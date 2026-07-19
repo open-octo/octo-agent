@@ -248,19 +248,19 @@ func TestResolveShowReasoning(t *testing.T) {
 		name    string
 		flagSet bool
 		flagVal bool
-		entry   config.ModelEntry
+		cfg     config.Config
 		want    bool
 	}{
-		{"default off", false, true, config.ModelEntry{}, false},
-		{"config off", false, true, config.ModelEntry{ShowReasoning: &fls}, false},
-		{"config on", false, true, config.ModelEntry{ShowReasoning: &tru}, true},
-		{"flag off beats config on", true, false, config.ModelEntry{ShowReasoning: &tru}, false},
-		{"flag on beats config off", true, true, config.ModelEntry{ShowReasoning: &fls}, true},
+		{"default off", false, true, config.Config{}, false},
+		{"config off", false, true, config.Config{ShowReasoning: &fls}, false},
+		{"config on", false, true, config.Config{ShowReasoning: &tru}, true},
+		{"flag off beats config on", true, false, config.Config{ShowReasoning: &tru}, false},
+		{"flag on beats config off", true, true, config.Config{ShowReasoning: &fls}, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := resolveShowReasoning(c.flagSet, c.flagVal, c.entry); got != c.want {
-				t.Errorf("resolveShowReasoning(%v, %v, %+v) = %v, want %v", c.flagSet, c.flagVal, c.entry, got, c.want)
+			if got := resolveShowReasoning(c.flagSet, c.flagVal, c.cfg); got != c.want {
+				t.Errorf("resolveShowReasoning(%v, %v, %+v) = %v, want %v", c.flagSet, c.flagVal, c.cfg, got, c.want)
 			}
 		})
 	}
@@ -298,19 +298,19 @@ func TestResolveCoauthor(t *testing.T) {
 }
 
 func TestResolveReasoningEffort(t *testing.T) {
-	if got := resolveReasoningEffort(true, "high", config.ModelEntry{ReasoningEffort: "low"}); got != "high" {
+	if got := resolveReasoningEffort(true, "high", config.Config{ReasoningEffort: "low"}); got != "high" {
 		t.Errorf("flag should win: got %q", got)
 	}
-	if got := resolveReasoningEffort(false, "", config.ModelEntry{ReasoningEffort: "medium"}); got != "medium" {
+	if got := resolveReasoningEffort(false, "", config.Config{ReasoningEffort: "medium"}); got != "medium" {
 		t.Errorf("config fallback: got %q", got)
 	}
-	if got := resolveReasoningEffort(false, "", config.ModelEntry{}); got != "" {
+	if got := resolveReasoningEffort(false, "", config.Config{}); got != "" {
 		t.Errorf("default off: got %q", got)
 	}
-	if got := resolveReasoningEffort(true, "off", config.ModelEntry{ReasoningEffort: "high"}); got != "" {
+	if got := resolveReasoningEffort(true, "off", config.Config{ReasoningEffort: "high"}); got != "" {
 		t.Errorf("explicit --reasoning-effort off should override config: got %q", got)
 	}
-	if got := resolveReasoningEffort(true, "OFF", config.ModelEntry{ReasoningEffort: "high"}); got != "" {
+	if got := resolveReasoningEffort(true, "OFF", config.Config{ReasoningEffort: "high"}); got != "" {
 		t.Errorf("--reasoning-effort off should be case-insensitive: got %q", got)
 	}
 }

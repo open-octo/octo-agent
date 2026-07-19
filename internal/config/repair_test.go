@@ -12,8 +12,8 @@ func TestSave_WritesRollingBackup(t *testing.T) {
 	setHome(t)
 
 	cfg := Config{
-		Models:       []ModelEntry{{Provider: "openai", Model: "gpt-4o"}},
-		DefaultModel: "gpt-4o",
+		Endpoints: []Endpoint{{ID: "ep-a", Provider: "openai", Models: []EndpointModel{{Model: "gpt-4o"}}}},
+		Default:   "ep-a::gpt-4o",
 	}
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -32,7 +32,7 @@ func TestSave_WritesRollingBackup(t *testing.T) {
 	if uerr := yaml.Unmarshal(got, &f); uerr != nil {
 		t.Fatalf("backup does not parse: %v", uerr)
 	}
-	if len(f.Models) != 1 || f.Models[0].Model != "gpt-4o" {
+	if len(f.Endpoints) != 1 || len(f.Endpoints[0].Models) != 1 || f.Endpoints[0].Models[0].Model != "gpt-4o" {
 		t.Errorf("backup content = %+v, want the saved config", f)
 	}
 }
@@ -41,8 +41,8 @@ func TestRestoreFromBackup(t *testing.T) {
 	home := setHome(t)
 
 	good := Config{
-		Models:       []ModelEntry{{Provider: "openai", Model: "gpt-4o"}},
-		DefaultModel: "gpt-4o",
+		Endpoints: []Endpoint{{ID: "ep-a", Provider: "openai", Models: []EndpointModel{{Model: "gpt-4o"}}}},
+		Default:   "ep-a::gpt-4o",
 	}
 	if err := good.Save(); err != nil { // writes config.yml + config.yml.bak
 		t.Fatalf("Save: %v", err)
@@ -50,7 +50,7 @@ func TestRestoreFromBackup(t *testing.T) {
 
 	// Now corrupt config.yml the way a hand edit would.
 	path, _ := Path()
-	if err := os.WriteFile(path, []byte("models: [oops\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("endpoints: [oops\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Load(); err == nil {
@@ -73,7 +73,7 @@ func TestRestoreFromBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load after restore: %v", err)
 	}
-	if got.DefaultModel != "gpt-4o" || len(got.Models) != 1 {
+	if got.Default != "ep-a::gpt-4o" || len(got.Endpoints) != 1 {
 		t.Errorf("restored config = %+v, want the good one", got)
 	}
 	_ = home
@@ -81,7 +81,7 @@ func TestRestoreFromBackup(t *testing.T) {
 
 func TestRestoreFromBackup_NoBackup(t *testing.T) {
 	setHome(t)
-	writeOcto(t, os.Getenv("HOME"), "config.yml", "models: [oops\n")
+	writeOcto(t, os.Getenv("HOME"), "config.yml", "endpoints: [oops\n")
 	if _, err := RestoreFromBackup(); err == nil {
 		t.Fatal("RestoreFromBackup with no .bak should error")
 	}
@@ -89,127 +89,10 @@ func TestRestoreFromBackup_NoBackup(t *testing.T) {
 
 func TestRestoreFromBackup_InvalidBackup(t *testing.T) {
 	home := setHome(t)
-	writeOcto(t, home, "config.yml", "models: [oops\n")
+	writeOcto(t, home, "config.yml", "endpoints: [oops\n")
 	writeOcto(t, home, "config.yml.bak", "also: [broken\n")
 	if _, err := RestoreFromBackup(); err == nil {
 		t.Fatal("RestoreFromBackup with an invalid .bak should error")
-	}
-}
-
-func TestRepair_ResetsDanglingDefaultModel(t *testing.T) {
-	c := Config{
-		Models:       []ModelEntry{{Provider: "openai", Model: "gpt-4o"}},
-		DefaultModel: "gone",
-	}
-	repaired, fixed, unfixable := c.Repair()
-	if len(unfixable) != 0 {
-		t.Errorf("unfixable = %v, want none", unfixable)
-	}
-	if len(fixed) != 1 {
-		t.Fatalf("fixed = %v, want 1 entry", fixed)
-	}
-	if repaired.DefaultModel != "gpt-4o" {
-		t.Errorf("default_model = %q, want reset to gpt-4o", repaired.DefaultModel)
-	}
-	// Repaired config is clean.
-	if p := repaired.Validate(); len(p) != 0 {
-		t.Errorf("repaired config still has problems: %v", p)
-	}
-}
-
-func TestRepair_ClearsDanglingLiteModel(t *testing.T) {
-	c := Config{
-		Models:    []ModelEntry{{Provider: "openai", Model: "gpt-4o"}},
-		LiteModel: "gone",
-	}
-	repaired, fixed, unfixable := c.Repair()
-	if len(unfixable) != 0 || len(fixed) != 1 {
-		t.Fatalf("fixed=%v unfixable=%v, want 1 fixed 0 unfixable", fixed, unfixable)
-	}
-	if repaired.LiteModel != "" {
-		t.Errorf("lite_model = %q, want cleared", repaired.LiteModel)
-	}
-}
-
-func TestRepair_ReportsUnfixable(t *testing.T) {
-	c := Config{
-		Models: []ModelEntry{
-			{Provider: "openai", Model: "gpt-4o"},
-			{Provider: "openai", Model: "gpt-4o"}, // duplicate
-			{Provider: "", Model: "no-provider"},  // missing provider
-			{Provider: "openai", Model: ""},       // missing model name
-		},
-	}
-	_, fixed, unfixable := c.Repair()
-	if len(fixed) != 0 {
-		t.Errorf("fixed = %v, want none (all problems are unfixable)", fixed)
-	}
-	if len(unfixable) != 3 {
-		t.Errorf("unfixable = %v, want 3 (duplicate, missing provider, missing model)", unfixable)
-	}
-}
-
-func TestRepair_DanglingDefaultWithNoNamedEntry(t *testing.T) {
-	// First (and only) entry has no model name, and default_model is dangling.
-	// There's no usable model to reset the default to, so Repair must NOT claim
-	// a fix or set default_model to "".
-	c := Config{
-		Models:       []ModelEntry{{Provider: "openai", Model: ""}},
-		DefaultModel: "gone",
-	}
-	repaired, fixed, unfixable := c.Repair()
-	if len(fixed) != 0 {
-		t.Errorf("fixed = %v, want none — no named entry to reset the default to", fixed)
-	}
-	if repaired.DefaultModel != "gone" {
-		t.Errorf("default_model = %q, want left unchanged (not blanked)", repaired.DefaultModel)
-	}
-	if len(unfixable) == 0 {
-		t.Error("the nameless entry should be reported as unfixable")
-	}
-}
-
-func TestRepair_PicksFirstNamedEntry(t *testing.T) {
-	// A nameless entry precedes a valid one; a dangling default must reset to the
-	// first *named* model, not to the empty first entry.
-	c := Config{
-		Models: []ModelEntry{
-			{Provider: "openai", Model: ""},
-			{Provider: "openai", Model: "gpt-4o"},
-		},
-		DefaultModel: "gone",
-	}
-	repaired, fixed, _ := c.Repair()
-	if repaired.DefaultModel != "gpt-4o" {
-		t.Errorf("default_model = %q, want gpt-4o (first named)", repaired.DefaultModel)
-	}
-	if len(fixed) != 1 {
-		t.Errorf("fixed = %v, want the default reset", fixed)
-	}
-}
-
-func TestRepair_HealthyIsNoOp(t *testing.T) {
-	c := Config{
-		Models:       []ModelEntry{{Provider: "openai", Model: "gpt-4o"}},
-		DefaultModel: "gpt-4o",
-	}
-	repaired, fixed, unfixable := c.Repair()
-	if len(fixed) != 0 || len(unfixable) != 0 {
-		t.Errorf("healthy config: fixed=%v unfixable=%v, want none", fixed, unfixable)
-	}
-	if repaired.DefaultModel != "gpt-4o" {
-		t.Errorf("healthy config mutated: %+v", repaired)
-	}
-}
-
-func TestRepair_EmptyConfigIsNoOp(t *testing.T) {
-	var c Config
-	repaired, fixed, unfixable := c.Repair()
-	if len(fixed) != 0 || len(unfixable) != 0 {
-		t.Errorf("empty config: fixed=%v unfixable=%v, want none", fixed, unfixable)
-	}
-	if len(repaired.Models) != 0 {
-		t.Errorf("empty config gained models: %+v", repaired)
 	}
 }
 
@@ -218,11 +101,10 @@ func TestRepair_EmptyConfigIsNoOp(t *testing.T) {
 // dangling Lite clears; an endpoint with no models is deleted (it's unusable
 // and nothing references it); Lite == Default clears Lite.
 //
-// Like Validate, the endpoint-level Repair runs only on the pure new schema
-// (Endpoints set, Models empty) to avoid double-acting on a migrated flat
-// config. Unfixable cases (duplicate endpoint id, illegal id chars, no
-// model name, duplicate model within an endpoint) are reported for the user
-// rather than guessed.
+// PR5: the "pure new schema" guard from PR1 is lifted — Config.Models is
+// deleted, so every config goes through the endpoint-level Repair. Unfixable
+// cases (duplicate endpoint id, illegal id chars, no model name, duplicate
+// model within an endpoint) are reported for the user rather than guessed.
 func TestRepair_EndpointLevel_DanglingDefaultReset(t *testing.T) {
 	cfg := Config{
 		Endpoints: []Endpoint{

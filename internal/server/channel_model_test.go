@@ -21,11 +21,11 @@ func TestApplyChannelModel_HonorsStoreBinding(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 
 	seed := config.Config{
-		Models: []config.ModelEntry{
-			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
-			{Provider: "kimi", Model: "kimi-k2.6", APIKey: "sk-kimi"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-anthropic", Provider: "anthropic", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "ep-kimi", Provider: "kimi", APIKey: "sk-kimi", Models: []config.EndpointModel{{Model: "kimi-k2.6"}}},
 		},
-		DefaultModel: "claude-sonnet-4-6",
+		Default: "ep-anthropic::claude-sonnet-4-6",
 	}
 	if err := seed.Save(); err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestApplyChannelModel_HonorsStoreBinding(t *testing.T) {
 
 	// Binding entry deleted: fall back to the default sender instead of
 	// failing the turn.
-	if w := doJSON(t, srv, http.MethodDelete, "/api/config/models/kimi-k2.6", ""); w.Code != http.StatusOK {
+	if w := doJSON(t, srv, http.MethodDelete, "/api/config/endpoints/ep-kimi/models/kimi-k2.6", ""); w.Code != http.StatusOK {
 		t.Fatalf("DELETE = %d: %s", w.Code, w.Body.String())
 	}
 	srv.applyChannelModel(sess)
@@ -78,11 +78,11 @@ func TestChannelModelOps_Resolve(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 
 	seed := config.Config{
-		Models: []config.ModelEntry{
-			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
-			{Provider: "kimi", Model: "kimi-k2.6", APIKey: "sk-kimi"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-anthropic", Provider: "anthropic", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "ep-kimi", Provider: "kimi", APIKey: "sk-kimi", Models: []config.EndpointModel{{Model: "kimi-k2.6"}}},
 		},
-		DefaultModel: "claude-sonnet-4-6",
+		Default: "ep-anthropic::claude-sonnet-4-6",
 	}
 	if err := seed.Save(); err != nil {
 		t.Fatal(err)
@@ -106,9 +106,8 @@ func TestChannelModelOps_Resolve(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve kimi-k2.6: %v", err)
 	}
-	// PR4b: bare model resolves through ParseModelFlag; the bound entry is the
-	// composite id pointing at kimi's endpoint. The exact endpoint id is the
-	// synthesised legacy-<host>-<n> form, so assert by suffix.
+	// PR5: bare model resolves through ParseModelFlag; the bound entry is the
+	// composite id pointing at the kimi endpoint.
 	if bound.Model != "kimi-k2.6" {
 		t.Errorf("bound model = %q, want kimi-k2.6", bound.Model)
 	}

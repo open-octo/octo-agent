@@ -1034,10 +1034,10 @@ func TestHandleTestConfig_ReusesStoredKey(t *testing.T) {
 	defer mock.Close()
 
 	seedModels(t, config.Config{
-		Models: []config.ModelEntry{
-			{Provider: "openai", Model: "gpt-4o-mini", BaseURL: mock.URL, APIKey: "stored-key"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", BaseURL: mock.URL, APIKey: "stored-key", Models: []config.EndpointModel{{Model: "gpt-4o-mini"}}},
 		},
-		DefaultModel: "gpt-4o-mini",
+		Default: "ep-a::gpt-4o-mini",
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
@@ -1055,29 +1055,6 @@ func TestHandleTestConfig_ReusesStoredKey(t *testing.T) {
 	}
 	if gotAuth != "Bearer stored-key" {
 		t.Errorf("Authorization = %q, want Bearer stored-key (stored key reused)", gotAuth)
-	}
-}
-
-func TestHandleSaveModelConfig(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
-
-	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	payload, _ := json.Marshal(saveModelRequest{Type: "default", Model: "gpt-4", BaseURL: "https://api.openai.com/v1", APIKey: "sk-test"})
-	req := httptest.NewRequest(http.MethodPost, "/api/config/models", bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	serveLoopback(srv.mux, w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-	var body map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body["ok"] != true {
-		t.Fatalf("ok = %v, want true", body["ok"])
 	}
 }
 
@@ -1435,114 +1412,9 @@ func TestHandleUpdateSessionReasoningEffort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.DefaultEntry().ReasoningEffort; got != "high" {
+	// PR5: reasoning is global — read cfg.ReasoningEffort directly.
+	if got := cfg.ReasoningEffort; got != "high" {
 		t.Fatalf("reasoning_effort = %q, want high", got)
-	}
-}
-
-// A session pinned to a NON-default model must have ITS OWN entry's
-// reasoning_effort changed — not the unrelated default model's. Before this
-// was fixed, every PATCH landed on cfg.DefaultEntry() regardless of which
-// session triggered it, so a multi-model setup's per-session tuning silently
-// no-opped for any session not running the default model.
-func TestHandleUpdateSessionReasoningEffort_NonDefaultModel(t *testing.T) {
-	setTestHome(t)
-	seedModels(t, config.Config{
-		Models: []config.ModelEntry{
-			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
-			{Provider: "deepseek", Model: "deepseek-v4-flash"},
-		},
-		DefaultModel: "claude-sonnet-4-6",
-	})
-
-	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-
-	sess := agent.NewSession("deepseek-v4-flash", "")
-	sess.ModelConfig = "deepseek-v4-flash"
-	if err := sess.Save(); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-
-	payload, _ := json.Marshal(updateSessionReasoningEffortRequest{ReasoningEffort: "xhigh"})
-	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/reasoning_effort", bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	serveLoopback(srv.mux, w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	e, ok := cfg.EntryByModel("deepseek-v4-flash")
-	if !ok {
-		t.Fatal("deepseek-v4-flash entry vanished")
-	}
-	if e.ReasoningEffort != "xhigh" {
-		t.Errorf("deepseek-v4-flash reasoning_effort = %q, want xhigh (this session's own entry should change)", e.ReasoningEffort)
-	}
-	if def := cfg.DefaultEntry(); def.ReasoningEffort != "" {
-		t.Errorf("default entry (claude-sonnet-4-6) reasoning_effort = %q, want untouched (empty)", def.ReasoningEffort)
-	}
-}
-
-// The reported bug (#web show_reasoning field not respected): a session
-// pinned to a non-default model must have ITS OWN entry's show_reasoning
-// toggled. Before this fix, the toggle always wrote to cfg.DefaultEntry()
-// while the session's actual turns (senderForSession) already correctly
-// resolved the session's own entry — so the Composer's eye icon flipped
-// (read and write both hit the same wrong entry) while reasoning kept
-// showing/hiding no matter how many times it was toggled.
-func TestHandleUpdateSessionShowReasoning_NonDefaultModel(t *testing.T) {
-	setTestHome(t)
-	seedModels(t, config.Config{
-		Models: []config.ModelEntry{
-			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
-			{Provider: "deepseek", Model: "deepseek-v4-flash"},
-		},
-		DefaultModel: "claude-sonnet-4-6",
-	})
-
-	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-
-	sess := agent.NewSession("deepseek-v4-flash", "")
-	sess.ModelConfig = "deepseek-v4-flash"
-	if err := sess.Save(); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-
-	payload, _ := json.Marshal(updateSessionShowReasoningRequest{ShowReasoning: false})
-	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/show_reasoning", bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	serveLoopback(srv.mux, w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	e, ok := cfg.EntryByModel("deepseek-v4-flash")
-	if !ok {
-		t.Fatal("deepseek-v4-flash entry vanished")
-	}
-	if e.ShowReasoning == nil || *e.ShowReasoning {
-		t.Errorf("deepseek-v4-flash show_reasoning = %v, want false (this session's own entry should be toggled)", e.ShowReasoning)
-	}
-	if def := cfg.DefaultEntry(); def.ShowReasoning != nil {
-		t.Errorf("default entry (claude-sonnet-4-6) show_reasoning = %v, want untouched (nil)", def.ShowReasoning)
-	}
-
-	// senderForSession must resolve this session's turns against the SAME
-	// (now-updated) entry the toggle just wrote — proving the fix actually
-	// changes what the session's real turns do, not just what the config
-	// file happens to say.
-	if got := cfg.EffectiveShowReasoning(entryForSession(cfg, sess).ShowReasoning); got {
-		t.Error("entryForSession(sess) still resolves show_reasoning=true after toggling it off for this session")
 	}
 }
 
@@ -1552,11 +1424,10 @@ func TestHandleUpdateSessionShowReasoning_NonDefaultModel(t *testing.T) {
 // that's since been removed from config.
 func TestEntryForSession(t *testing.T) {
 	cfg := config.Config{
-		Models: []config.ModelEntry{
-			{Model: "model-a"},
-			{Model: "model-b"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "anthropic", Models: []config.EndpointModel{{Model: "model-a"}, {Model: "model-b"}}},
 		},
-		DefaultModel: "model-a",
+		Default: "ep-a::model-a",
 	}
 
 	cases := []struct {
@@ -1813,8 +1684,10 @@ func TestHandleUpdateSessionModel_RawStringIsPerSession(t *testing.T) {
 		t.Fatalf("server default model changed to %q — must stay stub-model", srv.model)
 	}
 	cfg, _ := config.Load()
-	if len(cfg.Models) != 0 {
-		t.Fatalf("global config written by a per-session switch: %+v", cfg.Models)
+	// PR5: Config.Models is deleted — the per-session switch never writes the
+	// global config (it just sets sess.ModelConfig, a session field).
+	if len(cfg.Endpoints) != 0 {
+		t.Fatalf("global config written by a per-session switch: %+v", cfg.Endpoints)
 	}
 }
 
@@ -1824,11 +1697,11 @@ func TestHandleUpdateSessionModel_EntryNameBindsSession(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 
 	seed := config.Config{
-		Models: []config.ModelEntry{
-			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
-			{Provider: "kimi", Model: "kimi-k2.6", APIKey: "sk-kimi"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-anthropic", Provider: "anthropic", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "ep-kimi", Provider: "kimi", APIKey: "sk-kimi", Models: []config.EndpointModel{{Model: "kimi-k2.6"}}},
 		},
-		DefaultModel: "claude-sonnet-4-6",
+		Default: "ep-anthropic::claude-sonnet-4-6",
 	}
 	if err := seed.Save(); err != nil {
 		t.Fatal(err)
@@ -1859,8 +1732,8 @@ func TestHandleUpdateSessionModel_EntryNameBindsSession(t *testing.T) {
 		t.Fatalf("session = (%q, %q), want (kimi-k2.6, kimi-k2.6)", got.Model, got.ModelConfig)
 	}
 	cfg, _ := config.Load()
-	if cfg.DefaultModel != "claude-sonnet-4-6" {
-		t.Fatalf("global default changed to %q — must stay claude-sonnet-4-6", cfg.DefaultModel)
+	if cfg.Default != "ep-anthropic::claude-sonnet-4-6" {
+		t.Fatalf("global default changed to %q — must stay ep-anthropic::claude-sonnet-4-6", cfg.Default)
 	}
 
 	// The bound session's turns resolve to the entry's sender and model;
@@ -1877,9 +1750,10 @@ func TestHandleUpdateSessionModel_EntryNameBindsSession(t *testing.T) {
 		t.Errorf("unbound session = (%v, %q), want default sender + stub-model", sender2, model2)
 	}
 
-	// Deleting the bound entry degrades to the default sender instead of
-	// failing the turn.
-	if w := doJSON(t, srv, http.MethodDelete, "/api/config/models/kimi-k2.6", ""); w.Code != http.StatusOK {
+	// Deleting the bound endpoint's model degrades to the default sender
+	// instead of failing the turn. PR5: the delete route is now
+	// /api/config/endpoints/{id}/models/{model} (old /api/config/models is gone).
+	if w := doJSON(t, srv, http.MethodDelete, "/api/config/endpoints/ep-kimi/models/kimi-k2.6", ""); w.Code != http.StatusOK {
 		t.Fatalf("DELETE = %d: %s", w.Code, w.Body.String())
 	}
 	if sender3, _ := srv.senderForSession(got); sender3 != srv.sender {
@@ -2172,11 +2046,12 @@ func TestHandleGetSessionMessages_ShowReasoningField(t *testing.T) {
 	setTestHome(t)
 	off := false
 	seedModels(t, config.Config{
-		Models: []config.ModelEntry{
-			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
-			{Provider: "kimi-coding-plan", Model: "kimi-for-coding", ShowReasoning: &off},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-anthropic", Provider: "anthropic", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "ep-kimi", Provider: "kimi-coding-plan", Models: []config.EndpointModel{{Model: "kimi-for-coding"}}},
 		},
-		DefaultModel: "claude-sonnet-4-6",
+		Default:       "ep-anthropic::claude-sonnet-4-6",
+		ShowReasoning: &off,
 	})
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
@@ -2206,11 +2081,14 @@ func TestHandleGetSessionMessages_ShowReasoningField(t *testing.T) {
 		return body["show_reasoning"]
 	}
 
+	// PR5: reasoning is global. Both sessions read the global ShowReasoning
+	// (off) — per-session overrides no longer exist. This test now just
+	// guards that the global value surfaces on session messages.
 	if got := getShowReasoning(quiet.ID); got != false {
-		t.Errorf("kimi-for-coding session show_reasoning = %v, want false", got)
+		t.Errorf("kimi-for-coding session show_reasoning = %v, want false (global)", got)
 	}
-	if got := getShowReasoning(loud.ID); got != true {
-		t.Errorf("claude-sonnet-4-6 session show_reasoning = %v, want true (untouched default)", got)
+	if got := getShowReasoning(loud.ID); got != false {
+		t.Errorf("claude-sonnet-4-6 session show_reasoning = %v, want false (global)", got)
 	}
 }
 

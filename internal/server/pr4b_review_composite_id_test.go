@@ -19,11 +19,11 @@ func TestPR4b_Review_VerifyEntryByModelHandlesCompositeID(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 
 	seed := config.Config{
-		Models: []config.ModelEntry{
-			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
-			{Provider: "kimi", Model: "kimi-k2.6", BaseURL: "https://kimi.example", APIKey: "sk-kimi"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-anthropic", Provider: "anthropic", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "ep-kimi", Provider: "kimi", BaseURL: "https://kimi.example", APIKey: "sk-kimi", Models: []config.EndpointModel{{Model: "kimi-k2.6"}}},
 		},
-		DefaultModel: "claude-sonnet-4-6",
+		Default: "ep-anthropic::claude-sonnet-4-6",
 	}
 	if err := seed.Save(); err != nil {
 		t.Fatal(err)

@@ -197,8 +197,8 @@ func TestHandleChannelMessage_RecoversTurnPanic(t *testing.T) {
 func TestHandleChannelMessage_HonorsCompactAutoPct(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
-		Models:         []config.ModelEntry{{Provider: "openai", Model: "stub-model"}},
-		DefaultModel:   "stub-model",
+		Endpoints:      []config.Endpoint{{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "stub-model"}}}},
+		Default:        "ep-a::stub-model",
 		CompactAutoPct: 70,
 	})
 	srv := chanServer(t)
@@ -466,8 +466,8 @@ func TestHandleChannelMessage_RefreshesAutoRecallBeforeRegisteringHooks(t *testi
 	setTestHome(t)
 	marker := "octo-agent lucky number is 47"
 	seedModels(t, config.Config{
-		Models:       []config.ModelEntry{{Provider: "openai", Model: "gpt-4o"}},
-		DefaultModel: "gpt-4o",
+		Endpoints: []config.Endpoint{{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}}},
+		Default:   "ep-a::gpt-4o",
 		MemoryBackend: config.MemoryBackendConfig{
 			Type:       "hindsight",
 			BaseURL:    hindsightRecallStub(t, marker),

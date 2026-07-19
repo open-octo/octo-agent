@@ -5,47 +5,11 @@ import (
 	"testing"
 )
 
-func TestConfigValidate(t *testing.T) {
-	good := ModelEntry{Provider: "openai", Model: "gpt-4o"}
-	tests := []struct {
-		name string
-		cfg  Config
-		want string // substring of an expected problem; "" = no problems
-	}{
-		{"empty pre-onboarding is valid", Config{}, ""},
-		{"good", Config{Models: []ModelEntry{good}, DefaultModel: "gpt-4o"}, ""},
-		{"dangling default_model", Config{Models: []ModelEntry{good}, DefaultModel: "nope"}, "default_model"},
-		{"dangling lite_model", Config{Models: []ModelEntry{good}, LiteModel: "nope"}, "lite_model"},
-		{"missing provider", Config{Models: []ModelEntry{{Model: "gpt-4o"}}}, "no provider"},
-		{"missing model name", Config{Models: []ModelEntry{{Provider: "openai"}}}, "no model name"},
-		{"duplicate model", Config{Models: []ModelEntry{good, {Provider: "anthropic", Model: "gpt-4o"}}}, "duplicate"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			probs := tt.cfg.Validate()
-			joined := strings.Join(probs, "; ")
-			if tt.want == "" {
-				if len(probs) != 0 {
-					t.Errorf("want no problems, got %v", probs)
-				}
-				return
-			}
-			if !strings.Contains(joined, tt.want) {
-				t.Errorf("want a problem containing %q, got %v", tt.want, probs)
-			}
-		})
-	}
-}
-
-// TestConfigValidate_EndpointLevel covers the endpoint-level checks layered on
-// top of the legacy Models checks in PR1: endpoint id uniqueness/legality,
-// each endpoint has at least one model, model names non-empty, no duplicate
-// models within one endpoint, and Default/Lite composite ids resolve.
-//
-// These checks are no-ops for implicit endpoints migrated from the flat
-// schema (their ids are program-generated and thus always legal/unique), but
-// they guard against hand-edited endpoints: blocks the user might write
-// during PR1 (Load honours them per §4.1 step 1) and that PR4 will emit.
+// TestConfigValidate_EndpointLevel covers the endpoint-level checks (PR5:
+// the only Validate path now that Config.Models is deleted): endpoint id
+// uniqueness/legality, each endpoint has at least one model, model names
+// non-empty, no duplicate models within one endpoint, and Default/Lite
+// composite ids resolve.
 func TestConfigValidate_EndpointLevel(t *testing.T) {
 	goodEP := Endpoint{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-sonnet-4-6", Vision: true}}}
 	tests := []struct {

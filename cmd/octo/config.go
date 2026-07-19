@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -189,72 +190,93 @@ func runConfigShow(stdout, stderr io.Writer) int {
 		return 1
 	}
 	path, _ := config.Path()
-	entry := cfg.DefaultEntry()
-
-	provider := firstNonEmpty(os.Getenv("OCTO_PROVIDER"), entry.Provider, providerAnthropic)
-	provSrc := "default"
-	if envProv := os.Getenv("OCTO_PROVIDER"); envProv != "" {
-		provSrc = "env"
-	} else if entry.Provider != "" {
-		provSrc = "config"
-	}
-	model := firstNonEmpty(entry.Model, defaultModels[provider])
-	modelSrc := "default"
-	if entry.Model != "" {
-		modelSrc = "config"
-	}
 
 	fmt.Fprintf(stdout, "Config file: %s\n", path)
 	if _, statErr := os.Stat(path); statErr != nil {
 		fmt.Fprintln(stdout, "  (not created yet — run `octo config` to set it up)")
 	}
 	fmt.Fprintln(stdout)
-	if len(cfg.Models) > 1 {
-		fmt.Fprintf(stdout, "  models:    %d configured, default %q (others: %s)\n",
-			len(cfg.Models), entry.Model, otherEntryModels(cfg, entry.Model))
-	}
-	fmt.Fprintf(stdout, "  provider:  %s (%s)\n", provider, provSrc)
-	fmt.Fprintf(stdout, "  model:     %s (%s)\n", model, modelSrc)
-	if entry.BaseURL != "" {
-		fmt.Fprintf(stdout, "  base URL:  %s (config)\n", entry.BaseURL)
+
+	if len(cfg.Endpoints) == 0 {
+		fmt.Fprintln(stdout, "endpoints: (none configured)")
 	} else {
-		fmt.Fprintln(stdout, "  base URL:  (provider default)")
-	}
-	fmt.Fprintf(stdout, "  API key:   %s\n", apiKeyStatus(provider, entry))
-	coauthorStatus := "on (default)"
-	if cfg.Coauthor != nil {
-		if *cfg.Coauthor {
-			coauthorStatus = "on (config)"
-		} else {
-			coauthorStatus = "off (config)"
+		fmt.Fprintln(stdout, "endpoints:")
+		for _, ep := range cfg.Endpoints {
+			header := ep.ID
+			if ep.Name != "" && ep.Name != ep.ID {
+				header = fmt.Sprintf("%s (%s)", ep.ID, ep.Name)
+			}
+			// Mark default/lite by which endpoint holds the composite id.
+			tags := []string{}
+			if strings.HasPrefix(cfg.Default, ep.ID+"::") {
+				tags = append(tags, fmt.Sprintf("default: %s", cfg.Default))
+			}
+			if strings.HasPrefix(cfg.Lite, ep.ID+"::") {
+				tags = append(tags, fmt.Sprintf("lite: %s", cfg.Lite))
+			}
+			modelsCount := len(ep.Models)
+			// Compose a single-line endpoint row.
+			tail := ""
+			if len(tags) > 0 {
+				tail = " [" + strings.Join(tags, "; ") + "]"
+			}
+			// Provider/base_url inline for at-a-glance identification.
+			info := ep.Provider
+			if ep.BaseURL != "" {
+				info += ", " + ep.BaseURL
+			} else {
+				info += " (provider default)"
+			}
+			fmt.Fprintf(stdout, "  %s — %s, %d models%s\n", header, info, modelsCount, tail)
 		}
 	}
-	fmt.Fprintf(stdout, "  coauthor:  %s\n", coauthorStatus)
-	effortStatus := "off (default)"
-	if entry.ReasoningEffort != "" {
-		effortStatus = entry.ReasoningEffort + " (config)"
+
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "references:")
+	if cfg.Default != "" {
+		fmt.Fprintf(stdout, "  default = %s\n", cfg.Default)
+	} else {
+		fmt.Fprintln(stdout, "  default = (unset, falls back to first endpoint's first model)")
 	}
-	fmt.Fprintf(stdout, "  reasoning: %s\n", effortStatus)
+	if cfg.Lite != "" {
+		fmt.Fprintf(stdout, "  lite = %s\n", cfg.Lite)
+	} else {
+		fmt.Fprintln(stdout, "  lite = (none)")
+	}
+
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "reasoning:")
+	effort := cfg.ReasoningEffort
+	if effort == "" {
+		effort = "off (default)"
+	}
+	fmt.Fprintf(stdout, "  effort = %s\n", effort)
 	showStatus := "off (default)"
-	if entry.ShowReasoning != nil {
-		if *entry.ShowReasoning {
+	if cfg.ShowReasoning != nil {
+		if *cfg.ShowReasoning {
 			showStatus = "on (config)"
 		} else {
 			showStatus = "off (config)"
 		}
 	}
-	fmt.Fprintf(stdout, "  show trace (web): %s\n", showStatus)
+	fmt.Fprintf(stdout, "  show_reasoning = %s\n", showStatus)
+
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "CLI flags (--provider, --model, --system) and env vars override this file per run.")
 	return 0
 }
 
-// otherEntryModels lists the configured entry models besides skip, for display.
+// otherEntryModels lists the configured endpoint+model pairs besides the one
+// referenced by skip, for display. PR5: scans Endpoints instead of the deleted
+// Models field.
 func otherEntryModels(cfg config.Config, skip string) string {
-	names := make([]string, 0, len(cfg.Models))
-	for _, e := range cfg.Models {
-		if e.Model != skip {
-			names = append(names, e.Model)
+	var names []string
+	for _, ep := range cfg.Endpoints {
+		for _, m := range ep.Models {
+			cid := ep.ID + "::" + m.Model
+			if cid != skip && m.Model != skip {
+				names = append(names, cid)
+			}
 		}
 	}
 	return strings.Join(names, ", ")
@@ -530,6 +552,7 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 		full.Coauthor = &coauthorVal
 
 		// Reasoning effort: off (empty) by default; offer the existing value.
+		// PR5: reasoning is global — reads/writes full.ReasoningEffort.
 		if tty {
 			choice, ok := runSelect(stdin, stdout, "Reasoning effort", []selectItem{
 				{label: "Off", value: ""},
@@ -538,32 +561,32 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 				{label: "High", value: "high"},
 				{label: "Extra-high", value: "xhigh"},
 				{label: "Max", value: "max"},
-			}, existing.ReasoningEffort)
+			}, full.ReasoningEffort)
 			if !ok {
 				return cancelWizard(stderr)
 			}
-			outEntry.ReasoningEffort = choice.value
+			full.ReasoningEffort = choice.value
 		} else {
 			effortAns := strings.ToLower(strings.TrimSpace(promptDefault(reader, stdout,
-				"Reasoning effort (low | medium | high | xhigh | max, empty = off)", existing.ReasoningEffort)))
+				"Reasoning effort (low | medium | high | xhigh | max, empty = off)", full.ReasoningEffort)))
 			if !validReasoningEffort(effortAns) {
 				fmt.Fprintf(stderr, "octo config: invalid reasoning effort %q (use 'low', 'medium', 'high', 'xhigh', 'max', or empty)\n", effortAns)
 				return 2
 			}
-			outEntry.ReasoningEffort = effortAns
+			full.ReasoningEffort = effortAns
 		}
 
 		// Surface the reasoning/thinking trace for the Web UI to display (the
 		// terminal never renders it): default off.
 		// Skip when reasoning is off — no reasoning output to show.
-		if outEntry.ReasoningEffort != "" {
-			showDefault := existing.ShowReasoning != nil && *existing.ShowReasoning
+		if full.ReasoningEffort != "" {
+			showDefault := full.ShowReasoning != nil && *full.ShowReasoning
 			showVal, ok := pickYesNo(tty, reader, stdin, stdout,
 				"Show the reasoning/thinking trace on the Web UI?", showDefault)
 			if !ok {
 				return cancelWizard(stderr)
 			}
-			outEntry.ShowReasoning = &showVal
+			full.ShowReasoning = &showVal
 		}
 	}
 
@@ -586,16 +609,70 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 		outEntry.Vision = visVal
 	}
 
-	// The model is the entry's identity; editing the default entry must not
-	// collide with a different existing entry (the HTTP API enforces this too).
-	for _, m := range full.Models {
-		if m.Model == outEntry.Model && m.Model != existing.Model {
-			fmt.Fprintf(stderr, "octo config: a model entry for %q already exists — pick a different model\n", outEntry.Model)
-			return 2
+	// PR5 (design §7.1): the wizard builds one endpoint from the collected
+	// ModelEntry (outEntry). The endpoint id follows the implicit-id rule
+	// legacy-<host>-0 — the same rule Load uses for old models: blocks — so a
+	// user who runs the wizard twice against the same base_url sees the same
+	// id and the second run overwrites the first (rather than silently
+	// creating a second endpoint).
+	host := hostFromBaseURLForWizard(outEntry.BaseURL)
+	// Fallback: a named vendor with no base_url yields an ugly "legacy--0"
+	// id. Fall back to the provider name so the id is at least recognisable.
+	if host == "" {
+		host = strings.ToLower(provider)
+	}
+	endpointID := legacyEndpointIDForWizard(host, 0)
+
+	// PR5 (design §11.4): the same model name may appear under multiple
+	// endpoints — that's the whole point of the two-level schema (e.g.
+	// claude-sonnet-4-6 via both official anthropic and a relay). So unlike
+	// the old flat Models schema (which rejected duplicate model names),
+	// the wizard does NOT collision-check the model name across endpoints.
+	// The only collision that matters is the endpoint id, and UpsertEndpoint
+	// handles that by overwriting the same id.
+
+	ep := config.Endpoint{
+		ID:       endpointID,
+		Provider: outEntry.Provider,
+		BaseURL:  outEntry.BaseURL,
+		APIKey:   outEntry.APIKey,
+		Protocol: outEntry.Protocol,
+	}
+	// Carry over any existing models if we're overwriting the same endpoint
+	// id, so a user re-running the wizard doesn't lose their other models.
+	for _, existingEp := range full.Endpoints {
+		if existingEp.ID == endpointID {
+			ep.Name = existingEp.Name
+			ep.LiteModel = existingEp.LiteModel
+			// Only keep models that aren't the one we're about to add/replace.
+			for _, m := range existingEp.Models {
+				if m.Model != outEntry.Model {
+					ep.Models = append(ep.Models, m)
+				}
+			}
+			break
 		}
 	}
+	ep.Models = append(ep.Models, config.EndpointModel{
+		Model:  outEntry.Model,
+		Vision: outEntry.Vision,
+	})
+	full.UpsertEndpoint(ep)
+	cid := endpointID + "::" + outEntry.Model
 
-	full.SetDefaultEntry(outEntry)
+	// PR5 (design §7.1 step 7): explicit "set as default?" prompt. Default
+	// yes on first run / when no Default exists; default no when overwriting
+	// an existing default the user might want to keep.
+	setDefaultDefault := firstRun || full.Default == ""
+	setDefault, ok := pickYesNo(tty, reader, stdin, stdout,
+		fmt.Sprintf("Set %s as the default model?", cid), setDefaultDefault)
+	if !ok {
+		return cancelWizard(stderr)
+	}
+	if setDefault {
+		full.SetDefaultComposite(cid)
+	}
+
 	if err := full.Save(); err != nil {
 		fmt.Fprintf(stderr, "octo config: %v\n", err)
 		return 1
@@ -609,6 +686,31 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 		fmt.Fprintln(stdout, "Run `octo` to start.")
 	}
 	return 0
+}
+
+// hostFromBaseURLForWizard extracts the URL host (lowercased) for use in a
+// legacy-<host>-<n> endpoint ID. Mirrors config.hostFromBaseURL, which is
+// unexported — kept in lockstep so the wizard generates the same id as Load.
+func hostFromBaseURLForWizard(baseURL string) string {
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Host == "" {
+		return strings.ToLower(baseURL)
+	}
+	return strings.ToLower(u.Host)
+}
+
+// legacyEndpointIDForWizard builds a "legacy-<host>-<n>" endpoint id, the
+// implicit-id rule shared with config.legacyEndpointID (unexported). Non-
+// alphanumeric host chars are replaced with '-' so the id matches the
+// ^[a-zA-Z0-9_-]+$ endpoint id regex.
+func legacyEndpointIDForWizard(host string, n int) string {
+	safe := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, host)
+	return fmt.Sprintf("legacy-%s-%d", safe, n)
 }
 
 // apiKeyEnvVar is the conventional env var holding a provider's key.

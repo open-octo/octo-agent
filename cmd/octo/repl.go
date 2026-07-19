@@ -109,9 +109,14 @@ func (cfg *replConfig) ensureSender(targetModel string, tuning senderTuning) err
 	// sending the request to the wrong endpoint (e.g. longcat base URL with a
 	// deepseek model name → HTTP 500).
 	if _, found := models.EntryByModel(targetModel); !found {
-		available := make([]string, 0, len(models.Models))
-		for _, e := range models.Models {
-			available = append(available, e.Model)
+		// PR5: build the available list from Endpoints (Config.Models deleted).
+		// Emit composite ids so the user can disambiguate when a model name
+		// exists on multiple endpoints.
+		var available []string
+		for _, ep := range models.Endpoints {
+			for _, m := range ep.Models {
+				available = append(available, ep.ID+"::"+m.Model)
+			}
 		}
 		sort.Strings(available)
 		return fmt.Errorf("model %q is not configured (available: %s)", targetModel, strings.Join(available, ", "))

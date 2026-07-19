@@ -177,15 +177,14 @@
     loading = true
     try {
       const cfg = await api.getConfig() as any
-      // models list
-      const ms: any[] = cfg.models ?? []
-      models = ms as ModelEntry[]
-      defaultModelIdx = cfg.default_model_idx ?? 0
-      const def = ms[defaultModelIdx]
-      if (def) {
-        reasoning = capitalize(def.reasoning_effort ?? 'medium')
-        permMode  = permissionModeToLabel(def.permission_mode ?? 'interactive')
-      }
+      // PR5: GET /api/config no longer returns a models list (the flat
+      // Models field is deleted). The two-level endpoint view
+      // (GET /api/config/endpoints) is the only model surface now; the
+      // flat AI Models editor section below is hidden until PR6 ships a
+      // two-level editor. reasoning_effort is now global.
+      defaultModelIdx = 0
+      reasoning = capitalize(cfg.reasoning_effort ?? 'medium')
+      permMode  = permissionModeToLabel(cfg.permission_mode ?? 'interactive')
       showReasoning = cfg.show_reasoning ?? true
       coauthor = cfg.coauthor ?? true
       workspaceDir = cfg.workspace_dir ?? ''
@@ -200,9 +199,8 @@
       if (cfg.language)   language = cfg.language
       origLanguage = language
 
-      // PR4b: load the two-level endpoint view in parallel. Failure is non-fatal
-      // — the read-only Channels section just renders empty and the existing
-      // flat Models section still carries the editing surface.
+      // PR4b/PR5: load the two-level endpoint view in parallel. Failure is
+      // non-fatal — the read-only Channels section just renders empty.
       try {
         const ep = await api.getEndpoints()
         endpoints = ep.endpoints ?? []
@@ -418,7 +416,12 @@
         {/if}
       </div>
 
-      <!-- AI Models (config-level entries) -->
+      <!-- AI Models (config-level entries) — PR5: hidden. The flat Models
+           editor and its backend routes (POST/PATCH/DELETE /api/config/models*)
+           are deleted in PR5. A two-level endpoint editor lands in PR6.
+           The section block is kept (wrapped in {#if false}) so PR6 can
+           revive it; the i18n keys and handler stubs remain. -->
+      {#if false}
       <div class="section-card">
         <div class="section-head">
           <span class="section-title-inline">{$t('settings.models.title')}</span>
@@ -458,6 +461,7 @@
           {/each}
         {/if}
       </div>
+      {/if}
 
       <!-- General -->
       <div class="section-card">

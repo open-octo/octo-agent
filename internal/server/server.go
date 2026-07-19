@@ -828,11 +828,15 @@ func (s *Server) registerRoutes() {
 	s.api("PUT /api/config/language", s.handlePutLanguage)
 	s.api("PUT /api/config/workspace_dir", s.handlePutWorkspaceDir)
 	s.api("POST /api/config/test", s.handleTestConfig)
-	s.api("POST /api/config/models", s.handleSaveModelConfig)
-	s.api("PATCH /api/config/models/{id}", s.handleUpdateModelConfig)
-	s.api("DELETE /api/config/models/{id}", s.handleDeleteModelConfig)
-	s.api("POST /api/config/models/{id}/default", s.handleSetDefaultModelConfig)
-	s.api("POST /api/config/models/{id}/lite", s.handleSetLiteModelConfig)
+	// PR5: endpoint-level CRUD (design §10.2). The old /api/config/models*
+	// routes are deleted — callers must use these.
+	s.api("POST /api/config/endpoints", s.handleCreateEndpoint)
+	s.api("PATCH /api/config/endpoints/{id}", s.handleUpdateEndpoint)
+	s.api("DELETE /api/config/endpoints/{id}", s.handleDeleteEndpoint)
+	s.api("POST /api/config/endpoints/{id}/models", s.handleAddEndpointModel)
+	s.api("DELETE /api/config/endpoints/{id}/models/{model}", s.handleDeleteEndpointModel)
+	s.api("POST /api/config/endpoints/{id}/default", s.handleSetEndpointDefault)
+	s.api("POST /api/config/endpoints/{id}/lite", s.handleSetEndpointLite)
 
 	// Browser automation setup
 	s.api("GET /api/browser/status", s.handleBrowserStatus)
@@ -1364,8 +1368,8 @@ func resolveProviderAndModel(flagProvider, flagModel string) (agent.Sender, stri
 		APIKey:          apiKey,
 		BaseURL:         resolveBaseURL(provName, cfg),
 		Protocol:        protocol,
-		ReasoningEffort: entry.ReasoningEffort,
-		ShowReasoning:   cfg.EffectiveShowReasoning(entry.ShowReasoning),
+		ReasoningEffort: cfg.ReasoningEffort,
+		ShowReasoning:   cfg.EffectiveShowReasoning(nil),
 	})
 	if err != nil {
 		return nil, "", "", err
@@ -1542,11 +1546,11 @@ func (s *Server) invalidateEndpointSenders(endpointID string) {
 // switch this arg to cfg.Lite so the lite sender participates in per-endpoint
 // invalidation (§9.2).
 func (s *Server) liteSenderFromConfig(cfg config.Config) (agent.Sender, string) {
-	entry, ok := cfg.EntryByModel(cfg.LiteModel)
+	entry, ok := cfg.EntryByModel(cfg.Lite)
 	if !ok || entry.Model == "" {
 		return nil, ""
 	}
-	sender, err := s.cachedSenderForEntry(cfg.LiteModel, entry)
+	sender, err := s.cachedSenderForEntry(cfg.Lite, entry)
 	if err != nil {
 		return nil, ""
 	}
@@ -1569,8 +1573,8 @@ func senderForEntry(entry config.ModelEntry) (agent.Sender, error) {
 		APIKey:          apiKey,
 		BaseURL:         entry.BaseURL,
 		Protocol:        entry.Protocol,
-		ReasoningEffort: entry.ReasoningEffort,
-		ShowReasoning:   cfg.EffectiveShowReasoning(entry.ShowReasoning),
+		ReasoningEffort: cfg.ReasoningEffort,
+		ShowReasoning:   cfg.EffectiveShowReasoning(nil),
 	})
 }
 

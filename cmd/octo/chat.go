@@ -258,14 +258,15 @@ func resolveCoauthor(noCoauthorFlag bool, cfg config.Config) bool {
 // resolveShowReasoning determines whether the reasoning/thinking trace is
 // surfaced (i.e. requested from the provider). The terminal never renders it —
 // this only governs whether the trace is fetched at all, which the Web UI then
-// displays. Precedence: an explicit --show-reasoning flag > config file >
-// default (false).
-func resolveShowReasoning(flagSet, flagVal bool, entry config.ModelEntry) bool {
+// displays. PR5: reasoning is global — reads Config.ShowReasoning instead of
+// the deleted per-entry field. Precedence: an explicit --show-reasoning flag >
+// config file > default (false).
+func resolveShowReasoning(flagSet, flagVal bool, cfg config.Config) bool {
 	if flagSet {
 		return flagVal
 	}
-	if entry.ShowReasoning != nil {
-		return *entry.ShowReasoning
+	if cfg.ShowReasoning != nil {
+		return *cfg.ShowReasoning
 	}
 	return false
 }
@@ -281,15 +282,15 @@ func toolSearchConfigFrom(c config.ToolSearchConfig) tools.ToolSearchConfig {
 // > config file > "" (off). "off" is accepted as an explicit flag value (case
 // insensitive) so a config-persisted level can be turned off for one run,
 // mirroring `/thinking off` in the TUI and the server's reasoning_effort API.
-func resolveReasoningEffort(flagSet bool, flagVal string, entry config.ModelEntry) string {
+func resolveReasoningEffort(flagSet bool, flagVal string, cfg config.Config) string {
 	if flagSet {
 		return normalizeOffEffort(flagVal)
 	}
-	// The config entry can itself hold the literal "off" sentinel — the
-	// server's session reasoning_effort API historically persisted it
+	// PR5: reasoning is global. The config can hold the literal "off" sentinel
+	// — the server's session reasoning_effort API historically persisted it
 	// verbatim instead of normalizing to "" (see internal/server/handlers.go
 	// handleUpdateSessionReasoningEffort) — so normalize on read too.
-	return normalizeOffEffort(entry.ReasoningEffort)
+	return normalizeOffEffort(cfg.ReasoningEffort)
 }
 
 // normalizeOffEffort maps the case-insensitive "off" sentinel to "", the
@@ -455,12 +456,12 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			reasoningEffortFlagSet = true
 		}
 	})
-	resolvedEffort := resolveReasoningEffort(reasoningEffortFlagSet, *reasoningEffort, entry)
+	resolvedEffort := resolveReasoningEffort(reasoningEffortFlagSet, *reasoningEffort, cfg)
 	if !validReasoningEffort(resolvedEffort) {
 		fmt.Fprintf(stderr, "octo: invalid --reasoning-effort %q (want 'off', 'low', 'medium', 'high', 'xhigh', or 'max')\n", *reasoningEffort)
 		return 2
 	}
-	resolvedShowReasoning := resolveShowReasoning(showReasoningFlagSet, *showReasoning, entry)
+	resolvedShowReasoning := resolveShowReasoning(showReasoningFlagSet, *showReasoning, cfg)
 
 	// Single-turn mode requires a message.
 	if !isREPL && resumeID != "" {
@@ -643,7 +644,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// History compaction runs on the configured lite model when one is set.
 	// A build failure (missing key, unknown provider) just leaves the primary
 	// in charge — never fail startup over the lite entry.
-	if liteEntry, ok := cfg.EntryByModel(cfg.LiteModel); ok && liteEntry.Model != "" {
+	if liteEntry, ok := cfg.EntryByModel(cfg.Lite); ok && liteEntry.Model != "" {
 		if liteSender, lerr := buildSender(liteEntry.Provider, liteEntry, io.Discard, senderTuning{}); lerr == nil {
 			a.LiteSender = liteSender
 			a.LiteModel = liteEntry.Model

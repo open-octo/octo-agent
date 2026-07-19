@@ -77,11 +77,11 @@ func TestEnsureSender_RebuildsOnProviderChange(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-openai-key")
 
 	writeTestConfig(t, config.Config{
-		Models: []config.ModelEntry{
-			{Model: "gpt-4o", Provider: "openai"},
-			{Model: "kimi-for-coding", Provider: "anthropic", BaseURL: "https://api.moonshot.cn/anthropic"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}},
+			{ID: "ep-b", Provider: "anthropic", BaseURL: "https://api.moonshot.cn/anthropic", Models: []config.EndpointModel{{Model: "kimi-for-coding"}}},
 		},
-		DefaultModel: "gpt-4o",
+		Default: "ep-a::gpt-4o",
 	})
 
 	stub := &stubSender{reply: "ok"}
@@ -117,11 +117,10 @@ func TestEnsureSender_NoRebuildWhenUnchanged(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-openai-key")
 
 	writeTestConfig(t, config.Config{
-		Models: []config.ModelEntry{
-			{Model: "gpt-4o", Provider: "openai"},
-			{Model: "gpt-4o-mini", Provider: "openai"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}, {Model: "gpt-4o-mini"}}},
 		},
-		DefaultModel: "gpt-4o",
+		Default: "ep-a::gpt-4o",
 	})
 
 	stub := &stubSender{reply: "ok"}
@@ -148,11 +147,11 @@ func TestEnsureSender_RebuildsOnBaseURLChange(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
 
 	writeTestConfig(t, config.Config{
-		Models: []config.ModelEntry{
-			{Model: "claude-sonnet-4-6", Provider: "anthropic"},
-			{Model: "kimi-for-coding", Provider: "anthropic", BaseURL: "https://api.moonshot.cn/anthropic"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "anthropic", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "ep-b", Provider: "anthropic", BaseURL: "https://api.moonshot.cn/anthropic", Models: []config.EndpointModel{{Model: "kimi-for-coding"}}},
 		},
-		DefaultModel: "claude-sonnet-4-6",
+		Default: "ep-a::claude-sonnet-4-6",
 	})
 
 	stub := &stubSender{reply: "ok"}
@@ -184,11 +183,11 @@ func TestEnsureSender_ErrorLeavesConfigUnchanged(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-openai-key")
 
 	writeTestConfig(t, config.Config{
-		Models: []config.ModelEntry{
-			{Model: "gpt-4o", Provider: "openai"},
-			{Model: "kimi-for-coding", Provider: "anthropic", BaseURL: "https://api.moonshot.cn/anthropic"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}},
+			{ID: "ep-b", Provider: "anthropic", BaseURL: "https://api.moonshot.cn/anthropic", Models: []config.EndpointModel{{Model: "kimi-for-coding"}}},
 		},
-		DefaultModel: "gpt-4o",
+		Default: "ep-a::gpt-4o",
 	})
 
 	stub := &stubSender{reply: "ok"}
@@ -224,11 +223,11 @@ func TestEnsureSender_UnconfiguredModel(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-openai-key")
 
 	writeTestConfig(t, config.Config{
-		Models: []config.ModelEntry{
-			{Model: "gpt-4o", Provider: "openai"},
-			{Model: "deepseek-v4-flash", Provider: "deepseek", BaseURL: "https://api.deepseek.com"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}},
+			{ID: "ep-b", Provider: "deepseek", BaseURL: "https://api.deepseek.com", Models: []config.EndpointModel{{Model: "deepseek-v4-flash"}}},
 		},
-		DefaultModel: "gpt-4o",
+		Default: "ep-a::gpt-4o",
 	})
 
 	stub := &stubSender{reply: "ok"}

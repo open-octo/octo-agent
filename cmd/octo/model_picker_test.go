@@ -49,11 +49,11 @@ func pickUpdate(m *tuiModel, msg tea.Msg) *tuiModel {
 // endpoints, and the cursor starts on the active model's endpoint.
 func TestDispatchModel_NoArgOpensPicker(t *testing.T) {
 	writeModelsConfig(t, config.Config{
-		Models: []config.ModelEntry{
-			{Model: "gpt-4o", Provider: "openai"},
-			{Model: "claude-sonnet-4-6", Provider: "anthropic"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}},
+			{ID: "ep-b", Provider: "anthropic", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
 		},
-		DefaultModel: "gpt-4o",
+		Default: "ep-a::gpt-4o",
 	})
 
 	m := newPickerTestModel("gpt-4o")
@@ -81,12 +81,12 @@ func TestDispatchModel_NoArgOpensPicker(t *testing.T) {
 // cursor on the active model — not always the first one.
 func TestDispatchModel_NoArgCursorOnActive(t *testing.T) {
 	writeModelsConfig(t, config.Config{
-		Models: []config.ModelEntry{
-			{Model: "gpt-4o", Provider: "openai"},
-			{Model: "claude-sonnet-4-6", Provider: "anthropic"},
-			{Model: "deepseek-v4-flash", Provider: "deepseek", BaseURL: "https://api.deepseek.com"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}},
+			{ID: "ep-b", Provider: "anthropic", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "ep-c", Provider: "deepseek", BaseURL: "https://api.deepseek.com", Models: []config.EndpointModel{{Model: "deepseek-v4-flash"}}},
 		},
-		DefaultModel: "claude-sonnet-4-6",
+		Default: "ep-b::claude-sonnet-4-6",
 	})
 
 	m := newPickerTestModel("claude-sonnet-4-6")
@@ -113,18 +113,17 @@ func TestDispatchModel_NoArgCursorOnActive(t *testing.T) {
 // endpoint with two models so ↑↓ stays within one endpoint.
 func TestDispatchModel_PickerKeyDown(t *testing.T) {
 	writeModelsConfig(t, config.Config{
-		Models: []config.ModelEntry{
-			{Model: "gpt-4o", Provider: "openai", BaseURL: "https://api.openai.com"},
-			{Model: "gpt-4.1", Provider: "openai", BaseURL: "https://api.openai.com"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", BaseURL: "https://api.openai.com", Models: []config.EndpointModel{{Model: "gpt-4o"}, {Model: "gpt-4.1"}}},
 		},
-		DefaultModel: "gpt-4o",
+		Default: "ep-a::gpt-4o",
 	})
 
 	m := newPickerTestModel("gpt-4o")
 	m.dispatchModel("")
 
 	if len(m.modelPicker.endpoints) != 1 {
-		t.Fatalf("expected 1 endpoint (same provider+base_url), got %d", len(m.modelPicker.endpoints))
+		t.Fatalf("expected 1 endpoint (two models under one endpoint), got %d", len(m.modelPicker.endpoints))
 	}
 	// Down → index 1
 	m = pickUpdate(m, tea.KeyMsg{Type: tea.KeyDown})
@@ -146,10 +145,10 @@ func TestDispatchModel_PickerKeyDown(t *testing.T) {
 // TestDispatchModel_PickerKeyEsc verifies Esc closes the picker.
 func TestDispatchModel_PickerKeyEsc(t *testing.T) {
 	writeModelsConfig(t, config.Config{
-		Models: []config.ModelEntry{
-			{Model: "gpt-4o", Provider: "openai"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}},
 		},
-		DefaultModel: "gpt-4o",
+		Default: "ep-a::gpt-4o",
 	})
 
 	m := newPickerTestModel("gpt-4o")
@@ -169,11 +168,10 @@ func TestDispatchModel_PickerKeyEsc(t *testing.T) {
 func TestDispatchModel_PickerKeyEnter(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "test-deepseek-key")
 	writeModelsConfig(t, config.Config{
-		Models: []config.ModelEntry{
-			{Model: "deepseek-v4-flash", Provider: "deepseek", BaseURL: "https://api.deepseek.com"},
-			{Model: "deepseek-v4-pro", Provider: "deepseek", BaseURL: "https://api.deepseek.com"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "deepseek", BaseURL: "https://api.deepseek.com", Models: []config.EndpointModel{{Model: "deepseek-v4-flash"}, {Model: "deepseek-v4-pro"}}},
 		},
-		DefaultModel: "deepseek-v4-flash",
+		Default: "ep-a::deepseek-v4-flash",
 	})
 
 	m := newPickerTestModel("deepseek-v4-flash")
@@ -197,11 +195,11 @@ func TestDispatchModel_PickerKeyEnter(t *testing.T) {
 // models (collapsed for others — ←→ switches focus to reveal theirs).
 func TestModelPickerView_Renders(t *testing.T) {
 	writeModelsConfig(t, config.Config{
-		Models: []config.ModelEntry{
-			{Model: "gpt-4o", Provider: "openai", BaseURL: "https://api.openai.com"},
-			{Model: "deepseek-v4-flash", Provider: "deepseek", BaseURL: "https://api.deepseek.com"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", BaseURL: "https://api.openai.com", Models: []config.EndpointModel{{Model: "gpt-4o"}}},
+			{ID: "ep-b", Provider: "deepseek", BaseURL: "https://api.deepseek.com", Models: []config.EndpointModel{{Model: "deepseek-v4-flash"}}},
 		},
-		DefaultModel: "gpt-4o",
+		Default: "ep-a::gpt-4o",
 	})
 
 	m := newPickerTestModel("gpt-4o")
@@ -241,11 +239,11 @@ func TestModelPicker_TwoLevelEndpointSwitch(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "test-deepseek-key")
 	t.Setenv("OPENAI_API_KEY", "test-openai-key")
 	writeModelsConfig(t, config.Config{
-		Models: []config.ModelEntry{
-			{Model: "gpt-4o", Provider: "openai", BaseURL: "https://api.openai.com", APIKey: "sk-openai"},
-			{Model: "deepseek-v4-flash", Provider: "deepseek", BaseURL: "https://api.deepseek.com", APIKey: "sk-deepseek"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", BaseURL: "https://api.openai.com", APIKey: "sk-openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}},
+			{ID: "ep-b", Provider: "deepseek", BaseURL: "https://api.deepseek.com", APIKey: "sk-deepseek", Models: []config.EndpointModel{{Model: "deepseek-v4-flash"}}},
 		},
-		DefaultModel: "gpt-4o",
+		Default: "ep-a::gpt-4o",
 	})
 
 	m := newPickerTestModel("gpt-4o")
@@ -283,13 +281,16 @@ func TestModelPicker_TwoLevelEndpointSwitch(t *testing.T) {
 			m.modelPicker.endpoints[m.modelPicker.epIdx].items[0].name)
 	}
 
-	// Enter on deepseek-v4-flash dispatches the composite id.
+	// Enter on deepseek-v4-flash dispatches the composite id. The endpoint id
+	// is whatever the seed assigned (PR5: tests seed Endpoints directly, so
+	// the id is "ep-b" rather than the legacy-<host>-<n> form Load synthesises
+	// from old models: blocks).
 	m = pickUpdate(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.modelPicker != nil {
 		t.Fatal("picker should be cleared after Enter")
 	}
-	if m.a.Model != "legacy-api-deepseek-com-0::deepseek-v4-flash" {
-		t.Errorf("active model = %q, want legacy-api-deepseek-com-0::deepseek-v4-flash", m.a.Model)
+	if !strings.HasSuffix(m.a.Model, "::deepseek-v4-flash") {
+		t.Errorf("active model = %q, want suffix ::deepseek-v4-flash", m.a.Model)
 	}
 }
 
@@ -297,10 +298,10 @@ func TestModelPicker_TwoLevelEndpointSwitch(t *testing.T) {
 // correctly when only one model is configured (wrap arithmetic is a no-op).
 func TestDispatchModel_PickerSingleModel(t *testing.T) {
 	writeModelsConfig(t, config.Config{
-		Models: []config.ModelEntry{
-			{Model: "gpt-4o", Provider: "openai"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}},
 		},
-		DefaultModel: "gpt-4o",
+		Default: "ep-a::gpt-4o",
 	})
 
 	m := newPickerTestModel("gpt-4o")
@@ -340,11 +341,11 @@ func TestModelPickerView_EmptyWhenInactive(t *testing.T) {
 func TestDispatchModel_DefaultFlag(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "test-deepseek-key")
 	writeModelsConfig(t, config.Config{
-		Models: []config.ModelEntry{
-			{Model: "gpt-4o", Provider: "openai"},
-			{Model: "deepseek-v4-flash", Provider: "deepseek", BaseURL: "https://api.deepseek.com"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}},
+			{ID: "ep-b", Provider: "deepseek", BaseURL: "https://api.deepseek.com", Models: []config.EndpointModel{{Model: "deepseek-v4-flash"}}},
 		},
-		DefaultModel: "gpt-4o",
+		Default: "ep-a::gpt-4o",
 	})
 
 	m := newPickerTestModel("gpt-4o")
@@ -358,8 +359,8 @@ func TestDispatchModel_DefaultFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if saved.DefaultModel != "deepseek-v4-flash" {
-		t.Errorf("default_model = %q, want deepseek-v4-flash", saved.DefaultModel)
+	if !strings.HasSuffix(saved.Default, "::deepseek-v4-flash") {
+		t.Errorf("Default = %q, want suffix ::deepseek-v4-flash", saved.Default)
 	}
 }
 
@@ -367,10 +368,10 @@ func TestDispatchModel_DefaultFlag(t *testing.T) {
 // errors on the switch step and does NOT touch the config.
 func TestDispatchModel_DefaultFlagUnconfigured(t *testing.T) {
 	writeModelsConfig(t, config.Config{
-		Models: []config.ModelEntry{
-			{Model: "gpt-4o", Provider: "openai"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}},
 		},
-		DefaultModel: "gpt-4o",
+		Default: "ep-a::gpt-4o",
 	})
 
 	m := newPickerTestModel("gpt-4o")
@@ -384,8 +385,8 @@ func TestDispatchModel_DefaultFlagUnconfigured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if saved.DefaultModel != "gpt-4o" {
-		t.Errorf("default_model = %q, want gpt-4o (unchanged)", saved.DefaultModel)
+	if !strings.HasSuffix(saved.Default, "::gpt-4o") {
+		t.Errorf("Default = %q, want suffix ::gpt-4o", saved.Default)
 	}
 }
 
@@ -394,11 +395,11 @@ func TestDispatchModel_DefaultFlagUnconfigured(t *testing.T) {
 func TestDispatchModel_NoDefaultFlag(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "test-deepseek-key")
 	writeModelsConfig(t, config.Config{
-		Models: []config.ModelEntry{
-			{Model: "deepseek-v4-flash", Provider: "deepseek", BaseURL: "https://api.deepseek.com"},
-			{Model: "gpt-4o", Provider: "openai"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "deepseek", BaseURL: "https://api.deepseek.com", Models: []config.EndpointModel{{Model: "deepseek-v4-flash"}}},
+			{ID: "ep-b", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}},
 		},
-		DefaultModel: "gpt-4o",
+		Default: "ep-b::gpt-4o",
 	})
 
 	m := newPickerTestModel("gpt-4o")
@@ -411,8 +412,8 @@ func TestDispatchModel_NoDefaultFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if saved.DefaultModel != "gpt-4o" {
-		t.Errorf("default_model = %q, want gpt-4o (unchanged)", saved.DefaultModel)
+	if !strings.HasSuffix(saved.Default, "::gpt-4o") {
+		t.Errorf("Default = %q, want suffix ::gpt-4o", saved.Default)
 	}
 }
 
@@ -420,10 +421,10 @@ func TestDispatchModel_NoDefaultFlag(t *testing.T) {
 // a model name) errors cleanly and does not touch the config.
 func TestDispatchModel_DefaultFlagOnly(t *testing.T) {
 	writeModelsConfig(t, config.Config{
-		Models: []config.ModelEntry{
-			{Model: "gpt-4o", Provider: "openai"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}},
 		},
-		DefaultModel: "gpt-4o",
+		Default: "ep-a::gpt-4o",
 	})
 
 	m := newPickerTestModel("gpt-4o")
@@ -437,7 +438,7 @@ func TestDispatchModel_DefaultFlagOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if saved.DefaultModel != "gpt-4o" {
-		t.Errorf("default_model = %q, want gpt-4o (unchanged)", saved.DefaultModel)
+	if !strings.HasSuffix(saved.Default, "::gpt-4o") {
+		t.Errorf("Default = %q, want suffix ::gpt-4o", saved.Default)
 	}
 }

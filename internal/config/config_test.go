@@ -64,7 +64,7 @@ func TestLoad_MissingFileIsZeroNotError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() on missing file = %v, want nil", err)
 	}
-	if len(c.Models) != 0 || c.DefaultModel != "" {
+	if len(c.Endpoints) != 0 || c.Default != "" {
 		t.Errorf("Load() on missing file = %+v, want zero Config", c)
 	}
 }
@@ -73,12 +73,12 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	setHome(t)
 
 	want := Config{
-		Models: []ModelEntry{
-			{Provider: "anthropic", Model: "claude-fable-5"},
-			{Provider: "kimi", Model: "kimi-k2.6", BaseURL: "https://x.example"},
+		Endpoints: []Endpoint{
+			{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-fable-5"}}},
+			{ID: "ep-b", Provider: "kimi", BaseURL: "https://x.example", Models: []EndpointModel{{Model: "kimi-k2.6"}}},
 		},
-		DefaultModel: "kimi-k2.6",
-		LiteModel:    "claude-fable-5",
+		Default: "ep-b::kimi-k2.6",
+		Lite:    "ep-a::claude-fable-5",
 	}
 	if err := want.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -88,11 +88,11 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(got.Models) != 2 || got.Models[1] != want.Models[1] {
-		t.Errorf("round-trip models = %+v, want %+v", got.Models, want.Models)
+	if len(got.Endpoints) != 2 || got.Endpoints[1].ID != want.Endpoints[1].ID || got.Endpoints[1].Provider != want.Endpoints[1].Provider {
+		t.Errorf("round-trip endpoints = %+v, want %+v", got.Endpoints, want.Endpoints)
 	}
-	if got.DefaultModel != "kimi-k2.6" || got.LiteModel != "claude-fable-5" {
-		t.Errorf("round-trip refs = default %q lite %q", got.DefaultModel, got.LiteModel)
+	if got.Default != "ep-b::kimi-k2.6" || got.Lite != "ep-a::claude-fable-5" {
+		t.Errorf("round-trip refs = default %q lite %q", got.Default, got.Lite)
 	}
 	if e := got.DefaultEntry(); e.Model != "kimi-k2.6" || e.BaseURL != "https://x.example" {
 		t.Errorf("DefaultEntry = %+v, want kimi entry", e)
@@ -108,19 +108,28 @@ func TestLoad_LegacyYAMLIsNormalised(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(c.Models) != 1 {
-		t.Fatalf("Models = %+v, want one synthesized entry", c.Models)
+	if len(c.Endpoints) != 1 {
+		t.Fatalf("Endpoints = %+v, want one synthesized endpoint", c.Endpoints)
 	}
-	e := c.Models[0]
-	if e.Provider != "openai" || e.Model != "gpt-4o-mini" ||
-		e.BaseURL != "https://x.example" || e.APIKey != "sk-old" || e.ReasoningEffort != "high" {
-		t.Errorf("synthesized entry = %+v", e)
+	ep := c.Endpoints[0]
+	if ep.Provider != "openai" || ep.BaseURL != "https://x.example" || ep.APIKey != "sk-old" {
+		t.Errorf("synthesized endpoint = %+v", ep)
 	}
-	if c.DefaultModel != "gpt-4o-mini" {
-		t.Errorf("DefaultModel = %q, want gpt-4o-mini", c.DefaultModel)
+	if len(ep.Models) != 1 || ep.Models[0].Model != "gpt-4o-mini" {
+		t.Errorf("endpoint models = %+v, want one gpt-4o-mini", ep.Models)
+	}
+	if !strings.HasSuffix(c.Default, "::gpt-4o-mini") {
+		t.Errorf("Default = %q, want suffix ::gpt-4o-mini", c.Default)
 	}
 	if c.PermissionMode != "strict" {
 		t.Errorf("global PermissionMode lost: %q", c.PermissionMode)
+	}
+	// PR5 (design §11.6): the top-level reasoning_effort key is the global
+	// setting — Load reads it into Config.ReasoningEffort (the only place
+	// reasoning is stored now). Only per-entry reasoning_effort inside a
+	// legacy models: block is dropped on migration.
+	if c.ReasoningEffort != "high" {
+		t.Errorf("ReasoningEffort = %q, want high (top-level reasoning is the global setting)", c.ReasoningEffort)
 	}
 }
 
@@ -138,15 +147,18 @@ func TestLoad_MigratesCompatibleVendorsToCustom(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if e := c.Models[0]; e.Provider != "custom" || e.Protocol != "openai" {
-		t.Errorf("openai_compatible entry = %+v, want custom/openai", e)
+	if len(c.Endpoints) != 3 {
+		t.Fatalf("Endpoints = %d, want 3 (one per entry): %+v", len(c.Endpoints), c.Endpoints)
 	}
-	if e := c.Models[1]; e.Provider != "custom" || e.Protocol != "anthropic" {
-		t.Errorf("anthropic_compatible entry = %+v, want custom/anthropic", e)
+	if ep := c.Endpoints[0]; ep.Provider != "custom" || ep.Protocol != "openai" {
+		t.Errorf("openai_compatible endpoint = %+v, want custom/openai", ep)
+	}
+	if ep := c.Endpoints[1]; ep.Provider != "custom" || ep.Protocol != "anthropic" {
+		t.Errorf("anthropic_compatible endpoint = %+v, want custom/anthropic", ep)
 	}
 	// A named vendor is left untouched.
-	if e := c.Models[2]; e.Provider != "anthropic" || e.Protocol != "" {
-		t.Errorf("anthropic entry = %+v, want anthropic/(no protocol)", e)
+	if ep := c.Endpoints[2]; ep.Provider != "anthropic" || ep.Protocol != "" {
+		t.Errorf("anthropic endpoint = %+v, want anthropic/(no protocol)", ep)
 	}
 }
 
@@ -201,7 +213,7 @@ func TestSave_FileMode0600(t *testing.T) {
 	}
 	home := setHome(t)
 
-	cfg := Config{Models: []ModelEntry{{Model: "main", APIKey: "sk-secret"}}}
+	cfg := Config{Endpoints: []Endpoint{{ID: "ep-a", Provider: "anthropic", APIKey: "sk-secret", Models: []EndpointModel{{Model: "main"}}}}}
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -227,14 +239,26 @@ func TestLoadCached_FallsBackToLastGoodOnParseError(t *testing.T) {
 	t.Cleanup(resetLastGoodForTest)
 	resetLastGoodForTest()
 	home := setHome(t)
-	writeOcto(t, home, "config.yml", "default_model: good-model\n")
+	writeOcto(t, home, "config.yml",
+		"endpoints:\n  - id: ep-a\n    provider: anthropic\n    models:\n      - model: good-model\n")
+	// default set to the good endpoint so we can verify the cached Default.
+	// We'll write it via a quick Save instead of hand YAML to get the
+	// composite id format right.
+	cfg0, err := Load()
+	if err != nil {
+		t.Fatalf("initial Load: %v", err)
+	}
+	cfg0.Default = "ep-a::good-model"
+	if err := cfg0.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
 
 	cfg, err := LoadCached()
 	if err != nil {
 		t.Fatalf("LoadCached() first load = %v, want nil", err)
 	}
-	if cfg.DefaultModel != "good-model" {
-		t.Fatalf("LoadCached() first load DefaultModel = %q, want %q", cfg.DefaultModel, "good-model")
+	if cfg.Default != "ep-a::good-model" {
+		t.Fatalf("LoadCached() first load Default = %q, want %q", cfg.Default, "ep-a::good-model")
 	}
 
 	writeOcto(t, home, "config.yml", "not: valid: yaml: [")
@@ -243,8 +267,8 @@ func TestLoadCached_FallsBackToLastGoodOnParseError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCached() after malformed edit = %v, want nil (fall back to last good)", err)
 	}
-	if cfg.DefaultModel != "good-model" {
-		t.Errorf("LoadCached() after malformed edit DefaultModel = %q, want cached %q", cfg.DefaultModel, "good-model")
+	if cfg.Default != "ep-a::good-model" {
+		t.Errorf("LoadCached() after malformed edit Default = %q, want cached %q", cfg.Default, "ep-a::good-model")
 	}
 }
 
@@ -259,29 +283,8 @@ func TestLoadCached_ErrorsWhenNothingCachedYet(t *testing.T) {
 	}
 }
 
-func TestSetDefaultEntry(t *testing.T) {
-	var c Config
-
-	// Appends when empty.
-	c.SetDefaultEntry(ModelEntry{Model: "m1"})
-	if len(c.Models) != 1 || c.DefaultModel != "m1" {
-		t.Fatalf("after first set: %+v", c)
-	}
-
-	// Replaces the default in place when its model changes, carrying the lite
-	// reference over to the new model.
-	c.LiteModel = "m1"
-	c.SetDefaultEntry(ModelEntry{Model: "m2"})
-	if len(c.Models) != 1 || c.Models[0].Model != "m2" {
-		t.Fatalf("after model change: %+v", c.Models)
-	}
-	if c.DefaultModel != "m2" || c.LiteModel != "m2" {
-		t.Errorf("references not updated: default %q lite %q", c.DefaultModel, c.LiteModel)
-	}
-}
-
 func TestEntryByModel_EmptyNeverMatches(t *testing.T) {
-	c := Config{Models: []ModelEntry{{Model: "m"}}}
+	c := Config{Endpoints: []Endpoint{{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{{Model: "m"}}}}}
 	if _, ok := c.EntryByModel(""); ok {
 		t.Error("EntryByModel(\"\") matched, want no match")
 	}
@@ -355,13 +358,15 @@ func TestEntryByModel_CompositeIDResolvesAgainstEndpoints(t *testing.T) {
 }
 
 // TestEntryByModel_BareModelStillWorks pins the legacy path: a bare model
-// string (no "::" separator) resolves against c.Models the way it always did.
-// This is what pre-PR4 session files carry — their ModelConfig is a bare model
-// string, and EntryByModel must keep working for them.
+// string (no "::" separator) resolves against c.Endpoints (PR5: was c.Models
+// before deletion). This is what pre-PR4 session files carry — their
+// ModelConfig is a bare model string, and EntryByModel must keep working for
+// them.
 func TestEntryByModel_BareModelStillWorks(t *testing.T) {
 	cfg := Config{
-		Models: []ModelEntry{
-			{Provider: "anthropic", Model: "claude-sonnet-4-6", BaseURL: "https://api.anthropic.com", Vision: true},
+		Endpoints: []Endpoint{
+			{ID: "ep-a", Provider: "anthropic", BaseURL: "https://api.anthropic.com",
+				Models: []EndpointModel{{Model: "claude-sonnet-4-6", Vision: true}}},
 		},
 	}
 	got, ok := cfg.EntryByModel("claude-sonnet-4-6")
@@ -373,48 +378,34 @@ func TestEntryByModel_BareModelStillWorks(t *testing.T) {
 	}
 }
 
-// TestEntryByModel_CompositeIDWinsOverFlatModels pins the precedence: when
-// the config has BOTH a flat Models entry with the bare model AND an Endpoints
-// entry whose composite id matches, the composite-id path must win. Otherwise
-// a user who configures the same model on two endpoints (the whole point of
-// the two-level schema) and references it via composite id would get the flat
-// entry's connection params instead of the endpoint's — silently routing to
-// the wrong backend.
-func TestEntryByModel_CompositeIDWinsOverFlatModels(t *testing.T) {
+// TestEntryByModel_BareModelAmbiguousPicksDefault covers PR5's bare-model
+// fallback rule: when a bare model name matches multiple endpoints, prefer
+// the one cfg.Default points at (mirroring ParseModelFlag step 2a).
+func TestEntryByModel_BareModelAmbiguousPicksDefault(t *testing.T) {
 	cfg := Config{
 		Endpoints: []Endpoint{
-			{
-				ID:       "relay-a",
-				Provider: "custom",
-				BaseURL:  "https://relay.example.com",
-				APIKey:   "alpha",
-				Protocol: "anthropic",
-				Models:   []EndpointModel{{Model: "claude-sonnet-4-6", Vision: true}},
-			},
+			{ID: "relay-a", Provider: "custom", BaseURL: "https://relay.example.com",
+				Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "official", Provider: "anthropic", BaseURL: "https://api.anthropic.com",
+				Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
 		},
-		// A flat Models entry with the SAME bare model — this is what a
-		// migrated config looks like before the write-path switches in PR4
-		// (Endpoints synthesised in memory + Models still populated from the
-		// legacy file). The composite-id path must win so the relay's
-		// connection params are returned, not the flat entry's.
-		Models: []ModelEntry{
-			{Provider: "anthropic", Model: "claude-sonnet-4-6", BaseURL: "https://api.anthropic.com", Vision: true},
-		},
+		Default: "official::claude-sonnet-4-6",
 	}
-
-	got, ok := cfg.EntryByModel("relay-a::claude-sonnet-4-6")
+	got, ok := cfg.EntryByModel("claude-sonnet-4-6")
 	if !ok {
-		t.Fatal("EntryByModel(composite) = false, want true")
+		t.Fatal("EntryByModel(bare) = false, want true")
 	}
-	if got.Provider != "custom" || got.BaseURL != "https://relay.example.com" || got.APIKey != "alpha" {
-		t.Errorf("EntryByModel(composite) = %+v, want relay-a endpoint's connection params (composite path must win over flat Models)", got)
+	if got.Provider != "anthropic" || got.BaseURL != "https://api.anthropic.com" {
+		t.Errorf("bare ambiguous = %+v, want the default endpoint (official/anthropic)", got)
 	}
 }
 
 func TestModelVision(t *testing.T) {
-	c := Config{Models: []ModelEntry{
-		{Model: "qwen-vl-max", Vision: true},
-		{Model: "qwen3.7-max", Vision: false},
+	c := Config{Endpoints: []Endpoint{
+		{ID: "ep-a", Provider: "custom", Models: []EndpointModel{
+			{Model: "qwen-vl-max", Vision: true},
+			{Model: "qwen3.7-max", Vision: false},
+		}},
 	}}
 	cases := map[string]bool{
 		"qwen-vl-max":   true,  // recorded true
@@ -452,23 +443,29 @@ func TestModelSupportsVision(t *testing.T) {
 
 // TestModelEntryVisionMigration covers the load-time backfill: a legacy file
 // with no `vision:` key gets the heuristic value (matching the behaviour those
-// files had before the field existed), an explicit value is preserved, and Save
-// always records the field.
+// files had before the field existed), an explicit value is preserved.
+//
+// PR5: Load migrates legacy models: block into c.Endpoints, so the vision
+// check goes through the endpoint's models (not the deleted c.Models).
 func TestModelEntryVisionMigration(t *testing.T) {
-	in := []byte("models:\n" +
-		"  - model: qwen3.7-max\n" + // no vision → heuristic false (text-only qwen)
-		"  - model: claude-sonnet-4-6\n" + // no vision → heuristic true
-		"  - model: gpt-4o\n" +
-		"    vision: false\n") // explicit false must survive despite gpt-4o inferring true
+	home := setHome(t)
+	writeOcto(t, home, "config.yml",
+		"models:\n"+
+			"  - model: qwen3.7-max\n"+ // no vision → heuristic false (text-only qwen)
+			"  - model: claude-sonnet-4-6\n"+ // no vision → heuristic true
+			"  - model: gpt-4o\n"+
+			"    vision: false\n") // explicit false must survive despite gpt-4o inferring true
 
-	var c Config
-	if err := yaml.Unmarshal(in, &c); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
 	}
 	want := map[string]bool{"qwen3.7-max": false, "claude-sonnet-4-6": true, "gpt-4o": false}
-	for _, e := range c.Models {
-		if got := e.Vision; got != want[e.Model] {
-			t.Errorf("after load, %q vision = %v, want %v", e.Model, got, want[e.Model])
+	for _, ep := range c.Endpoints {
+		for _, m := range ep.Models {
+			if got := m.Vision; got != want[m.Model] {
+				t.Errorf("after load, %q vision = %v, want %v", m.Model, got, want[m.Model])
+			}
 		}
 	}
 
@@ -478,8 +475,12 @@ func TestModelEntryVisionMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if n := strings.Count(string(out), "vision:"); n != len(c.Models) {
-		t.Errorf("marshaled config has %d vision: keys, want %d\n%s", n, len(c.Models), out)
+	wantCount := 0
+	for _, ep := range c.Endpoints {
+		wantCount += len(ep.Models)
+	}
+	if n := strings.Count(string(out), "vision:"); n != wantCount {
+		t.Errorf("marshaled config has %d vision: keys, want %d\n%s", n, wantCount, out)
 	}
 }
 
@@ -597,15 +598,12 @@ func TestLoad_LegacyFlatSynthesizesEndpoint(t *testing.T) {
 		t.Errorf("Default = %q, want %q", c.Default, wantDefault)
 	}
 
-	// Legacy Models field still populated — existing callers keep working.
-	if len(c.Models) != 1 {
-		t.Fatalf("legacy Models = %d entries, want 1 (must stay populated for existing callers): %+v", len(c.Models), c.Models)
+	// PR5: Config.Models is deleted; the entry lives under c.Endpoints[0].Models.
+	if len(ep.Models) != 1 || ep.Models[0].Model != "claude-sonnet-4-6" {
+		t.Errorf("endpoint models = %+v, want one claude-sonnet-4-6", ep.Models)
 	}
-	if c.Models[0].Model != "claude-sonnet-4-6" || c.Models[0].Provider != "anthropic" {
-		t.Errorf("legacy Models[0] = %+v, want claude-sonnet-4-6/anthropic", c.Models[0])
-	}
-	if c.DefaultModel != "claude-sonnet-4-6" {
-		t.Errorf("legacy DefaultModel = %q, want claude-sonnet-4-6", c.DefaultModel)
+	if ep.Provider != "anthropic" {
+		t.Errorf("endpoint provider = %q, want anthropic", ep.Provider)
 	}
 }
 
@@ -1117,19 +1115,22 @@ func TestParseModelFlag_EmptyFlagErrors(t *testing.T) {
 	}
 }
 
-// TestSave_PR1DoesNotEmitEndpointsBlock is the PR1 invariant from design S4.3:
-// Save must NOT write an endpoints: block to disk. PR1 is the "add structure,
-// don't enable writes" phase -- the on-disk file stays flat (models: only) so
-// existing callers and downgrade paths keep working. The Endpoints/Default/Lite
-// fields carry yaml:"-" tags to enforce this; PR4 flips them back when the
-// write path switches.
-func TestSave_PR1DoesNotEmitEndpointsBlock(t *testing.T) {
+// TestSave_WritesEndpointsFormat is the PR5 invariant (design §4.2): Save
+// writes the new endpoints: form, NOT the legacy flat models: form. PR5
+// flipped the authoritative field — Endpoints/Default/Lite are now
+// persisted; Models/DefaultModel/LiteModel are deleted from the runtime
+// Config (only fileConfig.Models survives as a Load-only intermediate for
+// reading old files). Downgrading to a PR4b or earlier build after this Save
+// is NOT supported — the file will parse but the old code's cfg.Models will
+// be empty. This is by design (§18.1).
+func TestSave_WritesEndpointsFormat(t *testing.T) {
 	setHome(t)
 	cfg := Config{
-		Models: []ModelEntry{
-			{Provider: "anthropic", Model: "claude-sonnet-4-6", BaseURL: "https://api.anthropic.com", APIKey: "alpha", Vision: true},
+		Endpoints: []Endpoint{
+			{ID: "ep-a", Provider: "anthropic", BaseURL: "https://api.anthropic.com",
+				APIKey: "alpha", Models: []EndpointModel{{Model: "claude-sonnet-4-6", Vision: true}}},
 		},
-		DefaultModel: "claude-sonnet-4-6",
+		Default: "ep-a::claude-sonnet-4-6",
 	}
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -1140,14 +1141,17 @@ func TestSave_PR1DoesNotEmitEndpointsBlock(t *testing.T) {
 		t.Fatalf("read saved file: %v", err)
 	}
 	s := string(data)
-	if strings.Contains(s, "endpoints:") {
-		t.Errorf("PR1 Save wrote an endpoints: block -- PR1 must keep the file flat.\nfile:\n%s", s)
+	if !strings.Contains(s, "endpoints:") {
+		t.Errorf("PR5 Save must emit an endpoints: block.\nfile:\n%s", s)
 	}
-	if strings.Contains(s, "\ndefault:") {
-		t.Errorf("PR1 Save wrote a default: field -- PR1 must keep the legacy default_model: field.\nfile:\n%s", s)
+	if !strings.Contains(s, "default:") {
+		t.Errorf("PR5 Save must emit the default: composite-id field.\nfile:\n%s", s)
 	}
-	if !strings.Contains(s, "models:") || !strings.Contains(s, "default_model:") {
-		t.Errorf("PR1 Save must still emit the flat models: + default_model: form.\nfile:\n%s", s)
+	if strings.Contains(s, "\nmodels:") {
+		t.Errorf("PR5 Save must NOT emit the legacy models: block.\nfile:\n%s", s)
+	}
+	if strings.Contains(s, "default_model:") {
+		t.Errorf("PR5 Save must NOT emit the legacy default_model: field.\nfile:\n%s", s)
 	}
 }
 
@@ -1316,16 +1320,18 @@ func TestSave_ConcurrentWritersDontClobber(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			cfg := Config{
-				Models: []ModelEntry{
+				Endpoints: []Endpoint{
 					{
+						ID:       fmt.Sprintf("ep-%d", idx),
 						Provider: "anthropic",
-						Model:    fmt.Sprintf("model-%d", idx),
 						BaseURL:  "https://api.anthropic.com",
 						APIKey:   fmt.Sprintf("key-%d", idx),
-						Vision:   true,
+						Models: []EndpointModel{
+							{Model: fmt.Sprintf("model-%d", idx), Vision: true},
+						},
 					},
 				},
-				DefaultModel: fmt.Sprintf("model-%d", idx),
+				Default: fmt.Sprintf("ep-%d::model-%d", idx, idx),
 			}
 			errs[idx] = cfg.Save()
 		}(i)
@@ -1343,11 +1349,11 @@ func TestSave_ConcurrentWritersDontClobber(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load after concurrent saves: %v — file was corrupted", err)
 	}
-	if len(loaded.Models) != 1 {
-		t.Fatalf("loaded Models = %d entries, want 1 (last writer wins, but file must be valid): %+v", len(loaded.Models), loaded.Models)
+	if len(loaded.Endpoints) != 1 {
+		t.Fatalf("loaded Endpoints = %d, want 1 (last writer wins, but file must be valid): %+v", len(loaded.Endpoints), loaded.Endpoints)
 	}
 	// The winning model name must be one of the N we wrote.
-	modelName := loaded.Models[0].Model
+	modelName := loaded.Endpoints[0].Models[0].Model
 	prefix := "model-"
 	if !strings.HasPrefix(modelName, prefix) {
 		t.Fatalf("loaded model = %q, want one of the model-N names", modelName)
@@ -1356,9 +1362,10 @@ func TestSave_ConcurrentWritersDontClobber(t *testing.T) {
 	if convErr != nil || idx < 0 || idx >= N {
 		t.Fatalf("loaded model = %q, want a valid index in [0, %d)", modelName, N)
 	}
-	// Default must match the loaded model (last writer wins consistently).
-	if loaded.DefaultModel != modelName {
-		t.Errorf("loaded DefaultModel = %q, want %q (matching the winning model)", loaded.DefaultModel, modelName)
+	// Default must match the loaded endpoint::model (last writer wins consistently).
+	wantDefault := fmt.Sprintf("ep-%d::%s", idx, modelName)
+	if loaded.Default != wantDefault {
+		t.Errorf("loaded Default = %q, want %q (matching the winning endpoint+model)", loaded.Default, wantDefault)
 	}
 }
 

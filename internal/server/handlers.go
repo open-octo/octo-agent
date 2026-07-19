@@ -154,11 +154,11 @@ func entryForSession(cfg config.Config, sess *agent.Session) config.ModelEntry {
 
 // sessionStatusFields returns the server-level session metadata (permission
 // mode, reasoning effort, show reasoning, current context usage) plus the
-// DEFAULT working dir, resolved against sess's own model-config entry (see
-// entryForSession) — pass nil when no specific session is in scope. Working
-// dir is per-session regardless: callers with a session in hand override the
-// returned value via sessionCwd / sessionCwdByID; the default here is the
-// fallback for sessions with none.
+// DEFAULT working dir. PR5: reasoning effort and show_reasoning are global
+// (Config.ReasoningEffort / Config.ShowReasoning) — per-entry overrides are
+// deleted. Working dir is per-session regardless: callers with a session in
+// hand override the returned value via sessionCwd / sessionCwdByID; the
+// default here is the fallback for sessions with none.
 func (srv *Server) sessionStatusFields(sess *agent.Session) (workingDir, permissionMode, reasoningEffort string, showReasoning *bool, contextUsage int) {
 	workingDir = srv.cwd
 	if sess != nil && sess.PermissionMode != "" {
@@ -167,9 +167,8 @@ func (srv *Server) sessionStatusFields(sess *agent.Session) (workingDir, permiss
 		permissionMode = string(resolvePermissionMode())
 	}
 	if cfg, err := config.Load(); err == nil {
-		entry := entryForSession(cfg, sess)
-		reasoningEffort = entry.ReasoningEffort
-		eff := cfg.EffectiveShowReasoning(entry.ShowReasoning)
+		reasoningEffort = cfg.ReasoningEffort
+		eff := cfg.EffectiveShowReasoning(nil)
 		showReasoning = &eff
 	}
 	// Report the session's persisted context usage (its real last-turn token
@@ -1240,35 +1239,30 @@ func (s *Server) handleUpdateSessionReasoningEffort(w http.ResponseWriter, r *ht
 		return
 	}
 
-	sess, err := agent.LoadSession(id)
-	if err != nil {
+	// Verify the session exists (the id is only used for broadcast below;
+	// PR5 made reasoning global, so there's no per-session entry to load).
+	if _, err := agent.LoadSession(id); err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
 
-	// Resolve and mutate the entry THIS session actually runs on (see
-	// entryForSession) — not always the default entry, so a session pinned
-	// to a non-default model actually gets its own reasoning_effort changed
-	// instead of silently editing an unrelated model's config.
+	// PR5: reasoning is global — update the global Config.ReasoningEffort,
+	// not a per-session entry (per-entry fields are deleted).
 	cfg, _ := config.Load()
-	entry := entryForSession(cfg, sess)
 	// "off" is only ever a wire/UI sentinel — the persisted and forwarded
 	// representation of "no reasoning effort" is "" everywhere else in the
 	// codebase (CLI, TUI, provider layer). Storing "off" verbatim used to
 	// reach provider requests as a literal, invalid reasoning_effort value.
 	if level == "off" {
-		entry.ReasoningEffort = ""
+		cfg.ReasoningEffort = ""
 	} else {
-		entry.ReasoningEffort = level
+		cfg.ReasoningEffort = level
 	}
 	// Reasoning off has nothing to show a trace of; keep show_reasoning from
 	// staying on in a way that looks toggled on but does nothing.
 	if level == "off" {
 		off := false
-		entry.ShowReasoning = &off
-	}
-	if !cfg.SetEntry(entry) {
-		cfg.SetDefaultEntry(entry)
+		cfg.ShowReasoning = &off
 	}
 	if err := cfg.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
@@ -1409,18 +1403,17 @@ func (s *Server) handleUpdateSessionShowReasoning(w http.ResponseWriter, r *http
 		return
 	}
 
-	sess, err := agent.LoadSession(id)
-	if err != nil {
+	// Verify the session exists (PR5: reasoning is global; no per-session
+	// entry to load).
+	if _, err := agent.LoadSession(id); err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
 
 	cfg, _ := config.Load()
-	entry := entryForSession(cfg, sess)
-	entry.ShowReasoning = &req.ShowReasoning
-	if !cfg.SetEntry(entry) {
-		cfg.SetDefaultEntry(entry)
-	}
+	// PR5: reasoning/show_reasoning is global — update the global config
+	// field, not a per-session entry (those fields are deleted).
+	cfg.ShowReasoning = &req.ShowReasoning
 	if err := cfg.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
 		return
