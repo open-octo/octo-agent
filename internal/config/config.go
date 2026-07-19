@@ -17,6 +17,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -794,8 +796,17 @@ func syncEndpointsFromModels(c *Config) {
 				ep.APIKey = e.APIKey
 				ep.Protocol = e.Protocol
 			} else if e.APIKey != "" && e.APIKey != g.entries[0].APIKey {
+				// Log only a non-reversible fingerprint of the dropped key —
+				// CodeQL (correctly) flags any clear-text key material as a
+				// sensitive-data leak, even a truncated prefix (the first 8
+				// chars of an sk-... key are enough to identify it). The
+				// length plus a 4-char sha256 prefix is enough for the user
+				// to tell which key was dropped without any key material
+				// landing in the log.
 				slog.Warn("config: multiple api_keys found for same base_url, keeping the first",
-					"base_url", g.baseURL, "dropped_key", e.APIKey[:min(8, len(e.APIKey))]+"…")
+					"base_url", g.baseURL,
+					"dropped_key_len", len(e.APIKey),
+					"dropped_key_fp", keyFingerprint(e.APIKey))
 			}
 			ep.Models = append(ep.Models, EndpointModel{Model: e.Model, Vision: e.Vision})
 		}
@@ -857,6 +868,17 @@ func legacyEndpointID(host string, n int) string {
 		return '-'
 	}, host)
 	return fmt.Sprintf("legacy-%s-%d", safe, n)
+}
+
+// keyFingerprint returns a short, non-reversible fingerprint of an API key for
+// use in logs — the first 4 hex chars of sha256(key). This is enough for the
+// user to tell which key was dropped (by matching against `sha256sum` of their
+// known keys) without any clear-text key material landing on disk. CodeQL
+// flags any clear-text key material — even a truncated prefix — as a
+// sensitive-data leak, so the old `key[:8] + "…"` shape was flagged.
+func keyFingerprint(key string) string {
+	h := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(h[:2])
 }
 
 // ResolveDefault returns the (endpoint, model) pair the session should run on

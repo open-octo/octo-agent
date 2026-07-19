@@ -614,11 +614,19 @@ func TestLoad_LegacyFlatMultipleKeysSameBaseURLKeepsFirst(t *testing.T) {
 		t.Errorf("aggregated endpoint models = %d, want 2", len(ep.Models))
 	}
 
-	// The dropped second key must be surfaced, not lost silently. The key is
-	// truncated in the log to avoid writing the full secret to disk, so match
-	// the truncated prefix.
-	if !strings.Contains(logBuf.String(), "multiple api_keys") || !strings.Contains(logBuf.String(), "sk-secon") {
-		t.Errorf("expected slog.Warn about dropped sk-second key (truncated to sk-secon…), got log:\n%s", logBuf.String())
+	// The dropped second key must be surfaced, not lost silently. CodeQL flags
+	// any clear-text key material as a sensitive-data leak, so the log carries
+	// only a non-reversible fingerprint (sha256 prefix) + the key length, not
+	// the key itself or any prefix of it. Match on the fingerprint field name
+	// and the length being present.
+	if !strings.Contains(logBuf.String(), "multiple api_keys") ||
+		!strings.Contains(logBuf.String(), "dropped_key_fp") ||
+		!strings.Contains(logBuf.String(), "dropped_key_len") {
+		t.Errorf("expected slog.Warn with dropped_key_fp and dropped_key_len (no clear-text key), got log:\n%s", logBuf.String())
+	}
+	// The fingerprint must NOT contain any clear-text key material — no "sk-second".
+	if strings.Contains(logBuf.String(), "sk-second") {
+		t.Errorf("clear-text key material leaked into log:\n%s", logBuf.String())
 	}
 }
 
@@ -1113,9 +1121,13 @@ func TestHostFromBaseURL_CaseInsensitive(t *testing.T) {
 	}
 }
 
-// TestSyncEndpoints_DroppedKeyTruncationStrength strengthens the truncation
-// assertion: the dropped key must appear in the log with the sentinel.
-func TestSyncEndpoints_DroppedKeyTruncationStrength(t *testing.T) {
+// TestSyncEndpoints_DroppedKeyFingerprintNoClearText strengthens the
+// sensitive-data assertion: the dropped key must NOT appear in the log in any
+// clear-text form (no prefix, no truncation, no sentinel). CodeQL flags any
+// clear-text key material as a sensitive-data leak, so the log carries only a
+// non-reversible sha256 fingerprint + the key length. This test guards
+// against a regression that re-introduces a truncated-prefix shape.
+func TestSyncEndpoints_DroppedKeyFingerprintNoClearText(t *testing.T) {
 	home := setHome(t)
 	// Build credential lines via concatenation to avoid the static scanner.
 	firstKey := "firstkeylongvalue"
@@ -1140,7 +1152,15 @@ func TestSyncEndpoints_DroppedKeyTruncationStrength(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if !strings.Contains(logBuf.String(), "secondke") || !strings.Contains(logBuf.String(), "…") {
-		t.Errorf("expected truncated secondke… (dropped key) with sentinel, got:\n%s", logBuf.String())
+	// The fingerprint field must be present.
+	if !strings.Contains(logBuf.String(), "dropped_key_fp") {
+		t.Errorf("expected dropped_key_fp field in log, got:\n%s", logBuf.String())
+	}
+	// NO clear-text key material — neither the full key nor any prefix.
+	if strings.Contains(logBuf.String(), secondKey) {
+		t.Errorf("full dropped key leaked into log:\n%s", logBuf.String())
+	}
+	if strings.Contains(logBuf.String(), secondKey[:8]) {
+		t.Errorf("dropped key prefix leaked into log:\n%s", logBuf.String())
 	}
 }
