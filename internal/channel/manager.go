@@ -200,6 +200,8 @@ func (m *Manager) newSession(key SessionKey, ev InboundEvent) *Session {
 		BoundAt: time.Now(),
 	}
 	s.restoreOrInitStore(m.resolveStoreID(key))
+	// Index by store ID so /bind can re-attach to this session later.
+	m.sessionsByStore.Store(s.Store.ID, s)
 	return s
 }
 
@@ -211,6 +213,15 @@ type Manager struct {
 
 	// sessions holds active sessions keyed by SessionKey.
 	sessions sync.Map // SessionKey -> *Session
+
+	// sessionsByStore indexes the same Session objects by their persistent
+	// store ID, so /bind can re-attach to an in-memory session after /unbind
+	// instead of creating a new one. The entry is written once by newSession
+	// and survives LoadAndDelete from sessions (e.g. /unbind), giving cmdBind
+	// a chance to recover the running session. It is overwritten naturally
+	// when a new session claims the same store (via newSession), so old
+	// pointers don't leak.
+	sessionsByStore sync.Map // string (store ID) -> *Session
 
 	// bindings is the persistent chat→session redirection set by /bind. When a
 	// key is present, the chat routes to the recorded store instead of its
@@ -528,11 +539,19 @@ func (m *Manager) cmdBind(ev InboundEvent, args []string) string {
 		_ = target.Save()
 		return fmt.Sprintf("Could not save the binding: %v", err)
 	}
-	// Drop any live session for this key, then rebuild it against the newly
-	// bound store so the chat is ready immediately. A turn still in flight on
-	// the old session keeps persisting to its own store — nothing is deleted.
-	m.sessions.LoadAndDelete(key)
-	m.sessions.Store(key, m.newSession(key, ev))
+	// If an in-memory session for this store is still running (e.g. after
+	// /unbind mid-turn), re-attach it instead of creating a new one. This
+	// lets /bind recover the running session including its in-flight output:
+	// suppressDelivery is cleared so the remaining turn text resumes delivery.
+	if live, ok := m.sessionsByStore.Load(target.ID); ok {
+		sess := live.(*Session)
+		sess.suppressDelivery.Store(false)
+		m.sessions.Store(key, sess)
+	} else {
+		// No running session found — create a new one from the store file.
+		m.sessions.LoadAndDelete(key)
+		m.sessions.Store(key, m.newSession(key, ev))
+	}
 	if res == agent.Stolen {
 		return fmt.Sprintf("Taken over %q [%s] from %s. History preserved.", target.DisplayTitle(), target.ShortID(), previousEntry)
 	}

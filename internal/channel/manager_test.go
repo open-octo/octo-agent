@@ -304,6 +304,69 @@ func TestManager_UnbindMidTurn_SuppressesButKeepsRunning(t *testing.T) {
 	}
 }
 
+// TestManager_UnbindThenBindBackRecoversRunningSession: /unbind mid-turn
+// suppresses delivery and removes the session from the active map, but /bind
+// back to the same session must recover the in-memory session object: clear
+// suppressDelivery and re-add it to the sessions map so the running turn's
+// remaining output resumes delivery.
+func TestManager_UnbindThenBindBackRecoversRunningSession(t *testing.T) {
+	tempHome(t)
+	cfg := &Config{Channels: map[string]PlatformConfig{}}
+	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
+
+	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
+	sess := mgr.GetOrCreateSession(ev)
+	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "q"})
+	if err := sess.Persist(); err != nil {
+		t.Fatal(err)
+	}
+	storeID := sess.Store.ID
+
+	// Begin a turn and keep it in flight.
+	runCtx, done := sess.BeginRun(context.Background())
+	defer done()
+
+	// /unbind: suppress delivery, remove from sessions map.
+	ev.Text = "/unbind"
+	reply := mgr.CommandRouter(ev)
+	if !strings.Contains(strings.ToLower(reply), "unbound") {
+		t.Fatalf("expected unbind reply, got %q", reply)
+	}
+	if !sess.SuppressDelivery() {
+		t.Fatal("/unbind must set suppressDelivery")
+	}
+	key := sessionKeyFor(BindByChatUser, ev)
+	if _, ok := mgr.sessions.Load(key); ok {
+		t.Fatal("/unbind must remove session from sessions map")
+	}
+	if runCtx.Err() != nil {
+		t.Fatal("/unbind must not cancel the in-flight turn")
+	}
+
+	// /bind back to the same session by its store ID.
+	ev.Text = "/bind " + storeID
+	reply = mgr.CommandRouter(ev)
+	if !strings.Contains(strings.ToLower(reply), "bound") {
+		t.Fatalf("expected bind reply, got %q", reply)
+	}
+
+	// Verify: the SAME session object is back in the map, delivery restored.
+	got, ok := mgr.sessions.Load(key)
+	if !ok {
+		t.Fatal("/bind must re-add the session to the sessions map")
+	}
+	gotSess := got.(*Session)
+	if gotSess != sess {
+		t.Fatal("/bind must recover the same session object, not create a new one")
+	}
+	if gotSess.SuppressDelivery() {
+		t.Fatal("/bind must clear suppressDelivery on the recovered session")
+	}
+	if runCtx.Err() != nil {
+		t.Fatal("/bind must not cancel the in-flight turn")
+	}
+}
+
 func TestSession_InterruptIdleIsNoop(t *testing.T) {
 	sess := &Session{}
 	if sess.Interrupt() {
