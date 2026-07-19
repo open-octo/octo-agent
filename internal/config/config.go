@@ -709,9 +709,14 @@ func (c *Config) SetEntry(e ModelEntry) bool {
 // rare event, and the fall-through makes the staleness tolerable. PR4 may
 // revisit this if the fall-through proves insufficient.
 //
-// The caller must validate newID before calling (RenameEndpoint does not
-// re-validate; it's a mechanical rename). Returns ErrEndpointNotFound if
-// oldID doesn't match any endpoint.
+// newID must not collide with another endpoint's ID — RenameEndpoint checks
+// and returns ErrEndpointIDInUse if it would. The caller is still expected
+// to have validated newID against the id regex (^[a-zA-Z0-9_-]+$) first;
+// RenameEndpoint does the collision check defensively but not the format
+// check.
+//
+// Returns ErrEndpointNotFound (wrap-target for errors.Is) if oldID doesn't
+// match any endpoint.
 func (c *Config) RenameEndpoint(oldID, newID string) error {
 	// Find the endpoint and bail if it doesn't exist — renaming a
 	// non-existent endpoint is a caller bug.
@@ -723,7 +728,17 @@ func (c *Config) RenameEndpoint(oldID, newID string) error {
 		}
 	}
 	if idx < 0 {
-		return fmt.Errorf("endpoint %q not found", oldID)
+		return fmt.Errorf("%w: %s", ErrEndpointNotFound, oldID)
+	}
+
+	// Defensive collision check — renaming onto an existing id would produce
+	// a duplicate, which Validate classifies as unfixable (§14.3). The doc
+	// says the caller must validate, but a one-line check here prevents a
+	// caller bug from silently corrupting the config.
+	for i, ep := range c.Endpoints {
+		if i != idx && ep.ID == newID {
+			return fmt.Errorf("%w: %s", ErrEndpointIDInUse, newID)
+		}
 	}
 
 	// Update the endpoint's own ID.
@@ -751,8 +766,14 @@ func renameCompositePrefix(id, oldID, newID string) string {
 }
 
 // ErrEndpointNotFound is returned by RenameEndpoint (and future endpoint
-// mutations) when the named endpoint doesn't exist in c.Endpoints.
+// mutations) when the named endpoint doesn't exist in c.Endpoints. Wrap-target
+// for errors.Is — callers can distinguish "not found" from other errors.
 var ErrEndpointNotFound = errors.New("endpoint not found")
+
+// ErrEndpointIDInUse is returned by RenameEndpoint when newID already matches
+// another endpoint's ID — renaming onto it would produce a duplicate, which
+// Validate classifies as unfixable (§14.3). Wrap-target for errors.Is.
+var ErrEndpointIDInUse = errors.New("endpoint id already in use")
 
 // Mutate performs an atomic read-modify-write on config.yml under the flock:
 // it acquires the exclusive lock, Loads the latest config, applies fn (which

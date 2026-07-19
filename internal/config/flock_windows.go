@@ -37,17 +37,20 @@ func withConfigLock(path string, fn func() error) error {
 	defer syscall.CloseHandle(fh)
 
 	// LockFileEx with LOCKFILE_EXCLUSIVE_LOCK locks byte range [0, 1)
-	// exclusively. The large-integer struct encodes a 64-bit offset+length;
-	// we lock the first byte only (enough to serialise — the lockfile is a
-	// sidecar, its contents are never read or written).
+	// exclusively, blocking until the lock is acquired (matching Unix
+	// flock(LOCK_EX) semantics). We deliberately do NOT pass
+	// LOCKFILE_FAIL_IMMEDIATELY — that flag would make a contended lock
+	// return immediately with ERROR_LOCK_VIOLATION, and our fallback branch
+	// would then run fn without the lock, breaking the serialisation
+	// guarantee PR3 §7.1 is meant to provide. Blocking here is correct:
+	// concurrent Save callers wait for each other rather than clobber.
 	var overlapped syscall.Overlapped
 	lockRange := [2]uint32{1, 0} // 1 byte at offset 0 (low DWORD)
 	const lockfileExclusiveLock = 0x00000002
-	const lockfileFailImmediately = 0x00000001
 	lockFileExProc := syscall.NewLazyDLL("kernel32.dll").NewProc("LockFileEx")
 	r1, _, err := lockFileExProc.Call(
 		uintptr(fh),
-		uintptr(lockfileExclusiveLock|lockfileFailImmediately),
+		uintptr(lockfileExclusiveLock),
 		0,
 		uintptr(lockRange[0]), uintptr(lockRange[1]),
 		uintptr(unsafe.Pointer(&overlapped)),

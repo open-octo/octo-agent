@@ -2711,3 +2711,68 @@ type nopSender struct{ id string }
 func (n *nopSender) SendMessages(ctx context.Context, model, system string, messages []agent.Message, maxTokens int) (agent.Reply, error) {
 	return agent.Reply{}, nil
 }
+
+// TestCachedSenderForEntry_DistinguishesSameModelDifferentEndpoint verifies
+// PR3 §9.1's core fix: the cache key is the raw ref (composite id or bare
+// model), not entry.Model. Two entries with the same Model string but
+// different endpoint prefixes must produce separate cache entries —
+// otherwise a turn on relay-a::claude would silently route to the official
+// anthropic sender (or vice versa).
+//
+// We seed the cache directly with two senders under the two composite-id
+// keys, then call cachedSenderForEntry with one of them and assert the
+// returned sender is the one we cached under that key (not the other).
+func TestCachedSenderForEntry_DistinguishesSameModelDifferentEndpoint(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	relaySender := &nopSender{id: "relay-sender"}
+	officialSender := &nopSender{id: "official-sender"}
+	srv.senderCacheMu.Lock()
+	srv.senderCache = map[string]agent.Sender{
+		"relay-a::claude-sonnet-4-6":  relaySender,
+		"official::claude-sonnet-4-6": officialSender,
+	}
+	srv.senderCacheMu.Unlock()
+
+	// Both entries have the same Model string — what distinguishes them in
+	// the cache is the ref passed in.
+	entry := config.ModelEntry{Provider: "custom", Model: "claude-sonnet-4-6"}
+
+	got, err := srv.cachedSenderForEntry("relay-a::claude-sonnet-4-6", entry)
+	if err != nil {
+		t.Fatalf("cachedSenderForEntry(relay-a::...): %v", err)
+	}
+	if got != relaySender {
+		t.Errorf("relay-a::claude-sonnet-4-6 returned %+v, want relaySender — cache key collision would route to the wrong endpoint", got)
+	}
+
+	got, err = srv.cachedSenderForEntry("official::claude-sonnet-4-6", entry)
+	if err != nil {
+		t.Fatalf("cachedSenderForEntry(official::...): %v", err)
+	}
+	if got != officialSender {
+		t.Errorf("official::claude-sonnet-4-6 returned %+v, want officialSender — cache key collision would route to the wrong endpoint", got)
+	}
+}
+
+// TestCachedSenderForEntry_BareModelRefStillWorks pins the legacy path: a
+// bare-model ref (no "::") uses the bare string as the cache key, matching
+// pre-PR3 behaviour for legacy sessions whose ModelConfig is a bare model.
+func TestCachedSenderForEntry_BareModelRefStillWorks(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	bareSender := &nopSender{id: "bare"}
+	srv.senderCacheMu.Lock()
+	srv.senderCache = map[string]agent.Sender{
+		"claude-sonnet-4-6": bareSender,
+	}
+	srv.senderCacheMu.Unlock()
+
+	entry := config.ModelEntry{Provider: "anthropic", Model: "claude-sonnet-4-6"}
+	got, err := srv.cachedSenderForEntry("claude-sonnet-4-6", entry)
+	if err != nil {
+		t.Fatalf("cachedSenderForEntry(bare): %v", err)
+	}
+	if got != bareSender {
+		t.Errorf("bare-model ref returned %+v, want bareSender", got)
+	}
+}

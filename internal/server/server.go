@@ -1532,6 +1532,14 @@ func (s *Server) invalidateEndpointSenders(endpointID string) {
 // liteSenderFromConfig resolves the configured lite entry to a (sender,
 // model) pair for compaction, or (nil, "") when none is configured or it
 // can't be built — the agent then compacts on its primary sender.
+//
+// PR4 note: this currently passes cfg.LiteModel (the legacy bare-model
+// field) as the cache ref, so the lite sender's cache key has no
+// "<endpointID>::" prefix — invalidateEndpointSenders can't reach it even
+// when the lite model lives under the endpoint being invalidated. Once
+// PR4 switches Save to emit endpoints: and cfg.Lite is populated on Load,
+// switch this arg to cfg.Lite so the lite sender participates in per-endpoint
+// invalidation (§9.2).
 func (s *Server) liteSenderFromConfig(cfg config.Config) (agent.Sender, string) {
 	entry, ok := cfg.EntryByModel(cfg.LiteModel)
 	if !ok || entry.Model == "" {

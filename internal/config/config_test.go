@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -1492,7 +1493,10 @@ func TestRenameEndpoint_EmptyDefaultAndLiteAreNoops(t *testing.T) {
 }
 
 // TestRenameEndpoint_UnknownEndpointReturnsError verifies renaming a
-// non-existent endpoint fails rather than silently succeeding.
+// non-existent endpoint fails with ErrEndpointNotFound (wrap-target for
+// errors.Is) rather than silently succeeding. The doc contract on
+// RenameEndpoint says it returns ErrEndpointNotFound; a caller branching on
+// errors.Is(err, ErrEndpointNotFound) must get true.
 func TestRenameEndpoint_UnknownEndpointReturnsError(t *testing.T) {
 	cfg := Config{
 		Endpoints: []Endpoint{
@@ -1503,11 +1507,124 @@ func TestRenameEndpoint_UnknownEndpointReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("RenameEndpoint on unknown endpoint: expected error, got nil")
 	}
+	if !errors.Is(err, ErrEndpointNotFound) {
+		t.Errorf("error = %v, want errors.Is(err, ErrEndpointNotFound) = true", err)
+	}
 	if !strings.Contains(err.Error(), "ghost") {
 		t.Errorf("error should name the missing endpoint, got: %v", err)
 	}
 	// Config must be unchanged on failure.
 	if cfg.Endpoints[0].ID != "relay-a" {
 		t.Errorf("endpoint ID changed on failure: %q, want relay-a", cfg.Endpoints[0].ID)
+	}
+}
+
+// TestRenameEndpoint_NewIDCollisionReturnsError verifies the defensive
+// collision check: renaming an endpoint onto an id that another endpoint
+// already holds fails with ErrEndpointIDInUse rather than producing a
+// duplicate (which Validate §14.3 would classify as unfixable).
+func TestRenameEndpoint_NewIDCollisionReturnsError(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "official", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+	}
+	err := cfg.RenameEndpoint("relay-a", "official")
+	if err == nil {
+		t.Fatal("RenameEndpoint onto existing id: expected error, got nil")
+	}
+	if !errors.Is(err, ErrEndpointIDInUse) {
+		t.Errorf("error = %v, want errors.Is(err, ErrEndpointIDInUse) = true", err)
+	}
+	// Config must be unchanged on failure.
+	if cfg.Endpoints[0].ID != "relay-a" {
+		t.Errorf("endpoint ID changed on collision failure: %q, want relay-a", cfg.Endpoints[0].ID)
+	}
+}
+
+// TestMutate_AtomicUnderConcurrentAccess verifies Mutate's atomicity
+// guarantee (PR3 §7.1 + §6): N goroutines each do Mutate(fn) where fn
+// increments a counter stored in the config (here: a top-level string field
+// encoded with the count, since PR1-3 doesn't persist Endpoints). Without
+// the flock serialising Load+modify+save, two goroutines would both read
+// the pre-increment state and the later Save would drop the earlier
+// increment — final count < N.
+//
+// We use PermissionMode as the carrier field because it's a top-level
+// string that round-trips through Save/Load cleanly in PR1-3 (unlike
+// Endpoints, which Save elides). The counter is encoded as a number string.
+func TestMutate_AtomicUnderConcurrentAccess(t *testing.T) {
+	setHome(t)
+	// Seed with counter=0.
+	if err := (Config{PermissionMode: "0"}).Save(); err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
+
+	const N = 20
+	var wg sync.WaitGroup
+	errs := make([]error, N)
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			errs[idx] = Mutate(func(cfg *Config) error {
+				// Read-modify-write: parse current counter, increment, write back.
+				var n int
+				if _, err := fmt.Sscanf(cfg.PermissionMode, "%d", &n); err != nil {
+					return fmt.Errorf("parse counter %q: %w", cfg.PermissionMode, err)
+				}
+				cfg.PermissionMode = fmt.Sprintf("%d", n+1)
+				return nil
+			})
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("goroutine %d Mutate: %v", i, err)
+		}
+	}
+
+	final, err := Load()
+	if err != nil {
+		t.Fatalf("final Load: %v", err)
+	}
+	var got int
+	if _, err := fmt.Sscanf(final.PermissionMode, "%d", &got); err != nil {
+		t.Fatalf("final PermissionMode %q not a number: %v", final.PermissionMode, err)
+	}
+	if got != N {
+		t.Errorf("after %d concurrent Mutates, counter = %d, want %d (some increments were lost — Mutate's flock didn't serialise)", N, got, N)
+	}
+}
+
+// TestMutate_FnErrorAbortsSave verifies that if fn returns an error, Mutate
+// does NOT save — the on-disk file stays at its pre-mutation state. This is
+// the contract that lets callers use Mutate for speculative mutations
+// (validate inside fn, return error to bail without persisting).
+func TestMutate_FnErrorAbortsSave(t *testing.T) {
+	setHome(t)
+	seed := Config{PermissionMode: "strict"}
+	if err := seed.Save(); err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
+
+	err := Mutate(func(cfg *Config) error {
+		cfg.PermissionMode = "auto"            // mutate
+		return errors.New("intentional abort") // then bail
+	})
+	if err == nil {
+		t.Fatal("Mutate with failing fn: expected error, got nil")
+	}
+
+	// On-disk file must be unchanged.
+	final, err := Load()
+	if err != nil {
+		t.Fatalf("final Load: %v", err)
+	}
+	if final.PermissionMode != "strict" {
+		t.Errorf("PermissionMode = %q, want strict (fn aborted, save must not have happened)", final.PermissionMode)
 	}
 }
