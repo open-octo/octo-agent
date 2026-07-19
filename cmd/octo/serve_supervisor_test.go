@@ -187,12 +187,14 @@ func TestSpawnServeWorker_ReResolvesExecutablePath(t *testing.T) {
 // return the now-deleted aside name, and the next worker spawn would fail with
 // ENOENT. Caching makes the path string stable across the rename.
 func TestSpawnServeWorker_CachesExecutablePath(t *testing.T) {
-	// Swap in a counting fake resolver, restore the real one on cleanup.
+	// Swap in a counting fake resolver that returns a non-existent path, so
+	// cmd.Start() fails immediately without spawning a real process. Restore
+	// the real resolver on cleanup.
 	orig := osExecutable
 	calls := 0
 	osExecutable = func() (string, error) {
 		calls++
-		return orig()
+		return "/fake/octo/does/not/exist", nil
 	}
 	defer func() { osExecutable = orig }()
 
@@ -205,9 +207,13 @@ func TestSpawnServeWorker_CachesExecutablePath(t *testing.T) {
 	}
 
 	// Three more spawns. The production resolver is a closure over the cached
-	// value, so osExecutable must NOT be called again.
+	// value, so osExecutable must NOT be called again. Each spawn fails because
+	// the path does not exist — that's expected and harmless.
 	for i := 0; i < 3; i++ {
-		_, _, _ = spawn()
+		_, _, err := spawn()
+		if err == nil {
+			t.Fatalf("spawn %d: expected error from fake path, got nil", i)
+		}
 	}
 
 	if calls != 1 {
