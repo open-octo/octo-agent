@@ -736,6 +736,118 @@ func legacyEndpointID(host string, n int) string {
 	return fmt.Sprintf("legacy-%s-%d", safe, n)
 }
 
+// ResolveDefault returns the (endpoint, model) pair the session should run on
+// when nothing else selects one. It implements the four-step fallback chain
+// from the design doc (§5.3):
+//
+//  1. Default parses to (endpointID, model) and both resolve → that pair.
+//  2. Default's endpoint resolves but the model doesn't (e.g. the relay
+//     dropped it) → keep the endpoint, fall back to its first model.
+//  3. Default's endpoint doesn't exist (e.g. user deleted it) → fall back
+//     to the first endpoint's first model.
+//  4. No endpoints at all → zero values, ok=false (caller surfaces a
+//     "please configure" error).
+//
+// An empty Default is the normal fresh-install state, not a fallback: step 3
+// applies silently (no warn) so a brand-new config doesn't log noise on every
+// turn. Every other step that falls back logs a slog.Warn with the reason so
+// the user can see why their turns aren't running on the model they expected.
+//
+// The (endpoint, model, ok) shape mirrors DefaultEntry/EntryByModel: callers
+// that only need a ModelEntry for the legacy sender-building path can read
+// the returned Endpoint and EndpointModel directly.
+func (c Config) ResolveDefault() (Endpoint, EndpointModel, bool) {
+	if len(c.Endpoints) == 0 {
+		return Endpoint{}, EndpointModel{}, false
+	}
+
+	// Parse Default into (endpointID, model). An empty Default or one missing
+	// the separator is treated as "no default set" — step 3 applies silently.
+	endpointID, model, hasDefault := splitCompositeID(c.Default)
+
+	if hasDefault {
+		// Step 1 + 2: find the endpoint Default points at.
+		for i := range c.Endpoints {
+			if c.Endpoints[i].ID != endpointID {
+				continue
+			}
+			ep := &c.Endpoints[i]
+			if len(ep.Models) == 0 {
+				// Step 2 dead-end: endpoint exists but is empty. Fall through
+				// to step 3 (first non-empty endpoint), with a warn that the
+				// targeted endpoint was empty.
+				slog.Warn("config: default model resolution fell back",
+					"default", c.Default, "reason", "empty_endpoint",
+					"endpoint_id", endpointID)
+				if first := firstNonEmptyEndpoint(c.Endpoints); first != nil {
+					return *first, first.Models[0], true
+				}
+				return Endpoint{}, EndpointModel{}, false
+			}
+			// Step 1: exact model hit.
+			for j := range ep.Models {
+				if ep.Models[j].Model == model {
+					return *ep, ep.Models[j], true
+				}
+			}
+			// Step 2: endpoint found, model not found — fall back to the
+			// endpoint's first model.
+			slog.Warn("config: default model resolution fell back",
+				"default", c.Default, "resolved_to", ep.CompositeID(ep.Models[0].Model),
+				"reason", "model_not_found")
+			return *ep, ep.Models[0], true
+		}
+
+		// Step 3: Default's endpoint doesn't exist.
+		if first := firstNonEmptyEndpoint(c.Endpoints); first != nil {
+			slog.Warn("config: default model resolution fell back",
+				"default", c.Default,
+				"resolved_to", first.CompositeID(first.Models[0].Model),
+				"reason", "endpoint_not_found")
+			return *first, first.Models[0], true
+		}
+		return Endpoint{}, EndpointModel{}, false
+	}
+
+	// Empty Default — fresh install, not a fallback. Step 3 applies silently.
+	if first := firstNonEmptyEndpoint(c.Endpoints); first != nil {
+		return *first, first.Models[0], true
+	}
+	return Endpoint{}, EndpointModel{}, false
+}
+
+// splitCompositeID splits "<endpoint_id>::<model>" into its parts. hasDefault
+// is false when the input is empty or doesn't contain the "::" separator —
+// both mean "no default set" to ResolveDefault. A composite id with an empty
+// endpoint id or empty model (e.g. "::model" or "ep::") is treated as set
+// (hasDefault true) so ResolveDefault can report the specific failure rather
+// than silently ignoring it.
+func splitCompositeID(id string) (endpointID, model string, hasDefault bool) {
+	if id == "" {
+		return "", "", false
+	}
+	idx := strings.Index(id, "::")
+	if idx < 0 {
+		// Bare model with no endpoint prefix — not a valid composite id. Treat
+		// as "no default set" so the caller falls back rather than reporting a
+		// parse error mid-turn.
+		return "", "", false
+	}
+	return id[:idx], id[idx+2:], true
+}
+
+// firstNonEmptyEndpoint returns the first endpoint in the slice that has at
+// least one model, or nil if none do. An endpoint with zero models is
+// unusable (nothing to run), so the fallback chain skips them.
+func firstNonEmptyEndpoint(endpoints []Endpoint) *Endpoint {
+	for i := range endpoints {
+		if len(endpoints[i].Models) > 0 {
+			return &endpoints[i]
+		}
+	}
+	return nil
+}
+
 // migrateEntryProvider folds the retired openai_compatible / anthropic_compatible
 // catch-all vendors into the unified "custom" vendor, recovering the wire format
 // into the new per-entry Protocol field so existing configs keep working.

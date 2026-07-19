@@ -603,3 +603,148 @@ func TestLoad_LegacyFlatMultipleKeysSameBaseURLKeepsFirst(t *testing.T) {
 		t.Errorf("expected slog.Warn about dropped sk-second key (truncated to sk-secon…), got log:\n%s", logBuf.String())
 	}
 }
+
+// TestResolveDefault_HitWhenDefaultResolvesFully covers step 1 of the fallback
+// chain: Default is a valid composite id whose endpoint and model both exist,
+// so ResolveDefault returns exactly that pair with ok=true and no fallback.
+func TestResolveDefault_HitWhenDefaultResolvesFully(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-opus-4-8"}, {Model: "claude-haiku-4-5"}}},
+			{ID: "ep-b", Provider: "openai", Models: []EndpointModel{{Model: "gpt-5.4"}}},
+		},
+		Default: "ep-b::gpt-5.4",
+	}
+	ep, m, ok := cfg.ResolveDefault()
+	if !ok {
+		t.Fatal("ResolveDefault ok = false, want true (full hit)")
+	}
+	if ep.ID != "ep-b" || m.Model != "gpt-5.4" {
+		t.Errorf("ResolveDefault = (%q, %q), want (ep-b, gpt-5.4)", ep.ID, m.Model)
+	}
+}
+
+// TestResolveDefault_FallsBackToFirstModelInEndpoint covers step 2: Default's
+// endpoint exists but its model no longer does (e.g. the relay removed that
+// model). ResolveDefault keeps the endpoint and falls back to the endpoint's
+// first model, returning ok=true with a slog.Warn about the fallback.
+func TestResolveDefault_FallsBackToFirstModelInEndpoint(t *testing.T) {
+	var logBuf strings.Builder
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
+	t.Cleanup(func() { slog.SetDefault(slog.Default()) })
+
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}, {Model: "gpt-5.4"}}},
+		},
+		Default: "relay-a::claude-opus-4-8", // model not in endpoint
+	}
+	ep, m, ok := cfg.ResolveDefault()
+	if !ok {
+		t.Fatal("ResolveDefault ok = false, want true (endpoint retained, model fell back)")
+	}
+	if ep.ID != "relay-a" {
+		t.Errorf("endpoint = %q, want relay-a (retained from Default)", ep.ID)
+	}
+	if m.Model != "claude-sonnet-4-6" {
+		t.Errorf("model = %q, want claude-sonnet-4-6 (first model in endpoint)", m.Model)
+	}
+	if !strings.Contains(logBuf.String(), "model_not_found") {
+		t.Errorf("expected slog.Warn with reason=model_not_found, got:\n%s", logBuf.String())
+	}
+}
+
+// TestResolveDefault_FallsBackToFirstEndpoint covers step 3: Default's
+// endpoint doesn't exist at all (e.g. user deleted it without updating
+// Default). ResolveDefault falls back to the first endpoint's first model.
+func TestResolveDefault_FallsBackToFirstEndpoint(t *testing.T) {
+	var logBuf strings.Builder
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
+	t.Cleanup(func() { slog.SetDefault(slog.Default()) })
+
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "ep-b", Provider: "openai", Models: []EndpointModel{{Model: "gpt-5.4"}}},
+		},
+		Default: "ghost::whatever", // endpoint doesn't exist
+	}
+	ep, m, ok := cfg.ResolveDefault()
+	if !ok {
+		t.Fatal("ResolveDefault ok = false, want true (first endpoint fallback)")
+	}
+	if ep.ID != "ep-a" || m.Model != "claude-sonnet-4-6" {
+		t.Errorf("ResolveDefault = (%q, %q), want (ep-a, claude-sonnet-4-6) (first endpoint)", ep.ID, m.Model)
+	}
+	if !strings.Contains(logBuf.String(), "endpoint_not_found") {
+		t.Errorf("expected slog.Warn with reason=endpoint_not_found, got:\n%s", logBuf.String())
+	}
+}
+
+// TestResolveDefault_NoEndpointsReturnsZero covers step 4: with no endpoints
+// configured at all, ResolveDefault returns a zero Endpoint, zero EndpointModel,
+// and ok=false so the caller can surface a "please configure" error.
+func TestResolveDefault_NoEndpointsReturnsZero(t *testing.T) {
+	cfg := Config{Default: "anything::anything"}
+	ep, m, ok := cfg.ResolveDefault()
+	if ok {
+		t.Error("ResolveDefault ok = true with no endpoints, want false")
+	}
+	if ep.ID != "" || m.Model != "" {
+		t.Errorf("ResolveDefault = (%q, %q), want zero values", ep.ID, m.Model)
+	}
+}
+
+// TestResolveDefault_EmptyDefaultFallsBackToFirstEndpoint covers the common
+// "fresh install" case: Default is empty (user never set it), so ResolveDefault
+// falls straight to the first endpoint's first model without a warn — this is
+// the normal state, not a fallback.
+func TestResolveDefault_EmptyDefaultFallsBackToFirstEndpoint(t *testing.T) {
+	var logBuf strings.Builder
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
+	t.Cleanup(func() { slog.SetDefault(slog.Default()) })
+
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+		Default: "", // empty — fresh install
+	}
+	ep, m, ok := cfg.ResolveDefault()
+	if !ok {
+		t.Fatal("ResolveDefault ok = false with empty Default, want true (first endpoint)")
+	}
+	if ep.ID != "ep-a" || m.Model != "claude-sonnet-4-6" {
+		t.Errorf("ResolveDefault = (%q, %q), want (ep-a, claude-sonnet-4-6)", ep.ID, m.Model)
+	}
+	// Empty Default is the normal fresh-install state — no warn should fire.
+	if strings.Contains(logBuf.String(), "fell back") {
+		t.Errorf("empty Default should not warn, got:\n%s", logBuf.String())
+	}
+}
+
+// TestResolveDefault_EmptyEndpointTreatedAsMissing covers the edge where
+// Default's endpoint exists but has zero models (a half-deleted config). The
+// endpoint is effectively unusable, so ResolveDefault skips it and falls back
+// to the first non-empty endpoint.
+func TestResolveDefault_EmptyEndpointTreatedAsMissing(t *testing.T) {
+	var logBuf strings.Builder
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
+	t.Cleanup(func() { slog.SetDefault(slog.Default()) })
+
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "ep-empty", Provider: "custom", Models: nil}, // empty
+			{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+		Default: "ep-empty::whatever",
+	}
+	ep, m, ok := cfg.ResolveDefault()
+	if !ok {
+		t.Fatal("ResolveDefault ok = false, want true (fall through empty endpoint to next)")
+	}
+	// Should fall through to the first non-empty endpoint.
+	if ep.ID != "ep-a" || m.Model != "claude-sonnet-4-6" {
+		t.Errorf("ResolveDefault = (%q, %q), want (ep-a, claude-sonnet-4-6) (first non-empty)", ep.ID, m.Model)
+	}
+}
