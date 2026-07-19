@@ -157,6 +157,21 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   let subAgentsElapsed = $derived(subAgentsStart ? (now - subAgentsStart) / 1000 : 0)
   let reconnectIn = $derived($wsReconnect ? Math.max(0, Math.ceil(($wsReconnect.nextAt - now) / 1000)) : 0)
 
+  // All sub-agents finished ("all done"): fade the panel out after a brief beat.
+  // This covers the mid-turn window where sub-agents have all completed but the
+  // main turn is still streaming a reply — `complete`'s clear hasn't fired yet and
+  // the per-agent dismiss only runs when the turn is already idle, so without
+  // this the panel lingers indefinitely. Starts a 2s timer; cancels if a new
+  // sub-agent starts before it fires (effect re-runs).
+  $effect(() => {
+    const sid = $activeSessionId ?? ''
+    if (!sid) return
+    if (subAgents.length === 0) return
+    if (subAgents.some(a => a.status === 'running')) return
+    const timer = setTimeout(() => clearDoneSubAgents(sid), SUB_AGENT_DISMISS_MS)
+    return () => clearTimeout(timer)
+  })
+
   // Live "Thinking" readout — mirrors the TUI thinkingLine: elapsed since the
   // turn began plus a rough output-token estimate (streamed chars / 4) so a
   // long silent wait reads as the model working, not a freeze.
