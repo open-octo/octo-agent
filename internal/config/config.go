@@ -464,13 +464,73 @@ func (c Config) DefaultEntry() ModelEntry {
 // duplicated or half-filled entry) but which usually mean a hand edit went
 // wrong. It returns a human-readable list; empty means the config is usable. A
 // config with no models (the valid pre-onboarding state) reports nothing.
+//
+// PR1 layers endpoint-level checks on top of the legacy Models checks (design
+// §14.1): endpoint id uniqueness/legality, each endpoint has at least one
+// model, model names non-empty, no duplicate models within one endpoint, and
+// Default/Lite composite ids resolve.
+//
+// To avoid double-reporting on a migrated flat config (where Endpoints is
+// synthesised from Models and the same duplicate would surface in both
+// layers), the endpoint-level checks only run when the config is on the pure
+// new schema — i.e. Endpoints is non-empty AND Models is empty (a hand-written
+// endpoints: block with no models: block, the shape §4.1 step 1 recognises as
+// "user is already on the new schema"). A flat config (Models non-empty,
+// Endpoints synthesised in memory) gets only the legacy Models checks, so
+// hand-edited flat files keep getting exactly the validation they always did.
+// PR4, which switches Save to emit Endpoints and drops the Models write path,
+// will lift this guard so endpoint-level checks always run.
 func (c Config) Validate() []string {
-	if len(c.Models) == 0 {
-		return nil
-	}
 	var problems []string
-	// Keyed by the raw model string (EntryByModel matches exactly), so the
-	// default_model/lite_model checks below agree with runtime resolution.
+
+	// Endpoint-level checks — only on the pure new schema (Endpoints set,
+	// Models empty). See the doc comment for why.
+	if len(c.Endpoints) > 0 && len(c.Models) == 0 {
+		seenEndpointID := make(map[string]bool, len(c.Endpoints))
+		for i, ep := range c.Endpoints {
+			if strings.TrimSpace(ep.ID) == "" {
+				problems = append(problems, fmt.Sprintf("endpoints[%d] has no id", i))
+			} else if !isValidEndpointID(ep.ID) {
+				problems = append(problems, fmt.Sprintf("endpoint id %q contains illegal chars (allowed: a-z A-Z 0-9 _ -, and no \"::\")", ep.ID))
+			}
+			if seenEndpointID[ep.ID] {
+				problems = append(problems, fmt.Sprintf("duplicate endpoint id %q", ep.ID))
+			}
+			seenEndpointID[ep.ID] = true
+
+			if len(ep.Models) == 0 {
+				problems = append(problems, fmt.Sprintf("endpoint %q has no models", ep.ID))
+			}
+			seenModel := make(map[string]bool, len(ep.Models))
+			for j, m := range ep.Models {
+				if strings.TrimSpace(m.Model) == "" {
+					problems = append(problems, fmt.Sprintf("endpoint %q models[%d] has no model name", ep.ID, j))
+					continue
+				}
+				if seenModel[m.Model] {
+					problems = append(problems, fmt.Sprintf("duplicate model %q in endpoint %q", m.Model, ep.ID))
+				}
+				seenModel[m.Model] = true
+			}
+		}
+
+		// Default/Lite composite-id resolution.
+		if c.Default != "" {
+			if _, _, ok := c.resolveCompositeID(c.Default); !ok {
+				problems = append(problems, fmt.Sprintf("default %q does not resolve to any endpoint+model", c.Default))
+			}
+		}
+		if c.Lite != "" {
+			if _, _, ok := c.resolveCompositeID(c.Lite); !ok {
+				problems = append(problems, fmt.Sprintf("lite %q does not resolve to any endpoint+model", c.Lite))
+			}
+		}
+	}
+
+	// Legacy flat Models checks.
+	if len(c.Models) == 0 {
+		return problems
+	}
 	seen := make(map[string]bool, len(c.Models))
 	for i, m := range c.Models {
 		if strings.TrimSpace(m.Model) == "" {
@@ -492,6 +552,44 @@ func (c Config) Validate() []string {
 		problems = append(problems, fmt.Sprintf("lite_model %q matches no entry", c.LiteModel))
 	}
 	return problems
+}
+
+// isValidEndpointID reports whether id matches the endpoint id regex
+// ^[a-zA-Z0-9_-]+$ and does not contain the composite-id separator "::". The
+// "::" check is redundant with the regex (":" isn't in the allowed set) but
+// spelled out for clarity — a future regex relaxation must still reject "::".
+func isValidEndpointID(id string) bool {
+	if id == "" || strings.Contains(id, "::") {
+		return false
+	}
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// resolveCompositeID parses "<endpoint_id>::<model>" and reports whether both
+// the endpoint and the model under it exist. Used by Validate to check Default
+// and Lite without coupling to ParseModelFlag's error messages (Validate
+// produces its own "does not resolve" wording).
+func (c Config) resolveCompositeID(id string) (Endpoint, EndpointModel, bool) {
+	endpointID, model, ok := splitCompositeID(id)
+	if !ok {
+		return Endpoint{}, EndpointModel{}, false
+	}
+	for _, ep := range c.Endpoints {
+		if ep.ID != endpointID {
+			continue
+		}
+		for _, m := range ep.Models {
+			if m.Model == model {
+				return ep, m, true
+			}
+		}
+	}
+	return Endpoint{}, EndpointModel{}, false
 }
 
 // EntryByModel returns the entry with the given model string. An empty model
