@@ -28,20 +28,12 @@ type fsEntry struct {
 // folder picker. Selecting a directory sets the session working dir through the
 // existing PATCH /api/sessions/{id}/working_dir; this endpoint only browses.
 //
-// Localhost-only, gated per request: listing discloses the server's filesystem
-// layout, which is harmless on a loopback-bound single-user serve (the agent
-// can already reach any path through terminal) but must not leak to a peer that
-// reached the server off-box. The check is on the peer being loopback, not on
-// the process bind address, so the same server can offer the picker to a local
-// browser while denying it to a tunnelled/remote peer, which then falls back to
-// typed paths or upload. This layers on top of requireAuth — a valid access key
-// is still required — as an additional gate specific to this endpoint.
+// Access-key authenticated callers (including remote peers) may browse any
+// reachable directory. Unauthenticated callers are still restricted to loopback
+// by requireAuth, like every other /api/* route. Unlike the native folder dialog
+// (which literally opens a desktop window and stays loopback-only), there is
+// no per-endpoint remote check here — the access key is the sole gate.
 func (s *Server) handleFsList(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r.RemoteAddr) {
-		writeError(w, http.StatusForbidden, "directory browsing is available only from the local machine")
-		return
-	}
-
 	// Empty path starts at the user's home directory (a native open-dialog
 	// default). expandDir would resolve "" to the launch dir, which is less
 	// useful as a starting point.

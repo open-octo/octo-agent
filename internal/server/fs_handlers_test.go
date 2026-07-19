@@ -18,24 +18,16 @@ type fsListResponse struct {
 	Truncated bool      `json:"truncated"`
 }
 
-func doFsList(t *testing.T, remoteAddr, path string) *httptest.ResponseRecorder {
+func doFsList(t *testing.T, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	url := "/api/fs/list"
 	if path != "" {
 		url += "?path=" + path
 	}
 	req := httptest.NewRequest(http.MethodGet, url, nil)
-	req.RemoteAddr = remoteAddr
 	rec := httptest.NewRecorder()
 	(&Server{}).handleFsList(rec, req)
 	return rec
-}
-
-func TestFsListRejectsNonLoopback(t *testing.T) {
-	rec := doFsList(t, "203.0.113.7:54321", "")
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("non-loopback peer: got %d, want 403", rec.Code)
-	}
 }
 
 func TestFsListHappyPath(t *testing.T) {
@@ -51,7 +43,7 @@ func TestFsListHappyPath(t *testing.T) {
 		linkOK = false // some CI filesystems disallow symlinks; skip that assertion
 	}
 
-	rec := doFsList(t, "127.0.0.1:12345", root)
+	rec := doFsList(t, root)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
@@ -109,10 +101,10 @@ func TestFsListErrors(t *testing.T) {
 	file := filepath.Join(root, "a-file")
 	mustWrite(t, file)
 
-	if rec := doFsList(t, "127.0.0.1:1", filepath.Join(root, "nope")); rec.Code != http.StatusBadRequest {
+	if rec := doFsList(t, filepath.Join(root, "nope")); rec.Code != http.StatusBadRequest {
 		t.Errorf("missing path: got %d, want 400", rec.Code)
 	}
-	if rec := doFsList(t, "127.0.0.1:1", file); rec.Code != http.StatusBadRequest {
+	if rec := doFsList(t, file); rec.Code != http.StatusBadRequest {
 		t.Errorf("file path: got %d, want 400", rec.Code)
 	}
 }
@@ -126,7 +118,7 @@ func TestFsListTruncates(t *testing.T) {
 	for i := 0; i < fsListCap+50; i++ {
 		mustWrite(t, filepath.Join(root, "f"+strconv.Itoa(i)))
 	}
-	rec := doFsList(t, "127.0.0.1:1", root)
+	rec := doFsList(t, root)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got %d, want 200", rec.Code)
 	}
@@ -151,7 +143,7 @@ func TestFsListDefaultsToHome(t *testing.T) {
 	if err != nil {
 		t.Skip("no home dir")
 	}
-	rec := doFsList(t, "127.0.0.1:1", "")
+	rec := doFsList(t, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
