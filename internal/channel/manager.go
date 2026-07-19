@@ -605,9 +605,14 @@ func (m *Manager) cmdUnbind(ev InboundEvent) string {
 	released := false
 	if val, ok := m.sessions.Load(key); ok {
 		sess := val.(*Session)
-		if sess.IsRunning() {
-			sess.suppressDelivery.Store(true)
-		}
+		// The chat is being detached: suppress all further outbound delivery
+		// for this session. This covers both a turn in flight (the in-flight
+		// UIController reads sess.suppressDelivery) and any armed loop wakeup
+		// — imWaker holds this same session object, so its future idle turns
+		// build a UIController that polls the same flag and stay silent too.
+		// A later message rebuilds a fresh session (zero value = not suppressed),
+		// so normal chat resumes after /bind.
+		sess.suppressDelivery.Store(true)
 		released = sess.UnbindStore(agent.EntryChannel)
 	}
 

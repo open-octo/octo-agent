@@ -2533,7 +2533,7 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 	// per-key latches.
 	cmd := strings.ToLower(strings.Fields(text)[0])
 	switch cmd {
-	case "/unbind", "/bind", "/clear", "/new":
+	case "/bind", "/clear", "/new":
 		imKey := "im:" + string(s.channelMgr.KeyFor(ev))
 		s.rememberedMu.Lock()
 		delete(s.rememberedStores, imKey)
@@ -2543,6 +2543,21 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 		s.injectorMu.Unlock()
 		// A fresh context drops any armed loop wakeup for this chat.
 		s.cancelWakeup(imKey)
+	case "/unbind":
+		// /unbind detaches the chat but does NOT start a fresh context: an
+		// already-armed loop keeps firing, and the running turn (if any) keeps
+		// running — suppressDelivery makes their replies stay out of the IM
+		// chat (the session is handed to web as a fallback), so the loop only
+		// stops on an explicit /stop or schedule_wakeup(cancel=true). We still
+		// drop the per-key latches so the next non-loop message rebuilds a clean
+		// context under the chat's fresh session.
+		imKey := "im:" + string(s.channelMgr.KeyFor(ev))
+		s.rememberedMu.Lock()
+		delete(s.rememberedStores, imKey)
+		s.rememberedMu.Unlock()
+		s.injectorMu.Lock()
+		delete(s.sessionInjectors, imKey)
+		s.injectorMu.Unlock()
 	case "/stop":
 		// /stop is the IM interrupt — also the hard stop for an armed loop.
 		s.cancelWakeup("im:" + string(s.channelMgr.KeyFor(ev)))

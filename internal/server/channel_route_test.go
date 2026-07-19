@@ -837,3 +837,37 @@ func TestChannelCommand_LoopPassesThroughToAgent(t *testing.T) {
 		t.Fatal("/loop must not be intercepted as a command — it routes to the agent")
 	}
 }
+
+// TestChannelCommand_UnbindKeepsLoopWakeup: /unbind detaches the chat but must
+// NOT cancel an already-armed loop wakeup — the session is handed to web as a
+// fallback, so the loop keeps running (its ticks are silenced by
+// suppressDelivery, not stopped). This is the behaviour that regressed before
+// the fix: /unbind used to share a case with /bind /clear /new and cancelled
+// the wakeup, silently killing the loop. /bind, /clear and /new DO cancel it,
+// because they start a fresh context.
+func TestChannelCommand_UnbindKeepsLoopWakeup(t *testing.T) {
+	srv := chanServer(t)
+	ad := &fullFakeAdapter{}
+	// mustServer doesn't init the wakeup maps (it's not a web/IM surface in
+	// those tests); arm one manually under the im: key the way imWaker does.
+	srv.wakeupTimers = map[string]*time.Timer{}
+	srv.wakeupStart = map[string]time.Time{}
+	sess := srv.channelMgr.GetOrCreateSession(evFor("seed"))
+	key := "im:" + string(sess.Key)
+	srv.wakeupTimers[key] = time.AfterFunc(time.Hour, func() {})
+	srv.wakeupStart[key] = time.Now()
+
+	// /unbind must keep the wakeup armed — the loop continues silently.
+	if !srv.handleChannelCommand(ad, evFor("/unbind")) {
+		t.Fatal("/unbind should be handled as a command")
+	}
+	if _, ok := srv.wakeupTimers[key]; !ok {
+		t.Fatal("/unbind must not cancel an armed loop wakeup (session handed to web)")
+	}
+
+	// /clear (a fresh-context command) DOES cancel the wakeup — contrast.
+	srv.handleChannelCommand(ad, evFor("/clear"))
+	if _, ok := srv.wakeupTimers[key]; ok {
+		t.Fatal("/clear must cancel the armed loop wakeup (fresh context)")
+	}
+}
