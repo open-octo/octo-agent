@@ -1293,8 +1293,105 @@ func RestoreFromBackup() (brokenSaved string, err error) {
 // reset to the first entry; a dangling lite_model is cleared. A duplicate model
 // or a half-filled entry is reported as unfixable — the intended value can't be
 // guessed, so it's left for the user.
+//
+// PR1 layers endpoint-level auto-fixes on top of the legacy Models fixes
+// (design §14.2): dangling Default resets to the first endpoint's first
+// model; dangling Lite clears; an empty endpoint (no models) is deleted; Lite
+// == Default clears Lite. Duplicate endpoint id, illegal id chars, missing
+// model name, and duplicate model within one endpoint are unfixable (can't
+// guess the intended value). Like Validate, the endpoint-level branch only
+// runs on the pure new schema (Endpoints set, Models empty) to avoid
+// double-acting on a migrated flat config; PR4 lifts that guard.
 func (c Config) Repair() (repaired Config, fixed, unfixable []string) {
 	repaired = c
+
+	// Endpoint-level repair — only on the pure new schema (Endpoints set,
+	// Models empty). See the doc comment for why.
+	if len(repaired.Endpoints) > 0 && len(repaired.Models) == 0 {
+		// Scan for unfixable problems first so the auto-fixes below don't
+		// act on garbage (e.g. an illegal id can't be safely renamed, so
+		// the user must fix it before any auto-reset of Default makes
+		// sense).
+		seenID := make(map[string]bool, len(repaired.Endpoints))
+		for i, ep := range repaired.Endpoints {
+			if strings.TrimSpace(ep.ID) == "" {
+				unfixable = append(unfixable, fmt.Sprintf("endpoints[%d] has no id — add one", i))
+			} else if !isValidEndpointID(ep.ID) {
+				unfixable = append(unfixable, fmt.Sprintf("endpoint id %q contains illegal chars — rename", ep.ID))
+			}
+			if seenID[ep.ID] {
+				unfixable = append(unfixable, fmt.Sprintf("duplicate endpoint id %q — rename one", ep.ID))
+			}
+			seenID[ep.ID] = true
+
+			seenModel := make(map[string]bool, len(ep.Models))
+			for j, m := range ep.Models {
+				if strings.TrimSpace(m.Model) == "" {
+					unfixable = append(unfixable, fmt.Sprintf("endpoint %q models[%d] has no model name — add one or remove it", ep.ID, j))
+					continue
+				}
+				if seenModel[m.Model] {
+					unfixable = append(unfixable, fmt.Sprintf("duplicate model %q in endpoint %q — remove one", m.Model, ep.ID))
+				}
+				seenModel[m.Model] = true
+			}
+		}
+
+		// Auto-fixes (safe, no guessing).
+
+		// Delete empty endpoints (no models). These are unusable and a
+		// dangling-Default reset below would have nothing to point at if all
+		// endpoints were empty.
+		var kept []Endpoint
+		for _, ep := range repaired.Endpoints {
+			if len(ep.Models) == 0 {
+				fixed = append(fixed, fmt.Sprintf("deleted empty endpoint %q (had no models)", ep.ID))
+				continue
+			}
+			kept = append(kept, ep)
+		}
+		repaired.Endpoints = kept
+
+		// Find the first non-empty endpoint + its first model — the reset
+		// target for a dangling Default. If there are none, leave Default
+		// for the user (all-empty config is the pre-onboarding state).
+		var firstEpID, firstModel string
+		for _, ep := range repaired.Endpoints {
+			if len(ep.Models) > 0 {
+				firstEpID = ep.ID
+				firstModel = ep.Models[0].Model
+				break
+			}
+		}
+		if repaired.Default != "" {
+			if _, _, ok := repaired.resolveCompositeID(repaired.Default); !ok {
+				if firstEpID != "" {
+					newDefault := firstEpID + "::" + firstModel
+					fixed = append(fixed, fmt.Sprintf("reset default %q → %q (first endpoint's first model)", repaired.Default, newDefault))
+					repaired.Default = newDefault
+				} else {
+					fixed = append(fixed, fmt.Sprintf("cleared default %q (no endpoints with models to fall back to)", repaired.Default))
+					repaired.Default = ""
+				}
+			}
+		}
+		if repaired.Lite != "" {
+			// Lite dangles OR Lite == Default → clear. The "==" check is on
+			// the resolved composite id, so a Lite that points at the same
+			// endpoint+model as Default is caught even if the strings differ
+			// in casing or whitespace (they won't for composite ids, but the
+			// resolved form is the canonical one).
+			_, _, liteOK := repaired.resolveCompositeID(repaired.Lite)
+			if !liteOK || repaired.Lite == repaired.Default {
+				fixed = append(fixed, fmt.Sprintf("cleared lite %q (matched no endpoint+model or equals default)", repaired.Lite))
+				repaired.Lite = ""
+			}
+		}
+
+		return repaired, fixed, unfixable
+	}
+
+	// Legacy flat Models repair.
 	if len(repaired.Models) == 0 {
 		return repaired, nil, nil
 	}
