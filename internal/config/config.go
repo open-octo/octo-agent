@@ -987,10 +987,10 @@ func firstNonEmptyEndpoint(endpoints []Endpoint) *Endpoint {
 //     error naming the missing part and listing the available ones.
 //   - Bare model "<model>" — resolves via the precedence in S5.4:
 //     1. If the Default endpoint's model matches, use the Default endpoint
-//        (Default is "my main endpoint", a bare name prefers it).
+//     (Default is "my main endpoint", a bare name prefers it).
 //     2. Otherwise scan all endpoints; a unique hit returns it.
 //     3. Multiple hits return the first match and slog.Warn naming the
-//        picked endpoint so the user can disambiguate with a composite id.
+//     picked endpoint so the user can disambiguate with a composite id.
 //     4. No hit is an error listing the available models.
 //
 // An empty flag is an error — callers should treat empty as "no --model given"
