@@ -695,6 +695,96 @@ func (c *Config) SetEntry(e ModelEntry) bool {
 	return false
 }
 
+// RenameEndpoint renames an endpoint id across the config: it updates the
+// endpoint's ID field AND rewrites any Default/Lite composite-id prefixes
+// that point at the old id. The rename runs under the config flock so a
+// concurrent Save can't interleave and drop the reference update (design §6).
+//
+// Session files (which carry their own model_config composite-id references
+// in ~/.octo/sessions/*.jsonl) are NOT scanned or updated — that's
+// intentionally deferred. A stale composite id whose endpoint was renamed
+// falls through EntryByModel's bare-model path (Slice 2.2), which finds the
+// model in c.Models (still populated during PR1-3) and degrades gracefully.
+// Scanning every session file on every rename is a heavy operation for a
+// rare event, and the fall-through makes the staleness tolerable. PR4 may
+// revisit this if the fall-through proves insufficient.
+//
+// The caller must validate newID before calling (RenameEndpoint does not
+// re-validate; it's a mechanical rename). Returns ErrEndpointNotFound if
+// oldID doesn't match any endpoint.
+func (c *Config) RenameEndpoint(oldID, newID string) error {
+	// Find the endpoint and bail if it doesn't exist — renaming a
+	// non-existent endpoint is a caller bug.
+	idx := -1
+	for i := range c.Endpoints {
+		if c.Endpoints[i].ID == oldID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("endpoint %q not found", oldID)
+	}
+
+	// Update the endpoint's own ID.
+	c.Endpoints[idx].ID = newID
+
+	// Rewrite Default/Lite composite-id prefixes. A composite id is
+	// "<endpoint_id>::<model>" — we only swap the prefix, the model stays.
+	c.Default = renameCompositePrefix(c.Default, oldID, newID)
+	c.Lite = renameCompositePrefix(c.Lite, oldID, newID)
+	return nil
+}
+
+// renameCompositePrefix rewrites a composite id's endpoint prefix from oldID
+// to newID. If id doesn't match the "<oldID>::..." shape, it's returned
+// unchanged (it might point at a different endpoint, or be empty).
+func renameCompositePrefix(id, oldID, newID string) string {
+	if id == "" {
+		return ""
+	}
+	prefix := oldID + "::"
+	if !strings.HasPrefix(id, prefix) {
+		return id // points at a different endpoint, leave it
+	}
+	return newID + "::" + strings.TrimPrefix(id, prefix)
+}
+
+// ErrEndpointNotFound is returned by RenameEndpoint (and future endpoint
+// mutations) when the named endpoint doesn't exist in c.Endpoints.
+var ErrEndpointNotFound = errors.New("endpoint not found")
+
+// Mutate performs an atomic read-modify-write on config.yml under the flock:
+// it acquires the exclusive lock, Loads the latest config, applies fn (which
+// may modify the Config in place), and Saves the result. Use this for any
+// mutation that depends on the current state of the file (renaming an
+// endpoint, updating Default/Lite references, etc.) — without it, two
+// concurrent goroutines can both Load the pre-mutation state and the later
+// Save silently drops the earlier mutation.
+//
+// fn must not call Save itself (Mutate does that via saveLocked, which skips
+// re-locking) and must not take long (it holds the lock). If fn returns an
+// error, Mutate aborts without saving and returns the error.
+func Mutate(fn func(*Config) error) error {
+	path, err := Path()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return withConfigLock(path, func() error {
+		cfg, err := Load()
+		if err != nil {
+			return fmt.Errorf("config.Mutate: load: %w", err)
+		}
+		if err := fn(&cfg); err != nil {
+			return err
+		}
+		return cfg.saveLocked(path)
+	})
+}
+
 // Path returns the absolute path to the config file (~/.octo/config.yml).
 func Path() (string, error) {
 	home, err := os.UserHomeDir()
@@ -1289,6 +1379,10 @@ func resetLastGoodForTest() {
 // changes. The lock is advisory (flock / LockFileEx) — co-operating
 // processes honour it. NFS home directories are a known weak spot; documented
 // in dev-docs/endpoint-design.md §7.3.
+//
+// Callers that need read-modify-write atomicity (e.g. renaming an endpoint
+// and updating Default/Lite references) should use Mutate, which holds the
+// lock across Load+modify+Save — calling Save directly in that pattern races.
 func (c Config) Save() error {
 	path, err := Path()
 	if err != nil {
@@ -1298,32 +1392,40 @@ func (c Config) Save() error {
 		return err
 	}
 	return withConfigLock(path, func() error {
-		// Shallow copy with the new-schema fields cleared so yaml.Marshal emits
-		// only the legacy flat form. The Models slice is shared by reference,
-		// which is fine — we don't mutate it.
-		saved := c
-		saved.Endpoints = nil
-		saved.Default = ""
-		saved.Lite = ""
-		data, err := yaml.Marshal(saved)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(path, data, 0o600); err != nil {
-			return err
-		}
-		// Rolling backup of the last config we wrote (always valid, since it's a
-		// marshaled Config): `octo config --fix` restores from it when a later hand
-		// edit leaves config.yml unparseable. Best-effort — a backup failure must
-		// never fail the save itself.
-		_ = os.WriteFile(path+".bak", data, 0o600)
-		if legacy, lerr := legacyPath(); lerr == nil {
-			if _, statErr := os.Stat(legacy); statErr == nil {
-				_ = os.Rename(legacy, legacy+".bak")
-			}
-		}
-		return nil
+		return c.saveLocked(path)
 	})
+}
+
+// saveLocked writes the config without acquiring the flock. Used by Save
+// (which wraps it in withConfigLock) and by Mutate (which already holds the
+// lock and needs to save without re-locking — re-locking would deadlock since
+// flock on a fresh fd blocks on the same inode).
+func (c Config) saveLocked(path string) error {
+	// Shallow copy with the new-schema fields cleared so yaml.Marshal emits
+	// only the legacy flat form. The Models slice is shared by reference,
+	// which is fine — we don't mutate it.
+	saved := c
+	saved.Endpoints = nil
+	saved.Default = ""
+	saved.Lite = ""
+	data, err := yaml.Marshal(saved)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+	// Rolling backup of the last config we wrote (always valid, since it's a
+	// marshaled Config): `octo config --fix` restores from it when a later hand
+	// edit leaves config.yml unparseable. Best-effort — a backup failure must
+	// never fail the save itself.
+	_ = os.WriteFile(path+".bak", data, 0o600)
+	if legacy, lerr := legacyPath(); lerr == nil {
+		if _, statErr := os.Stat(legacy); statErr == nil {
+			_ = os.Rename(legacy, legacy+".bak")
+		}
+	}
+	return nil
 }
 
 // BackupPath returns the rolling-backup path (config.yml.bak) that Save writes

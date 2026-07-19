@@ -1417,3 +1417,97 @@ func TestWithConfigLock_SerialisesConcurrentCallers(t *testing.T) {
 		t.Fatal("second caller didn't acquire the lock within 5s after the first released")
 	}
 }
+
+// TestRenameEndpoint_UpdatesIDAndReferences covers PR3 §6.1: renaming an
+// endpoint id updates the endpoint's ID field AND rewrites Default/Lite
+// composite-id prefixes that point at the old id. References pointing at
+// OTHER endpoints are left alone.
+func TestRenameEndpoint_UpdatesIDAndReferences(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "official", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-opus-4-8"}}},
+		},
+		Default: "relay-a::claude-sonnet-4-6",
+		Lite:    "official::claude-opus-4-8",
+	}
+
+	if err := cfg.RenameEndpoint("relay-a", "relay-b"); err != nil {
+		t.Fatalf("RenameEndpoint: %v", err)
+	}
+
+	// Endpoint ID updated.
+	if cfg.Endpoints[0].ID != "relay-b" {
+		t.Errorf("endpoint ID = %q, want relay-b", cfg.Endpoints[0].ID)
+	}
+	// Default prefix rewritten.
+	if cfg.Default != "relay-b::claude-sonnet-4-6" {
+		t.Errorf("Default = %q, want relay-b::claude-sonnet-4-6", cfg.Default)
+	}
+	// Lite pointing at a DIFFERENT endpoint is untouched.
+	if cfg.Lite != "official::claude-opus-4-8" {
+		t.Errorf("Lite = %q, want official::claude-opus-4-8 (untouched)", cfg.Lite)
+	}
+}
+
+// TestRenameEndpoint_RewritesBothDefaultAndLiteWhenBothPointAtRenamedEndpoint
+// verifies both Default and Lite are updated when both point at the renamed
+// endpoint (e.g. an endpoint that's both the primary and the lite source).
+func TestRenameEndpoint_RewritesBothDefaultAndLiteWhenBothPointAtRenamedEndpoint(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}, {Model: "gpt-5.4-mini"}}},
+		},
+		Default: "relay-a::claude-sonnet-4-6",
+		Lite:    "relay-a::gpt-5.4-mini",
+	}
+
+	if err := cfg.RenameEndpoint("relay-a", "relay-b"); err != nil {
+		t.Fatalf("RenameEndpoint: %v", err)
+	}
+	if cfg.Default != "relay-b::claude-sonnet-4-6" {
+		t.Errorf("Default = %q, want relay-b::claude-sonnet-4-6", cfg.Default)
+	}
+	if cfg.Lite != "relay-b::gpt-5.4-mini" {
+		t.Errorf("Lite = %q, want relay-b::gpt-5.4-mini", cfg.Lite)
+	}
+}
+
+// TestRenameEndpoint_EmptyDefaultAndLiteAreNoops verifies the edge case where
+// Default/Lite are empty — renameCompositePrefix returns "" for empty input,
+// so an empty Default/Lite stays empty (no spurious "newID::" prefix).
+func TestRenameEndpoint_EmptyDefaultAndLiteAreNoops(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+		// No Default or Lite set.
+	}
+	if err := cfg.RenameEndpoint("relay-a", "relay-b"); err != nil {
+		t.Fatalf("RenameEndpoint: %v", err)
+	}
+	if cfg.Default != "" || cfg.Lite != "" {
+		t.Errorf("Default/Lite = %q/%q, want empty/empty (rename of empty refs is a no-op)", cfg.Default, cfg.Lite)
+	}
+}
+
+// TestRenameEndpoint_UnknownEndpointReturnsError verifies renaming a
+// non-existent endpoint fails rather than silently succeeding.
+func TestRenameEndpoint_UnknownEndpointReturnsError(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+	}
+	err := cfg.RenameEndpoint("ghost", "relay-b")
+	if err == nil {
+		t.Fatal("RenameEndpoint on unknown endpoint: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "ghost") {
+		t.Errorf("error should name the missing endpoint, got: %v", err)
+	}
+	// Config must be unchanged on failure.
+	if cfg.Endpoints[0].ID != "relay-a" {
+		t.Errorf("endpoint ID changed on failure: %q, want relay-a", cfg.Endpoints[0].ID)
+	}
+}
