@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { SubAgentState } from '../stores'
+import type { SubAgentState } from './stores'
 import { createSubAgentFadeTimer, SUB_AGENT_DISMISS_MS } from './subagentFadeTimer'
 
 // Mock the store helper so the test asserts the controller's *decision* (when it
