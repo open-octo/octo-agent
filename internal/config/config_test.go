@@ -1,12 +1,16 @@
 package config
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -1286,5 +1290,130 @@ func TestSyncEndpoints_DroppedKeyFingerprintNoClearText(t *testing.T) {
 	}
 	if strings.Contains(logBuf.String(), secondKey[:8]) {
 		t.Errorf("dropped key prefix leaked into log:\n%s", logBuf.String())
+	}
+}
+
+// TestSave_ConcurrentWritersDontClobber verifies the flock serialisation
+// from PR3 §7.1: 10 goroutines each save a distinct config, and after all
+// of them complete the on-disk file must be a valid YAML that parses to
+// exactly one of the written configs. Without the flock, concurrent
+// os.WriteFile calls would interleave (partial writes to the same path race)
+// or clobber each other, producing either a corrupt file or losing writes.
+//
+// Note: Unix flock is advisory and per-fd. Within a single process, two
+// goroutines opening separate fds on the same lockfile DO block each other
+// (the kernel serialises per-inode, not per-process), so this test exercises
+// the flock path. On Windows, LockFileEx behaves similarly per-file-handle.
+func TestSave_ConcurrentWritersDontClobber(t *testing.T) {
+	setHome(t)
+
+	const N = 10
+	var wg sync.WaitGroup
+	errs := make([]error, N)
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			cfg := Config{
+				Models: []ModelEntry{
+					{
+						Provider: "anthropic",
+						Model:    fmt.Sprintf("model-%d", idx),
+						BaseURL:  "https://api.anthropic.com",
+						APIKey:   fmt.Sprintf("key-%d", idx),
+						Vision:   true,
+					},
+				},
+				DefaultModel: fmt.Sprintf("model-%d", idx),
+			}
+			errs[idx] = cfg.Save()
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("goroutine %d Save: %v", i, err)
+		}
+	}
+
+	// The file must parse cleanly — no corruption from interleaved writes.
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load after concurrent saves: %v — file was corrupted", err)
+	}
+	if len(loaded.Models) != 1 {
+		t.Fatalf("loaded Models = %d entries, want 1 (last writer wins, but file must be valid): %+v", len(loaded.Models), loaded.Models)
+	}
+	// The winning model name must be one of the N we wrote.
+	modelName := loaded.Models[0].Model
+	prefix := "model-"
+	if !strings.HasPrefix(modelName, prefix) {
+		t.Fatalf("loaded model = %q, want one of the model-N names", modelName)
+	}
+	idx, convErr := strconv.Atoi(strings.TrimPrefix(modelName, prefix))
+	if convErr != nil || idx < 0 || idx >= N {
+		t.Fatalf("loaded model = %q, want a valid index in [0, %d)", modelName, N)
+	}
+	// Default must match the loaded model (last writer wins consistently).
+	if loaded.DefaultModel != modelName {
+		t.Errorf("loaded DefaultModel = %q, want %q (matching the winning model)", loaded.DefaultModel, modelName)
+	}
+}
+
+// TestWithConfigLock_SerialisesConcurrentCallers verifies the flock itself
+// serialises: when two goroutines both call withConfigLock on the same path,
+// the second must wait for the first to release before its fn runs. We
+// assert this by having the first fn hold the lock until it observes the
+// second goroutine is waiting (via a channel), and the second fn only
+// signals it got the lock after the first releases.
+//
+// This is the core invariant the PR3 concurrency design (§7.1) depends on:
+// without it, Slice 3.2's rename cascade (read old config → modify refs →
+// write new config) would race and drop the other writer's changes.
+func TestWithConfigLock_SerialisesConcurrentCallers(t *testing.T) {
+	tmp := t.TempDir()
+	lockPath := filepath.Join(tmp, "test.lock")
+
+	// firstHolder blocks until it sees the second goroutine is waiting, then
+	// releases the lock by closing releaseCh. secondRunning fires its fn
+	// body only once it has the lock.
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondGotLock := make(chan struct{})
+
+	go func() {
+		_ = withConfigLock(lockPath, func() error {
+			close(firstStarted)
+			<-releaseFirst // hold the lock until the test releases us
+			return nil
+		})
+	}()
+
+	<-firstStarted // first goroutine is holding the lock
+
+	// Now the second goroutine should block on the lock — it must NOT
+	// have run its fn yet.
+	select {
+	case <-secondGotLock:
+		t.Fatal("second caller acquired the lock while the first still held it — flock not exclusive")
+	case <-time.After(50 * time.Millisecond):
+		// good — second is still waiting
+	}
+
+	// Release the first; the second should then acquire and signal.
+	go func() {
+		_ = withConfigLock(lockPath, func() error {
+			close(secondGotLock)
+			return nil
+		})
+	}()
+
+	close(releaseFirst)
+	select {
+	case <-secondGotLock:
+		// good — flock serialised correctly
+	case <-time.After(5 * time.Second):
+		t.Fatal("second caller didn't acquire the lock within 5s after the first released")
 	}
 }

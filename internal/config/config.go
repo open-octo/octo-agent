@@ -1271,10 +1271,6 @@ func resetLastGoodForTest() {
 // API keys), creating ~/.octo if needed. A legacy config.yaml present at that
 // moment is renamed to config.yaml.bak — best effort, because config.yml wins
 // the read order regardless.
-// Save writes the config to ~/.octo/config.yml with mode 0600 (it may hold
-// API keys), creating ~/.octo if needed. A legacy config.yaml present at that
-// moment is renamed to config.yaml.bak — best effort, because config.yml wins
-// the read order regardless.
 //
 // PR1 invariant (design §4.3): Save must write the legacy flat form
 // (models: + default_model: + lite_model:), NOT the new endpoints: form.
@@ -1284,6 +1280,15 @@ func resetLastGoodForTest() {
 // tags (Load still needs to honour an explicit endpoints: block the user
 // hand-writes, per §4.1 step 1), Save marshals a shallow copy with the new
 // fields cleared.
+//
+// PR3 (design §7.1): Save holds an exclusive flock on the lockfile for the
+// duration of the write, serialising concurrent Save calls across processes.
+// octo-agent has multiple entry points (TUI process + octo serve + octo
+// config command) that can all write config.yml simultaneously; without
+// the lock, a later writer would silently overwrite an earlier writer's
+// changes. The lock is advisory (flock / LockFileEx) — co-operating
+// processes honour it. NFS home directories are a known weak spot; documented
+// in dev-docs/endpoint-design.md §7.3.
 func (c Config) Save() error {
 	path, err := Path()
 	if err != nil {
@@ -1292,31 +1297,33 @@ func (c Config) Save() error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	// Shallow copy with the new-schema fields cleared so yaml.Marshal emits
-	// only the legacy flat form. The Models slice is shared by reference,
-	// which is fine — we don't mutate it.
-	saved := c
-	saved.Endpoints = nil
-	saved.Default = ""
-	saved.Lite = ""
-	data, err := yaml.Marshal(saved)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return err
-	}
-	// Rolling backup of the last config we wrote (always valid, since it's a
-	// marshaled Config): `octo config --fix` restores from it when a later hand
-	// edit leaves config.yml unparseable. Best-effort — a backup failure must
-	// never fail the save itself.
-	_ = os.WriteFile(path+".bak", data, 0o600)
-	if legacy, lerr := legacyPath(); lerr == nil {
-		if _, statErr := os.Stat(legacy); statErr == nil {
-			_ = os.Rename(legacy, legacy+".bak")
+	return withConfigLock(path, func() error {
+		// Shallow copy with the new-schema fields cleared so yaml.Marshal emits
+		// only the legacy flat form. The Models slice is shared by reference,
+		// which is fine — we don't mutate it.
+		saved := c
+		saved.Endpoints = nil
+		saved.Default = ""
+		saved.Lite = ""
+		data, err := yaml.Marshal(saved)
+		if err != nil {
+			return err
 		}
-	}
-	return nil
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			return err
+		}
+		// Rolling backup of the last config we wrote (always valid, since it's a
+		// marshaled Config): `octo config --fix` restores from it when a later hand
+		// edit leaves config.yml unparseable. Best-effort — a backup failure must
+		// never fail the save itself.
+		_ = os.WriteFile(path+".bak", data, 0o600)
+		if legacy, lerr := legacyPath(); lerr == nil {
+			if _, statErr := os.Stat(legacy); statErr == nil {
+				_ = os.Rename(legacy, legacy+".bak")
+			}
+		}
+		return nil
+	})
 }
 
 // BackupPath returns the rolling-backup path (config.yml.bak) that Save writes
