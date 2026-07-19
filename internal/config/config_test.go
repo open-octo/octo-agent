@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -456,5 +457,149 @@ func TestLoad_LegacyFlatSynthesizesEndpoint(t *testing.T) {
 	}
 	if c.DefaultModel != "claude-sonnet-4-6" {
 		t.Errorf("legacy DefaultModel = %q, want claude-sonnet-4-6", c.DefaultModel)
+	}
+}
+
+// TestLoad_LegacyFlatAggregatesByProviderBaseURL covers the aggregation rule:
+// entries sharing the same (provider, base_url) collapse into one implicit
+// endpoint with multiple models; entries with different base_urls become
+// distinct endpoints. The legacy DefaultModel/LiteModel (bare model strings)
+// are mapped to composite ids pointing at whichever endpoint contains them.
+func TestLoad_LegacyFlatAggregatesByProviderBaseURL(t *testing.T) {
+	home := setHome(t)
+	writeOcto(t, home, "config.yml",
+		"models:\n"+
+			"  - provider: anthropic\n"+
+			"    model: claude-opus-4-8\n"+
+			"    base_url: https://api.anthropic.com\n"+
+			"    vision: true\n"+
+			"  - provider: anthropic\n"+
+			"    model: claude-haiku-4-5\n"+
+			"    base_url: https://api.anthropic.com\n"+
+			"    vision: true\n"+
+			"  - provider: custom\n"+
+			"    model: gpt-5.4\n"+
+			"    base_url: https://relay-a.example.com\n"+
+			"    api_key: sk-relay\n"+
+			"    protocol: openai\n"+
+			"    vision: true\n"+
+			"default_model: claude-opus-4-8\n"+
+			"lite_model: claude-haiku-4-5\n")
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Two endpoints: one for api.anthropic.com (aggregating two models),
+	// one for relay-a.example.com (one model).
+	if len(c.Endpoints) != 2 {
+		t.Fatalf("Endpoints = %d, want 2 (one per distinct base_url): %+v", len(c.Endpoints), c.Endpoints)
+	}
+
+	// Find the anthropic and relay endpoints by base_url (order isn't guaranteed
+	// by the aggregation map, so locate rather than index).
+	var anthEp, relayEp *Endpoint
+	for i := range c.Endpoints {
+		switch c.Endpoints[i].BaseURL {
+		case "https://api.anthropic.com":
+			anthEp = &c.Endpoints[i]
+		case "https://relay-a.example.com":
+			relayEp = &c.Endpoints[i]
+		}
+	}
+	if anthEp == nil || relayEp == nil {
+		t.Fatalf("missing expected endpoints: %+v", c.Endpoints)
+	}
+
+	// The anthropic endpoint aggregates both claude models.
+	if len(anthEp.Models) != 2 {
+		t.Errorf("anthropic endpoint models = %d, want 2 (aggregated): %+v", len(anthEp.Models), anthEp.Models)
+	}
+	anthModels := map[string]bool{}
+	for _, m := range anthEp.Models {
+		anthModels[m.Model] = true
+	}
+	if !anthModels["claude-opus-4-8"] || !anthModels["claude-haiku-4-5"] {
+		t.Errorf("anthropic endpoint missing expected models: %+v", anthEp.Models)
+	}
+
+	// The relay endpoint has one model and carries the api_key/protocol from
+	// the legacy entry.
+	if len(relayEp.Models) != 1 || relayEp.Models[0].Model != "gpt-5.4" {
+		t.Errorf("relay endpoint models = %+v, want one gpt-5.4", relayEp.Models)
+	}
+	if relayEp.APIKey != "sk-relay" || relayEp.Protocol != "openai" {
+		t.Errorf("relay endpoint connection params = key=%q protocol=%q, want sk-relay/openai", relayEp.APIKey, relayEp.Protocol)
+	}
+
+	// Each endpoint has a stable legacy-<host>-<n> id; the host has dots
+	// replaced with "-" so the ID matches the ^[a-zA-Z0-9_-]+$ regex.
+	if anthEp.ID != "legacy-api-anthropic-com-0" {
+		t.Errorf("anthropic endpoint ID = %q, want legacy-api-anthropic-com-0", anthEp.ID)
+	}
+	if relayEp.ID != "legacy-relay-a-example-com-0" {
+		t.Errorf("relay endpoint ID = %q, want legacy-relay-a-example-com-0", relayEp.ID)
+	}
+
+	// Default/Lite map to composite ids on the anthropic endpoint (both
+	// reference claude models that live there).
+	wantDefault := anthEp.ID + "::claude-opus-4-8"
+	wantLite := anthEp.ID + "::claude-haiku-4-5"
+	if c.Default != wantDefault {
+		t.Errorf("Default = %q, want %q", c.Default, wantDefault)
+	}
+	if c.Lite != wantLite {
+		t.Errorf("Lite = %q, want %q", c.Lite, wantLite)
+	}
+}
+
+// TestLoad_LegacyFlatMultipleKeysSameBaseURLKeepsFirst verifies that when
+// legacy entries share a base_url but disagree on api_key, the first entry's
+// key wins and the loss of the later key is surfaced via slog.Warn rather
+// than failing the load.
+func TestLoad_LegacyFlatMultipleKeysSameBaseURLKeepsFirst(t *testing.T) {
+	home := setHome(t)
+	writeOcto(t, home, "config.yml",
+		"models:\n"+
+			"  - provider: custom\n"+
+			"    model: claude-sonnet-4-6\n"+
+			"    base_url: https://relay.example.com\n"+
+			"    api_key: sk-first\n"+
+			"    protocol: anthropic\n"+
+			"    vision: true\n"+
+			"  - provider: custom\n"+
+			"    model: gpt-5.4\n"+
+			"    base_url: https://relay.example.com\n"+
+			"    api_key: sk-second\n"+
+			"    protocol: anthropic\n"+
+			"    vision: true\n")
+
+	// Capture slog warnings to confirm the dropped key is surfaced.
+	var logBuf strings.Builder
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
+	t.Cleanup(func() { slog.SetDefault(slog.Default()) })
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if len(c.Endpoints) != 1 {
+		t.Fatalf("Endpoints = %d, want 1 (same base_url aggregates): %+v", len(c.Endpoints), c.Endpoints)
+	}
+	ep := c.Endpoints[0]
+	if ep.APIKey != "sk-first" {
+		t.Errorf("aggregated endpoint APIKey = %q, want sk-first (first entry wins)", ep.APIKey)
+	}
+	if len(ep.Models) != 2 {
+		t.Errorf("aggregated endpoint models = %d, want 2", len(ep.Models))
+	}
+
+	// The dropped second key must be surfaced, not lost silently. The key is
+	// truncated in the log to avoid writing the full secret to disk, so match
+	// the truncated prefix.
+	if !strings.Contains(logBuf.String(), "multiple api_keys") || !strings.Contains(logBuf.String(), "sk-secon") {
+		t.Errorf("expected slog.Warn about dropped sk-second key (truncated to sk-secon…), got log:\n%s", logBuf.String())
 	}
 }
