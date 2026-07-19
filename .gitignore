@@ -43,3 +43,4 @@ __pycache__/
 # source (`make web-build` locally, CI for releases), never committed.
 /internal/server/webdist/*
 !/internal/server/webdist/.gitkeep
+.octo/implement-state.json
