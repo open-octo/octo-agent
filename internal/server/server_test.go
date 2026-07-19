@@ -2635,3 +2635,79 @@ func TestHandleUpdateSession_Rename(t *testing.T) {
 		t.Errorf("unknown id status = %d, want 404", w.Code)
 	}
 }
+
+// TestInvalidateEndpointSenders_DropsOnlyMatchingPrefix verifies PR3 §9.2:
+// invalidateEndpointSenders clears cache entries whose key is prefixed with
+// "<endpointID>::" but leaves other endpoints' entries intact. This is the
+// cache hit-rate preservation — changing one endpoint's base_url doesn't
+// force every other endpoint to rebuild.
+func TestInvalidateEndpointSenders_DropsOnlyMatchingPrefix(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	// Seed the cache with entries under two different endpoint prefixes.
+	// Use a stub Sender so we don't need real API keys.
+	stub := func(id string) agent.Sender { return &nopSender{id: id} }
+	srv.senderCacheMu.Lock()
+	srv.senderCache = map[string]agent.Sender{
+		"relay-a::claude-sonnet-4-6":  stub("a1"),
+		"relay-a::gpt-5.4":            stub("a2"),
+		"official::claude-sonnet-4-6": stub("o1"),
+		"official::gpt-5.4":           stub("o2"),
+		// A bare-model key (legacy session form) — must NOT be cleared by
+		// invalidateEndpointSenders since it has no endpoint prefix.
+		"claude-haiku-4-5": stub("bare"),
+	}
+	srv.senderCacheMu.Unlock()
+
+	srv.invalidateEndpointSenders("relay-a")
+
+	srv.senderCacheMu.Lock()
+	defer srv.senderCacheMu.Unlock()
+	// relay-a entries gone.
+	if _, ok := srv.senderCache["relay-a::claude-sonnet-4-6"]; ok {
+		t.Error("relay-a::claude-sonnet-4-6 still cached after invalidate")
+	}
+	if _, ok := srv.senderCache["relay-a::gpt-5.4"]; ok {
+		t.Error("relay-a::gpt-5.4 still cached after invalidate")
+	}
+	// official entries preserved.
+	if _, ok := srv.senderCache["official::claude-sonnet-4-6"]; !ok {
+		t.Error("official::claude-sonnet-4-6 dropped — invalidate must be endpoint-scoped")
+	}
+	if _, ok := srv.senderCache["official::gpt-5.4"]; !ok {
+		t.Error("official::gpt-5.4 dropped — invalidate must be endpoint-scoped")
+	}
+	// Bare-model key preserved (no prefix to match).
+	if _, ok := srv.senderCache["claude-haiku-4-5"]; !ok {
+		t.Error("bare-model key dropped — invalidateEndpointSenders must not touch bare keys")
+	}
+}
+
+// TestInvalidateEndpointSenders_EmptyIDIsNoop verifies the guard: calling
+// with an empty endpointID (a caller bug) doesn't clear the whole cache.
+// Without the guard, prefix "" would match every key.
+func TestInvalidateEndpointSenders_EmptyIDIsNoop(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	stub := &nopSender{id: "x"}
+	srv.senderCacheMu.Lock()
+	srv.senderCache = map[string]agent.Sender{
+		"relay-a::claude-sonnet-4-6": stub,
+		"official::gpt-5.4":          stub,
+	}
+	srv.senderCacheMu.Unlock()
+
+	srv.invalidateEndpointSenders("")
+
+	srv.senderCacheMu.Lock()
+	defer srv.senderCacheMu.Unlock()
+	if len(srv.senderCache) != 2 {
+		t.Errorf("empty endpointID cleared the cache: %d entries remain, want 2", len(srv.senderCache))
+	}
+}
+
+// nopSender is a minimal agent.Sender for cache tests — never actually sends.
+type nopSender struct{ id string }
+
+func (n *nopSender) SendMessages(ctx context.Context, model, system string, messages []agent.Message, maxTokens int) (agent.Reply, error) {
+	return agent.Reply{}, nil
+}
