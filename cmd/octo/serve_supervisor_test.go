@@ -179,6 +179,42 @@ func TestSpawnServeWorker_ReResolvesExecutablePath(t *testing.T) {
 	}
 }
 
+// TestSpawnServeWorker_CachesExecutablePath is the regression guard for the
+// upgrade-swap bug (issue #1614 follow-up): spawnServeWorker must resolve
+// os.Executable() ONCE at construction time and reuse that path for every
+// subsequent worker spawn. If it re-resolved on every spawn, the rename in
+// swap() (octo → octo.old.<ts>.<pid>) would make /proc/self/exe on Linux
+// return the now-deleted aside name, and the next worker spawn would fail with
+// ENOENT. Caching makes the path string stable across the rename.
+func TestSpawnServeWorker_CachesExecutablePath(t *testing.T) {
+	// Swap in a counting fake resolver, restore the real one on cleanup.
+	orig := osExecutable
+	calls := 0
+	osExecutable = func() (string, error) {
+		calls++
+		return orig()
+	}
+	defer func() { osExecutable = orig }()
+
+	var stdout, stderr bytes.Buffer
+	spawn := spawnServeWorker(nil, &stdout, &stderr)
+
+	// Construction should have resolved exactly once.
+	if calls != 1 {
+		t.Fatalf("osExecutable calls after construction = %d, want 1", calls)
+	}
+
+	// Three more spawns. The production resolver is a closure over the cached
+	// value, so osExecutable must NOT be called again.
+	for i := 0; i < 3; i++ {
+		_, _, _ = spawn()
+	}
+
+	if calls != 1 {
+		t.Errorf("osExecutable calls after 3 spawns = %d, want 1 (path must be cached)", calls)
+	}
+}
+
 func TestShouldSupervise(t *testing.T) {
 	cases := []struct {
 		noSupervisor bool

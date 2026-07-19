@@ -18,6 +18,11 @@ import (
 // exit code server.ExitRestart.
 const serveWorkerEnv = "OCTO_SERVE_WORKER"
 
+// osExecutable is a stub hook for tests; production code calls os.Executable.
+// spawnServeWorker caches its result at construction time (see its doc), and
+// this variable is the seam that lets tests verify that caching.
+var osExecutable = os.Executable
+
 // superviseLoop drives the supervisor: spawn a worker, wait, and dispatch on
 // its exit code — server.ExitRestart respawns (picking up a replaced binary),
 // anything else propagates. A signal received while a worker runs is
@@ -71,17 +76,31 @@ func superviseLoop(spawn func() (func() int, func(os.Signal), error), sigCh <-ch
 
 // spawnServeWorker returns the production spawn function for superviseLoop:
 // re-exec the current binary with `serve <args>` and the worker marker env.
-// The binary path is re-resolved on every spawn so transient failures are not
-// cached forever and, on platforms where os.Executable() resolves by path
-// (not by inode), a binary replaced on disk takes effect on the next restart
-// without the supervisor itself changing.
+//
+// The binary path is resolved ONCE, at supervisor startup, and cached for the
+// lifetime of the supervisor. This is load-bearing for the upgrade swap flow:
+// swap() renames the running binary aside (octo → octo.old.<ts>.<pid>) and
+// renames the new binary into place (.octo.new.<pid> → octo). On Linux,
+// os.Executable() reads /proc/self/exe, which reflects the running inode's
+// *current* name — so after the rename it returns the now-deleted aside name,
+// and the next worker spawn fails with ENOENT. Caching the path at startup
+// sidesteps this: the cached string still says "octo", and after the rename
+// that path points at the new binary. (On macOS the same code path happens to
+// work because KERN_PROC_PATHNAME is a static snapshot — but the cache makes
+// the correctness explicit and platform-independent.)
 func spawnServeWorker(args []string, stdout, stderr io.Writer) func() (func() int, func(os.Signal), error) {
-	return spawnServeWorkerWithResolver(args, stdout, stderr, os.Executable)
+	exe, resolveErr := osExecutable()
+	return spawnServeWorkerWithResolver(args, stdout, stderr, func() (string, error) {
+		return exe, resolveErr
+	})
 }
 
 // spawnServeWorkerWithResolver is the testable core of spawnServeWorker.
-// resolver is called on every worker spawn so tests can fake a changing binary
-// path without touching the real executable.
+// resolver is called on every worker spawn so tests can fake a binary path
+// that changes between spawns without touching the real executable. The
+// production resolver (a closure over a cached os.Executable() result)
+// ignores this and always returns the same path, which is what makes the
+// upgrade swap flow safe — see spawnServeWorker's doc comment.
 func spawnServeWorkerWithResolver(args []string, stdout, stderr io.Writer, resolver func() (string, error)) func() (func() int, func(os.Signal), error) {
 	return func() (func() int, func(os.Signal), error) {
 		exe, err := resolver()
