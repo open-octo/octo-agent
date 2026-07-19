@@ -9,7 +9,11 @@
 // vendor only needs one line here.
 package app
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/open-octo/octo-agent/internal/config"
+)
 
 // EndpointVariant is a regional endpoint alternative for a vendor.
 type EndpointVariant struct {
@@ -449,6 +453,12 @@ func IsKnownVendor(id string) bool {
 //   - baseURL points off the vendor's own endpoints — a custom endpoint is a
 //     different backend wearing a compatible protocol, and its catalogue
 //     won't include the vendor's lite model.
+//
+// Deprecated: prefer ImplicitLiteModelForEndpoint, which takes a config.Endpoint
+// and consults endpoint.LiteModel first. This form is kept for callers that
+// haven't migrated yet (they pass the provider/model/baseURL they already
+// have); it's equivalent to ImplicitLiteModelForEndpoint with an endpoint
+// whose LiteModel is empty.
 func ImplicitLiteModel(provider, model, baseURL string) string {
 	v := vendorByID(provider)
 	if v == nil || v.LiteModel == "" || v.LiteModel == model {
@@ -458,6 +468,57 @@ func ImplicitLiteModel(provider, model, baseURL string) string {
 		return ""
 	}
 	return v.LiteModel
+}
+
+// ImplicitLiteModelForEndpoint returns the lite model a session should compact
+// on when the user configured none explicitly (design §5.5). The precedence:
+//
+//  1. endpoint.LiteModel non-empty and != model → endpoint.LiteModel. The
+//     user explicitly marked this endpoint's lite model (e.g. a custom relay
+//     endpoint carrying both claude-sonnet and gpt-5.4-mini, with mini marked
+//     as lite) — that wins over any vendor inference.
+//  2. Otherwise, if endpoint.BaseURL hits an official vendor (via
+//     VendorByBaseURL) and that vendor has a LiteModel != model → vendor
+//     LiteModel. An official endpoint (e.g. anthropic's api.anthropic.com)
+//     can safely serve the vendor's lite model over the same sender, sharing
+//     key and prompt-cache routing.
+//  3. Otherwise "" — a custom endpoint without an explicit LiteModel has no
+//     implicit lite. Custom relays carry arbitrary catalogues the registry
+//     doesn't know about, so guessing a vendor LiteModel would serve a model
+//     the relay doesn't expose. The user must set endpoint.LiteModel.
+//
+// Migrating from the old ImplicitLiteModel(provider, model, baseURL): the old
+// form is equivalent to ImplicitLiteModelForEndpoint with an endpoint whose
+// LiteModel is empty and whose Provider/BaseURL come from the old args.
+func ImplicitLiteModelForEndpoint(endpoint config.Endpoint, model string) string {
+	// Step 1: explicit endpoint LiteModel wins when it differs from the
+	// primary model. If they're equal, the lite would be a no-op — fall
+	// through to vendor inference so an official endpoint still gets its
+	// vendor's lite (e.g. endpoint.LiteModel="claude-sonnet-4-6" on the
+	// anthropic endpoint, primary is also claude-sonnet-4-6 → infer
+	// claude-haiku-4-5 rather than returning a useless self-reference).
+	if endpoint.LiteModel != "" && endpoint.LiteModel != model {
+		return endpoint.LiteModel
+	}
+
+	// Step 2: official vendor endpoint → vendor LiteModel. The provider field
+	// alone isn't enough — a user can set provider="anthropic" on an endpoint
+	// whose base_url points elsewhere (a relay wearing the anthropic
+	// protocol). VendorByBaseURL confirms the endpoint actually points at the
+	// named vendor's host before inferring its LiteModel.
+	if endpoint.BaseURL != "" {
+		inferredProvider := VendorByBaseURL(endpoint.BaseURL)
+		if inferredProvider != "" && inferredProvider == endpoint.Provider {
+			if v := vendorByID(inferredProvider); v != nil && v.LiteModel != "" && v.LiteModel != model {
+				return v.LiteModel
+			}
+		}
+	}
+
+	// Step 3: no inference. Either a custom endpoint (no vendor match) or a
+	// vendor with no LiteModel in the registry, or the primary model already
+	// is the vendor LiteModel.
+	return ""
 }
 
 // VendorByBaseURL returns the vendor whose default endpoint or one of whose
