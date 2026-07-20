@@ -4,7 +4,8 @@ interface Props {
 	locale?: 'zh' | 'en';
 }
 const { locale = 'zh' } = Astro.props;
+const navSrc = import.meta.env.BASE_URL.replace(/\/?$/, '/') + 'octo-nav.js';
 ---
 
-<script is:inline src="/octo-nav.js" defer></script>
+<script is:inline src={navSrc} defer></script>
 <octo-site-footer locale={locale}></octo-site-footer>
