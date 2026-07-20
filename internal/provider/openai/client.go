@@ -407,12 +407,25 @@ func (c *Client) promptCacheKey(key string) string {
 
 // endpointURL returns BaseURL + ChatCompletionsPath, applying defaults and
 // trimming any trailing slash on BaseURL so the join is exactly one slash.
+//
+// OpenAI-compatible gateway conventions split on where the "/v1" goes: OpenAI
+// itself and Alibaba Bailian bake "/v1" into the documented base (e.g.
+// "https://dashscope.aliyuncs.com/compatible-mode/v1"), then the client only
+// appends "/chat/completions". Other gateways (api.deepseek.com, api.moonshot.cn,
+// …) ship a bare host and expect the client to append the full
+// "/v1/chat/completions". To accept both without making the user trim, detect
+// a trailing "/v1" on the base and drop the redundant segment.
 func (c *Client) endpointURL() string {
 	base := c.BaseURL
 	if base == "" {
 		base = DefaultBaseURL
 	}
-	return strings.TrimRight(base, "/") + ChatCompletionsPath
+	base = strings.TrimRight(base, "/")
+	suffix := ChatCompletionsPath // "/v1/chat/completions"
+	if strings.HasSuffix(base, "/v1") {
+		suffix = "/chat/completions"
+	}
+	return base + suffix
 }
 
 // toAPITools converts []agent.ToolDefinition to []apiTool (function format).

@@ -290,6 +290,37 @@ func TestSend_AppendsChatCompletionsPath(t *testing.T) {
 	}
 }
 
+func TestSend_BaseAlreadyHasV1_StripsDuplicate(t *testing.T) {
+	// Bailian (Alibaba) and OpenAI itself bake "/v1" into the documented base
+	// (e.g. "https://dashscope.aliyuncs.com/compatible-mode/v1"). The client
+	// must detect the trailing "/v1" and only append "/chat/completions" so the
+	// final URL is not ".../v1/v1/chat/completions". See issue #1625.
+	cases := []struct {
+		name string
+		base string
+	}{
+		{"base ends with /v1", "https://coding.dashscope.aliyuncs.com/v1"},
+		{"base ends with /v1/", "https://coding.dashscope.aliyuncs.com/v1/"},
+		{"base ends with longer path + /v1", "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cl, _ := New("k")
+			cl.BaseURL = c.base
+			got := cl.endpointURL()
+
+			// Must NOT contain "/v1/v1".
+			if strings.Contains(got, "/v1/v1") {
+				t.Errorf("endpointURL() = %q, must not contain /v1/v1", got)
+			}
+			// Must end with exactly "/v1/chat/completions".
+			if !strings.HasSuffix(got, "/v1/chat/completions") {
+				t.Errorf("endpointURL() = %q, must end with /v1/chat/completions", got)
+			}
+		})
+	}
+}
+
 func TestSend_NoChoices(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","model":"x","choices":[],"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}}`))

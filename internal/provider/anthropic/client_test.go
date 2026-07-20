@@ -348,6 +348,36 @@ func TestSend_AppendsMessagesPath(t *testing.T) {
 	}
 }
 
+func TestSend_BaseAlreadyHasV1_StripsDuplicate(t *testing.T) {
+	// Mirrors the OpenAI client test: if a relay bakes "/v1" into its base
+	// URL, the client must detect it and only append "/messages" so the final
+	// URL is not ".../v1/v1/messages". Defensive parity with openai.Client.
+	cases := []struct {
+		name string
+		base string
+	}{
+		{"base ends with /v1", "https://gw.example.com/v1"},
+		{"base ends with /v1/", "https://gw.example.com/v1/"},
+		{"base ends with longer path + /v1", "https://gw.example.com/anthropic/v1"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cl, _ := New("k")
+			cl.BaseURL = c.base
+			got := cl.endpointURL()
+
+			// Must NOT contain "/v1/v1".
+			if strings.Contains(got, "/v1/v1") {
+				t.Errorf("endpointURL() = %q, must not contain /v1/v1", got)
+			}
+			// Must end with exactly "/v1/messages".
+			if !strings.HasSuffix(got, "/v1/messages") {
+				t.Errorf("endpointURL() = %q, must end with /v1/messages", got)
+			}
+		})
+	}
+}
+
 // Compile-time assertion: *Client implements provider.Provider.
 var _ provider.Provider = (*Client)(nil)
 
