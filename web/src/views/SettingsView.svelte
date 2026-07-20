@@ -956,10 +956,12 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 }
 .ep-add-model-input { flex: 1; min-width: 140px; }
 .ep-vision-toggle { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-tertiary); }
-.ep-form { display: flex; flex-direction: column; gap: 12px; }
-.ep-field { display: flex; flex-direction: column; gap: 4px; }
-.ep-label { font-size: 12px; color: var(--text-tertiary); }
+.ep-form { display: flex; flex-direction: column; gap: 16px; }
+.ep-field { display: flex; flex-direction: column; gap: 6px; }
+.ep-label { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
 .ep-form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.ep-form-actions .btn-secondary,
+.ep-form-actions .btn-primary { height: 34px; }
 
 .btn-add {
   height: 30px; padding: 0 12px; border: 1px solid var(--border); background: var(--bg-container);
