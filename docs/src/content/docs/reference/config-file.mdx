@@ -10,23 +10,26 @@ import { Aside } from '@astrojs/starlight/components';
 falls back to the built-in default. Manage it with `octo config` rather than hand-editing where
 possible.
 
-<Aside type="caution" title="Renamed from config.yaml">
-Older installs may still have `~/.octo/config.yaml` (a single top-level provider/model pair). It's
-still read if `config.yml` is absent; the first `octo config` save migrates it and parks the old
-file as `config.yaml.bak`.
+<Aside type="caution" title="Migrating an older config">
+Two older shapes are still read and upgraded on the next `octo config` save. A `~/.octo/config.yaml`
+(the pre-`.yml` name) is read if `config.yml` is absent, then migrated with the old file parked as
+`config.yaml.bak`. A flat top-level `models:` list (the pre-two-level schema) is rewritten into
+`endpoints:` — each old entry becomes an endpoint named `legacy-<host>-<n>` that you can rename to
+anything friendly.
 </Aside>
 
 ## Top-level keys
 
 | Key | Type | Description |
 |---|---|---|
-| `models` | list of [model entry](#model-entry) | Named model configurations |
-| `default_model` | string | Entry used when nothing else selects one; empty falls back to the first entry |
-| `lite_model` | string | Entry used for cheap internal calls ([history compaction](/docs/concepts/compaction/)'s summarize step and session-title generation) |
+| `endpoints` | list of [endpoint](#endpoint) | Configured providers, each bundling shared connection params and a list of models |
+| `default` | string | Composite id `<endpoint-id>::<model>` used when nothing else selects one; empty falls back to the first endpoint's first model |
+| `lite` | string | Composite id `<endpoint-id>::<model>` for cheap internal calls ([history compaction](/docs/concepts/compaction/)'s summarize step and session-title generation); empty infers from the endpoint's `lite_model` or the vendor default |
 | `permission_mode` | string | `interactive` \| `strict` \| `auto` |
 | `coauthor` | bool | Append `Co-authored-by` to git commits the agent writes (default `true`) |
 | `access_key` | string | Shared secret for Web UI / API auth when exposed beyond loopback |
 | `compact_auto_pct` | int | Auto-compaction threshold as % of the context window (default `75`); the same threshold is checked both between turns and after each tool-call batch |
+| `reasoning_effort` | string | Global reasoning intensity: `low` \| `medium` \| `high` \| `xhigh` \| `max`; empty means off |
 | `show_reasoning` | bool | Global default for surfacing the reasoning trace to the Web UI |
 | `workspace_dir` | string | Default working dir for new web sessions; `"auto"` → `~/Desktop/octo` |
 | `tools` | [tools block](#tools-block) | Per-tool behavior knobs |
@@ -39,36 +42,55 @@ file as `config.yaml.bak`.
 | `terminal_title` | bool | TUI only: set the terminal tab/window title to the session name on startup (OSC 2, honoured by Ghostty, iTerm2, Kitty and most modern terminals; default `true`) |
 
 When the agent edits this file, octo validates it right after the write and warns
-in the turn if it no longer parses or has a semantic problem (a mistyped
-`default_model`, a duplicate or half-filled entry) — a broken edit otherwise
+in the turn if it no longer parses or has a semantic problem (a `default`
+pointing at a missing endpoint, a duplicate id or half-filled entry) — a broken edit otherwise
 degrades silently, since octo keeps using the last config that parsed cleanly.
 
-## Model entry
+## Endpoint
 
-Each item in `models:` is a complete, independently-selectable configuration. `--model <name>`
-selects the whole entry; two entries can't share a model string.
+Each item in `endpoints:` bundles the connection params shared by a set of models. The two-level
+shape lets the same model name live under more than one endpoint — say `claude-sonnet-5` via both
+the official Anthropic endpoint and a relay — which the old flat list couldn't express.
 
 | Key | Type | Description |
 |---|---|---|
+| `id` | string | Unique identifier and composite-id prefix; matches `^[a-zA-Z0-9_-]+$`, no `::`. The wizard names it after the provider (`anthropic`, `openai`, `custom`); rename it freely |
+| `name` | string | Optional display name shown in the UI; may differ from `id` |
 | `provider` | string | `anthropic` \| `openai` \| `custom` |
-| `model` | string | The model's identity — also the id used by `--model` and the HTTP API |
-| `protocol` | string | Wire format for the `custom` vendor only: `anthropic` \| `openai` |
-| `base_url` | string | Endpoint override; empty uses the vendor default |
+| `base_url` | string | Endpoint URL; empty uses the vendor default. Required for the `custom` vendor |
 | `api_key` | string | Plaintext fallback used only if the provider's env var is empty (mode `0600`) |
-| `reasoning_effort` | string | `low` \| `medium` \| `high` \| `xhigh` \| `max`; empty = off |
-| `show_reasoning` | bool | Per-entry override of the global `show_reasoning` |
-| `vision` | bool | Whether tools may hand this model images; auto-detected for known models |
+| `protocol` | string | Wire format for the `custom` vendor only: `anthropic` \| `openai` |
+| `lite_model` | string | Optional: name a model in this endpoint's `models` to serve as its compaction lite model |
+| `models` | list of [model](#model) | The models offered through this endpoint |
+
+## Model
+
+Each item in an endpoint's `models:` list is independently selectable. `--model <name>` selects it —
+and with it the endpoint's connection params — while `default` / `lite` reference it by composite id
+`<endpoint-id>::<model>`. Connection settings (`base_url`, `api_key`, `protocol`) and reasoning
+(`reasoning_effort`, `show_reasoning`) live on the endpoint and top level respectively, not here.
+
+| Key | Type | Description |
+|---|---|---|
+| `model` | string | The model id sent to the API (e.g. `claude-sonnet-4-6`) — also the name `--model` and the HTTP API use |
+| `vision` | bool | Whether tools may hand this model images; a model-level capability, auto-detected for known models |
 
 ```yaml
-models:
-  - provider: anthropic
-    model: claude-sonnet-5
-  - provider: custom
+endpoints:
+  - id: anthropic
+    provider: anthropic
+    models:
+      - model: claude-sonnet-5
+        vision: true
+  - id: deepseek
+    provider: custom
     protocol: anthropic
-    model: deepseek-chat
     base_url: https://api.deepseek.com/anthropic
-default_model: claude-sonnet-5
-lite_model: claude-sonnet-5
+    models:
+      - model: deepseek-chat
+default: anthropic::claude-sonnet-5
+lite: anthropic::claude-sonnet-5
+reasoning_effort: ""      # low | medium | high | xhigh | max; empty = off
 permission_mode: interactive
 coauthor: true
 ```
