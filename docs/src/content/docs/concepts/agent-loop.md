@@ -35,8 +35,8 @@ its own — see [History compaction](/docs/concepts/compaction/) for the full me
 A different problem from running out of input context: the provider's *reply* itself hits the
 output token cap mid-thought. octo escalates in up to two ways before giving up cleanly:
 
-1. **Retry the same round at a higher cap.** Both providers default to a 16,384-token first
-   attempt; if that's truncated, one retry goes out at an escalated 32,768-token cap
+1. **Retry the same round at a higher cap.** Both providers default to a 32,768-token first
+   attempt; if that's truncated, one retry goes out at an escalated 65,536-token cap
    (`--max-tokens-escalate`, `0` disables it), replayed from unchanged history rather than
    appending the cut-off reply.
 2. **If still truncated and the reply is plain text (no tool call in progress),** octo appends what
