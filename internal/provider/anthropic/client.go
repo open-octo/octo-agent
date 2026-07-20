@@ -233,12 +233,23 @@ func hasToolUseBlock(blocks []agent.ContentBlock) bool {
 
 // endpointURL returns BaseURL + MessagesPath, applying defaults and trimming
 // any trailing slash on BaseURL so the join is exactly one slash.
+//
+// Most Anthropic-style gateways (api.anthropic.com, the …/anthropic Bailian
+// endpoints) ship a bare base and expect the client to append the full
+// "/v1/messages". A handful of relays bake "/v1" into the base the same way
+// OpenAI-compatible ones do — detect the trailing "/v1" and drop the redundant
+// segment so both shapes resolve.
 func (c *Client) endpointURL() string {
 	base := c.BaseURL
 	if base == "" {
 		base = DefaultBaseURL
 	}
-	return strings.TrimRight(base, "/") + MessagesPath
+	base = strings.TrimRight(base, "/")
+	suffix := MessagesPath // "/v1/messages"
+	if strings.HasSuffix(base, "/v1") {
+		suffix = "/messages"
+	}
+	return base + suffix
 }
 
 // staticPrefixCache picks the cache_control marker for the static system+tools
