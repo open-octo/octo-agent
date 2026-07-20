@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -610,18 +609,15 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 	}
 
 	// PR5 (design §7.1): the wizard builds one endpoint from the collected
-	// ModelEntry (outEntry). The endpoint id follows the implicit-id rule
-	// legacy-<host>-0 — the same rule Load uses for old models: blocks — so a
-	// user who runs the wizard twice against the same base_url sees the same
-	// id and the second run overwrites the first (rather than silently
-	// creating a second endpoint).
-	host := hostFromBaseURLForWizard(outEntry.BaseURL)
-	// Fallback: a named vendor with no base_url yields an ugly "legacy--0"
-	// id. Fall back to the provider name so the id is at least recognisable.
-	if host == "" {
-		host = strings.ToLower(provider)
-	}
-	endpointID := legacyEndpointIDForWizard(host, 0)
+	// ModelEntry (outEntry). The endpoint id is a human-readable name derived
+	// from the provider — "anthropic" for Anthropic, "openai" for OpenAI,
+	// "custom" for Custom — so the user sees a recognisable name instead of
+	// the "legacy-<host>-<n>" form reserved for Load's migration of old flat
+	// configs. Re-running the wizard against the same provider + base_url
+	// reuses the same id and overwrites (rather than silently creating a
+	// second endpoint). If the natural id is already taken by an unrelated
+	// endpoint, a "-1", "-2" ... suffix disambiguates.
+	endpointID := generateEndpointID(outEntry.Provider, outEntry.BaseURL, full.Endpoints)
 
 	// PR5 (design §11.4): the same model name may appear under multiple
 	// endpoints — that's the whole point of the two-level schema (e.g.
@@ -688,29 +684,46 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 	return 0
 }
 
-// hostFromBaseURLForWizard extracts the URL host (lowercased) for use in a
-// legacy-<host>-<n> endpoint ID. Mirrors config.hostFromBaseURL, which is
-// unexported — kept in lockstep so the wizard generates the same id as Load.
-func hostFromBaseURLForWizard(baseURL string) string {
-	u, err := url.Parse(baseURL)
-	if err != nil || u.Host == "" {
-		return strings.ToLower(baseURL)
+// generateEndpointID produces a human-readable endpoint id for the wizard:
+// the provider id for a named vendor ("anthropic", "openai", "kimi", ...),
+// or "custom" for the Custom vendor. The "legacy-<host>-<n>" form is reserved
+// for Load's migration of old flat configs; new wizard entries get a name the
+// user can recognise in the endpoint list.
+//
+// Re-running the wizard against the same provider + base_url reuses the
+// existing endpoint id (overwrite) rather than creating a duplicate. If the
+// natural id is already taken by an unrelated endpoint, "-1", "-2", ... are
+// appended until free. The result always matches ^[a-zA-Z0-9_-]+$.
+func generateEndpointID(provider, baseURL string, existing []config.Endpoint) string {
+	base := provider
+	if base == "" || base == "custom" {
+		base = "custom"
 	}
-	return strings.ToLower(u.Host)
-}
-
-// legacyEndpointIDForWizard builds a "legacy-<host>-<n>" endpoint id, the
-// implicit-id rule shared with config.legacyEndpointID (unexported). Non-
-// alphanumeric host chars are replaced with '-' so the id matches the
-// ^[a-zA-Z0-9_-]+$ endpoint id regex.
-func legacyEndpointIDForWizard(host string, n int) string {
-	safe := strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
-			return r
+	// Overwrite candidate: same provider AND same base_url (both empty counts
+	// as equal — named vendors resolve base_url at runtime, so an empty
+	// base_url is the canonical "this provider's default endpoint").
+	for _, ep := range existing {
+		if ep.Provider == provider && ep.BaseURL == baseURL {
+			return ep.ID
 		}
-		return '-'
-	}, host)
-	return fmt.Sprintf("legacy-%s-%d", safe, n)
+	}
+	taken := func(id string) bool {
+		for _, ep := range existing {
+			if ep.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	if !taken(base) {
+		return base
+	}
+	for n := 1; ; n++ {
+		id := fmt.Sprintf("%s-%d", base, n)
+		if !taken(id) {
+			return id
+		}
+	}
 }
 
 // apiKeyEnvVar is the conventional env var holding a provider's key.
