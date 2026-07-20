@@ -494,24 +494,28 @@ func projectToModelEntry(ep Endpoint, m EndpointModel) ModelEntry {
 // so every config is on the new schema now. Endpoint-level checks always run:
 // id uniqueness/legality, each endpoint has at least one model, model names
 // non-empty, no duplicate models within one endpoint, Default/Lite composite
-// ids resolve. Global scalar fields that moved from per-model to top-level
-// (permission_mode, reasoning_effort, compact_auto_pct) are value-checked too,
-// so a hand edit that bypasses the CLI/API write-path validation still shows up
-// in `octo doctor` and the post-edit config guard.
+// ids resolve. Global scalar fields with a bounded value set are value-checked
+// too (permission_mode, reasoning_effort, compact_auto_pct, language,
+// tools.tool_search.enabled/threshold_pct, memory_backend.type/base_url), so a
+// hand edit that bypasses the CLI/API write-path validation still shows up in
+// `octo doctor` and the post-edit config guard.
 func (c Config) Validate() []string {
 	var problems []string
 
-	// Global scalar fields moved from per-model to top-level (PR5:
-	// permission_mode / reasoning_effort). Their write-path entries — CLI flags
-	// and the server PUT handlers — reject a bad value, but a hand edit of
-	// config.yml bypasses those and then falls back silently at runtime. Check
-	// the value legality here so `octo doctor` and the post-edit config guard
-	// surface a typo. These run regardless of endpoints (a config may carry only
-	// global settings pre-onboarding), so they sit before the no-endpoints early
-	// return below. config is a leaf package, so the accepted sets are spelled
-	// out rather than imported from permission/ (which would cycle). show_reasoning
-	// is a *bool: a bad value fails YAML decode and is caught by Load, so it needs
-	// no value check here.
+	// Global scalar fields with a bounded value set (permission_mode /
+	// reasoning_effort moved here from per-model in PR5; language, the
+	// tool_search knobs and memory_backend were always global). Their write-path
+	// entries — CLI flags and the server PUT handlers — reject a bad value, but a
+	// hand edit of config.yml bypasses those and then falls back silently at
+	// runtime. Check the value legality here so `octo doctor` and the post-edit
+	// config guard surface a typo. These run regardless of endpoints (a config
+	// may carry only global settings pre-onboarding), so they sit before the
+	// no-endpoints early return below. The accepted sets mirror those write-path
+	// entries; config is a leaf package, so the literals are spelled out rather
+	// than imported from permission/ or memorybackend/ (which would cycle). Bool
+	// and free-form string fields need no check: a bad bool fails YAML decode
+	// (caught by Load), and a free-form string (access_key, paths, namespaces)
+	// has nothing to validate against.
 	if pm := strings.ToLower(strings.TrimSpace(c.PermissionMode)); pm != "" &&
 		pm != "interactive" && pm != "auto" && pm != "strict" {
 		problems = append(problems, fmt.Sprintf("permission_mode %q is not one of interactive, auto, strict", c.PermissionMode))
@@ -522,6 +526,27 @@ func (c Config) Validate() []string {
 	}
 	if c.CompactAutoPct < 0 || c.CompactAutoPct > 100 {
 		problems = append(problems, fmt.Sprintf("compact_auto_pct %d is out of range (0–100; 0 means the built-in default)", c.CompactAutoPct))
+	}
+	if lang := strings.ToLower(strings.TrimSpace(c.Language)); lang != "" && lang != "en" && lang != "zh" {
+		problems = append(problems, fmt.Sprintf("language %q is not one of en, zh", c.Language))
+	}
+	if ts := strings.ToLower(strings.TrimSpace(c.Tools.ToolSearch.Enabled)); ts != "" && ts != "auto" && ts != "on" && ts != "off" {
+		problems = append(problems, fmt.Sprintf("tools.tool_search.enabled %q is not one of auto, on, off", c.Tools.ToolSearch.Enabled))
+	}
+	if pct := c.Tools.ToolSearch.ThresholdPct; pct < 0 || pct > 100 {
+		problems = append(problems, fmt.Sprintf("tools.tool_search.threshold_pct %d is out of range (0–100; 0 means the built-in default)", pct))
+	}
+	// memory_backend: an empty Type disables the feature (nothing to check).
+	// When set, Type must be a known backend and base_url is required — except
+	// mem0 in "cloud" mode, which auto-fills base_url (mirrors memorybackend.New).
+	if mt := strings.ToLower(strings.TrimSpace(c.MemoryBackend.Type)); mt != "" {
+		if mt != "hindsight" && mt != "mem0" && mt != "agentmemory" {
+			problems = append(problems, fmt.Sprintf("memory_backend.type %q is not one of hindsight, mem0, agentmemory", c.MemoryBackend.Type))
+		}
+		mem0Cloud := mt == "mem0" && strings.ToLower(strings.TrimSpace(c.MemoryBackend.Mode)) == "cloud"
+		if c.MemoryBackend.BaseURL == "" && !mem0Cloud {
+			problems = append(problems, "memory_backend.base_url is required when memory_backend.type is set")
+		}
 	}
 
 	if len(c.Endpoints) == 0 {

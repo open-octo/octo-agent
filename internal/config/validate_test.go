@@ -72,6 +72,18 @@ func TestConfigValidate_GlobalScalars(t *testing.T) {
 		{"in-range compact_auto_pct", Config{CompactAutoPct: 75}, ""},
 		{"negative compact_auto_pct", Config{CompactAutoPct: -1}, "compact_auto_pct"},
 		{"over-100 compact_auto_pct", Config{CompactAutoPct: 150}, "compact_auto_pct"},
+		{"empty language is fine", Config{}, ""},
+		{"valid language zh", Config{Language: "zh"}, ""},
+		{"bad language", Config{Language: "fr"}, "language"},
+		{"valid tool_search enabled off", Config{Tools: ToolsConfig{ToolSearch: ToolSearchConfig{Enabled: "off"}}}, ""},
+		{"bad tool_search enabled", Config{Tools: ToolsConfig{ToolSearch: ToolSearchConfig{Enabled: "yes"}}}, "tool_search.enabled"},
+		{"in-range tool_search threshold_pct", Config{Tools: ToolsConfig{ToolSearch: ToolSearchConfig{ThresholdPct: 10}}}, ""},
+		{"over-100 tool_search threshold_pct", Config{Tools: ToolsConfig{ToolSearch: ToolSearchConfig{ThresholdPct: 200}}}, "threshold_pct"},
+		{"empty memory_backend is fine", Config{}, ""},
+		{"valid memory_backend", Config{MemoryBackend: MemoryBackendConfig{Type: "hindsight", BaseURL: "http://localhost:8888"}}, ""},
+		{"bad memory_backend type", Config{MemoryBackend: MemoryBackendConfig{Type: "pinecone", BaseURL: "http://x"}}, "memory_backend.type"},
+		{"memory_backend missing base_url", Config{MemoryBackend: MemoryBackendConfig{Type: "mem0"}}, "base_url"},
+		{"mem0 cloud mode needs no base_url", Config{MemoryBackend: MemoryBackendConfig{Type: "mem0", Mode: "cloud"}}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
