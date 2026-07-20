@@ -113,6 +113,9 @@
   function onProviderChange() {
     if (!epPreset || epForm.provider === 'custom') {
       if (epForm.provider === 'custom') {
+        // Named vendors auto-fill their preset URL, which is meaningless for
+        // a self-hosted endpoint — start custom entry from a blank field.
+        epForm.base_url = ''
         autoFilledBaseURL = ''
         // Custom has no registry-pinned wire format and an empty protocol
         // fails at client build time, so the select offers no blank option —
