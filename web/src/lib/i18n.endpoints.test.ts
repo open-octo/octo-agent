@@ -5,10 +5,9 @@ import { en, zh } from './i18n'
 // both en and zh with no missing keys. A missing key would render as the raw
 // key string in the UI, which is the regression this test guards against.
 //
-// This is the PR4b read-only subset of §15.1. The full table also lists
-// CRUD-related keys (add, delete, rename_confirm, error.*) that PR5 will add
-// when the write path lands. Don't assume §15.1 is fully covered just because
-// this test passes — extend ENDPOINT_KEYS in PR5.
+// PR4b added the read-only subset; PR6 extends with CRUD-related keys
+// (add/delete/edit/rename_confirm/error.*/field.*/modal.*). The full §15.1
+// table is now covered.
 const ENDPOINT_KEYS = [
   'settings.endpoints.title',
   'settings.endpoints.empty',
@@ -26,6 +25,35 @@ const ENDPOINT_KEYS = [
   'settings.endpoints.models.vision',
   'settings.endpoints.badge.default',
   'settings.endpoints.badge.lite',
+  // PR6 CRUD keys:
+  'settings.endpoints.add',
+  'settings.endpoints.delete',
+  'settings.endpoints.edit',
+  'settings.endpoints.set_default',
+  'settings.endpoints.set_lite',
+  'settings.endpoints.unset_lite',
+  'settings.endpoints.models.add',
+  'settings.endpoints.models.model',
+  'settings.endpoints.models.vision_hint',
+  'settings.endpoints.rename_confirm',
+  'settings.endpoints.confirm_delete',
+  'settings.endpoints.confirm_delete_model',
+  'settings.endpoints.error.duplicate_id',
+  'settings.endpoints.error.invalid_id',
+  'settings.endpoints.error.not_found',
+  'settings.endpoints.error.model_not_found',
+  'settings.endpoints.error.empty',
+  'settings.endpoints.field.id',
+  'settings.endpoints.field.name',
+  'settings.endpoints.field.provider',
+  'settings.endpoints.field.base_url',
+  'settings.endpoints.field.protocol',
+  'settings.endpoints.field.api_key',
+  'settings.endpoints.field.api_key_hint',
+  'settings.endpoints.modal.add_title',
+  'settings.endpoints.modal.edit_title',
+  'settings.endpoints.modal.save',
+  'settings.endpoints.modal.cancel',
 ] as const
 
 describe('settings.endpoints.* i18n coverage', () => {

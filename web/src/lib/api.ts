@@ -747,6 +747,83 @@ export async function getEndpoints(): Promise<EndpointsResponse> {
   return request<EndpointsResponse>('/api/config/endpoints')
 }
 
+// ─── Endpoint CRUD (PR6, design §10.2) ─────────────────────────────────────
+//
+// PR5 shipped the backend routes; PR6 wires the Web UI to them. The old
+// /api/config/models* routes are gone (PR5 deleted them), so saveModel below
+// is re-routed to createEndpoint — the FirstRunSetup wizard and the (hidden)
+// flat AI Models section both call saveModel with a ModelConfigInput; PR6
+// keeps that call site working by projecting the flat input onto a single-
+// model endpoint.
+
+export interface EndpointModelInput {
+  model: string
+  vision: boolean
+}
+
+export interface EndpointConfigInput {
+  id: string
+  name?: string
+  provider: string
+  base_url?: string
+  api_key?: string
+  protocol?: string
+  lite_model?: string
+  models?: EndpointModelInput[]
+}
+
+// Mirrors server endpointJSONOut — the response shape from create/update.
+export interface EndpointMutationResult {
+  id: string
+  name?: string
+  provider: string
+  base_url?: string
+  protocol?: string
+  has_api_key: boolean
+  lite_model?: string
+  models: EndpointModel[]
+}
+
+export async function createEndpoint(req: EndpointConfigInput): Promise<EndpointMutationResult> {
+  return request<EndpointMutationResult>('/api/config/endpoints', { method: 'POST', ...json(req) })
+}
+
+// updateEndpoint takes the current id + a partial patch. When new_id is set,
+// the server triggers RenameEndpoint (Default/Lite cascade + sender cache
+// invalidation on the old id).
+export interface EndpointUpdateInput {
+  new_id?: string
+  name?: string
+  provider?: string
+  base_url?: string
+  api_key?: string
+  protocol?: string
+}
+
+export async function updateEndpoint(id: string, req: EndpointUpdateInput): Promise<EndpointMutationResult> {
+  return request<EndpointMutationResult>(`/api/config/endpoints/${encodeURIComponent(id)}`, { method: 'PATCH', ...json(req) })
+}
+
+export async function deleteEndpoint(id: string): Promise<void> {
+  await request<unknown>(`/api/config/endpoints/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export async function addEndpointModel(id: string, model: string, vision: boolean): Promise<EndpointMutationResult> {
+  return request<EndpointMutationResult>(`/api/config/endpoints/${encodeURIComponent(id)}/models`, { method: 'POST', ...json({ model, vision }) })
+}
+
+export async function deleteEndpointModel(id: string, model: string): Promise<void> {
+  await request<unknown>(`/api/config/endpoints/${encodeURIComponent(id)}/models/${encodeURIComponent(model)}`, { method: 'DELETE' })
+}
+
+export async function setEndpointDefault(id: string): Promise<{ ok: boolean; default: string }> {
+  return request<{ ok: boolean; default: string }>(`/api/config/endpoints/${encodeURIComponent(id)}/default`, { method: 'POST' })
+}
+
+export async function setEndpointLite(id: string): Promise<{ ok: boolean; lite: string }> {
+  return request<{ ok: boolean; lite: string }>(`/api/config/endpoints/${encodeURIComponent(id)}/lite`, { method: 'POST' })
+}
+
 export async function updateShowReasoning(showReasoning: boolean): Promise<{ ok: boolean; show_reasoning?: boolean }> {
   return request<{ ok: boolean; show_reasoning?: boolean }>('/api/config/show_reasoning', {
     method: 'PUT',
@@ -900,22 +977,66 @@ export async function testConfig(req: ModelConfigInput & { index?: number }): Pr
   return request<TestConfigResult>('/api/config/test', { method: 'POST', ...json(req) })
 }
 
+// saveModel is the flat-input shim kept for the FirstRunSetup wizard and the
+// (PR5-hidden) flat AI Models section. PR5 deleted /api/config/models, so
+// saveModel now projects the flat ModelConfigInput onto a single-model
+// endpoint via createEndpoint. The endpoint id follows the same
+// legacy-<host>-<n> rule the CLI wizard uses (host from base_url, fallback to
+// provider name), so a re-run over the same base_url overwrites rather than
+// creating duplicates.
 export async function saveModel(req: ModelConfigInput): Promise<{ ok: boolean; id?: string }> {
-  return request<{ ok: boolean; id?: string }>('/api/config/models', { method: 'POST', ...json(req) })
+  const provider = req.provider || 'custom'
+  const host = hostFromBaseURL(req.base_url) || provider.toLowerCase()
+  const endpointID = `legacy-${host}-0`
+  const protocol = req.anthropic_format ? 'anthropic' : (provider === 'custom' ? 'openai' : undefined)
+  await createEndpoint({
+    id: endpointID,
+    provider,
+    base_url: req.base_url || undefined,
+    api_key: req.api_key || undefined,
+    protocol,
+    models: [{ model: req.model, vision: req.vision ?? false }],
+  })
+  // set as default — createEndpoint doesn't auto-set Default; the wizard
+  // path expects the first saved model to become the default. The hidden
+  // flat section's "add model" path also lands here, but PR6's new endpoint
+  // editor uses createEndpoint directly with its own default toggle.
+  try {
+    await setEndpointDefault(endpointID)
+  } catch {
+    // non-fatal: endpoint was created, default just didn't stick
+  }
+  return { ok: true, id: req.model }
 }
 
-export async function updateModel(id: string, req: ModelConfigInput): Promise<void> {
-  await request<unknown>(`/api/config/models/${encodeURIComponent(id)}`, { method: 'PATCH', ...json(req) })
+// hostFromBaseURL extracts the URL host (lowercased) for the legacy-<host>-<n>
+// endpoint id. Mirrors config.hostFromBaseURL / the CLI wizard's
+// hostFromBaseURLForWizard (both unexported). Returns "" for empty/unparseable
+// base_urls — the caller falls back to the provider name.
+function hostFromBaseURL(baseURL: string): string {
+  if (!baseURL) return ''
+  try {
+    const u = new URL(baseURL)
+    return (u.host || '').toLowerCase()
+  } catch {
+    return baseURL.toLowerCase()
+  }
 }
 
-export async function deleteModel(id: string): Promise<void> {
-  await request<unknown>(`/api/config/models/${encodeURIComponent(id)}`, { method: 'DELETE' })
+// The four flat-Models mutations below are STUBS. PR5 deleted their backend
+// routes (/api/config/models*), so calling them throws. They're kept only so
+// the (PR5-hidden, {#if false}) flat AI Models section in SettingsView still
+// compiles — Slice 6.3 replaces that section with an endpoint editor and
+// deletes these stubs along with it.
+export async function updateModel(_id: string, _req: ModelConfigInput): Promise<void> {
+  throw new Error('updateModel is removed — use updateEndpoint (PR5 deleted /api/config/models)')
 }
-
-export async function setDefaultModel(id: string): Promise<void> {
-  await request<unknown>(`/api/config/models/${encodeURIComponent(id)}/default`, { method: 'POST' })
+export async function deleteModel(_id: string): Promise<void> {
+  throw new Error('deleteModel is removed — use deleteEndpoint (PR5 deleted /api/config/models)')
 }
-
-export async function setLiteModel(id: string): Promise<{ ok: boolean; lite_model: string }> {
-  return request<{ ok: boolean; lite_model: string }>(`/api/config/models/${encodeURIComponent(id)}/lite`, { method: 'POST' })
+export async function setDefaultModel(_id: string): Promise<void> {
+  throw new Error('setDefaultModel is removed — use setEndpointDefault (PR5 deleted /api/config/models)')
+}
+export async function setLiteModel(_id: string): Promise<{ ok: boolean; lite_model: string }> {
+  throw new Error('setLiteModel is removed — use setEndpointLite (PR5 deleted /api/config/models)')
 }

@@ -1,5 +1,13 @@
 # Endpoint 二级分组设计文档
 
+> **文档状态说明（2026-07-20，PR6）**
+>
+> 本文档是 PR1-3 期间写的设计快照，描述了**引入 endpoint 二级分组时的设计意图**。其中 `Models` 字段被描述为"权威字段"、Save 写扁平格式等——这些在 **PR5（PR #1624）** 后已过时：PR5 删除了 `Config.Models`/`DefaultModel`/`LiteModel`，Save 改写 `endpoints:` 格式，per-entry reasoning 简化到全局，老 `/api/config/models*` 路由全删。
+>
+> **当前状态以 `dev-docs/endpoint-pr5-impl.md` 为准**——它是 PR5 的实施设计，含 11 项 grill-me 决策 + 技术事实纠正（§6.1 "扫 channels.yml" 是错的，channel 绑定实际在 session jsonl）。本文档保留作为**历史决策记录**，不再逐章修订；读本文档时请对照 PR5 impl 的偏离清单。
+>
+> PR6（PR 待开）补齐 Web UI CRUD 编辑器 + doctor per-endpoint 卡片输出（§13.2）+ §15.1 剩余 i18n key。
+
 ## 1. 背景与目标
 
 ### 1.1 痛点
@@ -450,13 +458,15 @@ RESTful 资源嵌套，endpoint 是父资源、model 是子资源。改名走 `P
 
 | PR | 内容 | 风险 | 依赖 |
 |---|---|---|---|
-| **PR1** | config 结构 + 读兼容 + Validate/Repair + ResolveDefault + ParseModelFlag。引入 `Endpoints` 字段，`normalize()` 老扁平 → endpoints 内存，**Save 仍写老扁平格式** | 高 | 无 |
-| **PR2** | 读路径适配：`ImplicitLiteModel` 签名改 `(endpoint, model)`；session `Model`/`ModelConfig` 读时兼容；channel store 读时升级 | 中 | PR1 |
-| **PR3** | flock 并发保护 + endpoint 改名级联（跨文件 tmp+rename）+ `invalidateEndpointSenders` | 高 | PR1+PR2 |
-| **PR4** | 写路径切换（Save 写 endpoints 格式）+ 三处 UI 两级（TUI picker / IM `/model` 分组 / Web 设置页 + 新 API） | 中 | PR1-3 |
-| **PR5** | CLI（`octo config` 向导 / `octo config show` / `octo config --fix` / `octo doctor`）+ dev-docs 文档 | 低 | PR1-4 |
+| **PR1** | config 结构 + 读兼容 + Validate/Repair + ResolveDefault + ParseModelFlag。引入 `Endpoints` 字段，`normalize()` 老扁平 → endpoints 内存，**Save 仍写老扁平格式** | 高 | 无 | ✅ 已合并 #1610 |
+| **PR2** | 读路径适配：`ImplicitLiteModel` 签名改 `(endpoint, model)`；session `Model`/`ModelConfig` 读时兼容；channel store 读时升级 | 中 | PR1 | ✅ 已合并 #1613 |
+| **PR3** | flock 并发保护 + endpoint 改名级联（跨文件 tmp+rename）+ `invalidateEndpointSenders` | 高 | PR1+PR2 | ✅ 已合并 #1617 |
+| **PR4a** | ~~写路径切换（Save 写 endpoints 格式）~~ — **取消**，并入 PR5（写路径切换要求所有 Models 调用点同步迁移，协调成本大） | — | — | ❌ 取消 |
+| **PR4b** | 三处 UI 两级只读（TUI picker / IM `/model` 分组 / Web 设置页只读卡片）+ GET `/api/config/endpoints` + i18n 只读子集 | 中 | PR1-3 | ✅ 已合并 #1623 |
+| **PR5** | Save 写路径切换（删 `Config.Models` + Save 写 endpoints）+ 7 个 endpoint CRUD 后端 + CLI（`octo config` 向导/show/doctor）+ reasoning 简化到全局 + 老端点全删 + 文档 | 高 | PR1-4b | ✅ 已合并 #1624 |
+| **PR6** | Web UI CRUD 编辑器（endpoint 卡片可编辑）+ doctor per-endpoint 卡片输出（§13.2）+ §15.1 剩余 i18n key + 文档修订 | 中 | PR5 | 🚧 进行中 |
 
-**PR1-3 期间老用户配置仍是扁平格式**——这是"零摩擦"的体现，PR4 一次性切换写路径 + UI，此时底层全已就绪。
+**PR1-3 期间老用户配置仍是扁平格式**——这是"零摩擦"的体现，PR4b/PR5 一次性切换写路径 + UI，此时底层全已就绪。
 
 ---
 
