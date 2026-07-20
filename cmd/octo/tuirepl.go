@@ -79,12 +79,12 @@ func runTUI(cfg replConfig) int {
 		cfg.a.Gate = newCLIGate(cfg.permEngine, sink)
 	}
 	tools.SetAsker(newREPLAsker(sink))
-	// Recompute cfg.tools now that the asker is registered — DefaultToolsFor
+	// Recompute m.cfg.tools now that the asker is registered — DefaultToolsFor
 	// gates ask_user_question on activeAsker != nil, and chat.go computed
 	// cfg.tools BEFORE this SetAsker ran, so the tool was silently absent
 	// for the whole TUI session. Mirrors what mcpReadyMsg does below.
 	if cfg.executor != nil {
-		cfg.tools = tools.DefaultToolsFor(cfg.modelName)
+		m.cfg.tools = tools.DefaultToolsFor(cfg.modelName)
 	}
 
 	// Sub-agent manager: wire the onExit hook so completion notifications ride
