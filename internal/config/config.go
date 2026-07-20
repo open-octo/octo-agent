@@ -494,9 +494,35 @@ func projectToModelEntry(ep Endpoint, m EndpointModel) ModelEntry {
 // so every config is on the new schema now. Endpoint-level checks always run:
 // id uniqueness/legality, each endpoint has at least one model, model names
 // non-empty, no duplicate models within one endpoint, Default/Lite composite
-// ids resolve.
+// ids resolve. Global scalar fields that moved from per-model to top-level
+// (permission_mode, reasoning_effort, compact_auto_pct) are value-checked too,
+// so a hand edit that bypasses the CLI/API write-path validation still shows up
+// in `octo doctor` and the post-edit config guard.
 func (c Config) Validate() []string {
 	var problems []string
+
+	// Global scalar fields moved from per-model to top-level (PR5:
+	// permission_mode / reasoning_effort). Their write-path entries — CLI flags
+	// and the server PUT handlers — reject a bad value, but a hand edit of
+	// config.yml bypasses those and then falls back silently at runtime. Check
+	// the value legality here so `octo doctor` and the post-edit config guard
+	// surface a typo. These run regardless of endpoints (a config may carry only
+	// global settings pre-onboarding), so they sit before the no-endpoints early
+	// return below. config is a leaf package, so the accepted sets are spelled
+	// out rather than imported from permission/ (which would cycle). show_reasoning
+	// is a *bool: a bad value fails YAML decode and is caught by Load, so it needs
+	// no value check here.
+	if pm := strings.ToLower(strings.TrimSpace(c.PermissionMode)); pm != "" &&
+		pm != "interactive" && pm != "auto" && pm != "strict" {
+		problems = append(problems, fmt.Sprintf("permission_mode %q is not one of interactive, auto, strict", c.PermissionMode))
+	}
+	if re := strings.ToLower(strings.TrimSpace(c.ReasoningEffort)); re != "" &&
+		re != "off" && re != "low" && re != "medium" && re != "high" && re != "xhigh" && re != "max" {
+		problems = append(problems, fmt.Sprintf("reasoning_effort %q is not one of off, low, medium, high, xhigh, max", c.ReasoningEffort))
+	}
+	if c.CompactAutoPct < 0 || c.CompactAutoPct > 100 {
+		problems = append(problems, fmt.Sprintf("compact_auto_pct %d is out of range (0–100; 0 means the built-in default)", c.CompactAutoPct))
+	}
 
 	if len(c.Endpoints) == 0 {
 		return problems
