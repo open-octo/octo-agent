@@ -85,10 +85,19 @@
     if (epModalOpen) epModalEl?.focus()
   })
 
-  function openAddEndpoint() {
-    editingEpId = null
-    epForm = { id: '', name: '', provider: 'anthropic', base_url: '', api_key: '', protocol: '' }
-    epModalOpen = true
+  // Track the last provider whose preset base_url we auto-filled, so that
+  // switching providers only overwrites base_url when the user hasn't hand-edited it.
+  let autoFilledBaseURL = $state('')
+
+  function onProviderChange() {
+    const preset = providers.find(p => p.id === epForm.provider)
+    if (!preset || epForm.provider === 'custom') return
+    // Only auto-fill when base_url is empty or still carries the previous
+    // auto-filled value — preserves a hand-typed relay/proxy URL.
+    if (epForm.base_url === '' || epForm.base_url === autoFilledBaseURL) {
+      epForm.base_url = preset.base_url
+      autoFilledBaseURL = preset.base_url
+    }
   }
 
   function openEditEndpoint(ep: EndpointConfig) {
@@ -101,11 +110,19 @@
       api_key: '', // never prefill the key — server only returns has_api_key
       protocol: ep.protocol ?? '',
     }
+    autoFilledBaseURL = ep.base_url ?? ''
     epModalOpen = true
   }
 
   function closeEpModal() {
     epModalOpen = false
+  }
+
+  function openAddEndpoint() {
+    editingEpId = null
+    epForm = { id: '', name: '', provider: 'anthropic', base_url: '', api_key: '', protocol: '' }
+    autoFilledBaseURL = ''
+    epModalOpen = true
   }
 
   async function submitEndpoint() {
@@ -836,7 +853,7 @@
         </label>
         <label class="ep-field">
           <span class="ep-label">{$t('settings.endpoints.field.provider')}</span>
-          <select class="sel" bind:value={epForm.provider}>
+          <select class="sel" bind:value={epForm.provider} onchange={onProviderChange}>
             {#each providers as p}
               <option value={p.id}>{p.name}</option>
             {/each}
