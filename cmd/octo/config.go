@@ -660,17 +660,21 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 	full.UpsertEndpoint(ep)
 	cid := endpointID + "::" + outEntry.Model
 
-	// PR5 (design §7.1 step 7): explicit "set as default?" prompt. Default
-	// yes on first run / when no Default exists; default no when overwriting
-	// an existing default the user might want to keep.
-	setDefaultDefault := firstRun || full.Default == ""
-	setDefault, ok := pickYesNo(tty, reader, stdin, stdout,
-		fmt.Sprintf("Set %s as the default model?", cid), setDefaultDefault)
-	if !ok {
-		return cancelWizard(stderr)
-	}
-	if setDefault {
+	// On first run the very first model becomes the default without asking —
+	// same as the web first-run setup (saveModel in web/src/lib/api.ts). When
+	// the wizard is re-run later to add another model, ask before touching the
+	// default, so adding a model doesn't silently steal the existing default.
+	if firstRun {
 		full.SetDefaultComposite(cid)
+	} else {
+		setDefault, ok := pickYesNo(tty, reader, stdin, stdout,
+			fmt.Sprintf("Set %s as the default model?", cid), full.Default == "")
+		if !ok {
+			return cancelWizard(stderr)
+		}
+		if setDefault {
+			full.SetDefaultComposite(cid)
+		}
 	}
 
 	if err := full.Save(); err != nil {
