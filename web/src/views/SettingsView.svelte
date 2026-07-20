@@ -88,16 +88,38 @@
   // Track the last provider whose preset base_url we auto-filled, so that
   // switching providers only overwrites base_url when the user hasn't hand-edited it.
   let autoFilledBaseURL = $state('')
+  // Toggle API key visibility in the endpoint modal.
+  let epShowKey = $state(false)
+
+  // Resolve the ProviderPreset for the current epForm.provider so the template
+  // can show the "Get API key" link, variant chips, and lock base_url for named vendors.
+  let epPreset = $derived(providers.find(p => p.id === epForm.provider) ?? null)
+  // Named vendors (custom_endpoint=false) have a fixed base_url resolved at
+  // runtime — the field is readonly so the user can't break the endpoint.
+  // Custom vendor (or an empty provider) unlocks it for free-form entry.
+  let epBaseUrlLocked = $derived(!!epPreset && !epPreset.custom_endpoint)
+  let epVariants = $derived(epPreset?.endpoint_variants ?? [])
+
+  function epVariantLabel(v: api.EndpointVariant): string {
+    if (v.label_key) {
+      const tr = $t(v.label_key)
+      if (tr && tr !== v.label_key) return tr
+    }
+    return v.label || v.base_url
+  }
 
   function onProviderChange() {
-    const preset = providers.find(p => p.id === epForm.provider)
-    if (!preset || epForm.provider === 'custom') return
+    if (!epPreset || epForm.provider === 'custom') {
+      if (epForm.provider === 'custom') autoFilledBaseURL = ''
+      return
+    }
     // Only auto-fill when base_url is empty or still carries the previous
     // auto-filled value — preserves a hand-typed relay/proxy URL.
     if (epForm.base_url === '' || epForm.base_url === autoFilledBaseURL) {
-      epForm.base_url = preset.base_url
-      autoFilledBaseURL = preset.base_url
+      epForm.base_url = epPreset.base_url
+      autoFilledBaseURL = epPreset.base_url
     }
+    epShowKey = false
   }
 
   function openEditEndpoint(ep: EndpointConfig) {
@@ -111,6 +133,7 @@
       protocol: ep.protocol ?? '',
     }
     autoFilledBaseURL = ep.base_url ?? ''
+    epShowKey = false
     epModalOpen = true
   }
 
@@ -122,6 +145,7 @@
     editingEpId = null
     epForm = { id: '', name: '', provider: 'anthropic', base_url: '', api_key: '', protocol: '' }
     autoFilledBaseURL = ''
+    epShowKey = false
     epModalOpen = true
   }
 
@@ -833,15 +857,15 @@
       <div class="modal-body ep-form">
         <label class="ep-field">
           <span class="ep-label">{$t('settings.endpoints.field.id')}</span>
-          <input class="input" bind:value={epForm.id} placeholder="relay-a" />
+          <input class="ep-input" bind:value={epForm.id} placeholder="relay-a" />
         </label>
         <label class="ep-field">
           <span class="ep-label">{$t('settings.endpoints.field.name')}</span>
-          <input class="input" bind:value={epForm.name} placeholder={$t('settings.endpoints.field.name')} />
+          <input class="ep-input" bind:value={epForm.name} placeholder={$t('settings.endpoints.field.name')} />
         </label>
         <label class="ep-field">
           <span class="ep-label">{$t('settings.endpoints.field.provider')}</span>
-          <select class="sel" bind:value={epForm.provider} onchange={onProviderChange}>
+          <select class="ep-input" bind:value={epForm.provider} onchange={onProviderChange}>
             {#each providers as p}
               <option value={p.id}>{p.name}</option>
             {/each}
@@ -850,16 +874,36 @@
         </label>
         <label class="ep-field">
           <span class="ep-label">{$t('settings.endpoints.field.base_url')}</span>
-          <input class="input" bind:value={epForm.base_url} placeholder="https://api.example.com" />
+          <input class="ep-input" bind:value={epForm.base_url} readonly={epBaseUrlLocked} placeholder="https://api.example.com" />
+          {#if epVariants.length > 0}
+            <div class="variants">
+              {#each epVariants as v (v.base_url)}
+                <button type="button" class="variant-chip" class:active={epForm.base_url === v.base_url} onclick={() => { epForm.base_url = v.base_url; autoFilledBaseURL = v.base_url }}>
+                  {epVariantLabel(v)}
+                </button>
+              {/each}
+            </div>
+          {/if}
         </label>
+
+        <div class="ep-divider"></div>
+
         <label class="ep-field">
           <span class="ep-label">{$t('settings.endpoints.field.api_key')}</span>
-          <input class="inp" type="password" bind:value={epForm.api_key} placeholder={$t('settings.endpoints.field.api_key_hint')} />
+          <div class="key-row">
+            <input class="ep-input" type={epShowKey ? 'text' : 'password'} bind:value={epForm.api_key} placeholder={$t('settings.endpoints.field.api_key_hint')} />
+            <button type="button" class="key-toggle" onclick={() => (epShowKey = !epShowKey)} title={epShowKey ? 'Hide' : 'Show'}>
+              <iconify-icon icon={epShowKey ? 'ant-design:eye-invisible-outlined' : 'ant-design:eye-outlined'} width="15"></iconify-icon>
+            </button>
+          </div>
+          {#if epPreset?.website_url}
+            <a class="field-link" href={epPreset.website_url} target="_blank" rel="noreferrer">{$t('models.get_apikey')}</a>
+          {/if}
         </label>
         {#if epForm.provider === 'custom'}
           <label class="ep-field">
             <span class="ep-label">{$t('settings.endpoints.field.protocol')}</span>
-            <select class="sel" bind:value={epForm.protocol}>
+            <select class="ep-input" bind:value={epForm.protocol}>
               <option value="">(auto)</option>
               <option value="anthropic">anthropic</option>
               <option value="openai">openai</option>
@@ -956,16 +1000,44 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 }
 .ep-add-model-input { flex: 1; min-width: 140px; }
 .ep-vision-toggle { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-tertiary); }
-.ep-form { display: flex; flex-direction: column; gap: 16px; }
+.ep-form { display: flex; flex-direction: column; gap: 14px; }
 .ep-field { display: flex; flex-direction: column; gap: 6px; }
 .ep-label { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
-.ep-form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.ep-input {
+  width: 100%; height: 36px; padding: 0 12px;
+  border: 1px solid var(--border); border-radius: 8px; font-size: 13px;
+  color: var(--text); font-family: inherit; background: var(--bg-container); outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.ep-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 3px rgba(5,145,255,0.12); }
+.ep-input[readonly] { background: var(--bg-subtle, rgba(0,0,0,0.03)); color: var(--text-tertiary); cursor: not-allowed; }
+select.ep-input { cursor: pointer; }
+.ep-divider { height: 1px; margin: 4px -24px; background: var(--border-table); }
+.key-row { display: flex; align-items: center; gap: 8px; }
+.key-row .ep-input { flex: 1; }
+.key-toggle {
+  width: 36px; height: 36px; border: 1px solid var(--border); background: var(--bg-container);
+  border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; color: var(--text-tertiary); flex: 0 0 auto;
+}
+.key-toggle:hover { border-color: var(--blue-5); color: var(--blue-5); }
+.field-link { font-size: 12px; color: var(--blue-6); text-decoration: none; }
+.field-link:hover { text-decoration: underline; }
+.variants { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.variant-chip {
+  height: 26px; padding: 0 10px; border: 1px solid var(--border); background: var(--bg-container);
+  border-radius: 13px; font-size: 12px; color: var(--text-secondary); cursor: pointer;
+  font-family: inherit; transition: all 0.15s;
+}
+.variant-chip:hover { border-color: var(--blue-5); color: var(--blue-5); }
+.variant-chip.active { border-color: var(--blue-6); background: rgba(5,145,255,0.08); color: var(--blue-6); }
+.ep-form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
 .ep-form-actions .btn-secondary,
-.ep-form-actions .btn-primary { height: 34px; }
+.ep-form-actions .btn-primary { height: 36px; border-radius: 8px; }
 
 .btn-add {
-  height: 30px; padding: 0 12px; border: 1px solid var(--border); background: var(--bg-container);
-  border-radius: 6px; display: flex; align-items: center; gap: 6px;
+  height: 36px; padding: 0 14px; border: 1px solid var(--border); background: var(--bg-container);
+  border-radius: 8px; display: flex; align-items: center; gap: 6px;
   font-size: 13px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
 }
 .btn-add:hover { border-color: var(--blue-5); color: var(--blue-5); }
