@@ -58,7 +58,8 @@ func (ReadFileTool) Definition() agent.ToolDefinition {
 			"working directory. Refuses binary extensions (executables, archives, " +
 			"PDFs, DBs) and blocking device files (/dev/random, /dev/tty etc). " +
 			"Image files (.png, .jpg, .jpeg, .gif, .webp, .bmp, .tiff, .heic, .ico) " +
-			"are returned as image content for multimodal model consumption.",
+			"are returned as image content for multimodal model consumption, or a " +
+			"refusal if the active model does not accept image input.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
