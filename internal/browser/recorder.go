@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 )
@@ -268,7 +269,28 @@ func (r *Recorder) Start(ctx context.Context) error {
 // instrumentPageSession instruments a newly attached tab (a page target) the
 // same way the top document is instrumented, plus navigation capture — the demo
 // may navigate the new tab (or drive an SPA in it) before touching anything.
+//
+// Race fix: a tab the demonstration itself opened (target=_blank / window.open)
+// starts loading immediately, and the user can click in it before our
+// instrumentation finishes — any events before the captureScript is injected
+// are lost. We close that window by pausing the page with Page.stopLoading the
+// moment we attach, running the full instrumentation, then refreshing the
+// document via Page.navigate to the current URL so the recorder is in place
+// before anything can be clicked. The user never sees an interactive-but-
+// uninstrumented page.
 func (r *Recorder) instrumentPageSession(ctx context.Context, session string) {
+	// Pause loading immediately so the page can't finish rendering (and can't be
+	// clicked) before the recorder is installed. Best-effort: a page that already
+	// finished loading is unaffected, and one that never loads still instruments.
+	_, _ = r.page.cli.call(ctx, session, "Page.stopLoading", nil)
+	// Snapshot the current URL before reload — stopLoading may leave the page in
+	// a loading state whose URL is the in-flight request, not the final one.
+	curURL := ""
+	if res, err := r.page.cli.call(ctx, session, "Runtime.evaluate", map[string]any{"expression": "location.href"}); err == nil {
+		var u string
+		_ = json.Unmarshal(res, &u)
+		curURL = u
+	}
 	// Enable the domains ourselves rather than depend on the browser watcher's
 	// async registration having run first — same reasoning as instrumentOOPIF.
 	for _, d := range []string{"Page.enable", "Runtime.enable", "DOM.enable"} {
@@ -280,6 +302,13 @@ func (r *Recorder) instrumentPageSession(ctx context.Context, session string) {
 		return
 	}
 	r.watchNavigations(ctx, session)
+	// Recorder is in place — refresh the document so the injected captureScript
+	// (via addScriptToEvaluateOnNewDocument) fires on the fresh page and the
+	// user sees a fully-loaded page. Page.navigate to the current URL; if the
+	// URL is non-navigable (data: / blob: / chrome-error:) skip the reload.
+	if curURL != "" && !strings.HasPrefix(curURL, "data:") && !strings.HasPrefix(curURL, "blob:") && !strings.HasPrefix(curURL, "chrome-error:") {
+		_, _ = r.page.cli.call(ctx, session, "Page.navigate", map[string]any{"url": curURL})
+	}
 }
 
 // watchNavigations records top-level navigations on one page session: both

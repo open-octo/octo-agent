@@ -206,6 +206,84 @@ func TestRecorderCapturesNewTab(t *testing.T) {
 	}
 }
 
+// TestRecorderCapturesNewTab_ClickBeforeInstrument: the user clicks in a freshly
+// opened tab immediately — before instrumentation would normally finish. The
+// stopLoading fix guarantees the page cannot be interacted with until the
+// recorder is in place, so the click must still be captured. Regression test for
+// the race where early new-tab clicks were silently lost.
+func TestRecorderCapturesNewTab_ClickBeforeInstrument(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/b", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>b</title><button id="bb">B</button>`))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>a</title><a id="open" href="/b" target="_blank">Open</a>`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#open", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	rec := NewRecorder(page)
+	if err := rec.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer rec.Stop()
+
+	np, err := b.ClickFollow(ctx, page, "#open")
+	if err != nil {
+		t.Fatalf("open new tab: %v", err)
+	}
+	if np == page {
+		t.Fatal("click did not open a new tab")
+	}
+	// Wait for the button to be visible. stopLoading pauses the load; the
+	// recorder then reloads the page, so #bb only appears after the reload
+	// completes and the recorder is fully in place — exactly when it's safe to
+	// click without racing instrumentation.
+	if err := np.WaitFor(ctx, "#bb", testWaitTimeout); err != nil {
+		t.Fatalf("wait #bb after reload: %v", err)
+	}
+	// Now click immediately and verify capture — no extra sleep for instrument.
+	if err := np.Click(ctx, "#bb"); err != nil {
+		t.Fatalf("click #bb: %v", err)
+	}
+	found := false
+	for i := 0; i < 50; i++ {
+		time.Sleep(100 * time.Millisecond)
+		for _, e := range rec.Events() {
+			if e.Type == "click" && e.Selector == "#bb" {
+				found = true
+			}
+		}
+		if found {
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("immediate click in the new tab was not captured (race condition): %+v", rec.Events())
+	}
+	// Verify no duplicate clicks were captured (reload shouldn't re-trigger).
+	count := 0
+	for _, e := range rec.Events() {
+		if e.Type == "click" && e.Selector == "#bb" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly 1 captured click on #bb, got %d: %+v", count, rec.Events())
+	}
+}
+
 // TestRecorderCapturesEnter: Enter in a text input is captured with the field's
 // current value (change never fires without a blur); Enter in a textarea is a
 // newline, not a submit, and must not be captured.
