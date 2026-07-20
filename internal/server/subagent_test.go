@@ -126,8 +126,8 @@ func (s *systemRecordingSender) StreamMessagesWithTools(_ context.Context, _, sy
 func TestEnableSubAgentTools_RefreshesMemoryBackendBeforeBakingGuidance(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
-		Models:       []config.ModelEntry{{Provider: "openai", Model: "gpt-4o"}},
-		DefaultModel: "gpt-4o",
+		Endpoints: []config.Endpoint{{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}}},
+		Default:   "ep-a::gpt-4o",
 		MemoryBackend: config.MemoryBackendConfig{
 			Type:    "hindsight",
 			BaseURL: "http://localhost:8888",

@@ -13,8 +13,8 @@ import (
 func TestBuildAgent_HonorsCompactConfig(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
-		Models:         []config.ModelEntry{{Provider: "openai", Model: "gpt-4o"}},
-		DefaultModel:   "gpt-4o",
+		Endpoints:      []config.Endpoint{{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}}},
+		Default:        "ep-a::gpt-4o",
 		CompactAutoPct: 70,
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
@@ -31,8 +31,8 @@ func TestBuildAgent_HonorsCompactConfig(t *testing.T) {
 func TestBuildAgent_CompactDefaultsWhenUnset(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
-		Models:       []config.ModelEntry{{Provider: "openai", Model: "gpt-4o"}},
-		DefaultModel: "gpt-4o",
+		Endpoints: []config.Endpoint{{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}}},
+		Default:   "ep-a::gpt-4o",
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 

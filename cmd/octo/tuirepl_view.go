@@ -1233,8 +1233,11 @@ func (m *tuiModel) dispatchModel(name string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// setModelAsDefault persists name as default_model in ~/.octo/config.yml,
-// keeping all existing entries intact.
+// setModelAsDefault persists name as the default composite id in
+// ~/.octo/config.yml. name may be a bare model id (legacy form; resolved to
+// a composite id via EntryByModel's bare-model path, picking the default
+// endpoint when ambiguous) or a composite id "<endpoint>::<model>" (PR5
+// form, used directly).
 func setModelAsDefault(name string) error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -1243,7 +1246,33 @@ func setModelAsDefault(name string) error {
 	if _, ok := cfg.EntryByModel(name); !ok {
 		return fmt.Errorf("model %q is not configured", name)
 	}
-	cfg.DefaultModel = name
+	// If name is already a composite id, use it verbatim. If it's a bare
+	// model, EntryByModel's bare-model path already picked the right endpoint
+	// (default-priority) — reconstruct the composite id from the first
+	// endpoint that contains the model under the default endpoint's id.
+	cid := name
+	if !strings.Contains(name, "::") {
+		// Bare model: find the composite id the same way EntryByModel does.
+		if cfg.Default != "" {
+			if defEp, defM, ok := cfg.ResolveDefault(); ok && defM.Model == name {
+				cid = defEp.CompositeID(defM.Model)
+			}
+		}
+		if !strings.Contains(cid, "::") {
+			for _, ep := range cfg.Endpoints {
+				for _, m := range ep.Models {
+					if m.Model == name {
+						cid = ep.CompositeID(m.Model)
+						break
+					}
+				}
+				if strings.Contains(cid, "::") {
+					break
+				}
+			}
+		}
+	}
+	cfg.SetDefaultComposite(cid)
 	return cfg.Save()
 }
 

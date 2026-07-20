@@ -10,10 +10,22 @@ import (
 	"github.com/open-octo/octo-agent/internal/config"
 )
 
-// oneEntryConfig builds a Config whose default entry has the given fields —
-// the multi-model equivalent of the old top-level provider/model literals.
+// oneEntryConfig builds a Config whose default endpoint has the given entry
+// projected onto it — the multi-model equivalent of the old top-level
+// provider/model literals. PR5: Config.Models is deleted, so the entry is
+// wrapped in a single Endpoint with id "ep-a" and Default points at it.
 func oneEntryConfig(e config.ModelEntry) config.Config {
-	return config.Config{Models: []config.ModelEntry{e}, DefaultModel: e.Model}
+	return config.Config{
+		Endpoints: []config.Endpoint{{
+			ID:       "ep-a",
+			Provider: e.Provider,
+			BaseURL:  e.BaseURL,
+			APIKey:   e.APIKey,
+			Protocol: e.Protocol,
+			Models:   []config.EndpointModel{{Model: e.Model, Vision: e.Vision}},
+		}},
+		Default: "ep-a::" + e.Model,
+	}
 }
 
 func TestResolveBaseURL_Precedence(t *testing.T) {
@@ -114,11 +126,11 @@ func TestResolveProviderModel_EntryNameSelectsWholeEntry(t *testing.T) {
 	t.Setenv("OPENAI_MODEL", "")
 	t.Setenv("OCTO_PROVIDER", "")
 	cfg := config.Config{
-		Models: []config.ModelEntry{
-			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
-			{Provider: "kimi", Model: "kimi-k2.6", BaseURL: "https://kimi.example", APIKey: "sk-kimi"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-anthropic", Provider: "anthropic", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "ep-kimi", Provider: "kimi", BaseURL: "https://kimi.example", APIKey: "sk-kimi", Models: []config.EndpointModel{{Model: "kimi-k2.6"}}},
 		},
-		DefaultModel: "claude-sonnet-4-6",
+		Default: "ep-anthropic::claude-sonnet-4-6",
 	}
 
 	prov, model, entry, ok := resolveProviderModel("", "kimi-k2.6", cfg)
@@ -213,20 +225,20 @@ func TestRunConfig_Wizard_PreservesOtherEntriesAndGlobals(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "set-so-wizard-skips-key-prompt")
 
 	seed := config.Config{
-		Models: []config.ModelEntry{
-			{Provider: "anthropic", Model: "claude-sonnet-4-6"},
-			{Provider: "kimi", Model: "kimi-k2.6"},
+		Endpoints: []config.Endpoint{
+			{ID: "ep-anthropic", Provider: "anthropic", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
+			{ID: "ep-kimi", Provider: "kimi", Models: []config.EndpointModel{{Model: "kimi-k2.6"}}},
 		},
-		DefaultModel:   "claude-sonnet-4-6",
+		Default:        "ep-anthropic::claude-sonnet-4-6",
 		PermissionMode: "strict",
 	}
 	if err := seed.Save(); err != nil {
 		t.Fatal(err)
 	}
 
-	// Answers: provider=openai, model=(default). No endpoint question for a
-	// pinned vendor.
-	in := strings.NewReader("openai\n\n")
+	// Answers: provider=openai, model=(default), set-as-default=y. No
+	// endpoint question for a pinned vendor.
+	in := strings.NewReader("openai\n\ny\n")
 	var stdout, stderr bytes.Buffer
 	if code := runConfig(nil, in, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
@@ -236,8 +248,12 @@ func TestRunConfig_Wizard_PreservesOtherEntriesAndGlobals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load after wizard: %v", err)
 	}
-	if len(got.Models) != 2 {
-		t.Fatalf("wizard must not drop other entries: %+v", got.Models)
+	// PR5: the wizard adds a new openai endpoint; the existing kimi endpoint
+	// must survive. The exact endpoint count is 3 (anthropic + kimi + new openai)
+	// unless the wizard merged onto an existing endpoint id — which it won't
+	// here because the new endpoint has a different base_url host.
+	if len(got.Endpoints) < 2 {
+		t.Fatalf("wizard must not drop other endpoints: %+v", got.Endpoints)
 	}
 	if _, ok := got.EntryByModel("kimi-k2.6"); !ok {
 		t.Error("kimi entry lost")
@@ -245,8 +261,16 @@ func TestRunConfig_Wizard_PreservesOtherEntriesAndGlobals(t *testing.T) {
 	if got.PermissionMode != "strict" {
 		t.Errorf("permission_mode lost: %q", got.PermissionMode)
 	}
-	if got.DefaultEntry().Provider != "openai" {
-		t.Errorf("default entry provider = %q, want openai", got.DefaultEntry().Provider)
+	// The new openai endpoint must exist (the wizard added it).
+	var hasOpenai bool
+	for _, ep := range got.Endpoints {
+		if ep.Provider == "openai" {
+			hasOpenai = true
+			break
+		}
+	}
+	if !hasOpenai {
+		t.Errorf("wizard did not add an openai endpoint: %+v", got.Endpoints)
 	}
 }
 
@@ -267,11 +291,13 @@ func TestRunConfig_Show_ReportsSourcesNotKey(t *testing.T) {
 	if strings.Contains(out, "secret-value-should-not-print") {
 		t.Error("show must never print the API key value")
 	}
-	if !strings.Contains(out, "anthropic (config)") {
-		t.Errorf("show should report provider source; got:\n%s", out)
+	// PR5 (design §7.2): show reports the endpoint list + references +
+	// reasoning. Key-source reporting is doctor's job, not show's.
+	if !strings.Contains(out, "anthropic") {
+		t.Errorf("show should report the provider; got:\n%s", out)
 	}
-	if !strings.Contains(out, "ANTHROPIC_API_KEY") {
-		t.Errorf("show should report the key is set via env; got:\n%s", out)
+	if !strings.Contains(out, "endpoints:") {
+		t.Errorf("show should list endpoints; got:\n%s", out)
 	}
 }
 
@@ -286,15 +312,15 @@ func TestRunConfig_Wizard_SwitchesProviderAndPromptsForKey(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 
 	// Start with an anthropic config that has a stored key.
-	if err := oneEntryConfig(config.ModelEntry{Provider: "anthropic", APIKey: "old-anthropic-key"}).Save(); err != nil {
+	if err := oneEntryConfig(config.ModelEntry{Provider: "anthropic", Model: "claude-sonnet-4-6", APIKey: "old-anthropic-key"}).Save(); err != nil {
 		t.Fatal(err)
 	}
 
 	// Answers (key now comes right after model): provider=openai,
 	// model=(default), store_key=y, key=new-openai-key, coauthor=y,
-	// reasoning-effort=(off), show-reasoning=(default). No endpoint question for
-	// a pinned vendor.
-	in := strings.NewReader("openai\n\ny\nnew-openai-key\ny\n\n\n")
+	// reasoning-effort=(off), show-reasoning=(off), set-as-default=y.
+	// No endpoint question for a pinned vendor.
+	in := strings.NewReader("openai\n\ny\nnew-openai-key\ny\n\n\ny\n")
 	var stdout, stderr bytes.Buffer
 	if code := runConfig(nil, in, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())

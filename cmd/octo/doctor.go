@@ -53,7 +53,7 @@ func runDoctor(_ []string, _ io.Reader, stdout, stderr io.Writer) int {
 	}
 
 	// Environment essentials — only meaningful once a model is configured.
-	if len(cfg.Models) == 0 {
+	if len(cfg.Endpoints) == 0 {
 		fmt.Fprintln(stdout, "  ! no models configured yet — run `octo config` to set one up")
 	} else {
 		def := cfg.DefaultEntry()

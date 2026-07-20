@@ -16,11 +16,13 @@ import (
 func TestPrepareToolTurn_WiresBrowserVision(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
-		Models: []config.ModelEntry{
-			{Provider: "openai", Model: "qwen3.7-max", Vision: false}, // recorded text-only
-			{Provider: "openai", Model: "gpt-4o", Vision: true},       // recorded vision
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{
+				{Model: "qwen3.7-max", Vision: false}, // recorded text-only
+				{Model: "gpt-4o", Vision: true},       // recorded vision
+			}},
 		},
-		DefaultModel: "qwen3.7-max",
+		Default: "ep-a::qwen3.7-max",
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -119,8 +120,8 @@ func detectOnboardPhase() string {
 
 	// Check if any provider key is available.
 	hasKey := false
-	for _, e := range cfg.Models {
-		if e.APIKey != "" {
+	for _, ep := range cfg.Endpoints {
+		if ep.APIKey != "" {
 			hasKey = true
 			break
 		}
@@ -156,69 +157,21 @@ func (s *Server) handleOnboardComplete(w http.ResponseWriter, r *http.Request) {
 
 // ─── GET /api/config ────────────────────────────────────────────────────────
 
-// configResponse mirrors what the Svelte frontend expects.
+// configResponse mirrors what the Svelte frontend expects. PR5: the Models
+// field is gone (the frontend reads endpoints via GET /api/config/endpoints);
+// only the global settings remain. ReasoningEffort is the global reasoning
+// level (PR5 deleted per-entry reasoning).
 type configResponse struct {
-	Models          []modelConfig `json:"models,omitempty"`
-	DefaultModelIdx int           `json:"default_model_idx,omitempty"`
-	FontSize        string        `json:"font_size,omitempty"`
-	Language        string        `json:"language,omitempty"`
-	ShowReasoning   *bool         `json:"show_reasoning,omitempty"`
-	Coauthor        *bool         `json:"coauthor,omitempty"`
-	WorkspaceDir    string        `json:"workspace_dir,omitempty"`
-}
-
-type modelConfig struct {
-	ID              string `json:"id"`
-	Type            string `json:"type,omitempty"`
-	Model           string `json:"model"`
-	BaseURL         string `json:"base_url"`
-	APIKeyMasked    string `json:"api_key_masked,omitempty"`
-	Provider        string `json:"provider,omitempty"`
-	AnthropicFormat bool   `json:"anthropic_format"`
-	PermissionMode  string `json:"permission_mode,omitempty"`
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	FontSize        string `json:"font_size,omitempty"`
+	Language        string `json:"language,omitempty"`
 	ShowReasoning   *bool  `json:"show_reasoning,omitempty"`
-	Vision          bool   `json:"vision"`
-}
-
-// defaultEntryIdx returns the index of the default entry: the one whose model
-// matches DefaultModel, else 0.
-func defaultEntryIdx(cfg config.Config) int {
-	for i, e := range cfg.Models {
-		if e.Model == cfg.DefaultModel {
-			return i
-		}
-	}
-	return 0
+	Coauthor        *bool  `json:"coauthor,omitempty"`
+	WorkspaceDir    string `json:"workspace_dir,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	cfg, _ := config.Load()
-
-	models := []modelConfig{}
-	defaultIdx := defaultEntryIdx(cfg)
-
-	for i, e := range cfg.Models {
-		m := modelConfig{
-			ID:              e.Model,
-			Model:           e.Model,
-			BaseURL:         e.BaseURL,
-			APIKeyMasked:    maskKey(e.APIKey),
-			Provider:        e.Provider,
-			AnthropicFormat: entryUsesAnthropic(e),
-			ReasoningEffort: e.ReasoningEffort,
-			ShowReasoning:   e.ShowReasoning,
-			Vision:          e.Vision,
-		}
-		switch {
-		case i == defaultIdx:
-			m.Type = "default"
-			m.PermissionMode = cfg.PermissionMode
-		case e.Model == cfg.LiteModel:
-			m.Type = "lite"
-		}
-		models = append(models, m)
-	}
 
 	// Coauthor, unlike ShowReasoning, has an OCTO_COAUTHOR env-var layer above
 	// the config file, so the raw cfg.Coauthor pointer can disagree with what
@@ -226,13 +179,12 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	// meant to reflect, not the on-disk-only one.
 	effCoauthor := cfg.EffectiveCoauthor()
 	writeJSON(w, http.StatusOK, configResponse{
-		Models:          models,
-		DefaultModelIdx: defaultIdx,
 		FontSize:        "medium",
 		Language:        cfg.Language,
 		ShowReasoning:   cfg.ShowReasoning,
 		Coauthor:        &effCoauthor,
 		WorkspaceDir:    cfg.WorkspaceDir,
+		ReasoningEffort: cfg.ReasoningEffort,
 	})
 }
 
@@ -502,22 +454,22 @@ type testConfigRequest struct {
 	AnthropicFormat bool   `json:"anthropic_format"`
 }
 
-// storedAPIKey returns the saved key of the config entry that best matches
+// storedAPIKey returns the saved key of the endpoint that best matches
 // (provider, baseURL): an exact provider+endpoint match wins, else the first
-// entry on the same provider. Empty when none is stored. Lets a connection
+// endpoint on the same provider. Empty when none is stored. Lets a connection
 // test reuse the stored key when the provider is unchanged.
 func storedAPIKey(cfg config.Config, provider, baseURL string) string {
 	nb := strings.TrimRight(baseURL, "/")
 	var sameProvider string
-	for _, e := range cfg.Models {
-		if e.APIKey == "" || e.Provider != provider {
+	for _, ep := range cfg.Endpoints {
+		if ep.APIKey == "" || ep.Provider != provider {
 			continue
 		}
-		if strings.TrimRight(e.BaseURL, "/") == nb {
-			return e.APIKey
+		if strings.TrimRight(ep.BaseURL, "/") == nb {
+			return ep.APIKey
 		}
 		if sameProvider == "" {
-			sameProvider = e.APIKey
+			sameProvider = ep.APIKey
 		}
 	}
 	return sameProvider
@@ -578,328 +530,410 @@ func (s *Server) handleTestConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "Connection successful"})
 }
 
-// ─── POST /api/config/models ────────────────────────────────────────────────
+// ─── POST/PATCH/DELETE /api/config/endpoints (CRUD) ─────────────────────────
+//
+// PR5 (design §10.2): endpoint-level CRUD. The handler layer is thin — it
+// parses the request, calls config.UpsertEndpoint / UpsertModel /
+// SetDefaultComposite / RenameEndpoint under config.Mutate (flock + atomic
+// Save), and triggers s.invalidateEndpointSenders when connection params or
+// the endpoint id changes. Model-level mutations (add/delete model under an
+// endpoint) also invalidate per the coarse-grained policy (design §6).
+//
+// Old /api/config/models* handlers (POST/PATCH/DELETE) were deleted in the
+// same slice — callers must use these endpoint-level routes. The web UI
+// continues to read endpoints via GET /api/config/endpoints (PR4b) and will
+// gain editing affordances in a follow-up PR.
 
-type saveModelRequest struct {
-	Type            string `json:"type"`
-	Model           string `json:"model"`
-	BaseURL         string `json:"base_url"`
-	APIKey          string `json:"api_key"`
-	Provider        string `json:"provider,omitempty"`
-	AnthropicFormat bool   `json:"anthropic_format"`
-	PermissionMode  string `json:"permission_mode,omitempty"`
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
-	ShowReasoning   *bool  `json:"show_reasoning,omitempty"`
-	Vision          *bool  `json:"vision,omitempty"`
+type createEndpointRequest struct {
+	ID       string            `json:"id"`
+	Name     string            `json:"name,omitempty"`
+	Provider string            `json:"provider"`
+	BaseURL  string            `json:"base_url,omitempty"`
+	APIKey   string            `json:"api_key,omitempty"`
+	Protocol string            `json:"protocol,omitempty"`
+	Models   []endpointModelIn `json:"models,omitempty"`
 }
 
-// applyModelRequestToEntry overlays the request onto an entry. An empty (or
-// still-masked) api_key keeps the stored key — the panel echoes masked keys
-// and omits unchanged ones. The vendor resolves from explicit request field >
-// known endpoint > the entry's current value; only a brand-new entry with no
-// signal at all falls back to the anthropic_format flag.
-func applyModelRequestToEntry(req saveModelRequest, e *config.ModelEntry) {
-	e.Model = req.Model
-	e.BaseURL = req.BaseURL
-	if req.APIKey != "" && !strings.Contains(req.APIKey, "****") {
-		e.APIKey = req.APIKey
-	}
-	switch {
-	case req.Provider != "":
-		e.Provider = req.Provider
-	case app.VendorByBaseURL(req.BaseURL) != "":
-		e.Provider = app.VendorByBaseURL(req.BaseURL)
-	case e.Provider != "":
-		// keep the entry's current vendor
-	case req.BaseURL == "":
-		// No endpoint signal at all — fall back to the protocol root vendor.
-		if req.AnthropicFormat {
-			e.Provider = app.ProviderAnthropic
-		} else {
-			e.Provider = app.ProviderOpenAI
-		}
-	default:
-		e.Provider = app.ProviderCustom
-	}
-	// Protocol is stored only for the Custom vendor; a named vendor pins its own,
-	// so clear any stale value carried over from a previous Custom selection.
-	if app.VendorNeedsProtocol(e.Provider) {
-		e.Protocol = customProtocol(req.AnthropicFormat)
-	} else {
-		e.Protocol = ""
-	}
-	if req.ReasoningEffort != "" {
-		// "off" is the form's UI sentinel for "no reasoning effort"; the
-		// persisted/forwarded representation is "" everywhere else in the
-		// codebase (CLI, TUI, provider layer) — normalize here so it isn't
-		// later sent to a provider as a literal, invalid reasoning_effort.
-		if strings.EqualFold(req.ReasoningEffort, "off") {
-			e.ReasoningEffort = ""
-		} else {
-			e.ReasoningEffort = req.ReasoningEffort
-		}
-	}
-	if req.ShowReasoning != nil {
-		e.ShowReasoning = req.ShowReasoning
-	}
-	// Vision is always recorded. Honour an explicit request value (the form's
-	// toggle); otherwise resolve from the catalogue for a predefined model, or
-	// fall back to the id heuristic for a custom / unknown one. Resolution runs
-	// after the vendor is settled above, so VendorModelVision sees the final
-	// provider.
-	switch {
-	case req.Vision != nil:
-		e.Vision = *req.Vision
-	default:
-		if v, known := app.VendorModelVision(e.Provider, req.Model); known {
-			e.Vision = v
-		} else {
-			e.Vision = config.ModelSupportsVision(req.Model)
-		}
-	}
+type endpointModelIn struct {
+	Model  string `json:"model"`
+	Vision bool   `json:"vision"`
 }
 
-// handleSaveModelConfig creates a new model entry (POST /api/config/models).
-func (s *Server) handleSaveModelConfig(w http.ResponseWriter, r *http.Request) {
-	var req saveModelRequest
+type updateEndpointRequest struct {
+	// NewID, when non-empty, triggers a rename (RenameEndpoint + cascade).
+	NewID    string `json:"new_id,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	BaseURL  string `json:"base_url,omitempty"`
+	APIKey   string `json:"api_key,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
+}
+
+// endpointJSONOut is the response shape for a single endpoint — same as
+// endpointConfigJSON from GET /api/config/endpoints, kept inline here so the
+// CRUD handlers don't depend on the read handler's type staying put.
+type endpointJSONOut struct {
+	ID        string              `json:"id"`
+	Name      string              `json:"name,omitempty"`
+	Provider  string              `json:"provider"`
+	BaseURL   string              `json:"base_url,omitempty"`
+	Protocol  string              `json:"protocol,omitempty"`
+	HasAPIKey bool                `json:"has_api_key"`
+	LiteModel string              `json:"lite_model,omitempty"`
+	Models    []endpointModelJSON `json:"models"`
+}
+
+func endpointToJSON(ep config.Endpoint) endpointJSONOut {
+	out := endpointJSONOut{
+		ID:        ep.ID,
+		Name:      ep.Name,
+		Provider:  ep.Provider,
+		BaseURL:   ep.BaseURL,
+		Protocol:  ep.Protocol,
+		HasAPIKey: ep.APIKey != "",
+		LiteModel: ep.LiteModel,
+		Models:    make([]endpointModelJSON, 0, len(ep.Models)),
+	}
+	for _, m := range ep.Models {
+		out.Models = append(out.Models, endpointModelJSON{Model: m.Model, Vision: m.Vision})
+	}
+	return out
+}
+
+// handleCreateEndpoint: POST /api/config/endpoints
+func (s *Server) handleCreateEndpoint(w http.ResponseWriter, r *http.Request) {
+	var req createEndpointRequest
 	if err := readBodyJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.Model == "" {
-		writeError(w, http.StatusBadRequest, "model is required")
+	if req.ID == "" {
+		writeError(w, http.StatusBadRequest, "id is required")
+		return
+	}
+	if req.Provider == "" {
+		writeError(w, http.StatusBadRequest, "provider is required")
 		return
 	}
 
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
+	var created config.Endpoint
+	if err := config.Mutate(func(cfg *config.Config) error {
+		// Reject id collision — Validate would flag it as unfixable anyway.
+		for _, ep := range cfg.Endpoints {
+			if ep.ID == req.ID {
+				return fmt.Errorf("endpoint id %q already exists", req.ID)
+			}
+		}
+		ep := config.Endpoint{
+			ID:       req.ID,
+			Name:     req.Name,
+			Provider: req.Provider,
+			BaseURL:  req.BaseURL,
+			APIKey:   req.APIKey,
+			Protocol: req.Protocol,
+		}
+		for _, m := range req.Models {
+			if m.Model == "" {
+				continue
+			}
+			ep.Models = append(ep.Models, config.EndpointModel{Model: m.Model, Vision: m.Vision})
+		}
+		cfg.UpsertEndpoint(ep)
+		created = ep
+		return nil
+	}); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	var entry config.ModelEntry
-	applyModelRequestToEntry(req, &entry)
-	// Model is the entry's identity, so it must be unique.
-	if _, exists := cfg.EntryByModel(entry.Model); exists {
-		writeError(w, http.StatusConflict, fmt.Sprintf("a model entry for %q already exists", entry.Model))
-		return
-	}
-	cfg.Models = append(cfg.Models, entry)
-	if cfg.DefaultModel == "" || len(cfg.Models) == 1 {
-		cfg.DefaultModel = entry.Model
-	}
-	if req.PermissionMode != "" {
-		cfg.PermissionMode = req.PermissionMode
-	}
-
-	if err := cfg.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
-		return
-	}
-	// Rebuild the default sender/model so new unbound sessions pick up the new
-	// entry (e.g. the first model saved during onboard, or a changed default).
-	s.invalidateSenderCache()
-	if err := s.reloadDefaultSender(); err != nil {
-		log.Printf("[server] reload default sender after saving model config: %v", err)
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": entry.Model})
+	// A brand-new endpoint has no cached senders yet, so no invalidation
+	// needed. New endpoints with models could in principle be referenced
+	// immediately, but the cache is populated lazily on the first turn.
+	writeJSON(w, http.StatusCreated, endpointToJSON(created))
 }
 
-// handleUpdateModelConfig updates the entry named by {id}.
-func (s *Server) handleUpdateModelConfig(w http.ResponseWriter, r *http.Request) {
+// handleUpdateEndpoint: PATCH /api/config/endpoints/{id}
+// Without new_id: updates connection params / name in place.
+// With new_id: renames the endpoint (RenameEndpoint + Default/Lite cascade +
+// invalidateEndpointSenders on the old id).
+func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "missing model id")
+		writeError(w, http.StatusBadRequest, "missing endpoint id")
 		return
 	}
-
-	var req saveModelRequest
+	var req updateEndpointRequest
 	if err := readBodyJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	// Model is the entry's identity; an empty one would re-key the entry to ""
-	// (unaddressable via the API), so reject it as POST does.
-	if req.Model == "" {
-		writeError(w, http.StatusBadRequest, "model is required")
-		return
-	}
 
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
-		return
-	}
-
-	updated := false
-	newID := id
-	for i := range cfg.Models {
-		if cfg.Models[i].Model == id {
-			applyModelRequestToEntry(req, &cfg.Models[i])
-			// Model is the entry id. When it changes, the id changes with it, so
-			// reject a collision with another entry and carry the default/lite
-			// refs that pointed at the old model over to the new one.
-			if newModel := cfg.Models[i].Model; newModel != id {
-				for j := range cfg.Models {
-					if j != i && cfg.Models[j].Model == newModel {
-						writeError(w, http.StatusConflict, fmt.Sprintf("a model entry for %q already exists", newModel))
-						return
-					}
-				}
-				newID = newModel
-				if cfg.DefaultModel == id {
-					cfg.DefaultModel = newModel
-				}
-				if cfg.LiteModel == id {
-					cfg.LiteModel = newModel
+	var updated config.Endpoint
+	if err := config.Mutate(func(cfg *config.Config) error {
+		idx := -1
+		for i := range cfg.Endpoints {
+			if cfg.Endpoints[i].ID == id {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			return fmt.Errorf("%w: %s", config.ErrEndpointNotFound, id)
+		}
+		// Rename path: new_id triggers RenameEndpoint (which rewrites
+		// Default/Lite composite-id prefixes) before applying field updates.
+		if req.NewID != "" && req.NewID != id {
+			if err := cfg.RenameEndpoint(id, req.NewID); err != nil {
+				return err
+			}
+			// RenameEndpoint updated Endpoints[idx].ID in place; re-find it
+			// under the new id so the field patches below land on the right
+			// endpoint.
+			for i := range cfg.Endpoints {
+				if cfg.Endpoints[i].ID == req.NewID {
+					idx = i
+					break
 				}
 			}
-			updated = true
-			break
 		}
-	}
-	if !updated {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("no model config for %q", id))
+		ep := cfg.Endpoints[idx]
+		// Apply field patches. Empty strings in the request mean "unchanged"
+		// EXCEPT for Protocol/BaseURL where the user may legitimately want to
+		// clear them — but we can't distinguish "omitted" from "cleared" with
+		// the current JSON shape. PR5 errs on the side of "empty = unchanged"
+		// for all fields; clearing a field requires sending the previous
+		// value. (A follow-up could switch to *string / omitempty:true to
+		// distinguish, but the current web UI doesn't need it.)
+		if req.Name != "" {
+			ep.Name = req.Name
+		}
+		if req.Provider != "" {
+			ep.Provider = req.Provider
+		}
+		if req.BaseURL != "" {
+			ep.BaseURL = req.BaseURL
+		}
+		if req.APIKey != "" {
+			ep.APIKey = req.APIKey
+		}
+		if req.Protocol != "" {
+			ep.Protocol = req.Protocol
+		}
+		cfg.Endpoints[idx] = ep
+		updated = ep
+		return nil
+	}); err != nil {
+		if errors.Is(err, config.ErrEndpointNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		if errors.Is(err, config.ErrEndpointIDInUse) {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.PermissionMode != "" {
-		cfg.PermissionMode = req.PermissionMode
-	}
 
-	if err := cfg.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
-		return
+	// Invalidate cached senders for the endpoint — connection params may have
+	// changed (coarse-grained: we invalidate even if only Name changed). If a
+	// rename happened, invalidate the OLD id (senders cached under "<old>::...").
+	invalidID := id
+	if req.NewID != "" && req.NewID != id {
+		invalidID = id
 	}
-	// Editing the default entry (provider/model/endpoint/key) must rebuild the
-	// default sender, or new unbound sessions keep using the stale startup one.
-	s.invalidateSenderCache()
-	if err := s.reloadDefaultSender(); err != nil {
-		log.Printf("[server] reload default sender after updating model config: %v", err)
-	}
-
-	// id may have changed if the model changed — return it so the client can
-	// refresh its reference.
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": newID})
+	s.invalidateEndpointSenders(invalidID)
+	writeJSON(w, http.StatusOK, endpointToJSON(updated))
 }
 
-// handleDeleteModelConfig removes the entry named by {id} and repairs the
-// default/lite references that pointed at it.
-func (s *Server) handleDeleteModelConfig(w http.ResponseWriter, r *http.Request) {
+// handleDeleteEndpoint: DELETE /api/config/endpoints/{id}
+func (s *Server) handleDeleteEndpoint(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "missing model id")
+		writeError(w, http.StatusBadRequest, "missing endpoint id")
 		return
 	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
-		return
-	}
-
-	kept := cfg.Models[:0]
-	removed := false
-	for _, e := range cfg.Models {
-		if e.Model == id {
-			removed = true
-			continue
+	if err := config.Mutate(func(cfg *config.Config) error {
+		idx := -1
+		for i := range cfg.Endpoints {
+			if cfg.Endpoints[i].ID == id {
+				idx = i
+				break
+			}
 		}
-		kept = append(kept, e)
-	}
-	if !removed {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("no model config for %q", id))
-		return
-	}
-	cfg.Models = kept
-	if cfg.DefaultModel == id {
-		cfg.DefaultModel = ""
-		if len(cfg.Models) > 0 {
-			cfg.DefaultModel = cfg.Models[0].Model
+		if idx < 0 {
+			return fmt.Errorf("%w: %s", config.ErrEndpointNotFound, id)
 		}
-	}
-	if cfg.LiteModel == id {
-		cfg.LiteModel = ""
-	}
-
-	if err := cfg.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+		cfg.Endpoints = append(cfg.Endpoints[:idx], cfg.Endpoints[idx+1:]...)
+		// Clear Default/Lite if they pointed at the deleted endpoint's prefix.
+		if strings.HasPrefix(cfg.Default, id+"::") {
+			cfg.Default = ""
+		}
+		if strings.HasPrefix(cfg.Lite, id+"::") {
+			cfg.Lite = ""
+		}
+		return nil
+	}); err != nil {
+		if errors.Is(err, config.ErrEndpointNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Deleting an entry may have repaired the default; rebuild the default
-	// sender so new unbound sessions follow the new default.
-	s.invalidateSenderCache()
-	if err := s.reloadDefaultSender(); err != nil {
-		log.Printf("[server] reload default sender after deleting model config: %v", err)
-	}
-
+	s.invalidateEndpointSenders(id)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// handleSetLiteModelConfig toggles lite_model on the entry named by {id}:
-// pointing it at the entry, or clearing it when the entry is already the
-// lite model. The lite entry serves history compaction.
-func (s *Server) handleSetLiteModelConfig(w http.ResponseWriter, r *http.Request) {
+// handleAddEndpointModel: POST /api/config/endpoints/{id}/models
+func (s *Server) handleAddEndpointModel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "missing model id")
+		writeError(w, http.StatusBadRequest, "missing endpoint id")
+		return
+	}
+	var req endpointModelIn
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Model == "" {
+		writeError(w, http.StatusBadRequest, "model is required")
 		return
 	}
 
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
+	var updated config.Endpoint
+	if err := config.Mutate(func(cfg *config.Config) error {
+		if err := cfg.UpsertModel(id, config.EndpointModel{Model: req.Model, Vision: req.Vision}); err != nil {
+			return err
+		}
+		for _, ep := range cfg.Endpoints {
+			if ep.ID == id {
+				updated = ep
+				break
+			}
+		}
+		return nil
+	}); err != nil {
+		if errors.Is(err, config.ErrEndpointNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if _, ok := cfg.EntryByModel(id); !ok {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("no model config named %q", id))
-		return
-	}
-	if cfg.LiteModel == id {
-		cfg.LiteModel = "" // toggle off
-	} else {
-		cfg.LiteModel = id
-	}
-
-	if err := cfg.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
-		return
-	}
-	s.invalidateSenderCache()
-
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "lite_model": cfg.LiteModel})
+	s.invalidateEndpointSenders(id)
+	writeJSON(w, http.StatusOK, endpointToJSON(updated))
 }
 
-// handleSetDefaultModelConfig points default_model at the entry named by {id}.
-func (s *Server) handleSetDefaultModelConfig(w http.ResponseWriter, r *http.Request) {
+// handleDeleteEndpointModel: DELETE /api/config/endpoints/{id}/models/{model}
+func (s *Server) handleDeleteEndpointModel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	model := r.PathValue("model")
+	if id == "" || model == "" {
+		writeError(w, http.StatusBadRequest, "missing endpoint id or model")
+		return
+	}
+	if err := config.Mutate(func(cfg *config.Config) error {
+		for i := range cfg.Endpoints {
+			if cfg.Endpoints[i].ID != id {
+				continue
+			}
+			kept := cfg.Endpoints[i].Models[:0]
+			for _, m := range cfg.Endpoints[i].Models {
+				if m.Model == model {
+					continue
+				}
+				kept = append(kept, m)
+			}
+			cfg.Endpoints[i].Models = kept
+			// Clear Default/Lite if they pointed at the deleted model.
+			if cfg.Default == id+"::"+model {
+				cfg.Default = ""
+			}
+			if cfg.Lite == id+"::"+model {
+				cfg.Lite = ""
+			}
+			return nil
+		}
+		return fmt.Errorf("%w: %s", config.ErrEndpointNotFound, id)
+	}); err != nil {
+		if errors.Is(err, config.ErrEndpointNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.invalidateEndpointSenders(id)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleSetEndpointDefault: POST /api/config/endpoints/{id}/default
+// Sets cfg.Default to "<id>::<first model under this endpoint>". The caller
+// can't pick a specific model via this endpoint (PR5 design: first suffices;
+// a follow-up could add a `?model=` query).
+func (s *Server) handleSetEndpointDefault(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "missing model id")
+		writeError(w, http.StatusBadRequest, "missing endpoint id")
 		return
 	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
+	var newDefault string
+	if err := config.Mutate(func(cfg *config.Config) error {
+		for _, ep := range cfg.Endpoints {
+			if ep.ID != id {
+				continue
+			}
+			if len(ep.Models) == 0 {
+				return fmt.Errorf("endpoint %q has no models", id)
+			}
+			newDefault = ep.CompositeID(ep.Models[0].Model)
+			cfg.SetDefaultComposite(newDefault)
+			return nil
+		}
+		return fmt.Errorf("%w: %s", config.ErrEndpointNotFound, id)
+	}); err != nil {
+		if errors.Is(err, config.ErrEndpointNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if _, ok := cfg.EntryByModel(id); !ok {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("no model config named %q", id))
+	// Default switch does NOT invalidate senders (design §6) — only changes
+	// which sender ResolveDefault returns next turn.
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "default": newDefault})
+}
+
+// handleSetEndpointLite: POST /api/config/endpoints/{id}/lite
+// Sets cfg.Lite to "<id>::<first model under this endpoint>".
+func (s *Server) handleSetEndpointLite(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing endpoint id")
 		return
 	}
-	cfg.DefaultModel = id
-
-	if err := cfg.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+	var newLite string
+	if err := config.Mutate(func(cfg *config.Config) error {
+		for _, ep := range cfg.Endpoints {
+			if ep.ID != id {
+				continue
+			}
+			if len(ep.Models) == 0 {
+				return fmt.Errorf("endpoint %q has no models", id)
+			}
+			newLite = ep.CompositeID(ep.Models[0].Model)
+			cfg.Lite = newLite
+			return nil
+		}
+		return fmt.Errorf("%w: %s", config.ErrEndpointNotFound, id)
+	}); err != nil {
+		if errors.Is(err, config.ErrEndpointNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	// The next agent turn should pick up the new default: rebuild the default
-	// sender/model under senderMu so new unbound sessions follow it.
-	s.invalidateSenderCache()
-	if err := s.reloadDefaultSender(); err != nil {
-		log.Printf("[server] reload default sender after setting default model: %v", err)
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "lite": newLite})
 }
