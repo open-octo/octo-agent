@@ -804,6 +804,27 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         tools: [],
         todos: [],
       })
+      // A first-round failure (usage limit, network, bad key) rolls the user
+      // message back past history on the server (see the history_reload that
+      // follows), and send() already cleared the composer optimistically — so
+      // the text the user typed is gone from both places. Pull it back into the
+      // composer so a long prompt isn't lost to a transient error; the user can
+      // fix the cause and resend. The fresh message that started this turn is
+      // the queue's single non-streaming entry (a follow-up sent mid-turn is
+      // classified as a steer, wasStreaming:true, and its text belongs to the
+      // running turn — not a fresh compose). Find it by that flag rather than by
+      // position: a leaked steer from an earlier turn can sit ahead of it, and a
+      // trailing steer can sit after it. Mirrors the steer_retracted restore
+      // above, including forgetting the rollback entry (a rolled-back message is
+      // never confirmed by history_user_message).
+      const errQueue = pendingSends.get(sid)
+      const errMeta = errQueue?.find(m => !m.wasStreaming)
+      if (errQueue && errMeta) {
+        const next = errQueue.filter(m => m.pendingId !== errMeta.pendingId)
+        if (next.length) pendingSends.set(sid, next)
+        else pendingSends.delete(sid)
+        composer?.restore(errMeta.text, errMeta.files)
+      }
     }))
 
     cleanups.push(ws.on('tool_stdout', (ev) => {
