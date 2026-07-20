@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -19,6 +20,13 @@ type Browser struct {
 	cli         *cdpClient
 	ownsProcess bool
 
+	// tempUserDataDir is the throwaway profile this process launched Chrome with
+	// (via Launch with empty LaunchOptions.UserDataDir). Close removes it so
+	// test runs don't leak octo-chrome-* directories in /tmp. Empty when
+	// attached to a user-owned Chrome (Connect*) — those profiles must never be
+	// deleted by us.
+	tempUserDataDir string
+
 	// oopifs maps a cross-origin (out-of-process) iframe's frameId to its CDP
 	// session, populated by the target watcher. Cross-origin iframes live in a
 	// separate renderer, so their DOM is unreachable via the parent's
@@ -29,16 +37,21 @@ type Browser struct {
 
 // Launch starts a Chrome and connects to it.
 func Launch(ctx context.Context, opts LaunchOptions) (*Browser, error) {
-	cmd, wsURL, err := launchChrome(ctx, opts)
+	cmd, wsURL, tempDir, err := launchChrome(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
 	cli, err := dial(ctx, wsURL)
 	if err != nil {
 		killProcessGroup(cmd)
+		if tempDir != "" {
+			os.RemoveAll(tempDir)
+		}
 		return nil, err
 	}
-	return wrapBrowser(cli, cmd, true), nil
+	b := wrapBrowser(cli, cmd, true)
+	b.tempUserDataDir = tempDir
+	return b, nil
 }
 
 // wrapBrowser wraps a live CDP connection and starts the cross-origin iframe
@@ -136,12 +149,17 @@ func dial(ctx context.Context, wsURL string) (*cdpClient, error) {
 func (b *Browser) OwnsProcess() bool { return b.ownsProcess }
 
 // Close tears down the connection and, if this process launched Chrome, the
-// Chrome process too.
+// Chrome process too. It also removes any throwaway profile directory created
+// for a Launch with an empty UserDataDir, so test runs don't leak octo-chrome-*
+// directories in /tmp.
 func (b *Browser) Close() error {
 	b.cli.close()
 	if b.ownsProcess && b.cmd != nil && b.cmd.Process != nil {
 		killProcessGroup(b.cmd)
 		b.cmd.Wait()
+	}
+	if b.tempUserDataDir != "" {
+		os.RemoveAll(b.tempUserDataDir)
 	}
 	return nil
 }
