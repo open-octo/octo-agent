@@ -1579,14 +1579,23 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	})
 
 	// After-turn follow-up suggestion (matches TUI suggestCmd behaviour).
-	// Fire-and-forget: the frontend shows it as ghost text; failures are silent.
+	// Fire-and-forget: the frontend shows it as ghost text; failures/timeouts
+	// still broadcast an empty text so a stale suggestion from the previous
+	// turn gets cleared (the browser's chatSuggestion store only mutates on
+	// next_message_suggestion — without this, a timed-out generation would
+	// leave the prior turn's chip stuck on screen).
 	if err == nil {
 		go func() {
 			defer s.recoverBg("suggestion generation")
 			ctx, cancel := context.WithTimeout(context.Background(), throwawayGenerationTimeout)
 			defer cancel()
 			text, serr := a.Suggest(ctx, toolDefs)
-			if serr != nil || strings.TrimSpace(text) == "" {
+			if serr != nil {
+				s.wsHub.broadcast(sess.ID, map[string]any{
+					"type":       "next_message_suggestion",
+					"session_id": sess.ID,
+					"text":       "",
+				})
 				return
 			}
 			s.wsHub.broadcast(sess.ID, map[string]any{
@@ -1605,11 +1614,12 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 // ("max"), paying the model's full reasoning budget even for a 6-word title.
 // The real fix is agent.LowEffortSender (both calls now cap effort to "low"
 // instead of inheriting the session's), which removes most of that latency at
-// the source — this timeout is only the remaining safety margin for normal
-// network/provider variance, not a substitute for the effort cap, so it stays
-// modest rather than papering over a slow call with a long wait. (Session
-// titles use agent.TitleGenerationTimeout, the shared title mechanism.)
-const throwawayGenerationTimeout = 5 * time.Second
+// the source. Raised from 5s to 10s because even with LowEffort a slow
+// provider/network can still exceed 5s for a short suggestion, and the call
+// is now bounded more tightly (so a longer wait is safe); the timeout
+// remains the backstop, not a substitute for the effort cap. (Session titles
+// use agent.TitleGenerationTimeout, the shared title mechanism.)
+const throwawayGenerationTimeout = 10 * time.Second
 
 // claimTitleGeneration marks a title generation in flight for the session;
 // it returns false when one is already running so concurrent turn ends don't

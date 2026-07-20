@@ -63,25 +63,28 @@ type ToolSender interface {
 
 // LowEffortSender is implemented by a Sender that can produce a cheaper
 // variant of itself with reasoning effort capped to a small, fast budget.
-// Suggest uses this: it deliberately reuses the turn's own Sender (so the
-// request shares the main conversation's prompt-cache prefix — see its doc
-// comment), but that Sender carries whatever reasoning_effort the session
-// happens to be configured with. A session running "high"/"max" would otherwise
-// pay the model's full reasoning budget just to produce a one-line suggestion,
-// for no benefit — and on a slower provider this reliably exceeds the throwaway
-// call's timeout. LowEffort caps effort to "low" rather than disabling it
-// outright, so the request shape stays consistent with earlier turns that may
-// already carry thinking blocks in history.
+// Suggest and GenerateTitle use this as a fallback when NoReasoningSender
+// isn't available: the throwaway call deliberately reuses the turn's own
+// Sender (so the request shares the main conversation's prompt-cache prefix —
+// see Suggest's doc comment), but that Sender carries whatever
+// reasoning_effort the session happens to be configured with. A session
+// running "high"/"max" would otherwise pay the model's full reasoning budget
+// just to produce a one-line suggestion, for no benefit — and on a slower
+// provider this reliably exceeds the throwaway call's timeout. LowEffort caps
+// effort to "low" rather than disabling it outright, so the request shape
+// stays consistent with earlier turns that may already carry thinking blocks
+// in history.
 type LowEffortSender interface {
 	Sender
 	LowEffort() Sender
 }
 
 // NoReasoningSender is implemented by a Sender that can produce a variant of
-// itself with reasoning disabled entirely. GenerateTitle uses this because a
-// 6-word title needs no reasoning at all, and even "low" reasoning can consume
-// the tight title token budget or time out. If a sender does not implement this
-// interface, GenerateTitle falls back to LowEffortSender instead.
+// itself with reasoning disabled entirely. GenerateTitle and Suggest prefer
+// this over LowEffortSender: a 6-word title / one-line follow-up suggestion
+// needs no reasoning at all, and even "low" reasoning can consume the tight
+// token budget or time out. If a sender does not implement this interface,
+// both calls fall back to LowEffortSender instead.
 type NoReasoningSender interface {
 	Sender
 	NoReasoning() Sender
@@ -1350,7 +1353,13 @@ func (a *Agent) Suggest(ctx context.Context, tools []ToolDefinition) (string, er
 	msgs = append(msgs, snap...)
 	msgs = append(msgs, NewUserMessage(suggestInstruction))
 
-	if le, ok := sender.(LowEffortSender); ok {
+	// Prefer NoReasoning, fall back to LowEffort: a one-line follow-up
+	// suggestion needs no reasoning, and even "low" effort wastes time and
+	// tokens that can push this throwaway call past its timeout on a slow
+	// provider (same logic as GenerateTitle).
+	if nr, ok := sender.(NoReasoningSender); ok {
+		sender = nr.NoReasoning()
+	} else if le, ok := sender.(LowEffortSender); ok {
 		sender = le.LowEffort()
 	}
 

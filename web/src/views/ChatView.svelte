@@ -1003,6 +1003,13 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // Panel-launched agentic sessions (Replay/Record/Edit/…) are single-purpose;
       // a follow-up suggestion is just noise there.
       if (agenticSessions.has(sid)) return
+      // A turn is in flight: drop the event. The previous turn's Suggest call
+      // can still resolve after a new one starts (fire-and-forget goroutine on
+      // the server); applying its stale suggestion would resurrect text that
+      // send() just cleared. Mirrors the TUI's "only apply suggestion while
+      // idle" rule. The new turn's own Suggest (or its empty-timeout event)
+      // will carry the authoritative follow-up.
+      if (get(chatStreaming)[sid]) return
       chatSuggestion.update(s => ({ ...s, [sid]: (ev as any).text ?? '' }))
     }))
 
@@ -1265,11 +1272,14 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     const steering = wasStreaming
     if (!steering) {
       // A fresh turn starts: clear the previous turn's finished sub-agents and
-      // thinking buffer, clear the error banner, and flip the session into
-      // streaming.
+      // thinking buffer, clear the error banner, clear any stale follow-up
+      // suggestion from the last turn (it belongs to a conversation that has now
+      // moved on and must not re-render when this turn ends), and flip the
+      // session into streaming.
       turnError = null
       clearDoneSubAgents(sid)
       chatThinking.update(tt => ({ ...tt, [sid]: '' }))
+      chatSuggestion.update(s => ({ ...s, [sid]: '' }))
       chatStreaming.update(s => ({ ...s, [sid]: true }))
     }
     const pendingId = 'pending-' + Date.now()
