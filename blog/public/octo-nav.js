@@ -26,7 +26,18 @@
 	// dangerous URL schemes before handing a value to setAttribute('href', …).
 	const escapeHtml = (s) =>
 		String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-	const safeHref = (s) => (/^\s*(javascript|data|vbscript):/i.test(String(s)) ? '' : s);
+	// Parse via the URL API and require the result to carry a same-flow http(s)
+	// protocol check right at the call site — inlined, not behind a helper
+	// function, so the scheme guard visibly dominates every setAttribute('href')
+	// sink below (a wrapped helper's "return the input unchanged" branch still
+	// reads as tainted data reaching the sink to static analysis).
+	function parseUrl(s) {
+		try {
+			return new URL(String(s ?? ''), location.origin);
+		} catch {
+			return null;
+		}
+	}
 
 	const BLUE = '#1677FF',
 		HOVER = '#4096FF';
@@ -87,8 +98,10 @@
 			if (v != null) el.textContent = v;
 		});
 		document.querySelectorAll('[data-href-en],[data-href-zh]').forEach((el) => {
-			const v = el.getAttribute(isZh ? 'data-href-zh' : 'data-href-en');
-			if (v != null) el.setAttribute('href', safeHref(v));
+			const raw = el.getAttribute(isZh ? 'data-href-zh' : 'data-href-en');
+			if (raw == null) return;
+			const u = parseUrl(raw);
+			if (u && (u.protocol === 'http:' || u.protocol === 'https:')) el.setAttribute('href', u.href);
 		});
 		document.querySelectorAll('octo-site-nav[lang-toggle],octo-site-footer[lang-toggle]').forEach((el) => {
 			el.setAttribute('locale', lang);
@@ -106,7 +119,12 @@
 			const t = T[loc];
 			const blogHome = isZh ? '/blog/' : '/blog/en/';
 			const docsHref = isZh ? '/docs/zh/' : '/docs/';
-			const alt = escapeHtml(safeHref(this.getAttribute('alt')) || (isZh ? '/blog/en/' : '/blog/'));
+			const altAttr = this.getAttribute('alt');
+			const altUrl = altAttr == null ? null : parseUrl(altAttr);
+			const altSafe = altUrl && (altUrl.protocol === 'http:' || altUrl.protocol === 'https:')
+				? altUrl.href
+				: isZh ? '/blog/en/' : '/blog/';
+			const alt = escapeHtml(altSafe);
 			const releases = 'https://github.com/open-octo/octo-agent/releases/latest';
 			const repo = 'https://github.com/open-octo/octo-agent';
 			const sections =
