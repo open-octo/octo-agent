@@ -109,7 +109,7 @@ func (ReadFileTool) Execute(ctx context.Context, _ string, input map[string]any)
 	// image blocks, and a model that believes it "read" an image it cannot
 	// see confidently hallucinates the contents.
 	if mimeType := imageMIMEType(abs); mimeType != "" {
-		if !ModelVisionEnabled() {
+		if !ModelVisionEnabled(ctx) {
 			return agent.ToolResult{
 				Text: fmt.Sprintf("%s is an image file (%s) and the active model does not accept image input — the contents cannot be read or described. Do not guess what the image shows; tell the user to switch to a vision-capable model if they need it analyzed.", path, mimeType),
 			}, nil

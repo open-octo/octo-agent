@@ -118,7 +118,8 @@ tools.SetBrowserHealer(app.MakeBrowserHealer(a.GetSender(), a.Model))
 
 如果 Director 并发跑的两个 agent 都启用 browser 工具且用不同 model,这三行会互相覆盖——**这是一个
 真实的并发安全缺口,不是可以靠约定绕开的东西,只是 Sinew 场景目前不用 browser 工具所以不触发**。见
-"已知限制"一节。
+"已知限制"一节。（后续更新：这三行已经改成 ctx-scoped 写法，不再是进程级覆写——见"已知限制"一节里
+对应条目。）
 
 ### 7. 第四个未 ctx 化的全局状态:workflow discovery cwd
 
@@ -487,20 +488,26 @@ Director 侧用法：`agent.Gate = approval.GateFunc(func(ctx, name, input) (boo
 
 ## 已知限制（如实记录，不假装解决）
 
-- **Browser 工具的三个全局 setter 仍未 ctx 化**（`SetBrowserVision`/`SetBrowserRecordingGenerator`/
-  `SetBrowserHealer`，`internal/server/handlers.go:822-831`）。`toolenv.WireForSession` 不处理
-  这三个，调用方若启用 browser 工具且并发跑多个不同 model 的 agent，会有互相覆盖的竞态。Sinew
-  Director 的 `agent.yaml` 场景不需要 browser 工具，绕开即可；这不代表问题被解决了，只是当前
-  消费者不触发。如果未来有别的 library 消费者需要 browser 工具的并发安全，需要单独给这三个也做
-  ctx 化改造（工作量和 #1133 类似）。
+- ~~Browser 工具的三个全局 setter 仍未 ctx 化~~ **已修复**：`SetBrowserVision`（现
+  `SetModelVision`）/`SetBrowserRecordingGenerator`/`SetBrowserHealer` 都已经加上
+  `WithModelVision`/`WithBrowserRecordingGenerator`/`WithBrowserHealer` 的 ctx 携带路径
+  （`internal/tools/vision.go`、`internal/tools/browser.go`），`prepareToolTurn`
+  （`internal/server/handlers_prepare_toolturn.go`）改成把这三个 stamp 进 ctx 而不是覆写进程级全局，
+  跟第 6 点里"两个 agent 并发用不同 model 会互相覆盖"的竞态一起解决了。`toolenv.WireForSession`／
+  `NewSessionToolEnv` 仍然不主动 wire 这三个（调用方要用 browser 工具需要自己
+  `ctx = tools.WithModelVision(ctx, ...)` 等），但底层已经是并发安全的 ctx-first-then-global 解析,
+  不再是原样覆写的全局变量。
 - **`Agent.Gate` 的 `PermissionGate.Check` 目前是同步阻塞签名**（`(ctx, name, input) (bool,
   string)`，没有单独的"pending/等待中"状态）。调用方如果要做异步审批（等人工审批几十分钟），
   `Check` 内部必须自己阻塞等待（在一个 goroutine 里挂起），而不是让 octo 提供任何挂起/恢复机制——
   这是设计上的既有事实，pkg/ 不改变它。
-- **workflow-discovery-cwd 是第四个未 ctx 化的全局状态**（`tools.SetWorkflowDiscoveryCWD`/
-  `ActiveWorkflowDiscoveryCWD`，`internal/tools/workflow.go`），跟三个 browser setter 同一类
-  问题——并发跑的多个 agent 若 working directory 不同且都用 workflow 工具，会互相踩。跟 browser
-  setter 一样，`toolenv.WireForSession` 不处理它，调用方不启用 workflow 工具即可绕开。
+- **workflow-discovery-cwd 仍未 ctx 化，且不能用同一套方案修**（`tools.SetWorkflowDiscoveryCWD`/
+  `ActiveWorkflowDiscoveryCWD`，`internal/tools/workflow.go`）——跟上面三个 browser setter 不同,
+  它读取的地方是 `WorkflowTool.Definition()`,而 `agent.ToolDefinition` 接口的 `Definition()`
+  方法本身不带 `ctx` 参数,没有 ctx 可读。要修就得改 `Definition()` 的方法签名,这会牵动代码库里
+  每一个 `ToolExecutor` 实现,是量级完全不同的改动,这次不做。并发跑的多个 agent 若 working
+  directory 不同且都用 workflow 工具,仍会互相踩;`toolenv.WireForSession` 不处理它,调用方不启用
+  workflow 工具即可绕开。
 - **MCP client 注册目前没有库安全路径**（`tools.SetMCPRegistry`，`internal/tools/mcp.go:40`，以及
   `internal/app/mcp.go` 里 CLI/server 专属的 `ConnectMCP`/`SwapMCP` 编排逻辑）——同样是进程级
   全局，同样完全没有导出规划。Sinew Director 大概率会想用 MCP 工具（Forge/Spine 本身就是 MCP

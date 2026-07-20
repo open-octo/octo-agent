@@ -21,13 +21,14 @@ func TestPrepareToolTurn_WiresBrowserLLMHelpers(t *testing.T) {
 	tools.SetBrowserRecordingGenerator(nil)
 
 	a := agent.New(&stubSender{}, "stub-model")
-	if _, _, _, _, err := srv.prepareToolTurn(context.Background(), a, nil); err != nil {
+	ctx, _, _, _, err := srv.prepareToolTurn(context.Background(), a, nil)
+	if err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
-	if !tools.BrowserHealerSet() {
+	if !tools.BrowserHealerSetForCtx(ctx) {
 		t.Error("replay self-heal helper not wired in serve")
 	}
-	if !tools.BrowserRecordingGeneratorSet() {
+	if !tools.BrowserRecordingGeneratorSetForCtx(ctx) {
 		t.Error("record_stop recording generator not wired in serve")
 	}
 }
