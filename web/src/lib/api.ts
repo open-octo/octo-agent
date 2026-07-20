@@ -1024,7 +1024,7 @@ export async function saveModel(req: ModelConfigInput): Promise<{ ok: boolean; i
 // existing endpoint id (overwrite) rather than creating a duplicate. If the
 // natural id is already taken by an unrelated endpoint, "-1", "-2", ... are
 // appended until free.
-function generateEndpointID(provider: string, baseURL: string, existing: EndpointConfig[]): string {
+export function generateEndpointID(provider: string, baseURL: string, existing: EndpointConfig[]): string {
   const base = (provider && provider !== 'custom') ? provider : 'custom'
   // Overwrite candidate: same provider AND same base_url (both empty counts
   // as equal — named vendors resolve base_url at runtime, so an empty
