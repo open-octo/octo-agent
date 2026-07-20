@@ -236,9 +236,10 @@ func TestRunConfig_Wizard_PreservesOtherEntriesAndGlobals(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Answers: provider=openai, model=(default), set-as-default=y. No
-	// endpoint question for a pinned vendor.
-	in := strings.NewReader("openai\n\ny\n")
+	// Answers: provider=openai, model=(default/blank), store-key=n,
+	// coauthor=y, reasoning=off(blank), set-as-default=y. No endpoint question
+	// for a pinned vendor; no vision question (gpt-5.4 is in the catalogue).
+	in := strings.NewReader("openai\n\nn\ny\n\ny\n")
 	var stdout, stderr bytes.Buffer
 	if code := runConfig(nil, in, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
@@ -261,16 +262,28 @@ func TestRunConfig_Wizard_PreservesOtherEntriesAndGlobals(t *testing.T) {
 	if got.PermissionMode != "strict" {
 		t.Errorf("permission_mode lost: %q", got.PermissionMode)
 	}
-	// The new openai endpoint must exist (the wizard added it).
-	var hasOpenai bool
+	// The new openai endpoint must exist (the wizard added it) and, since the
+	// model question was answered blank, must inherit the openai default —
+	// NOT the previous anthropic entry's model.
+	var openaiModel string
 	for _, ep := range got.Endpoints {
 		if ep.Provider == "openai" {
-			hasOpenai = true
+			if len(ep.Models) > 0 {
+				openaiModel = ep.Models[0].Model
+			}
 			break
 		}
 	}
-	if !hasOpenai {
-		t.Errorf("wizard did not add an openai endpoint: %+v", got.Endpoints)
+	if openaiModel == "" {
+		t.Fatalf("wizard did not add an openai endpoint: %+v", got.Endpoints)
+	}
+	if openaiModel != "gpt-5.4" {
+		t.Errorf("blank model answer must default to the openai default, got %q", openaiModel)
+	}
+	// The default composite id must name the openai model, not the leaked
+	// anthropic one.
+	if wantDefault := "openai::gpt-5.4"; got.Default != wantDefault {
+		t.Errorf("Default = %q, want %q", got.Default, wantDefault)
 	}
 }
 
@@ -318,9 +331,10 @@ func TestRunConfig_Wizard_SwitchesProviderAndPromptsForKey(t *testing.T) {
 
 	// Answers (key now comes right after model): provider=openai,
 	// model=(default), store_key=y, key=new-openai-key, coauthor=y,
-	// reasoning-effort=(off), show-reasoning=(off), set-as-default=y.
-	// No endpoint question for a pinned vendor.
-	in := strings.NewReader("openai\n\ny\nnew-openai-key\ny\n\n\ny\n")
+	// reasoning-effort=(off), set-as-default=y. No endpoint question for a
+	// pinned vendor; no vision question (the blank model defaults to the
+	// openai default gpt-5.4, which the catalogue already knows is vision-capable).
+	in := strings.NewReader("openai\n\ny\nnew-openai-key\ny\n\ny\n")
 	var stdout, stderr bytes.Buffer
 	if code := runConfig(nil, in, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
