@@ -907,8 +907,16 @@ func (s *Server) handleSetEndpointDefault(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Default switch does NOT invalidate senders (design §6) — only changes
-	// which sender ResolveDefault returns next turn.
+	// Default switch does NOT invalidate the per-entry sender cache (design §6)
+	// — it only changes which sender ResolveDefault returns next turn. However it
+	// MUST update s.model immediately so that handleCreateSession (which reads
+	// s.model directly) picks up the new default, not the stale startup fallback
+	// (e.g. claude-sonnet-4-6 on a fresh install). Without this, the first
+	// onboard session is created with the wrong model and fails with 500 because
+	// senderForSession later pairs the reconfigured sender with a stale model.
+	if err := s.reloadDefaultSender(); err != nil {
+		log.Printf("[server] reload default sender after default change: %v", err)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "default": newDefault})
 }
 
