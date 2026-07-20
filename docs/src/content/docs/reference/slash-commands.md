@@ -12,7 +12,7 @@ is the process; an IM chat can be re-bound to a different session entirely).
 | Command | Syntax | Behavior |
 |---|---|---|
 | `/help` | `/help` | Prints the command list and key hints |
-| `/model` | `/model <name>` | Switches the model in place — same provider, refreshed toolset for that model |
+| `/model` | `/model <name>` | Switches to another configured model by name — its endpoint's provider and connection come with it — and rebuilds the toolset for it |
 | `/thinking` | `/thinking off\|low\|medium\|high\|xhigh\|max` | Sets reasoning effort; rebuilds the sender, since the thinking budget is set at construction time |
 | `/compact` | `/compact` | Compacts history now; refused while a turn is running |
 | `/clear` | `/clear` | Wipes history and saves immediately; refused mid-turn. Keeps the same session file — for a brand-new one, see `/new` below (IM only) |
@@ -58,7 +58,7 @@ IM sessions can be re-bound between chats, so this surface has commands the othe
 | `/new` | `/new` | Creates a brand-new session and binds this chat to it — the one way to start fresh without touching an existing session's history |
 | `/clear` | `/clear` | Wipes history but keeps the current binding |
 | `/compact` | `/compact` | Compacts now, out-of-band so it doesn't block the chat |
-| `/model` | `/model [name\|default]` | No argument lists the configured models; `/model <name>` binds the session to that entry, `/model default` unbinds back to the default. The binding persists and is the same one the Web UI's model picker shows |
+| `/model` | `/model [name\|default]` | No argument lists the configured models; `/model <name>` binds the session to that model, `/model default` unbinds back to the default. The binding persists and is the same one the Web UI's model picker shows |
 | `/goal [...]` | | Same shared implementation as Web — `/goal edit <text>` works inline |
 | `/stop` | `/stop` | Interrupts the in-flight turn |
 | `/status` | `/status` | Reports how long this chat has been bound, plus input/output token counts |
