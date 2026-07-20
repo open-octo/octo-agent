@@ -93,6 +93,9 @@ func TestBrowserTool_SearchDownloadFlow(t *testing.T) {
 	// a code defect. Skip on the known flake signatures; any other failure stays
 	// fatal so real regressions fail the build.
 	skipOnBrowserFlake(t, "launch", err)
+	if b != nil {
+		t.Cleanup(func() { b.Close() })
+	}
 	page, err := b.NewPage(ctx, "about:blank")
 	skipOnBrowserFlake(t, "new page", err)
 	SetBrowserSession(b, page)
@@ -155,6 +158,9 @@ func TestBrowserTool_RecordRunRoundTrip(t *testing.T) {
 	// a code defect. Skip on the known flake signatures; any other failure stays
 	// fatal so real regressions fail the build.
 	skipOnBrowserFlake(t, "launch", err)
+	if b != nil {
+		t.Cleanup(func() { b.Close() })
+	}
 	page, err := b.NewPage(ctx, srv.URL)
 	skipOnBrowserFlake(t, "new page", err)
 	SetBrowserSession(b, page)
@@ -209,6 +215,9 @@ func TestBrowserTool_RecordCancel(t *testing.T) {
 	}
 	b, err := browser.Launch(ctx, browser.LaunchOptions{Headless: true})
 	skipOnBrowserFlake(t, "launch", err)
+	if b != nil {
+		t.Cleanup(func() { b.Close() })
+	}
 	page, err := b.NewPage(ctx, "about:blank")
 	skipOnBrowserFlake(t, "new page", err)
 	SetBrowserSession(b, page)
@@ -376,6 +385,9 @@ func TestBrowserTool_CookiesIncludesHttpOnly(t *testing.T) {
 	// a code defect. Skip on the known flake signatures; any other failure stays
 	// fatal so real regressions fail the build.
 	skipOnBrowserFlake(t, "launch", err)
+	if b != nil {
+		t.Cleanup(func() { b.Close() })
+	}
 	page, err := b.NewPage(ctx, "about:blank")
 	skipOnBrowserFlake(t, "new page", err)
 	SetBrowserSession(b, page)
@@ -414,6 +426,9 @@ func TestBrowserTool_ObserveAndScreenshotVision(t *testing.T) {
 	// a code defect. Skip on the known flake signatures; any other failure stays
 	// fatal so real regressions fail the build.
 	skipOnBrowserFlake(t, "launch", err)
+	if b != nil {
+		t.Cleanup(func() { b.Close() })
+	}
 	page, err := b.NewPage(ctx, "about:blank")
 	skipOnBrowserFlake(t, "new page", err)
 	SetBrowserSession(b, page)

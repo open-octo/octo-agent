@@ -144,19 +144,21 @@ func findChrome(override string) (string, error) {
 	return "", fmt.Errorf("chrome not found; set LaunchOptions.ExecPath")
 }
 
-// launchChrome starts Chrome and returns the running process plus the browser-
-// level CDP websocket URL.
-func launchChrome(ctx context.Context, opts LaunchOptions) (*exec.Cmd, string, error) {
+// launchChrome starts Chrome and returns the running process, the browser-level
+// CDP websocket URL, and the path of any throwaway profile it created (empty when
+// opts.UserDataDir was set — the caller owns that dir). The caller is responsible
+// for removing the returned temp dir once the browser is no longer needed.
+func launchChrome(ctx context.Context, opts LaunchOptions) (*exec.Cmd, string, string, error) {
 	exe, err := findChrome(opts.ExecPath)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	dataDir := opts.UserDataDir
 	tempDir := ""
 	if dataDir == "" {
 		tempDir, err = os.MkdirTemp("", "octo-chrome-")
 		if err != nil {
-			return nil, "", err
+			return nil, "", "", err
 		}
 		dataDir = tempDir
 	}
@@ -186,7 +188,7 @@ func launchChrome(ctx context.Context, opts LaunchOptions) (*exec.Cmd, string, e
 		if tempDir != "" {
 			os.RemoveAll(tempDir)
 		}
-		return nil, "", fmt.Errorf("start chrome: %w", err)
+		return nil, "", "", fmt.Errorf("start chrome: %w", err)
 	}
 
 	port := opts.Port
@@ -194,15 +196,21 @@ func launchChrome(ctx context.Context, opts LaunchOptions) (*exec.Cmd, string, e
 		port, err = readDevToolsPort(ctx, dataDir)
 		if err != nil {
 			killProcessGroup(cmd)
-			return nil, "", err
+			if tempDir != "" {
+				os.RemoveAll(tempDir)
+			}
+			return nil, "", "", err
 		}
 	}
 	wsURL, err := browserWebSocketURL(ctx, port)
 	if err != nil {
 		killProcessGroup(cmd)
-		return nil, "", err
+		if tempDir != "" {
+			os.RemoveAll(tempDir)
+		}
+		return nil, "", "", err
 	}
-	return cmd, wsURL, nil
+	return cmd, wsURL, tempDir, nil
 }
 
 // readDevToolsPort waits for Chrome to write its chosen debug port to the
