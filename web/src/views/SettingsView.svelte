@@ -60,7 +60,7 @@
   let modelModalEl = $state<HTMLDivElement | null>(null)
 
   // ── Endpoints section (PR4b: two-level read-only preview; PR6: editable) ──
-  // Mirrors GET /api/config/endpoints. PR6 makes the channel cards editable:
+  // Mirrors GET /api/config/endpoints. PR6 makes the endpoint cards editable:
   // add/edit/delete endpoint, add/delete model, set default/lite, rename with
   // confirmation. The old flat "AI Models" section below is hidden ({#if false})
   // and its handlers are stubs — PR6 doesn't remove them to keep the diff
@@ -112,7 +112,16 @@
 
   function onProviderChange() {
     if (!epPreset || epForm.provider === 'custom') {
-      if (epForm.provider === 'custom') autoFilledBaseURL = ''
+      if (epForm.provider === 'custom') {
+        // Named vendors auto-fill their preset URL, which is meaningless for
+        // a self-hosted endpoint — start custom entry from a blank field.
+        epForm.base_url = ''
+        autoFilledBaseURL = ''
+        // Custom has no registry-pinned wire format and an empty protocol
+        // fails at client build time, so the select offers no blank option —
+        // seed the binding to match (mirrors the TUI wizard's forced choice).
+        if (!epForm.protocol) epForm.protocol = 'anthropic'
+      }
       return
     }
     // Product rule: named vendors always use their registry base_url — the
@@ -132,7 +141,9 @@
       provider: ep.provider,
       base_url: ep.base_url ?? '',
       api_key: '', // never prefill the key — server only returns has_api_key
-      protocol: ep.protocol ?? '',
+      // A stored custom endpoint with no protocol is unbuildable anyway;
+      // default the select to anthropic so saving repairs it.
+      protocol: ep.protocol || (ep.provider === 'custom' ? 'anthropic' : ''),
     }
     autoFilledBaseURL = ep.base_url ?? ''
     epModalOpen = true
@@ -403,7 +414,7 @@
       origLanguage = language
 
       // PR4b/PR5: load the two-level endpoint view in parallel. Failure is
-      // non-fatal — the read-only Channels section just renders empty.
+      // non-fatal — the Endpoints section just renders empty.
       try {
         const ep = await api.getEndpoints()
         endpoints = ep.endpoints ?? []
@@ -558,7 +569,7 @@
     {#if loading}
       <div class="loading-state">{$t('settings.loading')}</div>
     {:else}
-      <!-- Channels (PR6: two-level editable) -->
+      <!-- Endpoints (PR6: two-level editable) -->
       <div class="section-card">
         <div class="section-head">
           <span class="section-title-inline">{$t('settings.endpoints.title')}</span>
@@ -869,9 +880,17 @@
             {#each providers as p}
               <option value={p.id}>{p.name}</option>
             {/each}
-            <option value="custom">Custom</option>
           </select>
         </label>
+        {#if epForm.provider === 'custom'}
+          <label class="ep-field">
+            <span class="ep-label">{$t('settings.endpoints.field.protocol')}</span>
+            <select class="ep-input" bind:value={epForm.protocol}>
+              <option value="anthropic">anthropic</option>
+              <option value="openai">openai</option>
+            </select>
+          </label>
+        {/if}
         <label class="ep-field">
           <span class="ep-label">{$t('settings.endpoints.field.base_url')}</span>
           <input class="ep-input" bind:value={epForm.base_url} readonly={epBaseUrlLocked} placeholder="https://api.example.com" />
@@ -887,16 +906,6 @@
             <a class="field-link" href={epPreset.website_url} target="_blank" rel="noreferrer">{$t('models.get_apikey')}</a>
           {/if}
         </label>
-        {#if epForm.provider === 'custom'}
-          <label class="ep-field">
-            <span class="ep-label">{$t('settings.endpoints.field.protocol')}</span>
-            <select class="ep-input" bind:value={epForm.protocol}>
-              <option value="">(auto)</option>
-              <option value="anthropic">anthropic</option>
-              <option value="openai">openai</option>
-            </select>
-          </label>
-        {/if}
         <div class="ep-form-actions">
           <button class="btn-secondary" onclick={closeEpModal}>{$t('settings.endpoints.modal.cancel')}</button>
           <button class="btn-primary" onclick={submitEndpoint}>{$t('settings.endpoints.modal.save')}</button>
@@ -948,7 +957,7 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 }
 .section-title-inline { font-size: 16px; font-weight: 600; color: var(--text-heading); }
 
-/* ── Channels section (PR6 two-level editable) ────────────────────────────── */
+/* ── Endpoints section (PR6 two-level editable) ────────────────────────────── */
 .endpoint-card {
   padding: 14px 24px; border-bottom: 1px solid var(--border-table);
 }
