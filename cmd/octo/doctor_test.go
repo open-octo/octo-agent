@@ -40,6 +40,17 @@ func TestRunDoctor_HealthyWithKey(t *testing.T) {
 	if !strings.Contains(out, "config.yml parses") || !strings.Contains(out, "All checks passed") {
 		t.Errorf("healthy output missing expected lines:\n%s", out)
 	}
+	// PR6 (design §13.2): per-endpoint card output.
+	if !strings.Contains(out, "Endpoints:") || !strings.Contains(out, "ep-a") || !strings.Contains(out, "gpt-4o") {
+		t.Errorf("healthy output missing per-endpoint card:\n%s", out)
+	}
+	if !strings.Contains(out, "API key: found") {
+		t.Errorf("healthy output missing key-found status:\n%s", out)
+	}
+	// References section.
+	if !strings.Contains(out, "References:") || !strings.Contains(out, "default = ep-a::gpt-4o") {
+		t.Errorf("healthy output missing references section:\n%s", out)
+	}
 }
 
 func TestRunDoctor_MissingKeyIsProblem(t *testing.T) {

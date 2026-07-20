@@ -57,15 +57,177 @@
   let busyModelId  = $state<string | null>(null)
   let modelModalEl = $state<HTMLDivElement | null>(null)
 
-  // ── Endpoints section (PR4b: two-level read-only preview) ──────────────────
-  // Mirrors GET /api/config/endpoints. The two-level shape (channel cards with
-  // their model lists) is the future of this page, but PR4b ships it read-only —
-  // the write path (CRUD on endpoints) lands in PR5 alongside the Save format
-  // switch. The existing flat "AI Models" section below remains the editing
-  // surface until then.
+  // ── Endpoints section (PR4b: two-level read-only preview; PR6: editable) ──
+  // Mirrors GET /api/config/endpoints. PR6 makes the channel cards editable:
+  // add/edit/delete endpoint, add/delete model, set default/lite, rename with
+  // confirmation. The old flat "AI Models" section below is hidden ({#if false})
+  // and its handlers are stubs — PR6 doesn't remove them to keep the diff
+  // small, but they're dead code once the endpoint editor is live.
   let endpoints     = $state<EndpointConfig[]>([])
   let defaultCid    = $state('')
   let liteCid       = $state('')
+
+  // Endpoint editor modal state.
+  let epModalOpen   = $state(false)
+  let editingEpId   = $state<string | null>(null) // null = creating new
+  let epForm        = $state({
+    id: '', name: '', provider: 'anthropic', base_url: '', api_key: '', protocol: '',
+  })
+  let busyEpId      = $state<string | null>(null)
+  let epModalEl     = $state<HTMLDivElement | null>(null)
+  // Add-model inline form per endpoint.
+  let addModelEpId  = $state<string | null>(null)
+  let newModelName  = $state('')
+  let newModelVision = $state(false)
+
+  // Focus trap for the endpoint modal.
+  $effect(() => {
+    if (epModalOpen) epModalEl?.focus()
+  })
+
+  function openAddEndpoint() {
+    editingEpId = null
+    epForm = { id: '', name: '', provider: 'anthropic', base_url: '', api_key: '', protocol: '' }
+    epModalOpen = true
+  }
+
+  function openEditEndpoint(ep: EndpointConfig) {
+    editingEpId = ep.id
+    epForm = {
+      id: ep.id,
+      name: ep.name ?? '',
+      provider: ep.provider,
+      base_url: ep.base_url ?? '',
+      api_key: '', // never prefill the key — server only returns has_api_key
+      protocol: ep.protocol ?? '',
+    }
+    epModalOpen = true
+  }
+
+  function closeEpModal() {
+    epModalOpen = false
+  }
+
+  async function submitEndpoint() {
+    const id = epForm.id.trim()
+    if (!id) { showToast($t('settings.endpoints.error.invalid_id'), 'error'); return }
+    if (!/^[a-zA-Z0-9_-]+$/.test(id)) { showToast($t('settings.endpoints.error.invalid_id'), 'error'); return }
+    try {
+      if (editingEpId) {
+        // Edit existing. If id changed, confirm rename (cascade).
+        if (id !== editingEpId) {
+          if (!(await confirmDialog($t('settings.endpoints.rename_confirm')))) return
+        }
+        const patch: api.EndpointUpdateInput = {
+          new_id: id !== editingEpId ? id : undefined,
+          name: epForm.name || undefined,
+          provider: epForm.provider || undefined,
+          base_url: epForm.base_url || undefined,
+          api_key: epForm.api_key || undefined,
+          protocol: epForm.protocol || undefined,
+        }
+        await api.updateEndpoint(editingEpId, patch)
+      } else {
+        await api.createEndpoint({
+          id,
+          name: epForm.name || undefined,
+          provider: epForm.provider,
+          base_url: epForm.base_url || undefined,
+          api_key: epForm.api_key || undefined,
+          protocol: epForm.protocol || undefined,
+          models: [],
+        })
+      }
+      epModalOpen = false
+      await loadConfig()
+      showToast(tr('settings.toast_saved'), 'success')
+    } catch (e: any) {
+      showToast(e?.message ?? 'Save failed', 'error')
+    }
+  }
+
+  async function deleteEndpointRow(ep: EndpointConfig) {
+    if (!(await confirmDialog($t('settings.endpoints.confirm_delete')))) return
+    busyEpId = ep.id
+    try {
+      await api.deleteEndpoint(ep.id)
+      await loadConfig()
+    } catch (e: any) {
+      showToast(e?.message ?? 'Delete failed', 'error')
+    } finally {
+      busyEpId = null
+    }
+  }
+
+  async function setEndpointDefaultRow(ep: EndpointConfig) {
+    busyEpId = ep.id
+    try {
+      await api.setEndpointDefault(ep.id)
+      await loadConfig()
+    } catch (e: any) {
+      showToast(e?.message ?? 'Failed', 'error')
+    } finally {
+      busyEpId = null
+    }
+  }
+
+  async function toggleEndpointLite(ep: EndpointConfig) {
+    busyEpId = ep.id
+    try {
+      // If this endpoint holds the current lite, unset by setting lite to a
+      // different endpoint — but the API only has "set lite" (no unset). PR6
+      // simplifies: clicking lite on the endpoint that already holds it is a
+      // no-op; clicking on another endpoint moves lite there. Unsetting lite
+      // entirely requires a follow-up API (DELETE /api/config/lite) — not in
+      // PR5/PR6 scope.
+      if (!liteCid.startsWith(`${ep.id}::`)) {
+        await api.setEndpointLite(ep.id)
+        await loadConfig()
+      }
+    } catch (e: any) {
+      showToast(e?.message ?? 'Failed', 'error')
+    } finally {
+      busyEpId = null
+    }
+  }
+
+  function toggleAddModel(ep: EndpointConfig) {
+    if (addModelEpId === ep.id) {
+      addModelEpId = null
+    } else {
+      addModelEpId = ep.id
+      newModelName = ''
+      newModelVision = false
+    }
+  }
+
+  async function submitAddModel(ep: EndpointConfig) {
+    const model = newModelName.trim()
+    if (!model) { showToast($t('settings.endpoints.error.empty'), 'error'); return }
+    busyEpId = ep.id
+    try {
+      await api.addEndpointModel(ep.id, model, newModelVision)
+      addModelEpId = null
+      await loadConfig()
+    } catch (e: any) {
+      showToast(e?.message ?? 'Add failed', 'error')
+    } finally {
+      busyEpId = null
+    }
+  }
+
+  async function deleteEndpointModelRow(ep: EndpointConfig, model: string) {
+    if (!(await confirmDialog($t('settings.endpoints.confirm_delete_model')))) return
+    busyEpId = ep.id
+    try {
+      await api.deleteEndpointModel(ep.id, model)
+      await loadConfig()
+    } catch (e: any) {
+      showToast(e?.message ?? 'Delete failed', 'error')
+    } finally {
+      busyEpId = null
+    }
+  }
 
   // Focus trap so Esc doesn't leak past the modal (#1112).
   $effect(() => {
@@ -367,12 +529,15 @@
     {#if loading}
       <div class="loading-state">{$t('settings.loading')}</div>
     {:else}
-      <!-- Channels (PR4b: two-level read-only preview) -->
+      <!-- Channels (PR6: two-level editable) -->
       <div class="section-card">
         <div class="section-head">
           <span class="section-title-inline">{$t('settings.endpoints.title')}</span>
+          <button class="btn-add" onclick={openAddEndpoint}>
+            <iconify-icon icon="ant-design:plus-outlined" width="13"></iconify-icon>
+            {$t('settings.endpoints.add')}
+          </button>
         </div>
-        <div class="endpoints-notice">{$t('settings.endpoints.readonly_notice')}</div>
         {#if endpoints.length === 0}
           <div class="models-empty">{$t('settings.endpoints.empty')}</div>
         {:else}
@@ -382,6 +547,12 @@
                 <div class="endpoint-title-line">
                   <span class="endpoint-id mono">{ep.id}</span>
                   {#if ep.name}<span class="endpoint-name">{ep.name}</span>{/if}
+                  {#if defaultCid.startsWith(`${ep.id}::`)}
+                    <StatusTag status="success">{$t('settings.endpoints.badge.default')}</StatusTag>
+                  {/if}
+                  {#if liteCid.startsWith(`${ep.id}::`)}
+                    <StatusTag status="info">{$t('settings.endpoints.badge.lite')}</StatusTag>
+                  {/if}
                 </div>
                 <div class="endpoint-meta mono">
                   <span>{ep.provider}</span>
@@ -395,9 +566,26 @@
                     <span class="key-missing">{$t('settings.endpoints.api_key')}: {$t('settings.endpoints.api_key.missing')}</span>
                   {/if}
                 </div>
+                <div class="endpoint-actions">
+                  {#if !defaultCid.startsWith(`${ep.id}::`)}
+                    <button class="act-text" disabled={busyEpId === ep.id} onclick={() => setEndpointDefaultRow(ep)}>{$t('settings.endpoints.set_default')}</button>
+                  {/if}
+                  <button class="act-text" disabled={busyEpId === ep.id} onclick={() => toggleEndpointLite(ep)}>
+                    {liteCid.startsWith(`${ep.id}::`) ? $t('settings.endpoints.badge.lite') : $t('settings.endpoints.set_lite')}
+                  </button>
+                  <button class="act-btn" title={$t('settings.endpoints.edit')} onclick={() => openEditEndpoint(ep)}>
+                    <iconify-icon icon="ant-design:edit-outlined" width="14"></iconify-icon>
+                  </button>
+                  <button class="act-btn del" title={$t('settings.endpoints.delete')} disabled={busyEpId === ep.id} onclick={() => deleteEndpointRow(ep)}>
+                    <iconify-icon icon="ant-design:delete-outlined" width="14"></iconify-icon>
+                  </button>
+                </div>
               </div>
               <div class="endpoint-models">
-                <div class="endpoint-models-head">{$t('settings.endpoints.models')}</div>
+                <div class="endpoint-models-head">
+                  {$t('settings.endpoints.models')}
+                  <button class="act-text ep-add-model-btn" disabled={busyEpId === ep.id} onclick={() => toggleAddModel(ep)}>{$t('settings.endpoints.models.add')}</button>
+                </div>
                 {#each ep.models as m (m.model)}
                   <div class="endpoint-model-row">
                     <span class="mono">{ep.id}::{m.model}</span>
@@ -408,8 +596,22 @@
                     {#if liteCid === `${ep.id}::${m.model}`}
                       <StatusTag status="info">{$t('settings.endpoints.badge.lite')}</StatusTag>
                     {/if}
+                    <button class="act-btn del ep-model-del" title={$t('common.delete')} disabled={busyEpId === ep.id} onclick={() => deleteEndpointModelRow(ep, m.model)}>
+                      <iconify-icon icon="ant-design:delete-outlined" width="12"></iconify-icon>
+                    </button>
                   </div>
                 {/each}
+                {#if addModelEpId === ep.id}
+                  <div class="ep-add-model-form">
+                    <input class="input ep-add-model-input" placeholder={$t('settings.endpoints.models.model')} bind:value={newModelName} />
+                    <label class="ep-vision-toggle">
+                      <input type="checkbox" bind:checked={newModelVision} />
+                      <span>{$t('settings.endpoints.models.vision_hint')}</span>
+                    </label>
+                    <button class="btn-secondary" disabled={busyEpId === ep.id} onclick={() => submitAddModel(ep)}>{$t('settings.endpoints.modal.save')}</button>
+                    <button class="btn-secondary" onclick={() => { addModelEpId = null }}>{$t('settings.endpoints.modal.cancel')}</button>
+                  </div>
+                {/if}
               </div>
             </div>
           {/each}
@@ -613,6 +815,61 @@
   </div>
 {/if}
 
+<!-- Add / edit endpoint modal (PR6) -->
+{#if epModalOpen}
+  <div class="modal-backdrop" role="presentation">
+    <div class="modal" bind:this={epModalEl} onkeydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closeEpModal() } }} role="dialog" aria-modal="true" tabindex="-1">
+      <div class="modal-header">
+        <span class="modal-title">{editingEpId ? $t('settings.endpoints.modal.edit_title') : $t('settings.endpoints.modal.add_title')}</span>
+        <button class="modal-close" onclick={closeEpModal} aria-label={$t('common.close')}>
+          <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
+        </button>
+      </div>
+      <div class="modal-body ep-form">
+        <label class="ep-field">
+          <span class="ep-label">{$t('settings.endpoints.field.id')}</span>
+          <input class="input" bind:value={epForm.id} placeholder="relay-a" />
+        </label>
+        <label class="ep-field">
+          <span class="ep-label">{$t('settings.endpoints.field.name')}</span>
+          <input class="input" bind:value={epForm.name} placeholder={$t('settings.endpoints.field.name')} />
+        </label>
+        <label class="ep-field">
+          <span class="ep-label">{$t('settings.endpoints.field.provider')}</span>
+          <select class="sel" bind:value={epForm.provider}>
+            {#each providers as p}
+              <option value={p.id}>{p.name}</option>
+            {/each}
+            <option value="custom">Custom</option>
+          </select>
+        </label>
+        <label class="ep-field">
+          <span class="ep-label">{$t('settings.endpoints.field.base_url')}</span>
+          <input class="input" bind:value={epForm.base_url} placeholder="https://api.example.com" />
+        </label>
+        <label class="ep-field">
+          <span class="ep-label">{$t('settings.endpoints.field.api_key')}</span>
+          <input class="inp" type="password" bind:value={epForm.api_key} placeholder={$t('settings.endpoints.field.api_key_hint')} />
+        </label>
+        {#if epForm.provider === 'custom'}
+          <label class="ep-field">
+            <span class="ep-label">{$t('settings.endpoints.field.protocol')}</span>
+            <select class="sel" bind:value={epForm.protocol}>
+              <option value="">(auto)</option>
+              <option value="anthropic">anthropic</option>
+              <option value="openai">openai</option>
+            </select>
+          </label>
+        {/if}
+        <div class="ep-form-actions">
+          <button class="btn-secondary" onclick={closeEpModal}>{$t('settings.endpoints.modal.cancel')}</button>
+          <button class="btn-primary" onclick={submitEndpoint}>{$t('settings.endpoints.modal.save')}</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
 .page { flex: 1; overflow-y: auto; min-height: 0; }
 .inner { max-width: 800px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
@@ -655,12 +912,7 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 }
 .section-title-inline { font-size: 16px; font-weight: 600; color: var(--text-heading); }
 
-/* ── Channels section (PR4b two-level read-only) ───────────────────────────── */
-.endpoints-notice {
-  padding: 10px 24px; font-size: 12px; color: var(--text-tertiary);
-  background: var(--bg-subtle, rgba(0,0,0,0.02));
-  border-bottom: 1px solid var(--border-table);
-}
+/* ── Channels section (PR6 two-level editable) ────────────────────────────── */
 .endpoint-card {
   padding: 14px 24px; border-bottom: 1px solid var(--border-table);
 }
@@ -686,6 +938,23 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
   font-size: 11px; padding: 1px 6px; border-radius: 4px;
   background: var(--bg-subtle, rgba(0,0,0,0.04)); color: var(--text-tertiary);
 }
+
+/* PR6 endpoint editor */
+.endpoint-actions { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.ep-add-model-btn { font-size: 11px; padding: 0 6px; margin-left: 8px; }
+.ep-model-del { opacity: 0.5; }
+.ep-model-del:hover { opacity: 1; color: var(--red-6, #dc2626); }
+.ep-add-model-form {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 6px; padding: 8px; background: var(--bg-subtle, rgba(0,0,0,0.02));
+  border-radius: 6px;
+}
+.ep-add-model-input { flex: 1; min-width: 140px; }
+.ep-vision-toggle { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-tertiary); }
+.ep-form { display: flex; flex-direction: column; gap: 12px; }
+.ep-field { display: flex; flex-direction: column; gap: 4px; }
+.ep-label { font-size: 12px; color: var(--text-tertiary); }
+.ep-form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 
 .btn-add {
   height: 30px; padding: 0 12px; border: 1px solid var(--border); background: var(--bg-container);
