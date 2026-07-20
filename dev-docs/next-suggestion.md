@@ -16,17 +16,7 @@ Its usage is intentionally **not** accrued into the session — it's an auxiliar
 UI call, not part of a turn. Returns `""` (no error) when there's nothing to
 suggest.
 
-**Cache alignment is the whole reason it's cheap.** Anthropic's cache prefix is
-ordered `tools → system → messages`. The agentic loop sends a tools block, so if
-Suggest sent *no* tools (a plain `SendMessages`) its prefix would diverge at
-block 0 and the entire history would be re-billed at full input price every
-turn. So Suggest takes the **same `tools`** the loop uses and routes through the
-`ToolSender` path: the `tools → system → history` prefix matches, the whole
-history is reused at the cheap cache-read rate, and only the instruction plus the
-one-line reply are fresh tokens. The instruction tells the model not to call
-tools; if it returns a `tool_use` anyway, `Content` is empty and that turn simply
-yields no suggestion. The TUI passes `cfg.tools`; with no ToolSender/tools,
-Suggest falls back to `SendMessages` (uncached but still correct).
+**Effort strategy mirrors GenerateTitle.** Both are throwaway, one-line calls: a follow-up suggestion needs no reasoning just like a 6-word title, and even the `"low"` budget adds latency/tokens that can push the call past its timeout on a slow provider. So Suggest prefers a sender's `NoReasoning()` (thinking disabled entirely) when available, falling back to `LowEffort()` (cap to `"low"`) otherwise.
 
 ## TUI wiring (cmd/octo)
 
