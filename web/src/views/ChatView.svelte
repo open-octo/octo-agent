@@ -1265,11 +1265,14 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     const steering = wasStreaming
     if (!steering) {
       // A fresh turn starts: clear the previous turn's finished sub-agents and
-      // thinking buffer, clear the error banner, and flip the session into
-      // streaming.
+      // thinking buffer, clear the error banner, clear any stale follow-up
+      // suggestion from the last turn (it belongs to a conversation that has now
+      // moved on and must not re-render when this turn ends), and flip the
+      // session into streaming.
       turnError = null
       clearDoneSubAgents(sid)
       chatThinking.update(tt => ({ ...tt, [sid]: '' }))
+      chatSuggestion.update(s => ({ ...s, [sid]: '' }))
       chatStreaming.update(s => ({ ...s, [sid]: true }))
     }
     const pendingId = 'pending-' + Date.now()
