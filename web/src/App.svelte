@@ -109,8 +109,9 @@
     // shows the real configured default instead of a hardcoded guess.
     api.getConfig().then(cfg => {
       if (cfg.language) setLocale(cfg.language)
-      const def = cfg.models?.find(m => m.type === 'default')
-      if (def?.permission_mode) globalPermissionMode.set(def.permission_mode)
+      // PR5: permission_mode is global (was per-default-entry before). The
+      // Composer reads this to seed its no-active-session fallback.
+      if (cfg.permission_mode) globalPermissionMode.set(cfg.permission_mode)
     }).catch(() => { /* non-critical */ })
 
     ws.on('session_list', (ev: any) => {

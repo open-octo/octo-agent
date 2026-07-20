@@ -706,13 +706,15 @@ export interface ModelEntry {
   vision?: boolean
 }
 export interface ConfigResponse {
-  models?: ModelEntry[]
-  default_model_idx?: number
+  // PR5: Models/DefaultModelIdx deleted (flat Models field gone). The
+  // two-level endpoint view is served by GET /api/config/endpoints.
   font_size?: string
   language?: string
   show_reasoning?: boolean
   coauthor?: boolean
   workspace_dir?: string
+  reasoning_effort?: string   // PR5: global reasoning effort
+  permission_mode?: string    // PR6: global permission mode (was per-default-entry)
 }
 
 export async function getConfig(): Promise<ConfigResponse> {
