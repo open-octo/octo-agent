@@ -879,6 +879,15 @@
             {/each}
           </select>
         </label>
+        {#if epForm.provider === 'custom'}
+          <label class="ep-field">
+            <span class="ep-label">{$t('settings.endpoints.field.protocol')}</span>
+            <select class="ep-input" bind:value={epForm.protocol}>
+              <option value="anthropic">anthropic</option>
+              <option value="openai">openai</option>
+            </select>
+          </label>
+        {/if}
         <label class="ep-field">
           <span class="ep-label">{$t('settings.endpoints.field.base_url')}</span>
           <input class="ep-input" bind:value={epForm.base_url} readonly={epBaseUrlLocked} placeholder="https://api.example.com" />
@@ -894,15 +903,6 @@
             <a class="field-link" href={epPreset.website_url} target="_blank" rel="noreferrer">{$t('models.get_apikey')}</a>
           {/if}
         </label>
-        {#if epForm.provider === 'custom'}
-          <label class="ep-field">
-            <span class="ep-label">{$t('settings.endpoints.field.protocol')}</span>
-            <select class="ep-input" bind:value={epForm.protocol}>
-              <option value="anthropic">anthropic</option>
-              <option value="openai">openai</option>
-            </select>
-          </label>
-        {/if}
         <div class="ep-form-actions">
           <button class="btn-secondary" onclick={closeEpModal}>{$t('settings.endpoints.modal.cancel')}</button>
           <button class="btn-primary" onclick={submitEndpoint}>{$t('settings.endpoints.modal.save')}</button>
