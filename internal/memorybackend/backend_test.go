@@ -65,6 +65,31 @@ func TestNewDoesNotOverrideExplicitBaseURLForMem0Cloud(t *testing.T) {
 	}
 }
 
+func TestNewDefaultsBaseURLForHindsightCloud(t *testing.T) {
+	b, err := New(Config{Type: "hindsight", Mode: "cloud"})
+	if err != nil {
+		t.Fatalf("New(hindsight cloud, no base_url): unexpected error: %v", err)
+	}
+	h, ok := b.(*hindsightBackend)
+	if !ok {
+		t.Fatalf("New(hindsight cloud) returned %T, want *hindsightBackend", b)
+	}
+	if h.cfg.BaseURL != hindsightCloudBaseURL {
+		t.Errorf("BaseURL = %q, want the Hindsight Cloud default %q", h.cfg.BaseURL, hindsightCloudBaseURL)
+	}
+}
+
+func TestNewDoesNotOverrideExplicitBaseURLForHindsightCloud(t *testing.T) {
+	b, err := New(Config{Type: "hindsight", Mode: "cloud", BaseURL: "https://staging.hindsight.example"})
+	if err != nil {
+		t.Fatalf("New: unexpected error: %v", err)
+	}
+	h := b.(*hindsightBackend)
+	if h.cfg.BaseURL != "https://staging.hindsight.example" {
+		t.Errorf("BaseURL = %q, want the explicitly configured value preserved", h.cfg.BaseURL)
+	}
+}
+
 func TestConfigNamespaceDefault(t *testing.T) {
 	if got := (Config{}).namespace(); got != "default" {
 		t.Errorf("empty Namespace: got %q, want %q", got, "default")

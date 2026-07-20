@@ -84,6 +84,19 @@ Unlike the self-hosted default, Hindsight Cloud requires the API key — generat
 dashboard and set it here. octo sends it as `Authorization: Bearer <api_key>`, matching what the
 cloud API expects.
 
+You can also drop the `base_url` and set `mode: cloud` instead — octo then fills in
+`https://api.hindsight.vectorize.io` for you. Because the cloud API is identical to self-hosted in
+auth and route shape, `mode: cloud` is purely this base_url shortcut here (unlike mem0, where it also
+switches paths and headers):
+
+```yaml
+memory_backend:
+  type: hindsight
+  mode: cloud            # fills base_url = https://api.hindsight.vectorize.io
+  api_key: "<your Hindsight Cloud API key>"
+  namespace: octo-agent
+```
+
 ### mem0
 
 Needs Postgres (with pgvector) — the official `server/` stack bundles it via Docker Compose.
@@ -213,7 +226,7 @@ Add a `memory_backend` block to `~/.octo/config.yml`:
 ```yaml
 memory_backend:
   type: hindsight        # hindsight | mem0 | agentmemory
-  mode: ""               # only meaningful for mem0: "cloud" or "" (self-hosted, default)
+  mode: ""               # meaningful for mem0 & hindsight: "cloud" or "" (self-hosted, default)
   base_url: http://localhost:8888
   api_key: ""            # optional — see per-backend notes below
   namespace: my-project  # scopes stored/recalled memories; defaults to "default"
@@ -222,12 +235,15 @@ memory_backend:
 
 - **`type`** selects the backend. Leaving it unset (or omitting the whole block) disables the
   feature entirely — no tool is advertised, nothing is sent anywhere.
-- **`mode`** only matters for `type: mem0`: set it to `cloud` to talk to the hosted mem0 Platform
-  instead of a self-hosted server (see "mem0 Cloud" above) — the two use different endpoint paths
-  and auth headers, so this isn't inferred from `base_url`. Ignored by hindsight and agentmemory.
+- **`mode`** matters for `type: mem0` and `type: hindsight`: set it to `cloud` to talk to the
+  vendor's hosted Platform instead of a self-hosted server (see "mem0 Cloud" / "Hindsight Cloud"
+  above). For mem0 the cloud and self-hosted APIs differ in endpoint paths and auth headers, so this
+  isn't inferred from `base_url`; for hindsight they're identical, so `mode: cloud` just fills in the
+  cloud `base_url`. Ignored by agentmemory.
 - **`base_url`** is the backend's REST endpoint — wherever you're running its server (`http://localhost:8888`
-  for hindsight/mem0 as set up above, `http://localhost:3111` for agentmemory). Can be omitted for
-  `mem0` with `mode: cloud`, which defaults it to `https://api.mem0.ai`.
+  for hindsight/mem0 as set up above, `http://localhost:3111` for agentmemory). Can be omitted with
+  `mode: cloud`, which defaults it to `https://api.mem0.ai` (mem0) or
+  `https://api.hindsight.vectorize.io` (hindsight).
 - **`api_key`** is optional and backend-dependent:
   - self-hosted hindsight has no auth by default; set an API key only if you've enabled
     `HINDSIGHT_API_TENANT_API_KEY` on the server. Hindsight Cloud is the exception — it always

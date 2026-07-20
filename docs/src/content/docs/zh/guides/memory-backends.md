@@ -78,6 +78,18 @@ memory_backend:
 跟自托管默认情况不同，Hindsight Cloud 是强制要求 API key 的——去它的控制台生成一个填在这里。
 octo 会把它当作 `Authorization: Bearer <api_key>` 发出去，正好是云端 API 要求的格式。
 
+你也可以不填 `base_url`，改成设 `mode: cloud`——octo 会自动帮你填上
+`https://api.hindsight.vectorize.io`。因为云端 API 在鉴权和路径结构上跟自托管完全一致，这里的
+`mode: cloud` 纯粹就是这个 base_url 快捷方式（不像 mem0，它的 `cloud` 还会切换路径和 header）：
+
+```yaml
+memory_backend:
+  type: hindsight
+  mode: cloud            # 自动填 base_url = https://api.hindsight.vectorize.io
+  api_key: "<你的 Hindsight Cloud API key>"
+  namespace: octo-agent
+```
+
 ### mem0
 
 需要 Postgres（带 pgvector）——官方的 `server/` 那套栈用 Docker Compose 把它一起打包了。
@@ -200,7 +212,7 @@ curl http://localhost:3111/agentmemory/health
 ```yaml
 memory_backend:
   type: hindsight        # hindsight | mem0 | agentmemory
-  mode: ""               # 只对 mem0 有意义："cloud" 或 ""（自托管，默认）
+  mode: ""               # 对 mem0 和 hindsight 有意义："cloud" 或 ""（自托管，默认）
   base_url: http://localhost:8888
   api_key: ""            # 可选——具体看下面每个后端的说明
   namespace: my-project  # 限定存储/召回的记忆范围；不填默认是 "default"
@@ -209,12 +221,14 @@ memory_backend:
 
 - **`type`** 选择用哪个后端。不填（或者整段都不写）就是彻底关掉这个功能——不会向模型
   暴露任何工具，也不会往外发任何东西。
-- **`mode`** 只对 `type: mem0` 有意义：设成 `cloud` 就会走托管的 mem0 Platform，而不是自托管
-  server（见上文「mem0 Cloud」）——两者端点路径和鉴权 header 都不一样，不会根据 `base_url`
-  自动判断。hindsight 和 agentmemory 不看这个字段。
+- **`mode`** 对 `type: mem0` 和 `type: hindsight` 有意义：设成 `cloud` 就会走对应厂商托管的
+  Platform，而不是自托管 server（见上文「mem0 Cloud」/「Hindsight Cloud」）。mem0 的云端和自托管
+  端点路径、鉴权 header 都不一样，不会根据 `base_url` 自动判断；hindsight 两者完全一致，`mode: cloud`
+  只是帮你填上云端 `base_url`。agentmemory 不看这个字段。
 - **`base_url`** 是后端的 REST 端点——也就是你把它的 server 跑在哪（照上面的方式搭的话，
-  hindsight/mem0 是 `http://localhost:8888`，agentmemory 是 `http://localhost:3111`）。`mem0` 配合
-  `mode: cloud` 时可以不填，会自动用 `https://api.mem0.ai`。
+  hindsight/mem0 是 `http://localhost:8888`，agentmemory 是 `http://localhost:3111`）。配合
+  `mode: cloud` 时可以不填，会自动用 `https://api.mem0.ai`（mem0）或
+  `https://api.hindsight.vectorize.io`（hindsight）。
 - **`api_key`** 是可选的，具体看后端：
   - 自托管 hindsight 默认不需要鉴权；只有在 server 上开了 `HINDSIGHT_API_TENANT_API_KEY` 时才
     需要填一个 API key。Hindsight Cloud 是例外——它始终要求填控制台生成的 API key。
