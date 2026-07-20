@@ -21,6 +21,13 @@
  *               page can delete its own inline nav + language script.
  */
 (() => {
+	// Both attrs (`alt`) and same-document data-attrs (`data-href-en/zh`) are
+	// treated as untrusted: escape before splicing into innerHTML, and refuse
+	// dangerous URL schemes before handing a value to setAttribute('href', …).
+	const escapeHtml = (s) =>
+		String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+	const safeHref = (s) => (/^\s*(javascript|data|vbscript):/i.test(String(s)) ? '' : s);
+
 	const BLUE = '#1677FF',
 		HOVER = '#4096FF';
 	const MARK = (s) =>
@@ -81,7 +88,7 @@
 		});
 		document.querySelectorAll('[data-href-en],[data-href-zh]').forEach((el) => {
 			const v = el.getAttribute(isZh ? 'data-href-zh' : 'data-href-en');
-			if (v != null) el.setAttribute('href', v);
+			if (v != null) el.setAttribute('href', safeHref(v));
 		});
 		document.querySelectorAll('octo-site-nav[lang-toggle],octo-site-footer[lang-toggle]').forEach((el) => {
 			el.setAttribute('locale', lang);
@@ -99,7 +106,7 @@
 			const t = T[loc];
 			const blogHome = isZh ? '/blog/' : '/blog/en/';
 			const docsHref = isZh ? '/docs/zh/' : '/docs/';
-			const alt = this.getAttribute('alt') || (isZh ? '/blog/en/' : '/blog/');
+			const alt = escapeHtml(safeHref(this.getAttribute('alt')) || (isZh ? '/blog/en/' : '/blog/'));
 			const releases = 'https://github.com/open-octo/octo-agent/releases/latest';
 			const repo = 'https://github.com/open-octo/octo-agent';
 			const sections =
