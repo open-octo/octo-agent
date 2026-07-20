@@ -982,15 +982,18 @@ export async function testConfig(req: ModelConfigInput & { index?: number }): Pr
 // saveModel is the flat-input shim kept for the FirstRunSetup wizard and the
 // (PR5-hidden) flat AI Models section. PR5 deleted /api/config/models, so
 // saveModel now projects the flat ModelConfigInput onto a single-model
-// endpoint via createEndpoint. The endpoint id follows the same
-// legacy-<host>-<n> rule the CLI wizard uses (host from base_url, fallback to
-// provider name), so a re-run over the same base_url overwrites rather than
-// creating duplicates.
+// endpoint via createEndpoint. The endpoint id is a human-readable name
+// derived from the provider — "anthropic" for Anthropic, "openai" for OpenAI,
+// "custom" for Custom — so the user sees a recognisable name instead of the
+// "legacy-<host>-<n>" form reserved for Load's migration of old flat configs.
+// A re-run over the same provider + base_url reuses the same id and overwrites
+// rather than creating duplicates.
 export async function saveModel(req: ModelConfigInput): Promise<{ ok: boolean; id?: string }> {
   const provider = req.provider || 'custom'
-  const host = hostFromBaseURL(req.base_url) || provider.toLowerCase()
-  const endpointID = `legacy-${host}-0`
   const protocol = req.anthropic_format ? 'anthropic' : (provider === 'custom' ? 'openai' : undefined)
+  // Resolve existing endpoints to generate a unique, readable id.
+  const ep = await getEndpoints().catch(() => ({ endpoints: [], default: '', lite: '' }))
+  const endpointID = generateEndpointID(provider, req.base_url || '', ep.endpoints)
   await createEndpoint({
     id: endpointID,
     provider,
@@ -1011,17 +1014,31 @@ export async function saveModel(req: ModelConfigInput): Promise<{ ok: boolean; i
   return { ok: true, id: req.model }
 }
 
-// hostFromBaseURL extracts the URL host (lowercased) for the legacy-<host>-<n>
-// endpoint id. Mirrors config.hostFromBaseURL / the CLI wizard's
-// hostFromBaseURLForWizard (both unexported). Returns "" for empty/unparseable
-// base_urls — the caller falls back to the provider name.
-function hostFromBaseURL(baseURL: string): string {
-  if (!baseURL) return ''
-  try {
-    const u = new URL(baseURL)
-    return (u.host || '').toLowerCase()
-  } catch {
-    return baseURL.toLowerCase()
+// generateEndpointID produces a human-readable endpoint id for the wizard:
+// the provider id for a named vendor ("anthropic", "openai", ...), or "custom"
+// for the Custom vendor. The "legacy-<host>-<n>" form is reserved for Load's
+// migration of old flat configs; new wizard entries get a name the user can
+// recognise in the endpoint list.
+//
+// Re-running the wizard against the same provider + base_url reuses the
+// existing endpoint id (overwrite) rather than creating a duplicate. If the
+// natural id is already taken by an unrelated endpoint, "-1", "-2", ... are
+// appended until free.
+function generateEndpointID(provider: string, baseURL: string, existing: EndpointConfig[]): string {
+  const base = (provider && provider !== 'custom') ? provider : 'custom'
+  // Overwrite candidate: same provider AND same base_url (both empty counts
+  // as equal — named vendors resolve base_url at runtime, so an empty
+  // base_url is the canonical "this provider's default endpoint").
+  for (const ep of existing) {
+    if (ep.provider === provider && (ep.base_url ?? '') === baseURL) {
+      return ep.id
+    }
+  }
+  const taken = (id: string) => existing.some(e => e.id === id)
+  if (!taken(base)) return base
+  for (let n = 1; ; n++) {
+    const id = `${base}-${n}`
+    if (!taken(id)) return id
   }
 }
 
