@@ -113,9 +113,13 @@
       if (epForm.provider === 'custom') autoFilledBaseURL = ''
       return
     }
-    // Only auto-fill when base_url is empty or still carries the previous
-    // auto-filled value — preserves a hand-typed relay/proxy URL.
-    if (epForm.base_url === '' || epForm.base_url === autoFilledBaseURL) {
+    // When the target vendor locks base_url (readonly field), always refill
+    // with its preset — otherwise a URL hand-typed under the custom provider
+    // would survive the switch and be stuck, uneditable, in the locked field.
+    // For an editable target, only auto-fill when base_url is empty or still
+    // carries the previous auto-filled value — preserves a hand-typed
+    // relay/proxy URL.
+    if (epBaseUrlLocked || epForm.base_url === '' || epForm.base_url === autoFilledBaseURL) {
       epForm.base_url = epPreset.base_url
       autoFilledBaseURL = epPreset.base_url
     }
