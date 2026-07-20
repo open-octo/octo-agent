@@ -442,7 +442,11 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 		}
 		fmt.Fprintf(stdout, "Model: %s\n\n", shown)
 	} else {
-		model = strings.TrimSpace(promptDefault(reader, stdout, "Model", firstNonEmpty(existing.Model, defaultModels[provider])))
+		def := defaultModels[provider]
+		if sameProvider && existing.Model != "" {
+			def = existing.Model
+		}
+		model = strings.TrimSpace(promptDefault(reader, stdout, "Model", def))
 	}
 
 	// Base URL / endpoint. Compatible (custom-endpoint) vendors require a
