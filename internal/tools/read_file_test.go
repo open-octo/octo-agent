@@ -189,6 +189,33 @@ func TestReadFile_RejectsBinaryExtensions(t *testing.T) {
 	}
 }
 
+// TestReadFile_ImageNonVisionModel verifies that when the active model has no
+// image input, read_file refuses with an instructive message instead of
+// returning an image block the provider would silently drop — a text-only
+// model that "successfully reads" an image it cannot see confidently
+// hallucinates its contents.
+func TestReadFile_ImageNonVisionModel(t *testing.T) {
+	SetModelVision(false)
+	t.Cleanup(func() { SetModelVision(true) })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shot.png")
+	if err := os.WriteFile(path, []byte("\x89PNG\r\n\x1a\nfake"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	res, err := ReadFileTool{}.Execute(context.Background(), "", map[string]any{"path": path})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(res.Blocks) != 0 {
+		t.Errorf("expected no image blocks for non-vision model, got %+v", res.Blocks)
+	}
+	if !strings.Contains(res.Text, "does not accept image input") {
+		t.Errorf("expected refusal text, got: %q", res.Text)
+	}
+}
+
 func TestReadFile_ReadsImage(t *testing.T) {
 	// A valid PNG header: 89 50 4E 47 0D 0A 1A 0A
 	pngHeader := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}

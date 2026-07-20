@@ -79,11 +79,12 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 	tools.SetBrowserRecordingGenerator(MakeRecordingGenerator(a.GetSender(), a.Model))
 	tools.SetBrowserHealer(MakeBrowserHealer(a.GetSender(), a.Model))
 
-	// Gate image content (browser screenshots) on the active model's vision
-	// capability so a text-only model isn't handed images its endpoint rejects.
+	// Gate image content (browser screenshots, read_file) on the active model's
+	// vision capability so a text-only model isn't handed images its endpoint
+	// rejects.
 	cfg, cfgErr := config.Load()
 	if cfgErr == nil {
-		tools.SetBrowserVision(cfg.ModelVision(a.Model))
+		tools.SetModelVision(cfg.ModelVision(a.Model))
 	}
 
 	// Optional external semantic memory backend (hindsight/mem0/agentmemory) — the
@@ -95,7 +96,7 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 		tools.SetSpawner(nil)
 		tools.SetBrowserRecordingGenerator(nil)
 		tools.SetBrowserHealer(nil)
-		tools.SetBrowserVision(true)
+		tools.SetModelVision(true)
 		tools.ResetBrowserSession()
 		tools.SetMemoryBackend(nil)
 		tools.SetMemoryBackendAutoRecall(false)
