@@ -579,3 +579,54 @@ func TestReplayTimeoutScalesWithSteps(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveBrowserHealer_CtxOverridesGlobal proves resolveBrowserHealer
+// prefers a ctx-scoped healer over a conflicting process-global one — the
+// server's per-turn ctx must win even if another session's SetBrowserHealer
+// call (or a leftover CLI global) left the global pointed at a different
+// model's healer.
+func TestResolveBrowserHealer_CtxOverridesGlobal(t *testing.T) {
+	globalHealer := browser.Healer(func(context.Context, *browser.Page, *browser.Step, error) error {
+		return errors.New("global-healer")
+	})
+	ctxHealer := browser.Healer(func(context.Context, *browser.Page, *browser.Step, error) error {
+		return errors.New("ctx-healer")
+	})
+	SetBrowserHealer(globalHealer)
+	t.Cleanup(func() { SetBrowserHealer(nil) })
+
+	got := resolveBrowserHealer(WithBrowserHealer(context.Background(), ctxHealer))
+	if err := got(context.Background(), nil, nil, nil); err == nil || err.Error() != "ctx-healer" {
+		t.Errorf("expected ctx-scoped healer to win, got err=%v", err)
+	}
+
+	// No ctx value stamped (the CLI's one-session-per-process path) ⇒ falls
+	// back to the process-global healer.
+	got = resolveBrowserHealer(context.Background())
+	if err := got(context.Background(), nil, nil, nil); err == nil || err.Error() != "global-healer" {
+		t.Errorf("expected fallback to global healer, got err=%v", err)
+	}
+}
+
+// TestResolveBrowserRecordingGenerator_CtxOverridesGlobal is the same proof
+// as above for resolveBrowserRecordingGenerator.
+func TestResolveBrowserRecordingGenerator_CtxOverridesGlobal(t *testing.T) {
+	globalGen := browser.RecordingGenerator(func(context.Context, string, string) (string, error) {
+		return "global-gen", nil
+	})
+	ctxGen := browser.RecordingGenerator(func(context.Context, string, string) (string, error) {
+		return "ctx-gen", nil
+	})
+	SetBrowserRecordingGenerator(globalGen)
+	t.Cleanup(func() { SetBrowserRecordingGenerator(nil) })
+
+	got := resolveBrowserRecordingGenerator(WithBrowserRecordingGenerator(context.Background(), ctxGen))
+	if s, _ := got(context.Background(), "", ""); s != "ctx-gen" {
+		t.Errorf("expected ctx-scoped generator to win, got %q", s)
+	}
+
+	got = resolveBrowserRecordingGenerator(context.Background())
+	if s, _ := got(context.Background(), "", ""); s != "global-gen" {
+		t.Errorf("expected fallback to global generator, got %q", s)
+	}
+}
