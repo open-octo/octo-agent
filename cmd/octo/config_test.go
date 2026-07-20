@@ -353,6 +353,53 @@ func TestRunConfig_Wizard_SwitchesProviderAndPromptsForKey(t *testing.T) {
 	}
 }
 
+// TestRunConfig_Wizard_AddModel_DeclineKeepsDefault covers the re-run path:
+// only first run auto-sets the default; re-running the wizard to add a model
+// asks first, and answering "n" leaves the existing default untouched — adding
+// a model must not silently steal the default.
+func TestRunConfig_Wizard_AddModel_DeclineKeepsDefault(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+
+	// Seed an anthropic default with a stored key.
+	if err := oneEntryConfig(config.ModelEntry{Provider: "anthropic", Model: "claude-sonnet-4-6", APIKey: "old-anthropic-key"}).Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Same answers as the switch-provider test but set-as-default=n: provider=
+	// openai, model=(default/blank), store_key=y, key=new-openai-key,
+	// coauthor=y, reasoning=(off), set-as-default=n. No vision question — the
+	// blank model resolves to the catalogue's openai default (gpt-5.4).
+	in := strings.NewReader("openai\n\ny\nnew-openai-key\ny\n\nn\n")
+	var stdout, stderr bytes.Buffer
+	if code := runConfig(nil, in, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+	}
+
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load after wizard: %v", err)
+	}
+	// Declined: the seeded anthropic default must survive.
+	if entry := got.DefaultEntry(); entry.Provider != "anthropic" {
+		t.Errorf("default provider = %q, want anthropic (declining must keep it)", entry.Provider)
+	}
+	// The openai model was still added — declining only affects the default.
+	var hasOpenai bool
+	for _, ep := range got.Endpoints {
+		if ep.Provider == "openai" {
+			hasOpenai = true
+			break
+		}
+	}
+	if !hasOpenai {
+		t.Errorf("wizard did not add the openai endpoint: %+v", got.Endpoints)
+	}
+}
+
 // TestRunConfigWizard_FirstRun_MinimalAndKeyDirect verifies the first-run path:
 // it asks for the key directly (not the "store? (y/N)" double-negative), stores
 // it, and skips the expert questions (coauthor / reasoning / show-reasoning).
