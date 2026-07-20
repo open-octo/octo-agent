@@ -4,6 +4,8 @@
   import * as api from '../../lib/api'
   import type { ProviderPreset, ModelEntry, ModelConfigInput } from '../../lib/api'
   import Switch from '../ui/Switch.svelte'
+  import ApiKeyInput from './ApiKeyInput.svelte'
+  import VariantChips from './VariantChips.svelte'
 
   // Shared provider/key form used by both the first-run setup panel and the
   // Settings → Models section. It owns the Test-connection button internally;
@@ -52,7 +54,6 @@
   // gets the picked model's catalogue value (via applyPresetVision on select),
   // falling back to true until the user picks or toggles.
   let vision       = $state(seed.vision ?? true)
-  let showKey      = $state(false)
 
   let testing      = $state(false)
   let saving       = $state(false)
@@ -104,14 +105,6 @@
   // it explicitly. A hand-typed endpoint with no preset is Custom too.
   let isCustom = $derived(preset ? (!!preset.custom_endpoint && !preset.api) : !!baseUrl)
   let keyPlaceholder = $derived(initial?.api_key_masked || $t('models.apikey.placeholder'))
-
-  function variantLabel(v: api.EndpointVariant): string {
-    if (v.label_key) {
-      const tr = $t(v.label_key)
-      if (tr && tr !== v.label_key) return tr
-    }
-    return v.label || v.base_url
-  }
 
   // Selecting a preset fills model + base_url.
   function onProviderChange() {
@@ -262,36 +255,13 @@
       readonly={baseUrlLocked}
       disabled={saving}
     />
-    {#if variants.length > 0}
-      <div class="variants">
-        {#each variants as v (v.base_url)}
-          <button
-            type="button"
-            class="variant-chip"
-            class:active={baseUrl === v.base_url}
-            onclick={() => (baseUrl = v.base_url)}
-            disabled={saving}
-          >{variantLabel(v)}</button>
-        {/each}
-      </div>
-    {/if}
+    <VariantChips {variants} value={baseUrl} disabled={saving} onselect={(v) => (baseUrl = v.base_url)} />
   </label>
 
   <!-- API Key -->
   <label class="field">
     <span class="field-label">{$t('models.apikey')}</span>
-    <div class="key-row">
-      <input
-        class="field-input mono"
-        type={showKey ? 'text' : 'password'}
-        placeholder={keyPlaceholder}
-        bind:value={apiKey}
-        disabled={saving}
-      />
-      <button type="button" class="key-toggle" onclick={() => (showKey = !showKey)} title={showKey ? 'Hide' : 'Show'}>
-        <iconify-icon icon={showKey ? 'ant-design:eye-invisible-outlined' : 'ant-design:eye-outlined'} width="15"></iconify-icon>
-      </button>
-    </div>
+    <ApiKeyInput bind:value={apiKey} placeholder={keyPlaceholder} disabled={saving} />
   </label>
 
   <!-- Preferences (hidden during onboard — the /onboard ceremony collects them) -->
@@ -362,20 +332,6 @@
 .field-link { font-size: 12px; color: var(--blue-6); text-decoration: none; align-self: flex-start; }
 .field-link:hover { text-decoration: underline; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.variants { display: flex; flex-wrap: wrap; gap: 6px; }
-.variant-chip {
-  height: 24px; padding: 0 10px; border: 1px solid var(--border); background: var(--bg-container);
-  border-radius: 999px; font-size: 12px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
-}
-.variant-chip:hover:not(:disabled) { border-color: var(--blue-5); color: var(--blue-5); }
-.variant-chip.active { border-color: var(--blue-6); color: var(--blue-6); background: var(--active-blue-bg); }
-.key-row { display: flex; align-items: center; gap: 8px; }
-.key-row .field-input { flex: 1; min-width: 0; }
-.key-toggle {
-  width: 34px; height: 36px; flex: 0 0 34px; border: 1px solid var(--border); background: var(--bg-container);
-  border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-tertiary);
-}
-.key-toggle:hover { border-color: var(--blue-5); color: var(--blue-5); }
 .prefs { display: flex; gap: 12px; }
 .field.half { flex: 1; min-width: 0; }
 .toggles { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
