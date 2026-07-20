@@ -9,8 +9,18 @@ import (
 	"strings"
 )
 
+// hindsightCloudBaseURL is the fixed hosted-Platform endpoint, used when Mode
+// is "cloud" and BaseURL is left blank — there's only one, unlike self-hosted
+// deployments which need an explicit address. Unlike mem0, hindsight's hosted
+// API is identical to self-hosted in auth (Authorization: Bearer) and route
+// shape (/v1/default/banks/{bank}/...), so cloud mode only swaps the base_url;
+// no path/header branching is needed. Verified against
+// https://docs.hindsight.vectorize.io/api-reference/hindsight-cloud-api/.
+const hindsightCloudBaseURL = "https://api.hindsight.vectorize.io"
+
 // hindsightBackend talks to a self-hosted github.com/vectorize-io/hindsight
-// server. Endpoints and auth verified against
+// server, or — when Mode is "cloud" — the hosted Platform at
+// hindsightCloudBaseURL. Endpoints and auth verified against
 // https://hindsight.vectorize.io/api-reference and
 // https://hindsight.vectorize.io/developer/configuration.
 type hindsightBackend struct {

@@ -64,8 +64,17 @@ type Backend interface {
 // unreachable or misconfigured backend surface on the first Store/Recall
 // call.
 func New(cfg Config) (Backend, error) {
-	if cfg.Type == "mem0" && cfg.Mode == "cloud" && cfg.BaseURL == "" {
-		cfg.BaseURL = mem0CloudBaseURL
+	// "cloud" mode auto-fills the fixed hosted base_url when the user leaves it
+	// blank. mem0 and hindsight each run a single managed Platform, so there's
+	// one canonical URL per backend (unlike self-hosted, which needs an explicit
+	// address). agentmemory has no hosted service, so it's not listed here.
+	if cfg.Mode == "cloud" && cfg.BaseURL == "" {
+		switch cfg.Type {
+		case "mem0":
+			cfg.BaseURL = mem0CloudBaseURL
+		case "hindsight":
+			cfg.BaseURL = hindsightCloudBaseURL
+		}
 	}
 	if cfg.BaseURL == "" {
 		return nil, fmt.Errorf("memorybackend: base_url is required")

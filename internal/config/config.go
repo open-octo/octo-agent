@@ -303,10 +303,10 @@ type MemoryBackendConfig struct {
 	// Namespace scopes stored/recalled memories (hindsight bank_id, mem0
 	// user_id, agentmemory project). Defaults to "default" when empty.
 	Namespace string `yaml:"namespace,omitempty"`
-	// Mode selects between deployment variants of the same Type. Currently
-	// only meaningful for "mem0": "cloud" talks to the hosted mem0 Platform
-	// API instead of a self-hosted server — see the memory-backends guide.
-	// Ignored by other backend types.
+	// Mode selects between deployment variants of the same Type. Meaningful for
+	// "mem0" and "hindsight": "cloud" talks to the vendor's hosted Platform API
+	// (auto-filling its fixed base_url) instead of a self-hosted server — see the
+	// memory-backends guide. Ignored by other backend types.
 	Mode string `yaml:"mode,omitempty"`
 	// AutoRecall, when true, automatically calls Recall with the user's
 	// message before every turn and injects the result as context —
