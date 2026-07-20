@@ -28,6 +28,15 @@ export default defineConfig({
 					content:
 						"try{localStorage.setItem('starlight-theme','light')}catch(e){}document.documentElement.dataset.theme='light';",
 				},
+				{
+					// The sidebar's "Blog" entry is a single external link shared by every
+					// locale (Starlight's `translations` only localizes the label, not the
+					// href), so it hardcodes the zh blog. Point it at the English blog on
+					// non-zh-CN pages instead.
+					tag: 'script',
+					content:
+						"document.addEventListener('DOMContentLoaded',function(){if(document.documentElement.lang!=='zh-CN'){document.querySelectorAll('a[href=\"https://octo-agent.dev/blog/\"]').forEach(function(a){a.href='https://octo-agent.dev/blog/en/';});}});",
+				},
 			],
 			defaultLocale: 'root',
 			locales: {
