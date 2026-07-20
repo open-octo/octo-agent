@@ -827,6 +827,8 @@ func (s *Server) registerRoutes() {
 	s.api("PUT /api/config/coauthor", s.handlePutCoauthor)
 	s.api("PUT /api/config/language", s.handlePutLanguage)
 	s.api("PUT /api/config/workspace_dir", s.handlePutWorkspaceDir)
+	s.api("PUT /api/config/reasoning_effort", s.handlePutReasoningEffort)
+	s.api("PUT /api/config/permission_mode", s.handlePutPermissionMode)
 	s.api("POST /api/config/test", s.handleTestConfig)
 	// PR5: endpoint-level CRUD (design §10.2). The old /api/config/models*
 	// routes are deleted — callers must use these.

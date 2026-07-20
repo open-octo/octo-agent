@@ -552,3 +552,91 @@ func TestPutWorkspaceDir_UpdatesConfigAndServerDefault(t *testing.T) {
 		t.Errorf("server.workspaceDir = %q, want %q", srv.workspaceDir, wantDir)
 	}
 }
+
+func TestPutReasoningEffort_ValidLevel_SavesAndReturns(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	reqBody, err := json.Marshal(map[string]string{"reasoning_effort": "xhigh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := doJSON(t, srv, http.MethodPut, "/api/config/reasoning_effort", string(reqBody))
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT /api/config/reasoning_effort = %d: %s", w.Code, w.Body.String())
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReasoningEffort != "xhigh" {
+		t.Errorf("config.ReasoningEffort = %q, want %q", cfg.ReasoningEffort, "xhigh")
+	}
+}
+
+func TestPutReasoningEffort_InvalidLevel_Rejects(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	reqBody, err := json.Marshal(map[string]string{"reasoning_effort": "ultra"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := doJSON(t, srv, http.MethodPut, "/api/config/reasoning_effort", string(reqBody))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("PUT /api/config/reasoning_effort (invalid) = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReasoningEffort != "" {
+		t.Errorf("config.ReasoningEffort = %q, want empty (reject should not save)", cfg.ReasoningEffort)
+	}
+}
+
+func TestPutPermissionMode_ValidMode_SavesAndReturns(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	reqBody, err := json.Marshal(map[string]string{"permission_mode": "strict"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := doJSON(t, srv, http.MethodPut, "/api/config/permission_mode", string(reqBody))
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT /api/config/permission_mode = %d: %s", w.Code, w.Body.String())
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PermissionMode != "strict" {
+		t.Errorf("config.PermissionMode = %q, want %q", cfg.PermissionMode, "strict")
+	}
+}
+
+func TestPutPermissionMode_InvalidMode_Rejects(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	reqBody, err := json.Marshal(map[string]string{"permission_mode": "yes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := doJSON(t, srv, http.MethodPut, "/api/config/permission_mode", string(reqBody))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("PUT /api/config/permission_mode (invalid) = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PermissionMode != "" {
+		t.Errorf("config.PermissionMode = %q, want empty (reject should not save)", cfg.PermissionMode)
+	}
+}

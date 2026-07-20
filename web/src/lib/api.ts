@@ -854,6 +854,20 @@ export async function updateWorkspaceDir(workspaceDir: string): Promise<{ ok: bo
   })
 }
 
+export async function updateReasoningEffort(effort: string): Promise<{ ok: boolean; reasoning_effort?: string }> {
+  return request<{ ok: boolean; reasoning_effort?: string }>('/api/config/reasoning_effort', {
+    method: 'PUT',
+    ...json({ reasoning_effort: effort }),
+  })
+}
+
+export async function updatePermissionMode(mode: string): Promise<{ ok: boolean; permission_mode?: string }> {
+  return request<{ ok: boolean; permission_mode?: string }>('/api/config/permission_mode', {
+    method: 'PUT',
+    ...json({ permission_mode: mode }),
+  })
+}
+
 export async function getVersion(): Promise<unknown> {
   return request<unknown>('/api/version', { cache: 'no-store' })
 }
