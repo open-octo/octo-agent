@@ -1,41 +1,183 @@
 /*
- * octo docs theme — indigo accent + monospace headings.
- * Palette and rationale: dev-docs/docs-site-design.md.
+ * octo docs theme — unified with the landing page (octo-agent/landing/index.html).
+ * Ant Blue #1677FF accent, native system stack (no more mono headings),
+ * flat white, light-only. Pairs with the astro.config `head` snippet that
+ * forces the light theme (see HANDOFF.md).
  */
 
 :root {
-	/* Indigo accent (dark theme, Starlight's default) */
-	--sl-color-accent-low: #312e81;
-	--sl-color-accent: #818cf8;
-	--sl-color-accent-high: #c7d2fe;
+	/* Ant Blue accent */
+	--sl-color-accent-low: #e6f4ff;
+	--sl-color-accent: #1677ff;
+	--sl-color-accent-high: #0958d9;
 
-	--sl-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-	--sl-font-mono: ui-monospace, 'SF Mono', 'Roboto Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+	/* One system font everywhere — matches the landing page. */
+	--sl-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+		"Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+	--sl-font-mono: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
 
-:root[data-theme='light'] {
-	--sl-color-accent-low: #e0e7ff;
-	--sl-color-accent: #4f46e5;
-	--sl-color-accent-high: #3730a3;
+/* Force the light palette even if a stale data-theme="dark" slips through. */
+:root,
+:root[data-theme="light"],
+:root[data-theme="dark"] {
+	color-scheme: light;
+	--sl-color-accent-low: #e6f4ff;
+	--sl-color-accent: #1677ff;
+	--sl-color-accent-high: #0958d9;
+
+	--sl-color-white: #1f1f1f;
+	--sl-color-gray-1: #262626;
+	--sl-color-gray-2: rgba(0, 0, 0, 0.78);
+	--sl-color-gray-3: rgba(0, 0, 0, 0.65);
+	--sl-color-gray-4: rgba(0, 0, 0, 0.45);
+	--sl-color-gray-5: #d9d9d9;
+	--sl-color-gray-6: #f0f0f0;
+	--sl-color-gray-7: #f5f5f5;
+	--sl-color-black: #ffffff;
+
+	--sl-color-text: rgba(0, 0, 0, 0.88);
+	--sl-color-text-accent: #1677ff;
+	--sl-color-bg: #ffffff;
+	--sl-color-bg-nav: rgba(255, 255, 255, 0.92);
+	--sl-color-bg-sidebar: #ffffff;
+	--sl-color-hairline: #eeeff1;
+	--sl-color-hairline-light: #f0f0f0;
+	--sl-color-hairline-shade: #eeeff1;
 }
 
-/* octo is a terminal-first tool — headings, the site title, and sidebar
-   group labels use the monospace face; body copy stays humanist sans. */
-.sl-markdown-content :is(h1, h2, h3, h4, h5, h6):not(:where(.not-content *)),
-.site-title,
-.group-label .large,
-.hero h1,
-.hero .tagline {
-	font-family: var(--__sl-font-mono);
+/* Headings use the system font (the old build forced monospace). */
+.sl-markdown-content
+	:is(h1, h2, h3, h4, h5, h6):not(:where(.not-content *)) {
+	font-family: var(--sl-font);
+	font-weight: 600;
+	letter-spacing: -0.01em;
+	color: #1f1f1f;
+}
+.sl-markdown-content h1:not(:where(.not-content *)) {
 	letter-spacing: -0.02em;
 }
-
-.sl-markdown-content :is(h1, h2, h3, h4, h5, h6):not(:where(.not-content *)) {
-	font-weight: 700;
+.site-title {
+	font-family: var(--sl-font);
+	font-weight: 600;
+	color: #1f1f1f;
 }
 
-/* Maturity badges reuse Starlight's Badge component; keep them monospace too. */
+/* Drop the light card shadow the landing avoids; keep hairline chrome. */
+.sl-container,
+.sl-markdown-content {
+	--sl-shadow-md: none;
+}
+
+/* ---------- sticky blur header, matching the landing nav ---------- */
+header.header {
+	background: rgba(255, 255, 255, 0.92);
+	backdrop-filter: blur(8px);
+	border-bottom: 1px solid #eeeff1;
+}
+
+/* ---------- sidebar: rounded pills, blue = current ---------- */
+.sidebar-content a {
+	border-radius: 9999px;
+	color: rgba(0, 0, 0, 0.65);
+	transition: background 0.15s, color 0.15s;
+}
+.sidebar-content a:hover {
+	background: rgba(0, 0, 0, 0.04);
+	color: rgba(0, 0, 0, 0.88);
+}
+.sidebar-content a[aria-current="page"],
+.sidebar-content a[aria-current="page"]:hover {
+	background: rgba(22, 119, 255, 0.06);
+	color: #1677ff;
+	font-weight: 600;
+	border-inline-start-color: transparent;
+}
+/* Group titles: uppercase, tracked out (landing sidebar convention). */
+.sidebar-content .large,
+summary .group-label .large {
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	font-size: 0.75rem;
+	font-weight: 600;
+	color: rgba(0, 0, 0, 0.45);
+}
+
+/* ---------- header search pill (Klook soft grey-blue fill) ---------- */
+site-search button {
+	background: #e9eef6;
+	border: 0;
+	border-radius: 9999px;
+}
+
+/* ---------- content: links, code, tables, cards ---------- */
+.sl-markdown-content a:not(:where(.not-content *)) {
+	color: #1677ff;
+	text-underline-offset: 3px;
+}
+.sl-markdown-content a:hover:not(:where(.not-content *)) {
+	color: #4096ff;
+}
+
+.sl-markdown-content :not(pre) > code {
+	background: #f5f5f5;
+	border: 1px solid #eeeff1;
+	border-radius: 4px;
+	color: rgba(0, 0, 0, 0.88);
+}
+
+.sl-markdown-content th {
+	background: #fafafa;
+	font-weight: 600;
+	color: #1f1f1f;
+}
+.sl-markdown-content :is(th, td) {
+	border-color: #f0f0f0;
+}
+
+/* CardGrid cards react with color, not elevation (Klook rule). */
+.card {
+	border: 1px solid #f0f0f0;
+	border-radius: 16px;
+	background: #fff;
+	box-shadow: none;
+	transition: background 0.15s, border-color 0.15s;
+}
+.card:hover {
+	background: rgba(22, 119, 255, 0.06);
+	border-color: rgba(22, 119, 255, 0.5);
+}
+.card .icon {
+	color: #1677ff;
+	background: #e6f4ff;
+	border-radius: 9999px;
+}
+
+/* Asides / callouts keep the flat blue-wash treatment. */
+.starlight-aside {
+	border-radius: 12px;
+}
+.starlight-aside--note,
+.starlight-aside--tip {
+	background: #f0f7ff;
+	border-color: rgba(22, 119, 255, 0.25);
+}
 starlight-aside .aside-title,
 .badge {
-	font-family: var(--__sl-font-mono);
+	font-family: var(--sl-font);
+	font-weight: 600;
+}
+
+/* Buttons — Ant Blue primary, 6px radius. */
+.sl-link-button.primary {
+	background: #1677ff;
+	border-radius: 6px;
+}
+.sl-link-button.primary:hover {
+	background: #4096ff;
+}
+
+/* Hide the light/dark toggle — the site is light-only now. */
+starlight-theme-select {
+	display: none;
 }

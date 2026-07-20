@@ -1,0 +1,10 @@
+---
+/** Thin wrapper around the shared /octo-nav.js footer component. */
+interface Props {
+	locale?: 'zh' | 'en';
+}
+const { locale = 'zh' } = Astro.props;
+---
+
+<script is:inline src="/octo-nav.js" defer></script>
+<octo-site-footer locale={locale}></octo-site-footer>
