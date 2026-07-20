@@ -90,6 +90,12 @@ type ToolStreamingSender = agent.ToolStreamingSender
 // LowEffortSender can produce a cheaper variant of itself for throwaway calls.
 type LowEffortSender = agent.LowEffortSender
 
+// NoReasoningSender can produce a variant of itself with reasoning disabled,
+// used for throwaway calls (e.g. session-title generation) where a reasoning
+// trace would be wasted. A Sender that implements it is detected by the agent
+// loop via type assertion; a custom Sender opts in by satisfying this interface.
+type NoReasoningSender = agent.NoReasoningSender
+
 // PermissionGate decides whether a tool call may proceed.
 type PermissionGate = agent.PermissionGate
 

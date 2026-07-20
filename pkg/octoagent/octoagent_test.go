@@ -50,6 +50,12 @@ func TestAliasTypesAreIdentical(t *testing.T) {
 	var _ EventKind = EventTextDelta
 	var _ EventKind = EventTurnDone
 
+	// Sender-capability interfaces are aliased (compile-time check): an internal
+	// value must satisfy the pkg-level interface without conversion. Guards
+	// against a new agent.*Sender capability being added without an SDK alias.
+	var _ func(agent.LowEffortSender) LowEffortSender = func(s agent.LowEffortSender) LowEffortSender { return s }
+	var _ func(agent.NoReasoningSender) NoReasoningSender = func(s agent.NoReasoningSender) NoReasoningSender { return s }
+
 	// Goal status constants are reachable.
 	var _ GoalStatus = GoalActive
 
