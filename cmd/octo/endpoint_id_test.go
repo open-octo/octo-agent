@@ -74,7 +74,7 @@ func TestGenerateEndpointID(t *testing.T) {
 				{ID: "anthropic", Provider: "anthropic", BaseURL: "https://api.anthropic.com"},
 				{ID: "anthropic-1", Provider: "anthropic", BaseURL: "https://relay1.example.com"},
 			},
-			want:     "anthropic-2",
+			want: "anthropic-2",
 		},
 		{
 			name:     "custom conflict: custom taken gets custom-1",
