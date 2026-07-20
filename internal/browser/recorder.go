@@ -187,11 +187,49 @@ const captureScript = `(function(){
     var parts=[], node=el, depth=0;
     while(node && node.nodeType===1 && node.tagName!=='BODY' && depth<6){
       if(node.id){ parts.unshift('#'+CSS.escape(node.id)); return parts.join(' > '); }
-      var part=node.tagName.toLowerCase(); var p=node.parentElement;
-      if(p){var same=[].slice.call(p.children).filter(function(c){return c.tagName===node.tagName;}); if(same.length>1){part+=':nth-of-type('+(same.indexOf(node)+1)+')';}}
-      parts.unshift(part); node=p; depth++;
+      parts.unshift(pathNode(node)); node=node.parentElement; depth++;
     }
     return parts.join(' > ');
+  }
+  // pathNode builds a selector for one node in the path: tagName plus a semantic
+  // anchor when available (role, structural class) — so a table cell reads
+  // td.ant-picker-cell[role="gridcell"]:nth-of-type(2) instead of plain
+  // td:nth-of-type(2). The semantic anchor survives layout shifts that a pure
+  // positional index would not. Falls back to :nth-of-type only when nothing
+  // else distinguishes the node among same-tag siblings.
+  function pathNode(node){
+    var tag=node.tagName.toLowerCase();
+    var role=node.getAttribute && node.getAttribute('role');
+    if(role) return tag+'[role=\"'+CSS.escape(role)+'\"]'+nthSuffix(node);
+    var cls=structuralClass(node);
+    if(cls) return tag+'.'+CSS.escape(cls)+nthSuffix(node);
+    var p=node.parentElement;
+    if(p){var same=[].slice.call(p.children).filter(function(c){return c.tagName===node.tagName;}); if(same.length>1){return tag+':nth-of-type('+(same.indexOf(node)+1)+')';}}
+    return tag;
+  }
+  function nthSuffix(node){
+    var p=node.parentElement;
+    if(!p) return '';
+    var same=[].slice.call(p.children).filter(function(c){return c.tagName===node.tagName;});
+    return same.length>1?':nth-of-type('+(same.indexOf(node)+1)+')':'';
+  }
+  // structuralClass picks the most likely-semantic class from an element's class
+  // list — prefers longer, component-style names (BEM blocks, library classes)
+  // over short generics like "active"/"disabled". Returns "" when nothing looks
+  // structural, so the caller can fall back to something else.
+  function structuralClass(node){
+    if(!node.className || typeof node.className!=='string') return '';
+    var cls=node.className.split(/\s+/).filter(function(c){return c && c.length>3});
+    if(cls.length===0) return '';
+    // Prefer longer names — usually the component block (ant-picker-cell-inner
+    // over active). Break ties by preferring names that look like BEM
+    // (double-dash) or library-prefixed (ant-, el-, mui-).
+    cls.sort(function(a,b){
+      var scoreA=(a.indexOf('--')>=0?10:0)+(/(ant|el|mui|odin)-/.test(a)?5:0)+a.length;
+      var scoreB=(b.indexOf('--')>=0?10:0)+(/(ant|el|mui|odin)-/.test(b)?5:0)+b.length;
+      return scoreB-scoreA;
+    });
+    return cls[0];
   }
   /* ---- wait-event reporting (debounced) ---- */
   var _lastWaitAt=0;

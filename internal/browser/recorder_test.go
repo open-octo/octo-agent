@@ -439,6 +439,65 @@ func TestCompileRecordingWaitEvents(t *testing.T) {
 	}
 }
 
+// TestSelectorSemanticAnchor: a click on a calendar cell (role="gridcell",
+// class="ant-picker-cell") produces a selector that includes those semantic
+// anchors instead of a bare :nth-of-type chain — so the recording survives
+// layout shifts that a purely positional selector would not.
+func TestSelectorSemanticAnchor(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>cal</title>
+<table class="ant-picker-content">
+  <tbody>
+	<tr role="row"><td role="gridcell" class="ant-picker-cell"><div class="ant-picker-cell-inner">19</div></td><td role="gridcell" class="ant-picker-cell"><div class="ant-picker-cell-inner">20</div></td></tr>
+  </tbody>
+</table>`))
+	}))
+	defer srv.Close()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, ".ant-picker-content", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	rec := NewRecorder(page)
+	if err := rec.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer rec.Stop()
+
+	// Click the cell containing "20" — second cell in the row.
+	if err := page.Click(ctx, ".ant-picker-cell:nth-of-type(2) .ant-picker-cell-inner"); err != nil {
+		t.Fatalf("click: %v", err)
+	}
+	var got string
+	for i := 0; i < 30; i++ {
+		time.Sleep(100 * time.Millisecond)
+		for _, e := range rec.Events() {
+			if e.Type == "click" {
+				got = e.Selector
+			}
+		}
+		if got != "" {
+			break
+		}
+	}
+	if got == "" {
+		t.Fatalf("no click captured: %+v", rec.Events())
+	}
+	// Must include both the role and class anchors — proves semantic anchoring.
+	if !strings.Contains(got, "role") {
+		t.Fatalf("expected selector to carry role anchor, got %q", got)
+	}
+	if !strings.Contains(got, "ant-picker-cell-inner") {
+		t.Fatalf("expected selector to carry structural class, got %q", got)
+	}
+}
+
 // TestRecorderCapturesEnter: Enter in a text input is captured with the field's
 // current value (change never fires without a blur); Enter in a textarea is a
 // newline, not a submit, and must not be captured.
