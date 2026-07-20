@@ -56,21 +56,25 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	// capability. Unlike the CLI (which goes through app.WireTools), the server
 	// wires tools here, so this is the only place serve learns whether the model
 	// can take images — a text-only model would otherwise be handed a screenshot
-	// or image block it rejects (HTTP 400). Re-evaluated per turn so a mid-session
-	// model switch takes effect. LoadCached so a config.yml that's momentarily
-	// invalid mid-edit keeps the last vision setting that parsed instead of
-	// silently going stale.
+	// or image block it rejects (HTTP 400). Stamped into ctx (not the
+	// process-global tools.SetModelVision) so two concurrent sessions running
+	// different models don't race on the setting; re-evaluated every turn so a
+	// mid-session model switch takes effect. LoadCached so a config.yml that's
+	// momentarily invalid mid-edit keeps the last vision setting that parsed
+	// instead of silently going stale.
 	cfg, cfgErr := config.LoadCached()
 	if cfgErr == nil {
-		tools.SetModelVision(cfg.ModelVision(a.Model))
+		ctx = tools.WithModelVision(ctx, cfg.ModelVision(a.Model))
 	}
 
 	// Same omission for the LLM-backed browser helpers: record_stop's
 	// distillation and replay's selector self-heal need a model. WireTools
-	// installs these for the CLI; serve must too, or the web UI silently falls
-	// back to deterministic compilation and no self-heal.
-	tools.SetBrowserRecordingGenerator(app.MakeRecordingGenerator(a.GetSender(), a.Model))
-	tools.SetBrowserHealer(app.MakeBrowserHealer(a.GetSender(), a.Model))
+	// installs these for the CLI (via the process-global setters); serve must
+	// too, but stamps them into ctx instead — same concurrent-session race as
+	// vision above — or the web UI silently falls back to deterministic
+	// compilation and no self-heal.
+	ctx = tools.WithBrowserRecordingGenerator(ctx, app.MakeRecordingGenerator(a.GetSender(), a.Model))
+	ctx = tools.WithBrowserHealer(ctx, app.MakeBrowserHealer(a.GetSender(), a.Model))
 
 	// Same omission for the external memory backend: WireTools installs it for
 	// the CLI, but serve never calls WireTools. app.RefreshMemoryBackend is

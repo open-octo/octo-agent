@@ -58,11 +58,17 @@ var (
 // is model capability, not browser state.
 func SetBrowserVision(on bool) { SetModelVision(on) }
 
-// BrowserVisionEnabled reports the current setting (for tests/diagnostics).
-func BrowserVisionEnabled() bool { return ModelVisionEnabled() }
+// BrowserVisionEnabled reports the process-global setting (for
+// tests/diagnostics) — it does not see a per-turn value stamped via
+// WithModelVision. Use ModelVisionEnabled(ctx) to see what a turn actually
+// resolves to.
+func BrowserVisionEnabled() bool { return modelVision.Load() }
 
-// BrowserHealerSet / BrowserRecordingGeneratorSet report whether the LLM-backed
-// browser helpers are wired (for tests/diagnostics).
+// BrowserHealerSet / BrowserRecordingGeneratorSet report whether the
+// process-global LLM-backed browser helpers are wired (for tests/
+// diagnostics) — they do not see a per-turn value stamped via
+// WithBrowserHealer / WithBrowserRecordingGenerator. Use the ForCtx variants
+// below to see what a turn actually resolves to.
 func BrowserHealerSet() bool {
 	recorderMu.Lock()
 	defer recorderMu.Unlock()
@@ -74,7 +80,20 @@ func BrowserRecordingGeneratorSet() bool {
 	return browserRecordingGen != nil
 }
 
-// SetBrowserHealer injects the LLM-backed step healer used by replay.
+// BrowserHealerSetForCtx / BrowserRecordingGeneratorSetForCtx report whether a
+// helper is available for ctx (ctx-scoped first, then the process-global one)
+// — for tests/diagnostics on the server's per-turn wiring.
+func BrowserHealerSetForCtx(ctx context.Context) bool {
+	return resolveBrowserHealer(ctx) != nil
+}
+func BrowserRecordingGeneratorSetForCtx(ctx context.Context) bool {
+	return resolveBrowserRecordingGenerator(ctx) != nil
+}
+
+// SetBrowserHealer injects the LLM-backed step healer used by replay, for the
+// CLI's one-session-per-process path. The server instead stamps
+// WithBrowserHealer into each turn's ctx — two concurrent sessions on
+// different models would otherwise race on this process-global.
 func SetBrowserHealer(h browser.Healer) {
 	recorderMu.Lock()
 	defer recorderMu.Unlock()
@@ -82,11 +101,55 @@ func SetBrowserHealer(h browser.Healer) {
 }
 
 // SetBrowserRecordingGenerator injects the LLM-backed recording distiller used
-// by record_stop (nil falls back to deterministic compilation).
+// by record_stop (nil falls back to deterministic compilation), for the CLI's
+// one-session-per-process path. The server instead stamps
+// WithBrowserRecordingGenerator into each turn's ctx.
 func SetBrowserRecordingGenerator(g browser.RecordingGenerator) {
 	recorderMu.Lock()
 	defer recorderMu.Unlock()
 	browserRecordingGen = g
+}
+
+type browserHealerCtxKeyType struct{}
+
+var browserHealerCtxKey = browserHealerCtxKeyType{}
+
+// WithBrowserHealer returns ctx carrying the per-turn LLM-backed step healer.
+func WithBrowserHealer(ctx context.Context, h browser.Healer) context.Context {
+	return context.WithValue(ctx, browserHealerCtxKey, h)
+}
+
+// resolveBrowserHealer picks the ctx-scoped healer (server, stamped fresh
+// every turn) first, then falls back to the process-global one (CLI/TUI).
+func resolveBrowserHealer(ctx context.Context) browser.Healer {
+	if h, ok := ctx.Value(browserHealerCtxKey).(browser.Healer); ok {
+		return h
+	}
+	recorderMu.Lock()
+	defer recorderMu.Unlock()
+	return browserHealer
+}
+
+type browserRecordingGenCtxKeyType struct{}
+
+var browserRecordingGenCtxKey = browserRecordingGenCtxKeyType{}
+
+// WithBrowserRecordingGenerator returns ctx carrying the per-turn LLM-backed
+// recording distiller.
+func WithBrowserRecordingGenerator(ctx context.Context, g browser.RecordingGenerator) context.Context {
+	return context.WithValue(ctx, browserRecordingGenCtxKey, g)
+}
+
+// resolveBrowserRecordingGenerator picks the ctx-scoped generator (server,
+// stamped fresh every turn) first, then falls back to the process-global one
+// (CLI/TUI).
+func resolveBrowserRecordingGenerator(ctx context.Context) browser.RecordingGenerator {
+	if g, ok := ctx.Value(browserRecordingGenCtxKey).(browser.RecordingGenerator); ok {
+		return g
+	}
+	recorderMu.Lock()
+	defer recorderMu.Unlock()
+	return browserRecordingGen
 }
 
 // BrowserRecordingsDir is where browser recordings live (editable YAML).
@@ -519,7 +582,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 			return agent.ToolResult{}, err
 		}
 		path := saveScreenshot(shot)
-		if !ModelVisionEnabled() {
+		if !ModelVisionEnabled(ctx) {
 			// Text-only model: handing it an image block would be rejected by the
 			// endpoint. Return the path and steer the model to the text channels.
 			return agent.ToolResult{Text: "screenshot saved to " + path + " (the current model can't view images — use observe/eval/ax to read the page instead)"}, nil
@@ -688,8 +751,9 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		if name == "" || filepath.Base(name) != name {
 			return agent.ToolResult{}, fmt.Errorf("browser: record_stop requires a valid recording name")
 		}
+		gen := resolveBrowserRecordingGenerator(ctx)
 		recorderMu.Lock()
-		rec, startURL, gen := activeRecorder, recorderStartURL, browserRecordingGen
+		rec, startURL := activeRecorder, recorderStartURL
 		activeRecorder = nil
 		recorderMu.Unlock()
 		if rec == nil {
@@ -733,9 +797,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		if err := resolveReplayParams(ctx, &recording, name, params); err != nil {
 			return agent.ToolResult{}, err
 		}
-		recorderMu.Lock()
-		healer := browserHealer
-		recorderMu.Unlock()
+		healer := resolveBrowserHealer(ctx)
 		// Refine the call's parent bound (30 min) by the recording's length, so a
 		// long but healthy replay isn't killed by a one-size-fits-all ceiling.
 		rctx, rcancel := context.WithTimeout(ctx, replayTimeout(len(recording.Steps)))
