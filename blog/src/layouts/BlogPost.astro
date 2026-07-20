@@ -1,11 +1,14 @@
 ---
 import type { CollectionEntry } from 'astro:content';
+import SiteHeader from '../components/SiteHeader.astro';
+import SiteFooter from '../components/SiteFooter.astro';
 import '../styles/blog.css';
 
 type Props = CollectionEntry<'posts'>['data'] & { slug?: string; locale?: string; alternateSlug?: string };
 
 const { title, description, pubDate, updatedDate, author, tags, image, slug, locale = 'zh', alternateSlug } = Astro.props;
-const dateFormatter = new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
+const isZh = locale === 'zh';
+const dateFormatter = new Intl.DateTimeFormat(isZh ? 'zh-CN' : 'en-US', {
 	year: 'numeric',
 	month: 'long',
 	day: 'numeric',
@@ -13,30 +16,22 @@ const dateFormatter = new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US
 
 const siteUrl = 'https://octo-agent.dev';
 const pageSlug = slug ?? '';
-const canonicalPath = pageSlug.startsWith('en/')
-	? `/blog/posts/${pageSlug}/`
-	: `/blog/posts/${pageSlug}/`;
-const canonicalUrl = `${siteUrl}${canonicalPath}`;
+const canonicalUrl = `${siteUrl}/blog/posts/${pageSlug}/`;
 
-const navLabels = {
-	en: { home: 'octo blog', landing: 'Octo', docs: 'Docs', github: 'GitHub', lang: 'EN' },
-	zh: { home: 'octo 博客', landing: 'Octo', docs: '文档', github: 'GitHub', lang: '中文' },
-};
-const labels = navLabels[locale as keyof typeof navLabels] || navLabels.zh;
+const blogHome = isZh ? '/blog/' : '/blog/en/';
+const backLabel = isZh ? '返回博客' : 'Back to Blog';
 
-const alternateLocale = locale === 'zh' ? 'en' : 'zh';
+const alternateLocale = isZh ? 'en' : 'zh';
 const alternateUrl = alternateSlug
 	? `${siteUrl}/blog/posts/${alternateLocale === 'en' ? 'en/' : ''}${alternateSlug}/`
 	: `${siteUrl}/blog/${alternateLocale === 'zh' ? '' : 'en/'}`;
-const alternateLabel = locale === 'zh' ? 'English' : '中文';
 
 const ogImage = image ? (image.startsWith('http') ? image : `${siteUrl}${image}`) : `${siteUrl}/blog/og-default.svg`;
-const ogType = 'article';
-const siteName = locale === 'zh' ? 'octo 博客' : 'octo blog';
+const siteName = isZh ? 'octo 博客' : 'octo blog';
 ---
 
 <!DOCTYPE html>
-<html lang={locale === 'zh' ? 'zh-CN' : 'en'}>
+<html lang={isZh ? 'zh-CN' : 'en'}>
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -50,8 +45,8 @@ const siteName = locale === 'zh' ? 'octo 博客' : 'octo blog';
 		<meta property="og:title" content={title} />
 		<meta property="og:description" content={description} />
 		<meta property="og:url" content={canonicalUrl} />
-		<meta property="og:type" content={ogType} />
-		<meta property="og:locale" content={locale === 'zh' ? 'zh-CN' : 'en'} />
+		<meta property="og:type" content="article" />
+		<meta property="og:locale" content={isZh ? 'zh-CN' : 'en'} />
 		<meta property="og:site_name" content={siteName} />
 		<meta property="og:image" content={ogImage} />
 
@@ -68,37 +63,32 @@ const siteName = locale === 'zh' ? 'octo 博客' : 'octo blog';
 		{tags.map((tag) => <meta property="article:tag" content={tag} />)}
 	</head>
 	<body>
-		<header class="site-header">
-			<div class="container">
-				<a href={locale === 'zh' ? '/blog/' : '/blog/en/'} class="site-title">{labels.home}</a>
-				<nav class="site-nav">
-					<a href="https://octo-agent.dev/">{labels.landing}</a>
-					<a href="/docs/">{labels.docs}</a>
-					<a href="https://github.com/open-octo/octo-agent">{labels.github}</a>
-					<a class="lang-switch" href={alternateUrl} title={alternateLabel}>{alternateLabel}</a>
-				</nav>
-			</div>
-		</header>
+		<SiteHeader locale={isZh ? 'zh' : 'en'} active="blog" alternateUrl={alternateUrl} />
 
-		<main class="container">
+		<main>
 			<article class="blog-post">
+				<a href={blogHome} class="back-link">
+					<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3 5 8l5 5"></path></svg>
+					{backLabel}
+				</a>
+
 				<header class="post-header">
 					<h1>{title}</h1>
 					<p class="post-meta">
 						<time datetime={pubDate.toISOString()}>{dateFormatter.format(pubDate)}</time>
 						{updatedDate && (
 							<>
-								{' · updated '}
-								<time datetime={updatedDate.toISOString()}>{dateFormatter.format(updatedDate)}</time>
+								<span>·</span>
+								<span>{isZh ? '更新于' : 'updated'} {dateFormatter.format(updatedDate)}</span>
 							</>
 						)}
-						{' · '}
+						<span>·</span>
 						<span class="author">{author}</span>
 					</p>
 					{tags.length > 0 && (
 						<div class="tags">
 							{tags.map((tag) => (
-								<span class="tag">{tag}</span>
+								<span class="tag brand">{tag}</span>
 							))}
 						</div>
 					)}
@@ -110,13 +100,7 @@ const siteName = locale === 'zh' ? 'octo 博客' : 'octo blog';
 			</article>
 		</main>
 
-		<footer class="site-footer">
-			<div class="container">
-				<p>
-					© {new Date().getFullYear()} <a href="https://octo-agent.dev/">octo-agent</a>. Built with <a href="https://astro.build">Astro</a>.
-				</p>
-			</div>
-		</footer>
+		<SiteFooter locale={isZh ? 'zh' : 'en'} />
 
 		<script type="module">
 			import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
@@ -130,9 +114,6 @@ const siteName = locale === 'zh' ? 'octo 博客' : 'octo blog';
 				container.className = 'mermaid-diagram';
 				container.id = 'mermaid-container-' + suffix;
 				pre.replaceWith(container);
-				// mermaid.render() creates and then removes a temporary DOM node
-				// with this id internally, so it must differ from container.id
-				// or mermaid ends up deleting our own container instead.
 				mermaid.render('mermaid-render-' + suffix, source).then(({ svg }) => {
 					container.innerHTML = svg;
 				}).catch((err) => {

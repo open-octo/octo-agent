@@ -22,6 +22,13 @@ export default defineConfig({
 				baseUrl: 'https://github.com/open-octo/octo-agent/edit/main/docs/',
 			},
 			customCss: ['./src/styles/custom.css'],
+			head: [
+				{
+					tag: 'script',
+					content:
+						"try{localStorage.setItem('starlight-theme','light')}catch(e){}document.documentElement.dataset.theme='light';",
+				},
+			],
 			defaultLocale: 'root',
 			locales: {
 				root: { label: 'English', lang: 'en' },

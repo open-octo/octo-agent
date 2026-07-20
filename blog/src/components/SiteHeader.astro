@@ -1,0 +1,17 @@
+---
+/**
+ * Thin wrapper around the shared web component in /octo-nav.js — the single
+ * source of truth for the nav across the landing page and the blog.
+ * (Copy shared/octo-nav.js to blog/public/octo-nav.js so it serves at /octo-nav.js.)
+ */
+interface Props {
+	locale?: 'zh' | 'en';
+	active?: 'blog' | 'docs' | 'home';
+	alternateUrl?: string;
+}
+const { locale = 'zh', active = 'blog', alternateUrl } = Astro.props;
+const navSrc = import.meta.env.BASE_URL.replace(/\/?$/, '/') + 'octo-nav.js';
+---
+
+<script is:inline src={navSrc} defer></script>
+<octo-site-nav variant="site" locale={locale} active={active} alt={alternateUrl}></octo-site-nav>

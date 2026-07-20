@@ -1,22 +1,28 @@
 ---
 import { getCollection } from 'astro:content';
+import SiteHeader from '../components/SiteHeader.astro';
+import SiteFooter from '../components/SiteFooter.astro';
 import '../styles/blog.css';
 
 const posts = (await getCollection('posts'))
 	.filter((post) => !post.data.draft && post.data.locale === 'zh')
 	.sort((a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf());
 
+const [featured, ...rest] = posts;
+
 const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
 	year: 'numeric',
 	month: 'long',
 	day: 'numeric',
 });
+const href = (post) => `/blog/posts/${post.id.slice(3)}/`;
 
 const siteUrl = 'https://octo-agent.dev';
 const canonicalUrl = `${siteUrl}/blog/`;
 const alternateUrl = `${siteUrl}/blog/en/`;
 const title = 'octo 博客';
-const description = 'octo-agent 团队的工程笔记、版本更新与 AI Agent 技术深度文章，分享 Loop Engineering、工具链与实战经验。';
+const description =
+	'octo-agent 团队的工程笔记、版本更新与 AI Agent 技术深度文章，分享 Loop Engineering、工具链与实战经验。';
 const ogImage = `${siteUrl}/blog/og-default.svg`;
 ---
 
@@ -45,62 +51,72 @@ const ogImage = `${siteUrl}/blog/og-default.svg`;
 		<meta name="twitter:image" content={ogImage} />
 	</head>
 	<body>
-		<header class="site-header">
+		<SiteHeader locale="zh" active="blog" alternateUrl={alternateUrl} />
+
+		<section class="hero">
 			<div class="container">
-				<a href="/blog/" class="site-title">octo 博客</a>
-				<nav class="site-nav">
-					<a href="https://octo-agent.dev/">Octo</a>
-					<a href="/docs/">文档</a>
-					<a href="https://github.com/open-octo/octo-agent">GitHub</a>
-					<a class="lang-switch" href={alternateUrl} title="English">English</a>
-				</nav>
-			</div>
-		</header>
-
-		<main class="container">
-			<section class="hero">
+				<span class="kicker">Octo 团队的工程笔记</span>
 				<h1>octo 博客</h1>
-				<p>
-					octo-agent 团队的工程笔记、版本更新与技术深度文章。
-				</p>
-			</section>
+				<p>版本说明、Loop Engineering 深度解析，以及构建私密、自托管 AI Agent 的一线实践。</p>
+			</div>
+		</section>
 
-			<section class="post-list">
+		<main class="post-list">
+			<div class="post-list-head">
 				<h2>最新文章</h2>
-				{posts.length === 0 && <p>暂无文章。</p>}
-				<ul>
-					{
-						posts.map((post) => (
-							<li class="post-card">
-								<a href={`/blog/posts/${post.id.slice(3)}/`} class="post-card-title">
-									{post.data.title}
-								</a>
+				<div class="rule"></div>
+			</div>
+
+			{posts.length === 0 && <p>暂无文章。</p>}
+
+			{
+				featured && (
+					<a href={href(featured)} class="post-card featured">
+						<span class="flag">精选</span>
+						<span class="post-card-title">{featured.data.title}</span>
+						<p class="post-card-description">{featured.data.description}</p>
+						<p class="post-card-meta">
+							<time datetime={featured.data.pubDate.toISOString()}>
+								{dateFormatter.format(featured.data.pubDate)}
+							</time>
+							<span>·</span>
+							<span>{featured.data.author}</span>
+							<span class="tags">
+								{featured.data.tags.slice(0, 2).map((tag) => (
+									<span class="tag brand">{tag}</span>
+								))}
+							</span>
+						</p>
+					</a>
+				)
+			}
+
+			<ul>
+				{
+					rest.map((post) => (
+						<li>
+							<a href={href(post)} class="post-card">
+								<span class="post-card-title">{post.data.title}</span>
 								<p class="post-card-description">{post.data.description}</p>
 								<p class="post-card-meta">
 									<time datetime={post.data.pubDate.toISOString()}>
 										{dateFormatter.format(post.data.pubDate)}
 									</time>
-									{' · '}
-									{post.data.tags.slice(0, 3).map((tag, i) => (
-										<>
-											{i > 0 && ', '}
+									<span>·</span>
+									<span>{post.data.author}</span>
+									<span class="tags">
+										{post.data.tags.slice(0, 2).map((tag) => (
 											<span class="tag">{tag}</span>
-										</>
-									))}
+										))}
+									</span>
 								</p>
-							</li>
-						))
-					}
-				</ul>
-			</section>
+							</a>
+						</li>
+					))
+				}
+			</ul>
 		</main>
 
-		<footer class="site-footer">
-			<div class="container">
-				<p>
-					© {new Date().getFullYear()} <a href="https://octo-agent.dev/">octo-agent</a>. Built with <a href="https://astro.build">Astro</a>.
-				</p>
-			</div>
-		</footer>
+		<SiteFooter locale="zh" />
 	</body>
 </html>
