@@ -159,6 +159,21 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 			s.Steps = append(s.Steps, up)
 			continue
 		}
+		if e.Type == "wait" {
+			// Auto-inserted wait: the recorder detected a condition the next step
+			// depends on (network activity, a modal appearing). Emit a wait step so
+			// the next action only fires once the page has settled.
+			st := Step{Action: "wait", Frame: e.Frame}
+			switch e.WaitKind {
+			case "network":
+				st.Network = true
+				st.TimeoutMS = e.TimeoutMS
+			case "element":
+				st.Selector = e.Selector
+			}
+			s.Steps = append(s.Steps, st)
+			continue
+		}
 		if e.Selector == "" {
 			continue
 		}

@@ -284,6 +284,161 @@ func TestRecorderCapturesNewTab_ClickBeforeInstrument(t *testing.T) {
 	}
 }
 
+// TestAutoWaitNetwork: a click that triggers a fetch/XHR is followed by an
+// auto-inserted "network" wait event — the page is loading data and the next
+// step must not race ahead of it.
+func TestAutoWaitNetwork(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/data", func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.Write([]byte("loaded"))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>net</title>
+<button id="load">Load</button>
+<div id="result"></div>
+<script>
+document.getElementById('load').addEventListener('click', function(){
+  fetch('/data').then(function(r){return r.text()}).then(function(t){
+	document.getElementById('result').textContent=t;
+  });
+});
+</script>`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#load", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	rec := NewRecorder(page)
+	if err := rec.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer rec.Stop()
+
+	if err := page.Click(ctx, "#load"); err != nil {
+		t.Fatalf("click: %v", err)
+	}
+	// Wait for the auto-inserted network wait event.
+	var waitEv *RecordedEvent
+	for i := 0; i < 50; i++ {
+		time.Sleep(100 * time.Millisecond)
+		for _, e := range rec.Events() {
+			if e.Type == "wait" && e.WaitKind == "network" {
+				waitEv = &e
+				break
+			}
+		}
+		if waitEv != nil {
+			break
+		}
+	}
+	if waitEv == nil {
+		t.Fatalf("expected auto-inserted network wait event, got: %+v", rec.Events())
+	}
+	// The wait must appear AFTER the click in the events slice.
+	clickIdx, waitIdx := -1, -1
+	for i, e := range rec.Events() {
+		if e.Type == "click" && e.Selector == "#load" {
+			clickIdx = i
+		}
+		if e.Type == "wait" && e.WaitKind == "network" {
+			waitIdx = i
+		}
+	}
+	if clickIdx == -1 || waitIdx == -1 || waitIdx <= clickIdx {
+		t.Fatalf("network wait should come after click (click=%d wait=%d), events=%+v", clickIdx, waitIdx, rec.Events())
+	}
+}
+
+// TestAutoWaitElement: when a click causes a modal/dialog to appear, an
+// auto-inserted "element" wait event for that modal is emitted — the next step
+// that interacts with the modal must wait for it to be present.
+func TestAutoWaitElement(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>modal</title>
+<button id="open">Open</button>
+<script>
+document.getElementById('open').addEventListener('click', function(){
+  var d=document.createElement('div');
+  d.id='mymodal';
+  d.setAttribute('role','dialog');
+  d.className='modal';
+  d.innerHTML='<button id="ok">OK</button>';
+  document.body.appendChild(d);
+});
+</script>`))
+	}))
+	defer srv.Close()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#open", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	rec := NewRecorder(page)
+	if err := rec.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer rec.Stop()
+
+	if err := page.Click(ctx, "#open"); err != nil {
+		t.Fatalf("click: %v", err)
+	}
+	// Wait for the auto-inserted element wait event targeting the modal.
+	var waitEv *RecordedEvent
+	for i := 0; i < 50; i++ {
+		time.Sleep(100 * time.Millisecond)
+		for _, e := range rec.Events() {
+			if e.Type == "wait" && e.WaitKind == "element" && e.Selector == "#mymodal" {
+				waitEv = &e
+				break
+			}
+		}
+		if waitEv != nil {
+			break
+		}
+	}
+	if waitEv == nil {
+		t.Fatalf("expected auto-inserted element wait event for #mymodal, got: %+v", rec.Events())
+	}
+}
+
+// TestCompileRecordingWaitEvents: wait events compiled into wait steps — a
+// "network" wait becomes a wait step with network:true; an "element" wait
+// becomes a wait step with a selector.
+func TestCompileRecordingWaitEvents(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "click", Selector: "#b", Tag: "BUTTON"},
+		{Type: "wait", WaitKind: "network", TimeoutMS: 10000},
+		{Type: "click", Selector: "#b2", Tag: "BUTTON"},
+		{Type: "wait", WaitKind: "element", Selector: "#modal"},
+	}
+	rec := CompileRecording("test", "test desc", "", events)
+	if len(rec.Steps) != 4 {
+		t.Fatalf("expected 4 steps, got %d: %+v", len(rec.Steps), rec.Steps)
+	}
+	if s := rec.Steps[1]; s.Action != "wait" || !s.Network || s.TimeoutMS != 10000 {
+		t.Fatalf("network wait step wrong: %+v", s)
+	}
+	if s := rec.Steps[3]; s.Action != "wait" || s.Selector != "#modal" {
+		t.Fatalf("element wait step wrong: %+v", s)
+	}
+}
+
 // TestRecorderCapturesEnter: Enter in a text input is captured with the field's
 // current value (change never fires without a blur); Enter in a textarea is a
 // newline, not a submit, and must not be captured.

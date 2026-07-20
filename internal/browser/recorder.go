@@ -12,16 +12,22 @@ import (
 // carries enough to replay it: the action kind plus a best-effort selector (and
 // the value for inputs). Frame is set when the element lives in a same-origin
 // iframe, so replay can pierce it via the " >>> " convention.
+//
+// Type == "wait" is special: it has no target element, only a condition to wait
+// for. WaitKind is "network" (wait for fetch/XHR to settle) or "element" (wait
+// for Selector to appear). TimeoutMS caps how long to wait.
 type RecordedEvent struct {
-	Type     string `json:"type"`     // click | change | upload | navigate
-	Selector string `json:"selector"` // best-effort CSS selector within its document
-	Frame    string `json:"frame"`    // iframe selector when the target is in a child frame
-	Tag      string `json:"tag"`      // target tagName (SELECT/INPUT/…), so replay picks the right action
-	Value    string `json:"value"`    // input/select value (change events)
-	Text     string `json:"text"`     // element text, for context
-	Field    string `json:"field"`    // input's placeholder/name/aria-label/id — names the auto-param
-	Secret   bool   `json:"secret"`   // password input: don't persist the value as a param default
-	URL      string `json:"url"`      // document URL at capture time
+	Type       string `json:"type"`     // click | change | upload | navigate | enter | wait
+	Selector   string `json:"selector"` // best-effort CSS selector within its document
+	Frame      string `json:"frame"`    // iframe selector when the target is in a child frame
+	Tag        string `json:"tag"`      // target tagName (SELECT/INPUT/…), so replay picks the right action
+	Value      string `json:"value"`    // input/select value (change events)
+	Text       string `json:"text"`     // element text, for context
+	Field      string `json:"field"`    // input's placeholder/name/aria-label/id — names the auto-param
+	Secret     bool   `json:"secret"`   // password input: don't persist the value as a param default
+	URL        string `json:"url"`      // document URL at capture time
+	WaitKind   string `json:"wait_kind,omitempty"`   // wait: "network" | "element"
+	TimeoutMS  int    `json:"timeout_ms,omitempty"`  // wait: cap in ms
 }
 
 // Recorder captures a user's actions on a page by injecting a DOM listener that
@@ -157,17 +163,29 @@ func (r *Recorder) instrumentOOPIF(ctx context.Context, session string) {
 
 // captureScript installs capture-phase click/change/keydown listeners that report
 // each action (with a stable-ish selector) through the __octoRecord binding.
+//
+// It also auto-inserts wait events: after each click, it checks whether the click
+// triggered network activity (SPA data loading) and emits a "network" wait, and a
+// MutationObserver detects significant new DOM elements (modals, popups,
+// calendars, overlays) and emits an "element" wait for the first such element.
+// These waits make the compiled recording replayable without the next step
+// racing ahead of a page that hasn't settled.
 const captureScript = `(function(){
   if (window.__octoRec) return; window.__octoRec = true;
+  /* ---- network monitor: track in-flight fetch/XHR (reused by WaitForNetworkIdle) ---- */
+  if (!window.__octoNet){
+    var s=window.__octoNet={n:0, idleSince:Date.now()};
+    function inc(){ s.n++; s.idleSince=0; }
+    function dec(){ s.n=Math.max(0,s.n-1); if(s.n===0) s.idleSince=Date.now(); }
+    try{ var of=window.fetch; if(of){ window.fetch=function(){ inc(); return of.apply(this,arguments).then(function(r){dec();return r;},function(e){dec();throw e;}); }; } }catch(_){}
+    try{ var send=XMLHttpRequest.prototype.send; XMLHttpRequest.prototype.send=function(){ inc(); try{ this.addEventListener('loadend',function(){dec();},{once:true}); }catch(_){ dec(); } return send.apply(this,arguments); }; }catch(_){}
+  }
   function sel(el){
     if(!el || el.nodeType!==1) return '';
     if(el.id) return '#'+CSS.escape(el.id);
     for(var i=0;i<4;i++){var a=['data-testid','data-test','name','aria-label'][i];var v=el.getAttribute&&el.getAttribute(a);if(v)return el.tagName.toLowerCase()+'['+a+'=\"'+CSS.escape(v)+'\"]';}
     var parts=[], node=el, depth=0;
     while(node && node.nodeType===1 && node.tagName!=='BODY' && depth<6){
-      // Anchor the path at the nearest ancestor carrying an id: short and stable,
-      // versus a free-floating nth-of-type chain from <body> that any layout
-      // shift breaks. (el itself has no id here — that returned above.)
       if(node.id){ parts.unshift('#'+CSS.escape(node.id)); return parts.join(' > '); }
       var part=node.tagName.toLowerCase(); var p=node.parentElement;
       if(p){var same=[].slice.call(p.children).filter(function(c){return c.tagName===node.tagName;}); if(same.length>1){part+=':nth-of-type('+(same.indexOf(node)+1)+')';}}
@@ -175,13 +193,26 @@ const captureScript = `(function(){
     }
     return parts.join(' > ');
   }
+  /* ---- wait-event reporting (debounced) ---- */
+  var _lastWaitAt=0;
+  var WAIT_COOLDOWN=200;
+  function reportWait(kind, selector, timeout){
+    var now=Date.now();
+    if(now-_lastWaitAt<WAIT_COOLDOWN) return;
+    _lastWaitAt=now;
+    try{ window.__octoRecord(JSON.stringify({type:'wait', wait_kind:kind, selector:selector||'', timeout_ms:timeout||10000, url:location.href})); }catch(_){}
+  }
   function report(type, e){
     try{var el=e.target; var fr=''; try{ if(window.frameElement) fr=sel(window.frameElement); }catch(_2){}
       var field=((el.placeholder||el.name||(el.getAttribute?el.getAttribute('aria-label'):'')||el.id||'')+'').trim().slice(0,40);
       var secret=(el.type==='password');
       window.__octoRecord(JSON.stringify({type:type, selector:sel(el), frame:fr, tag:el.tagName, text:(el.textContent||'').trim().slice(0,40), field:field, secret:secret, value:(secret?'':(el.value!==undefined?(''+el.value).slice(0,200):'')), url:location.href}));}catch(_){}
   }
-  document.addEventListener('click', function(e){report('click',e);}, true);
+  /* ---- click: report + detect network activity after a short delay ---- */
+  document.addEventListener('click', function(e){
+    report('click', e);
+    setTimeout(function(){ try{ var s=window.__octoNet; if(s && s.n>0) reportWait('network','',10000); }catch(_){} }, 150);
+  }, true);
   document.addEventListener('change', function(e){var t=e.target; report((t&&t.type==='file')?'upload':'change', e);}, true);
   // Enter in a text input = the submit gesture (change never fires without a
   // blur, so the typed value only reaches us as this event's snapshot). Not
@@ -198,6 +229,38 @@ const captureScript = `(function(){
     if(!TEXTY[t.type||'text']) return;
     report('enter', e);
   }, true);
+  /* ---- MutationObserver: detect modals/popups/calendars/overlays ---- */
+  var _waitTimer=null, _observer=null;
+  function isSignificant(el){
+    if(!el || el.nodeType!==1) return false;
+    var role=el.getAttribute('role');
+    if(role==='dialog'||role==='alertdialog') return true;
+    if(el.getAttribute('aria-modal')==='true') return true;
+    var cls=(el.className&&typeof el.className==='string')?el.className.toLowerCase():'';
+    if(/(^|\s)(modal|dialog|popup|popover|drawer|overlay|calendar|picker|dropdown|lightbox|tooltip|ant-modal|ant-picker|ant-dropdown|ant-drawer|ant-popover|ant-tooltip)($|\s)/.test(cls)) return true;
+    try{ var st=window.getComputedStyle(el); if((st.position==='fixed'||st.position==='absolute')&&el.offsetWidth>window.innerWidth*0.3&&el.offsetHeight>window.innerHeight*0.3) return true; }catch(_){}
+    return false;
+  }
+  function ensureObserver(){
+    if(_observer) return;
+    _observer=new MutationObserver(function(muts){
+      var found=null;
+      for(var i=0;i<muts.length&&!found;i++){
+        var m=muts[i];
+        if(m.type==='childList'&&m.addedNodes){
+          for(var j=0;j<m.addedNodes.length;j++){ if(isSignificant(m.addedNodes[j])){ found=m.addedNodes[j]; break; } }
+        }
+      }
+      if(!found) return;
+      clearTimeout(_waitTimer);
+      _waitTimer=setTimeout(function(){
+        // Only report if the element is still in the DOM (not immediately removed).
+        try{ if(document.body && document.body.contains(found)) reportWait('element', sel(found), 10000); }catch(_){}
+      }, 300);
+    });
+    _observer.observe(document.documentElement, {childList:true, subtree:true});
+  }
+  if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', ensureObserver); } else { ensureObserver(); }
 })();`
 
 // Start begins capturing. The binding and listeners are installed on the live
