@@ -538,13 +538,14 @@ func (c Config) Validate() []string {
 	}
 	// memory_backend: an empty Type disables the feature (nothing to check).
 	// When set, Type must be a known backend and base_url is required — except
-	// mem0 in "cloud" mode, which auto-fills base_url (mirrors memorybackend.New).
+	// in "cloud" mode for backends that auto-fill a fixed hosted URL (mem0 and
+	// hindsight), which mirrors memorybackend.New.
 	if mt := strings.ToLower(strings.TrimSpace(c.MemoryBackend.Type)); mt != "" {
 		if mt != "hindsight" && mt != "mem0" && mt != "agentmemory" {
 			problems = append(problems, fmt.Sprintf("memory_backend.type %q is not one of hindsight, mem0, agentmemory", c.MemoryBackend.Type))
 		}
-		mem0Cloud := mt == "mem0" && strings.ToLower(strings.TrimSpace(c.MemoryBackend.Mode)) == "cloud"
-		if c.MemoryBackend.BaseURL == "" && !mem0Cloud {
+		cloudAutoFill := strings.ToLower(strings.TrimSpace(c.MemoryBackend.Mode)) == "cloud" && (mt == "mem0" || mt == "hindsight")
+		if c.MemoryBackend.BaseURL == "" && !cloudAutoFill {
 			problems = append(problems, "memory_backend.base_url is required when memory_backend.type is set")
 		}
 	}

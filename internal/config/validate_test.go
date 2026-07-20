@@ -84,6 +84,7 @@ func TestConfigValidate_GlobalScalars(t *testing.T) {
 		{"bad memory_backend type", Config{MemoryBackend: MemoryBackendConfig{Type: "pinecone", BaseURL: "http://x"}}, "memory_backend.type"},
 		{"memory_backend missing base_url", Config{MemoryBackend: MemoryBackendConfig{Type: "mem0"}}, "base_url"},
 		{"mem0 cloud mode needs no base_url", Config{MemoryBackend: MemoryBackendConfig{Type: "mem0", Mode: "cloud"}}, ""},
+		{"hindsight cloud mode needs no base_url", Config{MemoryBackend: MemoryBackendConfig{Type: "hindsight", Mode: "cloud"}}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
