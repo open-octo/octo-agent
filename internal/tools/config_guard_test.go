@@ -34,14 +34,15 @@ func TestConfigGuard_ValidateConfigFile(t *testing.T) {
 		t.Errorf("broken YAML: want a parse warning, got %q", msg)
 	}
 
-	// Parses, but default_model dangles → the semantic warning.
-	writeCfg(t, "models:\n  - provider: openai\n    model: gpt-4o\ndefault_model: nope\n")
-	if msg := validateConfigFile(); !strings.Contains(msg, "problems") || !strings.Contains(msg, "default_model") {
-		t.Errorf("dangling default_model: want a semantic warning, got %q", msg)
+	// Parses, but Default dangles → the semantic warning. PR5: Default is a
+	// composite id; "ghost::gpt-4o" points at a non-existent endpoint.
+	writeCfg(t, "endpoints:\n  - id: ep-a\n    provider: openai\n    models:\n      - model: gpt-4o\ndefault: ghost::gpt-4o\n")
+	if msg := validateConfigFile(); !strings.Contains(msg, "problems") || !strings.Contains(msg, "default") {
+		t.Errorf("dangling Default: want a semantic warning, got %q", msg)
 	}
 
 	// Valid → no warning.
-	writeCfg(t, "models:\n  - provider: openai\n    model: gpt-4o\ndefault_model: gpt-4o\n")
+	writeCfg(t, "endpoints:\n  - id: ep-a\n    provider: openai\n    models:\n      - model: gpt-4o\ndefault: ep-a::gpt-4o\n")
 	if msg := validateConfigFile(); msg != "" {
 		t.Errorf("valid config: want no warning, got %q", msg)
 	}
