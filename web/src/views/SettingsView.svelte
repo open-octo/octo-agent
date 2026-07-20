@@ -473,29 +473,17 @@
   async function handleSave() {
     saving = true
     try {
-      // Agent Defaults (Reasoning Effort + Permission Mode) — the default
-      // model entry's own settings, saved the same way the Models section
-      // below saves any entry: api.updateModel(id, ...the full entry...).
-      // No session is involved; this is config, not session state. update-
-      // Model isn't a partial PATCH, so the rest of the entry's fields (base
-      // URL, key, provider, vision) are resent unchanged alongside the two
-      // that actually changed — dropping them would blank those fields out.
-      if (reasoning !== origReasoning || permMode !== origPermMode) {
-        const def = models[defaultModelIdx]
-        if (def) {
-          await api.updateModel(def.id, {
-            model: def.model,
-            base_url: def.base_url ?? '',
-            api_key: def.api_key_masked ?? '',
-            provider: def.provider,
-            anthropic_format: def.anthropic_format,
-            vision: def.vision,
-            reasoning_effort: effortMap[reasoning] ?? 'medium',
-            permission_mode: labelToPermissionMode(permMode),
-          })
-          origReasoning = reasoning
-          origPermMode = permMode
-        }
+      // Reasoning Effort + Permission Mode: PR5 made these global config
+      // (PUT /api/config/reasoning_effort + PUT /api/config/permission_mode),
+      // not per-entry. The old api.updateModel call was deleted — save each
+      // changed field through its own global endpoint.
+      if (reasoning !== origReasoning) {
+        await api.updateReasoningEffort(effortMap[reasoning] ?? 'medium')
+        origReasoning = reasoning
+      }
+      if (permMode !== origPermMode) {
+        await api.updatePermissionMode(labelToPermissionMode(permMode))
+        origPermMode = permMode
       }
 
       // Show Reasoning is a separate global fallback (PUT

@@ -436,6 +436,127 @@ func (s *Server) handlePutWorkspaceDir(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "workspace_dir": req.WorkspaceDir})
 }
 
+// ─── PUT /api/config/reasoning_effort ────────────────────────────────────────
+
+type putReasoningEffortRequest struct {
+	ReasoningEffort string `json:"reasoning_effort"`
+}
+
+// handlePutReasoningEffort updates the global default reasoning effort. Valid
+// levels: "off", "low", "medium", "high", "xhigh", "max". The server's default
+// sender is rebuilt so unbound existing sessions pick up the new value on their
+// next turn. Because reasoning_effort is baked into cached senders, the cache is
+// invalidated and per-session WS broadcasts push the new effective level.
+func (s *Server) handlePutReasoningEffort(w http.ResponseWriter, r *http.Request) {
+	var req putReasoningEffortRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	level := strings.ToLower(req.ReasoningEffort)
+	if level == "" {
+		level = "off"
+	}
+	if level != "off" && level != "low" && level != "medium" && level != "high" && level != "xhigh" && level != "max" {
+		writeError(w, http.StatusBadRequest, "reasoning_effort must be off, low, medium, high, xhigh, or max")
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
+		return
+	}
+
+	cfg.ReasoningEffort = level
+	if err := cfg.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+		return
+	}
+
+	s.invalidateSenderCache()
+	if err := s.reloadDefaultSender(); err != nil {
+		log.Printf("[server] reload default sender after reasoning_effort change: %v", err)
+	}
+
+	sessions, _ := agent.ListSessions(50)
+	for _, sess := range sessions {
+		_, pm, re, sr, ctxUsage := s.sessionStatusFields(sess)
+		if sr == nil {
+			continue
+		}
+		s.wsHub.broadcast(sess.ID, map[string]any{
+			"type":             "session_update",
+			"session_id":       sess.ID,
+			"working_dir":      s.sessionCwd(sess),
+			"permission_mode":  pm,
+			"reasoning_effort": re,
+			"show_reasoning":   *sr,
+			"context_usage":    ctxUsage,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "reasoning_effort": level})
+}
+
+// ─── PUT /api/config/permission_mode ─────────────────────────────────────────
+
+type putPermissionModeRequest struct {
+	PermissionMode string `json:"permission_mode"`
+}
+
+// handlePutPermissionMode updates the global default permission mode. Valid
+// values: "interactive", "auto", "strict". New sessions inherit this value.
+// Per-session overrides (set via PATCH /api/sessions/{id}/permission_mode)
+// are untouched — this only changes the global default.
+func (s *Server) handlePutPermissionMode(w http.ResponseWriter, r *http.Request) {
+	var req putPermissionModeRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	mode := strings.ToLower(req.PermissionMode)
+	if mode != "interactive" && mode != "auto" && mode != "strict" {
+		writeError(w, http.StatusBadRequest, "permission_mode must be interactive, auto, or strict")
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
+		return
+	}
+
+	cfg.PermissionMode = mode
+	if err := cfg.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+		return
+	}
+
+	// Push the new default to all sessions so the UI reflects it immediately.
+	// Sessions with a per-session override keep their own value.
+	sessions, _ := agent.ListSessions(50)
+	for _, sess := range sessions {
+		_, pm, re, sr, ctxUsage := s.sessionStatusFields(sess)
+		if sr == nil {
+			continue
+		}
+		s.wsHub.broadcast(sess.ID, map[string]any{
+			"type":             "session_update",
+			"session_id":       sess.ID,
+			"working_dir":      s.sessionCwd(sess),
+			"permission_mode":  pm,
+			"reasoning_effort": re,
+			"show_reasoning":   *sr,
+			"context_usage":    ctxUsage,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "permission_mode": mode})
+}
+
 // maskKey masks most of an API key, keeping the first and last four runes
 // visible. It measures by runes so it never splits a multi-byte UTF-8 character.
 func maskKey(k string) string {
