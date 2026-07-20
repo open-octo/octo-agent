@@ -1350,7 +1350,13 @@ func (a *Agent) Suggest(ctx context.Context, tools []ToolDefinition) (string, er
 	msgs = append(msgs, snap...)
 	msgs = append(msgs, NewUserMessage(suggestInstruction))
 
-	if le, ok := sender.(LowEffortSender); ok {
+	// Prefer NoReasoning, fall back to LowEffort: a one-line follow-up
+	// suggestion needs no reasoning, and even "low" effort wastes time and
+	// tokens that can push this throwaway call past its timeout on a slow
+	// provider (same logic as GenerateTitle).
+	if nr, ok := sender.(NoReasoningSender); ok {
+		sender = nr.NoReasoning()
+	} else if le, ok := sender.(LowEffortSender); ok {
 		sender = le.LowEffort()
 	}
 

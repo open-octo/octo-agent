@@ -1860,6 +1860,42 @@ func TestAgent_Suggest_UsesLowEffortSenderWhenAvailable(t *testing.T) {
 	}
 }
 
+// TestAgent_Suggest_PrefersNoReasoningOverLowEffort guards the same hierarchy
+// GenerateTitle uses: a sender that implements both NoReasoningSender and
+// LowEffortSender must have NoReasoning() preferred, since the follow-up
+// suggestion (like a title) needs no reasoning at all.
+func TestAgent_Suggest_PrefersNoReasoningOverLowEffort(t *testing.T) {
+	low := &fakeSender{reply: Reply{Content: "low effort — should not be used"}}
+	noReasoning := &fakeSender{reply: Reply{Content: "no-reasoning suggestion"}}
+	main := &fakeNoReasoningSender{
+		fakeLowEffortSender: fakeLowEffortSender{
+			fakeSender: fakeSender{reply: Reply{Content: "main — should not be used"}},
+			low:        low,
+		},
+		noReasoning: noReasoning,
+	}
+	a := New(main, "m")
+	a.History.Append(NewUserMessage("do X"))
+	a.History.Append(NewAssistantMessage("did X"))
+
+	s, err := a.Suggest(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Suggest: %v", err)
+	}
+	if s != "no-reasoning suggestion" {
+		t.Errorf("suggestion = %q, want the no-reasoning sender's reply", s)
+	}
+	if len(main.gotMessages) != 0 {
+		t.Errorf("main sender should not have been called; got %d messages", len(main.gotMessages))
+	}
+	if len(low.gotMessages) != 0 {
+		t.Errorf("low-effort sender should not have been called when no-reasoning is available; got %d messages", len(low.gotMessages))
+	}
+	if len(noReasoning.gotMessages) == 0 {
+		t.Error("no-reasoning sender was never called")
+	}
+}
+
 func TestAgent_GenerateTitle(t *testing.T) {
 	send := &fakeSender{reply: Reply{Content: "\"Fix the login redirect bug\"."}}
 	a := New(send, "m")
