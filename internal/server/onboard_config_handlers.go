@@ -168,6 +168,12 @@ type configResponse struct {
 	Coauthor        *bool  `json:"coauthor,omitempty"`
 	WorkspaceDir    string `json:"workspace_dir,omitempty"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// PermissionMode is the global default permission mode. PR5 lifted
+	// per-entry permission_mode to global (per-entry reasoning was deleted;
+	// permission_mode was always global in practice — the old default entry
+	// carried it). The Composer reads this to seed its no-active-session
+	// fallback.
+	PermissionMode string `json:"permission_mode,omitempty"`
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -185,6 +191,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		Coauthor:        &effCoauthor,
 		WorkspaceDir:    cfg.WorkspaceDir,
 		ReasoningEffort: cfg.ReasoningEffort,
+		PermissionMode:  cfg.PermissionMode,
 	})
 }
 

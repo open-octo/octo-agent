@@ -561,7 +561,12 @@
   }
 
   // ── model + reasoning pickers ──────────────────────────────────────────────
-  let models = $state<api.ModelEntry[]>([])
+  // PR5/PR6: the flat ModelEntry list is gone — read the two-level endpoint
+  // view and flatten it into model rows the picker can show. Each row carries
+  // the composite id "<endpoint>::<model>" so pickModel can pass it to
+  // updateSessionModel, which resolves it via cfg.EntryByModel (composite-id
+  // aware since PR2).
+  let models = $state<{ id: string; model: string; endpoint: string }[]>([])
   let modelMenu = $state(false)
   let reasonMenu = $state(false)
   let dirMenu = $state(false)
@@ -573,7 +578,16 @@
   const showReasoningIcon = $derived(showReasoning ? 'ant-design:eye-outlined' : 'ant-design:eye-invisible-outlined')
 
   onMount(async () => {
-    try { models = (await api.getConfig()).models ?? [] } catch { /* leave empty */ }
+    try {
+      const ep = await api.getEndpoints()
+      const flat: { id: string; model: string; endpoint: string }[] = []
+      for (const e of ep.endpoints) {
+        for (const m of e.models) {
+          flat.push({ id: `${e.id}::${m.model}`, model: m.model, endpoint: e.id })
+        }
+      }
+      models = flat
+    } catch { /* leave empty */ }
     try { skills = await api.listSkills() } catch { /* leave empty */ }
     try { workflows = await api.listWorkflows() } catch { /* leave empty */ }
     try {
@@ -584,10 +598,13 @@
     } catch { /* leave empty */ }
   })
 
-  async function pickModel(m: api.ModelEntry) {
+  async function pickModel(m: { id: string; model: string; endpoint: string }) {
     modelMenu = false
     if (!sid) return
     try {
+      // m.id is the composite id "<endpoint>::<model>" — the backend's
+      // handleUpdateSessionModel resolves it via cfg.EntryByModel (composite-
+      // id aware since PR2), binding the session to that endpoint's sender.
       const res = await api.updateSessionModel(sid, m.id)
       sessions.update(list => list.map((s: any) => s.id === sid ? { ...s, model: res.model, model_id: res.model_id } : s))
       chatModel.update(mx => ({ ...mx, [sid]: res.model }))
@@ -869,8 +886,8 @@
           {:else}
             {#each models as m (m.id)}
               <button class="menu-item" onclick={() => pickModel(m)}>
-                <span class="mi-name">{m.id}</span>
-                <span class="mi-model mono">{m.model}</span>
+                <span class="mi-name mono">{m.id}</span>
+                <span class="mi-model mono">{m.endpoint}</span>
               </button>
             {/each}
           {/if}
