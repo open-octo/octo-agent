@@ -1135,6 +1135,13 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   //    ResizeObserver stays only as a supplementary trigger for layout shifts
   //    that don't touch msgs (viewport resize, Artifacts panel toggle).
   let railTicks = $state<{ id: string; top: number; preview: string }[]>([])
+  // Which node is "current" (last user message scrolled past the 0.32 line) and
+  // how far the blue progress line has filled (0–100, scroll position). Both are
+  // driven by the scroll listener below; the nodes stay at their real rendered
+  // offsets (railTicks[].top) so the rail maps the actual conversation, and the
+  // fill/active layer expresses where the viewport currently sits.
+  let railActive = $state(0)
+  let railFillPct = $state(0)
 
   const RAIL_THROTTLE_MS = 100
   let railTimer: ReturnType<typeof setTimeout> | null = null
@@ -1155,11 +1162,41 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         ticks.push({
           id: m.id,
           top: Math.min(99, Math.max(1, (offsetTop / total) * 100)),
-          preview: (m.content || '').slice(0, 80),
+          preview: (m.content || '').slice(0, 160),
         })
       }
     }
     railTicks = ticks
+    syncRailScroll()
+  }
+
+  // Recompute active node + fill percentage from the scroll container. Called on
+  // every scroll (rAF-throttled) and whenever the tick set changes.
+  function syncRailScroll() {
+    const sc = messagesEl
+    if (!sc || railTicks.length === 0) return
+    const max = sc.scrollHeight - sc.clientHeight
+    const fill = max > 0 ? Math.min(100, Math.max(0, (sc.scrollTop / max) * 100)) : 0
+    const scTop = sc.getBoundingClientRect().top
+    const line = sc.clientHeight * 0.32
+    let active = 0
+    railTicks.forEach((tk, i) => {
+      const el = document.getElementById(`msg-${tk.id}`)
+      if (!el) return
+      if (el.getBoundingClientRect().top - scTop <= line) active = i
+    })
+    if (max - sc.scrollTop < 4) active = railTicks.length - 1
+    if (fill !== railFillPct) railFillPct = fill
+    if (active !== railActive) railActive = active
+  }
+
+  let railScrollRaf = 0
+  function onRailScroll() {
+    if (railScrollRaf) return
+    railScrollRaf = requestAnimationFrame(() => {
+      railScrollRaf = 0
+      syncRailScroll()
+    })
   }
 
   function scheduleRailRecompute() {
@@ -1189,8 +1226,25 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     return () => ro.disconnect()
   })
 
+  $effect(() => {
+    const sc = messagesEl
+    if (!sc) return
+    sc.addEventListener('scroll', onRailScroll, { passive: true })
+    syncRailScroll()
+    return () => sc.removeEventListener('scroll', onRailScroll)
+  })
+
+  // Smooth-scroll the conversation so the target message lands ~90px below the
+  // top of the scroll area. Deliberately not scrollIntoView (per the timeline
+  // design): scrollIntoView can nudge ancestor scrollers and gives no offset
+  // control. Honors prefers-reduced-motion.
   function jumpToMessage(id: string) {
-    document.getElementById(`msg-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const sc = messagesEl
+    const el = document.getElementById(`msg-${id}`)
+    if (!sc || !el) return
+    const target = Math.max(0, el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop - 90)
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    sc.scrollTo({ top: target, behavior: reduce ? 'auto' : 'smooth' })
   }
 
   // ── markdown copy buttons setup ────────────────────────────────────────────
@@ -1894,15 +1948,25 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
       {#if railTicks.length > 0}
         <div class="msg-rail">
-          {#each railTicks as tick (tick.id)}
+          <div class="msg-rail-track"></div>
+          <div class="msg-rail-fill" style="height:calc((100% - 8px) * {railFillPct / 100})"></div>
+          {#each railTicks as tick, i (tick.id)}
             <button
               type="button"
-              class="msg-rail-tick"
+              class="msg-rail-node"
+              class:passed={i < railActive}
+              class:active={i === railActive}
               style="top:{tick.top}%"
               onclick={() => jumpToMessage(tick.id)}
-              title={tick.preview}
+              aria-current={i === railActive ? 'true' : undefined}
               aria-label={tick.preview ? `${$t('chat.jump_to_message')}: ${tick.preview}` : $t('chat.jump_to_message')}
-            ></button>
+            >
+              <span class="msg-rail-dot"></span>
+              <span class="msg-rail-tip" role="tooltip">
+                <span class="msg-rail-tip-meta">{$t('chat.nth_user_message').replace('{n}', String(i + 1))}</span>
+                <span class="msg-rail-tip-text">{tick.preview}</span>
+              </span>
+            </button>
           {/each}
         </div>
       {/if}
@@ -2082,34 +2146,91 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   -webkit-overflow-scrolling: touch;
 }
 
-/* ── User-message rail ───────────────────────────────────────────────────── */
-/* A timeline of ticks (one per user message) sitting in the gutter to the
-   right of the centered message column, positioned to match each message's
-   real offset in the scrollable content. Click to jump. */
+/* ── User-message timeline rail ──────────────────────────────────────────── */
+/* A floating vertical timeline in the right-hand gutter: one node per user
+   message at its real rendered offset, a grey track behind them, and a blue
+   progress line that fills to the current scroll position. Hovering a node
+   reveals a dark preview card; clicking smooth-scrolls to that message. */
 .msg-rail {
   /* Float just outside the centered message column's right edge, with a
      comfortable gap so it reads as a companion timeline rather than either
      crowding the bubbles or drifting to the far pane edge on wide windows.
      Falls back to a fixed offset on narrow panes, staying clear of the
      native scrollbar track (app.css sets it to 8px). */
-  position: absolute; top: 8px; bottom: 8px; width: 8px;
+  position: absolute; top: 8px; bottom: 8px; width: 20px;
   right: max(22px, calc((100% - var(--chat-content-max-width)) / 2 - 44px));
-  pointer-events: none; z-index: 5;
+  pointer-events: none; z-index: 8;
 }
-.msg-rail::before {
-  content: ''; position: absolute; top: 0; bottom: 0; left: 50%;
-  width: 2px; margin-left: -1px; border-radius: 999px;
-  background: var(--border-secondary);
+/* Background track (full height) + blue progress fill (top → scroll position). */
+.msg-rail-track, .msg-rail-fill {
+  position: absolute; left: 50%; top: 4px; width: 2px;
+  transform: translateX(-50%); border-radius: 9999px;
 }
-.msg-rail-tick {
-  position: absolute; left: 50%; width: 8px; height: 8px; border-radius: 999px;
-  background: var(--text-tertiary); border: none; padding: 0; margin: 0;
-  cursor: pointer; pointer-events: auto; transform: translate(-50%, -50%);
-  transition: background 0.15s ease, transform 0.15s ease;
+.msg-rail-track { bottom: 4px; background: var(--border); }
+.msg-rail-fill {
+  background: linear-gradient(var(--blue-5), var(--blue-6));
+  transition: height 0.14s linear;
 }
-.msg-rail-tick:hover, .msg-rail-tick:focus-visible {
-  background: var(--blue-6); transform: translate(-50%, -50%) scale(1.4);
-  outline: none;
+/* Node = generous 20×8 hit area wrapping a small dot, placed at the message's
+   real offset in the scroll content. */
+.msg-rail-node {
+  position: absolute; left: 50%; width: 20px; height: 8px;
+  padding: 0; margin: 0; border: none; background: none;
+  display: flex; align-items: center; justify-content: center;
+  transform: translate(-50%, -50%);
+  cursor: pointer; pointer-events: auto; z-index: 2;
+}
+.msg-rail-node:focus-visible { outline: none; }
+.msg-rail-dot {
+  width: 10px; height: 10px; border-radius: 9999px;
+  background: var(--bg-container); border: 2px solid var(--border);
+  transition: width 0.14s ease, height 0.14s ease, background 0.14s ease,
+    border-color 0.14s ease, box-shadow 0.14s ease;
+}
+/* Passed + active nodes are filled blue; the active one is larger with a ring. */
+.msg-rail-node.passed .msg-rail-dot,
+.msg-rail-node.active .msg-rail-dot {
+  background: var(--blue-6); border-color: var(--blue-6);
+}
+.msg-rail-node.active .msg-rail-dot {
+  width: 12px; height: 12px; box-shadow: 0 0 0 4px rgba(22,119,255,0.16);
+}
+/* Hover/focus preview card, to the left of the rail, with a caret pointing back
+   at the dot. --terminal-bg is the DS's intentionally-dark surface in both
+   themes, matching the design's #1F1F1F tooltip. */
+.msg-rail-tip {
+  position: absolute; right: calc(100% + 14px); top: 50%;
+  transform: translateY(-50%);
+  display: none; flex-direction: column;
+  background: var(--terminal-bg); color: var(--terminal-text);
+  border-radius: 10px; padding: 9px 13px;
+  max-width: 260px; width: max-content;
+  box-shadow: 0 8px 24px rgba(15,23,42,0.18);
+  pointer-events: none; z-index: 20;
+  animation: tlfade 0.14s ease;
+}
+.msg-rail-node:hover .msg-rail-tip,
+.msg-rail-node:focus-visible .msg-rail-tip { display: flex; }
+.msg-rail-tip::after {
+  content: ''; position: absolute; left: 100%; top: 50%;
+  transform: translateY(-50%);
+  border: 6px solid transparent; border-left-color: var(--terminal-bg);
+}
+.msg-rail-tip-meta {
+  font-size: 11px; color: rgba(255,255,255,0.5); margin-bottom: 3px;
+}
+.msg-rail-tip-text {
+  font-size: 12.5px; line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical;
+  overflow: hidden; word-break: break-word;
+}
+@keyframes tlfade {
+  from { opacity: 0; transform: translateY(-50%) translateX(6px); }
+  to { opacity: 1; transform: translateY(-50%) translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg-rail-fill, .msg-rail-dot { transition: none; }
+  .msg-rail-tip { animation: none; }
 }
 .messages-inner {
   max-width: var(--chat-content-max-width); margin: 0 auto;
