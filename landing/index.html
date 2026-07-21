@@ -118,6 +118,11 @@
     .step h3{font-size:16px;font-weight:600;}
     .step p{margin:0 0 14px;font-size:14px;color:var(--t65);}
     .step code{display:block;font-family:var(--mono);font-size:12.5px;background:#F5F5F5;border-radius:6px;padding:10px 12px;color:var(--t88);white-space:pre;overflow-x:auto;}
+    .step .path{display:flex;align-items:flex-start;gap:8px;}
+    .step .path+.path{margin-top:10px;}
+    .step .path .tag{flex:none;margin-top:3px;font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--blue);background:var(--blue-soft);border-radius:4px;padding:1px 6px;}
+    .step .path .txt{font-size:13.5px;line-height:1.6;color:var(--t65);}
+    .step .path code{flex:1;min-width:0;}
 
     /* arms */
     .arms{background:var(--canvas);border-top:1px solid var(--line);border-bottom:1px solid var(--line);}
@@ -302,17 +307,20 @@
         <div class="step reveal">
           <div class="step-head"><span class="num">1</span><h3 data-en="Install" data-zh="安装"></h3></div>
           <p data-en="Grab the desktop app for macOS, Windows, or Linux — or install just the CLI binary." data-zh="下载 macOS / Windows / Linux 桌面应用 —— 或只装命令行二进制。"></p>
-          <code>curl -fsSL octo-agent.dev/install.sh | sh</code>
+          <div class="path"><span class="tag" data-en="Desktop" data-zh="桌面版"></span><span class="txt" data-en="Download the installer for your OS and open it." data-zh="下载对应系统的安装包，打开即用。"></span></div>
+          <div class="path"><span class="tag">CLI</span><code>curl -fsSL octo-agent.dev/install.sh | sh</code></div>
         </div>
         <div class="step reveal">
           <div class="step-head"><span class="num">2</span><h3 data-en="Connect a model" data-zh="连接模型"></h3></div>
           <p data-en="Point Octo at any Anthropic- or OpenAI-compatible endpoint — cloud or fully local." data-zh="把 Octo 指向任意 Anthropic 或 OpenAI 兼容端点 —— 云端或完全本地。"></p>
-          <code data-en="octo config   # interactive setup" data-zh="octo config   # 交互式配置"></code>
+          <div class="path"><span class="tag" data-en="Desktop" data-zh="桌面版"></span><span class="txt" data-en="First launch opens a setup wizard — pick a provider, paste an API key, test the connection." data-zh="首次启动自动进入设置向导 —— 选择供应商、填入 API Key、测试连接。"></span></div>
+          <div class="path"><span class="tag">CLI</span><code data-en="octo config   # interactive setup" data-zh="octo config   # 交互式配置"></code></div>
         </div>
         <div class="step reveal">
           <div class="step-head"><span class="num">3</span><h3 data-en="Ship" data-zh="交付"></h3></div>
           <p data-en="One prompt, full tool loop — in the TUI, headless in CI, or from any of the eight arms." data-zh="一句 prompt，完整工具循环 —— 在 TUI、CI 无界面运行，或从八条腕中任意一条发起。"></p>
-          <code>octo "Add a --json flag to config show"</code>
+          <div class="path"><span class="tag" data-en="Desktop" data-zh="桌面版"></span><span class="txt" data-en="Type your first prompt in the workbench — sessions, skills, and MCP all in one window." data-zh="在 Workbench 里发出第一句 prompt —— 会话、skills、MCP 都在同一个窗口。"></span></div>
+          <div class="path"><span class="tag">CLI</span><code>octo "Add a --json flag to config show"</code></div>
         </div>
       </div>
     </div>
