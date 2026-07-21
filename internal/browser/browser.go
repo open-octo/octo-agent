@@ -424,10 +424,16 @@ func (p *Page) Navigate(ctx context.Context, url string) error {
 		return ctx.Err()
 	case <-events:
 		return nil
-	case <-time.After(30 * time.Second):
+	case <-time.After(navigateLoadTimeout):
 		return fmt.Errorf("navigate %s: timed out waiting for load", url)
 	}
 }
+
+// navigateLoadTimeout caps how long Navigate waits for the load event. A var,
+// not a const, so the package tests can raise it: starved CI runners (2-core
+// windows-latest especially) intermittently need more than 30s for a cold
+// Chrome to finish its first navigation even to a local fixture page.
+var navigateLoadTimeout = 30 * time.Second
 
 // Eval runs a JS expression in the page and unmarshals its return value into
 // out (pass nil to ignore the value). The expression may be a Promise.

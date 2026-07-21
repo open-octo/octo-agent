@@ -14,7 +14,7 @@ import (
 // selector anchored at its nearest id-bearing ancestor, not a free nth-of-type
 // chain from <body> — shorter and far more stable across layout changes.
 func TestRecorderAnchorsSelectorAtNearestID(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>rec</title>
@@ -58,7 +58,7 @@ func TestRecorderAnchorsSelectorAtNearestID(t *testing.T) {
 // driven via trusted input (standing in for a human), and the recorder must
 // capture both with usable selectors and values.
 func TestRecorderCapturesActions(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>rec</title>
@@ -147,7 +147,7 @@ func TestRecorderCapturesActions(t *testing.T) {
 // and keeps going there is captured end to end — previously everything after the
 // tab switch was silently lost (the attach watcher only instrumented iframes).
 func TestRecorderCapturesNewTab(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/b", func(w http.ResponseWriter, _ *http.Request) {
@@ -214,7 +214,7 @@ func TestRecorderCapturesNewTab(t *testing.T) {
 // click must still be captured. Regression test for the race where early
 // new-tab clicks were silently lost.
 func TestRecorderCapturesNewTab_ClickBeforeInstrument(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/b", func(w http.ResponseWriter, _ *http.Request) {
@@ -289,7 +289,7 @@ func TestRecorderCapturesNewTab_ClickBeforeInstrument(t *testing.T) {
 // auto-inserted "network" wait event — the page is loading data and the next
 // step must not race ahead of it.
 func TestAutoWaitNetwork(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/data", func(w http.ResponseWriter, _ *http.Request) {
@@ -364,7 +364,7 @@ document.getElementById('load').addEventListener('click', function(){
 // auto-inserted "element" wait event for that modal is emitted — the next step
 // that interacts with the modal must wait for it to be present.
 func TestAutoWaitElement(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>modal</title>
@@ -445,7 +445,7 @@ func TestCompileRecordingWaitEvents(t *testing.T) {
 // anchors instead of a bare :nth-of-type chain — so the recording survives
 // layout shifts that a purely positional selector would not.
 func TestSelectorSemanticAnchor(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>cal</title>
@@ -503,7 +503,7 @@ func TestSelectorSemanticAnchor(t *testing.T) {
 // current value (change never fires without a blur); Enter in a textarea is a
 // newline, not a submit, and must not be captured.
 func TestRecorderCapturesEnter(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>enter</title>
@@ -564,7 +564,7 @@ func TestRecorderCapturesEnter(t *testing.T) {
 // as navigate events (they never fire Page.frameNavigated), while SPA routing
 // inside a subframe is ignored — it isn't the page moving.
 func TestRecorderCapturesSPANavigation(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/frame", func(w http.ResponseWriter, _ *http.Request) {
@@ -630,7 +630,7 @@ func TestRecorderCapturesSPANavigation(t *testing.T) {
 // upgraded to a "download" event with the suggested filename — so the compiled
 // recording emits a download step that replay uses to capture the file.
 func TestAutoDownloadDetection(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/file.xlsx", func(w http.ResponseWriter, _ *http.Request) {
@@ -661,9 +661,12 @@ func TestAutoDownloadDetection(t *testing.T) {
 	if err := page.Click(ctx, "#dl"); err != nil {
 		t.Fatalf("click: %v", err)
 	}
-	// Wait for the click to be upgraded to a download event.
+	// Wait for the click to be upgraded to a download event. The ceiling
+	// matches testWaitTimeout: downloadWillBegin delivery on a starved runner
+	// can lag the click by many seconds (5s of polling flaked on windows-latest).
 	found := false
-	for i := 0; i < 50; i++ {
+	deadline := time.Now().Add(testWaitTimeout)
+	for time.Now().Before(deadline) {
 		time.Sleep(100 * time.Millisecond)
 		for _, e := range rec.Events() {
 			if e.Type == "download" && e.DownloadName == "report.xlsx" {
@@ -685,7 +688,7 @@ func TestAutoDownloadDetection(t *testing.T) {
 // Stop() should remove it so repeated record/stop cycles don't leak temp dirs
 // on disk.
 func TestRecorderStopCleansUpDownloadDir(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>dl-dir</title><button id="b">B</button>`))
@@ -769,7 +772,7 @@ func TestCompileRecordingDownloadEvent(t *testing.T) {
 // fingerprint — alternate selectors (built with a different strategy than the
 // primary), the role attribute, and the nearest label-like neighbor text.
 func TestRecorderCapturesAnchorFacts(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>anchors</title>

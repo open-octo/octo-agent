@@ -57,6 +57,14 @@ type Recorder struct {
 	lastClickIdx int
 	lastClickAt  time.Time
 
+	// pendingDLName / pendingDLAt park a downloadWillBegin that arrived before
+	// the click that triggered it: the download event travels straight from the
+	// browser process while the click rides the renderer→binding→CDP path, so
+	// on a loaded machine the download can win the race. The next click within
+	// the attribution window claims it.
+	pendingDLName string
+	pendingDLAt   time.Time
+
 	// dlDir is the temp directory downloads land in during recording (set by
 	// watchDownloads). Removed in Stop() — recording-time downloads are only
 	// used to detect the event, not kept.
@@ -99,35 +107,47 @@ func (r *Recorder) addEvent(re RecordedEvent, frameSel string) {
 	}
 	r.mu.Lock()
 	if re.Type == "click" {
-		r.lastClickIdx = len(r.events)
-		r.lastClickAt = time.Now()
+		if r.pendingDLName != "" && time.Since(r.pendingDLAt) <= downloadAttributionWindow {
+			// A downloadWillBegin already arrived for this click (it beat the
+			// click's binding delivery) — record the click as the download.
+			re.Type = "download"
+			re.DownloadName = r.pendingDLName
+			r.pendingDLName = ""
+		} else {
+			r.lastClickIdx = len(r.events)
+			r.lastClickAt = time.Now()
+		}
 	}
 	r.events = append(r.events, re)
 	r.mu.Unlock()
 }
 
+// downloadAttributionWindow is how far apart a click and its
+// Browser.downloadWillBegin may arrive and still be treated as one action.
+// A var, not a const, so the package tests can widen it for starved CI
+// runners where event delivery lags by many seconds.
+var downloadAttributionWindow = 5 * time.Second
+
 // upgradeLastClickToDownload upgrades the most recent click event to a "download"
 // event with the given filename — called when Browser.downloadWillBegin fires
-// within a short window after the click that triggered it. No-op if the click is
-// too old or already consumed.
+// within a short window after the click that triggered it. When no eligible
+// click has been recorded yet (the download event won the race against the
+// click's binding delivery), the download is parked for addEvent to claim.
 func (r *Recorder) upgradeLastClickToDownload(filename string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	idx := r.lastClickIdx
-	if idx < 0 || idx >= len(r.events) {
+	if idx >= 0 && idx < len(r.events) && r.events[idx].Type == "click" &&
+		time.Since(r.lastClickAt) <= downloadAttributionWindow {
+		ev := r.events[idx]
+		ev.Type = "download"
+		ev.DownloadName = filename
+		r.events[idx] = ev
+		r.lastClickIdx = -1 // consumed
 		return
 	}
-	if time.Since(r.lastClickAt) > 5*time.Second {
-		return
-	}
-	ev := r.events[idx]
-	if ev.Type != "click" {
-		return
-	}
-	ev.Type = "download"
-	ev.DownloadName = filename
-	r.events[idx] = ev
-	r.lastClickIdx = -1 // consumed
+	r.pendingDLName = filename
+	r.pendingDLAt = time.Now()
 }
 
 // watchDownloads subscribes to Browser.downloadWillBegin globally (the browser-

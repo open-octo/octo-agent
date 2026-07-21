@@ -15,7 +15,7 @@ import (
 // digest is the healer's candidate list, so a wrong filter both hides healable
 // targets and could offer unclickable ones.
 func TestInteractiveDigestVisibility(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprint(w, `<!doctype html><title>digest</title>
@@ -25,10 +25,7 @@ func TestInteractiveDigestVisibility(t *testing.T) {
 <button id="invis" style="visibility:hidden">Invis</button>`)
 	}))
 	defer srv.Close()
-	b, err := Launch(ctx, LaunchOptions{Headless: true})
-	if err != nil {
-		t.Skipf("chrome unavailable: %v", err)
-	}
+	b := newBrowser(t, ctx)
 	defer b.Close()
 	page, err := b.NewPage(ctx, srv.URL)
 	if err != nil {
@@ -36,7 +33,7 @@ func TestInteractiveDigestVisibility(t *testing.T) {
 	}
 	// Wait for the document to parse before digesting: NewPage can resolve ahead
 	// of the renderer on slow runners (Windows CI returned an empty digest).
-	if err := page.WaitFor(ctx, "#fixed", 10*time.Second); err != nil {
+	if err := page.WaitFor(ctx, "#fixed", testWaitTimeout); err != nil {
 		t.Fatalf("wait for fixture: %v", err)
 	}
 	digest, err := InteractiveDigest(ctx, page, "", 0)

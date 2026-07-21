@@ -83,5 +83,10 @@ jobs:
       # catches platform-specific failures (path handling, process spawning, the
       # GOOS-guarded cases). The race pass on Windows was the CI bottleneck
       # (~150s of a ~220s job) thanks to instrumentation + costly process spawns.
+      # -timeout 20m: the browser package launches a real Chrome per test and
+      # already runs ~6-8min on a starved windows-latest runner; with the
+      # deliberately generous per-test ceilings (see internal/browser
+      # testWaitTimeout) a bad-weather run must fail those tests cleanly
+      # instead of hitting the go-test default 10m panic.
       - name: go test
-        run: go test ${{ matrix.os == 'ubuntu-latest' && '-race' || '' }} ./...
+        run: go test -timeout 20m ${{ matrix.os == 'ubuntu-latest' && '-race' || '' }} ./...

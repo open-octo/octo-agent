@@ -135,7 +135,7 @@ func TestCompileAutoVerifyNavigateHost(t *testing.T) {
 // different host (a stand-in for an SSO/login bounce) fails the auto host verify,
 // instead of replay silently continuing on the wrong page.
 func TestReplayVerifyURLCatchesCrossHostRedirect(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	// The "login" host the redirect lands on.
 	login := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -196,7 +196,7 @@ func TestCompileDedupesRepeatedType(t *testing.T) {
 // URL merely echoes the expected host in a query param must still fail the host
 // verify (exact host match, not a naive href substring).
 func TestReplayVerifyURLIgnoresHostInQueryParam(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	var app *httptest.Server
 	login := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -326,7 +326,7 @@ func TestCompileUploadMerge(t *testing.T) {
 // TestUploadViaChooser drives the chooser-based upload: clicking a button opens
 // a (intercepted) file chooser and the file is set on the underlying input.
 func TestUploadViaChooser(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>up</title>
@@ -517,7 +517,7 @@ func TestRunStepWaitFixedDelay(t *testing.T) {
 // TestWaitForNetworkIdle: a wait{network:true} step blocks until an in-flight
 // fetch the page kicked off completes, then returns — the SPA-settle primitive.
 func TestWaitForNetworkIdle(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/slow", func(w http.ResponseWriter, _ *http.Request) {
@@ -565,7 +565,7 @@ func TestWaitForNetworkIdle(t *testing.T) {
 // the tab it opens (the Zhihu-hot-item failure mode), and ReplayRecording returns
 // that tab as the final page.
 func TestReplayClickFollowsNewTab(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/dest", func(w http.ResponseWriter, _ *http.Request) {
@@ -606,7 +606,7 @@ func TestReplayClickFollowsNewTab(t *testing.T) {
 // points at the WRONG element after a layout change, but the recorded text steers
 // replay to the right one — instead of silently clicking the wrong node.
 func TestReplayTextAnchorRecoversFromDrift(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -650,7 +650,7 @@ func TestReplayTextAnchorRecoversFromDrift(t *testing.T) {
 // hint (its name) re-locates it — so type lands in the right box instead of failing
 // into the healer.
 func TestReplayFieldHintRecoversFromDrift(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -693,7 +693,7 @@ func TestReplayFieldHintRecoversFromDrift(t *testing.T) {
 // until a consent overlay is accepted; replay recovers by clicking the allow-list
 // "Accept" control — no healer wired — then the retry succeeds.
 func TestReplayDismissesOverlayDeterministically(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -736,7 +736,7 @@ func TestReplayDismissesOverlayDeterministically(t *testing.T) {
 // still wrong, the second is correct — and replay keeps consulting it (up to the
 // cap) instead of giving up after one attempt.
 func TestReplayMultiRoundHeal(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>t</title>
@@ -785,7 +785,7 @@ func TestReplayMultiRoundHeal(t *testing.T) {
 // the healer repairs the selector, replay retries and succeeds — and reports the
 // recording as modified so the caller can write the fix back.
 func TestReplayRecordingSelfHeal(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>heal</title>
@@ -910,7 +910,7 @@ func TestRecordingYAMLRoundTripOutputs(t *testing.T) {
 // TestReplayRecordingDownloadBindsOutputs: a download step captures the file the
 // trigger produces and binds its path into the recording's declared file[] output.
 func TestReplayRecordingDownloadBindsOutputs(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/file.csv" {
@@ -954,7 +954,7 @@ func TestReplayRecordingDownloadBindsOutputs(t *testing.T) {
 // TestReplayRecordingExtractBindsOutput: an extract step evaluates JS and binds the
 // (unwrapped) string result into a declared output.
 func TestReplayRecordingExtractBindsOutput(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -1031,7 +1031,7 @@ func TestListRecordings(t *testing.T) {
 // first, then passes after a heal, must bind the file exactly once — recoverStep
 // re-runs the whole step, so binding before Verify would double-count the output.
 func TestReplayRecordingDownloadNoDoubleBindOnHeal(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/file.csv" {
@@ -1105,7 +1105,7 @@ func TestSubstJSEscapesValues(t *testing.T) {
 // original value (properly encoded on the wire), proving replay navigates to the
 // intended URL rather than a value-corrupted one.
 func TestReplayNavigateEncodesParams(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	var gotQ, gotURI string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1140,7 +1140,7 @@ func TestReplayNavigateEncodesParams(t *testing.T) {
 // inside a JS string literal evaluates to the exact original value, not a
 // broken (or altered) expression.
 func TestReplayExtractEscapesParams(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>x</title>ok`))
@@ -1210,7 +1210,7 @@ func TestCompileEnterFlow(t *testing.T) {
 // TestReplayKeyEnter: replay types the value, focuses the field with a real
 // click, and presses Enter — the form actually submits.
 func TestReplayKeyEnter(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>k</title>
@@ -1364,7 +1364,7 @@ func TestGenerateRecordingDistillRestoresDroppedSecretParam(t *testing.T) {
 // verify failure's error text must name the placeholder — never carry the
 // resolved value, which would flow into the tool result and the conversation.
 func TestReplayVerifyErrorRedactsSecret(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>v</title><form><input id="pw" type="password"></form>`))
@@ -1644,7 +1644,7 @@ func TestGenerateRecordingBackfillsAnchors(t *testing.T) {
 // fingerprint (visible text + tag + neighbor text) must still land the click on
 // the right one.
 func TestReplayAnchorsSurviveClassDrift(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>drift</title>
@@ -1684,7 +1684,7 @@ func TestReplayAnchorsSurviveClassDrift(t *testing.T) {
 // would click it silently; anchored replay must refuse with a fingerprint error
 // and must not click anything.
 func TestReplayAnchorsRefuseWrongElement(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>wrong</title>
