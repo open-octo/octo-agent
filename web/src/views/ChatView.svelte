@@ -2094,7 +2094,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 }
 .msg-rail-tick {
   position: absolute; right: 0; width: 8px; height: 8px; border-radius: 999px;
-  background: var(--border-secondary); border: none; padding: 0; margin: 0;
+  background: var(--text-tertiary); border: none; padding: 0; margin: 0;
   cursor: pointer; pointer-events: auto; transform: translateY(-50%);
   transition: background 0.15s ease, transform 0.15s ease;
 }
