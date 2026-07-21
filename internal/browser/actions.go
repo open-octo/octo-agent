@@ -93,6 +93,220 @@ func (p *Page) resolveClickTarget(ctx context.Context, frame, elemSel, anchor st
 	}
 }
 
+// anchorCandidate is the DOM facts collected for one candidate element during
+// anchored resolution — everything scoreAnchorCandidate needs to judge how well
+// the element matches the recorded fingerprint. Via records how the candidate
+// was found ("primary" / "alt" selector, or a text/role "scan"), the tie-break
+// order when scores draw.
+type anchorCandidate struct {
+	Sel      string `json:"sel"`      // freshly built selector for this element on the current page
+	Text     string `json:"text"`     // trimmed visible text
+	Role     string `json:"role"`     // role attribute
+	Tag      string `json:"tag"`      // lowercase tag name
+	Neighbor bool   `json:"neighbor"` // recorded neighbor text found next to this element
+	Via      string `json:"via"`      // primary | alt | scan
+}
+
+// scoreAnchorCandidate scores how well a candidate element matches the recorded
+// fingerprint: exact visible-text match 4 (contains 2), neighbor text found 2,
+// role match 2, tag match 1. Pure function — the DOM facts arrive pre-extracted.
+func scoreAnchorCandidate(c anchorCandidate, label string, a *Anchors) int {
+	score := 0
+	if l := strings.TrimSpace(label); l != "" {
+		t := strings.TrimSpace(c.Text)
+		if t == l {
+			score += 4
+		} else if strings.Contains(t, l) {
+			score += 2
+		}
+	}
+	if a.NeighborText != "" && c.Neighbor {
+		score += 2
+	}
+	if a.Role != "" && c.Role == a.Role {
+		score += 2
+	}
+	if a.Tag != "" && strings.EqualFold(c.Tag, a.Tag) {
+		score++
+	}
+	return score
+}
+
+// anchorMaxScore is the highest score this fingerprint can award — the sum of
+// the weights for the signals it actually carries. The acceptance threshold is
+// relative to it, so a sparse fingerprint isn't held to a rich one's bar.
+func anchorMaxScore(label string, a *Anchors) int {
+	max := 0
+	if strings.TrimSpace(label) != "" {
+		max += 4
+	}
+	if a.NeighborText != "" {
+		max += 2
+	}
+	if a.Role != "" {
+		max += 2
+	}
+	if a.Tag != "" {
+		max++
+	}
+	return max
+}
+
+// pickAnchorCandidate selects the candidate that matches the fingerprint, or
+// reports that none does. Acceptance requires the best score to EXCEED half the
+// fingerprint's achievable maximum — a candidate that only matches the weak
+// signals (tag alone) never wins on position. Score ties break toward the
+// candidate found via the primary selector, then via an alternate selector;
+// a tie between scan-found elements is ambiguity and fails, because clicking
+// either would be a guess.
+func pickAnchorCandidate(cands []anchorCandidate, label string, a *Anchors) (string, bool) {
+	max := anchorMaxScore(label, a)
+	if max == 0 {
+		return "", false
+	}
+	best := -1
+	var bestC []anchorCandidate
+	for _, c := range cands {
+		s := scoreAnchorCandidate(c, label, a)
+		switch {
+		case s > best:
+			best, bestC = s, []anchorCandidate{c}
+		case s == best:
+			bestC = append(bestC, c)
+		}
+	}
+	if best*2 <= max {
+		return "", false
+	}
+	if len(bestC) == 1 {
+		return bestC[0].Sel, true
+	}
+	for _, via := range []string{"primary", "alt"} {
+		var hit []anchorCandidate
+		for _, c := range bestC {
+			if c.Via == via {
+				hit = append(hit, c)
+			}
+		}
+		if len(hit) == 1 {
+			return hit[0].Sel, true
+		}
+		if len(hit) > 1 {
+			return "", false
+		}
+	}
+	return "", false
+}
+
+// anchorSelBuilderJS builds a fresh selector for an element on the CURRENT page
+// (id → attribute → id-anchored positional path). Replay-side twin of the
+// capture script's sel(): the capture script isn't installed during replay, so
+// the resolver carries its own copy.
+const anchorSelBuilderJS = `function __selOf(el){
+  if(!el||el.nodeType!==1) return '';
+  if(el.id) return '#'+CSS.escape(el.id);
+  for(var i=0;i<4;i++){var a=['data-testid','data-test','name','aria-label'][i];var v=el.getAttribute&&el.getAttribute(a);if(v)return el.tagName.toLowerCase()+'['+a+'="'+CSS.escape(v)+'"]';}
+  var parts=[],node=el,depth=0;
+  while(node&&node.nodeType===1&&node.tagName!=='BODY'&&depth<6){
+    if(node.id){parts.unshift('#'+CSS.escape(node.id));return parts.join(' > ');}
+    var part=node.tagName.toLowerCase();var p=node.parentElement;
+    if(p){var same=[].slice.call(p.children).filter(function(c){return c.tagName===node.tagName;});if(same.length>1)part+=':nth-of-type('+(same.indexOf(node)+1)+')';}
+    parts.unshift(part);node=p;depth++;
+  }
+  return parts.join(' > ');
+}`
+
+// resolveAnchoredTarget re-identifies a step's target element by scoring
+// candidates against the recorded fingerprint (step.Anchors + step.Label).
+// Candidates come from the primary selector, the alternate selectors, and
+// text/role scans of the live document. Unlike resolveClickTarget, a fingerprint
+// that matches nothing is an explicit error — replay must NOT fall back to
+// blindly acting on the positional selector, because a drifted positional
+// selector can match the WRONG element without failing (the silent-wrong-click
+// this resolver exists to prevent). The error reaches the healer, which gets the
+// fingerprint as constraint material.
+func (p *Page) resolveAnchoredTarget(ctx context.Context, frame, primary, label string, a *Anchors, timeout time.Duration) (string, error) {
+	if frame != "" {
+		if cp, ok := p.oopifPage(ctx, frame); ok {
+			sel, err := cp.resolveAnchoredTarget(ctx, "", primary, label, a, timeout)
+			if err != nil {
+				return "", err
+			}
+			return frame + frameDelim + sel, nil
+		}
+	}
+	doc := "document"
+	if frame != "" {
+		doc = fmt.Sprintf("(document.querySelector(%s)||{}).contentDocument", jsString(frame))
+	}
+	altsJSON, _ := json.Marshal(a.Selectors)
+	collect := fmt.Sprintf(`(()=>{
+	  %s
+	  var d=%s; if(!d) return [];
+	  var nb=%s, tag=%s, role=%s, label=%s;
+	  function nbHit(el){
+	    if(!nb) return false;
+	    try{
+	      var lb=el.closest&&el.closest('label');
+	      if(lb&&(lb.textContent||'').indexOf(nb)>=0) return true;
+	      var node=el;
+	      for(var up=0;node&&node!==d.body&&up<3;up++){
+	        var sib=node.previousElementSibling,k=0;
+	        while(sib&&k<2){
+	          if(!/^(SCRIPT|STYLE|TEMPLATE)$/.test(sib.tagName)&&((sib.textContent||'').trim()).indexOf(nb)>=0) return true;
+	          sib=sib.previousElementSibling;k++;
+	        }
+	        node=node.parentElement;
+	      }
+	    }catch(_){}
+	    return false;
+	  }
+	  var seen=[],out=[];
+	  function add(el,via){
+	    if(!el||el.nodeType!==1||seen.indexOf(el)>=0) return;
+	    seen.push(el);
+	    out.push({sel:__selOf(el),text:(el.textContent||'').trim().slice(0,80),role:(el.getAttribute&&el.getAttribute('role'))||'',tag:el.tagName.toLowerCase(),neighbor:nbHit(el),via:via});
+	  }
+	  try{ add(d.querySelector(%s),'primary'); }catch(_){}
+	  var alts=(%s)||[];
+	  for(var i=0;i<alts.length;i++){ try{ add(d.querySelector(alts[i]),'alt'); }catch(_){} }
+	  if(label){
+	    try{
+	      var els=d.querySelectorAll(tag||'*'),n=0;
+	      for(var j=0;j<els.length&&n<8;j++){ var t=(els[j].textContent||'').trim(); if(t===label||t.indexOf(label)>=0){ add(els[j],'scan'); n++; } }
+	    }catch(_){}
+	  }
+	  if(role){
+	    try{
+	      var rs=d.querySelectorAll((tag||'')+'[role=\"'+role+'\"]');
+	      for(var k2=0;k2<rs.length&&k2<8;k2++){ add(rs[k2],'scan'); }
+	    }catch(_){}
+	  }
+	  return out;
+	})()`, anchorSelBuilderJS, doc, jsString(a.NeighborText), jsString(strings.ToLower(a.Tag)), jsString(a.Role), jsString(strings.TrimSpace(label)), jsString(primary), string(altsJSON))
+
+	deadline := time.Now().Add(timeout)
+	for {
+		var cands []anchorCandidate
+		if err := p.Eval(ctx, collect, &cands); err == nil {
+			if sel, ok := pickAnchorCandidate(cands, label, a); ok && sel != "" {
+				if frame != "" {
+					return frame + frameDelim + sel, nil
+				}
+				return sel, nil
+			}
+		}
+		if ctx.Err() != nil || !time.Now().Before(deadline) {
+			return "", fmt.Errorf("no element matches the recorded fingerprint (label=%q, role=%q, tag=%q, neighbor=%q) — the page changed or the target is ambiguous", label, a.Role, a.Tag, a.NeighborText)
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
+}
+
 // DismissOverlay makes one deterministic attempt to clear a blocking overlay —
 // a cookie/consent banner or a modal whose backdrop intercepts clicks, the most
 // common non-selector reason a replay step suddenly fails. It clicks the first

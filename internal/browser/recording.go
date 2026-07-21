@@ -64,12 +64,30 @@ type Step struct {
 	// when the positional Selector drifts, replay re-locates the field by Hint
 	// before giving up to the healer — the field-input analogue of Label steering
 	// a click by visible text.
-	Hint      string  `yaml:"hint,omitempty"`
-	Bind      string  `yaml:"bind,omitempty"`       // download/extract: write the produced value into this named Output
-	JS        string  `yaml:"js,omitempty"`         // extract: expression whose value is bound
-	Network   bool    `yaml:"network,omitempty"`    // wait: settle for network (fetch/XHR) idle instead of a fixed delay
-	TimeoutMS int     `yaml:"timeout_ms,omitempty"` // wait: fixed delay (ms) when no selector; also caps the network-idle settle
-	Verify    *Verify `yaml:"verify,omitempty"`
+	Hint      string   `yaml:"hint,omitempty"`
+	Bind      string   `yaml:"bind,omitempty"`       // download/extract: write the produced value into this named Output
+	JS        string   `yaml:"js,omitempty"`         // extract: expression whose value is bound
+	Network   bool     `yaml:"network,omitempty"`    // wait: settle for network (fetch/XHR) idle instead of a fixed delay
+	TimeoutMS int      `yaml:"timeout_ms,omitempty"` // wait: fixed delay (ms) when no selector; also caps the network-idle settle
+	Verify    *Verify  `yaml:"verify,omitempty"`
+	Anchors   *Anchors `yaml:"anchors,omitempty"` // element fingerprint for scored re-identification (nil = legacy resolution)
+}
+
+// Anchors is a step target's fingerprint: redundant identification signals
+// captured at record time so replay can re-identify the element by scoring
+// (resolveAnchoredTarget) instead of trusting one selector. Selectors are
+// alternates built with different strategies than Step.Selector; Role/Tag are
+// the element's role attribute and tag name; NeighborText is the nearest stable
+// label-like text next to it. The step's visible text lives in Step.Label. A
+// nil Anchors keeps the legacy resolution paths — old YAML replays unchanged.
+//
+// A pointer field keeps Step comparable (recoverStep relies on *step == before);
+// the healer never mutates Anchors, so pointer identity is the right semantics.
+type Anchors struct {
+	Selectors    []string `yaml:"selectors,omitempty"`
+	Role         string   `yaml:"role,omitempty"`
+	Tag          string   `yaml:"tag,omitempty"`
+	NeighborText string   `yaml:"neighbor_text,omitempty"`
 }
 
 // Verify is an optional post-step assertion. Exists waits for a selector; Text
@@ -200,7 +218,7 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 			// Emit a download step that replay uses to capture the file. Bind the
 			// captured file path to an auto-declared output so downstream steps or
 			// the workflow can use it.
-			st := Step{Action: "download", Frame: e.Frame, Selector: e.Selector, Label: e.Text, Hint: e.Field}
+			st := Step{Action: "download", Frame: e.Frame, Selector: e.Selector, Label: e.Text, Hint: e.Field, Anchors: eventAnchors(e)}
 			outName := addDownloadOutput(e.DownloadName)
 			st.Bind = outName
 			s.Steps = append(s.Steps, st)
@@ -209,7 +227,7 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 		if e.Selector == "" {
 			continue
 		}
-		st := Step{Frame: e.Frame, Selector: e.Selector, Label: e.Text, Hint: e.Field}
+		st := Step{Frame: e.Frame, Selector: e.Selector, Label: e.Text, Hint: e.Field, Anchors: eventAnchors(e)}
 		switch {
 		case e.Type == "click":
 			st.Action = "click"
@@ -250,7 +268,7 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 					desc = "secret value (not stored; provide at replay)"
 				}
 				pn := addParam(hint, e.Value, desc, e.Secret)
-				s.Steps = append(s.Steps, Step{Action: "type", Frame: e.Frame, Selector: e.Selector, Label: e.Text, Hint: hint, Value: "{{" + pn + "}}"})
+				s.Steps = append(s.Steps, Step{Action: "type", Frame: e.Frame, Selector: e.Selector, Label: e.Text, Hint: hint, Value: "{{" + pn + "}}", Anchors: eventAnchors(e)})
 			}
 		default:
 			continue
@@ -259,6 +277,21 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 	}
 	s.Steps = dropConsecutiveDupeSteps(s.Steps)
 	return s
+}
+
+// eventAnchors builds a step's Anchors from a captured event's fingerprint
+// fields, or nil when the event carries none (an event captured by an older
+// recorder, or a synthetic one) — nil keeps the legacy resolution paths.
+func eventAnchors(e RecordedEvent) *Anchors {
+	if len(e.AltSelectors) == 0 && e.Role == "" && e.NeighborText == "" {
+		return nil
+	}
+	return &Anchors{
+		Selectors:    e.AltSelectors,
+		Role:         e.Role,
+		Tag:          strings.ToLower(e.Tag),
+		NeighborText: e.NeighborText,
+	}
 }
 
 // compressEvents applies deterministic Layer-1 rules to drop provably-redundant
@@ -576,6 +609,7 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 		"(4) Preserve step order and all navigate steps. " +
 		"(5) Preserve every download step and its bind (keep every declared output name and its type: file[] unchanged — do not drop or rename outputs). " +
 		"(6) Write description as a short statement of what the workflow does. " +
+		"(7) You may omit each step's anchors block — it is re-attached automatically; never invent one. " +
 		"Output ONLY the recording as YAML (keys: name, description, params, outputs, steps), no prose, no code fences."
 	user := fmt.Sprintf("Baseline (the only valid selectors are those here):\n%s\n\nRaw events in order:\n%s\n\nReturn the cleaned recording YAML.", baseYAML, renderTrace(events))
 
@@ -628,7 +662,30 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 		slog.Warn("browser: recording distill used a selector not in the recording, keeping deterministic baseline steps", "recording", name)
 		return withDescription(base, refined.Description)
 	}
+	backfillAnchors(&refined, base)
 	return refined
+}
+
+// backfillAnchors re-attaches each refined step's Anchors from the baseline step
+// with the same frame+selector. The distiller routinely drops the anchors block
+// when rewriting steps; since selectorsSubset already guarantees every refined
+// selector came from the baseline, the lookup is deterministic — no reliance on
+// the LLM echoing anchors through. Refined steps that already carry anchors are
+// left alone.
+func backfillAnchors(refined *Recording, base Recording) {
+	byTarget := map[string]*Anchors{}
+	for i := range base.Steps {
+		st := &base.Steps[i]
+		if st.Anchors != nil && st.Selector != "" {
+			byTarget[st.Frame+"\x00"+st.Selector] = st.Anchors
+		}
+	}
+	for i := range refined.Steps {
+		st := &refined.Steps[i]
+		if st.Anchors == nil && st.Selector != "" {
+			st.Anchors = byTarget[st.Frame+"\x00"+st.Selector]
+		}
+	}
 }
 
 func withDescription(s Recording, desc string) Recording {
@@ -1182,11 +1239,17 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 			}
 		}
 	case "click":
-		// When the recording captured the element's visible text, resolve by text
-		// (verifying or replacing the drift-prone positional selector) — this is
-		// what makes replay survive layout changes and stops silent wrong-element
-		// clicks. resolveClickTarget already polled for existence.
-		if a := strings.TrimSpace(step.Label); len(a) >= 2 {
+		// Anchored steps resolve by fingerprint scoring (and explicitly fail into
+		// the healer on a mismatch — never a blind positional click). Legacy steps
+		// resolve by visible text when the recording captured it, else wait for the
+		// positional selector.
+		if step.Anchors != nil {
+			t, err := page.resolveAnchoredTarget(ctx, step.Frame, step.Selector, step.Label, step.Anchors, waitTimeout)
+			if err != nil {
+				return page, err
+			}
+			target = t
+		} else if a := strings.TrimSpace(step.Label); len(a) >= 2 {
 			target = page.resolveClickTarget(ctx, step.Frame, step.Selector, a, waitTimeout)
 		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return page, err
@@ -1198,9 +1261,16 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 		}
 		page = np
 	case "type":
-		// Re-locate the field by its accessible-name hint when the positional
-		// selector drifted (the type/select analogue of a text-anchored click).
-		if h := strings.TrimSpace(step.Hint); h != "" {
+		// Anchored steps resolve by fingerprint (a field with no accessible name
+		// still has its neighbor label); legacy steps re-locate by the accessible-
+		// name hint when the positional selector drifted.
+		if step.Anchors != nil {
+			t, err := page.resolveAnchoredTarget(ctx, step.Frame, step.Selector, step.Label, step.Anchors, waitTimeout)
+			if err != nil {
+				return page, err
+			}
+			target = t
+		} else if h := strings.TrimSpace(step.Hint); h != "" {
 			target = page.resolveFieldTarget(ctx, step.Frame, step.Selector, h, waitTimeout)
 		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return page, err
@@ -1226,7 +1296,13 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 		// A recorded Enter in a text input (form submit / autocomplete confirm) —
 		// the only key recorded today. Page.Key dispatches to the focused element,
 		// so focus the field with a real (trusted) click first.
-		if h := strings.TrimSpace(step.Hint); h != "" {
+		if step.Anchors != nil {
+			t, err := page.resolveAnchoredTarget(ctx, step.Frame, step.Selector, step.Label, step.Anchors, waitTimeout)
+			if err != nil {
+				return page, err
+			}
+			target = t
+		} else if h := strings.TrimSpace(step.Hint); h != "" {
 			target = page.resolveFieldTarget(ctx, step.Frame, step.Selector, h, waitTimeout)
 		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return page, err
@@ -1242,7 +1318,13 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 			return page, err
 		}
 	case "select":
-		if h := strings.TrimSpace(step.Hint); h != "" {
+		if step.Anchors != nil {
+			t, err := page.resolveAnchoredTarget(ctx, step.Frame, step.Selector, step.Label, step.Anchors, waitTimeout)
+			if err != nil {
+				return page, err
+			}
+			target = t
+		} else if h := strings.TrimSpace(step.Hint); h != "" {
 			target = page.resolveFieldTarget(ctx, step.Frame, step.Selector, h, waitTimeout)
 		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return page, err
@@ -1254,7 +1336,13 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 		// The upload trigger is a labeled control (e.g. "Choose file"), so prefer
 		// its visible text the same way clicks do, then its field hint, before
 		// falling back to the positional selector (→ healer).
-		if a := strings.TrimSpace(step.Label); len(a) >= 2 {
+		if step.Anchors != nil {
+			t, err := page.resolveAnchoredTarget(ctx, step.Frame, step.Selector, step.Label, step.Anchors, waitTimeout)
+			if err != nil {
+				return page, err
+			}
+			target = t
+		} else if a := strings.TrimSpace(step.Label); len(a) >= 2 {
 			target = page.resolveClickTarget(ctx, step.Frame, step.Selector, a, waitTimeout)
 		} else if h := strings.TrimSpace(step.Hint); h != "" {
 			target = page.resolveFieldTarget(ctx, step.Frame, step.Selector, h, waitTimeout)
@@ -1280,7 +1368,13 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 		if downloadDir == "" {
 			return page, fmt.Errorf("download: no download directory configured")
 		}
-		if a := strings.TrimSpace(step.Label); len(a) >= 2 {
+		if step.Anchors != nil {
+			t, err := page.resolveAnchoredTarget(ctx, step.Frame, step.Selector, step.Label, step.Anchors, waitTimeout)
+			if err != nil {
+				return page, err
+			}
+			target = t
+		} else if a := strings.TrimSpace(step.Label); len(a) >= 2 {
 			target = page.resolveClickTarget(ctx, step.Frame, step.Selector, a, waitTimeout)
 		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return page, err

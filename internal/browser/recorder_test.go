@@ -764,3 +764,61 @@ func TestCompileRecordingDownloadEvent(t *testing.T) {
 		t.Fatalf("bind %q not declared in outputs %+v", dl.Bind, rec.Outputs)
 	}
 }
+
+// TestRecorderCapturesAnchorFacts: a captured click carries the element's
+// fingerprint — alternate selectors (built with a different strategy than the
+// primary), the role attribute, and the nearest label-like neighbor text.
+func TestRecorderCapturesAnchorFacts(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>anchors</title>
+<div><span>操作</span><button role="tab" class="btn-export">导出</button></div>`))
+	}))
+	defer srv.Close()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, ".btn-export", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	rec := NewRecorder(page)
+	if err := rec.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer rec.Stop()
+
+	if err := page.Click(ctx, ".btn-export"); err != nil {
+		t.Fatalf("click: %v", err)
+	}
+	var ev *RecordedEvent
+	for i := 0; i < 50 && ev == nil; i++ {
+		time.Sleep(100 * time.Millisecond)
+		for _, e := range rec.Events() {
+			if e.Type == "click" {
+				ev = &e
+				break
+			}
+		}
+	}
+	if ev == nil {
+		t.Fatalf("no click captured: %+v", rec.Events())
+	}
+	if ev.Role != "tab" {
+		t.Fatalf("role not captured: %+v", ev)
+	}
+	if ev.NeighborText != "操作" {
+		t.Fatalf("neighbor text not captured: %+v", ev)
+	}
+	if len(ev.AltSelectors) == 0 {
+		t.Fatalf("alternate selectors not captured: %+v", ev)
+	}
+	for _, alt := range ev.AltSelectors {
+		if alt == ev.Selector {
+			t.Fatalf("alternate duplicates the primary selector: %+v", ev)
+		}
+	}
+}

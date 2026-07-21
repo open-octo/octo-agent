@@ -17,19 +17,28 @@ import (
 // Type == "wait" is special: it has no target element, only a condition to wait
 // for. WaitKind is "network" (wait for fetch/XHR to settle) or "element" (wait
 // for Selector to appear). TimeoutMS caps how long to wait.
+//
+// AltSelectors, Role and NeighborText are redundant anchors (the element's
+// fingerprint): alternate selectors built with different strategies, the role
+// attribute, and the nearest stable label-like text. Together with Text and Tag
+// they let replay re-identify the element by scoring when the primary Selector
+// drifts — see resolveAnchoredTarget.
 type RecordedEvent struct {
-	Type         string `json:"type"`                    // click | change | upload | navigate | enter | wait | download
-	Selector     string `json:"selector"`                // best-effort CSS selector within its document
-	Frame        string `json:"frame"`                   // iframe selector when the target is in a child frame
-	Tag          string `json:"tag"`                     // target tagName (SELECT/INPUT/…), so replay picks the right action
-	Value        string `json:"value"`                   // input/select value (change events)
-	Text         string `json:"text"`                    // element text, for context
-	Field        string `json:"field"`                   // input's placeholder/name/aria-label/id — names the auto-param
-	Secret       bool   `json:"secret"`                  // password input: don't persist the value as a param default
-	URL          string `json:"url"`                     // document URL at capture time
-	WaitKind     string `json:"wait_kind,omitempty"`     // wait: "network" | "element"
-	TimeoutMS    int    `json:"timeout_ms,omitempty"`    // wait: cap in ms
-	DownloadName string `json:"download_name,omitempty"` // download: suggested filename from CDP
+	Type         string   `json:"type"`                    // click | change | upload | navigate | enter | wait | download
+	Selector     string   `json:"selector"`                // best-effort CSS selector within its document
+	Frame        string   `json:"frame"`                   // iframe selector when the target is in a child frame
+	Tag          string   `json:"tag"`                     // target tagName (SELECT/INPUT/…), so replay picks the right action
+	Value        string   `json:"value"`                   // input/select value (change events)
+	Text         string   `json:"text"`                    // element text, for context
+	Field        string   `json:"field"`                   // input's placeholder/name/aria-label/id — names the auto-param
+	Secret       bool     `json:"secret"`                  // password input: don't persist the value as a param default
+	URL          string   `json:"url"`                     // document URL at capture time
+	WaitKind     string   `json:"wait_kind,omitempty"`     // wait: "network" | "element"
+	TimeoutMS    int      `json:"timeout_ms,omitempty"`    // wait: cap in ms
+	DownloadName string   `json:"download_name,omitempty"` // download: suggested filename from CDP
+	AltSelectors []string `json:"alt_selectors,omitempty"` // alternate selectors (different strategies than Selector)
+	Role         string   `json:"role,omitempty"`          // element's role attribute
+	NeighborText string   `json:"neighbor_text,omitempty"` // nearest stable label-like text (label / preceding sibling)
 }
 
 // Recorder captures a user's actions on a page by injecting a DOM listener that
@@ -265,16 +274,70 @@ const captureScript = `(function(){
     try{ var of=window.fetch; if(of){ window.fetch=function(){ inc(); return of.apply(this,arguments).then(function(r){dec();return r;},function(e){dec();throw e;}); }; } }catch(_){}
     try{ var send=XMLHttpRequest.prototype.send; XMLHttpRequest.prototype.send=function(){ inc(); try{ this.addEventListener('loadend',function(){dec();},{once:true}); }catch(_){ dec(); } return send.apply(this,arguments); }; }catch(_){}
   }
-  function sel(el){
+  function attrSel(el){
     if(!el || el.nodeType!==1) return '';
     if(el.id) return '#'+CSS.escape(el.id);
     for(var i=0;i<4;i++){var a=['data-testid','data-test','name','aria-label'][i];var v=el.getAttribute&&el.getAttribute(a);if(v)return el.tagName.toLowerCase()+'['+a+'=\"'+CSS.escape(v)+'\"]';}
+    return '';
+  }
+  // pathSel walks up from el building a selector path, one part per node via
+  // nodeFn — anchored at the nearest id-bearing ancestor when one exists.
+  function pathSel(el, nodeFn){
     var parts=[], node=el, depth=0;
     while(node && node.nodeType===1 && node.tagName!=='BODY' && depth<6){
       if(node.id){ parts.unshift('#'+CSS.escape(node.id)); return parts.join(' > '); }
-      parts.unshift(pathNode(node)); node=node.parentElement; depth++;
+      parts.unshift(nodeFn(node)); node=node.parentElement; depth++;
     }
     return parts.join(' > ');
+  }
+  function sel(el){
+    if(!el || el.nodeType!==1) return '';
+    var a=attrSel(el); if(a) return a;
+    return pathSel(el, pathNode);
+  }
+  // altSels returns alternate selectors built with strategies DIFFERENT from
+  // the primary sel() — the semantic path when the primary was attribute-based,
+  // plus the plain positional path. Replay tries them as extra candidates and
+  // scores each against the fingerprint, so a page whose classes all changed
+  // (CSS-in-JS hash rollover) can still be re-anchored by position + text.
+  function altSels(el){
+    if(!el || el.nodeType!==1) return [];
+    var primary=sel(el), out=[];
+    var cands=[pathSel(el, pathNode), pathSel(el, posNode)];
+    for(var i=0;i<cands.length;i++){ var c=cands[i]; if(c && c!==primary && out.indexOf(c)<0) out.push(c); }
+    return out.slice(0,2);
+  }
+  // posNode is the purely positional path part: tag:nth-of-type(N), no classes
+  // or roles — survives a class-hash rollover that kills the semantic path.
+  function posNode(node){
+    var tag=node.tagName.toLowerCase();
+    var p=node.parentElement;
+    if(p){var same=[].slice.call(p.children).filter(function(c){return c.tagName===node.tagName;}); if(same.length>1){return tag+':nth-of-type('+(same.indexOf(node)+1)+')';}}
+    return tag;
+  }
+  // neighborText finds the nearest stable label-like text for el: an enclosing
+  // <label>, else a preceding sibling's short text, walking up to 3 ancestors.
+  // It anchors the element to what the USER sees next to it — which survives
+  // wholesale class/structure churn that breaks every selector strategy.
+  function neighborText(el){
+    try{
+      var lb=el.closest && el.closest('label');
+      if(lb){ var t=(lb.textContent||'').trim(); if(t && t.length<=30) return t; }
+      var node=el;
+      // Stop at <body>: walking past it reaches <head>, whose <title> text is
+      // not something the user sees NEXT TO the element — a garbage anchor.
+      for(var up=0; node && node!==document.body && up<3; up++){
+        var sib=node.previousElementSibling, k=0;
+        while(sib && k<2){
+          if(!/^(SCRIPT|STYLE|TEMPLATE)$/.test(sib.tagName)){
+            var t2=(sib.textContent||'').trim(); if(t2 && t2.length<=30) return t2;
+          }
+          sib=sib.previousElementSibling; k++;
+        }
+        node=node.parentElement;
+      }
+    }catch(_){}
+    return '';
   }
   // pathNode builds a selector for one node in the path: tagName plus a semantic
   // anchor when available (role, structural class) — so a table cell reads
@@ -329,7 +392,8 @@ const captureScript = `(function(){
     try{var el=e.target; var fr=''; try{ if(window.frameElement) fr=sel(window.frameElement); }catch(_2){}
       var field=((el.placeholder||el.name||(el.getAttribute?el.getAttribute('aria-label'):'')||el.id||'')+'').trim().slice(0,40);
       var secret=(el.type==='password');
-      window.__octoRecord(JSON.stringify({type:type, selector:sel(el), frame:fr, tag:el.tagName, text:(el.textContent||'').trim().slice(0,40), field:field, secret:secret, value:(secret?'':(el.value!==undefined?(''+el.value).slice(0,200):'')), url:location.href}));}catch(_){}
+      var role=''; try{ role=el.getAttribute('role')||''; }catch(_3){}
+      window.__octoRecord(JSON.stringify({type:type, selector:sel(el), frame:fr, tag:el.tagName, text:(el.textContent||'').trim().slice(0,40), field:field, secret:secret, value:(secret?'':(el.value!==undefined?(''+el.value).slice(0,200):'')), url:location.href, alt_selectors:altSels(el), role:role, neighbor_text:neighborText(el)}));}catch(_){}
   }
   /* ---- click: report + detect network activity after a short delay ---- */
   document.addEventListener('click', function(e){

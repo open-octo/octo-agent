@@ -53,15 +53,22 @@ func MakeBrowserHealer(sender agent.Sender, model string) browser.Healer {
 // for a type/select step the label is empty (an input has no textContent), so
 // the hint — the placeholder/name/aria-label captured at record time — is the
 // only semantic clue to which field the step meant.
-const healSystemPrompt = "You repair a failed browser-automation step. Given the intended action and the page's current interactive elements (each line: CSS_SELECTOR<TAB>visible text), reply with ONLY the single best CSS selector for the intended element. Reply NONE if nothing matches. No prose, no backticks."
+const healSystemPrompt = "You repair a failed browser-automation step. Given the intended action and the page's current interactive elements (each line: CSS_SELECTOR<TAB>visible text), reply with ONLY the single best CSS selector for the intended element. When an element fingerprint (role/tag/neighbor text) is provided, the answer must be consistent with it. Reply NONE if nothing matches. No prose, no backticks."
 
 func healPrompt(step *browser.Step, digest []browser.DigestElement) string {
 	var elems strings.Builder
 	for _, d := range digest {
 		fmt.Fprintf(&elems, "%s\t%s\n", d.Selector, d.Text)
 	}
-	return fmt.Sprintf("Intended action: %s\nIntended element label: %q\nField hint: %q\nOld selector (no longer matches): %s\n\nCurrent elements:\n%s",
-		step.Action, step.Label, step.Hint, step.Selector, elems.String())
+	// The recorded fingerprint (when present) turns the task from an open guess
+	// into constrained matching: the intended element's role/tag and the stable
+	// text the user saw next to it.
+	fingerprint := ""
+	if a := step.Anchors; a != nil {
+		fingerprint = fmt.Sprintf("Element fingerprint: role=%q tag=%q neighbor_text=%q\n", a.Role, a.Tag, a.NeighborText)
+	}
+	return fmt.Sprintf("Intended action: %s\nIntended element label: %q\nField hint: %q\n%sOld selector (no longer matches): %s\n\nCurrent elements:\n%s",
+		step.Action, step.Label, step.Hint, fingerprint, step.Selector, elems.String())
 }
 
 // MakeRecordingGenerator builds the LLM-backed skill distiller for record_stop. It
