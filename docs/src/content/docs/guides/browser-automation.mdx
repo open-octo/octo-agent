@@ -60,10 +60,29 @@ agent you're done and it calls `record_stop <name>`.
 
 What gets captured, per step: the action (`click` / `type` / `select` / `upload` / `navigate`), a
 selector anchored at the nearest element with a stable `id` (not a fragile position-based chain),
-the element's visible text, and the URL. A model pass then distills the raw capture — dropping
-dead-end detours, turning your specific values into `{{param}}` placeholders, and writing a
-description — but it can only reorder or rename real captured steps, never invent a new target: any
-refined step whose selector isn't in the original capture is rejected in favor of the raw version.
+the element's visible text, and the URL — plus a redundant **fingerprint** of the target (alternate
+selectors built with different strategies, its `role` attribute, and the nearest label-like
+neighbor text), which is what lets replay survive wholesale class churn (see Replay below).
+
+The recorder also captures what happens *between* your actions:
+
+- A click that triggers fetch/XHR activity gets an automatic **network wait** step; one that opens
+  a modal / date picker / overlay gets an **element wait** — so replay never races ahead of a page
+  that hasn't settled.
+- A click that starts a browser download is upgraded to a **`download` step** bound to a `file[]`
+  output, so replay captures the file.
+- Provably-redundant fumbles are compressed away deterministically before any model sees them:
+  retyping the same field keeps only the final value, and a click-away-click-back detour collapses
+  to the single final click.
+
+A model pass then distills the raw capture — dropping dead-end detours, turning your specific
+values into `{{param}}` placeholders, and writing a description — but it can only reorder or rename
+real captured steps, never invent a new target: any refined step whose selector isn't in the
+original capture is rejected in favor of the raw version (fingerprints are re-attached
+deterministically after the pass).
+
+`record_stop` replies with a numbered run-plan — each step with what it does and what its check
+is — for you to confirm or correct before the recording is used.
 
 Recordings are saved as plain YAML at `~/.octo/browser-recordings/<name>.yaml` — readable, editable by
 hand, and diffable in git. (Before the recording rename this was `~/.octo/browser-skills/`; an existing
@@ -81,8 +100,16 @@ Replay is deterministic — no model call in the common case. Each step waits fo
 executes, and (if the recording declares one) checks a `verify`. A few robustness details worth
 knowing:
 
-- A click looks for the exact original selector first; if the page shifted slightly but an element
-  with the same recorded label text still exists, it clicks that instead of failing outright.
+- A step recorded with a fingerprint re-identifies its target by **scoring** candidates (from the
+  original selector, the alternates, and text/role scans) against the recorded text, role, tag and
+  neighbor text. A page whose CSS classes all changed still resolves; a positional selector that
+  now matches the *wrong* element is refused outright — an explicit failure into self-heal, never a
+  silent wrong click. Older recordings without fingerprints keep the previous behavior: exact
+  selector first, then an element carrying the same recorded label text.
+- Auto-inserted `wait` steps settle the page (network idle, or a specific element appearing)
+  before the next action fires.
+- A `download` step clicks its trigger, waits for the browser download to complete, and binds the
+  saved file's path to its declared output.
 - If a step opens a new tab, later steps automatically follow it.
 - After typing, an unexpectedly empty field gets one clear-and-retype before the step is marked
   failed.
@@ -137,7 +164,9 @@ recording and the param — never the value.
 If a step's selector no longer matches anything — and only if a model is configured for this
 purpose — octo takes a **text digest** of the page's currently interactable elements (selector +
 visible text, no screenshot, model-agnostic), and asks the model for a single corrected CSS
-selector given the intended action and the dead one. The fix is retried once and, if it works,
+selector given the intended action, the dead selector, and (when the step carries one) the
+recorded fingerprint — role, tag and neighbor text — turning the request from an open guess into
+constrained matching. The fix is retried once and, if it works,
 written back into the recording's YAML — so a heal is durable, not a one-off patch you'd have to
 redo on every future replay. (The write-back re-marshals the YAML, so any hand-written comments in
 the file are dropped on the next healed replay; field values are kept. Version your recordings in
