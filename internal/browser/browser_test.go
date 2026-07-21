@@ -24,8 +24,13 @@ const testWaitTimeout = 60 * time.Second
 
 // Navigate's internal load-event ceiling needs the same headroom: the same
 // windows-latest starvation that blows the WaitFor budget also showed first
-// loads of local fixture pages exceeding the 30s production default.
-func init() { navigateLoadTimeout = 90 * time.Second }
+// loads of local fixture pages exceeding the 30s production default. The
+// click→download attribution window gets the same treatment: a starved runner
+// delivered downloadWillBegin more than 5s after the click that caused it.
+func init() {
+	navigateLoadTimeout = 90 * time.Second
+	downloadAttributionWindow = 30 * time.Second
+}
 
 // testChromeArgs trims Chrome's background work so a cold start on a starved
 // CI runner spends its two cores on the page under test instead of crashpad,

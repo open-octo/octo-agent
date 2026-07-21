@@ -661,9 +661,12 @@ func TestAutoDownloadDetection(t *testing.T) {
 	if err := page.Click(ctx, "#dl"); err != nil {
 		t.Fatalf("click: %v", err)
 	}
-	// Wait for the click to be upgraded to a download event.
+	// Wait for the click to be upgraded to a download event. The ceiling
+	// matches testWaitTimeout: downloadWillBegin delivery on a starved runner
+	// can lag the click by many seconds (5s of polling flaked on windows-latest).
 	found := false
-	for i := 0; i < 50; i++ {
+	deadline := time.Now().Add(testWaitTimeout)
+	for time.Now().Before(deadline) {
 		time.Sleep(100 * time.Millisecond)
 		for _, e := range rec.Events() {
 			if e.Type == "download" && e.DownloadName == "report.xlsx" {
