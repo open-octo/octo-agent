@@ -247,12 +247,12 @@ func TestRecorderCapturesNewTab_ClickBeforeInstrument(t *testing.T) {
 	if np == page {
 		t.Fatal("click did not open a new tab")
 	}
-	// Wait for the button to be visible. stopLoading pauses the load; the
-	// recorder then reloads the page, so #bb only appears after the reload
-	// completes and the recorder is fully in place — exactly when it's safe to
-	// click without racing instrumentation.
+	// Wait for the button to be visible. stopLoading holds the page back while
+	// instrumentation installs; if it cancelled the tab's first navigation
+	// before commit, the stranded-tab recovery re-navigates to the intended URL
+	// — either way instrumentation ran before #bb can render.
 	if err := np.WaitFor(ctx, "#bb", testWaitTimeout); err != nil {
-		t.Fatalf("wait #bb after reload: %v", err)
+		t.Fatalf("wait #bb: %v", err)
 	}
 	// Now click immediately and verify capture — no extra sleep for instrument.
 	if err := np.Click(ctx, "#bb"); err != nil {

@@ -239,7 +239,16 @@ func (p *Page) resolveAnchoredTarget(ctx context.Context, frame, primary, label 
 	if frame != "" {
 		doc = fmt.Sprintf("(document.querySelector(%s)||{}).contentDocument", jsString(frame))
 	}
-	altsJSON, _ := json.Marshal(a.Selectors)
+	// Fingerprint values come from a recording file the user can edit, so treat
+	// them as untrusted when splicing into the generated script: marshal each to
+	// a JSON string and additionally escape single quotes as \u0027 (JSON-legal),
+	// so no value can terminate a single-quoted span in the surrounding JS.
+	quote := func(s string) string { return strings.ReplaceAll(jsString(s), "'", `\u0027`) }
+	altParts := make([]string, len(a.Selectors))
+	for i, s := range a.Selectors {
+		altParts[i] = quote(s)
+	}
+	altsJS := "[" + strings.Join(altParts, ",") + "]"
 	collect := fmt.Sprintf(`(()=>{
 	  %s
 	  var d=%s; if(!d) return [];
@@ -278,12 +287,12 @@ func (p *Page) resolveAnchoredTarget(ctx context.Context, frame, primary, label 
 	  }
 	  if(role){
 	    try{
-	      var rs=d.querySelectorAll((tag||'')+'[role=\"'+role+'\"]');
+	      var rs=d.querySelectorAll((tag||'')+'[role="'+CSS.escape(role)+'"]');
 	      for(var k2=0;k2<rs.length&&k2<8;k2++){ add(rs[k2],'scan'); }
 	    }catch(_){}
 	  }
 	  return out;
-	})()`, anchorSelBuilderJS, doc, jsString(a.NeighborText), jsString(strings.ToLower(a.Tag)), jsString(a.Role), jsString(strings.TrimSpace(label)), jsString(primary), string(altsJSON))
+	})()`, anchorSelBuilderJS, doc, quote(a.NeighborText), quote(strings.ToLower(a.Tag)), quote(a.Role), quote(strings.TrimSpace(label)), quote(primary), altsJS)
 
 	deadline := time.Now().Add(timeout)
 	for {

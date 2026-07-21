@@ -16,23 +16,28 @@
 
 **问题**：`instrumentPageSession` 是异步的（addBinding → captureScript 注入 → 开始捕获），Tab 打开后用户立刻点击会丢事件。
 
-**方案**：Tab 打开后立即 `Page.stopLoading()` 暂停加载，完成 instrument 后 `Page.navigate` 到当前 URL 重新渲染。用户看到页面时录音已在位，不会丢事件。
+**方案**：Tab 打开后立即 `Page.stopLoading()` 暂停加载，随后完成完整 instrument（binding + on-new-document 脚本 + 对当前文档 evaluate）——页面可交互时录制已在位。
+
+**stopLoading 的一个有害边界**：慢机器上 stopLoading 可能在新 Tab 首次导航 commit 之前把它取消掉，Tab 被困在 about:blank。仅在这种 stranded 场景下才补一次导航——目标 URL 取自 `Target.getTargetInfo`。**已 commit 的页面绝不重新导航**：re-navigate 会在用户第一次点击时把文档换掉，恰好制造本功能要消灭的事件丢失（实测：对已 commit 页面 reload 会稳定丢失紧随其后的点击）。
 
 ```go
 func (r *Recorder) instrumentPageSession(ctx context.Context, session string) {
     _, _ = r.page.cli.call(ctx, session, "Page.stopLoading", nil)
+    // 快照 location.href（Runtime.evaluate 返回 RemoteObject envelope，解析 .result.value）
     // ... domains + instrumentSession + watchNavigations ...
-    _, _ = r.page.cli.call(ctx, session, "Page.navigate", map[string]any{"url": curURL})
+    // 仅当 curURL 为空/about:blank（stranded）时：Page.navigate 到 Target.getTargetInfo 的 URL
 }
 ```
 
 **决策依据**：相比"加 wait 步骤回放时再等"，在源头修复更彻底——不依赖回放时的等待策略。
 
+**踩坑记录**：初版把 `Runtime.evaluate` 的 envelope 直接 `json.Unmarshal` 进 `string`，永远失败——`curURL` 恒为空、reload 分支实为死代码。本地全绿是原始导航自然完成掩盖的；Windows CI 上 stopLoading 真取消了首次导航时，死掉的恢复路径让 Tab 永远空白（`wait #bb` 超时）。修正为解析 `.result.value`，并把恢复导航严格限定在 stranded 场景。
+
 ### 2. 自动插入 wait 事件
 
 **方案**：在 `captureScript` 里嵌入两层检测：
 
-- **网络活动检测**：click 后 150ms 检查 `__octoNet.n > 0`（全局的 fetch/XHR 计数器），有活动则插入 `{type:"wait", wait_kind:"network"}`
+- **网络活动检测**：click 后 150ms 检查 `__octoNet`——在飞计数 `n > 0` **或** 代数计数器 `gen` 相比 click 时刻有增长（负载高时 150ms 定时器可能晚触发，快请求已完成，"此刻在飞"会漏判；"期间发生过"不会）——有活动则插入 `{type:"wait", wait_kind:"network"}`
 - **DOM 变化检测**：`MutationObserver` 监听新增节点，命中"显著元素"（`role="dialog"` / class 含 modal|dialog|calendar|picker / 大面积 overlay）→ 300ms debounce 后插入 `{type:"wait", wait_kind:"element", selector:"..."}`
 
 **显著元素判定规则**（正则匹配 class 关键词）：

@@ -268,8 +268,8 @@ const captureScript = `(function(){
   if (window.__octoRec) return; window.__octoRec = true;
   /* ---- network monitor: track in-flight fetch/XHR (reused by WaitForNetworkIdle) ---- */
   if (!window.__octoNet){
-    var s=window.__octoNet={n:0, idleSince:Date.now()};
-    function inc(){ s.n++; s.idleSince=0; }
+    var s=window.__octoNet={n:0, gen:0, idleSince:Date.now()};
+    function inc(){ s.n++; s.gen++; s.idleSince=0; }
     function dec(){ s.n=Math.max(0,s.n-1); if(s.n===0) s.idleSince=Date.now(); }
     try{ var of=window.fetch; if(of){ window.fetch=function(){ inc(); return of.apply(this,arguments).then(function(r){dec();return r;},function(e){dec();throw e;}); }; } }catch(_){}
     try{ var send=XMLHttpRequest.prototype.send; XMLHttpRequest.prototype.send=function(){ inc(); try{ this.addEventListener('loadend',function(){dec();},{once:true}); }catch(_){ dec(); } return send.apply(this,arguments); }; }catch(_){}
@@ -396,9 +396,14 @@ const captureScript = `(function(){
       window.__octoRecord(JSON.stringify({type:type, selector:sel(el), frame:fr, tag:el.tagName, text:(el.textContent||'').trim().slice(0,40), field:field, secret:secret, value:(secret?'':(el.value!==undefined?(''+el.value).slice(0,200):'')), url:location.href, alt_selectors:altSels(el), role:role, neighbor_text:neighborText(el)}));}catch(_){}
   }
   /* ---- click: report + detect network activity after a short delay ---- */
+  // Compare the activity GENERATION, not just in-flight count: on a loaded
+  // machine the 150ms timer can fire after a fast request already completed,
+  // and "n>0 right now" would miss it — "any request started since the click"
+  // does not.
   document.addEventListener('click', function(e){
     report('click', e);
-    setTimeout(function(){ try{ var s=window.__octoNet; if(s && s.n>0) reportWait('network','',10000); }catch(_){} }, 150);
+    var g0=window.__octoNet?window.__octoNet.gen:0;
+    setTimeout(function(){ try{ var s=window.__octoNet; if(s && (s.n>0 || s.gen!==g0)) reportWait('network','',10000); }catch(_){} }, 150);
   }, true);
   document.addEventListener('change', function(e){var t=e.target; report((t&&t.type==='file')?'upload':'change', e);}, true);
   // Enter in a text input = the submit gesture (change never fires without a
@@ -526,23 +531,34 @@ func (r *Recorder) Start(ctx context.Context) error {
 // Race fix: a tab the demonstration itself opened (target=_blank / window.open)
 // starts loading immediately, and the user can click in it before our
 // instrumentation finishes — any events before the captureScript is injected
-// are lost. We close that window by pausing the page with Page.stopLoading the
-// moment we attach, running the full instrumentation, then refreshing the
-// document via Page.navigate to the current URL so the recorder is in place
-// before anything can be clicked. The user never sees an interactive-but-
-// uninstrumented page.
+// are lost. Page.stopLoading the moment we attach holds the page back while the
+// full instrumentation runs (binding + on-new-document script + evaluate into
+// the live document), so by the time the page is interactable the recorder is
+// in place.
+//
+// stopLoading has one harmful edge: on a slow machine it can cancel the tab's
+// FIRST navigation before it ever commits, stranding the tab on about:blank.
+// Only in that case do we navigate — to the target's intended URL from
+// Target.getTargetInfo. A page that already committed its document is left
+// alone: re-navigating it swaps the document out from under the user's first
+// click, which is exactly the event loss this function exists to prevent.
 func (r *Recorder) instrumentPageSession(ctx context.Context, session string) {
 	// Pause loading immediately so the page can't finish rendering (and can't be
 	// clicked) before the recorder is installed. Best-effort: a page that already
 	// finished loading is unaffected, and one that never loads still instruments.
 	_, _ = r.page.cli.call(ctx, session, "Page.stopLoading", nil)
-	// Snapshot the current URL before reload — stopLoading may leave the page in
-	// a loading state whose URL is the in-flight request, not the final one.
+	// Snapshot the committed URL. Runtime.evaluate returns a RemoteObject
+	// envelope ({"result":{"type":"string","value":…}}), not a bare string.
 	curURL := ""
 	if res, err := r.page.cli.call(ctx, session, "Runtime.evaluate", map[string]any{"expression": "location.href"}); err == nil {
-		var u string
-		_ = json.Unmarshal(res, &u)
-		curURL = u
+		var ev struct {
+			Result struct {
+				Value string `json:"value"`
+			} `json:"result"`
+		}
+		if json.Unmarshal(res, &ev) == nil {
+			curURL = ev.Result.Value
+		}
 	}
 	// Enable the domains ourselves rather than depend on the browser watcher's
 	// async registration having run first — same reasoning as instrumentOOPIF.
@@ -555,13 +571,29 @@ func (r *Recorder) instrumentPageSession(ctx context.Context, session string) {
 		return
 	}
 	r.watchNavigations(ctx, session)
-	// Recorder is in place — refresh the document so the injected captureScript
-	// (via addScriptToEvaluateOnNewDocument) fires on the fresh page and the
-	// user sees a fully-loaded page. Page.navigate to the current URL; if the
-	// URL is non-navigable (data: / blob: / chrome-error:) skip the reload.
-	if curURL != "" && !strings.HasPrefix(curURL, "data:") && !strings.HasPrefix(curURL, "blob:") && !strings.HasPrefix(curURL, "chrome-error:") {
-		_, _ = r.page.cli.call(ctx, session, "Page.navigate", map[string]any{"url": curURL})
+	// Recover a tab stranded on about:blank (stopLoading beat the first commit):
+	// navigate to the destination recorded on the target info. Committed pages
+	// are never re-navigated — see the function comment.
+	if curURL == "" || curURL == "about:blank" {
+		if res, err := r.page.cli.call(ctx, session, "Target.getTargetInfo", nil); err == nil {
+			var ti struct {
+				TargetInfo struct {
+					URL string `json:"url"`
+				} `json:"targetInfo"`
+			}
+			if json.Unmarshal(res, &ti) == nil && navigableURL(ti.TargetInfo.URL) {
+				_, _ = r.page.cli.call(ctx, session, "Page.navigate", map[string]any{"url": ti.TargetInfo.URL})
+			}
+		}
 	}
+}
+
+// navigableURL reports whether u is a real page destination the stranded-tab
+// recovery can navigate to — not blank and not a data:/blob:/chrome-error:
+// pseudo-URL.
+func navigableURL(u string) bool {
+	return u != "" && u != "about:blank" &&
+		!strings.HasPrefix(u, "data:") && !strings.HasPrefix(u, "blob:") && !strings.HasPrefix(u, "chrome-error:")
 }
 
 // watchNavigations records top-level navigations on one page session: both
