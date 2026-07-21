@@ -212,13 +212,12 @@ type Config struct {
 	// (via OSC 2) to the session name on startup. nil means the built-in default
 	// (enabled).
 	TerminalTitle *bool `yaml:"terminal_title,omitempty"`
-	// OnboardAttempted marks that the soul_setup auto-nudge (auto-launching
-	// /onboard on a fresh soul.md-less install) has already fired once. It is
-	// set the moment the nudge fires, regardless of whether the user completes
-	// or interrupts it, so an interrupted first run doesn't retrigger /onboard
-	// on every subsequent startup. Manually re-running onboarding stays
-	// available (the Profile page's soul/user "Update" buttons) whether or not
-	// this is set.
+	// OnboardAttempted is the LEGACY location of the soul_setup nudge marker.
+	// It is only READ now (see the package-level OnboardAttempted /
+	// MarkOnboardAttempted, which use the standalone ~/.octo/.onboard_attempted
+	// file so a config.yml rewrite can't clobber it — #1660). Kept as a field
+	// so installs that recorded it in config.yml before the marker file existed
+	// still count as attempted; nothing writes it anymore.
 	OnboardAttempted bool `yaml:"onboard_attempted,omitempty"`
 }
 
@@ -882,6 +881,50 @@ func legacyPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".octo", "config.yaml"), nil
+}
+
+// onboardMarkerPath returns ~/.octo/.onboard_attempted — a standalone marker
+// that records the soul_setup auto-nudge has fired once. It lives OUTSIDE
+// config.yml on purpose: config.yml is rewritten by many non-atomic
+// Load+modify+Save callers during first-run (the setup panel's key save,
+// language, the /onboard skill), any of which could clobber a bool folded into
+// the same file. A dedicated file can't be lost that way (#1660 follow-up).
+func onboardMarkerPath() (string, error) {
+	p, err := Path()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(p), ".onboard_attempted"), nil
+}
+
+// OnboardAttempted reports whether the soul_setup auto-nudge has already fired
+// once. It honours both the standalone marker file (current) and the legacy
+// config.yml onboard_attempted field (installs that recorded it before the
+// marker file existed) so an upgrade never re-nudges.
+func OnboardAttempted() bool {
+	if p, err := onboardMarkerPath(); err == nil {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	if cfg, err := Load(); err == nil && cfg.OnboardAttempted {
+		return true
+	}
+	return false
+}
+
+// MarkOnboardAttempted records that the soul_setup nudge fired by creating the
+// standalone marker file. Idempotent; safe to call concurrently with any
+// config.yml write (it touches a different file).
+func MarkOnboardAttempted() error {
+	p, err := onboardMarkerPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(p, []byte("1\n"), 0o600)
 }
 
 // fileConfig is the on-disk superset: the current Endpoints-based schema plus

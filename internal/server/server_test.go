@@ -951,6 +951,11 @@ func TestHandleOnboardStatus(t *testing.T) {
 	if body["needs_onboard"] == nil {
 		t.Fatal("expected needs_onboard field")
 	}
+	// The status response must be uncacheable: the desktop webview heuristically
+	// caches GET 200s, and a stale phase re-launches /onboard on reopen (#1660).
+	if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "no-store") {
+		t.Errorf("Cache-Control = %q, want it to contain no-store", cc)
+	}
 }
 
 func TestHandleListProviders(t *testing.T) {

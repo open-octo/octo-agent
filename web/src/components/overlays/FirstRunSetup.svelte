@@ -45,6 +45,11 @@
     // Persist the language choice so a refresh lands on it.
     await api.updateLanguage(lang).catch(() => {})
     await api.completeOnboard()
+    // This IS the first-run auto-launch of /onboard, so record the one-shot
+    // nudge marker before opening the chat — otherwise interrupting it and
+    // reopening re-fires the soul_setup nudge (this path set phase to '' and
+    // never went through maybeLaunchOnboard, so nothing else marked it) (#1660).
+    await api.markOnboardAttempted().catch(() => {})
     await openAgentSession(`/onboard lang:${lang}`, '✨ Onboard')
     onboardPhase.set('')
   }

@@ -936,7 +936,11 @@ export interface OnboardStatus {
 }
 
 export async function getOnboardStatus(): Promise<OnboardStatus> {
-  return request<OnboardStatus>('/api/onboard/status')
+  // no-store: the desktop webview (WKWebView) heuristically caches GET 200s, so
+  // without this the second window open would replay the FIRST load's stale
+  // 'soul_setup' from cache — never hitting the server — and re-launch /onboard
+  // even after the marker is set (#1660). Mirrors /api/version, /api/browser/status.
+  return request<OnboardStatus>('/api/onboard/status', { cache: 'no-store' })
 }
 
 export async function completeOnboard(): Promise<void> {
