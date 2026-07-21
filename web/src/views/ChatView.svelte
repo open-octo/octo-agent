@@ -1433,24 +1433,24 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     <div class="header-actions">
       <button class="hdr-btn" title={$t('chat.compact_tooltip')} disabled={!id || streaming} onclick={() => send('/compact')}>
         <iconify-icon icon="ant-design:compress-outlined" width="13"></iconify-icon>
-        {$t('chat.compact')}
+        <span class="btn-label">{$t('chat.compact')}</span>
       </button>
       <button class="hdr-btn" title={$t('chat.clear_tooltip')} disabled={!id || streaming} onclick={async () => {
         if (await confirmDialog($t('chat.clear_confirm'))) send('/clear')
       }}>
         <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
-        {$t('chat.clear')}
+        <span class="btn-label">{$t('chat.clear')}</span>
       </button>
-      <button class="hdr-btn" class:active={$artifactsOpen} onclick={() => artifactsOpen.update(v => !v)}>
+      <button class="hdr-btn" class:active={$artifactsOpen} title={$t('chat.artifacts')} onclick={() => artifactsOpen.update(v => !v)}>
         <iconify-icon icon="ant-design:file-text-outlined" width="13"></iconify-icon>
-        {$t('chat.artifacts')}
+        <span class="btn-label">{$t('chat.artifacts')}</span>
         {#if artifactCount > 0}
           <span class="count-badge">{artifactCount}</span>
         {/if}
       </button>
-      <button class="hdr-btn" onclick={exportTranscript}>
+      <button class="hdr-btn" title={$t('chat.export')} onclick={exportTranscript}>
         <iconify-icon icon="ant-design:export-outlined" width="13"></iconify-icon>
-        {$t('chat.export')}
+        <span class="btn-label">{$t('chat.export')}</span>
       </button>
     </div>
   </div>
@@ -1891,15 +1891,24 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 /* ── Header ──────────────────────────────────────────────────────────────── */
 .chat-header {
   flex: 0 0 auto; background: var(--bg-container); border-bottom: 1px solid var(--border-secondary);
-  padding: 12px 24px; display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  container-type: inline-size;
 }
-.title-row { display: flex; align-items: center; gap: 10px; }
-.session-title { font-size: 16px; font-weight: 600; color: var(--text-heading); }
-.header-actions { display: flex; align-items: center; gap: 8px; }
+.title-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.session-title {
+  font-size: 16px; font-weight: 600; color: var(--text-heading);
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.header-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 .hdr-btn {
   height: 28px; padding: 0 12px; border: 1px solid var(--border); background: var(--bg-container);
-  border-radius: 6px; display: flex; align-items: center; gap: 8px;
+  border-radius: 6px; display: flex; align-items: center; gap: 8px; white-space: nowrap;
   font-size: 13px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
+}
+/* Not enough room for labels: keep the icons (tooltips carry the meaning). */
+@container (max-width: 680px) {
+  .btn-label { display: none; }
+  .hdr-btn { padding: 0 8px; }
 }
 .hdr-btn:hover { border-color: var(--blue-5); color: var(--blue-5); }
 .hdr-btn.active { border-color: var(--blue-6); color: var(--blue-6); background: var(--active-blue-bg); }
@@ -2249,6 +2258,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 .branched-label {
   display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
   color: var(--text-tertiary); cursor: help;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 /* ── Turn-error banner ──────────────────────────────────────────────────── */
