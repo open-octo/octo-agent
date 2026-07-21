@@ -2149,14 +2149,14 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
    progress line that fills to the current scroll position. Hovering a node
    reveals a dark preview card; clicking smooth-scrolls to that message. */
 .msg-rail {
-  /* Float just outside the centered message column's right edge, with a
-     comfortable gap so it reads as a companion timeline rather than either
-     crowding the bubbles or drifting to the far pane edge on wide windows.
-     Falls back to a fixed offset on narrow panes, staying clear of the
-     native scrollbar track (app.css sets it to 8px). Vertically centers the
-     node column within the conversation area. */
+  /* Sit in the middle of the empty gutter to the right of the centered message
+     column — halfway between the column edge and the pane edge — so it has
+     breathing room on both sides instead of crowding the bubbles. Falls back
+     to a fixed offset on narrow panes, staying clear of the native scrollbar
+     track (app.css sets it to 8px). Vertically centers the node column within
+     the conversation area. */
   position: absolute; top: 8px; bottom: 8px; width: 20px;
-  right: max(22px, calc((100% - var(--chat-content-max-width)) / 2 - 44px));
+  right: max(22px, calc((100% - var(--chat-content-max-width)) / 4));
   pointer-events: none; z-index: 8;
   display: flex; align-items: center; justify-content: center;
 }
