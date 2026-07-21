@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"strings"
 	"sync"
 	"time"
 )
@@ -480,6 +479,15 @@ func (r *Recorder) Start(ctx context.Context) error {
 		for _, s := range sessions {
 			r.instrumentOOPIF(ctx, s)
 		}
+		// Freeze-on-create for targets attached during the demonstration: with
+		// waitForDebuggerOnStart a new tab is PAUSED at creation — nothing loads,
+		// renders, or accepts a click — until we finish instrumenting it and
+		// resume it below. This is the CDP-native fix for the race where the user
+		// clicks in a fresh tab before the captureScript is in place; Stop()
+		// restores the non-freezing mode.
+		_, _ = p.cli.call(ctx, p.sessionID, "Target.setAutoAttach", map[string]any{
+			"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true,
+		})
 		attached, attachUnsub := p.cli.subscribe("Target.attachedToTarget", "")
 		r.mu.Lock()
 		r.unsubs = append(r.unsubs, attachUnsub)
@@ -490,7 +498,6 @@ func (r *Recorder) Start(ctx context.Context) error {
 					SessionID  string `json:"sessionId"`
 					TargetInfo struct {
 						Type string `json:"type"`
-						URL  string `json:"url"`
 					} `json:"targetInfo"`
 				}
 				if json.Unmarshal(ev.Params, &a) != nil || a.SessionID == "" {
@@ -510,8 +517,12 @@ func (r *Recorder) Start(ctx context.Context) error {
 					// recording started are deliberately NOT instrumented: switching
 					// to one leaves no replayable step, so its events would compile
 					// into a skill that replays on the wrong page.
-					r.instrumentPageSession(ictx, a.SessionID, a.TargetInfo.URL)
+					r.instrumentPageSession(ictx, a.SessionID)
 				}
+				// Resume the target regardless of type or instrumentation outcome —
+				// waitForDebuggerOnStart keeps it frozen until this call, and a
+				// frozen tab is strictly worse than an uninstrumented one.
+				_, _ = p.cli.call(ictx, a.SessionID, "Runtime.runIfWaitingForDebugger", nil)
 				icancel()
 			}
 		}()
@@ -529,25 +540,16 @@ func (r *Recorder) Start(ctx context.Context) error {
 // same way the top document is instrumented, plus navigation capture — the demo
 // may navigate the new tab (or drive an SPA in it) before touching anything.
 //
-// Race fix: a tab the demonstration itself opened (target=_blank / window.open)
-// starts loading immediately, and the user can click in it before our
-// instrumentation finishes — any events before the captureScript is injected
-// are lost. Page.stopLoading the moment we attach holds the page back while the
-// full instrumentation runs (binding + on-new-document script + evaluate into
-// the live document), so by the time the page is interactable the recorder is
-// in place.
-//
-// stopLoading has one harmful edge: on a slow machine it can cancel the tab's
-// FIRST navigation before it ever commits, stranding the tab on about:blank.
-// Only in that case do we navigate — to the target's intended URL from
-// Target.getTargetInfo. A page that already committed its document is left
-// alone: re-navigating it swaps the document out from under the user's first
-// click, which is exactly the event loss this function exists to prevent.
-func (r *Recorder) instrumentPageSession(ctx context.Context, session, hintURL string) {
-	// Pause loading immediately so the page can't finish rendering (and can't be
-	// clicked) before the recorder is installed. Best-effort: a page that already
-	// finished loading is unaffected, and one that never loads still instruments.
-	_, _ = r.page.cli.call(ctx, session, "Page.stopLoading", nil)
+// Race note: recording auto-attaches with waitForDebuggerOnStart, so this runs
+// while the tab is still FROZEN at creation — nothing can load, render, or be
+// clicked until the attach watcher resumes it with Runtime.runIfWaitingForDebugger
+// after this returns. The captureScript is therefore in place before the page's
+// very first document commits: the click-before-instrument race cannot occur.
+// (An earlier design tried Page.stopLoading + re-navigate instead; it either
+// cancelled the tab's first navigation irrecoverably — the destination isn't
+// recorded anywhere yet — or swapped the document out from under the user's
+// first click. The freeze is the mechanism CDP provides for exactly this.)
+func (r *Recorder) instrumentPageSession(ctx context.Context, session string) {
 	// Enable the domains ourselves rather than depend on the browser watcher's
 	// async registration having run first — same reasoning as instrumentOOPIF.
 	for _, d := range []string{"Page.enable", "Runtime.enable", "DOM.enable"} {
@@ -559,80 +561,6 @@ func (r *Recorder) instrumentPageSession(ctx context.Context, session, hintURL s
 		return
 	}
 	r.watchNavigations(ctx, session)
-	// Recover a tab stranded on about:blank (stopLoading beat the first commit).
-	// Committed pages are never re-navigated — see the function comment. The
-	// destination is the first navigable of: the target's current info URL, the
-	// URL carried on the attach event (hintURL — stopLoading can cancel the
-	// navigation before the target info ever records it), or whatever a short
-	// poll turns up (the cancelled navigation may still commit on its own).
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if u := r.sessionHref(ctx, session); navigableURL(u) {
-			return // committed — leave the document alone
-		}
-		if u := r.sessionTargetURL(ctx, session); navigableURL(u) {
-			_, _ = r.page.cli.call(ctx, session, "Page.navigate", map[string]any{"url": u})
-			return
-		}
-		if navigableURL(hintURL) {
-			_, _ = r.page.cli.call(ctx, session, "Page.navigate", map[string]any{"url": hintURL})
-			return
-		}
-		if ctx.Err() != nil || !time.Now().Before(deadline) {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(150 * time.Millisecond):
-		}
-	}
-}
-
-// sessionHref returns the session's current committed location.href ("" on any
-// failure). Runtime.evaluate returns a RemoteObject envelope
-// ({"result":{"type":"string","value":…}}), not a bare string.
-func (r *Recorder) sessionHref(ctx context.Context, session string) string {
-	res, err := r.page.cli.call(ctx, session, "Runtime.evaluate", map[string]any{"expression": "location.href"})
-	if err != nil {
-		return ""
-	}
-	var ev struct {
-		Result struct {
-			Value string `json:"value"`
-		} `json:"result"`
-	}
-	if json.Unmarshal(res, &ev) != nil {
-		return ""
-	}
-	return ev.Result.Value
-}
-
-// sessionTargetURL returns the session target's URL from Target.getTargetInfo
-// ("" on any failure) — set as soon as a navigation is requested, so it can
-// know the destination before (or after) the document commits.
-func (r *Recorder) sessionTargetURL(ctx context.Context, session string) string {
-	res, err := r.page.cli.call(ctx, session, "Target.getTargetInfo", nil)
-	if err != nil {
-		return ""
-	}
-	var ti struct {
-		TargetInfo struct {
-			URL string `json:"url"`
-		} `json:"targetInfo"`
-	}
-	if json.Unmarshal(res, &ti) != nil {
-		return ""
-	}
-	return ti.TargetInfo.URL
-}
-
-// navigableURL reports whether u is a real page destination the stranded-tab
-// recovery can navigate to — not blank and not a data:/blob:/chrome-error:
-// pseudo-URL.
-func navigableURL(u string) bool {
-	return u != "" && u != "about:blank" &&
-		!strings.HasPrefix(u, "data:") && !strings.HasPrefix(u, "blob:") && !strings.HasPrefix(u, "chrome-error:")
 }
 
 // watchNavigations records top-level navigations on one page session: both
@@ -741,4 +669,11 @@ func (r *Recorder) Stop() {
 	if dlDir != "" {
 		_ = os.RemoveAll(dlDir)
 	}
+	// Restore non-freezing auto-attach (Start switched it to freeze-on-create so
+	// new tabs pause until instrumented). Best-effort: the page may be gone.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _ = r.page.cli.call(ctx, r.page.sessionID, "Target.setAutoAttach", map[string]any{
+		"autoAttach": true, "waitForDebuggerOnStart": false, "flatten": true,
+	})
 }

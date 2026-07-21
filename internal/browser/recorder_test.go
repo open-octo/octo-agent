@@ -209,9 +209,10 @@ func TestRecorderCapturesNewTab(t *testing.T) {
 
 // TestRecorderCapturesNewTab_ClickBeforeInstrument: the user clicks in a freshly
 // opened tab immediately — before instrumentation would normally finish. The
-// stopLoading fix guarantees the page cannot be interacted with until the
-// recorder is in place, so the click must still be captured. Regression test for
-// the race where early new-tab clicks were silently lost.
+// freeze-on-create auto-attach (waitForDebuggerOnStart) guarantees the page
+// cannot load or be interacted with until the recorder is in place, so the
+// click must still be captured. Regression test for the race where early
+// new-tab clicks were silently lost.
 func TestRecorderCapturesNewTab_ClickBeforeInstrument(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -247,10 +248,9 @@ func TestRecorderCapturesNewTab_ClickBeforeInstrument(t *testing.T) {
 	if np == page {
 		t.Fatal("click did not open a new tab")
 	}
-	// Wait for the button to be visible. stopLoading holds the page back while
-	// instrumentation installs; if it cancelled the tab's first navigation
-	// before commit, the stranded-tab recovery re-navigates to the intended URL
-	// — either way instrumentation ran before #bb can render.
+	// Wait for the button to be visible. The tab is frozen at creation until
+	// instrumentation completes, so #bb can only render after the recorder is
+	// fully in place.
 	if err := np.WaitFor(ctx, "#bb", testWaitTimeout); err != nil {
 		t.Fatalf("wait #bb: %v", err)
 	}
