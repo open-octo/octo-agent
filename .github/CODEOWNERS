@@ -1,0 +1,24 @@
+# Code owners for octo-agent.
+#
+# Paths NOT listed here have no required code owner — any maintainer with write
+# access can review and merge changes to them. The paths below are the sensitive
+# core: changes touching them require review from an owner listed here, on top of
+# the normal 1-approval rule enforced on main.
+#
+# Syntax: https://docs.github.com/articles/about-code-owners
+
+# App bootstrap — the single place that constructs providers, owns the
+# permission gate and sub-agent spawner.
+/internal/app/            @Leihb
+
+# Agent core — the loop, history, sessions, Sender interface stack.
+/internal/agent/          @Leihb
+
+# Release & packaging — the publishing pipeline and installers.
+/.github/workflows/release.yml   @Leihb
+/packaging/                      @Leihb
+
+# Governance — permission rules, project conventions, ownership itself.
+/.github/CODEOWNERS       @Leihb
+/CLAUDE.md                @Leihb
+/.octorules              @Leihb
