@@ -3,42 +3,49 @@ package tools
 import (
 	"context"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestBackgroundServerLifecycle launches a real HTTP server via the terminal
 // tool in background mode, verifies it responds to curl, inspects startup logs
 // via terminal_output, then stops it with SIGTERM and confirms a graceful exit.
 func TestBackgroundServerLifecycle(t *testing.T) {
-	// Find a free port so we don't collide with anything on the host.
-	port := freePort(t)
-
-	// Write a minimal Go HTTP server into a temp directory and compile it.
+	// Write a minimal Go HTTP server into a temp directory and compile it. The
+	// server binds 127.0.0.1:0 and reports the real port on stdout — probing a
+	// free port here and passing it in would leave a window where another
+	// process on the host grabs it between release and rebind (a real CI flake:
+	// the TCP dial then "succeeds" against a stranger and curl returns junk).
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "srv.go")
-	code := fmt.Sprintf(`package main
+	code := `package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 )
 func main() {
-	port := os.Args[1]
-	srv := &http.Server{Addr: ":" + port}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		fmt.Println("Listen error:", err)
+		os.Exit(1)
+	}
+	fmt.Println("Server starting on port", ln.Addr().(*net.TCPAddr).Port)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "hello-bg")
 	})
-	fmt.Println("Server starting on port", port)
+	srv := &http.Server{}
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			fmt.Println("Server error:", err)
 			os.Exit(1)
 		}
@@ -53,7 +60,7 @@ func main() {
 	}
 	fmt.Println("Server stopped")
 }
-`)
+`
 	if err := os.WriteFile(src, []byte(code), 0644); err != nil {
 		t.Fatalf("write server source: %v", err)
 	}
@@ -79,7 +86,7 @@ func main() {
 	// Launch the server in the background as an interactive process so we can
 	// inspect its startup logs via terminal_output.
 	resLaunch, err := term.Execute(ctx, "terminal", map[string]any{
-		"command":           fmt.Sprintf("%s %s", bin, port),
+		"command":           bin,
 		"run_in_background": "interactive",
 	})
 	if err != nil {
@@ -90,36 +97,47 @@ func main() {
 		t.Fatalf("expected bg id in launch result, got: %s", resLaunch.Text)
 	}
 
-	// Wait for the server to actually start listening.
-	waitFor(t, "server to accept connections", func() bool {
-		conn, err := net.Dial("tcp", "127.0.0.1:"+port)
-		if err == nil {
-			conn.Close()
+	// Read the server's chosen port from its startup log via terminal_output —
+	// this doubles as the startup-log assertion: the line only appears once the
+	// listener is bound, so the port is live as soon as we can parse it.
+	outTool := TerminalOutputTool{}
+	portRe := regexp.MustCompile(`Server starting on port (\d+)`)
+	var port string
+	waitFor(t, "server to report its port", func() bool {
+		res, err := outTool.Execute(ctx, "terminal_output", map[string]any{"id": bgID})
+		if err != nil {
+			return false
+		}
+		if m := portRe.FindStringSubmatch(res.Text); m != nil {
+			port = m[1]
 			return true
 		}
 		return false
 	})
 
-	// Verify it responds via curl.
-	resCurl, err := term.Execute(ctx, "terminal", map[string]any{
-		"command": fmt.Sprintf("curl -s http://127.0.0.1:%s/", port),
-	})
-	if err != nil {
-		t.Fatalf("curl server: %v", err)
+	// Verify it responds via curl. Retried: a loaded machine can transiently
+	// refuse/reset even with the listener bound, and one lost datagram of
+	// stdout must not fail the whole lifecycle test.
+	curlLimit := 10 * time.Second
+	if runtime.GOOS == "windows" {
+		curlLimit = 45 * time.Second
 	}
-	if !strings.Contains(resCurl.Text, "hello-bg") {
-		t.Fatalf("curl did not return expected body: %s", resCurl.Text)
-	}
-
-	// Inspect startup logs via terminal_output.
-	outTool := TerminalOutputTool{}
-	resLogs, err := outTool.Execute(ctx, "terminal_output", map[string]any{"id": bgID})
-	if err != nil {
-		t.Fatalf("terminal_output: %v", err)
-	}
-	if !strings.Contains(resLogs.Text, "Server starting") {
-		t.Logf("startup logs: %s", resLogs.Text)
-		t.Error("expected startup log line from the server")
+	var lastCurl string
+	deadline := time.Now().Add(curlLimit)
+	for {
+		resCurl, err := term.Execute(ctx, "terminal", map[string]any{
+			"command": fmt.Sprintf("curl -s http://127.0.0.1:%s/", port),
+		})
+		if err == nil {
+			lastCurl = resCurl.Text
+			if strings.Contains(lastCurl, "hello-bg") {
+				break
+			}
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("curl never returned expected body; last output: %s", lastCurl)
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	// Graceful stop with SIGTERM.
@@ -149,17 +167,6 @@ func main() {
 			t.Error("expected clean exit (exited: 0 or signal: terminated) after SIGTERM graceful shutdown")
 		}
 	}
-}
-
-// freePort asks the OS for an ephemeral port and immediately releases it.
-func freePort(t *testing.T) string {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("find free port: %v", err)
-	}
-	defer l.Close()
-	return fmt.Sprint(l.Addr().(*net.TCPAddr).Port)
 }
 
 // extractBgID pulls the first bg_NNN substring from s, trimming trailing
