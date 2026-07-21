@@ -179,8 +179,15 @@ func TestBrowserTool_RecordRunRoundTrip(t *testing.T) {
 		skipOnBrowserFlake(t, "click", err)
 	}
 	time.Sleep(300 * time.Millisecond) // let the capture event arrive
-	if _, err := run(map[string]any{"action": "record_stop", "name": "demo"}); err != nil {
+	stopOut, err := run(map[string]any{"action": "record_stop", "name": "demo"})
+	if err != nil {
 		skipOnBrowserFlake(t, "record_stop", err)
+	}
+	// record_stop must still tell the agent how to trigger a replay and that
+	// recordings are never auto-triggered — dropping this from the response
+	// leaves the agent unable to explain how to run what it just recorded.
+	if !strings.Contains(stopOut, "action=replay") || !strings.Contains(stopOut, "NOT keyword-triggerable") {
+		t.Fatalf("record_stop response missing replay guidance: %s", stopOut)
 	}
 
 	// Replay: navigates back to the start URL (reset clicks) and re-clicks.

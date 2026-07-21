@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -676,6 +677,55 @@ func TestAutoDownloadDetection(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected click to be upgraded to download event, got: %+v", rec.Events())
+	}
+}
+
+// TestRecorderStopCleansUpDownloadDir: the temp directory watchDownloads
+// creates to receive recording-time downloads must not outlive the recorder —
+// Stop() should remove it so repeated record/stop cycles don't leak temp dirs
+// on disk.
+func TestRecorderStopCleansUpDownloadDir(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>dl-dir</title><button id="b">B</button>`))
+	}))
+	defer srv.Close()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#b", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	rec := NewRecorder(page)
+	if err := rec.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	var dlDir string
+	for i := 0; i < 50; i++ {
+		rec.mu.Lock()
+		dlDir = rec.dlDir
+		rec.mu.Unlock()
+		if dlDir != "" {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if dlDir == "" {
+		t.Fatal("watchDownloads never set a download dir")
+	}
+	if _, err := os.Stat(dlDir); err != nil {
+		t.Fatalf("download dir should exist while recording: %v", err)
+	}
+
+	rec.Stop()
+
+	if _, err := os.Stat(dlDir); !os.IsNotExist(err) {
+		t.Fatalf("download dir should be removed after Stop, stat err: %v", err)
 	}
 }
 

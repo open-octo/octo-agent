@@ -1411,7 +1411,7 @@ func TestCompressEventsOverwrite(t *testing.T) {
 		{Type: "click", Selector: "#submit", Tag: "BUTTON"},
 	}
 	got := compressEvents(events)
-	// navigate + click #field + 1 change (#field quedó ABC) + click #submit
+	// navigate + click #field + 1 change (#field ends up ABC) + click #submit
 	if len(got) != 4 {
 		t.Fatalf("expected 4 events after overwrite compression, got %d: %+v", len(got), got)
 	}

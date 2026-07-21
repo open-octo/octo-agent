@@ -18,17 +18,17 @@ import (
 // for. WaitKind is "network" (wait for fetch/XHR to settle) or "element" (wait
 // for Selector to appear). TimeoutMS caps how long to wait.
 type RecordedEvent struct {
-	Type       string `json:"type"`     // click | change | upload | navigate | enter | wait | download
-	Selector   string `json:"selector"` // best-effort CSS selector within its document
-	Frame      string `json:"frame"`    // iframe selector when the target is in a child frame
-	Tag        string `json:"tag"`      // target tagName (SELECT/INPUT/…), so replay picks the right action
-	Value      string `json:"value"`    // input/select value (change events)
-	Text       string `json:"text"`     // element text, for context
-	Field      string `json:"field"`    // input's placeholder/name/aria-label/id — names the auto-param
-	Secret     bool   `json:"secret"`   // password input: don't persist the value as a param default
-	URL        string `json:"url"`      // document URL at capture time
-	WaitKind   string `json:"wait_kind,omitempty"`   // wait: "network" | "element"
-	TimeoutMS  int    `json:"timeout_ms,omitempty"`  // wait: cap in ms
+	Type         string `json:"type"`                    // click | change | upload | navigate | enter | wait | download
+	Selector     string `json:"selector"`                // best-effort CSS selector within its document
+	Frame        string `json:"frame"`                   // iframe selector when the target is in a child frame
+	Tag          string `json:"tag"`                     // target tagName (SELECT/INPUT/…), so replay picks the right action
+	Value        string `json:"value"`                   // input/select value (change events)
+	Text         string `json:"text"`                    // element text, for context
+	Field        string `json:"field"`                   // input's placeholder/name/aria-label/id — names the auto-param
+	Secret       bool   `json:"secret"`                  // password input: don't persist the value as a param default
+	URL          string `json:"url"`                     // document URL at capture time
+	WaitKind     string `json:"wait_kind,omitempty"`     // wait: "network" | "element"
+	TimeoutMS    int    `json:"timeout_ms,omitempty"`    // wait: cap in ms
 	DownloadName string `json:"download_name,omitempty"` // download: suggested filename from CDP
 }
 
@@ -48,10 +48,17 @@ type Recorder struct {
 	// arrives after the click that triggered it. -1 means no recent click.
 	lastClickIdx int
 	lastClickAt  time.Time
+
+	// dlDir is the temp directory downloads land in during recording (set by
+	// watchDownloads). Removed in Stop() — recording-time downloads are only
+	// used to detect the event, not kept.
+	dlDir string
 }
 
 // NewRecorder creates a recorder bound to a page.
-func NewRecorder(page *Page) *Recorder { return &Recorder{page: page, seen: map[string]bool{}, lastClickIdx: -1} }
+func NewRecorder(page *Page) *Recorder {
+	return &Recorder{page: page, seen: map[string]bool{}, lastClickIdx: -1}
+}
 
 // claimSession atomically records a session as instrumented, returning false if
 // it already was — the guarded compare-and-set that lets Start and the
@@ -123,13 +130,17 @@ func (r *Recorder) upgradeLastClickToDownload(filename string) {
 func (r *Recorder) watchDownloads(ctx context.Context) {
 	// Enable the Browser domain (idempotent) and configure download behavior so
 	// Chrome emits downloadWillBegin. eventsEnabled is required — without it the
-	// event never fires. Downloads during recording land in a temp dir that is
-	// cleaned up when the browser closes; only the event metadata is kept.
+	// event never fires. Downloads during recording land in a temp dir; only the
+	// event metadata is kept, and Stop() removes the directory (and whatever
+	// landed in it) once recording ends.
 	_, _ = r.page.cli.call(ctx, "", "Browser.enable", nil)
 	dlDir, err := os.MkdirTemp("", "octo-rec-dl-*")
 	if err != nil {
 		dlDir = ""
 	}
+	r.mu.Lock()
+	r.dlDir = dlDir
+	r.mu.Unlock()
 	_, _ = r.page.cli.call(ctx, "", "Browser.setDownloadBehavior", map[string]any{
 		"behavior":      "allow",
 		"downloadPath":  dlDir,
@@ -584,10 +595,15 @@ func (r *Recorder) Stop() {
 	r.mu.Lock()
 	unsubs := r.unsubs
 	r.unsubs = nil
+	dlDir := r.dlDir
+	r.dlDir = ""
 	r.mu.Unlock()
 	for _, u := range unsubs {
 		if u != nil {
 			u()
 		}
+	}
+	if dlDir != "" {
+		_ = os.RemoveAll(dlDir)
 	}
 }
