@@ -1164,7 +1164,16 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     const sc = messagesEl
     if (!sc || railTicks.length === 0) return
     const max = sc.scrollHeight - sc.clientHeight
-    const fill = max > 0 ? Math.min(100, Math.max(0, (sc.scrollTop / max) * 100)) : 0
+    // Not actually scrollable: the whole thread is visible from the top, so the
+    // first message is "current" and nothing has been scrolled past. Without
+    // this guard `max - scrollTop < 4` is trivially true and would pin active
+    // to the last node even though you're looking at the top.
+    if (max <= 4) {
+      if (railFillPct !== 0) railFillPct = 0
+      if (railActive !== 0) railActive = 0
+      return
+    }
+    const fill = Math.min(100, Math.max(0, (sc.scrollTop / max) * 100))
     const scTop = sc.getBoundingClientRect().top
     const line = sc.clientHeight * 0.32
     let active = 0
@@ -1951,7 +1960,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
               >
                 <span class="msg-rail-dot"></span>
                 <span class="msg-rail-tip" role="tooltip">
-                  <span class="msg-rail-tip-meta">{$t('chat.nth_user_message').replace('{n}', String(i + 1))}</span>
                   <span class="msg-rail-tip-text">{tick.preview}</span>
                 </span>
               </button>
@@ -2210,9 +2218,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   content: ''; position: absolute; left: 100%; top: 50%;
   transform: translateY(-50%);
   border: 6px solid transparent; border-left-color: var(--terminal-bg);
-}
-.msg-rail-tip-meta {
-  font-size: 11px; color: rgba(255,255,255,0.5); margin-bottom: 3px;
 }
 .msg-rail-tip-text {
   font-size: 12.5px; line-height: 1.5;
