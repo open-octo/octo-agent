@@ -101,6 +101,11 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 	// catch a repeated `type` afterwards, because each gets a distinct {{param}}
 	// placeholder as its value — so a spurious extra param+step would survive.
 	events = dedupeConsecutiveEvents(events)
+	// Layer-1 deterministic compression: drop provably-redundant events (typing
+	// corrections, select corrections) before the LLM distill sees them — keeps
+	// the baseline clean and reduces the chance the distiller hallucinates a
+	// reason to keep a fumble.
+	events = compressEvents(events)
 	s := Recording{Name: name, Description: description}
 	if startURL != "" && startURL != "about:blank" {
 		s.Steps = append(s.Steps, navStep(startURL))
@@ -256,6 +261,96 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 	return s
 }
 
+// compressEvents applies deterministic Layer-1 rules to drop provably-redundant
+// events from a recording BEFORE the LLM distill sees them. These are patterns
+// where a later event makes the earlier one irrelevant AND no side-effect event
+// sits between them that would make the intermediate steps meaningful.
+//
+// Rules (all conservative — each is provably safe):
+//  1. Overwrite typing/selecting: consecutive type|change events on the same
+//     selector (same frame) with no navigate/download/wait/click between → keep
+//     only the last (the earlier value is overwritten / re-selected).
+//  2. A-B-A click backtrack: click A → (only clicks, no nav/wait/download)* →
+//     click A again → delete the detour AND the return click (final state = A
+//     clicked once). Only fires when every intermediate event is a click, because
+//     any non-click intermediate could have done something irreversible.
+//
+// Events are processed in order; the function returns a new slice.
+func compressEvents(events []RecordedEvent) []RecordedEvent {
+	if len(events) < 2 {
+		return events
+	}
+	out := make([]RecordedEvent, 0, len(events))
+	for i := 0; i < len(events); i++ {
+		e := events[i]
+		// Rule 1: same-selector overwrite for type/change — peek at the next
+		// surviving event; if it overwrites us, skip emitting this one.
+		if e.Type == "type" || e.Type == "change" {
+			if j := nextSurvivingClickable(events, i); j >= 0 {
+				nxt := events[j]
+				if nxt.Selector == e.Selector && nxt.Frame == e.Frame &&
+					(nxt.Type == "type" || nxt.Type == "change") &&
+					!hasSideEffectBetween(events, i, j) {
+					continue // overwritten by nxt
+				}
+			}
+		}
+		// Rule 2: A-B-A click backtrack — if this click re-appears later with only
+		// clicks between, this whole stretch is a detour; skip to the last A.
+		if e.Type == "click" && e.Selector != "" {
+			if lastA := findABABacktrack(events, i); lastA > i {
+				out = append(out, e) // emit the first A (final state = clicked A)
+				i = lastA            // skip detour and the return click
+				continue
+			}
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// nextSurvivingClickable returns the index of the next event after i that is a
+// type|change|click, or -1 if none. Used to peek whether a later same-selector
+// event overwrites event i.
+func nextSurvivingClickable(events []RecordedEvent, i int) int {
+	for j := i + 1; j < len(events); j++ {
+		switch events[j].Type {
+		case "type", "change", "click":
+			return j
+		}
+	}
+	return -1
+}
+
+// hasSideEffectBetween reports whether any event between i and j (exclusive) is
+// a state-changing action that would make intermediate steps meaningful:
+// navigate, download, wait, or upload.
+func hasSideEffectBetween(events []RecordedEvent, i, j int) bool {
+	for k := i + 1; k < j; k++ {
+		switch events[k].Type {
+		case "navigate", "download", "wait", "upload":
+			return true
+		}
+	}
+	return false
+}
+
+// findABABacktrack looks for a later click with the same selector as events[i],
+// where EVERY event between i and that later click is itself a click. Returns the
+// index of the later matching click, or -1 if none qualifies.
+func findABABacktrack(events []RecordedEvent, i int) int {
+	for j := i + 1; j < len(events); j++ {
+		mid := events[j]
+		if mid.Type != "click" {
+			return -1 // non-click intermediate — can't safely compress
+		}
+		if mid.Selector == events[i].Selector && mid.Frame == events[i].Frame {
+			return j
+		}
+	}
+	return -1
+}
+
 // navStep builds a navigate step, auto-attaching a URL verify pinned to the
 // destination host. This surfaces a redirect to a different host (a login or
 // error page, whose DOM often mirrors the target and would otherwise let replay
@@ -279,6 +374,103 @@ func hostOf(raw string) string {
 		return ""
 	}
 	return pu.Host
+}
+
+// stepSummaryLine renders one step as a human-readable line describing what it
+// does and what its verification checks (for the agent to recite to the user).
+func stepSummaryLine(i int, s Step) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("%d. ", i+1))
+	switch s.Action {
+	case "navigate":
+		b.WriteString(fmt.Sprintf("→ 导航到 %s", truncate(s.URL, 60)))
+		if s.Verify != nil && s.Verify.URL != "" {
+			b.WriteString(fmt.Sprintf("\n   检查：URL 包含「%s」", s.Verify.URL))
+		} else {
+			b.WriteString("\n   检查：页面加载完成")
+		}
+	case "click":
+		b.WriteString(fmt.Sprintf("→ 点击「%s」", lineLabel(s)))
+		if s.Verify != nil && s.Verify.Exists != "" {
+			b.WriteString(fmt.Sprintf("\n   检查：元素「%s」出现", s.Verify.Exists))
+		} else {
+			b.WriteString(fmt.Sprintf("\n   检查：点击后页面/元素处于预期状态"))
+		}
+	case "type":
+		b.WriteString(fmt.Sprintf("→ 在「%s」中输入", lineLabel(s)))
+		b.WriteString(fmt.Sprintf("\n   检查：字段值为「%s」", s.Value))
+	case "select":
+		b.WriteString(fmt.Sprintf("→ 选择「%s」", lineLabel(s)))
+		b.WriteString(fmt.Sprintf("\n   检查：选项「%s」已选中", s.Value))
+	case "wait":
+		if s.Network {
+			b.WriteString("→ 等待网络请求完成")
+			b.WriteString("\n   检查：数据加载完毕（网络空闲）")
+		} else if s.Selector != "" {
+			b.WriteString(fmt.Sprintf("→ 等待元素「%s」出现", s.Selector))
+			b.WriteString(fmt.Sprintf("\n   检查：元素「%s」可见", s.Selector))
+		} else {
+			b.WriteString(fmt.Sprintf("→ 等待 %dms", s.TimeoutMS))
+			b.WriteString("\n   检查：延迟结束")
+		}
+	case "download":
+		b.WriteString(fmt.Sprintf("→ 下载文件（绑定输出：%s）", s.Bind))
+		b.WriteString("\n   检查：文件已保存到本地")
+	case "extract":
+		b.WriteString(fmt.Sprintf("→ 提取数据（绑定输出：%s）", s.Bind))
+		b.WriteString("\n   检查：数据已写入输出")
+	case "upload":
+		b.WriteString(fmt.Sprintf("→ 上传文件到「%s」", lineLabel(s)))
+		b.WriteString("\n   检查：文件已上传")
+	case "key":
+		b.WriteString(fmt.Sprintf("→ 在「%s」中按 %s", lineLabel(s), s.Value))
+		b.WriteString("\n   检查：提交成功")
+	default:
+		b.WriteString(fmt.Sprintf("→ %s", s.Action))
+	}
+	return b.String()
+}
+
+// lineLabel returns a human-readable name for a step's target: its Label, Hint,
+// or a truncated Selector — so a click reads "点击「提交」" not "点击「#btn」".
+func lineLabel(s Step) string {
+	if s.Label != "" {
+		return s.Label
+	}
+	if s.Hint != "" {
+		return s.Hint
+	}
+	if s.Selector != "" {
+		return truncate(s.Selector, 40)
+	}
+	return "(未识别)"
+}
+
+// truncate cuts s to max runes, appending "…" when it shortens.
+func truncate(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "…"
+}
+
+// SummarizeRecording renders a recording as a numbered, human-readable run-
+// plan with each step's verification check — for the agent to recite back to the
+// user after record_stop so the user can confirm or request changes. Uses the
+// user-facing language (Chinese) by convention; steps are 1-indexed.
+func SummarizeRecording(r Recording) string {
+	var b strings.Builder
+	if r.Description != "" {
+		b.WriteString(fmt.Sprintf("录制描述：%s\n", r.Description))
+	}
+	b.WriteString(fmt.Sprintf("共 %d 步。请确认以下操作步骤：\n", len(r.Steps)))
+	for i, s := range r.Steps {
+		b.WriteString("\n")
+		b.WriteString(stepSummaryLine(i, s))
+	}
+	b.WriteString("\n\n请确认以上步骤是否正确、检验环节是否充分，或告诉我哪里需要修改。")
+	return b.String()
 }
 
 // slugParam reduces a field hint to a safe {{param}} identifier: lowercase, with

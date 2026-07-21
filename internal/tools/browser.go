@@ -709,13 +709,12 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		if err := browser.SaveRecording(path, recording); err != nil {
 			return agent.ToolResult{}, err
 		}
-		msg := fmt.Sprintf("recorded %d step(s) → %s\nReview/edit it there (set params, fix selectors). Replay it with the Replay button in the Browser view, or action=replay name=%q. (Recordings are NOT keyword-triggerable — they only run when explicitly replayed.)", len(recording.Steps), path, name)
-		if recording.Description == "" {
-			// The LLM distill fell back (or omitted a description). Surface it here
-			// — the stderr warning never reaches the model — so the recording doesn't
-			// silently stay a bare name in the manifest.
-			msg += "\nNo description was distilled; the recordings manifest will show a step digest instead. Add a description: line to the YAML to improve discovery."
-		}
+		// Recite the run-plan with verification per step so the user can confirm or
+		// request changes before the recording is used. The agent surfaces this
+		// text and asks the user to confirm.
+		summary := browser.SummarizeRecording(recording)
+		msg := fmt.Sprintf("recorded %d step(s) → %s\n\n%s\n\n", len(recording.Steps), path, summary)
+		msg += "(已保存到上述路径供需要时重放或编辑。)"
 		return agent.ToolResult{Text: msg}, nil
 
 	case "replay", "run_skill":

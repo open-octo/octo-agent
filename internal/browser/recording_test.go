@@ -1397,3 +1397,98 @@ func TestReplayVerifyErrorRedactsSecret(t *testing.T) {
 		t.Fatalf("error should name the placeholder, got: %v", err)
 	}
 }
+
+// TestCompressEventsOverwrite: consecutive type/change on the same selector with
+// no side effect between is compressed to the last one (the earlier value is
+// overwritten).
+func TestCompressEventsOverwrite(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "navigate", URL: "https://x/start"},
+		{Type: "click", Selector: "#field", Tag: "INPUT"},
+		{Type: "change", Selector: "#field", Tag: "INPUT", Value: "A"},
+		{Type: "change", Selector: "#field", Tag: "INPUT", Value: "AB"},
+		{Type: "change", Selector: "#field", Tag: "INPUT", Value: "ABC"},
+		{Type: "click", Selector: "#submit", Tag: "BUTTON"},
+	}
+	got := compressEvents(events)
+	// navigate + click #field + 1 change (#field quedó ABC) + click #submit
+	if len(got) != 4 {
+		t.Fatalf("expected 4 events after overwrite compression, got %d: %+v", len(got), got)
+	}
+	if got[2].Value != "ABC" {
+		t.Fatalf("expected surviving field value to be ABC, got %q", got[2].Value)
+	}
+}
+
+// TestCompressEventsABABacktrack: click A → click B → click A is compressed to a
+// single click A (the detour and return click are dropped).
+func TestCompressEventsABABacktrack(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "click", Selector: "#tab-climate", Tag: "A"},
+		{Type: "click", Selector: "#tab-weather", Tag: "A"},
+		{Type: "click", Selector: "#tab-climate", Tag: "A"},
+		{Type: "click", Selector: "#submit", Tag: "BUTTON"},
+	}
+	got := compressEvents(events)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 events (climate + submit), got %d: %+v", len(got), got)
+	}
+	if got[0].Selector != "#tab-climate" || got[1].Selector != "#submit" {
+		t.Fatalf("wrong selectors after A-B-A compression: %+v", got)
+	}
+}
+
+// TestCompressEventsPreservesSideEffects: a type → navigate → type on the same
+// selector is NOT compressed — the navigate is a side effect.
+func TestCompressEventsPreservesSideEffects(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "change", Selector: "#q", Tag: "INPUT", Value: "wrong"},
+		{Type: "navigate", URL: "https://x/other"},
+		{Type: "change", Selector: "#q", Tag: "INPUT", Value: "right"},
+	}
+	got := compressEvents(events)
+	if len(got) != 3 {
+		t.Fatalf("side-effect event should block compression, got %d: %+v", len(got), got)
+	}
+}
+
+// TestSummarizeRecording: each step is rendered as a numbered line with its
+// verification check, and navigate auto-attaches a URL check.
+func TestSummarizeRecording(t *testing.T) {
+	r := Recording{
+		Description: "demo report",
+		Steps: []Step{
+			{Action: "navigate", URL: "https://example.com/report?report_id=118240"},
+			{Action: "click", Selector: "#date-input", Label: "打开日期选择器"},
+			{Action: "wait", Network: true, TimeoutMS: 10000},
+			{Action: "download", Selector: "#dl-btn", Bind: "report_file"},
+		},
+	}
+	out := SummarizeRecording(r)
+	// Has description header.
+	if !strings.Contains(out, "demo report") {
+		t.Fatalf("summary missing description, got %q", out)
+	}
+	// Step numbering 1..4.
+	for _, n := range []string{"1.", "2.", "3.", "4."} {
+		if !strings.Contains(out, n) {
+			t.Fatalf("summary missing step %s, got %q", n, out)
+		}
+	}
+	// Navigate line has URL check.
+	if !strings.Contains(out, "example.com") {
+		t.Fatalf("navigate summary missing URL check, got %q", out)
+	}
+	// Wait network line describes network settle.
+	if !strings.Contains(out, "网络") {
+		t.Fatalf("wait summary missing network check, got %q", out)
+	}
+	// Download line mentions file binding.
+	if !strings.Contains(out, "report_file") {
+		t.Fatalf("download summary missing bind, got %q", out)
+	}
+	// Asks user to confirm.
+	if !strings.Contains(out, "确认") {
+		t.Fatalf("summary missing confirmation prompt, got %q", out)
+	}
+}
