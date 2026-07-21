@@ -103,6 +103,11 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 // ─── GET /api/onboard/status ────────────────────────────────────────────────
 
 func (s *Server) handleOnboardStatus(w http.ResponseWriter, r *http.Request) {
+	// no-store: this gates the first-run /onboard nudge, and the desktop webview
+	// heuristically caches GET 200s. Without it, the second window open replays
+	// the first load's stale phase from cache and re-launches /onboard even after
+	// the marker is set (#1660). The client also passes cache:'no-store'.
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 	phase := detectOnboardPhase()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"needs_onboard": phase != "",
@@ -113,11 +118,12 @@ func (s *Server) handleOnboardStatus(w http.ResponseWriter, r *http.Request) {
 // detectOnboardPhase determines whether first-run setup is needed.
 //
 //	"key_setup"  — no API key configured (hard block).
-//	"soul_setup" — key present, soul.md missing, and the nudge hasn't fired yet (soft nudge).
+//	"soul_setup" — key present, the nudge hasn't fired yet, AND the user has no
+//	               identity at all (both soul.md and user.md missing) (soft nudge).
 //	""           — fully configured, or the nudge already fired once (#1660: an
 //	               interrupted first attempt must not retrigger on every restart —
 //	               the Profile page's soul/user "Update" buttons stay available
-//	               as the manual path).
+//	               as the manual path), or any identity file already exists.
 func detectOnboardPhase() string {
 	cfg, _ := config.Load()
 
@@ -141,17 +147,30 @@ func detectOnboardPhase() string {
 		return "key_setup"
 	}
 
-	if cfg.OnboardAttempted {
+	if config.OnboardAttempted() {
 		return ""
 	}
 
-	// Check soul.md (IdentityPath also finds a legacy uppercase SOUL.md).
-	soulPath := prompt.IdentityPath(octoDir(), "soul.md")
-	if _, err := os.Stat(soulPath); os.IsNotExist(err) {
+	// Nudge only on a truly fresh identity: BOTH soul.md (who the agent is) and
+	// user.md (who the user is) absent. If either already exists the user has
+	// some identity set up, so don't nudge. (IdentityPath also finds the legacy
+	// uppercase SOUL.md/USER.md spellings.)
+	if identityMissing(octoDir()) {
 		return "soul_setup"
 	}
 
 	return ""
+}
+
+// identityMissing reports whether dir has neither soul.md nor user.md (nor
+// their legacy uppercase spellings).
+func identityMissing(dir string) bool {
+	for _, name := range []string{"soul.md", "user.md"} {
+		if _, err := os.Stat(prompt.IdentityPath(dir, name)); err == nil {
+			return false
+		}
+	}
+	return true
 }
 
 // ─── POST /api/onboard/complete ─────────────────────────────────────────────
@@ -167,15 +186,11 @@ func (s *Server) handleOnboardComplete(w http.ResponseWriter, r *http.Request) {
 // handleOnboardAttempt records that the soul_setup nudge has fired, before the
 // /onboard chat itself starts — so a user who closes the tab or interrupts the
 // chat before finishing doesn't get re-nudged on every subsequent load (#1660).
+// The marker is a standalone file, not a config.yml field, so a concurrent
+// config.yml write during first-run can't clobber it.
 func (s *Server) handleOnboardAttempt(w http.ResponseWriter, r *http.Request) {
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
-		return
-	}
-	cfg.OnboardAttempted = true
-	if err := cfg.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+	if err := config.MarkOnboardAttempted(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("mark onboard attempted: %v", err))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

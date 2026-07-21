@@ -148,15 +148,55 @@ func TestOnboardAttempt_StopsSoulSetupNudge(t *testing.T) {
 		t.Fatalf("POST /api/onboard/attempt = %d: %s", w.Code, w.Body.String())
 	}
 
+	if !config.OnboardAttempted() {
+		t.Fatal("config.OnboardAttempted() = false after POST /api/onboard/attempt")
+	}
+	if got := detectOnboardPhase(); got != "" {
+		t.Fatalf("detectOnboardPhase = %q after attempt (identity still missing), want \"\" (no repeat nudge)", got)
+	}
+
+	// The regression this fix targets: a config.yml rewrite AFTER the marker was
+	// set (first-run key save, language, the /onboard skill) must NOT re-open the
+	// nudge. The marker lives in its own file, so a full config Save can't clobber
+	// it — detectOnboardPhase still returns "" (#1660 follow-up).
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.OnboardAttempted {
-		t.Fatal("config.OnboardAttempted = false after POST /api/onboard/attempt")
+	cfg.Language = "zh"
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
 	}
 	if got := detectOnboardPhase(); got != "" {
-		t.Fatalf("detectOnboardPhase = %q after attempt (soul.md still missing), want \"\" (no repeat nudge)", got)
+		t.Fatalf("detectOnboardPhase = %q after a later config.yml Save, want \"\" (marker must survive)", got)
+	}
+}
+
+// TestDetectOnboardPhase_ExistingIdentitySkipsNudge covers the trigger gate:
+// the soul_setup nudge fires only when the user has NO identity at all. If
+// either soul.md or user.md already exists — even without the attempt marker —
+// detectOnboardPhase must return "".
+func TestDetectOnboardPhase_ExistingIdentitySkipsNudge(t *testing.T) {
+	for _, name := range []string{"soul.md", "user.md"} {
+		t.Run(name, func(t *testing.T) {
+			home := setTestHome(t)
+			seedModels(t, config.Config{
+				Endpoints: []config.Endpoint{
+					{ID: "ep-a", Provider: "anthropic", APIKey: "sk-test", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
+				},
+				Default: "ep-a::claude-sonnet-4-6",
+			})
+			octo := filepath.Join(home, ".octo")
+			if err := os.MkdirAll(octo, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(octo, name), []byte("# identity"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got := detectOnboardPhase(); got != "" {
+				t.Fatalf("detectOnboardPhase = %q with %s present, want \"\" (no nudge when identity exists)", got, name)
+			}
+		})
 	}
 }
 

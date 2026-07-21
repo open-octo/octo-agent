@@ -47,28 +47,51 @@ func soulMissing() bool {
 	return os.IsNotExist(statErr)
 }
 
-// onboardAttempted reports whether the soul_setup auto-nudge has already
-// fired once (see config.Config.OnboardAttempted). A Load error is treated as
-// "not attempted yet" — the nudge firing once more on a config hiccup is
-// harmless, while silently skipping it forever would not be.
-func onboardAttempted() bool {
-	cfg, err := config.Load()
-	if err != nil {
+// identityMissing reports whether the user has neither soul.md nor user.md
+// (nor their legacy uppercase spellings) — the signal that they have no
+// identity at all. Onboarding nudges only in that case; if either file exists
+// the user has some identity set up.
+func identityMissing() bool {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
 		return false
 	}
-	return cfg.OnboardAttempted
+	dir := filepath.Join(home, ".octo")
+	for _, name := range []string{"soul.md", "user.md"} {
+		if _, err := os.Stat(prompt.IdentityPath(dir, name)); err == nil {
+			return false
+		}
+	}
+	return true
+}
+
+// onboardAttempted reports whether the soul_setup auto-nudge has already fired
+// once (see config.OnboardAttempted, backed by ~/.octo/.onboard_attempted). A
+// missing marker is treated as "not attempted yet" — the nudge firing once
+// more is harmless, while silently skipping it forever would not be.
+func onboardAttempted() bool {
+	return config.OnboardAttempted()
 }
 
 // markOnboardAttempted persists that the soul_setup auto-nudge fired, before
 // the TUI takes over — so even if the user interrupts /onboard immediately,
 // the marker is already on disk and it won't retrigger on the next startup.
 func markOnboardAttempted() {
-	cfg, err := config.Load()
-	if err != nil {
-		return
+	_ = config.MarkOnboardAttempted()
+}
+
+// shouldAutoOnboard reports whether a fresh CLI/TUI run should auto-launch the
+// /onboard ceremony — first-ever session, no identity yet, and the nudge hasn't
+// fired. Deciding "yes" writes the one-shot marker as a SIDE EFFECT, on
+// purpose: the two are bound in one place so they can never drift apart. That
+// drift is exactly the #1660 bug — the web's FirstRunSetup launched /onboard
+// but forgot to mark it, so an interrupted first run re-nudged on reopen.
+func shouldAutoOnboard() bool {
+	if isFirstEverSession() && identityMissing() && !onboardAttempted() {
+		markOnboardAttempted()
+		return true
 	}
-	cfg.OnboardAttempted = true
-	_ = cfg.Save()
+	return false
 }
 
 // offerOnboarding asks (on a first run) whether to run the onboarding ceremony.
@@ -1028,13 +1051,11 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		// start the onboarding ceremony so a new CLI user isn't left with an
 		// impersonal agent — mirroring the web's soul_setup nudge. The config
 		// wizard above only sets the key/model; onboard is who-it-is/who-you-are.
-		// Gated on !onboardAttempted so an interrupted first run doesn't
-		// retrigger /onboard on every subsequent startup (#1660) — the marker
-		// is written immediately, not on completion, since interrupting is the
-		// exact case it needs to cover.
-		if isFirstEverSession() && soulMissing() && !onboardAttempted() {
+		// shouldAutoOnboard writes the one-shot marker as it decides, so an
+		// interrupted first run can't retrigger /onboard on the next startup
+		// (#1660) — the marker lands before the TUI even takes over.
+		if shouldAutoOnboard() {
 			cfg.autoFirstInput = "/onboard"
-			markOnboardAttempted()
 		}
 		return runTUI(cfg)
 	}
