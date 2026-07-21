@@ -820,6 +820,7 @@ func (s *Server) registerRoutes() {
 	// Onboard & config
 	s.api("GET /api/onboard/status", s.handleOnboardStatus)
 	s.api("POST /api/onboard/complete", s.handleOnboardComplete)
+	s.api("POST /api/onboard/attempt", s.handleOnboardAttempt)
 	s.api("GET /api/providers", s.handleListProviders)
 	s.api("GET /api/config", s.handleGetConfig)
 	s.api("GET /api/config/endpoints", s.handleGetEndpoints)

@@ -212,6 +212,14 @@ type Config struct {
 	// (via OSC 2) to the session name on startup. nil means the built-in default
 	// (enabled).
 	TerminalTitle *bool `yaml:"terminal_title,omitempty"`
+	// OnboardAttempted marks that the soul_setup auto-nudge (auto-launching
+	// /onboard on a fresh soul.md-less install) has already fired once. It is
+	// set the moment the nudge fires, regardless of whether the user completes
+	// or interrupts it, so an interrupted first run doesn't retrigger /onboard
+	// on every subsequent startup. Manually re-running onboarding stays
+	// available (the Profile page's soul/user "Update" buttons) whether or not
+	// this is set.
+	OnboardAttempted bool `yaml:"onboard_attempted,omitempty"`
 }
 
 // TrashConfig configures the file recycle bin.
