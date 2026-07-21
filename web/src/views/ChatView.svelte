@@ -1134,12 +1134,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   //    throttle on every change regardless of tab visibility; the
   //    ResizeObserver stays only as a supplementary trigger for layout shifts
   //    that don't touch msgs (viewport resize, Artifacts panel toggle).
-  let railTicks = $state<{ id: string; top: number; preview: string }[]>([])
+  let railTicks = $state<{ id: string; preview: string }[]>([])
   // Which node is "current" (last user message scrolled past the 0.32 line) and
   // how far the blue progress line has filled (0–100, scroll position). Both are
-  // driven by the scroll listener below; the nodes stay at their real rendered
-  // offsets (railTicks[].top) so the rail maps the actual conversation, and the
-  // fill/active layer expresses where the viewport currently sits.
+  // driven by the scroll listener below. The nodes are evenly spaced and
+  // vertically centered (per the timeline design); this layer expresses where
+  // the viewport currently sits within the conversation.
   let railActive = $state(0)
   let railFillPct = $state(0)
 
@@ -1148,23 +1148,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   let railLastRun = 0
 
   function recomputeRailTicks() {
-    const content = innerEl
-    if (!content) return
-    const total = content.scrollHeight
-    const contentTop = content.getBoundingClientRect().top
-    const ticks: { id: string; top: number; preview: string }[] = []
-    if (total) {
-      for (const m of msgs) {
-        if (m.type !== 'user') continue
-        const el = document.getElementById(`msg-${m.id}`)
-        if (!el) continue
-        const offsetTop = el.getBoundingClientRect().top - contentTop
-        ticks.push({
-          id: m.id,
-          top: Math.min(99, Math.max(1, (offsetTop / total) * 100)),
-          preview: (m.content || '').slice(0, 160),
-        })
-      }
+    const ticks: { id: string; preview: string }[] = []
+    for (const m of msgs) {
+      if (m.type !== 'user') continue
+      if (!document.getElementById(`msg-${m.id}`)) continue
+      ticks.push({ id: m.id, preview: (m.content || '').slice(0, 160) })
     }
     railTicks = ticks
     syncRailScroll()
@@ -1948,26 +1936,27 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
       {#if railTicks.length > 0}
         <div class="msg-rail">
-          <div class="msg-rail-track"></div>
-          <div class="msg-rail-fill" style="height:calc((100% - 8px) * {railFillPct / 100})"></div>
-          {#each railTicks as tick, i (tick.id)}
-            <button
-              type="button"
-              class="msg-rail-node"
-              class:passed={i < railActive}
-              class:active={i === railActive}
-              style="top:{tick.top}%"
-              onclick={() => jumpToMessage(tick.id)}
-              aria-current={i === railActive ? 'true' : undefined}
-              aria-label={tick.preview ? `${$t('chat.jump_to_message')}: ${tick.preview}` : $t('chat.jump_to_message')}
-            >
-              <span class="msg-rail-dot"></span>
-              <span class="msg-rail-tip" role="tooltip">
-                <span class="msg-rail-tip-meta">{$t('chat.nth_user_message').replace('{n}', String(i + 1))}</span>
-                <span class="msg-rail-tip-text">{tick.preview}</span>
-              </span>
-            </button>
-          {/each}
+          <div class="msg-rail-inner">
+            <div class="msg-rail-track"></div>
+            <div class="msg-rail-fill" style="height:calc((100% - 8px) * {railFillPct / 100})"></div>
+            {#each railTicks as tick, i (tick.id)}
+              <button
+                type="button"
+                class="msg-rail-node"
+                class:passed={i < railActive}
+                class:active={i === railActive}
+                onclick={() => jumpToMessage(tick.id)}
+                aria-current={i === railActive ? 'true' : undefined}
+                aria-label={tick.preview ? `${$t('chat.jump_to_message')}: ${tick.preview}` : $t('chat.jump_to_message')}
+              >
+                <span class="msg-rail-dot"></span>
+                <span class="msg-rail-tip" role="tooltip">
+                  <span class="msg-rail-tip-meta">{$t('chat.nth_user_message').replace('{n}', String(i + 1))}</span>
+                  <span class="msg-rail-tip-text">{tick.preview}</span>
+                </span>
+              </button>
+            {/each}
+          </div>
         </div>
       {/if}
       </div>
@@ -2156,12 +2145,19 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
      comfortable gap so it reads as a companion timeline rather than either
      crowding the bubbles or drifting to the far pane edge on wide windows.
      Falls back to a fixed offset on narrow panes, staying clear of the
-     native scrollbar track (app.css sets it to 8px). */
+     native scrollbar track (app.css sets it to 8px). Vertically centers the
+     node column within the conversation area. */
   position: absolute; top: 8px; bottom: 8px; width: 20px;
   right: max(22px, calc((100% - var(--chat-content-max-width)) / 2 - 44px));
   pointer-events: none; z-index: 8;
+  display: flex; align-items: center; justify-content: center;
 }
-/* Background track (full height) + blue progress fill (top → scroll position). */
+/* Evenly-spaced node column, centered; track + fill are scoped to its height. */
+.msg-rail-inner {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 20px;
+}
+/* Background track (node-column height) + blue progress fill (top → scroll). */
 .msg-rail-track, .msg-rail-fill {
   position: absolute; left: 50%; top: 4px; width: 2px;
   transform: translateX(-50%); border-radius: 9999px;
@@ -2171,13 +2167,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   background: linear-gradient(var(--blue-5), var(--blue-6));
   transition: height 0.14s linear;
 }
-/* Node = generous 20×8 hit area wrapping a small dot, placed at the message's
-   real offset in the scroll content. */
+/* Node = generous 20×8 hit area wrapping a small dot, laid out in the flow of
+   the evenly-spaced column. */
 .msg-rail-node {
-  position: absolute; left: 50%; width: 20px; height: 8px;
+  position: relative; width: 20px; height: 8px;
   padding: 0; margin: 0; border: none; background: none;
   display: flex; align-items: center; justify-content: center;
-  transform: translate(-50%, -50%);
   cursor: pointer; pointer-events: auto; z-index: 2;
 }
 .msg-rail-node:focus-visible { outline: none; }
