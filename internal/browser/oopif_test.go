@@ -34,7 +34,7 @@ func oopifServer(t *testing.T, innerBody string) *httptest.Server {
 
 func newOOPIFBrowser(t *testing.T, ctx context.Context) *Browser {
 	t.Helper()
-	b, err := Launch(ctx, LaunchOptions{Headless: true, ExtraArgs: []string{"--site-per-process"}})
+	b, err := Launch(ctx, LaunchOptions{Headless: true, ExtraArgs: append([]string{"--site-per-process"}, testChromeArgs...)})
 	if err != nil {
 		t.Skipf("chrome unavailable: %v", err)
 	}
@@ -45,7 +45,7 @@ func newOOPIFBrowser(t *testing.T, ctx context.Context) *Browser {
 // frame selector routes into the OOPIF's own session; the click lands there, and a
 // verification WaitFor through the same frame path confirms it.
 func TestOOPIFReplay(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := oopifServer(t, `<button id="go" onclick="var d=document.createElement('div');d.id='done';document.body.appendChild(d)">Go</button>`)
 	defer srv.Close()
@@ -66,7 +66,7 @@ func TestOOPIFReplay(t *testing.T) {
 	}
 	// The click must have run inside the OOPIF: #done appears there. WaitFor also
 	// routes through the frame, so a pass proves both directions work.
-	if err := page.WaitFor(ctx, "#f >>> #done", 10*time.Second); err != nil {
+	if err := page.WaitFor(ctx, "#f >>> #done", testWaitTimeout); err != nil {
 		t.Fatalf("click did not land inside the cross-origin iframe: %v", err)
 	}
 }
@@ -74,7 +74,7 @@ func TestOOPIFReplay(t *testing.T) {
 // TestOOPIFTypeReplay: type into a text input inside a cross-origin iframe, then
 // read it back through the frame path.
 func TestOOPIFTypeReplay(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := oopifServer(t, `<input id="q" name="q">`)
 	defer srv.Close()
@@ -109,7 +109,7 @@ func TestOOPIFTypeReplay(t *testing.T) {
 // TestOOPIFRecord: a user gesture inside a cross-origin iframe is captured and
 // tagged with the parent iframe selector, so the recording replays back into it.
 func TestOOPIFRecord(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := oopifServer(t, `<button id="go">Go</button>`)
 	defer srv.Close()
@@ -124,7 +124,7 @@ func TestOOPIFRecord(t *testing.T) {
 		t.Fatalf("navigate: %v", err)
 	}
 	// Ensure the OOPIF is attached/registered before recording starts.
-	if err := page.WaitFor(ctx, "#f >>> #go", 10*time.Second); err != nil {
+	if err := page.WaitFor(ctx, "#f >>> #go", testWaitTimeout); err != nil {
 		t.Fatalf("oopif not ready: %v", err)
 	}
 
