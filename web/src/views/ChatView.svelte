@@ -2083,23 +2083,29 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 }
 
 /* ── User-message rail ───────────────────────────────────────────────────── */
-/* A minimap of ticks (one per user message) sitting in the gutter to the
+/* A timeline of ticks (one per user message) sitting in the gutter to the
    right of the centered message column, positioned to match each message's
    real offset in the scrollable content. Click to jump. */
 .msg-rail {
-  /* Offset clear of the native scrollbar track (app.css sets it to 8px) so the
-     ticks don't fight the OS/webkit thumb for the same pixels. */
-  position: absolute; top: 8px; bottom: 8px; right: 14px; width: 8px;
+  /* Clear of both the native scrollbar track (app.css sets it to 8px) and the
+     viewport edge, so the rail doesn't fight the OS/webkit thumb or crowd
+     the edge. */
+  position: absolute; top: 8px; bottom: 8px; right: 22px; width: 8px;
   pointer-events: none; z-index: 5;
 }
+.msg-rail::before {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 50%;
+  width: 2px; margin-left: -1px; border-radius: 999px;
+  background: var(--border-secondary);
+}
 .msg-rail-tick {
-  position: absolute; right: 0; width: 8px; height: 8px; border-radius: 999px;
+  position: absolute; left: 50%; width: 8px; height: 8px; border-radius: 999px;
   background: var(--text-tertiary); border: none; padding: 0; margin: 0;
-  cursor: pointer; pointer-events: auto; transform: translateY(-50%);
+  cursor: pointer; pointer-events: auto; transform: translate(-50%, -50%);
   transition: background 0.15s ease, transform 0.15s ease;
 }
 .msg-rail-tick:hover, .msg-rail-tick:focus-visible {
-  background: var(--blue-6); transform: translateY(-50%) scale(1.4);
+  background: var(--blue-6); transform: translate(-50%, -50%) scale(1.4);
   outline: none;
 }
 .messages-inner {
