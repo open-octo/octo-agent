@@ -660,11 +660,13 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 	full.UpsertEndpoint(ep)
 	cid := endpointID + "::" + outEntry.Model
 
-	// On first run the very first model becomes the default without asking —
-	// same as the web first-run setup (saveModel in web/src/lib/api.ts). When
-	// the wizard is re-run later to add another model, ask before touching the
-	// default, so adding a model doesn't silently steal the existing default.
-	if firstRun {
+	// The very first model becomes the default without asking — same as the web
+	// first-run setup (saveModel in web/src/lib/api.ts). This covers both the
+	// startup onboarding (firstRun) and an explicit `octo config` against an
+	// as-yet defaultless config: with nothing to steal from, the prompt is just
+	// noise. Only once a default already exists do we ask before touching it, so
+	// adding another model doesn't silently steal the existing default.
+	if firstRun || full.Default == "" {
 		full.SetDefaultComposite(cid)
 	} else {
 		setDefault, ok := pickYesNo(tty, reader, stdin, stdout,
