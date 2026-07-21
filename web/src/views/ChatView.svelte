@@ -1117,6 +1117,82 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     stick = true
   })
 
+  // ── user-message rail ───────────────────────────────────────────────────────
+  // A minimap-style rail of ticks, one per user message, positioned by actual
+  // rendered offset within the scrollable content (not evenly spaced) so it
+  // tracks where each message really sits, DeepSeek-style.
+  //
+  // Split into two effects on purpose:
+  //  - The recompute itself is throttled (like throttledMarkdown below, #1114)
+  //    since it walks every user message doing layout-forcing reads, and
+  //    appendToLastAssistant (stores.ts) hands msgs a new array on every
+  //    streamed delta.
+  //  - Driving that throttle from a ResizeObserver ALONE isn't reliable:
+  //    Chrome defers ResizeObserver callbacks for backgrounded/invisible tabs,
+  //    so a message added while the tab isn't in the foreground would leave
+  //    the rail stale indefinitely. A tracked `msgs` effect below re-arms the
+  //    throttle on every change regardless of tab visibility; the
+  //    ResizeObserver stays only as a supplementary trigger for layout shifts
+  //    that don't touch msgs (viewport resize, Artifacts panel toggle).
+  let railTicks = $state<{ id: string; top: number; preview: string }[]>([])
+
+  const RAIL_THROTTLE_MS = 100
+  let railTimer: ReturnType<typeof setTimeout> | null = null
+  let railLastRun = 0
+
+  function recomputeRailTicks() {
+    const content = innerEl
+    if (!content) return
+    const total = content.scrollHeight
+    const contentTop = content.getBoundingClientRect().top
+    const ticks: { id: string; top: number; preview: string }[] = []
+    if (total) {
+      for (const m of msgs) {
+        if (m.type !== 'user') continue
+        const el = document.getElementById(`msg-${m.id}`)
+        if (!el) continue
+        const offsetTop = el.getBoundingClientRect().top - contentTop
+        ticks.push({
+          id: m.id,
+          top: Math.min(99, Math.max(1, (offsetTop / total) * 100)),
+          preview: (m.content || '').slice(0, 80),
+        })
+      }
+    }
+    railTicks = ticks
+  }
+
+  function scheduleRailRecompute() {
+    const elapsed = Date.now() - railLastRun
+    if (elapsed >= RAIL_THROTTLE_MS) {
+      railLastRun = Date.now()
+      recomputeRailTicks()
+    } else if (!railTimer) {
+      railTimer = setTimeout(() => {
+        railTimer = null
+        railLastRun = Date.now()
+        recomputeRailTicks()
+      }, RAIL_THROTTLE_MS - elapsed)
+    }
+  }
+
+  $effect(() => {
+    void msgs
+    scheduleRailRecompute()
+  })
+
+  $effect(() => {
+    const content = innerEl
+    if (!content) return
+    const ro = new ResizeObserver(scheduleRailRecompute)
+    ro.observe(content)
+    return () => ro.disconnect()
+  })
+
+  function jumpToMessage(id: string) {
+    document.getElementById(`msg-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   // ── markdown copy buttons setup ────────────────────────────────────────────
   function setupAssistantEl(el: HTMLElement) {
     return setupCopyButtons(el)
@@ -1518,13 +1594,14 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   <div class="body-row">
     <div class="conversation">
       <!-- Messages scroll area -->
+      <div class="messages-wrap">
       <div class="messages" bind:this={messagesEl}>
         <div class="messages-inner" bind:this={innerEl}>
 
           {#each msgs as msg, i (msg.id)}
             {#if msg.type === 'user'}
               <!-- Right-aligned user bubble -->
-              <div class="msg-user fadein">
+              <div class="msg-user fadein" id={`msg-${msg.id}`}>
                 <div class="user-avatar" aria-hidden="true">
                   <iconify-icon icon="ant-design:user-outlined" width="16"></iconify-icon>
                 </div>
@@ -1815,6 +1892,22 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         {/if}
       </div>
 
+      {#if railTicks.length > 0}
+        <div class="msg-rail">
+          {#each railTicks as tick (tick.id)}
+            <button
+              type="button"
+              class="msg-rail-tick"
+              style="top:{tick.top}%"
+              onclick={() => jumpToMessage(tick.id)}
+              title={tick.preview}
+              aria-label={tick.preview ? `${$t('chat.jump_to_message')}: ${tick.preview}` : $t('chat.jump_to_message')}
+            ></button>
+          {/each}
+        </div>
+      {/if}
+      </div>
+
       <!-- Background workflows panel (persists across turns, pinned above composer) -->
       {#if workflows.length > 0}
         <div class="workflows-bar fadein">
@@ -1975,6 +2068,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   max-width: var(--chat-content-max-width); margin: 0 auto; width: 100%;
   padding: 0 24px 12px;
 }
+.messages-wrap {
+  flex: 1; display: flex; min-height: 0; position: relative;
+}
 .messages {
   flex: 1;
   overflow-y: auto;
@@ -1984,6 +2080,27 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
      at the bottom and swipes up a small amount. */
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
+}
+
+/* ── User-message rail ───────────────────────────────────────────────────── */
+/* A minimap of ticks (one per user message) sitting in the gutter to the
+   right of the centered message column, positioned to match each message's
+   real offset in the scrollable content. Click to jump. */
+.msg-rail {
+  /* Offset clear of the native scrollbar track (app.css sets it to 8px) so the
+     ticks don't fight the OS/webkit thumb for the same pixels. */
+  position: absolute; top: 8px; bottom: 8px; right: 14px; width: 8px;
+  pointer-events: none; z-index: 5;
+}
+.msg-rail-tick {
+  position: absolute; right: 0; width: 8px; height: 8px; border-radius: 999px;
+  background: var(--border-secondary); border: none; padding: 0; margin: 0;
+  cursor: pointer; pointer-events: auto; transform: translateY(-50%);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.msg-rail-tick:hover, .msg-rail-tick:focus-visible {
+  background: var(--blue-6); transform: translateY(-50%) scale(1.4);
+  outline: none;
 }
 .messages-inner {
   max-width: var(--chat-content-max-width); margin: 0 auto;
