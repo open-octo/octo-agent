@@ -943,6 +943,13 @@ export async function completeOnboard(): Promise<void> {
   await request<unknown>('/api/onboard/complete', { method: 'POST' })
 }
 
+// Persists that the soul_setup auto-nudge fired, before the /onboard chat
+// starts — so an interrupted first attempt doesn't retrigger it on the next
+// load (#1660).
+export async function markOnboardAttempted(): Promise<void> {
+  await request<unknown>('/api/onboard/attempt', { method: 'POST' })
+}
+
 // Provider presets (GET /api/providers) — mirrors server providerPreset.
 export interface EndpointVariant {
   label: string

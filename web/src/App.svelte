@@ -277,10 +277,14 @@
   }
 
   // soul_setup: key present, soul.md missing → auto-launch one /onboard chat.
-  // Guarded by sessionStorage so a refresh doesn't spawn a second session.
+  // sessionStorage guards against a same-tab refresh spawning a second
+  // session; markOnboardAttempted persists server-side so closing the tab (or
+  // interrupting the chat) doesn't re-nudge on the next load either — the
+  // server also stops reporting phase 'soul_setup' once it's set (#1660).
   function maybeLaunchOnboard() {
     if (sessionStorage.getItem('octo-onboard-launched')) return
     sessionStorage.setItem('octo-onboard-launched', '1')
+    api.markOnboardAttempted().catch(() => {})
     const lang = get(locale).startsWith('zh') ? 'zh' : 'en'
     openAgentSession(`/onboard lang:${lang}`, '✨ Onboard').catch(() => {})
   }

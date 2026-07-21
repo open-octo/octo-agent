@@ -29,6 +29,24 @@ func TestSoulMissing(t *testing.T) {
 	}
 }
 
+func TestOnboardAttempted(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// os.UserHomeDir() reads %USERPROFILE% on Windows, not $HOME.
+	t.Setenv("USERPROFILE", home)
+
+	if onboardAttempted() {
+		t.Fatal("expected onboardAttempted=false before markOnboardAttempted")
+	}
+	markOnboardAttempted()
+	if !onboardAttempted() {
+		t.Fatal("expected onboardAttempted=true after markOnboardAttempted, even with soul.md still missing (#1660)")
+	}
+	if !soulMissing() {
+		t.Fatal("markOnboardAttempted must not itself create soul.md")
+	}
+}
+
 func TestOfferOnboarding(t *testing.T) {
 	cases := map[string]bool{
 		"\n":     true,  // default (Enter) → onboard

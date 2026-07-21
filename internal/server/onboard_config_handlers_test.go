@@ -125,6 +125,41 @@ func TestConfig_ShowReasoningReloadsDefaultSender(t *testing.T) {
 	}
 }
 
+// TestOnboardAttempt_StopsSoulSetupNudge covers #1660: once /api/onboard/attempt
+// has fired, detectOnboardPhase must not keep reporting soul_setup even
+// though soul.md is still missing (the user interrupted the first attempt) —
+// the Profile page's manual "Update" buttons remain the way back in.
+func TestOnboardAttempt_StopsSoulSetupNudge(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "anthropic", APIKey: "sk-test", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+		Default: "ep-a::claude-sonnet-4-6",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	if got := detectOnboardPhase(); got != "soul_setup" {
+		t.Fatalf("detectOnboardPhase = %q before any attempt, want soul_setup", got)
+	}
+
+	w := doJSON(t, srv, http.MethodPost, "/api/onboard/attempt", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /api/onboard/attempt = %d: %s", w.Code, w.Body.String())
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.OnboardAttempted {
+		t.Fatal("config.OnboardAttempted = false after POST /api/onboard/attempt")
+	}
+	if got := detectOnboardPhase(); got != "" {
+		t.Fatalf("detectOnboardPhase = %q after attempt (soul.md still missing), want \"\" (no repeat nudge)", got)
+	}
+}
+
 func TestListProviders_MarksCustomCatchAll(t *testing.T) {
 	presets := buildProviderPresets()
 	byID := map[string]providerPreset{}

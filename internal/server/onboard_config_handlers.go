@@ -113,8 +113,11 @@ func (s *Server) handleOnboardStatus(w http.ResponseWriter, r *http.Request) {
 // detectOnboardPhase determines whether first-run setup is needed.
 //
 //	"key_setup"  — no API key configured (hard block).
-//	"soul_setup" — key present but soul.md missing (soft nudge).
-//	""           — fully configured.
+//	"soul_setup" — key present, soul.md missing, and the nudge hasn't fired yet (soft nudge).
+//	""           — fully configured, or the nudge already fired once (#1660: an
+//	               interrupted first attempt must not retrigger on every restart —
+//	               the Profile page's soul/user "Update" buttons stay available
+//	               as the manual path).
 func detectOnboardPhase() string {
 	cfg, _ := config.Load()
 
@@ -138,6 +141,10 @@ func detectOnboardPhase() string {
 		return "key_setup"
 	}
 
+	if cfg.OnboardAttempted {
+		return ""
+	}
+
 	// Check soul.md (IdentityPath also finds a legacy uppercase SOUL.md).
 	soulPath := prompt.IdentityPath(octoDir(), "soul.md")
 	if _, err := os.Stat(soulPath); os.IsNotExist(err) {
@@ -152,6 +159,25 @@ func detectOnboardPhase() string {
 func (s *Server) handleOnboardComplete(w http.ResponseWriter, r *http.Request) {
 	// Ensure the ~/.octo directory exists.
 	_ = os.MkdirAll(octoDir(), 0o700)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// ─── POST /api/onboard/attempt ──────────────────────────────────────────────
+
+// handleOnboardAttempt records that the soul_setup nudge has fired, before the
+// /onboard chat itself starts — so a user who closes the tab or interrupts the
+// chat before finishing doesn't get re-nudged on every subsequent load (#1660).
+func (s *Server) handleOnboardAttempt(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
+		return
+	}
+	cfg.OnboardAttempted = true
+	if err := cfg.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
