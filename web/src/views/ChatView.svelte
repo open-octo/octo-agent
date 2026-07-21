@@ -2087,13 +2087,13 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
    right of the centered message column, positioned to match each message's
    real offset in the scrollable content. Click to jump. */
 .msg-rail {
-  /* Hug the content column's right edge (not the pane edge) so the rail
-     reads as an annotation on the conversation rather than a stray mark far
-     off in empty space on wide windows. Falls back to a fixed offset once
-     the column has widened to fill the pane, staying clear of both the
-     native scrollbar track (app.css sets it to 8px) and the viewport edge. */
+  /* Float just outside the centered message column's right edge, with a
+     comfortable gap so it reads as a companion timeline rather than either
+     crowding the bubbles or drifting to the far pane edge on wide windows.
+     Falls back to a fixed offset on narrow panes, staying clear of the
+     native scrollbar track (app.css sets it to 8px). */
   position: absolute; top: 8px; bottom: 8px; width: 8px;
-  right: max(22px, calc((100% - var(--chat-content-max-width)) / 2 + 24px));
+  right: max(22px, calc((100% - var(--chat-content-max-width)) / 2 - 44px));
   pointer-events: none; z-index: 5;
 }
 .msg-rail::before {
