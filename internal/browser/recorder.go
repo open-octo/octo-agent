@@ -490,6 +490,7 @@ func (r *Recorder) Start(ctx context.Context) error {
 					SessionID  string `json:"sessionId"`
 					TargetInfo struct {
 						Type string `json:"type"`
+						URL  string `json:"url"`
 					} `json:"targetInfo"`
 				}
 				if json.Unmarshal(ev.Params, &a) != nil || a.SessionID == "" {
@@ -509,7 +510,7 @@ func (r *Recorder) Start(ctx context.Context) error {
 					// recording started are deliberately NOT instrumented: switching
 					// to one leaves no replayable step, so its events would compile
 					// into a skill that replays on the wrong page.
-					r.instrumentPageSession(ictx, a.SessionID)
+					r.instrumentPageSession(ictx, a.SessionID, a.TargetInfo.URL)
 				}
 				icancel()
 			}
@@ -542,24 +543,11 @@ func (r *Recorder) Start(ctx context.Context) error {
 // Target.getTargetInfo. A page that already committed its document is left
 // alone: re-navigating it swaps the document out from under the user's first
 // click, which is exactly the event loss this function exists to prevent.
-func (r *Recorder) instrumentPageSession(ctx context.Context, session string) {
+func (r *Recorder) instrumentPageSession(ctx context.Context, session, hintURL string) {
 	// Pause loading immediately so the page can't finish rendering (and can't be
 	// clicked) before the recorder is installed. Best-effort: a page that already
 	// finished loading is unaffected, and one that never loads still instruments.
 	_, _ = r.page.cli.call(ctx, session, "Page.stopLoading", nil)
-	// Snapshot the committed URL. Runtime.evaluate returns a RemoteObject
-	// envelope ({"result":{"type":"string","value":…}}), not a bare string.
-	curURL := ""
-	if res, err := r.page.cli.call(ctx, session, "Runtime.evaluate", map[string]any{"expression": "location.href"}); err == nil {
-		var ev struct {
-			Result struct {
-				Value string `json:"value"`
-			} `json:"result"`
-		}
-		if json.Unmarshal(res, &ev) == nil {
-			curURL = ev.Result.Value
-		}
-	}
 	// Enable the domains ourselves rather than depend on the browser watcher's
 	// async registration having run first — same reasoning as instrumentOOPIF.
 	for _, d := range []string{"Page.enable", "Runtime.enable", "DOM.enable"} {
@@ -571,21 +559,72 @@ func (r *Recorder) instrumentPageSession(ctx context.Context, session string) {
 		return
 	}
 	r.watchNavigations(ctx, session)
-	// Recover a tab stranded on about:blank (stopLoading beat the first commit):
-	// navigate to the destination recorded on the target info. Committed pages
-	// are never re-navigated — see the function comment.
-	if curURL == "" || curURL == "about:blank" {
-		if res, err := r.page.cli.call(ctx, session, "Target.getTargetInfo", nil); err == nil {
-			var ti struct {
-				TargetInfo struct {
-					URL string `json:"url"`
-				} `json:"targetInfo"`
-			}
-			if json.Unmarshal(res, &ti) == nil && navigableURL(ti.TargetInfo.URL) {
-				_, _ = r.page.cli.call(ctx, session, "Page.navigate", map[string]any{"url": ti.TargetInfo.URL})
-			}
+	// Recover a tab stranded on about:blank (stopLoading beat the first commit).
+	// Committed pages are never re-navigated — see the function comment. The
+	// destination is the first navigable of: the target's current info URL, the
+	// URL carried on the attach event (hintURL — stopLoading can cancel the
+	// navigation before the target info ever records it), or whatever a short
+	// poll turns up (the cancelled navigation may still commit on its own).
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if u := r.sessionHref(ctx, session); navigableURL(u) {
+			return // committed — leave the document alone
+		}
+		if u := r.sessionTargetURL(ctx, session); navigableURL(u) {
+			_, _ = r.page.cli.call(ctx, session, "Page.navigate", map[string]any{"url": u})
+			return
+		}
+		if navigableURL(hintURL) {
+			_, _ = r.page.cli.call(ctx, session, "Page.navigate", map[string]any{"url": hintURL})
+			return
+		}
+		if ctx.Err() != nil || !time.Now().Before(deadline) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(150 * time.Millisecond):
 		}
 	}
+}
+
+// sessionHref returns the session's current committed location.href ("" on any
+// failure). Runtime.evaluate returns a RemoteObject envelope
+// ({"result":{"type":"string","value":…}}), not a bare string.
+func (r *Recorder) sessionHref(ctx context.Context, session string) string {
+	res, err := r.page.cli.call(ctx, session, "Runtime.evaluate", map[string]any{"expression": "location.href"})
+	if err != nil {
+		return ""
+	}
+	var ev struct {
+		Result struct {
+			Value string `json:"value"`
+		} `json:"result"`
+	}
+	if json.Unmarshal(res, &ev) != nil {
+		return ""
+	}
+	return ev.Result.Value
+}
+
+// sessionTargetURL returns the session target's URL from Target.getTargetInfo
+// ("" on any failure) — set as soon as a navigation is requested, so it can
+// know the destination before (or after) the document commits.
+func (r *Recorder) sessionTargetURL(ctx context.Context, session string) string {
+	res, err := r.page.cli.call(ctx, session, "Target.getTargetInfo", nil)
+	if err != nil {
+		return ""
+	}
+	var ti struct {
+		TargetInfo struct {
+			URL string `json:"url"`
+		} `json:"targetInfo"`
+	}
+	if json.Unmarshal(res, &ti) != nil {
+		return ""
+	}
+	return ti.TargetInfo.URL
 }
 
 // navigableURL reports whether u is a real page destination the stranded-tab

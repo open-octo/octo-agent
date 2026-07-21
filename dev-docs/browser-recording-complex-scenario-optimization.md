@@ -37,7 +37,7 @@ func (r *Recorder) instrumentPageSession(ctx context.Context, session string) {
 
 **方案**：在 `captureScript` 里嵌入两层检测：
 
-- **网络活动检测**：click 后 150ms 检查 `__octoNet`——在飞计数 `n > 0` **或** 代数计数器 `gen` 相比 click 时刻有增长（负载高时 150ms 定时器可能晚触发，快请求已完成，"此刻在飞"会漏判；"期间发生过"不会）——有活动则插入 `{type:"wait", wait_kind:"network"}`
+- **网络活动检测**：click 后 150ms 检查 `__octoNet`——在飞计数 `n > 0` **或** 代数计数器 `gen` 相比 click 时刻有增长（负载高时 150ms 定时器可能晚触发，快请求已完成，"此刻在飞"会漏判；"期间发生过"不会）——有活动则插入 `{type:"wait", wait_kind:"network"}`。注意 `__octoNet` 的实际安装方通常是页面创建时的 `netMonitorScript`（captureScript 的副本因幂等检查永远不会赢），所以 `gen` 必须加在 `netMonitorScript` 上；captureScript 里的副本只覆盖"录制中新开的 Tab"这类没走 NewPage 的页面
 - **DOM 变化检测**：`MutationObserver` 监听新增节点，命中"显著元素"（`role="dialog"` / class 含 modal|dialog|calendar|picker / 大面积 overlay）→ 300ms debounce 后插入 `{type:"wait", wait_kind:"element", selector:"..."}`
 
 **显著元素判定规则**（正则匹配 class 关键词）：

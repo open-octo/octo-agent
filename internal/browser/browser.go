@@ -226,14 +226,18 @@ func (b *Browser) AttachPage(ctx context.Context, targetID string) (*Page, error
 	return p, nil
 }
 
-// netMonitorScript maintains window.__octoNet.{n,idleSince} by wrapping fetch and
-// XMLHttpRequest, so replay can wait for XHR/fetch activity to settle. It counts
-// only fetch/XHR (not sub-resources) — which is what "the SPA finished loading
-// its data" means in practice — and resets naturally per document. Idempotent.
+// netMonitorScript maintains window.__octoNet.{n,gen,idleSince} by wrapping
+// fetch and XMLHttpRequest, so replay can wait for XHR/fetch activity to settle
+// and the recorder can tell whether ANY request started since a click (gen is a
+// monotonically increasing activity generation — required because this script
+// installs at page creation, so the recorder's own copy never wins the
+// idempotency check and must rely on this one carrying gen). It counts only
+// fetch/XHR (not sub-resources) — which is what "the SPA finished loading its
+// data" means in practice — and resets naturally per document. Idempotent.
 const netMonitorScript = `(function(){
   if(window.__octoNet) return;
-  var s=window.__octoNet={n:0, idleSince:Date.now()};
-  function inc(){ s.n++; s.idleSince=0; }
+  var s=window.__octoNet={n:0, gen:0, idleSince:Date.now()};
+  function inc(){ s.n++; s.gen++; s.idleSince=0; }
   function dec(){ s.n=Math.max(0,s.n-1); if(s.n===0) s.idleSince=Date.now(); }
   try{ var of=window.fetch; if(of){ window.fetch=function(){ inc(); return of.apply(this,arguments).then(function(r){dec();return r;},function(e){dec();throw e;}); }; } }catch(_){}
   try{ var send=XMLHttpRequest.prototype.send; XMLHttpRequest.prototype.send=function(){ inc(); try{ this.addEventListener('loadend',function(){dec();},{once:true}); }catch(_){ dec(); } return send.apply(this,arguments); }; }catch(_){}
