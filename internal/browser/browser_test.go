@@ -18,8 +18,46 @@ import (
 // appear. WaitFor returns the instant the element is present, so this ceiling
 // is free on a healthy run — it only matters when a slow/loaded CI runner
 // (Windows cold-starts Chrome notably slower) needs more than a few seconds to
-// finish the first navigation. 5s was too tight there and flaked TestUpload.
-const testWaitTimeout = 20 * time.Second
+// finish the first navigation. 5s was too tight there and flaked TestUpload;
+// 20s flaked five recorder tests in one windows-latest run (2026-07-21).
+const testWaitTimeout = 60 * time.Second
+
+// Navigate's internal load-event ceiling needs the same headroom: the same
+// windows-latest starvation that blows the WaitFor budget also showed first
+// loads of local fixture pages exceeding the 30s production default. The
+// click→download attribution window gets the same treatment: a starved runner
+// delivered downloadWillBegin more than 5s after the click that caused it.
+func init() {
+	navigateLoadTimeout = 90 * time.Second
+	downloadAttributionWindow = 30 * time.Second
+}
+
+// testChromeArgs trims Chrome's background work so a cold start on a starved
+// CI runner spends its two cores on the page under test instead of crashpad,
+// component updates, field trials, and sync. All tests run a throwaway profile
+// against local fixture servers, so none of these features are load-bearing
+// (and --no-sandbox is safe for the same reason: nothing untrusted is loaded).
+var testChromeArgs = []string{
+	"--no-sandbox",
+	"--disable-background-networking",
+	"--disable-background-timer-throttling",
+	"--disable-backgrounding-occluded-windows",
+	"--disable-breakpad",
+	"--disable-client-side-phishing-detection",
+	"--disable-component-update",
+	"--disable-default-apps",
+	"--disable-dev-shm-usage",
+	"--disable-domain-reliability",
+	"--disable-extensions",
+	"--disable-hang-monitor",
+	"--disable-ipc-flooding-protection",
+	"--disable-popup-blocking",
+	"--disable-prompt-on-repost",
+	"--disable-renderer-backgrounding",
+	"--disable-sync",
+	"--metrics-recording-only",
+	"--mute-audio",
+}
 
 // fixtureHTML reproduces the awkward shape of the real target system:
 //   - the download button only appears after a search (no pre-constructable URL)
@@ -61,7 +99,7 @@ func newBrowser(t *testing.T, ctx context.Context) *Browser {
 	if _, err := findChrome(""); err != nil {
 		t.Skipf("chrome not available: %v", err)
 	}
-	b, err := Launch(ctx, LaunchOptions{Headless: true})
+	b, err := Launch(ctx, LaunchOptions{Headless: true, ExtraArgs: testChromeArgs})
 	if err != nil {
 		// A loaded CI runner ships Chrome (so findChrome passes) but launching
 		// it headless intermittently times out reading DevToolsActivePort —
@@ -81,7 +119,7 @@ func newBrowser(t *testing.T, ctx context.Context) *Browser {
 // the owned backend: search, wait for the dynamically-appearing button, click
 // it, and capture the client-side-generated file.
 func TestSearchThenDownload(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -137,7 +175,7 @@ func TestSearchThenDownload(t *testing.T) {
 // and attach to it (rather than opening a fresh one), as when reusing the user's
 // logged-in session.
 func TestAttachExistingPage(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(fixtureHTML))
@@ -185,7 +223,7 @@ func TestAttachExistingPage(t *testing.T) {
 // TestUpload sets a file on a file input via DOM.setFileInputFiles (no OS
 // dialog) and verifies the page sees it — the upload primitive.
 func TestUpload(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>up</title><input type="file" id="f">`))
@@ -222,7 +260,7 @@ func TestUpload(t *testing.T) {
 // TestHover verifies a trusted pointer move fires real hover DOM events (which
 // synthetic JS events / CSS :hover can't be driven by otherwise).
 func TestHover(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>h</title>
@@ -256,7 +294,7 @@ document.getElementById('t').addEventListener('mouseover',function(){window.hove
 // TestSelectOption picks a native <select> option and verifies the value + that
 // change fired.
 func TestSelectOption(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>s</title>
@@ -296,7 +334,7 @@ func TestSelectOption(t *testing.T) {
 // " >>> " piercing convention (wait, then a trusted click that lands through
 // the computed frame offset). Same-origin as in Klook's admin system.
 func TestSameOriginFrame(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/child" {
@@ -448,7 +486,7 @@ func TestDialError(t *testing.T) {
 // DevToolsActivePort — the path used to reuse a logged-in browser without
 // relaunching (and without /json, which recent Chrome disables).
 func TestConnectViaProfile(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	if !ChromeAvailable("") {
 		t.Skip("chrome not available")
@@ -479,7 +517,7 @@ func TestConnectViaProfile(t *testing.T) {
 
 // TestPrimitives covers eval / screenshot / ax-tree / key on the fixture.
 func TestPrimitives(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(fixtureHTML))
@@ -530,7 +568,7 @@ func TestPrimitives(t *testing.T) {
 // has open. Regression guard for the bug where attaching to a running Chrome
 // hijacked pages[0] (the octo web UI itself) and navigated it away.
 func TestNewPageLeavesOtherTabsUntouched(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	b := newBrowser(t, ctx)
 	defer b.Close()
@@ -575,7 +613,7 @@ func TestNewPageLeavesOtherTabsUntouched(t *testing.T) {
 // not valid CSS; querySelector throws. We should surface an actionable message
 // (not a bare "eval threw: Uncaught") so the model switches to a CSS selector.
 func TestClick_InvalidSelectorMessage(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	b := newBrowser(t, ctx)
 	defer b.Close()
@@ -606,7 +644,7 @@ func TestClick_InvalidSelectorMessage(t *testing.T) {
 // TestClick_PlaywrightSelectors verifies the supported Playwright subset
 // actually resolves and clicks the right element.
 func TestClick_PlaywrightSelectors(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	b := newBrowser(t, ctx)
 	defer b.Close()
@@ -650,7 +688,7 @@ func TestClick_PlaywrightSelectors(t *testing.T) {
 // replace that entry, so going Back from a later page lands on the first real
 // page — not the blank tab octo opened.
 func TestNavigate_ReplacesInitialBlank(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	b := newBrowser(t, ctx)
 	defer b.Close()
