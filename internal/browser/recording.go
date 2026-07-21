@@ -133,6 +133,22 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 		s.Params = append(s.Params, p)
 		return nm
 	}
+	// addDownloadOutput auto-declares a file[] Output for a download step to bind
+	// the captured file to, so downstream steps / the workflow can use it.
+	outSeen := map[string]bool{}
+	addDownloadOutput := func(filename string) string {
+		root := slugParam(filename)
+		if root == "" {
+			root = "downloaded_file"
+		}
+		nm := root
+		for i := 2; outSeen[nm]; i++ {
+			nm = fmt.Sprintf("%s%d", root, i)
+		}
+		outSeen[nm] = true
+		s.Outputs = append(s.Outputs, Output{Name: nm, Type: "file[]"})
+		return nm
+	}
 	for _, e := range events {
 		if e.Type == "navigate" {
 			// Skip an echo of the page we're already on (start URL or the prior nav).
@@ -171,6 +187,17 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 			case "element":
 				st.Selector = e.Selector
 			}
+			s.Steps = append(s.Steps, st)
+			continue
+		}
+		if e.Type == "download" {
+			// Auto-detected download: a click that triggered a browser download.
+			// Emit a download step that replay uses to capture the file. Bind the
+			// captured file path to an auto-declared output so downstream steps or
+			// the workflow can use it.
+			st := Step{Action: "download", Frame: e.Frame, Selector: e.Selector, Label: e.Text, Hint: e.Field}
+			outName := addDownloadOutput(e.DownloadName)
+			st.Bind = outName
 			s.Steps = append(s.Steps, st)
 			continue
 		}
@@ -355,8 +382,9 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 		"(2) Drop redundant back-and-forth and retries; keep the intended linear path. " +
 		"(3) Replace user-specific input values with {{param}} and declare each in params (keep upload's {{file}}, every declared param name, and any secret: true marker unchanged). " +
 		"(4) Preserve step order and all navigate steps. " +
-		"(5) Write description as a short statement of what the workflow does. " +
-		"Output ONLY the recording as YAML (keys: name, description, params, steps), no prose, no code fences."
+		"(5) Preserve every download step and its bind (keep every declared output name and its type: file[] unchanged — do not drop or rename outputs). " +
+		"(6) Write description as a short statement of what the workflow does. " +
+		"Output ONLY the recording as YAML (keys: name, description, params, outputs, steps), no prose, no code fences."
 	user := fmt.Sprintf("Baseline (the only valid selectors are those here):\n%s\n\nRaw events in order:\n%s\n\nReturn the cleaned recording YAML.", baseYAML, renderTrace(events))
 
 	out, err := gen(ctx, system, user)

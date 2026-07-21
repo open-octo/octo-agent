@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -17,7 +18,7 @@ import (
 // for. WaitKind is "network" (wait for fetch/XHR to settle) or "element" (wait
 // for Selector to appear). TimeoutMS caps how long to wait.
 type RecordedEvent struct {
-	Type       string `json:"type"`     // click | change | upload | navigate | enter | wait
+	Type       string `json:"type"`     // click | change | upload | navigate | enter | wait | download
 	Selector   string `json:"selector"` // best-effort CSS selector within its document
 	Frame      string `json:"frame"`    // iframe selector when the target is in a child frame
 	Tag        string `json:"tag"`      // target tagName (SELECT/INPUT/…), so replay picks the right action
@@ -28,6 +29,7 @@ type RecordedEvent struct {
 	URL        string `json:"url"`      // document URL at capture time
 	WaitKind   string `json:"wait_kind,omitempty"`   // wait: "network" | "element"
 	TimeoutMS  int    `json:"timeout_ms,omitempty"`  // wait: cap in ms
+	DownloadName string `json:"download_name,omitempty"` // download: suggested filename from CDP
 }
 
 // Recorder captures a user's actions on a page by injecting a DOM listener that
@@ -40,10 +42,16 @@ type Recorder struct {
 	events []RecordedEvent
 	unsubs []func()
 	seen   map[string]bool // sessions already instrumented (avoid double-install)
+
+	// lastClickIdx / lastClickAt track the most recent click so a later
+	// Browser.downloadWillBegin can upgrade it to a download event — the file
+	// arrives after the click that triggered it. -1 means no recent click.
+	lastClickIdx int
+	lastClickAt  time.Time
 }
 
 // NewRecorder creates a recorder bound to a page.
-func NewRecorder(page *Page) *Recorder { return &Recorder{page: page, seen: map[string]bool{}} }
+func NewRecorder(page *Page) *Recorder { return &Recorder{page: page, seen: map[string]bool{}, lastClickIdx: -1} }
 
 // claimSession atomically records a session as instrumented, returning false if
 // it already was — the guarded compare-and-set that lets Start and the
@@ -68,14 +76,80 @@ func (r *Recorder) releaseSession(session string) {
 
 // addEvent appends a captured event, forcing frame to frameSel when the event
 // came from a cross-origin iframe session (whose own window.frameElement is
-// unreadable, so the script couldn't tag it).
+// unreadable, so the script couldn't tag it). Click events are tracked so a later
+// Browser.downloadWillBegin can upgrade the click to a download event.
 func (r *Recorder) addEvent(re RecordedEvent, frameSel string) {
 	if frameSel != "" {
 		re.Frame = frameSel
 	}
 	r.mu.Lock()
+	if re.Type == "click" {
+		r.lastClickIdx = len(r.events)
+		r.lastClickAt = time.Now()
+	}
 	r.events = append(r.events, re)
 	r.mu.Unlock()
+}
+
+// upgradeLastClickToDownload upgrades the most recent click event to a "download"
+// event with the given filename — called when Browser.downloadWillBegin fires
+// within a short window after the click that triggered it. No-op if the click is
+// too old or already consumed.
+func (r *Recorder) upgradeLastClickToDownload(filename string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	idx := r.lastClickIdx
+	if idx < 0 || idx >= len(r.events) {
+		return
+	}
+	if time.Since(r.lastClickAt) > 5*time.Second {
+		return
+	}
+	ev := r.events[idx]
+	if ev.Type != "click" {
+		return
+	}
+	ev.Type = "download"
+	ev.DownloadName = filename
+	r.events[idx] = ev
+	r.lastClickIdx = -1 // consumed
+}
+
+// watchDownloads subscribes to Browser.downloadWillBegin globally (the browser-
+// wide session, since downloads are not page-scoped). When a download begins
+// shortly after a recorded click, that click is upgraded to a "download" event
+// with the captured filename — CompileRecording then emits a download step that
+// replay uses to capture the file.
+func (r *Recorder) watchDownloads(ctx context.Context) {
+	// Enable the Browser domain (idempotent) and configure download behavior so
+	// Chrome emits downloadWillBegin. eventsEnabled is required — without it the
+	// event never fires. Downloads during recording land in a temp dir that is
+	// cleaned up when the browser closes; only the event metadata is kept.
+	_, _ = r.page.cli.call(ctx, "", "Browser.enable", nil)
+	dlDir, err := os.MkdirTemp("", "octo-rec-dl-*")
+	if err != nil {
+		dlDir = ""
+	}
+	_, _ = r.page.cli.call(ctx, "", "Browser.setDownloadBehavior", map[string]any{
+		"behavior":      "allow",
+		"downloadPath":  dlDir,
+		"eventsEnabled": true,
+	})
+	dlEvents, unsub := r.page.cli.subscribe("Browser.downloadWillBegin", "")
+	r.mu.Lock()
+	r.unsubs = append(r.unsubs, unsub)
+	r.mu.Unlock()
+	go func() {
+		for ev := range dlEvents {
+			var w struct {
+				SuggestedFilename string `json:"suggestedFilename"`
+			}
+			if json.Unmarshal(ev.Params, &w) != nil {
+				continue
+			}
+			r.upgradeLastClickToDownload(w.SuggestedFilename)
+		}
+	}()
 }
 
 // instrumentSession installs the capture binding + listeners on one CDP session
@@ -310,6 +384,9 @@ func (r *Recorder) Start(ctx context.Context) error {
 	if err := r.instrumentSession(ctx, p.sessionID, ""); err != nil {
 		return err
 	}
+	// Watch for downloads triggered by clicks in any page: the click records as
+	// a plain click, then Browser.downloadWillBegin retroactively upgrades it.
+	r.watchDownloads(ctx)
 	// Instrument cross-origin iframes: those already present, and any that attach
 	// during the demonstration (so gestures inside a payment/OAuth/captcha frame
 	// are captured, tagged with the parent selector replay routes back into).

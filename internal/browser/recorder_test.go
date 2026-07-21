@@ -624,3 +624,93 @@ func TestRecorderCapturesSPANavigation(t *testing.T) {
 		t.Fatalf("subframe SPA routing should be ignored: %+v", rec.Events())
 	}
 }
+
+// TestAutoDownloadDetection: a click that triggers a browser download is
+// upgraded to a "download" event with the suggested filename — so the compiled
+// recording emits a download step that replay uses to capture the file.
+func TestAutoDownloadDetection(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/file.xlsx", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		w.Header().Set("Content-Disposition", `attachment; filename="report.xlsx"`)
+		w.Write([]byte("xlsx-bytes"))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>dl</title><a id="dl" href="/file.xlsx" download>Export</a>`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#dl", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	rec := NewRecorder(page)
+	if err := rec.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer rec.Stop()
+
+	if err := page.Click(ctx, "#dl"); err != nil {
+		t.Fatalf("click: %v", err)
+	}
+	// Wait for the click to be upgraded to a download event.
+	found := false
+	for i := 0; i < 50; i++ {
+		time.Sleep(100 * time.Millisecond)
+		for _, e := range rec.Events() {
+			if e.Type == "download" && e.DownloadName == "report.xlsx" {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected click to be upgraded to download event, got: %+v", rec.Events())
+	}
+}
+
+// TestCompileRecordingDownloadEvent: a download event compiles to a download step
+// with an auto-declared file[] output binding.
+func TestCompileRecordingDownloadEvent(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "click", Selector: "#b", Tag: "BUTTON"},
+		{Type: "download", Selector: "#dl", Tag: "A", DownloadName: "report.xlsx"},
+	}
+	rec := CompileRecording("test", "test desc", "", events)
+	if len(rec.Steps) != 2 {
+		t.Fatalf("expected 2 steps, got %d: %+v", len(rec.Steps), rec.Steps)
+	}
+	dl := rec.Steps[1]
+	if dl.Action != "download" {
+		t.Fatalf("expected download step, got %+v", dl)
+	}
+	if dl.Selector != "#dl" {
+		t.Fatalf("download selector wrong: %+v", dl)
+	}
+	if dl.Bind == "" {
+		t.Fatalf("download step should bind to an output")
+	}
+	// Output must be declared as file[].
+	var found bool
+	for _, o := range rec.Outputs {
+		if o.Name == dl.Bind {
+			found = true
+			if o.Type != "file[]" {
+				t.Fatalf("output %q should be file[], got %q", o.Name, o.Type)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("bind %q not declared in outputs %+v", dl.Bind, rec.Outputs)
+	}
+}
