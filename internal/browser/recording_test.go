@@ -1397,3 +1397,324 @@ func TestReplayVerifyErrorRedactsSecret(t *testing.T) {
 		t.Fatalf("error should name the placeholder, got: %v", err)
 	}
 }
+
+// TestCompressEventsOverwrite: consecutive type/change on the same selector with
+// no side effect between is compressed to the last one (the earlier value is
+// overwritten).
+func TestCompressEventsOverwrite(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "navigate", URL: "https://x/start"},
+		{Type: "click", Selector: "#field", Tag: "INPUT"},
+		{Type: "change", Selector: "#field", Tag: "INPUT", Value: "A"},
+		{Type: "change", Selector: "#field", Tag: "INPUT", Value: "AB"},
+		{Type: "change", Selector: "#field", Tag: "INPUT", Value: "ABC"},
+		{Type: "click", Selector: "#submit", Tag: "BUTTON"},
+	}
+	got := compressEvents(events)
+	// navigate + click #field + 1 change (#field ends up ABC) + click #submit
+	if len(got) != 4 {
+		t.Fatalf("expected 4 events after overwrite compression, got %d: %+v", len(got), got)
+	}
+	if got[2].Value != "ABC" {
+		t.Fatalf("expected surviving field value to be ABC, got %q", got[2].Value)
+	}
+}
+
+// TestCompressEventsABABacktrack: click A → click B → click A is compressed to a
+// single click A (the detour and return click are dropped).
+func TestCompressEventsABABacktrack(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "click", Selector: "#tab-climate", Tag: "A"},
+		{Type: "click", Selector: "#tab-weather", Tag: "A"},
+		{Type: "click", Selector: "#tab-climate", Tag: "A"},
+		{Type: "click", Selector: "#submit", Tag: "BUTTON"},
+	}
+	got := compressEvents(events)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 events (climate + submit), got %d: %+v", len(got), got)
+	}
+	if got[0].Selector != "#tab-climate" || got[1].Selector != "#submit" {
+		t.Fatalf("wrong selectors after A-B-A compression: %+v", got)
+	}
+}
+
+// TestCompressEventsPreservesSideEffects: a type → navigate → type on the same
+// selector is NOT compressed — the navigate is a side effect.
+func TestCompressEventsPreservesSideEffects(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "change", Selector: "#q", Tag: "INPUT", Value: "wrong"},
+		{Type: "navigate", URL: "https://x/other"},
+		{Type: "change", Selector: "#q", Tag: "INPUT", Value: "right"},
+	}
+	got := compressEvents(events)
+	if len(got) != 3 {
+		t.Fatalf("side-effect event should block compression, got %d: %+v", len(got), got)
+	}
+}
+
+// TestSummarizeRecording: each step is rendered as a numbered line with its
+// verification check, and navigate auto-attaches a URL check.
+func TestSummarizeRecording(t *testing.T) {
+	r := Recording{
+		Description: "demo report",
+		Steps: []Step{
+			{Action: "navigate", URL: "https://example.com/report?report_id=118240"},
+			{Action: "click", Selector: "#date-input", Label: "打开日期选择器"},
+			{Action: "wait", Network: true, TimeoutMS: 10000},
+			{Action: "download", Selector: "#dl-btn", Bind: "report_file"},
+		},
+	}
+	out := SummarizeRecording(r)
+	// Has description header.
+	if !strings.Contains(out, "demo report") {
+		t.Fatalf("summary missing description, got %q", out)
+	}
+	// Step numbering 1..4.
+	for _, n := range []string{"1.", "2.", "3.", "4."} {
+		if !strings.Contains(out, n) {
+			t.Fatalf("summary missing step %s, got %q", n, out)
+		}
+	}
+	// Navigate line has URL check.
+	if !strings.Contains(out, "example.com") {
+		t.Fatalf("navigate summary missing URL check, got %q", out)
+	}
+	// Wait network line describes network settle.
+	if !strings.Contains(out, "网络") {
+		t.Fatalf("wait summary missing network check, got %q", out)
+	}
+	// Download line mentions file binding.
+	if !strings.Contains(out, "report_file") {
+		t.Fatalf("download summary missing bind, got %q", out)
+	}
+	// Asks user to confirm.
+	if !strings.Contains(out, "确认") {
+		t.Fatalf("summary missing confirmation prompt, got %q", out)
+	}
+}
+
+// TestScoreAnchorCandidate: the fingerprint-match scoring — exact text beats
+// contains, each signal contributes its weight, absent fingerprint signals
+// contribute nothing.
+func TestScoreAnchorCandidate(t *testing.T) {
+	a := &Anchors{Role: "gridcell", Tag: "td", NeighborText: "开始日期"}
+	cases := []struct {
+		name string
+		c    anchorCandidate
+		want int
+	}{
+		{"full match", anchorCandidate{Text: "20", Role: "gridcell", Tag: "td", Neighbor: true}, 4 + 2 + 2 + 1},
+		{"contains text", anchorCandidate{Text: "x20x", Role: "gridcell", Tag: "td", Neighbor: true}, 2 + 2 + 2 + 1},
+		{"wrong everything", anchorCandidate{Text: "删除", Role: "button", Tag: "a", Neighbor: false}, 0},
+		{"tag only", anchorCandidate{Text: "删除", Tag: "TD"}, 1}, // tag compare is case-insensitive
+		{"neighbor only", anchorCandidate{Neighbor: true}, 2},
+	}
+	for _, tc := range cases {
+		if got := scoreAnchorCandidate(tc.c, "20", a); got != tc.want {
+			t.Errorf("%s: score=%d want %d", tc.name, got, tc.want)
+		}
+	}
+	// Empty label: text contributes nothing even on a would-be match.
+	if got := scoreAnchorCandidate(anchorCandidate{Text: "20", Tag: "td"}, "", a); got != 1 {
+		t.Errorf("empty label should skip text scoring, got %d", got)
+	}
+}
+
+// TestPickAnchorCandidate: threshold (must EXCEED half the achievable max),
+// tie-breaking toward primary/alt-found candidates, and ambiguity failure.
+func TestPickAnchorCandidate(t *testing.T) {
+	a := &Anchors{Tag: "button", NeighborText: "操作"}
+	label := "导出" // max = 4 + 2 + 1 = 7, acceptance needs score >= 4
+
+	// The right element wins over a positional impostor.
+	right := anchorCandidate{Sel: "#right", Text: "导出", Tag: "button", Neighbor: true, Via: "scan"}
+	wrong := anchorCandidate{Sel: "#wrong", Text: "删除", Tag: "button", Neighbor: true, Via: "primary"}
+	sel, ok := pickAnchorCandidate([]anchorCandidate{wrong, right}, label, a)
+	if !ok || sel != "#right" {
+		t.Fatalf("expected #right to win, got %q ok=%v", sel, ok)
+	}
+
+	// Below threshold: tag+neighbor (3) does not exceed 7/2 rounded — refuse.
+	weak := anchorCandidate{Sel: "#weak", Text: "删除", Tag: "button", Neighbor: true, Via: "primary"}
+	if sel, ok := pickAnchorCandidate([]anchorCandidate{weak}, label, a); ok {
+		t.Fatalf("weak candidate should be refused, got %q", sel)
+	}
+
+	// Score tie between primary and scan: primary wins.
+	p := anchorCandidate{Sel: "#p", Text: "导出", Tag: "button", Neighbor: true, Via: "primary"}
+	s := anchorCandidate{Sel: "#s", Text: "导出", Tag: "button", Neighbor: true, Via: "scan"}
+	sel, ok = pickAnchorCandidate([]anchorCandidate{s, p}, label, a)
+	if !ok || sel != "#p" {
+		t.Fatalf("tie should break toward primary, got %q ok=%v", sel, ok)
+	}
+
+	// Tie between two scan-found candidates: ambiguous, refuse.
+	s2 := anchorCandidate{Sel: "#s2", Text: "导出", Tag: "button", Neighbor: true, Via: "scan"}
+	if sel, ok := pickAnchorCandidate([]anchorCandidate{s, s2}, label, a); ok {
+		t.Fatalf("scan tie should be ambiguous, got %q", sel)
+	}
+
+	// Empty fingerprint: nothing to score against, refuse.
+	if sel, ok := pickAnchorCandidate([]anchorCandidate{right}, "", &Anchors{}); ok {
+		t.Fatalf("empty fingerprint should refuse, got %q", sel)
+	}
+}
+
+// TestAnchorsCompileIntoSteps: captured anchor facts land on the compiled step
+// (tag lowercased); an event without anchor facts compiles with nil Anchors so
+// replay keeps the legacy resolution path.
+func TestAnchorsCompileIntoSteps(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "click", Selector: "td.cell", Tag: "TD", Text: "20",
+			AltSelectors: []string{"td:nth-of-type(2)"}, Role: "gridcell", NeighborText: "开始日期"},
+		{Type: "click", Selector: "#plain", Tag: "BUTTON", Text: "Go"},
+	}
+	s := CompileRecording("demo", "", "", events)
+	if len(s.Steps) != 2 {
+		t.Fatalf("want 2 steps, got %d: %+v", len(s.Steps), s.Steps)
+	}
+	a := s.Steps[0].Anchors
+	if a == nil {
+		t.Fatal("anchored event should compile with Anchors")
+	}
+	if a.Role != "gridcell" || a.Tag != "td" || a.NeighborText != "开始日期" || len(a.Selectors) != 1 {
+		t.Fatalf("anchors wrong: %+v", a)
+	}
+	if s.Steps[1].Anchors != nil {
+		t.Fatalf("plain event should compile with nil Anchors: %+v", s.Steps[1].Anchors)
+	}
+}
+
+// TestAnchorsYAMLRoundTrip: anchors survive Marshal/Parse; YAML written before
+// anchors existed parses to nil Anchors (legacy path preserved).
+func TestAnchorsYAMLRoundTrip(t *testing.T) {
+	s := Recording{Name: "demo", Steps: []Step{{
+		Action: "click", Selector: "td.cell", Label: "20",
+		Anchors: &Anchors{Selectors: []string{"td:nth-of-type(2)"}, Role: "gridcell", Tag: "td", NeighborText: "开始日期"},
+	}}}
+	data, err := MarshalRecording(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := ParseRecording(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := back.Steps[0].Anchors
+	if a == nil || a.Role != "gridcell" || a.NeighborText != "开始日期" || len(a.Selectors) != 1 {
+		t.Fatalf("anchors did not round-trip: %+v", a)
+	}
+
+	legacy := []byte("name: old\nsteps:\n  - action: click\n    selector: \"#b\"\n")
+	old, err := ParseRecording(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.Steps[0].Anchors != nil {
+		t.Fatalf("legacy yaml should parse with nil Anchors: %+v", old.Steps[0].Anchors)
+	}
+}
+
+// TestGenerateRecordingBackfillsAnchors: the distiller routinely drops anchors
+// blocks when rewriting steps; GenerateRecording re-attaches them from the
+// baseline by frame+selector, so replay still gets the fingerprint.
+func TestGenerateRecordingBackfillsAnchors(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "click", Selector: "td.cell", Tag: "TD", Text: "20",
+			AltSelectors: []string{"td:nth-of-type(2)"}, Role: "gridcell", NeighborText: "开始日期"},
+	}
+	gen := func(_ context.Context, _, _ string) (string, error) {
+		// A refined recording using only baseline selectors but WITHOUT anchors.
+		return "name: demo\ndescription: picks a date\nsteps:\n  - action: click\n    selector: td.cell\n    label: \"20\"\n", nil
+	}
+	out := GenerateRecording(context.Background(), "demo", "", events, gen)
+	if out.Description != "picks a date" {
+		t.Fatalf("distilled description lost: %+v", out)
+	}
+	a := out.Steps[0].Anchors
+	if a == nil || a.Role != "gridcell" || a.NeighborText != "开始日期" {
+		t.Fatalf("anchors not backfilled from baseline: %+v", a)
+	}
+}
+
+// TestReplayAnchorsSurviveClassDrift: the recording was made against build A
+// (hashed CSS-in-JS classes, buttons in one order); the live page is build B —
+// every class hash changed AND the buttons swapped order, so both the primary
+// selector and the positional alternate now point at the WRONG button. The
+// fingerprint (visible text + tag + neighbor text) must still land the click on
+// the right one.
+func TestReplayAnchorsSurviveClassDrift(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>drift</title>
+<div><span>操作</span><button class="css-z9y8x7" onclick="window.__hit='delete'">删除</button><button class="css-q5w6e7" onclick="window.__hit='export'">导出</button></div>`))
+	}))
+	defer srv.Close()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	rec := Recording{Name: "drift", Steps: []Step{{
+		Action:   "click",
+		Selector: "button.css-a1b2c3", // record-time hash — matches nothing now
+		Label:    "导出",
+		Anchors: &Anchors{
+			Selectors:    []string{"div > button:nth-of-type(1)"}, // positional alternate — now the WRONG button
+			Tag:          "button",
+			NeighborText: "操作",
+		},
+	}}}
+	if _, _, _, err := ReplayRecording(ctx, page, &rec, nil, ReplayOptions{Browser: b, StepTimeout: 10 * time.Second}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	var hit string
+	if err := page.Eval(ctx, "window.__hit||''", &hit); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if hit != "export" {
+		t.Fatalf("expected the 导出 button to be clicked, got %q", hit)
+	}
+}
+
+// TestReplayAnchorsRefuseWrongElement: the primary selector still MATCHES an
+// element — but the wrong one (the recorded 导出 button is gone). Legacy replay
+// would click it silently; anchored replay must refuse with a fingerprint error
+// and must not click anything.
+func TestReplayAnchorsRefuseWrongElement(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>wrong</title>
+<div><button class="btn-main" onclick="window.__hit='delete'">删除</button></div>`))
+	}))
+	defer srv.Close()
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	rec := Recording{Name: "wrong", Steps: []Step{{
+		Action:   "click",
+		Selector: "button.btn-main", // matches — but it's 删除 now, not 导出
+		Label:    "导出",
+		Anchors:  &Anchors{Tag: "button", NeighborText: "下载区"},
+	}}}
+	_, _, _, err = ReplayRecording(ctx, page, &rec, nil, ReplayOptions{Browser: b, StepTimeout: 2 * time.Second})
+	if err == nil {
+		t.Fatal("replay should have refused the fingerprint mismatch")
+	}
+	if !strings.Contains(err.Error(), "fingerprint") {
+		t.Fatalf("error should describe the fingerprint mismatch, got: %v", err)
+	}
+	var hit string
+	if err := page.Eval(ctx, "window.__hit||''", &hit); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if hit != "" {
+		t.Fatalf("nothing should have been clicked, got %q", hit)
+	}
+}

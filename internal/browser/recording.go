@@ -64,12 +64,30 @@ type Step struct {
 	// when the positional Selector drifts, replay re-locates the field by Hint
 	// before giving up to the healer — the field-input analogue of Label steering
 	// a click by visible text.
-	Hint      string  `yaml:"hint,omitempty"`
-	Bind      string  `yaml:"bind,omitempty"`       // download/extract: write the produced value into this named Output
-	JS        string  `yaml:"js,omitempty"`         // extract: expression whose value is bound
-	Network   bool    `yaml:"network,omitempty"`    // wait: settle for network (fetch/XHR) idle instead of a fixed delay
-	TimeoutMS int     `yaml:"timeout_ms,omitempty"` // wait: fixed delay (ms) when no selector; also caps the network-idle settle
-	Verify    *Verify `yaml:"verify,omitempty"`
+	Hint      string   `yaml:"hint,omitempty"`
+	Bind      string   `yaml:"bind,omitempty"`       // download/extract: write the produced value into this named Output
+	JS        string   `yaml:"js,omitempty"`         // extract: expression whose value is bound
+	Network   bool     `yaml:"network,omitempty"`    // wait: settle for network (fetch/XHR) idle instead of a fixed delay
+	TimeoutMS int      `yaml:"timeout_ms,omitempty"` // wait: fixed delay (ms) when no selector; also caps the network-idle settle
+	Verify    *Verify  `yaml:"verify,omitempty"`
+	Anchors   *Anchors `yaml:"anchors,omitempty"` // element fingerprint for scored re-identification (nil = legacy resolution)
+}
+
+// Anchors is a step target's fingerprint: redundant identification signals
+// captured at record time so replay can re-identify the element by scoring
+// (resolveAnchoredTarget) instead of trusting one selector. Selectors are
+// alternates built with different strategies than Step.Selector; Role/Tag are
+// the element's role attribute and tag name; NeighborText is the nearest stable
+// label-like text next to it. The step's visible text lives in Step.Label. A
+// nil Anchors keeps the legacy resolution paths — old YAML replays unchanged.
+//
+// A pointer field keeps Step comparable (recoverStep relies on *step == before);
+// the healer never mutates Anchors, so pointer identity is the right semantics.
+type Anchors struct {
+	Selectors    []string `yaml:"selectors,omitempty"`
+	Role         string   `yaml:"role,omitempty"`
+	Tag          string   `yaml:"tag,omitempty"`
+	NeighborText string   `yaml:"neighbor_text,omitempty"`
 }
 
 // Verify is an optional post-step assertion. Exists waits for a selector; Text
@@ -101,6 +119,11 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 	// catch a repeated `type` afterwards, because each gets a distinct {{param}}
 	// placeholder as its value — so a spurious extra param+step would survive.
 	events = dedupeConsecutiveEvents(events)
+	// Layer-1 deterministic compression: drop provably-redundant events (typing
+	// corrections, select corrections) before the LLM distill sees them — keeps
+	// the baseline clean and reduces the chance the distiller hallucinates a
+	// reason to keep a fumble.
+	events = compressEvents(events)
 	s := Recording{Name: name, Description: description}
 	if startURL != "" && startURL != "about:blank" {
 		s.Steps = append(s.Steps, navStep(startURL))
@@ -133,6 +156,22 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 		s.Params = append(s.Params, p)
 		return nm
 	}
+	// addDownloadOutput auto-declares a file[] Output for a download step to bind
+	// the captured file to, so downstream steps / the workflow can use it.
+	outSeen := map[string]bool{}
+	addDownloadOutput := func(filename string) string {
+		root := slugParam(filename)
+		if root == "" {
+			root = "downloaded_file"
+		}
+		nm := root
+		for i := 2; outSeen[nm]; i++ {
+			nm = fmt.Sprintf("%s%d", root, i)
+		}
+		outSeen[nm] = true
+		s.Outputs = append(s.Outputs, Output{Name: nm, Type: "file[]"})
+		return nm
+	}
 	for _, e := range events {
 		if e.Type == "navigate" {
 			// Skip an echo of the page we're already on (start URL or the prior nav).
@@ -159,10 +198,36 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 			s.Steps = append(s.Steps, up)
 			continue
 		}
+		if e.Type == "wait" {
+			// Auto-inserted wait: the recorder detected a condition the next step
+			// depends on (network activity, a modal appearing). Emit a wait step so
+			// the next action only fires once the page has settled.
+			st := Step{Action: "wait", Frame: e.Frame}
+			switch e.WaitKind {
+			case "network":
+				st.Network = true
+				st.TimeoutMS = e.TimeoutMS
+			case "element":
+				st.Selector = e.Selector
+			}
+			s.Steps = append(s.Steps, st)
+			continue
+		}
+		if e.Type == "download" {
+			// Auto-detected download: a click that triggered a browser download.
+			// Emit a download step that replay uses to capture the file. Bind the
+			// captured file path to an auto-declared output so downstream steps or
+			// the workflow can use it.
+			st := Step{Action: "download", Frame: e.Frame, Selector: e.Selector, Label: e.Text, Hint: e.Field, Anchors: eventAnchors(e)}
+			outName := addDownloadOutput(e.DownloadName)
+			st.Bind = outName
+			s.Steps = append(s.Steps, st)
+			continue
+		}
 		if e.Selector == "" {
 			continue
 		}
-		st := Step{Frame: e.Frame, Selector: e.Selector, Label: e.Text, Hint: e.Field}
+		st := Step{Frame: e.Frame, Selector: e.Selector, Label: e.Text, Hint: e.Field, Anchors: eventAnchors(e)}
 		switch {
 		case e.Type == "click":
 			st.Action = "click"
@@ -203,7 +268,7 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 					desc = "secret value (not stored; provide at replay)"
 				}
 				pn := addParam(hint, e.Value, desc, e.Secret)
-				s.Steps = append(s.Steps, Step{Action: "type", Frame: e.Frame, Selector: e.Selector, Label: e.Text, Hint: hint, Value: "{{" + pn + "}}"})
+				s.Steps = append(s.Steps, Step{Action: "type", Frame: e.Frame, Selector: e.Selector, Label: e.Text, Hint: hint, Value: "{{" + pn + "}}", Anchors: eventAnchors(e)})
 			}
 		default:
 			continue
@@ -212,6 +277,111 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 	}
 	s.Steps = dropConsecutiveDupeSteps(s.Steps)
 	return s
+}
+
+// eventAnchors builds a step's Anchors from a captured event's fingerprint
+// fields, or nil when the event carries none (an event captured by an older
+// recorder, or a synthetic one) — nil keeps the legacy resolution paths.
+func eventAnchors(e RecordedEvent) *Anchors {
+	if len(e.AltSelectors) == 0 && e.Role == "" && e.NeighborText == "" {
+		return nil
+	}
+	return &Anchors{
+		Selectors:    e.AltSelectors,
+		Role:         e.Role,
+		Tag:          strings.ToLower(e.Tag),
+		NeighborText: e.NeighborText,
+	}
+}
+
+// compressEvents applies deterministic Layer-1 rules to drop provably-redundant
+// events from a recording BEFORE the LLM distill sees them. These are patterns
+// where a later event makes the earlier one irrelevant AND no side-effect event
+// sits between them that would make the intermediate steps meaningful.
+//
+// Rules (all conservative — each is provably safe):
+//  1. Overwrite typing/selecting: consecutive type|change events on the same
+//     selector (same frame) with no navigate/download/wait/click between → keep
+//     only the last (the earlier value is overwritten / re-selected).
+//  2. A-B-A click backtrack: click A → (only clicks, no nav/wait/download)* →
+//     click A again → delete the detour AND the return click (final state = A
+//     clicked once). Only fires when every intermediate event is a click, because
+//     any non-click intermediate could have done something irreversible.
+//
+// Events are processed in order; the function returns a new slice.
+func compressEvents(events []RecordedEvent) []RecordedEvent {
+	if len(events) < 2 {
+		return events
+	}
+	out := make([]RecordedEvent, 0, len(events))
+	for i := 0; i < len(events); i++ {
+		e := events[i]
+		// Rule 1: same-selector overwrite for type/change — peek at the next
+		// surviving event; if it overwrites us, skip emitting this one.
+		if e.Type == "type" || e.Type == "change" {
+			if j := nextSurvivingClickable(events, i); j >= 0 {
+				nxt := events[j]
+				if nxt.Selector == e.Selector && nxt.Frame == e.Frame &&
+					(nxt.Type == "type" || nxt.Type == "change") &&
+					!hasSideEffectBetween(events, i, j) {
+					continue // overwritten by nxt
+				}
+			}
+		}
+		// Rule 2: A-B-A click backtrack — if this click re-appears later with only
+		// clicks between, this whole stretch is a detour; skip to the last A.
+		if e.Type == "click" && e.Selector != "" {
+			if lastA := findABABacktrack(events, i); lastA > i {
+				out = append(out, e) // emit the first A (final state = clicked A)
+				i = lastA            // skip detour and the return click
+				continue
+			}
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// nextSurvivingClickable returns the index of the next event after i that is a
+// type|change|click, or -1 if none. Used to peek whether a later same-selector
+// event overwrites event i.
+func nextSurvivingClickable(events []RecordedEvent, i int) int {
+	for j := i + 1; j < len(events); j++ {
+		switch events[j].Type {
+		case "type", "change", "click":
+			return j
+		}
+	}
+	return -1
+}
+
+// hasSideEffectBetween reports whether any event between i and j (exclusive) is
+// a state-changing action that would make intermediate steps meaningful:
+// navigate, download, wait, or upload.
+func hasSideEffectBetween(events []RecordedEvent, i, j int) bool {
+	for k := i + 1; k < j; k++ {
+		switch events[k].Type {
+		case "navigate", "download", "wait", "upload":
+			return true
+		}
+	}
+	return false
+}
+
+// findABABacktrack looks for a later click with the same selector as events[i],
+// where EVERY event between i and that later click is itself a click. Returns the
+// index of the later matching click, or -1 if none qualifies.
+func findABABacktrack(events []RecordedEvent, i int) int {
+	for j := i + 1; j < len(events); j++ {
+		mid := events[j]
+		if mid.Type != "click" {
+			return -1 // non-click intermediate — can't safely compress
+		}
+		if mid.Selector == events[i].Selector && mid.Frame == events[i].Frame {
+			return j
+		}
+	}
+	return -1
 }
 
 // navStep builds a navigate step, auto-attaching a URL verify pinned to the
@@ -237,6 +407,103 @@ func hostOf(raw string) string {
 		return ""
 	}
 	return pu.Host
+}
+
+// stepSummaryLine renders one step as a human-readable line describing what it
+// does and what its verification checks (for the agent to recite to the user).
+func stepSummaryLine(i int, s Step) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("%d. ", i+1))
+	switch s.Action {
+	case "navigate":
+		b.WriteString(fmt.Sprintf("→ 导航到 %s", truncate(s.URL, 60)))
+		if s.Verify != nil && s.Verify.URL != "" {
+			b.WriteString(fmt.Sprintf("\n   检查：URL 包含「%s」", s.Verify.URL))
+		} else {
+			b.WriteString("\n   检查：页面加载完成")
+		}
+	case "click":
+		b.WriteString(fmt.Sprintf("→ 点击「%s」", lineLabel(s)))
+		if s.Verify != nil && s.Verify.Exists != "" {
+			b.WriteString(fmt.Sprintf("\n   检查：元素「%s」出现", s.Verify.Exists))
+		} else {
+			b.WriteString(fmt.Sprintf("\n   检查：点击后页面/元素处于预期状态"))
+		}
+	case "type":
+		b.WriteString(fmt.Sprintf("→ 在「%s」中输入", lineLabel(s)))
+		b.WriteString(fmt.Sprintf("\n   检查：字段值为「%s」", s.Value))
+	case "select":
+		b.WriteString(fmt.Sprintf("→ 选择「%s」", lineLabel(s)))
+		b.WriteString(fmt.Sprintf("\n   检查：选项「%s」已选中", s.Value))
+	case "wait":
+		if s.Network {
+			b.WriteString("→ 等待网络请求完成")
+			b.WriteString("\n   检查：数据加载完毕（网络空闲）")
+		} else if s.Selector != "" {
+			b.WriteString(fmt.Sprintf("→ 等待元素「%s」出现", s.Selector))
+			b.WriteString(fmt.Sprintf("\n   检查：元素「%s」可见", s.Selector))
+		} else {
+			b.WriteString(fmt.Sprintf("→ 等待 %dms", s.TimeoutMS))
+			b.WriteString("\n   检查：延迟结束")
+		}
+	case "download":
+		b.WriteString(fmt.Sprintf("→ 下载文件（绑定输出：%s）", s.Bind))
+		b.WriteString("\n   检查：文件已保存到本地")
+	case "extract":
+		b.WriteString(fmt.Sprintf("→ 提取数据（绑定输出：%s）", s.Bind))
+		b.WriteString("\n   检查：数据已写入输出")
+	case "upload":
+		b.WriteString(fmt.Sprintf("→ 上传文件到「%s」", lineLabel(s)))
+		b.WriteString("\n   检查：文件已上传")
+	case "key":
+		b.WriteString(fmt.Sprintf("→ 在「%s」中按 %s", lineLabel(s), s.Value))
+		b.WriteString("\n   检查：提交成功")
+	default:
+		b.WriteString(fmt.Sprintf("→ %s", s.Action))
+	}
+	return b.String()
+}
+
+// lineLabel returns a human-readable name for a step's target: its Label, Hint,
+// or a truncated Selector — so a click reads "点击「提交」" not "点击「#btn」".
+func lineLabel(s Step) string {
+	if s.Label != "" {
+		return s.Label
+	}
+	if s.Hint != "" {
+		return s.Hint
+	}
+	if s.Selector != "" {
+		return truncate(s.Selector, 40)
+	}
+	return "(未识别)"
+}
+
+// truncate cuts s to max runes, appending "…" when it shortens.
+func truncate(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "…"
+}
+
+// SummarizeRecording renders a recording as a numbered, human-readable run-
+// plan with each step's verification check — for the agent to recite back to the
+// user after record_stop so the user can confirm or request changes. Uses the
+// user-facing language (Chinese) by convention; steps are 1-indexed.
+func SummarizeRecording(r Recording) string {
+	var b strings.Builder
+	if r.Description != "" {
+		b.WriteString(fmt.Sprintf("录制描述：%s\n", r.Description))
+	}
+	b.WriteString(fmt.Sprintf("共 %d 步。请确认以下操作步骤：\n", len(r.Steps)))
+	for i, s := range r.Steps {
+		b.WriteString("\n")
+		b.WriteString(stepSummaryLine(i, s))
+	}
+	b.WriteString("\n\n请确认以上步骤是否正确、检验环节是否充分，或告诉我哪里需要修改。")
+	return b.String()
 }
 
 // slugParam reduces a field hint to a safe {{param}} identifier: lowercase, with
@@ -340,8 +607,10 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 		"(2) Drop redundant back-and-forth and retries; keep the intended linear path. " +
 		"(3) Replace user-specific input values with {{param}} and declare each in params (keep upload's {{file}}, every declared param name, and any secret: true marker unchanged). " +
 		"(4) Preserve step order and all navigate steps. " +
-		"(5) Write description as a short statement of what the workflow does. " +
-		"Output ONLY the recording as YAML (keys: name, description, params, steps), no prose, no code fences."
+		"(5) Preserve every download step and its bind (keep every declared output name and its type: file[] unchanged — do not drop or rename outputs). " +
+		"(6) Write description as a short statement of what the workflow does. " +
+		"(7) You may omit each step's anchors block — it is re-attached automatically; never invent one. " +
+		"Output ONLY the recording as YAML (keys: name, description, params, outputs, steps), no prose, no code fences."
 	user := fmt.Sprintf("Baseline (the only valid selectors are those here):\n%s\n\nRaw events in order:\n%s\n\nReturn the cleaned recording YAML.", baseYAML, renderTrace(events))
 
 	out, err := gen(ctx, system, user)
@@ -393,7 +662,30 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 		slog.Warn("browser: recording distill used a selector not in the recording, keeping deterministic baseline steps", "recording", name)
 		return withDescription(base, refined.Description)
 	}
+	backfillAnchors(&refined, base)
 	return refined
+}
+
+// backfillAnchors re-attaches each refined step's Anchors from the baseline step
+// with the same frame+selector. The distiller routinely drops the anchors block
+// when rewriting steps; since selectorsSubset already guarantees every refined
+// selector came from the baseline, the lookup is deterministic — no reliance on
+// the LLM echoing anchors through. Refined steps that already carry anchors are
+// left alone.
+func backfillAnchors(refined *Recording, base Recording) {
+	byTarget := map[string]*Anchors{}
+	for i := range base.Steps {
+		st := &base.Steps[i]
+		if st.Anchors != nil && st.Selector != "" {
+			byTarget[st.Frame+"\x00"+st.Selector] = st.Anchors
+		}
+	}
+	for i := range refined.Steps {
+		st := &refined.Steps[i]
+		if st.Anchors == nil && st.Selector != "" {
+			st.Anchors = byTarget[st.Frame+"\x00"+st.Selector]
+		}
+	}
 }
 
 func withDescription(s Recording, desc string) Recording {
@@ -947,11 +1239,17 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 			}
 		}
 	case "click":
-		// When the recording captured the element's visible text, resolve by text
-		// (verifying or replacing the drift-prone positional selector) — this is
-		// what makes replay survive layout changes and stops silent wrong-element
-		// clicks. resolveClickTarget already polled for existence.
-		if a := strings.TrimSpace(step.Label); len(a) >= 2 {
+		// Anchored steps resolve by fingerprint scoring (and explicitly fail into
+		// the healer on a mismatch — never a blind positional click). Legacy steps
+		// resolve by visible text when the recording captured it, else wait for the
+		// positional selector.
+		if step.Anchors != nil {
+			t, err := page.resolveAnchoredTarget(ctx, step.Frame, step.Selector, step.Label, step.Anchors, waitTimeout)
+			if err != nil {
+				return page, err
+			}
+			target = t
+		} else if a := strings.TrimSpace(step.Label); len(a) >= 2 {
 			target = page.resolveClickTarget(ctx, step.Frame, step.Selector, a, waitTimeout)
 		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return page, err
@@ -963,9 +1261,16 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 		}
 		page = np
 	case "type":
-		// Re-locate the field by its accessible-name hint when the positional
-		// selector drifted (the type/select analogue of a text-anchored click).
-		if h := strings.TrimSpace(step.Hint); h != "" {
+		// Anchored steps resolve by fingerprint (a field with no accessible name
+		// still has its neighbor label); legacy steps re-locate by the accessible-
+		// name hint when the positional selector drifted.
+		if step.Anchors != nil {
+			t, err := page.resolveAnchoredTarget(ctx, step.Frame, step.Selector, step.Label, step.Anchors, waitTimeout)
+			if err != nil {
+				return page, err
+			}
+			target = t
+		} else if h := strings.TrimSpace(step.Hint); h != "" {
 			target = page.resolveFieldTarget(ctx, step.Frame, step.Selector, h, waitTimeout)
 		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return page, err
@@ -991,7 +1296,13 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 		// A recorded Enter in a text input (form submit / autocomplete confirm) —
 		// the only key recorded today. Page.Key dispatches to the focused element,
 		// so focus the field with a real (trusted) click first.
-		if h := strings.TrimSpace(step.Hint); h != "" {
+		if step.Anchors != nil {
+			t, err := page.resolveAnchoredTarget(ctx, step.Frame, step.Selector, step.Label, step.Anchors, waitTimeout)
+			if err != nil {
+				return page, err
+			}
+			target = t
+		} else if h := strings.TrimSpace(step.Hint); h != "" {
 			target = page.resolveFieldTarget(ctx, step.Frame, step.Selector, h, waitTimeout)
 		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return page, err
@@ -1007,7 +1318,13 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 			return page, err
 		}
 	case "select":
-		if h := strings.TrimSpace(step.Hint); h != "" {
+		if step.Anchors != nil {
+			t, err := page.resolveAnchoredTarget(ctx, step.Frame, step.Selector, step.Label, step.Anchors, waitTimeout)
+			if err != nil {
+				return page, err
+			}
+			target = t
+		} else if h := strings.TrimSpace(step.Hint); h != "" {
 			target = page.resolveFieldTarget(ctx, step.Frame, step.Selector, h, waitTimeout)
 		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return page, err
@@ -1019,7 +1336,13 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 		// The upload trigger is a labeled control (e.g. "Choose file"), so prefer
 		// its visible text the same way clicks do, then its field hint, before
 		// falling back to the positional selector (→ healer).
-		if a := strings.TrimSpace(step.Label); len(a) >= 2 {
+		if step.Anchors != nil {
+			t, err := page.resolveAnchoredTarget(ctx, step.Frame, step.Selector, step.Label, step.Anchors, waitTimeout)
+			if err != nil {
+				return page, err
+			}
+			target = t
+		} else if a := strings.TrimSpace(step.Label); len(a) >= 2 {
 			target = page.resolveClickTarget(ctx, step.Frame, step.Selector, a, waitTimeout)
 		} else if h := strings.TrimSpace(step.Hint); h != "" {
 			target = page.resolveFieldTarget(ctx, step.Frame, step.Selector, h, waitTimeout)
@@ -1045,7 +1368,13 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 		if downloadDir == "" {
 			return page, fmt.Errorf("download: no download directory configured")
 		}
-		if a := strings.TrimSpace(step.Label); len(a) >= 2 {
+		if step.Anchors != nil {
+			t, err := page.resolveAnchoredTarget(ctx, step.Frame, step.Selector, step.Label, step.Anchors, waitTimeout)
+			if err != nil {
+				return page, err
+			}
+			target = t
+		} else if a := strings.TrimSpace(step.Label); len(a) >= 2 {
 			target = page.resolveClickTarget(ctx, step.Frame, step.Selector, a, waitTimeout)
 		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return page, err
