@@ -1943,7 +1943,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         {/if}
       </div>
 
-      {#if railTicks.length > 0}
+      {#if railTicks.length > 1}
         <div class="msg-rail">
           <div class="msg-rail-inner">
             <div class="msg-rail-track"></div>
