@@ -98,6 +98,28 @@
     .shot-media{aspect-ratio:2/1;background:var(--canvas);display:flex;align-items:center;justify-content:center;position:relative;}
     .shot-media img,.shot-media video{width:100%;height:100%;object-fit:cover;display:block;}
     .shot-ph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--t45);font-size:14px;}
+    .carousel{position:absolute;inset:0;}
+    .carousel .slide{position:absolute;inset:0;opacity:0;transition:opacity .4s ease;pointer-events:none;}
+    .carousel .slide.active{opacity:1;pointer-events:auto;}
+    .carousel .slide video{cursor:pointer;}
+    .carousel-playpause{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(.85);width:64px;height:64px;border-radius:50%;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:3;opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;}
+    .carousel.is-paused .carousel-playpause{opacity:1;transform:translate(-50%,-50%) scale(1);}
+    .carousel-playpause::before{content:"";border-style:solid;border-width:11px 0 11px 19px;border-color:transparent transparent transparent #fff;margin-left:4px;}
+    .carousel-arrow{position:absolute;top:50%;transform:translateY(-50%);z-index:3;width:52px;height:52px;border-radius:50%;border:none;background:rgba(15,23,42,.35);color:#fff;font-size:32px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s,background .2s;font-family:inherit;}
+    .carousel-arrow:hover{background:rgba(15,23,42,.6);}
+    .shot-media:hover .carousel-arrow{opacity:1;}
+    .carousel-arrow.prev{left:16px;}
+    .carousel-arrow.next{right:16px;}
+    .carousel-dots{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:4;}
+    .carousel-dots button{width:8px;height:8px;padding:0;border:none;border-radius:50%;background:rgba(255,255,255,.5);cursor:pointer;transition:background .2s,width .2s;}
+    .carousel-dots button.active{background:#fff;width:20px;border-radius:4px;}
+    .carousel-time{position:absolute;right:14px;bottom:11px;z-index:4;font-family:var(--mono);font-size:11px;color:rgba(255,255,255,.92);text-shadow:0 1px 2px rgba(0,0,0,.55);letter-spacing:.02em;pointer-events:none;}
+    .carousel-progress{position:absolute;left:0;right:0;bottom:0;height:34px;display:flex;align-items:flex-end;z-index:4;cursor:pointer;touch-action:none;background:linear-gradient(to top,rgba(0,0,0,.45),transparent);}
+    .carousel-track{position:relative;width:100%;height:4px;background:rgba(255,255,255,.35);transition:height .15s;}
+    .carousel-progress:hover .carousel-track,.carousel-progress:focus-visible .carousel-track{height:6px;}
+    .carousel-fill{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--blue,#1677ff);}
+    .carousel-fill::after{content:"";position:absolute;right:-6px;top:50%;width:12px;height:12px;border-radius:50%;background:#fff;transform:translateY(-50%) scale(0);transition:transform .15s;box-shadow:0 1px 4px rgba(0,0,0,.4);}
+    .carousel-progress:hover .carousel-fill::after,.carousel-progress:focus-visible .carousel-fill::after{transform:translateY(-50%) scale(1);}
 
     /* provider strip */
     .providers{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--canvas);padding:20px 32px;}
@@ -277,7 +299,17 @@
           <span class="shot-title">Octo Desktop</span>
         </div>
         <div class="shot-media">
-          <video src="octo-demo.mp4" autoplay muted loop playsinline aria-label="Octo Desktop demo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"></video>
+          <div class="carousel" id="demo-carousel">
+            <div class="slide active"><video src="octo-demo.mp4" muted playsinline preload="auto" aria-label="Octo Desktop demo 1"></video></div>
+            <div class="slide"><video src="octo-demo-2.mp4" muted playsinline preload="auto" aria-label="Octo Desktop demo 2"></video></div>
+            <div class="slide"><video src="octo-demo-3.mp4" muted playsinline preload="auto" aria-label="Octo Desktop demo 3"></video></div>
+            <div class="carousel-playpause" aria-hidden="true"></div>
+            <button class="carousel-arrow prev" type="button" aria-label="Previous">‹</button>
+            <button class="carousel-arrow next" type="button" aria-label="Next">›</button>
+            <div class="carousel-dots"></div>
+            <div class="carousel-time"><span class="cur">0:00</span> / <span class="dur">0:00</span></div>
+            <div class="carousel-progress" role="slider" aria-label="Seek" tabindex="0" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="carousel-track"><div class="carousel-fill"></div></div></div>
+          </div>
           <div class="shot-ph" style="display:none">
             <iconify-icon icon="ant-design:play-circle-outlined" width="40" style="color:var(--t45)"></iconify-icon>
             <span data-en="Desktop demo — drop octo-demo.mp4 here" data-zh="桌面版演示 —— 放入 octo-demo.mp4"></span>
@@ -638,6 +670,69 @@
     // ----- Scroll reveal -----
     const io=new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting) e.target.classList.add('visible'); }),{threshold:.1});
     document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+
+    // ----- Demo carousel (auto-advance when a clip ends; dots + arrows) -----
+    (function(){
+      const root=document.getElementById('demo-carousel');
+      if(!root) return;
+      const slides=[...root.querySelectorAll('.slide')];
+      const videos=slides.map(s=>s.querySelector('video'));
+      const dotsWrap=root.querySelector('.carousel-dots');
+      const prog=root.querySelector('.carousel-progress');
+      const fill=root.querySelector('.carousel-fill');
+      const curEl=root.querySelector('.carousel-time .cur');
+      const durEl=root.querySelector('.carousel-time .dur');
+      let idx=0, scrubbing=false;
+      const fmt=s=>{ s=Math.max(0,Math.floor(s||0)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
+      const dots=slides.map((_,i)=>{
+        const b=document.createElement('button');
+        b.type='button'; b.setAttribute('aria-label','Slide '+(i+1));
+        if(i===0) b.classList.add('active');
+        b.addEventListener('click',()=>go(i));
+        dotsWrap.appendChild(b);
+        return b;
+      });
+      function setFill(r){ fill.style.width=(r*100)+'%'; prog.setAttribute('aria-valuenow',Math.round(r*100)); }
+      function setTime(){ const v=videos[idx]; curEl.textContent=fmt(v&&v.currentTime); durEl.textContent=fmt(v&&v.duration); }
+      function go(n){
+        idx=(n+slides.length)%slides.length;
+        slides.forEach((s,i)=>s.classList.toggle('active',i===idx));
+        dots.forEach((d,i)=>d.classList.toggle('active',i===idx));
+        setFill(0); setTime();
+        videos.forEach((v,i)=>{
+          if(i===idx){ try{v.currentTime=0;}catch(e){} v.play().catch(()=>{}); }
+          else v.pause();
+        });
+      }
+      videos.forEach((v,i)=>{
+        v.addEventListener('ended',()=>{ if(i===idx) go(idx+1); });
+        v.addEventListener('timeupdate',()=>{ if(i===idx && !scrubbing && v.duration){ setFill(v.currentTime/v.duration); setTime(); } });
+        v.addEventListener('loadedmetadata',()=>{ if(i===idx) setTime(); });
+        v.addEventListener('click',()=>{ if(i!==idx) return; if(v.paused) v.play().catch(()=>{}); else v.pause(); });
+        v.addEventListener('play',()=>{ if(i===idx) root.classList.remove('is-paused'); });
+        v.addEventListener('pause',()=>{ if(i===idx && !v.ended) root.classList.add('is-paused'); });
+      });
+      function seek(clientX){
+        const r=prog.getBoundingClientRect();
+        const ratio=Math.min(1,Math.max(0,(clientX-r.left)/r.width));
+        const v=videos[idx];
+        setFill(ratio);
+        if(v && v.duration){ v.currentTime=ratio*v.duration; setTime(); }
+      }
+      prog.addEventListener('pointerdown',e=>{ scrubbing=true; try{prog.setPointerCapture(e.pointerId);}catch(_){} seek(e.clientX); });
+      prog.addEventListener('pointermove',e=>{ if(scrubbing) seek(e.clientX); });
+      function endScrub(e){ if(!scrubbing) return; scrubbing=false; try{prog.releasePointerCapture(e.pointerId);}catch(_){} }
+      prog.addEventListener('pointerup',endScrub);
+      prog.addEventListener('pointercancel',endScrub);
+      prog.addEventListener('keydown',e=>{
+        const v=videos[idx]; if(!v||!v.duration) return;
+        if(e.key==='ArrowRight'){ v.currentTime=Math.min(v.duration,v.currentTime+5); e.preventDefault(); }
+        else if(e.key==='ArrowLeft'){ v.currentTime=Math.max(0,v.currentTime-5); e.preventDefault(); }
+      });
+      root.querySelector('.prev').addEventListener('click',()=>go(idx-1));
+      root.querySelector('.next').addEventListener('click',()=>go(idx+1));
+      go(0);
+    })();
   </script>
 </body>
 </html>
