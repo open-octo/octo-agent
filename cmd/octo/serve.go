@@ -44,6 +44,8 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	maxTokens := fs.Int("max-tokens", 0, "max_tokens for responses")
 	tools := fs.Bool("tools", true, "Enable agentic tool loop")
 	cors := fs.String("cors", "", "Additional CORS allowed origins (comma-separated, * for any). app://obsidian.md and vscode-webview:// origins are always allowed by default.")
+	tunnelOn := fs.Bool("tunnel", false, "Connect to octo's managed relay so a paired phone can reach this server through NAT (end-to-end encrypted; opt-in)")
+	relayURL := fs.String("relay", defaultRelayURL, "Managed-tunnel relay endpoint (override to self-host the relay or use staging)")
 	noChannel := fs.Bool("no-channel", false, "Disable IM channel (DingTalk, Feishu)")
 	noMemory := fs.Bool("no-memory", false, "Disable cross-session memory injection")
 	noSupervisor := fs.Bool("no-supervisor", false, "Run the server directly, without the self-restart supervisor (exit code 42 still signals a restart request to an external supervisor)")
@@ -133,6 +135,16 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	if *tunnelOn {
+		// The tunnel is a goroutine in this process; it stops when ctx is
+		// cancelled on shutdown. It dials the relay and bridges to the local
+		// /ws as a normal client, so the server needs no tunnel awareness.
+		if err := startTunnel(ctx, srv, *addr, *relayURL, stdout); err != nil {
+			fmt.Fprintf(stderr, "octo serve: tunnel: %v\n", err)
+			return 1
+		}
+	}
 
 	go func() {
 		sigCh := make(chan os.Signal, 1)
