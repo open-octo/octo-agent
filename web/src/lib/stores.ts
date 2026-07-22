@@ -94,6 +94,14 @@ export const editDraft = writable('')
 // Per-session chat state (keyed by sessionId)
 export const chatMessages = writable<Record<string, any[]>>({})
 export const chatStreaming = writable<Record<string, boolean>>({})
+// Wall-clock time (ms) of the last text_delta per session. The reply caret is
+// gated on this being recent: the assistant message stays `streaming` for the
+// whole turn (cleared only at segment boundaries — tool_call, new reasoning,
+// complete), so between a finished text run and the next tool the caret would
+// otherwise keep blinking under text that stopped growing while the model is
+// silently generating. Showing it only while text is actively arriving makes it
+// a true typewriter cursor.
+export const chatLastTextAt = writable<Record<string, number>>({})
 // Wall-clock start (ms) of the active streaming turn, per session, so the live
 // "Thinking" elapsed readout survives view remounts (page switches) instead of
 // resetting — a component-local start would restart from ~0 (and briefly read

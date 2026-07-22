@@ -7,6 +7,7 @@
     sessions,
     chatMessages,
     chatStreaming,
+    chatLastTextAt,
     chatTurnStart,
     chatProgress,
     chatBgTasks,
@@ -147,6 +148,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     pendingSteerList = pendingSteers[$activeSessionId ?? ''] ?? []
   })
 
+  // How long after the last text_delta the reply caret keeps blinking.
+  const CARET_IDLE_MS = 1200
+
   // Sub-agents card elapsed time + reconnect countdown both tick off `now`.
   let now = $state(Date.now())
   $effect(() => {
@@ -192,6 +196,13 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   })
   let turnStartAt = $derived($chatTurnStart[$activeSessionId ?? ''] ?? 0)
   let thinkElapsed = $derived(turnStartAt ? Math.max(0, Math.floor((now - turnStartAt) / 1000)) : 0)
+  // The reply caret is a typewriter cursor: show it only while text is actively
+  // arriving. Once deltas stop (the model went silent to generate tool calls /
+  // reasoning), it fades within CARET_IDLE_MS even though the bubble stays
+  // `streaming` until the next segment boundary. `now` ticks every 1s, so the
+  // real hide latency is CARET_IDLE_MS..CARET_IDLE_MS+1s.
+  let lastTextAt = $derived($chatLastTextAt[$activeSessionId ?? ''] ?? 0)
+  let typingActive = $derived(streaming && lastTextAt > 0 && (now - lastTextAt) < CARET_IDLE_MS)
   // Output-token estimate (~chars/4), derived from persisted stores — the live
   // assistant text plus the reasoning buffer — so it survives view remounts
   // alongside the elapsed clock instead of resetting to 0.
@@ -565,6 +576,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       const pendingThinking = get(chatThinking)[sid] ?? ''
       appendToLastAssistant(sid, txt, pendingThinking)
       if (pendingThinking) chatThinking.update(tt => ({ ...tt, [sid]: '' }))
+      // Stamp the arrival so the reply caret only blinks while text is flowing
+      // (see chatLastTextAt). Empty deltas carry no visible text, so ignore them.
+      if (txt) chatLastTextAt.update(tt => ({ ...tt, [sid]: Date.now() }))
     }))
 
     cleanups.push(ws.on('thinking_delta', (ev) => {
@@ -1783,8 +1797,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                     </div>
                   {/if}
 
-                  <!-- Streaming caret -->
-                  {#if msg.streaming}
+                  <!-- Streaming caret — only while text is actively arriving
+                       (see typingActive), so it doesn't blink under a finished
+                       reply while the model silently generates the next step. -->
+                  {#if msg.streaming && typingActive}
                     <span class="caret"></span>
                   {/if}
 
