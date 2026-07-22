@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
 	"sync"
 	"time"
@@ -27,11 +28,13 @@ type Config struct {
 	// PairTokens are the one-time pairing tokens the host offers (one per phone
 	// it expects to pair). Production mints these per QR.
 	PairTokens []string
-	// LoopbackURL is the local server's /ws, e.g. ws://127.0.0.1:8088/ws.
+	// LoopbackURL points at the local server's /ws, e.g. ws://127.0.0.1:8088/ws.
+	// Its host:port is the base the bridge dials for both loopback HTTP (/api)
+	// and loopback WebSocket (/ws) calls.
 	LoopbackURL string
-	// AccessKey is presented to the local /ws as ?access_key=. Loopback is
-	// exempt from the key check, so this is belt-and-suspenders, but it keeps
-	// the tunnel an ordinary key-authenticated client.
+	// AccessKey would authenticate a non-loopback client. The bridge dials
+	// 127.0.0.1, which the server exempts from the key check, so it is unused for
+	// now; kept for a future non-loopback bind.
 	AccessKey string
 	// Identity supplies the host's Noise static keypair (and, if TunnelID is
 	// unset, the tunnel id). Load it with LoadOrCreateIdentity to persist it in
@@ -42,10 +45,14 @@ type Config struct {
 }
 
 // Tunnel is the host side of the managed tunnel: one relay connection bridging N
-// paired devices to the local /ws, each over its own Noise session.
+// paired devices to the local server, each over its own Noise session.
 type Tunnel struct {
 	cfg  Config
 	logf func(string, ...any)
+
+	httpBase   string // http(s)://host:port — loopback base for /api replays
+	wsBase     string // ws(s)://host:port     — loopback base for /ws streams
+	httpClient *http.Client
 
 	relayMu sync.Mutex // guards the relay pointer and serializes writes to it
 	relay   *websocket.Conn
@@ -54,12 +61,13 @@ type Tunnel struct {
 	devices map[string]*device
 }
 
-// device is one paired phone: its Noise session and its dedicated loopback /ws
-// connection to the local server.
+// device is one paired phone: its Noise session and, once the handshake
+// completes, the bridge that demultiplexes its shim frames onto the loopback
+// server.
 type device struct {
-	id       string
-	sess     *session
-	loopback *websocket.Conn
+	id   string
+	sess *session
+	br   *bridge
 }
 
 // New builds a tunnel. If cfg.Identity is nil, a throwaway one is generated
@@ -78,11 +86,37 @@ func New(cfg Config) (*Tunnel, error) {
 	if cfg.RelayURL == "" || cfg.TunnelID == "" || cfg.LoopbackURL == "" {
 		return nil, fmt.Errorf("tunnel: RelayURL, TunnelID and LoopbackURL are required")
 	}
+	httpBase, wsBase, err := loopbackBases(cfg.LoopbackURL)
+	if err != nil {
+		return nil, err
+	}
 	logf := cfg.Logf
 	if logf == nil {
 		logf = log.Printf
 	}
-	return &Tunnel{cfg: cfg, logf: logf, devices: map[string]*device{}}, nil
+	return &Tunnel{
+		cfg:        cfg,
+		logf:       logf,
+		httpBase:   httpBase,
+		wsBase:     wsBase,
+		httpClient: &http.Client{},
+		devices:    map[string]*device{},
+	}, nil
+}
+
+// loopbackBases derives the HTTP and WebSocket loopback bases from the /ws URL.
+func loopbackBases(loopbackURL string) (httpBase, wsBase string, err error) {
+	u, err := url.Parse(loopbackURL)
+	if err != nil {
+		return "", "", fmt.Errorf("tunnel: parse LoopbackURL: %w", err)
+	}
+	if u.Host == "" {
+		return "", "", fmt.Errorf("tunnel: LoopbackURL has no host")
+	}
+	if u.Scheme == "wss" || u.Scheme == "https" {
+		return "https://" + u.Host, "wss://" + u.Host, nil
+	}
+	return "http://" + u.Host, "ws://" + u.Host, nil
 }
 
 // Serve maintains the relay connection with reconnect/backoff until ctx is
@@ -109,7 +143,7 @@ func (t *Tunnel) Serve(ctx context.Context) error {
 }
 
 // runOnce dials the relay and bridges until the connection drops or ctx is
-// cancelled. All per-device loopback connections are torn down on return.
+// cancelled. Every device's bridge is torn down on return.
 func (t *Tunnel) runOnce(ctx context.Context) error {
 	q := url.Values{"tunnel": {t.cfg.TunnelID}}
 	for _, tok := range t.cfg.PairTokens {
@@ -130,8 +164,8 @@ func (t *Tunnel) runOnce(ctx context.Context) error {
 	t.mu.Unlock()
 	t.logf("[tunnel] connected to relay tunnel=%s", t.cfg.TunnelID)
 
-	// When the read loop exits, stop the relay socket and every loopback socket
-	// so their pump goroutines unblock and return.
+	// When the read loop exits, stop the relay socket and tear down every
+	// device's bridge (which closes its loopback streams).
 	defer func() {
 		ws.Close()
 		t.relayMu.Lock()
@@ -139,8 +173,8 @@ func (t *Tunnel) runOnce(ctx context.Context) error {
 		t.relayMu.Unlock()
 		t.mu.Lock()
 		for _, d := range t.devices {
-			if d.loopback != nil {
-				d.loopback.Close()
+			if d.br != nil {
+				d.br.close()
 			}
 		}
 		t.devices = map[string]*device{}
@@ -189,74 +223,29 @@ func (t *Tunnel) handleRelayFrame(ctx context.Context, f frame) error {
 			}
 			return t.writeRelay(frame{Type: frameHandshake, Device: f.Device, Payload: msg})
 		}
-		// Handshake complete: open this device's loopback /ws and start pumping
-		// its replies back to the phone. If the loopback dial fails the device
-		// has no destination, so drop it rather than leave a done session with a
-		// nil loopback that a later data frame would deref.
-		if err := t.openLoopback(ctx, d); err != nil {
-			t.removeDevice(f.Device)
-			return err
-		}
+		// Handshake complete: stand up the device's bridge. Loopback connections
+		// open lazily, per shim frame, so there is nothing to dial here.
+		d.br = newBridge(ctx, t, f.Device, d.sess)
 		return nil
 
 	case frameData:
 		d := t.device(f.Device)
-		if d == nil || !d.sess.done || d.loopback == nil {
+		if d == nil || !d.sess.done || d.br == nil {
 			return fmt.Errorf("data with no ready session")
 		}
 		plaintext, err := d.sess.decrypt(f.Payload)
 		if err != nil {
 			return err
 		}
-		// The decrypted payload is a /ws message; hand it to the local server
-		// verbatim, exactly as a browser tab would send it.
-		return d.loopback.WriteMessage(websocket.TextMessage, plaintext)
+		sf, err := decodeShimFrame(plaintext)
+		if err != nil {
+			return fmt.Errorf("decode shim frame: %w", err)
+		}
+		d.br.handle(sf)
+		return nil
 
 	default:
 		return nil
-	}
-}
-
-// openLoopback dials the local /ws for one device and starts its reply pump.
-func (t *Tunnel) openLoopback(ctx context.Context, d *device) error {
-	loopURL := t.cfg.LoopbackURL
-	if t.cfg.AccessKey != "" {
-		if u, err := url.Parse(loopURL); err == nil {
-			q := u.Query()
-			q.Set("access_key", t.cfg.AccessKey)
-			u.RawQuery = q.Encode()
-			loopURL = u.String()
-		}
-	}
-	ws, _, err := websocket.DefaultDialer.DialContext(ctx, loopURL, nil)
-	if err != nil {
-		return fmt.Errorf("dial loopback /ws: %w", err)
-	}
-	t.mu.Lock()
-	d.loopback = ws
-	t.mu.Unlock()
-	t.logf("[tunnel] device=%s bridged to loopback /ws", d.id)
-	go t.loopbackPump(d)
-	return nil
-}
-
-// loopbackPump reads server events from a device's loopback /ws, encrypts them,
-// and forwards them to that phone through the relay. It ends when either socket
-// closes.
-func (t *Tunnel) loopbackPump(d *device) {
-	for {
-		_, msg, err := d.loopback.ReadMessage()
-		if err != nil {
-			return
-		}
-		ciphertext, err := d.sess.encrypt(msg)
-		if err != nil {
-			t.logf("[tunnel] device=%s encrypt: %v", d.id, err)
-			return
-		}
-		if err := t.writeRelay(frame{Type: frameData, Device: d.id, Payload: ciphertext}); err != nil {
-			return
-		}
 	}
 }
 
@@ -279,10 +268,4 @@ func (t *Tunnel) setDevice(d *device) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.devices[d.id] = d
-}
-
-func (t *Tunnel) removeDevice(id string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	delete(t.devices, id)
 }
