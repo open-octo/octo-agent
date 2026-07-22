@@ -289,6 +289,39 @@ func taskUI(action string, store TaskStore) map[string]any {
 	}
 }
 
+// AllTasksComplete reports whether the store holds at least one non-deleted
+// task and every one of them is completed — i.e. the current plan is finished.
+// Used to close a plan: a finished one is cleared at the next turn's start
+// (clear-and-rebuild) and skipped by replay so it doesn't reappear after its
+// fade-out. Empty/nil stores return false (nothing to close).
+func AllTasksComplete(store TaskStore) bool {
+	if store == nil {
+		return false
+	}
+	seen := false
+	for _, t := range store.List() {
+		if t.Status == tasks.Deleted {
+			continue
+		}
+		if t.Status != tasks.Completed {
+			return false
+		}
+		seen = true
+	}
+	return seen
+}
+
+// TaskSnapshot returns the current checklist as the same [{content,status}]
+// payload taskUI embeds in a todo_update, for rebuilding the web task panel on
+// (re)subscribe. Returns nil when the store is nil or has no non-deleted tasks.
+func TaskSnapshot(store TaskStore) []map[string]any {
+	if store == nil {
+		return nil
+	}
+	todos, _ := taskUI("Tasks", store)["todos"].([]map[string]any)
+	return todos
+}
+
 // FormatTaskList renders a slice of tasks for display. Used both by the
 // task_list tool's Execute and by the REPL's /tasks slash command.
 //

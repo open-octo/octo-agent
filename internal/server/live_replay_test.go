@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/tasks"
 	"github.com/open-octo/octo-agent/internal/tools"
 	"github.com/open-octo/octo-agent/internal/workflow"
 )
@@ -370,9 +371,10 @@ func TestReplayLiveState_StdoutClearsAfterToolDone(t *testing.T) {
 }
 
 // TestReplayLiveState_ReplaysTaskPanel is the regression guard for the task
-// panel vanishing on a mid-turn refresh: the web task store is rebuilt per turn
-// and never persisted, and todo_update is fire-and-forget, so a tab that
-// (re)subscribes after the last task tool ran had no way to rebuild the panel.
+// panel vanishing on refresh. The store is per-session (not per-turn) and
+// outlives the turn, and replayLiveState rebuilds the panel from it
+// unconditionally — so the panel survives a refresh even AFTER the turn ends,
+// with no live turn to snapshot.
 func TestReplayLiveState_ReplaysTaskPanel(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 	srv.initWS()
@@ -381,20 +383,17 @@ func TestReplayLiveState_ReplaysTaskPanel(t *testing.T) {
 
 	const sid = "replay-task-panel-session"
 	defer tools.CloseSessionBackgroundManager(sid)
+	defer tools.CloseSessionTaskStore(sid)
 
-	seedLiveTurn(srv, sid)
-	sw := srv.newWSStreamWriter(sid)
-
-	todos := []any{
-		map[string]any{"content": "step one", "status": "completed"},
-		map[string]any{"content": "step two", "status": "in_progress"},
+	// Seed the per-session store as the task_* tools would, then DON'T seed a
+	// live turn — this is the post-turn refresh case the per-turn store lost.
+	store := tools.SessionTaskStore(sid)
+	if _, err := store.Create("step one", "", ""); err != nil {
+		t.Fatalf("create task: %v", err)
 	}
-	sw.handleEvent(agent.AgentEvent{
-		Kind:   agent.EventToolDone,
-		ToolID: "task1",
-		Output: "ok",
-		UI:     map[string]any{"type": "todo", "todos": todos},
-	})
+	if _, err := store.Create("step two", "", ""); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
 
 	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
 	srv.replayLiveState(sid, conn)
@@ -408,12 +407,62 @@ func TestReplayLiveState_ReplaysTaskPanel(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("replayed todo_update count = %d, want 1", len(got))
 	}
-	list, ok := got[0]["todos"].([]any)
-	if !ok || len(list) != 2 {
+	if list, ok := got[0]["todos"].([]any); !ok || len(list) != 2 {
 		t.Fatalf("replayed todos = %v, want 2 items", got[0]["todos"])
 	}
-	if first, _ := list[0].(map[string]any); first["content"] != "step one" || first["status"] != "completed" {
-		t.Errorf("replayed todos[0] = %v, want {step one, completed}", list[0])
+}
+
+// TestReplayLiveState_SkipsCompletedTaskPanel guards that a fully-completed plan
+// is NOT replayed: it fades out client-side once done, so a refresh afterwards
+// must not bring the panel back (and the store is cleared at the next turn).
+func TestReplayLiveState_SkipsCompletedTaskPanel(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+	srv.pendingQuestions = map[string]wsEventRequestUserQuestion{}
+	srv.pendingConfirms = map[string]wsEventRequestConfirmation{}
+
+	const sid = "replay-completed-task-session"
+	defer tools.CloseSessionBackgroundManager(sid)
+	defer tools.CloseSessionTaskStore(sid)
+
+	store := tools.SessionTaskStore(sid)
+	id, _ := store.Create("only step", "", "")
+	done := tasks.Completed
+	if _, err := store.Update(id, tasks.UpdateField{Status: &done}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.replayLiveState(sid, conn)
+
+	for _, ev := range drainConn(t, conn) {
+		if ev["type"] == "todo_update" {
+			t.Errorf("replayed a todo_update for a fully-completed plan: %v", ev)
+		}
+	}
+}
+
+// TestReplayLiveState_NoTaskPanelWhenEmpty guards the leak/no-op side: a session
+// that never ran a task tool must not create a store or replay a todo_update.
+func TestReplayLiveState_NoTaskPanelWhenEmpty(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+	srv.pendingQuestions = map[string]wsEventRequestUserQuestion{}
+	srv.pendingConfirms = map[string]wsEventRequestConfirmation{}
+
+	const sid = "replay-no-task-session"
+	defer tools.CloseSessionBackgroundManager(sid)
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.replayLiveState(sid, conn)
+
+	for _, ev := range drainConn(t, conn) {
+		if ev["type"] == "todo_update" {
+			t.Errorf("replayed a todo_update for a session with no tasks: %v", ev)
+		}
+	}
+	if tools.PeekSessionTaskStore(sid) != nil {
+		t.Error("replay created a task store for a session that never used one")
 	}
 }
 

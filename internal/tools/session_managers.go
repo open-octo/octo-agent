@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"sync"
+
+	"github.com/open-octo/octo-agent/internal/tasks"
 )
 
 // backgroundManagerCtxKey scopes a BackgroundManager to a turn's context, the
@@ -236,6 +238,52 @@ func CloseSessionReadTracker(id string) {
 	sessionReadTrackersMu.Lock()
 	delete(sessionReadTrackers, id)
 	sessionReadTrackersMu.Unlock()
+}
+
+// ─── Task stores ────────────────────────────────────────────────────────
+
+// Per-session task stores, keyed like the other session managers. The task_*
+// tools' store, built fresh per turn (as the server's tool-env setup did),
+// forgot the plan the moment a turn ended — so the web task panel vanished on
+// the next turn and on a post-turn page refresh. Keying by session id keeps the
+// checklist alive across turns (matching the IM path's per-session store and
+// SessionReadTracker's rationale) and lets replayLiveState rebuild the panel
+// from it on (re)subscribe. In-memory only: a daemon restart still starts fresh.
+// Reaped on session delete (CloseSessionTaskStore).
+var (
+	sessionTaskStoresMu sync.Mutex
+	sessionTaskStores   = map[string]TaskStore{}
+)
+
+// SessionTaskStore returns the per-session task store for id, creating it on
+// first use. Used by the per-turn tool-env setup.
+func SessionTaskStore(id string) TaskStore {
+	sessionTaskStoresMu.Lock()
+	defer sessionTaskStoresMu.Unlock()
+	s := sessionTaskStores[id]
+	if s == nil {
+		s = tasks.New()
+		sessionTaskStores[id] = s
+	}
+	return s
+}
+
+// PeekSessionTaskStore returns the per-session task store for id without
+// creating one. nil means the session has never used a task tool — replay
+// paths use this so a mere (re)subscribe doesn't leak an empty store per
+// browsed session.
+func PeekSessionTaskStore(id string) TaskStore {
+	sessionTaskStoresMu.Lock()
+	defer sessionTaskStoresMu.Unlock()
+	return sessionTaskStores[id]
+}
+
+// CloseSessionTaskStore drops the per-session task store for id. No-op for an
+// unknown id.
+func CloseSessionTaskStore(id string) {
+	sessionTaskStoresMu.Lock()
+	delete(sessionTaskStores, id)
+	sessionTaskStoresMu.Unlock()
 }
 
 // allBackgroundManagers returns defaultBg plus every live per-session manager,

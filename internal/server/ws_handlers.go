@@ -25,13 +25,6 @@ type sessionLiveState struct {
 	// right card (see #1193's pickToolIndex on the frontend).
 	stdoutToolID string
 
-	// todos is the latest task-checklist snapshot broadcast this turn (the
-	// `todos` payload of a todo_update). The web task store is rebuilt per turn
-	// and never persisted, so this live copy is the only way a tab that
-	// (re)subscribes mid-turn — e.g. a page refresh — can rebuild the task
-	// panel; without it the panel vanishes until the next task tool runs.
-	todos any
-
 	// events buffers the turn's already-broadcast transcript events
 	// (tool_call / tool_result / tool_error / steer history_user_message,
 	// plus flushed deltas) so a tab that subscribes mid-turn — e.g. after a
@@ -320,6 +313,28 @@ func (s *Server) replayLiveState(sessionID string, conn *wsConn) {
 		}
 	}
 
+	// Rebuild the task panel from the per-session task store. Done outside the
+	// live-turn snapshot below (and unconditionally) because the store outlives
+	// the turn: a refresh AFTER the turn ends must still restore the checklist,
+	// which the dropped live state can't provide. PeekSessionTaskStore avoids
+	// creating an empty store for a session that never ran a task tool. A
+	// fully-completed plan is skipped: it fades out client-side once done, so it
+	// must not reappear on refresh (and it's cleared at the next turn's start).
+	if store := tools.PeekSessionTaskStore(sessionID); !tools.AllTasksComplete(store) {
+		if todos := tools.TaskSnapshot(store); len(todos) > 0 {
+			if b, err := json.Marshal(map[string]any{
+				"type":       "todo_update",
+				"session_id": sessionID,
+				"todos":      todos,
+			}); err == nil {
+				select {
+				case conn.send <- b:
+				default:
+				}
+			}
+		}
+	}
+
 	// Snapshot the in-progress turn under the read lock: the event buffer,
 	// any unflushed streaming deltas, the current progress, and buffered
 	// stdout. Marshaling happens inside the lock because the builders and the
@@ -373,18 +388,6 @@ func (s *Server) replayLiveState(sessionID string, conn *wsConn) {
 				"session_id": sessionID,
 				"tool_id":    state.stdoutToolID,
 				"lines":      state.stdoutLines,
-			}); err == nil {
-				replay = append(replay, b)
-			}
-		}
-		// Rebuild the task panel: without this a mid-turn refresh leaves it
-		// empty until the next task tool fires (the store is per-turn, so the
-		// live snapshot is the only source).
-		if state.todos != nil {
-			if b, err := json.Marshal(map[string]any{
-				"type":       "todo_update",
-				"session_id": sessionID,
-				"todos":      state.todos,
 			}); err == nil {
 				replay = append(replay, b)
 			}
@@ -634,6 +637,15 @@ func (s *Server) wsClearSession(sid string) {
 	s.injectorMu.Lock()
 	delete(s.sessionInjectors, sid)
 	s.injectorMu.Unlock()
+
+	// The per-session task store now outlives turns (unlike the old per-turn
+	// store), so /clear must reset the plan too — otherwise the next turn's
+	// task_list still shows the wiped conversation's checklist and the panel
+	// lingers over an empty transcript. /compact deliberately does NOT do this
+	// (it preserves the conversation). Broadcast an empty todo_update so live
+	// tabs drop the panel immediately (history_reload also clears it).
+	tools.CloseSessionTaskStore(sid)
+	s.wsHub.broadcast(sid, map[string]any{"type": "todo_update", "session_id": sid, "todos": []any{}})
 
 	s.wsHub.broadcast(sid, map[string]any{"type": "session_update", "session_id": sid, "status": "idle", "context_usage": 0, "context_tokens": 0})
 	s.broadcastHistoryReload(sid)
@@ -1887,13 +1899,6 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 					SessionID: w.sessionID,
 					Todos:     m["todos"],
 				})
-				// Retain for replayLiveState so a mid-turn refresh rebuilds the
-				// task panel (the web task store is per-turn, not persisted).
-				w.server.liveStateMu.Lock()
-				if ls, ok := w.server.liveStates[w.sessionID]; ok {
-					ls.todos = m["todos"]
-				}
-				w.server.liveStateMu.Unlock()
 			}
 		}
 		w.hub.broadcast(w.sessionID, toolResult)
