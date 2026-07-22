@@ -22,6 +22,10 @@ on:
       - 'mobile/**'
       - '.github/workflows/mobile.yml'
 
+# Only reads the checkout; no token write scope needed.
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Type-check + test
