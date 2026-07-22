@@ -215,3 +215,70 @@ func TestDispatchTools_DeniedCallInParallelBatch(t *testing.T) {
 		t.Errorf("executor calls = %d, want 2 (grep was gated out)", len(exec.called))
 	}
 }
+
+// recordingHandler collects AgentEvents; concurrency-safe because dispatchTools'
+// parallel path may emit result events from several goroutines.
+type recordingHandler struct {
+	mu     sync.Mutex
+	events []AgentEvent
+}
+
+func (h *recordingHandler) handle(ev AgentEvent) {
+	h.mu.Lock()
+	h.events = append(h.events, ev)
+	h.mu.Unlock()
+}
+
+func (h *recordingHandler) resultKinds() map[string]EventKind {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := map[string]EventKind{}
+	for _, ev := range h.events {
+		if ev.Kind == EventToolDone || ev.Kind == EventToolError {
+			out[ev.ToolID] = ev.Kind
+		}
+	}
+	return out
+}
+
+// dispatchTools must emit a result event for EVERY tool as it finishes — not
+// batched by the caller after the whole set completes. This is the regression
+// guard for a parallel sub_agent fan-out whose cards stayed "running" (and were
+// lost on a mid-batch refresh) until the slowest child returned. Covers the
+// parallel path (done) and a gate-denied call (error) in the same batch.
+func TestDispatchTools_EmitsResultEventPerTool(t *testing.T) {
+	h := &recordingHandler{}
+	exec := &countingExec{}
+	gate := denyOneGate{deny: "grep"}
+	blocks := []ContentBlock{
+		NewToolUseBlock("c1", "read_file", map[string]any{"path": "a"}),
+		NewToolUseBlock("c2", "grep", map[string]any{"pattern": "x"}),
+		NewToolUseBlock("c3", "glob", map[string]any{"pattern": "*"}),
+	}
+	if _, err := dispatchTools(context.Background(), exec, blocks, h.handle, gate); err != nil {
+		t.Fatal(err)
+	}
+	kinds := h.resultKinds()
+	if len(kinds) != 3 {
+		t.Fatalf("result events for %d tools, want 3: %v", len(kinds), kinds)
+	}
+	if kinds["c1"] != EventToolDone || kinds["c3"] != EventToolDone {
+		t.Errorf("allowed tools should emit EventToolDone: %v", kinds)
+	}
+	if kinds["c2"] != EventToolError {
+		t.Errorf("gate-denied tool should emit EventToolError: %v", kinds)
+	}
+}
+
+// The serial path emits per-tool too (single-tool batch → not parallelized).
+func TestDispatchTools_EmitsResultEventSerial(t *testing.T) {
+	h := &recordingHandler{}
+	exec := &countingExec{}
+	blocks := []ContentBlock{NewToolUseBlock("only", "read_file", map[string]any{"path": "a"})}
+	if _, err := dispatchTools(context.Background(), exec, blocks, h.handle, nil); err != nil {
+		t.Fatal(err)
+	}
+	if k := h.resultKinds(); len(k) != 1 || k["only"] != EventToolDone {
+		t.Fatalf("serial result events = %v, want {only: done}", k)
+	}
+}
