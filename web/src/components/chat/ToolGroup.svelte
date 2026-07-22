@@ -227,10 +227,19 @@
   // A user-driven click still closes instantly (native <details> behaviour,
   // untouched here) — checking toolOpen[id] here skips a card the user
   // already has an explicit override on.
+  //
+  // This must be $effect.pre, not $effect: a post-DOM effect would let the
+  // running->false render close the <details> first and force it back open a
+  // flush later. That reopen fires a toggle whose open=true diverges from the
+  // now-false default, so applyToolToggle records it as a user "keep open"
+  // override — and when the animation ends and closingIds clears, that stale
+  // override snaps the card back open (shrink 2s, then pop back). Running
+  // before the DOM update keeps `open` true continuously, so no toggle fires
+  // at all.
   let closingIds = $state<Record<string, boolean>>({})
   let prevRunning: boolean | undefined
   const AUTO_CLOSE_MS = 2000
-  $effect(() => {
+  $effect.pre(() => {
     const ts = tools ?? []
     if (ts.length === 0) return
     const running = ts.some((t) => !t.done && !t.error)
@@ -246,6 +255,22 @@
     }
     prevRunning = running
   })
+
+  // Toggle handler that is animation-aware: while a card is mid-animated-close,
+  // the only genuine toggle is the user clicking to collapse it early — end the
+  // animation so the native close sticks, and record no override either way
+  // (the forced-open state must never be mistaken for a user choice).
+  function onToggle(tool: any, lastId: string | undefined, running: boolean, open: boolean) {
+    if (closingIds[tool.id]) {
+      if (!open) {
+        const next = { ...closingIds }
+        delete next[tool.id]
+        closingIds = next
+      }
+      return
+    }
+    applyToolToggle(toolOpen, tool, lastId, running, open)
+  }
 
   // todo_write renders its checklist from the tool args.
   function todoItems(tool: any): Array<{ status: string; content: string }> | null {
@@ -319,7 +344,7 @@
            user read/copy the whole thing despite the truncation. -->
       {@const argText = tool.summary || (tool.args ? argSummary(tool.name, tool.args) : '')}
       {@const isClosing = !!closingIds[tool.id]}
-      <details open={toolOpenState(toolOpen, tool, lastId, anyRunning) || isClosing} ontoggle={(e) => applyToolToggle(toolOpen, tool, lastId, anyRunning, (e.currentTarget as HTMLDetailsElement).open)} class="tool-item">
+      <details open={toolOpenState(toolOpen, tool, lastId, anyRunning) || isClosing} ontoggle={(e) => onToggle(tool, lastId, anyRunning, (e.currentTarget as HTMLDetailsElement).open)} class="tool-item">
         <summary class="tool-summary">
           <iconify-icon icon="lucide:chevron-right" width="13" class="chev" style="color:var(--text-tertiary)"></iconify-icon>
           <iconify-icon icon={toolIcon(tool.name)} width="14" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
