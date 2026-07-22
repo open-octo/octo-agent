@@ -6,9 +6,16 @@
   "description": "octo's iOS/Android client — a thin remote client of an octo serve instance, packaged with Capacitor around the existing web frontend. The native Noise/keys layer (Swift/Kotlin) is built separately; it needs the iOS/Android toolchains.",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "bundle-web": "node scripts/bundle-web.mjs"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.0.0"
   },
   "devDependencies": {
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/cli": "^6.0.0",
+    "@capacitor/ios": "^6.0.0",
     "typescript": "^5.5.3",
     "vitest": "^4.1.10"
   }
