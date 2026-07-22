@@ -201,8 +201,29 @@ The tunnel does not replace `serve`'s access-key auth ([serve-auth-design.md](se
 
 The app is positioned as **a remote client to the user's own machine** — the same category as the SSH, terminal, and remote-desktop clients Apple already approves (Termius, Blink, Jump Desktop). The distinctions App Review cares about hold here: the host is the user's own, command execution happens on that host and never inside the app, and no executable code is downloaded into the app (App Review guideline 2.5.2 is not triggered — the app is a viewer/controller, not a code loader). Both the App Store and Google Play are launch targets, and the app keeps its full conversational capability rather than trimming to monitor-only to appease review.
 
+That category positioning is necessary but not sufficient; the connection model has four further consequences for review, each resolved by the transport design above rather than by a review-time workaround.
+
+### A reviewer can exercise the app end to end (Guideline 2.1)
+
+A remote-control app opens onto a pairing screen and does nothing until it reaches a backend — the classic 2.1 rejection is a reviewer who has no host to pair with. octo operates a **demo host** (`octo serve --tunnel` against a throwaway workspace) for exactly this, and the App Review notes carry a **pre-generated pairing code** for it. The reviewer scans it, lands in a live session, sends a prompt, and approves a permission ask — the whole flow, including the mobile-critical remote-approval path, without standing up their own machine. The demo host runs the same build as any user's, so what the reviewer exercises is the real product, not a stub.
+
+### No in-app purchase surface at launch (Guideline 3.1.1)
+
+The managed tunnel is a paid service, but v1 ships **no purchase or subscription UI inside the app**, and no link that steers the user to buy. Paid relay access is provisioned entirely on the host side — the CLI or desktop shell that already renders the pairing QR is where a user turns the managed tunnel on. The app only *consumes* an already-provisioned pairing, so it qualifies as a multiplatform service rather than a digital purchase consumed in-app, and 3.1.1's IAP requirement is not triggered. This also matches the transport's existing shape: pairing authenticates with a one-time token and carries no account or billing identity (see [Deferred](#deferred)).
+
+### Privacy declarations follow the transport, honestly (Guidelines 5.1.1, 5.1.2)
+
+The two transports declare differently, and neither overclaims:
+
+- **Self-tunnel** collects nothing for octo — traffic flows only between the user's phone and the user's host — so it declares **Data Not Collected**.
+- **Managed relay** is end-to-end encrypted, so session content is never readable by octo and is not reported as collected; the privacy policy states plainly that the relay is a ciphertext-only dumb pipe that persists no conversation data. The one datum the relay transiently handles — the **push token / device id** used to wake a sleeping phone — *is* declared, under App Functionality, not linked to the user's identity and not used for tracking. The design's structural guarantees (relay holds no key material, persists no token or frame — see [Push without breaking E2E](#push-without-breaking-e2e)) are the factual basis for these declarations. The app does **not** claim zero data collection on the managed path, because the push path demonstrably touches a token.
+
+### Encryption and push are declared, not incidental
+
+The Noise handshake (X25519) makes the app a user of non-exempt encryption: it sets `ITSAppUsesNonExemptEncryption` and answers the export-compliance questionnaire, claiming the standard exemption for encryption that only protects the user's own data (with the additional French declaration where required). Push uses APNs directly with the relay's own credentials, so the app declares the `remote-notification` background mode and the wakeup-only purpose — content-free by construction, as the push section specifies.
+
 ## Deferred
 
-- **Accounts, login, and billing.** Pairing uses a one-time token, not an identity. A later account layer can gate relay access and metering; the tunnel is designed so that layer slots in at the relay's authentication step without touching E2E or the client protocol.
+- **Accounts, login, and billing.** Pairing uses a one-time token, not an identity. A later account layer can gate relay access and metering; the tunnel is designed so that layer slots in at the relay's authentication step without touching E2E or the client protocol. Whether that layer eventually needs In-App Purchase turns entirely on whether a purchase surface appears *inside the app*: the multiplatform-service posture (provisioning on the host side, no in-app buy flow) that keeps 3.1.1 untriggered at launch is the one to preserve as billing lands.
 - **One phone, many hosts.** A phone paired to several hosts (work laptop, home desktop) is a natural extension — the phone simply stores multiple pairings — but v1 ships the many-devices-to-one-host direction and a single active host per phone; the host-switching UI comes later.
 - **Managed tunnel for the desktop/web clients.** The transport abstraction is general, but the first target is mobile, where the reachability gap is real. Bringing other clients onto the relay is a later, orthogonal step.
