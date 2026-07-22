@@ -5,24 +5,36 @@
   // other tabs are filled in by later batches (see
   // dev-docs/mobile-ui-implementation.md).
   import './theme.css'
+  import Feed from './Feed.svelte'
+  import { setActiveSession } from '../lib/stores'
 
   type Tab = 'chat' | 'tasks' | 'config' | 'settings'
   let tab = $state<Tab>('chat')
+  // The session opened into a detail view (null = show the feed).
+  let openId = $state<string | null>(null)
+
+  function openSession(id: string) {
+    setActiveSession(id)
+    openId = id
+  }
 </script>
 
 <div class="m-root">
   <main class="m-view">
     {#if tab === 'chat'}
-      <header class="m-head"><h1>会话</h1></header>
-      <div class="m-scroll">
-        <!-- Batch 1 replaces these placeholders with feedGroups + SessionCard -->
-        <p class="m-section">待办</p>
-        <div class="m-ph">待你回复 / 待审批 · 批 1 接入</div>
-        <p class="m-section">进行中</p>
-        <div class="m-ph">运行中的会话 · 批 1 接入</div>
-        <p class="m-section">最近完成</p>
-        <div class="m-ph">已完成会话 · 批 1 接入</div>
-      </div>
+      {#if openId}
+        <header class="m-dhead">
+          <button class="m-back" onclick={() => (openId = null)} aria-label="返回">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--m-text)" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <span class="m-dtitle">对话详情</span>
+        </header>
+        <div class="m-scroll">
+          <div class="m-ph">ChatDetail · 批 1b 接入 Composer + 消息流</div>
+        </div>
+      {:else}
+        <Feed onOpen={openSession} />
+      {/if}
     {:else if tab === 'tasks'}
       <header class="m-head"><h1>任务</h1></header>
       <div class="m-scroll"><div class="m-ph">定时与自动化 · 批 3 接入</div></div>
@@ -36,7 +48,7 @@
   </main>
 
   <nav class="m-tabbar">
-    <button class="m-tab" class:on={tab === 'chat'} onclick={() => (tab = 'chat')}>
+    <button class="m-tab" class:on={tab === 'chat'} onclick={() => { tab = 'chat'; openId = null }}>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></svg>
       <span>会话</span>
     </button>
@@ -83,19 +95,36 @@
     font-weight: 600;
     color: var(--m-text-strong);
   }
+  .m-dhead {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px 12px;
+  }
+  .m-back {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: none;
+    background: var(--m-surface);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: var(--m-shadow-card);
+  }
+  .m-dtitle {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--m-text);
+  }
   .m-scroll {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     padding: 0 16px 20px;
-  }
-  .m-section {
-    margin: 14px 2px 8px;
-    font: 600 12px/1 system-ui;
-    letter-spacing: .5px;
-    text-transform: uppercase;
-    color: var(--m-text-3);
   }
   .m-ph {
     background: var(--m-surface);
