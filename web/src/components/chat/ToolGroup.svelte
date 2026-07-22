@@ -280,7 +280,7 @@
            ellipsizes it. Surfacing it via `title` + selectable text lets the
            user read/copy the whole thing despite the truncation. -->
       {@const argText = tool.summary || (tool.args ? argSummary(tool.name, tool.args) : '')}
-      <details open={toolOpenState(toolOpen, tool, lastId, groupStreaming)} ontoggle={(e) => applyToolToggle(toolOpen, tool, lastId, groupStreaming, (e.currentTarget as HTMLDetailsElement).open)} class="tool-item">
+      <details open={toolOpenState(toolOpen, tool, lastId, anyRunning)} ontoggle={(e) => applyToolToggle(toolOpen, tool, lastId, anyRunning, (e.currentTarget as HTMLDetailsElement).open)} class="tool-item">
         <summary class="tool-summary">
           <iconify-icon icon="lucide:chevron-right" width="13" class="chev" style="color:var(--text-tertiary)"></iconify-icon>
           <iconify-icon icon={toolIcon(tool.name)} width="14" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>

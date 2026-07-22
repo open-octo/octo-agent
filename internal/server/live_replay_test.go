@@ -417,6 +417,48 @@ func TestReplayLiveState_ReplaysTaskPanel(t *testing.T) {
 	}
 }
 
+// TestReplayLiveState_ReplaysAllRunningSyncSubAgents is the regression guard
+// for a parallel sub_agent fan-out losing all but one entry on a mid-turn
+// refresh: every concurrently-running foreground (sync) sub-agent must replay
+// its own started event, not just one.
+func TestReplayLiveState_ReplaysAllRunningSyncSubAgents(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+
+	const sid = "replay-fanout-session"
+	defer tools.CloseSessionSubAgentManager(sid)
+
+	block := make(chan struct{})
+	defer close(block)
+	mgr := tools.SessionSubAgentManager(sid, func() tools.Spawner { return &blockingSpawner{block: block} })
+
+	const n = 4
+	for i := 0; i < n; i++ {
+		i := i
+		go func() {
+			_, _ = mgr.RunSync(context.Background(), tools.SpawnRequest{
+				Description: fmt.Sprintf("fanout-%d", i),
+			})
+		}()
+	}
+
+	// Wait until all n are registered and running.
+	waitFor(t, func() bool { return len(mgr.ListRunning()) == n })
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.replayLiveState(sid, conn)
+
+	started := map[string]bool{}
+	for _, ev := range drainConn(t, conn) {
+		if ev["type"] == "sub_agent_event" && ev["kind"] == "started" {
+			started[fmt.Sprintf("%v", ev["agent_id"])] = true
+		}
+	}
+	if len(started) != n {
+		t.Fatalf("replayed started events for %d sub-agents, want %d", len(started), n)
+	}
+}
+
 // TestReplayLiveState_ReplaysRunningWorkflow is the regression guard for the
 // web workflow panel never appearing (or never clearing) when a tab
 // (re)subscribes after a background workflow already started: the panel is
