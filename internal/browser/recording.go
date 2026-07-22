@@ -1073,13 +1073,25 @@ func recoverStep(ctx context.Context, opts ReplayOptions, page *Page, step *Step
 		}
 	}
 	if opts.Healer == nil {
-		return page, false, cause
+		return page, false, fmt.Errorf("%w (self-heal skipped: no healer model available)", cause)
 	}
-	// 2. LLM healer, multi-round.
+	// 2. LLM healer, multi-round. Every exit path names the heal outcome —
+	// returning the bare cause made a failed heal indistinguishable from no
+	// heal ever running.
 	for round := 0; round < maxHealRounds; round++ {
 		before := *step
 		if herr := opts.Healer(ctx, page, step, cause); herr != nil {
-			return page, false, cause
+			return page, false, fmt.Errorf("%w (self-heal gave up: %v)", cause, herr)
+		}
+		if step.Selector != before.Selector {
+			// The healer's replacement selector is authoritative for this
+			// retry: the recorded fingerprint is exactly what just failed to
+			// match the page, so re-gating the healed selector through
+			// resolveAnchoredTarget would reject every repair — an anchored
+			// step could never heal. Dropping the stale anchors also reaches
+			// the YAML via the caller's write-back, so the healed step stays
+			// replayable next time instead of deadlocking again.
+			step.Anchors = nil
 		}
 		np, retryErr := runStep(ctx, opts.Browser, page, step, params, opts.StepTimeout, opts.DownloadDir, binds)
 		if retryErr == nil {
@@ -1089,11 +1101,12 @@ func recoverStep(ctx context.Context, opts ReplayOptions, page *Page, step *Step
 			return np, true, nil
 		}
 		if *step == before {
-			return page, false, retryErr // healer made no change — further rounds won't help
+			// healer made no change — further rounds won't help
+			return page, false, fmt.Errorf("%w (self-heal returned the unchanged step)", retryErr)
 		}
 		cause = retryErr // feed the fresh failure to the next round
 	}
-	return page, false, cause
+	return page, false, fmt.Errorf("%w (self-heal tried %d rounds without success)", cause, maxHealRounds)
 }
 
 // unknownParams rejects a caller-supplied param key the recording doesn't

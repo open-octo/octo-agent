@@ -732,6 +732,102 @@ func TestReplayDismissesOverlayDeterministically(t *testing.T) {
 	}
 }
 
+// TestReplayHealBypassesStaleAnchors: a step whose recorded fingerprint no
+// longer matches the page (garbage neighbor text) fails anchored resolution;
+// the healer supplies the correct selector. The retry must TRUST the healed
+// selector instead of re-gating it through the same dead fingerprint —
+// otherwise an anchored step can never heal (observed on Zhihu: every heal
+// round was rejected by the drifted fingerprint and replay failed). The stale
+// anchors must also be dropped from the step so the write-back persists a
+// replayable repair.
+func TestReplayHealBypassesStaleAnchors(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>t</title>
+<button id="real">Go</button>
+<script>window.clicks=0;document.getElementById('real').addEventListener('click',function(){window.clicks++});</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#real", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+
+	recording := &Recording{Name: "x", Steps: []Step{{
+		Action:   "click",
+		Selector: "#stale",
+		Anchors:  &Anchors{Tag: "div", NeighborText: "text that exists nowhere on this page"},
+	}}}
+	heal := func(_ context.Context, _ *Page, step *Step, _ error) error {
+		step.Selector = "#real"
+		return nil
+	}
+	modified, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal, Browser: b})
+	if err != nil {
+		t.Fatalf("replay should succeed via the healed selector, got: %v", err)
+	}
+	if !modified {
+		t.Fatal("expected modified=true after a successful heal")
+	}
+	if recording.Steps[0].Selector != "#real" {
+		t.Fatalf("step not corrected: %q", recording.Steps[0].Selector)
+	}
+	if recording.Steps[0].Anchors != nil {
+		t.Fatal("stale anchors must be dropped with the healed selector — keeping them re-deadlocks the next replay")
+	}
+	var clicks int
+	if err := page.Eval(ctx, "window.clicks", &clicks); err != nil || clicks < 1 {
+		t.Fatalf("healed step did not actually click (clicks=%d, err=%v)", clicks, err)
+	}
+}
+
+// TestReplayHealFailureIsReported: when the healer runs and gives up, the
+// surfaced error must say so — a bare selector error made a failed heal
+// indistinguishable from self-heal never being configured.
+func TestReplayHealFailureIsReported(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>t</title><p>nothing to click</p>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+
+	recording := &Recording{Name: "x", Steps: []Step{{Action: "click", Selector: "#gone"}}}
+	heal := func(_ context.Context, _ *Page, _ *Step, _ error) error {
+		return fmt.Errorf("model could not identify a replacement selector")
+	}
+	_, _, _, err = ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal, Browser: b})
+	if err == nil {
+		t.Fatal("replay should fail")
+	}
+	if !strings.Contains(err.Error(), "self-heal") {
+		t.Fatalf("error must surface the heal attempt, got: %v", err)
+	}
+
+	// And with no healer at all, the error must say self-heal was unavailable.
+	_, _, _, err = ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 2 * time.Second, Browser: b})
+	if err == nil {
+		t.Fatal("replay should fail")
+	}
+	if !strings.Contains(err.Error(), "self-heal skipped") {
+		t.Fatalf("error must say self-heal was unavailable, got: %v", err)
+	}
+}
+
 // TestReplayMultiRoundHeal: the healer needs two rounds — the first repair is
 // still wrong, the second is correct — and replay keeps consulting it (up to the
 // cap) instead of giving up after one attempt.
