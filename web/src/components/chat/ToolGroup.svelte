@@ -3,7 +3,7 @@
   import { activeSessionId, showToast } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
-  import { toolOpenState, applyToolToggle } from '../../lib/toolFold'
+  import { toolOpenState, applyToolToggle, defaultToolOpen } from '../../lib/toolFold'
 
   // Tracks which overwrite-undo buttons have already fired, keyed by tool id.
   let undone = $state<Record<string, boolean>>({})
@@ -209,6 +209,42 @@
   // re-render revert a manual collapse of the auto-opened last tool.
   let toolOpen = $state<Record<string, boolean>>({})
 
+  // A card whose default flips open->closed on its own (the last tool loses
+  // that status, or the whole group stops running) collapses instantly if we
+  // just let <details open> follow the default — the content is hidden by the
+  // browser in one frame, which reads as a flash/bug. `closingIds` keeps such
+  // a card's <details> forced open for a couple seconds while a CSS max-height
+  // transition (see .tool-body.auto-closing) shrinks it first, so the native
+  // collapse that finally lands is invisible. A user-driven click still closes
+  // instantly (native <details> behaviour, untouched here) — only the
+  // no-override, default-driven collapse gets animated.
+  let closingIds = $state<Record<string, boolean>>({})
+  let prevAutoOpen: Record<string, boolean> = {}
+  const AUTO_CLOSE_MS = 2000
+  $effect(() => {
+    const ts = tools ?? []
+    if (ts.length === 0) return
+    const last = ts[ts.length - 1]?.id
+    const running = ts.some((t) => !t.done && !t.error)
+    for (const tool of ts) {
+      if (toolOpen[tool.id] !== undefined) {
+        delete prevAutoOpen[tool.id]
+        continue
+      }
+      const target = defaultToolOpen(tool, last, running)
+      if (prevAutoOpen[tool.id] === true && target === false) {
+        closingIds = { ...closingIds, [tool.id]: true }
+        const id = tool.id
+        setTimeout(() => {
+          const next = { ...closingIds }
+          delete next[id]
+          closingIds = next
+        }, AUTO_CLOSE_MS)
+      }
+      prevAutoOpen[tool.id] = target
+    }
+  })
+
   // todo_write renders its checklist from the tool args.
   function todoItems(tool: any): Array<{ status: string; content: string }> | null {
     if (tool.name !== 'todo_write' && tool.name !== 'todowrite') return null
@@ -280,7 +316,8 @@
            ellipsizes it. Surfacing it via `title` + selectable text lets the
            user read/copy the whole thing despite the truncation. -->
       {@const argText = tool.summary || (tool.args ? argSummary(tool.name, tool.args) : '')}
-      <details open={toolOpenState(toolOpen, tool, lastId, anyRunning)} ontoggle={(e) => applyToolToggle(toolOpen, tool, lastId, anyRunning, (e.currentTarget as HTMLDetailsElement).open)} class="tool-item">
+      {@const isClosing = !!closingIds[tool.id]}
+      <details open={toolOpenState(toolOpen, tool, lastId, anyRunning) || isClosing} ontoggle={(e) => applyToolToggle(toolOpen, tool, lastId, anyRunning, (e.currentTarget as HTMLDetailsElement).open)} class="tool-item">
         <summary class="tool-summary">
           <iconify-icon icon="lucide:chevron-right" width="13" class="chev" style="color:var(--text-tertiary)"></iconify-icon>
           <iconify-icon icon={toolIcon(tool.name)} width="14" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
@@ -325,6 +362,7 @@
           </span>
         </summary>
 
+        <div class="tool-body" class:auto-closing={isClosing}><div class="tool-body-inner">
         {#if tool.error}
           <div class="error-output mono">{tool.error}</div>
         {:else if fErr}
@@ -448,6 +486,7 @@
             {/if}
           </div>
         {/if}
+        </div></div>
       </details>
     {/each}
   </div>
@@ -483,6 +522,14 @@
 /* Chevron rotates from ▸ (collapsed) to ▾ (open). */
 .chev { transition: transform 0.15s ease; flex: 0 0 auto; }
 details[open] > summary .chev { transform: rotate(90deg); }
+/* Auto-collapse animation: a default-driven close (last tool losing that
+   status, or the group finishing) shrinks this wrapper to nothing over 2s
+   before the <details> is actually allowed to close, so the native collapse
+   that follows is invisible instead of an instant flash. A user click still
+   closes natively/instantly — untouched here. */
+.tool-body { display: grid; grid-template-rows: 1fr; }
+.tool-body.auto-closing { grid-template-rows: 0fr; transition: grid-template-rows 2s ease; }
+.tool-body-inner { overflow: hidden; min-height: 0; }
 /* todo_write checklist */
 .todo-list { border-top: 1px solid var(--border-table); padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
 .todo-step { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
