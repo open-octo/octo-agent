@@ -250,11 +250,17 @@
 {#if tools !== null && tools.length > 0}
   <!-- Real data rendering -->
   {@const lastId = tools[tools.length - 1]?.id}
+  <!-- "running" reflects whether a tool is still in flight, NOT the group's
+       message-level `streaming` flag: that flag stays true until the whole turn
+       completes (finishAllTools), so a group whose tools all finished — or one
+       rebuilt done-but-streaming on reconnect replay — would otherwise show a
+       perpetual "running". -->
+  {@const anyRunning = tools.some((t) => !t.done && !t.error)}
   <div class="tool-group">
     <div class="group-header">
       <iconify-icon icon="ant-design:tool-outlined" width="14" style="color:var(--text-tertiary)"></iconify-icon>
       <span class="hdr-label">{$t(tools.length === 1 ? 'tools.n_used_one' : 'tools.n_used').replace('{n}', String(tools.length))}</span>
-      {#if groupStreaming}
+      {#if anyRunning}
         <span style="margin-left:auto;display:flex;align-items:center;gap:5px;font-size:12px;color:var(--blue-6)">
           <iconify-icon icon="ant-design:loading-outlined" width="13" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
           {$t('tools.running')}

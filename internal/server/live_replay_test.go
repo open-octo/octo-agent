@@ -369,6 +369,54 @@ func TestReplayLiveState_StdoutClearsAfterToolDone(t *testing.T) {
 	}
 }
 
+// TestReplayLiveState_ReplaysTaskPanel is the regression guard for the task
+// panel vanishing on a mid-turn refresh: the web task store is rebuilt per turn
+// and never persisted, and todo_update is fire-and-forget, so a tab that
+// (re)subscribes after the last task tool ran had no way to rebuild the panel.
+func TestReplayLiveState_ReplaysTaskPanel(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+	srv.pendingQuestions = map[string]wsEventRequestUserQuestion{}
+	srv.pendingConfirms = map[string]wsEventRequestConfirmation{}
+
+	const sid = "replay-task-panel-session"
+	defer tools.CloseSessionBackgroundManager(sid)
+
+	seedLiveTurn(srv, sid)
+	sw := srv.newWSStreamWriter(sid)
+
+	todos := []any{
+		map[string]any{"content": "step one", "status": "completed"},
+		map[string]any{"content": "step two", "status": "in_progress"},
+	}
+	sw.handleEvent(agent.AgentEvent{
+		Kind:   agent.EventToolDone,
+		ToolID: "task1",
+		Output: "ok",
+		UI:     map[string]any{"type": "todo", "todos": todos},
+	})
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.replayLiveState(sid, conn)
+
+	var got []map[string]any
+	for _, ev := range drainConn(t, conn) {
+		if ev["type"] == "todo_update" && ev["session_id"] == sid {
+			got = append(got, ev)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("replayed todo_update count = %d, want 1", len(got))
+	}
+	list, ok := got[0]["todos"].([]any)
+	if !ok || len(list) != 2 {
+		t.Fatalf("replayed todos = %v, want 2 items", got[0]["todos"])
+	}
+	if first, _ := list[0].(map[string]any); first["content"] != "step one" || first["status"] != "completed" {
+		t.Errorf("replayed todos[0] = %v, want {step one, completed}", list[0])
+	}
+}
+
 // TestReplayLiveState_ReplaysRunningWorkflow is the regression guard for the
 // web workflow panel never appearing (or never clearing) when a tab
 // (re)subscribes after a background workflow already started: the panel is
