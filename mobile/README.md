@@ -41,6 +41,7 @@ webview fetch('/api/…') / new WebSocket('/ws')
 | App boot: install shim, pair, connect | `src/boot.ts` | on-device |
 | QR scan (getUserMedia + jsQR) | `src/qr.ts` | on-device |
 | Android native plugin (Noise XX) | `native/OctoTunnelPlugin.kt` | emulator E2E |
+| iOS native plugin (Noise XX) | `native/OctoTunnelPlugin.swift` | simulator E2E |
 | Capacitor config + web bundling | `capacitor.config.ts`, `scripts/bundle-web.mjs` | tsc |
 
 ```bash
@@ -50,15 +51,13 @@ npm test          # vitest: pairing + frames + shim + buffering-transport
 npm run typecheck # tsc
 ```
 
-The **Android** app is verified end to end: paired to a local
+Both the **Android** and **iOS** apps are verified end to end: paired to a local
 `octo serve --tunnel` + `octo-relay` over a real Noise XX session, and the
-bundled frontend drove `/api` + `/ws` through the tunnel. See
-`native/README.md` for the Android wiring.
+bundled frontend drove `/api` + `/ws` through the tunnel. See `native/README.md`
+for the per-platform wiring.
 
 ## Not done yet
 
-- **iOS native plugin** — `native/` has only the Android `OctoTunnelPlugin.kt`.
-  The Swift/Keychain equivalent hasn't been written (no iOS toolchain yet).
 - The other native plugins (biometric, push, notifications, share) and the
   `mobileShell` branch re-pointing in the frontend.
 - **Self-tunnel transport** — `SelfTunnelTransport` dials a `/tunnel` endpoint
