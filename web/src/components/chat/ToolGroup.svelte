@@ -3,6 +3,7 @@
   import { activeSessionId, showToast } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
+  import { toolOpenState, applyToolToggle } from '../../lib/toolFold'
 
   // Tracks which overwrite-undo buttons have already fired, keyed by tool id.
   let undone = $state<Record<string, boolean>>({})
@@ -203,16 +204,10 @@
     return tool.name === 'terminal' || tool.name === 'bash'
   }
 
-  // While a turn is still running, keep the LATEST tool open (whether or not it
-  // has finished) so its output stays readable until the next step replaces it
-  // — a finished tool only collapses once the next tool appears, and the whole
-  // group collapses once the turn completes (the assistant reply takes over).
-  // Errors always open — they need attention.
-  function defaultOpen(tool: any, lastId: string | undefined, streaming: boolean): boolean {
-    if (tool.error) return true
-    if (!streaming) return false
-    return tool.id === lastId
-  }
+  // Per-tool open/closed override, seeded by the default (see lib/toolFold).
+  // Binding <details open> straight to the default would let every streaming
+  // re-render revert a manual collapse of the auto-opened last tool.
+  let toolOpen = $state<Record<string, boolean>>({})
 
   // todo_write renders its checklist from the tool args.
   function todoItems(tool: any): Array<{ status: string; content: string }> | null {
@@ -279,7 +274,7 @@
            ellipsizes it. Surfacing it via `title` + selectable text lets the
            user read/copy the whole thing despite the truncation. -->
       {@const argText = tool.summary || (tool.args ? argSummary(tool.name, tool.args) : '')}
-      <details open={defaultOpen(tool, lastId, groupStreaming)} class="tool-item">
+      <details open={toolOpenState(toolOpen, tool, lastId, groupStreaming)} ontoggle={(e) => applyToolToggle(toolOpen, tool, lastId, groupStreaming, (e.currentTarget as HTMLDetailsElement).open)} class="tool-item">
         <summary class="tool-summary">
           <iconify-icon icon="lucide:chevron-right" width="13" class="chev" style="color:var(--text-tertiary)"></iconify-icon>
           <iconify-icon icon={toolIcon(tool.name)} width="14" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
