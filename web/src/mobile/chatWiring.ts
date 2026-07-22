@@ -32,6 +32,7 @@ import {
   finishAllTools,
   finishToolsById,
   clearMsgs,
+  showToast,
   uid,
 } from '../lib/stores'
 
@@ -198,10 +199,47 @@ export function wireMobileSession(sid: string): () => void {
   cleanups.push(ws.on('turn_error', (ev: any) => {
     if (!forSid(ev)) return
     addChatMsg(sid, {
-      id: uid('err'), type: 'notice', content: `**Error:** ${ev.error ?? 'request failed'}`,
+      id: uid('err'), type: 'notice', content: `错误: ${ev.error ?? 'request failed'}`,
       level: 'error', createdAt: Date.now(), streaming: false, tools: [], todos: [],
     })
     chatStreaming.update(s => ({ ...s, [sid]: false }))
+  }))
+
+  cleanups.push(ws.on('toast', (ev: any) => {
+    if (ev.session_id !== sid) return
+    showToast(ev.message ?? '', ev.level ?? 'info')
+  }))
+
+  // Operation errors surfaced over WS (retry-while-running, session-not-found…).
+  cleanups.push(ws.on('error', (ev: any) => {
+    if (!forSid(ev)) return
+    showToast(ev.message ?? 'Error', 'error')
+  }))
+
+  // The server rejected the send (session bound to another client, not found…).
+  // Without this the optimistic bubble and the streaming flag would hang forever
+  // — the server sends no idle snapshot after a rejection. Roll the echo back,
+  // clear streaming, and surface why. (No steer/force bookkeeping — mobile has
+  // no optimistic-steer path; force-takeover UI is a later batch.)
+  const rollbackSend = (ev: any) => {
+    chatMessages.update(m => {
+      const msgs = [...(m[sid] || [])]
+      const lastPending = msgs.findLastIndex((x: any) => x.type === 'user' && x.pending)
+      if (lastPending >= 0) msgs.splice(lastPending, 1)
+      return { ...m, [sid]: msgs }
+    })
+    chatStreaming.update(s => ({ ...s, [sid]: false }))
+    showToast(ev.message ?? '发送失败', 'error')
+  }
+  cleanups.push(ws.on('send_rejected', (ev: any) => {
+    if (!forSid(ev)) return
+    rollbackSend(ev)
+  }))
+  cleanups.push(ws.on('bind_required', (ev: any) => {
+    if (!forSid(ev)) return
+    // Mobile has no force-takeover UI yet, so treat it as a rejection rather
+    // than leaving the turn stuck: roll back and tell the user it's in use.
+    rollbackSend({ message: ev.message ?? '会话正被其他端占用' })
   }))
 
   cleanups.push(ws.on('session_update', (ev: any) => {
