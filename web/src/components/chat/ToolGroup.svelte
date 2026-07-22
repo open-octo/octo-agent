@@ -3,7 +3,7 @@
   import { activeSessionId, showToast } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
-  import { toolOpenState, applyToolToggle, defaultToolOpen } from '../../lib/toolFold'
+  import { toolOpenState, applyToolToggle } from '../../lib/toolFold'
 
   // Tracks which overwrite-undo buttons have already fired, keyed by tool id.
   let undone = $state<Record<string, boolean>>({})
@@ -209,40 +209,42 @@
   // re-render revert a manual collapse of the auto-opened last tool.
   let toolOpen = $state<Record<string, boolean>>({})
 
-  // A card whose default flips open->closed on its own (the last tool loses
-  // that status, or the whole group stops running) collapses instantly if we
-  // just let <details open> follow the default — the content is hidden by the
-  // browser in one frame, which reads as a flash/bug. `closingIds` keeps such
-  // a card's <details> forced open for a couple seconds while a CSS max-height
-  // transition (see .tool-body.auto-closing) shrinks it first, so the native
-  // collapse that finally lands is invisible. A user-driven click still closes
-  // instantly (native <details> behaviour, untouched here) — only the
-  // no-override, default-driven collapse gets animated.
+  // The last tool card auto-collapses the instant its turn stops running,
+  // which — bound straight to <details open> — hides the content in one
+  // frame and reads as a flash/bug. `closingIds` keeps that one card's
+  // <details> forced open for a couple seconds while a CSS transition (see
+  // .tool-body.auto-closing) shrinks it first, so the native collapse that
+  // finally lands is invisible.
+  //
+  // This only fires on the group-level running->not-running edge (the turn
+  // actually finishing), not on every default flip: the last tool also loses
+  // its auto-open default the instant a *later* tool call starts and takes
+  // over as the new last one — collapsing the outgoing card there stays
+  // instant, matching how it always worked, because animating it made the
+  // outgoing card's shrink and the incoming card's arrival read as if both
+  // were "expanding" together.
+  //
+  // A user-driven click still closes instantly (native <details> behaviour,
+  // untouched here) — checking toolOpen[id] here skips a card the user
+  // already has an explicit override on.
   let closingIds = $state<Record<string, boolean>>({})
-  let prevAutoOpen: Record<string, boolean> = {}
+  let prevRunning: boolean | undefined
   const AUTO_CLOSE_MS = 2000
   $effect(() => {
     const ts = tools ?? []
     if (ts.length === 0) return
-    const last = ts[ts.length - 1]?.id
     const running = ts.some((t) => !t.done && !t.error)
-    for (const tool of ts) {
-      if (toolOpen[tool.id] !== undefined) {
-        delete prevAutoOpen[tool.id]
-        continue
-      }
-      const target = defaultToolOpen(tool, last, running)
-      if (prevAutoOpen[tool.id] === true && target === false) {
-        closingIds = { ...closingIds, [tool.id]: true }
-        const id = tool.id
-        setTimeout(() => {
-          const next = { ...closingIds }
-          delete next[id]
-          closingIds = next
-        }, AUTO_CLOSE_MS)
-      }
-      prevAutoOpen[tool.id] = target
+    const last = ts[ts.length - 1]
+    if (prevRunning === true && running === false && last && !last.error && toolOpen[last.id] === undefined) {
+      const id = last.id
+      closingIds = { ...closingIds, [id]: true }
+      setTimeout(() => {
+        const next = { ...closingIds }
+        delete next[id]
+        closingIds = next
+      }, AUTO_CLOSE_MS)
     }
+    prevRunning = running
   })
 
   // todo_write renders its checklist from the tool args.
@@ -526,8 +528,12 @@ details[open] > summary .chev { transform: rotate(90deg); }
    status, or the group finishing) shrinks this wrapper to nothing over 2s
    before the <details> is actually allowed to close, so the native collapse
    that follows is invisible instead of an instant flash. A user click still
-   closes natively/instantly — untouched here. */
-.tool-body { display: grid; grid-template-rows: 1fr; }
+   closes natively/instantly — untouched here. The base rule pins
+   transition-duration to 0s explicitly (not just omits it) — some engines
+   resolve a class-removal transition from the style being left rather than
+   the one being entered, which would otherwise replay the 2s shrink in
+   reverse as a spurious "expand" animation once auto-closing is cleared. */
+.tool-body { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 0s; }
 .tool-body.auto-closing { grid-template-rows: 0fr; transition: grid-template-rows 2s ease; }
 .tool-body-inner { overflow: hidden; min-height: 0; }
 /* todo_write checklist */
