@@ -54,7 +54,7 @@ func NewSpawner(parent *agent.Agent, executor agent.ToolExecutor, toolsFn func(c
 }
 
 // childMaxTurns caps the sub-agent's tool loop per round. Deliberately lower
-// than the parent's defaultMaxTurns (200): a sub-task should make focused
+// than the parent's defaultMaxTurns (1000): a sub-task should make focused
 // progress and check back rather than run unbounded. Each Continue re-arms
 // this budget for the next round.
 const childMaxTurns = 100
