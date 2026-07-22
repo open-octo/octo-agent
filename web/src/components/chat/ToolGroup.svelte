@@ -212,7 +212,7 @@
   // The last tool card auto-collapses the instant its turn stops running,
   // which — bound straight to <details open> — hides the content in one
   // frame and reads as a flash/bug. `closingIds` keeps that one card's
-  // <details> forced open for a couple seconds while a CSS transition (see
+  // <details> forced open for a beat while a CSS transition (see
   // .tool-body.auto-closing) shrinks it first, so the native collapse that
   // finally lands is invisible.
   //
@@ -233,12 +233,14 @@
   // flush later. That reopen fires a toggle whose open=true diverges from the
   // now-false default, so applyToolToggle records it as a user "keep open"
   // override — and when the animation ends and closingIds clears, that stale
-  // override snaps the card back open (shrink 2s, then pop back). Running
+  // override snaps the card back open (animated shrink, then pop back). Running
   // before the DOM update keeps `open` true continuously, so no toggle fires
   // at all.
+  // Slightly longer than the CSS transition so the shrink always finishes
+  // before the <details> is allowed to natively close.
   let closingIds = $state<Record<string, boolean>>({})
   let prevRunning: boolean | undefined
-  const AUTO_CLOSE_MS = 2000
+  const AUTO_CLOSE_MS = 750
   $effect.pre(() => {
     const ts = tools ?? []
     if (ts.length === 0) return
@@ -549,17 +551,17 @@
 /* Chevron rotates from ▸ (collapsed) to ▾ (open). */
 .chev { transition: transform 0.15s ease; flex: 0 0 auto; }
 details[open] > summary .chev { transform: rotate(90deg); }
-/* Auto-collapse animation: a default-driven close (last tool losing that
-   status, or the group finishing) shrinks this wrapper to nothing over 2s
-   before the <details> is actually allowed to close, so the native collapse
-   that follows is invisible instead of an instant flash. A user click still
-   closes natively/instantly — untouched here. The base rule pins
+/* Auto-collapse animation: when the turn finishes, this wrapper shrinks to
+   nothing before the <details> is actually allowed to close (AUTO_CLOSE_MS
+   in the script keeps it forced open just past this duration), so the native
+   collapse that follows is invisible instead of an instant flash. A user
+   click still closes natively/instantly — untouched here. The base rule pins
    transition-duration to 0s explicitly (not just omits it) — some engines
    resolve a class-removal transition from the style being left rather than
-   the one being entered, which would otherwise replay the 2s shrink in
-   reverse as a spurious "expand" animation once auto-closing is cleared. */
+   the one being entered, which would otherwise replay the shrink in reverse
+   as a spurious "expand" animation once auto-closing is cleared. */
 .tool-body { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 0s; }
-.tool-body.auto-closing { grid-template-rows: 0fr; transition: grid-template-rows 2s ease; }
+.tool-body.auto-closing { grid-template-rows: 0fr; transition: grid-template-rows 0.6s ease; }
 .tool-body-inner { overflow: hidden; min-height: 0; }
 /* todo_write checklist */
 .todo-list { border-top: 1px solid var(--border-table); padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
