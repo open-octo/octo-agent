@@ -1,0 +1,79 @@
+/* octo-mobile neutral design tokens.
+ *
+ * Independent of the web theme's tokens so the mobile and desktop view trees can
+ * evolve separately. The accent stays Ant Blue (#1677FF) for cross-surface
+ * consistency. Dark values follow the app-wide `data-theme` attribute that
+ * lib/theme.ts writes on <html>. All tokens are `--m-*` so they never collide
+ * with the web palette. */
+
+:root {
+  /* surfaces */
+  --m-bg: #f2f3f5;            /* page background */
+  --m-surface: #ffffff;       /* cards, sheets */
+  --m-surface-2: #f7f8fa;     /* inset / search pill */
+  --m-terminal-bg: #1e1e1e;   /* command / log blocks */
+  --m-terminal-fg: #e6e6e6;
+
+  /* text tiers */
+  --m-text-strong: #0f1114;
+  --m-text: #1f2329;
+  --m-text-2: #4e5969;
+  --m-text-3: #86909c;
+  --m-text-4: #a9aeb8;
+
+  /* lines */
+  --m-border: #dfe2e8;
+  --m-border-2: #e8ebf0;
+  --m-divider: #f0f1f4;
+
+  /* accent + status */
+  --m-accent: #1677ff;
+  --m-accent-soft: #e8f1ff;
+  --m-success: #00b42a;
+  --m-error: #f53f3f;
+  --m-warning: #ff7d00;
+  --m-purple: #6056d6;
+
+  /* tags: warning / success / info / neutral (bg · text · border) */
+  --m-tag-warn-bg: #fff7e6;   --m-tag-warn-text: #d46b08;  --m-tag-warn-border: #ffe0a3;
+  --m-tag-ok-bg: #e8f8ec;     --m-tag-ok-text: #009a29;    --m-tag-ok-border: #b7e8c3;
+  --m-tag-info-bg: #e8f1ff;   --m-tag-info-text: #1677ff;  --m-tag-info-border: #b3d4ff;
+  --m-tag-neutral-bg: #f2f3f5; --m-tag-neutral-text: #4e5969; --m-tag-neutral-border: #dfe2e8;
+
+  /* elevation */
+  --m-shadow-card: 0 1px 2px rgba(15, 23, 42, .04);
+  --m-shadow-fab: 0 10px 24px rgba(22, 119, 255, .4);
+}
+
+:root[data-theme="dark"] {
+  --m-bg: #17171a;
+  --m-surface: #232327;
+  --m-surface-2: #2a2a2f;
+  --m-terminal-bg: #0e0e10;
+  --m-terminal-fg: #e6e6e6;
+
+  --m-text-strong: #f5f5f6;
+  --m-text: #e6e6e8;
+  --m-text-2: #b4b6bd;
+  --m-text-3: #898b93;
+  --m-text-4: #64666e;
+
+  --m-border: #35353b;
+  --m-border-2: #2d2d33;
+  --m-divider: #2a2a2f;
+
+  --m-accent: #3c89ff;
+  --m-accent-soft: #17263f;
+  --m-success: #23c343;
+  --m-error: #f76965;
+  --m-warning: #ff9a2e;
+  --m-purple: #7d75e6;
+
+  --m-tag-warn-bg: #33280f;   --m-tag-warn-text: #f5b95f;  --m-tag-warn-border: #4a3a1a;
+  --m-tag-ok-bg: #102a17;     --m-tag-ok-text: #58d67d;    --m-tag-ok-border: #1e4429;
+  --m-tag-info-bg: #14243d;   --m-tag-info-text: #6aa8ff;  --m-tag-info-border: #244065;
+  --m-tag-neutral-bg: #2a2a2f; --m-tag-neutral-text: #b4b6bd; --m-tag-neutral-border: #35353b;
+
+  --m-shadow-card: 0 1px 2px rgba(0, 0, 0, .3);
+  --m-shadow-fab: 0 10px 24px rgba(22, 119, 255, .5);
+}

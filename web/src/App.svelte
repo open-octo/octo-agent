@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sessions, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell } from './lib/stores'
+  import { view, sessions, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell } from './lib/stores'
+  import MobileApp from './mobile/MobileApp.svelte'
   import { ws, wsState } from './lib/ws'
   import { notificationsEnabled } from './lib/notifications'
   import { locale, t, tr, setLocale } from './lib/i18n'
@@ -298,6 +299,8 @@
   <div class="splash"><div class="spinner"></div></div>
 {:else if $onboardPhase === 'key_setup'}
   <FirstRunSetup />
+{:else if mobileShell}
+<MobileApp />
 {:else}
 <div class="app">
   <Header />
