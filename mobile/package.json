@@ -7,7 +7,8 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "bundle-web": "node scripts/bundle-web.mjs"
+    "bundle-web": "node scripts/bundle-web.mjs",
+    "wire-native": "node scripts/wire-native.mjs"
   },
   "dependencies": {
     "@capacitor/app": "^6.0.0",

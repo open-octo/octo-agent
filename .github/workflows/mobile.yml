@@ -1,0 +1,48 @@
+name: Mobile
+
+# Type-checks and tests octo-mobile (mobile/), the Capacitor iOS/Android client.
+# It is a nested npm project with its own dependency tree — none of it enters the
+# CLI's zero-dependency Go build, and the main `Go` workflow does not touch it.
+# This job runs only the TypeScript layer (shim / frames / pairing / transport /
+# buffering-transport), which is pure JS and needs no iOS/Android toolchain, so it
+# stays fast and green on a plain Linux runner. The native plugins
+# (native/OctoTunnelPlugin.{kt,swift}) and their platform wiring are verified by
+# hand on a Mac with the mobile toolchains — see mobile/native/README.md.
+#
+# Path-filtered so a mobile-only change runs only this workflow, and a change
+# elsewhere never triggers it.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/mobile.yml'
+  pull_request:
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/mobile.yml'
+
+jobs:
+  build:
+    name: Type-check + test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
