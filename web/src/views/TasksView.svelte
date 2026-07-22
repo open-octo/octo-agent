@@ -68,10 +68,15 @@
         // the groups snapshot — a cron run files its session into the task's
         // group server-side, but that store is otherwise only ever populated
         // once at sidebar mount, so without this the session would render
-        // ungrouped until a manual reload (#1699).
-        const [data, org] = await Promise.all([api.listSessions(), api.listSessionGroups()])
+        // ungrouped until a manual reload (#1699). The groups fetch is
+        // best-effort: the task already started, so its failure must not
+        // abort activating the session or read as "Failed to run task".
+        const [data, org] = await Promise.all([
+          api.listSessions(),
+          api.listSessionGroups().catch(() => null),
+        ])
         sessions.set(data.sessions ?? [])
-        sessionGroups.set(org.groups)
+        if (org) sessionGroups.set(org.groups)
         setActiveSession(res.session_id)
         view.set('chat')
       }

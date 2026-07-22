@@ -3,7 +3,7 @@
   import { activeSessionId, showToast } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
-  import { toolOpenState, applyToolToggle } from '../../lib/toolFold'
+  import { toolOpenState, applyToolToggle, autoCloseAction } from '../../lib/toolFold'
 
   // Tracks which overwrite-undo buttons have already fired, keyed by tool id.
   let undone = $state<Record<string, boolean>>({})
@@ -209,24 +209,24 @@
   // re-render revert a manual collapse of the auto-opened last tool.
   let toolOpen = $state<Record<string, boolean>>({})
 
-  // The last tool card auto-collapses the instant its turn stops running,
+  // The last tool card auto-collapses the instant the group stops running,
   // which — bound straight to <details open> — hides the content in one
   // frame and reads as a flash/bug. `closingIds` keeps that one card's
   // <details> forced open for a beat while a CSS transition (see
   // .tool-body.auto-closing) shrinks it first, so the native collapse that
   // finally lands is invisible.
   //
-  // This only fires on the group-level running->not-running edge (the turn
-  // actually finishing), not on every default flip: the last tool also loses
-  // its auto-open default the instant a *later* tool call starts and takes
-  // over as the new last one — collapsing the outgoing card there stays
-  // instant, matching how it always worked, because animating it made the
-  // outgoing card's shrink and the incoming card's arrival read as if both
-  // were "expanding" together.
+  // "Stops running" means no in-flight tool in the group right now — usually
+  // the turn finishing, but the same dip also happens between sequential tool
+  // rounds inside one turn (result received, next call still an LLM round-trip
+  // away). If the next call arrives while the previous card is still
+  // shrinking, the 'cancel' branch in autoCloseAction lands it instantly —
+  // otherwise the outgoing shrink overlaps the incoming card and the pair
+  // reads as everything animating open at once.
   //
   // A user-driven click still closes instantly (native <details> behaviour,
-  // untouched here) — checking toolOpen[id] here skips a card the user
-  // already has an explicit override on.
+  // untouched here); autoCloseAction skips a card the user holds an explicit
+  // override on.
   //
   // This must be $effect.pre, not $effect: a post-DOM effect would let the
   // running->false render close the <details> first and force it back open a
@@ -236,8 +236,8 @@
   // override snaps the card back open (animated shrink, then pop back). Running
   // before the DOM update keeps `open` true continuously, so no toggle fires
   // at all.
-  // Slightly longer than the CSS transition so the shrink always finishes
-  // before the <details> is allowed to natively close.
+  // AUTO_CLOSE_MS is slightly longer than the CSS transition so the shrink
+  // always finishes before the <details> is allowed to natively close.
   let closingIds = $state<Record<string, boolean>>({})
   let prevRunning: boolean | undefined
   const AUTO_CLOSE_MS = 750
@@ -245,17 +245,19 @@
     const ts = tools ?? []
     if (ts.length === 0) return
     const running = ts.some((t) => !t.done && !t.error)
-    const last = ts[ts.length - 1]
-    if (prevRunning === true && running === false && last && !last.error && toolOpen[last.id] === undefined) {
-      const id = last.id
+    const action = autoCloseAction(prevRunning, running, ts, toolOpen, Object.keys(closingIds).length)
+    prevRunning = running
+    if (action?.kind === 'start') {
+      const id = action.id
       closingIds = { ...closingIds, [id]: true }
       setTimeout(() => {
         const next = { ...closingIds }
         delete next[id]
         closingIds = next
       }, AUTO_CLOSE_MS)
+    } else if (action?.kind === 'cancel') {
+      closingIds = {}
     }
-    prevRunning = running
   })
 
   // Toggle handler that is animation-aware: while a card is mid-animated-close,

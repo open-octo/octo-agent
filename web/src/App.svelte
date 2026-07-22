@@ -164,6 +164,22 @@
       }
     })
 
+    // Pull the authoritative session list from the server into the stores.
+    // Shared by the reconciliation paths below; never touches activeSessionId.
+    const refreshSessionsFromServer = () => {
+      api.listSessions().then((data: any) => {
+        const list = data.sessions ?? []
+        sessions.set(list)
+        chatShowReasoning.update(m => {
+          const next = { ...m }
+          for (const s of list) {
+            if (typeof s.show_reasoning === 'boolean') next[s.id] = s.show_reasoning
+          }
+          return next
+        })
+      }).catch(() => { /* non-critical: WS fast paths already ran */ })
+    }
+
     // Auto-title: a global broadcast carrying the freshly generated name, so
     // the sidebar reflects the rename live instead of showing the stale title
     // until a reload.
@@ -177,22 +193,19 @@
       )
       // Double-check against the server: the store mutation above is the fast
       // path, but if a slow-consumer drop or a UI reactivity gap hides the
-      // rename, the next REST list will reconcile the sidebar. This is also
-      // the first live signal of a brand-new cron session for a tab that was
-      // already open (its auto-title fires this event on message receipt) —
-      // refresh the groups snapshot alongside it, or the session shows up
-      // ungrouped until a manual reload re-mounts the sidebar (#1699).
-      api.listSessions().then((data: any) => {
-        const list = data.sessions ?? []
-        sessions.set(list)
-        chatShowReasoning.update(m => {
-          const next = { ...m }
-          for (const s of list) {
-            if (typeof s.show_reasoning === 'boolean') next[s.id] = s.show_reasoning
-          }
-          return next
-        })
-      }).catch(() => { /* non-critical: fast-path store update already ran */ })
+      // rename, the next REST list will reconcile the sidebar.
+      refreshSessionsFromServer()
+    })
+
+    // A session created outside this tab's own actions — a scheduled cron
+    // fire filing a fresh session into its task's group, or a branch/fork
+    // made in another tab. Every other broadcast about that session is
+    // per-session and dropped for tabs that never subscribed to it, so this
+    // is the one signal an open sidebar gets: refetch both the session list
+    // AND the groups snapshot (which is otherwise only ever fetched once, at
+    // sidebar mount) so the session appears already inside its group (#1699).
+    ws.on('session_created', () => {
+      refreshSessionsFromServer()
       api.listSessionGroups().then(org => sessionGroups.set(org.groups)).catch(() => { /* non-critical */ })
     })
 

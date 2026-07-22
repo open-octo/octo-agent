@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { defaultToolOpen, toolOpenState, applyToolToggle, type ToolLike } from './toolFold'
+import { defaultToolOpen, toolOpenState, applyToolToggle, autoCloseAction, type ToolLike } from './toolFold'
 
 const tool = (id: string, error?: unknown): ToolLike => ({ id, error })
 
@@ -67,5 +67,46 @@ describe('toolOpenState + applyToolToggle', () => {
     applyToolToggle(ov, errored, 'b', true, false)
     expect(ov).toEqual({ a: false })
     expect(toolOpenState(ov, errored, 'b', true)).toBe(false)
+  })
+})
+
+describe('autoCloseAction', () => {
+  const tools = [tool('a'), tool('b')]
+
+  it('starts the animated close of the last card on the running->false edge', () => {
+    expect(autoCloseAction(true, false, tools, {}, 0)).toEqual({ kind: 'start', id: 'b' })
+  })
+
+  it('does not start on first render (history replay lands already-done tools)', () => {
+    expect(autoCloseAction(undefined, false, tools, {}, 0)).toBeNull()
+  })
+
+  it('does not re-start while already stopped', () => {
+    expect(autoCloseAction(false, false, tools, {}, 0)).toBeNull()
+  })
+
+  it('skips an error card — those stay open by default, nothing to animate', () => {
+    expect(autoCloseAction(true, false, [tool('a'), tool('b', 'boom')], {}, 0)).toBeNull()
+  })
+
+  it('skips a card the user holds an explicit override on', () => {
+    expect(autoCloseAction(true, false, tools, { b: false }, 0)).toBeNull()
+    expect(autoCloseAction(true, false, tools, { b: true }, 0)).toBeNull()
+  })
+
+  // A new tool call arriving before the previous card finished shrinking must
+  // land the old card instantly — otherwise its shrink overlaps the new card's
+  // arrival and the pair reads as everything animating open at once.
+  it('cancels an in-flight close when the group starts running again', () => {
+    expect(autoCloseAction(false, true, tools, {}, 1)).toEqual({ kind: 'cancel' })
+  })
+
+  it('does nothing while running with no close in flight', () => {
+    expect(autoCloseAction(false, true, tools, {}, 0)).toBeNull()
+    expect(autoCloseAction(true, true, tools, {}, 0)).toBeNull()
+  })
+
+  it('handles an empty tool list', () => {
+    expect(autoCloseAction(true, false, [], {}, 0)).toBeNull()
   })
 })
