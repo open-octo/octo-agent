@@ -176,6 +176,103 @@ func newGroupID() string {
 	return "g-" + hex.EncodeToString(b[:])
 }
 
+// ─── Programmatic group helpers (used by the scheduler) ─────────────────────
+//
+// Cron tasks file each run's session under a per-task group (see
+// internal/server/tasks_handlers.go). These helpers own groupMu themselves, so
+// the scheduler path can create/rename/delete groups and add sessions without
+// duplicating the load-modify-save cycle the HTTP handlers run inline.
+
+// createSessionGroupNamed creates a new group with the given name and returns
+// it. The caller records the group's ID on the task so later runs reuse it.
+func createSessionGroupNamed(name string) (sessionGroup, error) {
+	groupMu.Lock()
+	defer groupMu.Unlock()
+	groups, err := loadSessionGroups()
+	if err != nil {
+		return sessionGroup{}, err
+	}
+	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}}
+	groups = append(groups, g)
+	if err := saveSessionGroups(groups); err != nil {
+		return sessionGroup{}, err
+	}
+	return g, nil
+}
+
+// addSessionToGroup appends a session ID to a group, enforcing single
+// membership (the session is first removed from every other group, matching
+// handleSetSessionGroup). Returns an error if the target group no longer
+// exists.
+func addSessionToGroup(groupID, sessionID string) error {
+	groupMu.Lock()
+	defer groupMu.Unlock()
+	groups, err := loadSessionGroups()
+	if err != nil {
+		return err
+	}
+	found := false
+	for i := range groups {
+		ids := groups[i].SessionIDs[:0]
+		for _, existing := range groups[i].SessionIDs {
+			if existing != sessionID {
+				ids = append(ids, existing)
+			}
+		}
+		groups[i].SessionIDs = ids
+		if groups[i].ID == groupID {
+			groups[i].SessionIDs = append(groups[i].SessionIDs, sessionID)
+			found = true
+		}
+	}
+	if !found {
+		return fmt.Errorf("session group %q not found", groupID)
+	}
+	return saveSessionGroups(groups)
+}
+
+// renameSessionGroup renames a group by ID. A no-op (nil) if the group is gone
+// — a task's group may have been deleted manually in the UI.
+func renameSessionGroup(groupID, name string) error {
+	groupMu.Lock()
+	defer groupMu.Unlock()
+	groups, err := loadSessionGroups()
+	if err != nil {
+		return err
+	}
+	for i := range groups {
+		if groups[i].ID == groupID {
+			groups[i].Name = name
+			return saveSessionGroups(groups)
+		}
+	}
+	return nil
+}
+
+// deleteSessionGroup removes a group by ID, leaving its member sessions intact
+// (they fall back to ungrouped). A no-op if the group is already gone.
+func deleteSessionGroup(groupID string) error {
+	groupMu.Lock()
+	defer groupMu.Unlock()
+	groups, err := loadSessionGroups()
+	if err != nil {
+		return err
+	}
+	out := groups[:0]
+	found := false
+	for _, g := range groups {
+		if g.ID == groupID {
+			found = true
+			continue
+		}
+		out = append(out, g)
+	}
+	if !found {
+		return nil
+	}
+	return saveSessionGroups(out)
+}
+
 // ─── GET /api/session-groups ────────────────────────────────────────────────
 
 func (s *Server) handleListSessionGroups(w http.ResponseWriter, r *http.Request) {

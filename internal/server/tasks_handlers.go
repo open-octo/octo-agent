@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -22,31 +23,30 @@ import (
 // ─── Tasks REST API ─────────────────────────────────────────────────────────
 
 type taskRequest struct {
-	Name        string                  `json:"name"`
-	Cron        string                  `json:"cron"`
-	Prompt      string                  `json:"prompt"`
-	Model       string                  `json:"model,omitempty"`
-	Agent       string                  `json:"agent,omitempty"`
-	Directory   string                  `json:"directory,omitempty"`
-	Notify      scheduler.NotifyTargets `json:"notify,omitempty"`
-	SessionMode string                  `json:"session_mode,omitempty"`
+	Name      string                  `json:"name"`
+	Cron      string                  `json:"cron"`
+	Prompt    string                  `json:"prompt"`
+	Model     string                  `json:"model,omitempty"`
+	Agent     string                  `json:"agent,omitempty"`
+	Directory string                  `json:"directory,omitempty"`
+	Notify    scheduler.NotifyTargets `json:"notify,omitempty"`
 }
 
 type taskResponse struct {
-	ID          string                  `json:"id"`
-	Name        string                  `json:"name"`
-	Cron        string                  `json:"cron"`
-	Prompt      string                  `json:"prompt"`
-	Model       string                  `json:"model,omitempty"`
-	Agent       string                  `json:"agent,omitempty"`
-	Directory   string                  `json:"directory,omitempty"`
-	Notify      scheduler.NotifyTargets `json:"notify,omitempty"`
-	Enabled     bool                    `json:"enabled"`
-	CreatedAt   string                  `json:"created_at,omitempty"`
-	LastRun     string                  `json:"last_run,omitempty"`
-	NextRun     string                  `json:"next_run,omitempty"`
-	SessionID   string                  `json:"session_id,omitempty"`
-	SessionMode string                  `json:"session_mode,omitempty"`
+	ID             string                  `json:"id"`
+	Name           string                  `json:"name"`
+	Cron           string                  `json:"cron"`
+	Prompt         string                  `json:"prompt"`
+	Model          string                  `json:"model,omitempty"`
+	Agent          string                  `json:"agent,omitempty"`
+	Directory      string                  `json:"directory,omitempty"`
+	Notify         scheduler.NotifyTargets `json:"notify,omitempty"`
+	Enabled        bool                    `json:"enabled"`
+	CreatedAt      string                  `json:"created_at,omitempty"`
+	LastRun        string                  `json:"last_run,omitempty"`
+	NextRun        string                  `json:"next_run,omitempty"`
+	SessionID      string                  `json:"session_id,omitempty"`
+	SessionGroupID string                  `json:"session_group_id,omitempty"`
 }
 
 // initScheduler creates the scheduler if not already initialized. It is
@@ -73,36 +73,49 @@ func (s *Server) initScheduler() {
 	s.scheduler = sch
 }
 
-// CreateSession implements scheduler.Runner. It creates or reuses the session
-// for a task and persists it immediately so the web UI can open the session
-// before the (potentially long) agent turn starts.
-//
-// task.SessionMode selects the behaviour:
-//   - "shared" (default): reuse the task's existing session if one exists;
-//     history accumulates across runs — ideal for recurring reports that
-//     reference their own prior output.
-//   - "fresh": always create a new, empty session, so each run starts from a
-//     clean transcript. The previous run's session is left on disk; the task
-//     list links to the most recent one for traceability.
+// CreateSession implements scheduler.Runner. Every run creates a brand-new,
+// empty session — each run starts from a clean transcript, and the previous
+// run's session is left on disk. The session is filed under the task's Web-UI
+// group (created lazily here for tasks that predate grouping), so all of a
+// task's runs cluster together in the sidebar, named by date.
 func (s *Server) CreateSession(task scheduler.Task) (string, error) {
-	// Fresh mode: never reuse, always start from an empty transcript.
-	if task.SessionMode == "fresh" {
-		return s.newSession(task)
+	sessionID, err := s.newSession(task)
+	if err != nil {
+		return "", err
 	}
 
-	// Shared mode (default): try to load an existing session for this task.
-	sess, err := agent.LoadSession(task.SessionID)
-	if err != nil {
-		// No reusable session — create a new one.
-		return s.newSession(task)
+	// File the session under the task's group. Grouping is a best-effort
+	// convenience layer — a failure here must not fail the run, so errors are
+	// logged, not returned.
+	groupID := task.SessionGroupID
+	if groupID == "" {
+		// A task predating grouping (or whose group creation failed at create
+		// time): create the group now and persist its ID back on the task so
+		// later runs reuse it.
+		g, gerr := createSessionGroupNamed(task.Name)
+		if gerr != nil {
+			slog.Warn("cron: create session group", "task", task.Name, "err", gerr)
+		} else {
+			groupID = g.ID
+			if s.scheduler != nil {
+				if serr := s.scheduler.SetSessionGroup(task.ID, groupID); serr != nil {
+					slog.Warn("cron: persist session group", "task", task.Name, "err", serr)
+				}
+			}
+		}
 	}
-	return sess.ID, nil
+	if groupID != "" {
+		if gerr := addSessionToGroup(groupID, sessionID); gerr != nil {
+			slog.Warn("cron: add session to group", "task", task.Name, "err", gerr)
+		}
+	}
+	return sessionID, nil
 }
 
-// newSession creates and persists a brand-new agent session for a task, seeded
-// with the task's model, title, working directory, and unattended permission
-// mode. It is the single path that actually allocates a session on disk, so
-// both the "shared" first-run and "fresh" modes flow through it.
+// newSession creates and persists a brand-new agent session for a task run,
+// seeded with the task's model, working directory, and unattended permission
+// mode. The title is the run's local date and time so a task's runs are
+// distinguishable within its group (the group carries the task name).
 func (s *Server) newSession(task scheduler.Task) (string, error) {
 	model := task.Model
 	if model == "" {
@@ -110,7 +123,7 @@ func (s *Server) newSession(task scheduler.Task) (string, error) {
 	}
 	sess := agent.NewSession(model, s.system)
 	sess.Source = "cron"
-	sess.Title = task.Name
+	sess.Title = time.Now().Format("2006-01-02 15:04")
 	// Cron ticks have no human to answer an ask prompt, unlike the web/IM
 	// default this mirrors — see ResolveUnattendedDefaultMode's doc comment.
 	_ = sess.SetPermissionMode(string(permission.ResolveUnattendedDefaultMode()))
@@ -157,12 +170,13 @@ func seedSessionDirectory(sess *agent.Session, dir string) error {
 	return sess.SetWorkingDir(dir)
 }
 
-// RunTask implements scheduler.Runner. It executes a scheduled task by
-// creating (or reusing) a session and running a single streamed turn, so any
-// subscribed web UI tab sees the same live progress, tool cards, and completion
-// events as a normal chat turn.
+// RunTask implements scheduler.Runner. It runs a single streamed turn in the
+// task's session (created by the scheduler before this call, so each run gets a
+// fresh session — see scheduler.fire/RunNow), so any subscribed web UI tab sees
+// the same live progress, tool cards, and completion events as a normal chat
+// turn.
 func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID string, err error) {
-	// The scheduler fires this from a bare goroutine (go s.fire), so a panic in
+	// The scheduler fires this from a bare goroutine (go s.run), so a panic in
 	// a scheduled turn would crash the whole serve process without this. Named
 	// returns let the recover surface the panic as an error, so the scheduler
 	// records the run as failed rather than silently as a success.
@@ -177,11 +191,16 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID st
 	}
 	defer s.drain.end()
 
-	sessionID, err = s.CreateSession(task)
-	if err != nil {
-		return sessionID, err
+	// The scheduler creates the fresh session before calling RunTask. A direct
+	// caller (or a defensive path) that left it empty gets one created here.
+	sessionID = task.SessionID
+	if sessionID == "" {
+		sessionID, err = s.CreateSession(task)
+		if err != nil {
+			return sessionID, err
+		}
+		task.SessionID = sessionID
 	}
-	task.SessionID = sessionID
 
 	if ok, _, berr := s.acquireSessionBinding(sessionID, agent.EntryCron, false); !ok {
 		return sessionID, fmt.Errorf("acquire binding: %w", berr)
@@ -468,19 +487,27 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	task := scheduler.Task{
-		Name:        req.Name,
-		Cron:        req.Cron,
-		Prompt:      req.Prompt,
-		Model:       req.Model,
-		Agent:       req.Agent,
-		Directory:   req.Directory,
-		Notify:      req.Notify,
-		SessionMode: req.SessionMode,
-		Enabled:     true,
+		Name:      req.Name,
+		Cron:      req.Cron,
+		Prompt:    req.Prompt,
+		Model:     req.Model,
+		Agent:     req.Agent,
+		Directory: req.Directory,
+		Notify:    req.Notify,
+		Enabled:   true,
 	}
 	if err := s.scheduler.Add(&task); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// Give the task its own session group so every run clusters under it.
+	// Created after Add (which validates the cron and assigns the ID) so an
+	// invalid task never leaves an orphan group; best-effort, since a run can
+	// still create the group lazily if this fails.
+	if g, gerr := createSessionGroupNamed(task.Name); gerr != nil {
+		slog.Warn("cron: create session group", "task", task.Name, "err", gerr)
+	} else if serr := s.scheduler.SetSessionGroup(task.ID, g.ID); serr != nil {
+		slog.Warn("cron: persist session group", "task", task.Name, "err", serr)
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"id": task.ID})
 }
@@ -495,6 +522,13 @@ func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "missing task id")
 		return
+	}
+	// Delete the task's session group too (its member sessions are kept — they
+	// fall back to ungrouped). Look it up before Delete removes the task.
+	if t, gerr := s.scheduler.Get(id); gerr == nil && t.SessionGroupID != "" {
+		if derr := deleteSessionGroup(t.SessionGroupID); derr != nil {
+			slog.Warn("cron: delete session group", "task", t.Name, "err", derr)
+		}
 	}
 	if err := s.scheduler.Delete(id); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -526,14 +560,14 @@ func (s *Server) handleRunTask(w http.ResponseWriter, r *http.Request) {
 // pointer so the handler only touches what the caller actually sent — a
 // partial update. Enabling/disabling is just {"enabled": ...}.
 type patchTaskRequest struct {
-	Enabled     *bool                    `json:"enabled,omitempty"`
-	Cron        *string                  `json:"cron,omitempty"`
-	Prompt      *string                  `json:"prompt,omitempty"`
-	Model       *string                  `json:"model,omitempty"`
-	Agent       *string                  `json:"agent,omitempty"`
-	Directory   *string                  `json:"directory,omitempty"`
-	Notify      *scheduler.NotifyTargets `json:"notify,omitempty"`
-	SessionMode *string                  `json:"session_mode,omitempty"`
+	Enabled   *bool                    `json:"enabled,omitempty"`
+	Cron      *string                  `json:"cron,omitempty"`
+	Prompt    *string                  `json:"prompt,omitempty"`
+	Model     *string                  `json:"model,omitempty"`
+	Agent     *string                  `json:"agent,omitempty"`
+	Directory *string                  `json:"directory,omitempty"`
+	Notify    *scheduler.NotifyTargets `json:"notify,omitempty"`
+	Name      *string                  `json:"name,omitempty"`
 }
 
 // handlePatchTask updates any subset of a scheduled task's fields and reschedules
@@ -562,6 +596,15 @@ func (s *Server) handlePatchTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			writeError(w, http.StatusBadRequest, "name cannot be empty")
+			return
+		}
+		*req.Name = name
+		task.Name = name
+	}
 	if req.Enabled != nil {
 		task.Enabled = *req.Enabled
 	}
@@ -583,12 +626,17 @@ func (s *Server) handlePatchTask(w http.ResponseWriter, r *http.Request) {
 	if req.Notify != nil {
 		task.Notify = *req.Notify
 	}
-	if req.SessionMode != nil {
-		task.SessionMode = *req.SessionMode
-	}
 	if err := s.scheduler.Update(*task); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// Keep the task's session group name in sync with the task name so the
+	// sidebar group label follows a rename. Best-effort; a missing group (the
+	// task predates grouping, or the group was deleted in the UI) is a no-op.
+	if req.Name != nil && task.SessionGroupID != "" {
+		if gerr := renameSessionGroup(task.SessionGroupID, *req.Name); gerr != nil {
+			slog.Warn("cron: rename session group", "task", task.Name, "err", gerr)
+		}
 	}
 	writeJSON(w, http.StatusOK, s.taskToResponse(*task))
 }
@@ -617,6 +665,6 @@ func (s *Server) taskToResponse(t scheduler.Task) taskResponse {
 		}
 	}
 	r.SessionID = t.SessionID
-	r.SessionMode = t.SessionMode
+	r.SessionGroupID = t.SessionGroupID
 	return r
 }

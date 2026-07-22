@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/config"
@@ -151,130 +152,111 @@ func TestCreateSession_InvalidDirectoryErrors(t *testing.T) {
 	}
 }
 
-// Once a session exists for a task, re-running CreateSession (as every
-// subsequent cron fire does) must reuse it untouched — task.Directory plays
-// no further role, even if it was edited via PATCH /api/tasks/{id} in the
-// meantime. This is the behavior change from the old "apply task.Directory
-// fresh on every run" design: editing a task's directory only affects the
-// NEXT session created for it, never one that's already running.
-func TestCreateSession_ReusesExistingSession_LaterDirectoryEditIgnored(t *testing.T) {
-	setTestHome(t)
-	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-
-	firstDir := t.TempDir()
-	sessionID, err := srv.CreateSession(scheduler.Task{Name: "t", Directory: firstDir})
-	if err != nil {
-		t.Fatalf("CreateSession (first): %v", err)
-	}
-
-	// Simulate the task being edited (PATCH /api/tasks/{id}) to point at a
-	// different directory, then firing again with the existing SessionID —
-	// exactly what every real cron trigger after the first does.
-	secondDir := t.TempDir()
-	sessionID2, err := srv.CreateSession(scheduler.Task{Name: "t", Directory: secondDir, SessionID: sessionID})
-	if err != nil {
-		t.Fatalf("CreateSession (reuse): %v", err)
-	}
-	if sessionID2 != sessionID {
-		t.Fatalf("expected the existing session to be reused, got a new id %q", sessionID2)
-	}
-
-	sess, err := agent.LoadSession(sessionID)
-	if err != nil {
-		t.Fatalf("LoadSession: %v", err)
-	}
-	if sess.WorkingDir != firstDir {
-		t.Errorf("sess.WorkingDir = %q, want unchanged %q (task.Directory edits shouldn't touch an existing session)", sess.WorkingDir, firstDir)
-	}
-}
-
-// session_mode "fresh" creates a new session every time, even when one
-// already exists — it overrides the default "shared" reuse behavior.
-func TestCreateSession_FreshMode_IgnoresExistingSession(t *testing.T) {
+// Every run creates a brand-new session — even when a SessionID from a prior
+// run is set on the task, CreateSession never reuses it. The previous run's
+// session is left on disk; each run starts from a clean transcript.
+func TestCreateSession_AlwaysCreatesNewSession(t *testing.T) {
 	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
 	dir := t.TempDir()
-	firstID, err := srv.CreateSession(scheduler.Task{
-		Name:        "t",
-		Directory:   dir,
-		SessionMode: "fresh",
-	})
+	firstID, err := srv.CreateSession(scheduler.Task{Name: "t", Directory: dir})
 	if err != nil {
 		t.Fatalf("CreateSession (first): %v", err)
 	}
 
-	// Run again with the SAME SessionID set — "fresh" must ignore it.
-	secondID, err := srv.CreateSession(scheduler.Task{
-		Name:        "t",
-		Directory:   dir,
-		SessionID:   firstID,
-		SessionMode: "fresh",
-	})
+	// Run again with the prior SessionID set — it must be ignored.
+	secondID, err := srv.CreateSession(scheduler.Task{Name: "t", Directory: dir, SessionID: firstID})
 	if err != nil {
 		t.Fatalf("CreateSession (second): %v", err)
 	}
 	if secondID == firstID {
-		t.Fatalf("fresh mode reused the existing session %q; want a NEW session", firstID)
+		t.Fatalf("CreateSession reused the existing session %q; every run must be a NEW session", firstID)
 	}
 }
 
-// session_mode "" (empty) preserves legacy shared behavior — reuse the
-// existing session if one is set on the task.
-func TestCreateSession_DefaultMode_ReusesExistingSession(t *testing.T) {
+// Each run's session is titled by the run's local date and time, so a task's
+// runs are distinguishable within its group.
+func TestCreateSession_TitlesSessionByDate(t *testing.T) {
 	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	firstID, err := srv.CreateSession(scheduler.Task{Name: "t"})
+	sessionID, err := srv.CreateSession(scheduler.Task{Name: "daily report"})
 	if err != nil {
-		t.Fatalf("CreateSession (first): %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
-
-	secondID, err := srv.CreateSession(scheduler.Task{Name: "t", SessionID: firstID})
+	sess, err := agent.LoadSession(sessionID)
 	if err != nil {
-		t.Fatalf("CreateSession (reuse): %v", err)
+		t.Fatalf("LoadSession: %v", err)
 	}
-	if secondID != firstID {
-		t.Fatalf("default mode created a new session %q instead of reusing %q", secondID, firstID)
+	// Title is time.Now().Format("2006-01-02 15:04") — check the shape rather
+	// than an exact instant.
+	if _, perr := time.Parse("2006-01-02 15:04", sess.Title); perr != nil {
+		t.Errorf("sess.Title = %q, want a %q date-time (parse err: %v)", sess.Title, "2006-01-02 15:04", perr)
 	}
 }
 
-// Switching session_mode between runs takes effect on the very next run —
-// not whatever mode the task started with.
-func TestCreateSession_ModeSwitchBetweenRuns(t *testing.T) {
+// A run files its session under the task's existing session group.
+func TestCreateSession_FilesSessionUnderTaskGroup(t *testing.T) {
 	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	// First run: shared mode, creates session A.
-	sharedID, err := srv.CreateSession(scheduler.Task{Name: "t", SessionMode: "shared"})
+	g, err := createSessionGroupNamed("daily report")
 	if err != nil {
-		t.Fatalf("CreateSession (shared): %v", err)
+		t.Fatalf("createSessionGroupNamed: %v", err)
+	}
+	sessionID, err := srv.CreateSession(scheduler.Task{Name: "daily report", SessionGroupID: g.ID})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
 	}
 
-	// Shared run with SessionID set reuses A.
-	reuseID, err := srv.CreateSession(scheduler.Task{Name: "t", SessionID: sharedID, SessionMode: "shared"})
+	groups, err := loadSessionGroups()
 	if err != nil {
-		t.Fatalf("CreateSession (shared reuse): %v", err)
+		t.Fatalf("loadSessionGroups: %v", err)
 	}
-	if reuseID != sharedID {
-		t.Fatalf("shared mode did not reuse: got %q, want %q", reuseID, sharedID)
+	found := false
+	for _, grp := range groups {
+		if grp.ID != g.ID {
+			continue
+		}
+		for _, sid := range grp.SessionIDs {
+			if sid == sessionID {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("session %q not filed under group %q; groups=%+v", sessionID, g.ID, groups)
+	}
+}
+
+// A task with no group yet (predating grouping) gets one created lazily on its
+// first run, and the run's session is filed under it.
+func TestCreateSession_LazilyCreatesGroupForOldTask(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	sessionID, err := srv.CreateSession(scheduler.Task{Name: "legacy task"})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
 	}
 
-	// Switch to fresh — must create a NEW session, ignoring sharedID.
-	freshID, err := srv.CreateSession(scheduler.Task{Name: "t", SessionID: sharedID, SessionMode: "fresh"})
+	groups, err := loadSessionGroups()
 	if err != nil {
-		t.Fatalf("CreateSession (fresh after shared): %v", err)
+		t.Fatalf("loadSessionGroups: %v", err)
 	}
-	if freshID == sharedID {
-		t.Fatalf("fresh mode reused the shared session %q; want a NEW session", sharedID)
+	found := false
+	for _, grp := range groups {
+		if grp.Name != "legacy task" {
+			continue
+		}
+		for _, sid := range grp.SessionIDs {
+			if sid == sessionID {
+				found = true
+			}
+		}
 	}
-
-	// Switch back to shared without a SessionID — new shared session created.
-	newSharedID, err := srv.CreateSession(scheduler.Task{Name: "t", SessionMode: "shared"})
-	if err != nil {
-		t.Fatalf("CreateSession (shared after fresh): %v", err)
-	}
-	if newSharedID == freshID || newSharedID == sharedID {
-		t.Fatalf("shared mode after fresh should create yet another session; got %q", newSharedID)
+	if !found {
+		t.Fatalf("no lazily-created group holds session %q; groups=%+v", sessionID, groups)
 	}
 }

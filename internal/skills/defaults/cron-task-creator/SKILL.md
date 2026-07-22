@@ -25,8 +25,15 @@ a run).
 | `notify` | no | IM chats to push each run's final reply (or failure) to — see the notify table |
 | `enabled` | yes | Whether the schedule is active |
 
-`id`, `created_at`, `last_run`, `session_id` are server-managed — never set them
-by hand except `id` in the file-write fallback below.
+`id`, `created_at`, `last_run`, `session_id`, `session_group_id` are
+server-managed — never set them by hand except `id` in the file-write fallback
+below.
+
+Every run creates a **fresh session** (titled by the run's local date and time)
+and files it under a per-task session group named after the task, so a task's
+runs cluster together in the sidebar. The group is created with the task and
+renamed/deleted along with it. Runs never share a session — each starts from a
+clean transcript.
 
 ## Cron expression — 6 fields, seconds first
 
@@ -95,9 +102,10 @@ curl -s -X PATCH http://127.0.0.1:8088/api/tasks/{id} \
   -d '{"prompt":"new prompt ...","enabled":false}'
 ```
 
-`PATCH /api/tasks/{id}` accepts `enabled`, `cron`, `prompt`, `model`, `agent`,
-`directory`, `notify` — send only the fields you want to change. Look up `{id}`
-from the create response or the list. (Earlier builds had a separate
+`PATCH /api/tasks/{id}` accepts `name`, `enabled`, `cron`, `prompt`, `model`,
+`agent`, `directory`, `notify` — send only the fields you want to change.
+Renaming via `name` also renames the task's session group. Look up `{id}` from
+the create response or the list. (Earlier builds had a separate
 `/api/cron-tasks/...` route and a `/toggle` endpoint; both are gone — everything
 is `/api/tasks` now.)
 

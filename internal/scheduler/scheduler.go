@@ -13,6 +13,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -68,16 +69,17 @@ type Task struct {
 	LastRun   time.Time     `json:"last_run,omitempty"`
 	NextRun   time.Time     `json:"next_run,omitempty"`
 	SessionID string        `json:"session_id,omitempty"` // last session ID
-	// SessionMode controls whether the task shares one session across runs
-	// ("shared", the default — history accumulates) or creates a fresh session
-	// each time ("fresh" — empty history, kept separate from earlier runs).
-	SessionMode string `json:"session_mode,omitempty"`
+	// SessionGroupID is the Web-UI session group every run of this task is filed
+	// under (created once, when the task is created — or lazily on the first run
+	// of a task that predates grouping). Each run creates a fresh session named
+	// by date and adds it to this group; the group name tracks the task name.
+	SessionGroupID string `json:"session_group_id,omitempty"`
 }
 
 // Runner is the interface the scheduler calls to execute a task.
 type Runner interface {
-	// CreateSession prepares (or reuses) the session for a task and persists it
-	// so the UI can open it before the turn begins. It must be safe to call
+	// CreateSession prepares a fresh session for a task run and persists it so
+	// the UI can open it before the turn begins. It must be safe to call
 	// synchronously from an HTTP handler.
 	CreateSession(task Task) (sessionID string, err error)
 	RunTask(ctx context.Context, task Task) (sessionID string, err error)
@@ -141,9 +143,6 @@ func (s *Scheduler) Add(task *Task) error {
 	if _, err := exprParser.Parse(task.Cron); err != nil {
 		return fmt.Errorf("invalid cron expression %q: %w", task.Cron, err)
 	}
-	if task.SessionMode != "" && task.SessionMode != "shared" && task.SessionMode != "fresh" {
-		return fmt.Errorf("invalid session_mode %q: must be \"shared\" or \"fresh\"", task.SessionMode)
-	}
 	if task.ID == "" {
 		task.ID = fmt.Sprintf("task_%d", time.Now().UnixMilli())
 	}
@@ -170,9 +169,6 @@ func (s *Scheduler) Update(task Task) error {
 	if _, err := exprParser.Parse(task.Cron); err != nil {
 		return fmt.Errorf("invalid cron expression %q: %w", task.Cron, err)
 	}
-	if task.SessionMode != "" && task.SessionMode != "shared" && task.SessionMode != "fresh" {
-		return fmt.Errorf("invalid session_mode %q: must be \"shared\" or \"fresh\"", task.SessionMode)
-	}
 	s.mu.Lock()
 	existing, ok := s.tasks[task.ID]
 	if !ok {
@@ -187,7 +183,7 @@ func (s *Scheduler) Update(task Task) error {
 	existing.Directory = task.Directory
 	existing.Notify = task.Notify
 	existing.Enabled = task.Enabled
-	existing.SessionMode = task.SessionMode
+	existing.SessionGroupID = task.SessionGroupID
 	cp := *existing
 	s.mu.Unlock()
 
@@ -247,47 +243,44 @@ func (s *Scheduler) Get(id string) (*Task, error) {
 // a manual run also fires when the task is disabled, since the user asked for
 // it explicitly.
 //
-// For shared-mode tasks the session is created synchronously before the turn
-// runs asynchronously, so the caller (e.g. the web UI) has a session it can
-// open immediately. Fresh-mode tasks create a new session on every run, so
-// pre-creating one here would leave an orphan — fire() creates the real
-// session and the UI waits for the task list to reflect it.
+// The fresh session is created synchronously (and its id returned) so the
+// caller — e.g. the web UI's Run button — can open it immediately, while the
+// turn itself runs in the background.
 func (s *Scheduler) RunNow(id string) (string, error) {
 	s.mu.Lock()
-	task, ok := s.tasks[id]
+	t, ok := s.tasks[id]
 	s.mu.Unlock()
 	if !ok {
 		return "", fmt.Errorf("task %q not found", id)
 	}
+	task := *t
 
-	// Fresh mode creates a new session per run — skip the optimistic
-	// pre-create so we don't orphan a session the turn will never use.
-	if task.SessionMode == "fresh" {
-		go s.fire(id, true)
-		return "", nil
-	}
-
-	sessionID, err := s.runner.CreateSession(*task)
+	sessionID, err := s.runner.CreateSession(task)
 	if err != nil {
 		return "", fmt.Errorf("create session: %w", err)
 	}
-
-	// Persist the new session_id on the task so subsequent runs reuse it and
-	// the task list reports it immediately.
-	s.mu.Lock()
-	if t, ok := s.tasks[id]; ok {
-		t.SessionID = sessionID
-		cp := *t
-		s.mu.Unlock()
-		if err := s.save(cp); err != nil {
-			log.Printf("[scheduler] save task %q: %v", cp.Name, err)
-		}
-	} else {
-		s.mu.Unlock()
-	}
-
-	go s.fire(id, true)
+	task.SessionID = sessionID
+	// Persist immediately so the task list links to the new run's session even
+	// before the (possibly long) turn finishes.
+	s.setSessionID(id, sessionID)
+	go s.run(id, task)
 	return sessionID, nil
+}
+
+// SetSessionGroup records the Web-UI session group a task's runs are filed
+// under and persists it. Used when the group is created lazily on the first
+// run of a task that predates grouping (see Runner.CreateSession).
+func (s *Scheduler) SetSessionGroup(id, groupID string) error {
+	s.mu.Lock()
+	t, ok := s.tasks[id]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("task %q not found", id)
+	}
+	t.SessionGroupID = groupID
+	cp := *t
+	s.mu.Unlock()
+	return s.save(cp)
 }
 
 // ─── Private methods ─────────────────────────────────────────────────────
@@ -334,42 +327,84 @@ func (s *Scheduler) unschedule(id string) {
 // or disabled task stops running immediately and prompt/model edits apply to
 // the very next run.
 func (s *Scheduler) wrap(id string) func() {
-	return func() { s.fire(id, false) }
+	return func() { s.fire(id) }
 }
 
-// fire executes the task by ID and records LastRun/SessionID, persisting them
-// so the bookkeeping survives a restart. A manual fire ignores the Enabled
-// flag; a cron fire skips disabled (or since-deleted) tasks.
-func (s *Scheduler) fire(id string, manual bool) {
+// fire creates a fresh session for the run and executes it. Creating the
+// session here — rather than inside RunTask — means each run's session is
+// chosen by the scheduler and never the previous run's persisted SessionID, so
+// two runs can never accidentally share a session. It skips disabled (or
+// since-deleted) tasks; a manual run bypasses fire entirely via RunNow.
+//
+// fire runs in the cron scheduler's goroutine, which robfig/cron does not wrap
+// with panic recovery — so it recovers itself, mirroring RunTask, to keep a
+// panic in CreateSession/newSession from taking down the whole serve process.
+func (s *Scheduler) fire(id string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[scheduler] recovered panic in task %q: %v\n%s", id, r, debug.Stack())
+		}
+	}()
+
 	s.mu.Lock()
 	t, ok := s.tasks[id]
-	if !ok || (!manual && !t.Enabled) {
+	if !ok || !t.Enabled {
 		s.mu.Unlock()
 		return
 	}
 	task := *t
 	s.mu.Unlock()
 
+	sessionID, err := s.runner.CreateSession(task)
+	if err != nil {
+		log.Printf("[scheduler] task %q create session: %v", task.Name, err)
+		return
+	}
+	task.SessionID = sessionID
+	s.run(id, task)
+}
+
+// run executes RunTask for a run whose session is already created
+// (task.SessionID set) and records LastRun/SessionID bookkeeping, persisting it
+// so it survives a restart. Shared by fire (cron) and RunNow (manual).
+func (s *Scheduler) run(id string, task Task) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
-	sessionID, err := s.runner.RunTask(ctx, task)
-	if err != nil {
+	if _, err := s.runner.RunTask(ctx, task); err != nil {
 		log.Printf("[scheduler] task %q failed: %v", task.Name, err)
 	}
 
 	s.mu.Lock()
-	t, ok = s.tasks[id]
+	t, ok := s.tasks[id]
 	if !ok {
 		s.mu.Unlock()
 		return
 	}
 	t.LastRun = time.Now()
-	t.SessionID = sessionID
+	t.SessionID = task.SessionID
 	cp := *t
 	s.mu.Unlock()
 	if err := s.save(cp); err != nil {
 		log.Printf("[scheduler] save task %q: %v", task.Name, err)
+	}
+}
+
+// setSessionID persists a task's current session id without touching other
+// bookkeeping — used by RunNow to record the freshly created session before the
+// turn starts.
+func (s *Scheduler) setSessionID(id, sessionID string) {
+	s.mu.Lock()
+	t, ok := s.tasks[id]
+	if !ok {
+		s.mu.Unlock()
+		return
+	}
+	t.SessionID = sessionID
+	cp := *t
+	s.mu.Unlock()
+	if err := s.save(cp); err != nil {
+		log.Printf("[scheduler] save task %q: %v", cp.Name, err)
 	}
 }
 

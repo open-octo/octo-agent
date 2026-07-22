@@ -14,7 +14,7 @@ export interface TaskResponse {
   last_run: string
   next_run: string
   session_id: string
-  session_mode?: string
+  session_group_id?: string
 }
 
 // #1109: every caller below throws through here, and every error toast in
