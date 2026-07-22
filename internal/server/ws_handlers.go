@@ -313,6 +313,28 @@ func (s *Server) replayLiveState(sessionID string, conn *wsConn) {
 		}
 	}
 
+	// Rebuild the task panel from the per-session task store. Done outside the
+	// live-turn snapshot below (and unconditionally) because the store outlives
+	// the turn: a refresh AFTER the turn ends must still restore the checklist,
+	// which the dropped live state can't provide. PeekSessionTaskStore avoids
+	// creating an empty store for a session that never ran a task tool. A
+	// fully-completed plan is skipped: it fades out client-side once done, so it
+	// must not reappear on refresh (and it's cleared at the next turn's start).
+	if store := tools.PeekSessionTaskStore(sessionID); !tools.AllTasksComplete(store) {
+		if todos := tools.TaskSnapshot(store); len(todos) > 0 {
+			if b, err := json.Marshal(map[string]any{
+				"type":       "todo_update",
+				"session_id": sessionID,
+				"todos":      todos,
+			}); err == nil {
+				select {
+				case conn.send <- b:
+				default:
+				}
+			}
+		}
+	}
+
 	// Snapshot the in-progress turn under the read lock: the event buffer,
 	// any unflushed streaming deltas, the current progress, and buffered
 	// stdout. Marshaling happens inside the lock because the builders and the
@@ -615,6 +637,15 @@ func (s *Server) wsClearSession(sid string) {
 	s.injectorMu.Lock()
 	delete(s.sessionInjectors, sid)
 	s.injectorMu.Unlock()
+
+	// The per-session task store now outlives turns (unlike the old per-turn
+	// store), so /clear must reset the plan too — otherwise the next turn's
+	// task_list still shows the wiped conversation's checklist and the panel
+	// lingers over an empty transcript. /compact deliberately does NOT do this
+	// (it preserves the conversation). Broadcast an empty todo_update so live
+	// tabs drop the panel immediately (history_reload also clears it).
+	tools.CloseSessionTaskStore(sid)
+	s.wsHub.broadcast(sid, map[string]any{"type": "todo_update", "session_id": sid, "todos": []any{}})
 
 	s.wsHub.broadcast(sid, map[string]any{"type": "session_update", "session_id": sid, "status": "idle", "context_usage": 0, "context_tokens": 0})
 	s.broadcastHistoryReload(sid)

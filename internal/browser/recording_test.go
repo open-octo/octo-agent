@@ -1109,7 +1109,12 @@ func TestReplayNavigateEncodesParams(t *testing.T) {
 	defer cancel()
 	var gotQ, gotURI string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotQ, gotURI = r.URL.Query().Get("q"), r.RequestURI
+		// Capture only the navigation target — Chromium may also fetch
+		// /favicon.ico after load, whose empty query would otherwise clobber
+		// the recorded values and flake the assertions (seen on windows).
+		if strings.HasPrefix(r.URL.Path, "/item/") {
+			gotQ, gotURI = r.URL.Query().Get("q"), r.RequestURI
+		}
 		w.Write([]byte(`<!doctype html><title>echo</title>ok`))
 	}))
 	defer srv.Close()

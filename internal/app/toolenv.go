@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/open-octo/octo-agent/internal/agent"
-	"github.com/open-octo/octo-agent/internal/tasks"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
@@ -44,7 +43,11 @@ func NewSessionToolEnv(
 ) (context.Context, agent.ToolExecutor, *tools.SubAgentManager, func()) {
 	ctx = tools.WithWorkingDir(ctx, a.CWD)
 	ctx = tools.WithBackgroundManager(ctx, tools.SessionBackgroundManager(sessionID))
-	ctx = tools.WithTaskStore(ctx, tasks.New())
+	// Per-session task store, cached by sessionID like the managers above, so the
+	// task/plan checklist survives across turns and a page refresh (a per-turn
+	// tasks.New() here is why the panel used to vanish). Callers that want a plan
+	// reset between turns do it via CloseSessionTaskStore before this call.
+	ctx = tools.WithTaskStore(ctx, tools.SessionTaskStore(sessionID))
 
 	mkSpawner := func() tools.Spawner {
 		return NewSpawner(a, executor, func(ctx context.Context) []agent.ToolDefinition {

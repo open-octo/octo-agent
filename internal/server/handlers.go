@@ -688,6 +688,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	tools.CloseSessionSubAgentManager(id)   // and its sub-agents
 	tools.CloseSessionWorkflowManager(id)   // and its background workflows
 	tools.CloseSessionReadTracker(id)       // and its read-before-write tracker
+	tools.CloseSessionTaskStore(id)         // and its task/plan checklist
 	tools.CloseSessionReplaySecrets(id)     // and any cached replay secrets
 	s.wsHub.broadcast("", wsEventSessionDeleted{Type: "session_deleted", SessionID: id})
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": []string{id}})
@@ -723,6 +724,7 @@ func (s *Server) handleDeleteSessions(w http.ResponseWriter, r *http.Request) {
 		tools.CloseSessionSubAgentManager(id)   // and its sub-agents
 		tools.CloseSessionWorkflowManager(id)   // and its background workflows
 		tools.CloseSessionReadTracker(id)       // and its read-before-write tracker
+		tools.CloseSessionTaskStore(id)         // and its task/plan checklist
 		tools.CloseSessionReplaySecrets(id)     // and any cached replay secrets
 		s.wsHub.broadcast("", wsEventSessionDeleted{Type: "session_deleted", SessionID: id})
 		deleted = append(deleted, id)

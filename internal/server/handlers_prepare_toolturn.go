@@ -128,6 +128,14 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	var cleanup func()
 
 	if hasSession && sid != "" {
+		// Clear-and-rebuild: a fully-completed plan is closed, so drop it BEFORE
+		// NewSessionToolEnv picks up the per-session task store — this turn's new
+		// tasks then start a fresh plan instead of piling onto old, done ones. An
+		// incomplete plan carries over so the agent keeps working on it. Turns are
+		// serialized per session, so this read-then-reset is safe.
+		if tools.AllTasksComplete(tools.PeekSessionTaskStore(sid)) {
+			tools.CloseSessionTaskStore(sid)
+		}
 		// Session-scoped path: reuse the concurrency-safe core from app.NewSessionToolEnv.
 		// Server-specific callbacks (WebSocket broadcast, model note delivery) are
 		// injected here; the core function stays free of *Server dependencies.

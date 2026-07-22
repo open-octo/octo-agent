@@ -176,6 +176,21 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     return () => clearTimeout(timer)
   })
 
+  // Fade the task panel once the whole plan is done: 3s after every task reads
+  // completed, drop it. Cancels if a task reverts to incomplete or a new one is
+  // added (the effect re-runs on any todos change). Mirrors the sub-agent
+  // dismiss above; the server skips replaying a fully-completed plan so a
+  // refresh after the fade doesn't bring it back.
+  const TODO_DISMISS_MS = 3000
+  $effect(() => {
+    const sid = $activeSessionId ?? ''
+    if (!sid) return
+    if (todos.length === 0) return
+    if (todos.some(t => t.status !== 'completed')) return
+    const timer = setTimeout(() => chatTodos.update(t => ({ ...t, [sid]: [] })), TODO_DISMISS_MS)
+    return () => clearTimeout(timer)
+  })
+
   // Live "Thinking" readout — mirrors the TUI thinkingLine: elapsed since the
   // turn began plus a rough output-token estimate (streamed chars / 4) so a
   // long silent wait reads as the model working, not a freeze.
