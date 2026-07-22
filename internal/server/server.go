@@ -121,6 +121,11 @@ type Server struct {
 	mux  *http.ServeMux
 	http *http.Server
 
+	// tunnelPairing holds the managed-tunnel pairing material the web UI renders
+	// as a QR, published by `octo serve --tunnel` via SetTunnelPairing. Nil when
+	// the tunnel is off. The server otherwise knows nothing about the tunnel.
+	tunnelPairing atomic.Pointer[TunnelPairing]
+
 	// agent factory state (resolved once at start)
 	sender   agent.Sender
 	model    string
@@ -772,6 +777,7 @@ func (s *Server) registerRoutes() {
 	s.api("PATCH /api/session-groups/{id}", s.handleUpdateSessionGroup)
 	s.api("DELETE /api/session-groups/{id}", s.handleDeleteSessionGroup)
 	s.api("GET /api/fs/list", s.handleFsList)
+	s.api("GET /api/tunnel/pairing", s.handleTunnelPairing)
 	if s.cfg.Native != nil {
 		// Desktop build only: OS-native capabilities. Absent under `octo serve`.
 		s.api("POST /api/native/pick-folder", s.handleNativePickFolder)

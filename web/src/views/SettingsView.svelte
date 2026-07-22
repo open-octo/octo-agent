@@ -6,6 +6,7 @@
   import ModelConfigForm from '../components/settings/ModelConfigForm.svelte'
   import ApiKeyInput from '../components/settings/ApiKeyInput.svelte'
   import VariantChips from '../components/settings/VariantChips.svelte'
+  import QrCode from '../components/ui/QrCode.svelte'
   import { get } from 'svelte/store'
   import { showToast, nativeShell } from '../lib/stores'
   import { setLocale, t, tr } from '../lib/i18n'
@@ -36,6 +37,9 @@
   let saving        = $state(false)
   let loading       = $state(true)
   let providersLoaded = $state(false)
+  // Managed-tunnel pairing material (null until fetched; .enabled false when
+  // the server was not started with --tunnel).
+  let tunnelPairing = $state<api.TunnelPairing | null>(null)
 
   // Original values for dirty-checking
   let origLanguage     = 'en'
@@ -311,7 +315,18 @@
     await api.listProviders().then(p => { providers = p; providersLoaded = true }).catch(() => { providersLoaded = true })
     await Promise.all([loadConfig(), loadVersion()])
     if (get(nativeShell)) api.getAutostart().then(v => (autostart = v)).catch(() => {})
+    api.getTunnelPairing().then(p => { tunnelPairing = p }).catch(() => {})
   })
+
+  async function copyPairURL() {
+    if (!tunnelPairing?.pair_url) return
+    try {
+      await navigator.clipboard.writeText(tunnelPairing.pair_url)
+      showToast($t('settings.mobile.copied'), 'success')
+    } catch {
+      showToast('Copy failed', 'error')
+    }
+  }
 
   // Desktop shell: toggle launch-at-login. Applied immediately (not part of the
   // Save batch); snaps back if the native call fails.
@@ -770,6 +785,26 @@
         </div>
       </div>
 
+      <!-- Mobile (managed tunnel pairing) -->
+      <div class="section-card">
+        <div class="section-title">{$t('settings.mobile')}</div>
+        {#if tunnelPairing?.enabled && tunnelPairing.pair_url}
+          <div class="mobile-pair">
+            <QrCode text={tunnelPairing.pair_url} />
+            <div class="mobile-info">
+              <p class="mobile-scan">{$t('settings.mobile.scan')}</p>
+              <div class="mobile-meta mono">
+                <div>{$t('settings.mobile.relay')}: {tunnelPairing.relay}</div>
+                <div>{$t('settings.mobile.tunnel_id')}: {tunnelPairing.tunnel_id}</div>
+              </div>
+              <button class="btn-secondary" onclick={copyPairURL}>{$t('settings.mobile.copy_url')}</button>
+            </div>
+          </div>
+        {:else}
+          <div class="mobile-disabled">{$t('settings.mobile.disabled')}</div>
+        {/if}
+      </div>
+
       <!-- Agent defaults -->
       <div class="section-card">
         <div class="section-title">{$t('settings.agent')}</div>
@@ -1054,6 +1089,15 @@ select.ep-input { cursor: pointer; }
 .act-btn.del:hover { color: var(--error); }
 .act-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* ── Mobile (managed tunnel pairing) ───────────────────────────────────────── */
+.mobile-pair { display: flex; gap: 20px; padding: 20px 24px; align-items: flex-start; flex-wrap: wrap; }
+.mobile-info { display: flex; flex-direction: column; gap: 12px; min-width: 0; flex: 1; }
+.mobile-scan { margin: 0; font-size: 14px; color: var(--text); }
+.mobile-meta { font-size: 12px; color: var(--text-tertiary); display: flex; flex-direction: column; gap: 4px; word-break: break-all; }
+.mobile-meta > div { min-width: 0; }
+.mobile-info .btn-secondary { align-self: flex-start; }
+.mobile-disabled { padding: 28px 24px; text-align: center; font-size: 13px; color: var(--text-tertiary); }
 
 /* ── modal ──────────────────────────────────────────────────────────────────── */
 .modal-backdrop {
