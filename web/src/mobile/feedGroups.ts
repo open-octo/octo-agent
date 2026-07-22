@@ -31,10 +31,11 @@ function byPinThenRecent(a: FeedItem, b: FeedItem): number {
 export const feedGroups = derived(
   [sessions, confirmModal],
   ([$sessions, $confirm]): FeedGroups => {
-    // confirmModal holds the open confirmation (or null); it carries the
-    // session it belongs to. Guard the shape since the store is typed `any`.
+    // confirmModal holds the open confirmation (or null); it carries the session
+    // under `sessionId` (camelCase — see where ChatView.svelte sets it), not
+    // `session_id`. Guard the shape since the store is typed `any`.
     const approvalSid =
-      $confirm && typeof $confirm === 'object' ? ($confirm.session_id as string | undefined) : undefined
+      $confirm && typeof $confirm === 'object' ? ($confirm.sessionId as string | undefined) : undefined
 
     const todo: FeedItem[] = []
     const active: FeedItem[] = []
