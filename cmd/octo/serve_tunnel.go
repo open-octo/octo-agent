@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -48,9 +49,31 @@ func startTunnel(ctx context.Context, srv *server.Server, addr, relayURL string,
 		return err
 	}
 
-	printPairingMaterial(stdout, relayURL, identity, token)
+	// Publish the pairing material so the web UI can render it as a QR, and
+	// print it too so a headless server can pair without a browser.
+	pairURL := pairingURL(relayURL, identity, token)
+	srv.SetTunnelPairing(&server.TunnelPairing{
+		PairURL:  pairURL,
+		Relay:    relayURL,
+		TunnelID: identity.TunnelID(),
+	})
+	printPairingMaterial(stdout, relayURL, identity, token, pairURL)
+
 	go func() { _ = tun.Serve(ctx) }()
 	return nil
+}
+
+// pairingURL is the deep link a pairing QR encodes: the four things a phone
+// needs to reach and authenticate this host — relay, tunnel id, host public
+// key, and the one-time token.
+func pairingURL(relayURL string, id *tunnel.Identity, token string) string {
+	q := url.Values{
+		"relay": {relayURL},
+		"tid":   {id.TunnelID()},
+		"hk":    {id.PublicKeyBase64()},
+		"tok":   {token},
+	}
+	return "octo-pair://v1?" + q.Encode()
 }
 
 // tunnelIdentityPath is ~/.octo/tunnel.json, alongside the other serve state.
@@ -88,10 +111,12 @@ func loopbackWSURL(addr string) string {
 // printPairingMaterial shows the raw data a pairing QR encodes. Rendering it as
 // a scannable QR (CLI ASCII, web/desktop panel) is a later step; the text is
 // enough to pair a device by hand and to test against a relay.
-func printPairingMaterial(w io.Writer, relayURL string, id *tunnel.Identity, token string) {
+func printPairingMaterial(w io.Writer, relayURL string, id *tunnel.Identity, token, pairURL string) {
 	fmt.Fprintln(w, "octo serve: managed tunnel enabled — pair a device with:")
 	fmt.Fprintf(w, "  relay:      %s\n", relayURL)
 	fmt.Fprintf(w, "  tunnel id:  %s\n", id.TunnelID())
 	fmt.Fprintf(w, "  host key:   %s\n", id.PublicKeyBase64())
 	fmt.Fprintf(w, "  pair token: %s  (one-time)\n", token)
+	fmt.Fprintf(w, "  pair url:   %s\n", pairURL)
+	fmt.Fprintln(w, "  (or open Settings › Mobile in the web UI to scan a QR)")
 }

@@ -12,12 +12,14 @@
   "dependencies": {
     "dompurify": "^3.2.0",
     "highlight.js": "^11.10.0",
-    "marked": "^15.0.0"
+    "marked": "^15.0.0",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/svelte": "^5.4.2",
+    "@types/qrcode": "^1.5.5",
     "happy-dom": "^20.11.0",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
