@@ -8,5 +8,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "capacitor.config.ts"]
 }
