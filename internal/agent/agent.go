@@ -1126,17 +1126,13 @@ func (a *Agent) runLoop(
 				}
 			}
 
-			// Decorate results before events and history so the model and
-			// the persisted session see the same text. UI events strip the
-			// <system-reminder> spans (emitToolResultEvents) — hook output
-			// is model-facing, not part of the tool's visible result.
+			// dispatchTools already emitted EventToolDone / EventToolError for
+			// each tool as it finished (so a parallel batch reports results
+			// incrementally instead of all at once). applyPostToolUse then
+			// appends any PostToolUse hook output to the results for the model
+			// and the persisted session only — it is deliberately kept out of
+			// the UI events, which show the tool's own visible result.
 			a.applyPostToolUse(ctx, reply.Blocks, resultBlocks)
-
-			// Emit EventToolDone / EventToolError per result, pairing
-			// each result with the originating tool_use block so ToolName
-			// can be carried through (tool_result blocks don't carry it
-			// themselves).
-			emitToolResultEvents(handler, reply.Blocks, resultBlocks)
 
 			a.History.Append(NewToolResultMessage(resultBlocks))
 
@@ -1571,9 +1567,29 @@ func emitToolResultEvents(handler EventHandler, useBlocks, resultBlocks []Conten
 		if r.Type != "tool_result" {
 			continue
 		}
+		// Delegate the event shaping so the display formatting lives in one
+		// place (emitToolResultBlocks) — this path only supplies the name.
+		emitToolResultBlocks(handler, nameByID[r.ToolUseID], []ContentBlock{r})
+	}
+}
+
+// emitToolResultBlocks fires EventToolDone / EventToolError for a single tool's
+// result blocks. toolName is the originating tool's name (a tool_result block
+// doesn't carry it). Used by dispatchTools to report each tool as it finishes —
+// so a parallel batch doesn't hold every card "running" until the slowest tool
+// completes. No-op on a nil handler; emits the pre-decoration result (hook
+// output is model-facing and deliberately kept out of the UI).
+func emitToolResultBlocks(handler EventHandler, toolName string, blocks []ContentBlock) {
+	if handler == nil {
+		return
+	}
+	for _, r := range blocks {
+		if r.Type != "tool_result" {
+			continue
+		}
 		ev := AgentEvent{
 			ToolID:   r.ToolUseID,
-			ToolName: nameByID[r.ToolUseID],
+			ToolName: toolName,
 			Output:   truncateOutput(StripRemindersForDisplay(r.Result)),
 			UI:       r.UI,
 		}
@@ -1652,10 +1668,22 @@ func dispatchTools(ctx context.Context, executor ToolExecutor, blocks []ContentB
 
 	if canParallelize(calls) {
 		var wg sync.WaitGroup
+		// Result events are emitted as each tool finishes rather than batched
+		// after wg.Wait — otherwise a parallel sub_agent fan-out holds every
+		// card "running" until the slowest child returns, and a mid-batch page
+		// refresh can't see the ones that already completed. emitMu serializes
+		// handler calls so a handler needn't be concurrency-safe.
+		var emitMu sync.Mutex
+		emit := func(name string, rblocks []ContentBlock) {
+			emitMu.Lock()
+			emitToolResultBlocks(handler, name, rblocks)
+			emitMu.Unlock()
+		}
 		resultSlices = make([][]ContentBlock, len(calls))
 		for i := range calls {
 			if calls[i].denyReason != "" {
 				resultSlices[i] = []ContentBlock{NewToolResultBlock(calls[i].block.ID, calls[i].denyReason, true)}
+				emit(calls[i].block.Name, resultSlices[i])
 				continue
 			}
 			wg.Add(1)
@@ -1663,6 +1691,7 @@ func dispatchTools(ctx context.Context, executor ToolExecutor, blocks []ContentB
 				defer wg.Done()
 				res, err := executor.Execute(ctx, calls[i].block.Name, calls[i].block.Input)
 				resultSlices[i] = toolResultBlocks(calls[i].block.ID, res, err)
+				emit(calls[i].block.Name, resultSlices[i])
 			}(i)
 		}
 		wg.Wait()
@@ -1675,6 +1704,7 @@ func dispatchTools(ctx context.Context, executor ToolExecutor, blocks []ContentB
 		b := calls[i].block
 		if calls[i].denyReason != "" {
 			resultSlices[i] = []ContentBlock{NewToolResultBlock(b.ID, calls[i].denyReason, true)}
+			emitToolResultBlocks(handler, b.Name, resultSlices[i])
 			continue
 		}
 		var (
@@ -1694,6 +1724,7 @@ func dispatchTools(ctx context.Context, executor ToolExecutor, blocks []ContentB
 			res, execErr = executor.Execute(ctx, b.Name, b.Input)
 		}
 		resultSlices[i] = toolResultBlocks(b.ID, res, execErr)
+		emitToolResultBlocks(handler, b.Name, resultSlices[i])
 	}
 	return flattenResults(resultSlices), nil
 }
