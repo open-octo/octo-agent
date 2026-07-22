@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { tasks, showToast, sessions, activeSessionId, view, setActiveSession, openAgentSession } from '../lib/stores'
+  import { tasks, showToast, sessions, sessionGroups, activeSessionId, view, setActiveSession, openAgentSession } from '../lib/stores'
   import { t, tr, locale } from '../lib/i18n'
   import { confirmDialog } from '../lib/confirm'
   import { get } from 'svelte/store'
@@ -64,9 +64,14 @@
       if (res.session_id) {
         // Refresh the session list so the new session shows in the sidebar,
         // then activate it and switch to chat. The streamed turn events will
-        // appear automatically once the WebSocket subscribes.
-        const data = await api.listSessions()
+        // appear automatically once the WebSocket subscribes. Also refresh
+        // the groups snapshot — a cron run files its session into the task's
+        // group server-side, but that store is otherwise only ever populated
+        // once at sidebar mount, so without this the session would render
+        // ungrouped until a manual reload (#1699).
+        const [data, org] = await Promise.all([api.listSessions(), api.listSessionGroups()])
         sessions.set(data.sessions ?? [])
+        sessionGroups.set(org.groups)
         setActiveSession(res.session_id)
         view.set('chat')
       }

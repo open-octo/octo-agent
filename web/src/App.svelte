@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sessions, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell } from './lib/stores'
+  import { view, sessions, sessionGroups, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell } from './lib/stores'
   import MobileApp from './mobile/MobileApp.svelte'
   import { ws, wsState } from './lib/ws'
   import { notificationsEnabled } from './lib/notifications'
@@ -177,7 +177,11 @@
       )
       // Double-check against the server: the store mutation above is the fast
       // path, but if a slow-consumer drop or a UI reactivity gap hides the
-      // rename, the next REST list will reconcile the sidebar.
+      // rename, the next REST list will reconcile the sidebar. This is also
+      // the first live signal of a brand-new cron session for a tab that was
+      // already open (its auto-title fires this event on message receipt) —
+      // refresh the groups snapshot alongside it, or the session shows up
+      // ungrouped until a manual reload re-mounts the sidebar (#1699).
       api.listSessions().then((data: any) => {
         const list = data.sessions ?? []
         sessions.set(list)
@@ -189,6 +193,7 @@
           return next
         })
       }).catch(() => { /* non-critical: fast-path store update already ran */ })
+      api.listSessionGroups().then(org => sessionGroups.set(org.groups)).catch(() => { /* non-critical */ })
     })
 
     // session_activity is a lightweight global signal (unlike
