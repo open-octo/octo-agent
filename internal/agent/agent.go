@@ -1567,19 +1567,9 @@ func emitToolResultEvents(handler EventHandler, useBlocks, resultBlocks []Conten
 		if r.Type != "tool_result" {
 			continue
 		}
-		ev := AgentEvent{
-			ToolID:   r.ToolUseID,
-			ToolName: nameByID[r.ToolUseID],
-			Output:   truncateOutput(StripRemindersForDisplay(r.Result)),
-			UI:       r.UI,
-		}
-		if r.IsError {
-			ev.Kind = EventToolError
-			ev.Err = r.Result // full untruncated error message in Err
-		} else {
-			ev.Kind = EventToolDone
-		}
-		handler(ev)
+		// Delegate the event shaping so the display formatting lives in one
+		// place (emitToolResultBlocks) — this path only supplies the name.
+		emitToolResultBlocks(handler, nameByID[r.ToolUseID], []ContentBlock{r})
 	}
 }
 
@@ -1684,9 +1674,9 @@ func dispatchTools(ctx context.Context, executor ToolExecutor, blocks []ContentB
 		// refresh can't see the ones that already completed. emitMu serializes
 		// handler calls so a handler needn't be concurrency-safe.
 		var emitMu sync.Mutex
-		emit := func(name string, blocks []ContentBlock) {
+		emit := func(name string, rblocks []ContentBlock) {
 			emitMu.Lock()
-			emitToolResultBlocks(handler, name, blocks)
+			emitToolResultBlocks(handler, name, rblocks)
 			emitMu.Unlock()
 		}
 		resultSlices = make([][]ContentBlock, len(calls))

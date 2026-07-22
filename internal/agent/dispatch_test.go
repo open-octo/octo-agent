@@ -241,6 +241,20 @@ func (h *recordingHandler) resultKinds() map[string]EventKind {
 	return out
 }
 
+// resultCount is the raw number of result events, NOT deduped by tool id, so a
+// double-emit for one tool is detectable (resultKinds' map would hide it).
+func (h *recordingHandler) resultCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	for _, ev := range h.events {
+		if ev.Kind == EventToolDone || ev.Kind == EventToolError {
+			n++
+		}
+	}
+	return n
+}
+
 // dispatchTools must emit a result event for EVERY tool as it finishes — not
 // batched by the caller after the whole set completes. This is the regression
 // guard for a parallel sub_agent fan-out whose cards stayed "running" (and were
@@ -257,6 +271,11 @@ func TestDispatchTools_EmitsResultEventPerTool(t *testing.T) {
 	}
 	if _, err := dispatchTools(context.Background(), exec, blocks, h.handle, gate); err != nil {
 		t.Fatal(err)
+	}
+	// Exactly one result event per tool — no double-emit (the caller must not
+	// also emit now that dispatchTools does).
+	if n := h.resultCount(); n != 3 {
+		t.Fatalf("emitted %d result events, want exactly 3 (one per tool, no double-emit)", n)
 	}
 	kinds := h.resultKinds()
 	if len(kinds) != 3 {
