@@ -207,6 +207,92 @@ func TestRecorderCapturesNewTab(t *testing.T) {
 	}
 }
 
+// TestRecorderCapturesNoopenerNewTab: a demonstration continuing in a tab opened
+// WITHOUT an opener relationship — window.open(..., "noopener"), the shape of
+// e.g. Zhihu's 写文章 button — must still be captured. Session-scoped auto-attach
+// never fires for unrelated targets, so this only works through the browser-level
+// freeze-on-create auto-attach; both the new tab's first navigation and the click
+// inside it must land in the recording.
+func TestRecorderCapturesNoopenerNewTab(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/b", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>b</title><button id="bb">B</button>`))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>a</title>
+<button id="open">Open</button>
+<script>document.getElementById('open').addEventListener('click',function(){window.open('/b','_blank','noopener')});</script>`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#open", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	rec := NewRecorder(page)
+	if err := rec.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer rec.Stop()
+
+	np, err := b.ClickFollow(ctx, page, "#open")
+	if err != nil {
+		t.Fatalf("open new tab: %v", err)
+	}
+	if np == page {
+		t.Fatal("click did not open a new tab")
+	}
+	if err := np.WaitFor(ctx, "#bb", testWaitTimeout); err != nil {
+		t.Fatalf("wait #bb: %v", err)
+	}
+	// Give the attach-event instrumentation a beat, as in the opener variant.
+	time.Sleep(500 * time.Millisecond)
+	if err := np.Click(ctx, "#bb"); err != nil {
+		t.Fatalf("click #bb: %v", err)
+	}
+	var sawNav, sawClick bool
+	for i := 0; i < 30; i++ {
+		time.Sleep(100 * time.Millisecond)
+		for _, e := range rec.Events() {
+			if e.Type == "navigate" && strings.HasSuffix(e.URL, "/b") {
+				sawNav = true
+			}
+			if e.Type == "click" && e.Selector == "#bb" {
+				sawClick = true
+			}
+		}
+		if sawNav && sawClick {
+			break
+		}
+	}
+	if !sawClick {
+		t.Fatalf("click in the noopener tab was not captured: %+v", rec.Events())
+	}
+	if !sawNav {
+		t.Fatalf("the noopener tab's navigation was not captured (replay would lose the page): %+v", rec.Events())
+	}
+	// Exactly one capture — a double-attach (browser-level + session-level
+	// auto-attach both firing for the same target) would instrument the tab
+	// twice and duplicate every event.
+	count := 0
+	for _, e := range rec.Events() {
+		if e.Type == "click" && e.Selector == "#bb" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly 1 captured click on #bb, got %d: %+v", count, rec.Events())
+	}
+}
+
 // TestRecorderCapturesNewTab_ClickBeforeInstrument: the user clicks in a freshly
 // opened tab immediately — before instrumentation would normally finish. The
 // freeze-on-create auto-attach (waitForDebuggerOnStart) guarantees the page

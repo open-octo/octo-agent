@@ -218,6 +218,14 @@ func (r *Recorder) instrumentSession(ctx context.Context, session, frameSel stri
 	if _, err := r.page.cli.call(ctx, session, "Runtime.evaluate", map[string]any{"expression": captureScript}); err != nil {
 		return release(err)
 	}
+	r.watchBindingEvents(session, frameSel)
+	return nil
+}
+
+// watchBindingEvents subscribes to the capture binding's calls on one session
+// and appends each delivered event. Purely client-side — safe to install on a
+// still-frozen target.
+func (r *Recorder) watchBindingEvents(session, frameSel string) {
 	events, unsub := r.page.cli.subscribe("Runtime.bindingCalled", session)
 	r.mu.Lock()
 	r.unsubs = append(r.unsubs, unsub)
@@ -238,7 +246,6 @@ func (r *Recorder) instrumentSession(ctx context.Context, session, frameSel stri
 			r.addEvent(re, frameSel)
 		}
 	}()
-	return nil
 }
 
 // instrumentOOPIF resolves a cross-origin iframe session's parent selector and
@@ -508,6 +515,19 @@ func (r *Recorder) Start(ctx context.Context) error {
 		_, _ = p.cli.call(ctx, p.sessionID, "Target.setAutoAttach", map[string]any{
 			"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true,
 		})
+		// The session-scoped call above only fires for targets Chrome considers
+		// related to the recorded page — child frames, workers, popups that keep
+		// an opener. A tab opened WITHOUT an opener relationship (target="_blank"
+		// is implicitly rel=noopener since Chrome 88; sites also open editors via
+		// window.open(..., "noopener")) is an unrelated top-level target: no
+		// attachedToTarget ever fires, the tab is never instrumented, and the rest
+		// of the demonstration is silently absent from the recording. Request
+		// freeze-on-create at the BROWSER level too — that scope fires for every
+		// created target regardless of opener. The handler below instruments page
+		// targets and resumes everything it sees, so the extra events are safe.
+		_, _ = p.cli.call(ctx, "", "Target.setAutoAttach", map[string]any{
+			"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true,
+		})
 		attached, attachUnsub := p.cli.subscribe("Target.attachedToTarget", "")
 		r.mu.Lock()
 		r.unsubs = append(r.unsubs, attachUnsub)
@@ -517,7 +537,8 @@ func (r *Recorder) Start(ctx context.Context) error {
 				var a struct {
 					SessionID  string `json:"sessionId"`
 					TargetInfo struct {
-						Type string `json:"type"`
+						TargetID string `json:"targetId"`
+						Type     string `json:"type"`
 					} `json:"targetInfo"`
 				}
 				if json.Unmarshal(ev.Params, &a) != nil || a.SessionID == "" {
@@ -537,7 +558,7 @@ func (r *Recorder) Start(ctx context.Context) error {
 					// recording started are deliberately NOT instrumented: switching
 					// to one leaves no replayable step, so its events would compile
 					// into a skill that replays on the wrong page.
-					r.instrumentPageSession(ictx, a.SessionID)
+					r.instrumentPageSession(ictx, a.SessionID, a.TargetInfo.TargetID)
 				}
 				// Resume the target regardless of type or instrumentation outcome —
 				// waitForDebuggerOnStart keeps it frozen until this call, and a
@@ -569,18 +590,45 @@ func (r *Recorder) Start(ctx context.Context) error {
 // cancelled the tab's first navigation irrecoverably — the destination isn't
 // recorded anywhere yet — or swapped the document out from under the user's
 // first click. The freeze is the mechanism CDP provides for exactly this.)
-func (r *Recorder) instrumentPageSession(ctx context.Context, session string) {
+func (r *Recorder) instrumentPageSession(ctx context.Context, session, targetID string) {
+	// Claim by TARGET, not by session: one tab can surface as several sessions
+	// of the same client (auto-attach at creation plus a later explicit
+	// Target.attachToTarget), and a page-side binding call notifies every
+	// session that registered the binding — instrumenting a second session
+	// would record every action twice. The "target:" prefix keeps these claims
+	// disjoint from instrumentSession's session-keyed ones.
+	if !r.claimSession("target:" + targetID) {
+		return
+	}
+	// A frozen tab answers NO renderer-bound command until it is resumed — a
+	// tab opened without an opener relationship gets a fresh renderer that
+	// isn't serviced while paused — so a call-and-wait sequence here would
+	// deadlock against the resume that only happens after we return. Instead,
+	// queue the whole setup on the wire (callAsync writes immediately; wire
+	// order guarantees it all applies before any page code runs), install the
+	// client-side subscriptions, queue the resume, and only then collect the
+	// responses. Opener-related popups whose shared renderer answers while
+	// frozen take the exact same path — the awaits just complete sooner.
+	cli := r.page.cli
+	var waits []func(context.Context) (json.RawMessage, error)
 	// Enable the domains ourselves rather than depend on the browser watcher's
 	// async registration having run first — same reasoning as instrumentOOPIF.
 	for _, d := range []string{"Page.enable", "Runtime.enable", "DOM.enable"} {
-		if _, err := r.page.cli.call(ctx, session, d, nil); err != nil {
-			return
-		}
+		waits = append(waits, cli.callAsync(session, d, nil))
 	}
-	if err := r.instrumentSession(ctx, session, ""); err != nil {
-		return
-	}
+	waits = append(waits, cli.callAsync(session, "Runtime.addBinding", map[string]any{"name": "__octoRecord"}))
+	waits = append(waits, cli.callAsync(session, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": captureScript}))
+	r.watchBindingEvents(session, "")
 	r.watchNavigations(ctx, session)
+	waits = append(waits, cli.callAsync(session, "Runtime.runIfWaitingForDebugger", nil))
+	for _, wait := range waits {
+		_, _ = wait(ctx) // best-effort, matching the attach handler's contract
+	}
+	// Install into an already-loaded document too (the script self-dedups). On
+	// a tab attached frozen at creation this evaluates in the transient initial
+	// document — harmless; the real document is covered by the on-new-document
+	// registration above.
+	_, _ = cli.call(ctx, session, "Runtime.evaluate", map[string]any{"expression": captureScript})
 }
 
 // watchNavigations records top-level navigations on one page session: both
@@ -588,10 +636,20 @@ func (r *Recorder) instrumentPageSession(ctx context.Context, session string) {
 // (Page.navigatedWithinDocument — pushState/replaceState never fire
 // frameNavigated). Subframe navigations are ignored: the cross-document event
 // carries the frame's parentId, and the same-document one is filtered against
-// the session's top frame (resolved once here). Consecutive repeats collapse.
+// the session's top frame (resolved asynchronously — a still-frozen tab only
+// answers Page.getFrameTree after its resume, and blocking here would deadlock
+// instrumentPageSession's queued-setup sequence; until it resolves the filter
+// admits all same-document navs, the same fallback as a failed lookup).
+// Consecutive repeats collapse.
 func (r *Recorder) watchNavigations(ctx context.Context, session string) {
+	var topMu sync.Mutex
 	topFrameID := ""
-	if res, err := r.page.cli.call(ctx, session, "Page.getFrameTree", nil); err == nil {
+	waitFrameTree := r.page.cli.callAsync(session, "Page.getFrameTree", nil)
+	go func() {
+		res, err := waitFrameTree(ctx)
+		if err != nil {
+			return
+		}
 		var ft struct {
 			FrameTree struct {
 				Frame struct {
@@ -600,9 +658,11 @@ func (r *Recorder) watchNavigations(ctx context.Context, session string) {
 			} `json:"frameTree"`
 		}
 		if json.Unmarshal(res, &ft) == nil {
+			topMu.Lock()
 			topFrameID = ft.FrameTree.Frame.ID
+			topMu.Unlock()
 		}
-	}
+	}()
 
 	navEvents, navUnsub := r.page.cli.subscribe("Page.frameNavigated", session)
 	spaEvents, spaUnsub := r.page.cli.subscribe("Page.navigatedWithinDocument", session)
@@ -647,7 +707,10 @@ func (r *Recorder) watchNavigations(ctx context.Context, session string) {
 			if json.Unmarshal(ev.Params, &b) != nil {
 				continue
 			}
-			if topFrameID != "" && b.FrameID != topFrameID {
+			topMu.Lock()
+			top := topFrameID
+			topMu.Unlock()
+			if top != "" && b.FrameID != top {
 				continue // SPA routing inside a subframe — not a page move
 			}
 			recordNav(b.URL)
@@ -695,5 +758,11 @@ func (r *Recorder) Stop() {
 	defer cancel()
 	_, _ = r.page.cli.call(ctx, r.page.sessionID, "Target.setAutoAttach", map[string]any{
 		"autoAttach": true, "waitForDebuggerOnStart": false, "flatten": true,
+	})
+	// The browser-level freeze-on-create has no pre-recording baseline to
+	// restore — nothing else on this connection enables browser-scoped
+	// auto-attach — so turn it off entirely.
+	_, _ = r.page.cli.call(ctx, "", "Target.setAutoAttach", map[string]any{
+		"autoAttach": false, "waitForDebuggerOnStart": false, "flatten": true,
 	})
 }

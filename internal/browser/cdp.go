@@ -137,6 +137,17 @@ func (c *cdpClient) shutdown(err error) {
 // call sends a command and waits for its response. sessionID may be empty for
 // browser-level commands.
 func (c *cdpClient) call(ctx context.Context, sessionID, method string, params any) (json.RawMessage, error) {
+	return c.callAsync(sessionID, method, params)(ctx)
+}
+
+// callAsync sends a command immediately — the write happens in the caller's
+// goroutine, so successive callAsync/call invocations hit the wire in program
+// order — and returns a function that awaits the response. This split matters
+// for a target frozen by waitForDebuggerOnStart: such a target answers no
+// renderer-bound command until Runtime.runIfWaitingForDebugger, so its setup
+// sequence must be *sent* before the resume yet can only be *awaited* after it.
+// Wire order guarantees the queued setup applies before any page code runs.
+func (c *cdpClient) callAsync(sessionID, method string, params any) func(ctx context.Context) (json.RawMessage, error) {
 	id := atomic.AddInt64(&c.nextID, 1)
 	ch := make(chan rpcResponse, 1)
 	c.pendingMu.Lock()
@@ -144,33 +155,43 @@ func (c *cdpClient) call(ctx context.Context, sessionID, method string, params a
 	c.pendingMu.Unlock()
 
 	req := rpcRequest{ID: id, Method: method, Params: params, SessionID: sessionID}
-	payload, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
+	payload, marshalErr := json.Marshal(req)
+	writeErr := marshalErr
+	if writeErr == nil {
+		c.writeMu.Lock()
+		writeErr = c.conn.WriteMessage(websocket.TextMessage, payload)
+		c.writeMu.Unlock()
+		if writeErr != nil {
+			writeErr = fmt.Errorf("cdp write %s: %w", method, writeErr)
+		}
 	}
-	c.writeMu.Lock()
-	err = c.conn.WriteMessage(websocket.TextMessage, payload)
-	c.writeMu.Unlock()
-	if err != nil {
-		return nil, fmt.Errorf("cdp write %s: %w", method, err)
-	}
-
-	select {
-	case <-ctx.Done():
+	if writeErr != nil {
 		c.pendingMu.Lock()
 		delete(c.pending, id)
 		c.pendingMu.Unlock()
-		return nil, ctx.Err()
-	case <-c.closed:
-		return nil, fmt.Errorf("cdp connection closed: %w", c.closeErr)
-	case resp, ok := <-ch:
-		if !ok {
+	}
+
+	return func(ctx context.Context) (json.RawMessage, error) {
+		if writeErr != nil {
+			return nil, writeErr
+		}
+		select {
+		case <-ctx.Done():
+			c.pendingMu.Lock()
+			delete(c.pending, id)
+			c.pendingMu.Unlock()
+			return nil, ctx.Err()
+		case <-c.closed:
 			return nil, fmt.Errorf("cdp connection closed: %w", c.closeErr)
+		case resp, ok := <-ch:
+			if !ok {
+				return nil, fmt.Errorf("cdp connection closed: %w", c.closeErr)
+			}
+			if resp.Error != nil {
+				return nil, fmt.Errorf("%s: %w", method, resp.Error)
+			}
+			return resp.Result, nil
 		}
-		if resp.Error != nil {
-			return nil, fmt.Errorf("%s: %w", method, resp.Error)
-		}
-		return resp.Result, nil
 	}
 }
 
