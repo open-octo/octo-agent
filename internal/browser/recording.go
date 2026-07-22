@@ -1007,15 +1007,29 @@ func ReplayRecording(ctx context.Context, page *Page, recording *Recording, para
 		// named recording and passes params that don't match this one at all.
 		return false, page, nil, fmt.Errorf("replay %q: missing required param(s): %s", recording.Name, strings.Join(missing, ", "))
 	}
+	// stepHard bounds one step's TOTAL wall time — implicit waits, retries and
+	// heal rounds included — as a backstop for CDP calls that never answer: a
+	// crashed renderer (e.g. after Chrome killed the page) leaves every command
+	// pending forever, and the per-wait timeouts are themselves implemented as
+	// CDP polls, so they hang with it. Without this bound a dead tab stalls
+	// replay until the caller's context — an entire turn — expires. Generous on
+	// purpose: it must never cut a legitimately slow step, only a hung one.
+	stepHard := 8 * opts.StepTimeout
+	if floor := 2 * navigateLoadTimeout; stepHard < floor {
+		stepHard = floor
+	}
 	binds := map[string][]string{}
 	cur := page
 	for i := range recording.Steps {
-		np, runErr := runStep(ctx, opts.Browser, cur, &recording.Steps[i], full, opts.StepTimeout, opts.DownloadDir, binds)
+		stepCtx, cancel := context.WithTimeout(ctx, stepHard)
+		np, runErr := runStep(stepCtx, opts.Browser, cur, &recording.Steps[i], full, opts.StepTimeout, opts.DownloadDir, binds)
 		if runErr == nil {
+			cancel()
 			cur = np
 			continue
 		}
-		np, healed, runErr := recoverStep(ctx, opts, cur, &recording.Steps[i], full, runErr, &modified, binds)
+		np, healed, runErr := recoverStep(stepCtx, opts, cur, &recording.Steps[i], full, runErr, &modified, binds)
+		cancel()
 		if runErr != nil {
 			return modified, cur, nil, fmt.Errorf("step %d (%s): %w", i+1, recording.Steps[i].Action, runErr)
 		}

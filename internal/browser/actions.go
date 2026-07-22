@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -707,11 +709,43 @@ func (p *Page) Screenshot(ctx context.Context) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(r.Data)
 }
 
+// normalizeUploadFiles validates the paths handed to DOM.setFileInputFiles
+// BEFORE they reach Chrome: a leading "~/" is expanded (the browser has no
+// shell semantics), the result must be absolute, and the file must exist.
+// This is a hard prerequisite, not a nicety — Chrome treats a path the browser
+// process can't grant (relative, unexpanded "~", nonexistent) as a compromised
+// renderer and KILLS the page (RESULT_CODE_KILLED_BAD_MESSAGE), which then
+// leaves every subsequent CDP call on that session hanging.
+func normalizeUploadFiles(files []string) ([]string, error) {
+	out := make([]string, 0, len(files))
+	for _, f := range files {
+		if f == "~" || strings.HasPrefix(f, "~/") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return nil, fmt.Errorf("upload: expand %q: %w", f, err)
+			}
+			f = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(f, "~"), "/"))
+		}
+		if !filepath.IsAbs(f) {
+			return nil, fmt.Errorf("upload: path %q must be absolute (the browser does not resolve relative paths)", f)
+		}
+		if _, err := os.Stat(f); err != nil {
+			return nil, fmt.Errorf("upload: file not found: %s", f)
+		}
+		out = append(out, f)
+	}
+	return out, nil
+}
+
 // Upload sets the files on a file <input> matched by selector, without the OS
 // file-picker dialog (CDP DOM.setFileInputFiles). Paths should be absolute.
 // Resolving the input by JS object (rather than a DOM nodeId) lets it pierce a
 // same-origin iframe via the same frame convention as the other actions.
 func (p *Page) Upload(ctx context.Context, selector string, files []string) error {
+	files, err := normalizeUploadFiles(files)
+	if err != nil {
+		return err
+	}
 	frame, elem := splitFrame(selector)
 	res, err := p.cli.call(ctx, p.sessionID, "Runtime.evaluate", map[string]any{
 		"expression":    elemRefJS(frame, elem),
@@ -743,6 +777,10 @@ func (p *Page) Upload(ctx context.Context, selector string, files []string) erro
 // case where there is no persistent <input type=file> to target directly. The
 // real Klook SD upload works this way.
 func (p *Page) UploadViaChooser(ctx context.Context, selector string, files []string) error {
+	files, err := normalizeUploadFiles(files)
+	if err != nil {
+		return err
+	}
 	if frame, elem := splitFrame(selector); frame != "" {
 		if cp, ok := p.oopifPage(ctx, frame); ok {
 			return cp.UploadViaChooser(ctx, elem, files)
