@@ -439,6 +439,14 @@ octo stands on the shoulders of two projects and doesn't pretend otherwise:
 
 Any bugs or bad decisions are octo's own.
 
+## Contributors
+
+Thanks to everyone who has contributed to octo:
+
+<a href="https://github.com/open-octo/octo-agent/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=open-octo/octo-agent" alt="Contributors" />
+</a>
+
 ## License
 
 MIT. See [`LICENSE.txt`](LICENSE.txt).

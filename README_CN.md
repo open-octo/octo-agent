@@ -399,6 +399,14 @@ octo 站在两个项目的肩膀上，这点不遮掩：
 
 有 bug 或者设计得不好的地方，都算 octo 自己的。
 
+## 贡献者
+
+感谢每一位为 octo 做出贡献的人：
+
+<a href="https://github.com/open-octo/octo-agent/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=open-octo/octo-agent" alt="Contributors" />
+</a>
+
 ## 许可
 
 MIT。见 [`LICENSE.txt`](LICENSE.txt)。
