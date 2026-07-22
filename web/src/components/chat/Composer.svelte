@@ -926,7 +926,7 @@
         <button class="chip" title={workingDir} onclick={(e) => { e.stopPropagation(); openDirMenu() }}>
           <iconify-icon icon="ant-design:folder-outlined" width="12"></iconify-icon>
           <span>{$t('chat.dir_label')}</span>
-          <span class="mono">{shortDir(workingDir)}</span>
+          <span class="mono dir-path">{shortDir(workingDir)}</span>
           <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
         </button>
         {#if dirMenu}
@@ -1157,6 +1157,7 @@
 .reasoning-chip { padding-right: 8px; }
 .reasoning-eye { color: var(--success); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.dir-path { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .context-chip { gap: 8px; }
 .ctx-bar { width: 56px; height: 4px; background: var(--border-table); border-radius: 9999px; overflow: hidden; display: inline-block; }
 .ctx-fill { display: block; height: 100%; background: var(--blue-6); border-radius: 9999px; }
