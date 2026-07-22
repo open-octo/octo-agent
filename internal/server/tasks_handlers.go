@@ -109,6 +109,14 @@ func (s *Server) CreateSession(task scheduler.Task) (string, error) {
 			slog.Warn("cron: add session to group", "task", task.Name, "err", gerr)
 		}
 	}
+
+	// Announce the new session globally. A scheduled fire has no subscribed
+	// tab yet, and every per-session broadcast in RunTask is dropped for a
+	// session nobody subscribed to — without this, an open sidebar can't learn
+	// the session (or its group filing) exists until a manual reload. Emitted
+	// after the group write above so a tab that refetches on receipt sees the
+	// membership already on disk.
+	s.wsHub.broadcast("", wsEventSessionCreated{Type: "session_created", SessionID: sessionID})
 	return sessionID, nil
 }
 

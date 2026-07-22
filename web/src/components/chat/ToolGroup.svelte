@@ -3,7 +3,7 @@
   import { activeSessionId, showToast } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
-  import { toolOpenState, applyToolToggle } from '../../lib/toolFold'
+  import { toolOpenState, applyToolToggle, autoCloseAction } from '../../lib/toolFold'
 
   // Tracks which overwrite-undo buttons have already fired, keyed by tool id.
   let undone = $state<Record<string, boolean>>({})
@@ -209,6 +209,73 @@
   // re-render revert a manual collapse of the auto-opened last tool.
   let toolOpen = $state<Record<string, boolean>>({})
 
+  // The last tool card auto-collapses the instant the group stops running,
+  // which — bound straight to <details open> — hides the content in one
+  // frame and reads as a flash/bug. `closingIds` keeps that one card's
+  // <details> forced open for a beat while a CSS transition (see
+  // .tool-body.auto-closing) shrinks it first, so the native collapse that
+  // finally lands is invisible.
+  //
+  // "Stops running" means no in-flight tool in the group right now — usually
+  // the turn finishing, but the same dip also happens between sequential tool
+  // rounds inside one turn (result received, next call still an LLM round-trip
+  // away). If the next call arrives while the previous card is still
+  // shrinking, the 'cancel' branch in autoCloseAction lands it instantly —
+  // otherwise the outgoing shrink overlaps the incoming card and the pair
+  // reads as everything animating open at once.
+  //
+  // A user-driven click still closes instantly (native <details> behaviour,
+  // untouched here); autoCloseAction skips a card the user holds an explicit
+  // override on.
+  //
+  // This must be $effect.pre, not $effect: a post-DOM effect would let the
+  // running->false render close the <details> first and force it back open a
+  // flush later. That reopen fires a toggle whose open=true diverges from the
+  // now-false default, so applyToolToggle records it as a user "keep open"
+  // override — and when the animation ends and closingIds clears, that stale
+  // override snaps the card back open (animated shrink, then pop back). Running
+  // before the DOM update keeps `open` true continuously, so no toggle fires
+  // at all.
+  // AUTO_CLOSE_MS is slightly longer than the CSS transition so the shrink
+  // always finishes before the <details> is allowed to natively close.
+  let closingIds = $state<Record<string, boolean>>({})
+  let prevRunning: boolean | undefined
+  const AUTO_CLOSE_MS = 750
+  $effect.pre(() => {
+    const ts = tools ?? []
+    if (ts.length === 0) return
+    const running = ts.some((t) => !t.done && !t.error)
+    const action = autoCloseAction(prevRunning, running, ts, toolOpen, Object.keys(closingIds).length)
+    prevRunning = running
+    if (action?.kind === 'start') {
+      const id = action.id
+      closingIds = { ...closingIds, [id]: true }
+      setTimeout(() => {
+        const next = { ...closingIds }
+        delete next[id]
+        closingIds = next
+      }, AUTO_CLOSE_MS)
+    } else if (action?.kind === 'cancel') {
+      closingIds = {}
+    }
+  })
+
+  // Toggle handler that is animation-aware: while a card is mid-animated-close,
+  // the only genuine toggle is the user clicking to collapse it early — end the
+  // animation so the native close sticks, and record no override either way
+  // (the forced-open state must never be mistaken for a user choice).
+  function onToggle(tool: any, lastId: string | undefined, running: boolean, open: boolean) {
+    if (closingIds[tool.id]) {
+      if (!open) {
+        const next = { ...closingIds }
+        delete next[tool.id]
+        closingIds = next
+      }
+      return
+    }
+    applyToolToggle(toolOpen, tool, lastId, running, open)
+  }
+
   // todo_write renders its checklist from the tool args.
   function todoItems(tool: any): Array<{ status: string; content: string }> | null {
     if (tool.name !== 'todo_write' && tool.name !== 'todowrite') return null
@@ -280,7 +347,8 @@
            ellipsizes it. Surfacing it via `title` + selectable text lets the
            user read/copy the whole thing despite the truncation. -->
       {@const argText = tool.summary || (tool.args ? argSummary(tool.name, tool.args) : '')}
-      <details open={toolOpenState(toolOpen, tool, lastId, anyRunning)} ontoggle={(e) => applyToolToggle(toolOpen, tool, lastId, anyRunning, (e.currentTarget as HTMLDetailsElement).open)} class="tool-item">
+      {@const isClosing = !!closingIds[tool.id]}
+      <details open={toolOpenState(toolOpen, tool, lastId, anyRunning) || isClosing} ontoggle={(e) => onToggle(tool, lastId, anyRunning, (e.currentTarget as HTMLDetailsElement).open)} class="tool-item">
         <summary class="tool-summary">
           <iconify-icon icon="lucide:chevron-right" width="13" class="chev" style="color:var(--text-tertiary)"></iconify-icon>
           <iconify-icon icon={toolIcon(tool.name)} width="14" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
@@ -325,6 +393,7 @@
           </span>
         </summary>
 
+        <div class="tool-body" class:auto-closing={isClosing}><div class="tool-body-inner">
         {#if tool.error}
           <div class="error-output mono">{tool.error}</div>
         {:else if fErr}
@@ -448,6 +517,7 @@
             {/if}
           </div>
         {/if}
+        </div></div>
       </details>
     {/each}
   </div>
@@ -483,6 +553,18 @@
 /* Chevron rotates from ▸ (collapsed) to ▾ (open). */
 .chev { transition: transform 0.15s ease; flex: 0 0 auto; }
 details[open] > summary .chev { transform: rotate(90deg); }
+/* Auto-collapse animation: when the turn finishes, this wrapper shrinks to
+   nothing before the <details> is actually allowed to close (AUTO_CLOSE_MS
+   in the script keeps it forced open just past this duration), so the native
+   collapse that follows is invisible instead of an instant flash. A user
+   click still closes natively/instantly — untouched here. The base rule pins
+   transition-duration to 0s explicitly (not just omits it) — some engines
+   resolve a class-removal transition from the style being left rather than
+   the one being entered, which would otherwise replay the shrink in reverse
+   as a spurious "expand" animation once auto-closing is cleared. */
+.tool-body { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 0s; }
+.tool-body.auto-closing { grid-template-rows: 0fr; transition: grid-template-rows 0.6s ease; }
+.tool-body-inner { overflow: hidden; min-height: 0; }
 /* todo_write checklist */
 .todo-list { border-top: 1px solid var(--border-table); padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
 .todo-step { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }

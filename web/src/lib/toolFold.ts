@@ -49,3 +49,33 @@ export function applyToolToggle(
   if (open === defaultToolOpen(tool, lastId, streaming)) delete overrides[tool.id]
   else overrides[tool.id] = open
 }
+
+// What the auto-close animation should do on a render where the group's
+// running state may have changed.
+//
+// 'start' — the group just went running->not-running: begin the animated close
+// of the auto-opened last card (unless it's an error card, which stays open by
+// default, or the user holds an explicit override on it).
+//
+// 'cancel' — the group is running again while a close animation is still in
+// flight: a new tool call arrived before the previous card finished shrinking.
+// Land the old card instantly, otherwise its shrink overlaps the new card's
+// arrival and the pair reads as everything animating open at once.
+//
+// null — nothing to do. Note prevRunning === undefined (first render, e.g. a
+// replayed history transcript whose tools are already done) is not an edge.
+export type AutoCloseAction = { kind: 'start'; id: string } | { kind: 'cancel' } | null
+
+export function autoCloseAction(
+  prevRunning: boolean | undefined,
+  running: boolean,
+  tools: ToolLike[],
+  overrides: Record<string, boolean>,
+  closingCount: number,
+): AutoCloseAction {
+  if (running) return closingCount > 0 ? { kind: 'cancel' } : null
+  if (prevRunning !== true) return null
+  const last = tools[tools.length - 1]
+  if (!last || last.error || overrides[last.id] !== undefined) return null
+  return { kind: 'start', id: last.id }
+}
