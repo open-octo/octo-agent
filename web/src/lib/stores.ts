@@ -31,6 +31,18 @@ export const wsDown = writable(false)
 export const isDesktopShell =
   typeof location !== 'undefined' && new URLSearchParams(location.search).get('shell') === 'octo-desktop'
 
+// True when the page runs inside the octo-mobile Capacitor webview. Capacitor
+// injects a global `Capacitor` object with isNativePlatform(); a plain browser
+// has none. Fixed for the page's lifetime, like isDesktopShell. Mobile's
+// nativeness is a CLIENT-side fact — the phone connects to a remote plain
+// `octo serve` that reports native:false — so it is detected here from the
+// injected global, never from /api/version (unlike nativeShell). The frontend's
+// native branches will read this alongside nativeShell as the native plugins
+// land; the plugins are built in the mobile/ Capacitor project.
+export const mobileShell =
+  typeof window !== 'undefined' &&
+  !!(window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.()
+
 // True when served by the Wails desktop shell (a NativeBridge is wired,
 // reported by /api/version's `native` flag). Lets the folder picker use the OS
 // dialog instead of the in-app directory tree. False under `octo serve`.

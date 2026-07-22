@@ -1,0 +1,15 @@
+{
+  "name": "octo-mobile",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "octo's iOS/Android client — a thin remote client of an octo serve instance, packaged with Capacitor around the existing web frontend. The native Noise/keys layer (Swift/Kotlin) is built separately; it needs the iOS/Android toolchains.",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.3",
+    "vitest": "^4.1.10"
+  }
+}
