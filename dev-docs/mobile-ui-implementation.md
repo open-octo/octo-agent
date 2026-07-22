@@ -48,12 +48,15 @@ explicitly avoided.
   `{#if}` split inside one Vite build: `web/src/lib` imports resolve normally
   and the shim/boot path is unchanged; the mobile shell is simply a component
   tree that never coexists with the desktop one.
-- **`stores.ts` split.** `stores.ts` mixes *data* stores (`sessions`,
+- **No `stores.ts` split.** `stores.ts` mixes *data* stores (`sessions`,
   `chatMessages`, `chatStreaming`, `questionModals`, …, reused on mobile) with
   *desktop-UI* stores (`sidebar`, `cmdkOpen`, `artifactsOpen`, …, unused on
-  mobile). Move the desktop-only ones to a `stores.ui.ts`; keep the data stores
-  in `stores.ts`. This is the one change to an existing web file — a no-risk
-  relocation — and it lets each view tree import only what it needs.
+  mobile). An earlier draft split the desktop-only ones into a `stores.ui.ts`;
+  that was dropped. Store definitions are side-effect-free, so the mobile tree
+  simply imports the data-store subset it needs and never references the
+  desktop-UI stores — splitting the file would rewrite every desktop
+  `from './stores'` import for no real benefit. No change to an existing web
+  file is required here.
 
 ## Component map
 
@@ -121,8 +124,8 @@ in a mobile-local `theme.css`.
 
 ## Delivery batches
 
-- **Batch 0 — groundwork.** `stores.ts` data/UI split; mobile `theme.css`;
-  `MobileApp` + `mobileShell` split skeleton.
+- **Batch 0 — groundwork.** Mobile `theme.css` (neutral tokens); `MobileApp`
+  shell + a `mobileShell` branch in `App.svelte`. (Done.)
 - **Batch 1 — session flow (usable first).** `TabBar` + `Fab` + `Feed`
   (three sections + `feedGroups.ts`) + `SessionCard` + `ChatDetail` (reusing
   Composer) + `DeviceBanner`. Result: view sessions, open a conversation, send
@@ -140,9 +143,6 @@ in a mobile-local `theme.css`.
 
 - **Build shape** — one Vite build with a top-level split (recommended) vs. a
   separate mobile entry.
-- **`stores.ts` split boundary** — which stores count as desktop-only; the
-  relocation is safe but must be drawn cleanly so the two view trees don't
-  cross-reference.
 - **Touch adaptation** — hit areas and long-press behavior on reused components
   (`Composer`, `ToolGroup`), walked through per component.
 - **Dark tokens** — the prototype is light-only; dark values are filled in
