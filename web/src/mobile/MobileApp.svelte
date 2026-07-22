@@ -6,6 +6,7 @@
   // dev-docs/mobile-ui-implementation.md).
   import './theme.css'
   import Feed from './Feed.svelte'
+  import ChatDetail from './ChatDetail.svelte'
   import { setActiveSession } from '../lib/stores'
 
   type Tab = 'chat' | 'tasks' | 'config' | 'settings'
@@ -23,15 +24,7 @@
   <main class="m-view">
     {#if tab === 'chat'}
       {#if openId}
-        <header class="m-dhead">
-          <button class="m-back" onclick={() => (openId = null)} aria-label="返回">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--m-text)" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
-          </button>
-          <span class="m-dtitle">对话详情</span>
-        </header>
-        <div class="m-scroll">
-          <div class="m-ph">ChatDetail · 批 1b 接入 Composer + 消息流</div>
-        </div>
+        <ChatDetail onBack={() => (openId = null)} />
       {:else}
         <Feed onOpen={openSession} />
       {/if}
@@ -94,30 +87,6 @@
     font-size: 24px;
     font-weight: 600;
     color: var(--m-text-strong);
-  }
-  .m-dhead {
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 6px 14px 12px;
-  }
-  .m-back {
-    width: 34px;
-    height: 34px;
-    border-radius: 50%;
-    border: none;
-    background: var(--m-surface);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    box-shadow: var(--m-shadow-card);
-  }
-  .m-dtitle {
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--m-text);
   }
   .m-scroll {
     flex: 1;
