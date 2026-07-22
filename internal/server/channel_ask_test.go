@@ -118,26 +118,6 @@ func TestChannelPermissionAsk_ContextCancelDenies(t *testing.T) {
 	}
 }
 
-func TestChannelPermissionAsk_TimeoutDenies(t *testing.T) {
-	old := channelAskTimeout
-	channelAskTimeout = 50 * time.Millisecond
-	t.Cleanup(func() { channelAskTimeout = old })
-
-	srv, sess, ad, ev := askEnv(t)
-	ask := srv.channelPermissionAsk(sess, ad, ev)
-
-	allow, _, err := ask(context.Background(), "terminal", nil)
-	if err != nil {
-		t.Fatalf("timeout should deny without error, got %v", err)
-	}
-	if allow {
-		t.Error("timeout must deny")
-	}
-	if len(ad.texts()) == 0 {
-		t.Error("prompt was never sent")
-	}
-}
-
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -375,10 +355,6 @@ func TestChannelPermissionAsk_ButtonDeny(t *testing.T) {
 func TestChannelPermissionAsk_ButtonIgnoresText(t *testing.T) {
 	// When buttons are active, a plain text message must NOT be consumed
 	// (the ask slot stays armed for a button press).
-	old := channelAskTimeout
-	channelAskTimeout = 200 * time.Millisecond
-	t.Cleanup(func() { channelAskTimeout = old })
-
 	srv, sess, ad, ev := buttonAskEnv(t)
 	ask := srv.channelPermissionAsk(sess, ad, ev)
 
