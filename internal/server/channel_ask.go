@@ -7,17 +7,11 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/open-octo/octo-agent/internal/app"
 	"github.com/open-octo/octo-agent/internal/channel"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
-
-// channelAskTimeout bounds how long an IM permission prompt waits for the
-// user's reply before denying. Matches the web confirmation modal's posture
-// of "no answer = no". Variable, not const, so tests can shorten it.
-var channelAskTimeout = 5 * time.Minute
 
 // imAffirmatives are the only replies that approve an IM permission prompt.
 // Anything else denies — over chat, silence and ambiguity must fail closed.
@@ -120,20 +114,21 @@ func (s *Server) channelPermissionAsk(sess *channel.Session, ad channel.Adapter,
 			}, ev.MessageID)
 		} else {
 			prompt := fmt.Sprintf(
-				"⚠️ Allow %s? Reply yes / 允许 to approve once, always / 总是允许 to stop asking for this exact call — any other reply denies; only the requester's reply counts. (Auto-deny in %s; /stop cancels the task.)",
-				what, channelAskTimeout)
+				"⚠️ Allow %s? Reply yes / 允许 to approve once, always / 总是允许 to stop asking for this exact call — any other reply denies; only the requester's reply counts. (/stop cancels the task.)",
+				what)
 			ad.SendText(ev.ChatID, prompt, ev.MessageID)
 		}
 
-		timer := time.NewTimer(channelAskTimeout)
-		defer timer.Stop()
+		// No timeout: an IM permission ask fires only in an attended chat, so it
+		// waits for a real reply and is released by cancelling the turn (/stop →
+		// ctx). This mirrors chatAsker.Ask (ask_user_question) below; both
+		// surfaces reach the asker only in an interactive session, since strict
+		// mode resolves Ask→Deny before the gate ever calls it.
 		select {
 		case text := <-replyCh:
 			return isAffirmative(text), isAlways(text), nil
 		case <-ctx.Done():
 			return false, false, ctx.Err()
-		case <-timer.C:
-			return false, false, nil
 		}
 	}
 }
@@ -198,9 +193,9 @@ func (c chatAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskRespon
 	}
 	c.ad.SendText(c.ev.ChatID, b.String(), c.ev.MessageID)
 
-	// No timeout: this is a clarifying question in an attended chat, not the
-	// permission gate above — waiting forever for an actual reply is correct
-	// here (see channelPermissionAsk for why that one keeps channelAskTimeout).
+	// No timeout: this is a clarifying question in an attended chat, so waiting
+	// for an actual reply is correct — released by cancelling the turn, same as
+	// the permission ask above.
 	select {
 	case text := <-replyCh:
 		return parseAskReply(text, q), nil

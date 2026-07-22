@@ -2122,7 +2122,14 @@ func (s *Server) requestConfirmation(ctx context.Context, sessionID, message, ki
 
 	s.wsHub.broadcast(sessionID, ev)
 
-	// Wait for response, timeout, or cancellation.
+	// Wait for the user's response or turn cancellation — no timeout. A
+	// permission ask only reaches this function in an interactive session
+	// (permission.Mode's applyMode resolves Ask→Deny in strict mode and
+	// Ask→Allow in auto mode before the gate calls the asker), so waiting
+	// indefinitely for a real answer is correct: an attended session may be
+	// approving from a phone that a push notification will summon after a
+	// nap. An unanswered ask is released by interrupting the turn (ctx
+	// cancellation), matching ask_user_question (wsAsker.Ask).
 	select {
 	case result := <-ch:
 		cleanup()
@@ -2130,9 +2137,6 @@ func (s *Server) requestConfirmation(ctx context.Context, sessionID, message, ki
 	case <-ctx.Done():
 		cleanup()
 		return "", fmt.Errorf("confirmation cancelled")
-	case <-time.After(5 * time.Minute):
-		cleanup()
-		return "", fmt.Errorf("confirmation timed out")
 	}
 }
 
