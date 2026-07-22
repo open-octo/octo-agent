@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -435,6 +436,52 @@ func (p *Page) Navigate(ctx context.Context, url string) error {
 // Chrome to finish its first navigation even to a local fixture page.
 var navigateLoadTimeout = 30 * time.Second
 
+// evalException mirrors the fields of a CDP Runtime.ExceptionDetails we surface
+// when an evaluated expression throws.
+type evalException struct {
+	Text         string `json:"text"`
+	LineNumber   int    `json:"lineNumber"`
+	ColumnNumber int    `json:"columnNumber"`
+	Exception    *struct {
+		ClassName   string          `json:"className"`
+		Description string          `json:"description"`
+		Value       json.RawMessage `json:"value"`
+	} `json:"exception"`
+}
+
+// message builds a human-readable one-liner from a thrown exception. CDP's
+// top-level Text is almost always just "Uncaught", so the useful detail lives
+// in the exception RemoteObject: Description carries an Error's message plus its
+// stack, Value carries a thrown non-Error primitive (e.g. `throw "boom"`).
+func (e *evalException) message() string {
+	detail := ""
+	if e.Exception != nil {
+		switch {
+		case e.Exception.Description != "":
+			// Description already includes the message; keep only its first
+			// line so the stack trace doesn't bury the actual error.
+			detail = strings.SplitN(e.Exception.Description, "\n", 2)[0]
+		case len(e.Exception.Value) > 0:
+			detail = strings.Trim(string(e.Exception.Value), `"`)
+		case e.Exception.ClassName != "":
+			detail = e.Exception.ClassName
+		}
+	}
+	text := strings.TrimSpace(e.Text)
+	switch {
+	case detail == "":
+		if text == "" {
+			return "unknown error"
+		}
+		return text
+	case text == "" || text == "Uncaught":
+		// Bare "Uncaught" adds nothing; the detail is the message.
+		return detail
+	default:
+		return text + ": " + detail
+	}
+}
+
 // Eval runs a JS expression in the page and unmarshals its return value into
 // out (pass nil to ignore the value). The expression may be a Promise.
 func (p *Page) Eval(ctx context.Context, expr string, out any) error {
@@ -450,15 +497,13 @@ func (p *Page) Eval(ctx context.Context, expr string, out any) error {
 		Result struct {
 			Value json.RawMessage `json:"value"`
 		} `json:"result"`
-		ExceptionDetails *struct {
-			Text string `json:"text"`
-		} `json:"exceptionDetails"`
+		ExceptionDetails *evalException `json:"exceptionDetails"`
 	}
 	if err := json.Unmarshal(res, &r); err != nil {
 		return err
 	}
 	if r.ExceptionDetails != nil {
-		return fmt.Errorf("eval threw: %s", r.ExceptionDetails.Text)
+		return fmt.Errorf("eval threw: %s", r.ExceptionDetails.message())
 	}
 	if out != nil && len(r.Result.Value) > 0 {
 		return json.Unmarshal(r.Result.Value, out)
