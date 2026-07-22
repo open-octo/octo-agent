@@ -2,6 +2,8 @@ package tunnel
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,28 +15,31 @@ import (
 )
 
 // This test exercises the host tunnel in isolation. The production code under
-// test is Tunnel (relay ↔ loopback /ws bridge). The relay, the phone, and the
-// local /ws are stubs speaking the same wire protocol — the tunnel cannot tell
-// them from the real thing. Because the test is in-package, the phone stub
-// reuses the real Noise session and frame codec instead of duplicating them.
+// test is Tunnel: it demultiplexes a device's shim frames onto the loopback
+// server — replaying http-req as HTTP calls and ws-open/msg as loopback /ws
+// streams. The relay, the phone, and the local server are stubs speaking the
+// same wire protocol. Because the test is in-package, the phone stub reuses the
+// real Noise session and both frame codecs.
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 
 func wsScheme(s *httptest.Server) string { return "ws" + strings.TrimPrefix(s.URL, "http") }
 
-// --- stub local /ws (the loopback target the tunnel bridges into) ---
+// --- stub loopback server: /api/echo (HTTP) + /ws (WebSocket echo) ---
 
-type stubWS struct {
-	srv      *httptest.Server
-	received chan string // plaintext the tunnel forwarded in from a phone
-	keys     chan string // access_key the tunnel presented on connect
-}
-
-func startStubWS(t *testing.T) *stubWS {
+func startStubLoopback(t *testing.T) *httptest.Server {
 	t.Helper()
-	s := &stubWS{received: make(chan string, 8), keys: make(chan string, 8)}
-	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.keys <- r.URL.Query().Get("access_key")
+	mux := http.NewServeMux()
+	// Echoes the method and request body back as JSON, so the test can prove a
+	// real HTTP round-trip happened through the tunnel.
+	mux.HandleFunc("/api/echo", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("content-type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintf(w, `{"method":%q,"body":%q}`, r.Method, string(body))
+	})
+	// Echoes each WebSocket message with a "reply-to:" prefix.
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		ws, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
@@ -45,18 +50,17 @@ func startStubWS(t *testing.T) *stubWS {
 			if err != nil {
 				return
 			}
-			s.received <- string(msg)
-			// Exercise the loopback→phone direction: reply to what we got.
 			if err := ws.WriteMessage(websocket.TextMessage, []byte("reply-to:"+string(msg))); err != nil {
 				return
 			}
 		}
-	}))
-	t.Cleanup(s.srv.Close)
-	return s
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
 }
 
-// --- stub relay (broker + bridge), minimal, speaking the wire protocol ---
+// --- stub relay (broker + bridge), minimal, speaking the relay wire protocol ---
 
 type stubRelay struct {
 	srv *httptest.Server
@@ -91,8 +95,6 @@ func startStubRelay(t *testing.T, tokens ...string) *stubRelay {
 	return r
 }
 
-// waitHost blocks until the host tunnel has connected — mirrors reality, where a
-// long-lived host is present before any phone pairs.
 func (r *stubRelay) waitHost(t *testing.T) {
 	t.Helper()
 	select {
@@ -129,7 +131,6 @@ func (r *stubRelay) handleHost(w http.ResponseWriter, req *http.Request) {
 	r.host = ws
 	r.mu.Unlock()
 	r.hostOnce.Do(func() { close(r.hostReady) })
-	// Host → device: route by the device the host named.
 	for {
 		f, err := readFrame(ws)
 		if err != nil {
@@ -160,14 +161,11 @@ func (r *stubRelay) handleDevice(w http.ResponseWriter, req *http.Request) {
 	r.deviceW[id] = &sync.Mutex{}
 	r.mu.Unlock()
 
-	// Announce to both ends, host first so it is ready before the phone's first
-	// handshake frame arrives.
 	_ = r.writeHost(frame{Type: frameDeviceJoined, Device: id})
 	r.deviceW[id].Lock()
 	_ = writeFrame(ws, frame{Type: framePaired, Device: id})
 	r.deviceW[id].Unlock()
 
-	// Device → host: stamp the device id so the host knows the source.
 	for {
 		f, err := readFrame(ws)
 		if err != nil {
@@ -178,14 +176,14 @@ func (r *stubRelay) handleDevice(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// --- mock phone (initiator), reusing the real session + wire ---
+// --- mock phone (initiator), reusing the real session + both frame codecs ---
 
 type mockPhone struct {
 	ws       *websocket.Conn
 	sess     *session
 	deviceID string
 	ready    chan struct{}
-	recvCh   chan string
+	recvCh   chan shimFrame
 }
 
 func (r *stubRelay) dialPhone(t *testing.T, token string) *mockPhone {
@@ -194,12 +192,12 @@ func (r *stubRelay) dialPhone(t *testing.T, token string) *mockPhone {
 	if err != nil {
 		t.Fatalf("dial phone: %v", err)
 	}
-	p := &mockPhone{ws: ws, ready: make(chan struct{}), recvCh: make(chan string, 8)}
-	go p.loop(t)
+	p := &mockPhone{ws: ws, ready: make(chan struct{}), recvCh: make(chan shimFrame, 16)}
+	go p.loop()
 	return p
 }
 
-func (p *mockPhone) loop(t *testing.T) {
+func (p *mockPhone) loop() {
 	for {
 		f, err := readFrame(p.ws)
 		if err != nil {
@@ -241,7 +239,11 @@ func (p *mockPhone) loop(t *testing.T) {
 			if err != nil {
 				return
 			}
-			p.recvCh <- string(pt)
+			sf, err := decodeShimFrame(pt)
+			if err != nil {
+				return
+			}
+			p.recvCh <- sf
 		}
 	}
 }
@@ -255,9 +257,13 @@ func (p *mockPhone) waitReady(t *testing.T) {
 	}
 }
 
-func (p *mockPhone) send(t *testing.T, plaintext string) {
+func (p *mockPhone) sendShim(t *testing.T, f shimFrame) {
 	t.Helper()
-	ct, err := p.sess.encrypt([]byte(plaintext))
+	data, err := f.encode()
+	if err != nil {
+		t.Fatalf("phone encode: %v", err)
+	}
+	ct, err := p.sess.encrypt(data)
 	if err != nil {
 		t.Fatalf("phone encrypt: %v", err)
 	}
@@ -266,71 +272,96 @@ func (p *mockPhone) send(t *testing.T, plaintext string) {
 	}
 }
 
-func (p *mockPhone) recv(t *testing.T) string {
+func (p *mockPhone) recvShim(t *testing.T) shimFrame {
 	t.Helper()
 	select {
-	case m := <-p.recvCh:
-		return m
+	case sf := <-p.recvCh:
+		return sf
 	case <-time.After(3 * time.Second):
-		t.Fatal("phone received nothing")
+		t.Fatal("phone received no frame")
 	}
-	return ""
+	return shimFrame{}
 }
 
-func recvWithin(t *testing.T, ch <-chan string) string {
+func newPairedPhone(t *testing.T) *mockPhone {
 	t.Helper()
-	select {
-	case v := <-ch:
-		return v
-	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting on channel")
-	}
-	return ""
-}
-
-// TestHostTunnel_BridgesBothDirections is the isolated proof: a phone pairs and
-// runs Noise with the host tunnel through a stub relay; a message the phone
-// encrypts arrives as plaintext at the local /ws, and the /ws's reply arrives
-// back at the phone decrypted. The tunnel decrypts and re-encrypts host-side —
-// the local server sees an ordinary /ws client.
-func TestHostTunnel_BridgesBothDirections(t *testing.T) {
-	stub := startStubWS(t)
+	stub := startStubLoopback(t)
 	relay := startStubRelay(t, "tok-1")
-
 	tun, err := New(Config{
 		RelayURL:    wsScheme(relay.srv),
 		TunnelID:    "tunnel-A",
 		PairTokens:  []string{"tok-1"},
-		LoopbackURL: wsScheme(stub.srv),
-		AccessKey:   "secret-key",
-		Logf:        func(string, ...any) {}, // quiet
+		LoopbackURL: wsScheme(stub) + "/ws",
+		Logf:        func(string, ...any) {},
 	})
 	if err != nil {
 		t.Fatalf("new tunnel: %v", err)
 	}
-
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	t.Cleanup(cancel)
 	go func() { _ = tun.Serve(ctx) }()
 
-	relay.waitHost(t) // a phone only pairs once the long-lived host is present
+	relay.waitHost(t)
 	phone := relay.dialPhone(t, "tok-1")
 	phone.waitReady(t)
+	return phone
+}
 
-	// Phone → local /ws: the plaintext must surface at the loopback verbatim.
-	phone.send(t, "REQ-hello-🔒")
-	if got := recvWithin(t, stub.received); got != "REQ-hello-🔒" {
-		t.Errorf("loopback received %q, want %q", got, "REQ-hello-🔒")
+// TestHostTunnel_HTTPRoundTrip proves an /api call tunnels: the phone's http-req
+// frame is replayed as a real loopback HTTP request and its response comes back
+// as an http-resp frame.
+func TestHostTunnel_HTTPRoundTrip(t *testing.T) {
+	phone := newPairedPhone(t)
+
+	phone.sendShim(t, shimFrame{
+		Kind:    shimHTTPReq,
+		ID:      "r1",
+		Method:  "POST",
+		Path:    "/api/echo",
+		Headers: map[string]string{"content-type": "application/json"},
+		Body:    strPtr(`{"hi":1}`),
+	})
+
+	resp := phone.recvShim(t)
+	if resp.Kind != shimHTTPResp || resp.ID != "r1" {
+		t.Fatalf("got %+v, want an http-resp for r1", resp)
 	}
-
-	// The tunnel presented the access key to the local /ws.
-	if got := recvWithin(t, stub.keys); got != "secret-key" {
-		t.Errorf("tunnel presented access_key %q, want %q", got, "secret-key")
+	if resp.Status != http.StatusCreated {
+		t.Errorf("status = %d, want %d", resp.Status, http.StatusCreated)
 	}
+	if resp.Body == nil || !strings.Contains(*resp.Body, `"method":"POST"`) || !strings.Contains(*resp.Body, `{\"hi\":1}`) {
+		t.Errorf("body = %v, want it to echo the POST + request body", resp.Body)
+	}
+}
 
-	// Local /ws → phone: the stub's reply must arrive decrypted at the phone.
-	if got := phone.recv(t); got != "reply-to:REQ-hello-🔒" {
-		t.Errorf("phone received %q, want %q", got, "reply-to:REQ-hello-🔒")
+// TestHostTunnel_WSRoundTrip proves a /ws stream tunnels: ws-open dials the
+// loopback /ws, ws-msg is delivered, and the server's reply comes back as a
+// ws-msg frame tagged with the same stream id.
+func TestHostTunnel_WSRoundTrip(t *testing.T) {
+	phone := newPairedPhone(t)
+
+	phone.sendShim(t, shimFrame{Kind: shimWSOpen, ID: "w1", Path: "/ws"})
+	phone.sendShim(t, shimFrame{Kind: shimWSMessage, ID: "w1", Data: "hello"})
+
+	msg := phone.recvShim(t)
+	if msg.Kind != shimWSMessage || msg.ID != "w1" {
+		t.Fatalf("got %+v, want a ws-msg for w1", msg)
+	}
+	if msg.Data != "reply-to:hello" {
+		t.Errorf("data = %q, want %q", msg.Data, "reply-to:hello")
+	}
+}
+
+// TestHostTunnel_WSErrorOnBadPath proves a ws-open to a path the loopback server
+// won't upgrade comes back as a ws-error, not a hang.
+func TestHostTunnel_WSErrorOnBadPath(t *testing.T) {
+	phone := newPairedPhone(t)
+
+	phone.sendShim(t, shimFrame{Kind: shimWSOpen, ID: "w9", Path: "/api/echo"})
+
+	f := phone.recvShim(t)
+	if f.Kind != shimWSError || f.ID != "w9" {
+		t.Fatalf("got %+v, want a ws-error for w9", f)
 	}
 }
 
