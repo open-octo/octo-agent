@@ -31,26 +31,19 @@ the server was down is not replayed on restart.
 | `directory` | no | Working directory the run executes in |
 | `notify` | no | IM chats to push each run's final reply (or failure) to |
 | `enabled` | yes | Whether the schedule is currently active |
-| `session_mode` | no | `"shared"` (default) reuses one session across runs — history accumulates. `"fresh"` creates a new session every run — clean transcript each time. |
 
 The prompt runs in its own session with no access to whatever conversation created the task, so it
 needs to be self-contained: what to do, where, and what the output should look like. Give it an
 explicit stop condition too — an open-ended prompt keeps the model re-verifying until the 30-minute
 timeout instead of finishing once the answer is "nothing to report."
 
-## Session modes
+## Sessions and grouping
 
-A task's `session_mode` controls whether runs share a session or start fresh:
-
-- **`shared`** (default) — every run reuses the same session, so the agent sees its prior work and
-  can build on it. Good for recurring reports that reference their own prior output.
-- **`fresh`** — every run creates a brand-new session with an empty transcript. Good for one-shot
-  reminders or tasks that should not see earlier runs. Previous sessions are kept on disk; the task
-  list links to the most recent one for traceability.
-
-The default is `"shared"` (and an empty value behaves as `"shared"`), so existing tasks are
-unaffected. Switch a task's mode at any time via `PATCH /api/tasks/{id}` — the change takes effect on
-the very next run. Any value other than `"shared"` or `"fresh"` is rejected with a 400 error.
+Every run creates a **new session**, titled with the run's local date and time (e.g.
+`2026-07-22 15:04`) and starting from an empty transcript — runs never share a session. Each task
+also gets a **session group** named after the task; all of its runs are filed under it, so they
+cluster together in the sidebar. The group is created with the task and renamed/deleted along with it
+(deleting the group only ungroups its sessions — the sessions themselves stay on disk).
 
 ## Cron expression — 6 fields, seconds first
 
@@ -78,15 +71,10 @@ whenever `octo serve` is up.
 
 ```bash
 # Create — returns {"id":"task_..."}. Any optional field (directory, model,
-# agent, notify, session_mode) goes right in the create body.
+# agent, notify) goes right in the create body.
 curl -s -X POST http://127.0.0.1:8088/api/tasks \
   -H 'Content-Type: application/json' \
   -d '{"name":"daily-report","cron":"0 0 9 * * *","prompt":"Summarize ...","directory":"/srv/repo"}'
-
-# Fresh-mode example — new session every run.
-curl -s -X POST http://127.0.0.1:8088/api/tasks \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"one-shot","cron":"15 10 18 8 *","prompt":"Remind me: ...","session_mode":"fresh"}'
 
 curl -s http://127.0.0.1:8088/api/tasks                # list
 curl -s -X DELETE http://127.0.0.1:8088/api/tasks/{id} # delete
@@ -100,8 +88,9 @@ curl -s -X PATCH http://127.0.0.1:8088/api/tasks/{id} \
   -d '{"prompt":"new prompt ...","enabled":false}'
 ```
 
-`PATCH /api/tasks/{id}` accepts `enabled`, `cron`, `prompt`, `model`, `agent`, `directory`, `notify`,
-`session_mode` — send only what you're changing. The Web UI's scheduler panel is a client of this
+`PATCH /api/tasks/{id}` accepts `name`, `enabled`, `cron`, `prompt`, `model`, `agent`, `directory`,
+`notify` — send only what you're changing; renaming via `name` also renames the task's session
+group. The Web UI's scheduler panel is a client of this
 same API, so a task created by `curl` shows up there and vice versa; the panel is also the
 recommended place to **smoke-test a new task's `Run` button** rather than triggering
 `/api/tasks/{id}/run` from a chat session — a run is a full agent turn (up to 30 minutes) in the
@@ -120,7 +109,6 @@ Write `~/.octo/tasks/<id>.json` directly (`id` format `task_<unix-millis>`; file
   "cron": "0 0 9 * * *",
   "prompt": "Summarize ...",
   "directory": "/srv/repo",
-  "session_mode": "shared",
   "enabled": true,
   "created_at": "2026-06-10T09:00:00Z"
 }
