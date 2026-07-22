@@ -74,8 +74,14 @@ cd mobile && npm install && npm run bundle-web
 npx cap add ios
 npx cap add android
 
-# 3. Copy the native plugin reference source into the platform projects
-#    (see native/README.md), then sync and open.
+# 3. Wire the native plugin into the generated projects (copies the reference
+#    source + patches Gradle / Manifest / Info.plist). Idempotent; re-run after
+#    any `cap add`. Add --local to inject the simulator/emulator cleartext
+#    switches (never for release). See native/README.md for what it does and the
+#    one manual step it leaves (iOS plugin-instance registration).
+npm run wire-native -- --local
+
+# 4. Sync and open.
 npx cap sync
 npx cap open ios       # Xcode
 npx cap open android   # Android Studio
