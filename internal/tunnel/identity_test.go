@@ -46,6 +46,24 @@ func TestLoadOrCreateIdentity_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestLoadOrCreateIdentity_CreatesParentDir covers a fresh machine where
+// ~/.octo does not exist yet (e.g. access key came from the environment, so
+// server startup never created it). Creating the identity must make the dir.
+func TestLoadOrCreateIdentity_CreatesParentDir(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "does-not-exist-yet", "tunnel.json")
+
+	id, err := LoadOrCreateIdentity(path)
+	if err != nil {
+		t.Fatalf("create in missing dir: %v", err)
+	}
+	if id.TunnelID() == "" {
+		t.Error("tunnel id is empty")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("identity file was not written: %v", err)
+	}
+}
+
 func TestDecodeIdentity_Rejects(t *testing.T) {
 	if _, err := decodeIdentity([]byte("{not json")); err == nil {
 		t.Error("malformed JSON should error")

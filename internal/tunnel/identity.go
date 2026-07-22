@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/flynn/noise"
 )
@@ -89,6 +90,11 @@ func createIdentity(path string) (*Identity, error) {
 	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return nil, err
+	}
+	// Don't rely on ~/.octo already existing: on a fresh machine the access key
+	// can come from OCTO_ACCESS_KEY, so server startup may not have created it.
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("tunnel: create state dir: %w", err)
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return nil, fmt.Errorf("tunnel: write identity: %w", err)
