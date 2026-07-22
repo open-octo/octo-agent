@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -22,12 +23,16 @@ func TestLoadOrCreateIdentity_RoundTrip(t *testing.T) {
 	}
 
 	// The identity file must not be world-readable — it holds a private key.
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("identity file perm = %o, want 600", perm)
+	// Windows does not honor Unix mode bits (os.WriteFile's 0o600 surfaces as
+	// 0666 there), so this invariant is only meaningful on Unix.
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat: %v", err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("identity file perm = %o, want 600", perm)
+		}
 	}
 
 	// Reloading returns the same identity, not a new one.
