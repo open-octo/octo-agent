@@ -12,34 +12,49 @@ export interface PairingInfo {
   token: string
 }
 
-const SCHEME = 'octo-pair:'
+const SCHEME = 'octo-pair'
 const VERSION = 'v1'
 
 /**
  * parsePairingURL parses an `octo-pair://v1?relay=&tid=&hk=&tok=` URL into typed
  * PairingInfo. It throws on a wrong scheme, an unsupported version, or a missing
  * field. The values were percent-encoded by the host (Go's url.Values.Encode),
- * and URL's searchParams decodes them back.
+ * and URLSearchParams decodes them back.
+ *
+ * It parses the string directly rather than via the WHATWG `URL` constructor:
+ * `octo-pair` is a non-special scheme, and engines disagree on whether the
+ * authority (which carries our version, e.g. //v1) is populated — Node fills
+ * `url.host`, but the Android System WebView leaves it empty, which silently
+ * broke version detection on-device. Manual parsing behaves identically
+ * everywhere, and it also tolerates the `//` being dropped when a custom-scheme
+ * deep link is delivered as an opaque URI.
  */
 export function parsePairingURL(raw: string): PairingInfo {
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    throw new Error('pairing: not a valid URL')
+  const trimmed = raw.trim()
+
+  const schemeMatch = /^([a-z][a-z0-9+.-]*):/i.exec(trimmed)
+  if (!schemeMatch || schemeMatch[1].toLowerCase() !== SCHEME) {
+    const got = schemeMatch ? `${schemeMatch[1]}:` : '(none)'
+    throw new Error(`pairing: expected ${SCHEME}: scheme, got ${got}`)
   }
-  if (url.protocol !== SCHEME) {
-    throw new Error(`pairing: expected ${SCHEME} scheme, got ${url.protocol}`)
+
+  // Everything after `octo-pair:`, with an optional `//` authority marker
+  // stripped. The version rides in the authority slot: octo-pair://v1?...
+  const afterScheme = trimmed.slice(schemeMatch[0].length).replace(/^\/\//, '')
+  const queryStart = afterScheme.search(/[?#]/)
+  const versionPart = (queryStart === -1 ? afterScheme : afterScheme.slice(0, queryStart)).replace(/\/+$/, '')
+  const queryStr = queryStart === -1 ? '' : afterScheme.slice(queryStart + 1).replace(/#.*$/, '')
+
+  if (versionPart !== VERSION) {
+    throw new Error(`pairing: unsupported version ${versionPart || '(none)'}`)
   }
-  // The version rides in the URL authority slot: octo-pair://v1?...
-  if (url.host !== VERSION) {
-    throw new Error(`pairing: unsupported version ${url.host || '(none)'}`)
-  }
+
+  const params = new URLSearchParams(queryStr)
   const info: PairingInfo = {
-    relay: url.searchParams.get('relay') ?? '',
-    tunnelId: url.searchParams.get('tid') ?? '',
-    hostKey: url.searchParams.get('hk') ?? '',
-    token: url.searchParams.get('tok') ?? '',
+    relay: params.get('relay') ?? '',
+    tunnelId: params.get('tid') ?? '',
+    hostKey: params.get('hk') ?? '',
+    token: params.get('tok') ?? '',
   }
   const required: Array<[string, string]> = [
     ['relay', info.relay],
