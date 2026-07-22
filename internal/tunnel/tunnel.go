@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flynn/noise"
 	"github.com/gorilla/websocket"
 )
 
@@ -34,9 +33,10 @@ type Config struct {
 	// exempt from the key check, so this is belt-and-suspenders, but it keeps
 	// the tunnel an ordinary key-authenticated client.
 	AccessKey string
-	// StaticKey is the host's Noise static keypair. Persisted in ~/.octo in
-	// production; the PoC generates a throwaway one (see New).
-	StaticKey noise.DHKey
+	// Identity supplies the host's Noise static keypair (and, if TunnelID is
+	// unset, the tunnel id). Load it with LoadOrCreateIdentity to persist it in
+	// ~/.octo. When nil, New generates a throwaway identity — the PoC/test path.
+	Identity *Identity
 	// Logf overrides the logger. nil uses log.Printf.
 	Logf func(string, ...any)
 }
@@ -62,18 +62,21 @@ type device struct {
 	loopback *websocket.Conn
 }
 
-// New builds a tunnel. If cfg.StaticKey is the zero value, a throwaway keypair
-// is generated (PoC behavior); production passes a persisted key.
+// New builds a tunnel. If cfg.Identity is nil, a throwaway one is generated
+// (PoC/test path); production passes a persisted identity.
 func New(cfg Config) (*Tunnel, error) {
-	if cfg.RelayURL == "" || cfg.TunnelID == "" || cfg.LoopbackURL == "" {
-		return nil, fmt.Errorf("tunnel: RelayURL, TunnelID and LoopbackURL are required")
-	}
-	if cfg.StaticKey.Private == nil {
+	if cfg.Identity == nil {
 		kp, err := generateKeypair()
 		if err != nil {
 			return nil, err
 		}
-		cfg.StaticKey = kp
+		cfg.Identity = &Identity{tunnelID: cfg.TunnelID, static: kp}
+	}
+	if cfg.TunnelID == "" {
+		cfg.TunnelID = cfg.Identity.tunnelID
+	}
+	if cfg.RelayURL == "" || cfg.TunnelID == "" || cfg.LoopbackURL == "" {
+		return nil, fmt.Errorf("tunnel: RelayURL, TunnelID and LoopbackURL are required")
 	}
 	logf := cfg.Logf
 	if logf == nil {
@@ -164,7 +167,7 @@ func (t *Tunnel) runOnce(ctx context.Context) error {
 func (t *Tunnel) handleRelayFrame(ctx context.Context, f frame) error {
 	switch f.Type {
 	case frameDeviceJoined:
-		s, err := newSession(false /* responder */, t.cfg.StaticKey)
+		s, err := newSession(false /* responder */, t.cfg.Identity.static)
 		if err != nil {
 			return err
 		}
