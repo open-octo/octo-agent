@@ -911,3 +911,122 @@ func TestRecorderCapturesAnchorFacts(t *testing.T) {
 		}
 	}
 }
+
+// TestRecorderRetargetsClickToInteractiveAncestor: the user clicks an svg icon
+// inside a button whose id is auto-generated (Popover7-toggle) — the recorded
+// event must land on the BUTTON (the element with semantics), selected via its
+// aria-label, not on the raw svg with a volatile-id-anchored path. Raw-target
+// recording produced steps with no label/role/hint: fragile and unhealable.
+func TestRecorderRetargetsClickToInteractiveAncestor(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>rt</title>
+<button id="Popover7-toggle" aria-label="Import"><span><svg id="ic" width="24" height="24" viewBox="0 0 24 24"><rect width="24" height="24"/></svg></span></button>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#ic", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	rec := NewRecorder(page)
+	if err := rec.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer rec.Stop()
+
+	if err := page.Click(ctx, "#ic"); err != nil {
+		t.Fatalf("click svg: %v", err)
+	}
+	var evs []RecordedEvent
+	for i := 0; i < 30; i++ {
+		time.Sleep(100 * time.Millisecond)
+		if evs = rec.Events(); len(evs) >= 1 {
+			break
+		}
+	}
+	if len(evs) == 0 {
+		t.Fatal("no events captured")
+	}
+	e := evs[0]
+	if e.Tag != "BUTTON" {
+		t.Fatalf("click must be retargeted to the button, got tag %q (selector %q)", e.Tag, e.Selector)
+	}
+	if e.Selector != `button[aria-label="Import"]` {
+		t.Fatalf("selector must use the aria-label, not the volatile id: %q", e.Selector)
+	}
+}
+
+// TestClickWaitsForAnimationToSettle: a trusted coordinate click on an element
+// that is still moving must wait until it settles — a click dispatched at a
+// mid-animation position lands where the element USED to be (on a popover's
+// backdrop, closing it). The page records the mousedown coordinates; they must
+// match the button's final resting center.
+func TestClickWaitsForAnimationToSettle(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>anim</title>
+<style>#b{position:absolute;top:10px;left:0;width:80px;height:30px}</style>
+<button id="b">Go</button>
+<script>
+window.downAt=null;
+document.addEventListener('mousedown',function(e){window.downAt={x:e.clientX,y:e.clientY};},true);
+// startAnim slides the button 300px right over ~1.1s — triggered by the test
+// right before it clicks, so the click provably races the animation. Driven by
+// setInterval, not requestAnimationFrame: headless Chrome throttles RAF on
+// pages it considers non-visible, which would leave the button motionless and
+// the test asserting nothing.
+window.startAnim=function(){
+  var start=Date.now();
+  var timer=setInterval(function(){
+    var t=Math.min(1,(Date.now()-start)/1100);
+    document.getElementById('b').style.left=(t*300)+'px';
+    if(t>=1) clearInterval(timer);
+  },40);
+  return true;
+};
+</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#b", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	// Start the slide, then click while the button is provably still moving.
+	var started bool
+	if err := page.Eval(ctx, "window.startAnim()", &started); err != nil || !started {
+		t.Fatalf("startAnim: %v", err)
+	}
+	if err := page.Click(ctx, "#b"); err != nil {
+		t.Fatalf("click: %v", err)
+	}
+	var down *struct{ X, Y float64 }
+	if err := page.Eval(ctx, "window.downAt", &down); err != nil || down == nil {
+		t.Fatalf("no mousedown recorded (err=%v)", err)
+	}
+	// Let the slide finish, then measure where the button came to rest.
+	time.Sleep(1500 * time.Millisecond)
+	var rest struct{ X, Y float64 }
+	if err := page.Eval(ctx, `(()=>{const r=document.getElementById('b').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`, &rest); err != nil {
+		t.Fatalf("rect: %v", err)
+	}
+	if rest.X < 250 {
+		t.Fatalf("animation never ran (rest x=%.1f) — the test would assert nothing", rest.X)
+	}
+	if dx := down.X - rest.X; dx > 3 || dx < -3 {
+		t.Fatalf("click landed at x=%.1f but the button rests at x=%.1f — dispatched mid-animation", down.X, rest.X)
+	}
+}

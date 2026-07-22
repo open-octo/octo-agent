@@ -1819,3 +1819,108 @@ func TestReplayAnchorsRefuseWrongElement(t *testing.T) {
 		t.Fatalf("nothing should have been clicked, got %q", hit)
 	}
 }
+
+// TestGenerateRecordingDistillRetriesOnInvalidSelector: the first distill
+// attempt uses a selector outside the baseline; instead of silently discarding
+// the refinement, the distiller is re-asked once with the violations named,
+// and a corrected second attempt is accepted.
+func TestGenerateRecordingDistillRetriesOnInvalidSelector(t *testing.T) {
+	ctx := context.Background()
+	events := []RecordedEvent{
+		{Type: "click", Selector: "#search", Tag: "BUTTON", Text: "Search"},
+	}
+	calls := 0
+	var secondPrompt string
+	gen := func(_ context.Context, _, user string) (string, error) {
+		calls++
+		if calls == 1 {
+			return "name: x\nsteps:\n  - {action: click, selector: '#invented'}\n", nil
+		}
+		secondPrompt = user
+		return "name: x\nsteps:\n  - {action: click, selector: '#search'}\n", nil
+	}
+	s := GenerateRecording(ctx, "demo", "", events, gen)
+	if calls != 2 {
+		t.Fatalf("expected exactly one retry (2 calls), got %d", calls)
+	}
+	if !strings.Contains(secondPrompt, "#invented") {
+		t.Fatalf("retry prompt must name the invalid selector, got: %q", secondPrompt)
+	}
+	if len(s.Steps) != 1 || s.Steps[0].Selector != "#search" {
+		t.Fatalf("corrected second attempt should be accepted: %+v", s.Steps)
+	}
+}
+
+// TestCollapseNewTabDetours: the click chain that spawned a new tab (whose
+// first navigation is tagged NewTab) is dropped — the navigate reaches the
+// same page directly, and the menu-hop clicks were the least replayable steps
+// (Zhihu: popover toggle → 写文章). State-bearing events end the walk-back,
+// and an untagged navigate (a tab the user opened by hand) keeps everything.
+func TestCollapseNewTabDetours(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "change", Selector: "#q", Tag: "INPUT", Value: "keep me"},
+		{Type: "click", Selector: "#menu-toggle", Tag: "BUTTON"},
+		{Type: "wait", WaitKind: "network"},
+		{Type: "click", Selector: "#menu-item", Tag: "BUTTON"},
+		{Type: "navigate", URL: "https://x/editor", NewTab: true},
+		{Type: "click", Selector: "#after", Tag: "BUTTON"},
+	}
+	s := CompileRecording("x", "", "", events)
+	var actions []string
+	for _, st := range s.Steps {
+		actions = append(actions, st.Action+":"+st.Selector+st.URL)
+	}
+	want := []string{"type:#q", "navigate:https://x/editor", "click:#after"}
+	if strings.Join(actions, "|") != strings.Join(want, "|") {
+		t.Fatalf("detour not collapsed to %v, got %v", want, actions)
+	}
+
+	// Untagged navigate (user-opened tab): the clicks must survive.
+	for i := range events {
+		events[i].NewTab = false
+	}
+	s2 := CompileRecording("x", "", "", events)
+	sawMenuClick := false
+	for _, st := range s2.Steps {
+		if st.Action == "click" && st.Selector == "#menu-toggle" {
+			sawMenuClick = true
+		}
+	}
+	if !sawMenuClick {
+		t.Fatal("untagged navigate must not eat preceding clicks")
+	}
+}
+
+// TestCompileUploadMergeThroughWaits: the chooser-opening click is usually
+// separated from the file-pick event by auto-inserted waits; the merge must
+// look back past them, and carry the click's hint/fingerprint onto the merged
+// upload step — otherwise the recording keeps a separate click AND an upload
+// targeting a hidden <input type=file> that has no clickable box to replay.
+func TestCompileUploadMergeThroughWaits(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "click", Selector: "div[role=\"button\"]", Tag: "DIV", Text: "选择文件", Role: "button", NeighborText: "文档最大 30MB"},
+		{Type: "wait", WaitKind: "network"},
+		{Type: "upload", Selector: "input[type=file]", Tag: "INPUT", Value: "C:\\fakepath\\x.md"},
+	}
+	s := CompileRecording("x", "", "", events)
+	var uploads, clicks int
+	var up Step
+	for _, st := range s.Steps {
+		switch st.Action {
+		case "upload":
+			uploads++
+			up = st
+		case "click":
+			clicks++
+		}
+	}
+	if uploads != 1 || clicks != 0 {
+		t.Fatalf("expected the click merged into one upload step, got %d uploads / %d clicks: %+v", uploads, clicks, s.Steps)
+	}
+	if up.Selector != "div[role=\"button\"]" {
+		t.Fatalf("upload must target the visible trigger, got %q", up.Selector)
+	}
+	if up.Anchors == nil || up.Anchors.Role != "button" || up.Anchors.NeighborText != "文档最大 30MB" {
+		t.Fatalf("upload must carry the click's fingerprint, got %+v", up.Anchors)
+	}
+}

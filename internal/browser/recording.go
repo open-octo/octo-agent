@@ -124,6 +124,7 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 	// the baseline clean and reduces the chance the distiller hallucinates a
 	// reason to keep a fumble.
 	events = compressEvents(events)
+	events = collapseNewTabDetours(events)
 	s := Recording{Name: name, Description: description}
 	if startURL != "" && startURL != "about:blank" {
 		s.Steps = append(s.Steps, navStep(startURL))
@@ -191,9 +192,22 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 			// error, never a masked prompt.
 			fp := addParam("file", "", "path to the file to upload", false)
 			up := Step{Action: "upload", Frame: e.Frame, Selector: e.Selector, Value: "{{" + fp + "}}", Label: e.Text}
-			if n := len(s.Steps); n > 0 && s.Steps[n-1].Action == "click" {
-				up.Selector, up.Frame, up.Label = s.Steps[n-1].Selector, s.Steps[n-1].Frame, s.Steps[n-1].Label
-				s.Steps = s.Steps[:n-1]
+			// The trigger click is often separated from the file-pick event by
+			// auto-inserted waits (the chooser click fires the network probe /
+			// modal observer), so look back PAST wait steps for it — requiring
+			// strict adjacency left both the click AND an input-targeting upload
+			// step in the recording, and a hidden <input type=file> has no
+			// clickable box to replay against. Carry the click's hint and
+			// fingerprint too, so the merged step resolves and heals like the
+			// click would have.
+			j := len(s.Steps) - 1
+			for j >= 0 && s.Steps[j].Action == "wait" {
+				j--
+			}
+			if j >= 0 && s.Steps[j].Action == "click" {
+				c := s.Steps[j]
+				up.Selector, up.Frame, up.Label, up.Hint, up.Anchors = c.Selector, c.Frame, c.Label, c.Hint, c.Anchors
+				s.Steps = append(s.Steps[:j], s.Steps[j+1:]...)
 			}
 			s.Steps = append(s.Steps, up)
 			continue
@@ -545,6 +559,32 @@ func hintFromSelector(sel string) string {
 
 var selectorAttrRe = regexp.MustCompile(`\[(?:name|aria-label|data-testid|data-test)="([^"]+)"\]`)
 
+// collapseNewTabDetours drops the click chain whose only outcome was opening a
+// new tab: the tab's first navigation (tagged NewTab by the recorder, and only
+// for tabs the PAGE spawned — the target had an opener) reaches the same URL
+// directly, so replaying the menu hops that spawned it is pure fragility (the
+// Zhihu detour: homepage → popover toggle → "写文章" → new tab; those popover
+// clicks were the least replayable steps in the recording). Walk back over
+// clicks and waits only — a type/select/upload/enter/download/navigate is
+// state-bearing and ends the detour. A tab the USER opened by hand carries no
+// opener, is never tagged, and keeps its preceding clicks.
+func collapseNewTabDetours(events []RecordedEvent) []RecordedEvent {
+	out := make([]RecordedEvent, 0, len(events))
+	for _, e := range events {
+		if e.Type == "navigate" && e.NewTab {
+			for len(out) > 0 {
+				t := out[len(out)-1].Type
+				if t != "click" && t != "wait" {
+					break
+				}
+				out = out[:len(out)-1]
+			}
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
 // dedupeConsecutiveEvents drops a raw event identical to its immediate
 // predecessor (same type/selector/frame/value/tag) — a double-fire or a
 // framework's re-dispatched event. navigate is exempt (CompileRecording collapses
@@ -613,57 +653,69 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 		"Output ONLY the recording as YAML (keys: name, description, params, outputs, steps), no prose, no code fences."
 	user := fmt.Sprintf("Baseline (the only valid selectors are those here):\n%s\n\nRaw events in order:\n%s\n\nReturn the cleaned recording YAML.", baseYAML, renderTrace(events))
 
-	out, err := gen(ctx, system, user)
-	if err != nil {
-		slog.Warn("browser: recording distill failed, keeping deterministic baseline", "recording", name, "err", err)
-		return base
-	}
-	refined, err := ParseRecording([]byte(stripFences(out)))
-	if err != nil || len(refined.Steps) == 0 {
-		slog.Warn("browser: recording distill output unusable, keeping deterministic baseline steps", "recording", name, "err", err, "steps", len(refined.Steps))
-		return withDescription(base, refined.Description)
-	}
-	refined.Name = name
-	// The distiller rewrites the param list from prose and can drop the secret
-	// marker; backfill it by name from the deterministic baseline so a password
-	// param is still secret after distillation.
-	secretParams := map[string]bool{}
-	for _, p := range base.Params {
-		if p.Secret {
-			secretParams[p.Name] = true
+	prompt := user
+	for attempt := 0; ; attempt++ {
+		out, err := gen(ctx, system, prompt)
+		if err != nil {
+			slog.Warn("browser: recording distill failed, keeping deterministic baseline", "recording", name, "err", err)
+			return base
 		}
-	}
-	for i := range refined.Params {
-		if secretParams[refined.Params[i].Name] {
-			refined.Params[i].Secret = true
+		refined, err := ParseRecording([]byte(stripFences(out)))
+		if err != nil || len(refined.Steps) == 0 {
+			slog.Warn("browser: recording distill output unusable, keeping deterministic baseline steps", "recording", name, "err", err, "steps", len(refined.Steps))
+			return withDescription(base, refined.Description)
 		}
-	}
-	// The distiller may also drop a secret param's DECLARATION while keeping
-	// its {{placeholder}} in a step. Left alone, replay would treat it as a
-	// non-secret missing param — the plaintext-in-conversation leak the secret
-	// marker exists to close. Re-attach the baseline declaration for any
-	// baseline secret param the refined steps still reference.
-	declared := map[string]bool{}
-	for _, p := range refined.Params {
-		declared[p.Name] = true
-	}
-	for _, p := range base.Params {
-		if !p.Secret || declared[p.Name] {
-			continue
+		refined.Name = name
+		// The distiller rewrites the param list from prose and can drop the secret
+		// marker; backfill it by name from the deterministic baseline so a password
+		// param is still secret after distillation.
+		secretParams := map[string]bool{}
+		for _, p := range base.Params {
+			if p.Secret {
+				secretParams[p.Name] = true
+			}
 		}
-		if paramReferenced(&refined, p.Name) {
-			refined.Params = append(refined.Params, p)
+		for i := range refined.Params {
+			if secretParams[refined.Params[i].Name] {
+				refined.Params[i].Secret = true
+			}
 		}
+		// The distiller may also drop a secret param's DECLARATION while keeping
+		// its {{placeholder}} in a step. Left alone, replay would treat it as a
+		// non-secret missing param — the plaintext-in-conversation leak the secret
+		// marker exists to close. Re-attach the baseline declaration for any
+		// baseline secret param the refined steps still reference.
+		declared := map[string]bool{}
+		for _, p := range refined.Params {
+			declared[p.Name] = true
+		}
+		for _, p := range base.Params {
+			if !p.Secret || declared[p.Name] {
+				continue
+			}
+			if paramReferenced(&refined, p.Name) {
+				refined.Params = append(refined.Params, p)
+			}
+		}
+		if bad := invalidSelectors(refined, base); len(bad) > 0 {
+			// Precision guard: the model used selectors it wasn't given. Name
+			// the violations and let it correct itself ONCE — a wholesale
+			// silent fallback threw away otherwise-good refinements (observed:
+			// both distill attempts of a real recording were discarded, so the
+			// cleanup pass never ran at all). On the second miss the refined
+			// steps stay untrustworthy; the prose description still isn't —
+			// keep it so the recordings manifest isn't left with a bare name.
+			if attempt == 0 {
+				slog.Warn("browser: recording distill used selectors not in the recording, retrying with violations named", "recording", name, "invalid", strings.Join(bad, " | "))
+				prompt = user + "\n\nYour previous attempt was REJECTED because these selectors do not appear in the baseline:\n" + strings.Join(bad, "\n") + "\nReturn the cleaned recording again, using ONLY selectors copied verbatim from the baseline."
+				continue
+			}
+			slog.Warn("browser: recording distill used a selector not in the recording, keeping deterministic baseline steps", "recording", name)
+			return withDescription(base, refined.Description)
+		}
+		backfillAnchors(&refined, base)
+		return refined
 	}
-	if !selectorsSubset(refined, base) {
-		// Precision guard: the model used a selector it wasn't given. The refined
-		// steps are untrustworthy, but the prose description still is — keep it so
-		// the recordings manifest isn't left with a bare name.
-		slog.Warn("browser: recording distill used a selector not in the recording, keeping deterministic baseline steps", "recording", name)
-		return withDescription(base, refined.Description)
-	}
-	backfillAnchors(&refined, base)
-	return refined
 }
 
 // backfillAnchors re-attaches each refined step's Anchors from the baseline step
@@ -724,17 +776,30 @@ func stripFences(s string) string {
 // selectorsSubset reports whether every selector/frame the refined recording uses
 // was present in the baseline (the captured ground truth).
 func selectorsSubset(refined, base Recording) bool {
+	return len(invalidSelectors(refined, base)) == 0
+}
+
+// invalidSelectors lists the selectors/frames the refined recording uses that
+// the baseline never captured — the violations to feed back to the distiller
+// on its retry, so it can correct them instead of the whole refinement being
+// silently discarded.
+func invalidSelectors(refined, base Recording) []string {
 	allowed := map[string]bool{"": true}
 	for _, st := range base.Steps {
 		allowed[st.Selector] = true
 		allowed[st.Frame] = true
 	}
+	var bad []string
+	seen := map[string]bool{}
 	for _, st := range refined.Steps {
-		if !allowed[st.Selector] || !allowed[st.Frame] {
-			return false
+		for _, sel := range []string{st.Selector, st.Frame} {
+			if !allowed[sel] && !seen[sel] {
+				seen[sel] = true
+				bad = append(bad, sel)
+			}
 		}
 	}
-	return true
+	return bad
 }
 
 // StepDigest renders a compact one-line summary of what a replay does, e.g.

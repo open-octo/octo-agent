@@ -38,6 +38,7 @@ type RecordedEvent struct {
 	AltSelectors []string `json:"alt_selectors,omitempty"` // alternate selectors (different strategies than Selector)
 	Role         string   `json:"role,omitempty"`          // element's role attribute
 	NeighborText string   `json:"neighbor_text,omitempty"` // nearest stable label-like text (label / preceding sibling)
+	NewTab       bool     `json:"new_tab,omitempty"`       // navigate: the first load of a tab the page itself opened (has an opener)
 }
 
 // Recorder captures a user's actions on a page by injecting a DOM listener that
@@ -300,18 +301,31 @@ const captureScript = `(function(){
     try{ var of=window.fetch; if(of){ window.fetch=function(){ inc(); return of.apply(this,arguments).then(function(r){dec();return r;},function(e){dec();throw e;}); }; } }catch(_){}
     try{ var send=XMLHttpRequest.prototype.send; XMLHttpRequest.prototype.send=function(){ inc(); try{ this.addEventListener('loadend',function(){dec();},{once:true}); }catch(_){ dec(); } return send.apply(this,arguments); }; }catch(_){}
   }
+  // volatileId flags auto-generated ids that change per mount/session —
+  // react-aria/radix/headlessui counters, "Popover12"-style numbered
+  // components, ":r3:"-style useId output, long numeric runs. Anchoring a
+  // recording on one produces a selector that is dead by the next session
+  // (observed: Zhihu's #Popover6-content / #react-aria-2-tabpanel-…). A
+  // volatile id is only DEMOTED — the attribute/path strategies and the
+  // fingerprint alternates still identify the element.
+  function volatileId(id){
+    return /^(react-aria|radix|headlessui|downshift|floating-ui|aria)[-:]/i.test(id)
+      || /^:r[0-9a-z]+:$/i.test(id)
+      || /^[A-Za-z]+\d+([-_][A-Za-z0-9]+)*$/.test(id)
+      || /\d{4,}/.test(id);
+  }
   function attrSel(el){
     if(!el || el.nodeType!==1) return '';
-    if(el.id) return '#'+CSS.escape(el.id);
+    if(el.id && !volatileId(el.id)) return '#'+CSS.escape(el.id);
     for(var i=0;i<4;i++){var a=['data-testid','data-test','name','aria-label'][i];var v=el.getAttribute&&el.getAttribute(a);if(v)return el.tagName.toLowerCase()+'['+a+'=\"'+CSS.escape(v)+'\"]';}
     return '';
   }
   // pathSel walks up from el building a selector path, one part per node via
-  // nodeFn — anchored at the nearest id-bearing ancestor when one exists.
+  // nodeFn — anchored at the nearest STABLE-id-bearing ancestor when one exists.
   function pathSel(el, nodeFn){
     var parts=[], node=el, depth=0;
     while(node && node.nodeType===1 && node.tagName!=='BODY' && depth<6){
-      if(node.id){ parts.unshift('#'+CSS.escape(node.id)); return parts.join(' > '); }
+      if(node.id && !volatileId(node.id)){ parts.unshift('#'+CSS.escape(node.id)); return parts.join(' > '); }
       parts.unshift(nodeFn(node)); node=node.parentElement; depth++;
     }
     return parts.join(' > ');
@@ -414,8 +428,26 @@ const captureScript = `(function(){
     _lastWaitAt=now;
     try{ window.__octoRecord(JSON.stringify({type:'wait', wait_kind:kind, selector:selector||'', timeout_ms:timeout||10000, url:location.href})); }catch(_){}
   }
+  // interactiveAncestor retargets an event from its raw target (an svg path, a
+  // text span, a bare wrapper div) to the nearest interactive ancestor — the
+  // element carrying the semantics (tag, aria-label, role, text) that a stable
+  // selector, a scoring fingerprint and the self-heal prompt all need.
+  // Recording the raw target produced steps like "click div:nth-of-type(4)"
+  // with no label/role/hint: fragile to replay and impossible to heal.
+  var INTERACTIVE_ROLES={button:1,link:1,menuitem:1,menuitemcheckbox:1,menuitemradio:1,tab:1,option:1,checkbox:1,radio:1,'switch':1,combobox:1,treeitem:1};
+  function interactiveAncestor(el){
+    var node=el, depth=0;
+    while(node && node.nodeType===1 && node!==document.body && depth<6){
+      var tag=node.tagName;
+      if(tag==='BUTTON'||tag==='A'||tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA'||tag==='SUMMARY'||tag==='OPTION') return node;
+      var role=node.getAttribute && node.getAttribute('role');
+      if(role && INTERACTIVE_ROLES[role]) return node;
+      node=node.parentElement; depth++;
+    }
+    return el;
+  }
   function report(type, e){
-    try{var el=e.target; var fr=''; try{ if(window.frameElement) fr=sel(window.frameElement); }catch(_2){}
+    try{var el=(type==='click')?interactiveAncestor(e.target):e.target; var fr=''; try{ if(window.frameElement) fr=sel(window.frameElement); }catch(_2){}
       var field=((el.placeholder||el.name||(el.getAttribute?el.getAttribute('aria-label'):'')||el.id||'')+'').trim().slice(0,40);
       var secret=(el.type==='password');
       var role=''; try{ role=el.getAttribute('role')||''; }catch(_3){}
@@ -539,6 +571,7 @@ func (r *Recorder) Start(ctx context.Context) error {
 					TargetInfo struct {
 						TargetID string `json:"targetId"`
 						Type     string `json:"type"`
+						OpenerID string `json:"openerId"`
 					} `json:"targetInfo"`
 				}
 				if json.Unmarshal(ev.Params, &a) != nil || a.SessionID == "" {
@@ -558,7 +591,7 @@ func (r *Recorder) Start(ctx context.Context) error {
 					// recording started are deliberately NOT instrumented: switching
 					// to one leaves no replayable step, so its events would compile
 					// into a skill that replays on the wrong page.
-					r.instrumentPageSession(ictx, a.SessionID, a.TargetInfo.TargetID)
+					r.instrumentPageSession(ictx, a.SessionID, a.TargetInfo.TargetID, a.TargetInfo.OpenerID != "")
 				}
 				// Resume the target regardless of type or instrumentation outcome —
 				// waitForDebuggerOnStart keeps it frozen until this call, and a
@@ -573,7 +606,7 @@ func (r *Recorder) Start(ctx context.Context) error {
 	// multi-page demonstration replays from the right pages — otherwise the only
 	// navigate step is the synthesized start URL, and the recording loses every
 	// page the user moved to.
-	r.watchNavigations(ctx, p.sessionID)
+	r.watchNavigations(ctx, p.sessionID, false)
 	return nil
 }
 
@@ -590,7 +623,7 @@ func (r *Recorder) Start(ctx context.Context) error {
 // cancelled the tab's first navigation irrecoverably — the destination isn't
 // recorded anywhere yet — or swapped the document out from under the user's
 // first click. The freeze is the mechanism CDP provides for exactly this.)
-func (r *Recorder) instrumentPageSession(ctx context.Context, session, targetID string) {
+func (r *Recorder) instrumentPageSession(ctx context.Context, session, targetID string, hasOpener bool) {
 	// Claim by TARGET, not by session: one tab can surface as several sessions
 	// of the same client (auto-attach at creation plus a later explicit
 	// Target.attachToTarget), and a page-side binding call notifies every
@@ -619,7 +652,11 @@ func (r *Recorder) instrumentPageSession(ctx context.Context, session, targetID 
 	waits = append(waits, cli.callAsync(session, "Runtime.addBinding", map[string]any{"name": "__octoRecord"}))
 	waits = append(waits, cli.callAsync(session, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": captureScript}))
 	r.watchBindingEvents(session, "")
-	r.watchNavigations(ctx, session)
+	// hasOpener distinguishes a tab the PAGE spawned (its first navigation is
+	// tagged NewTab so CompileRecording can collapse the click detour that
+	// opened it) from a tab the USER opened by hand (Cmd+T + typed URL — the
+	// preceding clicks are unrelated and must survive).
+	r.watchNavigations(ctx, session, hasOpener)
 	waits = append(waits, cli.callAsync(session, "Runtime.runIfWaitingForDebugger", nil))
 	for _, wait := range waits {
 		_, _ = wait(ctx) // best-effort, matching the attach handler's contract
@@ -641,7 +678,7 @@ func (r *Recorder) instrumentPageSession(ctx context.Context, session, targetID 
 // instrumentPageSession's queued-setup sequence; until it resolves the filter
 // admits all same-document navs, the same fallback as a failed lookup).
 // Consecutive repeats collapse.
-func (r *Recorder) watchNavigations(ctx context.Context, session string) {
+func (r *Recorder) watchNavigations(ctx context.Context, session string, markFirstNav bool) {
 	var topMu sync.Mutex
 	topFrameID := ""
 	waitFrameTree := r.page.cli.callAsync(session, "Page.getFrameTree", nil)
@@ -670,6 +707,7 @@ func (r *Recorder) watchNavigations(ctx context.Context, session string) {
 	r.unsubs = append(r.unsubs, navUnsub, spaUnsub)
 	r.mu.Unlock()
 
+	firstNav := markFirstNav
 	recordNav := func(u string) {
 		if u == "" || u == "about:blank" {
 			return
@@ -680,7 +718,12 @@ func (r *Recorder) watchNavigations(ctx context.Context, session string) {
 			r.mu.Unlock()
 			return // collapse the initial-load echo / repeat
 		}
-		r.events = append(r.events, RecordedEvent{Type: "navigate", URL: u})
+		ev := RecordedEvent{Type: "navigate", URL: u}
+		if firstNav {
+			ev.NewTab = true
+			firstNav = false
+		}
+		r.events = append(r.events, ev)
 		r.mu.Unlock()
 	}
 

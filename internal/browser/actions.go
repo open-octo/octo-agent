@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -453,6 +454,45 @@ func (p *Page) elementCenter(ctx context.Context, selector string) (point, error
 	return point{X: res.X, Y: res.Y}, nil
 }
 
+// clickStabilizeTimeout caps how long Click waits for the target to stop
+// moving before dispatching anyway. A var so tests can tighten it.
+var clickStabilizeTimeout = 1500 * time.Millisecond
+
+// stableElementCenter samples the element's center until two consecutive
+// samples agree within a pixel — the actionability gate for trusted clicks.
+// A coordinate click computed while the element is still animating (a Popover
+// menu scaling open, a modal sliding in) lands where the element USED to be:
+// on the backdrop, which closes the menu and derails everything after it.
+// Best-effort by design: if the element never settles before the timeout (an
+// infinite pulse animation), click the last observed position rather than fail.
+func (p *Page) stableElementCenter(ctx context.Context, selector string) (point, error) {
+	prev, err := p.elementCenter(ctx, selector)
+	if err != nil {
+		return point{}, err
+	}
+	deadline := time.Now().Add(clickStabilizeTimeout)
+	for {
+		select {
+		case <-ctx.Done():
+			return prev, nil
+		case <-time.After(80 * time.Millisecond):
+		}
+		cur, err := p.elementCenter(ctx, selector)
+		if err != nil {
+			// The element vanished between samples (menu re-rendered its
+			// items); click the last place it was seen — matching the old
+			// single-sample behavior rather than failing a click that may
+			// still land fine.
+			return prev, nil
+		}
+		stable := math.Abs(cur.X-prev.X) < 1 && math.Abs(cur.Y-prev.Y) < 1
+		if stable || !time.Now().Before(deadline) {
+			return cur, nil
+		}
+		prev = cur
+	}
+}
+
 // Click performs a trusted browser-level click at the element's center.
 // Trusted input (vs a JS .click()) counts as a real user gesture, which some
 // flows — file dialogs, download buttons — require, and is less detectable.
@@ -462,7 +502,7 @@ func (p *Page) Click(ctx context.Context, selector string) error {
 			return cp.Click(ctx, elem)
 		}
 	}
-	pt, err := p.elementCenter(ctx, selector)
+	pt, err := p.stableElementCenter(ctx, selector)
 	if err != nil {
 		return err
 	}
