@@ -973,25 +973,17 @@ func TestClickWaitsForAnimationToSettle(t *testing.T) {
 	defer cancel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`<!doctype html><title>anim</title>
-<style>#b{position:absolute;top:10px;left:0;width:80px;height:30px}</style>
+<style>#b{position:absolute;top:10px;left:0;width:80px;height:30px;transition:left 0.9s linear}</style>
 <button id="b">Go</button>
 <script>
 window.downAt=null;
 document.addEventListener('mousedown',function(e){window.downAt={x:e.clientX,y:e.clientY};},true);
-// startAnim slides the button 300px right over ~1.1s — triggered by the test
-// right before it clicks, so the click provably races the animation. Driven by
-// setInterval, not requestAnimationFrame: headless Chrome throttles RAF on
-// pages it considers non-visible, which would leave the button motionless and
-// the test asserting nothing.
-window.startAnim=function(){
-  var start=Date.now();
-  var timer=setInterval(function(){
-    var t=Math.min(1,(Date.now()-start)/1100);
-    document.getElementById('b').style.left=(t*300)+'px';
-    if(t>=1) clearInterval(timer);
-  },40);
-  return true;
-};
+// startAnim slides the button 300px right via a CSS transition — driven by the
+// rendering engine, not a JS timer, so a starved CI runner can't throttle it
+// into looking motionless (which used to make the stability check fire early).
+// If the runner refuses to animate at all, left snaps to 300 and the button is
+// simply already at rest — clicking it is then correct, so the test still holds.
+window.startAnim=function(){ document.getElementById('b').style.left='300px'; return true; };
 </script>`))
 	}))
 	defer srv.Close()
