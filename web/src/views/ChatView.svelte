@@ -2215,6 +2215,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
    the evenly-spaced column. */
 .msg-rail-node {
   position: relative; width: 20px; height: 8px;
+  /* Allow shrinking below the 8px hit area on extremely short panes with many
+     nodes (flex's min-height:auto would otherwise floor each node at 8px and
+     let the column overflow the pane again). Dots may overlap; the column
+     stays bounded. */
+  min-height: 0;
   padding: 0; margin: 0; border: none; background: none;
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; pointer-events: auto; z-index: 2;
