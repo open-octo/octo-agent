@@ -515,6 +515,54 @@ func (p *Page) stableElementPoint(ctx context.Context, selector string, fx, fy f
 	}
 }
 
+// waitEnabled polls until the element (or a close ancestor) stops advertising
+// a disabled/loading state: the native disabled property, aria-disabled, or —
+// the web-component convention — any attribute matching *-disabled/*-loading
+// valued "" or "true" (observed: Xiaohongshu's <xhs-publish-btn
+// submit-disabled="true" submit-loading="true"> — a click dispatched before
+// those cleared was swallowed, and the recorded demonstration only worked
+// because a human never clicks that fast). Best-effort: on timeout the click
+// proceeds anyway, matching the old behavior.
+func (p *Page) waitEnabled(ctx context.Context, selector string, timeout time.Duration) {
+	frame, elem := splitFrame(selector)
+	if frame != "" {
+		if cp, ok := p.oopifPage(ctx, frame); ok {
+			cp.waitEnabled(ctx, elem, timeout)
+			return
+		}
+	}
+	check := fmt.Sprintf(`(()=>{
+	  let el; try { el = %s; } catch(e) { return false; }
+	  if (!el) return false;
+	  for (let n = el, i = 0; n && n.nodeType === 1 && i < 4; n = n.parentElement, i++) {
+	    if (n.disabled === true) return true;
+	    const attrs = n.getAttributeNames ? n.getAttributeNames() : [];
+	    for (const a of attrs) {
+	      if (/(^|[-_:])(disabled|loading)$/i.test(a)) {
+	        const v = n.getAttribute(a);
+	        if (v === "" || v === "true") return true;
+	      }
+	    }
+	  }
+	  return false;
+	})()`, elemRefJS(frame, elem))
+	deadline := time.Now().Add(timeout)
+	for {
+		var disabled bool
+		if err := p.Eval(ctx, check, &disabled); err != nil || !disabled {
+			return
+		}
+		if ctx.Err() != nil || !time.Now().Before(deadline) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
+}
+
 // Click performs a trusted browser-level click at the element's center.
 // Trusted input (vs a JS .click()) counts as a real user gesture, which some
 // flows — file dialogs, download buttons — require, and is less detectable.

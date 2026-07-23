@@ -2281,3 +2281,51 @@ setTimeout(function(){
 		t.Fatalf("expected the re-click to land exactly once after hydration, got %d", published)
 	}
 }
+
+// TestReplayWaitsForDisabledStateToClear: a click on an element still
+// advertising a disabled/loading state (native disabled, aria-disabled, or a
+// web-component *-disabled attribute — Xiaohongshu's <xhs-publish-btn
+// submit-disabled="true">) is swallowed silently; replay must wait for the
+// state to clear before dispatching. The demonstration only ever worked
+// because no human clicks faster than the component enables itself.
+func TestReplayWaitsForDisabledStateToClear(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>dis</title>
+<div id="host" submit-disabled="true" style="width:200px;height:40px">
+  <button id="pub" style="width:100%;height:100%">发布</button>
+</div>
+<script>
+window.published=0;
+document.getElementById('pub').addEventListener('click',function(){
+  if(document.getElementById('host').getAttribute('submit-disabled')==='true') return; // component guard
+  window.published++;
+});
+setTimeout(function(){ document.getElementById('host').setAttribute('submit-disabled','false'); }, 1200);
+</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+
+	recording := &Recording{Name: "d", Steps: []Step{
+		{Action: "navigate", URL: srv.URL},
+		{Action: "click", Selector: "#pub"},
+	}}
+	if _, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 5 * time.Second, Browser: b}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	var published int
+	if err := page.Eval(ctx, "window.published", &published); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if published != 1 {
+		t.Fatalf("click must wait out the disabled state and land once, got %d", published)
+	}
+}

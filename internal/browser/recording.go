@@ -1585,6 +1585,11 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return page, err
 		}
+		// A resolved element can still be REFUSING input: disabled/loading state
+		// (native, aria, or *-disabled/*-loading web-component attributes)
+		// swallows the click silently, and the idle-wait after it passes on a
+		// page that did nothing. Wait for it to become actionable first.
+		page.waitEnabled(ctx, target, waitTimeout)
 		// Follow a new tab the click may open (target=_blank / SPA window.open).
 		gen0 := page.netActivityGen(ctx)
 		np, err := clickTarget(ctx, b, page, target, step.ClickX, step.ClickY)
