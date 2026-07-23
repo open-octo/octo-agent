@@ -1285,3 +1285,46 @@ setTimeout(function(){
 		t.Fatalf("click must wait for the custom element to upgrade (:defined) before firing (fired=%d)", fired)
 	}
 }
+
+// TestClickWaitsForOverlayToClear: a loading mask covering the page (the top
+// spinner the user described) intercepts pointer events at the target's point
+// — a human can't click, but the element is present, :defined, and enabled, so
+// every other gate passes. The hit-test must hold the click until the overlay
+// clears. Regression for the Xiaohongshu publish button clicked while the page
+// was still "spinning".
+func TestClickWaitsForOverlayToClear(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>overlay</title>
+<button id="b" style="position:absolute;left:100px;top:100px;width:120px;height:40px">Go</button>
+<div id="mask" style="position:fixed;inset:0;background:rgba(0,0,0,.2);z-index:9999"></div>
+<script>
+window.fired=0;
+document.getElementById('b').addEventListener('click',function(){window.fired++;});
+// The mask covers everything (intercepting clicks) and clears after 1.2s.
+setTimeout(function(){ document.getElementById('mask').remove(); }, 1200);
+</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#b", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if err := page.Click(ctx, "#b"); err != nil {
+		t.Fatalf("click: %v", err)
+	}
+	var fired int
+	if err := page.Eval(ctx, "window.fired", &fired); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if fired != 1 {
+		t.Fatalf("click must wait for the covering overlay to clear (fired=%d)", fired)
+	}
+}

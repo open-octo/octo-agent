@@ -427,7 +427,7 @@ func (p *Page) resolveFieldTarget(ctx context.Context, frame, elemSel, hint stri
 // the document only ever sees the retargeted host, and clicking the host's
 // CENTER can land on dead space (observed: Xiaohongshu's <xhs-publish-btn> —
 // the publish click silently did nothing on replay).
-func (p *Page) elementPoint(ctx context.Context, selector string, fx, fy float64) (point, error) {
+func (p *Page) elementPoint(ctx context.Context, selector string, fx, fy float64) (point, bool, error) {
 	frame, elem := splitFrame(selector)
 	offset := ""
 	if frame != "" {
@@ -439,6 +439,18 @@ func (p *Page) elementPoint(ctx context.Context, selector string, fx, fy float64
 	if fy <= 0 || fy > 1 {
 		fy = 0.5
 	}
+	// hittable: does the click point actually reach the target? A loading mask
+	// / overlay still covering the page intercepts pointer events at the point
+	// (elementFromPoint returns the overlay, not the target), so a click would
+	// hit the mask, not the button — exactly what a human sees when the page is
+	// "still spinning". Computed in the top document's viewport coords (skipped
+	// for framed targets, whose point is offset into an iframe). el===hit,
+	// el.contains(hit) (a descendant), or hit.contains(el) (a shadow host
+	// retargeting to itself) all count as reaching the target.
+	hitJS := "true"
+	if frame == "" {
+		hitJS = `(() => { const h = document.elementFromPoint(px, py); return !!h && (h === el || el.contains(h) || h.contains(el)); })()`
+	}
 	expr := fmt.Sprintf(`(() => {
 		let el;
 		try { el = %s; } catch (e) { return { badSelector: true }; }
@@ -447,27 +459,30 @@ func (p *Page) elementPoint(ctx context.Context, selector string, fx, fy float64
 		const r = el.getBoundingClientRect();
 		let ox = 0, oy = 0;
 		%s
-		return { x: ox + r.x + r.width * %g, y: oy + r.y + r.height * %g };
-	})()`, elemRefJS(frame, elem), offset, fx, fy)
+		const px = ox + r.x + r.width * %g, py = oy + r.y + r.height * %g;
+		return { x: px, y: py, hittable: %s };
+	})()`, elemRefJS(frame, elem), offset, fx, fy, hitJS)
 	var res *struct {
 		X, Y        float64
+		Hittable    bool `json:"hittable"`
 		BadSelector bool `json:"badSelector"`
 	}
 	if err := p.Eval(ctx, expr, &res); err != nil {
-		return point{}, err
+		return point{}, false, err
 	}
 	if res == nil {
-		return point{}, fmt.Errorf("selector %q matched nothing", selector)
+		return point{}, false, fmt.Errorf("selector %q matched nothing", selector)
 	}
 	if res.BadSelector {
-		return point{}, fmt.Errorf("invalid selector %q — use plain CSS or a supported Playwright form (:has-text(\"…\"), text=…, :visible, xpath=…); run the observe action to list valid selectors", selector)
+		return point{}, false, fmt.Errorf("invalid selector %q — use plain CSS or a supported Playwright form (:has-text(\"…\"), text=…, :visible, xpath=…); run the observe action to list valid selectors", selector)
 	}
-	return point{X: res.X, Y: res.Y}, nil
+	return point{X: res.X, Y: res.Y}, res.Hittable, nil
 }
 
 // elementCenter is elementPoint at the element's center.
 func (p *Page) elementCenter(ctx context.Context, selector string) (point, error) {
-	return p.elementPoint(ctx, selector, 0.5, 0.5)
+	pt, _, err := p.elementPoint(ctx, selector, 0.5, 0.5)
+	return pt, err
 }
 
 // clickStabilizeTimeout caps how long Click waits for the target to stop
@@ -497,7 +512,7 @@ func (p *Page) stableElementCenter(ctx context.Context, selector string) (point,
 // stableElementPoint is stableElementCenter at a fractional position of the
 // element's box.
 func (p *Page) stableElementPoint(ctx context.Context, selector string, fx, fy float64) (point, error) {
-	prev, err := p.elementPoint(ctx, selector, fx, fy)
+	prev, _, err := p.elementPoint(ctx, selector, fx, fy)
 	if err != nil {
 		return point{}, err
 	}
@@ -508,7 +523,7 @@ func (p *Page) stableElementPoint(ctx context.Context, selector string, fx, fy f
 			return prev, nil
 		case <-time.After(80 * time.Millisecond):
 		}
-		cur, err := p.elementPoint(ctx, selector, fx, fy)
+		cur, hit, err := p.elementPoint(ctx, selector, fx, fy)
 		if err != nil {
 			// The element vanished between samples (menu re-rendered its
 			// items); click the last place it was seen — matching the old
@@ -516,8 +531,12 @@ func (p *Page) stableElementPoint(ctx context.Context, selector string, fx, fy f
 			// still land fine.
 			return prev, nil
 		}
+		// Ready = position settled AND the point actually reaches the target
+		// (no loading mask / overlay intercepting it). Both must hold in the
+		// SAME sample. On timeout, click the last point anyway (best-effort,
+		// matching the pre-hit-test behavior rather than failing outright).
 		stable := math.Abs(cur.X-prev.X) < 1 && math.Abs(cur.Y-prev.Y) < 1
-		if stable || !time.Now().Before(deadline) {
+		if (stable && hit) || !time.Now().Before(deadline) {
 			return cur, nil
 		}
 		prev = cur
