@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -589,10 +590,11 @@ func (p *Page) WaitFor(ctx context.Context, selector string, timeout time.Durati
 	}
 }
 
-// jsString encodes s as a JS string literal via JSON (valid JS string syntax).
+// jsString encodes s as a double-quoted JS string literal. strconv.Quote's
+// escaping of quotes, backslashes, and control characters is also valid JS
+// string syntax, so the result is always safe to splice into a JS expression.
 func jsString(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
+	return strconv.Quote(s)
 }
 
 // netActivityGen reads the in-page network monitor's activity generation — a
