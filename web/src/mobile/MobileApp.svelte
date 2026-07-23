@@ -21,11 +21,14 @@
   // to show, taken from the tapped card's kind.
   let openId = $state<string | null>(null)
   let openKind = $state<FeedKind | null>(null)
-  // New-task sheet (FAB) + the first message it queued for the opened session.
+  // New-task sheet (FAB) + the first message it queued, bound to the session
+  // it was queued for — opening any other session must never inherit it.
   let newTask = $state(false)
-  let initialPrompt = $state('')
+  let initial = $state<{ id: string; prompt: string } | null>(null)
 
   function openSession(id: string, kind: FeedKind) {
+    newTask = false
+    if (initial && initial.id !== id) initial = null
     setActiveSession(id)
     openId = id
     openKind = kind
@@ -33,7 +36,7 @@
   function closeDetail() {
     openId = null
     openKind = null
-    initialPrompt = ''
+    initial = null
   }
 </script>
 
@@ -43,7 +46,7 @@
       {#if newTask}
         <NewTask
           onCancel={() => (newTask = false)}
-          onCreated={(id, prompt) => { newTask = false; initialPrompt = prompt; openSession(id, prompt ? 'running' : 'done') }}
+          onCreated={(id, prompt) => { newTask = false; openSession(id, prompt ? 'running' : 'done'); if (prompt) initial = { id, prompt } }}
         />
       {:else if openId}
         {#if openKind === 'approval'}
@@ -52,8 +55,8 @@
           <ChatDetail
             onBack={closeDetail}
             onViewApproval={() => (openKind = 'approval')}
-            {initialPrompt}
-            onInitialSent={() => (initialPrompt = '')}
+            initialPrompt={initial?.id === openId ? initial.prompt : ''}
+            onInitialSent={() => (initial = null)}
           />
         {/if}
       {:else}

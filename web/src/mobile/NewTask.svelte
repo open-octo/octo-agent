@@ -27,12 +27,21 @@
         for (const e of d.endpoints ?? []) {
           for (const m of e.models ?? []) flat.push({ id: `${e.id}::${m.model}`, label: m.model })
         }
-        models = flat
+        // The same model on two endpoints would render two identical options;
+        // qualify duplicates with their endpoint id.
+        const seen = new Map<string, number>()
+        for (const m of flat) seen.set(m.label, (seen.get(m.label) ?? 0) + 1)
+        models = flat.map(m => (seen.get(m.label)! > 1 ? { ...m, label: `${m.label} · ${m.id.split('::')[0]}` } : m))
       })
       .catch(() => {})
   })
 
-  let permMode = $state(get(globalPermissionMode) || 'interactive')
+  // globalPermissionMode is seeded 'ask' and only overwritten when config.yml
+  // sets one of the engine modes — normalize before using it as the segment
+  // default and the skip-if-unchanged baseline.
+  const g = get(globalPermissionMode)
+  const basePermMode = ['interactive', 'auto', 'strict'].includes(g) ? g : 'interactive'
+  let permMode = $state(basePermMode)
   const permModes = [
     { m: 'interactive', label: '询问' },
     { m: 'auto', label: '自动' },
@@ -50,10 +59,12 @@
       // Best-effort per-session overrides: a failed override shouldn't strand
       // the already-created session, so toast and continue.
       if (modelId) {
-        await api.updateSessionModel(sess.id, modelId).catch((e: any) =>
-          showToast(e?.message ?? '切换模型失败', 'error'))
+        await api.updateSessionModel(sess.id, modelId)
+          .then(res => sessions.update(list =>
+            list.map(s => (s.id === sess.id ? { ...s, model: res.model, model_id: res.model_id } : s))))
+          .catch((e: any) => showToast(e?.message ?? '切换模型失败', 'error'))
       }
-      if (permMode !== (get(globalPermissionMode) || 'interactive')) {
+      if (permMode !== basePermMode) {
         await api.updateSessionPermissionMode(sess.id, permMode).catch((e: any) =>
           showToast(e?.message ?? '设置权限模式失败', 'error'))
       }
@@ -70,7 +81,7 @@
 </script>
 
 <header class="head">
-  <button class="back" aria-label="取消" onclick={onCancel}>
+  <button class="back" aria-label="取消" disabled={creating} onclick={onCancel}>
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg>
   </button>
   <h1>新建任务</h1>
@@ -83,6 +94,7 @@
       class="prompt"
       rows="5"
       placeholder="让 Octo 做什么?留空则只创建空会话"
+      aria-label="任务描述"
       bind:value={prompt}
     ></textarea>
   </div>
@@ -101,7 +113,7 @@
   <div class="card pad">
     <div class="seg">
       {#each permModes as p (p.m)}
-        <button class="segi" class:on={permMode === p.m} onclick={() => (permMode = p.m)}>{p.label}</button>
+        <button class="segi" class:on={permMode === p.m} aria-pressed={permMode === p.m} onclick={() => (permMode = p.m)}>{p.label}</button>
       {/each}
     </div>
     <p class="note">
