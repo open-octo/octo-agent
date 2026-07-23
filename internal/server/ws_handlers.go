@@ -115,19 +115,20 @@ func (s *Server) listSessionsBrief() []wsSessionInfo {
 		}
 		_, pm, re, sr, ctxUsage := s.sessionStatusFields(sess)
 		out = append(out, wsSessionInfo{
-			ID:              sess.ID,
-			Name:            name,
-			Status:          s.sessionStatus(sess.ID),
-			CreatedAt:       sess.CreatedAt.UnixMilli(),
-			Source:          source,
-			Model:           sess.Model,
-			TotalTurns:      sess.TurnCount(),
-			WorkingDir:      s.sessionCwd(sess),
-			PermissionMode:  pm,
-			ReasoningEffort: re,
-			ShowReasoning:   sr,
-			ContextUsage:    ctxUsage,
-			PendingQuestion: s.hasPendingQuestion(sess.ID),
+			ID:                  sess.ID,
+			Name:                name,
+			Status:              s.sessionStatus(sess.ID),
+			CreatedAt:           sess.CreatedAt.UnixMilli(),
+			Source:              source,
+			Model:               sess.Model,
+			TotalTurns:          sess.TurnCount(),
+			WorkingDir:          s.sessionCwd(sess),
+			PermissionMode:      pm,
+			ReasoningEffort:     re,
+			ShowReasoning:       sr,
+			ContextUsage:        ctxUsage,
+			PendingQuestion:     s.hasPendingQuestion(sess.ID),
+			PendingConfirmation: s.hasPendingConfirmation(sess.ID),
 		})
 	}
 	return out
@@ -141,6 +142,18 @@ func (s *Server) hasPendingQuestion(sessionID string) bool {
 	s.pendingPromptMu.Lock()
 	defer s.pendingPromptMu.Unlock()
 	_, ok := s.pendingQuestions[sessionID]
+	return ok
+}
+
+// hasPendingConfirmation reports whether a session has an outstanding permission
+// confirmation awaiting an answer — the approval analogue of hasPendingQuestion.
+// It lets a freshly-loaded session list surface the mobile feed's needs-approval
+// card without the client having to be subscribed to that session (a
+// request_confirmation is only broadcast to subscribers).
+func (s *Server) hasPendingConfirmation(sessionID string) bool {
+	s.pendingPromptMu.Lock()
+	defer s.pendingPromptMu.Unlock()
+	_, ok := s.pendingConfirms[sessionID]
 	return ok
 }
 
@@ -2149,9 +2162,23 @@ func (s *Server) requestConfirmation(ctx context.Context, sessionID, message, ki
 		s.pendingPromptMu.Lock()
 		delete(s.pendingConfirms, sessionID)
 		s.pendingPromptMu.Unlock()
+		// Clear the cross-session "pending confirmation" signal (mirrors the
+		// question_resolved broadcast) so the mobile feed's approval card drops.
+		s.wsHub.broadcast("", wsEventSessionActivity{
+			Type:      "session_activity",
+			SessionID: sessionID,
+			Kind:      "confirm_resolved",
+		})
 	}
 
 	s.wsHub.broadcast(sessionID, ev)
+	// Cross-session signal (mirrors question_pending) so a client not subscribed
+	// to this session — the mobile feed — can still surface a needs-approval card.
+	s.wsHub.broadcast("", wsEventSessionActivity{
+		Type:      "session_activity",
+		SessionID: sessionID,
+		Kind:      "confirm_pending",
+	})
 
 	// Wait for the user's response or turn cancellation — no timeout. A
 	// permission ask only reaches this function in an interactive session

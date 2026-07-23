@@ -1,11 +1,11 @@
 <script lang="ts">
   import { get } from 'svelte/store'
-  import { feedGroups } from './feedGroups'
+  import { feedGroups, type FeedKind } from './feedGroups'
   import { createNewSession, activeSessionId } from '../lib/stores'
   import SessionCard from './SessionCard.svelte'
   import DeviceBanner from './DeviceBanner.svelte'
 
-  let { onOpen }: { onOpen: (id: string) => void } = $props()
+  let { onOpen }: { onOpen: (id: string, kind: FeedKind) => void } = $props()
 
   const groups = feedGroups
   const empty = $derived($groups.todo.length + $groups.active.length + $groups.recent.length === 0)
@@ -13,7 +13,7 @@
   async function newSession() {
     await createNewSession()
     const id = get(activeSessionId)
-    if (id) onOpen(id)
+    if (id) onOpen(id, 'done')
   }
 </script>
 

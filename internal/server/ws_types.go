@@ -105,19 +105,20 @@ type wsEventSessionList struct {
 }
 
 type wsSessionInfo struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Status          string `json:"status,omitempty"` // "idle" | "working"
-	CreatedAt       int64  `json:"created_at"`       // unix ms
-	Source          string `json:"source,omitempty"` // "manual" | "cron" | "channel" | "setup"
-	Model           string `json:"model,omitempty"`
-	TotalTurns      int    `json:"total_turns,omitempty"`
-	WorkingDir      string `json:"working_dir,omitempty"`
-	PermissionMode  string `json:"permission_mode,omitempty"`
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
-	ShowReasoning   *bool  `json:"show_reasoning,omitempty"`
-	ContextUsage    int    `json:"context_usage,omitempty"`
-	PendingQuestion bool   `json:"pending_question,omitempty"`
+	ID                  string `json:"id"`
+	Name                string `json:"name"`
+	Status              string `json:"status,omitempty"` // "idle" | "working"
+	CreatedAt           int64  `json:"created_at"`       // unix ms
+	Source              string `json:"source,omitempty"` // "manual" | "cron" | "channel" | "setup"
+	Model               string `json:"model,omitempty"`
+	TotalTurns          int    `json:"total_turns,omitempty"`
+	WorkingDir          string `json:"working_dir,omitempty"`
+	PermissionMode      string `json:"permission_mode,omitempty"`
+	ReasoningEffort     string `json:"reasoning_effort,omitempty"`
+	ShowReasoning       *bool  `json:"show_reasoning,omitempty"`
+	ContextUsage        int    `json:"context_usage,omitempty"`
+	PendingQuestion     bool   `json:"pending_question,omitempty"`
+	PendingConfirmation bool   `json:"pending_confirmation,omitempty"`
 }
 
 type wsEventHistoryUserMessage struct {
@@ -284,7 +285,7 @@ type wsEventDismissUserQuestion struct {
 type wsEventSessionActivity struct {
 	Type      string `json:"type"`
 	SessionID string `json:"session_id"`
-	Kind      string `json:"kind"` // "question_pending" | "question_resolved" | "turn_complete"
+	Kind      string `json:"kind"` // "question_pending" | "question_resolved" | "confirm_pending" | "confirm_resolved" | "turn_complete"
 }
 
 type wsEventBackgroundTaskUpdate struct {

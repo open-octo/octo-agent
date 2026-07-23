@@ -753,6 +753,7 @@ func (s *Server) registerRoutes() {
 	s.api("POST /api/sessions/delete", s.handleDeleteSessions)
 	s.api("GET /api/sessions/{id}", s.handleGetSession)
 	s.api("GET /api/sessions/{id}/messages", s.handleGetSessionMessages)
+	s.api("GET /api/sessions/{id}/confirmation", s.handleGetSessionConfirmation)
 	s.api("GET /api/sessions/{id}/artifacts", s.handleGetArtifact)
 	s.api("DELETE /api/sessions/{id}", s.handleDeleteSession)
 	s.api("PATCH /api/sessions/{id}", s.handleUpdateSession)

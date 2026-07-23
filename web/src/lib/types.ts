@@ -31,6 +31,9 @@ export interface Session {
   // session_activity broadcast (App.svelte), independent of whether this
   // tab is currently subscribed to the session.
   pending_question?: boolean
+  // Set when a permission confirmation is awaiting an answer — the approval
+  // analogue of pending_question, driving the mobile feed's needs-approval card.
+  pending_confirmation?: boolean
   // Optional UI-only fields carried by some broadcasts.
   time?: string
   icon?: string

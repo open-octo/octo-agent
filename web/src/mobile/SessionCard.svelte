@@ -1,7 +1,7 @@
 <script lang="ts">
-  import type { FeedItem } from './feedGroups'
+  import type { FeedItem, FeedKind } from './feedGroups'
 
-  let { item, onOpen }: { item: FeedItem; onOpen: (id: string) => void } = $props()
+  let { item, onOpen }: { item: FeedItem; onOpen: (id: string, kind: FeedKind) => void } = $props()
 
   const s = $derived(item.session)
   const title = $derived(s.title || s.name || '未命名会话')
@@ -23,7 +23,7 @@
   class="card"
   class:approval={item.kind === 'approval'}
   class:reply={item.kind === 'reply'}
-  onclick={() => onOpen(s.id)}
+  onclick={() => onOpen(s.id, item.kind)}
 >
   <div class="top">
     <span class="title">{title}</span>
