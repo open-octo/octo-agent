@@ -2329,3 +2329,62 @@ setTimeout(function(){ document.getElementById('host').setAttribute('submit-disa
 		t.Fatalf("click must wait out the disabled state and land once, got %d", published)
 	}
 }
+
+// TestReplayRetriesDecisiveClickUntilItLands: the demonstration's last click
+// navigated (EndURL differs), but on replay the click is accepted yet BLOCKED
+// by a transient validation (an async upload still in progress) that clears
+// itself — the URL stays put. Replay must wait and re-click until the page
+// moves. Models Xiaohongshu's publish rejected by "图片正在上传".
+func TestReplayRetriesDecisiveClickUntilItLands(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>pub</title>
+<button id="pub" style="width:120px;height:40px">Publish</button>
+<script>
+var here = location.href;
+// Constant background traffic (heartbeats / telemetry) — this is what defeats
+// the network-activity dud-retry on a real page, so the decisive URL-based
+// retry is the only thing that can save the click.
+setInterval(function(){ fetch('/beacon'); }, 150);
+// "Cover image" still uploading for the first 1.2s; publish is blocked until then.
+window.uploading = true;
+setTimeout(function(){ window.uploading = false; }, 1200);
+document.getElementById('pub').addEventListener('click', function(){
+  if (window.uploading) return;           // blocked — URL stays put
+  history.pushState({}, '', here + '?published=true');
+});
+</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.Navigate(ctx, srv.URL); err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+
+	recording := &Recording{
+		Name:   "pub",
+		EndURL: srv.URL + "/?published=true",
+		Steps: []Step{
+			{Action: "navigate", URL: srv.URL},
+			{Action: "click", Selector: "#pub"},
+			{Action: "wait", Network: true, TimeoutMS: 5000},
+		},
+	}
+	if _, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 4 * time.Second, Browser: b}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	var href string
+	if err := page.Eval(ctx, "location.href", &href); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if !strings.Contains(href, "published=true") {
+		t.Fatalf("decisive click was not retried until it landed; url=%s", href)
+	}
+}

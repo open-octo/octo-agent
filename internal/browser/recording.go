@@ -75,8 +75,15 @@ type Step struct {
 	// (a not-yet-hydrated custom element, a briefly disabled button) — the
 	// idle-wait that follows would pass instantly and hide it.
 	expectNetwork bool
-	Value         string `yaml:"value,omitempty"`
-	Label         string `yaml:"label,omitempty"`
+	// expectEndURL is a replay-time hint (never serialized) set on the LAST
+	// click step when the demonstration's decisive click moved the page to a
+	// different URL (recording.EndURL). A blocked decisive action (e.g. a
+	// publish rejected by a transient "still uploading" validation) leaves the
+	// URL put; replay then retries the click, waiting between attempts, until
+	// the URL advances or the attempts run out.
+	expectEndURL string
+	Value        string `yaml:"value,omitempty"`
+	Label        string `yaml:"label,omitempty"`
 	// Hint is a form field's accessible name (placeholder/name/aria-label/id or
 	// its <label> text). It's the deterministic fallback for type/select/upload:
 	// when the positional Selector drifts, replay re-locates the field by Hint
@@ -1277,11 +1284,22 @@ func ReplayRecording(ctx context.Context, page *Page, recording *Recording, para
 		stepHard = floor
 	}
 	binds := map[string][]string{}
+	lastClick := -1
 	for i := range recording.Steps {
 		if recording.Steps[i].Action == "click" && i+1 < len(recording.Steps) &&
 			recording.Steps[i+1].Action == "wait" && recording.Steps[i+1].Network {
 			recording.Steps[i].expectNetwork = true
 		}
+		if recording.Steps[i].Action == "click" {
+			lastClick = i
+		}
+	}
+	// The decisive click: the last click of the flow, when the demonstration
+	// ended at a URL different from where that click happened (so the click was
+	// meant to navigate — a publish/submit). Replay retries it until the URL
+	// moves, riding out a transient server-side validation ("图片正在上传").
+	if lastClick >= 0 && recording.EndURL != "" {
+		recording.Steps[lastClick].expectEndURL = recording.EndURL
 	}
 	cur := page
 	for i := range recording.Steps {
@@ -1605,6 +1623,32 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 					break
 				}
 				np = np2
+			}
+		}
+		// Decisive click: the demonstrated click navigated (EndURL differs from
+		// where it fired), but this one left the page put — the action was
+		// accepted yet BLOCKED by a transient validation (e.g. an async cover
+		// image still uploading), which clears itself. Wait for the page to
+		// settle and re-click, up to a few times, stopping the moment the URL
+		// moves. Same-tab navigation on success changes the URL, so a
+		// successful click never gets re-fired.
+		if step.expectEndURL != "" && np == page {
+			var urlBefore string
+			_ = page.Eval(ctx, "location.href", &urlBefore)
+			if !sameLocation(urlBefore, step.expectEndURL) {
+				for attempt := 0; attempt < 3; attempt++ {
+					_ = page.WaitForNetworkIdle(ctx, 0, 8*time.Second)
+					var cur string
+					_ = page.Eval(ctx, "location.href", &cur)
+					if !sameLocation(cur, urlBefore) {
+						break // the page moved — the action took effect
+					}
+					np2, rerr := clickTarget(ctx, b, page, target, step.ClickX, step.ClickY)
+					if rerr != nil {
+						break
+					}
+					np = np2
+				}
 			}
 		}
 		page = np

@@ -911,10 +911,10 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 				// take the error path, so it must carry its own diagnostic
 				// pointer or the model has nothing to act on. Same evidence and
 				// decision tree the hard-error path provides.
-				env["end_url_mismatch"] = "the demonstration ended at a different URL than this replay — the final action likely did NOT take effect; do NOT report success. Diagnose: observe the live page for its real state; the recording's raw captured events are at " +
+				env["end_url_mismatch"] = "the demonstration ended at a different URL than this replay — the final action likely did NOT take effect; do NOT report success. First OBSERVE the live page. If a transient validation is shown (e.g. \"图片正在上传\" / \"uploading\" / \"processing\"), the action was ACCEPTED but blocked — WAIT for it to clear, then just replay this recording again (the decisive action is retried automatically). If the decisive control is a custom element (a hyphenated tag like <xhs-publish-btn> — often a closed shadow DOM whose real button text/`:has-text` selectors CANNOT find), do NOT hand-click it by text; replay the recording, which clicks the exact recorded coordinates. Otherwise diagnose with the recording's raw captured events at " +
 					browser.RecordingEventsPath(BrowserRecordingsDir(), name) +
 					" and the editable steps at " + path +
-					" — compare the last acting step against its source events (event missing -> re-record; event present but step wrong -> edit the YAML; both fine -> the page changed, fix that step's selector/waits or drive the final action directly)."
+					" — compare the last acting step against its source events (event missing -> re-record; event present but step wrong -> edit the YAML; both fine -> the page changed, fix that step's selector/waits)."
 			}
 		}
 		if modified {
