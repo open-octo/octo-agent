@@ -906,7 +906,15 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 			env["demonstrated_end_url"] = recording.EndURL
 			env["replay_end_url"] = cur
 			if !browser.SameLocation(cur, recording.EndURL) {
-				env["end_url_mismatch"] = "the demonstration ended at a different URL than this replay — the final action may not have taken effect; VERIFY the outcome on the page before reporting success"
+				// This is the COMMON failure mode — every step passed but the
+				// outcome is wrong (a decisive click swallowed) — and it does not
+				// take the error path, so it must carry its own diagnostic
+				// pointer or the model has nothing to act on. Same evidence and
+				// decision tree the hard-error path provides.
+				env["end_url_mismatch"] = "the demonstration ended at a different URL than this replay — the final action likely did NOT take effect; do NOT report success. Diagnose: observe the live page for its real state; the recording's raw captured events are at " +
+					browser.RecordingEventsPath(BrowserRecordingsDir(), name) +
+					" and the editable steps at " + path +
+					" — compare the last acting step against its source events (event missing -> re-record; event present but step wrong -> edit the YAML; both fine -> the page changed, fix that step's selector/waits or drive the final action directly)."
 			}
 		}
 		if modified {
