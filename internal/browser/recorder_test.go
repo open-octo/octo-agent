@@ -1237,3 +1237,51 @@ b.addEventListener('click',function(){ if(window.armed) window.fired++; });
 		t.Fatalf("default settle delay must bridge the rAF-gated arm (fired=%d)", fired)
 	}
 }
+
+// TestClickWaitsForCustomElementUpgrade: a custom element present in the DOM
+// but not yet UPGRADED (its class registers late — the closed shadow-DOM
+// component pattern, an empty resolvable shell before its JS runs) must not be
+// clicked until it matches :defined. Regression for the Xiaohongshu publish
+// button: the shell resolved instantly, the click fired on a not-yet-functional
+// element, and the network-idle wait passed on the still-transitioning page.
+func TestClickWaitsForCustomElementUpgrade(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>upgrade</title>
+<my-pub id="p" style="display:inline-block;width:120px;height:40px">x</my-pub>
+<script>
+window.fired=0;
+// Register the element LATE — until then <my-pub> is an undefined shell.
+setTimeout(function(){
+  customElements.define('my-pub', class extends HTMLElement {
+    connectedCallback(){ this.addEventListener('click',()=>{ window.fired++; }); }
+  });
+}, 1200);
+</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#p", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	// Click immediately — the element exists but is not yet upgraded. The
+	// readiness gate must hold the click until :defined, after the handler is
+	// attached.
+	if err := page.Click(ctx, "#p"); err != nil {
+		t.Fatalf("click: %v", err)
+	}
+	var fired int
+	if err := page.Eval(ctx, "window.fired", &fired); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if fired != 1 {
+		t.Fatalf("click must wait for the custom element to upgrade (:defined) before firing (fired=%d)", fired)
+	}
+}

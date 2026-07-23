@@ -479,6 +479,10 @@ var clickStabilizeTimeout = 1500 * time.Millisecond
 // control first. A var so tests can zero it.
 var clickMoveSettle = 60 * time.Millisecond
 
+// clickReadyTimeout bounds the pre-click readiness wait (page loaded, custom
+// element upgraded, not disabled). A var so tests can tighten it.
+var clickReadyTimeout = 15 * time.Second
+
 // stableElementCenter samples the element's center until two consecutive
 // samples agree within a pixel — the actionability gate for trusted clicks.
 // A coordinate click computed while the element is still animating (a Popover
@@ -536,25 +540,38 @@ func (p *Page) waitEnabled(ctx context.Context, selector string, timeout time.Du
 			return
 		}
 	}
+	// Returns "" when the target is ready to be clicked, else a short reason.
+	// Three gates, all standard (no site knowledge):
+	//   - the document has finished loading (readyState complete) — a click
+	//     fired during a navigation lands on a half-built page;
+	//   - a CUSTOM element (tag with a hyphen) has been UPGRADED — it matches
+	//     :defined only after its class runs. An empty custom-element shell
+	//     (e.g. a closed shadow-DOM button) is in the DOM and resolvable long
+	//     before it is functional; clicking the shell does nothing. childCount
+	//     stays 0 forever for closed shadow, so :defined is the only signal;
+	//   - neither the element nor a close ancestor advertises a
+	//     disabled/loading state (native, aria, or *-disabled/*-loading attrs).
 	check := fmt.Sprintf(`(()=>{
-	  let el; try { el = %s; } catch(e) { return false; }
-	  if (!el) return false;
+	  if (document.readyState !== "complete") return "loading";
+	  let el; try { el = %s; } catch(e) { return "resolve"; }
+	  if (!el) return "absent";
 	  for (let n = el, i = 0; n && n.nodeType === 1 && i < 4; n = n.parentElement, i++) {
-	    if (n.disabled === true) return true;
+	    if (n.tagName && n.tagName.includes("-") && n.matches && !n.matches(":defined")) return "undefined-ancestor";
+	    if (n.disabled === true) return "disabled";
 	    const attrs = n.getAttributeNames ? n.getAttributeNames() : [];
 	    for (const a of attrs) {
 	      if (/(^|[-_:])(disabled|loading)$/i.test(a)) {
 	        const v = n.getAttribute(a);
-	        if (v === "" || v === "true") return true;
+	        if (v === "" || v === "true") return "disabled-attr";
 	      }
 	    }
 	  }
-	  return false;
+	  return "";
 	})()`, elemRefJS(frame, elem))
 	deadline := time.Now().Add(timeout)
 	for {
-		var disabled bool
-		if err := p.Eval(ctx, check, &disabled); err != nil || !disabled {
+		var reason string
+		if err := p.Eval(ctx, check, &reason); err != nil || reason == "" {
 			return
 		}
 		if ctx.Err() != nil || !time.Now().Before(deadline) {
@@ -584,6 +601,12 @@ func (p *Page) ClickAt(ctx context.Context, selector string, fx, fy float64) err
 			return cp.ClickAt(ctx, elem, fx, fy)
 		}
 	}
+	// Readiness gate: page loaded, custom element upgraded (:defined), not
+	// disabled. Bounded, best-effort. Placed here — the single choke point for
+	// every click, replay and agent-driven alike — so a click on a resolvable
+	// but not-yet-functional element (an un-upgraded custom-element shell) waits
+	// instead of firing into the void. StepTimeout-scale bound comes via ctx.
+	p.waitEnabled(ctx, selector, clickReadyTimeout)
 	pt, err := p.stableElementPoint(ctx, selector, fx, fy)
 	if err != nil {
 		return err
