@@ -1171,6 +1171,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // the viewport currently sits within the conversation.
   let railActive = $state(0)
   let railFillPct = $state(0)
+  // How much the node column is compressed versus its natural length (1 = not
+  // at all). Drives --rail-scale so the dots shrink along with the spacing on
+  // short panes instead of staying full-size while crammed together.
+  let railScale = $state(1)
 
   const RAIL_THROTTLE_MS = 100
   let railTimer: ReturnType<typeof setTimeout> | null = null
@@ -1184,6 +1188,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       ticks.push({ id: m.id, preview: (m.content || '').slice(0, 160) })
     }
     railTicks = ticks
+    // Compression factor: available rail height (pane minus the 8px top/bottom
+    // insets of .msg-rail) over the column's natural length (28px per node
+    // minus the trailing gap). Clamped to 1 so uncompressed panes are unscaled.
+    const natural = ticks.length * 28 - 20
+    const avail = (messagesEl?.clientHeight ?? 0) - 16
+    railScale = ticks.length > 1 && avail > 0 ? Math.min(1, avail / natural) : 1
     syncRailScroll()
   }
 
@@ -1249,6 +1259,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     if (!content) return
     const ro = new ResizeObserver(scheduleRailRecompute)
     ro.observe(content)
+    // Also watch the scroll pane itself: a height-only viewport resize changes
+    // the rail's available height (railScale) without reflowing the content,
+    // so observing the content alone would miss it.
+    if (messagesEl) ro.observe(messagesEl)
     return () => ro.disconnect()
   })
 
@@ -1976,7 +1990,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
       {#if railTicks.length > 1}
         <div class="msg-rail">
-          <div class="msg-rail-inner" style="height:min(100%, {railTicks.length * 28 - 20}px)">
+          <div class="msg-rail-inner" style="height:min(100%, {railTicks.length * 28 - 20}px);--rail-scale:{railScale}">
             <div class="msg-rail-track"></div>
             <div class="msg-rail-fill" style="height:calc((100% - 8px) * {railFillPct / 100})"></div>
             {#each railTicks as tick, i (tick.id)}
@@ -2225,8 +2239,13 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   cursor: pointer; pointer-events: auto; z-index: 2;
 }
 .msg-rail-node:focus-visible { outline: none; }
+/* Dots shrink with the column's compression (--rail-scale, 1 on panes tall
+   enough for the natural length) so a crammed rail reads as a smaller minimap
+   instead of full-size dots touching. Floored so they stay visible. */
 .msg-rail-dot {
-  width: 10px; height: 10px; border-radius: 9999px;
+  width: max(6px, calc(10px * var(--rail-scale, 1)));
+  height: max(6px, calc(10px * var(--rail-scale, 1)));
+  border-radius: 9999px;
   background: var(--bg-container); border: 2px solid var(--border);
   transition: width 0.14s ease, height 0.14s ease, background 0.14s ease,
     border-color 0.14s ease, box-shadow 0.14s ease;
@@ -2237,7 +2256,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   background: var(--blue-6); border-color: var(--blue-6);
 }
 .msg-rail-node.active .msg-rail-dot {
-  width: 12px; height: 12px; box-shadow: 0 0 0 4px rgba(22,119,255,0.16);
+  width: max(8px, calc(12px * var(--rail-scale, 1)));
+  height: max(8px, calc(12px * var(--rail-scale, 1)));
+  box-shadow: 0 0 0 4px rgba(22,119,255,0.16);
 }
 /* Hover/focus preview card, to the left of the rail, with a caret pointing back
    at the dot. --terminal-bg is the DS's intentionally-dark surface in both
