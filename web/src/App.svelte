@@ -229,7 +229,7 @@
           s.id === sid ? { ...s, pending_confirmation: ev.kind === 'confirm_pending' } : s
         ))
       }
-      if (ev.kind === 'question_pending' || ev.kind === 'turn_complete') {
+      if (ev.kind === 'question_pending' || ev.kind === 'confirm_pending' || ev.kind === 'turn_complete') {
         notifyForSessionActivity(sid, ev.kind)
       }
     })
@@ -270,7 +270,7 @@
   // looking at in a focused tab — if they are, they'd see it happen live and
   // a notification would just be noise. No-op unless the user has the
   // Desktop Notifications preference on AND has granted browser permission.
-  function notifyForSessionActivity(sid: string, kind: 'question_pending' | 'turn_complete') {
+  function notifyForSessionActivity(sid: string, kind: 'question_pending' | 'confirm_pending' | 'turn_complete') {
     if (!get(notificationsEnabled)) return
     const native = get(nativeShell)
     // The browser Notification API doesn't work in the desktop webview; native
@@ -285,7 +285,9 @@
     lastNotifiedAt[cooldownKey] = now
     const sess = get(sessions).find(s => s.id === sid)
     const title = sess?.name || sess?.title || sid
-    const bodyKey = kind === 'question_pending' ? 'header.notif_question_body' : 'header.notif_turn_complete_body'
+    const bodyKey = kind === 'question_pending' ? 'header.notif_question_body'
+      : kind === 'confirm_pending' ? 'header.notif_confirm_body'
+      : 'header.notif_turn_complete_body'
     const body = tr(bodyKey)
     if (native) {
       // The native notification carries this session id so the desktop shell

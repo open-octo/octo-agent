@@ -1,10 +1,11 @@
 <script lang="ts">
   // Mobile approval detail: the high-value phone scenario — approve or reject a
-  // pending high-risk command. Reads the same `confirmModal` store the desktop
-  // ConfirmModal uses and answers over the same ws.answerConfirmation contract
-  // ('yes' = allow once, 'always' = allow for session, anything else = deny).
-  // The desktop ConfirmModal overlay is suppressed on mobile (App.svelte) so this
-  // is the single approval surface.
+  // pending high-risk command. The feed isn't subscribed to the session
+  // (request_confirmation only reaches subscribers), so it fetches the pending
+  // confirmation over REST (getSessionConfirmation) and answers over the same
+  // ws.answerConfirmation contract the desktop uses ('yes' = allow once,
+  // 'always' = allow for session, anything else = deny). The desktop ConfirmModal
+  // overlay is suppressed on mobile (App.svelte) so this is the single surface.
   import { activeSessionId } from '../lib/stores'
   import { ws } from '../lib/ws'
   import { getSessionConfirmation, type SessionConfirmation } from '../lib/api'
