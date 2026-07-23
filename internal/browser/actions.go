@@ -474,6 +474,11 @@ func (p *Page) elementCenter(ctx context.Context, selector string) (point, error
 // moving before dispatching anyway. A var so tests can tighten it.
 var clickStabilizeTimeout = 1500 * time.Millisecond
 
+// clickMoveSettle is the pause between moving the pointer onto a target and
+// pressing, so pointer-entry handlers (often rAF/layout-gated) can arm the
+// control first. A var so tests can zero it.
+var clickMoveSettle = 60 * time.Millisecond
+
 // stableElementCenter samples the element's center until two consecutive
 // samples agree within a pixel — the actionability gate for trusted clicks.
 // A coordinate click computed while the element is still animating (a Popover
@@ -595,6 +600,18 @@ func (p *Page) ClickAt(ctx context.Context, selector string, fx, fy float64) err
 		"type": "mouseMoved", "x": pt.X, "y": pt.Y,
 	}); err != nil {
 		return err
+	}
+	// Let the pointer-entry handlers actually RUN before pressing. A control
+	// that arms on pointer entry often does so behind a requestAnimationFrame /
+	// layout tick (closed shadow-DOM web components are the common case), so a
+	// press fired in the same breath as the move — even across CDP round-trips,
+	// a few ms — still beats the arming and is swallowed. One frame-plus of gap
+	// is what separated a working move-first click from a dead one at identical
+	// coordinates. A var so tests can zero it.
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(clickMoveSettle):
 	}
 	steps := []map[string]any{
 		{"type": "mousePressed", "x": pt.X, "y": pt.Y, "button": "left", "buttons": 1, "clickCount": 1},

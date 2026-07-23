@@ -1196,3 +1196,44 @@ b.addEventListener('click',function(){ if(window.armed) window.fired++; });
 		t.Fatalf("click must move the pointer to the target before pressing (fired=%d)", fired)
 	}
 }
+
+// TestClickArmsRAFGatedControl: a control that arms itself one animation frame
+// AFTER pointer entry (the closed shadow-DOM web-component pattern) accepts a
+// click only if the press comes a frame after the move. The default settle
+// delay must bridge that; zeroing it must miss — proving the delay is
+// load-bearing, not decorative.
+func TestClickArmsRAFGatedControl(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>raf</title>
+<button id="b" style="width:120px;height:40px">Go</button>
+<script>
+window.fired=0; window.armed=false;
+var b=document.getElementById('b');
+b.addEventListener('mousemove',function(){ requestAnimationFrame(function(){ requestAnimationFrame(function(){ window.armed=true; }); }); });
+b.addEventListener('click',function(){ if(window.armed) window.fired++; });
+</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#b", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if err := page.Click(ctx, "#b"); err != nil {
+		t.Fatalf("click: %v", err)
+	}
+	var fired int
+	if err := page.Eval(ctx, "window.fired", &fired); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if fired != 1 {
+		t.Fatalf("default settle delay must bridge the rAF-gated arm (fired=%d)", fired)
+	}
+}
