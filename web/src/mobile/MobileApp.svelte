@@ -9,6 +9,7 @@
   import ChatDetail from './ChatDetail.svelte'
   import ApprovalDetail from './ApprovalDetail.svelte'
   import SettingsTab from './SettingsTab.svelte'
+  import TasksTab from './TasksTab.svelte'
   import type { FeedKind } from './feedGroups'
   import { setActiveSession } from '../lib/stores'
 
@@ -43,8 +44,7 @@
         <Feed onOpen={openSession} />
       {/if}
     {:else if tab === 'tasks'}
-      <header class="m-head"><h1>任务</h1></header>
-      <div class="m-scroll"><div class="m-ph">定时与自动化 · 批 3 接入</div></div>
+      <TasksTab onOpenSession={(id) => { tab = 'chat'; openId = id; openKind = 'running' }} />
     {:else if tab === 'config'}
       <header class="m-head"><h1>配置</h1></header>
       <div class="m-scroll"><div class="m-ph">技能 / MCP / 工作流 / 数据 · 批 3 接入</div></div>
