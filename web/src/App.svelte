@@ -354,7 +354,9 @@
 <AuthGate />
 <CommandPalette />
 <McpModal />
-<ConfirmModal />
+<!-- Mobile approves via its own ApprovalDetail (web/src/mobile); suppress the
+     desktop confirmation overlay there so it doesn't double up. -->
+{#if !mobileShell}<ConfirmModal />{/if}
 <ConfirmDialog />
 <ArtifactModal />
 <FeedbackModal />

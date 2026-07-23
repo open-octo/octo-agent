@@ -7,16 +7,25 @@
   import './theme.css'
   import Feed from './Feed.svelte'
   import ChatDetail from './ChatDetail.svelte'
+  import ApprovalDetail from './ApprovalDetail.svelte'
+  import type { FeedKind } from './feedGroups'
   import { setActiveSession } from '../lib/stores'
 
   type Tab = 'chat' | 'tasks' | 'config' | 'settings'
   let tab = $state<Tab>('chat')
-  // The session opened into a detail view (null = show the feed).
+  // The session opened into a detail view (null = feed), plus which typed detail
+  // to show, taken from the tapped card's kind.
   let openId = $state<string | null>(null)
+  let openKind = $state<FeedKind | null>(null)
 
-  function openSession(id: string) {
+  function openSession(id: string, kind: FeedKind) {
     setActiveSession(id)
     openId = id
+    openKind = kind
+  }
+  function closeDetail() {
+    openId = null
+    openKind = null
   }
 </script>
 
@@ -24,7 +33,11 @@
   <main class="m-view">
     {#if tab === 'chat'}
       {#if openId}
-        <ChatDetail onBack={() => (openId = null)} />
+        {#if openKind === 'approval'}
+          <ApprovalDetail onBack={closeDetail} />
+        {:else}
+          <ChatDetail onBack={closeDetail} />
+        {/if}
       {:else}
         <Feed onOpen={openSession} />
       {/if}
@@ -41,7 +54,7 @@
   </main>
 
   <nav class="m-tabbar">
-    <button class="m-tab" class:on={tab === 'chat'} onclick={() => { tab = 'chat'; openId = null }}>
+    <button class="m-tab" class:on={tab === 'chat'} onclick={() => { tab = 'chat'; closeDetail() }}>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></svg>
       <span>会话</span>
     </button>
