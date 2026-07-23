@@ -4,12 +4,13 @@
   // beyond that (create/edit/delete) stays on desktop; the phone is a remote
   // control, so this view is monitor + toggle + fire.
   import { onMount } from 'svelte'
-  import { sessions, setActiveSession, showToast } from '../lib/stores'
+  import { sessions, showToast } from '../lib/stores'
   import * as api from '../lib/api'
 
   let { onOpenSession }: { onOpenSession: (id: string) => void } = $props()
 
   let loading = $state(true)
+  let loadError = $state(false)
   let tasks = $state<api.TaskResponse[]>([])
   const activeCount = $derived(tasks.filter(t => t.enabled).length)
 
@@ -25,9 +26,12 @@
   }
 
   async function load() {
+    loading = true
+    loadError = false
     try {
       tasks = await api.listTasks()
     } catch (e: any) {
+      loadError = true
       showToast(e?.message ?? '加载任务失败', 'error')
     } finally {
       loading = false
@@ -35,14 +39,22 @@
   }
   onMount(load)
 
+  let togglingId = $state<string | null>(null)
   async function toggle(t: api.TaskResponse) {
+    if (togglingId) return
+    togglingId = t.id
     const next = !t.enabled
     try {
       await api.toggleTask(t.id, next)
       tasks = tasks.map(r => (r.id === t.id ? { ...r, enabled: next } : r))
       showToast(next ? '任务已恢复' : '任务已暂停')
+      // The server recomputes next_run on resume; refresh silently so the
+      // card doesn't show a stale "下次 —" until the next tab visit.
+      api.listTasks().then(r => (tasks = r)).catch(() => {})
     } catch (e: any) {
       showToast(e?.message ?? '更新任务失败', 'error')
+    } finally {
+      togglingId = null
     }
   }
 
@@ -58,7 +70,6 @@
         // jump straight into its chat detail to watch the run live.
         const data = await api.listSessions().catch(() => null)
         if (data) sessions.set(data.sessions ?? [])
-        setActiveSession(res.session_id)
         onOpenSession(res.session_id)
       }
     } catch (e: any) {
@@ -80,6 +91,8 @@
 
   {#if loading}
     <div class="empty">加载中…</div>
+  {:else if loadError}
+    <button class="empty retry" onclick={load}>加载失败 · 点击重试</button>
   {:else if tasks.length === 0}
     <div class="empty">还没有定时任务 · 在桌面端用 /cron-task-creator 创建</div>
   {:else}
@@ -96,6 +109,7 @@
             role="switch"
             aria-checked={t.enabled}
             aria-label={t.enabled ? '暂停任务' : '恢复任务'}
+            disabled={togglingId !== null}
             onclick={() => toggle(t)}
           ><span class="knob"></span></button>
         </div>
@@ -130,6 +144,7 @@
   .stat .cap { font-size: 11px; color: var(--m-text-3); }
 
   .empty { padding: 40px 16px; text-align: center; font-size: 13px; color: var(--m-text-3); }
+  .retry { display: block; width: 100%; background: none; border: none; font-family: inherit; color: var(--m-accent); cursor: pointer; }
 
   .card {
     background: var(--m-surface); border-radius: 14px; box-shadow: var(--m-shadow-card);
@@ -145,9 +160,9 @@
   .runline { font-size: 12px; color: var(--m-text-3); }
   .acts { display: flex; justify-content: flex-end; margin-top: 10px; }
   .run {
-    display: inline-flex; align-items: center; gap: 5px;
+    display: inline-flex; align-items: center; gap: 5px; min-height: 36px;
     border: 1px solid var(--m-border); background: none; border-radius: 9999px;
-    padding: 6px 14px; font-size: 12.5px; color: var(--m-accent);
+    padding: 6px 16px; font-size: 12.5px; color: var(--m-accent);
     font-family: inherit; cursor: pointer;
   }
   .run:disabled { opacity: .5; }

@@ -44,7 +44,7 @@
         <Feed onOpen={openSession} />
       {/if}
     {:else if tab === 'tasks'}
-      <TasksTab onOpenSession={(id) => { tab = 'chat'; openId = id; openKind = 'running' }} />
+      <TasksTab onOpenSession={(id) => { tab = 'chat'; openSession(id, 'running') }} />
     {:else if tab === 'config'}
       <header class="m-head"><h1>配置</h1></header>
       <div class="m-scroll"><div class="m-ph">技能 / MCP / 工作流 / 数据 · 批 3 接入</div></div>
