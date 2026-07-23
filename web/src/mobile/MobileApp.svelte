@@ -8,6 +8,7 @@
   import Feed from './Feed.svelte'
   import ChatDetail from './ChatDetail.svelte'
   import ApprovalDetail from './ApprovalDetail.svelte'
+  import SettingsTab from './SettingsTab.svelte'
   import type { FeedKind } from './feedGroups'
   import { setActiveSession } from '../lib/stores'
 
@@ -48,8 +49,7 @@
       <header class="m-head"><h1>配置</h1></header>
       <div class="m-scroll"><div class="m-ph">技能 / MCP / 工作流 / 数据 · 批 3 接入</div></div>
     {:else}
-      <header class="m-head"><h1>设置</h1></header>
-      <div class="m-scroll"><div class="m-ph">设备 / 通知 / 外观 · 批 3 接入</div></div>
+      <SettingsTab />
     {/if}
   </main>
 
