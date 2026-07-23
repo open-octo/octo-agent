@@ -41,26 +41,27 @@ type turnRequest struct {
 // sessionItem is the shape the Web UI expects for each session in listings
 // and after creation. It is a superset of the raw agent.Session fields.
 type sessionItem struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	Title           string    `json:"title"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
-	Model           string    `json:"model"`
-	ModelID         string    `json:"model_id,omitempty"`
-	Status          string    `json:"status"`
-	Source          string    `json:"source"`
-	AgentProfile    string    `json:"agent_profile"`
-	Pinned          bool      `json:"pinned"`
-	TotalTasks      int       `json:"total_tasks"`
-	TurnCount       int       `json:"turn_count"`
-	WorkingDir      string    `json:"working_dir,omitempty"`
-	PermissionMode  string    `json:"permission_mode,omitempty"`
-	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
-	ShowReasoning   *bool     `json:"show_reasoning,omitempty"`
-	ContextUsage    int       `json:"context_usage,omitempty"`
-	PendingQuestion bool      `json:"pending_question,omitempty"`
-	BranchedFrom    string    `json:"branched_from,omitempty"`
+	ID                  string    `json:"id"`
+	Name                string    `json:"name"`
+	Title               string    `json:"title"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+	Model               string    `json:"model"`
+	ModelID             string    `json:"model_id,omitempty"`
+	Status              string    `json:"status"`
+	Source              string    `json:"source"`
+	AgentProfile        string    `json:"agent_profile"`
+	Pinned              bool      `json:"pinned"`
+	TotalTasks          int       `json:"total_tasks"`
+	TurnCount           int       `json:"turn_count"`
+	WorkingDir          string    `json:"working_dir,omitempty"`
+	PermissionMode      string    `json:"permission_mode,omitempty"`
+	ReasoningEffort     string    `json:"reasoning_effort,omitempty"`
+	ShowReasoning       *bool     `json:"show_reasoning,omitempty"`
+	ContextUsage        int       `json:"context_usage,omitempty"`
+	PendingQuestion     bool      `json:"pending_question,omitempty"`
+	PendingConfirmation bool      `json:"pending_confirmation,omitempty"`
+	BranchedFrom        string    `json:"branched_from,omitempty"`
 }
 
 type sessionDetail struct {
@@ -109,26 +110,54 @@ func (srv *Server) toSessionItem(s *agent.Session, source, agentProfile string) 
 	}
 	_, pm, re, sr, ctxUsage := srv.sessionStatusFields(s)
 	return sessionItem{
-		ID:              s.ID,
-		Name:            name,
-		Title:           title,
-		CreatedAt:       s.CreatedAt,
-		UpdatedAt:       updated,
-		Model:           s.Model,
-		Status:          srv.sessionStatus(s.ID),
-		Source:          source,
-		AgentProfile:    agentProfile,
-		Pinned:          false,
-		TotalTasks:      0,
-		TurnCount:       s.TurnCount(),
-		WorkingDir:      srv.sessionCwd(s),
-		PermissionMode:  pm,
-		ReasoningEffort: re,
-		ShowReasoning:   sr,
-		ContextUsage:    ctxUsage,
-		PendingQuestion: srv.hasPendingQuestion(s.ID),
-		BranchedFrom:    s.BranchedFrom,
+		ID:                  s.ID,
+		Name:                name,
+		Title:               title,
+		CreatedAt:           s.CreatedAt,
+		UpdatedAt:           updated,
+		Model:               s.Model,
+		Status:              srv.sessionStatus(s.ID),
+		Source:              source,
+		AgentProfile:        agentProfile,
+		Pinned:              false,
+		TotalTasks:          0,
+		TurnCount:           s.TurnCount(),
+		WorkingDir:          srv.sessionCwd(s),
+		PermissionMode:      pm,
+		ReasoningEffort:     re,
+		ShowReasoning:       sr,
+		ContextUsage:        ctxUsage,
+		PendingQuestion:     srv.hasPendingQuestion(s.ID),
+		PendingConfirmation: srv.hasPendingConfirmation(s.ID),
+		BranchedFrom:        s.BranchedFrom,
 	}
+}
+
+// handleGetSessionConfirmation serves GET /api/sessions/{id}/confirmation: the
+// outstanding permission confirmation for a session, if any. request_confirmation
+// is only broadcast to a session's subscribers, but the mobile feed subscribes to
+// no session, so it reads the pending ask over REST to render ApprovalDetail.
+// Answering still goes over ws.answerConfirmation with the returned id. Returns
+// {pending:false} when there is none.
+func (srv *Server) handleGetSessionConfirmation(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	srv.pendingPromptMu.Lock()
+	ev, ok := srv.pendingConfirms[id]
+	srv.pendingPromptMu.Unlock()
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]any{"pending": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"pending":   true,
+		"id":        ev.ConfID,
+		"message":   ev.Message,
+		"kind":      ev.Kind,
+		"tool_name": ev.ToolName,
+		"command":   ev.Command,
+		"diff":      ev.Diff,
+		"input":     ev.Input,
+	})
 }
 
 // entryForSession returns the model-config entry that actually backs sess's

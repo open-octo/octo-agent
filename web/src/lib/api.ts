@@ -158,6 +158,24 @@ export async function getSessionMessages(id: string): Promise<unknown> {
   return request<unknown>(`/api/sessions/${id}/messages`)
 }
 
+// The outstanding permission confirmation for a session, if any. The mobile feed
+// isn't subscribed to sessions (request_confirmation only reaches subscribers),
+// so ApprovalDetail fetches the pending ask over REST. Returns { pending: false }
+// when there is none.
+export interface SessionConfirmation {
+  pending: boolean
+  id?: string
+  message?: string
+  kind?: string
+  tool_name?: string
+  command?: string
+  diff?: string
+  input?: string
+}
+export async function getSessionConfirmation(id: string): Promise<SessionConfirmation> {
+  return request<SessionConfirmation>(`/api/sessions/${id}/confirmation`)
+}
+
 // The server keys session model by the named entry id (or "default" / a raw
 // model string), read from the `model_id` field — not `model`.
 export async function updateSessionModel(id: string, modelId: string): Promise<{ model: string; model_id: string }> {

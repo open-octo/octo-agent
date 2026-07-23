@@ -5,16 +5,29 @@
   // ('yes' = allow once, 'always' = allow for session, anything else = deny).
   // The desktop ConfirmModal overlay is suppressed on mobile (App.svelte) so this
   // is the single approval surface.
-  import { confirmModal } from '../lib/stores'
+  import { activeSessionId } from '../lib/stores'
   import { ws } from '../lib/ws'
+  import { getSessionConfirmation, type SessionConfirmation } from '../lib/api'
 
   let { onBack }: { onBack: () => void } = $props()
 
-  const c = $derived($confirmModal)
+  const sid = $derived($activeSessionId ?? '')
+  let c = $state<SessionConfirmation | null>(null)
+  let loading = $state(true)
+
+  // The feed isn't subscribed to the session (request_confirmation only reaches
+  // subscribers), so fetch the pending confirmation over REST when this opens.
+  $effect(() => {
+    const s = sid
+    if (!s) { c = null; loading = false; return }
+    loading = true
+    getSessionConfirmation(s)
+      .then(resp => { c = resp?.pending ? resp : null; loading = false })
+      .catch(() => { c = null; loading = false })
+  })
 
   function answer(result: string) {
-    if (c) ws.answerConfirmation(c.id, result)
-    confirmModal.set(null)
+    if (c?.id) ws.answerConfirmation(c.id, result)
     onBack()
   }
 
@@ -55,9 +68,6 @@
     {:else if c.input}
       <div class="label">输入</div>
       <pre class="term">{c.input}</pre>
-    {:else if c.content}
-      <div class="label">内容</div>
-      <pre class="term">{c.content}</pre>
     {/if}
 
     <div class="actions">
@@ -69,6 +79,8 @@
         <button class="btnG" onclick={() => answer('always')}>本次会话都允许</button>
       {/if}
     </div>
+  {:else if loading}
+    <div class="empty">加载中…</div>
   {:else}
     <div class="empty">没有待审批的请求(可能已在别处处理)。</div>
     <button class="btnD full" onclick={onBack}>返回</button>

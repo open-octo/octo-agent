@@ -222,6 +222,13 @@
           s.id === sid ? { ...s, pending_question: ev.kind === 'question_pending' } : s
         ))
       }
+      // Approval analogue — drives the mobile feed's needs-approval card for a
+      // session the client isn't subscribed to.
+      if (ev.kind === 'confirm_pending' || ev.kind === 'confirm_resolved') {
+        sessions.update(list => list.map(s =>
+          s.id === sid ? { ...s, pending_confirmation: ev.kind === 'confirm_pending' } : s
+        ))
+      }
       if (ev.kind === 'question_pending' || ev.kind === 'turn_complete') {
         notifyForSessionActivity(sid, ev.kind)
       }
