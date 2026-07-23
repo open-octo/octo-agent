@@ -17,8 +17,14 @@ func (s *Server) handleGetProfileSoul(w http.ResponseWriter, r *http.Request) {
 	path := prompt.IdentityPath(octoDir(), "soul.md")
 	content, err := os.ReadFile(path)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "soul.md not found")
-		return
+		// No soul.md yet is the normal not-customized-yet state, not an error the
+		// UI should surface — the Profile view already renders an empty-state
+		// message when content is blank.
+		if !os.IsNotExist(err) {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		content = nil
 	}
 	writeJSON(w, http.StatusOK, map[string]string{
 		"content": string(content),
@@ -30,8 +36,11 @@ func (s *Server) handleGetProfileUser(w http.ResponseWriter, r *http.Request) {
 	path := prompt.IdentityPath(octoDir(), "user.md")
 	content, err := os.ReadFile(path)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "user.md not found")
-		return
+		if !os.IsNotExist(err) {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		content = nil
 	}
 	writeJSON(w, http.StatusOK, map[string]string{
 		"content": string(content),
