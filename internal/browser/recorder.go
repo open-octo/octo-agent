@@ -713,10 +713,23 @@ func (r *Recorder) watchNavigations(ctx context.Context, session string, markFir
 			return
 		}
 		r.mu.Lock()
-		n := len(r.events)
-		if n > 0 && r.events[n-1].Type == "navigate" && r.events[n-1].URL == u {
-			r.mu.Unlock()
-			return // collapse the initial-load echo / repeat
+		// Collapse against the last recorded NAVIGATE, not just the immediately
+		// preceding event: every URL change lands a navigate event, so the last
+		// one IS the page's known location. An SPA that re-announces the same
+		// URL after an in-page click (tab switches that replaceState — observed
+		// on Xiaohongshu's publish page) would otherwise record a navigate step
+		// whose replay RELOADS the page and resets the very state the click
+		// just set up. A genuine leave-and-return still records: the departure
+		// put a different navigate in between.
+		for i := len(r.events) - 1; i >= 0; i-- {
+			if r.events[i].Type != "navigate" {
+				continue
+			}
+			if r.events[i].URL == u {
+				r.mu.Unlock()
+				return
+			}
+			break
 		}
 		ev := RecordedEvent{Type: "navigate", URL: u}
 		if firstNav {

@@ -1972,3 +1972,40 @@ func TestReplayEmitsProgress(t *testing.T) {
 		}
 	}
 }
+
+// TestReplayNavigateSkipsReloadWhenAlreadyThere: a navigate step whose target
+// is the page's CURRENT URL must not reload — in-page state set up by earlier
+// steps (an SPA tab selection) would be wiped, breaking every step after it.
+func TestReplayNavigateSkipsReloadWhenAlreadyThere(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>skip</title>
+<button id="b">Go</button>
+<script>window.marker=0;document.getElementById('b').addEventListener('click',function(){window.marker=1;});</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+
+	recording := &Recording{Name: "skip", Steps: []Step{
+		{Action: "navigate", URL: srv.URL},
+		{Action: "click", Selector: "#b"},
+		{Action: "navigate", URL: srv.URL}, // recorded echo of the click's in-page transition
+	}}
+	if _, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 3 * time.Second, Browser: b}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	var marker int
+	if err := page.Eval(ctx, "window.marker", &marker); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if marker != 1 {
+		t.Fatal("the same-URL navigate reloaded the page and wiped the click's state")
+	}
+}

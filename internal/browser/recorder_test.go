@@ -1030,3 +1030,62 @@ window.startAnim=function(){
 		t.Fatalf("click landed at x=%.1f but the button rests at x=%.1f — dispatched mid-animation", down.X, rest.X)
 	}
 }
+
+// TestRecorderCollapsesSameURLNavEcho: an SPA that re-announces the CURRENT
+// URL after an in-page click (pushState/replaceState to the same location —
+// observed on Xiaohongshu's publish tabs) must not record a navigate event:
+// replaying it reloads the page and resets the state the click just set up.
+// A genuine leave-and-return (different URL in between) still records.
+func TestRecorderCollapsesSameURLNavEcho(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>spa</title>
+<button id="away">Away</button><button id="echo">Echo</button><button id="back">Back</button>
+<script>
+var here=location.href;
+document.getElementById('away').addEventListener('click',function(){history.pushState({},'',here+'?p=away');});
+document.getElementById('echo').addEventListener('click',function(){history.pushState({},'',here+'?p=away');});
+document.getElementById('back').addEventListener('click',function(){history.pushState({},'',here);});
+</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#away", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	rec := NewRecorder(page)
+	if err := rec.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer rec.Stop()
+
+	for _, sel := range []string{"#away", "#echo", "#back"} {
+		if err := page.Click(ctx, sel); err != nil {
+			t.Fatalf("click %s: %v", sel, err)
+		}
+		time.Sleep(400 * time.Millisecond)
+	}
+	time.Sleep(1 * time.Second)
+
+	var navs []string
+	for _, e := range rec.Events() {
+		if e.Type == "navigate" {
+			navs = append(navs, e.URL)
+		}
+	}
+	// #away moved -> recorded. #echo re-announced the CURRENT URL -> dropped,
+	// even though click events sit between (the old check only collapsed
+	// adjacent duplicates). #back returned to the original URL -> recorded
+	// (the away nav sits between, so it is a genuine move).
+	want := []string{srv.URL + "/?p=away", srv.URL + "/"}
+	if strings.Join(navs, "|") != strings.Join(want, "|") {
+		t.Fatalf("nav events = %v, want %v (same-URL echo must be dropped, leave-and-return kept)", navs, want)
+	}
+}

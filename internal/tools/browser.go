@@ -785,7 +785,8 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 			return agent.ToolResult{}, fmt.Errorf("browser: no recording in progress")
 		}
 		rec.Stop()
-		recording := browser.GenerateRecording(ctx, name, startURL, rec.Events(), gen)
+		events := rec.Events()
+		recording := browser.GenerateRecording(ctx, name, startURL, events, gen)
 		dir := BrowserRecordingsDir()
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return agent.ToolResult{}, err
@@ -793,6 +794,14 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		path := filepath.Join(dir, name+".yaml")
 		if err := browser.SaveRecording(path, recording); err != nil {
 			return agent.ToolResult{}, err
+		}
+		// Persist the RAW captured events beside the YAML (best-effort). The
+		// compiled recording is a lossy distillation; when a generated recording
+		// misbehaves, the sidecar is the only way to tell a capture bug from a
+		// compile bug (ListRecordings only picks up *.yaml, so it stays out of
+		// the manifest). Secret-typed values were never captured in events.
+		if raw, err := json.MarshalIndent(events, "", "  "); err == nil {
+			_ = os.WriteFile(filepath.Join(dir, name+".events.json"), raw, 0o600)
 		}
 		// Recite the run-plan with verification per step so the user can confirm or
 		// request changes before the recording is used. The agent surfaces this

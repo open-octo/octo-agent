@@ -969,6 +969,29 @@ func (s Step) target() string {
 	return s.Selector
 }
 
+// sameLocation reports whether two URL strings address the same document —
+// component-wise, so the browser's normalization of "http://host" to
+// "http://host/" doesn't defeat the comparison.
+func sameLocation(a, b string) bool {
+	if a == b {
+		return true
+	}
+	ua, errA := url.Parse(a)
+	ub, errB := url.Parse(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	pa, pb := ua.Path, ub.Path
+	if pa == "" {
+		pa = "/"
+	}
+	if pb == "" {
+		pb = "/"
+	}
+	return ua.Scheme == ub.Scheme && ua.Host == ub.Host && pa == pb &&
+		ua.RawQuery == ub.RawQuery && ua.Fragment == ub.Fragment
+}
+
 // subst replaces {{name}} placeholders with param values, verbatim. Used where
 // the surrounding context is plain text (typed values, select options, file
 // paths, verify comparisons). URL and JS contexts need the escaping variants
@@ -1344,8 +1367,19 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 	target := step.target()
 	switch step.Action {
 	case "navigate":
-		if err := page.Navigate(ctx, substURL(step.URL, params)); err != nil {
-			return page, err
+		dest := substURL(step.URL, params)
+		// Already there → don't reload. A recorded navigate can be the echo of
+		// an in-page transition a preceding click already reproduced (SPA tab
+		// switches that re-announce the current URL); reloading resets the very
+		// page state that click just set up. Compared component-wise (the
+		// browser normalizes "http://host" to "http://host/"), and the step's
+		// Verify still runs below, so this never skips a real move.
+		var cur string
+		_ = page.Eval(ctx, "location.href", &cur)
+		if !sameLocation(cur, dest) {
+			if err := page.Navigate(ctx, dest); err != nil {
+				return page, err
+			}
 		}
 	case "wait":
 		// Wait for an element if a selector is given (the robust form); else settle
