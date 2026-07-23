@@ -276,7 +276,7 @@ func (p *Page) WaitForNetworkIdle(ctx context.Context, quiet, timeout time.Durat
 		return r.IdleMS, r.Gen, true
 	}
 	if idle0, gen0, ok := read(); ok {
-		grace := 1200 * time.Millisecond
+		grace := networkIdleGraceDefault
 		if timeout < grace {
 			grace = timeout
 		}
@@ -484,6 +484,13 @@ func (p *Page) Navigate(ctx context.Context, url string) error {
 // windows-latest especially) intermittently need more than 30s for a cold
 // Chrome to finish its first navigation even to a local fixture page.
 var navigateLoadTimeout = 30 * time.Second
+
+// networkIdleGraceDefault bounds how long WaitForNetworkIdle gives a
+// just-triggered request to actually start (see the "gen" comment above). A
+// var so the package tests can raise it: on a starved windows-latest runner
+// the CDP round-trips this polls with are slow enough that a request
+// scheduled 400ms out can miss a tight grace window entirely.
+var networkIdleGraceDefault = 1200 * time.Millisecond
 
 // evalException mirrors the fields of a CDP Runtime.ExceptionDetails we surface
 // when an evaluated expression throws.

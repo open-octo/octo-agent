@@ -95,7 +95,11 @@ func TestRenderTraceRedactsSecret(t *testing.T) {
 // replay until the turn's 400s deadline.
 func TestNormalizeUploadFiles(t *testing.T) {
 	home := t.TempDir()
+	// os.UserHomeDir reads $HOME on Unix but %USERPROFILE% on Windows — both
+	// must be set for the tilde expansion below to resolve into home rather
+	// than the CI runner's real profile dir.
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	if err := os.WriteFile(filepath.Join(home, "doc.md"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
