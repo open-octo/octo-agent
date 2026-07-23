@@ -10,6 +10,7 @@
   import ApprovalDetail from './ApprovalDetail.svelte'
   import SettingsTab from './SettingsTab.svelte'
   import TasksTab from './TasksTab.svelte'
+  import ConfigTab from './ConfigTab.svelte'
   import type { FeedKind } from './feedGroups'
   import { setActiveSession } from '../lib/stores'
 
@@ -46,8 +47,7 @@
     {:else if tab === 'tasks'}
       <TasksTab onOpenSession={(id) => { tab = 'chat'; openSession(id, 'running') }} />
     {:else if tab === 'config'}
-      <header class="m-head"><h1>配置</h1></header>
-      <div class="m-scroll"><div class="m-ph">技能 / MCP / 工作流 / 数据 · 批 3 接入</div></div>
+      <ConfigTab />
     {:else}
       <SettingsTab />
     {/if}
@@ -90,32 +90,6 @@
     display: flex;
     flex-direction: column;
     padding-top: env(safe-area-inset-top);
-  }
-  .m-head {
-    flex: none;
-    padding: 8px 18px 12px;
-  }
-  .m-head h1 {
-    margin: 0;
-    font-size: 24px;
-    font-weight: 600;
-    color: var(--m-text-strong);
-  }
-  .m-scroll {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    padding: 0 16px 20px;
-  }
-  .m-ph {
-    background: var(--m-surface);
-    border: 1px dashed var(--m-border);
-    border-radius: 14px;
-    padding: 18px 16px;
-    font-size: 13px;
-    color: var(--m-text-3);
-    box-shadow: var(--m-shadow-card);
   }
   .m-tabbar {
     flex: none;
