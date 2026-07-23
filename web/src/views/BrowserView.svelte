@@ -65,9 +65,16 @@
   }
 
   // Replay reuses the full agent path (replay action + self-heal): open a session
-  // and let the model drive it, rather than a server-side replay endpoint.
+  // and let the model drive it, rather than a server-side replay endpoint. The
+  // declared param names ride along in the prompt — without them the model
+  // paraphrases ("title" for a param named value) and the replay call rejects.
   function run(name: string) {
-    openAgentSession(tr('browser.rec.run_prompt').replace('{name}', name), '▶ ' + name).catch(() => {})
+    let prompt = tr('browser.rec.run_prompt').replace('{name}', name)
+    const rec = recordings.find(r => r.name === name)
+    if (rec?.params?.length) {
+      prompt += ' ' + tr('browser.rec.run_prompt_params').replace('{params}', rec.params.join(', '))
+    }
+    openAgentSession(prompt, '▶ ' + name).catch(() => {})
   }
 
   // Start a recording: open a fresh session whose first message kicks off the

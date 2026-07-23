@@ -2079,3 +2079,77 @@ func TestRecordingDirectoryLayout(t *testing.T) {
 		t.Fatalf("deleting a missing recording should report not-exist, got %v", err)
 	}
 }
+
+// TestReplayNavigateWaitsForAsyncSPAURL: an SPA updates location.href a beat
+// AFTER the click that caused the transition (Xiaohongshu appends
+// &from=tab_switch asynchronously). The recorded navigate that follows the
+// click must give the page a grace window to arrive on its own instead of
+// immediately force-loading — the reload resets the in-page state the click
+// just set up.
+func TestReplayNavigateWaitsForAsyncSPAURL(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>spa</title>
+<button id="tab">Tab</button>
+<script>
+window.marker=0;
+document.getElementById('tab').addEventListener('click',function(){
+  window.marker=1;
+  setTimeout(function(){ history.pushState({},'',location.pathname+'?tab=long'); }, 600);
+});
+</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+
+	recording := &Recording{Name: "spa", Steps: []Step{
+		{Action: "navigate", URL: srv.URL},
+		{Action: "click", Selector: "#tab"},
+		{Action: "navigate", URL: srv.URL + "/?tab=long"}, // async echo of the click
+	}}
+	if _, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 3 * time.Second, Browser: b}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	var marker int
+	if err := page.Eval(ctx, "window.marker", &marker); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if marker != 1 {
+		t.Fatal("the navigate raced the SPA's async URL update and reloaded, wiping the click's state")
+	}
+}
+
+// TestCompileDropsSameDocNavigates: a same-document navigation (pushState
+// after a tab click — Xiaohongshu appends &from=tab_switch) is an effect of
+// the preceding click, not a user action. Compiling it into a navigate step
+// force-reloads the page on replay and resets the state the click set up.
+func TestCompileDropsSameDocNavigates(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "navigate", URL: "https://x/publish"},
+		{Type: "click", Selector: "#tab-long", Tag: "SPAN", Text: "写长文"},
+		{Type: "navigate", URL: "https://x/publish?from=tab_switch", SameDoc: true},
+		{Type: "click", Selector: "#new-draft", Tag: "BUTTON", Text: "新的创作"},
+	}
+	s := CompileRecording("x", "", "", events)
+	for _, st := range s.Steps {
+		if st.Action == "navigate" && strings.Contains(st.URL, "tab_switch") {
+			t.Fatalf("same-doc navigation must not compile to a navigate step: %+v", s.Steps)
+		}
+	}
+	var clicks int
+	for _, st := range s.Steps {
+		if st.Action == "click" {
+			clicks++
+		}
+	}
+	if clicks != 2 {
+		t.Fatalf("both real clicks must survive, got %d: %+v", clicks, s.Steps)
+	}
+}

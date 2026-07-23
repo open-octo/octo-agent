@@ -813,6 +813,26 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		// text and asks the user to confirm.
 		summary := browser.SummarizeRecording(recording)
 		msg := fmt.Sprintf("recorded %d step(s) → %s\n\n%s\n\nReview/edit it there (set params, fix selectors). Replay it with the Replay button in the Browser view, or action=replay name=%q. (Recordings are NOT keyword-triggerable — they only run when explicitly replayed.)", len(recording.Steps), path, summary, name)
+		if len(recording.Params) > 0 {
+			// Spell the declared param names out in the result. Without this
+			// the model paraphrases them from memory when reciting the plan
+			// ("pass file and title" for a param actually named value) and
+			// then calls replay with the invented name.
+			var pb strings.Builder
+			for _, p := range recording.Params {
+				fmt.Fprintf(&pb, "\n- %s", p.Name)
+				if p.Description != "" {
+					fmt.Fprintf(&pb, " — %s", p.Description)
+				}
+				if p.Default != "" {
+					fmt.Fprintf(&pb, " (default: %s)", p.Default)
+				}
+				if p.Secret {
+					pb.WriteString(" (secret: collected outside the conversation — never pass a value)")
+				}
+			}
+			msg += "\n\nDeclared replay params — use EXACTLY these names:" + pb.String()
+		}
 		if recording.Description == "" {
 			// The LLM distill fell back (or omitted a description). Surface it here
 			// — the stderr warning never reaches the model — so the recording doesn't

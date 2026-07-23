@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -175,6 +176,13 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 	}
 	for _, e := range events {
 		if e.Type == "navigate" {
+			// A same-document navigation is a page-initiated EFFECT of the
+			// preceding action (pushState after a tab click); replaying the
+			// action reproduces it, while a navigate step would force-reload
+			// and reset the in-page state it depends on. Drop it.
+			if e.SameDoc {
+				continue
+			}
 			// Skip an echo of the page we're already on (start URL or the prior nav).
 			if n := len(s.Steps); n > 0 && s.Steps[n-1].Action == "navigate" && s.Steps[n-1].URL == e.URL {
 				continue
@@ -520,14 +528,21 @@ func SummarizeRecording(r Recording) string {
 	return b.String()
 }
 
-// slugParam reduces a field hint to a safe {{param}} identifier: lowercase, with
-// runs of non-alphanumerics collapsed to a single underscore and trimmed.
+// slugParam reduces a field hint to a safe {{param}} identifier: lowercase,
+// with runs of everything else collapsed to a single underscore and trimmed.
+// Unicode letters and digits are KEPT — a CJK placeholder like 输入标题 used
+// to slug to "" and fall back to the meaningless "value", which the model then
+// misguessed as "title" on every replay. {{输入标题}} is unambiguous. Capped so
+// a long form prompt doesn't become an unwieldy name.
 func slugParam(s string) string {
 	var b strings.Builder
 	prevUnderscore := false
 	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		if b.Len() >= 48 { // ~16 CJK runes
+			break
+		}
 		switch {
-		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
 			b.WriteRune(r)
 			prevUnderscore = false
 		default:
@@ -1066,6 +1081,18 @@ func sameLocation(a, b string) bool {
 		ua.RawQuery == ub.RawQuery && ua.Fragment == ub.Fragment
 }
 
+// sameHost reports whether two URL strings share a scheme+host — the gate for
+// the navigate step's grace window (an in-page transition can only "arrive" at
+// a same-host destination).
+func sameHost(a, b string) bool {
+	ua, errA := url.Parse(a)
+	ub, errB := url.Parse(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return ua.Scheme == ub.Scheme && ua.Host == ub.Host
+}
+
 // subst replaces {{name}} placeholders with param values, verbatim. Used where
 // the surrounding context is plain text (typed values, select options, file
 // paths, verify comparisons). URL and JS contexts need the escaping variants
@@ -1448,8 +1475,29 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 		// page state that click just set up. Compared component-wise (the
 		// browser normalizes "http://host" to "http://host/"), and the step's
 		// Verify still runs below, so this never skips a real move.
+		//
+		// The SPA's own URL update is ASYNC: right after the click step returns,
+		// location.href may still show the old address (observed on Xiaohongshu:
+		// the tab click appends &from=tab_switch a beat later, and navigating in
+		// that window reloaded the page and reset the tab). When the destination
+		// is on the page's current host, give the page a short grace window to
+		// arrive on its own before forcing a load; a genuine cross-host navigate
+		// pays nothing.
 		var cur string
 		_ = page.Eval(ctx, "location.href", &cur)
+		if !sameLocation(cur, dest) && sameHost(cur, dest) {
+			grace := time.Now().Add(3 * time.Second)
+			for time.Now().Before(grace) && ctx.Err() == nil {
+				select {
+				case <-ctx.Done():
+				case <-time.After(100 * time.Millisecond):
+				}
+				_ = page.Eval(ctx, "location.href", &cur)
+				if sameLocation(cur, dest) {
+					break
+				}
+			}
+		}
 		if !sameLocation(cur, dest) {
 			if err := page.Navigate(ctx, dest); err != nil {
 				return page, err

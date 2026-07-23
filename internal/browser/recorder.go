@@ -39,6 +39,7 @@ type RecordedEvent struct {
 	Role         string   `json:"role,omitempty"`          // element's role attribute
 	NeighborText string   `json:"neighbor_text,omitempty"` // nearest stable label-like text (label / preceding sibling)
 	NewTab       bool     `json:"new_tab,omitempty"`       // navigate: the first load of a tab the page itself opened (has an opener)
+	SameDoc      bool     `json:"same_doc,omitempty"`      // navigate: same-document (pushState/replaceState) — a page-initiated effect, not a user action
 }
 
 // Recorder captures a user's actions on a page by injecting a DOM listener that
@@ -719,7 +720,7 @@ func (r *Recorder) watchNavigations(ctx context.Context, session string, markFir
 	r.mu.Unlock()
 
 	firstNav := markFirstNav
-	recordNav := func(u string) {
+	recordNav := func(u string, sameDoc bool) {
 		if u == "" || u == "about:blank" {
 			return
 		}
@@ -742,8 +743,8 @@ func (r *Recorder) watchNavigations(ctx context.Context, session string, markFir
 			}
 			break
 		}
-		ev := RecordedEvent{Type: "navigate", URL: u}
-		if firstNav {
+		ev := RecordedEvent{Type: "navigate", URL: u, SameDoc: sameDoc}
+		if firstNav && !sameDoc {
 			ev.NewTab = true
 			firstNav = false
 		}
@@ -762,7 +763,7 @@ func (r *Recorder) watchNavigations(ctx context.Context, session string, markFir
 			if json.Unmarshal(ev.Params, &b) != nil || b.Frame.ParentID != "" {
 				continue // ignore subframe navigations
 			}
-			recordNav(b.Frame.URL)
+			recordNav(b.Frame.URL, false)
 		}
 	}()
 	go func() {
@@ -780,7 +781,14 @@ func (r *Recorder) watchNavigations(ctx context.Context, session string, markFir
 			if top != "" && b.FrameID != top {
 				continue // SPA routing inside a subframe — not a page move
 			}
-			recordNav(b.URL)
+			// Same-document navigations (pushState/replaceState) can only be
+			// initiated by page JS — an address-bar entry is always a full
+			// load — so they are recorded as EFFECTS (SameDoc) for the events
+			// sidecar, and the compiler drops them: replaying the click that
+			// caused one reproduces it, while replaying it as a navigate
+			// force-reloads the page and resets the in-page state the click
+			// just set up. Known loss: SPA Back/Forward browser-button moves.
+			recordNav(b.URL, true)
 		}
 	}()
 }
