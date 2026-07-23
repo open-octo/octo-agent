@@ -6,7 +6,7 @@
   import { onMount } from 'svelte'
   import { showToast } from '../lib/stores'
   import * as api from '../lib/api'
-  import type { Skill, Workflow, McpServer, Memory } from '../lib/types'
+  import type { Skill, Workflow, Memory } from '../lib/types'
 
   // The trash endpoint's real wire shape ({ files: [...] }); api.listTrash's
   // declared RecallFile[] doesn't match it (the desktop view casts around the
@@ -17,6 +17,23 @@
     deleted_at: string
     size: number
     orphan: boolean
+    label?: string
+  }
+
+  // The MCP endpoint's real wire shape (mcpServerInfo in
+  // internal/server/mcp_handlers.go): `disabled` + `status`, not the
+  // enabled/tagStatus/tagLabel of the stale types.ts McpServer — the desktop
+  // view (McpView.svelte) casts around the same gap and derives locally.
+  interface McpInfo {
+    name: string
+    transport: string
+    disabled: boolean
+    status: 'connected' | 'error' | 'disabled' | 'invalid' | 'disconnected'
+    tools: number
+  }
+  const mcpStatusLabel: Record<McpInfo['status'], string> = {
+    connected: '已连接', error: '连接失败', disabled: '已停用',
+    invalid: '配置无效', disconnected: '未连接',
   }
 
   type Section = 'root' | 'skills' | 'mcp' | 'workflows' | 'memory' | 'trash'
@@ -25,7 +42,7 @@
   let loading = $state(true)
   let loadError = $state(false)
   let skills = $state<Skill[]>([])
-  let mcp = $state<McpServer[]>([])
+  let mcp = $state<McpInfo[]>([])
   let workflows = $state<Workflow[]>([])
   let memories = $state<Memory[]>([])
   let trash = $state<TrashEntry[]>([])
@@ -41,11 +58,13 @@
       api.listTrash().catch(() => null),
     ])
     if (sk) skills = sk
-    if (mc) mcp = mc.servers ?? []
+    if (mc) mcp = ((mc.servers ?? []) as unknown[]) as McpInfo[]
     if (wf) workflows = wf
     if (me) memories = me
     if (tr) trash = ((tr as any).files ?? tr ?? []) as TrashEntry[]
-    loadError = !sk && !mc && !wf && !me && !tr
+    const failed = [sk, mc, wf, me, tr].filter(r => !r).length
+    loadError = failed === 5
+    if (failed > 0 && failed < 5) showToast('部分数据加载失败', 'error')
     loading = false
   }
   onMount(load)
@@ -64,17 +83,16 @@
       togglingName = null
     }
   }
-  async function toggleMcp(m: McpServer) {
+  async function toggleMcp(m: McpInfo) {
     if (togglingName) return
     togglingName = m.name
-    const next = !m.enabled
     try {
-      await api.toggleMcpServer(m.name, next)
+      await api.toggleMcpServer(m.name, m.disabled)
       // Enable/disable changes connection state server-side; refetch for the
-      // real status instead of guessing the tag locally.
+      // real status instead of guessing it locally.
       const d = await api.listMcpServers().catch(() => null)
-      if (d) mcp = d.servers ?? []
-      else mcp = mcp.map(r => (r.name === m.name ? { ...r, enabled: next } : r))
+      if (d) mcp = ((d.servers ?? []) as unknown[]) as McpInfo[]
+      else mcp = mcp.map(r => (r.name === m.name ? { ...r, disabled: !m.disabled } : r))
     } catch (e: any) {
       showToast(e?.message ?? '更新 MCP 失败', 'error')
     } finally {
@@ -102,7 +120,7 @@
 
   const groups = $derived([
     { key: 'skills' as Section, label: '技能', count: `${skills.filter(s => s.enabled).length}/${skills.length} 启用` },
-    { key: 'mcp' as Section, label: 'MCP 服务器', count: `${mcp.filter(m => m.enabled).length}/${mcp.length} 启用` },
+    { key: 'mcp' as Section, label: 'MCP 服务器', count: `${mcp.filter(m => !m.disabled).length}/${mcp.length} 启用` },
     { key: 'workflows' as Section, label: '工作流', count: `${workflows.length} 个` },
     { key: 'memory' as Section, label: '记忆', count: `${memories.length} 条` },
     { key: 'trash' as Section, label: '回收站', count: `${trash.length} 项` },
@@ -162,12 +180,12 @@
           <div class="row">
             <div class="names">
               <span class="rlabel">
-                <span class="dot" class:ok={m.tagStatus === 'success'} class:bad={m.tagStatus === 'error'}></span>
+                <span class="dot" class:ok={m.status === 'connected'} class:bad={m.status === 'error' || m.status === 'invalid'}></span>
                 {m.name}
               </span>
-              <span class="sub">{m.transport} · {m.tools} 个工具 · {m.tagLabel}</span>
+              <span class="sub">{m.transport || '—'} · {m.tools} 个工具 · {mcpStatusLabel[m.status] ?? m.status}</span>
             </div>
-            <button class="switch" class:on={m.enabled} role="switch" aria-checked={m.enabled}
+            <button class="switch" class:on={!m.disabled} role="switch" aria-checked={!m.disabled}
               aria-label={m.name} disabled={togglingName !== null} onclick={() => toggleMcp(m)}
             ><span class="knob"></span></button>
           </div>
@@ -206,7 +224,7 @@
         {#each trash as f (f.id)}
           <div class="row">
             <div class="names">
-              <span class="rlabel">{f.original.split('/').pop()}</span>
+              <span class="rlabel">{f.label || f.original.split('/').pop()}</span>
               <span class="sub">{fmtBytes(f.size)} · {fmtDate(f.deleted_at)}{f.orphan ? ' · 原目录已不存在' : ''}</span>
             </div>
           </div>
