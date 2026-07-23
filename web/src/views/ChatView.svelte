@@ -2246,7 +2246,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   width: max(6px, calc(10px * var(--rail-scale, 1)));
   height: max(6px, calc(10px * var(--rail-scale, 1)));
   border-radius: 9999px;
-  background: var(--bg-container); border: 2px solid var(--border);
+  background: var(--bg-container);
+  /* Border and (below) the active ring scale too: at the 6px floor a fixed 2px
+     border would leave almost no fill, and a fixed 4px ring would cover
+     neighboring dots. */
+  border: max(1.5px, calc(2px * var(--rail-scale, 1))) solid var(--border);
   transition: width 0.14s ease, height 0.14s ease, background 0.14s ease,
     border-color 0.14s ease, box-shadow 0.14s ease;
 }
@@ -2258,7 +2262,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 .msg-rail-node.active .msg-rail-dot {
   width: max(8px, calc(12px * var(--rail-scale, 1)));
   height: max(8px, calc(12px * var(--rail-scale, 1)));
-  box-shadow: 0 0 0 4px rgba(22,119,255,0.16);
+  box-shadow: 0 0 0 max(2px, calc(4px * var(--rail-scale, 1))) rgba(22,119,255,0.16);
 }
 /* Hover/focus preview card, to the left of the rail, with a caret pointing back
    at the dot. --terminal-bg is the DS's intentionally-dark surface in both
