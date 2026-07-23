@@ -5,12 +5,12 @@ import SiteFooter from '../../components/SiteFooter.astro';
 import '../../styles/blog.css';
 
 const posts = (await getCollection('posts'))
-	.filter((post) => !post.data.draft && post.data.locale === 'en')
+	.filter((post) => !post.data.draft && post.data.locale === 'zh')
 	.sort((a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf());
 
 const [featured, ...rest] = posts;
 
-const dateFormatter = new Intl.DateTimeFormat('en-US', {
+const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
 	year: 'numeric',
 	month: 'long',
 	day: 'numeric',
@@ -18,15 +18,16 @@ const dateFormatter = new Intl.DateTimeFormat('en-US', {
 const href = (post) => `/blog/posts/${post.id}/`;
 
 const siteUrl = 'https://octo-agent.dev';
-const canonicalUrl = `${siteUrl}/blog/en/`;
+const canonicalUrl = `${siteUrl}/blog/zh/`;
 const alternateUrl = `${siteUrl}/blog/`;
-const title = 'octo blog';
-const description = 'Engineering notes, release updates, and deep dives from the octo-agent team.';
+const title = 'octo 博客';
+const description =
+	'octo-agent 团队的工程笔记、版本更新与 AI Agent 技术深度文章，分享 Loop Engineering、工具链与实战经验。';
 const ogImage = `${siteUrl}/blog/og-default.svg`;
 ---
 
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -34,13 +35,13 @@ const ogImage = `${siteUrl}/blog/og-default.svg`;
 		<meta name="description" content={description} />
 		<link rel="canonical" href={canonicalUrl} />
 		<link rel="icon" type="image/svg+xml" href="/blog/favicon.svg" />
-		<link rel="alternate" hreflang="zh-CN" href={alternateUrl} />
+		<link rel="alternate" hreflang="en" href={alternateUrl} />
 
 		<meta property="og:title" content={title} />
 		<meta property="og:description" content={description} />
 		<meta property="og:url" content={canonicalUrl} />
 		<meta property="og:type" content="website" />
-		<meta property="og:locale" content="en" />
+		<meta property="og:locale" content="zh-CN" />
 		<meta property="og:site_name" content={title} />
 		<meta property="og:image" content={ogImage} />
 
@@ -50,28 +51,28 @@ const ogImage = `${siteUrl}/blog/og-default.svg`;
 		<meta name="twitter:image" content={ogImage} />
 	</head>
 	<body>
-		<SiteHeader locale="en" active="blog" alternateUrl={alternateUrl} />
+		<SiteHeader locale="zh" active="blog" alternateUrl={alternateUrl} />
 
 		<section class="hero">
 			<div class="container">
-				<span class="kicker">Engineering notes from the Octo team</span>
-				<h1>octo blog</h1>
-				<p>Release notes, deep dives on Loop Engineering, and field reports on building a private, self-hosted AI agent.</p>
+				<span class="kicker">Octo 团队的工程笔记</span>
+				<h1>octo 博客</h1>
+				<p>版本说明、Loop Engineering 深度解析，以及构建私密、自托管 AI Agent 的一线实践。</p>
 			</div>
 		</section>
 
 		<main class="post-list">
 			<div class="post-list-head">
-				<h2>Latest posts</h2>
+				<h2>最新文章</h2>
 				<div class="rule"></div>
 			</div>
 
-			{posts.length === 0 && <p>No posts yet.</p>}
+			{posts.length === 0 && <p>暂无文章。</p>}
 
 			{
 				featured && (
 					<a href={href(featured)} class="post-card featured">
-						<span class="flag">Featured</span>
+						<span class="flag">精选</span>
 						<span class="post-card-title">{featured.data.title}</span>
 						<p class="post-card-description">{featured.data.description}</p>
 						<p class="post-card-meta">
@@ -116,6 +117,6 @@ const ogImage = `${siteUrl}/blog/og-default.svg`;
 			</ul>
 		</main>
 
-		<SiteFooter locale="en" />
+		<SiteFooter locale="zh" />
 	</body>
 </html>

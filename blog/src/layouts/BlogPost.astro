@@ -18,13 +18,13 @@ const siteUrl = 'https://octo-agent.dev';
 const pageSlug = slug ?? '';
 const canonicalUrl = `${siteUrl}/blog/posts/${pageSlug}/`;
 
-const blogHome = isZh ? '/blog/' : '/blog/en/';
+const blogHome = isZh ? '/blog/zh/' : '/blog/';
 const backLabel = isZh ? '返回博客' : 'Back to Blog';
 
 const alternateLocale = isZh ? 'en' : 'zh';
 const alternateUrl = alternateSlug
-	? `${siteUrl}/blog/posts/${alternateLocale === 'en' ? 'en/' : ''}${alternateSlug}/`
-	: `${siteUrl}/blog/${alternateLocale === 'zh' ? '' : 'en/'}`;
+	? `${siteUrl}/blog/posts/${alternateLocale === 'zh' ? 'zh/' : ''}${alternateSlug}/`
+	: `${siteUrl}/blog/${alternateLocale === 'en' ? '' : 'zh/'}`;
 
 const ogImage = image ? (image.startsWith('http') ? image : `${siteUrl}${image}`) : `${siteUrl}/blog/og-default.svg`;
 const siteName = isZh ? 'octo 博客' : 'octo blog';
