@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -1922,5 +1923,52 @@ func TestCompileUploadMergeThroughWaits(t *testing.T) {
 	}
 	if up.Anchors == nil || up.Anchors.Role != "button" || up.Anchors.NeighborText != "文档最大 30MB" {
 		t.Fatalf("upload must carry the click's fingerprint, got %+v", up.Anchors)
+	}
+}
+
+// TestReplayEmitsProgress: replay reports each step on the Progress callback as
+// it starts — a multi-minute replay must not be a black box that only speaks on
+// failure — and self-heal announces itself when it intervenes.
+func TestReplayEmitsProgress(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>p</title><button id="real">Go</button>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+
+	recording := &Recording{
+		Name: "p",
+		Steps: []Step{
+			{Action: "navigate", URL: srv.URL},
+			{Action: "click", Selector: "#stale"},
+		},
+	}
+	heal := func(_ context.Context, _ *Page, step *Step, _ error) error {
+		step.Selector = "#real"
+		return nil
+	}
+	var mu sync.Mutex
+	var lines []string
+	progress := func(line string) {
+		mu.Lock()
+		lines = append(lines, line)
+		mu.Unlock()
+	}
+	if _, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal, Browser: b, Progress: progress}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	joined := strings.Join(lines, "\n")
+	for _, want := range []string{"[1/2] navigate " + srv.URL, "[2/2] click #stale", "self-heal", "recovered"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("progress missing %q; got:\n%s", want, joined)
+		}
 	}
 }

@@ -1044,6 +1044,46 @@ type ReplayOptions struct {
 	Healer      Healer
 	Browser     *Browser
 	DownloadDir string
+	// Progress, when set, receives one human-readable line as each step starts
+	// (and when self-heal intervenes) — the live view of a replay that can run
+	// for minutes. Lines are built from the step's RAW template fields, never
+	// substituted param values, so a secret param can't leak through them.
+	Progress func(line string)
+}
+
+// emitProgress is the nil-safe Progress call.
+func (o ReplayOptions) emitProgress(line string) {
+	if o.Progress != nil {
+		o.Progress(line)
+	}
+}
+
+// stepProgressLine names a step for the live progress feed: the action plus
+// the most human-meaningful identifier the step carries (label > hint >
+// selector; URL for navigate; the wait condition for waits). Values are
+// deliberately absent — a type step's value may hold a substituted secret.
+func stepProgressLine(i, total int, st *Step) string {
+	name := st.Label
+	if name == "" {
+		name = st.Hint
+	}
+	if name == "" {
+		name = st.Selector
+	}
+	switch st.Action {
+	case "navigate":
+		name = st.URL
+	case "wait":
+		switch {
+		case st.Selector != "":
+			name = st.Selector
+		case st.Network:
+			name = "network idle"
+		default:
+			name = fmt.Sprintf("%dms", st.TimeoutMS)
+		}
+	}
+	return fmt.Sprintf("[%d/%d] %s %s", i, total, st.Action, name)
 }
 
 // ReplayRecording runs a recording deterministically (no LLM), substituting params. Each
@@ -1086,6 +1126,7 @@ func ReplayRecording(ctx context.Context, page *Page, recording *Recording, para
 	binds := map[string][]string{}
 	cur := page
 	for i := range recording.Steps {
+		opts.emitProgress(stepProgressLine(i+1, len(recording.Steps), &recording.Steps[i]))
 		stepCtx, cancel := context.WithTimeout(ctx, stepHard)
 		np, runErr := runStep(stepCtx, opts.Browser, cur, &recording.Steps[i], full, opts.StepTimeout, opts.DownloadDir, binds)
 		if runErr == nil {
@@ -1098,7 +1139,9 @@ func ReplayRecording(ctx context.Context, page *Page, recording *Recording, para
 		if runErr != nil {
 			return modified, cur, nil, fmt.Errorf("step %d (%s): %w", i+1, recording.Steps[i].Action, runErr)
 		}
-		_ = healed
+		if healed {
+			opts.emitProgress(fmt.Sprintf("[%d/%d] recovered — continuing", i+1, len(recording.Steps)))
+		}
 		cur = np
 	}
 	return modified, cur, assembleOutputs(recording.Outputs, binds), nil
@@ -1147,6 +1190,7 @@ const maxHealRounds = 3
 func recoverStep(ctx context.Context, opts ReplayOptions, page *Page, step *Step, params map[string]string, cause error, modified *bool, binds map[string][]string) (*Page, bool, error) {
 	// 1. Structural: a blocking overlay is the most common non-selector failure.
 	if dismissed, _ := page.DismissOverlay(ctx); dismissed {
+		opts.emitProgress("step failed — dismissed a blocking overlay, retrying")
 		if np, err := runStep(ctx, opts.Browser, page, step, params, opts.StepTimeout, opts.DownloadDir, binds); err == nil {
 			return np, true, nil
 		}
@@ -1158,9 +1202,13 @@ func recoverStep(ctx context.Context, opts ReplayOptions, page *Page, step *Step
 	// returning the bare cause made a failed heal indistinguishable from no
 	// heal ever running.
 	for round := 0; round < maxHealRounds; round++ {
+		opts.emitProgress(fmt.Sprintf("step failed — self-heal round %d/%d", round+1, maxHealRounds))
 		before := *step
 		if herr := opts.Healer(ctx, page, step, cause); herr != nil {
 			return page, false, fmt.Errorf("%w (self-heal gave up: %v)", cause, herr)
+		}
+		if step.Selector != before.Selector {
+			opts.emitProgress("self-heal proposed " + step.Selector + " — retrying")
 		}
 		if step.Selector != before.Selector {
 			// The healer's replacement selector is authoritative for this

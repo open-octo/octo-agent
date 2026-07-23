@@ -443,6 +443,31 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 	}
 }
 
+// ExecuteStream implements agent.StreamingToolExecutor: a replay's per-step
+// progress lines surface live on the tool card / CLI instead of the whole
+// multi-minute run being a silent black box that only speaks on failure. The
+// callback rides ctx so the deeply-nested replay case needs no signature churn;
+// every other action behaves exactly like Execute.
+func (b BrowserTool) ExecuteStream(ctx context.Context, name string, input map[string]any, progress func(chunk string)) (agent.ToolResult, error) {
+	if progress != nil {
+		ctx = withBrowserProgress(ctx, progress)
+	}
+	return b.Execute(ctx, name, input)
+}
+
+type browserProgressCtxKeyType struct{}
+
+var browserProgressCtxKey = browserProgressCtxKeyType{}
+
+func withBrowserProgress(ctx context.Context, p func(string)) context.Context {
+	return context.WithValue(ctx, browserProgressCtxKey, p)
+}
+
+func resolveBrowserProgress(ctx context.Context) func(string) {
+	p, _ := ctx.Value(browserProgressCtxKey).(func(string))
+	return p
+}
+
 func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
 	action, _ := input["action"].(string)
 	if action == "" {
@@ -806,7 +831,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		// long but healthy replay isn't killed by a one-size-fits-all ceiling.
 		rctx, rcancel := context.WithTimeout(ctx, replayTimeout(len(recording.Steps)))
 		defer rcancel()
-		modified, finalPage, outputs, err := browser.ReplayRecording(rctx, page, &recording, params, browser.ReplayOptions{Healer: healer, Browser: b, DownloadDir: downloadDir()})
+		modified, finalPage, outputs, err := browser.ReplayRecording(rctx, page, &recording, params, browser.ReplayOptions{Healer: healer, Browser: b, DownloadDir: downloadDir(), Progress: resolveBrowserProgress(ctx)})
 		if err != nil {
 			return agent.ToolResult{}, fmt.Errorf("browser: replay %q: %w", name, err)
 		}
