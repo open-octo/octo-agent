@@ -1153,3 +1153,46 @@ document.getElementById('zone').addEventListener('click', function(){
 		t.Fatalf("expected exactly the user's zone click, got %v", clicks)
 	}
 }
+
+// TestClickMovesPointerBeforePressing: a control that arms itself on pointer
+// entry (pointerenter/mousemove) before accepting activation — the norm for
+// closed shadow-DOM web components — must receive a move before the press, or
+// the press/release is ignored. Regression for the Xiaohongshu publish button,
+// which swallowed a bare press/release at coordinates where a move-first click
+// succeeded.
+func TestClickMovesPointerBeforePressing(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>arm</title>
+<button id="b" style="width:120px;height:40px">Go</button>
+<script>
+window.fired=0; window.armed=false;
+var b=document.getElementById('b');
+// Only accept the click if the pointer entered first (armed via pointermove).
+b.addEventListener('mousemove',function(){window.armed=true;});
+b.addEventListener('click',function(){ if(window.armed) window.fired++; });
+</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#b", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if err := page.Click(ctx, "#b"); err != nil {
+		t.Fatalf("click: %v", err)
+	}
+	var fired int
+	if err := page.Eval(ctx, "window.fired", &fired); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if fired != 1 {
+		t.Fatalf("click must move the pointer to the target before pressing (fired=%d)", fired)
+	}
+}

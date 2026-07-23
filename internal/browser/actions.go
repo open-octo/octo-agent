@@ -583,15 +583,25 @@ func (p *Page) ClickAt(ctx context.Context, selector string, fx, fy float64) err
 	if err != nil {
 		return err
 	}
-	for _, typ := range []string{"mousePressed", "mouseReleased"} {
-		_, err := p.cli.call(ctx, p.sessionID, "Input.dispatchMouseEvent", map[string]any{
-			"type":       typ,
-			"x":          pt.X,
-			"y":          pt.Y,
-			"button":     "left",
-			"clickCount": 1,
-		})
-		if err != nil {
+	// Move the pointer to the target BEFORE pressing. A bare press/release with
+	// no preceding move never fires pointerenter/pointerover/mousemove, so a
+	// control that arms itself on pointer entry before accepting activation —
+	// the norm for closed shadow-DOM web components (observed: Xiaohongshu's
+	// <xhs-publish-btn>, which swallowed press/release at the exact coordinates
+	// where a move-first click published) never reaches its clickable state.
+	// The press then carries buttons:1 (the down-button bitmask a real press
+	// has) so a framework inspecting it doesn't dismiss it as synthetic.
+	if _, err := p.cli.call(ctx, p.sessionID, "Input.dispatchMouseEvent", map[string]any{
+		"type": "mouseMoved", "x": pt.X, "y": pt.Y,
+	}); err != nil {
+		return err
+	}
+	steps := []map[string]any{
+		{"type": "mousePressed", "x": pt.X, "y": pt.Y, "button": "left", "buttons": 1, "clickCount": 1},
+		{"type": "mouseReleased", "x": pt.X, "y": pt.Y, "button": "left", "buttons": 0, "clickCount": 1},
+	}
+	for _, ev := range steps {
+		if _, err := p.cli.call(ctx, p.sessionID, "Input.dispatchMouseEvent", ev); err != nil {
 			return err
 		}
 	}
