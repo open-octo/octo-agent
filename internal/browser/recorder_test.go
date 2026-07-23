@@ -1328,3 +1328,49 @@ setTimeout(function(){ document.getElementById('mask').remove(); }, 1200);
 		t.Fatalf("click must wait for the covering overlay to clear (fired=%d)", fired)
 	}
 }
+
+// TestWaitForNetworkIdleWaitsForTriggeredRequest: a wait-for-idle issued right
+// after an action must not return in the gap BEFORE the action's request
+// starts. Regression for the Xiaohongshu 下一步 race — step 17 (wait network)
+// passed instantly while the submit was still in flight, so step 18 fired on
+// the not-yet-transitioned page.
+func TestWaitForNetworkIdleWaitsForTriggeredRequest(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/slow", func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(500 * time.Millisecond)
+		w.Write([]byte("ok"))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>race</title><body>x</body>`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	// Let the page's own initial requests settle so the monitor is idle — the
+	// exact state that used to make wait-for-idle return instantly.
+	time.Sleep(400 * time.Millisecond)
+	// Schedule a request 400ms out, then IMMEDIATELY wait for idle. The naive
+	// check returns at the first poll (idle since load); the grace must hold
+	// until the scheduled request both starts and finishes.
+	if err := page.Eval(ctx, "window.done=0; setTimeout(function(){ fetch('/slow').then(function(){ window.done=1; }); }, 400); true", nil); err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
+	if err := page.WaitForNetworkIdle(ctx, 0, 10*time.Second); err != nil {
+		t.Fatalf("wait idle: %v", err)
+	}
+	var done int
+	if err := page.Eval(ctx, "window.done", &done); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if done != 1 {
+		t.Fatal("wait-for-idle returned before the scheduled request completed (activity-grace race)")
+	}
+}
