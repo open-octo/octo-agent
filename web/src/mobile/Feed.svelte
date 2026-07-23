@@ -1,20 +1,12 @@
 <script lang="ts">
-  import { get } from 'svelte/store'
   import { feedGroups, type FeedKind } from './feedGroups'
-  import { createNewSession, activeSessionId } from '../lib/stores'
   import SessionCard from './SessionCard.svelte'
   import DeviceBanner from './DeviceBanner.svelte'
 
-  let { onOpen }: { onOpen: (id: string, kind: FeedKind) => void } = $props()
+  let { onOpen, onNew }: { onOpen: (id: string, kind: FeedKind) => void; onNew: () => void } = $props()
 
   const groups = feedGroups
   const empty = $derived($groups.todo.length + $groups.active.length + $groups.recent.length === 0)
-
-  async function newSession() {
-    await createNewSession()
-    const id = get(activeSessionId)
-    if (id) onOpen(id, 'done')
-  }
 </script>
 
 <header class="head">
@@ -53,7 +45,7 @@
   {/if}
 </div>
 
-<button class="fab" onclick={newSession} aria-label="新建会话">
+<button class="fab" onclick={onNew} aria-label="新建任务">
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
 </button>
 

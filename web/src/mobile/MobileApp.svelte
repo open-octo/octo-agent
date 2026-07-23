@@ -11,6 +11,7 @@
   import SettingsTab from './SettingsTab.svelte'
   import TasksTab from './TasksTab.svelte'
   import ConfigTab from './ConfigTab.svelte'
+  import NewTask from './NewTask.svelte'
   import type { FeedKind } from './feedGroups'
   import { setActiveSession } from '../lib/stores'
 
@@ -20,8 +21,14 @@
   // to show, taken from the tapped card's kind.
   let openId = $state<string | null>(null)
   let openKind = $state<FeedKind | null>(null)
+  // New-task sheet (FAB) + the first message it queued, bound to the session
+  // it was queued for — opening any other session must never inherit it.
+  let newTask = $state(false)
+  let initial = $state<{ id: string; prompt: string } | null>(null)
 
   function openSession(id: string, kind: FeedKind) {
+    newTask = false
+    if (initial && initial.id !== id) initial = null
     setActiveSession(id)
     openId = id
     openKind = kind
@@ -29,20 +36,31 @@
   function closeDetail() {
     openId = null
     openKind = null
+    initial = null
   }
 </script>
 
 <div class="m-root">
   <main class="m-view">
     {#if tab === 'chat'}
-      {#if openId}
+      {#if newTask}
+        <NewTask
+          onCancel={() => (newTask = false)}
+          onCreated={(id, prompt) => { newTask = false; openSession(id, prompt ? 'running' : 'done'); if (prompt) initial = { id, prompt } }}
+        />
+      {:else if openId}
         {#if openKind === 'approval'}
           <ApprovalDetail onBack={closeDetail} />
         {:else}
-          <ChatDetail onBack={closeDetail} onViewApproval={() => (openKind = 'approval')} />
+          <ChatDetail
+            onBack={closeDetail}
+            onViewApproval={() => (openKind = 'approval')}
+            initialPrompt={initial?.id === openId ? initial.prompt : ''}
+            onInitialSent={() => (initial = null)}
+          />
         {/if}
       {:else}
-        <Feed onOpen={openSession} />
+        <Feed onOpen={openSession} onNew={() => (newTask = true)} />
       {/if}
     {:else if tab === 'tasks'}
       <TasksTab onOpenSession={(id) => { tab = 'chat'; openSession(id, 'running') }} />
