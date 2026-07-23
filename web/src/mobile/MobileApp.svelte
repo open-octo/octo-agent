@@ -36,7 +36,7 @@
         {#if openKind === 'approval'}
           <ApprovalDetail onBack={closeDetail} />
         {:else}
-          <ChatDetail onBack={closeDetail} />
+          <ChatDetail onBack={closeDetail} onViewApproval={() => (openKind = 'approval')} />
         {/if}
       {:else}
         <Feed onOpen={openSession} />

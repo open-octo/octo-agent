@@ -14,6 +14,7 @@
 import { get } from 'svelte/store'
 import { ws } from '../lib/ws'
 import * as api from '../lib/api'
+import { observeArtifact, resetArtifacts } from '../lib/artifacts'
 import {
   chatMessages,
   chatStreaming,
@@ -61,6 +62,7 @@ function applyHistoryEvent(sid: string, ev: Record<string, any>, showReasoning: 
     })
   } else if (ev.type === 'tool_result') {
     updateToolResult(sid, ev.tool_id, ev.result, ev.ui_payload)
+    observeArtifact(sid, ev.ui_payload, false) // populate the artifacts store (silent)
   }
 }
 
@@ -167,6 +169,7 @@ export function wireMobileSession(sid: string): () => void {
   cleanups.push(ws.on('tool_result', (ev: any) => {
     if (!forSid(ev)) return
     updateToolResult(sid, ev.tool_id, ev.result, ev.ui_payload)
+    observeArtifact(sid, ev.ui_payload, false)
   }))
 
   cleanups.push(ws.on('tool_error', (ev: any) => {
@@ -255,6 +258,7 @@ export function wireMobileSession(sid: string): () => void {
   cleanups.push(ws.on('history_reload', (ev: any) => {
     if (!forSid(ev)) return
     clearMsgs(sid)
+    resetArtifacts(sid) // mirror desktop: /clear or /compact must drop stale artifacts
     loadMobileHistory(sid)
   }))
 
