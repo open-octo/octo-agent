@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -2007,5 +2008,74 @@ func TestReplayNavigateSkipsReloadWhenAlreadyThere(t *testing.T) {
 	}
 	if marker != 1 {
 		t.Fatal("the same-URL navigate reloaded the page and wiped the click's state")
+	}
+}
+
+// TestRecordingDirectoryLayout: a recording is a directory (recording.yaml +
+// events.json) so its artifacts live and die together; legacy flat files are
+// still resolved, listed, edited in place — and deleted with their sidecars.
+func TestRecordingDirectoryLayout(t *testing.T) {
+	root := t.TempDir()
+
+	// New name → directory layout for creation.
+	p := RecordingYAMLPath(root, "fresh")
+	if p != filepath.Join(root, "fresh", "recording.yaml") {
+		t.Fatalf("creation path should use the directory layout, got %s", p)
+	}
+
+	// Directory layout resolves, and its events sidecar sits inside.
+	if err := os.MkdirAll(filepath.Join(root, "dirrec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveRecording(filepath.Join(root, "dirrec", "recording.yaml"), Recording{Name: "dirrec", Steps: []Step{{Action: "navigate", URL: "https://x"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := RecordingYAMLPath(root, "dirrec"); got != filepath.Join(root, "dirrec", "recording.yaml") {
+		t.Fatalf("dir layout not resolved: %s", got)
+	}
+	if got := RecordingEventsPath(root, "dirrec"); got != filepath.Join(root, "dirrec", "events.json") {
+		t.Fatalf("dir events path wrong: %s", got)
+	}
+
+	// Legacy flat file resolves, with its flat sidecar.
+	if err := SaveRecording(filepath.Join(root, "old.yaml"), Recording{Name: "old", Steps: []Step{{Action: "navigate", URL: "https://y"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := RecordingYAMLPath(root, "old"); got != filepath.Join(root, "old.yaml") {
+		t.Fatalf("legacy layout not resolved: %s", got)
+	}
+	if got := RecordingEventsPath(root, "old"); got != filepath.Join(root, "old.events.json") {
+		t.Fatalf("legacy events path wrong: %s", got)
+	}
+
+	// Both layouts list.
+	names := []string{}
+	for _, r := range ListRecordings(root) {
+		names = append(names, r.Name)
+	}
+	if strings.Join(names, "|") != "dirrec|old" {
+		t.Fatalf("list should cover both layouts, got %v", names)
+	}
+
+	// Delete removes the whole directory, and legacy files with their sidecar.
+	if err := os.WriteFile(filepath.Join(root, "old.events.json"), []byte("[]"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteRecording(root, "dirrec"); err != nil {
+		t.Fatalf("delete dir layout: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "dirrec")); !os.IsNotExist(err) {
+		t.Fatal("recording directory not removed")
+	}
+	if err := DeleteRecording(root, "old"); err != nil {
+		t.Fatalf("delete legacy layout: %v", err)
+	}
+	for _, f := range []string{"old.yaml", "old.events.json"} {
+		if _, err := os.Stat(filepath.Join(root, f)); !os.IsNotExist(err) {
+			t.Fatalf("legacy artifact %s not removed", f)
+		}
+	}
+	if err := DeleteRecording(root, "gone"); !os.IsNotExist(err) {
+		t.Fatalf("deleting a missing recording should report not-exist, got %v", err)
 	}
 }

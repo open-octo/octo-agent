@@ -884,6 +884,74 @@ func LoadRecording(path string) (Recording, error) {
 	return ParseRecording(data)
 }
 
+// --- Recording storage layout ---
+//
+// A recording is a DIRECTORY under the recordings root:
+//
+//	<root>/<name>/recording.yaml  — the replayable, hand-editable recording
+//	<root>/<name>/events.json    — the raw captured events (diagnostics)
+//
+// so one recording's artifacts live and die together: deleting the directory
+// removes everything, and future artifacts (heal history, step screenshots)
+// have a home. Recordings saved by older versions as flat <root>/<name>.yaml
+// files are still found and edited in place; re-recording under that name
+// migrates it to the directory layout.
+
+// recordingFileName is the YAML's fixed basename inside a recording directory.
+const recordingFileName = "recording.yaml"
+
+// RecordingYAMLPath resolves where name's YAML lives: the directory layout
+// when present, else the legacy flat file when present, else (for creation)
+// the directory layout. name must be a bare name — callers validate it.
+func RecordingYAMLPath(root, name string) string {
+	dirPath := filepath.Join(root, name, recordingFileName)
+	if _, err := os.Stat(dirPath); err == nil {
+		return dirPath
+	}
+	legacy := filepath.Join(root, name+".yaml")
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	return dirPath
+}
+
+// RecordingEventsPath returns where name's raw-events sidecar belongs, in the
+// same layout RecordingYAMLPath resolves to.
+func RecordingEventsPath(root, name string) string {
+	p := RecordingYAMLPath(root, name)
+	if filepath.Base(p) == recordingFileName {
+		return filepath.Join(filepath.Dir(p), "events.json")
+	}
+	return filepath.Join(root, name+".events.json")
+}
+
+// DeleteRecording removes every artifact of name in either layout. Returns
+// os.ErrNotExist when nothing was there to delete.
+func DeleteRecording(root, name string) error {
+	found := false
+	dir := filepath.Join(root, name)
+	if st, err := os.Stat(dir); err == nil && st.IsDir() {
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
+		found = true
+	}
+	for _, f := range []string{filepath.Join(root, name+".yaml"), filepath.Join(root, name+".events.json")} {
+		err := os.Remove(f)
+		if err == nil {
+			found = true
+			continue
+		}
+		if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if !found {
+		return os.ErrNotExist
+	}
+	return nil
+}
+
 // ListRecordings reads every *.yaml recording in dir and returns them sorted by
 // name. A missing dir yields nil; an unreadable or unparseable file (a
 // half-written or hand-broken recording) is skipped rather than sinking the whole
@@ -895,10 +963,16 @@ func ListRecordings(dir string) []Recording {
 	}
 	var out []Recording
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+		var path string
+		switch {
+		case e.IsDir():
+			path = filepath.Join(dir, e.Name(), recordingFileName)
+		case strings.HasSuffix(e.Name(), ".yaml"):
+			path = filepath.Join(dir, e.Name()) // legacy flat layout
+		default:
 			continue
 		}
-		s, err := LoadRecording(filepath.Join(dir, e.Name()))
+		s, err := LoadRecording(path)
 		if err != nil || s.Name == "" {
 			continue
 		}

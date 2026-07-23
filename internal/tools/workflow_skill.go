@@ -128,7 +128,7 @@ func browserRecordingExists(name string) bool {
 	if name == "" || filepath.Base(name) != name {
 		return false
 	}
-	_, err := os.Stat(filepath.Join(BrowserRecordingsDir(), name+".yaml"))
+	_, err := os.Stat(browser.RecordingYAMLPath(BrowserRecordingsDir(), name))
 	return err == nil
 }
 
@@ -142,7 +142,7 @@ func skillRegistryGet(name string) (skills.Skill, bool) {
 // runBrowserRecording replays a recording deterministically and returns its
 // declared outputs as JSON. Serialized on the shared Chrome session.
 func runBrowserRecording(ctx context.Context, name string, params map[string]any) workflow.AgentResult {
-	path := filepath.Join(BrowserRecordingsDir(), name+".yaml")
+	path := browser.RecordingYAMLPath(BrowserRecordingsDir(), name)
 	recording, err := browser.LoadRecording(path)
 	if err != nil {
 		return workflow.AgentResult{Err: fmt.Errorf("recording %q: load: %w", name, err)}

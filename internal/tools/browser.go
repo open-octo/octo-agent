@@ -788,20 +788,25 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		events := rec.Events()
 		recording := browser.GenerateRecording(ctx, name, startURL, events, gen)
 		dir := BrowserRecordingsDir()
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		// A recording is a directory (<name>/recording.yaml + events.json) so
+		// its artifacts live and die together. Saving always writes the
+		// directory layout; a same-named legacy flat file is removed after a
+		// successful save, migrating it.
+		path := filepath.Join(dir, name, "recording.yaml")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return agent.ToolResult{}, err
 		}
-		path := filepath.Join(dir, name+".yaml")
 		if err := browser.SaveRecording(path, recording); err != nil {
 			return agent.ToolResult{}, err
 		}
+		_ = os.Remove(filepath.Join(dir, name+".yaml"))
+		_ = os.Remove(filepath.Join(dir, name+".events.json"))
 		// Persist the RAW captured events beside the YAML (best-effort). The
 		// compiled recording is a lossy distillation; when a generated recording
 		// misbehaves, the sidecar is the only way to tell a capture bug from a
-		// compile bug (ListRecordings only picks up *.yaml, so it stays out of
-		// the manifest). Secret-typed values were never captured in events.
+		// compile bug. Secret-typed values were never captured in events.
 		if raw, err := json.MarshalIndent(events, "", "  "); err == nil {
-			_ = os.WriteFile(filepath.Join(dir, name+".events.json"), raw, 0o600)
+			_ = os.WriteFile(filepath.Join(filepath.Dir(path), "events.json"), raw, 0o600)
 		}
 		// Recite the run-plan with verification per step so the user can confirm or
 		// request changes before the recording is used. The agent surfaces this
@@ -821,7 +826,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		if name == "" || filepath.Base(name) != name {
 			return agent.ToolResult{}, fmt.Errorf("browser: replay requires a valid recording name")
 		}
-		path := filepath.Join(BrowserRecordingsDir(), name+".yaml")
+		path := browser.RecordingYAMLPath(BrowserRecordingsDir(), name)
 		recording, err := browser.LoadRecording(path)
 		if err != nil {
 			return agent.ToolResult{}, fmt.Errorf("browser: load recording %q: %w", name, err)

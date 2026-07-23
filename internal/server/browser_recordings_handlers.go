@@ -37,8 +37,10 @@ func safeRecordingName(name string) (string, bool) {
 	return name, true
 }
 
+// recordingPath resolves a recording's YAML in either storage layout — the
+// directory form (<name>/recording.yaml) or the legacy flat file.
 func recordingPath(name string) string {
-	return filepath.Join(tools.BrowserRecordingsDir(), name+".yaml")
+	return browser.RecordingYAMLPath(tools.BrowserRecordingsDir(), name)
 }
 
 // GET /api/browser/recordings — list recorded workflows.
@@ -48,18 +50,25 @@ func (s *Server) handleListBrowserRecordings(w http.ResponseWriter, _ *http.Requ
 	out := make([]recordingSummary, 0)
 	if err == nil {
 		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+			var name, path string
+			switch {
+			case e.IsDir():
+				name = e.Name()
+				path = filepath.Join(dir, name, "recording.yaml")
+			case strings.HasSuffix(e.Name(), ".yaml"):
+				name = strings.TrimSuffix(e.Name(), ".yaml") // legacy flat layout
+				path = filepath.Join(dir, e.Name())
+			default:
 				continue
 			}
-			sk, lerr := browser.LoadRecording(filepath.Join(dir, e.Name()))
+			sk, lerr := browser.LoadRecording(path)
 			if lerr != nil {
-				continue // skip unparseable files rather than failing the list
+				continue // skip unparseable/empty entries rather than failing the list
 			}
 			params := make([]string, 0, len(sk.Params))
 			for _, p := range sk.Params {
 				params = append(params, p.Name)
 			}
-			name := strings.TrimSuffix(e.Name(), ".yaml")
 			out = append(out, recordingSummary{Name: name, Description: sk.Description, Steps: len(sk.Steps), Params: params})
 		}
 	}
@@ -111,12 +120,12 @@ func (s *Server) handleSaveBrowserRecording(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "a recording must have at least one step")
 		return
 	}
-	dir := tools.BrowserRecordingsDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	path := recordingPath(name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("create recordings dir: %v", err))
 		return
 	}
-	if err := os.WriteFile(recordingPath(name), []byte(req.YAML), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(req.YAML), 0o644); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("write recording: %v", err))
 		return
 	}
@@ -130,7 +139,9 @@ func (s *Server) handleDeleteBrowserRecording(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, "invalid recording name")
 		return
 	}
-	if err := os.Remove(recordingPath(name)); err != nil {
+	// Remove the whole recording — YAML, raw-events sidecar, any future
+	// artifacts — in whichever layout it uses.
+	if err := browser.DeleteRecording(tools.BrowserRecordingsDir(), name); err != nil {
 		if os.IsNotExist(err) {
 			writeError(w, http.StatusNotFound, fmt.Sprintf("recording %q not found", name))
 			return
