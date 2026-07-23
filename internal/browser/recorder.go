@@ -459,10 +459,20 @@ const captureScript = `(function(){
   // and "n>0 right now" would miss it — "any request started since the click"
   // does not.
   document.addEventListener('click', function(e){
+    /* Only the user's REAL gestures are the demonstration. A page that
+       programmatically clicks elements (e.g. creating a hidden file input and
+       calling .click() on it when an upload zone is pressed — Xiaohongshu's
+       import dialog) dispatches untrusted events; recording them poisons the
+       compiled steps (the upload merge grabbed the synthetic input click and
+       produced an unreplayable bare-"input" target). */
+    if(!e.isTrusted) return;
     report('click', e);
     var g0=window.__octoNet?window.__octoNet.gen:0;
     setTimeout(function(){ try{ var s=window.__octoNet; if(s && (s.n>0 || s.gen!==g0)) reportWait('network','',10000); }catch(_){} }, 150);
   }, true);
+  /* change stays unguarded: SELECT simulation and some framework controls
+     legitimately dispatch synthetic change events; the observed poison
+     (programmatic .click() on a dynamically created file input) is a click. */
   document.addEventListener('change', function(e){var t=e.target; report((t&&t.type==='file')?'upload':'change', e);}, true);
   // Enter in a text input = the submit gesture (change never fires without a
   // blur, so the typed value only reaches us as this event's snapshot). Not
@@ -472,6 +482,7 @@ const captureScript = `(function(){
   // the candidate — it is not a submit, CJK users hit it constantly).
   var TEXTY={text:1,search:1,email:1,url:1,tel:1,number:1,password:1};
   document.addEventListener('keydown', function(e){
+    if(!e.isTrusted) return;
     if(e.key!=='Enter'&&e.keyCode!==13) return;
     if(e.isComposing||e.keyCode===229) return;
     var t=e.target;

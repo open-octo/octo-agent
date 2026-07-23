@@ -1089,3 +1089,67 @@ document.getElementById('back').addEventListener('click',function(){history.push
 		t.Fatalf("nav events = %v, want %v (same-URL echo must be dropped, leave-and-return kept)", navs, want)
 	}
 }
+
+// TestRecorderIgnoresProgrammaticClicks: a page that reacts to a real click by
+// programmatically clicking another element (creating a file input and calling
+// .click() on it — Xiaohongshu's upload zone) must record only the USER's
+// gesture. The synthetic click polluted the event stream and the upload merge
+// then targeted the bare hidden input instead of the visible zone.
+func TestRecorderIgnoresProgrammaticClicks(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>pc</title>
+<div id="zone" role="button">upload zone</div>
+<script>
+document.getElementById('zone').addEventListener('click', function(){
+  var inp=document.createElement('input'); inp.type='file'; inp.id='ghost';
+  document.body.appendChild(inp);
+  inp.click(); // programmatic — must NOT be recorded
+});
+</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#zone", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	rec := NewRecorder(page)
+	if err := rec.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer rec.Stop()
+
+	if err := page.Click(ctx, "#zone"); err != nil {
+		t.Fatalf("click: %v", err)
+	}
+	var clicks []string
+	for i := 0; i < 30; i++ {
+		time.Sleep(100 * time.Millisecond)
+		clicks = clicks[:0]
+		for _, e := range rec.Events() {
+			if e.Type == "click" {
+				clicks = append(clicks, e.Selector)
+			}
+		}
+		if len(clicks) >= 1 {
+			break
+		}
+	}
+	time.Sleep(500 * time.Millisecond) // allow a late synthetic click to arrive (it must not)
+	clicks = clicks[:0]
+	for _, e := range rec.Events() {
+		if e.Type == "click" {
+			clicks = append(clicks, e.Selector)
+		}
+	}
+	if len(clicks) != 1 || strings.Contains(clicks[0], "ghost") {
+		t.Fatalf("expected exactly the user's zone click, got %v", clicks)
+	}
+}
