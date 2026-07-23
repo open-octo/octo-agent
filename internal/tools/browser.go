@@ -443,6 +443,31 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 	}
 }
 
+// ExecuteStream implements agent.StreamingToolExecutor: a replay's per-step
+// progress lines surface live on the tool card / CLI instead of the whole
+// multi-minute run being a silent black box that only speaks on failure. The
+// callback rides ctx so the deeply-nested replay case needs no signature churn;
+// every other action behaves exactly like Execute.
+func (b BrowserTool) ExecuteStream(ctx context.Context, name string, input map[string]any, progress func(chunk string)) (agent.ToolResult, error) {
+	if progress != nil {
+		ctx = withBrowserProgress(ctx, progress)
+	}
+	return b.Execute(ctx, name, input)
+}
+
+type browserProgressCtxKeyType struct{}
+
+var browserProgressCtxKey = browserProgressCtxKeyType{}
+
+func withBrowserProgress(ctx context.Context, p func(string)) context.Context {
+	return context.WithValue(ctx, browserProgressCtxKey, p)
+}
+
+func resolveBrowserProgress(ctx context.Context) func(string) {
+	p, _ := ctx.Value(browserProgressCtxKey).(func(string))
+	return p
+}
+
 func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
 	action, _ := input["action"].(string)
 	if action == "" {
@@ -760,20 +785,55 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 			return agent.ToolResult{}, fmt.Errorf("browser: no recording in progress")
 		}
 		rec.Stop()
-		recording := browser.GenerateRecording(ctx, name, startURL, rec.Events(), gen)
+		events := rec.Events()
+		recording := browser.GenerateRecording(ctx, name, startURL, events, gen)
 		dir := BrowserRecordingsDir()
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		// A recording is a directory (<name>/recording.yaml + events.json) so
+		// its artifacts live and die together. Saving always writes the
+		// directory layout; a same-named legacy flat file is removed after a
+		// successful save, migrating it.
+		path := filepath.Join(dir, name, "recording.yaml")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return agent.ToolResult{}, err
 		}
-		path := filepath.Join(dir, name+".yaml")
 		if err := browser.SaveRecording(path, recording); err != nil {
 			return agent.ToolResult{}, err
+		}
+		_ = os.Remove(filepath.Join(dir, name+".yaml"))
+		_ = os.Remove(filepath.Join(dir, name+".events.json"))
+		// Persist the RAW captured events beside the YAML (best-effort). The
+		// compiled recording is a lossy distillation; when a generated recording
+		// misbehaves, the sidecar is the only way to tell a capture bug from a
+		// compile bug. Secret-typed values were never captured in events.
+		if raw, err := json.MarshalIndent(events, "", "  "); err == nil {
+			_ = os.WriteFile(filepath.Join(filepath.Dir(path), "events.json"), raw, 0o600)
 		}
 		// Recite the run-plan with verification per step so the user can confirm or
 		// request changes before the recording is used. The agent surfaces this
 		// text and asks the user to confirm.
 		summary := browser.SummarizeRecording(recording)
 		msg := fmt.Sprintf("recorded %d step(s) → %s\n\n%s\n\nReview/edit it there (set params, fix selectors). Replay it with the Replay button in the Browser view, or action=replay name=%q. (Recordings are NOT keyword-triggerable — they only run when explicitly replayed.)", len(recording.Steps), path, summary, name)
+		if len(recording.Params) > 0 {
+			// Spell the declared param names out in the result. Without this
+			// the model paraphrases them from memory when reciting the plan
+			// ("pass file and title" for a param actually named value) and
+			// then calls replay with the invented name.
+			var pb strings.Builder
+			for _, p := range recording.Params {
+				fmt.Fprintf(&pb, "\n- %s", p.Name)
+				if p.Description != "" {
+					fmt.Fprintf(&pb, " — %s", p.Description)
+				}
+				if p.Default != "" {
+					fmt.Fprintf(&pb, " (default: %s)", p.Default)
+				}
+				if p.Secret {
+					pb.WriteString(" (secret: collected outside the conversation — never pass a value)")
+				}
+			}
+			msg += "\n\nDeclared replay params — use EXACTLY these names:" + pb.String()
+		}
+		msg += fmt.Sprintf("\nRaw captured events (diagnostic ground truth for this recording): %s — when a future replay misbehaves, compare the failing step against its source events before editing.", filepath.Join(filepath.Dir(path), "events.json"))
 		if recording.Description == "" {
 			// The LLM distill fell back (or omitted a description). Surface it here
 			// — the stderr warning never reaches the model — so the recording doesn't
@@ -787,7 +847,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		if name == "" || filepath.Base(name) != name {
 			return agent.ToolResult{}, fmt.Errorf("browser: replay requires a valid recording name")
 		}
-		path := filepath.Join(BrowserRecordingsDir(), name+".yaml")
+		path := browser.RecordingYAMLPath(BrowserRecordingsDir(), name)
 		recording, err := browser.LoadRecording(path)
 		if err != nil {
 			return agent.ToolResult{}, fmt.Errorf("browser: load recording %q: %w", name, err)
@@ -806,9 +866,21 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		// long but healthy replay isn't killed by a one-size-fits-all ceiling.
 		rctx, rcancel := context.WithTimeout(ctx, replayTimeout(len(recording.Steps)))
 		defer rcancel()
-		modified, finalPage, outputs, err := browser.ReplayRecording(rctx, page, &recording, params, browser.ReplayOptions{Healer: healer, Browser: b, DownloadDir: downloadDir()})
+		modified, finalPage, outputs, err := browser.ReplayRecording(rctx, page, &recording, params, browser.ReplayOptions{Healer: healer, Browser: b, DownloadDir: downloadDir(), Progress: resolveBrowserProgress(ctx)})
 		if err != nil {
-			return agent.ToolResult{}, fmt.Errorf("browser: replay %q: %w", name, err)
+			// Route the model to the evidence it needs to repair the recording
+			// ITSELF: the YAML is the editable steps, the events sidecar is the
+			// raw capture ground truth. Comparing them tells a capture problem
+			// (event missing/odd) from a compile problem (event present, step
+			// wrong) from page drift (both fine, page changed) — each with a
+			// different fix: re-record, edit the YAML, or adjust the failing
+			// step's selector/waits.
+			hint := fmt.Sprintf(" [to diagnose: the editable steps are at %s; the RAW captured events are at %s — compare the failing step against its source events to tell a capture gap (re-record) from a compile fault (edit the YAML) from page drift (fix the step's selector/waits); observe the live page to see its current state]",
+				path, browser.RecordingEventsPath(BrowserRecordingsDir(), name))
+			if _, serr := os.Stat(browser.RecordingEventsPath(BrowserRecordingsDir(), name)); serr != nil {
+				hint = fmt.Sprintf(" [to diagnose: the editable steps are at %s; observe the live page to compare its current state against the failing step]", path)
+			}
+			return agent.ToolResult{}, fmt.Errorf("browser: replay %q: %w%s", name, err, hint)
 		}
 		// A click in the recording may have opened (and switched to) a new tab; keep
 		// the session pointed there so follow-up actions act on the right page.
@@ -822,6 +894,28 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 			"recording": name,
 			"steps":     len(recording.Steps),
 			"outputs":   outputs,
+		}
+		// End-state accounting: every step can "pass" while the decisive click
+		// silently does nothing (a disabled/missed publish button) — the
+		// demonstration's final URL is the recorded ground truth to check
+		// against. A mismatch doesn't fail the replay (query params can vary);
+		// it tells the model to verify the outcome instead of assuming success.
+		if recording.EndURL != "" && finalPage != nil {
+			var cur string
+			_ = finalPage.Eval(rctx, "location.href", &cur)
+			env["demonstrated_end_url"] = recording.EndURL
+			env["replay_end_url"] = cur
+			if !browser.SameLocation(cur, recording.EndURL) {
+				// This is the COMMON failure mode — every step passed but the
+				// outcome is wrong (a decisive click swallowed) — and it does not
+				// take the error path, so it must carry its own diagnostic
+				// pointer or the model has nothing to act on. Same evidence and
+				// decision tree the hard-error path provides.
+				env["end_url_mismatch"] = "the demonstration ended at a different URL than this replay — the final action likely did NOT take effect; do NOT report success. First OBSERVE the live page. If a transient validation is shown (e.g. \"图片正在上传\" / \"uploading\" / \"processing\"), the action was ACCEPTED but blocked — WAIT for it to clear, then just replay this recording again (the decisive action is retried automatically). If the decisive control is a custom element (a hyphenated tag like <xhs-publish-btn> — often a closed shadow DOM whose real button text/`:has-text` selectors CANNOT find), do NOT hand-click it by text; replay the recording, which clicks the exact recorded coordinates. Otherwise diagnose with the recording's raw captured events at " +
+					browser.RecordingEventsPath(BrowserRecordingsDir(), name) +
+					" and the editable steps at " + path +
+					" — compare the last acting step against its source events (event missing -> re-record; event present but step wrong -> edit the YAML; both fine -> the page changed, fix that step's selector/waits)."
+			}
 		}
 		if modified {
 			// Self-heal write-back: persists the selector that just verified. Note it

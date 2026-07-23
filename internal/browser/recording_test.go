@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -729,6 +731,102 @@ func TestReplayDismissesOverlayDeterministically(t *testing.T) {
 	}
 	if hit != 1 {
 		t.Fatalf("target not clicked after overlay dismissal (hit=%d)", hit)
+	}
+}
+
+// TestReplayHealBypassesStaleAnchors: a step whose recorded fingerprint no
+// longer matches the page (garbage neighbor text) fails anchored resolution;
+// the healer supplies the correct selector. The retry must TRUST the healed
+// selector instead of re-gating it through the same dead fingerprint —
+// otherwise an anchored step can never heal (observed on Zhihu: every heal
+// round was rejected by the drifted fingerprint and replay failed). The stale
+// anchors must also be dropped from the step so the write-back persists a
+// replayable repair.
+func TestReplayHealBypassesStaleAnchors(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>t</title>
+<button id="real">Go</button>
+<script>window.clicks=0;document.getElementById('real').addEventListener('click',function(){window.clicks++});</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#real", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+
+	recording := &Recording{Name: "x", Steps: []Step{{
+		Action:   "click",
+		Selector: "#stale",
+		Anchors:  &Anchors{Tag: "div", NeighborText: "text that exists nowhere on this page"},
+	}}}
+	heal := func(_ context.Context, _ *Page, step *Step, _ error) error {
+		step.Selector = "#real"
+		return nil
+	}
+	modified, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal, Browser: b})
+	if err != nil {
+		t.Fatalf("replay should succeed via the healed selector, got: %v", err)
+	}
+	if !modified {
+		t.Fatal("expected modified=true after a successful heal")
+	}
+	if recording.Steps[0].Selector != "#real" {
+		t.Fatalf("step not corrected: %q", recording.Steps[0].Selector)
+	}
+	if recording.Steps[0].Anchors != nil {
+		t.Fatal("stale anchors must be dropped with the healed selector — keeping them re-deadlocks the next replay")
+	}
+	var clicks int
+	if err := page.Eval(ctx, "window.clicks", &clicks); err != nil || clicks < 1 {
+		t.Fatalf("healed step did not actually click (clicks=%d, err=%v)", clicks, err)
+	}
+}
+
+// TestReplayHealFailureIsReported: when the healer runs and gives up, the
+// surfaced error must say so — a bare selector error made a failed heal
+// indistinguishable from self-heal never being configured.
+func TestReplayHealFailureIsReported(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>t</title><p>nothing to click</p>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+
+	recording := &Recording{Name: "x", Steps: []Step{{Action: "click", Selector: "#gone"}}}
+	heal := func(_ context.Context, _ *Page, _ *Step, _ error) error {
+		return fmt.Errorf("model could not identify a replacement selector")
+	}
+	_, _, _, err = ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal, Browser: b})
+	if err == nil {
+		t.Fatal("replay should fail")
+	}
+	if !strings.Contains(err.Error(), "self-heal") {
+		t.Fatalf("error must surface the heal attempt, got: %v", err)
+	}
+
+	// And with no healer at all, the error must say self-heal was unavailable.
+	_, _, _, err = ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 2 * time.Second, Browser: b})
+	if err == nil {
+		t.Fatal("replay should fail")
+	}
+	if !strings.Contains(err.Error(), "self-heal skipped") {
+		t.Fatalf("error must say self-heal was unavailable, got: %v", err)
 	}
 }
 
@@ -1721,5 +1819,572 @@ func TestReplayAnchorsRefuseWrongElement(t *testing.T) {
 	}
 	if hit != "" {
 		t.Fatalf("nothing should have been clicked, got %q", hit)
+	}
+}
+
+// TestGenerateRecordingDistillRetriesOnInvalidSelector: the first distill
+// attempt uses a selector outside the baseline; instead of silently discarding
+// the refinement, the distiller is re-asked once with the violations named,
+// and a corrected second attempt is accepted.
+func TestGenerateRecordingDistillRetriesOnInvalidSelector(t *testing.T) {
+	ctx := context.Background()
+	events := []RecordedEvent{
+		{Type: "click", Selector: "#search", Tag: "BUTTON", Text: "Search"},
+	}
+	calls := 0
+	var secondPrompt string
+	gen := func(_ context.Context, _, user string) (string, error) {
+		calls++
+		if calls == 1 {
+			return "name: x\nsteps:\n  - {action: click, selector: '#invented'}\n", nil
+		}
+		secondPrompt = user
+		return "name: x\nsteps:\n  - {action: click, selector: '#search'}\n", nil
+	}
+	s := GenerateRecording(ctx, "demo", "", events, gen)
+	if calls != 2 {
+		t.Fatalf("expected exactly one retry (2 calls), got %d", calls)
+	}
+	if !strings.Contains(secondPrompt, "#invented") {
+		t.Fatalf("retry prompt must name the invalid selector, got: %q", secondPrompt)
+	}
+	if len(s.Steps) != 1 || s.Steps[0].Selector != "#search" {
+		t.Fatalf("corrected second attempt should be accepted: %+v", s.Steps)
+	}
+}
+
+// TestCollapseNewTabDetours: the click chain that spawned a new tab (whose
+// first navigation is tagged NewTab) is dropped — the navigate reaches the
+// same page directly, and the menu-hop clicks were the least replayable steps
+// (Zhihu: popover toggle → 写文章). State-bearing events end the walk-back,
+// and an untagged navigate (a tab the user opened by hand) keeps everything.
+func TestCollapseNewTabDetours(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "change", Selector: "#q", Tag: "INPUT", Value: "keep me"},
+		{Type: "click", Selector: "#menu-toggle", Tag: "BUTTON"},
+		{Type: "wait", WaitKind: "network"},
+		{Type: "click", Selector: "#menu-item", Tag: "BUTTON"},
+		{Type: "navigate", URL: "https://x/editor", NewTab: true},
+		{Type: "click", Selector: "#after", Tag: "BUTTON"},
+	}
+	s := CompileRecording("x", "", "", events)
+	var actions []string
+	for _, st := range s.Steps {
+		actions = append(actions, st.Action+":"+st.Selector+st.URL)
+	}
+	want := []string{"type:#q", "navigate:https://x/editor", "click:#after"}
+	if strings.Join(actions, "|") != strings.Join(want, "|") {
+		t.Fatalf("detour not collapsed to %v, got %v", want, actions)
+	}
+
+	// Untagged navigate (user-opened tab): the clicks must survive.
+	for i := range events {
+		events[i].NewTab = false
+	}
+	s2 := CompileRecording("x", "", "", events)
+	sawMenuClick := false
+	for _, st := range s2.Steps {
+		if st.Action == "click" && st.Selector == "#menu-toggle" {
+			sawMenuClick = true
+		}
+	}
+	if !sawMenuClick {
+		t.Fatal("untagged navigate must not eat preceding clicks")
+	}
+}
+
+// TestCompileUploadMergeThroughWaits: the chooser-opening click is usually
+// separated from the file-pick event by auto-inserted waits; the merge must
+// look back past them, and carry the click's hint/fingerprint onto the merged
+// upload step — otherwise the recording keeps a separate click AND an upload
+// targeting a hidden <input type=file> that has no clickable box to replay.
+func TestCompileUploadMergeThroughWaits(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "click", Selector: "div[role=\"button\"]", Tag: "DIV", Text: "选择文件", Role: "button", NeighborText: "文档最大 30MB"},
+		{Type: "wait", WaitKind: "network"},
+		{Type: "upload", Selector: "input[type=file]", Tag: "INPUT", Value: "C:\\fakepath\\x.md"},
+	}
+	s := CompileRecording("x", "", "", events)
+	var uploads, clicks int
+	var up Step
+	for _, st := range s.Steps {
+		switch st.Action {
+		case "upload":
+			uploads++
+			up = st
+		case "click":
+			clicks++
+		}
+	}
+	if uploads != 1 || clicks != 0 {
+		t.Fatalf("expected the click merged into one upload step, got %d uploads / %d clicks: %+v", uploads, clicks, s.Steps)
+	}
+	if up.Selector != "div[role=\"button\"]" {
+		t.Fatalf("upload must target the visible trigger, got %q", up.Selector)
+	}
+	if up.Anchors == nil || up.Anchors.Role != "button" || up.Anchors.NeighborText != "文档最大 30MB" {
+		t.Fatalf("upload must carry the click's fingerprint, got %+v", up.Anchors)
+	}
+}
+
+// TestReplayEmitsProgress: replay reports each step on the Progress callback as
+// it starts — a multi-minute replay must not be a black box that only speaks on
+// failure — and self-heal announces itself when it intervenes.
+func TestReplayEmitsProgress(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>p</title><button id="real">Go</button>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+
+	recording := &Recording{
+		Name: "p",
+		Steps: []Step{
+			{Action: "navigate", URL: srv.URL},
+			{Action: "click", Selector: "#stale"},
+		},
+	}
+	heal := func(_ context.Context, _ *Page, step *Step, _ error) error {
+		step.Selector = "#real"
+		return nil
+	}
+	var mu sync.Mutex
+	var lines []string
+	progress := func(line string) {
+		mu.Lock()
+		lines = append(lines, line)
+		mu.Unlock()
+	}
+	if _, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal, Browser: b, Progress: progress}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	joined := strings.Join(lines, "\n")
+	for _, want := range []string{"[1/2] navigate " + srv.URL, "[2/2] click #stale", "self-heal", "recovered"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("progress missing %q; got:\n%s", want, joined)
+		}
+	}
+}
+
+// TestReplayNavigateSkipsReloadWhenAlreadyThere: a navigate step whose target
+// is the page's CURRENT URL must not reload — in-page state set up by earlier
+// steps (an SPA tab selection) would be wiped, breaking every step after it.
+func TestReplayNavigateSkipsReloadWhenAlreadyThere(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>skip</title>
+<button id="b">Go</button>
+<script>window.marker=0;document.getElementById('b').addEventListener('click',function(){window.marker=1;});</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+
+	recording := &Recording{Name: "skip", Steps: []Step{
+		{Action: "navigate", URL: srv.URL},
+		{Action: "click", Selector: "#b"},
+		{Action: "navigate", URL: srv.URL}, // recorded echo of the click's in-page transition
+	}}
+	if _, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 3 * time.Second, Browser: b}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	var marker int
+	if err := page.Eval(ctx, "window.marker", &marker); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if marker != 1 {
+		t.Fatal("the same-URL navigate reloaded the page and wiped the click's state")
+	}
+}
+
+// TestRecordingDirectoryLayout: a recording is a directory (recording.yaml +
+// events.json) so its artifacts live and die together; legacy flat files are
+// still resolved, listed, edited in place — and deleted with their sidecars.
+func TestRecordingDirectoryLayout(t *testing.T) {
+	root := t.TempDir()
+
+	// New name → directory layout for creation.
+	p := RecordingYAMLPath(root, "fresh")
+	if p != filepath.Join(root, "fresh", "recording.yaml") {
+		t.Fatalf("creation path should use the directory layout, got %s", p)
+	}
+
+	// Directory layout resolves, and its events sidecar sits inside.
+	if err := os.MkdirAll(filepath.Join(root, "dirrec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveRecording(filepath.Join(root, "dirrec", "recording.yaml"), Recording{Name: "dirrec", Steps: []Step{{Action: "navigate", URL: "https://x"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := RecordingYAMLPath(root, "dirrec"); got != filepath.Join(root, "dirrec", "recording.yaml") {
+		t.Fatalf("dir layout not resolved: %s", got)
+	}
+	if got := RecordingEventsPath(root, "dirrec"); got != filepath.Join(root, "dirrec", "events.json") {
+		t.Fatalf("dir events path wrong: %s", got)
+	}
+
+	// Legacy flat file resolves, with its flat sidecar.
+	if err := SaveRecording(filepath.Join(root, "old.yaml"), Recording{Name: "old", Steps: []Step{{Action: "navigate", URL: "https://y"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := RecordingYAMLPath(root, "old"); got != filepath.Join(root, "old.yaml") {
+		t.Fatalf("legacy layout not resolved: %s", got)
+	}
+	if got := RecordingEventsPath(root, "old"); got != filepath.Join(root, "old.events.json") {
+		t.Fatalf("legacy events path wrong: %s", got)
+	}
+
+	// Both layouts list.
+	names := []string{}
+	for _, r := range ListRecordings(root) {
+		names = append(names, r.Name)
+	}
+	if strings.Join(names, "|") != "dirrec|old" {
+		t.Fatalf("list should cover both layouts, got %v", names)
+	}
+
+	// Delete removes the whole directory, and legacy files with their sidecar.
+	if err := os.WriteFile(filepath.Join(root, "old.events.json"), []byte("[]"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteRecording(root, "dirrec"); err != nil {
+		t.Fatalf("delete dir layout: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "dirrec")); !os.IsNotExist(err) {
+		t.Fatal("recording directory not removed")
+	}
+	if err := DeleteRecording(root, "old"); err != nil {
+		t.Fatalf("delete legacy layout: %v", err)
+	}
+	for _, f := range []string{"old.yaml", "old.events.json"} {
+		if _, err := os.Stat(filepath.Join(root, f)); !os.IsNotExist(err) {
+			t.Fatalf("legacy artifact %s not removed", f)
+		}
+	}
+	if err := DeleteRecording(root, "gone"); !os.IsNotExist(err) {
+		t.Fatalf("deleting a missing recording should report not-exist, got %v", err)
+	}
+}
+
+// TestReplayNavigateWaitsForAsyncSPAURL: an SPA updates location.href a beat
+// AFTER the click that caused the transition (Xiaohongshu appends
+// &from=tab_switch asynchronously). The recorded navigate that follows the
+// click must give the page a grace window to arrive on its own instead of
+// immediately force-loading — the reload resets the in-page state the click
+// just set up.
+func TestReplayNavigateWaitsForAsyncSPAURL(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>spa</title>
+<button id="tab">Tab</button>
+<script>
+window.marker=0;
+document.getElementById('tab').addEventListener('click',function(){
+  window.marker=1;
+  setTimeout(function(){ history.pushState({},'',location.pathname+'?tab=long'); }, 600);
+});
+</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+
+	recording := &Recording{Name: "spa", Steps: []Step{
+		{Action: "navigate", URL: srv.URL},
+		{Action: "click", Selector: "#tab"},
+		{Action: "navigate", URL: srv.URL + "/?tab=long"}, // async echo of the click
+	}}
+	if _, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 3 * time.Second, Browser: b}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	var marker int
+	if err := page.Eval(ctx, "window.marker", &marker); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if marker != 1 {
+		t.Fatal("the navigate raced the SPA's async URL update and reloaded, wiping the click's state")
+	}
+}
+
+// TestCompileDropsSameDocNavigates: a same-document navigation (pushState
+// after a tab click — Xiaohongshu appends &from=tab_switch) is an effect of
+// the preceding click, not a user action. Compiling it into a navigate step
+// force-reloads the page on replay and resets the state the click set up.
+func TestCompileDropsSameDocNavigates(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "navigate", URL: "https://x/publish"},
+		{Type: "click", Selector: "#tab-long", Tag: "SPAN", Text: "写长文"},
+		{Type: "navigate", URL: "https://x/publish?from=tab_switch", SameDoc: true},
+		{Type: "click", Selector: "#new-draft", Tag: "BUTTON", Text: "新的创作"},
+	}
+	s := CompileRecording("x", "", "", events)
+	for _, st := range s.Steps {
+		if st.Action == "navigate" && strings.Contains(st.URL, "tab_switch") {
+			t.Fatalf("same-doc navigation must not compile to a navigate step: %+v", s.Steps)
+		}
+	}
+	var clicks int
+	for _, st := range s.Steps {
+		if st.Action == "click" {
+			clicks++
+		}
+	}
+	if clicks != 2 {
+		t.Fatalf("both real clicks must survive, got %d: %+v", clicks, s.Steps)
+	}
+}
+
+// TestCompileCapturesClickPointAndEndURL: the click's press position (box
+// fractions) and the demonstration's final URL survive compilation — the
+// fractions replay shadow-host clicks at the real spot, and EndURL is the
+// ground truth that catches a decisive click that silently did nothing.
+func TestCompileCapturesClickPointAndEndURL(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "navigate", URL: "https://x/publish"},
+		{Type: "click", Selector: "xhs-publish-btn", Tag: "XHS-PUBLISH-BTN", ClickX: 0.87, ClickY: 0.42},
+		{Type: "navigate", URL: "https://x/publish?published=true", SameDoc: true},
+	}
+	s := CompileRecording("x", "", "", events)
+	var click *Step
+	for i := range s.Steps {
+		if s.Steps[i].Action == "click" {
+			click = &s.Steps[i]
+		}
+	}
+	if click == nil || click.ClickX != 0.87 || click.ClickY != 0.42 {
+		t.Fatalf("click point not carried: %+v", s.Steps)
+	}
+	if s.EndURL != "https://x/publish?published=true" {
+		t.Fatalf("EndURL must record the demonstration's final URL (same-doc redirects included), got %q", s.EndURL)
+	}
+	// And it round-trips through YAML.
+	data, err := MarshalRecording(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt, err := ParseRecording(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt.EndURL != s.EndURL || rt.Steps[len(rt.Steps)-1].ClickX == 0 {
+		t.Fatalf("yaml round-trip lost fields: end_url=%q steps=%+v", rt.EndURL, rt.Steps)
+	}
+}
+
+// TestClickAtFraction: ClickAt presses at the requested fraction of the
+// element's box, not its center — a shadow-DOM host's center can be dead
+// space while the real control sits at the recorded spot.
+func TestClickAtFraction(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>frac</title>
+<div id="host" style="position:absolute;left:0;top:0;width:400px;height:100px;background:#eee"></div>
+<script>
+window.hits=[];
+document.getElementById('host').addEventListener('mousedown',function(e){window.hits.push({x:e.clientX,y:e.clientY});},true);
+</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#host", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if err := page.ClickAt(ctx, "#host", 0.9, 0.5); err != nil {
+		t.Fatalf("click: %v", err)
+	}
+	var hits []struct{ X, Y float64 }
+	if err := page.Eval(ctx, "window.hits", &hits); err != nil || len(hits) == 0 {
+		t.Fatalf("no mousedown recorded (err=%v)", err)
+	}
+	if hits[0].X < 340 || hits[0].X > 380 {
+		t.Fatalf("click should land at ~90%% of the 400px box (x≈360), got x=%.0f", hits[0].X)
+	}
+}
+
+// TestReplayReclicksWhenClickHadNoEffect: the demonstrated click caused
+// network activity (the recording has a wait-network step right after it); a
+// replayed click on a not-yet-hydrated element causes none — the engine must
+// re-click instead of letting the following idle-wait pass instantly and read
+// as success. Models the Xiaohongshu publish button: a custom element whose
+// handler attaches a beat after the element renders.
+func TestReplayReclicksWhenClickHadNoEffect(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("ok"))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>hydrate</title>
+<button id="pub">Publish</button>
+<script>
+window.published=0;
+// The handler hydrates LATE: clicks in the first ~1.5s do nothing.
+setTimeout(function(){
+  document.getElementById('pub').addEventListener('click',function(){
+    window.published++;
+    fetch('/api');
+  });
+}, 1500);
+</script>`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+
+	recording := &Recording{Name: "h", Steps: []Step{
+		{Action: "navigate", URL: srv.URL},
+		{Action: "click", Selector: "#pub"},
+		{Action: "wait", Network: true, TimeoutMS: 5000},
+	}}
+	if _, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 3 * time.Second, Browser: b}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	var published int
+	if err := page.Eval(ctx, "window.published", &published); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if published != 1 {
+		t.Fatalf("expected the re-click to land exactly once after hydration, got %d", published)
+	}
+}
+
+// TestReplayWaitsForDisabledStateToClear: a click on an element still
+// advertising a disabled/loading state (native disabled, aria-disabled, or a
+// web-component *-disabled attribute — Xiaohongshu's <xhs-publish-btn
+// submit-disabled="true">) is swallowed silently; replay must wait for the
+// state to clear before dispatching. The demonstration only ever worked
+// because no human clicks faster than the component enables itself.
+func TestReplayWaitsForDisabledStateToClear(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>dis</title>
+<div id="host" submit-disabled="true" style="width:200px;height:40px">
+  <button id="pub" style="width:100%;height:100%">发布</button>
+</div>
+<script>
+window.published=0;
+document.getElementById('pub').addEventListener('click',function(){
+  if(document.getElementById('host').getAttribute('submit-disabled')==='true') return; // component guard
+  window.published++;
+});
+setTimeout(function(){ document.getElementById('host').setAttribute('submit-disabled','false'); }, 1200);
+</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+
+	recording := &Recording{Name: "d", Steps: []Step{
+		{Action: "navigate", URL: srv.URL},
+		{Action: "click", Selector: "#pub"},
+	}}
+	if _, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 5 * time.Second, Browser: b}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	var published int
+	if err := page.Eval(ctx, "window.published", &published); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if published != 1 {
+		t.Fatalf("click must wait out the disabled state and land once, got %d", published)
+	}
+}
+
+// TestReplayRetriesDecisiveClickUntilItLands: the demonstration's last click
+// navigated (EndURL differs), but on replay the click is accepted yet BLOCKED
+// by a transient validation (an async upload still in progress) that clears
+// itself — the URL stays put. Replay must wait and re-click until the page
+// moves. Models Xiaohongshu's publish rejected by "图片正在上传".
+func TestReplayRetriesDecisiveClickUntilItLands(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>pub</title>
+<button id="pub" style="width:120px;height:40px">Publish</button>
+<script>
+var here = location.href;
+// Constant background traffic (heartbeats / telemetry) — this is what defeats
+// the network-activity dud-retry on a real page, so the decisive URL-based
+// retry is the only thing that can save the click.
+setInterval(function(){ fetch('/beacon'); }, 150);
+// "Cover image" still uploading for the first 1.2s; publish is blocked until then.
+window.uploading = true;
+setTimeout(function(){ window.uploading = false; }, 1200);
+document.getElementById('pub').addEventListener('click', function(){
+  if (window.uploading) return;           // blocked — URL stays put
+  history.pushState({}, '', here + '?published=true');
+});
+</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.Navigate(ctx, srv.URL); err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+
+	recording := &Recording{
+		Name:   "pub",
+		EndURL: srv.URL + "/?published=true",
+		Steps: []Step{
+			{Action: "navigate", URL: srv.URL},
+			{Action: "click", Selector: "#pub"},
+			{Action: "wait", Network: true, TimeoutMS: 5000},
+		},
+	}
+	if _, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 4 * time.Second, Browser: b}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	var href string
+	if err := page.Eval(ctx, "location.href", &href); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if !strings.Contains(href, "published=true") {
+		t.Fatalf("decisive click was not retried until it landed; url=%s", href)
 	}
 }

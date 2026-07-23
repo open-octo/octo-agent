@@ -255,10 +255,52 @@ func (p *Page) WaitForNetworkIdle(ctx context.Context, quiet, timeout time.Durat
 		quiet = 500 * time.Millisecond
 	}
 	deadline := time.Now().Add(timeout)
+	// One round-trip reads BOTH the idle duration (ms since the last request
+	// finished; -1 while busy) and the monotonic activity generation (bumped
+	// when any request STARTS). gen closes the post-click race: a wait issued
+	// right after a click samples the network before the click's fetch has
+	// started, sees "idle for ages", and returns instantly — so the next step
+	// charges ahead while the page is still transitioning. First give activity
+	// a bounded grace to APPEAR (gen moves, or we catch it busy), then wait for
+	// it to settle. If nothing starts within the grace, the action genuinely
+	// caused no network and we fall through.
+	read := func() (idleMS, gen float64, ok bool) {
+		var r *struct {
+			IdleMS float64 `json:"idle"`
+			Gen    float64 `json:"gen"`
+		}
+		if err := p.Eval(ctx, `(function(){var s=window.__octoNet; if(!s) return null; return {idle:(s.n===0 && s.idleSince>0)?(Date.now()-s.idleSince):-1, gen:s.gen};})()`, &r); err != nil || r == nil {
+			return 0, 0, false
+		}
+		return r.IdleMS, r.Gen, true
+	}
+	if idle0, gen0, ok := read(); ok {
+		grace := 1200 * time.Millisecond
+		if timeout < grace {
+			grace = timeout
+		}
+		graceEnd := time.Now().Add(grace)
+		sawActivity := idle0 < 0
+		for !sawActivity && time.Now().Before(graceEnd) {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(60 * time.Millisecond):
+			}
+			idle, gen, ok2 := read()
+			if !ok2 {
+				break // navigating / monitor gone — stop waiting for activity
+			}
+			if idle < 0 || gen != gen0 {
+				sawActivity = true
+			}
+		}
+	}
 	for {
-		// Returns ms the network has been idle, or -1 while busy / unavailable.
-		var idleMS float64 = -1
-		_ = p.Eval(ctx, `(function(){var s=window.__octoNet; if(!s) return 1e9; return (s.n===0 && s.idleSince>0) ? (Date.now()-s.idleSince) : -1;})()`, &idleMS)
+		idleMS, _, ok := read()
+		if !ok {
+			idleMS = 1e9 // monitor unavailable (mid-navigation) — treat as idle
+		}
 		if idleMS >= float64(quiet/time.Millisecond) {
 			return nil
 		}
@@ -279,13 +321,19 @@ func (p *Page) WaitForNetworkIdle(ctx context.Context, quiet, timeout time.Durat
 // the new tab when one opened, otherwise the same page. Without this a click that
 // spawns a tab looks like it "did nothing" because the original page is unchanged.
 func (b *Browser) ClickFollow(ctx context.Context, page *Page, target string) (*Page, error) {
+	return b.ClickFollowAt(ctx, page, target, 0, 0)
+}
+
+// ClickFollowAt is ClickFollow clicking at a fractional position of the
+// element's box (fractions outside (0,1] mean the center).
+func (b *Browser) ClickFollowAt(ctx context.Context, page *Page, target string, fx, fy float64) (*Page, error) {
 	before := map[string]bool{}
 	if ps, err := b.Pages(ctx); err == nil {
 		for _, p := range ps {
 			before[p.TargetID] = true
 		}
 	}
-	if err := page.Click(ctx, target); err != nil {
+	if err := page.ClickAt(ctx, target, fx, fy); err != nil {
 		return page, err
 	}
 	myID := page.TargetID()
@@ -545,4 +593,32 @@ func (p *Page) WaitFor(ctx context.Context, selector string, timeout time.Durati
 func jsString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// netActivityGen reads the in-page network monitor's activity generation — a
+// counter that increments when any fetch/XHR STARTS. 0 when the monitor isn't
+// installed.
+func (p *Page) netActivityGen(ctx context.Context) float64 {
+	var gen float64
+	_ = p.Eval(ctx, "window.__octoNet?window.__octoNet.gen:0", &gen)
+	return gen
+}
+
+// netActivityAdvanced polls until the activity generation moves past gen0 —
+// i.e. something started a request since the snapshot — or the window closes.
+func (p *Page) netActivityAdvanced(ctx context.Context, gen0 float64, window time.Duration) bool {
+	deadline := time.Now().Add(window)
+	for {
+		if g := p.netActivityGen(ctx); g != gen0 {
+			return true
+		}
+		if ctx.Err() != nil || !time.Now().Before(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(120 * time.Millisecond):
+		}
+	}
 }

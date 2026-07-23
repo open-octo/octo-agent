@@ -3,6 +3,8 @@ package browser
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -82,5 +84,37 @@ func TestRenderTraceRedactsSecret(t *testing.T) {
 	// The non-secret value is still present (redaction is targeted).
 	if !strings.Contains(captured, "alice") {
 		t.Fatalf("expected the non-secret value to remain in the prompt:\n%s", captured)
+	}
+}
+
+// TestNormalizeUploadFiles: paths reaching DOM.setFileInputFiles must be
+// absolute and existing — Chrome treats anything else (an unexpanded "~", a
+// relative path, a missing file) as a compromised renderer and KILLS the page
+// (RESULT_CODE_KILLED_BAD_MESSAGE), stranding the whole session. Observed live:
+// replaying an upload step with "~/Downloads/…" crashed the tab and hung the
+// replay until the turn's 400s deadline.
+func TestNormalizeUploadFiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "doc.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := normalizeUploadFiles([]string{"~/doc.md"})
+	if err != nil {
+		t.Fatalf("tilde path should expand and validate: %v", err)
+	}
+	if len(got) != 1 || got[0] != filepath.Join(home, "doc.md") {
+		t.Fatalf("bad expansion: %v", got)
+	}
+
+	if _, err := normalizeUploadFiles([]string{"relative/doc.md"}); err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("relative path must be rejected, got: %v", err)
+	}
+	if _, err := normalizeUploadFiles([]string{filepath.Join(home, "missing.md")}); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("missing file must be rejected, got: %v", err)
+	}
+	if _, err := normalizeUploadFiles([]string{"~/missing.md"}); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("missing tilde file must be rejected, got: %v", err)
 	}
 }

@@ -80,6 +80,47 @@
     switch (name) {
       case 'web_search': return pick('query', 'q')
       case 'web_fetch':  return pick('url')
+      // browser is a multiplexed tool: the sub-command (action) is the headline
+      // — "replay zhihu-publish {…}" not a bare recording name or raw JSON —
+      // followed by that action's salient argument.
+      case 'browser': {
+        const act = pick('action')
+        if (!act) {
+          const compact = JSON.stringify(a)
+          return compact.length > 80 ? compact.slice(0, 77) + '…' : compact
+        }
+        const sel = a.frame ? `${a.frame} >>> ${pick('selector')}` : pick('selector')
+        let detail = ''
+        switch (act) {
+          case 'navigate': detail = pick('url'); break
+          case 'click': case 'hover': case 'scroll': case 'download':
+            detail = sel; break
+          case 'wait':
+            detail = sel || (a.network_idle ? 'network idle' : (a.timeout_ms ? `${a.timeout_ms}ms` : '')); break
+          case 'type':
+            detail = sel + (a.text ? ` "${a.text}"` : ''); break
+          case 'select':
+            detail = sel + (a.value ? ` "${a.value}"` : ''); break
+          case 'key': detail = pick('keys'); break
+          case 'eval': detail = pick('js'); break
+          case 'upload':
+            detail = Array.isArray(a.files) && a.files.length ? a.files.join(', ') : sel; break
+          case 'select_page':
+            detail = a.index != null ? `#${a.index}` : ''; break
+          case 'replay': case 'run_skill': {
+            detail = pick('name')
+            if (a.params && typeof a.params === 'object' && Object.keys(a.params).length) {
+              detail += ' ' + JSON.stringify(a.params)
+            }
+            break
+          }
+          case 'record_start': case 'record_stop': case 'record_cancel':
+            detail = pick('name'); break
+          // observe / screenshot / ax / cookies / pages / back / close:
+          // the action name alone says it all.
+        }
+        return detail ? `${act}  ${detail}` : act
+      }
       case 'grep':       return pick('pattern', 'query') + (a.path ? `  ${a.path}` : '')
       case 'glob':       return pick('pattern', 'glob')
       case 'read_file': case 'write_file': case 'edit_file':

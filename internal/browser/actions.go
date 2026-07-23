@@ -5,6 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -416,14 +419,37 @@ func (p *Page) resolveFieldTarget(ctx context.Context, frame, elemSel, hint stri
 	}
 }
 
-// elementCenter scrolls an element into view and returns its viewport-center
-// point (adding the iframe's offset for framed targets), or an error if the
-// selector matches nothing.
-func (p *Page) elementCenter(ctx context.Context, selector string) (point, error) {
+// elementPoint scrolls an element into view and returns the viewport point at
+// the given fractions of its bounding box (adding the iframe's offset for
+// framed targets), or an error if the selector matches nothing. fx/fy outside
+// (0,1] mean "center". A recorded click's fractions matter when the captured
+// element is a shadow-DOM HOST: the real control lives somewhere inside it,
+// the document only ever sees the retargeted host, and clicking the host's
+// CENTER can land on dead space (observed: Xiaohongshu's <xhs-publish-btn> —
+// the publish click silently did nothing on replay).
+func (p *Page) elementPoint(ctx context.Context, selector string, fx, fy float64) (point, bool, error) {
 	frame, elem := splitFrame(selector)
 	offset := ""
 	if frame != "" {
 		offset = fmt.Sprintf(`{const f=document.querySelector(%s); if(f){const fr=f.getBoundingClientRect(); ox=fr.x; oy=fr.y;}}`, jsString(frame))
+	}
+	if fx <= 0 || fx > 1 {
+		fx = 0.5
+	}
+	if fy <= 0 || fy > 1 {
+		fy = 0.5
+	}
+	// hittable: does the click point actually reach the target? A loading mask
+	// / overlay still covering the page intercepts pointer events at the point
+	// (elementFromPoint returns the overlay, not the target), so a click would
+	// hit the mask, not the button — exactly what a human sees when the page is
+	// "still spinning". Computed in the top document's viewport coords (skipped
+	// for framed targets, whose point is offset into an iframe). el===hit,
+	// el.contains(hit) (a descendant), or hit.contains(el) (a shadow host
+	// retargeting to itself) all count as reaching the target.
+	hitJS := "true"
+	if frame == "" {
+		hitJS = `(() => { const h = document.elementFromPoint(px, py); return !!h && (h === el || el.contains(h) || h.contains(el)); })()`
 	}
 	expr := fmt.Sprintf(`(() => {
 		let el;
@@ -433,46 +459,208 @@ func (p *Page) elementCenter(ctx context.Context, selector string) (point, error
 		const r = el.getBoundingClientRect();
 		let ox = 0, oy = 0;
 		%s
-		return { x: ox + r.x + r.width / 2, y: oy + r.y + r.height / 2 };
-	})()`, elemRefJS(frame, elem), offset)
+		const px = ox + r.x + r.width * %g, py = oy + r.y + r.height * %g;
+		return { x: px, y: py, hittable: %s };
+	})()`, elemRefJS(frame, elem), offset, fx, fy, hitJS)
 	var res *struct {
 		X, Y        float64
+		Hittable    bool `json:"hittable"`
 		BadSelector bool `json:"badSelector"`
 	}
 	if err := p.Eval(ctx, expr, &res); err != nil {
-		return point{}, err
+		return point{}, false, err
 	}
 	if res == nil {
-		return point{}, fmt.Errorf("selector %q matched nothing", selector)
+		return point{}, false, fmt.Errorf("selector %q matched nothing", selector)
 	}
 	if res.BadSelector {
-		return point{}, fmt.Errorf("invalid selector %q — use plain CSS or a supported Playwright form (:has-text(\"…\"), text=…, :visible, xpath=…); run the observe action to list valid selectors", selector)
+		return point{}, false, fmt.Errorf("invalid selector %q — use plain CSS or a supported Playwright form (:has-text(\"…\"), text=…, :visible, xpath=…); run the observe action to list valid selectors", selector)
 	}
-	return point{X: res.X, Y: res.Y}, nil
+	return point{X: res.X, Y: res.Y}, res.Hittable, nil
+}
+
+// elementCenter is elementPoint at the element's center.
+func (p *Page) elementCenter(ctx context.Context, selector string) (point, error) {
+	pt, _, err := p.elementPoint(ctx, selector, 0.5, 0.5)
+	return pt, err
+}
+
+// clickStabilizeTimeout caps how long Click waits for the target to stop
+// moving before dispatching anyway. A var so tests can tighten it.
+var clickStabilizeTimeout = 1500 * time.Millisecond
+
+// clickMoveSettle is the pause between moving the pointer onto a target and
+// pressing, so pointer-entry handlers (often rAF/layout-gated) can arm the
+// control first. A var so tests can zero it.
+var clickMoveSettle = 60 * time.Millisecond
+
+// clickReadyTimeout bounds the pre-click readiness wait (page loaded, custom
+// element upgraded, not disabled). A var so tests can tighten it.
+var clickReadyTimeout = 15 * time.Second
+
+// stableElementCenter samples the element's center until two consecutive
+// samples agree within a pixel — the actionability gate for trusted clicks.
+// A coordinate click computed while the element is still animating (a Popover
+// menu scaling open, a modal sliding in) lands where the element USED to be:
+// on the backdrop, which closes the menu and derails everything after it.
+// Best-effort by design: if the element never settles before the timeout (an
+// infinite pulse animation), click the last observed position rather than fail.
+func (p *Page) stableElementCenter(ctx context.Context, selector string) (point, error) {
+	return p.stableElementPoint(ctx, selector, 0.5, 0.5)
+}
+
+// stableElementPoint is stableElementCenter at a fractional position of the
+// element's box.
+func (p *Page) stableElementPoint(ctx context.Context, selector string, fx, fy float64) (point, error) {
+	prev, _, err := p.elementPoint(ctx, selector, fx, fy)
+	if err != nil {
+		return point{}, err
+	}
+	deadline := time.Now().Add(clickStabilizeTimeout)
+	for {
+		select {
+		case <-ctx.Done():
+			return prev, nil
+		case <-time.After(80 * time.Millisecond):
+		}
+		cur, hit, err := p.elementPoint(ctx, selector, fx, fy)
+		if err != nil {
+			// The element vanished between samples (menu re-rendered its
+			// items); click the last place it was seen — matching the old
+			// single-sample behavior rather than failing a click that may
+			// still land fine.
+			return prev, nil
+		}
+		// Ready = position settled AND the point actually reaches the target
+		// (no loading mask / overlay intercepting it). Both must hold in the
+		// SAME sample. On timeout, click the last point anyway (best-effort,
+		// matching the pre-hit-test behavior rather than failing outright).
+		stable := math.Abs(cur.X-prev.X) < 1 && math.Abs(cur.Y-prev.Y) < 1
+		if (stable && hit) || !time.Now().Before(deadline) {
+			return cur, nil
+		}
+		prev = cur
+	}
+}
+
+// waitEnabled polls until the element (or a close ancestor) stops advertising
+// a disabled/loading state: the native disabled property, aria-disabled, or —
+// the web-component convention — any attribute matching *-disabled/*-loading
+// valued "" or "true" (observed: Xiaohongshu's <xhs-publish-btn
+// submit-disabled="true" submit-loading="true"> — a click dispatched before
+// those cleared was swallowed, and the recorded demonstration only worked
+// because a human never clicks that fast). Best-effort: on timeout the click
+// proceeds anyway, matching the old behavior.
+func (p *Page) waitEnabled(ctx context.Context, selector string, timeout time.Duration) {
+	frame, elem := splitFrame(selector)
+	if frame != "" {
+		if cp, ok := p.oopifPage(ctx, frame); ok {
+			cp.waitEnabled(ctx, elem, timeout)
+			return
+		}
+	}
+	// Returns "" when the target is ready to be clicked, else a short reason.
+	// Three gates, all standard (no site knowledge):
+	//   - the document has finished loading (readyState complete) — a click
+	//     fired during a navigation lands on a half-built page;
+	//   - a CUSTOM element (tag with a hyphen) has been UPGRADED — it matches
+	//     :defined only after its class runs. An empty custom-element shell
+	//     (e.g. a closed shadow-DOM button) is in the DOM and resolvable long
+	//     before it is functional; clicking the shell does nothing. childCount
+	//     stays 0 forever for closed shadow, so :defined is the only signal;
+	//   - neither the element nor a close ancestor advertises a
+	//     disabled/loading state (native, aria, or *-disabled/*-loading attrs).
+	check := fmt.Sprintf(`(()=>{
+	  if (document.readyState !== "complete") return "loading";
+	  let el; try { el = %s; } catch(e) { return "resolve"; }
+	  if (!el) return "absent";
+	  for (let n = el, i = 0; n && n.nodeType === 1 && i < 4; n = n.parentElement, i++) {
+	    if (n.tagName && n.tagName.includes("-") && n.matches && !n.matches(":defined")) return "undefined-ancestor";
+	    if (n.disabled === true) return "disabled";
+	    const attrs = n.getAttributeNames ? n.getAttributeNames() : [];
+	    for (const a of attrs) {
+	      if (/(^|[-_:])(disabled|loading)$/i.test(a)) {
+	        const v = n.getAttribute(a);
+	        if (v === "" || v === "true") return "disabled-attr";
+	      }
+	    }
+	  }
+	  return "";
+	})()`, elemRefJS(frame, elem))
+	deadline := time.Now().Add(timeout)
+	for {
+		var reason string
+		if err := p.Eval(ctx, check, &reason); err != nil || reason == "" {
+			return
+		}
+		if ctx.Err() != nil || !time.Now().Before(deadline) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
 }
 
 // Click performs a trusted browser-level click at the element's center.
 // Trusted input (vs a JS .click()) counts as a real user gesture, which some
 // flows — file dialogs, download buttons — require, and is less detectable.
 func (p *Page) Click(ctx context.Context, selector string) error {
+	return p.ClickAt(ctx, selector, 0, 0)
+}
+
+// ClickAt clicks at the given fractions of the element's box; fractions
+// outside (0,1] mean the center. Recorded clicks replay at the exact spot the
+// user pressed — see elementPoint for why that matters on shadow-DOM hosts.
+func (p *Page) ClickAt(ctx context.Context, selector string, fx, fy float64) error {
 	if frame, elem := splitFrame(selector); frame != "" {
 		if cp, ok := p.oopifPage(ctx, frame); ok {
-			return cp.Click(ctx, elem)
+			return cp.ClickAt(ctx, elem, fx, fy)
 		}
 	}
-	pt, err := p.elementCenter(ctx, selector)
+	// Readiness gate: page loaded, custom element upgraded (:defined), not
+	// disabled. Bounded, best-effort. Placed here — the single choke point for
+	// every click, replay and agent-driven alike — so a click on a resolvable
+	// but not-yet-functional element (an un-upgraded custom-element shell) waits
+	// instead of firing into the void. StepTimeout-scale bound comes via ctx.
+	p.waitEnabled(ctx, selector, clickReadyTimeout)
+	pt, err := p.stableElementPoint(ctx, selector, fx, fy)
 	if err != nil {
 		return err
 	}
-	for _, typ := range []string{"mousePressed", "mouseReleased"} {
-		_, err := p.cli.call(ctx, p.sessionID, "Input.dispatchMouseEvent", map[string]any{
-			"type":       typ,
-			"x":          pt.X,
-			"y":          pt.Y,
-			"button":     "left",
-			"clickCount": 1,
-		})
-		if err != nil {
+	// Move the pointer to the target BEFORE pressing. A bare press/release with
+	// no preceding move never fires pointerenter/pointerover/mousemove, so a
+	// control that arms itself on pointer entry before accepting activation —
+	// the norm for closed shadow-DOM web components (observed: Xiaohongshu's
+	// <xhs-publish-btn>, which swallowed press/release at the exact coordinates
+	// where a move-first click published) never reaches its clickable state.
+	// The press then carries buttons:1 (the down-button bitmask a real press
+	// has) so a framework inspecting it doesn't dismiss it as synthetic.
+	if _, err := p.cli.call(ctx, p.sessionID, "Input.dispatchMouseEvent", map[string]any{
+		"type": "mouseMoved", "x": pt.X, "y": pt.Y,
+	}); err != nil {
+		return err
+	}
+	// Let the pointer-entry handlers actually RUN before pressing. A control
+	// that arms on pointer entry often does so behind a requestAnimationFrame /
+	// layout tick (closed shadow-DOM web components are the common case), so a
+	// press fired in the same breath as the move — even across CDP round-trips,
+	// a few ms — still beats the arming and is swallowed. One frame-plus of gap
+	// is what separated a working move-first click from a dead one at identical
+	// coordinates. A var so tests can zero it.
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(clickMoveSettle):
+	}
+	steps := []map[string]any{
+		{"type": "mousePressed", "x": pt.X, "y": pt.Y, "button": "left", "buttons": 1, "clickCount": 1},
+		{"type": "mouseReleased", "x": pt.X, "y": pt.Y, "button": "left", "buttons": 0, "clickCount": 1},
+	}
+	for _, ev := range steps {
+		if _, err := p.cli.call(ctx, p.sessionID, "Input.dispatchMouseEvent", ev); err != nil {
 			return err
 		}
 	}
@@ -707,11 +895,43 @@ func (p *Page) Screenshot(ctx context.Context) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(r.Data)
 }
 
+// normalizeUploadFiles validates the paths handed to DOM.setFileInputFiles
+// BEFORE they reach Chrome: a leading "~/" is expanded (the browser has no
+// shell semantics), the result must be absolute, and the file must exist.
+// This is a hard prerequisite, not a nicety — Chrome treats a path the browser
+// process can't grant (relative, unexpanded "~", nonexistent) as a compromised
+// renderer and KILLS the page (RESULT_CODE_KILLED_BAD_MESSAGE), which then
+// leaves every subsequent CDP call on that session hanging.
+func normalizeUploadFiles(files []string) ([]string, error) {
+	out := make([]string, 0, len(files))
+	for _, f := range files {
+		if f == "~" || strings.HasPrefix(f, "~/") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return nil, fmt.Errorf("upload: expand %q: %w", f, err)
+			}
+			f = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(f, "~"), "/"))
+		}
+		if !filepath.IsAbs(f) {
+			return nil, fmt.Errorf("upload: path %q must be absolute (the browser does not resolve relative paths)", f)
+		}
+		if _, err := os.Stat(f); err != nil {
+			return nil, fmt.Errorf("upload: file not found: %s", f)
+		}
+		out = append(out, f)
+	}
+	return out, nil
+}
+
 // Upload sets the files on a file <input> matched by selector, without the OS
 // file-picker dialog (CDP DOM.setFileInputFiles). Paths should be absolute.
 // Resolving the input by JS object (rather than a DOM nodeId) lets it pierce a
 // same-origin iframe via the same frame convention as the other actions.
 func (p *Page) Upload(ctx context.Context, selector string, files []string) error {
+	files, err := normalizeUploadFiles(files)
+	if err != nil {
+		return err
+	}
 	frame, elem := splitFrame(selector)
 	res, err := p.cli.call(ctx, p.sessionID, "Runtime.evaluate", map[string]any{
 		"expression":    elemRefJS(frame, elem),
@@ -743,6 +963,10 @@ func (p *Page) Upload(ctx context.Context, selector string, files []string) erro
 // case where there is no persistent <input type=file> to target directly. The
 // real Klook SD upload works this way.
 func (p *Page) UploadViaChooser(ctx context.Context, selector string, files []string) error {
+	files, err := normalizeUploadFiles(files)
+	if err != nil {
+		return err
+	}
 	if frame, elem := splitFrame(selector); frame != "" {
 		if cp, ok := p.oopifPage(ctx, frame); ok {
 			return cp.UploadViaChooser(ctx, elem, files)

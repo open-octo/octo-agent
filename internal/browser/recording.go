@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -24,7 +25,13 @@ type Recording struct {
 	Description string   `yaml:"description,omitempty"`
 	Params      []Param  `yaml:"params,omitempty"`
 	Outputs     []Output `yaml:"outputs,omitempty"`
-	Steps       []Step   `yaml:"steps"`
+	// EndURL is where the demonstration ENDED — the last URL the recorder saw,
+	// including page-initiated redirects that never compile to steps (a
+	// publish's pushState to ...published=true). Replay reports its own final
+	// URL against it, so a run whose decisive click silently did nothing can't
+	// pass for a success.
+	EndURL string `yaml:"end_url,omitempty"`
+	Steps  []Step `yaml:"steps"`
 }
 
 // Param is a replay-time input; {{name}} placeholders in step values/urls are
@@ -57,8 +64,26 @@ type Step struct {
 	URL      string `yaml:"url,omitempty"`
 	Frame    string `yaml:"frame,omitempty"`
 	Selector string `yaml:"selector,omitempty"`
-	Value    string `yaml:"value,omitempty"`
-	Label    string `yaml:"label,omitempty"`
+	// ClickX/ClickY are where the user pressed, as fractions of the element's
+	// box; zero means unknown (replay clicks the center). They matter when the
+	// recorded element is a shadow-DOM host whose center is dead space.
+	ClickX float64 `yaml:"click_x,omitempty"`
+	ClickY float64 `yaml:"click_y,omitempty"`
+	// expectNetwork is a replay-time hint (never serialized): the recording has
+	// a wait-network step right after this click, i.e. the demonstrated click
+	// CAUSED network activity. If the replayed click causes none, it was a dud
+	// (a not-yet-hydrated custom element, a briefly disabled button) — the
+	// idle-wait that follows would pass instantly and hide it.
+	expectNetwork bool
+	// expectEndURL is a replay-time hint (never serialized) set on the LAST
+	// click step when the demonstration's decisive click moved the page to a
+	// different URL (recording.EndURL). A blocked decisive action (e.g. a
+	// publish rejected by a transient "still uploading" validation) leaves the
+	// URL put; replay then retries the click, waiting between attempts, until
+	// the URL advances or the attempts run out.
+	expectEndURL string
+	Value        string `yaml:"value,omitempty"`
+	Label        string `yaml:"label,omitempty"`
 	// Hint is a form field's accessible name (placeholder/name/aria-label/id or
 	// its <label> text). It's the deterministic fallback for type/select/upload:
 	// when the positional Selector drifts, replay re-locates the field by Hint
@@ -124,9 +149,20 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 	// the baseline clean and reduces the chance the distiller hallucinates a
 	// reason to keep a fumble.
 	events = compressEvents(events)
+	events = collapseNewTabDetours(events)
 	s := Recording{Name: name, Description: description}
 	if startURL != "" && startURL != "about:blank" {
 		s.Steps = append(s.Steps, navStep(startURL))
+	}
+	// The demonstration's end URL — the last navigation the recorder saw, of
+	// any kind. Same-doc redirects never compile to steps but ARE the natural
+	// success signal (…published=true); replay reports its final URL against
+	// this so a silently-failed decisive click can't read as success.
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Type == "navigate" {
+			s.EndURL = events[i].URL
+			break
+		}
 	}
 	// Deterministic auto-parameterization: every value the user typed becomes a
 	// declared {{param}} whose Default is the recorded value — so replay with no
@@ -174,6 +210,13 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 	}
 	for _, e := range events {
 		if e.Type == "navigate" {
+			// A same-document navigation is a page-initiated EFFECT of the
+			// preceding action (pushState after a tab click); replaying the
+			// action reproduces it, while a navigate step would force-reload
+			// and reset the in-page state it depends on. Drop it.
+			if e.SameDoc {
+				continue
+			}
 			// Skip an echo of the page we're already on (start URL or the prior nav).
 			if n := len(s.Steps); n > 0 && s.Steps[n-1].Action == "navigate" && s.Steps[n-1].URL == e.URL {
 				continue
@@ -191,9 +234,22 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 			// error, never a masked prompt.
 			fp := addParam("file", "", "path to the file to upload", false)
 			up := Step{Action: "upload", Frame: e.Frame, Selector: e.Selector, Value: "{{" + fp + "}}", Label: e.Text}
-			if n := len(s.Steps); n > 0 && s.Steps[n-1].Action == "click" {
-				up.Selector, up.Frame, up.Label = s.Steps[n-1].Selector, s.Steps[n-1].Frame, s.Steps[n-1].Label
-				s.Steps = s.Steps[:n-1]
+			// The trigger click is often separated from the file-pick event by
+			// auto-inserted waits (the chooser click fires the network probe /
+			// modal observer), so look back PAST wait steps for it — requiring
+			// strict adjacency left both the click AND an input-targeting upload
+			// step in the recording, and a hidden <input type=file> has no
+			// clickable box to replay against. Carry the click's hint and
+			// fingerprint too, so the merged step resolves and heals like the
+			// click would have.
+			j := len(s.Steps) - 1
+			for j >= 0 && s.Steps[j].Action == "wait" {
+				j--
+			}
+			if j >= 0 && s.Steps[j].Action == "click" {
+				c := s.Steps[j]
+				up.Selector, up.Frame, up.Label, up.Hint, up.Anchors = c.Selector, c.Frame, c.Label, c.Hint, c.Anchors
+				s.Steps = append(s.Steps[:j], s.Steps[j+1:]...)
 			}
 			s.Steps = append(s.Steps, up)
 			continue
@@ -231,6 +287,7 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 		switch {
 		case e.Type == "click":
 			st.Action = "click"
+			st.ClickX, st.ClickY = e.ClickX, e.ClickY
 		case e.Type == "change" && e.Tag == "SELECT":
 			st.Action = "select"
 			st.Value = e.Value
@@ -506,14 +563,21 @@ func SummarizeRecording(r Recording) string {
 	return b.String()
 }
 
-// slugParam reduces a field hint to a safe {{param}} identifier: lowercase, with
-// runs of non-alphanumerics collapsed to a single underscore and trimmed.
+// slugParam reduces a field hint to a safe {{param}} identifier: lowercase,
+// with runs of everything else collapsed to a single underscore and trimmed.
+// Unicode letters and digits are KEPT — a CJK placeholder like 输入标题 used
+// to slug to "" and fall back to the meaningless "value", which the model then
+// misguessed as "title" on every replay. {{输入标题}} is unambiguous. Capped so
+// a long form prompt doesn't become an unwieldy name.
 func slugParam(s string) string {
 	var b strings.Builder
 	prevUnderscore := false
 	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		if b.Len() >= 48 { // ~16 CJK runes
+			break
+		}
 		switch {
-		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
 			b.WriteRune(r)
 			prevUnderscore = false
 		default:
@@ -544,6 +608,32 @@ func hintFromSelector(sel string) string {
 }
 
 var selectorAttrRe = regexp.MustCompile(`\[(?:name|aria-label|data-testid|data-test)="([^"]+)"\]`)
+
+// collapseNewTabDetours drops the click chain whose only outcome was opening a
+// new tab: the tab's first navigation (tagged NewTab by the recorder, and only
+// for tabs the PAGE spawned — the target had an opener) reaches the same URL
+// directly, so replaying the menu hops that spawned it is pure fragility (the
+// Zhihu detour: homepage → popover toggle → "写文章" → new tab; those popover
+// clicks were the least replayable steps in the recording). Walk back over
+// clicks and waits only — a type/select/upload/enter/download/navigate is
+// state-bearing and ends the detour. A tab the USER opened by hand carries no
+// opener, is never tagged, and keeps its preceding clicks.
+func collapseNewTabDetours(events []RecordedEvent) []RecordedEvent {
+	out := make([]RecordedEvent, 0, len(events))
+	for _, e := range events {
+		if e.Type == "navigate" && e.NewTab {
+			for len(out) > 0 {
+				t := out[len(out)-1].Type
+				if t != "click" && t != "wait" {
+					break
+				}
+				out = out[:len(out)-1]
+			}
+		}
+		out = append(out, e)
+	}
+	return out
+}
 
 // dedupeConsecutiveEvents drops a raw event identical to its immediate
 // predecessor (same type/selector/frame/value/tag) — a double-fire or a
@@ -613,57 +703,70 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 		"Output ONLY the recording as YAML (keys: name, description, params, outputs, steps), no prose, no code fences."
 	user := fmt.Sprintf("Baseline (the only valid selectors are those here):\n%s\n\nRaw events in order:\n%s\n\nReturn the cleaned recording YAML.", baseYAML, renderTrace(events))
 
-	out, err := gen(ctx, system, user)
-	if err != nil {
-		slog.Warn("browser: recording distill failed, keeping deterministic baseline", "recording", name, "err", err)
-		return base
-	}
-	refined, err := ParseRecording([]byte(stripFences(out)))
-	if err != nil || len(refined.Steps) == 0 {
-		slog.Warn("browser: recording distill output unusable, keeping deterministic baseline steps", "recording", name, "err", err, "steps", len(refined.Steps))
-		return withDescription(base, refined.Description)
-	}
-	refined.Name = name
-	// The distiller rewrites the param list from prose and can drop the secret
-	// marker; backfill it by name from the deterministic baseline so a password
-	// param is still secret after distillation.
-	secretParams := map[string]bool{}
-	for _, p := range base.Params {
-		if p.Secret {
-			secretParams[p.Name] = true
+	prompt := user
+	for attempt := 0; ; attempt++ {
+		out, err := gen(ctx, system, prompt)
+		if err != nil {
+			slog.Warn("browser: recording distill failed, keeping deterministic baseline", "recording", name, "err", err)
+			return base
 		}
-	}
-	for i := range refined.Params {
-		if secretParams[refined.Params[i].Name] {
-			refined.Params[i].Secret = true
+		refined, err := ParseRecording([]byte(stripFences(out)))
+		if err != nil || len(refined.Steps) == 0 {
+			slog.Warn("browser: recording distill output unusable, keeping deterministic baseline steps", "recording", name, "err", err, "steps", len(refined.Steps))
+			return withDescription(base, refined.Description)
 		}
-	}
-	// The distiller may also drop a secret param's DECLARATION while keeping
-	// its {{placeholder}} in a step. Left alone, replay would treat it as a
-	// non-secret missing param — the plaintext-in-conversation leak the secret
-	// marker exists to close. Re-attach the baseline declaration for any
-	// baseline secret param the refined steps still reference.
-	declared := map[string]bool{}
-	for _, p := range refined.Params {
-		declared[p.Name] = true
-	}
-	for _, p := range base.Params {
-		if !p.Secret || declared[p.Name] {
-			continue
+		refined.Name = name
+		// The distiller rewrites the param list from prose and can drop the secret
+		// marker; backfill it by name from the deterministic baseline so a password
+		// param is still secret after distillation.
+		secretParams := map[string]bool{}
+		for _, p := range base.Params {
+			if p.Secret {
+				secretParams[p.Name] = true
+			}
 		}
-		if paramReferenced(&refined, p.Name) {
-			refined.Params = append(refined.Params, p)
+		for i := range refined.Params {
+			if secretParams[refined.Params[i].Name] {
+				refined.Params[i].Secret = true
+			}
 		}
+		// The distiller may also drop a secret param's DECLARATION while keeping
+		// its {{placeholder}} in a step. Left alone, replay would treat it as a
+		// non-secret missing param — the plaintext-in-conversation leak the secret
+		// marker exists to close. Re-attach the baseline declaration for any
+		// baseline secret param the refined steps still reference.
+		declared := map[string]bool{}
+		for _, p := range refined.Params {
+			declared[p.Name] = true
+		}
+		for _, p := range base.Params {
+			if !p.Secret || declared[p.Name] {
+				continue
+			}
+			if paramReferenced(&refined, p.Name) {
+				refined.Params = append(refined.Params, p)
+			}
+		}
+		if bad := invalidSelectors(refined, base); len(bad) > 0 {
+			// Precision guard: the model used selectors it wasn't given. Name
+			// the violations and let it correct itself ONCE — a wholesale
+			// silent fallback threw away otherwise-good refinements (observed:
+			// both distill attempts of a real recording were discarded, so the
+			// cleanup pass never ran at all). On the second miss the refined
+			// steps stay untrustworthy; the prose description still isn't —
+			// keep it so the recordings manifest isn't left with a bare name.
+			if attempt == 0 {
+				slog.Warn("browser: recording distill used selectors not in the recording, retrying with violations named", "recording", name, "invalid", strings.Join(bad, " | "))
+				prompt = user + "\n\nYour previous attempt was REJECTED because these selectors do not appear in the baseline:\n" + strings.Join(bad, "\n") + "\nReturn the cleaned recording again, using ONLY selectors copied verbatim from the baseline."
+				continue
+			}
+			slog.Warn("browser: recording distill used a selector not in the recording, keeping deterministic baseline steps", "recording", name)
+			return withDescription(base, refined.Description)
+		}
+		backfillAnchors(&refined, base)
+		refined.EndURL = base.EndURL
+		return refined
 	}
-	if !selectorsSubset(refined, base) {
-		// Precision guard: the model used a selector it wasn't given. The refined
-		// steps are untrustworthy, but the prose description still is — keep it so
-		// the recordings manifest isn't left with a bare name.
-		slog.Warn("browser: recording distill used a selector not in the recording, keeping deterministic baseline steps", "recording", name)
-		return withDescription(base, refined.Description)
-	}
-	backfillAnchors(&refined, base)
-	return refined
 }
 
 // backfillAnchors re-attaches each refined step's Anchors from the baseline step
@@ -724,17 +827,30 @@ func stripFences(s string) string {
 // selectorsSubset reports whether every selector/frame the refined recording uses
 // was present in the baseline (the captured ground truth).
 func selectorsSubset(refined, base Recording) bool {
+	return len(invalidSelectors(refined, base)) == 0
+}
+
+// invalidSelectors lists the selectors/frames the refined recording uses that
+// the baseline never captured — the violations to feed back to the distiller
+// on its retry, so it can correct them instead of the whole refinement being
+// silently discarded.
+func invalidSelectors(refined, base Recording) []string {
 	allowed := map[string]bool{"": true}
 	for _, st := range base.Steps {
 		allowed[st.Selector] = true
 		allowed[st.Frame] = true
 	}
+	var bad []string
+	seen := map[string]bool{}
 	for _, st := range refined.Steps {
-		if !allowed[st.Selector] || !allowed[st.Frame] {
-			return false
+		for _, sel := range []string{st.Selector, st.Frame} {
+			if !allowed[sel] && !seen[sel] {
+				seen[sel] = true
+				bad = append(bad, sel)
+			}
 		}
 	}
-	return true
+	return bad
 }
 
 // StepDigest renders a compact one-line summary of what a replay does, e.g.
@@ -819,6 +935,74 @@ func LoadRecording(path string) (Recording, error) {
 	return ParseRecording(data)
 }
 
+// --- Recording storage layout ---
+//
+// A recording is a DIRECTORY under the recordings root:
+//
+//	<root>/<name>/recording.yaml  — the replayable, hand-editable recording
+//	<root>/<name>/events.json    — the raw captured events (diagnostics)
+//
+// so one recording's artifacts live and die together: deleting the directory
+// removes everything, and future artifacts (heal history, step screenshots)
+// have a home. Recordings saved by older versions as flat <root>/<name>.yaml
+// files are still found and edited in place; re-recording under that name
+// migrates it to the directory layout.
+
+// recordingFileName is the YAML's fixed basename inside a recording directory.
+const recordingFileName = "recording.yaml"
+
+// RecordingYAMLPath resolves where name's YAML lives: the directory layout
+// when present, else the legacy flat file when present, else (for creation)
+// the directory layout. name must be a bare name — callers validate it.
+func RecordingYAMLPath(root, name string) string {
+	dirPath := filepath.Join(root, name, recordingFileName)
+	if _, err := os.Stat(dirPath); err == nil {
+		return dirPath
+	}
+	legacy := filepath.Join(root, name+".yaml")
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	return dirPath
+}
+
+// RecordingEventsPath returns where name's raw-events sidecar belongs, in the
+// same layout RecordingYAMLPath resolves to.
+func RecordingEventsPath(root, name string) string {
+	p := RecordingYAMLPath(root, name)
+	if filepath.Base(p) == recordingFileName {
+		return filepath.Join(filepath.Dir(p), "events.json")
+	}
+	return filepath.Join(root, name+".events.json")
+}
+
+// DeleteRecording removes every artifact of name in either layout. Returns
+// os.ErrNotExist when nothing was there to delete.
+func DeleteRecording(root, name string) error {
+	found := false
+	dir := filepath.Join(root, name)
+	if st, err := os.Stat(dir); err == nil && st.IsDir() {
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
+		found = true
+	}
+	for _, f := range []string{filepath.Join(root, name+".yaml"), filepath.Join(root, name+".events.json")} {
+		err := os.Remove(f)
+		if err == nil {
+			found = true
+			continue
+		}
+		if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if !found {
+		return os.ErrNotExist
+	}
+	return nil
+}
+
 // ListRecordings reads every *.yaml recording in dir and returns them sorted by
 // name. A missing dir yields nil; an unreadable or unparseable file (a
 // half-written or hand-broken recording) is skipped rather than sinking the whole
@@ -830,10 +1014,16 @@ func ListRecordings(dir string) []Recording {
 	}
 	var out []Recording
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+		var path string
+		switch {
+		case e.IsDir():
+			path = filepath.Join(dir, e.Name(), recordingFileName)
+		case strings.HasSuffix(e.Name(), ".yaml"):
+			path = filepath.Join(dir, e.Name()) // legacy flat layout
+		default:
 			continue
 		}
-		s, err := LoadRecording(filepath.Join(dir, e.Name()))
+		s, err := LoadRecording(path)
 		if err != nil || s.Name == "" {
 			continue
 		}
@@ -902,6 +1092,41 @@ func (s Step) target() string {
 		return s.Frame + frameDelim + s.Selector
 	}
 	return s.Selector
+}
+
+// sameLocation reports whether two URL strings address the same document —
+// component-wise, so the browser's normalization of "http://host" to
+// "http://host/" doesn't defeat the comparison.
+func sameLocation(a, b string) bool {
+	if a == b {
+		return true
+	}
+	ua, errA := url.Parse(a)
+	ub, errB := url.Parse(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	pa, pb := ua.Path, ub.Path
+	if pa == "" {
+		pa = "/"
+	}
+	if pb == "" {
+		pb = "/"
+	}
+	return ua.Scheme == ub.Scheme && ua.Host == ub.Host && pa == pb &&
+		ua.RawQuery == ub.RawQuery && ua.Fragment == ub.Fragment
+}
+
+// sameHost reports whether two URL strings share a scheme+host — the gate for
+// the navigate step's grace window (an in-page transition can only "arrive" at
+// a same-host destination).
+func sameHost(a, b string) bool {
+	ua, errA := url.Parse(a)
+	ub, errB := url.Parse(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return ua.Scheme == ub.Scheme && ua.Host == ub.Host
 }
 
 // subst replaces {{name}} placeholders with param values, verbatim. Used where
@@ -979,6 +1204,46 @@ type ReplayOptions struct {
 	Healer      Healer
 	Browser     *Browser
 	DownloadDir string
+	// Progress, when set, receives one human-readable line as each step starts
+	// (and when self-heal intervenes) — the live view of a replay that can run
+	// for minutes. Lines are built from the step's RAW template fields, never
+	// substituted param values, so a secret param can't leak through them.
+	Progress func(line string)
+}
+
+// emitProgress is the nil-safe Progress call.
+func (o ReplayOptions) emitProgress(line string) {
+	if o.Progress != nil {
+		o.Progress(line)
+	}
+}
+
+// stepProgressLine names a step for the live progress feed: the action plus
+// the most human-meaningful identifier the step carries (label > hint >
+// selector; URL for navigate; the wait condition for waits). Values are
+// deliberately absent — a type step's value may hold a substituted secret.
+func stepProgressLine(i, total int, st *Step) string {
+	name := st.Label
+	if name == "" {
+		name = st.Hint
+	}
+	if name == "" {
+		name = st.Selector
+	}
+	switch st.Action {
+	case "navigate":
+		name = st.URL
+	case "wait":
+		switch {
+		case st.Selector != "":
+			name = st.Selector
+		case st.Network:
+			name = "network idle"
+		default:
+			name = fmt.Sprintf("%dms", st.TimeoutMS)
+		}
+	}
+	return fmt.Sprintf("[%d/%d] %s %s", i, total, st.Action, name)
 }
 
 // ReplayRecording runs a recording deterministically (no LLM), substituting params. Each
@@ -1007,19 +1272,53 @@ func ReplayRecording(ctx context.Context, page *Page, recording *Recording, para
 		// named recording and passes params that don't match this one at all.
 		return false, page, nil, fmt.Errorf("replay %q: missing required param(s): %s", recording.Name, strings.Join(missing, ", "))
 	}
+	// stepHard bounds one step's TOTAL wall time — implicit waits, retries and
+	// heal rounds included — as a backstop for CDP calls that never answer: a
+	// crashed renderer (e.g. after Chrome killed the page) leaves every command
+	// pending forever, and the per-wait timeouts are themselves implemented as
+	// CDP polls, so they hang with it. Without this bound a dead tab stalls
+	// replay until the caller's context — an entire turn — expires. Generous on
+	// purpose: it must never cut a legitimately slow step, only a hung one.
+	stepHard := 8 * opts.StepTimeout
+	if floor := 2 * navigateLoadTimeout; stepHard < floor {
+		stepHard = floor
+	}
 	binds := map[string][]string{}
+	lastClick := -1
+	for i := range recording.Steps {
+		if recording.Steps[i].Action == "click" && i+1 < len(recording.Steps) &&
+			recording.Steps[i+1].Action == "wait" && recording.Steps[i+1].Network {
+			recording.Steps[i].expectNetwork = true
+		}
+		if recording.Steps[i].Action == "click" {
+			lastClick = i
+		}
+	}
+	// The decisive click: the last click of the flow, when the demonstration
+	// ended at a URL different from where that click happened (so the click was
+	// meant to navigate — a publish/submit). Replay retries it until the URL
+	// moves, riding out a transient server-side validation ("图片正在上传").
+	if lastClick >= 0 && recording.EndURL != "" {
+		recording.Steps[lastClick].expectEndURL = recording.EndURL
+	}
 	cur := page
 	for i := range recording.Steps {
-		np, runErr := runStep(ctx, opts.Browser, cur, &recording.Steps[i], full, opts.StepTimeout, opts.DownloadDir, binds)
+		opts.emitProgress(stepProgressLine(i+1, len(recording.Steps), &recording.Steps[i]))
+		stepCtx, cancel := context.WithTimeout(ctx, stepHard)
+		np, runErr := runStep(stepCtx, opts.Browser, cur, &recording.Steps[i], full, opts.StepTimeout, opts.DownloadDir, binds)
 		if runErr == nil {
+			cancel()
 			cur = np
 			continue
 		}
-		np, healed, runErr := recoverStep(ctx, opts, cur, &recording.Steps[i], full, runErr, &modified, binds)
+		np, healed, runErr := recoverStep(stepCtx, opts, cur, &recording.Steps[i], full, runErr, &modified, binds)
+		cancel()
 		if runErr != nil {
 			return modified, cur, nil, fmt.Errorf("step %d (%s): %w", i+1, recording.Steps[i].Action, runErr)
 		}
-		_ = healed
+		if healed {
+			opts.emitProgress(fmt.Sprintf("[%d/%d] recovered — continuing", i+1, len(recording.Steps)))
+		}
 		cur = np
 	}
 	return modified, cur, assembleOutputs(recording.Outputs, binds), nil
@@ -1068,18 +1367,35 @@ const maxHealRounds = 3
 func recoverStep(ctx context.Context, opts ReplayOptions, page *Page, step *Step, params map[string]string, cause error, modified *bool, binds map[string][]string) (*Page, bool, error) {
 	// 1. Structural: a blocking overlay is the most common non-selector failure.
 	if dismissed, _ := page.DismissOverlay(ctx); dismissed {
+		opts.emitProgress("step failed — dismissed a blocking overlay, retrying")
 		if np, err := runStep(ctx, opts.Browser, page, step, params, opts.StepTimeout, opts.DownloadDir, binds); err == nil {
 			return np, true, nil
 		}
 	}
 	if opts.Healer == nil {
-		return page, false, cause
+		return page, false, fmt.Errorf("%w (self-heal skipped: no healer model available)", cause)
 	}
-	// 2. LLM healer, multi-round.
+	// 2. LLM healer, multi-round. Every exit path names the heal outcome —
+	// returning the bare cause made a failed heal indistinguishable from no
+	// heal ever running.
 	for round := 0; round < maxHealRounds; round++ {
+		opts.emitProgress(fmt.Sprintf("step failed — self-heal round %d/%d", round+1, maxHealRounds))
 		before := *step
 		if herr := opts.Healer(ctx, page, step, cause); herr != nil {
-			return page, false, cause
+			return page, false, fmt.Errorf("%w (self-heal gave up: %v)", cause, herr)
+		}
+		if step.Selector != before.Selector {
+			opts.emitProgress("self-heal proposed " + step.Selector + " — retrying")
+		}
+		if step.Selector != before.Selector {
+			// The healer's replacement selector is authoritative for this
+			// retry: the recorded fingerprint is exactly what just failed to
+			// match the page, so re-gating the healed selector through
+			// resolveAnchoredTarget would reject every repair — an anchored
+			// step could never heal. Dropping the stale anchors also reaches
+			// the YAML via the caller's write-back, so the healed step stays
+			// replayable next time instead of deadlocking again.
+			step.Anchors = nil
 		}
 		np, retryErr := runStep(ctx, opts.Browser, page, step, params, opts.StepTimeout, opts.DownloadDir, binds)
 		if retryErr == nil {
@@ -1089,11 +1405,12 @@ func recoverStep(ctx context.Context, opts ReplayOptions, page *Page, step *Step
 			return np, true, nil
 		}
 		if *step == before {
-			return page, false, retryErr // healer made no change — further rounds won't help
+			// healer made no change — further rounds won't help
+			return page, false, fmt.Errorf("%w (self-heal returned the unchanged step)", retryErr)
 		}
 		cause = retryErr // feed the fresh failure to the next round
 	}
-	return page, false, cause
+	return page, false, fmt.Errorf("%w (self-heal tried %d rounds without success)", cause, maxHealRounds)
 }
 
 // unknownParams rejects a caller-supplied param key the recording doesn't
@@ -1204,8 +1521,40 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 	target := step.target()
 	switch step.Action {
 	case "navigate":
-		if err := page.Navigate(ctx, substURL(step.URL, params)); err != nil {
-			return page, err
+		dest := substURL(step.URL, params)
+		// Already there → don't reload. A recorded navigate can be the echo of
+		// an in-page transition a preceding click already reproduced (SPA tab
+		// switches that re-announce the current URL); reloading resets the very
+		// page state that click just set up. Compared component-wise (the
+		// browser normalizes "http://host" to "http://host/"), and the step's
+		// Verify still runs below, so this never skips a real move.
+		//
+		// The SPA's own URL update is ASYNC: right after the click step returns,
+		// location.href may still show the old address (observed on Xiaohongshu:
+		// the tab click appends &from=tab_switch a beat later, and navigating in
+		// that window reloaded the page and reset the tab). When the destination
+		// is on the page's current host, give the page a short grace window to
+		// arrive on its own before forcing a load; a genuine cross-host navigate
+		// pays nothing.
+		var cur string
+		_ = page.Eval(ctx, "location.href", &cur)
+		if !sameLocation(cur, dest) && sameHost(cur, dest) {
+			grace := time.Now().Add(3 * time.Second)
+			for time.Now().Before(grace) && ctx.Err() == nil {
+				select {
+				case <-ctx.Done():
+				case <-time.After(100 * time.Millisecond):
+				}
+				_ = page.Eval(ctx, "location.href", &cur)
+				if sameLocation(cur, dest) {
+					break
+				}
+			}
+		}
+		if !sameLocation(cur, dest) {
+			if err := page.Navigate(ctx, dest); err != nil {
+				return page, err
+			}
 		}
 	case "wait":
 		// Wait for an element if a selector is given (the robust form); else settle
@@ -1254,10 +1603,53 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 		} else if err := page.WaitFor(ctx, target, waitTimeout); err != nil {
 			return page, err
 		}
+		// Actionability (page loaded, custom element upgraded, not disabled) is
+		// gated inside ClickAt now — the single choke point for every click.
 		// Follow a new tab the click may open (target=_blank / SPA window.open).
-		np, err := clickTarget(ctx, b, page, target)
+		gen0 := page.netActivityGen(ctx)
+		np, err := clickTarget(ctx, b, page, target, step.ClickX, step.ClickY)
 		if err != nil {
 			return page, err
+		}
+		// The demonstration's click caused network activity (the recorder put a
+		// wait-network step right after it). If this one caused none, it was a
+		// dud — most often a custom element whose handlers hadn't hydrated yet,
+		// or a briefly disabled button — and the idle-wait that follows would
+		// pass instantly, reading as success. Re-click, up to twice.
+		if step.expectNetwork && np == page {
+			for attempt := 0; attempt < 2 && !page.netActivityAdvanced(ctx, gen0, 2500*time.Millisecond); attempt++ {
+				np2, rerr := clickTarget(ctx, b, page, target, step.ClickX, step.ClickY)
+				if rerr != nil {
+					break
+				}
+				np = np2
+			}
+		}
+		// Decisive click: the demonstrated click navigated (EndURL differs from
+		// where it fired), but this one left the page put — the action was
+		// accepted yet BLOCKED by a transient validation (e.g. an async cover
+		// image still uploading), which clears itself. Wait for the page to
+		// settle and re-click, up to a few times, stopping the moment the URL
+		// moves. Same-tab navigation on success changes the URL, so a
+		// successful click never gets re-fired.
+		if step.expectEndURL != "" && np == page {
+			var urlBefore string
+			_ = page.Eval(ctx, "location.href", &urlBefore)
+			if !sameLocation(urlBefore, step.expectEndURL) {
+				for attempt := 0; attempt < 3; attempt++ {
+					_ = page.WaitForNetworkIdle(ctx, 0, 8*time.Second)
+					var cur string
+					_ = page.Eval(ctx, "location.href", &cur)
+					if !sameLocation(cur, urlBefore) {
+						break // the page moved — the action took effect
+					}
+					np2, rerr := clickTarget(ctx, b, page, target, step.ClickX, step.ClickY)
+					if rerr != nil {
+						break
+					}
+					np = np2
+				}
+			}
 		}
 		page = np
 	case "type":
@@ -1429,15 +1821,20 @@ func bind(binds map[string][]string, name, value string) {
 // clickTarget clicks target on page, following a new tab the click opens when a
 // Browser is available (replay/tools path). Without a Browser it is a plain
 // click on the same page.
-func clickTarget(ctx context.Context, b *Browser, page *Page, target string) (*Page, error) {
+func clickTarget(ctx context.Context, b *Browser, page *Page, target string, fx, fy float64) (*Page, error) {
 	if b != nil {
-		return b.ClickFollow(ctx, page, target)
+		return b.ClickFollowAt(ctx, page, target, fx, fy)
 	}
-	if err := page.Click(ctx, target); err != nil {
+	if err := page.ClickAt(ctx, target, fx, fy); err != nil {
 		return page, err
 	}
 	return page, nil
 }
+
+// SameLocation reports whether two URL strings address the same document —
+// exported for callers comparing a replay's final URL against the recording's
+// demonstrated EndURL.
+func SameLocation(a, b string) bool { return sameLocation(a, b) }
 
 func verify(ctx context.Context, page *Page, step *Step, params map[string]string) error {
 	if step.Verify == nil {

@@ -38,6 +38,10 @@ type RecordedEvent struct {
 	AltSelectors []string `json:"alt_selectors,omitempty"` // alternate selectors (different strategies than Selector)
 	Role         string   `json:"role,omitempty"`          // element's role attribute
 	NeighborText string   `json:"neighbor_text,omitempty"` // nearest stable label-like text (label / preceding sibling)
+	NewTab       bool     `json:"new_tab,omitempty"`       // navigate: the first load of a tab the page itself opened (has an opener)
+	SameDoc      bool     `json:"same_doc,omitempty"`      // navigate: same-document (pushState/replaceState) — a page-initiated effect, not a user action
+	ClickX       float64  `json:"click_x,omitempty"`       // click: fraction of the element's width where the user pressed (0 = unknown → center)
+	ClickY       float64  `json:"click_y,omitempty"`       // click: fraction of the element's height where the user pressed
 }
 
 // Recorder captures a user's actions on a page by injecting a DOM listener that
@@ -218,6 +222,14 @@ func (r *Recorder) instrumentSession(ctx context.Context, session, frameSel stri
 	if _, err := r.page.cli.call(ctx, session, "Runtime.evaluate", map[string]any{"expression": captureScript}); err != nil {
 		return release(err)
 	}
+	r.watchBindingEvents(session, frameSel)
+	return nil
+}
+
+// watchBindingEvents subscribes to the capture binding's calls on one session
+// and appends each delivered event. Purely client-side — safe to install on a
+// still-frozen target.
+func (r *Recorder) watchBindingEvents(session, frameSel string) {
 	events, unsub := r.page.cli.subscribe("Runtime.bindingCalled", session)
 	r.mu.Lock()
 	r.unsubs = append(r.unsubs, unsub)
@@ -238,7 +250,6 @@ func (r *Recorder) instrumentSession(ctx context.Context, session, frameSel stri
 			r.addEvent(re, frameSel)
 		}
 	}()
-	return nil
 }
 
 // instrumentOOPIF resolves a cross-origin iframe session's parent selector and
@@ -293,18 +304,31 @@ const captureScript = `(function(){
     try{ var of=window.fetch; if(of){ window.fetch=function(){ inc(); return of.apply(this,arguments).then(function(r){dec();return r;},function(e){dec();throw e;}); }; } }catch(_){}
     try{ var send=XMLHttpRequest.prototype.send; XMLHttpRequest.prototype.send=function(){ inc(); try{ this.addEventListener('loadend',function(){dec();},{once:true}); }catch(_){ dec(); } return send.apply(this,arguments); }; }catch(_){}
   }
+  // volatileId flags auto-generated ids that change per mount/session —
+  // react-aria/radix/headlessui counters, "Popover12"-style numbered
+  // components, ":r3:"-style useId output, long numeric runs. Anchoring a
+  // recording on one produces a selector that is dead by the next session
+  // (observed: Zhihu's #Popover6-content / #react-aria-2-tabpanel-…). A
+  // volatile id is only DEMOTED — the attribute/path strategies and the
+  // fingerprint alternates still identify the element.
+  function volatileId(id){
+    return /^(react-aria|radix|headlessui|downshift|floating-ui|aria)[-:]/i.test(id)
+      || /^:r[0-9a-z]+:$/i.test(id)
+      || /^[A-Za-z]+\d+([-_][A-Za-z0-9]+)*$/.test(id)
+      || /\d{4,}/.test(id);
+  }
   function attrSel(el){
     if(!el || el.nodeType!==1) return '';
-    if(el.id) return '#'+CSS.escape(el.id);
+    if(el.id && !volatileId(el.id)) return '#'+CSS.escape(el.id);
     for(var i=0;i<4;i++){var a=['data-testid','data-test','name','aria-label'][i];var v=el.getAttribute&&el.getAttribute(a);if(v)return el.tagName.toLowerCase()+'['+a+'=\"'+CSS.escape(v)+'\"]';}
     return '';
   }
   // pathSel walks up from el building a selector path, one part per node via
-  // nodeFn — anchored at the nearest id-bearing ancestor when one exists.
+  // nodeFn — anchored at the nearest STABLE-id-bearing ancestor when one exists.
   function pathSel(el, nodeFn){
     var parts=[], node=el, depth=0;
     while(node && node.nodeType===1 && node.tagName!=='BODY' && depth<6){
-      if(node.id){ parts.unshift('#'+CSS.escape(node.id)); return parts.join(' > '); }
+      if(node.id && !volatileId(node.id)){ parts.unshift('#'+CSS.escape(node.id)); return parts.join(' > '); }
       parts.unshift(nodeFn(node)); node=node.parentElement; depth++;
     }
     return parts.join(' > ');
@@ -407,12 +431,37 @@ const captureScript = `(function(){
     _lastWaitAt=now;
     try{ window.__octoRecord(JSON.stringify({type:'wait', wait_kind:kind, selector:selector||'', timeout_ms:timeout||10000, url:location.href})); }catch(_){}
   }
+  // interactiveAncestor retargets an event from its raw target (an svg path, a
+  // text span, a bare wrapper div) to the nearest interactive ancestor — the
+  // element carrying the semantics (tag, aria-label, role, text) that a stable
+  // selector, a scoring fingerprint and the self-heal prompt all need.
+  // Recording the raw target produced steps like "click div:nth-of-type(4)"
+  // with no label/role/hint: fragile to replay and impossible to heal.
+  var INTERACTIVE_ROLES={button:1,link:1,menuitem:1,menuitemcheckbox:1,menuitemradio:1,tab:1,option:1,checkbox:1,radio:1,'switch':1,combobox:1,treeitem:1};
+  function interactiveAncestor(el){
+    var node=el, depth=0;
+    while(node && node.nodeType===1 && node!==document.body && depth<6){
+      var tag=node.tagName;
+      if(tag==='BUTTON'||tag==='A'||tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA'||tag==='SUMMARY'||tag==='OPTION') return node;
+      var role=node.getAttribute && node.getAttribute('role');
+      if(role && INTERACTIVE_ROLES[role]) return node;
+      node=node.parentElement; depth++;
+    }
+    return el;
+  }
   function report(type, e){
-    try{var el=e.target; var fr=''; try{ if(window.frameElement) fr=sel(window.frameElement); }catch(_2){}
+    try{var el=(type==='click')?interactiveAncestor(e.target):e.target; var fr=''; try{ if(window.frameElement) fr=sel(window.frameElement); }catch(_2){}
       var field=((el.placeholder||el.name||(el.getAttribute?el.getAttribute('aria-label'):'')||el.id||'')+'').trim().slice(0,40);
       var secret=(el.type==='password');
       var role=''; try{ role=el.getAttribute('role')||''; }catch(_3){}
-      window.__octoRecord(JSON.stringify({type:type, selector:sel(el), frame:fr, tag:el.tagName, text:(el.textContent||'').trim().slice(0,40), field:field, secret:secret, value:(secret?'':(el.value!==undefined?(''+el.value).slice(0,200):'')), url:location.href, alt_selectors:altSels(el), role:role, neighbor_text:neighborText(el)}));}catch(_){}
+      /* Where INSIDE the element the user pressed, as box fractions. Replay
+         clicks the same spot instead of the geometric center — essential for
+         shadow-DOM hosts, where the document only sees the retargeted host
+         and its center may be dead space. Keyboard-activated clicks arrive at
+         (0,0): leave the fractions unset and let replay use the center. */
+      var cx=0, cy=0;
+      if(type==='click'&&(e.clientX||e.clientY)){try{var rr=el.getBoundingClientRect(); if(rr.width>0&&rr.height>0){cx=Math.min(1,Math.max(0.001,(e.clientX-rr.x)/rr.width)); cy=Math.min(1,Math.max(0.001,(e.clientY-rr.y)/rr.height));}}catch(_4){}}
+      window.__octoRecord(JSON.stringify({type:type, selector:sel(el), frame:fr, tag:el.tagName, text:(el.textContent||'').trim().slice(0,40), field:field, secret:secret, value:(secret?'':(el.value!==undefined?(''+el.value).slice(0,200):'')), url:location.href, alt_selectors:altSels(el), role:role, neighbor_text:neighborText(el), click_x:cx, click_y:cy}));}catch(_){}
   }
   /* ---- click: report + detect network activity after a short delay ---- */
   // Compare the activity GENERATION, not just in-flight count: on a loaded
@@ -420,10 +469,20 @@ const captureScript = `(function(){
   // and "n>0 right now" would miss it — "any request started since the click"
   // does not.
   document.addEventListener('click', function(e){
+    /* Only the user's REAL gestures are the demonstration. A page that
+       programmatically clicks elements (e.g. creating a hidden file input and
+       calling .click() on it when an upload zone is pressed — Xiaohongshu's
+       import dialog) dispatches untrusted events; recording them poisons the
+       compiled steps (the upload merge grabbed the synthetic input click and
+       produced an unreplayable bare-"input" target). */
+    if(!e.isTrusted) return;
     report('click', e);
     var g0=window.__octoNet?window.__octoNet.gen:0;
     setTimeout(function(){ try{ var s=window.__octoNet; if(s && (s.n>0 || s.gen!==g0)) reportWait('network','',10000); }catch(_){} }, 150);
   }, true);
+  /* change stays unguarded: SELECT simulation and some framework controls
+     legitimately dispatch synthetic change events; the observed poison
+     (programmatic .click() on a dynamically created file input) is a click. */
   document.addEventListener('change', function(e){var t=e.target; report((t&&t.type==='file')?'upload':'change', e);}, true);
   // Enter in a text input = the submit gesture (change never fires without a
   // blur, so the typed value only reaches us as this event's snapshot). Not
@@ -433,6 +492,7 @@ const captureScript = `(function(){
   // the candidate — it is not a submit, CJK users hit it constantly).
   var TEXTY={text:1,search:1,email:1,url:1,tel:1,number:1,password:1};
   document.addEventListener('keydown', function(e){
+    if(!e.isTrusted) return;
     if(e.key!=='Enter'&&e.keyCode!==13) return;
     if(e.isComposing||e.keyCode===229) return;
     var t=e.target;
@@ -508,6 +568,19 @@ func (r *Recorder) Start(ctx context.Context) error {
 		_, _ = p.cli.call(ctx, p.sessionID, "Target.setAutoAttach", map[string]any{
 			"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true,
 		})
+		// The session-scoped call above only fires for targets Chrome considers
+		// related to the recorded page — child frames, workers, popups that keep
+		// an opener. A tab opened WITHOUT an opener relationship (target="_blank"
+		// is implicitly rel=noopener since Chrome 88; sites also open editors via
+		// window.open(..., "noopener")) is an unrelated top-level target: no
+		// attachedToTarget ever fires, the tab is never instrumented, and the rest
+		// of the demonstration is silently absent from the recording. Request
+		// freeze-on-create at the BROWSER level too — that scope fires for every
+		// created target regardless of opener. The handler below instruments page
+		// targets and resumes everything it sees, so the extra events are safe.
+		_, _ = p.cli.call(ctx, "", "Target.setAutoAttach", map[string]any{
+			"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true,
+		})
 		attached, attachUnsub := p.cli.subscribe("Target.attachedToTarget", "")
 		r.mu.Lock()
 		r.unsubs = append(r.unsubs, attachUnsub)
@@ -517,7 +590,9 @@ func (r *Recorder) Start(ctx context.Context) error {
 				var a struct {
 					SessionID  string `json:"sessionId"`
 					TargetInfo struct {
-						Type string `json:"type"`
+						TargetID string `json:"targetId"`
+						Type     string `json:"type"`
+						OpenerID string `json:"openerId"`
 					} `json:"targetInfo"`
 				}
 				if json.Unmarshal(ev.Params, &a) != nil || a.SessionID == "" {
@@ -537,7 +612,7 @@ func (r *Recorder) Start(ctx context.Context) error {
 					// recording started are deliberately NOT instrumented: switching
 					// to one leaves no replayable step, so its events would compile
 					// into a skill that replays on the wrong page.
-					r.instrumentPageSession(ictx, a.SessionID)
+					r.instrumentPageSession(ictx, a.SessionID, a.TargetInfo.TargetID, a.TargetInfo.OpenerID != "")
 				}
 				// Resume the target regardless of type or instrumentation outcome —
 				// waitForDebuggerOnStart keeps it frozen until this call, and a
@@ -552,7 +627,7 @@ func (r *Recorder) Start(ctx context.Context) error {
 	// multi-page demonstration replays from the right pages — otherwise the only
 	// navigate step is the synthesized start URL, and the recording loses every
 	// page the user moved to.
-	r.watchNavigations(ctx, p.sessionID)
+	r.watchNavigations(ctx, p.sessionID, false)
 	return nil
 }
 
@@ -569,18 +644,49 @@ func (r *Recorder) Start(ctx context.Context) error {
 // cancelled the tab's first navigation irrecoverably — the destination isn't
 // recorded anywhere yet — or swapped the document out from under the user's
 // first click. The freeze is the mechanism CDP provides for exactly this.)
-func (r *Recorder) instrumentPageSession(ctx context.Context, session string) {
+func (r *Recorder) instrumentPageSession(ctx context.Context, session, targetID string, hasOpener bool) {
+	// Claim by TARGET, not by session: one tab can surface as several sessions
+	// of the same client (auto-attach at creation plus a later explicit
+	// Target.attachToTarget), and a page-side binding call notifies every
+	// session that registered the binding — instrumenting a second session
+	// would record every action twice. The "target:" prefix keeps these claims
+	// disjoint from instrumentSession's session-keyed ones.
+	if !r.claimSession("target:" + targetID) {
+		return
+	}
+	// A frozen tab answers NO renderer-bound command until it is resumed — a
+	// tab opened without an opener relationship gets a fresh renderer that
+	// isn't serviced while paused — so a call-and-wait sequence here would
+	// deadlock against the resume that only happens after we return. Instead,
+	// queue the whole setup on the wire (callAsync writes immediately; wire
+	// order guarantees it all applies before any page code runs), install the
+	// client-side subscriptions, queue the resume, and only then collect the
+	// responses. Opener-related popups whose shared renderer answers while
+	// frozen take the exact same path — the awaits just complete sooner.
+	cli := r.page.cli
+	var waits []func(context.Context) (json.RawMessage, error)
 	// Enable the domains ourselves rather than depend on the browser watcher's
 	// async registration having run first — same reasoning as instrumentOOPIF.
 	for _, d := range []string{"Page.enable", "Runtime.enable", "DOM.enable"} {
-		if _, err := r.page.cli.call(ctx, session, d, nil); err != nil {
-			return
-		}
+		waits = append(waits, cli.callAsync(session, d, nil))
 	}
-	if err := r.instrumentSession(ctx, session, ""); err != nil {
-		return
+	waits = append(waits, cli.callAsync(session, "Runtime.addBinding", map[string]any{"name": "__octoRecord"}))
+	waits = append(waits, cli.callAsync(session, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": captureScript}))
+	r.watchBindingEvents(session, "")
+	// hasOpener distinguishes a tab the PAGE spawned (its first navigation is
+	// tagged NewTab so CompileRecording can collapse the click detour that
+	// opened it) from a tab the USER opened by hand (Cmd+T + typed URL — the
+	// preceding clicks are unrelated and must survive).
+	r.watchNavigations(ctx, session, hasOpener)
+	waits = append(waits, cli.callAsync(session, "Runtime.runIfWaitingForDebugger", nil))
+	for _, wait := range waits {
+		_, _ = wait(ctx) // best-effort, matching the attach handler's contract
 	}
-	r.watchNavigations(ctx, session)
+	// Install into an already-loaded document too (the script self-dedups). On
+	// a tab attached frozen at creation this evaluates in the transient initial
+	// document — harmless; the real document is covered by the on-new-document
+	// registration above.
+	_, _ = cli.call(ctx, session, "Runtime.evaluate", map[string]any{"expression": captureScript})
 }
 
 // watchNavigations records top-level navigations on one page session: both
@@ -588,10 +694,20 @@ func (r *Recorder) instrumentPageSession(ctx context.Context, session string) {
 // (Page.navigatedWithinDocument — pushState/replaceState never fire
 // frameNavigated). Subframe navigations are ignored: the cross-document event
 // carries the frame's parentId, and the same-document one is filtered against
-// the session's top frame (resolved once here). Consecutive repeats collapse.
-func (r *Recorder) watchNavigations(ctx context.Context, session string) {
+// the session's top frame (resolved asynchronously — a still-frozen tab only
+// answers Page.getFrameTree after its resume, and blocking here would deadlock
+// instrumentPageSession's queued-setup sequence; until it resolves the filter
+// admits all same-document navs, the same fallback as a failed lookup).
+// Consecutive repeats collapse.
+func (r *Recorder) watchNavigations(ctx context.Context, session string, markFirstNav bool) {
+	var topMu sync.Mutex
 	topFrameID := ""
-	if res, err := r.page.cli.call(ctx, session, "Page.getFrameTree", nil); err == nil {
+	waitFrameTree := r.page.cli.callAsync(session, "Page.getFrameTree", nil)
+	go func() {
+		res, err := waitFrameTree(ctx)
+		if err != nil {
+			return
+		}
 		var ft struct {
 			FrameTree struct {
 				Frame struct {
@@ -600,9 +716,11 @@ func (r *Recorder) watchNavigations(ctx context.Context, session string) {
 			} `json:"frameTree"`
 		}
 		if json.Unmarshal(res, &ft) == nil {
+			topMu.Lock()
 			topFrameID = ft.FrameTree.Frame.ID
+			topMu.Unlock()
 		}
-	}
+	}()
 
 	navEvents, navUnsub := r.page.cli.subscribe("Page.frameNavigated", session)
 	spaEvents, spaUnsub := r.page.cli.subscribe("Page.navigatedWithinDocument", session)
@@ -610,17 +728,36 @@ func (r *Recorder) watchNavigations(ctx context.Context, session string) {
 	r.unsubs = append(r.unsubs, navUnsub, spaUnsub)
 	r.mu.Unlock()
 
-	recordNav := func(u string) {
+	firstNav := markFirstNav
+	recordNav := func(u string, sameDoc bool) {
 		if u == "" || u == "about:blank" {
 			return
 		}
 		r.mu.Lock()
-		n := len(r.events)
-		if n > 0 && r.events[n-1].Type == "navigate" && r.events[n-1].URL == u {
-			r.mu.Unlock()
-			return // collapse the initial-load echo / repeat
+		// Collapse against the last recorded NAVIGATE, not just the immediately
+		// preceding event: every URL change lands a navigate event, so the last
+		// one IS the page's known location. An SPA that re-announces the same
+		// URL after an in-page click (tab switches that replaceState — observed
+		// on Xiaohongshu's publish page) would otherwise record a navigate step
+		// whose replay RELOADS the page and resets the very state the click
+		// just set up. A genuine leave-and-return still records: the departure
+		// put a different navigate in between.
+		for i := len(r.events) - 1; i >= 0; i-- {
+			if r.events[i].Type != "navigate" {
+				continue
+			}
+			if r.events[i].URL == u {
+				r.mu.Unlock()
+				return
+			}
+			break
 		}
-		r.events = append(r.events, RecordedEvent{Type: "navigate", URL: u})
+		ev := RecordedEvent{Type: "navigate", URL: u, SameDoc: sameDoc}
+		if firstNav && !sameDoc {
+			ev.NewTab = true
+			firstNav = false
+		}
+		r.events = append(r.events, ev)
 		r.mu.Unlock()
 	}
 
@@ -635,7 +772,7 @@ func (r *Recorder) watchNavigations(ctx context.Context, session string) {
 			if json.Unmarshal(ev.Params, &b) != nil || b.Frame.ParentID != "" {
 				continue // ignore subframe navigations
 			}
-			recordNav(b.Frame.URL)
+			recordNav(b.Frame.URL, false)
 		}
 	}()
 	go func() {
@@ -647,10 +784,20 @@ func (r *Recorder) watchNavigations(ctx context.Context, session string) {
 			if json.Unmarshal(ev.Params, &b) != nil {
 				continue
 			}
-			if topFrameID != "" && b.FrameID != topFrameID {
+			topMu.Lock()
+			top := topFrameID
+			topMu.Unlock()
+			if top != "" && b.FrameID != top {
 				continue // SPA routing inside a subframe — not a page move
 			}
-			recordNav(b.URL)
+			// Same-document navigations (pushState/replaceState) can only be
+			// initiated by page JS — an address-bar entry is always a full
+			// load — so they are recorded as EFFECTS (SameDoc) for the events
+			// sidecar, and the compiler drops them: replaying the click that
+			// caused one reproduces it, while replaying it as a navigate
+			// force-reloads the page and resets the in-page state the click
+			// just set up. Known loss: SPA Back/Forward browser-button moves.
+			recordNav(b.URL, true)
 		}
 	}()
 }
@@ -695,5 +842,11 @@ func (r *Recorder) Stop() {
 	defer cancel()
 	_, _ = r.page.cli.call(ctx, r.page.sessionID, "Target.setAutoAttach", map[string]any{
 		"autoAttach": true, "waitForDebuggerOnStart": false, "flatten": true,
+	})
+	// The browser-level freeze-on-create has no pre-recording baseline to
+	// restore — nothing else on this connection enables browser-scoped
+	// auto-attach — so turn it off entirely.
+	_, _ = r.page.cli.call(ctx, "", "Target.setAutoAttach", map[string]any{
+		"autoAttach": false, "waitForDebuggerOnStart": false, "flatten": true,
 	})
 }
