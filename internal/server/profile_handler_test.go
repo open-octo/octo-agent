@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -126,7 +127,13 @@ func TestHandleGetProfileUser_Missing(t *testing.T) {
 // sitting where ~/.octo should be a directory trips ENOTDIR, which
 // os.IsNotExist does not recognize (#1237), giving a portable way to force
 // a non-not-exist error without relying on platform-specific chmod semantics.
+// Windows is the exception: it reports this case as ERROR_PATH_NOT_FOUND,
+// which os.IsNotExist treats as a plain missing file, so the handler cannot
+// (and needn't) distinguish it there.
 func TestHandleGetProfileSoul_IOError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ENOTDIR maps to path-not-found on Windows, indistinguishable from a missing file")
+	}
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
