@@ -27,9 +27,14 @@ const testWaitTimeout = 60 * time.Second
 // loads of local fixture pages exceeding the 30s production default. The
 // click→download attribution window gets the same treatment: a starved runner
 // delivered downloadWillBegin more than 5s after the click that caused it.
+// WaitForNetworkIdle's activity grace gets the same treatment: a starved
+// runner's CDP round-trips ate enough of the 1200ms production default that a
+// request scheduled 400ms out (TestWaitForNetworkIdleWaitsForTriggeredRequest)
+// was consistently missed on windows-latest.
 func init() {
 	navigateLoadTimeout = 90 * time.Second
 	downloadAttributionWindow = 30 * time.Second
+	networkIdleGraceDefault = 5 * time.Second
 }
 
 // testChromeArgs trims Chrome's background work so a cold start on a starved
