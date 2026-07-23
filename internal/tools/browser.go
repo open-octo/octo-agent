@@ -833,6 +833,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 			}
 			msg += "\n\nDeclared replay params — use EXACTLY these names:" + pb.String()
 		}
+		msg += fmt.Sprintf("\nRaw captured events (diagnostic ground truth for this recording): %s — when a future replay misbehaves, compare the failing step against its source events before editing.", filepath.Join(filepath.Dir(path), "events.json"))
 		if recording.Description == "" {
 			// The LLM distill fell back (or omitted a description). Surface it here
 			// — the stderr warning never reaches the model — so the recording doesn't
@@ -867,7 +868,19 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		defer rcancel()
 		modified, finalPage, outputs, err := browser.ReplayRecording(rctx, page, &recording, params, browser.ReplayOptions{Healer: healer, Browser: b, DownloadDir: downloadDir(), Progress: resolveBrowserProgress(ctx)})
 		if err != nil {
-			return agent.ToolResult{}, fmt.Errorf("browser: replay %q: %w", name, err)
+			// Route the model to the evidence it needs to repair the recording
+			// ITSELF: the YAML is the editable steps, the events sidecar is the
+			// raw capture ground truth. Comparing them tells a capture problem
+			// (event missing/odd) from a compile problem (event present, step
+			// wrong) from page drift (both fine, page changed) — each with a
+			// different fix: re-record, edit the YAML, or adjust the failing
+			// step's selector/waits.
+			hint := fmt.Sprintf(" [to diagnose: the editable steps are at %s; the RAW captured events are at %s — compare the failing step against its source events to tell a capture gap (re-record) from a compile fault (edit the YAML) from page drift (fix the step's selector/waits); observe the live page to see its current state]",
+				path, browser.RecordingEventsPath(BrowserRecordingsDir(), name))
+			if _, serr := os.Stat(browser.RecordingEventsPath(BrowserRecordingsDir(), name)); serr != nil {
+				hint = fmt.Sprintf(" [to diagnose: the editable steps are at %s; observe the live page to compare its current state against the failing step]", path)
+			}
+			return agent.ToolResult{}, fmt.Errorf("browser: replay %q: %w%s", name, err, hint)
 		}
 		// A click in the recording may have opened (and switched to) a new tab; keep
 		// the session pointed there so follow-up actions act on the right page.
