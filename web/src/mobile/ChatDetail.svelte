@@ -10,7 +10,15 @@
   import { ws } from '../lib/ws'
   import { wireMobileSession, loadMobileHistory, sendMobile } from './chatWiring'
 
-  let { onBack, onViewApproval }: { onBack: () => void; onViewApproval: () => void } = $props()
+  let { onBack, onViewApproval, initialPrompt = '', onInitialSent }: {
+    onBack: () => void
+    onViewApproval: () => void
+    // Queued first message from the new-task sheet, sent once the WS
+    // subscription is live (so the reply stream isn't missed). onInitialSent
+    // lets the owner clear it so a remount doesn't re-send.
+    initialPrompt?: string
+    onInitialSent?: () => void
+  } = $props()
 
   const sid = $derived($activeSessionId ?? '')
   const msgs = $derived($chatMessages[sid] ?? [])
@@ -38,7 +46,12 @@
     let cancelled = false
     // Subscribe only after history renders (same ordering the desktop relies on).
     loadMobileHistory(s).then(() => {
-      if (!cancelled) ws.subscribe(s)
+      if (cancelled) return
+      ws.subscribe(s)
+      if (initialPrompt) {
+        sendMobile(s, initialPrompt, [])
+        onInitialSent?.()
+      }
     })
     const cleanup = wireMobileSession(s)
     return () => {

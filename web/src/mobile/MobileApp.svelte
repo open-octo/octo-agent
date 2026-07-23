@@ -11,6 +11,7 @@
   import SettingsTab from './SettingsTab.svelte'
   import TasksTab from './TasksTab.svelte'
   import ConfigTab from './ConfigTab.svelte'
+  import NewTask from './NewTask.svelte'
   import type { FeedKind } from './feedGroups'
   import { setActiveSession } from '../lib/stores'
 
@@ -20,6 +21,9 @@
   // to show, taken from the tapped card's kind.
   let openId = $state<string | null>(null)
   let openKind = $state<FeedKind | null>(null)
+  // New-task sheet (FAB) + the first message it queued for the opened session.
+  let newTask = $state(false)
+  let initialPrompt = $state('')
 
   function openSession(id: string, kind: FeedKind) {
     setActiveSession(id)
@@ -29,20 +33,31 @@
   function closeDetail() {
     openId = null
     openKind = null
+    initialPrompt = ''
   }
 </script>
 
 <div class="m-root">
   <main class="m-view">
     {#if tab === 'chat'}
-      {#if openId}
+      {#if newTask}
+        <NewTask
+          onCancel={() => (newTask = false)}
+          onCreated={(id, prompt) => { newTask = false; initialPrompt = prompt; openSession(id, prompt ? 'running' : 'done') }}
+        />
+      {:else if openId}
         {#if openKind === 'approval'}
           <ApprovalDetail onBack={closeDetail} />
         {:else}
-          <ChatDetail onBack={closeDetail} onViewApproval={() => (openKind = 'approval')} />
+          <ChatDetail
+            onBack={closeDetail}
+            onViewApproval={() => (openKind = 'approval')}
+            {initialPrompt}
+            onInitialSent={() => (initialPrompt = '')}
+          />
         {/if}
       {:else}
-        <Feed onOpen={openSession} />
+        <Feed onOpen={openSession} onNew={() => (newTask = true)} />
       {/if}
     {:else if tab === 'tasks'}
       <TasksTab onOpenSession={(id) => { tab = 'chat'; openSession(id, 'running') }} />
