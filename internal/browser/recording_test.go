@@ -2153,3 +2153,77 @@ func TestCompileDropsSameDocNavigates(t *testing.T) {
 		t.Fatalf("both real clicks must survive, got %d: %+v", clicks, s.Steps)
 	}
 }
+
+// TestCompileCapturesClickPointAndEndURL: the click's press position (box
+// fractions) and the demonstration's final URL survive compilation — the
+// fractions replay shadow-host clicks at the real spot, and EndURL is the
+// ground truth that catches a decisive click that silently did nothing.
+func TestCompileCapturesClickPointAndEndURL(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "navigate", URL: "https://x/publish"},
+		{Type: "click", Selector: "xhs-publish-btn", Tag: "XHS-PUBLISH-BTN", ClickX: 0.87, ClickY: 0.42},
+		{Type: "navigate", URL: "https://x/publish?published=true", SameDoc: true},
+	}
+	s := CompileRecording("x", "", "", events)
+	var click *Step
+	for i := range s.Steps {
+		if s.Steps[i].Action == "click" {
+			click = &s.Steps[i]
+		}
+	}
+	if click == nil || click.ClickX != 0.87 || click.ClickY != 0.42 {
+		t.Fatalf("click point not carried: %+v", s.Steps)
+	}
+	if s.EndURL != "https://x/publish?published=true" {
+		t.Fatalf("EndURL must record the demonstration's final URL (same-doc redirects included), got %q", s.EndURL)
+	}
+	// And it round-trips through YAML.
+	data, err := MarshalRecording(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt, err := ParseRecording(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt.EndURL != s.EndURL || rt.Steps[len(rt.Steps)-1].ClickX == 0 {
+		t.Fatalf("yaml round-trip lost fields: end_url=%q steps=%+v", rt.EndURL, rt.Steps)
+	}
+}
+
+// TestClickAtFraction: ClickAt presses at the requested fraction of the
+// element's box, not its center — a shadow-DOM host's center can be dead
+// space while the real control sits at the recorded spot.
+func TestClickAtFraction(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>frac</title>
+<div id="host" style="position:absolute;left:0;top:0;width:400px;height:100px;background:#eee"></div>
+<script>
+window.hits=[];
+document.getElementById('host').addEventListener('mousedown',function(e){window.hits.push({x:e.clientX,y:e.clientY});},true);
+</script>`))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#host", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if err := page.ClickAt(ctx, "#host", 0.9, 0.5); err != nil {
+		t.Fatalf("click: %v", err)
+	}
+	var hits []struct{ X, Y float64 }
+	if err := page.Eval(ctx, "window.hits", &hits); err != nil || len(hits) == 0 {
+		t.Fatalf("no mousedown recorded (err=%v)", err)
+	}
+	if hits[0].X < 340 || hits[0].X > 380 {
+		t.Fatalf("click should land at ~90%% of the 400px box (x≈360), got x=%.0f", hits[0].X)
+	}
+}

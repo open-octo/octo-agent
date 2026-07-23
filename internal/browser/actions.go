@@ -419,14 +419,25 @@ func (p *Page) resolveFieldTarget(ctx context.Context, frame, elemSel, hint stri
 	}
 }
 
-// elementCenter scrolls an element into view and returns its viewport-center
-// point (adding the iframe's offset for framed targets), or an error if the
-// selector matches nothing.
-func (p *Page) elementCenter(ctx context.Context, selector string) (point, error) {
+// elementPoint scrolls an element into view and returns the viewport point at
+// the given fractions of its bounding box (adding the iframe's offset for
+// framed targets), or an error if the selector matches nothing. fx/fy outside
+// (0,1] mean "center". A recorded click's fractions matter when the captured
+// element is a shadow-DOM HOST: the real control lives somewhere inside it,
+// the document only ever sees the retargeted host, and clicking the host's
+// CENTER can land on dead space (observed: Xiaohongshu's <xhs-publish-btn> —
+// the publish click silently did nothing on replay).
+func (p *Page) elementPoint(ctx context.Context, selector string, fx, fy float64) (point, error) {
 	frame, elem := splitFrame(selector)
 	offset := ""
 	if frame != "" {
 		offset = fmt.Sprintf(`{const f=document.querySelector(%s); if(f){const fr=f.getBoundingClientRect(); ox=fr.x; oy=fr.y;}}`, jsString(frame))
+	}
+	if fx <= 0 || fx > 1 {
+		fx = 0.5
+	}
+	if fy <= 0 || fy > 1 {
+		fy = 0.5
 	}
 	expr := fmt.Sprintf(`(() => {
 		let el;
@@ -436,8 +447,8 @@ func (p *Page) elementCenter(ctx context.Context, selector string) (point, error
 		const r = el.getBoundingClientRect();
 		let ox = 0, oy = 0;
 		%s
-		return { x: ox + r.x + r.width / 2, y: oy + r.y + r.height / 2 };
-	})()`, elemRefJS(frame, elem), offset)
+		return { x: ox + r.x + r.width * %g, y: oy + r.y + r.height * %g };
+	})()`, elemRefJS(frame, elem), offset, fx, fy)
 	var res *struct {
 		X, Y        float64
 		BadSelector bool `json:"badSelector"`
@@ -454,6 +465,11 @@ func (p *Page) elementCenter(ctx context.Context, selector string) (point, error
 	return point{X: res.X, Y: res.Y}, nil
 }
 
+// elementCenter is elementPoint at the element's center.
+func (p *Page) elementCenter(ctx context.Context, selector string) (point, error) {
+	return p.elementPoint(ctx, selector, 0.5, 0.5)
+}
+
 // clickStabilizeTimeout caps how long Click waits for the target to stop
 // moving before dispatching anyway. A var so tests can tighten it.
 var clickStabilizeTimeout = 1500 * time.Millisecond
@@ -466,7 +482,13 @@ var clickStabilizeTimeout = 1500 * time.Millisecond
 // Best-effort by design: if the element never settles before the timeout (an
 // infinite pulse animation), click the last observed position rather than fail.
 func (p *Page) stableElementCenter(ctx context.Context, selector string) (point, error) {
-	prev, err := p.elementCenter(ctx, selector)
+	return p.stableElementPoint(ctx, selector, 0.5, 0.5)
+}
+
+// stableElementPoint is stableElementCenter at a fractional position of the
+// element's box.
+func (p *Page) stableElementPoint(ctx context.Context, selector string, fx, fy float64) (point, error) {
+	prev, err := p.elementPoint(ctx, selector, fx, fy)
 	if err != nil {
 		return point{}, err
 	}
@@ -477,7 +499,7 @@ func (p *Page) stableElementCenter(ctx context.Context, selector string) (point,
 			return prev, nil
 		case <-time.After(80 * time.Millisecond):
 		}
-		cur, err := p.elementCenter(ctx, selector)
+		cur, err := p.elementPoint(ctx, selector, fx, fy)
 		if err != nil {
 			// The element vanished between samples (menu re-rendered its
 			// items); click the last place it was seen — matching the old
@@ -497,12 +519,19 @@ func (p *Page) stableElementCenter(ctx context.Context, selector string) (point,
 // Trusted input (vs a JS .click()) counts as a real user gesture, which some
 // flows — file dialogs, download buttons — require, and is less detectable.
 func (p *Page) Click(ctx context.Context, selector string) error {
+	return p.ClickAt(ctx, selector, 0, 0)
+}
+
+// ClickAt clicks at the given fractions of the element's box; fractions
+// outside (0,1] mean the center. Recorded clicks replay at the exact spot the
+// user pressed — see elementPoint for why that matters on shadow-DOM hosts.
+func (p *Page) ClickAt(ctx context.Context, selector string, fx, fy float64) error {
 	if frame, elem := splitFrame(selector); frame != "" {
 		if cp, ok := p.oopifPage(ctx, frame); ok {
-			return cp.Click(ctx, elem)
+			return cp.ClickAt(ctx, elem, fx, fy)
 		}
 	}
-	pt, err := p.stableElementCenter(ctx, selector)
+	pt, err := p.stableElementPoint(ctx, selector, fx, fy)
 	if err != nil {
 		return err
 	}

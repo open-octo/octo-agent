@@ -40,6 +40,8 @@ type RecordedEvent struct {
 	NeighborText string   `json:"neighbor_text,omitempty"` // nearest stable label-like text (label / preceding sibling)
 	NewTab       bool     `json:"new_tab,omitempty"`       // navigate: the first load of a tab the page itself opened (has an opener)
 	SameDoc      bool     `json:"same_doc,omitempty"`      // navigate: same-document (pushState/replaceState) — a page-initiated effect, not a user action
+	ClickX       float64  `json:"click_x,omitempty"`       // click: fraction of the element's width where the user pressed (0 = unknown → center)
+	ClickY       float64  `json:"click_y,omitempty"`       // click: fraction of the element's height where the user pressed
 }
 
 // Recorder captures a user's actions on a page by injecting a DOM listener that
@@ -452,7 +454,14 @@ const captureScript = `(function(){
       var field=((el.placeholder||el.name||(el.getAttribute?el.getAttribute('aria-label'):'')||el.id||'')+'').trim().slice(0,40);
       var secret=(el.type==='password');
       var role=''; try{ role=el.getAttribute('role')||''; }catch(_3){}
-      window.__octoRecord(JSON.stringify({type:type, selector:sel(el), frame:fr, tag:el.tagName, text:(el.textContent||'').trim().slice(0,40), field:field, secret:secret, value:(secret?'':(el.value!==undefined?(''+el.value).slice(0,200):'')), url:location.href, alt_selectors:altSels(el), role:role, neighbor_text:neighborText(el)}));}catch(_){}
+      /* Where INSIDE the element the user pressed, as box fractions. Replay
+         clicks the same spot instead of the geometric center — essential for
+         shadow-DOM hosts, where the document only sees the retargeted host
+         and its center may be dead space. Keyboard-activated clicks arrive at
+         (0,0): leave the fractions unset and let replay use the center. */
+      var cx=0, cy=0;
+      if(type==='click'&&(e.clientX||e.clientY)){try{var rr=el.getBoundingClientRect(); if(rr.width>0&&rr.height>0){cx=Math.min(1,Math.max(0.001,(e.clientX-rr.x)/rr.width)); cy=Math.min(1,Math.max(0.001,(e.clientY-rr.y)/rr.height));}}catch(_4){}}
+      window.__octoRecord(JSON.stringify({type:type, selector:sel(el), frame:fr, tag:el.tagName, text:(el.textContent||'').trim().slice(0,40), field:field, secret:secret, value:(secret?'':(el.value!==undefined?(''+el.value).slice(0,200):'')), url:location.href, alt_selectors:altSels(el), role:role, neighbor_text:neighborText(el), click_x:cx, click_y:cy}));}catch(_){}
   }
   /* ---- click: report + detect network activity after a short delay ---- */
   // Compare the activity GENERATION, not just in-flight count: on a loaded

@@ -882,6 +882,20 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 			"steps":     len(recording.Steps),
 			"outputs":   outputs,
 		}
+		// End-state accounting: every step can "pass" while the decisive click
+		// silently does nothing (a disabled/missed publish button) — the
+		// demonstration's final URL is the recorded ground truth to check
+		// against. A mismatch doesn't fail the replay (query params can vary);
+		// it tells the model to verify the outcome instead of assuming success.
+		if recording.EndURL != "" && finalPage != nil {
+			var cur string
+			_ = finalPage.Eval(rctx, "location.href", &cur)
+			env["demonstrated_end_url"] = recording.EndURL
+			env["replay_end_url"] = cur
+			if !browser.SameLocation(cur, recording.EndURL) {
+				env["end_url_mismatch"] = "the demonstration ended at a different URL than this replay — the final action may not have taken effect; VERIFY the outcome on the page before reporting success"
+			}
+		}
 		if modified {
 			// Self-heal write-back: persists the selector that just verified. Note it
 			// re-marshals the whole YAML — hand-written comments in the file are

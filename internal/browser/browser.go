@@ -279,13 +279,19 @@ func (p *Page) WaitForNetworkIdle(ctx context.Context, quiet, timeout time.Durat
 // the new tab when one opened, otherwise the same page. Without this a click that
 // spawns a tab looks like it "did nothing" because the original page is unchanged.
 func (b *Browser) ClickFollow(ctx context.Context, page *Page, target string) (*Page, error) {
+	return b.ClickFollowAt(ctx, page, target, 0, 0)
+}
+
+// ClickFollowAt is ClickFollow clicking at a fractional position of the
+// element's box (fractions outside (0,1] mean the center).
+func (b *Browser) ClickFollowAt(ctx context.Context, page *Page, target string, fx, fy float64) (*Page, error) {
 	before := map[string]bool{}
 	if ps, err := b.Pages(ctx); err == nil {
 		for _, p := range ps {
 			before[p.TargetID] = true
 		}
 	}
-	if err := page.Click(ctx, target); err != nil {
+	if err := page.ClickAt(ctx, target, fx, fy); err != nil {
 		return page, err
 	}
 	myID := page.TargetID()

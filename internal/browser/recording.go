@@ -25,7 +25,13 @@ type Recording struct {
 	Description string   `yaml:"description,omitempty"`
 	Params      []Param  `yaml:"params,omitempty"`
 	Outputs     []Output `yaml:"outputs,omitempty"`
-	Steps       []Step   `yaml:"steps"`
+	// EndURL is where the demonstration ENDED — the last URL the recorder saw,
+	// including page-initiated redirects that never compile to steps (a
+	// publish's pushState to ...published=true). Replay reports its own final
+	// URL against it, so a run whose decisive click silently did nothing can't
+	// pass for a success.
+	EndURL string `yaml:"end_url,omitempty"`
+	Steps  []Step `yaml:"steps"`
 }
 
 // Param is a replay-time input; {{name}} placeholders in step values/urls are
@@ -58,8 +64,13 @@ type Step struct {
 	URL      string `yaml:"url,omitempty"`
 	Frame    string `yaml:"frame,omitempty"`
 	Selector string `yaml:"selector,omitempty"`
-	Value    string `yaml:"value,omitempty"`
-	Label    string `yaml:"label,omitempty"`
+	// ClickX/ClickY are where the user pressed, as fractions of the element's
+	// box; zero means unknown (replay clicks the center). They matter when the
+	// recorded element is a shadow-DOM host whose center is dead space.
+	ClickX float64 `yaml:"click_x,omitempty"`
+	ClickY float64 `yaml:"click_y,omitempty"`
+	Value  string  `yaml:"value,omitempty"`
+	Label  string  `yaml:"label,omitempty"`
 	// Hint is a form field's accessible name (placeholder/name/aria-label/id or
 	// its <label> text). It's the deterministic fallback for type/select/upload:
 	// when the positional Selector drifts, replay re-locates the field by Hint
@@ -129,6 +140,16 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 	s := Recording{Name: name, Description: description}
 	if startURL != "" && startURL != "about:blank" {
 		s.Steps = append(s.Steps, navStep(startURL))
+	}
+	// The demonstration's end URL — the last navigation the recorder saw, of
+	// any kind. Same-doc redirects never compile to steps but ARE the natural
+	// success signal (…published=true); replay reports its final URL against
+	// this so a silently-failed decisive click can't read as success.
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Type == "navigate" {
+			s.EndURL = events[i].URL
+			break
+		}
 	}
 	// Deterministic auto-parameterization: every value the user typed becomes a
 	// declared {{param}} whose Default is the recorded value — so replay with no
@@ -253,6 +274,7 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 		switch {
 		case e.Type == "click":
 			st.Action = "click"
+			st.ClickX, st.ClickY = e.ClickX, e.ClickY
 		case e.Type == "change" && e.Tag == "SELECT":
 			st.Action = "select"
 			st.Value = e.Value
@@ -729,6 +751,7 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 			return withDescription(base, refined.Description)
 		}
 		backfillAnchors(&refined, base)
+		refined.EndURL = base.EndURL
 		return refined
 	}
 }
@@ -1551,7 +1574,7 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 			return page, err
 		}
 		// Follow a new tab the click may open (target=_blank / SPA window.open).
-		np, err := clickTarget(ctx, b, page, target)
+		np, err := clickTarget(ctx, b, page, target, step.ClickX, step.ClickY)
 		if err != nil {
 			return page, err
 		}
@@ -1725,15 +1748,20 @@ func bind(binds map[string][]string, name, value string) {
 // clickTarget clicks target on page, following a new tab the click opens when a
 // Browser is available (replay/tools path). Without a Browser it is a plain
 // click on the same page.
-func clickTarget(ctx context.Context, b *Browser, page *Page, target string) (*Page, error) {
+func clickTarget(ctx context.Context, b *Browser, page *Page, target string, fx, fy float64) (*Page, error) {
 	if b != nil {
-		return b.ClickFollow(ctx, page, target)
+		return b.ClickFollowAt(ctx, page, target, fx, fy)
 	}
-	if err := page.Click(ctx, target); err != nil {
+	if err := page.ClickAt(ctx, target, fx, fy); err != nil {
 		return page, err
 	}
 	return page, nil
 }
+
+// SameLocation reports whether two URL strings address the same document —
+// exported for callers comparing a replay's final URL against the recording's
+// demonstrated EndURL.
+func SameLocation(a, b string) bool { return sameLocation(a, b) }
 
 func verify(ctx context.Context, page *Page, step *Step, params map[string]string) error {
 	if step.Verify == nil {
