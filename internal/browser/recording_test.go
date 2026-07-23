@@ -2227,3 +2227,57 @@ document.getElementById('host').addEventListener('mousedown',function(e){window.
 		t.Fatalf("click should land at ~90%% of the 400px box (x≈360), got x=%.0f", hits[0].X)
 	}
 }
+
+// TestReplayReclicksWhenClickHadNoEffect: the demonstrated click caused
+// network activity (the recording has a wait-network step right after it); a
+// replayed click on a not-yet-hydrated element causes none — the engine must
+// re-click instead of letting the following idle-wait pass instantly and read
+// as success. Models the Xiaohongshu publish button: a custom element whose
+// handler attaches a beat after the element renders.
+func TestReplayReclicksWhenClickHadNoEffect(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("ok"))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>hydrate</title>
+<button id="pub">Publish</button>
+<script>
+window.published=0;
+// The handler hydrates LATE: clicks in the first ~1.5s do nothing.
+setTimeout(function(){
+  document.getElementById('pub').addEventListener('click',function(){
+    window.published++;
+    fetch('/api');
+  });
+}, 1500);
+</script>`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+
+	recording := &Recording{Name: "h", Steps: []Step{
+		{Action: "navigate", URL: srv.URL},
+		{Action: "click", Selector: "#pub"},
+		{Action: "wait", Network: true, TimeoutMS: 5000},
+	}}
+	if _, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 3 * time.Second, Browser: b}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	var published int
+	if err := page.Eval(ctx, "window.published", &published); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if published != 1 {
+		t.Fatalf("expected the re-click to land exactly once after hydration, got %d", published)
+	}
+}

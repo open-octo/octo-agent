@@ -552,3 +552,31 @@ func jsString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
 }
+
+// netActivityGen reads the in-page network monitor's activity generation — a
+// counter that increments when any fetch/XHR STARTS. 0 when the monitor isn't
+// installed.
+func (p *Page) netActivityGen(ctx context.Context) float64 {
+	var gen float64
+	_ = p.Eval(ctx, "window.__octoNet?window.__octoNet.gen:0", &gen)
+	return gen
+}
+
+// netActivityAdvanced polls until the activity generation moves past gen0 —
+// i.e. something started a request since the snapshot — or the window closes.
+func (p *Page) netActivityAdvanced(ctx context.Context, gen0 float64, window time.Duration) bool {
+	deadline := time.Now().Add(window)
+	for {
+		if g := p.netActivityGen(ctx); g != gen0 {
+			return true
+		}
+		if ctx.Err() != nil || !time.Now().Before(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(120 * time.Millisecond):
+		}
+	}
+}

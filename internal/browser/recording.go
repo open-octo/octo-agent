@@ -69,6 +69,12 @@ type Step struct {
 	// recorded element is a shadow-DOM host whose center is dead space.
 	ClickX float64 `yaml:"click_x,omitempty"`
 	ClickY float64 `yaml:"click_y,omitempty"`
+	// expectNetwork is a replay-time hint (never serialized): the recording has
+	// a wait-network step right after this click, i.e. the demonstrated click
+	// CAUSED network activity. If the replayed click causes none, it was a dud
+	// (a not-yet-hydrated custom element, a briefly disabled button) — the
+	// idle-wait that follows would pass instantly and hide it.
+	expectNetwork bool
 	Value  string  `yaml:"value,omitempty"`
 	Label  string  `yaml:"label,omitempty"`
 	// Hint is a form field's accessible name (placeholder/name/aria-label/id or
@@ -1271,6 +1277,12 @@ func ReplayRecording(ctx context.Context, page *Page, recording *Recording, para
 		stepHard = floor
 	}
 	binds := map[string][]string{}
+	for i := range recording.Steps {
+		if recording.Steps[i].Action == "click" && i+1 < len(recording.Steps) &&
+			recording.Steps[i+1].Action == "wait" && recording.Steps[i+1].Network {
+			recording.Steps[i].expectNetwork = true
+		}
+	}
 	cur := page
 	for i := range recording.Steps {
 		opts.emitProgress(stepProgressLine(i+1, len(recording.Steps), &recording.Steps[i]))
@@ -1574,9 +1586,24 @@ func runStep(ctx context.Context, b *Browser, page *Page, step *Step, params map
 			return page, err
 		}
 		// Follow a new tab the click may open (target=_blank / SPA window.open).
+		gen0 := page.netActivityGen(ctx)
 		np, err := clickTarget(ctx, b, page, target, step.ClickX, step.ClickY)
 		if err != nil {
 			return page, err
+		}
+		// The demonstration's click caused network activity (the recorder put a
+		// wait-network step right after it). If this one caused none, it was a
+		// dud — most often a custom element whose handlers hadn't hydrated yet,
+		// or a briefly disabled button — and the idle-wait that follows would
+		// pass instantly, reading as success. Re-click, up to twice.
+		if step.expectNetwork && np == page {
+			for attempt := 0; attempt < 2 && !page.netActivityAdvanced(ctx, gen0, 2500*time.Millisecond); attempt++ {
+				np2, rerr := clickTarget(ctx, b, page, target, step.ClickX, step.ClickY)
+				if rerr != nil {
+					break
+				}
+				np = np2
+			}
 		}
 		page = np
 	case "type":
