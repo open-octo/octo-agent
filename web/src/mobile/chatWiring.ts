@@ -14,7 +14,7 @@
 import { get } from 'svelte/store'
 import { ws } from '../lib/ws'
 import * as api from '../lib/api'
-import { observeArtifact } from '../lib/artifacts'
+import { observeArtifact, resetArtifacts } from '../lib/artifacts'
 import {
   chatMessages,
   chatStreaming,
@@ -258,6 +258,7 @@ export function wireMobileSession(sid: string): () => void {
   cleanups.push(ws.on('history_reload', (ev: any) => {
     if (!forSid(ev)) return
     clearMsgs(sid)
+    resetArtifacts(sid) // mirror desktop: /clear or /compact must drop stale artifacts
     loadMobileHistory(sid)
   }))
 
