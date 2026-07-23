@@ -5,7 +5,7 @@ import BlogPost from '../../layouts/BlogPost.astro';
 export async function getStaticPaths() {
 	const posts = await getCollection('posts');
 	return posts.map((post) => {
-		const slug = post.id.startsWith('zh/') ? post.id.slice(3) : post.id;
+		const slug = post.id.startsWith('en/') ? post.id.slice(3) : post.id;
 		const locale = post.data.locale || (post.id.startsWith('zh/') ? 'zh' : 'en');
 		// Find alternate-language version of the same post
 		const alternate = posts.find(

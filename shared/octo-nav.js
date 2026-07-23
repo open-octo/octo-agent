@@ -117,13 +117,13 @@
 			const toggle = this.hasAttribute('lang-toggle');
 			const isZh = loc === 'zh';
 			const t = T[loc];
-			const blogHome = isZh ? '/blog/' : '/blog/en/';
+			const blogHome = isZh ? '/blog/zh/' : '/blog/';
 			const docsHref = isZh ? '/docs/zh/' : '/docs/';
 			const altAttr = this.getAttribute('alt');
 			const altUrl = altAttr == null ? null : parseUrl(altAttr);
 			const altSafe = altUrl && (altUrl.protocol === 'http:' || altUrl.protocol === 'https:')
 				? altUrl.href
-				: isZh ? '/blog/en/' : '/blog/';
+				: isZh ? '/blog/' : '/blog/zh/';
 			const alt = escapeHtml(altSafe);
 			const releases = 'https://github.com/open-octo/octo-agent/releases/latest';
 			const repo = 'https://github.com/open-octo/octo-agent';
@@ -168,7 +168,7 @@
 			const isZh = loc === 'zh';
 			const t = T[loc];
 			const docsHref = isZh ? '/docs/zh/' : '/docs/';
-			const blogHome = isZh ? '/blog/' : '/blog/en/';
+			const blogHome = isZh ? '/blog/zh/' : '/blog/';
 			const year = new Date().getFullYear();
 			const root = this.shadowRoot || this.attachShadow({ mode: 'open' });
 			root.innerHTML = `<style>${FOOT}</style>

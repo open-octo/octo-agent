@@ -10,7 +10,7 @@ export default defineConfig({
 		sitemap({
 			customPages: [
 				'https://octo-agent.dev/blog/',
-				'https://octo-agent.dev/blog/en/',
+				'https://octo-agent.dev/blog/zh/',
 			],
 		}),
 	],

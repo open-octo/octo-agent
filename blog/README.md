@@ -24,9 +24,9 @@ originalSlug: your-post-slug
 
 ## Bilingual support
 
-- Chinese posts live in `src/content/posts/zh/` and are served at `/blog/posts/<slug>/`.
-- English posts live in `src/content/posts/en/` and are served at `/blog/posts/en/<slug>/`.
-- The homepage has both `/blog/` (Chinese) and `/blog/en/` (English) versions.
+- English posts live in `src/content/posts/en/` and are served at `/blog/posts/<slug>/`.
+- Chinese posts live in `src/content/posts/zh/` and are served at `/blog/posts/zh/<slug>/`.
+- The homepage has both `/blog/` (English) and `/blog/zh/` (Chinese) versions.
 - Each post and page includes a language switcher to the corresponding alternate version.
 - Use `originalSlug` to link the two language versions of the same post.
 
