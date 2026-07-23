@@ -5,17 +5,25 @@
   // hint (the detailed tool/progress view is batch 2), and the composer is a
   // lightweight mobile input rather than the desktop Composer.
   import { tick } from 'svelte'
-  import { activeSessionId, chatMessages, chatStreaming, sessions, clearMsgs } from '../lib/stores'
+  import { activeSessionId, chatMessages, chatStreaming, sessions, clearMsgs, artifacts } from '../lib/stores'
+  import { resetArtifacts } from '../lib/artifacts'
   import { ws } from '../lib/ws'
   import { wireMobileSession, loadMobileHistory, sendMobile } from './chatWiring'
 
-  let { onBack }: { onBack: () => void } = $props()
+  let { onBack, onViewApproval }: { onBack: () => void; onViewApproval: () => void } = $props()
 
   const sid = $derived($activeSessionId ?? '')
   const msgs = $derived($chatMessages[sid] ?? [])
   const streaming = $derived($chatStreaming[sid] ?? false)
   const session = $derived($sessions.find(s => s.id === sid) ?? null)
   const title = $derived(session?.title || session?.name || '会话')
+  // A confirmation raised for THIS session while it's open — surface an inline
+  // entry to the approval detail (the feed card is out of view here).
+  const pendingApproval = $derived(session?.pending_confirmation ?? false)
+
+  function stop() {
+    if (sid) ws.interrupt(sid)
+  }
 
   let draft = $state('')
   let scroller: HTMLElement | undefined
@@ -26,6 +34,7 @@
     const s = sid
     if (!s) return
     clearMsgs(s)
+    resetArtifacts(s)
     let cancelled = false
     // Subscribe only after history renders (same ordering the desktop relies on).
     loadMobileHistory(s).then(() => {
@@ -81,6 +90,14 @@
   </div>
 </header>
 
+{#if pendingApproval}
+  <button class="approve-banner" onclick={onViewApproval}>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--m-warning)" stroke-width="2"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6A2 2 0 0 0 22 18L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+    <span class="txt">agent 请求审批</span>
+    <span class="go">查看 ›</span>
+  </button>
+{/if}
+
 <div class="scroll" bind:this={scroller}>
   {#each msgs as msg (msg.id)}
     {#if msg.type === 'user'}
@@ -101,7 +118,28 @@
       <div class="notice" class:err={msg.level === 'error'}>{msg.content}</div>
     {/if}
   {/each}
+  {#if $artifacts.length}
+    <div class="artifacts">
+      <div class="alabel">制品</div>
+      {#each $artifacts as a (a.path)}
+        <div class="acard">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--m-accent)" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+          <span class="aname">{a.name}</span>
+          <span class="atype">{a.type}</span>
+        </div>
+      {/each}
+    </div>
+  {/if}
 </div>
+
+{#if streaming}
+  <div class="stopbar">
+    <button class="stop" onclick={stop}>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+      停止生成
+    </button>
+  </div>
+{/if}
 
 <div class="composer">
   <textarea
@@ -257,4 +295,56 @@
     cursor: pointer;
   }
   .composer .send:disabled { opacity: .4; cursor: default; }
+  .approve-banner {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 12px 8px;
+    padding: 10px 14px;
+    background: var(--m-tag-warn-bg);
+    border: 1px solid var(--m-tag-warn-border);
+    border-radius: 12px;
+    font-size: 13px;
+    color: var(--m-text);
+    font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+  .approve-banner .txt { flex: 1; font-weight: 500; }
+  .approve-banner .go { color: var(--m-warning); font-weight: 600; }
+  .stopbar {
+    flex: none;
+    display: flex;
+    justify-content: center;
+    padding: 0 12px 8px;
+  }
+  .stop {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 16px;
+    border-radius: 9999px;
+    border: 1px solid var(--m-border);
+    background: var(--m-surface);
+    color: var(--m-error);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    box-shadow: var(--m-shadow-card);
+  }
+  .artifacts { align-self: stretch; margin-top: 4px; }
+  .alabel { font-size: 12px; color: var(--m-text-3); margin: 0 2px 8px; }
+  .acard {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--m-surface);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    box-shadow: var(--m-shadow-card);
+  }
+  .acard .aname { flex: 1; font-size: 14px; color: var(--m-text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .acard .atype { flex: none; font-size: 11px; color: var(--m-text-3); font-family: ui-monospace, Menlo, monospace; }
 </style>
