@@ -149,8 +149,8 @@
         </div>
         {#if loadingSoul}
           <div class="card-loading">{$t('common.loading')}</div>
-        {:else if soulData}
-          <div class="card-body md-content">{@html renderMarkdown(soulData.content)}</div>
+        {:else if isCustom(soulData)}
+          <div class="card-body md-content">{@html renderMarkdown(soulData!.content)}</div>
         {:else}
           <div class="card-loading">{$t('profile.soul_empty')}</div>
         {/if}
@@ -177,8 +177,8 @@
         </div>
         {#if loadingUser}
           <div class="card-loading">{$t('common.loading')}</div>
-        {:else if userData}
-          <div class="card-body md-content">{@html renderMarkdown(userData.content)}</div>
+        {:else if isCustom(userData)}
+          <div class="card-body md-content">{@html renderMarkdown(userData!.content)}</div>
         {:else}
           <div class="card-loading">{$t('profile.user_empty')}</div>
         {/if}
