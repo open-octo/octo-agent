@@ -1352,17 +1352,35 @@ func TestWaitForNetworkIdleWaitsForTriggeredRequest(t *testing.T) {
 	// Schedule a request 400ms out, then IMMEDIATELY wait for idle. The naive
 	// check returns at the first poll (idle since load); the grace must hold
 	// until the scheduled request both starts and finishes.
+	start := time.Now()
 	if err := page.Eval(ctx, "window.done=0; setTimeout(function(){ fetch('/slow').then(function(){ window.done=1; }); }, 400); true", nil); err != nil {
 		t.Fatalf("schedule: %v", err)
 	}
+	t.Logf("[+%s] scheduled", time.Since(start))
 	if err := page.WaitForNetworkIdle(ctx, 0, 10*time.Second); err != nil {
 		t.Fatalf("wait idle: %v", err)
 	}
+	t.Logf("[+%s] WaitForNetworkIdle returned", time.Since(start))
 	var done int
 	if err := page.Eval(ctx, "window.done", &done); err != nil {
 		t.Fatalf("eval: %v", err)
 	}
+	t.Logf("[+%s] done=%d", time.Since(start), done)
 	if done != 1 {
+		// Diagnostic only (not asserted on): how much longer does it actually
+		// take, and what does the monitor think its own state is.
+		for i := 0; i < 30 && done != 1; i++ {
+			time.Sleep(100 * time.Millisecond)
+			_ = page.Eval(ctx, "window.done", &done)
+		}
+		t.Logf("[+%s] done eventually=%d after extra polling", time.Since(start), done)
+		var net struct {
+			N   float64
+			Gen float64
+			Idl float64
+		}
+		_ = page.Eval(ctx, `(function(){var s=window.__octoNet; if(!s) return null; return {N:s.n, Gen:s.gen, Idl:(s.idleSince>0?Date.now()-s.idleSince:-1)};})()`, &net)
+		t.Logf("[+%s] __octoNet state: %+v", time.Since(start), net)
 		t.Fatal("wait-for-idle returned before the scheduled request completed (activity-grace race)")
 	}
 }
