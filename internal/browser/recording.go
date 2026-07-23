@@ -75,8 +75,8 @@ type Step struct {
 	// (a not-yet-hydrated custom element, a briefly disabled button) — the
 	// idle-wait that follows would pass instantly and hide it.
 	expectNetwork bool
-	Value  string  `yaml:"value,omitempty"`
-	Label  string  `yaml:"label,omitempty"`
+	Value         string `yaml:"value,omitempty"`
+	Label         string `yaml:"label,omitempty"`
 	// Hint is a form field's accessible name (placeholder/name/aria-label/id or
 	// its <label> text). It's the deterministic fallback for type/select/upload:
 	// when the positional Selector drifts, replay re-locates the field by Hint
