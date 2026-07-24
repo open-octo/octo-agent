@@ -1,4 +1,4 @@
-# octo-relay runbook (M1a: single node, TLS)
+# octo-relay runbook (M1a single node · M1b multi-node)
 
 How to provision, operate, and verify a hosted octo-relay node. The relay is a
 stateless dumb pipe (see `dev-docs/mobile-managed-tunnel-design.md`): it holds
@@ -74,6 +74,61 @@ node it grows out of.
 - **State**: none. Pairing tokens and connections live only in process memory.
   A restart invalidates unredeemed pairing QRs (the host re-offers its tokens
   on reconnect automatically).
+
+## Scaling out (M1b: multi-node SNI routing)
+
+Clients dial `wss://<tunnelid>.relay.octo.dev` (the host's Go tunnel and both
+native mobile plugins apply the same rule: DNS-named relay → tunnel-id
+subdomain; IP/dotless hosts dial unchanged). An L4 balancer consistent-hashes
+the TLS SNI, so both ends of a tunnel always land on the same node and nodes
+never talk to each other.
+
+```
+DNS: relay.octo.dev + *.relay.octo.dev ─► HAProxy (SNI passthrough + consistent hash)
+                                              │
+                                     ┌────────┴────────┐
+                                  relay VM1         relay VM2   (TLS terminates HERE)
+```
+
+1. **Wildcard cert** on every relay node: `*.relay.octo.dev` requires DNS-01
+   (HTTP-01 can't issue wildcards):
+   ```sh
+   sudo certbot certonly --preferred-challenges dns \
+     --dns-<provider> -d 'relay.octo.dev' -d '*.relay.octo.dev'
+   ```
+   Pick the certbot DNS plugin for wherever the zone is hosted; renewal is
+   automatic via the same plugin. Update `/etc/octo-relay/env` to the new
+   `live/relay.octo.dev*` paths if certbot picked a new lineage name.
+2. **Balancer**: `cmd/octo-relay/deploy/haproxy.cfg` — TCP mode, TLS
+   passthrough (`req.ssl_sni` from the ClientHello, never decrypted),
+   `balance hash req.ssl_sni` + `hash-type consistent` (HAProxy ≥ 2.2). List
+   every relay node as a `server` line.
+3. **DNS**: move `relay.octo.dev` **and** `*.relay.octo.dev` to the balancer.
+4. **Relay nodes**: nothing special — each node is the M1a setup with the
+   wildcard cert. Nodes hold only in-memory state, so any assignment works
+   as long as both ends of a tunnel agree (that's the SNI hash's job).
+5. **Adding a node**: the consistent hash remaps ~1/N tunnels, but remapping
+   only affects NEW connections — an established host WebSocket stays pinned
+   to its old node while the (much more reconnect-happy) phone starts
+   hashing to the new one, where neither the tunnel nor its pairing token
+   exists. There is no keepalive to break the idle host connection, so the
+   pair would stay split until the balancer's 4h client timeout. After
+   adding a node, rolling-restart the EXISTING relay nodes
+   (`systemctl restart octo-relay`, one at a time) so every host redials
+   and lands per the new hash. Removing a node / node failure needs no such
+   step — the break itself makes both ends redial.
+6. **Compatibility**: multi-node requires BOTH ends of a tunnel to be ≥ M1b.
+   A mixed pair (old phone + new host, or vice versa) hashes to different
+   nodes — the token is registered on one node and redeemed on another,
+   which 403s deterministically (the phone then drops its stored pairing
+   and re-scanning doesn't help until the old end is upgraded). Only a pair
+   where BOTH ends are query-only degrades gracefully: the balancer hashes
+   `relay.octo.dev` for all of them onto one node, which merely concentrates
+   load. On a single node everything interoperates (the relay reads
+   `?tunnel=` first, then the Host's first DNS label).
+
+Verify: pair a phone, then `systemctl stop octo-relay` on the node serving it
+— both ends reconnect and meet on a surviving node within seconds.
 
 ## Local development
 

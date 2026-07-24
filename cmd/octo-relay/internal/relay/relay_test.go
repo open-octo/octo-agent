@@ -190,3 +190,24 @@ func TestUnknownToken(t *testing.T) {
 		t.Fatal("phone with an unknown token should be rejected")
 	}
 }
+
+// TestTunnelIDFromRequest: query wins; a subdomain Host fills in when the
+// query is absent (SNI-routed production clients); IP/dotless hosts without
+// a query resolve to nothing.
+func TestTunnelIDFromRequest(t *testing.T) {
+	cases := []struct{ url, host, want string }{
+		{"/host?tunnel=t123", "relay.octo.dev", "t123"},
+		{"/host?tunnel=t123", "t999.relay.octo.dev", "t123"}, // query beats subdomain
+		{"/host", "t123.relay.octo.dev", "t123"},
+		{"/host", "t123.relay.octo.dev:443", "t123"},
+		{"/host", "127.0.0.1:8090", ""},
+		{"/host", "localhost:8090", ""},
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest("GET", c.url, nil)
+		req.Host = c.host
+		if got := relay.TunnelIDFromRequest(req); got != c.want {
+			t.Errorf("TunnelIDFromRequest(url=%q host=%q) = %q, want %q", c.url, c.host, got, c.want)
+		}
+	}
+}

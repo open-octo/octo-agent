@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +19,65 @@ const (
 	initialBackoff = 500 * time.Millisecond
 	maxBackoff     = 30 * time.Second
 )
+
+// tunnelLabelRe is the shape of a tunnel id that can ride in a DNS label
+// under a single-level wildcard cert: lowercase letters, digits, hyphens,
+// at most 63 chars. Production ids are 32-char lowercase hex; anything else
+// (a hand-edited tunnel.json) falls back to query-only routing rather than
+// producing an undialable hostname.
+var tunnelLabelRe = regexp.MustCompile(`^[a-z0-9-]{1,63}$`)
+
+// relayDialBase returns the relay base URL to dial for a tunnel. Against a
+// DNS-named relay it prefixes the tunnel id as a subdomain
+// (wss://<tunnelid>.relay.octo.dev) so a multi-node deployment's L4 balancer
+// can consistent-hash the TLS SNI and land both ends of a tunnel on the same
+// node without decrypting anything. IP literals and dotless hosts (localhost,
+// the PoC's 127.0.0.1 test relays) can't carry a subdomain, so they dial
+// unchanged. The ?tunnel= query is always sent too, so a new client keeps
+// working against a single-node relay that only reads the query.
+//
+// The eligibility rule (dotted host, not an IP — including trailing-dot and
+// dots-and-digits shapes) is mirrored by the mobile natives' deviceUrl/
+// deviceURL; keep the three identical, or the two ends of a tunnel hash to
+// different nodes.
+func relayDialBase(relayURL, tunnelID string) string {
+	if !tunnelLabelRe.MatchString(tunnelID) {
+		return relayURL
+	}
+	u, err := url.Parse(relayURL)
+	if err != nil {
+		return relayURL
+	}
+	host := u.Hostname()
+	if host == "" || !strings.Contains(host, ".") {
+		return relayURL
+	}
+	trimmed := strings.TrimSuffix(host, ".")
+	if net.ParseIP(trimmed) != nil || digitsAndDotsOnly(trimmed) {
+		return relayURL
+	}
+	if port := u.Port(); port != "" {
+		u.Host = net.JoinHostPort(tunnelID+"."+host, port)
+	} else {
+		u.Host = tunnelID + "." + host
+	}
+	return u.String()
+}
+
+// digitsAndDotsOnly matches the mobile natives' cheap IP-ish test so shapes
+// like "1.2.3.4.5" (not a valid IP, but clearly not a name either) are
+// treated identically on every end.
+func digitsAndDotsOnly(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if (r < '0' || r > '9') && r != '.' {
+			return false
+		}
+	}
+	return true
+}
 
 // Config configures a host tunnel. Zero LoopbackURL/RelayURL/TunnelID is a
 // programming error; the rest have sensible defaults.
@@ -149,7 +211,7 @@ func (t *Tunnel) runOnce(ctx context.Context) error {
 	for _, tok := range t.cfg.PairTokens {
 		q.Add("pairtoken", tok)
 	}
-	relayURL := t.cfg.RelayURL + "/host?" + q.Encode()
+	relayURL := relayDialBase(t.cfg.RelayURL, t.cfg.TunnelID) + "/host?" + q.Encode()
 
 	ws, _, err := websocket.DefaultDialer.DialContext(ctx, relayURL, nil)
 	if err != nil {

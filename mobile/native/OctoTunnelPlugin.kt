@@ -73,6 +73,7 @@ class OctoTunnelPlugin : Plugin() {
         val relay = call.getString("relay")
         val token = call.getString("token")
         val hostKey = call.getString("hostKey")
+        val tunnelId = call.getString("tunnelId")
         if (relay.isNullOrEmpty() || token.isNullOrEmpty() || hostKey.isNullOrEmpty()) {
             call.reject("pair: relay, token and hostKey are required")
             return
@@ -97,7 +98,7 @@ class OctoTunnelPlugin : Plugin() {
                 .replaceFirst("wss://", "https://")
                 .replaceFirst("ws://", "http://")
                 .trimEnd('/')
-            val url = "$base/device?token=$token"
+            val url = deviceUrl(base, tunnelId, token)
             ws = http.newWebSocket(Request.Builder().url(url).build(), Listener())
         } catch (e: Exception) {
             pairCall = null
@@ -254,6 +255,25 @@ class OctoTunnelPlugin : Plugin() {
     private val masterAlias = "octo_tunnel_master"
     private val gcmTagBits = 128
     private val ivLen = 12
+
+    // deviceUrl builds the relay device endpoint. Against a DNS-named relay it
+    // prefixes the tunnel id as a subdomain (<tunnelId>.relay.octo.dev) so a
+    // multi-node deployment's L4 balancer can consistent-hash the TLS SNI and
+    // land the phone on the same node as its host. IP literals and dotless
+    // hosts (local dev) dial unchanged. Mirrors relayDialBase in the host's
+    // internal/tunnel/tunnel.go — keep the two rules identical.
+    private fun deviceUrl(base: String, tunnelId: String?, token: String): String {
+        val plain = "$base/device?token=$token"
+        if (tunnelId.isNullOrEmpty()) return plain
+        val uri = try { java.net.URI(base) } catch (_: Exception) { return plain }
+        val host = uri.host ?: return plain
+        val ipLike = host.matches(Regex("^[0-9.]+$")) || host.contains(":")
+        if (!host.contains(".") || ipLike) return plain
+        val portPart = if (uri.port != -1) ":${uri.port}" else ""
+        // Preserve a path prefix (self-hosted relay behind a proxy path).
+        val pathPart = (uri.rawPath ?: "").trimEnd('/')
+        return "${uri.scheme}://$tunnelId.$host$portPart$pathPart/device?token=$token"
+    }
 
     @Synchronized
     private fun deviceKeypair(): Pair<ByteArray, ByteArray> {

@@ -14,7 +14,9 @@ package relay
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -104,11 +106,36 @@ func (r *Relay) logf(format string, args ...any) {
 	}
 }
 
+// tunnelIDFromRequest resolves the tunnel a request addresses. The query
+// parameter wins (every current client sends it); when it's absent the first
+// DNS label of the Host is used — production clients dial
+// <tunnelid>.relay.octo.dev so the L4 balancer can consistent-hash the SNI,
+// and a future query-less client still routes. A subdomain-less direct dial
+// with no query yields a junk-but-harmless id (e.g. "relay"); the query check
+// runs first precisely so that never happens with today's clients.
+func tunnelIDFromRequest(req *http.Request) string {
+	if id := req.URL.Query().Get("tunnel"); id != "" {
+		return id
+	}
+	host := req.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if net.ParseIP(host) != nil {
+		return ""
+	}
+	label, _, found := strings.Cut(host, ".")
+	if !found {
+		return ""
+	}
+	return label
+}
+
 // handleHost registers the host side of a tunnel. The host offers a one-time
 // pairing token (in production, the one encoded in its QR) that a phone will
 // present to find it.
 func (r *Relay) handleHost(w http.ResponseWriter, req *http.Request) {
-	tunnelID := req.URL.Query().Get("tunnel")
+	tunnelID := tunnelIDFromRequest(req)
 	// A host declares the one-time pairing tokens it will honor (in production,
 	// one per QR it mints). Repeated ?pairtoken= values let several phones pair.
 	tokens := req.URL.Query()["pairtoken"]

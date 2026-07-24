@@ -71,10 +71,9 @@ public class OctoTunnelPlugin: CAPPlugin, CAPBridgedPlugin {
                 self.pairCall = call
 
                 // URLSessionWebSocketTask dials ws(s):// directly (unlike OkHttp,
-                // which upgrades over http). The PoC relay routes by token;
-                // production dials <tunnelId>.<relay-host> for SNI routing.
+                // which upgrades over http).
                 let base = relay.hasSuffix("/") ? String(relay.dropLast()) : relay
-                guard let url = URL(string: "\(base)/device?token=\(token)") else {
+                guard let url = Self.deviceURL(base: base, tunnelId: call.getString("tunnelId"), token: token) else {
                     throw TunnelError.message("bad relay URL")
                 }
                 let session = URLSession(configuration: .default)
@@ -212,6 +211,33 @@ public class OctoTunnelPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private let keychainService = "dev.octo.mobile.tunnel"
     private let keychainAccount = "device_static_key"
+
+    // deviceURL builds the relay device endpoint. Against a DNS-named relay it
+    // prefixes the tunnel id as a subdomain (<tunnelId>.relay.octo.dev) so a
+    // multi-node deployment's L4 balancer can consistent-hash the TLS SNI and
+    // land the phone on the same node as its host. IP literals and dotless
+    // hosts (local dev) dial unchanged. Mirrors relayDialBase in the host's
+    // internal/tunnel/tunnel.go — keep the two rules identical.
+    static func deviceURL(base: String, tunnelId: String?, token: String) -> URL? {
+        guard var comps = URLComponents(string: base) else { return nil }
+        if let tid = tunnelId, !tid.isEmpty, let host = comps.host,
+           host.contains("."), !Self.isIPLiteral(host) {
+            comps.host = tid + "." + host
+        }
+        // Preserve a path prefix (self-hosted relay behind a proxy path).
+        var prefix = comps.path
+        while prefix.hasSuffix("/") { prefix.removeLast() }
+        comps.path = prefix + "/device"
+        comps.queryItems = [URLQueryItem(name: "token", value: token)]
+        return comps.url
+    }
+
+    private static func isIPLiteral(_ host: String) -> Bool {
+        if host.contains(":") { return true } // bracketless IPv6 from URLComponents
+        // ASCII digits and dots only — the same cheap IP-ish test as the
+        // Kotlin plugin's ^[0-9.]+$ and the host's digitsAndDotsOnly.
+        return !host.isEmpty && host.allSatisfy { ($0.isASCII && $0.isNumber) || $0 == "." }
+    }
 
     private func deviceIdentity() throws -> Identity {
         if let raw = keychainLoad() {
