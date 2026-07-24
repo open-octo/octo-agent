@@ -231,8 +231,9 @@ func TestServerRunsSubAgentSynchronously(t *testing.T) {
 		{
 			Blocks: []agent.ContentBlock{
 				agent.NewToolUseBlock("tu1", "sub_agent", map[string]any{
-					"description": "sub task",
-					"prompt":      "do the sub task",
+					"description":   "sub task",
+					"prompt":        "do the sub task",
+					"subagent_type": "general",
 				}),
 			},
 			StopReason: "tool_use",
