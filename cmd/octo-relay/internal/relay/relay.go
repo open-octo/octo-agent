@@ -3,21 +3,22 @@
 // frames by (tunnel, device) and never inspects a payload — the two ends run a
 // Noise session the relay has no key for, so everything it copies is ciphertext.
 //
-// This PoC omits the two production concerns that are orthogonal to the core
-// transport: content-free APNs/FCM wakeups (need real push credentials and a
-// device) and multi-node consistent-hash routing over the TLS SNI subdomain
-// (an ops/scaling concern, not a correctness one). What it proves is the risky
-// part — that pairing and bidirectional encrypted bridging work end to end and
-// that the relay is structurally unable to read what it moves.
+// Beyond bridging, the relay consumes two kinds of host control frames:
+// pairing-token offers (in the /host query) and wakeup requests (M1c), which
+// it turns into content-free APNs/FCM pushes without ever persisting or
+// logging a token. Multi-node routing rides the TLS SNI subdomain and lives
+// entirely in the balancer (M1b) — nodes share nothing.
 package relay
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -44,10 +45,19 @@ type tunnel struct {
 	devices map[string]*conn // deviceID -> device connection
 }
 
+// WakePusher fires one content-free push (see internal/push). nil disables
+// wakeups — frames are dropped with a token-free log line.
+type WakePusher interface {
+	Wake(ctx context.Context, platform, token string) error
+}
+
 // Relay is the in-memory bridge/broker. All maps are guarded by mu. Nothing
 // here is persisted: pairing tokens, device ids, and connections all live only
 // as long as the process and the sockets do.
 type Relay struct {
+	// Pusher handles wakeup frames. Set at startup; never mutated after.
+	Pusher WakePusher
+
 	mu      sync.Mutex
 	tunnels map[string]*tunnel // tunnelID -> tunnel
 	tokens  map[string]string  // one-time pairing token -> tunnelID
@@ -170,11 +180,37 @@ func (r *Relay) handleHost(w http.ResponseWriter, req *http.Request) {
 		r.logf("[relay] host disconnected tunnel=%s", tunnelID)
 	}()
 
-	// Host → device: the host names the recipient in frame.Device.
+	// Host → device: the host names the recipient in frame.Device. Wakeup
+	// frames are the exception — the relay consumes those itself.
+	//
+	// wakeBudget rate-limits wakeups per host connection: /host is
+	// unauthenticated, and the host-side 30s/phone limit is voluntary — an
+	// abusive client must not be able to burn the operator's APNs/FCM
+	// credentials or spawn unbounded push goroutines. Per-connection local
+	// state, refilled once a minute; over-budget frames are dropped with a
+	// token-free log line.
+	wakeBudget := wakeupsPerMinute
+	wakeWindow := time.Now()
 	for {
 		f, err := wire.Read(ws)
 		if err != nil {
 			return
+		}
+		if f.Type == wire.TypeWakeup {
+			if now := time.Now(); now.Sub(wakeWindow) >= time.Minute {
+				wakeBudget = wakeupsPerMinute
+				wakeWindow = now
+			}
+			if wakeBudget <= 0 {
+				r.logf("[relay] wakeup rate limit exceeded tunnel=%s", tunnelID)
+				continue
+			}
+			wakeBudget--
+			// Not captured: a wakeup payload is operational metadata (push
+			// token), not forwarded ciphertext — the instrumented test's
+			// "everything forwarded is ciphertext" assertion must not see it.
+			r.handleWakeup(req.Context(), tunnelID, f)
+			continue
 		}
 		r.capture(f.Payload)
 		r.mu.Lock()
@@ -270,6 +306,42 @@ func (r *Relay) handleDevice(w http.ResponseWriter, req *http.Request) {
 			r.logf("[relay] write to host tunnel=%s: %v", tunnelID, err)
 		}
 	}
+}
+
+// wakeupsPerMinute caps wakeup frames per host connection. Generous for real
+// hosts (which self-limit to one per phone per 30s) while bounding abuse.
+const wakeupsPerMinute = 10
+
+// handleWakeup consumes a host's wakeup frame: skip if the target phone is
+// currently connected (it gets the update over the live tunnel), otherwise
+// fire a content-free push. The token exists only in the frame and the push
+// request — never in a log line, never on disk.
+func (r *Relay) handleWakeup(ctx context.Context, tunnelID string, f wire.Frame) {
+	r.mu.Lock()
+	t := r.tunnels[tunnelID]
+	connected := t != nil && f.Device != "" && t.devices[f.Device] != nil
+	r.mu.Unlock()
+	if connected {
+		return
+	}
+	p, err := wire.DecodeWakeup(f.Payload)
+	if err != nil || p.PushToken == "" {
+		r.logf("[relay] wakeup with bad payload tunnel=%s device=%s", tunnelID, f.Device)
+		return
+	}
+	if r.Pusher == nil {
+		r.logf("[relay] wakeup dropped (no pusher configured) tunnel=%s device=%s", tunnelID, f.Device)
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		if err := r.Pusher.Wake(ctx, p.Platform, p.PushToken); err != nil {
+			r.logf("[relay] wakeup push failed tunnel=%s device=%s platform=%s: %v", tunnelID, f.Device, p.Platform, err)
+			return
+		}
+		r.logf("[relay] wakeup pushed tunnel=%s device=%s platform=%s", tunnelID, f.Device, p.Platform)
+	}()
 }
 
 // capture records a forwarded payload when instrumented. It is the hook the

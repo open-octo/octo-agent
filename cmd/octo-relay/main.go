@@ -14,6 +14,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/open-octo/octo-agent/cmd/octo-relay/internal/push"
 	"github.com/open-octo/octo-agent/cmd/octo-relay/internal/relay"
 )
 
@@ -25,12 +26,38 @@ func main() {
 	addr := flag.String("addr", ":8090", "listen address")
 	tlsCert := flag.String("tls-cert", "", "TLS certificate file (PEM); with --tls-key, serve wss instead of plaintext")
 	tlsKey := flag.String("tls-key", "", "TLS private key file (PEM)")
+	apnsKeyFile := flag.String("apns-key-file", "", "APNs .p8 signing key; with the other apns flags, enables iOS wakeup pushes")
+	apnsKeyID := flag.String("apns-key-id", "", "APNs key id")
+	apnsTeamID := flag.String("apns-team-id", "", "APNs team id")
+	apnsTopic := flag.String("apns-topic", "", "APNs topic (the app's bundle id)")
+	fcmCredentials := flag.String("fcm-credentials", "", "FCM service-account JSON; enables Android wakeup pushes")
 	flag.Parse()
 	if err := rejectEmptyTLSFlags(flag.CommandLine); err != nil {
 		log.Fatalf("[relay] %v", err)
 	}
 
+	pushers := push.Multi{}
+	if *apnsKeyFile != "" || *apnsKeyID != "" || *apnsTeamID != "" || *apnsTopic != "" {
+		a, err := push.NewAPNS(push.APNSConfig{KeyFile: *apnsKeyFile, KeyID: *apnsKeyID, TeamID: *apnsTeamID, Topic: *apnsTopic})
+		if err != nil {
+			log.Fatalf("[relay] %v", err)
+		}
+		pushers["apns"] = a
+		log.Printf("[relay] apns wakeups enabled topic=%s", *apnsTopic)
+	}
+	if *fcmCredentials != "" {
+		f, err := push.NewFCM(*fcmCredentials)
+		if err != nil {
+			log.Fatalf("[relay] %v", err)
+		}
+		pushers["fcm"] = f
+		log.Printf("[relay] fcm wakeups enabled")
+	}
+
 	r := relay.New()
+	if len(pushers) > 0 {
+		r.Pusher = pushers
+	}
 	if err := serve(*addr, *tlsCert, *tlsKey, withHealthz(r.Handler(), version)); err != nil {
 		log.Fatalf("[relay] %v", err)
 	}

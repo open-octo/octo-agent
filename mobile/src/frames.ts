@@ -16,6 +16,7 @@ export type ShimFrame =
   | WsMessageFrame
   | WsCloseFrame
   | WsErrorFrame
+  | PushTokenFrame
 
 /** A fetch() the shim intercepted, to be replayed as a loopback HTTP call. */
 export interface HttpRequestFrame {
@@ -65,7 +66,20 @@ export interface WsErrorFrame {
   message: string
 }
 
-const KINDS = new Set(['http-req', 'http-resp', 'ws-open', 'ws-msg', 'ws-close', 'ws-error'])
+/**
+ * Registers the phone's current push token with the host (phone→host only;
+ * the host's bridge consumes it, never forwarding it to loopback). `data` is
+ * JSON `{"token":"...","platform":"apns"|"fcm"}` — mirror of the host's
+ * pushTokenData in internal/tunnel/frames.go. Send it after every connect so
+ * the host always holds a fresh token; an empty token unregisters.
+ */
+export interface PushTokenFrame {
+  kind: 'push-token'
+  id: string
+  data: string
+}
+
+const KINDS = new Set(['http-req', 'http-resp', 'ws-open', 'ws-msg', 'ws-close', 'ws-error', 'push-token'])
 
 /** encodeFrame serializes a frame to the JSON text the transport carries. */
 export function encodeFrame(frame: ShimFrame): string {

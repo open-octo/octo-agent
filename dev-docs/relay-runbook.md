@@ -130,6 +130,27 @@ DNS: relay.octo.dev + *.relay.octo.dev ─► HAProxy (SNI passthrough + consist
 Verify: pair a phone, then `systemctl stop octo-relay` on the node serving it
 — both ends reconnect and meet on a surviving node within seconds.
 
+## Push wakeups (M1c)
+
+Optional per node: with APNs/FCM credentials configured, the relay turns a
+host's `wakeup` control frame into a content-free push ("Octo has new
+activity") at an offline phone. The relay never persists or logs push tokens;
+they exist only in the frame and the outbound push request. A wakeup for a
+currently-connected phone is dropped — the live tunnel already carries the
+update.
+
+- **APNs**: a `.p8` signing key + key id + team id + the app bundle id as
+  topic (`--apns-key-file/--apns-key-id/--apns-team-id/--apns-topic`). The
+  relay talks to PRODUCTION APNs: tokens from a dev/debug build belong to the
+  sandbox and will fail with BadDeviceToken — verify wakeups with a
+  TestFlight or release build.
+- **FCM**: a Firebase service-account JSON (`--fcm-credentials`); the project
+  id is read from the file.
+- Credential files go under `/etc/octo-relay/` (readable by the service
+  user), referenced from `/etc/octo-relay/env` — see `deploy/env.example`.
+  A platform with no credentials just logs "no pusher configured" (token-free)
+  and drops the wakeup.
+
 ## Local development
 
 No flags = plaintext on :8090, same as the PoC. The relay is a nested Go

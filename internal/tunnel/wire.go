@@ -18,13 +18,26 @@ import (
 )
 
 // Frame type tags. handshake and data are client-to-client (opaque to the
-// relay); paired and device_joined are control frames the relay emits.
+// relay); paired and device_joined are control frames the relay emits; wakeup
+// is a control frame the relay CONSUMES — the host asks it to send a
+// content-free push to an offline phone.
 const (
 	frameHandshake    = "handshake"
 	frameData         = "data"
 	frameDeviceJoined = "device_joined"
 	framePaired       = "paired"
+	frameWakeup       = "wakeup"
 )
+
+// wakeupPayload rides a frameWakeup frame. It is host→relay operational
+// metadata, not E2E ciphertext — deliberately limited to exactly what the
+// relay needs to fire a content-free push: the push token and which push
+// service it belongs to. No session content ever goes here. Mirrors the
+// relay's wire.WakeupPayload (same JSON contract, no shared code).
+type wakeupPayload struct {
+	PushToken string `json:"push_token"`
+	Platform  string `json:"platform"` // "apns" | "fcm"
+}
 
 // frame is one message between the host and the relay. Tunnel/Device address it;
 // Payload carries Noise handshake or encrypted application bytes, opaque to the

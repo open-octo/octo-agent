@@ -34,7 +34,18 @@ const (
 	shimWSMessage = "ws-msg"
 	shimWSClose   = "ws-close"
 	shimWSError   = "ws-error"
+	// shimPushToken registers the phone's current push token with the host
+	// (phone→host only, consumed by the bridge, never forwarded to loopback).
+	// Data carries JSON {"token":"...","platform":"apns"|"fcm"}. The phone
+	// re-sends it on every app open so the host always holds a fresh token.
+	shimPushToken = "push-token"
 )
+
+// pushTokenData is the JSON inside a shimPushToken frame's Data field.
+type pushTokenData struct {
+	Token    string `json:"token"`
+	Platform string `json:"platform"`
+}
 
 func decodeShimFrame(b []byte) (shimFrame, error) {
 	var f shimFrame

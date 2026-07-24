@@ -20,6 +20,11 @@ type session struct {
 	initiator bool
 	done      bool
 	tx, rx    *noise.CipherState
+	// peerStatic is the remote end's static public key, available once the XX
+	// handshake completes. It is the only identity of a phone that is stable
+	// across reconnects (relay-assigned device ids are per-connection), so the
+	// host keys per-device state — like push-token registrations — on it.
+	peerStatic []byte
 }
 
 // newSession builds a fresh handshake for the given role. Each side supplies its
@@ -79,6 +84,7 @@ func (s *session) install(cs1, cs2 *noise.CipherState) {
 	} else {
 		s.tx, s.rx = cs2, cs1
 	}
+	s.peerStatic = s.hs.PeerStatic()
 	s.done = true
 }
 
