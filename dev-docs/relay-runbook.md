@@ -28,9 +28,9 @@ node it grows out of.
    ```sh
    sudo certbot certonly --standalone -d relay.octo.dev
    ```
-   Run this before the relay first starts (both want :80/:443 free at issue
-   time; renewals use the deploy hook below and don't conflict once switched
-   to webroot or a brief stop). Give the service user read access:
+   Standalone HTTP-01 binds :80 only, and the relay binds :443 only, so
+   issuance and renewals never conflict with a running relay. Give the
+   service user read access:
    ```sh
    sudo groupadd -f octo-certs
    sudo usermod -aG octo-certs octo-relay
@@ -77,10 +77,12 @@ node it grows out of.
 
 ## Local development
 
-No flags = plaintext on :8090, same as the PoC:
+No flags = plaintext on :8090, same as the PoC. The relay is a nested Go
+module, so run it from its own directory (the parent module doesn't contain
+it):
 
 ```sh
-go run ./cmd/octo-relay --addr :8090
+(cd cmd/octo-relay && go run . --addr :8090)
 octo serve --tunnel --relay ws://127.0.0.1:8090
 ```
 

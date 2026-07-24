@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"flag"
 	"io"
 	"math/big"
 	"net"
@@ -29,6 +30,48 @@ func TestServeRejectsHalfTLSConfig(t *testing.T) {
 		if err := serve("127.0.0.1:0", tc[0], tc[1], http.NotFoundHandler()); err == nil {
 			t.Errorf("serve(cert=%q, key=%q) = nil, want error", tc[0], tc[1])
 		}
+	}
+}
+
+// TestRejectEmptyTLSFlags: a TLS flag explicitly passed as "" (what systemd's
+// ${VAR} expansion produces for an unset variable) must fail startup instead
+// of silently downgrading to plaintext. Omitting the flags stays fine.
+func TestRejectEmptyTLSFlags(t *testing.T) {
+	mk := func() *flag.FlagSet {
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		fs.String("tls-cert", "", "")
+		fs.String("tls-key", "", "")
+		fs.String("addr", ":8090", "")
+		return fs
+	}
+	for _, args := range [][]string{
+		{"--tls-cert", "", "--tls-key", ""},
+		{"--tls-cert", ""},
+		{"--tls-key", ""},
+	} {
+		fs := mk()
+		if err := fs.Parse(args); err != nil {
+			t.Fatal(err)
+		}
+		if err := rejectEmptyTLSFlags(fs); err == nil {
+			t.Errorf("rejectEmptyTLSFlags(%q) = nil, want error", args)
+		}
+	}
+	// Flags not passed at all: plaintext local dev must keep working.
+	fs := mk()
+	if err := fs.Parse([]string{"--addr", ":9999"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rejectEmptyTLSFlags(fs); err != nil {
+		t.Errorf("rejectEmptyTLSFlags(no TLS flags) = %v, want nil", err)
+	}
+	// And explicitly set non-empty values pass through.
+	fs = mk()
+	if err := fs.Parse([]string{"--tls-cert", "c.pem", "--tls-key", "k.pem"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rejectEmptyTLSFlags(fs); err != nil {
+		t.Errorf("rejectEmptyTLSFlags(both set) = %v, want nil", err)
 	}
 }
 

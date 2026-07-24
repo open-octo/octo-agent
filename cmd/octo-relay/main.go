@@ -26,11 +26,33 @@ func main() {
 	tlsCert := flag.String("tls-cert", "", "TLS certificate file (PEM); with --tls-key, serve wss instead of plaintext")
 	tlsKey := flag.String("tls-key", "", "TLS private key file (PEM)")
 	flag.Parse()
+	if err := rejectEmptyTLSFlags(flag.CommandLine); err != nil {
+		log.Fatalf("[relay] %v", err)
+	}
 
 	r := relay.New()
 	if err := serve(*addr, *tlsCert, *tlsKey, withHealthz(r.Handler(), version)); err != nil {
 		log.Fatalf("[relay] %v", err)
 	}
+}
+
+// rejectEmptyTLSFlags refuses a TLS flag that was explicitly passed with an
+// empty value. systemd's ${VAR} expansion turns an unset variable into an
+// empty argument (not a removed one), so a stale /etc/octo-relay/env with
+// both TLS variables missing would otherwise sail into the plaintext branch —
+// a silent downgrade on a public port. Not passing the flags at all (local
+// development) stays plaintext as documented.
+func rejectEmptyTLSFlags(fs *flag.FlagSet) error {
+	var bad string
+	fs.Visit(func(f *flag.Flag) {
+		if (f.Name == "tls-cert" || f.Name == "tls-key") && f.Value.String() == "" {
+			bad = f.Name
+		}
+	})
+	if bad != "" {
+		return fmt.Errorf("--%s was passed an empty value; unset both TLS flags for plaintext or set both to serve TLS", bad)
+	}
+	return nil
 }
 
 // serve listens with TLS when both cert and key are given, plaintext when
