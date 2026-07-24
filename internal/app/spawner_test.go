@@ -456,12 +456,62 @@ func TestAgentSpawner_ForkSeedsConversation(t *testing.T) {
 	}
 	foundPrompt := false
 	for _, m := range msgs {
-		if m.Role == agent.RoleUser && m.Content == "go" {
+		if m.Role == agent.RoleUser && strings.HasSuffix(m.Content, "go") {
 			foundPrompt = true
+			// The fork prompt carries the role pin so the child doesn't keep
+			// playing the parent's orchestrator role from the seeded history.
+			if !strings.Contains(m.Content, "forked from the conversation above") {
+				t.Errorf("fork prompt should carry the fork framing, got: %q", m.Content)
+			}
 		}
 	}
 	if !foundPrompt {
 		t.Error("fork prompt should be appended after the seeded history")
+	}
+}
+
+// TestAgentSpawner_ForkUsesPreCapturedHistory verifies Spawn seeds a fork from
+// req.ForkHistory when set, not from the parent's live history — the live
+// history may have moved on by the time a background spawn goroutine runs.
+func TestAgentSpawner_ForkUsesPreCapturedHistory(t *testing.T) {
+	send := &subAgentSender{reply: "ok"}
+	parent := agent.New(send, "parent-model")
+	parent.History.Append(agent.NewUserMessage("original question"))
+
+	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
+
+	// Capture the seed as the sub_agent tool would, then let the parent turn
+	// "move on" before Spawn runs.
+	seed := sp.ForkSnapshot()
+	parent.History.Append(agent.NewAssistantMessage("waiting for the sub-agents to finish"))
+
+	if _, err := sp.Spawn(context.Background(), tools.SpawnRequest{
+		Prompt: "go", ForkConversation: true, ForkHistory: seed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, m := range sp.reg.m[onlyChildID(t, sp)].agent.History.Snapshot() {
+		if strings.Contains(m.Content, "waiting for the sub-agents") {
+			t.Fatalf("fork must seed from the pre-captured snapshot, not the parent's later messages: %+v", m)
+		}
+	}
+}
+
+// TestAgentSpawner_NonForkPromptUnframed verifies a fresh (preset) child gets
+// the raw prompt — the fork role pin only applies to forks.
+func TestAgentSpawner_NonForkPromptUnframed(t *testing.T) {
+	send := &subAgentSender{reply: "ok"}
+	parent := agent.New(send, "parent-model")
+
+	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
+	if _, err := sp.Spawn(context.Background(), tools.SpawnRequest{Prompt: "go"}); err != nil {
+		t.Fatal(err)
+	}
+
+	last := send.lastMessages[len(send.lastMessages)-1]
+	if last.Content != "go" {
+		t.Errorf("non-fork prompt should be passed through unframed, got: %q", last.Content)
 	}
 }
 

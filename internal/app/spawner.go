@@ -104,13 +104,22 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 	child.LiteSender = s.parent.LiteSender
 	child.LiteModel = s.parent.LiteModel
 
-	// True fork: seed the child with the parent's conversation so far so it
-	// continues with full context. runChild then appends req.Prompt as the next
-	// user turn. The in-flight assistant turn that called sub_agent is trimmed
-	// (see forkHistorySnapshot) so the copied history doesn't end on a dangling
-	// tool_use the provider would reject.
+	// True fork: seed the child with the parent's conversation so it continues
+	// with full context. runChild then appends the fork prompt as the next
+	// user turn. The seed is normally pre-captured by the sub_agent tool at
+	// tool-execution time (req.ForkHistory) — a background Spawn runs on its
+	// own goroutine, and snapshotting here would race the still-running parent
+	// turn, seeding the child with the parent's own "waiting for sub-agents"
+	// follow-ups. Snapshotting live is the fallback for direct synchronous
+	// callers; either way the in-flight assistant turn that called sub_agent
+	// is trimmed (see forkHistorySnapshot) so the copied history doesn't end
+	// on a dangling tool_use the provider would reject.
 	if req.ForkConversation {
-		child.History.ReplaceAll(forkHistorySnapshot(s.parent.History.Snapshot()))
+		hist := req.ForkHistory
+		if hist == nil {
+			hist = s.parent.History.Snapshot()
+		}
+		child.History.ReplaceAll(forkHistorySnapshot(hist))
 	}
 
 	// Create the session dir before registering the child: a permissions
@@ -147,7 +156,17 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 		ctx = tools.WithWorkingDir(ctx, wt.dir)
 	}
 
-	reply, in, out, stop, turns, err := s.runChild(ctx, lc, req.Prompt)
+	// A fork child's first prompt gets an explicit role pin: the seeded
+	// conversation usually reads as "I am orchestrating sub-agents", and
+	// without the pin a weaker model keeps playing the parent (replying
+	// "waiting for the sub-agents…") instead of doing the task appended at
+	// the end.
+	prompt := req.Prompt
+	if req.ForkConversation {
+		prompt = forkTaskFraming + prompt
+	}
+
+	reply, in, out, stop, turns, err := s.runChild(ctx, lc, prompt)
 	if err != nil {
 		if wt != nil {
 			wt.finish() // reconcile/clean even on error so we don't leak the worktree
@@ -202,6 +221,13 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 		StopReason:   stop,
 	}, nil
 }
+
+// forkTaskFraming prefixes a fork child's first prompt (see Spawn).
+const forkTaskFraming = "<system-reminder>You are a sub-agent forked from the conversation above. " +
+	"That conversation is background context only — do not continue its narrative, do not act as " +
+	"the orchestrator, and do not wait for or report on other sub-agents. Your entire job is the " +
+	"single task below: execute it yourself, using your tools as needed, and reply with its " +
+	"result.</system-reminder>\n\n"
 
 // schemaRetryPrompt re-prompts a child whose first reply wasn't valid JSON.
 const schemaRetryPrompt = "Your previous reply was not valid JSON. Respond with ONLY the raw JSON " +
@@ -361,6 +387,15 @@ func (lc *liveChild) syncSession() {
 // edit_file) are dropped too — used by read-only presets so the child keeps
 // terminal/MCP/codegraph but can't change files. The two filters compose: a
 // readOnly preset still honours allowed.
+// ForkSnapshot captures the parent conversation for seeding a fork child,
+// trimmed of the in-flight assistant turn (see forkHistorySnapshot). It
+// implements tools.ForkSnapshotter: the sub_agent tool calls it synchronously
+// at tool-execution time so a background fork seeds from the conversation as
+// the model saw it when it made the call.
+func (s *Spawner) ForkSnapshot() []agent.Message {
+	return forkHistorySnapshot(s.parent.History.Snapshot())
+}
+
 // forkHistorySnapshot trims a parent-history snapshot for seeding a fork. The
 // parent is mid-turn: the assistant message that called sub_agent is already in
 // history, but its tool_result hasn't been produced. Copying it verbatim would
