@@ -178,9 +178,12 @@ func runOnce(cfg replConfig, prompt string, stream bool) int {
 	defer hooks.DrainSpill(5 * time.Second)
 	defer tools.CleanSpillFiles()
 
-	// Sub-agent completions and background-process notices ride the inbox, so a
-	// later iteration of this single agentic turn picks them up (the agent
-	// drains the inbox at the start of each loop step).
+	// Background-process notices ride the inbox, so a later iteration of this
+	// single agentic turn picks them up (the agent drains the inbox at the
+	// start of each loop step). Sub-agent completions can no longer arrive
+	// this way — the one-shot forces sub-agents synchronous (see runChat), so
+	// the OnExit hook below is a defensive backstop only; the wiring stays for
+	// the KillAll cleanup.
 	if cfg.subAgentMgr != nil {
 		tools.SetDefaultSubAgentManager(cfg.subAgentMgr)
 		cfg.subAgentMgr.SetOnExit(func(ev tools.SubAgentNotification) {

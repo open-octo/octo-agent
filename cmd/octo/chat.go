@@ -771,6 +771,18 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	toolExecutor = toolEnv.Executor
 	subAgentMgr = toolEnv.SubAgentMgr
 
+	// The headless one-shot exits when its single turn ends, so a background
+	// sub-agent's completion notification has no follow-up turn to land in —
+	// children spawned with run_in_background=true would be orphaned and their
+	// results silently lost. Run sub-agents inline instead, like the other
+	// request/response transports (server, IM). Parallel fan-out is unaffected:
+	// sync sub_agent calls issued in one assistant message still dispatch
+	// concurrently. The TUI keeps async — it re-injects completions as
+	// follow-up turns.
+	if !useTUI {
+		subAgentMgr.SetSynchronous(true)
+	}
+
 	// send_message / send_file for the CLI/TUI: delegate to a local `octo serve`
 	// (live adapters — needed for WeChat) or fall back to a one-shot send from
 	// config. Only wired when the user has configured at least one channel, so
