@@ -50,6 +50,7 @@ func TestVerify_AgentToolAsyncLaunchAndResume(t *testing.T) {
 	out, err := (tools.AgentTool{}).Execute(ctx, "sub_agent", map[string]any{
 		"description":       "research the cache module",
 		"prompt":            "Summarise the cache module.",
+		"subagent_type":     "explore",
 		"run_in_background": true,
 	})
 	if err != nil {

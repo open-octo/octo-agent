@@ -69,7 +69,7 @@ func TestAgentTool_SyncMaxTurnsSurfaced(t *testing.T) {
 	ctx := WithSubAgentManager(context.Background(), mgr)
 
 	res, err := (AgentTool{}).Execute(ctx, "sub_agent", map[string]any{
-		"description": "d", "prompt": "p",
+		"description": "d", "prompt": "p", "subagent_type": "general",
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -84,9 +84,30 @@ func TestAgentTool_SyncMaxTurnsSurfaced(t *testing.T) {
 	// A normal completion must NOT be flagged.
 	mgr2 := NewSubAgentManager(&resultSpawner{reply: "done", stopReason: ""})
 	ctx2 := WithSubAgentManager(context.Background(), mgr2)
-	res2, _ := (AgentTool{}).Execute(ctx2, "sub_agent", map[string]any{"description": "d", "prompt": "p"})
+	res2, _ := (AgentTool{}).Execute(ctx2, "sub_agent", map[string]any{"description": "d", "prompt": "p", "subagent_type": "general"})
 	if strings.Contains(res2.Text, "INCOMPLETE") {
 		t.Errorf("a complete result should not be flagged, got: %q", res2.Text)
+	}
+}
+
+// TestAgentTool_RequiresSubagentType verifies omitting subagent_type is a
+// hard error that names the available presets — every sub-agent is a fresh,
+// typed agent; conversation branching is the session branch feature's job.
+func TestAgentTool_RequiresSubagentType(t *testing.T) {
+	mgr := NewSubAgentManager(&resultSpawner{reply: "done"})
+	ctx := WithSubAgentManager(context.Background(), mgr)
+
+	_, err := (AgentTool{}).Execute(ctx, "sub_agent", map[string]any{
+		"description": "d", "prompt": "p",
+	})
+	if err == nil {
+		t.Fatal("omitting subagent_type should be an error")
+	}
+	if !strings.Contains(err.Error(), "subagent_type is required") {
+		t.Errorf("error should say what is missing, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "explore") {
+		t.Errorf("error should list available presets, got: %v", err)
 	}
 }
 
@@ -99,7 +120,7 @@ func TestAgentTool_ForcedSyncNote(t *testing.T) {
 	ctx := WithSubAgentManager(context.Background(), mgr)
 
 	res, err := (AgentTool{}).Execute(ctx, "sub_agent", map[string]any{
-		"description": "d", "prompt": "p", "run_in_background": true,
+		"description": "d", "prompt": "p", "subagent_type": "general", "run_in_background": true,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)

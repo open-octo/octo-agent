@@ -403,118 +403,6 @@ func TestAgentSpawner_AppliesSystemSuffix(t *testing.T) {
 	}
 }
 
-func TestForkHistorySnapshot_TrimsTrailingToolUse(t *testing.T) {
-	toolUseTurn := agent.Message{Role: agent.RoleAssistant, Blocks: []agent.ContentBlock{
-		agent.NewToolUseBlock("tu_1", "sub_agent", map[string]any{"prompt": "go"}),
-	}}
-
-	// Trailing in-flight tool_use turn is dropped.
-	got := forkHistorySnapshot([]agent.Message{
-		agent.NewUserMessage("q"), agent.NewAssistantMessage("a"), toolUseTurn,
-	})
-	if len(got) != 2 || messageHasToolUse(got[len(got)-1]) {
-		t.Errorf("trailing tool_use not trimmed: %+v", got)
-	}
-
-	// A clean tail (no trailing tool_use) is left untouched.
-	clean := []agent.Message{agent.NewUserMessage("q"), agent.NewAssistantMessage("a")}
-	if got := forkHistorySnapshot(clean); len(got) != 2 {
-		t.Errorf("clean history should be untouched, got %+v", got)
-	}
-
-	// Empty in, empty out.
-	if got := forkHistorySnapshot(nil); len(got) != 0 {
-		t.Errorf("nil history should stay empty, got %+v", got)
-	}
-}
-
-func TestAgentSpawner_ForkSeedsConversation(t *testing.T) {
-	send := &subAgentSender{reply: "ok"}
-	parent := agent.New(send, "parent-model")
-	parent.System = "BASE"
-	parent.History.Append(agent.NewUserMessage("first question"))
-	parent.History.Append(agent.NewAssistantMessage("first answer"))
-	// In-flight turn that called sub_agent: an assistant message carrying a
-	// tool_use whose result doesn't exist yet.
-	parent.History.Append(agent.Message{Role: agent.RoleAssistant, Blocks: []agent.ContentBlock{
-		agent.NewToolUseBlock("tu_1", "sub_agent", map[string]any{"prompt": "go"}),
-	}})
-
-	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
-	if _, err := sp.Spawn(context.Background(), tools.SpawnRequest{Prompt: "go", ForkConversation: true}); err != nil {
-		t.Fatal(err)
-	}
-
-	msgs := sp.reg.m[onlyChildID(t, sp)].agent.History.Snapshot()
-	if len(msgs) < 2 || msgs[0].Content != "first question" || msgs[1].Content != "first answer" {
-		t.Fatalf("fork did not seed the parent conversation: %+v", msgs)
-	}
-	for _, m := range msgs {
-		if messageHasToolUse(m) {
-			t.Errorf("forked history must not carry the trailing tool_use turn: %+v", m)
-		}
-	}
-	foundPrompt := false
-	for _, m := range msgs {
-		if m.Role == agent.RoleUser && strings.HasSuffix(m.Content, "go") {
-			foundPrompt = true
-			// The fork prompt carries the role pin so the child doesn't keep
-			// playing the parent's orchestrator role from the seeded history.
-			if !strings.Contains(m.Content, "forked from the conversation above") {
-				t.Errorf("fork prompt should carry the fork framing, got: %q", m.Content)
-			}
-		}
-	}
-	if !foundPrompt {
-		t.Error("fork prompt should be appended after the seeded history")
-	}
-}
-
-// TestAgentSpawner_ForkUsesPreCapturedHistory verifies Spawn seeds a fork from
-// req.ForkHistory when set, not from the parent's live history — the live
-// history may have moved on by the time a background spawn goroutine runs.
-func TestAgentSpawner_ForkUsesPreCapturedHistory(t *testing.T) {
-	send := &subAgentSender{reply: "ok"}
-	parent := agent.New(send, "parent-model")
-	parent.History.Append(agent.NewUserMessage("original question"))
-
-	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
-
-	// Capture the seed as the sub_agent tool would, then let the parent turn
-	// "move on" before Spawn runs.
-	seed := sp.ForkSnapshot()
-	parent.History.Append(agent.NewAssistantMessage("waiting for the sub-agents to finish"))
-
-	if _, err := sp.Spawn(context.Background(), tools.SpawnRequest{
-		Prompt: "go", ForkConversation: true, ForkHistory: seed,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	for _, m := range sp.reg.m[onlyChildID(t, sp)].agent.History.Snapshot() {
-		if strings.Contains(m.Content, "waiting for the sub-agents") {
-			t.Fatalf("fork must seed from the pre-captured snapshot, not the parent's later messages: %+v", m)
-		}
-	}
-}
-
-// TestAgentSpawner_NonForkPromptUnframed verifies a fresh (preset) child gets
-// the raw prompt — the fork role pin only applies to forks.
-func TestAgentSpawner_NonForkPromptUnframed(t *testing.T) {
-	send := &subAgentSender{reply: "ok"}
-	parent := agent.New(send, "parent-model")
-
-	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
-	if _, err := sp.Spawn(context.Background(), tools.SpawnRequest{Prompt: "go"}); err != nil {
-		t.Fatal(err)
-	}
-
-	last := send.lastMessages[len(send.lastMessages)-1]
-	if last.Content != "go" {
-		t.Errorf("non-fork prompt should be passed through unframed, got: %q", last.Content)
-	}
-}
-
 // TestAgentSpawner_LeanSystemKeepsParentModel verifies a lean preset trims
 // the system prompt only: the child stays on the parent's model and sender
 // even when a lite model is configured (lite is for compaction, not for
@@ -572,7 +460,7 @@ func TestAgentSpawner_ExplicitModelOverride(t *testing.T) {
 	}
 }
 
-func TestAgentSpawner_NoForkStartsFresh(t *testing.T) {
+func TestAgentSpawner_ChildStartsFresh(t *testing.T) {
 	send := &subAgentSender{reply: "ok"}
 	parent := agent.New(send, "parent-model")
 	parent.History.Append(agent.NewUserMessage("secret parent context"))
@@ -584,7 +472,7 @@ func TestAgentSpawner_NoForkStartsFresh(t *testing.T) {
 
 	for _, m := range sp.reg.m[onlyChildID(t, sp)].agent.History.Snapshot() {
 		if m.Content == "secret parent context" {
-			t.Error("non-fork child must not inherit the parent conversation")
+			t.Error("a child never inherits the parent conversation")
 		}
 	}
 }

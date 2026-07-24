@@ -439,7 +439,7 @@ export interface SubAgentTool {
 export interface SubAgentState {
   id: string
   description: string
-  agentType: string // subagent_type, e.g. "explore" (empty for an untyped fork)
+  agentType: string // subagent_type, e.g. "explore" (empty for workflow-spawned agents)
   // running: still working. done: clean completion. error: exited with an error
   // or was killed. cancelled: user killed (context canceled) while running.
   status: 'running' | 'done' | 'error' | 'cancelled'

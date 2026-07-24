@@ -639,7 +639,7 @@ type pickerEndpoint struct {
 // subAgentUI is the live panel state for one running sub-agent.
 type subAgentUI struct {
 	description string
-	agentType   string // subagent_type, e.g. "explore" (empty for an untyped fork)
+	agentType   string // subagent_type, e.g. "explore" (empty for workflow-spawned agents)
 	start       time.Time
 	toolCount   int
 	recent      []string // last few tool names, for the live chain (collapsed view)

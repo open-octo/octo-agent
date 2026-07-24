@@ -14,10 +14,10 @@ import (
 //
 // Parameters:
 //   - description: short label for UI/logging
-//   - prompt:      the task (self-contained for a fresh agent; a fork sees the
-//     conversation, so just the task to do now)
-//   - subagent_type: optional agent type (explore, plan, general, code-review).
-//     Omit to fork yourself — the child inherits your full conversation context.
+//   - prompt:      the task. Self-contained — the child starts with zero
+//     conversation context and can't see this conversation.
+//   - subagent_type: agent type (explore, plan, general, code-review, or a
+//     user-defined agent from ~/.octo/agents). Required.
 //   - run_in_background: when true the agent runs async and you are notified
 //     on completion. When false (default) it blocks and returns the result.
 //   - model: optional model override
@@ -33,21 +33,13 @@ func (AgentTool) Definition() agent.ToolDefinition {
 			"The sub-agent runs with its own context window and tool budget. " +
 			"Use when you need parallel investigation, a fresh context for an isolated " +
 			"sub-problem, or when the task is well-defined enough to delegate.\n\n" +
-			"Two modes — pick by whether the task depends on THIS conversation's context:\n" +
-			"- **Fork** (omit subagent_type): the child inherits your full conversation — your " +
-			"system prompt AND this conversation's messages so far. Its own tool calls and output " +
-			"stay in its branch and never enter your context; only its final reply comes back. " +
-			"Fork ONLY when the task builds on context accumulated here that would be costly to " +
-			"restate (e.g. verifying a hypothesis this conversation just formed). Every fork " +
-			"re-sends your whole conversation, so it costs your full context per child. " +
-			"Self-check: if you find yourself writing a self-contained prompt, don't fork — use a " +
-			"typed agent.\n" +
-			"- **Typed agent** (set subagent_type): the child starts with zero conversation " +
-			"context and a specialized persona; provide a complete, self-contained task " +
-			"description. Prefer this whenever the task can be stated standalone, and ALWAYS for " +
-			"a parallel fan-out of independent sub-tasks: 'explore' for read-only " +
-			"investigation/research, 'general' for delegated work that modifies files, " +
-			"'code-review' for an independent read of changes.\n\n" +
+			"The child always starts with zero conversation context and the persona named by " +
+			"subagent_type — it can never see this conversation, so make the prompt a complete, " +
+			"self-contained task description (file paths, constraints, deliverable). " +
+			"'explore' for read-only investigation/research, 'plan' for read-only planning, " +
+			"'general' for delegated work that modifies files, 'code-review' for an independent " +
+			"read of changes. To branch the conversation itself, use the session branch feature " +
+			"instead — a sub-agent is not a conversation fork.\n\n" +
 			"Set run_in_background=true when you are dispatching multiple independent sub-agents that can run in parallel, " +
 			"or when a sub-agent is expected to take a while. You will be notified when it completes. " +
 			"Leave it false (default) to block and receive the result directly when the task is short. " +
@@ -64,11 +56,11 @@ func (AgentTool) Definition() agent.ToolDefinition {
 				},
 				"prompt": map[string]any{
 					"type":        "string",
-					"description": "The task for the sub-agent. For a fresh agent (subagent_type set) make it self-contained: include all context the sub-agent needs (file paths, constraints, deliverable) since it can't see this conversation. A fork already sees this conversation, so state just the task to do now. Either way, state the expected output shape (a summary, a list, a YES/NO).",
+					"description": "The task for the sub-agent. Make it self-contained: include all context the sub-agent needs (file paths, constraints, deliverable) since it can't see this conversation. State the expected output shape (a summary, a list, a YES/NO).",
 				},
 				"subagent_type": map[string]any{
 					"type":        "string",
-					"description": "Optional agent type. 'explore' (read-only research), 'plan' (read-only planning), 'general' (full toolbelt), 'code-review' (read-only review). Omit to fork yourself — the child inherits your full conversation (system prompt + messages so far).",
+					"description": "Agent type: 'explore' (read-only research), 'plan' (read-only planning), 'general' (full toolbelt), 'code-review' (read-only review), or a user-defined agent from ~/.octo/agents.",
 				},
 				"run_in_background": map[string]any{
 					"type":        "boolean",
@@ -84,7 +76,7 @@ func (AgentTool) Definition() agent.ToolDefinition {
 					"description": "Optional tool-name allowlist for the sub-agent. Omit to inherit your tools (minus sub_agent itself — no recursion).",
 				},
 			},
-			"required": []string{"description", "prompt"},
+			"required": []string{"description", "prompt", "subagent_type"},
 		},
 	}
 }
@@ -108,16 +100,18 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 		return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: sub-agent dispatch is not configured for this session")
 	}
 
-	// Resolve subagent_type → preset or fork
+	// subagent_type is required: every sub-agent is a fresh, typed agent.
+	// Conversation branching belongs to the session branch feature, not to a
+	// sub-agent the user can't talk to.
 	subagentType := strings.TrimSpace(stringArg(input, "subagent_type"))
-	var preset *agentPreset
-	if subagentType != "" {
-		p, ok := lookupAgentPreset(subagentType)
-		if !ok {
-			return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: unknown subagent_type %q. Available: %s", subagentType, listPresetNames())
-		}
-		preset = &p
+	if subagentType == "" {
+		return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: subagent_type is required. Available: %s", listPresetNames())
 	}
+	p, ok := lookupAgentPreset(subagentType)
+	if !ok {
+		return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: unknown subagent_type %q. Available: %s", subagentType, listPresetNames())
+	}
+	preset := &p
 
 	// Build the spawn request. Call-level tools/model win over the preset's
 	// frontmatter defaults; the preset fills in what the call left unset.
@@ -129,31 +123,16 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 		Prompt:      prompt,
 		Tools:       callTools,
 		Model:       callModel,
-		// No subagent_type → fork: seed the child with this conversation so far.
-		ForkConversation: subagentType == "",
 	}
-	// Capture the fork seed here, on the tool-execution path, rather than
-	// inside Spawn: a background spawn runs on its own goroutine and would
-	// otherwise snapshot the parent history after the turn has moved on —
-	// picking up the "Started sub-agent…" tool results and the parent's own
-	// follow-up messages, which prime the child to keep playing the parent's
-	// role instead of doing its task.
-	if req.ForkConversation {
-		if fs, ok := mgr.Spawner().(ForkSnapshotter); ok {
-			req.ForkHistory = fs.ForkSnapshot()
-		}
+	req.SystemSuffix = preset.persona
+	req.ReadOnly = preset.readOnly
+	req.LeanSystem = preset.leanSystem
+	req.DisallowedTools = preset.disallowedTools
+	if len(callTools) == 0 {
+		req.Tools = preset.tools
 	}
-	if preset != nil {
-		req.SystemSuffix = preset.persona
-		req.ReadOnly = preset.readOnly
-		req.LeanSystem = preset.leanSystem
-		req.DisallowedTools = preset.disallowedTools
-		if len(callTools) == 0 {
-			req.Tools = preset.tools
-		}
-		if callModel == "" {
-			req.Model = preset.model
-		}
+	if callModel == "" {
+		req.Model = preset.model
 	}
 
 	// Determine sync vs async

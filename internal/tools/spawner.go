@@ -3,8 +3,6 @@ package tools
 import (
 	"context"
 	"sync"
-
-	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // Spawner runs one sub-agent task to completion and returns the final reply.
@@ -31,29 +29,12 @@ type SpawnRequest struct {
 	Description string
 
 	// AgentType is the subagent_type the caller selected (e.g. "explore",
-	// "general"), shown alongside Description in the live panels. Empty for an
-	// untyped fork.
+	// "general"), shown alongside Description in the live panels. Empty when
+	// the spawn didn't come from the sub_agent tool (e.g. workflow agents).
 	AgentType string
 
 	// Prompt is the sub-agent's user message. It carries the task.
 	Prompt string
-
-	// ForkConversation, when true, seeds the child's history with the parent's
-	// conversation so far (a true fork), rather than starting fresh. The
-	// spawner trims the in-flight tool_use turn that spawned the child so the
-	// copied history ends cleanly. Set by the sub_agent tool when no
-	// subagent_type is given; workflow agents leave it false.
-	ForkConversation bool
-
-	// ForkHistory, when non-nil, is the parent-conversation snapshot the fork
-	// child is seeded with. The sub_agent tool captures it at tool-execution
-	// time (via ForkSnapshotter) so the fork reflects the conversation as it
-	// stood when the model made the call — a background spawn's goroutine may
-	// run arbitrarily later, after the parent turn has appended its own
-	// "Started sub-agent…" results and follow-up messages, which a child must
-	// not mistake for its own role. Nil means "snapshot inside Spawn" (only
-	// safe for synchronous callers).
-	ForkHistory []agent.Message
 
 	// Tools, when non-empty, restricts the child to this subset of the
 	// parent's tool list. nil/empty means "inherit all of parent's tools
@@ -99,16 +80,6 @@ type SpawnRequest struct {
 	// full conversation transcript to <SessionDir>/<agent-id>.jsonl so it can
 	// be inspected after a failure.
 	SessionDir string
-}
-
-// ForkSnapshotter is implemented by Spawner implementations that can capture
-// the parent conversation synchronously. The sub_agent tool calls it on the
-// tool-execution path — while the parent turn is still parked on this tool
-// call — so a background fork seeds from the conversation the model actually
-// saw, not from wherever the parent turn has advanced to by the time the
-// spawn goroutine gets scheduled.
-type ForkSnapshotter interface {
-	ForkSnapshot() []agent.Message
 }
 
 // SpawnResult is the sub-agent's final output, plus its token usage so the

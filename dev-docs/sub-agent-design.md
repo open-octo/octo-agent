@@ -8,7 +8,7 @@
 
 ```
 工具面            sub_agent（唯一的模型可见工具）
-  │               参数选择 fork/fresh、sync/async、preset、model、tools
+  │               参数选择 preset、sync/async、model、tools
   ▼
 SubAgentManager   异步层：每个 async 调用在独立 goroutine 跑，立即返回 agent_N 句柄；
   │               完成时触发 onExit 通知。busy/pending 队列、并发上限、Kill、ListRunning。
@@ -34,20 +34,26 @@ spawn 入口(`internal/tools/agent.go`),经 spawner 注册门控——未配置 
 |------|------|
 | `description` | UI/日志用的短标签,不影响行为 |
 | `prompt` | 任务,**自包含**:子 agent 看不到本对话,所有上下文都得写在这里 |
-| `subagent_type` | 可选 preset(见下);省略则 **fork** |
+| `subagent_type` | preset(见下),**必填**;省略直接报错并列出可用 preset |
 | `run_in_background` | true=异步(完成后通知);false/省略=同步阻塞返回结果 |
 | `model` | 可选,覆盖父模型(如指定更便宜的) |
 | `tools` | 可选工具名白名单,与父 toolbelt 取交集 |
 
-### Fork vs Fresh
+### 只有 Fresh:fork 模式已删除
 
-- **Fork**(省略 `subagent_type`):child 继承父的 **system prompt**(共享的 harness 身份和
-  prompt cache)**和本对话此刻的消息历史**(真 fork;快照裁掉触发本次 spawn 的悬空 tool_use
-  回合),任务可以直接建立在对话已积累的上下文上,中间工具输出留在 child 分支、只把结论收回。
-  代价是每个 fork 都重发整段父对话,成本随父上下文线性涨——任务能用自包含 prompt 表达时应改用
-  typed preset,并行 fan-out 一律 typed(工具 description 里也是这么教模型的)。
-- **Fresh**(给 `subagent_type`):child 零对话上下文 + 一个 preset persona,`prompt` 必须自包含。
-  用于独立视角(如 code review)、专门角色,以及一切可自包含表达的任务。
+早期版本里省略 `subagent_type` 会 **fork**:child 继承父的 system prompt 和本对话此刻的消息历史。
+后来删掉了这个模式,`subagent_type` 变成必填,理由:
+
+- **分叉应该是会话级原语,不是 agent 工具的一个隐式模式。** web 端已有真正的会话 branch
+  (`POST /api/sessions/{id}/branch`,从任意消息切出一个可以直接对话的新会话);fork 模式复制了
+  上下文却把对话困在一个用户摸不着的 sub_agent 里,是它的劣化版。
+- **失败模式多**:种子对话读起来像"我在 orchestrate 子 agent",child 会接着扮演编排者而不是干活
+  (曾需要 `forkTaskFraming` 角色钉缓解);异步 spawn 的快照时机还有竞态(曾需要在工具执行路径上
+  预捕获 `ForkHistory`)。补丁随病根一起拔除。
+- **成本与引导都难圆**:每个 fork 重发整段父对话,工具 description 只能反复教模型"能自包含就别
+  fork"——一个需要处处警告的模式本身就是设计气味。
+
+现在每个 child 一律零对话上下文 + preset persona,`prompt` 必须自包含。
 
 ### Sync vs Async
 
@@ -110,8 +116,8 @@ child.Gate = parent.Gate                    // 续用同一权限门控
 child.MaxTurns = childMaxTurns              // child 专属 loop 预算
 ```
 
-- **隔离点**:自己的 loop 预算。History 视模式而定:**fork(省略 subagent_type)复制父此刻的对话**作为 child 起点(`req.ForkConversation`,`forkHistorySnapshot` 裁掉触发本次 spawn 的悬空 tool_use 回合);**带 subagent_type 的 fresh agent / workflow agent 仍是 fresh History**,看不到父对话。
-- **共享点**:Sender(一条连接)、System(同一身份,fork 时连 cache 一起共享;leanSystem preset 用精简 system)、Gate(同一权限——子 agent 不绕过权限)、计费(子 agent token 累加进父 session 总数,`/cost` 报合并数字)、lite 模型(`LiteSender`/`LiteModel` 继承给 child,仅用于 compaction)。
+- **隔离点**:自己的 loop 预算 + **fresh History**——child 一律看不到父对话(fork 模式已删除,见上)。
+- **共享点**:Sender(一条连接)、System(同一身份;leanSystem preset 用精简 system)、Gate(同一权限——子 agent 不绕过权限)、计费(子 agent token 累加进父 session 总数,`/cost` 报合并数字)、lite 模型(`LiteSender`/`LiteModel` 继承给 child,仅用于 compaction)。
 - `req.Tools` 非空时与父 toolbelt 取交集;`req.DisallowedTools` 从继承集里减;`req.Model` 非空时覆盖父模型。调用层传的 tools/model 优先于 preset frontmatter,preset 只补调用没指定的部分。
 - **max-turns 不是失败**:child 跑到 `childMaxTurns` 上限时,`runChild` 返回**部分 reply** +
   `StopReason="max_turns"`(而非报错)。`sub_agent` 的同步结果和异步完成通知都会把它标成

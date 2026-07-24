@@ -1,21 +1,17 @@
 ---
 title: Sub-agents
-description: Fork the conversation or spawn a specialized, independent agent.
+description: Spawn a specialized, independent agent with its own context window.
 ---
 
-The `sub_agent` tool spawns a fresh agent — either a copy of the current conversation, or an
-independent one with its own persona and toolset. There's no slash command for this; the model
-calls the tool directly when a task calls for isolation or a specialized perspective.
+The `sub_agent` tool spawns a fresh agent — an independent one with its own persona, toolset, and
+an empty conversation history. There's no slash command for this; the model calls the tool
+directly when a task calls for isolation or a specialized perspective.
 
-## Fork vs. a typed sub-agent
-
-| | Fork (no type given) | Typed (a `subagent_type`) |
-|---|---|---|
-| History | Copies the parent conversation so far | Starts empty |
-| System prompt | Same as the parent — shares its prompt cache, so it's cheap | The parent's prompt plus the preset's persona text |
-| Model | Parent's model, unless overridden | Parent's model, unless the preset or the call overrides it |
-| Tools | Full parent toolbelt minus `sub_agent` itself | Parent toolbelt filtered by the preset's `tools`/`disallowed_tools` |
-| Use it for | Offloading a noisy investigation and keeping only the conclusion | An independent perspective or a specialized role |
+Every sub-agent starts with **zero conversation context**: it can't see the current conversation,
+so the model writes a self-contained prompt naming the `subagent_type` (required). To branch the
+conversation itself — a new session you can talk to directly, seeded from any earlier message —
+use the session branch feature in the web UI instead; that's a conversation fork, and it is
+deliberately not something a sub-agent can do.
 
 Recursion is blocked one level deep: a sub-agent's own toolbelt never includes `sub_agent`, and
 calling it anyway is rejected even if something bypassed that filtering.

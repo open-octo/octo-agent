@@ -1648,8 +1648,8 @@ func (m *tuiModel) View() string {
 				lines.WriteByte('\n')
 			}
 			// Show the task description as the name, prefixed with the
-			// subagent_type (e.g. "explore (Find code)"). An untyped child is a
-			// fork of the parent, labelled "fork" — the tool's own vocabulary.
+			// subagent_type (e.g. "explore (Find code)"). An untyped child
+			// (e.g. spawned by a workflow run) is labelled "agent".
 			// The agent_N id is the internal addressing handle, not user-facing.
 			label := id
 			if sa.description != "" {
@@ -1657,7 +1657,7 @@ func (m *tuiModel) View() string {
 			}
 			typ := sa.agentType
 			if typ == "" {
-				typ = "fork"
+				typ = "agent"
 			}
 			label = fmt.Sprintf("%s (%s)", typ, label)
 			focus := "  "

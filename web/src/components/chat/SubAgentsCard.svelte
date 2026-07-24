@@ -81,8 +81,8 @@
             class:pulse={a.status === 'running'}></span>
         </span>
         <div class="agent-info">
-          <!-- An untyped child is a fork of the parent — label it "fork". -->
-          <span class="agent-name"><span class="agent-type">{a.agentType || 'fork'}</span> {a.description}</span>
+          <!-- An untyped child (e.g. workflow-spawned) is labelled "agent". -->
+          <span class="agent-name"><span class="agent-type">{a.agentType || 'agent'}</span> {a.description}</span>
         </div>
         {#if a.status === 'running'}
           <span class="status-running">
