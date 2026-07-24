@@ -379,3 +379,22 @@ func itoa(n int) string {
 	}
 	return string(b[i:])
 }
+
+// TestRelayDialBase: the SNI-subdomain rewrite applies to DNS-named relays
+// only — IP literals and dotless hosts (local dev) dial unchanged, and the
+// port survives the rewrite.
+func TestRelayDialBase(t *testing.T) {
+	cases := []struct{ relay, tunnel, want string }{
+		{"wss://relay.octo.dev", "t123", "wss://t123.relay.octo.dev"},
+		{"wss://relay.octo.dev:8443", "t123", "wss://t123.relay.octo.dev:8443"},
+		{"ws://127.0.0.1:8090", "t123", "ws://127.0.0.1:8090"},
+		{"ws://localhost:8090", "t123", "ws://localhost:8090"},
+		{"ws://[::1]:8090", "t123", "ws://[::1]:8090"},
+		{"wss://relay.octo.dev", "", "wss://relay.octo.dev"},
+	}
+	for _, c := range cases {
+		if got := relayDialBase(c.relay, c.tunnel); got != c.want {
+			t.Errorf("relayDialBase(%q, %q) = %q, want %q", c.relay, c.tunnel, got, c.want)
+		}
+	}
+}

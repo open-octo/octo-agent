@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +18,31 @@ const (
 	initialBackoff = 500 * time.Millisecond
 	maxBackoff     = 30 * time.Second
 )
+
+// relayDialBase returns the relay base URL to dial for a tunnel. Against a
+// DNS-named relay it prefixes the tunnel id as a subdomain
+// (wss://<tunnelid>.relay.octo.dev) so a multi-node deployment's L4 balancer
+// can consistent-hash the TLS SNI and land both ends of a tunnel on the same
+// node without decrypting anything. IP literals and dotless hosts (localhost,
+// the PoC's 127.0.0.1 test relays) can't carry a subdomain, so they dial
+// unchanged. The ?tunnel= query is always sent too, so a new client keeps
+// working against a single-node relay that only reads the query.
+func relayDialBase(relayURL, tunnelID string) string {
+	u, err := url.Parse(relayURL)
+	if err != nil || tunnelID == "" {
+		return relayURL
+	}
+	host := u.Hostname()
+	if host == "" || !strings.Contains(host, ".") || net.ParseIP(host) != nil {
+		return relayURL
+	}
+	if port := u.Port(); port != "" {
+		u.Host = net.JoinHostPort(tunnelID+"."+host, port)
+	} else {
+		u.Host = tunnelID + "." + host
+	}
+	return u.String()
+}
 
 // Config configures a host tunnel. Zero LoopbackURL/RelayURL/TunnelID is a
 // programming error; the rest have sensible defaults.
@@ -149,7 +176,7 @@ func (t *Tunnel) runOnce(ctx context.Context) error {
 	for _, tok := range t.cfg.PairTokens {
 		q.Add("pairtoken", tok)
 	}
-	relayURL := t.cfg.RelayURL + "/host?" + q.Encode()
+	relayURL := relayDialBase(t.cfg.RelayURL, t.cfg.TunnelID) + "/host?" + q.Encode()
 
 	ws, _, err := websocket.DefaultDialer.DialContext(ctx, relayURL, nil)
 	if err != nil {
