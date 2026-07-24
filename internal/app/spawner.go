@@ -380,13 +380,6 @@ func (lc *liveChild) syncSession() {
 	_ = lc.session.Save()
 }
 
-// filterChildTools drops Agent (a sub-agent cannot spawn another sub-agent —
-// that stays top-level-only) and, when allowed is non-empty, intersects with
-// that allowlist so the parent can hand the child a restricted toolbelt (e.g.
-// read-only research). When readOnly is set, the mutating tools (write_file,
-// edit_file) are dropped too — used by read-only presets so the child keeps
-// terminal/MCP/codegraph but can't change files. The two filters compose: a
-// readOnly preset still honours allowed.
 // ForkSnapshot captures the parent conversation for seeding a fork child,
 // trimmed of the in-flight assistant turn (see forkHistorySnapshot). It
 // implements tools.ForkSnapshotter: the sub_agent tool calls it synchronously
@@ -424,6 +417,13 @@ func messageHasToolUse(m agent.Message) bool {
 	return false
 }
 
+// filterChildTools drops Agent (a sub-agent cannot spawn another sub-agent —
+// that stays top-level-only) and, when allowed is non-empty, intersects with
+// that allowlist so the parent can hand the child a restricted toolbelt (e.g.
+// read-only research). When readOnly is set, the mutating tools (write_file,
+// edit_file) are dropped too — used by read-only presets so the child keeps
+// terminal/MCP/codegraph but can't change files. The two filters compose: a
+// readOnly preset still honours allowed.
 func filterChildTools(parent []agent.ToolDefinition, allowed, disallowed []string, readOnly bool) []agent.ToolDefinition {
 	var allowSet map[string]bool
 	if len(allowed) > 0 {
