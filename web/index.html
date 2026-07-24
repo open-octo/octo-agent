@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- viewport-fit=cover makes env(safe-area-inset-*) resolve to real values
+       inside the iOS mobile shell's full-screen WebView; without it the insets
+       are 0 and the feed header draws under the notch / Dynamic Island. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Octo Agent</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
