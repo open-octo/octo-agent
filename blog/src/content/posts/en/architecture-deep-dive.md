@@ -141,11 +141,11 @@ The `terminal` tool runs everything you hand it on the system shell, so its sche
 
 Together these turn "a shell can do anything" from a blunderbuss into a bounded surface the model can reason about. Without burning tokens polling dead output.
 
-### sub_agent: Can Fork, Can't Recurse
+### sub_agent: Fresh Context Only, Can't Recurse
 
 The `sub_agent` tool looks like delegate-and-wait, but the design tension lives in what it *refuses* to do. The most visible rule sits in `AgentTool.Execute` (`internal/tools/agent.go`): if the caller is already a sub-agent, fail outright. "a sub-agent cannot spawn another sub-agent." No recursion, period. Combined with the `tools` allowlist deliberately omitting `sub_agent` itself, that's a hard ceiling. Not the workflow's Turing-complete arbitrary spawn. The design intent is "one layer of delegation only"; no agent trees.
 
-**Fork vs. Fresh** (`subagent_type`): omitting `subagent_type` seeds the child with the **parent's full conversation** (system prompt + messages so far), a true fork that shares context and follows the same conclusion-shaped reply contract. Setting a type (`explore`, `plan`, `general`, `code-review`) starts a zero-context child with a specialized persona, read-only / lean-context defaults, and its own `model` frontmatter. One tool covers both; presets fill in whatever the caller left unset.
+**Always fresh** (`subagent_type`, required): every child starts with **zero conversation context** and the persona its type names (`explore`, `plan`, `general`, `code-review`, or a user-defined agent from `~/.octo/agents`), with read-only / lean-context defaults and its own `model` frontmatter. The prompt must be self-contained, because a sub-agent can never see the parent's conversation. There used to be a fork mode (omit the type, inherit the parent's full history); it was removed because branching a conversation is a session-level primitive — the web UI's session branch cuts a new session you can actually talk to — while a forked sub-agent trapped that context behind a wall the user can't reach. Presets fill in whatever the caller left unset.
 
 **Sync vs. Async**: `run_in_background: true` calls `SubAgentManager.Start`, returning an `agent_N` ID immediately and pushing a notification on completion; `false` (default) calls `RunSync`, blocking the turn until the result is back. A semaphore (`syncSem`) bounds concurrent synchronous sub-agents so a fan-out wave can't starve the parent. Transport-aware too: synchronous channels (server / IM) have no follow-up-turn path, so `mgr.Synchronous()` silently forces the blocking path and tells the model. Instead of failing quietly.
 

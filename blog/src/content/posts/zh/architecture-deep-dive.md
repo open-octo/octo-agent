@@ -141,11 +141,11 @@ MCP 工具的 JSON schema 可能非常庞大——配置几十个 MCP 服务器�
 
 这些加在一起，把"shell 什么都干得出来"从一把火枪变成了一个模型能推理的有界表面，不会为轮询死去输出而烧 token。
 
-### sub_agent：能 fork，不能递归
+### sub_agent：只有 fresh，不能递归
 
 `sub_agent` 工具表面看就是派活 + 等结果，设计张力藏在它**不许**做的事里。最醒目的规则在 `AgentTool.Execute`（`internal/tools/agent.go`）：如果调用方已经是 sub-agent，直接失败——"a sub-agent cannot spawn another sub-agent"。绝对禁止递归。配合 `tools` allowlist 里故意不列入 `sub_agent` 自身，这是一道硬的天花板，不是 workflow 那种图灵完备的任意派生——设计意图就是"只有一层委派"，不搞 agent 树。
 
-**fork vs. fresh**（`subagent_type`）：省略 `subagent_type` 时，用**父的完整对话**（system prompt + 截至目前的消息）作为子 agent 的种子——真正的 fork，共享上下文、走同样的 conclusion-shaped 回复契约。设定 subagent_type（`explore`、`plan`、`general`、`code-review`）则从零上下文起一个带专用 persona 的子 agent，走 read-only / lean-context 默认值、带自己的 `model` frontmatter。同一把 tool 覆盖两种；preset 填充调用方没覆盖的字段。
+**一律 fresh**（`subagent_type`，必填）：每个子 agent 都从**零对话上下文**启动，带上类型指定的 persona（`explore`、`plan`、`general`、`code-review`，或 `~/.octo/agents` 里的自定义 agent），走 read-only / lean-context 默认值、带自己的 `model` frontmatter。prompt 必须自包含，因为子 agent 永远看不到父对话。这里曾经有过一个 fork 模式（省略类型就继承父的完整历史），后来删掉了：分叉对话是会话级原语——web 端的会话 branch 切出来的新会话你可以直接对话——而 fork 出来的子 agent 把那份上下文困在了用户够不着的墙后面。preset 填充调用方没覆盖的字段。
 
 **同步 vs. 异步**：`run_in_background: true` 调 `SubAgentManager.Start`，立刻返回 `agent_N` ID 并在完成后推通知；`false`（默认）调 `RunSync`，阻塞这个 turn 等结果。信号量（`syncSem`）控制同步 sub-agent 的上限，避免一波 fan-out 把父 agent 饿死。按 transport 自适应：同步通道（server / IM）没有 follow-up-turn 路径，`mgr.Synchronous()` 静默强制走阻塞路径并告知模型——而不是悄悄失败。
 
