@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -152,6 +153,8 @@ func (r DefaultRegistry) ExecuteStream(ctx context.Context, name string, input m
 							r.tracker.RecordRead(abs)
 						}
 					}
+				case "grep":
+					r.recordGrepReads(ctx, input, out.Text)
 				case "terminal":
 					if cmd, ok := input["command"].(string); ok {
 						r.recordTerminalReads(cmd)
@@ -219,6 +222,57 @@ func (r DefaultRegistry) recordTerminalReads(command string) {
 		}
 		if _, err := os.Stat(abs); err == nil {
 			r.tracker.RecordRead(abs)
+		}
+	}
+}
+
+// grepPathRe extracts the leading path from an rg output line: "path:12:text"
+// (content matches), "path-12-text" (context lines), "path-12-" etc. The
+// non-greedy path group settles on the first separator+digits boundary;
+// Windows drive prefixes survive because "C" alone is never followed by ":"
+// plus digits (same trick as grepUIMatchRe in grep.go).
+var grepPathRe = regexp.MustCompile(`^(.+?)[-:]\d+[-:]`)
+
+// grepCountRe matches count-mode lines "path:3", which have no trailing
+// separator after the number and so escape grepPathRe.
+var grepCountRe = regexp.MustCompile(`^(.+):\d+$`)
+
+// recordGrepReads stamps the read tracker with every file a successful grep
+// call surfaced, so a grep-then-edit flow doesn't hit "File has not been read
+// yet" — the model HAS seen the lines it is about to edit. Recording also
+// pins the current mtime, so the "modified since read" guard still fires if
+// the file changes out-of-band afterwards.
+//
+// The parser mirrors recordTerminalReads' lightweight philosophy: it tries
+// each output line as a whole path (files_with_matches mode), as "path:N:…"
+// or "path-N-…" (content mode), and as "path:N" (count mode), and records
+// whatever resolves to an existing regular file. Lines that aren't paths —
+// "(no matches)", "--" group separators, the truncation marker — simply fail
+// to stat and are skipped.
+func (r DefaultRegistry) recordGrepReads(ctx context.Context, input map[string]any, output string) {
+	base := WorkingDir(ctx)
+	record := func(candidate string) {
+		abs, err := resolvePathIn(base, candidate)
+		if err != nil {
+			return
+		}
+		if info, err := os.Stat(abs); err == nil && !info.IsDir() {
+			r.tracker.RecordRead(abs)
+		}
+	}
+
+	// Single-file search: rg omits the path prefix from its output, so the
+	// only place the file appears is the input's own `path` argument.
+	if p, _ := input["path"].(string); p != "" {
+		record(p)
+	}
+
+	for _, line := range strings.Split(output, "\n") {
+		record(line) // files_with_matches mode: the whole line is a path
+		if m := grepPathRe.FindStringSubmatch(line); m != nil {
+			record(m[1])
+		} else if m := grepCountRe.FindStringSubmatch(line); m != nil {
+			record(m[1])
 		}
 	}
 }
