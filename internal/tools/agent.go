@@ -14,7 +14,8 @@ import (
 //
 // Parameters:
 //   - description: short label for UI/logging
-//   - prompt:      the task (self-contained — the child can't see this conversation)
+//   - prompt:      the task (self-contained for a fresh agent; a fork sees the
+//     conversation, so just the task to do now)
 //   - subagent_type: optional agent type (explore, plan, general, code-review).
 //     Omit to fork yourself — the child inherits your full conversation context.
 //   - run_in_background: when true the agent runs async and you are notified
@@ -58,7 +59,7 @@ func (AgentTool) Definition() agent.ToolDefinition {
 				},
 				"prompt": map[string]any{
 					"type":        "string",
-					"description": "The task for the sub-agent. Self-contained: include all context the sub-agent needs (file paths, constraints, deliverable) since it can't see this conversation. State the expected output shape (a summary, a list, a YES/NO).",
+					"description": "The task for the sub-agent. For a fresh agent (subagent_type set) make it self-contained: include all context the sub-agent needs (file paths, constraints, deliverable) since it can't see this conversation. A fork already sees this conversation, so state just the task to do now. Either way, state the expected output shape (a summary, a list, a YES/NO).",
 				},
 				"subagent_type": map[string]any{
 					"type":        "string",
@@ -125,6 +126,17 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 		Model:       callModel,
 		// No subagent_type → fork: seed the child with this conversation so far.
 		ForkConversation: subagentType == "",
+	}
+	// Capture the fork seed here, on the tool-execution path, rather than
+	// inside Spawn: a background spawn runs on its own goroutine and would
+	// otherwise snapshot the parent history after the turn has moved on —
+	// picking up the "Started sub-agent…" tool results and the parent's own
+	// follow-up messages, which prime the child to keep playing the parent's
+	// role instead of doing its task.
+	if req.ForkConversation {
+		if fs, ok := mgr.Spawner().(ForkSnapshotter); ok {
+			req.ForkHistory = fs.ForkSnapshot()
+		}
 	}
 	if preset != nil {
 		req.SystemSuffix = preset.persona
