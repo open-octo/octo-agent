@@ -231,14 +231,17 @@ func TestDiscoverAgents_ProjectOverridesUser(t *testing.T) {
 }
 
 func TestBuiltInPresets_LeanFlag(t *testing.T) {
-	lean := map[string]bool{"explore": true, "plan": true, "general": false, "code-review": false}
-	for name, want := range lean {
+	// The research presets trim context via the lean system prompt; no preset
+	// downgrades the model — a sub-agent's findings gate the parent's next
+	// step, so model quality is never traded for cost.
+	want := map[string]bool{"explore": true, "plan": true, "general": false, "code-review": false}
+	for name, w := range want {
 		p, ok := lookupAgentPreset(name)
 		if !ok {
 			t.Fatalf("built-in %q not found", name)
 		}
-		if p.lean != want {
-			t.Errorf("%q lean = %v, want %v", name, p.lean, want)
+		if p.leanSystem != w {
+			t.Errorf("%q leanSystem = %v, want %v", name, p.leanSystem, w)
 		}
 	}
 }

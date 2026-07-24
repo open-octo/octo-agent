@@ -76,11 +76,12 @@ type SpawnRequest struct {
 	// from the child's toolbelt on top of the always-dropped Agent tool.
 	ReadOnly bool
 
-	// LeanContext, when true, runs the child on the parent's lite model and
-	// seeds it with the parent's lean system prompt (skills manifest + memory
-	// dropped). Set for cheap read-only presets (explore/plan). Falls back to
-	// the parent's model/system when no lite model / lean system is configured.
-	LeanContext bool
+	// LeanSystem, when true, seeds the child with the parent's lean system
+	// prompt (skills manifest + memory dropped) to keep its context small.
+	// Falls back to the parent's full system when none is configured. It only
+	// trims context — the child always runs on the parent's model (or an
+	// explicit Model override); model quality is never traded for cost.
+	LeanSystem bool
 
 	// Schema, when non-empty, is a JSON Schema (as a JSON string) the child's
 	// reply must satisfy. The spawner instructs the child to emit only matching
