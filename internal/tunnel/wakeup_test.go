@@ -130,6 +130,22 @@ func expectWakeup(t *testing.T, r *wakeRelay, wantDevice, wantToken, wantPlatfor
 	}
 }
 
+// waitRelayReady blocks until the tunnel has assigned its relay connection,
+// so a wakeup write can actually leave (white-box: same package).
+func waitRelayReady(t *testing.T, tun *Tunnel) {
+	t.Helper()
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
+		tun.relayMu.Lock()
+		ready := tun.relay != nil
+		tun.relayMu.Unlock()
+		if ready {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("tunnel never assigned its relay connection")
+}
+
 func expectNoFrame(t *testing.T, r *wakeRelay, within time.Duration) {
 	t.Helper()
 	select {
@@ -159,6 +175,11 @@ func TestWakeupFlow(t *testing.T) {
 	go func() { _ = tun.Serve(ctx) }()
 	loop.waitWatcher(t)
 	relay.waitConnected(t)
+	// waitConnected fires when the SERVER upgrades /host, but the tunnel
+	// goroutine assigns t.relay a beat later. If the first broadcast raced
+	// ahead of that, wakeDevices' writeRelay would fail and silently drop the
+	// (un-retried) wakeup. Poll the client side until it's ready to send.
+	waitRelayReady(t, tun)
 
 	tun.registerPushToken([]byte("peer-static-1"), "dev-1", "tokenA", "apns")
 
