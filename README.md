@@ -117,6 +117,14 @@ Three beliefs drive the project:
   hard-wired to ask permission first (browser modal on web, explicit reply on
   IM); and even an approved restart drains the current turn so the reply
   reaches you before the supervisor respawns the server and clients reconnect.
+- **A probabilistic model will eventually go insane on you.** One day the agent
+  decides "the environment is broken", "everything I wrote is wrong", "this
+  file is a virus" — and really deletes a day of your work. On octo every
+  delete is checked: catastrophic commands (`rm -rf /`, `rm -rf ~`) are
+  hard-coded denies that even your own permission rules cannot re-allow;
+  ordinary deletes are copied to a recycle bin before they run, and file
+  overwrites are backed up the same way. Within the default 14-day / 10 GiB
+  window, nothing the agent deletes is ever truly gone.
 - **Frontier features, without the gates.** In June 2026 Claude Code shipped
   dynamic workflows and Codex shipped record & replay (macOS only). octo has
   both, on its own terms: a workflow fans out at most 8 concurrent sub-agents
