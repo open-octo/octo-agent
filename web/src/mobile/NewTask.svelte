@@ -6,6 +6,7 @@
   import { get } from 'svelte/store'
   import { sessions, activeSessionId, activeSession, globalPermissionMode, showToast } from '../lib/stores'
   import * as api from '../lib/api'
+  import { t, tr } from '../lib/i18n'
 
   let { onCancel, onCreated }: {
     onCancel: () => void
@@ -43,9 +44,9 @@
   const basePermMode = ['interactive', 'auto', 'strict'].includes(g) ? g : 'interactive'
   let permMode = $state(basePermMode)
   const permModes = [
-    { m: 'interactive', label: '询问' },
-    { m: 'auto', label: '自动' },
-    { m: 'strict', label: '严格' },
+    { m: 'interactive', key: 'm.perm_ask' },
+    { m: 'auto', key: 'm.perm_auto' },
+    { m: 'strict', key: 'm.perm_strict' },
   ]
 
   async function create() {
@@ -62,74 +63,74 @@
         await api.updateSessionModel(sess.id, modelId)
           .then(res => sessions.update(list =>
             list.map(s => (s.id === sess.id ? { ...s, model: res.model, model_id: res.model_id } : s))))
-          .catch((e: any) => showToast(e?.message ?? '切换模型失败', 'error'))
+          .catch((e: any) => showToast(e?.message ?? tr('m.model_fail'), 'error'))
       }
       if (permMode !== basePermMode) {
         await api.updateSessionPermissionMode(sess.id, permMode).catch((e: any) =>
-          showToast(e?.message ?? '设置权限模式失败', 'error'))
+          showToast(e?.message ?? tr('m.perm_fail'), 'error'))
       }
       if (dir.trim()) {
         await api.updateSessionWorkingDir(sess.id, dir.trim()).catch((e: any) =>
-          showToast(e?.message ?? '设置工作目录失败', 'error'))
+          showToast(e?.message ?? tr('m.dir_fail'), 'error'))
       }
       onCreated(sess.id, prompt.trim())
     } catch (e: any) {
-      showToast(e?.message ?? '创建会话失败', 'error')
+      showToast(e?.message ?? tr('m.create_fail'), 'error')
       creating = false
     }
   }
 </script>
 
 <header class="head">
-  <button class="back" aria-label="取消" disabled={creating} onclick={onCancel}>
+  <button class="back" aria-label={$t('m.cancel')} disabled={creating} onclick={onCancel}>
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg>
   </button>
-  <h1>新建任务</h1>
+  <h1>{$t('m.new_task')}</h1>
 </header>
 
 <div class="scroll">
-  <p class="lbl">任务描述</p>
+  <p class="lbl">{$t('m.task_desc')}</p>
   <div class="card">
     <textarea
       class="prompt"
       rows="5"
-      placeholder="让 Octo 做什么?留空则只创建空会话"
-      aria-label="任务描述"
+      placeholder={$t('m.task_ph')}
+      aria-label={$t('m.task_desc')}
       bind:value={prompt}
     ></textarea>
   </div>
 
-  <p class="lbl">模型</p>
+  <p class="lbl">{$t('m.model')}</p>
   <div class="card pad">
-    <select class="select" bind:value={modelId} aria-label="模型">
-      <option value="">默认</option>
+    <select class="select" bind:value={modelId} aria-label={$t('m.model')}>
+      <option value="">{$t('m.default')}</option>
       {#each models as m (m.id)}
         <option value={m.id}>{m.label}</option>
       {/each}
     </select>
   </div>
 
-  <p class="lbl">权限模式</p>
+  <p class="lbl">{$t('m.perm_mode')}</p>
   <div class="card pad">
     <div class="seg">
       {#each permModes as p (p.m)}
-        <button class="segi" class:on={permMode === p.m} aria-pressed={permMode === p.m} onclick={() => (permMode = p.m)}>{p.label}</button>
+        <button class="segi" class:on={permMode === p.m} aria-pressed={permMode === p.m} onclick={() => (permMode = p.m)}>{$t(p.key)}</button>
       {/each}
     </div>
     <p class="note">
-      {permMode === 'auto' ? '自动批准工具执行,适合无人值守任务'
-        : permMode === 'strict' ? '自动拒绝需要授权的操作'
-        : '危险操作会挂起等你在手机上审批'}
+      {permMode === 'auto' ? $t('m.perm_note_auto')
+        : permMode === 'strict' ? $t('m.perm_note_strict')
+        : $t('m.perm_note_ask')}
     </p>
   </div>
 
-  <p class="lbl">工作目录</p>
+  <p class="lbl">{$t('m.workdir')}</p>
   <div class="card pad">
-    <input class="input" type="text" placeholder="服务器默认" bind:value={dir} aria-label="工作目录" />
+    <input class="input" type="text" placeholder={$t('m.server_default')} bind:value={dir} aria-label={$t('m.workdir')} />
   </div>
 
   <button class="go" disabled={creating} onclick={create}>
-    {creating ? '创建中…' : prompt.trim() ? '创建并开始' : '创建空会话'}
+    {creating ? $t('m.creating') : prompt.trim() ? $t('m.create_start') : $t('m.create_blank')}
   </button>
 </div>
 

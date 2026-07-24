@@ -14,6 +14,7 @@
   import NewTask from './NewTask.svelte'
   import type { FeedKind } from './feedGroups'
   import { setActiveSession } from '../lib/stores'
+  import { t } from '../lib/i18n'
 
   type Tab = 'chat' | 'tasks' | 'config' | 'settings'
   let tab = $state<Tab>('chat')
@@ -74,19 +75,19 @@
   <nav class="m-tabbar">
     <button class="m-tab" class:on={tab === 'chat'} onclick={() => { tab = 'chat'; closeDetail() }}>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></svg>
-      <span>会话</span>
+      <span>{$t('m.tab_sessions')}</span>
     </button>
     <button class="m-tab" class:on={tab === 'tasks'} onclick={() => (tab = 'tasks')}>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg>
-      <span>任务</span>
+      <span>{$t('m.tab_tasks')}</span>
     </button>
     <button class="m-tab" class:on={tab === 'config'} onclick={() => (tab = 'config')}>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h6M14 18h6"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="12" cy="18" r="2"/></svg>
-      <span>配置</span>
+      <span>{$t('m.tab_config')}</span>
     </button>
     <button class="m-tab" class:on={tab === 'settings'} onclick={() => (tab = 'settings')}>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 7"/></svg>
-      <span>设置</span>
+      <span>{$t('m.tab_settings')}</span>
     </button>
   </nav>
 </div>

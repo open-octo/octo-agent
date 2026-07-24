@@ -2,6 +2,7 @@
   import { feedGroups, type FeedKind } from './feedGroups'
   import SessionCard from './SessionCard.svelte'
   import DeviceBanner from './DeviceBanner.svelte'
+  import { t } from '../lib/i18n'
 
   let { onOpen, onNew }: { onOpen: (id: string, kind: FeedKind) => void; onNew: () => void } = $props()
 
@@ -10,8 +11,8 @@
 </script>
 
 <header class="head">
-  <h1>会话</h1>
-  <button class="search" aria-label="搜索">
+  <h1>{$t('m.tab_sessions')}</h1>
+  <button class="search" aria-label={$t('m.search')}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--m-text-2)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
   </button>
 </header>
@@ -20,32 +21,32 @@
   <DeviceBanner />
 
   {#if empty}
-    <div class="empty">还没有会话 · 点右下角 + 新建</div>
+    <div class="empty">{$t('m.feed_empty')}</div>
   {/if}
 
   {#if $groups.todo.length}
-    <p class="lbl">待办</p>
+    <p class="lbl">{$t('m.sec_todo')}</p>
     {#each $groups.todo as item (item.session.id)}
       <SessionCard {item} {onOpen} />
     {/each}
   {/if}
 
   {#if $groups.active.length}
-    <p class="lbl">进行中</p>
+    <p class="lbl">{$t('m.sec_active')}</p>
     {#each $groups.active as item (item.session.id)}
       <SessionCard {item} {onOpen} />
     {/each}
   {/if}
 
   {#if $groups.recent.length}
-    <p class="lbl">最近完成</p>
+    <p class="lbl">{$t('m.sec_recent')}</p>
     {#each $groups.recent as item (item.session.id)}
       <SessionCard {item} {onOpen} />
     {/each}
   {/if}
 </div>
 
-<button class="fab" onclick={onNew} aria-label="新建任务">
+<button class="fab" onclick={onNew} aria-label={$t('m.new_task')}>
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
 </button>
 

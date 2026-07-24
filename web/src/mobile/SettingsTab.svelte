@@ -6,12 +6,13 @@
   import { notificationsEnabled, setNotificationsEnabled } from '../lib/notifications'
   import { getMode, setMode, type ThemeMode } from '../lib/theme'
   import { wsState } from '../lib/ws'
+  import { t } from '../lib/i18n'
 
   let mode = $state<ThemeMode>(getMode())
-  const themes: { m: ThemeMode; label: string }[] = [
-    { m: 'light', label: '浅色' },
-    { m: 'dark', label: '深色' },
-    { m: 'system', label: '跟随系统' },
+  const themes: { m: ThemeMode; key: string }[] = [
+    { m: 'light', key: 'm.theme_light' },
+    { m: 'dark', key: 'm.theme_dark' },
+    { m: 'system', key: 'm.theme_system' },
   ]
   function pickTheme(m: ThemeMode) {
     mode = m
@@ -27,42 +28,42 @@
   })
 </script>
 
-<header class="head"><h1>设置</h1></header>
+<header class="head"><h1>{$t('m.tab_settings')}</h1></header>
 
 <div class="scroll">
   <div class="card device">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--m-accent)" stroke-width="2"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/></svg>
-    <span class="dname">已连接远程主机</span>
+    <span class="dname">{$t('m.dev_connected')}</span>
     <span class="dot" class:live={$wsState === 'connected'}></span>
   </div>
 
-  <p class="lbl">偏好</p>
+  <p class="lbl">{$t('m.prefs')}</p>
   <div class="card group">
     <div class="row">
-      <span class="rlabel">通知</span>
+      <span class="rlabel">{$t('m.notifications')}</span>
       <button
         class="switch"
         class:on={$notificationsEnabled}
         role="switch"
         aria-checked={$notificationsEnabled}
-        aria-label="通知"
+        aria-label={$t('m.notifications')}
         onclick={() => setNotificationsEnabled(!$notificationsEnabled)}
       ><span class="knob"></span></button>
     </div>
     <div class="row col">
-      <span class="rlabel">外观</span>
+      <span class="rlabel">{$t('m.appearance')}</span>
       <div class="seg">
-        {#each themes as t (t.m)}
-          <button class="segi" class:on={mode === t.m} onclick={() => pickTheme(t.m)}>{t.label}</button>
+        {#each themes as th (th.m)}
+          <button class="segi" class:on={mode === th.m} aria-pressed={mode === th.m} onclick={() => pickTheme(th.m)}>{$t(th.key)}</button>
         {/each}
       </div>
     </div>
   </div>
 
-  <p class="lbl">关于</p>
+  <p class="lbl">{$t('m.about')}</p>
   <div class="card group">
     <div class="row">
-      <span class="rlabel">关于 Octo</span>
+      <span class="rlabel">{$t('m.about_octo')}</span>
       <span class="rval mono">{version ? `v${version}` : ''}</span>
     </div>
   </div>

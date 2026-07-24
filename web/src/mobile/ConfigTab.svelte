@@ -6,6 +6,7 @@
   import { onMount } from 'svelte'
   import { showToast } from '../lib/stores'
   import * as api from '../lib/api'
+  import { t, tr } from '../lib/i18n'
   import type { Skill, Workflow, Memory } from '../lib/types'
 
   // The trash endpoint's real wire shape ({ files: [...] }); api.listTrash's
@@ -31,9 +32,9 @@
     status: 'connected' | 'error' | 'disabled' | 'invalid' | 'disconnected'
     tools: number
   }
-  const mcpStatusLabel: Record<McpInfo['status'], string> = {
-    connected: '已连接', error: '连接失败', disabled: '已停用',
-    invalid: '配置无效', disconnected: '未连接',
+  const mcpStatusKey: Record<McpInfo['status'], string> = {
+    connected: 'm.mcp_connected', error: 'm.mcp_error', disabled: 'm.mcp_disabled',
+    invalid: 'm.mcp_invalid', disconnected: 'm.mcp_disconnected',
   }
 
   type Section = 'root' | 'skills' | 'mcp' | 'workflows' | 'memory' | 'trash'
@@ -50,7 +51,7 @@
   async function load() {
     loading = true
     loadError = false
-    const [sk, mc, wf, me, tr] = await Promise.all([
+    const [sk, mc, wf, me, trs] = await Promise.all([
       api.listSkills().catch(() => null),
       api.listMcpServers().catch(() => null),
       api.listWorkflowsView().catch(() => null),
@@ -61,10 +62,10 @@
     if (mc) mcp = ((mc.servers ?? []) as unknown[]) as McpInfo[]
     if (wf) workflows = wf
     if (me) memories = me
-    if (tr) trash = ((tr as any).files ?? tr ?? []) as TrashEntry[]
-    const failed = [sk, mc, wf, me, tr].filter(r => !r).length
+    if (trs) trash = ((trs as any).files ?? trs ?? []) as TrashEntry[]
+    const failed = [sk, mc, wf, me, trs].filter(r => !r).length
     loadError = failed === 5
-    if (failed > 0 && failed < 5) showToast('部分数据加载失败', 'error')
+    if (failed > 0 && failed < 5) showToast(tr('m.partial_load_fail'), 'error')
     loading = false
   }
   onMount(load)
@@ -78,7 +79,7 @@
       await api.toggleSkill(s.name, next)
       skills = skills.map(r => (r.name === s.name ? { ...r, enabled: next } : r))
     } catch (e: any) {
-      showToast(e?.message ?? '更新技能失败', 'error')
+      showToast(e?.message ?? tr('m.skill_update_fail'), 'error')
     } finally {
       togglingName = null
     }
@@ -94,7 +95,7 @@
       if (d) mcp = ((d.servers ?? []) as unknown[]) as McpInfo[]
       else mcp = mcp.map(r => (r.name === m.name ? { ...r, disabled: !m.disabled } : r))
     } catch (e: any) {
-      showToast(e?.message ?? '更新 MCP 失败', 'error')
+      showToast(e?.message ?? tr('m.mcp_update_fail'), 'error')
     } finally {
       togglingName = null
     }
@@ -118,33 +119,35 @@
     return `${(n / 1024 / 1024).toFixed(1)} MB`
   }
 
+  const nEnabled = (a: number, b: number) =>
+    $t('m.n_enabled').replace('{a}', String(a)).replace('{b}', String(b))
   const groups = $derived([
-    { key: 'skills' as Section, label: '技能', count: `${skills.filter(s => s.enabled).length}/${skills.length} 启用` },
-    { key: 'mcp' as Section, label: 'MCP 服务器', count: `${mcp.filter(m => !m.disabled).length}/${mcp.length} 启用` },
-    { key: 'workflows' as Section, label: '工作流', count: `${workflows.length} 个` },
-    { key: 'memory' as Section, label: '记忆', count: `${memories.length} 条` },
-    { key: 'trash' as Section, label: '回收站', count: `${trash.length} 项` },
+    { key: 'skills' as Section, label: $t('m.skills'), count: nEnabled(skills.filter(s => s.enabled).length, skills.length) },
+    { key: 'mcp' as Section, label: $t('m.mcp'), count: nEnabled(mcp.filter(m => !m.disabled).length, mcp.length) },
+    { key: 'workflows' as Section, label: $t('m.workflows'), count: $t('m.count_wf').replace('{n}', String(workflows.length)) },
+    { key: 'memory' as Section, label: $t('m.memory'), count: $t('m.count_mem').replace('{n}', String(memories.length)) },
+    { key: 'trash' as Section, label: $t('m.trash'), count: $t('m.count_trash').replace('{n}', String(trash.length)) },
   ])
-  const titles: Record<Section, string> = {
-    root: '配置', skills: '技能', mcp: 'MCP 服务器', workflows: '工作流', memory: '记忆', trash: '回收站',
+  const titleKeys: Record<Section, string> = {
+    root: 'm.tab_config', skills: 'm.skills', mcp: 'm.mcp', workflows: 'm.workflows', memory: 'm.memory', trash: 'm.trash',
   }
 </script>
 
 <header class="head">
   {#if section !== 'root'}
-    <button class="back" aria-label="返回" onclick={() => (section = 'root')}>
+    <button class="back" aria-label={$t('m.back')} onclick={() => (section = 'root')}>
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg>
     </button>
   {/if}
-  <h1>{titles[section]}</h1>
+  <h1>{$t(titleKeys[section])}</h1>
 </header>
 
 <div class="scroll">
   {#if loading}
-    <div class="empty">加载中…</div>
+    <div class="empty">{$t('m.loading')}</div>
   {:else if section === 'root'}
     {#if loadError}
-      <button class="empty retry" onclick={load}>加载失败 · 点击重试</button>
+      <button class="empty retry" onclick={load}>{$t('m.load_retry')}</button>
     {:else}
       <div class="card group">
         {#each groups as g (g.key)}
@@ -155,10 +158,10 @@
           </button>
         {/each}
       </div>
-      <p class="hint">安装、编辑与删除请在桌面端操作</p>
+      <p class="hint">{$t('m.desktop_hint')}</p>
     {/if}
   {:else if section === 'skills'}
-    {#if skills.length === 0}<div class="empty">没有技能</div>{:else}
+    {#if skills.length === 0}<div class="empty">{$t('m.no_skills')}</div>{:else}
       <div class="card group">
         {#each skills as s (s.name)}
           <div class="row">
@@ -174,7 +177,7 @@
       </div>
     {/if}
   {:else if section === 'mcp'}
-    {#if mcp.length === 0}<div class="empty">没有 MCP 服务器</div>{:else}
+    {#if mcp.length === 0}<div class="empty">{$t('m.no_mcp')}</div>{:else}
       <div class="card group">
         {#each mcp as m (m.name)}
           <div class="row">
@@ -183,7 +186,7 @@
                 <span class="dot" class:ok={m.status === 'connected'} class:bad={m.status === 'error' || m.status === 'invalid'}></span>
                 {m.name}
               </span>
-              <span class="sub">{m.transport || '—'} · {m.tools} 个工具 · {mcpStatusLabel[m.status] ?? m.status}</span>
+              <span class="sub">{m.transport || '—'} · {$t('m.n_tools').replace('{n}', String(m.tools))} · {mcpStatusKey[m.status] ? $t(mcpStatusKey[m.status]) : m.status}</span>
             </div>
             <button class="switch" class:on={!m.disabled} role="switch" aria-checked={!m.disabled}
               aria-label={m.name} disabled={togglingName !== null} onclick={() => toggleMcp(m)}
@@ -193,7 +196,7 @@
       </div>
     {/if}
   {:else if section === 'workflows'}
-    {#if workflows.length === 0}<div class="empty">没有工作流</div>{:else}
+    {#if workflows.length === 0}<div class="empty">{$t('m.no_wf')}</div>{:else}
       <div class="card group">
         {#each workflows as w (w.name)}
           <div class="row">
@@ -206,7 +209,7 @@
       </div>
     {/if}
   {:else if section === 'memory'}
-    {#if memories.length === 0}<div class="empty">还没有记忆</div>{:else}
+    {#if memories.length === 0}<div class="empty">{$t('m.no_mem')}</div>{:else}
       <div class="card group">
         {#each memories as m (m.source + m.name)}
           <div class="row">
@@ -219,13 +222,13 @@
       </div>
     {/if}
   {:else if section === 'trash'}
-    {#if trash.length === 0}<div class="empty">回收站是空的</div>{:else}
+    {#if trash.length === 0}<div class="empty">{$t('m.trash_empty')}</div>{:else}
       <div class="card group">
         {#each trash as f (f.id)}
           <div class="row">
             <div class="names">
               <span class="rlabel">{f.label || f.original.split('/').pop()}</span>
-              <span class="sub">{fmtBytes(f.size)} · {fmtDate(f.deleted_at)}{f.orphan ? ' · 原目录已不存在' : ''}</span>
+              <span class="sub">{fmtBytes(f.size)} · {fmtDate(f.deleted_at)}{f.orphan ? ` · ${$t('m.orphan_dir')}` : ''}</span>
             </div>
           </div>
         {/each}

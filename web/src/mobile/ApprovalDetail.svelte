@@ -9,6 +9,7 @@
   import { activeSessionId } from '../lib/stores'
   import { ws } from '../lib/ws'
   import { getSessionConfirmation, type SessionConfirmation } from '../lib/api'
+  import { t } from '../lib/i18n'
 
   let { onBack }: { onBack: () => void } = $props()
 
@@ -41,50 +42,50 @@
 </script>
 
 <header class="dhead">
-  <button class="back" onclick={onBack} aria-label="返回">
+  <button class="back" onclick={onBack} aria-label={$t('m.back')}>
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--m-text)" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
   </button>
-  <span class="dtitle">审批</span>
+  <span class="dtitle">{$t('m.approval')}</span>
 </header>
 
 <div class="scroll">
   {#if c}
     <div class="warn">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--m-warning)" stroke-width="2"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6A2 2 0 0 0 22 18L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
-      <span>agent 请求执行高风险操作,需要你确认。</span>
+      <span>{$t('m.approval_warn')}</span>
     </div>
 
     {#if c.message}<p class="desc">{c.message}</p>{/if}
 
     {#if c.command}
-      <div class="label">命令</div>
+      <div class="label">{$t('m.cmd')}</div>
       <pre class="term"><span class="p">$</span> {c.command}</pre>
     {:else if c.diff}
-      <div class="label">改动</div>
+      <div class="label">{$t('m.diff')}</div>
       <div class="diff">
         {#each c.diff.split('\n') as line}
           <div class="dl {diffClass(line)}">{line}</div>
         {/each}
       </div>
     {:else if c.input}
-      <div class="label">输入</div>
+      <div class="label">{$t('m.input')}</div>
       <pre class="term">{c.input}</pre>
     {/if}
 
     <div class="actions">
       {#if c.kind === 'ok'}
-        <button class="btnP" onclick={() => answer('ok')}>好的</button>
+        <button class="btnP" onclick={() => answer('ok')}>{$t('m.ok')}</button>
       {:else}
-        <button class="btnP" onclick={() => answer('yes')}>批准执行</button>
-        <button class="btnD" onclick={() => answer('deny')}>拒绝</button>
-        <button class="btnG" onclick={() => answer('always')}>本次会话都允许</button>
+        <button class="btnP" onclick={() => answer('yes')}>{$t('m.approve')}</button>
+        <button class="btnD" onclick={() => answer('deny')}>{$t('m.deny')}</button>
+        <button class="btnG" onclick={() => answer('always')}>{$t('m.allow_session')}</button>
       {/if}
     </div>
   {:else if loading}
-    <div class="empty">加载中…</div>
+    <div class="empty">{$t('m.loading')}</div>
   {:else}
-    <div class="empty">没有待审批的请求(可能已在别处处理)。</div>
-    <button class="btnD full" onclick={onBack}>返回</button>
+    <div class="empty">{$t('m.approval_gone')}</div>
+    <button class="btnD full" onclick={onBack}>{$t('m.back')}</button>
   {/if}
 </div>
 
