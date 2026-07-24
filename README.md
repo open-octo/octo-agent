@@ -77,6 +77,35 @@ is the closest kin. octo covers the same ground — self-hosted, MIT, reaches yo
 the chat apps you already use — but as one static binary instead of a Node.js app
 with a dependency tree, and with a full coding-agent core built in.
 
+## A note from the author
+
+I'm a heavy Claude Code user myself, and I think it's the best coding agent there
+is. octo exists because a great agent experience shouldn't depend on things that
+have nothing to do with your skills: whether you can afford a $20–200/month
+subscription, whether your credit card and network can reach the vendor at all
+(for many users — in China especially — they can't), and whether your code is
+allowed to leave your machine.
+
+Three beliefs drive the project:
+
+- **Open models are good enough now.** DeepSeek, Kimi, and Qwen have closed most
+  of the day-to-day gap — what's usually missing is the harness around them: the
+  tool loop, permission gating, skills, memory, sub-agents. octo gives them the
+  same harness at one to two orders of magnitude lower cost, with both wire
+  protocols implemented natively rather than through a compatibility shim.
+- **Your data should only pass through your own machine.** No cloud, no accounts,
+  no telemetry in the codebase — the only outbound traffic is the model API you
+  configure and GitHub for update checks. For people working inside a corporate
+  network where code cannot leave, this is a precondition, not a nice-to-have.
+- **The agent should live where you already are.** IM bridges (WeChat iLink,
+  Feishu, DingTalk, WeCom, Discord, Telegram) are core features, not
+  afterthoughts — assign a task at your desk, follow up from your phone.
+
+And one honest word: if you have a Claude subscription and you're happy with it,
+keep using Claude Code — it earns its price. octo is for everyone the
+subscription doesn't reach. The SKILL.md format is shared, so you can even run
+both: Claude Code for the heavy lifting, octo on DeepSeek for everything else.
+
 ## Interfaces
 
 **Stable (1.0).** Eight interfaces are planned — one per arm of the octopus — and seven are live:
