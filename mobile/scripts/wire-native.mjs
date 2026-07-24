@@ -174,7 +174,10 @@ function wireAndroid() {
       label: 'Android: kotlinOptions jvmTarget',
       marker: 'kotlinOptions',
       anchor: /^android\s*\{/m,
-      insert: '    kotlinOptions { jvmTarget = "17" }',
+      // Must match javac's target, which defaults to the running JDK —
+      // Android Studio's bundled JBR is 21, and AGP hard-fails the build on
+      // a kotlinc/javac target mismatch.
+      insert: '    kotlinOptions { jvmTarget = "21" }',
     })
     injectOnce(appGradle, {
       label: 'Android: dependencies (kotlin-stdlib, noise-java, okhttp)',
@@ -194,15 +197,43 @@ function wireAndroid() {
     androidRoot, 'app', 'src', 'main', 'java', 'dev', 'octo', 'mobile', 'MainActivity.java',
   )
   if (existsSync(mainActivity)) {
-    injectOnce(mainActivity, {
-      label: 'Android: registerPlugin in MainActivity',
-      marker: 'registerPlugin(OctoTunnelPlugin.class)',
-      anchor: /super\.onCreate/,
-      insert: '        registerPlugin(OctoTunnelPlugin.class);',
-    })
-    // The anchor inserts AFTER super.onCreate; native/README wants it before, so
-    // if we injected, warn to move it up one line. (Kept simple + safe.)
-    warn('Android: ensure `registerPlugin(OctoTunnelPlugin.class);` sits BEFORE super.onCreate in MainActivity.')
+    const text = readFileSync(mainActivity, 'utf8')
+    if (text.includes('registerPlugin(OctoTunnelPlugin.class)')) {
+      // already wired
+    } else if (/extends BridgeActivity\s*\{\}/.test(text)) {
+      // Capacitor 7's template is a bodyless one-liner with no onCreate —
+      // expand it with the registration BEFORE super.onCreate, which is
+      // where the bridge expects plugins to exist.
+      const expanded = text
+        .replace(
+          /^import com\.getcapacitor\.BridgeActivity;/m,
+          'import android.os.Bundle;\n\nimport com.getcapacitor.BridgeActivity;',
+        )
+        .replace(
+          /extends BridgeActivity\s*\{\}/,
+          'extends BridgeActivity {\n' +
+            '    @Override\n' +
+            '    public void onCreate(Bundle savedInstanceState) {\n' +
+            '        // Must run before super.onCreate so the bridge sees the plugin\n' +
+            '        // when it boots the webview (see mobile/native/README.md).\n' +
+            '        registerPlugin(OctoTunnelPlugin.class);\n' +
+            '        super.onCreate(savedInstanceState);\n' +
+            '    }\n' +
+            '}',
+        )
+      writeFileSync(mainActivity, expanded)
+      did('Android: registerPlugin in MainActivity (expanded bodyless template)')
+    } else {
+      injectOnce(mainActivity, {
+        label: 'Android: registerPlugin in MainActivity',
+        marker: 'registerPlugin(OctoTunnelPlugin.class)',
+        anchor: /super\.onCreate/,
+        insert: '        registerPlugin(OctoTunnelPlugin.class);',
+      })
+      // The anchor inserts AFTER super.onCreate; native/README wants it
+      // before, so if we injected, warn to move it up one line.
+      warn('Android: ensure `registerPlugin(OctoTunnelPlugin.class);` sits BEFORE super.onCreate in MainActivity.')
+    }
   } else {
     warn(`Android: ${mainActivity} not found (package may differ); register the plugin by hand.`)
   }
