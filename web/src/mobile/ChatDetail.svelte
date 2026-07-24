@@ -9,6 +9,7 @@
   import { resetArtifacts } from '../lib/artifacts'
   import { ws } from '../lib/ws'
   import { wireMobileSession, loadMobileHistory, sendMobile } from './chatWiring'
+  import ArtifactViewer from './ArtifactViewer.svelte'
   import { t } from '../lib/i18n'
 
   let { onBack, onViewApproval, initialPrompt = '', onInitialSent }: {
@@ -37,11 +38,17 @@
   let draft = $state('')
   let scroller: HTMLElement | undefined
   let composing = $state(false)
+  // The artifact opened full-screen, tracked by path and derived from the
+  // store so a live re-write of the same file refreshes the open viewer
+  // (observeArtifact replaces the entry object on re-write).
+  let viewPath = $state<string | null>(null)
+  const viewArtifact = $derived(viewPath ? ($artifacts.find(a => a.path === viewPath) ?? null) : null)
 
   // Subscribe + wire while this session is open; tear down on switch/unmount.
   $effect(() => {
     const s = sid
     if (!s) return
+    viewPath = null
     clearMsgs(s)
     resetArtifacts(s)
     let cancelled = false
@@ -137,11 +144,11 @@
     <div class="artifacts">
       <div class="alabel">{$t('m.artifacts')}</div>
       {#each $artifacts as a (a.path)}
-        <div class="acard">
+        <button class="acard" onclick={() => (viewPath = a.path)}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--m-accent)" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
           <span class="aname">{a.name}</span>
           <span class="atype">{a.type}</span>
-        </div>
+        </button>
       {/each}
     </div>
   {/if}
@@ -169,6 +176,10 @@
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>
   </button>
 </div>
+
+{#if viewArtifact}
+  <ArtifactViewer artifact={viewArtifact} onClose={() => (viewPath = null)} />
+{/if}
 
 <style>
   .dhead {
@@ -354,6 +365,11 @@
     display: flex;
     align-items: center;
     gap: 10px;
+    width: 100%;
+    border: none;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
     background: var(--m-surface);
     border-radius: 12px;
     padding: 12px 14px;
