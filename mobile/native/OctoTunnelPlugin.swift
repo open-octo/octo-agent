@@ -224,14 +224,19 @@ public class OctoTunnelPlugin: CAPPlugin, CAPBridgedPlugin {
            host.contains("."), !Self.isIPLiteral(host) {
             comps.host = tid + "." + host
         }
-        comps.path = "/device"
+        // Preserve a path prefix (self-hosted relay behind a proxy path).
+        var prefix = comps.path
+        while prefix.hasSuffix("/") { prefix.removeLast() }
+        comps.path = prefix + "/device"
         comps.queryItems = [URLQueryItem(name: "token", value: token)]
         return comps.url
     }
 
     private static func isIPLiteral(_ host: String) -> Bool {
         if host.contains(":") { return true } // bracketless IPv6 from URLComponents
-        return !host.isEmpty && host.allSatisfy { $0.isNumber || $0 == "." }
+        // ASCII digits and dots only — the same cheap IP-ish test as the
+        // Kotlin plugin's ^[0-9.]+$ and the host's digitsAndDotsOnly.
+        return !host.isEmpty && host.allSatisfy { ($0.isASCII && $0.isNumber) || $0 == "." }
     }
 
     private func deviceIdentity() throws -> Identity {

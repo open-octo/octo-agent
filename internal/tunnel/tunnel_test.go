@@ -398,3 +398,20 @@ func TestRelayDialBase(t *testing.T) {
 		}
 	}
 }
+
+// TestRelayDialBase_RuleParity: shapes where the eligibility rule must match
+// the mobile natives exactly — trailing-dot IPs, dots-and-digits non-IPs, and
+// non-DNS-label tunnel ids all fall back to the unchanged (query-routed) URL.
+func TestRelayDialBase_RuleParity(t *testing.T) {
+	cases := []struct{ relay, tunnel, want string }{
+		{"ws://127.0.0.1.:8090", "t123", "ws://127.0.0.1.:8090"},    // trailing-dot IP
+		{"ws://1.2.3.4.5:8090", "t123", "ws://1.2.3.4.5:8090"},      // digits+dots, not an IP
+		{"wss://relay.octo.dev", "has.dot", "wss://relay.octo.dev"}, // id not a DNS label
+		{"wss://relay.octo.dev", "UPPER", "wss://relay.octo.dev"},   // id not lowercase
+	}
+	for _, c := range cases {
+		if got := relayDialBase(c.relay, c.tunnel); got != c.want {
+			t.Errorf("relayDialBase(%q, %q) = %q, want %q", c.relay, c.tunnel, got, c.want)
+		}
+	}
+}

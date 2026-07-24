@@ -270,7 +270,9 @@ class OctoTunnelPlugin : Plugin() {
         val ipLike = host.matches(Regex("^[0-9.]+$")) || host.contains(":")
         if (!host.contains(".") || ipLike) return plain
         val portPart = if (uri.port != -1) ":${uri.port}" else ""
-        return "${uri.scheme}://$tunnelId.$host$portPart/device?token=$token"
+        // Preserve a path prefix (self-hosted relay behind a proxy path).
+        val pathPart = (uri.rawPath ?: "").trimEnd('/')
+        return "${uri.scheme}://$tunnelId.$host$portPart$pathPart/device?token=$token"
     }
 
     @Synchronized

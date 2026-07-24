@@ -102,17 +102,30 @@ DNS: relay.octo.dev + *.relay.octo.dev ─► HAProxy (SNI passthrough + consist
 2. **Balancer**: `cmd/octo-relay/deploy/haproxy.cfg` — TCP mode, TLS
    passthrough (`req.ssl_sni` from the ClientHello, never decrypted),
    `balance hash req.ssl_sni` + `hash-type consistent` (HAProxy ≥ 2.2). List
-   every relay node as a `server` line; adding/removing a node reshuffles
-   ~1/N tunnels, and moved tunnels reconnect on their own.
+   every relay node as a `server` line.
 3. **DNS**: move `relay.octo.dev` **and** `*.relay.octo.dev` to the balancer.
 4. **Relay nodes**: nothing special — each node is the M1a setup with the
    wildcard cert. Nodes hold only in-memory state, so any assignment works
    as long as both ends of a tunnel agree (that's the SNI hash's job).
-5. **Compatibility**: the relay resolves the tunnel from `?tunnel=` first and
-   falls back to the Host's first DNS label, so pre-M1b clients (query-only)
-   keep working on a single node. They can't span multiple nodes — the LB
-   would hash `relay.octo.dev` for all of them onto one node, which is also
-   harmless.
+5. **Adding a node**: the consistent hash remaps ~1/N tunnels, but remapping
+   only affects NEW connections — an established host WebSocket stays pinned
+   to its old node while the (much more reconnect-happy) phone starts
+   hashing to the new one, where neither the tunnel nor its pairing token
+   exists. There is no keepalive to break the idle host connection, so the
+   pair would stay split until the balancer's 4h client timeout. After
+   adding a node, rolling-restart the EXISTING relay nodes
+   (`systemctl restart octo-relay`, one at a time) so every host redials
+   and lands per the new hash. Removing a node / node failure needs no such
+   step — the break itself makes both ends redial.
+6. **Compatibility**: multi-node requires BOTH ends of a tunnel to be ≥ M1b.
+   A mixed pair (old phone + new host, or vice versa) hashes to different
+   nodes — the token is registered on one node and redeemed on another,
+   which 403s deterministically (the phone then drops its stored pairing
+   and re-scanning doesn't help until the old end is upgraded). Only a pair
+   where BOTH ends are query-only degrades gracefully: the balancer hashes
+   `relay.octo.dev` for all of them onto one node, which merely concentrates
+   load. On a single node everything interoperates (the relay reads
+   `?tunnel=` first, then the Host's first DNS label).
 
 Verify: pair a phone, then `systemctl stop octo-relay` on the node serving it
 — both ends reconnect and meet on a surviving node within seconds.
