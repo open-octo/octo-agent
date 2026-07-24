@@ -6,13 +6,13 @@
 //
 // Design: every mutation is idempotent (running twice is a no-op) and safe. A
 // step that copies a file always succeeds; a step that injects into a generated
-// file (Gradle / Manifest / Info.plist) first checks whether it is already there,
-// and if it cannot find its anchor it does NOT blindly edit — it records a
-// warning with the exact snippet to add by hand and moves on. One step is left
-// to the human: the iOS plugin-instance registration (a CAPBridgeViewController
-// subclass + storyboard custom class) depends on the generated project layout and
-// the local toolchain (see the storyboard note in native/README.md), so we detect
-// and instruct rather than rewrite it.
+// file (Gradle / Manifest / Info.plist / Xcode project) first checks whether it
+// is already there, and if it cannot find its anchor it does NOT blindly edit —
+// it records a warning with the exact snippet to add by hand and moves on.
+// Both platforms are fully automated end to end, including the iOS
+// plugin-instance registration (a generated CAPBridgeViewController subclass +
+// a programmatic root VC): no manual step remains for a standard
+// Capacitor-generated project.
 //
 // Usage:
 //   node scripts/wire-native.mjs            # wire whichever of ios/ android/ exist
