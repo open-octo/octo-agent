@@ -80,7 +80,7 @@ archives:
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     files:
       - README.md
-      - README_CN.md
+      - README_EN.md
       - LICENSE.txt
       # Windows double-click launcher: opens PowerShell with octo on PATH and
       # starts a session. Harmless in the tar.gz archives; meant for the zip.
