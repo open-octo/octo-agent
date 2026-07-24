@@ -93,6 +93,14 @@ Three beliefs drive the project:
   tool loop, permission gating, skills, memory, sub-agents. octo gives them the
   same harness at one to two orders of magnitude lower cost, with both wire
   protocols implemented natively rather than through a compatibility shim.
+- **The harness shouldn't degrade off-Anthropic.** A popular route is plugging
+  third-party models into Claude Code through a router (cc-switch and kin), but
+  two things quietly break: prompt caching is tuned for Anthropic's own endpoint,
+  so hit rates — and your token bill — suffer; and server-side capabilities like
+  web search and tool search simply stop working. octo does both on its own side:
+  caching is tuned per provider (measured 95%+ hit rates on Kimi, DeepSeek, and
+  Qwen), and web search / tool search are built into the harness, working the
+  same on every model.
 - **Your data should only pass through your own machine.** No cloud, no accounts,
   no telemetry in the codebase — the only outbound traffic is the model API you
   configure and GitHub for update checks. For people working inside a corporate
