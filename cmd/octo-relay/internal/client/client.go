@@ -120,6 +120,10 @@ func (c *Client) Send(device string, data []byte) error {
 // Close tears down the WebSocket.
 func (c *Client) Close() error { return c.ws.Close() }
 
+// WriteRawFrame writes an arbitrary frame on the relay socket. Control-frame
+// tests (wakeup) use it; normal traffic goes through Send.
+func (c *Client) WriteRawFrame(f wire.Frame) error { return c.sendFrame(f) }
+
 func (c *Client) sendFrame(f wire.Frame) error {
 	c.writeM.Lock()
 	defer c.writeM.Unlock()

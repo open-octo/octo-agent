@@ -29,7 +29,29 @@ const (
 	// TypeDeviceJoined is sent by the relay to a host when a new device pairs
 	// into its tunnel; Device carries that device's id.
 	TypeDeviceJoined = "device_joined"
+	// TypeWakeup is sent by a host and CONSUMED by the relay (never forwarded):
+	// a request to fire a content-free push at an offline phone. Device names
+	// the target so the relay can skip the push when that phone is currently
+	// connected; Payload is a WakeupPayload.
+	TypeWakeup = "wakeup"
 )
+
+// WakeupPayload rides a TypeWakeup frame. Unlike every data/handshake payload
+// it is NOT end-to-end ciphertext — it is host→relay operational metadata,
+// deliberately limited to exactly what a push needs: the token and which push
+// service it belongs to. No session content ever goes here, and the relay
+// must never persist or log the token.
+type WakeupPayload struct {
+	PushToken string `json:"push_token"`
+	Platform  string `json:"platform"` // "apns" | "fcm"
+}
+
+// DecodeWakeup parses a TypeWakeup frame's payload.
+func DecodeWakeup(payload []byte) (WakeupPayload, error) {
+	var p WakeupPayload
+	err := json.Unmarshal(payload, &p)
+	return p, err
+}
 
 // Frame is one message on the wire between a client and the relay.
 //

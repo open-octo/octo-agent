@@ -121,6 +121,12 @@ type Tunnel struct {
 
 	mu      sync.Mutex
 	devices map[string]*device
+
+	// pushRegs holds per-phone push-token registrations, keyed by the phone's
+	// base64 Noise static key (stable across reconnects). Guarded by pushMu;
+	// see wakeup.go.
+	pushMu   sync.Mutex
+	pushRegs map[string]*pushReg
 }
 
 // device is one paired phone: its Noise session and, once the handshake
@@ -185,6 +191,8 @@ func loopbackBases(loopbackURL string) (httpBase, wsBase string, err error) {
 // cancelled — the same infinite-retry posture the editor plugins use against
 // serve. Each connection lifecycle is one runOnce.
 func (t *Tunnel) Serve(ctx context.Context) error {
+	// Watch the server's global activity broadcasts for push wakeups (M1c).
+	go t.watchActivity(ctx)
 	backoff := initialBackoff
 	for {
 		if err := ctx.Err(); err != nil {

@@ -2,6 +2,8 @@ package relay_test
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/open-octo/octo-agent/cmd/octo-relay/internal/client"
 	"github.com/open-octo/octo-agent/cmd/octo-relay/internal/relay"
+	"github.com/open-octo/octo-agent/cmd/octo-relay/internal/wire"
 )
 
 // wsURL turns an httptest http:// base into a ws:// base.
@@ -209,5 +212,84 @@ func TestTunnelIDFromRequest(t *testing.T) {
 		if got := relay.TunnelIDFromRequest(req); got != c.want {
 			t.Errorf("TunnelIDFromRequest(url=%q host=%q) = %q, want %q", c.url, c.host, got, c.want)
 		}
+	}
+}
+
+// fakePusher records wake calls for assertions.
+type fakePusher struct {
+	calls chan [2]string // {platform, token}
+}
+
+func (f *fakePusher) Wake(_ context.Context, platform, token string) error {
+	f.calls <- [2]string{platform, token}
+	return nil
+}
+
+// TestWakeupConsumption: a wakeup for an offline device fires the pusher with
+// exactly the token/platform from the payload; a wakeup for a connected
+// device is dropped (the phone gets the update over the live tunnel); the
+// frame is never forwarded to any device.
+func TestWakeupConsumption(t *testing.T) {
+	fake := &fakePusher{calls: make(chan [2]string, 4)}
+	r := relay.New()
+	r.Quiet = true
+	r.Pusher = fake
+	srv := httptest.NewServer(r.Handler())
+	defer srv.Close()
+
+	host, err := client.DialHost(wsURL(srv), "tunnel-W", "tok-w1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer host.Close()
+
+	wakeup := func(device, token, platform string) {
+		t.Helper()
+		payload, _ := json.Marshal(wire.WakeupPayload{PushToken: token, Platform: platform})
+		if err := host.WriteRawFrame(wire.Frame{Type: wire.TypeWakeup, Device: device, Payload: payload}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Offline device: push fires.
+	wakeup("dev-99", "apns-token-1", "apns")
+	select {
+	case got := <-fake.calls:
+		if got != [2]string{"apns", "apns-token-1"} {
+			t.Fatalf("pushed %v, want [apns apns-token-1]", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("pusher never called for an offline device")
+	}
+
+	// Pair a phone, then wake its id: connected → no push, and the phone must
+	// not receive the wakeup frame either.
+	phone, err := client.DialPhone(wsURL(srv), "tok-w1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer phone.Close()
+	devID := awaitReady(t, phone)
+	awaitReady(t, host)
+
+	wakeup(devID, "apns-token-2", "apns")
+	select {
+	case got := <-fake.calls:
+		t.Fatalf("pushed %v for a connected device", got)
+	case m, ok := <-phone.Recv():
+		if ok {
+			t.Fatalf("phone received %v — wakeup must never be forwarded", m)
+		}
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	// Bad payload: dropped without a push.
+	if err := host.WriteRawFrame(wire.Frame{Type: wire.TypeWakeup, Device: "dev-99", Payload: []byte("{")}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-fake.calls:
+		t.Fatalf("pushed %v for a garbage payload", got)
+	case <-time.After(300 * time.Millisecond):
 	}
 }

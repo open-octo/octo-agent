@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -56,6 +57,14 @@ func (b *bridge) handle(f shimFrame) {
 		b.wsWrite(f.ID, f.Data)
 	case shimWSClose:
 		b.closeStream(f.ID)
+	case shimPushToken:
+		// Consumed here: the token is tunnel-level state, not loopback traffic.
+		var d pushTokenData
+		if err := json.Unmarshal([]byte(f.Data), &d); err != nil {
+			b.t.logf("[tunnel] device=%s bad push-token frame: %v", b.deviceID, err)
+			return
+		}
+		b.t.registerPushToken(b.sess.peerStatic, b.deviceID, d.Token, d.Platform)
 	default:
 		// http-resp / ws-msg only travel host→phone; nothing to do inbound.
 	}
