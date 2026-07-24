@@ -82,17 +82,16 @@ spawn 入口(`internal/tools/agent.go`),经 spawner 注册门控——未配置 
 
 ## Preset(subagent_type)
 
-内置四个(`internal/tools/agent_presets.go`),`readOnly` 的会从 child toolbelt 过滤掉
+内置三个(`internal/tools/agent_presets.go`),`readOnly` 的会从 child toolbelt 过滤掉
 `write_file` / `edit_file`:
 
 | 名称 | 只读 | leanSystem | 用途 |
 |------|------|-----------|------|
 | `explore` | 是 | 是 | 只读调研:定位、理解代码 |
-| `plan` | 是 | 是 | 只读调研后产出计划 |
 | `general` | 否 | 否 | 全工具,端到端处理委派任务 |
 | `code-review` | 是 | 否 | 用 `git diff` 等审查改动 |
 
-**leanSystem**(`explore`/`plan`)用**精简 system**(`parent.LeanSystem`,丢掉 skills manifest +
+**leanSystem**(`explore`)用**精简 system**(`parent.LeanSystem`,丢掉 skills manifest +
 memory 注入)作为起点。**没有任何 preset 会降级模型**:子代理的结论直接决定父代理的下一步,
 侦察兵降级,情报也跟着降级——省成本只精简上下文,不动模型。所有 preset 跑父模型,显式传 `model`
 时优先用显式的;父的 lite 模型(`LiteSender`/`LiteModel`)只继承给 child 用于 compaction。

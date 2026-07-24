@@ -60,7 +60,7 @@ func (AgentTool) Definition() agent.ToolDefinition {
 				},
 				"subagent_type": map[string]any{
 					"type":        "string",
-					"description": "Agent type: 'explore' (read-only research), 'plan' (read-only planning), 'general' (full toolbelt), 'code-review' (read-only review), or a user-defined agent from ~/.octo/agents.",
+					"description": "Required agent type: 'explore' (read-only research), 'general' (full toolbelt), 'code-review' (read-only review), or a user-defined agent from ~/.octo/agents.",
 				},
 				"run_in_background": map[string]any{
 					"type":        "boolean",

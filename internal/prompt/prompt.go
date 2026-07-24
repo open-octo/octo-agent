@@ -130,7 +130,7 @@ func Compose(userSystem, cwd, env, skills, mcpTools, memory string, coauthor boo
 // ComposePair returns both the full system prompt and a "lean" variant that
 // drops the skills manifest, MCP tools manifest, and memory injection (the
 // heaviest, most optional layers). The lean variant seeds cheap read-only
-// sub-agents (explore/plan) that don't need the full harness context. Other
+// sub-agents (explore) that don't need the full harness context. Other
 // layers — soul, env, user/project conventions — are kept in both.
 func ComposePair(userSystem, cwd, env, skills, mcpTools, memory string, coauthor bool) (full, lean string) {
 	full = Compose(userSystem, cwd, env, skills, mcpTools, memory, coauthor)

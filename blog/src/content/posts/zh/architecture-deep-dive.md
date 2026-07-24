@@ -145,9 +145,9 @@ MCP 工具的 JSON schema 可能非常庞大——配置几十个 MCP 服务器�
 
 `sub_agent` 工具表面看就是派活 + 等结果，设计张力藏在它**不许**做的事里。最醒目的规则在 `AgentTool.Execute`（`internal/tools/agent.go`）：如果调用方已经是 sub-agent，直接失败——"a sub-agent cannot spawn another sub-agent"。绝对禁止递归。配合 `tools` allowlist 里故意不列入 `sub_agent` 自身，这是一道硬的天花板，不是 workflow 那种图灵完备的任意派生——设计意图就是"只有一层委派"，不搞 agent 树。
 
-**一律 fresh**（`subagent_type`，必填）：每个子 agent 都从**零对话上下文**启动，带上类型指定的 persona（`explore`、`plan`、`general`、`code-review`，或 `~/.octo/agents` 里的自定义 agent），走 read-only / lean-context 默认值、带自己的 `model` frontmatter。prompt 必须自包含，因为子 agent 永远看不到父对话。这里曾经有过一个 fork 模式（省略类型就继承父的完整历史），后来删掉了：分叉对话是会话级原语——web 端的会话 branch 切出来的新会话你可以直接对话——而 fork 出来的子 agent 把那份上下文困在了用户够不着的墙后面。preset 填充调用方没覆盖的字段。
+**一律 fresh**（`subagent_type`，必填）：每个子 agent 都从**零对话上下文**启动，带上类型指定的 persona（`explore`、`general`、`code-review`，或 `~/.octo/agents` 里的自定义 agent），走 read-only / lean-context 默认值、带自己的 `model` frontmatter。prompt 必须自包含，因为子 agent 永远看不到父对话。这里曾经有过一个 fork 模式（省略类型就继承父的完整历史），后来删掉了：分叉对话是会话级原语——web 端的会话 branch 切出来的新会话你可以直接对话——而 fork 出来的子 agent 把那份上下文困在了用户够不着的墙后面。preset 填充调用方没覆盖的字段。
 
-**同步 vs. 异步**：`run_in_background: true` 调 `SubAgentManager.Start`，立刻返回 `agent_N` ID 并在完成后推通知；`false`（默认）调 `RunSync`，阻塞这个 turn 等结果。信号量（`syncSem`）控制同步 sub-agent 的上限，避免一波 fan-out 把父 agent 饿死。按 transport 自适应：同步通道（server / IM）没有 follow-up-turn 路径，`mgr.Synchronous()` 静默强制走阻塞路径并告知模型——而不是悄悄失败。
+**同步 vs. 异步**：`run_in_background: true` 调 `SubAgentManager.Start`，立刻返回 `agent_N` ID 并在完成后推通知；`false`（默认）调 `RunSync`，阻塞这个 turn 等结果。信号量（`syncSem`）控制同步 sub-agent 的上限，避免一波 fan-out 把父 agent 饿死。按 transport 自适应：只有 CLI one-shot——单回合进程，没有后续回合通道——通过 `mgr.Synchronous()` 强制走阻塞路径，且结果里明说降级了，而不是悄悄失败。TUI、Web 会话和 IM 回合都保持异步：完成通知会被当作一个空闲 follow-up 回合重新注入。
 
 子 agent 撞到 turn 上限时，结果会带上显式的 `[INCOMPLETE: … partial]` 标记返回，而不是把半成品当成品交差。父 agent 要么用更细的任务重启，要么把它当未完成处理。每种 `StopReason`（`end_turn`、`tool_use`、`max_turns`、`error`、`killed`）都会上送到 WS broadcast，前端状态面板无需轮询就能更新。
 

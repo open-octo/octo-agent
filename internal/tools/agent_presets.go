@@ -40,17 +40,6 @@ var builtInPresets = []agentPreset{
 			"quoted to make the point. Don't dump whole files.",
 	},
 	{
-		name:        "plan",
-		description: "Read-only planning agent",
-		readOnly:    true,
-		leanSystem:  true,
-		persona: "You are a planning sub-agent. Investigate the codebase read-only, then produce a " +
-			"concrete, step-by-step implementation plan. Do NOT modify files. Deliverable: an ordered " +
-			"plan — the files to change and what changes in each, in dependency order; the key design " +
-			"decisions and trade-offs; risks and a test strategy. Ground every step in code you have " +
-			"actually inspected (cite file:line). Do not write speculative steps you couldn't verify.",
-	},
-	{
 		name:        "general",
 		description: "General-purpose agent with full toolbelt",
 		readOnly:    false,

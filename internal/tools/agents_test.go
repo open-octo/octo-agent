@@ -234,7 +234,7 @@ func TestBuiltInPresets_LeanFlag(t *testing.T) {
 	// The research presets trim context via the lean system prompt; no preset
 	// downgrades the model — a sub-agent's findings gate the parent's next
 	// step, so model quality is never traded for cost.
-	want := map[string]bool{"explore": true, "plan": true, "general": false, "code-review": false}
+	want := map[string]bool{"explore": true, "general": false, "code-review": false}
 	for name, w := range want {
 		p, ok := lookupAgentPreset(name)
 		if !ok {
