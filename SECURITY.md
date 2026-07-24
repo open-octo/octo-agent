@@ -73,29 +73,18 @@ sits behind the access-key auth like every other mutating endpoint.
 
 ## Code signing policy
 
-octo's Windows installer (`octo-setup.exe`) is signed through the free
-open-source program of the [SignPath Foundation](https://signpath.org/),
-which issues the certificate; the signing key is held by SignPath and never
-leaves their infrastructure. The macOS installer (`octo-setup.pkg`) isn't
-signed or notarized yet — there's no Apple Developer Program membership behind
-this project — so Gatekeeper's unidentified-developer warning is expected for
-every release until that changes.
+Neither installer is code-signed yet, so the operating system shows an
+unrecognized-publisher warning on first launch:
 
-- **What is signed:** the `octo-setup.exe` installer attached to each GitHub
-  release. The release archives themselves are integrity-checked via the
-  `checksums.txt` published alongside them.
-- **How:** the installer is built in CI (`.github/workflows/release.yml`) and
-  submitted to SignPath for signing as part of the release. Every signing
-  request is approved by a project maintainer before it is signed.
-- **Who can approve:** the repository maintainers. Anyone with signing-request
-  approval or repository write access uses multi-factor authentication on both
-  GitHub and SignPath.
-- **Verifying:** right-click the installer → *Properties → Digital Signatures*
-  to confirm the publisher.
+- **Windows** (`octo-setup.exe`): SmartScreen shows "Windows protected your
+  PC" — click **More info → Run anyway**.
+- **macOS** (`octo-setup.pkg`): Gatekeeper shows an unidentified-developer
+  warning. There's no Apple Developer Program membership behind this project,
+  so this is expected for every release until that changes.
 
-Signing is being rolled out via the SignPath Foundation; until the certificate
-is provisioned, released installers may be **unsigned**, in which case Windows
-SmartScreen shows "Windows protected your PC" — click **More info → Run anyway**.
+Release integrity is instead verified by hash: every archive is checked
+against the `checksums.txt` published alongside it on each GitHub release
+(the same SHA-256 check `octo upgrade` runs automatically).
 
 ## Reporting a vulnerability
 
