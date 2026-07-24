@@ -1,0 +1,50 @@
+name: Relay
+
+# Builds and tests cmd/octo-relay, the managed-tunnel relay. It is a nested Go
+# module with its own dependency tree (flynn/noise, gorilla/websocket) — none
+# of it enters the CLI's zero-dependency build, and the main `Go` workflow's
+# `go test ./...` skips nested modules entirely, so without this job the
+# relay's tests would never run in CI.
+#
+# Path-filtered so a relay-only change runs only this workflow, and a change
+# elsewhere never triggers it.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/octo-relay/**'
+      - '.github/workflows/relay.yml'
+  pull_request:
+    paths:
+      - 'cmd/octo-relay/**'
+      - '.github/workflows/relay.yml'
+
+# Only reads the checkout; no token write scope needed.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build + test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cmd/octo-relay
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cmd/octo-relay/go.mod
+          cache-dependency-path: cmd/octo-relay/go.sum
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then echo "gofmt needed on:"; echo "$out"; exit 1; fi
+
+      - name: go test
+        run: go test -race ./...
