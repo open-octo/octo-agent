@@ -232,12 +232,14 @@ func (m *SubAgentManager) Spawner() Spawner {
 }
 
 // SetSynchronous selects the sub_agent dispatch model. The default (false)
-// is the interactive async path: Start returns immediately and the reply
-// arrives via onExit, which the REPL/TUI re-injects as a follow-up turn. A
-// request/response transport (HTTP server, IM bridge) has no follow-up-turn
-// channel, so it sets this true: sub_agent then blocks the turn on RunSync
-// and returns the child's reply directly as the tool_result. Set once at
-// startup, before any turn runs.
+// is the async path: Start returns immediately and the reply arrives via
+// onExit, which the transport re-injects as a follow-up turn — the TUI
+// enqueues into the agent Inbox, and the web/IM servers kick an idle
+// follow-up turn on completion (deliverModelNote / runChannelIdleTurn).
+// Only transports with no follow-up-turn channel set this true — the CLI
+// one-shot and the server's one-shot runTurn paths without a session:
+// sub_agent then blocks the turn on RunSync and returns the child's reply
+// directly as the tool_result. Set once at startup, before any turn runs.
 func (m *SubAgentManager) SetSynchronous(v bool) {
 	m.mu.Lock()
 	m.synchronous = v

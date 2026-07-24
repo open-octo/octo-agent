@@ -774,11 +774,12 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// The headless one-shot exits when its single turn ends, so a background
 	// sub-agent's completion notification has no follow-up turn to land in —
 	// children spawned with run_in_background=true would be orphaned and their
-	// results silently lost. Run sub-agents inline instead, like the other
-	// request/response transports (server, IM). Parallel fan-out is unaffected:
-	// sync sub_agent calls issued in one assistant message still dispatch
-	// concurrently. The TUI keeps async — it re-injects completions as
-	// follow-up turns.
+	// results silently lost. Run sub-agents inline instead, like the server's
+	// one-shot runTurn paths without a session. (The web session and IM paths
+	// keep async: they kick an idle follow-up turn on completion.) Parallel
+	// fan-out is unaffected: sync sub_agent calls issued in one assistant
+	// message still dispatch concurrently. The TUI keeps async too — it
+	// re-injects completions as follow-up turns.
 	if !useTUI {
 		subAgentMgr.SetSynchronous(true)
 	}
