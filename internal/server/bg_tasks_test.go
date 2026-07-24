@@ -274,7 +274,7 @@ func TestKickIdleSteerTurn_SkipsWhenBoundToOtherEntry(t *testing.T) {
 
 // prepareToolTurn must hand back the SAME session-scoped manager on every
 // turn of a session (async mode), so spawns survive turn boundaries — and a
-// sid-less context still gets the old per-turn synchronous manager.
+// sid-less context is a wiring bug the call refuses loudly.
 func TestPrepareToolTurn_SessionScopedAsyncManager(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -301,15 +301,10 @@ func TestPrepareToolTurn_SessionScopedAsyncManager(t *testing.T) {
 		t.Error("session-scoped manager should be async")
 	}
 
-	_, _, anon, _, err := srv.prepareToolTurn(context.Background(), a, nil)
-	if err != nil {
-		t.Fatalf("prepareToolTurn (no sid): %v", err)
-	}
-	if !anon.Synchronous() {
-		t.Error("sid-less context should fall back to a synchronous manager")
-	}
-	if anon == m1 {
-		t.Error("sid-less manager must not be the session-scoped one")
+	// A sid-less ctx is a wiring bug: prepareToolTurn refuses rather than
+	// silently building a degraded turn.
+	if _, _, _, _, err := srv.prepareToolTurn(context.Background(), a, nil); err == nil {
+		t.Error("prepareToolTurn without a session id should fail loudly")
 	}
 }
 

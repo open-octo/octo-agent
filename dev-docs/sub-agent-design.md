@@ -54,10 +54,11 @@ spawn 入口(`internal/tools/agent.go`),经 spawner 注册门控——未配置 
 - 默认 **async**(CLI TUI / Web 会话 / IM):`run_in_background:true` 起后台、立即返回句柄,完成经
   通知注入对话——TUI 走 agent Inbox,Web/IM 走 `deliverModelNote` / `runChannelIdleTurn`,回合
   空闲时自动开一个 follow-up turn。
-- **无后续回合通道的 transport**(CLI one-shot、server 的无会话 one-shot runTurn)调
-  `SetSynchronous(true)` 让 `sub_agent` 走 `RunSync` 阻塞、把结果直接作为 tool_result 返回。
-  此时即使模型传了 `run_in_background:true` 也被强制为同步,且**结果里明说**降级了(不静默
-  吞掉模型的选择)。
+- **唯一强制同步的 transport 是 CLI one-shot**:单回合进程没有后续回合通道,`SetSynchronous(true)`
+  让 `sub_agent` 走 `RunSync` 阻塞、把结果直接作为 tool_result 返回。此时即使模型传了
+  `run_in_background:true` 也被强制为同步,且**结果里明说**降级了(不静默吞掉模型的选择)。
+  server 侧没有等价路径——`prepareToolTurn` 要求 ctx 带 session id(所有生产调用方都钉了),
+  缺失即报错;历史上曾有"无会话 one-shot"兜底分支,生产上不可达,已删除。
 
 ### 防递归
 

@@ -8,17 +8,22 @@ import (
 	"github.com/open-octo/octo-agent/internal/app"
 	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/permission"
-	"github.com/open-octo/octo-agent/internal/tasks"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // prepareToolTurn wires the per-turn tool environment for agent a: the strict,
-// non-interactive permission gate, plus a sub-agent manager and task store
-// bound to THIS turn's agent and stamped into ctx so the sub-agent / task tools
-// dispatch to them rather than the process-global gating sentinels. The manager
-// runs synchronously — a request/response turn has no follow-up channel for an
-// async sub-agent result — and each turn gets a private store, so concurrent
-// sessions never share sub-agent or task state.
+// non-interactive permission gate, plus the session-scoped sub-agent manager
+// and task store bound to THIS turn's agent and stamped into ctx so the
+// sub-agent / task tools dispatch to them rather than the process-global
+// gating sentinels. The sub-agent manager runs async: a spawn's completion
+// lands after the turn ends and is re-injected via the session's idle
+// follow-up turn (deliverModelNote / kickIdleSteerTurn), the same channel
+// background-process completions use.
+//
+// ctx MUST carry a session id (ctxKeySessionID) — every production caller
+// (runTurn, the WS turn loop, cron ticks) stamps one before calling. A
+// missing id is a wiring bug, so this fails loudly instead of silently
+// building a degraded turn.
 //
 // Callers must build this turn's tool list with tools.DefaultToolsForCtx(ctx,
 // ...) — using the ctx returned here — rather than the ctx-blind
@@ -29,20 +34,17 @@ import (
 // (see its doc comment — a different concern, since WorkflowTool.Definition()
 // has no ctx to read a.CWD from).
 func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agent.Session) (context.Context, agent.ToolExecutor, *tools.SubAgentManager, func(), error) {
-	sid, hasSession := ctx.Value(ctxKeySessionID{}).(string)
+	sid, _ := ctx.Value(ctxKeySessionID{}).(string)
+	if sid == "" {
+		return ctx, nil, nil, func() {}, fmt.Errorf("prepareToolTurn: no session id in context — callers must stamp ctxKeySessionID")
+	}
 
 	// A session-scoped tracker (keyed by sid, cached across turns like the
 	// background/sub-agent/workflow managers below) so a file read_file'd in
 	// one turn is still "read" when a later turn in the same conversation
 	// writes it — a per-turn tracker would forget every read as soon as the
-	// turn ended. One-shot paths with no session identity keep a fresh
-	// per-call tracker (nothing to persist it against).
-	var executor tools.DefaultRegistry
-	if hasSession && sid != "" {
-		executor = tools.NewDefaultRegistryWithTracker(tools.SessionReadTracker(sid))
-	} else {
-		executor = tools.NewDefaultRegistry()
-	}
+	// turn ended.
+	executor := tools.NewDefaultRegistryWithTracker(tools.SessionReadTracker(sid))
 
 	// Goal tools dispatch to the turn's session on every tool-enabled path
 	// (WS, REST, scheduled) — advertising them (SetGoalsEnabled) while
@@ -111,99 +113,70 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 		return ctx, nil, nil, func() {}, fmt.Errorf("permission engine: %w", err)
 	}
 
-	var ask app.PermissionAsk
-	if hasSession && sid != "" {
-		ask = s.permissionAskFrom(sid)
-		engine.AttachRemembered(s.rememberedFor(sid))
-	}
+	ask := s.permissionAskFrom(sid)
+	engine.AttachRemembered(s.rememberedFor(sid))
 	a.Gate = app.NewPermissionGate(engine, ask)
 
-	mkSpawner := func() tools.Spawner {
-		return app.NewSpawner(a, executor, func(ctx context.Context) []agent.ToolDefinition {
-			return tools.DefaultToolsForCtx(ctx, a.Model)
-		})
+	// Clear-and-rebuild: a fully-completed plan is closed, so drop it BEFORE
+	// NewSessionToolEnv picks up the per-session task store — this turn's new
+	// tasks then start a fresh plan instead of piling onto old, done ones. An
+	// incomplete plan carries over so the agent keeps working on it. Turns are
+	// serialized per session, so this read-then-reset is safe.
+	if tools.AllTasksComplete(tools.PeekSessionTaskStore(sid)) {
+		tools.CloseSessionTaskStore(sid)
 	}
-
-	var mgr *tools.SubAgentManager
-	var cleanup func()
-
-	if hasSession && sid != "" {
-		// Clear-and-rebuild: a fully-completed plan is closed, so drop it BEFORE
-		// NewSessionToolEnv picks up the per-session task store — this turn's new
-		// tasks then start a fresh plan instead of piling onto old, done ones. An
-		// incomplete plan carries over so the agent keeps working on it. Turns are
-		// serialized per session, so this read-then-reset is safe.
-		if tools.AllTasksComplete(tools.PeekSessionTaskStore(sid)) {
-			tools.CloseSessionTaskStore(sid)
-		}
-		// Session-scoped path: reuse the concurrency-safe core from app.NewSessionToolEnv.
-		// Server-specific callbacks (WebSocket broadcast, model note delivery) are
-		// injected here; the core function stays free of *Server dependencies.
-		ctx, _, mgr, cleanup = app.NewSessionToolEnv(ctx, a, sid, executor, app.ToolEnvCallbacks{
-			SubAgentOnEvent: func(ev tools.SubAgentEvent) {
-				if s.wsHub == nil {
-					return
-				}
-				s.wsHub.broadcast(sid, map[string]any{
-					"type":        "sub_agent_event",
-					"session_id":  sid,
-					"agent_id":    ev.AgentID,
-					"description": ev.Description,
-					"agent_type":  ev.AgentType,
-					"kind":        ev.Kind,
-					"tool_name":   ev.ToolName,
-					"tool_input":  ev.ToolInput,
-					"stop_reason": ev.StopReason,
-				})
-			},
-			SubAgentOnExit: func(ev tools.SubAgentNotification) {
-				if s.wsHub == nil {
-					return
-				}
-				s.wsHub.broadcast(sid, wsEventSubAgentNotice{
-					Type:        "sub_agent_notice",
-					SessionID:   sid,
-					AgentID:     ev.AgentID,
-					Description: ev.Description,
-					Kind:        ev.Kind,
-					Status:      subAgentNoticeStatus(ev),
-				})
-				s.notifySubAgentExit(sid, ev)
-			},
-			WorkflowOnEvent: func(ev tools.WorkflowEvent) {
-				if s.wsHub == nil {
-					return
-				}
-				s.wsHub.broadcast(sid, map[string]any{
-					"type":        "workflow_event",
-					"session_id":  sid,
-					"run_id":      ev.RunID,
-					"description": ev.Description,
-					"kind":        ev.Kind,
-					"line":        ev.Line,
-					"status":      ev.Status,
-				})
-			},
-			WorkflowOnDone: func(ev tools.WorkflowNotification) {
-				s.deliverModelNote(sid, tools.FormatWorkflowNote(ev))
-			},
-		})
-	} else {
-		// No session identity (one-shot runTurn paths): keep the old
-		// request/response semantics — block on every sub-agent. Deliberately
-		// leave ctx without a background manager, same as before this
-		// function was split: resolveBackgroundManager's fallback to
-		// defaultBg is exactly the "no ctx-scoped manager" case it documents,
-		// and stamping tools.SessionBackgroundManager("") here would silently
-		// swap that documented fallback for an undocumented synthetic
-		// "" session cached forever in sessionMgrs.
-		ctx = tools.WithWorkingDir(ctx, a.CWD)
-		ctx = tools.WithTaskStore(ctx, tasks.New())
-		mgr = tools.NewSubAgentManager(mkSpawner())
-		mgr.SetSynchronous(true)
-		ctx = tools.WithSubAgentManager(ctx, mgr)
-		cleanup = func() {}
-	}
+	// Reuse the concurrency-safe core from app.NewSessionToolEnv. Server-
+	// specific callbacks (WebSocket broadcast, model note delivery) are
+	// injected here; the core function stays free of *Server dependencies.
+	ctx, _, mgr, cleanup := app.NewSessionToolEnv(ctx, a, sid, executor, app.ToolEnvCallbacks{
+		SubAgentOnEvent: func(ev tools.SubAgentEvent) {
+			if s.wsHub == nil {
+				return
+			}
+			s.wsHub.broadcast(sid, map[string]any{
+				"type":        "sub_agent_event",
+				"session_id":  sid,
+				"agent_id":    ev.AgentID,
+				"description": ev.Description,
+				"agent_type":  ev.AgentType,
+				"kind":        ev.Kind,
+				"tool_name":   ev.ToolName,
+				"tool_input":  ev.ToolInput,
+				"stop_reason": ev.StopReason,
+			})
+		},
+		SubAgentOnExit: func(ev tools.SubAgentNotification) {
+			if s.wsHub == nil {
+				return
+			}
+			s.wsHub.broadcast(sid, wsEventSubAgentNotice{
+				Type:        "sub_agent_notice",
+				SessionID:   sid,
+				AgentID:     ev.AgentID,
+				Description: ev.Description,
+				Kind:        ev.Kind,
+				Status:      subAgentNoticeStatus(ev),
+			})
+			s.notifySubAgentExit(sid, ev)
+		},
+		WorkflowOnEvent: func(ev tools.WorkflowEvent) {
+			if s.wsHub == nil {
+				return
+			}
+			s.wsHub.broadcast(sid, map[string]any{
+				"type":        "workflow_event",
+				"session_id":  sid,
+				"run_id":      ev.RunID,
+				"description": ev.Description,
+				"kind":        ev.Kind,
+				"line":        ev.Line,
+				"status":      ev.Status,
+			})
+		},
+		WorkflowOnDone: func(ev tools.WorkflowNotification) {
+			s.deliverModelNote(sid, tools.FormatWorkflowNote(ev))
+		},
+	})
 
 	// The workflow tool's Definition(), unlike its Execute, takes no ctx and
 	// so can't see a.CWD directly — that one remains a save-and-restore

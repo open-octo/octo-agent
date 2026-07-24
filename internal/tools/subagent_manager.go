@@ -236,10 +236,10 @@ func (m *SubAgentManager) Spawner() Spawner {
 // onExit, which the transport re-injects as a follow-up turn — the TUI
 // enqueues into the agent Inbox, and the web/IM servers kick an idle
 // follow-up turn on completion (deliverModelNote / runChannelIdleTurn).
-// Only transports with no follow-up-turn channel set this true — the CLI
-// one-shot and the server's one-shot runTurn paths without a session:
-// sub_agent then blocks the turn on RunSync and returns the child's reply
-// directly as the tool_result. Set once at startup, before any turn runs.
+// Only the CLI one-shot sets this true: its single turn has no follow-up
+// channel, so sub_agent blocks the turn on RunSync and returns the child's
+// reply directly as the tool_result. Set once at startup, before any turn
+// runs.
 func (m *SubAgentManager) SetSynchronous(v bool) {
 	m.mu.Lock()
 	m.synchronous = v

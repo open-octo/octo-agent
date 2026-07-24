@@ -158,11 +158,11 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 
 	// Determine sync vs async
 	runInBackground := boolArg(input, "run_in_background")
-	// Transports with no follow-up-turn channel (CLI one-shot, server one-shot
-	// runTurn without a session) force sync even if the model asked for
-	// background — and tell the model, rather than silently downgrading its
-	// choice. TUI, web session, and IM turns all stay async: they re-inject
-	// completions as idle follow-up turns (see SetSynchronous).
+	// A transport with no follow-up-turn channel (the CLI one-shot — the only
+	// synchronous mode) forces sync even if the model asked for background —
+	// and tells the model, rather than silently downgrading its choice. TUI,
+	// web session, and IM turns all stay async: they re-inject completions as
+	// idle follow-up turns (see SetSynchronous).
 	forcedSync := false
 	if runInBackground && mgr.Synchronous() {
 		runInBackground = false

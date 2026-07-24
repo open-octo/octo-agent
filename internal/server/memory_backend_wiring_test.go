@@ -53,7 +53,7 @@ func TestPrepareToolTurn_WiresMemoryBackend(t *testing.T) {
 	tools.SetMemoryBackend(nil) // start disabled to prove prepareToolTurn is what enables it
 	t.Cleanup(func() { tools.SetMemoryBackend(nil) })
 
-	if _, _, _, _, err := srv.prepareToolTurn(context.Background(), agent.New(&stubSender{}, "gpt-4o"), nil); err != nil {
+	if _, _, _, _, err := srv.prepareToolTurn(prepareToolTurnCtx(t, "memory-backend"), agent.New(&stubSender{}, "gpt-4o"), nil); err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
 	if g := tools.MemoryBackendGuidance(); g == "" {
@@ -81,7 +81,7 @@ func TestPrepareToolTurn_WiresAutoRecall(t *testing.T) {
 		tools.SetMemoryBackendAutoRecall(false)
 	})
 
-	if _, _, _, _, err := srv.prepareToolTurn(context.Background(), agent.New(&stubSender{}, "gpt-4o"), nil); err != nil {
+	if _, _, _, _, err := srv.prepareToolTurn(prepareToolTurnCtx(t, "memory-backend"), agent.New(&stubSender{}, "gpt-4o"), nil); err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
 
@@ -163,7 +163,7 @@ func TestPrepareToolTurn_NoMemoryBackendConfigured(t *testing.T) {
 	tools.SetMemoryBackend(nil)
 	t.Cleanup(func() { tools.SetMemoryBackend(nil) })
 
-	if _, _, _, _, err := srv.prepareToolTurn(context.Background(), agent.New(&stubSender{}, "gpt-4o"), nil); err != nil {
+	if _, _, _, _, err := srv.prepareToolTurn(prepareToolTurnCtx(t, "memory-backend"), agent.New(&stubSender{}, "gpt-4o"), nil); err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
 	if g := tools.MemoryBackendGuidance(); g != "" {

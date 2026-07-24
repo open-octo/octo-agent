@@ -680,6 +680,23 @@ func mustWorkspaceDir(cfg Config) string {
 	return dir
 }
 
+// prepareToolTurnCtx returns a ctx stamped with a test session id, as every
+// production caller of prepareToolTurn does (runTurn, the WS turn loop, cron
+// ticks — they stamp both the server-layer ctxKeySessionID and the tools-layer
+// tools.WithSessionID), and registers cleanup for the per-session state the
+// call creates.
+func prepareToolTurnCtx(t *testing.T, name string) context.Context {
+	t.Helper()
+	sid := "ptt-" + name
+	t.Cleanup(func() {
+		tools.CloseSessionSubAgentManager(sid)
+		tools.CloseSessionReadTracker(sid)
+		tools.CloseSessionTaskStore(sid)
+	})
+	ctx := context.WithValue(context.Background(), ctxKeySessionID{}, sid)
+	return tools.WithSessionID(ctx, sid)
+}
+
 // mustServer creates a Server for testing. It skips tests that need a real
 // provider by using a stub sender.
 func mustServer(t *testing.T, cfg Config) *Server {

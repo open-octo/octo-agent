@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -21,7 +20,7 @@ func TestPrepareToolTurn_WiresBrowserLLMHelpers(t *testing.T) {
 	tools.SetBrowserRecordingGenerator(nil)
 
 	a := agent.New(&stubSender{}, "stub-model")
-	ctx, _, _, _, err := srv.prepareToolTurn(context.Background(), a, nil)
+	ctx, _, _, _, err := srv.prepareToolTurn(prepareToolTurnCtx(t, "browser-helpers"), a, nil)
 	if err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}

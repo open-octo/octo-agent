@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -30,7 +29,7 @@ func TestPrepareToolTurn_CronSessionSelfHealsFromStaleInteractiveMode(t *testing
 	sess.Source = "cron"
 	sess.PermissionMode = "interactive" // stale value from before this fix
 
-	ctx, _, _, cleanup, err := srv.prepareToolTurn(context.Background(), a, sess)
+	ctx, _, _, cleanup, err := srv.prepareToolTurn(prepareToolTurnCtx(t, "cron-self-heal"), a, sess)
 	if err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
@@ -57,7 +56,7 @@ func TestPrepareToolTurn_CronSessionHonorsExplicitStrictMode(t *testing.T) {
 	sess.Source = "cron"
 	sess.PermissionMode = "strict"
 
-	ctx, _, _, cleanup, err := srv.prepareToolTurn(context.Background(), a, sess)
+	ctx, _, _, cleanup, err := srv.prepareToolTurn(prepareToolTurnCtx(t, "cron-strict"), a, sess)
 	if err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
@@ -85,7 +84,7 @@ func TestPrepareToolTurn_WiresWorkingDirFromAgentCWD(t *testing.T) {
 	a := agent.New(&stubSender{}, "qwen3.7-max")
 	a.CWD = "/some/custom/project/dir"
 
-	ctx, _, _, cleanup, err := srv.prepareToolTurn(context.Background(), a, nil)
+	ctx, _, _, cleanup, err := srv.prepareToolTurn(prepareToolTurnCtx(t, "workingdir"), a, nil)
 	if err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
@@ -112,7 +111,7 @@ func TestPrepareToolTurn_WorkflowDiscoveryCWDStartsCleanAcrossCalls(t *testing.T
 
 	a1 := agent.New(&stubSender{}, "qwen3.7-max")
 	a1.CWD = "/repo/A"
-	_, _, _, cleanup1, err := srv.prepareToolTurn(context.Background(), a1, nil)
+	_, _, _, cleanup1, err := srv.prepareToolTurn(prepareToolTurnCtx(t, "clean-slate-a"), a1, nil)
 	if err != nil {
 		t.Fatalf("prepareToolTurn (a1): %v", err)
 	}
@@ -124,7 +123,7 @@ func TestPrepareToolTurn_WorkflowDiscoveryCWDStartsCleanAcrossCalls(t *testing.T
 
 	a2 := agent.New(&stubSender{}, "qwen3.7-max")
 	a2.CWD = "/repo/B"
-	_, _, _, cleanup2, err := srv.prepareToolTurn(context.Background(), a2, nil)
+	_, _, _, cleanup2, err := srv.prepareToolTurn(prepareToolTurnCtx(t, "clean-slate-b"), a2, nil)
 	if err != nil {
 		t.Fatalf("prepareToolTurn (a2): %v", err)
 	}

@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"sync"
 	"testing"
 
@@ -28,7 +27,7 @@ func TestPrepareToolTurn_WiresModelVision(t *testing.T) {
 	})
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 
-	ctx, _, _, _, err := srv.prepareToolTurn(context.Background(), agent.New(&stubSender{}, "qwen3.7-max"), nil)
+	ctx, _, _, _, err := srv.prepareToolTurn(prepareToolTurnCtx(t, "vision-basic"), agent.New(&stubSender{}, "qwen3.7-max"), nil)
 	if err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
@@ -36,7 +35,7 @@ func TestPrepareToolTurn_WiresModelVision(t *testing.T) {
 		t.Error("vision should be OFF for a text-only model (qwen3.7-max)")
 	}
 
-	ctx, _, _, _, err = srv.prepareToolTurn(context.Background(), agent.New(&stubSender{}, "gpt-4o"), nil)
+	ctx, _, _, _, err = srv.prepareToolTurn(prepareToolTurnCtx(t, "vision-basic-2"), agent.New(&stubSender{}, "gpt-4o"), nil)
 	if err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
@@ -63,6 +62,8 @@ func TestPrepareToolTurn_ModelVisionConcurrentSessions(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 
 	const rounds = 50
+	ctxA := prepareToolTurnCtx(t, "vision-race-a")
+	ctxB := prepareToolTurnCtx(t, "vision-race-b")
 	var wg sync.WaitGroup
 	errs := make(chan string, rounds*2)
 	wg.Add(2)
@@ -70,7 +71,7 @@ func TestPrepareToolTurn_ModelVisionConcurrentSessions(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < rounds; i++ {
-			ctx, _, _, _, err := srv.prepareToolTurn(context.Background(), agent.New(&stubSender{}, "qwen3.7-max"), nil)
+			ctx, _, _, _, err := srv.prepareToolTurn(ctxA, agent.New(&stubSender{}, "qwen3.7-max"), nil)
 			if err != nil {
 				errs <- err.Error()
 				continue
@@ -83,7 +84,7 @@ func TestPrepareToolTurn_ModelVisionConcurrentSessions(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < rounds; i++ {
-			ctx, _, _, _, err := srv.prepareToolTurn(context.Background(), agent.New(&stubSender{}, "gpt-4o"), nil)
+			ctx, _, _, _, err := srv.prepareToolTurn(ctxB, agent.New(&stubSender{}, "gpt-4o"), nil)
 			if err != nil {
 				errs <- err.Error()
 				continue
