@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -105,6 +106,120 @@ func TestRunChat_HonoursAnthropicBaseURL(t *testing.T) {
 	}
 	if gotPath != "/v1/messages" {
 		t.Errorf("path = %q, want /v1/messages", gotPath)
+	}
+}
+
+// TestRunChat_OneShot_BackgroundSubAgentForcedSync locks the one-shot
+// transport contract for sub-agents: the headless one-shot exits when its
+// single turn ends, so a sub-agent spawned with run_in_background=true has no
+// follow-up turn for its completion to land in — without forced-sync dispatch
+// the child is orphaned and its result silently lost. The one-shot must run
+// the child inline and hand its reply back in the tool_result, like the
+// server and IM transports do.
+func TestRunChat_OneShot_BackgroundSubAgentForcedSync(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		requests []string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		requests = append(requests, string(body))
+		n := len(requests)
+		mu.Unlock()
+		switch {
+		case strings.Contains(string(body), `"tool_result"`):
+			// Parent follow-up turn — the sub_agent tool_result came back.
+			_, _ = w.Write([]byte(`{
+				"id":"m","type":"message","role":"assistant","model":"x",
+				"content":[{"type":"text","text":"SUMMARY DONE"}],
+				"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}
+			}`))
+		case n == 1:
+			// Parent turn 1: request a background sub-agent.
+			_, _ = w.Write([]byte(`{
+				"id":"m","type":"message","role":"assistant","model":"x",
+				"content":[{"type":"tool_use","id":"tu_1","name":"sub_agent",
+					"input":{"description":"probe trash","prompt":"say done","subagent_type":"explore","run_in_background":true}}],
+				"stop_reason":"tool_use","usage":{"input_tokens":1,"output_tokens":1}
+			}`))
+		default:
+			// The child's conversation. The parent runs buffered
+			// (--stream=false) but a sub-agent always runs through
+			// RunStream, so answer in whichever shape the request asked for.
+			if strings.Contains(string(body), `"stream":true`) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte("" +
+					`data: {"type":"message_start","message":{"id":"m","model":"x","usage":{"input_tokens":1,"output_tokens":0}}}` + "\n\n" +
+					`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"CHILD DONE"}}` + "\n\n" +
+					`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":0,"output_tokens":2}}` + "\n\n"))
+				return
+			}
+			_, _ = w.Write([]byte(`{
+				"id":"m","type":"message","role":"assistant","model":"x",
+				"content":[{"type":"text","text":"CHILD DONE"}],
+				"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}
+			}`))
+		}
+	}))
+	defer srv.Close()
+
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("ANTHROPIC_API_KEY", "k")
+	t.Setenv("ANTHROPIC_BASE_URL", srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	code := runChat([]string{"--model", "x", "--stream=false", "--no-memory", "hello"},
+		strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+
+	// The tool_result the parent saw must carry the child's actual reply plus
+	// the forced-sync note — not an async "Started sub-agent" stub. Pull the
+	// tool_result content out of the captured request body rather than
+	// string-matching the whole request: the sub_agent tool's own description
+	// (always present in the tools catalog) contains async wording.
+	mu.Lock()
+	defer mu.Unlock()
+	var toolResultContent string
+	for _, req := range requests {
+		var body struct {
+			Messages []struct {
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.Unmarshal([]byte(req), &body); err != nil {
+			continue
+		}
+		for _, msg := range body.Messages {
+			var blocks []struct {
+				Type    string `json:"type"`
+				Content string `json:"content"`
+			}
+			if err := json.Unmarshal(msg.Content, &blocks); err != nil {
+				continue
+			}
+			for _, b := range blocks {
+				if b.Type == "tool_result" {
+					toolResultContent = b.Content
+				}
+			}
+		}
+	}
+	if toolResultContent == "" {
+		t.Fatalf("no follow-up request with a tool_result reached the endpoint; requests=%d", len(requests))
+	}
+	if !strings.Contains(toolResultContent, "CHILD DONE") {
+		t.Errorf("tool_result should contain the child's reply; got: %q", toolResultContent)
+	}
+	if !strings.Contains(toolResultContent, "ran synchronously") {
+		t.Errorf("tool_result should carry the forced-sync note; got: %q", toolResultContent)
+	}
+	if strings.Contains(toolResultContent, "Started sub-agent") {
+		t.Errorf("one-shot must not take the async path; got: %q", toolResultContent)
 	}
 }
 
