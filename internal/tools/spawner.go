@@ -78,15 +78,10 @@ type SpawnRequest struct {
 
 	// LeanSystem, when true, seeds the child with the parent's lean system
 	// prompt (skills manifest + memory dropped) to keep its context small.
-	// Falls back to the parent's full system when none is configured.
+	// Falls back to the parent's full system when none is configured. It only
+	// trims context — the child always runs on the parent's model (or an
+	// explicit Model override); model quality is never traded for cost.
 	LeanSystem bool
-
-	// LiteModel, when true, runs the child on the parent's lite model (via its
-	// own sender — a named lite model may live on a different provider). Falls
-	// back to the parent's model when none is configured; an explicit Model
-	// override always wins. Kept separate from LeanSystem so a preset can trim
-	// context without giving up model quality (explore).
-	LiteModel bool
 
 	// Schema, when non-empty, is a JSON Schema (as a JSON string) the child's
 	// reply must satisfy. The spawner instructs the child to emit only matching

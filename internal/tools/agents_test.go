@@ -231,22 +231,17 @@ func TestDiscoverAgents_ProjectOverridesUser(t *testing.T) {
 }
 
 func TestBuiltInPresets_LeanFlag(t *testing.T) {
-	// explore keeps the parent's model — its findings gate the parent's next
-	// step, so quality matters — while still trimming context via the lean
-	// system prompt. plan stays fully lean.
-	want := map[string]struct{ leanSystem, liteModel bool }{
-		"explore":     {leanSystem: true, liteModel: false},
-		"plan":        {leanSystem: true, liteModel: true},
-		"general":     {},
-		"code-review": {},
-	}
+	// The research presets trim context via the lean system prompt; no preset
+	// downgrades the model — a sub-agent's findings gate the parent's next
+	// step, so model quality is never traded for cost.
+	want := map[string]bool{"explore": true, "plan": true, "general": false, "code-review": false}
 	for name, w := range want {
 		p, ok := lookupAgentPreset(name)
 		if !ok {
 			t.Fatalf("built-in %q not found", name)
 		}
-		if p.leanSystem != w.leanSystem || p.liteModel != w.liteModel {
-			t.Errorf("%q leanSystem/liteModel = %v/%v, want %v/%v", name, p.leanSystem, p.liteModel, w.leanSystem, w.liteModel)
+		if p.leanSystem != w {
+			t.Errorf("%q leanSystem = %v, want %v", name, p.leanSystem, w)
 		}
 	}
 }

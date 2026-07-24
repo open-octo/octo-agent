@@ -24,15 +24,15 @@ calling it anyway is rejected even if something bypassed that filtering.
 
 | Type | Read-only | Notes |
 |---|---|---|
-| `explore` | yes | Research on the parent's model, with a trimmed system prompt |
-| `plan` | yes | Read-only investigation that produces an implementation plan; runs on the cheaper lite model when one's configured |
+| `explore` | yes | Fast research, with a trimmed system prompt |
+| `plan` | yes | Read-only investigation that produces an implementation plan; trimmed system prompt |
 | `general` | no | Full toolbelt, for end-to-end delegation |
 | `code-review` | yes | Reviews via `git diff` |
 
 `explore` and `plan` are the only "lean" types — they drop the skills manifest and memory
-injection from their system prompt, since a quick research pass rarely needs either. `plan`
-additionally runs on the lite model; `explore` deliberately keeps the parent's model, because
-its findings gate the parent's next step and a downgraded scout returns downgraded findings.
+injection from their system prompt, since a quick research pass rarely needs either. Every type
+runs on the parent's model (or an explicit `model` override): a sub-agent's findings gate the
+parent's next step, and a downgraded scout returns downgraded findings.
 
 ## Custom types
 

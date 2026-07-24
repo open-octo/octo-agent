@@ -65,17 +65,13 @@ const childMaxTurns = 100
 func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.SpawnResult, error) {
 	childTools := filterChildTools(s.toolsFn(ctx), req.Tools, req.DisallowedTools, req.ReadOnly)
 
-	// Pick the child's sender + model. A lite preset (plan) runs on the
-	// parent's lite model when one is configured — its own cheaper sender, not
-	// the main one, since a named lite model may live on a different provider.
-	// An explicit req.Model always wins; otherwise lite → lite, else parent's.
+	// The child runs on the parent's sender + model unless the request
+	// overrides the model explicitly. No preset downgrades to the lite model:
+	// a sub-agent's output gates the parent's next step, so cost is trimmed
+	// via the lean system prompt (below), never via model quality.
 	sender, model := s.parent.GetSender(), req.Model
 	if model == "" {
-		if req.LiteModel && s.parent.LiteModel != "" && s.parent.LiteSender != nil {
-			sender, model = s.parent.LiteSender, s.parent.LiteModel
-		} else {
-			model = s.parent.Model
-		}
+		model = s.parent.Model
 	}
 
 	// Lean presets are seeded with the lean system prompt (skills + memory

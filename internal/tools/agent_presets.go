@@ -17,13 +17,11 @@ type agentPreset struct {
 	disallowedTools []string
 	model           string
 	// leanSystem seeds the agent with the parent's lean system prompt (skills
-	// manifest + memory dropped) to keep its context small.
+	// manifest + memory dropped) to keep its context small. Presets always
+	// run on the parent's model (or an explicit model override) — a research
+	// agent's findings gate the parent's next step, so model quality is never
+	// traded for cost; only context is trimmed.
 	leanSystem bool
-	// liteModel runs the agent on the parent's lite model. Reserved for cheap
-	// mechanical work — a preset whose output quality gates the parent's next
-	// step (explore) keeps the parent's model and saves tokens via leanSystem
-	// alone.
-	liteModel bool
 }
 
 // builtInPresets is the canonical set of built-in agent types. These are
@@ -46,7 +44,6 @@ var builtInPresets = []agentPreset{
 		description: "Read-only planning agent",
 		readOnly:    true,
 		leanSystem:  true,
-		liteModel:   true,
 		persona: "You are a planning sub-agent. Investigate the codebase read-only, then produce a " +
 			"concrete, step-by-step implementation plan. Do NOT modify files. Deliverable: an ordered " +
 			"plan — the files to change and what changes in each, in dependency order; the key design " +

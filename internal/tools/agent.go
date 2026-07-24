@@ -147,7 +147,6 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 		req.SystemSuffix = preset.persona
 		req.ReadOnly = preset.readOnly
 		req.LeanSystem = preset.leanSystem
-		req.LiteModel = preset.liteModel
 		req.DisallowedTools = preset.disallowedTools
 		if len(callTools) == 0 {
 			req.Tools = preset.tools
