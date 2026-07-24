@@ -15,13 +15,9 @@
 > Anthropic, OpenAI, or anything compatible), with the server and your data staying
 > on your own machine.
 
-<!-- TODO(demo): run `vhs scripts/demo.tape` to generate landing/assets/demo.gif
-     (one-line install → one prompt → full agentic loop), then uncomment the block below. -->
-<!--
 <p align="center">
   <img src="landing/assets/demo.gif" alt="octo demo" width="760">
 </p>
--->
 
 ```bash
 curl -fsSL https://octo-agent.dev/install.sh | sh     # single binary — no Node / Ruby / Python

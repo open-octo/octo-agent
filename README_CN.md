@@ -14,13 +14,9 @@
 > 接**任意模型**（DeepSeek、Kimi、Anthropic、OpenAI 或任何兼容端点），服务和
 > 数据都留在你自己的机器上。
 
-<!-- TODO(demo): 跑 `vhs scripts/demo.tape` 生成 landing/assets/demo.gif
-     （一行安装 → 一句 prompt → 完整 agentic 循环），然后取消下面这段注释。 -->
-<!--
 <p align="center">
-  <img src="landing/assets/demo.gif" alt="octo 演示" width="760">
+  <img src="landing/assets/demo-cn.gif" alt="octo 演示" width="760">
 </p>
--->
 
 ```bash
 curl -fsSL https://octo-agent.dev/install.sh | sh     # 单二进制，无需 Node / Ruby / Python 环境

@@ -58,12 +58,19 @@ Sleep 2.5s
 # NOTE: needs a release that includes open-octo/octo-agent#1737 (one-shot forces
 # sub-agents synchronous) — on older releases the model may dispatch the
 # children async and exit before the summary.
-Type `octo "Use 3 sub-agents in parallel to explore octo's three core implementations — 1. the recycle bin, 2. workflows, 3. browser record & replay — then give me a summary."`
+# `--no-memory` keeps the reply in the prompt's language: this repo's default
+# model (LongCat) mirrors English fine on its own, but an operator's stored
+# cross-session memory can carry a language preference that overrides it. It's
+# also honest for a hero — a first-run user has no memory yet. Drop it if your
+# config already answers in the language you want on camera.
+Type `octo --no-memory "Explore octo's recycle bin, workflows, and browser record/replay with 3 parallel sub-agents, then summarize."`
 Sleep 500ms
 Enter
-# Show the fan-out starting, then skip the ~2-3 min wait; the sub_agent lines
-# carry their real durations, so the cut is honest.
-Sleep 12s
+# Wait for the fan-out to actually appear (model latency varies), let all three
+# sub_agent lines render, then skip the ~2-3 min run. The sub_agent lines carry
+# their real durations, so the cut is honest.
+Wait+Screen@60s /sub_agent/
+Sleep 4s
 Hide
 # The one-shot exits back to the shell (VHS prompt is ">") when the loop ends.
 Wait@600s />$/
