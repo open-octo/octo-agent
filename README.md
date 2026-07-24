@@ -108,6 +108,15 @@ Three beliefs drive the project:
 - **The agent should live where you already are.** IM bridges (WeChat iLink,
   Feishu, DingTalk, WeCom, Discord, Telegram) are core features, not
   afterthoughts — assign a task at your desk, follow up from your phone.
+- **The agent must not saw off the branch it's sitting on.** My most infuriating
+  OpenClaw/Hermes memory: chatting with the agent from my phone, mid-discussion
+  it decides to edit code and restart itself — then silence until I got home to
+  revive it. octo defends this scenario specifically: the terminal tool refuses
+  any kill aimed at octo's own process (including `kill $(pgrep octo)`-style
+  detours); the only restart path is a dedicated `restart_server` tool,
+  hard-wired to ask permission first (browser modal on web, explicit reply on
+  IM); and even an approved restart drains the current turn so the reply
+  reaches you before the supervisor respawns the server and clients reconnect.
 - **Frontier features, without the gates.** In June 2026 Claude Code shipped
   dynamic workflows and Codex shipped record & replay (macOS only). octo has
   both, on its own terms: a workflow fans out at most 8 concurrent sub-agents
