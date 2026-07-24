@@ -36,8 +36,8 @@ octo "Add a --json flag to 'octo config show' and run the tests"   # one prompt 
 Upgrade any time with `octo upgrade`. Platform details — Gatekeeper / SmartScreen
 warnings, uninstall, building from source — are in the
 [install guide](https://octo-agent.dev/docs/getting-started/install/).
-The Windows installer is signed via the [SignPath Foundation](https://signpath.org/);
-the full code signing policy is in [SECURITY.md](SECURITY.md#code-signing-policy).
+The installers aren't code-signed yet; the full policy and how to verify
+releases by hash are in [SECURITY.md](SECURITY.md#code-signing-policy).
 
 ## Quick start
 
