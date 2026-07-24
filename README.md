@@ -15,8 +15,8 @@
 > Anthropic, OpenAI, or anything compatible), with the server and your data staying
 > on your own machine.
 
-<!-- TODO(demo): record a 15–30s hero GIF (one-line install → octo on DeepSeek → solve a real
-     coding task), drop it at landing/assets/demo.gif, and uncomment the block below. -->
+<!-- TODO(demo): run `vhs scripts/demo.tape` to generate landing/assets/demo.gif
+     (one-line install → one prompt → full agentic loop), then uncomment the block below. -->
 <!--
 <p align="center">
   <img src="landing/assets/demo.gif" alt="octo demo" width="760">

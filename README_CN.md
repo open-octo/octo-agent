@@ -14,8 +14,8 @@
 > 接**任意模型**（DeepSeek、Kimi、Anthropic、OpenAI 或任何兼容端点），服务和
 > 数据都留在你自己的机器上。
 
-<!-- TODO(demo): 录一段 15–30s 首屏 GIF（装一行 → octo 接 DeepSeek → 解决一个真实编码任务），
-     放到 landing/assets/demo.gif，然后取消下面这段注释。 -->
+<!-- TODO(demo): 跑 `vhs scripts/demo.tape` 生成 landing/assets/demo.gif
+     （一行安装 → 一句 prompt → 完整 agentic 循环），然后取消下面这段注释。 -->
 <!--
 <p align="center">
   <img src="landing/assets/demo.gif" alt="octo 演示" width="760">
