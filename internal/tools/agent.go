@@ -33,16 +33,21 @@ func (AgentTool) Definition() agent.ToolDefinition {
 			"The sub-agent runs with its own context window and tool budget. " +
 			"Use when you need parallel investigation, a fresh context for an isolated " +
 			"sub-problem, or when the task is well-defined enough to delegate.\n\n" +
-			"Two modes:\n" +
+			"Two modes — pick by whether the task depends on THIS conversation's context:\n" +
 			"- **Fork** (omit subagent_type): the child inherits your full conversation — your " +
-			"system prompt AND this conversation's messages so far — so it already has your " +
-			"context. Its own tool calls and output stay in its branch and never enter your " +
-			"context; only its final reply comes back. Use to offload a chunk of your own work " +
-			"(deep investigation, a focused edit) and get just the conclusion. `prompt` is the " +
-			"specific task to do now.\n" +
-			"- **Fresh agent** (set subagent_type): the child starts with zero context and a " +
-			"specialized persona. Provide a complete task description. Use when you want an " +
-			"independent read (e.g. code review).\n\n" +
+			"system prompt AND this conversation's messages so far. Its own tool calls and output " +
+			"stay in its branch and never enter your context; only its final reply comes back. " +
+			"Fork ONLY when the task builds on context accumulated here that would be costly to " +
+			"restate (e.g. verifying a hypothesis this conversation just formed). Every fork " +
+			"re-sends your whole conversation, so it costs your full context per child. " +
+			"Self-check: if you find yourself writing a self-contained prompt, don't fork — use a " +
+			"typed agent.\n" +
+			"- **Typed agent** (set subagent_type): the child starts with zero conversation " +
+			"context and a specialized persona; provide a complete, self-contained task " +
+			"description. Prefer this whenever the task can be stated standalone, and ALWAYS for " +
+			"a parallel fan-out of independent sub-tasks: 'explore' for read-only " +
+			"investigation/research, 'general' for delegated work that modifies files, " +
+			"'code-review' for an independent read of changes.\n\n" +
 			"Set run_in_background=true when you are dispatching multiple independent sub-agents that can run in parallel, " +
 			"or when a sub-agent is expected to take a while. You will be notified when it completes. " +
 			"Leave it false (default) to block and receive the result directly when the task is short. " +
@@ -141,7 +146,8 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 	if preset != nil {
 		req.SystemSuffix = preset.persona
 		req.ReadOnly = preset.readOnly
-		req.LeanContext = preset.lean
+		req.LeanSystem = preset.leanSystem
+		req.LiteModel = preset.liteModel
 		req.DisallowedTools = preset.disallowedTools
 		if len(callTools) == 0 {
 			req.Tools = preset.tools

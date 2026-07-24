@@ -65,13 +65,13 @@ const childMaxTurns = 100
 func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.SpawnResult, error) {
 	childTools := filterChildTools(s.toolsFn(ctx), req.Tools, req.DisallowedTools, req.ReadOnly)
 
-	// Pick the child's sender + model. A lean preset (explore/plan) runs on the
+	// Pick the child's sender + model. A lite preset (plan) runs on the
 	// parent's lite model when one is configured — its own cheaper sender, not
 	// the main one, since a named lite model may live on a different provider.
-	// An explicit req.Model always wins; otherwise lean → lite, else parent's.
+	// An explicit req.Model always wins; otherwise lite → lite, else parent's.
 	sender, model := s.parent.GetSender(), req.Model
 	if model == "" {
-		if req.LeanContext && s.parent.LiteModel != "" && s.parent.LiteSender != nil {
+		if req.LiteModel && s.parent.LiteModel != "" && s.parent.LiteSender != nil {
 			sender, model = s.parent.LiteSender, s.parent.LiteModel
 		} else {
 			model = s.parent.Model
@@ -81,7 +81,7 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 	// Lean presets are seeded with the lean system prompt (skills + memory
 	// dropped) when the parent has one; everyone else shares the full identity.
 	baseSystem := s.parent.System // base + soul + env + skills + memory + …
-	if req.LeanContext && s.parent.LeanSystem != "" {
+	if req.LeanSystem && s.parent.LeanSystem != "" {
 		baseSystem = s.parent.LeanSystem
 	}
 

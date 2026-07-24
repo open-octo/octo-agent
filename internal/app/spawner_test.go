@@ -526,19 +526,46 @@ func TestAgentSpawner_LeanUsesLiteModelAndSystem(t *testing.T) {
 
 	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
 	if _, err := sp.Spawn(context.Background(), tools.SpawnRequest{
-		Prompt: "go", LeanContext: true, SystemSuffix: "PERSONA",
+		Prompt: "go", LeanSystem: true, LiteModel: true, SystemSuffix: "PERSONA",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	lc := sp.reg.m[onlyChildID(t, sp)]
 	if lc.agent.Model != "lite-model" {
-		t.Errorf("lean child model = %q, want lite-model", lc.agent.Model)
+		t.Errorf("lite child model = %q, want lite-model", lc.agent.Model)
 	}
 	if lc.agent.GetSender() != lite {
-		t.Error("lean child should run on the lite sender, not the main one")
+		t.Error("lite child should run on the lite sender, not the main one")
 	}
 	if lc.agent.System != "LEAN BASE\n\nPERSONA" {
 		t.Errorf("lean child System = %q, want lean base + persona", lc.agent.System)
+	}
+}
+
+// TestAgentSpawner_LeanSystemKeepsParentModel verifies the two lean halves are
+// independent: an explore-shaped request (LeanSystem only) trims the system
+// prompt but keeps the parent's model and sender.
+func TestAgentSpawner_LeanSystemKeepsParentModel(t *testing.T) {
+	main := &subAgentSender{reply: "main"}
+	lite := &subAgentSender{reply: "lite"}
+	parent := agent.New(main, "main-model")
+	parent.System = "FULL BASE"
+	parent.LeanSystem = "LEAN BASE"
+	parent.LiteSender = lite
+	parent.LiteModel = "lite-model"
+
+	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
+	if _, err := sp.Spawn(context.Background(), tools.SpawnRequest{
+		Prompt: "go", LeanSystem: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	lc := sp.reg.m[onlyChildID(t, sp)]
+	if lc.agent.Model != "main-model" || lc.agent.GetSender() != main {
+		t.Errorf("LeanSystem alone must not downgrade the model; got model=%q", lc.agent.Model)
+	}
+	if lc.agent.System != "LEAN BASE" {
+		t.Errorf("System = %q, want the lean system prompt", lc.agent.System)
 	}
 }
 
@@ -548,7 +575,7 @@ func TestAgentSpawner_LeanFallsBackWithoutLiteModel(t *testing.T) {
 	parent.System = "FULL BASE" // no LeanSystem, no LiteSender/LiteModel
 
 	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
-	if _, err := sp.Spawn(context.Background(), tools.SpawnRequest{Prompt: "go", LeanContext: true}); err != nil {
+	if _, err := sp.Spawn(context.Background(), tools.SpawnRequest{Prompt: "go", LeanSystem: true, LiteModel: true}); err != nil {
 		t.Fatal(err)
 	}
 	lc := sp.reg.m[onlyChildID(t, sp)]
@@ -567,7 +594,7 @@ func TestAgentSpawner_ExplicitModelWinsOverLean(t *testing.T) {
 	parent.LiteSender, parent.LiteModel = lite, "lite-model"
 
 	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
-	if _, err := sp.Spawn(context.Background(), tools.SpawnRequest{Prompt: "go", LeanContext: true, Model: "explicit"}); err != nil {
+	if _, err := sp.Spawn(context.Background(), tools.SpawnRequest{Prompt: "go", LiteModel: true, Model: "explicit"}); err != nil {
 		t.Fatal(err)
 	}
 	lc := sp.reg.m[onlyChildID(t, sp)]
