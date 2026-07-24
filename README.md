@@ -152,8 +152,10 @@ Codex 的 record & replay 只在 macOS 应用里提供，octo 的浏览器录制
 - **Obsidian 插件** —— [`open-octo/octo-obsidian`](https://github.com/open-octo/octo-obsidian)
 - **Go SDK** —— [`pkg/octoagent`](pkg/octoagent)，把 agent 循环嵌进你自己的程序
 
-第八个界面移动端 App 即将上线。哪些接口可以放心依赖见
-[COMPATIBILITY.md](COMPATIBILITY.md)；安全边界见 [SECURITY.md](SECURITY.md)。
+第八个界面——移动端 App（iOS + Android）——已实现，目前是**开发者预览**：现在即可从源码
+自建、配合自托管 relay 使用（见 [`mobile/`](mobile/)），托管 relay 与应用商店版本在路上。
+哪些接口可以放心依赖见 [COMPATIBILITY.md](COMPATIBILITY.md)；安全边界见
+[SECURITY.md](SECURITY.md)。
 
 ## 深入了解
 

@@ -145,8 +145,11 @@ both: Claude Code for the heavy lifting, octo on DeepSeek for everything else.
 - **Obsidian plugin** — [`open-octo/octo-obsidian`](https://github.com/open-octo/octo-obsidian)
 - **Go SDK** — [`pkg/octoagent`](pkg/octoagent), embed the agent loop in your own programs
 
-The eighth, a mobile app, is landing next. What you can build on is declared in
-[COMPATIBILITY.md](COMPATIBILITY.md); the security boundary in [SECURITY.md](SECURITY.md).
+The eighth — a mobile app (iOS + Android) — is implemented and in **developer
+preview**: buildable from source today against a self-hosted relay (see
+[`mobile/`](mobile/)), with a hosted relay and app-store builds next. What you
+can build on is declared in [COMPATIBILITY.md](COMPATIBILITY.md); the security
+boundary in [SECURITY.md](SECURITY.md).
 
 ## Learn more
 
