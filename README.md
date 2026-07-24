@@ -108,6 +108,12 @@ Three beliefs drive the project:
 - **The agent should live where you already are.** IM bridges (WeChat iLink,
   Feishu, DingTalk, WeCom, Discord, Telegram) are core features, not
   afterthoughts — assign a task at your desk, follow up from your phone.
+- **Frontier features, without the gates.** In June 2026 Claude Code shipped
+  dynamic workflows and Codex shipped record & replay (macOS only). octo has
+  both, on its own terms: a workflow fans out at most 8 concurrent sub-agents
+  (the rest queue — every task still completes, the token bill stays bounded),
+  and browser record / replay, self-healing included, treats Windows and Linux
+  as first-class.
 
 And one honest word: if you have a Claude subscription and you're happy with it,
 keep using Claude Code — it earns its price. octo is for everyone the
