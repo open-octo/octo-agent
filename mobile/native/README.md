@@ -6,15 +6,18 @@ code, and never enter JavaScript (see `../src/native-bridge.ts` for the contract
 and `../src/transport.ts` for the caller).
 
 These files are the **reference source**, committed here because the generated
-`ios/` and `android/` folders (from `npx cap add`) are gitignored. On a Mac,
-after `npx cap add ios` / `add android`, place them into the platform projects:
+`ios/` and `android/` folders (from `npx cap add`) are gitignored.
 
-- **iOS** — `OctoTunnelPlugin.swift` → place at `ios/App/App/OctoTunnelPlugin.swift`.
-  It is a pure-Swift Capacitor plugin (conforms to `CAPBridgedPlugin`), so no
-  companion Objective-C `CAP_PLUGIN` macro file is needed. See the wiring below.
-- **Android** — `OctoTunnelPlugin.kt` → place at
-  `android/app/src/main/java/dev/octo/mobile/OctoTunnelPlugin.kt`. See the wiring
-  below.
+**You normally don't apply any of this by hand** — `../scripts/wire-native.mjs`
+does all of it (copy the plugin, register it, patch Gradle / Manifest /
+Info.plist / the Xcode project) idempotently. Run it after every `npx cap add`:
+
+```bash
+npm run wire-native -- --local   # drop --local for a release build
+```
+
+The rest of this document is the reference for **what wire-native does and
+why** — read it to understand or debug the wiring, not to perform it.
 
 ## Status
 
@@ -41,60 +44,64 @@ They interoperate with the Go host (`internal/tunnel`) and relay
   `"frame"` listener event. Cipher use is serialized — a Noise CipherState nonce
   is stateful.
 
-## Android wiring (after `npx cap add android`)
+## Android wiring (what wire-native does)
 
-The generated `android/` is gitignored, so redo these each time it is
-regenerated:
+Applied automatically after `npx cap add android`:
 
 1. **Kotlin plugin** — the project template is Java-only. In the root
    `android/build.gradle` buildscript dependencies add
    `classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22'`; in
    `android/app/build.gradle` add `apply plugin: 'kotlin-android'`, a
-   `kotlinOptions { jvmTarget = "17" }` block, and
+   `kotlinOptions { jvmTarget = "21" }` block (must match javac's target — the
+   Android Studio JBR is 21, and AGP fails the build on a mismatch), and
    `implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.22"`.
 2. **Dependencies** (`android/app/build.gradle`, resolved from Maven Central):
    - `implementation "com.github.auties00:noise-java:1.2"` — Noise XX; its
      `com.southernstorm.noise` classes are pure Java (no NDK).
    - `implementation "com.squareup.okhttp3:okhttp:4.12.0"` — relay WebSocket.
 3. **Register** the plugin in `MainActivity` **before** `super.onCreate`:
-   `registerPlugin(OctoTunnelPlugin.class);`. The pairing screen scans a QR with
-   `getUserMedia`, so also request `CAMERA` at runtime there.
+   `registerPlugin(OctoTunnelPlugin.class);`. Capacitor 7's template is a
+   bodyless `class MainActivity extends BridgeActivity {}`, so wire-native
+   expands it with an `onCreate` that registers the plugin. The pairing screen
+   scans a QR with `getUserMedia`, so `CAMERA` is requested at runtime there.
 4. **AndroidManifest.xml** — add `android.permission.CAMERA` (plus a non-required
    `android.hardware.camera` feature) and, on `MainActivity`, an
    `android.intent.action.VIEW` intent-filter for the `octo-pair` scheme so a
    scanned QR opens the app as a deep link.
-5. **Local testing only** — to reach a plaintext `ws://` relay from the emulator
-   (`10.0.2.2`), set `android:usesCleartextTraffic="true"` on `<application>`.
-   Production uses `wss://`; do not ship cleartext.
+5. **Local testing only** (`--local`) — to reach a plaintext `ws://` relay from
+   the emulator (`10.0.2.2`), set `android:usesCleartextTraffic="true"` on
+   `<application>`. Production uses `wss://`; do not ship cleartext.
 
-## iOS wiring (after `npx cap add ios` + `pod install`)
+## iOS wiring (what wire-native does)
 
-The generated `ios/` is gitignored, so redo these each time it is regenerated:
+Applied automatically after `npx cap add ios`. Capacitor 7 uses Swift Package
+Manager, so there is no `pod install`.
 
-1. **Plugin source** — add `OctoTunnelPlugin.swift` to the `App` target
-   (`ios/App/App/`). It is pure Swift and conforms to `CAPBridgedPlugin`; no
-   `.m` file is needed. It uses CryptoKit (Curve25519 / ChaChaPoly / SHA256 /
-   HMAC-HKDF) — no third-party dependency.
-2. **Register the plugin.** Capacitor's ObjC-runtime auto-scan does not reliably
+1. **Plugin source** — `OctoTunnelPlugin.swift` is copied into the `App` target
+   (`ios/App/App/`) **and added to `project.pbxproj`** (build file + file ref +
+   group + Sources phase). `cap add ios` copies nothing into the project, so
+   without the pbxproj entry the file wouldn't compile. It is pure Swift,
+   conforms to `CAPBridgedPlugin` (no `.m` file), and uses CryptoKit
+   (Curve25519 / ChaChaPoly / SHA256 / HMAC-HKDF) — no third-party dependency.
+2. **Register the plugin.** Capacitor's ObjC-runtime auto-scan doesn't reliably
    surface an app-target Swift plugin, and `registerPluginType` is a no-op while
-   `autoRegisterPlugins` is on. Register an instance explicitly: subclass
-   `CAPBridgeViewController` and override `capacitorDidLoad()` with
-   `bridge?.registerPluginInstance(OctoTunnelPlugin())`, then use that subclass
-   as the bridge view controller (Main.storyboard's custom class, or the
-   programmatic root VC).
+   `autoRegisterPlugins` is on. So wire-native generates
+   `OctoBridgeViewController.swift` — a `CAPBridgeViewController` subclass that
+   registers the **instance** in `capacitorDidLoad()`
+   (`bridge?.registerPluginInstance(OctoTunnelPlugin())`) — and rewrites
+   `AppDelegate` to build it as the window's root view controller in code.
+   Building the root VC programmatically also drops `Main.storyboard` (and
+   `UIMainStoryboardFile` from Info.plist): under Xcode 26's SDK with an older
+   simulator runtime, compiling the storyboard fails "Platform Not Installed",
+   and the programmatic root sidesteps it. This is always done now (not a
+   per-machine workaround).
 3. **Info.plist** — add `NSCameraUsageDescription` (getUserMedia QR scan) and a
    `CFBundleURLTypes` entry for the `octo-pair` scheme (the deep link Capacitor's
    `App` plugin delivers as `appUrlOpen`).
-4. **Local testing only** — add `NSAppTransportSecurity → NSAllowsLocalNetworking
-   = true` so the app can reach a plaintext `ws://127.0.0.1` relay on the
-   simulator (the simulator shares the Mac's network; no `10.0.2.2` needed).
-   Production uses `wss://`.
-
-> Note: on a machine whose installed simulator runtime matches the Xcode SDK,
-> keep the generated storyboards. This environment only had an older iOS runtime,
-> so the local `ios/` project was patched to drop the storyboards and build the
-> bridge view controller programmatically — a workaround for the toolchain
-> mismatch, not part of the plugin.
+4. **Local testing only** (`--local`) — add `NSAppTransportSecurity →
+   NSAllowsLocalNetworking = true` so the app can reach a plaintext
+   `ws://127.0.0.1` relay on the simulator (the simulator shares the Mac's
+   network; no `10.0.2.2` needed). Production uses `wss://`.
 
 The JS side (`../src/plugin.ts`) resolves every plugin — `OctoTunnel` and
 first-party ones like `App` — through `@capacitor/core`'s `registerPlugin`, not
