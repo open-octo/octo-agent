@@ -4,13 +4,14 @@
   // managed tunnel (M1); for now this reflects the live socket state so the feed
   // never silently shows stale data as if live.
   import { wsState, wsReconnect } from '../lib/ws'
+  import { t } from '../lib/i18n'
 
   const label = $derived(
     $wsState === 'connected'
-      ? '已连接远程主机'
+      ? $t('m.dev_connected')
       : $wsState === 'connecting' || $wsReconnect
-        ? '连接中…'
-        : '已断开 · 等待重连',
+        ? $t('m.dev_connecting')
+        : $t('m.dev_offline'),
   )
 </script>
 

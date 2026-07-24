@@ -13,6 +13,7 @@
 // simplified view; the detailed tool/progress rendering is batch 2.
 import { get } from 'svelte/store'
 import { ws } from '../lib/ws'
+import { tr } from '../lib/i18n'
 import * as api from '../lib/api'
 import { observeArtifact, resetArtifacts } from '../lib/artifacts'
 import {
@@ -202,7 +203,7 @@ export function wireMobileSession(sid: string): () => void {
   cleanups.push(ws.on('turn_error', (ev: any) => {
     if (!forSid(ev)) return
     addChatMsg(sid, {
-      id: uid('err'), type: 'notice', content: `错误: ${ev.error ?? 'request failed'}`,
+      id: uid('err'), type: 'notice', content: `${tr('m.err_prefix')}: ${ev.error ?? 'request failed'}`,
       level: 'error', createdAt: Date.now(), streaming: false, tools: [], todos: [],
     })
     chatStreaming.update(s => ({ ...s, [sid]: false }))
@@ -232,7 +233,7 @@ export function wireMobileSession(sid: string): () => void {
       return { ...m, [sid]: msgs }
     })
     chatStreaming.update(s => ({ ...s, [sid]: false }))
-    showToast(ev.message ?? '发送失败', 'error')
+    showToast(ev.message ?? tr('m.send_fail'), 'error')
   }
   cleanups.push(ws.on('send_rejected', (ev: any) => {
     if (!forSid(ev)) return
@@ -242,7 +243,7 @@ export function wireMobileSession(sid: string): () => void {
     if (!forSid(ev)) return
     // Mobile has no force-takeover UI yet, so treat it as a rejection rather
     // than leaving the turn stuck: roll back and tell the user it's in use.
-    rollbackSend({ message: ev.message ?? '会话正被其他端占用' })
+    rollbackSend({ message: ev.message ?? tr('m.session_busy') })
   }))
 
   cleanups.push(ws.on('session_update', (ev: any) => {

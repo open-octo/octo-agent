@@ -9,6 +9,7 @@
   import { resetArtifacts } from '../lib/artifacts'
   import { ws } from '../lib/ws'
   import { wireMobileSession, loadMobileHistory, sendMobile } from './chatWiring'
+  import { t, tr } from '../lib/i18n'
 
   let { onBack, onViewApproval, initialPrompt = '', onInitialSent }: {
     onBack: () => void
@@ -24,7 +25,7 @@
   const msgs = $derived($chatMessages[sid] ?? [])
   const streaming = $derived($chatStreaming[sid] ?? false)
   const session = $derived($sessions.find(s => s.id === sid) ?? null)
-  const title = $derived(session?.title || session?.name || '会话')
+  const title = $derived(session?.title || session?.name || $t('m.session'))
   // A confirmation raised for THIS session while it's open — surface an inline
   // entry to the approval detail (the feed card is out of view here).
   const pendingApproval = $derived(session?.pending_confirmation ?? false)
@@ -86,19 +87,19 @@
   function toolLabel(tools: any[]): string {
     if (!tools?.length) return ''
     const names = tools.map(t => t.name).filter(Boolean)
-    return names.length ? names.join(' · ') : `${tools.length} 个工具`
+    return names.length ? names.join(' · ') : tr('m.n_tools').replace('{n}', String(tools.length))
   }
 </script>
 
 <header class="dhead">
-  <button class="back" onclick={onBack} aria-label="返回">
+  <button class="back" onclick={onBack} aria-label={$t('m.back')}>
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--m-text)" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
   </button>
   <div class="dtitle">
     <span class="t">{title}</span>
     <span class="sub">
       <span class="d" class:live={streaming}></span>
-      {streaming ? '处理中' : '空闲'}{session?.model ? ` · ${session.model}` : ''}
+      {streaming ? $t('m.working') : $t('m.idle')}{session?.model ? ` · ${session.model}` : ''}
     </span>
   </div>
 </header>
@@ -106,8 +107,8 @@
 {#if pendingApproval}
   <button class="approve-banner" onclick={onViewApproval}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--m-warning)" stroke-width="2"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6A2 2 0 0 0 22 18L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
-    <span class="txt">agent 请求审批</span>
-    <span class="go">查看 ›</span>
+    <span class="txt">{$t('m.approval_banner')}</span>
+    <span class="go">{$t('m.view')} ›</span>
   </button>
 {/if}
 
@@ -133,7 +134,7 @@
   {/each}
   {#if $artifacts.length}
     <div class="artifacts">
-      <div class="alabel">制品</div>
+      <div class="alabel">{$t('m.artifacts')}</div>
       {#each $artifacts as a (a.path)}
         <div class="acard">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--m-accent)" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
@@ -149,7 +150,7 @@
   <div class="stopbar">
     <button class="stop" onclick={stop}>
       <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-      停止生成
+      {$t('m.stop_gen')}
     </button>
   </div>
 {/if}
@@ -160,10 +161,10 @@
     onkeydown={onKey}
     oncompositionstart={() => (composing = true)}
     oncompositionend={() => (composing = false)}
-    placeholder="回复 agent…"
+    placeholder={$t('m.reply_ph')}
     rows="1"
   ></textarea>
-  <button class="send" onclick={send} disabled={!draft.trim()} aria-label="发送">
+  <button class="send" onclick={send} disabled={!draft.trim()} aria-label={$t('m.send')}>
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>
   </button>
 </div>

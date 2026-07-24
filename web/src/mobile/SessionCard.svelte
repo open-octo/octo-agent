@@ -1,21 +1,22 @@
 <script lang="ts">
   import type { FeedItem, FeedKind } from './feedGroups'
+  import { t, tr } from '../lib/i18n'
 
   let { item, onOpen }: { item: FeedItem; onOpen: (id: string, kind: FeedKind) => void } = $props()
 
   const s = $derived(item.session)
-  const title = $derived(s.title || s.name || '未命名会话')
+  const title = $derived(s.title || s.name || $t('m.untitled'))
 
   function ago(iso: string): string {
     if (!iso) return ''
     const ms = Date.now() - new Date(iso).getTime()
     if (Number.isNaN(ms)) return ''
     const m = Math.floor(ms / 60000)
-    if (m < 1) return '刚刚'
-    if (m < 60) return `${m} 分钟前`
+    if (m < 1) return tr('m.just_now')
+    if (m < 60) return tr('m.min_ago').replace('{n}', String(m))
     const h = Math.floor(m / 60)
-    if (h < 24) return `${h} 小时前`
-    return `${Math.floor(h / 24)} 天前`
+    if (h < 24) return tr('m.hr_ago').replace('{n}', String(h))
+    return tr('m.day_ago').replace('{n}', String(Math.floor(h / 24)))
   }
 </script>
 
@@ -28,9 +29,9 @@
   <div class="top">
     <span class="title">{title}</span>
     {#if item.kind === 'reply'}
-      <span class="tag tag-accent">待你回复</span>
+      <span class="tag tag-accent">{$t('m.tag_reply')}</span>
     {:else if item.kind === 'approval'}
-      <span class="tag tag-warn">待审批</span>
+      <span class="tag tag-warn">{$t('m.tag_approval')}</span>
     {:else if item.kind === 'running'}
       <span class="pulse"></span>
     {:else}
@@ -39,7 +40,7 @@
   </div>
   <div class="meta">
     {#if item.kind === 'running'}
-      <span class="running">agent 正在处理<span class="blink">•••</span></span>
+      <span class="running">{$t('m.card_running')}<span class="blink">•••</span></span>
     {:else}
       <span class="mono">{s.model || s.model_id || ''}</span>
     {/if}

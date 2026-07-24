@@ -6,6 +6,7 @@
   import { onMount } from 'svelte'
   import { sessions, showToast } from '../lib/stores'
   import * as api from '../lib/api'
+  import { t, tr } from '../lib/i18n'
 
   let { onOpenSession }: { onOpenSession: (id: string) => void } = $props()
 
@@ -32,7 +33,7 @@
       tasks = await api.listTasks()
     } catch (e: any) {
       loadError = true
-      showToast(e?.message ?? '加载任务失败', 'error')
+      showToast(e?.message ?? tr('m.tasks_load_fail'), 'error')
     } finally {
       loading = false
     }
@@ -47,12 +48,12 @@
     try {
       await api.toggleTask(t.id, next)
       tasks = tasks.map(r => (r.id === t.id ? { ...r, enabled: next } : r))
-      showToast(next ? '任务已恢复' : '任务已暂停')
+      showToast(next ? tr('m.task_resumed') : tr('m.task_paused'))
       // The server recomputes next_run on resume; refresh silently so the
       // card doesn't show a stale "下次 —" until the next tab visit.
       api.listTasks().then(r => (tasks = r)).catch(() => {})
     } catch (e: any) {
-      showToast(e?.message ?? '更新任务失败', 'error')
+      showToast(e?.message ?? tr('m.task_update_fail'), 'error')
     } finally {
       togglingId = null
     }
@@ -64,7 +65,7 @@
     runningId = t.id
     try {
       const res = await api.runTask(t.id)
-      showToast('任务已启动')
+      showToast(tr('m.task_started'))
       if (res.session_id) {
         // Refresh the session list so the feed knows the new session, then
         // jump straight into its chat detail to watch the run live.
@@ -73,54 +74,54 @@
         onOpenSession(res.session_id)
       }
     } catch (e: any) {
-      showToast(e?.message ?? '运行任务失败', 'error')
+      showToast(e?.message ?? tr('m.task_run_fail'), 'error')
     } finally {
       runningId = null
     }
   }
 </script>
 
-<header class="head"><h1>任务</h1></header>
+<header class="head"><h1>{$t('m.tab_tasks')}</h1></header>
 
 <div class="scroll">
   <div class="stats">
-    <div class="stat"><span class="num on">{activeCount}</span><span class="cap">启用</span></div>
-    <div class="stat"><span class="num">{tasks.length - activeCount}</span><span class="cap">暂停</span></div>
-    <div class="stat"><span class="num">{tasks.length}</span><span class="cap">总数</span></div>
+    <div class="stat"><span class="num on">{activeCount}</span><span class="cap">{$t('m.tasks_stat_enabled')}</span></div>
+    <div class="stat"><span class="num">{tasks.length - activeCount}</span><span class="cap">{$t('m.tasks_stat_paused')}</span></div>
+    <div class="stat"><span class="num">{tasks.length}</span><span class="cap">{$t('m.tasks_stat_total')}</span></div>
   </div>
 
   {#if loading}
-    <div class="empty">加载中…</div>
+    <div class="empty">{$t('m.loading')}</div>
   {:else if loadError}
-    <button class="empty retry" onclick={load}>加载失败 · 点击重试</button>
+    <button class="empty retry" onclick={load}>{$t('m.load_retry')}</button>
   {:else if tasks.length === 0}
-    <div class="empty">还没有定时任务 · 在桌面端用 /cron-task-creator 创建</div>
+    <div class="empty">{$t('m.tasks_empty')}</div>
   {:else}
-    {#each tasks as t (t.id)}
-      <div class="card" class:off={!t.enabled}>
+    {#each tasks as t2 (t2.id)}
+      <div class="card" class:off={!t2.enabled}>
         <div class="top">
           <div class="names">
-            <span class="name">{t.name}</span>
-            {#if t.agent || t.model}<span class="target">{t.agent || t.model}</span>{/if}
+            <span class="name">{t2.name}</span>
+            {#if t2.agent || t2.model}<span class="target">{t2.agent || t2.model}</span>{/if}
           </div>
           <button
             class="switch"
-            class:on={t.enabled}
+            class:on={t2.enabled}
             role="switch"
-            aria-checked={t.enabled}
-            aria-label={t.enabled ? '暂停任务' : '恢复任务'}
+            aria-checked={t2.enabled}
+            aria-label={t2.enabled ? $t('m.pause_task') : $t('m.resume_task')}
             disabled={togglingId !== null}
-            onclick={() => toggle(t)}
+            onclick={() => toggle(t2)}
           ><span class="knob"></span></button>
         </div>
         <div class="meta">
-          <span class="cron">{t.cron || '—'}</span>
-          <span class="runline">上次 {fmtDate(t.last_run)} · 下次 {t.enabled ? fmtDate(t.next_run) : '—'}</span>
+          <span class="cron">{t2.cron || '—'}</span>
+          <span class="runline">{$t('m.last_run')} {fmtDate(t2.last_run)} · {$t('m.next_run')} {t2.enabled ? fmtDate(t2.next_run) : '—'}</span>
         </div>
         <div class="acts">
-          <button class="run" disabled={runningId !== null} onclick={() => runNow(t)}>
+          <button class="run" disabled={runningId !== null} onclick={() => runNow(t2)}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-            {runningId === t.id ? '启动中…' : '立即运行'}
+            {runningId === t2.id ? $t('m.starting') : $t('m.run_now')}
           </button>
         </div>
       </div>
