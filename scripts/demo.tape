@@ -32,12 +32,14 @@ Set Theme "Catppuccin Mocha"
 Set TypingSpeed 55ms
 Set WaitTimeout 240s
 
-# --- hidden setup: sandboxed install dir + clean workspace -------------------
+# --- hidden setup: sandboxed install dir + a real repo to explore ------------
 # Add `export OCTO_VERSION=<latest>;` in front when re-running repeatedly.
+# The workspace is a shallow clone of octo itself — beat 2 has the agent
+# explore its own implementation.
 Hide
-Type `export OCTO_INSTALL_DIR="$HOME/.octo-demo-bin"; export PATH="$OCTO_INSTALL_DIR:$PATH"; rm -rf ~/octo-demo-ws; mkdir -p ~/octo-demo-ws; cd ~/octo-demo-ws; clear`
+Type `export OCTO_INSTALL_DIR="$HOME/.octo-demo-bin"; export PATH="$OCTO_INSTALL_DIR:$PATH"; rm -rf ~/octo-demo-ws; git clone --depth 1 -q https://github.com/open-octo/octo-agent ~/octo-demo-ws; cd ~/octo-demo-ws; clear`
 Enter
-Sleep 1s
+Sleep 15s
 Show
 
 # --- beat 1: one-line install --------------------------------------------------
@@ -51,11 +53,19 @@ Wait+Screen@120s /installed octo/
 Show
 Sleep 2.5s
 
-# --- beat 2: one prompt, full agentic loop -------------------------------------
-# Swap the task freely — keep it under ~30s of agent time so the GIF stays tight.
-Type `octo "Create fizzbuzz.py, run it for n=15 and show me the output"`
+# --- beat 2: one prompt, parallel sub-agent fan-out ----------------------------
+# octo explores its own codebase with 3 concurrent sub-agents, then summarizes.
+# NOTE: needs a release that includes open-octo/octo-agent#1737 (one-shot forces
+# sub-agents synchronous) — on older releases the model may dispatch the
+# children async and exit before the summary.
+Type `octo "Use 3 sub-agents in parallel to explore octo's three core implementations — 1. the recycle bin, 2. workflows, 3. browser record & replay — then give me a summary."`
 Sleep 500ms
 Enter
+# Show the fan-out starting, then skip the ~2-3 min wait; the sub_agent lines
+# carry their real durations, so the cut is honest.
+Sleep 12s
+Hide
 # The one-shot exits back to the shell (VHS prompt is ">") when the loop ends.
-Wait@240s />$/
-Sleep 4s
+Wait@600s />$/
+Show
+Sleep 6s
