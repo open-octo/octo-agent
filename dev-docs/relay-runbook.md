@@ -140,7 +140,10 @@ currently-connected phone is dropped — the live tunnel already carries the
 update.
 
 - **APNs**: a `.p8` signing key + key id + team id + the app bundle id as
-  topic (`--apns-key-file/--apns-key-id/--apns-team-id/--apns-topic`).
+  topic (`--apns-key-file/--apns-key-id/--apns-team-id/--apns-topic`). The
+  relay talks to PRODUCTION APNs: tokens from a dev/debug build belong to the
+  sandbox and will fail with BadDeviceToken — verify wakeups with a
+  TestFlight or release build.
 - **FCM**: a Firebase service-account JSON (`--fcm-credentials`); the project
   id is read from the file.
 - Credential files go under `/etc/octo-relay/` (readable by the service

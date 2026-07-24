@@ -2,7 +2,9 @@ package push
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/url"
 
 	"github.com/sideshow/apns2"
 	"github.com/sideshow/apns2/payload"
@@ -46,7 +48,15 @@ func (a *APNS) Wake(ctx context.Context, _ string, deviceToken string) error {
 	}
 	res, err := a.client.PushWithContext(ctx, n)
 	if err != nil {
-		return err
+		// apns2 puts the device token in the request URL, and a transport
+		// failure surfaces as *url.Error whose Error() embeds that URL — the
+		// caller logs our return value, so strip the URL and keep only the
+		// operation and underlying cause.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			return fmt.Errorf("apns: %s: %w", ue.Op, ue.Err)
+		}
+		return fmt.Errorf("apns: %v", err)
 	}
 	if !res.Sent() {
 		// Reason strings are Apple error codes (BadDeviceToken, …), token-free.

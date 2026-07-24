@@ -1,10 +1,13 @@
 package push
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
 
@@ -26,7 +29,12 @@ func NewFCM(credFile string) (*FCM, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fcm credentials: %w", err)
 	}
-	src := jwtCfg.TokenSource(nil)
+	// A bounded client for the token endpoint: TokenSource(nil) would use
+	// http.DefaultClient (no timeout), and Token() ignores the per-wake
+	// context — a hung Google endpoint would strand wakeup goroutines behind
+	// ReuseTokenSource's mutex indefinitely.
+	authCtx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{Timeout: 10 * time.Second})
+	src := jwtCfg.TokenSource(authCtx)
 	return &FCM{
 		Endpoint: "https://fcm.googleapis.com/v1/projects/" + project + "/messages:send",
 		Authorize: func(req *http.Request) error {

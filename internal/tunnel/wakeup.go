@@ -27,8 +27,11 @@ const wakeupMinInterval = 30 * time.Second
 
 // pushReg is one phone's registered push token. deviceID is the phone's
 // relay-assigned id from the connection the registration arrived on — the
-// relay uses it to check "is this phone currently connected"; the phone
-// re-registers on every connect, so it stays current.
+// relay uses it to check "is this phone currently connected". The phone
+// re-registers on every connect, but there is a window (reconnect until the
+// push-token frame lands, and after a host relay-reconnect reissues device
+// ids) where deviceID is stale: the relay then misses the connectivity match
+// and sends one redundant generic push. Benign, and capped by the rate limit.
 type pushReg struct {
 	token    string
 	platform string
@@ -66,10 +69,20 @@ func (t *Tunnel) registerPushToken(peerStatic []byte, deviceID, token, platform 
 
 // wakeDevices sends one wakeup frame per registered token, rate-limited per
 // phone. Connectivity gating happens at the relay (see the package comment).
+//
+// The relay write happens OUTSIDE pushMu: writeRelay blocks on a websocket
+// with no write deadline, and the relay read loop's registerPushToken path
+// also takes pushMu — holding it across a stalled write would wedge the read
+// loop until the socket died.
 func (t *Tunnel) wakeDevices() {
-	t.pushMu.Lock()
-	defer t.pushMu.Unlock()
 	now := time.Now()
+	type job struct {
+		reg     *pushReg
+		payload []byte
+		device  string
+	}
+	var jobs []job
+	t.pushMu.Lock()
 	for _, reg := range t.pushRegs {
 		if now.Sub(reg.lastWake) < wakeupMinInterval {
 			continue
@@ -78,12 +91,19 @@ func (t *Tunnel) wakeDevices() {
 		if err != nil {
 			continue
 		}
-		if err := t.writeRelay(frame{Type: frameWakeup, Device: reg.deviceID, Payload: payload}); err != nil {
+		jobs = append(jobs, job{reg: reg, payload: payload, device: reg.deviceID})
+	}
+	t.pushMu.Unlock()
+
+	for _, j := range jobs {
+		if err := t.writeRelay(frame{Type: frameWakeup, Device: j.device, Payload: j.payload}); err != nil {
 			// Relay down; its reconnect loop will recover. Don't burn the
 			// rate-limit window on a frame that never left.
 			continue
 		}
-		reg.lastWake = now
+		t.pushMu.Lock()
+		j.reg.lastWake = now
+		t.pushMu.Unlock()
 	}
 }
 

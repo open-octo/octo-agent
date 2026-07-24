@@ -15,19 +15,22 @@ import (
 // wakeRelay is a minimal /host endpoint that records every frame the tunnel
 // writes, so the test can assert exactly which wakeups went out.
 type wakeRelay struct {
-	srv    *httptest.Server
-	frames chan frame
+	srv       *httptest.Server
+	frames    chan frame
+	connected chan struct{}
+	once      sync.Once
 }
 
 func startWakeRelay(t *testing.T) *wakeRelay {
 	t.Helper()
-	r := &wakeRelay{frames: make(chan frame, 16)}
+	r := &wakeRelay{frames: make(chan frame, 16), connected: make(chan struct{})}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/host", func(w http.ResponseWriter, req *http.Request) {
 		ws, err := upgrader.Upgrade(w, req, nil)
 		if err != nil {
 			return
 		}
+		r.once.Do(func() { close(r.connected) })
 		for {
 			f, err := readFrame(ws)
 			if err != nil {
@@ -39,6 +42,15 @@ func startWakeRelay(t *testing.T) *wakeRelay {
 	r.srv = httptest.NewServer(mux)
 	t.Cleanup(r.srv.Close)
 	return r
+}
+
+func (r *wakeRelay) waitConnected(t *testing.T) {
+	t.Helper()
+	select {
+	case <-r.connected:
+	case <-time.After(3 * time.Second):
+		t.Fatal("tunnel never connected to the wake relay")
+	}
 }
 
 // activityLoopback is a loopback /ws stub the watcher connects to; the test
@@ -146,6 +158,7 @@ func TestWakeupFlow(t *testing.T) {
 	defer cancel()
 	go func() { _ = tun.Serve(ctx) }()
 	loop.waitWatcher(t)
+	relay.waitConnected(t)
 
 	tun.registerPushToken([]byte("peer-static-1"), "dev-1", "tokenA", "apns")
 

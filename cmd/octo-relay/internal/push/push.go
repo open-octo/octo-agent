@@ -9,8 +9,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 )
 
@@ -79,9 +82,19 @@ func (f *FCM) Wake(ctx context.Context, _ string, token string) error {
 	}
 	res, err := client.Do(req)
 	if err != nil {
+		// A transport *url.Error embeds the request URL; FCM's URL carries
+		// only the project id (token rides in the body), but strip it anyway
+		// so this stays safe if the endpoint shape ever changes.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			return fmt.Errorf("fcm: %s: %w", ue.Op, ue.Err)
+		}
 		return err
 	}
+	// Drain (bounded) so the keep-alive connection is reusable; never
+	// surfaced anywhere — the body can echo the token.
 	defer res.Body.Close()
+	defer func() { _, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 4<<10)) }()
 	if res.StatusCode/100 != 2 {
 		// Status only — the response body can echo the token.
 		return fmt.Errorf("fcm: status %d", res.StatusCode)
