@@ -262,8 +262,11 @@ func (r DefaultRegistry) recordGrepReads(ctx context.Context, input map[string]a
 	}
 
 	// Single-file search: rg omits the path prefix from its output, so the
-	// only place the file appears is the input's own `path` argument.
-	if p, _ := input["path"].(string); p != "" {
+	// only place the file appears is the input's own `path` argument. A
+	// zero-match grep returns "(no matches)" with a nil error — in that case
+	// the model saw nothing, so don't stamp (it would wrongly unlock a blind
+	// edit of a file the search didn't actually surface).
+	if p, _ := input["path"].(string); p != "" && output != "(no matches)" {
 		record(p)
 	}
 

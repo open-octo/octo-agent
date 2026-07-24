@@ -441,3 +441,71 @@ func TestRegistry_GrepThenEdit_UnmatchedFileStillBlocked(t *testing.T) {
 		t.Errorf("editing a file grep did not surface should stay blocked, got %v", err)
 	}
 }
+
+// A grep with zero matches returns "(no matches)" with a nil error. That
+// output must NOT stamp the input path — the model saw nothing, so a
+// following edit would be a blind write the read-before-write guard must
+// still block. This is the regression guard for the no-match stamp bug.
+func TestRegistry_GrepSingleFileNoMatch_EditStillBlocked(t *testing.T) {
+	reg := NewDefaultRegistry()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "code.go")
+	if err := os.WriteFile(p, []byte("package x\nconst a = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := reg.Execute(context.Background(), "grep", map[string]any{
+		"pattern": "zzz_no_such_pattern", "path": p,
+	}); err != nil {
+		t.Fatalf("grep: %v", err)
+	}
+	_, err := reg.Execute(context.Background(), "edit_file", map[string]any{
+		"path": p, "old_string": "const a = 1", "new_string": "const a = 2",
+	})
+	if err == nil || !strings.Contains(err.Error(), "not been read") {
+		t.Errorf("edit after a zero-match grep should stay blocked, got %v", err)
+	}
+}
+
+// Count mode outputs "path:N" lines. Those must count as a read too.
+func TestRegistry_GrepCountModeThenEdit_Allowed(t *testing.T) {
+	reg := NewDefaultRegistry()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "code.go")
+	if err := os.WriteFile(p, []byte("package x\nconst a = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := reg.Execute(context.Background(), "grep", map[string]any{
+		"pattern": "const a", "path": dir, "mode": "count",
+	}); err != nil {
+		t.Fatalf("grep: %v", err)
+	}
+	if _, err := reg.Execute(context.Background(), "edit_file", map[string]any{
+		"path": p, "old_string": "const a = 1", "new_string": "const a = 2",
+	}); err != nil {
+		t.Errorf("edit after count-mode grep should succeed: %v", err)
+	}
+}
+
+// Context mode adds "path-N-text" lines and "--" group separators. The
+// separator line must not break parsing, and the hit file must still count.
+func TestRegistry_GrepContextModeThenEdit_Allowed(t *testing.T) {
+	reg := NewDefaultRegistry()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "code.go")
+	if err := os.WriteFile(p, []byte("package x\nconst a = 1\nvar b = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := reg.Execute(context.Background(), "grep", map[string]any{
+		"pattern": "const a", "path": dir, "context_lines": 1,
+	}); err != nil {
+		t.Fatalf("grep: %v", err)
+	}
+	if _, err := reg.Execute(context.Background(), "edit_file", map[string]any{
+		"path": p, "old_string": "const a = 1", "new_string": "const a = 2",
+	}); err != nil {
+		t.Errorf("edit after context-mode grep should succeed: %v", err)
+	}
+}
