@@ -1,0 +1,36 @@
+# systemd unit for the hosted octo-relay (M1a: single node, TLS at the relay).
+# Install: cp to /etc/systemd/system/octo-relay.service, then
+#   systemctl daemon-reload && systemctl enable --now octo-relay
+# Configuration lives in /etc/octo-relay/env (see env.example) so the unit
+# itself never changes between environments.
+
+[Unit]
+Description=octo-relay - end-to-end-encrypted tunnel relay
+Documentation=https://github.com/open-octo/octo-agent/tree/main/cmd/octo-relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=octo-relay
+Group=octo-relay
+EnvironmentFile=/etc/octo-relay/env
+ExecStart=/usr/local/bin/octo-relay --addr ${RELAY_ADDR} --tls-cert ${RELAY_TLS_CERT} --tls-key ${RELAY_TLS_KEY}
+Restart=always
+RestartSec=2
+
+# Binding :443 as a non-root user.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# The relay holds no state and writes nothing; lock it down accordingly.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
