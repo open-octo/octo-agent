@@ -203,7 +203,7 @@ export function wireMobileSession(sid: string): () => void {
   cleanups.push(ws.on('turn_error', (ev: any) => {
     if (!forSid(ev)) return
     addChatMsg(sid, {
-      id: uid('err'), type: 'notice', content: `${tr('m.err_prefix')}: ${ev.error ?? 'request failed'}`,
+      id: uid('err'), type: 'notice', content: `${tr('m.err_prefix')}: ${ev.error ?? tr('m.request_failed')}`,
       level: 'error', createdAt: Date.now(), streaming: false, tools: [], todos: [],
     })
     chatStreaming.update(s => ({ ...s, [sid]: false }))

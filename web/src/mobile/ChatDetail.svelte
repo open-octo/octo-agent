@@ -9,7 +9,7 @@
   import { resetArtifacts } from '../lib/artifacts'
   import { ws } from '../lib/ws'
   import { wireMobileSession, loadMobileHistory, sendMobile } from './chatWiring'
-  import { t, tr } from '../lib/i18n'
+  import { t } from '../lib/i18n'
 
   let { onBack, onViewApproval, initialPrompt = '', onInitialSent }: {
     onBack: () => void
@@ -84,10 +84,11 @@
     }
   }
 
-  function toolLabel(tools: any[]): string {
+  // Takes the reactive $t so the fallback re-renders on locale flip.
+  function toolLabel(tools: any[], tf: (k: string) => string): string {
     if (!tools?.length) return ''
-    const names = tools.map(t => t.name).filter(Boolean)
-    return names.length ? names.join(' · ') : tr('m.n_tools').replace('{n}', String(tools.length))
+    const names = tools.map(tl => tl.name).filter(Boolean)
+    return names.length ? names.join(' · ') : tf('m.n_tools').replace('{n}', String(tools.length))
   }
 </script>
 
@@ -126,7 +127,7 @@
     {:else if msg.type === 'tool_group'}
       <div class="tools">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--m-text-3)" stroke-width="2"><path d="M14.7 6.3a4 4 0 0 1-5 5L4 17v3h3l5.7-5.7a4 4 0 0 0 5-5z"/></svg>
-        <span>{toolLabel(msg.tools)}</span>
+        <span>{toolLabel(msg.tools, $t)}</span>
       </div>
     {:else if msg.type === 'notice'}
       <div class="notice" class:err={msg.level === 'error'}>{msg.content}</div>

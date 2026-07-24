@@ -1,22 +1,24 @@
 <script lang="ts">
   import type { FeedItem, FeedKind } from './feedGroups'
-  import { t, tr } from '../lib/i18n'
+  import { t } from '../lib/i18n'
 
   let { item, onOpen }: { item: FeedItem; onOpen: (id: string, kind: FeedKind) => void } = $props()
 
   const s = $derived(item.session)
   const title = $derived(s.title || s.name || $t('m.untitled'))
 
-  function ago(iso: string): string {
+  // Takes the reactive $t so the timestamp re-renders when the locale flips
+  // (config-driven setLocale lands after the first session_list).
+  function ago(iso: string, tf: (k: string) => string): string {
     if (!iso) return ''
     const ms = Date.now() - new Date(iso).getTime()
     if (Number.isNaN(ms)) return ''
     const m = Math.floor(ms / 60000)
-    if (m < 1) return tr('m.just_now')
-    if (m < 60) return tr('m.min_ago').replace('{n}', String(m))
+    if (m < 1) return tf('m.just_now')
+    if (m < 60) return tf('m.min_ago').replace('{n}', String(m))
     const h = Math.floor(m / 60)
-    if (h < 24) return tr('m.hr_ago').replace('{n}', String(h))
-    return tr('m.day_ago').replace('{n}', String(Math.floor(h / 24)))
+    if (h < 24) return tf('m.hr_ago').replace('{n}', String(h))
+    return tf('m.day_ago').replace('{n}', String(Math.floor(h / 24)))
   }
 </script>
 
@@ -45,7 +47,7 @@
       <span class="mono">{s.model || s.model_id || ''}</span>
     {/if}
     <span class="dot">·</span>
-    <span>{ago(s.updated_at)}</span>
+    <span>{ago(s.updated_at, $t)}</span>
   </div>
 </button>
 
