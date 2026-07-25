@@ -23,9 +23,11 @@ func TestValidate(t *testing.T) {
 		{"id 32 chars ok", func(p *Profile) { p.ID = strings.Repeat("a", 32) }, ""},
 		{"description required", func(p *Profile) { p.Description = "  " }, "description is required"},
 		{"name too long", func(p *Profile) { p.Name = strings.Repeat("n", 33) }, "name too long"},
-		{"alias missing @", func(p *Profile) { p.MentionAs = []string{"review"} }, "must start with @"},
-		{"alias bare @", func(p *Profile) { p.MentionAs = []string{"@"} }, "must start with @"},
+		{"alias missing @", func(p *Profile) { p.MentionAs = []string{"review"} }, "invalid mention alias"},
+		{"alias bare @", func(p *Profile) { p.MentionAs = []string{"@"} }, "invalid mention alias"},
+		{"alias bad charset", func(p *Profile) { p.MentionAs = []string{"@$$"} }, "invalid mention alias"},
 		{"alias ok", func(p *Profile) { p.MentionAs = []string{"@review", "@CR"} }, ""},
+		{"name 32 CJK chars ok", func(p *Profile) { p.Name = strings.Repeat("审", 32) }, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

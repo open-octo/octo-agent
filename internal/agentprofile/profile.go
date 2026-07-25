@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Source marks where a profile comes from. It determines which run modes the
@@ -85,7 +86,10 @@ type Profile struct {
 	MentionAs       []string         // conversation mode only; user-level only
 	ChannelBindings []ChannelBinding // conversation mode only; user-level only
 
-	Source    Source
+	Source Source
+
+	// Timestamps are best-effort: both track the file's mtime (there is no
+	// separate creation record), so CreatedAt advances on every rewrite.
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -108,6 +112,10 @@ func DefaultProfile() *Profile {
 // idRule is the profile ID shape: a lowercase slug usable as a file name.
 var idRule = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
 
+// aliasRule is the mention alias shape: @ plus the same charset the router's
+// mention extractor recognizes, so a validated alias can always match.
+var aliasRule = regexp.MustCompile(`^@[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
 // Validate checks the fields every write path (REST API, meta-skill, Store)
 // must enforce. Model-against-config validation lives in the API layer, which
 // is the only place that can see the server config.
@@ -118,12 +126,12 @@ func (p *Profile) Validate() error {
 	if strings.TrimSpace(p.Description) == "" {
 		return errors.New("description is required")
 	}
-	if len(p.Name) > 32 {
-		return fmt.Errorf("name too long: %d chars (max 32)", len(p.Name))
+	if utf8.RuneCountInString(p.Name) > 32 {
+		return fmt.Errorf("name too long: %d chars (max 32)", utf8.RuneCountInString(p.Name))
 	}
 	for _, alias := range p.MentionAs {
-		if !strings.HasPrefix(alias, "@") || len(alias) < 2 {
-			return fmt.Errorf("invalid mention alias %q: must start with @", alias)
+		if !aliasRule.MatchString(alias) {
+			return fmt.Errorf("invalid mention alias %q: must be @ followed by [A-Za-z0-9_-]", alias)
 		}
 	}
 	return nil

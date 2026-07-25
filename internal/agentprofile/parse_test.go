@@ -132,4 +132,9 @@ func TestValidateForWritePromptCap(t *testing.T) {
 	if err := validateForWrite(p); err == nil || !strings.Contains(err.Error(), "system_prompt too long") {
 		t.Fatalf("validateForWrite() = %v", err)
 	}
+	// The cap counts runes: 10000 CJK chars (30KB) must pass.
+	p.SystemPrompt = strings.Repeat("审", maxSystemPrompt)
+	if err := validateForWrite(p); err != nil {
+		t.Fatalf("10000-rune CJK prompt rejected: %v", err)
+	}
 }

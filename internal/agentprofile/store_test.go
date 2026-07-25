@@ -1,8 +1,11 @@
 package agentprofile
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -62,16 +65,35 @@ func TestStoreProjectStripsPlatformSlice(t *testing.T) {
 	}
 }
 
-func TestStoreSkipsBrokenAndNonSlugFiles(t *testing.T) {
+func TestStoreSkipsBrokenFilesAndReservedID(t *testing.T) {
 	s, userDir, _ := newTestStore(t)
 	writeMD(t, userDir, "broken.md", "no frontmatter here\n")
-	writeMD(t, userDir, "Bad_Name.md", "---\ndescription: d\n---\nbody\n")
+	writeMD(t, userDir, "default.md", "---\ndescription: impostor\n---\nbody\n") // reserved ID: skipped
 	writeMD(t, userDir, "good.md", "---\ndescription: d\n---\nbody\n")
 	writeMD(t, userDir, "notes.txt", "---\ndescription: d\n---\nbody\n") // not .md
 
 	got := s.List()
 	if len(got) != 1 || got[0].ID != "good" {
 		t.Fatalf("List() = %+v, want only [good]", got)
+	}
+	// The default profile is code-defined, never the impostor file.
+	if p, _ := s.Get(DefaultID); p.Description == "impostor" {
+		t.Fatal("default.md shadowed the code-defined default agent")
+	}
+}
+
+// The pre-existing agent loader accepts any .md basename as an ID; the Store
+// must too (zero-migration), even names that fail the write-side slug rule.
+func TestStoreAcceptsNonSlugFilenames(t *testing.T) {
+	s, userDir, _ := newTestStore(t)
+	writeMD(t, userDir, "Code_Review.md", "---\ndescription: legacy\n---\nbody\n")
+
+	p, ok := s.Get("Code_Review")
+	if !ok || p.Description != "legacy" {
+		t.Fatalf("non-slug legacy file not readable: %v, %v", p, ok)
+	}
+	if got := s.List(); len(got) != 1 || got[0].ID != "Code_Review" {
+		t.Fatalf("List() = %+v", got)
 	}
 }
 
@@ -173,4 +195,76 @@ func TestStoreByChannelByMention(t *testing.T) {
 	if _, ok := s.ByMention("@nobody"); ok {
 		t.Fatal("ByMention(@nobody) should miss")
 	}
+}
+
+// A project-level file shadowing a user profile's ID overrides delegation
+// (Get) but must never silence the user profile's IM routing.
+func TestStoreProjectShadowKeepsUserRouting(t *testing.T) {
+	s, userDir, projectDir := newTestStore(t)
+	writeMD(t, userDir, "reviewer.md", "---\ndescription: user\nmention_as: [\"@review\"]\nchannel_bindings:\n  - {platform: weixin, chat_id: g1}\n---\nuser body\n")
+	writeMD(t, projectDir, "reviewer.md", "---\ndescription: project\n---\nproject body\n")
+
+	if p, _ := s.Get("reviewer"); p.Source != SourceProject {
+		t.Fatalf("delegation precedence broken: %+v", p)
+	}
+	if got := s.ByChannel("weixin", "g1"); len(got) != 1 || got[0].ID != "reviewer" {
+		t.Fatalf("project shadow silenced user routing: %+v", got)
+	}
+	if p, ok := s.ByMention("@review"); !ok || p.ID != "reviewer" {
+		t.Fatalf("project shadow broke alias routing: %v, %v", p, ok)
+	}
+}
+
+func TestStoreDefaultReserved(t *testing.T) {
+	s, userDir, _ := newTestStore(t)
+
+	if p, ok := s.Get(DefaultID); !ok || !p.IsDefault() {
+		t.Fatalf("Get(default) = %v, %v — the default profile must always resolve", p, ok)
+	}
+	if err := s.Create(&Profile{ID: DefaultID, Description: "impostor"}); err == nil {
+		t.Fatal("Create with reserved id 'default' should fail")
+	}
+	if _, err := os.Stat(filepath.Join(userDir, "default.md")); !os.IsNotExist(err) {
+		t.Fatal("impostor default.md was written")
+	}
+}
+
+func TestStoreAliasUniqueness(t *testing.T) {
+	s, userDir, _ := newTestStore(t)
+	writeMD(t, userDir, "a.md", "---\ndescription: da\nmention_as: [\"@review\"]\n---\nbody\n")
+
+	// Create with a taken alias fails.
+	err := s.Create(&Profile{ID: "b", Description: "db", MentionAs: []string{"@review"}})
+	if err == nil || !strings.Contains(err.Error(), "already claimed") {
+		t.Fatalf("Create with duplicate alias = %v", err)
+	}
+	// Update of the owner itself keeps the alias.
+	writeMD(t, userDir, "a.md", "---\ndescription: da\nmention_as: [\"@review\"]\n---\nbody\n")
+	if err := s.Update(&Profile{ID: "a", Description: "da2", MentionAs: []string{"@review"}}); err != nil {
+		t.Fatalf("Update of alias owner = %v", err)
+	}
+	// Update claiming someone else's alias fails.
+	writeMD(t, userDir, "b.md", "---\ndescription: db\n---\nbody\n")
+	if err := s.Update(&Profile{ID: "b", Description: "db", MentionAs: []string{"@review"}}); err == nil {
+		t.Fatal("Update stealing alias should fail")
+	}
+}
+
+func TestStoreConcurrentAccess(t *testing.T) {
+	s, _, _ := newTestStore(t)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			id := fmt.Sprintf("p%d", i%4)
+			p := &Profile{ID: id, Description: "d"}
+			_ = s.Create(p)
+			_, _ = s.Get(id)
+			_ = s.List()
+			_ = s.Update(p)
+			_ = s.Delete(id)
+		}(i)
+	}
+	wg.Wait()
 }

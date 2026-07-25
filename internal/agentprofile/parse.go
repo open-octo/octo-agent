@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -125,8 +126,8 @@ func splitFrontmatter(content string) (front, body string, ok bool) {
 	return "", "", false
 }
 
-// maxSystemPrompt mirrors the design doc's 10000-char body limit; enforced by
-// validateForWrite before any file is written.
+// maxSystemPrompt mirrors the design doc's 10000-char body limit (counted in
+// runes, not bytes); enforced by validateForWrite before any file is written.
 const maxSystemPrompt = 10000
 
 // validateForWrite is the Store-level write gate: schema validation plus the
@@ -135,8 +136,9 @@ func validateForWrite(p *Profile) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	if len(p.SystemPrompt) > maxSystemPrompt {
-		return fmt.Errorf("system_prompt too long: %d chars (max %d)", len(p.SystemPrompt), maxSystemPrompt)
+	if utf8.RuneCountInString(p.SystemPrompt) > maxSystemPrompt {
+		return fmt.Errorf("system_prompt too long: %d chars (max %d)",
+			utf8.RuneCountInString(p.SystemPrompt), maxSystemPrompt)
 	}
 	return nil
 }
