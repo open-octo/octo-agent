@@ -58,22 +58,47 @@ func TestDefaultToolsForProfile_FiltersByAllowlist(t *testing.T) {
 	}
 }
 
-func TestDefaultToolsForProfile_EmptyToolsReturnsAll(t *testing.T) {
+func TestDefaultToolsForProfile_BuiltinEmptyReturnsAll(t *testing.T) {
 	dir := t.TempDir()
 	store := agentprofile.New(dir, nil)
+	// All builtin agents (default, explore, general, code-review) have empty
+	// Tools and get the full toolbelt — they manage restrictions via ReadOnly
+	// and the system prompt.
+	for _, id := range []string{"default", "explore", "general", "code-review"} {
+		t.Run(id, func(t *testing.T) {
+			p, ok := store.Get(id)
+			if !ok {
+				t.Fatalf("builtin %q not found", id)
+			}
+			if p.Source != agentprofile.SourceBuiltin {
+				t.Fatalf("%q source = %s, want builtin", id, p.Source)
+			}
+			ctx := WithSessionAgentID(WithProfileStore(context.Background(), store), id)
+			all := DefaultToolsForProfile(ctx, "test-model")
+			if len(all) < 5 {
+				t.Fatalf("expected several tools for builtin %q with empty allowlist, got %d", id, len(all))
+			}
+		})
+	}
+}
+
+func TestDefaultToolsForProfile_ExpertEmptyReturnsNone(t *testing.T) {
+	dir := t.TempDir()
+	store := agentprofile.New(dir, nil)
+	// An expert agent without tools gets none.
 	if err := store.Create(&agentprofile.Profile{
-		ID:          "full",
-		Description: "all tools",
+		ID:          "expert-no-tools",
+		Description: "expert with no tools",
 		CapabilitySpec: agentprofile.CapabilitySpec{
-			Tools: []string{}, // empty = all
+			Tools: []string{}, // empty = no tools for user-created expert
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	ctx := WithSessionAgentID(WithProfileStore(context.Background(), store), "full")
-	all := DefaultToolsForProfile(ctx, "test-model")
-	if len(all) < 5 {
-		t.Fatalf("expected several tools with empty allowlist, got %d", len(all))
+	ctx := WithSessionAgentID(WithProfileStore(context.Background(), store), "expert-no-tools")
+	filtered := DefaultToolsForProfile(ctx, "test-model")
+	if len(filtered) != 0 {
+		t.Fatalf("expected zero tools for expert agent with empty allowlist, got %d: %v", len(filtered), toolNames(filtered))
 	}
 }
 

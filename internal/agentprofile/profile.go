@@ -56,7 +56,7 @@ const DefaultID = "default"
 type CapabilitySpec struct {
 	Model        string   // frontmatter model; empty = inherit the caller's
 	SystemPrompt string   // .md body (never carried in frontmatter)
-	Tools        []string // frontmatter tools allowlist; empty = all tools
+	Tools        []string // frontmatter tools allowlist; empty → builtin: all, user: none
 	ToolSkills   []string // frontmatter tool_skills: skills exposed as tools
 
 	// Delegation refinements, parsed for zero-migration compatibility with
