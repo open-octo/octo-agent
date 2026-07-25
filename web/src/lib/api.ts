@@ -836,12 +836,18 @@ export async function deleteEndpointModel(id: string, model: string): Promise<vo
   await request<unknown>(`/api/config/endpoints/${encodeURIComponent(id)}/models/${encodeURIComponent(model)}`, { method: 'DELETE' })
 }
 
-export async function setEndpointDefault(id: string): Promise<{ ok: boolean; default: string }> {
-  return request<{ ok: boolean; default: string }>(`/api/config/endpoints/${encodeURIComponent(id)}/default`, { method: 'POST' })
+export async function setEndpointDefault(id: string, model?: string): Promise<{ ok: boolean; default: string }> {
+  const qs = model ? `?model=${encodeURIComponent(model)}` : ''
+  return request<{ ok: boolean; default: string }>(`/api/config/endpoints/${encodeURIComponent(id)}/default${qs}`, { method: 'POST' })
 }
 
-export async function setEndpointLite(id: string): Promise<{ ok: boolean; lite: string }> {
-  return request<{ ok: boolean; lite: string }>(`/api/config/endpoints/${encodeURIComponent(id)}/lite`, { method: 'POST' })
+export async function setEndpointLite(id: string, model?: string): Promise<{ ok: boolean; lite: string }> {
+  const qs = model ? `?model=${encodeURIComponent(model)}` : ''
+  return request<{ ok: boolean; lite: string }>(`/api/config/endpoints/${encodeURIComponent(id)}/lite${qs}`, { method: 'POST' })
+}
+
+export async function unsetEndpointLite(id: string): Promise<{ ok: boolean; lite: string }> {
+  return request<{ ok: boolean; lite: string }>(`/api/config/endpoints/${encodeURIComponent(id)}/lite`, { method: 'DELETE' })
 }
 
 export async function updateShowReasoning(showReasoning: boolean): Promise<{ ok: boolean; show_reasoning?: boolean }> {

@@ -230,16 +230,48 @@
   async function toggleEndpointLite(ep: EndpointConfig) {
     busyEpId = ep.id
     try {
-      // If this endpoint holds the current lite, unset by setting lite to a
-      // different endpoint — but the API only has "set lite" (no unset). PR6
-      // simplifies: clicking lite on the endpoint that already holds it is a
-      // no-op; clicking on another endpoint moves lite there. Unsetting lite
-      // entirely requires a follow-up API (DELETE /api/config/lite) — not in
-      // PR5/PR6 scope.
-      if (!liteCid.startsWith(`${ep.id}::`)) {
+      if (liteCid.startsWith(`${ep.id}::`)) {
+        await api.unsetEndpointLite(ep.id)
+      } else {
         await api.setEndpointLite(ep.id)
-        await loadConfig()
       }
+      await loadConfig()
+    } catch (e: any) {
+      showToast(e?.message ?? 'Failed', 'error')
+    } finally {
+      busyEpId = null
+    }
+  }
+
+  async function setDefaultModelRow(ep: EndpointConfig, model: string) {
+    busyEpId = ep.id
+    try {
+      await api.setEndpointDefault(ep.id, model)
+      await loadConfig()
+    } catch (e: any) {
+      showToast(e?.message ?? 'Failed', 'error')
+    } finally {
+      busyEpId = null
+    }
+  }
+
+  async function setLiteModelRow(ep: EndpointConfig, model: string) {
+    busyEpId = ep.id
+    try {
+      await api.setEndpointLite(ep.id, model)
+      await loadConfig()
+    } catch (e: any) {
+      showToast(e?.message ?? 'Failed', 'error')
+    } finally {
+      busyEpId = null
+    }
+  }
+
+  async function unsetLiteModelRow(ep: EndpointConfig) {
+    busyEpId = ep.id
+    try {
+      await api.unsetEndpointLite(ep.id)
+      await loadConfig()
     } catch (e: any) {
       showToast(e?.message ?? 'Failed', 'error')
     } finally {
@@ -626,7 +658,7 @@
                     <button class="act-text" disabled={busyEpId === ep.id} onclick={() => setEndpointDefaultRow(ep)}>{$t('settings.endpoints.set_default')}</button>
                   {/if}
                   <button class="act-text" disabled={busyEpId === ep.id} onclick={() => toggleEndpointLite(ep)}>
-                    {liteCid.startsWith(`${ep.id}::`) ? $t('settings.endpoints.badge.lite') : $t('settings.endpoints.set_lite')}
+                    {liteCid.startsWith(`${ep.id}::`) ? $t('settings.endpoints.unset_lite') : $t('settings.endpoints.set_lite')}
                   </button>
                   <button class="act-btn" title={$t('settings.endpoints.edit')} onclick={() => openEditEndpoint(ep)}>
                     <iconify-icon icon="ant-design:edit-outlined" width="14"></iconify-icon>
@@ -642,14 +674,24 @@
                   <button class="act-text ep-add-model-btn" disabled={busyEpId === ep.id} onclick={() => toggleAddModel(ep)}>{$t('settings.endpoints.models.add')}</button>
                 </div>
                 {#each ep.models as m (m.model)}
+                  {@const isDefault = defaultCid === `${ep.id}::${m.model}`}
+                  {@const isLite = liteCid === `${ep.id}::${m.model}`}
                   <div class="endpoint-model-row">
                     <span class="mono">{ep.id}::{m.model}</span>
                     {#if m.vision}<span class="vision-tag">{$t('settings.endpoints.models.vision')}</span>{/if}
-                    {#if defaultCid === `${ep.id}::${m.model}`}
+                    {#if isDefault}
                       <StatusTag status="success">{$t('settings.endpoints.badge.default')}</StatusTag>
                     {/if}
-                    {#if liteCid === `${ep.id}::${m.model}`}
+                    {#if isLite}
                       <StatusTag status="info">{$t('settings.endpoints.badge.lite')}</StatusTag>
+                    {/if}
+                    {#if !isDefault}
+                      <button class="act-text" disabled={busyEpId === ep.id} onclick={() => setDefaultModelRow(ep, m.model)}>{$t('settings.endpoints.set_default')}</button>
+                    {/if}
+                    {#if !isLite}
+                      <button class="act-text" disabled={busyEpId === ep.id} onclick={() => setLiteModelRow(ep, m.model)}>{$t('settings.endpoints.set_lite')}</button>
+                    {:else}
+                      <button class="act-text" disabled={busyEpId === ep.id} onclick={() => unsetLiteModelRow(ep)}>{$t('settings.endpoints.unset_lite')}</button>
                     {/if}
                     <button class="act-btn del ep-model-del" title={$t('common.delete')} disabled={busyEpId === ep.id} onclick={() => deleteEndpointModelRow(ep, m.model)}>
                       <iconify-icon icon="ant-design:delete-outlined" width="12"></iconify-icon>

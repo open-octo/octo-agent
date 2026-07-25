@@ -1037,16 +1037,17 @@ func (s *Server) handleDeleteEndpointModel(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// handleSetEndpointDefault: POST /api/config/endpoints/{id}/default
-// Sets cfg.Default to "<id>::<first model under this endpoint>". The caller
-// can't pick a specific model via this endpoint (PR5 design: first suffices;
-// a follow-up could add a `?model=` query).
+// handleSetEndpointDefault: POST /api/config/endpoints/{id}/default[?model=<model>]
+// Sets cfg.Default to "<id>::<model>". If ?model is omitted, the endpoint's
+// first model is used. A model that does not exist under the endpoint is
+// rejected with 400.
 func (s *Server) handleSetEndpointDefault(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "missing endpoint id")
 		return
 	}
+	model := r.URL.Query().Get("model")
 	var newDefault string
 	if err := config.Mutate(func(cfg *config.Config) error {
 		for _, ep := range cfg.Endpoints {
@@ -1056,7 +1057,22 @@ func (s *Server) handleSetEndpointDefault(w http.ResponseWriter, r *http.Request
 			if len(ep.Models) == 0 {
 				return fmt.Errorf("endpoint %q has no models", id)
 			}
-			newDefault = ep.CompositeID(ep.Models[0].Model)
+			m := model
+			if m == "" {
+				m = ep.Models[0].Model
+			} else {
+				found := false
+				for _, mm := range ep.Models {
+					if mm.Model == m {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return fmt.Errorf("model %q not found in endpoint %q", m, id)
+				}
+			}
+			newDefault = ep.CompositeID(m)
 			cfg.SetDefaultComposite(newDefault)
 			return nil
 		}
@@ -1082,14 +1098,17 @@ func (s *Server) handleSetEndpointDefault(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "default": newDefault})
 }
 
-// handleSetEndpointLite: POST /api/config/endpoints/{id}/lite
-// Sets cfg.Lite to "<id>::<first model under this endpoint>".
+// handleSetEndpointLite: POST /api/config/endpoints/{id}/lite[?model=<model>]
+// Sets cfg.Lite to "<id>::<model>". If ?model is omitted, the endpoint's first
+// model is used. A model that does not exist under the endpoint is rejected with
+// 400.
 func (s *Server) handleSetEndpointLite(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "missing endpoint id")
 		return
 	}
+	model := r.URL.Query().Get("model")
 	var newLite string
 	if err := config.Mutate(func(cfg *config.Config) error {
 		for _, ep := range cfg.Endpoints {
@@ -1099,7 +1118,22 @@ func (s *Server) handleSetEndpointLite(w http.ResponseWriter, r *http.Request) {
 			if len(ep.Models) == 0 {
 				return fmt.Errorf("endpoint %q has no models", id)
 			}
-			newLite = ep.CompositeID(ep.Models[0].Model)
+			m := model
+			if m == "" {
+				m = ep.Models[0].Model
+			} else {
+				found := false
+				for _, mm := range ep.Models {
+					if mm.Model == m {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return fmt.Errorf("model %q not found in endpoint %q", m, id)
+				}
+			}
+			newLite = ep.CompositeID(m)
 			cfg.Lite = newLite
 			return nil
 		}
@@ -1113,4 +1147,33 @@ func (s *Server) handleSetEndpointLite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "lite": newLite})
+}
+
+// handleUnsetEndpointLite: DELETE /api/config/endpoints/{id}/lite
+// Clears cfg.Lite so the agent falls back to vendor/registry-implied lite
+// models.
+func (s *Server) handleUnsetEndpointLite(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing endpoint id")
+		return
+	}
+	if err := config.Mutate(func(cfg *config.Config) error {
+		for _, ep := range cfg.Endpoints {
+			if ep.ID != id {
+				continue
+			}
+			cfg.Lite = ""
+			return nil
+		}
+		return fmt.Errorf("%w: %s", config.ErrEndpointNotFound, id)
+	}); err != nil {
+		if errors.Is(err, config.ErrEndpointNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "lite": ""})
 }

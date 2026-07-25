@@ -715,3 +715,175 @@ func TestPutPermissionMode_InvalidMode_Rejects(t *testing.T) {
 		t.Errorf("config.PermissionMode = %q, want empty (reject should not save)", cfg.PermissionMode)
 	}
 }
+
+func TestSetEndpointDefault_WithModelQuery_SetsSpecificModel(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "anthropic", APIKey: "sk-test", Models: []config.EndpointModel{
+				{Model: "claude-sonnet-4-6"},
+				{Model: "claude-haiku-4-5"},
+			}},
+		},
+		Default: "ep-a::claude-sonnet-4-6",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints/ep-a/default?model=claude-haiku-4-5", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST default?model = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if cfg.Default != "ep-a::claude-haiku-4-5" {
+		t.Errorf("default = %q, want ep-a::claude-haiku-4-5", cfg.Default)
+	}
+}
+
+func TestSetEndpointDefault_WithoutModelQuery_FallsBackToFirstModel(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "anthropic", APIKey: "sk-test", Models: []config.EndpointModel{
+				{Model: "claude-haiku-4-5"},
+				{Model: "claude-sonnet-4-6"},
+			}},
+		},
+		Default: "ep-a::claude-sonnet-4-6",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints/ep-a/default", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST default = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if cfg.Default != "ep-a::claude-haiku-4-5" {
+		t.Errorf("default = %q, want ep-a::claude-haiku-4-5 (first model)", cfg.Default)
+	}
+}
+
+func TestSetEndpointDefault_MissingModel_ReturnsBadRequest(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "anthropic", APIKey: "sk-test", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+		Default: "ep-a::claude-sonnet-4-6",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints/ep-a/default?model=missing-model", "")
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	cfg, _ := config.Load()
+	if cfg.Default != "ep-a::claude-sonnet-4-6" {
+		t.Errorf("default changed to %q, want unchanged", cfg.Default)
+	}
+}
+
+func TestSetEndpointLite_WithModelQuery_SetsSpecificModel(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "anthropic", APIKey: "sk-test", Models: []config.EndpointModel{
+				{Model: "claude-sonnet-4-6"},
+				{Model: "claude-haiku-4-5"},
+			}},
+		},
+		Default: "ep-a::claude-sonnet-4-6",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints/ep-a/lite?model=claude-haiku-4-5", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST lite?model = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if cfg.Lite != "ep-a::claude-haiku-4-5" {
+		t.Errorf("lite = %q, want ep-a::claude-haiku-4-5", cfg.Lite)
+	}
+}
+
+func TestSetEndpointLite_WithoutModelQuery_FallsBackToFirstModel(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "anthropic", APIKey: "sk-test", Models: []config.EndpointModel{
+				{Model: "claude-haiku-4-5"},
+				{Model: "claude-sonnet-4-6"},
+			}},
+		},
+		Default: "ep-a::claude-haiku-4-5",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints/ep-a/lite", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST lite = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if cfg.Lite != "ep-a::claude-haiku-4-5" {
+		t.Errorf("lite = %q, want ep-a::claude-haiku-4-5 (first model)", cfg.Lite)
+	}
+}
+
+func TestSetEndpointLite_MissingModel_ReturnsBadRequest(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "anthropic", APIKey: "sk-test", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+		Default: "ep-a::claude-sonnet-4-6",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints/ep-a/lite?model=missing-model", "")
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	cfg, _ := config.Load()
+	if cfg.Lite != "" {
+		t.Errorf("lite = %q, want empty", cfg.Lite)
+	}
+}
+
+func TestUnsetEndpointLite_ClearsLite(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "anthropic", APIKey: "sk-test", Models: []config.EndpointModel{
+				{Model: "claude-sonnet-4-6"},
+				{Model: "claude-haiku-4-5"},
+			}},
+		},
+		Default: "ep-a::claude-sonnet-4-6",
+		Lite:    "ep-a::claude-haiku-4-5",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodDelete, "/api/config/endpoints/ep-a/lite", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("DELETE lite = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if cfg.Lite != "" {
+		t.Errorf("lite = %q, want empty", cfg.Lite)
+	}
+}
+
+func TestUnsetEndpointLite_UnknownEndpoint_ReturnsNotFound(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "anthropic", APIKey: "sk-test", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+		Default: "ep-a::claude-sonnet-4-6",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodDelete, "/api/config/endpoints/unknown/lite", "")
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}

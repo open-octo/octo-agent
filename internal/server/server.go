@@ -855,6 +855,7 @@ func (s *Server) registerRoutes() {
 	s.api("DELETE /api/config/endpoints/{id}/models/{model}", s.handleDeleteEndpointModel)
 	s.api("POST /api/config/endpoints/{id}/default", s.handleSetEndpointDefault)
 	s.api("POST /api/config/endpoints/{id}/lite", s.handleSetEndpointLite)
+	s.api("DELETE /api/config/endpoints/{id}/lite", s.handleUnsetEndpointLite)
 
 	// Browser automation setup
 	s.api("GET /api/browser/status", s.handleBrowserStatus)
