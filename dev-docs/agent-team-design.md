@@ -1,5 +1,15 @@
 # 技术方案：Agent Team
 
+> ⚠️ **已废弃（2026-07-25）** — 本方案经讨论后否决，不进入实现。文档仅作历史存档保留。
+>
+> **否决原因**：
+> 1. **能力重复**：octo 的 `workflow` 工具（Ruby `parallel`/`pipeline` + `agent()`）已能表达"并行 spawn 多个带预设角色的子 agent 并聚合"。Team Template 本质是一个表达力更弱的 workflow DSL。
+> 2. **token 成本**：N 个 member 各自重复读取同一份上下文（multi-agent 固有开销，业界实践约 4~15x），`llm_summary` 聚合还需把所有产出再灌入一次 LLM 调用。
+> 3. **场景错位**：multi-agent 的明确收益场景是广度优先、弱耦合任务（如多源调研）；"多个角色审同一份代码"是强耦合任务，单 agent + checklist skill 通常效果相当而成本为 1/N。
+> 4. **固定角色组合前提不稳**：每次任务的审查重点随内容变化，主 Agent 临场 spawn sub_agent 比静态模板更适配。
+>
+> **替代路径**：重复性固定编排需求用 saved workflow（workflow-creator）解决；member 活动可见性（Activity Feed 的构想）如有需要，归入 sub_agent 可观测性增强，不作为 Team 特性。
+
 ## 1. 背景与目标
 
 ### 1.1 背景

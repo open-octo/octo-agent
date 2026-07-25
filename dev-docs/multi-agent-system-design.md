@@ -222,7 +222,6 @@ type Store struct {
     mu       sync.RWMutex
     dir      string           // ~/.octo/agents/
     profiles map[string]*Profile
-    watcher  *fsnotify.Watcher // 监听文件变更
 }
 
 func New(dir string) (*Store, error)
@@ -232,7 +231,7 @@ func (s *Store) List() []*Profile               // 返回所有 profile（不含
 func (s *Store) Create(p *Profile) error
 func (s *Store) Update(p *Profile) error
 func (s *Store) Delete(id string) error
-func (s *Store) Watch(ctx context.Context)     // fsnotify 热加载循环
+func (s *Store) Reload(id string) error         // 从磁盘重读指定 profile（手动改文件后免重启生效）
 func (s *Store) ByChannel(platform, chatID string) []*Profile  // 按频道绑定索引
 func (s *Store) ByMention(alias string) (*Profile, bool)       // 按 @ 别名索引
 ```
@@ -243,11 +242,10 @@ func (s *Store) ByMention(alias string) (*Profile, bool)       // 按 @ 别名�
 - 所有字段在 `Create`/`Update` 时做非空校验
 - `model` 必须在 `~/.octo/config.yml` 的 `models` 列表中
 
-**热加载**：
-- `Watch()` 监听 `~/.octo/agents/` 目录的 `CREATE` / `WRITE` / `REMOVE` 事件
-- 文件改动后：`Load()` 全量重读（文件量小，O(N) 可接受）
-- 触发 `MultiManager` 重载（重建受影响的 per-agent Manager）
-- API 路径 `POST /api/agents/:id/reload` 提供手动触发入口
+**热加载**（决策 Q5：不做文件系统监听，直接编辑文件不会在运行期被感知，需重启或通过 API 触发）：
+- 所有经 REST API 的变更（`POST/PUT/DELETE /api/agents/*`）在写入磁盘后立即更新内存，并触发 `MultiManager` 重载（重建受影响的 per-agent Manager），无需重启
+- `POST /api/agents/:id/reload` 从磁盘重读指定 profile —— 手工改文件后免重启生效的入口
+- 直接编辑 `~/.octo/agents/*.json` 后不走上述两个入口的，重启进程才生效
 
 ### 2. Agent Router
 
@@ -260,7 +258,7 @@ type Router struct {
 }
 
 // Route 返回应处理该消息的 agent profile
-// 返回 *Profile（总不为 nil：fallback 到 Default Agent）
+// 可能返回 nil：群聊绑定多个 agent 且消息无 @ 时返回 nil，caller 应 drop 该消息
 func (r *Router) Route(ev InboundEvent) *Profile {
     // 1. 检查 @ 提及（群聊场景）
     if mentioned := extractMentionAlias(ev.Text); mentioned != "" {
@@ -315,8 +313,8 @@ Channel.MultiManager
 
 **关键行为**：
 - Session ID 本身已全局唯一（由 `agent.NewSession` 的时间戳 + 随机后缀保证），无需添加 agent 前缀
-- Session 文件保持现名 `~/.octo/sessions/<session_id>.jsonl`，仅按 manager 隔离 in-memory 引用
-- 首次加载时，所有已有 session 自动归属 Default Agent（session 文件名不带 agent 信息）
+- Session 文件保持现名 `~/.octo/sessions/<session_id>.jsonl`，但头部 metadata 新增 `agent_id` 字段，创建 session 时写入所属 agent
+- 加载时按 `agent_id` 将 session 分配到对应 manager 的 pool；缺失 `agent_id` 的历史 session 归 Default Agent —— 天然兼容旧数据，且重启后 expert agent 的会话列表不丢失
 
 ### 4. 改造 `buildChannelFactory`
 
@@ -747,9 +745,10 @@ func DefaultProfile() *Profile {
 #### 10.2 已有 Session 归属
 
 服务器首次启动多 agent 改造后：
-- 所有已有 session 归属于 Default Agent（它们都用旧格式存储，不带 agent 前缀）
-- `~/.octo/sessions/` 中的文件直接划入 Default Agent 的 session pool
+- 所有已有 session 归属于 Default Agent（旧格式存储，metadata 中无 `agent_id` 字段，按"缺失即 default"处理）
+- `~/.octo/sessions/` 中的历史文件直接划入 Default Agent 的 session pool
 - 这导致 Default Agent 首次加载时 session 列表包含所有历史 session — 符合预期（用户视角无感）
+- 改造后新建的 session 均在头部 metadata 写入 `agent_id`，重启后仍归属正确的 agent
 
 **Cron 迁移**：现有 cron JSON 含 `"agent": "general"`（死代码字段）。加载时忽略旧 `agent` 字段，`agent_id` 默认设为 `"default"`。无需数据迁移，旧值被静默丢弃。
 
@@ -820,6 +819,7 @@ func DefaultProfile() *Profile {
 | `internal/server/server.go` | `buildChannelFactory()` 改为按 profile 创建 |
 | `internal/server/handlers.go` | 新增 agents handlers（CRUD + 资源子路由） |
 | `internal/channel/manager.go` | 接受 profile 参数注入 system prompt / model |
+| `internal/agent/`（session 序列化处） | session metadata 新增 `agent_id` 字段；读取时缺失归 default |
 | `internal/tools/registry.go` | `DefaultToolsForProfile()` — 按 profile 过滤工具 |
 | `internal/skills/skills.go` | `ManifestForProfile()` — 按 profile 过滤 skill manifest；系统级 skill frontmatter 标记 `system: true` 后对 expert agent 隐藏；browser-recorded skill 在 profile 不含 browser 工具时隐藏 |
 | `internal/scheduler/` 或 task 存储 | cron task 新增 `agent_id` 字段；`GET /api/cron` 支持 `?agent_id=` 过滤；新增 `PUT /api/cron/:id/transfer` |
@@ -851,7 +851,7 @@ func DefaultProfile() *Profile {
 
 1. 创建 profile → assign → 重启 → 热加载 → 删除，全流程
 2. Default Agent 的 skill/MCP 定义新增后，expert agent 立即可见（在启用列表中）
-3. 热加载后新配置生效（无需重启）
+3. API 触发 reload（或 CRUD API 变更）后新配置生效，无需重启；直接改文件不走 API 的运行期不生效（符合 Q5 决策）
 4. Default Agent 的 system prompt 不可通过 profile 编辑器修改（只读显示"由 onboard 管理"）
 5. IM 频道绑定：发消息到绑定群 → 只有被绑 agent 响应；@ 提及 → 被 @ agent 响应
 6. `octo chat --agent code-review` 正常启动
@@ -896,24 +896,30 @@ func DefaultProfile() *Profile {
 
 ---
 
-## 发布顺序
+## 发布顺序（PR 切片）
 
-按依赖链从底向上：
+贯穿全程的不变量：**无 profile 文件时行为与改造前完全一致**——每个 PR 的验收都包含这条，主干随时可发。
 
-1. **`internal/agentprofile/`** — Profile / Store / Router 包（纯新代码，无依赖）
-2. **`internal/channel/` — MultiManager** — 引用 agentprofile
-3. **`internal/server/server.go`** — 重构 initChannels → initMultiManager，替换 channelMgr 为 multiMgr
-4. **`internal/tools/registry.go` + `internal/skills/skills.go`** — 过滤函数
-5. **Web UI** — AgentViews + 改造 Header/Skills/Mcp/Chat
-6. **`cmd/octo/`** — `--agent` flag + `/agent` 命令
-7. **测试 + 文档**
+| PR | 内容 | 验收重点 |
+|----|------|----------|
+| 1 | `internal/agentprofile/` 纯新包（Profile / Store / Router）+ 单测 | 不接线，纯库 |
+| 2 | `MultiManager` + server.go 重构（`initChannels` → `initMultiManager`） | 兼容测试：无 profile 时 IM 路由、session 行为全等。**单独成 PR，不捆绑其他改动** |
+| 3 | tools/skills 按 profile 过滤（`DefaultToolsForProfile`、`ManifestForProfile`、`system:true`、browser skill 隐藏） | 只依赖 PR1，可与 PR2 并行 |
+| 4 | CLI/TUI `--agent` + `/agent` 命令 | 第一个端到端验证切片：profile 创建 → 路由 → 工具过滤全链路 |
+| 5 | REST API `/api/agents/*` + cron `agent_id`/transfer + `expert-agent-manager` 元技能 | 对话式管理入口可用 |
+| 6 | Web UI（Agents 面板、Header 切换、各 View 过滤） | 纯前端，API 已就绪 |
+
+要点：
+
+- **CLI 先于 Web UI**：CLI 是全栈最薄的验证路径，让 PR2 这个高风险重构尽早获得端到端信号，而不是压到 Web UI 做完才第一次跑通全链路
+- **PR2 单独成 PR**：无双轨迁移期下它是唯一不可逆的切片，diff 越纯粹，评审越聚焦于"channelMgr 的每个调用点是否等价迁移"
 
 ### 发布后验证清单
 
 - [ ] 无 profile 文件时行为与改造前完全一致（向后兼容）
 - [ ] 创建 profile → 绑定频道 → IM 发消息 → 正确路由
 - [ ] Web 新建会话选 agent → 会话正确归属；skill/MCP 面板不按 agent 过滤
-- [ ] 热加载后新配置生效（无需重启）
+- [ ] API 触发 reload 后新配置生效（无需重启）；直接改文件不走 API 的运行期不生效
 - [ ] Default Agent 的 system prompt 不可通过 profile 编辑器修改（只读显示"由 onboard 管理"）
 - [ ] `octo --agent code-review` 正常启动
 - [ ] `octo serve` 桌面版 default 和新 profile 共存
