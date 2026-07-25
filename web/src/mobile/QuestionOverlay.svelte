@@ -39,7 +39,6 @@
 
   onMount(() => {
     cleanups.push(ws.on('request_user_question', (ev: any) => {
-      console.log('[octo-mobile] request_user_question received', ev.session_id, ev.question?.slice(0, 40))
       const sid = ev.session_id
       if (!sid) return
       questionModals.update(m => ({
