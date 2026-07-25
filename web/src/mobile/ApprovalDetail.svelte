@@ -1,11 +1,12 @@
 <script lang="ts">
   // Mobile approval detail: the high-value phone scenario — approve or reject a
-  // pending high-risk command. The feed isn't subscribed to the session
-  // (request_confirmation only reaches subscribers), so it fetches the pending
-  // confirmation over REST (getSessionConfirmation) and answers over the same
-  // ws.answerConfirmation contract the desktop uses ('yes' = allow once,
-  // 'always' = allow for session, anything else = deny). The desktop ConfirmModal
-  // overlay is suppressed on mobile (App.svelte) so this is the single surface.
+  // pending high-risk command. request_confirmation is now globally broadcast
+  // but this detail is a deep-linked page opened from the feed — it fetches the
+  // current confirmation state over REST so it always has the latest regardless
+  // of when the event arrived. Answers go over ws.answerConfirmation using the
+  // same contract as desktop ('yes' = allow once, 'always' = allow for session,
+  // anything else = deny). The desktop ConfirmModal overlay is suppressed on
+  // mobile (App.svelte) so this is the single surface.
   import { activeSessionId } from '../lib/stores'
   import { ws } from '../lib/ws'
   import { getSessionConfirmation, type SessionConfirmation } from '../lib/api'
@@ -17,8 +18,9 @@
   let c = $state<SessionConfirmation | null>(null)
   let loading = $state(true)
 
-  // The feed isn't subscribed to the session (request_confirmation only reaches
-  // subscribers), so fetch the pending confirmation over REST when this opens.
+  // Fetch the current confirmation state over REST when this opens — even
+  // though request_confirmation is globally broadcast, this is a deep-linked
+  // page that needs the latest state regardless of when the event arrived.
   $effect(() => {
     const s = sid
     if (!s) { c = null; loading = false; return }
