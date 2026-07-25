@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { t } from '../lib/i18n'
-  import { showToast } from '../lib/stores'
+  import { showToast, openAgentSession } from '../lib/stores'
   import { confirmDialog } from '../lib/confirm'
   import * as api from '../lib/api'
   import AgentEdit from './AgentEdit.svelte'
@@ -55,15 +55,26 @@
     }
   }
 
+  // Agentic-first: create an agent through conversation with the expert-agent-manager
+  // meta-skill, mirroring the skill-creator flow in SkillsView.
+  function handleCreateWithAgent() {
+    openAgentSession('/expert-agent-manager', 'New agent')
+  }
+
   onMount(loadAgents)
 </script>
 
 <div class="agents-view">
   <div class="header">
     <h2>{$t('nav.agents')}</h2>
-    <button class="primary" onclick={() => { editing = null; creating = true }}>
-      {$t('agents.create')}
-    </button>
+    <div class="header-actions">
+      <button class="secondary" onclick={handleCreateWithAgent}>
+        {$t('agents.create_with_agent')}
+      </button>
+      <button class="primary" onclick={() => { editing = null; creating = true }}>
+        {$t('agents.create')}
+      </button>
+    </div>
   </div>
 
   {#if loading}
@@ -142,4 +153,10 @@
     border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;
     &:hover { opacity: 0.9; }
   }
+  .secondary {
+    padding: 8px 16px; background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border-secondary);
+    border-radius: 6px; font-size: 13px; cursor: pointer;
+    &:hover { background: var(--bg-container); }
+  }
+  .header-actions { display: flex; gap: 8px; }
 </style>
