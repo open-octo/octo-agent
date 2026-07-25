@@ -581,6 +581,27 @@ func DefaultToolsForProfile(ctx context.Context, profile *agentprofile.Profile, 
 
 MVP 阶段 memory backend 不改。所有 agent 共享同一套 `memDir` + `homeMemDir`，语义记忆注入对全部 agent 生效。
 
+#### 6.8 System Prompt 拼装规范
+
+`prompt.Compose` 将 system prompt 拆为 10 层（layer），按优先级递增排列：
+
+| # | 层 | 来源 | Default Agent | Expert Agent |
+|---|-----|------|:---:|:---:|
+| 1 | base | 嵌入式 `base.md`（工具使用规范、安全约束） | ✅ | ✅ |
+| 2 | soul | `~/.octo/soul.md`（agent 身份/人格） | ✅ | ❌ |
+| 3 | env | 环境快照（cwd, git, date, OS） | ✅ | ✅ |
+| 4 | skills | per-profile 过滤的 skill manifest | ✅ | ✅ |
+| 5 | mcpTools | MCP 工具清单 | ✅ | ✅ |
+| 6 | memory | cross-session 记忆 | ✅ | ✅ |
+| 7 | profile | `~/.octo/user.md`（用户档案） | ✅ | ❌ |
+| 8 | user | `~/.octo/octorules.md`（用户全局规则） | ✅ | ❌ |
+| 9 | project | `<cwd>/.octorules`（项目规范） | ✅ | ❌ |
+| 10 | system | `--system` flag 或 profile 的 `SystemPrompt` | ✅ | ✅ |
+
+**Expert Agent 跳过身份层（2, 7, 8, 9）**：soul.md、user.md、octorules.md 和项目规范是 Default Agent 的身份与偏好，与 Expert Agent 的自定义 persona 冲突。Expert Agent 的 `SystemPrompt`（layer 10）应独立定义其身份——不应被 Default Agent 的 "我是鳌少保" 等身份描述污染。
+
+实现：`prompt.Compose/ComposePair` 接收 `expertMode bool` 参数；调用侧根据 `profile.SystemPrompt != ""` 决定是否传 `true`。
+
 ### 7. Web UI 布局
 
 #### 7.1 新建会话时选择 Agent
