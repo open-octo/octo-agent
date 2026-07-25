@@ -353,6 +353,7 @@ func TestRegistry_ZeroValue_NoEnforcement(t *testing.T) {
 // A grep over a directory surfaces the matching lines of every hit file, so
 // those files count as "read": a following edit_file must not be refused.
 func TestRegistry_GrepDirThenEdit_Allowed(t *testing.T) {
+	requireRg(t)
 	reg := NewDefaultRegistry()
 	dir := t.TempDir()
 	p := filepath.Join(dir, "code.go")
@@ -374,6 +375,7 @@ func TestRegistry_GrepDirThenEdit_Allowed(t *testing.T) {
 
 // files_with_matches mode shows only paths — still enough to count as seen.
 func TestRegistry_GrepFilesWithMatchesThenEdit_Allowed(t *testing.T) {
+	requireRg(t)
 	reg := NewDefaultRegistry()
 	dir := t.TempDir()
 	p := filepath.Join(dir, "code.go")
@@ -396,6 +398,7 @@ func TestRegistry_GrepFilesWithMatchesThenEdit_Allowed(t *testing.T) {
 // Single-file grep: rg omits the path prefix from its output, so the file
 // must be picked up from the input's own `path` argument.
 func TestRegistry_GrepSingleFileThenEdit_Allowed(t *testing.T) {
+	requireRg(t)
 	reg := NewDefaultRegistry()
 	dir := t.TempDir()
 	p := filepath.Join(dir, "code.go")
@@ -418,6 +421,7 @@ func TestRegistry_GrepSingleFileThenEdit_Allowed(t *testing.T) {
 // Only files the grep actually surfaced count. A sibling with no matches was
 // never shown to the model, so editing it stays blocked.
 func TestRegistry_GrepThenEdit_UnmatchedFileStillBlocked(t *testing.T) {
+	requireRg(t)
 	reg := NewDefaultRegistry()
 	dir := t.TempDir()
 	hit := filepath.Join(dir, "hit.go")
@@ -447,6 +451,7 @@ func TestRegistry_GrepThenEdit_UnmatchedFileStillBlocked(t *testing.T) {
 // following edit would be a blind write the read-before-write guard must
 // still block. This is the regression guard for the no-match stamp bug.
 func TestRegistry_GrepSingleFileNoMatch_EditStillBlocked(t *testing.T) {
+	requireRg(t)
 	reg := NewDefaultRegistry()
 	dir := t.TempDir()
 	p := filepath.Join(dir, "code.go")
@@ -469,6 +474,7 @@ func TestRegistry_GrepSingleFileNoMatch_EditStillBlocked(t *testing.T) {
 
 // Count mode outputs "path:N" lines. Those must count as a read too.
 func TestRegistry_GrepCountModeThenEdit_Allowed(t *testing.T) {
+	requireRg(t)
 	reg := NewDefaultRegistry()
 	dir := t.TempDir()
 	p := filepath.Join(dir, "code.go")
@@ -491,6 +497,7 @@ func TestRegistry_GrepCountModeThenEdit_Allowed(t *testing.T) {
 // Context mode adds "path-N-text" lines and "--" group separators. The
 // separator line must not break parsing, and the hit file must still count.
 func TestRegistry_GrepContextModeThenEdit_Allowed(t *testing.T) {
+	requireRg(t)
 	reg := NewDefaultRegistry()
 	dir := t.TempDir()
 	p := filepath.Join(dir, "code.go")
@@ -515,6 +522,7 @@ func TestRegistry_GrepContextModeThenEdit_Allowed(t *testing.T) {
 // boundary and the candidate "report" didn't stat. The multi-boundary fix
 // now tries every prefix, so the full filename is found.
 func TestRegistry_GrepNumericDashFilename_Allowed(t *testing.T) {
+	requireRg(t)
 	reg := NewDefaultRegistry()
 	dir := t.TempDir()
 	p := filepath.Join(dir, "report-2024-01-01.txt")
