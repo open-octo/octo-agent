@@ -2640,18 +2640,32 @@ func (s *Server) stopOneChannelLocked(name string) {
 		_ = v.(channel.Adapter).Stop()
 		s.runningAdapters.Delete(name)
 	}
-	// A deliberate stop (disable/delete/reload) isn't a health problem — clear
-	// any crash/restart status left over from before it, so re-enabling later
-	// starts from a clean slate instead of showing a stale crash reason.
 	s.clearChannelIssue(name)
 }
 
+// stopPlatformLocked stops every running instance of a platform by adapterID.
+// Finds all runningAdapters whose key starts with the platform name (for
+// single-instance legacy, the key equals the platform; for multi-instance,
+// the key is the instance name — but single-instance names default to the
+// platform name so both cases are covered by the prefix match).
+func (s *Server) stopPlatformLocked(platform string) {
+	s.runningAdapters.Range(func(key, _ any) bool {
+		k := key.(string)
+		// Multi-instance: adapterID is the instance name (e.g. "code-review-bot").
+		// Single-instance: adapterID defaults to the platform name via AdapterID().
+		// The platform name alone can't identify which adapter belongs to it —
+		// stop anything that the next startOneChannelLocked will re-create.
+		if k == platform || strings.HasPrefix(k, platform+"-") {
+			s.stopOneChannelLocked(k)
+		}
+		return true
+	})
+}
+
 // reloadChannel applies a saved config change for one platform without a full
-// server restart: it re-reads channels.yml, stops the platform's adapter if
-// running, then starts it again when the new config has it enabled. It handles
-// a fresh add (manager built lazily), a credential change (stop + start), and
-// a disable/delete (stop only). Called from the channels REST handlers after a
-// successful save.
+// server restart: it re-reads channels.yml, stops all instances of the
+// platform, then re-starts enabled instances. A credential change, a
+// disable/delete, and a fresh add all flow through here.
 func (s *Server) reloadChannel(platform string) {
 	if s.cfg.NoChannel || s.getSender() == nil {
 		return
@@ -2674,7 +2688,8 @@ func (s *Server) reloadChannel(platform string) {
 		})
 	}
 
-	s.stopOneChannelLocked(platform)
+	// Stop all running instances of this platform (keyed by adapterID).
+	s.stopPlatformLocked(platform)
 	if chCfg.IsEnabled(platform) {
 		s.startOneChannelLocked(platform)
 		slog.Info("channel reloaded", "channel", platform)

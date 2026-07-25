@@ -19,8 +19,8 @@ const ConfigFile = "channels.yml"
 // InstanceConfig is the raw per-bot-instance configuration.
 type InstanceConfig struct {
 	Name    string         `yaml:"name,omitempty"`
-	Config  PlatformConfig `yaml:",inline,omitempty"`
 	Enabled bool           `yaml:"enabled"`
+	Config  PlatformConfig `yaml:",inline,omitempty"`
 }
 
 // IsEnabled reports whether this instance is enabled.
@@ -93,11 +93,15 @@ func LoadConfig() (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("channel config: %w", err)
 	}
-	// Backfill instance names for legacy single-instance entries that have none.
+	// Backfill instance names and strip stale `enabled` keys from legacy
+	// config maps (they've been promoted to InstanceConfig.Enabled).
 	for platform, list := range cfg.Channels {
 		for i := range list {
 			if list[i].Name == "" {
 				list[i].Name = platform
+			}
+			if list[i].Config != nil {
+				delete(list[i].Config, "enabled")
 			}
 		}
 	}
@@ -168,6 +172,7 @@ func (c *Config) SetPlatform(name string, fields map[string]any) {
 		ic.Config[k] = v
 	}
 	ic.Enabled = true
+	delete(ic.Config, "enabled") // promoted to struct field, must not linger in map
 	c.Channels[name] = list
 }
 
