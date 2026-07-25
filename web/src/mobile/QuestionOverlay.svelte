@@ -1,26 +1,43 @@
 <script lang="ts">
-  // Mobile question overlay — listens for the globally-broadcast
-  // request_user_question event and renders a mobile-native question card.
-  // With global broadcast, a question can originate from ANY session (desktop
-  // or mobile); this overlay renders whatever is pending regardless of which
-  // session is open.
+  // Mobile question surface. With global broadcast, a question can originate
+  // from ANY session. To avoid interrupting a conversation in progress:
+  //
+  //  - The question card appears ONLY for the ACTIVE session (the one open in
+  //    the chat detail view).
+  //  - Questions from other sessions surface as a compact toast with a "View"
+  //    action — tapping it navigates to that session, where the card then
+  //    appears.
   import { onMount, onDestroy } from 'svelte'
-  import { questionModals, type QuestionModalEntry } from '../lib/stores'
+  import { questionModals, activeSessionId } from '../lib/stores'
   import { ws } from '../lib/ws'
   import { t } from '../lib/i18n'
 
-  const entries = $derived(Object.entries($questionModals))
-
-  // Per-question getDraft state, keyed by sessionId.
-  const drafts = $state<Record<string, { selected: string[]; custom: string; expanded: boolean }>>({})
-
-  // Track the question-subscription cleanups so we can remove them on unmount.
+  // Track WS event cleanups so we can remove them on unmount.
   const cleanups: Array<() => void> = []
 
+  // Per-question draft state, keyed by sessionId.
+  const drafts = $state<Record<string, { selected: string[]; custom: string; expanded: boolean }>>({})
+
+  function getDraft(sid: string) {
+    if (!drafts[sid]) drafts[sid] = { selected: [], custom: '', expanded: false }
+    return drafts[sid]
+  }
+
+  // Reset a draft when its question changes.
+  const lastIds: Record<string, string> = {}
+  $effect(() => {
+    for (const [sid, e] of Object.entries($questionModals)) {
+      if (lastIds[sid] !== e.questionId) {
+        lastIds[sid] = e.questionId
+        drafts[sid] = { selected: [], custom: '', expanded: false }
+      }
+    }
+  })
+
+  const activeQ = $derived($activeSessionId ? $questionModals[$activeSessionId] : undefined)
+  const others = $derived(Object.entries($questionModals).filter(([sid]) => sid !== $activeSessionId))
+
   onMount(() => {
-    // With global broadcast, questions from any session reach every client.
-    // These listeners populate the shared questionModals store; the overlay
-    // reacts via the `entries` derivation above.
     cleanups.push(ws.on('request_user_question', (ev: any) => {
       const sid = ev.session_id
       if (!sid) return
@@ -51,22 +68,6 @@
 
   onDestroy(() => {
     cleanups.forEach(fn => fn())
-  })
-
-  function getDraft(sid: string) {
-    if (!drafts[sid]) drafts[sid] = { selected: [], custom: '', expanded: false }
-    return drafts[sid]
-  }
-
-  // Reset a draft when its question changes.
-  const lastIds: Record<string, string> = {}
-  $effect(() => {
-    for (const [sid, e] of Object.entries($questionModals)) {
-      if (lastIds[sid] !== e.questionId) {
-        lastIds[sid] = e.questionId
-        drafts[sid] = { selected: [], custom: '', expanded: false }
-      }
-    }
   })
 
   function toggle(sid: string, opt: string, multi: boolean) {
@@ -100,69 +101,120 @@
     ws.answerQuestion(e.questionId, [], '', true)
     clear(sid)
   }
-
-  function submitAll() {
-    for (const sid of entries.map(([s]) => s)) submit(sid)
-  }
 </script>
 
-{#if entries.length}
+<!-- Non-active sessions: compact toast with a "View" action. -->
+{#if others.length}
+  <div class="qo-toast-stack" role="status" aria-live="polite">
+    {#each others as [sid, e] (sid)}
+      <button class="qo-toast" onclick={() => setActiveSession(sid)}>
+        <span class="qo-toast-icon">◆</span>
+        <span class="qo-toast-q">{e.question}</span>
+        <span class="qo-toast-go">{$t('m.view')} ›</span>
+      </button>
+    {/each}
+  </div>
+{/if}
+
+<!-- Active session's own question: full card. -->
+{#if activeQ}
   <div class="qo-overlay">
-    <div class="qo-stack">
-      {#each entries as [sid, e] (sid)}
-        <div class="qo-card" class:expanded={getDraft(sid).expanded}>
-          <div class="qo-head">
-            <span class="qo-icon">◆</span>
-            <span class="qo-title">{e.header || t('question.title')}</span>
-            {#if entries.length > 1}<span class="qo-count">{entries.length}</span>{/if}
-          </div>
+    <div class="qo-card" class:expanded={getDraft(activeQ.sessionId).expanded}>
+      <div class="qo-head">
+        <span class="qo-icon">◆</span>
+        <span class="qo-title">{activeQ.header || t('question.title')}</span>
+      </div>
 
-          <p class="qo-body">{e.question}</p>
+      <p class="qo-body">{activeQ.question}</p>
 
-          {#if e.options?.length}
-            <div class="qo-options">
-              {#each e.options as opt}
-                <button
-                  class="qo-opt"
-                  class:on={getDraft(sid).selected.includes(opt)}
-                  onclick={() => toggle(sid, opt, e.multiSelect ?? false)}
-                >
-                  <span class="qo-dot"></span>{opt}
-                </button>
-              {/each}
-            </div>
-          {/if}
-
-          {#if getDraft(sid).expanded}
-            <textarea
-              class="qo-free"
-              rows="2"
-              placeholder={t('question.custom_placeholder')}
-              value={getDraft(sid).custom}
-              oninput={(e) => { getDraft(sid).custom = e.target.value }}
-            ></textarea>
-          {/if}
-
-          <div class="qo-actions">
-            <button class="qo-cancel" onclick={() => cancel(sid)}>{t('common.cancel')}</button>
-            {#if !getDraft(sid).expanded}
-              <button class="qo-expand" onclick={() => (getDraft(sid).expanded = true)}>展开</button>
-            {/if}
+      {#if activeQ.options?.length}
+        <div class="qo-options">
+          {#each activeQ.options as opt}
             <button
-              class="qo-submit"
-              onclick={() => submit(sid)}
-              disabled={getDraft(sid).selected.length === 0 && !getDraft(sid).custom.trim()}
+              class="qo-opt"
+              class:on={getDraft(activeQ.sessionId).selected.includes(opt)}
+              onclick={() => toggle(activeQ.sessionId, opt, activeQ.multiSelect ?? false)}
             >
-              {entries.length > 1 ? '全部提交' : t('common.submit')}
+              <span class="qo-dot"></span>{opt}
             </button>
-          </div>
+          {/each}
         </div>
-      {/each}
+      {/if}
+
+      {#if getDraft(activeQ.sessionId).expanded}
+        <textarea
+          class="qo-free"
+          rows="2"
+          placeholder={t('question.custom_placeholder')}
+          value={getDraft(activeQ.sessionId).custom}
+          oninput={(e) => { getDraft(activeQ.sessionId).custom = e.target.value }}
+        ></textarea>
+      {/if}
+
+      <div class="qo-actions">
+        <button class="qo-cancel" onclick={() => cancel(activeQ.sessionId)}>{t('common.cancel')}</button>
+        {#if !getDraft(activeQ.sessionId).expanded}
+          <button class="qo-expand" onclick={() => (getDraft(activeQ.sessionId).expanded = true)}>展开</button>
+        {/if}
+        <button
+          class="qo-submit"
+          onclick={() => submit(activeQ.sessionId)}
+          disabled={getDraft(activeQ.sessionId).selected.length === 0 && !getDraft(activeQ.sessionId).custom.trim()}
+        >
+          {t('common.submit')}
+        </button>
+      </div>
     </div>
   </div>
 {/if}
 
 <style>
+  /* ─── Non-active-session toasts (non-interrupting) ─────────────── */
+  .qo-toast-stack {
+    position: fixed;
+    top: calc(12px + env(safe-area-inset-top));
+    left: 0;
+    right: 0;
+    z-index: 2147483646;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    pointer-events: none;
+  }
+  .qo-toast {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    max-width: 480px;
+    padding: 10px 14px;
+    background: var(--m-surface);
+    border: 1px solid var(--m-border);
+    border-radius: 12px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+    cursor: pointer;
+    font-family: inherit;
+    text-align: left;
+    animation: octo-toast-in 0.18s ease;
+    font-size: 13px;
+  }
+  .qo-toast:hover { border-color: var(--m-accent); }
+  .qo-toast-icon { color: var(--m-accent); font-size: 10px; flex-shrink: 0; }
+  .qo-toast-q {
+    flex: 1; min-width: 0;
+    color: var(--m-text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .qo-toast-go { color: var(--m-accent); flex-shrink: 0; }
+  @keyframes octo-toast-in {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ─── Active-session card overlay ──────────────────────────────── */
   .qo-overlay {
     position: fixed;
     inset: 0;
@@ -173,7 +225,7 @@
     background: rgba(0, 0, 0, 0.35);
     pointer-events: none;
   }
-  .qo-stack {
+  .qo-card {
     pointer-events: auto;
     width: 100%;
     max-height: 90vh;
@@ -183,39 +235,14 @@
     gap: 12px;
     padding: 16px;
     padding-bottom: calc(16px + env(safe-area-inset-bottom));
-  }
-  .qo-card {
     background: var(--m-surface);
     border: 1px solid var(--m-border);
-    border-radius: 16px;
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    border-radius: 16px 16px 0 0;
     box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.12);
   }
-  .qo-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .qo-icon {
-    color: var(--m-accent);
-    font-size: 12px;
-  }
-  .qo-title {
-    flex: 1;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--m-text);
-  }
-  .qo-count {
-    font-size: 11px;
-    color: var(--m-text-3);
-    background: var(--m-surface-2);
-    border-radius: 999px;
-    padding: 2px 8px;
-  }
+  .qo-head { display: flex; align-items: center; gap: 8px; }
+  .qo-icon { color: var(--m-accent); font-size: 12px; }
+  .qo-title { font-size: 14px; font-weight: 600; color: var(--m-text); }
   .qo-body {
     margin: 0;
     font-size: 15px;
@@ -224,11 +251,7 @@
     white-space: pre-wrap;
     word-break: break-word;
   }
-  .qo-options {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
+  .qo-options { display: flex; flex-direction: column; gap: 8px; }
   .qo-opt {
     display: flex;
     align-items: center;
@@ -245,14 +268,9 @@
     font-family: inherit;
     transition: border-color 0.15s, background 0.15s;
   }
-  .qo-opt.on {
-    border-color: var(--m-accent);
-    background: var(--m-accent-soft);
-    color: var(--m-accent);
-  }
+  .qo-opt.on { border-color: var(--m-accent); background: var(--m-accent-soft); color: var(--m-accent); }
   .qo-dot {
-    width: 18px;
-    height: 18px;
+    width: 18px; height: 18px;
     border-radius: 50%;
     border: 2px solid var(--m-text-4);
     flex-shrink: 0;
@@ -260,17 +278,8 @@
     align-items: center;
     justify-content: center;
   }
-  .qo-opt.on .qo-dot {
-    border-color: var(--m-accent);
-    background: var(--m-accent);
-  }
-  .qo-opt.on .qo-dot::after {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #fff;
-  }
+  .qo-opt.on .qo-dot { border-color: var(--m-accent); background: var(--m-accent); }
+  .qo-opt.on .qo-dot::after { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #fff; }
   .qo-free {
     border: 1px solid var(--m-border);
     border-radius: 10px;
@@ -283,11 +292,7 @@
     background: var(--m-bg);
   }
   .qo-free:focus { border-color: var(--m-accent); }
-  .qo-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
+  .qo-actions { display: flex; align-items: center; gap: 8px; }
   .qo-cancel {
     height: 38px;
     padding: 0 16px;

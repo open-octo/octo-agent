@@ -985,13 +985,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     }))
 
     cleanups.push(ws.on('request_user_question', (ev) => {
-      if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      // Falls back to sid like the dismiss_user_question handler below —
-      // the current emitter always sets session_id, but without this
-      // fallback a hypothetical session_id-less event would key the entry
-      // by "" instead of the active session, making it unreachable from
-      // QuestionModal's $questionModals[$activeSessionId] lookup.
-      const qsid = (ev as any).session_id || sid
+      // Global broadcast: the question may be for ANY session, not just this
+      // tab's. Store it under its own session_id; QuestionModal decides whether
+      // to show it as a modal (active session) or a note (non-active).
+      const qsid = (ev as any).session_id
+      if (!qsid) return
       questionModals.update(m => ({
         ...m,
         [qsid]: {
@@ -1008,10 +1006,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     }))
 
     cleanups.push(ws.on('dismiss_user_question', (ev) => {
-      if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      const qsid = (ev as any).session_id
+      if (!qsid) return
       questionModals.update(m => {
         const n = { ...m }
-        delete n[sid]
+        delete n[qsid]
         return n
       })
     }))
