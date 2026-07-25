@@ -959,8 +959,9 @@ func (s *Server) handleWSRunTask(conn *wsConn, sessionID string) {
 }
 
 // handleWSConfirmation delivers a confirmation answer from one client and
-// broadcasts a completion event so every other subscribed client can close
-// its modal for the same confirmation.
+// broadcasts a completion event globally so every connected client can close
+// its modal for the same confirmation — not just subscribers of the session,
+// mirroring request_user_question/reach.
 func (s *Server) handleWSConfirmation(confID, result string) {
 	s.confirmMu.Lock()
 	if ch, ok := s.confirmations[confID]; ok {
@@ -972,7 +973,11 @@ func (s *Server) handleWSConfirmation(confID, result string) {
 	defer s.pendingPromptMu.Unlock()
 	for sessionID, pending := range s.pendingConfirms {
 		if pending.ConfID == confID {
-			s.wsHub.broadcast(sessionID, wsEventConfirmationComplete{
+			// Global broadcast (not session-scoped) so every connected client —
+			// desktop or mobile, any session — closes its modal. Mirrors
+			// dismiss_user_question: a session-scoped broadcast would leave other
+			// clients showing a dead modal.
+			s.wsHub.broadcast("", wsEventConfirmationComplete{
 				Type:      "confirmation_complete",
 				SessionID: sessionID,
 				ConfID:    confID,
@@ -2173,7 +2178,7 @@ func (s *Server) requestConfirmation(ctx context.Context, sessionID, message, ki
 		})
 	}
 
-	s.wsHub.broadcast(sessionID, ev)
+	s.wsHub.broadcast("", ev)
 	// Cross-session signal (mirrors question_pending) so a client not subscribed
 	// to this session — the mobile feed — can still surface a needs-approval card.
 	s.wsHub.broadcast("", wsEventSessionActivity{

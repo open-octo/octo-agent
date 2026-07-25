@@ -477,6 +477,11 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Broadcast globally so other clients (desktop, other tabs) see the new
+	// session in their sidebar immediately — mirrors branch/cron, which also
+	// emit session_created.
+	s.wsHub.broadcast("", wsEventSessionCreated{Type: "session_created", SessionID: sess.ID})
+
 	writeJSON(w, http.StatusOK, map[string]any{"session": s.toSessionItem(sess, source, agentProfile)})
 }
 
