@@ -286,13 +286,15 @@ func (r *Router) Route(ev InboundEvent) *Profile {
 |------|--------|----------|----------|
 | 私聊（未绑定） | — | 无 | **Default Agent** |
 | 私聊（绑定 code-review） | — | 有（唯一） | **code-review** |
-| 群聊（绑定 code-review） | @ops 但 ops 未绑定此群 | 有 | **Default Agent**（@ 到不存在的 alias 回退） |
+| 群聊（绑定 code-review） | @ops 但 ops 未绑定此群 | 有 | **ops-helper**（@ 解析是全局的：显式召唤不受绑定限制） |
 | 群聊（绑定 code-review） | @review | 有 | **code-review** |
 | 群聊（绑定 code + ops） | @ops | 有（多） | **ops-helper** |
 | 群聊（绑定 code + ops） | 无 @ | 有（多） | **静默**（drop） |
 | 群聊（无绑定） | — | 无 | **Default Agent** |
 
 **注意**：AgentRouter 返回 nil 时，handler 直接 drop 该消息（不路由到任何 agent），这与"群聊未 @ 完全静默"的决策一致。
+
+**@ 解析是全局的**（2026-07-25 拍板）：`ByMention` 在所有用户级 profile 中查找，不要求被 @ 的 profile 绑定当前频道——@ 是显式召唤，绑定只决定"未 @ 时谁响应"。仅当 @ 的 alias 不存在时才回退 Default Agent。
 
 ### 3. 单 Manager Session Pool：key 内嵌 agent 命名空间
 
