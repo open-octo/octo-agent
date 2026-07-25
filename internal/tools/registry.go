@@ -226,15 +226,19 @@ func (r DefaultRegistry) recordTerminalReads(command string) {
 	}
 }
 
-// grepPathRe extracts the leading path from an rg output line: "path:12:text"
-// (content matches), "path-12-text" (context lines), "path-12-" etc. The
-// non-greedy path group settles on the first separator+digits boundary;
-// Windows drive prefixes survive because "C" alone is never followed by ":"
-// plus digits (same trick as grepUIMatchRe in grep.go).
-var grepPathRe = regexp.MustCompile(`^(.+?)[-:]\d+[-:]`)
+// sepDigitsSep matches a separator (hyphen or colon) followed by digits
+// and another separator — the boundary between a file path and the
+// line-number region of an rg content/context output line
+// ("path:12:text", "path-12-text"). A filename itself may contain
+// separator+digit runs (e.g. "report-2024-01-01.txt:5:hit" has them at
+// "-2024-" and ":5-"), so recordGrepReads collects EVERY such boundary
+// and tries each prefix; the rightmost one that stats to a real file
+// wins. Windows drive prefixes survive because the regex requires a
+// leading separator before the digits.
+var sepDigitsSep = regexp.MustCompile(`[-:]\d+[-:]`)
 
 // grepCountRe matches count-mode lines "path:3", which have no trailing
-// separator after the number and so escape grepPathRe.
+// separator after the number and so escape sepDigitsSep.
 var grepCountRe = regexp.MustCompile(`^(.+):\d+$`)
 
 // recordGrepReads stamps the read tracker with every file a successful grep
@@ -272,8 +276,14 @@ func (r DefaultRegistry) recordGrepReads(ctx context.Context, input map[string]a
 
 	for _, line := range strings.Split(output, "\n") {
 		record(line) // files_with_matches mode: the whole line is a path
-		if m := grepPathRe.FindStringSubmatch(line); m != nil {
-			record(m[1])
+		if idx := sepDigitsSep.FindAllStringIndex(line, -1); idx != nil {
+			// Content/context mode. The line may hold multiple
+			// "separator+digits+separator" boundaries when the filename
+			// itself contains them — try every prefix so the longest one
+			// that resolves to a real file wins.
+			for _, pos := range idx {
+				record(line[:pos[0]])
+			}
 		} else if m := grepCountRe.FindStringSubmatch(line); m != nil {
 			record(m[1])
 		}

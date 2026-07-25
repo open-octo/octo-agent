@@ -509,3 +509,27 @@ func TestRegistry_GrepContextModeThenEdit_Allowed(t *testing.T) {
 		t.Errorf("edit after context-mode grep should succeed: %v", err)
 	}
 }
+
+// Filenames with embedded separator+digit runs (e.g. "report-2024-01-01.txt")
+// used to fail closed: the non-greedy regex settled on the first "-2024-"
+// boundary and the candidate "report" didn't stat. The multi-boundary fix
+// now tries every prefix, so the full filename is found.
+func TestRegistry_GrepNumericDashFilename_Allowed(t *testing.T) {
+	reg := NewDefaultRegistry()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "report-2024-01-01.txt")
+	if err := os.WriteFile(p, []byte("line one\nconst a = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := reg.Execute(context.Background(), "grep", map[string]any{
+		"pattern": "const a", "path": dir,
+	}); err != nil {
+		t.Fatalf("grep: %v", err)
+	}
+	if _, err := reg.Execute(context.Background(), "edit_file", map[string]any{
+		"path": p, "old_string": "const a = 1", "new_string": "const a = 2",
+	}); err != nil {
+		t.Errorf("edit after grep on a numeric-dash filename should succeed: %v", err)
+	}
+}
