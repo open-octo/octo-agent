@@ -24,8 +24,9 @@ type agentRequest struct {
 }
 
 type agentBindRequest struct {
-	Platform string `json:"platform"`
-	ChatID   string `json:"chat_id"`
+	Platform  string `json:"platform"`
+	AdapterID string `json:"adapter_id,omitempty"`
+	ChatID    string `json:"chat_id"`
 }
 
 type agentTransferRequest struct {
@@ -228,14 +229,15 @@ func (s *Server) handleBindAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Append binding (avoid duplicates).
 	for _, b := range p.ChannelBindings {
-		if b.Platform == req.Platform && b.ChatID == req.ChatID {
+		if b.Platform == req.Platform && b.ChatID == req.ChatID && b.AdapterID == req.AdapterID {
 			writeJSON(w, http.StatusOK, agentToResp(p))
 			return
 		}
 	}
 	p.ChannelBindings = append(p.ChannelBindings, agentprofile.ChannelBinding{
-		Platform: req.Platform,
-		ChatID:   req.ChatID,
+		Platform:  req.Platform,
+		AdapterID: req.AdapterID,
+		ChatID:    req.ChatID,
 	})
 	if err := s.agentStoreOrInit().Update(p); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -261,7 +263,7 @@ func (s *Server) handleUnbindAgent(w http.ResponseWriter, r *http.Request) {
 
 	filtered := p.ChannelBindings[:0]
 	for _, b := range p.ChannelBindings {
-		if !(b.Platform == req.Platform && b.ChatID == req.ChatID) {
+		if !(b.Platform == req.Platform && b.ChatID == req.ChatID && b.AdapterID == req.AdapterID) {
 			filtered = append(filtered, b)
 		}
 	}

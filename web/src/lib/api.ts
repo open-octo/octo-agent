@@ -375,7 +375,7 @@ export interface Agent {
   tools?: string[]
   tool_skills?: string[]
   system_prompt?: string
-  channel_bindings?: { platform: string; chat_id: string }[]
+  channel_bindings?: { platform: string; adapter_id?: string; chat_id: string }[]
 }
 
 export async function listAgents(): Promise<Agent[]> {

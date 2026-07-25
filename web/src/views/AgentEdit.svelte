@@ -16,6 +16,15 @@
   let model = $state('')
   let systemPrompt = $state('')
 
+  // Channel binding state.
+  interface BindEntry {
+    platform: string
+    adapter_id: string
+    chat_id: string
+  }
+  let bindings: BindEntry[] = $state([])
+  let availableBots: { platform: string; adapter_id: string; label: string }[] = $state([])
+
   // Checklist items loaded from the Default Agent's resource pool.
   interface ChecklistItem {
     name: string
@@ -31,22 +40,21 @@
   // Load available resources from the Default Agent pool.
   async function loadResources() {
     try {
-      const [toolDefs, skillDefs] = await Promise.all([
+      const [toolDefs, skillDefs, channelList] = await Promise.all([
         api.fetchAvailableTools(),
         api.listSkills(),
+        api.listChannels(),
       ])
-      availableTools = toolDefs.map(t => ({
-        name: t.name,
-        description: t.description || '',
-      }))
-      availableSkills = skillDefs.map(s => ({
-        name: s.name,
-        description: s.desc || '',
-      }))
-    } catch {
-      // Degrade gracefully — the text-input fallback is always available
-      // via the profile's .md file.
-    }
+      availableTools = toolDefs.map(t => ({ ... }))
+      availableSkills = skillDefs.map(s => ({ ... }))
+      availableBots = channelList
+        .filter(c => c.enabled)
+        .map(c => ({
+          platform: c.name,
+          adapter_id: c.adapter_id || c.name,
+          label: c.adapter_id && c.adapter_id !== c.name ? `${c.name} / ${c.adapter_id}` : c.name,
+        }))
+    } catch { /* degrade gracefully */ }
   }
 
   // Reset form fields when the agent prop changes.
@@ -57,6 +65,11 @@
     systemPrompt = agent?.system_prompt ?? ''
     selectedTools = new Set(agent?.tools ?? [])
     selectedSkills = new Set(agent?.tool_skills ?? [])
+    bindings = (agent?.channel_bindings ?? []).map(b => ({
+      platform: b.platform,
+      adapter_id: b.adapter_id || '',
+      chat_id: b.chat_id,
+    }))
   })
 
   onMount(loadResources)
@@ -75,17 +88,30 @@
     selectedSkills = next
   }
 
+  function addBinding() {
+    bindings = [...bindings, { platform: '', adapter_id: '', chat_id: '' }]
+  }
+
+  function removeBinding(i: number) {
+    bindings = bindings.filter((_, idx) => idx !== i)
+  }
+
   function handleSubmit(e: Event) {
     e.preventDefault()
     const selTools = [...selectedTools]
     const selSkills = [...selectedSkills]
-    const body = {
+    const body: any = {
       name: name.trim(),
       description: description.trim(),
       model: model.trim() || undefined,
       tools: selTools.length > 0 ? selTools : undefined,
       tool_skills: selSkills.length > 0 ? selSkills : undefined,
       system_prompt: systemPrompt.trim() || undefined,
+      channel_bindings: bindings.filter(b => b.platform && b.chat_id).map(b => ({
+        platform: b.platform,
+        adapter_id: b.adapter_id || undefined,
+        chat_id: b.chat_id,
+      })),
     }
     if (!body.name || !body.description) {
       alert('Name and description are required')
@@ -160,6 +186,33 @@
         {/if}
       </div>
 
+      <!-- Channel bindings -->
+      <div class="field">
+        <label>{$t('agents.channel_bindings')}</label>
+        {#each bindings as b, i}
+          <div class="bind-row">
+            <select bind:value={bindings[i].platform} class="bind-select">
+              <option value="">{$t('agents.select_platform')}</option>
+              {#each availableBots as bot}
+                <option value={bot.platform}>{bot.label}</option>
+              {/each}
+            </select>
+            <input
+              bind:value={bindings[i].chat_id}
+              placeholder={$t('agents.chat_id_placeholder')}
+              class="bind-input"
+            />
+            <button type="button" class="btn-secondary bind-del" onclick={() => removeBinding(i)} title={$t('common.delete')}>
+              <iconify-icon icon="ant-design:delete-outlined" width="12"></iconify-icon>
+            </button>
+          </div>
+        {/each}
+        <button type="button" class="btn-secondary" style="margin-top:6px" onclick={addBinding}>
+          <iconify-icon icon="ant-design:plus-outlined" width="12"></iconify-icon>
+          {$t('agents.add_binding')}
+        </button>
+      </div>
+
       <div class="actions">
         <button type="button" class="btn-secondary" onclick={onCancel}>{$t('common.cancel')}</button>
         <button type="submit" class="btn-primary">{$t('common.save')}</button>
@@ -211,6 +264,26 @@
     flex: 1; min-width: 0;
     font-size: 11px; color: var(--text-tertiary);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* ── bindings ────────────────────────────────────────────────────────────── */
+  .bind-row {
+    display: flex; gap: 6px; align-items: center; margin-bottom: 6px;
+  }
+  .bind-select {
+    flex: 0 0 140px; height: 30px; padding: 0 8px;
+    border: 1px solid var(--border-secondary); border-radius: 6px;
+    background: var(--bg-primary); color: var(--text-primary); font-size: 12px;
+    font-family: inherit;
+  }
+  .bind-input {
+    flex: 1; height: 30px; padding: 0 10px;
+    border: 1px solid var(--border-secondary); border-radius: 6px;
+    font-size: 12px; font-family: inherit;
+  }
+  .bind-del {
+    flex: 0 0 30px; width: 30px; height: 30px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
   }
 
   .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }

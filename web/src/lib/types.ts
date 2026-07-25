@@ -93,6 +93,7 @@ export interface McpServer {
 
 export interface Channel {
   name: string
+  adapter_id?: string
   handle: string
   activity: string
   icon: string

@@ -20,49 +20,63 @@ Configure IM platform channels for octo. Supported platforms: `feishu`, `weixin`
 
 - Config lives in `~/.octo/channels.yml` (YAML, mode 600). Edit it directly with
   `read_file` / `write_file`.
+- Each platform can have **multiple bot instances** — e.g. 3 Feishu bots in one group,
+  each bound to a different expert agent. Instances are named; the name becomes the
+  `adapter_id` used in profile `channel_bindings`.
 - Adapters run inside `octo serve`, started alongside the HTTP server (skip with
   `--no-channel`). Config changes are applied on save via `POST /api/channels/<platform>`
   — no full restart needed.
 - Weixin login state lives separately in `~/.octo/weixin-credentials.json`, written by
   the QR-login flow this skill drives (`POST /api/channels/weixin/login` on the running serve).
 
-`channels.yml` schema:
+`channels.yml` schema (multi-instance):
 
 ```yaml
 channels:
   feishu:
-    enabled: true | false
-    app_id: string            # required
-    app_secret: string        # required
-    domain: string            # optional, default https://open.feishu.cn (include scheme)
-    allowed_users: string     # optional, comma-separated user IDs; empty = allow all
+    - name: code-review-bot       # instance name (adapter_id); omit for single-instance
+      enabled: true | false
+      app_id: string              # required
+      app_secret: string          # required
+      domain: string              # optional, default https://open.feishu.cn
+      allowed_users: string       # optional, comma-separated user IDs; empty = allow all
+    - name: ops-bot               # second instance, same platform
+      enabled: true
+      app_id: ...
+      app_secret: ...
   weixin:
-    enabled: true | false
-    token: string             # bot token; optional if cred_path (or the default
-    cred_path: string         #   ~/.octo/weixin-credentials.json) exists
-    base_url: string          # optional, default https://ilinkai.weixin.qq.com
-    allowed_users: string
+    - enabled: true | false
+      token: string               # bot token; optional if cred_path exists
+      cred_path: string           # optional, default ~/.octo/weixin-credentials.json
+      base_url: string            # optional, default https://ilinkai.weixin.qq.com
+      allowed_users: string
   dingtalk:
-    enabled: true | false
-    client_id: string         # required (AppKey)
-    client_secret: string     # required (AppSecret)
-    allowed_users: string
+    - name: ...                   # optional
+      enabled: true | false
+      client_id: string           # required (AppKey)
+      client_secret: string       # required (AppSecret)
+      allowed_users: string
   wecom:
-    enabled: true | false
-    bot_id: string            # required, intelligent robot Bot ID (starts with "aib")
-    secret: string            # required, robot secret
-    allowed_users: string
+    - name: ...
+      enabled: true | false
+      bot_id: string              # required, intelligent robot Bot ID (starts with "aib")
+      secret: string              # required, robot secret
+      allowed_users: string
   discord:
-    enabled: true | false
-    bot_token: string         # required, from the Discord Developer Portal
-    allowed_users: string
+    - name: ...
+      enabled: true | false
+      bot_token: string           # required, from the Discord Developer Portal
+      allowed_users: string
   telegram:
-    enabled: true | false
-    bot_token: string         # required, from @BotFather
-    base_url: string          # optional, default https://api.telegram.org
-    parse_mode: string        # optional, default "Markdown"; empty string disables
-    allowed_users: string
+    - name: ...
+      enabled: true | false
+      bot_token: string           # required, from @BotFather
+      base_url: string            # optional, default https://api.telegram.org
+      parse_mode: string          # optional, default "Markdown"; empty string disables
+      allowed_users: string
 ```
+
+**New instance on an existing platform**: append another `-` entry under the platform key with a unique `name`. The `name` field is the `adapter_id`; single-instance setups can omit it (the platform name is used as the default).
 
 ## Hot-reload after config change
 
@@ -137,6 +151,27 @@ Ask with `ask_user_question`:
 > 5. Discord
 > 6. Telegram (Bot API)
 
+After a platform is chosen, ask whether this is a new configuration or an additional
+instance on an existing platform:
+
+> Is this a new platform setup, or adding another bot instance to an existing one?
+>
+> (If the platform isn't configured yet, skip this question.)
+
+**Adding an instance to an existing platform**: append a new `-` entry under the
+platform key with a `name`. Ask the user for a name (e.g. "code-review-bot",
+"ops-bot"), then proceed to the platform-specific credentials steps below. The
+`name` is the `adapter_id` — it appears in InboundEvent and is used for
+profile `channel_bindings`.
+
+**After credentials are validated and saved**, ask:
+
+> Do you want to bind this bot instance to an expert agent? If yes, which agent?
+
+List the available agents via `GET /api/agents`. When the user picks one, call
+`POST /api/agents/:id/bind` with `{"platform": "<platform>", "adapter_id": "<name>", "chat_id": "<group or DM id>"}`.
+The `adapter_id` must match the instance `name` in channels.yml.
+
 ### Feishu setup
 
 #### Phase 1 — Create the app
@@ -182,9 +217,10 @@ Ask with `ask_user_question`:
    ```yaml
    channels:
      feishu:
-       enabled: true
-       app_id: <APP_ID>
-       app_secret: <APP_SECRET>
+       - name: <NAME>             # user-chosen instance name
+         enabled: true
+         app_id: <APP_ID>
+         app_secret: <APP_SECRET>
    ```
 
 #### Phase 6 — Configure event subscription (Long Connection)
@@ -232,7 +268,8 @@ Weixin uses a QR-code login — no app credentials needed.
    ```yaml
    channels:
      weixin:
-       enabled: true
+        - - enabled: true
+          enabled: true
    ```
    The adapter reads `~/.octo/weixin-credentials.json` automatically; only set `cred_path` if the user keeps credentials elsewhere.
 6. After writing `channels.yml`, trigger a hot reload (see "Hot-reload after config change") so the new adapter starts immediately. If the server isn't running, tell the user to start `octo serve`.
@@ -255,7 +292,8 @@ Weixin uses a QR-code login — no app credentials needed.
    ```yaml
    channels:
      dingtalk:
-       enabled: true
+        - - name: <NAME>
+          enabled: true
        client_id: <CLIENT_ID>
        client_secret: <CLIENT_SECRET>
    ```
@@ -274,7 +312,8 @@ WeCom "API mode" intelligent robots connect over a WebSocket long connection —
    ```yaml
    channels:
      wecom:
-       enabled: true
+        - - name: <NAME>
+          enabled: true
        bot_id: <BOT_ID>
        secret: <SECRET>
    ```
@@ -306,7 +345,8 @@ Discord requires manual portal interaction (hCaptcha gates application creation)
    ```yaml
    channels:
      discord:
-       enabled: true
+        - - name: <NAME>
+          enabled: true
        bot_token: <BOT_TOKEN>
    ```
 4. Build the invite URL with the Application ID and tell the user to open it:
@@ -333,7 +373,8 @@ Telegram is the simplest — no browser automation, no QR. The user creates a bo
    ```yaml
    channels:
      telegram:
-       enabled: true
+        - - name: <NAME>
+          enabled: true
        bot_token: <TOKEN>
    ```
 4. Trigger a hot reload (see "Hot-reload after config change"). If the server isn't running, remind the user to start `octo serve`. Then say: "✅ Telegram channel configured. Open your bot in Telegram and send it a message."
@@ -355,13 +396,14 @@ Telegram is the simplest — no browser automation, no QR. The user creates a bo
 Check each item, report ✅ / ❌ with remediation:
 
 1. **Config file** — `~/.octo/channels.yml` exists, is valid YAML, and has mode 600 (`stat -f %Lp` on macOS, `stat -c %a` on Linux).
-2. **Required fields** — for each enabled platform:
+2. **Required fields** — for each enabled **instance** (list under each platform):
    - Feishu: `app_id`, `app_secret` non-empty.
    - Weixin: `token` non-empty, or a readable credential file (`cred_path`, else `~/.octo/weixin-credentials.json`).
    - DingTalk: `client_id`, `client_secret` non-empty.
    - WeCom: `bot_id` (starts with `aib`), `secret` non-empty.
    - Discord: `bot_token` non-empty.
    - Telegram: `bot_token` non-empty.
+   Also check that no two instances share the same `name` (adapter_id) across or within platforms.
 3. **Feishu credentials** (if enabled) — run the tenant_access_token curl from setup Phase 5; `"code":0` → ✅, else ❌ "Feishu credentials rejected — re-run setup".
 4. **DingTalk credentials** (if enabled) — run the accessToken curl from setup step 4; `accessToken` present → ✅, else ❌ "DingTalk credentials invalid — re-run setup".
 5. **Weixin credentials** (if enabled) — credential file exists and contains a non-empty `token` → ✅, else ❌ "Re-run the weixin QR login (web Channels panel, or `POST /api/channels/weixin/login`)".

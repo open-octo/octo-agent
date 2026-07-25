@@ -50,6 +50,10 @@ export const en: Record<string, string> = {
   "agents.system_prompt_placeholder": "You are a helpful assistant...",
   "agents.model": "Model",
   "agents.model_placeholder": "Leave empty to use the default model",
+  "agents.channel_bindings": "Channel Bindings",
+  "agents.select_platform": "Select platform",
+  "agents.chat_id_placeholder": "Chat ID (e.g. group_xxx)",
+  "agents.add_binding": "Add binding",
   "agents.tools": "Tools",
 
   "agents.tools_loading": "Loading available tools…",
@@ -850,6 +854,10 @@ export const zh: Record<string, string> = {
   "agents.system_prompt_placeholder": "你是一个有用的助手...",
   "agents.model": "模型",
   "agents.model_placeholder": "留空使用默认模型",
+  "agents.channel_bindings": "频道绑定",
+  "agents.select_platform": "选择平台",
+  "agents.chat_id_placeholder": "聊天 ID（如 group_xxx）",
+  "agents.add_binding": "添加绑定",
   "agents.tools": "工具",
 
   "agents.tools_loading": "正在加载可用工具…",

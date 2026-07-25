@@ -69,9 +69,9 @@ type CapabilitySpec struct {
 // ChannelBinding pins a profile to one IM bot+chat combination: messages
 // from that adapter in that chat route to this profile.
 type ChannelBinding struct {
-	Platform  string `yaml:"platform"`
-	AdapterID string `yaml:"adapter_id,omitempty"`
-	ChatID    string `yaml:"chat_id"`
+	Platform  string `yaml:"platform" json:"platform"`
+	AdapterID string `yaml:"adapter_id,omitempty" json:"adapter_id,omitempty"`
+	ChatID    string `yaml:"chat_id" json:"chat_id"`
 }
 
 // Profile describes one agent: identity, capability slice, and platform
