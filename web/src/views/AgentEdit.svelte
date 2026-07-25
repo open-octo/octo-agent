@@ -85,8 +85,8 @@
         <small>{$t('agents.mention_as_hint')}</small>
       </div>
       <div class="actions">
-        <button type="button" class="secondary" onclick={onCancel}>{$t('common.cancel')}</button>
-        <button type="submit" class="primary">{$t('common.save')}</button>
+        <button type="button" class="btn-secondary" onclick={onCancel}>{$t('common.cancel')}</button>
+        <button type="submit" class="btn-primary">{$t('common.save')}</button>
       </div>
     </form>
   </div>
@@ -108,16 +108,20 @@
     width: 100%; padding: 8px 12px; border: 1px solid var(--border-secondary);
     border-radius: 6px; background: var(--bg-primary); color: var(--text-primary);
     font-size: 13px; font-family: inherit;
-    &:focus { outline: none; border-color: var(--primary); }
+    &:focus { outline: none; border-color: var(--blue-6); }
   }
   small { display: block; font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
   .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
-  .secondary {
-    padding: 8px 16px; background: var(--bg-hover); color: var(--text-primary);
-    border: none; border-radius: 6px; font-size: 13px; cursor: pointer;
+  .btn-primary {
+    height: 32px; padding: 0 14px; border: none; background: var(--blue-6); border-radius: 6px;
+    font-size: 14px; color: #fff; cursor: pointer; font-family: inherit;
   }
-  .primary {
-    padding: 8px 16px; background: var(--primary); color: white; border: none;
-    border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;
+  .btn-primary:hover:not(:disabled) { background: var(--blue-5); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-secondary {
+    height: 32px; padding: 0 14px; border: 1px solid var(--border); background: var(--bg-container);
+    border-radius: 6px; font-size: 13px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
   }
+  .btn-secondary:hover:not(:disabled) { border-color: var(--blue-5); color: var(--blue-5); }
+  .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
