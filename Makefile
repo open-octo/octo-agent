@@ -94,8 +94,12 @@ build-full: build
 # WebView2). Embeds the web UI first (the in-process server go:embeds webdist).
 # Produces a bare binary; use `wails3 build` inside cmd/octo-desktop for a
 # packaged .app / installer.
+DESKTOP_MACOS_VERSION ?= $(shell sw_vers -productVersion 2>/dev/null | cut -d. -f1 || echo 11)
 desktop: web-build
-	cd cmd/octo-desktop && CGO_ENABLED=1 go build -ldflags='$(DESKTOP_LDFLAGS)' -o ../../octo-desktop .
+	cd cmd/octo-desktop && CGO_ENABLED=1 \
+		CGO_CFLAGS="-mmacosx-version-min=$(DESKTOP_MACOS_VERSION)" \
+		CGO_LDFLAGS="-Wl,-macos_version_min,$(DESKTOP_MACOS_VERSION) -Wl,-no_warn_duplicate_libraries" \
+		go build -ldflags='$(DESKTOP_LDFLAGS)' -o ../../octo-desktop .
 
 # Package the desktop shell into a double-clickable macOS Octo.app bundle
 # (embeds the web UI, ad-hoc signed for local use). Real Developer ID

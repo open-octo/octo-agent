@@ -44,8 +44,11 @@ for arch in amd64 arm64; do
 
 	echo "==> building octo-desktop (darwin/$arch)"
 	out="$ROOT/octo-desktop-$arch"
+	macos_ver="$(sw_vers -productVersion | cut -d. -f1)"
 	( cd "$MOD_DIR" && \
 		GOOS=darwin GOARCH="$arch" CGO_ENABLED=1 CC="clang -arch $cc_arch" \
+		CGO_CFLAGS="-mmacosx-version-min=$macos_ver" \
+		CGO_LDFLAGS="-Wl,-macos_version_min,$macos_ver -Wl,-no_warn_duplicate_libraries" \
 		go build -tags embedrg -ldflags "$LDFLAGS" -o "$out" . )
 	slices+=("$out")
 done
