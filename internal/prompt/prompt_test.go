@@ -82,3 +82,18 @@ func TestReadProjectContext_MissingFileIsEmpty(t *testing.T) {
 		t.Errorf("empty cwd should yield empty, got %q", got)
 	}
 }
+
+func TestCompose_ExpertModeSkipsIdentityLayers(t *testing.T) {
+	useIdentityFiles(t, "SOUL CONTENT", "USER CONTENT")
+	out := Compose("EXPERT_SYSTEM", t.TempDir(), "ENV", "SKILLS", "", "", true, true)
+	for _, forbidden := range []string{"soul.md", "user.md", "octorules.md", "Agent identity", "User profile"} {
+		if strings.Contains(out, forbidden) {
+			t.Errorf("expertMode should skip %q", forbidden)
+		}
+	}
+	for _, want := range []string{"ENV", "SKILLS", "EXPERT_SYSTEM"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expertMode should keep %q", want)
+		}
+	}
+}

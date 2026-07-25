@@ -55,8 +55,8 @@ var userRulesPath = func() string {
 	return filepath.Join(home, ".octo", "octorules.md")
 }
 
-// Compose assembles the session system prompt from up to ten layers, in
-// order of increasing specificity:
+// Compose assembles the session system prompt from up to ten layers (six
+// when expertMode is true), in order of increasing specificity:
 //
 //  1. base     — embedded octo foundation (always present)
 //  2. soul     — ~/.octo/soul.md, if present (agent identity & behavior)
@@ -139,7 +139,7 @@ func Compose(userSystem, cwd, env, skills, mcpTools, memory string, coauthor, ex
 // drops the skills manifest, MCP tools manifest, and memory injection (the
 // heaviest, most optional layers). The lean variant seeds cheap read-only
 // sub-agents (explore) that don't need the full harness context. Other
-// layers — soul, env, user/project conventions — are kept in both.
+// layers — soul, env, user/project conventions — are kept in both (except in expertMode, where soul/user/project are dropped from both).
 func ComposePair(userSystem, cwd, env, skills, mcpTools, memory string, coauthor, expertMode bool) (full, lean string) {
 	full = Compose(userSystem, cwd, env, skills, mcpTools, memory, coauthor, expertMode)
 	lean = Compose(userSystem, cwd, env, "", "", "", coauthor, expertMode)
