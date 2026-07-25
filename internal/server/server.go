@@ -2691,10 +2691,11 @@ func (s *Server) routeChannelEvent(ctx context.Context, ad channel.Adapter, ev c
 	// means "stay silent": a group chat with multiple bound agents and no
 	// @-mention.
 	profile := s.agentRouter().Route(agentprofile.RouteInput{
-		Platform: ev.Platform,
-		ChatID:   ev.ChatID,
-		UserID:   ev.UserID,
-		Text:     ev.Text,
+		Platform:  ev.Platform,
+		ChatID:    ev.ChatID,
+		AdapterID: ev.AdapterID,
+		UserID:    ev.UserID,
+		Text:      ev.Text,
 	})
 	if profile == nil {
 		return

@@ -66,11 +66,12 @@ type CapabilitySpec struct {
 	LeanContext     bool     // frontmatter lean_context: seed with the lean system prompt
 }
 
-// ChannelBinding pins a profile to one IM chat: messages from that chat route
-// to this profile without needing an @-mention.
+// ChannelBinding pins a profile to one IM bot+chat combination: messages
+// from that adapter in that chat route to this profile.
 type ChannelBinding struct {
-	Platform string `yaml:"platform"`
-	ChatID   string `yaml:"chat_id"`
+	Platform  string `yaml:"platform"`
+	AdapterID string `yaml:"adapter_id,omitempty"`
+	ChatID    string `yaml:"chat_id"`
 }
 
 // Profile describes one agent: identity, capability slice, and platform

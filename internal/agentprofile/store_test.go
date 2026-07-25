@@ -53,7 +53,7 @@ func TestStoreProjectStripsPlatformSlice(t *testing.T) {
 	if p, _ := s.Get("ops"); p == nil || len(p.ChannelBindings) != 0 {
 		t.Fatalf("project profile kept platform slice: %+v", p)
 	}
-	if got := s.ByChannel("weixin", "g1"); len(got) != 0 {
+	if got := s.ByChannel("weixin", "", "g1"); len(got) != 0 {
 		t.Fatal("project-level binding must not be routable")
 	}
 }
@@ -107,7 +107,7 @@ func TestStore_UserProfilesSkipsNonSlug(t *testing.T) {
 	}
 	s := New(dir, nil)
 	// userProfiles() (IM-routing source) skips non-slug files.
-	if p := s.ByChannel("weixin", "g1"); len(p) > 0 {
+	if p := s.ByChannel("weixin", "", "g1"); len(p) > 0 {
 		t.Fatalf("non-slug profile is routable via IM: %+v", p)
 	}
 	// But Get()/List() (delegation + API) still see it.
@@ -201,13 +201,13 @@ func TestStoreByChannelByMention(t *testing.T) {
 	writeMD(t, userDir, "a.md", "---\ndescription: da\nmention_as: [\"@review\"]\nchannel_bindings:\n  - {platform: weixin, chat_id: g1}\n---\nbody\n")
 	writeMD(t, userDir, "b.md", "---\ndescription: db\nchannel_bindings:\n  - {platform: weixin, chat_id: g1}\n  - {platform: feishu, chat_id: g2}\n---\nbody\n")
 
-	if got := s.ByChannel("weixin", "g1"); len(got) != 2 {
+	if got := s.ByChannel("weixin", "", "g1"); len(got) != 2 {
 		t.Fatalf("ByChannel(weixin,g1) = %d, want 2", len(got))
 	}
-	if got := s.ByChannel("feishu", "g2"); len(got) != 1 || got[0].ID != "b" {
+	if got := s.ByChannel("feishu", "", "g2"); len(got) != 1 || got[0].ID != "b" {
 		t.Fatalf("ByChannel(feishu,g2) = %+v", got)
 	}
-	if got := s.ByChannel("weixin", "unknown"); len(got) != 0 {
+	if got := s.ByChannel("weixin", "", "unknown"); len(got) != 0 {
 		t.Fatalf("ByChannel unknown = %+v", got)
 	}
 }
@@ -222,7 +222,7 @@ func TestStoreProjectShadowKeepsUserRouting(t *testing.T) {
 	if p, _ := s.Get("reviewer"); p.Source != SourceProject {
 		t.Fatalf("delegation precedence broken: %+v", p)
 	}
-	if got := s.ByChannel("weixin", "g1"); len(got) != 1 || got[0].ID != "reviewer" {
+	if got := s.ByChannel("weixin", "", "g1"); len(got) != 1 || got[0].ID != "reviewer" {
 		t.Fatalf("project shadow silenced user routing: %+v", got)
 	}
 }

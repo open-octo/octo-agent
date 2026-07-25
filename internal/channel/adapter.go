@@ -42,6 +42,11 @@ type InboundEvent struct {
 	// that was pressed. Empty for ordinary messages.
 	ButtonID string
 
+	// AdapterID identifies which bot instance received the message. Empty
+	// for single-instance (legacy) platforms; set when channels.yml declares
+	// multiple instances for the same platform.
+	AdapterID string
+
 	// Raw is the platform-native payload, kept for adapter-internal use.
 	Raw any
 }

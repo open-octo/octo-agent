@@ -231,16 +231,25 @@ func (s *Store) userProfiles() map[string]*Profile {
 	return m
 }
 
-// ByChannel returns the user-level profiles bound to the given IM chat. The
-// router treats >1 as "ambiguous: stay silent unless @-mentioned".
-func (s *Store) ByChannel(platform, chatID string) []*Profile {
+// ByChannel returns the user-level profiles bound to the given IM chat.
+// When adapterID is non-empty, only bindings with a matching AdapterID
+// (or an empty AdapterID — legacy compatibility) are considered. When
+// adapterID is empty, the legacy two-dimensional (platform, chat_id)
+// match is used. The router treats >1 results as "ambiguous: stay silent".
+func (s *Store) ByChannel(platform, adapterID, chatID string) []*Profile {
 	var out []*Profile
 	for _, p := range s.userProfiles() {
 		for _, b := range p.ChannelBindings {
-			if b.Platform == platform && b.ChatID == chatID {
-				out = append(out, p)
-				break
+			if b.Platform != platform || b.ChatID != chatID {
+				continue
 			}
+			// adapterID match: non-empty → exact match or legacy empty;
+			// empty adapterID in query → match any (legacy mode).
+			if adapterID != "" && b.AdapterID != "" && b.AdapterID != adapterID {
+				continue
+			}
+			out = append(out, p)
+			break
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
