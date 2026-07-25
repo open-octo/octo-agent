@@ -75,16 +75,26 @@ bound to the chosen agent — switch agents by opening a new session.
 
 Each session in the sidebar is tagged with its agent name.
 
-### IM channels — channel bindings
+### IM channels
 
-Bind an expert agent to a channel so messages route to it automatically:
+Assign an expert agent to an IM channel through the agent's settings in the
+Web UI. Once assigned, messages from that channel route directly to the agent —
+no `@mention` needed.
 
-```
-/bind code-review
-```
+To set up multiple bots in the same group (e.g. `@code-review-bot`,
+`@ops-bot`, `@docs-bot` each with a different expert agent), use the
+`channel-manager` skill:
 
-A group chat with multiple bound agents stays silent — bind only one
-agent per group, or keep the Default Agent for general use.
+> Set up three Feishu bots for my dev group — one for code review, one for
+> ops, one for docs.
+
+The Default Agent walks you through platform console setup, credentials, and
+agent assignment. Each bot gets its own entry in `channels.yml`, and each is
+bound to the profile you pick.
+
+A group chat with multiple bound agents and no clear routing target stays
+silent — assign at most one agent per bot, or keep the Default Agent for
+general use.
 
 ### CLI
 

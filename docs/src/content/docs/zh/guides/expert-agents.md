@@ -69,16 +69,20 @@ Default Agent 会通过 `expert-agent-manager` 技能调用 REST API 完成创�
 
 侧边栏中每条会话都标记了所属智能体的标签。
 
-### IM 频道 — 频道绑定
+### IM 频道
 
-把专家智能体绑定到频道后，消息会自动路由到它：
+通过 Web UI 在智能体设置中将其分配到指定 IM 频道。分配后，该频道的
+消息直接路由到该智能体——无需 `@mention`。
 
-```
-/bind code-review
-```
+如果想在同一个群里配置多个机器人（例如 `@code-review-bot`、`@ops-bot`、
+`@docs-bot` 分别对应不同 expert agent），使用 `channel-manager` 技能：
 
-绑定多个智能体的群聊会保持静默——每个群只绑定一个智能体，
-或者保留 Default Agent 处理日常对话。
+> 帮我给开发群配三个飞书机器人——一个做代码审查，一个做运维，一个写文档。
+
+Default Agent 会引导你完成平台控制台操作、凭据收集和 agent 分配。
+每个机器人有独立的 `channels.yml` 条目，各自绑定到你选择的 profile。
+
+如果不给任何频道分配 expert agent，消息会路由到 Default Agent。
 
 ### CLI
 
