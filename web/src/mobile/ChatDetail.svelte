@@ -9,6 +9,7 @@
   import { resetArtifacts } from '../lib/artifacts'
   import { ws } from '../lib/ws'
   import { wireMobileSession, loadMobileHistory, sendMobile } from './chatWiring'
+  import { renderMarkdown } from '../lib/markdown'
   import ArtifactViewer from './ArtifactViewer.svelte'
   import { t } from '../lib/i18n'
 
@@ -126,11 +127,11 @@
       <div class="bubble user" class:pending={msg.pending}>{msg.content}</div>
     {:else if msg.type === 'assistant'}
       <div class="bubble agent">
-        {#if msg.thinking}<div class="thoughts">{msg.thinking}</div>{/if}
-        <div class="body">{msg.content}{#if msg.streaming}<span class="caret">▋</span>{/if}</div>
+        {#if msg.thinking}<div class="thoughts">{@html renderMarkdown(msg.thinking)}</div>{/if}
+        <div class="body">{@html renderMarkdown(msg.content)}{#if msg.streaming}<span class="caret">▋</span>{/if}</div>
       </div>
     {:else if msg.type === 'thinking'}
-      <div class="thoughts standalone">{msg.thinking}</div>
+      <div class="thoughts standalone">{@html renderMarkdown(msg.thinking)}</div>
     {:else if msg.type === 'tool_group'}
       <div class="tools">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--m-text-3)" stroke-width="2"><path d="M14.7 6.3a4 4 0 0 1-5 5L4 17v3h3l5.7-5.7a4 4 0 0 0 5-5z"/></svg>
@@ -378,4 +379,46 @@
   }
   .acard .aname { flex: 1; font-size: 14px; color: var(--m-text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .acard .atype { flex: none; font-size: 11px; color: var(--m-text-3); font-family: ui-monospace, Menlo, monospace; }
+
+  /* ── Markdown rendering (adapted from desktop for mobile) ─────────────────── */
+  .agent.body :global(p) { margin: 0; }
+  .agent.body :global(p:not(:last-child)) { margin: 0 0 8px; }
+  .agent.body :global(h1), .agent.body :global(h2), .agent.body :global(h3), .agent.body :global(h4) {
+    margin: 12px 0 6px; font-weight: 600; line-height: 1.3;
+  }
+  .agent.body :global(h1) { font-size: 18px; }
+  .agent.body :global(h2) { font-size: 16px; }
+  .agent.body :global(h3) { font-size: 15px; }
+  .agent.body :global(ul), .agent.body :global(ol) { margin: 0; padding-left: 22px; }
+  .agent.body :global(li) { margin: 3px 0; }
+  .agent.body :global(a) { color: var(--m-accent); text-decoration: none; }
+  .agent.body :global(code) {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+    background: rgba(127, 127, 127, 0.15); border-radius: 4px; padding: 1px 5px;
+  }
+  .agent.body :global(pre) {
+    margin: 8px 0; padding: 10px 12px; overflow-x: auto; border-radius: 8px;
+    background: var(--m-surface); border: 1px solid var(--m-border);
+    font-size: 12.5px; line-height: 1.6;
+  }
+  .agent.body :global(pre code) { background: none; padding: 0; border-radius: 0; }
+  .agent.body :global(blockquote) {
+    margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--m-accent);
+    background: rgba(127, 127, 127, 0.08); border-radius: 0 6px 6px 0; font-size: 13px; color: var(--m-text-2);
+  }
+  .agent.body :global(table) { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+  .agent.body :global(th), .agent.body :global(td) { border: 1px solid var(--m-border); padding: 5px 10px; text-align: left; }
+  .agent.body :global(th) { background: var(--m-surface); font-weight: 600; }
+  .agent.body :global(hr) { border: none; border-top: 1px solid var(--m-border); margin: 12px 0; }
+  .agent.body :global(img) { max-width: 100%; border-radius: 8px; }
+  .thoughts :global(p) { margin: 0; }
+  .thoughts :global(pre) { margin: 6px 0; padding: 8px 10px; border-radius: 6px; background: rgba(127, 127, 127, 0.08); overflow-x: auto; font-size: 12px; }
+  .thoughts :global(code) { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  /* highlight.js theme overrides for mobile dark context */
+  .agent.body :global(.hljs) { background: transparent; }
+  .agent.body :global(.code-block) { border: 1px solid var(--m-border); border-radius: 8px; overflow: hidden; margin: 8px 0; }
+  .agent.body :global(.code-header) { display: flex; align-items: center; gap: 8px; padding: 5px 10px; background: var(--m-surface); border-bottom: 1px solid var(--m-border); }
+  .agent.body :global(.code-lang) { font-size: 10px; color: var(--m-text-3); font-family: ui-monospace, Menlo, monospace; }
+  .agent.body :global(.copy-btn) { margin-left: auto; border: none; background: transparent; color: var(--m-text-3); font-size: 11px; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-family: inherit; }
+  .agent.body :global(.copy-btn:active) { background: var(--m-border); }
 </style>
