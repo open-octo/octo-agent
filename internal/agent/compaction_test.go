@@ -93,6 +93,9 @@ func TestContextWindow(t *testing.T) {
 	if got := contextWindow("k3"); got != 1_000_000 {
 		t.Errorf("k3 window = %d, want 1000000", got)
 	}
+	if got := contextWindow("k3-256k"); got != 256_000 {
+		t.Errorf("k3-256k window = %d, want 256000", got)
+	}
 	if got := contextWindow("deepseek-v4-pro"); got != 1_000_000 {
 		t.Errorf("deepseek-v4-pro window = %d, want 1000000", got)
 	}

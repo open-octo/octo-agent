@@ -206,6 +206,7 @@ var Registry = []Vendor{
 			{ID: "kimi-for-coding", Vision: true},
 			{ID: "kimi-for-coding-highspeed", Vision: true},
 			{ID: "k3", Vision: true},
+			{ID: "k3-256k", Vision: true},
 			{ID: "kimi-k2.6", Vision: true},
 			{ID: "kimi-k2.7-code", Vision: true},
 		},

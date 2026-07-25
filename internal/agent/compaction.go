@@ -115,6 +115,8 @@ func contextWindow(model string) int {
 	// ── Moonshot Kimi ──
 	case strings.Contains(m, "kimi-for-coding-highspeed"):
 		return 256_000
+	case strings.Contains(m, "k3-256k"):
+		return 256_000
 	case strings.Contains(m, "k3"):
 		return 1_000_000
 	case strings.Contains(m, "kimi-k2.7") || strings.Contains(m, "kimik2.7") || strings.Contains(m, "k2.7"):
