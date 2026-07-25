@@ -153,6 +153,23 @@ async function boot(): Promise<void> {
     }
   }
 
+  // Dev fallback: check for a pairing file injected via adb (avoids deep-link
+  // fragility on emulators where Capacitor's appUrlOpen fires before the JS
+  // listener is loaded).
+  try {
+    const resp = await fetch('/octo-pairing.json', { cache: 'no-store' })
+    if (resp.ok) {
+      const info = await resp.json() as PairingInfo
+      if (info.relay && info.tunnelId && info.hostKey && info.token) {
+        await connect(info)
+        saveStored(info)
+        return
+      }
+    }
+  } catch {
+    // No dev pairing file — normal flow continues.
+  }
+
   await showOverlay()
 
   // A QR scanned by the system camera app (or an `adb … VIEW` in dev) arrives as

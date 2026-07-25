@@ -24,6 +24,14 @@ const defaultRelayURL = "wss://relay.octo.dev"
 // ordinary key-authenticated /ws client of the local server, so internal/server
 // is untouched. The goroutine stops when ctx is cancelled (serve shutdown).
 func startTunnel(ctx context.Context, srv *server.Server, addr, relayURL string, stdout io.Writer) error {
+	// Validate the relay URL scheme early — the relay speaks WebSocket and a
+	// bare http:// URL silently fails with retry-loop noise instead of a clear
+	// startup error (the mobile app also expects ws:// / wss:// in pairing URLs).
+	u, err := url.Parse(relayURL)
+	if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") {
+		return fmt.Errorf("--relay must be a ws:// or wss:// URL (got %q)", relayURL)
+	}
+
 	idPath, err := tunnelIdentityPath()
 	if err != nil {
 		return err
