@@ -1177,4 +1177,38 @@ func (s *Server) handleChannelEvent(ctx context.Context, ad channel.Adapter, ada
 | `internal/server/server.go` | `startOneChannelLocked` 注入 `adapterID` 到事件流；适配新 Config 格式 |
 | `web/src/views/AgentEdit.svelte` | 绑定频道表单增加 bot 实例选择器 |
 | `skills/expert-agent-manager/SKILL.md` | bind API 参数增加 `adapter_id` |
-| `skills/channel-manager/SKILL.md` | 支持多 bot 实例引导 |
+| `skills/channel-manager/SKILL.md` | 支持多 bot 实例引导：配置流程增加"命名实例并关联 agent profile"步骤；diagnose 反馈覆盖多 bot 场景（3 个 bot、1 个群、各自 agent 绑定正常） |
+
+### channel-manager 技能修改
+
+`channel-manager` 是 Default Agent 专属技能，负责引导用户完成 IM 平台配置
+（平台控制台操作、凭据收集、`~/.octo/channels.yml` 写入、连接诊断）。
+
+**当前行为**：一次只配一个 bot 实例，写完 `channels.yml` 后调用 `octo serve` 重启。
+配置流程是"选平台 → 收集凭据 → 写入配置 → 诊断"。
+
+**改造目标**：支持在同一个平台下配置多个 bot 实例，并为每个实例绑定 agent profile。
+
+**新增引导步骤**：
+
+1. 平台选择后，询问"是否为已有平台添加更多实例"——如果是，追加到 `name` 列表下
+2. 收集凭据时要求用户给实例命名（`name`），用于后续 `channel_bindings` 引用
+3. 凭据收集完成后，引导用户将此实例绑定到一个 expert agent：
+   - 列出已有的 expert agent profiles
+   - 用户选择后调用 `POST /api/agents/:id/bind`（带 `adapter_id`）
+4. `channels.yml` 格式改为多实例列表：
+
+```yaml
+channels:
+  feishu:
+    - name: code-review-bot
+      enabled: true
+      app_id: cli_a7...
+      app_secret: ...
+    - name: ops-bot
+      enabled: true
+      app_id: cli_b8...
+      app_secret: ...
+```
+
+**诊断（doctor）扩展**：检查多 bot 实例是否成功连接、是否各自绑定到不同 agent profile、同一群聊是否有多个 bot 但无明确路由目标。
