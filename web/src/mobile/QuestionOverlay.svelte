@@ -8,7 +8,7 @@
   //    action — tapping it navigates to that session, where the card then
   //    appears.
   import { onMount, onDestroy } from 'svelte'
-  import { questionModals, activeSessionId } from '../lib/stores'
+  import { questionModals, activeSessionId, setActiveSession } from '../lib/stores'
   import { ws } from '../lib/ws'
   import { t } from '../lib/i18n'
 
@@ -39,6 +39,7 @@
 
   onMount(() => {
     cleanups.push(ws.on('request_user_question', (ev: any) => {
+      console.log('[octo-mobile] request_user_question received', ev.session_id, ev.question?.slice(0, 40))
       const sid = ev.session_id
       if (!sid) return
       questionModals.update(m => ({
@@ -122,7 +123,7 @@
     <div class="qo-card" class:expanded={getDraft(activeQ.sessionId).expanded}>
       <div class="qo-head">
         <span class="qo-icon">◆</span>
-        <span class="qo-title">{activeQ.header || t('question.title')}</span>
+        <span class="qo-title">{activeQ.header || $t('question.title')}</span>
       </div>
 
       <p class="qo-body">{activeQ.question}</p>
@@ -145,14 +146,14 @@
         <textarea
           class="qo-free"
           rows="2"
-          placeholder={t('question.custom_placeholder')}
+          placeholder={$t('question.custom_placeholder')}
           value={getDraft(activeQ.sessionId).custom}
-          oninput={(e) => { getDraft(activeQ.sessionId).custom = e.target.value }}
+          oninput={(e) => { getDraft(activeQ.sessionId).custom = (e.target as HTMLTextAreaElement).value }}
         ></textarea>
       {/if}
 
       <div class="qo-actions">
-        <button class="qo-cancel" onclick={() => cancel(activeQ.sessionId)}>{t('common.cancel')}</button>
+        <button class="qo-cancel" onclick={() => cancel(activeQ.sessionId)}>{$t('common.cancel')}</button>
         {#if !getDraft(activeQ.sessionId).expanded}
           <button class="qo-expand" onclick={() => (getDraft(activeQ.sessionId).expanded = true)}>展开</button>
         {/if}
@@ -161,7 +162,7 @@
           onclick={() => submit(activeQ.sessionId)}
           disabled={getDraft(activeQ.sessionId).selected.length === 0 && !getDraft(activeQ.sessionId).custom.trim()}
         >
-          {t('common.submit')}
+          {$t('common.submit')}
         </button>
       </div>
     </div>
