@@ -422,7 +422,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	var sandboxWrite, sandboxRead stringList
 	fs.Var(&sandboxWrite, "sandbox-write", "Under --sandbox, an extra writable directory (repeatable)")
 	fs.Var(&sandboxRead, "sandbox-read", "Under --sandbox, an extra read-only directory (repeatable)")
-	agentName := fs.String("agent", "", "Start the session bound to a specific agent (by ID or name from ~/.octo/agents)")
+	agentName := fs.String("agent", "", "Start the session bound to a specific agent (by ID from ~/.octo/agents)")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -517,12 +517,14 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// The profile ID is stamped onto the session so it routes to the right
 	// agent namespace and filters tools/skills per the profile's allowlist.
 	var agentProfileID string
+	var agentStore *agentprofile.Store
 	if *agentName != "" {
-		store := agentprofile.New(agentUserDir(), agentProjectDir)
-		profile, ok := store.Get(*agentName)
+		agentStore = agentprofile.New(agentUserDir(), agentProjectDir)
+		profile, ok := agentStore.Get(*agentName)
 		if !ok {
-			fmt.Fprintf(stderr, "octo: agent %q not found (available: default, %s)\n",
-				*agentName, strings.Join(profileIDs(store), ", "))
+			ids := append([]string{"default"}, profileIDs(agentStore)...)
+			fmt.Fprintf(stderr, "octo: agent %q not found (available: %s)\n",
+				*agentName, strings.Join(ids, ", "))
 			return 2
 		}
 		agentProfileID = profile.ID
@@ -1132,9 +1134,9 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		// DefaultToolsForProfile filters the tool allowlist. The CLI is
 		// single-session, so this static filtering at startup is sufficient.
 		toolCtx := context.Background()
-		if agentProfileID != "" {
+		if agentProfileID != "" && agentStore != nil {
 			toolCtx = tools.WithSessionAgentID(toolCtx, agentProfileID)
-			toolCtx = tools.WithProfileStore(toolCtx, agentprofile.New(agentUserDir(), agentProjectDir))
+			toolCtx = tools.WithProfileStore(toolCtx, agentStore)
 		}
 		replCfg.tools = tools.DefaultToolsForProfile(toolCtx, resolvedModel)
 		replCfg.executor = toolExecutor
