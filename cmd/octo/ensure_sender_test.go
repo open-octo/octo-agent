@@ -54,7 +54,7 @@ func TestEnsureSender_ConfigLoadFailure(t *testing.T) {
 		stderr:       io.Discard,
 	}
 
-	if err := cfg.ensureSender("kimi-for-coding", senderTuning{}); err == nil {
+	if _, err := cfg.ensureSender("kimi-for-coding", senderTuning{}); err == nil {
 		t.Fatal("expected error when config.Load() fails, got nil")
 	}
 	if cfg.providerName != "openai" {
@@ -93,8 +93,12 @@ func TestEnsureSender_RebuildsOnProviderChange(t *testing.T) {
 		stderr:       io.Discard,
 	}
 
-	if err := cfg.ensureSender("kimi-for-coding", senderTuning{}); err != nil {
+	entry, err := cfg.ensureSender("kimi-for-coding", senderTuning{})
+	if err != nil {
 		t.Fatalf("ensureSender: %v", err)
+	}
+	if entry.Model != "kimi-for-coding" {
+		t.Errorf("resolved entry.Model = %q, want kimi-for-coding", entry.Model)
 	}
 	if cfg.providerName != "anthropic" {
 		t.Errorf("providerName = %q, want anthropic", cfg.providerName)
@@ -132,7 +136,7 @@ func TestEnsureSender_NoRebuildWhenUnchanged(t *testing.T) {
 		stderr:       io.Discard,
 	}
 
-	if err := cfg.ensureSender("gpt-4o-mini", senderTuning{}); err != nil {
+	if _, err := cfg.ensureSender("gpt-4o-mini", senderTuning{}); err != nil {
 		t.Fatalf("ensureSender: %v", err)
 	}
 	// Sender must be the same stub — no rebuild happened.
@@ -163,7 +167,7 @@ func TestEnsureSender_RebuildsOnBaseURLChange(t *testing.T) {
 		stderr:       io.Discard,
 	}
 
-	if err := cfg.ensureSender("kimi-for-coding", senderTuning{}); err != nil {
+	if _, err := cfg.ensureSender("kimi-for-coding", senderTuning{}); err != nil {
 		t.Fatalf("ensureSender: %v", err)
 	}
 	if cfg.configEntry.BaseURL != "https://api.moonshot.cn/anthropic" {
@@ -200,7 +204,7 @@ func TestEnsureSender_ErrorLeavesConfigUnchanged(t *testing.T) {
 		stderr:       io.Discard,
 	}
 
-	if err := cfg.ensureSender("kimi-for-coding", senderTuning{}); err == nil {
+	if _, err := cfg.ensureSender("kimi-for-coding", senderTuning{}); err == nil {
 		t.Fatal("expected error for missing anthropic API key, got nil")
 	}
 	if cfg.providerName != "openai" {
@@ -211,6 +215,44 @@ func TestEnsureSender_ErrorLeavesConfigUnchanged(t *testing.T) {
 	}
 	if cfg.a.GetSender() != stub {
 		t.Error("sender should be unchanged after failed rebuild")
+	}
+}
+
+// TestEnsureSender_CompositeIDReturnsBareModel pins the fix for the TUI
+// /model 401: the picker's accept path hands ensureSender a composite id
+// "<endpoint>::<model>", and the returned entry must carry the BARE model id
+// — the only form providers accept on the wire. Sending the composite id
+// verbatim made upstreams reject the request (HTTP 401 "model id does not
+// exist, recognized as Kimi::K3").
+func TestEnsureSender_CompositeIDReturnsBareModel(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "test-deepseek-key")
+
+	writeTestConfig(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}},
+			{ID: "ep-b", Provider: "deepseek", BaseURL: "https://api.deepseek.com", Models: []config.EndpointModel{{Model: "deepseek-v4-flash"}}},
+		},
+		Default: "ep-a::gpt-4o",
+	})
+
+	stub := &stubSender{reply: "ok"}
+	a := agent.New(stub, "gpt-4o")
+	cfg := &replConfig{
+		a:            a,
+		providerName: "openai",
+		configEntry:  config.ModelEntry{Model: "gpt-4o", Provider: "openai"},
+		stderr:       io.Discard,
+	}
+
+	entry, err := cfg.ensureSender("ep-b::deepseek-v4-flash", senderTuning{})
+	if err != nil {
+		t.Fatalf("ensureSender: %v", err)
+	}
+	if entry.Model != "deepseek-v4-flash" {
+		t.Errorf("resolved entry.Model = %q, want bare model deepseek-v4-flash", entry.Model)
+	}
+	if strings.Contains(entry.Model, "::") {
+		t.Errorf("resolved entry.Model %q must never contain the composite separator", entry.Model)
 	}
 }
 
@@ -240,7 +282,7 @@ func TestEnsureSender_UnconfiguredModel(t *testing.T) {
 		stderr:       io.Discard,
 	}
 
-	if err := cfg.ensureSender("deepseek-v4-pro", senderTuning{}); err == nil {
+	if _, err := cfg.ensureSender("deepseek-v4-pro", senderTuning{}); err == nil {
 		t.Fatal("expected error for unconfigured model, got nil")
 	} else if !strings.Contains(err.Error(), "gpt-4o") || !strings.Contains(err.Error(), "deepseek-v4-flash") {
 		t.Errorf("error should list available models, got: %v", err)

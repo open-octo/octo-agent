@@ -1212,15 +1212,22 @@ func (m *tuiModel) dispatchModel(name string) (tea.Model, tea.Cmd) {
 	}
 
 	tuning := senderTuning{showReasoning: m.cfg.showReasoning}
-	if err := m.cfg.ensureSender(name, tuning); err != nil {
+	entry, err := m.cfg.ensureSender(name, tuning)
+	if err != nil {
 		m.println(errorStyle.Render(fmt.Sprintf("error switching model: %v", err)))
 		return m, nil
 	}
-	m.a.Model = name
-	m.cfg.modelName = name
+	// The wire model is the bare model id from the resolved entry. name may
+	// be a composite "<endpoint>::<model>" reference (the picker's accept
+	// form) — that is endpoint addressing, not a model id providers accept;
+	// sending it verbatim makes upstreams 401 (e.g. "model id does not
+	// exist, recognized as Kimi::K3"). Mirrors the server/IM switch paths,
+	// which also set Agent.Model from the resolved entry.
+	m.a.Model = entry.Model
+	m.cfg.modelName = entry.Model
 	// Tool surface may differ per model (e.g. vision vs non-vision).
 	if m.cfg.tools != nil {
-		m.cfg.tools = tools.DefaultToolsFor(name)
+		m.cfg.tools = tools.DefaultToolsFor(entry.Model)
 	}
 
 	if setDefault {

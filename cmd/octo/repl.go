@@ -99,10 +99,15 @@ type replConfig struct {
 // cfg.providerName / cfg.configEntry are updated to match the new sender. On
 // error (missing key for the target provider, unknown model) cfg is left
 // unchanged.
-func (cfg *replConfig) ensureSender(targetModel string, tuning senderTuning) error {
+//
+// Returns the resolved config entry. targetModel may be a composite id
+// "<endpoint>::<model>" (the picker's accept form); the returned entry's
+// Model is always the bare model id — the only form providers accept on the
+// wire — so callers must take a.Model from it rather than from targetModel.
+func (cfg *replConfig) ensureSender(targetModel string, tuning senderTuning) (config.ModelEntry, error) {
 	models, err := config.Load()
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		return config.ModelEntry{}, fmt.Errorf("loading config: %w", err)
 	}
 	// Reject models not present in the config — resolveProviderModel would
 	// silently fall back to the current provider (matching on flagProvider),
@@ -119,23 +124,23 @@ func (cfg *replConfig) ensureSender(targetModel string, tuning senderTuning) err
 			}
 		}
 		sort.Strings(available)
-		return fmt.Errorf("model %q is not configured (available: %s)", targetModel, strings.Join(available, ", "))
+		return config.ModelEntry{}, fmt.Errorf("model %q is not configured (available: %s)", targetModel, strings.Join(available, ", "))
 	}
 	provName, _, entry, ok := resolveProviderModel(cfg.providerName, targetModel, models)
 	if !ok {
-		return fmt.Errorf("cannot resolve provider for model %q", targetModel)
+		return config.ModelEntry{}, fmt.Errorf("cannot resolve provider for model %q", targetModel)
 	}
 	if provName == cfg.providerName && entry.BaseURL == cfg.configEntry.BaseURL {
-		return nil // no rebuild needed
+		return entry, nil // no rebuild needed
 	}
 	newSender, err := buildSender(provName, entry, cfg.stderr, tuning)
 	if err != nil {
-		return err
+		return config.ModelEntry{}, err
 	}
 	cfg.a.SetSender(newSender)
 	cfg.providerName = provName
 	cfg.configEntry = entry
-	return nil
+	return entry, nil
 }
 
 // mcpBootstrap carries the inputs runTUI needs to connect MCP servers from a

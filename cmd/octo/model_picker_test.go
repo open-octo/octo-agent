@@ -161,10 +161,12 @@ func TestDispatchModel_PickerKeyEsc(t *testing.T) {
 }
 
 // TestDispatchModel_PickerKeyEnter verifies Enter switches to the highlighted
-// (endpoint, model) and clears the picker. The accept path now produces a
+// (endpoint, model) and clears the picker. The accept path produces a
 // composite id "<endpoint>::<model>" so the receiver resolves the right
-// endpoint's connection params (PR4b). Two models share a provider + base URL
-// so ensureSender returns early (no live rebuild needed).
+// endpoint's connection params (PR4b), but a.Model must end up as the BARE
+// model id — the composite id is endpoint addressing and providers 401 on it
+// on the wire. Two models share a provider + base URL so ensureSender returns
+// early (no live rebuild needed).
 func TestDispatchModel_PickerKeyEnter(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "test-deepseek-key")
 	writeModelsConfig(t, config.Config{
@@ -184,10 +186,8 @@ func TestDispatchModel_PickerKeyEnter(t *testing.T) {
 	if m.modelPicker != nil {
 		t.Error("picker should be cleared after Enter")
 	}
-	// m.a.Model is now the composite id; EntryByModel resolves it back to the
-	// same model id, so we assert the suffix rather than the bare name.
-	if !strings.HasSuffix(m.a.Model, "::deepseek-v4-pro") {
-		t.Errorf("active model = %q, want suffix ::deepseek-v4-pro", m.a.Model)
+	if m.a.Model != "deepseek-v4-pro" {
+		t.Errorf("active model = %q, want bare model deepseek-v4-pro", m.a.Model)
 	}
 }
 
@@ -281,16 +281,15 @@ func TestModelPicker_TwoLevelEndpointSwitch(t *testing.T) {
 			m.modelPicker.endpoints[m.modelPicker.epIdx].items[0].name)
 	}
 
-	// Enter on deepseek-v4-flash dispatches the composite id. The endpoint id
-	// is whatever the seed assigned (PR5: tests seed Endpoints directly, so
-	// the id is "ep-b" rather than the legacy-<host>-<n> form Load synthesises
-	// from old models: blocks).
+	// Enter on deepseek-v4-flash dispatches the composite id internally, but
+	// a.Model must land as the bare model id — the composite form is endpoint
+	// addressing and providers reject it on the wire (HTTP 401).
 	m = pickUpdate(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.modelPicker != nil {
 		t.Fatal("picker should be cleared after Enter")
 	}
-	if !strings.HasSuffix(m.a.Model, "::deepseek-v4-flash") {
-		t.Errorf("active model = %q, want suffix ::deepseek-v4-flash", m.a.Model)
+	if m.a.Model != "deepseek-v4-flash" {
+		t.Errorf("active model = %q, want bare model deepseek-v4-flash", m.a.Model)
 	}
 }
 
