@@ -824,6 +824,7 @@ func (s *Server) registerRoutes() {
 	s.api("DELETE /api/tasks/{id}", s.handleDeleteTask)
 	s.api("POST /api/tasks/{id}/run", s.handleRunTask)
 	s.api("PATCH /api/tasks/{id}", s.handlePatchTask)
+	s.api("PUT /api/tasks/{id}/transfer", s.handleTransferTask)
 	s.api("GET /api/profile/soul", s.handleGetProfileSoul)
 	s.api("GET /api/profile/user", s.handleGetProfileUser)
 	s.api("GET /api/memories", s.handleGetMemories)
@@ -882,6 +883,15 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/workflows/{name}", s.handleGetWorkflow)
 	s.api("DELETE /api/workflows/{name}", s.handleDeleteWorkflow)
 	s.api("GET /api/workflows/{name}/export", s.handleExportWorkflow)
+
+	// Agent profiles (multi-agent system)
+	s.api("GET /api/agents", s.handleListAgents)
+	s.api("POST /api/agents", s.handleCreateAgent)
+	s.api("GET /api/agents/{id}", s.handleGetAgent)
+	s.api("PUT /api/agents/{id}", s.handleUpdateAgent)
+	s.api("DELETE /api/agents/{id}", s.handleDeleteAgent)
+	s.api("POST /api/agents/{id}/bind", s.handleBindAgent)
+	s.api("DELETE /api/agents/{id}/bind", s.handleUnbindAgent)
 
 	// MCP server management
 	s.api("GET /api/mcp/servers", s.handleListMCPServers)

@@ -27,7 +27,8 @@ type taskRequest struct {
 	Cron      string                  `json:"cron"`
 	Prompt    string                  `json:"prompt"`
 	Model     string                  `json:"model,omitempty"`
-	Agent     string                  `json:"agent,omitempty"`
+	Agent     string                  `json:"agent,omitempty"`  // deprecated
+	AgentID   string                  `json:"agent_id,omitempty"`
 	Directory string                  `json:"directory,omitempty"`
 	Notify    scheduler.NotifyTargets `json:"notify,omitempty"`
 }
@@ -38,7 +39,8 @@ type taskResponse struct {
 	Cron           string                  `json:"cron"`
 	Prompt         string                  `json:"prompt"`
 	Model          string                  `json:"model,omitempty"`
-	Agent          string                  `json:"agent,omitempty"`
+	Agent          string                  `json:"agent,omitempty"`  // deprecated
+	AgentID        string                  `json:"agent_id,omitempty"`
 	Directory      string                  `json:"directory,omitempty"`
 	Notify         scheduler.NotifyTargets `json:"notify,omitempty"`
 	Enabled        bool                    `json:"enabled"`
@@ -472,8 +474,12 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tasks := s.scheduler.List()
+	filterID := r.URL.Query().Get("agent_id")
 	out := make([]taskResponse, 0, len(tasks))
 	for _, t := range tasks {
+		if filterID != "" && t.AgentID != filterID {
+			continue
+		}
 		out = append(out, s.taskToResponse(t))
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -500,6 +506,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Prompt:    req.Prompt,
 		Model:     req.Model,
 		Agent:     req.Agent,
+		AgentID:   req.AgentID,
 		Directory: req.Directory,
 		Notify:    req.Notify,
 		Enabled:   true,
@@ -562,6 +569,42 @@ func (s *Server) handleRunTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started", "id": id, "session_id": sessionID})
+}
+
+// handleTransferTask serves PUT /api/tasks/:id/transfer — transfer a task's
+// ownership to another agent. Only the default agent (or an admin) may
+// transfer; the design scopes this to the default agent view.
+func (s *Server) handleTransferTask(w http.ResponseWriter, r *http.Request) {
+	s.initScheduler()
+	if s.scheduler == nil {
+		writeError(w, http.StatusInternalServerError, "scheduler not available")
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing task id")
+		return
+	}
+	var req agentTransferRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.AgentID == "" {
+		writeError(w, http.StatusBadRequest, "agent_id is required")
+		return
+	}
+	task, err := s.scheduler.Get(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	task.AgentID = req.AgentID
+	if err := s.scheduler.Update(*task); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s.taskToResponse(*task))
 }
 
 // patchTaskRequest is the body for PATCH /api/tasks/{id}. Every field is a
@@ -657,6 +700,7 @@ func (s *Server) taskToResponse(t scheduler.Task) taskResponse {
 		Prompt:    t.Prompt,
 		Model:     t.Model,
 		Agent:     t.Agent,
+		AgentID:   t.AgentID,
 		Directory: t.Directory,
 		Notify:    t.Notify,
 		Enabled:   t.Enabled,

@@ -61,7 +61,8 @@ type Task struct {
 	Cron      string        `json:"cron"`
 	Prompt    string        `json:"prompt"`
 	Model     string        `json:"model,omitempty"`
-	Agent     string        `json:"agent,omitempty"` // "general" | "coding"
+	Agent     string        `json:"agent,omitempty"` // deprecated: "general" | "coding"; use AgentID
+	AgentID   string        `json:"agent_id,omitempty"`
 	Directory string        `json:"directory,omitempty"`
 	Notify    NotifyTargets `json:"notify,omitempty"`
 	Enabled   bool          `json:"enabled"`

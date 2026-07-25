@@ -1,0 +1,280 @@
+package server
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/open-octo/octo-agent/internal/agentprofile"
+)
+
+// ─── Request/Response types ─────────────────────────────────────────────────
+
+type agentRequest struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Model       string   `json:"model,omitempty"`
+	Tools       []string `json:"tools,omitempty"`
+	ToolSkills  []string `json:"tool_skills,omitempty"`
+	MentionAs   []string `json:"mention_as,omitempty"`
+}
+
+type agentBindRequest struct {
+	Platform string `json:"platform"`
+	ChatID   string `json:"chat_id"`
+}
+
+type agentTransferRequest struct {
+	AgentID string `json:"agent_id"`
+}
+
+// agentResponse is the wire shape for an agent profile. Stored files use the
+// same frontmatter shape via agentprofile.Profile.
+type agentResponse struct {
+	ID             string                `json:"id"`
+	Name           string                `json:"name"`
+	Description    string                `json:"description"`
+	Model          string                `json:"model,omitempty"`
+	Tools          []string              `json:"tools,omitempty"`
+	ToolSkills     []string              `json:"tool_skills,omitempty"`
+	MentionAs      []string              `json:"mention_as,omitempty"`
+	ChannelBindings []agentprofile.ChannelBinding `json:"channel_bindings,omitempty"`
+}
+
+func agentToResp(p *agentprofile.Profile) agentResponse {
+	return agentResponse{
+		ID:             p.ID,
+		Name:           p.Name,
+		Description:    p.Description,
+		Model:          p.Model,
+		Tools:          p.Tools,
+		ToolSkills:     p.ToolSkills,
+		MentionAs:      p.MentionAs,
+		ChannelBindings: p.ChannelBindings,
+	}
+}
+
+// ─── Handlers ───────────────────────────────────────────────────────────────
+
+// agentStoreOrInit returns the profile store, initializing it if needed.
+// The store is read-through, so this is cheap.
+func (s *Server) agentStoreOrInit() *agentprofile.Store {
+	if s.agentStore == nil {
+		_ = s.agentRouter()
+	}
+	return s.agentStore
+}
+
+// handleListAgents serves GET /api/agents — list all profiles (excluding the
+// code-defined default).
+func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
+	store := s.agentStoreOrInit()
+	profiles := store.List()
+	resp := make([]agentResponse, 0, len(profiles))
+	for _, p := range profiles {
+		resp = append(resp, agentToResp(p))
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleGetAgent serves GET /api/agents/:id — get a single profile.
+func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/agents/")
+	p, ok := s.agentStoreOrInit().Get(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, agentToResp(p))
+}
+
+// handleCreateAgent serves POST /api/agents — create a new profile. Writes the
+// .md file via the Store; the ID is derived from the name (slug) or taken
+// from the request.
+func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
+	var req agentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %v", err))
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if strings.TrimSpace(req.Description) == "" {
+		writeError(w, http.StatusBadRequest, "description is required")
+		// Keep going — description is required by Store.Create anyway.
+	}
+
+	// Derive a slug ID from the name if not explicitly provided.
+	id := slugify(req.Name)
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "name must contain at least one alphanumeric character")
+		return
+	}
+
+	p := &agentprofile.Profile{
+		ID:          id,
+		Name:        req.Name,
+		Description: req.Description,
+		CapabilitySpec: agentprofile.CapabilitySpec{
+			Model:      req.Model,
+			Tools:      req.Tools,
+			ToolSkills: req.ToolSkills,
+		},
+		MentionAs: req.MentionAs,
+	}
+
+	if err := s.agentStoreOrInit().Create(p); err != nil {
+		if strings.Contains(err.Error(), "already exists") {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, agentToResp(p))
+}
+
+// handleUpdateAgent serves PUT /api/agents/:id — update an existing profile.
+// Builtin profiles are immutable through this endpoint.
+func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/agents/")
+	var req agentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %v", err))
+		return
+	}
+
+	existing, ok := s.agentStoreOrInit().Get(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+
+	p := &agentprofile.Profile{
+		ID:          existing.ID,
+		Name:        req.Name,
+		Description: req.Description,
+		CapabilitySpec: agentprofile.CapabilitySpec{
+			Model:      req.Model,
+			Tools:      req.Tools,
+			ToolSkills: req.ToolSkills,
+		},
+		MentionAs:       req.MentionAs,
+		ChannelBindings: existing.ChannelBindings, // preserved unless explicitly changed
+	}
+
+	if err := s.agentStoreOrInit().Update(p); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, agentToResp(p))
+}
+
+// handleDeleteAgent serves DELETE /api/agents/:id — remove a user-level profile.
+// Builtin profiles and profiles with active channel bindings are protected.
+func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/agents/")
+	if err := s.agentStoreOrInit().Delete(id); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleBindAgent serves POST /api/agents/:id/bind — bind a profile to an IM chat.
+func (s *Server) handleBindAgent(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(strings.TrimSuffix(r.URL.Path, "/bind"), "/api/agents/")
+	var req agentBindRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %v", err))
+		return
+	}
+	if req.Platform == "" || req.ChatID == "" {
+		writeError(w, http.StatusBadRequest, "platform and chat_id are required")
+		return
+	}
+
+	p, ok := s.agentStoreOrInit().Get(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+
+	// Append binding (avoid duplicates).
+	for _, b := range p.ChannelBindings {
+		if b.Platform == req.Platform && b.ChatID == req.ChatID {
+			writeJSON(w, http.StatusOK, agentToResp(p))
+			return
+		}
+	}
+	p.ChannelBindings = append(p.ChannelBindings, agentprofile.ChannelBinding{
+		Platform: req.Platform,
+		ChatID:   req.ChatID,
+	})
+	if err := s.agentStoreOrInit().Update(p); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, agentToResp(p))
+}
+
+// handleUnbindAgent serves DELETE /api/agents/:id/bind — remove an IM binding.
+func (s *Server) handleUnbindAgent(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(strings.TrimSuffix(r.URL.Path, "/bind"), "/api/agents/")
+	var req agentBindRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %v", err))
+		return
+	}
+
+	p, ok := s.agentStoreOrInit().Get(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+
+	filtered := p.ChannelBindings[:0]
+	for _, b := range p.ChannelBindings {
+		if !(b.Platform == req.Platform && b.ChatID == req.ChatID) {
+			filtered = append(filtered, b)
+		}
+	}
+	p.ChannelBindings = filtered
+	if err := s.agentStoreOrInit().Update(p); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, agentToResp(p))
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+// slugify converts a name to a lowercase slug suitable as a profile ID.
+func slugify(name string) string {
+	name = strings.TrimSpace(name)
+	name = strings.ToLower(name)
+	// Keep only [a-z0-9-], collapse runs of other chars into single dashes.
+	var b strings.Builder
+	prevDash := false
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			prevDash = false
+		case r == '-' || r == ' ' || r == '_':
+			if !prevDash && b.Len() > 0 {
+				b.WriteRune('-')
+				prevDash = true
+			}
+		}
+	}
+	s := strings.Trim(b.String(), "-")
+	return s
+}
