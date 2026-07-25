@@ -74,7 +74,7 @@ func TestHandleAgents_CreateListGetDelete(t *testing.T) {
 
 	// Delete.
 	w = doJSON(t, srv, http.MethodDelete, "/api/agents/"+created.ID, "")
-	if w.Code != http.StatusNoContent {
+	if w.Code != http.StatusOK {
 		t.Fatalf("delete = %d: %s", w.Code, w.Body.String())
 	}
 	list = doAgents(t, srv)

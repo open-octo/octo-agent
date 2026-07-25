@@ -43,10 +43,6 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     throw new Error(await readErrorMessage(res, `${res.status} ${res.statusText}`))
   }
-  // 204 No Content has no body — skip JSON parsing.
-  if (res.status === 204) {
-    return undefined as unknown as T
-  }
   return res.json() as Promise<T>
 }
 

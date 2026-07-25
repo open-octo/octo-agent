@@ -205,7 +205,7 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": id})
 }
 
 // handleBindAgent serves POST /api/agents/:id/bind — bind a profile to an IM chat.
