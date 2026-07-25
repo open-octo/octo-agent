@@ -42,7 +42,7 @@
 
   async function handleDelete(agent: api.Agent) {
     const confirmed = await confirmDialog(
-      $t('agents.delete_confirm', { name: agent.name })
+      $t('agents.delete_confirm').replace('{name}', agent.name)
     )
     if (!confirmed) return
     try {
