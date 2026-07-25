@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agentprofile"
 	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/executil"
 	"github.com/open-octo/octo-agent/internal/permission"
@@ -398,14 +399,15 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	out := make([]sessionItem, 0, len(sessions))
 	cronCount := 0
 	for _, sess := range sessions {
-		// agent_profile is not persisted on the session; default to "general"
-		// so the UI renders. Sessions from before source was persisted load
-		// with an empty Source and fall back to "manual".
+		// agent_profile is not persisted on the session; default to the
+		// code-defined default agent so the UI renders in the Default pool.
+		// Sessions from before source was persisted load with an empty Source
+		// and fall back to "manual".
 		source := sess.Source
 		if source == "" {
 			source = "manual"
 		}
-		item := s.toSessionItem(sess, source, "general")
+		item := s.toSessionItem(sess, source, agentprofile.DefaultID)
 		out = append(out, item)
 		if item.Source == "cron" {
 			cronCount++
@@ -456,7 +458,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 
 	agentProfile := req.AgentProfile
 	if agentProfile == "" {
-		agentProfile = "general"
+		agentProfile = agentprofile.DefaultID
 	}
 	source := req.Source
 	if source == "" {
@@ -1160,7 +1162,7 @@ func (s *Server) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("set title: %v", err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"session": s.toSessionItem(sess, "manual", "general")})
+	writeJSON(w, http.StatusOK, map[string]any{"session": s.toSessionItem(sess, "manual", agentprofile.DefaultID)})
 }
 
 // ─── PATCH /api/sessions/{id}/model ─────────────────────────────────────────

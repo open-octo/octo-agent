@@ -110,6 +110,7 @@ type wsSessionInfo struct {
 	Status              string `json:"status,omitempty"` // "idle" | "working"
 	CreatedAt           int64  `json:"created_at"`       // unix ms
 	Source              string `json:"source,omitempty"` // "manual" | "cron" | "channel" | "setup"
+	AgentProfile        string `json:"agent_profile,omitempty"`
 	Model               string `json:"model,omitempty"`
 	TotalTurns          int    `json:"total_turns,omitempty"`
 	WorkingDir          string `json:"working_dir,omitempty"`
