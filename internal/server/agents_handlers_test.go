@@ -151,6 +151,68 @@ func TestHandleAgents_BindUnbind(t *testing.T) {
 	}
 }
 
+// TestHandleAgents_UpdateBindings verifies that PUT /api/agents/:id can both
+// preserve existing bindings when the field is omitted and clear them when an
+// empty array is sent (matching the AgentEdit "delete + save" flow).
+func TestHandleAgents_UpdateBindings(t *testing.T) {
+	srv := agentsTestServer(t)
+
+	w := doJSON(t, srv, http.MethodPost, "/api/agents", `{
+		"name": "Binding Agent",
+		"description": "d",
+		"channel_bindings": [{"platform": "weixin", "chat_id": "c1"}]
+	}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create = %d: %s", w.Code, w.Body.String())
+	}
+	var created agentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if len(created.ChannelBindings) != 1 || created.ChannelBindings[0].ChatID != "c1" {
+		t.Fatalf("unexpected created bindings: %+v", created.ChannelBindings)
+	}
+
+	// Omitting channel_bindings in PUT should preserve existing ones.
+	w = doJSON(t, srv, http.MethodPut, "/api/agents/"+created.ID, `{
+		"name": "Binding Agent v2",
+		"description": "d2"
+	}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update without bindings = %d: %s", w.Code, w.Body.String())
+	}
+	var preserved agentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &preserved); err != nil {
+		t.Fatal(err)
+	}
+	if len(preserved.ChannelBindings) != 1 || preserved.ChannelBindings[0].ChatID != "c1" {
+		t.Fatalf("expected bindings preserved, got %+v", preserved.ChannelBindings)
+	}
+
+	// Sending an empty array should clear them (the bug being fixed).
+	w = doJSON(t, srv, http.MethodPut, "/api/agents/"+created.ID, `{
+		"name": "Binding Agent v3",
+		"description": "d3",
+		"channel_bindings": []
+	}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update with empty bindings = %d: %s", w.Code, w.Body.String())
+	}
+	var cleared agentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &cleared); err != nil {
+		t.Fatal(err)
+	}
+	if len(cleared.ChannelBindings) != 0 {
+		t.Fatalf("expected 0 bindings after clear, got %+v", cleared.ChannelBindings)
+	}
+
+	// Verify it persisted.
+	got := doAgent(t, srv, created.ID)
+	if len(got.ChannelBindings) != 0 {
+		t.Fatalf("expected 0 bindings on reload, got %+v", got.ChannelBindings)
+	}
+}
+
 // agentsTestServer returns a server with an isolated ~/.octo/agents dir.
 func agentsTestServer(t *testing.T) *Server {
 	t.Helper()

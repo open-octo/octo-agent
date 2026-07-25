@@ -14,13 +14,14 @@ import (
 // ─── Request/Response types ─────────────────────────────────────────────────
 
 type agentRequest struct {
-	ID           string   `json:"id,omitempty"`
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	Model        string   `json:"model,omitempty"`
-	Tools        []string `json:"tools,omitempty"`
-	ToolSkills   []string `json:"tool_skills,omitempty"`
-	SystemPrompt string   `json:"system_prompt,omitempty"`
+	ID              string                        `json:"id,omitempty"`
+	Name            string                        `json:"name"`
+	Description     string                        `json:"description"`
+	Model           string                        `json:"model,omitempty"`
+	Tools           []string                      `json:"tools,omitempty"`
+	ToolSkills      []string                      `json:"tool_skills,omitempty"`
+	SystemPrompt    string                        `json:"system_prompt,omitempty"`
+	ChannelBindings []agentprofile.ChannelBinding `json:"channel_bindings,omitempty"`
 }
 
 type agentBindRequest struct {
@@ -138,6 +139,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 			ToolSkills:   req.ToolSkills,
 			SystemPrompt: req.SystemPrompt,
 		},
+		ChannelBindings: req.ChannelBindings,
 	}
 
 	if err := s.agentStoreOrInit().Create(p); err != nil {
@@ -173,6 +175,11 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	bindings := existing.ChannelBindings
+	if req.ChannelBindings != nil {
+		bindings = req.ChannelBindings
+	}
+
 	p := &agentprofile.Profile{
 		ID:          existing.ID,
 		Name:        req.Name,
@@ -183,7 +190,7 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 			ToolSkills:   req.ToolSkills,
 			SystemPrompt: req.SystemPrompt,
 		},
-		ChannelBindings: existing.ChannelBindings, // preserved unless explicitly changed
+		ChannelBindings: bindings,
 	}
 
 	if err := s.agentStoreOrInit().Update(p); err != nil {
