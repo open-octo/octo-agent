@@ -279,6 +279,7 @@ func runOnce(cfg replConfig, prompt string, stream bool) int {
 func printTuiHelp(w io.Writer) {
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  /help        Show this message")
+	fmt.Fprintln(w, "  /agent       Show the current agent, or list available ones (/agent list)")
 	fmt.Fprintln(w, "  /init        Analyze the repo and generate/update .octorules (needs --tools)")
 	fmt.Fprintln(w, "  /compact     Summarize older history now to free up context")
 	fmt.Fprintln(w, "  /transcript  Re-print the last (or last N) tool call(s) uncapped")

@@ -11,11 +11,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agentprofile"
 	"github.com/open-octo/octo-agent/internal/app"
 	"github.com/open-octo/octo-agent/internal/channel"
 	"github.com/open-octo/octo-agent/internal/config"
@@ -420,6 +422,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	var sandboxWrite, sandboxRead stringList
 	fs.Var(&sandboxWrite, "sandbox-write", "Under --sandbox, an extra writable directory (repeatable)")
 	fs.Var(&sandboxRead, "sandbox-read", "Under --sandbox, an extra read-only directory (repeatable)")
+	agentName := fs.String("agent", "", "Start the session bound to a specific agent (by ID or name from ~/.octo/agents)")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -509,6 +512,21 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 	resolvedShowReasoning := resolveShowReasoning(showReasoningFlagSet, *showReasoning, cfg)
+
+	// Resolve the --agent profile (if specified) from ~/.octo/agents.
+	// The profile ID is stamped onto the session so it routes to the right
+	// agent namespace and filters tools/skills per the profile's allowlist.
+	var agentProfileID string
+	if *agentName != "" {
+		store := agentprofile.New(agentUserDir(), agentProjectDir)
+		profile, ok := store.Get(*agentName)
+		if !ok {
+			fmt.Fprintf(stderr, "octo: agent %q not found (available: default, %s)\n",
+				*agentName, strings.Join(profileIDs(store), ", "))
+			return 2
+		}
+		agentProfileID = profile.ID
+	}
 
 	// Single-turn mode requires a message.
 	if !isREPL && resumeID != "" {
@@ -997,6 +1015,9 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		} else {
 			sess = agent.NewSession(resolvedModel, *system)
 			sess.Bind(agent.EntryTUI, false)
+			if agentProfileID != "" {
+				sess.AgentID = agentProfileID
+			}
 		}
 		wireSessionHooks(a, sess, agent.EntryTUI)
 		// Session goals: the session is the durable goal record and the
@@ -1083,6 +1104,9 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// advertises which contract the model gets.
 	tools.SetWorkflowForeground(true)
 	oneShotSess := agent.NewSession(resolvedModel, *system)
+	if agentProfileID != "" {
+		oneShotSess.AgentID = agentProfileID
+	}
 	wireSessionHooks(a, oneShotSess, agent.EntryCLI)
 	replCfg := replConfig{
 		a:               a,
@@ -1104,7 +1128,15 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		configEntry:     entry,
 	}
 	if toolsOn {
-		replCfg.tools = tools.DefaultToolsFor(resolvedModel)
+		// Build a context with the profile store + agent ID so
+		// DefaultToolsForProfile filters the tool allowlist. The CLI is
+		// single-session, so this static filtering at startup is sufficient.
+		toolCtx := context.Background()
+		if agentProfileID != "" {
+			toolCtx = tools.WithSessionAgentID(toolCtx, agentProfileID)
+			toolCtx = tools.WithProfileStore(toolCtx, agentprofile.New(agentUserDir(), agentProjectDir))
+		}
+		replCfg.tools = tools.DefaultToolsForProfile(toolCtx, resolvedModel)
 		replCfg.executor = toolExecutor
 		replCfg.subAgentMgr = subAgentMgr
 	}
@@ -1205,4 +1237,37 @@ func newCacheKey() string {
 		return fmt.Sprintf("octo-%d", time.Now().UnixNano())
 	}
 	return "octo-" + hex.EncodeToString(b[:])
+}
+
+// agentUserDir is the user-level profile directory (~/.octo/agents).
+func agentUserDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".octo", "agents")
+}
+
+// agentProjectDir is the delegation-only project-level profile directory
+// (<repo>/.octo/agents), resolved per call like the pre-existing loader.
+func agentProjectDir() string {
+	cwd, err := os.Getwd()
+	if err != nil || cwd == "" {
+		return ""
+	}
+	root := memory.ProjectRoot(cwd)
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, ".octo", "agents")
+}
+
+// profileIDs returns the IDs of all non-builtin profiles in the store.
+func profileIDs(store *agentprofile.Store) []string {
+	ids := make([]string, 0, len(store.List()))
+	for _, p := range store.List() {
+		ids = append(ids, p.ID)
+	}
+	sort.Strings(ids)
+	return ids
 }

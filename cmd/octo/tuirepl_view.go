@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	rw "github.com/mattn/go-runewidth"
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agentprofile"
 	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/permission"
 	"github.com/open-octo/octo-agent/internal/tools"
@@ -915,6 +916,8 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.startCompact()
+	case "/agent":
+		return m.dispatchAgent(strings.TrimSpace(strings.TrimPrefix(text, first)))
 	case "/transcript":
 		return m.dispatchTranscript(strings.TrimSpace(strings.TrimPrefix(text, first)))
 	case "/trash":
@@ -978,6 +981,32 @@ func (m *tuiModel) dispatchClear() (tea.Model, tea.Cmd) {
 	}
 	m.assistantFirstBlock = true
 	m.println(noticeStyle.Render("✦ context cleared — starting fresh"))
+	return m, nil
+}
+
+// dispatchAgent handles "/agent" (show current agent) and "/agent list" (list
+// available agents). The session's agent is bound at creation and cannot be
+// switched — starting a different agent requires a new session.
+func (m *tuiModel) dispatchAgent(rest string) (tea.Model, tea.Cmd) {
+	cfg := m.cfg
+	if rest == "list" {
+		store := agentprofile.New(agentUserDir(), agentProjectDir)
+		names := append([]string{"default"}, profileIDs(store)...)
+		m.println(noticeStyle.Render("Available agents: " + strings.Join(names, ", ")))
+		return m, nil
+	}
+	// Show current session's agent.
+	agentID := cfg.session.EffectiveAgentID()
+	if agentID == agentprofile.DefaultID {
+		m.println(noticeStyle.Render("Current agent: Default (full access)"))
+		return m, nil
+	}
+	store := agentprofile.New(agentUserDir(), agentProjectDir)
+	if p, ok := store.Get(agentID); ok {
+		m.println(noticeStyle.Render(fmt.Sprintf("Current agent: %s — %s", p.Name, p.Description)))
+	} else {
+		m.println(noticeStyle.Render(fmt.Sprintf("Current agent: %s", agentID)))
+	}
 	return m, nil
 }
 

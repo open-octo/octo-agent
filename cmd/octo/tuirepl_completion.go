@@ -19,6 +19,7 @@ const maxComplVisible = 10
 // order. Skills are appended after these by slashCandidates.
 var builtinSlashCommands = []complItem{
 	{"/help", "List commands and tools"},
+	{"/agent", "Show current agent or list available agents (/agent list)"},
 	{"/model", "Switch to another model (--default to make it the default)"},
 	{"/thinking", "Set reasoning effort (off/low/medium/high/xhigh/max)"},
 	{"/compact", "Summarize older history to free up context"},
