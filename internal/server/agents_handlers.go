@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/open-octo/octo-agent/internal/agentprofile"
+	"github.com/open-octo/octo-agent/internal/skills"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // ─── Request/Response types ─────────────────────────────────────────────────
@@ -121,6 +123,13 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate tool and skill names against the canonical registries so users
+	// get immediate feedback instead of silent filtering at runtime.
+	if unknown := unknownToolNames(req.Tools, s.skillReg); len(unknown) > 0 {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown tools: %s", strings.Join(unknown, ", ")))
+		return
+	}
+
 	p := &agentprofile.Profile{
 		ID:          id,
 		Name:        req.Name,
@@ -158,6 +167,12 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	existing, ok := s.agentStoreOrInit().Get(id)
 	if !ok {
 		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+
+	// Validate tool and skill names against the canonical registries.
+	if unknown := unknownToolNames(req.Tools, s.skillReg); len(unknown) > 0 {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown tools: %s", strings.Join(unknown, ", ")))
 		return
 	}
 
@@ -286,4 +301,27 @@ func slugify(name string) string {
 	}
 	s := strings.Trim(b.String(), "-")
 	return s
+}
+
+// unknownToolNames returns tools in names that are neither a known built-in
+// tool nor a known skill. When names is empty it returns nil (not validated,
+// meaning "all tools" in the profile's allowlist).
+func unknownToolNames(names []string, reg *skills.Registry) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	known := make(map[string]bool, len(tools.KnownToolNames())+reg.Len())
+	for _, n := range tools.KnownToolNames() {
+		known[n] = true
+	}
+	for _, sk := range reg.List() {
+		known[sk.Name] = true
+	}
+	var unknown []string
+	for _, n := range names {
+		if !known[n] {
+			unknown = append(unknown, n)
+		}
+	}
+	return unknown
 }
