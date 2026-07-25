@@ -1879,7 +1879,10 @@ func (a wsAsker) ask(ctx context.Context, q tools.AskRequest, secret bool) (tool
 	// sidebar badge / notification logic knows this session is no longer
 	// waiting.
 	dismiss := func() {
-		a.s.wsHub.broadcast(sessionID, wsEventDismissUserQuestion{
+		// Global broadcast (not session-scoped) so every connected client —
+		// desktop or mobile, any session — closes its modal. A session-scoped
+		// broadcast would leave other clients showing a dead modal.
+		a.s.wsHub.broadcast("", wsEventDismissUserQuestion{
 			Type:       "dismiss_user_question",
 			SessionID:  sessionID,
 			QuestionID: qid,
@@ -1900,7 +1903,11 @@ func (a wsAsker) ask(ctx context.Context, q tools.AskRequest, secret bool) (tool
 		a.s.pendingPromptMu.Unlock()
 	}
 
-	a.s.wsHub.broadcast(sessionID, ev)
+	// Global broadcast (sessionID "" = all connected clients) so the question
+	// reaches every client — desktop or mobile, whichever session they're
+	// viewing — not just subscribers of the originating session. Any client can
+	// answer; the answer routes back by question ID.
+	a.s.wsHub.broadcast("", ev)
 	a.s.wsHub.broadcast("", wsEventSessionActivity{
 		Type:      "session_activity",
 		SessionID: sessionID,
