@@ -514,9 +514,12 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	resolvedShowReasoning := resolveShowReasoning(showReasoningFlagSet, *showReasoning, cfg)
 
 	// Resolve the --agent profile (if specified) from ~/.octo/agents.
+	// When the profile carries its own SystemPrompt, it replaces the
+	// server's base prompt — so expert agents actually use their persona.
 	// The profile ID is stamped onto the session so it routes to the right
 	// agent namespace and filters tools/skills per the profile's allowlist.
 	var agentProfileID string
+	var agentProfile *agentprofile.Profile
 	var agentStore *agentprofile.Store
 	if *agentName != "" {
 		agentStore = agentprofile.New(agentUserDir(), agentProjectDir)
@@ -527,6 +530,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				*agentName, strings.Join(ids, ", "))
 			return 2
 		}
+		agentProfile = profile
 		agentProfileID = profile.ID
 	}
 
@@ -1019,6 +1023,12 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			sess.Bind(agent.EntryTUI, false)
 			if agentProfileID != "" {
 				sess.AgentID = agentProfileID
+		// An expert agent profile with its own system prompt
+		// replaces the server base prompt. Persist in the session
+		// so resume recomposes with the right persona.
+		if agentProfile != nil && agentProfile.SystemPrompt != "" {
+			sess.System = agentProfile.SystemPrompt
+		}
 			}
 		}
 		wireSessionHooks(a, sess, agent.EntryTUI)
@@ -1107,6 +1117,9 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	tools.SetWorkflowForeground(true)
 	oneShotSess := agent.NewSession(resolvedModel, *system)
 	if agentProfileID != "" {
+		if agentProfile != nil && agentProfile.SystemPrompt != "" {
+			oneShotSess.System = agentProfile.SystemPrompt
+		}
 		oneShotSess.AgentID = agentProfileID
 	}
 	wireSessionHooks(a, oneShotSess, agent.EntryCLI)

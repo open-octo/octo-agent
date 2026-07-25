@@ -1,5 +1,6 @@
 ---
 name: expert-agent-manager
+system: true
 description: Manage octo's agent profiles through conversation — create, modify, delete, list, and bind agents to IM chats by calling REST APIs. This skill is exclusive to the Default Agent (full-access). Use when the user wants to manage agents conversationally, e.g. "create a code review agent", "list all agents", "bind agent X to this group", "delete agent Y", "帮我建一个 agent", "管理 agent".
 ---
 

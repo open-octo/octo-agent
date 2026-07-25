@@ -41,6 +41,7 @@ type Skill struct {
 	Body        string // SKILL.md body after frontmatter
 	Dir         string // absolute path of the skill directory
 	Source      string // "project" | "user" (display only, for --list-skills)
+	System      bool   // frontmatter system: true → hidden from expert agent manifests
 }
 
 // Registry holds the skills discovered for a session, indexed by name. It is
@@ -111,7 +112,7 @@ func (r *Registry) scanRoot(root, source string) {
 		if err != nil {
 			continue
 		}
-		desc, body, ok := parse(b)
+		desc, sys, body, ok := parse(b)
 		if !ok || desc == "" {
 			continue
 		}
@@ -121,6 +122,7 @@ func (r *Registry) scanRoot(root, source string) {
 		}
 		r.skills[name] = Skill{
 			Name:        name,
+System:      sys,
 			Description: desc,
 			Body:        strings.TrimSpace(body),
 			Dir:         abs,
@@ -135,22 +137,23 @@ func (r *Registry) scanRoot(root, source string) {
 type frontmatter struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
+	System      bool   `yaml:"system"` // hidden from expert agent manifests
 }
 
 // parse splits a SKILL.md into its frontmatter description and body. It expects
 // the file to open with a `---` line and contain a closing `---` line; the YAML
 // between them is unmarshalled for the description. ok is false when the file
 // has no frontmatter fence or the YAML doesn't parse.
-func parse(b []byte) (desc, body string, ok bool) {
+func parse(b []byte) (desc string, sys bool, body string, ok bool) {
 	front, body, ok := splitFrontmatter(string(b))
 	if !ok {
-		return "", "", false
+		return "", false, "", false
 	}
 	var fm frontmatter
 	if err := yaml.Unmarshal([]byte(front), &fm); err != nil {
-		return "", "", false
+		return "", false, "", false
 	}
-	return strings.TrimSpace(fm.Description), body, true
+	return strings.TrimSpace(fm.Description), fm.System, body, true
 }
 
 // splitFrontmatter returns the text between the opening and closing `---`
@@ -353,12 +356,23 @@ func RenderManifest(r *Registry) string {
 // When profile is non-nil and declares ToolSkills, only those skills are
 // listed — the design's per-agent skill isolation. A nil profile or an empty
 // ToolSkills list means "all skills" (the default agent behavior).
+//
+// Expert agents (non-default profiles) additionally have system-level skills
+// hidden — skills marked system:true in their frontmatter (e.g.
+// expert-agent-manager, channel-manager) exist for the Default Agent's
+// management surface and make no sense in an expert agent's context.
 func ManifestForProfile(r *Registry, profile *agentprofile.Profile) string {
 	if r.Len() == 0 {
 		return ""
 	}
 	if profile == nil || len(profile.ToolSkills) == 0 {
-		return RenderManifest(r)
+		manifest := RenderManifest(r)
+		// Default agent sees everything; expert agents without an allowlist
+		// still have system skills filtered from the raw manifest.
+		if profile != nil && !profile.IsDefault() {
+			manifest = stripSystemSkills(r, manifest)
+		}
+		return manifest
 	}
 	allowed := make(map[string]bool, len(profile.ToolSkills))
 	for _, name := range profile.ToolSkills {
@@ -369,9 +383,10 @@ func ManifestForProfile(r *Registry, profile *agentprofile.Profile) string {
 	b.WriteString("When a task matches a skill's description, call the `skill` tool with its " +
 		"name to load the full instructions before acting. Don't guess the instructions " +
 		"from the one-line description. The user can also trigger one directly by typing /<name>.\n\n")
+	expert := !profile.IsDefault()
 	n := 0
 	for _, s := range r.List() {
-		if allowed[s.Name] {
+		if allowed[s.Name] && !(expert && s.System) {
 			fmt.Fprintf(&b, "- %s: %s\n", s.Name, s.Description)
 			n++
 		}
@@ -380,6 +395,41 @@ func ManifestForProfile(r *Registry, profile *agentprofile.Profile) string {
 		return ""
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// stripSystemSkills filters system-level skill lines from the rendered manifest
+// text. It looks for "- <name>: " prefixed lines whose name matches a skill with
+// System==true in the registry, and removes them.
+func stripSystemSkills(r *Registry, manifest string) string {
+	// Collect the names of system skills.
+	sys := map[string]bool{}
+	for _, s := range r.List() {
+		if s.System {
+			sys[s.Name] = true
+		}
+	}
+	if len(sys) == 0 {
+		return manifest
+	}
+	var b strings.Builder
+	for _, line := range strings.Split(manifest, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- ") {
+			// Extract skill name: "- name: description..."
+			rest := trimmed[2:]
+			if colon := strings.IndexByte(rest, ':'); colon > 0 {
+				name := rest[:colon]
+				if sys[name] {
+					continue // skip system skill lines
+				}
+			}
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(line)
+	}
+	return b.String()
 }
 
 // ccCompatNote bridges skills authored for Claude Code — the ecosystem most

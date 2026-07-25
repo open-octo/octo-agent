@@ -1,10 +1,11 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import { t } from '../lib/i18n'
-  import type { Agent } from '../lib/api'
+  import * as api from '../lib/api'
 
   interface Props {
-    agent: Agent | null
-    onSave: (agent: Agent) => void
+    agent: api.Agent | null
+    onSave: (agent: api.Agent) => void
     onCancel: () => void
   }
 
@@ -13,32 +14,82 @@
   let name = $state('')
   let description = $state('')
   let model = $state('')
-  let tools = $state('')
-  let toolSkills = $state('')
   let mentionAs = $state('')
   let systemPrompt = $state('')
 
-  // Reset form fields when the agent prop changes (Svelte 5 captures prop
-  // values only at initialisation; without this, editing a different agent
-  // keeps the previous form content).
+  // Checklist items loaded from the Default Agent's resource pool.
+  interface ChecklistItem {
+    name: string
+    description: string
+    kind: 'builtin' | 'skill' | 'mcp'
+  }
+  let availableTools: ChecklistItem[] = $state([])
+  let availableSkills: ChecklistItem[] = $state([])
+
+  // Selected tool/skill names (from the agent's current allowlists).
+  let selectedTools: Set<string> = $state(new Set<string>())
+  let selectedSkills: Set<string> = $state(new Set<string>())
+
+  // Load available resources from the Default Agent pool.
+  async function loadResources() {
+    try {
+      const [toolDefs, skillDefs] = await Promise.all([
+        api.fetchAvailableTools(),
+        api.listSkills(),
+      ])
+      availableTools = toolDefs.map(t => ({
+        name: t.name,
+        description: t.description || '',
+        kind: 'builtin' as const,
+      }))
+      availableSkills = skillDefs.map(s => ({
+        name: s.name,
+        description: s.desc || '',
+        kind: 'skill' as const,
+      }))
+    } catch {
+      // Degrade gracefully — the text-input fallback is always available
+      // via the profile's .md file.
+    }
+  }
+
+  // Reset form fields when the agent prop changes.
   $effect(() => {
     name = agent?.name ?? ''
     description = agent?.description ?? ''
     model = agent?.model ?? ''
-    tools = agent?.tools?.join(', ') ?? ''
-    toolSkills = agent?.tool_skills?.join(', ') ?? ''
     mentionAs = agent?.mention_as?.join(', ') ?? ''
     systemPrompt = agent?.system_prompt ?? ''
+    selectedTools = new Set(agent?.tools ?? [])
+    selectedSkills = new Set(agent?.tool_skills ?? [])
   })
+
+  onMount(loadResources)
+
+  function toggleTool(name: string) {
+    const next = new Set(selectedTools)
+    if (next.has(name)) next.delete(name)
+    else next.add(name)
+    selectedTools = next
+  }
+
+  function toggleSkill(name: string) {
+    const next = new Set(selectedSkills)
+    if (next.has(name)) next.delete(name)
+    else next.add(name)
+    selectedSkills = next
+  }
 
   function handleSubmit(e: Event) {
     e.preventDefault()
+    const selTools = [...selectedTools]
+    const selSkills = [...selectedSkills]
     const body = {
       name: name.trim(),
       description: description.trim(),
       model: model.trim() || undefined,
-      tools: tools.trim() ? tools.split(',').map(s => s.trim()).filter(Boolean) : undefined,
-      tool_skills: toolSkills.trim() ? toolSkills.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+      tools: selTools.length > 0 ? selTools : undefined,
+      tool_skills: selSkills.length > 0 ? selSkills : undefined,
       mention_as: mentionAs.trim() ? mentionAs.split(',').map(s => s.trim()).filter(Boolean) : undefined,
       system_prompt: systemPrompt.trim() || undefined,
     }
@@ -46,7 +97,7 @@
       alert('Name and description are required')
       return
     }
-    onSave(body as Agent)
+    onSave(body as api.Agent)
   }
 </script>
 
@@ -70,15 +121,51 @@
         <label>{$t('agents.model')}</label>
         <input bind:value={model} placeholder={$t('agents.model_placeholder')} />
       </div>
+
+      <!-- Tools checklist -->
       <div class="field">
         <label>{$t('agents.tools')}</label>
-        <input bind:value={tools} placeholder={$t('agents.tools_placeholder')} />
-        <small>{$t('agents.tools_hint')}</small>
+        {#if availableTools.length > 0}
+          <div class="checklist">
+            {#each availableTools as t}
+              <label class="check-item" title={t.description}>
+                <input
+                  type="checkbox"
+                  checked={selectedTools.has(t.name)}
+                  onchange={() => toggleTool(t.name)}
+                />
+                <span class="check-name">{t.name}</span>
+                <span class="check-hint">{t.description}</span>
+              </label>
+            {/each}
+          </div>
+        {:else}
+          <small>{$t('agents.tools_loading')}</small>
+        {/if}
       </div>
+
+      <!-- Skills checklist -->
       <div class="field">
         <label>{$t('agents.tool_skills')}</label>
-        <input bind:value={toolSkills} placeholder={$t('agents.tool_skills_placeholder')} />
+        {#if availableSkills.length > 0}
+          <div class="checklist">
+            {#each availableSkills as s}
+              <label class="check-item" title={s.description}>
+                <input
+                  type="checkbox"
+                  checked={selectedSkills.has(s.name)}
+                  onchange={() => toggleSkill(s.name)}
+                />
+                <span class="check-name">{s.name}</span>
+                <span class="check-hint">{s.description}</span>
+              </label>
+            {/each}
+          </div>
+        {:else}
+          <small>{$t('agents.skills_loading')}</small>
+        {/if}
       </div>
+
       <div class="field">
         <label>{$t('agents.mention_as')}</label>
         <input bind:value={mentionAs} placeholder={$t('agents.mention_as_placeholder')} />
@@ -99,7 +186,7 @@
   }
   .modal {
     background: var(--bg-container); border-radius: 12px; padding: 24px;
-    max-width: 480px; width: 90%; max-height: 80vh; overflow-y: auto;
+    max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;
   }
   h3 { margin: 0 0 20px; font-size: 18px; font-weight: 600; }
   .field { margin-bottom: 16px; }
@@ -108,9 +195,35 @@
     width: 100%; padding: 8px 12px; border: 1px solid var(--border-secondary);
     border-radius: 6px; background: var(--bg-primary); color: var(--text-primary);
     font-size: 13px; font-family: inherit;
-    &:focus { outline: none; border-color: var(--blue-6); }
   }
+  input:focus, textarea:focus { outline: none; border-color: var(--blue-6); }
   small { display: block; font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
+
+  /* ── checklist ──────────────────────────────────────────────────────────── */
+  .checklist {
+    border: 1px solid var(--border-secondary); border-radius: 8px;
+    max-height: 200px; overflow-y: auto; padding: 4px;
+    background: var(--bg-primary);
+  }
+  .check-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; border-radius: 5px; cursor: pointer;
+    font-size: 13px;
+  }
+  .check-item:hover { background: var(--hover-neutral); }
+  .check-item input[type="checkbox"] { width: auto; margin: 0; flex: 0 0 auto; }
+  .check-name {
+    flex: 0 0 auto; min-width: 110px;
+    font-family: var(--font-mono, 'SF Mono', Monaco, monospace);
+    font-size: 12px; color: var(--text-primary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .check-hint {
+    flex: 1; min-width: 0;
+    font-size: 11px; color: var(--text-tertiary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
   .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
   .btn-primary {
     height: 32px; padding: 0 14px; border: none; background: var(--blue-6); border-radius: 6px;

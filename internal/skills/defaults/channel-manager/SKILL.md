@@ -1,5 +1,6 @@
 ---
 name: channel-manager
+system: true
 description: |
   Configure IM platform channels (Feishu, Weixin/WeChat, WeCom, DingTalk, Discord, Telegram) for octo.
   Guides the user through platform consoles, collects credentials, writes ~/.octo/channels.yml,

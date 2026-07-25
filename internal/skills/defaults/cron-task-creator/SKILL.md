@@ -1,5 +1,6 @@
 ---
 name: cron-task-creator
+system: true
 description: Create, inspect, run, edit, enable/disable, and delete octo's scheduled cron tasks — recurring agent prompts stored in ~/.octo/tasks/*.json and executed by the octo serve scheduler. Use when the user wants to schedule a recurring task, e.g. "run X every morning", "schedule a daily report", "set up a cron job", "定时任务", "每天自动跑".
 ---
 

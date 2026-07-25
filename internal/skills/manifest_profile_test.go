@@ -80,15 +80,18 @@ func countSkillLines(manifest string) int {
 func TestManifestForProfile_EmptyToolSkillsReturnsAll(t *testing.T) {
 	r := discoverWithDefaults(t)
 	full := RenderManifest(r)
-	profiled := ManifestForProfile(r, &agentprofile.Profile{
+	// Default agent sees the full manifest including system skills.
+	profiled := ManifestForProfile(r, agentprofile.DefaultProfile())
+	if full != profiled {
+		t.Fatalf("empty ToolSkills should return full manifest for default agent")
+	}
+	// Non-default agent with empty ToolSkills gets manifest minus system skills.
+	expertProfiled := ManifestForProfile(r, &agentprofile.Profile{
 		ID:          "test",
 		Description: "d",
-		CapabilitySpec: agentprofile.CapabilitySpec{
-			ToolSkills: []string{},
-		},
 	})
-	if full != profiled {
-		t.Fatalf("empty ToolSkills should return full manifest")
+	if expertProfiled == full {
+		t.Fatalf("non-default agent with empty ToolSkills should strip system skills")
 	}
 }
 
