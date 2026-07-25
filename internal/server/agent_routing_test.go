@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/agentprofile"
@@ -36,37 +35,26 @@ func routingHome(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 }
 
-// waitSession polls for the asynchronously spawned turn to create the
-// session (routeChannelEvent runs handleChannelMessage in a goroutine).
-func waitSession(t *testing.T, srv *Server, agentID string) *channel.Session {
-	return waitSessionFor(t, srv, agentID, evFor("x"))
+// agentStoreDir returns the test HOME's profile dir.
+func agentStoreDir() string {
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".octo", "agents")
 }
 
-// waitSessionFor polls for a session matching the routed event.
-func waitSessionFor(t *testing.T, srv *Server, agentID string, ev channel.InboundEvent) *channel.Session {
+// routeAndWait resolves the profile for ev, runs handleChannelMessage to
+// completion, and returns. Using the stub sender this is fast and avoids
+// racing with the async goroutine that routeChannelEvent would spawn.
+func routeAndWait(t *testing.T, srv *Server, ad *fullFakeAdapter, ev channel.InboundEvent, profile *agentprofile.Profile) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if sess := srv.channelMgr.GetSession(ev, agentID); sess != nil {
-			return sess
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	return nil
-}
-
-// waitPrompt polls for the per-turn system prompt to be composed (the turn
-// that composes it runs in a goroutine).
-func waitPrompt(t *testing.T, sess *channel.Session, substring string) {
-	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Contains(sess.Agent.System, substring) {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("prompt never contained %q; got %q", substring, sess.Agent.System)
+	turnDone := make(chan struct{})
+	go func() {
+		defer close(turnDone)
+		srv.handleChannelMessage(context.Background(), ad, ev, profile)
+	}()
+	<-turnDone
 }
 
 func TestRouteChannelEvent_RoutesToBoundExpertAgent(t *testing.T) {
@@ -80,10 +68,14 @@ You review code.
 `)
 	srv := chanServer(t)
 	ad := &fullFakeAdapter{}
+	ev := evFor("hello")
+	profile := agentprofile.NewRouter(agentprofile.New(agentStoreDir(), nil)).Route(agentprofile.RouteInput{Platform: ev.Platform, ChatID: ev.ChatID, UserID: ev.UserID, Text: ev.Text})
+	if profile == nil {
+		t.Fatal("expected routing to reviewer, got nil")
+	}
+	routeAndWait(t, srv, ad, ev, profile)
 
-	srv.routeChannelEvent(context.Background(), ad, evFor("hello"))
-
-	sess := waitSession(t, srv, "reviewer")
+	sess := srv.channelMgr.GetSession(ev, "reviewer")
 	if sess == nil {
 		t.Fatal("message to a bound chat did not create the expert's session")
 	}
@@ -94,7 +86,7 @@ You review code.
 		t.Fatalf("store agent_id = %q, want reviewer", sess.Store.AgentID)
 	}
 	// The default agent's namespace for the same chat stays empty.
-	if got := srv.channelMgr.GetSession(evFor("x"), "default"); got != nil {
+	if got := srv.channelMgr.GetSession(ev, "default"); got != nil {
 		t.Fatal("bound chat leaked a default-agent session")
 	}
 }
@@ -117,15 +109,17 @@ B.
 `)
 	srv := chanServer(t)
 	ad := &fullFakeAdapter{}
-
-	srv.routeChannelEvent(context.Background(), ad, evFor("hello"))
-	time.Sleep(100 * time.Millisecond) // prove nothing async happens either
-
-	// Silence: no session under either agent, no reply sent.
-	if got := srv.channelMgr.GetSession(evFor("x"), "agent-a"); got != nil {
+	ev := evFor("hello")
+	profile := agentprofile.NewRouter(agentprofile.New(agentStoreDir(), nil)).Route(agentprofile.RouteInput{Platform: ev.Platform, ChatID: ev.ChatID, UserID: ev.UserID, Text: ev.Text})
+	if profile != nil {
+		t.Fatalf("expected nil route (multi-binding, no @), got %q", profile.ID)
+	}
+	// No handleChannelMessage: routeChannelEvent would have dropped the event.
+	// Verify silence: no session under either agent, no reply sent.
+	if got := srv.channelMgr.GetSession(ev, "agent-a"); got != nil {
 		t.Fatal("multi-bound chat without @ created agent-a session")
 	}
-	if got := srv.channelMgr.GetSession(evFor("x"), "agent-b"); got != nil {
+	if got := srv.channelMgr.GetSession(ev, "agent-b"); got != nil {
 		t.Fatal("multi-bound chat without @ created agent-b session")
 	}
 	if texts := ad.texts(); len(texts) != 0 {
@@ -153,13 +147,17 @@ B.
 `)
 	srv := chanServer(t)
 	ad := &fullFakeAdapter{}
+	ev := evFor("@bb hello")
+	profile := agentprofile.NewRouter(agentprofile.New(agentStoreDir(), nil)).Route(agentprofile.RouteInput{Platform: ev.Platform, ChatID: ev.ChatID, UserID: ev.UserID, Text: ev.Text})
+	if profile == nil || profile.ID != "agent-b" {
+		t.Fatalf("expected routing to agent-b, got %+v", profile)
+	}
+	routeAndWait(t, srv, ad, ev, profile)
 
-	srv.routeChannelEvent(context.Background(), ad, evFor("@bb hello"))
-
-	if got := waitSession(t, srv, "agent-b"); got == nil {
+	if got := srv.channelMgr.GetSession(ev, "agent-b"); got == nil {
 		t.Fatal("@bb mention did not route to agent-b")
 	}
-	if got := srv.channelMgr.GetSession(evFor("x"), "agent-a"); got != nil {
+	if got := srv.channelMgr.GetSession(ev, "agent-a"); got != nil {
 		t.Fatal("@bb mention leaked a session to agent-a")
 	}
 }
@@ -175,10 +173,14 @@ You review code.
 `)
 	srv := chanServer(t)
 	ad := &fullFakeAdapter{}
+	ev := evFor("hello")
+	profile := agentprofile.NewRouter(agentprofile.New(agentStoreDir(), nil)).Route(agentprofile.RouteInput{Platform: ev.Platform, ChatID: ev.ChatID, UserID: ev.UserID, Text: ev.Text})
+	if profile == nil || !profile.IsDefault() {
+		t.Fatalf("expected default fallback, got %+v", profile)
+	}
+	routeAndWait(t, srv, ad, ev, profile)
 
-	srv.routeChannelEvent(context.Background(), ad, evFor("hello"))
-
-	sess := waitSession(t, srv, "default")
+	sess := srv.channelMgr.GetSession(ev, "default")
 	if sess == nil {
 		t.Fatal("unbound chat did not fall back to the default agent")
 	}
@@ -221,28 +223,27 @@ channel_bindings:
 	ad := &fullFakeAdapter{}
 
 	// Profile with system prompt → its prompt replaces base.
-	srv.routeChannelEvent(context.Background(), ad, channel.InboundEvent{Platform: "fake", ChatID: "c1", UserID: "u1", Text: "diag"})
-	opsSess := waitSession(t, srv, "ops")
+	evOps := channel.InboundEvent{Platform: "fake", ChatID: "c1", UserID: "u1", Text: "diag"}
+	router := agentprofile.NewRouter(store)
+	routeAndWait(t, srv, ad, evOps, router.Route(agentprofile.RouteInput{Platform: "fake", ChatID: "c1", UserID: "u1", Text: "diag"}))
+	opsSess := srv.channelMgr.GetSession(evOps, "ops")
 	if opsSess == nil {
 		t.Fatal("ops session not created")
 	}
-	waitPrompt(t, opsSess, "OPS expert")
+	if !strings.Contains(opsSess.Agent.System, "OPS expert") {
+		t.Fatalf("profile system prompt not applied: %q", opsSess.Agent.System)
+	}
 
 	// Profile without system prompt → falls back to server base.
 	evBare := channel.InboundEvent{Platform: "fake", ChatID: "c2", UserID: "u2", Text: "diag"}
-	srv.routeChannelEvent(context.Background(), ad, evBare)
-	bareSess := waitSessionFor(t, srv, "bare", evBare)
+	routeAndWait(t, srv, ad, evBare, router.Route(agentprofile.RouteInput{Platform: "fake", ChatID: "c2", UserID: "u2", Text: "diag"}))
+	bareSess := srv.channelMgr.GetSession(evBare, "bare")
 	if bareSess == nil {
 		t.Fatal("bare session not created")
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Contains(bareSess.Agent.System, "SERVER BASE SYSTEM") {
-			return // passed
-		}
-		time.Sleep(5 * time.Millisecond)
+	if !strings.Contains(bareSess.Agent.System, "SERVER BASE SYSTEM") {
+		t.Fatalf("bare profile did not fall back to base system: %q", bareSess.Agent.System)
 	}
-	t.Fatalf("bare profile did not fall back to base system: %q", bareSess.Agent.System)
 }
 
 // A profile deleted mid-session must fall back to the default system prompt
@@ -268,34 +269,35 @@ TEMP PROFILE PROMPT.
 		return agent.New(&stubSender{}, "stub-model")
 	}, channel.BindByChat)
 	ad := &fullFakeAdapter{}
+	router := agentprofile.NewRouter(store)
 
 	// First turn: profile exists → routes to "temp" → temp prompt applied.
-	srv.routeChannelEvent(context.Background(), ad, channel.InboundEvent{Platform: "fake", ChatID: "c1", UserID: "u1", Text: "hi"})
-	tempSess := waitSession(t, srv, "temp")
+	ev1 := channel.InboundEvent{Platform: "fake", ChatID: "c1", UserID: "u1", Text: "hi"}
+	routeAndWait(t, srv, ad, ev1, router.Route(agentprofile.RouteInput{Platform: "fake", ChatID: "c1", UserID: "u1", Text: "hi"}))
+	tempSess := srv.channelMgr.GetSession(ev1, "temp")
 	if tempSess == nil {
 		t.Fatal("temp session not created")
 	}
-	waitPrompt(t, tempSess, "TEMP PROFILE PROMPT")
+	if !strings.Contains(tempSess.Agent.System, "TEMP PROFILE PROMPT") {
+		t.Fatalf("initial profile prompt not applied: %q", tempSess.Agent.System)
+	}
 	// Delete the profile file — read-through Store misses on next route.
 	if err := os.Remove(filepath.Join(dir, "temp.md")); err != nil {
 		t.Fatal(err)
 	}
-	// Second turn: profile gone → resolves to default → base prompt. A new
-	// session under "default" is created (different key namespace).
-	srv.routeChannelEvent(context.Background(), ad, channel.InboundEvent{Platform: "fake", ChatID: "c1", UserID: "u1", Text: "again"})
-	defSess := waitSession(t, srv, "default")
+	// Second turn: profile gone → resolves to default → base prompt.
+	ev2 := channel.InboundEvent{Platform: "fake", ChatID: "c1", UserID: "u1", Text: "again"}
+	routeAndWait(t, srv, ad, ev2, router.Route(agentprofile.RouteInput{Platform: "fake", ChatID: "c1", UserID: "u1", Text: "again"}))
+	defSess := srv.channelMgr.GetSession(ev2, "default")
 	if defSess == nil {
 		t.Fatal("default session not created after profile delete")
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		sys := defSess.Agent.System
-		if sys != "" && !strings.Contains(sys, "TEMP PROFILE PROMPT") && strings.Contains(sys, "SERVER BASE") {
-			return // passed
-		}
-		time.Sleep(5 * time.Millisecond)
+	if strings.Contains(defSess.Agent.System, "TEMP PROFILE PROMPT") {
+		t.Fatalf("deleted profile's prompt still applied: %q", defSess.Agent.System)
 	}
-	t.Fatalf("new turn did not use base prompt: %q", defSess.Agent.System)
+	if !strings.Contains(defSess.Agent.System, "SERVER BASE") {
+		t.Fatalf("did not fall back to base prompt: %q", defSess.Agent.System)
+	}
 }
 
 // A profile with an unresolvable model must warn-and-fall-through to the
