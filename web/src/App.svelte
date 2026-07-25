@@ -279,6 +279,13 @@
     if (!native && (!('Notification' in window) || Notification.permission !== 'granted')) return
     const viewingThisSession = document.hasFocus() && get(view) === 'chat' && get(activeSessionId) === sid
     if (viewingThisSession) return
+    // When the user is in the app (document focused) but viewing a DIFFERENT
+    // session, the in-app question note handles question_pending /
+    // confirm_pending — don't also fire an OS notification, that's duplicate
+    // noise. Only turn_complete surfaces as an OS notification while in-app
+    // (there's no in-app note for it). When the user is away from the app
+    // (tab hidden/minimized), all kinds fire as before.
+    if (document.hasFocus() && (kind === 'question_pending' || kind === 'confirm_pending')) return
     const cooldownKey = `${sid}:${kind}`
     const now = Date.now()
     if (now - (lastNotifiedAt[cooldownKey] ?? 0) < NOTIFY_COOLDOWN_MS) return
