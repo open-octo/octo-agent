@@ -33,12 +33,12 @@
 
 | 术语 | 含义 |
 |------|------|
-| **Agent Profile** | 描述一个 expert agent 完整配置的声明式对象，包含 ID、名称、描述、系统提示词、模型、工具白名单、mention 别名、频道绑定 |
+| **Agent Profile** | 描述一个 expert agent 完整配置的声明式对象，包含 ID、名称、描述、系统提示词、模型、工具白名单、频道绑定 |
 | **Default Agent** | 代码内建的顶级 agent，system prompt 由代码 base prompt + onboard 注入的 `~/.octo/soul.md` 和 `~/.octo/user.md` 构成，**不可通过 profile 编辑器修改**。拥有所有 skill/MCP 的定义权。没有对应的 .md 文件 |
 | **Expert Agent** | 用户在 Default Agent 视图下创建的 Agent Profile，只能从 Default Agent 已有的资源池中启用/禁用，不能新增 |
 | **sub_agent** | 工具名。所有 agent 都可通过此工具在会话内部调度匿名子 agent 执行隔离任务。子 agent 的生命周期、上下文、工具集完全独立，运行结束后结果回传给主 agent |
 | **Profile Store** | 统一加载三来源：`~/.octo/agents/*.md`（用户级，双模式）、`<repo>/.octo/agents/*.md`（项目级，仅委派）、内建 profile；每个 expert agent 一个 `<id>.md` 文件（Markdown + frontmatter） |
-| **Agent Router** | 根据 InboundEvent（平台、chatID、消息内容中的 @ 提及）决定消息路由到哪个 agent profile |
+| **Agent Router** | 根据 InboundEvent（平台、chatID）按频道绑定决定消息路由到哪个 agent profile |
 | **Session Key** | `platform:chat_id[:user_id]`；expert agent 加 `agentID#` 前缀形成命名空间（如 `a3f9b2c1#weixin:c1:u1`）。default agent 保持 legacy 格式字节级不变 |
 | **Agent 绑定** | 会话创建时绑定 agent，一旦建立不可切换；通过新建会话选择其他 agent |
 | **能力片（CapabilitySpec）** | Profile 中 prompt/model/tools/skills 四元组，是对话模式和委派模式共享的能力定义 |
@@ -55,7 +55,7 @@
                               │
                     ┌─────────▼─────────┐
                     │    AgentRouter     │   纯函数：ev → profile
-                    └─────────┬─────────┘   1. @ 提及  2. 频道绑定  3. fallback default
+                    └─────────┬─────────┘   1. 频道绑定  2. fallback default
                               │
                               ▼
               ┌───────────────────────────────┐
@@ -119,7 +119,7 @@ if profile == nil {
                     （同 chat 不同 agent 各自独立 session，由 key 前缀区分）
 ```
 
-**Route 返回 nil 的 drop 逻辑**：当群聊绑定多个 agent 但消息无 @ 时，`Router.Route()` 返回 nil，handler 直接 return 不响应（与"群聊未 @ 完全静默"的决策一致）。
+**Route 返回 nil 的 drop 逻辑**：当群聊绑定多个 agent 时，`Router.Route()` 返回 nil，handler 直接 drop（多个 agent 绑定同一群聊无法确定路由目标）。
 
 **adapter 无改造**：adapter 回调签名不变，路由发生在 `handleChannelMessage` 内部，adapter 不感知 agent 数量。
 
@@ -145,7 +145,6 @@ description: 专责 review PR、发现 bug、建议改进
 model: claude-sonnet-4-20250514
 tools: [read_file, write_file, edit_file, grep, glob, terminal, code-review]
 tool_skills: [code-review]
-mention_as: ["@review", "@CR"]
 channel_bindings:
   - {platform: weixin, chat_id: dev-group-xxx}
 ---
@@ -188,7 +187,6 @@ type Profile struct {
     Description     string           // frontmatter description（必填）
     CapabilitySpec                   // 能力片（见上）
     WorkingDir      string           // frontmatter working_dir
-    MentionAs       []string         // frontmatter mention_as（仅 user 级生效）
     ChannelBindings []ChannelBinding // frontmatter channel_bindings（仅 user 级生效）
     Source          Source
     CreatedAt       time.Time
@@ -229,7 +227,6 @@ func (s *Store) Create(p *Profile) error        // 序列化为 .md 写入用户
 func (s *Store) Update(p *Profile) error
 func (s *Store) Delete(id string) error
 func (s *Store) ByChannel(platform, chatID string) []*Profile  // 按频道绑定索引（仅 user 级）
-func (s *Store) ByMention(alias string) (*Profile, bool)       // 按 @ 别名索引（仅 user 级）
 ```
 
 **创建规则**：
@@ -254,47 +251,35 @@ type Router struct {
 }
 
 // Route 返回应处理该消息的 agent profile
-// 可能返回 nil：群聊绑定多个 agent 且消息无 @ 时返回 nil，caller 应 drop 该消息
+// Route 返回应处理该消息的 agent profile。
+// 可能返回 nil：群聊绑定多个 agent 时返回 nil，caller 应 drop 该消息。
 func (r *Router) Route(ev InboundEvent) *Profile {
-    // 1. 检查 @ 提及（群聊场景）
-    if mentioned := extractMentionAlias(ev.Text); mentioned != "" {
-        if p, ok := r.store.ByMention(mentioned); ok {
-            return p
-        }
-        // @ 了不存在的 alias，回退到 Default Agent（Default 也可能 drop，取决于上下文）
-        return DefaultProfile()
-    }
-
-    // 2. 频道绑定
+    // 1. 频道绑定
     if p := r.store.ByChannel(ev.Platform, ev.ChatID); len(p) > 0 {
         if len(p) == 1 {
             return p[0]
         }
-        // 群聊多绑定但未 @：静默（Default Agent 也不响应，由 dispatcher 直接 drop）
-        // 见下方 "路由行为总结"
+        // 群聊多绑定：静默
         return nil
     }
 
-    // 3. 私聊未绑定 → Default Agent
+    // 2. 未绑定 → Default Agent
     return DefaultProfile()
 }
 ```
 
 #### 路由行为总结
 
-| 场景 | @ 提及 | 频道绑定 | 路由结果 |
-|------|--------|----------|----------|
-| 私聊（未绑定） | — | 无 | **Default Agent** |
-| 私聊（绑定 code-review） | — | 有（唯一） | **code-review** |
-| 群聊（绑定 code-review） | @ops 但 ops 未绑定此群 | 有 | **ops-helper**（@ 解析是全局的：显式召唤不受绑定限制） |
-| 群聊（绑定 code-review） | @review | 有 | **code-review** |
-| 群聊（绑定 code + ops） | @ops | 有（多） | **ops-helper** |
-| 群聊（绑定 code + ops） | 无 @ | 有（多） | **静默**（drop） |
-| 群聊（无绑定） | — | 无 | **Default Agent** |
+| 场景 | 频道绑定 | 路由结果 |
+|------|----------|----------|
+| 私聊（未绑定） | 无 | **Default Agent** |
+| 私聊（绑定 code-review） | 有（唯一） | **code-review** |
+| 群聊（绑定 code-review） | 有（唯一） | **code-review** |
+| 群聊（绑定 code + ops） | 有（多） | **静默**（drop） |
+| 群聊（无绑定） | 无 | **Default Agent** |
 
-**注意**：AgentRouter 返回 nil 时，handler 直接 drop 该消息（不路由到任何 agent），这与"群聊未 @ 完全静默"的决策一致。
+**注意**：AgentRouter 返回 nil 时，handler 直接 drop 该消息（多个 agent 绑定同一群聊，无法确定路由目标）。
 
-**@ 解析是全局的**（2026-07-25 拍板）：`ByMention` 在所有用户级 profile 中查找，不要求被 @ 的 profile 绑定当前频道——@ 是显式召唤，绑定只决定"未 @ 时谁响应"。仅当 @ 的 alias 不存在时才回退 Default Agent。
 
 ### 3. 单 Manager Session Pool：key 内嵌 agent 命名空间
 
@@ -758,7 +743,6 @@ DELETE /api/agents/:id/bind      — 解绑频道
 - `system_prompt`（.md 正文）：最大 10000 字符
 - `tools`：必须是 `skillReg` + `tools.DefaultRegistry` 中存在名的子集
 - `model`：必须在 `~/.octo/config.yml` 的 `models` 列表中
-- `mention_as`：每个 alias 必须以 `@` 开头，且全局唯一（同一 alias 不能被两个 profile 声明）
 
 ### 10. 数据迁移
 
@@ -811,7 +795,7 @@ octo 已有的用户 agent 定义机制（`~/.octo/agents/*.md`，供 `subagent_
 
 - **ephemeral、全新上下文**：委派 run 不携带目标 profile 的任何 session 历史，用完即弃
 - **不进 session pool**：委派 run 由 SubAgentManager 管理，不出现在该 agent 的会话列表，不写入其 session pool
-- **只取能力片**：profile 的 `mention_as` / `channel_bindings` / cron 归属在委派模式下被忽略
+- **只取能力片**：profile 的 `channel_bindings` / cron 归属在委派模式下被忽略
 - **model 解析优先级**：`sub_agent(model:)` 显式参数 > profile.model > 继承父 agent model
 
 ### 一致性提示
@@ -919,7 +903,7 @@ Web 端不维护全局 active agent 状态——agent 绑定在 session 上，�
 2. Default Agent 的 skill/MCP 定义新增后，expert agent 立即可见（在启用列表中）
 3. 任何路径的变更（CRUD API / 直接编辑 .md）下一次读取即生效，无需重启（read-through，与现有加载机制语义一致）
 4. Default Agent 的 system prompt 不可通过 profile 编辑器修改（只读显示"由 onboard 管理"）
-5. IM 频道绑定：发消息到绑定群 → 只有被绑 agent 响应；@ 提及 → 被 @ agent 响应
+5. IM 频道绑定：发消息到绑定群 → 只有被绑 agent 响应；多绑定群 → 静默
 6. `octo chat --agent code-review` 正常启动
 7. `octo serve` 桌面版 default 和新 profile 共存
 
