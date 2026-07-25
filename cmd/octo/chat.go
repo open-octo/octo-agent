@@ -943,7 +943,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if g := tools.MemoryBackendGuidance(); g != "" {
 		memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
 	}
-	a.System, a.LeanSystem = prompt.ComposePair(*system, cwd, env, skillsManifest, mcpManifest, memInjection, coauthor)
+	a.System, a.LeanSystem = prompt.ComposePair(*system, cwd, env, skillsManifest, mcpManifest, memInjection, coauthor, false)
 
 	// Attention layer: re-surface MEMORY.md's structured rules (## 必须遵守 /
 	// ## 触发提醒) on the message stream at the point of action. This rides each
@@ -1017,7 +1017,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			// MCP manifest against a.Model (may differ from resolvedModel — a
 			// saved session can override it above) so the Tool Search
 			// activation gate matches the model actually in use.
-			a.System, a.LeanSystem = prompt.ComposePair(sess.System, cwd, env, skillsManifest, tools.MCPManifestFor(a.Model), memInjection, coauthor)
+			a.System, a.LeanSystem = prompt.ComposePair(sess.System, cwd, env, skillsManifest, tools.MCPManifestFor(a.Model), memInjection, coauthor, sess.EffectiveAgentID() != "default")
 		} else {
 			sess = agent.NewSession(resolvedModel, *system)
 			sess.Bind(agent.EntryTUI, false)
@@ -1028,6 +1028,12 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				// so resume recomposes with the right persona.
 				if agentProfile != nil && agentProfile.SystemPrompt != "" {
 					sess.System = agentProfile.SystemPrompt
+
+					// a.System was set at startup from the server base
+					// prompt (line ~946). Re-compose with the expert
+					// prompt and skip identity layers so the expert.s
+					// persona isn.t polluted by soul.md/user.md.
+					a.System, a.LeanSystem = prompt.ComposePair(sess.System, cwd, env, skillsManifest, tools.MCPManifestFor(a.Model), memInjection, coauthor, true)
 				}
 			}
 		}
@@ -1083,7 +1089,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		// for both a fresh session (NewSession stores *system into it) and a
 		// resumed one (loaded from disk), so it's correct in either case.
 		cfg.recomposeMCPManifest = func() {
-			a.System, a.LeanSystem = prompt.ComposePair(sess.System, cwd, env, skillsManifest, tools.MCPManifestFor(a.Model), memInjection, coauthor)
+			a.System, a.LeanSystem = prompt.ComposePair(sess.System, cwd, env, skillsManifest, tools.MCPManifestFor(a.Model), memInjection, coauthor, sess.EffectiveAgentID() != "default")
 		}
 		if toolsOn {
 			// Built-ins only at first paint — the MCP registry is still nil
@@ -1119,6 +1125,9 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if agentProfileID != "" {
 		if agentProfile != nil && agentProfile.SystemPrompt != "" {
 			oneShotSess.System = agentProfile.SystemPrompt
+			// Re-compose a.System with the expert prompt and skip
+			// identity layers (soul.md/user.md don't belong here).
+			a.System, a.LeanSystem = prompt.ComposePair(oneShotSess.System, cwd, env, skillsManifest, tools.MCPManifestFor(a.Model), memInjection, coauthor, true)
 		}
 		oneShotSess.AgentID = agentProfileID
 	}

@@ -89,15 +89,21 @@ var userRulesPath = func() string {
 //
 // coauthor, when true, injects a rule into the system prompt instructing the
 // agent to append a Co-authored-by trailer to every git commit message it writes.
-func Compose(userSystem, cwd, env, skills, mcpTools, memory string, coauthor bool) string {
+//
+// expertMode, when true, skips identity/persona layers (soul.md, user.md,
+// octorules.md, and project conventions) — these belong to the Default Agent
+// and would collide with an Expert Agent's custom system prompt.
+func Compose(userSystem, cwd, env, skills, mcpTools, memory string, coauthor, expertMode bool) string {
 	layers := []string{strings.TrimSpace(base)}
 
 	if coauthor {
 		layers = append(layers, coauthorRule)
 	}
 
-	if s := readSoul(); s != "" {
-		layers = append(layers, "# Agent identity (~/.octo/soul.md)\n\n"+s)
+	if !expertMode {
+		if s := readSoul(); s != "" {
+			layers = append(layers, "# Agent identity (~/.octo/soul.md)\n\n"+s)
+		}
 	}
 	if e := strings.TrimSpace(env); e != "" {
 		layers = append(layers, e)
@@ -111,14 +117,16 @@ func Compose(userSystem, cwd, env, skills, mcpTools, memory string, coauthor boo
 	if m := strings.TrimSpace(memory); m != "" {
 		layers = append(layers, m)
 	}
-	if p := readUserProfile(); p != "" {
-		layers = append(layers, "# User profile (~/.octo/user.md)\n\n"+p)
-	}
-	if u := readUserContext(); u != "" {
-		layers = append(layers, "# User conventions (~/.octo/octorules.md)\n\n"+u)
-	}
-	if proj := readProjectContext(cwd); proj != "" {
-		layers = append(layers, "# Project conventions ("+ProjectContextFile+")\n\n"+proj)
+	if !expertMode {
+		if p := readUserProfile(); p != "" {
+			layers = append(layers, "# User profile (~/.octo/user.md)\n\n"+p)
+		}
+		if u := readUserContext(); u != "" {
+			layers = append(layers, "# User conventions (~/.octo/octorules.md)\n\n"+u)
+		}
+		if proj := readProjectContext(cwd); proj != "" {
+			layers = append(layers, "# Project conventions ("+ProjectContextFile+")\n\n"+proj)
+		}
 	}
 	if u := strings.TrimSpace(userSystem); u != "" {
 		layers = append(layers, u)
@@ -132,9 +140,9 @@ func Compose(userSystem, cwd, env, skills, mcpTools, memory string, coauthor boo
 // heaviest, most optional layers). The lean variant seeds cheap read-only
 // sub-agents (explore) that don't need the full harness context. Other
 // layers — soul, env, user/project conventions — are kept in both.
-func ComposePair(userSystem, cwd, env, skills, mcpTools, memory string, coauthor bool) (full, lean string) {
-	full = Compose(userSystem, cwd, env, skills, mcpTools, memory, coauthor)
-	lean = Compose(userSystem, cwd, env, "", "", "", coauthor)
+func ComposePair(userSystem, cwd, env, skills, mcpTools, memory string, coauthor, expertMode bool) (full, lean string) {
+	full = Compose(userSystem, cwd, env, skills, mcpTools, memory, coauthor, expertMode)
+	lean = Compose(userSystem, cwd, env, "", "", "", coauthor, expertMode)
 	return full, lean
 }
 

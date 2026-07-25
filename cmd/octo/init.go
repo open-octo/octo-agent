@@ -81,7 +81,7 @@ func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 
 	a := agent.New(llmSender, resolvedModel)
-	a.System = prompt.Compose("", cwd, env, "", "", "", true) // init is a one-shot task; no skills/mcp/memory
+	a.System = prompt.Compose("", cwd, env, "", "", "", true, false) // init is a one-shot task; no skills/mcp/memory
 
 	// init's whole job is writing/updating .octorules at cwd's root, and it
 	// defaults to strict (no one is watching an ask prompt for a one-shot

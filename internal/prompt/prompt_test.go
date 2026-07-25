@@ -8,7 +8,7 @@ import (
 )
 
 func TestCompose_BaseAlwaysPresent(t *testing.T) {
-	out := Compose("", t.TempDir(), "", "", "", "", false) // empty user/env/skills/mcp, no .octorules
+	out := Compose("", t.TempDir(), "", "", "", "", false, false) // empty user/env/skills/mcp, no .octorules
 	if !strings.Contains(out, "octo") {
 		t.Errorf("composed prompt should contain the base identity:\n%s", out)
 	}
@@ -19,7 +19,7 @@ func TestCompose_BaseAlwaysPresent(t *testing.T) {
 
 func TestComposePair_LeanDropsSkillsMCPAndMemory(t *testing.T) {
 	dir := t.TempDir()
-	full, lean := ComposePair("USER_RULE", dir, "ENV_BLOCK", "SKILLS_MANIFEST", "MCP_MANIFEST", "MEMORY_BLOCK", true)
+	full, lean := ComposePair("USER_RULE", dir, "ENV_BLOCK", "SKILLS_MANIFEST", "MCP_MANIFEST", "MEMORY_BLOCK", true, false)
 
 	// Full keeps everything; lean drops skills + mcp tools + memory but keeps env + user.
 	for _, want := range []string{"SKILLS_MANIFEST", "MCP_MANIFEST", "MEMORY_BLOCK", "ENV_BLOCK", "USER_RULE"} {
@@ -42,7 +42,7 @@ func TestCompose_LayersInOrder(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ProjectContextFile), []byte("PROJECT_RULE_X"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out := Compose("USER_RULE_Y", dir, "ENV_BLOCK_Z", "SKILLS_MANIFEST_W", "MCP_MANIFEST_V", "", true)
+	out := Compose("USER_RULE_Y", dir, "ENV_BLOCK_Z", "SKILLS_MANIFEST_W", "MCP_MANIFEST_V", "", true, false)
 
 	baseIdx := strings.Index(out, "octo")
 	envIdx := strings.Index(out, "ENV_BLOCK_Z")
@@ -68,7 +68,7 @@ func TestCompose_SkipsAbsentLayers(t *testing.T) {
 	// same on a developer machine and on a fresh CI runner.
 	useIdentityFiles(t, "", "")
 	// No env, no skills, no mcp tools, no .octorules, no user prompt → just the base, no separators.
-	out := Compose("", t.TempDir(), "", "", "", "", false)
+	out := Compose("", t.TempDir(), "", "", "", "", false, false)
 	if strings.Contains(out, "---") {
 		t.Errorf("single-layer prompt should have no separator:\n%s", out)
 	}

@@ -593,7 +593,7 @@ func (s *Server) enableSubAgentTools() {
 	}
 	cwd, envCtx := s.curCwdEnv()
 	cfg, _ := config.Load() // zero value on error still resolves correctly via EffectiveCoauthor
-	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(model), memInjection, s.effectiveCoauthor(cfg))
+	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(model), memInjection, s.effectiveCoauthor(cfg), false)
 	executor := tools.NewDefaultRegistry()
 	spawner := app.NewSpawner(template, executor, func(ctx context.Context) []agent.ToolDefinition {
 		return tools.DefaultToolsForCtx(ctx, s.model)
@@ -1279,10 +1279,12 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// edits land on the next message; a deleted profile falls back to default.
 	profile := s.profileForAgent(sess.EffectiveAgentID())
 	base := s.system
+	expertMode := false
 	if profile.SystemPrompt != "" {
 		base = profile.SystemPrompt
+		expertMode = true
 	}
-	a.System, a.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model), memInjection, s.effectiveCoauthor(cfg))
+	a.System, a.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model), memInjection, s.effectiveCoauthor(cfg), expertMode)
 
 	// L2: attention-layer rules (triggered keywords) + save-nudge on milestone
 	// tool results, plus any shell hooks (env/hooks.yml), unified on the agent's
@@ -3111,10 +3113,12 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// (default agent: unchanged, s.system). Resolved fresh per turn so profile
 	// edits land on the next message; a deleted profile falls back to default.
 	base := s.system
+	expertMode := false
 	if profile.SystemPrompt != "" {
 		base = profile.SystemPrompt
+		expertMode = true
 	}
-	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model), memInjection, s.effectiveCoauthor(cfg))
+	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model), memInjection, s.effectiveCoauthor(cfg), expertMode)
 
 	// L2 memory hooks + shell hooks, same engine buildAgent gives web turns,
 	// rebuilt per IM turn. The injector is session-sticky (recall latch) and
