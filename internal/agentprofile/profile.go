@@ -30,8 +30,7 @@ import (
 	"unicode/utf8"
 )
 
-// Source marks where a profile comes from. It determines which run modes the
-// profile supports and its override precedence (project > user > builtin).
+// Source marks where a profile comes from.
 type Source string
 
 const (
@@ -41,10 +40,6 @@ const (
 	// SourceUser profiles live in ~/.octo/agents/*.md and support both
 	// conversation and delegation modes.
 	SourceUser Source = "user"
-	// SourceProject profiles live in <repo>/.octo/agents/*.md and are
-	// delegation-only: the platform slice (mention aliases, channel
-	// bindings) is ignored, so a project file can never hijack IM routing.
-	SourceProject Source = "project"
 )
 
 // DefaultID is the reserved ID of the code-defined default agent.

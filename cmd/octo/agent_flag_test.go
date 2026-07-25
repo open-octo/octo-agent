@@ -38,7 +38,7 @@ func TestRunChat_AgentFlagListsAvailableOnError(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	store := agentprofile.New(dir, func() string { return "" })
+	store := agentprofile.New(dir)
 	if err := store.Create(&agentprofile.Profile{
 		ID:             "my-agent",
 		Name:           "My Agent",
@@ -76,7 +76,7 @@ func TestRunChat_AgentFlagResolvesByID(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	store := agentprofile.New(dir, func() string { return "" })
+	store := agentprofile.New(dir)
 	if err := store.Create(&agentprofile.Profile{
 		ID:             "my-agent",
 		Name:           "My Agent",

@@ -264,19 +264,6 @@ func TestHasMCPBridgeAccess_UserEmptyTools(t *testing.T) {
 	}
 }
 
-func TestHasMCPBridgeAccess_ProjectEmptyTools(t *testing.T) {
-	p := &agentprofile.Profile{
-		ID:     "proj-no-tools",
-		Source: agentprofile.SourceProject,
-		CapabilitySpec: agentprofile.CapabilitySpec{
-			Tools: []string{}, // empty = none for project
-		},
-	}
-	if hasMCPBridgeAccess(p) {
-		t.Error("project agent with empty Tools must NOT have MCP bridge access")
-	}
-}
-
 func TestHasMCPBridgeAccess_BothBridgeTools(t *testing.T) {
 	p := &agentprofile.Profile{
 		ID:     "mcp-enabled",

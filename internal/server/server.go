@@ -2217,7 +2217,7 @@ func (s *Server) agentRouter() *agentprofile.Router {
 		if s.agentStore != nil {
 			return
 		}
-		s.agentStore = agentprofile.New(agentUserDir(), agentProjectDir)
+		s.agentStore = agentprofile.New(agentUserDir())
 		s.agentRouterVal = agentprofile.NewRouter(s.agentStore)
 	})
 	return s.agentRouterVal
@@ -2255,20 +2255,6 @@ func agentUserDir() string {
 		return ""
 	}
 	return filepath.Join(home, ".octo", "agents")
-}
-
-// agentProjectDir is the delegation-only project-level profile directory
-// (<repo>/.octo/agents), resolved per call like the pre-existing loader.
-func agentProjectDir() string {
-	cwd, err := os.Getwd()
-	if err != nil || cwd == "" {
-		return ""
-	}
-	root := memory.ProjectRoot(cwd)
-	if root == "" {
-		return ""
-	}
-	return filepath.Join(root, ".octo", "agents")
 }
 
 // channelModelOps builds the ModelOps the channel manager's /model command

@@ -69,7 +69,7 @@ You review code.
 	srv := chanServer(t)
 	ad := &fullFakeAdapter{}
 	ev := evFor("hello")
-	profile := agentprofile.NewRouter(agentprofile.New(agentStoreDir(), nil)).Route(agentprofile.RouteInput{Platform: ev.Platform, ChatID: ev.ChatID, UserID: ev.UserID, Text: ev.Text})
+	profile := agentprofile.NewRouter(agentprofile.New(agentStoreDir())).Route(agentprofile.RouteInput{Platform: ev.Platform, ChatID: ev.ChatID, UserID: ev.UserID, Text: ev.Text})
 	if profile == nil {
 		t.Fatal("expected routing to reviewer, got nil")
 	}
@@ -110,7 +110,7 @@ B.
 	srv := chanServer(t)
 	ad := &fullFakeAdapter{}
 	ev := evFor("hello")
-	profile := agentprofile.NewRouter(agentprofile.New(agentStoreDir(), nil)).Route(agentprofile.RouteInput{Platform: ev.Platform, ChatID: ev.ChatID, UserID: ev.UserID, Text: ev.Text})
+	profile := agentprofile.NewRouter(agentprofile.New(agentStoreDir())).Route(agentprofile.RouteInput{Platform: ev.Platform, ChatID: ev.ChatID, UserID: ev.UserID, Text: ev.Text})
 	if profile != nil {
 		t.Fatalf("expected nil route (multi-binding), got %q", profile.ID)
 	}
@@ -139,7 +139,7 @@ You review code.
 	srv := chanServer(t)
 	ad := &fullFakeAdapter{}
 	ev := evFor("hello")
-	profile := agentprofile.NewRouter(agentprofile.New(agentStoreDir(), nil)).Route(agentprofile.RouteInput{Platform: ev.Platform, ChatID: ev.ChatID, UserID: ev.UserID, Text: ev.Text})
+	profile := agentprofile.NewRouter(agentprofile.New(agentStoreDir())).Route(agentprofile.RouteInput{Platform: ev.Platform, ChatID: ev.ChatID, UserID: ev.UserID, Text: ev.Text})
 	if profile == nil || !profile.IsDefault() {
 		t.Fatalf("expected default fallback, got %+v", profile)
 	}
@@ -177,7 +177,7 @@ channel_bindings:
 ---
 `)
 	dir := filepath.Join(os.Getenv("HOME"), ".octo", "agents")
-	store := agentprofile.New(dir, func() string { return "" })
+	store := agentprofile.New(dir)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	srv.system = "SERVER BASE SYSTEM"
 	srv.agentStore = store
@@ -225,7 +225,7 @@ channel_bindings:
 ---
 TEMP PROFILE PROMPT.
 `)
-	store := agentprofile.New(dir, func() string { return "" })
+	store := agentprofile.New(dir)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	srv.system = "SERVER BASE"
 	srv.agentStore = store

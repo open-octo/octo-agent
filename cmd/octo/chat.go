@@ -522,7 +522,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	var agentProfile *agentprofile.Profile
 	var agentStore *agentprofile.Store
 	if *agentName != "" {
-		agentStore = agentprofile.New(agentUserDir(), agentProjectDir)
+		agentStore = agentprofile.New(agentUserDir())
 		profile, ok := agentStore.Get(*agentName)
 		if !ok {
 			ids := append([]string{"default"}, profileIDs(agentStore)...)
@@ -1270,20 +1270,6 @@ func agentUserDir() string {
 		return ""
 	}
 	return filepath.Join(home, ".octo", "agents")
-}
-
-// agentProjectDir is the delegation-only project-level profile directory
-// (<repo>/.octo/agents), resolved per call like the pre-existing loader.
-func agentProjectDir() string {
-	cwd, err := os.Getwd()
-	if err != nil || cwd == "" {
-		return ""
-	}
-	root := memory.ProjectRoot(cwd)
-	if root == "" {
-		return ""
-	}
-	return filepath.Join(root, ".octo", "agents")
 }
 
 // profileIDs returns the IDs of all non-builtin profiles in the store.

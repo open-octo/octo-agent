@@ -990,7 +990,7 @@ func (m *tuiModel) dispatchClear() (tea.Model, tea.Cmd) {
 func (m *tuiModel) dispatchAgent(rest string) (tea.Model, tea.Cmd) {
 	cfg := m.cfg
 	if rest == "list" {
-		store := agentprofile.New(agentUserDir(), agentProjectDir)
+		store := agentprofile.New(agentUserDir())
 		names := append([]string{"default"}, profileIDs(store)...)
 		m.println(noticeStyle.Render("Available agents: " + strings.Join(names, ", ")))
 		return m, nil
@@ -1001,7 +1001,7 @@ func (m *tuiModel) dispatchAgent(rest string) (tea.Model, tea.Cmd) {
 		m.println(noticeStyle.Render("Current agent: Default (full access)"))
 		return m, nil
 	}
-	store := agentprofile.New(agentUserDir(), agentProjectDir)
+	store := agentprofile.New(agentUserDir())
 	if p, ok := store.Get(agentID); ok {
 		m.println(noticeStyle.Render(fmt.Sprintf("Current agent: %s — %s", p.Name, p.Description)))
 	} else {

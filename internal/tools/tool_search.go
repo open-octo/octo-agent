@@ -201,12 +201,8 @@ func MCPManifestFor(model string, profile *agentprofile.Profile) string {
 }
 
 // hasMCPBridgeAccess reports whether the profile can use the MCP bridge tools
-// (mcp_describe and mcp_call). Matches DefaultToolsForProfile's filter logic:
-// builtin agents with empty Tools get everything; user/project agents with
-// empty Tools get nothing; an explicit allowlist must include both bridge
-// tools (the manifest text instructs the model to call mcp_describe then
-// mcp_call — having only one creates a dead end). A nil profile means
-// "default agent, full access."
+// (mcp_describe and mcp_call). Builtin agents with empty Tools get everything;
+// user agents with empty Tools get nothing.
 func hasMCPBridgeAccess(profile *agentprofile.Profile) bool {
 	if profile == nil || profile.IsDefault() {
 		return true

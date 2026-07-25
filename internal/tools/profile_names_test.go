@@ -27,7 +27,7 @@ func (s *resultSpawnerSync) Continue(ctx context.Context, agentID, message strin
 // user-defined profiles), retiring the old agent_presets.go lookup.
 func TestAgentTool_SubagentTypeResolvesViaStore(t *testing.T) {
 	dir := t.TempDir()
-	store := agentprofile.New(dir, nil)
+	store := agentprofile.New(dir)
 
 	ctx := WithProfileStore(context.Background(), store)
 	mgr := NewSubAgentManager(&resultSpawnerSync{reply: "ok"})

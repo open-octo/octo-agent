@@ -580,8 +580,7 @@ func sessionAgentIDFromContext(ctx context.Context) string {
 //
 // Empty Tools means different things depending on the agent source:
 //   - builtin (default, explore, general, code-review): empty = all tools
-//     (backward compatible; their behavior is managed via ReadOnly/LeanContext)
-//   - user-created / project: empty = no tools (explicitly restricted)
+//   - user-created: empty = no tools (explicitly restricted)
 func DefaultToolsForProfile(ctx context.Context, model string) []agent.ToolDefinition {
 	all := defaultToolsFor(ctx, model)
 	store := profileStoreFromContext(ctx)

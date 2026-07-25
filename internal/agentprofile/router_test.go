@@ -5,7 +5,7 @@ import "testing"
 // routerStore builds a store with user profiles for channel-binding routing tests.
 func routerStore(t *testing.T) *Store {
 	t.Helper()
-	s, userDir, _ := newTestStore(t)
+	s, userDir := newTestStore(t)
 	writeMD(t, userDir, "code.md", "---\ndescription: dc\nchannel_bindings:\n  - {platform: weixin, chat_id: g1}\n---\nbody\n")
 	writeMD(t, userDir, "ops.md", "---\ndescription: do\nchannel_bindings:\n  - {platform: weixin, chat_id: g1}\n  - {platform: weixin, chat_id: g2}\n---\nbody\n")
 	writeMD(t, userDir, "solo.md", "---\ndescription: ds\nchannel_bindings:\n  - {platform: feishu, chat_id: dm1}\n---\nbody\n")

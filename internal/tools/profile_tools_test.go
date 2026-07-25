@@ -25,7 +25,7 @@ func TestDefaultToolsForProfile_NoProfileReturnsAll(t *testing.T) {
 
 func TestDefaultToolsForProfile_FiltersByAllowlist(t *testing.T) {
 	dir := t.TempDir()
-	store := agentprofile.New(dir, nil)
+	store := agentprofile.New(dir)
 	// Create a profile with a restricted tool allowlist.
 	// (Writing the file and relying on read-through scan.)
 	if err := store.Create(&agentprofile.Profile{
@@ -60,7 +60,7 @@ func TestDefaultToolsForProfile_FiltersByAllowlist(t *testing.T) {
 
 func TestDefaultToolsForProfile_BuiltinEmptyReturnsAll(t *testing.T) {
 	dir := t.TempDir()
-	store := agentprofile.New(dir, nil)
+	store := agentprofile.New(dir)
 	// All builtin agents (default, explore, general, code-review) have empty
 	// Tools and get the full toolbelt — they manage restrictions via ReadOnly
 	// and the system prompt.
@@ -84,7 +84,7 @@ func TestDefaultToolsForProfile_BuiltinEmptyReturnsAll(t *testing.T) {
 
 func TestDefaultToolsForProfile_ExpertEmptyReturnsNone(t *testing.T) {
 	dir := t.TempDir()
-	store := agentprofile.New(dir, nil)
+	store := agentprofile.New(dir)
 	// An expert agent without tools gets none.
 	if err := store.Create(&agentprofile.Profile{
 		ID:          "expert-no-tools",
@@ -104,7 +104,7 @@ func TestDefaultToolsForProfile_ExpertEmptyReturnsNone(t *testing.T) {
 
 func TestDefaultToolsForProfile_UnknownAgentFallsBack(t *testing.T) {
 	dir := t.TempDir()
-	store := agentprofile.New(dir, nil)
+	store := agentprofile.New(dir)
 	// No profile for "ghost" → store.Get misses → all tools.
 	ctx := WithSessionAgentID(WithProfileStore(context.Background(), store), "ghost")
 	all := DefaultToolsForProfile(ctx, "test-model")
@@ -117,7 +117,7 @@ func TestDefaultToolsForProfile_SubToolsFiltered(t *testing.T) {
 	// Verify that sub_agent tools (which require a SubAgentManager in ctx) are
 	// filtered out when the profile doesn't include them.
 	dir := t.TempDir()
-	store := agentprofile.New(dir, nil)
+	store := agentprofile.New(dir)
 	if err := store.Create(&agentprofile.Profile{
 		ID:          "no-sub",
 		Description: "no sub-agent",

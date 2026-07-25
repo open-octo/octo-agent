@@ -9,56 +9,38 @@ import (
 	"strings"
 )
 
-// Store loads profiles from the user-level and project-level agent
-// directories plus the code-defined builtins, and answers every query by
-// rescanning: it is deliberately read-through, so a change made through any
-// path (REST API, Web UI, direct .md edit) is visible on the next read. The
-// directories hold a handful of small files, so a rescan is cheap — this is
-// exactly how the pre-existing discoverAgents loader already behaved.
-//
-// Precedence is project > user > builtin: a user .md can shadow a builtin
-// (e.g. a personal "explore"), and a project .md can shadow both.
+// Store loads profiles from the user-level agent directory plus the
+// code-defined builtins, and answers every query by rescanning: it is
+// deliberately read-through, so a change made through any path (REST API,
+// Web UI, direct .md edit) is visible on the next read. The directory holds
+// a handful of small files, so a rescan is cheap.
 type Store struct {
-	userDir    string
-	projectDir func() string // resolved per scan (cwd-dependent); nil disables
+	userDir string
 }
 
-// New builds a Store over the user-level directory. projectDir, when non-nil,
-// is consulted on every scan for the delegation-only project-level directory.
-func New(userDir string, projectDir func() string) *Store {
-	return &Store{userDir: userDir, projectDir: projectDir}
+// New builds a Store over the user-level directory (~/.octo/agents).
+func New(userDir string) *Store {
+	return &Store{userDir: userDir}
 }
 
-// load scans all sources and returns the merged id → profile map. Files that
-// fail to parse are skipped (a broken profile must never take the others down
-// with it, and the next read self-heals once the file is fixed).
+// load scans user profiles and returns the id → profile map, with builtins as
+// the base layer. Files that fail to parse are skipped.
 func (s *Store) load() map[string]*Profile {
 	profiles := make(map[string]*Profile)
 	for _, p := range builtinProfiles() {
 		profiles[p.ID] = p
 	}
 	s.scanDir(s.userDir, SourceUser, profiles)
-	if s.projectDir != nil {
-		s.scanDir(s.projectDir(), SourceProject, profiles)
-	}
 	return profiles
 }
 
 // scanDir merges *.md profiles from dir into dst, overwriting same-named
-// entries of lower precedence. A missing or unreadable dir is a no-op.
-//
-// The read path accepts any .md basename as an ID (zero-migration
-// compatibility with the pre-existing agent loader); the slug rule is
-// enforced on writes instead. The reserved "default" ID is skipped so a
-// stray default.md can never shadow the code-defined default agent.
+// entries. A missing or unreadable dir is a no-op.
 func (s *Store) scanDir(dir string, src Source, dst map[string]*Profile) {
 	s.scanDirFiltered(dir, src, dst, nil)
 }
 
 // scanDirFiltered is scanDir with an optional ID filter (nil = accept all).
-// The IM-routing path passes IsValidID so a non-slug filename can never
-// become a routable profile; the delegation path passes nil to keep loading
-// legacy .md files written before the slug rule existed.
 func (s *Store) scanDirFiltered(dir string, src Source, dst map[string]*Profile, accept func(string) bool) {
 	if dir == "" {
 		return
@@ -81,30 +63,22 @@ func (s *Store) scanDirFiltered(dir string, src Source, dst map[string]*Profile,
 		p, err := parseFile(filepath.Join(dir, e.Name()))
 		if err != nil {
 			log.Printf("agentprofile: skipping %s: %v", filepath.Join(dir, e.Name()), err)
-			continue // broken file: skip, self-heal next read
+			continue
 		}
 		p.ID = id
 		p.Source = src
-		if src == SourceProject {
-			// Delegation-only: the platform slice from a project file must
-			// never influence IM routing.
-			p.ChannelBindings = nil
-		}
 		dst[id] = p
 	}
 }
 
-// Load performs a full scan. With the read-through design it has no cached
-// state to refresh and unreadable directories are tolerated as empty — it
-// exists to keep the documented API shape and as a scan smoke hook for tests.
+// Load performs a full scan.
 func (s *Store) Load() error {
 	s.load()
 	return nil
 }
 
-// Get returns the profile with the given id, honoring the project > user >
-// builtin precedence. The default profile is code-defined and always
-// available.
+// Get returns the profile with the given id. The default profile is
+// code-defined and always available.
 func (s *Store) Get(id string) (*Profile, bool) {
 	if id == DefaultID {
 		return DefaultProfile(), true
@@ -113,8 +87,7 @@ func (s *Store) Get(id string) (*Profile, bool) {
 	return p, ok
 }
 
-// List returns every non-builtin profile (user- and project-level), sorted by
-// ID for stable output.
+// List returns every user-level profile, sorted by ID for stable output.
 func (s *Store) List() []*Profile {
 	var out []*Profile
 	for _, p := range s.load() {
@@ -127,10 +100,7 @@ func (s *Store) List() []*Profile {
 	return out
 }
 
-// Create validates p and writes it as <userDir>/<id>.md. It refuses to
-// overwrite an existing file (including one shadowing a builtin — shadowing
-// stays a deliberate, hand-written affair), to use the reserved default ID,
-// or to claim a mention alias another profile already holds.
+// Create validates p and writes it as <userDir>/<id>.md.
 func (s *Store) Create(p *Profile) error {
 	if err := s.validateForStoreWrite(p); err != nil {
 		return err
@@ -142,21 +112,18 @@ func (s *Store) Create(p *Profile) error {
 	return s.writeFile(path, p)
 }
 
-// Update rewrites an existing user-level profile. Builtin and project-level
-// profiles are immutable through the Store: edit code or the project file.
+// Update rewrites an existing user-level profile.
 func (s *Store) Update(p *Profile) error {
 	if err := s.validateForStoreWrite(p); err != nil {
 		return err
 	}
 	path := filepath.Join(s.userDir, p.ID+".md")
 	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("profile %q not found at user level (builtin/project profiles are read-only here)", p.ID)
+		return fmt.Errorf("profile %q not found", p.ID)
 	}
 	return s.writeFile(path, p)
 }
 
-// validateForStoreWrite is the write gate shared by Create and Update: schema
-// validation and the reserved default ID.
 func (s *Store) validateForStoreWrite(p *Profile) error {
 	if err := validateForWrite(p); err != nil {
 		return err
@@ -167,15 +134,15 @@ func (s *Store) validateForStoreWrite(p *Profile) error {
 	return nil
 }
 
-// Delete removes a user-level profile. A profile with channel bindings must
-// be unbound first, so an IM chat is never left routing to a ghost.
+// Delete removes a profile. Builtin profiles are protected. A profile with
+// channel bindings must be unbound first.
 func (s *Store) Delete(id string) error {
 	p, ok := s.Get(id)
 	if !ok {
 		return fmt.Errorf("profile %q not found", id)
 	}
-	if p.Source != SourceUser {
-		return fmt.Errorf("profile %q is %s-level and cannot be deleted through the Store", id, p.Source)
+	if p.Source == SourceBuiltin {
+		return fmt.Errorf("profile %q is builtin and cannot be deleted", id)
 	}
 	if len(p.ChannelBindings) > 0 {
 		return fmt.Errorf("profile %q still has %d channel binding(s): unbind them first", id, len(p.ChannelBindings))
@@ -183,8 +150,7 @@ func (s *Store) Delete(id string) error {
 	return os.Remove(filepath.Join(s.userDir, id+".md"))
 }
 
-// writeFile serializes p and writes it via temp-file + rename, so a
-// concurrent read-through scan never observes a partially written file.
+// writeFile serializes p and writes it via temp-file + rename.
 func (s *Store) writeFile(path string, p *Profile) error {
 	b, err := serialize(p)
 	if err != nil {
@@ -215,16 +181,7 @@ func (s *Store) writeFile(path string, p *Profile) error {
 	return os.Rename(tmpName, path)
 }
 
-// userProfiles scans only the user-level directory. IM routing queries
-// (ByChannel/ByMention) build on this — not on the merged map — so a
-// project-level file shadowing a user profile's ID (delegation override)
-// can never silence that profile's conversation-mode routing.
-//
-// IM routing only honors slug-shaped profile IDs (the same rule enforced on
-// writes): a hand-placed `a#b.md` would otherwise produce an ID whose '#'
-// defeats the session-key namespace splitter, so the router would misroute
-// messages to it. Delegation-mode lookups (sub_agent) keep the legacy lenient
-// loader via scanDir, which still accepts any basename.
+// userProfiles scans only the user-level directory for IM routing.
 func (s *Store) userProfiles() map[string]*Profile {
 	m := make(map[string]*Profile)
 	s.scanDirFiltered(s.userDir, SourceUser, m, IsValidID)
@@ -232,10 +189,6 @@ func (s *Store) userProfiles() map[string]*Profile {
 }
 
 // ByChannel returns the user-level profiles bound to the given IM chat.
-// When adapterID is non-empty, only bindings with a matching AdapterID
-// (or an empty AdapterID — legacy compatibility) are considered. When
-// adapterID is empty, the legacy two-dimensional (platform, chat_id)
-// match is used. The router treats >1 results as "ambiguous: stay silent".
 func (s *Store) ByChannel(platform, adapterID, chatID string) []*Profile {
 	var out []*Profile
 	for _, p := range s.userProfiles() {
@@ -243,8 +196,6 @@ func (s *Store) ByChannel(platform, adapterID, chatID string) []*Profile {
 			if b.Platform != platform || b.ChatID != chatID {
 				continue
 			}
-			// adapterID match: non-empty → exact match or legacy empty;
-			// empty adapterID in query → match any (legacy mode).
 			if adapterID != "" && b.AdapterID != "" && b.AdapterID != adapterID {
 				continue
 			}

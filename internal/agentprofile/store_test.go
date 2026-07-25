@@ -6,16 +6,15 @@ import (
 	"testing"
 )
 
-// newTestStore builds a Store over two temp dirs (user + project).
-func newTestStore(t *testing.T) (*Store, string, string) {
+// newTestStore builds a Store over a temp user dir.
+func newTestStore(t *testing.T) (*Store, string) {
 	t.Helper()
 	userDir := t.TempDir()
-	projectDir := t.TempDir()
-	return New(userDir, func() string { return projectDir }), userDir, projectDir
+	return New(userDir), userDir
 }
 
 func TestStoreBuiltinFallback(t *testing.T) {
-	s, _, _ := newTestStore(t)
+	s, _ := newTestStore(t)
 	for _, id := range []string{"explore", "general", "code-review"} {
 		p, ok := s.Get(id)
 		if !ok || p.Source != SourceBuiltin {
@@ -30,36 +29,21 @@ func TestStoreBuiltinFallback(t *testing.T) {
 	}
 }
 
-func TestStorePrecedence(t *testing.T) {
-	s, userDir, projectDir := newTestStore(t)
-	// User file shadows the builtin "explore".
+func TestStoreUserOverridesBuiltin(t *testing.T) {
+	s, userDir := newTestStore(t)
 	writeMD(t, userDir, "explore.md", "---\ndescription: user explore\n---\nuser persona\n")
-	// Project file shadows the user file.
-	writeMD(t, projectDir, "explore.md", "---\ndescription: project explore\n---\nproject persona\n")
 
 	p, ok := s.Get("explore")
 	if !ok {
 		t.Fatal("Get(explore) not found")
 	}
-	if p.Source != SourceProject || p.SystemPrompt != "project persona" {
-		t.Fatalf("precedence project > user > builtin broken: %+v", p)
-	}
-}
-
-func TestStoreProjectStripsPlatformSlice(t *testing.T) {
-	s, _, projectDir := newTestStore(t)
-	writeMD(t, projectDir, "ops.md", "---\ndescription: d\nchannel_bindings:\n  - {platform: weixin, chat_id: g1}\n---\nbody\n")
-
-	if p, _ := s.Get("ops"); p == nil || len(p.ChannelBindings) != 0 {
-		t.Fatalf("project profile kept platform slice: %+v", p)
-	}
-	if got := s.ByChannel("weixin", "", "g1"); len(got) != 0 {
-		t.Fatal("project-level binding must not be routable")
+	if p.Source != SourceUser || p.SystemPrompt != "user persona" {
+		t.Fatalf("user file should override builtin: %+v", p)
 	}
 }
 
 func TestStoreSkipsBrokenFilesAndReservedID(t *testing.T) {
-	s, userDir, _ := newTestStore(t)
+	s, userDir := newTestStore(t)
 	writeMD(t, userDir, "broken.md", "no frontmatter here\n")
 	writeMD(t, userDir, "default.md", "---\ndescription: impostor\n---\nbody\n") // reserved ID: skipped
 	writeMD(t, userDir, "good.md", "---\ndescription: d\n---\nbody\n")
@@ -75,12 +59,8 @@ func TestStoreSkipsBrokenFilesAndReservedID(t *testing.T) {
 	}
 }
 
-// Delegation lookups (sub_agent) and the profile API keep the zero-migration
-// lenient loader: any .md basename is a valid profile ID on the read path,
-// even names that fail the write-side slug rule. The write path still
-// enforces slug via validateForWrite.
 func TestStore_DelegationAcceptsNonSlugFilenames(t *testing.T) {
-	s, userDir, _ := newTestStore(t)
+	s, userDir := newTestStore(t)
 	writeMD(t, userDir, "Code_Review.md", "---\ndescription: legacy\n---\nbody\n")
 
 	p, ok := s.Get("Code_Review")
@@ -105,7 +85,7 @@ func TestStore_UserProfilesSkipsNonSlug(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "valid.md"), []byte("---\ndescription: d\n---\nbody\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s := New(dir, nil)
+	s := New(dir)
 	// userProfiles() (IM-routing source) skips non-slug files.
 	if p := s.ByChannel("weixin", "", "g1"); len(p) > 0 {
 		t.Fatalf("non-slug profile is routable via IM: %+v", p)
@@ -120,7 +100,7 @@ func TestStore_UserProfilesSkipsNonSlug(t *testing.T) {
 }
 
 func TestStoreReadThrough(t *testing.T) {
-	s, userDir, _ := newTestStore(t)
+	s, userDir := newTestStore(t)
 	writeMD(t, userDir, "a.md", "---\ndescription: v1\n---\nbody v1\n")
 
 	p, _ := s.Get("a")
@@ -143,7 +123,7 @@ func TestStoreReadThrough(t *testing.T) {
 }
 
 func TestStoreCreateUpdateDelete(t *testing.T) {
-	s, userDir, _ := newTestStore(t)
+	s, userDir := newTestStore(t)
 
 	p := &Profile{ID: "reviewer", Name: "Reviewer", Description: "d",
 		CapabilitySpec: CapabilitySpec{SystemPrompt: "prompt", Tools: []string{"read_file"}}}
@@ -197,7 +177,7 @@ func TestStoreCreateUpdateDelete(t *testing.T) {
 }
 
 func TestStoreByChannelByMention(t *testing.T) {
-	s, userDir, _ := newTestStore(t)
+	s, userDir := newTestStore(t)
 	writeMD(t, userDir, "a.md", "---\ndescription: da\nmention_as: [\"@review\"]\nchannel_bindings:\n  - {platform: weixin, chat_id: g1}\n---\nbody\n")
 	writeMD(t, userDir, "b.md", "---\ndescription: db\nchannel_bindings:\n  - {platform: weixin, chat_id: g1}\n  - {platform: feishu, chat_id: g2}\n---\nbody\n")
 
@@ -212,23 +192,8 @@ func TestStoreByChannelByMention(t *testing.T) {
 	}
 }
 
-// A project-level file shadowing a user profile's ID overrides delegation
-// (Get) but must never silence the user profile's IM routing.
-func TestStoreProjectShadowKeepsUserRouting(t *testing.T) {
-	s, userDir, projectDir := newTestStore(t)
-	writeMD(t, userDir, "reviewer.md", "---\ndescription: user\nmention_as: [\"@review\"]\nchannel_bindings:\n  - {platform: weixin, chat_id: g1}\n---\nuser body\n")
-	writeMD(t, projectDir, "reviewer.md", "---\ndescription: project\n---\nproject body\n")
-
-	if p, _ := s.Get("reviewer"); p.Source != SourceProject {
-		t.Fatalf("delegation precedence broken: %+v", p)
-	}
-	if got := s.ByChannel("weixin", "", "g1"); len(got) != 1 || got[0].ID != "reviewer" {
-		t.Fatalf("project shadow silenced user routing: %+v", got)
-	}
-}
-
 func TestStoreDefaultReserved(t *testing.T) {
-	s, userDir, _ := newTestStore(t)
+	s, userDir := newTestStore(t)
 
 	if p, ok := s.Get(DefaultID); !ok || !p.IsDefault() {
 		t.Fatalf("Get(default) = %v, %v — the default profile must always resolve", p, ok)
