@@ -33,6 +33,20 @@ When you run ` + "`git commit`" + ` (via the terminal tool or any other path), a
 
 The trailer must be placed at the very end of the commit message, separated from the body by a blank line, following standard Git trailer format. Do not add this trailer if the user explicitly tells you not to.`
 
+// expertOverrideBanner is prepended to the profile's SystemPrompt when
+// expertMode is true. It makes explicit that the expert agent's configured
+// persona and rules take priority over the base prompt's generic guidance —
+// without it, detailed base-prompt instructions (tool-use norms, phase
+// boundaries, output style) can drown out the shorter custom prompt.
+const expertOverrideBanner = `# Expert Agent Configuration
+
+The system prompt below is **authoritative** and **overrides any conflicting
+instructions** in the sections above. Follow this persona, constraints, and
+rules even when they contradict earlier guidance.
+
+---
+`
+
 // ProjectContextFile is the per-repo conventions file Compose looks for in
 // the working directory. It carries project-specific rules the agent should
 // follow (the human-facing counterpart to CLAUDE.md).
@@ -59,16 +73,26 @@ var userRulesPath = func() string {
 // when expertMode is true), in order of increasing specificity:
 //
 //  1. base     — embedded octo foundation (always present)
+//
 //  2. soul     — ~/.octo/soul.md, if present (agent identity & behavior)
+//
 //  3. env      — environment snapshot (cwd, git, date, OS) the caller renders
+//
 //  4. skills   — the available-skills manifest the caller renders, if any
+//
 //  5. mcpTools — the available-MCP-tools manifest the caller renders, if any (see tools.MCPManifestFor)
+//
 //  6. memory   — cross-session memory the caller renders, if any (C9; includes inherited home-dir memories)
+//
 //  7. profile  — ~/.octo/user.md, if present (who the user is)
+//
 //  8. user     — ~/.octo/octorules.md, if present (cross-project user rules)
+//
 //  9. project  — ProjectContextFile in cwd, if present (repo conventions)
 //
-// 10. system   — the --system value, if any (highest-priority override, last)
+//  10. system   — the --system value, if any (highest-priority override, last).
+//     In expertMode, prefixed with an authoritative banner so the
+//     expert agent's persona overrides base-prompt instructions.
 //
 // Empty layers are skipped. Later layers appear later in the text, which is
 // the conventional way to let more specific instructions take precedence —
@@ -129,7 +153,11 @@ func Compose(userSystem, cwd, env, skills, mcpTools, memory string, coauthor, ex
 		}
 	}
 	if u := strings.TrimSpace(userSystem); u != "" {
-		layers = append(layers, u)
+		if expertMode {
+			layers = append(layers, expertOverrideBanner+u)
+		} else {
+			layers = append(layers, u)
+		}
 	}
 
 	return strings.Join(layers, "\n\n---\n\n")

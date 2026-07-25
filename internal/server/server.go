@@ -593,7 +593,7 @@ func (s *Server) enableSubAgentTools() {
 	}
 	cwd, envCtx := s.curCwdEnv()
 	cfg, _ := config.Load() // zero value on error still resolves correctly via EffectiveCoauthor
-	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(model), memInjection, s.effectiveCoauthor(cfg), false)
+	template.System, template.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(model, nil), memInjection, s.effectiveCoauthor(cfg), false)
 	executor := tools.NewDefaultRegistry()
 	spawner := app.NewSpawner(template, executor, func(ctx context.Context) []agent.ToolDefinition {
 		return tools.DefaultToolsForCtx(ctx, s.model)
@@ -1284,7 +1284,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 		base = profile.SystemPrompt
 		expertMode = true
 	}
-	a.System, a.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model), memInjection, s.effectiveCoauthor(cfg), expertMode)
+	a.System, a.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
 
 	// L2: attention-layer rules (triggered keywords) + save-nudge on milestone
 	// tool results, plus any shell hooks (env/hooks.yml), unified on the agent's
@@ -3118,7 +3118,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		base = profile.SystemPrompt
 		expertMode = true
 	}
-	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model), memInjection, s.effectiveCoauthor(cfg), expertMode)
+	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
 
 	// L2 memory hooks + shell hooks, same engine buildAgent gives web turns,
 	// rebuilt per IM turn. The injector is session-sticky (recall latch) and

@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agentprofile"
 )
 
 // Tool Search defers MCP tool schemas behind two bridge tools instead of
@@ -183,14 +184,47 @@ func toolSearchBridgeDefs() []agent.ToolDefinition {
 //
 // Returns "" when the bridge isn't active for model (the full per-tool
 // definitions, schema included, are already inline in the tools array, so
-// repeating the names in the prompt would just duplicate them) or when there
-// are no MCP tools connected.
-func MCPManifestFor(model string) string {
+// repeating the names in the prompt would just duplicate them), when there
+// are no MCP tools connected, or when profile is a non-default agent that
+// lacks the MCP bridge tools (mcp_describe and mcp_call) — listing
+// tools the agent can't invoke is misleading. A nil profile means "default
+// agent, full access" and never suppresses the manifest.
+func MCPManifestFor(model string, profile *agentprofile.Profile) string {
 	catalog := mcpCatalog()
 	if !toolSearchActive(model, catalog) {
 		return ""
 	}
+	if !hasMCPBridgeAccess(profile) {
+		return ""
+	}
 	return renderMCPManifest(catalog)
+}
+
+// hasMCPBridgeAccess reports whether the profile can use the MCP bridge tools
+// (mcp_describe and mcp_call). Matches DefaultToolsForProfile's filter logic:
+// builtin agents with empty Tools get everything; user/project agents with
+// empty Tools get nothing; an explicit allowlist must include both bridge
+// tools (the manifest text instructs the model to call mcp_describe then
+// mcp_call — having only one creates a dead end). A nil profile means
+// "default agent, full access."
+func hasMCPBridgeAccess(profile *agentprofile.Profile) bool {
+	if profile == nil || profile.IsDefault() {
+		return true
+	}
+	if len(profile.Tools) == 0 {
+		return profile.Source == agentprofile.SourceBuiltin
+	}
+	hasDescribe := false
+	hasCall := false
+	for _, t := range profile.Tools {
+		if t == toolDescribeName {
+			hasDescribe = true
+		}
+		if t == toolCallName {
+			hasCall = true
+		}
+	}
+	return hasDescribe && hasCall
 }
 
 // renderMCPManifest builds the manifest text for a given catalog. Split out

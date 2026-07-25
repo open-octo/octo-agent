@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agentprofile"
 )
 
 // fakeCatalog installs a fixed MCP catalog for the duration of a test, so the
@@ -168,7 +169,7 @@ func TestMCPManifestFor_ActiveListsNamesNotSchema(t *testing.T) {
 	fakeCatalog(t, sampleCatalog())
 	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOn})
 
-	manifest := MCPManifestFor("claude-opus-4-8")
+	manifest := MCPManifestFor("claude-opus-4-8", nil)
 	for _, want := range []string{"mcp__github__create_issue", "mcp__github__list_pulls", "mcp__slack__post_message", "# Available MCP tools"} {
 		if !strings.Contains(manifest, want) {
 			t.Errorf("manifest missing %q:\n%s", want, manifest)
@@ -185,7 +186,7 @@ func TestMCPManifestFor_InactiveReturnsEmpty(t *testing.T) {
 	fakeCatalog(t, sampleCatalog())
 	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOff})
 
-	if got := MCPManifestFor("claude-opus-4-8"); got != "" {
+	if got := MCPManifestFor("claude-opus-4-8", nil); got != "" {
 		t.Errorf("bridge inactive should yield no manifest, got:\n%s", got)
 	}
 }
@@ -195,7 +196,7 @@ func TestMCPManifestFor_EmptyCatalogReturnsEmpty(t *testing.T) {
 	fakeCatalog(t, nil)
 	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOn})
 
-	if got := MCPManifestFor("claude-opus-4-8"); got != "" {
+	if got := MCPManifestFor("claude-opus-4-8", nil); got != "" {
 		t.Errorf("empty catalog should yield no manifest, got:\n%s", got)
 	}
 }
@@ -216,9 +217,154 @@ func TestMCPManifestFor_NoCap(t *testing.T) {
 	fakeCatalog(t, big)
 	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOn})
 
-	manifest := MCPManifestFor("claude-opus-4-8")
+	manifest := MCPManifestFor("claude-opus-4-8", nil)
 	got := strings.Count(manifest, "\n- mcp__srv__tool_")
 	if got != len(big) {
 		t.Errorf("manifest listed %d of %d tools, want all of them uncapped", got, len(big))
+	}
+}
+
+// ── hasMCPBridgeAccess boundary tests ──────────────────────────────────────
+
+func TestHasMCPBridgeAccess_NilProfile(t *testing.T) {
+	if !hasMCPBridgeAccess(nil) {
+		t.Error("nil profile must have MCP bridge access (template path)")
+	}
+}
+
+func TestHasMCPBridgeAccess_DefaultProfile(t *testing.T) {
+	if !hasMCPBridgeAccess(agentprofile.DefaultProfile()) {
+		t.Error("default agent must have MCP bridge access")
+	}
+}
+
+func TestHasMCPBridgeAccess_BuiltinEmptyTools(t *testing.T) {
+	p := &agentprofile.Profile{
+		ID:     "explore",
+		Source: agentprofile.SourceBuiltin,
+		CapabilitySpec: agentprofile.CapabilitySpec{
+			Tools: []string{}, // empty = all for builtin
+		},
+	}
+	if !hasMCPBridgeAccess(p) {
+		t.Error("builtin agent with empty Tools must have MCP bridge access")
+	}
+}
+
+func TestHasMCPBridgeAccess_UserEmptyTools(t *testing.T) {
+	p := &agentprofile.Profile{
+		ID:     "expert-no-tools",
+		Source: agentprofile.SourceUser,
+		CapabilitySpec: agentprofile.CapabilitySpec{
+			Tools: []string{}, // empty = none for user-created
+		},
+	}
+	if hasMCPBridgeAccess(p) {
+		t.Error("user-created agent with empty Tools must NOT have MCP bridge access")
+	}
+}
+
+func TestHasMCPBridgeAccess_ProjectEmptyTools(t *testing.T) {
+	p := &agentprofile.Profile{
+		ID:     "proj-no-tools",
+		Source: agentprofile.SourceProject,
+		CapabilitySpec: agentprofile.CapabilitySpec{
+			Tools: []string{}, // empty = none for project
+		},
+	}
+	if hasMCPBridgeAccess(p) {
+		t.Error("project agent with empty Tools must NOT have MCP bridge access")
+	}
+}
+
+func TestHasMCPBridgeAccess_BothBridgeTools(t *testing.T) {
+	p := &agentprofile.Profile{
+		ID:     "mcp-enabled",
+		Source: agentprofile.SourceUser,
+		CapabilitySpec: agentprofile.CapabilitySpec{
+			Tools: []string{"read_file", "mcp_describe", "mcp_call"},
+		},
+	}
+	if !hasMCPBridgeAccess(p) {
+		t.Error("profile with both mcp_describe and mcp_call must have access")
+	}
+}
+
+func TestHasMCPBridgeAccess_OnlyDescribe(t *testing.T) {
+	p := &agentprofile.Profile{
+		ID:     "describe-only",
+		Source: agentprofile.SourceUser,
+		CapabilitySpec: agentprofile.CapabilitySpec{
+			Tools: []string{"mcp_describe"},
+		},
+	}
+	if hasMCPBridgeAccess(p) {
+		t.Error("profile with only mcp_describe (no mcp_call) must NOT have access")
+	}
+}
+
+func TestHasMCPBridgeAccess_OnlyCall(t *testing.T) {
+	p := &agentprofile.Profile{
+		ID:     "call-only",
+		Source: agentprofile.SourceUser,
+		CapabilitySpec: agentprofile.CapabilitySpec{
+			Tools: []string{"mcp_call"},
+		},
+	}
+	if hasMCPBridgeAccess(p) {
+		t.Error("profile with only mcp_call (no mcp_describe) must NOT have access")
+	}
+}
+
+func TestHasMCPBridgeAccess_NoMCPTools(t *testing.T) {
+	p := &agentprofile.Profile{
+		ID:     "no-mcp",
+		Source: agentprofile.SourceUser,
+		CapabilitySpec: agentprofile.CapabilitySpec{
+			Tools: []string{"read_file", "grep", "terminal"},
+		},
+	}
+	if hasMCPBridgeAccess(p) {
+		t.Error("profile without any MCP bridge tools must NOT have access")
+	}
+}
+
+// ── MCPManifestFor end-to-end with profile ─────────────────────────────────
+
+func TestMCPManifestFor_ExpertWithoutBridgeReturnsEmpty(t *testing.T) {
+	resetToolSearchConfig(t)
+	fakeCatalog(t, sampleCatalog())
+	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOn})
+
+	p := &agentprofile.Profile{
+		ID:     "expert-no-mcp",
+		Source: agentprofile.SourceUser,
+		CapabilitySpec: agentprofile.CapabilitySpec{
+			Tools: []string{"read_file", "grep"},
+		},
+	}
+	if got := MCPManifestFor("claude-opus-4-8", p); got != "" {
+		t.Errorf("expert agent without MCP bridge tools must see no manifest, got:\n%s", got)
+	}
+}
+
+func TestMCPManifestFor_ExpertWithBridgeReturnsManifest(t *testing.T) {
+	resetToolSearchConfig(t)
+	fakeCatalog(t, sampleCatalog())
+	SetToolSearchConfig(ToolSearchConfig{Mode: ToolSearchOn})
+
+	p := &agentprofile.Profile{
+		ID:     "expert-mcp",
+		Source: agentprofile.SourceUser,
+		CapabilitySpec: agentprofile.CapabilitySpec{
+			Tools: []string{"mcp_describe", "mcp_call"},
+		},
+	}
+	manifest := MCPManifestFor("claude-opus-4-8", p)
+	if manifest == "" {
+		t.Error("expert agent with both MCP bridge tools must see the manifest")
+	}
+	if !strings.Contains(manifest, "# Available MCP tools") {
+		t.Errorf("manifest missing header:\n%s", manifest)
 	}
 }
