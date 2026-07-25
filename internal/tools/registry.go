@@ -600,6 +600,16 @@ func DefaultToolsForProfile(ctx context.Context, model string) []agent.ToolDefin
 	return filtered
 }
 
+// KnownToolNames returns the names of all built-in tools. Used by the server
+// to validate profile tool allowlists against the canonical tool set.
+func KnownToolNames() []string {
+	names := make([]string, len(allTools))
+	for i, t := range allTools {
+		names[i] = t.Definition().Name
+	}
+	return names
+}
+
 func defaultToolsFor(ctx context.Context, model string) []agent.ToolDefinition {
 	skillsOn := skillsEnabled()
 	mgrOn := subAgentManagerEnabled()
