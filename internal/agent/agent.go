@@ -1429,7 +1429,7 @@ func (a *Agent) GenerateTitleFrom(ctx context.Context, snap []Message) (string, 
 	}
 	text := firstUserText(snap)
 	if text == "" {
-		slog.Info("title generation skipped: no user text in snapshot")
+		slog.Debug("title generation skipped: no user text in snapshot")
 		return "", nil
 	}
 	if r := []rune(text); len(r) > titleContextMaxRunes {
@@ -1443,14 +1443,14 @@ func (a *Agent) GenerateTitleFrom(ctx context.Context, snap []Message) (string, 
 		sender = le.LowEffort()
 	}
 
-	slog.Info("title generation request", "model", model, "is_lite", isLite)
+	slog.Debug("title generation request", "model", model, "is_lite", isLite)
 	reply, err := sender.SendMessages(ctx, model, titleInstruction, msgs, titleMaxTokens)
 	if err != nil {
-		slog.Info("title generation provider error", "model", model, "err", err)
+		slog.Debug("title generation provider error", "model", model, "err", err)
 		return "", err
 	}
 	cleaned := cleanTitle(reply.Content)
-	slog.Info("title generation response", "model", model, "raw_len", len(reply.Content), "raw", reply.Content, "cleaned", cleaned)
+	slog.Debug("title generation response", "model", model, "raw_len", len(reply.Content), "raw", reply.Content, "cleaned", cleaned)
 	return cleaned, nil
 }
 
@@ -1465,12 +1465,12 @@ func (a *Agent) GenerateTitleOrSnippet(ctx context.Context, snap []Message) (str
 	t, err := a.GenerateTitleFrom(ctx, snap)
 	if err == nil {
 		if t = strings.TrimSpace(t); t != "" {
-			slog.Info("title generation succeeded", "title", t)
+			slog.Debug("title generation succeeded", "title", t)
 			return t, nil
 		}
-		slog.Info("title generation returned empty, falling back to snippet")
+		slog.Debug("title generation returned empty, falling back to snippet")
 	} else {
-		slog.Info("title generation errored, falling back to snippet", "err", err)
+		slog.Debug("title generation errored, falling back to snippet", "err", err)
 	}
 	return FirstUserSnippet(snap), err
 }
