@@ -16,14 +16,55 @@ const ConfigDir = ".octo"
 // ConfigFile is the channel credentials file.
 const ConfigFile = "channels.yml"
 
-// Config manages IM platform credentials (Feishu, WeCom, etc.).
-// Stored in ~/.octo/channels.yml.
-type Config struct {
-	Channels map[string]PlatformConfig `yaml:"channels,omitempty"`
+// InstanceConfig is the raw per-bot-instance configuration.
+type InstanceConfig struct {
+	Name    string         `yaml:"name,omitempty"`
+	Config  PlatformConfig `yaml:",inline,omitempty"`
+	Enabled bool           `yaml:"enabled"`
 }
+
+// IsEnabled reports whether this instance is enabled.
+func (ic InstanceConfig) IsEnabled() bool { return ic.Enabled }
 
 // PlatformConfig is the raw per-platform configuration from YAML.
 type PlatformConfig map[string]any
+
+// InstanceList is a list of InstanceConfig with custom YAML unmarshalling
+// that upgrades legacy single-instance (map) entries to a one-element list.
+type InstanceList []InstanceConfig
+
+// UnmarshalYAML implements yaml.Unmarshaler: a map value is upgraded to a
+// one-element list so legacy single-instance channels.yml files load without
+// migration.
+func (il *InstanceList) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.SequenceNode:
+		var list []InstanceConfig
+		if err := value.Decode(&list); err != nil {
+			return err
+		}
+		*il = list
+		return nil
+	case yaml.MappingNode:
+		// Legacy single-instance: decode as PlatformConfig and wrap.
+		var pc PlatformConfig
+		if err := value.Decode(&pc); err != nil {
+			return err
+		}
+		ic := InstanceConfig{Config: pc, Enabled: isEnabled(pc)}
+		// Carry the name from the platform key up into the instance when available.
+		*il = []InstanceConfig{ic}
+		return nil
+	default:
+		return fmt.Errorf("channel config: expected sequence or mapping, got %v", value.Kind)
+	}
+}
+
+// Config manages IM platform credentials (Feishu, WeCom, etc.).
+// Stored in ~/.octo/channels.yml.
+type Config struct {
+	Channels map[string]InstanceList `yaml:"channels,omitempty"`
+}
 
 // ConfigPath returns the absolute path to channels.yml.
 func ConfigPath() (string, error) {
@@ -52,6 +93,14 @@ func LoadConfig() (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("channel config: %w", err)
 	}
+	// Backfill instance names for legacy single-instance entries that have none.
+	for platform, list := range cfg.Channels {
+		for i := range list {
+			if list[i].Name == "" {
+				list[i].Name = platform
+			}
+		}
+	}
 	return &cfg, nil
 }
 
@@ -71,49 +120,96 @@ func (c *Config) Save() error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-// EnabledPlatforms returns the list of platforms with enabled == true.
+// EnabledPlatforms returns the list of platforms that have at least one
+// enabled instance.
 func (c *Config) EnabledPlatforms() []string {
 	var out []string
-	for name, pc := range c.Channels {
-		if isEnabled(pc) {
-			out = append(out, name)
+	for name, list := range c.Channels {
+		for _, ic := range list {
+			if ic.Enabled {
+				out = append(out, name)
+				break
+			}
 		}
 	}
 	return out
 }
 
-// Platform returns the raw config for a platform, or nil if not present.
-func (c *Config) Platform(name string) PlatformConfig {
+// Platform returns the instance list for a platform, or nil if not present.
+func (c *Config) Platform(name string) InstanceList {
 	return c.Channels[name]
 }
 
-// IsEnabled reports whether the named platform is present and enabled.
+// IsEnabled reports whether the named platform has any enabled instance.
 func (c *Config) IsEnabled(name string) bool {
-	return isEnabled(c.Channels[name])
+	for _, ic := range c.Channels[name] {
+		if ic.Enabled {
+			return true
+		}
+	}
+	return false
 }
 
-// SetPlatform merges fields into a platform's config, creating it if needed.
-// Automatically sets enabled: true unless explicitly provided.
+// SetPlatform merges fields into a platform's first instance, creating it
+// if needed. For single-instance platforms this is the legacy-compatible path.
 func (c *Config) SetPlatform(name string, fields map[string]any) {
 	if c.Channels == nil {
-		c.Channels = make(map[string]PlatformConfig)
+		c.Channels = make(map[string]InstanceList)
 	}
-	pc := c.Channels[name]
-	if pc == nil {
-		pc = make(PlatformConfig)
+	list := c.Channels[name]
+	if len(list) == 0 {
+		list = []InstanceConfig{{Name: name}}
+	}
+	ic := &list[0]
+	if ic.Config == nil {
+		ic.Config = make(PlatformConfig)
 	}
 	for k, v := range fields {
-		pc[k] = v
+		ic.Config[k] = v
 	}
-	if _, ok := pc["enabled"]; !ok {
-		pc["enabled"] = true
-	}
-	c.Channels[name] = pc
+	ic.Enabled = true
+	c.Channels[name] = list
 }
 
 // RemovePlatform deletes a platform entry entirely.
 func (c *Config) RemovePlatform(name string) {
 	delete(c.Channels, name)
+}
+
+// EnabledInstances returns all enabled (platform, instance) pairs.
+func (c *Config) EnabledInstances() []InstanceRef {
+	var out []InstanceRef
+	for name, list := range c.Channels {
+		for i, ic := range list {
+			if ic.Enabled {
+				out = append(out, InstanceRef{
+					Platform: name,
+					Instance: ic,
+					Index:    i,
+				})
+			}
+		}
+	}
+	return out
+}
+
+// InstanceRef pairs a platform name with one of its instances.
+type InstanceRef struct {
+	Platform string
+	Instance InstanceConfig
+	Index    int
+}
+
+// AdapterID returns the unique identifier for this instance, used in
+// InboundEvent.AdapterID and ChannelBinding.AdapterID. For
+// single-instance platforms, AdapterID is the platform name (legacy
+// mode: always matches empty binding). For multi-instance, it's the
+// instance Name.
+func (ir InstanceRef) AdapterID() string {
+	if ir.Instance.Name != "" {
+		return ir.Instance.Name
+	}
+	return ir.Platform
 }
 
 func isEnabled(pc PlatformConfig) bool {

@@ -18,14 +18,14 @@ func SendOnce(platform, chatID, text string) error {
 		return err
 	}
 	pc, ok := cfg.Channels[platform]
-	if !ok {
+	if !ok || len(pc) == 0 {
 		return fmt.Errorf("channel %q not configured", platform)
 	}
 	ctor, err := Find(platform)
 	if err != nil {
 		return err
 	}
-	a, err := ctor(pc)
+	a, err := ctor(pc[0].Config)
 	if err != nil {
 		return err
 	}
@@ -46,14 +46,14 @@ func SendFileOnce(platform, chatID, path, name string) error {
 		return err
 	}
 	pc, ok := cfg.Channels[platform]
-	if !ok {
+	if !ok || len(pc) == 0 {
 		return fmt.Errorf("channel %q not configured", platform)
 	}
 	ctor, err := Find(platform)
 	if err != nil {
 		return err
 	}
-	a, err := ctor(pc)
+	a, err := ctor(pc[0].Config)
 	if err != nil {
 		return err
 	}

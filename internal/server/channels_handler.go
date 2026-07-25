@@ -13,16 +13,12 @@ import (
 // channelInfo is the safe-for-frontend view of a platform config (secrets masked).
 type channelInfo struct {
 	Platform  string            `json:"platform"`
+	AdapterID string            `json:"adapter_id,omitempty"`
 	Enabled   bool              `json:"enabled"`
 	Running   bool              `json:"running"`
 	HasConfig bool              `json:"has_config"`
 	Fields    map[string]string `json:"fields"`
-	// Issue is why the adapter isn't healthy — a startup skip reason
-	// (unregistered / construction failed / invalid config) or the latest
-	// crash-and-restart status — omitted when there's none recorded (#1121:
-	// previously the only symptom of any of these was "the bot never
-	// replies", with no queryable reason anywhere).
-	Issue string `json:"issue,omitempty"`
+	Issue     string            `json:"issue,omitempty"`
 }
 
 var secretKeys = map[string]bool{
@@ -43,11 +39,15 @@ func (s *Server) handleListChannels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := make([]channelInfo, 0, len(cfg.Channels))
-	for name, pc := range cfg.Channels {
-		info := platformToInfo(name, pc)
-		info.Running = s.isAdapterRunning(name)
-		info.Issue = s.channelIssue(name)
-		out = append(out, info)
+	for name, list := range cfg.Channels {
+		for i, ic := range list {
+			ir := channel.InstanceRef{Platform: name, Instance: ic, Index: i}
+			adapterID := ir.AdapterID()
+			info := instanceToInfo(name, adapterID, ic)
+			info.Running = s.isAdapterRunning(adapterID)
+			info.Issue = s.channelIssue(adapterID)
+			out = append(out, info)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"channels": out})
 }
@@ -66,15 +66,17 @@ func (s *Server) handleGetChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pc := cfg.Platform(platform)
-	if pc == nil {
+	instances := cfg.Platform(platform)
+	if len(instances) == 0 {
 		writeError(w, http.StatusNotFound, "platform not configured")
 		return
 	}
-
-	info := platformToInfo(platform, pc)
-	info.Running = s.isAdapterRunning(platform)
-	info.Issue = s.channelIssue(platform)
+	ic := instances[0]
+	ir := channel.InstanceRef{Platform: platform, Instance: ic}
+	adapterID := ir.AdapterID()
+	info := instanceToInfo(platform, adapterID, ic)
+	info.Running = s.isAdapterRunning(adapterID)
+	info.Issue = s.channelIssue(adapterID)
 	writeJSON(w, http.StatusOK, info)
 }
 
@@ -175,8 +177,8 @@ func (s *Server) handleTestChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pc := cfg.Platform(platform)
-	if pc == nil {
+	instances := cfg.Platform(platform)
+	if len(instances) == 0 {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "no configuration saved for this platform"})
 		return
 	}
@@ -187,13 +189,13 @@ func (s *Server) handleTestChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ad, err := ctor(pc)
+	ad, err := ctor(instances[0].Config)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
 
-	errs := ad.ValidateConfig(pc)
+	errs := ad.ValidateConfig(instances[0].Config)
 	if len(errs) > 0 {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": strings.Join(errs, "; ")})
 		return
@@ -318,9 +320,9 @@ func (s *Server) handleChannelSendFile(w http.ResponseWriter, r *http.Request) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-func platformToInfo(name string, pc channel.PlatformConfig) channelInfo {
+func instanceToInfo(platform, adapterID string, ic channel.InstanceConfig) channelInfo {
 	fields := make(map[string]string)
-	for k, v := range pc {
+	for k, v := range ic.Config {
 		if k == "enabled" {
 			continue
 		}
@@ -334,20 +336,11 @@ func platformToInfo(name string, pc channel.PlatformConfig) channelInfo {
 		fields[k] = s
 	}
 
-	enabled := false
-	if v, ok := pc["enabled"]; ok {
-		switch val := v.(type) {
-		case bool:
-			enabled = val
-		case string:
-			enabled = val == "true"
-		}
-	}
-
 	return channelInfo{
-		Platform:  name,
-		Enabled:   enabled,
-		HasConfig: true,
+		Platform:  platform,
+		AdapterID: adapterID,
+		Enabled:   ic.Enabled,
+		HasConfig: len(fields) > 0,
 		Fields:    fields,
 	}
 }

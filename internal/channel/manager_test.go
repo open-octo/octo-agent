@@ -157,8 +157,8 @@ func TestManager_CommandRouter(t *testing.T) {
 	})
 
 	cfg := &Config{
-		Channels: map[string]PlatformConfig{
-			"mock": {"enabled": true},
+		Channels: map[string]InstanceList{
+			"mock": {InstanceConfig{Enabled: true}},
 		},
 	}
 	tempHome(t)
@@ -208,7 +208,7 @@ func TestManager_CommandRouter(t *testing.T) {
 
 func TestManager_StopInterruptsRunningTurn(t *testing.T) {
 	tempHome(t)
-	cfg := &Config{Channels: map[string]PlatformConfig{}}
+	cfg := &Config{Channels: map[string]InstanceList{}}
 	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
 
 	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
@@ -264,7 +264,7 @@ func TestSession_BeginRunSerialisesTurns(t *testing.T) {
 // the /unbind mid-turn contract that hands the session to web.
 func TestManager_UnbindMidTurn_SuppressesButKeepsRunning(t *testing.T) {
 	tempHome(t)
-	cfg := &Config{Channels: map[string]PlatformConfig{}}
+	cfg := &Config{Channels: map[string]InstanceList{}}
 	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
 
 	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
@@ -312,7 +312,7 @@ func TestManager_UnbindMidTurn_SuppressesButKeepsRunning(t *testing.T) {
 // remaining output resumes delivery.
 func TestManager_UnbindThenBindBackRecoversRunningSession(t *testing.T) {
 	tempHome(t)
-	cfg := &Config{Channels: map[string]PlatformConfig{}}
+	cfg := &Config{Channels: map[string]InstanceList{}}
 	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
 
 	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
@@ -387,7 +387,7 @@ func TestManager_UnbindThenBindBackRecoversRunningSession(t *testing.T) {
 // nonsense.
 func TestManager_BindCreatesNewWhenNoRunningSession(t *testing.T) {
 	tempHome(t)
-	cfg := &Config{Channels: map[string]PlatformConfig{}}
+	cfg := &Config{Channels: map[string]InstanceList{}}
 	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
 
 	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
@@ -452,8 +452,8 @@ func TestManager_AutoSessionCreation(t *testing.T) {
 	})
 
 	cfg := &Config{
-		Channels: map[string]PlatformConfig{
-			"mock2": {"enabled": true},
+		Channels: map[string]InstanceList{
+			"mock2": {InstanceConfig{Enabled: true}},
 		},
 	}
 	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
