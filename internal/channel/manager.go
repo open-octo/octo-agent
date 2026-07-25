@@ -333,7 +333,10 @@ func (m *Manager) SetModelOps(ops *ModelOps) {
 }
 
 // SetProfileLookup injects the server's agent-profile resolver. Called once
-// at manager construction, before any adapter goroutine runs.
+// at manager construction, before any adapter goroutine runs. The closure's
+// ok return value is currently unused (the manager's resolveProfile always
+// falls back to the default profile on a miss) — it exists so callers can
+// report "known unknowns" in future without an API break.
 func (m *Manager) SetProfileLookup(fn func(id string) (*agentprofile.Profile, bool)) {
 	m.profileLookup = fn
 }

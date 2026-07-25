@@ -9,8 +9,11 @@ import "regexp"
 type RouteInput struct {
 	Platform string
 	ChatID   string
-	UserID   string
-	Text     string
+	// UserID is reserved for PR3+ (per-user session scoping under a shared
+	// group chat). It is currently unused but kept so the router signature is
+	// stable once binding modes like BindByChatUser need it.
+	UserID string
+	Text   string
 }
 
 // Router maps an inbound event to the profile that should handle it. It is a

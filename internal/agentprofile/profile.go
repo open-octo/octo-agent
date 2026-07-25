@@ -88,8 +88,10 @@ type Profile struct {
 
 	Source Source
 
-	// Timestamps are best-effort: both track the file's mtime (there is no
-	// separate creation record), so CreatedAt advances on every rewrite.
+	// Timestamps track the profile file's mtime (there is no separate creation
+	// record on most filesystems): CreatedAt advances on every rewrite, so it
+	// is best-effort "last modified" rather than a true birth time. Empty for
+	// profiles predating this field.
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -119,6 +121,8 @@ func IsValidID(id string) bool { return idRule.MatchString(id) }
 
 // aliasRule is the mention alias shape: @ plus the same charset the router's
 // mention extractor recognizes, so a validated alias can always match.
+// Sync with agentprofile/router.go's mentionRule (@[A-Za-z0-9][A-Za-z0-9_-]*) if
+// either changes.
 var aliasRule = regexp.MustCompile(`^@[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
 // Validate checks the fields every write path (REST API, meta-skill, Store)
