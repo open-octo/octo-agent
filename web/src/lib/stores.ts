@@ -84,7 +84,6 @@ export const editGroupDraft = writable('')
 // 'ask' alone would ignore whatever the user actually configured.
 export const globalPermissionMode = writable<string>('ask')
 // Sidebar session UI state
-export const activeSession = writable<string | null>(null)
 export const selMode = writable(false)
 export const sel = writable<Record<string, boolean>>({})
 export const menuFor = writable<string | null>(null)
@@ -222,7 +221,6 @@ export async function createNewSession(): Promise<void> {
   const sess = await api.createSession({ source: 'manual' })
   sessions.update(ss => [sess, ...ss])
   activeSessionId.set(sess.id)
-  activeSession.set(sess.id)
   view.set('chat')
 }
 

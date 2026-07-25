@@ -3,7 +3,6 @@
   import { fade } from 'svelte/transition'
   import {
     activeSessionId,
-    activeSession,
     sessions,
     chatMessages,
     chatStreaming,
@@ -1422,7 +1421,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       const newSess = created.session ?? created
       sessions.update(ss => [newSess, ...ss])
       activeSessionId.set(newSess.id)
-      activeSession.set(newSess.id)
       return newSess.id
     } catch (e: any) {
       showToast(e.message, 'error')
@@ -1564,7 +1562,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       const newSess = await api.branchSession(sid, branchModal.index, branchModal.draft)
       sessions.update(ss => [newSess, ...ss])
       activeSessionId.set(newSess.id)
-      activeSession.set(newSess.id)
       branchModal.open = false
       // Defer the send until the new session's chat state registers.
       if (branchSendTimer) clearTimeout(branchSendTimer)

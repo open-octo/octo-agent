@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSession, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
@@ -396,7 +396,7 @@
       </div>
 
       {#snippet sessionRow(s: any)}
-        {@const active = s.id === $activeSession && $view === 'chat'}
+        {@const active = s.id === $activeSessionId && $view === 'chat'}
         {@const selected = !!$sel[s.id]}
         {@const editing = $editId === s.id}
         {@const menuOpen = $menuFor === s.id && !$selMode}
@@ -407,7 +407,7 @@
           class="nav-row"
           class:solid={solid}
           class:selected={selected && !solid}
-          onclick={() => { if ($selMode) toggleSel(s.id); else { view.set('chat'); activeSession.set(s.id); activeSessionId.set(s.id); menuFor.set(null); groupMenuFor.set(null) } }}
+          onclick={() => { if ($selMode) toggleSel(s.id); else { view.set('chat'); activeSessionId.set(s.id); menuFor.set(null); groupMenuFor.set(null) } }}
         >
           {#if $selMode}
           <span

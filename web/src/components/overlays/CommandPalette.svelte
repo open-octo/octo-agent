@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { cmdkOpen, view, sessions, activeSessionId, activeSession, skills, openAgentSession, createNewSession, showToast } from '../../lib/stores'
+  import { cmdkOpen, view, sessions, activeSessionId, skills, openAgentSession, createNewSession, showToast } from '../../lib/stores'
   import { t } from '../../lib/i18n'
 
   let query = $state('')
@@ -25,7 +25,6 @@
 
   function openSession(id: string) {
     activeSessionId.set(id)
-    activeSession.set(id)
     view.set('chat')
     close()
   }

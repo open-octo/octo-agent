@@ -4,7 +4,7 @@
   // directory, and land in the streaming chat detail. Leaving the prompt
   // empty just creates a blank session (the old FAB behavior).
   import { get } from 'svelte/store'
-  import { sessions, activeSessionId, activeSession, globalPermissionMode, showToast } from '../lib/stores'
+  import { sessions, activeSessionId, globalPermissionMode, showToast } from '../lib/stores'
   import * as api from '../lib/api'
   import { t, tr } from '../lib/i18n'
 
@@ -56,7 +56,6 @@
       const sess = await api.createSession({ source: 'manual' })
       sessions.update(ss => [sess, ...ss])
       activeSessionId.set(sess.id)
-      activeSession.set(sess.id)
       // Best-effort per-session overrides: a failed override shouldn't strand
       // the already-created session, so toast and continue.
       if (modelId) {
