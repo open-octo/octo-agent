@@ -805,7 +805,7 @@ func (s *Server) handleBranchSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.wsHub.broadcast("", wsEventSessionCreated{Type: "session_created", SessionID: branch.ID})
-	writeJSON(w, http.StatusOK, map[string]any{"session": s.toSessionItem(branch, "web", "")})
+	writeJSON(w, http.StatusOK, map[string]any{"session": s.toSessionItem(branch, "web", branch.EffectiveAgentID())})
 }
 
 // ─── POST /api/sessions/{id}/edit_message ──────────────────────────────────

@@ -70,7 +70,6 @@ export interface CreateSessionOpts {
   model?: string
   source?: string
   agent_profile?: string
-  agent_id?: string
 }
 
 export async function createSession(opts: CreateSessionOpts): Promise<Session> {

@@ -1432,7 +1432,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     const existing = get(activeSessionId)
     if (existing) return existing
     try {
-      const created = await api.createSession({ source: 'manual', agent_id: get(activeAgent) }) as any
+      const created = await api.createSession({ source: 'manual', agent_profile: get(activeAgent) }) as any
       const newSess = created.session ?? created
       sessions.update(ss => [newSess, ...ss])
       activeSessionId.set(newSess.id)
