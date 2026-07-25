@@ -317,18 +317,19 @@
       </button>
       {#if agentPickerOpen}
         <div class="agent-picker-menu">
-          {#if agents.length === 0}
-            <div class="ap-empty">{$t('agents.empty')}</div>
-          {:else}
-            <button class="ap-item" onclick={() => { newSession(); agentPickerOpen = false }}>
-              <span class="ap-name">Default</span>
+          <button class="ap-item" onclick={() => { newSession(); agentPickerOpen = false }}>
+            <span class="ap-name">Default</span>
+          </button>
+          {#each agents as a (a.id)}
+            <button class="ap-item" onclick={() => { newSession(a.id); agentPickerOpen = false }}>
+              <span class="ap-name">{a.name}</span>
             </button>
-            {#each agents as a (a.id)}
-              <button class="ap-item" onclick={() => { newSession(a.id); agentPickerOpen = false }}>
-                <span class="ap-name">{a.name}</span>
-              </button>
-            {/each}
-          {/if}
+          {/each}
+          <div class="ap-sep"></div>
+          <button class="ap-item ap-new" onclick={() => { view.set('agents'); agentPickerOpen = false }}>
+            <iconify-icon icon="ant-design:plus-outlined" width="12"></iconify-icon>
+            <span>{$t('agents.create')}</span>
+          </button>
         </div>
       {/if}
     </div>
@@ -646,7 +647,8 @@
   text-align: left; cursor: pointer; border-radius: 6px;
 }
 .ap-item:hover { background: var(--hover-neutral); }
-.ap-empty { padding: 8px 12px; font-size: 13px; color: var(--text-quaternary); }
+.ap-sep { height: 1px; margin: 4px 8px; background: var(--border-secondary); }
+.ap-new { color: var(--blue-6); display: flex; align-items: center; gap: 6px; }
 .agent-tag {
   flex: 0 0 auto; padding: 0 5px; border-radius: 3px;
   font-size: 10px; font-weight: 600; white-space: nowrap;

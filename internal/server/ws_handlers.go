@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
-	"github.com/open-octo/octo-agent/internal/agentprofile"
 	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
@@ -121,7 +120,7 @@ func (s *Server) listSessionsBrief() []wsSessionInfo {
 			Status:              s.sessionStatus(sess.ID),
 			CreatedAt:           sess.CreatedAt.UnixMilli(),
 			Source:              source,
-			AgentProfile:        agentprofile.DefaultID,
+			AgentProfile:        sess.EffectiveAgentID(),
 			Model:               sess.Model,
 			TotalTurns:          sess.TurnCount(),
 			WorkingDir:          s.sessionCwd(sess),
