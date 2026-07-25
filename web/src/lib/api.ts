@@ -38,7 +38,7 @@ export async function readErrorMessage(res: Response, fallback: string): Promise
   return fallback
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init)
   if (!res.ok) {
     throw new Error(await readErrorMessage(res, `${res.status} ${res.statusText}`))
@@ -70,6 +70,7 @@ export interface CreateSessionOpts {
   model?: string
   source?: string
   agent_profile?: string
+  agent_id?: string
 }
 
 export async function createSession(opts: CreateSessionOpts): Promise<Session> {
@@ -357,6 +358,51 @@ export async function updateSessionWorkingDir(id: string, dir: string): Promise<
 // The server returns { skills: [{name, description, source, enabled}] }. Map it
 // to the display shape the table expects (desc/icon/tag), since the server has
 // no icon/version/status of its own.
+// Agent profile management (multi-agent system)
+export interface Agent {
+  id: string
+  name: string
+  description: string
+  model?: string
+  tools?: string[]
+  tool_skills?: string[]
+  mention_as?: string[]
+  channel_bindings?: { platform: string; chat_id: string }[]
+}
+
+export async function listAgents(): Promise<Agent[]> {
+  return request<Agent[]>('/api/agents')
+}
+
+export async function getAgent(id: string): Promise<Agent> {
+  return request<Agent>(`/api/agents/${id}`)
+}
+
+export async function createAgent(data: Omit<Agent, 'id'>): Promise<Agent> {
+  return request<Agent>('/api/agents', { method: 'POST', ...json(data) })
+}
+
+export async function updateAgent(id: string, data: Partial<Agent>): Promise<Agent> {
+  return request<Agent>(`/api/agents/${id}`, { method: 'PUT', ...json(data) })
+}
+
+export async function deleteAgent(id: string): Promise<void> {
+  await request<unknown>(`/api/agents/${id}`, { method: 'DELETE' })
+}
+
+export async function bindAgent(id: string, platform: string, chatId: string): Promise<Agent> {
+  return request<Agent>(`/api/agents/${id}/bind`, { method: 'POST', ...json({ platform, chat_id: chatId }) })
+}
+
+export async function unbindAgent(id: string, platform: string, chatId: string): Promise<Agent> {
+  return request<Agent>(`/api/agents/${id}/bind`, { method: 'DELETE', ...json({ platform, chat_id: chatId }) })
+}
+
+// Transfer a cron task's ownership to another agent.
+export async function transferTask(taskId: string, agentId: string): Promise<unknown> {
+  return request<unknown>(`/api/tasks/${taskId}/transfer`, { method: 'PUT', ...json({ agent_id: agentId }) })
+}
+
 interface SkillInfoRaw {
   name: string
   description?: string

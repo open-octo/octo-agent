@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sessions, sessionGroups, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell } from './lib/stores'
+  import { view, sessions, sessionGroups, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, activeAgent } from './lib/stores'
   import MobileApp from './mobile/MobileApp.svelte'
   import { ws, wsState } from './lib/ws'
   import { notificationsEnabled } from './lib/notifications'
@@ -13,6 +13,7 @@
   import FirstRunSetup from './components/overlays/FirstRunSetup.svelte'
   import Header from './components/layout/Header.svelte'
   import Sidebar from './components/layout/Sidebar.svelte'
+  import AgentsView from './views/AgentsView.svelte'
   import ChatView from './views/ChatView.svelte'
   import SkillsView from './views/SkillsView.svelte'
   import WorkflowsView from './views/WorkflowsView.svelte'
@@ -40,7 +41,7 @@
   // Reflect the current view (and active chat session) in the hash so a refresh
   // lands back where the user was instead of the default chat view.
   let routeReady = false
-  const VALID_VIEWS = ['chat', 'skills', 'workflows', 'browser', 'tasks', 'mcp', 'channels', 'settings', 'profile', 'files']
+  const VALID_VIEWS = ['chat', 'agents', 'skills', 'workflows', 'browser', 'tasks', 'mcp', 'channels', 'settings', 'profile', 'files']
 
   function applyHash() {
     const h = location.hash.replace(/^#\/?/, '')
@@ -343,6 +344,8 @@
     <main class="main">
       {#if $view === 'chat'}
         <ChatView />
+      {:else if $view === 'agents'}
+        <AgentsView />
       {:else if $view === 'skills'}
         <SkillsView />
       {:else if $view === 'workflows'}

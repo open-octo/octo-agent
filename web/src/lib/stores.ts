@@ -9,6 +9,10 @@ export const onboardPhase = writable<'unknown' | 'key_setup' | 'soul_setup' | ''
 
 // Navigation
 export const view = writable('chat')
+
+// The currently active agent profile ID. Default is the code-defined default
+// agent; switching to a profile routes sessions to its isolated session pool.
+export const activeAgent = writable<string>('default')
 export const sidebar = writable('full')
 export const cmdkOpen = writable(false)
 // Drives the MCP import-JSON modal. Adding a single server and editing an

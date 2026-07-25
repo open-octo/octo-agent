@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, activeAgent, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
@@ -26,18 +26,23 @@
   // no longer resolve to a live session are dropped here, so a deleted session
   // leaves no ghost row.
   const groupedView = $derived.by(() => {
-    const byId = new Map($sessions.map(s => [s.id, s] as const))
+    // Filter sessions to the active agent's pool. Default agent sessions have
+    // no agent_id (empty or "default"); expert agents own their own sessions.
+    const agentSessions = $activeAgent === 'default'
+      ? $sessions.filter(s => !s.agent_id || s.agent_id === 'default')
+      : $sessions.filter(s => s.agent_id === $activeAgent)
+    const byId = new Map(agentSessions.map(s => [s.id, s] as const))
     const claimed = new Set<string>()
     // Pinned sessions float to a dedicated top section (registry order) and are
     // claimed first, so they don't also appear under their group or Ungrouped.
-    const pinned = $pinnedSessions.map(id => byId.get(id)).filter(Boolean) as typeof $sessions
+    const pinned = $pinnedSessions.map(id => byId.get(id)).filter(Boolean) as typeof agentSessions
     pinned.forEach(s => claimed.add(s.id))
     const groups = $sessionGroups.map(g => {
-      const items = g.session_ids.map(id => byId.get(id)).filter(Boolean).filter(s => !claimed.has((s as any).id)) as typeof $sessions
+      const items = g.session_ids.map(id => byId.get(id)).filter(Boolean).filter(s => !claimed.has((s as any).id)) as typeof agentSessions
       items.forEach(s => claimed.add(s.id))
       return { group: g, items }
     })
-    const ungrouped = $sessions.filter(s => !claimed.has(s.id))
+    const ungrouped = agentSessions.filter(s => !claimed.has(s.id))
     return { pinned, groups, ungrouped }
   })
 

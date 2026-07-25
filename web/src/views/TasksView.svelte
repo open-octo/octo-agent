@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { tasks, showToast, sessions, sessionGroups, activeSessionId, view, setActiveSession, openAgentSession } from '../lib/stores'
+  import { tasks, showToast, sessions, sessionGroups, activeSessionId, activeAgent, view, setActiveSession, openAgentSession } from '../lib/stores'
   import { t, tr, locale } from '../lib/i18n'
   import { confirmDialog } from '../lib/confirm'
   import { get } from 'svelte/store'
@@ -36,7 +36,10 @@
   async function load() {
     loading = true
     try {
-      rawTasks = await api.listTasks()
+      // When viewing a specific agent, filter tasks to its ownership.
+      const agentId = get(activeAgent)
+      const url = agentId !== 'default' ? `/api/tasks?agent_id=${encodeURIComponent(agentId)}` : '/api/tasks'
+      rawTasks = await (agentId !== 'default' ? api.request<any[]>(url) : api.listTasks())
       // Sync into shared store (ScheduledTask display shape) for other consumers
       tasks.set(rawTasks.map(t => ({
         name: t.name,
