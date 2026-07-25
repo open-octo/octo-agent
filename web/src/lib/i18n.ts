@@ -56,9 +56,6 @@ export const en: Record<string, string> = {
   "agents.tool_skills": "Skills",
 
   "agents.skills_loading": "Loading available skills…",
-  "agents.mention_as": "Mention Aliases",
-  "agents.mention_as_placeholder": "@review, @expert",
-  "agents.mention_as_hint": "Each alias must start with @ and be globally unique.",
   "agents.all_tools": "All tools",
   "agents.bound_chats": "bound",
   "agents.delete_title": "Delete Agent",
@@ -859,9 +856,6 @@ export const zh: Record<string, string> = {
   "agents.tool_skills": "技能",
 
   "agents.skills_loading": "正在加载可用技能…",
-  "agents.mention_as": "提及别名",
-  "agents.mention_as_placeholder": "@review, @expert",
-  "agents.mention_as_hint": "每个别名必须以 @ 开头且全局唯一。",
   "agents.all_tools": "全部工具",
   "agents.bound_chats": "已绑定",
   "agents.delete_title": "删除智能体",

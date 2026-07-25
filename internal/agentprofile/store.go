@@ -88,7 +88,6 @@ func (s *Store) scanDirFiltered(dir string, src Source, dst map[string]*Profile,
 		if src == SourceProject {
 			// Delegation-only: the platform slice from a project file must
 			// never influence IM routing.
-			p.MentionAs = nil
 			p.ChannelBindings = nil
 		}
 		dst[id] = p
@@ -157,27 +156,13 @@ func (s *Store) Update(p *Profile) error {
 }
 
 // validateForStoreWrite is the write gate shared by Create and Update: schema
-// validation, the reserved default ID, and global mention-alias uniqueness
-// (the design's anti-impersonation rule — only the Store can see all
-// profiles, so the check lives here).
+// validation and the reserved default ID.
 func (s *Store) validateForStoreWrite(p *Profile) error {
 	if err := validateForWrite(p); err != nil {
 		return err
 	}
 	if p.ID == DefaultID {
 		return fmt.Errorf("id %q is reserved for the code-defined default agent", DefaultID)
-	}
-	for id, other := range s.load() {
-		if id == p.ID || other.Source != SourceUser {
-			continue
-		}
-		for _, alias := range p.MentionAs {
-			for _, taken := range other.MentionAs {
-				if alias == taken {
-					return fmt.Errorf("mention alias %q is already claimed by profile %q", alias, id)
-				}
-			}
-		}
 	}
 	return nil
 }
@@ -260,16 +245,4 @@ func (s *Store) ByChannel(platform, chatID string) []*Profile {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
-}
-
-// ByMention resolves an @-alias (including the @) to a user-level profile.
-func (s *Store) ByMention(alias string) (*Profile, bool) {
-	for _, p := range s.userProfiles() {
-		for _, a := range p.MentionAs {
-			if a == alias {
-				return p, true
-			}
-		}
-	}
-	return nil, false
 }

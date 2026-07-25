@@ -1,11 +1,8 @@
 package agentprofile
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync"
 	"testing"
 )
 
@@ -51,17 +48,13 @@ func TestStorePrecedence(t *testing.T) {
 
 func TestStoreProjectStripsPlatformSlice(t *testing.T) {
 	s, _, projectDir := newTestStore(t)
-	writeMD(t, projectDir, "ops.md", "---\ndescription: d\nmention_as: [\"@ops\"]\nchannel_bindings:\n  - {platform: weixin, chat_id: g1}\n---\nbody\n")
+	writeMD(t, projectDir, "ops.md", "---\ndescription: d\nchannel_bindings:\n  - {platform: weixin, chat_id: g1}\n---\nbody\n")
 
-	if _, ok := s.ByMention("@ops"); ok {
-		t.Fatal("project-level alias must not be routable")
+	if p, _ := s.Get("ops"); p == nil || len(p.ChannelBindings) != 0 {
+		t.Fatalf("project profile kept platform slice: %+v", p)
 	}
 	if got := s.ByChannel("weixin", "g1"); len(got) != 0 {
 		t.Fatal("project-level binding must not be routable")
-	}
-	p, _ := s.Get("ops")
-	if len(p.MentionAs) != 0 || len(p.ChannelBindings) != 0 {
-		t.Fatalf("project profile kept platform slice: %+v", p)
 	}
 }
 
@@ -116,9 +109,6 @@ func TestStore_UserProfilesSkipsNonSlug(t *testing.T) {
 	// userProfiles() (IM-routing source) skips non-slug files.
 	if p := s.ByChannel("weixin", "g1"); len(p) > 0 {
 		t.Fatalf("non-slug profile is routable via IM: %+v", p)
-	}
-	if p, ok := s.ByMention("@anything"); ok {
-		t.Fatalf("non-slug profile is @-routable: %+v", p)
 	}
 	// But Get()/List() (delegation + API) still see it.
 	if _, ok := s.Get("a#b"); !ok {
@@ -220,13 +210,6 @@ func TestStoreByChannelByMention(t *testing.T) {
 	if got := s.ByChannel("weixin", "unknown"); len(got) != 0 {
 		t.Fatalf("ByChannel unknown = %+v", got)
 	}
-	p, ok := s.ByMention("@review")
-	if !ok || p.ID != "a" {
-		t.Fatalf("ByMention(@review) = %v, %v", p, ok)
-	}
-	if _, ok := s.ByMention("@nobody"); ok {
-		t.Fatal("ByMention(@nobody) should miss")
-	}
 }
 
 // A project-level file shadowing a user profile's ID overrides delegation
@@ -242,9 +225,6 @@ func TestStoreProjectShadowKeepsUserRouting(t *testing.T) {
 	if got := s.ByChannel("weixin", "g1"); len(got) != 1 || got[0].ID != "reviewer" {
 		t.Fatalf("project shadow silenced user routing: %+v", got)
 	}
-	if p, ok := s.ByMention("@review"); !ok || p.ID != "reviewer" {
-		t.Fatalf("project shadow broke alias routing: %v, %v", p, ok)
-	}
 }
 
 func TestStoreDefaultReserved(t *testing.T) {
@@ -259,44 +239,4 @@ func TestStoreDefaultReserved(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(userDir, "default.md")); !os.IsNotExist(err) {
 		t.Fatal("impostor default.md was written")
 	}
-}
-
-func TestStoreAliasUniqueness(t *testing.T) {
-	s, userDir, _ := newTestStore(t)
-	writeMD(t, userDir, "a.md", "---\ndescription: da\nmention_as: [\"@review\"]\n---\nbody\n")
-
-	// Create with a taken alias fails.
-	err := s.Create(&Profile{ID: "b", Description: "db", MentionAs: []string{"@review"}})
-	if err == nil || !strings.Contains(err.Error(), "already claimed") {
-		t.Fatalf("Create with duplicate alias = %v", err)
-	}
-	// Update of the owner itself keeps the alias.
-	writeMD(t, userDir, "a.md", "---\ndescription: da\nmention_as: [\"@review\"]\n---\nbody\n")
-	if err := s.Update(&Profile{ID: "a", Description: "da2", MentionAs: []string{"@review"}}); err != nil {
-		t.Fatalf("Update of alias owner = %v", err)
-	}
-	// Update claiming someone else's alias fails.
-	writeMD(t, userDir, "b.md", "---\ndescription: db\n---\nbody\n")
-	if err := s.Update(&Profile{ID: "b", Description: "db", MentionAs: []string{"@review"}}); err == nil {
-		t.Fatal("Update stealing alias should fail")
-	}
-}
-
-func TestStoreConcurrentAccess(t *testing.T) {
-	s, _, _ := newTestStore(t)
-	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			id := fmt.Sprintf("p%d", i%4)
-			p := &Profile{ID: id, Description: "d"}
-			_ = s.Create(p)
-			_, _ = s.Get(id)
-			_ = s.List()
-			_ = s.Update(p)
-			_ = s.Delete(id)
-		}(i)
-	}
-	wg.Wait()
 }

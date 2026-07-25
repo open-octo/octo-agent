@@ -28,9 +28,7 @@ func TestHandleAgents_CreateListGetDelete(t *testing.T) {
 	w = doJSON(t, srv, http.MethodPost, "/api/agents", `{
 		"name": "Code Reviewer",
 		"description": "Reviews code",
-		"tools": ["read_file", "grep"],
-		"mention_as": ["@review"]
-	}`)
+		"tools": ["read_file", "grep"]	}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("create = %d: %s", w.Code, w.Body.String())
 	}

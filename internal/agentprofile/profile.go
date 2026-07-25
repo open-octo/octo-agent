@@ -83,7 +83,6 @@ type Profile struct {
 	CapabilitySpec
 
 	WorkingDir      string
-	MentionAs       []string         // conversation mode only; user-level only
 	ChannelBindings []ChannelBinding // conversation mode only; user-level only
 
 	Source Source
@@ -119,12 +118,6 @@ var idRule = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
 // from a chat ID that merely contains '#'.
 func IsValidID(id string) bool { return idRule.MatchString(id) }
 
-// aliasRule is the mention alias shape: @ plus the same charset the router's
-// mention extractor recognizes, so a validated alias can always match.
-// Sync with agentprofile/router.go's mentionRule (@[A-Za-z0-9][A-Za-z0-9_-]*) if
-// either changes.
-var aliasRule = regexp.MustCompile(`^@[A-Za-z0-9][A-Za-z0-9_-]*$`)
-
 // Validate checks the fields every write path (REST API, meta-skill, Store)
 // must enforce. Model-against-config validation lives in the API layer, which
 // is the only place that can see the server config.
@@ -137,11 +130,6 @@ func (p *Profile) Validate() error {
 	}
 	if utf8.RuneCountInString(p.Name) > 32 {
 		return fmt.Errorf("name too long: %d chars (max 32)", utf8.RuneCountInString(p.Name))
-	}
-	for _, alias := range p.MentionAs {
-		if !aliasRule.MatchString(alias) {
-			return fmt.Errorf("invalid mention alias %q: must be @ followed by [A-Za-z0-9_-]", alias)
-		}
 	}
 	return nil
 }

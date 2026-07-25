@@ -20,7 +20,6 @@ type agentRequest struct {
 	Model        string   `json:"model,omitempty"`
 	Tools        []string `json:"tools,omitempty"`
 	ToolSkills   []string `json:"tool_skills,omitempty"`
-	MentionAs    []string `json:"mention_as,omitempty"`
 	SystemPrompt string   `json:"system_prompt,omitempty"`
 }
 
@@ -42,7 +41,6 @@ type agentResponse struct {
 	Model           string                        `json:"model,omitempty"`
 	Tools           []string                      `json:"tools,omitempty"`
 	ToolSkills      []string                      `json:"tool_skills,omitempty"`
-	MentionAs       []string                      `json:"mention_as,omitempty"`
 	SystemPrompt    string                        `json:"system_prompt,omitempty"`
 	ChannelBindings []agentprofile.ChannelBinding `json:"channel_bindings,omitempty"`
 }
@@ -55,7 +53,6 @@ func agentToResp(p *agentprofile.Profile) agentResponse {
 		Model:           p.Model,
 		Tools:           p.Tools,
 		ToolSkills:      p.ToolSkills,
-		MentionAs:       p.MentionAs,
 		SystemPrompt:    p.SystemPrompt,
 		ChannelBindings: p.ChannelBindings,
 	}
@@ -140,7 +137,6 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 			ToolSkills:   req.ToolSkills,
 			SystemPrompt: req.SystemPrompt,
 		},
-		MentionAs: req.MentionAs,
 	}
 
 	if err := s.agentStoreOrInit().Create(p); err != nil {
@@ -186,7 +182,6 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 			ToolSkills:   req.ToolSkills,
 			SystemPrompt: req.SystemPrompt,
 		},
-		MentionAs:       req.MentionAs,
 		ChannelBindings: existing.ChannelBindings, // preserved unless explicitly changed
 	}
 

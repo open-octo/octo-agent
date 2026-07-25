@@ -112,53 +112,18 @@ B.
 	ev := evFor("hello")
 	profile := agentprofile.NewRouter(agentprofile.New(agentStoreDir(), nil)).Route(agentprofile.RouteInput{Platform: ev.Platform, ChatID: ev.ChatID, UserID: ev.UserID, Text: ev.Text})
 	if profile != nil {
-		t.Fatalf("expected nil route (multi-binding, no @), got %q", profile.ID)
+		t.Fatalf("expected nil route (multi-binding), got %q", profile.ID)
 	}
 	// No handleChannelMessage: routeChannelEvent would have dropped the event.
 	// Verify silence: no session under either agent, no reply sent.
 	if got := srv.channelMgr.GetSession(ev, "agent-a"); got != nil {
-		t.Fatal("multi-bound chat without @ created agent-a session")
+		t.Fatal("multi-bound chat created agent-a session")
 	}
 	if got := srv.channelMgr.GetSession(ev, "agent-b"); got != nil {
-		t.Fatal("multi-bound chat without @ created agent-b session")
+		t.Fatal("multi-bound chat created agent-b session")
 	}
 	if texts := ad.texts(); len(texts) != 0 {
 		t.Fatalf("expected silence, got replies: %v", texts)
-	}
-}
-
-func TestRouteChannelEvent_MentionSelectsAgent(t *testing.T) {
-	routingHome(t)
-	writeAgentProfile(t, "agent-a", `---
-description: a
-mention_as: ["@aa"]
-channel_bindings:
-  - {platform: fake, chat_id: c1}
----
-A.
-`)
-	writeAgentProfile(t, "agent-b", `---
-description: b
-mention_as: ["@bb"]
-channel_bindings:
-  - {platform: fake, chat_id: c1}
----
-B.
-`)
-	srv := chanServer(t)
-	ad := &fullFakeAdapter{}
-	ev := evFor("@bb hello")
-	profile := agentprofile.NewRouter(agentprofile.New(agentStoreDir(), nil)).Route(agentprofile.RouteInput{Platform: ev.Platform, ChatID: ev.ChatID, UserID: ev.UserID, Text: ev.Text})
-	if profile == nil || profile.ID != "agent-b" {
-		t.Fatalf("expected routing to agent-b, got %+v", profile)
-	}
-	routeAndWait(t, srv, ad, ev, profile)
-
-	if got := srv.channelMgr.GetSession(ev, "agent-b"); got == nil {
-		t.Fatal("@bb mention did not route to agent-b")
-	}
-	if got := srv.channelMgr.GetSession(ev, "agent-a"); got != nil {
-		t.Fatal("@bb mention leaked a session to agent-a")
 	}
 }
 

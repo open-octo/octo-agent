@@ -21,7 +21,6 @@ type frontmatter struct {
 	ReadOnly        bool             `yaml:"read_only,omitempty"`
 	LeanContext     bool             `yaml:"lean_context,omitempty"`
 	WorkingDir      string           `yaml:"working_dir,omitempty"`
-	MentionAs       []string         `yaml:"mention_as,omitempty"`
 	ChannelBindings []ChannelBinding `yaml:"channel_bindings,omitempty"`
 }
 
@@ -65,7 +64,6 @@ func parseFile(path string) (*Profile, error) {
 			LeanContext:     fm.LeanContext,
 		},
 		WorkingDir:      fm.WorkingDir,
-		MentionAs:       fm.MentionAs,
 		ChannelBindings: fm.ChannelBindings,
 	}
 	if info, err := os.Stat(path); err == nil {
@@ -89,7 +87,6 @@ func serialize(p *Profile) ([]byte, error) {
 		ReadOnly:        p.ReadOnly,
 		LeanContext:     p.LeanContext,
 		WorkingDir:      p.WorkingDir,
-		MentionAs:       p.MentionAs,
 		ChannelBindings: p.ChannelBindings,
 	}
 	head, err := yaml.Marshal(&fm)

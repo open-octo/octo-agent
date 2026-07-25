@@ -14,7 +14,6 @@ model: claude-sonnet-4-20250514
 tools: [read_file, grep, glob]
 tool_skills: [code-review]
 read_only: true
-mention_as: ["@review"]
 channel_bindings:
   - {platform: weixin, chat_id: dev-group-1}
 ---
@@ -50,9 +49,6 @@ func TestParseFile(t *testing.T) {
 	}
 	if len(p.Tools) != 3 || len(p.ToolSkills) != 1 || p.ToolSkills[0] != "code-review" {
 		t.Fatalf("tools = %v skills = %v", p.Tools, p.ToolSkills)
-	}
-	if len(p.MentionAs) != 1 || p.MentionAs[0] != "@review" {
-		t.Fatalf("mention_as = %v", p.MentionAs)
 	}
 	if len(p.ChannelBindings) != 1 || p.ChannelBindings[0].Platform != "weixin" {
 		t.Fatalf("bindings = %+v", p.ChannelBindings)
@@ -104,7 +100,6 @@ func TestSerializeRoundTrip(t *testing.T) {
 			ToolSkills:   []string{"code-review"},
 			ReadOnly:     true,
 		},
-		MentionAs:       []string{"@review"},
 		ChannelBindings: []ChannelBinding{{Platform: "weixin", ChatID: "g1"}},
 	}
 	b, err := serialize(orig)
@@ -120,7 +115,7 @@ func TestSerializeRoundTrip(t *testing.T) {
 	if got.Name != orig.Name || got.Description != orig.Description ||
 		got.Model != orig.Model || got.SystemPrompt != orig.SystemPrompt ||
 		!got.ReadOnly || len(got.Tools) != 2 || len(got.ToolSkills) != 1 ||
-		len(got.MentionAs) != 1 || len(got.ChannelBindings) != 1 {
+		len(got.ChannelBindings) != 1 {
 		t.Fatalf("roundtrip mismatch:\n got %+v\nwant %+v", got, orig)
 	}
 }

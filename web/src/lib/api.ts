@@ -374,7 +374,6 @@ export interface Agent {
   model?: string
   tools?: string[]
   tool_skills?: string[]
-  mention_as?: string[]
   system_prompt?: string
   channel_bindings?: { platform: string; chat_id: string }[]
 }

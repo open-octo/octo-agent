@@ -14,7 +14,6 @@
   let name = $state('')
   let description = $state('')
   let model = $state('')
-  let mentionAs = $state('')
   let systemPrompt = $state('')
 
   // Checklist items loaded from the Default Agent's resource pool.
@@ -55,7 +54,6 @@
     name = agent?.name ?? ''
     description = agent?.description ?? ''
     model = agent?.model ?? ''
-    mentionAs = agent?.mention_as?.join(', ') ?? ''
     systemPrompt = agent?.system_prompt ?? ''
     selectedTools = new Set(agent?.tools ?? [])
     selectedSkills = new Set(agent?.tool_skills ?? [])
@@ -87,7 +85,6 @@
       model: model.trim() || undefined,
       tools: selTools.length > 0 ? selTools : undefined,
       tool_skills: selSkills.length > 0 ? selSkills : undefined,
-      mention_as: mentionAs.trim() ? mentionAs.split(',').map(s => s.trim()).filter(Boolean) : undefined,
       system_prompt: systemPrompt.trim() || undefined,
     }
     if (!body.name || !body.description) {
@@ -163,11 +160,6 @@
         {/if}
       </div>
 
-      <div class="field">
-        <label>{$t('agents.mention_as')}</label>
-        <input bind:value={mentionAs} placeholder={$t('agents.mention_as_placeholder')} />
-        <small>{$t('agents.mention_as_hint')}</small>
-      </div>
       <div class="actions">
         <button type="button" class="btn-secondary" onclick={onCancel}>{$t('common.cancel')}</button>
         <button type="submit" class="btn-primary">{$t('common.save')}</button>
