@@ -268,8 +268,7 @@ Weixin uses a QR-code login — no app credentials needed.
    ```yaml
    channels:
      weixin:
-        - - enabled: true
-          enabled: true
+       - enabled: true
    ```
    The adapter reads `~/.octo/weixin-credentials.json` automatically; only set `cred_path` if the user keeps credentials elsewhere.
 6. After writing `channels.yml`, trigger a hot reload (see "Hot-reload after config change") so the new adapter starts immediately. If the server isn't running, tell the user to start `octo serve`.
@@ -292,10 +291,10 @@ Weixin uses a QR-code login — no app credentials needed.
    ```yaml
    channels:
      dingtalk:
-        - - name: <NAME>
-          enabled: true
-       client_id: <CLIENT_ID>
-       client_secret: <CLIENT_SECRET>
+       - name: <NAME>
+         enabled: true
+         client_id: <CLIENT_ID>
+         client_secret: <CLIENT_SECRET>
    ```
 6. Trigger a hot reload (see "Hot-reload after config change"). If the server isn't running, remind the user to start `octo serve`. Then say: "✅ DingTalk channel configured. Publish the app version if you haven't, then message the robot in DingTalk."
 
@@ -312,10 +311,10 @@ WeCom "API mode" intelligent robots connect over a WebSocket long connection —
    ```yaml
    channels:
      wecom:
-        - - name: <NAME>
-          enabled: true
-       bot_id: <BOT_ID>
-       secret: <SECRET>
+       - name: <NAME>
+         enabled: true
+         bot_id: <BOT_ID>
+         secret: <SECRET>
    ```
    There is no public REST endpoint to pre-validate these credentials — they are checked when the WebSocket subscribes. After `octo serve` starts, an invalid pair logs `[wecom] authentication failed`.
 6. Trigger a hot reload (see "Hot-reload after config change"). If the server isn't running, remind the user to start `octo serve`. Then say: "✅ WeCom channel configured. Find the bot in the WeCom client under Contacts → Smart Bot (智能机器人) and message it."
@@ -345,9 +344,9 @@ Discord requires manual portal interaction (hCaptcha gates application creation)
    ```yaml
    channels:
      discord:
-        - - name: <NAME>
-          enabled: true
-       bot_token: <BOT_TOKEN>
+       - name: <NAME>
+         enabled: true
+         bot_token: <BOT_TOKEN>
    ```
 4. Build the invite URL with the Application ID and tell the user to open it:
    `https://discord.com/oauth2/authorize?client_id=<APP_ID>&scope=bot&permissions=274878220912`
@@ -373,9 +372,9 @@ Telegram is the simplest — no browser automation, no QR. The user creates a bo
    ```yaml
    channels:
      telegram:
-        - - name: <NAME>
-          enabled: true
-       bot_token: <TOKEN>
+       - name: <NAME>
+         enabled: true
+         bot_token: <TOKEN>
    ```
 4. Trigger a hot reload (see "Hot-reload after config change"). If the server isn't running, remind the user to start `octo serve`. Then say: "✅ Telegram channel configured. Open your bot in Telegram and send it a message."
    > **For group chats**: disable Privacy Mode first (@BotFather → `/mybots` → Bot Settings → Group Privacy → Turn off), then **remove and re-add the bot to the group** — otherwise it cannot receive any group messages, including @-mentions.
