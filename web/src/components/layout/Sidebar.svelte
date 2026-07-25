@@ -104,6 +104,7 @@
   const railNav = [
     { icon: 'ant-design:message-outlined', title: 'sidebar.chat', v: 'chat' },
     { icon: 'ant-design:clock-circle-outlined', title: 'nav.tasks', v: 'tasks' },
+    { icon: 'ant-design:robot-outlined', title: 'nav.agents', v: 'agents' },
     { icon: 'ant-design:thunderbolt-outlined', title: 'nav.skills', v: 'skills' },
     { icon: 'ant-design:api-outlined', title: 'nav.mcp', v: 'mcp' },
     { icon: 'ant-design:partition-outlined', title: 'nav.workflows', v: 'workflows' },
@@ -508,6 +509,7 @@
         <div class="group-header"><span class="group-label">{$t('nav.config')}</span></div>
         {#each [
           { icon: 'ant-design:clock-circle-outlined', label: 'nav.tasks', v: 'tasks' },
+          { icon: 'ant-design:robot-outlined', label: 'nav.agents', v: 'agents' },
           { icon: 'ant-design:thunderbolt-outlined', label: 'nav.skills', v: 'skills' },
           { icon: 'ant-design:api-outlined', label: 'nav.mcp', v: 'mcp' },
           { icon: 'ant-design:partition-outlined', label: 'nav.workflows', v: 'workflows' },
