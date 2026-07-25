@@ -31,7 +31,7 @@ func TestManifestForProfile_FiltersByToolSkills(t *testing.T) {
 	}
 	target := allSkills[0].Name
 	profiled := ManifestForProfile(r, &agentprofile.Profile{
-		ID:         "test",
+		ID:          "test",
 		Description: "d",
 		CapabilitySpec: agentprofile.CapabilitySpec{
 			ToolSkills: []string{target},
