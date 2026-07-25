@@ -12,6 +12,7 @@
   import TasksTab from './TasksTab.svelte'
   import ConfigTab from './ConfigTab.svelte'
   import NewTask from './NewTask.svelte'
+  import QuestionOverlay from './QuestionOverlay.svelte'
   import type { FeedKind } from './feedGroups'
   import { setActiveSession } from '../lib/stores'
   import { t } from '../lib/i18n'
@@ -90,6 +91,10 @@
       <span>{$t('m.tab_settings')}</span>
     </button>
   </nav>
+
+  <!-- Cross-client ask: with global broadcast, a question from any session
+       (desktop or mobile) reaches every connected client. -->
+  <QuestionOverlay />
 </div>
 
 <style>
