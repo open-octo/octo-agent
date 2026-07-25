@@ -52,6 +52,14 @@ func (s *Store) load() map[string]*Profile {
 // enforced on writes instead. The reserved "default" ID is skipped so a
 // stray default.md can never shadow the code-defined default agent.
 func (s *Store) scanDir(dir string, src Source, dst map[string]*Profile) {
+	s.scanDirFiltered(dir, src, dst, nil)
+}
+
+// scanDirFiltered is scanDir with an optional ID filter (nil = accept all).
+// The IM-routing path passes IsValidID so a non-slug filename can never
+// become a routable profile; the delegation path passes nil to keep loading
+// legacy .md files written before the slug rule existed.
+func (s *Store) scanDirFiltered(dir string, src Source, dst map[string]*Profile, accept func(string) bool) {
 	if dir == "" {
 		return
 	}
@@ -65,6 +73,9 @@ func (s *Store) scanDir(dir string, src Source, dst map[string]*Profile) {
 		}
 		id := strings.TrimSuffix(e.Name(), ".md")
 		if id == "" || id == DefaultID {
+			continue
+		}
+		if accept != nil && !accept(id) {
 			continue
 		}
 		p, err := parseFile(filepath.Join(dir, e.Name()))
@@ -223,9 +234,15 @@ func (s *Store) writeFile(path string, p *Profile) error {
 // (ByChannel/ByMention) build on this — not on the merged map — so a
 // project-level file shadowing a user profile's ID (delegation override)
 // can never silence that profile's conversation-mode routing.
+//
+// IM routing only honors slug-shaped profile IDs (the same rule enforced on
+// writes): a hand-placed `a#b.md` would otherwise produce an ID whose '#'
+// defeats the session-key namespace splitter, so the router would misroute
+// messages to it. Delegation-mode lookups (sub_agent) keep the legacy lenient
+// loader via scanDir, which still accepts any basename.
 func (s *Store) userProfiles() map[string]*Profile {
 	m := make(map[string]*Profile)
-	s.scanDir(s.userDir, SourceUser, m)
+	s.scanDirFiltered(s.userDir, SourceUser, m, IsValidID)
 	return m
 }
 

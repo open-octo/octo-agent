@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -67,13 +68,14 @@ func TestManager_AgentNamespacesIsolateSessions(t *testing.T) {
 	if def.Store.ID == exp.Store.ID {
 		t.Fatal("sessions of different agents must not share a store file")
 	}
-	// The expert store carries agent_id; the default store keeps it empty
-	// (legacy shape).
+	// The expert store carries agent_id; the default store is stamped
+	// "default" (new sessions) or empty (restored legacy files) — both
+	// EffectiveAgentID "default".
 	if exp.Store.EffectiveAgentID() != "code-review" {
 		t.Fatalf("expert store agent_id = %q", exp.Store.AgentID)
 	}
-	if def.Store.AgentID != "" && def.Store.AgentID != "default" {
-		t.Fatalf("default store agent_id = %q", def.Store.AgentID)
+	if def := def.Store.EffectiveAgentID(); def != "default" {
+		t.Fatalf("default store effective agent = %q, want default", def)
 	}
 	// Re-resolving either agent returns its own session.
 	if got := m.GetSession(ev, "code-review"); got != exp {
@@ -152,8 +154,10 @@ func TestManager_LegacyStoreRestoresUnderDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	legacyStoreID := sess.Store.ID
-	if sess.Store.AgentID != "" && sess.Store.AgentID != "default" {
-		t.Fatalf("legacy-shaped store agent_id = %q", sess.Store.AgentID)
+	// Newly-created default-agent session is stamped "default"; a restored
+	// legacy file has agent_id empty — both are "default"EffectiveAgentID.
+	if sess.Store.EffectiveAgentID() != "default" {
+		t.Fatalf("new default session effective agent = %q", sess.Store.EffectiveAgentID())
 	}
 
 	m2 := testManager()
@@ -166,5 +170,79 @@ func TestManager_LegacyStoreRestoresUnderDefault(t *testing.T) {
 	}
 	if restored.Store.EffectiveAgentID() != "default" {
 		t.Fatalf("legacy store effective agent = %q", restored.Store.EffectiveAgentID())
+	}
+}
+
+// /bind recovery after the owning profile was deleted must keep the session
+// in the routed agent's key namespace (AgentID == agentID) — never silently
+// drift to "default" — even though the profile lookup now falls back to the
+// default profile for shaping the agent.
+func TestManager_BindRecoversDeletedProfileInAgentNamespace(t *testing.T) {
+	tempHome(t)
+	m := testManager()
+	evExpert := InboundEvent{Platform: "feishu", ChatID: "cX", UserID: "uX"}
+
+	// Create an expert-agent session, persist it, then "delete" the profile
+	// (simulate by dropping all profile definitions — the Store is
+	// read-through, so Get on the ID now misses).
+	sess := m.GetOrCreateSession(evExpert, expertProfile("expert-1"))
+	if err := sess.Persist(); err != nil {
+		t.Fatal(err)
+	}
+	storeID := sess.Store.ID
+
+	// A chat /binds to that session. The profile is gone, so resolveProfile
+	// falls back to the default profile — but the session's AgentID and key
+	// must stay in the expert-1 namespace.
+	evB := InboundEvent{Platform: "feishu", ChatID: "cB", UserID: "uB"}
+	if reply := m.cmdBind(evB, []string{storeID}, "expert-1"); !strings.Contains(strings.ToLower(reply), "bound") {
+		t.Fatalf("bind of deleted-profile session = %q, want success", reply)
+	}
+	got := m.GetSession(evB, "expert-1")
+	if got == nil {
+		t.Fatal("bound session is not in the expert-1 namespace")
+	}
+	if got.AgentID != "expert-1" {
+		t.Fatalf("recovered session AgentID = %q, want expert-1", got.AgentID)
+	}
+	if got.Store.ID != storeID {
+		t.Fatalf("recovered store ID = %q, want %q", got.Store.ID, storeID)
+	}
+}
+
+// /list indices must match the indices /bind resolves against — both built
+// from the same "all sessions → filter by owner → cap 20" pipeline. Before
+// the fix, /list capped at 20 before filtering, so a session filtered out
+// of the top-20 by owner would still claim an index that /bind could not
+// resolve.
+func TestManager_ListAndBindIndicesMatch(t *testing.T) {
+	tempHome(t)
+	m := testManager()
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+
+	// Create 25 default-agent sessions so the global top-20 excludes some of
+	// them; then create an expert session that /list must show at index 1.
+	for i := 0; i < 25; i++ {
+		s := m.GetOrCreateSession(InboundEvent{Platform: "feishu", ChatID: fmt.Sprintf("cX%d", i), UserID: "uX"}, nil)
+		if err := s.Persist(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	expert := m.GetOrCreateSession(ev, expertProfile("code-review"))
+	if err := expert.Persist(); err != nil {
+		t.Fatal(err)
+	}
+
+	listReply := m.cmdList("code-review")
+	if !strings.Contains(listReply, "1. ") {
+		t.Fatalf("expert /list = %q, want index 1", listReply)
+	}
+	// /bind 1 from a fresh chat should resolve to the expert session.
+	evB := InboundEvent{Platform: "feishu", ChatID: "cB", UserID: "uB"}
+	if reply := m.cmdBind(evB, []string{"1"}, "code-review"); !strings.Contains(strings.ToLower(reply), "bound") {
+		t.Fatalf("/bind 1 under code-review = %q, want success", reply)
+	}
+	if got := m.GetSession(evB, "code-review"); got == nil || got.Store.ID != expert.Store.ID {
+		t.Fatalf("/bind 1 resolved to wrong session: %+v", got)
 	}
 }

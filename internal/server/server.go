@@ -2170,22 +2170,38 @@ func (s *Server) buildChannelAgent(profile *agentprofile.Profile) *agent.Agent {
 
 // agentRouter lazily builds the profile store + router used by the IM routing
 // path. The store is read-through, so profile edits (API, Web UI, direct .md
-// edits) take effect on the next inbound event.
+// edits) take effect on the next inbound event. If the store/router have
+// already been set (e.g. by a test), the Once is a no-op.
 func (s *Server) agentRouter() *agentprofile.Router {
 	s.agentRouterOnce.Do(func() {
+		if s.agentStore != nil {
+			return
+		}
 		s.agentStore = agentprofile.New(agentUserDir(), agentProjectDir)
 		s.agentRouterVal = agentprofile.NewRouter(s.agentStore)
 	})
 	return s.agentRouterVal
 }
 
+// agentStoreIfReady returns the profile store if it has been initialized
+// (either by agentRouter or by a test), without triggering lazy init.
+func (s *Server) agentStoreIfReady() (*agentprofile.Store, bool) {
+	return s.agentStore, s.agentStore != nil
+}
+
 // profileForAgent resolves an agent ID to its profile, falling back to the
 // default profile on a miss (empty ID, or the profile was deleted while one
-// of its sessions is still live).
+// of its sessions is still live). It uses the already-initialized store if
+// present (respects a test-injected store) and only falls back to lazy init
+// if nothing has been set yet.
 func (s *Server) profileForAgent(agentID string) *agentprofile.Profile {
-	_ = s.agentRouter() // ensures agentStore is initialised
+	store, ok := s.agentStoreIfReady()
+	if !ok {
+		_ = s.agentRouter()
+		store = s.agentStore
+	}
 	if agentID != "" {
-		if p, ok := s.agentStore.Get(agentID); ok {
+		if p, ok := store.Get(agentID); ok {
 			return p
 		}
 	}

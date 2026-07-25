@@ -234,17 +234,21 @@ type ModelOps struct {
 
 // newSession builds a Session with a fresh agent and per-conversation task
 // store. Centralised so every binding path (explicit /bind, auto-create on
-// first message, GetOrCreateSession) wires sessions identically. profile is
-// the routed agent (nil → default): it shapes the factory-built agent and is
-// stamped onto Session.AgentID and the persisted store's agent_id.
-func (m *Manager) newSession(key SessionKey, ev InboundEvent, profile *agentprofile.Profile) *Session {
+// first message, GetOrCreateSession) wires sessions identically. agentID is
+// the routed agent (never empty — callers normalize "" to "default"); it is
+// stamped onto Session.AgentID and the persisted store's agent_id, and it
+// determines the session-key namespace. profile shapes the factory-built
+// agent (system prompt / model) and may fall back to the default profile if
+// the routed profile was deleted — but the session's AgentID always stays the
+// routed agent, so its key namespace and store identity never drift.
+func (m *Manager) newSession(key SessionKey, ev InboundEvent, agentID string, profile *agentprofile.Profile) *Session {
 	if profile == nil {
 		profile = agentprofile.DefaultProfile()
 	}
 	s := &Session{
 		Key:     key,
 		Agent:   m.factory(profile),
-		AgentID: profile.ID,
+		AgentID: agentID,
 		Tasks:   tasks.New(),
 		ChatID:  ev.ChatID,
 		UserID:  ev.UserID,
@@ -707,8 +711,12 @@ func (m *Manager) cmdBind(ev InboundEvent, args []string, agentID string) string
 		m.sessions.Store(key, sess)
 	} else {
 		// No running session found — create a new one from the store file.
+		// The session keeps the routed agent's namespace (agentID) even if the
+		// profile was deleted in the meantime — resolveProfile falls back to
+		// the default profile for shaping the agent, but the key and AgentID
+		// stay anchored to the routed agent.
 		m.sessions.LoadAndDelete(key)
-		m.sessions.Store(key, m.newSession(key, ev, m.resolveProfile(agentID)))
+		m.sessions.Store(key, m.newSession(key, ev, agentID, m.resolveProfile(agentID)))
 	}
 	if res == agent.Stolen {
 		return fmt.Sprintf("Taken over %q [%s] from %s. History preserved.", target.DisplayTitle(), target.ShortID(), previousEntry)
@@ -851,15 +859,21 @@ func (m *Manager) cmdStatus(ev InboundEvent, agentID string) string {
 // the index /bind accepts.
 func (m *Manager) cmdList(agentID string) string {
 	agentID = normalizeAgentID(agentID)
-	sessions, err := agent.ListSessions(20)
+	// Match resolveBindTarget: fetch all sessions, filter by owner, then cap
+	// at 20. A /list that stopped at 20 before filtering would assign indices
+	// that don't match the indices /bind resolves against.
+	sessions, err := agent.ListSessions(0)
 	if err != nil {
 		return fmt.Sprintf("Could not list sessions: %v", err)
 	}
-	var owned []*agent.Session
+	owned := make([]*agent.Session, 0, len(sessions))
 	for _, s := range sessions {
 		if s.EffectiveAgentID() == agentID {
 			owned = append(owned, s)
 		}
+	}
+	if len(owned) > 20 {
+		owned = owned[:20]
 	}
 	if len(owned) == 0 {
 		return "No saved sessions yet."
@@ -892,7 +906,9 @@ func (m *Manager) GetSession(ev InboundEvent, agentID string) *Session {
 }
 
 // GetOrCreateSession returns the existing session for the routed agent's key
-// namespace, or creates a new one shaped by profile (nil → default).
+// namespace, or creates a new one shaped by profile (nil → default). The
+// session's AgentID is always the routed agent, even when profile falls back
+// to the default — so a deleted profile's /bind recovery keeps its namespace.
 func (m *Manager) GetOrCreateSession(ev InboundEvent, profile *agentprofile.Profile) *Session {
 	if profile == nil {
 		profile = agentprofile.DefaultProfile()
@@ -900,7 +916,7 @@ func (m *Manager) GetOrCreateSession(ev InboundEvent, profile *agentprofile.Prof
 	key := sessionKeyFor(m.mode, ev, profile.ID)
 	val, loaded := m.sessions.Load(key)
 	if !loaded {
-		sess := m.newSession(key, ev, profile)
+		sess := m.newSession(key, ev, profile.ID, profile)
 		val, _ = m.sessions.LoadOrStore(key, sess)
 	}
 	return val.(*Session)

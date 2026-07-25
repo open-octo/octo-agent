@@ -82,18 +82,50 @@ func TestStoreSkipsBrokenFilesAndReservedID(t *testing.T) {
 	}
 }
 
-// The pre-existing agent loader accepts any .md basename as an ID; the Store
-// must too (zero-migration), even names that fail the write-side slug rule.
-func TestStoreAcceptsNonSlugFilenames(t *testing.T) {
+// Delegation lookups (sub_agent) and the profile API keep the zero-migration
+// lenient loader: any .md basename is a valid profile ID on the read path,
+// even names that fail the write-side slug rule. The write path still
+// enforces slug via validateForWrite.
+func TestStore_DelegationAcceptsNonSlugFilenames(t *testing.T) {
 	s, userDir, _ := newTestStore(t)
 	writeMD(t, userDir, "Code_Review.md", "---\ndescription: legacy\n---\nbody\n")
 
 	p, ok := s.Get("Code_Review")
 	if !ok || p.Description != "legacy" {
-		t.Fatalf("non-slug legacy file not readable: %v, %v", p, ok)
+		t.Fatalf("non-slug legacy file not readable via delegation: %v, %v", p, ok)
 	}
 	if got := s.List(); len(got) != 1 || got[0].ID != "Code_Review" {
 		t.Fatalf("List() = %+v", got)
+	}
+}
+
+// IM routing only honors slug-shaped profile IDs: a hand-placed `a#b.md`
+// must never become a routable profile (its '#' would defeat the
+// session-key namespace splitter). userProfiles() — the ByChannel/ByMention
+// source — skips non-slug files, even though Get() (delegation) still reads
+// them.
+func TestStore_UserProfilesSkipsNonSlug(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a#b.md"), []byte("---\ndescription: d\nchannel_bindings:\n  - {platform: weixin, chat_id: g1}\n---\nbody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "valid.md"), []byte("---\ndescription: d\n---\nbody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := New(dir, nil)
+	// userProfiles() (IM-routing source) skips non-slug files.
+	if p := s.ByChannel("weixin", "g1"); len(p) > 0 {
+		t.Fatalf("non-slug profile is routable via IM: %+v", p)
+	}
+	if p, ok := s.ByMention("@anything"); ok {
+		t.Fatalf("non-slug profile is @-routable: %+v", p)
+	}
+	// But Get()/List() (delegation + API) still see it.
+	if _, ok := s.Get("a#b"); !ok {
+		t.Fatal("non-slug profile not visible to delegation Get")
+	}
+	if _, ok := s.Get("valid"); !ok {
+		t.Fatal("slug profile not found")
 	}
 }
 
