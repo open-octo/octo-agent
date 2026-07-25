@@ -41,6 +41,8 @@
 | **Agent Router** | 根据 InboundEvent（平台、chatID、消息内容中的 @ 提及）决定消息路由到哪个 agent profile |
 | **Session Key** | `platform:chat_id:user_id`（私聊时）或 `platform:chat_id`（群聊时），标识一个 session pool 中的唯一会话 |
 | **Agent 绑定** | 会话创建时绑定 agent，一旦建立不可切换；通过新建会话选择其他 agent |
+| **能力片（CapabilitySpec）** | Profile 中 prompt/model/tools/skills 四元组，是对话模式和委派模式共享的能力定义 |
+| **委派模式** | `sub_agent` 以某 profile 的能力片发起的 ephemeral run：全新上下文、不进 session pool、任务结束即弃；profile 的平台片（别名/绑定/cron）被忽略 |
 
 ---
 
@@ -187,14 +189,22 @@ Profile 存储在 `~/.octo/agents/<profile-id>.json`，每个文件一个 profil
 // internal/agentprofile/profile.go
 package agentprofile
 
+// CapabilitySpec 是 profile 的"能力片"：prompt / model / tools / skills。
+// 它被两种运行模式共享：
+//   - 对话模式：channel.Manager 持久 session（用户直接对话）
+//   - 委派模式：sub_agent 发起的 ephemeral run（见 "sub_agent 委派模式" 一节）
+type CapabilitySpec struct {
+    Model        string   `json:"model"`
+    SystemPrompt string   `json:"system_prompt"`
+    Tools        []string `json:"tools"`
+    ToolSkills   []string `json:"tool_skills"` // 这些 skill 以工具形式暴露
+}
+
 type Profile struct {
     ID             string           `json:"id"`
     Name           string           `json:"name"`
     Description    string           `json:"description"`
-    Model          string           `json:"model"`
-    SystemPrompt   string           `json:"system_prompt"`
-    Tools          []string         `json:"tools"`
-    ToolSkills     []string         `json:"tool_skills"`  // 这些 skill 以工具形式暴露
+    CapabilitySpec                   `json:",inline"` // JSON 扁平展开，存储格式不变
     WorkingDir     string           `json:"working_dir,omitempty"`
     MentionAs      []string         `json:"mention_as"`
     ChannelBindings []ChannelBinding `json:"channel_bindings"`
@@ -754,6 +764,31 @@ func DefaultProfile() *Profile {
 
 ---
 
+## sub_agent 委派模式：preset 与 Expert Agent 定义层统一
+
+### 背景
+
+sub_agent 的内置 preset（explore / general / code-review）与 Expert Agent Profile 在"能力定义"上同构——都是 prompt + model + tools 的组合。为避免两套 schema 并存，二者**定义层统一、运行层保持独立**。
+
+### 统一规则
+
+1. **Profile 是唯一的能力定义 schema**。能力片（`CapabilitySpec`：prompt/model/tools/skills）抽为独立结构，对话模式和委派模式共享；平台片（别名/频道绑定/session pool/cron 归属）仅对话模式使用
+2. **内置 preset 降级为内建 profile**。`explore` / `general` / `code-review` 由代码定义（与 DefaultProfile 同款待遇，无 JSON 文件），行为与现状完全一致，对用户透明
+3. **`subagent_type` 接受内建 profile 名或用户 expert profile id**。参数名保持 `subagent_type` 不变（向后兼容），语义扩展为"内建或用户 profile 的 id"
+
+### 委派模式的约束（红线）
+
+- **ephemeral、全新上下文**：委派 run 不携带目标 profile 的任何 session 历史，用完即弃
+- **不进 session pool**：委派 run 由 SubAgentManager 管理，不出现在该 agent 的会话列表，不写入其 session pool
+- **只取能力片**：profile 的 `mention_as` / `channel_bindings` / cron 归属在委派模式下被忽略
+- **model 解析优先级**：`sub_agent(model:)` 显式参数 > profile.model > 继承父 agent model
+
+### 一致性提示
+
+用户修改 profile 会影响所有引用它的 workflow / 会话。expert-agent-manager 元技能在执行 Update/Delete 时提示引用情况（如"有 N 个 saved workflow 在引用此 profile"）。
+
+---
+
 ## HTTP API 完整清单
 
 ### Agent Profile CRUD
@@ -821,6 +856,7 @@ func DefaultProfile() *Profile {
 | `internal/channel/manager.go` | 接受 profile 参数注入 system prompt / model |
 | `internal/agent/`（session 序列化处） | session metadata 新增 `agent_id` 字段；读取时缺失归 default |
 | `internal/tools/registry.go` | `DefaultToolsForProfile()` — 按 profile 过滤工具 |
+| `internal/tools/`（sub_agent 工具定义处） | `subagent_type` 解析扩展：内建 preset 名或 expert profile id；委派模式只取 CapabilitySpec |
 | `internal/skills/skills.go` | `ManifestForProfile()` — 按 profile 过滤 skill manifest；系统级 skill frontmatter 标记 `system: true` 后对 expert agent 隐藏；browser-recorded skill 在 profile 不含 browser 工具时隐藏 |
 | `internal/scheduler/` 或 task 存储 | cron task 新增 `agent_id` 字段；`GET /api/cron` 支持 `?agent_id=` 过滤；新增 `PUT /api/cron/:id/transfer` |
 | `internal/server/server.go` | `Server.Config`（server.go:56）新增 `agentName` 字段（仅客户端路径 `octo`/`octo-desktop` 设置；`octo serve` 不接受此 flag，由 session 绑定 agent） |
@@ -904,7 +940,7 @@ func DefaultProfile() *Profile {
 |----|------|----------|
 | 1 | `internal/agentprofile/` 纯新包（Profile / Store / Router）+ 单测 | 不接线，纯库 |
 | 2 | `MultiManager` + server.go 重构（`initChannels` → `initMultiManager`） | 兼容测试：无 profile 时 IM 路由、session 行为全等。**单独成 PR，不捆绑其他改动** |
-| 3 | tools/skills 按 profile 过滤（`DefaultToolsForProfile`、`ManifestForProfile`、`system:true`、browser skill 隐藏） | 只依赖 PR1，可与 PR2 并行 |
+| 3 | tools/skills 按 profile 过滤（`DefaultToolsForProfile`、`ManifestForProfile`、`system:true`、browser skill 隐藏）+ preset 内建 profile 化与 `subagent_type` 解析扩展 | 只依赖 PR1，可与 PR2 并行 |
 | 4 | CLI/TUI `--agent` + `/agent` 命令 | 第一个端到端验证切片：profile 创建 → 路由 → 工具过滤全链路 |
 | 5 | REST API `/api/agents/*` + cron `agent_id`/transfer + `expert-agent-manager` 元技能 | 对话式管理入口可用 |
 | 6 | Web UI（Agents 面板、Header 切换、各 View 过滤） | 纯前端，API 已就绪 |
