@@ -2,22 +2,13 @@
   import { onMount } from 'svelte'
   import { t } from '../lib/i18n'
   import { showToast } from '../lib/stores'
+  import { confirmDialog } from '../lib/confirm'
   import * as api from '../lib/api'
+  import AgentEdit from './AgentEdit.svelte'
 
-  interface Agent {
-    id: string
-    name: string
-    description: string
-    model?: string
-    tools?: string[]
-    tool_skills?: string[]
-    mention_as?: string[]
-    channel_bindings?: { platform: string; chat_id: string }[]
-  }
-
-  let agents: Agent[] = []
-  let editing: Agent | null = null
-  let deleting: Agent | null = null
+  let agents: api.Agent[] = []
+  let editing: api.Agent | null = null
+  let deleting: api.Agent | null = null
   let creating = false
   let loading = true
 
@@ -32,7 +23,7 @@
     }
   }
 
-  async function handleSave(agent: Agent) {
+  async function handleSave(agent: api.Agent) {
     try {
       if (creating) {
         await api.createAgent(agent)
@@ -49,8 +40,11 @@
     }
   }
 
-  async function handleDelete(agent: Agent) {
-    if (!confirm(`Delete agent "${agent.name}" (${agent.id})? This cannot be undone.`)) return
+  async function handleDelete(agent: api.Agent) {
+    const confirmed = await confirmDialog(
+      $t('agents.delete_confirm', { name: agent.name })
+    )
+    if (!confirmed) return
     try {
       await api.deleteAgent(agent.id)
       showToast('Agent deleted', 'success')
@@ -99,7 +93,7 @@
             <button class="icon" onclick={() => { editing = {...agent}; creating = false }} title={$t('common.edit')}>
               <iconify-icon icon="ant-design:edit-outlined" width="16"></iconify-icon>
             </button>
-            <button class="icon danger" onclick={() => deleting = agent} title={$t('common.delete')}>
+            <button class="icon danger" onclick={() => handleDelete(agent)} title={$t('common.delete')}>
               <iconify-icon icon="ant-design:delete-outlined" width="16"></iconify-icon>
             </button>
           </div>
@@ -114,16 +108,6 @@
     agent={editing}
     onSave={handleSave}
     onCancel={() => { editing = null; creating = false }}
-  />
-{/if}
-
-{#if deleting}
-  <ConfirmDialog
-    title={$t('agents.delete_title')}
-    message={$t('agents.delete_confirm', { name: deleting.name })}
-    confirmText={$t('common.delete')}
-    onConfirm={() => handleDelete(deleting!)}
-    onCancel={() => deleting = null}
   />
 {/if}
 

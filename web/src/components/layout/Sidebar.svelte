@@ -27,10 +27,10 @@
   // leaves no ghost row.
   const groupedView = $derived.by(() => {
     // Filter sessions to the active agent's pool. Default agent sessions have
-    // no agent_id (empty or "default"); expert agents own their own sessions.
+    // no agent_profile (empty or "default"); expert agents own their own sessions.
     const agentSessions = $activeAgent === 'default'
-      ? $sessions.filter(s => !s.agent_id || s.agent_id === 'default')
-      : $sessions.filter(s => s.agent_id === $activeAgent)
+      ? $sessions.filter(s => !s.agent_profile || s.agent_profile === 'default')
+      : $sessions.filter(s => s.agent_profile === $activeAgent)
     const byId = new Map(agentSessions.map(s => [s.id, s] as const))
     const claimed = new Set<string>()
     // Pinned sessions float to a dedicated top section (registry order) and are

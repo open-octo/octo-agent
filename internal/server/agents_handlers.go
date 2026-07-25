@@ -12,13 +12,14 @@ import (
 // ─── Request/Response types ─────────────────────────────────────────────────
 
 type agentRequest struct {
-	ID          string   `json:"id,omitempty"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Model       string   `json:"model,omitempty"`
-	Tools       []string `json:"tools,omitempty"`
-	ToolSkills  []string `json:"tool_skills,omitempty"`
-	MentionAs   []string `json:"mention_as,omitempty"`
+	ID           string   `json:"id,omitempty"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Model        string   `json:"model,omitempty"`
+	Tools        []string `json:"tools,omitempty"`
+	ToolSkills   []string `json:"tool_skills,omitempty"`
+	MentionAs    []string `json:"mention_as,omitempty"`
+	SystemPrompt string   `json:"system_prompt,omitempty"`
 }
 
 type agentBindRequest struct {
@@ -40,6 +41,7 @@ type agentResponse struct {
 	Tools           []string                      `json:"tools,omitempty"`
 	ToolSkills      []string                      `json:"tool_skills,omitempty"`
 	MentionAs       []string                      `json:"mention_as,omitempty"`
+	SystemPrompt    string                        `json:"system_prompt,omitempty"`
 	ChannelBindings []agentprofile.ChannelBinding `json:"channel_bindings,omitempty"`
 }
 
@@ -52,6 +54,7 @@ func agentToResp(p *agentprofile.Profile) agentResponse {
 		Tools:           p.Tools,
 		ToolSkills:      p.ToolSkills,
 		MentionAs:       p.MentionAs,
+		SystemPrompt:    p.SystemPrompt,
 		ChannelBindings: p.ChannelBindings,
 	}
 }
@@ -123,9 +126,10 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		Name:        req.Name,
 		Description: req.Description,
 		CapabilitySpec: agentprofile.CapabilitySpec{
-			Model:      req.Model,
-			Tools:      req.Tools,
-			ToolSkills: req.ToolSkills,
+			Model:        req.Model,
+			Tools:        req.Tools,
+			ToolSkills:   req.ToolSkills,
+			SystemPrompt: req.SystemPrompt,
 		},
 		MentionAs: req.MentionAs,
 	}
@@ -162,9 +166,10 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		Name:        req.Name,
 		Description: req.Description,
 		CapabilitySpec: agentprofile.CapabilitySpec{
-			Model:      req.Model,
-			Tools:      req.Tools,
-			ToolSkills: req.ToolSkills,
+			Model:        req.Model,
+			Tools:        req.Tools,
+			ToolSkills:   req.ToolSkills,
+			SystemPrompt: req.SystemPrompt,
 		},
 		MentionAs:       req.MentionAs,
 		ChannelBindings: existing.ChannelBindings, // preserved unless explicitly changed

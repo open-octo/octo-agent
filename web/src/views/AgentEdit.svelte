@@ -27,6 +27,7 @@
       tools: tools.trim() ? tools.split(',').map(s => s.trim()).filter(Boolean) : undefined,
       tool_skills: toolSkills.trim() ? toolSkills.split(',').map(s => s.trim()).filter(Boolean) : undefined,
       mention_as: mentionAs.trim() ? mentionAs.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+      system_prompt: systemPrompt.trim() || undefined,
     }
     if (!body.name || !body.description) {
       alert('Name and description are required')

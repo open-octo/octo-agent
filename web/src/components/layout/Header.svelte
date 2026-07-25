@@ -23,6 +23,9 @@
     activeAgent.set(id)
     agentMenuOpen = false
   }
+  function cycleSidebar() {
+    sidebar.update(s => s === 'full' ? 'rail' : s === 'rail' ? 'hidden' : 'full')
+  }
 
   onMount(loadAgents)
 

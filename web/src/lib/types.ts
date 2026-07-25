@@ -18,7 +18,6 @@ export interface Session {
   status: 'idle' | 'working' | string
   source: string
   agent_profile: string
-  agent_id: string
   pinned: boolean
   total_tasks: number
   turn_count: number
