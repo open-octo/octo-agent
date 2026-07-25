@@ -12,6 +12,7 @@ import (
 // ─── Request/Response types ─────────────────────────────────────────────────
 
 type agentRequest struct {
+	ID          string   `json:"id,omitempty"`
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	Model       string   `json:"model,omitempty"`
@@ -32,25 +33,25 @@ type agentTransferRequest struct {
 // agentResponse is the wire shape for an agent profile. Stored files use the
 // same frontmatter shape via agentprofile.Profile.
 type agentResponse struct {
-	ID             string                `json:"id"`
-	Name           string                `json:"name"`
-	Description    string                `json:"description"`
-	Model          string                `json:"model,omitempty"`
-	Tools          []string              `json:"tools,omitempty"`
-	ToolSkills     []string              `json:"tool_skills,omitempty"`
-	MentionAs      []string              `json:"mention_as,omitempty"`
+	ID              string                        `json:"id"`
+	Name            string                        `json:"name"`
+	Description     string                        `json:"description"`
+	Model           string                        `json:"model,omitempty"`
+	Tools           []string                      `json:"tools,omitempty"`
+	ToolSkills      []string                      `json:"tool_skills,omitempty"`
+	MentionAs       []string                      `json:"mention_as,omitempty"`
 	ChannelBindings []agentprofile.ChannelBinding `json:"channel_bindings,omitempty"`
 }
 
 func agentToResp(p *agentprofile.Profile) agentResponse {
 	return agentResponse{
-		ID:             p.ID,
-		Name:           p.Name,
-		Description:    p.Description,
-		Model:          p.Model,
-		Tools:          p.Tools,
-		ToolSkills:     p.ToolSkills,
-		MentionAs:      p.MentionAs,
+		ID:              p.ID,
+		Name:            p.Name,
+		Description:     p.Description,
+		Model:           p.Model,
+		Tools:           p.Tools,
+		ToolSkills:      p.ToolSkills,
+		MentionAs:       p.MentionAs,
 		ChannelBindings: p.ChannelBindings,
 	}
 }
@@ -80,7 +81,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 
 // handleGetAgent serves GET /api/agents/:id — get a single profile.
 func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/api/agents/")
+	id := r.PathValue("id")
 	p, ok := s.agentStoreOrInit().Get(id)
 	if !ok {
 		writeError(w, http.StatusNotFound, "agent not found")
@@ -104,13 +105,16 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.Description) == "" {
 		writeError(w, http.StatusBadRequest, "description is required")
-		// Keep going — description is required by Store.Create anyway.
+		return
 	}
 
 	// Derive a slug ID from the name if not explicitly provided.
-	id := slugify(req.Name)
+	id := req.ID
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "name must contain at least one alphanumeric character")
+		id = slugify(req.Name)
+	}
+	if id == "" || !agentprofile.IsValidID(id) {
+		writeError(w, http.StatusBadRequest, "id must be a valid slug ([a-z0-9][a-z0-9-]*, 1-32 chars)")
 		return
 	}
 
@@ -140,7 +144,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 // handleUpdateAgent serves PUT /api/agents/:id — update an existing profile.
 // Builtin profiles are immutable through this endpoint.
 func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/api/agents/")
+	id := r.PathValue("id")
 	var req agentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %v", err))
@@ -176,7 +180,7 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 // handleDeleteAgent serves DELETE /api/agents/:id — remove a user-level profile.
 // Builtin profiles and profiles with active channel bindings are protected.
 func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/api/agents/")
+	id := r.PathValue("id")
 	if err := s.agentStoreOrInit().Delete(id); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeError(w, http.StatusNotFound, err.Error())
@@ -190,7 +194,7 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 
 // handleBindAgent serves POST /api/agents/:id/bind — bind a profile to an IM chat.
 func (s *Server) handleBindAgent(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(strings.TrimSuffix(r.URL.Path, "/bind"), "/api/agents/")
+	id := r.PathValue("id")
 	var req agentBindRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %v", err))
@@ -227,7 +231,7 @@ func (s *Server) handleBindAgent(w http.ResponseWriter, r *http.Request) {
 
 // handleUnbindAgent serves DELETE /api/agents/:id/bind — remove an IM binding.
 func (s *Server) handleUnbindAgent(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(strings.TrimSuffix(r.URL.Path, "/bind"), "/api/agents/")
+	id := r.PathValue("id")
 	var req agentBindRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %v", err))

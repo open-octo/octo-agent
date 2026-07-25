@@ -181,6 +181,7 @@ func (s *Scheduler) Update(task Task) error {
 	existing.Prompt = task.Prompt
 	existing.Model = task.Model
 	existing.Agent = task.Agent
+	existing.AgentID = task.AgentID
 	existing.Directory = task.Directory
 	existing.Notify = task.Notify
 	existing.Enabled = task.Enabled

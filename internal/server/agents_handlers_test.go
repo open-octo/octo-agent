@@ -195,17 +195,54 @@ func doAgent(t *testing.T, srv *Server, id string) agentResponse {
 
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
-		"Code Reviewer":     "code-reviewer",
-		"My Agent":          "my-agent",
-		"  Spaces  ":        "spaces",
-		"---":               "",
-		"Agent_1":           "agent-1",
-		"Multi   Spaces":    "multi-spaces",
-		"Special!@#$Chars":  "specialchars",
+		"Code Reviewer":    "code-reviewer",
+		"My Agent":         "my-agent",
+		"  Spaces  ":       "spaces",
+		"---":              "",
+		"Agent_1":          "agent-1",
+		"Multi   Spaces":   "multi-spaces",
+		"Special!@#$Chars": "specialchars",
+		"代码审查专家":           "",
 	}
 	for in, want := range cases {
 		if got := slugify(in); got != want {
 			t.Errorf("slugify(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestHandleAgents_CreateWithExplicitID verifies that a non-ASCII name can
+// still create a profile by providing an explicit ID.
+func TestHandleAgents_CreateWithExplicitID(t *testing.T) {
+	srv := agentsTestServer(t)
+
+	w := doJSON(t, srv, http.MethodPost, "/api/agents", `{
+		"id": "code-review-zh",
+		"name": "代码审查专家",
+		"description": "审查代码质量"
+	}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create with explicit id = %d: %s", w.Code, w.Body.String())
+	}
+	var created agentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.ID != "code-review-zh" || created.Name != "代码审查专家" {
+		t.Fatalf("unexpected profile: %+v", created)
+	}
+}
+
+// TestHandleAgents_UpdateNotFound verifies that updating a non-existent agent
+// returns 404.
+func TestHandleAgents_UpdateNotFound(t *testing.T) {
+	srv := agentsTestServer(t)
+
+	w := doJSON(t, srv, http.MethodPut, "/api/agents/nonexistent", `{
+		"name": "Ghost",
+		"description": "nope"
+	}`)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("update nonexistent = %d, want 404: %s", w.Code, w.Body.String())
 	}
 }
