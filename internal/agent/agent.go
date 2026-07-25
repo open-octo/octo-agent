@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -1419,7 +1420,8 @@ func (a *Agent) GenerateTitle(ctx context.Context) (string, error) {
 // retry would double the latency of a call bounded by TitleGenerationTimeout.
 func (a *Agent) GenerateTitleFrom(ctx context.Context, snap []Message) (string, error) {
 	sender, model := a.GetSender(), a.Model
-	if a.LiteSender != nil && a.LiteModel != "" {
+	isLite := a.LiteSender != nil && a.LiteModel != ""
+	if isLite {
 		sender, model = a.LiteSender, a.LiteModel
 	}
 	if sender == nil || model == "" {
@@ -1427,12 +1429,13 @@ func (a *Agent) GenerateTitleFrom(ctx context.Context, snap []Message) (string, 
 	}
 	text := firstUserText(snap)
 	if text == "" {
+		slog.Info("title generation skipped: no user text in snapshot")
 		return "", nil
 	}
 	if r := []rune(text); len(r) > titleContextMaxRunes {
 		text = string(r[:titleContextMaxRunes])
 	}
-	msgs := []Message{NewUserMessage(text), NewUserMessage(titleInstruction)}
+	msgs := []Message{NewUserMessage(text)}
 
 	if nr, ok := sender.(NoReasoningSender); ok {
 		sender = nr.NoReasoning()
@@ -1440,11 +1443,15 @@ func (a *Agent) GenerateTitleFrom(ctx context.Context, snap []Message) (string, 
 		sender = le.LowEffort()
 	}
 
-	reply, err := sender.SendMessages(ctx, model, "", msgs, titleMaxTokens)
+	slog.Info("title generation request", "model", model, "is_lite", isLite)
+	reply, err := sender.SendMessages(ctx, model, titleInstruction, msgs, titleMaxTokens)
 	if err != nil {
+		slog.Info("title generation provider error", "model", model, "err", err)
 		return "", err
 	}
-	return cleanTitle(reply.Content), nil
+	cleaned := cleanTitle(reply.Content)
+	slog.Info("title generation response", "model", model, "raw_len", len(reply.Content), "raw", reply.Content, "cleaned", cleaned)
+	return cleaned, nil
 }
 
 // GenerateTitleOrSnippet is GenerateTitleFrom with a guaranteed result: on
@@ -1458,8 +1465,12 @@ func (a *Agent) GenerateTitleOrSnippet(ctx context.Context, snap []Message) (str
 	t, err := a.GenerateTitleFrom(ctx, snap)
 	if err == nil {
 		if t = strings.TrimSpace(t); t != "" {
+			slog.Info("title generation succeeded", "title", t)
 			return t, nil
 		}
+		slog.Info("title generation returned empty, falling back to snippet")
+	} else {
+		slog.Info("title generation errored, falling back to snippet", "err", err)
 	}
 	return FirstUserSnippet(snap), err
 }

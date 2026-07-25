@@ -1915,19 +1915,16 @@ func TestAgent_GenerateTitle(t *testing.T) {
 		t.Errorf("history len = %d, want 2 (GenerateTitle must not append)", a.History.Len())
 	}
 	// The title call is deliberately minimal: ONLY the first user message's
-	// text plus the instruction, with no system prompt — the rest of the
-	// history ("found it") and a.System must not leak into the request.
-	if n := len(send.gotMessages); n != 2 {
-		t.Fatalf("sent %d messages, want 2 (first user message + instruction)", n)
+	// text, with the title instruction sent as the system prompt — the rest
+	// of the history ("found it") and a.System must not leak into the request.
+	if n := len(send.gotMessages); n != 1 {
+		t.Fatalf("sent %d messages, want 1 (first user message only)", n)
 	}
 	if send.gotMessages[0].Content != "the login page redirects in a loop" {
 		t.Errorf("first sent message = %q, want the first user message only", send.gotMessages[0].Content)
 	}
-	if send.gotMessages[1].Content != titleInstruction {
-		t.Errorf("last sent message = %q, want the title instruction", send.gotMessages[1].Content)
-	}
-	if send.gotSystem != "" {
-		t.Errorf("system = %q, want empty (title call sends no system prompt)", send.gotSystem)
+	if send.gotSystem != titleInstruction {
+		t.Errorf("system = %q, want the title instruction", send.gotSystem)
 	}
 	if send.gotMaxToks != titleMaxTokens {
 		t.Errorf("maxTokens = %d, want %d", send.gotMaxToks, titleMaxTokens)

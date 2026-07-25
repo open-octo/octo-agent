@@ -180,14 +180,11 @@ func TestListSessionsBrief_ReflectsGeneratedTitle(t *testing.T) {
 	}
 }
 
-// isTitlePrompt reports whether msgs is GenerateTitle's throwaway call
-// (identified by its trailing instruction, not by any dedicated flag — the
-// provider itself only ever sees an ordinary message list).
-func isTitlePrompt(msgs []agent.Message) bool {
-	if len(msgs) == 0 {
-		return false
-	}
-	return strings.Contains(msgs[len(msgs)-1].Content, "Generate a very short title")
+// isTitlePrompt reports whether this is GenerateTitle's throwaway call
+// (identified by its system prompt carrying the title instruction, not by any
+// dedicated flag — the provider itself only ever sees an ordinary user message).
+func isTitlePrompt(system string, msgs []agent.Message) bool {
+	return strings.Contains(system, "Generate a very short title")
 }
 
 // titleSpySender counts title-generation calls while letting the main turn
@@ -198,8 +195,8 @@ type titleSpySender struct {
 	titleCalls atomic.Int32
 }
 
-func (s *titleSpySender) SendMessages(_ context.Context, _, _ string, msgs []agent.Message, _ int) (agent.Reply, error) {
-	if isTitlePrompt(msgs) {
+func (s *titleSpySender) SendMessages(_ context.Context, _, system string, msgs []agent.Message, _ int) (agent.Reply, error) {
+	if isTitlePrompt(system, msgs) {
 		s.titleCalls.Add(1)
 	}
 	return agent.Reply{Content: "stub reply"}, nil
@@ -249,8 +246,8 @@ type blockingTurnSender struct {
 	release chan struct{} // the main call returns once this is closed
 }
 
-func (s *blockingTurnSender) SendMessages(_ context.Context, _, _ string, msgs []agent.Message, _ int) (agent.Reply, error) {
-	if isTitlePrompt(msgs) {
+func (s *blockingTurnSender) SendMessages(_ context.Context, _, system string, msgs []agent.Message, _ int) (agent.Reply, error) {
+	if isTitlePrompt(system, msgs) {
 		return agent.Reply{Content: "early title"}, nil
 	}
 	return agent.Reply{Content: "stub reply"}, nil
@@ -271,8 +268,8 @@ type blockingTitleFailSender struct {
 	release chan struct{}
 }
 
-func (s *blockingTitleFailSender) SendMessages(_ context.Context, _, _ string, msgs []agent.Message, _ int) (agent.Reply, error) {
-	if isTitlePrompt(msgs) {
+func (s *blockingTitleFailSender) SendMessages(_ context.Context, _, system string, msgs []agent.Message, _ int) (agent.Reply, error) {
+	if isTitlePrompt(system, msgs) {
 		return agent.Reply{}, fmt.Errorf("stub: title provider error")
 	}
 	return agent.Reply{Content: "stub reply"}, nil
