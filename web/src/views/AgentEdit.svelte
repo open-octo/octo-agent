@@ -56,9 +56,9 @@
       availableBots = channelList
         .filter(c => c.enabled)
         .map(c => ({
-          platform: c.name,
-          adapter_id: c.adapter_id || c.name,
-          label: c.adapter_id && c.adapter_id !== c.name ? `${c.name} / ${c.adapter_id}` : c.name,
+          platform: c.platform,
+          adapter_id: c.adapter_id || c.platform,
+          label: c.adapter_id && c.adapter_id !== c.platform ? `${c.platform} / ${c.adapter_id}` : c.platform,
         }))
     } catch { /* degrade gracefully */ }
   }

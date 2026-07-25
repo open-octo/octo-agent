@@ -92,14 +92,13 @@ export interface McpServer {
 }
 
 export interface Channel {
-  name: string
+  platform: string
   adapter_id?: string
-  handle: string
-  activity: string
-  icon: string
-  tagStatus: TagStatus
-  tagLabel: string
   enabled: boolean
+  running?: boolean
+  has_config?: boolean
+  fields?: Record<string, string>
+  issue?: string
 }
 
 export interface Memory {
