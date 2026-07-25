@@ -12,7 +12,7 @@ export default defineConfig({
     // left behind are inert: index.html only references the fresh ones.
     emptyOutDir: false,
     // The UI ships as one embedded bundle served from localhost; code-splitting buys nothing here.
-    chunkSizeWarningLimit: 600,
+    chunkSizeWarningLimit: 1000,
   },
   server: {
     port: 5173,

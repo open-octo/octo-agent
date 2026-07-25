@@ -7,9 +7,9 @@
   import VersionBadge from './VersionBadge.svelte'
 
   // Agent list for the new-session picker dropdown.
-  let agents: api.Agent[] = []
-  let agentPickerOpen = false
-  let agentPickerEl: HTMLElement
+  let agents: api.Agent[] = $state([])
+  let agentPickerOpen = $state(false)
+  let agentPickerEl = $state<HTMLElement>()
 
   function dismissPicker(e: MouseEvent) {
     if (!agentPickerOpen || !agentPickerEl) return
