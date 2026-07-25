@@ -1037,6 +1037,24 @@ func (s *Server) handleDeleteEndpointModel(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// resolveEndpointModel picks the target model for default/lite assignment.
+// If model is empty, it returns the endpoint's first model. Otherwise it
+// validates that the model exists under the endpoint.
+func resolveEndpointModel(ep config.Endpoint, model string) (string, error) {
+	if len(ep.Models) == 0 {
+		return "", fmt.Errorf("endpoint %q has no models", ep.ID)
+	}
+	if model == "" {
+		return ep.Models[0].Model, nil
+	}
+	for _, m := range ep.Models {
+		if m.Model == model {
+			return model, nil
+		}
+	}
+	return "", fmt.Errorf("model %q not found in endpoint %q", model, ep.ID)
+}
+
 // handleSetEndpointDefault: POST /api/config/endpoints/{id}/default[?model=<model>]
 // Sets cfg.Default to "<id>::<model>". If ?model is omitted, the endpoint's
 // first model is used. A model that does not exist under the endpoint is
@@ -1054,23 +1072,9 @@ func (s *Server) handleSetEndpointDefault(w http.ResponseWriter, r *http.Request
 			if ep.ID != id {
 				continue
 			}
-			if len(ep.Models) == 0 {
-				return fmt.Errorf("endpoint %q has no models", id)
-			}
-			m := model
-			if m == "" {
-				m = ep.Models[0].Model
-			} else {
-				found := false
-				for _, mm := range ep.Models {
-					if mm.Model == m {
-						found = true
-						break
-					}
-				}
-				if !found {
-					return fmt.Errorf("model %q not found in endpoint %q", m, id)
-				}
+			m, err := resolveEndpointModel(ep, model)
+			if err != nil {
+				return err
 			}
 			newDefault = ep.CompositeID(m)
 			cfg.SetDefaultComposite(newDefault)
@@ -1115,23 +1119,9 @@ func (s *Server) handleSetEndpointLite(w http.ResponseWriter, r *http.Request) {
 			if ep.ID != id {
 				continue
 			}
-			if len(ep.Models) == 0 {
-				return fmt.Errorf("endpoint %q has no models", id)
-			}
-			m := model
-			if m == "" {
-				m = ep.Models[0].Model
-			} else {
-				found := false
-				for _, mm := range ep.Models {
-					if mm.Model == m {
-						found = true
-						break
-					}
-				}
-				if !found {
-					return fmt.Errorf("model %q not found in endpoint %q", m, id)
-				}
+			m, err := resolveEndpointModel(ep, model)
+			if err != nil {
+				return err
 			}
 			newLite = ep.CompositeID(m)
 			cfg.Lite = newLite
@@ -1150,20 +1140,26 @@ func (s *Server) handleSetEndpointLite(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleUnsetEndpointLite: DELETE /api/config/endpoints/{id}/lite
-// Clears cfg.Lite so the agent falls back to vendor/registry-implied lite
-// models.
+// Clears cfg.Lite if it currently points at this endpoint. If lite is assigned
+// to a different endpoint, the call is a no-op and returns the existing value.
 func (s *Server) handleUnsetEndpointLite(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "missing endpoint id")
 		return
 	}
+	var cleared bool
+	var currentLite string
 	if err := config.Mutate(func(cfg *config.Config) error {
 		for _, ep := range cfg.Endpoints {
 			if ep.ID != id {
 				continue
 			}
-			cfg.Lite = ""
+			currentLite = cfg.Lite
+			if strings.HasPrefix(cfg.Lite, id+"::") {
+				cfg.Lite = ""
+				cleared = true
+			}
 			return nil
 		}
 		return fmt.Errorf("%w: %s", config.ErrEndpointNotFound, id)
@@ -1175,5 +1171,5 @@ func (s *Server) handleUnsetEndpointLite(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "lite": ""})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "cleared": cleared, "lite": currentLite})
 }
