@@ -28,8 +28,8 @@
       if (creating) {
         await api.createAgent(agent)
         showToast('Agent created', 'success')
-      } else {
-        await api.updateAgent(agent.id, agent)
+      } else if (editing) {
+        await api.updateAgent(editing.id, agent)
         showToast('Agent updated', 'success')
       }
       editing = null
