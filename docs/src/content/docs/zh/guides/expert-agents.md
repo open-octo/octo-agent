@@ -31,8 +31,7 @@ Web UI 也有 **Agents** 面板（`/agents`）用于创建、编辑和删除专�
    - **System Prompt** — 角色定义。描述这个智能体是什么、做什么、怎么做。
      这会**替换** Default Agent 的身份层（soul.md、user.md）。
    - **Model** — 留空使用默认模型，或指定特定模型。
-   - **Tools** — 勾选此智能体可以使用的工具。全部不勾选 = 授予全部工具
-     （Default Agent 行为）。
+   - **Tools** — 勾选此智能体可以使用的工具。全部不勾选 = 不授予任何工具。
    - **Skills** — 勾选此智能体可加载的技能。
 4. 点击 **Save**。
 
@@ -72,7 +71,7 @@ Default Agent 会通过 `expert-agent-manager` 技能调用 REST API 完成创�
 ### IM 频道
 
 通过 Web UI 在智能体设置中将其分配到指定 IM 频道。分配后，该频道的所有消息
-直接路由到该智能体——无需 `/bind` 或 `@mention`。
+直接路由到该智能体。
 
 如果不给任何专家智能体分配频道，消息会路由到 Default Agent。
 
@@ -104,7 +103,8 @@ octo --agent
 创建专家智能体时，你可以选择它能使用哪些工具和技能。运行时：
 
 - **工具**每轮自动过滤——专家智能体只看得到 allowlist 中的工具。
-  空 allowlist = 全部工具可用（同 Default Agent）。
+  空 allowlist = 不授予任何工具（内置的 default/explore/general/code-review 除外，
+  它们的空 allowlist 表示全部工具可用）。
 - **技能**在 system prompt manifest 中按 profile 过滤。系统级技能
   （`skill-creator`、`expert-agent-manager`、`channel-manager` 等）自动对
   专家智能体隐藏——它们只对 Default Agent 有意义。
@@ -114,7 +114,7 @@ octo --agent
 
 每个智能体有独立的会话池，通过 `<agentID>#` 前缀区分。这意味着：
 
-- 路由到 `code-review` 的聊天有自己独立的 history、`/bind`、`/list`、`/stop`
+- 路由到 `code-review` 的聊天有自己独立的 history、`/list`、`/stop`
   ——与同聊天中 Default Agent 的会话互不干扰。
 - 已有会话不会迁移，始终归属于创建它的智能体。
 - 多智能体升级前的旧会话归属于 Default Agent。

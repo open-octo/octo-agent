@@ -34,7 +34,7 @@ and delete expert agents — plus assign them to IM channels.
      (soul.md, user.md).
    - **Model** — leave empty to use the default model, or pick a specific one.
    - **Tools** — check the tools the agent may use. Leave all unchecked to
-     grant full tool access (Default Agent behaviour).
+     grant no tools.
    - **Skills** — check the skills the agent may load on demand.
 4. Click **Save**.
 
@@ -79,7 +79,7 @@ Each session in the sidebar is tagged with its agent name.
 
 Assign an expert agent to an IM channel through the agent's settings in the
 Web UI. Once assigned, all messages from that channel route directly to the
-agent — no `/bind` or `@mention` needed.
+agent.
 
 The Default Agent can also be used in IM: just don't assign a channel to
 any expert agent, and messages will route to Default.
@@ -113,7 +113,8 @@ When you create an expert agent, you pick which tools and skills it can use. At
 runtime:
 
 - **Tools** are filtered on every turn — an expert agent only sees the tools in
-  its allowlist. An empty allowlist means "all tools" (like the Default Agent).
+  its allowlist. An empty allowlist means no tools (except for the built-in
+  default/explore/general/code-review agents, where empty means all tools).
 - **Skills** are filtered in the system prompt manifest. System-level skills
   (`skill-creator`, `expert-agent-manager`, `channel-manager`, etc.) are
   automatically hidden from expert agents — they only make sense for the
@@ -126,7 +127,7 @@ runtime:
 Each agent has its own session pool, separated by an `<agentID>#` prefix on the
 session key. This means:
 
-- A chat routed to `code-review` has its own history, `/bind`, `/list`, and `/stop`
+- A chat routed to `code-review` has its own history, `/list`, and `/stop`
   — independent of the Default Agent's sessions in the same chat.
 - Existing sessions are never migrated; they stay with whichever agent created
   them.
