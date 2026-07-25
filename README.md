@@ -14,10 +14,6 @@
 > 接**任意模型**（DeepSeek、Kimi、Anthropic、OpenAI 或任何兼容端点），服务和
 > 数据都留在你自己的机器上。
 
-<p align="center">
-  <img src="landing/assets/demo-cn.gif" alt="octo 演示" width="760">
-</p>
-
 ```bash
 curl -fsSL https://octo-agent.dev/install.sh | sh     # 单二进制，无需 Node / Ruby / Python 环境
 octo config                                            # 选 provider，填 key（DeepSeek / Kimi / 百炼 …）

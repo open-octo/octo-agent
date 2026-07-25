@@ -15,10 +15,6 @@
 > Anthropic, OpenAI, or anything compatible), with the server and your data staying
 > on your own machine.
 
-<p align="center">
-  <img src="landing/assets/demo.gif" alt="octo demo" width="760">
-</p>
-
 ```bash
 curl -fsSL https://octo-agent.dev/install.sh | sh     # single binary — no Node / Ruby / Python
 octo config                                            # pick a provider, paste a key (DeepSeek / Kimi / …)
