@@ -11,6 +11,7 @@
   // Agent selector state.
   let agents: api.Agent[] = []
   let agentMenuOpen = false
+  let agentSelector: HTMLElement
   $: currentAgent = agents.find(a => a.id === $activeAgent)?.name ?? 'Default'
 
   async function loadAgents() {
@@ -25,6 +26,12 @@
   }
   function cycleSidebar() {
     sidebar.update(s => s === 'full' ? 'rail' : s === 'rail' ? 'hidden' : 'full')
+  }
+  function onWindowClick(e: MouseEvent) {
+    if (!agentMenuOpen || !agentSelector) return
+    if (!agentSelector.contains(e.target as Node)) {
+      agentMenuOpen = false
+    }
   }
 
   onMount(loadAgents)
@@ -88,6 +95,8 @@
   })
 </script>
 
+<svelte:window onclick={onWindowClick} />
+
 <header class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
   <div class="left">
     <button class="icon-btn" title={$t('header.toggle_sidebar')} onclick={cycleSidebar}>
@@ -102,7 +111,7 @@
 
     <!-- Agent selector: the profile the current view operates as. Switching
          reloads all panels (sessions/skills/MCP/cron) filtered to this agent. -->
-    <div class="agent-selector">
+    <div class="agent-selector" bind:this={agentSelector}>
       <button class="agent-btn" onclick={() => agentMenuOpen = !agentMenuOpen}>
         <span class="agent-dot" class:active={$activeAgent !== 'default'}></span>
         <span class="agent-name">{currentAgent}</span>

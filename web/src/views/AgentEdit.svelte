@@ -16,7 +16,20 @@
   let tools = $state(agent?.tools?.join(', ') ?? '')
   let toolSkills = $state(agent?.tool_skills?.join(', ') ?? '')
   let mentionAs = $state(agent?.mention_as?.join(', ') ?? '')
-  let systemPrompt = $state('')
+  let systemPrompt = $state(agent?.system_prompt ?? '')
+
+  // Reset form fields when the agent prop changes (Svelte 5 captures prop
+  // values only at initialisation; without this, editing a different agent
+  // keeps the previous form content).
+  $effect(() => {
+    name = agent?.name ?? ''
+    description = agent?.description ?? ''
+    model = agent?.model ?? ''
+    tools = agent?.tools?.join(', ') ?? ''
+    toolSkills = agent?.tool_skills?.join(', ') ?? ''
+    mentionAs = agent?.mention_as?.join(', ') ?? ''
+    systemPrompt = agent?.system_prompt ?? ''
+  })
 
   function handleSubmit(e: Event) {
     e.preventDefault()
@@ -38,7 +51,7 @@
 </script>
 
 <div class="modal-backdrop" onclick={onCancel}>
-  <div class="modal" onclick|stopPropagation>
+  <div class="modal" onclick={(e) => e.stopPropagation()}>
     <h3>{agent ? $t('agents.edit') : $t('agents.create')}</h3>
     <form onsubmit={handleSubmit}>
       <div class="field">
