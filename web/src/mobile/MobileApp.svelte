@@ -109,6 +109,8 @@
     display: flex;
     flex-direction: column;
     padding-top: env(safe-area-inset-top);
+    overflow: hidden;
+    position: relative;
   }
   .m-tabbar {
     flex: none;
