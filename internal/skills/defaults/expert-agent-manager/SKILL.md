@@ -41,8 +41,7 @@ Use the `web_fetch` tool to call them. All requests return JSON.
   "system_prompt": "You are a thorough code reviewer. Be concise but precise.",
   "model": "claude-sonnet-4-20250514",
   "tools": ["read_file", "grep", "glob"],
-  "tool_skills": ["code-review"],
-  "mention_as": ["@review"]
+  "tool_skills": ["code-review"]
 }
 ```
 
@@ -51,11 +50,8 @@ Use the `web_fetch` tool to call them. All requests return JSON.
 - `description`: required; shown in listings.
 - `system_prompt`: the agent's system prompt (the Markdown body of `~/.octo/agents/<id>.md`); required for the agent to behave differently from the default agent.
 - `model`: optional model override (must be in `~/.octo/config.yml`'s models).
-- `tools`: tool allowlist; `[]` = no tools (user agents) or all tools (default agent). For restrictive agents, always set to `[]`.
+- `tools`: tool allowlist; `[]` = no tools. User-created agents with empty `tools` get nothing (unlike the default agent which gets all tools with empty allowlist).
 - `tool_skills`: skills exposed as tools.
-- `disallowed_tools`: tools explicitly subtracted (useful when you want "all except X").
-- `read_only`: if true, write-capable tools (write_file, edit_file, terminal) are stripped.
-- `mention_as`: @-aliases for IM routing (each must start with `@`, globally unique).
 
 ## Writing Effective System Prompts — Core Principles
 
@@ -204,7 +200,7 @@ can drive a real test; you cannot simulate it.
 4. **Call `PUT /api/agents/:id`** with the full updated profile (the API
    replaces the whole object — send all fields, not just changed ones).
 
-Note: `id` and `created_at` are immutable. `channel_bindings` from the
+Note: `id` is immutable. `channel_bindings` from the
 existing profile are preserved unless the user explicitly changes them.
 
 ### Deleting an agent
@@ -235,8 +231,6 @@ existing profile are preserved unless the user explicitly changes them.
 
 - **Always confirm before destructive operations** (delete, overwrite).
 - **Show the user the current state** before modifying — don't guess.
-- **Mention aliases must be globally unique** — creating a profile with a
-   duplicate `@alias` returns 409. Check existing profiles first.
 - **Model must exist in config** — the server validates against
   `~/.octo/config.yml`'s `models` list. An invalid model returns 400.
 - **This skill only works on the Default Agent** — if you detect you're running
@@ -257,7 +251,5 @@ existing profile are preserved unless the user explicitly changes them.
   different name or use the existing profile.
 - **400 "model not found"** — the model isn't in config. List available models
   via `GET /api/config/endpoints` and ask the user to pick one.
-- **409 "alias already claimed"** — another profile uses the same `@alias`.
-  List existing profiles and suggest an alternative.
-- **409 "channel binding exists"** — the chat is already bound to this or
-  another profile. Check existing bindings first.
+- **Duplicate bindings** — binding the same chat twice returns 200 (idempotent);
+  no error to handle.
