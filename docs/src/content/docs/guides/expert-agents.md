@@ -18,7 +18,7 @@ octo chat --agent code-review "review the diff"
 ```
 
 The Web UI also has an **Agents** panel (`/agents`) where you can create, edit,
-and delete expert agents — plus bind them to IM channels.
+and delete expert agents — plus assign them to IM channels.
 
 ## Creating an agent
 
@@ -75,16 +75,14 @@ bound to the chosen agent — switch agents by opening a new session.
 
 Each session in the sidebar is tagged with its agent name.
 
-### IM channels — channel bindings
+### IM channels
 
-Bind an expert agent to a channel so messages route to it automatically:
+Assign an expert agent to an IM channel through the agent's settings in the
+Web UI. Once assigned, all messages from that channel route directly to the
+agent — no `/bind` or `@mention` needed.
 
-```
-/bind code-review
-```
-
-A group chat with multiple bound agents stays silent — bind only one
-agent per group, or keep the Default Agent for general use.
+The Default Agent can also be used in IM: just don't assign a channel to
+any expert agent, and messages will route to Default.
 
 ### CLI
 
@@ -128,7 +126,7 @@ runtime:
 Each agent has its own session pool, separated by an `<agentID>#` prefix on the
 session key. This means:
 
-- A chat bound to `code-review` has its own history, `/bind`, `/list`, and `/stop`
+- A chat routed to `code-review` has its own history, `/bind`, `/list`, and `/stop`
   — independent of the Default Agent's sessions in the same chat.
 - Existing sessions are never migrated; they stay with whichever agent created
   them.
@@ -164,5 +162,5 @@ Cron tasks are owned by the agent that created them. In the Web UI's Tasks panel
   that only reviews code doesn't need `terminal` or `write_file`.
 - **Give it exactly one or two skills**: the skill description is the model's
   trigger cue — don't drown the signal.
-- **Test with a one-shot**: before binding an agent to a channel, try `octo
+- **Test with a one-shot**: before assigning an agent to a channel, try `octo
   --agent new-agent -p "test prompt"` to see how it responds.

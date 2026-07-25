@@ -17,7 +17,7 @@ octo chat --agent code-review "review the diff"
 ```
 
 Web UI 也有 **Agents** 面板（`/agents`）用于创建、编辑和删除专家智能体，
-还可以把它们绑定到 IM 频道。
+还可以把它们分配到 IM 频道。
 
 ## 创建智能体
 
@@ -69,16 +69,12 @@ Default Agent 会通过 `expert-agent-manager` 技能调用 REST API 完成创�
 
 侧边栏中每条会话都标记了所属智能体的标签。
 
-### IM 频道 — 频道绑定
+### IM 频道
 
-把专家智能体绑定到频道后，消息会自动路由到它：
+通过 Web UI 在智能体设置中将其分配到指定 IM 频道。分配后，该频道的所有消息
+直接路由到该智能体——无需 `/bind` 或 `@mention`。
 
-```
-/bind code-review
-```
-
-绑定多个智能体的群聊会保持静默——每个群只绑定一个智能体，
-或者保留 Default Agent 处理日常对话。
+如果不给任何专家智能体分配频道，消息会路由到 Default Agent。
 
 ### CLI
 
@@ -118,7 +114,7 @@ octo --agent
 
 每个智能体有独立的会话池，通过 `<agentID>#` 前缀区分。这意味着：
 
-- 绑定到 `code-review` 的聊天有自己独立的 history、`/bind`、`/list`、`/stop`
+- 路由到 `code-review` 的聊天有自己独立的 history、`/bind`、`/list`、`/stop`
   ——与同聊天中 Default Agent 的会话互不干扰。
 - 已有会话不会迁移，始终归属于创建它的智能体。
 - 多智能体升级前的旧会话归属于 Default Agent。
@@ -151,5 +147,5 @@ cron 任务归属于创建它的智能体。在 Web UI 的 Tasks 面板中：
 - **限制工具**：只勾选智能体真正需要的工具。只做代码审查的智能体不需要
   `terminal` 或 `write_file`。
 - **只给一两个技能**：技能描述是模型的触发信号——不要淹没它。
-- **先用 one-shot 测试**：绑定到频道前，先 `octo --agent new-agent -p "测试提示"`
+- **先用 one-shot 测试**：分配到频道前，先 `octo --agent new-agent -p "测试提示"`
   看看响应是否符合预期。
