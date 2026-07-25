@@ -216,7 +216,13 @@ existing profile are preserved unless the user explicitly changes them.
 
 ### Binding to an IM chat
 
-1. **Collect platform + chat ID** (e.g. `weixin` + group ID).
+1. **Collect platform + chat ID.** The format depends on the platform:
+   - **WeChat (weixin):** only private chats are supported. The `chat_id` is the
+     user's private chat ID (e.g. `o9cq8...@im.wechat`). Group chats are not
+     available on this platform.
+   - **Other platforms** (Telegram, Discord, Feishu, DingTalk, WeCom): both
+     private and group chat IDs are supported.
+   When the user says "bind to a WeChat group", correct them — it isn't possible.
 2. **Call `POST /api/agents/:id/bind`** with `{"platform": "...", "chat_id": "..."}`.
 3. **Verify** with `GET /api/agents/:id`.
 
