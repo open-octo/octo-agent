@@ -1477,6 +1477,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       })
     }
     ws.sendMessage(sid, text, files)
+    pinToBottom()
   }
 
   // ── force bind ─────────────────────────────────────────────────────────────
@@ -1493,6 +1494,17 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     }
     bindRequiredFor = null
     ws.sendMessage(sid, meta.text, meta.files, true)
+    pinToBottom()
+  }
+
+  // Re-pin the scroll view to the bottom: reset the stick flag so the
+  // ResizeObserver keeps us there, and scroll immediately in case the observer
+  // doesn't fire (e.g. content height hasn't changed yet).
+  function pinToBottom() {
+    stick = true
+    requestAnimationFrame(() => {
+      if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight
+    })
   }
 
   // ── plan progress helpers ──────────────────────────────────────────────────
@@ -1539,6 +1551,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // before the message, and reruns with the edited prompt itself — no
       // resend from here (a resend would append the prompt a second time).
       await api.editMessage(sid, msgs[idx].messageIndex, content)
+      // Server truncated history and reran — re-pin so the new reply streams
+      // into view even if the user had scrolled up before editing.
+      pinToBottom()
       editingIndex = null
       editingDraft = ''
     } catch (e: any) {
