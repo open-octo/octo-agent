@@ -75,7 +75,7 @@ bound to the chosen agent — switch agents by opening a new session.
 
 Each session in the sidebar is tagged with its agent name.
 
-### IM channels — @-mentions and bindings
+### IM channels — channel bindings
 
 Bind an expert agent to a channel so messages route to it automatically:
 
@@ -83,15 +83,8 @@ Bind an expert agent to a channel so messages route to it automatically:
 /bind code-review
 ```
 
-In group chats with multiple bound agents, use `@review` to address a specific
-one:
-
-```
-@review can you check this diff?
-```
-
-An agent without a channel binding can still be reached via `@mention` in any chat
-where the bot is present.
+A group chat with multiple bound agents stays silent — bind only one
+agent per group, or keep the Default Agent for general use.
 
 ### CLI
 

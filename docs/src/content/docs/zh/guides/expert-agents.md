@@ -69,7 +69,7 @@ Default Agent 会通过 `expert-agent-manager` 技能调用 REST API 完成创�
 
 侧边栏中每条会话都标记了所属智能体的标签。
 
-### IM 频道 — @ 提及与频道绑定
+### IM 频道 — 频道绑定
 
 把专家智能体绑定到频道后，消息会自动路由到它：
 
@@ -77,13 +77,8 @@ Default Agent 会通过 `expert-agent-manager` 技能调用 REST API 完成创�
 /bind code-review
 ```
 
-在绑定了多个智能体的群聊中，用 `@review` 指定目标：
-
-```
-@review 帮我看看这个 diff
-```
-
-没有频道绑定的智能体可以通过 `@mention` 在任何 bot 所在的聊天中被呼叫。
+绑定多个智能体的群聊会保持静默——每个群只绑定一个智能体，
+或者保留 Default Agent 处理日常对话。
 
 ### CLI
 
