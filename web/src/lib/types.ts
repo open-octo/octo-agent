@@ -375,7 +375,7 @@ export interface WsEventNextMessageSuggestion {
 export interface WsEventSessionActivity {
   type: 'session_activity'
   session_id: string
-  kind: 'question_pending' | 'question_resolved' | 'turn_complete'
+  kind: 'question_pending' | 'question_resolved' | 'confirm_pending' | 'confirm_resolved' | 'turn_complete'
 }
 
 // Discriminated union of all WebSocket event types
