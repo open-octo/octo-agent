@@ -75,6 +75,7 @@ export default defineConfig({
 						{ label: 'Give it memory', slug: 'guides/memory', translations: { 'zh-CN': '让它拥有记忆' } },
 						{ label: 'Connect a memory backend', slug: 'guides/memory-backends', translations: { 'zh-CN': '接入记忆后端' } },
 						{ label: 'Sub-agents', slug: 'guides/sub-agents', translations: { 'zh-CN': '子代理' } },
+						{ label: 'Expert agents', slug: 'guides/expert-agents', translations: { 'zh-CN': '专家智能体' } },
 						{ label: 'Workflows', slug: 'guides/workflows', translations: { 'zh-CN': '工作流' } },
 						{ label: 'Automate with hooks', slug: 'guides/hooks', translations: { 'zh-CN': '用 Hooks 自动化' } },
 						{ label: 'Bridge to chat apps', slug: 'guides/channels', translations: { 'zh-CN': '接入聊天应用' } },
