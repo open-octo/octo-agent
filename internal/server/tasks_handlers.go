@@ -27,7 +27,7 @@ type taskRequest struct {
 	Cron      string                  `json:"cron"`
 	Prompt    string                  `json:"prompt"`
 	Model     string                  `json:"model,omitempty"`
-	Agent     string                  `json:"agent,omitempty"`  // deprecated
+	Agent     string                  `json:"agent,omitempty"` // deprecated
 	AgentID   string                  `json:"agent_id,omitempty"`
 	Directory string                  `json:"directory,omitempty"`
 	Notify    scheduler.NotifyTargets `json:"notify,omitempty"`
@@ -39,7 +39,7 @@ type taskResponse struct {
 	Cron           string                  `json:"cron"`
 	Prompt         string                  `json:"prompt"`
 	Model          string                  `json:"model,omitempty"`
-	Agent          string                  `json:"agent,omitempty"`  // deprecated
+	Agent          string                  `json:"agent,omitempty"` // deprecated
 	AgentID        string                  `json:"agent_id,omitempty"`
 	Directory      string                  `json:"directory,omitempty"`
 	Notify         scheduler.NotifyTargets `json:"notify,omitempty"`
