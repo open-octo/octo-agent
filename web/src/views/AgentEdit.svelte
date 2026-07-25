@@ -21,7 +21,6 @@
   interface ChecklistItem {
     name: string
     description: string
-    kind: 'builtin' | 'skill' | 'mcp'
   }
   let availableTools: ChecklistItem[] = $state([])
   let availableSkills: ChecklistItem[] = $state([])
@@ -40,12 +39,10 @@
       availableTools = toolDefs.map(t => ({
         name: t.name,
         description: t.description || '',
-        kind: 'builtin' as const,
       }))
       availableSkills = skillDefs.map(s => ({
         name: s.name,
         description: s.desc || '',
-        kind: 'skill' as const,
       }))
     } catch {
       // Degrade gracefully — the text-input fallback is always available

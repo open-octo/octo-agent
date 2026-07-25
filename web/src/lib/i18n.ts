@@ -51,14 +51,11 @@ export const en: Record<string, string> = {
   "agents.model": "Model",
   "agents.model_placeholder": "Leave empty to use the default model",
   "agents.tools": "Tools",
-  "agents.tools_placeholder": "read_file, grep, glob (comma-separated, empty = all)",
 
-  "agents.tools_loading": "Loading available toolsu2026",
-  "agents.tools_hint": "Leave empty to grant all tools (default agent behaviour).",
+  "agents.tools_loading": "Loading available tools…",
   "agents.tool_skills": "Skills",
 
-  "agents.skills_loading": "Loading available skillsu2026",
-  "agents.tool_skills_placeholder": "code-review, tech-design",
+  "agents.skills_loading": "Loading available skills…",
   "agents.mention_as": "Mention Aliases",
   "agents.mention_as_placeholder": "@review, @expert",
   "agents.mention_as_hint": "Each alias must start with @ and be globally unique.",
@@ -857,14 +854,11 @@ export const zh: Record<string, string> = {
   "agents.model": "模型",
   "agents.model_placeholder": "留空使用默认模型",
   "agents.tools": "工具",
-  "agents.tools_placeholder": "read_file, grep, glob（逗号分隔，空=全部）",
-  "agents.tools_hint": "留空授予全部工具（默认智能体行为）。",
 
   "agents.tools_loading": "正在加载可用工具…",
   "agents.tool_skills": "技能",
 
   "agents.skills_loading": "正在加载可用技能…",
-  "agents.tool_skills_placeholder": "code-review, tech-design",
   "agents.mention_as": "提及别名",
   "agents.mention_as_placeholder": "@review, @expert",
   "agents.mention_as_hint": "每个别名必须以 @ 开头且全局唯一。",
