@@ -14,12 +14,12 @@ func TestCmdGoal_AppliesSharedGrammarOnStore(t *testing.T) {
 	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
 
 	// No session yet.
-	if r := mgr.cmdGoal(ev, "anything"); !strings.Contains(r, "No active session") {
+	if r := mgr.cmdGoal(ev, "anything", ""); !strings.Contains(r, "No active session") {
 		t.Errorf("no-session reply = %q", r)
 	}
 
-	sess := mgr.GetOrCreateSession(ev)
-	if r := mgr.cmdGoal(ev, "ship the release"); !strings.Contains(r, "Goal set") {
+	sess := mgr.GetOrCreateSession(ev, nil)
+	if r := mgr.cmdGoal(ev, "ship the release", ""); !strings.Contains(r, "Goal set") {
 		t.Errorf("create reply = %q", r)
 	}
 
@@ -41,13 +41,13 @@ func TestCmdGoal_AppliesSharedGrammarOnStore(t *testing.T) {
 		t.Errorf("goal must persist to disk: %+v", rg)
 	}
 
-	if r := mgr.cmdGoal(ev, "pause"); !strings.Contains(r, "paused") {
+	if r := mgr.cmdGoal(ev, "pause", ""); !strings.Contains(r, "paused") {
 		t.Errorf("pause reply = %q", r)
 	}
 
 	// A tombstoned store (concurrent /unbind) degrades gracefully.
 	_ = sess.deleteStore()
-	if r := mgr.cmdGoal(ev, ""); !strings.Contains(r, "unavailable") {
+	if r := mgr.cmdGoal(ev, "", ""); !strings.Contains(r, "unavailable") {
 		t.Errorf("tombstoned-store reply = %q", r)
 	}
 }
@@ -64,9 +64,9 @@ func TestCmdGoal_RespectsGoalsEnabledGate(t *testing.T) {
 
 	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
 	mgr.SetGoalsEnabled(false)
-	sess := mgr.GetOrCreateSession(ev)
+	sess := mgr.GetOrCreateSession(ev, nil)
 
-	if r := mgr.cmdGoal(ev, "ship the release"); !strings.Contains(r, "disabled") {
+	if r := mgr.cmdGoal(ev, "ship the release", ""); !strings.Contains(r, "disabled") {
 		t.Errorf("goals-disabled reply = %q, want a disabled notice", r)
 	}
 	if _, ok := sess.GoalStore().GoalSnapshot(); ok {
@@ -75,7 +75,7 @@ func TestCmdGoal_RespectsGoalsEnabledGate(t *testing.T) {
 
 	// Re-enabling restores the normal behavior.
 	mgr.SetGoalsEnabled(true)
-	if r := mgr.cmdGoal(ev, "ship the release"); !strings.Contains(r, "Goal set") {
+	if r := mgr.cmdGoal(ev, "ship the release", ""); !strings.Contains(r, "Goal set") {
 		t.Errorf("re-enabled create reply = %q", r)
 	}
 }

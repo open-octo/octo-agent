@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agentprofile"
 )
 
 func tempHome(t *testing.T) {
@@ -17,7 +18,7 @@ func tempHome(t *testing.T) {
 }
 
 func testManager() *Manager {
-	return NewManager(&Config{}, func() *agent.Agent {
+	return NewManager(&Config{}, func(*agentprofile.Profile) *agent.Agent {
 		return agent.New(nil, "stub-model")
 	}, BindByChatUser)
 }
@@ -43,7 +44,7 @@ func TestSession_PersistAndRestore(t *testing.T) {
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1", Text: "hi"}
 
 	m1 := testManager()
-	sess := m1.GetOrCreateSession(ev)
+	sess := m1.GetOrCreateSession(ev, nil)
 	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "remember the number 42"})
 	sess.Agent.History.Append(agent.Message{Role: agent.RoleAssistant, Content: "noted: 42"})
 	if err := sess.Persist(); err != nil {
@@ -53,7 +54,7 @@ func TestSession_PersistAndRestore(t *testing.T) {
 	// A fresh manager simulates the post-restart process: same event key must
 	// come back with the conversation history.
 	m2 := testManager()
-	restored := m2.GetOrCreateSession(ev)
+	restored := m2.GetOrCreateSession(ev, nil)
 	msgs := restored.Agent.History.Snapshot()
 	if len(msgs) != 2 {
 		t.Fatalf("restored history has %d messages, want 2", len(msgs))
@@ -71,7 +72,7 @@ func TestSession_PersistAcrossTurnsAppends(t *testing.T) {
 	ev := InboundEvent{Platform: "tg", ChatID: "c", UserID: "u"}
 
 	m := testManager()
-	sess := m.GetOrCreateSession(ev)
+	sess := m.GetOrCreateSession(ev, nil)
 	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "one"})
 	if err := sess.Persist(); err != nil {
 		t.Fatal(err)
@@ -81,7 +82,7 @@ func TestSession_PersistAcrossTurnsAppends(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	restored := testManager().GetOrCreateSession(ev)
+	restored := testManager().GetOrCreateSession(ev, nil)
 	if got := len(restored.Agent.History.Snapshot()); got != 2 {
 		t.Errorf("history after two persists = %d messages, want 2", got)
 	}
@@ -94,7 +95,7 @@ func TestCmdUnbind_KeepsStore(t *testing.T) {
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 
 	m := testManager()
-	sess := m.GetOrCreateSession(ev)
+	sess := m.GetOrCreateSession(ev, nil)
 	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "secret"})
 	if err := sess.Persist(); err != nil {
 		t.Fatal(err)
@@ -107,7 +108,7 @@ func TestCmdUnbind_KeepsStore(t *testing.T) {
 		t.Fatalf("store file missing before unbind: %v", err)
 	}
 
-	if reply := m.cmdUnbind(ev); !strings.Contains(strings.ToLower(reply), "unbound") &&
+	if reply := m.cmdUnbind(ev, ""); !strings.Contains(strings.ToLower(reply), "unbound") &&
 		!strings.Contains(strings.ToLower(reply), "wasn't bound") {
 		t.Fatalf("unexpected unbind reply %q", reply)
 	}
@@ -124,7 +125,7 @@ func TestCmdBind_AttachesToExistingSession(t *testing.T) {
 
 	// Chat A builds up a session and persists it.
 	evA := InboundEvent{Platform: "feishu", ChatID: "cA", UserID: "uA"}
-	sessA := m.GetOrCreateSession(evA)
+	sessA := m.GetOrCreateSession(evA, nil)
 	sessA.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "shared context"})
 	if err := sessA.Persist(); err != nil {
 		t.Fatal(err)
@@ -133,10 +134,10 @@ func TestCmdBind_AttachesToExistingSession(t *testing.T) {
 
 	// Chat B binds to A's session by ID and should see A's history.
 	evB := InboundEvent{Platform: "feishu", ChatID: "cB", UserID: "uB"}
-	if reply := m.cmdBind(evB, []string{targetID}); !strings.Contains(strings.ToLower(reply), "bound") {
+	if reply := m.cmdBind(evB, []string{targetID}, ""); !strings.Contains(strings.ToLower(reply), "bound") {
 		t.Fatalf("unexpected bind reply %q", reply)
 	}
-	bound := m.GetSession(evB)
+	bound := m.GetSession(evB, "")
 	if bound == nil {
 		t.Fatal("expected a session after /bind")
 	}
@@ -152,7 +153,7 @@ func TestCmdBind_AttachesToExistingSession(t *testing.T) {
 
 	// The binding survives a rebuild (persisted): a fresh manager re-attaches.
 	m2 := testManager()
-	again := m2.GetOrCreateSession(evB)
+	again := m2.GetOrCreateSession(evB, nil)
 	if again.Store.ID != targetID {
 		t.Errorf("binding did not persist: store = %q, want %q", again.Store.ID, targetID)
 	}
@@ -174,11 +175,11 @@ func TestCmdBind_RejectedWhenBoundToOtherEntry(t *testing.T) {
 	}
 
 	evB := InboundEvent{Platform: "feishu", ChatID: "cB", UserID: "uB"}
-	reply := m.cmdBind(evB, []string{webSess.ID})
+	reply := m.cmdBind(evB, []string{webSess.ID}, "")
 	if !strings.Contains(strings.ToLower(reply), "cannot bind") {
 		t.Fatalf("expected rejection, got %q", reply)
 	}
-	if m.GetSession(evB) != nil {
+	if m.GetSession(evB, "") != nil {
 		t.Fatal("expected no session after rejected /bind")
 	}
 }
@@ -199,7 +200,7 @@ func TestCmdBind_ForceTakesOverOtherEntry(t *testing.T) {
 	}
 
 	evB := InboundEvent{Platform: "feishu", ChatID: "cB", UserID: "uB"}
-	reply := m.cmdBind(evB, []string{"--force", webSess.ID})
+	reply := m.cmdBind(evB, []string{"--force", webSess.ID}, "")
 	if !strings.Contains(strings.ToLower(reply), "taken over") {
 		t.Fatalf("expected takeover success, got %q", reply)
 	}
@@ -207,7 +208,7 @@ func TestCmdBind_ForceTakesOverOtherEntry(t *testing.T) {
 		t.Fatalf("expected reply to name previous owner %q, got %q", agent.EntryWeb, reply)
 	}
 
-	bound := m.GetSession(evB)
+	bound := m.GetSession(evB, "")
 	if bound == nil {
 		t.Fatal("expected a session after /bind --force")
 	}
@@ -217,7 +218,7 @@ func TestCmdBind_ForceTakesOverOtherEntry(t *testing.T) {
 
 	// The binding is persisted: a fresh manager sees channel ownership.
 	m2 := testManager()
-	again := m2.GetOrCreateSession(evB)
+	again := m2.GetOrCreateSession(evB, nil)
 	if !again.Store.BoundTo(agent.EntryChannel) {
 		t.Errorf("persisted entry after takeover = %q, want %q", again.Store.BoundEntry, agent.EntryChannel)
 	}
@@ -240,11 +241,11 @@ func TestCmdBind_ForceRejectedWhenLeaseActive(t *testing.T) {
 	}
 
 	evB := InboundEvent{Platform: "feishu", ChatID: "cB", UserID: "uB"}
-	reply := m.cmdBind(evB, []string{webSess.ID, "--force"})
+	reply := m.cmdBind(evB, []string{webSess.ID, "--force"}, "")
 	if !strings.Contains(strings.ToLower(reply), "cannot bind") {
 		t.Fatalf("expected rejection due to active lease, got %q", reply)
 	}
-	if m.GetSession(evB) != nil {
+	if m.GetSession(evB, "") != nil {
 		t.Fatal("expected no session after rejected forced /bind")
 	}
 }
@@ -256,13 +257,13 @@ func TestCmdUnbind_ReleasesBoundEntry(t *testing.T) {
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 
 	m := testManager()
-	sess := m.GetOrCreateSession(ev)
+	sess := m.GetOrCreateSession(ev, nil)
 	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "secret"})
 	if err := sess.Persist(); err != nil {
 		t.Fatal(err)
 	}
 
-	m.cmdUnbind(ev)
+	m.cmdUnbind(ev, "")
 
 	reloaded, err := agent.LoadSession(sess.Store.ID)
 	if err != nil {
@@ -280,7 +281,7 @@ func TestCmdClear_WipesHistoryKeepsStore(t *testing.T) {
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 
 	m := testManager()
-	sess := m.GetOrCreateSession(ev)
+	sess := m.GetOrCreateSession(ev, nil)
 	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "remember me"})
 	if err := sess.Persist(); err != nil {
 		t.Fatal(err)
@@ -291,7 +292,7 @@ func TestCmdClear_WipesHistoryKeepsStore(t *testing.T) {
 	}
 	storeID := sess.Store.ID
 
-	if reply := m.cmdClear(ev); !strings.Contains(strings.ToLower(reply), "cleared") {
+	if reply := m.cmdClear(ev, ""); !strings.Contains(strings.ToLower(reply), "cleared") {
 		t.Fatalf("unexpected clear reply %q", reply)
 	}
 	if got := len(sess.Agent.History.Snapshot()); got != 0 {
@@ -342,21 +343,21 @@ func TestCmdNew_CreatesFreshSessionAndBindsChat(t *testing.T) {
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 
 	m := testManager()
-	old := m.GetOrCreateSession(ev)
+	old := m.GetOrCreateSession(ev, nil)
 	old.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "old context"})
 	if err := old.Persist(); err != nil {
 		t.Fatal(err)
 	}
 	oldID := old.Store.ID
 
-	reply := m.cmdNew(ev)
+	reply := m.cmdNew(ev, "")
 	if !strings.Contains(strings.ToLower(reply), "started a new session") {
 		t.Fatalf("unexpected /new reply %q", reply)
 	}
 
 	// A fresh manager must resolve to the new session, not the old one.
 	m2 := testManager()
-	fresh := m2.GetOrCreateSession(ev)
+	fresh := m2.GetOrCreateSession(ev, nil)
 	if fresh.Store.ID == oldID {
 		t.Errorf("chat still resolves to old session %q after /new", oldID)
 	}
@@ -383,19 +384,19 @@ func TestCmdNew_DetachesEvenWhenBoundToOtherEntry(t *testing.T) {
 	// Chat A owns a session that is now bound to web.
 	evA := InboundEvent{Platform: "feishu", ChatID: "cA", UserID: "uA"}
 	m := testManager()
-	sessA := m.GetOrCreateSession(evA)
+	sessA := m.GetOrCreateSession(evA, nil)
 	sessA.Store.Bind(agent.EntryWeb, true)
 	if err := sessA.Store.Save(); err != nil {
 		t.Fatal(err)
 	}
 
-	reply := m.cmdNew(evA)
+	reply := m.cmdNew(evA, "")
 	if !strings.Contains(strings.ToLower(reply), "started a new session") {
 		t.Fatalf("unexpected /new reply %q", reply)
 	}
 
 	m2 := testManager()
-	fresh := m2.GetOrCreateSession(evA)
+	fresh := m2.GetOrCreateSession(evA, nil)
 	if fresh.Store.ID == sessA.Store.ID {
 		t.Error("chat still resolves to the web-bound session after /new")
 	}
@@ -412,7 +413,7 @@ func TestDeleteStore_TombstonesAgainstZombiePersist(t *testing.T) {
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 
 	m := testManager()
-	sess := m.GetOrCreateSession(ev)
+	sess := m.GetOrCreateSession(ev, nil)
 	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "private"})
 	if err := sess.Persist(); err != nil {
 		t.Fatal(err)
@@ -446,7 +447,7 @@ func TestEnsureStoreExists_RecreatesDeletedFile(t *testing.T) {
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 
 	m := testManager()
-	sess := m.GetOrCreateSession(ev)
+	sess := m.GetOrCreateSession(ev, nil)
 	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "hello"})
 	if err := sess.Persist(); err != nil {
 		t.Fatal(err)
@@ -485,7 +486,7 @@ func TestEnsureStoreExists_NoOpWhenFileStillExists(t *testing.T) {
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 
 	m := testManager()
-	sess := m.GetOrCreateSession(ev)
+	sess := m.GetOrCreateSession(ev, nil)
 	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "hello"})
 	if err := sess.Persist(); err != nil {
 		t.Fatal(err)
@@ -508,7 +509,7 @@ func TestEnsureStoreExists_NoOpWhenStoreIsNil(t *testing.T) {
 	tempHome(t)
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 	m := testManager()
-	sess := m.GetOrCreateSession(ev)
+	sess := m.GetOrCreateSession(ev, nil)
 	if err := sess.deleteStore(); err != nil {
 		t.Fatal(err)
 	}
@@ -533,7 +534,7 @@ func TestAdoptGeneratedTitle_ReplacesPlaceholder(t *testing.T) {
 	m := testManager()
 
 	for _, placeholder := range []string{"*Octo Agent", "Session 3", ""} {
-		sess := m.GetOrCreateSession(ev)
+		sess := m.GetOrCreateSession(ev, nil)
 		sess.Store.Title = placeholder // direct assignment: SetTitle("") is a no-op
 		adopted, err := sess.AdoptGeneratedTitle("deploy staging build")
 		if err != nil {
@@ -548,13 +549,13 @@ func TestAdoptGeneratedTitle_ReplacesPlaceholder(t *testing.T) {
 		if err := sess.deleteStore(); err != nil { // reset for the next case
 			t.Fatal(err)
 		}
-		m.sessions.Delete(sessionKeyFor(m.mode, ev))
+		m.sessions.Delete(sessionKeyFor(m.mode, ev, ""))
 	}
 
 	// The store is meta-only (no messages persisted yet), so the title folds
 	// into the meta header on the next Persist — the order the server's
 	// channel persist closure always uses.
-	sess := m.GetOrCreateSession(ev)
+	sess := m.GetOrCreateSession(ev, nil)
 	adopted, err := sess.AdoptGeneratedTitle("deploy staging build")
 	if err != nil || !adopted {
 		t.Fatalf("AdoptGeneratedTitle: adopted=%v err=%v", adopted, err)
@@ -578,7 +579,7 @@ func TestAdoptGeneratedTitle_KeepsUserTitle(t *testing.T) {
 	tempHome(t)
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 	m := testManager()
-	sess := m.GetOrCreateSession(ev)
+	sess := m.GetOrCreateSession(ev, nil)
 	if err := sess.Store.SetTitle("my rename"); err != nil {
 		t.Fatal(err)
 	}
@@ -601,7 +602,7 @@ func TestAdoptGeneratedTitle_TombstonedStore(t *testing.T) {
 	tempHome(t)
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 	m := testManager()
-	sess := m.GetOrCreateSession(ev)
+	sess := m.GetOrCreateSession(ev, nil)
 	if err := sess.deleteStore(); err != nil {
 		t.Fatal(err)
 	}

@@ -27,7 +27,7 @@ func TestManager_KnownChats(t *testing.T) {
 	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
 
 	// A live session (this process run) → Active.
-	mgr.GetOrCreateSession(InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"})
+	mgr.GetOrCreateSession(InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}, nil)
 	// A persisted binding for a different chat → Bound.
 	if err := mgr.bindings.set(SessionKey("telegram:42:u2"), "sess-x"); err != nil {
 		t.Fatalf("bind: %v", err)

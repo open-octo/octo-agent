@@ -12,7 +12,7 @@ func TestSessionTaskStorePersists(t *testing.T) {
 
 	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
 
-	s1 := mgr.GetOrCreateSession(ev)
+	s1 := mgr.GetOrCreateSession(ev, nil)
 	if s1.Tasks == nil {
 		t.Fatal("session should have a task store")
 	}
@@ -21,7 +21,7 @@ func TestSessionTaskStorePersists(t *testing.T) {
 	}
 
 	// A later message for the same chat reuses the session and its store.
-	s2 := mgr.GetOrCreateSession(ev)
+	s2 := mgr.GetOrCreateSession(ev, nil)
 	if s2 != s1 {
 		t.Fatal("same chat should reuse the session")
 	}
@@ -30,7 +30,7 @@ func TestSessionTaskStorePersists(t *testing.T) {
 	}
 
 	// A different chat gets its own, independent store.
-	other := mgr.GetOrCreateSession(InboundEvent{Platform: "mock", ChatID: "c2", UserID: "u2"})
+	other := mgr.GetOrCreateSession(InboundEvent{Platform: "mock", ChatID: "c2", UserID: "u2"}, nil)
 	if len(other.Tasks.List()) != 0 {
 		t.Error("a different chat should have an independent task store")
 	}

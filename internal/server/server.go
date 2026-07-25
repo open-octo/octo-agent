@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agentprofile"
 	"github.com/open-octo/octo-agent/internal/app"
 	"github.com/open-octo/octo-agent/internal/channel"
 	"github.com/open-octo/octo-agent/internal/hooks"
@@ -279,6 +280,13 @@ type Server struct {
 	channelMgr      *channel.Manager
 	channelCancel   context.CancelFunc
 	runningAdapters sync.Map // string -> channel.Adapter
+
+	// Agent profiles (multi-agent routing). agentStore/agentRouterVal are
+	// built lazily on first use via agentRouter() — tests that never touch
+	// the IM path never pay the directory scan.
+	agentStore      *agentprofile.Store
+	agentRouterVal  *agentprofile.Router
+	agentRouterOnce sync.Once
 
 	// channelMu guards channel (re)start bookkeeping — startChannels runs at
 	// boot, stopChannels at shutdown, and reloadChannel from an HTTP handler
@@ -2108,14 +2116,17 @@ func (s *Server) initChannels() {
 		// server restart needed.
 		return
 	}
-	s.channelMgr = channel.NewManager(chCfg, s.buildChannelFactory(), channel.BindByChatUser)
+	s.channelMgr = channel.NewManager(chCfg, s.buildChannelAgent, channel.BindByChatUser)
 	s.channelMgr.SetGoalsEnabled(s.goalsEnabled.Load())
 	s.channelMgr.SetModelOps(s.channelModelOps())
+	s.channelMgr.SetProfileLookup(func(id string) (*agentprofile.Profile, bool) {
+		return s.profileForAgent(id), true
+	})
 	slog.Info("channels enabled", "platforms", strings.Join(platforms, ", "))
 }
 
-// buildChannelFactory returns the agent factory the channel manager uses to
-// spin up a fresh agent per IM session. No gate is set here: handleChannelMessage
+// buildChannelAgent is the channel manager's agent factory, parameterized by
+// the routed profile. No gate is set here: handleChannelMessage
 // builds a fresh per-turn gate (configured mode + chat-interactive ask), the
 // same shape prepareToolTurn gives web turns. A factory-time gate would freeze
 // one policy snapshot for the session's whole life.
@@ -2126,22 +2137,82 @@ func (s *Server) initChannels() {
 // LiteSender/LiteModel resolved below have no such per-turn refresh anywhere
 // in the IM path, so they stay — this is genuinely the only place they're set
 // for the session's whole lifetime.
-func (s *Server) buildChannelFactory() func() *agent.Agent {
-	return func() *agent.Agent {
-		defaultSender, model := s.defaultSenderAndModel()
-		a := agent.New(defaultSender, model)
-		a.MaxTokens = s.cfg.MaxTokens
-		if cfg, err := config.Load(); err == nil {
-			a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
-			if a.LiteSender == nil {
-				if lm := app.ImplicitLiteModel(s.getProvider(), model, resolveBaseURL(s.getProvider(), cfg)); lm != "" {
-					a.LiteSender = defaultSender
-					a.LiteModel = lm
-				}
+//
+// A profile-pinned model swaps the session's starting sender+model; a user's
+// later /model binding still wins (applyChannelModel applies the persisted
+// binding over whatever the factory set).
+func (s *Server) buildChannelAgent(profile *agentprofile.Profile) *agent.Agent {
+	if profile == nil {
+		profile = agentprofile.DefaultProfile()
+	}
+	defaultSender, model := s.defaultSenderAndModel()
+	if profile.Model != "" {
+		if res, err := s.channelModelOps().Resolve(profile.Model); err == nil {
+			defaultSender, model = res.Sender, res.Model
+		} else {
+			slog.Warn("channel profile model unresolved, using server default",
+				"profile", profile.ID, "model", profile.Model, "err", err)
+		}
+	}
+	a := agent.New(defaultSender, model)
+	a.MaxTokens = s.cfg.MaxTokens
+	if cfg, err := config.Load(); err == nil {
+		a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
+		if a.LiteSender == nil {
+			if lm := app.ImplicitLiteModel(s.getProvider(), model, resolveBaseURL(s.getProvider(), cfg)); lm != "" {
+				a.LiteSender = defaultSender
+				a.LiteModel = lm
 			}
 		}
-		return a
 	}
+	return a
+}
+
+// agentRouter lazily builds the profile store + router used by the IM routing
+// path. The store is read-through, so profile edits (API, Web UI, direct .md
+// edits) take effect on the next inbound event.
+func (s *Server) agentRouter() *agentprofile.Router {
+	s.agentRouterOnce.Do(func() {
+		s.agentStore = agentprofile.New(agentUserDir(), agentProjectDir)
+		s.agentRouterVal = agentprofile.NewRouter(s.agentStore)
+	})
+	return s.agentRouterVal
+}
+
+// profileForAgent resolves an agent ID to its profile, falling back to the
+// default profile on a miss (empty ID, or the profile was deleted while one
+// of its sessions is still live).
+func (s *Server) profileForAgent(agentID string) *agentprofile.Profile {
+	_ = s.agentRouter() // ensures agentStore is initialised
+	if agentID != "" {
+		if p, ok := s.agentStore.Get(agentID); ok {
+			return p
+		}
+	}
+	return agentprofile.DefaultProfile()
+}
+
+// agentUserDir is the user-level profile directory (~/.octo/agents).
+func agentUserDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".octo", "agents")
+}
+
+// agentProjectDir is the delegation-only project-level profile directory
+// (<repo>/.octo/agents), resolved per call like the pre-existing loader.
+func agentProjectDir() string {
+	cwd, err := os.Getwd()
+	if err != nil || cwd == "" {
+		return ""
+	}
+	root := memory.ProjectRoot(cwd)
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, ".octo", "agents")
 }
 
 // channelModelOps builds the ModelOps the channel manager's /model command
@@ -2531,9 +2602,12 @@ func (s *Server) reloadChannel(platform string) {
 	defer s.channelMu.Unlock()
 	s.channelCfg = chCfg
 	if s.channelMgr == nil {
-		s.channelMgr = channel.NewManager(chCfg, s.buildChannelFactory(), channel.BindByChatUser)
+		s.channelMgr = channel.NewManager(chCfg, s.buildChannelAgent, channel.BindByChatUser)
 		s.channelMgr.SetGoalsEnabled(s.goalsEnabled.Load())
 		s.channelMgr.SetModelOps(s.channelModelOps())
+		s.channelMgr.SetProfileLookup(func(id string) (*agentprofile.Profile, bool) {
+			return s.profileForAgent(id), true
+		})
 	}
 
 	s.stopOneChannelLocked(platform)
@@ -2556,7 +2630,20 @@ func (s *Server) routeChannelEvent(ctx context.Context, ad channel.Adapter, ev c
 	// The adapter invokes this from its own inbound goroutine (not net/http), so
 	// a panic anywhere in the IM turn path would crash the whole serve process.
 	defer s.recoverBg("channel event (" + ev.Platform + ")")
-	if s.handleChannelCommand(ad, ev) {
+	// Resolve the routed agent once per event; every downstream path (commands,
+	// asks, steers, turns) works within its session-key namespace. A nil route
+	// means "stay silent": a group chat with multiple bound agents and no
+	// @-mention.
+	profile := s.agentRouter().Route(agentprofile.RouteInput{
+		Platform: ev.Platform,
+		ChatID:   ev.ChatID,
+		UserID:   ev.UserID,
+		Text:     ev.Text,
+	})
+	if profile == nil {
+		return
+	}
+	if s.handleChannelCommand(ad, ev, profile) {
 		return
 	}
 	// Button events (e.g. inline keyboard presses on Telegram, component
@@ -2564,7 +2651,7 @@ func (s *Server) routeChannelEvent(ctx context.Context, ad channel.Adapter, ev c
 	// bypassing the text-based DeliverAskReply path. Button events are routed
 	// before plain text so they work even when askButtonsOnly is set.
 	if ev.ButtonID != "" {
-		if sess := s.channelMgr.GetSession(ev); sess != nil {
+		if sess := s.channelMgr.GetSession(ev, profile.ID); sess != nil {
 			if sess.DeliverAskButton(ev.ChatID, ev.UserID, ev.ButtonID) {
 				return
 			}
@@ -2574,7 +2661,7 @@ func (s *Server) routeChannelEvent(ctx context.Context, ad channel.Adapter, ev c
 	// steer — an empty reply would consume the ask slot and deny for
 	// nothing, and an empty steer adds noise.
 	if strings.TrimSpace(ev.Text) != "" {
-		if sess := s.channelMgr.GetSession(ev); sess != nil {
+		if sess := s.channelMgr.GetSession(ev, profile.ID); sess != nil {
 			if sess.DeliverAskReply(ev.ChatID, ev.UserID, ev.Text) {
 				return
 			}
@@ -2594,13 +2681,14 @@ func (s *Server) routeChannelEvent(ctx context.Context, ad channel.Adapter, ev c
 			}
 		}
 	}
-	go s.handleChannelMessage(ctx, ad, ev)
+	go s.handleChannelMessage(ctx, ad, ev, profile)
 }
 
 // handleChannelCommand processes slash commands (e.g. /bind, /stop). Returns
 // true if the event was a command. Without the "/" guard, plain text like
 // "你好" would be parsed as an unknown command and never reach the agent.
-func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEvent) bool {
+// Commands operate within the routed agent's session-key namespace.
+func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEvent, profile *agentprofile.Profile) bool {
 	text := strings.TrimSpace(ev.Text)
 	if !strings.HasPrefix(text, "/") {
 		return false
@@ -2614,7 +2702,7 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 	cmd := strings.ToLower(strings.Fields(text)[0])
 	switch cmd {
 	case "/bind", "/clear", "/new":
-		imKey := "im:" + string(s.channelMgr.KeyFor(ev))
+		imKey := "im:" + string(s.channelMgr.KeyFor(ev, profile.ID))
 		s.rememberedMu.Lock()
 		delete(s.rememberedStores, imKey)
 		s.rememberedMu.Unlock()
@@ -2631,7 +2719,7 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 		// stops on an explicit /stop or schedule_wakeup(cancel=true). We still
 		// drop the per-key latches so the next non-loop message rebuilds a clean
 		// context under the chat's fresh session.
-		imKey := "im:" + string(s.channelMgr.KeyFor(ev))
+		imKey := "im:" + string(s.channelMgr.KeyFor(ev, profile.ID))
 		s.rememberedMu.Lock()
 		delete(s.rememberedStores, imKey)
 		s.rememberedMu.Unlock()
@@ -2640,12 +2728,12 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 		s.injectorMu.Unlock()
 	case "/stop":
 		// /stop is the IM interrupt — also the hard stop for an armed loop.
-		s.cancelWakeup("im:" + string(s.channelMgr.KeyFor(ev)))
+		s.cancelWakeup("im:" + string(s.channelMgr.KeyFor(ev, profile.ID)))
 	}
 	// /compact runs an LLM summarize, so it's handled out of the (synchronous,
 	// reply-string) CommandRouter: run it in a goroutine and report the result.
 	if cmd == "/compact" {
-		s.handleChannelCompact(ad, ev)
+		s.handleChannelCompact(ad, ev, profile.ID)
 		return true
 	}
 	// Reserved commands must not be intercepted by a skill (matching
@@ -2668,7 +2756,7 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 			return false
 		}
 	}
-	if reply := s.channelMgr.CommandRouter(ev); reply != "" {
+	if reply := s.channelMgr.CommandRouter(ev, profile.ID); reply != "" {
 		ad.SendText(ev.ChatID, reply, ev.MessageID)
 	}
 	return true
@@ -2677,8 +2765,8 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 // handleChannelCompact force-compacts an IM session's history and reports the
 // outcome. The summarize is an LLM call, so it runs in a goroutine; BeginRun
 // serialises it against any agent turn in the same session.
-func (s *Server) handleChannelCompact(ad channel.Adapter, ev channel.InboundEvent) {
-	sess := s.channelMgr.GetSession(ev)
+func (s *Server) handleChannelCompact(ad channel.Adapter, ev channel.InboundEvent, agentID string) {
+	sess := s.channelMgr.GetSession(ev, agentID)
 	if sess == nil {
 		ad.SendText(ev.ChatID, "No active session to compact.", ev.MessageID)
 		return
@@ -2722,7 +2810,7 @@ func (s *Server) handleChannelCompact(ad channel.Adapter, ev channel.InboundEven
 // handleChannelMessage runs an agent turn for a channel inbound event and
 // wires completion hooks so background processes / workflows can trigger
 // follow-up turns when the session goes idle (web kickIdleSteerTurn parity).
-func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, ev channel.InboundEvent) {
+func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, ev channel.InboundEvent, profile *agentprofile.Profile) {
 	// routeChannelEvent dispatches this in its own goroutine (go
 	// s.handleChannelMessage), so the whole IM turn runs outside any caller's
 	// recover — guard it here, at the goroutine's actual entry, or a panic mid
@@ -2737,7 +2825,7 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 	}
 	defer s.drain.end()
 
-	sess := s.channelMgr.GetOrCreateSession(ev)
+	sess := s.channelMgr.GetOrCreateSession(ev, profile)
 	if sess == nil {
 		return
 	}
@@ -2957,7 +3045,14 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	if cfg.CompactAutoPct > 0 {
 		sess.Agent.CompactAutoFraction = float64(cfg.CompactAutoPct) / 100.0
 	}
-	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(sess.Agent.Model), memInjection, s.effectiveCoauthor(cfg))
+	// A profile with its own system prompt replaces the server's base prompt
+	// (default agent: unchanged, s.system). Resolved fresh per turn so profile
+	// edits land on the next message; a deleted profile falls back to default.
+	base := s.system
+	if p := s.profileForAgent(sess.AgentID); p.SystemPrompt != "" {
+		base = p.SystemPrompt
+	}
+	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(sess.Agent.Model), memInjection, s.effectiveCoauthor(cfg))
 
 	// L2 memory hooks + shell hooks, same engine buildAgent gives web turns,
 	// rebuilt per IM turn. The injector is session-sticky (recall latch) and

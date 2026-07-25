@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agentprofile"
 	"github.com/open-octo/octo-agent/internal/channel"
 	"github.com/open-octo/octo-agent/internal/config"
 )
@@ -32,10 +33,10 @@ func TestApplyChannelModel_HonorsStoreBinding(t *testing.T) {
 	}
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	mgr := channel.NewManager(&channel.Config{}, func() *agent.Agent {
+	mgr := channel.NewManager(&channel.Config{}, func(*agentprofile.Profile) *agent.Agent {
 		return agent.New(srv.getSender(), "stub-model")
 	}, channel.BindByChatUser)
-	sess := mgr.GetOrCreateSession(channel.InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"})
+	sess := mgr.GetOrCreateSession(channel.InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}, nil)
 
 	// Unbound: default sender, model from the store.
 	srv.applyChannelModel(sess)

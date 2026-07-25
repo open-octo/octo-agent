@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agentprofile"
 	"github.com/open-octo/octo-agent/internal/channel"
 )
 
@@ -321,12 +322,12 @@ func TestChannelTurn_GoalContinuationAndZeroProgressStop(t *testing.T) {
 	srv.goalsEnabled.Store(true)
 	ad := &fullFakeAdapter{}
 
-	sess := srv.channelMgr.GetOrCreateSession(evFor("x"))
+	sess := srv.channelMgr.GetOrCreateSession(evFor("x"), nil)
 	if _, err := sess.GoalStore().CreateGoal("keep going", 0); err != nil {
 		t.Fatal(err)
 	}
 
-	srv.handleChannelMessage(context.Background(), ad, evFor("start"))
+	srv.handleChannelMessage(context.Background(), ad, evFor("start"), nil)
 
 	msgs := sess.Agent.History.Snapshot()
 	cont := 0
@@ -363,19 +364,19 @@ func TestChannelTurn_BudgetCrossingSendsNotice(t *testing.T) {
 	srv := chanServer(t)
 	srv.goalsEnabled.Store(true)
 	// Replace the factory-made zero-usage agent with one that reports usage.
-	srv.channelMgr = channel.NewManager(&channel.Config{}, func() *agent.Agent {
+	srv.channelMgr = channel.NewManager(&channel.Config{}, func(*agentprofile.Profile) *agent.Agent {
 		return agent.New(&usageStubSender{}, "stub-model")
 	}, channel.BindByChat)
 	ad := &fullFakeAdapter{}
 
-	sess := srv.channelMgr.GetOrCreateSession(evFor("x"))
+	sess := srv.channelMgr.GetOrCreateSession(evFor("x"), nil)
 	if _, err := sess.GoalStore().CreateGoal("small budget", 50); err != nil {
 		t.Fatal(err)
 	}
 	// Consume the mid-turn-creation skip so the first turn's usage bills.
 	sess.GoalStore().ResetGoalWallClock()
 
-	srv.handleChannelMessage(context.Background(), ad, evFor("start"))
+	srv.handleChannelMessage(context.Background(), ad, evFor("start"), nil)
 
 	if g, _ := sess.GoalStore().GoalSnapshot(); g.Status != agent.GoalBudgetLimited {
 		t.Fatalf("goal should be budget_limited, got %+v", g)

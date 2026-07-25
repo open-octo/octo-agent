@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agentprofile"
 )
 
 // mockAdapter is a test double that records sent messages.
@@ -120,7 +121,7 @@ func (m *mockAdapter) lastSentText() sentText {
 	return m.sentTexts[len(m.sentTexts)-1]
 }
 
-func fakeAgentFactory() *agent.Agent {
+func fakeAgentFactory(*agentprofile.Profile) *agent.Agent {
 	return agent.New(fakeSender{}, "test-model")
 }
 
@@ -143,7 +144,7 @@ func TestManager_SessionBindingModes(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := sessionKeyFor(tt.mode, ev)
+		got := sessionKeyFor(tt.mode, ev, "")
 		if got != tt.want {
 			t.Errorf("mode %q: got %q, want %q", tt.mode, got, tt.want)
 		}
@@ -165,32 +166,32 @@ func TestManager_CommandRouter(t *testing.T) {
 
 	// A session exists once the chat has spoken.
 	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
-	mgr.GetOrCreateSession(ev)
+	mgr.GetOrCreateSession(ev, nil)
 	if mgr.SessionCount() != 1 {
 		t.Fatalf("expected 1 session, got %d", mgr.SessionCount())
 	}
 
 	// /bind with no target explains usage and creates nothing.
 	ev.Text = "/bind"
-	if reply := mgr.CommandRouter(ev); !strings.Contains(strings.ToLower(reply), "usage") {
+	if reply := mgr.CommandRouter(ev, ""); !strings.Contains(strings.ToLower(reply), "usage") {
 		t.Fatalf("expected usage hint for bare /bind, got %q", reply)
 	}
 
 	// /status
 	ev.Text = "/status"
-	if reply := mgr.CommandRouter(ev); reply == "" {
+	if reply := mgr.CommandRouter(ev, ""); reply == "" {
 		t.Fatal("expected non-empty reply for /status")
 	}
 
 	// /list
 	ev.Text = "/list"
-	if reply := mgr.CommandRouter(ev); reply == "" {
+	if reply := mgr.CommandRouter(ev, ""); reply == "" {
 		t.Fatal("expected non-empty reply for /list")
 	}
 
 	// /stop with no turn in flight (does not delete the session)
 	ev.Text = "/stop"
-	if reply := mgr.CommandRouter(ev); !strings.Contains(reply, "No task is running") {
+	if reply := mgr.CommandRouter(ev, ""); !strings.Contains(reply, "No task is running") {
 		t.Fatalf("expected idle /stop reply, got %q", reply)
 	}
 	if mgr.SessionCount() != 1 {
@@ -199,7 +200,7 @@ func TestManager_CommandRouter(t *testing.T) {
 
 	// /unbind detaches the live session (history is kept on disk).
 	ev.Text = "/unbind"
-	mgr.CommandRouter(ev)
+	mgr.CommandRouter(ev, "")
 	if mgr.SessionCount() != 0 {
 		t.Fatalf("expected 0 live sessions after /unbind, got %d", mgr.SessionCount())
 	}
@@ -211,13 +212,13 @@ func TestManager_StopInterruptsRunningTurn(t *testing.T) {
 	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
 
 	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
-	sess := mgr.GetOrCreateSession(ev)
+	sess := mgr.GetOrCreateSession(ev, nil)
 
 	runCtx, done := sess.BeginRun(context.Background())
 	defer done()
 
 	ev.Text = "/stop"
-	reply := mgr.CommandRouter(ev)
+	reply := mgr.CommandRouter(ev, "")
 	if !strings.Contains(reply, "Task interrupted") {
 		t.Fatalf("expected interrupt reply, got %q", reply)
 	}
@@ -226,7 +227,7 @@ func TestManager_StopInterruptsRunningTurn(t *testing.T) {
 	}
 
 	// A second /stop finds nothing to interrupt.
-	if reply := mgr.CommandRouter(ev); !strings.Contains(reply, "No task is running") {
+	if reply := mgr.CommandRouter(ev, ""); !strings.Contains(reply, "No task is running") {
 		t.Fatalf("expected idle reply on second /stop, got %q", reply)
 	}
 }
@@ -267,7 +268,7 @@ func TestManager_UnbindMidTurn_SuppressesButKeepsRunning(t *testing.T) {
 	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
 
 	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
-	sess := mgr.GetOrCreateSession(ev)
+	sess := mgr.GetOrCreateSession(ev, nil)
 	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "q"})
 	if err := sess.Persist(); err != nil {
 		t.Fatal(err)
@@ -282,7 +283,7 @@ func TestManager_UnbindMidTurn_SuppressesButKeepsRunning(t *testing.T) {
 	defer done()
 
 	ev.Text = "/unbind"
-	reply := mgr.CommandRouter(ev)
+	reply := mgr.CommandRouter(ev, "")
 	if !strings.Contains(strings.ToLower(reply), "unbound") {
 		t.Fatalf("expected unbind reply, got %q", reply)
 	}
@@ -315,7 +316,7 @@ func TestManager_UnbindThenBindBackRecoversRunningSession(t *testing.T) {
 	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
 
 	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
-	sess := mgr.GetOrCreateSession(ev)
+	sess := mgr.GetOrCreateSession(ev, nil)
 	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "q"})
 	if err := sess.Persist(); err != nil {
 		t.Fatal(err)
@@ -328,14 +329,14 @@ func TestManager_UnbindThenBindBackRecoversRunningSession(t *testing.T) {
 
 	// /unbind: suppress delivery, remove from sessions map.
 	ev.Text = "/unbind"
-	reply := mgr.CommandRouter(ev)
+	reply := mgr.CommandRouter(ev, "")
 	if !strings.Contains(strings.ToLower(reply), "unbound") {
 		t.Fatalf("expected unbind reply, got %q", reply)
 	}
 	if !sess.SuppressDelivery() {
 		t.Fatal("/unbind must set suppressDelivery")
 	}
-	key := sessionKeyFor(BindByChatUser, ev)
+	key := sessionKeyFor(BindByChatUser, ev, "")
 	if _, ok := mgr.sessions.Load(key); ok {
 		t.Fatal("/unbind must remove session from sessions map")
 	}
@@ -345,7 +346,7 @@ func TestManager_UnbindThenBindBackRecoversRunningSession(t *testing.T) {
 
 	// /bind back to the same session by its store ID.
 	ev.Text = "/bind " + storeID
-	reply = mgr.CommandRouter(ev)
+	reply = mgr.CommandRouter(ev, "")
 	if !strings.Contains(strings.ToLower(reply), "bound") {
 		t.Fatalf("expected bind reply, got %q", reply)
 	}
@@ -390,17 +391,17 @@ func TestManager_BindCreatesNewWhenNoRunningSession(t *testing.T) {
 	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
 
 	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
-	sess := mgr.GetOrCreateSession(ev)
+	sess := mgr.GetOrCreateSession(ev, nil)
 	sess.Agent.History.Append(agent.Message{Role: agent.RoleUser, Content: "q"})
 	if err := sess.Persist(); err != nil {
 		t.Fatal(err)
 	}
 	storeID := sess.Store.ID
-	key := sessionKeyFor(BindByChatUser, ev)
+	key := sessionKeyFor(BindByChatUser, ev, "")
 
 	// Unbind and let the old session object be GC'd (no references kept).
 	ev.Text = "/unbind"
-	mgr.CommandRouter(ev)
+	mgr.CommandRouter(ev, "")
 
 	// Also remove from sessionsByStore to simulate the case where the running
 	// session has been evicted (e.g., a later message already created a new
@@ -409,7 +410,7 @@ func TestManager_BindCreatesNewWhenNoRunningSession(t *testing.T) {
 
 	// /bind the same store ID — must fall through to creating a new session.
 	ev.Text = "/bind " + storeID
-	reply := mgr.CommandRouter(ev)
+	reply := mgr.CommandRouter(ev, "")
 	if !strings.Contains(strings.ToLower(reply), "bound") {
 		t.Fatalf("expected bind reply, got %q", reply)
 	}
@@ -458,13 +459,13 @@ func TestManager_AutoSessionCreation(t *testing.T) {
 	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
 
 	ev := InboundEvent{Platform: "mock2", ChatID: "c1", UserID: "u1", Text: "hello"}
-	mgr.GetOrCreateSession(ev)
+	mgr.GetOrCreateSession(ev, nil)
 
 	if mgr.SessionCount() != 1 {
 		t.Fatalf("expected 1 auto-created session, got %d", mgr.SessionCount())
 	}
 
-	sess := mgr.GetOrCreateSession(ev)
+	sess := mgr.GetOrCreateSession(ev, nil)
 	if sess == nil {
 		t.Fatal("expected session to exist")
 	}
@@ -477,7 +478,7 @@ func TestManager_UnknownCommand(t *testing.T) {
 	tempHome(t)
 	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
 	ev := InboundEvent{Text: "/foobar"}
-	reply := mgr.CommandRouter(ev)
+	reply := mgr.CommandRouter(ev, "")
 	if reply == "" {
 		t.Fatal("expected error reply for unknown command")
 	}
@@ -492,11 +493,11 @@ func TestCmdClear_RefusesWhileRunning(t *testing.T) {
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 
 	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
-	sess := mgr.GetOrCreateSession(ev)
+	sess := mgr.GetOrCreateSession(ev, nil)
 	runCtx, done := sess.BeginRun(context.Background())
 	defer done()
 
-	reply := mgr.cmdClear(ev)
+	reply := mgr.cmdClear(ev, "")
 	if !strings.Contains(strings.ToLower(reply), "can't clear") {
 		t.Fatalf("expected refusal while running, got %q", reply)
 	}
@@ -512,7 +513,7 @@ func TestCmdCompact_FoldsHistory(t *testing.T) {
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 
 	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
-	sess := mgr.GetOrCreateSession(ev)
+	sess := mgr.GetOrCreateSession(ev, nil)
 	// Shrink the keep budget so the small test history still has something to fold.
 	sess.Agent.CompactKeepFraction = 0.001
 
@@ -525,7 +526,7 @@ func TestCmdCompact_FoldsHistory(t *testing.T) {
 	}
 	before := len(sess.Agent.History.Snapshot())
 
-	reply := mgr.cmdCompact(ev)
+	reply := mgr.cmdCompact(ev, "")
 	if !strings.Contains(strings.ToLower(reply), "compact") &&
 		!strings.Contains(strings.ToLower(reply), "folded") &&
 		!strings.Contains(strings.ToLower(reply), "reclaimed") {
@@ -576,9 +577,9 @@ func TestCmdModel_ListMarksCurrent(t *testing.T) {
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
 	mgr.SetModelOps(fakeModelOps())
-	mgr.GetOrCreateSession(ev)
+	mgr.GetOrCreateSession(ev, nil)
 
-	reply := mgr.cmdModel(ev, "")
+	reply := mgr.cmdModel(ev, "", "")
 	for _, want := range []string{"test-model", "other-model", "current"} {
 		if !strings.Contains(reply, want) {
 			t.Fatalf("listing should contain %q, got %q", want, reply)
@@ -606,12 +607,12 @@ func TestCmdModel_ListGroupsByEndpoint(t *testing.T) {
 			return ModelResolution{}, fmt.Errorf("unused in this test")
 		},
 	})
-	sess := mgr.GetOrCreateSession(ev)
+	sess := mgr.GetOrCreateSession(ev, nil)
 	// The "current" mark is keyed off the persisted binding (composite id),
 	// not the bare model on the agent — so set AppliedModelConfig.
 	sess.AppliedModelConfig = "relay-a::claude-sonnet-4-6"
 
-	reply := mgr.cmdModel(ev, "")
+	reply := mgr.cmdModel(ev, "", "")
 	for _, want := range []string{
 		"relay-a (中转站A)",
 		"relay-a::claude-sonnet-4-6",
@@ -638,9 +639,9 @@ func TestCmdModel_SwitchPersistsBinding(t *testing.T) {
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
 	mgr.SetModelOps(fakeModelOps())
-	sess := mgr.GetOrCreateSession(ev)
+	sess := mgr.GetOrCreateSession(ev, nil)
 
-	reply := mgr.cmdModel(ev, "other-model")
+	reply := mgr.cmdModel(ev, "other-model", "")
 	if !strings.Contains(reply, "other-model") {
 		t.Fatalf("unexpected switch reply %q", reply)
 	}
@@ -660,7 +661,7 @@ func TestCmdModel_SwitchPersistsBinding(t *testing.T) {
 	}
 
 	// /model default unbinds back to the default.
-	if reply := mgr.cmdModel(ev, "default"); !strings.Contains(reply, "test-model") {
+	if reply := mgr.cmdModel(ev, "default", ""); !strings.Contains(reply, "test-model") {
 		t.Fatalf("unexpected default reply %q", reply)
 	}
 	if sess.Store.ModelConfig != "" {
@@ -675,9 +676,9 @@ func TestCmdModel_RejectsUnknownAndRunning(t *testing.T) {
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
 	mgr.SetModelOps(fakeModelOps())
-	sess := mgr.GetOrCreateSession(ev)
+	sess := mgr.GetOrCreateSession(ev, nil)
 
-	reply := mgr.cmdModel(ev, "nope")
+	reply := mgr.cmdModel(ev, "nope", "")
 	if !strings.Contains(reply, "not configured") {
 		t.Fatalf("expected not-configured error, got %q", reply)
 	}
@@ -690,7 +691,7 @@ func TestCmdModel_RejectsUnknownAndRunning(t *testing.T) {
 
 	_, done := sess.BeginRun(context.Background())
 	defer done()
-	reply = mgr.cmdModel(ev, "other-model")
+	reply = mgr.cmdModel(ev, "other-model", "")
 	if !strings.Contains(strings.ToLower(reply), "can't switch") {
 		t.Fatalf("expected refusal while running, got %q", reply)
 	}
@@ -703,12 +704,12 @@ func TestCmdModel_GracefulWithoutOpsOrSession(t *testing.T) {
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 
 	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
-	if reply := mgr.cmdModel(ev, "other-model"); !strings.Contains(reply, "unavailable") {
+	if reply := mgr.cmdModel(ev, "other-model", ""); !strings.Contains(reply, "unavailable") {
 		t.Fatalf("expected unavailable reply without ModelOps, got %q", reply)
 	}
 
 	mgr.SetModelOps(fakeModelOps())
-	if reply := mgr.cmdModel(ev, "other-model"); !strings.Contains(reply, "No active session") {
+	if reply := mgr.cmdModel(ev, "other-model", ""); !strings.Contains(reply, "No active session") {
 		t.Fatalf("expected no-session reply, got %q", reply)
 	}
 }
@@ -720,9 +721,9 @@ func TestCmdCompact_NoOpOnTinyHistory(t *testing.T) {
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 
 	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
-	mgr.GetOrCreateSession(ev)
+	mgr.GetOrCreateSession(ev, nil)
 
-	reply := mgr.cmdCompact(ev)
+	reply := mgr.cmdCompact(ev, "")
 	if !strings.Contains(strings.ToLower(reply), "nothing to compact") {
 		t.Fatalf("expected no-op reply, got %q", reply)
 	}
@@ -734,11 +735,11 @@ func TestCmdCompact_RefusesWhileRunning(t *testing.T) {
 	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
 
 	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
-	sess := mgr.GetOrCreateSession(ev)
+	sess := mgr.GetOrCreateSession(ev, nil)
 	runCtx, done := sess.BeginRun(context.Background())
 	defer done()
 
-	reply := mgr.cmdCompact(ev)
+	reply := mgr.cmdCompact(ev, "")
 	if !strings.Contains(strings.ToLower(reply), "can't compact") {
 		t.Fatalf("expected refusal while running, got %q", reply)
 	}

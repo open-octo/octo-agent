@@ -56,7 +56,7 @@ func TestHandleChannelRecipients(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 
 	srv := chanServer(t)
-	srv.channelMgr.GetOrCreateSession(channel.InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"})
+	srv.channelMgr.GetOrCreateSession(channel.InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}, nil)
 
 	req := httptest.NewRequest("GET", "/api/channels/recipients", nil)
 	w := httptest.NewRecorder()

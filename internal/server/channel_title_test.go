@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agentprofile"
 	"github.com/open-octo/octo-agent/internal/channel"
 )
 
@@ -21,7 +22,7 @@ func TestHandleChannelMessage_GeneratesSessionTitle(t *testing.T) {
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	sender := &blockingTurnSender{entered: make(chan struct{}), release: make(chan struct{})}
-	srv.channelMgr = channel.NewManager(&channel.Config{}, func() *agent.Agent {
+	srv.channelMgr = channel.NewManager(&channel.Config{}, func(*agentprofile.Profile) *agent.Agent {
 		return agent.New(sender, "stub-model")
 	}, channel.BindByChat)
 
@@ -35,14 +36,14 @@ func TestHandleChannelMessage_GeneratesSessionTitle(t *testing.T) {
 
 	ad := &fullFakeAdapter{}
 	ev := evFor("hello there")
-	sess := srv.channelMgr.GetOrCreateSession(ev) // pre-create to learn the store ID
+	sess := srv.channelMgr.GetOrCreateSession(ev, nil) // pre-create to learn the store ID
 	storeID := sess.Store.ID
 	if sess.Store.Title != "*Octo Agent" {
 		t.Fatalf("fresh IM session title = %q, want the placeholder", sess.Store.Title)
 	}
 
 	turnDone := make(chan struct{})
-	go func() { defer close(turnDone); srv.handleChannelMessage(context.Background(), ad, ev) }()
+	go func() { defer close(turnDone); srv.handleChannelMessage(context.Background(), ad, ev, nil) }()
 	<-sender.entered // main turn call is blocked; title generation runs concurrently
 
 	// Mid-turn the generated title is broadcast live...
@@ -81,7 +82,7 @@ func TestHandleChannelMessage_TitleFallsBackToSnippet(t *testing.T) {
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	sender := &blockingTitleFailSender{entered: make(chan struct{}), release: make(chan struct{})}
-	srv.channelMgr = channel.NewManager(&channel.Config{}, func() *agent.Agent {
+	srv.channelMgr = channel.NewManager(&channel.Config{}, func(*agentprofile.Profile) *agent.Agent {
 		return agent.New(sender, "stub-model")
 	}, channel.BindByChat)
 
@@ -94,11 +95,11 @@ func TestHandleChannelMessage_TitleFallsBackToSnippet(t *testing.T) {
 
 	ad := &fullFakeAdapter{}
 	ev := evFor("hello there")
-	sess := srv.channelMgr.GetOrCreateSession(ev)
+	sess := srv.channelMgr.GetOrCreateSession(ev, nil)
 	storeID := sess.Store.ID
 
 	turnDone := make(chan struct{})
-	go func() { defer close(turnDone); srv.handleChannelMessage(context.Background(), ad, ev) }()
+	go func() { defer close(turnDone); srv.handleChannelMessage(context.Background(), ad, ev, nil) }()
 	<-sender.entered // main turn call is blocked; the snippet fallback lands mid-turn
 
 	if name := waitForRename(t, conn, storeID); name != "hello there" {
@@ -123,15 +124,15 @@ func TestHandleChannelMessage_SkipsTitleForEmptyFirstMessage(t *testing.T) {
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	spy := &titleSpySender{}
-	srv.channelMgr = channel.NewManager(&channel.Config{}, func() *agent.Agent {
+	srv.channelMgr = channel.NewManager(&channel.Config{}, func(*agentprofile.Profile) *agent.Agent {
 		return agent.New(spy, "stub-model")
 	}, channel.BindByChat)
 
 	ad := &fullFakeAdapter{}
 	ev := evFor("") // text-free content, the attachments-only shape
-	sess := srv.channelMgr.GetOrCreateSession(ev)
+	sess := srv.channelMgr.GetOrCreateSession(ev, nil)
 
-	srv.handleChannelMessage(context.Background(), ad, ev)
+	srv.handleChannelMessage(context.Background(), ad, ev, nil)
 
 	if got := spy.titleCalls.Load(); got != 0 {
 		t.Errorf("title calls = %d, want 0 for a text-free first message", got)

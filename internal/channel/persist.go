@@ -41,8 +41,9 @@ func sessionStoreID(key SessionKey) string {
 }
 
 // newChannelStore builds a fresh, persisted-shape store for a channel
-// session: source "channel", bound to EntryChannel. Title stays at
-// agent.NewSession's "*Octo Agent" placeholder — never the raw SessionKey
+// session: source "channel", bound to EntryChannel, stamped with the owning
+// agent's ID ("" → default, for sessions predating multi-agent). Title stays
+// at agent.NewSession's "*Octo Agent" placeholder — never the raw SessionKey
 // (e.g. "weixin:o9cq…@im.wechat:o9cq…@im.wechat") — until the first turn's
 // async title generation replaces it; meanwhile DisplayTitle() surfaces the
 // first user message snippet instead of the placeholder. Shared by
@@ -50,11 +51,12 @@ func sessionStoreID(key SessionKey) string {
 // (#1079 — recovering after the file was deleted out from under an
 // already-running session), so both give a fresh channel session the exact
 // same shape.
-func newChannelStore(id, model string) *agent.Session {
+func newChannelStore(id, model, agentID string) *agent.Session {
 	st := agent.NewSession(model, "")
 	st.ID = id
 	st.CreatedAt = time.Now()
 	st.Source = "channel"
+	st.AgentID = agentID
 	st.BoundEntry = agent.EntryChannel
 	st.BoundAt = time.Now()
 	_ = st.SetPermissionMode(string(permission.ResolveDefaultMode()))
@@ -81,7 +83,7 @@ func (s *Session) restoreOrInitStore(id string) {
 	}
 	// Persist immediately so the entry binding is visible to other processes
 	// (and to the server's authoritative LoadSession in handleChannelMessage).
-	st := newChannelStore(id, s.Agent.Model)
+	st := newChannelStore(id, s.Agent.Model, s.AgentID)
 	_ = st.Save()
 	s.Store = st
 }
@@ -111,7 +113,7 @@ func (s *Session) EnsureStoreExists() {
 	if _, err := agent.SessionMTime(s.Store.ID); err == nil {
 		return
 	}
-	st := newChannelStore(s.Store.ID, s.Agent.Model)
+	st := newChannelStore(s.Store.ID, s.Agent.Model, s.AgentID)
 	_ = st.Save()
 	s.Store = st
 	s.Agent.History = agent.NewHistory()

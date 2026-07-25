@@ -112,6 +112,11 @@ func DefaultProfile() *Profile {
 // idRule is the profile ID shape: a lowercase slug usable as a file name.
 var idRule = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
 
+// IsValidID reports whether id is a well-formed profile ID slug. Exported for
+// the channel manager, which must distinguish a real "<agentID>#" key prefix
+// from a chat ID that merely contains '#'.
+func IsValidID(id string) bool { return idRule.MatchString(id) }
+
 // aliasRule is the mention alias shape: @ plus the same charset the router's
 // mention extractor recognizes, so a validated alias can always match.
 var aliasRule = regexp.MustCompile(`^@[A-Za-z0-9][A-Za-z0-9_-]*$`)

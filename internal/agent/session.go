@@ -33,6 +33,10 @@ type Session struct {
 	System    string    `json:"system,omitempty"`
 	Title     string    `json:"title,omitempty"`
 	Source    string    `json:"source,omitempty"` // how the session was created: "" (manual) | "cron" | "channel" | "setup"
+	// AgentID is the ID of the agent profile (agentprofile.Profile) that owns
+	// this session. Empty means the default agent — also the value for every
+	// session predating multi-agent, so legacy files need no migration.
+	AgentID string `json:"agent_id,omitempty"`
 	// ModelConfig is the model string of the config entry this session is bound
 	// to. Empty means "the default entry at turn time" — also the value for
 	// every session predating per-session model binding. (Sessions written
@@ -394,6 +398,7 @@ func BranchFrom(s *Session, count int) *Session {
 	branch.WorkingDir = s.WorkingDir
 	branch.PermissionMode = s.PermissionMode
 	branch.ModelConfig = s.ModelConfig
+	branch.AgentID = s.AgentID
 	branch.BranchedFrom = s.ID
 	if count > 0 {
 		branch.Messages = make([]Message, count)
@@ -405,6 +410,16 @@ func BranchFrom(s *Session, count int) *Session {
 // TurnCount returns the number of complete user+assistant turn pairs.
 func (s *Session) TurnCount() int {
 	return len(s.Messages) / 2
+}
+
+// EffectiveAgentID returns the owning agent profile's ID: "default" for the
+// default agent and for every session predating the AgentID field (kept as a
+// literal here so the agent package stays free of an agentprofile import).
+func (s *Session) EffectiveAgentID() string {
+	if s.AgentID == "" {
+		return "default"
+	}
+	return s.AgentID
 }
 
 // UsedTools reports whether any assistant message in the session emitted
@@ -507,6 +522,7 @@ type sessionRecord struct {
 	Title             string    `json:"title,omitempty"`
 	Source            string    `json:"source,omitempty"`
 	ModelConfig       string    `json:"model_config,omitempty"`
+	AgentID           string    `json:"agent_id,omitempty"`
 	WorkingDir        string    `json:"working_dir,omitempty"`
 	PermissionMode    string    `json:"permission_mode,omitempty"`
 	BoundEntry        string    `json:"bound_entry,omitempty"`
@@ -532,7 +548,7 @@ func (s *Session) metaRecord() sessionRecord {
 		goal = &g
 	}
 	s.mu.Unlock()
-	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, LastContextTokens: s.LastContextTokens, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, BranchedFrom: s.BranchedFrom, Goal: goal}
+	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, AgentID: s.AgentID, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, LastContextTokens: s.LastContextTokens, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, BranchedFrom: s.BranchedFrom, Goal: goal}
 }
 
 // MarkHookStarted records that SessionStart has fired for this session, so a
@@ -1156,6 +1172,7 @@ func LoadSession(id string) (*Session, error) {
 			s.Title = rec.Title // a compacted file carries the title in its meta header
 			s.Source = rec.Source
 			s.ModelConfig = rec.ModelConfig
+			s.AgentID = rec.AgentID
 			s.WorkingDir = rec.WorkingDir
 			s.PermissionMode = rec.PermissionMode
 			s.LastContextTokens = rec.LastContextTokens // a rewritten file carries it in its meta header

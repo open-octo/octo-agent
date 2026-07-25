@@ -286,7 +286,7 @@ func TestHandleChannelMessage_DrainingRepliesPolitely(t *testing.T) {
 	srv.drain.drain(0)
 
 	ad := &drainTestAdapter{}
-	srv.handleChannelMessage(context.Background(), ad, channel.InboundEvent{ChatID: "c1", Text: "hi"})
+	srv.handleChannelMessage(context.Background(), ad, channel.InboundEvent{ChatID: "c1", Text: "hi"}, nil)
 
 	if len(ad.texts()) != 1 {
 		t.Fatalf("SendText calls = %d, want 1", len(ad.texts()))

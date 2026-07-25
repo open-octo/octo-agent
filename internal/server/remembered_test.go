@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/open-octo/octo-agent/internal/agentprofile"
 	"github.com/open-octo/octo-agent/internal/permission"
 )
 
@@ -118,10 +119,10 @@ func TestChannelCommand_UnbindDropsRemembered(t *testing.T) {
 	ad := &fullFakeAdapter{}
 	ev := evFor("/unbind")
 
-	key := "im:" + string(srv.channelMgr.KeyFor(ev))
+	key := "im:" + string(srv.channelMgr.KeyFor(ev, ""))
 	before := srv.rememberedFor(key)
 
-	if !srv.handleChannelCommand(ad, ev) {
+	if !srv.handleChannelCommand(ad, ev, agentprofile.DefaultProfile()) {
 		t.Fatal("/unbind not handled as a command")
 	}
 	if srv.rememberedFor(key) == before {
@@ -136,10 +137,10 @@ func TestChannelCommand_NewDropsRemembered(t *testing.T) {
 	ad := &fullFakeAdapter{}
 	ev := evFor("/new")
 
-	key := "im:" + string(srv.channelMgr.KeyFor(ev))
+	key := "im:" + string(srv.channelMgr.KeyFor(ev, ""))
 	before := srv.rememberedFor(key)
 
-	if !srv.handleChannelCommand(ad, ev) {
+	if !srv.handleChannelCommand(ad, ev, agentprofile.DefaultProfile()) {
 		t.Fatal("/new not handled as a command")
 	}
 	if srv.rememberedFor(key) == before {
