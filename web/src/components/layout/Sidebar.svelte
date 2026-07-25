@@ -311,9 +311,9 @@
       <button class="new-btn" onclick={() => newSession()}>
         <iconify-icon icon="ant-design:plus-outlined" width="14"></iconify-icon>
         <span>{$t('nav.new_session')}</span>
-        <button class="btn-caret" title={$t('nav.new_session_with_agent')} onclick={(e) => { e.stopPropagation(); agentPickerOpen = !agentPickerOpen }}>
+        <span class="btn-caret" title={$t('nav.new_session_with_agent')} onclick={(e) => { e.stopPropagation(); agentPickerOpen = !agentPickerOpen }}>
           <iconify-icon icon="ant-design:down-outlined" width="10"></iconify-icon>
-        </button>
+        </span>
       </button>
       {#if agentPickerOpen}
         <div class="agent-picker-menu">
