@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -108,48 +106,3 @@ func TestEmbeddedDefaultWorkflows_Execute(t *testing.T) {
 	}
 }
 
-// TestLoopEngineeringTemplates_Execute proves the loop-engineering skill's
-// reference templates (internal/skills/defaults/loop-engineering/templates/)
-// are runnable mruby scripts, even though they're deliberately NOT embedded
-// workflow-registry defaults (see TestLookupWorkflow_ReferenceTemplatesNotEmbedded).
-// A user or agent copies one of these into a `workflow` call or `workflow_save`;
-// a template that can't actually execute would be a worse starting point than
-// no template at all.
-func TestLoopEngineeringTemplates_Execute(t *testing.T) {
-	type run struct {
-		name string
-		args string
-	}
-	runs := []run{
-		{"issue-triage", ""},
-		{"pr-babysitter", ""},
-		{"ci-sweeper", ""},
-		{"ci-sweeper", `{"dry_run": false, "retry_flaky": true}`},
-		{"dependency-sweeper", ""},
-		{"dependency-sweeper", `{"dry_run": false}`},
-		{"changelog-drafter", ""},
-		{"post-merge-cleanup", ""},
-		{"post-merge-cleanup", `{"apply": true}`},
-	}
-
-	for _, r := range runs {
-		t.Run(fmt.Sprintf("%s/%s", r.name, r.args), func(t *testing.T) {
-			path := filepath.Join("..", "skills", "defaults", "loop-engineering", "templates", r.name+".rb")
-			script, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("reading template %q: %v", path, err)
-			}
-			got, err := workflow.Run(context.Background(), string(script), workflow.Options{
-				Agent:      schemaFakeAgent,
-				Args:       r.args,
-				JournalDir: ActiveWorkflowJournalDir(),
-			})
-			if err != nil {
-				t.Fatalf("workflow.Run(%q, args=%s): %v", r.name, r.args, err)
-			}
-			if strings.TrimSpace(got.Output) == "" {
-				t.Errorf("workflow.Run(%q, args=%s): empty output", r.name, r.args)
-			}
-		})
-	}
-}

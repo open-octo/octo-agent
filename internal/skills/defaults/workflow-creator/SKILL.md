@@ -1,6 +1,6 @@
 ---
 name: workflow-creator
-description: Turn a repeatable multi-step task into a runnable, reusable saved workflow through guided conversation, in either of two shapes — chaining existing skills/recordings (wiring each one's output into the next's input), or composing the workflow script's own primitives (agent/parallel/pipeline) directly when the task needs fresh sub-agent orchestration and no existing skill covers it. Figure out which shape fits, generate the Ruby workflow, dry-run it, and save it with workflow_save. Use when the user wants to combine / chain / orchestrate work into one repeatable flow — whether that's several EXISTING skills, or a from-scratch multi-agent script (parallel review, fan-out research, a pipeline over a list) — e.g. "chain these skills", "把这几个技能连起来", "串个流程", "做个 workflow", "编排一下", "build a workflow", "写个并行跑多个 agent 的脚本". Do NOT use to author a single new skill (that is skill-creator), to run one skill/agent a single time (just call it), or to design a recurring/self-triggering loop with its own trigger and state file (that is loop-engineering — a saved workflow is just the one-shot script such a loop calls, not the loop itself).
+description: Turn a repeatable multi-step task into a runnable, reusable saved workflow through guided conversation, in either of two shapes — chaining existing skills/recordings (wiring each one's output into the next's input), or composing the workflow script's own primitives (agent/parallel/pipeline) directly when the task needs fresh sub-agent orchestration and no existing skill covers it. Figure out which shape fits, generate the Ruby workflow, dry-run it, and save it with workflow_save. Use when the user wants to combine / chain / orchestrate work into one repeatable flow — whether that's several EXISTING skills, or a from-scratch multi-agent script (parallel review, fan-out research, a pipeline over a list) — e.g. "chain these skills", "把这几个技能连起来", "串个流程", "做个 workflow", "编排一下", "build a workflow", "写个并行跑多个 agent 的脚本". Do NOT use to author a single new skill (that is skill-creator), to run one skill/agent a single time (just call it), or to design a recurring/self-triggering loop with its own trigger and state file (use `cron-task-creator` to schedule a saved workflow instead — a saved workflow is just the one-shot script such a scheduled run calls, not the loop itself).
 ---
 
 # Build a saved workflow
@@ -48,7 +48,8 @@ Figure out which shape (or mix) fits **before** drafting anything — see Step 0
 First check this isn't actually a **loop** in disguise: if the user describes
 something that keeps running on its own (daily/hourly cadence, "keep checking
 until X", needs to remember state between runs, needs a done-condition or a
-human gate) — that's `loop-engineering`'s job, not this skill's. A saved
+human gate) — use `cron-task-creator` to schedule a saved workflow or build
+stateful persistence yourself; that's not this skill's job. A saved
 workflow is a single deterministic script; it has no opinion on when or how
 often it's invoked. Redirect there instead of scoping cadence/state yourself.
 
@@ -159,8 +160,7 @@ Then tell them the three ways to run it:
 
 ## Don't
 - Don't author a new SKILL.md — that is `skill-creator`.
-- Don't design cadence/state/trigger for a recurring loop — that is
-  `loop-engineering`; don't ask "定时跑还是手动触发" or "这个 workflow 解决什么场景"
+- Don't design cadence/state/trigger for a recurring loop — use `cron-task-creator` to schedule a saved workflow instead; don't ask "定时跑还是手动触发" or "这个 workflow 解决什么场景"
   as scoping questions, since scheduling is only ever a *consumer* of a saved
   workflow (mentioned once, in Step 5, as one of three ways to run it by name).
 - Don't save before the user has confirmed the name and scope.

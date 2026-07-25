@@ -289,20 +289,6 @@ func TestLookupWorkflow_EmbeddedDefaultAlwaysAvailable(t *testing.T) {
 	}
 }
 
-func TestLookupWorkflow_ReferenceTemplatesNotEmbedded(t *testing.T) {
-	// The loop-engineering skill ships several workflow scripts as reference
-	// templates under its own templates/ dir (read + adapted on demand, or
-	// saved with workflow_save) rather than as embedded registry defaults —
-	// only daily-triage graduated to a built-in preset. This guards against
-	// silently re-adding them to workflow_defaults/ without a deliberate call.
-	useWorkflowRoots(t, "", "")
-	for _, name := range []string{"issue-triage", "pr-babysitter", "ci-sweeper", "dependency-sweeper", "changelog-drafter", "post-merge-cleanup"} {
-		if _, ok := lookupWorkflow(context.Background(), name); ok {
-			t.Errorf("%q resolved as an embedded default; expected it to be a loop-engineering reference template only", name)
-		}
-	}
-}
-
 func TestLookupWorkflow_UserOverridesEmbeddedDefault(t *testing.T) {
 	user := t.TempDir()
 	useWorkflowRoots(t, user, "")

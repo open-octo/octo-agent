@@ -82,12 +82,12 @@ matches its description — you rarely need to invoke them by name.
 | Skill | What it does |
 |---|---|
 | `cron-task-creator` | Creates/inspects/edits/deletes recurring prompts that survive a restart, run by `octo serve`'s scheduler. See [Schedule cron tasks](/docs/guides/cron-tasks/) |
-| `loop-engineering` | Designs a self-running agent loop from octo's built-in primitives — discovery, isolated workers, verification, persisted state — with an L1→L3 rollout plan |
 
 **Connect things**
 
 | Skill | What it does |
 |---|---|
+| `expert-agent-manager` | Manage octo's agent profiles through conversation — create, modify, delete, list, and bind agents to IM chats by calling REST APIs |
 | `mcp-creator` | Finds the right MCP server, writes the `mcp.json` entry, and verifies the connection |
 | `channel-manager` | Walks you through setting up an IM platform (Feishu, WeChat, WeCom, DingTalk, Discord, Telegram) and writes `channels.yml` |
 

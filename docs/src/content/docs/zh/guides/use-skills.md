@@ -77,12 +77,12 @@ octo 开箱自带 20 个 skill。每一个都会在模型判断任务匹配时�
 | Skill | 作用 |
 |---|---|
 | `cron-task-creator` | 创建/查看/编辑/删除能扛得住重启的定期任务，由 `octo serve` 的调度器执行 |
-| `loop-engineering` | 用 octo 的内置原语设计一个自运行的 agent 循环——发现任务、隔离执行、验证结果、持久化状态，附 L1→L3 上线计划 |
 
 **接入外部系统**
 
 | Skill | 作用 |
 |---|---|
+| `expert-agent-manager` | 通过对话管理 octo 的 agent 画像——创建、修改、删除、列出 agent，并将 agent 绑定到 IM 聊天 |
 | `mcp-creator` | 找到合适的 MCP 服务，写好 `mcp.json` 配置项，并验证连接 |
 | `channel-manager` | 引导你配置一个 IM 平台（飞书、微信、企微、钉钉、Discord、Telegram），写好 `channels.yml` |
 
