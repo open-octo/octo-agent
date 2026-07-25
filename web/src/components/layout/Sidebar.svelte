@@ -311,9 +311,9 @@
       <button class="new-btn" onclick={() => newSession()}>
         <iconify-icon icon="ant-design:plus-outlined" width="14"></iconify-icon>
         <span>{$t('nav.new_session')}</span>
-      </button>
-      <button class="agent-pick-btn" title={$t('nav.new_session_with_agent')} onclick={() => agentPickerOpen = !agentPickerOpen}>
-        <iconify-icon icon="ant-design:plus-outlined" width="12"></iconify-icon>
+        <button class="btn-caret" title={$t('nav.new_session_with_agent')} onclick={(e) => { e.stopPropagation(); agentPickerOpen = !agentPickerOpen }}>
+          <iconify-icon icon="ant-design:down-outlined" width="10"></iconify-icon>
+        </button>
       </button>
       {#if agentPickerOpen}
         <div class="agent-picker-menu">
@@ -626,15 +626,16 @@
   flex: 1; height: 32px; border: none; border-radius: 6px;
   background: var(--blue-6); color: #fff; font-size: 14px;
   display: flex; align-items: center; justify-content: center; gap: 8px;
-  cursor: pointer; font-family: inherit;
+  cursor: pointer; font-family: inherit; position: relative;
 }
 .new-btn:hover { background: var(--blue-5); }
-.agent-pick-btn {
-  width: 32px; height: 32px; flex: 0 0 32px; border: none; border-radius: 6px;
-  background: var(--bg-hover); color: var(--text-tertiary);
+.btn-caret {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 22px; height: 22px; border: none; border-radius: 4px;
+  background: transparent; color: inherit;
   display: flex; align-items: center; justify-content: center; cursor: pointer;
 }
-.agent-pick-btn:hover { background: var(--border-secondary); color: var(--text-primary); }
+.btn-caret:hover { background: rgba(255,255,255,0.2); }
 .agent-picker-menu {
   position: absolute; top: 100%; left: 12px; right: 12px; z-index: 30;
   margin-top: 2px; padding: 4px;
