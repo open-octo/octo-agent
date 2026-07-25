@@ -544,8 +544,60 @@ func DefaultToolsFor(model string) []agent.ToolDefinition {
 // that used to be required, which mutated process-global state on every turn
 // of an inherently multi-session process (#1133). CLI/TUI callers, which have
 // no ctx-scoped manager, see identical behavior to DefaultToolsFor.
+//
+// When the context also carries a profile store (WithProfileStore) and session
+// agent ID (WithSessionAgentID), tools are filtered to the profile's allowlist
+// — see DefaultToolsForProfile.
 func DefaultToolsForCtx(ctx context.Context, model string) []agent.ToolDefinition {
-	return defaultToolsFor(ctx, model)
+	return DefaultToolsForProfile(ctx, model)
+}
+
+// ctxKeySessionAgentID is the context key for the per-turn session AgentID.
+type ctxKeySessionAgentID struct{}
+
+// WithSessionAgentID attaches a session's agent ID to the context so
+// DefaultToolsForProfile can resolve the profile for tool filtering. Stamped
+// per turn by the server's IM/web/cron handlers.
+func WithSessionAgentID(ctx context.Context, agentID string) context.Context {
+	return context.WithValue(ctx, ctxKeySessionAgentID{}, agentID)
+}
+
+// sessionAgentIDFromContext returns the context's session AgentID, or "".
+func sessionAgentIDFromContext(ctx context.Context) string {
+	if id, ok := ctx.Value(ctxKeySessionAgentID{}).(string); ok {
+		return id
+	}
+	return ""
+}
+
+// DefaultToolsForProfile is DefaultToolsForCtx with a per-profile allowlist.
+// When the context carries a profile store (WithProfileStore) and a session
+// agent ID (WithSessionAgentID), it resolves the profile and filters tools to
+// its allowlist. Otherwise it behaves like DefaultToolsForCtx — so callers
+// that don't wire a store see unchanged behavior. Resolved fresh per turn so
+// profile edits land on the next message without rebuilding anything.
+func DefaultToolsForProfile(ctx context.Context, model string) []agent.ToolDefinition {
+	all := defaultToolsFor(ctx, model)
+	store := profileStoreFromContext(ctx)
+	agentID := sessionAgentIDFromContext(ctx)
+	if store == nil || agentID == "" {
+		return all
+	}
+	profile, ok := store.Get(agentID)
+	if !ok || len(profile.Tools) == 0 {
+		return all
+	}
+	allowed := make(map[string]bool, len(profile.Tools))
+	for _, t := range profile.Tools {
+		allowed[t] = true
+	}
+	filtered := make([]agent.ToolDefinition, 0, len(all))
+	for _, t := range all {
+		if allowed[t.Name] {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
 }
 
 func defaultToolsFor(ctx context.Context, model string) []agent.ToolDefinition {

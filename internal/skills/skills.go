@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/open-octo/octo-agent/internal/agentprofile"
 	"github.com/open-octo/octo-agent/internal/pathutil"
 	"github.com/open-octo/octo-agent/internal/trash"
 	"gopkg.in/yaml.v3"
@@ -335,6 +336,39 @@ func RenderManifest(r *Registry) string {
 		"from the one-line description. The user can also trigger one directly by typing /<name>.\n\n")
 	for _, s := range r.List() {
 		fmt.Fprintf(&b, "- %s: %s\n", s.Name, s.Description)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// ManifestForProfile is RenderManifest filtered to the profile's ToolSkills.
+// When profile is non-nil and declares ToolSkills, only those skills are
+// listed — the design's per-agent skill isolation. A nil profile or an empty
+// ToolSkills list means "all skills" (the default agent behavior).
+func ManifestForProfile(r *Registry, profile *agentprofile.Profile) string {
+	if r.Len() == 0 {
+		return ""
+	}
+	if profile == nil || len(profile.ToolSkills) == 0 {
+		return RenderManifest(r)
+	}
+	allowed := make(map[string]bool, len(profile.ToolSkills))
+	for _, name := range profile.ToolSkills {
+		allowed[name] = true
+	}
+	var b strings.Builder
+	b.WriteString("# Available skills\n\n")
+	b.WriteString("When a task matches a skill's description, call the `skill` tool with its " +
+		"name to load the full instructions before acting. Don't guess the instructions " +
+		"from the one-line description. The user can also trigger one directly by typing /<name>.\n\n")
+	n := 0
+	for _, s := range r.List() {
+		if allowed[s.Name] {
+			fmt.Fprintf(&b, "- %s: %s\n", s.Name, s.Description)
+			n++
+		}
+	}
+	if n == 0 {
+		return ""
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

@@ -54,6 +54,15 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 		ctx = tools.WithGoalStore(ctx, sess)
 	}
 
+	// Resolve the routed agent's profile for per-turn tool/skill filtering.
+	// The store is read-through, so profile edits land on the next message.
+	// Stamped into ctx so DefaultToolsForCtx auto-filters via
+	// DefaultToolsForProfile.
+	if sess != nil {
+		ctx = tools.WithProfileStore(ctx, s.agentStore)
+		ctx = tools.WithSessionAgentID(ctx, sess.EffectiveAgentID())
+	}
+
 	// Gate image-handing tools (browser, read_file) on the active model's vision
 	// capability. Unlike the CLI (which goes through app.WireTools), the server
 	// wires tools here, so this is the only place serve learns whether the model

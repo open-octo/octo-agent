@@ -3,10 +3,45 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agentprofile"
 )
+
+// ctxKeyProfileStore is the context key for the per-turn agentprofile.Store.
+type ctxKeyProfileStore struct{}
+
+// WithProfileStore attaches an agentprofile.Store to the context so the
+// sub_agent tool can resolve subagent_type names against profiles. The store
+// is read-through, so profile edits (API, Web UI, direct .md edits) take
+// effect on the next resolution without any reload call.
+func WithProfileStore(ctx context.Context, store *agentprofile.Store) context.Context {
+	return context.WithValue(ctx, ctxKeyProfileStore{}, store)
+}
+
+// profileStoreFromContext returns the context's profile store, or nil.
+func profileStoreFromContext(ctx context.Context) *agentprofile.Store {
+	if s, ok := ctx.Value(ctxKeyProfileStore{}).(*agentprofile.Store); ok {
+		return s
+	}
+	return nil
+}
+
+// profileNames returns a comma-separated list of available profile names
+// (built-ins + user-defined) for error messages.
+func profileNames(store *agentprofile.Store) string {
+	if store == nil {
+		return "default, explore, general, code-review"
+	}
+	names := []string{"default"}
+	for _, p := range store.List() {
+		names = append(names, p.ID)
+	}
+	sort.Strings(names[1:]) // keep "default" first
+	return strings.Join(names, ", ")
+}
 
 // AgentTool is the unified sub-agent tool. It replaces the previous
 // explore_agent / plan_agent / general_agent /
@@ -105,15 +140,38 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 	// sub-agent the user can't talk to.
 	subagentType := strings.TrimSpace(stringArg(input, "subagent_type"))
 	if subagentType == "" {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: subagent_type is required. Available: %s", listPresetNames())
+		return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: subagent_type is required. Available: %s", profileNames(profileStoreFromContext(ctx)))
 	}
-	p, ok := lookupAgentPreset(subagentType)
-	if !ok {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: unknown subagent_type %q. Available: %s", subagentType, listPresetNames())
+	store := profileStoreFromContext(ctx)
+	var profile *agentprofile.Profile
+	if store != nil {
+		if p, ok := store.Get(subagentType); ok {
+			profile = p
+		}
+	} else {
+		// Fallback for callers that haven't wired a store (e.g. legacy CLI):
+		// resolve via the deprecated preset loader.
+		if p, ok := lookupAgentPreset(subagentType); ok {
+			profile = &agentprofile.Profile{
+				ID:          p.name,
+				Description: p.description,
+				CapabilitySpec: agentprofile.CapabilitySpec{
+					SystemPrompt:    p.persona,
+					ReadOnly:        p.readOnly,
+					LeanContext:     p.leanSystem,
+					Tools:           p.tools,
+					DisallowedTools: p.disallowedTools,
+					Model:           p.model,
+				},
+			}
+		}
+	}
+	if profile == nil {
+		return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: unknown subagent_type %q. Available: %s", subagentType, profileNames(store))
 	}
 
-	// Build the spawn request. Call-level tools/model win over the preset's
-	// frontmatter defaults; the preset fills in what the call left unset.
+	// Build the spawn request. Call-level tools/model win over the profile's
+	// frontmatter defaults; the profile fills in what the call left unset.
 	callTools := stringSliceArg(input, "tools")
 	callModel := strings.TrimSpace(stringArg(input, "model"))
 	req := SpawnRequest{
@@ -123,15 +181,15 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 		Tools:       callTools,
 		Model:       callModel,
 	}
-	req.SystemSuffix = p.persona
-	req.ReadOnly = p.readOnly
-	req.LeanSystem = p.leanSystem
-	req.DisallowedTools = p.disallowedTools
+	req.SystemSuffix = profile.SystemPrompt
+	req.ReadOnly = profile.ReadOnly
+	req.LeanSystem = profile.LeanContext
+	req.DisallowedTools = profile.DisallowedTools
 	if len(callTools) == 0 {
-		req.Tools = p.tools
+		req.Tools = profile.Tools
 	}
 	if callModel == "" {
-		req.Model = p.model
+		req.Model = profile.Model
 	}
 
 	// Determine sync vs async

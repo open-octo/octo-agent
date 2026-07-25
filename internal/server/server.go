@@ -1263,7 +1263,15 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	if g := tools.MemoryBackendGuidance(); g != "" {
 		memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
 	}
-	a.System, a.LeanSystem = prompt.ComposePair(s.system, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(model), memInjection, s.effectiveCoauthor(cfg))
+	// A profile with its own system prompt replaces the server's base prompt
+	// (default agent: unchanged, s.system). Resolved fresh per turn so profile
+	// edits land on the next message; a deleted profile falls back to default.
+	profile := s.profileForAgent(sess.EffectiveAgentID())
+	base := s.system
+	if profile.SystemPrompt != "" {
+		base = profile.SystemPrompt
+	}
+	a.System, a.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model), memInjection, s.effectiveCoauthor(cfg))
 
 	// L2: attention-layer rules (triggered keywords) + save-nudge on milestone
 	// tool results, plus any shell hooks (env/hooks.yml), unified on the agent's
@@ -1610,6 +1618,18 @@ func (s *Server) curSkillsManifest() string {
 	s.skillsMu.RLock()
 	defer s.skillsMu.RUnlock()
 	return s.skillsManifest
+}
+
+// curSkillsManifestForProfile is curSkillsManifest filtered to the profile's
+// ToolSkills. When profile is nil or declares no ToolSkills, the full manifest
+// is returned (default agent behavior). Resolved fresh per turn so profile
+// edits land on the next message.
+func (s *Server) curSkillsManifestForProfile(profile *agentprofile.Profile) string {
+	raw := s.curSkillsManifest()
+	if profile == nil || len(profile.ToolSkills) == 0 {
+		return raw
+	}
+	return skills.ManifestForProfile(s.skillReg, profile)
 }
 
 // setSkillsManifest replaces the skills manifest under a write lock. Called by
@@ -3038,6 +3058,14 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// prompt compose just below keys the MCP manifest off it.
 	s.applyChannelModel(sess)
 
+	// Resolve the routed agent's profile for per-turn behavior (system prompt,
+	// tool allowlist, skill allowlist). The store is read-through, so profile
+	// edits land on the next message. Stamped into ctx so DefaultToolsForCtx
+	// auto-filters via DefaultToolsForProfile.
+	profile := s.profileForAgent(sess.AgentID)
+	ctx = tools.WithProfileStore(ctx, s.agentStore)
+	ctx = tools.WithSessionAgentID(ctx, sess.AgentID)
+
 	// Recompose the system prompt every turn so memory written and skills
 	// imported/toggled since server start are visible — web turns get this
 	// for free from buildAgent; the IM factory's compose-once snapshot went
@@ -3065,10 +3093,10 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// (default agent: unchanged, s.system). Resolved fresh per turn so profile
 	// edits land on the next message; a deleted profile falls back to default.
 	base := s.system
-	if p := s.profileForAgent(sess.AgentID); p.SystemPrompt != "" {
-		base = p.SystemPrompt
+	if profile.SystemPrompt != "" {
+		base = profile.SystemPrompt
 	}
-	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifest(), tools.MCPManifestFor(sess.Agent.Model), memInjection, s.effectiveCoauthor(cfg))
+	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model), memInjection, s.effectiveCoauthor(cfg))
 
 	// L2 memory hooks + shell hooks, same engine buildAgent gives web turns,
 	// rebuilt per IM turn. The injector is session-sticky (recall latch) and
