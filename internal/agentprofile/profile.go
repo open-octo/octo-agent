@@ -3,11 +3,10 @@
 // skills) plus the platform slice (mention aliases, channel bindings) used
 // when a profile is addressed directly by users.
 //
-// Profiles come from three sources, in increasing precedence:
+// Profiles come from two sources, in increasing precedence:
 //
 //   - builtin: code-defined (default, explore, general, code-review)
 //   - user:    ~/.octo/agents/<id>.md       (conversation + delegation modes)
-//   - project: <repo>/.octo/agents/<id>.md  (delegation mode only)
 //
 // A profile is consumed in two modes:
 //
@@ -79,7 +78,7 @@ type Profile struct {
 	CapabilitySpec
 
 	WorkingDir      string
-	ChannelBindings []ChannelBinding // conversation mode only; user-level only
+	ChannelBindings []ChannelBinding // conversation mode only
 
 	Source Source
 

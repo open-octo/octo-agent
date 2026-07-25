@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/open-octo/octo-agent/internal/memory"
 	"gopkg.in/yaml.v3"
 )
 
@@ -31,22 +30,6 @@ var userAgentsRoot = func() string {
 	return filepath.Join(home, ".octo", "agents")
 }
 
-// projectAgentsRoot returns <project-root>/.octo/agents for the current working
-// directory's repository, or "" when it can't be resolved. Project-level agents
-// override user-level ones of the same name (matching .claude/agents semantics).
-// A var so tests can point it at a temp directory.
-var projectAgentsRoot = func() string {
-	cwd, err := os.Getwd()
-	if err != nil || cwd == "" {
-		return ""
-	}
-	root := memory.ProjectRoot(cwd)
-	if root == "" {
-		return ""
-	}
-	return filepath.Join(root, ".octo", "agents")
-}
-
 // discoveredAgents holds the last scanned user-defined agents.
 var (
 	discoveredAgentsMu sync.RWMutex
@@ -58,11 +41,7 @@ var (
 // the freshest set call it before lookupAgentPreset.
 func discoverAgents() {
 	fresh := make(map[string]agentPreset)
-	// User-level first, then project-level — project entries override
-	// user-level ones of the same name.
-	for _, root := range []string{userAgentsRoot(), projectAgentsRoot()} {
-		scanAgentsRoot(root, fresh)
-	}
+	scanAgentsRoot(userAgentsRoot(), fresh)
 	discoveredAgentsMu.Lock()
 	discoveredAgents = fresh
 	discoveredAgentsMu.Unlock()
