@@ -26,20 +26,8 @@ func TestManifestForProfile_NoProfileReturnsAll(t *testing.T) {
 	r := discoverWithDefaults(t)
 	full := RenderManifest(r)
 	profiled := ManifestForProfile(r, nil)
-	// Don't compare strings directly — List() sort is non-deterministic
-	// (pre-existing bug). Verify the profiled manifest contains every skill.
-	for _, s := range r.List() {
-		if !strings.Contains(profiled, s.Name) {
-			t.Fatalf("nil profile manifest missing skill %q", s.Name)
-		}
-	}
-	// Both should be non-empty and have the same number of skill entries.
-	if full == "" || profiled == "" {
-		t.Fatal("expected non-empty manifests")
-	}
-	if countSkillLines(full) != countSkillLines(profiled) {
-		t.Fatalf("full and profiled manifests have different skill counts: %d vs %d",
-			countSkillLines(full), countSkillLines(profiled))
+	if full != profiled {
+		t.Fatalf("nil profile should return full manifest.\nfull:\n%s\nprofiled:\n%s", full, profiled)
 	}
 }
 
@@ -99,16 +87,8 @@ func TestManifestForProfile_EmptyToolSkillsReturnsAll(t *testing.T) {
 			ToolSkills: []string{},
 		},
 	})
-	// Don't compare strings directly — List() sort is non-deterministic
-	// (pre-existing bug). Verify the profiled manifest contains every skill.
-	for _, s := range r.List() {
-		if !strings.Contains(profiled, s.Name) {
-			t.Fatalf("empty ToolSkills manifest missing skill %q", s.Name)
-		}
-	}
-	if countSkillLines(full) != countSkillLines(profiled) {
-		t.Fatalf("full and profiled manifests have different skill counts: %d vs %d",
-			countSkillLines(full), countSkillLines(profiled))
+	if full != profiled {
+		t.Fatalf("empty ToolSkills should return full manifest")
 	}
 }
 

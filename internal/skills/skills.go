@@ -232,9 +232,16 @@ func (r *Registry) List() []Skill {
 		}
 	}
 	r.mu.RUnlock()
+	// Source priority: project overrides user, user overrides default.
+	// Must use a total order (strict weak ordering) — the old
+	// out[i].Source == "project" shortcut was not antisymmetric
+	// (e.g. "user" vs "default" returned false for both directions),
+	// which made sort.Slice non-deterministic.
+	sourceOrder := map[string]int{"project": 0, "user": 1, "default": 2}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].Source != out[j].Source {
-			return out[i].Source == "project" // project before user
+		si, sj := sourceOrder[out[i].Source], sourceOrder[out[j].Source]
+		if si != sj {
+			return si < sj
 		}
 		return out[i].Name < out[j].Name
 	})
@@ -254,9 +261,11 @@ func (r *Registry) All() []Skill {
 		out = append(out, s)
 	}
 	r.mu.RUnlock()
+	sourceOrder := map[string]int{"project": 0, "user": 1, "default": 2}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].Source != out[j].Source {
-			return out[i].Source == "project" // project before user
+		si, sj := sourceOrder[out[i].Source], sourceOrder[out[j].Source]
+		if si != sj {
+			return si < sj
 		}
 		return out[i].Name < out[j].Name
 	})
