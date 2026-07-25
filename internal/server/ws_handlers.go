@@ -2178,6 +2178,17 @@ func (s *Server) requestConfirmation(ctx context.Context, sessionID, message, ki
 		})
 	}
 
+	// dismiss both closes the modal on every tab (not just the one that
+	// answered — without this, a tab that didn't answer keeps showing a dead
+	// modal) and is called on ctx cancellation to prevent orphaned modals.
+	dismiss := func() {
+		s.wsHub.broadcast("", wsEventDismissConfirmation{
+			Type:      "dismiss_confirmation",
+			SessionID: sessionID,
+			ConfID:    confID,
+		})
+	}
+
 	s.wsHub.broadcast("", ev)
 	// Cross-session signal (mirrors question_pending) so a client not subscribed
 	// to this session — the mobile feed — can still surface a needs-approval card.
@@ -2201,6 +2212,7 @@ func (s *Server) requestConfirmation(ctx context.Context, sessionID, message, ki
 		return result, nil
 	case <-ctx.Done():
 		cleanup()
+		dismiss()
 		return "", fmt.Errorf("confirmation cancelled")
 	}
 }

@@ -1,10 +1,16 @@
 <script lang="ts">
-  import { confirmModal } from '../../lib/stores'
+  import { confirmModals, activeSessionId } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import { t } from '../../lib/i18n'
   import StatusTag from '../ui/StatusTag.svelte'
 
   let modalEl = $state<HTMLDivElement | null>(null)
+
+  // Only the ACTIVE session's confirmation renders as a modal. Non-active
+  // session confirmations are stored in confirmModals but don't interrupt —
+  // the sidebar's pending_confirmation badge (via session_activity) alerts
+  // the user instead.
+  const current = $derived($activeSessionId ? $confirmModals[$activeSessionId] : undefined)
 
   // Focus the modal whenever it (re)opens, same as AuthGate/CommandPalette —
   // review caught that a window-level keydown listener without stealing
@@ -13,19 +19,29 @@
   // approved the pending tool call — approving blind again, just via
   // keyboard instead of the backdrop click this fix closed off.
   $effect(() => {
-    if ($confirmModal && modalEl) modalEl.focus()
+    if (current && modalEl) modalEl.focus()
   })
 
+  function clearCurrent() {
+    const sid = current?.sessionId
+    if (!sid) return
+    confirmModals.update(m => {
+      const n = { ...m }
+      delete n[sid]
+      return n
+    })
+  }
+
   function deny() {
-    if (!$confirmModal) return
-    ws.answerConfirmation($confirmModal.id, 'deny')
-    confirmModal.set(null)
+    if (!current) return
+    ws.answerConfirmation(current.id, 'deny')
+    clearCurrent()
   }
 
   function answer(result: string) {
-    if (!$confirmModal) return
-    ws.answerConfirmation($confirmModal.id, result)
-    confirmModal.set(null)
+    if (!current) return
+    ws.answerConfirmation(current.id, result)
+    clearCurrent()
   }
 
   // #1105: Esc / Enter, matching AuthGate / CommandPalette. Bound on the
@@ -35,13 +51,13 @@
   // Enter maps to the primary action — for a permission ask that's now
   // "allow once" (the least-privilege choice), not "allow for session".
   function onKeydown(e: KeyboardEvent) {
-    if (!$confirmModal) return
+    if (!current) return
     if (e.key === 'Escape') {
       e.preventDefault()
-      $confirmModal.kind === 'ok' ? answer('ok') : deny()
+      current.kind === 'ok' ? answer('ok') : deny()
     } else if (e.key === 'Enter') {
       e.preventDefault()
-      answer($confirmModal.kind === 'ok' ? 'ok' : 'yes')
+      answer(current.kind === 'ok' ? 'ok' : 'yes')
     }
   }
 
@@ -56,7 +72,7 @@
   }
 </script>
 
-{#if $confirmModal}
+{#if current}
 <!-- #1105: backdrop no longer denies on click — a stray click used to
      silently cancel the pending tool call mid-turn. Dismissal now requires
      an explicit button or Esc. -->
@@ -71,26 +87,26 @@
     </div>
 
     <div class="modal-body">
-      {#if $confirmModal.message}
-        <p class="desc">{$confirmModal.message}</p>
+      {#if current.message}
+        <p class="desc">{current.message}</p>
       {/if}
-      {#if $confirmModal.command}
-        <pre class="terminal"><span class="prompt">$</span> {$confirmModal.command}</pre>
-      {:else if $confirmModal.diff}
+      {#if current.command}
+        <pre class="terminal"><span class="prompt">$</span> {current.command}</pre>
+      {:else if current.diff}
         <div class="diff-block">
-          {#each $confirmModal.diff.split('\n') as line}
+          {#each current.diff.split('\n') as line}
             <div class={diffLineClass(line)}>{line}</div>
           {/each}
         </div>
-      {:else if $confirmModal.input}
-        <pre class="terminal">{$confirmModal.input}</pre>
-      {:else if $confirmModal.content}
-        <pre class="terminal">{$confirmModal.content}</pre>
+      {:else if current.input}
+        <pre class="terminal">{current.input}</pre>
+      {:else if current.content}
+        <pre class="terminal">{current.content}</pre>
       {/if}
     </div>
 
     <div class="modal-footer">
-      {#if $confirmModal.kind === 'ok'}
+      {#if current.kind === 'ok'}
         <button class="btn-primary" onclick={() => answer('ok')}>{$t('common.ok')}</button>
       {:else}
         <button class="btn-deny" onclick={deny}>

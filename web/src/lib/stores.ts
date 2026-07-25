@@ -145,7 +145,11 @@ export const chatWorkflows = writable<Record<string, WorkflowRunState[]>>({})
 export const pendingPrompt = writable<{ sessionId: string; content: string } | null>(null)
 
 // Permission/question modals
-export const confirmModal = writable<any | null>(null)
+// Keyed by sessionId so a second session's confirmation doesn't clobber a
+// still-unanswered first one — same pattern as questionModals. Only the
+// active session's confirmation renders as a modal; non-active ones surface
+// as toast notifications.
+export const confirmModals = writable<Record<string, any>>({})
 export interface QuestionModalEntry {
   questionId: string
   sessionId: string

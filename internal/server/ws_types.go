@@ -274,6 +274,16 @@ type wsEventDismissUserQuestion struct {
 	QuestionID string `json:"question_id"`
 }
 
+// wsEventDismissConfirmation tells the browser to close the confirmation modal
+// that was opened by request_confirmation. Sent when the agent context is
+// cancelled (interrupt, timeout, session delete) before the user answers —
+// without it, the modal hangs forever on tabs that haven't answered yet.
+type wsEventDismissConfirmation struct {
+	Type      string `json:"type"`
+	SessionID string `json:"session_id"`
+	ConfID    string `json:"id"`
+}
+
 // wsEventSessionActivity is a lightweight cross-session signal broadcast
 // globally (wsHub.broadcast("", ev)) rather than to a session's subscribers.
 // request_user_question / session_update / complete only reach tabs

@@ -22,7 +22,7 @@
     chatSubAgents,
     chatWorkflows,
     applyWorkflowEvent,
-    confirmModal,
+    confirmModals,
     questionModals,
     feedbackModal,
     pendingPrompt,
@@ -953,34 +953,39 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     }))
 
     cleanups.push(ws.on('request_confirmation', (ev) => {
-      if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      confirmModal.set({
-        // ConfirmModal reads $confirmModal.id when answering; storing it under
-        // any other key sends a confirmation with no id, which the server can't
-        // route back to the waiting tool (the turn then hangs on the popup).
-        id: (ev as any).id,
-        sessionId: (ev as any).session_id,
-        message: (ev as any).message,
-        kind: (ev as any).kind,
-        // #1105: detail fields so the modal shows what it's approving
-        // instead of just "Allow <tool>?".
-        toolName: (ev as any).tool_name,
-        command: (ev as any).command,
-        diff: (ev as any).diff,
-        input: (ev as any).input,
-      })
+      const csid = (ev as any).session_id
+      if (!csid) return
+      confirmModals.update(m => ({
+        ...m,
+        [csid]: {
+          id: (ev as any).id,
+          sessionId: csid,
+          message: (ev as any).message,
+          kind: (ev as any).kind,
+          // #1105: detail fields so the modal shows what it's approving
+          // instead of just "Allow <tool>?".
+          toolName: (ev as any).tool_name,
+          command: (ev as any).command,
+          diff: (ev as any).diff,
+          input: (ev as any).input,
+        },
+      }))
     }))
 
     cleanups.push(ws.on('confirmation_complete', (ev) => {
-      if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      confirmModal.update(current => {
-        if (!current) return current
+      const csid = (ev as any).session_id
+      if (!csid) return
+      confirmModals.update(m => {
+        const current = m[csid]
+        if (!current) return m
         // Only close if this completion is for the confirmation currently
-        // shown in this tab; otherwise leave any unrelated modal untouched.
+        // shown for that session; otherwise leave any unrelated modal untouched.
         if ((ev as any).id === current.id) {
-          return null
+          const n = { ...m }
+          delete n[csid]
+          return n
         }
-        return current
+        return m
       })
     }))
 
@@ -1011,6 +1016,16 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       questionModals.update(m => {
         const n = { ...m }
         delete n[qsid]
+        return n
+      })
+    }))
+
+    cleanups.push(ws.on('dismiss_confirmation', (ev) => {
+      const csid = (ev as any).session_id
+      if (!csid) return
+      confirmModals.update(m => {
+        const n = { ...m }
+        delete n[csid]
         return n
       })
     }))
