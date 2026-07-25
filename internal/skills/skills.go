@@ -122,7 +122,7 @@ func (r *Registry) scanRoot(root, source string) {
 		}
 		r.skills[name] = Skill{
 			Name:        name,
-System:      sys,
+			System:      sys,
 			Description: desc,
 			Body:        strings.TrimSpace(body),
 			Dir:         abs,

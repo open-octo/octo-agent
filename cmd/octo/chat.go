@@ -1023,12 +1023,12 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			sess.Bind(agent.EntryTUI, false)
 			if agentProfileID != "" {
 				sess.AgentID = agentProfileID
-		// An expert agent profile with its own system prompt
-		// replaces the server base prompt. Persist in the session
-		// so resume recomposes with the right persona.
-		if agentProfile != nil && agentProfile.SystemPrompt != "" {
-			sess.System = agentProfile.SystemPrompt
-		}
+				// An expert agent profile with its own system prompt
+				// replaces the server base prompt. Persist in the session
+				// so resume recomposes with the right persona.
+				if agentProfile != nil && agentProfile.SystemPrompt != "" {
+					sess.System = agentProfile.SystemPrompt
+				}
 			}
 		}
 		wireSessionHooks(a, sess, agent.EntryTUI)
