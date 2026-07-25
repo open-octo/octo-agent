@@ -381,44 +381,44 @@
   .acard .atype { flex: none; font-size: 11px; color: var(--m-text-3); font-family: ui-monospace, Menlo, monospace; }
 
   /* ── Markdown rendering (adapted from desktop for mobile) ─────────────────── */
-  .agent.body :global(p) { margin: 0; }
-  .agent.body :global(p:not(:last-child)) { margin: 0 0 8px; }
-  .agent.body :global(h1), .agent.body :global(h2), .agent.body :global(h3), .agent.body :global(h4) {
+  .bubble.agent .body :global(p) { margin: 0; }
+  .bubble.agent .body :global(p:not(:last-child)) { margin: 0 0 8px; }
+  .bubble.agent .body :global(h1), .bubble.agent .body :global(h2), .bubble.agent .body :global(h3), .bubble.agent .body :global(h4) {
     margin: 12px 0 6px; font-weight: 600; line-height: 1.3;
   }
-  .agent.body :global(h1) { font-size: 18px; }
-  .agent.body :global(h2) { font-size: 16px; }
-  .agent.body :global(h3) { font-size: 15px; }
-  .agent.body :global(ul), .agent.body :global(ol) { margin: 0; padding-left: 22px; }
-  .agent.body :global(li) { margin: 3px 0; }
-  .agent.body :global(a) { color: var(--m-accent); text-decoration: none; }
-  .agent.body :global(code) {
+  .bubble.agent .body :global(h1) { font-size: 18px; }
+  .bubble.agent .body :global(h2) { font-size: 16px; }
+  .bubble.agent .body :global(h3) { font-size: 15px; }
+  .bubble.agent .body :global(ul), .bubble.agent .body :global(ol) { margin: 0; padding-left: 22px; }
+  .bubble.agent .body :global(li) { margin: 3px 0; }
+  .bubble.agent .body :global(a) { color: var(--m-accent); text-decoration: none; }
+  .bubble.agent .body :global(code) {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
     background: rgba(127, 127, 127, 0.15); border-radius: 4px; padding: 1px 5px;
   }
-  .agent.body :global(pre) {
+  .bubble.agent .body :global(pre) {
     margin: 8px 0; padding: 10px 12px; overflow-x: auto; border-radius: 8px;
     background: var(--m-surface); border: 1px solid var(--m-border);
     font-size: 12.5px; line-height: 1.6;
   }
-  .agent.body :global(pre code) { background: none; padding: 0; border-radius: 0; }
-  .agent.body :global(blockquote) {
+  .bubble.agent .body :global(pre code) { background: none; padding: 0; border-radius: 0; }
+  .bubble.agent .body :global(blockquote) {
     margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--m-accent);
     background: rgba(127, 127, 127, 0.08); border-radius: 0 6px 6px 0; font-size: 13px; color: var(--m-text-2);
   }
-  .agent.body :global(table) { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
-  .agent.body :global(th), .agent.body :global(td) { border: 1px solid var(--m-border); padding: 5px 10px; text-align: left; }
-  .agent.body :global(th) { background: var(--m-surface); font-weight: 600; }
-  .agent.body :global(hr) { border: none; border-top: 1px solid var(--m-border); margin: 12px 0; }
-  .agent.body :global(img) { max-width: 100%; border-radius: 8px; }
+  .bubble.agent .body :global(table) { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+  .bubble.agent .body :global(th), .bubble.agent .body :global(td) { border: 1px solid var(--m-border); padding: 5px 10px; text-align: left; }
+  .bubble.agent .body :global(th) { background: var(--m-surface); font-weight: 600; }
+  .bubble.agent .body :global(hr) { border: none; border-top: 1px solid var(--m-border); margin: 12px 0; }
+  .bubble.agent .body :global(img) { max-width: 100%; border-radius: 8px; }
   .thoughts :global(p) { margin: 0; }
   .thoughts :global(pre) { margin: 6px 0; padding: 8px 10px; border-radius: 6px; background: rgba(127, 127, 127, 0.08); overflow-x: auto; font-size: 12px; }
   .thoughts :global(code) { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   /* highlight.js theme overrides for mobile dark context */
-  .agent.body :global(.hljs) { background: transparent; }
-  .agent.body :global(.code-block) { border: 1px solid var(--m-border); border-radius: 8px; overflow: hidden; margin: 8px 0; }
-  .agent.body :global(.code-header) { display: flex; align-items: center; gap: 8px; padding: 5px 10px; background: var(--m-surface); border-bottom: 1px solid var(--m-border); }
-  .agent.body :global(.code-lang) { font-size: 10px; color: var(--m-text-3); font-family: ui-monospace, Menlo, monospace; }
-  .agent.body :global(.copy-btn) { margin-left: auto; border: none; background: transparent; color: var(--m-text-3); font-size: 11px; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-family: inherit; }
-  .agent.body :global(.copy-btn:active) { background: var(--m-border); }
+  .bubble.agent .body :global(.hljs) { background: transparent; }
+  .bubble.agent .body :global(.code-block) { border: 1px solid var(--m-border); border-radius: 8px; overflow: hidden; margin: 8px 0; }
+  .bubble.agent .body :global(.code-header) { display: flex; align-items: center; gap: 8px; padding: 5px 10px; background: var(--m-surface); border-bottom: 1px solid var(--m-border); }
+  .bubble.agent .body :global(.code-lang) { font-size: 10px; color: var(--m-text-3); font-family: ui-monospace, Menlo, monospace; }
+  .bubble.agent .body :global(.copy-btn) { margin-left: auto; border: none; background: transparent; color: var(--m-text-3); font-size: 11px; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-family: inherit; }
+  .bubble.agent .body :global(.copy-btn:active) { background: var(--m-border); }
 </style>

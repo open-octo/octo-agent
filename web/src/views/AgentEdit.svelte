@@ -10,13 +10,13 @@
 
   let { agent, onSave, onCancel }: Props = $props()
 
-  let name = $state(agent?.name ?? '')
-  let description = $state(agent?.description ?? '')
-  let model = $state(agent?.model ?? '')
-  let tools = $state(agent?.tools?.join(', ') ?? '')
-  let toolSkills = $state(agent?.tool_skills?.join(', ') ?? '')
-  let mentionAs = $state(agent?.mention_as?.join(', ') ?? '')
-  let systemPrompt = $state(agent?.system_prompt ?? '')
+  let name = $state('')
+  let description = $state('')
+  let model = $state('')
+  let tools = $state('')
+  let toolSkills = $state('')
+  let mentionAs = $state('')
+  let systemPrompt = $state('')
 
   // Reset form fields when the agent prop changes (Svelte 5 captures prop
   // values only at initialisation; without this, editing a different agent
