@@ -197,12 +197,15 @@
         <label>{$t('agents.channel_bindings')}</label>
         {#each bindings as b, i}
           <div class="bind-row">
-            <select bind:value={bindings[i].platform} class="bind-select" onchange={(e) => {
-              const val = (e.target as HTMLSelectElement).value
-              const parts = val.split('|')
-              bindings[i].platform = parts[0]
-              bindings[i].adapter_id = parts[1] || ''
-            }}>
+            <select
+              class="bind-select"
+              value={`${b.platform}|${b.adapter_id || b.platform}`}
+              onchange={(e) => {
+                const val = (e.target as HTMLSelectElement).value
+                const parts = val.split('|')
+                bindings[i] = { ...bindings[i], platform: parts[0], adapter_id: parts[1] || '' }
+              }}
+            >
               <option value="">{$t('agents.select_platform')}</option>
               {#each availableBots as bot}
                 <option value={`${bot.platform}|${bot.adapter_id}`}>{bot.label}</option>
