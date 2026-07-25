@@ -89,7 +89,7 @@
         <iconify-icon icon="ant-design:form-outlined" width="14" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
         <span class="qnote-label">{sessionLabel(sid)}</span>
         <span class="qnote-q">{entry.question}</span>
-        <span class="qnote-go">{$t('m.view')} ›</span>
+        <span class="qnote-go">$t('m.view')} ›</span>
       </button>
     {/each}
   </div>
@@ -101,8 +101,8 @@
     <div class="modal" bind:this={modalEl} onkeydown={onKeydown} role="dialog" aria-modal="true" tabindex="-1">
       <div class="modal-header">
         <iconify-icon icon="ant-design:form-outlined" width="16" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
-        <span class="modal-title">{current.header || t('question.title')}</span>
-        <button class="close-btn" onclick={softClose} aria-label={t('common.close')}>
+        <span class="modal-title">{current.header || $t('question.title')}</span>
+        <button class="close-btn" onclick={softClose} aria-label={$t('common.close')}>
           <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
         </button>
       </div>
@@ -128,7 +128,7 @@
             type={current.secret ? 'password' : 'text'}
             autocomplete={current.secret ? 'new-password' : 'off'}
             data-1p-ignore={current.secret ? true : undefined}
-            placeholder={t('question.custom_placeholder')}
+            placeholder={$t('question.custom_placeholder')}
             bind:value={customText}
             onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit() } }}
           />
@@ -136,10 +136,10 @@
       </div>
 
       <div class="modal-footer">
-        <button class="btn-cancel" onclick={cancel}>{t('common.cancel')}</button>
+        <button class="btn-cancel" onclick={cancel}>{$t('common.cancel')}</button>
         <span class="spacer"></span>
         <button class="btn-primary" onclick={submit} disabled={selected.length === 0 && !customText.trim()}>
-          {t('common.submit')}
+          {$t('common.submit')}
         </button>
       </div>
     </div>
@@ -173,13 +173,13 @@
           type={current.secret ? 'password' : 'text'}
           autocomplete={current.secret ? 'new-password' : 'off'}
           data-1p-ignore={current.secret ? true : undefined}
-          placeholder={t('question.custom_placeholder')}
+          placeholder={$t('question.custom_placeholder')}
           bind:value={customText}
           onkeydown={(e) => { if (e.key === 'Enter' && customText.trim()) { e.preventDefault(); submit() } }}
         />
-        <button class="btn-cancel btn-cancel-sm" onclick={cancel}>{t('common.cancel')}</button>
+        <button class="btn-cancel btn-cancel-sm" onclick={cancel}>{$t('common.cancel')}</button>
         <button class="btn-primary btn-primary-sm" onclick={submit} disabled={selected.length === 0 && !customText.trim()}>
-          {t('common.submit')}
+          {$t('common.submit')}
         </button>
       </div>
     </div>
