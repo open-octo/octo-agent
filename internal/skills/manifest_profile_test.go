@@ -41,7 +41,19 @@ func TestManifestForProfile_FiltersByToolSkills(t *testing.T) {
 	if len(allSkills) == 0 {
 		t.Fatal("expected skills")
 	}
-	target := allSkills[0].Name
+	// Pick the first non-system skill — a system skill (e.g. skill-creator)
+	// would be stripped from an expert agent's manifest and break the
+	// one-skill-count assertion below.
+	var target string
+	for _, s := range allSkills {
+		if !s.System {
+			target = s.Name
+			break
+		}
+	}
+	if target == "" {
+		t.Skip("no non-system skill available")
+	}
 	profiled := ManifestForProfile(r, &agentprofile.Profile{
 		ID:          "test",
 		Description: "d",

@@ -1,5 +1,6 @@
 ---
 name: workflow-creator
+system: true
 description: Turn a repeatable multi-step task into a runnable, reusable saved workflow through guided conversation, in either of two shapes — chaining existing skills/recordings (wiring each one's output into the next's input), or composing the workflow script's own primitives (agent/parallel/pipeline) directly when the task needs fresh sub-agent orchestration and no existing skill covers it. Figure out which shape fits, generate the Ruby workflow, dry-run it, and save it with workflow_save. Use when the user wants to combine / chain / orchestrate work into one repeatable flow — whether that's several EXISTING skills, or a from-scratch multi-agent script (parallel review, fan-out research, a pipeline over a list) — e.g. "chain these skills", "把这几个技能连起来", "串个流程", "做个 workflow", "编排一下", "build a workflow", "写个并行跑多个 agent 的脚本". Do NOT use to author a single new skill (that is skill-creator), to run one skill/agent a single time (just call it), or to design a recurring/self-triggering loop with its own trigger and state file (use `cron-task-creator` to schedule a saved workflow instead — a saved workflow is just the one-shot script such a scheduled run calls, not the loop itself).
 ---
 
