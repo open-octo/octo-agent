@@ -37,6 +37,7 @@ Use the `web_fetch` tool to call them. All requests return JSON.
   "id": "code-review",
   "name": "Code Reviewer",
   "description": "Reviews code for bugs and style",
+  "system_prompt": "You are a thorough code reviewer. Be concise but precise.",
   "model": "claude-sonnet-4-20250514",
   "tools": ["read_file", "grep", "glob"],
   "tool_skills": ["code-review"],
@@ -47,6 +48,7 @@ Use the `web_fetch` tool to call them. All requests return JSON.
 - `id`: filename slug (lowercase, `[a-z0-9-]`); immutable after creation.
 - `name`: display name.
 - `description`: required; shown in listings.
+- `system_prompt`: the agent's system prompt (the Markdown body of `~/.octo/agents/<id>.md`); required for the agent to behave differently from the default agent.
 - `model`: optional model override (must be in `~/.octo/config.yml`'s models).
 - `tools`: tool allowlist; empty = all tools (default agent behavior).
 - `tool_skills`: skills exposed as tools.
@@ -67,8 +69,9 @@ Use the `web_fetch` tool to call them. All requests return JSON.
 2. **Confirm before creating.** Show the user the profile you're about to
    create and confirm.
 
-3. **Call `POST /api/agents`.** Body is the profile JSON. The server derives
-   the `id` from the name (slug). On success (201), echo back the created
+3. **Call `POST /api/agents`.** Body is the profile JSON. Include `system_prompt`
+   in the JSON body (it becomes the Markdown body of the `.md` file). The server
+   derives the `id` from the name (slug). On success (201), echo back the created
    profile.
 
 4. **Verify.** Call `GET /api/agents/:id` to confirm it was written.
