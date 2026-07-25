@@ -1049,3 +1049,132 @@ Web 端不维护全局 active agent 状态——agent 绑定在 session 上，�
 - **WeChat 群聊**：WeChat 没有原生 mention，群聊路由只能走频道绑定。私聊绑定同一 expert agent 后，群聊和私聊行为相同（无 @ 区分）。这是 WeChat 平台限制，无法在应用层规避。
 - **MCP Server 资源**：被禁 MCP 的 server 仍保持 registry 注册和连接。若 MCC server 数量极大且有连接数上限，可在后续加入 lazy-connect 优化。
 - **多 agent 并发 rate limit**：多个 agent 的 cron 同时跑时共用同一个 API key，可能触发 rate limit。留待后续加 per-agent 并发限制或队列。
+
+---
+
+## 多 Bot 实例与 Bot 级路由（规划中）
+
+### 场景
+
+用户在同一 IM 平台注册多个 bot、拉入同一个群聊、每个 bot 绑定不同 expert agent。
+用户 @ 某个 bot → 对应该 bot 的 agent 响应。
+
+示例：飞书群里有 3 个 bot——`@code-review-bot`、`@ops-bot`、`@docs-bot`——分别
+绑定 code-review / ops-helper / docs-writer profile。
+
+### 当前架构缺口
+
+现有架构是**单 bot 单 Manager**：
+
+1. **`channels.yml` 每个平台只配一个 bot**——key 是平台名（`feishu`），value 是凭据。
+   要注册 3 个飞书 bot，需要 3 条配置——当前 key 冲突。
+2. **`InboundEvent` 无 `AdapterID` 字段**——Router 收到消息后只能看到 `(platform, chat_id)`，
+   无法区分这条消息来自哪个 bot 实例。
+3. **`profile.channel_bindings` 按 `(platform, chat_id)` 索引**——同一个 chat_id 只能绑
+   一个 profile，多绑 → drop。无法表达"bot A → agent A, bot B → agent B"的映射。
+4. **IM adapter 层有 bot 身份信息但没有暴露**：Telegram 的 `botID/botUsername`、
+   飞书的 `app_id`、DingTalk/WeCom 的 `bot_id` 都在 adapter 内部用于 mention 门控，
+   未传入 InboundEvent。
+
+### 设计方案
+
+核心思路：在 `channels.yml` → adapter → InboundEvent → Router 这条链路上，
+把 **bot 实例标识（`AdapterID`）** 作为一等公民对待。
+
+#### 1. `channels.yml` 支持多实例
+
+将每个平台的配置从单实例扩展为实例列表：
+
+```yaml
+channels:
+  feishu:
+    - name: code-review-bot
+      enabled: true
+      app_id: cli_a7...
+      app_secret: ...
+    - name: ops-bot
+      enabled: true
+      app_id: cli_b8...
+      app_secret: ...
+    - name: docs-bot
+      enabled: true
+      app_id: cli_c9...
+      app_secret: ...
+```
+
+`name` 是用户给这个 bot 实例起的别名（在 `channel_bindings` 中引用）。
+每个实例独立注册为 adapter 并进入 Manager。
+
+#### 2. `InboundEvent` 增加 `AdapterID` 字段
+
+```go
+type InboundEvent struct {
+    // ... 现有字段 ...
+    // AdapterID identifies which bot instance received the message.
+    // Set by the adapter factory; empty for single-instance platforms.
+    AdapterID string
+}
+```
+
+Adapter 构造时注入自身 ID，构造 InboundEvent 时填入。这个字段对 adapter
+本身无额外影响——各 adapter 已经持有自己的凭据和身份信息——只是把它
+带入事件流。
+
+#### 3. `ChannelBinding` 增加 `AdapterID` 维度
+
+```go
+type ChannelBinding struct {
+    Platform  string
+    AdapterID string // bot 实例标识；空 = 单实例兼容模式
+    ChatID    string
+}
+```
+
+profile 的 `channel_bindings` 变为三维：`(platform, adapter_id, chat_id)`。
+同一群聊的不同 bot 可以有不同绑定。
+
+#### 4. Router 改为三维匹配
+
+```
+ByChannel(platform, adapterID, chatID) → []*Profile
+```
+
+路由决策表：
+
+| adapterID | 频道绑定 | 路由结果 |
+|-----------|----------|----------|
+| 有 | 0 条匹配 | Default Agent |
+| 有 | 1 条匹配 | 绑定的 profile |
+| 有 | 多条匹配 | drop |
+| 空（单 bot） | 0 | Default Agent |
+| 空（单 bot） | 1 | 绑定的 profile |
+
+#### 5. `handleChannelEvent` 传递 `AdapterID`
+
+```go
+func (s *Server) handleChannelEvent(ctx context.Context, ad channel.Adapter, adapterID string, ev channel.InboundEvent) {
+    ev.AdapterID = adapterID
+    // ... 现有逻辑 ...  Router.Route(ev) ...
+}
+```
+
+#### 6. 兼容性
+
+- 单 bot 实例的平台（旧 `channels.yml` 格式）自动获得 `AdapterID=""`，Router 降级到
+  二维匹配——行为与改造前完全一致。
+- 存量的 `profile.channel_bindings` 中 `adapter_id` 为空，"空=兼容模式下的单 bot"。
+- Manager/`sessionKeyFor`/`/bind` 等无需改动——这些已经从 profile 路由结果获取 `agentID`，
+  router 改三维不影响它们。
+
+### 改造文件
+
+| 文件 | 改动 |
+|------|------|
+| `internal/channel/config.go` | Config 支持多实例列表；向后兼容旧单实例格式 |
+| `internal/channel/adapter.go` | InboundEvent 增加 `AdapterID` 字段 |
+| `internal/agentprofile/profile.go` | ChannelBinding 增加 `AdapterID` 字段；Router 改为三维 |
+| `internal/agentprofile/store.go` | ByChannel 增加 `adapterID` 参数 |
+| `internal/server/server.go` | `startOneChannelLocked` 注入 `adapterID` 到事件流；适配新 Config 格式 |
+| `web/src/views/AgentEdit.svelte` | 绑定频道表单增加 bot 实例选择器 |
+| `skills/expert-agent-manager/SKILL.md` | bind API 参数增加 `adapter_id` |
+| `skills/channel-manager/SKILL.md` | 支持多 bot 实例引导 |
