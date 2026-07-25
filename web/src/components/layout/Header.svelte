@@ -1,40 +1,16 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, cmdkOpen, sidebar, nativeShell, activeAgent } from '../../lib/stores'
-  import * as api from '../../lib/api'
+  import { view, cmdkOpen, sidebar, nativeShell } from '../../lib/stores'
   import { t } from '../../lib/i18n'
+  import * as api from '../../lib/api'
   import { ws, wsState } from '../../lib/ws'
   import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
   import { nativeToggleMaximise, nativeMinimise, nativeClose, nativeWindowState } from '../../lib/api'
   import OctoLogo from './OctoLogo.svelte'
 
-  // Agent selector state.
-  let agents: api.Agent[] = []
-  let agentMenuOpen = false
-  let agentSelector: HTMLElement
-  $: currentAgent = agents.find(a => a.id === $activeAgent)?.name ?? 'Default'
-
-  async function loadAgents() {
-    try {
-      agents = await api.listAgents()
-    } catch { /* agents list is optional — default always works */ }
-  }
-
-  function selectAgent(id: string) {
-    activeAgent.set(id)
-    agentMenuOpen = false
-  }
   function cycleSidebar() {
     sidebar.update(s => s === 'full' ? 'rail' : s === 'rail' ? 'hidden' : 'full')
   }
-  function onWindowClick(e: MouseEvent) {
-    if (!agentMenuOpen || !agentSelector) return
-    if (!agentSelector.contains(e.target as Node)) {
-      agentMenuOpen = false
-    }
-  }
-
-  onMount(loadAgents)
 
   // The bell toggles desktop notifications on/off — the same preference the
   // "Desktop Notifications" switch in Settings drives. There is no feed.
@@ -95,8 +71,6 @@
   })
 </script>
 
-<svelte:window onclick={onWindowClick} />
-
 <header class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
   <div class="left">
     <button class="icon-btn" title={$t('header.toggle_sidebar')} onclick={cycleSidebar}>
@@ -107,28 +81,6 @@
       <span class="name">Octo</span>
       <span class="divider"></span>
       <span class="sub">{$t('nav.workbench')}</span>
-    </div>
-
-    <!-- Agent selector: the profile the current view operates as. Switching
-         reloads all panels (sessions/skills/MCP/cron) filtered to this agent. -->
-    <div class="agent-selector" bind:this={agentSelector}>
-      <button class="agent-btn" onclick={() => agentMenuOpen = !agentMenuOpen}>
-        <span class="agent-dot" class:active={$activeAgent !== 'default'}></span>
-        <span class="agent-name">{currentAgent}</span>
-        <iconify-icon icon="ant-design:down-outlined" width="12"></iconify-icon>
-      </button>
-      {#if agentMenuOpen}
-        <div class="agent-menu">
-          <button class="agent-item" class:current={$activeAgent === 'default'} onclick={() => selectAgent('default')}>
-            Default
-          </button>
-          {#each agents as a (a.id)}
-            <button class="agent-item" class:current={$activeAgent === a.id} onclick={() => selectAgent(a.id)}>
-              {a.name}
-            </button>
-          {/each}
-        </div>
-      {/if}
     </div>
   </div>
 
@@ -187,35 +139,6 @@ header.native-inset { padding-left: 82px; }
 header .icon-btn,
 header .search-pill,
 
-/* Agent selector */
-.agent-selector { position: relative; }
-.agent-btn {
-  display: flex; align-items: center; gap: 6px; padding: 6px 10px;
-  border: 1px solid var(--border-secondary); border-radius: 6px;
-  background: var(--bg-container); color: var(--text-primary);
-  font-size: 12px; cursor: pointer;
-  &:hover { background: var(--bg-hover); }
-}
-.agent-dot {
-  width: 6px; height: 6px; border-radius: 50%; background: var(--text-tertiary);
-  &.active { background: var(--primary); }
-}
-.agent-menu {
-  position: absolute; top: 100%; left: 0; margin-top: 4px; min-width: 160px;
-  background: var(--bg-container); border: 1px solid var(--border-secondary);
-  border-radius: 8px; box-shadow: var(--shadow-lg); z-index: 200;
-  overflow: hidden;
-}
-.agent-item {
-  display: block; width: 100%; padding: 8px 12px; border: none;
-  background: transparent; color: var(--text-primary); font-size: 13px;
-  text-align: left; cursor: pointer;
-  &:hover { background: var(--bg-hover); }
-  &.current { background: var(--primary-muted); color: var(--primary); }
-}
-
-header .agent-btn,
-header .agent-menu button,
 header .brand,
 header .window-controls { --wails-draggable: no-drag; }
 .left, .right { display: flex; align-items: center; gap: 8px; }

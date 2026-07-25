@@ -1,10 +1,22 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, activeAgent, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
   import VersionBadge from './VersionBadge.svelte'
+
+  // Agent list for the new-session picker dropdown.
+  let agents: api.Agent[] = []
+  let agentPickerOpen = false
+  let agentPickerEl: HTMLElement
+
+  function dismissPicker(e: MouseEvent) {
+    if (!agentPickerOpen || !agentPickerEl) return
+    if (!agentPickerEl.contains(e.target as Node)) {
+      agentPickerOpen = false
+    }
+  }
 
   // Seed the shared MCP-server store before the user ever opens the MCP panel;
   // McpView keeps it in sync afterward. Also seed the sidebar session groups so
@@ -19,6 +31,9 @@
       sessionGroups.set(org.groups)
       pinnedSessions.set(org.pinned)
     } catch { /* ignore — sessions just render flat under Ungrouped */ }
+    try {
+      agents = await api.listAgents()
+    } catch { /* agents list is optional */ }
   })
 
   // The session list split into its groups (registry order) plus the leftover
@@ -26,23 +41,18 @@
   // no longer resolve to a live session are dropped here, so a deleted session
   // leaves no ghost row.
   const groupedView = $derived.by(() => {
-    // Filter sessions to the active agent's pool. Default agent sessions have
-    // no agent_profile (empty or "default"); expert agents own their own sessions.
-    const agentSessions = $activeAgent === 'default'
-      ? $sessions.filter(s => !s.agent_profile || s.agent_profile === 'default')
-      : $sessions.filter(s => s.agent_profile === $activeAgent)
-    const byId = new Map(agentSessions.map(s => [s.id, s] as const))
+    const byId = new Map($sessions.map(s => [s.id, s] as const))
     const claimed = new Set<string>()
     // Pinned sessions float to a dedicated top section (registry order) and are
     // claimed first, so they don't also appear under their group or Ungrouped.
-    const pinned = $pinnedSessions.map(id => byId.get(id)).filter(Boolean) as typeof agentSessions
+    const pinned = $pinnedSessions.map(id => byId.get(id)).filter(Boolean) as typeof $sessions
     pinned.forEach(s => claimed.add(s.id))
     const groups = $sessionGroups.map(g => {
-      const items = g.session_ids.map(id => byId.get(id)).filter(Boolean).filter(s => !claimed.has((s as any).id)) as typeof agentSessions
+      const items = g.session_ids.map(id => byId.get(id)).filter(Boolean).filter(s => !claimed.has((s as any).id)) as typeof $sessions
       items.forEach(s => claimed.add(s.id))
       return { group: g, items }
     })
-    const ungrouped = agentSessions.filter(s => !claimed.has(s.id))
+    const ungrouped = $sessions.filter(s => !claimed.has(s.id))
     return { pinned, groups, ungrouped }
   })
 
@@ -170,9 +180,9 @@
     editId.set(null)
   }
 
-  async function newSession() {
+  async function newSession(agentId?: string) {
     try {
-      await createNewSession()
+      await createNewSession(agentId)
     } catch (e: any) { showToast(e.message, 'error') }
   }
 
@@ -284,17 +294,43 @@
   }
 
   const selCount = $derived(Object.keys($sel).length)
+
+  function agentNameOf(profileId: string): string {
+    if (!profileId || profileId === 'default') return ''
+    return agents.find(a => a.id === profileId)?.name ?? profileId
+  }
 </script>
+
+<svelte:window onclick={dismissPicker} />
 
 <aside style="width:{$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};flex:0 0 {$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};background:var(--bg-sidebar);border-right:1px solid var(--border-secondary);overflow:hidden;transition:width 0.32s cubic-bezier(0.2,0,0,1),flex-basis 0.32s cubic-bezier(0.2,0,0,1);">
 
   {#if $sidebar === 'full'}
   <div class="full">
-    <div class="new-btn-wrap">
-      <button class="new-btn" onclick={newSession}>
+    <div class="new-btn-wrap" bind:this={agentPickerEl}>
+      <button class="new-btn" onclick={() => newSession()}>
         <iconify-icon icon="ant-design:plus-outlined" width="14"></iconify-icon>
         <span>{$t('nav.new_session')}</span>
       </button>
+      <button class="agent-pick-btn" title={$t('nav.new_session_with_agent')} onclick={() => agentPickerOpen = !agentPickerOpen}>
+        <iconify-icon icon="ant-design:plus-outlined" width="12"></iconify-icon>
+      </button>
+      {#if agentPickerOpen}
+        <div class="agent-picker-menu">
+          {#if agents.length === 0}
+            <div class="ap-empty">{$t('agents.empty')}</div>
+          {:else}
+            <button class="ap-item" onclick={() => { newSession(); agentPickerOpen = false }}>
+              <span class="ap-name">Default</span>
+            </button>
+            {#each agents as a (a.id)}
+              <button class="ap-item" onclick={() => { newSession(a.id); agentPickerOpen = false }}>
+                <span class="ap-name">{a.name}</span>
+              </button>
+            {/each}
+          {/if}
+        </div>
+      {/if}
     </div>
 
     <div class="scroll">
@@ -446,6 +482,12 @@
           </span>
           {:else}
           <span class="session-title" style="color:{solid ? '#fff' : 'var(--text)'};">{(s as any).name || (s as any).title || s.id}</span>
+          {#if (s as any).agent_profile && (s as any).agent_profile !== 'default' && !menuOpen}
+            {@const aName = agentNameOf((s as any).agent_profile)}
+            <span class="agent-tag" style="background:{solid ? 'rgba(255,255,255,0.2)' : 'var(--active-blue-bg)'};color:{solid ? '#fff' : 'var(--blue-6)'};">
+              {aName}
+            </span>
+          {/if}
           {#if isPinned(s.id) && !menuOpen}
             <iconify-icon icon="ant-design:pushpin-filled" width="11" title={$t('sidebar.pinned')} style="color:{solid ? 'rgba(255,255,255,0.75)' : 'var(--text-quaternary)'};flex:0 0 auto"></iconify-icon>
           {/if}
@@ -551,7 +593,7 @@
   {#if $sidebar === 'rail'}
   <div class="rail">
     <div style="padding:16px 0 8px 0;">
-      <button class="rail-btn primary" title={$t('nav.new_session')} onclick={newSession}>
+      <button class="rail-btn primary" title={$t('nav.new_session')} onclick={() => newSession()}>
         <iconify-icon icon="ant-design:plus-outlined" width="16"></iconify-icon>
       </button>
     </div>
@@ -578,14 +620,38 @@
 
 <style>
 .full { width: 256px; height: 100%; display: flex; flex-direction: column; min-height: 0; }
-.new-btn-wrap { padding: 12px 12px 8px; }
+.new-btn-wrap { padding: 12px 12px 8px; display: flex; gap: 4px; position: relative; }
 .new-btn {
-  width: 100%; height: 32px; border: none; border-radius: 6px;
+  flex: 1; height: 32px; border: none; border-radius: 6px;
   background: var(--blue-6); color: #fff; font-size: 14px;
   display: flex; align-items: center; justify-content: center; gap: 8px;
   cursor: pointer; font-family: inherit;
 }
 .new-btn:hover { background: var(--blue-5); }
+.agent-pick-btn {
+  width: 32px; height: 32px; flex: 0 0 32px; border: none; border-radius: 6px;
+  background: var(--bg-hover); color: var(--text-tertiary);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.agent-pick-btn:hover { background: var(--border-secondary); color: var(--text-primary); }
+.agent-picker-menu {
+  position: absolute; top: 100%; left: 12px; right: 12px; z-index: 30;
+  margin-top: 2px; padding: 4px;
+  background: var(--bg-elevated, #fff); border: 1px solid var(--border-secondary);
+  border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+}
+.ap-item {
+  display: block; width: 100%; padding: 8px 12px; border: none;
+  background: transparent; color: var(--text-primary); font-size: 13px;
+  text-align: left; cursor: pointer; border-radius: 6px;
+}
+.ap-item:hover { background: var(--hover-neutral); }
+.ap-empty { padding: 8px 12px; font-size: 13px; color: var(--text-quaternary); }
+.agent-tag {
+  flex: 0 0 auto; padding: 0 5px; border-radius: 3px;
+  font-size: 10px; font-weight: 600; white-space: nowrap;
+  max-width: 64px; overflow: hidden; text-overflow: ellipsis;
+}
 .scroll { flex: 1; overflow-y: auto; padding: 8px 12px; display: flex; flex-direction: column; gap: 20px; }
 .nav-group { display: flex; flex-direction: column; gap: 2px; }
 .group-header { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 6px; }
