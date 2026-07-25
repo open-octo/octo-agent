@@ -45,8 +45,14 @@
         api.listSkills(),
         api.listChannels(),
       ])
-      availableTools = toolDefs.map(t => ({ ... }))
-      availableSkills = skillDefs.map(s => ({ ... }))
+      availableTools = toolDefs.map(t => ({
+        name: t.name,
+        description: t.description || '',
+      }))
+      availableSkills = skillDefs.map(s => ({
+        name: s.name,
+        description: s.desc || '',
+      }))
       availableBots = channelList
         .filter(c => c.enabled)
         .map(c => ({
