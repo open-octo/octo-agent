@@ -32,12 +32,11 @@ func profileStoreFromContext(ctx context.Context) *agentprofile.Store {
 // profileNames returns a comma-separated list of available profile names
 // (built-ins + user-defined) for error messages.
 func profileNames(store *agentprofile.Store) string {
-	if store == nil {
-		return "default, explore, general, code-review"
-	}
-	names := []string{"default"}
-	for _, p := range store.List() {
-		names = append(names, p.ID)
+	names := []string{"default", "code-review", "explore", "general"}
+	if store != nil {
+		for _, p := range store.List() {
+			names = append(names, p.ID)
+		}
 	}
 	sort.Strings(names[1:]) // keep "default" first
 	return strings.Join(names, ", ")

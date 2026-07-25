@@ -39,13 +39,22 @@ func TestDefaultToolsForProfile_FiltersByAllowlist(t *testing.T) {
 	}
 	ctx := WithSessionAgentID(WithProfileStore(context.Background(), store), "restricted")
 	filtered := DefaultToolsForProfile(ctx, "test-model")
-	if len(filtered) != 2 {
-		t.Fatalf("expected 2 tools, got %d: %+v", len(filtered), toolNames(filtered))
-	}
+	// Don't assert exact count — defaultToolsFor gates tools on process-global
+	// flags, which test order can affect. Verify presence instead.
+	haveReadFile, haveGrep := false, false
 	for _, d := range filtered {
+		if d.Name == "read_file" {
+			haveReadFile = true
+		}
+		if d.Name == "grep" {
+			haveGrep = true
+		}
 		if d.Name != "read_file" && d.Name != "grep" {
 			t.Errorf("unexpected tool %q in filtered list", d.Name)
 		}
+	}
+	if !haveReadFile || !haveGrep {
+		t.Fatalf("filtered tools missing expected tools (have read_file=%v grep=%v): %+v", haveReadFile, haveGrep, toolNames(filtered))
 	}
 }
 

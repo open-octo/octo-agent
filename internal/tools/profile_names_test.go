@@ -81,4 +81,7 @@ func TestAgentTool_SubagentTypeResolvesViaStore(t *testing.T) {
 	if !strings.Contains(err.Error(), "nonexistent") {
 		t.Fatalf("error should mention the unknown type, got: %v", err)
 	}
+	if !strings.Contains(err.Error(), "explore") {
+		t.Errorf("error should list built-in profile 'explore' even when Store is wired, got: %v", err)
+	}
 }
