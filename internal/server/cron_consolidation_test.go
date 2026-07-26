@@ -271,3 +271,81 @@ func TestRetiredCronEndpoints_NotRouted(t *testing.T) {
 		}
 	}
 }
+
+// TestCreateTask_RejectsInvalidAgentID: creating a task with a non-existent
+// agent_id must return 400 immediately rather than silently falling back to
+// default at run time.
+func TestCreateTask_RejectsInvalidAgentID(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	body := `{"name":"bad","cron":"0 0 9 * * *","prompt":"go","agent_id":"nonexistent"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/tasks", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("create with invalid agent_id status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestCreateTask_AcceptsValidAgentID: creating a task with an existing agent_id
+// (built-in) must succeed.
+func TestCreateTask_AcceptsValidAgentID(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	id := createTaskForTest(t, srv, `{"name":"ok","cron":"0 0 9 * * *","prompt":"go","agent_id":"code-review"}`)
+	tasks := listTasksForTest(t, srv)
+	if len(tasks) != 1 {
+		t.Fatalf("want 1 task, got %d", len(tasks))
+	}
+	if tasks[0].AgentID != "code-review" {
+		t.Errorf("agent_id = %q, want %q", tasks[0].AgentID, "code-review")
+	}
+	_ = id
+}
+
+// TestTransferTask_RejectsInvalidAgentID verifies the transfer endpoint rejects
+// a non-existent agent_id.
+func TestTransferTask_RejectsInvalidAgentID(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	id := createTaskForTest(t, srv, `{"name":"t","cron":"0 0 9 * * *","prompt":"go"}`)
+
+	body := `{"agent_id":"nonexistent"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/tasks/"+id+"/transfer", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("transfer invalid agent_id status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestPatchTask_RejectsInvalidAgentID: PATCH with an invalid agent_id must
+// return 400.
+func TestPatchTask_RejectsInvalidAgentID(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	id := createTaskForTest(t, srv, `{"name":"p","cron":"0 0 9 * * *","prompt":"go"}`)
+
+	body := `{"agent_id":"nonexistent"}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/tasks/"+id, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("patch invalid agent_id status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
