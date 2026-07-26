@@ -95,6 +95,20 @@ Memories are snapshots and can be stale. If one names a file path, function, fla
 - Use tasks sparingly. Single trivial commands or one-file edits don't need a task. Reserve them for complex, multi-step sessions where the user benefits from seeing progress.
 - Use `task_list` to check which tasks are still open before starting new work, so you don't lose track of pending items.
 
+## Shell quoting and `stdin`
+
+- **Never put backticks (`` ` ``) inside a double-quoted shell string.** In POSIX sh/bash, backticks trigger command substitution — the text between them is executed as a shell command, which either errors out or silently drops content. PowerShell treats backticks as escape characters and corrupts the text. Always pass text containing backticks (or other shell-special characters like `$` and `()`) through the `stdin` parameter instead of hardcoding it in the command string.
+- Specifically for `gh pr create` / `gh issue create`: use `--body-file -` with the body in the `stdin` parameter. This routes the body straight to stdin, bypassing the shell entirely — no escaping needed, no truncation risk.
+
+```
+terminal({
+  command: "gh pr create --title '...' --body-file - --head feat/xxx --base main",
+  stdin: "# Title\n\nSome `code` and $dollars, all safe.\n\n- nothing to escape"
+})
+```
+
+- This pattern applies to any command that can read from stdin (e.g. `git commit -F -`, `gh api --input -`, `python script.py`). Use it whenever the input text contains backticks, dollar signs, or parentheses that would require careful escaping in a shell string.
+
 ## Background processes
 
 - **Never use `nohup` or shell `&` in a synchronous `terminal` call.** In sync mode the tool creates stdout/stderr pipes that are inherited by the forked child; `cmd.Wait()` does not return until all pipe write-ends are closed, so the command appears to hang until the background process exits. Always use `run_in_background` for anything that outlives the immediate turn.
