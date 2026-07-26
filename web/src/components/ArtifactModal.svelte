@@ -96,7 +96,7 @@
   padding: 12px;
 }
 .modal {
-  width: 96vw;
+  width: min(1400px, 96vw);
   height: 94vh;
   min-width: 320px;
   background: var(--bg-container);

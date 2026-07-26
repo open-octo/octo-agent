@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -128,6 +129,9 @@ func (s *Server) handleDeleteLightApp(w http.ResponseWriter, r *http.Request) {
 // handleCreateLightApp creates a new Light App from the provided manifest and
 // HTML content. Slug is auto-derived from name if not supplied.
 func (s *Server) handleCreateLightApp(w http.ResponseWriter, r *http.Request) {
+	// Cap body at 10 MB — more than enough for any self-contained HTML page.
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+
 	var in struct {
 		Slug        string `json:"slug"`
 		Name        string `json:"name"`
@@ -136,6 +140,10 @@ func (s *Server) handleCreateLightApp(w http.ResponseWriter, r *http.Request) {
 		HTML        string `json:"html"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		if strings.Contains(err.Error(), "http: request body too large") {
+			writeError(w, http.StatusRequestEntityTooLarge, "lightapp_body_too_large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid_lightapp_payload")
 		return
 	}
@@ -158,6 +166,13 @@ func (s *Server) handleCreateLightApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appDir := filepath.Join(lightAppsDir(), slug)
+
+	// Reject if the app already exists — users should delete first or rename.
+	if _, err := os.Stat(appDir); err == nil {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "slug_exists", "slug": slug})
+		return
+	}
+
 	if err := os.MkdirAll(appDir, 0o755); err != nil {
 		writeError(w, http.StatusInternalServerError, "create_lightapp_failed")
 		return
@@ -175,7 +190,11 @@ func (s *Server) handleCreateLightApp(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:   now,
 	}
 
-	mData, _ := json.MarshalIndent(m, "", "  ")
+	mData, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "create_lightapp_failed")
+		return
+	}
 	if err := os.WriteFile(filepath.Join(appDir, "manifest.json"), mData, 0o644); err != nil {
 		writeError(w, http.StatusInternalServerError, "create_lightapp_failed")
 		return
@@ -196,7 +215,10 @@ func slugFromName(name string) string {
 	s = slugNonAlpha.ReplaceAllString(s, "-")
 	s = strings.Trim(s, "-")
 	if s == "" {
-		s = fmt.Sprintf("app-%d", time.Now().UnixMilli()%100000)
+		// Derive a stable slug from the original name so repeated calls with
+		// the same input always produce the same fallback.
+		h := sha256.Sum256([]byte(name))
+		s = fmt.Sprintf("app-%x", h[:4])
 	}
 	return s
 }

@@ -255,4 +255,26 @@ iframe { border: 0; width: 100%; height: 100%; display: block; }
 }
 .chip.active { border-color: var(--blue-6); background: var(--active-blue-bg); color: var(--blue-6); }
 .spin { animation: octo-spin 0.8s linear infinite; }
+
+/* ── Save-to-Light-App inline form ──────────────────────────────────── */
+.save-to-la-bar {
+  flex: 0 0 auto; padding: 6px 10px;
+  border-bottom: 1px solid var(--border-secondary);
+  display: flex; align-items: center; gap: 6px;
+}
+.save-to-la-input {
+  flex: 1; height: 28px; padding: 0 8px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 6px; font-size: 12px; font-family: inherit;
+  background: var(--bg-container); color: var(--text);
+  outline: none;
+}
+.save-to-la-input:focus { border-color: var(--blue-5); }
+.btn-action {
+  height: 28px; padding: 0 12px; border: none;
+  border-radius: 6px; font-size: 12px; cursor: pointer;
+  background: var(--blue-6); color: #fff; font-family: inherit;
+}
+.btn-action:hover:not(:disabled) { background: var(--blue-5); }
+.btn-action:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
