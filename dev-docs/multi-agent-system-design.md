@@ -855,8 +855,7 @@ Web 端不维护全局 active agent 状态——agent 绑定在 session 上，�
 | `internal/agentprofile/profile.go` | Profile 结构 + .md frontmatter 解析/序列化 + 校验 |
 | `internal/agentprofile/store.go` | Store（三来源加载/保存/索引） |
 | `internal/agentprofile/router.go` | AgentRouter（按事件路由到 profile） |
-| `web/src/views/AgentsView.svelte` | Agent 管理主面板 |
-| `web/src/views/AgentEditView.svelte` | Agent 编辑表单，含 tools/skills/MCP checklist |
+| `web/src/views/AgentsView.svelte` | Agent 管理主面板，Create/Edit 通过 `expert-agent-manager` skill 走对话 |
 | `skills/expert-agent-manager/SKILL.md` | Expert Agent Manager 元技能（Default Agent 专用） |
 
 ### 修改文件
@@ -883,7 +882,7 @@ Web 端不维护全局 active agent 状态——agent 绑定在 session 上，�
 | `web/src/views/McpView.svelte` | 全局 MCP 管理面板，始终以 Default Agent 身份访问；不做 per-agent 过滤 |
 | `web/src/views/WorkflowsView.svelte` | workflow 面板展示全部 workflow；不做按 agent 过滤 |
 | `web/src/views/ChatView.svelte` | 会话列表每条会话标记所属 agent tag；会话内不显示 agent 切换入口 |
-| `web/src/views/AgentEditView.svelte` | Agent 编辑表单内展示 tools/skills/MCP checklist，允许从 Default Agent 资源池中勾选启用 |
+| `web/src/views/AgentsView.svelte` | Agent 卡片面板内展示 tools/skills 数量 badge，Create/Edit 通过对话进行 |
 | `web/src/views/TasksView.svelte` | cron 列表按 agent 过滤；default 视图显示"归属"列和"转移"操作 |
 
 ---
@@ -957,7 +956,7 @@ Web 端不维护全局 active agent 状态——agent 绑定在 session 上，�
 | 3 | tools/skills 按 profile 过滤（`DefaultToolsForProfile`、`ManifestForProfile`、`system:true`、browser skill 隐藏）+ `subagent_type` 解析改走 Store、`discoverAgents` 合并进 Store、代码内 "preset" 标识符统一更名为 profile | 只依赖 PR1，可与 PR2 并行 |
 | 4 | CLI/TUI `--agent` + `/agent` 命令 | 第一个端到端验证切片：profile 创建 → 路由 → 工具过滤全链路 |
 | 5 | REST API `/api/agents/*` + cron `agent_id`/transfer + `expert-agent-manager` 元技能 | 对话式管理入口可用 |
-| 6 | Web UI（Agents 面板、会话列表 agent tag、AgentEdit 表单 checklist） | 纯前端，API 已就绪 |
+| 6 | Web UI（Agents 面板、会话列表 agent tag、对话式创建/编辑） | 纯前端，API 已就绪 |
 
 要点：
 
@@ -1005,7 +1004,7 @@ Web 端不维护全局 active agent 状态——agent 绑定在 session 上，�
 - `internal/agentprofile/` — 全新包，可整体删除
 - `internal/server/` — 改动集中在 `handleChannelMessage` 路由步骤 + 新增 handlers，撤销路由步骤即可
 - `internal/channel/manager.go` — key 命名空间与签名扩展向后兼容（default agent key 不变），无需回滚数据
-- `web/src/views/AgentsView.svelte` + `AgentEditView.svelte` — 全新文件，可删除
+- `web/src/views/AgentsView.svelte` — 全新文件，可删除/重写
 
 回滚步骤：
 1. 删除新增文件
@@ -1159,7 +1158,7 @@ func (s *Server) handleChannelEvent(ctx context.Context, ad channel.Adapter, ada
 | `internal/agentprofile/profile.go` | ChannelBinding 增加 `AdapterID` 字段；Router 改为三维 |
 | `internal/agentprofile/store.go` | ByChannel 增加 `adapterID` 参数 |
 | `internal/server/server.go` | `startOneChannelLocked` 注入 `adapterID` 到事件流；适配新 Config 格式 |
-| `web/src/views/AgentEdit.svelte` | 绑定频道表单增加 bot 实例选择器 |
+| `web/src/views/AgentsView.svelte` | 绑定频道通过 `expert-agent-manager` skill 对话完成（已删除 AgentEdit.svelte 表单） |
 | `skills/expert-agent-manager/SKILL.md` | bind API 参数增加 `adapter_id` |
 | `skills/channel-manager/SKILL.md` | 支持多 bot 实例引导：配置流程增加"命名实例并关联 agent profile"步骤；diagnose 反馈覆盖多 bot 场景（3 个 bot、1 个群、各自 agent 绑定正常） |
 
