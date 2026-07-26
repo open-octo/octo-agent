@@ -134,6 +134,7 @@ func (s *Server) newSession(task scheduler.Task) (string, error) {
 	sess := agent.NewSession(model, s.system)
 	sess.Source = "cron"
 	sess.Title = time.Now().Format("2006-01-02 15:04")
+	sess.AgentID = task.AgentID
 	// Cron ticks have no human to answer an ask prompt, unlike the web/IM
 	// default this mirrors — see ResolveUnattendedDefaultMode's doc comment.
 	_ = sess.SetPermissionMode(string(permission.ResolveUnattendedDefaultMode()))
@@ -615,7 +616,8 @@ type patchTaskRequest struct {
 	Cron      *string                  `json:"cron,omitempty"`
 	Prompt    *string                  `json:"prompt,omitempty"`
 	Model     *string                  `json:"model,omitempty"`
-	Agent     *string                  `json:"agent,omitempty"`
+	Agent     *string                  `json:"agent,omitempty"` // deprecated
+	AgentID   *string                  `json:"agent_id,omitempty"`
 	Directory *string                  `json:"directory,omitempty"`
 	Notify    *scheduler.NotifyTargets `json:"notify,omitempty"`
 	Name      *string                  `json:"name,omitempty"`
@@ -670,6 +672,9 @@ func (s *Server) handlePatchTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Agent != nil {
 		task.Agent = *req.Agent
+	}
+	if req.AgentID != nil {
+		task.AgentID = *req.AgentID
 	}
 	if req.Directory != nil {
 		task.Directory = *req.Directory
