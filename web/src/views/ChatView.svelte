@@ -27,7 +27,6 @@
     questionModals,
     feedbackModal,
     pendingPrompt,
-    artifactsOpen,
     artifacts,
     addChatMsg,
     clearMsgs,
@@ -63,7 +62,6 @@
   import WorkflowsCard from '../components/chat/WorkflowsCard.svelte'
   import BackgroundProcesses from '../components/chat/BackgroundProcesses.svelte'
   import Composer from '../components/chat/Composer.svelte'
-  import ArtifactsPanel from '../components/ArtifactsPanel.svelte'
   import OctoLogo from '../components/layout/OctoLogo.svelte'
 import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
@@ -1638,13 +1636,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
         <span class="btn-label">{$t('chat.clear')}</span>
       </button>
-      <button class="hdr-btn" class:active={$artifactsOpen} title={$t('chat.artifacts')} onclick={() => artifactsOpen.update(v => !v)}>
-        <iconify-icon icon="ant-design:file-text-outlined" width="13"></iconify-icon>
-        <span class="btn-label">{$t('chat.artifacts')}</span>
-        {#if artifactCount > 0}
-          <span class="count-badge">{artifactCount}</span>
-        {/if}
-      </button>
       <button class="hdr-btn" title={$t('chat.export')} onclick={exportTranscript}>
         <iconify-icon icon="ant-design:export-outlined" width="13"></iconify-icon>
         <span class="btn-label">{$t('chat.export')}</span>
@@ -2070,11 +2061,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       <!-- Composer -->
       <Composer bind:this={composer} onSend={send} />
     </div>
-
-    <!-- Artifacts panel -->
-    {#if $artifactsOpen}
-      <ArtifactsPanel />
-    {/if}
   </div>
 </div>
 

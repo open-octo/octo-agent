@@ -68,6 +68,15 @@ export const artifactView = writable<ArtifactView>('preview')
 // the sidebar back open.
 export const artifactModalOpen = writable(false)
 
+// Artifacts panel sidebar mode. null = closed, 'session' = session artifacts,
+// 'lightapps' = Light Apps list + rendering. Replaces the per-session artifactsOpen.
+export const panelContent = writable<'session' | 'lightapps' | null>(null)
+
+// Light Apps state for the sidebar (loaded on demand).
+export const lightappSel = writable<string>('')
+export const lightapps = writable<import('./api').LightApp[]>([])
+export const lightappHTML = writable<Record<string, string>>({})
+
 // Sessions
 export const sessions = writable<Session[]>([])
 export const activeSessionId = writable<string | null>(null)

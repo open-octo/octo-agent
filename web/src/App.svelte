@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sessions, sessionGroups, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell } from './lib/stores'
+  import { view, sessions, sessionGroups, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent } from './lib/stores'
   import MobileApp from './mobile/MobileApp.svelte'
   import { ws, wsState } from './lib/ws'
   import { notificationsEnabled } from './lib/notifications'
@@ -30,6 +30,7 @@
   import ConfirmModal from './components/overlays/ConfirmModal.svelte'
   import ConfirmDialog from './components/overlays/ConfirmDialog.svelte'
   import ArtifactModal from './components/ArtifactModal.svelte'
+  import ArtifactsPanel from './components/ArtifactsPanel.svelte'
   import FeedbackModal from './components/overlays/FeedbackModal.svelte'
   import Toast from './components/overlays/Toast.svelte'
 
@@ -369,6 +370,9 @@
         <LightAppsView />
       {/if}
     </main>
+    {#if $panelContent}
+      <ArtifactsPanel />
+    {/if}
   </div>
 </div>
 {/if}

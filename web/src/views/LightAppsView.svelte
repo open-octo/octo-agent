@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { showToast, openAgentSession } from '../lib/stores'
+  import { showToast, openAgentSession, panelContent, lightapps, lightappSel, lightappHTML } from '../lib/stores'
   import * as api from '../lib/api'
   import type { LightApp } from '../lib/api'
   import { t, tr } from '../lib/i18n'
@@ -25,12 +25,13 @@
 
   async function handleOpen(slug: string) {
     try {
+      // Load Light App data into global stores, then open the sidebar in lightapps mode.
       const detail = await api.getLightApp(slug)
-      const blob = new Blob([detail.html], { type: 'text/html;charset=utf-8' })
-      const url  = URL.createObjectURL(blob)
-      window.open(url, '_blank')
-      // Revoke after the new tab has loaded the blob into its own session.
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      lightappHTML.update(m => ({ ...m, [slug]: detail.html }))
+      // If not already loaded, populate the list.
+      if ($lightapps.length === 0) lightapps.set(apps)
+      lightappSel.set(slug)
+      panelContent.set('lightapps')
     } catch (e: any) {
       showToast(`Failed to open: ${e.message}`, 'error')
     }

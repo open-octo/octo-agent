@@ -8,7 +8,7 @@
 // ArtifactsPanel renders. Mirrors the old hand-written Artifacts.observe().
 
 import { get, writable } from 'svelte/store'
-import { artifacts, artifactsOpen, artifactSel } from './stores'
+import { artifacts, panelContent, artifactSel } from './stores'
 import { renderMarkdown } from './markdown'
 import type { Artifact } from './types'
 
@@ -79,7 +79,7 @@ function hasExternalRefs(html: string): boolean {
 export function resetArtifacts(sessionId: string): void {
   artifacts.set([])
   artifactSel.set(0)
-  artifactsOpen.set(false)
+  panelContent.set(null)
   autoOpened = false
   artifactSelSession.set(sessionId)
 }
@@ -203,6 +203,6 @@ document.querySelector('.body').addEventListener('click',function(e){
 
   if (live && !autoOpened) {
     autoOpened = true
-    artifactsOpen.set(true)
+    panelContent.set('session')
   }
 }

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, cmdkOpen, sidebar, nativeShell } from '../../lib/stores'
+  import { view, cmdkOpen, sidebar, nativeShell, panelContent, artifacts, activeSessionId } from '../../lib/stores'
   import { t } from '../../lib/i18n'
   import * as api from '../../lib/api'
   import { ws, wsState } from '../../lib/ws'
@@ -10,6 +10,18 @@
 
   function cycleSidebar() {
     sidebar.update(s => s === 'full' ? 'rail' : s === 'rail' ? 'hidden' : 'full')
+  }
+
+  // Toggle the Artifacts panel sidebar.
+  // In a chat session with artifacts → session mode; otherwise → lightapps mode.
+  function togglePanel() {
+    const cur = $panelContent
+    if (cur) { panelContent.set(null); return }
+    if ($view === 'chat' && $activeSessionId && $artifacts.length > 0) {
+      panelContent.set('session')
+    } else {
+      panelContent.set('lightapps')
+    }
   }
 
   // The bell toggles desktop notifications on/off — the same preference the
@@ -98,6 +110,9 @@
       <iconify-icon icon="ant-design:search-outlined" width="14"></iconify-icon>
       <span>{$t('header.search_sessions')}</span>
       <kbd>⌘K</kbd>
+    </button>
+    <button class="icon-btn" class:active={$panelContent !== null} title={$t('artifacts.toggle')} onclick={togglePanel}>
+      <iconify-icon icon="ant-design:file-text-outlined" width="16"></iconify-icon>
     </button>
     <button class="icon-btn" class:active={$notificationsEnabled} title={$t('header.notifications')} aria-pressed={$notificationsEnabled} onclick={toggleNotifications}>
       <iconify-icon icon={$notificationsEnabled ? 'ant-design:bell-filled' : 'ant-design:bell-outlined'} width="16"></iconify-icon>
