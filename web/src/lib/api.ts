@@ -352,15 +352,6 @@ export async function updateSessionWorkingDir(id: string, dir: string): Promise<
   })
 }
 
-// Available tools for AgentEdit checklist — mirrors GET /api/tools.
-export interface ToolInfo {
-  name: string
-  description: string
-}
-export async function fetchAvailableTools(): Promise<ToolInfo[]> {
-  return request<ToolInfo[]>('/api/tools')
-}
-
 // Skills
 
 // The server returns { skills: [{name, description, source, enabled}] }. Map it
