@@ -2252,6 +2252,25 @@ func (s *Server) profileForAgent(agentID string) *agentprofile.Profile {
 	return agentprofile.DefaultProfile()
 }
 
+// validateAgentID checks that agentID (if non-empty) maps to an existing
+// profile in the store, returning an error when it doesn't — so the caller
+// can reject a bad agent_id at input time instead of silently falling back
+// to default at run time. An empty agentID is always valid (means default).
+func (s *Server) validateAgentID(agentID string) error {
+	if agentID == "" {
+		return nil
+	}
+	store, ok := s.agentStoreIfReady()
+	if !ok {
+		_ = s.agentRouter()
+		store = s.agentStore
+	}
+	if _, ok := store.Get(agentID); ok {
+		return nil
+	}
+	return fmt.Errorf("agent %q not found", agentID)
+}
+
 // agentUserDir is the user-level profile directory (~/.octo/agents).
 func agentUserDir() string {
 	home, err := os.UserHomeDir()

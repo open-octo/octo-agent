@@ -501,6 +501,10 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name, cron, and prompt are required")
 		return
 	}
+	if err := s.validateAgentID(req.AgentID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	task := scheduler.Task{
 		Name:      req.Name,
 		Cron:      req.Cron,
@@ -595,6 +599,10 @@ func (s *Server) handleTransferTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "agent_id is required")
 		return
 	}
+	if err := s.validateAgentID(req.AgentID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	task, err := s.scheduler.Get(id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "task not found")
@@ -681,6 +689,10 @@ func (s *Server) handlePatchTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Notify != nil {
 		task.Notify = *req.Notify
+	}
+	if err := s.validateAgentID(task.AgentID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	if err := s.scheduler.Update(*task); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
