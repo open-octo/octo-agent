@@ -151,6 +151,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, agentToResp(p))
+	s.broadcastGlobal(map[string]any{"type": "agents_changed"})
 }
 
 // handleUpdateAgent serves PUT /api/agents/:id — update an existing profile.
@@ -198,6 +199,7 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, agentToResp(p))
+	s.broadcastGlobal(map[string]any{"type": "agents_changed"})
 }
 
 // handleDeleteAgent serves DELETE /api/agents/:id — remove a user-level profile.
@@ -213,6 +215,7 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": id})
+	s.broadcastGlobal(map[string]any{"type": "agents_changed"})
 }
 
 // handleBindAgent serves POST /api/agents/:id/bind — bind a profile to an IM chat.
@@ -251,6 +254,7 @@ func (s *Server) handleBindAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, agentToResp(p))
+	s.broadcastGlobal(map[string]any{"type": "agents_changed"})
 }
 
 // handleUnbindAgent serves DELETE /api/agents/:id/bind — remove an IM binding.
@@ -280,6 +284,7 @@ func (s *Server) handleUnbindAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, agentToResp(p))
+	s.broadcastGlobal(map[string]any{"type": "agents_changed"})
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

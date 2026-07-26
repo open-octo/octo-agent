@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
+  import { ws } from '../../lib/ws'
   import VersionBadge from './VersionBadge.svelte'
 
   // Agent list for the new-session picker dropdown.
@@ -35,6 +36,16 @@
       agents = await api.listAgents()
     } catch { /* agents list is optional */ }
   })
+
+  // Reload agent list when an agent is created/updated/deleted via the API
+  // (e.g. through expert-agent-manager skill in conversation).
+  const unsubAgents = ws.on('agents_changed', async () => {
+    try {
+      agents = await api.listAgents()
+    } catch { /* ignore */ }
+  })
+
+  onDestroy(() => { unsubAgents() })
 
   // The session list split into its groups (registry order) plus the leftover
   // "ungrouped" ones. Membership lives in the group registry; member IDs that
