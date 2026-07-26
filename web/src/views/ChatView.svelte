@@ -2258,14 +2258,15 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
      neighboring dots. */
   border: max(1.5px, calc(2px * var(--rail-scale, 1))) solid var(--border);
   transition: width 0.14s ease, height 0.14s ease, background 0.14s ease,
-    border-color 0.14s ease, box-shadow 0.14s ease;
+    border-color 0.14s ease, box-shadow 0.14s ease, opacity 0.14s ease;
 }
-/* Passed + active nodes are filled blue; the active one is larger with a ring. */
-.msg-rail-node.passed .msg-rail-dot,
-.msg-rail-node.active .msg-rail-dot {
-  background: var(--blue-6); border-color: var(--blue-6);
+/* Passed + active nodes are filled blue; tone them down slightly so they do
+   not dominate the message column. */
+.msg-rail-node.passed .msg-rail-dot {
+  background: var(--blue-5); border-color: var(--blue-5);
 }
 .msg-rail-node.active .msg-rail-dot {
+  background: var(--blue-6); border-color: var(--blue-6); opacity: 0.9;
   width: max(8px, calc(12px * var(--rail-scale, 1)));
   height: max(8px, calc(12px * var(--rail-scale, 1)));
   box-shadow: 0 0 0 max(2px, calc(4px * var(--rail-scale, 1))) rgba(22,119,255,0.16);
