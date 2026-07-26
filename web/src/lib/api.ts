@@ -724,6 +724,34 @@ export async function deleteMemory(name: string, source: string): Promise<void> 
   await request<unknown>(`/api/memories/${encodeURIComponent(name)}?source=${encodeURIComponent(source)}`, { method: 'DELETE' })
 }
 
+// ── Light Apps ─────────────────────────────────────────────────────────────
+
+export interface LightApp {
+  slug: string
+  name: string
+  description: string
+  icon: string
+  created_at: string
+}
+
+export interface LightAppDetail {
+  manifest: LightApp
+  html: string
+}
+
+export async function listLightApps(): Promise<LightApp[]> {
+  const d = await request<{ apps: LightApp[] }>('/api/light-apps')
+  return d.apps ?? []
+}
+
+export async function getLightApp(slug: string): Promise<LightAppDetail> {
+  return request<LightAppDetail>(`/api/light-apps/${encodeURIComponent(slug)}`)
+}
+
+export async function deleteLightApp(slug: string): Promise<void> {
+  await request<unknown>(`/api/light-apps/${encodeURIComponent(slug)}`, { method: 'DELETE' })
+}
+
 // Trash
 
 export async function listTrash(): Promise<RecallFile[]> {

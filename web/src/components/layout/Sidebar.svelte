@@ -121,6 +121,7 @@
     { icon: 'ant-design:global-outlined', title: 'nav.browser', v: 'browser' },
     { icon: 'ant-design:mobile-outlined', title: 'nav.channels', v: 'channels' },
     { icon: 'ant-design:user-outlined', title: 'nav.memory', v: 'profile' },
+    { icon: 'ant-design:appstore-outlined', title: 'nav.light_apps', v: 'lightapps' },
     { icon: 'ant-design:folder-open-outlined', title: 'nav.file_recall', v: 'files' },
   ]
 
@@ -571,6 +572,7 @@
         <div class="group-header"><span class="group-label">{$t('nav.my_data')}</span></div>
         {#each [
           { icon: 'ant-design:user-outlined', label: 'nav.memory', v: 'profile' },
+          { icon: 'ant-design:appstore-outlined', label: 'nav.light_apps', v: 'lightapps' },
           { icon: 'ant-design:folder-open-outlined', label: 'nav.file_recall', v: 'files' },
         ] as item}
         <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>

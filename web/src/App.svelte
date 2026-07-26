@@ -24,6 +24,7 @@
   import SettingsView from './views/SettingsView.svelte'
   import ProfileView from './views/ProfileView.svelte'
   import FileRecallView from './views/FileRecallView.svelte'
+  import LightAppsView from './views/LightAppsView.svelte'
   import CommandPalette from './components/overlays/CommandPalette.svelte'
   import McpModal from './components/overlays/McpModal.svelte'
   import ConfirmModal from './components/overlays/ConfirmModal.svelte'
@@ -41,7 +42,7 @@
   // Reflect the current view (and active chat session) in the hash so a refresh
   // lands back where the user was instead of the default chat view.
   let routeReady = false
-  const VALID_VIEWS = ['chat', 'agents', 'skills', 'workflows', 'browser', 'tasks', 'mcp', 'channels', 'settings', 'profile', 'files']
+  const VALID_VIEWS = ['chat', 'agents', 'skills', 'workflows', 'browser', 'tasks', 'mcp', 'channels', 'settings', 'profile', 'files', 'lightapps']
 
   function applyHash() {
     const h = location.hash.replace(/^#\/?/, '')
@@ -364,6 +365,8 @@
         <ProfileView />
       {:else if $view === 'files'}
         <FileRecallView />
+      {:else if $view === 'lightapps'}
+        <LightAppsView />
       {/if}
     </main>
   </div>
