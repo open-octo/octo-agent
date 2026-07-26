@@ -187,6 +187,11 @@ func TestGlob_FileRoot(t *testing.T) {
 }
 
 func TestLiteralPathPrefix(t *testing.T) {
+	// On Unix, paths starting with "/" are absolute; on Windows, they aren't.
+	absPrefixWant := "internal/tools"
+	if filepath.IsAbs("/internal/tools/*.go") {
+		absPrefixWant = "/internal/tools"
+	}
 	cases := []struct {
 		pattern string
 		want    string
@@ -197,9 +202,9 @@ func TestLiteralPathPrefix(t *testing.T) {
 		{"**/*.go", ""},
 		{"*.go", ""},
 		{"src/*/foo.go", "src"},
-		{"../sibling/*.go", ""},                     // ".." must never anchor outside the search root
-		{"foo/../bar/*.go", "foo"},                  // stops at ".." rather than treating it as literal
-		{"/internal/tools/*.go", "/internal/tools"}, // leading "/" preserved for absolute patterns
+		{"../sibling/*.go", ""},                 // ".." must never anchor outside the search root
+		{"foo/../bar/*.go", "foo"},              // stops at ".." rather than treating it as literal
+		{"/internal/tools/*.go", absPrefixWant}, // absolute on Unix, relative on Windows
 		{"./internal/tools/*.go", "internal/tools"},
 	}
 	for _, c := range cases {
