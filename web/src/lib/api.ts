@@ -8,6 +8,7 @@ export interface TaskResponse {
   prompt: string
   model: string
   agent: string
+  agent_id?: string
   notify: string
   enabled: boolean
   created_at: string

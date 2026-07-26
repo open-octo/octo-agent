@@ -43,7 +43,7 @@
       // Sync into shared store (ScheduledTask display shape) for other consumers
       tasks.set(rawTasks.map(t => ({
         name: t.name,
-        target: t.agent || t.model || '',
+        target: t.agent_id || t.agent || t.model || '',
         cron: t.cron,
         nextRun: t.enabled ? fmtDate(t.next_run) : '—',
         tagStatus: t.enabled ? 'success' : 'default',
@@ -153,8 +153,8 @@
             <!-- Name + agent/model target -->
             <div class="task-name-cell">
               <span class="task-name">{task.name}</span>
-              {#if task.agent || task.model}
-                <span class="task-target">{task.agent || task.model}</span>
+              {#if task.agent_id || task.agent || task.model}
+                <span class="task-target">{task.agent_id || task.agent || task.model}</span>
               {/if}
             </div>
 
