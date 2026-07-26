@@ -17,8 +17,9 @@ data staying on the user's own machine. No Node / Python / Ruby runtime.
 - **Go SDK** (`pkg/octoagent`) — embed the agent loop in your own programs
 
 The eighth, a mobile app, is next. On top of the agent loop: skills, MCP clients,
-OS-level sandboxing, persistent memory, sub-agents, background workflows, and a
-task graph for autonomous multi-step goals.
+OS-level sandboxing, persistent memory, sub-agents, expert agents, background workflows,
+Light Apps (reusable agent-generated HTML tools), and a task graph for autonomous
+multi-step goals.
 
 ## Install
 

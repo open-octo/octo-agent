@@ -26,9 +26,9 @@ You have access to octo's product documentation. Use it to answer user questions
    Read the relevant file(s) with `read_file` before answering.
 
 2. **Online docs** (fallback, and the source of truth for anything the bundled summaries don't cover) — the public docs site at `https://octo-agent.dev/docs/`, fetched with `web_fetch`:
-   - `guides/<topic>/` for narrative how-tos — e.g. `guides/goals/`, `guides/workflows/`, `guides/loop/`, `guides/cron-tasks/`, `guides/browser-automation/`, `guides/sub-agents/`, `guides/sandbox-the-agent/`, `guides/self-host/`, `guides/channels/`, `guides/hooks/`, `guides/use-skills/`, `guides/connect-mcp-servers/`, `guides/memory/`, `guides/memory-backends/`
+   - `guides/<topic>/` for narrative how-tos — e.g. `guides/goals/`, `guides/workflows/`, `guides/loop/`, `guides/cron-tasks/`, `guides/browser-automation/`, `guides/sub-agents/`, `guides/expert-agents/`, `guides/light-apps/`, `guides/sandbox-the-agent/`, `guides/self-host/`, `guides/channels/`, `guides/hooks/`, `guides/use-skills/`, `guides/connect-mcp-servers/`, `guides/memory/`, `guides/memory-backends/`
    - `reference/<topic>/` for exhaustive lookups — `reference/cli/`, `reference/config-file/`, `reference/permissions/`, `reference/slash-commands/`, `reference/tools/`, `reference/http-api/`, `reference/security/`, `reference/compatibility/`
-   - Some topics (`sub-agents`, `sandbox-the-agent`, `self-host`) have a full guide online but no bundled summary file at all — go straight to `web_fetch` for those.
+   - Some topics (`sub-agents`, `expert-agents`, `light-apps`, `sandbox-the-agent`, `self-host`) have a full guide online but no bundled summary file at all — go straight to `web_fetch` for those.
    - For anything neither the bundled docs nor the docs site cover (e.g. an internal design doc under `dev-docs/`), fall back to `https://github.com/open-octo/octo-agent/blob/main/<path>` via `web_fetch`.
 
 ## How to answer
