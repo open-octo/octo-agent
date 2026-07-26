@@ -46,6 +46,7 @@
 
   // ── Light Apps (new) ──────────────────────────────────────────────────────
   let laLoading = $state(false)
+  let laAttempted = $state(false)
 
   async function loadLightApps() {
     if ($lightapps.length > 0) return
@@ -54,7 +55,10 @@
       const list = await api.listLightApps()
       lightapps.set(list)
     } catch { /* empty list */ }
-    finally { laLoading = false }
+    finally {
+      laLoading = false
+      laAttempted = true
+    }
   }
 
   async function selectLightApp(slug: string) {
@@ -70,7 +74,8 @@
 
   // Load light apps list once when the panel opens in lightapps mode.
   $effect(() => {
-    if ($panelContent === 'lightapps' && $lightapps.length === 0) loadLightApps()
+    if ($panelContent === 'lightapps' && $lightapps.length === 0 && !laAttempted) loadLightApps()
+    if ($panelContent !== 'lightapps') laAttempted = false
   })
 
   function closePanel() { panelContent.set(null) }
