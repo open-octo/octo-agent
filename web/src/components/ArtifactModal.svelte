@@ -93,11 +93,11 @@
   position: fixed; inset: 0; z-index: 1100;
   background: rgba(0,0,0,0.4);
   display: flex; align-items: center; justify-content: center;
-  padding: 24px;
+  padding: 12px;
 }
 .modal {
-  width: min(1200px, 90vw);
-  height: min(760px, 82vh);
+  width: 96vw;
+  height: 94vh;
   min-width: 320px;
   background: var(--bg-container);
   border: 1px solid var(--border-secondary);

@@ -748,6 +748,10 @@ export async function getLightApp(slug: string): Promise<LightAppDetail> {
   return request<LightAppDetail>(`/api/light-apps/${encodeURIComponent(slug)}`)
 }
 
+export async function createLightApp(opts: { name: string; description?: string; html: string }): Promise<LightApp> {
+  return request<LightApp>('/api/light-apps', { method: 'POST', ...json({ ...opts, icon: '📄' }) })
+}
+
 export async function deleteLightApp(slug: string): Promise<void> {
   await request<unknown>(`/api/light-apps/${encodeURIComponent(slug)}`, { method: 'DELETE' })
 }

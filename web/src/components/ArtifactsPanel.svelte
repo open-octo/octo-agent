@@ -10,6 +10,40 @@
   function onCopy() { copyArtifact(cur?.code ?? '', showToast) }
   function onDownload() { downloadArtifact(cur?.name, cur?.code ?? '', showToast) }
 
+  // ── Save to Light App (HTML artifacts only) ─────────────────────────────
+  let saveToLAName = $state('')
+  let saveToLADialog = $state(false)
+  let saveToLALoading = $state(false)
+
+  function openSaveToLA() {
+    saveToLAName = cur?.name?.replace(/\.[^.]+$/, '') ?? ''
+    saveToLADialog = true
+  }
+
+  async function doSaveToLA() {
+    const name = saveToLAName.trim()
+    if (!name || !cur) return
+    saveToLALoading = true
+    try {
+      const app = await api.createLightApp({ name, html: cur.code })
+      showToast(`Light App "${app.name}" saved`, 'success')
+      saveToLADialog = false
+      // If the panel is in lightapps mode, refresh the list.
+      if ($panelContent === 'lightapps') {
+        try {
+          const list = await api.listLightApps()
+          lightapps.set(list)
+        } catch { /* ignore */ }
+      }
+    } catch (e: any) {
+      showToast(`Save failed: ${e.message}`, 'error')
+    } finally {
+      saveToLALoading = false
+    }
+  }
+
+  const curIsHTML = $derived(cur?.type === 'HTML')
+
   // ── Light Apps (new) ──────────────────────────────────────────────────────
   let laLoading = $state(false)
 
@@ -111,6 +145,11 @@
         </div>
         <button class="icon-btn" title={$t('artifacts.copy')} onclick={onCopy}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
         <button class="icon-btn" title={$t('artifacts.download')} onclick={onDownload}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
+        {#if curIsHTML}
+          <button class="icon-btn" title={$t('artifacts.save_to_lightapp')} onclick={openSaveToLA}>
+            <iconify-icon icon="ant-design:save-outlined" width="14"></iconify-icon>
+          </button>
+        {/if}
         <button class="icon-btn" title={$t('artifacts.maximize')} onclick={() => { panelContent.set(null); artifactModalOpen.set(true) }}>
           <iconify-icon icon="ant-design:expand-outlined" width="14"></iconify-icon>
         </button>
@@ -118,6 +157,22 @@
           <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
         </button>
       </div>
+
+      {#if saveToLADialog}
+        <div class="save-to-la-bar">
+          <input
+            class="save-to-la-input"
+            type="text"
+            bind:value={saveToLAName}
+            placeholder={$t('artifacts.save_to_lightapp_placeholder')}
+            onkeydown={(e) => { if (e.key === 'Enter') doSaveToLA(); if (e.key === 'Escape') saveToLADialog = false }}
+          />
+          <button class="btn-action" disabled={saveToLALoading || !saveToLAName.trim()} onclick={doSaveToLA}>
+            {saveToLALoading ? '…' : $t('common.save')}
+          </button>
+          <button class="btn-action" onclick={() => saveToLADialog = false}>{$t('common.cancel')}</button>
+        </div>
+      {/if}
 
       <div class="toolbar">
         <div class="seg">
