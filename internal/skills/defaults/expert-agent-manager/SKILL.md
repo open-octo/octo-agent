@@ -19,7 +19,8 @@ allowlist).
 ## API Base
 
 All endpoints below are served by the octo server at `http://localhost:<port>`.
-Use the `web_fetch` tool to call them. All requests return JSON.
+Use `curl` via the `terminal` tool to call them. (Do NOT use `web_fetch` —
+localhost is blocked by SSRF protection.) All requests return JSON.
 
 | Method | Path | Description |
 |--------|------|-------------|

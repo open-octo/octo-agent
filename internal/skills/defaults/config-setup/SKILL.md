@@ -29,7 +29,7 @@ workspace_dir                     default / lite model
 ```
 
 All of these live in `~/.octo/config.yml` and are editable through the REST API
-on the running octo server at `http://localhost:<port>` (use `web_fetch`).
+on the running octo server at `http://localhost:<port>` (use `curl` via the `terminal` tool — do NOT use `web_fetch`, localhost is blocked by SSRF).
 
 ## Finding the server port
 
