@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { artifacts, artifactsOpen, artifactSel, artifactView, artifactModalOpen, showToast } from '../lib/stores'
+  import { artifacts, panelContent, artifactSel, artifactView, artifactModalOpen, showToast } from '../lib/stores'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact } from '../lib/artifact-actions'
 
@@ -18,7 +18,7 @@
   // "Back to sidebar": close modal, reopen the side panel.
   function restoreSidebar() {
     artifactModalOpen.set(false)
-    artifactsOpen.set(true)
+    panelContent.set('session')
   }
 
   function close() {

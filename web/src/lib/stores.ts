@@ -59,17 +59,16 @@ export const nativeShell = writable(false)
 export const localAccess = writable(false)
 
 // Artifacts panel
-export const artifactsOpen = writable(false)
 export const artifacts = writable<Artifact[]>([])
 export const artifactSel = writable(0)
 export const artifactView = writable<ArtifactView>('preview')
 // Centered modal for full artifact viewing — toggled by the sidebar's maximize
-// button. Independent from artifactsOpen so closing the modal doesn't force
+// button. Independent from panelContent so closing the modal doesn't force
 // the sidebar back open.
 export const artifactModalOpen = writable(false)
 
 // Artifacts panel sidebar mode. null = closed, 'session' = session artifacts,
-// 'lightapps' = Light Apps list + rendering. Replaces the per-session artifactsOpen.
+// 'lightapps' = Light Apps list + rendering.
 export const panelContent = writable<'session' | 'lightapps' | null>(null)
 
 // Light Apps state for the sidebar (loaded on demand).
