@@ -4,12 +4,8 @@
   import { showToast, openAgentSession } from '../lib/stores'
   import { confirmDialog } from '../lib/confirm'
   import * as api from '../lib/api'
-  import AgentEdit from './AgentEdit.svelte'
 
   let agents: api.Agent[] = []
-  let editing: api.Agent | null = null
-  let deleting: api.Agent | null = null
-  let creating = false
   let loading = true
 
   async function loadAgents() {
@@ -23,23 +19,6 @@
     }
   }
 
-  async function handleSave(agent: api.Agent) {
-    try {
-      if (creating) {
-        await api.createAgent(agent)
-        showToast('Agent created', 'success')
-      } else if (editing) {
-        await api.updateAgent(editing.id, agent)
-        showToast('Agent updated', 'success')
-      }
-      editing = null
-      creating = false
-      await loadAgents()
-    } catch (err) {
-      showToast('Failed to save agent: ' + (err as Error).message, 'error')
-    }
-  }
-
   async function handleDelete(agent: api.Agent) {
     const confirmed = await confirmDialog(
       $t('agents.delete_confirm').replace('{name}', agent.name)
@@ -48,22 +27,20 @@
     try {
       await api.deleteAgent(agent.id)
       showToast('Agent deleted', 'success')
-      deleting = null
       await loadAgents()
     } catch (err) {
       showToast('Failed to delete agent: ' + (err as Error).message, 'error')
     }
   }
 
-  // Agentic-first: create an agent through conversation with the expert-agent-manager
-  // meta-skill, mirroring the skill-creator flow in SkillsView.
+  // Agentic-first: create and edit through conversation with the
+  // expert-agent-manager skill.
   function handleCreateWithAgent() {
     openAgentSession('/expert-agent-manager', 'New agent')
   }
 
-  function handleCreate() {
-    editing = null
-    creating = true
+  function handleEditWithAgent(agent: api.Agent) {
+    openAgentSession(`/expert-agent-manager edit ${agent.id}`, `Edit agent: ${agent.name}`)
   }
 
   // Derive icon avatar from agent name
@@ -91,13 +68,9 @@
         <p>{$t('agents.desc')}</p>
       </div>
       <div class="header-actions">
-        <button class="btn-secondary" onclick={handleCreateWithAgent}>
+        <button class="btn-primary" onclick={handleCreateWithAgent}>
           <iconify-icon icon="ant-design:message-outlined" width="14"></iconify-icon>
           {$t('agents.create_with_agent')}
-        </button>
-        <button class="btn-primary" onclick={handleCreate}>
-          <iconify-icon icon="ant-design:plus-outlined" width="14"></iconify-icon>
-          {$t('agents.create')}
         </button>
       </div>
     </div>
@@ -111,7 +84,7 @@
       <div class="empty-state">
         <iconify-icon icon="ant-design:robot-outlined" width="32"></iconify-icon>
         <span>{$t('agents.empty')}</span>
-        <button class="btn-primary" onclick={handleCreate}>{$t('agents.create')}</button>
+        <button class="btn-primary" onclick={handleCreateWithAgent}>{$t('agents.create_with_agent')}</button>
       </div>
     {:else}
       <div class="agent-list">
@@ -147,10 +120,10 @@
             <div class="agent-actions">
               <button
                 class="act-btn"
-                title={$t('common.edit')}
-                onclick={() => { editing = {...agent}; creating = false }}
+                title={$t('agents.edit_with_agent')}
+                onclick={() => handleEditWithAgent(agent)}
               >
-                <iconify-icon icon="ant-design:edit-outlined" width="14"></iconify-icon>
+                <iconify-icon icon="ant-design:message-outlined" width="14"></iconify-icon>
               </button>
               <button
                 class="act-btn del"
@@ -166,14 +139,6 @@
     {/if}
   </div>
 </div>
-
-{#if editing || creating}
-  <AgentEdit
-    agent={editing}
-    onSave={handleSave}
-    onCancel={() => { editing = null; creating = false }}
-  />
-{/if}
 
 <style>
 /* ── layout ──────────────────────────────────────────────────────────────── */
@@ -195,14 +160,6 @@ p  { margin: 0; font-size: 14px; color: var(--text-secondary); }
 }
 .btn-primary:hover:not(:disabled) { background: var(--blue-5); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.btn-secondary {
-  height: 32px; padding: 0 12px; border: 1px solid var(--border); background: var(--bg-container);
-  border-radius: 6px; font-size: 13px; color: var(--text-secondary); cursor: pointer;
-  font-family: inherit; display: flex; align-items: center; gap: 8px;
-}
-.btn-secondary:hover:not(:disabled) { border-color: var(--blue-5); color: var(--blue-5); }
-.btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── agent list ──────────────────────────────────────────────────────────── */
 .agent-list { display: flex; flex-direction: column; gap: 16px; }
