@@ -44,9 +44,11 @@
   // Static actions (always available)
   const actions = [
     { id: 'new', icon: 'ant-design:plus-outlined', label: () => $t('nav.new_session'), shortcut: '⌘N', run: () => newSession() },
+    { id: 'agents', icon: 'ant-design:robot-outlined', label: () => $t('nav.agents'), shortcut: '', run: () => goTo('agents') },
     { id: 'skills', icon: 'ant-design:thunderbolt-outlined', label: () => $t('nav.skills'), shortcut: '', run: () => goTo('skills') },
     { id: 'workflows', icon: 'ant-design:partition-outlined', label: () => $t('nav.workflows'), shortcut: '', run: () => goTo('workflows') },
     { id: 'tasks', icon: 'ant-design:clock-circle-outlined', label: () => $t('nav.tasks'), shortcut: '', run: () => goTo('tasks') },
+    { id: 'browser', icon: 'ant-design:global-outlined', label: () => $t('nav.browser'), shortcut: '', run: () => goTo('browser') },
     { id: 'mcp', icon: 'ant-design:api-outlined', label: () => $t('nav.mcp'), shortcut: '', run: () => goTo('mcp') },
     { id: 'channels', icon: 'ant-design:mobile-outlined', label: () => $t('nav.channels'), shortcut: '', run: () => goTo('channels') },
     { id: 'memory', icon: 'ant-design:user-outlined', label: () => $t('nav.memory'), shortcut: '', run: () => goTo('profile') },
