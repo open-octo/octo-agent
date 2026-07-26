@@ -173,7 +173,7 @@ Agent 生成 Light App HTML 时，已有 `artifact-design` 和 `dataviz` 技能�
 
 ### 导航入口
 
-侧边栏新增「轻应用」导航项（和「Skills」「Workflows」同级）。
+在「我的数据」栏目下，位于「助手记忆」和「文件回收站」之间，新增「轻应用」导航项。
 
 ### 列表页
 
