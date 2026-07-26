@@ -49,13 +49,14 @@ All are individual `PUT` endpoints returning 200 on success, 400 on invalid inpu
 
 ```
 PUT /api/config/reasoning_effort
-{"effort": "low"|"medium"|"high"|"xhigh"|"max"}
+{"reasoning_effort": "off"|"low"|"medium"|"high"|"xhigh"|"max"}
 ```
 
 | Value | Effect |
 |-------|--------|
+| `off` | No extended thinking (server default) |
 | `low` | Fast, surface-level thinking |
-| `medium` | Balanced (default) |
+| `medium` | Balanced |
 | `high` | Deeper reasoning, slower |
 | `xhigh` | Very thorough |
 | `max` | Maximum depth |
@@ -64,7 +65,7 @@ PUT /api/config/reasoning_effort
 
 ```
 PUT /api/config/permission_mode
-{"mode": "interactive"|"auto"|"strict"}
+{"permission_mode": "interactive"|"auto"|"strict"}
 ```
 
 | Value | Effect |
@@ -77,7 +78,7 @@ PUT /api/config/permission_mode
 
 ```
 PUT /api/config/show_reasoning
-{"show": true|false}
+{"show_reasoning": true|false}
 ```
 
 When enabled, the agent's thinking process is visible in the chat.
@@ -86,7 +87,7 @@ When enabled, the agent's thinking process is visible in the chat.
 
 ```
 PUT /api/config/coauthor
-{"enabled": true|false}
+{"coauthor": true|false}
 ```
 
 When enabled, appends a `Co-authored-by: octo-agent` trailer to git commits.
@@ -95,7 +96,7 @@ When enabled, appends a `Co-authored-by: octo-agent` trailer to git commits.
 
 ```
 PUT /api/config/workspace_dir
-{"dir": "/absolute/path"|"auto"}
+{"workspace_dir": "/absolute/path"|"auto"}
 ```
 
 Sets the default working directory for new sessions. Use `"auto"` to let octo
@@ -219,14 +220,13 @@ The model name must be URL-encoded (e.g. `claude-sonnet-4-20250514`).
 ### Set Default / Lite Model
 
 ```
-PUT /api/config/endpoints/{id}/default
-{"model": "gpt-4o"}   // omit for first-model fallback
-
-PUT /api/config/endpoints/{id}/lite
-{"model": "claude-haiku"}   // omit for first-model fallback
-
+POST /api/config/endpoints/{id}/default?model=gpt-4o
+POST /api/config/endpoints/{id}/lite?model=claude-haiku
 DELETE /api/config/endpoints/{id}/lite   // clear lite designation
 ```
+
+The model is passed as a **query parameter** (`?model=…`), not in the request body.
+Omit `?model` to use the endpoint's first model as a fallback.
 
 ---
 
