@@ -260,3 +260,45 @@ func TestCreateSession_LazilyCreatesGroupForOldTask(t *testing.T) {
 		t.Fatalf("no lazily-created group holds session %q; groups=%+v", sessionID, groups)
 	}
 }
+
+func TestCreateSession_PersistsAgentID(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	sessionID, err := srv.CreateSession(scheduler.Task{Name: "t", AgentID: "code-review"})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	sess, err := agent.LoadSession(sessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if sess.AgentID != "code-review" {
+		t.Errorf("sess.AgentID = %q, want %q", sess.AgentID, "code-review")
+	}
+	if got := sess.EffectiveAgentID(); got != "code-review" {
+		t.Errorf("EffectiveAgentID() = %q, want %q", got, "code-review")
+	}
+}
+
+func TestCreateSession_EmptyAgentID_DefaultsToDefault(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	sessionID, err := srv.CreateSession(scheduler.Task{Name: "t"})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	sess, err := agent.LoadSession(sessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if sess.AgentID != "" {
+		t.Errorf("sess.AgentID = %q, want empty", sess.AgentID)
+	}
+	if got := sess.EffectiveAgentID(); got != "default" {
+		t.Errorf("EffectiveAgentID() = %q, want %q", got, "default")
+	}
+}

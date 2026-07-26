@@ -73,7 +73,7 @@ func TestPatchTask_UpdatesFields(t *testing.T) {
 
 	id := createTaskForTest(t, srv, `{"name":"edit-me","cron":"0 0 9 * * *","prompt":"old"}`)
 
-	patch := `{"prompt":"new prompt","directory":"/w","enabled":false}`
+	patch := `{"prompt":"new prompt","directory":"/w","enabled":false,"agent_id":"code-review"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/tasks/"+id, strings.NewReader(patch))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -93,6 +93,9 @@ func TestPatchTask_UpdatesFields(t *testing.T) {
 	}
 	if got.Enabled {
 		t.Errorf("enabled = true, want false (toggle via PATCH)")
+	}
+	if got.AgentID != "code-review" {
+		t.Errorf("agent_id = %q, want %q", got.AgentID, "code-review")
 	}
 	// Cron was not in the patch — it must be left untouched.
 	if got.Cron != "0 0 9 * * *" {
