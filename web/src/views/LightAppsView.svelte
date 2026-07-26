@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, activeSessionId, showToast, openAgentSession } from '../lib/stores'
+  import { showToast, openAgentSession } from '../lib/stores'
   import * as api from '../lib/api'
   import type { LightApp } from '../lib/api'
   import { t, tr } from '../lib/i18n'
@@ -29,6 +29,8 @@
       const blob = new Blob([detail.html], { type: 'text/html;charset=utf-8' })
       const url  = URL.createObjectURL(blob)
       window.open(url, '_blank')
+      // Revoke after the new tab has loaded the blob into its own session.
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
     } catch (e: any) {
       showToast(`Failed to open: ${e.message}`, 'error')
     }

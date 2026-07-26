@@ -71,7 +71,7 @@ func (s *Server) handleListLightApps(w http.ResponseWriter, r *http.Request) {
 // single Light App identified by its slug.
 func (s *Server) handleGetLightApp(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
-	if slug == "" || strings.Contains(slug, "..") || strings.Contains(slug, "/") {
+	if slug == "" || strings.Contains(slug, "..") || strings.ContainsAny(slug, "/\\") {
 		writeError(w, http.StatusBadRequest, "invalid_lightapp_slug")
 		return
 	}
@@ -109,7 +109,7 @@ func (s *Server) handleGetLightApp(w http.ResponseWriter, r *http.Request) {
 // handleDeleteLightApp removes a Light App dir (recursively) by its slug.
 func (s *Server) handleDeleteLightApp(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
-	if slug == "" || strings.Contains(slug, "..") || strings.Contains(slug, "/") {
+	if slug == "" || strings.Contains(slug, "..") || strings.ContainsAny(slug, "/\\") {
 		writeError(w, http.StatusBadRequest, "invalid_lightapp_slug")
 		return
 	}
