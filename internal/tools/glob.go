@@ -77,13 +77,41 @@ func (GlobTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 		return agent.ToolResult{Text: ""}, fmt.Errorf("glob: pattern is required")
 	}
 
-	root := "."
-	if p, ok := input["path"].(string); ok && p != "" {
-		root = p
-	}
-	absRoot, err := resolvePathIn(WorkingDir(ctx), root)
-	if err != nil {
-		return agent.ToolResult{Text: ""}, err
+	var absRoot string
+	matchPattern := pattern
+	if filepath.IsAbs(pattern) {
+		// When the pattern is an absolute path, use its literal directory
+		// prefix as the search root instead of the current working directory.
+		if prefix := literalPathPrefix(matchPattern); prefix != "" {
+			absRoot = prefix
+		} else {
+			absRoot = "/"
+		}
+		// If the literal prefix doesn't exist on disk, no file can match.
+		if _, statErr := os.Stat(absRoot); os.IsNotExist(statErr) {
+			text := fmt.Sprintf("(no matches for %q under %s)", pattern, absRoot)
+			return agent.ToolResult{Text: text, UI: map[string]any{
+				"type":    "file_list",
+				"path":    absRoot,
+				"entries": []map[string]any{},
+				"total":   0,
+			}}, nil
+		}
+		matchPattern = strings.TrimPrefix(pattern, absRoot)
+		matchPattern = strings.TrimPrefix(matchPattern, "/")
+		if matchPattern == "" {
+			matchPattern = "."
+		}
+	} else {
+		root := "."
+		if p, ok := input["path"].(string); ok && p != "" {
+			root = p
+		}
+		var err error
+		absRoot, err = resolvePathIn(WorkingDir(ctx), root)
+		if err != nil {
+			return agent.ToolResult{Text: ""}, err
+		}
 	}
 
 	// Anchor the walk to the pattern's literal (non-wildcard) leading path
@@ -94,7 +122,7 @@ func (GlobTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 	// project on every single glob call, regardless of how specific the
 	// pattern is.
 	scanRoot := absRoot
-	if prefix := literalPathPrefix(pattern); prefix != "" {
+	if prefix := literalPathPrefix(matchPattern); prefix != "" {
 		candidate := filepath.Join(absRoot, prefix)
 		switch _, statErr := os.Stat(candidate); {
 		case statErr == nil:
@@ -156,9 +184,9 @@ func (GlobTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 		if hasNoiseDirSegment(rel) {
 			continue
 		}
-		ok, mErr := globMatch(pattern, rel)
+		ok, mErr := globMatch(matchPattern, rel)
 		if mErr != nil {
-			return agent.ToolResult{Text: ""}, fmt.Errorf("glob: bad pattern %q: %w", pattern, mErr)
+			return agent.ToolResult{Text: ""}, fmt.Errorf("glob: bad pattern %q: %w", matchPattern, mErr)
 		}
 		if !ok {
 			continue
@@ -249,7 +277,11 @@ func literalPathPrefix(pattern string) string {
 		}
 		lit = append(lit, seg)
 	}
-	return strings.Join(lit, "/")
+	result := strings.Join(lit, "/")
+	if filepath.IsAbs(pattern) && len(pattern) > 0 && os.IsPathSeparator(pattern[0]) {
+		result = "/" + result
+	}
+	return result
 }
 
 // onDiskCaseMatches reports whether every segment of prefix (a "/"-joined

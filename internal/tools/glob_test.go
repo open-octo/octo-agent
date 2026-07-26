@@ -197,9 +197,9 @@ func TestLiteralPathPrefix(t *testing.T) {
 		{"**/*.go", ""},
 		{"*.go", ""},
 		{"src/*/foo.go", "src"},
-		{"../sibling/*.go", ""},                    // ".." must never anchor outside the search root
-		{"foo/../bar/*.go", "foo"},                 // stops at ".." rather than treating it as literal
-		{"/internal/tools/*.go", "internal/tools"}, // leading "/" doesn't shift the prefix
+		{"../sibling/*.go", ""},                     // ".." must never anchor outside the search root
+		{"foo/../bar/*.go", "foo"},                  // stops at ".." rather than treating it as literal
+		{"/internal/tools/*.go", "/internal/tools"}, // leading "/" preserved for absolute patterns
 		{"./internal/tools/*.go", "internal/tools"},
 	}
 	for _, c := range cases {
@@ -389,5 +389,90 @@ func TestGlob_UnreadableSubdirReturnsPartialResults(t *testing.T) {
 	}
 	if !strings.Contains(out.Text, "[warning:") {
 		t.Errorf("expected a warning about the unreadable subdir:\n%s", out.Text)
+	}
+}
+
+// TestGlob_AbsolutePattern verifies that an absolute-path pattern searches
+// from that absolute directory instead of the current working directory.
+func TestGlob_AbsolutePattern(t *testing.T) {
+	requireRg(t)
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "a.go"), "")
+	writeTestFile(t, filepath.Join(dir, "b.go"), "")
+	writeTestFile(t, filepath.Join(dir, "c.txt"), "")
+
+	out, err := GlobTool{}.Execute(context.Background(), "glob", map[string]any{
+		"pattern": filepath.Join(dir, "*.go"),
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.Text, "a.go") || !strings.Contains(out.Text, "b.go") {
+		t.Errorf("expected a.go and b.go in output:\n%s", out.Text)
+	}
+	if strings.Contains(out.Text, "c.txt") {
+		t.Errorf(".txt should not match *.go:\n%s", out.Text)
+	}
+}
+
+// TestGlob_AbsolutePatternRecursive verifies absolute pattern with **
+// recursion searches the correct directory.
+func TestGlob_AbsolutePatternRecursive(t *testing.T) {
+	requireRg(t)
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "top.go"), "")
+	writeTestFile(t, filepath.Join(dir, "sub", "mid.go"), "")
+	writeTestFile(t, filepath.Join(dir, "sub", "deeper", "leaf.go"), "")
+
+	out, err := GlobTool{}.Execute(context.Background(), "glob", map[string]any{
+		"pattern": filepath.Join(dir, "**/*.go"),
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for _, want := range []string{"top.go", "mid.go", "leaf.go"} {
+		if !strings.Contains(out.Text, want) {
+			t.Errorf("expected %s in output:\n%s", want, out.Text)
+		}
+	}
+}
+
+// TestGlob_AbsolutePatternNonExistent verifies that an absolute pattern
+// whose literal prefix doesn't exist returns "no matches".
+func TestGlob_AbsolutePatternNonExistent(t *testing.T) {
+	dir := t.TempDir()
+	nonExistent := filepath.Join(dir, "does-not-exist")
+
+	out, err := GlobTool{}.Execute(context.Background(), "glob", map[string]any{
+		"pattern": filepath.Join(nonExistent, "*.go"),
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.Text, "no matches") {
+		t.Errorf("expected 'no matches' message: %q", out.Text)
+	}
+}
+
+// TestGlob_AbsolutePatternFullyLiteral verifies a fully literal absolute pattern
+// (no wildcards) matches the exact file.
+func TestGlob_AbsolutePatternFullyLiteral(t *testing.T) {
+	requireRg(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "pkg", "single.go")
+	writeTestFile(t, target, "")
+	writeTestFile(t, filepath.Join(dir, "pkg", "other.go"), "")
+
+	out, err := GlobTool{}.Execute(context.Background(), "glob", map[string]any{
+		"pattern": target,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.Text, "single.go") {
+		t.Errorf("expected single.go in output:\n%s", out.Text)
+	}
+	if strings.Contains(out.Text, "other.go") {
+		t.Errorf("other.go should not match a fully literal pattern:\n%s", out.Text)
 	}
 }
