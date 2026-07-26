@@ -2377,7 +2377,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 /* ── Rich answer (markdown) ──────────────────────────────────────────────── */
 .rich-answer { font-size: 14px; line-height: 1.6; color: var(--text); display: flex; flex-direction: column; gap: 12px; }
 :global(.rich-answer p) { margin: 0; }
-:global(.rich-answer code), :global(.think-body code) {
+:global(.rich-answer :not(pre) > code), :global(.think-body :not(pre) > code) {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; font-style: normal;
   background: var(--bg-table-header); border: 1px solid var(--border-table); border-radius: 4px; padding: 1px 5px;
 }
