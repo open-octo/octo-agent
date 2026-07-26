@@ -95,21 +95,14 @@ Memories are snapshots and can be stale. If one names a file path, function, fla
 - Use tasks sparingly. Single trivial commands or one-file edits don't need a task. Reserve them for complex, multi-step sessions where the user benefits from seeing progress.
 - Use `task_list` to check which tasks are still open before starting new work, so you don't lose track of pending items.
 
-## Shell quoting and `stdin`
+## Background processes
+
+### Shell quoting and `stdin`
 
 - **Never put backticks (`` ` ``) inside a double-quoted shell string.** In POSIX sh/bash, backticks trigger command substitution — the text between them is executed as a shell command, which either errors out or silently drops content. PowerShell treats backticks as escape characters and corrupts the text. Always pass text containing backticks (or other shell-special characters like `$` and `()`) through the `stdin` parameter instead of hardcoding it in the command string.
-- Specifically for `gh pr create` / `gh issue create`: use `--body-file -` with the body in the `stdin` parameter. This routes the body straight to stdin, bypassing the shell entirely — no escaping needed, no truncation risk.
-
-```
-terminal({
-  command: "gh pr create --title '...' --body-file - --head feat/xxx --base main",
-  stdin: "# Title\n\nSome `code` and $dollars, all safe.\n\n- nothing to escape"
-})
-```
-
-- This pattern applies to any command that can read from stdin (e.g. `git commit -F -`, `gh api --input -`, `python script.py`). Use it whenever the input text contains backticks, dollar signs, or parentheses that would require careful escaping in a shell string.
-
-## Background processes
+- For `gh pr create` / `gh issue create`: use `--body-file -` with the body in the `stdin` parameter — e.g. `terminal(command: "gh pr create --title '...' --body-file - --head ...", stdin: "# Title\n\nSome \`code\` and $dollars, all safe.")`. The body bypasses the shell entirely; no escaping needed.
+- This pattern applies to any command that reads stdin (e.g. `git commit -F -`, `gh api --input -`, `python script.py`). Use it whenever input text contains backticks, dollar signs, or parentheses that would need careful escaping in a shell string.
+- (This rule is also in the terminal tool's built-in description; repeated here because shell-quoting bugs are the most common preventable crash in agent-generated commands.)
 
 - **Never use `nohup` or shell `&` in a synchronous `terminal` call.** In sync mode the tool creates stdout/stderr pipes that are inherited by the forked child; `cmd.Wait()` does not return until all pipe write-ends are closed, so the command appears to hang until the background process exits. Always use `run_in_background` for anything that outlives the immediate turn.
 - **`run_in_background` vs `detached` — pick by lifecycle.** `run_in_background:"async"` / `"interactive"` is for work tied to this session: octo tracks it and kills it when the session ends. Use `run_in_background:"async"` for one-shot tasks (tests, builds, installs) — you may NOT use `terminal_output` or `terminal_input`; wait for the completion notification. Use `run_in_background:"interactive"` for long-running services and REPLs (servers, watchers, `rails c`, `octo serve`) — `terminal_output` and `terminal_input` are allowed. Use `detached:true` ONLY when the user explicitly wants a process to **outlive octo** — e.g. exposing a port with `ngrok`, starting a standalone daemon. A detached process runs in its own session, is untracked (no `terminal_output` / `kill_shell`), is not killed on exit, and returns only its OS pid. Don't reach for `detached` to dodge the session timeout — that's what `run_in_background` is for. Never hand-roll `nohup`/`setsid`/`&`; set `detached:true` and the tool handles it.
