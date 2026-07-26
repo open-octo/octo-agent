@@ -55,7 +55,7 @@ for the task in plain language instead and the model loads the matching skill it
 
 ## Built-in skills
 
-octo ships 20 skills out of the box. Every one triggers automatically when the model judges a task
+octo ships 21 skills out of the box. Every one triggers automatically when the model judges a task
 matches its description — you rarely need to invoke them by name.
 
 **Get started**
@@ -64,6 +64,7 @@ matches its description — you rarely need to invoke them by name.
 |---|---|
 | `onboard` | First-run setup (name, personality, profile → `soul.md` + `user.md`); also handles narrower re-curation with `scope:soul`, `scope:user`, or a specific memory file path |
 | `product-help` | Answers "how do I…" / "what is…" questions about octo itself by reading its own product docs |
+| `config-setup` | Configures octo's global settings through conversation — set up AI model endpoints (providers, API keys, models), adjust agent defaults (reasoning effort, permission mode, coauthor, workspace directory), and manage default/lite model assignments |
 | `skill-creator` | Turns a repeatable task into a new `SKILL.md`, or edits/improves an existing one |
 | `workflow-creator` | Chains **existing** skills and browser recordings, or composes fresh `agent`/`parallel`/`pipeline` orchestration, into one runnable, saved [workflow](/docs/guides/workflows/) |
 

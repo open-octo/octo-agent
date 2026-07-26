@@ -51,7 +51,7 @@ skill 上；直接用大白话说想干什么就行，模型会自己判断该�
 
 ## 内置 skills
 
-octo 开箱自带 20 个 skill。每一个都会在模型判断任务匹配时自动触发——大多数情况下你不需要按名字调用它们。
+octo 开箱自带 21 个 skill。每一个都会在模型判断任务匹配时自动触发——大多数情况下你不需要按名字调用它们。
 
 **上手起步**
 
@@ -59,6 +59,7 @@ octo 开箱自带 20 个 skill。每一个都会在模型判断任务匹配时�
 |---|---|
 | `onboard` | 首次运行的引导流程（起名字、定性格、填个人画像 → 写进 `soul.md` + `user.md`）；也支持用 `scope:soul`、`scope:user`，或某个具体的记忆文件路径做更窄范围的修订 |
 | `product-help` | 通过读取 octo 自己的产品文档回答"怎么用 XXX"这类关于 octo 本身的问题 |
+| `config-setup` | 通过对话配置 octo 的全局设置——设置 AI 模型端点（Provider、API Key、模型）、调整 Agent 默认值（推理强度、权限模式、coauthor、工作目录），以及管理默认/轻量模型分配 |
 | `skill-creator` | 把一个可复用的任务写成新的 `SKILL.md`，或者改进已有的 |
 | `workflow-creator` | 把**已有** skill 和浏览器录制串起来，或者直接用 `agent`/`parallel`/`pipeline` 编排新逻辑，生成一个可运行、可保存的[工作流](/docs/zh/guides/workflows/) |
 
