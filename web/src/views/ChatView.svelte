@@ -2123,14 +2123,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   .hdr-btn { padding: 0 8px; }
 }
 .hdr-btn:hover { border-color: var(--blue-5); color: var(--blue-5); }
-.hdr-btn.active { border-color: var(--blue-6); color: var(--blue-6); background: var(--active-blue-bg); }
 .hdr-btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: var(--border); color: var(--text-quaternary); }
-.count-badge {
-  font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: var(--blue-1); color: var(--blue-6); border-radius: 9999px;
-  min-width: 16px; height: 16px; padding: 0 5px;
-  display: flex; align-items: center; justify-content: center;
-}
 
 /* ── WS banner ───────────────────────────────────────────────────────────── */
 .ws-banner {
