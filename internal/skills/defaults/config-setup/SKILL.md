@@ -228,6 +228,38 @@ DELETE /api/config/endpoints/{id}/lite   // clear lite designation
 The model is passed as a **query parameter** (`?model=…`), not in the request body.
 Omit `?model` to use the endpoint's first model as a fallback.
 
+**Important**: This changes the **server-wide default** that seeds new sessions.
+It does **not** switch the model of any session that is already running or already
+bound to a specific model. For those, see [Switching the Current Session's Model](#switching-the-current-sessions-model).
+
+### Switching the Current Session's Model
+
+A session is bound to the global default model only at creation time. Once it has
+a turn, it keeps that model until you explicitly switch it. This applies to
+Web, TUI, CLI one-shot, and IM sessions.
+
+- **Web UI**: Click the model chip in the Composer status bar (the row showing the
+current model name, e.g. `K3`), then pick the desired model from the dropdown.
+- **IM (Weixin/Feishu/DingTalk/WeCom/Discord/Telegram)**: Send `/model` to list
+configured models and see the current one, then `/model <endpoint>::<model>` to
+bind the session to that endpoint's model, or `/model default` to make it follow
+the server-wide default again. You cannot switch while a turn is running.
+- **REST API**:
+
+```
+PATCH /api/sessions/{id}/model
+{"model_id": "Kimi::k3-256k"}
+```
+
+Use `default` as the `model_id` to unbind the session from a specific endpoint
+and make it follow the global default on subsequent turns. Unknown or bare model
+strings are treated as raw model names on the default sender.
+
+**Restart behavior**: You do **not** need to restart `octo serve` after changing
+the global default or a session's model. Both take effect on the next turn. The
+only exception is a session that was already bound to a model before the change —
+it will not switch unless you use one of the methods above.
+
 ---
 
 ## Workflow
@@ -265,8 +297,8 @@ Keep it brief: one question at a time, one change per response.
 6. **Verify** via `GET /api/config/endpoints` — confirm the new endpoint
    appears with the right models.
 
-7. **Tell the user** the endpoint is ready. The agent will use it immediately
-   for new turns.
+7. **Tell the user** the endpoint is ready. New sessions will use it immediately.
+   Existing sessions keep their current model binding unless manually switched.
 
 ### Editing an existing endpoint
 
@@ -274,14 +306,23 @@ Keep it brief: one question at a time, one change per response.
 2. **Show the user** the endpoint's current config.
 3. **Apply the smallest change** via `PATCH /api/config/endpoints/{id}`.
 4. **Verify** the change took effect.
+5. **Point out** that updating an endpoint (key, URL, provider, protocol) does not
+   automatically switch any bound session to a different model; it only changes
+   how the already-bound model is reached. If the user wants a running session to
+   use a different model, use the per-session switch.
 
 ### Setting default / lite model
 
 1. **List endpoints** to show the user what's available.
 2. **Confirm** which model should be default (normal turns) and which lite
    (lightweight tasks).
-3. **Call** `PUT /api/config/endpoints/{id}/default` etc.
+3. **Call** `POST /api/config/endpoints/{id}/default` etc.
 4. **Confirm** the assignment.
+5. **Clarify the scope**: this only affects **new** sessions and any session that
+   is currently unbound. Sessions already in progress or already switched to a
+   specific model continue on that model. Tell the user how to switch the current
+   session if they expected it to change immediately (Web UI model chip, IM `/model`,
+   or `PATCH /api/sessions/{id}/model`).
 
 ---
 

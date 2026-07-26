@@ -35,6 +35,8 @@ Precedence (highest first): CLI flag > env var > config file > built-in default.
 - `OCTO_PROVIDER` / `ANTHROPIC_MODEL` env vars override the config file
 - The config file's model is only honored when the resolved provider matches
 
+Also remember that a session is **bound to a model at creation time**. Changing the global default (`octo config`, the web UI Settings panel, or `POST /api/config/endpoints/{id}/default`) only affects **new** sessions. Existing sessions keep their current model until you explicitly switch them via the TUI `/model` command, the web UI Composer's model chip, the IM `/model` command, or `PATCH /api/sessions/{id}/model`.
+
 ## TUI
 
 ### TUI doesn't start (falls back to plain REPL)

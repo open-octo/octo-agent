@@ -4,6 +4,8 @@ octo can run as a chat bot on WeChat (iLink), Feishu, DingTalk, WeCom, Discord, 
 
 Each chat is a session like any other — per-user history and permission context, slash commands (a different set than the TUI/web; see the reference below), attachments bridge both ways, and a session goal works the same as elsewhere.
 
+IM-specific slash commands include `/model` (list models), `/model <endpoint>::<model>` to switch the current chat session to a specific model, and `/model default` to make it follow the server-wide default. Switching only affects this chat session; it does not change the global default in `~/.octo/config.yml`.
+
 ## Proactive messaging (`send_message` / `send_file`)
 
 A normal reply only reaches the chat the current turn is already talking to. To reach a **different** chat — e.g. the user is on the web UI and asks octo to message their WeChat — the model uses `send_message`/`send_file`, addressed by `platform` + `chat_id`. Calling with just a platform (or no arguments) returns the list of chats it can currently reach; a chat only appears once it has messaged the bot at least once. These tools only appear when a messenger is active (`octo serve` running with channels enabled).

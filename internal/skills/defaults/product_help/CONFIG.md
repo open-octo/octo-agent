@@ -7,7 +7,7 @@ Path: `~/.octo/config.yml`. Every field is optional — a missing file or field 
 | Key | Type | Description |
 |---|---|---|
 | `endpoints` | list | Configured providers. Each bundles connection params (`id`, `name`, `provider` (`anthropic`\|`openai`\|`custom`), `base_url`, `api_key`, `protocol` (custom vendor only), optional `lite_model`) and a `models` list whose entries are `{ model, vision }` |
-| `default` | string | Composite id `<endpoint-id>::<model>` used when nothing else selects one; empty → first endpoint's first model |
+| `default` | string | Composite id `<endpoint-id>::<model>` used when nothing else selects one; empty → first endpoint's first model. **Only seeds new sessions** — a session that already has turns keeps the model it was bound to until you switch it explicitly (TUI/web chip/IM `/model`/`/api/sessions/{id}/model`). |
 | `lite` | string | Composite id `<endpoint-id>::<model>` for cheap internal calls (compaction summaries, session titles) |
 | `permission_mode` | string | `interactive` (default) \| `strict` \| `auto` |
 | `coauthor` | bool | Append `Co-authored-by` to git commits (default true) |
