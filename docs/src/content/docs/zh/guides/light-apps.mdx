@@ -1,0 +1,71 @@
+---
+title: 轻应用
+description: 把 Agent 生成的 HTML 页面保存为可复用的轻应用，随时打开，零 token 消耗。
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="New" variant="tip" /><br /><br />
+
+当你让 Agent 生成一个 HTML 页面——比如数据对账工具、格式转换器、日报模板——如果这个任务是**可重复**的，
+Agent 会主动提醒你把它保存为一个**轻应用**。保存后，你可以随时在 Web 界面里打开使用，不需要再消耗 LLM token。
+
+## 它是什么
+
+轻应用是 Agent 用纯前端技术（HTML + CSS + JS）写的自包含页面，存储在本机 `~/.octo/light-apps/`
+目录下。每个轻应用由两个文件组成：
+
+```
+~/.octo/light-apps/<slug>/
+├── manifest.json   # 元数据：名称、描述、图标、创建时间
+└── index.html      # 自包含页面（不依赖 CDN、不请求外部资源）
+```
+
+轻应用运行在浏览器的 sandboxed iframe 里，只能使用浏览器端能力——`FileReader`、`<input type="file">`、
+`localStorage` 等。它不能访问后端服务，也不需要后端。
+
+## 适用场景
+
+✅ **适合做成轻应用的任务**：
+- 重复性工具：数据对账、格式转换、CSV 合并
+- 模板生成器：日报模板、周报模板、清单生成
+- 输入→输出逻辑固定的任务：校验器、计算器、格式化工具
+- 需要离线可用的工具
+
+❌ **不适合做成轻应用**：
+- 一次性的分析或调研
+- 必须依赖 LLM 推理的任务
+- 需要后端 API / 数据库的工作流（用 [Skills](/docs/zh/guides/use-skills/) 或 [Workflows](/docs/zh/guides/workflows/) 代替）
+
+## 如何创建
+
+Agent 会自动判断一个 HTML 页面是否适合保存为轻应用。流程如下：
+
+1. 你在对话中让 Agent 生成一个 HTML 工具页面
+2. Agent 生成并预览后，如果判断任务可重复，会主动问：「保存为轻应用？以后随时在轻应用面板打开，不消耗 token。」
+3. 你确认后，Agent 用 `write_file` 直接把文件写入 `~/.octo/light-apps/<slug>/`
+4. slug 由小写字母、数字和连字符组成，从应用名称自动推导
+
+你也**不需要手动操作文件系统**——Agent 会自动完成一切。
+
+## 管理与使用
+
+在 Web 界面的导航栏点击「轻应用」，你会看到一个卡片网格，列出所有已保存的轻应用：
+
+- **打开**：在侧边栏的 Artifacts 面板中以 preview 模式渲染，可以直接交互使用
+- **编辑**：跳转到 Agent 对话，告诉 Agent 当前内容和修改需求，让它帮你更新
+- **删除**：确认后删除该轻应用
+
+Agent 生成的 HTML artifact 也可以在 Artifacts 面板中一键「保存到轻应用」。
+
+## 技术约束
+
+因为轻应用跑在 sandboxed iframe 里，Agent 在生成时必须遵守以下规则：
+
+- 完全自包含：不能引用 CDN、不能请求外部图片、不能跨域 fetch
+- CSS 和 JS 都内联（`<style>` + `<script>`）
+- 文件处理用 `FileReader` + `<input type="file">`
+- 图标用 emoji 或内联 SVG
+- 遵循 `artifact-design` 和 `dataviz` skill 的布局与配色规范
+
+这些约束 Agent 都清楚——你只需要告诉它要做什么，它会自动处理技术细节。

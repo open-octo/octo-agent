@@ -1,0 +1,73 @@
+---
+title: Light Apps
+description: Save agent-generated HTML pages as reusable mini-apps. Open anytime — zero token cost.
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="New" variant="tip" /><br /><br />
+
+When you ask the agent to generate an HTML page — a data reconciliation tool, format converter,
+daily report template — and the task is **repeatable**, the agent will proactively suggest
+saving it as a **Light App**. Once saved, you can open it anytime from the Web UI without
+consuming LLM tokens.
+
+## What it is
+
+A Light App is a self-contained HTML page written by the agent using pure frontend technologies
+(HTML + CSS + JS). It lives under `~/.octo/light-apps/` with two files per app:
+
+```
+~/.octo/light-apps/<slug>/
+├── manifest.json   # metadata: name, description, icon, created_at
+└── index.html      # self-contained page (no CDN, no external requests)
+```
+
+Light Apps run in a sandboxed iframe and only have access to browser-side capabilities —
+`FileReader`, `<input type="file">`, `localStorage`. No backend needed, no backend access.
+
+## When to use
+
+✅ **Good candidates for Light Apps**:
+- Repeatable tools: data reconciliation, format conversion, CSV merging
+- Template generators: daily report templates, checklist generators
+- Tasks with fixed input → output rules: validators, calculators, formatters
+- Tools you want available offline
+
+❌ **Not suitable for Light Apps**:
+- One-off analysis or research
+- Tasks that genuinely need LLM reasoning each time
+- Workflows requiring backend APIs / databases (use [Skills](/docs/guides/use-skills/) or [Workflows](/docs/guides/workflows/))
+
+## How to create one
+
+The agent automatically evaluates whether an HTML page is worth saving as a Light App. The flow:
+
+1. You ask the agent to generate an HTML tool page in conversation
+2. The agent generates and previews it, then proactively asks: "Save as Light App? Open anytime from the Light Apps panel with zero tokens."
+3. On your confirmation, the agent writes both files to `~/.octo/light-apps/<slug>/` using `write_file`
+4. The slug is derived from the app name — lowercase letters, digits, and hyphens only
+
+You **don't need to touch the filesystem** — the agent handles everything.
+
+## Managing Light Apps
+
+Click "Light Apps" in the Web UI navigation bar to see a card grid of all saved apps:
+
+- **Open**: renders the app in the Artifacts sidebar panel in preview mode — fully interactive
+- **Edit**: opens an agent conversation with the current content inline, so the agent can update it
+- **Delete**: removes the app after confirmation
+
+Agent-generated HTML artifacts can also be saved to Light Apps with one click from the Artifacts panel.
+
+## Technical constraints
+
+Since Light Apps run in a sandboxed iframe, the agent follows these rules when generating them:
+
+- Fully self-contained: no CDN links, no external images, no cross-origin fetch
+- All CSS and JS inline (`<style>` + `<script>`)
+- File processing via `FileReader` + `<input type="file">`
+- Icons via emoji or inline SVG
+- Layout and color conventions from the `artifact-design` and `dataviz` skills
+
+The agent already knows these constraints — just describe what you want, and it handles the rest.
