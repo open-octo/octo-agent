@@ -38,11 +38,13 @@ type uiStrings struct {
 	errStartFmt  string // "...%v"
 	dialogOKText string
 
-	updTitle        string
-	updFailed       string
-	updLatestFmt    string // "...(v%s)."
-	updAvailableFmt string // "...%s..."
-	updOpen         string
+	updTitle         string
+	updFailed        string
+	updLatestFmt     string // "...(v%s)."
+	updAvailableFmt  string // "...%s..."
+	updOpen          string
+	updInstall       string
+	updInplaceFailed string
 }
 
 var enStrings = uiStrings{
@@ -72,11 +74,13 @@ var enStrings = uiStrings{
 	errStartFmt:  "Couldn't start the backend: %v",
 	dialogOKText: "OK",
 
-	updTitle:        "Octo",
-	updFailed:       "Couldn't check for updates. Please try again later.",
-	updLatestFmt:    "You're on the latest version (v%s).",
-	updAvailableFmt: "Octo %s is available.",
-	updOpen:         "Open Download Page",
+	updTitle:         "Octo",
+	updFailed:        "Couldn't check for updates. Please try again later.",
+	updLatestFmt:     "You're on the latest version (v%s).",
+	updAvailableFmt:  "Octo %s is available.",
+	updOpen:          "Open Download Page",
+	updInstall:       "Update Now",
+	updInplaceFailed: "Automatic update failed — opening the download page.",
 }
 
 var zhStrings = uiStrings{
@@ -106,11 +110,13 @@ var zhStrings = uiStrings{
 	errStartFmt:  "无法启动后端：%v",
 	dialogOKText: "好",
 
-	updTitle:        "Octo",
-	updFailed:       "检查更新失败,请稍后重试。",
-	updLatestFmt:    "已是最新版本(v%s)。",
-	updAvailableFmt: "Octo %s 已发布。",
-	updOpen:         "打开下载页",
+	updTitle:         "Octo",
+	updFailed:        "检查更新失败,请稍后重试。",
+	updLatestFmt:     "已是最新版本(v%s)。",
+	updAvailableFmt:  "Octo %s 已发布。",
+	updOpen:          "打开下载页",
+	updInstall:       "立即更新",
+	updInplaceFailed: "自动更新失败,已打开下载页。",
 }
 
 // active holds the current string set. It's an atomic pointer because the tray

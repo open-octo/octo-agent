@@ -1,32 +1,88 @@
-# Desktop update notification
+# Desktop update flow
 
 The Wails desktop shell (`cmd/octo-desktop`) is distributed as a whole-app
 installer (macOS pkg, Windows `octo-setup.exe`, Linux AppImage), not as the
-`octo` CLI tarball. It cannot use the in-place binary swap that
-`octo serve` offers, because the running executable is the app bundle's
-`octo-desktop`, and `upgrade.Install` would rename the CLI `octo` binary over
-it — breaking the app (and, on macOS, its bundle code signature). That is why
-the desktop shell constructs the server with `UpdateCheck: false` today, which
-suppresses the whole version badge.
+`octo` CLI tarball. It cannot reuse the CLI's in-place swap (`upgrade.Install`
+would rename the CLI `octo` binary over the GUI executable), so it updates
+through two paths of its own:
 
-This design gives the desktop shell a **notify-and-open** update flow instead:
-detect a newer release, tell the user, and open the release download page in
-the system browser. The user installs the new package themselves. No in-app
-download, no in-place swap.
+- **In-place update** (macOS bundled + Windows release builds): the Wails v3
+  updater (`app.Updater`) downloads the desktop release artifact, verifies its
+  SHA-256 against the `desktop-checksums.txt` sidecar, swaps the installed app
+  via a helper process, and relaunches. See "In-place update" below.
+- **Notify-and-open** (Linux AppImage, dev/unbundled builds, or when the
+  updater can't be configured): detect a newer release, tell the user, and
+  open the download page in the system browser. The user installs the new
+  package themselves.
+
+`startUpdateFlow` (cmd/octo-desktop/update.go) routes every update request —
+the tray's "Update to vX" item and the update toast — to whichever path the
+running build supports (`bridge.inplaceUpdate`).
 
 ## Goals
 
-- The desktop shell surfaces "a newer version is available" and links to the
-  download page, from three entry points: the web version badge, a tray menu
-  item, and the Settings page.
+- The desktop shell surfaces "a newer version is available" from three entry
+  points: the web version badge, a tray menu item, and the Settings page.
+- One click installs the update where the platform allows it; everywhere else
+  the click lands on the download page.
 - The CLI (`octo serve`) self-upgrade flow is untouched.
 - A remote browser connected to the desktop-hosted server is handled correctly
   (it also cannot swap the desktop binary, and its OS may differ).
 
 ## Non-goals
 
-- In-app download of the installer, launching the installer, or silent
-  auto-update. Explicitly out of scope for this iteration.
+- Silent auto-update: installing is always user-initiated (the updater window
+  asks before the restart that performs the swap).
+- Delta/patch downloads: each update downloads the full artifact (the Wails
+  updater has no delta support).
+
+## In-place update
+
+### Release artifacts
+
+The release workflow attaches swappable desktop artifacts alongside the
+installers, plus a checksum sidecar (goreleaser's `checksums.txt` covers only
+the CLI archives):
+
+| Asset | Produced by | Swap target |
+|---|---|---|
+| `Octo-darwin-universal.zip` | macos-installer job (`ditto` of the universal, ad-hoc signed `Octo.app`) | the installed `.app` bundle |
+| `octo-desktop-windows-{amd64,arm64}.exe` | windows-installer job (the same self-contained exe the installer wraps) | the installed exe |
+| `desktop-checksums.txt` | desktop-checksums job (aggregates SHA-256 over all desktop assets after they upload) | — |
+
+Linux has no swappable artifact: the AppImage runs from a read-only squashfs
+mount the updater would try to write through, so it stays on notify-and-open.
+
+### Wiring (`cmd/octo-desktop/update.go`)
+
+- `canInplaceUpdate()` gates the whole path: release build only
+  (`upgrade.Eligible` — a dev build must not be replaced by an older release),
+  and macOS additionally requires running from a bundle.
+- `initInplaceUpdater` configures `app.Updater` with a GitHub Releases
+  provider. The asset matcher matches **exact names** (`desktopAssetName`),
+  never substrings — the release also carries CLI archives whose names contain
+  the same platform/arch markers, and a heuristic match would swap the GUI
+  with the CLI binary. Any init failure logs and falls back to
+  notify-and-open.
+- Detection stays on `internal/upgrade`'s releases/latest redirect (no API
+  rate limit, mirror fallback); `app.Updater.CheckAndInstall` runs only when
+  the user asks to install. Its window walks download → verify → stage and
+  prompts for the restart that performs the swap.
+- Restart quits the app so the updater's helper (this same binary re-spawned
+  with sentinel env vars; intercepted by `updater.HandleHelperMode()` at the
+  top of `main`) can wait for the process to exit, swap, and relaunch. The
+  `ShouldQuit` hook always allows a quit while an update is staged
+  (`app.Updater.State() == StateReady`) — the keep-running-in-background veto
+  would otherwise deadlock the swap.
+
+### Trust anchor
+
+Digest-only verification: the sidecar's SHA-256 over GitHub's TLS — the same
+anchor as the CLI's `octo upgrade`. No signing key is configured; when one
+exists (Developer ID / Authenticode effort), `updater.Config.PublicKey` adds
+Ed25519 verification without changing the flow. Because the update is
+downloaded by the app itself (no browser), no quarantine / Mark-of-the-Web is
+attached, so Gatekeeper and SmartScreen do not re-prompt on the swapped app.
 
 ## Two upgrade modes
 
@@ -128,19 +184,17 @@ otherwise shell out per-platform (no new third-party dependency):
 
 ### Tray menu item "Check for updates…"
 
-`buildTrayMenu` gains one item between "Settings" and the separator. On click,
-a background goroutine (never block the UI thread):
+`buildTrayMenu` has one item between "Settings" and the separator. While no
+update is known it is "Check for updates…" (manual `upgrade.Check`, reporting
+via toast); once a newer release is known it becomes "↑ Update to vX", whose
+click runs `startUpdateFlow` — the in-place install where supported, the
+download page otherwise. A daily `autoUpdateLoop` keeps the item current
+without the user asking.
 
-1. `upgrade.Check(ctx)` for the latest tag.
-2. Compare with `version.Version`:
-   - Newer → native question dialog "vX is available. Open the download page?"
-     → on confirm, `OpenExternal(BaseURL + "/releases/latest")`.
-   - Already latest → native info dialog "You're on the latest version."
-   - Check failed → native error dialog.
-
-Pure native path; does not depend on a window being open. Reuses the existing
-`confirm` / `showError` dialog helpers. New strings go in `lang.go` +
-`lang_*.go` (zh/en), matching the tray/dialog i18n already there.
+Pure native path; does not depend on a window being open. The update toast's
+action button follows the same routing (its label is "Update Now" when the
+build installs in place, "Open Download Page" otherwise). Strings live in
+`lang.go` (zh/en).
 
 ## Frontend
 

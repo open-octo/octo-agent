@@ -38,6 +38,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
+	"github.com/wailsapp/wails/v3/pkg/updater"
 )
 
 // Tray icons. macOS wants a monochrome template image (auto-tinted for the
@@ -113,6 +114,13 @@ func ensureWorkingDir() {
 }
 
 func main() {
+	// When spawned as the updater's helper child (sentinel env vars set), swap
+	// the staged update over the installed app and exit — before any of the
+	// launch side effects below (chdir, CLI/uv seeding, settings) run in a
+	// process that only exists to copy files. No-op on a normal launch;
+	// application.New would also catch it, just later.
+	updater.HandleHelperMode()
+
 	// A GUI launch inherits "/" as the working directory; move to the user's
 	// home before anything reads it (the in-process server records its launch
 	// dir as the default for sessions without a configured workspace_dir).
@@ -183,6 +191,13 @@ func main() {
 			if runtime.GOOS == "darwin" {
 				return true
 			}
+			// A staged in-place update restarts by quitting: the updater's
+			// helper waits for this process to exit before swapping the
+			// binary. Vetoing that quit (keep-running-in-background) would
+			// deadlock the update, so always allow it.
+			if bridge.app != nil && bridge.app.Updater.State() == updater.StateReady {
+				return true
+			}
 			return bridge.allowQuit.Load()
 		},
 		Mac: application.MacOptions{
@@ -194,7 +209,12 @@ func main() {
 	})
 	bridge.app = app
 
-	// Interacting with the "update available" toast opens the download page;
+	// Configure the in-place updater when this build can swap itself (bundled
+	// release build — see canInplaceUpdate). The flag routes the tray item and
+	// the update toast through app.Updater instead of the download page.
+	bridge.inplaceUpdate.Store(canInplaceUpdate() && initInplaceUpdater(app))
+
+	// Interacting with the "update available" toast starts the update flow;
 	// session notifications focus and route to the relevant session; every other
 	// notification just raises the window. Match the category (which all three
 	// platform notifiers echo back) and then only the "Open" action or a tap
@@ -204,7 +224,7 @@ func main() {
 			if res.Response.CategoryID == updateNotifyCategoryID {
 				switch res.Response.ActionIdentifier {
 				case updateNotifyOpenActionID, notifications.DefaultActionIdentifier:
-					_ = bridge.OpenExternal(upgrade.DownloadPageURL)
+					go startUpdateFlow(bridge)
 				}
 				return
 			}
@@ -360,8 +380,9 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 	srv, err := server.New(server.Config{
 		Tools: true,
 		// On: the version badge needs the latest-release lookup to know an update
-		// exists. It reports upgrade_mode "installer" (Native is set), so the UI
-		// offers a download link, not the in-place swap this build can't do.
+		// exists. It reports upgrade_mode "installer" (Native is set), so the web
+		// UI offers a download link; the desktop shell's own in-place update flow
+		// lives in the tray + update toast (see startUpdateFlow), not the badge.
 		UpdateCheck: true,
 		Native:      bridge,
 		// The desktop server runs in-process — there is no supervisor to
@@ -490,11 +511,12 @@ func buildTrayMenu(app *application.App, bridge *nativeBridge) *application.Menu
 	m.AddSeparator()
 	m.Add(L().trayShow).OnClick(func(*application.Context) { bridge.showWindow() })
 	m.Add(L().traySettings).OnClick(func(*application.Context) { bridge.openSettings() })
-	// A known-newer release replaces the "check" item with a one-click download —
-	// the durable prompt when the toast was suppressed. Otherwise the manual check.
+	// A known-newer release replaces the "check" item with a one-click update
+	// (in-place when this build supports it, else the download page) — the
+	// durable prompt when the toast was suppressed. Otherwise the manual check.
 	if v := bridge.updateAvailable.Load(); v != nil {
 		m.Add(fmt.Sprintf(L().trayUpdateAvailFmt, *v)).OnClick(func(*application.Context) {
-			_ = bridge.OpenExternal(upgrade.DownloadPageURL)
+			go startUpdateFlow(bridge)
 		})
 	} else {
 		m.Add(L().trayCheckUpdates).OnClick(func(*application.Context) { go checkForUpdates(bridge) })

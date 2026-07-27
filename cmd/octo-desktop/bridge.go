@@ -58,6 +58,12 @@ type nativeBridge struct {
 	// Atomic: the auto-check goroutine writes it while the tray loop / UI thread
 	// read it.
 	updateAvailable atomic.Pointer[string]
+	// inplaceUpdate reports whether this build swaps itself via app.Updater
+	// (bundled release build; see canInplaceUpdate) — when false, update
+	// actions open the download page instead. Written once in main before the
+	// event loop starts; atomic because tray/notification callbacks read it
+	// from other goroutines.
+	inplaceUpdate atomic.Bool
 	// tray is the system-tray handle, stored so an update check can refresh the
 	// menu immediately rather than waiting for refreshTrayLoop's next tick.
 	tray atomic.Pointer[application.SystemTray]
@@ -264,8 +270,9 @@ func (b *nativeBridge) requestNotificationAuthorization() {
 
 // Update-check notifications: the tray "Check for Updates…" flow reports via a
 // toast rather than a modal dialog. The "update available" toast carries an
-// action button; both it and a tap on the body open the download page, routed
-// in main.go's OnNotificationResponse handler by matching updateNotifyCategoryID.
+// action button; both it and a tap on the body start the update flow (in-place
+// install, or the download page — see startUpdateFlow), routed in main.go's
+// OnNotificationResponse handler by matching updateNotifyCategoryID.
 const (
 	updateNotifyID           = "octo-update-available"
 	updateNotifyCategoryID   = "octo.update-available"
@@ -273,17 +280,22 @@ const (
 )
 
 // registerUpdateNotifyCategory registers the category that gives the "update
-// available" toast its "Open Download Page" action button. No-op when the
-// notifier is unavailable (an unbundled dev binary). Register once at startup,
-// after the notification service has started.
+// available" toast its action button — "Update Now" when this build installs
+// in place, "Open Download Page" otherwise. No-op when the notifier is
+// unavailable (an unbundled dev binary). Register once at startup, after the
+// notification service has started (and after main sets inplaceUpdate).
 func (b *nativeBridge) registerUpdateNotifyCategory() {
 	if b.notifier == nil {
 		return
 	}
+	action := L().updOpen
+	if b.inplaceUpdate.Load() {
+		action = L().updInstall
+	}
 	_ = b.notifier.RegisterNotificationCategory(notifications.NotificationCategory{
 		ID: updateNotifyCategoryID,
 		Actions: []notifications.NotificationAction{
-			{ID: updateNotifyOpenActionID, Title: L().updOpen},
+			{ID: updateNotifyOpenActionID, Title: action},
 		},
 	})
 }

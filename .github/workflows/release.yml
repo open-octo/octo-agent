@@ -171,11 +171,17 @@ jobs:
             "/O$staging" packaging\windows\octo.iss
 
       # Installers are shipped unsigned — see SECURITY.md "Code signing policy".
-      - name: Attach installer to the release
+      # The bare .exe is what the desktop app's in-place updater downloads and
+      # swaps over itself (the exe is self-contained: web UI + ripgrep are
+      # go:embed'd, so replacing it alone is a complete upgrade). Its name must
+      # stay in sync with the desktop shell's asset matcher (cmd/octo-desktop).
+      - name: Attach installer + updater exe to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
-        run: gh release upload "${{ github.ref_name }}" staging\${{ matrix.out }}.exe --clobber
+        run: |
+          Copy-Item staging\octo-desktop.exe "staging\octo-desktop-windows-${{ matrix.arch }}.exe"
+          gh release upload "${{ github.ref_name }}" staging\${{ matrix.out }}.exe "staging\octo-desktop-windows-${{ matrix.arch }}.exe" --clobber
 
   # Build the double-click macOS installer (octo-setup.pkg) from the universal
   # (amd64+arm64) binary goreleaser just published, and attach it to the same
@@ -237,10 +243,17 @@ jobs:
           OutDir: ${{ github.workspace }}/staging
         run: packaging/macos/build.sh
 
-      - name: Attach installer to the release
+      # The .app zip is what the desktop app's in-place updater downloads and
+      # swaps over the installed bundle (build.sh leaves the universal, ad-hoc
+      # signed Octo.app at the repo root). ditto preserves the bundle's symlinks
+      # and permissions where plain zip would not. Its name must stay in sync
+      # with the desktop shell's asset matcher (cmd/octo-desktop).
+      - name: Attach installer + updater app zip to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" staging/octo-setup.pkg --clobber
+        run: |
+          ditto -c -k --keepParent Octo.app staging/Octo-darwin-universal.zip
+          gh release upload "$GITHUB_REF_NAME" staging/octo-setup.pkg staging/Octo-darwin-universal.zip --clobber
 
   # Build the Linux desktop AppImages (Octo-x86_64.AppImage,
   # Octo-aarch64.AppImage) and attach them. The AppImage is the GUI + bundled
@@ -314,3 +327,29 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" Octo-${{ matrix.apparch }}.AppImage --clobber
+
+  # Publish desktop-checksums.txt covering the desktop artifacts the jobs above
+  # attached. goreleaser's checksums.txt only covers its own (CLI) assets; the
+  # desktop app's in-place updater fetches this sidecar to verify the artifact
+  # it downloads before swapping itself. One aggregate job (rather than each
+  # job appending) because concurrent uploads of the same asset would clobber
+  # each other.
+  desktop-checksums:
+    name: desktop checksums
+    needs: [windows-installer, macos-installer, linux-appimage]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checksum desktop release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mkdir -p assets && cd assets
+          gh release download "$GITHUB_REF_NAME" \
+            --pattern 'Octo-darwin-universal.zip' \
+            --pattern 'octo-desktop-windows-*.exe' \
+            --pattern 'Octo-*.AppImage'
+          sha256sum * > ../desktop-checksums.txt
+          cd ..
+          cat desktop-checksums.txt
+          gh release upload "$GITHUB_REF_NAME" desktop-checksums.txt --clobber
