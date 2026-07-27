@@ -11,7 +11,7 @@
     "wire-native": "node scripts/wire-native.mjs"
   },
   "dependencies": {
-    "@capacitor/app": "^6.0.0",
+    "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^6.0.0",
     "jsqr": "^1.4.0"
   },
