@@ -302,6 +302,20 @@ func (t TerminalTool) ExecuteStream(
 		out     []byte
 		dropped bool
 	)
+	// Progress channel: decouple the scanner goroutine from the progress
+	// consumer. A slow progress handler (e.g. a full WS events channel)
+	// must never block the scanner — a blocked scanner backs up the
+	// io.Pipe, which blocks Go's internal stdout-copy goroutine, which
+	// prevents cmd.Wait() from returning (5-link deadlock).
+	progressCh := make(chan string, 128)
+	if progress != nil {
+		go func() {
+			for line := range progressCh {
+				progress(line)
+			}
+		}()
+	}
+	defer close(progressCh)
 	onLine := func(line string) {
 		outMu.Lock()
 		out = append(out, line...)
@@ -310,8 +324,14 @@ func (t TerminalTool) ExecuteStream(
 			dropped = true
 		}
 		outMu.Unlock()
-		if progress != nil {
-			progress(strings.TrimRight(line, "\n"))
+		if progressCh != nil {
+			trimmed := strings.TrimRight(line, "\n")
+			select {
+			case progressCh <- trimmed:
+			default:
+				// Drop when the consumer falls behind — better
+				// than deadlocking the entire pipe chain.
+			}
 		}
 	}
 
