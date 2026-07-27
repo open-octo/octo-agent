@@ -116,7 +116,7 @@ jobs:
 
       - name: Upload macOS app
         if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Octo-macos
           path: Octo.app
@@ -133,7 +133,7 @@ jobs:
       # per-arch artifact name keeps the amd64 and arm64 uploads distinct.
       - name: Upload Linux AppImage
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Octo-linux-${{ matrix.goarch }}-appimage
           path: Octo-*.AppImage
@@ -169,7 +169,7 @@ jobs:
       # Setup track (see windows-installer-check.yml), a separate change.
       - name: Upload Windows binary
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: octo-desktop-windows-${{ matrix.goarch }}
           path: cmd/octo-desktop/octo-desktop.exe
