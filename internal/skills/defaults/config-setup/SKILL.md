@@ -31,12 +31,25 @@ workspace_dir                     default / lite model
 All of these live in `~/.octo/config.yml` and are editable through the REST API
 on the running octo server at `http://localhost:<port>` (use `curl` via the `terminal` tool — do NOT use `web_fetch`, localhost is blocked by SSRF).
 
-## Finding the server port
+## Reaching the server
 
-Run `cat ~/.octo/octo.pid` to find the PID, then `lsof -i -P -n | grep LISTEN | grep <PID>`
-or check the default port (the web UI URL in the browser's address bar).
+The server listens on `127.0.0.1:8088` by default (the desktop app's built-in
+server uses the same port). Loopback requests need no access key.
 
-If you can't determine the port, use `24222` (the default).
+1. **Try the default first**: `curl -s http://127.0.0.1:8088/api/config`.
+   JSON back = you're connected; skip the rest of this section.
+2. **Connection refused?** The server may be on a custom port:
+   - Started as a daemon (`octo serve -d`): `cat ~/.octo/serve.pid` for the PID,
+     then find its listen port — macOS/Linux:
+     `lsof -iTCP -sTCP:LISTEN -P -n -a -p <PID>`; Windows (PowerShell):
+     `Get-NetTCPConnection -State Listen -OwningProcess <PID>`.
+   - A foreground `octo serve` writes no pid file — ask the user which port they
+     started it on (it's also in the web UI's address bar).
+3. **No server running at all?** Don't stop — fall back to editing
+   `~/.octo/config.yml` directly (it is the same file every API call below
+   mutates). Read the file first, apply the smallest edit that matches the
+   structure you see, then validate with `octo doctor`. Changes are picked up
+   by new CLI sessions and by the server next time it starts.
 
 ---
 
@@ -124,10 +137,10 @@ Endpoint "anthropic"                  Endpoint "relay-a"
   provider: anthropic                   provider: custom
   api_key: sk-ant-…                     api_key: sk-…
   models:                               models:
-    - claude-sonnet-4-20250514            - gpt-4o
-    - claude-haiku-3-5                    - deepseek-v3
-  default_model: claude-sonnet-4-…      default_model: gpt-4o
-  lite_model: claude-haiku-3-5          lite_model: deepseek-v3
+    - claude-sonnet-5                     - gpt-4o
+    - claude-haiku-4-5                    - deepseek-v3
+  default_model: claude-sonnet-5        default_model: gpt-4o
+  lite_model: claude-haiku-4-5          lite_model: deepseek-v3
 ```
 
 The **default model** is what the agent uses for normal turns.
@@ -215,7 +228,9 @@ POST /api/config/endpoints/{id}/models
 DELETE /api/config/endpoints/{id}/models/{model}
 ```
 
-The model name must be URL-encoded (e.g. `claude-sonnet-4-20250514`).
+The model name must be URL-encoded when it contains special characters — this
+matters for slash-style names like `deepseek/deepseek-chat`, which becomes
+`deepseek%2Fdeepseek-chat` in the path.
 
 ### Set Default / Lite Model
 
