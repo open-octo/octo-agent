@@ -307,15 +307,16 @@ func (t TerminalTool) ExecuteStream(
 	// must never block the scanner — a blocked scanner backs up the
 	// io.Pipe, which blocks Go's internal stdout-copy goroutine, which
 	// prevents cmd.Wait() from returning (5-link deadlock).
-	progressCh := make(chan string, 128)
+	var progressCh chan string
 	if progress != nil {
+		progressCh = make(chan string, 128)
 		go func() {
 			for line := range progressCh {
 				progress(line)
 			}
 		}()
+		defer close(progressCh)
 	}
-	defer close(progressCh)
 	onLine := func(line string) {
 		outMu.Lock()
 		out = append(out, line...)

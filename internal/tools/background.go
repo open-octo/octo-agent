@@ -562,6 +562,9 @@ func (m *BackgroundManager) list(includeExited bool) []BgInfo {
 
 // Promote makes a background process visible in ListRunning. Used when a
 // sync-started process times out and becomes a true background task.
+// Also clears the onLine callback (if any) so the sync path's progress
+// channel can be safely closed without the reader goroutine panicking on
+// a send to a closed channel.
 func (m *BackgroundManager) Promote(id string) bool {
 	m.mu.Lock()
 	p := m.procs[id]
@@ -571,6 +574,7 @@ func (m *BackgroundManager) Promote(id string) bool {
 	}
 	p.mu.Lock()
 	p.visible = true
+	p.onLine = nil
 	p.mu.Unlock()
 	return true
 }

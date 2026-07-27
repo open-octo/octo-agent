@@ -499,6 +499,57 @@ func TestTerminalTool_SubAgent_NotPromotable(t *testing.T) {
 	<-ctlDone
 }
 
+// TestTerminalTool_ExecuteStream_SlowProgressDoesNotDeadlock verifies that
+// a slow/blocking progress handler never deadlocks the pipe chain (the root
+// cause fixed by decoupling progress via a buffered channel).
+func TestTerminalTool_ExecuteStream_SlowProgressDoesNotDeadlock(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell only")
+	}
+
+	// A progress callback that blocks forever.
+	block := make(chan struct{})
+	progress := func(line string) { <-block }
+
+	done := make(chan agent.ToolResult, 1)
+	go func() {
+		res, _ := TerminalTool{}.ExecuteStream(context.Background(), "terminal",
+			map[string]any{"command": "for i in $(seq 1 200); do echo line$i; done"},
+			progress)
+		done <- res
+	}()
+
+	// The command must finish WITHOUT deadlocking. With the fix, the scanner
+	// never blocks on progress — it drops excess events via the non-blocking
+	// channel send. The aggregated output is unaffected.
+	select {
+	case res := <-done:
+		// Success — returned promptly despite blocked progress.
+		for i := 1; i <= 200; i++ {
+			want := "line" + itoa(i)
+			if !strings.Contains(res.Text, want) {
+				t.Errorf("aggregated output missing line %d (%q)", i, want)
+				break
+			}
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ExecuteStream deadlocked — did not return within 5s while progress was blocked")
+	}
+	close(block) // cleanup: unblock progress goroutine
+}
+
+// itoa is a minimal int-to-string helper for tests.
+func itoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	var digits []byte
+	for n := i; n > 0; n /= 10 {
+		digits = append([]byte{byte('0' + n%10)}, digits...)
+	}
+	return string(digits)
+}
+
 func TestTerminalInputTool_Definition(t *testing.T) {
 	def := TerminalInputTool{}.Definition()
 	if def.Name != "terminal_input" {
