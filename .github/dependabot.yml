@@ -1,0 +1,46 @@
+# Version-update coverage for every real dependency manifest. Before this
+# file existed only GitHub's default security updates ran, and they opened
+# fix PRs for some manifests but not others (see #1842-era postcss alerts:
+# /blog got a PR, /web and /docs did not).
+#
+# Deliberately NOT covered: evals/tasks/*/repo/go.mod — those are eval
+# fixtures whose dependencies are part of the task definition, and the
+# top-level /evals harness module, which shares their churn-free intent.
+#
+# Minor and patch bumps are grouped into one PR per directory to keep the
+# weekly noise reviewable; majors stay individual PRs.
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directories:
+      - "/"
+      - "/cmd/octo-desktop"
+      - "/cmd/octo-relay"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      go-minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "npm"
+    directories:
+      - "/web"
+      - "/docs"
+      - "/blog"
+      - "/mobile"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      npm-minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(deps)"
