@@ -1,20 +1,30 @@
 package main
 
-import "testing"
+import (
+	"path/filepath"
+	"runtime"
+	"testing"
+)
 
 func TestHomeIfRootLaunch(t *testing.T) {
-	const home = "/Users/alice"
+	// Real per-platform shapes: homeIfRootLaunch detects a root as "a path
+	// that is its own parent" via filepath.Dir, whose separator handling is
+	// platform-specific — POSIX "/" is not a root on Windows ("C:\" is).
+	root, home := "/", "/Users/alice"
+	if runtime.GOOS == "windows" {
+		root, home = `C:\`, `C:\Users\alice`
+	}
 	cases := []struct {
 		name string
 		wd   string
 		home string
 		want string
 	}{
-		{"finder launch at root", "/", home, home},
+		{"gui launch at filesystem root", root, home, home},
 		{"getwd failed (empty)", "", home, home},
-		{"terminal launch in a project dir", "/Users/alice/proj", home, ""},
+		{"terminal launch in a project dir", filepath.Join(home, "proj"), home, ""},
 		{"home itself is fine", home, home, ""},
-		{"no home resolved leaves cwd untouched", "/", "", ""},
+		{"no home resolved leaves cwd untouched", root, "", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
