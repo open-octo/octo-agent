@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -82,5 +83,62 @@ func TestRunUpgrade_BadFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := runUpgrade([]string{"--no-such-flag"}, &stdout, &stderr); code != 2 {
 		t.Fatalf("exit = %d, want 2 for flag errors", code)
+	}
+}
+
+func TestRunningServeDaemon(t *testing.T) {
+	isolatePidFile(t)
+	if pid, ok := runningServeDaemon(); ok {
+		t.Fatalf("no pid file: got running daemon pid %d", pid)
+	}
+	pidFile, err := daemonPidFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Our own pid is guaranteed alive.
+	if err := writePidFile(pidFile, os.Getpid()); err != nil {
+		t.Fatal(err)
+	}
+	pid, ok := runningServeDaemon()
+	if !ok || pid != os.Getpid() {
+		t.Fatalf("got (%d, %v), want (%d, true)", pid, ok, os.Getpid())
+	}
+}
+
+// TestRunUpgrade_FailureHintsRunningServeDaemon pins the #1842 follow-up: when
+// the upgrade fails while an `octo serve` daemon is running, the error is
+// followed by a hint that the daemon may be locking the binary (Windows) and
+// how to stop/retry/restart.
+func TestRunUpgrade_FailureHintsRunningServeDaemon(t *testing.T) {
+	// The fake origin serves only releases/latest, so the asset download 404s
+	// and Run fails after the version check. Clear the mirrors so the failing
+	// download never leaves the httptest server.
+	fakeLatest(t, "9.9.9")
+	origMirrors := upgrade.MirrorBaseURLs
+	upgrade.MirrorBaseURLs = nil
+	t.Cleanup(func() { upgrade.MirrorBaseURLs = origMirrors })
+	origV := version.Version
+	version.Version = "0.18.0"
+	t.Cleanup(func() { version.Version = origV })
+
+	isolatePidFile(t)
+	pidFile, err := daemonPidFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writePidFile(pidFile, os.Getpid()); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runUpgrade([]string{"--force"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "hint: an `octo serve` daemon is running") {
+		t.Errorf("stderr should hint at the running daemon, got:\n%s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "`octo serve stop`") {
+		t.Errorf("hint should mention `octo serve stop`, got:\n%s", stderr.String())
 	}
 }

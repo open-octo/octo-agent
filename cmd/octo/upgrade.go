@@ -43,6 +43,8 @@ func runUpgrade(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
+	daemonPid, daemonRunning := runningServeDaemon()
+
 	err := upgrade.Run(ctx, upgrade.Options{
 		Force: *force,
 		Log:   func(line string) { fmt.Fprintln(stdout, line) },
@@ -53,8 +55,31 @@ func runUpgrade(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case err != nil:
 		fmt.Fprintf(stderr, "octo upgrade: %v\n", err)
+		if daemonRunning {
+			fmt.Fprintf(stderr, "hint: an `octo serve` daemon is running (pid %d) and may be holding the binary in place (Windows locks a running executable) — run `octo serve stop`, retry the upgrade, then `octo serve -d`\n", daemonPid)
+		}
 		return 1
 	}
-	fmt.Fprintln(stdout, "done — a running `octo serve` picks the new binary up on its next restart")
+	if daemonRunning {
+		fmt.Fprintf(stdout, "done — the running `octo serve` daemon (pid %d) keeps using the old binary; restart it (`octo serve stop && octo serve -d`) to switch\n", daemonPid)
+	} else {
+		fmt.Fprintln(stdout, "done — a running `octo serve` picks the new binary up on its next restart")
+	}
 	return 0
+}
+
+// runningServeDaemon reports the pid of a live `octo serve -d` daemon, if
+// any, via the shared ~/.octo/serve.pid contract. A foreground serve has no
+// pid file and is invisible here — that's fine, the messages this feeds are
+// best-effort guidance, not a gate.
+func runningServeDaemon() (int, bool) {
+	pidFile, err := daemonPidFile()
+	if err != nil {
+		return 0, false
+	}
+	pid, err := readPidFile(pidFile)
+	if err != nil || !isProcessAlive(pid) {
+		return 0, false
+	}
+	return pid, true
 }
