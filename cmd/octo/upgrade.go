@@ -43,35 +43,38 @@ func runUpgrade(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	daemonPid, daemonRunning := runningServeDaemon()
-
 	err := upgrade.Run(ctx, upgrade.Options{
 		Force: *force,
 		Log:   func(line string) { fmt.Fprintln(stdout, line) },
 	})
+	// Checked after Run, not before: a download can take minutes, and what
+	// matters is who is alive when the message prints.
+	backendPid, backendRunning := runningServeDaemon()
 	switch {
 	case errors.Is(err, upgrade.ErrUpToDate):
 		fmt.Fprintln(stdout, "already up to date")
 		return 0
 	case err != nil:
 		fmt.Fprintf(stderr, "octo upgrade: %v\n", err)
-		if daemonRunning {
-			fmt.Fprintf(stderr, "hint: an `octo serve` daemon is running (pid %d) and may be holding the binary in place (Windows locks a running executable) — run `octo serve stop`, retry the upgrade, then `octo serve -d`\n", daemonPid)
+		if backendRunning {
+			fmt.Fprintf(stderr, "hint: an octo backend is running (pid %d) — if it's an `octo serve -d` daemon it may be locking the binary (Windows locks a running executable): run `octo serve stop`, retry the upgrade, then restart the daemon with your usual flags\n", backendPid)
 		}
 		return 1
 	}
-	if daemonRunning {
-		fmt.Fprintf(stdout, "done — the running `octo serve` daemon (pid %d) keeps using the old binary; restart it (`octo serve stop && octo serve -d`) to switch\n", daemonPid)
+	if backendRunning {
+		fmt.Fprintf(stdout, "done — an octo backend is still running (pid %d); if it's an `octo serve -d` daemon it keeps using the old binary until restarted (`octo serve stop`, then relaunch with your usual flags)\n", backendPid)
 	} else {
 		fmt.Fprintln(stdout, "done — a running `octo serve` picks the new binary up on its next restart")
 	}
 	return 0
 }
 
-// runningServeDaemon reports the pid of a live `octo serve -d` daemon, if
-// any, via the shared ~/.octo/serve.pid contract. A foreground serve has no
-// pid file and is invisible here — that's fine, the messages this feeds are
-// best-effort guidance, not a gate.
+// runningServeDaemon reports the pid of a live backend registered in the
+// shared ~/.octo/serve.pid. The owner may be an `octo serve -d` daemon or the
+// desktop hub (which serves in-process from a different executable), and the
+// file can't tell them apart — messages built on this must hedge accordingly.
+// A foreground serve has no pid file and is invisible here — that's fine, the
+// messages this feeds are best-effort guidance, not a gate.
 func runningServeDaemon() (int, bool) {
 	pidFile, err := daemonPidFile()
 	if err != nil {

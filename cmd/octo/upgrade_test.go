@@ -68,6 +68,7 @@ func TestRunUpgrade_DevRefusalExitCode(t *testing.T) {
 	orig := upgrade.BaseURL
 	upgrade.BaseURL = "http://127.0.0.1:0"
 	t.Cleanup(func() { upgrade.BaseURL = orig })
+	isolatePidFile(t)
 
 	var stdout, stderr bytes.Buffer
 	code := runUpgrade(nil, &stdout, &stderr)
@@ -76,6 +77,9 @@ func TestRunUpgrade_DevRefusalExitCode(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "--force") {
 		t.Errorf("refusal should hint at --force, got: %s", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "hint:") {
+		t.Errorf("no backend is registered, so no hint should print, got: %s", stderr.String())
 	}
 }
 
@@ -135,8 +139,8 @@ func TestRunUpgrade_FailureHintsRunningServeDaemon(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1; stderr=%s", code, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "hint: an `octo serve` daemon is running") {
-		t.Errorf("stderr should hint at the running daemon, got:\n%s", stderr.String())
+	if !strings.Contains(stderr.String(), "hint: an octo backend is running") {
+		t.Errorf("stderr should hint at the running backend, got:\n%s", stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "`octo serve stop`") {
 		t.Errorf("hint should mention `octo serve stop`, got:\n%s", stderr.String())
