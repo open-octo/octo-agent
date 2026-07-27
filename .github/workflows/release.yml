@@ -20,7 +20,7 @@ jobs:
         with:
           fetch-depth: 0 # full history + tags so goreleaser can build the changelog
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.25'
           cache: true
@@ -69,7 +69,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7 # for packaging/windows/octo.iss + LICENSE.txt
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.25'
           cache-dependency-path: cmd/octo-desktop/go.sum
@@ -194,7 +194,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7 # for packaging/macos/ + LICENSE.txt
 
-      - uses: actions/setup-go@v6 # build.sh builds the desktop app from source
+      - uses: actions/setup-go@v7 # build.sh builds the desktop app from source
         with:
           go-version: '1.25'
           cache-dependency-path: cmd/octo-desktop/go.sum
@@ -274,7 +274,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.25'
           cache-dependency-path: cmd/octo-desktop/go.sum
