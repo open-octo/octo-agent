@@ -25,6 +25,10 @@ octo config                                            # pick a provider, paste 
 octo "Add a --json flag to 'octo config show' and run the tests"   # one prompt → full agentic loop
 ```
 
+<p align="center">
+  <img src="docs/assets/octo-demo-2.gif" alt="Octo dispatching three sub-agents to explore TUI, IM, and Mobile modules in parallel" width="100%">
+</p>
+
 ## Install
 
 - **Linux / macOS** — `curl -fsSL https://octo-agent.dev/install.sh | sh`

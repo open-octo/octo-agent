@@ -24,6 +24,10 @@ octo config                                            # 选 provider，填 key�
 octo "给 octo config show 加一个 --json 参数并跑测试"   # 一句话 → 完整 agentic 工具循环
 ```
 
+<p align="center">
+  <img src="docs/assets/octo-demo-2.gif" alt="Octo 用三个 sub-agent 并行探索 TUI、IM、Mobile 模块" width="100%">
+</p>
+
 ## 安装
 
 - **Linux / macOS** — `curl -fsSL https://octo-agent.dev/install.sh | sh`
