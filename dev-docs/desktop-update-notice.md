@@ -70,19 +70,38 @@ mount the updater would try to write through, so it stays on notify-and-open.
   prompts for the restart that performs the swap.
 - Restart quits the app so the updater's helper (this same binary re-spawned
   with sentinel env vars; intercepted by `updater.HandleHelperMode()` at the
-  top of `main`) can wait for the process to exit, swap, and relaunch. The
-  `ShouldQuit` hook always allows a quit while an update is staged
-  (`app.Updater.State() == StateReady`) — the keep-running-in-background veto
-  would otherwise deadlock the swap.
+  top of `main`) can wait for the process to exit, swap, and relaunch. A
+  listener on `updater.EventUserRestart` flags the bridge so `ShouldQuit`
+  allows that specific quit — the keep-running-in-background veto would
+  otherwise deadlock the swap. Keyed on the user's restart action, not on
+  updater state: a staged-but-deferred update must not quietly disable
+  keep-running-in-background.
+- `startUpdateFlow` is single-flighted across its entry points (tray, toast,
+  web badge), and the download uses a client without a whole-request timeout
+  (`updateHTTPClient`) — the provider default caps the entire body read at
+  30 s, which truncates a ~100 MB artifact on slow links.
 
 ### Trust anchor
 
 Digest-only verification: the sidecar's SHA-256 over GitHub's TLS — the same
-anchor as the CLI's `octo upgrade`. No signing key is configured; when one
-exists (Developer ID / Authenticode effort), `updater.Config.PublicKey` adds
-Ed25519 verification without changing the flow. Because the update is
-downloaded by the app itself (no browser), no quarantine / Mark-of-the-Web is
-attached, so Gatekeeper and SmartScreen do not re-prompt on the swapped app.
+anchor as the CLI's `octo upgrade`. Fail-closed: the stock GitHub provider
+treats a missing sidecar as "nothing to verify", so `verifiedOnly`
+(update.go) wraps it and errors on any release without a digest — an
+unverifiable release falls back to notify-and-open rather than installing on
+TLS alone. No signing key is configured; when one exists (Developer ID /
+Authenticode effort), `updater.Config.PublicKey` adds Ed25519 verification
+without changing the flow. Because the update is downloaded by the app itself
+(no browser), no quarantine / Mark-of-the-Web is attached, so Gatekeeper and
+SmartScreen do not re-prompt on the swapped app.
+
+### Known gap: Windows CLI version drift
+
+The in-place swap replaces `octo-desktop.exe` only. On Windows the Inno
+installer owns the bundled CLI (`ensureBundledOcto` deliberately skips
+Windows), so `octo.exe` stays at the installed version until the user next
+runs an installer — and Programs & Features keeps showing the installer's
+version. macOS has no such drift: the swapped bundle carries the new CLI and
+the app re-seeds `~/.local/bin/octo` on launch.
 
 ## Two upgrade modes
 

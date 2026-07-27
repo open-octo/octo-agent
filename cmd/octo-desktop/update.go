@@ -11,9 +11,13 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
+	"net/http"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/open-octo/octo-agent/internal/upgrade"
 	"github.com/open-octo/octo-agent/internal/version"
@@ -60,6 +64,40 @@ func desktopAssetIndex(assets []ghprovider.ReleaseAsset, want string) int {
 	return -1
 }
 
+// updateHTTPClient replaces the provider's default client, whose 30-second
+// http.Client.Timeout caps the WHOLE request — including streaming the
+// response body — and so truncates a ~100 MB artifact download on any link
+// slower than ~27 Mbps. Timeouts move to the connection phases instead; the
+// body stream is unbounded (the updater window surfaces progress, and a lost
+// connection still fails through the transport).
+func updateHTTPClient() *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.ResponseHeaderTimeout = 30 * time.Second
+	return &http.Client{Transport: tr}
+}
+
+// verifiedOnly wraps a Provider to fail closed when a release carries no
+// digest. The GitHub provider treats a missing checksum sidecar (say the
+// desktop-checksums release job never ran) as "nothing to verify" and the
+// updater would then install on TLS alone — silently weaker than the SHA-256
+// verification this flow promises. An unverifiable release is an error here,
+// which lands on the notify-and-open fallback like any other check failure.
+type verifiedOnly struct {
+	updater.Provider
+}
+
+func (p verifiedOnly) Check(ctx context.Context, req updater.CheckRequest) (*updater.Release, error) {
+	rel, err := p.Provider.Check(ctx, req)
+	if err != nil || rel == nil {
+		return rel, err
+	}
+	if rel.Verification == nil || len(rel.Verification.Digest) == 0 {
+		return nil, fmt.Errorf("release %s carries no digest for %s (missing %s?); refusing an unverified install",
+			rel.Version, rel.Artifact.Filename, desktopChecksumAsset)
+	}
+	return rel, nil
+}
+
 // canInplaceUpdate reports whether this build may replace itself in place:
 // a release build (upgrade.Eligible — a dev build must not be silently
 // replaced by an older release), on a platform whose installed form the
@@ -95,6 +133,7 @@ func initInplaceUpdater(app *application.App) bool {
 	gh, err := ghprovider.New(ghprovider.Config{
 		Repository:    releaseRepo,
 		ChecksumAsset: desktopChecksumAsset,
+		HTTPClient:    updateHTTPClient(),
 		AssetMatcher: func(_ updater.CheckRequest, assets []ghprovider.ReleaseAsset) int {
 			return desktopAssetIndex(assets, asset)
 		},
@@ -105,7 +144,7 @@ func initInplaceUpdater(app *application.App) bool {
 	}
 	if err := app.Updater.Init(updater.Config{
 		CurrentVersion: strings.TrimPrefix(version.Version, "v"),
-		Providers:      []updater.Provider{gh},
+		Providers:      []updater.Provider{verifiedOnly{gh}},
 	}); err != nil {
 		log.Printf("octo-desktop: in-place updater disabled (init): %v", err)
 		return false
@@ -113,21 +152,33 @@ func initInplaceUpdater(app *application.App) bool {
 	return true
 }
 
-// startUpdateFlow routes an update request — the tray's "Update to vX" item or
-// a tap on the update toast — to the in-place updater when this build supports
-// it, else to the download page. Runs on a background goroutine: CheckAndInstall
-// blocks for the whole download.
+// startUpdateFlow routes an update request — the tray's "Update to vX" item,
+// a tap on the update toast, or the web badge's "Update Now" — to the in-place
+// updater when this build supports it, else to the download page. Runs on a
+// background goroutine: CheckAndInstall blocks for the whole download.
+// Single-flighted across those entry points: a second trigger while a flow is
+// running would tear down the first flow's window and then trip over its
+// still-running download — the running flow's window is already the surface.
 func startUpdateFlow(bridge *nativeBridge) {
 	if !bridge.inplaceUpdate.Load() {
 		_ = bridge.OpenExternal(upgrade.DownloadPageURL)
 		return
 	}
+	if !bridge.updateFlowBusy.CompareAndSwap(false, true) {
+		return
+	}
+	defer bridge.updateFlowBusy.Store(false)
 	// CheckAndInstall opens the updater window and walks check → download →
 	// verify → stage; the window then prompts for the restart that performs
 	// the swap. User choices (skip / remind / cancel) are not errors and end
 	// the flow quietly. A genuine failure falls back to the download page —
 	// the user asked for an update, so never leave them at a dead end.
 	if err := bridge.app.Updater.CheckAndInstall(context.Background()); err != nil {
+		if errors.Is(err, updater.ErrDownloadInProgress) {
+			// Belt over the CAS: an earlier flow's download still owns the
+			// updater window; this attempt has nothing to add.
+			return
+		}
 		log.Printf("octo-desktop: in-place update: %v", err)
 		bridge.Notify(L().updTitle, L().updInplaceFailed)
 		_ = bridge.OpenExternal(upgrade.DownloadPageURL)

@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
+	"io"
 	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/wailsapp/wails/v3/pkg/updater"
 	ghprovider "github.com/wailsapp/wails/v3/pkg/updater/providers/github"
 )
 
@@ -53,6 +56,51 @@ func TestDesktopAssetIndex_AbsentAsset(t *testing.T) {
 	cliOnly := releaseAssets[:6]
 	if idx := desktopAssetIndex(cliOnly, desktopAssetName()); idx != -1 {
 		t.Fatalf("desktopAssetIndex on CLI-only assets = %d (%s), want -1", idx, cliOnly[idx].Name)
+	}
+}
+
+// stubProvider returns a canned Check result so verifiedOnly's gate can be
+// exercised without a network.
+type stubProvider struct {
+	rel *updater.Release
+	err error
+}
+
+func (s stubProvider) Name() string { return "stub" }
+func (s stubProvider) Check(context.Context, updater.CheckRequest) (*updater.Release, error) {
+	return s.rel, s.err
+}
+func (s stubProvider) Download(context.Context, *updater.Release, io.Writer, func(int64, int64)) error {
+	return nil
+}
+
+// verifiedOnly must fail closed: a release without a digest (missing or
+// incomplete desktop-checksums.txt) would otherwise install on TLS alone.
+func TestVerifiedOnly_FailsClosedWithoutDigest(t *testing.T) {
+	rel := func(v *updater.Verification) *updater.Release {
+		return &updater.Release{Version: "9.9.9", Artifact: updater.Artifact{Filename: "x.zip"}, Verification: v}
+	}
+	cases := []struct {
+		name   string
+		rel    *updater.Release
+		wantOK bool
+	}{
+		{"digest present", rel(&updater.Verification{DigestAlgo: "sha256", Digest: []byte{0x1}}), true},
+		{"nil verification", rel(nil), false},
+		{"empty digest", rel(&updater.Verification{DigestAlgo: "sha256"}), false},
+	}
+	for _, tc := range cases {
+		got, err := verifiedOnly{stubProvider{rel: tc.rel}}.Check(context.Background(), updater.CheckRequest{})
+		if tc.wantOK && (err != nil || got == nil) {
+			t.Errorf("%s: got (%v, %v), want release through", tc.name, got, err)
+		}
+		if !tc.wantOK && err == nil {
+			t.Errorf("%s: err = nil, want refusal", tc.name)
+		}
+	}
+	// Up-to-date (nil, nil) and provider errors pass through untouched.
+	if got, err := (verifiedOnly{stubProvider{}}).Check(context.Background(), updater.CheckRequest{}); got != nil || err != nil {
+		t.Errorf("up-to-date: got (%v, %v), want (nil, nil)", got, err)
 	}
 }
 

@@ -191,11 +191,13 @@ func main() {
 			if runtime.GOOS == "darwin" {
 				return true
 			}
-			// A staged in-place update restarts by quitting: the updater's
-			// helper waits for this process to exit before swapping the
-			// binary. Vetoing that quit (keep-running-in-background) would
-			// deadlock the update, so always allow it.
-			if bridge.app != nil && bridge.app.Updater.State() == updater.StateReady {
+			// A confirmed update restart quits so the updater's helper (which
+			// waits for this process to exit) can swap the binary. Vetoing
+			// that quit (keep-running-in-background) would deadlock the
+			// update. Keyed on the user's restart action, not on updater
+			// state: a staged-but-deferred update ("remind me later") must
+			// not quietly disable keep-running-in-background.
+			if bridge.updateRestart.Load() {
 				return true
 			}
 			return bridge.allowQuit.Load()
@@ -213,6 +215,14 @@ func main() {
 	// release build — see canInplaceUpdate). The flag routes the tray item and
 	// the update toast through app.Updater instead of the download page.
 	bridge.inplaceUpdate.Store(canInplaceUpdate() && initInplaceUpdater(app))
+
+	// The updater window's Restart action quits the app so the helper can
+	// swap the binary — flag it for ShouldQuit above. Registered here, before
+	// any updater session opens its own (goroutine-spawning) restart handler,
+	// so the flag is set by the time the quit is dispatched.
+	app.Event.On(updater.EventUserRestart, func(*application.CustomEvent) {
+		bridge.updateRestart.Store(true)
+	})
 
 	// Interacting with the "update available" toast starts the update flow;
 	// session notifications focus and route to the relevant session; every other

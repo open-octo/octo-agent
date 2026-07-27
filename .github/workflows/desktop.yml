@@ -103,6 +103,13 @@ jobs:
         working-directory: cmd/octo-desktop
         run: go vet ./...
 
+      # The nested module's tests don't run in the root `go test ./...` (the
+      # parent skips this directory), so run them here — they guard, among
+      # other things, the release-asset names the in-place updater matches.
+      - name: go test
+        working-directory: cmd/octo-desktop
+        run: go test ./...
+
       - name: Build + package macOS Octo.app
         if: runner.os == 'macOS'
         run: bash scripts/package-desktop-macos.sh

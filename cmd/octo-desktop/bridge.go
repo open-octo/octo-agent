@@ -65,6 +65,17 @@ type nativeBridge struct {
 	// event loop starts; atomic because tray/notification callbacks read it
 	// from other goroutines.
 	inplaceUpdate atomic.Bool
+	// updateFlowBusy single-flights startUpdateFlow across its entry points
+	// (tray item, toast tap, web badge): a second concurrent CheckAndInstall
+	// would tear down the running flow's window and misreport
+	// ErrDownloadInProgress as a failure.
+	updateFlowBusy atomic.Bool
+	// updateRestart is set when the user confirms the updater window's
+	// restart: the quit that follows must never be vetoed (the updater's
+	// helper waits for this process to exit before swapping the binary, so a
+	// veto deadlocks the update). Sticky by design — it flips only on the
+	// restart hand-off, after which the process is exiting anyway.
+	updateRestart atomic.Bool
 	// tray is the system-tray handle, stored so an update check can refresh the
 	// menu immediately rather than waiting for refreshTrayLoop's next tick.
 	tray atomic.Pointer[application.SystemTray]

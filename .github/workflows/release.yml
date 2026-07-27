@@ -331,12 +331,22 @@ jobs:
   # Publish desktop-checksums.txt covering the desktop artifacts the jobs above
   # attached. goreleaser's checksums.txt only covers its own (CLI) assets; the
   # desktop app's in-place updater fetches this sidecar to verify the artifact
-  # it downloads before swapping itself. One aggregate job (rather than each
-  # job appending) because concurrent uploads of the same asset would clobber
-  # each other.
+  # it downloads before swapping itself — and refuses to install an artifact
+  # the sidecar doesn't cover, so this job missing means in-place updates fall
+  # back to the download page for the whole release. One aggregate job (rather
+  # than each job appending) because concurrent uploads of the same asset would
+  # clobber each other.
+  #
+  # Ops note: re-running a packaging job re-uploads its artifact with new bytes
+  # — re-run this job afterwards too, or the stale digests will fail-close
+  # every in-place update against the release.
   desktop-checksums:
     name: desktop checksums
     needs: [windows-installer, macos-installer, linux-appimage]
+    # Run as long as the swappable (mac/win) artifacts exist: the AppImage
+    # never in-place updates, so a failed linux leg must not take the sidecar
+    # — and with it every mac/win in-place update — down with it.
+    if: ${{ !cancelled() && needs.windows-installer.result == 'success' && needs.macos-installer.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checksum desktop release assets
@@ -347,8 +357,11 @@ jobs:
           mkdir -p assets && cd assets
           gh release download "$GITHUB_REF_NAME" \
             --pattern 'Octo-darwin-universal.zip' \
-            --pattern 'octo-desktop-windows-*.exe' \
-            --pattern 'Octo-*.AppImage'
+            --pattern 'octo-desktop-windows-*.exe'
+          # AppImage sums are informational (no in-place update on Linux);
+          # don't fail the sidecar when the linux leg produced no assets.
+          gh release download "$GITHUB_REF_NAME" --pattern 'Octo-*.AppImage' \
+            || echo "AppImages absent; sums cover mac/win only"
           sha256sum * > ../desktop-checksums.txt
           cd ..
           cat desktop-checksums.txt
