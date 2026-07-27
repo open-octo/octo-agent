@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -147,8 +148,13 @@ func TestDefaultRegistry_Execute(t *testing.T) {
 // ─── ExecuteStream tests ────────────────────────────────────────────────────
 
 func TestTerminalTool_ExecuteStream_LineByLine(t *testing.T) {
+	var mu sync.Mutex
 	var got []string
-	progress := func(line string) { got = append(got, line) }
+	progress := func(line string) {
+		mu.Lock()
+		got = append(got, line)
+		mu.Unlock()
+	}
 
 	result, err := TerminalTool{}.ExecuteStream(context.Background(), "terminal", map[string]any{
 		"command": "echo line1 && echo line2 && echo line3",
@@ -157,12 +163,18 @@ func TestTerminalTool_ExecuteStream_LineByLine(t *testing.T) {
 		t.Fatalf("ExecuteStream: %v", err)
 	}
 
-	if len(got) != 3 {
-		t.Errorf("expected 3 progress callbacks, got %d: %v", len(got), got)
+	mu.Lock()
+	n := len(got)
+	g := make([]string, len(got))
+	copy(g, got)
+	mu.Unlock()
+
+	if n != 3 {
+		t.Errorf("expected 3 progress callbacks, got %d: %v", n, g)
 	}
 	for i, want := range []string{"line1", "line2", "line3"} {
-		if i < len(got) && got[i] != want {
-			t.Errorf("got[%d] = %q, want %q", i, got[i], want)
+		if i < n && g[i] != want {
+			t.Errorf("got[%d] = %q, want %q", i, g[i], want)
 		}
 	}
 	if result.Text != "line1\nline2\nline3" {
@@ -171,8 +183,13 @@ func TestTerminalTool_ExecuteStream_LineByLine(t *testing.T) {
 }
 
 func TestTerminalTool_ExecuteStream_MergedStdoutAndStderr(t *testing.T) {
+	var mu sync.Mutex
 	var got []string
-	progress := func(line string) { got = append(got, line) }
+	progress := func(line string) {
+		mu.Lock()
+		got = append(got, line)
+		mu.Unlock()
+	}
 
 	// Write to stdout AND stderr; both should reach progress in the order
 	// the shell flushes them. (sh tends to be unbuffered enough for this
@@ -184,7 +201,9 @@ func TestTerminalTool_ExecuteStream_MergedStdoutAndStderr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteStream: %v", err)
 	}
+	mu.Lock()
 	joined := strings.Join(got, "|")
+	mu.Unlock()
 	if !strings.Contains(joined, "from-stdout") || !strings.Contains(joined, "from-stderr") {
 		t.Errorf("both streams should reach progress; got: %s", joined)
 	}

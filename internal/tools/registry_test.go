@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -64,8 +65,13 @@ func TestDefaultRegistry_RoutesByName(t *testing.T) {
 // DefaultRegistry.ExecuteStream forwarding to it, EventToolProgress never
 // fires for any tool.
 func TestDefaultRegistry_ExecuteStream_StreamsTerminalOutput(t *testing.T) {
+	var mu sync.Mutex
 	var got []string
-	progress := func(chunk string) { got = append(got, chunk) }
+	progress := func(chunk string) {
+		mu.Lock()
+		got = append(got, chunk)
+		mu.Unlock()
+	}
 
 	result, err := DefaultRegistry{}.ExecuteStream(context.Background(), "terminal", map[string]any{
 		"command": "echo line1 && echo line2",
@@ -73,8 +79,13 @@ func TestDefaultRegistry_ExecuteStream_StreamsTerminalOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteStream: %v", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("expected 2 progress chunks routed through the registry, got %d: %v", len(got), got)
+	mu.Lock()
+	n := len(got)
+	g := make([]string, n)
+	copy(g, got)
+	mu.Unlock()
+	if n != 2 {
+		t.Fatalf("expected 2 progress chunks routed through the registry, got %d: %v", n, g)
 	}
 	if !strings.Contains(result.Text, "line1") || !strings.Contains(result.Text, "line2") {
 		t.Errorf("aggregated result = %q", result.Text)
