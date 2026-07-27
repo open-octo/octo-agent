@@ -105,6 +105,38 @@ func TestVersionUpgradeMode(t *testing.T) {
 	}
 }
 
+// TestVersionSelfUpdateFlag: /api/version reports self_update from the
+// bridge's CanSelfUpdate, so the badge only offers "Update Now" on desktop
+// builds that can actually swap themselves (false on a plain serve build,
+// which has no bridge at all).
+func TestVersionSelfUpdateFlag(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	get := func(srv *Server) bool {
+		req := httptest.NewRequest(http.MethodGet, "/api/version", nil)
+		w := httptest.NewRecorder()
+		serveLoopback(srv.mux, w, req)
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		v, _ := body["self_update"].(bool)
+		return v
+	}
+
+	if get(mustServer(t, Config{Addr: "127.0.0.1:0"})) {
+		t.Error("serve build: self_update = true, want false")
+	}
+	if get(mustServer(t, Config{Addr: "127.0.0.1:0", Native: &fakeNative{}})) {
+		t.Error("desktop build without in-place support: self_update = true, want false")
+	}
+	if !get(mustServer(t, Config{Addr: "127.0.0.1:0", Native: &fakeNative{canSelfUpdate: true}})) {
+		t.Error("desktop build with in-place support: self_update = false, want true")
+	}
+}
+
 // TestVersionUpgradeRefusedInInstallerMode: the in-place swap endpoint refuses
 // with 409 when a NativeBridge is wired, so a remote peer can't drive a desktop
 // binary swap.

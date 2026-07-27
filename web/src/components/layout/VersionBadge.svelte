@@ -25,8 +25,11 @@
   // upgradeMode is 'cli' (octo serve — the in-place swap below is valid) or
   // 'installer' (desktop build — a swap would clobber the running binary, so we
   // link to the download page instead). downloadUrl is that download page.
+  // selfUpdateAvail: the desktop build can swap itself (its native updater
+  // window), so a loopback badge offers "Update Now" before the download link.
   let upgradeMode = $state<'cli' | 'installer'>('cli')
   let downloadUrl = $state('')
+  let selfUpdateAvail = $state(false)
   let phase = $state<Phase>('idle')
   let logLines = $state<string[]>([])
   let open = $state(false)
@@ -52,6 +55,7 @@
       if (d.cli_command) cliCommand = d.cli_command
       upgradeMode = d.upgrade_mode === 'installer' ? 'installer' : 'cli'
       downloadUrl = d.download_url ?? ''
+      selfUpdateAvail = d.self_update === true
       nativeShell.set(d.native === true && isDesktopShell)
       localAccess.set(d.local === true)
     } catch { /* badge stays minimal */ }
@@ -68,6 +72,14 @@
     }
     window.open(downloadUrl, '_blank', 'noopener')
     open = false
+  }
+
+  // Installer mode + a self-updating desktop build + a loopback peer: hand off
+  // to the native updater window (download → verify → restart happen there, so
+  // no phase machinery here). Any failure to start falls back to the download
+  // page — the user asked for an update, never leave them at a dead end.
+  async function startSelfUpdate() {
+    try { await api.selfUpdate(); open = false } catch { await downloadUpdate() }
   }
 
   onMount(() => {
@@ -166,7 +178,9 @@
         <p class="vb-desc">{$t('upgrade.desc')}</p>
         <p class="vb-versions">v{current} <span class="vb-arrow">→</span> v{latest}</p>
         <div class="vb-actions">
-          {#if upgradeMode === 'installer'}
+          {#if upgradeMode === 'installer' && selfUpdateAvail && $localAccess}
+            <button class="vb-btn-primary" onclick={startSelfUpdate}>{$t('upgrade.btn.selfupdate')}</button>
+          {:else if upgradeMode === 'installer'}
             <button class="vb-btn-primary" onclick={downloadUpdate}>{$t('upgrade.btn.download')}</button>
           {:else}
             <button class="vb-btn-primary" onclick={startUpgrade}>{$t('upgrade.btn.upgrade')}</button>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,6 +30,9 @@ type fakeNative struct {
 	gotSaveName        string
 	gotSaveContent     string
 	saveCalls          int
+	canSelfUpdate      bool
+	selfUpdateCalls    int
+	selfUpdateErr      error
 }
 
 func (f *fakeNative) PickFolder(_ context.Context, startDir string) (string, bool, error) {
@@ -63,6 +67,11 @@ func (f *fakeNative) SaveFile(_ context.Context, defaultName, content string) (s
 	f.saveCalls++
 	f.gotSaveName, f.gotSaveContent = defaultName, content
 	return f.retPath, f.retCancel, nil
+}
+func (f *fakeNative) CanSelfUpdate() bool { return f.canSelfUpdate }
+func (f *fakeNative) SelfUpdate() error {
+	f.selfUpdateCalls++
+	return f.selfUpdateErr
 }
 
 func TestNativePickFolderNotRegisteredWithoutBridge(t *testing.T) {
@@ -403,6 +412,62 @@ func TestNativeOpenExternalNotRegisteredWithoutBridge(t *testing.T) {
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("without a bridge the route must not exist: got %d, want 404", w.Code)
+	}
+}
+
+func TestNativeSelfUpdateDelegatesToBridge(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	fake := &fakeNative{canSelfUpdate: true}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/self-update", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	if fake.selfUpdateCalls != 1 {
+		t.Errorf("bridge.SelfUpdate calls = %d, want 1", fake.selfUpdateCalls)
+	}
+}
+
+func TestNativeSelfUpdateReportsBridgeRefusal(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	fake := &fakeNative{selfUpdateErr: errors.New("this build updates through its installer")}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/self-update", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("got %d, want 409 (%s)", w.Code, w.Body.String())
+	}
+}
+
+func TestNativeSelfUpdateRejectsNonLoopback(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	fake := &fakeNative{canSelfUpdate: true}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/self-update", nil)
+	req.RemoteAddr = "203.0.113.5:1000" // non-loopback
+	req.Host = "127.0.0.1:8080"
+	req.Header.Set("Authorization", "Bearer "+srv.AccessKey())
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("non-loopback peer: got %d, want 403", w.Code)
+	}
+	if fake.selfUpdateCalls != 0 {
+		t.Errorf("bridge must not be called for a non-loopback peer (calls=%d)", fake.selfUpdateCalls)
 	}
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -497,6 +498,20 @@ func (b *nativeBridge) showError(title, message string) {
 // runtime's own browser API isn't reachable here because the page is
 // octo-served, not served off Wails' asset server (same reason ExecJS is dead
 // in showWindowAt).
+// CanSelfUpdate / SelfUpdate back the web badge's "Update Now" action
+// (POST /api/native/self-update): available only when this build swaps itself
+// in place (see canInplaceUpdate). SelfUpdate hands off to the same flow the
+// tray and toast use — the native updater window takes over from here.
+func (b *nativeBridge) CanSelfUpdate() bool { return b.inplaceUpdate.Load() }
+
+func (b *nativeBridge) SelfUpdate() error {
+	if !b.inplaceUpdate.Load() {
+		return errors.New("this build updates through its installer; use the download link")
+	}
+	go startUpdateFlow(b)
+	return nil
+}
+
 func (b *nativeBridge) OpenExternal(url string) error {
 	switch runtime.GOOS {
 	case "darwin":

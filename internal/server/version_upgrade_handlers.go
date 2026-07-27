@@ -60,6 +60,11 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		// site's per-platform installer buttons, not the raw releases listing — so
 		// the frontend needn't hardcode it. Constant; this endpoint is unauthenticated.
 		"download_url": upgrade.DownloadPageURL,
+		// self_update: the desktop build can swap itself in place (POST
+		// /api/native/self-update), so a loopback badge may offer "Update Now"
+		// instead of only the download link. Remote peers still get the link —
+		// the native route refuses them regardless.
+		"self_update": s.cfg.Native != nil && s.cfg.Native.CanSelfUpdate(),
 	})
 }
 

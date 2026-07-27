@@ -67,6 +67,18 @@ type NativeBridge interface {
 	// the octo-served webview can't trigger an in-page blob download, so the
 	// desktop shell writes the file through a native dialog instead.
 	SaveFile(ctx context.Context, defaultName, content string) (path string, cancelled bool, err error)
+
+	// CanSelfUpdate reports whether the desktop build can replace itself in
+	// place (bundled release build on a swappable platform). Surfaced to the
+	// frontend as /api/version's self_update flag so the update badge knows
+	// whether "Update Now" is on the table or only the download link.
+	CanSelfUpdate() bool
+
+	// SelfUpdate starts the desktop shell's in-place update flow — its native
+	// updater window walks download → verify → restart. The error reports only
+	// whether the flow could start; progress and the install decision live in
+	// the native UI. Fails when CanSelfUpdate is false.
+	SelfUpdate() error
 }
 
 type nativePickFolderRequest struct {
@@ -317,6 +329,26 @@ func (s *Server) handleNativeOpenExternal(w http.ResponseWriter, r *http.Request
 	}
 	if err := s.cfg.Native.OpenExternal(req.URL); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleNativeSelfUpdate starts the desktop shell's in-place update flow (the
+// native updater window takes over from here). Loopback-only like the other
+// native routes: a remote peer must not drive the desktop host's update — the
+// badge sends remote users to the download page instead.
+func (s *Server) handleNativeSelfUpdate(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRemote(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+	if err := s.cfg.Native.SelfUpdate(); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

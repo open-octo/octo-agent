@@ -205,11 +205,16 @@ build installs in place, "Open Download Page" otherwise). Strings live in
 - `upgrade_mode === 'cli'`: unchanged — the existing upgrade→restart state
   machine.
 - `upgrade_mode === 'installer'`: when `needsUpdate`, the popover shows the new
-  release version and a **"Download update"** button instead of "Upgrade".
-  The button opens the download page:
-  - `localAccess` true (loopback — the desktop window itself, or a localhost
-    browser) → `POST /api/native/open-external { url: release_url }`.
-  - otherwise (remote browser) → `window.open(release_url, '_blank')`.
+  release version and one primary action:
+  - `self_update` true (the desktop build swaps itself — the bridge's
+    `CanSelfUpdate`) **and** `localAccess` true → an **"Update Now"** button
+    that `POST /api/native/self-update`s; the native updater window takes over
+    (so the badge has no phase machinery for it). Failure to start falls back
+    to the download page.
+  - otherwise a **"Download update"** button that opens the download page:
+    `localAccess` true (loopback — the desktop window itself, or a localhost
+    browser) → `POST /api/native/open-external { url: release_url }`;
+    otherwise (remote browser) → `window.open(release_url, '_blank')`.
 
 The `upgrading` / `needs_restart` / `reconnecting` phases are never entered in
 installer mode.

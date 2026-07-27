@@ -311,6 +311,14 @@ export async function openExternal(url: string): Promise<void> {
   })
 }
 
+// Desktop shell only: start the in-place update flow — the native updater
+// window takes over (download → verify → restart). Available when /api/version
+// reports self_update:true and the caller is loopback; the badge falls back to
+// the download page on failure.
+export async function selfUpdate(): Promise<void> {
+  await request<{ ok: boolean }>('/api/native/self-update', { method: 'POST' })
+}
+
 // Desktop shell only: launch-at-login state.
 export async function getAutostart(): Promise<boolean> {
   const r = await request<{ enabled: boolean }>('/api/native/autostart')
