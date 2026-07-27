@@ -16,7 +16,7 @@ jobs:
     name: goreleaser
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # full history + tags so goreleaser can build the changelog
 
@@ -67,7 +67,7 @@ jobs:
           - { arch: amd64, uvarch: x86_64,  archallowed: x64compatible, out: octo-setup }
           - { arch: arm64, uvarch: aarch64, archallowed: arm64,         out: octo-setup-arm64 }
     steps:
-      - uses: actions/checkout@v5 # for packaging/windows/octo.iss + LICENSE.txt
+      - uses: actions/checkout@v7 # for packaging/windows/octo.iss + LICENSE.txt
 
       - uses: actions/setup-go@v6
         with:
@@ -192,7 +192,7 @@ jobs:
     needs: goreleaser
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v5 # for packaging/macos/ + LICENSE.txt
+      - uses: actions/checkout@v7 # for packaging/macos/ + LICENSE.txt
 
       - uses: actions/setup-go@v6 # build.sh builds the desktop app from source
         with:
@@ -272,7 +272,7 @@ jobs:
           - { runner: ubuntu-latest,    arch: amd64, apparch: x86_64,  uvarch: x86_64 }
           - { runner: ubuntu-24.04-arm, arch: arm64, apparch: aarch64, uvarch: aarch64 }
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v6
         with:

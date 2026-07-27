@@ -66,7 +66,7 @@ jobs:
           - { os: windows-latest,   label: windows-amd64, goarch: amd64 }
           - { os: windows-latest,   label: windows-arm64, goarch: arm64 }
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # package-desktop-macos.sh derives the version from `git describe`;
           # fetch tags so it isn't just the short SHA.
