@@ -983,3 +983,66 @@ func TestUnsetEndpointLite_DifferentEndpointHoldsLite_IsNoOp(t *testing.T) {
 		t.Errorf("lite = %q, want ep-b::claude-haiku-4-5 (unchanged)", cfg.Lite)
 	}
 }
+
+// TestPutReasoningEffort_Off_PersistsEmptyAndDisablesShowReasoning pins the
+// global PUT to the same "off is a wire sentinel" contract as the per-session
+// PATCH: persist "" (a stored literal "off" reads as thinking-ON at the
+// provider layer) and drop show_reasoning, which has nothing to show.
+func TestPutReasoningEffort_Off_PersistsEmptyAndDisablesShowReasoning(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPut, "/api/config/reasoning_effort", `{"reasoning_effort":"off"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT /api/config/reasoning_effort = %d: %s", w.Code, w.Body.String())
+	}
+	// The response echoes the wire sentinel, not the stored "".
+	var resp struct {
+		ReasoningEffort string `json:"reasoning_effort"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.ReasoningEffort != "off" {
+		t.Errorf("response reasoning_effort = %q, want \"off\"", resp.ReasoningEffort)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReasoningEffort != "" {
+		t.Errorf("config.ReasoningEffort = %q, want \"\" (off persists as empty)", cfg.ReasoningEffort)
+	}
+	if cfg.ShowReasoning == nil || *cfg.ShowReasoning {
+		t.Errorf("config.ShowReasoning = %v, want false when reasoning is off", cfg.ShowReasoning)
+	}
+
+	// The broadcast/status surface applies the same sentinel: "" must never
+	// reach session_update consumers (ChatView drops empty-string updates).
+	if _, _, re, _, _ := srv.sessionStatusFields(nil); re != "off" {
+		t.Errorf("sessionStatusFields reasoning_effort = %q, want \"off\"", re)
+	}
+}
+
+// TestGetConfig_ReasoningEffortOffSentinel: "" (the stored form of off) must
+// surface as "off" on the wire — through omitempty the field used to vanish,
+// and the frontend defaulted an absent value to "medium".
+func TestGetConfig_ReasoningEffortOffSentinel(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodGet, "/api/config", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/config = %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		ReasoningEffort string `json:"reasoning_effort"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.ReasoningEffort != "off" {
+		t.Errorf("reasoning_effort = %q, want \"off\"", resp.ReasoningEffort)
+	}
+}

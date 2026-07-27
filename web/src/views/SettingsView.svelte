@@ -29,7 +29,7 @@
   let tunnelPairing = $state<api.TunnelPairing | null>(null)
 
   // ── Agent defaults (display-only, configured through conversation) ──────────
-  let reasoningEffort  = $state('medium')
+  let reasoningEffort  = $state('off')
   let permissionMode   = $state('interactive')
   let showReasoningVal = $state(true)
   let coauthorVal      = $state(true)
@@ -43,9 +43,9 @@
   // ── helpers ─────────────────────────────────────────────────────────────────
   function effortLabel(effort: string): string {
     const labels: Record<string, string> = {
-      low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Xhigh', max: 'Max',
+      off: 'Off', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Xhigh', max: 'Max',
     }
-    return labels[effort.toLowerCase()] ?? 'Medium'
+    return labels[effort.toLowerCase()] ?? 'Off'
   }
 
   function permissionLabel(mode: string): string {
@@ -76,7 +76,8 @@
     loading = true
     try {
       const cfg = await api.getConfig() as any
-      reasoningEffort  = cfg.reasoning_effort ?? 'medium'
+      // Absent = old server dropping "" through omitempty = reasoning off.
+      reasoningEffort  = cfg.reasoning_effort ?? 'off'
       permissionMode   = cfg.permission_mode ?? 'interactive'
       showReasoningVal = cfg.show_reasoning ?? true
       coauthorVal      = cfg.coauthor ?? true

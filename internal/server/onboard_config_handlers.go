@@ -225,13 +225,21 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	// commits actually get. Report the resolved value the Settings toggle is
 	// meant to reflect, not the on-disk-only one.
 	effCoauthor := cfg.EffectiveCoauthor()
+	// The stored form of disabled reasoning is "" — but serialized through
+	// the omitempty tag that drops the field entirely, and the frontend
+	// defaults an absent value to "medium" (SettingsView). Send the wire
+	// sentinel "off" so off actually reads as off.
+	re := cfg.ReasoningEffort
+	if re == "" {
+		re = "off"
+	}
 	writeJSON(w, http.StatusOK, configResponse{
 		FontSize:        "medium",
 		Language:        cfg.Language,
 		ShowReasoning:   cfg.ShowReasoning,
 		Coauthor:        &effCoauthor,
 		WorkspaceDir:    cfg.WorkspaceDir,
-		ReasoningEffort: cfg.ReasoningEffort,
+		ReasoningEffort: re,
 		PermissionMode:  cfg.PermissionMode,
 	})
 }
@@ -510,7 +518,19 @@ func (s *Server) handlePutReasoningEffort(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	cfg.ReasoningEffort = level
+	// "off" is only ever a wire/UI sentinel — persist "" (matching
+	// handleUpdateSessionReasoningEffort): the provider layer treats any
+	// non-empty effort as thinking-ON, so a stored literal "off" would
+	// actually enable reasoning. With reasoning off there is also nothing to
+	// trace, so drop show_reasoning too instead of leaving a toggle that
+	// looks on but does nothing.
+	if level == "off" {
+		cfg.ReasoningEffort = ""
+		off := false
+		cfg.ShowReasoning = &off
+	} else {
+		cfg.ReasoningEffort = level
+	}
 	if err := cfg.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
 		return

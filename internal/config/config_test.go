@@ -1635,3 +1635,19 @@ func TestMutate_FnErrorAbortsSave(t *testing.T) {
 		t.Errorf("PermissionMode = %q, want strict (fn aborted, save must not have happened)", final.PermissionMode)
 	}
 }
+
+// TestLoad_NormalizesLegacyOffReasoningEffort: files written by the pre-fix
+// global PUT handler carry the literal "off", which the provider layer would
+// treat as thinking-ON (any non-empty effort enables). Load must map it to
+// "", the canonical stored form of disabled reasoning.
+func TestLoad_NormalizesLegacyOffReasoningEffort(t *testing.T) {
+	home := setHome(t)
+	writeOcto(t, home, "config.yml", "reasoning_effort: off\n")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReasoningEffort != "" {
+		t.Errorf("ReasoningEffort = %q, want \"\" (normalized from legacy \"off\")", cfg.ReasoningEffort)
+	}
+}

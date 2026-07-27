@@ -528,11 +528,13 @@
   // to the session record, then to sensible defaults.
   let modelName = $derived($chatModel[sid] || currentSession?.model || currentSession?.model_id || '—')
   // "" (off) is a legitimate resolved value, not "no data yet" — only fall
-  // back to the 'medium' bootstrap default when neither source has reported
-  // anything at all (?? only skips null/undefined, not "").
+  // back to the bootstrap default when neither source has reported anything
+  // at all (?? only skips null/undefined, not ""). That default is 'off':
+  // an absent reasoning_effort in config means reasoning disabled, so
+  // claiming 'medium' before data arrives misreports the real state.
   let reasoning = $derived.by(() => {
     const v = $chatReasoningEffort[sid] ?? currentSession?.reasoning_effort
-    return v === undefined ? 'medium' : (v || 'off')
+    return v === undefined ? 'off' : (v || 'off')
   })
   let workingDir = $derived($chatWorkingDir[sid] || currentSession?.working_dir || '')
   let permMode = $derived($chatPermMode[sid] || currentSession?.permission_mode || $globalPermissionMode)

@@ -197,7 +197,7 @@ export interface WsSessionInfo {
   total_turns: number
   working_dir: string
   permission_mode: 'interactive' | 'auto' | 'strict'
-  reasoning_effort: 'low' | 'medium' | 'high'
+  reasoning_effort: 'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | string
   show_reasoning?: boolean
   context_usage: number
   pending_question?: boolean
@@ -276,7 +276,7 @@ export interface WsEventSessionUpdate {
   context_usage: number
   working_dir: string
   permission_mode: 'interactive' | 'auto' | 'strict'
-  reasoning_effort: 'low' | 'medium' | 'high'
+  reasoning_effort: 'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | string
   show_reasoning: boolean
 }
 

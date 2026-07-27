@@ -184,7 +184,7 @@ en:
 > - **max** — maximum reasoning
 
 Store as `prefs.reasoning_effort` (default `""`). If the user picks `"off"`, store as `""`. If the user gives an invalid value, silently fall back to `""`.
-If `prefs.reasoning_effort` is `""` (off), **skip** the **Show reasoning trace** question below — there is no reasoning output to show.
+If `prefs.reasoning_effort` is `""` (off), **skip** the **Show reasoning trace** question below — there is no reasoning output to show — and set `prefs.show_reasoning` to `false`.
 
 **Show reasoning trace** — whether to stream the model's thinking chain to the terminal.
 
@@ -284,10 +284,10 @@ Read `~/.octo/config.yml` (it already exists — the setup panel wrote provider/
 Use `write_file` to rewrite it with the behaviour-preference fields appended:
 
 - `permission_mode` — `prefs.permission_mode` (or omit if default `"interactive"`)
-- `show_reasoning` — `prefs.show_reasoning` boolean (or omit if default `true`)
-- `reasoning_effort` — `prefs.reasoning_effort` (or omit if empty)
+- `show_reasoning` — `prefs.show_reasoning` boolean (or omit if default `true`; when reasoning is off this is `false`, so it IS written)
+- `reasoning_effort` — `prefs.reasoning_effort`. **If empty (the user chose off), do not just omit it: also DELETE any `reasoning_effort:` line already in the file.** A stale value (e.g. `reasoning_effort: medium` from an earlier setup) left in place would silently keep reasoning on — this is the one exception to the preserve-everything rule below.
 
-Preserve every existing field (provider, model, base_url, api_key, etc.). Do NOT change or remove anything already in the file. Only add the three new keys.
+Preserve every existing field (provider, model, base_url, api_key, etc.). Do NOT change or remove anything already in the file — except a stale `reasoning_effort` when the user chose off, per above. Only add/adjust the three keys.
 
 Example diff:
 ```yaml

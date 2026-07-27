@@ -527,6 +527,8 @@ func (c Config) Validate() []string {
 		pm != "interactive" && pm != "auto" && pm != "strict" {
 		problems = append(problems, fmt.Sprintf("permission_mode %q is not one of interactive, auto, strict", c.PermissionMode))
 	}
+	// "off" stays accepted here for Configs constructed in memory; anything
+	// arriving through Load never carries it (normalize maps it to "").
 	if re := strings.ToLower(strings.TrimSpace(c.ReasoningEffort)); re != "" &&
 		re != "off" && re != "low" && re != "medium" && re != "high" && re != "xhigh" && re != "max" {
 		problems = append(problems, fmt.Sprintf("reasoning_effort %q is not one of off, low, medium, high, xhigh, max", c.ReasoningEffort))
@@ -970,6 +972,13 @@ type fileConfig struct {
 // shape.
 func (f fileConfig) normalize() Config {
 	c := f.Config
+	// "off" is only ever a wire/UI sentinel; the canonical stored form of
+	// disabled reasoning is "". Files written by the pre-fix global PUT (or
+	// by hand) can carry the literal, which the provider layer would treat
+	// as thinking-ON (any non-empty effort enables) — normalize it away.
+	if strings.EqualFold(c.ReasoningEffort, "off") {
+		c.ReasoningEffort = ""
+	}
 	if len(c.Endpoints) > 0 {
 		// Already on the new schema — Endpoints/Default/Lite are authoritative.
 		// Migrate any provider aliases on legacy Models (now only in

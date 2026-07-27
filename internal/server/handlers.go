@@ -198,6 +198,11 @@ func (srv *Server) sessionStatusFields(sess *agent.Session) (workingDir, permiss
 	}
 	if cfg, err := config.Load(); err == nil {
 		reasoningEffort = cfg.ReasoningEffort
+		if reasoningEffort == "" {
+			// Wire sentinel: "" is the stored form of off, but session_update
+			// consumers guard on non-empty strings (ChatView) — send "off".
+			reasoningEffort = "off"
+		}
 		eff := cfg.EffectiveShowReasoning(nil)
 		showReasoning = &eff
 	}
