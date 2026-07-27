@@ -56,12 +56,31 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	// Reject any positional argument: serve takes flags only, and a bare
-	// value like ":19099" silently falls into fs.Args() (defaulting --addr to
-	// 127.0.0.1:8088) — see issue #1614. Point the user at the flag form
-	// explicitly instead of letting the wrong port start quietly.
+	// Daemon-control subcommands: `octo serve stop|status` is what users
+	// reach for first (issue #1842), so accept it alongside --stop/--status.
+	// Any other positional argument is rejected: serve takes flags only, and
+	// a bare value like ":19099" silently falls into fs.Args() (defaulting
+	// --addr to 127.0.0.1:8088) — see issue #1614.
 	if rest := fs.Args(); len(rest) > 0 {
-		fmt.Fprintf(stderr, "octo serve: unexpected positional argument(s) %q — use flags for every option (e.g. `octo serve -addr %s -d`)\n", rest, rest[0])
+		switch rest[0] {
+		case "stop", "status":
+			if len(rest) > 1 {
+				fmt.Fprintf(stderr, "octo serve %s: unexpected extra argument(s) %q\n", rest[0], rest[1:])
+				return 2
+			}
+			if rest[0] == "stop" {
+				return stopDaemon(stdout, stderr)
+			}
+			return statusDaemon(stdout, stderr)
+		}
+		// Only echo the value back in the -addr example when it plausibly is
+		// one — substituting an arbitrary word (say, "restart") produces a
+		// nonsense suggestion like `octo serve -addr restart -d`.
+		example := "`octo serve -addr :8088 -d`"
+		if strings.Contains(rest[0], ":") {
+			example = fmt.Sprintf("`octo serve -addr %s -d`", rest[0])
+		}
+		fmt.Fprintf(stderr, "octo serve: unexpected positional argument(s) %q — use flags for every option (e.g. %s); daemon control is `octo serve stop` / `octo serve status`\n", rest, example)
 		return 2
 	}
 	if *stop {

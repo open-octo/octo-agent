@@ -142,6 +142,9 @@ Examples:
   octo serve --addr 127.0.0.1:3000     Bind to a specific address
   octo serve --no-channel              Skip IM platform bridges
   octo serve --no-tools                Disable the agentic tool loop
+  octo serve -d                        Run in the background (daemon)
+  octo serve status                    Show daemon status
+  octo serve stop                      Stop the background daemon
 
 Common flags:
   --addr <host:port>       Bind address (default :8088)
