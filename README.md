@@ -174,6 +174,16 @@ Codex 的 record & replay 只在 macOS 应用里提供，octo 的浏览器录制
 - [配置](https://octo-agent.dev/docs/zh/reference/config-file/) · [权限](https://octo-agent.dev/docs/zh/reference/permissions/) · [工具](https://octo-agent.dev/docs/zh/reference/tools/)
 - [架构](https://octo-agent.dev/docs/zh/architecture/system-layers/) —— 分层设计、provider 协议、如何扩展
 
+## 社区与交流
+
+- **Bug / 功能建议** —— [GitHub Issues](https://github.com/open-octo/octo-agent/issues)
+- **使用问题 / 讨论** —— [GitHub Discussions](https://github.com/open-octo/octo-agent/discussions)，公开可沉淀，后来的同学能搜到答案
+- **微信交流群** —— 扫码进群，聊使用心得、提需求、围观 roadmap（企业微信活码，长期有效，满员自动开新群）：
+
+<p align="left">
+  <img src="docs/assets/wechat-group-qr.png" alt="octo-agent 微信交流群二维码" width="200">
+</p>
+
 ## 开发
 
 ```bash

@@ -168,6 +168,16 @@ The full documentation lives at **[octo-agent.dev/docs](https://octo-agent.dev/d
 - [Configuration](https://octo-agent.dev/docs/reference/config-file/) · [Permissions](https://octo-agent.dev/docs/reference/permissions/) · [Tools](https://octo-agent.dev/docs/reference/tools/)
 - [Architecture](https://octo-agent.dev/docs/architecture/system-layers/) — the layered design, provider protocols, and how to extend it
 
+## Community
+
+- **Bugs / feature requests** — [GitHub Issues](https://github.com/open-octo/octo-agent/issues)
+- **Questions / discussion** — [GitHub Discussions](https://github.com/open-octo/octo-agent/discussions), public and searchable so the next person finds the answer
+- **WeChat group** (Chinese-speaking users) — scan to join the user group; the QR code is a WeCom live code, valid long-term:
+
+<p align="left">
+  <img src="docs/assets/wechat-group-qr.png" alt="octo-agent WeChat group QR code" width="200">
+</p>
+
 ## Development
 
 ```bash
