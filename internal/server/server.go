@@ -2760,8 +2760,17 @@ func (s *Server) routeChannelEvent(ctx context.Context, ad channel.Adapter, ev c
 		// When neither path consumes the message, handleChannelMessage
 		// persists the files instead (attachInboundFiles), so persisting is
 		// gated on HasPendingAsk/IsRunning to avoid a duplicate upload.
+		// running is snapshotted once and reused for both the persist gate
+		// and the steer check below: two separate IsRunning() calls could
+		// observe the turn finish in between, in which case DeliverAskReply
+		// also finds no pending ask and the message falls through to
+		// handleChannelMessage — which re-persists the same attachment via
+		// attachInboundFiles, leaking the first copy as an orphaned upload
+		// nothing ever references. Reusing one snapshot keeps the persist
+		// decision and the enqueue decision consistent.
+		running := sess.IsRunning()
 		text := ev.Text
-		if len(ev.Files) > 0 && (sess.HasPendingAsk() || sess.IsRunning()) {
+		if len(ev.Files) > 0 && (sess.HasPendingAsk() || running) {
 			if notes := inboundFileNotes(ev.Files); len(notes) > 0 {
 				text = strings.TrimSpace(text + "\n\n" + strings.Join(notes, "\n"))
 			}
@@ -2774,13 +2783,14 @@ func (s *Server) routeChannelEvent(ctx context.Context, ad channel.Adapter, ev c
 			// Inbox (drained between loop iterations; leftovers chain in
 			// handleChannelMessage) — web/CLI parity, instead of queueing a
 			// whole second turn. Known small race: a turn that finishes
-			// between this check and the enqueue leaves the message in the
-			// Inbox until the chat's next turn — delayed, not lost. Under
-			// shared-session bindings (BindByChat/BindByUser) this folds
-			// OTHER users' messages into the running turn too — coherent
-			// for a shared conversation, but a behavior those modes should
-			// revisit if the server ever stops hardcoding BindByChatUser.
-			if sess.IsRunning() {
+			// between the running snapshot above and here leaves the
+			// message in the Inbox until the chat's next turn — delayed,
+			// not lost. Under shared-session bindings (BindByChat/BindByUser)
+			// this folds OTHER users' messages into the running turn too —
+			// coherent for a shared conversation, but a behavior those modes
+			// should revisit if the server ever stops hardcoding
+			// BindByChatUser.
+			if running {
 				sess.Agent.Inbox.Enqueue(text)
 				return
 			}

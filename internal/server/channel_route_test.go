@@ -358,6 +358,48 @@ func TestRouteChannelEvent_ImageAnswersPendingAsk(t *testing.T) {
 	}
 }
 
+// TestRouteChannelEvent_EmptyTextImageAnswersPendingAsk: unlike weixin, the
+// dingtalk/discord/feishu/telegram/wecom adapters construct an empty Text
+// (not a placeholder) for a pure-image inbound message. Before the dispatcher
+// gated the persist step on ev.Files rather than ev.Text alone, an empty-text
+// image answering a pending ask fell through the old empty-text guard
+// entirely — the ask never saw the image, and it kept waiting while the
+// image spawned an unrelated new turn. Regression test for that class of
+// message, distinct from weixin's "[图片]"-placeholder case above.
+func TestRouteChannelEvent_EmptyTextImageAnswersPendingAsk(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	srv := chanServer(t)
+	ad := &fullFakeAdapter{}
+
+	sess := srv.channelMgr.GetOrCreateSession(evFor("seed"), nil)
+	replyCh, release, err := sess.BeginAsk("c1", "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	ev := evFor("") // empty text, as dingtalk/discord/feishu/telegram/wecom construct it
+	ev.Files = []channel.FileAttachment{{Type: "image", Name: "qr.png", MimeType: "image/png", DataURL: pngDataURL()}}
+	srv.routeChannelEvent(context.Background(), ad, ev)
+
+	var got string
+	select {
+	case got = <-replyCh:
+	case <-time.After(time.Second):
+		t.Fatal("pending ask did not receive the empty-text image answer")
+	}
+	if !strings.Contains(got, "[Attached file:") || !strings.Contains(filepath.ToSlash(got), ".octo/uploads") {
+		t.Fatalf("answer missing the persisted-upload note: %q", got)
+	}
+	path := strings.TrimSuffix(strings.Split(got, "[Attached file: ")[1], "]")
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		t.Errorf("persisted image unreadable: err=%v bytes=%d", err, len(data))
+	}
+}
+
 // TestRouteChannelEvent_ImageSteerCarriesAttachment: an image sent mid-turn
 // rides the Inbox as a steer — the attachment must reach the model as a
 // persisted path note, not vanish (same drop class as the ask-reply bug).

@@ -27,7 +27,11 @@ func inboundFileNotes(files []channel.FileAttachment) []string {
 		case f.DataURL != "":
 			block, _, err := saveImageAttachment(f.Name, f.DataURL)
 			if err != nil {
-				slog.Debug("inbound file note", "name", f.Name, "err", err)
+				// This is a silent-drop path: the caller only appends notes
+				// that were built successfully, so a persist failure here
+				// means the attachment goes missing from the ask/steer text
+				// with no visible signal to the user. Warn, not Debug.
+				slog.Warn("inbound file note: persist failed, attachment dropped", "name", f.Name, "err", err)
 				continue
 			}
 			notes = append(notes, agent.AttachmentNote(block.ImagePath))
