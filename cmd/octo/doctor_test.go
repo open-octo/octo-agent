@@ -11,12 +11,17 @@ import (
 )
 
 // doctorHome isolates HOME (via the shared isolateHome helper) and additionally
-// clears provider API keys so the environment checks are deterministic.
+// clears provider and web-search API keys so the environment checks are
+// deterministic — a developer with a real BRAVE_SEARCH_API_KEY exported would
+// otherwise flip the web-search section.
 func doctorHome(t *testing.T) string {
 	t.Helper()
 	home := isolateHome(t)
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("BRAVE_SEARCH_API_KEY", "")
+	t.Setenv("TAVILY_API_KEY", "")
+	t.Setenv("SERPER_API_KEY", "")
 	return home
 }
 
@@ -253,5 +258,60 @@ func TestRunConfigFix_ReportsUnfixable(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "manual attention") {
 		t.Errorf("output should flag the unfixable duplicate:\n%s", stdout.String())
+	}
+}
+
+func TestRunDoctor_WebSearchZeroKeyPointsAtFreeTiers(t *testing.T) {
+	doctorHome(t)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	cfg := config.Config{
+		Endpoints: []config.Endpoint{{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}}},
+		Default:   "ep-a::gpt-4o",
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runDoctor(nil, strings.NewReader(""), &stdout, &stderr)
+	out := stdout.String()
+	// A missing search key is informational, not a problem — scraping works.
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; out=%q err=%q", code, out, stderr.String())
+	}
+	if !strings.Contains(out, "Web search:") || !strings.Contains(out, "no search key set") {
+		t.Errorf("zero-key output missing web-search section:\n%s", out)
+	}
+	// The whole point of the section: name the free tiers, not just the env var.
+	if !strings.Contains(out, "BRAVE_SEARCH_API_KEY") || !strings.Contains(out, "free") {
+		t.Errorf("zero-key output should point at a free tier:\n%s", out)
+	}
+	if !strings.Contains(out, "All checks passed") {
+		t.Errorf("zero-key search must not count as a problem:\n%s", out)
+	}
+}
+
+func TestRunDoctor_WebSearchNamesConfiguredBackend(t *testing.T) {
+	doctorHome(t)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("TAVILY_API_KEY", "tk")
+	cfg := config.Config{
+		Endpoints: []config.Endpoint{{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}}},
+		Default:   "ep-a::gpt-4o",
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := runDoctor(nil, strings.NewReader(""), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0; err=%q", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "using tavily") {
+		t.Errorf("configured backend not named:\n%s", out)
+	}
+	if strings.Contains(out, "no search key set") {
+		t.Errorf("keyed setup should not show the zero-key hint:\n%s", out)
 	}
 }

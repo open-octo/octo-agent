@@ -406,3 +406,36 @@ func TestRenderToolOutcome_InlineResultSanitized(t *testing.T) {
 		t.Errorf("sanitized content should keep both halves visible: %q", got)
 	}
 }
+
+func TestRenderToolCard_WebSearchNamesBackend(t *testing.T) {
+	// The backend name lives at the end of the JSON body, past the results
+	// array the preview folds away — it only reaches the user via the header's
+	// dim meta. A keyed backend is named without a nudge.
+	body := `{"query":"x","results":[{"title":"T","url":"http://e.com","snippet":"s"}],"count":1,"provider":"brave"}`
+	got := renderToolCard("web_search", map[string]any{"query": "x"}, body, false, 0, 0)
+	if !strings.Contains(got, "brave") {
+		t.Errorf("backend name missing from card; got:\n%s", got)
+	}
+	if strings.Contains(got, "no search key") {
+		t.Errorf("keyed backend should carry no nudge; got:\n%s", got)
+	}
+}
+
+func TestRenderToolCard_WebSearchScrapedCarriesNudge(t *testing.T) {
+	body := `{"query":"x","results":[{"title":"T","url":"http://e.com","snippet":"s"}],"count":1,"provider":"duckduckgo"}`
+	got := renderToolCard("web_search", map[string]any{"query": "x"}, body, false, 0, 0)
+	if !strings.Contains(got, "duckduckgo") || !strings.Contains(got, "no search key") {
+		t.Errorf("scraped backend should be named and nudged; got:\n%s", got)
+	}
+}
+
+func TestWebSearchProvider_NonJSONBodyIsEmpty(t *testing.T) {
+	// An errored search (or a future change to the tool's output shape) must
+	// leave the meta untouched rather than render a stray label.
+	if got := webSearchProvider("web_search: query is required"); got != "" {
+		t.Errorf("non-JSON body: got %q, want \"\"", got)
+	}
+	if got := webSearchProviderNote("brave"); got != "" {
+		t.Errorf("keyed backend note: got %q, want \"\"", got)
+	}
+}

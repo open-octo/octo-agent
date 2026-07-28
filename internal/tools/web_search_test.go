@@ -386,3 +386,20 @@ func TestParseBingHTML_NestedLi_KnownLimitation(t *testing.T) {
 		t.Logf("If this test starts failing because the parser now returns 1, the limitation has been fixed — update the test and remove the LIMITATION comment in web_search.go.")
 	}
 }
+
+func TestWebSearchKeyedBackend_ReportsPriority(t *testing.T) {
+	clearSearchEnv(t)
+	if got := WebSearchKeyedBackend(); got != "" {
+		t.Errorf("zero-key: got %q, want \"\"", got)
+	}
+	t.Setenv("SERPER_API_KEY", "sk")
+	if got := WebSearchKeyedBackend(); got != "serper" {
+		t.Errorf("serper only: got %q, want \"serper\"", got)
+	}
+	// Brave outranks both — same order Execute walks the backends in.
+	t.Setenv("TAVILY_API_KEY", "tk")
+	t.Setenv("BRAVE_SEARCH_API_KEY", "bk")
+	if got := WebSearchKeyedBackend(); got != "brave" {
+		t.Errorf("all three set: got %q, want \"brave\"", got)
+	}
+}

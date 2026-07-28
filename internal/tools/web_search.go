@@ -58,6 +58,33 @@ type WebSearchResponse struct {
 	Error    string            `json:"error,omitempty"`
 }
 
+// keyedSearchBackends lists the key-gated backends in priority order, each
+// paired with the env var that enables it. Single-sourced so `octo doctor` can
+// report which one is live without duplicating the env-var names.
+var keyedSearchBackends = []struct {
+	name string
+	env  string
+	run  func(context.Context, string, int) ([]WebSearchResult, error)
+}{
+	{"brave", "BRAVE_SEARCH_API_KEY", searchBrave},
+	{"tavily", "TAVILY_API_KEY", searchTavily},
+	{"serper", "SERPER_API_KEY", searchSerper},
+}
+
+// WebSearchKeyedBackend returns the name of the highest-priority key-gated
+// backend that has its env var set, or "" when none is — i.e. searches fall
+// through to the DuckDuckGo/Bing HTML scraping path, whose result quality is
+// substantially worse. `octo doctor` uses the empty case to point the user at
+// the free tiers.
+func WebSearchKeyedBackend() string {
+	for _, b := range keyedSearchBackends {
+		if os.Getenv(b.env) != "" {
+			return b.name
+		}
+	}
+	return ""
+}
+
 // WebSearchTool searches the web. Backend priority (descending):
 //  1. Brave Search API (env BRAVE_SEARCH_API_KEY)
 //  2. Tavily API       (env TAVILY_API_KEY)
@@ -125,14 +152,10 @@ func (WebSearchTool) Execute(ctx context.Context, _ string, input map[string]any
 		run  func(context.Context, string, int) ([]WebSearchResult, error)
 	}
 	backends := []backend{}
-	if os.Getenv("BRAVE_SEARCH_API_KEY") != "" {
-		backends = append(backends, backend{"brave", searchBrave})
-	}
-	if os.Getenv("TAVILY_API_KEY") != "" {
-		backends = append(backends, backend{"tavily", searchTavily})
-	}
-	if os.Getenv("SERPER_API_KEY") != "" {
-		backends = append(backends, backend{"serper", searchSerper})
+	for _, b := range keyedSearchBackends {
+		if os.Getenv(b.env) != "" {
+			backends = append(backends, backend{b.name, b.run})
+		}
 	}
 	// Zero-key fallbacks are always available.
 	backends = append(backends,

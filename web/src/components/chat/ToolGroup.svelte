@@ -165,6 +165,23 @@
     })).filter((r: any) => r.title || r.url)
   }
 
+  // web_search ui_payload → which backend answered. 'duckduckgo' / 'bing' mean
+  // the zero-key HTML-scrape path, whose results are markedly worse than a real
+  // index; naming it is the only signal the user gets that a (free) key would
+  // help. Mirrors the TUI card's dim meta — see cmd/octo/toolcards.go.
+  function searchProvider(tool: any): string {
+    const p = tool.ui_payload
+    if (p && typeof p.provider === 'string') return p.provider
+    if (typeof tool.result === 'string') {
+      try { const j = JSON.parse(tool.result); if (typeof j.provider === 'string') return j.provider } catch { /* not json */ }
+    }
+    return ''
+  }
+  function searchScraped(tool: any): boolean {
+    const p = searchProvider(tool)
+    return p === 'duckduckgo' || p === 'bing'
+  }
+
   // Per-tool right-aligned meta count ("12 matches" / "64 lines" / …), derived
   // from the result/payload since the server sends no explicit counter.
   function nonEmptyLines(s: string): number {
@@ -176,7 +193,9 @@
     switch (tool.name) {
       case 'web_search': {
         const r = searchResults(tool)
-        return r ? `${r.length} results` : ''
+        if (!r) return ''
+        const provider = searchProvider(tool)
+        return provider ? `${r.length} results · ${provider}` : `${r.length} results`
       }
       case 'grep':       return res ? `${nonEmptyLines(res)} matches` : ''
       case 'read_file':  return res ? `${nonEmptyLines(res)} lines` : ''
@@ -507,6 +526,13 @@
                 {/if}
               </div>
             {/each}
+            {#if searchScraped(tool)}
+              <div class="search-hint">
+                <iconify-icon icon="lucide:info" width="12"></iconify-icon>
+                {$t('tools.search_scraped')}
+                <a href="https://brave.com/search/api/" target="_blank" rel="noopener noreferrer">{$t('tools.search_get_key')}</a>
+              </div>
+            {/if}
           </div>
         {:else if tool.name === 'write_file' && tool.ui_payload?.preview != null}
           <div class="term-wrap">
@@ -617,6 +643,9 @@ details[open] > summary .chev { transform: rotate(90deg); }
 .search-title:hover { text-decoration: underline; }
 .search-title-plain { font-size: 13px; color: var(--text); }
 .search-url { font-size: 11px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-hint { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-tertiary); }
+.search-hint a { color: var(--blue-6); text-decoration: none; }
+.search-hint a:hover { text-decoration: underline; }
 .diff-block { border-top: 1px solid var(--border-table); font-size: 12px; line-height: 1.7; overflow-x: auto; }
 .diff-hdr { padding: 4px 14px; color: var(--text-tertiary); border-bottom: 1px solid var(--border-table); }
 .diff-line { padding: 1px 14px; }

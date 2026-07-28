@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -161,8 +162,41 @@ func toolCardOpts(toolName string, input map[string]any, output string, isErr bo
 		}
 	case "terminal_output", "kill_shell", "terminal_input":
 		opts.Tail = true
+	case "web_search":
+		// Which backend answered is otherwise invisible: it sits at the end of
+		// the JSON body, past the results array the preview folds away. It
+		// matters because the zero-key path is an HTML scrape whose results are
+		// markedly worse — so name it, and say so when no key is set.
+		if p := webSearchProvider(output); p != "" {
+			opts.Meta = joinMeta(p, webSearchProviderNote(p), opts.Meta)
+		}
 	}
 	return output, opts
+}
+
+// webSearchProvider pulls the backend name out of a web_search result body
+// (WebSearchResponse.Provider). Returns "" for a non-JSON or unparsable body —
+// an errored search, or a future change to the tool's output shape.
+func webSearchProvider(output string) string {
+	var r struct {
+		Provider string `json:"provider"`
+	}
+	if err := json.Unmarshal([]byte(output), &r); err != nil {
+		return ""
+	}
+	return r.Provider
+}
+
+// webSearchProviderNote returns the nudge shown beside a zero-key backend, or
+// "" for a keyed one. Deliberately terse: the note shares the header with the
+// query, and anything longer truncates the query away — which is the more
+// useful of the two. `octo doctor` carries the env-var list and the free tiers.
+func webSearchProviderNote(provider string) string {
+	switch provider {
+	case "duckduckgo", "bing":
+		return "no search key"
+	}
+	return ""
 }
 
 // renderToolFull re-renders a finished tool call with its output fully

@@ -8,14 +8,16 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/app"
 	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // runDoctor is `octo doctor`: a read-only health check that works even when
 // config.yml won't parse — the exact case that stops `octo` from starting. It
 // checks the config file (parse + semantic Validate), runs a per-endpoint card
 // (design §13.2: each channel's models + API key reachability), checks the
-// Default/Lite references resolve, prints ✓/✗ lines, and exits non-zero when
-// anything is wrong so it can be scripted. It never mutates anything
+// Default/Lite references resolve, reports which web-search backend is live,
+// prints ✓/✗ lines, and exits non-zero when anything is wrong so it can be
+// scripted. It never mutates anything
 // (`octo config --fix` does the repairs it points to).
 func runDoctor(_ []string, _ io.Reader, stdout, stderr io.Writer) int {
 	problems := 0
@@ -123,6 +125,21 @@ func runDoctor(_ []string, _ io.Reader, stdout, stderr io.Writer) int {
 		} else {
 			note(false, fmt.Sprintf("lite = %s (does not resolve)", cfg.Lite))
 		}
+	}
+
+	// Web search backend. Not a ✓/✗ check — the zero-key scraping path works,
+	// it just returns markedly worse results, and users have no way of knowing
+	// that two of the good backends have free tiers that cover ordinary use.
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "Web search:")
+	if backend := tools.WebSearchKeyedBackend(); backend != "" {
+		fmt.Fprintf(stdout, "  ✓ using %s\n", backend)
+	} else {
+		fmt.Fprintln(stdout, "  ! no search key set — falling back to DuckDuckGo/Bing HTML scraping (poor results)")
+		fmt.Fprintln(stdout, "    → set one of these for a real search index:")
+		fmt.Fprintln(stdout, "        BRAVE_SEARCH_API_KEY   1000 searches/month free   https://brave.com/search/api/")
+		fmt.Fprintln(stdout, "        TAVILY_API_KEY         1000 searches/month free   https://www.tavily.com/")
+		fmt.Fprintln(stdout, "        SERPER_API_KEY         2500 free, then $1/1000    https://serper.dev/")
 	}
 
 	fmt.Fprintln(stdout)
