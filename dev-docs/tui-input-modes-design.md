@@ -9,7 +9,7 @@ REPL 主循环不再是「读一行 → 阻塞跑完回合 → 再读一行」�
 
 - **Inbox**(裸 Enter):键入的话进入 inbox,在**下次迭代开始时**（`think()` 之前）注入 history,
   引导 agent 改方向而不打断它。
-- **Queue**(Alt+Enter):键入的话排队,当前回合完整结束后作为新回合自动执行。
+- **Queue**(Ctrl+Q):键入的话排队,当前回合完整结束后作为新回合自动执行。
 - **Interrupt**(Esc,无模态时):停掉当前在途回合;队列保留。
 
 ## 2. 架构
@@ -134,15 +134,21 @@ Other 自由文本输入。
 | 键 | idle(无回合) | 回合运行中(无模态) | 模态打开时 |
 |---|---|---|---|
 | 裸 **Enter** | 提交,开新回合 | **inbox**:进入 inbox,下次迭代生效 | 确认当前选项 |
-| **Alt+Enter** | (同 Enter) | **queue**:排队,回合结束后作新回合 | — |
+| **Ctrl+Q** | (同 Enter) | **queue**:排队,回合结束后作新回合 | — |
 | **Ctrl+X** | — | **撤回**最近排队项(连按清空) | — |
+| **Alt+Enter** / **Ctrl+J** | 插入换行 | 插入换行 | — |
 | **Esc** | 清空当前输入行 | **interrupt**:停当前回合,pending 保留 | **取消单个工具**,回合继续 |
 | **Ctrl+C** | 保存并退出 | interrupt | 取消工具 |
 | **Ctrl+D** | 退出 | — | — |
 
-`Alt+Enter` 在 raw mode 下是 `ESC`+`CR`、bubbletea 可靠检测;不用 Ctrl+Enter / Shift+Enter
-(终端普遍发与 Enter 相同的码)。`Ctrl+X` 是队列撤回安全阀——因为 Esc 只停回合、不清队列,
-排错的 queue 靠它取消。
+queue 键与换行键都不能用 Ctrl+Enter / Shift+Enter(终端普遍发与 Enter 相同的码)。`Ctrl+Q`
+是独立键位、不与换行争 Enter;`Alt+Enter` 在 raw mode 下是 `ESC`+`CR`、bubbletea 可靠检测,
+`Ctrl+J` 是 LF、在 Alt 未映射的终端上兜底。`Ctrl+X` 是队列撤回安全阀——因为 Esc 只停回合、
+不清队列,排错的 queue 靠它取消。
+
+Web 端(`octo serve`)映射同一套语义:回合运行中 Enter = steer(进 Inbox),**Cmd/Ctrl+Enter**
+= queue(进服务端 steer 队列,`user_message` 带 `queue:true`),Stop 按钮 = interrupt。终端的
+码位限制不适用于浏览器,所以那里用 Cmd/Ctrl+Enter 而非 Ctrl+Q。
 
 常驻队列区列出所有 pending、显示消费顺序;状态行在队列非空时提示 `Ctrl+X unqueue`。pending
 为会话内瞬态,不持久化。
@@ -176,6 +182,6 @@ KeyBinding)。Model 逻辑经 `Update` 直接单测,**不依赖** `teatest`。
 - **inbox/注入**:mock Sender 产 tool_use，断言 inbox 作为独立 user message 追加在
   迭代开始时、无边界时降级；两个 provider 适配器的 wire 形态。
 - **interrupt**:cancel `turnCtx`,断言走 `finishInterrupted` 且 inbox 存活、后续被消费。
-- **TUI Model**:经 `Update` 断言键位映射(Enter=inbox/Alt+Enter=queue/Ctrl+X=unqueue/Esc)、
+- **TUI Model**:经 `Update` 断言键位映射(Enter=inbox/Ctrl+Q=queue/Ctrl+X=unqueue/Esc)、
   queue 入队与出队、降级、模态状态机、文本缓冲——无需真 TTY。
 - **纯文本路径回归**:既有 scanner-based REPL 测试继续绿,保证 `--no-tui` / 非-TTY 不变。

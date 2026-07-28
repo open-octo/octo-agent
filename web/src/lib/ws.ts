@@ -153,7 +153,16 @@ export class WsManager {
     this.send({ type: "unsubscribe", session_id: sessionId });
   }
 
-  sendMessage(sessionId: string, content: string, files?: unknown[], force?: boolean): void {
+  // queue asks the server to run the message as its own follow-up turn once the
+  // one in flight finishes, instead of steering that turn (the web counterpart
+  // of the TUI's Ctrl+Q). Ignored server-side when no turn is running.
+  sendMessage(
+    sessionId: string,
+    content: string,
+    files?: unknown[],
+    force?: boolean,
+    queue?: boolean
+  ): void {
     const payload: Record<string, unknown> = {
       type: "user_message",
       session_id: sessionId,
@@ -164,6 +173,9 @@ export class WsManager {
     }
     if (force) {
       payload.force = true;
+    }
+    if (queue) {
+      payload.queue = true;
     }
     this.send(payload);
   }

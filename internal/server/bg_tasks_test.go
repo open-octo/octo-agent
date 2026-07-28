@@ -179,7 +179,7 @@ func TestNotifyAgentBgExit_IdleGoesToSteerQueue(t *testing.T) {
 	srv.notifyAgentBgExit("sess-1", tools.BgExit{ID: "bg_2", Command: "make test", Status: "exited: exit status 1"})
 
 	items := srv.drainSteer("sess-1")
-	if len(items) != 1 || !strings.Contains(items[0].Text, "[BACKGROUND COMPLETED]") || !strings.Contains(items[0].Text, "bg_2") {
+	if len(items) != 1 || !strings.Contains(items[0].item.Text, "[BACKGROUND COMPLETED]") || !strings.Contains(items[0].item.Text, "bg_2") {
 		t.Fatalf("steer queue = %+v, want one bg note", items)
 	}
 }

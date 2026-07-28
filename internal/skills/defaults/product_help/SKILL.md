@@ -21,6 +21,7 @@ You have access to octo's product documentation. Use it to answer user questions
    - `HOOKS.md` — the hooks engine (`hooks.yml`, event types, blocking)
    - `IM.md` — the IM/chat bridge (`channels.yml`, supported platforms, `send_message`/`send_file`)
    - `TUI.md` — terminal UI reference (slash commands, keyboard shortcuts, status bar)
+   - `WEB.md` — Web UI reference (`octo serve` dashboard: composer shortcuts, mid-turn steer vs. queue)
    - `TROUBLESHOOTING.md` — common issues and fixes
 
    Read the relevant file(s) with `read_file` before answering.

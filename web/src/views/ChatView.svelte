@@ -99,7 +99,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // the server rejects one, we roll back only that pending bubble and restore
   // the streaming flag to its pre-send value. Content and files are kept so a
   // force takeover can retry the same message.
-  const pendingSends = new Map<string, { pendingId: string; wasStreaming: boolean; text: string; files?: any[] }[]>()
+  const pendingSends = new Map<string, { pendingId: string; wasStreaming: boolean; text: string; files?: any[]; queued?: boolean }[]>()
 
   // Pending auto-dismiss timers for background sub-agents that finished with no
   // active turn (keyed by `${sid}\x00${agentId}`). A turn-less `done` has no
@@ -124,7 +124,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // Pending steer messages typed while a turn is running. They are shown above
   // the composer as ghost user bubbles until the server drains the inbox and
   // confirms them in the scrollback.
-  let pendingSteers = $state<Record<string, { pendingId: string; text: string; files?: any[]; retracting?: boolean }[]>>({})
+  let pendingSteers = $state<Record<string, { pendingId: string; text: string; files?: any[]; retracting?: boolean; queued?: boolean }[]>>({})
 
   // Set when the server reports a recoverable binding conflict. The UI shows a
   // banner with a "Force bind" button; clicking it retries the pending send
@@ -137,7 +137,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     open: false, index: 0, draft: '', busy: false,
   })
 
-  let pendingSteerList = $state<{ pendingId: string; text: string; files?: any[]; retracting?: boolean }[]>([])
+  let pendingSteerList = $state<{ pendingId: string; text: string; files?: any[]; retracting?: boolean; queued?: boolean }[]>([])
 
   // Sync pendingSteerList with the current session's pending steers. Uses $effect
   // instead of $derived to ensure correct reactivity when indexing a $state Record
@@ -771,6 +771,13 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         }
         return { ...m, [sid]: msgs }
       })
+      if (meta?.queued) {
+        // A queued message does not ride the previous turn — it starts its own,
+        // and that turn's `complete` already flipped streaming off. Flip it back
+        // so the composer shows Stop and the reply renders as live output
+        // instead of looking like the session went idle.
+        chatStreaming.update(s => ({ ...s, [sid]: true }))
+      }
       if (isSteer && meta) {
         // The server drained this steer from the inbox; drop the ghost bubble.
         pendingSteers = { ...pendingSteers, [sid]: pendingSteers[sid]?.filter(s => s.pendingId !== meta.pendingId) ?? [] }
@@ -1442,7 +1449,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   }
 
   // ── send message ───────────────────────────────────────────────────────────
-  async function send(text: string, files?: any[]) {
+  async function send(text: string, files?: any[], queued = false) {
     if (!text.trim() && !(files && files.length)) return
     const sid = await ensureActiveSession()
     if (!sid) return
@@ -1463,14 +1470,27 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       chatSuggestion.update(s => ({ ...s, [sid]: '' }))
       chatStreaming.update(s => ({ ...s, [sid]: true }))
     }
+    // Queueing only means anything mid-turn: idle there is no turn to wait for,
+    // so the server starts one immediately and this is an ordinary send.
+    const isQueued = queued && steering
     const pendingId = 'pending-' + Date.now()
     const queue = pendingSends.get(sid) ?? []
-    queue.push({ pendingId, wasStreaming, text, files })
+    const entry = { pendingId, wasStreaming, text, files, queued: isQueued }
+    const firstQueued = queue.findIndex(m => m.queued)
+    if (!isQueued && firstQueued >= 0) {
+      // The server drains steers into the turn in flight, but a queued message
+      // waits for the turn after it — so a steer sent later is confirmed first.
+      // Keep this FIFO in server-consumption order, or history_user_message
+      // would retire the wrong entry and drop the wrong ghost bubble.
+      queue.splice(firstQueued, 0, entry)
+    } else {
+      queue.push(entry)
+    }
     pendingSends.set(sid, queue)
     if (steering) {
       // Mid-turn input: show above the composer, not in the scrollback, until
       // the server drains it into the running turn (mirrors TUI pendingSteer).
-      pendingSteers = { ...pendingSteers, [sid]: [...(pendingSteers[sid] ?? []), { pendingId, text, files }] }
+      pendingSteers = { ...pendingSteers, [sid]: [...(pendingSteers[sid] ?? []), { pendingId, text, files, queued: isQueued }] }
     } else {
       // Optimistically show the user bubble, marked pending. The server echoes
       // it back as a history_user_message — that handler replaces this pending
@@ -1487,7 +1507,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         todos: [],
       })
     }
-    ws.sendMessage(sid, text, files)
+    ws.sendMessage(sid, text, files, false, isQueued)
     pinToBottom()
   }
 
@@ -1504,7 +1524,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       return
     }
     bindRequiredFor = null
-    ws.sendMessage(sid, meta.text, meta.files, true)
+    ws.sendMessage(sid, meta.text, meta.files, true, meta.queued)
     pinToBottom()
   }
 
@@ -1981,6 +2001,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           <div class="pending-steer-bar fadein">
             {#each pendingSteerList as s}
               <div class="pending-steer-line">
+                <!-- A queued message waits for the turn AFTER this one, so say so:
+                     otherwise it is indistinguishable from a steer that is about
+                     to be folded into the reply now being written. -->
+                <span class="steer-kind" class:queued={s.queued}>
+                  {s.queued ? $t('chat.pending_queued') : $t('chat.pending_steer')}
+                </span>
                 <span class="steer-text">
                   {#if s.files && s.files.length > 0}
                     <span class="steer-attachments">
@@ -2505,6 +2531,18 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 }
 .steer-text {
   white-space: pre-wrap; word-break: break-word;
+}
+.steer-kind {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border-secondary);
+  color: var(--text-quaternary);
+}
+.steer-kind.queued {
+  border-color: var(--blue-6);
+  color: var(--blue-6);
 }
 .steer-retract {
   width: 20px; height: 20px; border: none; background: transparent;

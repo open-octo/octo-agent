@@ -146,10 +146,10 @@ func TestDeliverLoopTick_EnqueuesWrappedTick(t *testing.T) {
 	if len(q) != 1 {
 		t.Fatalf("expected exactly one enqueued steer, got %d", len(q))
 	}
-	if !strings.Contains(q[0].Text, "check whether the PR is merged") {
-		t.Fatalf("tick steer must carry the task verbatim, got %q", q[0].Text)
+	if !strings.Contains(q[0].item.Text, "check whether the PR is merged") {
+		t.Fatalf("tick steer must carry the task verbatim, got %q", q[0].item.Text)
 	}
-	if visible := strings.TrimSpace(agent.StripSystemReminders(q[0].Text)); visible != "" {
+	if visible := strings.TrimSpace(agent.StripSystemReminders(q[0].item.Text)); visible != "" {
 		t.Fatalf("a loop tick must leave no visible user-bubble text, got %q", visible)
 	}
 }
@@ -192,7 +192,7 @@ func newLoopTestServer() *Server {
 		wakeupStart:         map[string]time.Time{},
 		turnRunning:         map[string]bool{},
 		turnLocks:           map[string]*sync.Mutex{},
-		steerQueues:         map[string][]agent.InboxItem{},
+		steerQueues:         map[string][]queuedTurn{},
 		sessionBindingLocks: map[string]*sync.Mutex{},
 	}
 }

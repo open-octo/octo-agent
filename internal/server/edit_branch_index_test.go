@@ -41,7 +41,7 @@ func TestDoAgentTurn_ErrorRollback_BroadcastsHistoryReload(t *testing.T) {
 	srv.sender = erroringSender{}
 	srv.initWS()
 	srv.turnRunning = make(map[string]bool)
-	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.steerQueues = make(map[string][]queuedTurn)
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
 	sess := agent.NewSession("stub-model", "")
@@ -119,7 +119,7 @@ func TestDoAgentTurn_Interrupt_KeepsUserMessage_NoReload(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	srv.initWS()
 	srv.turnRunning = make(map[string]bool)
-	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.steerQueues = make(map[string][]queuedTurn)
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
 	sess := agent.NewSession("stub-model", "")
@@ -209,7 +209,7 @@ func TestDoAgentTurn_MidTurnError_NoHistoryReload(t *testing.T) {
 	srv.sender = &failSecondRoundSender{}
 	srv.initWS()
 	srv.turnRunning = make(map[string]bool)
-	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.steerQueues = make(map[string][]queuedTurn)
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
 	sess := agent.NewSession("stub-model", "")
@@ -259,7 +259,7 @@ func TestRunTask_UserMessageBroadcastCarriesIndex(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	srv.initWS()
 	srv.turnRunning = make(map[string]bool)
-	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.steerQueues = make(map[string][]queuedTurn)
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
 	// Pre-create the task session and seed prior turns so the expected index
@@ -311,7 +311,7 @@ func TestRunTask_ErrorRollback_BroadcastsHistoryReload(t *testing.T) {
 	srv.sender = erroringSender{}
 	srv.initWS()
 	srv.turnRunning = make(map[string]bool)
-	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.steerQueues = make(map[string][]queuedTurn)
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
 	sessionID, err := srv.CreateSession(scheduler.Task{Name: "t"})
@@ -382,7 +382,7 @@ func TestHandleEditMessage_MidStream_InterruptsAndReruns(t *testing.T) {
 	srv.sender = sender
 	srv.initWS()
 	srv.turnRunning = make(map[string]bool)
-	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.steerQueues = make(map[string][]queuedTurn)
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
 	sess := agent.NewSession("stub-model", "")

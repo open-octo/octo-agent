@@ -77,7 +77,7 @@ func TestDoAgentTurn_GeneratesSessionTitle(t *testing.T) {
 	srv.sender = sender
 	srv.initWS()
 	srv.turnRunning = make(map[string]bool)
-	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.steerQueues = make(map[string][]queuedTurn)
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
 	// Born with the frontend's auto-assigned placeholder, like every session
@@ -134,7 +134,7 @@ func TestListSessionsBrief_ReflectsGeneratedTitle(t *testing.T) {
 	srv.sender = sender
 	srv.initWS()
 	srv.turnRunning = make(map[string]bool)
-	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.steerQueues = make(map[string][]queuedTurn)
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
 	sess := agent.NewSession("stub-model", "")
@@ -217,7 +217,7 @@ func TestDoAgentTurn_SkipsTitleForEmptyFirstMessage(t *testing.T) {
 	srv.sender = spy
 	srv.initWS()
 	srv.turnRunning = make(map[string]bool)
-	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.steerQueues = make(map[string][]queuedTurn)
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
 	sess := agent.NewSession("stub-model", "")
@@ -302,7 +302,7 @@ func TestDoAgentTurn_TitleGenerationFailureIsLogged(t *testing.T) {
 	srv.sender = sender
 	srv.initWS()
 	srv.turnRunning = make(map[string]bool)
-	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.steerQueues = make(map[string][]queuedTurn)
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
 	sess := agent.NewSession("stub-model", "")

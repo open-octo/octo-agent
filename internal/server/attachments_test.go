@@ -363,7 +363,7 @@ func TestHandleWSUserMessage_ImageOnly(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	srv.initWS()
 	srv.turnRunning = make(map[string]bool)
-	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.steerQueues = make(map[string][]queuedTurn)
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
 	sess := agent.NewSession("stub-model", "")
@@ -479,7 +479,7 @@ func TestHandleWSUserMessage_ImageOnly_NonVision(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	srv.initWS()
 	srv.turnRunning = make(map[string]bool)
-	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.steerQueues = make(map[string][]queuedTurn)
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
 	sess := agent.NewSession("deepseek-v4-pro", "")

@@ -719,7 +719,7 @@ func mustServer(t *testing.T, cfg Config) *Server {
 		entryBindings:       make(map[string]*cachedEntryBinding),
 		sessionBindingLocks: map[string]*sync.Mutex{},
 		sessionAgents:       make(map[string]*agent.Agent),
-		steerQueues:         make(map[string][]agent.InboxItem),
+		steerQueues:         make(map[string][]queuedTurn),
 		wsHub:               newWSHub(),
 	}
 	srv.registerRoutes()
@@ -2210,7 +2210,7 @@ func TestDoAgentTurn_SeedsThinkingProgress(t *testing.T) {
 	// Maps doAgentTurn touches that the full constructor sets up but mustServer
 	// (a minimal hand-built Server) does not.
 	srv.turnRunning = make(map[string]bool)
-	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.steerQueues = make(map[string][]queuedTurn)
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
 	sess := agent.NewSession("stub-model", "")
@@ -2291,7 +2291,7 @@ func TestDoAgentTurn_LiveAndHistoryCreatedAtMatch(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	srv.initWS()
 	srv.turnRunning = make(map[string]bool)
-	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.steerQueues = make(map[string][]queuedTurn)
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
 	sess := agent.NewSession("stub-model", "")

@@ -130,23 +130,20 @@ func (s *Server) kickIdleSteerTurn(sessionID string) bool {
 		s.releaseSessionBinding(sessionID, agent.EntryWeb)
 		return false
 	}
-	items := s.drainSteer(sessionID)
-	if len(items) == 0 {
+	// Only the first batch starts this turn; anything the user explicitly queued
+	// behind it goes back on the queue so runAgentTurnLoop chains it as its own
+	// turn instead of folding everything into one.
+	batches := batchQueuedTurns(s.drainSteer(sessionID))
+	if len(batches) == 0 {
 		mu.Unlock()
 		s.releaseSessionBinding(sessionID, agent.EntryWeb)
 		return false
 	}
+	s.requeueFront(sessionID, batches[1:])
 	s.turnRunning[sessionID] = true
 	mu.Unlock()
 
-	var texts []string
-	var blocks []agent.ContentBlock
-	for _, it := range items {
-		if strings.TrimSpace(it.Text) != "" {
-			texts = append(texts, it.Text)
-		}
-		blocks = append(blocks, it.Blocks...)
-	}
+	content, blocks := foldQueuedBatch(batches[0])
 	go func() {
 		defer func() {
 			mu.Lock()
@@ -154,7 +151,7 @@ func (s *Server) kickIdleSteerTurn(sessionID string) bool {
 			mu.Unlock()
 			s.releaseSessionBinding(sessionID, agent.EntryWeb)
 		}()
-		s.runAgentTurnLoop(sess, strings.Join(texts, "\n\n"), blocks, imageRefsFromBlocks(blocks))
+		s.runAgentTurnLoop(sess, content, blocks, imageRefsFromBlocks(blocks))
 	}()
 	return true
 }

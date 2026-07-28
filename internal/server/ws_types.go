@@ -26,6 +26,10 @@ type wsMsgUserMessage struct {
 	// Force allows the web UI to take over a session bound to another entry.
 	// The server still refuses if the other entry holds an active turn lease.
 	Force bool `json:"force,omitempty"`
+	// Queue asks for the message to run as its own follow-up turn after the one
+	// in flight finishes, instead of steering it. Web counterpart of the TUI's
+	// Ctrl+Q; ignored when no turn is running (the message just starts one).
+	Queue bool `json:"queue,omitempty"`
 }
 
 type wsUserFile struct {

@@ -564,6 +564,12 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 
 	if s.turnRunning[sid] {
 		mu.Unlock()
+		// An explicit queue request skips the running turn entirely: park it for
+		// runAgentTurnLoop to run as its own chained turn once this one is done.
+		if msg.Queue {
+			s.enqueueQueued(sid, agent.InboxItem{Text: content, Blocks: att.blocks})
+			return
+		}
 		// The current Web entry already owns the binding; a mid-turn message
 		// has exactly one home: the running Agent's Inbox when it is registered
 		// (the runLoop drains it between iterations — attachment blocks and
@@ -1088,13 +1094,17 @@ func (s *Server) runAgentTurnLoop(sess *agent.Session, initialContent string, bl
 	defer s.drain.end()
 
 	content := initialContent
+	// pending holds chained turns already carved out of the steer queue but not
+	// yet run, in order. Explicitly queued messages each get their own batch, so
+	// the queue is not necessarily exhausted by a single follow-up turn.
+	var pending [][]queuedTurn
 	for {
 		s.doAgentTurn(sess, content, blocks, images)
 		if s.drain.isDraining() {
 			// Don't chain queued steer messages into fresh turns during a
 			// drain — they'd start work the shutdown cuts at the timeout.
 			// Tell the user to resend instead of eating the input silently.
-			if items := s.drainSteer(sess.ID); len(items) > 0 && s.wsHub != nil {
+			if (len(pending) > 0 || len(s.drainSteer(sess.ID)) > 0) && s.wsHub != nil {
 				s.wsHub.broadcast(sess.ID, map[string]string{
 					"type":       "error",
 					"message":    errDraining.Error(),
@@ -1103,42 +1113,130 @@ func (s *Server) runAgentTurnLoop(sess *agent.Session, initialContent string, bl
 			}
 			break
 		}
-		// An active goal continues unprompted: enqueue the hidden continuation
-		// prompt so the chain below starts the follow-up turn. User steers
-		// queued meanwhile take priority — GoalContinuation is only consulted
-		// when the queue is empty, and its own guards (status, zero-progress
-		// suppression) decide whether the loop keeps going.
-		if s.goalsEnabled.Load() && !s.steerPending(sess.ID) {
-			if prompt, ok := sess.GoalContinuation(); ok {
-				s.enqueueSteer(sess.ID, agent.InboxItem{Text: prompt})
+		if len(pending) == 0 {
+			// An active goal continues unprompted: enqueue the hidden continuation
+			// prompt so the chain below starts the follow-up turn. User steers
+			// queued meanwhile take priority — GoalContinuation is only consulted
+			// when the queue is empty, and its own guards (status, zero-progress
+			// suppression) decide whether the loop keeps going.
+			if s.goalsEnabled.Load() && !s.steerPending(sess.ID) {
+				if prompt, ok := sess.GoalContinuation(); ok {
+					s.enqueueSteer(sess.ID, agent.InboxItem{Text: prompt})
+				}
 			}
+			pending = batchQueuedTurns(s.drainSteer(sess.ID))
 		}
-		steerItems := s.drainSteer(sess.ID)
-		if len(steerItems) == 0 {
+		if len(pending) == 0 {
 			break
 		}
-		// Fold the queued steer items into one chained turn: texts joined,
-		// attachment blocks carried over, thumbnails re-derived.
-		var texts []string
-		blocks = nil
-		for _, it := range steerItems {
-			if strings.TrimSpace(it.Text) != "" {
-				texts = append(texts, it.Text)
-			}
-			blocks = append(blocks, it.Blocks...)
-		}
-		content = strings.Join(texts, "\n\n")
+		content, blocks = foldQueuedBatch(pending[0])
+		pending = pending[1:]
 		images = imageRefsFromBlocks(blocks)
 	}
 }
 
+// queuedTurn is a mid-turn message parked for a follow-up turn. standalone
+// marks one the user explicitly queued (web Cmd/Ctrl+Enter, mirroring the TUI's
+// Ctrl+Q): it runs as its own turn rather than being folded together with the
+// messages around it.
+type queuedTurn struct {
+	item       agent.InboxItem
+	standalone bool
+}
+
+// batchQueuedTurns splits drained items into the chained turns to run, in
+// order: each standalone item alone, runs of non-standalone items folded
+// together (their original semantics — a steer that missed its turn).
+func batchQueuedTurns(queued []queuedTurn) [][]queuedTurn {
+	var batches [][]queuedTurn
+	var fold []queuedTurn
+	flush := func() {
+		if len(fold) > 0 {
+			batches = append(batches, fold)
+			fold = nil
+		}
+	}
+	for _, q := range queued {
+		if q.standalone {
+			flush()
+			batches = append(batches, []queuedTurn{q})
+			continue
+		}
+		fold = append(fold, q)
+	}
+	flush()
+	return batches
+}
+
+// foldQueuedBatch collapses one batch into a single turn's input: texts joined,
+// attachment blocks carried over.
+func foldQueuedBatch(batch []queuedTurn) (string, []agent.ContentBlock) {
+	var texts []string
+	var blocks []agent.ContentBlock
+	for _, q := range batch {
+		if strings.TrimSpace(q.item.Text) != "" {
+			texts = append(texts, q.item.Text)
+		}
+		blocks = append(blocks, q.item.Blocks...)
+	}
+	return strings.Join(texts, "\n\n"), blocks
+}
+
 func (s *Server) enqueueSteer(sessionID string, items ...agent.InboxItem) {
+	s.enqueue(sessionID, false, items...)
+}
+
+// enqueueQueued parks messages the user explicitly queued — each runs as its
+// own chained turn.
+func (s *Server) enqueueQueued(sessionID string, items ...agent.InboxItem) {
+	s.enqueue(sessionID, true, items...)
+}
+
+func (s *Server) enqueue(sessionID string, standalone bool, items ...agent.InboxItem) {
 	s.steerMu.Lock()
-	s.steerQueues[sessionID] = append(s.steerQueues[sessionID], items...)
+	for _, it := range items {
+		s.steerQueues[sessionID] = append(s.steerQueues[sessionID], queuedTurn{item: it, standalone: standalone})
+	}
 	s.steerMu.Unlock()
 }
 
-func (s *Server) drainSteer(sessionID string) []agent.InboxItem {
+// requeueFront puts already-drained items back at the head of the queue, so a
+// caller that only consumed the first batch leaves the rest in order for
+// runAgentTurnLoop to chain.
+func (s *Server) requeueFront(sessionID string, batches [][]queuedTurn) {
+	if len(batches) == 0 {
+		return
+	}
+	var head []queuedTurn
+	for _, b := range batches {
+		head = append(head, b...)
+	}
+	s.steerMu.Lock()
+	s.steerQueues[sessionID] = append(head, s.steerQueues[sessionID]...)
+	s.steerMu.Unlock()
+}
+
+// drainFoldableSteer removes and returns only the items that may ride the turn
+// being built — the steers. Explicitly queued messages stay parked: their whole
+// point is to run as a separate turn, not to be injected into this one.
+func (s *Server) drainFoldableSteer(sessionID string) []agent.InboxItem {
+	s.steerMu.Lock()
+	defer s.steerMu.Unlock()
+	q := s.steerQueues[sessionID]
+	var items []agent.InboxItem
+	kept := q[:0]
+	for _, e := range q {
+		if e.standalone {
+			kept = append(kept, e)
+			continue
+		}
+		items = append(items, e.item)
+	}
+	s.steerQueues[sessionID] = kept
+	return items
+}
+
+func (s *Server) drainSteer(sessionID string) []queuedTurn {
 	s.steerMu.Lock()
 	items := s.steerQueues[sessionID]
 	s.steerQueues[sessionID] = nil
@@ -1154,7 +1252,7 @@ func (s *Server) removeSteerFromQueue(sessionID, text string) bool {
 	defer s.steerMu.Unlock()
 	q := s.steerQueues[sessionID]
 	for i := len(q) - 1; i >= 0; i-- {
-		if q[i].Text == text {
+		if q[i].item.Text == text {
 			s.steerQueues[sessionID] = append(q[:i], q[i+1:]...)
 			return true
 		}
@@ -1342,7 +1440,9 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 
 	// Flush any steer messages that arrived before the Agent was built into
 	// the Agent's Inbox so the runLoop can drain them between iterations.
-	for _, it := range s.drainSteer(sess.ID) {
+	// Explicitly queued messages are left in the queue — chaining them as their
+	// own turn is exactly what the user asked for.
+	for _, it := range s.drainFoldableSteer(sess.ID) {
 		a.Inbox.EnqueueWithBlocks(it.Text, it.Blocks)
 	}
 

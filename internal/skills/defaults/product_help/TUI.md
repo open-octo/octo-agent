@@ -39,7 +39,7 @@ The Web UI and IM channels each recognize a **different** command set than the T
 
 | Key | Action |
 |-----|--------|
-| **Shift+Tab** | Cycle permission mode: interactive → strict → auto → interactive |
+| **Shift+Tab** | Cycle permission mode: interactive → auto → strict → interactive |
 
 ### Completion menu
 

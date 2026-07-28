@@ -61,7 +61,7 @@ func goalTestServer(t *testing.T) (*Server, *agent.Session) {
 	srv.initWS()
 	srv.goalsEnabled.Store(true)
 	srv.turnRunning = make(map[string]bool)
-	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.steerQueues = make(map[string][]queuedTurn)
 	srv.sessionAgents = make(map[string]*agent.Agent)
 
 	sess := agent.NewSession("stub-model", "")
@@ -171,7 +171,7 @@ func TestRunAgentTurnLoop_ErroredTurnSuppressesContinuation(t *testing.T) {
 }
 
 func TestSteerPending(t *testing.T) {
-	s := &Server{steerQueues: make(map[string][]agent.InboxItem)}
+	s := &Server{steerQueues: make(map[string][]queuedTurn)}
 	if s.steerPending("sid") {
 		t.Error("empty queue should not be pending")
 	}

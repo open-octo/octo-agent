@@ -14,7 +14,7 @@
   import type { McpServerDetail, McpTool } from '../../lib/types'
   import { getMcpServer } from '../../lib/api'
 
-  let { onSend }: { onSend?: (text: string, files?: any[]) => void } = $props()
+  let { onSend }: { onSend?: (text: string, files?: any[], queued?: boolean) => void } = $props()
 
   // A staged attachment. Images carry inline as a base64 data URL (the model
   // gets an image block); every other type is uploaded to the server and
@@ -727,7 +727,10 @@
     return parts.length <= 2 ? p : '…/' + parts.slice(-2).join('/')
   }
 
-  function send() {
+  // queued=true parks the message as its own follow-up turn instead of steering
+  // the turn in flight (Cmd/Ctrl+Enter — the web counterpart of the TUI's
+  // Ctrl+Q). Idle it makes no difference: the server just starts the turn.
+  function send(queued = false) {
     if (!text.trim() && attachments.length === 0) return
     // Don't send while an attachment upload is still in flight — the file
     // would be dropped and re-appear on the next message.
@@ -752,7 +755,7 @@
     text = ''
     attachments = []
     if (onSend) {
-      onSend(v, files)
+      onSend(v, files, queued)
     } else {
       running.set(true)
     }
@@ -838,6 +841,15 @@
           return
         }
       }
+    }
+
+    // Cmd/Ctrl+Enter queues instead of steering: the message runs as its own
+    // turn after the one in flight. Checked before the plain-Enter branch below,
+    // which would otherwise swallow it as an ordinary send.
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault()
+      send(true)
+      return
     }
 
     // Enter to send (unless shift is held)
@@ -1060,13 +1072,16 @@
         {#if isStreaming || $running}
           <!-- Mid-turn: Stop interrupts the running turn; Send stays available
                so a follow-up message steers the turn in flight (rides the
-               running Agent's Inbox server-side). -->
+               running Agent's Inbox server-side), and Cmd/Ctrl+Enter queues it
+               as a separate turn instead (the server's steer queue). -->
           <button class="stop-btn" onclick={stop}>
             <span class="stop-sq"></span>
             {$t('chat.stop')}
           </button>
         {/if}
-        <button class="send-btn" onclick={send}>{$t('chat.send')}</button>
+        <!-- Arrow-wrapped: a bare `onclick={send}` would hand the MouseEvent to
+             the `queued` parameter and queue every click. -->
+        <button class="send-btn" title={isStreaming || $running ? $t('chat.send_or_queue_hint') : undefined} onclick={() => send()}>{$t('chat.send')}</button>
       </div>
     </div>
   </div>

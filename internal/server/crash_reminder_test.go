@@ -74,7 +74,7 @@ func newCrashReminderServer(t *testing.T, sender *msgRecordingSender) *Server {
 	srv.sender = sender
 	srv.initWS()
 	srv.turnRunning = make(map[string]bool)
-	srv.steerQueues = make(map[string][]agent.InboxItem)
+	srv.steerQueues = make(map[string][]queuedTurn)
 	srv.sessionAgents = make(map[string]*agent.Agent)
 	return srv
 }
