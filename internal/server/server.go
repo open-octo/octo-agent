@@ -2750,9 +2750,24 @@ func (s *Server) routeChannelEvent(ctx context.Context, ad channel.Adapter, ev c
 	// Text-less events (stickers, images, voice) never answer an ask or
 	// steer — an empty reply would consume the ask slot and deny for
 	// nothing, and an empty steer adds noise.
-	if strings.TrimSpace(ev.Text) != "" {
-		if sess := s.channelMgr.GetSession(ev, profile.ID); sess != nil {
-			if sess.DeliverAskReply(ev.ChatID, ev.UserID, ev.Text) {
+	if sess := s.channelMgr.GetSession(ev, profile.ID); sess != nil {
+		// The ask-reply and steer paths carry text only. When either could
+		// claim this message, persist its attachments up front and fold the
+		// path notes into the text — otherwise an image sent as the answer
+		// to ask_user_question (or as a mid-turn steer) silently vanishes:
+		// the adapter's "[图片]" placeholder text made the guard below pass,
+		// the ask consumed it, and the image bytes in ev.Files went nowhere.
+		// When neither path consumes the message, handleChannelMessage
+		// persists the files instead (attachInboundFiles), so persisting is
+		// gated on HasPendingAsk/IsRunning to avoid a duplicate upload.
+		text := ev.Text
+		if len(ev.Files) > 0 && (sess.HasPendingAsk() || sess.IsRunning()) {
+			if notes := inboundFileNotes(ev.Files); len(notes) > 0 {
+				text = strings.TrimSpace(text + "\n\n" + strings.Join(notes, "\n"))
+			}
+		}
+		if strings.TrimSpace(text) != "" {
+			if sess.DeliverAskReply(ev.ChatID, ev.UserID, text) {
 				return
 			}
 			// Steer: a message arriving mid-turn rides the running turn's
@@ -2766,7 +2781,7 @@ func (s *Server) routeChannelEvent(ctx context.Context, ad channel.Adapter, ev c
 			// for a shared conversation, but a behavior those modes should
 			// revisit if the server ever stops hardcoding BindByChatUser.
 			if sess.IsRunning() {
-				sess.Agent.Inbox.Enqueue(ev.Text)
+				sess.Agent.Inbox.Enqueue(text)
 				return
 			}
 		}

@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -300,6 +302,98 @@ func TestRouteChannelEvent_EmptyTextNeverAnswers(t *testing.T) {
 	case got := <-replyCh:
 		t.Fatalf("empty text %q answered the ask", got)
 	default:
+	}
+}
+
+// pngDataURL is a tiny valid PNG as a data URL, the shape the weixin adapter
+// hands routeChannelEvent for an inbound image message.
+func pngDataURL() string {
+	// 1x1 transparent PNG.
+	raw, _ := base64.StdEncoding.DecodeString(
+		"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(raw)
+}
+
+// TestRouteChannelEvent_ImageAnswersPendingAsk: an image message sent as the
+// answer to a pending ask (ask_user_question) must not lose the image — the
+// adapter's "[图片]" placeholder text makes the message look like a text
+// reply, so the dispatcher persists the attachment and folds an
+// "[Attached file: <path>]" note into the answer text. Regression test for
+// the bug where such an answer arrived as the bare placeholder and the image
+// bytes were silently dropped.
+func TestRouteChannelEvent_ImageAnswersPendingAsk(t *testing.T) {
+	tmp := t.TempDir() // uploads land in ~/.octo/uploads — isolate HOME
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	srv := chanServer(t)
+	ad := &fullFakeAdapter{}
+
+	sess := srv.channelMgr.GetOrCreateSession(evFor("seed"), nil)
+	replyCh, release, err := sess.BeginAsk("c1", "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	ev := evFor("[图片]")
+	ev.Files = []channel.FileAttachment{{Type: "image", Name: "qr.png", MimeType: "image/png", DataURL: pngDataURL()}}
+	srv.routeChannelEvent(context.Background(), ad, ev)
+
+	var got string
+	select {
+	case got = <-replyCh:
+	case <-time.After(time.Second):
+		t.Fatal("pending ask did not receive the image answer")
+	}
+	if !strings.Contains(got, "[图片]") {
+		t.Errorf("answer lost the message text: %q", got)
+	}
+	if !strings.Contains(got, "[Attached file:") || !strings.Contains(filepath.ToSlash(got), ".octo/uploads") {
+		t.Fatalf("answer missing the persisted-upload note: %q", got)
+	}
+	path := strings.TrimSuffix(strings.Split(got, "[Attached file: ")[1], "]")
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		t.Errorf("persisted image unreadable: err=%v bytes=%d", err, len(data))
+	}
+}
+
+// TestRouteChannelEvent_ImageSteerCarriesAttachment: an image sent mid-turn
+// rides the Inbox as a steer — the attachment must reach the model as a
+// persisted path note, not vanish (same drop class as the ask-reply bug).
+func TestRouteChannelEvent_ImageSteerCarriesAttachment(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	sender := &blockingSender{started: make(chan struct{}, 8), release: make(chan struct{})}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.channelMgr = channel.NewManager(&channel.Config{}, func(*agentprofile.Profile) *agent.Agent {
+		a := agent.New(sender, "stub-model")
+		a.LiteSender, a.LiteModel = stubSender{}, "stub-model"
+		return a
+	}, channel.BindByChat)
+	ad := &fullFakeAdapter{}
+
+	srv.routeChannelEvent(context.Background(), ad, evFor("first message"))
+	<-sender.started // turn 1 is now blocked inside the sender
+
+	ev := evFor("[图片]")
+	ev.Files = []channel.FileAttachment{{Type: "image", Name: "shot.png", MimeType: "image/png", DataURL: pngDataURL()}}
+	srv.routeChannelEvent(context.Background(), ad, ev)
+
+	close(sender.release) // let turn 1 finish; the leftover steers must chain
+	<-sender.started      // the chained turn hit the sender
+
+	waitFor(t, func() bool { calls, _ := sender.snapshot(); return calls >= 2 })
+	_, inputs := sender.snapshot()
+	found := false
+	for _, in := range inputs {
+		if strings.Contains(in, "[Attached file:") && strings.Contains(filepath.ToSlash(in), ".octo/uploads") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("steered image never reached the model as a path note; inputs = %q", inputs)
 	}
 }
 

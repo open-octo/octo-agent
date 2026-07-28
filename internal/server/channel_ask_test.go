@@ -90,6 +90,28 @@ func TestChannelPermissionAsk_NonAffirmativeDenies(t *testing.T) {
 	}
 }
 
+// TestChannelPermissionAsk_AffirmativeWithAttachmentNote: the dispatcher
+// folds "[Attached file: …]" notes into replies that carry files; an
+// approving word accompanied by a screenshot must still approve.
+func TestChannelPermissionAsk_AffirmativeWithAttachmentNote(t *testing.T) {
+	srv, sess, ad, ev := askEnv(t)
+	ask := srv.channelPermissionAsk(sess, ad, ev)
+
+	done := make(chan struct{})
+	var allow bool
+	go func() {
+		allow, _, _ = ask(context.Background(), "terminal", nil)
+		close(done)
+	}()
+	waitFor(t, func() bool { return len(ad.texts()) == 1 })
+	sess.DeliverAskReply("c1", "", "允许\n\n[Attached file: /tmp/shot.png]")
+	<-done
+
+	if !allow {
+		t.Error("affirmative reply with an attachment note must allow")
+	}
+}
+
 func TestChannelPermissionAsk_ContextCancelDenies(t *testing.T) {
 	srv, sess, ad, ev := askEnv(t)
 	ask := srv.channelPermissionAsk(sess, ad, ev)

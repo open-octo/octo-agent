@@ -49,6 +49,16 @@ func (s *Session) SetAskButtonsOnly() {
 	s.askMu.Unlock()
 }
 
+// HasPendingAsk reports whether an ask is currently waiting for a reply.
+// The inbound dispatcher uses it to decide whether an incoming message's
+// attachments must be persisted up front: an ask answer (or a mid-turn
+// steer) travels as text only, so files would otherwise be dropped.
+func (s *Session) HasPendingAsk() bool {
+	s.askMu.Lock()
+	defer s.askMu.Unlock()
+	return s.pendingAsk != nil
+}
+
 // DeliverAskReply routes text to a pending ask and reports whether it was
 // consumed. False means no ask is waiting (or the reply came from the wrong
 // chat or user) — the caller should treat the message as normal chat input.

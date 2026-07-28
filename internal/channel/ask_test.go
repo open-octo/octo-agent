@@ -47,6 +47,24 @@ func TestSession_SecondBeginAskRefused(t *testing.T) {
 	}
 }
 
+func TestSession_HasPendingAsk(t *testing.T) {
+	sess := &Session{}
+	if sess.HasPendingAsk() {
+		t.Fatal("no ask armed, HasPendingAsk must be false")
+	}
+	_, release, err := sess.BeginAsk("c1", "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sess.HasPendingAsk() {
+		t.Fatal("ask armed, HasPendingAsk must be true")
+	}
+	release()
+	if sess.HasPendingAsk() {
+		t.Fatal("ask released, HasPendingAsk must be false")
+	}
+}
+
 func TestSession_ReleaseClearsPending(t *testing.T) {
 	sess := &Session{}
 	_, release, err := sess.BeginAsk("c1", "u1")

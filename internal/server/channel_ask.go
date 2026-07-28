@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/app"
 	"github.com/open-octo/octo-agent/internal/channel"
 	"github.com/open-octo/octo-agent/internal/tools"
@@ -126,7 +127,11 @@ func (s *Server) channelPermissionAsk(sess *channel.Session, ad channel.Adapter,
 		// mode resolves Ask→Deny before the gate ever calls it.
 		select {
 		case text := <-replyCh:
-			return isAffirmative(text), isAlways(text), nil
+			// The dispatcher folds "[Attached file: …]" notes into replies
+			// that carry files; strip them so an approving word accompanied
+			// by a screenshot still parses as the approval it is.
+			cleaned, _ := agent.StripAttachmentNotes(text)
+			return isAffirmative(cleaned), isAlways(cleaned), nil
 		case <-ctx.Done():
 			return false, false, ctx.Err()
 		}

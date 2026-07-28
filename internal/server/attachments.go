@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,7 +12,31 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/channel"
 )
+
+// inboundFileNotes persists an inbound IM event's file attachments and
+// returns one "[Attached file: <path>]" note per file. Unlike
+// attachInboundFiles there is no vision branch — the ask-reply and steer
+// paths carry text only, so every file must be reachable by path. Attachments
+// without retrievable bytes (voice/video placeholders) are skipped.
+func inboundFileNotes(files []channel.FileAttachment) []string {
+	var notes []string
+	for _, f := range files {
+		switch {
+		case f.DataURL != "":
+			block, _, err := saveImageAttachment(f.Name, f.DataURL)
+			if err != nil {
+				slog.Debug("inbound file note", "name", f.Name, "err", err)
+				continue
+			}
+			notes = append(notes, agent.AttachmentNote(block.ImagePath))
+		case f.Path != "":
+			notes = append(notes, agent.AttachmentNote(f.Path))
+		}
+	}
+	return notes
+}
 
 // docChipRefs strips "[Attached file: …]" notes from display text and returns
 // the cleaned text plus one chip ref per note. Image attachments persisted
