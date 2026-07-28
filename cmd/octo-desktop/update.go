@@ -119,6 +119,23 @@ func canInplaceUpdate() bool {
 	return false
 }
 
+// updaterWindowCSS patches the hover state of the built-in updater window's
+// primary buttons ("Install Update", "Restart & Apply", "Try Again").
+//
+// Upstream (wails v3 alpha2.118, pkg/updater/assets/window.html) has
+// `.u__btn:hover:not(:disabled) { background: var(--surface-2) }` at specificity
+// 0,3,0, which outranks `.u__btn--primary { background: var(--accent) }` at
+// 0,1,0 — and `.u__btn--primary:hover` only layers on a brightness filter, never
+// re-asserting the accent background. So hovering a primary button swaps it to
+// --surface-2 while its text stays --accent-fg (#ffffff): white on #f0f0f3 in
+// the light palette, i.e. the button vanishes. (Dark mode hides the bug, where
+// --surface-2 is #2c2c30.) Injected CSS lands last in <head>, so re-asserting
+// both at equal specificity wins.
+const updaterWindowCSS = `.u__btn--primary:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-fg);
+}`
+
 // initInplaceUpdater configures app.Updater against the GitHub release feed.
 // Returns false (logging why) when configuration fails; the caller then keeps
 // the notify-and-open flow, so an updater problem never blocks updates
@@ -145,6 +162,7 @@ func initInplaceUpdater(app *application.App) bool {
 	if err := app.Updater.Init(updater.Config{
 		CurrentVersion: strings.TrimPrefix(version.Version, "v"),
 		Providers:      []updater.Provider{verifiedOnly{gh}},
+		Window:         &updater.BuiltinWindow{CSS: updaterWindowCSS},
 	}); err != nil {
 		log.Printf("octo-desktop: in-place updater disabled (init): %v", err)
 		return false
