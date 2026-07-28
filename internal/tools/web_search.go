@@ -50,11 +50,18 @@ type WebSearchResult struct {
 // WebSearchResponse is what gets serialised back to the LLM. Provider
 // records which backend actually produced the results, so the LLM knows
 // whether to trust the corpus (Brave/Google index vs. DDG/Bing HTML scrape).
+//
+// Field order matters: Provider precedes Results because the marshalled body
+// reaches event consumers through AgentEvent.Output, which the agent loop
+// truncates at EventToolOutputCap (8 KiB) — a size 20 results with long
+// snippets can exceed. Behind the results array, Provider would be the first
+// field cut, and the TUI card (which parses this body for the backend name)
+// would silently lose its label exactly for the biggest searches.
 type WebSearchResponse struct {
 	Query    string            `json:"query"`
-	Results  []WebSearchResult `json:"results"`
-	Count    int               `json:"count"`
 	Provider string            `json:"provider"`
+	Count    int               `json:"count"`
+	Results  []WebSearchResult `json:"results"`
 	Error    string            `json:"error,omitempty"`
 }
 
@@ -204,11 +211,14 @@ func (WebSearchTool) Execute(ctx context.Context, _ string, input map[string]any
 	if succeeded {
 		// Structured payload for the web frontend's rich result card
 		// (sessions.js _renderWebSearchResult expects query/results/total).
+		// provider rides along so the card can name the backend without
+		// re-parsing the (truncatable) result body — UI is never truncated.
 		res.UI = map[string]any{
-			"type":    "web_search",
-			"query":   response.Query,
-			"results": response.Results,
-			"total":   response.Count,
+			"type":     "web_search",
+			"query":    response.Query,
+			"provider": response.Provider,
+			"results":  response.Results,
+			"total":    response.Count,
 		}
 	}
 	return res, nil

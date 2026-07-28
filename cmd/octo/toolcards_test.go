@@ -1,14 +1,19 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 func TestCardVerbFor(t *testing.T) {
@@ -407,14 +412,26 @@ func TestRenderToolOutcome_InlineResultSanitized(t *testing.T) {
 	}
 }
 
+// webSearchBody builds a web_search result body with the given backend, in the
+// real field order WebSearchResponse marshals (provider ahead of results).
+func webSearchBody(provider string) string {
+	return `{"query":"x","provider":"` + provider +
+		`","count":1,"results":[{"title":"T","url":"http://e.com","snippet":"s"}]}`
+}
+
+// cardHeader returns just the header line of a rendered card. Assertions have
+// to target it specifically: the body preview echoes the raw JSON, so a
+// whole-card Contains("brave") would pass off the body even with the meta gone.
+func cardHeader(card string) string {
+	return strings.SplitN(card, "\n", 2)[0]
+}
+
 func TestRenderToolCard_WebSearchNamesBackend(t *testing.T) {
-	// The backend name lives at the end of the JSON body, past the results
-	// array the preview folds away — it only reaches the user via the header's
-	// dim meta. A keyed backend is named without a nudge.
-	body := `{"query":"x","results":[{"title":"T","url":"http://e.com","snippet":"s"}],"count":1,"provider":"brave"}`
-	got := renderToolCard("web_search", map[string]any{"query": "x"}, body, false, 0, 0)
-	if !strings.Contains(got, "brave") {
-		t.Errorf("backend name missing from card; got:\n%s", got)
+	// Which backend answered only reaches the user through the header's dim
+	// meta — the body preview folds away. A keyed backend is named, no nudge.
+	got := renderToolCard("web_search", map[string]any{"query": "x"}, webSearchBody("brave"), false, 0, 0)
+	if h := cardHeader(got); !strings.Contains(h, "brave") {
+		t.Errorf("backend name missing from card header %q; full card:\n%s", h, got)
 	}
 	if strings.Contains(got, "no search key") {
 		t.Errorf("keyed backend should carry no nudge; got:\n%s", got)
@@ -422,10 +439,40 @@ func TestRenderToolCard_WebSearchNamesBackend(t *testing.T) {
 }
 
 func TestRenderToolCard_WebSearchScrapedCarriesNudge(t *testing.T) {
-	body := `{"query":"x","results":[{"title":"T","url":"http://e.com","snippet":"s"}],"count":1,"provider":"duckduckgo"}`
-	got := renderToolCard("web_search", map[string]any{"query": "x"}, body, false, 0, 0)
-	if !strings.Contains(got, "duckduckgo") || !strings.Contains(got, "no search key") {
-		t.Errorf("scraped backend should be named and nudged; got:\n%s", got)
+	got := renderToolCard("web_search", map[string]any{"query": "x"}, webSearchBody("duckduckgo"), false, 0, 0)
+	h := cardHeader(got)
+	if !strings.Contains(h, "duckduckgo") || !strings.Contains(h, "no search key") {
+		t.Errorf("scraped backend should be named and nudged in the header %q; full card:\n%s", h, got)
+	}
+}
+
+func TestRenderToolCard_WebSearchBackendSurvivesOutputCap(t *testing.T) {
+	// Event consumers get AgentEvent.Output, which the agent loop truncates at
+	// EventToolOutputCap (8 KiB) — reachable with 20 long-snippet results. The
+	// label must survive that, which is why Provider marshals ahead of Results.
+	var results []tools.WebSearchResult
+	for i := 0; i < 20; i++ {
+		results = append(results, tools.WebSearchResult{
+			Title:   "result title " + strconv.Itoa(i),
+			URL:     "https://example.com/" + strconv.Itoa(i),
+			Snippet: strings.Repeat("long snippet text ", 40),
+		})
+	}
+	body, err := json.MarshalIndent(tools.WebSearchResponse{
+		Query: "x", Provider: "duckduckgo", Count: len(results), Results: results,
+	}, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) <= agent.EventToolOutputCap {
+		t.Fatalf("fixture is %d bytes, needs to exceed the %d-byte cap to be meaningful",
+			len(body), agent.EventToolOutputCap)
+	}
+	capped := string(body)[:agent.EventToolOutputCap] + "…[truncated]"
+
+	got := renderToolCard("web_search", map[string]any{"query": "x"}, capped, false, 0, 0)
+	if h := cardHeader(got); !strings.Contains(h, "duckduckgo") {
+		t.Errorf("backend name lost to output truncation; header %q", h)
 	}
 }
 

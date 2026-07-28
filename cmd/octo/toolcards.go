@@ -175,16 +175,66 @@ func toolCardOpts(toolName string, input map[string]any, output string, isErr bo
 }
 
 // webSearchProvider pulls the backend name out of a web_search result body
-// (WebSearchResponse.Provider). Returns "" for a non-JSON or unparsable body —
-// an errored search, or a future change to the tool's output shape.
+// (WebSearchResponse.Provider). Returns "" for a body that isn't a JSON object,
+// or one whose provider field never arrives — an errored search, or a future
+// change to the tool's output shape.
+//
+// Scans token-by-token rather than json.Unmarshal-ing the whole body, because
+// what reaches here is AgentEvent.Output, which the agent loop truncates at
+// EventToolOutputCap. A truncated body is invalid JSON, so a whole-document
+// unmarshal fails outright and the label would vanish for exactly the largest
+// searches. An incremental scan gets everything ahead of the cut — which is why
+// WebSearchResponse marshals Provider ahead of Results.
 func webSearchProvider(output string) string {
-	var r struct {
-		Provider string `json:"provider"`
-	}
-	if err := json.Unmarshal([]byte(output), &r); err != nil {
+	dec := json.NewDecoder(strings.NewReader(output))
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
 		return ""
 	}
-	return r.Provider
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return ""
+		}
+		if name, _ := key.(string); name == "provider" {
+			v, err := dec.Token()
+			if err != nil {
+				return ""
+			}
+			s, _ := v.(string)
+			return s
+		}
+		if err := skipJSONValue(dec); err != nil {
+			return ""
+		}
+	}
+	return ""
+}
+
+// skipJSONValue consumes exactly one value from dec — a scalar, or a whole
+// object/array however deeply nested — leaving the decoder positioned at the
+// next key. Returns the decoder's error when the stream ends mid-value, which
+// for a truncated body is the expected outcome.
+func skipJSONValue(dec *json.Decoder) error {
+	t, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if t != json.Delim('{') && t != json.Delim('[') {
+		return nil // scalar: already consumed
+	}
+	for depth := 1; depth > 0; {
+		t, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		switch t {
+		case json.Delim('{'), json.Delim('['):
+			depth++
+		case json.Delim('}'), json.Delim(']'):
+			depth--
+		}
+	}
+	return nil
 }
 
 // webSearchProviderNote returns the nudge shown beside a zero-key backend, or

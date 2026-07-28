@@ -17,8 +17,8 @@ import (
 // (design §13.2: each channel's models + API key reachability), checks the
 // Default/Lite references resolve, reports which web-search backend is live,
 // prints ✓/✗ lines, and exits non-zero when anything is wrong so it can be
-// scripted. It never mutates anything
-// (`octo config --fix` does the repairs it points to).
+// scripted. It never mutates anything (`octo config --fix` does the repairs it
+// points to).
 func runDoctor(_ []string, _ io.Reader, stdout, stderr io.Writer) int {
 	problems := 0
 	note := func(ok bool, msg string) {
