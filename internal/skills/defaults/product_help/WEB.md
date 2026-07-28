@@ -17,8 +17,9 @@ not bound by terminal key codes.
 | **↑** / **↓** | Browse input history (caret at start / end of the box) | Same |
 | **/** (first character) | Open the command menu — ↑/↓ to navigate, Tab/Enter to pick, Esc to close | Same |
 
-The **Stop** button next to Send interrupts the running turn (the TUI's Esc). Queued and not-yet-drained
-steer messages survive an interrupt, exactly as in the TUI.
+The **Stop** button next to Send interrupts the running turn (the TUI's Esc). Interrupting stops only that
+turn — a queued message survives it and then **starts running immediately**, as the next turn. To cancel a
+queued message rather than let it run, retract it first (see below). Same behaviour as the TUI.
 
 Attachments: paste an image directly into the box, drag files onto it, or use the paperclip. Images ride
 the message inline; other file types are uploaded and referenced by path for the agent to read.

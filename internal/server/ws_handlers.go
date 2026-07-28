@@ -621,6 +621,12 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 			mu.Lock()
 			s.turnRunning[sid] = false
 			mu.Unlock()
+			// A message that arrived between the loop's last drain and the flag
+			// clearing above saw turnRunning=true and parked itself, but the loop
+			// was already past chaining it — nothing else would ever pick it up.
+			// Kick once now that we're demonstrably idle (no-op when empty, or
+			// when another entry has taken the session over).
+			s.kickIdleSteerTurn(sid)
 		}()
 		s.runAgentTurnLoop(sess, content, att.blocks, att.images)
 	}()
@@ -1094,17 +1100,13 @@ func (s *Server) runAgentTurnLoop(sess *agent.Session, initialContent string, bl
 	defer s.drain.end()
 
 	content := initialContent
-	// pending holds chained turns already carved out of the steer queue but not
-	// yet run, in order. Explicitly queued messages each get their own batch, so
-	// the queue is not necessarily exhausted by a single follow-up turn.
-	var pending [][]queuedTurn
 	for {
 		s.doAgentTurn(sess, content, blocks, images)
 		if s.drain.isDraining() {
 			// Don't chain queued steer messages into fresh turns during a
 			// drain — they'd start work the shutdown cuts at the timeout.
 			// Tell the user to resend instead of eating the input silently.
-			if (len(pending) > 0 || len(s.drainSteer(sess.ID)) > 0) && s.wsHub != nil {
+			if items := s.drainSteer(sess.ID); len(items) > 0 && s.wsHub != nil {
 				s.wsHub.broadcast(sess.ID, map[string]string{
 					"type":       "error",
 					"message":    errDraining.Error(),
@@ -1113,24 +1115,26 @@ func (s *Server) runAgentTurnLoop(sess *agent.Session, initialContent string, bl
 			}
 			break
 		}
-		if len(pending) == 0 {
-			// An active goal continues unprompted: enqueue the hidden continuation
-			// prompt so the chain below starts the follow-up turn. User steers
-			// queued meanwhile take priority — GoalContinuation is only consulted
-			// when the queue is empty, and its own guards (status, zero-progress
-			// suppression) decide whether the loop keeps going.
-			if s.goalsEnabled.Load() && !s.steerPending(sess.ID) {
-				if prompt, ok := sess.GoalContinuation(); ok {
-					s.enqueueSteer(sess.ID, agent.InboxItem{Text: prompt})
-				}
+		// An active goal continues unprompted: enqueue the hidden continuation
+		// prompt so the chain below starts the follow-up turn. User steers
+		// queued meanwhile take priority — GoalContinuation is only consulted
+		// when the queue is empty, and its own guards (status, zero-progress
+		// suppression) decide whether the loop keeps going.
+		if s.goalsEnabled.Load() && !s.steerPending(sess.ID) {
+			if prompt, ok := sess.GoalContinuation(); ok {
+				s.enqueueSteer(sess.ID, agent.InboxItem{Text: prompt})
 			}
-			pending = batchQueuedTurns(s.drainSteer(sess.ID))
 		}
-		if len(pending) == 0 {
+		batches := batchQueuedTurns(s.drainSteer(sess.ID))
+		if len(batches) == 0 {
 			break
 		}
-		content, blocks = foldQueuedBatch(pending[0])
-		pending = pending[1:]
+		// Run the first batch; put the rest back at the head rather than holding
+		// them in a local. The queue stays the single source of truth, so a
+		// message the user queued behind this one can still be retracted while it
+		// waits — and anything arriving meanwhile appends behind it, in order.
+		s.requeueFront(sess.ID, batches[1:])
+		content, blocks = foldQueuedBatch(batches[0])
 		images = imageRefsFromBlocks(blocks)
 	}
 }
@@ -1465,7 +1469,15 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	defer func() {
 		s.sessionAgentsMu.Lock()
 		if items := a.Inbox.Drain(); len(items) > 0 {
-			s.enqueueSteer(sess.ID, items...)
+			// These were typed at THIS turn — they run ahead of anything the user
+			// explicitly queued behind them, or the chain would answer the later
+			// message first. Same front-insert the TUI does when a turn ends with
+			// an undrained inbox (cmd/octo/tuirepl.go, handleTurnFinished).
+			turns := make([]queuedTurn, 0, len(items))
+			for _, it := range items {
+				turns = append(turns, queuedTurn{item: it})
+			}
+			s.requeueFront(sess.ID, [][]queuedTurn{turns})
 		}
 		delete(s.sessionAgents, sess.ID)
 		delete(s.liveSessions, sess.ID)

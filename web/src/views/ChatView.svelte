@@ -56,6 +56,7 @@
   import { renderMarkdown, setupCopyButtons } from '../lib/markdown'
   import { t, tr } from '../lib/i18n'
   import { confirmDialog } from '../lib/confirm'
+  import { insertPendingSend } from '../lib/pendingSendOrder'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
   import SubAgentsCard from '../components/chat/SubAgentsCard.svelte'
@@ -772,10 +773,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         return { ...m, [sid]: msgs }
       })
       if (meta?.queued) {
-        // A queued message does not ride the previous turn — it starts its own,
-        // and that turn's `complete` already flipped streaming off. Flip it back
-        // so the composer shows Stop and the reply renders as live output
-        // instead of looking like the session went idle.
+        // A queued message starts its own turn, and the previous turn's
+        // `complete` already flipped streaming off. The `progress phase=active`
+        // that doAgentTurn broadcasts right after this event flips it back — this
+        // just closes the frame in between, so the composer doesn't blink to idle.
         chatStreaming.update(s => ({ ...s, [sid]: true }))
       }
       if (isSteer && meta) {
@@ -1474,18 +1475,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     // so the server starts one immediately and this is an ordinary send.
     const isQueued = queued && steering
     const pendingId = 'pending-' + Date.now()
-    const queue = pendingSends.get(sid) ?? []
-    const entry = { pendingId, wasStreaming, text, files, queued: isQueued }
-    const firstQueued = queue.findIndex(m => m.queued)
-    if (!isQueued && firstQueued >= 0) {
-      // The server drains steers into the turn in flight, but a queued message
-      // waits for the turn after it — so a steer sent later is confirmed first.
-      // Keep this FIFO in server-consumption order, or history_user_message
-      // would retire the wrong entry and drop the wrong ghost bubble.
-      queue.splice(firstQueued, 0, entry)
-    } else {
-      queue.push(entry)
-    }
+    // Insert in server-confirmation order, not send order — see pendingSendOrder.
+    const queue = insertPendingSend(pendingSends.get(sid) ?? [], {
+      pendingId, wasStreaming, text, files, queued: isQueued,
+    })
     pendingSends.set(sid, queue)
     if (steering) {
       // Mid-turn input: show above the composer, not in the scrollback, until

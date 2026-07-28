@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 )
@@ -178,8 +179,184 @@ func TestMidTurnQueue_RunsAsSeparateTurns(t *testing.T) {
 	if counts["q1\n\nq2"] != 0 {
 		t.Errorf("queued messages were folded into one turn (all: %q)", userTexts)
 	}
+	// Order is the whole point: they must run in the order the user sent them.
+	if got := indexOf(userTexts, "q1"); got > indexOf(userTexts, "q2") {
+		t.Errorf("q1 ran after q2 (transcript: %q)", userTexts)
+	}
 	if leftover := srv.drainSteer(sess.ID); len(leftover) != 0 {
 		t.Errorf("steer queue = %+v, want drained", leftover)
+	}
+}
+
+func indexOf(hay []string, needle string) int {
+	for i, s := range hay {
+		if s == needle {
+			return i
+		}
+	}
+	return -1
+}
+
+// A steer left undrained when its turn ends belongs to that turn — it must run
+// BEFORE a message the user queued behind it. The teardown used to append it to
+// the queue tail, which reversed the two as soon as queueing gave the queue's
+// order any meaning: the user saw the later message answered first.
+//
+// The single-round stub is what makes this reachable — runLoop drains the inbox
+// at the START of an iteration, so a steer arriving during the only round is
+// still there at teardown.
+func TestTurnTeardown_UndrainedSteerRunsBeforeQueued(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.initWS()
+	srv.turnRunning = make(map[string]bool)
+	srv.steerQueues = make(map[string][]queuedTurn)
+	srv.sessionAgents = make(map[string]*agent.Agent)
+
+	sess := agent.NewSession("stub-model", "")
+	sess.Title = "teardown order probe"
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv.sender = &midTurnSender{inject: func() {
+		// Steer first, then queue — the order the user typed them.
+		srv.handleWSUserMessage(nil, &wsMsgUserMessage{
+			SessionID: sess.ID,
+			Content:   json.RawMessage(`"steered"`),
+		})
+		srv.handleWSUserMessage(nil, &wsMsgUserMessage{
+			SessionID: sess.ID,
+			Content:   json.RawMessage(`"queued"`),
+			Queue:     true,
+		})
+	}}
+
+	srv.turnRunning[sess.ID] = true
+	srv.runAgentTurnLoop(sess, "first-msg", nil, nil)
+
+	loaded, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	var userTexts []string
+	for _, m := range loaded.Messages {
+		if m.Role != agent.RoleUser {
+			continue
+		}
+		if m.Content != "" {
+			userTexts = append(userTexts, m.Content)
+		}
+		for _, b := range m.Blocks {
+			if b.Type == "text" && b.Text != "" {
+				userTexts = append(userTexts, b.Text)
+			}
+		}
+	}
+	si, qi := indexOf(userTexts, "steered"), indexOf(userTexts, "queued")
+	if si < 0 || qi < 0 {
+		t.Fatalf("both messages must run, got transcript %q", userTexts)
+	}
+	if si > qi {
+		t.Errorf("the undrained steer ran after the queued message (transcript: %q)", userTexts)
+	}
+}
+
+// While a queued message waits for its turn it must stay in the queue, so the
+// user can still retract it. Holding not-yet-run batches in a local made the
+// retract report "already sent" for a message that had not run yet.
+func TestQueuedMessage_RetractableWhileWaiting(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+
+	const sid = "retract-queued"
+	conn := subscribedConn(t, srv, sid)
+
+	srv.enqueueQueued(sid, agent.InboxItem{Text: "q1"}, agent.InboxItem{Text: "q2"})
+	// The turn loop takes the first batch and puts the rest back.
+	batches := batchQueuedTurns(srv.drainSteer(sid))
+	srv.requeueFront(sid, batches[1:])
+
+	srv.handleWSRetractSteer(sid, "pending-q2", "q2")
+
+	ev := nextEvent(t, conn)
+	if ev["type"] != "steer_retracted" {
+		t.Fatalf("type = %v, want steer_retracted (a waiting queued message is retractable)", ev["type"])
+	}
+	if leftover := srv.drainSteer(sid); len(leftover) != 0 {
+		t.Errorf("queue = %+v, want empty after retracting the only waiting item", leftover)
+	}
+}
+
+// The idle kick is the safety net for a message queued in the window between
+// the turn loop's last drain and turnRunning clearing — nothing else would pick
+// it up. It must also honour the batching: a steer ahead of a queued message
+// runs first, as its own turn.
+func TestKickIdleSteerTurn_RunsQueuedAsSeparateTurns(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.initWS()
+	srv.turnRunning = make(map[string]bool)
+	srv.steerQueues = make(map[string][]queuedTurn)
+	srv.sessionAgents = make(map[string]*agent.Agent)
+	srv.sender = &midTurnSender{}
+
+	sess := agent.NewSession("stub-model", "")
+	sess.Title = "idle kick probe"
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv.enqueueSteer(sess.ID, agent.InboxItem{Text: "late-steer"})
+	srv.enqueueQueued(sess.ID, agent.InboxItem{Text: "late-queued"})
+
+	if !srv.kickIdleSteerTurn(sess.ID) {
+		t.Fatal("kickIdleSteerTurn returned false, want a turn started")
+	}
+
+	mu := srv.sessionTurnLock(sess.ID)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		running := srv.turnRunning[sess.ID]
+		mu.Unlock()
+		if !running {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("turn never wound down")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	loaded, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	var userTexts []string
+	for _, m := range loaded.Messages {
+		if m.Role == agent.RoleUser && m.Content != "" {
+			userTexts = append(userTexts, m.Content)
+		}
+	}
+	for _, want := range []string{"late-steer", "late-queued"} {
+		if indexOf(userTexts, want) < 0 {
+			t.Errorf("%q never ran (transcript: %q)", want, userTexts)
+		}
+	}
+	if indexOf(userTexts, "late-steer") > indexOf(userTexts, "late-queued") {
+		t.Errorf("steer ran after the queued message (transcript: %q)", userTexts)
+	}
+	for _, txt := range userTexts {
+		if txt == "late-steer\n\nlate-queued" {
+			t.Errorf("the queued message was folded with the steer (transcript: %q)", userTexts)
+		}
 	}
 }
 

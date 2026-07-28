@@ -9,6 +9,7 @@
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
   import { t } from '../../lib/i18n'
+  import { submitIntent } from '../../lib/composerKeys'
   import StatusTag from '../ui/StatusTag.svelte'
   import FolderPickerModal from '../overlays/FolderPickerModal.svelte'
   import type { McpServerDetail, McpTool } from '../../lib/types'
@@ -843,19 +844,12 @@
       }
     }
 
-    // Cmd/Ctrl+Enter queues instead of steering: the message runs as its own
-    // turn after the one in flight. Checked before the plain-Enter branch below,
-    // which would otherwise swallow it as an ordinary send.
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    // Enter sends (mid-turn: steers); Cmd/Ctrl+Enter queues as the next turn;
+    // Shift+Enter falls through to the textarea's own newline. See composerKeys.
+    const intent = submitIntent(e)
+    if (intent) {
       e.preventDefault()
-      send(true)
-      return
-    }
-
-    // Enter to send (unless shift is held)
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      send()
+      send(intent === 'queue')
       return
     }
 
@@ -1012,7 +1006,7 @@
       <textarea
         bind:this={textareaEl}
         rows={1}
-        placeholder={$t('chat.placeholder')}
+        placeholder={isStreaming || $running ? $t('chat.placeholder_running') : $t('chat.placeholder')}
         bind:value={text}
         onkeydown={onKeydown}
         oninput={onInput}
