@@ -178,10 +178,11 @@ Codex 的 record & replay 只在 macOS 应用里提供，octo 的浏览器录制
 
 - **Bug / 功能建议** —— [GitHub Issues](https://github.com/open-octo/octo-agent/issues)
 - **使用问题 / 讨论** —— [GitHub Discussions](https://github.com/open-octo/octo-agent/discussions)，公开可沉淀，后来的同学能搜到答案
-- **微信交流群** —— 扫码进群，聊使用心得、提需求、围观 roadmap（企业微信活码，长期有效，满员自动开新群）：
+- **微信交流群** —— 扫码进群，聊使用心得、提需求、围观 roadmap。群二维码 7 天
+  有效、到期会更新；扫不进的话到 Discussions 喊一声：
 
 <p align="left">
-  <img src="docs/assets/wechat-group-qr.png" alt="octo-agent 微信交流群二维码" width="200">
+  <img src="docs/assets/wechat-group-qr.jpg" alt="octo-agent 微信交流群二维码" width="200">
 </p>
 
 ## 开发

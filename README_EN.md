@@ -172,10 +172,11 @@ The full documentation lives at **[octo-agent.dev/docs](https://octo-agent.dev/d
 
 - **Bugs / feature requests** — [GitHub Issues](https://github.com/open-octo/octo-agent/issues)
 - **Questions / discussion** — [GitHub Discussions](https://github.com/open-octo/octo-agent/discussions), public and searchable so the next person finds the answer
-- **WeChat group** (Chinese-speaking users) — scan to join the user group; the QR code is a WeCom live code, valid long-term:
+- **WeChat group** (Chinese-speaking users) — scan to join the user group. The QR code
+  expires every 7 days and gets refreshed; if it no longer scans, ping us in Discussions:
 
 <p align="left">
-  <img src="docs/assets/wechat-group-qr.png" alt="octo-agent WeChat group QR code" width="200">
+  <img src="docs/assets/wechat-group-qr.jpg" alt="octo-agent WeChat group QR code" width="200">
 </p>
 
 ## Development
