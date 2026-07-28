@@ -308,7 +308,7 @@ func TestRunDoctor_WebSearchNamesConfiguredBackend(t *testing.T) {
 		t.Fatalf("exit = %d, want 0; err=%q", code, stderr.String())
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "using tavily") {
+	if !strings.Contains(out, "TAVILY_API_KEY set") || !strings.Contains(out, "tavily") {
 		t.Errorf("configured backend not named:\n%s", out)
 	}
 	if strings.Contains(out, "no search key set") {

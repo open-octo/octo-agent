@@ -60,6 +60,21 @@ first; there's no cap on how many background processes can run at once, and all 
 | `web_search` | search the web |
 | `browser` | drive a real Chrome tab over CDP — see [Browser automation](/docs/guides/browser-automation/) |
 
+`web_search` works with no configuration by scraping DuckDuckGo and Bing HTML, but those results are
+markedly worse than a real search index. Setting any one of these env vars switches it to a proper
+API — the first one present wins:
+
+| Env var | Backend | Free allowance |
+|---|---|---|
+| `BRAVE_SEARCH_API_KEY` | [Brave Search](https://brave.com/search/api/) | 1000 searches/month |
+| `TAVILY_API_KEY` | [Tavily](https://www.tavily.com/) | 1000 searches/month |
+| `SERPER_API_KEY` | [Serper](https://serper.dev/) | 2500 one-off, then ~$1/1000 |
+
+Either free tier covers ordinary single-user use. `octo doctor` reports which backend is configured,
+and each result card names the backend that actually answered — a card marked `scraped` means the
+cascade fell through to HTML scraping, either because no key is set or because the keyed backend
+errored, hit its quota, or returned nothing.
+
 ## Agents & orchestration
 
 | Tool | Purpose |

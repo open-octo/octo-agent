@@ -433,16 +433,16 @@ func TestRenderToolCard_WebSearchNamesBackend(t *testing.T) {
 	if h := cardHeader(got); !strings.Contains(h, "brave") {
 		t.Errorf("backend name missing from card header %q; full card:\n%s", h, got)
 	}
-	if strings.Contains(got, "no search key") {
-		t.Errorf("keyed backend should carry no nudge; got:\n%s", got)
+	if strings.Contains(got, "scraped") {
+		t.Errorf("keyed backend should carry no scrape flag; got:\n%s", got)
 	}
 }
 
 func TestRenderToolCard_WebSearchScrapedCarriesNudge(t *testing.T) {
 	got := renderToolCard("web_search", map[string]any{"query": "x"}, webSearchBody("duckduckgo"), false, 0, 0)
 	h := cardHeader(got)
-	if !strings.Contains(h, "duckduckgo") || !strings.Contains(h, "no search key") {
-		t.Errorf("scraped backend should be named and nudged in the header %q; full card:\n%s", h, got)
+	if !strings.Contains(h, "duckduckgo") || !strings.Contains(h, "scraped") {
+		t.Errorf("scraped backend should be named and flagged in the header %q; full card:\n%s", h, got)
 	}
 }
 
@@ -468,6 +468,12 @@ func TestRenderToolCard_WebSearchBackendSurvivesOutputCap(t *testing.T) {
 		t.Fatalf("fixture is %d bytes, needs to exceed the %d-byte cap to be meaningful",
 			len(body), agent.EventToolOutputCap)
 	}
+	// Replicates agent.truncateOutput, which is unexported. That coupling is
+	// the point of the assertion below rather than a shortcut around it: what
+	// this pins is "a body cut at the cap still yields the provider". If the
+	// agent's truncation policy ever changes shape (rune-aligned cut, different
+	// marker, head+tail), update this line — the property still holds for any
+	// prefix-preserving cut, which is what the field order buys.
 	capped := string(body)[:agent.EventToolOutputCap] + "…[truncated]"
 
 	got := renderToolCard("web_search", map[string]any{"query": "x"}, capped, false, 0, 0)
@@ -476,13 +482,59 @@ func TestRenderToolCard_WebSearchBackendSurvivesOutputCap(t *testing.T) {
 	}
 }
 
-func TestWebSearchProvider_NonJSONBodyIsEmpty(t *testing.T) {
-	// An errored search (or a future change to the tool's output shape) must
-	// leave the meta untouched rather than render a stray label.
-	if got := webSearchProvider("web_search: query is required"); got != "" {
-		t.Errorf("non-JSON body: got %q, want \"\"", got)
+func TestWebSearchProviderNote_NeverClaimsMissingKey(t *testing.T) {
+	// Regression guard for a false diagnosis: Execute's cascade falls through on
+	// an HTTP error, an exhausted quota, or a zero-result response, so a user
+	// with a working key can still get scraped results. The note must therefore
+	// never assert anything about the key — it only reports what the provider
+	// name proves. Env is set here to make the point that it is irrelevant.
+	t.Setenv("BRAVE_SEARCH_API_KEY", "bk")
+	for _, provider := range []string{"duckduckgo", "bing"} {
+		note := webSearchProviderNote(provider)
+		if note != "scraped" {
+			t.Errorf("%s: note = %q, want %q", provider, note, "scraped")
+		}
+		if strings.Contains(note, "key") {
+			t.Errorf("%s: note must not mention keys (a key may be set and failing); got %q", provider, note)
+		}
 	}
-	if got := webSearchProviderNote("brave"); got != "" {
-		t.Errorf("keyed backend note: got %q, want \"\"", got)
+	for _, provider := range []string{"brave", "tavily", "serper", "", "unknown"} {
+		if note := webSearchProviderNote(provider); note != "" {
+			t.Errorf("%s: non-scrape backend should carry no flag; got %q", provider, note)
+		}
+	}
+}
+
+func TestWebSearchProvider_Shapes(t *testing.T) {
+	// The scan runs on AgentEvent.Output, which arrives truncated at
+	// EventToolOutputCap often enough that "cut anywhere" is a real input class,
+	// not a hypothetical. Every shape below must yield a value or "", never a
+	// panic, a hang, or a wrong provider.
+	cases := []struct {
+		name, in, want string
+	}{
+		{"intact body", webSearchBody("brave"), "brave"},
+		{"provider first of all", `{"provider":"tavily","query":"x"}`, "tavily"},
+		{"cut mid-array after provider", `{"query":"x","provider":"bing","results":[{"title":"a"`, "bing"},
+		{"cut mid-key before provider", `{"query":"x","prov`, ""},
+		{"cut mid-provider-value", `{"query":"x","provider":"duckdu`, ""},
+		{"cut right after provider key", `{"query":"x","provider":`, ""},
+		{"provider behind a truncated array", `{"query":"x","results":[{"title":"a"`, ""},
+		{"non-JSON error text", "web_search: query is required", ""},
+		{"empty", "", ""},
+		{"json null", "null", ""},
+		{"json array", `[{"provider":"brave"}]`, ""},
+		{"json string", `"brave"`, ""},
+		{"nested provider is not top level", `{"meta":{"provider":"brave"},"provider":"bing"}`, "bing"},
+		{"provider not a string", `{"provider":42,"query":"x"}`, ""},
+		{"duplicate keys take the first", `{"provider":"brave","provider":"bing"}`, "brave"},
+		{"trailing garbage after object", `{"provider":"brave"} SPOOF`, "brave"},
+		{"deep nesting before provider", `{"a":{"b":{"c":[[[1,2]]]}},"provider":"serper"}`, "serper"},
+		{"no provider field", `{"query":"x","count":0}`, ""},
+	}
+	for _, c := range cases {
+		if got := webSearchProvider(c.in); got != c.want {
+			t.Errorf("%s: webSearchProvider(%q) = %q, want %q", c.name, c.in, got, c.want)
+		}
 	}
 }

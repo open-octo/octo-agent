@@ -163,10 +163,10 @@ func toolCardOpts(toolName string, input map[string]any, output string, isErr bo
 	case "terminal_output", "kill_shell", "terminal_input":
 		opts.Tail = true
 	case "web_search":
-		// Which backend answered is otherwise invisible: it sits at the end of
-		// the JSON body, past the results array the preview folds away. It
-		// matters because the zero-key path is an HTML scrape whose results are
-		// markedly worse — so name it, and say so when no key is set.
+		// Which backend answered is otherwise invisible: the body preview folds
+		// away before reaching it. It matters because the zero-key fallbacks are
+		// HTML scrapes whose results are markedly worse than a real index — so
+		// name the backend, and flag the scrape.
 		if p := webSearchProvider(output); p != "" {
 			opts.Meta = joinMeta(p, webSearchProviderNote(p), opts.Meta)
 		}
@@ -237,14 +237,21 @@ func skipJSONValue(dec *json.Decoder) error {
 	return nil
 }
 
-// webSearchProviderNote returns the nudge shown beside a zero-key backend, or
-// "" for a keyed one. Deliberately terse: the note shares the header with the
-// query, and anything longer truncates the query away — which is the more
-// useful of the two. `octo doctor` carries the env-var list and the free tiers.
+// webSearchProviderNote returns the flag shown beside a scrape backend, or ""
+// for a keyed one.
+//
+// It states only what the provider name proves — that these results were
+// scraped. It deliberately does NOT say "no search key": Execute's cascade
+// falls through on an HTTP error, an exhausted quota, or a zero-result
+// response, so a user with a perfectly good Brave key can land here, and
+// telling them to go get a key they already own would bury the real fault.
+// `octo doctor`, which can actually see the env, carries the key advice.
+//
+// Terse on purpose: the note shares the header line with the query, and the
+// query is the more useful of the two when the terminal is narrow.
 func webSearchProviderNote(provider string) string {
-	switch provider {
-	case "duckduckgo", "bing":
-		return "no search key"
+	if tools.WebSearchIsScrapedBackend(provider) {
+		return "scraped"
 	}
 	return ""
 }

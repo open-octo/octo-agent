@@ -78,15 +78,57 @@ var keyedSearchBackends = []struct {
 	{"serper", "SERPER_API_KEY", searchSerper},
 }
 
+// scrapedSearchBackends lists the zero-key HTML-scrape fallbacks in priority
+// order. Always available, and always a quality downgrade from a real search
+// index. Single-sourced so a renderer asking "were these results scraped?"
+// can't fall out of step with the cascade — adding a fourth fallback here
+// updates every surface at once.
+var scrapedSearchBackends = []struct {
+	name string
+	run  func(context.Context, string, int) ([]WebSearchResult, error)
+}{
+	{"duckduckgo", searchDuckDuckGo},
+	{"bing", searchBing},
+}
+
 // WebSearchKeyedBackend returns the name of the highest-priority key-gated
-// backend that has its env var set, or "" when none is — i.e. searches fall
-// through to the DuckDuckGo/Bing HTML scraping path, whose result quality is
+// backend that has its env var set, or "" when none is — i.e. searches start
+// from the DuckDuckGo/Bing HTML scraping path, whose result quality is
 // substantially worse. `octo doctor` uses the empty case to point the user at
 // the free tiers.
+//
+// A non-empty result does NOT mean a search actually used that backend: the
+// cascade in Execute falls through on an HTTP error, an exhausted quota, or a
+// zero-result response, so a configured key can still end in a scrape. Callers
+// reporting on a finished search must read the response's Provider instead.
 func WebSearchKeyedBackend() string {
 	for _, b := range keyedSearchBackends {
 		if os.Getenv(b.env) != "" {
 			return b.name
+		}
+	}
+	return ""
+}
+
+// WebSearchIsScrapedBackend reports whether name is one of the zero-key HTML
+// scrapers, i.e. whether a search that reported this provider returned
+// scrape-quality results.
+func WebSearchIsScrapedBackend(name string) bool {
+	for _, b := range scrapedSearchBackends {
+		if b.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// WebSearchKeyEnvVar returns the env var that enables the named key-gated
+// backend, or "" for an unknown or zero-key one. Lets `octo doctor` name the
+// variable it actually read instead of restating the mapping.
+func WebSearchKeyEnvVar(backend string) string {
+	for _, b := range keyedSearchBackends {
+		if b.name == backend {
+			return b.env
 		}
 	}
 	return ""
@@ -165,10 +207,9 @@ func (WebSearchTool) Execute(ctx context.Context, _ string, input map[string]any
 		}
 	}
 	// Zero-key fallbacks are always available.
-	backends = append(backends,
-		backend{"duckduckgo", searchDuckDuckGo},
-		backend{"bing", searchBing},
-	)
+	for _, b := range scrapedSearchBackends {
+		backends = append(backends, backend{b.name, b.run})
+	}
 
 	for _, b := range backends {
 		results, err := b.run(ctx, query, max)
@@ -210,9 +251,9 @@ func (WebSearchTool) Execute(ctx context.Context, _ string, input map[string]any
 	res := agent.ToolResult{Text: string(body)}
 	if succeeded {
 		// Structured payload for the web frontend's rich result card
-		// (sessions.js _renderWebSearchResult expects query/results/total).
-		// provider rides along so the card can name the backend without
-		// re-parsing the (truncatable) result body — UI is never truncated.
+		// (ToolGroup.svelte reads query/provider/results/total). provider rides
+		// along so the card can name the backend without re-parsing the
+		// (truncatable) result body — UI is never truncated.
 		res.UI = map[string]any{
 			"type":     "web_search",
 			"query":    response.Query,

@@ -132,8 +132,14 @@ func runDoctor(_ []string, _ io.Reader, stdout, stderr io.Writer) int {
 	// that two of the good backends have free tiers that cover ordinary use.
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Web search:")
+	// The ✓ here is weaker than its neighbours on purpose — it proves the env
+	// var is set, not that the key still works. A dead key falls through to
+	// scraping on every search, and nothing short of spending a real query
+	// would detect that, so the line names the var rather than claiming the
+	// backend is live.
 	if backend := tools.WebSearchKeyedBackend(); backend != "" {
-		fmt.Fprintf(stdout, "  ✓ using %s\n", backend)
+		fmt.Fprintf(stdout, "  ✓ %s set — searches try %s first\n",
+			tools.WebSearchKeyEnvVar(backend), backend)
 	} else {
 		fmt.Fprintln(stdout, "  ! no search key set — falling back to DuckDuckGo/Bing HTML scraping (poor results)")
 		fmt.Fprintln(stdout, "    → set one of these for a real search index:")

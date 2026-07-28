@@ -403,3 +403,25 @@ func TestWebSearchKeyedBackend_ReportsPriority(t *testing.T) {
 		t.Errorf("all three set: got %q, want \"brave\"", got)
 	}
 }
+
+func TestWebSearchBackendMetadata(t *testing.T) {
+	// The scrape set and the env-var mapping are read by `octo doctor` and the
+	// TUI card; both must stay in step with the cascade Execute actually builds.
+	for _, name := range []string{"duckduckgo", "bing"} {
+		if !WebSearchIsScrapedBackend(name) {
+			t.Errorf("%s should be a scrape backend", name)
+		}
+	}
+	for _, name := range []string{"brave", "tavily", "serper", "", "startpage"} {
+		if WebSearchIsScrapedBackend(name) {
+			t.Errorf("%s should not be a scrape backend", name)
+		}
+	}
+	if got := WebSearchKeyEnvVar("tavily"); got != "TAVILY_API_KEY" {
+		t.Errorf("WebSearchKeyEnvVar(tavily) = %q", got)
+	}
+	// A scrape backend has no key to name — callers must not print an empty var.
+	if got := WebSearchKeyEnvVar("duckduckgo"); got != "" {
+		t.Errorf("WebSearchKeyEnvVar(duckduckgo) = %q, want \"\"", got)
+	}
+}
