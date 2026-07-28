@@ -86,10 +86,9 @@ func printBrowserSetupSteps(w io.Writer, port int) {
 	fmt.Fprintln(w, `Browser automation lets octo drive your real, logged-in browser — clicking,
 typing, uploading, and replaying recorded workflows on sites you're signed into.
 
-To allow that, turn on remote debugging in the browser you want octo to use:
+To allow that, turn on remote debugging in Chrome:
 
-  Chrome   open  chrome://inspect/#remote-debugging
-  Edge     open  edge://inspect/#remote-debugging
+  Open  chrome://inspect/#remote-debugging
 
   Then tick "Allow remote debugging for this browser instance".
   (You may need to restart the browser for it to take effect.)`)
@@ -143,9 +142,8 @@ Usage:
                         the connection, and wire it into your config.
 
 Enabling remote debugging:
-  Chrome   chrome://inspect/#remote-debugging
-  Edge     edge://inspect/#remote-debugging
-  Tick "Allow remote debugging for this browser instance" (restart if asked).
+  Open chrome://inspect/#remote-debugging in Chrome and tick
+  "Allow remote debugging for this browser instance" (restart if asked).
 
 This serves a debug endpoint on 127.0.0.1:9222; setup saves
 browser.connect_port so the tool reuses your logged-in session every run.`)

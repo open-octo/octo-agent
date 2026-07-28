@@ -12,17 +12,15 @@ metadata:
 
 # Skill: web-access
 
-复杂 web 任务的方法论：把内置的 `web_search` / `web_fetch` 与 `browser` 工具（驱动你日常的、已登录的 Chrome/Edge）按场景编排起来，并跨 session 积累站点经验。
+复杂 web 任务的方法论：把内置的 `web_search` / `web_fetch` 与 `browser` 工具（驱动你日常的、已登录的 Chrome）按场景编排起来，并跨 session 积累站点经验。
 
 ## 前置：浏览器自动化
 
 `web_search` / `web_fetch` 开箱即用，不需要任何配置。
 
-只有当任务需要**操作浏览器界面 / 登录态 / 动态渲染页面**时，才需要 `browser` 工具能连上你日常的浏览器。一次性配置：
+只有当任务需要**操作浏览器界面 / 登录态 / 动态渲染页面**时，才需要 `browser` 工具能连上你日常的 Chrome。一次性配置：
 
-1. 在要用的浏览器打开 inspect 页面并勾选 **Allow remote debugging for this browser instance**（可能需重启浏览器）：
-   - Chrome：`chrome://inspect/#remote-debugging`
-   - Edge：`edge://inspect/#remote-debugging`
+1. 在 Chrome 打开 `chrome://inspect/#remote-debugging` 并勾选 **Allow remote debugging for this browser instance**（可能需重启浏览器）。
 2. 或直接运行 `octo browser setup`，它会给出上面的步骤、验证连接、并把端口写进配置。
 
 连上后 `browser` 工具天然携带登录态——大多数常用网站都已登录。无独立浏览器、无需命令行参数。
