@@ -42,9 +42,10 @@ debugger-attach prompt once, not on every navigation.
 octo browser setup
 ```
 
-Walks you through enabling `chrome://inspect/#remote-debugging` (Chrome 144+ disabled the old
-`--remote-debugging-port` flag on the default profile, so the inspect-page checkbox is the
-supported path), then probes port 9222 in a loop — confirming not just that it connects, but that a
+Walks you through enabling `chrome://inspect/#remote-debugging` (Chrome 136 stopped honouring
+`--remote-debugging-port` when it points at the *default* user-data directory, and Chrome 144 added
+this in-browser checkbox as the way to debug that profile — which is the one carrying your logins),
+then probes port 9222 in a loop — confirming not just that it connects, but that a
 real page-level CDP call succeeds (a browser-level connection can succeed while page control still
 fails on recent Chrome). On success it saves `browser.connect_port` to your config; on failure it
 prompts you to flip the toggle and retry, or quit and resume later.

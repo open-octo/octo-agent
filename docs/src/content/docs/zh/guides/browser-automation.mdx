@@ -39,9 +39,9 @@ Web UI 的那个）——要操作一个已有标签页，必须显式调用 `pa
 octo browser setup
 ```
 
-带你一步步打开 `chrome://inspect/#remote-debugging`（Chrome 144+ 之后默认 profile 上的旧
-`--remote-debugging-port` flag 被禁用了，所以走 inspect 页面的勾选框是目前支持的路径），然后循环
-探测 9222 端口——不只是确认连上了，还会验证一次真正的页面级 CDP 调用能成功（浏览器级连接可能成功，
+带你一步步打开 `chrome://inspect/#remote-debugging`（Chrome 136 起，`--remote-debugging-port`
+指向**默认** user-data 目录时不再生效；Chrome 144 加了这个浏览器内的勾选框，作为调试默认 profile
+——也就是带着你登录态的那个——的途径），然后循环探测 9222 端口——不只是确认连上了，还会验证一次真正的页面级 CDP 调用能成功（浏览器级连接可能成功，
 但页面控制在新版 Chrome 上还是会失败）。成功之后会把 `browser.connect_port` 存进你的配置；失败就
 提示你去开那个开关，回车重试，或者随时退出、以后再跑一遍。
 

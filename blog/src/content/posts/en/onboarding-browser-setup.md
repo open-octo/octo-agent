@@ -24,7 +24,7 @@ octo's `browser` tool drives a real Chrome tab directly over the Chrome DevTools
 octo browser setup
 ```
 
-This walks you to `chrome://inspect/#remote-debugging` and has you tick "Allow remote debugging for this browser instance" (Chrome 144+ disabled the old `--remote-debugging-port` flag on the default profile, so the inspect-page checkbox is the supported path today), restarting the browser if needed. Once ticked, `octo browser setup` probes port 9222 in a loop — and it checks more than "did it connect": it makes an actual page-level CDP call, because on recent Chrome a browser-level connection can succeed while page control still fails. Once that succeeds, the port is saved to your config, so every future `octo` run reuses it without repeating this step.
+This walks you to `chrome://inspect/#remote-debugging` and has you tick "Allow remote debugging for this browser instance" (Chrome 136 stopped honouring `--remote-debugging-port` when it points at the default profile, and Chrome 144 added this in-browser checkbox as the way to debug that profile — the one holding your logins), restarting the browser if needed. Once ticked, `octo browser setup` probes port 9222 in a loop — and it checks more than "did it connect": it makes an actual page-level CDP call, because on recent Chrome a browser-level connection can succeed while page control still fails. Once that succeeds, the port is saved to your config, so every future `octo` run reuses it without repeating this step.
 
 If you don't finish right away, that's fine — the command waits for you to confirm the toggle is on, retries on Enter, or quits any time on `q`. Run `octo browser setup` again whenever you're ready.
 

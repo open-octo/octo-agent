@@ -24,7 +24,7 @@ octo 的 `browser` 工具通过 Chrome DevTools Protocol（CDP）直接操作一
 octo browser setup
 ```
 
-这个命令会带你打开 `chrome://inspect/#remote-debugging`，勾选"Allow remote debugging for this browser instance"（Chrome 144 之后，默认 profile 上原来那个 `--remote-debugging-port` 命令行参数被禁用了，走 inspect 页面的这个勾选框是目前能用的路径），必要时重启一下浏览器。勾完之后，`octo browser setup` 会在本地 9222 端口反复探测——注意，它验证的不只是"连上了"，还会真正发一次页面级的 CDP 调用确认可用，因为在新版 Chrome 上，浏览器级的连接可能成功，但页面控制那一层还是会失败。探测成功后，端口号会存进你的配置，以后每次开 octo 都直接复用，不用再走一遍这个流程。
+这个命令会带你打开 `chrome://inspect/#remote-debugging`，勾选"Allow remote debugging for this browser instance"（Chrome 136 起，`--remote-debugging-port` 指向默认 profile 时不再生效；Chrome 144 加了这个浏览器内的勾选框，作为调试默认 profile——也就是带着你登录态的那个——的途径），必要时重启一下浏览器。勾完之后，`octo browser setup` 会在本地 9222 端口反复探测——注意，它验证的不只是"连上了"，还会真正发一次页面级的 CDP 调用确认可用，因为在新版 Chrome 上，浏览器级的连接可能成功，但页面控制那一层还是会失败。探测成功后，端口号会存进你的配置，以后每次开 octo 都直接复用，不用再走一遍这个流程。
 
 如果一时半会没弄好也没关系：命令会停下来等你确认已经打开开关，回车重试，或者随时按 `q` 退出，下次想起来了再跑一遍 `octo browser setup` 就行。
 

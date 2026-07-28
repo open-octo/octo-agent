@@ -49,10 +49,13 @@ authorization prompt appears once per process.
 
 ## Connecting to Chrome
 
-Chrome 144+ disabled `--remote-debugging-port` on the default profile, so the
-supported path is the **chrome://inspect checkbox**: open
+Chrome 136 stopped honouring `--remote-debugging-port` when it points at the
+default user-data directory; Chrome 144 added an in-browser checkbox that
+re-enables debugging for that profile. Since the default profile is the one
+carrying the user's logins, that checkbox is the supported path: open
 `chrome://inspect/#remote-debugging`, tick *"Allow remote debugging for this
-browser instance"*, which serves CDP on `127.0.0.1:9222`. The debug port is
+browser instance"*, which serves CDP on `127.0.0.1:9222`. Edge exposes the same
+toggle at `edge://inspect` under **Remote debugging** in the left nav. The debug port is
 fixed at **9222** (the checkbox's port); it is not user-editable in the setup UI
 — a custom port only via config (`browser.connect_port`).
 
