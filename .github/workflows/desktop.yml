@@ -80,7 +80,7 @@ jobs:
 
       # The desktop app go:embeds the web UI from internal/server/webdist,
       # which is gitignored — build it from source before any go build.
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
