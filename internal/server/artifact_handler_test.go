@@ -25,9 +25,8 @@ func newArtifactSession(t *testing.T, paths ...string) string {
 type writeOutcome int
 
 const (
-	writeOK         writeOutcome = iota // succeeded
-	writeDenied                         // the permission gate refused it
-	writeUnanswered                     // no tool_result at all
+	writeOK     writeOutcome = iota // succeeded
+	writeDenied                     // the permission gate refused it
 )
 
 // newArtifactSessionWith builds a transcript with one call per path under the
@@ -46,9 +45,6 @@ func newArtifactSessionWith(t *testing.T, tool string, outcome writeOutcome, pat
 				Input: map[string]any{"path": p, "content": "x"},
 			}},
 		})
-		if outcome == writeUnanswered {
-			continue
-		}
 		result := agent.NewToolResultBlock(id, "wrote "+p, false)
 		if outcome == writeDenied {
 			// Exactly what dispatchTools synthesises for a denied call.
@@ -288,11 +284,22 @@ func TestHandleGetArtifact_DeniedWriteIsNotServed(t *testing.T) {
 		t.Errorf("denied write: status = %d, want 404; body=%s", w.Code, w.Body.String())
 	}
 
-	// An unanswered call proves nothing either — a crashed turn, or the orphan
-	// repair stamping an error over an interrupted batch.
-	unanswered := newArtifactSessionWith(t, "write_file", writeUnanswered, private)
-	if w := getArtifact(t, srv, unanswered, private); w.Code != http.StatusNotFound {
-		t.Errorf("unanswered write: status = %d, want 404", w.Code)
+	// An unanswered call that something else has already moved past is stale:
+	// this is what stops a denial from being harvestable after the fact, and it
+	// is the difference from the in-flight case covered by the test below.
+	stale := agent.NewSession("stub-model", "")
+	stale.Messages = append(stale.Messages,
+		agent.Message{Role: agent.RoleAssistant, Blocks: []agent.ContentBlock{{
+			Type: "tool_use", ID: "t0", Name: "write_file",
+			Input: map[string]any{"path": private, "content": "x"},
+		}}},
+		agent.Message{Role: agent.RoleUser, Content: "never mind"},
+	)
+	if err := stale.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if w := getArtifact(t, srv, stale.ID, private); w.Code != http.StatusNotFound {
+		t.Errorf("stale unanswered write: status = %d, want 404", w.Code)
 	}
 
 	// Same for a refused show_artifact, the other way into the whitelist.
@@ -367,5 +374,45 @@ func TestHandleGetArtifact_ForgedSuccessIsRejected(t *testing.T) {
 	}
 	if w := getArtifact(t, srv, sameBatch.ID, private); w.Code != http.StatusNotFound {
 		t.Errorf("id reused in one batch: status = %d, want 404; body=%s", w.Code, w.Body.String())
+	}
+}
+
+// The live case, which is the whole reason an unanswered call is servable. The
+// panel is told to fetch from inside dispatchTools: EventToolDone carries the
+// ui_payload, the web handler broadcasts it and then persists (ws_handlers.go),
+// and the tool_result message is only appended once dispatchTools returns. So
+// the transcript the client's fetch reads ends at the tool_use. Requiring a
+// result would 404 every write the user just watched happen.
+func TestHandleGetArtifact_ServesAWriteStillInFlight(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	artDir := t.TempDir()
+	p := filepath.Join(artDir, "report.md")
+	if err := os.WriteFile(p, []byte("# report"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Exactly the mid-turn shape: user message, then the assistant's tool_use,
+	// and nothing yet after it.
+	sess := agent.NewSession("stub-model", "")
+	sess.Messages = append(sess.Messages,
+		agent.Message{Role: agent.RoleUser, Content: "write the report"},
+		agent.Message{Role: agent.RoleAssistant, Blocks: []agent.ContentBlock{{
+			Type: "tool_use", ID: "t0", Name: "write_file",
+			Input: map[string]any{"path": p, "content": "# report"},
+		}}},
+	)
+	if err := sess.Save(); err != nil {
+		t.Fatal(err)
+	}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	w := getArtifact(t, srv, sess.ID, p)
+	if w.Code != http.StatusOK {
+		t.Fatalf("in-flight write: status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "# report" {
+		t.Errorf("body = %q", w.Body.String())
 	}
 }

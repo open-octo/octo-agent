@@ -114,7 +114,7 @@ func sessionWrotePath(sess *agent.Session, reqPath string) (string, bool) {
 				continue
 			}
 			clean := filepath.Clean(p)
-			if clean != want || !callSucceeded(sess.Messages, i, b.ID) {
+			if clean != want || !callAuthorized(sess.Messages, i, b.ID) {
 				continue
 			}
 			return clean, true
@@ -123,11 +123,11 @@ func sessionWrotePath(sess *agent.Session, reqPath string) (string, bool) {
 	return "", false
 }
 
-// callSucceeded reports whether the tool_use with the given id in messages[i]
-// was answered by a non-error result in the message immediately after it. A gate
-// denial and a genuine execution failure both come back as IsError=true (see
-// dispatchTools), and the result is the only place the transcript records that a
-// call ran at all.
+// callAuthorized reports whether the tool_use with the given id in messages[i]
+// may serve its path. A gate denial and a genuine execution failure both come
+// back as IsError=true (see dispatchTools), and the result is the only place the
+// transcript records what became of a call — so the rule is that an *answered*
+// call must have been answered without error.
 //
 // Pairing is scoped to the next message rather than searched for across the
 // transcript, because tool-call ids come from the model, not the runtime. A
@@ -138,18 +138,30 @@ func sessionWrotePath(sess *agent.Session, reqPath string) (string, bool) {
 // message, and the agent loop appends the two back to back — so nothing
 // legitimate depends on a wider search.
 //
-// Unanswered calls count as not-run. The cost is that a file written by a turn
-// whose results never landed — a crash mid-turn, or ensureToolPairing stamping a
-// synthetic error over an interrupted batch — stops previewing until something
-// writes it again. That is the right way to be wrong about whether a read was
-// authorized. Context reclamation is safe for this: it rewrites a stale result's
-// text but preserves ToolUseID and IsError.
-func callSucceeded(msgs []agent.Message, i int, id string) bool {
-	if id == "" || i+1 >= len(msgs) {
+// A call with nothing after it at all is allowed, and that is not laxness — it
+// is the live case. The panel is told to fetch from inside dispatchTools:
+// EventToolDone carries the ui_payload, the web handler broadcasts it and then
+// persists (ws_handlers.go), and the tool_result message is only appended once
+// dispatchTools returns. So at the moment the client asks, the newest thing on
+// disk is the tool_use itself. Requiring a result here would 404 every write the
+// user just watched happen.
+//
+// The window that leaves open is narrow and bounded: a denied write is
+// momentarily unanswered too, until the error result reaches disk on the next
+// event. Nothing points a client at that path in the meantime — a denied call
+// produces no ui_payload — so reaching it means already knowing the path and
+// racing a sub-second write. Once any later message exists, an unanswered call
+// is stale and refused, which is what keeps a denial from being harvestable
+// afterwards. That is the property #1891 was actually about.
+//
+// Context reclamation is safe for all of this: it rewrites a stale result's text
+// but preserves ToolUseID and IsError.
+func callAuthorized(msgs []agent.Message, i int, id string) bool {
+	if id == "" {
 		return false
 	}
-	// An id repeated inside one batch is unusable for the same reason: whichever
-	// sibling succeeded would vouch for the other.
+	// An id repeated inside one batch is unusable: whichever sibling succeeded
+	// would vouch for the other.
 	uses := 0
 	for _, b := range msgs[i].Blocks {
 		if b.Type == "tool_use" && b.ID == id {
@@ -158,6 +170,9 @@ func callSucceeded(msgs []agent.Message, i int, id string) bool {
 	}
 	if uses != 1 {
 		return false
+	}
+	if i+1 >= len(msgs) {
+		return true // in flight, or the process died holding it
 	}
 	answered := false
 	for _, b := range msgs[i+1].Blocks {
