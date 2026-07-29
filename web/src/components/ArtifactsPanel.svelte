@@ -107,7 +107,7 @@
       {#if laLoading}
         <div class="empty"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon><span>{$t('common.loading')}</span></div>
       {:else if laCurHTML}
-        <iframe srcdoc={laCurHTML} sandbox="allow-scripts clipboard-write" title={laCurName}></iframe>
+        <iframe srcdoc={laCurHTML} sandbox="allow-scripts" allow="clipboard-write" title={laCurName}></iframe>
       {:else if $lightapps.length === 0}
         <div class="empty">
           <iconify-icon icon="ant-design:appstore-outlined" width="28"></iconify-icon>
@@ -195,7 +195,7 @@
         {#if curIsImage}
           <div class="img-wrap"><img src={cur.src} alt={cur.name} /></div>
         {:else if $artifactView === 'preview'}
-          <iframe srcdoc={cur.preview} sandbox="allow-scripts clipboard-write" title={cur.name}></iframe>
+          <iframe srcdoc={cur.preview} sandbox="allow-scripts" allow="clipboard-write" title={cur.name}></iframe>
         {:else}
           <pre class="code-view">{cur.code}</pre>
         {/if}

@@ -67,6 +67,27 @@ describe('observeArtifact — image artifacts', () => {
   })
 })
 
+describe('observeArtifact — markdown copy button', () => {
+  it('binds the handler to an element the preview document actually has', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('```js\nlet a = 1\n```\n')))
+
+    await observeArtifact(SID, payload('/tmp/notes.md'), false)
+
+    const { preview } = get(artifacts)[0]
+    // '.body' matched nothing here, so querySelector returned null and the whole
+    // handler threw on load — the button never worked.
+    expect(preview).not.toContain(".querySelector('.body')")
+    expect(preview).toContain('document.body.addEventListener')
+    // The other half of the contract: the markup the handler looks for.
+    // Not asserting the .code-block wrapper — under happy-dom, DOMPurify drops
+    // every outermost <div> (even `<div class="a">x</div>` → `x`), so its
+    // absence here says nothing about a browser. The handler null-guards that
+    // lookup for the same reason.
+    expect(preview).toContain('class="copy-btn"')
+    expect(preview).toContain('<pre><code')
+  })
+})
+
 describe('observeArtifact — preview documents', () => {
   it('builds the markdown preview without referencing /api/', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('# hello')))

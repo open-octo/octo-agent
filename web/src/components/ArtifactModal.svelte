@@ -57,7 +57,7 @@
         <!-- Images render outside the sandboxed iframe (see lib/artifacts.ts). -->
         <div class="img-wrap"><img src={cur.src} alt={cur.name} /></div>
       {:else}
-        <iframe srcdoc={cur.preview} sandbox="allow-scripts clipboard-write" title={cur.name}></iframe>
+        <iframe srcdoc={cur.preview} sandbox="allow-scripts" allow="clipboard-write" title={cur.name}></iframe>
       {/if}
     </div>
   </div>

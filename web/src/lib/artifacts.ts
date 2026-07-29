@@ -378,14 +378,39 @@ export async function observeArtifact(
         const bodyStyle = isDark
           ? 'margin:0;padding:16px;font:14px/1.6 system-ui,-apple-system,sans-serif;color:#d4d4d4;background:#1e1e1e'
           : 'margin:0;padding:16px;font:14px/1.6 system-ui,-apple-system,sans-serif;color:rgba(0,0,0,0.88);background:#ffffff'
+        // Bound to document.body, not '.body': this is a hand-inlined copy of
+        // setupCopyButtons(), whose caller passes the host app's container, and
+        // that selector matched nothing here — querySelector returned null and
+        // the whole handler died on load, so the button never worked at all.
+        //
+        // The clipboard call has a fallback because this document's origin is
+        // opaque; whether the async Clipboard API is available to it varies by
+        // browser even with clipboard-write delegated on the iframe. execCommand
+        // is deprecated but needs no permission, only the click's activation.
+        //
+        // The .code-block lookup is null-guarded like setupCopyButtons' is; the
+        // old unguarded form would throw if the wrapper ever went missing.
         const COPY_SCRIPT = `<script>
-	document.querySelector('.body').addEventListener('click',function(e){
+	document.body.addEventListener('click',function(e){
 	  var b=e.target.closest('.copy-btn');if(!b)return;
-	  var c=b.closest('.code-block').querySelector('pre code');
-	  navigator.clipboard.writeText(c?c.textContent:'').then(function(){
-	    var o=b.textContent;b.textContent='Copied!';
+	  var k=b.closest('.code-block');
+	  var c=k&&k.querySelector('pre code');
+	  var t=c?c.textContent:'';
+	  var done=function(ok){
+	    var o=b.textContent;b.textContent=ok?'Copied!':'Copy failed';
 	    setTimeout(function(){b.textContent=o},1500);
-	  })
+	  };
+	  var legacy=function(){
+	    var ta=document.createElement('textarea');
+	    ta.value=t;ta.setAttribute('readonly','');
+	    ta.style.position='fixed';ta.style.opacity='0';
+	    document.body.appendChild(ta);ta.select();
+	    var ok=false;try{ok=document.execCommand('copy')}catch(err){}
+	    ta.remove();done(ok);
+	  };
+	  if(navigator.clipboard&&navigator.clipboard.writeText){
+	    navigator.clipboard.writeText(t).then(function(){done(true)},legacy)
+	  }else{legacy()}
 	});
 	<\/script>`
         const body = await inlineLocalRefs(renderMarkdown(code), sessionId, path, 'fragment')

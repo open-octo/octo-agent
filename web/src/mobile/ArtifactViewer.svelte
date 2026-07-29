@@ -46,7 +46,7 @@
     {#if isImage}
       <div class="img-wrap"><img src={artifact.src} alt={artifact.name} /></div>
     {:else if view === 'preview'}
-      <iframe srcdoc={artifact.preview} sandbox="allow-scripts clipboard-write" title={artifact.name}></iframe>
+      <iframe srcdoc={artifact.preview} sandbox="allow-scripts" allow="clipboard-write" title={artifact.name}></iframe>
     {:else}
       <pre class="code-view">{artifact.code}</pre>
     {/if}
