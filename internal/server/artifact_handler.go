@@ -104,48 +104,72 @@ func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 // what the user just decided.
 func sessionWrotePath(sess *agent.Session, reqPath string) (string, bool) {
 	want := filepath.Clean(reqPath)
-	ran := succeededToolUses(sess)
-	for _, m := range sess.Messages {
+	for i, m := range sess.Messages {
 		for _, b := range m.Blocks {
 			if b.Type != "tool_use" || (b.Name != "write_file" && b.Name != "edit_file" && b.Name != "show_artifact") {
 				continue
 			}
-			if !ran[b.ID] {
+			p, ok := b.Input["path"].(string)
+			if !ok {
 				continue
 			}
-			p, ok := b.Input["path"].(string)
-			if ok {
-				if clean := filepath.Clean(p); clean == want {
-					return clean, true
-				}
+			clean := filepath.Clean(p)
+			if clean != want || !callSucceeded(sess.Messages, i, b.ID) {
+				continue
 			}
+			return clean, true
 		}
 	}
 	return "", false
 }
 
-// succeededToolUses collects the ids of tool calls whose paired tool_result
-// reports success. A gate denial and a genuine execution failure both come back
-// as IsError=true (see dispatchTools), and the result is the only place the
-// transcript distinguishes either from a call that ran.
+// callSucceeded reports whether the tool_use with the given id in messages[i]
+// was answered by a non-error result in the message immediately after it. A gate
+// denial and a genuine execution failure both come back as IsError=true (see
+// dispatchTools), and the result is the only place the transcript records that a
+// call ran at all.
 //
-// Unanswered calls count as not-run, which is deliberate: a write with no result
-// at all cannot be shown to have happened. The cost is that a file written by a
-// turn whose results never landed — a crash mid-turn, or the orphan repair in
-// ensureToolPairing stamping a synthetic error over an interrupted batch — stops
-// previewing until something writes it again. That is the right way to be wrong
-// here, and context reclamation is safe for this: it rewrites a stale result's
+// Pairing is scoped to the next message rather than searched for across the
+// transcript, because tool-call ids come from the model, not the runtime. A
+// transcript-wide set of "ids that succeeded" is forgeable: emit a write the
+// user is going to deny, then reuse that same id on a trivial call that
+// succeeds, and the denial inherits the success. Scoping also just matches the
+// wire format — an assistant tool_use message is answered by the next user
+// message, and the agent loop appends the two back to back — so nothing
+// legitimate depends on a wider search.
+//
+// Unanswered calls count as not-run. The cost is that a file written by a turn
+// whose results never landed — a crash mid-turn, or ensureToolPairing stamping a
+// synthetic error over an interrupted batch — stops previewing until something
+// writes it again. That is the right way to be wrong about whether a read was
+// authorized. Context reclamation is safe for this: it rewrites a stale result's
 // text but preserves ToolUseID and IsError.
-func succeededToolUses(sess *agent.Session) map[string]bool {
-	ran := make(map[string]bool)
-	for _, m := range sess.Messages {
-		for _, b := range m.Blocks {
-			if b.Type == "tool_result" && !b.IsError && b.ToolUseID != "" {
-				ran[b.ToolUseID] = true
-			}
+func callSucceeded(msgs []agent.Message, i int, id string) bool {
+	if id == "" || i+1 >= len(msgs) {
+		return false
+	}
+	// An id repeated inside one batch is unusable for the same reason: whichever
+	// sibling succeeded would vouch for the other.
+	uses := 0
+	for _, b := range msgs[i].Blocks {
+		if b.Type == "tool_use" && b.ID == id {
+			uses++
 		}
 	}
-	return ran
+	if uses != 1 {
+		return false
+	}
+	answered := false
+	for _, b := range msgs[i+1].Blocks {
+		if b.Type != "tool_result" || b.ToolUseID != id {
+			continue
+		}
+		if b.IsError {
+			return false
+		}
+		answered = true
+	}
+	return answered
 }
 
 // resolveArtifactPath validates a path from a tool UI payload. UI payloads carry
