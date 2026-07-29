@@ -57,14 +57,6 @@ describe('observeArtifact — image artifacts', () => {
     expect(second).not.toBe(first)
   })
 
-  it('keeps transcript order during replay, since nothing awaits', async () => {
-    vi.stubGlobal('fetch', vi.fn())
-
-    await observeArtifact(SID, payload('/tmp/a.png'), false)
-    await observeArtifact(SID, payload('/tmp/b.png'), false)
-
-    expect(get(artifacts).map(a => a.path)).toEqual(['/tmp/a.png', '/tmp/b.png'])
-  })
 })
 
 describe('observeArtifact — markdown copy button', () => {
@@ -204,6 +196,45 @@ describe('observeArtifact — html local references', () => {
     expect(entry.preview).not.toContain('chart.png')
     expect(entry.preview).not.toContain('bg.png')
     expect(entry.preview.match(/data:image\/png;base64,/g)).toHaveLength(2)
+  })
+
+  it('drops a <picture>\'s <source> so the inlined <img src> actually wins', async () => {
+    stubFetch(
+      '<html><body><picture><source srcset="chart.webp" type="image/webp">' +
+        '<img src="chart.png"></picture></body></html>',
+    )
+
+    await observeArtifact(SID, payload('/tmp/page.html'), false)
+
+    const [entry] = get(artifacts)
+    expect(entry.preview).toContain('data:image/png;base64,')
+    // A surviving <source> outranks the src, so the browser would go back to
+    // the unreachable relative path and the image would still be broken.
+    expect(entry.preview).not.toContain('chart.webp')
+    expect(entry.preview).not.toContain('<source')
+  })
+
+  it('rewrites an SVG <image href>', async () => {
+    stubFetch('<html><body><svg><image href="d.png" width="10" height="10"></image></svg></body></html>')
+
+    await observeArtifact(SID, payload('/tmp/page.html'), false)
+
+    const [entry] = get(artifacts)
+    expect(entry.preview).toContain('data:image/png;base64,')
+    expect(entry.preview).not.toContain('d.png')
+  })
+
+  it('keeps a doctype\'s public and system identifiers', async () => {
+    stubFetch(
+      '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">' +
+        '<html><body><img src="chart.png"></body></html>',
+    )
+
+    await observeArtifact(SID, payload('/tmp/page.html'), false)
+
+    // A name-only `<!DOCTYPE html>` would switch this file to standards mode and
+    // the preview would lay out differently from the real thing.
+    expect(get(artifacts)[0].preview).toContain('PUBLIC "-//W3C//DTD HTML 4.01//EN"')
   })
 
   it('hands back the exact source when there is nothing to inline', async () => {

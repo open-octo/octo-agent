@@ -58,7 +58,9 @@ async function downloadImage(
   const fname = name || 'artifact'
   try {
     const res = await fetch(src)
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    if (!res.ok) {
+      throw new Error(await api.readErrorMessage(res, `${res.status} ${res.statusText}`))
+    }
     if (get(nativeShell)) {
       const bytes = new Uint8Array(await res.arrayBuffer())
       // Chunked so a multi-MB screenshot doesn't blow the spread argument limit.
@@ -81,7 +83,10 @@ async function downloadImage(
     a.click()
     a.remove()
     URL.revokeObjectURL(url)
-  } catch {
-    showToast(tr('artifacts.save_failed'), 'error')
+  } catch (e: any) {
+    // With the server's own message: for the 10 MB cap in particular, this is
+    // the only thing that explains why the panel shows a broken image too.
+    const detail = e?.message ? `: ${e.message}` : ''
+    showToast(`${tr('artifacts.save_failed')}${detail}`, 'error')
   }
 }

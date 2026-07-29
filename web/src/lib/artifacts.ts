@@ -124,7 +124,7 @@ const inlineRefMax = 20
 
 // Cheap pre-check: skip the parse/serialize round-trip entirely for a document
 // with nothing to rewrite, which is most of them.
-const LOCAL_REF_HINT = /<img\b|url\(/i
+const LOCAL_REF_HINT = /<img\b|<image\b|url\(/i
 const CSS_URL_RE = /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi
 
 // mode picks how the result is serialized: an HTML artifact is a whole document
@@ -176,9 +176,23 @@ async function inlineLocalRefs(
     const dataUrl = await inline(img.getAttribute('src') ?? '')
     if (!dataUrl) continue
     img.setAttribute('src', dataUrl)
-    // A srcset would outrank the src we just rewrote, and its candidates are
-    // unreachable for the same reason.
+    // Whatever outranks the src has to go, or the rewrite achieves nothing: a
+    // srcset beats src, and a <picture>'s <source> beats both. Their candidates
+    // are unreachable for exactly the reason the src was, so dropping them is
+    // what makes the inlined src take effect.
     img.removeAttribute('srcset')
+    const parent = img.parentElement
+    if (parent && parent.tagName === 'PICTURE') {
+      for (const s of Array.from(parent.querySelectorAll('source'))) s.remove()
+    }
+    changed = true
+  }
+  // SVG's <image> is the same reference in a different attribute.
+  for (const el of Array.from(doc.querySelectorAll('image'))) {
+    const dataUrl = await inline(el.getAttribute('href') ?? el.getAttribute('xlink:href') ?? '')
+    if (!dataUrl) continue
+    if (el.hasAttribute('href')) el.setAttribute('href', dataUrl)
+    if (el.hasAttribute('xlink:href')) el.setAttribute('xlink:href', dataUrl)
     changed = true
   }
   for (const el of Array.from(doc.querySelectorAll('style'))) {
@@ -200,8 +214,20 @@ async function inlineLocalRefs(
   // no local references is never reshaped by the round-trip.
   if (!changed) return html
   if (mode === 'fragment') return doc.body.innerHTML
-  const doctype = doc.doctype ? `<!DOCTYPE ${doc.doctype.name}>` : ''
-  return doctype + doc.documentElement.outerHTML
+  return serializeDoctype(doc.doctype) + doc.documentElement.outerHTML
+}
+
+// documentElement.outerHTML drops the doctype, so it gets rebuilt — with its
+// public/system identifiers, since those are what decide the rendering mode and
+// a name-only `<!DOCTYPE html>` would silently switch a legacy file to standards
+// mode. Anything else above <html> (a build comment, say) is still lost.
+function serializeDoctype(dt: DocumentType | null): string {
+  if (!dt) return ''
+  let out = `<!DOCTYPE ${dt.name}`
+  if (dt.publicId) out += ` PUBLIC "${dt.publicId}"`
+  else if (dt.systemId) out += ' SYSTEM'
+  if (dt.systemId) out += ` "${dt.systemId}"`
+  return out + '>'
 }
 
 async function inlineCSSURLs(
