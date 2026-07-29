@@ -14,19 +14,49 @@ import (
 )
 
 // newArtifactSession persists a session whose transcript wrote the given
-// paths (one write_file tool_use per path) and returns its id.
+// paths — one write_file tool_use per path, each answered by a successful
+// tool_result, which is what the whitelist requires — and returns its id.
 func newArtifactSession(t *testing.T, paths ...string) string {
+	t.Helper()
+	return newArtifactSessionWith(t, "write_file", writeOK, paths...)
+}
+
+// writeOutcome describes the tool_result answering a recorded write.
+type writeOutcome int
+
+const (
+	writeOK         writeOutcome = iota // succeeded
+	writeDenied                         // the permission gate refused it
+	writeUnanswered                     // no tool_result at all
+)
+
+// newArtifactSessionWith builds a transcript with one call per path under the
+// given tool name, each paired with the described outcome.
+func newArtifactSessionWith(t *testing.T, tool string, outcome writeOutcome, paths ...string) string {
 	t.Helper()
 	sess := agent.NewSession("stub-model", "")
 	for i, p := range paths {
+		id := "t" + string(rune('0'+i))
 		sess.Messages = append(sess.Messages, agent.Message{
 			Role: agent.RoleAssistant,
 			Blocks: []agent.ContentBlock{{
 				Type:  "tool_use",
-				ID:    "t" + string(rune('0'+i)),
-				Name:  "write_file",
+				ID:    id,
+				Name:  tool,
 				Input: map[string]any{"path": p, "content": "x"},
 			}},
+		})
+		if outcome == writeUnanswered {
+			continue
+		}
+		result := agent.NewToolResultBlock(id, "wrote "+p, false)
+		if outcome == writeDenied {
+			// Exactly what dispatchTools synthesises for a denied call.
+			result = agent.NewToolResultBlock(id, "permission_denied: user declined to run "+tool, true)
+		}
+		sess.Messages = append(sess.Messages, agent.Message{
+			Role:   agent.RoleUser,
+			Blocks: []agent.ContentBlock{result},
 		})
 	}
 	if err := sess.Save(); err != nil {
@@ -155,6 +185,10 @@ func TestHandleGetArtifact_ShowArtifactCountsAsWrite(t *testing.T) {
 			Type: "tool_use", ID: "t1", Name: "show_artifact",
 			Input: map[string]any{"path": p},
 		}}})
+	sess.Messages = append(sess.Messages, agent.Message{
+		Role:   agent.RoleUser,
+		Blocks: []agent.ContentBlock{agent.NewToolResultBlock("t1", "shown", false)},
+	})
 	if err := sess.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -186,6 +220,10 @@ func TestHandleGetArtifact_EditCountsAsWrite(t *testing.T) {
 			Type: "tool_use", ID: "t1", Name: "edit_file",
 			Input: map[string]any{"path": p, "old_string": "a", "new_string": "b"},
 		}},
+	})
+	sess.Messages = append(sess.Messages, agent.Message{
+		Role:   agent.RoleUser,
+		Blocks: []agent.ContentBlock{agent.NewToolResultBlock("t1", "edited", false)},
 	})
 	if err := sess.Save(); err != nil {
 		t.Fatal(err)
@@ -224,5 +262,48 @@ func TestHandleGetArtifact_WorktreeOutsideServerCWD(t *testing.T) {
 	}
 	if w.Body.String() != "<p>worktree</p>" {
 		t.Errorf("body = %q", w.Body.String())
+	}
+}
+
+// A write the user refused must not become a readable path. The tool_use lands
+// in the transcript before the permission gate rules on it, so the call alone
+// cannot be the whitelist — otherwise denying a write grants a read.
+func TestHandleGetArtifact_DeniedWriteIsNotServed(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	// The realistic shape: the file already exists, the agent proposes
+	// overwriting it, and the user says no. The bytes on disk are the user's.
+	artDir := t.TempDir()
+	private := filepath.Join(artDir, "private.md")
+	if err := os.WriteFile(private, []byte("# my notes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	denied := newArtifactSessionWith(t, "write_file", writeDenied, private)
+	if w := getArtifact(t, srv, denied, private); w.Code != http.StatusNotFound {
+		t.Errorf("denied write: status = %d, want 404; body=%s", w.Code, w.Body.String())
+	}
+
+	// An unanswered call proves nothing either — a crashed turn, or the orphan
+	// repair stamping an error over an interrupted batch.
+	unanswered := newArtifactSessionWith(t, "write_file", writeUnanswered, private)
+	if w := getArtifact(t, srv, unanswered, private); w.Code != http.StatusNotFound {
+		t.Errorf("unanswered write: status = %d, want 404", w.Code)
+	}
+
+	// Same for a refused show_artifact, the other way into the whitelist.
+	deniedShow := newArtifactSessionWith(t, "show_artifact", writeDenied, private)
+	if w := getArtifact(t, srv, deniedShow, private); w.Code != http.StatusNotFound {
+		t.Errorf("denied show_artifact: status = %d, want 404", w.Code)
+	}
+
+	// The control: the same call, allowed, still serves.
+	allowed := newArtifactSessionWith(t, "write_file", writeOK, private)
+	if w := getArtifact(t, srv, allowed, private); w.Code != http.StatusOK {
+		t.Errorf("allowed write: status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
 }
