@@ -8,7 +8,9 @@
 # top-level /evals harness module, which shares their churn-free intent.
 #
 # Minor and patch bumps are grouped into one PR per directory to keep the
-# weekly noise reviewable; majors stay individual PRs.
+# weekly noise reviewable; majors stay individual PRs, except where a
+# package family is only installable as a matched set (see the capacitor
+# group below).
 version: 2
 updates:
   - package-ecosystem: "gomod"
@@ -35,6 +37,15 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     groups:
+      # Capacitor packages only work as a matched set: bumped one at a time,
+      # a new @capacitor/core cannot type-check against the older
+      # @capacitor/app and @capacitor/ios still on the previous major (see
+      # #1906/#1907/#1909, all closed for exactly this). Listed before
+      # npm-minor-patch so it claims capacitor's minor/patch bumps too —
+      # this group is about moving together, not about the bump size.
+      capacitor:
+        patterns:
+          - "@capacitor/*"
       npm-minor-patch:
         update-types: ["minor", "patch"]
 
