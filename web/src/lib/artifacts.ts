@@ -13,7 +13,12 @@
 // origin and count as cross-site; the SameSite=Strict access-key cookie is
 // withheld and the endpoint answers 401 for every client that isn't exempt as
 // loopback. It works on localhost and breaks over a tunnel or on the LAN.
-// Inline the bytes, or render outside the iframe (what `src` below is for).
+//
+// The same goes for any local file the artifact itself points at — a markdown
+// `![](shot.png)` resolves against the host page rather than the file's own
+// directory, and the /api/ path it would need can't authenticate from in there
+// either. Two ways out: render outside the iframe (what `src` is for) or inline
+// the bytes as a data: URI (what inlineMarkdownImages does).
 
 import { get, writable } from 'svelte/store'
 import { artifacts, panelContent, artifactSel } from './stores'
@@ -81,6 +86,122 @@ function hasExternalRefs(html: string): boolean {
   return EXTERNAL_REF_RE.test(html)
 }
 
+function artifactURL(sessionId: string, path: string): string {
+  return `/api/sessions/${encodeURIComponent(sessionId)}/artifacts?path=${encodeURIComponent(path)}`
+}
+
+// ─── Markdown image references ──────────────────────────────────────────────
+//
+// A markdown artifact can point at its own images: `![shot](shot.png)`. Those
+// references cannot survive inside the preview iframe — a relative path
+// resolves against the host page, and the /api/ path it would need can't
+// authenticate from there (see the file-header note) — so the bytes are inlined
+// as data: URIs, the one form the iframe can read.
+//
+// Only files the session itself wrote are fetchable, since the endpoint serves
+// nothing else. That covers the case that matters: a report the agent wrote
+// beside the screenshots it took. A reference to anything else is left exactly
+// as written and simply doesn't render, same as today.
+//
+// Budgeted because a data: URI is resident memory for as long as the artifact
+// is in the store: base64 costs ~1.37x the file size, doubled again by UTF-16,
+// and the srcdoc attribute holds a second copy. Past the budget the remaining
+// references are left alone rather than silently bloating the session.
+const inlineImageBudget = 8 << 20
+const inlineImageMax = 20
+
+async function inlineMarkdownImages(html: string, sessionId: string, mdPath: string): Promise<string> {
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  const imgs = Array.from(doc.querySelectorAll('img'))
+  if (imgs.length === 0) return html
+
+  const seen = new Map<string, string>()
+  let spent = 0
+  let count = 0
+  for (const img of imgs) {
+    const abs = localImagePath(img.getAttribute('src') ?? '', mdPath)
+    if (!abs) continue
+    const cached = seen.get(abs)
+    if (cached) {
+      img.setAttribute('src', cached)
+      continue
+    }
+    if (count >= inlineImageMax || spent >= inlineImageBudget) break
+    try {
+      const res = await fetch(artifactURL(sessionId, abs))
+      if (!res.ok) continue
+      const blob = await res.blob()
+      const dataUrl = await blobToDataURL(blob)
+      spent += blob.size
+      count++
+      seen.set(abs, dataUrl)
+      img.setAttribute('src', dataUrl)
+    } catch {
+      // Leave the reference as written — a broken image beats no preview.
+    }
+  }
+  return doc.body.innerHTML
+}
+
+// localImagePath resolves a markdown image reference to the absolute on-disk
+// path to ask the endpoint for, or null when it isn't a local file. Anything
+// carrying a scheme is left alone: an http(s) image is a cross-origin no-cors
+// load, which a sandboxed iframe performs just fine.
+function localImagePath(raw: string, mdPath: string): string | null {
+  const src = raw.trim()
+  if (!src || src.startsWith('//') || src.startsWith('#')) return null
+  if (/^[a-z][a-z0-9+.-]*:/i.test(src) && !/^[a-z]:[\\/]/i.test(src)) return null
+  let rel = src.split(/[?#]/)[0]
+  try {
+    rel = decodeURIComponent(rel)
+  } catch {
+    // Malformed escapes: use the reference verbatim.
+  }
+  if (!rel) return null
+  const abs = isAbsolutePath(rel) ? rel : `${dirOf(mdPath)}/${rel}`
+  const clean = cleanPath(abs)
+  return isAbsolutePath(clean) ? clean : null
+}
+
+// A leading "/" or a Windows drive letter. Paths are normalised to forward
+// slashes; the server runs filepath.Clean on its side, which re-separates them
+// per platform before matching against the transcript.
+function isAbsolutePath(p: string): boolean {
+  return p.startsWith('/') || /^[a-z]:[\\/]/i.test(p)
+}
+
+function dirOf(p: string): string {
+  const norm = p.replace(/\\/g, '/')
+  const cut = norm.lastIndexOf('/')
+  return cut < 0 ? '' : norm.slice(0, cut)
+}
+
+// Resolves "." and ".." segments and collapses repeats. Traversal needs no
+// guarding here: the endpoint only serves paths this session's transcript
+// records, so a resolved path outside the artifact's directory is simply a 404.
+function cleanPath(p: string): string {
+  const norm = p.replace(/\\/g, '/')
+  const out: string[] = []
+  for (const seg of norm.split('/')) {
+    if (seg === '' || seg === '.') continue
+    if (seg === '..') {
+      out.pop()
+      continue
+    }
+    out.push(seg)
+  }
+  return (norm.startsWith('/') ? '/' : '') + out.join('/')
+}
+
+function blobToDataURL(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(blob)
+  })
+}
+
 // Clear artifacts on session switch; history replay then repopulates. The
 // session marker gates in-flight fetches so a late response can't leak into the
 // newly-selected session.
@@ -108,7 +229,7 @@ export async function observeArtifact(
   const kind = kindOf(path)
   if (!kind) return
 
-  const url = `/api/sessions/${encodeURIComponent(sessionId)}/artifacts?path=${encodeURIComponent(path)}`
+  const url = artifactURL(sessionId, path)
 
   let code = ''
   let preview = ''
@@ -175,7 +296,8 @@ export async function observeArtifact(
 	  })
 	});
 	<\/script>`
-        preview = `<style>${MD_STYLES}</style><body style="${bodyStyle}">${renderMarkdown(code)}${COPY_SCRIPT}</body>`
+        const body = await inlineMarkdownImages(renderMarkdown(code), sessionId, path)
+        preview = `<style>${MD_STYLES}</style><body style="${bodyStyle}">${body}${COPY_SCRIPT}</body>`
       } else {
         // code kind: show with theme-aware monospace style
         const escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')

@@ -54,9 +54,6 @@ describe('observeArtifact — image artifacts', () => {
 })
 
 describe('observeArtifact — preview documents', () => {
-  // Covers the chrome we generate, not references inside the artifact's own
-  // body: a hand-written `![shot](shot.png)` in a markdown file still resolves
-  // against the host page and still fails inside the iframe.
   it('builds the markdown preview without referencing /api/', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('# hello')))
 
@@ -65,5 +62,67 @@ describe('observeArtifact — preview documents', () => {
     const [entry] = get(artifacts)
     expect(entry.preview).not.toBe('')
     expect(entry.preview).not.toContain('/api/')
+  })
+})
+
+// A markdown artifact's own image references can't load from inside the iframe
+// either, so their bytes are inlined as data: URIs.
+describe('observeArtifact — markdown image references', () => {
+  const png = new Uint8Array([137, 80, 78, 71])
+
+  function stubFetch(md: string, imageStatus = 200) {
+    const fetchMock = vi.fn(async (u: string) => {
+      if (u.includes('report.md')) return new Response(md)
+      if (imageStatus !== 200) return new Response('', { status: imageStatus })
+      return new Response(png, { headers: { 'Content-Type': 'image/png' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('inlines a relative reference, resolved against the markdown file', async () => {
+    const fetchMock = stubFetch('![shot](img/shot.png)\n')
+
+    await observeArtifact(SID, payload('/tmp/report.md'), false)
+
+    const [entry] = get(artifacts)
+    expect(entry.preview).toContain('src="data:image/png;base64,')
+    expect(entry.preview).not.toContain('img/shot.png')
+    // Resolved relative to /tmp/report.md, not to the host page.
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/sessions/${SID}/artifacts?path=${encodeURIComponent('/tmp/img/shot.png')}`,
+    )
+  })
+
+  it('resolves "." and ".." segments', async () => {
+    const fetchMock = stubFetch('![shot](../shots/./a.png)\n')
+
+    await observeArtifact(SID, payload('/tmp/docs/report.md'), false)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/sessions/${SID}/artifacts?path=${encodeURIComponent('/tmp/shots/a.png')}`,
+    )
+  })
+
+  it('leaves remote and data references untouched', async () => {
+    const fetchMock = stubFetch('![a](https://example.com/a.png)\n\n![b](data:image/gif;base64,R0lGOD)\n')
+
+    await observeArtifact(SID, payload('/tmp/report.md'), false)
+
+    const [entry] = get(artifacts)
+    expect(entry.preview).toContain('https://example.com/a.png')
+    // Only the markdown body itself was fetched.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the artifact when an image is not fetchable', async () => {
+    stubFetch('![gone](missing.png)\n', 404)
+
+    await observeArtifact(SID, payload('/tmp/report.md'), false)
+
+    const [entry] = get(artifacts)
+    // The reference stays as written: a broken image beats losing the preview.
+    expect(entry.preview).toContain('missing.png')
+    expect(get(artifacts)).toHaveLength(1)
   })
 })
