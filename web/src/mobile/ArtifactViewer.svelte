@@ -3,14 +3,16 @@
   // self-contained preview document (built in lib/artifacts.ts for the desktop
   // panel's sandboxed iframe) and the raw source — this just presents them
   // phone-sized: preview in the same sandboxed iframe, code as scrollable text.
+  // Images are the exception: they carry a `src` and render as a plain <img>.
   import type { Artifact } from '../lib/types'
   import { t } from '../lib/i18n'
 
   let { artifact, onClose }: { artifact: Artifact; onClose: () => void } = $props()
 
   let view = $state<'preview' | 'code'>('preview')
-  // Images have no meaningful source view (code is just the fetch URL).
-  const isImage = $derived(artifact.type === 'Image')
+  // Images render as a plain <img> (the sandboxed iframe cannot authenticate
+  // against /api/* — see lib/artifacts.ts) and have no meaningful source view.
+  const isImage = $derived(!!artifact.src)
   // Reset to preview only when a DIFFERENT file opens — a live re-write of the
   // same path swaps the entry object but must not kick the user out of Code.
   // svelte-ignore state_referenced_locally -- the initial path is exactly what we want captured
@@ -41,7 +43,9 @@
   </header>
 
   <div class="vbody">
-    {#if view === 'preview' || isImage}
+    {#if isImage}
+      <div class="img-wrap"><img src={artifact.src} alt={artifact.name} /></div>
+    {:else if view === 'preview'}
       <iframe srcdoc={artifact.preview} sandbox="allow-scripts clipboard-write" title={artifact.name}></iframe>
     {:else}
       <pre class="code-view">{artifact.code}</pre>
@@ -84,6 +88,12 @@
 
   .vbody { flex: 1; min-height: 0; background: var(--m-surface); }
   iframe { border: 0; width: 100%; height: 100%; display: block; }
+  .img-wrap {
+    width: 100%; height: 100%; box-sizing: border-box; padding: 8px;
+    display: flex; align-items: center; justify-content: center;
+    overflow: auto; -webkit-overflow-scrolling: touch; background: var(--m-bg);
+  }
+  .img-wrap img { max-width: 100%; max-height: 100%; object-fit: contain; }
   .code-view {
     margin: 0; height: 100%; box-sizing: border-box; overflow: auto;
     -webkit-overflow-scrolling: touch;

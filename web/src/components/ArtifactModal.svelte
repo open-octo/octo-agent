@@ -13,7 +13,7 @@
   })
 
   function onCopy() { copyArtifact(cur?.code ?? '', showToast) }
-  function onDownload() { downloadArtifact(cur?.name, cur?.code ?? '', showToast) }
+  function onDownload() { downloadArtifact(cur, showToast) }
 
   // "Back to sidebar": close modal, reopen the side panel.
   function restoreSidebar() {
@@ -53,7 +53,12 @@
 
     <!-- Body — always preview, no toolbar / footer chrome -->
     <div class="body">
-      <iframe srcdoc={cur.preview} sandbox="allow-scripts clipboard-write" title={cur.name}></iframe>
+      {#if cur.src}
+        <!-- Images render outside the sandboxed iframe (see lib/artifacts.ts). -->
+        <div class="img-wrap"><img src={cur.src} alt={cur.name} /></div>
+      {:else}
+        <iframe srcdoc={cur.preview} sandbox="allow-scripts clipboard-write" title={cur.name}></iframe>
+      {/if}
     </div>
   </div>
 </div>
@@ -102,4 +107,10 @@
 .icon-btn:hover { background: var(--hover-neutral); color: var(--blue-6); }
 .body { flex: 1; min-height: 0; background: var(--bg-container); }
 iframe { border: 0; width: 100%; height: 100%; display: block; }
+.img-wrap {
+  width: 100%; height: 100%; box-sizing: border-box; padding: 12px;
+  display: flex; align-items: center; justify-content: center;
+  overflow: auto; background: var(--bg-layout);
+}
+.img-wrap img { max-width: 100%; max-height: 100%; object-fit: contain; }
 </style>

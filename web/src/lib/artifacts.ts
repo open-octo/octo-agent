@@ -6,6 +6,14 @@
 // fetches the file body from the whitelisted GET /api/sessions/{id}/artifacts
 // endpoint, and pushes a previewable entry into the `artifacts` store that
 // ArtifactsPanel renders. Mirrors the old hand-written Artifacts.observe().
+//
+// Constraint on every preview document built here: it must not reference
+// /api/* — nothing inside the sandboxed srcdoc iframe can authenticate. The
+// iframe has no allow-same-origin, so its subresource requests carry an opaque
+// origin and count as cross-site; the SameSite=Strict access-key cookie is
+// withheld and the endpoint answers 401 for every client that isn't exempt as
+// loopback. It works on localhost and breaks over a tunnel or on the LAN.
+// Inline the bytes, or render outside the iframe (what `src` below is for).
 
 import { get, writable } from 'svelte/store'
 import { artifacts, panelContent, artifactSel } from './stores'
@@ -104,13 +112,25 @@ export async function observeArtifact(
 
   let code = ''
   let preview = ''
+  let src = ''
   try {
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
     if (kind === 'image') {
-      // The sandboxed iframe loads the image from the same-host endpoint.
-      code = url
-      const imgBg = isDark ? '#1e1e1e' : '#f5f5f5'
-      preview = `<body style="margin:0;display:flex;align-items:center;justify-content:center;background:${imgBg};height:100vh"><img style="max-width:100%;max-height:100vh" src="${url}"></body>`
+      // Images render as a plain <img> in the host document — see the
+      // file-header note on why an <img src="/api/…"> inside the sandboxed
+      // iframe 401s. The host document's own request is same-site and
+      // authenticates normally, and it keeps the browser's lazy loading: the
+      // bytes move only when the user actually looks at the image, which
+      // matters for a session full of multi-MB screenshots on a slow link.
+      //
+      // Dropping the iframe costs no isolation here. The endpoint pins
+      // Content-Type and sends X-Content-Type-Options: nosniff, and an SVG
+      // loaded through <img> runs no script and fetches no external resource.
+      src = url
+      // A binary artifact has no source view, so `code` carries the on-disk
+      // path instead: it is the one text form worth copying. Download saves
+      // the bytes from `src`.
+      code = path
     } else {
       const res = await fetch(url)
       if (!res.ok) return
@@ -181,6 +201,7 @@ export async function observeArtifact(
     code,
     preview,
     path,
+    src: src || undefined,
   }
 
   artifacts.update(list => {

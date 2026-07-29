@@ -127,6 +127,11 @@ export interface Artifact {
   code: string
   preview: string
   path: string
+  // src is set for image artifacts only: the artifacts endpoint URL. Images are
+  // rendered by a plain <img> in the host document rather than through the
+  // sandboxed `preview` iframe (which cannot authenticate — see lib/artifacts.ts),
+  // and the download action saves these bytes.
+  src?: string
 }
 
 // SkillInfo matches the Go server skill struct
