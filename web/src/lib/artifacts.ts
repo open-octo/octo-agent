@@ -15,10 +15,11 @@
 // loopback. It works on localhost and breaks over a tunnel or on the LAN.
 //
 // The same goes for any local file the artifact itself points at — a markdown
-// `![](shot.png)` resolves against the host page rather than the file's own
-// directory, and the /api/ path it would need can't authenticate from in there
-// either. Two ways out: render outside the iframe (what `src` is for) or inline
-// the bytes as a data: URI (what inlineMarkdownImages does).
+// `![](shot.png)` or an HTML `<img src="chart.png">` resolves against the host
+// page rather than the file's own directory, and the /api/ path it would need
+// can't authenticate from in there either. Two ways out: render outside the
+// iframe (what `src` is for) or inline the bytes as a data: URI (what
+// inlineLocalRefs does).
 
 import { get, writable } from 'svelte/store'
 import { artifacts, panelContent, artifactSel } from './stores'
@@ -90,64 +91,127 @@ function artifactURL(sessionId: string, path: string): string {
   return `/api/sessions/${encodeURIComponent(sessionId)}/artifacts?path=${encodeURIComponent(path)}`
 }
 
-// ─── Markdown image references ──────────────────────────────────────────────
+// ─── Local file references inside a preview document ────────────────────────
 //
-// A markdown artifact can point at its own images: `![shot](shot.png)`. Those
-// references cannot survive inside the preview iframe — a relative path
-// resolves against the host page, and the /api/ path it would need can't
-// authenticate from there (see the file-header note) — so the bytes are inlined
-// as data: URIs, the one form the iframe can read.
+// A markdown or HTML artifact can point at its own images: `![shot](shot.png)`,
+// `<img src="chart.png">`, `background-image:url(bg.png)`. None of those survive
+// inside the preview iframe — a relative path resolves against the host page,
+// and the /api/ path it would need can't authenticate from in there (see the
+// file-header note) — so the bytes are inlined as data: URIs, the one form the
+// iframe can read.
 //
 // Only files the session itself wrote are fetchable, since the endpoint serves
-// nothing else. That covers the case that matters: a report the agent wrote
-// beside the screenshots it took. A reference to anything else is left exactly
-// as written and simply doesn't render, same as today.
+// nothing else, and only the extensions it recognises as previewable (images
+// among them; stylesheets and fonts are not). Everything else is left exactly
+// as written and simply doesn't render, same as today — which is also the
+// fallback for a local .css or .js, already routed to the warning page by
+// hasExternalRefs.
 //
 // Budgeted because a data: URI is resident memory for as long as the artifact
 // is in the store: base64 costs ~1.37x the file size, doubled again by UTF-16,
 // and the srcdoc attribute holds a second copy. Past the budget the remaining
 // references are left alone rather than silently bloating the session.
-const inlineImageBudget = 8 << 20
-const inlineImageMax = 20
+const inlineRefBudget = 8 << 20
+const inlineRefMax = 20
 
-async function inlineMarkdownImages(html: string, sessionId: string, mdPath: string): Promise<string> {
+// Cheap pre-check: skip the parse/serialize round-trip entirely for a document
+// with nothing to rewrite, which is most of them.
+const LOCAL_REF_HINT = /<img\b|url\(/i
+const CSS_URL_RE = /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi
+
+// mode picks how the result is serialized: an HTML artifact is a whole document
+// (doctype and <head> must survive), markdown output is a body fragment.
+async function inlineLocalRefs(
+  html: string,
+  sessionId: string,
+  basePath: string,
+  mode: 'document' | 'fragment',
+): Promise<string> {
+  if (!LOCAL_REF_HINT.test(html)) return html
   const doc = new DOMParser().parseFromString(html, 'text/html')
-  const imgs = Array.from(doc.querySelectorAll('img'))
-  if (imgs.length === 0) return html
 
-  const seen = new Map<string, string>()
+  // null caches a failed lookup so a repeated broken reference is fetched once.
+  const seen = new Map<string, string | null>()
   let spent = 0
   let count = 0
-  for (const img of imgs) {
-    const abs = localImagePath(img.getAttribute('src') ?? '', mdPath)
-    if (!abs) continue
+  let changed = false
+
+  const inline = async (raw: string): Promise<string | null> => {
+    const abs = localFilePath(raw, basePath)
+    if (!abs) return null
     const cached = seen.get(abs)
-    if (cached) {
-      img.setAttribute('src', cached)
-      continue
-    }
-    if (count >= inlineImageMax || spent >= inlineImageBudget) break
+    if (cached !== undefined) return cached
+    if (count >= inlineRefMax || spent >= inlineRefBudget) return null
+    let dataUrl: string | null = null
     try {
       const res = await fetch(artifactURL(sessionId, abs))
-      if (!res.ok) continue
-      const blob = await res.blob()
-      const dataUrl = await blobToDataURL(blob)
-      spent += blob.size
-      count++
-      seen.set(abs, dataUrl)
-      img.setAttribute('src', dataUrl)
+      if (res.ok) {
+        const blob = await res.blob()
+        dataUrl = await blobToDataURL(blob)
+        spent += blob.size
+        count++
+      }
     } catch {
       // Leave the reference as written — a broken image beats no preview.
     }
+    seen.set(abs, dataUrl)
+    return dataUrl
   }
-  return doc.body.innerHTML
+
+  for (const img of Array.from(doc.querySelectorAll('img'))) {
+    const dataUrl = await inline(img.getAttribute('src') ?? '')
+    if (!dataUrl) continue
+    img.setAttribute('src', dataUrl)
+    // A srcset would outrank the src we just rewrote, and its candidates are
+    // unreachable for the same reason.
+    img.removeAttribute('srcset')
+    changed = true
+  }
+  for (const el of Array.from(doc.querySelectorAll('style'))) {
+    const css = el.textContent ?? ''
+    const next = await inlineCSSURLs(css, inline)
+    if (next === css) continue
+    el.textContent = next
+    changed = true
+  }
+  for (const el of Array.from(doc.querySelectorAll('[style]'))) {
+    const css = el.getAttribute('style') ?? ''
+    const next = await inlineCSSURLs(css, inline)
+    if (next === css) continue
+    el.setAttribute('style', next)
+    changed = true
+  }
+
+  // Hand back the original text when nothing was rewritten, so a document with
+  // no local references is never reshaped by the round-trip.
+  if (!changed) return html
+  if (mode === 'fragment') return doc.body.innerHTML
+  const doctype = doc.doctype ? `<!DOCTYPE ${doc.doctype.name}>` : ''
+  return doctype + doc.documentElement.outerHTML
 }
 
-// localImagePath resolves a markdown image reference to the absolute on-disk
-// path to ask the endpoint for, or null when it isn't a local file. Anything
-// carrying a scheme is left alone: an http(s) image is a cross-origin no-cors
-// load, which a sandboxed iframe performs just fine.
-function localImagePath(raw: string, mdPath: string): string | null {
+async function inlineCSSURLs(
+  css: string,
+  inline: (raw: string) => Promise<string | null>,
+): Promise<string> {
+  const out: string[] = []
+  let last = 0
+  for (const m of Array.from(css.matchAll(CSS_URL_RE))) {
+    const dataUrl = await inline(m[2])
+    if (!dataUrl) continue
+    out.push(css.slice(last, m.index), `url("${dataUrl}")`)
+    last = m.index + m[0].length
+  }
+  if (out.length === 0) return css
+  out.push(css.slice(last))
+  return out.join('')
+}
+
+// localFilePath resolves a reference to the absolute on-disk path to ask the
+// endpoint for, or null when it isn't a local file. Anything carrying a scheme
+// is left alone: an http(s) image is a cross-origin no-cors load, which a
+// sandboxed iframe performs just fine.
+function localFilePath(raw: string, basePath: string): string | null {
   const src = raw.trim()
   if (!src || src.startsWith('//') || src.startsWith('#')) return null
   if (/^[a-z][a-z0-9+.-]*:/i.test(src) && !/^[a-z]:[\\/]/i.test(src)) return null
@@ -158,7 +222,7 @@ function localImagePath(raw: string, mdPath: string): string | null {
     // Malformed escapes: use the reference verbatim.
   }
   if (!rel) return null
-  const abs = isAbsolutePath(rel) ? rel : `${dirOf(mdPath)}/${rel}`
+  const abs = isAbsolutePath(rel) ? rel : `${dirOf(basePath)}/${rel}`
   const clean = cleanPath(abs)
   return isAbsolutePath(clean) ? clean : null
 }
@@ -275,7 +339,9 @@ export async function observeArtifact(
 <pre style="margin:0;padding:12px;background:${warnPreBg};border-radius:6px;overflow:auto;font:12px/1.6 'SFMono-Regular',Menlo,monospace;color:${warnPreColor};white-space:pre-wrap">${escaped}</pre>
 </body>`
         } else {
-          preview = code
+          // No unreachable scripts or stylesheets, but the file's own images
+          // still need inlining to survive the iframe.
+          preview = await inlineLocalRefs(code, sessionId, path, 'document')
         }
       } else if (kind === 'markdown') {
         // Markdown is rendered inside a sandboxed srcdoc iframe which has no
@@ -296,7 +362,7 @@ export async function observeArtifact(
 	  })
 	});
 	<\/script>`
-        const body = await inlineMarkdownImages(renderMarkdown(code), sessionId, path)
+        const body = await inlineLocalRefs(renderMarkdown(code), sessionId, path, 'fragment')
         preview = `<style>${MD_STYLES}</style><body style="${bodyStyle}">${body}${COPY_SCRIPT}</body>`
       } else {
         // code kind: show with theme-aware monospace style

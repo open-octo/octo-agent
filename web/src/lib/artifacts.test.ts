@@ -126,3 +126,55 @@ describe('observeArtifact — markdown image references', () => {
     expect(get(artifacts)).toHaveLength(1)
   })
 })
+
+// An HTML artifact previews as its own document, so the same references need the
+// same treatment — but only when hasExternalRefs hasn't already routed the file
+// to the warning page.
+describe('observeArtifact — html local references', () => {
+  const png = new Uint8Array([137, 80, 78, 71])
+
+  function stubFetch(html: string, imageStatus = 200) {
+    const fetchMock = vi.fn(async (u: string) => {
+      if (u.includes('page.html')) return new Response(html)
+      if (imageStatus !== 200) return new Response('', { status: imageStatus })
+      return new Response(png, { headers: { 'Content-Type': 'image/png' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('inlines an <img> and a CSS url(), keeping the doctype', async () => {
+    stubFetch(
+      '<!DOCTYPE html><html><head><style>body{background:url("bg.png")}</style></head>' +
+        '<body><img src="chart.png"></body></html>',
+    )
+
+    await observeArtifact(SID, payload('/tmp/page.html'), false)
+
+    const [entry] = get(artifacts)
+    expect(entry.preview).toMatch(/^<!DOCTYPE html>/i)
+    expect(entry.preview).not.toContain('chart.png')
+    expect(entry.preview).not.toContain('bg.png')
+    expect(entry.preview.match(/data:image\/png;base64,/g)).toHaveLength(2)
+  })
+
+  it('hands back the exact source when there is nothing to inline', async () => {
+    const html = '<!DOCTYPE html><html><body><h1>hi</h1></body></html>'
+    stubFetch(html)
+
+    await observeArtifact(SID, payload('/tmp/page.html'), false)
+
+    // No parse/serialize round-trip on a document with no local references.
+    expect(get(artifacts)[0].preview).toBe(html)
+  })
+
+  it('leaves the warning page alone when a script is unreachable', async () => {
+    stubFetch('<html><head><script src="app.js"></script></head><body><img src="chart.png"></body></html>')
+
+    await observeArtifact(SID, payload('/tmp/page.html'), false)
+
+    const [entry] = get(artifacts)
+    expect(entry.preview).toContain('cannot be previewed here')
+    expect(entry.preview).not.toContain('data:image/png')
+  })
+})
