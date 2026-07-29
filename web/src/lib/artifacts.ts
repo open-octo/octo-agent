@@ -46,6 +46,10 @@ const EXT_KIND: Record<string, Kind> = {
 // Once-per-session guard so a live write auto-opens the panel only the first time.
 let autoOpened = false
 
+// How many times each image path has been observed this session, used as the
+// cache-busting revision in its src. Cleared with the artifacts themselves.
+const imageRevisions = new Map<string, number>()
+
 function kindOf(path: string): Kind | null {
   const dot = path.lastIndexOf('.')
   if (dot < 0) return null
@@ -274,6 +278,7 @@ export function resetArtifacts(sessionId: string): void {
   artifactSel.set(0)
   panelContent.set(null)
   autoOpened = false
+  imageRevisions.clear()
   artifactSelSession.set(sessionId)
 }
 
@@ -308,10 +313,18 @@ export async function observeArtifact(
       // bytes move only when the user actually looks at the image, which
       // matters for a session full of multi-MB screenshots on a slow link.
       //
+      // The revision counter matters: re-observing a path (the agent overwrote
+      // the file) otherwise yields a byte-identical src, so Svelte skips the
+      // attribute update and the panel keeps showing the previous bytes. The
+      // count is derived from the transcript, so replaying the same session
+      // reproduces the same URLs and the browser cache still applies.
+      //
       // Dropping the iframe costs no isolation here. The endpoint pins
       // Content-Type and sends X-Content-Type-Options: nosniff, and an SVG
       // loaded through <img> runs no script and fetches no external resource.
-      src = url
+      const rev = (imageRevisions.get(path) ?? 0) + 1
+      imageRevisions.set(path, rev)
+      src = `${url}&rev=${rev}`
       // A binary artifact has no source view, so `code` carries the on-disk
       // path instead: it is the one text form worth copying. Download saves
       // the bytes from `src`.

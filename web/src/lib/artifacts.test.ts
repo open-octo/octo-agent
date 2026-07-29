@@ -33,7 +33,7 @@ describe('observeArtifact — image artifacts', () => {
     const [entry] = get(artifacts)
     expect(entry.type).toBe('Image')
     expect(entry.src).toBe(
-      `/api/sessions/${encodeURIComponent(SID)}/artifacts?path=${encodeURIComponent('/tmp/shot.png')}`,
+      `/api/sessions/${encodeURIComponent(SID)}/artifacts?path=${encodeURIComponent('/tmp/shot.png')}&rev=1`,
     )
     // The <img> pulls the bytes lazily; observing must not download them.
     expect(fetchMock).not.toHaveBeenCalled()
@@ -41,6 +41,20 @@ describe('observeArtifact — image artifacts', () => {
     expect(entry.preview).toBe('')
     // `code` is the on-disk path — the one text form worth copying.
     expect(entry.code).toBe('/tmp/shot.png')
+  })
+
+  it('changes the src when the same path is written again', async () => {
+    vi.stubGlobal('fetch', vi.fn())
+
+    await observeArtifact(SID, payload('/tmp/shot.png'), false)
+    const first = get(artifacts)[0].src
+    await observeArtifact(SID, payload('/tmp/shot.png'), true)
+    const second = get(artifacts)[0].src
+
+    // An identical src would let Svelte skip the update and leave the old bytes
+    // on screen after the agent overwrote the file.
+    expect(get(artifacts)).toHaveLength(1)
+    expect(second).not.toBe(first)
   })
 
   it('keeps transcript order during replay, since nothing awaits', async () => {

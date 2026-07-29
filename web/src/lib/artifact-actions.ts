@@ -75,7 +75,11 @@ async function downloadImage(
     const a = document.createElement('a')
     a.href = url
     a.download = fname
+    // In the document, not detached: a detached anchor's click() has never been
+    // reliable in Firefox. Same shape as the skill zip export.
+    document.body.appendChild(a)
     a.click()
+    a.remove()
     URL.revokeObjectURL(url)
   } catch {
     showToast(tr('artifacts.save_failed'), 'error')
