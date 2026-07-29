@@ -104,18 +104,22 @@ function artifactURL(sessionId: string, path: string): string {
 // file-header note) — so the bytes are inlined as data: URIs, the one form the
 // iframe can read.
 //
-// Only files the session itself wrote are fetchable, since the endpoint serves
-// nothing else, and only the extensions it recognises as previewable (images
-// among them; stylesheets and fonts are not). Everything else is left exactly
-// as written and simply doesn't render, same as today — which is also the
-// fallback for a local .css or .js, already routed to the warning page by
+// Two gates on what gets inlined: the reference must resolve to an image (the
+// endpoint also serves .html and .md, and an artifact must not be able to pull
+// those in), and the session itself must have written it, since the endpoint
+// serves nothing else. That covers the case that matters: a report the agent
+// wrote beside the screenshots it took. Everything else is left exactly as
+// written and simply doesn't render, same as today — which is also the fallback
+// for a local .css or .js, already routed to the warning page by
 // hasExternalRefs.
 //
-// Budgeted because a data: URI is resident memory for as long as the artifact
-// is in the store: base64 costs ~1.37x the file size, doubled again by UTF-16,
-// and the srcdoc attribute holds a second copy. Past the budget the remaining
-// references are left alone rather than silently bloating the session.
-const inlineRefBudget = 8 << 20
+// The budget counts raw file bytes, not what they cost once resident: a data:
+// URI carries base64's ~1.37x, doubled again by UTF-16, and the srcdoc
+// attribute holds a second copy — so a full budget is several times its own
+// size in memory for as long as the artifact stays in the store. It is also
+// per-artifact, so a session with many image-bearing documents accumulates.
+// Both numbers are deliberately well under what one page needs.
+const inlineRefBudget = 4 << 20
 const inlineRefMax = 20
 
 // Cheap pre-check: skip the parse/serialize round-trip entirely for a document
@@ -143,6 +147,12 @@ async function inlineLocalRefs(
   const inline = async (raw: string): Promise<string | null> => {
     const abs = localFilePath(raw, basePath)
     if (!abs) return null
+    // Images only, enforced rather than assumed. The endpoint also serves .html
+    // and .md, so without this an artifact could name a sibling document here
+    // and have the host page — which is authenticated — fetch it and hand the
+    // bytes to a preview iframe that runs scripts and can reach the network.
+    // The artifact would be reading files it was never granted.
+    if (kindOf(abs) !== 'image') return null
     const cached = seen.get(abs)
     if (cached !== undefined) return cached
     if (count >= inlineRefMax || spent >= inlineRefBudget) return null
@@ -309,15 +319,18 @@ export async function observeArtifact(
       // Images render as a plain <img> in the host document — see the
       // file-header note on why an <img src="/api/…"> inside the sandboxed
       // iframe 401s. The host document's own request is same-site and
-      // authenticates normally, and it keeps the browser's lazy loading: the
-      // bytes move only when the user actually looks at the image, which
-      // matters for a session full of multi-MB screenshots on a slow link.
+      // authenticates normally, and observing costs no network at all: the URL
+      // only becomes a request once the panel renders this artifact, and it
+      // renders one at a time. History replay over a session full of multi-MB
+      // screenshots therefore transfers none of them.
       //
       // The revision counter matters: re-observing a path (the agent overwrote
       // the file) otherwise yields a byte-identical src, so Svelte skips the
-      // attribute update and the panel keeps showing the previous bytes. The
-      // count is derived from the transcript, so replaying the same session
-      // reproduces the same URLs and the browser cache still applies.
+      // attribute update and the panel keeps showing the previous bytes — the
+      // endpoint sends no validators, so nothing prompts a revalidation either.
+      // Counting observations rather than stamping a clock keeps the URL stable
+      // across a straight replay of the same transcript, so a reopened session
+      // can still reuse whatever the browser happens to have cached.
       //
       // Dropping the iframe costs no isolation here. The endpoint pins
       // Content-Type and sends X-Content-Type-Options: nosniff, and an SVG

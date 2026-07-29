@@ -118,6 +118,19 @@ describe('observeArtifact — markdown image references', () => {
     )
   })
 
+  it('refuses to inline a non-image, even though the endpoint serves it', async () => {
+    // .md is previewable server-side, so only this gate stops an artifact from
+    // naming a sibling document and having the host page fetch it.
+    const fetchMock = stubFetch('![oops](secrets.md)\n')
+
+    await observeArtifact(SID, payload('/tmp/report.md'), false)
+
+    const [entry] = get(artifacts)
+    expect(entry.preview).toContain('secrets.md')
+    expect(entry.preview).not.toContain('data:')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('leaves remote and data references untouched', async () => {
     const fetchMock = stubFetch('![a](https://example.com/a.png)\n\n![b](data:image/gif;base64,R0lGOD)\n')
 
