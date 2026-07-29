@@ -10,7 +10,7 @@ go 1.25.0
 require (
 	github.com/open-octo/octo-agent v0.0.0
 	github.com/tc-hib/winres v0.3.1
-	github.com/wailsapp/wails/v3 v3.0.0-alpha2.118
+	github.com/wailsapp/wails/v3 v3.0.0-alpha2.119
 )
 
 require (
