@@ -308,6 +308,18 @@ type Agent struct {
 	// runLoop returns so callers can surface it in UI (e.g. "3 iterations").
 	turnIterations int
 
+	// inputRolledBack records whether the most recent turn undid its own user
+	// input — the first-round-failure contract, where History is restored to
+	// its pre-turn state so a retry doesn't duplicate the message. Callers use
+	// it to decide whether the text the user typed still exists anywhere (the
+	// web/TUI composers hand it back when it doesn't). It is a recorded fact
+	// rather than something callers can infer from a history-length diff:
+	// a turn may also compact history (which shrinks it without losing the
+	// input) or drain inbox messages (which grows it), so length says nothing
+	// about this message's fate. Written on the same goroutine that runs the
+	// turn, read after it returns.
+	inputRolledBack bool
+
 	// recentToolCalls tracks the fingerprints of the last few tool-use batches
 	// so runLoop can detect when the model is stuck repeating the same call(s).
 	// Guarded by the implicit serialisation of runLoop (single goroutine).
@@ -604,6 +616,7 @@ func (a *Agent) turn(ctx context.Context, userInput string, finishInterrupt bool
 	}
 
 	// Append user message first so the snapshot the Sender sees includes it.
+	a.inputRolledBack = false
 	a.appendUserInput(ctx, userInput)
 
 	a.ResetGoalBaseline()
@@ -616,6 +629,7 @@ func (a *Agent) turn(ctx context.Context, userInput string, finishInterrupt bool
 		// History doesn't duplicate it. Cheaper than transactional locking
 		// since History is only mutated from this goroutine in M1.2.
 		a.History.popLast()
+		a.inputRolledBack = true
 		return Reply{}, fmt.Errorf("agent: send: %w", err)
 	}
 
@@ -673,6 +687,7 @@ func (a *Agent) turnStream(
 		return Reply{}, fmt.Errorf("agent: userInput must be non-empty")
 	}
 
+	a.inputRolledBack = false
 	a.appendUserInput(ctx, userInput)
 
 	a.ResetGoalBaseline()
@@ -696,6 +711,7 @@ func (a *Agent) turnStream(
 			return a.finishInterrupted(handler)
 		}
 		a.History.popLast()
+		a.inputRolledBack = true
 		return Reply{}, fmt.Errorf("agent: stream: %w", err)
 	}
 
@@ -916,6 +932,7 @@ func (a *Agent) runLoop(
 	// user input (drained inbox messages), so truncating to this baseline is
 	// what restores the pre-turn state — popLast would only remove one message.
 	baseHistoryLen := a.History.Len()
+	a.inputRolledBack = false
 	a.appendUserInput(ctx, userInput)
 
 	limit := a.turnLimit()
@@ -996,6 +1013,7 @@ func (a *Agent) runLoop(
 
 			if i == 0 {
 				a.History.TruncateTo(baseHistoryLen)
+				a.inputRolledBack = true
 			}
 			return Reply{}, fmt.Errorf("agent: loop[%d]: %w", i, err)
 		}
@@ -1030,6 +1048,7 @@ func (a *Agent) runLoop(
 			default:
 				if i == 0 {
 					a.History.TruncateTo(baseHistoryLen)
+					a.inputRolledBack = true
 				}
 				return Reply{}, fmt.Errorf("agent: loop[%d] escalate: %w", i, eerr)
 			}
@@ -1257,6 +1276,15 @@ func (a *Agent) TakeBackInterrupted() bool {
 // the most recent Run/RunStream call. It is 0 before the first run.
 func (a *Agent) TurnIterations() int {
 	return a.turnIterations
+}
+
+// InputRolledBack reports whether the most recent turn undid its own user input
+// (the first-round-failure contract). True means the message the user sent is
+// gone from History, so a UI that cleared its input box on send is the last
+// place that text could come back from. False covers both a clean turn and a
+// failure past the first round, where the message stayed in History.
+func (a *Agent) InputRolledBack() bool {
+	return a.inputRolledBack
 }
 
 // turnLimit resolves the per-Run loop cap.

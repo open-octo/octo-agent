@@ -847,7 +847,11 @@ func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 			echo = strings.TrimSpace(collapsed + "  " + m.attachmentChips())
 			m.pendingAttachments = nil
 		}
-		return m, m.startTurnEcho(text, echo)
+		// Pass text (paste tokens expanded), not collapsed: clearPastes above
+		// dropped the registry, so a recalled "[#N pasted …]" token would be a
+		// dead literal. Attachments are not recoverable — AttachUserBlocks
+		// already handed them to the agent.
+		return m, m.startTurnEchoRestore(text, echo, text)
 	}
 
 	// Mid-turn: enqueue the steer text, folding in any pending image

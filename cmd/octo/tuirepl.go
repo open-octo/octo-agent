@@ -902,9 +902,11 @@ func (m *tuiModel) startTurnEcho(line, echo string) tea.Cmd {
 }
 
 // startTurnEchoRestore is startTurnEcho plus restore: the raw text put back
-// into the input box if the user hits Esc before the model produces any output.
-// Pass "" for turns that aren't a verbatim typed message (skills, /init,
-// dequeued items) — those can't be meaningfully restored.
+// into the input box if the turn is taken back before the model produces any
+// output — by Esc, or by a first-round failure (restoreFailedInput). Pass ""
+// for turns that aren't a verbatim typed message (skills, /init, dequeued
+// items) — those can't be meaningfully restored, which is why startTurnEcho
+// exists. Only the plain-submit path in tuirepl_view.go passes real text.
 func (m *tuiModel) startTurnEchoRestore(line, echo, restore string) tea.Cmd {
 	// Any turn start cancels a pending /goal edit — async idle auto-turns
 	// (background exits, sub-agent notes, loop wakeups) can fire while the

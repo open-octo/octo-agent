@@ -499,6 +499,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         chatStreaming.update(s => ({ ...s, [sid]: meta.wasStreaming }))
       }
       bindRequiredFor = null
+      // No turn started, so no turn_error/complete will consume the restore
+      // slot — drop it here or it would outlive this send and be handed to a
+      // later turn's failure.
+      turnInput.delete(sid)
       showToast((ev as any).message ?? 'Error', 'error')
     }))
 
@@ -1092,6 +1096,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       cancelled = true
       ws.unsubscribe(sid)
       for (const cleanup of cleanups) cleanup()
+      // Switching away tears down the handlers that would have consumed the
+      // restore slot, so drop it: on the way back the turn that owned it is
+      // long over, and a later failure must not push its text at the composer.
+      turnInput.delete(sid)
       // Drop this session's pending sub-agent dismiss timers so they can't fire
       // against a session no longer shown in this view.
       for (const [key, timer] of subAgentDismissTimers) {

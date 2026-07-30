@@ -1603,12 +1603,14 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	s.liveStateMu.Unlock()
 
 	if err != nil {
-		// Did the turn lose the user's message? A first-round failure makes
-		// runLoop roll history back past it, so the text the user typed exists
-		// nowhere anymore — neither on disk nor (once the reload below lands) in
-		// the browser's transcript. Both the turn_error hint and the history
-		// reload key off this single condition so they stay in lockstep.
-		inputRolledBack := len(sess.Messages) < historyWatermark
+		// Did the turn lose the user's message? A first-round failure rolls
+		// history back past it, so the text the user typed exists nowhere
+		// anymore — neither on disk nor (once the reload below lands) in the
+		// browser's transcript. Ask the agent, which records the rollback:
+		// the history-length shrink that gates the reload below is a weaker
+		// signal, since a turn that compacted its history also shrinks it
+		// while keeping the user message.
+		inputRolledBack := a.InputRolledBack()
 		// Any aborted or errored turn parks the continuation loop: an
 		// interrupt means the user said stop (continuing immediately would
 		// make the loop interrupt-proof), and chaining fresh turns onto a
@@ -1643,8 +1645,9 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			// tail's session_update is a superset of what we'd emit here.
 			sw.userErrorInput(err, inputRolledBack)
 		}
-		// The rolled-back user message means the SyncFrom+Save above erased the
-		// crash-safety copy persisted before the turn.
+		// A first-round failure makes runLoop roll history back past the user
+		// message (appendUserInput's error-path contract), and the SyncFrom+
+		// Save above erased the crash-safety copy persisted before the turn.
 		// The browser still shows that user bubble with a now out-of-range
 		// message_index, so a later edit/branch would 400. Tell it to re-fetch
 		// the (shorter) transcript so its indices realign with disk. An
@@ -1655,8 +1658,10 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		// which also realigns its indices. Gated on an actual shrink below the
 		// turn-start watermark (deliberately not the live state's
 		// compaction-adjusted copy) so a mid-turn failure that kept the
-		// message doesn't trigger a needless reload.
-		if inputRolledBack {
+		// message doesn't trigger a needless reload. Deliberately NOT the
+		// rollback fact above: a compacted turn keeps its user message but
+		// still shifts every index below the fold.
+		if len(sess.Messages) < historyWatermark {
 			s.broadcastHistoryReload(sess.ID)
 		}
 	} else {

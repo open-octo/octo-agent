@@ -1979,3 +1979,51 @@ func TestTUI_FirstRoundErrorKeepsUserTypedText(t *testing.T) {
 		t.Errorf("with no restore the echo must stay in the scrollback, got %q", joined)
 	}
 }
+
+// The take-back paths (Esc, and a first-round failure) can only hand text back
+// if submit actually recorded it. It didn't for a long time — startTurnEchoRestore
+// had no caller passing a non-empty restore, so every unit test that set
+// echoRestore by hand passed while the real thing was dead. Drive the real
+// submit and assert the recall survives an error end-to-end.
+func TestTUI_SubmitRecordsRestoreText(t *testing.T) {
+	m := newTestModel()
+	setInput(m, "the prompt I typed")
+
+	_, _ = m.submit()
+
+	if !m.turnRunning {
+		t.Fatal("submit should have started a turn")
+	}
+	if m.echoRestore != "the prompt I typed" {
+		t.Fatalf("echoRestore = %q, want the typed text — the restore paths are dead without it", m.echoRestore)
+	}
+	if m.ta.Value() != "" {
+		t.Fatalf("submit should clear the box, got %q", m.ta.Value())
+	}
+
+	// The turn fails on its first round: the text must come back.
+	if !m.restoreFailedInput(fmt.Errorf("anthropic: HTTP 403: usage limit reached")) {
+		t.Fatal("a first-round failure after a real submit should restore")
+	}
+	if m.ta.Value() != "the prompt I typed" {
+		t.Errorf("input box = %q, want the typed text back", m.ta.Value())
+	}
+}
+
+// A paste is submitted expanded but echoed collapsed as "[#N pasted …]", and
+// submit clears the paste registry — so the recall must carry the expanded text,
+// not the token, which would come back as a dead literal.
+func TestTUI_SubmitRestoreTextExpandsPastes(t *testing.T) {
+	m := newTestModel()
+	m2, _ := m.handleKey(pasteKey("alpha\nbeta\ngamma\ndelta"))
+	m = m2.(*tuiModel)
+
+	_, _ = m.submit()
+
+	if strings.Contains(m.echoRestore, "pasted") {
+		t.Fatalf("echoRestore = %q, want the expanded paste, not the collapsed token", m.echoRestore)
+	}
+	if !strings.Contains(m.echoRestore, "alpha") || !strings.Contains(m.echoRestore, "delta") {
+		t.Fatalf("echoRestore = %q, want the pasted body", m.echoRestore)
+	}
+}
