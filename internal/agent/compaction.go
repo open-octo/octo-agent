@@ -665,6 +665,15 @@ func countKeptUserTurns(msgs []Message, split int) int {
 	return n
 }
 
+// IsPlainUserMessage reports whether m is a real user turn: role user with no
+// tool_result blocks (tool results ride on synthetic user-role messages).
+// History may only be cut just before such a message — anywhere else splits an
+// assistant tool_use from the tool_result answering it. Compaction's split
+// point and the server's branch endpoint both enforce this invariant.
+func IsPlainUserMessage(m Message) bool {
+	return m.Role == RoleUser && !hasToolResult(m)
+}
+
 // hasToolResult reports whether m carries any tool_result block (i.e. it's a
 // synthetic user message returning tool output, not a real user turn).
 func hasToolResult(m Message) bool {

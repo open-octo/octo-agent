@@ -145,7 +145,9 @@ func TestHandleDeleteSession(t *testing.T) {
 
 // TestHandleBranchSession verifies POST /api/sessions/{id}/branch:
 // 200 with a new session whose history is copied up to message_index, 400
-// when the index is out of range, and 404 when the source does not exist.
+// when the index is out of range or does not name a plain user message
+// (branching at an assistant or tool_result message would orphan a tool_use —
+// issue #1899), and 404 when the source does not exist.
 func TestHandleBranchSession(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -156,6 +158,12 @@ func TestHandleBranchSession(t *testing.T) {
 		{Role: agent.RoleUser, Content: "hello"},
 		{Role: agent.RoleAssistant, Content: "hi"},
 		{Role: agent.RoleUser, Content: "branch here"},
+		{Role: agent.RoleAssistant, Blocks: []agent.ContentBlock{
+			{Type: "tool_use", ID: "tu-1", Name: "terminal", Input: map[string]any{"command": "ls"}},
+		}},
+		{Role: agent.RoleUser, Blocks: []agent.ContentBlock{
+			{Type: "tool_result", ToolUseID: "tu-1", Result: "file.txt"},
+		}},
 		{Role: agent.RoleAssistant, Content: "ok"},
 	}
 	if err := sess.Save(); err != nil {
@@ -180,6 +188,25 @@ func TestHandleBranchSession(t *testing.T) {
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("out-of-range: status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+
+	// 400 — index names an assistant message
+	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/branch",
+		strings.NewReader(`{"message_index":1}`))
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("assistant index: status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+
+	// 400 — index names a tool_result message: the branch would end on the
+	// assistant tool_use with no answering result
+	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/branch",
+		strings.NewReader(`{"message_index":4}`))
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("tool_result index: status = %d, want 400; body=%s", w.Code, w.Body.String())
 	}
 
 	// 200 — valid branch with prompt override
@@ -225,8 +252,8 @@ func TestHandleBranchSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload source: %v", err)
 	}
-	if len(srcReloaded.Messages) != 4 {
-		t.Fatalf("source Messages len = %d, want 4 (untouched)", len(srcReloaded.Messages))
+	if len(srcReloaded.Messages) != 6 {
+		t.Fatalf("source Messages len = %d, want 6 (untouched)", len(srcReloaded.Messages))
 	}
 }
 
