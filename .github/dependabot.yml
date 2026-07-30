@@ -48,6 +48,18 @@ updates:
           - "@capacitor/*"
       npm-minor-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # TypeScript 7 is blocked upstream, not declined on its merits: every
+      # published svelte-check, latest 4.7.4 included, declares
+      # `typescript: ^5.0.0 || ^6.0.0` in its peers. /web therefore cannot take
+      # 7, and /mobile stays on 6 so both npm projects share a major. Without
+      # this, every weekly run reopens the same two unmergeable PRs.
+      #
+      # Scoped to 7.x on purpose — a later major still gets a PR. Drop this
+      # entry once svelte-check ships TypeScript 7 support and bump both
+      # directories together.
+      - dependency-name: "typescript"
+        versions: ["7.x"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
