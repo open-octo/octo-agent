@@ -273,6 +273,12 @@ func TestHandleEditMessage(t *testing.T) {
 		{Role: agent.RoleUser, Content: "one"},
 		{Role: agent.RoleAssistant, Content: "two"},
 		{Role: agent.RoleUser, Content: "three"},
+		{Role: agent.RoleAssistant, Blocks: []agent.ContentBlock{
+			{Type: "tool_use", ID: "tu-1", Name: "terminal", Input: map[string]any{"command": "ls"}},
+		}},
+		{Role: agent.RoleUser, Blocks: []agent.ContentBlock{
+			{Type: "tool_result", ToolUseID: "tu-1", Result: "file.txt"},
+		}},
 		{Role: agent.RoleAssistant, Content: "four"},
 	}
 	if err := sess.Save(); err != nil {
@@ -299,6 +305,16 @@ func TestHandleEditMessage(t *testing.T) {
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("assistant-index: status = %d, want 400", w.Code)
+	}
+
+	// 400 — index names a tool_result message (user role, but not a real user
+	// turn): truncating there would orphan the assistant tool_use before it
+	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/edit_message",
+		strings.NewReader(`{"message_index":4,"new_content":"x"}`))
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("tool_result-index: status = %d, want 400", w.Code)
 	}
 
 	// 200 — edit the second user prompt; the rerun regenerates from it
