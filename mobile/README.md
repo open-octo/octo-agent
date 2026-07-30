@@ -81,7 +81,7 @@ make web-build
 cd mobile && npm install && npm run bundle-web
 
 # 2. Add the native platforms (generates ios/ and android/, both gitignored).
-#    Capacitor 7 uses Swift Package Manager on iOS — there is no Podfile and no
+#    Capacitor 7+ uses Swift Package Manager on iOS — there is no Podfile and no
 #    `pod install`; Xcode resolves the packages on open.
 npx cap add ios
 npx cap add android
