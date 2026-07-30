@@ -4,5 +4,8 @@
 export function composeSlashCommand(command: string, draft: string): string {
   const tail = draft.trim()
   if (!tail) return command
-  return command.endsWith(' ') ? command + tail : command + ' ' + tail
+  // A "/name " prefill takes the draft as its argument. The natural-language
+  // prefills (workflow, MCP tool) are whole sentences, so the draft goes on its
+  // own line rather than running into the end of one.
+  return command.endsWith(' ') ? command + tail : command + '\n\n' + tail
 }

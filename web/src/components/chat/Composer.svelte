@@ -303,7 +303,7 @@
   let slashDraftTail = $state('')
 
   type SlashItem =
-    | { kind: 'builtin'; name: string; descKey: string }
+    | { kind: 'builtin'; name: string; descKey: string; takesArgs: boolean }
     | { kind: 'skill'; skill: Skill }
     | { kind: 'workflow'; workflow: api.NamedWorkflow }
     | { kind: 'mcp-server'; name: string }
@@ -315,11 +315,14 @@
   // on their own, so surface them in the same "/" menu — the TUI already lists
   // its built-ins in completion. Names only; descriptions are translated in the
   // template via descKey.
-  const BUILTIN_COMMANDS: { name: string; descKey: string }[] = [
-    { name: 'loop', descKey: 'composer.cmd_loop' },
-    { name: 'goal', descKey: 'composer.cmd_goal' },
-    { name: 'compact', descKey: 'composer.cmd_compact' },
-    { name: 'clear', descKey: 'composer.cmd_clear' },
+  // takesArgs=false marks the ones the server matches by exact equality
+  // (handleSlashCommand): anything appended after them turns the command into
+  // an ordinary chat message, so they never absorb a parked draft.
+  const BUILTIN_COMMANDS: { name: string; descKey: string; takesArgs: boolean }[] = [
+    { name: 'loop', descKey: 'composer.cmd_loop', takesArgs: true },
+    { name: 'goal', descKey: 'composer.cmd_goal', takesArgs: true },
+    { name: 'compact', descKey: 'composer.cmd_compact', takesArgs: false },
+    { name: 'clear', descKey: 'composer.cmd_clear', takesArgs: false },
   ]
 
   function normalizeSlash(value: string): string {
@@ -379,7 +382,7 @@
         .map(cmd => ({ cmd, score: scoreNameMatch(cmd.name, q) }))
         .filter(({ score }) => score > 0)
         .sort((a, b) => b.score - a.score || a.cmd.name.localeCompare(b.cmd.name))
-        .map(({ cmd }) => ({ kind: 'builtin', name: cmd.name, descKey: cmd.descKey }))
+        .map(({ cmd }) => ({ kind: 'builtin', name: cmd.name, descKey: cmd.descKey, takesArgs: cmd.takesArgs }))
       let scored = skills
         .map(s => ({ skill: s, score: scoreSkillMatch(s, q) }))
         .filter(({ score }) => score > 0)
@@ -412,6 +415,11 @@
   }
 
   function showSlashMenu(mode: 'skills' | 'workflows' | 'mcp-servers' | 'mcp-tools', query: string, serverName = '') {
+    // Every re-open re-derives the menu from the current text, so a draft
+    // parked by an earlier "/" press is stale by now — keeping it would
+    // resurrect text the user has since deleted. insertSkill parks its draft
+    // after this call.
+    slashDraftTail = ''
     slashMode = mode
     slashQuery = query
     slashMcpServer = serverName
@@ -465,8 +473,11 @@
   }
 
   function selectItem(item: SlashItem) {
+    const draft = slashDraftTail
     let command = ''
+    let takesArgs = true
     if (item.kind === 'builtin') {
+      takesArgs = item.takesArgs
       // Prefill "/name "; the no-arg ones (/clear, /compact) tolerate the
       // trailing space (the server trims before matching), and the arg-taking
       // ones (/loop, /goal) leave the caret ready for input.
@@ -482,7 +493,7 @@
     } else if (item.kind === 'mcp-tool') {
       command = $t('composer.mcp_tool_prompt').replace('{server}', item.server).replace('{tool}', item.tool.name)
     }
-    text = composeSlashCommand(command, slashDraftTail)
+    text = takesArgs ? composeSlashCommand(command, draft) : command
     hideSlashMenu()
     queueMicrotask(() => textareaEl?.focus())
   }
@@ -500,12 +511,9 @@
   function insertSkill() {
     // A half-typed "/query" is not a draft — it's the trigger itself.
     const draft = parseSlashInput(text).mode === null ? text.trim() : ''
-    if (draft) {
-      slashDraftTail = draft
-    } else {
-      text = '/'
-    }
+    if (!draft) text = '/'
     showSlashMenu('skills', '')
+    slashDraftTail = draft
     queueMicrotask(() => textareaEl?.focus())
   }
 
@@ -536,6 +544,9 @@
       attachments = attachmentsBySession[nextSid] ?? []
       draftSid = nextSid
       historyIndex = null
+      // The menu describes the departing session's text. Keyboard switches
+      // (⌘K) never fire the outside-click that would otherwise close it.
+      hideSlashMenu()
     })
   })
 
@@ -770,6 +781,9 @@
     const v = text.trim()
     const files = attachments.length ? [...attachments] : undefined
     pushHistory(sid, v)
+    // Enter sends whenever no menu row is highlighted, so the menu can outlive
+    // the message it was opened over. Close it with the text it belongs to.
+    hideSlashMenu()
     text = ''
     attachments = []
     if (onSend) {

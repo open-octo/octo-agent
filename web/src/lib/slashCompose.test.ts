@@ -11,8 +11,8 @@ describe('composeSlashCommand', () => {
     expect(composeSlashCommand('/code-review ', 'check the diff')).toBe('/code-review check the diff')
   })
 
-  it('separates command and draft when the command has no trailing space', () => {
-    expect(composeSlashCommand('Run the "deploy" workflow', 'to staging')).toBe('Run the "deploy" workflow to staging')
+  it('puts the draft on its own line after a sentence-style prefill', () => {
+    expect(composeSlashCommand('Run the "deploy" workflow', 'to staging')).toBe('Run the "deploy" workflow\n\nto staging')
   })
 
   it('trims the draft', () => {
