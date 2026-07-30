@@ -27,6 +27,9 @@
 
   // A failed image load would otherwise show only the browser's broken-image
   // glyph; surface the server's reason instead (e.g. the 10 MB preview cap).
+  // The <img> stays mounted (hidden) while failed: an error event can dispatch
+  // just after the artifact switched and mark the wrong one, and only a
+  // still-loading <img> can deliver the onload that clears that misfire.
   let imgFailed = $state(false)
   let imgFailDetail = $state('')
   $effect(() => {
@@ -34,12 +37,16 @@
     imgFailed = false
     imgFailDetail = ''
   })
+  function onImgLoad() {
+    imgFailed = false
+    imgFailDetail = ''
+  }
   async function onImgError() {
     const src = artifact.src
     if (!src) return
     imgFailed = true
     const detail = await imagePreviewError(src)
-    if (artifact.src === src) imgFailDetail = detail
+    if (artifact.src === src && imgFailed) imgFailDetail = detail
   }
 </script>
 
@@ -62,15 +69,14 @@
 
   <div class="vbody">
     {#if isImage}
-      {#if imgFailed}
-        <div class="img-wrap">
+      <div class="img-wrap">
+        {#if imgFailed}
           <div class="img-error">
             <span>{$t('artifacts.img_failed')}{imgFailDetail ? ` — ${imgFailDetail}` : ''}</span>
           </div>
-        </div>
-      {:else}
-        <div class="img-wrap"><img src={artifact.src} alt={artifact.name} onerror={onImgError} /></div>
-      {/if}
+        {/if}
+        <img src={artifact.src} alt={artifact.name} class:img-hidden={imgFailed} onerror={onImgError} onload={onImgLoad} />
+      </div>
     {:else if view === 'preview'}
       <iframe srcdoc={artifact.preview} sandbox="allow-scripts" allow="clipboard-write" title={artifact.name}></iframe>
     {:else}
@@ -120,6 +126,7 @@
     overflow: auto; -webkit-overflow-scrolling: touch; background: var(--m-bg);
   }
   .img-wrap img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .img-wrap img.img-hidden { display: none; }
   .img-error { max-width: 85%; text-align: center; color: var(--m-text-2); font-size: 13px; }
   .code-view {
     margin: 0; height: 100%; box-sizing: border-box; overflow: auto;
