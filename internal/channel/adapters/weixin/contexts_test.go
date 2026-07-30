@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -112,6 +113,55 @@ func TestSendText_RunningFallsBackToStore(t *testing.T) {
 	// Enqueue-only path: OK means the token lookup succeeded.
 	if res := a.SendText("user1", "hello", ""); !res.OK {
 		t.Fatalf("want OK via disk fallback, got: %s", res.Error)
+	}
+}
+
+// TestSendFile_RunningFallsBackToStore is the SendFile counterpart of the
+// restart scenario above (#1876): the token lookup must fall back to the
+// on-disk store instead of failing outright. A missing file path stops the
+// send right after the lookup, so getting a "read file" error (not
+// "no context_token") proves the fallback worked without touching the network.
+func TestSendFile_RunningFallsBackToStore(t *testing.T) {
+	dir := t.TempDir()
+	credPath := filepath.Join(dir, "weixin-credentials.json")
+	saveContextToken(contextStorePath(credPath), "user1", "ctx-disk")
+
+	a := &Adapter{
+		credPath: credPath,
+		client:   ilink.NewClient(),
+		bot: &ilinkBot{
+			client: ilink.NewClient(),
+			creds:  &ilink.Credentials{Token: "tok", BaseURL: "http://example.invalid"},
+		},
+	}
+	a.sendQ = newSendQueue(a.client, "http://example.invalid", "tok")
+
+	res := a.SendFile("user1", filepath.Join(dir, "missing.pdf"), "missing.pdf", "")
+	if res.OK {
+		t.Fatal("want failure on missing file")
+	}
+	if !strings.Contains(res.Error, "read file") {
+		t.Fatalf("want token lookup to succeed via disk fallback, got: %s", res.Error)
+	}
+}
+
+func TestSendFile_NoTokenAnywhere(t *testing.T) {
+	dir := t.TempDir()
+	credPath := filepath.Join(dir, "weixin-credentials.json")
+
+	a := &Adapter{
+		credPath: credPath,
+		client:   ilink.NewClient(),
+		bot: &ilinkBot{
+			client: ilink.NewClient(),
+			creds:  &ilink.Credentials{Token: "tok", BaseURL: "http://example.invalid"},
+		},
+	}
+	a.sendQ = newSendQueue(a.client, "http://example.invalid", "tok")
+
+	res := a.SendFile("stranger", filepath.Join(dir, "f.txt"), "f.txt", "")
+	if res.OK || !strings.Contains(res.Error, "no context_token") {
+		t.Fatalf("want no-token failure, got ok=%v err=%s", res.OK, res.Error)
 	}
 }
 
