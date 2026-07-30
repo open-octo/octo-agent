@@ -10,6 +10,7 @@
   import * as api from '../../lib/api'
   import { t } from '../../lib/i18n'
   import { submitIntent } from '../../lib/composerKeys'
+  import { composeSlashCommand } from '../../lib/slashCompose'
   import StatusTag from '../ui/StatusTag.svelte'
   import FolderPickerModal from '../overlays/FolderPickerModal.svelte'
   import type { McpServerDetail, McpTool } from '../../lib/types'
@@ -296,6 +297,10 @@
   let slashQuery = $state('')
   let slashActiveIndex = $state(-1)
   let slashMcpServer = $state('')
+  // Draft carried across the menu when the "/" button was pressed on a
+  // non-empty composer; the picked command is prefixed onto it. See
+  // insertSkill/composeSlashCommand.
+  let slashDraftTail = $state('')
 
   type SlashItem =
     | { kind: 'builtin'; name: string; descKey: string }
@@ -418,6 +423,7 @@
     slashMenu = false
     slashActiveIndex = -1
     slashMcpServer = ''
+    slashDraftTail = ''
   }
 
   async function maybeLoadMcpTools(serverName: string) {
@@ -459,22 +465,24 @@
   }
 
   function selectItem(item: SlashItem) {
+    let command = ''
     if (item.kind === 'builtin') {
       // Prefill "/name "; the no-arg ones (/clear, /compact) tolerate the
       // trailing space (the server trims before matching), and the arg-taking
       // ones (/loop, /goal) leave the caret ready for input.
-      text = '/' + item.name + ' '
+      command = '/' + item.name + ' '
     } else if (item.kind === 'skill') {
-      text = '/' + item.skill.name + ' '
+      command = '/' + item.skill.name + ' '
     } else if (item.kind === 'workflow') {
       // Prefill an editable run instruction; the user adds any args, then sends,
       // and the agent calls the workflow tool by name. (agentic-first)
-      text = `Run the "${item.workflow.name}" workflow`
+      command = `Run the "${item.workflow.name}" workflow`
     } else if (item.kind === 'mcp-server') {
-      text = '/mcp/' + item.name + ' '
+      command = '/mcp/' + item.name + ' '
     } else if (item.kind === 'mcp-tool') {
-      text = $t('composer.mcp_tool_prompt').replace('{server}', item.server).replace('{tool}', item.tool.name)
+      command = $t('composer.mcp_tool_prompt').replace('{server}', item.server).replace('{tool}', item.tool.name)
     }
+    text = composeSlashCommand(command, slashDraftTail)
     hideSlashMenu()
     queueMicrotask(() => textareaEl?.focus())
   }
@@ -485,9 +493,18 @@
     slashActiveIndex = (slashActiveIndex + delta + items.length) % items.length
   }
 
-  // The "/" button opens skill autocomplete with "/" prefilled.
+  // The "/" button opens skill autocomplete. On an empty composer it prefills
+  // "/" so typing filters the list. On a non-empty one it must not touch the
+  // draft — that used to wipe whatever the user had written; instead the draft
+  // is parked and the picked command is prefixed onto it as its argument.
   function insertSkill() {
-    text = '/'
+    // A half-typed "/query" is not a draft — it's the trigger itself.
+    const draft = parseSlashInput(text).mode === null ? text.trim() : ''
+    if (draft) {
+      slashDraftTail = draft
+    } else {
+      text = '/'
+    }
     showSlashMenu('skills', '')
     queueMicrotask(() => textareaEl?.focus())
   }
