@@ -429,3 +429,104 @@ describe('observeArtifact — link rel discrimination', () => {
     expect(get(artifacts)[0].preview).toBe(html)
   })
 })
+
+// The #1888 review collected reference kinds the inliner skipped; these pin
+// the client-side-fixable ones (#1892). What stays out: file kinds the
+// artifact endpoint deliberately doesn't serve (video, audio, fonts).
+describe('observeArtifact — inliner gaps (#1892)', () => {
+  const png = new Uint8Array([137, 80, 78, 71])
+
+  function stubFetch(html: string) {
+    const fetchMock = vi.fn(async (u: string) => {
+      if (u.includes('page.html')) return new Response(html)
+      return imageResponse(png)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('inlines a srcset-only <img> via its first candidate', async () => {
+    const fetchMock = stubFetch('<html><body><img srcset="chart.png 1x, chart@2x.png 2x"></body></html>')
+
+    await observeHydrated('/tmp/page.html')
+
+    const [entry] = get(artifacts)
+    expect(entry.preview).toContain('src="data:image/png;base64,')
+    expect(entry.preview).not.toContain('srcset')
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/sessions/${SID}/artifacts?path=${encodeURIComponent('/tmp/chart.png')}`,
+    )
+  })
+
+  it('does not second-guess a remote src just because the srcset is local', async () => {
+    const html = '<html><body><img src="https://example.com/c.png" srcset="chart.png 1x"></body></html>'
+    const fetchMock = stubFetch(html)
+
+    await observeHydrated('/tmp/page.html')
+
+    // The remote src is a load the iframe performs fine; replacing it with a
+    // sibling file's bytes would show the wrong image.
+    expect(get(artifacts)[0].preview).toBe(html)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('resolves references against a local <base href>', async () => {
+    const fetchMock = stubFetch(
+      '<html><head><base href="assets/"></head><body><img src="chart.png"></body></html>',
+    )
+
+    await observeHydrated('/tmp/page.html')
+
+    expect(get(artifacts)[0].preview).toContain('data:image/png;base64,')
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/sessions/${SID}/artifacts?path=${encodeURIComponent('/tmp/assets/chart.png')}`,
+    )
+  })
+
+  it('inlines nothing under a remote <base href>', async () => {
+    const html = '<html><head><base href="https://cdn.example.com/"></head><body><img src="chart.png"></body></html>'
+    const fetchMock = stubFetch(html)
+
+    await observeHydrated('/tmp/page.html')
+
+    // chart.png resolves against the remote base — again a load the iframe
+    // performs itself — so the document rides through untouched.
+    expect(get(artifacts)[0].preview).toBe(html)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a comment above <html>', async () => {
+    stubFetch('<!-- built 2026-07-30 --><!DOCTYPE html><html><body><img src="chart.png"></body></html>')
+
+    await observeHydrated('/tmp/page.html')
+
+    const [entry] = get(artifacts)
+    expect(entry.preview).toContain('<!-- built 2026-07-30 -->')
+    expect(entry.preview).toContain('<!DOCTYPE html>')
+    expect(entry.preview).toContain('data:image/png;base64,')
+  })
+
+  it('inlines a quoted CSS url() whose file name contains a parenthesis', async () => {
+    const fetchMock = stubFetch(
+      '<html><head><style>body{background:url("bg (1).png")}</style></head><body></body></html>',
+    )
+
+    await observeHydrated('/tmp/page.html')
+
+    expect(get(artifacts)[0].preview).toContain('data:image/png;base64,')
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/sessions/${SID}/artifacts?path=${encodeURIComponent('/tmp/bg (1).png')}`,
+    )
+  })
+
+  it('leaves a quoted data: url() with parentheses alone', async () => {
+    const html =
+      `<html><head><style>body{background:url("data:image/svg+xml,<svg fill='rgb(1,2,3)'/>")}</style></head><body></body></html>`
+    const fetchMock = stubFetch(html)
+
+    await observeHydrated('/tmp/page.html')
+
+    expect(get(artifacts)[0].preview).toBe(html)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})

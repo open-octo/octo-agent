@@ -143,7 +143,11 @@ const inlineRefMax = 20
 // Cheap pre-check: skip the parse/serialize round-trip entirely for a document
 // with nothing to rewrite, which is most of them.
 const LOCAL_REF_HINT = /<img\b|<image\b|url\(/i
-const CSS_URL_RE = /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi
+// A quoted url() body may legally contain ')' — an SVG data URI holding
+// rgb(...), a file name with parentheses — so the quoted forms get their own
+// alternatives (#1892). The unquoted form may not, short of CSS escapes this
+// best-effort pass doesn't attempt.
+const CSS_URL_RE = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^'")]*?))\s*\)/gi
 
 // mode picks how the result is serialized: an HTML artifact is a whole document
 // (doctype and <head> must survive), markdown output is a body fragment.
@@ -155,6 +159,21 @@ async function inlineLocalRefs(
 ): Promise<string> {
   if (!LOCAL_REF_HINT.test(html)) return html
   const doc = new DOMParser().parseFromString(html, 'text/html')
+
+  // A <base href> re-aims every relative reference, and the iframe honors it,
+  // so the inliner must resolve the same way (#1892). A local base substitutes
+  // its directory for the artifact's own; a base with a scheme (or protocol-
+  // relative) means every relative reference is remote — a load the sandboxed
+  // iframe performs fine — so there is nothing local left to inline.
+  const baseHref = doc.querySelector('base[href]')?.getAttribute('href')?.trim()
+  if (baseHref) {
+    if (baseHref.startsWith('//')) return html
+    if (/^[a-z][a-z0-9+.-]*:/i.test(baseHref) && !/^[a-z]:[\\/]/i.test(baseHref)) return html
+    // URL semantics: the base itself resolves against the document, and
+    // references then resolve against everything up to its last slash — so
+    // "assets/" appends a directory while a slashless "assets" changes nothing.
+    basePath = isAbsolutePath(baseHref) ? baseHref : `${dirOf(basePath)}/${baseHref}`
+  }
 
   // null caches a failed lookup so a repeated broken reference is fetched once.
   const seen = new Map<string, string | null>()
@@ -191,7 +210,15 @@ async function inlineLocalRefs(
   }
 
   for (const img of Array.from(doc.querySelectorAll('img'))) {
-    const dataUrl = await inline(img.getAttribute('src') ?? '')
+    const src = img.getAttribute('src')
+    let dataUrl = await inline(src ?? '')
+    // A srcset-only <img> has nothing in src to inline, and generating data:
+    // URIs *inside* a srcset is what's hairy (their commas collide with the
+    // candidate separator). Promoting one candidate to src isn't: inline the
+    // first candidate and let the srcset removal below make it take effect
+    // (#1892). Only when src is absent — a present-but-remote src is a load
+    // the iframe performs fine and must not be second-guessed.
+    if (!dataUrl && !src) dataUrl = await inline(firstSrcsetCandidate(img.getAttribute('srcset')))
     if (!dataUrl) continue
     img.setAttribute('src', dataUrl)
     // Whatever outranks the src has to go, or the rewrite achieves nothing: a
@@ -232,13 +259,39 @@ async function inlineLocalRefs(
   // no local references is never reshaped by the round-trip.
   if (!changed) return html
   if (mode === 'fragment') return doc.body.innerHTML
-  return serializeDoctype(doc.doctype) + doc.documentElement.outerHTML
+  return serializeDocument(doc)
 }
 
-// documentElement.outerHTML drops the doctype, so it gets rebuilt — with its
-// public/system identifiers, since those are what decide the rendering mode and
-// a name-only `<!DOCTYPE html>` would silently switch a legacy file to standards
-// mode. Anything else above <html> (a build comment, say) is still lost.
+// First URL in a srcset, parsed just far enough to promote it to src. Split
+// on commas and take each candidate's first token: a data: URI candidate
+// (whose own commas defeat the split) yields fragments that resolve to
+// nothing and fail the inliner's gates, same as any other broken reference.
+function firstSrcsetCandidate(srcset: string | null): string {
+  for (const part of (srcset ?? '').split(',')) {
+    const url = part.trim().split(/\s+/)[0]
+    if (url) return url
+  }
+  return ''
+}
+
+// documentElement.outerHTML alone drops everything at document level: the
+// doctype and any comments beside it (a build stamp above <html>, say).
+// Serialize the document's own children instead (#1892) — the parser keeps no
+// document-level whitespace, so the pieces butt against each other, same as
+// the old doctype + <html> pair did.
+function serializeDocument(doc: Document): string {
+  let out = ''
+  for (const node of Array.from(doc.childNodes)) {
+    if (node.nodeType === Node.DOCUMENT_TYPE_NODE) out += serializeDoctype(node as DocumentType)
+    else if (node.nodeType === Node.COMMENT_NODE) out += `<!--${(node as Comment).data}-->`
+    else if (node.nodeType === Node.ELEMENT_NODE) out += (node as Element).outerHTML
+  }
+  return out
+}
+
+// The doctype is rebuilt with its public/system identifiers, since those are
+// what decide the rendering mode and a name-only `<!DOCTYPE html>` would
+// silently switch a legacy file to standards mode.
 function serializeDoctype(dt: DocumentType | null): string {
   if (!dt) return ''
   let out = `<!DOCTYPE ${dt.name}`
@@ -255,7 +308,7 @@ async function inlineCSSURLs(
   const out: string[] = []
   let last = 0
   for (const m of Array.from(css.matchAll(CSS_URL_RE))) {
-    const dataUrl = await inline(m[2])
+    const dataUrl = await inline(m[1] ?? m[2] ?? m[3] ?? '')
     if (!dataUrl) continue
     out.push(css.slice(last, m.index), `url("${dataUrl}")`)
     last = m.index + m[0].length
