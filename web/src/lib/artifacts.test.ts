@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { get } from 'svelte/store'
 import { artifacts, artifactSel, panelContent } from './stores'
-import { observeArtifact, resetArtifacts } from './artifacts'
+import { lightAppSource, observeArtifact, hydrateArtifact, resetArtifacts } from './artifacts'
 
 // Nothing a preview document references can authenticate: the srcdoc iframe has
 // no allow-same-origin, so its subresource requests are cross-site and the
@@ -13,6 +13,14 @@ const SID = 'sess-1'
 
 function payload(path: string) {
   return { type: 'write', path }
+}
+
+// Observing is metadata-only since #1893 — the body fetch and preview build run
+// on first selection. Most cases below assert on the preview document, so this
+// drives that second step the way the panel's $effect does.
+async function observeHydrated(path: string) {
+  observeArtifact(SID, payload(path), false)
+  await hydrateArtifact(get(artifacts).at(-1))
 }
 
 // Image bytes must come back as the test environment's own Blob. Node's fetch
@@ -34,11 +42,11 @@ afterEach(() => {
 })
 
 describe('observeArtifact — image artifacts', () => {
-  it('carries a src for the host document and never fetches the bytes', async () => {
+  it('carries a src for the host document and never fetches the bytes', () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
 
-    await observeArtifact(SID, payload('/tmp/shot.png'), false)
+    observeArtifact(SID, payload('/tmp/shot.png'), false)
 
     const [entry] = get(artifacts)
     expect(entry.type).toBe('Image')
@@ -47,18 +55,20 @@ describe('observeArtifact — image artifacts', () => {
     )
     // The <img> pulls the bytes lazily; observing must not download them.
     expect(fetchMock).not.toHaveBeenCalled()
-    // No sandboxed preview document at all, so nothing to 401.
+    // No sandboxed preview document at all, so nothing to 401 — and nothing
+    // for hydrateArtifact to build either.
     expect(entry.preview).toBe('')
+    expect(entry.loaded).toBe(true)
     // `code` is the on-disk path — the one text form worth copying.
     expect(entry.code).toBe('/tmp/shot.png')
   })
 
-  it('changes the src when the same path is written again', async () => {
+  it('changes the src when the same path is written again', () => {
     vi.stubGlobal('fetch', vi.fn())
 
-    await observeArtifact(SID, payload('/tmp/shot.png'), false)
+    observeArtifact(SID, payload('/tmp/shot.png'), false)
     const first = get(artifacts)[0].src
-    await observeArtifact(SID, payload('/tmp/shot.png'), true)
+    observeArtifact(SID, payload('/tmp/shot.png'), true)
     const second = get(artifacts)[0].src
 
     // An identical src would let Svelte skip the update and leave the old bytes
@@ -69,11 +79,92 @@ describe('observeArtifact — image artifacts', () => {
 
 })
 
+// Entries land in the store metadata-only and the body is built on first
+// selection, so history replay costs no network and a session's unopened
+// artifacts hold no data: URIs (#1893).
+describe('hydrateArtifact — lazy body build', () => {
+  it('observing a text artifact fetches nothing', () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    observeArtifact(SID, payload('/tmp/report.md'), false)
+
+    const [entry] = get(artifacts)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(entry.loaded).toBe(false)
+    expect(entry.preview).toBe('')
+    expect(entry.code).toBe('')
+  })
+
+  it('builds the body once on first selection', async () => {
+    const fetchMock = vi.fn(async () => new Response('# hello'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    observeArtifact(SID, payload('/tmp/report.md'), false)
+    await hydrateArtifact(get(artifacts)[0])
+    // Re-selecting a loaded entry must not refetch.
+    await hydrateArtifact(get(artifacts)[0])
+
+    const [entry] = get(artifacts)
+    expect(entry.loaded).toBe(true)
+    expect(entry.code).toBe('# hello')
+    expect(entry.preview).toContain('hello')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops a stale build when a re-write replaced the entry', async () => {
+    let release!: (r: Response) => void
+    const gate = new Promise<Response>(r => { release = r })
+    vi.stubGlobal('fetch', vi.fn(() => gate))
+
+    observeArtifact(SID, payload('/tmp/report.md'), false)
+    const stale = hydrateArtifact(get(artifacts)[0])
+    // The agent re-wrote the file while the old body was still being fetched.
+    observeArtifact(SID, payload('/tmp/report.md'), false)
+    release(new Response('# v1'))
+    await stale
+
+    // The build began against the replaced entry; the fresh one must not
+    // inherit those bytes — it hydrates itself when next selected.
+    expect(get(artifacts)).toHaveLength(1)
+    expect(get(artifacts)[0].loaded).toBe(false)
+  })
+
+  it('discards a build that resolves after a session switch', async () => {
+    let release!: (r: Response) => void
+    const gate = new Promise<Response>(r => { release = r })
+    vi.stubGlobal('fetch', vi.fn(() => gate))
+
+    observeArtifact(SID, payload('/tmp/report.md'), false)
+    const inflight = hydrateArtifact(get(artifacts)[0])
+    resetArtifacts('sess-2')
+    release(new Response('# hello'))
+    await inflight
+
+    expect(get(artifacts)).toHaveLength(0)
+  })
+
+  it('shows a placeholder instead of loading forever when the fetch fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })))
+
+    observeArtifact(SID, payload('/tmp/report.md'), false)
+    await hydrateArtifact(get(artifacts)[0])
+
+    const [entry] = get(artifacts)
+    // loaded, or the panel would spin forever; a re-write replaces the entry
+    // and retries. loadFailed disables the actions that would persist the
+    // empty body (copy, download, Save to Light App).
+    expect(entry.loaded).toBe(true)
+    expect(entry.loadFailed).toBe(true)
+    expect(entry.preview).toContain('could not be loaded')
+  })
+})
+
 describe('observeArtifact — markdown copy button', () => {
   it('binds the handler to an element the preview document actually has', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('```js\nlet a = 1\n```\n')))
 
-    await observeArtifact(SID, payload('/tmp/notes.md'), false)
+    await observeHydrated('/tmp/notes.md')
 
     const { preview } = get(artifacts)[0]
     // '.body' matched nothing here, so querySelector returned null and the whole
@@ -87,7 +178,7 @@ describe('observeArtifact — markdown copy button', () => {
   })
 })
 
-// Code-kind artifacts fetch their body like markdown does and preview as
+// Code-kind artifacts hydrate their body like markdown does and preview as
 // escaped monospace text. The server serves these extensions as text/plain
 // (#1895) — before that, the fetch 404ed and the artifact silently vanished.
 describe('observeArtifact — code artifacts', () => {
@@ -95,7 +186,7 @@ describe('observeArtifact — code artifacts', () => {
     const source = 'if x < 1 && y > 2:\n    print("ok")\n'
     vi.stubGlobal('fetch', vi.fn(async () => new Response(source)))
 
-    await observeArtifact(SID, payload('/tmp/script.py'), false)
+    await observeHydrated('/tmp/script.py')
 
     const [entry] = get(artifacts)
     expect(entry.type).toBe('PY')
@@ -107,10 +198,10 @@ describe('observeArtifact — code artifacts', () => {
     expect(entry.preview).not.toContain('x < 1')
   })
 
-  it('never auto-opens the panel for a live code write', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('x = 1\n')))
+  it('never auto-opens the panel for a live code write', () => {
+    vi.stubGlobal('fetch', vi.fn())
 
-    await observeArtifact(SID, { type: 'write', path: '/tmp/script.py' }, true)
+    observeArtifact(SID, { type: 'write', path: '/tmp/script.py' }, true)
 
     // Source-file writes are the routine bulk of a coding session; the panel
     // must not pop open on them.
@@ -118,7 +209,7 @@ describe('observeArtifact — code artifacts', () => {
 
     // And the code write must not consume the once-per-session flag: a later
     // rich-kind artifact still auto-opens.
-    await observeArtifact(SID, { type: 'write', path: '/tmp/report.md' }, true)
+    observeArtifact(SID, { type: 'write', path: '/tmp/report.md' }, true)
     expect(get(panelContent)).toBe('session')
   })
 })
@@ -127,7 +218,7 @@ describe('observeArtifact — preview documents', () => {
   it('builds the markdown preview without referencing /api/', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('# hello')))
 
-    await observeArtifact(SID, payload('/tmp/notes.md'), false)
+    await observeHydrated('/tmp/notes.md')
 
     const [entry] = get(artifacts)
     expect(entry.preview).not.toBe('')
@@ -153,7 +244,7 @@ describe('observeArtifact — markdown image references', () => {
   it('inlines a relative reference, resolved against the markdown file', async () => {
     const fetchMock = stubFetch('![shot](img/shot.png)\n')
 
-    await observeArtifact(SID, payload('/tmp/report.md'), false)
+    await observeHydrated('/tmp/report.md')
 
     const [entry] = get(artifacts)
     expect(entry.preview).toContain('src="data:image/png;base64,')
@@ -167,7 +258,7 @@ describe('observeArtifact — markdown image references', () => {
   it('resolves "." and ".." segments', async () => {
     const fetchMock = stubFetch('![shot](../shots/./a.png)\n')
 
-    await observeArtifact(SID, payload('/tmp/docs/report.md'), false)
+    await observeHydrated('/tmp/docs/report.md')
 
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/sessions/${SID}/artifacts?path=${encodeURIComponent('/tmp/shots/a.png')}`,
@@ -179,7 +270,7 @@ describe('observeArtifact — markdown image references', () => {
     // naming a sibling document and having the host page fetch it.
     const fetchMock = stubFetch('![oops](secrets.md)\n')
 
-    await observeArtifact(SID, payload('/tmp/report.md'), false)
+    await observeHydrated('/tmp/report.md')
 
     const [entry] = get(artifacts)
     expect(entry.preview).toContain('secrets.md')
@@ -190,7 +281,7 @@ describe('observeArtifact — markdown image references', () => {
   it('leaves remote and data references untouched', async () => {
     const fetchMock = stubFetch('![a](https://example.com/a.png)\n\n![b](data:image/gif;base64,R0lGOD)\n')
 
-    await observeArtifact(SID, payload('/tmp/report.md'), false)
+    await observeHydrated('/tmp/report.md')
 
     const [entry] = get(artifacts)
     expect(entry.preview).toContain('https://example.com/a.png')
@@ -201,7 +292,7 @@ describe('observeArtifact — markdown image references', () => {
   it('keeps the artifact when an image is not fetchable', async () => {
     stubFetch('![gone](missing.png)\n', 404)
 
-    await observeArtifact(SID, payload('/tmp/report.md'), false)
+    await observeHydrated('/tmp/report.md')
 
     const [entry] = get(artifacts)
     // The reference stays as written: a broken image beats losing the preview.
@@ -232,7 +323,7 @@ describe('observeArtifact — html local references', () => {
         '<body><img src="chart.png"></body></html>',
     )
 
-    await observeArtifact(SID, payload('/tmp/page.html'), false)
+    await observeHydrated('/tmp/page.html')
 
     const [entry] = get(artifacts)
     expect(entry.preview).toMatch(/^<!DOCTYPE html>/i)
@@ -247,7 +338,7 @@ describe('observeArtifact — html local references', () => {
         '<img src="chart.png"></picture></body></html>',
     )
 
-    await observeArtifact(SID, payload('/tmp/page.html'), false)
+    await observeHydrated('/tmp/page.html')
 
     const [entry] = get(artifacts)
     expect(entry.preview).toContain('data:image/png;base64,')
@@ -260,7 +351,7 @@ describe('observeArtifact — html local references', () => {
   it('rewrites an SVG <image href>', async () => {
     stubFetch('<html><body><svg><image href="d.png" width="10" height="10"></image></svg></body></html>')
 
-    await observeArtifact(SID, payload('/tmp/page.html'), false)
+    await observeHydrated('/tmp/page.html')
 
     const [entry] = get(artifacts)
     expect(entry.preview).toContain('data:image/png;base64,')
@@ -273,7 +364,7 @@ describe('observeArtifact — html local references', () => {
         '<html><body><img src="chart.png"></body></html>',
     )
 
-    await observeArtifact(SID, payload('/tmp/page.html'), false)
+    await observeHydrated('/tmp/page.html')
 
     // A name-only `<!DOCTYPE html>` would switch this file to standards mode and
     // the preview would lay out differently from the real thing.
@@ -284,7 +375,7 @@ describe('observeArtifact — html local references', () => {
     const html = '<!DOCTYPE html><html><body><h1>hi</h1></body></html>'
     stubFetch(html)
 
-    await observeArtifact(SID, payload('/tmp/page.html'), false)
+    await observeHydrated('/tmp/page.html')
 
     // No parse/serialize round-trip on a document with no local references.
     expect(get(artifacts)[0].preview).toBe(html)
@@ -293,7 +384,7 @@ describe('observeArtifact — html local references', () => {
   it('leaves the warning page alone when a script is unreachable', async () => {
     stubFetch('<html><head><script src="app.js"></script></head><body><img src="chart.png"></body></html>')
 
-    await observeArtifact(SID, payload('/tmp/page.html'), false)
+    await observeHydrated('/tmp/page.html')
 
     const [entry] = get(artifacts)
     expect(entry.preview).toContain('cannot be previewed here')
@@ -321,7 +412,7 @@ describe('observeArtifact — link rel discrimination', () => {
         '<body><img src="chart.png"></body></html>',
     )
 
-    await observeArtifact(SID, payload('/tmp/page.html'), false)
+    await observeHydrated('/tmp/page.html')
 
     const [entry] = get(artifacts)
     expect(entry.preview).not.toContain('cannot be previewed here')
@@ -337,7 +428,7 @@ describe('observeArtifact — link rel discrimination', () => {
       '<body><h1>hi</h1></body></html>'
     stubFetch(html)
 
-    await observeArtifact(SID, payload('/tmp/page.html'), false)
+    await observeHydrated('/tmp/page.html')
 
     expect(get(artifacts)[0].preview).toBe(html)
   })
@@ -345,7 +436,7 @@ describe('observeArtifact — link rel discrimination', () => {
   it('still warns for an external stylesheet', async () => {
     stubFetch('<html><head><link rel="stylesheet" href="https://cdn.example.com/x.css"></head><body></body></html>')
 
-    await observeArtifact(SID, payload('/tmp/page.html'), false)
+    await observeHydrated('/tmp/page.html')
 
     expect(get(artifacts)[0].preview).toContain('cannot be previewed here')
   })
@@ -353,7 +444,7 @@ describe('observeArtifact — link rel discrimination', () => {
   it('still warns when the rel attribute is unquoted or trails the href', async () => {
     stubFetch('<html><head><link href="style.css" rel=stylesheet></head><body></body></html>')
 
-    await observeArtifact(SID, payload('/tmp/page.html'), false)
+    await observeHydrated('/tmp/page.html')
 
     expect(get(artifacts)[0].preview).toContain('cannot be previewed here')
   })
@@ -362,7 +453,7 @@ describe('observeArtifact — link rel discrimination', () => {
     // The rel="preload" onload="this.rel='stylesheet'" idiom makes it one.
     stubFetch('<html><head><link rel="preload" as="style" href="x.css"></head><body></body></html>')
 
-    await observeArtifact(SID, payload('/tmp/page.html'), false)
+    await observeHydrated('/tmp/page.html')
 
     expect(get(artifacts)[0].preview).toContain('cannot be previewed here')
   })
@@ -371,47 +462,223 @@ describe('observeArtifact — link rel discrimination', () => {
     const html = '<html><head><link rel="stylesheet" href="data:text/css,body{margin:0}"></head><body></body></html>'
     stubFetch(html)
 
-    await observeArtifact(SID, payload('/tmp/page.html'), false)
+    await observeHydrated('/tmp/page.html')
 
     expect(get(artifacts)[0].preview).toBe(html)
   })
 })
 
-// The list must come out in transcript order even though each observation
-// awaits its own fetch and they resolve in arbitrary order (#1894).
+// The #1888 review collected reference kinds the inliner skipped; these pin
+// the client-side-fixable ones (#1892). What stays out: file kinds the
+// artifact endpoint deliberately doesn't serve (video, audio, fonts).
+describe('observeArtifact — inliner gaps (#1892)', () => {
+  const png = new Uint8Array([137, 80, 78, 71])
+
+  function stubFetch(html: string) {
+    const fetchMock = vi.fn(async (u: string) => {
+      if (u.includes('page.html')) return new Response(html)
+      return imageResponse(png)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('inlines a srcset-only <img> via its first candidate', async () => {
+    const fetchMock = stubFetch('<html><body><img srcset="chart.png 1x, chart@2x.png 2x"></body></html>')
+
+    await observeHydrated('/tmp/page.html')
+
+    const [entry] = get(artifacts)
+    expect(entry.preview).toContain('src="data:image/png;base64,')
+    expect(entry.preview).not.toContain('srcset')
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/sessions/${SID}/artifacts?path=${encodeURIComponent('/tmp/chart.png')}`,
+    )
+  })
+
+  it('does not second-guess a remote src just because the srcset is local', async () => {
+    const html = '<html><body><img src="https://example.com/c.png" srcset="chart.png 1x"></body></html>'
+    const fetchMock = stubFetch(html)
+
+    await observeHydrated('/tmp/page.html')
+
+    // The remote src is a load the iframe performs fine; replacing it with a
+    // sibling file's bytes would show the wrong image.
+    expect(get(artifacts)[0].preview).toBe(html)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('resolves references against a local <base href>', async () => {
+    const fetchMock = stubFetch(
+      '<html><head><base href="assets/"></head><body><img src="chart.png"></body></html>',
+    )
+
+    await observeHydrated('/tmp/page.html')
+
+    expect(get(artifacts)[0].preview).toContain('data:image/png;base64,')
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/sessions/${SID}/artifacts?path=${encodeURIComponent('/tmp/assets/chart.png')}`,
+    )
+  })
+
+  it('inlines nothing under a remote <base href>', async () => {
+    const html = '<html><head><base href="https://cdn.example.com/"></head><body><img src="chart.png"></body></html>'
+    const fetchMock = stubFetch(html)
+
+    await observeHydrated('/tmp/page.html')
+
+    // chart.png resolves against the remote base — again a load the iframe
+    // performs itself — so the document rides through untouched.
+    expect(get(artifacts)[0].preview).toBe(html)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a comment above <html>', async () => {
+    stubFetch('<!-- built 2026-07-30 --><!DOCTYPE html><html><body><img src="chart.png"></body></html>')
+
+    await observeHydrated('/tmp/page.html')
+
+    const [entry] = get(artifacts)
+    expect(entry.preview).toContain('<!-- built 2026-07-30 -->')
+    expect(entry.preview).toContain('<!DOCTYPE html>')
+    expect(entry.preview).toContain('data:image/png;base64,')
+  })
+
+  it('inlines a quoted CSS url() whose file name contains a parenthesis', async () => {
+    const fetchMock = stubFetch(
+      '<html><head><style>body{background:url("bg (1).png")}</style></head><body></body></html>',
+    )
+
+    await observeHydrated('/tmp/page.html')
+
+    expect(get(artifacts)[0].preview).toContain('data:image/png;base64,')
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/sessions/${SID}/artifacts?path=${encodeURIComponent('/tmp/bg (1).png')}`,
+    )
+  })
+
+  it('leaves a quoted data: url() with parentheses alone', async () => {
+    const html =
+      `<html><head><style>body{background:url("data:image/svg+xml,<svg fill='rgb(1,2,3)'/>")}</style></head><body></body></html>`
+    const fetchMock = stubFetch(html)
+
+    await observeHydrated('/tmp/page.html')
+
+    expect(get(artifacts)[0].preview).toBe(html)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// The list must come out in transcript order regardless of how long any body
+// takes to load (#1894). Observing is synchronous, so entries land in call
+// order by construction; these pin the other half — a slow hydration writes
+// back in place and never reorders the list or steals the selection.
 describe('observeArtifact — transcript ordering', () => {
-  it('orders by observation order, not fetch completion, and selects the transcript-newest', async () => {
-    // report.md needs a fetch we hold open; the image needs none, so it lands first.
+  it('keeps order and selection while an earlier artifact is still hydrating', async () => {
+    // report.md needs a fetch we hold open; the image needs none.
     let releaseMd!: (r: Response) => void
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(res => { releaseMd = res })))
 
-    const md = observeArtifact(SID, payload('/tmp/report.md'), false)
-    const png = observeArtifact(SID, payload('/tmp/late.png'), false)
-    await png
-    expect(get(artifacts).map(a => a.name)).toEqual(['late.png'])
+    observeArtifact(SID, payload('/tmp/report.md'), false)
+    const md = hydrateArtifact(get(artifacts)[0])
+    observeArtifact(SID, payload('/tmp/late.png'), false)
+
+    // Both entries are present in transcript order before any fetch resolves.
+    expect(get(artifacts).map(a => a.name)).toEqual(['report.md', 'late.png'])
+    expect(get(artifactSel)).toBe(1)
 
     releaseMd(new Response('# report'))
     await md
 
+    // The finished build lands in place — order and selection unchanged.
     expect(get(artifacts).map(a => a.name)).toEqual(['report.md', 'late.png'])
-    // Selection follows the transcript-newest artifact, not the last fetch to finish.
+    expect(get(artifacts)[0].code).toBe('# report')
     expect(get(artifactSel)).toBe(1)
   })
 
-  it('keeps the newer observation when a stale fetch of the same path resolves last', async () => {
+  it('keeps the newer write when a stale build of the same path resolves last', async () => {
     const resolvers: Array<(r: Response) => void> = []
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(res => { resolvers.push(res) })))
 
-    const first = observeArtifact(SID, payload('/tmp/a.md'), false)
-    const second = observeArtifact(SID, payload('/tmp/a.md'), false)
+    observeArtifact(SID, payload('/tmp/a.md'), false)
+    const stale = hydrateArtifact(get(artifacts)[0])
+    // Re-write replaces the entry while the first build is still fetching.
+    observeArtifact(SID, payload('/tmp/a.md'), false)
+    const fresh = hydrateArtifact(get(artifacts)[0])
     resolvers[1](new Response('v2'))
-    await second
+    await fresh
     resolvers[0](new Response('v1'))
-    await first
+    await stale
 
     expect(get(artifacts)).toHaveLength(1)
     expect(get(artifacts)[0].code).toBe('v2')
-    // The dropped stale observation must not touch the selection either.
+    // The dropped stale build must not touch the selection either.
     expect(get(artifactSel)).toBe(0)
+  })
+})
+
+// "Save to Light App" persists a copy that renders through the same kind of
+// sandboxed iframe as the panel preview, so it must save the inlined preview —
+// the raw source's relative image paths resolve against nothing there (#1890).
+describe('lightAppSource — what Save to Light App persists', () => {
+  const png = new Uint8Array([137, 80, 78, 71])
+
+  function stubFetch(html: string) {
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => {
+      if (u.includes('page.html')) return new Response(html)
+      return imageResponse(png)
+    }))
+  }
+
+  it('hands over the inlined preview when the document has local images', async () => {
+    stubFetch('<!DOCTYPE html><html><body><img src="chart.png"></body></html>')
+
+    await observeHydrated('/tmp/page.html')
+
+    const saved = lightAppSource(get(artifacts)[0])
+    expect(saved).toContain('data:image/png;base64,')
+    expect(saved).not.toContain('chart.png')
+  })
+
+  it('hands over the exact source when there was nothing to inline', async () => {
+    const html = '<!DOCTYPE html><html><body><h1>hi</h1></body></html>'
+    stubFetch(html)
+
+    await observeHydrated('/tmp/page.html')
+
+    expect(lightAppSource(get(artifacts)[0])).toBe(html)
+  })
+
+  it('never persists the external-refs warning page — the source is the faithful copy', async () => {
+    const html = '<html><head><script src="app.js"></script></head><body><img src="chart.png"></body></html>'
+    stubFetch(html)
+
+    await observeHydrated('/tmp/page.html')
+
+    const entry = get(artifacts)[0]
+    expect(entry.preview).toContain('cannot be previewed here')
+    expect(lightAppSource(entry)).toBe(html)
+  })
+
+  it('never persists the load-failure placeholder either', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })))
+
+    await observeHydrated('/tmp/page.html')
+
+    const entry = get(artifacts)[0]
+    expect(entry.loadFailed).toBe(true)
+    // The save button is disabled for a failed entry; if a save fires anyway,
+    // the placeholder note must not become a Light App.
+    expect(lightAppSource(entry)).not.toContain('could not be loaded')
+  })
+
+  it('hands over the source for a non-HTML artifact', () => {
+    const a = { type: 'Markdown', code: '# hi', preview: '<h1>hi</h1>' }
+    expect(lightAppSource(a as any)).toBe('# hi')
+  })
+
+  it('falls back to the source when the preview is empty', () => {
+    const a = { type: 'HTML', code: '<html><body>hi</body></html>', preview: '' }
+    expect(lightAppSource(a as any)).toBe(a.code)
   })
 })

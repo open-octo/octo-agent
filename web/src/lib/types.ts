@@ -132,10 +132,14 @@ export interface Artifact {
   // sandboxed `preview` iframe (which cannot authenticate — see lib/artifacts.ts),
   // and the download action saves these bytes.
   src?: string
-  // Ingest sequence, assigned before the body fetch starts. Callers observe
-  // artifacts in transcript order but fetches resolve in arbitrary order, so
-  // the list is kept sorted by seq rather than by arrival (see lib/artifacts.ts).
-  seq: number
+  // code and preview are built lazily on first selection (hydrateArtifact in
+  // lib/artifacts.ts); loaded flips true once they are populated. Image
+  // artifacts observe as loaded — they carry src instead of a preview document.
+  loaded: boolean
+  // Set when the lazy build could not fetch the body: preview holds a
+  // placeholder note rather than the document, and code is empty. Actions
+  // that persist the body (copy, download, Save to Light App) are disabled.
+  loadFailed?: boolean
 }
 
 // SkillInfo matches the Go server skill struct
