@@ -1,16 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { renderMarkdown } from './markdown'
 
-// These assert on what a quote's CONTENTS render to, never on the surrounding
-// <blockquote> tag. Under happy-dom, DOMPurify strips block wrappers it keeps
-// in a real browser — `sanitize('<div class="q">x</div>')` returns bare `x`
-// here, and blockquote goes the same way, while the <p>/<strong> inside
-// survive. That is a test-environment artifact, not the shipped behavior (the
-// code-block renderer emits a <div> that is plainly present in the UI), so
-// asserting on the wrapper would pin the artifact instead of the fix.
 describe('renderMarkdown: blockquote contents', () => {
   it('renders bold inside a quote instead of leaking asterisks', () => {
     const out = renderMarkdown('> quoted **bold**')
+    expect(out).toContain('<blockquote')
     expect(out).toContain('<strong>bold</strong>')
     expect(out).not.toContain('**bold**')
   })
@@ -29,6 +23,7 @@ describe('renderMarkdown: blockquote contents', () => {
 
   it('keeps a multi-line quote as one quote with both lines rendered', () => {
     const out = renderMarkdown('> first **line**\n> second *line*')
+    expect(out.match(/<blockquote/g)).toHaveLength(1)
     expect(out).toContain('<strong>line</strong>')
     expect(out).toContain('<em>line</em>')
   })

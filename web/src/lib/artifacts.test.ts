@@ -71,10 +71,7 @@ describe('observeArtifact — markdown copy button', () => {
     expect(preview).not.toContain(".querySelector('.body')")
     expect(preview).toContain('document.body.addEventListener')
     // The other half of the contract: the markup the handler looks for.
-    // Not asserting the .code-block wrapper — under happy-dom, DOMPurify drops
-    // every outermost <div> (even `<div class="a">x</div>` → `x`), so its
-    // absence here says nothing about a browser. The handler null-guards that
-    // lookup for the same reason.
+    expect(preview).toContain('class="code-block"')
     expect(preview).toContain('class="copy-btn"')
     expect(preview).toContain('<pre><code')
   })

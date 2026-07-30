@@ -14,7 +14,12 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'happy-dom',
+    // jsdom, not happy-dom: happy-dom's parser/serializer is not spec-compliant
+    // enough for structural assertions — DOMPurify under it drops every
+    // outermost <div>, and DOMParser round-trips reshape documents in ways real
+    // browsers don't (#1897). jsdom keeps sanitized and re-serialized DOM close
+    // to what ships.
+    environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     globals: true,
     include: ['src/**/*.test.ts'],
