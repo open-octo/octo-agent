@@ -2,6 +2,7 @@
   import { artifacts, panelContent, artifactSel, artifactView, artifactModalOpen, lightappSel, lightapps, lightappHTML, showToast } from '../lib/stores'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
+  import { lightAppSource } from '../lib/artifacts'
   import * as api from '../lib/api'
 
   // ── Session artifacts (existing) ──────────────────────────────────────────
@@ -51,7 +52,10 @@
     if (!name || !cur) return
     saveToLALoading = true
     try {
-      const app = await api.createLightApp({ name, html: cur.code })
+      // Save what the panel previews, not the raw source: a Light App renders
+      // in the same kind of sandboxed iframe, where relative image paths
+      // resolve against nothing (#1890).
+      const app = await api.createLightApp({ name, html: lightAppSource(cur) })
       showToast(`Light App "${app.name}" saved`, 'success')
       saveToLADialog = false
       // If the panel is in lightapps mode, refresh the list.

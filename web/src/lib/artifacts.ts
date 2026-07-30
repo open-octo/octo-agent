@@ -106,6 +106,19 @@ function hasExternalRefs(html: string): boolean {
   return false
 }
 
+// The HTML to persist when an artifact is saved as a Light App. A Light App
+// renders through the same kind of sandboxed srcdoc iframe as the panel
+// preview, and its relative image references have nothing to resolve against
+// at all — so the inlined preview (local images as data: URIs, see
+// inlineLocalRefs) is the version that survives the copy, not the raw source
+// (#1890). The exception is a document hasExternalRefs routes to the warning
+// page: its preview is a placeholder, not the document, so the raw source
+// stays the faithful copy there.
+export function lightAppSource(a: Artifact): string {
+  if (a.type !== 'HTML' || hasExternalRefs(a.code)) return a.code
+  return a.preview || a.code
+}
+
 function artifactURL(sessionId: string, path: string): string {
   return `/api/sessions/${encodeURIComponent(sessionId)}/artifacts?path=${encodeURIComponent(path)}`
 }

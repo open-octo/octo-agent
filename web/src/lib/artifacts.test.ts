@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { get } from 'svelte/store'
 import { artifacts } from './stores'
-import { observeArtifact, resetArtifacts } from './artifacts'
+import { lightAppSource, observeArtifact, resetArtifacts } from './artifacts'
 
 // Nothing a preview document references can authenticate: the srcdoc iframe has
 // no allow-same-origin, so its subresource requests are cross-site and the
@@ -338,5 +338,49 @@ describe('observeArtifact — link rel discrimination', () => {
     await observeArtifact(SID, payload('/tmp/page.html'), false)
 
     expect(get(artifacts)[0].preview).toBe(html)
+  })
+})
+
+// "Save to Light App" persists a copy that renders through the same kind of
+// sandboxed iframe as the panel preview, so it must save the inlined preview —
+// the raw source's relative image paths resolve against nothing there (#1890).
+describe('lightAppSource — what Save to Light App persists', () => {
+  const png = new Uint8Array([137, 80, 78, 71])
+
+  function stubFetch(html: string) {
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => {
+      if (u.includes('page.html')) return new Response(html)
+      return new Response(png, { headers: { 'Content-Type': 'image/png' } })
+    }))
+  }
+
+  it('hands over the inlined preview when the document has local images', async () => {
+    stubFetch('<!DOCTYPE html><html><body><img src="chart.png"></body></html>')
+
+    await observeArtifact(SID, payload('/tmp/page.html'), false)
+
+    const saved = lightAppSource(get(artifacts)[0])
+    expect(saved).toContain('data:image/png;base64,')
+    expect(saved).not.toContain('chart.png')
+  })
+
+  it('hands over the exact source when there was nothing to inline', async () => {
+    const html = '<!DOCTYPE html><html><body><h1>hi</h1></body></html>'
+    stubFetch(html)
+
+    await observeArtifact(SID, payload('/tmp/page.html'), false)
+
+    expect(lightAppSource(get(artifacts)[0])).toBe(html)
+  })
+
+  it('never persists the external-refs warning page — the source is the faithful copy', async () => {
+    const html = '<html><head><script src="app.js"></script></head><body><img src="chart.png"></body></html>'
+    stubFetch(html)
+
+    await observeArtifact(SID, payload('/tmp/page.html'), false)
+
+    const entry = get(artifacts)[0]
+    expect(entry.preview).toContain('cannot be previewed here')
+    expect(lightAppSource(entry)).toBe(html)
   })
 })
