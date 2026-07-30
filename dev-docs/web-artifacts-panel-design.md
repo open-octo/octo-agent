@@ -82,7 +82,7 @@ Agent-generated HTML is untrusted by definition (prompt injection can author it)
 ```
 
 - Mirrors the existing left `<aside id="sidebar">` pattern on the right of `<main id="main">`: a `<aside id="artifacts-panel">` that is hidden until the session has at least one artifact, then shows a header toggle with a count badge.
-- Collapsed by default; auto-opens the first time an artifact appears in a **live** turn (not on history replay — reloading an old session shouldn't pop the panel).
+- Collapsed by default; auto-opens the first time an artifact appears in a **live** turn (not on history replay — reloading an old session shouldn't pop the panel). Code kinds enter the list but never trigger the auto-open and don't consume its once-per-session flag: source-file writes are the routine bulk of a coding session, and a later HTML report or chart should still pop the panel.
 - List rows: kind icon, basename, relative time. Row actions: preview (default), open raw in new tab, download.
 - Preview fills the lower pane; HTML previews get a refresh button (re-fetch + re-render).
 - Narrow viewports (≤768px, the existing mobile breakpoint): the panel becomes an overlay like the left sidebar's mobile mode.

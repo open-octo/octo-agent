@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { get } from 'svelte/store'
-import { artifacts } from './stores'
+import { artifacts, panelContent } from './stores'
 import { observeArtifact, resetArtifacts } from './artifacts'
 
 // Nothing a preview document references can authenticate: the srcdoc iframe has
@@ -105,6 +105,21 @@ describe('observeArtifact — code artifacts', () => {
     expect(entry.preview).toContain('<pre')
     expect(entry.preview).toContain('x &lt; 1 &amp;&amp; y &gt; 2')
     expect(entry.preview).not.toContain('x < 1')
+  })
+
+  it('never auto-opens the panel for a live code write', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('x = 1\n')))
+
+    await observeArtifact(SID, { type: 'write', path: '/tmp/script.py' }, true)
+
+    // Source-file writes are the routine bulk of a coding session; the panel
+    // must not pop open on them.
+    expect(get(panelContent)).toBe(null)
+
+    // And the code write must not consume the once-per-session flag: a later
+    // rich-kind artifact still auto-opens.
+    await observeArtifact(SID, { type: 'write', path: '/tmp/report.md' }, true)
+    expect(get(panelContent)).toBe('session')
   })
 })
 

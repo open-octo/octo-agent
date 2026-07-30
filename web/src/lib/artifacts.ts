@@ -492,7 +492,12 @@ export async function observeArtifact(
   })
   artifactSel.set(get(artifacts).length - 1)
 
-  if (live && !autoOpened) {
+  // Code kinds enter the list but never auto-open the panel: source-file
+  // writes are the routine bulk of a coding session, and popping the sidebar
+  // on the first one would make every such session open with it. They also
+  // don't consume the once-per-session flag, so a later HTML report or chart
+  // still auto-opens.
+  if (live && !autoOpened && kind !== 'code') {
     autoOpened = true
     panelContent.set('session')
   }
