@@ -1,4 +1,4 @@
-import { marked, Renderer } from "marked"
+import { marked, Renderer, type Tokens } from "marked"
 import DOMPurify from "dompurify"
 import hljs from "highlight.js/lib/core"
 import javascript from "highlight.js/lib/languages/javascript"
@@ -78,8 +78,13 @@ export function renderMarkdown(text: string, showReasoning = true): string {
     return lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("mailto:") || lower.startsWith("tel:")
   }
 
-  renderer.blockquote = function ({ text: bqText }: { text: string }) {
-    return `<blockquote class="md-bq">${bqText}</blockquote>`
+  // Render the quote's children, don't interpolate token.text — that field is
+  // the raw markdown source, so `> quoted **bold**` reached the DOM with the
+  // asterisks intact and every link, inline code span and nested list inside a
+  // quote came out as literal text. The default renderer parses token.tokens;
+  // this override exists only to add the md-bq class, so it has to do the same.
+  renderer.blockquote = function ({ tokens }: Tokens.Blockquote) {
+    return `<blockquote class="md-bq">${this.parser.parse(tokens)}</blockquote>`
   }
 
   marked.use({ renderer })
