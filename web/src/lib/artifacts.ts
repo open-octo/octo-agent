@@ -146,9 +146,14 @@ function artifactURL(sessionId: string, path: string): string {
 // attribute holds a second copy — so a full budget is several times its own
 // size in memory for as long as the artifact stays in the store. It is also
 // per-artifact, so a session with many image-bearing documents accumulates.
-// Both numbers are deliberately well under what one page needs.
-const inlineRefBudget = 4 << 20
-const inlineRefMax = 20
+//
+// The byte budget also has a hard ceiling: the inlined document is what "Save
+// to Light App" persists (lightAppSource), and POST /api/light-apps caps its
+// body at 10 MB — 6 MiB of raw bytes is ~8.2 MB as base64, leaving room for
+// the document itself. Raising the budget past ~7 MiB makes that save 413
+// without a matching server-side change.
+const inlineRefBudget = 6 << 20
+const inlineRefMax = 40
 
 // Cheap pre-check: skip the parse/serialize round-trip entirely for a document
 // with nothing to rewrite, which is most of them.
