@@ -375,5 +375,7 @@ describe('observeArtifact — transcript ordering', () => {
 
     expect(get(artifacts)).toHaveLength(1)
     expect(get(artifacts)[0].code).toBe('v2')
+    // The dropped stale observation must not touch the selection either.
+    expect(get(artifactSel)).toBe(0)
   })
 })
