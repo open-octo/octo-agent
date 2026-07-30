@@ -274,6 +274,76 @@ drainLoop:
 	}
 }
 
+// TestHandleWSUserMessage_DrainWaitsForBindingRelease: a drain must not report
+// idle while the turn goroutine's deferred wind-down — releaseSessionBinding
+// and the idle-steer kick, both of which write the session file — is still
+// running. A drain that returns early lets a restart, or a test's t.TempDir
+// cleanup on Windows, race those writes ("The directory is not empty"). The
+// binding still being on disk after a clean drain is the observable form of
+// that escape.
+func TestHandleWSUserMessage_DrainWaitsForBindingRelease(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.initWS()
+	srv.turnRunning = make(map[string]bool)
+	srv.steerQueues = make(map[string][]queuedTurn)
+	srv.sessionAgents = make(map[string]*agent.Agent)
+
+	sess := agent.NewSession("stub-model", "")
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	conn := &wsConn{
+		hub:        srv.wsHub,
+		send:       make(chan []byte, 256),
+		subscribed: map[string]struct{}{},
+	}
+	srv.wsHub.register <- conn
+	srv.wsHub.subscribe(conn, sess.ID)
+
+	block := make(chan struct{})
+	started := make(chan struct{})
+	srv.sender = &holdSender{block: block, started: started}
+
+	srv.handleWSUserMessage(conn, &wsMsgUserMessage{
+		SessionID: sess.ID,
+		Content:   json.RawMessage(`"hello from web"`),
+	})
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("turn never reached sender")
+	}
+
+	// Start the drain while the turn is held open, then release the turn. The
+	// drain may only return once the whole goroutine — including its deferred
+	// session writes — has finished.
+	drained := make(chan bool, 1)
+	go func() { drained <- srv.drain.drain(5 * time.Second) }()
+	close(block)
+
+	select {
+	case ok := <-drained:
+		if !ok {
+			t.Fatal("drain timed out waiting for the turn")
+		}
+	case <-time.After(6 * time.Second):
+		t.Fatal("drain never returned")
+	}
+
+	fresh, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if fresh.BoundTo(agent.EntryWeb) {
+		t.Fatal("binding release escaped the drain gate: session still bound to web after a clean drain")
+	}
+}
+
 // TestHandleWSUserMessage_ForceRejectedWhenLeaseActive: force=true still cannot
 // steal a session while another entry holds an active turn lease.
 func TestHandleWSUserMessage_ForceRejectedWhenLeaseActive(t *testing.T) {

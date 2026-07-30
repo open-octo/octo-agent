@@ -609,13 +609,21 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 	mu.Unlock()
 
 	go func() {
+		// Hold the drain gate across the deferred wind-down too, not just for
+		// runAgentTurnLoop's own begin/end (nested counting is fine): the
+		// binding release below — and the idle-steer kick's acquire/release —
+		// writes the session file after the loop returns. A drain that reports
+		// idle before those trailing writes land lets a restart, or a test's
+		// t.TempDir cleanup on Windows, race an open session-file handle
+		// ("The directory is not empty").
+		if s.drain.begin() == nil {
+			defer s.drain.end()
+		}
 		defer func() {
 			// Release the binding — which reloads the session and appends a
 			// lease-clear record, writing the session file — BEFORE clearing
-			// turnRunning. That flag is the "turn fully wound down" barrier
-			// (tests and drain logic wait on it); flipping it while a session
-			// write is still pending lets t.TempDir() cleanup race the open
-			// handle on Windows ("directory is not empty").
+			// turnRunning, so the flag only flips once the session write is
+			// done.
 			sess.DecFlight()
 			s.releaseSessionBinding(sid, agent.EntryWeb)
 			mu.Lock()

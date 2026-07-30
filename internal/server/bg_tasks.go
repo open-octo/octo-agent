@@ -145,6 +145,12 @@ func (s *Server) kickIdleSteerTurn(sessionID string) bool {
 
 	content, blocks := foldQueuedBatch(batches[0])
 	go func() {
+		// Hold the drain gate past the deferred binding release, whose session
+		// write would otherwise escape a drain — see the same pattern (and the
+		// full rationale) in handleWSUserMessage.
+		if s.drain.begin() == nil {
+			defer s.drain.end()
+		}
 		defer func() {
 			mu.Lock()
 			s.turnRunning[sessionID] = false
