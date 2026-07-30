@@ -275,7 +275,7 @@ describe('observeArtifact — link rel discrimination', () => {
   function stubFetch(html: string) {
     vi.stubGlobal('fetch', vi.fn(async (u: string) => {
       if (u.includes('page.html')) return new Response(html)
-      return new Response(png, { headers: { 'Content-Type': 'image/png' } })
+      return imageResponse(png)
     }))
   }
 
