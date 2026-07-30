@@ -862,10 +862,13 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // The slot is consumed either way, so a failure that kept the message
       // (or one whose turn never reaches `complete`) can't leak this text into a
       // later turn's error.
+      // Never overwrite a message already being composed (typed while the turn
+      // ran): the failed one is still one ↑ away in the input history, while
+      // half-typed text clobbered here would be unrecoverable.
       const lostInput = turnInput.get(sid)
       turnInput.delete(sid)
-      if ((ev as any).input_rolled_back && lostInput) {
-        composer?.restore(lostInput.text, lostInput.files)
+      if ((ev as any).input_rolled_back && lostInput && composer?.isEmpty()) {
+        composer.restore(lostInput.text, lostInput.files)
       }
       // Forget any send still tracked for rollback (a message the server never
       // confirmed — e.g. reminder-only text that gets no history_user_message).
@@ -1355,7 +1358,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   }
 
   // ── edit a prior user message: load it back into the composer for resend ─────
-  let composer = $state<{ setText: (v: string) => void; restore: (v: string, files?: any[]) => void } | null>(null)
+  let composer = $state<{ setText: (v: string) => void; restore: (v: string, files?: any[]) => void; isEmpty: () => boolean } | null>(null)
   function editMessage(content: string) {
     composer?.setText(content)
   }

@@ -65,6 +65,13 @@
     queueMicrotask(() => textareaEl?.focus())
   }
 
+  // Whether the box already holds something the user typed. Callers that push
+  // text back in unprompted (a turn error handing back the failed message) check
+  // this first so they never clobber a message being composed.
+  export function isEmpty(): boolean {
+    return text.trim() === '' && attachments.length === 0
+  }
+
   // Auto-grow the textarea with its content up to a max height, then scroll
   // inside (matches the max-height in CSS). The $effect re-runs on every text
   // change — typing, paste, send-clear, or programmatic setText.

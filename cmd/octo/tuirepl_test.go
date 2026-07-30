@@ -1892,3 +1892,90 @@ func TestModalSecretEscCancels(t *testing.T) {
 		t.Fatal("Esc should answer the modal")
 	}
 }
+
+// A turn that fails on its first LLM round (usage limit, bad key, network) never
+// produced any output, so the agent rolled the user message back out of history
+// — the typed text survives nowhere. The TUI must hand it back to the input box
+// and drop the deferred echo, instead of leaving the user with an error line, an
+// empty box, and a scrollback line that is no longer in context.
+func TestTUI_FirstRoundErrorRestoresInput(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+	m.echoPending = userEchoStyle.Render("> ") + "a long prompt"
+	m.echoRestore = "a long prompt"
+
+	if !m.restoreFailedInput(fmt.Errorf("anthropic: HTTP 403 (permission_error): usage limit reached")) {
+		t.Fatal("a first-round failure should restore the typed text")
+	}
+	if m.ta.Value() != "a long prompt" {
+		t.Errorf("input box = %q, want the failed prompt back for editing", m.ta.Value())
+	}
+	if m.echoPending != "" {
+		t.Error("the echo must be dropped, not committed — the message is in the box and no longer in context")
+	}
+	// commitEcho (which the turnEndedMsg path runs next) must now be a no-op.
+	m.commitEcho()
+	if len(m.printlnBuf) != 0 {
+		t.Errorf("nothing should reach the scrollback, got %v", m.printlnBuf)
+	}
+}
+
+// A failure AFTER the first round kept the user message in history and already
+// committed its echo, so nothing is restored: refilling the box there would
+// resend a message that is still in the transcript and in context.
+func TestTUI_MidTurnErrorKeepsInput(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+	m.echoPending = userEchoStyle.Render("> ") + "run the tool"
+	m.echoRestore = "run the tool"
+
+	// First visible output commits the echo — the turn got past round one.
+	m.handleEvent(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "working on it"})
+
+	if m.restoreFailedInput(fmt.Errorf("anthropic: HTTP 429: rate limited")) {
+		t.Error("a mid-turn failure must not restore — the message is still in the transcript")
+	}
+	if m.ta.Value() != "" {
+		t.Errorf("input box = %q, want empty", m.ta.Value())
+	}
+}
+
+// An interrupt is Esc's business: the take-back already recalled the text before
+// cancelling, and after output has streamed Esc deliberately leaves the message
+// in the transcript. Either way this path must stay out of it.
+func TestTUI_InterruptNotRestoredHere(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+	m.echoPending = userEchoStyle.Render("> ") + "fix the bug"
+	m.echoRestore = "fix the bug"
+
+	if m.restoreFailedInput(context.Canceled) {
+		t.Error("an interrupt must not restore here — Esc owns the take-back")
+	}
+	if m.echoPending == "" {
+		t.Error("the echo must be left for commitEcho to handle")
+	}
+}
+
+// Text the user typed while the turn ran must never be clobbered by the restore:
+// the failed message is still one ↑ away in the input history, a half-typed one
+// would be gone for good. The echo stays pending so commitEcho keeps that
+// message visible in the scrollback.
+func TestTUI_FirstRoundErrorKeepsUserTypedText(t *testing.T) {
+	m := newTestModel()
+	m.turnRunning = true
+	m.echoPending = userEchoStyle.Render("> ") + "a long prompt"
+	m.echoRestore = "a long prompt"
+	setInput(m, "something else I started typing")
+
+	if m.restoreFailedInput(fmt.Errorf("anthropic: HTTP 403: usage limit reached")) {
+		t.Error("must not restore over text the user is composing")
+	}
+	if m.ta.Value() != "something else I started typing" {
+		t.Errorf("input box = %q, want the text the user was typing left untouched", m.ta.Value())
+	}
+	m.commitEcho()
+	if joined := strings.Join(m.printlnBuf, "\n"); !strings.Contains(joined, "a long prompt") {
+		t.Errorf("with no restore the echo must stay in the scrollback, got %q", joined)
+	}
+}

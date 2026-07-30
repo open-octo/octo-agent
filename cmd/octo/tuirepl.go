@@ -988,6 +988,40 @@ func (m *tuiModel) startCompact() tea.Cmd {
 	return m.startTicker()
 }
 
+// restoreFailedInput hands the typed text of a failed turn back to the input box
+// and drops its deferred echo, mirroring the Esc take-back. It reports whether
+// it restored.
+//
+// A turn that errored with the echo still pending produced no visible output at
+// all, which means the failure was on its first round — the send that never got
+// an answer — so the agent rolled the user message back out of history. The
+// typed text then exists nowhere: not in context, and not in the input box
+// (submit reset it). Leaving the echo in the scrollback on top of the restore
+// would show the message twice, once as a line that isn't in context. A failure
+// after the first round already committed its echo, so that message keeps its
+// place in the transcript and nothing is restored. Interrupts are not this
+// path's business — Esc owns the take-back.
+//
+// Text the user started typing while the turn ran is never overwritten: the
+// failed message is still one ↑ away (submit recorded it in the input history),
+// while half-typed text clobbered here would be unrecoverable. That case keeps
+// the echo, so the failed message stays visible in the scrollback.
+func (m *tuiModel) restoreFailedInput(err error) bool {
+	if err == nil || err == context.Canceled || m.echoPending == "" || m.echoRestore == "" {
+		return false
+	}
+	if strings.TrimSpace(m.ta.Value()) != "" {
+		return false
+	}
+	m.ta.SetValue(m.echoRestore)
+	m.ta.CursorEnd()
+	m.inputHistoryIdx = -1
+	m.echoPending = ""
+	m.echoRestore = ""
+	_ = m.updateTextAreaHeight()
+	return true
+}
+
 // commitEcho promotes the deferred user-message echo from the live View() area
 // to the scrollback, so it lands just above the turn's first output. Idempotent
 // — a no-op once the echo has been committed or dropped.
@@ -1247,6 +1281,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Release any answer text still held by an in-flight hand-off sprint so
 		// the trailing-block flush below sees it.
 		m.flushSprint()
+		m.restoreFailedInput(msg.err)
 		// Commit a still-pending echo (a turn that produced no events — error,
 		// or Ctrl+C). The Esc take-back path clears it before cancelling, so this
 		// is a no-op there.
