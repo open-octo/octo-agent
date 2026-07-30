@@ -132,6 +132,10 @@ export interface Artifact {
   // sandboxed `preview` iframe (which cannot authenticate — see lib/artifacts.ts),
   // and the download action saves these bytes.
   src?: string
+  // code and preview are built lazily on first selection (hydrateArtifact in
+  // lib/artifacts.ts); loaded flips true once they are populated. Image
+  // artifacts observe as loaded — they carry src instead of a preview document.
+  loaded: boolean
 }
 
 // SkillInfo matches the Go server skill struct

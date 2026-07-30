@@ -2,9 +2,18 @@
   import { artifacts, panelContent, artifactSel, artifactModalOpen, showToast } from '../lib/stores'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
+  import { hydrateArtifact } from '../lib/artifacts'
 
   const cur = $derived($artifacts[$artifactSel] ?? $artifacts[0])
   let modalEl = $state<HTMLDivElement | null>(null)
+
+  // Entries observe metadata-only; the body is fetched and the preview built
+  // on first selection (see hydrateArtifact). Usually a no-op — the sidebar
+  // hydrates before the maximize button is reachable — but the modal must not
+  // depend on having passed through the sidebar.
+  $effect(() => {
+    if ($artifactModalOpen && cur && !cur.loaded) hydrateArtifact(cur)
+  })
 
   // A failed image load would otherwise show only the browser's broken-image
   // glyph; surface the server's reason instead (e.g. the 10 MB preview cap).
@@ -65,8 +74,8 @@
         <span class="file-name">{cur.name}</span>
         <span class="file-meta">{cur.type}</span>
       </div>
-      <button class="icon-btn" title={$t('artifacts.copy')} onclick={onCopy}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
-      <button class="icon-btn" title={$t('artifacts.download')} onclick={onDownload}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
+      <button class="icon-btn" title={$t('artifacts.copy')} disabled={!cur.loaded} onclick={onCopy}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
+      <button class="icon-btn" title={$t('artifacts.download')} disabled={!cur.loaded} onclick={onDownload}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
       <button class="icon-btn" title={$t('artifacts.restore')} onclick={restoreSidebar}>
         <iconify-icon icon="ant-design:compress-outlined" width="14"></iconify-icon>
       </button>
@@ -88,6 +97,8 @@
           {/if}
           <img src={cur.src} alt={cur.name} class:img-hidden={imgFailed} onerror={onImgError} onload={onImgLoad} />
         </div>
+      {:else if !cur.loaded}
+        <div class="body-loading"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon></div>
       {:else}
         <iframe srcdoc={cur.preview} sandbox="allow-scripts" allow="clipboard-write" title={cur.name}></iframe>
       {/if}
@@ -136,8 +147,10 @@
   border-radius: 6px; display: flex; align-items: center; justify-content: center;
   cursor: pointer; color: var(--text-tertiary);
 }
-.icon-btn:hover { background: var(--hover-neutral); color: var(--blue-6); }
+.icon-btn:hover:not(:disabled) { background: var(--hover-neutral); color: var(--blue-6); }
+.icon-btn:disabled { opacity: 0.45; cursor: default; }
 .body { flex: 1; min-height: 0; background: var(--bg-container); }
+.body-loading { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); }
 iframe { border: 0; width: 100%; height: 100%; display: block; }
 .img-wrap {
   width: 100%; height: 100%; box-sizing: border-box; padding: 12px;

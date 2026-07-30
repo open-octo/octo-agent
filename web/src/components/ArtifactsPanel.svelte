@@ -2,12 +2,21 @@
   import { artifacts, panelContent, artifactSel, artifactView, artifactModalOpen, lightappSel, lightapps, lightappHTML, showToast } from '../lib/stores'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
+  import { hydrateArtifact } from '../lib/artifacts'
   import * as api from '../lib/api'
 
   // ── Session artifacts (existing) ──────────────────────────────────────────
   const cur = $derived($artifacts[$artifactSel] ?? $artifacts[0])
   // Images render outside the sandboxed iframe and have no source view.
   const curIsImage = $derived(!!cur?.src)
+
+  // Entries observe metadata-only; the body is fetched and the preview built
+  // on first selection. Re-runs when a live re-write swaps the entry object,
+  // so the rebuilt document replaces the stale one. hydrateArtifact itself
+  // no-ops on loaded entries and in-flight builds.
+  $effect(() => {
+    if ($panelContent === 'session' && cur && !cur.loaded) hydrateArtifact(cur)
+  })
 
   // A failed image load would otherwise show only the browser's broken-image
   // glyph; surface the server's reason instead (e.g. the 10 MB preview cap).
@@ -174,10 +183,10 @@
           <span class="file-name">{cur.name}</span>
           <span class="file-meta">{cur.type}</span>
         </div>
-        <button class="icon-btn" title={$t('artifacts.copy')} onclick={onCopy}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
-        <button class="icon-btn" title={$t('artifacts.download')} onclick={onDownload}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
+        <button class="icon-btn" title={$t('artifacts.copy')} disabled={!cur.loaded} onclick={onCopy}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
+        <button class="icon-btn" title={$t('artifacts.download')} disabled={!cur.loaded} onclick={onDownload}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
         {#if curIsHTML}
-          <button class="icon-btn" title={$t('artifacts.save_to_lightapp')} onclick={openSaveToLA}>
+          <button class="icon-btn" title={$t('artifacts.save_to_lightapp')} disabled={!cur.loaded} onclick={openSaveToLA}>
             <iconify-icon icon="ant-design:save-outlined" width="14"></iconify-icon>
           </button>
         {/if}
@@ -226,6 +235,8 @@
             {/if}
             <img src={cur.src} alt={cur.name} class:img-hidden={imgFailed} onerror={onImgError} onload={onImgLoad} />
           </div>
+        {:else if !cur.loaded}
+          <div class="body-loading"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon></div>
         {:else if $artifactView === 'preview'}
           <iframe srcdoc={cur.preview} sandbox="allow-scripts" allow="clipboard-write" title={cur.name}></iframe>
         {:else}
@@ -263,7 +274,8 @@
   border-radius: 6px; display: flex; align-items: center; justify-content: center;
   cursor: pointer; color: var(--text-tertiary);
 }
-.icon-btn:hover { background: var(--hover-neutral); color: var(--blue-6); }
+.icon-btn:hover:not(:disabled) { background: var(--hover-neutral); color: var(--blue-6); }
+.icon-btn:disabled { opacity: 0.45; cursor: default; }
 .toolbar {
   flex: 0 0 auto; padding: 8px 12px; border-bottom: 1px solid var(--border-table);
   display: flex; align-items: center; gap: 8px;
@@ -276,6 +288,7 @@
 .seg-btn.active { background: var(--bg-container); color: var(--blue-6); }
 .sandboxed-label { margin-left: auto; font-size: 11px; color: var(--text-tertiary); }
 .body { flex: 1; min-height: 0; background: var(--bg-container); }
+.body-loading { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); }
 .empty {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 12px; padding: 32px; text-align: center; color: var(--text-tertiary); font-size: 13px;

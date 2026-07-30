@@ -2,10 +2,13 @@
 //
 // Previewable files the agent writes ride the existing ui_payload stream: the
 // write / edit / show_artifact tools each emit { type, path }. observeArtifact()
-// picks those up (from both the live tool_result path and history replay),
-// fetches the file body from the whitelisted GET /api/sessions/{id}/artifacts
-// endpoint, and pushes a previewable entry into the `artifacts` store that
-// ArtifactsPanel renders. Mirrors the old hand-written Artifacts.observe().
+// picks those up (from both the live tool_result path and history replay) and
+// pushes a metadata-only entry into the `artifacts` store that ArtifactsPanel
+// renders. The body — fetched from the whitelisted GET
+// /api/sessions/{id}/artifacts endpoint, and for markdown/HTML the preview
+// document built from it — is produced lazily on first selection
+// (hydrateArtifact), so history replay costs no network and a session's
+// unopened artifacts hold no data: URIs.
 //
 // Constraint on every preview document built here: it must not reference
 // /api/* — nothing inside the sandboxed srcdoc iframe can authenticate. The
@@ -334,13 +337,15 @@ export function resetArtifacts(sessionId: string): void {
 }
 
 // Ingest one tool ui_payload. `live` distinguishes a current turn (auto-opens
-// the panel once) from history replay (silent). Async: fetches the body, then
-// upserts the artifact (newest selected).
-export async function observeArtifact(
+// the panel once) from history replay (silent). Observing is metadata-only:
+// text kinds land with an empty body and `loaded: false`, and the fetch +
+// preview build run on first selection instead (hydrateArtifact). History
+// replay over any number of artifacts therefore transfers nothing.
+export function observeArtifact(
   sessionId: string,
   uiPayload: any,
   live: boolean,
-): Promise<void> {
+): void {
   if (!sessionId || !uiPayload) return
   const t = uiPayload.type
   if (t !== 'write' && t !== 'edit' && t !== 'artifact') return
@@ -349,89 +354,167 @@ export async function observeArtifact(
   const kind = kindOf(path)
   if (!kind) return
 
-  const url = artifactURL(sessionId, path)
-
   let code = ''
-  let preview = ''
   let src = ''
+  let loaded = false
+  if (kind === 'image') {
+    // Images render as a plain <img> in the host document — see the
+    // file-header note on why an <img src="/api/…"> inside the sandboxed
+    // iframe 401s. The host document's own request is same-site and
+    // authenticates normally, and observing costs no network at all: the URL
+    // only becomes a request once the panel renders this artifact, and it
+    // renders one at a time. There is no preview document to build either, so
+    // an image observes as already loaded.
+    //
+    // The revision counter matters: re-observing a path (the agent overwrote
+    // the file) otherwise yields a byte-identical src, so Svelte skips the
+    // attribute update and the panel keeps showing the previous bytes — the
+    // endpoint sends no validators, so nothing prompts a revalidation either.
+    // Counting observations rather than stamping a clock keeps the URL stable
+    // across a straight replay of the same transcript, so a reopened session
+    // can still reuse whatever the browser happens to have cached.
+    //
+    // Dropping the iframe costs no isolation here. The endpoint pins
+    // Content-Type and sends X-Content-Type-Options: nosniff, and an SVG
+    // loaded through <img> runs no script and fetches no external resource.
+    const rev = (imageRevisions.get(path) ?? 0) + 1
+    imageRevisions.set(path, rev)
+    src = `${artifactURL(sessionId, path)}&rev=${rev}`
+    // A binary artifact has no source view, so `code` carries the on-disk
+    // path instead: it is the one text form worth copying. Download saves
+    // the bytes from `src`.
+    code = path
+    loaded = true
+  }
+
+  const name = basename(path)
+  const entry: Artifact = {
+    name,
+    type: typeLabel(kind, path),
+    ver: '',
+    short: name.length > 22 ? name.slice(0, 21) + '…' : name,
+    icon: iconFor(kind),
+    code,
+    preview: '',
+    path,
+    src: src || undefined,
+    loaded,
+  }
+
+  artifacts.update(list => {
+    const next = list.filter(a => a.path !== path)
+    next.push(entry)
+    return next
+  })
+  artifactSel.set(get(artifacts).length - 1)
+
+  if (live && !autoOpened) {
+    autoOpened = true
+    panelContent.set('session')
+  }
+}
+
+// In-flight builds, keyed by entry identity: a live re-write replaces the
+// entry object in the store, so a stale build can never land on the fresh
+// entry, and the fresh entry is free to start its own.
+const hydrating = new WeakSet<Artifact>()
+
+// Shown instead of a spinner-forever when the body can't be fetched any more
+// (the file was deleted, say). Grey on the panel's own background reads fine
+// on either theme; a re-write of the path replaces the entry and retries.
+const LOAD_FAILED_PREVIEW =
+  '<body style="margin:0;padding:16px;font:13px/1.5 system-ui,sans-serif;color:#8b949e">' +
+  '⚠️ This file could not be loaded for preview. It may have been deleted or moved.</body>'
+
+// Builds an artifact's body on first selection rather than at observe time:
+// the fetch — and for markdown/HTML the image inlining behind it, whose data:
+// URIs stay resident for as long as the entry does — is paid only for what
+// the user actually opens (#1893). Safe to call on every render; it no-ops
+// once the entry is loaded and while a build is in flight.
+export async function hydrateArtifact(a: Artifact | null | undefined): Promise<void> {
+  if (!a || a.loaded || hydrating.has(a)) return
+  const sessionId = get(artifactSelSession)
+  const kind = kindOf(a.path)
+  if (!sessionId || !kind || kind === 'image') return
+  hydrating.add(a)
+  let body: { code: string; preview: string } | null = null
   try {
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
-    if (kind === 'image') {
-      // Images render as a plain <img> in the host document — see the
-      // file-header note on why an <img src="/api/…"> inside the sandboxed
-      // iframe 401s. The host document's own request is same-site and
-      // authenticates normally, and observing costs no network at all: the URL
-      // only becomes a request once the panel renders this artifact, and it
-      // renders one at a time. History replay over a session full of multi-MB
-      // screenshots therefore transfers none of them.
-      //
-      // The revision counter matters: re-observing a path (the agent overwrote
-      // the file) otherwise yields a byte-identical src, so Svelte skips the
-      // attribute update and the panel keeps showing the previous bytes — the
-      // endpoint sends no validators, so nothing prompts a revalidation either.
-      // Counting observations rather than stamping a clock keeps the URL stable
-      // across a straight replay of the same transcript, so a reopened session
-      // can still reuse whatever the browser happens to have cached.
-      //
-      // Dropping the iframe costs no isolation here. The endpoint pins
-      // Content-Type and sends X-Content-Type-Options: nosniff, and an SVG
-      // loaded through <img> runs no script and fetches no external resource.
-      const rev = (imageRevisions.get(path) ?? 0) + 1
-      imageRevisions.set(path, rev)
-      src = `${url}&rev=${rev}`
-      // A binary artifact has no source view, so `code` carries the on-disk
-      // path instead: it is the one text form worth copying. Download saves
-      // the bytes from `src`.
-      code = path
-    } else {
-      const res = await fetch(url)
-      if (!res.ok) return
-      code = await res.text()
-      if (kind === 'html') {
-        if (hasExternalRefs(code)) {
-          // External scripts/stylesheets can't load inside a sandboxed srcdoc
-          // iframe without same-origin access. Show a warning + the raw source.
-          const escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-          const warnBodyBg = isDark ? '#0d1117' : '#fafafa'
-          const warnBodyColor = isDark ? '#8b949e' : '#555'
-          const warnCardBg = isDark ? '#2b2111' : '#fff8e1'
-          const warnCardBorder = isDark ? '#594214' : '#f0c040'
-          const warnCardColor = isDark ? '#e8b339' : '#7a5c00'
-          const warnPreBg = isDark ? '#161b22' : '#f5f5f5'
-          const warnPreColor = isDark ? '#c9d1d9' : '#333'
-          preview = `<body style="margin:0;padding:16px;font:13px/1.5 system-ui,sans-serif;color:${warnBodyColor};background:${warnBodyBg}">
+    body = await buildTextBody(sessionId, a.path, kind)
+  } catch {
+    body = null
+  } finally {
+    hydrating.delete(a)
+  }
+  // The active session may have changed while the fetch was in flight — the
+  // guard that used to live in observeArtifact moves here with the fetch. The
+  // identity match below likewise drops the result when a re-write replaced
+  // the entry meanwhile: the replacement hydrates itself with the new bytes.
+  if (get(artifactSelSession) !== sessionId) return
+  const next: Artifact = {
+    ...a,
+    ...(body ?? { code: '', preview: LOAD_FAILED_PREVIEW }),
+    loaded: true,
+  }
+  artifacts.update(list => list.map(e => (e === a ? next : e)))
+}
+
+// The fetch + preview build for a text-kind artifact, extracted verbatim from
+// the old eager observeArtifact. null means the body wasn't fetchable.
+async function buildTextBody(
+  sessionId: string,
+  path: string,
+  kind: Kind,
+): Promise<{ code: string; preview: string } | null> {
+  const res = await fetch(artifactURL(sessionId, path))
+  if (!res.ok) return null
+  const code = await res.text()
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+  let preview = ''
+  if (kind === 'html') {
+    if (hasExternalRefs(code)) {
+      // External scripts/stylesheets can't load inside a sandboxed srcdoc
+      // iframe without same-origin access. Show a warning + the raw source.
+      const escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      const warnBodyBg = isDark ? '#0d1117' : '#fafafa'
+      const warnBodyColor = isDark ? '#8b949e' : '#555'
+      const warnCardBg = isDark ? '#2b2111' : '#fff8e1'
+      const warnCardBorder = isDark ? '#594214' : '#f0c040'
+      const warnCardColor = isDark ? '#e8b339' : '#7a5c00'
+      const warnPreBg = isDark ? '#161b22' : '#f5f5f5'
+      const warnPreColor = isDark ? '#c9d1d9' : '#333'
+      preview = `<body style="margin:0;padding:16px;font:13px/1.5 system-ui,sans-serif;color:${warnBodyColor};background:${warnBodyBg}">
 <div style="padding:10px 14px;background:${warnCardBg};border:1px solid ${warnCardBorder};border-radius:6px;margin-bottom:14px;font-size:13px;color:${warnCardColor}">
 ⚠️ This file references external resources and cannot be previewed here. Use <b>Open in new tab</b> or switch to <b>Code</b> view.
 </div>
 <pre style="margin:0;padding:12px;background:${warnPreBg};border-radius:6px;overflow:auto;font:12px/1.6 'SFMono-Regular',Menlo,monospace;color:${warnPreColor};white-space:pre-wrap">${escaped}</pre>
 </body>`
-        } else {
-          // No unreachable scripts or stylesheets, but the file's own images
-          // still need inlining to survive the iframe.
-          preview = await inlineLocalRefs(code, sessionId, path, 'document')
-        }
-      } else if (kind === 'markdown') {
-        // Markdown is rendered inside a sandboxed srcdoc iframe which has no
-        // access to the host app's CSS or JS.  Inline the highlight.js theme
-        // CSS, code-block layout, and a copy-button handler so syntax
-        // highlighting and the "Copy" button actually work in preview mode.
-        const MD_STYLES = isDark ? darkMDStyles() : lightMDStyles()
-        const bodyStyle = isDark
-          ? 'margin:0;padding:16px;font:14px/1.6 system-ui,-apple-system,sans-serif;color:#d4d4d4;background:#1e1e1e'
-          : 'margin:0;padding:16px;font:14px/1.6 system-ui,-apple-system,sans-serif;color:rgba(0,0,0,0.88);background:#ffffff'
-        // Bound to document.body, not '.body': this is a hand-inlined copy of
-        // setupCopyButtons(), whose caller passes the host app's container, and
-        // that selector matched nothing here — querySelector returned null and
-        // the whole handler died on load, so the button never worked at all.
-        //
-        // The clipboard call has a fallback because this document's origin is
-        // opaque; whether the async Clipboard API is available to it varies by
-        // browser even with clipboard-write delegated on the iframe. execCommand
-        // is deprecated but needs no permission, only the click's activation.
-        //
-        // The .code-block lookup is null-guarded like setupCopyButtons' is; the
-        // old unguarded form would throw if the wrapper ever went missing.
-        const COPY_SCRIPT = `<script>
+    } else {
+      // No unreachable scripts or stylesheets, but the file's own images
+      // still need inlining to survive the iframe.
+      preview = await inlineLocalRefs(code, sessionId, path, 'document')
+    }
+  } else if (kind === 'markdown') {
+    // Markdown is rendered inside a sandboxed srcdoc iframe which has no
+    // access to the host app's CSS or JS.  Inline the highlight.js theme
+    // CSS, code-block layout, and a copy-button handler so syntax
+    // highlighting and the "Copy" button actually work in preview mode.
+    const MD_STYLES = isDark ? darkMDStyles() : lightMDStyles()
+    const bodyStyle = isDark
+      ? 'margin:0;padding:16px;font:14px/1.6 system-ui,-apple-system,sans-serif;color:#d4d4d4;background:#1e1e1e'
+      : 'margin:0;padding:16px;font:14px/1.6 system-ui,-apple-system,sans-serif;color:rgba(0,0,0,0.88);background:#ffffff'
+    // Bound to document.body, not '.body': this is a hand-inlined copy of
+    // setupCopyButtons(), whose caller passes the host app's container, and
+    // that selector matched nothing here — querySelector returned null and
+    // the whole handler died on load, so the button never worked at all.
+    //
+    // The clipboard call has a fallback because this document's origin is
+    // opaque; whether the async Clipboard API is available to it varies by
+    // browser even with clipboard-write delegated on the iframe. execCommand
+    // is deprecated but needs no permission, only the click's activation.
+    //
+    // The .code-block lookup is null-guarded like setupCopyButtons' is; the
+    // old unguarded form would throw if the wrapper ever went missing.
+    const COPY_SCRIPT = `<script>
 	document.body.addEventListener('click',function(e){
 	  var b=e.target.closest('.copy-btn');if(!b)return;
 	  var k=b.closest('.code-block');
@@ -454,47 +537,16 @@ export async function observeArtifact(
 	  }else{legacy()}
 	});
 	<\/script>`
-        const body = await inlineLocalRefs(renderMarkdown(code), sessionId, path, 'fragment')
-        preview = `<style>${MD_STYLES}</style><body style="${bodyStyle}">${body}${COPY_SCRIPT}</body>`
-      } else {
-        // code kind: show with theme-aware monospace style
-        const escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        const codeBg = isDark ? '#1e1e1e' : '#ffffff'
-        const codeColor = isDark ? '#d4d4d4' : 'rgba(0,0,0,0.88)'
-        preview = `<body style="margin:0;background:${codeBg}"><pre style="margin:0;padding:16px;color:${codeColor};font:13px/1.6 'SFMono-Regular',Menlo,monospace;white-space:pre-wrap;word-break:break-all">${escaped}</pre></body>`
-      }
-    }
-  } catch {
-    return
+    const body = await inlineLocalRefs(renderMarkdown(code), sessionId, path, 'fragment')
+    preview = `<style>${MD_STYLES}</style><body style="${bodyStyle}">${body}${COPY_SCRIPT}</body>`
+  } else {
+    // code kind: show with theme-aware monospace style
+    const escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const codeBg = isDark ? '#1e1e1e' : '#ffffff'
+    const codeColor = isDark ? '#d4d4d4' : 'rgba(0,0,0,0.88)'
+    preview = `<body style="margin:0;background:${codeBg}"><pre style="margin:0;padding:16px;color:${codeColor};font:13px/1.6 'SFMono-Regular',Menlo,monospace;white-space:pre-wrap;word-break:break-all">${escaped}</pre></body>`
   }
-
-  // The active session may have changed while the fetch was in flight.
-  if (get(artifactSelSession) !== sessionId) return
-
-  const name = basename(path)
-  const entry: Artifact = {
-    name,
-    type: typeLabel(kind, path),
-    ver: '',
-    short: name.length > 22 ? name.slice(0, 21) + '…' : name,
-    icon: iconFor(kind),
-    code,
-    preview,
-    path,
-    src: src || undefined,
-  }
-
-  artifacts.update(list => {
-    const next = list.filter(a => a.path !== path)
-    next.push(entry)
-    return next
-  })
-  artifactSel.set(get(artifacts).length - 1)
-
-  if (live && !autoOpened) {
-    autoOpened = true
-    panelContent.set('session')
-  }
+  return { code, preview }
 }
 
 // darkMDStyles returns inline CSS for code blocks and syntax highlighting

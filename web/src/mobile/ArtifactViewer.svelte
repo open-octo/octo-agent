@@ -1,14 +1,22 @@
 <script lang="ts">
-  // Full-screen artifact viewer. The artifacts store entries already carry a
-  // self-contained preview document (built in lib/artifacts.ts for the desktop
-  // panel's sandboxed iframe) and the raw source — this just presents them
-  // phone-sized: preview in the same sandboxed iframe, code as scrollable text.
+  // Full-screen artifact viewer. The artifacts store entries observe
+  // metadata-only; their self-contained preview document and raw source are
+  // built on first selection (hydrateArtifact in lib/artifacts.ts) — this
+  // triggers that build and presents the result phone-sized: preview in the
+  // same sandboxed iframe the desktop panel uses, code as scrollable text.
   // Images are the exception: they carry a `src` and render as a plain <img>.
   import type { Artifact } from '../lib/types'
   import { t } from '../lib/i18n'
   import { imagePreviewError } from '../lib/artifact-actions'
+  import { hydrateArtifact } from '../lib/artifacts'
 
   let { artifact, onClose }: { artifact: Artifact; onClose: () => void } = $props()
+
+  // Re-runs when a live re-write swaps the entry object (the owner derives the
+  // prop from the store by path); no-ops once loaded or while in flight.
+  $effect(() => {
+    if (!artifact.loaded) hydrateArtifact(artifact)
+  })
 
   let view = $state<'preview' | 'code'>('preview')
   // Images render as a plain <img> (the sandboxed iframe cannot authenticate
@@ -77,6 +85,8 @@
         {/if}
         <img src={artifact.src} alt={artifact.name} class:img-hidden={imgFailed} onerror={onImgError} onload={onImgLoad} />
       </div>
+    {:else if !artifact.loaded}
+      <div class="body-loading"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon></div>
     {:else if view === 'preview'}
       <iframe srcdoc={artifact.preview} sandbox="allow-scripts" allow="clipboard-write" title={artifact.name}></iframe>
     {:else}
@@ -119,6 +129,7 @@
   .segi.on { background: var(--m-accent); color: #fff; font-weight: 600; }
 
   .vbody { flex: 1; min-height: 0; background: var(--m-surface); }
+  .body-loading { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--m-text-3); }
   iframe { border: 0; width: 100%; height: 100%; display: block; }
   .img-wrap {
     width: 100%; height: 100%; box-sizing: border-box; padding: 8px;
