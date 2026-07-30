@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { get } from 'svelte/store'
-import { artifacts, panelContent } from './stores'
+import { artifacts, artifactSel, panelContent } from './stores'
 import { observeArtifact, resetArtifacts } from './artifacts'
 
 // Nothing a preview document references can authenticate: the srcdoc iframe has
@@ -374,5 +374,44 @@ describe('observeArtifact — link rel discrimination', () => {
     await observeArtifact(SID, payload('/tmp/page.html'), false)
 
     expect(get(artifacts)[0].preview).toBe(html)
+  })
+})
+
+// The list must come out in transcript order even though each observation
+// awaits its own fetch and they resolve in arbitrary order (#1894).
+describe('observeArtifact — transcript ordering', () => {
+  it('orders by observation order, not fetch completion, and selects the transcript-newest', async () => {
+    // report.md needs a fetch we hold open; the image needs none, so it lands first.
+    let releaseMd!: (r: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(res => { releaseMd = res })))
+
+    const md = observeArtifact(SID, payload('/tmp/report.md'), false)
+    const png = observeArtifact(SID, payload('/tmp/late.png'), false)
+    await png
+    expect(get(artifacts).map(a => a.name)).toEqual(['late.png'])
+
+    releaseMd(new Response('# report'))
+    await md
+
+    expect(get(artifacts).map(a => a.name)).toEqual(['report.md', 'late.png'])
+    // Selection follows the transcript-newest artifact, not the last fetch to finish.
+    expect(get(artifactSel)).toBe(1)
+  })
+
+  it('keeps the newer observation when a stale fetch of the same path resolves last', async () => {
+    const resolvers: Array<(r: Response) => void> = []
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(res => { resolvers.push(res) })))
+
+    const first = observeArtifact(SID, payload('/tmp/a.md'), false)
+    const second = observeArtifact(SID, payload('/tmp/a.md'), false)
+    resolvers[1](new Response('v2'))
+    await second
+    resolvers[0](new Response('v1'))
+    await first
+
+    expect(get(artifacts)).toHaveLength(1)
+    expect(get(artifacts)[0].code).toBe('v2')
+    // The dropped stale observation must not touch the selection either.
+    expect(get(artifactSel)).toBe(0)
   })
 })
