@@ -463,9 +463,16 @@ func (a *Adapter) SendFile(chatID, path, name, replyTo string) channel.SendResul
 		return channel.SendResult{OK: false, Error: "not logged in"}
 	}
 
-	ct, ok := a.bot.contextTokens.Load(chatID)
-	if !ok {
-		return channel.SendResult{OK: false, Error: "no context_token for user " + chatID}
+	var token string
+	if ct, ok := a.bot.contextTokens.Load(chatID); ok {
+		token = ct.(string)
+	} else if a.credPath != "" {
+		// Memory miss (e.g. the process restarted since the user last wrote):
+		// fall back to the write-through store, same as SendText.
+		token = loadContextTokens(contextStorePath(a.credPath))[chatID]
+	}
+	if token == "" {
+		return channel.SendResult{OK: false, Error: "no context_token for " + chatID + " — have the user message the bot to set up a WebSocket session"}
 	}
 
 	// Flush pending text first (Ruby convention).
@@ -490,7 +497,7 @@ func (a *Adapter) SendFile(chatID, path, name, replyTo string) channel.SendResul
 		return channel.SendResult{OK: false, Error: err.Error()}
 	}
 
-	msg := ilink.BuildMediaMessage(chatID, ct.(string), items)
+	msg := ilink.BuildMediaMessage(chatID, token, items)
 	if err := a.client.SendMessage(ctx, a.bot.creds.BaseURL, a.bot.creds.Token, msg); err != nil {
 		return channel.SendResult{OK: false, Error: fmt.Sprintf("send message: %v", err)}
 	}

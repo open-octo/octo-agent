@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { get } from 'svelte/store'
-import { artifacts } from './stores'
+import { artifacts, artifactSel } from './stores'
 import { observeArtifact, hydrateArtifact, resetArtifacts } from './artifacts'
 
 // Nothing a preview document references can authenticate: the srcdoc iframe has
@@ -528,5 +528,53 @@ describe('observeArtifact — inliner gaps (#1892)', () => {
 
     expect(get(artifacts)[0].preview).toBe(html)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// The list must come out in transcript order regardless of how long any body
+// takes to load (#1894). Observing is synchronous, so entries land in call
+// order by construction; these pin the other half — a slow hydration writes
+// back in place and never reorders the list or steals the selection.
+describe('observeArtifact — transcript ordering', () => {
+  it('keeps order and selection while an earlier artifact is still hydrating', async () => {
+    // report.md needs a fetch we hold open; the image needs none.
+    let releaseMd!: (r: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(res => { releaseMd = res })))
+
+    observeArtifact(SID, payload('/tmp/report.md'), false)
+    const md = hydrateArtifact(get(artifacts)[0])
+    observeArtifact(SID, payload('/tmp/late.png'), false)
+
+    // Both entries are present in transcript order before any fetch resolves.
+    expect(get(artifacts).map(a => a.name)).toEqual(['report.md', 'late.png'])
+    expect(get(artifactSel)).toBe(1)
+
+    releaseMd(new Response('# report'))
+    await md
+
+    // The finished build lands in place — order and selection unchanged.
+    expect(get(artifacts).map(a => a.name)).toEqual(['report.md', 'late.png'])
+    expect(get(artifacts)[0].code).toBe('# report')
+    expect(get(artifactSel)).toBe(1)
+  })
+
+  it('keeps the newer write when a stale build of the same path resolves last', async () => {
+    const resolvers: Array<(r: Response) => void> = []
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(res => { resolvers.push(res) })))
+
+    observeArtifact(SID, payload('/tmp/a.md'), false)
+    const stale = hydrateArtifact(get(artifacts)[0])
+    // Re-write replaces the entry while the first build is still fetching.
+    observeArtifact(SID, payload('/tmp/a.md'), false)
+    const fresh = hydrateArtifact(get(artifacts)[0])
+    resolvers[1](new Response('v2'))
+    await fresh
+    resolvers[0](new Response('v1'))
+    await stale
+
+    expect(get(artifacts)).toHaveLength(1)
+    expect(get(artifacts)[0].code).toBe('v2')
+    // The dropped stale build must not touch the selection either.
+    expect(get(artifactSel)).toBe(0)
   })
 })

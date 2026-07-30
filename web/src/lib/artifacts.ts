@@ -393,7 +393,11 @@ export function resetArtifacts(sessionId: string): void {
 // the panel once) from history replay (silent). Observing is metadata-only:
 // text kinds land with an empty body and `loaded: false`, and the fetch +
 // preview build run on first selection instead (hydrateArtifact). History
-// replay over any number of artifacts therefore transfers nothing.
+// replay over any number of artifacts therefore transfers nothing — and
+// because nothing is awaited before the upsert, entries land in transcript
+// order by construction (#1894: the old per-artifact fetch made the list come
+// out in fetch-completion order; hydration now writes back in place and never
+// reorders or reselects).
 export function observeArtifact(
   sessionId: string,
   uiPayload: any,
