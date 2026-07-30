@@ -15,6 +15,16 @@ function payload(path: string) {
   return { type: 'write', path }
 }
 
+// Image bytes must come back as the test environment's own Blob. Node's fetch
+// Response mints undici's Blob, which jsdom's FileReader brand-checks and
+// rejects on Node 22 (Node 26 unifies the classes, so it passes there) — the
+// inliner's catch would swallow that and the tests would assert on an
+// un-rewritten document. A real browser mints fetch blobs and FileReader in
+// the same realm, so this is also the truer stub.
+function imageResponse(bytes: Uint8Array<ArrayBuffer>): Response {
+  return { ok: true, blob: async () => new Blob([bytes], { type: 'image/png' }) } as Response
+}
+
 beforeEach(() => {
   resetArtifacts(SID)
 })
@@ -98,7 +108,7 @@ describe('observeArtifact — markdown image references', () => {
     const fetchMock = vi.fn(async (u: string) => {
       if (u.includes('report.md')) return new Response(md)
       if (imageStatus !== 200) return new Response('', { status: imageStatus })
-      return new Response(png, { headers: { 'Content-Type': 'image/png' } })
+      return imageResponse(png)
     })
     vi.stubGlobal('fetch', fetchMock)
     return fetchMock
@@ -174,7 +184,7 @@ describe('observeArtifact — html local references', () => {
     const fetchMock = vi.fn(async (u: string) => {
       if (u.includes('page.html')) return new Response(html)
       if (imageStatus !== 200) return new Response('', { status: imageStatus })
-      return new Response(png, { headers: { 'Content-Type': 'image/png' } })
+      return imageResponse(png)
     })
     vi.stubGlobal('fetch', fetchMock)
     return fetchMock
