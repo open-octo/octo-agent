@@ -102,6 +102,15 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // force takeover can retry the same message.
   const pendingSends = new Map<string, { pendingId: string; wasStreaming: boolean; text: string; files?: any[]; queued?: boolean }[]>()
 
+  // The message that started the running turn, kept for the whole turn so a
+  // turn_error can put it back in the composer. pendingSends can't serve that:
+  // the server confirms the user bubble (history_user_message) BEFORE it calls
+  // the LLM, so the pending entry is already shifted out of the queue by the
+  // time a provider error lands. Written on every fresh (non-steer) send and
+  // dropped when the turn ends — a turn started elsewhere (another tab, cron,
+  // a wakeup) must never restore this tab's stale text.
+  const turnInput = new Map<string, { text: string; files?: any[] }>()
+
   // Pending auto-dismiss timers for background sub-agents that finished with no
   // active turn (keyed by `${sid}\x00${agentId}`). A turn-less `done` has no
   // `complete` event to clear it, so we show it briefly then drop it. Cleared
@@ -773,6 +782,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         return { ...m, [sid]: msgs }
       })
       if (meta?.queued) {
+        // This queued message is now the input of a turn of its own, so it takes
+        // over the restore slot the fresh-send path fills in send().
+        turnInput.set(sid, { text: meta.text, files: meta.files })
         // A queued message starts its own turn, and the previous turn's
         // `complete` already flipped streaming off. The `progress phase=active`
         // that doAgentTurn broadcasts right after this event flips it back — this
@@ -844,21 +856,28 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // follows), and send() already cleared the composer optimistically — so
       // the text the user typed is gone from both places. Pull it back into the
       // composer so a long prompt isn't lost to a transient error; the user can
-      // fix the cause and resend. The fresh message that started this turn is
-      // the queue's single non-streaming entry (a follow-up sent mid-turn is
-      // classified as a steer, wasStreaming:true, and its text belongs to the
-      // running turn — not a fresh compose). Find it by that flag rather than by
-      // position: a leaked steer from an earlier turn can sit ahead of it, and a
-      // trailing steer can sit after it. Mirrors the steer_retracted restore
-      // above, including forgetting the rollback entry (a rolled-back message is
-      // never confirmed by history_user_message).
+      // fix the cause and resend. Only when the server says the message was
+      // rolled back: a failure after the first round keeps the bubble in the
+      // transcript, and restoring there would resend it twice.
+      // The slot is consumed either way, so a failure that kept the message
+      // (or one whose turn never reaches `complete`) can't leak this text into a
+      // later turn's error.
+      const lostInput = turnInput.get(sid)
+      turnInput.delete(sid)
+      if ((ev as any).input_rolled_back && lostInput) {
+        composer?.restore(lostInput.text, lostInput.files)
+      }
+      // Forget any send still tracked for rollback (a message the server never
+      // confirmed — e.g. reminder-only text that gets no history_user_message).
+      // Leaving it would misalign the FIFO for the next turn's confirmation.
+      // Steers are left alone: their text belongs to the running turn and
+      // steer_retracted owns that path.
       const errQueue = pendingSends.get(sid)
       const errMeta = errQueue?.find(m => !m.wasStreaming)
       if (errQueue && errMeta) {
         const next = errQueue.filter(m => m.pendingId !== errMeta.pendingId)
         if (next.length) pendingSends.set(sid, next)
         else pendingSends.delete(sid)
-        composer?.restore(errMeta.text, errMeta.files)
       }
     }))
 
@@ -883,6 +902,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
     cleanups.push(ws.on('complete', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      // The turn is over: turn_error (which arrives before this) already had its
+      // chance to restore the input, so drop it rather than letting it leak into
+      // a later turn this tab didn't compose.
+      turnInput.delete(sid)
       chatStreaming.update(s => ({ ...s, [sid]: false }))
       chatProgress.update(p => ({ ...p, [sid]: null }))
       // A turn that ends without an assistant_message (interrupt / error) would
@@ -1466,6 +1489,8 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // moved on and must not re-render when this turn ends), and flip the
       // session into streaming.
       turnError = null
+      // Remember what started this turn so turn_error can hand it back.
+      turnInput.set(sid, { text, files })
       clearDoneSubAgents(sid)
       chatThinking.update(tt => ({ ...tt, [sid]: '' }))
       chatSuggestion.update(s => ({ ...s, [sid]: '' }))

@@ -1603,6 +1603,12 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	s.liveStateMu.Unlock()
 
 	if err != nil {
+		// Did the turn lose the user's message? A first-round failure makes
+		// runLoop roll history back past it, so the text the user typed exists
+		// nowhere anymore — neither on disk nor (once the reload below lands) in
+		// the browser's transcript. Both the turn_error hint and the history
+		// reload key off this single condition so they stay in lockstep.
+		inputRolledBack := len(sess.Messages) < historyWatermark
 		// Any aborted or errored turn parks the continuation loop: an
 		// interrupt means the user said stop (continuing immediately would
 		// make the loop interrupt-proof), and chaining fresh turns onto a
@@ -1635,11 +1641,10 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			// session_update tail. Returning here would skip `complete`, leaving
 			// the web UI's streaming flag (and its caret) stuck on forever; the
 			// tail's session_update is a superset of what we'd emit here.
-			sw.userError(err)
+			sw.userErrorInput(err, inputRolledBack)
 		}
-		// A first-round failure makes runLoop roll history back past the user
-		// message (appendUserInput's error-path contract), and the SyncFrom+
-		// Save above erased the crash-safety copy persisted before the turn.
+		// The rolled-back user message means the SyncFrom+Save above erased the
+		// crash-safety copy persisted before the turn.
 		// The browser still shows that user bubble with a now out-of-range
 		// message_index, so a later edit/branch would 400. Tell it to re-fetch
 		// the (shorter) transcript so its indices realign with disk. An
@@ -1651,7 +1656,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		// turn-start watermark (deliberately not the live state's
 		// compaction-adjusted copy) so a mid-turn failure that kept the
 		// message doesn't trigger a needless reload.
-		if len(sess.Messages) < historyWatermark {
+		if inputRolledBack {
 			s.broadcastHistoryReload(sess.ID)
 		}
 	} else {
@@ -1883,11 +1888,24 @@ func (w *wsStreamWriter) sendRaw(data []byte) {
 // tool_id): a turn error belongs to no tool card, so the frontend renders it as
 // a standalone error notice in the transcript rather than dropping it.
 func (w *wsStreamWriter) error(msg string) {
-	w.hub.broadcast(w.sessionID, map[string]string{
+	w.errorInput(msg, false)
+}
+
+// errorInput is error plus the inputRolledBack hint: the failed turn's user
+// message was rolled back out of history, so the text the user typed is gone
+// from the transcript too and the browser should put it back in the composer.
+// Absent (or false) means the message survived — a mid-turn failure keeps the
+// bubble, and restoring the text there would duplicate it on the next send.
+func (w *wsStreamWriter) errorInput(msg string, inputRolledBack bool) {
+	ev := map[string]any{
 		"type":       "turn_error",
 		"session_id": w.sessionID,
 		"error":      msg,
-	})
+	}
+	if inputRolledBack {
+		ev["input_rolled_back"] = true
+	}
+	w.hub.broadcast(w.sessionID, ev)
 }
 
 // userError is like error but strips internal agent-loop prefixes so the
@@ -1895,6 +1913,11 @@ func (w *wsStreamWriter) error(msg string) {
 // "agent: loop[0]: anthropic: HTTP 403 ...".
 func (w *wsStreamWriter) userError(err error) {
 	w.error(agent.UserFacingError(err))
+}
+
+// userErrorInput is userError carrying errorInput's inputRolledBack hint.
+func (w *wsStreamWriter) userErrorInput(err error, inputRolledBack bool) {
+	w.errorInput(agent.UserFacingError(err), inputRolledBack)
 }
 
 // bufferTurnEvent records an already-broadcast turn event in the session's
