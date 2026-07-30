@@ -136,6 +136,10 @@ export interface Artifact {
   // lib/artifacts.ts); loaded flips true once they are populated. Image
   // artifacts observe as loaded — they carry src instead of a preview document.
   loaded: boolean
+  // Set when the lazy build could not fetch the body: preview holds a
+  // placeholder note rather than the document, and code is empty. Actions
+  // that persist the body (copy, download, Save to Light App) are disabled.
+  loadFailed?: boolean
 }
 
 // SkillInfo matches the Go server skill struct

@@ -109,6 +109,21 @@ function hasExternalRefs(html: string): boolean {
   return false
 }
 
+// The HTML to persist when an artifact is saved as a Light App. A Light App
+// renders through the same kind of sandboxed srcdoc iframe as the panel
+// preview, and its relative image references have nothing to resolve against
+// at all — so the inlined preview (local images as data: URIs, see
+// inlineLocalRefs) is the version that survives the copy, not the raw source
+// (#1890). The exception is a document whose preview is a placeholder rather
+// than the document itself — the external-refs warning page, or the
+// load-failure note (loadFailed) — where the raw source stays the faithful
+// copy. (A load-failed entry has no source either; the save button is
+// disabled for it, this just keeps the placeholder out on every path.)
+export function lightAppSource(a: Artifact): string {
+  if (a.type !== 'HTML' || a.loadFailed || hasExternalRefs(a.code)) return a.code
+  return a.preview || a.code
+}
+
 function artifactURL(sessionId: string, path: string): string {
   return `/api/sessions/${encodeURIComponent(sessionId)}/artifacts?path=${encodeURIComponent(path)}`
 }
@@ -136,9 +151,17 @@ function artifactURL(sessionId: string, path: string): string {
 // attribute holds a second copy — so a full budget is several times its own
 // size in memory for as long as the artifact stays in the store. It is also
 // per-artifact, so a session with many image-bearing documents accumulates.
-// Both numbers are deliberately well under what one page needs.
-const inlineRefBudget = 4 << 20
-const inlineRefMax = 20
+//
+// The byte budget also matters beyond memory: the inlined document is what
+// "Save to Light App" persists (lightAppSource), and POST /api/light-apps caps
+// its body at 10 MiB. 6 MiB of raw bytes is 8 MiB as base64, leaving room for
+// the document itself — but the budget is only checked before each fetch and
+// spent afterwards, so the final image can overshoot it, and a page that lands
+// past the server cap fails its save with an explicit 413 toast. Raising the
+// budget further narrows that headroom; past ~7 MiB even in-budget pages
+// couldn't save without a matching server-side change.
+const inlineRefBudget = 6 << 20
+const inlineRefMax = 40
 
 // Cheap pre-check: skip the parse/serialize round-trip entirely for a document
 // with nothing to rewrite, which is most of them.
@@ -509,7 +532,7 @@ export async function hydrateArtifact(a: Artifact | null | undefined): Promise<v
   if (get(artifactSelSession) !== sessionId) return
   const next: Artifact = {
     ...a,
-    ...(body ?? { code: '', preview: LOAD_FAILED_PREVIEW }),
+    ...(body ?? { code: '', preview: LOAD_FAILED_PREVIEW, loadFailed: true }),
     loaded: true,
   }
   artifacts.update(list => list.map(e => (e === a ? next : e)))

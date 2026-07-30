@@ -74,8 +74,8 @@
         <span class="file-name">{cur.name}</span>
         <span class="file-meta">{cur.type}</span>
       </div>
-      <button class="icon-btn" title={$t('artifacts.copy')} disabled={!cur.loaded} onclick={onCopy}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
-      <button class="icon-btn" title={$t('artifacts.download')} disabled={!cur.loaded} onclick={onDownload}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
+      <button class="icon-btn" title={$t('artifacts.copy')} disabled={!cur.loaded || cur.loadFailed} onclick={onCopy}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
+      <button class="icon-btn" title={$t('artifacts.download')} disabled={!cur.loaded || cur.loadFailed} onclick={onDownload}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
       <button class="icon-btn" title={$t('artifacts.restore')} onclick={restoreSidebar}>
         <iconify-icon icon="ant-design:compress-outlined" width="14"></iconify-icon>
       </button>

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { get } from 'svelte/store'
 import { artifacts, artifactSel } from './stores'
-import { observeArtifact, hydrateArtifact, resetArtifacts } from './artifacts'
+import { lightAppSource, observeArtifact, hydrateArtifact, resetArtifacts } from './artifacts'
 
 // Nothing a preview document references can authenticate: the srcdoc iframe has
 // no allow-same-origin, so its subresource requests are cross-site and the
@@ -152,8 +152,10 @@ describe('hydrateArtifact — lazy body build', () => {
 
     const [entry] = get(artifacts)
     // loaded, or the panel would spin forever; a re-write replaces the entry
-    // and retries.
+    // and retries. loadFailed disables the actions that would persist the
+    // empty body (copy, download, Save to Light App).
     expect(entry.loaded).toBe(true)
+    expect(entry.loadFailed).toBe(true)
     expect(entry.preview).toContain('could not be loaded')
   })
 })
@@ -576,5 +578,71 @@ describe('observeArtifact — transcript ordering', () => {
     expect(get(artifacts)[0].code).toBe('v2')
     // The dropped stale build must not touch the selection either.
     expect(get(artifactSel)).toBe(0)
+  })
+})
+
+// "Save to Light App" persists a copy that renders through the same kind of
+// sandboxed iframe as the panel preview, so it must save the inlined preview —
+// the raw source's relative image paths resolve against nothing there (#1890).
+describe('lightAppSource — what Save to Light App persists', () => {
+  const png = new Uint8Array([137, 80, 78, 71])
+
+  function stubFetch(html: string) {
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => {
+      if (u.includes('page.html')) return new Response(html)
+      return imageResponse(png)
+    }))
+  }
+
+  it('hands over the inlined preview when the document has local images', async () => {
+    stubFetch('<!DOCTYPE html><html><body><img src="chart.png"></body></html>')
+
+    await observeHydrated('/tmp/page.html')
+
+    const saved = lightAppSource(get(artifacts)[0])
+    expect(saved).toContain('data:image/png;base64,')
+    expect(saved).not.toContain('chart.png')
+  })
+
+  it('hands over the exact source when there was nothing to inline', async () => {
+    const html = '<!DOCTYPE html><html><body><h1>hi</h1></body></html>'
+    stubFetch(html)
+
+    await observeHydrated('/tmp/page.html')
+
+    expect(lightAppSource(get(artifacts)[0])).toBe(html)
+  })
+
+  it('never persists the external-refs warning page — the source is the faithful copy', async () => {
+    const html = '<html><head><script src="app.js"></script></head><body><img src="chart.png"></body></html>'
+    stubFetch(html)
+
+    await observeHydrated('/tmp/page.html')
+
+    const entry = get(artifacts)[0]
+    expect(entry.preview).toContain('cannot be previewed here')
+    expect(lightAppSource(entry)).toBe(html)
+  })
+
+  it('never persists the load-failure placeholder either', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })))
+
+    await observeHydrated('/tmp/page.html')
+
+    const entry = get(artifacts)[0]
+    expect(entry.loadFailed).toBe(true)
+    // The save button is disabled for a failed entry; if a save fires anyway,
+    // the placeholder note must not become a Light App.
+    expect(lightAppSource(entry)).not.toContain('could not be loaded')
+  })
+
+  it('hands over the source for a non-HTML artifact', () => {
+    const a = { type: 'Markdown', code: '# hi', preview: '<h1>hi</h1>' }
+    expect(lightAppSource(a as any)).toBe('# hi')
+  })
+
+  it('falls back to the source when the preview is empty', () => {
+    const a = { type: 'HTML', code: '<html><body>hi</body></html>', preview: '' }
+    expect(lightAppSource(a as any)).toBe(a.code)
   })
 })

@@ -2,7 +2,7 @@
   import { artifacts, panelContent, artifactSel, artifactView, artifactModalOpen, lightappSel, lightapps, lightappHTML, showToast } from '../lib/stores'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
-  import { hydrateArtifact } from '../lib/artifacts'
+  import { hydrateArtifact, lightAppSource } from '../lib/artifacts'
   import * as api from '../lib/api'
 
   // ── Session artifacts (existing) ──────────────────────────────────────────
@@ -60,7 +60,10 @@
     if (!name || !cur) return
     saveToLALoading = true
     try {
-      const app = await api.createLightApp({ name, html: cur.code })
+      // Save what the panel previews, not the raw source: a Light App renders
+      // in the same kind of sandboxed iframe, where relative image paths
+      // resolve against nothing (#1890).
+      const app = await api.createLightApp({ name, html: lightAppSource(cur) })
       showToast(`Light App "${app.name}" saved`, 'success')
       saveToLADialog = false
       // If the panel is in lightapps mode, refresh the list.
@@ -183,10 +186,10 @@
           <span class="file-name">{cur.name}</span>
           <span class="file-meta">{cur.type}</span>
         </div>
-        <button class="icon-btn" title={$t('artifacts.copy')} disabled={!cur.loaded} onclick={onCopy}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
-        <button class="icon-btn" title={$t('artifacts.download')} disabled={!cur.loaded} onclick={onDownload}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
+        <button class="icon-btn" title={$t('artifacts.copy')} disabled={!cur.loaded || cur.loadFailed} onclick={onCopy}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
+        <button class="icon-btn" title={$t('artifacts.download')} disabled={!cur.loaded || cur.loadFailed} onclick={onDownload}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
         {#if curIsHTML}
-          <button class="icon-btn" title={$t('artifacts.save_to_lightapp')} disabled={!cur.loaded} onclick={openSaveToLA}>
+          <button class="icon-btn" title={$t('artifacts.save_to_lightapp')} disabled={!cur.loaded || cur.loadFailed} onclick={openSaveToLA}>
             <iconify-icon icon="ant-design:save-outlined" width="14"></iconify-icon>
           </button>
         {/if}
