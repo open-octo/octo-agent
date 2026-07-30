@@ -87,6 +87,27 @@ describe('observeArtifact — markdown copy button', () => {
   })
 })
 
+// Code-kind artifacts fetch their body like markdown does and preview as
+// escaped monospace text. The server serves these extensions as text/plain
+// (#1895) — before that, the fetch 404ed and the artifact silently vanished.
+describe('observeArtifact — code artifacts', () => {
+  it('previews a code file as escaped monospace text', async () => {
+    const source = 'if x < 1 && y > 2:\n    print("ok")\n'
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(source)))
+
+    await observeArtifact(SID, payload('/tmp/script.py'), false)
+
+    const [entry] = get(artifacts)
+    expect(entry.type).toBe('PY')
+    expect(entry.code).toBe(source)
+    // The source lands inside a <pre>, so its markup-significant characters
+    // must arrive escaped.
+    expect(entry.preview).toContain('<pre')
+    expect(entry.preview).toContain('x &lt; 1 &amp;&amp; y &gt; 2')
+    expect(entry.preview).not.toContain('x < 1')
+  })
+})
+
 describe('observeArtifact — preview documents', () => {
   it('builds the markdown preview without referencing /api/', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('# hello')))

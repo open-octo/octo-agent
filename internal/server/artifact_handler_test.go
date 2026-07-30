@@ -85,15 +85,20 @@ func TestHandleGetArtifact(t *testing.T) {
 	if err := os.WriteFile(secretPath, []byte("<h1>secret</h1>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Written by the session but not a previewable type.
+	// Written by the session; a code kind, served as plain text (#1895).
 	goPath := filepath.Join(artDir, "main.go")
 	if err := os.WriteFile(goPath, []byte("package main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Written by the session but not a previewable type.
+	binPath := filepath.Join(artDir, "tool.bin")
+	if err := os.WriteFile(binPath, []byte{0x00, 0x01}, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	// UI payloads carry absolute paths, so the transcript stores absolute paths.
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	id := newArtifactSession(t, htmlPath, goPath)
+	id := newArtifactSession(t, htmlPath, goPath, binPath)
 	otherID := newArtifactSession(t /* wrote nothing */)
 
 	// Whitelisted write → 200 with explicit headers.
@@ -122,8 +127,23 @@ func TestHandleGetArtifact(t *testing.T) {
 	if w := getArtifact(t, srv, otherID, htmlPath); w.Code != http.StatusNotFound {
 		t.Errorf("other session: status = %d, want 404", w.Code)
 	}
+	// A written code file serves as plain text — never its native type — with
+	// the same defensive headers (#1895).
+	w = getArtifact(t, srv, id, goPath)
+	if w.Code != http.StatusOK {
+		t.Fatalf("code kind: status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "text/plain; charset=utf-8" {
+		t.Errorf("code kind Content-Type = %q, want text/plain", ct)
+	}
+	if w.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Error("code kind: missing nosniff header")
+	}
+	if !strings.Contains(w.Header().Get("Content-Security-Policy"), "sandbox") {
+		t.Error("code kind: missing CSP sandbox header")
+	}
 	// Written but not a previewable extension → 404.
-	if w := getArtifact(t, srv, id, goPath); w.Code != http.StatusNotFound {
+	if w := getArtifact(t, srv, id, binPath); w.Code != http.StatusNotFound {
 		t.Errorf("non-previewable ext: status = %d, want 404", w.Code)
 	}
 	// Unknown session → 404.

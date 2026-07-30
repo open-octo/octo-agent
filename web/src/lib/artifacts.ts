@@ -120,8 +120,9 @@ function artifactURL(sessionId: string, path: string): string {
 // iframe can read.
 //
 // Two gates on what gets inlined: the reference must resolve to an image (the
-// endpoint also serves .html and .md, and an artifact must not be able to pull
-// those in), and the session itself must have written it, since the endpoint
+// endpoint also serves .html, .md, and the plain-text code kinds, and an
+// artifact must not be able to pull those in), and the session itself must have
+// written it, since the endpoint
 // serves nothing else. That covers the case that matters: a report the agent
 // wrote beside the screenshots it took. Everything else is left exactly as
 // written and simply doesn't render, same as today — which is also the fallback
@@ -162,11 +163,11 @@ async function inlineLocalRefs(
   const inline = async (raw: string): Promise<string | null> => {
     const abs = localFilePath(raw, basePath)
     if (!abs) return null
-    // Images only, enforced rather than assumed. The endpoint also serves .html
-    // and .md, so without this an artifact could name a sibling document here
-    // and have the host page — which is authenticated — fetch it and hand the
-    // bytes to a preview iframe that runs scripts and can reach the network.
-    // The artifact would be reading files it was never granted.
+    // Images only, enforced rather than assumed. The endpoint also serves .html,
+    // .md, and the plain-text code kinds, so without this an artifact could name
+    // a sibling document here and have the host page — which is authenticated —
+    // fetch it and hand the bytes to a preview iframe that runs scripts and can
+    // reach the network. The artifact would be reading files it was never granted.
     if (kindOf(abs) !== 'image') return null
     const cached = seen.get(abs)
     if (cached !== undefined) return cached

@@ -31,8 +31,8 @@ func TestShowArtifact_HappyPath(t *testing.T) {
 
 func TestShowArtifact_Errors(t *testing.T) {
 	dir := t.TempDir()
-	goFile := filepath.Join(dir, "main.go")
-	if err := os.WriteFile(goFile, []byte("package main"), 0o644); err != nil {
+	binFile := filepath.Join(dir, "tool.exe")
+	if err := os.WriteFile(binFile, []byte{0x4d, 0x5a}, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -42,7 +42,7 @@ func TestShowArtifact_Errors(t *testing.T) {
 	}{
 		{"missing path", map[string]any{}},
 		{"nonexistent file", map[string]any{"path": filepath.Join(dir, "nope.html")}},
-		{"non-previewable extension", map[string]any{"path": goFile}},
+		{"non-previewable extension", map[string]any{"path": binFile}},
 		{"directory", map[string]any{"path": dir + string(filepath.Separator) + "sub.html"}},
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "sub.html"), 0o755); err != nil {
@@ -61,5 +61,12 @@ func TestArtifactContentType(t *testing.T) {
 	}
 	if _, ok := ArtifactContentType("/x/y/binary.exe"); ok {
 		t.Error("exe should not be previewable")
+	}
+	// Code/text kinds are previewable but always plain text, never their native
+	// type (#1895).
+	for _, p := range []string{"/x/script.py", "/x/main.go", "/x/app.js", "/x/data.csv", "/x/notes.TXT"} {
+		if ct, ok := ArtifactContentType(p); !ok || ct != "text/plain; charset=utf-8" {
+			t.Errorf("%s: ct=%q ok=%v, want text/plain", p, ct, ok)
+		}
 	}
 }
