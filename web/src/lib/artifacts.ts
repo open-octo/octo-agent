@@ -46,6 +46,12 @@ const EXT_KIND: Record<string, Kind> = {
 // Once-per-session guard so a live write auto-opens the panel only the first time.
 let autoOpened = false
 
+// Ingest counter for observeArtifact, assigned synchronously before the body
+// fetch starts. The replay loops and the live tool_result handler both call
+// observeArtifact in transcript order, so the counter captures that order even
+// though the fetches resolve in arbitrary order.
+let observeSeq = 0
+
 // How many times each image path has been observed this session, used as the
 // cache-busting revision in its src. Cleared with the artifacts themselves.
 const imageRevisions = new Map<string, number>()
@@ -147,11 +153,14 @@ function artifactURL(sessionId: string, path: string): string {
 // size in memory for as long as the artifact stays in the store. It is also
 // per-artifact, so a session with many image-bearing documents accumulates.
 //
-// The byte budget also has a hard ceiling: the inlined document is what "Save
-// to Light App" persists (lightAppSource), and POST /api/light-apps caps its
-// body at 10 MB — 6 MiB of raw bytes is ~8.2 MB as base64, leaving room for
-// the document itself. Raising the budget past ~7 MiB makes that save 413
-// without a matching server-side change.
+// The byte budget also matters beyond memory: the inlined document is what
+// "Save to Light App" persists (lightAppSource), and POST /api/light-apps caps
+// its body at 10 MiB. 6 MiB of raw bytes is 8 MiB as base64, leaving room for
+// the document itself — but the budget is only checked before each fetch and
+// spent afterwards, so the final image can overshoot it, and a page that lands
+// past the server cap fails its save with an explicit 413 toast. Raising the
+// budget further narrows that headroom; past ~7 MiB even in-budget pages
+// couldn't save without a matching server-side change.
 const inlineRefBudget = 6 << 20
 const inlineRefMax = 40
 
@@ -347,13 +356,14 @@ export function resetArtifacts(sessionId: string): void {
   artifactSel.set(0)
   panelContent.set(null)
   autoOpened = false
+  observeSeq = 0
   imageRevisions.clear()
   artifactSelSession.set(sessionId)
 }
 
 // Ingest one tool ui_payload. `live` distinguishes a current turn (auto-opens
 // the panel once) from history replay (silent). Async: fetches the body, then
-// upserts the artifact (newest selected).
+// upserts the artifact at its transcript position (transcript-newest selected).
 export async function observeArtifact(
   sessionId: string,
   uiPayload: any,
@@ -366,6 +376,10 @@ export async function observeArtifact(
   if (!path) return
   const kind = kindOf(path)
   if (!kind) return
+
+  // Capture the transcript position now — the fetch below resolves in
+  // arbitrary order, and the upsert sorts by this instead of by arrival.
+  const seq = observeSeq++
 
   const url = artifactURL(sessionId, path)
 
@@ -500,14 +514,30 @@ export async function observeArtifact(
     preview,
     path,
     src: src || undefined,
+    seq,
   }
 
+  // Insert at the transcript position, not at the end: a slow fetch (e.g. a
+  // markdown file inlining N images) must not land after — and be selected
+  // over — artifacts that appear later in the transcript. A re-observed path
+  // carries a newer seq and moves accordingly; if a later observation of the
+  // same path already landed, this stale one is dropped.
+  let stale = false
   artifacts.update(list => {
+    const existing = list.find(a => a.path === path)
+    if (existing && existing.seq > seq) {
+      stale = true
+      return list
+    }
     const next = list.filter(a => a.path !== path)
-    next.push(entry)
+    let at = next.length
+    while (at > 0 && next[at - 1].seq > seq) at--
+    next.splice(at, 0, entry)
     return next
   })
-  artifactSel.set(get(artifacts).length - 1)
+  // The list is sorted by seq, so the last entry is the transcript-newest
+  // artifact — select it regardless of which fetch finished last.
+  if (!stale) artifactSel.set(get(artifacts).length - 1)
 
   if (live && !autoOpened) {
     autoOpened = true

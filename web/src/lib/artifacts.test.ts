@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { get } from 'svelte/store'
-import { artifacts } from './stores'
+import { artifacts, artifactSel } from './stores'
 import { lightAppSource, observeArtifact, resetArtifacts } from './artifacts'
 
 // Nothing a preview document references can authenticate: the srcdoc iframe has
@@ -275,7 +275,7 @@ describe('observeArtifact — link rel discrimination', () => {
   function stubFetch(html: string) {
     vi.stubGlobal('fetch', vi.fn(async (u: string) => {
       if (u.includes('page.html')) return new Response(html)
-      return new Response(png, { headers: { 'Content-Type': 'image/png' } })
+      return imageResponse(png)
     }))
   }
 
@@ -341,6 +341,45 @@ describe('observeArtifact — link rel discrimination', () => {
   })
 })
 
+// The list must come out in transcript order even though each observation
+// awaits its own fetch and they resolve in arbitrary order (#1894).
+describe('observeArtifact — transcript ordering', () => {
+  it('orders by observation order, not fetch completion, and selects the transcript-newest', async () => {
+    // report.md needs a fetch we hold open; the image needs none, so it lands first.
+    let releaseMd!: (r: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(res => { releaseMd = res })))
+
+    const md = observeArtifact(SID, payload('/tmp/report.md'), false)
+    const png = observeArtifact(SID, payload('/tmp/late.png'), false)
+    await png
+    expect(get(artifacts).map(a => a.name)).toEqual(['late.png'])
+
+    releaseMd(new Response('# report'))
+    await md
+
+    expect(get(artifacts).map(a => a.name)).toEqual(['report.md', 'late.png'])
+    // Selection follows the transcript-newest artifact, not the last fetch to finish.
+    expect(get(artifactSel)).toBe(1)
+  })
+
+  it('keeps the newer observation when a stale fetch of the same path resolves last', async () => {
+    const resolvers: Array<(r: Response) => void> = []
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(res => { resolvers.push(res) })))
+
+    const first = observeArtifact(SID, payload('/tmp/a.md'), false)
+    const second = observeArtifact(SID, payload('/tmp/a.md'), false)
+    resolvers[1](new Response('v2'))
+    await second
+    resolvers[0](new Response('v1'))
+    await first
+
+    expect(get(artifacts)).toHaveLength(1)
+    expect(get(artifacts)[0].code).toBe('v2')
+    // The dropped stale observation must not touch the selection either.
+    expect(get(artifactSel)).toBe(0)
+  })
+})
+
 // "Save to Light App" persists a copy that renders through the same kind of
 // sandboxed iframe as the panel preview, so it must save the inlined preview —
 // the raw source's relative image paths resolve against nothing there (#1890).
@@ -350,7 +389,7 @@ describe('lightAppSource — what Save to Light App persists', () => {
   function stubFetch(html: string) {
     vi.stubGlobal('fetch', vi.fn(async (u: string) => {
       if (u.includes('page.html')) return new Response(html)
-      return new Response(png, { headers: { 'Content-Type': 'image/png' } })
+      return imageResponse(png)
     }))
   }
 
@@ -382,5 +421,15 @@ describe('lightAppSource — what Save to Light App persists', () => {
     const entry = get(artifacts)[0]
     expect(entry.preview).toContain('cannot be previewed here')
     expect(lightAppSource(entry)).toBe(html)
+  })
+
+  it('hands over the source for a non-HTML artifact', () => {
+    const a = { type: 'Markdown', code: '# hi', preview: '<h1>hi</h1>' }
+    expect(lightAppSource(a as any)).toBe('# hi')
+  })
+
+  it('falls back to the source when the preview is empty', () => {
+    const a = { type: 'HTML', code: '<html><body>hi</body></html>', preview: '' }
+    expect(lightAppSource(a as any)).toBe(a.code)
   })
 })

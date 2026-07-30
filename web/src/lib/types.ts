@@ -132,6 +132,10 @@ export interface Artifact {
   // sandboxed `preview` iframe (which cannot authenticate — see lib/artifacts.ts),
   // and the download action saves these bytes.
   src?: string
+  // Ingest sequence, assigned before the body fetch starts. Callers observe
+  // artifacts in transcript order but fetches resolve in arbitrary order, so
+  // the list is kept sorted by seq rather than by arrival (see lib/artifacts.ts).
+  seq: number
 }
 
 // SkillInfo matches the Go server skill struct
