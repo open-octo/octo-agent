@@ -15,6 +15,16 @@ function payload(path: string) {
   return { type: 'write', path }
 }
 
+// Image bytes must come back as the test environment's own Blob. Node's fetch
+// Response mints undici's Blob, which jsdom's FileReader brand-checks and
+// rejects on Node 22 (Node 26 unifies the classes, so it passes there) — the
+// inliner's catch would swallow that and the tests would assert on an
+// un-rewritten document. A real browser mints fetch blobs and FileReader in
+// the same realm, so this is also the truer stub.
+function imageResponse(bytes: Uint8Array<ArrayBuffer>): Response {
+  return { ok: true, blob: async () => new Blob([bytes], { type: 'image/png' }) } as Response
+}
+
 beforeEach(() => {
   resetArtifacts(SID)
 })
@@ -71,10 +81,7 @@ describe('observeArtifact — markdown copy button', () => {
     expect(preview).not.toContain(".querySelector('.body')")
     expect(preview).toContain('document.body.addEventListener')
     // The other half of the contract: the markup the handler looks for.
-    // Not asserting the .code-block wrapper — under happy-dom, DOMPurify drops
-    // every outermost <div> (even `<div class="a">x</div>` → `x`), so its
-    // absence here says nothing about a browser. The handler null-guards that
-    // lookup for the same reason.
+    expect(preview).toContain('class="code-block"')
     expect(preview).toContain('class="copy-btn"')
     expect(preview).toContain('<pre><code')
   })
@@ -101,7 +108,7 @@ describe('observeArtifact — markdown image references', () => {
     const fetchMock = vi.fn(async (u: string) => {
       if (u.includes('report.md')) return new Response(md)
       if (imageStatus !== 200) return new Response('', { status: imageStatus })
-      return new Response(png, { headers: { 'Content-Type': 'image/png' } })
+      return imageResponse(png)
     })
     vi.stubGlobal('fetch', fetchMock)
     return fetchMock
@@ -177,7 +184,7 @@ describe('observeArtifact — html local references', () => {
     const fetchMock = vi.fn(async (u: string) => {
       if (u.includes('page.html')) return new Response(html)
       if (imageStatus !== 200) return new Response('', { status: imageStatus })
-      return new Response(png, { headers: { 'Content-Type': 'image/png' } })
+      return imageResponse(png)
     })
     vi.stubGlobal('fetch', fetchMock)
     return fetchMock
@@ -255,5 +262,81 @@ describe('observeArtifact — html local references', () => {
     const [entry] = get(artifacts)
     expect(entry.preview).toContain('cannot be previewed here')
     expect(entry.preview).not.toContain('data:image/png')
+  })
+})
+
+// Only a <link> whose rel the document needs in order to render may force the
+// warning page. A favicon or manifest failing to load changes nothing, and
+// routing those files to the warning page also kept them from the image
+// inliner entirely (#1896).
+describe('observeArtifact — link rel discrimination', () => {
+  const png = new Uint8Array([137, 80, 78, 71])
+
+  function stubFetch(html: string) {
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => {
+      if (u.includes('page.html')) return new Response(html)
+      return imageResponse(png)
+    }))
+  }
+
+  it('previews past a favicon link and still inlines the images', async () => {
+    stubFetch(
+      '<html><head><link rel="icon" href="favicon.png"></head>' +
+        '<body><img src="chart.png"></body></html>',
+    )
+
+    await observeArtifact(SID, payload('/tmp/page.html'), false)
+
+    const [entry] = get(artifacts)
+    expect(entry.preview).not.toContain('cannot be previewed here')
+    // The whole point: this file used to skip the inliner along with the preview.
+    expect(entry.preview).toContain('data:image/png;base64,')
+  })
+
+  it('previews past preconnect, manifest, and canonical links', async () => {
+    const html =
+      '<html><head><link rel="preconnect" href="https://fonts.googleapis.com">' +
+      '<link rel="manifest" href="manifest.json">' +
+      '<link rel="canonical" href="https://example.com/page"></head>' +
+      '<body><h1>hi</h1></body></html>'
+    stubFetch(html)
+
+    await observeArtifact(SID, payload('/tmp/page.html'), false)
+
+    expect(get(artifacts)[0].preview).toBe(html)
+  })
+
+  it('still warns for an external stylesheet', async () => {
+    stubFetch('<html><head><link rel="stylesheet" href="https://cdn.example.com/x.css"></head><body></body></html>')
+
+    await observeArtifact(SID, payload('/tmp/page.html'), false)
+
+    expect(get(artifacts)[0].preview).toContain('cannot be previewed here')
+  })
+
+  it('still warns when the rel attribute is unquoted or trails the href', async () => {
+    stubFetch('<html><head><link href="style.css" rel=stylesheet></head><body></body></html>')
+
+    await observeArtifact(SID, payload('/tmp/page.html'), false)
+
+    expect(get(artifacts)[0].preview).toContain('cannot be previewed here')
+  })
+
+  it('treats rel="preload" as render-affecting', async () => {
+    // The rel="preload" onload="this.rel='stylesheet'" idiom makes it one.
+    stubFetch('<html><head><link rel="preload" as="style" href="x.css"></head><body></body></html>')
+
+    await observeArtifact(SID, payload('/tmp/page.html'), false)
+
+    expect(get(artifacts)[0].preview).toContain('cannot be previewed here')
+  })
+
+  it('leaves a data: stylesheet alone, same as before', async () => {
+    const html = '<html><head><link rel="stylesheet" href="data:text/css,body{margin:0}"></head><body></body></html>'
+    stubFetch(html)
+
+    await observeArtifact(SID, payload('/tmp/page.html'), false)
+
+    expect(get(artifacts)[0].preview).toBe(html)
   })
 })

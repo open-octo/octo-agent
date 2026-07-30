@@ -85,10 +85,25 @@ function typeLabel(kind: Kind, path: string): string {
 }
 
 // Detects HTML that references external scripts or stylesheets — these fail to
-// load inside a sandboxed srcdoc iframe that has no same-origin access.
-const EXTERNAL_REF_RE = /<(script[^>]+src|link[^>]+href)=["'](?!data:|blob:|#)[^"']/i
+// load inside a sandboxed srcdoc iframe that has no same-origin access. Only
+// <link> rel values whose target the document needs in order to render count:
+// a favicon, manifest, preconnect, or canonical link loads nothing the preview
+// depends on, so it must not force the warning page (#1896). preload rides
+// along with stylesheet because the rel="preload" onload="this.rel='stylesheet'"
+// idiom makes it one.
+const SCRIPT_SRC_RE = /<script[^>]+src=["'](?!data:|blob:|#)[^"']/i
+const LINK_TAG_RE = /<link\b[^>]*>/gi
+const LINK_HREF_RE = /\bhref\s*=\s*["'](?!data:|blob:|#)[^"']/i
+const LINK_REL_RE = /\brel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
+const RENDER_REL_RE = /(?:^|\s)(?:stylesheet|preload|modulepreload)(?:\s|$)/i
 function hasExternalRefs(html: string): boolean {
-  return EXTERNAL_REF_RE.test(html)
+  if (SCRIPT_SRC_RE.test(html)) return true
+  for (const tag of html.match(LINK_TAG_RE) ?? []) {
+    if (!LINK_HREF_RE.test(tag)) continue
+    const m = LINK_REL_RE.exec(tag)
+    if (RENDER_REL_RE.test(m?.[1] ?? m?.[2] ?? m?.[3] ?? '')) return true
+  }
+  return false
 }
 
 function artifactURL(sessionId: string, path: string): string {

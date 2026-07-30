@@ -676,3 +676,21 @@ func TestSummarize_NoLiteConfiguredUsesPrimary(t *testing.T) {
 		t.Errorf("got %q after %d calls; want primary summary after 1", sum, len(primary.models))
 	}
 }
+
+func TestIsPlainUserMessage(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  Message
+		want bool
+	}{
+		{"user text", Message{Role: RoleUser, Content: "hi"}, true},
+		{"user with text block", Message{Role: RoleUser, Blocks: []ContentBlock{{Type: "text", Text: "hi"}}}, true},
+		{"assistant", Message{Role: RoleAssistant, Content: "hello"}, false},
+		{"tool_result carrier", Message{Role: RoleUser, Blocks: []ContentBlock{{Type: "tool_result", ToolUseID: "tu-1", Result: "out"}}}, false},
+	}
+	for _, tc := range cases {
+		if got := IsPlainUserMessage(tc.msg); got != tc.want {
+			t.Errorf("%s: IsPlainUserMessage = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

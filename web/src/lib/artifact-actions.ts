@@ -84,9 +84,25 @@ async function downloadImage(
     a.remove()
     URL.revokeObjectURL(url)
   } catch (e: any) {
-    // With the server's own message: for the 10 MB cap in particular, this is
-    // the only thing that explains why the panel shows a broken image too.
+    // With the server's own message — the same story imagePreviewError tells
+    // in the preview pane, for whoever reaches the download button first.
     const detail = e?.message ? `: ${e.message}` : ''
     showToast(`${tr('artifacts.save_failed')}${detail}`, 'error')
+  }
+}
+
+// A failed <img> fires onerror with no reason attached, but the endpoint's
+// error body has one — the 10 MB preview cap in particular (#1896). Re-request
+// the src to read it; the handler rejects such requests from file metadata
+// alone, before serving any bytes, so the retry is cheap exactly when it
+// matters. Returns '' when the refetch has no better story to tell (network
+// down, or the bytes arrived but failed to decode as an image).
+export async function imagePreviewError(src: string): Promise<string> {
+  try {
+    const res = await fetch(src)
+    if (res.ok) return ''
+    return await api.readErrorMessage(res, `${res.status} ${res.statusText}`)
+  } catch {
+    return ''
   }
 }

@@ -145,7 +145,9 @@ func TestHandleDeleteSession(t *testing.T) {
 
 // TestHandleBranchSession verifies POST /api/sessions/{id}/branch:
 // 200 with a new session whose history is copied up to message_index, 400
-// when the index is out of range, and 404 when the source does not exist.
+// when the index is out of range or does not name a plain user message
+// (branching at an assistant or tool_result message would orphan a tool_use —
+// issue #1899), and 404 when the source does not exist.
 func TestHandleBranchSession(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -156,7 +158,16 @@ func TestHandleBranchSession(t *testing.T) {
 		{Role: agent.RoleUser, Content: "hello"},
 		{Role: agent.RoleAssistant, Content: "hi"},
 		{Role: agent.RoleUser, Content: "branch here"},
+		{Role: agent.RoleAssistant, Blocks: []agent.ContentBlock{
+			{Type: "tool_use", ID: "tu-1", Name: "terminal", Input: map[string]any{"command": "ls"}},
+		}},
+		{Role: agent.RoleUser, Blocks: []agent.ContentBlock{
+			{Type: "tool_result", ToolUseID: "tu-1", Result: "file.txt"},
+		}},
 		{Role: agent.RoleAssistant, Content: "ok"},
+		// Steer-shaped user message: blocks-only text, no Content — the closest
+		// legitimate neighbour of the rejected shapes above; must stay branchable.
+		{Role: agent.RoleUser, Blocks: []agent.ContentBlock{{Type: "text", Text: "steer"}}},
 	}
 	if err := sess.Save(); err != nil {
 		t.Fatalf("save: %v", err)
@@ -180,6 +191,35 @@ func TestHandleBranchSession(t *testing.T) {
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("out-of-range: status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+
+	// 400 — index names an assistant message
+	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/branch",
+		strings.NewReader(`{"message_index":1}`))
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("assistant index: status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+
+	// 400 — index names a tool_result message: the branch would end on the
+	// assistant tool_use with no answering result
+	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/branch",
+		strings.NewReader(`{"message_index":4}`))
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("tool_result index: status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+
+	// 200 — a steer-shaped user message (blocks-only text) right after the tool
+	// exchange is a plain user turn and must remain branchable
+	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/branch",
+		strings.NewReader(`{"message_index":6}`))
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("steer index: status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
 
 	// 200 — valid branch with prompt override
@@ -225,8 +265,8 @@ func TestHandleBranchSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload source: %v", err)
 	}
-	if len(srcReloaded.Messages) != 4 {
-		t.Fatalf("source Messages len = %d, want 4 (untouched)", len(srcReloaded.Messages))
+	if len(srcReloaded.Messages) != 7 {
+		t.Fatalf("source Messages len = %d, want 7 (untouched)", len(srcReloaded.Messages))
 	}
 }
 
@@ -246,6 +286,12 @@ func TestHandleEditMessage(t *testing.T) {
 		{Role: agent.RoleUser, Content: "one"},
 		{Role: agent.RoleAssistant, Content: "two"},
 		{Role: agent.RoleUser, Content: "three"},
+		{Role: agent.RoleAssistant, Blocks: []agent.ContentBlock{
+			{Type: "tool_use", ID: "tu-1", Name: "terminal", Input: map[string]any{"command": "ls"}},
+		}},
+		{Role: agent.RoleUser, Blocks: []agent.ContentBlock{
+			{Type: "tool_result", ToolUseID: "tu-1", Result: "file.txt"},
+		}},
 		{Role: agent.RoleAssistant, Content: "four"},
 	}
 	if err := sess.Save(); err != nil {
@@ -272,6 +318,16 @@ func TestHandleEditMessage(t *testing.T) {
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("assistant-index: status = %d, want 400", w.Code)
+	}
+
+	// 400 — index names a tool_result message (user role, but not a real user
+	// turn): truncating there would orphan the assistant tool_use before it
+	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/edit_message",
+		strings.NewReader(`{"message_index":4,"new_content":"x"}`))
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("tool_result-index: status = %d, want 400", w.Code)
 	}
 
 	// 200 — edit the second user prompt; the rerun regenerates from it

@@ -803,6 +803,13 @@ func (s *Server) handleBranchSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index out of range: %d (have %d messages)", req.MessageIndex, len(src.Messages)))
 		return
 	}
+	// Branching is only valid at a plain user message: cutting at an assistant
+	// message or a tool_result message would leave the branch's last assistant
+	// tool_use with no answering result (issue #1899).
+	if !agent.IsPlainUserMessage(src.Messages[req.MessageIndex]) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index %d does not name a plain user message; history can only branch at a user turn", req.MessageIndex))
+		return
+	}
 	branch := agent.BranchFrom(src, req.MessageIndex) // BranchFrom takes an exclusive count; exclude the user message so the client can send it fresh
 
 	if err := branch.Save(); err != nil {
@@ -882,9 +889,12 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 	var blocks []agent.ContentBlock
 	if req.MessageIndex < len(sess.Messages) {
 		target := sess.Messages[req.MessageIndex]
-		if target.Role != agent.RoleUser {
+		// Same invariant as branching: tool results ride on user-role messages,
+		// so a bare Role check would still let an edit truncate between an
+		// assistant tool_use and its tool_result (issue #1899).
+		if !agent.IsPlainUserMessage(target) {
 			mu.Unlock()
-			writeError(w, http.StatusBadRequest, "message_index does not name a user message")
+			writeError(w, http.StatusBadRequest, "message_index does not name a plain user message")
 			return
 		}
 		// Keep the original image attachments (rehydrated by LoadSession) so

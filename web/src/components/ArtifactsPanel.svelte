@@ -1,13 +1,37 @@
 <script lang="ts">
   import { artifacts, panelContent, artifactSel, artifactView, artifactModalOpen, lightappSel, lightapps, lightappHTML, showToast } from '../lib/stores'
   import { t } from '../lib/i18n'
-  import { copyArtifact, downloadArtifact } from '../lib/artifact-actions'
+  import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
   import * as api from '../lib/api'
 
   // ── Session artifacts (existing) ──────────────────────────────────────────
   const cur = $derived($artifacts[$artifactSel] ?? $artifacts[0])
   // Images render outside the sandboxed iframe and have no source view.
   const curIsImage = $derived(!!cur?.src)
+
+  // A failed image load would otherwise show only the browser's broken-image
+  // glyph; surface the server's reason instead (e.g. the 10 MB preview cap).
+  // The <img> stays mounted (hidden) while failed: an error event can dispatch
+  // just after the selection switched and mark the wrong artifact, and only a
+  // still-loading <img> can deliver the onload that clears that misfire.
+  let imgFailed = $state(false)
+  let imgFailDetail = $state('')
+  $effect(() => {
+    void cur?.src
+    imgFailed = false
+    imgFailDetail = ''
+  })
+  function onImgLoad() {
+    imgFailed = false
+    imgFailDetail = ''
+  }
+  async function onImgError() {
+    const src = cur?.src
+    if (!src) return
+    imgFailed = true
+    const detail = await imagePreviewError(src)
+    if (cur?.src === src && imgFailed) imgFailDetail = detail
+  }
 
   function onCopy() { copyArtifact(cur?.code ?? '', showToast) }
   function onDownload() { downloadArtifact(cur, showToast) }
@@ -193,7 +217,15 @@
 
       <div class="body">
         {#if curIsImage}
-          <div class="img-wrap"><img src={cur.src} alt={cur.name} /></div>
+          <div class="img-wrap">
+            {#if imgFailed}
+              <div class="img-error">
+                <iconify-icon icon="ant-design:file-image-outlined" width="28"></iconify-icon>
+                <span>{$t('artifacts.img_failed')}{imgFailDetail ? ` — ${imgFailDetail}` : ''}</span>
+              </div>
+            {/if}
+            <img src={cur.src} alt={cur.name} class:img-hidden={imgFailed} onerror={onImgError} onload={onImgLoad} />
+          </div>
         {:else if $artifactView === 'preview'}
           <iframe srcdoc={cur.preview} sandbox="allow-scripts" allow="clipboard-write" title={cur.name}></iframe>
         {:else}
@@ -255,6 +287,11 @@ iframe { border: 0; width: 100%; height: 100%; display: block; }
   overflow: auto; background: var(--bg-layout);
 }
 .img-wrap img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.img-wrap img.img-hidden { display: none; }
+.img-error {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  max-width: 85%; text-align: center; color: var(--text-tertiary); font-size: 13px;
+}
 .code-view {
   margin: 0; height: 100%; box-sizing: border-box; overflow: auto;
   padding: 14px 16px; background: var(--bg-sidebar); font-size: 12px; line-height: 1.7;

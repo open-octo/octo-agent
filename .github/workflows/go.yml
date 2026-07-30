@@ -37,6 +37,10 @@ jobs:
         working-directory: web
         run: npx svelte-check --tsconfig ./tsconfig.json
 
+      - name: Run web tests
+        working-directory: web
+        run: npm test
+
   test:
     name: Go ${{ matrix.go }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
