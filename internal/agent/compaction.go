@@ -634,7 +634,7 @@ func (a *Agent) compactKeepBudget() int {
 func safeSplitIndexByBudget(msgs []Message, keepBudget int) int {
 	var userTurns []int
 	for i, m := range msgs {
-		if m.Role == RoleUser && !hasToolResult(m) {
+		if IsPlainUserMessage(m) {
 			userTurns = append(userTurns, i)
 		}
 	}
@@ -658,7 +658,7 @@ func safeSplitIndexByBudget(msgs []Message, keepBudget int) int {
 func countKeptUserTurns(msgs []Message, split int) int {
 	n := 0
 	for i := split; i < len(msgs); i++ {
-		if msgs[i].Role == RoleUser && !hasToolResult(msgs[i]) {
+		if IsPlainUserMessage(msgs[i]) {
 			n++
 		}
 	}

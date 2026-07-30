@@ -165,6 +165,9 @@ func TestHandleBranchSession(t *testing.T) {
 			{Type: "tool_result", ToolUseID: "tu-1", Result: "file.txt"},
 		}},
 		{Role: agent.RoleAssistant, Content: "ok"},
+		// Steer-shaped user message: blocks-only text, no Content — the closest
+		// legitimate neighbour of the rejected shapes above; must stay branchable.
+		{Role: agent.RoleUser, Blocks: []agent.ContentBlock{{Type: "text", Text: "steer"}}},
 	}
 	if err := sess.Save(); err != nil {
 		t.Fatalf("save: %v", err)
@@ -207,6 +210,16 @@ func TestHandleBranchSession(t *testing.T) {
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("tool_result index: status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+
+	// 200 — a steer-shaped user message (blocks-only text) right after the tool
+	// exchange is a plain user turn and must remain branchable
+	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/branch",
+		strings.NewReader(`{"message_index":6}`))
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("steer index: status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
 
 	// 200 — valid branch with prompt override
@@ -252,8 +265,8 @@ func TestHandleBranchSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload source: %v", err)
 	}
-	if len(srcReloaded.Messages) != 6 {
-		t.Fatalf("source Messages len = %d, want 6 (untouched)", len(srcReloaded.Messages))
+	if len(srcReloaded.Messages) != 7 {
+		t.Fatalf("source Messages len = %d, want 7 (untouched)", len(srcReloaded.Messages))
 	}
 }
 

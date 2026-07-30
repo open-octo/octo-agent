@@ -807,7 +807,7 @@ func (s *Server) handleBranchSession(w http.ResponseWriter, r *http.Request) {
 	// message or a tool_result message would leave the branch's last assistant
 	// tool_use with no answering result (issue #1899).
 	if !agent.IsPlainUserMessage(src.Messages[req.MessageIndex]) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index %d does not name a plain user message; branching there would orphan a tool_use", req.MessageIndex))
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index %d does not name a plain user message; history can only branch at a user turn", req.MessageIndex))
 		return
 	}
 	branch := agent.BranchFrom(src, req.MessageIndex) // BranchFrom takes an exclusive count; exclude the user message so the client can send it fresh
