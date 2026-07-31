@@ -128,17 +128,18 @@
 </div>
 
 <style>
-.page { flex: 1; overflow-y: auto; min-height: 0; }
-.inner { max-width: 1080px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
-.page-header { display: flex; flex-direction: column; gap: 4px; }
+.page { flex: 1; overflow-y: auto; min-height: 0; background: var(--bg-layout); }
+.inner { max-width: 1000px; margin: 0 auto; padding: 26px 28px 40px; display: flex; flex-direction: column; gap: 20px; }
+.page-header { display: flex; flex-direction: column; }
 .header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-h2 { margin: 0; font-size: 24px; font-weight: 600; color: var(--text-heading); }
-p { margin: 0; font-size: 14px; color: var(--text-secondary); }
+h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; color: var(--text-heading); }
+p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 60ch; }
 .btn-primary {
-  height: 32px; padding: 0 16px; border: none; border-radius: 6px;
-  background: var(--blue-6); color: #fff; font-size: 13px;
+  height: 32px; padding: 0 14px; border: none; border-radius: 8px;
+  background: var(--blue-6); color: #fff; font-size: 13px; font-weight: 600;
   display: flex; align-items: center; gap: 6px;
   cursor: pointer; font-family: inherit; flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(0,122,255,0.35);
 }
 .btn-primary:hover { background: var(--blue-5); }
 .empty-state {
@@ -151,7 +152,7 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
   gap: 16px;
 }
 .app-card {
-  background: var(--bg-container); border-radius: 16px; box-shadow: var(--card-shadow);
+  background: var(--bg-container); border: 1px solid var(--border); border-radius: var(--radius-card); box-shadow: var(--card-shadow);
   padding: 24px; display: flex; flex-direction: column; gap: 16px;
   transition: box-shadow 0.15s;
 }
@@ -171,12 +172,12 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 }
 .btn-action {
   height: 28px; padding: 0 10px; border: 1px solid var(--border);
-  background: var(--bg-container); border-radius: 6px;
+  background: var(--bg-container); border-radius: 8px;
   display: flex; align-items: center; gap: 4px;
-  font-size: 12px; color: var(--text-secondary);
+  font-size: 12px; font-weight: 500; color: var(--text);
   cursor: pointer; font-family: inherit;
 }
-.btn-action:hover:not(:disabled) { border-color: var(--blue-5); color: var(--blue-5); }
+.btn-action:hover:not(:disabled) { background: var(--hover-neutral); border-color: var(--text-quaternary); }
 .btn-action:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-action.danger:hover:not(:disabled) { border-color: var(--error); color: var(--error); }
+.btn-action.danger:hover:not(:disabled) { background: var(--error-bg); border-color: var(--error-border); color: var(--error); }
 </style>

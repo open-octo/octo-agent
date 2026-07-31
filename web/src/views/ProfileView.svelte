@@ -247,11 +247,11 @@
 </div>
 
 <style>
-.page { flex: 1; overflow-y: auto; min-height: 0; }
-.inner { max-width: 800px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
-.page-header { display: flex; flex-direction: column; gap: 4px; }
-h2 { margin: 0; font-size: 24px; font-weight: 600; color: var(--text-heading); }
-p { margin: 0; font-size: 14px; color: var(--text-secondary); }
+.page { flex: 1; overflow-y: auto; min-height: 0; background: var(--bg-layout); }
+.inner { max-width: 780px; margin: 0 auto; padding: 26px 28px 40px; display: flex; flex-direction: column; gap: 20px; }
+.page-header { display: flex; flex-direction: column; }
+h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; color: var(--text-heading); }
+p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 60ch; }
 .tabs { display: flex; align-items: center; gap: 24px; border-bottom: 1px solid var(--border-secondary); }
 .tab {
   padding: 0 2px 10px; margin-bottom: -1px; cursor: pointer;
@@ -260,7 +260,7 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 }
 .tab.active { font-weight: 600; color: var(--blue-6); border-bottom-color: var(--blue-6); }
 .tab:hover:not(.active) { color: var(--text); }
-.section-card { background: var(--bg-container); border-radius: 16px; box-shadow: var(--card-shadow); overflow: hidden; }
+.section-card { background: var(--bg-container); border: 1px solid var(--border); border-radius: var(--radius-card); box-shadow: var(--card-shadow); overflow: hidden; }
 .card-header {
   display: flex; align-items: center; gap: 12px;
   padding: 16px 24px; border-bottom: 1px solid var(--border-table);
@@ -293,7 +293,7 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
   padding: 16px 24px; border-top: 1px dashed var(--border-secondary);
 }
 .footer-hint { font-size: 13px; color: var(--text-tertiary); flex: 1; min-width: 0; }
-.btn-primary { height: 32px; padding: 0 14px; border: none; background: var(--blue-6); border-radius: 6px; font-size: 13px; color: #fff; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.btn-primary { height: 32px; padding: 0 14px; border: none; background: var(--blue-6); border-radius: 8px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer; font-family: inherit; white-space: nowrap; box-shadow: 0 1px 2px rgba(0,122,255,0.35); }
 .btn-primary:hover { background: var(--blue-5); }
 .mem-count { font-size: 12px; color: var(--text-tertiary); }
 .auto-badge { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-tertiary); margin-left: auto; }
@@ -318,10 +318,10 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 .mem-meta { font-size: 12px; color: var(--text-tertiary); }
 .forget-btn {
   flex: 0 0 auto; margin-top: 1px; height: 28px; padding: 0 10px;
-  border: 1px solid var(--border-secondary); background: var(--bg-container); border-radius: 6px;
+  border: none; background: transparent; border-radius: 7px;
   display: flex; align-items: center; gap: 6px; font-size: 12px;
-  color: var(--text-tertiary); cursor: pointer; font-family: inherit;
+  color: var(--text-secondary); cursor: pointer; font-family: inherit;
 }
-.forget-btn:hover { border-color: var(--error); color: var(--error); }
+.forget-btn:hover { background: var(--error-bg); color: var(--error); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 </style>

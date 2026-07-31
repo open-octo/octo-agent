@@ -199,32 +199,33 @@
 {/if}
 
 <style>
-  .view { padding: 24px; max-width: 880px; margin: 0 auto; overflow-y: auto; }
-  .view-head h1 { margin: 0; font-size: 20px; }
-  .sub { color: var(--text-muted); margin: 4px 0 20px; font-size: 13px; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 18px; }
+  .view { padding: 26px 28px 40px; max-width: 880px; margin: 0 auto; overflow-y: auto; background: var(--bg-layout); }
+  .view-head h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; color: var(--text-heading); }
+  .sub { color: var(--text-secondary); margin: 4px 0 20px; font-size: 13px; }
+  .card { background: var(--bg-container); border: 1px solid var(--border); border-radius: var(--radius-card); box-shadow: var(--card-shadow); padding: 18px; margin-bottom: 18px; }
   .sec-head { display: flex; align-items: center; justify-content: space-between; }
   .sec-title { margin: 0 0 12px; font-size: 15px; }
   .conn-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
   .conn-info { display: flex; flex-direction: column; gap: 4px; }
   .conn-info .sec-title { margin: 0; }
-  .conn-desc { font-size: 12px; color: var(--text-muted); }
+  .conn-desc { font-size: 12px; color: var(--text-secondary); }
   .conn-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
   .conn-note { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 12px; color: var(--warning); background: var(--warning-bg); }
   .mono { font-family: ui-monospace, monospace; }
-  .hint { color: var(--text-muted); font-size: 12px; margin: 0 0 14px; }
-  .muted { color: var(--text-muted); font-size: 13px; }
+  .hint { color: var(--text-secondary); font-size: 12px; margin: 0 0 14px; }
+  .muted { color: var(--text-secondary); font-size: 13px; }
   .rec-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-  .rec { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; }
+  .rec { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--border-secondary); border-radius: 8px; }
   .rec-name { font-weight: 600; font-size: 14px; }
-  .rec-desc { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
-  .rec-meta { color: var(--text-muted); font-size: 11px; margin-top: 4px; }
+  .rec-desc { color: var(--text-secondary); font-size: 12px; margin-top: 2px; }
+  .rec-meta { color: var(--text-tertiary); font-size: 11px; margin-top: 4px; }
   .rec-actions { display: flex; gap: 6px; flex-shrink: 0; }
-  .ghost-btn { background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; color: var(--text); }
-  .ghost-btn:hover { background: var(--surface-hover); }
-  .ghost-btn.danger { color: var(--danger, #d4380d); }
+  .ghost-btn { background: transparent; border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; font-size: 12px; font-weight: 500; cursor: pointer; color: var(--text); }
+  .ghost-btn:hover { background: var(--hover-neutral); border-color: var(--text-quaternary); }
+  .ghost-btn.danger { color: var(--error); }
+  .ghost-btn.danger:hover { background: var(--error-bg); border-color: var(--error-border); }
   .rec-head-actions { display: flex; align-items: center; gap: 8px; }
-  .primary-btn { display: inline-flex; align-items: center; gap: 5px; background: var(--blue-6); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  .primary-btn { display: inline-flex; align-items: center; gap: 5px; background: var(--blue-6); color: #fff; border: none; border-radius: 8px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 1px 2px rgba(0,122,255,0.35); }
   .primary-btn:hover:not(:disabled) { background: var(--blue-5); }
   .primary-btn:disabled { opacity: 0.6; cursor: default; }
   .modal-overlay {
