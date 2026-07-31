@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, cmdkOpen, sidebar, nativeShell, panelContent, artifacts, activeSessionId } from '../../lib/stores'
+  import { view, cmdkOpen, sidebar, nativeShell, panelContent, activeSessionId } from '../../lib/stores'
   import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
   import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
@@ -15,11 +15,12 @@
   }
 
   // Toggle the Artifacts panel sidebar.
-  // In a chat session with artifacts → session mode; otherwise → lightapps mode.
+  // With a session active → its artifacts (the empty state included); light
+  // apps only when no session is selected.
   function togglePanel() {
     const cur = $panelContent
     if (cur) { panelContent.set(null); return }
-    if ($view === 'chat' && $activeSessionId && $artifacts.length > 0) {
+    if ($view === 'chat' && $activeSessionId) {
       panelContent.set('session')
     } else {
       panelContent.set('lightapps')
