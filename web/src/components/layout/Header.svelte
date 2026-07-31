@@ -86,14 +86,17 @@
 </script>
 
 <header class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
-  <!-- Left: native traffic lights own the inset on desktop mac; everywhere
-       else (web, desktop win/linux) a small brand marks the window. -->
-  {#if !($nativeShell && isMac)}
-    <div class="brand">
-      <OctoLogo class="logo" size={18} />
-      <span class="name">Octo</span>
-    </div>
-  {/if}
+  <!-- Left: sidebar toggle + brand (on desktop mac they sit after the native
+       traffic lights' inset). -->
+  <button class="icon-btn" title={$t('header.toggle_left')} aria-pressed={$sidebar !== 'hidden'} onclick={toggleSidebar}>
+    <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
+  </button>
+  <div class="brand">
+    <OctoLogo class="logo" size={22} />
+    <span class="name">Octo</span>
+    <span class="brand-divider"></span>
+    <span class="sub">{$t('nav.workbench')}</span>
+  </div>
 
   <span class="spacer"></span>
 
@@ -113,15 +116,6 @@
   </button>
 
   <div class="ptoggle-group">
-    <button
-      class="ptoggle"
-      class:on={$sidebar !== 'hidden'}
-      title={$t('header.toggle_left')}
-      aria-pressed={$sidebar !== 'hidden'}
-      onclick={toggleSidebar}
-    >
-      <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
-    </button>
     <button
       class="ptoggle"
       class:on={$panelContent !== null}
@@ -181,9 +175,11 @@ header .brand,
 header .window-controls { --wails-draggable: no-drag; }
 
 .spacer { flex: 1; }
-.brand { display: flex; align-items: center; gap: 7px; }
+.brand { display: flex; align-items: center; gap: 9px; padding-left: 2px; }
 .brand :global(.logo) { color: var(--blue-6); flex: 0 0 auto; }
-.name { font-size: 12px; color: var(--text-secondary); }
+.name { font-size: 14px; font-weight: 600; color: var(--text-heading); }
+.brand-divider { width: 1px; height: 15px; background: var(--border); }
+.sub { font-size: 12px; color: var(--text-tertiary); white-space: nowrap; }
 
 .search-btn {
   display: flex; align-items: center; gap: 7px;
