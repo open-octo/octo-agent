@@ -144,6 +144,12 @@ func InstallDir(srcDir, destRoot string, force bool) (name, desc string, err err
 		if err != nil {
 			return err
 		}
+		// WalkDir only yields paths under srcDir, but guard anyway so the
+		// write target provably stays inside the staging dir (same barrier
+		// as the zip installer).
+		if !filepath.IsLocal(rel) {
+			return fmt.Errorf("entry %q escapes the skill directory", p)
+		}
 		return copyFile(p, filepath.Join(tmp, rel))
 	})
 	if err != nil {
