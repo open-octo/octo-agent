@@ -418,7 +418,7 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
   border: 1px solid var(--border); border-radius: 6px; font-size: 13px;
   color: var(--text); font-family: inherit; background: var(--bg-container); cursor: pointer; outline: none;
 }
-.sel:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
+.sel:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px var(--focus-ring); }
 .version-row { display: flex; align-items: center; justify-content: flex-end; }
 .version-badge { font-size: 12px; color: var(--text-tertiary); }
 

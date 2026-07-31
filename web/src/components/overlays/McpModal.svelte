@@ -143,7 +143,7 @@ label { font-size: 12px; color: var(--text-secondary); }
   color: var(--text); outline: none; background: var(--bg-container); box-sizing: border-box;
   resize: vertical; line-height: 1.6;
 }
-.json-area:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
+.json-area:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px var(--focus-ring); }
 .checkbox-row {
   display: flex; align-items: center; gap: 8px;
   font-size: 13px; color: var(--text-secondary); cursor: pointer;

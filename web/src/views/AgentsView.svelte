@@ -218,7 +218,7 @@ p  { margin: 0; font-size: 14px; color: var(--text-secondary); }
 
 /* ── loading spinner ─────────────────────────────────────────────────────── */
 .spinner {
-  width: 18px; height: 18px; border: 2px solid rgba(22,119,255,0.2);
+  width: 18px; height: 18px; border: 2px solid var(--blue-2);
   border-top-color: var(--blue-6); border-radius: 50%;
   animation: spin 0.6s linear infinite; flex: 0 0 18px;
 }

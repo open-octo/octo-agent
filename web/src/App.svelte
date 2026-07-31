@@ -25,6 +25,7 @@
   import ProfileView from './views/ProfileView.svelte'
   import FileRecallView from './views/FileRecallView.svelte'
   import LightAppsView from './views/LightAppsView.svelte'
+  import ComponentsView from './views/ComponentsView.svelte'
   import CommandPalette from './components/overlays/CommandPalette.svelte'
   import McpModal from './components/overlays/McpModal.svelte'
   import ConfirmModal from './components/overlays/ConfirmModal.svelte'
@@ -43,7 +44,7 @@
   // Reflect the current view (and active chat session) in the hash so a refresh
   // lands back where the user was instead of the default chat view.
   let routeReady = false
-  const VALID_VIEWS = ['chat', 'agents', 'skills', 'workflows', 'browser', 'tasks', 'mcp', 'channels', 'settings', 'profile', 'files', 'lightapps']
+  const VALID_VIEWS = ['chat', 'agents', 'skills', 'workflows', 'browser', 'tasks', 'mcp', 'channels', 'settings', 'profile', 'files', 'lightapps', 'components']
 
   function applyHash() {
     const h = location.hash.replace(/^#\/?/, '')
@@ -368,6 +369,8 @@
         <FileRecallView />
       {:else if $view === 'lightapps'}
         <LightAppsView />
+      {:else if $view === 'components'}
+        <ComponentsView />
       {/if}
     </main>
     {#if $panelContent}
@@ -418,7 +421,7 @@
   max-width: 420px; margin: 0 auto;
 }
 .splash .spinner {
-  width: 28px; height: 28px; border: 3px solid rgba(22,119,255,0.2);
+  width: 28px; height: 28px; border: 3px solid var(--blue-2);
   border-top-color: var(--blue-6); border-radius: 50%;
   animation: octo-spin 0.7s linear infinite;
 }

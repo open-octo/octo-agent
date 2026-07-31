@@ -325,7 +325,7 @@
   flex: 1; min-width: 0; font-family: inherit; font-size: 14px; color: var(--text);
   border: 1px solid var(--border); border-radius: 8px; padding: 8px 11px; outline: none; background: var(--bg-container);
 }
-.field-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(22,119,255,0.1); }
+.field-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px var(--focus-ring); }
 .field-hint { font-size: 12px; color: var(--text-tertiary); }
 .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .title-block { display: flex; flex-direction: column; gap: 4px; }
@@ -368,7 +368,7 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
   padding: 48px 24px; font-size: 14px; color: var(--text-tertiary);
 }
 .spinner {
-  width: 18px; height: 18px; border: 2px solid rgba(22,119,255,0.2);
+  width: 18px; height: 18px; border: 2px solid var(--blue-2);
   border-top-color: var(--blue-6); border-radius: 50%;
   animation: spin 0.6s linear infinite; flex: 0 0 18px;
 }

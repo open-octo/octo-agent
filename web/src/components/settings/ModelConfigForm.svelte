@@ -327,7 +327,7 @@
   padding: 8px 11px; outline: none; background: var(--bg-container);
   transition: border-color 0.15s;
 }
-.field-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(22,119,255,0.1); }
+.field-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px var(--focus-ring); }
 .field-input[readonly], .field-input:disabled { background: var(--bg-table-header); cursor: not-allowed; }
 .field-link { font-size: 12px; color: var(--blue-6); text-decoration: none; align-self: flex-start; }
 .field-link:hover { text-decoration: underline; }

@@ -1161,7 +1161,7 @@
   padding: 7px 10px; border: none; background: transparent; border-radius: 6px;
   cursor: pointer; font-family: inherit; text-align: left;
 }
-.menu-item:hover { background: rgba(22,119,255,0.08); }
+.menu-item:hover { background: var(--active-blue-bg); }
 .menu-item.active { background: var(--active-blue-bg); }
 .menu-divider { height: 1px; background: var(--border-secondary); margin: 4px 0; }
 .menu-item.toggle-item { flex-direction: row; justify-content: space-between; align-items: center; }
@@ -1218,12 +1218,12 @@
 }
 .input-card:focus-within {
   border-color: var(--blue-6);
-  box-shadow: 0 0 0 2px rgba(5,145,255,0.1);
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 .input-card.drag-over {
   border-color: var(--blue-6);
-  background: rgba(5,145,255,0.06);
-  box-shadow: 0 0 0 2px rgba(5,145,255,0.15);
+  background: var(--row-hover);
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 textarea {
   border: none; outline: none; resize: none; font-size: 14px; line-height: 1.6;
@@ -1297,7 +1297,7 @@ textarea {
 }
 .skill-menu-item:hover,
 .skill-menu-item.active {
-  background: rgba(22,119,255,0.08);
+  background: var(--active-blue-bg);
 }
 .skill-name {
   font-size: 13px;

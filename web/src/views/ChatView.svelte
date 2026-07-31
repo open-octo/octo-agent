@@ -2324,7 +2324,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   background: var(--blue-6); border-color: var(--blue-6); opacity: 0.9;
   width: max(8px, calc(12px * var(--rail-scale, 1)));
   height: max(8px, calc(12px * var(--rail-scale, 1)));
-  box-shadow: 0 0 0 max(2px, calc(4px * var(--rail-scale, 1))) rgba(22,119,255,0.16);
+  box-shadow: 0 0 0 max(2px, calc(4px * var(--rail-scale, 1))) var(--focus-ring);
 }
 /* Hover/focus preview card, to the left of the rail, with a caret pointing back
    at the dot. --terminal-bg is the DS's intentionally-dark surface in both

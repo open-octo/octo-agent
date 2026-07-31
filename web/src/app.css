@@ -16,62 +16,63 @@
    ────────────────────────────────────────────────────────────────────────── */
 :root {
   /* Primary */
-  --blue-1: #E6F4FF;
-  --blue-2: #BAE0FF;
-  --blue-5: #4096FF;
-  --blue-6: #1677FF;
-  --blue-7: #0958D9;
+  --blue-1: #E5F2FF;
+  --blue-2: #B3D7FF;
+  --blue-5: #0A6FF0;
+  --blue-6: #007AFF;
+  --blue-7: #0A63D6;
 
   /* Text */
-  --text: rgba(0,0,0,0.88);
-  --text-secondary: rgba(0,0,0,0.65);
-  --text-tertiary: rgba(0,0,0,0.45);
-  --text-quaternary: rgba(0,0,0,0.25);
-  --text-heading: #1F1F1F;
+  --text: #1D1D1F;
+  --text-secondary: #86868B;
+  --text-tertiary: #A9A9AF;
+  --text-quaternary: #C7C7CC;
+  --text-heading: #1D1D1F;
 
   /* Backgrounds */
-  --bg-layout: #F5F5F5;
+  --bg-layout: #F5F5F7;
   --bg-container: #FFFFFF;
-  --bg-sidebar: #FBFBFB;
-  --bg-table-header: #FAFAFA;
+  --bg-sidebar: #F5F5F7;
+  --bg-table-header: #FAFAFC;
 
   /* Borders */
-  --border: #D9D9D9;
-  --border-secondary: #EEEFF1;
-  --border-table: #F0F0F0;
+  --border: rgba(0,0,0,0.08);
+  --border-secondary: rgba(0,0,0,0.05);
+  --border-table: rgba(0,0,0,0.05);
 
   /* Semantic */
-  --success: #52C41A;
-  --success-bg: #F6FFED;
-  --success-border: #B7EB8F;
-  --success-text: #52C41A;
-  --warning: #FAAD14;
-  --warning-bg: #FFFBE6;
-  --warning-border: #FFE58F;
-  --warning-text: #FAAD14;
-  --error: #FF4D4F;
-  --error-bg: #FFF1F0;
-  --error-border: #FFCCC7;
-  --error-text: #FF4D4F;
-  --error-dark: #CF1322;
-  --info-bg: #E6F4FF;
-  --info-border: #91CAFF;
-  --info-text: #1677FF;
+  --success: #34C759;
+  --success-bg: rgba(52,199,89,0.14);
+  --success-border: rgba(52,199,89,0.35);
+  --success-text: #248A3D;
+  --warning: #FF9500;
+  --warning-bg: rgba(255,149,0,0.16);
+  --warning-border: rgba(255,149,0,0.40);
+  --warning-text: #B25E00;
+  --error: #FF3B30;
+  --error-bg: rgba(255,59,48,0.12);
+  --error-border: rgba(255,59,48,0.35);
+  --error-text: #C9302C;
+  --error-dark: #C9302C;
+  --info-bg: rgba(0,122,255,0.10);
+  --info-border: rgba(0,122,255,0.35);
+  --info-text: #007AFF;
 
   /* Interaction */
-  --hover-neutral: rgba(0,0,0,0.04);
-  --row-hover: rgba(22,119,255,0.06);
-  --active-blue-bg: rgba(22,119,255,0.06);
+  --hover-neutral: rgba(0,0,0,0.05);
+  --row-hover: rgba(0,122,255,0.06);
+  --active-blue-bg: rgba(0,122,255,0.10);
+  --focus-ring: rgba(0,122,255,0.15);   /* input focus box-shadow ring */
 
   /* Card shadow */
-  --card-shadow: 0 8px 24px rgba(15,23,42,0.03);
+  --card-shadow: 0 1px 2px rgba(0,0,0,0.04);
 
   /* Radius */
   --radius-pill: 9999px;
-  --radius-card: 16px;
-  --radius-modal: 12px;
-  --radius-sm: 6px;
-  --radius-xs: 4px;
+  --radius-card: 14px;
+  --radius-modal: 14px;
+  --radius-sm: 8px;
+  --radius-xs: 6px;
 
   /* On-accent foreground (white text on blue/colored fills — same in both themes) */
   --on-accent: #FFFFFF;
@@ -81,78 +82,89 @@
   --terminal-text: #E6E6E6;
 
   /* Misc surfaces */
-  --surface-info: #F0F7FF;     /* plan card / suggestion / subtle info bg */
-  --control-track: #F0F2F5;    /* segmented-control track */
-  --search-bg: #E9EEF6;        /* header search pill */
-  --search-hover: #DBE2EE;
+  --surface-info: #F4F9FF;     /* plan card / suggestion / subtle info bg */
+  --control-track: rgba(0,0,0,0.06);   /* segmented-control track */
+  --search-bg: rgba(0,0,0,0.05);       /* header search pill */
+  --search-hover: rgba(0,0,0,0.08);
+
+  /* Frosted surfaces (sidebar / slide-in panels) — pair with backdrop-filter:
+     blur(var(--frost-blur)). Solid fallbacks are --bg-sidebar / --bg-container. */
+  --sidebar-frost: rgba(245,245,247,0.6);
+  --panel-frost: rgba(255,255,255,0.7);
+  --frost-blur: 20px;
 
   /* Scrollbar + placeholder */
-  --scrollbar-thumb: rgba(0,0,0,0.12);
-  --placeholder: rgba(0,0,0,0.25);
+  --scrollbar-thumb: rgba(0,0,0,0.18);
+  --placeholder: #A9A9AF;
 
   /* Mono font */
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Helvetica Neue', system-ui, 'Segoe UI', Roboto, Arial, sans-serif;
 
   color-scheme: light;
 }
 
 /* ── Default pack ("klook") — dark mode ────────────────────────────────────
-   Ant-Design dark tokens, matching the "Octo Chat - Dark" design. */
+   macOS dark-mode mapping of the desktop-redesign palette
+   (dev-docs/design/desktop-redesign.md). */
 :root[data-theme="dark"] {
-  --blue-1: #111A2C;
-  --blue-2: #15325B;
-  --blue-5: #3C89E8;
-  --blue-6: #1668DC;
-  --blue-7: #1554AD;
+  --blue-1: rgba(10,132,255,0.18);
+  --blue-2: rgba(10,132,255,0.35);
+  --blue-5: #3395FF;
+  --blue-6: #0A84FF;
+  --blue-7: #0870D6;
 
-  --text: rgba(255,255,255,0.88);
-  --text-secondary: rgba(255,255,255,0.65);
-  --text-tertiary: rgba(255,255,255,0.45);
-  --text-quaternary: rgba(255,255,255,0.30);
-  --text-heading: #E6E6E6;
+  --text: #F5F5F7;
+  --text-secondary: #98989D;
+  --text-tertiary: #636366;
+  --text-quaternary: #48484A;
+  --text-heading: #F5F5F7;
 
-  --bg-layout: #141414;
-  --bg-container: #1F1F1F;
-  --bg-sidebar: #1A1A1A;
-  --bg-table-header: #262626;
+  --bg-layout: #1E1E20;
+  --bg-container: #2C2C2E;
+  --bg-sidebar: #232325;
+  --bg-table-header: #323234;
 
-  --border: #424242;
-  --border-secondary: #303030;
-  --border-table: #303030;
+  --border: rgba(255,255,255,0.10);
+  --border-secondary: rgba(255,255,255,0.06);
+  --border-table: rgba(255,255,255,0.06);
 
-  --success: #49AA19;
-  --success-bg: #162312;
-  --success-border: #274916;
-  --success-text: #6ABE39;
-  --warning: #D89614;
-  --warning-bg: #2B2111;
-  --warning-border: #594214;
-  --warning-text: #E8B339;
-  --error: #DC4446;
-  --error-bg: #2A1215;
-  --error-border: #58181C;
-  --error-text: #E84749;
-  --error-dark: #E84749;
-  --info-bg: #111A2C;
-  --info-border: #15325B;
-  --info-text: #3C89E8;
+  --success: #30D158;
+  --success-bg: rgba(48,209,88,0.16);
+  --success-border: rgba(48,209,88,0.40);
+  --success-text: #30D158;
+  --warning: #FF9F0A;
+  --warning-bg: rgba(255,159,10,0.16);
+  --warning-border: rgba(255,159,10,0.40);
+  --warning-text: #FF9F0A;
+  --error: #FF453A;
+  --error-bg: rgba(255,69,58,0.14);
+  --error-border: rgba(255,69,58,0.40);
+  --error-text: #FF453A;
+  --error-dark: #FF6961;
+  --info-bg: rgba(10,132,255,0.16);
+  --info-border: rgba(10,132,255,0.40);
+  --info-text: #409CFF;
 
-  --hover-neutral: rgba(255,255,255,0.08);
-  --row-hover: rgba(22,119,255,0.15);
-  --active-blue-bg: rgba(22,119,255,0.15);
+  --hover-neutral: rgba(255,255,255,0.07);
+  --row-hover: rgba(10,132,255,0.12);
+  --active-blue-bg: rgba(10,132,255,0.18);
+  --focus-ring: rgba(10,132,255,0.25);
 
-  --card-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  --card-shadow: 0 1px 2px rgba(0,0,0,0.30);
 
-  --scrollbar-thumb: rgba(255,255,255,0.16);
-  --placeholder: rgba(255,255,255,0.30);
+  --scrollbar-thumb: rgba(255,255,255,0.25);
+  --placeholder: #636366;
 
-  --terminal-bg: #0D0D0D;
+  --terminal-bg: #161618;
   --terminal-text: #E6E6E6;
-  --surface-info: #111A2C;
-  --control-track: #262626;
-  --search-bg: #262626;
-  --search-hover: #303030;
+  --surface-info: rgba(10,132,255,0.10);
+  --control-track: rgba(255,255,255,0.08);
+  --search-bg: rgba(255,255,255,0.07);
+  --search-hover: rgba(255,255,255,0.12);
+
+  --sidebar-frost: rgba(34,34,36,0.6);
+  --panel-frost: rgba(36,36,38,0.72);
 
   color-scheme: dark;
 }

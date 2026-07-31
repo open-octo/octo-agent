@@ -156,7 +156,7 @@
   font-family: inherit; outline: none; background: var(--bg-container);
   resize: vertical;
 }
-.custom-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
+.custom-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px var(--focus-ring); }
 
 .modal-footer {
   padding: 12px 18px;

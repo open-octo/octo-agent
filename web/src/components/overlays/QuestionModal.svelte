@@ -259,7 +259,7 @@
     font-size: 13px; color: var(--text);
     font-family: inherit; outline: none; background: var(--bg-container);
   }
-  .banner-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
+  .banner-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px var(--focus-ring); }
 
   /* ─── Full modal (expanded) ──────────────────────────────────── */
   .backdrop {
@@ -304,7 +304,7 @@
     font-size: 13px; color: var(--text);
     font-family: inherit; outline: none; background: var(--bg-container);
   }
-  .custom-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px rgba(5,145,255,0.1); }
+  .custom-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px var(--focus-ring); }
 
   .modal-footer { padding: 14px 24px; border-top: 1px solid var(--border-table); display: flex; align-items: center; gap: 8px; }
   .spacer { flex: 1; }

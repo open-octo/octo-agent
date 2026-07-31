@@ -54,6 +54,7 @@
     { id: 'memory', icon: 'ant-design:user-outlined', label: () => $t('nav.memory'), shortcut: '', run: () => goTo('profile') },
     { id: 'files', icon: 'ant-design:folder-open-outlined', label: () => $t('nav.file_recall'), shortcut: '', run: () => goTo('files') },
     { id: 'lightapps', icon: 'ant-design:appstore-outlined', label: () => $t('nav.light_apps'), shortcut: '', run: () => goTo('lightapps') },
+    { id: 'components', icon: 'ant-design:bg-colors-outlined', label: () => $t('nav.components'), shortcut: '', run: () => goTo('components') },
     { id: 'artifacts', icon: 'ant-design:file-text-outlined', label: () => $t('artifacts.toggle'), shortcut: '', run: () => { panelContent.update(v => v ? null : 'session') } },
     { id: 'settings', icon: 'ant-design:setting-outlined', label: () => $t('nav.settings'), shortcut: '', run: () => goTo('settings') },
   ]
