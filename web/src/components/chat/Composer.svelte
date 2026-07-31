@@ -4,14 +4,13 @@
   import {
     running, activeSessionId, chatStreaming, sessions,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
-    globalPermissionMode, nativeShell, localAccess,
+    globalPermissionMode, nativeShell, localAccess, activeAgent, view,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
   import { t } from '../../lib/i18n'
   import { submitIntent } from '../../lib/composerKeys'
   import { composeSlashCommand } from '../../lib/slashCompose'
-  import StatusTag from '../ui/StatusTag.svelte'
   import FolderPickerModal from '../overlays/FolderPickerModal.svelte'
   import type { McpServerDetail, McpTool } from '../../lib/types'
   import { getMcpServer } from '../../lib/api'
@@ -608,6 +607,37 @@
   let modelMenu = $state(false)
   let reasonMenu = $state(false)
   let dirMenu = $state(false)
+  let agentMenu = $state(false)
+  let permMenu = $state(false)
+
+  // The model menu groups rows under their endpoint, like the design mock.
+  let modelGroups = $derived.by(() => {
+    const out: { endpoint: string; items: { id: string; model: string }[] }[] = []
+    for (const m of models) {
+      let g = out.find(x => x.endpoint === m.endpoint)
+      if (!g) { g = { endpoint: m.endpoint, items: [] }; out.push(g) }
+      g.items.push({ id: m.id, model: m.model })
+    }
+    return out
+  })
+
+  // ── agent assignment ───────────────────────────────────────────────────────
+  // agent_profile is fixed at session creation (no server-side update path), so
+  // the chip *assigns the agent for new sessions* (the activeAgent store that
+  // ensureActiveSession passes to createSession). On an existing session it
+  // shows that session's own profile.
+  let agents = $state<api.Agent[]>([])
+  let sessionAgent = $derived((currentSession as any)?.agent_profile ?? '')
+  let agentLabel = $derived.by(() => {
+    const id = sessionAgent && sessionAgent !== 'default' ? sessionAgent : ($activeAgent !== 'default' ? $activeAgent : '')
+    if (!id) return 'Octo'
+    return agents.find(a => a.id === id)?.name ?? id
+  })
+  function pickAgent(id: string) {
+    activeAgent.set(id)
+    agentMenu = false
+    queueMicrotask(() => textareaEl?.focus())
+  }
   let dirDraft = $state('')
   let dirSaving = $state(false)
   let pickerOpen = $state(false)
@@ -627,6 +657,7 @@
       models = flat
     } catch { /* leave empty */ }
     try { skills = await api.listSkills() } catch { /* leave empty */ }
+    try { agents = await api.listAgents() } catch { /* leave empty */ }
     try { workflows = await api.listWorkflows() } catch { /* leave empty */ }
     try {
       const data = await api.listMcpServers()
@@ -678,14 +709,16 @@
     }
   }
 
-  // Cycle the permission mode through all three engine modes: interactive
-  // (ask) → auto (auto-approve) → strict (auto-deny) → back to interactive.
-  // Strict used to be unreachable from this chip (#1114).
-  const PERM_MODE_CYCLE = ['interactive', 'auto', 'strict']
-  async function cyclePermMode() {
-    if (!sid) return
-    const idx = PERM_MODE_CYCLE.indexOf(permMode)
-    const next = PERM_MODE_CYCLE[(idx + 1) % PERM_MODE_CYCLE.length]
+  // Explicit dropdown for the three engine modes (the old chip cycled on
+  // click, which hid what the next state would be — #1114's strict mode is a
+  // plain menu row now).
+  const PERM_MODES = ['interactive', 'auto', 'strict']
+  const PERM_LABEL_KEY: Record<string, string> = {
+    interactive: 'chat.ask_mode', auto: 'chat.auto_mode', strict: 'chat.strict_mode',
+  }
+  async function pickPermMode(next: string) {
+    permMenu = false
+    if (!sid || next === permMode) return
     try {
       await api.updateSessionPermissionMode(sid, next)
       chatPermMode.update(m => ({ ...m, [sid]: next }))
@@ -694,7 +727,7 @@
     }
   }
 
-  function closeMenus() { modelMenu = false; reasonMenu = false; dirMenu = false }
+  function closeMenus() { modelMenu = false; reasonMenu = false; dirMenu = false; agentMenu = false; permMenu = false }
 
   // Open the working-dir editor seeded with the current dir.
   function openDirMenu() {
@@ -918,106 +951,6 @@
 <svelte:window onclick={onWindowClick} />
 
 <div class="composer">
-  <div class="chips">
-    <div class="picker">
-      <button class="chip" onclick={(e) => { e.stopPropagation(); reasonMenu = false; modelMenu = !modelMenu }}>
-        <iconify-icon icon="ant-design:robot-outlined" width="12"></iconify-icon>
-        <span>{modelName}</span>
-        <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
-      </button>
-      {#if modelMenu}
-        <div class="menu" onclick={(e) => e.stopPropagation()}>
-          {#if models.length === 0}
-            <div class="menu-empty">{$t('chat.no_models')}</div>
-          {:else}
-            {#each models as m (m.id)}
-              <button class="menu-item" onclick={() => pickModel(m)}>
-                <span class="mi-name mono">{m.id}</span>
-                <span class="mi-model mono">{m.endpoint}</span>
-              </button>
-            {/each}
-          {/if}
-        </div>
-      {/if}
-    </div>
-    <div class="picker">
-      <button class="chip reasoning-chip" onclick={(e) => { e.stopPropagation(); modelMenu = false; reasonMenu = !reasonMenu }}>
-        <span>{$t('chat.reasoning')} {cap(reasoning)}</span>
-        <iconify-icon icon={showReasoningIcon} width="12" class="reasoning-eye"></iconify-icon>
-        <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
-      </button>
-      {#if reasonMenu}
-        <div class="menu" onclick={(e) => e.stopPropagation()}>
-          {#each reasoningLevels as lvl}
-            <button class="menu-item" class:active={lvl === reasoning} onclick={() => pickReasoning(lvl)}>
-              <span class="mi-name">{cap(lvl)}</span>
-            </button>
-          {/each}
-          <div class="menu-divider"></div>
-          <button
-            class="menu-item toggle-item"
-            disabled={reasoning === 'off'}
-            onclick={() => toggleShowReasoning()}
-          >
-            <span class="mi-name">{$t('chat.show_reasoning')}</span>
-            <span class="toggle" class:on={showReasoning && reasoning !== 'off'}>
-              <span class="toggle-knob"></span>
-            </span>
-          </button>
-        </div>
-      {/if}
-    </div>
-    {#if workingDir}
-      <div class="picker">
-        <button class="chip" title={workingDir} onclick={(e) => { e.stopPropagation(); openDirMenu() }}>
-          <iconify-icon icon="ant-design:folder-outlined" width="12"></iconify-icon>
-          <span>{$t('chat.dir_label')}</span>
-          <span class="mono dir-path">{shortDir(workingDir)}</span>
-          <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
-        </button>
-        {#if dirMenu}
-          <div class="menu dir-menu" onclick={(e) => e.stopPropagation()}>
-            <input
-              class="dir-input mono"
-              bind:value={dirDraft}
-              placeholder="~/code/my-project"
-              spellcheck="false"
-              onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveWorkingDir() } else if (e.key === 'Escape') { dirMenu = false } }}
-            />
-            <button class="dir-save" disabled={dirSaving} onclick={() => saveWorkingDir()}>
-              {dirSaving ? $t('chat.dir_saving') : $t('chat.dir_save')}
-            </button>
-            <button class="dir-browse" onclick={() => openPicker()}>
-              <iconify-icon icon="ant-design:folder-open-outlined" width="12"></iconify-icon>
-              {$t('chat.dir_browse')}
-            </button>
-          </div>
-        {/if}
-      </div>
-    {/if}
-    {#if goalChip}
-      <span class="chip static goal-chip" title={goal?.objective ?? ''}>
-        <span>{$t('chat.goal')}</span>
-        <span class="mono">{goalChip}</span>
-      </span>
-    {/if}
-    <span class="chip static context-chip">
-      <span>{$t('chat.context')}</span>
-      <span class="ctx-bar"><span class="ctx-fill" style="width:{Math.min(ctxUsage, 100)}%"></span></span>
-      <span class="mono">{ctxUsage}%</span>
-    </span>
-    <span style="margin-left:auto;"></span>
-    <button class="perm-toggle" onclick={(e) => { e.stopPropagation(); cyclePermMode() }} title={$t('chat.perm_toggle_hint')}>
-      {#if permMode === 'auto'}
-        <StatusTag status="success">{$t('chat.auto_mode')}</StatusTag>
-      {:else if permMode === 'strict'}
-        <StatusTag status="error">{$t('chat.strict_mode')}</StatusTag>
-      {:else}
-        <StatusTag status="warning">{$t('chat.ask_mode')}</StatusTag>
-      {/if}
-    </button>
-  </div>
-
   <div class="input-wrap">
     <div
       class="input-card"
@@ -1041,15 +974,59 @@
           {/each}
         </div>
       {/if}
-      <textarea
-        bind:this={textareaEl}
-        rows={1}
-        placeholder={isStreaming || $running ? $t('chat.placeholder_running') : $t('chat.placeholder')}
-        bind:value={text}
-        onkeydown={onKeydown}
-        oninput={onInput}
-        onpaste={onPaste}
-      ></textarea>
+      <div class="input-row">
+        <button class="tool-btn" title={$t('chat.attach_file')} onclick={openAttach}>
+          <iconify-icon icon="ant-design:paper-clip-outlined" width="15"></iconify-icon>
+        </button>
+        <button class="tool-btn skill-btn" title={$t('chat.insert_slash')} onclick={insertSkill}>/</button>
+        <div class="picker">
+          <button class="agent-chip" title={$t('composer.assign_agent')} onclick={(e) => { e.stopPropagation(); const open = agentMenu; closeMenus(); agentMenu = !open }}>
+            <span class="agent-at">@</span>
+            <span class="agent-name">{agentLabel}</span>
+          </button>
+          {#if agentMenu}
+            <div class="menu agent-menu" onclick={(e) => e.stopPropagation()}>
+              <div class="menu-label">{$t('composer.assign_agent')}</div>
+              <button class="menu-item" class:active={$activeAgent === 'default' && (!sessionAgent || sessionAgent === 'default')} onclick={() => pickAgent('default')}>
+                <span class="mi-name">Octo</span>
+              </button>
+              {#each agents as a (a.id)}
+                <button class="menu-item" class:active={$activeAgent === a.id} onclick={() => pickAgent(a.id)}>
+                  <span class="mi-name">{a.name}</span>
+                </button>
+              {/each}
+              <div class="menu-divider"></div>
+              <button class="menu-item manage" onclick={() => { agentMenu = false; view.set('agents') }}>
+                <iconify-icon icon="ant-design:plus-outlined" width="12"></iconify-icon>
+                <span class="mi-name">{$t('agents.create')}</span>
+              </button>
+            </div>
+          {/if}
+        </div>
+        <textarea
+          bind:this={textareaEl}
+          rows={1}
+          placeholder={isStreaming || $running ? $t('chat.placeholder_running') : $t('chat.placeholder')}
+          bind:value={text}
+          onkeydown={onKeydown}
+          oninput={onInput}
+          onpaste={onPaste}
+        ></textarea>
+        {#if isStreaming || $running}
+          <!-- Mid-turn: Stop interrupts the running turn; Send stays available
+               so a follow-up message steers the turn in flight (rides the
+               running Agent's Inbox server-side), and Cmd/Ctrl+Enter queues it
+               as a separate turn instead (the server's steer queue). -->
+          <button class="stop-btn" title={$t('chat.stop')} onclick={stop}>
+            <span class="stop-sq"></span>
+          </button>
+        {/if}
+        <!-- Arrow-wrapped: a bare `onclick={send}` would hand the MouseEvent to
+             the `queued` parameter and queue every click. -->
+        <button class="send-btn" title={isStreaming || $running ? $t('chat.send_or_queue_hint') : $t('chat.send')} aria-label={$t('chat.send')} onclick={() => send()}>
+          <iconify-icon icon="lucide:send" width="16"></iconify-icon>
+        </button>
+      </div>
       {#if slashMenu}
         <div class="skill-menu">
           {#each filteredItems() as item, i (item.kind + ':' + (item.kind === 'builtin' ? item.name : item.kind === 'skill' ? item.skill.name : item.kind === 'workflow' ? item.workflow.name : item.kind === 'mcp-server' ? item.name : item.server + '/' + item.tool.name))}
@@ -1095,25 +1072,117 @@
         style="display:none"
         onchange={onFilesPicked}
       />
-      <div class="input-footer">
-        <button class="tool-btn" title={$t('chat.attach_file')} onclick={openAttach}>
-          <iconify-icon icon="ant-design:paper-clip-outlined" width="15"></iconify-icon>
-        </button>
-        <button class="tool-btn skill-btn" title={$t('chat.insert_slash')} onclick={insertSkill}>/</button>
-        <span style="margin-left:auto;"></span>
-        {#if isStreaming || $running}
-          <!-- Mid-turn: Stop interrupts the running turn; Send stays available
-               so a follow-up message steers the turn in flight (rides the
-               running Agent's Inbox server-side), and Cmd/Ctrl+Enter queues it
-               as a separate turn instead (the server's steer queue). -->
-          <button class="stop-btn" onclick={stop}>
-            <span class="stop-sq"></span>
-            {$t('chat.stop')}
+      <div class="meta-row">
+        <div class="picker">
+          <button class="meta-chip" onclick={(e) => { e.stopPropagation(); const open = modelMenu; closeMenus(); modelMenu = !open }}>
+            <iconify-icon icon="ant-design:robot-outlined" width="13"></iconify-icon>
+            <span class="mono">{modelName}</span>
+            <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
           </button>
+          {#if modelMenu}
+            <div class="menu" onclick={(e) => e.stopPropagation()}>
+              {#if models.length === 0}
+                <div class="menu-empty">{$t('chat.no_models')}</div>
+              {:else}
+                {#each modelGroups as g (g.endpoint)}
+                  <div class="menu-label mono">{g.endpoint}</div>
+                  {#each g.items as m (m.id)}
+                    <button class="menu-item" class:active={m.model === modelName} onclick={() => pickModel({ id: m.id, model: m.model, endpoint: g.endpoint })}>
+                      <span class="mi-name mono">{m.model}</span>
+                    </button>
+                  {/each}
+                {/each}
+                <div class="menu-divider"></div>
+                <button class="menu-item manage" onclick={() => { modelMenu = false; view.set('settings') }}>
+                  <span class="mi-name">{$t('composer.manage_models')}</span>
+                </button>
+              {/if}
+            </div>
+          {/if}
+        </div>
+        <div class="picker">
+          <button class="meta-chip" onclick={(e) => { e.stopPropagation(); const open = reasonMenu; closeMenus(); reasonMenu = !open }}>
+            <span>{cap(reasoning)}</span>
+            <iconify-icon icon={showReasoningIcon} width="12" class="reasoning-eye"></iconify-icon>
+            <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
+          </button>
+          {#if reasonMenu}
+            <div class="menu" onclick={(e) => e.stopPropagation()}>
+              {#each reasoningLevels as lvl}
+                <button class="menu-item" class:active={lvl === reasoning} onclick={() => pickReasoning(lvl)}>
+                  <span class="mi-name">{cap(lvl)}</span>
+                </button>
+              {/each}
+              <div class="menu-divider"></div>
+              <button
+                class="menu-item toggle-item"
+                disabled={reasoning === 'off'}
+                onclick={() => toggleShowReasoning()}
+              >
+                <span class="mi-name">{$t('chat.show_reasoning')}</span>
+                <span class="toggle" class:on={showReasoning && reasoning !== 'off'}>
+                  <span class="toggle-knob"></span>
+                </span>
+              </button>
+            </div>
+          {/if}
+        </div>
+        {#if workingDir}
+          <div class="picker">
+            <button class="meta-chip" title={workingDir} onclick={(e) => { e.stopPropagation(); openDirMenu() }}>
+              <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
+              <span class="mono dir-path">{shortDir(workingDir)}</span>
+              <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
+            </button>
+            {#if dirMenu}
+              <div class="menu dir-menu" onclick={(e) => e.stopPropagation()}>
+                <input
+                  class="dir-input mono"
+                  bind:value={dirDraft}
+                  placeholder="~/code/my-project"
+                  spellcheck="false"
+                  onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveWorkingDir() } else if (e.key === 'Escape') { dirMenu = false } }}
+                />
+                <button class="dir-save" disabled={dirSaving} onclick={() => saveWorkingDir()}>
+                  {dirSaving ? $t('chat.dir_saving') : $t('chat.dir_save')}
+                </button>
+                <button class="dir-browse" onclick={() => openPicker()}>
+                  <iconify-icon icon="ant-design:folder-open-outlined" width="12"></iconify-icon>
+                  {$t('chat.dir_browse')}
+                </button>
+              </div>
+            {/if}
+          </div>
         {/if}
-        <!-- Arrow-wrapped: a bare `onclick={send}` would hand the MouseEvent to
-             the `queued` parameter and queue every click. -->
-        <button class="send-btn" title={isStreaming || $running ? $t('chat.send_or_queue_hint') : undefined} onclick={() => send()}>{$t('chat.send')}</button>
+        {#if goalChip}
+          <span class="meta-chip static" title={goal?.objective ?? ''}>
+            <span>{$t('chat.goal')}</span>
+            <span class="mono">{goalChip}</span>
+          </span>
+        {/if}
+        <span style="margin-left:auto;"></span>
+        <span class="meta-chip static" title={$t('chat.context')}>
+          <iconify-icon icon="lucide:clock" width="13"></iconify-icon>
+          <span>{$t('chat.context')}</span>
+          <span class="mono ctx-pct">{ctxUsage}%</span>
+        </span>
+        <div class="picker">
+          <button class="meta-chip" title={$t('chat.perm_toggle_hint')} onclick={(e) => { e.stopPropagation(); const open = permMenu; closeMenus(); permMenu = !open }}>
+            <span class="perm-dot" data-mode={permMode}></span>
+            <span>{$t(PERM_LABEL_KEY[permMode] ?? 'chat.ask_mode')}</span>
+            <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
+          </button>
+          {#if permMenu}
+            <div class="menu perm-menu" onclick={(e) => e.stopPropagation()}>
+              {#each PERM_MODES as mode}
+                <button class="menu-item" class:active={mode === permMode} onclick={() => pickPermMode(mode)}>
+                  <span class="perm-dot" data-mode={mode}></span>
+                  <span class="mi-name">{$t(PERM_LABEL_KEY[mode])}</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
       </div>
     </div>
   </div>
@@ -1131,25 +1200,9 @@
 <style>
 .composer {
   flex: 0 0 auto;
-  background: var(--bg-container);
-  border-top: 1px solid var(--border-secondary);
+  background: var(--bg-layout);
 }
-.chips {
-  max-width: var(--chat-content-max-width, 1080px); margin: 0 auto;
-  padding: 12px 24px 0;
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-}
-.chip {
-  height: 24px; padding: 0 10px; border: 1px solid var(--border); background: var(--bg-container);
-  border-radius: 9999px; display: flex; align-items: center; gap: 6px;
-  font-size: 12px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
-}
-.chip:hover { border-color: var(--blue-5); color: var(--blue-5); }
-.chip.static { cursor: default; background: var(--bg-table-header); border-color: var(--border-secondary); }
-.chip.static:hover { border-color: var(--border-secondary); color: var(--text-secondary); }
 .picker { position: relative; }
-.perm-toggle { padding: 0; border: none; background: transparent; cursor: pointer; font-family: inherit; display: inline-flex; }
-.perm-toggle:hover { opacity: 0.82; }
 .menu {
   position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 50;
   min-width: 200px; max-width: 320px; max-height: 280px; overflow-y: auto;
@@ -1180,7 +1233,6 @@
 }
 .toggle.on .toggle-knob { transform: translateX(14px); }
 .mi-name { font-size: 13px; color: var(--text); }
-.mi-model { font-size: 11px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; }
 .menu-empty { padding: 8px 10px; font-size: 12px; color: var(--text-tertiary); }
 .dir-menu { min-width: 300px; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; align-items: center; }
 .dir-input {
@@ -1203,18 +1255,14 @@
   display: flex; align-items: center; gap: 4px;
 }
 .dir-browse:hover { border-color: var(--blue-5); color: var(--blue-5); }
-.reasoning-chip { padding-right: 8px; }
 .reasoning-eye { color: var(--success); }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: var(--font-mono); }
 .dir-path { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.context-chip { gap: 8px; }
-.ctx-bar { width: 56px; height: 4px; background: var(--border-table); border-radius: 9999px; overflow: hidden; display: inline-block; }
-.ctx-fill { display: block; height: 100%; background: var(--blue-6); border-radius: 9999px; }
-.input-wrap { max-width: var(--chat-content-max-width, 1080px); margin: 10px auto 0; padding: 0 24px 16px; }
+.input-wrap { max-width: var(--chat-content-max-width, 1080px); margin: 0 auto; padding: 8px 24px 14px; }
 .input-card {
-  background: var(--bg-container); border: 1px solid var(--border); border-radius: 12px;
-  padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
-  position: relative;
+  background: var(--bg-container); border: 1px solid var(--border); border-radius: 14px;
+  padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;
+  position: relative; box-shadow: var(--card-shadow);
 }
 .input-card:focus-within {
   border-color: var(--blue-6);
@@ -1225,11 +1273,39 @@
   background: var(--row-hover);
   box-shadow: 0 0 0 2px var(--focus-ring);
 }
+.input-row { display: flex; align-items: flex-end; gap: 4px; }
 textarea {
   border: none; outline: none; resize: none; font-size: 14px; line-height: 1.6;
-  font-family: inherit; color: var(--text); background: transparent; width: 100%;
+  font-family: inherit; color: var(--text); background: transparent;
+  flex: 1; min-width: 0; margin: 4px 4px 5px;
   max-height: 200px; overflow-y: auto; min-height: 24px; /* ≈ MIN_TEXTAREA_PX in autoResize */
 }
+.agent-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 10px 0 5px; margin: 0 2px 2px 0;
+  background: var(--active-blue-bg); border: none; border-radius: 8px;
+  color: var(--blue-6); font-size: 12px; font-weight: 600;
+  cursor: pointer; font-family: inherit; flex: 0 0 auto;
+}
+.agent-chip:hover { background: var(--row-hover); }
+.agent-at {
+  width: 16px; height: 16px; border-radius: 5px;
+  background: var(--blue-6); color: var(--on-accent);
+  display: grid; place-items: center; font-size: 11px; font-weight: 700; line-height: 1;
+}
+.agent-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-menu { min-width: 220px; }
+.menu-label {
+  font-size: 11px; font-weight: 600; color: var(--text-secondary);
+  padding: 6px 10px 4px;
+}
+.menu-item.manage { flex-direction: row; align-items: center; gap: 6px; }
+.menu-item.manage .mi-name { color: var(--blue-6); }
+.perm-menu .menu-item { flex-direction: row; align-items: center; gap: 8px; }
+.perm-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: var(--text-quaternary); }
+.perm-dot[data-mode="auto"] { background: var(--success); }
+.perm-dot[data-mode="interactive"] { background: var(--warning); }
+.perm-dot[data-mode="strict"] { background: var(--error); }
 .attachments { display: flex; flex-wrap: wrap; gap: 6px; }
 .attach-chip {
   display: inline-flex; align-items: center; gap: 5px; max-width: 200px;
@@ -1245,26 +1321,45 @@ textarea {
   display: flex; align-items: center; color: var(--text-tertiary);
 }
 .attach-x:hover { color: var(--error); }
-.input-footer { display: flex; align-items: center; gap: 4px; }
+.meta-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 7px 6px 2px; border-top: 1px solid var(--border-secondary);
+}
+.meta-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 4px; border: none; border-radius: 6px; background: transparent;
+  font-size: 12px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
+  white-space: nowrap;
+}
+.meta-chip:hover { color: var(--text); background: var(--hover-neutral); }
+.meta-chip.static { cursor: default; }
+.meta-chip.static:hover { color: var(--text-secondary); background: transparent; }
+.ctx-pct { color: var(--text); font-weight: 600; }
 .tool-btn {
-  width: 28px; height: 28px; border: none; background: transparent; border-radius: 6px;
+  width: 28px; height: 28px; flex: 0 0 auto; margin-bottom: 2px;
+  border: none; background: transparent; border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; color: var(--text-tertiary);
 }
 .tool-btn:hover { background: var(--hover-neutral); color: var(--text-secondary); }
-.skill-btn { font-size: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.skill-btn { font-size: 14px; font-family: var(--font-mono); }
 .send-btn {
-  height: 32px; padding: 0 16px; border: none; background: var(--blue-6);
-  border-radius: 6px; font-size: 14px; color: #fff; cursor: pointer; font-family: inherit;
+  width: 38px; height: 30px; flex: 0 0 auto; margin-bottom: 1px;
+  border: none; background: var(--blue-6); border-radius: 9px;
+  display: grid; place-items: center; color: var(--on-accent);
+  cursor: pointer; font-family: inherit;
+  box-shadow: 0 1px 2px var(--focus-ring);
 }
 .send-btn:hover { background: var(--blue-5); }
+.send-btn:active { background: var(--blue-7); }
 .stop-btn {
-  height: 32px; padding: 0 14px; border: 1px solid var(--error-border); background: var(--error-bg);
-  border-radius: 6px; display: flex; align-items: center; gap: 7px;
-  font-size: 14px; color: var(--error); cursor: pointer; font-family: inherit;
+  width: 30px; height: 30px; flex: 0 0 auto; margin-bottom: 1px;
+  border: 1px solid var(--error-border); background: var(--error-bg);
+  border-radius: 9px; display: grid; place-items: center;
+  cursor: pointer; font-family: inherit;
 }
 .stop-btn:hover { border-color: var(--error); }
-.stop-sq { width: 9px; height: 9px; border-radius: 2px; background: var(--error); }
+.stop-sq { width: 10px; height: 10px; border-radius: 2px; background: var(--error); }
 
 /* Skill autocomplete dropdown */
 .skill-menu {
