@@ -2,14 +2,16 @@
   import { onMount } from 'svelte'
   import { view, cmdkOpen, sidebar, nativeShell, panelContent, artifacts, activeSessionId } from '../../lib/stores'
   import { t } from '../../lib/i18n'
-  import * as api from '../../lib/api'
   import { ws, wsState } from '../../lib/ws'
   import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
   import { nativeToggleMaximise, nativeMinimise, nativeClose, nativeWindowState } from '../../lib/api'
   import OctoLogo from './OctoLogo.svelte'
 
-  function cycleSidebar() {
-    sidebar.update(s => s === 'full' ? 'rail' : s === 'rail' ? 'hidden' : 'full')
+  // The title-bar toggle is a plain show/hide (the redesign has no manual rail
+  // state); 'rail' remains reachable only through the responsive auto-collapse
+  // in Sidebar, so toggling from rail expands back to full.
+  function toggleSidebar() {
+    sidebar.update(s => s === 'hidden' ? 'full' : 'hidden')
   }
 
   // Toggle the Artifacts panel sidebar.
@@ -84,64 +86,85 @@
 </script>
 
 <header class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
-  <div class="left">
-    <button class="icon-btn" title={$t('header.toggle_sidebar')} onclick={cycleSidebar}>
+  <!-- Left: native traffic lights own the inset on desktop mac; everywhere
+       else (web, desktop win/linux) a small brand marks the window. -->
+  {#if !($nativeShell && isMac)}
+    <div class="brand">
+      <OctoLogo class="logo" size={18} />
+      <span class="name">Octo</span>
+    </div>
+  {/if}
+
+  <span class="spacer"></span>
+
+  <!-- Visible on every view, not just ChatView, whose own inline banner only
+       renders while a chat session is open — Settings/MCP/Skills/Tasks/etc.
+       otherwise had no indication a dropped socket was silently failing
+       their actions. -->
+  {#if $wsState !== 'connected'}
+    <button class="icon-btn" title={$t('chat.connection_lost')} onclick={() => ws.connect()}>
+      <iconify-icon icon="ant-design:loading-outlined" width="16" style="color:var(--warning);animation:octo-spin 0.8s linear infinite"></iconify-icon>
+    </button>
+  {/if}
+
+  <button class="search-btn" title={$t('header.search_sessions')} onclick={() => cmdkOpen.set(true)}>
+    <iconify-icon icon="ant-design:search-outlined" width="15"></iconify-icon>
+    <kbd>⌘K</kbd>
+  </button>
+
+  <div class="ptoggle-group">
+    <button
+      class="ptoggle"
+      class:on={$sidebar !== 'hidden'}
+      title={$t('header.toggle_left')}
+      aria-pressed={$sidebar !== 'hidden'}
+      onclick={toggleSidebar}
+    >
       <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
     </button>
-    <div class="brand">
-      <OctoLogo class="logo" size={26} />
-      <span class="name">Octo</span>
-      <span class="divider"></span>
-      <span class="sub">{$t('nav.workbench')}</span>
-    </div>
+    <button
+      class="ptoggle"
+      class:on={$panelContent !== null}
+      title={$t('header.toggle_right')}
+      aria-pressed={$panelContent !== null}
+      onclick={togglePanel}
+    >
+      <iconify-icon icon="lucide:panel-right" width="16"></iconify-icon>
+    </button>
   </div>
 
-  <div class="right">
-    <!-- Visible on every view, not just ChatView, whose own inline banner only
-         renders while a chat session is open — Settings/MCP/Skills/Tasks/etc.
-         otherwise had no indication a dropped socket was silently failing
-         their actions. -->
-    {#if $wsState !== 'connected'}
-      <button class="icon-btn" title={$t('chat.connection_lost')} onclick={() => ws.connect()}>
-        <iconify-icon icon="ant-design:loading-outlined" width="16" style="color:var(--warning);animation:octo-spin 0.8s linear infinite"></iconify-icon>
+  <span class="divider"></span>
+
+  <button class="icon-btn" class:active={$notificationsEnabled} title={$t('header.notifications')} aria-pressed={$notificationsEnabled} onclick={toggleNotifications}>
+    <iconify-icon icon={$notificationsEnabled ? 'ant-design:bell-filled' : 'ant-design:bell-outlined'} width="17"></iconify-icon>
+  </button>
+  <button class="icon-btn" title={$t('nav.settings')} onclick={() => view.set('settings')}>
+    <iconify-icon icon="ant-design:setting-outlined" width="17"></iconify-icon>
+  </button>
+
+  {#if $nativeShell && !isMac}
+    <div class="window-controls">
+      <button class="window-btn minimise" aria-label="Minimise" title="Minimise" onclick={() => nativeMinimise()}>−</button>
+      <button class="window-btn maximise" aria-label={isMaximised ? 'Restore' : 'Maximise'} title={isMaximised ? 'Restore' : 'Maximise'} onclick={flipMaximise}>
+        {isMaximised ? '❐' : '□'}
       </button>
-    {/if}
-    <button class="search-pill" onclick={() => cmdkOpen.set(true)}>
-      <iconify-icon icon="ant-design:search-outlined" width="14"></iconify-icon>
-      <span>{$t('header.search_sessions')}</span>
-      <kbd>⌘K</kbd>
-    </button>
-    <button class="icon-btn" class:active={$panelContent !== null} title={$t('artifacts.toggle')} onclick={togglePanel}>
-      <iconify-icon icon="ant-design:file-text-outlined" width="16"></iconify-icon>
-    </button>
-    <button class="icon-btn" class:active={$notificationsEnabled} title={$t('header.notifications')} aria-pressed={$notificationsEnabled} onclick={toggleNotifications}>
-      <iconify-icon icon={$notificationsEnabled ? 'ant-design:bell-filled' : 'ant-design:bell-outlined'} width="16"></iconify-icon>
-    </button>
-    <button class="icon-btn" title={$t('nav.settings')} onclick={() => view.set('settings')}>
-      <iconify-icon icon="ant-design:setting-outlined" width="16"></iconify-icon>
-    </button>
-    {#if $nativeShell && !isMac}
-      <div class="window-controls">
-        <button class="window-btn minimise" aria-label="Minimise" title="Minimise" onclick={() => nativeMinimise()}>−</button>
-        <button class="window-btn maximise" aria-label={isMaximised ? 'Restore' : 'Maximise'} title={isMaximised ? 'Restore' : 'Maximise'} onclick={flipMaximise}>
-          {isMaximised ? '❐' : '□'}
-        </button>
-        <button class="window-btn close" aria-label="Close" title="Close" onclick={() => nativeClose()}>×</button>
-      </div>
-    {/if}
-  </div>
+      <button class="window-btn close" aria-label="Close" title="Close" onclick={() => nativeClose()}>×</button>
+    </div>
+  {/if}
 </header>
 
 <style>
 header {
-  height: 56px;
-  flex: 0 0 56px;
-  background: var(--bg-container);
-  border-bottom: 1px solid var(--border-secondary);
+  height: 48px;
+  flex: 0 0 48px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--titlebar-frost);
+  backdrop-filter: blur(var(--frost-blur));
+  -webkit-backdrop-filter: blur(var(--frost-blur));
   z-index: 100;
 }
 /* Mac's native hidden-inset title bar floats the real traffic-light buttons
@@ -152,58 +175,68 @@ header.native-inset { padding-left: 82px; }
    drag the window. Applied for all platforms (frameless window now), not just
    macOS, since --wails-draggable only activates under Frameless: true. */
 header .icon-btn,
-header .search-pill,
-
+header .search-btn,
+header .ptoggle-group,
 header .brand,
 header .window-controls { --wails-draggable: no-drag; }
-.left, .right { display: flex; align-items: center; gap: 8px; }
-.brand { display: flex; align-items: center; gap: 10px; padding-left: 4px; }
-.brand :global(.logo) {
-  color: var(--blue-6);
-  flex: 0 0 auto;
+
+.spacer { flex: 1; }
+.brand { display: flex; align-items: center; gap: 7px; }
+.brand :global(.logo) { color: var(--blue-6); flex: 0 0 auto; }
+.name { font-size: 12px; color: var(--text-secondary); }
+
+.search-btn {
+  display: flex; align-items: center; gap: 7px;
+  height: 30px; padding: 0 9px;
+  background: transparent; border: none; border-radius: var(--radius-sm);
+  color: var(--text-secondary); cursor: pointer; font-family: inherit;
 }
-.name { font-size: 15px; font-weight: 600; color: var(--text-heading); }
-.divider { width: 1px; height: 16px; background: var(--border-secondary); }
-.sub { font-size: 12px; color: var(--text-tertiary); }
+.search-btn:hover { background: var(--hover-neutral); color: var(--text); }
+kbd { font-size: 11px; font-family: var(--font-mono); }
+
+.ptoggle-group {
+  display: inline-flex; gap: 2px; padding: 2px;
+  background: var(--control-track); border-radius: var(--radius-sm);
+}
+.ptoggle {
+  width: 30px; height: 26px; display: grid; place-items: center;
+  border: none; background: transparent; border-radius: 6px;
+  cursor: pointer; color: var(--text-secondary); transition: 0.12s;
+}
+.ptoggle:hover { color: var(--text); }
+.ptoggle.on {
+  background: var(--bg-container); color: var(--blue-6);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.14);
+}
+
+.divider { width: 1px; height: 18px; background: var(--border); }
+
 .icon-btn {
-  width: 32px; height: 32px; border: none; background: transparent;
-  border-radius: 9999px; display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border: none; background: transparent;
+  border-radius: var(--radius-sm); display: grid; place-items: center;
   cursor: pointer; color: var(--text-secondary);
 }
-.icon-btn:hover { background: var(--hover-neutral); }
+.icon-btn:hover { background: var(--hover-neutral); color: var(--text); }
 .icon-btn.active { color: var(--blue-6); }
-.search-pill {
-  display: flex; align-items: center; gap: 8px;
-  height: 32px; padding: 0 6px 0 12px; width: 240px;
-  background: var(--search-bg); border-radius: 9999px; cursor: pointer;
-  color: var(--text-tertiary); border: none; font-family: inherit; font-size: 13px;
-}
-.search-pill:hover { background: var(--search-hover); }
-.search-pill span { flex: 1; text-align: left; }
-kbd {
-  font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: var(--bg-container); border: 1px solid var(--border-secondary); border-radius: 4px;
-  padding: 1px 5px; color: var(--text-tertiary);
-}
+
 /* Window controls (Windows/Linux only — Mac uses native traffic lights via the
-   hidden-inset title bar). Isolated in their own visual group: a left
-   separator line + 8px breathing room, so they never visually merge with the
-   settings button to their left. Maximise icon flips □/❐ to reflect the
-   window state. */
+   hidden-inset title bar). Stretch to the bar height and bleed into the right
+   padding so the hit area reaches the window edge. Maximise icon flips □/❐ to
+   reflect the window state. */
 .window-controls {
   display: flex;
-  align-items: center;
+  align-self: stretch;
+  align-items: stretch;
   gap: 0;
-  margin-left: 8px;
-  padding-left: 8px;
-  border-left: 1px solid var(--border-secondary);
+  margin-left: 4px;
+  margin-right: -16px;
 }
 .window-btn {
-  width: 40px; height: 32px; border: none; background: transparent;
-  display: flex; align-items: center; justify-content: center;
+  width: 46px; border: none; background: transparent;
+  display: grid; place-items: center;
   cursor: pointer; color: var(--text-secondary);
-  border-radius: 0;
+  border-radius: 0; font-size: 14px;
 }
-.window-btn:hover { background: var(--hover-neutral); }
+.window-btn:hover { background: var(--hover-neutral); color: var(--text); }
 .window-btn.close:hover { background: #e81123; color: white; }
 </style>

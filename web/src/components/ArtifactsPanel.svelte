@@ -122,9 +122,52 @@
   const laCurSlug = $derived($lightappSel || $lightapps[0]?.slug || '')
   const laCurHTML = $derived($lightappHTML[laCurSlug] ?? '')
   const laCurName = $derived($lightapps.find(a => a.slug === laCurSlug)?.name ?? laCurSlug)
+
+  // ── Resizable width ────────────────────────────────────────────────────────
+  // Drag the left-edge handle to resize; the width persists across sessions.
+  // Bounds: never narrower than the panel's usable minimum, never so wide the
+  // center column drops under its own minimum (mirrors the design mock).
+  const PANEL_WIDTH_KEY = 'octo.panelWidth'
+  const PANEL_MIN = 320
+  const CENTER_MIN = 460
+  let panelEl = $state<HTMLElement | null>(null)
+  let panelWidth = $state(readSavedWidth())
+
+  function readSavedWidth(): number {
+    const v = Number(localStorage.getItem(PANEL_WIDTH_KEY))
+    return Number.isFinite(v) && v >= PANEL_MIN ? v : 420
+  }
+
+  function startResize(e: MouseEvent) {
+    e.preventDefault()
+    const row = panelEl?.parentElement
+    if (!row) return
+    const startX = e.clientX
+    const startW = panelEl!.getBoundingClientRect().width
+    // Everything left of the panel (sidebar + center) must keep CENTER_MIN for
+    // the center column; the sidebar's share is whatever it currently occupies.
+    const rowW = row.getBoundingClientRect().width
+    const sideW = rowW - startW - (panelEl!.previousElementSibling as HTMLElement)?.getBoundingClientRect().width
+    const maxW = Math.max(PANEL_MIN, rowW - sideW - CENTER_MIN)
+    const move = (ev: MouseEvent) => {
+      panelWidth = Math.max(PANEL_MIN, Math.min(maxW, startW + (startX - ev.clientX)))
+    }
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      localStorage.setItem(PANEL_WIDTH_KEY, String(Math.round(panelWidth)))
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }
 </script>
 
-<aside class="panel">
+<aside class="panel" bind:this={panelEl} style="width:{panelWidth}px;flex-basis:{panelWidth}px">
+  <div class="resize-handle" role="separator" aria-orientation="vertical" onmousedown={startResize}></div>
   {#if $panelContent === 'lightapps'}
     <!-- ── Light Apps mode ───────────────────────────────────────────────── -->
     <div class="topbar">
@@ -262,9 +305,15 @@
 
 <style>
 .panel {
-  width: 420px; flex: 0 0 420px; background: var(--bg-container);
+  flex: 0 0 auto; background: var(--bg-container);
   border-left: 1px solid var(--border-secondary); display: flex; flex-direction: column; min-height: 0;
+  position: relative;
 }
+.resize-handle {
+  position: absolute; left: -3px; top: 0; bottom: 0; width: 8px;
+  cursor: col-resize; z-index: 5;
+}
+.resize-handle:hover { background: var(--focus-ring); }
 .topbar {
   flex: 0 0 auto; padding: 8px 8px 8px 16px;
   border-bottom: 1px solid var(--border-secondary); display: flex; align-items: center; gap: 6px;

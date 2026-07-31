@@ -92,6 +92,7 @@
      blur(var(--frost-blur)). Solid fallbacks are --bg-sidebar / --bg-container. */
   --sidebar-frost: rgba(245,245,247,0.6);
   --panel-frost: rgba(255,255,255,0.7);
+  --titlebar-frost: rgba(255,255,255,0.55);
   --frost-blur: 20px;
 
   /* Scrollbar + placeholder */
@@ -167,6 +168,7 @@
 
   --sidebar-frost: rgba(34,34,36,0.6);
   --panel-frost: rgba(36,36,38,0.72);
+  --titlebar-frost: rgba(44,44,46,0.55);
 
   color-scheme: dark;
 }
