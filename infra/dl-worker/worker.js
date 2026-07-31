@@ -11,6 +11,8 @@
 //   /releases/download/<tag>/<asset>  -> asset bytes (edge-cached; immutable)
 //   /releases/latest/download/<asset> -> asset bytes (uncached; tracks latest)
 //   /install.sh, /install.ps1         -> installer scripts from main
+//   /api/releases/latest              -> the GitHub API release JSON, for the
+//                                        desktop updater (cached 5 min)
 //
 // Only this fixed repository is proxied — the worker is not an open proxy.
 // Trust still anchors on checksum verification in the clients; the mirror
@@ -38,6 +40,51 @@ export default {
         return new Response(null, { status: 302, headers: { location: loc } })
       }
       return new Response(`unexpected upstream status ${upstream.status}`, { status: 502 })
+    }
+
+    if (pathname === '/api/releases/latest') {
+      // The desktop updater's Wails GitHub provider checks the API, not the
+      // web redirect. The asset URLs inside the JSON still point at
+      // github.com — the desktop's mirrorTransport rewrites those requests
+      // when they fail, so the JSON passes through unmodified. Cached
+      // briefly: the worker's egress IPs are shared, and GitHub's anonymous
+      // API rate limit is per-IP.
+      const cache = caches.default
+      if (request.method === 'GET') {
+        const hit = await cache.match(request)
+        if (hit) return hit
+      }
+      // GitHub's anonymous API limit is per-IP and the worker's egress IPs
+      // are shared, so anonymous calls 403 intermittently. An optional
+      // GITHUB_TOKEN secret (public-repo read-only) lifts that to 5000/h;
+      // without it the endpoint still works, just less reliably — the
+      // desktop updater falls back to notify-and-open on failure.
+      const headers = {
+        accept: 'application/vnd.github+json',
+        'x-github-api-version': '2022-11-28',
+        'user-agent': 'octo-dl-worker',
+      }
+      if (env.GITHUB_TOKEN) {
+        headers.authorization = `Bearer ${env.GITHUB_TOKEN}`
+      }
+      const upstream = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers })
+      if (!upstream.ok) {
+        const detail = (await upstream.text()).slice(0, 200)
+        return new Response(`upstream ${upstream.status}: ${detail}`, {
+          status: upstream.status === 404 ? 404 : 502,
+        })
+      }
+      const resp = new Response(upstream.body, {
+        status: 200,
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+          'cache-control': 'public, max-age=300',
+        },
+      })
+      if (request.method === 'GET') {
+        ctx.waitUntil(cache.put(request, resp.clone()))
+      }
+      return resp
     }
 
     if (pathname === '/install.sh' || pathname === '/install.ps1') {

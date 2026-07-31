@@ -17,6 +17,7 @@ mirror lists in sync when anything changes here.
 | `/releases/download/<tag>/<asset>` | streams the asset; edge-cached (immutable) |
 | `/releases/latest/download/<asset>` | streams the asset; uncached |
 | `/install.sh`, `/install.ps1` | installer scripts from `main` — the China-reachable install one-liner |
+| `/api/releases/latest` | GitHub API release JSON for the desktop updater; cached 5 min (shared egress IPs vs GitHub's per-IP anonymous rate limit) |
 | anything else | redirect to the landing page |
 
 ## Deploy
@@ -37,6 +38,11 @@ npx wrangler deploy
 `custom_domain = true` in `wrangler.toml` creates the `dl.octo-agent.dev`
 DNS record automatically. There is no CI deploy: the worker changes rarely,
 and a manual `wrangler deploy` keeps the account credentials out of GitHub.
+
+Optional: `npx wrangler secret put GITHUB_TOKEN` (a public-repo read-only
+token) authenticates the `/api/releases/latest` upstream call. Without it
+the endpoint 403s intermittently — GitHub's anonymous API limit is per-IP
+and the worker's egress IPs are shared with other Cloudflare tenants.
 
 ## Verify
 

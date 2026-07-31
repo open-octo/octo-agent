@@ -69,11 +69,13 @@ func desktopAssetIndex(assets []ghprovider.ReleaseAsset, want string) int {
 // response body — and so truncates a ~100 MB artifact download on any link
 // slower than ~27 Mbps. Timeouts move to the connection phases instead; the
 // body stream is unbounded (the updater window surfaces progress, and a lost
-// connection still fails through the transport).
+// connection still fails through the transport). mirrorTransport retries a
+// connection-level GitHub failure against the download mirror, matching the
+// CLI upgrade's mirror fallback.
 func updateHTTPClient() *http.Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.ResponseHeaderTimeout = 30 * time.Second
-	return &http.Client{Transport: tr}
+	return &http.Client{Transport: mirrorTransport{base: tr}}
 }
 
 // verifiedOnly wraps a Provider to fail closed when a release carries no
