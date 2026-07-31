@@ -88,8 +88,13 @@
     if (!el) return
     el.style.overflow = 'hidden'
     el.style.height = 'auto'
-    el.style.height = Math.min(Math.max(el.scrollHeight, MIN_TEXTAREA_PX), MAX_TEXTAREA_PX) + 'px'
-    el.style.overflow = ''
+    const h = el.scrollHeight
+    el.style.height = Math.min(Math.max(h, MIN_TEXTAREA_PX), MAX_TEXTAREA_PX) + 'px'
+    // Scrolling only exists once the content passes the height cap — below it
+    // a rounding sliver (scrollHeight a px or two over the set height) would
+    // otherwise paint a phantom scrollbar thumb beside the send button.
+    el.style.overflowY = h > MAX_TEXTAREA_PX ? 'auto' : 'hidden'
+    el.style.overflowX = ''
   }
   $effect(() => {
     text // track the bound value so the effect re-runs when it changes
@@ -1313,7 +1318,7 @@ textarea {
   border: none; outline: none; resize: none; font-size: 14px; line-height: 1.6;
   font-family: inherit; color: var(--text); background: transparent;
   flex: 1; min-width: 0; margin: 4px 4px 5px;
-  max-height: 200px; overflow-y: auto; min-height: 24px; /* ≈ MIN_TEXTAREA_PX in autoResize */
+  max-height: 200px; overflow-y: hidden; min-height: 24px; /* ≈ MIN_TEXTAREA_PX in autoResize */
 }
 .agent-chip {
   display: inline-flex; align-items: center; gap: 6px;
