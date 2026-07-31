@@ -48,10 +48,13 @@ var DownloadPageURL = "https://octo-agent.dev/"
 // fails to download from BaseURL. They must expose the same path layout as
 // GitHub releases: /releases/download/v<ver>/<asset>.
 //
-// Public, no-cost mirrors come and go; the list is conservative and can be
-// extended. Checksum verification still anchors trust to the original
+// dl.octo-agent.dev is the project's own Cloudflare Worker proxy
+// (infra/dl-worker) and is tried before the public gh-proxy mirrors, which
+// come and go. Checksum verification still anchors trust to the original
 // checksums.txt content, so a mirror cannot silently install a modified binary.
+// Keep this list in sync with landing/install.sh and landing/install.ps1.
 var MirrorBaseURLs = []string{
+	"https://dl.octo-agent.dev",
 	"https://ghproxy.net/https://github.com/open-octo/octo-agent",
 	"https://gh-proxy.com/https://github.com/open-octo/octo-agent",
 	"https://gh.ddlc.top/https://github.com/open-octo/octo-agent",

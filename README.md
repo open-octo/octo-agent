@@ -32,6 +32,8 @@ octo "给 octo config show 加一个 --json 参数并跑测试"   # 一句话 �
 
 - **Linux / macOS** — `curl -fsSL https://octo-agent.dev/install.sh | sh`
 - **Windows** — `irm https://octo-agent.dev/install.ps1 | iex`
+- **国内网络** — 官网或 GitHub 打不开时，走下载镜像（安装与 `octo upgrade` 会自动回退到镜像）：
+  `curl -fsSL https://dl.octo-agent.dev/install.sh | sh`（Windows：`irm https://dl.octo-agent.dev/install.ps1 | iex`）
 - **桌面应用** — 从[最新 release](https://github.com/open-octo/octo-agent/releases/latest)下载安装器：
   `octo-setup.pkg`（macOS）、`octo-setup.exe`（Windows）、`Octo-x86_64.AppImage`（Linux）
 - **Go** — `go install github.com/open-octo/octo-agent/cmd/octo@latest`

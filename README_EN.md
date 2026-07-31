@@ -33,6 +33,8 @@ octo "Add a --json flag to 'octo config show' and run the tests"   # one prompt 
 
 - **Linux / macOS** — `curl -fsSL https://octo-agent.dev/install.sh | sh`
 - **Windows** — `irm https://octo-agent.dev/install.ps1 | iex`
+- **Restricted networks** — if github.com is unreachable, use the download mirror (installs and `octo upgrade` also fall back to it automatically):
+  `curl -fsSL https://dl.octo-agent.dev/install.sh | sh` (Windows: `irm https://dl.octo-agent.dev/install.ps1 | iex`)
 - **Desktop app** — grab the installer from the [latest release](https://github.com/open-octo/octo-agent/releases/latest):
   `octo-setup.pkg` (macOS), `octo-setup.exe` (Windows), `Octo-x86_64.AppImage` (Linux)
 - **Go** — `go install github.com/open-octo/octo-agent/cmd/octo@latest`

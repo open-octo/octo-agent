@@ -3,6 +3,10 @@
 #
 #   curl -fsSL https://octo-agent.dev/install.sh | sh
 #
+# Where github.com is unreachable (e.g. mainland China), the same script is
+# served by the download mirror, and downloads fall back to it automatically:
+#   curl -fsSL https://dl.octo-agent.dev/install.sh | sh
+#
 # Detects your OS/arch, downloads the matching release archive, verifies its
 # SHA-256 against the release's checksums.txt, and installs the `octo` binary
 # to a directory on your PATH (default /usr/local/bin, else ~/.local/bin).
@@ -19,6 +23,13 @@
 set -eu
 
 REPO="open-octo/octo-agent"
+
+# Download bases, tried in order: GitHub first, then mirrors exposing the
+# same /releases/... path layout, for networks where github.com is blocked
+# (notably mainland China). Keep in sync with internal/upgrade's
+# MirrorBaseURLs and install.ps1. Checksum verification below applies to
+# whichever base served the bytes.
+BASES="https://github.com/$REPO https://dl.octo-agent.dev https://ghproxy.net/https://github.com/$REPO https://gh-proxy.com/https://github.com/$REPO https://gh.ddlc.top/https://github.com/$REPO"
 
 err() { printf 'octo install: %s\n' "$1" >&2; exit 1; }
 
@@ -45,23 +56,43 @@ esac
 # --- resolve version ---------------------------------------------------------
 version="${OCTO_VERSION:-}"
 if [ -z "$version" ]; then
-  # Read the latest tag from the GitHub API and strip the leading "v" so it
-  # matches the goreleaser archive name ({{.Version}}, e.g. 1.0.0).
-  version=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
-    | grep '"tag_name"' | head -n1 | sed -E 's/.*"tag_name": *"v?([^"]+)".*/\1/')
+  # Read the latest tag from the /releases/latest redirect (no GitHub API, so
+  # no rate limit) and strip the leading "v" so it matches the goreleaser
+  # archive name ({{.Version}}, e.g. 1.0.0). -w appends the redirect target;
+  # a mirror that follows the redirect itself returns the release page
+  # instead, whose og:url meta tag carries the same /releases/tag/ path —
+  # the sed matches either.
+  for b in $BASES; do
+    resp=$(curl -fsS --connect-timeout 5 --max-time 20 -w '\n%{redirect_url}' "$b/releases/latest" 2>/dev/null) || continue
+    version=$(printf '%s' "$resp" | sed -n 's#.*/releases/tag/v\{0,1\}\([^"/?[:space:]]*\).*#\1#p' | head -n1)
+    [ -n "$version" ] && break
+  done
 fi
 [ -n "$version" ] || err "could not determine the latest version"
 
 archive="octo_${version}_${os}_${arch}.tar.gz"
-base="https://github.com/$REPO/releases/download/v${version}"
 
 # --- download into a temp dir ------------------------------------------------
 tmp=$(mktemp -d 2>/dev/null || mktemp -d -t octo)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
+# fetch <asset> <dest>: try each base in order. --speed-limit aborts a
+# transfer that stalls below 1 KB/s for 30s (a blackholed connection would
+# otherwise hang forever and never reach the mirrors).
+fetch() {
+  for b in $BASES; do
+    if curl -fSL --connect-timeout 5 --speed-limit 1024 --speed-time 30 \
+        "$b/releases/download/v${version}/$1" -o "$2"; then
+      return 0
+    fi
+    printf 'octo install: download of %s from %s failed\n' "$1" "$b" >&2
+  done
+  return 1
+}
+
 printf 'octo install: downloading %s\n' "$archive"
-curl -fSL "$base/$archive"     -o "$tmp/$archive"     || err "download failed: $base/$archive"
-curl -fsSL "$base/checksums.txt" -o "$tmp/checksums.txt" || err "could not fetch checksums.txt"
+fetch "$archive" "$tmp/$archive"          || err "download failed: $archive"
+fetch "checksums.txt" "$tmp/checksums.txt" || err "could not fetch checksums.txt"
 
 # --- verify SHA-256 ----------------------------------------------------------
 want=$(grep " $archive\$" "$tmp/checksums.txt" | awk '{print $1}' | head -n1)

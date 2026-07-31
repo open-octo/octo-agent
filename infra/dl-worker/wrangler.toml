@@ -1,0 +1,11 @@
+# Deploy from this directory: npx wrangler deploy
+# (one-time: npx wrangler login; the custom domain requires the
+# octo-agent.dev zone to be on this Cloudflare account.)
+name = "octo-dl"
+main = "worker.js"
+compatibility_date = "2026-07-01"
+workers_dev = false
+
+[[routes]]
+pattern = "dl.octo-agent.dev"
+custom_domain = true
