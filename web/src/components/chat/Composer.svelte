@@ -314,6 +314,7 @@
     | { kind: 'mcp-server'; name: string }
     | { kind: 'mcp-tool'; server: string; tool: McpTool }
     | { kind: 'agent'; id: string; name: string }
+    | { kind: 'agent-create' }
 
   // Built-in slash commands that actually do something on web: /clear, /compact
   // and /goal are handled inline by the server; /loop falls through to the model
@@ -424,15 +425,18 @@
     }
     if (slashMode === 'agents') {
       const q = slashQuery
+      // Mirrors the sidebar's new-session picker: "Default" first, the expert
+      // agents, then a fixed create row that ignores the filter.
       const rows: SlashItem[] = [
-        { kind: 'agent', id: 'default', name: 'Octo' },
+        { kind: 'agent', id: 'default', name: 'Default' },
         ...agents.map(a => ({ kind: 'agent' as const, id: a.id, name: a.name })),
       ]
-      return rows
+      const filtered = rows
         .map(r => ({ r, score: scoreNameMatch(r.kind === 'agent' ? r.name : '', q) }))
         .filter(({ score }) => score > 0)
         .sort((a, b) => b.score - a.score)
         .map(({ r }) => r)
+      return [...filtered, { kind: 'agent-create' }]
     }
     return []
   }
@@ -524,6 +528,11 @@
       pickAgent(item.id)
       text = draft
       hideSlashMenu()
+      return
+    } else if (item.kind === 'agent-create') {
+      text = draft
+      hideSlashMenu()
+      view.set('agents')
       return
     }
     text = takesArgs ? composeSlashCommand(command, draft) : command
@@ -1005,7 +1014,7 @@
             <div class="menu agent-menu" onclick={(e) => e.stopPropagation()}>
               <div class="menu-label">{$t('composer.assign_agent')}</div>
               <button class="menu-item" class:active={$activeAgent === 'default' && (!sessionAgent || sessionAgent === 'default')} onclick={() => pickAgent('default')}>
-                <span class="mi-name">Octo</span>
+                <span class="mi-name">Default</span>
               </button>
               {#each agents as a (a.id)}
                 <button class="menu-item" class:active={$activeAgent === a.id} onclick={() => pickAgent(a.id)}>
@@ -1047,7 +1056,7 @@
       </div>
       {#if slashMenu}
         <div class="skill-menu">
-          {#each filteredItems() as item, i (item.kind + ':' + (item.kind === 'builtin' ? item.name : item.kind === 'skill' ? item.skill.name : item.kind === 'workflow' ? item.workflow.name : item.kind === 'mcp-server' ? item.name : item.kind === 'agent' ? item.id : item.server + '/' + item.tool.name))}
+          {#each filteredItems() as item, i (item.kind + ':' + (item.kind === 'builtin' ? item.name : item.kind === 'skill' ? item.skill.name : item.kind === 'workflow' ? item.workflow.name : item.kind === 'mcp-server' ? item.name : item.kind === 'agent' ? item.id : item.kind === 'agent-create' ? '' : item.server + '/' + item.tool.name))}
             <button
               class="skill-menu-item"
               class:active={i === slashActiveIndex}
@@ -1069,6 +1078,11 @@
               {:else if item.kind === 'agent'}
                 <span class="skill-name">@{item.name}</span>
                 <span class="skill-desc">{$t('composer.assign_agent')}</span>
+              {:else if item.kind === 'agent-create'}
+                <span class="skill-name create">
+                  <iconify-icon icon="ant-design:plus-outlined" width="12"></iconify-icon>
+                  {$t('agents.create')}
+                </span>
               {:else if item.kind === 'mcp-server'}
                 <span class="skill-name">/mcp/{item.name}</span>
                 <span class="skill-desc">{$t('composer.label_mcp_server')}</span>
@@ -1414,6 +1428,7 @@ textarea {
 .skill-menu-item.active {
   background: var(--active-blue-bg);
 }
+.skill-name.create { color: var(--blue-6); display: inline-flex; align-items: center; gap: 6px; }
 .skill-name {
   font-size: 13px;
   color: var(--text);
