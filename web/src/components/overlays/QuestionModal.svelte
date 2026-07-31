@@ -264,7 +264,7 @@
   /* ─── Full modal (expanded) ──────────────────────────────────── */
   .backdrop {
     position: fixed; inset: 0; z-index: 1100;
-    background: var(--text-tertiary);
+    background: var(--scrim);
     display: flex; align-items: center; justify-content: center;
     padding: 24px;
   }

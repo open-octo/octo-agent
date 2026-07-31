@@ -228,7 +228,7 @@
   .primary-btn:hover:not(:disabled) { background: var(--blue-5); }
   .primary-btn:disabled { opacity: 0.6; cursor: default; }
   .modal-overlay {
-    position: fixed; inset: 0; background: var(--text-tertiary);
+    position: fixed; inset: 0; background: var(--scrim);
     display: flex; align-items: flex-start; justify-content: center; z-index: 200;
     padding: 48px 16px; overflow-y: auto;
   }

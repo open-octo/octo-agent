@@ -204,7 +204,7 @@
 
 /* ── view-source modal ────────────────────────────────────────────────────── */
 .modal-backdrop {
-  position: fixed; inset: 0; background: var(--text-tertiary);
+  position: fixed; inset: 0; background: var(--scrim);
   display: flex; align-items: flex-start; justify-content: center; z-index: 200;
   padding: 56px 16px;
 }

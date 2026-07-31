@@ -2592,7 +2592,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 /* Tokens must exist in app.css — var() with an undefined name invalidates the
    whole declaration (the modal shipped fully transparent on --bg-elevated). */
 .modal-overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
+  position: fixed; inset: 0; background: var(--scrim);
   display: flex; align-items: center; justify-content: center; z-index: 1000;
 }
 .modal {

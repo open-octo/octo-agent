@@ -110,7 +110,7 @@
 <style>
 .backdrop {
   position: fixed; inset: 0; z-index: 1100;
-  background: rgba(0,0,0,0.4);
+  background: var(--scrim);
   display: flex; align-items: center; justify-content: center;
   padding: 12px;
 }

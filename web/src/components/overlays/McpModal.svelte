@@ -114,7 +114,7 @@
 
 <style>
 .backdrop {
-  position: fixed; inset: 0; z-index: 1000; background: var(--text-tertiary);
+  position: fixed; inset: 0; z-index: 1000; background: var(--scrim);
   display: flex; align-items: center; justify-content: center; padding: 24px;
 }
 .modal {
