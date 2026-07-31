@@ -299,13 +299,12 @@
   let mcpServerNames = $state<string[]>([])
   let mcpToolCache = $state<Record<string, McpTool[]>>({})
   let slashMenu = $state(false)
-  let slashMode = $state<'skills' | 'workflows' | 'mcp-servers' | 'mcp-tools'>('skills')
+  let slashMode = $state<'skills' | 'workflows' | 'mcp-servers' | 'mcp-tools' | 'agents'>('skills')
   let slashQuery = $state('')
   let slashActiveIndex = $state(-1)
   let slashMcpServer = $state('')
-  // Draft carried across the menu when the "/" button was pressed on a
-  // non-empty composer; the picked command is prefixed onto it. See
-  // insertSkill/composeSlashCommand.
+  // Draft parked under a picked command so it survives as the command's
+  // argument. See composeSlashCommand.
   let slashDraftTail = $state('')
 
   type SlashItem =
@@ -314,6 +313,7 @@
     | { kind: 'workflow'; workflow: api.NamedWorkflow }
     | { kind: 'mcp-server'; name: string }
     | { kind: 'mcp-tool'; server: string; tool: McpTool }
+    | { kind: 'agent'; id: string; name: string }
 
   // Built-in slash commands that actually do something on web: /clear, /compact
   // and /goal are handled inline by the server; /loop falls through to the model
@@ -332,11 +332,16 @@
   ]
 
   function normalizeSlash(value: string): string {
-    return value.replace(/^[\uff0f\u3001]/, '/')
+    return value.replace(/^[\uff0f\u3001]/, '/').replace(/^\uff20/, '@')
   }
 
   function parseSlashInput(value: string): { mode: SlashItem['kind'] | null; query: string; serverName?: string } {
     const trimmed = normalizeSlash(value)
+    // A leading "@" with no whitespace summons the agent picker, mirroring
+    // the "/" skill trigger (the design's \u8f93\u5165 @ \u4e5f\u53ef\u5524\u8d77).
+    if (/^@\S*$/.test(trimmed)) {
+      return { mode: 'agent', query: trimmed.slice(1).toLowerCase() }
+    }
     if (!trimmed.startsWith('/')) return { mode: null, query: '' }
     const rest = trimmed.slice(1)
     const lowerRest = rest.toLowerCase()
@@ -417,14 +422,25 @@
         .filter(t => !q || t.name.toLowerCase().includes(q))
         .map(tool => ({ kind: 'mcp-tool', server: slashMcpServer, tool }))
     }
+    if (slashMode === 'agents') {
+      const q = slashQuery
+      const rows: SlashItem[] = [
+        { kind: 'agent', id: 'default', name: 'Octo' },
+        ...agents.map(a => ({ kind: 'agent' as const, id: a.id, name: a.name })),
+      ]
+      return rows
+        .map(r => ({ r, score: scoreNameMatch(r.kind === 'agent' ? r.name : '', q) }))
+        .filter(({ score }) => score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map(({ r }) => r)
+    }
     return []
   }
 
-  function showSlashMenu(mode: 'skills' | 'workflows' | 'mcp-servers' | 'mcp-tools', query: string, serverName = '') {
+  function showSlashMenu(mode: 'skills' | 'workflows' | 'mcp-servers' | 'mcp-tools' | 'agents', query: string, serverName = '') {
     // Every re-open re-derives the menu from the current text, so a draft
-    // parked by an earlier "/" press is stale by now — keeping it would
-    // resurrect text the user has since deleted. insertSkill parks its draft
-    // after this call.
+    // parked earlier is stale by now — keeping it would resurrect text the
+    // user has since deleted.
     slashDraftTail = ''
     slashMode = mode
     slashQuery = query
@@ -460,6 +476,10 @@
     }
     if (parsed.mode === 'skill') {
       showSlashMenu('skills', parsed.query)
+      return
+    }
+    if (parsed.mode === 'agent') {
+      showSlashMenu('agents', parsed.query)
       return
     }
     if (parsed.mode === 'workflow') {
@@ -498,6 +518,13 @@
       command = '/mcp/' + item.name + ' '
     } else if (item.kind === 'mcp-tool') {
       command = $t('composer.mcp_tool_prompt').replace('{server}', item.server).replace('{tool}', item.tool.name)
+    } else if (item.kind === 'agent') {
+      // Assign the agent and swallow the "@query" trigger — the text box goes
+      // back to whatever draft the trigger was parked over (usually empty).
+      pickAgent(item.id)
+      text = draft
+      hideSlashMenu()
+      return
     }
     text = takesArgs ? composeSlashCommand(command, draft) : command
     hideSlashMenu()
@@ -510,18 +537,6 @@
     slashActiveIndex = (slashActiveIndex + delta + items.length) % items.length
   }
 
-  // The "/" button opens skill autocomplete. On an empty composer it prefills
-  // "/" so typing filters the list. On a non-empty one it must not touch the
-  // draft — that used to wipe whatever the user had written; instead the draft
-  // is parked and the picked command is prefixed onto it as its argument.
-  function insertSkill() {
-    // A half-typed "/query" is not a draft — it's the trigger itself.
-    const draft = parseSlashInput(text).mode === null ? text.trim() : ''
-    if (!draft) text = '/'
-    showSlashMenu('skills', '')
-    slashDraftTail = draft
-    queueMicrotask(() => textareaEl?.focus())
-  }
 
   // Full-width slash replacement + autocomplete trigger on input.
   function onInput() {
@@ -943,7 +958,7 @@
   // Click outside to close slash menu.
   function onWindowClick(e: MouseEvent) {
     const target = e.target as HTMLElement
-    if (slashMenu && !target.closest('.skill-menu') && !target.closest('.skill-btn')) {
+    if (slashMenu && !target.closest('.skill-menu')) {
       hideSlashMenu()
     }
     closeMenus()
@@ -980,16 +995,12 @@
         <button class="tool-btn" title={$t('chat.attach_file')} onclick={openAttach}>
           <iconify-icon icon="ant-design:paper-clip-outlined" width="15"></iconify-icon>
         </button>
-        <button class="tool-btn skill-btn" title={$t('chat.insert_slash')} onclick={insertSkill}>/</button>
+        {#if agentLabel}
         <div class="picker">
-          {#if agentLabel}
-            <button class="agent-chip" title={$t('composer.assign_agent')} onclick={(e) => { e.stopPropagation(); const open = agentMenu; closeMenus(); agentMenu = !open }}>
-              <span class="agent-at">@</span>
-              <span class="agent-name">{agentLabel}</span>
-            </button>
-          {:else}
-            <button class="tool-btn agent-ghost" title={$t('composer.assign_agent')} onclick={(e) => { e.stopPropagation(); const open = agentMenu; closeMenus(); agentMenu = !open }}>@</button>
-          {/if}
+          <button class="agent-chip" title={$t('composer.assign_agent')} onclick={(e) => { e.stopPropagation(); const open = agentMenu; closeMenus(); agentMenu = !open }}>
+            <span class="agent-at">@</span>
+            <span class="agent-name">{agentLabel}</span>
+          </button>
           {#if agentMenu}
             <div class="menu agent-menu" onclick={(e) => e.stopPropagation()}>
               <div class="menu-label">{$t('composer.assign_agent')}</div>
@@ -1009,6 +1020,7 @@
             </div>
           {/if}
         </div>
+        {/if}
         <textarea
           bind:this={textareaEl}
           rows={1}
@@ -1035,7 +1047,7 @@
       </div>
       {#if slashMenu}
         <div class="skill-menu">
-          {#each filteredItems() as item, i (item.kind + ':' + (item.kind === 'builtin' ? item.name : item.kind === 'skill' ? item.skill.name : item.kind === 'workflow' ? item.workflow.name : item.kind === 'mcp-server' ? item.name : item.server + '/' + item.tool.name))}
+          {#each filteredItems() as item, i (item.kind + ':' + (item.kind === 'builtin' ? item.name : item.kind === 'skill' ? item.skill.name : item.kind === 'workflow' ? item.workflow.name : item.kind === 'mcp-server' ? item.name : item.kind === 'agent' ? item.id : item.server + '/' + item.tool.name))}
             <button
               class="skill-menu-item"
               class:active={i === slashActiveIndex}
@@ -1054,6 +1066,9 @@
                 {#if item.workflow.description}
                   <span class="skill-desc">{item.workflow.description}</span>
                 {/if}
+              {:else if item.kind === 'agent'}
+                <span class="skill-name">@{item.name}</span>
+                <span class="skill-desc">{$t('composer.assign_agent')}</span>
               {:else if item.kind === 'mcp-server'}
                 <span class="skill-name">/mcp/{item.name}</span>
                 <span class="skill-desc">{$t('composer.label_mcp_server')}</span>
@@ -1348,8 +1363,6 @@ textarea {
   cursor: pointer; color: var(--text-tertiary);
 }
 .tool-btn:hover { background: var(--hover-neutral); color: var(--text-secondary); }
-.skill-btn { font-size: 14px; font-family: var(--font-mono); }
-.agent-ghost { font-size: 13px; font-weight: 600; font-family: var(--font-mono); }
 .send-btn {
   width: 38px; height: 30px; flex: 0 0 auto; margin-bottom: 1px;
   border: none; background: var(--blue-6); border-radius: 9px;
