@@ -4,7 +4,7 @@
   import {
     running, activeSessionId, chatStreaming, sessions,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
-    globalPermissionMode, nativeShell, localAccess, activeAgent, view,
+    globalPermissionMode, nativeShell, activeAgent, view,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
@@ -44,7 +44,6 @@
   let attachmentsBySession: Record<string, Attachment[]> = {}
   let draftSid = ''
   let textareaEl = $state<HTMLTextAreaElement | null>(null)
-  let fileInputEl = $state<HTMLInputElement | null>(null)
   let attachments = $state<Attachment[]>([])
   let dragOver = $state(false)
 
@@ -81,7 +80,7 @@
   // up to 5-6 lines on mount. Lock overflow to hidden while measuring so the
   // scrollbar never contributes to scrollHeight, and floor the result to a
   // single line so an empty box never opens tall.
-  const MAX_TEXTAREA_PX = 200
+  const MAX_TEXTAREA_PX = 156
   const MIN_TEXTAREA_PX = 24 // ≈ one line: 14px * 1.6 line-height + padding
   function autoResize() {
     const el = textareaEl
@@ -100,35 +99,6 @@
     text // track the bound value so the effect re-runs when it changes
     autoResize()
   })
-
-  async function openAttach() {
-    // Same machine as the agent: attach a file by real path (no upload).
-    //  - desktop shell → native OS file dialog
-    //  - localhost web → in-app file picker (server-side fs browse)
-    // Remote web → browser upload (front and back aren't co-located).
-    if (get(nativeShell)) {
-      try {
-        const res = await api.nativePickFile(workingDir)
-        if (!res.cancelled && res.path) attachLocalFile(res.path)
-      } catch (e: any) {
-        showToast(e.message ?? 'Failed to open file dialog', 'error')
-      }
-      return
-    }
-    if (get(localAccess)) {
-      pickerMode = 'file'
-      pickerOpen = true
-      return
-    }
-    fileInputEl?.click()
-  }
-
-  // Attach a real local file by its absolute path — the agent reads it in place
-  // (see server parseUserFiles' local_path handling), no upload round-trip.
-  function attachLocalFile(path: string) {
-    const name = path.split(/[/\\]/).pop() || path
-    attachTo(sid, { name, local_path: path })
-  }
 
   // Attachment reads (image FileReader, non-image upload) resolve asynchronously.
   // These helpers land the result on the session that STARTED the read, not
@@ -252,13 +222,6 @@
       dropAttachment(originSid, id)
       showToast(e.message ?? `Failed to upload ${name}`, 'error')
     }
-  }
-
-  function onFilesPicked(e: Event) {
-    const input = e.target as HTMLInputElement
-    const files = Array.from(input.files ?? [])
-    for (const f of files) addAttachment(f)
-    input.value = ''
   }
 
   // Paste files from the clipboard into the composer (images or any other file).
@@ -672,7 +635,6 @@
   let dirDraft = $state('')
   let dirSaving = $state(false)
   let pickerOpen = $state(false)
-  let pickerMode = $state<'folder' | 'file'>('folder')
   const reasoningLevels = ['off', 'low', 'medium', 'high', 'xhigh', 'max']
   const showReasoningIcon = $derived(showReasoning ? 'ant-design:eye-outlined' : 'ant-design:eye-invisible-outlined')
 
@@ -804,18 +766,11 @@
       }
       return
     }
-    pickerMode = 'folder'
     pickerOpen = true
   }
 
-  // The in-app picker returns a path: a directory (folder mode → working dir) or
-  // a file (file mode → attach by local path). Same modal, two modes.
+  // The in-app picker sets the session working directory.
   async function onPickerSelect(path: string) {
-    if (pickerMode === 'file') {
-      attachLocalFile(path)
-      pickerOpen = false
-      return
-    }
     if (await applyWorkingDir(path)) pickerOpen = false
   }
 
@@ -1006,9 +961,6 @@
         </div>
       {/if}
       <div class="input-row">
-        <button class="tool-btn" title={$t('chat.attach_file')} onclick={openAttach}>
-          <iconify-icon icon="ant-design:paper-clip-outlined" width="15"></iconify-icon>
-        </button>
         {#if agentLabel}
         <div class="picker">
           <button class="agent-chip" title={$t('composer.assign_agent')} onclick={(e) => { e.stopPropagation(); const open = agentMenu; closeMenus(); agentMenu = !open }}>
@@ -1105,13 +1057,6 @@
           {/each}
         </div>
       {/if}
-      <input
-        bind:this={fileInputEl}
-        type="file"
-        multiple
-        style="display:none"
-        onchange={onFilesPicked}
-      />
       <div class="meta-row">
         <div class="picker">
           <button class="meta-chip" onclick={(e) => { e.stopPropagation(); const open = modelMenu; closeMenus(); modelMenu = !open }}>
@@ -1231,7 +1176,7 @@
 {#if pickerOpen}
   <FolderPickerModal
     initialPath={workingDir}
-    mode={pickerMode}
+    mode="folder"
     onSelect={onPickerSelect}
     onClose={() => (pickerOpen = false)}
   />
@@ -1318,7 +1263,7 @@ textarea {
   border: none; outline: none; resize: none; font-size: 14px; line-height: 1.6;
   font-family: inherit; color: var(--text); background: transparent;
   flex: 1; min-width: 0; margin: 4px 4px 5px;
-  max-height: 200px; overflow-y: hidden; min-height: 24px; /* ≈ MIN_TEXTAREA_PX in autoResize */
+  max-height: 156px; overflow-y: hidden; min-height: 24px; /* ≈ MIN_TEXTAREA_PX in autoResize */
 }
 .agent-chip {
   display: inline-flex; align-items: center; gap: 6px;
@@ -1375,13 +1320,6 @@ textarea {
 .meta-chip.static { cursor: default; }
 .meta-chip.static:hover { color: var(--text-secondary); background: transparent; }
 .ctx-pct { color: var(--text); font-weight: 600; }
-.tool-btn {
-  width: 28px; height: 28px; flex: 0 0 auto; margin-bottom: 2px;
-  border: none; background: transparent; border-radius: 6px;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; color: var(--text-tertiary);
-}
-.tool-btn:hover { background: var(--hover-neutral); color: var(--text-secondary); }
 .send-btn {
   width: 38px; height: 30px; flex: 0 0 auto; margin-bottom: 1px;
   border: none; background: var(--blue-6); border-radius: 9px;
