@@ -628,9 +628,11 @@
   // shows that session's own profile.
   let agents = $state<api.Agent[]>([])
   let sessionAgent = $derived((currentSession as any)?.agent_profile ?? '')
+  // Empty when the default agent applies — the chip only renders for an
+  // expert agent; the default state keeps a bare "@" ghost button instead.
   let agentLabel = $derived.by(() => {
     const id = sessionAgent && sessionAgent !== 'default' ? sessionAgent : ($activeAgent !== 'default' ? $activeAgent : '')
-    if (!id) return 'Octo'
+    if (!id) return ''
     return agents.find(a => a.id === id)?.name ?? id
   })
   function pickAgent(id: string) {
@@ -980,10 +982,14 @@
         </button>
         <button class="tool-btn skill-btn" title={$t('chat.insert_slash')} onclick={insertSkill}>/</button>
         <div class="picker">
-          <button class="agent-chip" title={$t('composer.assign_agent')} onclick={(e) => { e.stopPropagation(); const open = agentMenu; closeMenus(); agentMenu = !open }}>
-            <span class="agent-at">@</span>
-            <span class="agent-name">{agentLabel}</span>
-          </button>
+          {#if agentLabel}
+            <button class="agent-chip" title={$t('composer.assign_agent')} onclick={(e) => { e.stopPropagation(); const open = agentMenu; closeMenus(); agentMenu = !open }}>
+              <span class="agent-at">@</span>
+              <span class="agent-name">{agentLabel}</span>
+            </button>
+          {:else}
+            <button class="tool-btn agent-ghost" title={$t('composer.assign_agent')} onclick={(e) => { e.stopPropagation(); const open = agentMenu; closeMenus(); agentMenu = !open }}>@</button>
+          {/if}
           {#if agentMenu}
             <div class="menu agent-menu" onclick={(e) => e.stopPropagation()}>
               <div class="menu-label">{$t('composer.assign_agent')}</div>
@@ -1343,6 +1349,7 @@ textarea {
 }
 .tool-btn:hover { background: var(--hover-neutral); color: var(--text-secondary); }
 .skill-btn { font-size: 14px; font-family: var(--font-mono); }
+.agent-ghost { font-size: 13px; font-weight: 600; font-family: var(--font-mono); }
 .send-btn {
   width: 38px; height: 30px; flex: 0 0 auto; margin-bottom: 1px;
   border: none; background: var(--blue-6); border-radius: 9px;
