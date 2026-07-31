@@ -277,9 +277,12 @@
       </div>
       <div class="alt-row">
         <span data-en="Also on" data-zh="其他平台"></span>
-        <a href="https://github.com/open-octo/octo-agent/releases/latest/download/octo-setup.pkg">macOS .pkg</a>
-        <a href="https://github.com/open-octo/octo-agent/releases/latest/download/octo-setup.exe">Windows .exe</a>
-        <a href="https://github.com/open-octo/octo-agent/releases/latest/download/Octo-x86_64.AppImage">Linux AppImage</a>
+        <!-- Direct asset links go through the dl mirror: same bytes (the
+             worker proxies GitHub releases), but reachable from networks
+             where github.com is blocked. Browse links stay on GitHub. -->
+        <a href="https://dl.octo-agent.dev/releases/latest/download/octo-setup.pkg">macOS .pkg</a>
+        <a href="https://dl.octo-agent.dev/releases/latest/download/octo-setup.exe">Windows .exe</a>
+        <a href="https://dl.octo-agent.dev/releases/latest/download/Octo-x86_64.AppImage">Linux AppImage</a>
         <a href="https://github.com/open-octo/octo-agent/releases/latest" data-en="All builds &amp; checksums →" data-zh="全部版本与校验和 →"></a>
       </div>
       <div class="cli-row">
@@ -562,7 +565,7 @@
     <h2 data-en="Your agent. Your machine. Your data." data-zh="你的 agent。你的机器。你的数据。"></h2>
     <p data-en="Install in seconds, configure in a minute, ship in an hour." data-zh="几秒安装，一分钟配置，一小时交付。"></p>
     <div class="cta-row" style="margin-bottom:0">
-      <a class="btn-primary" href="https://github.com/open-octo/octo-agent/releases/latest">
+      <a class="btn-primary" href="#get-started">
         <iconify-icon icon="ant-design:download-outlined" width="17"></iconify-icon>
         <span data-en="Download for free" data-zh="免费下载"></span>
       </a>
@@ -627,7 +630,7 @@
 
     // ----- OS-aware primary download -----
     (function(){
-      const base='https://github.com/open-octo/octo-agent/releases/latest/download/';
+      const base='https://dl.octo-agent.dev/releases/latest/download/';
       const ua=(navigator.userAgent||'')+' '+(navigator.platform||'');
       const main=document.getElementById('get-started');
       const icon=document.getElementById('dl-icon');
