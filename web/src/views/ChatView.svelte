@@ -49,6 +49,7 @@
     agenticSessions,
     chatGoal,
     nativeShell,
+    panelContent,
   } from '../lib/stores'
   import { ws, wsState, wsReconnect } from '../lib/ws'
   import * as api from '../lib/api'
@@ -57,7 +58,6 @@
   import { t, tr } from '../lib/i18n'
   import { confirmDialog } from '../lib/confirm'
   import { insertPendingSend } from '../lib/pendingSendOrder'
-  import StatusTag from '../components/ui/StatusTag.svelte'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
   import SubAgentsCard from '../components/chat/SubAgentsCard.svelte'
   import WorkflowsCard from '../components/chat/WorkflowsCard.svelte'
@@ -247,6 +247,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   }
   function fmtTokens(n: number): string {
     return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`
+  }
+  // HH:MM for the message meta row; only optimistic sends carry createdAt, so
+  // the row simply omits the time for replayed history.
+  function fmtTime(ts: number): string {
+    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   }
 
   // ── history handler ────────────────────────────────────────────────────────
@@ -1669,9 +1674,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         </span>
       {/if}
       {#if streaming}
-        <StatusTag status="info">{$t('status.running')}</StatusTag>
+        <span class="state-pill running"><span class="state-dot"></span>{$t('status.running')}</span>
       {:else}
-        <StatusTag status="default">{$t('status.idle')}</StatusTag>
+        <span class="state-pill"><span class="state-dot"></span>{$t('status.idle')}</span>
       {/if}
     </div>
     <div class="header-actions">
@@ -1684,6 +1689,13 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       }}>
         <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
         <span class="btn-label">{$t('chat.clear')}</span>
+      </button>
+      <button class="hdr-btn" title={$t('artifacts.toggle')} onclick={() => {
+        if ($panelContent) panelContent.set(null)
+        else panelContent.set(id && $artifacts.length > 0 ? 'session' : 'lightapps')
+      }}>
+        <iconify-icon icon="lucide:box" width="13"></iconify-icon>
+        <span class="btn-label">{$t('artifacts.toggle')}</span>
       </button>
       <button class="hdr-btn" title={$t('chat.export')} onclick={exportTranscript}>
         <iconify-icon icon="ant-design:export-outlined" width="13"></iconify-icon>
@@ -1759,15 +1771,33 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       <div class="messages" bind:this={messagesEl}>
         <div class="messages-inner" bind:this={innerEl}>
 
+          <!-- Meta row for an assistant turn: rendered on the first assistant
+               chunk after a user message (text/thinking/tools are separate
+               entries, so later chunks of the same turn skip it). Time shows
+               only when the entry carries createdAt — replayed history doesn't. -->
+          {#snippet agentMeta(show: boolean, ts?: number)}
+            {#if show}
+              <div class="msg-meta">
+                <span class="meta-avatar bot" aria-hidden="true"><OctoLogo size={22} /></span>
+                <span class="meta-name">Octo</span>
+                {#if ts}<span class="meta-time">{fmtTime(ts)}</span>{/if}
+              </div>
+            {/if}
+          {/snippet}
+
           {#each msgs as msg, i (msg.id)}
             {#if msg.type === 'user'}
               <!-- Right-aligned user bubble -->
               <div class="msg-user fadein" id={`msg-${msg.id}`}>
-                <div class="user-avatar" aria-hidden="true">
-                  <iconify-icon icon="ant-design:user-outlined" width="16"></iconify-icon>
+                <div class="msg-meta">
+                  <span class="meta-avatar user" aria-hidden="true">
+                    <iconify-icon icon="ant-design:user-outlined" width="13"></iconify-icon>
+                  </span>
+                  <span class="meta-name">{$t('chat.you')}</span>
+                  {#if msg.createdAt}<span class="meta-time">{fmtTime(msg.createdAt)}</span>{/if}
                 </div>
-                <div class="user-bubble-wrap">
-                  <div class="user-bubble" class:pending={msg.pending}>
+                <div class="user-card-wrap">
+                  <div class="user-card" class:pending={msg.pending}>
                     {#if msg.files && msg.files.length > 0}
                       <div class="msg-attachments">
                         {#each msg.files as f}
@@ -1839,7 +1869,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
             {:else if msg.type === 'assistant'}
               <!-- Assistant message with avatar -->
               <div class="msg-agent fadein">
-                <div class="agent-avatar"><OctoLogo size={18} /></div>
+                {@render agentMeta(i === 0 || msgs[i - 1]?.type === 'user', msg.createdAt)}
                 <div class="agent-content">
                   <!-- Plan card (todos attached to this message) -->
                   {#if msg.todos && msg.todos.length > 0}
@@ -1917,7 +1947,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
             {:else if msg.type === 'thinking' && showReasoning}
               <!-- Standalone Thoughts segment (reasoning before a tool round) -->
               <div class="msg-agent fadein">
-                <div class="agent-avatar"><OctoLogo size={18} /></div>
+                {@render agentMeta(i === 0 || msgs[i - 1]?.type === 'user', msg.createdAt)}
                 <div class="agent-content">
                   <details class="think-block">
                     <summary class="think-summary">
@@ -1933,7 +1963,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
             {:else if msg.type === 'tool_group'}
               <!-- Tool group card -->
               <div class="msg-agent fadein">
-                <div class="agent-avatar"><OctoLogo size={18} /></div>
+                {@render agentMeta(i === 0 || msgs[i - 1]?.type === 'user', msg.createdAt)}
                 <div class="agent-content">
                   <ToolGroup tools={msg.tools} streaming={msg.streaming} />
                 </div>
@@ -1942,7 +1972,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
             {:else if msg.type === 'progress'}
               <!-- Inline progress message -->
               <div class="msg-agent fadein">
-                <div class="agent-avatar"><OctoLogo size={18} /></div>
                 <div class="thinking-indicator">
                   <iconify-icon icon="ant-design:loading-outlined" width="15" style="color:var(--blue-6);animation:octo-spin 0.8s linear infinite"></iconify-icon>
                   <span>{msg.content || $t('chat.thinking')}</span>
@@ -1952,10 +1981,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
             {:else if msg.type === 'notice'}
               <!-- Inline scrollback notice (background process completion, etc.) -->
               <div class="msg-agent fadein">
-                <div class="agent-avatar notice-avatar" data-level={msg.level}>
-                  <iconify-icon icon="lucide:info" width="14"></iconify-icon>
-                </div>
-                <div class="agent-content">
+                <div class="notice-row">
+                  <span class="notice-avatar" data-level={msg.level}>
+                    <iconify-icon icon="lucide:info" width="14"></iconify-icon>
+                  </span>
                   <div class="notice-line" data-level={msg.level}>{@html renderMarkdown(msg.content, showReasoning)}</div>
                 </div>
               </div>
@@ -1969,7 +1998,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                  removed and the array empties). A default local transition would
                  only play on an {#each}-item removal inside a still-mounted card. -->
             <div class="msg-agent fadein" out:fade|global={{ duration: 250 }}>
-              <div class="agent-avatar"><OctoLogo size={18} /></div>
               <div class="agent-content">
                 <SubAgentsCard agents={subAgents} elapsed={subAgentsElapsed} />
               </div>
@@ -1979,7 +2007,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           <!-- Live thinking block while streaming -->
           {#if streaming && thinking && showReasoning}
             <div class="msg-agent fadein">
-              <div class="agent-avatar"><OctoLogo size={18} /></div>
               <div class="agent-content">
                 <details class="think-block" open>
                   <summary class="think-summary">
@@ -1996,7 +2023,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           <!-- Live thinking indicator while streaming -->
           {#if streaming && progress}
             <div class="msg-agent fadein">
-              <div class="agent-avatar"><OctoLogo size={18} /></div>
               <div class="thinking-indicator">
                 <iconify-icon icon="ant-design:loading-outlined" width="15" style="color:var(--blue-6);animation:octo-spin 0.8s linear infinite"></iconify-icon>
                 <span>{thinkingLabel}</span>
@@ -2157,28 +2183,38 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
 .chat-header {
-  flex: 0 0 auto; background: var(--bg-container); border-bottom: 1px solid var(--border-secondary);
-  padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  flex: 0 0 auto; background: var(--bg-layout); border-bottom: 1px solid var(--border);
+  padding: 7px 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
   container-type: inline-size;
 }
 .title-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .session-title {
-  font-size: 16px; font-weight: 600; color: var(--text-heading);
+  font-size: 15px; font-weight: 600; color: var(--text-heading);
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.state-pill {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px;
+  border-radius: var(--radius-pill); background: var(--hover-neutral);
+  font-size: 11px; font-weight: 500; color: var(--text-secondary); white-space: nowrap;
+}
+.state-pill .state-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-secondary); }
+.state-pill.running { background: var(--active-blue-bg); color: var(--blue-6); }
+.state-pill.running .state-dot { background: var(--blue-6); animation: octo-pulse 1.2s infinite; }
+@keyframes octo-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .header-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 .hdr-btn {
-  height: 28px; padding: 0 12px; border: 1px solid var(--border); background: var(--bg-container);
-  border-radius: 6px; display: flex; align-items: center; gap: 8px; white-space: nowrap;
-  font-size: 13px; color: var(--text-secondary); cursor: pointer; font-family: inherit;
+  height: 30px; padding: 0 11px; border: 1px solid var(--border); background: var(--bg-container);
+  border-radius: var(--radius-sm); display: flex; align-items: center; gap: 6px; white-space: nowrap;
+  font-size: 12px; font-weight: 500; color: var(--text); cursor: pointer; font-family: inherit;
+  box-shadow: 0 1px 1.5px rgba(0,0,0,0.04); transition: 0.12s;
 }
 /* Not enough room for labels: keep the icons (tooltips carry the meaning). */
 @container (max-width: 680px) {
   .btn-label { display: none; }
   .hdr-btn { padding: 0 8px; }
 }
-.hdr-btn:hover { border-color: var(--blue-5); color: var(--blue-5); }
-.hdr-btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: var(--border); color: var(--text-quaternary); }
+.hdr-btn:hover { background: var(--bg-table-header); border-color: var(--border); }
+.hdr-btn:disabled { opacity: 0.5; cursor: not-allowed; color: var(--text-quaternary); }
 
 /* ── WS banner ───────────────────────────────────────────────────────────── */
 .ws-banner {
@@ -2365,26 +2401,33 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   padding: 24px 24px 16px; display: flex; flex-direction: column; gap: 20px;
 }
 
-/* ── User message ────────────────────────────────────────────────────────── */
-.msg-user { display: flex; justify-content: flex-end; gap: 12px; }
-.user-bubble-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; max-width: 80%; }
-.user-avatar {
-  width: 28px; height: 28px; flex: 0 0 28px; border-radius: 8px;
-  background: var(--bg-tertiary); color: var(--text-secondary);
-  display: flex; align-items: center; justify-content: center;
-  order: 1;
+/* ── Message meta row (avatar · name · time) ─────────────────────────────── */
+.msg-meta { display: flex; align-items: center; gap: 8px; }
+.meta-avatar {
+  width: 22px; height: 22px; flex: 0 0 22px; border-radius: 6px;
+  display: grid; place-items: center; color: var(--on-accent); overflow: hidden;
 }
-.user-bubble {
-  background: var(--blue-1); border: 1px solid var(--blue-2);
-  border-radius: 12px 12px 4px 12px; padding: 10px 14px;
-  font-size: 14px; line-height: 1.6; color: var(--text);
+.meta-avatar.user { background: var(--text-quaternary); }
+/* The logo is already an app-icon style mark (blue rounded square); no well. */
+.meta-avatar.bot { background: transparent; color: var(--blue-6); }
+.meta-avatar.bot :global(svg) { width: 22px; height: 22px; }
+.meta-name { font-size: 13px; font-weight: 600; color: var(--text-heading); }
+.meta-time { font-size: 11px; color: var(--text-secondary); }
+
+/* ── User message ────────────────────────────────────────────────────────── */
+.msg-user { display: flex; flex-direction: column; gap: 9px; }
+.user-card-wrap { display: flex; flex-direction: column; gap: 4px; }
+.user-card {
+  background: var(--bg-container); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 16px; box-shadow: var(--card-shadow);
+  font-size: 13px; line-height: 1.65; color: var(--text);
   white-space: pre-wrap; word-break: break-word;
   display: flex; flex-direction: column; gap: 8px;
 }
-/* Pending (queued) bubble — an optimistic echo, or a steer message waiting to
+/* Pending (queued) card — an optimistic echo, or a steer message waiting to
    be drained into the running turn. Dimmed with a small spinner until the
    server confirms it via history_user_message. */
-.user-bubble.pending { opacity: 0.65; }
+.user-card.pending { opacity: 0.65; }
 .pending-spinner {
   display: inline-block; width: 10px; height: 10px; margin-left: 6px;
   vertical-align: -1px; border-radius: 50%;
@@ -2392,21 +2435,13 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   animation: octo-spin 0.8s linear infinite;
 }
 
-/* ── Inline attachments inside user bubbles ──────────────────────────────── */
-.msg-attachments { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
-.msg-image { max-width: 100%; max-height: 320px; border-radius: 8px; border: 1px solid var(--blue-2); }
+/* ── Inline attachments inside user cards ────────────────────────────────── */
+.msg-attachments { display: flex; flex-wrap: wrap; gap: 8px; }
+.msg-image { max-width: 100%; max-height: 320px; border-radius: 8px; border: 1px solid var(--border); }
 
 /* ── Agent message ───────────────────────────────────────────────────────── */
-.msg-agent { display: flex; gap: 12px; }
-.agent-avatar {
-  width: 28px; height: 28px; flex: 0 0 28px; border-radius: 8px;
-  background: var(--blue-6); color: var(--blue-6);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 13px; font-weight: 600;
-  overflow: hidden;
-}
-.agent-avatar :global(svg) { width: 100%; height: 100%; }
-.agent-content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.msg-agent { display: flex; flex-direction: column; gap: 12px; }
+.agent-content { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 
 /* ── Plan card ───────────────────────────────────────────────────────────── */
 .plan-card { border: 1px solid var(--blue-2); border-radius: 10px; background: var(--surface-info); overflow: hidden; }
@@ -2461,15 +2496,21 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   background: var(--surface-info); border-radius: 0 6px 6px 0;
   font-size: 13px; line-height: 1.6; color: var(--text-secondary);
 }
-:global(.think-block) { border-radius: 8px; }
-:global(.think-summary) {
-  list-style: none; display: inline-flex; align-items: center; gap: 6px;
-  cursor: pointer; user-select: none; font-size: 13px; color: var(--text-tertiary);
+/* Reasoning card — a bordered fold matching the design's tool-card look. */
+:global(.think-block) {
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg-container); box-shadow: var(--card-shadow);
 }
+:global(.think-summary) {
+  list-style: none; display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px; cursor: pointer; user-select: none;
+  font-size: 12px; color: var(--text-secondary);
+}
+:global(.think-summary > span:first-of-type) { font-weight: 600; color: var(--text); font-size: 13px; }
 :global(.think-summary::-webkit-details-marker) { display: none; }
-:global(.think-summary:hover) { color: var(--text-secondary); }
+:global(.think-summary:hover) { background: var(--hover-neutral); border-radius: 10px; }
 :global(.think-body) {
-  margin-top: 8px; padding-left: 12px; border-left: 2px solid var(--border-secondary);
+  margin: 0 12px 10px; padding-left: 12px; border-left: 2px solid var(--border-secondary);
   font-size: 13px; line-height: 1.7; color: var(--text-tertiary); font-style: italic;
   display: flex; flex-direction: column; gap: 10px;
 }
@@ -2482,7 +2523,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   border-radius: 6px; display: flex; align-items: center; justify-content: center;
   cursor: pointer; color: var(--text-tertiary); opacity: 0; transition: opacity 0.12s;
 }
-.user-bubble-wrap:hover .action-btn,
+.user-card-wrap:hover .action-btn,
 .agent-content:hover .reply-actions .action-btn { opacity: 1; }
 .action-btn:hover { background: var(--hover-neutral); color: var(--blue-6); }
 
@@ -2517,7 +2558,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 .suggestion-chip:hover { border-color: var(--blue-6); color: var(--blue-6); }
 
 /* ── Inline scrollback notice ─────────────────────────────────────────────── */
+.notice-row { display: flex; align-items: flex-start; gap: 10px; }
 .notice-avatar {
+  width: 22px; height: 22px; flex: 0 0 22px;
+  display: grid; place-items: center;
   background: transparent;
   color: var(--text-tertiary);
 }

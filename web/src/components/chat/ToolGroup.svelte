@@ -59,6 +59,27 @@
     return TOOL_ICONS[name] ?? 'ant-design:tool-outlined'
   }
 
+  // Localized card titles for well-known tools; anything else (MCP tools,
+  // future additions) keeps its raw mono name, which is at least exact.
+  const TOOL_TITLE_KEYS: Record<string, string> = {
+    read_file: 'tools.title.read_file',
+    write_file: 'tools.title.write_file',
+    edit_file: 'tools.title.edit_file',
+    terminal: 'tools.title.terminal',
+    bash: 'tools.title.bash',
+    grep: 'tools.title.grep',
+    glob: 'tools.title.glob',
+    web_search: 'tools.title.web_search',
+    web_fetch: 'tools.title.web_fetch',
+    remember: 'tools.title.remember',
+    sub_agent: 'tools.title.sub_agent',
+    launch_agent: 'tools.title.launch_agent',
+    browser: 'tools.title.browser',
+    todo_write: 'tools.title.todo_write',
+    todowrite: 'tools.title.todo_write',
+    skill: 'tools.title.skill',
+  }
+
   // Build a friendly one-line summary of a tool's arguments instead of dumping
   // raw JSON. Falls back to compact JSON for unknown shapes.
   function argSummary(name: string, args: any): string {
@@ -397,32 +418,45 @@
       <details open={toolOpenState(toolOpen, tool, lastId, anyRunning) || !!pinnedIds[tool.id]} ontoggle={(e) => onToggle(tool, lastId, anyRunning, (e.currentTarget as HTMLDetailsElement).open)} class="tool-item">
         <summary class="tool-summary">
           <iconify-icon icon="lucide:chevron-right" width="13" class="chev" style="color:var(--text-tertiary)"></iconify-icon>
-          <iconify-icon icon={toolIcon(tool.name)} width="14" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
-          <span class="tool-name mono">{tool.name}</span>
-          {#if argText}
-            <span class="tool-arg mono" title={argText}>{argText}</span>
-          {/if}
-          {#if meta && !fErr && !tErr}<span class="tool-meta" style="margin-left:auto">{meta}</span>{/if}
-          <span style="{(meta && !fErr && !tErr) ? '' : 'margin-left:auto;'}flex:0 0 auto;display:flex;align-items:center">
+          <span class="tool-well" class:accent={tool.name === 'edit_file' || tool.name === 'write_file'}>
+            <iconify-icon icon={toolIcon(tool.name)} width="16"></iconify-icon>
+          </span>
+          <div class="tool-head">
+            <div class="tool-title-row">
+              {#if TOOL_TITLE_KEYS[tool.name]}
+                <span class="tool-title">{$t(TOOL_TITLE_KEYS[tool.name])}</span>
+              {:else}
+                <span class="tool-title mono">{tool.name}</span>
+              {/if}
+              {#if argText}
+                <span class="tool-arg mono" title={argText}>{argText}</span>
+              {/if}
+            </div>
+            {#if meta && !fErr && !tErr}<div class="tool-submeta">{meta}</div>{/if}
+          </div>
+          <span class="tool-status">
             {#if tool.error}
-              <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--error)">
+              <span class="st err">
                 <iconify-icon icon="ant-design:close-circle-outlined" width="14"></iconify-icon>
                 {$t('tools.failed')}
               </span>
             {:else if fErr}
-              <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--warning)">
+              <span class="st warn">
                 <iconify-icon icon="ant-design:warning-outlined" width="14"></iconify-icon>
                 {fErr}
               </span>
             {:else if tErr}
-              <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--warning)">
+              <span class="st warn">
                 <iconify-icon icon="ant-design:warning-outlined" width="14"></iconify-icon>
                 {tErr}
               </span>
             {:else if tool.done}
-              <iconify-icon icon="ant-design:check-circle-outlined" width="14" style="color:var(--success)"></iconify-icon>
+              <span class="st ok">
+                <iconify-icon icon="lucide:check" width="13"></iconify-icon>
+                {$t('tools.done')}
+              </span>
             {:else}
-              <span style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--blue-6)">
+              <span class="st run">
                 <iconify-icon icon="ant-design:loading-outlined" width="13" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
                 {$t('tools.running')}
                 {#if tool.name === 'terminal' || tool.name === 'bash'}
@@ -577,25 +611,44 @@
 {/if}
 
 <style>
-.tool-group { border: 1px solid var(--border-table); border-radius: 10px; background: var(--bg-container); overflow: hidden; }
+/* Cards, not rows: each tool is its own bordered card in a column, headed by
+   a slim label line (the design's tool-call treatment). */
+.tool-group { display: flex; flex-direction: column; gap: 8px; }
 .group-header {
   display: flex; align-items: center; gap: 8px;
-  padding: 9px 12px; background: var(--bg-table-header); border-bottom: 1px solid var(--border-table);
-  font-size: 13px; color: var(--text-secondary);
+  padding: 0 2px;
+  font-size: 12px; color: var(--text-secondary);
 }
 .hdr-label { flex: 0 0 auto; }
 .hdr-time { font-size: 12px; color: var(--text-tertiary); margin-left: 10px; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.tool-item { border-bottom: 1px solid var(--border-table); }
-.tool-item:last-child { border-bottom: none; }
+.mono { font-family: var(--font-mono); }
+.tool-item {
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg-container); box-shadow: var(--card-shadow);
+  overflow: hidden; transition: 0.12s;
+}
 .tool-summary {
-  list-style: none; display: flex; align-items: center; gap: 8px;
-  padding: 9px 12px; cursor: pointer; user-select: none;
+  list-style: none; display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px 8px 10px; cursor: pointer; user-select: none;
 }
 .tool-summary:hover { background: var(--hover-neutral); }
-.tool-name { font-size: 13px; color: var(--text); }
-.tool-arg { font-size: 12px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; cursor: text; }
-.tool-meta { font-size: 12px; color: var(--text-tertiary); }
+.tool-well {
+  width: 30px; height: 30px; flex: 0 0 30px; border-radius: var(--radius-sm);
+  display: grid; place-items: center;
+  background: var(--hover-neutral); color: var(--text-secondary);
+}
+.tool-well.accent { background: var(--active-blue-bg); color: var(--blue-6); }
+.tool-head { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tool-title-row { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.tool-title { font-size: 13px; font-weight: 600; color: var(--text); flex: 0 0 auto; }
+.tool-arg { font-size: 11px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; cursor: text; min-width: 0; }
+.tool-submeta { font-size: 11px; color: var(--text-secondary); }
+.tool-status { margin-left: auto; flex: 0 0 auto; display: flex; align-items: center; }
+.st { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; }
+.st.ok { color: var(--success); }
+.st.err { color: var(--error); }
+.st.warn { color: var(--warning); }
+.st.run { color: var(--blue-6); font-size: 12px; gap: 6px; }
 .tool-output {
   margin: 0; padding: 10px 14px; border-top: 1px solid var(--border-table);
   background: var(--bg-sidebar); font-size: 12px; line-height: 1.7;
