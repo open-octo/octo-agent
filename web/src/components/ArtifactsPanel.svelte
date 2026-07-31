@@ -171,15 +171,13 @@
   {#if $panelContent === 'lightapps'}
     <!-- ── Light Apps mode ───────────────────────────────────────────────── -->
     <div class="topbar">
-      <span class="file-name">{$t('artifacts.light_apps')}</span>
+      <iconify-icon icon="ant-design:appstore-outlined" width="15" style="color:var(--blue-6);flex:0 0 auto"></iconify-icon>
+      <span class="panel-title">{$t('artifacts.light_apps')}</span>
       <span style="flex:1"></span>
+      <span class="sandboxed-label">{$t('artifacts.sandboxed')}</span>
       <button class="icon-btn" title={$t('common.close')} onclick={closePanel}>
         <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
       </button>
-    </div>
-
-    <div class="toolbar">
-      <span class="sandboxed-label">{$t('artifacts.sandboxed')}</span>
     </div>
 
     <div class="body">
@@ -212,7 +210,8 @@
     <!-- ── Session mode (existing behavior) ────────────────────────────────── -->
     {#if !cur}
       <div class="topbar">
-        <span class="file-name">{$t('chat.artifacts')}</span>
+        <iconify-icon icon="lucide:box" width="15" style="color:var(--blue-6);flex:0 0 auto"></iconify-icon>
+        <span class="panel-title">{$t('artifacts.toggle')}</span>
         <span style="flex:1"></span>
         <button class="icon-btn" title={$t('common.close')} onclick={closePanel}>
           <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
@@ -224,23 +223,28 @@
       </div>
     {:else}
       <div class="topbar">
-        <iconify-icon icon={cur.icon} width="15" style="color:var(--blue-6);flex:0 0 auto"></iconify-icon>
-        <div class="file-info">
-          <span class="file-name">{cur.name}</span>
-          <span class="file-meta">{cur.type}</span>
-        </div>
-        <button class="icon-btn" title={$t('artifacts.copy')} disabled={!cur.loaded || cur.loadFailed} onclick={onCopy}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
-        <button class="icon-btn" title={$t('artifacts.download')} disabled={!cur.loaded || cur.loadFailed} onclick={onDownload}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
-        {#if curIsHTML}
-          <button class="icon-btn" title={$t('artifacts.save_to_lightapp')} disabled={!cur.loaded || cur.loadFailed} onclick={openSaveToLA}>
-            <iconify-icon icon="ant-design:save-outlined" width="14"></iconify-icon>
-          </button>
+        <iconify-icon icon="lucide:box" width="15" style="color:var(--blue-6);flex:0 0 auto"></iconify-icon>
+        <span class="panel-title">{$t('artifacts.toggle')}</span>
+        <span style="flex:1"></span>
+        {#if !curIsImage}
+          <div class="seg">
+            <button class="seg-btn" class:active={$artifactView === 'preview'} onclick={() => artifactView.set('preview')}>{$t('artifacts.preview')}</button>
+            <button class="seg-btn" class:active={$artifactView === 'code'} onclick={() => artifactView.set('code')}>{$t('artifacts.code')}</button>
+          </div>
         {/if}
-        <button class="icon-btn" title={$t('artifacts.maximize')} onclick={() => { panelContent.set(null); artifactModalOpen.set(true) }}>
-          <iconify-icon icon="ant-design:expand-outlined" width="14"></iconify-icon>
-        </button>
         <button class="icon-btn" title={$t('common.close')} onclick={closePanel}>
           <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
+        </button>
+      </div>
+
+      <div class="file-row">
+        <iconify-icon icon={cur.icon} width="14" style="color:var(--text-secondary);flex:0 0 auto"></iconify-icon>
+        <span class="file-name mono">{cur.name}</span>
+        <span class="file-meta">{cur.type}</span>
+        <span style="flex:1"></span>
+        <span class="sandboxed-label">{$t('artifacts.sandboxed')}</span>
+        <button class="icon-btn" title={$t('artifacts.maximize')} onclick={() => { panelContent.set(null); artifactModalOpen.set(true) }}>
+          <iconify-icon icon="ant-design:expand-outlined" width="14"></iconify-icon>
         </button>
       </div>
 
@@ -257,16 +261,6 @@
             {saveToLALoading ? '…' : $t('common.save')}
           </button>
           <button class="btn-action" onclick={() => saveToLADialog = false}>{$t('common.cancel')}</button>
-        </div>
-      {/if}
-
-      {#if !curIsImage}
-        <div class="toolbar">
-          <div class="seg">
-            <button class="seg-btn" class:active={$artifactView === 'preview'} onclick={() => artifactView.set('preview')}>{$t('artifacts.preview')}</button>
-            <button class="seg-btn" class:active={$artifactView === 'code'} onclick={() => artifactView.set('code')}>{$t('artifacts.code')}</button>
-          </div>
-          <span class="sandboxed-label">{$t('artifacts.sandboxed')}</span>
         </div>
       {/if}
 
@@ -290,14 +284,32 @@
         {/if}
       </div>
 
+      {#if $artifacts.length > 1}
+        <div class="switcher">
+          {#each $artifacts as a, i}
+          <button class="chip" class:active={i === $artifactSel} title={a.path} onclick={() => artifactSel.set(i)}>
+            <iconify-icon icon={a.icon} width="13"></iconify-icon>
+            {a.short}
+          </button>
+          {/each}
+        </div>
+      {/if}
+
       <div class="footer">
-        <span class="footer-lbl">{$t('chat.artifacts')}</span>
-        {#each $artifacts as a, i}
-        <button class="chip" class:active={i === $artifactSel} title={a.path} onclick={() => artifactSel.set(i)}>
-          <iconify-icon icon={a.icon} width="13"></iconify-icon>
-          {a.short}
+        <button class="wbtn" disabled={!cur.loaded || cur.loadFailed} onclick={onCopy}>
+          <iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon>
+          {$t('artifacts.copy')}
         </button>
-        {/each}
+        <button class="wbtn" disabled={!cur.loaded || cur.loadFailed} onclick={onDownload}>
+          <iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon>
+          {$t('artifacts.download')}
+        </button>
+        {#if curIsHTML}
+          <button class="wbtn" disabled={!cur.loaded || cur.loadFailed} onclick={openSaveToLA}>
+            <iconify-icon icon="ant-design:save-outlined" width="14"></iconify-icon>
+            {$t('artifacts.save_to_lightapp')}
+          </button>
+        {/if}
       </div>
     {/if}
   {/if}
@@ -305,8 +317,11 @@
 
 <style>
 .panel {
-  flex: 0 0 auto; background: var(--bg-container);
-  border-left: 1px solid var(--border-secondary); display: flex; flex-direction: column; min-height: 0;
+  flex: 0 0 auto;
+  background: var(--panel-frost);
+  backdrop-filter: blur(var(--frost-blur));
+  -webkit-backdrop-filter: blur(var(--frost-blur));
+  border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0;
   position: relative;
 }
 .resize-handle {
@@ -316,11 +331,16 @@
 .resize-handle:hover { background: var(--focus-ring); }
 .topbar {
   flex: 0 0 auto; padding: 8px 8px 8px 16px;
-  border-bottom: 1px solid var(--border-secondary); display: flex; align-items: center; gap: 6px;
+  border-bottom: 1px solid var(--border-secondary); display: flex; align-items: center; gap: 8px;
 }
-.file-info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
-.file-name { font-size: 13px; font-weight: 600; color: var(--text-heading); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-meta { font-size: 11px; color: var(--text-tertiary); }
+.panel-title { font-size: 13px; font-weight: 600; color: var(--text-heading); white-space: nowrap; }
+.file-row {
+  flex: 0 0 auto; padding: 7px 10px 7px 16px;
+  border-bottom: 1px solid var(--border-secondary); display: flex; align-items: center; gap: 8px;
+}
+.file-name { font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-meta { font-size: 11px; color: var(--text-tertiary); flex: 0 0 auto; }
+.mono { font-family: var(--font-mono); }
 .icon-btn {
   width: 28px; height: 28px; flex: 0 0 28px; border: none; background: transparent;
   border-radius: 6px; display: flex; align-items: center; justify-content: center;
@@ -328,16 +348,12 @@
 }
 .icon-btn:hover:not(:disabled) { background: var(--hover-neutral); color: var(--blue-6); }
 .icon-btn:disabled { opacity: 0.45; cursor: default; }
-.toolbar {
-  flex: 0 0 auto; padding: 8px 12px; border-bottom: 1px solid var(--border-table);
-  display: flex; align-items: center; gap: 8px;
-}
-.seg { display: inline-flex; padding: 2px; background: var(--control-track); border-radius: 8px; gap: 2px; }
+.seg { display: inline-flex; padding: 2px; background: var(--control-track); border-radius: 8px; gap: 2px; flex: 0 0 auto; }
 .seg-btn {
-  height: 26px; padding: 0 14px; border: none; border-radius: 6px; font-size: 12px;
+  height: 24px; padding: 0 12px; border: none; border-radius: 6px; font-size: 12px;
   cursor: pointer; background: transparent; color: var(--text-secondary); font-family: inherit;
 }
-.seg-btn.active { background: var(--bg-container); color: var(--blue-6); }
+.seg-btn.active { background: var(--bg-container); color: var(--blue-6); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
 .sandboxed-label { margin-left: auto; font-size: 11px; color: var(--text-tertiary); }
 .body { flex: 1; min-height: 0; background: var(--bg-container); }
 .body-loading { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); }
@@ -362,11 +378,23 @@ iframe { border: 0; width: 100%; height: 100%; display: block; }
   padding: 14px 16px; background: var(--bg-sidebar); font-size: 12px; line-height: 1.7;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); white-space: pre;
 }
-.footer {
+.switcher {
   flex: 0 0 auto; border-top: 1px solid var(--border-secondary);
   padding: 8px 12px; display: flex; align-items: center; gap: 6px; overflow-x: auto;
 }
+.footer {
+  flex: 0 0 auto; border-top: 1px solid var(--border-secondary);
+  padding: 10px 16px; display: flex; align-items: center; gap: 8px; overflow-x: auto;
+}
 .footer-lbl { font-size: 11px; color: var(--text-tertiary); flex: 0 0 auto; margin-right: 2px; }
+.wbtn {
+  display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px;
+  background: var(--bg-container); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text); font-size: 12px; font-weight: 500; cursor: pointer; font-family: inherit;
+  white-space: nowrap; box-shadow: 0 1px 1.5px rgba(0,0,0,0.04); transition: 0.12s; flex: 0 0 auto;
+}
+.wbtn:hover:not(:disabled) { background: var(--bg-table-header); }
+.wbtn:disabled { opacity: 0.5; cursor: default; }
 .chip {
   height: 30px; padding: 0 10px; border: 1px solid var(--border-secondary); background: var(--bg-container);
   color: var(--text-secondary); border-radius: 6px; display: flex; align-items: center;
