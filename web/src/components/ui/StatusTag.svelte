@@ -3,14 +3,14 @@
   let { status = 'default', children }: { status?: TagStatus, children?: any } = $props()
 
   const styles: Record<TagStatus, string> = {
-    success: 'background:var(--success-bg);border-color:var(--success-border);color:var(--success)',
-    info:    'background:var(--blue-1);border-color:var(--info-border);color:var(--blue-6)',
-    warning: 'background:var(--warning-bg);border-color:var(--warning-border);color:var(--warning)',
-    error:   'background:var(--error-bg);border-color:var(--error-border);color:var(--error)',
-    default: 'background:var(--bg-table-header);border-color:var(--border);color:var(--text)',
+    success: 'background:var(--success-bg);color:var(--success-text)',
+    info:    'background:var(--active-blue-bg);color:var(--blue-6)',
+    warning: 'background:var(--warning-bg);color:var(--warning-text)',
+    error:   'background:var(--error-bg);color:var(--error-text)',
+    default: 'background:var(--hover-neutral);color:var(--text-secondary)',
   }
 </script>
 
-<span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;border:1px solid;border-radius:4px;font-size:12px;white-space:nowrap;{styles[status]}">
+<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:500;white-space:nowrap;{styles[status]}">
   {@render children?.()}
 </span>

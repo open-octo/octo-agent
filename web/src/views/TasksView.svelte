@@ -196,20 +196,21 @@
 
 <style>
 /* ── layout ─────────────────────────────────────────────────────────────────── */
-.page { flex: 1; overflow-y: auto; min-height: 0; }
-.inner { max-width: 1080px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
+.page { flex: 1; overflow-y: auto; min-height: 0; background: var(--bg-layout); }
+.inner { max-width: 1000px; margin: 0 auto; padding: 26px 28px 40px; display: flex; flex-direction: column; gap: 20px; }
 
 /* ── page header ─────────────────────────────────────────────────────────────── */
 .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.title-block { display: flex; flex-direction: column; gap: 4px; }
-h2 { margin: 0; font-size: 24px; font-weight: 600; color: var(--text-heading); }
-p { margin: 0; font-size: 14px; color: var(--text-secondary); }
+.title-block { display: flex; flex-direction: column; }
+h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; color: var(--text-heading); }
+p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 60ch; }
 
 /* ── buttons ─────────────────────────────────────────────────────────────────── */
 .btn-primary {
   height: 32px; padding: 0 14px; border: none; background: var(--blue-6);
-  border-radius: 6px; font-size: 14px; color: #fff; cursor: pointer;
+  border-radius: 8px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer;
   font-family: inherit; display: inline-flex; align-items: center; gap: 6px;
+  box-shadow: 0 1px 2px rgba(0,122,255,0.35);
 }
 .btn-primary:hover:not(:disabled) { background: var(--blue-5); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -219,22 +220,23 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 
 /* ── table ───────────────────────────────────────────────────────────────────── */
 .table-card {
-  background: var(--bg-container); border-radius: 16px;
+  background: var(--bg-container); border: 1px solid var(--border); border-radius: var(--radius-card);
   box-shadow: var(--card-shadow); overflow-x: auto;
 }
 .table-header, .table-row {
   display: grid;
   grid-template-columns: minmax(170px,2.4fr) 120px minmax(110px,1.2fr) 96px 120px;
-  column-gap: 12px; align-items: center; padding: 0 24px; min-width: 690px;
+  column-gap: 12px; align-items: center; min-width: 690px;
 }
 .table-header {
-  height: 44px; background: var(--bg-table-header);
-  font-size: 12px; font-weight: 600; color: var(--text-secondary);
-  border-bottom: 1px solid var(--border-table);
+  padding: 11px 18px; background: var(--bg-table-header);
+  font-size: 11px; font-weight: 600; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.03em;
+  border-bottom: 1px solid var(--border);
 }
-.table-row { padding: 12px 24px; border-bottom: 1px solid var(--border-table); background: var(--bg-container); }
+.table-row { padding: 13px 18px; border-bottom: 1px solid var(--border-secondary); background: var(--bg-container); }
 .table-row:last-child { border-bottom: none; }
-.table-row:hover { background: var(--active-blue-bg); }
+.table-row:hover { background: var(--hover-neutral); }
 .empty-row {
   padding: 36px 24px; text-align: center;
   font-size: 14px; color: var(--text-tertiary);
@@ -251,9 +253,10 @@ p { margin: 0; font-size: 14px; color: var(--text-secondary); }
 .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 .act-btn {
   width: 28px; height: 28px; border: none; background: transparent;
-  border-radius: 6px; display: flex; align-items: center; justify-content: center;
-  cursor: pointer; color: var(--text-tertiary);
+  border-radius: 7px; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; color: var(--text-secondary);
 }
-.act-btn:hover { background: var(--hover-neutral); color: var(--blue-6); }
-.act-btn.del:hover { color: var(--error); }
+.act-btn:hover { background: var(--hover-neutral); color: var(--text); }
+.act-btn.del:hover { background: var(--error-bg); color: var(--error); }
+.act-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 </style>
