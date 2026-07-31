@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sessions, sessionGroups, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent } from './lib/stores'
+  import { view, sessions, sessionGroups, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent, cmdkOpen } from './lib/stores'
   import MobileApp from './mobile/MobileApp.svelte'
   import { ws, wsState } from './lib/ws'
   import { notificationsEnabled } from './lib/notifications'
@@ -329,7 +329,18 @@
     const lang = get(locale).startsWith('zh') ? 'zh' : 'en'
     openAgentSession(`/onboard lang:${lang}`, '✨ Onboard').catch(() => {})
   }
+
+  // Cmd/Ctrl+K toggles the command palette — the Header pill advertises the
+  // shortcut, and it fires even while an input has focus (palette convention).
+  function onGlobalKeydown(e: KeyboardEvent) {
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+      e.preventDefault()
+      cmdkOpen.update(v => !v)
+    }
+  }
 </script>
+
+<svelte:window onkeydown={onGlobalKeydown} />
 
 {#if authDenied}
   <div class="splash splash-msg">{$t('auth.denied')}</div>
