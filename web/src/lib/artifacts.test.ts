@@ -682,3 +682,28 @@ describe('lightAppSource — what Save to Light App persists', () => {
     expect(lightAppSource(a as any)).toBe(a.code)
   })
 })
+
+describe('installArtifactThemeRefresh — theme switch busts baked previews', () => {
+  it('drops loaded text previews and leaves image artifacts alone', async () => {
+    const { installArtifactThemeRefresh } = await import('./artifacts')
+    document.documentElement.setAttribute('data-theme', 'light')
+    installArtifactThemeRefresh()
+    artifacts.set([
+      { id: 'a1', name: 'doc.md', path: '/tmp/doc.md', type: 'Markdown', icon: '',
+        loaded: true, code: '# hi', preview: '<h1>hi</h1>' } as any,
+      { id: 'a2', name: 'shot.png', path: '/tmp/shot.png', type: 'Image', icon: '',
+        loaded: true, src: '/api/x.png', preview: '' } as any,
+    ])
+
+    document.documentElement.setAttribute('data-theme', 'dark')
+    // MutationObserver delivers on a microtask; yield until it has run.
+    await vi.waitFor(() => {
+      expect(get(artifacts)[0].loaded).toBe(false)
+    })
+    expect(get(artifacts)[0].preview).toBe('')
+    // The image entry keeps its src and stays loaded — hydrate would refuse
+    // to rebuild it, so resetting it would strand a permanent spinner.
+    expect(get(artifacts)[1].loaded).toBe(true)
+    expect(get(artifacts)[1].src).toBe('/api/x.png')
+  })
+})

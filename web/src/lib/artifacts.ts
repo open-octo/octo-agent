@@ -544,6 +544,31 @@ export async function hydrateArtifact(a: Artifact | null | undefined): Promise<v
   artifacts.update(list => list.map(e => (e === a ? next : e)))
 }
 
+// Preview documents bake the resolved theme into their inline styles at build
+// time (buildTextBody reads data-theme once), so a live theme switch left
+// stale-themed previews in the panel until the artifact happened to be
+// re-written. Watch the resolved <html data-theme> attribute — one observer
+// catches every path that changes it (manual pick, pack change, the OS
+// listener under "system") — and drop each built text preview back to
+// unloaded. Replacing the entry object is the same move a live re-write
+// makes: hydrateArtifact's in-flight WeakSet doesn't know the clone, so the
+// visible artifact rebuilds immediately, and a stale in-flight build fails
+// its identity-matched write-back instead of resurrecting the old theme.
+// Image artifacts stay untouched: they carry src, never a themed preview,
+// and hydrateArtifact would refuse to re-load them.
+export function installArtifactThemeRefresh(): void {
+  if (typeof MutationObserver === 'undefined' || typeof document === 'undefined') return
+  let last = document.documentElement.getAttribute('data-theme')
+  const obs = new MutationObserver(() => {
+    const cur = document.documentElement.getAttribute('data-theme')
+    if (cur === last) return
+    last = cur
+    artifacts.update(list => list.map(e =>
+      e.loaded && !e.src ? { ...e, loaded: false, loadFailed: false, preview: '', code: '' } : e))
+  })
+  obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+}
+
 // The fetch + preview build for a text-kind artifact, extracted verbatim from
 // the old eager observeArtifact. null means the body wasn't fetchable.
 async function buildTextBody(
