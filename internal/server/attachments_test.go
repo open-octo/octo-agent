@@ -426,10 +426,13 @@ drain:
 	// but the turn runs on a background goroutine and the assert reads a file
 	// that goroutine just wrote; poll briefly so a loaded CI runner's scheduling
 	// jitter can't flake the read (it succeeds on the first iteration normally).
+	// A load error is "not yet", not fatal: Save rewrites the file in place
+	// (O_TRUNC, not atomic), so a read that lands mid-rewrite parses a torn
+	// transcript — the retry loop below absorbs that window too.
 	hasRehydratableImage := func() bool {
 		loaded, err := agent.LoadSession(sess.ID)
 		if err != nil {
-			t.Fatalf("reload: %v", err)
+			return false
 		}
 		for _, m := range loaded.Messages {
 			for _, blk := range m.Blocks {
@@ -578,9 +581,16 @@ drain:
 	if !hasNote {
 		t.Error("persisted user message missing the image path note")
 	}
-	// Re-load once more for the block check (cheap; the note poll above has
-	// already absorbed the cross-handle visibility lag).
-	if loaded, err := agent.LoadSession(sess.ID); err != nil {
+	// Re-load once more for the block check. The note poll above absorbed the
+	// cross-handle visibility lag, but a session Save may still be in flight
+	// (rewrites are in-place O_TRUNC, not atomic), and one read landing
+	// mid-rewrite parses a torn transcript — retry until the file parses.
+	loaded, err := agent.LoadSession(sess.ID)
+	for deadline := time.Now().Add(2 * time.Second); err != nil && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+		loaded, err = agent.LoadSession(sess.ID)
+	}
+	if err != nil {
 		t.Fatalf("reload: %v", err)
 	} else {
 		for _, m := range loaded.Messages {
