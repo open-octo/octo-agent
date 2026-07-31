@@ -315,7 +315,7 @@
 
 <svelte:window onclick={dismissPicker} />
 
-<aside style="width:{$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};flex:0 0 {$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};background:var(--bg-sidebar);border-right:1px solid var(--border-secondary);overflow:hidden;transition:width 0.32s cubic-bezier(0.2,0,0,1),flex-basis 0.32s cubic-bezier(0.2,0,0,1);">
+<aside style="width:{$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};flex:0 0 {$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};background:var(--sidebar-frost);backdrop-filter:blur(var(--frost-blur));-webkit-backdrop-filter:blur(var(--frost-blur));border-right:1px solid var(--border);overflow:hidden;transition:width 0.32s cubic-bezier(0.2,0,0,1),flex-basis 0.32s cubic-bezier(0.2,0,0,1);">
 
   {#if $sidebar === 'full'}
   <div class="full">
@@ -467,7 +467,7 @@
           {#if $selMode}
           <span
             class="checkbox"
-            style="border-color:{selected ? 'var(--blue-6)' : 'var(--border)'};background:{selected ? 'var(--blue-6)' : '#fff'}"
+            style="border-color:{selected ? 'var(--blue-6)' : 'var(--border)'};background:{selected ? 'var(--blue-6)' : 'var(--bg-container)'}"
             onclick={(e) => { e.stopPropagation(); toggleSel(s.id) }}
           >
             {#if selected}<iconify-icon icon="ant-design:check-outlined" width="11" style="color:#fff"></iconify-icon>{/if}
@@ -475,9 +475,9 @@
           {/if}
 
           {#if (s as any).status === 'working'}
-            <iconify-icon icon="ant-design:loading-outlined" width="14" style="color:{solid ? '#fff' : 'var(--blue-6)'};flex:0 0 auto;animation:octo-spin 0.8s linear infinite"></iconify-icon>
+            <iconify-icon icon="ant-design:loading-outlined" width="14" style="color:var(--blue-6);flex:0 0 auto;animation:octo-spin 0.8s linear infinite"></iconify-icon>
           {:else}
-            <iconify-icon icon={icon} width="14" style="color:{solid ? '#fff' : 'var(--text-tertiary)'};flex:0 0 auto"></iconify-icon>
+            <iconify-icon icon={icon} width="14" style="color:{solid ? 'var(--blue-6)' : 'var(--text-tertiary)'};flex:0 0 auto"></iconify-icon>
           {/if}
 
           {#if editing}
@@ -494,26 +494,26 @@
             <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
           </span>
           {:else}
-          <span class="session-title" style="color:{solid ? '#fff' : 'var(--text)'};">{(s as any).name || (s as any).title || s.id}</span>
+          <span class="session-title">{(s as any).name || (s as any).title || s.id}</span>
           {#if (s as any).agent_profile && (s as any).agent_profile !== 'default' && !menuOpen}
             {@const aName = agentNameOf((s as any).agent_profile)}
-            <span class="agent-tag" style="background:{solid ? 'rgba(255,255,255,0.2)' : 'var(--active-blue-bg)'};color:{solid ? '#fff' : 'var(--blue-6)'};">
+            <span class="agent-tag" style="background:{solid ? 'rgba(255,255,255,0.2)' : 'var(--active-blue-bg)'};color:var(--blue-6);">
               {aName}
             </span>
           {/if}
           {#if isPinned(s.id) && !menuOpen}
-            <iconify-icon icon="ant-design:pushpin-filled" width="11" title={$t('sidebar.pinned')} style="color:{solid ? 'rgba(255,255,255,0.75)' : 'var(--text-quaternary)'};flex:0 0 auto"></iconify-icon>
+            <iconify-icon icon="ant-design:pushpin-filled" width="11" title={$t('sidebar.pinned')} style="color:var(--text-quaternary);flex:0 0 auto"></iconify-icon>
           {/if}
           {#if (s as any).pending_question}
             <span class="pending-dot" title={$t('sidebar.pending_question')}></span>
           {/if}
           {#if !menuOpen}
-            <span class="session-time" style="color:{solid ? 'rgba(255,255,255,0.75)' : 'var(--text-quaternary)'};">
+            <span class="session-time" style="color:var(--text-quaternary);">
               {(s as any).source === 'cron' ? $t('sidebar.cron') : ''}
             </span>
           {/if}
           {#if !menuOpen && !$selMode}
-            <span class="row-action kebab" onclick={(e) => { e.stopPropagation(); menuFor.update(m => m === s.id ? null : s.id); groupMenuFor.set(null) }} style="color:{solid ? '#fff' : 'var(--text-tertiary)'}">
+            <span class="row-action kebab" onclick={(e) => { e.stopPropagation(); menuFor.update(m => m === s.id ? null : s.id); groupMenuFor.set(null) }} style="color:{solid ? 'var(--blue-6)' : 'var(--text-tertiary)'}">
               <iconify-icon icon="ant-design:more-outlined" width="14"></iconify-icon>
             </span>
           {/if}
@@ -572,8 +572,8 @@
           { icon: 'ant-design:mobile-outlined', label: 'nav.channels', v: 'channels' },
         ] as item}
         <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>
-          <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? '#fff' : 'var(--text-tertiary)'}"></iconify-icon>
-          <span style="font-size:13px;color:{navActive(item.v) ? '#fff' : 'var(--text-secondary)'};">{$t(item.label)}</span>
+          <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
+          <span style="font-size:13px;color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive(item.v) ? '600' : '400'};">{$t(item.label)}</span>
         </div>
         {/each}
       </div>
@@ -587,10 +587,19 @@
           { icon: 'ant-design:folder-open-outlined', label: 'nav.file_recall', v: 'files' },
         ] as item}
         <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>
-          <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? '#fff' : 'var(--text-tertiary)'}"></iconify-icon>
-          <span style="font-size:13px;color:{navActive(item.v) ? '#fff' : 'var(--text-secondary)'};">{$t(item.label)}</span>
+          <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
+          <span style="font-size:13px;color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive(item.v) ? '600' : '400'};">{$t(item.label)}</span>
         </div>
         {/each}
+      </div>
+
+      <!-- Design system -->
+      <div class="nav-group">
+        <div class="group-header"><span class="group-label">{$t('nav.design_system')}</span></div>
+        <div class="nav-row" class:solid={navActive('components')} onclick={() => view.set('components')}>
+          <iconify-icon icon="ant-design:bg-colors-outlined" width="14" style="color:{navActive('components') ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
+          <span style="font-size:13px;color:{navActive('components') ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive('components') ? '600' : '400'};">{$t('nav.components')}</span>
+        </div>
       </div>
     </div>
 
@@ -636,12 +645,14 @@
 .full { width: 256px; height: 100%; display: flex; flex-direction: column; min-height: 0; }
 .new-btn-wrap { padding: 12px 12px 8px; display: flex; gap: 4px; position: relative; }
 .new-btn {
-  flex: 1; height: 32px; border: none; border-radius: 6px;
-  background: var(--blue-6); color: #fff; font-size: 14px;
-  display: flex; align-items: center; justify-content: center; gap: 8px;
+  flex: 1; height: 34px; border: none; border-radius: var(--radius-sm);
+  background: var(--blue-6); color: var(--on-accent); font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
   cursor: pointer; font-family: inherit; position: relative;
+  box-shadow: 0 1px 2px var(--focus-ring);
 }
 .new-btn:hover { background: var(--blue-5); }
+.new-btn:active { background: var(--blue-7); }
 .btn-caret {
   position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
   width: 22px; height: 22px; border: none; border-radius: 4px;
@@ -730,13 +741,14 @@
 .nav-row {
   position: relative;
   display: flex; align-items: center; gap: 10px;
-  min-height: 36px; padding: 0 6px 0 10px;
-  border-radius: 9999px; cursor: pointer;
+  min-height: 34px; padding: 0 6px 0 9px;
+  border-radius: 7px; cursor: pointer;
 }
-.nav-row.solid { background: var(--blue-6); }
+/* Active row is a soft accent tint with accent text (the redesign's
+   data-on state), not a solid blue pill. */
+.nav-row.solid { background: var(--active-blue-bg); }
+.nav-row.solid .session-title { color: var(--blue-6); font-weight: 600; }
 .nav-row.selected { background: var(--active-blue-bg); }
-/* Hover never overrides the active (solid) row — that washed the blue pill out
-   to grey with near-invisible white text. */
 .nav-row:hover:not(.solid) { background: var(--hover-neutral); }
 .checkbox {
   width: 16px; height: 16px; flex: 0 0 16px;
@@ -750,7 +762,7 @@
 }
 .session-title {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; font-size: 13px;
+  white-space: nowrap; font-size: 13px; color: var(--text);
 }
 .session-time { font-size: 11px; flex: 0 0 auto; padding-right: 4px; }
 .pending-dot {
@@ -791,7 +803,7 @@
   display: flex; align-items: center; justify-content: center; cursor: pointer;
 }
 .rail-btn:hover { background: var(--hover-neutral); }
-.rail-btn.active { background: var(--blue-6); color: #fff; }
+.rail-btn.active { background: var(--active-blue-bg); color: var(--blue-6); }
 .rail-btn.primary { background: var(--blue-6); color: #fff; }
 .rail-btn.primary:hover { background: var(--blue-5); }
 </style>
