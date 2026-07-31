@@ -1317,7 +1317,7 @@ export const zh: Record<string, string> = {
   "artifacts.external_refs": "该文件引用了外部资源，无法在此预览。请在新标签页打开或切换到代码视图。",
   "artifacts.img_failed": "图片预览不可用",
   "artifacts.empty": "还没有可预览的文件。当 agent 写出 HTML、Markdown、图片或代码文件时，会显示在这里。",
-  "artifacts.toggle": "预览面板",
+  "artifacts.toggle": "制品",
   "artifacts.save_to_lightapp": "保存到轻应用",
   "artifacts.save_to_lightapp_placeholder": "应用名称…",
   "artifacts.light_apps": "轻应用",
