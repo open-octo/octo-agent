@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, manageCat } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
@@ -125,12 +125,7 @@
   const railNav = [
     { icon: 'ant-design:message-outlined', title: 'sidebar.chat', v: 'chat' },
     { icon: 'ant-design:clock-circle-outlined', title: 'nav.tasks', v: 'tasks' },
-    { icon: 'ant-design:robot-outlined', title: 'nav.agents', v: 'agents' },
-    { icon: 'ant-design:thunderbolt-outlined', title: 'nav.skills', v: 'skills' },
-    { icon: 'ant-design:api-outlined', title: 'nav.mcp', v: 'mcp' },
-    { icon: 'ant-design:partition-outlined', title: 'nav.workflows', v: 'workflows' },
-    { icon: 'ant-design:global-outlined', title: 'nav.browser', v: 'browser' },
-    { icon: 'ant-design:mobile-outlined', title: 'nav.channels', v: 'channels' },
+    { icon: 'ant-design:tool-outlined', title: 'nav.manage', v: 'manage' },
     { icon: 'ant-design:user-outlined', title: 'nav.memory', v: 'profile' },
     { icon: 'ant-design:appstore-outlined', title: 'nav.light_apps', v: 'lightapps' },
     { icon: 'ant-design:folder-open-outlined', title: 'nav.file_recall', v: 'files' },
@@ -338,7 +333,7 @@
             </button>
           {/each}
           <div class="ap-sep"></div>
-          <button class="ap-item ap-new" onclick={() => { view.set('agents'); agentPickerOpen = false }}>
+          <button class="ap-item ap-new" onclick={() => { manageCat.set('agents'); view.set('manage'); agentPickerOpen = false }}>
             <iconify-icon icon="ant-design:plus-outlined" width="12"></iconify-icon>
             <span>{$t('agents.create')}</span>
           </button>
@@ -347,8 +342,10 @@
     </div>
 
     <div class="scroll">
-      <!-- Sessions -->
-      <div class="nav-group">
+      <!-- Sessions — capped to whatever space is left once Config/My Data
+           below claim their natural height, so a long session list scrolls
+           internally instead of pushing those groups out of view. -->
+      <div class="nav-group sessions-group">
         <div class="group-header">
           <span class="group-label">{$t('nav.sessions')}</span>
           <span class="header-actions">
@@ -564,12 +561,7 @@
         <div class="group-header"><span class="group-label">{$t('nav.config')}</span></div>
         {#each [
           { icon: 'ant-design:clock-circle-outlined', label: 'nav.tasks', v: 'tasks' },
-          { icon: 'ant-design:robot-outlined', label: 'nav.agents', v: 'agents' },
-          { icon: 'ant-design:thunderbolt-outlined', label: 'nav.skills', v: 'skills' },
-          { icon: 'ant-design:api-outlined', label: 'nav.mcp', v: 'mcp' },
-          { icon: 'ant-design:partition-outlined', label: 'nav.workflows', v: 'workflows' },
-          { icon: 'ant-design:global-outlined', label: 'nav.browser', v: 'browser' },
-          { icon: 'ant-design:mobile-outlined', label: 'nav.channels', v: 'channels' },
+          { icon: 'ant-design:tool-outlined', label: 'nav.manage', v: 'manage' },
         ] as item}
         <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>
           <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
@@ -591,15 +583,6 @@
           <span style="font-size:13px;color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive(item.v) ? '600' : '400'};">{$t(item.label)}</span>
         </div>
         {/each}
-      </div>
-
-      <!-- Design system -->
-      <div class="nav-group">
-        <div class="group-header"><span class="group-label">{$t('nav.design_system')}</span></div>
-        <div class="nav-row" class:solid={navActive('components')} onclick={() => view.set('components')}>
-          <iconify-icon icon="ant-design:bg-colors-outlined" width="14" style="color:{navActive('components') ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
-          <span style="font-size:13px;color:{navActive('components') ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive('components') ? '600' : '400'};">{$t('nav.components')}</span>
-        </div>
       </div>
     </div>
 
@@ -679,8 +662,12 @@
   font-size: 10px; font-weight: 600; white-space: nowrap;
   max-width: 64px; overflow: hidden; text-overflow: ellipsis;
 }
-.scroll { flex: 1; overflow-y: auto; padding: 8px 12px; display: flex; flex-direction: column; gap: 20px; }
-.nav-group { display: flex; flex-direction: column; gap: 2px; }
+.scroll { flex: 1; min-height: 0; overflow: hidden; padding: 8px 12px; display: flex; flex-direction: column; gap: 20px; }
+.nav-group { display: flex; flex-direction: column; gap: 2px; flex: 0 0 auto; }
+/* Sessions is the only group that can grow arbitrarily long — cap it to
+   whatever's left after Config/My Data claim their natural height below,
+   and let it scroll internally instead of pushing them out of view. */
+.sessions-group { flex: 1 1 auto; min-height: 80px; overflow-y: auto; }
 .group-header { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 6px; }
 .group-label { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; color: var(--text-quaternary); }
 .header-actions { display: flex; align-items: center; gap: 8px; }

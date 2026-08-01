@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { cmdkOpen, view, sessions, activeSessionId, skills, openAgentSession, createNewSession, showToast, panelContent } from '../../lib/stores'
+  import { cmdkOpen, view, sessions, activeSessionId, skills, openAgentSession, createNewSession, showToast, panelContent, manageCat, type ManageCategory } from '../../lib/stores'
   import { t } from '../../lib/i18n'
 
   let query = $state('')
@@ -34,6 +34,12 @@
     close()
   }
 
+  function goToManage(cat: ManageCategory) {
+    manageCat.set(cat)
+    view.set('manage')
+    close()
+  }
+
   async function newSession() {
     close()
     try {
@@ -44,17 +50,16 @@
   // Static actions (always available)
   const actions = [
     { id: 'new', icon: 'ant-design:plus-outlined', label: () => $t('nav.new_session'), shortcut: '⌘N', run: () => newSession() },
-    { id: 'agents', icon: 'ant-design:robot-outlined', label: () => $t('nav.agents'), shortcut: '', run: () => goTo('agents') },
-    { id: 'skills', icon: 'ant-design:thunderbolt-outlined', label: () => $t('nav.skills'), shortcut: '', run: () => goTo('skills') },
-    { id: 'workflows', icon: 'ant-design:partition-outlined', label: () => $t('nav.workflows'), shortcut: '', run: () => goTo('workflows') },
+    { id: 'agents', icon: 'ant-design:robot-outlined', label: () => $t('nav.agents'), shortcut: '', run: () => goToManage('agents') },
+    { id: 'skills', icon: 'ant-design:thunderbolt-outlined', label: () => $t('nav.skills'), shortcut: '', run: () => goToManage('skills') },
+    { id: 'workflows', icon: 'ant-design:partition-outlined', label: () => $t('nav.workflows'), shortcut: '', run: () => goToManage('workflows') },
     { id: 'tasks', icon: 'ant-design:clock-circle-outlined', label: () => $t('nav.tasks'), shortcut: '', run: () => goTo('tasks') },
-    { id: 'browser', icon: 'ant-design:global-outlined', label: () => $t('nav.browser'), shortcut: '', run: () => goTo('browser') },
-    { id: 'mcp', icon: 'ant-design:api-outlined', label: () => $t('nav.mcp'), shortcut: '', run: () => goTo('mcp') },
-    { id: 'channels', icon: 'ant-design:mobile-outlined', label: () => $t('nav.channels'), shortcut: '', run: () => goTo('channels') },
+    { id: 'browser', icon: 'ant-design:global-outlined', label: () => $t('nav.browser'), shortcut: '', run: () => goToManage('browser') },
+    { id: 'mcp', icon: 'ant-design:api-outlined', label: () => $t('nav.mcp'), shortcut: '', run: () => goToManage('mcp') },
+    { id: 'channels', icon: 'ant-design:mobile-outlined', label: () => $t('nav.channels'), shortcut: '', run: () => goToManage('channels') },
     { id: 'memory', icon: 'ant-design:user-outlined', label: () => $t('nav.memory'), shortcut: '', run: () => goTo('profile') },
     { id: 'files', icon: 'ant-design:folder-open-outlined', label: () => $t('nav.file_recall'), shortcut: '', run: () => goTo('files') },
     { id: 'lightapps', icon: 'ant-design:appstore-outlined', label: () => $t('nav.light_apps'), shortcut: '', run: () => goTo('lightapps') },
-    { id: 'components', icon: 'ant-design:bg-colors-outlined', label: () => $t('nav.components'), shortcut: '', run: () => goTo('components') },
     { id: 'artifacts', icon: 'ant-design:file-text-outlined', label: () => $t('artifacts.toggle'), shortcut: '', run: () => { panelContent.update(v => v ? null : 'session') } },
     { id: 'settings', icon: 'ant-design:setting-outlined', label: () => $t('nav.settings'), shortcut: '', run: () => goTo('settings') },
   ]
