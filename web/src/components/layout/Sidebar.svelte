@@ -12,37 +12,38 @@
   let agentPickerOpen = $state(false)
   let agentPickerEl = $state<HTMLElement>()
 
-  // "More" flyout — collapses the six agentic-config surfaces (agents/
-  // skills/mcp/workflows/browser/channels) behind one sidebar row instead of
-  // a row each. Unlike a sub-page with its own rail, clicking an item here
+  // "More" flyout — collapses the remaining agentic-config surfaces (agents/
+  // skills/mcp/workflows/channels) behind one sidebar row instead of a row
+  // each. Unlike a sub-page with its own rail, clicking an item here
   // navigates straight to that view; there's no second layer of navigation.
   // One boolean covers both sidebar modes since 'full' and 'rail' are never
   // both mounted at once.
   let morePopoverOpen = $state(false)
   let morePopoverEl = $state<HTMLElement>()
-  // Rail mode's flyout must escape the sidebar <aside>'s overflow:hidden (needed
-  // for the width-collapse transition), so it's portaled to <body> and
-  // positioned via a captured button rect instead of being an absolute-positioned
-  // descendant of the clipped aside.
-  let moreRailBtnEl = $state<HTMLElement>()
-  let moreRailPos = $state({ top: 0, left: 0 })
+  // The flyout must escape the sidebar <aside>'s overflow:hidden (needed for
+  // the width-collapse transition) and, in full mode, the additional
+  // clipping/scrolling .scroll region — an absolutely-positioned descendant
+  // gets clipped by whichever ancestor's box ends first, which for the
+  // full-mode row sits right where the footer begins. So in both modes it's
+  // portaled to <body> and positioned via the anchor's captured rect instead.
+  let morePos = $state({ top: 0, left: 0, width: 0 })
   function portal(node: HTMLElement) {
     document.body.appendChild(node)
     return { destroy() { node.remove() } }
   }
-  function toggleMoreRailPopover() {
-    if (!morePopoverOpen && moreRailBtnEl) {
-      const r = moreRailBtnEl.getBoundingClientRect()
-      moreRailPos = { top: r.top, left: r.right + 6 }
-    }
-    morePopoverOpen = !morePopoverOpen
+  function toggleMorePopover(anchor: HTMLElement, mode: 'full' | 'rail') {
+    if (morePopoverOpen) { morePopoverOpen = false; return }
+    const r = anchor.getBoundingClientRect()
+    morePos = mode === 'rail'
+      ? { top: r.top, left: r.right + 6, width: 168 }
+      : { top: r.bottom + 2, left: r.left, width: r.width + 8 }
+    morePopoverOpen = true
   }
   const moreCategories = [
     { icon: 'ant-design:robot-outlined', label: 'nav.agents', v: 'agents' },
     { icon: 'ant-design:thunderbolt-outlined', label: 'nav.skills', v: 'skills' },
     { icon: 'ant-design:api-outlined', label: 'nav.mcp', v: 'mcp' },
     { icon: 'ant-design:partition-outlined', label: 'nav.workflows', v: 'workflows' },
-    { icon: 'ant-design:global-outlined', label: 'nav.browser', v: 'browser' },
     { icon: 'ant-design:mobile-outlined', label: 'nav.channels', v: 'channels' },
   ]
   function goToMore(v: string) {
@@ -54,7 +55,10 @@
     if (agentPickerOpen && agentPickerEl && !agentPickerEl.contains(e.target as Node)) {
       agentPickerOpen = false
     }
-    if (morePopoverOpen && morePopoverEl && !morePopoverEl.contains(e.target as Node) && !(e.target as HTMLElement).closest?.('.more-popover-rail')) {
+    // The popover itself is portaled to <body> in both modes, so it's no
+    // longer a DOM descendant of morePopoverEl (the anchor's wrapper) —
+    // check for a click inside it by class instead.
+    if (morePopoverOpen && morePopoverEl && !morePopoverEl.contains(e.target as Node) && !(e.target as HTMLElement).closest?.('.more-popover')) {
       morePopoverOpen = false
     }
   }
@@ -165,6 +169,7 @@
   const railNav = [
     { icon: 'ant-design:message-outlined', title: 'sidebar.chat', v: 'chat' },
     { icon: 'ant-design:clock-circle-outlined', title: 'nav.tasks', v: 'tasks' },
+    { icon: 'ant-design:global-outlined', title: 'nav.browser', v: 'browser' },
     { icon: 'ant-design:user-outlined', title: 'nav.memory', v: 'profile' },
     { icon: 'ant-design:appstore-outlined', title: 'nav.light_apps', v: 'lightapps' },
     { icon: 'ant-design:folder-open-outlined', title: 'nav.file_recall', v: 'files' },
@@ -382,9 +387,11 @@
     </div>
 
     <div class="scroll">
-      <!-- Sessions — capped to whatever space is left once Config/My Data
-           below claim their natural height, so a long session list scrolls
-           internally instead of pushing those groups out of view. -->
+      <!-- Sessions — sized to its own content (no forced grow-to-fill), so a
+           short list doesn't leave a reserved gap above Config/My Data; it
+           still shrinks (bounded by min-height) once the combined stack would
+           overflow .scroll, scrolling internally so a long session list never
+           pushes Config/My Data out of view or requires scrolling past it. -->
       <div class="nav-group sessions-group">
         <div class="group-header">
           <span class="group-label">{$t('nav.sessions')}</span>
@@ -603,13 +610,17 @@
           <iconify-icon icon="ant-design:clock-circle-outlined" width="14" style="color:{navActive('tasks') ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
           <span style="font-size:13px;color:{navActive('tasks') ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive('tasks') ? '600' : '400'};">{$t('nav.tasks')}</span>
         </div>
+        <div class="nav-row" class:solid={navActive('browser')} onclick={() => view.set('browser')}>
+          <iconify-icon icon="ant-design:global-outlined" width="14" style="color:{navActive('browser') ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
+          <span style="font-size:13px;color:{navActive('browser') ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive('browser') ? '600' : '400'};">{$t('nav.browser')}</span>
+        </div>
         <div class="more-wrap" bind:this={morePopoverEl}>
-          <div class="nav-row" class:solid={moreActive()} onclick={() => (morePopoverOpen = !morePopoverOpen)}>
-            <iconify-icon icon="ant-design:more-outlined" width="14" style="color:{moreActive() ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
+          <div class="nav-row" class:solid={moreActive()} onclick={(e) => toggleMorePopover(e.currentTarget as HTMLElement, 'full')}>
+            <iconify-icon icon="ant-design:menu-outlined" width="14" style="color:{moreActive() ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
             <span style="font-size:13px;color:{moreActive() ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{moreActive() ? '600' : '400'};">{$t('nav.manage')}</span>
           </div>
           {#if morePopoverOpen}
-          <div class="more-popover">
+          <div class="more-popover" use:portal style="top:{morePos.top}px; left:{morePos.left}px; width:{morePos.width}px;">
             {#each moreCategories as c (c.v)}
             <button class="ap-item" onclick={() => goToMore(c.v)}>
               <iconify-icon icon={c.icon} width="14" style="color:var(--text-tertiary)"></iconify-icon>
@@ -655,7 +666,7 @@
       </button>
     </div>
     <div class="rail-scroll">
-      {#each railNav.slice(0, 2) as item}
+      {#each railNav.slice(0, 3) as item}
       <button
         class="rail-btn"
         class:active={navActive(item.v)}
@@ -666,11 +677,11 @@
       </button>
       {/each}
       <div class="more-wrap" bind:this={morePopoverEl}>
-        <button class="rail-btn" bind:this={moreRailBtnEl} class:active={moreActive()} title={$t('nav.manage')} onclick={toggleMoreRailPopover}>
-          <iconify-icon icon="ant-design:more-outlined" width="16"></iconify-icon>
+        <button class="rail-btn" class:active={moreActive()} title={$t('nav.manage')} onclick={(e) => toggleMorePopover(e.currentTarget as HTMLElement, 'rail')}>
+          <iconify-icon icon="ant-design:menu-outlined" width="16"></iconify-icon>
         </button>
         {#if morePopoverOpen}
-        <div class="more-popover more-popover-rail" use:portal style="top:{moreRailPos.top}px; left:{moreRailPos.left}px;">
+        <div class="more-popover" use:portal style="top:{morePos.top}px; left:{morePos.left}px; width:{morePos.width}px;">
           {#each moreCategories as c (c.v)}
           <button class="ap-item" onclick={() => goToMore(c.v)}>
             <iconify-icon icon={c.icon} width="14" style="color:var(--text-tertiary)"></iconify-icon>
@@ -680,7 +691,7 @@
         </div>
         {/if}
       </div>
-      {#each railNav.slice(2) as item}
+      {#each railNav.slice(3) as item}
       <button
         class="rail-btn"
         class:active={navActive(item.v)}
@@ -732,14 +743,14 @@
 }
 .ap-item:hover { background: var(--hover-neutral); }
 .more-wrap { position: relative; }
+/* Portaled to <body> (see the portal action) and positioned via the anchor's
+   captured rect (morePos) — fixed, not absolute, since it must escape the
+   sidebar's own overflow:hidden ancestors rather than being clipped by them. */
 .more-popover {
-  position: absolute; top: 100%; left: 0; right: -8px; z-index: 30;
-  margin-top: 2px; padding: 4px;
+  position: fixed; z-index: 30;
+  padding: 4px;
   background: var(--bg-elevated, #fff); border: 1px solid var(--border-secondary);
   border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.18);
-}
-.more-popover-rail {
-  position: fixed; right: auto; margin-top: 0; width: 168px;
 }
 .ap-sep { height: 1px; margin: 4px 8px; background: var(--border-secondary); }
 .ap-new { color: var(--blue-6); display: flex; align-items: center; gap: 6px; }
@@ -750,10 +761,14 @@
 }
 .scroll { flex: 1; min-height: 0; overflow: hidden; padding: 8px 12px; display: flex; flex-direction: column; gap: 20px; }
 .nav-group { display: flex; flex-direction: column; gap: 2px; flex: 0 0 auto; }
-/* Sessions is the only group that can grow arbitrarily long — cap it to
-   whatever's left after Config/My Data claim their natural height below,
-   and let it scroll internally instead of pushing them out of view. */
-.sessions-group { flex: 1 1 auto; min-height: 80px; overflow-y: auto; }
+/* Sessions is the only group with no forced grow-to-fill (flex-grow:0, unlike
+   the "1 1 auto" this used to be) — a short list sizes to its own content
+   instead of being stretched to consume whatever space Config/My Data don't
+   need, which used to leave a big reserved gap above them. flex-shrink:1
+   (bounded by min-height) is unchanged from before: once the combined stack
+   would overflow .scroll, sessions is still the one that gives, scrolling
+   internally so a long list never pushes Config/My Data out of view. */
+.sessions-group { flex: 0 1 auto; min-height: 80px; overflow-y: auto; }
 .group-header { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 6px; }
 .group-label { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; color: var(--text-quaternary); }
 .header-actions { display: flex; align-items: center; gap: 8px; }

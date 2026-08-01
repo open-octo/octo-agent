@@ -2,7 +2,7 @@ import { writable, derived, get } from "svelte/store";
 
 export const en: Record<string, string> = {
   "nav.sessions": "Sessions",
-  "nav.config": "CONFIG",
+  "nav.config": "MANAGE",
   "nav.my_data": "MY DATA",
   "nav.new_session": "New Session",
   "nav.new_session_with_agent": "New session with a specific agent",
@@ -36,7 +36,7 @@ export const en: Record<string, string> = {
   "nav.light_apps": "Light Apps",
   "nav.file_recall": "File Recall",
   "nav.settings": "Settings",
-  "nav.manage": "More",
+  "nav.manage": "More settings",
   "nav.agents": "Agents",
   "nav.workbench": "Agent Workbench",
   "agents.desc": "Create and manage custom agent personalities for different tasks",
@@ -836,7 +836,7 @@ export const en: Record<string, string> = {
 
 export const zh: Record<string, string> = {
   "nav.sessions": "会话",
-  "nav.config": "配置",
+  "nav.config": "管理",
   "nav.my_data": "我的数据",
   "nav.new_session": "新建会话",
   "nav.new_session_with_agent": "指定 Agent 新建会话",
@@ -870,7 +870,7 @@ export const zh: Record<string, string> = {
   "nav.light_apps": "轻应用",
   "nav.file_recall": "文件回收站",
   "nav.settings": "设置",
-  "nav.manage": "更多",
+  "nav.manage": "更多配置",
   "nav.agents": "专家",
   "nav.workbench": "智能体工作台",
   "agents.desc": "为不同任务创建和管理自定义专家角色",
