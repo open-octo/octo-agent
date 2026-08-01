@@ -306,8 +306,10 @@
 
   function parseSlashInput(value: string): { mode: SlashItem['kind'] | null; query: string; serverName?: string } {
     const trimmed = normalizeSlash(value)
-    // A leading "@" with no whitespace summons the agent picker, mirroring
-    // the "/" skill trigger (the design's \u8f93\u5165 @ \u4e5f\u53ef\u5524\u8d77).
+    // A leading "@" with no whitespace summons the agent picker — only
+    // meaningful before a session exists (see handleSlashInput's hasSession
+    // guard): agent_profile is fixed at session creation, so this can only
+    // ever pick the agent for a session that doesn't exist yet.
     if (/^@\S*$/.test(trimmed)) {
       return { mode: 'agent', query: trimmed.slice(1).toLowerCase() }
     }
@@ -451,7 +453,10 @@
       return
     }
     if (parsed.mode === 'agent') {
-      showSlashMenu('agents', parsed.query)
+      // agent_profile is fixed at session creation — once a session exists,
+      // "@" is just a character, not a picker trigger.
+      if (!currentSession) showSlashMenu('agents', parsed.query)
+      else hideSlashMenu()
       return
     }
     if (parsed.mode === 'workflow') {
@@ -614,19 +619,26 @@
   })
 
   // ── agent assignment ───────────────────────────────────────────────────────
-  // agent_profile is fixed at session creation (no server-side update path), so
-  // the chip *assigns the agent for new sessions* (the activeAgent store that
-  // ensureActiveSession passes to createSession). On an existing session it
-  // shows that session's own profile.
+  // agent_profile is fixed at session creation (no server-side update path),
+  // so a picker only makes sense before a session exists — once currentSession
+  // is set, its profile can never change and the chip becomes a read-only
+  // label. Pre-creation, the chip assigns the agent for the session about to
+  // be auto-created (ensureActiveSession in ChatView reads the activeAgent
+  // store), mirroring the sidebar's own new-session picker.
   let agents = $state<api.Agent[]>([])
   let sessionAgent = $derived((currentSession as any)?.agent_profile ?? '')
-  // Empty when the default agent applies — the chip only renders for an
-  // expert agent; the default state keeps a bare "@" ghost button instead.
-  let agentLabel = $derived.by(() => {
-    const id = sessionAgent && sessionAgent !== 'default' ? sessionAgent : ($activeAgent !== 'default' ? $activeAgent : '')
-    if (!id) return ''
-    return agents.find(a => a.id === id)?.name ?? id
+  let sessionAgentName = $derived.by(() => {
+    if (!sessionAgent || sessionAgent === 'default') return ''
+    return agents.find(a => a.id === sessionAgent)?.name ?? sessionAgent
   })
+  let pendingAgentName = $derived.by(() => {
+    if ($activeAgent === 'default') return ''
+    return agents.find(a => a.id === $activeAgent)?.name ?? $activeAgent
+  })
+  // Empty when the default agent applies — the chip only renders for an
+  // expert agent, whichever source (bound session vs. pending pre-creation
+  // pick) is relevant right now.
+  let agentLabel = $derived(currentSession ? sessionAgentName : pendingAgentName)
   function pickAgent(id: string) {
     activeAgent.set(id)
     agentMenu = false
@@ -962,15 +974,21 @@
       {/if}
       <div class="input-row">
         {#if agentLabel}
+        {#if currentSession}
+        <span class="agent-chip" title={$t('composer.session_agent')}>
+          <span class="agent-at">@</span>
+          <span class="agent-name">{agentLabel}</span>
+        </span>
+        {:else}
         <div class="picker">
-          <button class="agent-chip" title={$t('composer.assign_agent')} onclick={(e) => { e.stopPropagation(); const open = agentMenu; closeMenus(); agentMenu = !open }}>
+          <button class="agent-chip pickable" title={$t('composer.assign_agent')} onclick={(e) => { e.stopPropagation(); const open = agentMenu; closeMenus(); agentMenu = !open }}>
             <span class="agent-at">@</span>
             <span class="agent-name">{agentLabel}</span>
           </button>
           {#if agentMenu}
             <div class="menu agent-menu" onclick={(e) => e.stopPropagation()}>
               <div class="menu-label">{$t('composer.assign_agent')}</div>
-              <button class="menu-item" class:active={$activeAgent === 'default' && (!sessionAgent || sessionAgent === 'default')} onclick={() => pickAgent('default')}>
+              <button class="menu-item" class:active={$activeAgent === 'default'} onclick={() => pickAgent('default')}>
                 <span class="mi-name">Default</span>
               </button>
               {#each agents as a (a.id)}
@@ -986,6 +1004,7 @@
             </div>
           {/if}
         </div>
+        {/if}
         {/if}
         <textarea
           bind:this={textareaEl}
@@ -1270,9 +1289,10 @@ textarea {
   height: 28px; padding: 0 10px 0 5px; margin: 0 2px 2px 0;
   background: var(--active-blue-bg); border: none; border-radius: 8px;
   color: var(--blue-6); font-size: 12px; font-weight: 600;
-  cursor: pointer; font-family: inherit; flex: 0 0 auto;
+  font-family: inherit; flex: 0 0 auto;
 }
-.agent-chip:hover { background: var(--row-hover); }
+.agent-chip.pickable { cursor: pointer; }
+.agent-chip.pickable:hover { background: var(--row-hover); }
 .agent-at {
   width: 16px; height: 16px; border-radius: 5px;
   background: var(--blue-6); color: var(--on-accent);
