@@ -69,6 +69,21 @@ export const en: Record<string, string> = {
   "agents.bound_chats": "bound",
   "agents.delete_title": "Delete Agent",
   "agents.delete_confirm": "Delete agent \"{name}\"? This cannot be undone.",
+  "agents.search_placeholder": "Search experts by name or description",
+  "agents.category.all": "All",
+  "agents.category.content-creation": "Content Creation",
+  "agents.category.life": "Life",
+  "agents.category.learning": "Learning",
+  "agents.category.productivity": "Productivity",
+  "agents.category.career": "Career",
+  "agents.category.mine": "My Experts",
+  "agents.capability_intro": "About",
+  "agents.good_at": "Good at",
+  "agents.try_asking": "Try asking",
+  "agents.summon": "Summon {name}",
+  "agents.hide": "Hide",
+  "agents.show": "Show",
+  "agents.official_badge": "Official",
   "chat.thinking": "Thinking",
   "chat.thinking_0": "Thinking",
   "chat.thinking_1": "Pondering",
@@ -885,6 +900,21 @@ export const zh: Record<string, string> = {
   "agents.bound_chats": "已绑定",
   "agents.delete_title": "删除专家",
   "agents.delete_confirm": "删除专家 \"{name}\"？此操作不可撤销。",
+  "agents.search_placeholder": "搜索专家名称或描述",
+  "agents.category.all": "全部",
+  "agents.category.content-creation": "内容创作",
+  "agents.category.life": "生活助手",
+  "agents.category.learning": "学习提升",
+  "agents.category.productivity": "效率工具",
+  "agents.category.career": "职业发展",
+  "agents.category.mine": "我的专家",
+  "agents.capability_intro": "能力介绍",
+  "agents.good_at": "擅长领域",
+  "agents.try_asking": "试试这样问我",
+  "agents.summon": "召唤 {name}",
+  "agents.hide": "隐藏",
+  "agents.show": "显示",
+  "agents.official_badge": "官方",
   "chat.thinking": "思考中",
   "chat.thinking_0": "思考中",
   "chat.thinking_1": "沉思中",
@@ -1652,4 +1682,18 @@ export function tr(key: string): string {
 
 export function setLocale(l: string): void {
   locale.set(l);
+}
+
+// Curated expert-gallery content (agent name/description/tags/example
+// prompts) is authored bilingually in the .md frontmatter itself rather than
+// run through the t()/tr() dictionaries — it's user-facing persona content,
+// not UI chrome. These pick the locale-appropriate variant, falling back to
+// the base (zh-authored) value when no English variant exists (e.g. plain
+// user-created agents, which are never translated).
+export function pickLocalized(base: string, en?: string): string {
+  return get(locale).startsWith("en") && en ? en : base;
+}
+
+export function pickLocalizedList(base?: string[], en?: string[]): string[] {
+  return get(locale).startsWith("en") && en && en.length ? en : (base ?? []);
 }

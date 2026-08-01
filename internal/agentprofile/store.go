@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Store loads profiles from the user-level agent directory plus the
@@ -16,6 +17,9 @@ import (
 // a handful of small files, so a rescan is cheap.
 type Store struct {
 	userDir string
+
+	mu               sync.RWMutex
+	disabledDefaults map[string]bool // curated-expert IDs hidden by the user; mirrors skills.Registry's disabled set
 }
 
 // New builds a Store over the user-level directory (~/.octo/agents).
@@ -23,13 +27,38 @@ func New(userDir string) *Store {
 	return &Store{userDir: userDir}
 }
 
-// load scans user profiles and returns the id → profile map, with builtins as
-// the base layer. Files that fail to parse are skipped.
+// SetDisabledDefaults replaces the set of curated-expert IDs hidden from
+// Get/List. Called once at startup with the persisted config value, and again
+// whenever the toggle endpoint flips one. Hidden, not deleted — the
+// underlying ~/.octo/agents-default/<id>.md is untouched and can be re-shown.
+func (s *Store) SetDisabledDefaults(ids []string) {
+	m := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		m[id] = true
+	}
+	s.mu.Lock()
+	s.disabledDefaults = m
+	s.mu.Unlock()
+}
+
+func (s *Store) isDisabledDefault(p *Profile) bool {
+	if p == nil || p.Source != SourceDefault {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.disabledDefaults[p.ID]
+}
+
+// load scans default (curated) and user profiles and returns the id →
+// profile map, with builtins as the base layer and user files taking highest
+// precedence. Files that fail to parse are skipped.
 func (s *Store) load() map[string]*Profile {
 	profiles := make(map[string]*Profile)
 	for _, p := range builtinProfiles() {
 		profiles[p.ID] = p
 	}
+	s.scanDir(defaultAgentsRoot(), SourceDefault, profiles)
 	s.scanDir(s.userDir, SourceUser, profiles)
 	return profiles
 }
@@ -78,20 +107,37 @@ func (s *Store) Load() error {
 }
 
 // Get returns the profile with the given id. The default profile is
-// code-defined and always available.
+// code-defined and always available. A hidden (toggled-off) curated expert is
+// treated as not found, matching skills.Registry's "disabled == non-existent"
+// semantics — use LookupAny to see it regardless.
 func (s *Store) Get(id string) (*Profile, bool) {
 	if id == DefaultID {
 		return DefaultProfile(), true
 	}
 	p, ok := s.load()[id]
+	if ok && s.isDisabledDefault(p) {
+		return nil, false
+	}
 	return p, ok
 }
 
-// List returns every user-level profile, sorted by ID for stable output.
+// LookupAny returns the profile with the given id regardless of whether it's
+// a currently-hidden curated expert — used by the toggle handler, which must
+// find a disabled default to re-enable it.
+func (s *Store) LookupAny(id string) (*Profile, bool) {
+	p, ok := s.load()[id]
+	return p, ok
+}
+
+// List returns every user-level and curated-default profile (excluding
+// builtins and hidden curated experts), sorted by ID for stable output.
 func (s *Store) List() []*Profile {
 	var out []*Profile
 	for _, p := range s.load() {
 		if p.Source == SourceBuiltin {
+			continue
+		}
+		if s.isDisabledDefault(p) {
 			continue
 		}
 		out = append(out, p)
@@ -112,15 +158,24 @@ func (s *Store) Create(p *Profile) error {
 	return s.writeFile(path, p)
 }
 
-// Update rewrites an existing user-level profile.
+// Update rewrites a profile. For a user profile this rewrites its existing
+// file; for a curated (SourceDefault) expert with no user-dir file yet, this
+// forks it into a permanent ~/.octo/agents/<id>.md override — same semantics
+// as a skill override, and the intended way "edit this expert" works from the
+// gallery UI. Once forked, that ID stops receiving future curated-content
+// refreshes (accepted trade-off, mirrors skill overrides).
 func (s *Store) Update(p *Profile) error {
 	if err := s.validateForStoreWrite(p); err != nil {
 		return err
 	}
-	path := filepath.Join(s.userDir, p.ID+".md")
-	if _, err := os.Stat(path); err != nil {
+	existing, ok := s.LookupAny(p.ID)
+	if !ok {
 		return fmt.Errorf("profile %q not found", p.ID)
 	}
+	if existing.Source == SourceBuiltin {
+		return fmt.Errorf("profile %q is builtin and cannot be modified", p.ID)
+	}
+	path := filepath.Join(s.userDir, p.ID+".md")
 	return s.writeFile(path, p)
 }
 
@@ -134,15 +189,19 @@ func (s *Store) validateForStoreWrite(p *Profile) error {
 	return nil
 }
 
-// Delete removes a profile. Builtin profiles are protected. A profile with
-// channel bindings must be unbound first.
+// Delete removes a profile. Builtin and curated-default profiles are
+// protected (curated experts can only be hidden via SetDisabledDefaults, not
+// deleted — same as skills.Registry refusing to delete Source=="default"). A
+// profile with channel bindings must be unbound first. Deleting a user
+// override of a curated expert works as usual and correctly falls back to the
+// shipped default on the next load.
 func (s *Store) Delete(id string) error {
-	p, ok := s.Get(id)
+	p, ok := s.LookupAny(id)
 	if !ok {
 		return fmt.Errorf("profile %q not found", id)
 	}
-	if p.Source == SourceBuiltin {
-		return fmt.Errorf("profile %q is builtin and cannot be deleted", id)
+	if p.Source == SourceBuiltin || p.Source == SourceDefault {
+		return fmt.Errorf("profile %q is %s and cannot be deleted", id, p.Source)
 	}
 	if len(p.ChannelBindings) > 0 {
 		return fmt.Errorf("profile %q still has %d channel binding(s): unbind them first", id, len(p.ChannelBindings))

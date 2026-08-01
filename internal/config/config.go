@@ -219,6 +219,16 @@ type Config struct {
 	// so installs that recorded it in config.yml before the marker file existed
 	// still count as attempted; nothing writes it anymore.
 	OnboardAttempted bool `yaml:"onboard_attempted,omitempty"`
+	// Agents groups agent-profile-related settings (curated expert visibility).
+	Agents AgentsConfig `yaml:"agents,omitempty"`
+}
+
+// AgentsConfig groups agent-profile-related settings under the `agents:` block.
+type AgentsConfig struct {
+	// DisabledDefaults lists curated expert-agent IDs the user has hidden from
+	// the gallery. Hidden, not deleted — the underlying
+	// ~/.octo/agents-default/<id>.md is untouched and can be re-shown.
+	DisabledDefaults []string `yaml:"disabled_defaults,omitempty"`
 }
 
 // TrashConfig configures the file recycle bin.

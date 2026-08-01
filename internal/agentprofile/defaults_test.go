@@ -1,0 +1,172 @@
+package agentprofile
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// TestMain neutralizes the default-agents root for the whole package so tests
+// never read the real ~/.octo/agents-default (which an installed binary
+// populates). Tests that exercise defaults opt in via useDefaultAgentsRoot.
+func TestMain(m *testing.M) {
+	tmp, _ := os.MkdirTemp("", "octo-agents-default-empty")
+	defaultAgentsRoot = func() string { return tmp }
+	code := m.Run()
+	if tmp != "" {
+		_ = os.RemoveAll(tmp)
+	}
+	os.Exit(code)
+}
+
+// useDefaultAgentsRoot points defaultAgentsRoot at dir for the test's duration.
+func useDefaultAgentsRoot(t *testing.T, dir string) {
+	t.Helper()
+	orig := defaultAgentsRoot
+	defaultAgentsRoot = func() string { return dir }
+	t.Cleanup(func() { defaultAgentsRoot = orig })
+}
+
+func TestMaterializeDefaults_WritesEmbeddedAndStamps(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "agents-default")
+	useDefaultAgentsRoot(t, root)
+
+	if err := MaterializeDefaults("v1"); err != nil {
+		t.Fatalf("MaterializeDefaults: %v", err)
+	}
+	for _, id := range []string{"copywriter", "trip-planner", "legal-helper"} {
+		if _, err := os.Stat(filepath.Join(root, id+".md")); err != nil {
+			t.Fatalf("expected %s.md materialized: %v", id, err)
+		}
+	}
+	b, err := os.ReadFile(filepath.Join(root, defaultStampFile))
+	if err != nil || string(b) != "v1" {
+		t.Fatalf("stamp = %q, %v; want v1", string(b), err)
+	}
+}
+
+func TestMaterializeDefaults_NoOpWhenCurrent(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "agents-default")
+	useDefaultAgentsRoot(t, root)
+	if err := MaterializeDefaults("v1"); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(root, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := MaterializeDefaults("v1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Errorf("same-version call should be a no-op, but the dir was rewritten")
+	}
+
+	if err := MaterializeDefaults("v2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Errorf("version bump should wipe-and-rewrite the default root")
+	}
+}
+
+func TestStore_DefaultLayerSurfacesAndIsOverridable(t *testing.T) {
+	defaultRoot := filepath.Join(t.TempDir(), "agents-default")
+	useDefaultAgentsRoot(t, defaultRoot)
+	writeMD(t, defaultRoot, "copywriter.md", "---\ndescription: curated copywriter\ntools: [read_file]\ncategory: content-creation\ntags: [writing]\n---\npersona body\n")
+
+	s, userDir := newTestStore(t)
+
+	// Default-only: shows up in List() with Source == SourceDefault, unlike
+	// builtins which List() always excludes.
+	got := s.List()
+	if len(got) != 1 || got[0].ID != "copywriter" || got[0].Source != SourceDefault {
+		t.Fatalf("List() = %+v, want one SourceDefault copywriter", got)
+	}
+	if got[0].Category != "content-creation" || len(got[0].Tags) != 1 {
+		t.Fatalf("gallery metadata not threaded through: %+v", got[0])
+	}
+
+	// A user file of the same ID overrides the curated default (same
+	// precedence rule as builtin overriding, one layer up).
+	writeMD(t, userDir, "copywriter.md", "---\ndescription: my override\n---\nuser body\n")
+	p, ok := s.Get("copywriter")
+	if !ok || p.Source != SourceUser || p.Description != "my override" {
+		t.Fatalf("user file should override curated default: %+v, %v", p, ok)
+	}
+}
+
+func TestStore_UpdateForksDefaultIntoUserOverride(t *testing.T) {
+	defaultRoot := filepath.Join(t.TempDir(), "agents-default")
+	useDefaultAgentsRoot(t, defaultRoot)
+	writeMD(t, defaultRoot, "copywriter.md", "---\ndescription: curated copywriter\ntools: [read_file]\ncategory: content-creation\n---\npersona body\n")
+
+	s, userDir := newTestStore(t)
+
+	existing, ok := s.Get("copywriter")
+	if !ok {
+		t.Fatal("copywriter not found")
+	}
+	existing.Description = "edited copywriter"
+	if err := s.Update(existing); err != nil {
+		t.Fatalf("Update() on a curated default should fork it, got: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(userDir, "copywriter.md")); err != nil {
+		t.Fatalf("expected fork written to user dir: %v", err)
+	}
+	p, ok := s.Get("copywriter")
+	if !ok || p.Source != SourceUser || p.Description != "edited copywriter" {
+		t.Fatalf("after fork: %+v, %v", p, ok)
+	}
+	// The fork must keep the persona's gallery metadata (category etc.), not
+	// silently drop it — the plan requires the API layer preserve unspecified
+	// fields, but the Store itself must simply persist whatever Profile it's
+	// handed.
+	if p.Category != "content-creation" {
+		t.Fatalf("fork lost gallery metadata: %+v", p)
+	}
+}
+
+func TestStore_DeleteBlockedForCuratedDefault(t *testing.T) {
+	defaultRoot := filepath.Join(t.TempDir(), "agents-default")
+	useDefaultAgentsRoot(t, defaultRoot)
+	writeMD(t, defaultRoot, "copywriter.md", "---\ndescription: curated copywriter\ntools: [read_file]\n---\npersona body\n")
+
+	s, _ := newTestStore(t)
+	if err := s.Delete("copywriter"); err == nil {
+		t.Fatal("Delete of a curated default should fail")
+	}
+}
+
+func TestStore_SetDisabledDefaults(t *testing.T) {
+	defaultRoot := filepath.Join(t.TempDir(), "agents-default")
+	useDefaultAgentsRoot(t, defaultRoot)
+	writeMD(t, defaultRoot, "copywriter.md", "---\ndescription: curated copywriter\ntools: [read_file]\n---\npersona body\n")
+
+	s, _ := newTestStore(t)
+	if _, ok := s.Get("copywriter"); !ok {
+		t.Fatal("copywriter should be visible before disabling")
+	}
+
+	s.SetDisabledDefaults([]string{"copywriter"})
+	if _, ok := s.Get("copywriter"); ok {
+		t.Fatal("disabled default should be hidden from Get")
+	}
+	found := false
+	for _, p := range s.List() {
+		if p.ID == "copywriter" {
+			found = true
+		}
+	}
+	if found {
+		t.Fatal("disabled default should be hidden from List")
+	}
+	if _, ok := s.LookupAny("copywriter"); !ok {
+		t.Fatal("LookupAny should still see a disabled default")
+	}
+
+	s.SetDisabledDefaults(nil)
+	if _, ok := s.Get("copywriter"); !ok {
+		t.Fatal("re-enabled default should be visible again")
+	}
+}

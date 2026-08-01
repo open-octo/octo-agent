@@ -427,6 +427,7 @@ func New(cfg Config) (*Server, error) {
 	// file), so calling it from both paths is harmless.
 	_ = skills.MaterializeDefaults(version.Version)
 	_ = tools.MaterializeDefaultWorkflows(version.Version)
+	_ = agentprofile.MaterializeDefaults(version.Version)
 	_ = workflow.PruneJournals()
 
 	cwd, _ := os.Getwd()
@@ -897,6 +898,7 @@ func (s *Server) registerRoutes() {
 	s.api("DELETE /api/agents/{id}", s.handleDeleteAgent)
 	s.api("POST /api/agents/{id}/bind", s.handleBindAgent)
 	s.api("DELETE /api/agents/{id}/bind", s.handleUnbindAgent)
+	s.api("PATCH /api/agents/{id}/toggle", s.handleToggleAgent)
 
 	// MCP server management
 	s.api("GET /api/mcp/servers", s.handleListMCPServers)
@@ -2223,6 +2225,9 @@ func (s *Server) agentRouter() *agentprofile.Router {
 			return
 		}
 		s.agentStore = agentprofile.New(agentUserDir())
+		if cfg, err := config.Load(); err == nil {
+			s.agentStore.SetDisabledDefaults(cfg.Agents.DisabledDefaults)
+		}
 		s.agentRouterVal = agentprofile.NewRouter(s.agentStore)
 	})
 	return s.agentRouterVal

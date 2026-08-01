@@ -265,6 +265,20 @@ export async function openAgentSession(content: string, name?: string): Promise<
   view.set('chat')
 }
 
+// Expert-gallery entry point: bind a fresh session to the given agent profile
+// (curated or user-created) and, when an example prompt is supplied,
+// pre-queue it as the first message via the same pendingPrompt auto-send
+// mechanism openAgentSession uses. Unlike openAgentSession this is a genuine
+// conversation with the expert, not a single-purpose panel session, so it is
+// deliberately NOT added to agenticSessions.
+export async function summonAgent(agentId: string, agentName: string, examplePrompt?: string): Promise<void> {
+  const sess = await api.createSession({ source: 'manual', agent_profile: agentId, name: agentName })
+  sessions.update(ss => [sess, ...ss])
+  if (examplePrompt) pendingPrompt.set({ sessionId: sess.id, content: examplePrompt })
+  activeSessionId.set(sess.id)
+  view.set('chat')
+}
+
 export function addChatMsg(sessionId: string, msg: any) {
   chatMessages.update(m => ({ ...m, [sessionId]: [...(m[sessionId] || []), msg] }))
 }

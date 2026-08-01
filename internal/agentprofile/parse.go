@@ -22,6 +22,17 @@ type frontmatter struct {
 	LeanContext     bool             `yaml:"lean_context,omitempty"`
 	WorkingDir      string           `yaml:"working_dir,omitempty"`
 	ChannelBindings []ChannelBinding `yaml:"channel_bindings,omitempty"`
+
+	// Gallery display metadata — only meaningful for curated (SourceDefault)
+	// experts; ordinary user profiles simply omit these.
+	Category         string   `yaml:"category,omitempty"`
+	Tags             []string `yaml:"tags,omitempty"`
+	TagsEN           []string `yaml:"tags_en,omitempty"`
+	ExamplePrompts   []string `yaml:"example_prompts,omitempty"`
+	ExamplePromptsEN []string `yaml:"example_prompts_en,omitempty"`
+	Icon             string   `yaml:"icon,omitempty"`
+	NameEN           string   `yaml:"name_en,omitempty"`
+	DescriptionEN    string   `yaml:"description_en,omitempty"`
 }
 
 // parseFile reads one profile .md file. The profile ID is the file name
@@ -65,6 +76,15 @@ func parseFile(path string) (*Profile, error) {
 		},
 		WorkingDir:      fm.WorkingDir,
 		ChannelBindings: fm.ChannelBindings,
+
+		Category:         fm.Category,
+		Tags:             fm.Tags,
+		TagsEN:           fm.TagsEN,
+		ExamplePrompts:   fm.ExamplePrompts,
+		ExamplePromptsEN: fm.ExamplePromptsEN,
+		Icon:             fm.Icon,
+		NameEN:           fm.NameEN,
+		DescriptionEN:    fm.DescriptionEN,
 	}
 	if info, err := os.Stat(path); err == nil {
 		p.CreatedAt = info.ModTime()
@@ -88,6 +108,15 @@ func serialize(p *Profile) ([]byte, error) {
 		LeanContext:     p.LeanContext,
 		WorkingDir:      p.WorkingDir,
 		ChannelBindings: p.ChannelBindings,
+
+		Category:         p.Category,
+		Tags:             p.Tags,
+		TagsEN:           p.TagsEN,
+		ExamplePrompts:   p.ExamplePrompts,
+		ExamplePromptsEN: p.ExamplePromptsEN,
+		Icon:             p.Icon,
+		NameEN:           p.NameEN,
+		DescriptionEN:    p.DescriptionEN,
 	}
 	head, err := yaml.Marshal(&fm)
 	if err != nil {

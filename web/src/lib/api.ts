@@ -376,6 +376,18 @@ export interface Agent {
   tool_skills?: string[]
   system_prompt?: string
   channel_bindings?: { platform: string; adapter_id?: string; chat_id: string }[]
+  // Gallery display metadata — populated for curated (source: 'default')
+  // experts, empty/absent for ordinary user agents.
+  category?: string
+  tags?: string[]
+  tags_en?: string[]
+  example_prompts?: string[]
+  example_prompts_en?: string[]
+  icon?: string
+  name_en?: string
+  description_en?: string
+  // Always present: 'default' (officially curated) or 'user'.
+  source?: 'default' | 'user'
 }
 
 export async function listAgents(): Promise<Agent[]> {
@@ -396,6 +408,12 @@ export async function updateAgent(id: string, data: Partial<Agent>): Promise<Age
 
 export async function deleteAgent(id: string): Promise<void> {
   await request<unknown>(`/api/agents/${id}`, { method: 'DELETE' })
+}
+
+// Hide or re-show a curated (source: 'default') expert in the gallery. Only
+// valid for curated experts — the server rejects it for user agents.
+export async function toggleAgent(id: string): Promise<{ id: string; enabled: boolean }> {
+  return request<{ id: string; enabled: boolean }>(`/api/agents/${id}/toggle`, { method: 'PATCH' })
 }
 
 export async function bindAgent(id: string, platform: string, chatId: string): Promise<Agent> {

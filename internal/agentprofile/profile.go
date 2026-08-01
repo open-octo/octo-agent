@@ -3,9 +3,10 @@
 // skills) plus the platform slice (mention aliases, channel bindings) used
 // when a profile is addressed directly by users.
 //
-// Profiles come from two sources, in increasing precedence:
+// Profiles come from three sources, in increasing precedence:
 //
 //   - builtin: code-defined (default, explore, general, code-review)
+//   - default: ~/.octo/agents-default/<id>.md (curated experts, officially shipped)
 //   - user:    ~/.octo/agents/<id>.md       (conversation + delegation modes)
 //
 // A profile is consumed in two modes:
@@ -36,6 +37,12 @@ const (
 	// SourceBuiltin profiles are code-defined (default, explore, general,
 	// code-review) and have no .md file.
 	SourceBuiltin Source = "builtin"
+	// SourceDefault profiles are officially-curated expert personas shipped in
+	// the binary and materialized to ~/.octo/agents-default (mirrors
+	// internal/skills' "default" source). Unlike SourceBuiltin they ARE
+	// surfaced through Store.List()/the REST API — they're user-facing
+	// content, not internal capability tiers.
+	SourceDefault Source = "default"
 	// SourceUser profiles live in ~/.octo/agents/*.md and support both
 	// conversation and delegation modes.
 	SourceUser Source = "user"
@@ -79,6 +86,20 @@ type Profile struct {
 
 	WorkingDir      string
 	ChannelBindings []ChannelBinding // conversation mode only
+
+	// Gallery display metadata for SourceDefault (curated) profiles — kept
+	// outside CapabilitySpec so it can never leak into the sub_agent
+	// delegation path. Empty/zero for ordinary user profiles, which the
+	// gallery UI renders with graceful fallbacks (initials avatar, no
+	// tags/example-prompt sections).
+	Category         string   // slug, e.g. "content-creation" — frontend maps to a localized chip label
+	Tags             []string // 擅长领域 chips (zh)
+	TagsEN           []string // en variant
+	ExamplePrompts   []string // 试试这样问我 (zh)
+	ExamplePromptsEN []string // en variant
+	Icon             string   // iconify icon name; empty → initials+hash-color fallback
+	NameEN           string   // en display name
+	DescriptionEN    string   // en description
 
 	Source Source
 

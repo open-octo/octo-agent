@@ -22,6 +22,17 @@ type agentRequest struct {
 	ToolSkills      []string                      `json:"tool_skills,omitempty"`
 	SystemPrompt    string                        `json:"system_prompt,omitempty"`
 	ChannelBindings []agentprofile.ChannelBinding `json:"channel_bindings,omitempty"`
+
+	// Gallery display metadata — optional, lets any agent (curated or
+	// user-authored) carry them.
+	Category         string   `json:"category,omitempty"`
+	Tags             []string `json:"tags,omitempty"`
+	TagsEN           []string `json:"tags_en,omitempty"`
+	ExamplePrompts   []string `json:"example_prompts,omitempty"`
+	ExamplePromptsEN []string `json:"example_prompts_en,omitempty"`
+	Icon             string   `json:"icon,omitempty"`
+	NameEN           string   `json:"name_en,omitempty"`
+	DescriptionEN    string   `json:"description_en,omitempty"`
 }
 
 type agentBindRequest struct {
@@ -45,18 +56,42 @@ type agentResponse struct {
 	ToolSkills      []string                      `json:"tool_skills,omitempty"`
 	SystemPrompt    string                        `json:"system_prompt,omitempty"`
 	ChannelBindings []agentprofile.ChannelBinding `json:"channel_bindings,omitempty"`
+
+	// Gallery display metadata (see agentRequest).
+	Category         string   `json:"category,omitempty"`
+	Tags             []string `json:"tags,omitempty"`
+	TagsEN           []string `json:"tags_en,omitempty"`
+	ExamplePrompts   []string `json:"example_prompts,omitempty"`
+	ExamplePromptsEN []string `json:"example_prompts_en,omitempty"`
+	Icon             string   `json:"icon,omitempty"`
+	NameEN           string   `json:"name_en,omitempty"`
+	DescriptionEN    string   `json:"description_en,omitempty"`
+
+	// Source is always present: "default" (officially curated) or "user".
+	// Builtin capability-tier profiles never reach this struct — Store.List
+	// excludes them.
+	Source string `json:"source"`
 }
 
 func agentToResp(p *agentprofile.Profile) agentResponse {
 	return agentResponse{
-		ID:              p.ID,
-		Name:            p.Name,
-		Description:     p.Description,
-		Model:           p.Model,
-		Tools:           p.Tools,
-		ToolSkills:      p.ToolSkills,
-		SystemPrompt:    p.SystemPrompt,
-		ChannelBindings: p.ChannelBindings,
+		ID:               p.ID,
+		Name:             p.Name,
+		Description:      p.Description,
+		Model:            p.Model,
+		Tools:            p.Tools,
+		ToolSkills:       p.ToolSkills,
+		SystemPrompt:     p.SystemPrompt,
+		ChannelBindings:  p.ChannelBindings,
+		Category:         p.Category,
+		Tags:             p.Tags,
+		TagsEN:           p.TagsEN,
+		ExamplePrompts:   p.ExamplePrompts,
+		ExamplePromptsEN: p.ExamplePromptsEN,
+		Icon:             p.Icon,
+		NameEN:           p.NameEN,
+		DescriptionEN:    p.DescriptionEN,
+		Source:           string(p.Source),
 	}
 }
 
@@ -139,7 +174,15 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 			ToolSkills:   req.ToolSkills,
 			SystemPrompt: req.SystemPrompt,
 		},
-		ChannelBindings: req.ChannelBindings,
+		ChannelBindings:  req.ChannelBindings,
+		Category:         req.Category,
+		Tags:             req.Tags,
+		TagsEN:           req.TagsEN,
+		ExamplePrompts:   req.ExamplePrompts,
+		ExamplePromptsEN: req.ExamplePromptsEN,
+		Icon:             req.Icon,
+		NameEN:           req.NameEN,
+		DescriptionEN:    req.DescriptionEN,
 	}
 
 	if err := s.agentStoreOrInit().Create(p); err != nil {
@@ -181,6 +224,45 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		bindings = req.ChannelBindings
 	}
 
+	// Gallery metadata falls back to the existing profile's values when the
+	// request omits a field — same rule as bindings above. This matters most
+	// when forking a curated (SourceDefault) expert: the conversational edit
+	// flow (expert-agent-manager) typically only sends name/description/
+	// tools/system_prompt, and must not silently wipe the persona's
+	// category/tags/examples/icon on its first fork into a user override.
+	category := existing.Category
+	if req.Category != "" {
+		category = req.Category
+	}
+	tags := existing.Tags
+	if req.Tags != nil {
+		tags = req.Tags
+	}
+	tagsEN := existing.TagsEN
+	if req.TagsEN != nil {
+		tagsEN = req.TagsEN
+	}
+	examplePrompts := existing.ExamplePrompts
+	if req.ExamplePrompts != nil {
+		examplePrompts = req.ExamplePrompts
+	}
+	examplePromptsEN := existing.ExamplePromptsEN
+	if req.ExamplePromptsEN != nil {
+		examplePromptsEN = req.ExamplePromptsEN
+	}
+	icon := existing.Icon
+	if req.Icon != "" {
+		icon = req.Icon
+	}
+	nameEN := existing.NameEN
+	if req.NameEN != "" {
+		nameEN = req.NameEN
+	}
+	descriptionEN := existing.DescriptionEN
+	if req.DescriptionEN != "" {
+		descriptionEN = req.DescriptionEN
+	}
+
 	p := &agentprofile.Profile{
 		ID:          existing.ID,
 		Name:        req.Name,
@@ -191,7 +273,15 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 			ToolSkills:   req.ToolSkills,
 			SystemPrompt: req.SystemPrompt,
 		},
-		ChannelBindings: bindings,
+		ChannelBindings:  bindings,
+		Category:         category,
+		Tags:             tags,
+		TagsEN:           tagsEN,
+		ExamplePrompts:   examplePrompts,
+		ExamplePromptsEN: examplePromptsEN,
+		Icon:             icon,
+		NameEN:           nameEN,
+		DescriptionEN:    descriptionEN,
 	}
 
 	if err := s.agentStoreOrInit().Update(p); err != nil {
