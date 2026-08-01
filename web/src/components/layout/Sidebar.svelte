@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, settingsModalOpen } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
@@ -604,7 +604,7 @@
     </div>
 
     <div class="footer">
-      <div class="footer-settings" style="color:{navActive('settings') ? 'var(--blue-6)' : 'var(--text-secondary)'}" onclick={() => view.set('settings')}>
+      <div class="footer-settings" style="color:{$settingsModalOpen ? 'var(--blue-6)' : 'var(--text-secondary)'}" onclick={() => settingsModalOpen.set(true)}>
         <iconify-icon icon="ant-design:setting-outlined" width="14"></iconify-icon>
         <span>{$t('nav.settings')}</span>
       </div>
@@ -633,7 +633,7 @@
       {/each}
     </div>
     <div class="rail-footer">
-      <button class="rail-btn" class:active={navActive('settings')} title={$t('nav.settings')} onclick={() => view.set('settings')}>
+      <button class="rail-btn" class:active={$settingsModalOpen} title={$t('nav.settings')} onclick={() => settingsModalOpen.set(true)}>
         <iconify-icon icon="ant-design:setting-outlined" width="16"></iconify-icon>
       </button>
     </div>

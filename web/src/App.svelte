@@ -21,13 +21,13 @@
   import TasksView from './views/TasksView.svelte'
   import McpView from './views/McpView.svelte'
   import ChannelsView from './views/ChannelsView.svelte'
-  import SettingsView from './views/SettingsView.svelte'
   import ProfileView from './views/ProfileView.svelte'
   import FileRecallView from './views/FileRecallView.svelte'
   import LightAppsView from './views/LightAppsView.svelte'
   import ComponentsView from './views/ComponentsView.svelte'
   import CommandPalette from './components/overlays/CommandPalette.svelte'
   import McpModal from './components/overlays/McpModal.svelte'
+  import SettingsModal from './components/overlays/SettingsModal.svelte'
   import ConfirmModal from './components/overlays/ConfirmModal.svelte'
   import ConfirmDialog from './components/overlays/ConfirmDialog.svelte'
   import ArtifactModal from './components/ArtifactModal.svelte'
@@ -44,7 +44,7 @@
   // Reflect the current view (and active chat session) in the hash so a refresh
   // lands back where the user was instead of the default chat view.
   let routeReady = false
-  const VALID_VIEWS = ['chat', 'agents', 'skills', 'workflows', 'browser', 'tasks', 'mcp', 'channels', 'settings', 'profile', 'files', 'lightapps', 'components']
+  const VALID_VIEWS = ['chat', 'agents', 'skills', 'workflows', 'browser', 'tasks', 'mcp', 'channels', 'profile', 'files', 'lightapps', 'components']
 
   function applyHash() {
     const h = location.hash.replace(/^#\/?/, '')
@@ -372,8 +372,6 @@
         <McpView />
       {:else if $view === 'channels'}
         <ChannelsView />
-      {:else if $view === 'settings'}
-        <SettingsView />
       {:else if $view === 'profile'}
         <ProfileView />
       {:else if $view === 'files'}
@@ -394,6 +392,7 @@
 <AuthGate />
 <CommandPalette />
 <McpModal />
+<SettingsModal />
 <!-- Mobile approves via its own ApprovalDetail (web/src/mobile); suppress the
      desktop confirmation overlay there so it doesn't double up. -->
 {#if !mobileShell}<ConfirmModal />{/if}

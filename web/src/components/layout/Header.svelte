@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, cmdkOpen, sidebar, nativeShell, panelContent, activeSessionId } from '../../lib/stores'
+  import { view, cmdkOpen, sidebar, nativeShell, panelContent, activeSessionId, settingsModalOpen } from '../../lib/stores'
   import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
   import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
@@ -133,7 +133,7 @@
   <button class="icon-btn" class:active={$notificationsEnabled} title={$t('header.notifications')} aria-pressed={$notificationsEnabled} onclick={toggleNotifications}>
     <iconify-icon icon={$notificationsEnabled ? 'ant-design:bell-filled' : 'ant-design:bell-outlined'} width="17"></iconify-icon>
   </button>
-  <button class="icon-btn" title={$t('nav.settings')} onclick={() => view.set('settings')}>
+  <button class="icon-btn" class:active={$settingsModalOpen} title={$t('nav.settings')} onclick={() => settingsModalOpen.set(true)}>
     <iconify-icon icon="ant-design:setting-outlined" width="17"></iconify-icon>
   </button>
 

@@ -1132,34 +1132,52 @@ export async function testConfig(req: ModelConfigInput & { index?: number }): Pr
 // saveModel is the flat-input shim kept for the FirstRunSetup wizard and the
 // (PR5-hidden) flat AI Models section. PR5 deleted /api/config/models, so
 // saveModel now projects the flat ModelConfigInput onto a single-model
-// endpoint via createEndpoint. The endpoint id is a human-readable name
-// derived from the provider — "anthropic" for Anthropic, "openai" for OpenAI,
-// "custom" for Custom — so the user sees a recognisable name instead of the
+// endpoint. The endpoint id is a human-readable name derived from the
+// provider — "anthropic" for Anthropic, "openai" for OpenAI, "custom" for
+// Custom — so the user sees a recognisable name instead of the
 // "legacy-<host>-<n>" form reserved for Load's migration of old flat configs.
-// A re-run over the same provider + base_url reuses the same id and overwrites
-// rather than creating duplicates.
+//
+// A re-run over the same provider + base_url reuses the same id — but
+// POST /api/config/endpoints (createEndpoint) 400s on an id collision by
+// design (it must not silently clobber an unrelated endpoint that happens to
+// share an id). So when generateEndpointID resolves to an EXISTING endpoint,
+// this updates that endpoint in place via PATCH + the models sub-route
+// instead of re-POSTing; only a genuinely new id goes through createEndpoint.
 export async function saveModel(req: ModelConfigInput): Promise<{ ok: boolean; id?: string }> {
   const provider = req.provider || 'custom'
   const protocol = req.anthropic_format ? 'anthropic' : (provider === 'custom' ? 'openai' : undefined)
   // Resolve existing endpoints to generate a unique, readable id.
   const ep = await getEndpoints().catch(() => ({ endpoints: [], default: '', lite: '' }))
   const endpointID = generateEndpointID(provider, req.base_url || '', ep.endpoints)
-  await createEndpoint({
-    id: endpointID,
-    provider,
-    base_url: req.base_url || undefined,
-    api_key: req.api_key || undefined,
-    protocol,
-    models: [{ model: req.model, vision: req.vision ?? false }],
-  })
-  // set as default — createEndpoint doesn't auto-set Default; the wizard
-  // path expects the first saved model to become the default. The hidden
-  // flat section's "add model" path also lands here, but PR6's new endpoint
-  // editor uses createEndpoint directly with its own default toggle.
+  const existing = ep.endpoints.some(e => e.id === endpointID)
+  if (existing) {
+    await updateEndpoint(endpointID, {
+      provider,
+      base_url: req.base_url || undefined,
+      api_key: req.api_key || undefined, // empty = keep the stored key (server-side "unchanged" rule)
+      protocol,
+    })
+    await addEndpointModel(endpointID, req.model, req.vision ?? false)
+  } else {
+    await createEndpoint({
+      id: endpointID,
+      provider,
+      base_url: req.base_url || undefined,
+      api_key: req.api_key || undefined,
+      protocol,
+      models: [{ model: req.model, vision: req.vision ?? false }],
+    })
+  }
+  // Set as default, pinned to the exact model just saved — neither path above
+  // auto-sets Default, and an existing endpoint may already carry other
+  // models, so the no-model fallback (first model) could point elsewhere.
+  // The hidden flat section's "add model" path also lands here, but PR6's
+  // new endpoint editor uses createEndpoint directly with its own default
+  // toggle.
   try {
-    await setEndpointDefault(endpointID)
+    await setEndpointDefault(endpointID, req.model)
   } catch {
-    // non-fatal: endpoint was created, default just didn't stick
+    // non-fatal: endpoint was created/updated, default just didn't stick
   }
   return { ok: true, id: req.model }
 }
@@ -1194,7 +1212,7 @@ export function generateEndpointID(provider: string, baseURL: string, existing: 
 
 // The four flat-Models mutations below are STUBS. PR5 deleted their backend
 // routes (/api/config/models*), so calling them throws. They're kept only so
-// the (PR5-hidden, {#if false}) flat AI Models section in SettingsView still
+// the (PR5-hidden, {#if false}) flat AI Models section in SettingsModal still
 // compiles — Slice 6.3 replaces that section with an endpoint editor and
 // deletes these stubs along with it.
 export async function updateModel(_id: string, _req: ModelConfigInput): Promise<void> {

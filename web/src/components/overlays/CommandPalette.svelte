@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { cmdkOpen, view, sessions, activeSessionId, skills, openAgentSession, createNewSession, showToast, panelContent } from '../../lib/stores'
+  import { cmdkOpen, view, sessions, activeSessionId, skills, openAgentSession, createNewSession, showToast, panelContent, settingsModalOpen } from '../../lib/stores'
   import { t } from '../../lib/i18n'
 
   let query = $state('')
@@ -56,7 +56,7 @@
     { id: 'lightapps', icon: 'ant-design:appstore-outlined', label: () => $t('nav.light_apps'), shortcut: '', run: () => goTo('lightapps') },
     { id: 'components', icon: 'ant-design:bg-colors-outlined', label: () => $t('nav.components'), shortcut: '', run: () => goTo('components') },
     { id: 'artifacts', icon: 'ant-design:file-text-outlined', label: () => $t('artifacts.toggle'), shortcut: '', run: () => { panelContent.update(v => v ? null : 'session') } },
-    { id: 'settings', icon: 'ant-design:setting-outlined', label: () => $t('nav.settings'), shortcut: '', run: () => goTo('settings') },
+    { id: 'settings', icon: 'ant-design:setting-outlined', label: () => $t('nav.settings'), shortcut: '', run: () => { close(); settingsModalOpen.set(true) } },
   ]
 
   // Reactive filtered results

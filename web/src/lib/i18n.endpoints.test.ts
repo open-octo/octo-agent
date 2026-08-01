@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { en, zh } from './i18n'
 
-// Agent-First UI alignment (PR #1827): the endpoints section in SettingsView
+// Agent-First UI alignment (PR #1827): the endpoints section in SettingsModal
 // is now read-only display — configuration happens through conversation via
 // the config-setup skill. Only display keys remain.
 const ENDPOINT_KEYS = [

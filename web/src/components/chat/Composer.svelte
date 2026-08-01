@@ -4,7 +4,7 @@
   import {
     running, activeSessionId, chatStreaming, sessions,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
-    globalPermissionMode, nativeShell, activeAgent, view,
+    globalPermissionMode, nativeShell, activeAgent, view, settingsModalOpen,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
@@ -1078,7 +1078,7 @@
                   {/each}
                 {/each}
                 <div class="menu-divider"></div>
-                <button class="menu-item manage" onclick={() => { modelMenu = false; view.set('settings') }}>
+                <button class="menu-item manage" onclick={() => { modelMenu = false; settingsModalOpen.set(true) }}>
                   <span class="mi-name">{$t('composer.manage_models')}</span>
                 </button>
               {/if}
