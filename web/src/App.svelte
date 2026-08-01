@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sessions, sessionGroups, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent, cmdkOpen, manageCat, type ManageCategory } from './lib/stores'
+  import { view, sessions, sessionGroups, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent, cmdkOpen } from './lib/stores'
   import MobileApp from './mobile/MobileApp.svelte'
   import { ws, wsState } from './lib/ws'
   import { notificationsEnabled } from './lib/notifications'
@@ -13,9 +13,14 @@
   import FirstRunSetup from './components/overlays/FirstRunSetup.svelte'
   import Header from './components/layout/Header.svelte'
   import Sidebar from './components/layout/Sidebar.svelte'
+  import AgentsView from './views/AgentsView.svelte'
   import ChatView from './views/ChatView.svelte'
+  import SkillsView from './views/SkillsView.svelte'
+  import WorkflowsView from './views/WorkflowsView.svelte'
+  import BrowserView from './views/BrowserView.svelte'
   import TasksView from './views/TasksView.svelte'
-  import ManageView from './views/ManageView.svelte'
+  import McpView from './views/McpView.svelte'
+  import ChannelsView from './views/ChannelsView.svelte'
   import ProfileView from './views/ProfileView.svelte'
   import FileRecallView from './views/FileRecallView.svelte'
   import LightAppsView from './views/LightAppsView.svelte'
@@ -38,8 +43,7 @@
   // Reflect the current view (and active chat session) in the hash so a refresh
   // lands back where the user was instead of the default chat view.
   let routeReady = false
-  const VALID_VIEWS = ['chat', 'manage', 'tasks', 'profile', 'files', 'lightapps']
-  const MANAGE_CATEGORIES: ManageCategory[] = ['agents', 'skills', 'mcp', 'workflows', 'browser', 'channels']
+  const VALID_VIEWS = ['chat', 'agents', 'skills', 'workflows', 'browser', 'tasks', 'mcp', 'channels', 'profile', 'files', 'lightapps']
 
   function applyHash() {
     const h = location.hash.replace(/^#\/?/, '')
@@ -50,9 +54,6 @@
     if (v === 'chat' && rest[0]) {
       const sid = decodeURIComponent(rest[0])
       if (get(activeSessionId) !== sid) activeSessionId.set(sid)
-    }
-    if (v === 'manage' && rest[0] && (MANAGE_CATEGORIES as string[]).includes(rest[0])) {
-      if (get(manageCat) !== rest[0]) manageCat.set(rest[0] as ManageCategory)
     }
   }
 
@@ -97,11 +98,9 @@
   // Write the current view/session to the hash on navigation (once the initial
   // hash has been restored, and only while the main UI is showing).
   $effect(() => {
-    const v = $view, sid = $activeSessionId, cat = $manageCat, phase = $onboardPhase
+    const v = $view, sid = $activeSessionId, phase = $onboardPhase
     if (!routeReady || phase === 'unknown' || phase === 'key_setup') return
-    const hash = v === 'chat' ? (sid ? `#/chat/${encodeURIComponent(sid)}` : '#/chat')
-      : v === 'manage' ? `#/manage/${cat}`
-      : `#/${v}`
+    const hash = v === 'chat' ? (sid ? `#/chat/${encodeURIComponent(sid)}` : '#/chat') : `#/${v}`
     if (location.hash !== hash) location.hash = hash
   })
 
@@ -358,10 +357,20 @@
     <main class="main">
       {#if $view === 'chat'}
         <ChatView />
-      {:else if $view === 'manage'}
-        <ManageView />
+      {:else if $view === 'agents'}
+        <AgentsView />
+      {:else if $view === 'skills'}
+        <SkillsView />
+      {:else if $view === 'workflows'}
+        <WorkflowsView />
+      {:else if $view === 'browser'}
+        <BrowserView />
       {:else if $view === 'tasks'}
         <TasksView />
+      {:else if $view === 'mcp'}
+        <McpView />
+      {:else if $view === 'channels'}
+        <ChannelsView />
       {:else if $view === 'profile'}
         <ProfileView />
       {:else if $view === 'files'}

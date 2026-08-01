@@ -4,7 +4,7 @@
   import {
     running, activeSessionId, chatStreaming, sessions,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
-    globalPermissionMode, nativeShell, activeAgent, view, manageCat, settingsModalOpen,
+    globalPermissionMode, nativeShell, activeAgent, view, settingsModalOpen,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
@@ -500,8 +500,7 @@
     } else if (item.kind === 'agent-create') {
       text = draft
       hideSlashMenu()
-      manageCat.set('agents')
-      view.set('manage')
+      view.set('agents')
       return
     }
     text = takesArgs ? composeSlashCommand(command, draft) : command
@@ -980,7 +979,7 @@
                 </button>
               {/each}
               <div class="menu-divider"></div>
-              <button class="menu-item manage" onclick={() => { agentMenu = false; manageCat.set('agents'); view.set('manage') }}>
+              <button class="menu-item manage" onclick={() => { agentMenu = false; view.set('agents') }}>
                 <iconify-icon icon="ant-design:plus-outlined" width="12"></iconify-icon>
                 <span class="mi-name">{$t('agents.create')}</span>
               </button>

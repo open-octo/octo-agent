@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, manageCat, settingsModalOpen } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, settingsModalOpen } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
@@ -12,10 +12,50 @@
   let agentPickerOpen = $state(false)
   let agentPickerEl = $state<HTMLElement>()
 
+  // "More" flyout — collapses the six agentic-config surfaces (agents/
+  // skills/mcp/workflows/browser/channels) behind one sidebar row instead of
+  // a row each. Unlike a sub-page with its own rail, clicking an item here
+  // navigates straight to that view; there's no second layer of navigation.
+  // One boolean covers both sidebar modes since 'full' and 'rail' are never
+  // both mounted at once.
+  let morePopoverOpen = $state(false)
+  let morePopoverEl = $state<HTMLElement>()
+  // Rail mode's flyout must escape the sidebar <aside>'s overflow:hidden (needed
+  // for the width-collapse transition), so it's portaled to <body> and
+  // positioned via a captured button rect instead of being an absolute-positioned
+  // descendant of the clipped aside.
+  let moreRailBtnEl = $state<HTMLElement>()
+  let moreRailPos = $state({ top: 0, left: 0 })
+  function portal(node: HTMLElement) {
+    document.body.appendChild(node)
+    return { destroy() { node.remove() } }
+  }
+  function toggleMoreRailPopover() {
+    if (!morePopoverOpen && moreRailBtnEl) {
+      const r = moreRailBtnEl.getBoundingClientRect()
+      moreRailPos = { top: r.top, left: r.right + 6 }
+    }
+    morePopoverOpen = !morePopoverOpen
+  }
+  const moreCategories = [
+    { icon: 'ant-design:robot-outlined', label: 'nav.agents', v: 'agents' },
+    { icon: 'ant-design:thunderbolt-outlined', label: 'nav.skills', v: 'skills' },
+    { icon: 'ant-design:api-outlined', label: 'nav.mcp', v: 'mcp' },
+    { icon: 'ant-design:partition-outlined', label: 'nav.workflows', v: 'workflows' },
+    { icon: 'ant-design:global-outlined', label: 'nav.browser', v: 'browser' },
+    { icon: 'ant-design:mobile-outlined', label: 'nav.channels', v: 'channels' },
+  ]
+  function goToMore(v: string) {
+    view.set(v as any)
+    morePopoverOpen = false
+  }
+
   function dismissPicker(e: MouseEvent) {
-    if (!agentPickerOpen || !agentPickerEl) return
-    if (!agentPickerEl.contains(e.target as Node)) {
+    if (agentPickerOpen && agentPickerEl && !agentPickerEl.contains(e.target as Node)) {
       agentPickerOpen = false
+    }
+    if (morePopoverOpen && morePopoverEl && !morePopoverEl.contains(e.target as Node) && !(e.target as HTMLElement).closest?.('.more-popover-rail')) {
+      morePopoverOpen = false
     }
   }
 
@@ -125,13 +165,13 @@
   const railNav = [
     { icon: 'ant-design:message-outlined', title: 'sidebar.chat', v: 'chat' },
     { icon: 'ant-design:clock-circle-outlined', title: 'nav.tasks', v: 'tasks' },
-    { icon: 'ant-design:more-outlined', title: 'nav.manage', v: 'manage' },
     { icon: 'ant-design:user-outlined', title: 'nav.memory', v: 'profile' },
     { icon: 'ant-design:appstore-outlined', title: 'nav.light_apps', v: 'lightapps' },
     { icon: 'ant-design:folder-open-outlined', title: 'nav.file_recall', v: 'files' },
   ]
 
   function navActive(v: string) { return $view === v }
+  function moreActive() { return moreCategories.some(c => c.v === $view) }
 
   function sessionIcon(s: any): string {
     if (s.source === 'cron') return 'ant-design:clock-circle-outlined'
@@ -333,7 +373,7 @@
             </button>
           {/each}
           <div class="ap-sep"></div>
-          <button class="ap-item ap-new" onclick={() => { manageCat.set('agents'); view.set('manage'); agentPickerOpen = false }}>
+          <button class="ap-item ap-new" onclick={() => { view.set('agents'); agentPickerOpen = false }}>
             <iconify-icon icon="ant-design:plus-outlined" width="12"></iconify-icon>
             <span>{$t('agents.create')}</span>
           </button>
@@ -559,15 +599,26 @@
       <!-- Config -->
       <div class="nav-group">
         <div class="group-header"><span class="group-label">{$t('nav.config')}</span></div>
-        {#each [
-          { icon: 'ant-design:clock-circle-outlined', label: 'nav.tasks', v: 'tasks' },
-          { icon: 'ant-design:more-outlined', label: 'nav.manage', v: 'manage' },
-        ] as item}
-        <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>
-          <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
-          <span style="font-size:13px;color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive(item.v) ? '600' : '400'};">{$t(item.label)}</span>
+        <div class="nav-row" class:solid={navActive('tasks')} onclick={() => view.set('tasks')}>
+          <iconify-icon icon="ant-design:clock-circle-outlined" width="14" style="color:{navActive('tasks') ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
+          <span style="font-size:13px;color:{navActive('tasks') ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive('tasks') ? '600' : '400'};">{$t('nav.tasks')}</span>
         </div>
-        {/each}
+        <div class="more-wrap" bind:this={morePopoverEl}>
+          <div class="nav-row" class:solid={moreActive()} onclick={() => (morePopoverOpen = !morePopoverOpen)}>
+            <iconify-icon icon="ant-design:more-outlined" width="14" style="color:{moreActive() ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
+            <span style="font-size:13px;color:{moreActive() ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{moreActive() ? '600' : '400'};">{$t('nav.manage')}</span>
+          </div>
+          {#if morePopoverOpen}
+          <div class="more-popover">
+            {#each moreCategories as c (c.v)}
+            <button class="ap-item" onclick={() => goToMore(c.v)}>
+              <iconify-icon icon={c.icon} width="14" style="color:var(--text-tertiary)"></iconify-icon>
+              <span>{$t(c.label)}</span>
+            </button>
+            {/each}
+          </div>
+          {/if}
+        </div>
       </div>
 
       <!-- My Data -->
@@ -604,7 +655,32 @@
       </button>
     </div>
     <div class="rail-scroll">
-      {#each railNav as item}
+      {#each railNav.slice(0, 2) as item}
+      <button
+        class="rail-btn"
+        class:active={navActive(item.v)}
+        title={$t(item.title)}
+        onclick={() => view.set(item.v as any)}
+      >
+        <iconify-icon icon={item.icon} width="16"></iconify-icon>
+      </button>
+      {/each}
+      <div class="more-wrap" bind:this={morePopoverEl}>
+        <button class="rail-btn" bind:this={moreRailBtnEl} class:active={moreActive()} title={$t('nav.manage')} onclick={toggleMoreRailPopover}>
+          <iconify-icon icon="ant-design:more-outlined" width="16"></iconify-icon>
+        </button>
+        {#if morePopoverOpen}
+        <div class="more-popover more-popover-rail" use:portal style="top:{moreRailPos.top}px; left:{moreRailPos.left}px;">
+          {#each moreCategories as c (c.v)}
+          <button class="ap-item" onclick={() => goToMore(c.v)}>
+            <iconify-icon icon={c.icon} width="14" style="color:var(--text-tertiary)"></iconify-icon>
+            <span>{$t(c.label)}</span>
+          </button>
+          {/each}
+        </div>
+        {/if}
+      </div>
+      {#each railNav.slice(2) as item}
       <button
         class="rail-btn"
         class:active={navActive(item.v)}
@@ -650,11 +726,21 @@
   border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.18);
 }
 .ap-item {
-  display: block; width: 100%; padding: 8px 12px; border: none;
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px; border: none;
   background: transparent; color: var(--text-primary); font-size: 13px;
   text-align: left; cursor: pointer; border-radius: 6px;
 }
 .ap-item:hover { background: var(--hover-neutral); }
+.more-wrap { position: relative; }
+.more-popover {
+  position: absolute; top: 100%; left: 0; right: -8px; z-index: 30;
+  margin-top: 2px; padding: 4px;
+  background: var(--bg-elevated, #fff); border: 1px solid var(--border-secondary);
+  border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+}
+.more-popover-rail {
+  position: fixed; right: auto; margin-top: 0; width: 168px;
+}
 .ap-sep { height: 1px; margin: 4px 8px; background: var(--border-secondary); }
 .ap-new { color: var(--blue-6); display: flex; align-items: center; gap: 6px; }
 .agent-tag {
