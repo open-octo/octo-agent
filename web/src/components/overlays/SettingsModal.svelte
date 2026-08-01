@@ -469,7 +469,10 @@
   display: flex; align-items: center; justify-content: center; padding: 24px;
 }
 .modal {
-  width: 100%; max-width: 760px; max-height: 78vh;
+  /* Fixed height (not max-height) so switching between categories with very
+     different content lengths (关于 vs 端点) never resizes the modal itself
+     — each pane scrolls internally instead. */
+  width: 100%; max-width: 760px; height: 78vh;
   background: var(--bg-container); border: 1px solid var(--border); border-radius: var(--radius-card);
   box-shadow: 0 24px 48px rgba(15,23,42,0.18);
   display: flex; flex-direction: column; overflow: hidden;
