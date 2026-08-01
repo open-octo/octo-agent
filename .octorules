@@ -4,7 +4,7 @@ The canonical project guidance for contributors and AI coding agents. Keep this 
 
 ## Project
 
-`octo-agent` is a Go AI agent CLI (Go 1.22+, single binary). Module path `github.com/open-octo/octo-agent`. Ships as CLI + embedded Web UI + IM bridges (see `octo serve`).
+`octo-agent` is a Go AI agent CLI (Go 1.25+, single binary). Module path `github.com/open-octo/octo-agent`. Ships as CLI + embedded Web UI + IM bridges (see `octo serve`).
 
 ## Commands
 
@@ -42,7 +42,7 @@ Dependency direction is one-way: `provider → agent`, `tools → agent`, never 
 
 ## Code style
 
-- Go 1.22 syntax. `gofmt -w` is the formatter; `go vet ./...` must pass.
+- Go 1.25 syntax. `gofmt -w` is the formatter; `go vet ./...` must pass.
 - Tests live next to code (`foo.go` + `foo_test.go`). Use `httptest.NewServer` for HTTP-mocked tests; do not hit live APIs in `go test ./...`.
 - Comments in English. Prefer self-documenting names over comments. Only comment the **why**, never the **what**.
 - No new third-party dependencies without justification in the PR description.

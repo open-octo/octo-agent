@@ -3,26 +3,26 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Octo — private, self-hosted AI agent · one brain, eight arms</title>
-  <meta name="description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with eight arms, like an octopus, reaching your terminal, VS Code, Obsidian, SDK, web, desktop, IM, and mobile. Any model, zero telemetry; your data never leaves your machine.">
+  <title>Octo — private, self-hosted AI agent · one brain, eight legs</title>
+  <meta name="description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with eight legs, like an octopus, reaching your terminal, VS Code, Obsidian, SDK, web, desktop, IM, and mobile. Any model, zero telemetry; your data never leaves your machine.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%231677FF'/%3E%3Cpath fill='%23ffffff' d='M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z'/%3E%3Ccircle cx='40' cy='42' r='5' fill='%231677FF'/%3E%3Ccircle cx='60' cy='42' r='5' fill='%231677FF'/%3E%3C/svg%3E">
   <link rel="canonical" href="https://octo-agent.dev/">
-  <meta property="og:title" content="Octo — private, self-hosted AI agent · one brain, eight arms">
-  <meta property="og:description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with eight arms, like an octopus, reaching your terminal, VS Code, Obsidian, SDK, web, desktop, IM, and mobile. Any model, zero telemetry; your data never leaves your machine.">
+  <meta property="og:title" content="Octo — private, self-hosted AI agent · one brain, eight legs">
+  <meta property="og:description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with eight legs, like an octopus, reaching your terminal, VS Code, Obsidian, SDK, web, desktop, IM, and mobile. Any model, zero telemetry; your data never leaves your machine.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://octo-agent.dev/">
   <meta property="og:image" content="https://octo-agent.dev/og-image.png">
   <meta property="og:site_name" content="Octo">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Octo — private, self-hosted AI agent · one brain, eight arms">
-  <meta name="twitter:description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with eight arms, like an octopus, reaching your terminal, VS Code, Obsidian, SDK, web, desktop, IM, and mobile. Any model, zero telemetry; your data never leaves your machine.">
+  <meta name="twitter:title" content="Octo — private, self-hosted AI agent · one brain, eight legs">
+  <meta name="twitter:description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with eight legs, like an octopus, reaching your terminal, VS Code, Obsidian, SDK, web, desktop, IM, and mobile. Any model, zero telemetry; your data never leaves your machine.">
   <meta name="twitter:image" content="https://octo-agent.dev/og-image.png">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Octo",
-    "description": "A private, self-hosted AI agent: one brain — a single fast Go binary — with eight arms, like an octopus, reaching your terminal, VS Code, Obsidian, SDK, web, desktop, IM, and mobile. Any model; your data never leaves your machine.",
+    "description": "A private, self-hosted AI agent: one brain — a single fast Go binary — with eight legs, like an octopus, reaching your terminal, VS Code, Obsidian, SDK, web, desktop, IM, and mobile. Any model; your data never leaves your machine.",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "macOS, Linux, Windows",
     "license": "https://github.com/open-octo/octo-agent/blob/main/LICENSE.txt",
@@ -164,6 +164,13 @@
     .arm-title{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
     .arm-title h3{margin:0;}
 
+    /* why octo */
+    .why{background:#fff;border-top:1px solid var(--line);}
+    .why-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;}
+    .why-card{background:var(--canvas);border:1px solid var(--line2);border-radius:12px;padding:20px;}
+    .why-card h3{font-size:15px;font-weight:600;margin-bottom:8px;color:var(--ink);}
+    .why-card p{margin:0;font-size:13.5px;line-height:1.6;color:var(--t65);}
+
     /* features */
     .feat-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;}
     .feat{background:#fff;border:1px solid var(--line2);border-radius:16px;padding:28px;}
@@ -221,7 +228,7 @@
       .nav{gap:12px;padding:0 16px;}
       .nav-cta{white-space:nowrap;margin-left:auto;}
       .lang{display:none;}
-      .hero h1{font-size:42px;} .grid3,.grid4,.feat-grid,.grid2,.foot-grid{grid-template-columns:1fr;}
+      .hero h1{font-size:42px;} .grid3,.grid4,.feat-grid,.grid2,.foot-grid,.why-grid{grid-template-columns:1fr;}
       .feat.hero-feat{grid-column:auto;} section{padding:56px 20px;} .hero{padding:100px 20px 0;}
     }
   </style>
@@ -261,10 +268,10 @@
         <iconify-icon icon="ant-design:safety-outlined" width="14"></iconify-icon>
         <span data-en="Open source · MIT · Self-hosted · Zero telemetry" data-zh="开源 · MIT · 自托管 · 零遥测"></span>
       </div>
-      <h1><span data-en="One brain, " data-zh="一个脑，"></span><span class="accent" data-en="eight arms." data-zh="八条腕。"></span></h1>
+      <h1><span data-en="One brain, " data-zh="一个脑，"></span><span class="accent" data-en="eight legs." data-zh="八条腿。"></span></h1>
       <p class="tagline"
-         data-en="Octo is a private, self-hosted AI agent — a single fast Go binary that reaches your terminal, VS Code, Obsidian, web, desktop, IM, SDK, and mobile. Any model. Your data never leaves your machine."
-         data-zh="Octo 是一个私密、自托管的 AI Agent —— 一个够快的 Go 二进制，伸进你的终端、VS Code、Obsidian、网页、桌面、IM、SDK 和移动端。任意模型，你的数据从不离开你的机器。"></p>
+         data-en="The self-hosted AI agent that just works. One Go binary, zero dependencies, any model — reaching your terminal, editor, notes, browser, desktop, chat apps, SDK, and phone. Your data never leaves your machine."
+         data-zh="开箱即用的自托管 AI Agent。一个零依赖的 Go 二进制，任意模型 —— 伸进终端、编辑器、笔记、浏览器、桌面、聊天应用、SDK 和手机。你的数据从不离开你的机器。"></p>
       <div class="cta-row">
         <a id="get-started" class="btn-primary" href="https://github.com/open-octo/octo-agent/releases/latest">
           <iconify-icon id="dl-icon" icon="ant-design:download-outlined" width="18"></iconify-icon>
@@ -355,7 +362,7 @@
         </div>
         <div class="step reveal">
           <div class="step-head"><span class="num">3</span><h3 data-en="Ship" data-zh="交付"></h3></div>
-          <p data-en="One prompt, full tool loop — in the TUI, headless in CI, or from any of the eight arms." data-zh="一句 prompt，完整工具循环 —— 在 TUI、CI 无界面运行，或从八条腕中任意一条发起。"></p>
+          <p data-en="One prompt, full tool loop — in the TUI, headless in CI, or from any of the eight legs." data-zh="一句 prompt，完整工具循环 —— 在 TUI、CI 无界面运行，或从八条腿中任意一条发起。"></p>
           <div class="path"><span class="tag" data-en="Desktop" data-zh="桌面版"></span><span class="txt" data-en="Type your first prompt in the workbench — sessions, skills, and MCP all in one window." data-zh="在 Workbench 里发出第一句 prompt —— 会话、skills、MCP 都在同一个窗口。"></span></div>
           <div class="path"><span class="tag">CLI</span><code>octo "Add a --json flag to config show"</code></div>
         </div>
@@ -367,10 +374,10 @@
     <div class="wrap">
       <div class="sec-head reveal">
         <h2 data-en="Reach it from wherever you work" data-zh="你在哪干活，就从哪够到它"></h2>
-        <p data-en="One brain — the Go harness plus the model you chose — and eight arms. Same memory, same ~/.octo, from every interface." data-zh="一个大脑 —— Go harness 加上你选的模型 —— 和八条腕。同一份记忆、同一个 ~/.octo，来自每一个界面。"></p>
+        <p data-en="One brain — the Go harness plus the model you chose — and eight legs. Same memory, same ~/.octo, from every interface." data-zh="一个大脑 —— Go harness 加上你选的模型 —— 和八条腿。同一份记忆、同一个 ~/.octo，来自每一个界面。"></p>
       </div>
       <figure class="octo reveal">
-        <svg font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" xmlns="http://www.w3.org/2000/svg" viewBox="0 64 720 356" role="img" aria-label="One brain, eight arms — one local octopus agent whose eight tentacles reach eight interfaces: terminal, VS Code, Obsidian, SDK, web, desktop, IM, and mobile (coming soon)">
+        <svg font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" xmlns="http://www.w3.org/2000/svg" viewBox="0 64 720 356" role="img" aria-label="One brain, eight legs — one local octopus agent whose eight legs reach eight interfaces: terminal, VS Code, Obsidian, SDK, web, desktop, IM, and mobile (coming soon)">
           <g>
           <path fill="#1677FF" d="M 330.11 206.96 L 324.02 202.37 L 317.87 197.81 L 311.65 193.27 L 305.37 188.75 L 299.02 184.26 L 292.61 179.80 L 286.13 175.35 L 279.58 170.93 L 272.97 166.54 L 266.29 162.17 L 259.54 157.82 L 252.73 153.49 L 245.85 149.19 L 238.91 144.90 L 231.90 140.64 L 224.83 136.41 L 217.69 132.19 L 210.48 127.99 L 203.21 123.82 L 195.88 119.66 L 188.47 115.52 L 181.01 111.40 L 173.48 107.29 L 165.88 103.20 L 158.23 99.12 L 150.52 95.03 L 149.48 96.97 L 157.08 101.21 L 164.60 105.51 L 172.04 109.84 L 179.40 114.21 L 186.67 118.61 L 193.88 123.04 L 201.00 127.50 L 208.05 131.98 L 215.02 136.50 L 221.92 141.04 L 228.74 145.60 L 235.48 150.20 L 242.15 154.81 L 248.74 159.46 L 255.25 164.12 L 261.69 168.82 L 268.05 173.53 L 274.34 178.27 L 280.55 183.04 L 286.68 187.83 L 292.74 192.64 L 298.72 197.47 L 304.63 202.33 L 310.46 207.21 L 316.21 212.11 L 321.89 217.04 Z"/>
           <path fill="#1677FF" d="M 316.03 229.83 L 309.84 228.07 L 303.63 226.35 L 297.41 224.64 L 291.17 222.95 L 284.92 221.29 L 278.65 219.65 L 272.37 218.03 L 266.08 216.43 L 259.77 214.85 L 253.44 213.29 L 247.10 211.76 L 240.74 210.24 L 234.37 208.74 L 227.99 207.27 L 221.59 205.81 L 215.17 204.38 L 208.74 202.96 L 202.30 201.56 L 195.84 200.19 L 189.36 198.82 L 182.88 197.48 L 176.37 196.15 L 169.86 194.83 L 163.33 193.53 L 156.78 192.23 L 150.23 190.92 L 149.77 193.08 L 156.28 194.56 L 162.76 196.10 L 169.22 197.69 L 175.65 199.31 L 182.06 200.96 L 188.46 202.64 L 194.83 204.36 L 201.18 206.10 L 207.51 207.88 L 213.82 209.68 L 220.11 211.51 L 226.38 213.37 L 232.63 215.26 L 238.85 217.17 L 245.06 219.11 L 251.25 221.07 L 257.41 223.07 L 263.56 225.09 L 269.68 227.13 L 275.78 229.21 L 281.87 231.30 L 287.93 233.43 L 293.97 235.57 L 299.99 237.75 L 305.99 239.95 L 311.97 242.17 Z"/>
@@ -456,7 +463,7 @@
             <h3 data-en="Mobile" data-zh="移动端"></h3>
             <span class="soon-tag" data-en="Developer preview" data-zh="开发者预览"></span>
           </div>
-          <p data-en="A thin native client (iOS + Android) over an end-to-end encrypted link to your machine. The eighth arm — buildable today from source with a self-hosted relay; hosted relay and app-store builds are next." data-zh="通过端到端加密链路连回你机器的轻量原生客户端（iOS + Android）。第八条腕 —— 现在即可从源码自建并配合自托管 relay 使用；托管 relay 与应用商店版本在路上。"></p>
+          <p data-en="A thin native client (iOS + Android) over an end-to-end encrypted link to your machine. The eighth leg — buildable today from source with a self-hosted relay; hosted relay and app-store builds are next." data-zh="通过端到端加密链路连回你机器的轻量原生客户端（iOS + Android）。第八条腿 —— 现在即可从源码自建并配合自托管 relay 使用；托管 relay 与应用商店版本在路上。"></p>
         </div>
       </div>
     </div>
@@ -494,6 +501,16 @@
           <h3 data-en="Workflows &amp; sub-agents" data-zh="工作流 &amp; 子代理"></h3>
           <p data-en="Parallel sub-agents with git worktree isolation, detached background runs, progress reported to every interface." data-zh="并行子代理，带 git worktree 隔离，可后台分离运行，并向每个界面回报进度。"></p>
         </div>
+        <div class="feat reveal">
+          <iconify-icon icon="ant-design:global-outlined" width="26"></iconify-icon>
+          <h3 data-en="Any model, tuned caching" data-zh="任意模型，缓存逐家优化"></h3>
+          <p data-en="DeepSeek, Kimi, Qwen, Anthropic, OpenAI, or any compatible endpoint. Caching is tuned per provider, with 95%+ measured hit rates on major domestic models." data-zh="DeepSeek、Kimi、Qwen、Anthropic、OpenAI，或任何兼容端点。缓存按供应商逐家优化，主流国产模型实测命中率 95%+。"></p>
+        </div>
+        <div class="feat reveal">
+          <iconify-icon icon="ant-design:security-scan-outlined" width="26"></iconify-icon>
+          <h3 data-en="Won't kill itself, won't go rogue" data-zh="不会自挂，也不会发疯删数据"></h3>
+          <p data-en="Refuses kill commands aimed at its own process, requires explicit permission for restart, and hard-codes deny for catastrophic deletes like rm -rf / or ~." data-zh="拒绝任何指向自身进程的 kill 命令，重启必须显式授权，rm -rf / 或 ~ 这类毁灭性删除被硬编码拒绝。"></p>
+        </div>
       </div>
       <div class="chips reveal">
         <span class="chip" data-en="Browser automation via CDP" data-zh="通过 CDP 的浏览器自动化"></span>
@@ -526,6 +543,33 @@
         <div class="term reveal">
           <div class="term-bar"><span class="d" style="background:#FF5F57"></span><span class="d" style="background:#FEBC2E"></span><span class="d" style="background:#28C840"></span><span data-en="Configuration layers" data-zh="配置分层"></span></div>
           <pre><div class="cmt" data-en="# Octo learns who you are and how you work" data-zh="# Octo 学习你是谁、你怎么工作"></div><div>~/.octo/soul.md      <span class="cmt" data-en="# agent persona" data-zh="# agent 人格"></span></div><div>~/.octo/user.md      <span class="cmt" data-en="# your profile" data-zh="# 你的个人画像"></span></div><div>~/.octo/octorules.md <span class="cmt" data-en="# global rules" data-zh="# 全局规则"></span></div><div>.octorules           <span class="cmt" data-en="# project conventions" data-zh="# 项目约定"></span></div></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="why" class="why">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <h2 data-en="Why Octo" data-zh="为什么用 Octo"></h2>
+        <p data-en="Everything that matters, without the gates." data-zh="重要的事一件不落，门槛一点不加。"></p>
+      </div>
+      <div class="why-grid">
+        <div class="why-card reveal">
+          <h3 data-en="Works out of the box" data-zh="开箱即用"></h3>
+          <p data-en="No tuning, no custom rules, no &quot;raising&quot; required. Shell, files, search, MCP, skills, and sub-agents are enabled by default." data-zh="无需调环境、写规则、精心“喂养”。shell、文件、搜索、MCP、skills、子代理全部默认开启。"></p>
+        </div>
+        <div class="why-card reveal">
+          <h3 data-en="Model choice, no lock-in" data-zh="模型任选，不被绑定"></h3>
+          <p data-en="Use DeepSeek, Kimi, Qwen, Anthropic, OpenAI, or any compatible endpoint. Tuned caching keeps hit rates high and bills low." data-zh="DeepSeek、Kimi、Qwen、Anthropic、OpenAI 或任意兼容端点。逐家优化的缓存保证高命中率、低账单。"></p>
+        </div>
+        <div class="why-card reveal">
+          <h3 data-en="One binary, eight legs" data-zh="一个二进制，八条腿"></h3>
+          <p data-en="A single ~40 MB Go executable with zero telemetry. The desktop installer is ~100 MB, not 1 GB." data-zh="单个约 40 MB 的 Go 可执行文件，零遥测。桌面安装包约 100 MB，而非 1 GB。"></p>
+        </div>
+        <div class="why-card reveal">
+          <h3 data-en="Stable and safe" data-zh="稳定且安全"></h3>
+          <p data-en="Won't kill itself, won't restart without permission, and won't nuke your files. Deletes go through a recycle bin first." data-zh="不会自杀、不会擅自重启、不会删除你的文件。删除先过回收站，误删可恢复。"></p>
         </div>
       </div>
     </div>
@@ -584,7 +628,7 @@
           <svg width="24" height="24" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#1677FF"/><path fill="#fff" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/><circle cx="40" cy="42" r="5" fill="#1677FF"/><circle cx="60" cy="42" r="5" fill="#1677FF"/></svg>
           Octo
         </div>
-        <p data-en="A private, self-hosted AI agent. One brain, eight arms. MIT licensed." data-zh="私密、自托管的 AI Agent。一个脑，八条腕。MIT 许可。"></p>
+        <p data-en="A private, self-hosted AI agent. One brain, eight legs. MIT licensed." data-zh="私密、自托管的 AI Agent。一个脑，八条腿。MIT 许可。"></p>
       </div>
       <div class="foot-col">
         <span class="h" data-en="Product" data-zh="产品"></span>
