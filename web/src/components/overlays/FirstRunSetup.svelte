@@ -125,7 +125,7 @@
       <ModelConfigForm
         {providers}
         initial={modelInitial}
-        requireKey={true}
+        requireKey={!modelInitial}
         showPrefs={false}
         submitLabel={$t('models.btn.test_save')}
         {onSubmit}

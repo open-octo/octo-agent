@@ -104,7 +104,13 @@
   // The Custom vendor has no fixed wire protocol (empty api), so the user picks
   // it explicitly. A hand-typed endpoint with no preset is Custom too.
   let isCustom = $derived(preset ? (!!preset.custom_endpoint && !preset.api) : !!baseUrl)
-  let keyPlaceholder = $derived(initial?.api_key_masked || $t('models.apikey.placeholder'))
+  // requireKey false means the caller found an existing endpoint with a
+  // stored key (see FirstRunSetup's re-run path) — leaving this blank keeps
+  // that key unchanged (saveModel's "empty api_key = unchanged" rule), so the
+  // hint should say that rather than implying a fresh key is expected.
+  let keyPlaceholder = $derived(
+    initial?.api_key_masked || (!requireKey ? $t('models.apikey.placeholder_keep') : $t('models.apikey.placeholder'))
+  )
 
   // Selecting a preset fills model + base_url.
   function onProviderChange() {
