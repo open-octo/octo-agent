@@ -26,7 +26,7 @@
   // chains them, then saves the result with workflow_save. Mirrors Skills'
   // "Create" → skill-creator.
   function handleCreate() {
-    openAgentSession('/workflow-creator', 'New workflow')
+    openAgentSession('/workflow-creator', tr('workflows.session_new'))
   }
 
   // Run: matches the Composer's own /wf menu — plain instruction text, the
@@ -40,7 +40,7 @@
   // no in-browser script editor, workflow-creator edits it and re-saves with
   // workflow_save.
   function handleEdit(name: string) {
-    openAgentSession(`/workflow-creator Edit the existing "${name}" workflow.`, `Edit workflow: ${name}`)
+    openAgentSession(`/workflow-creator Edit the existing "${name}" workflow.`, tr('workflows.session_edit').replace('{name}', name))
   }
 
   async function handleDelete(name: string) {

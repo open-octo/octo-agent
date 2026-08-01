@@ -104,7 +104,7 @@
   // form, and it keeps edit behavior in one place (the skill) instead of a
   // second hand-written prompt that could drift from it.
   function askAgentToEdit(name: string) {
-    openAgentSession(`/mcp-creator Edit the existing MCP server "${name}" — find its entry, show me the current config, then ask what I want changed.`, `Edit MCP: ${name}`)
+    openAgentSession(`/mcp-creator Edit the existing MCP server "${name}" — find its entry, show me the current config, then ask what I want changed.`, tr('mcp.session_edit').replace('{name}', name))
   }
 
   function openImport() {
@@ -114,7 +114,7 @@
   // Agentic-first: open a fresh chat that invokes the mcp-creator skill, which
   // walks the user through picking + configuring a server in conversation.
   function aiSetup() {
-    openAgentSession('/mcp-creator', 'MCP Setup')
+    openAgentSession('/mcp-creator', tr('mcp.session_setup'))
   }
 
   // ─── delete server ──────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@
   import { renderMarkdown } from '../lib/markdown'
   import * as api from '../lib/api'
   import type { Memory } from '../lib/types'
-  import { t } from '../lib/i18n'
+  import { t, tr } from '../lib/i18n'
 
   // --- state ---
   interface SoulData {
@@ -156,7 +156,7 @@
         {/if}
         <div class="card-footer">
           <span class="footer-hint">{$t('profile.soul_hint')}</span>
-          <button class="btn-primary" onclick={() => openAssistantChat('/onboard scope:soul', 'Update soul.md')}>
+          <button class="btn-primary" onclick={() => openAssistantChat('/onboard scope:soul', tr('profile.session_soul'))}>
             {$t('profile.update')}
           </button>
         </div>
@@ -184,7 +184,7 @@
         {/if}
         <div class="card-footer">
           <span class="footer-hint">{$t('profile.user_hint')}</span>
-          <button class="btn-primary" onclick={() => openAssistantChat('/onboard scope:user', 'Update user.md')}>
+          <button class="btn-primary" onclick={() => openAssistantChat('/onboard scope:user', tr('profile.session_user'))}>
             {$t('profile.update')}
           </button>
         </div>
@@ -237,7 +237,7 @@
         {/if}
         <div class="card-footer">
           <span class="footer-hint">{$t('profile.memories_hint')}</span>
-          <button class="btn-primary" onclick={() => openAssistantChat('Review my saved memories and help me update or remove any that are stale.', 'Update memories')}>
+          <button class="btn-primary" onclick={() => openAssistantChat('Review my saved memories and help me update or remove any that are stale.', tr('profile.session_memories'))}>
             {$t('profile.update')}
           </button>
         </div>

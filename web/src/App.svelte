@@ -327,7 +327,7 @@
     sessionStorage.setItem('octo-onboard-launched', '1')
     await api.markOnboardAttempted().catch(() => {})
     const lang = get(locale).startsWith('zh') ? 'zh' : 'en'
-    openAgentSession(`/onboard lang:${lang}`, '✨ Onboard').catch(() => {})
+    openAgentSession(`/onboard lang:${lang}`, tr('onboard.session_title')).catch(() => {})
   }
 
   // Cmd/Ctrl+K toggles the command palette — the Header pill advertises the

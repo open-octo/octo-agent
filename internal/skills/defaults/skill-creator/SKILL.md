@@ -1,7 +1,7 @@
 ---
 name: skill-creator
 system: true
-description: Create new skills, modify existing skills, and help users turn repeatable workflows into reusable instructions. Use when the user wants to create a skill from scratch, edit or improve an existing skill, capture a workflow as a skill, or optimize a skill's description for better triggering accuracy. Do NOT use to chain or orchestrate several EXISTING skills/recordings into a runnable saved workflow — that is workflow-creator.
+description: Create new skills, modify existing skills, and help users turn repeatable workflows into reusable instructions. Use when the user wants to create a skill from scratch, edit or improve an existing skill, capture a workflow as a skill, or optimize a skill's description for better triggering accuracy, e.g. "帮我建个技能", "创建一个技能", "把这个流程做成技能", "编辑这个技能", "优化技能的触发描述". Do NOT use to chain or orchestrate several EXISTING skills/recordings into a runnable saved workflow — that is workflow-creator.
 ---
 
 # Skill Creator

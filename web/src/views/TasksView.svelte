@@ -103,11 +103,11 @@
   // cron-task-creator skill, which collects the schedule + prompt in conversation
   // (no form).
   function openCreate() {
-    openAgentSession('/cron-task-creator', 'New task')
+    openAgentSession('/cron-task-creator', tr('tasks.session_new'))
   }
 
   function openEdit(t: api.TaskResponse) {
-    openAgentSession(`/cron-task-creator edit ${t.id} "${t.name}"`, `Edit task: ${t.name}`)
+    openAgentSession(`/cron-task-creator edit ${t.id} "${t.name}"`, tr('tasks.session_edit').replace('{name}', t.name))
   }
 </script>
 

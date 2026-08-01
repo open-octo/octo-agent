@@ -150,15 +150,15 @@
 
   // ── agentic-first actions ───────────────────────────────────────────────────
   function configureDefaults() {
-    openAgentSession('/config-setup', 'Configure defaults')
+    openAgentSession('/config-setup', tr('settings.session_configure_defaults'))
   }
 
   function configureEndpoints() {
-    openAgentSession('/config-setup add endpoint', 'Configure endpoints')
+    openAgentSession('/config-setup add endpoint', tr('settings.session_configure_endpoints'))
   }
 
   function editEndpoint(id: string) {
-    openAgentSession(`/config-setup edit endpoint ${id}`, `Edit endpoint: ${id}`)
+    openAgentSession(`/config-setup edit endpoint ${id}`, tr('settings.session_edit_endpoint').replace('{id}', id))
   }
 
   $effect(() => {
