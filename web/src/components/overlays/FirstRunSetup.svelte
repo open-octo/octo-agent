@@ -3,7 +3,7 @@
   import { t, tr, locale, setLocale } from '../../lib/i18n'
   import { onboardPhase, openAgentSession, showToast } from '../../lib/stores'
   import * as api from '../../lib/api'
-  import type { ProviderPreset, ModelConfigInput } from '../../lib/api'
+  import type { ProviderPreset, ModelConfigInput, ModelEntry } from '../../lib/api'
   import ModelConfigForm from '../settings/ModelConfigForm.svelte'
   import BrowserSetupForm from '../settings/BrowserSetupForm.svelte'
   import OctoLogo from '../layout/OctoLogo.svelte'
@@ -13,9 +13,17 @@
   // chat). Steps: pick language, connect a model, then an optional browser-
   // automation setup. On finish it marks onboarding complete and auto-launches
   // an /onboard chat to personalise soul.md / user.md.
+  //
+  // Settings → About → "Re-run" opens this same panel on an already-configured
+  // install (see rerunFirstRun in SettingsModal). modelInitial seeds the model
+  // step from whatever's currently the default endpoint/model + agent defaults,
+  // so re-running is "review and confirm" rather than "start from a blank
+  // form" — a genuinely first run has no default yet, so it resolves to null
+  // and the form behaves exactly as before.
 
   let step = $state<'lang' | 'model' | 'browser'>('lang')
   let providers = $state<ProviderPreset[]>([])
+  let modelInitial = $state<Partial<ModelEntry> | null>(null)
   let lang = $state<'en' | 'zh'>(($locale?.startsWith('zh') ? 'zh' : 'en'))
 
   onMount(async () => {
@@ -24,7 +32,31 @@
     } catch {
       /* non-fatal: the form still works with Custom */
     }
+    await loadModelInitial()
   })
+
+  async function loadModelInitial() {
+    try {
+      const [ep, cfg] = await Promise.all([api.getEndpoints(), api.getConfig()])
+      const defaultCid = ep.default ?? ''
+      const match = ep.endpoints.find(e => defaultCid.startsWith(`${e.id}::`))
+      if (!match) return // genuine first run — no default endpoint yet
+      const modelName = defaultCid.slice(match.id.length + 2)
+      const m = match.models.find(mm => mm.model === modelName)
+      modelInitial = {
+        provider: match.provider,
+        model: modelName,
+        base_url: match.base_url ?? '',
+        anthropic_format: match.protocol === 'anthropic',
+        permission_mode: cfg.permission_mode,
+        reasoning_effort: cfg.reasoning_effort,
+        show_reasoning: cfg.show_reasoning,
+        vision: m?.vision,
+      }
+    } catch {
+      /* non-fatal: form just starts blank, same as before */
+    }
+  }
 
   function pickLang(l: 'en' | 'zh') {
     lang = l
@@ -66,18 +98,24 @@
     </div>
 
     <div class="steps">
-      <span class="step" class:active={step === 'lang'} class:done={step !== 'lang'}>1 · {$t('onboard.step.lang')}</span>
+      <span class="ostep" class:on={step === 'lang'} class:done={step !== 'lang'}>1 · {$t('onboard.step.lang')}</span>
       <span class="step-sep"></span>
-      <span class="step" class:active={step === 'model'} class:done={step === 'browser'}>2 · {$t('onboard.step.model')}</span>
+      <span class="ostep" class:on={step === 'model'} class:done={step === 'browser'}>2 · {$t('onboard.step.model')}</span>
       <span class="step-sep"></span>
-      <span class="step" class:active={step === 'browser'}>3 · {$t('onboard.step.browser')}</span>
+      <span class="ostep" class:on={step === 'browser'}>3 · {$t('onboard.step.browser')}</span>
     </div>
 
     {#if step === 'lang'}
       <p class="prompt">{$t('onboard.lang.prompt')}</p>
-      <div class="lang-row">
-        <button class="lang-btn" class:active={lang === 'en'} onclick={() => pickLang('en')}>English</button>
-        <button class="lang-btn" class:active={lang === 'zh'} onclick={() => pickLang('zh')}>简体中文</button>
+      <div class="lang-list">
+        <div class="orow" class:sel={lang === 'en'} onclick={() => pickLang('en')}>
+          <span class="odot"></span>
+          <span>English</span>
+        </div>
+        <div class="orow" class:sel={lang === 'zh'} onclick={() => pickLang('zh')}>
+          <span class="odot"></span>
+          <span>简体中文</span>
+        </div>
       </div>
       <div class="actions">
         <button class="btn-primary" onclick={() => (step = 'model')}>{$t('onboard.lang.next')}</button>
@@ -86,6 +124,7 @@
       <p class="prompt">{$t('onboard.key.title')}</p>
       <ModelConfigForm
         {providers}
+        initial={modelInitial}
         requireKey={true}
         showPrefs={false}
         submitLabel={$t('models.btn.test_save')}
@@ -114,7 +153,7 @@
 }
 .card {
   width: 520px; max-width: 100%;
-  background: var(--bg-container); border-radius: 16px; box-shadow: var(--card-shadow);
+  background: var(--bg-container); border: 1px solid var(--border); border-radius: var(--radius-card); box-shadow: var(--card-shadow);
   padding: 32px; display: flex; flex-direction: column; gap: 20px;
 }
 .brand { display: flex; align-items: center; gap: 14px; }
@@ -126,23 +165,30 @@
 .brand-text h1 { margin: 0; font-size: 20px; font-weight: 600; color: var(--text-heading); }
 .brand-text p { margin: 2px 0 0; font-size: 13px; color: var(--text-secondary); }
 .steps { display: flex; align-items: center; gap: 10px; }
-.step { font-size: 12px; color: var(--text-tertiary); }
-.step.active { color: var(--blue-6); font-weight: 600; }
-.step.done { color: var(--success); }
+.ostep {
+  font-size: 12px; color: var(--text-secondary); padding: 3px 11px;
+  border-radius: 999px; background: var(--hover-neutral); white-space: nowrap;
+}
+.ostep.on { background: var(--blue-6); color: #fff; font-weight: 600; }
+.ostep.done { background: var(--success-bg); color: var(--success-text); }
 .step-sep { flex: 1; height: 1px; background: var(--border); max-width: 60px; }
 .prompt { margin: 0; font-size: 14px; font-weight: 500; color: var(--text); }
 .sub { margin: -12px 0 0; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
-.lang-row { display: flex; gap: 12px; }
-.lang-btn {
-  flex: 1; height: 44px; border: 1px solid var(--border); background: var(--bg-container);
-  border-radius: 10px; font-size: 14px; color: var(--text); cursor: pointer; font-family: inherit;
+.lang-list { display: flex; flex-direction: column; }
+.orow {
+  display: flex; align-items: center; gap: 10px; padding: 11px 14px;
+  border: 1px solid var(--border); border-radius: 10px; font-size: 14px; color: var(--text);
+  cursor: pointer; margin-bottom: 8px; background: var(--bg-container);
 }
-.lang-btn:hover { border-color: var(--blue-5); }
-.lang-btn.active { border-color: var(--blue-6); color: var(--blue-6); background: var(--active-blue-bg); }
+.orow:hover { border-color: var(--text-quaternary); }
+.orow.sel { border-color: var(--blue-6); background: var(--active-blue-bg); }
+.odot { width: 16px; height: 16px; flex: none; border-radius: 50%; border: 1.5px solid var(--border); }
+.orow.sel .odot { border-color: var(--blue-6); background: var(--blue-6); box-shadow: inset 0 0 0 3px var(--bg-container); }
 .actions { display: flex; justify-content: flex-end; }
 .btn-primary {
   height: 36px; padding: 0 18px; border: none; background: var(--blue-6); border-radius: 8px;
-  font-size: 14px; color: #fff; cursor: pointer; font-family: inherit;
+  font-size: 14px; font-weight: 600; color: #fff; cursor: pointer; font-family: inherit;
+  box-shadow: 0 1px 2px rgba(0,122,255,0.35);
 }
 .btn-primary:hover { background: var(--blue-5); }
 .back-row { display: flex; justify-content: flex-start; }

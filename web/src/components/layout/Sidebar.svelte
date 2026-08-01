@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, manageCat } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, manageCat, settingsModalOpen } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
@@ -125,7 +125,7 @@
   const railNav = [
     { icon: 'ant-design:message-outlined', title: 'sidebar.chat', v: 'chat' },
     { icon: 'ant-design:clock-circle-outlined', title: 'nav.tasks', v: 'tasks' },
-    { icon: 'ant-design:tool-outlined', title: 'nav.manage', v: 'manage' },
+    { icon: 'ant-design:more-outlined', title: 'nav.manage', v: 'manage' },
     { icon: 'ant-design:user-outlined', title: 'nav.memory', v: 'profile' },
     { icon: 'ant-design:appstore-outlined', title: 'nav.light_apps', v: 'lightapps' },
     { icon: 'ant-design:folder-open-outlined', title: 'nav.file_recall', v: 'files' },
@@ -561,7 +561,7 @@
         <div class="group-header"><span class="group-label">{$t('nav.config')}</span></div>
         {#each [
           { icon: 'ant-design:clock-circle-outlined', label: 'nav.tasks', v: 'tasks' },
-          { icon: 'ant-design:tool-outlined', label: 'nav.manage', v: 'manage' },
+          { icon: 'ant-design:more-outlined', label: 'nav.manage', v: 'manage' },
         ] as item}
         <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>
           <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
@@ -587,7 +587,7 @@
     </div>
 
     <div class="footer">
-      <div class="footer-settings" style="color:{navActive('settings') ? 'var(--blue-6)' : 'var(--text-secondary)'}" onclick={() => view.set('settings')}>
+      <div class="footer-settings" style="color:{$settingsModalOpen ? 'var(--blue-6)' : 'var(--text-secondary)'}" onclick={() => settingsModalOpen.set(true)}>
         <iconify-icon icon="ant-design:setting-outlined" width="14"></iconify-icon>
         <span>{$t('nav.settings')}</span>
       </div>
@@ -616,7 +616,7 @@
       {/each}
     </div>
     <div class="rail-footer">
-      <button class="rail-btn" class:active={navActive('settings')} title={$t('nav.settings')} onclick={() => view.set('settings')}>
+      <button class="rail-btn" class:active={$settingsModalOpen} title={$t('nav.settings')} onclick={() => settingsModalOpen.set(true)}>
         <iconify-icon icon="ant-design:setting-outlined" width="16"></iconify-icon>
       </button>
     </div>

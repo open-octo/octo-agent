@@ -26,6 +26,8 @@ export const cmdkOpen = writable(false)
 // McpView's aiSetup/askAgentToEdit) — it works uniformly whether the entry
 // lives in the user or project config.
 export const mcpModalOpen = writable(false)
+// Drives the Settings modal (replaces the old full-page 'settings' view).
+export const settingsModalOpen = writable(false)
 export interface ToastEntry { id: number; msg: string; type: string }
 export const toasts = writable<ToastEntry[]>([])
 
