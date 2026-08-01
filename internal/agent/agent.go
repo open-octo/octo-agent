@@ -1424,7 +1424,9 @@ const titleContextMaxRunes = 500
 // handful of words. 8 words / 25 characters mirrors FirstUserSnippet's
 // truncation budget, so a model title and the snippet fallback land at the
 // same length.
-const titleInstruction = "Generate a very short title for this conversation — at most 8 words, or 25 characters for Chinese or Japanese. " +
+const titleInstruction = "Generate a very short title that summarizes the user's first message or task. " +
+	"Do not answer the user or continue the conversation — only output a concise title. " +
+	"At most 8 words, or 25 characters for Chinese or Japanese. " +
 	"Reply with the title text only — no preamble, no quotes, no trailing punctuation, no markdown."
 
 // GenerateTitle produces a short title for the conversation so far, for
