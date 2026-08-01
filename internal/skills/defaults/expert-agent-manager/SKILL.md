@@ -66,6 +66,97 @@ localhost is blocked by SSRF protection.) All requests return JSON.
 | `POST` | `/api/agents/:id/bind` | Bind a profile to an IM chat |
 | `DELETE` | `/api/agents/:id/bind` | Remove an IM binding |
 
+## No octo server reachable (TUI-only sessions)
+
+**The API above only exists while `octo serve` (or the desktop app, which is
+also a serve process) is running as its own process.** A bare `octo` TUI/CLI
+session — the one this skill usually runs inside — does **not** open any HTTP
+listener itself; it's purely in-process. If nothing else on the machine
+happens to be running `octo serve`, every endpoint above is unreachable —
+`curl` will just fail to connect.
+
+**Check first, before assuming curl will work:**
+```
+curl -s --max-time 1 http://localhost:8088/api/version
+```
+(8088 is the default `octo serve` port; if the user has a custom `--addr`,
+try that instead.) No response within ~1s → no server is running. Don't keep
+retrying or guessing other ports — fall back to the file-based approach below
+for anything it covers, and tell the user plainly when something (see "Hiding
+a curated expert" below) genuinely requires a running server.
+
+### Creating/editing a user agent by hand-writing its file
+
+`~/.octo/agents/<id>.md` is the exact on-disk form of a user profile — the
+Store is read-through (any path that touches this directory takes effect on
+the very next read, no restart, no reload call). Writing this file directly
+with the `write_file` tool is a fully supported, first-class way to manage
+profiles when there's no server to call — but you take over every validation
+the API normally does for you:
+
+1. **Pick an id** matching `^[a-z0-9][a-z0-9-]{0,31}$` (lowercase, digits,
+   hyphens, 1-32 chars, starts alphanumeric) and not `default`/`explore`/
+   `general`/`code-review` (the four reserved builtin ids).
+2. **Check for a collision yourself** — `ls ~/.octo/agents/` and
+   `ls ~/.octo/agents-default/`. The API refuses to silently overwrite an
+   existing profile (409); a raw `write_file` has no such guard and will just
+   clobber whatever's already at that path.
+3. **Write the file**:
+   ```markdown
+   ---
+   name: Code Reviewer
+   description: Reviews code for bugs and style
+   model: claude-sonnet-4-20250514
+   tools: [read_file, grep, glob]
+   tool_skills: [code-review]
+   ---
+   You are a thorough code reviewer. Be concise but precise.
+   ```
+   `description` is the only field the Store itself enforces as non-empty on
+   read — everything else is on you to get right (see the checklist below).
+4. **Validate the rest yourself** — the API layer normally catches all of
+   this; a raw file skips every check:
+   - `name` ≤ 32 characters, if set.
+   - The Markdown body (the system prompt) ≤ 10,000 characters.
+   - Every entry in `tools`/`tool_skills` is a real tool/skill name — an unknown
+     name isn't rejected, it's just silently dropped from the agent's actual
+     allowlist at runtime. Cross-check spelling against what you know is
+     available (skills you've seen listed, the standard tool names) since
+     there's no listing endpoint to call here either.
+   - `model`, if set, should be a model you've confirmed the user has
+     configured — nothing validates this at all, on the API path either;
+     an unresolvable model just fails at the next turn, not at save time.
+
+**Editing a curated (`source: "default"`) expert this same way**: write
+`~/.octo/agents/<id>.md` using the *same id* as an existing
+`~/.octo/agents-default/<id>.md`. User-level files take precedence over the
+curated directory on every read, so this achieves exactly the same fork
+the API's `PUT` does — no server involved, just file precedence.
+
+**Deleting a user override created this way**: `rm ~/.octo/agents/<id>.md`
+after confirming with the user (same destructive-operation rule as always).
+If that id also exists under `~/.octo/agents-default/`, removing the override
+reverts the persona to its official curated version rather than erasing it
+entirely — tell the user this is what will happen; it's the same reason the
+API refuses to hard-delete a curated expert.
+
+### Hiding a curated expert without a server
+
+There's no file-based equivalent for this one — the hidden/shown state lives
+in `~/.octo/config.yml`'s `agents.disabled_defaults` list, and that file also
+holds endpoint credentials, so freehand edits there carry real risk. If asked
+to hide/show a curated expert and no server is reachable:
+
+1. Prefer telling the user to start `octo serve` (or open the desktop app)
+   and use the gallery card's hide/show action, or ask you again once it's
+   running — that's the safe, validated path.
+2. Only edit `config.yml` directly if the user insists: read the whole file
+   first, add or remove exactly one string under `agents:` → `disabled_defaults:`
+   (creating those two keys, appended at the end of the file, if they don't
+   exist yet), and change **nothing else** — show the user the exact diff
+   before saving. Never rewrite the file wholesale; a full rewrite risks
+   losing or corrupting the `endpoints:` block's API keys.
+
 ## Profile Shape
 
 ```json

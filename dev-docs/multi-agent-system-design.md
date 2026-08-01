@@ -1114,6 +1114,7 @@ Web 端不维护全局 active agent 状态——agent 绑定在 session 上，�
 - **WeChat 群聊**：WeChat 没有原生 mention，群聊路由只能走频道绑定。私聊绑定同一 expert agent 后，群聊和私聊行为相同（无 @ 区分）。这是 WeChat 平台限制，无法在应用层规避。
 - **MCP Server 资源**：被禁 MCP 的 server 仍保持 registry 注册和连接。若 MCC server 数量极大且有连接数上限，可在后续加入 lazy-connect 优化。
 - **多 agent 并发 rate limit**：多个 agent 的 cron 同时跑时共用同一个 API key，可能触发 rate limit。留待后续加 per-agent 并发限制或队列。
+- **纯 TUI/CLI 会话没有 HTTP 接口**：裸 `octo`（无子命令）完全进程内运行，不绑定任何端口——`/api/agents/*` 等接口只在 `octo serve`（或桌面版，本质也是一个 serve 进程）单独运行时才存在。`expert-agent-manager` 元技能因此需要先探测服务是否可达，探测失败则退化为直接读写 `~/.octo/agents/<id>.md`（Store 是 read-through 的，文件改动下一次读取即生效，语义等价于走 API）；但隐藏/显示内置专家这个状态只存在于 `~/.octo/config.yml` 的 `agents.disabled_defaults` 里，没有文件级等价路径，纯 TUI 场景下只能手改这个（同时存放 endpoint 密钥的）配置文件，或引导用户改跑 `octo serve`。
 
 ---
 
