@@ -361,6 +361,16 @@ export async function updateSessionWorkingDir(id: string, dir: string): Promise<
   })
 }
 
+// Only accepted server-side while the session still has zero turns — once a
+// turn has run, agent_profile is fixed for the life of the session (a turn
+// may already have applied the old profile's system prompt/tool allowlist).
+export async function updateSessionAgentProfile(id: string, agentProfile: string): Promise<{ agent_profile: string }> {
+  return request<{ agent_profile: string }>(`/api/sessions/${id}/agent_profile`, {
+    method: 'PATCH',
+    ...json({ agent_profile: agentProfile }),
+  })
+}
+
 // Skills
 
 // The server returns { skills: [{name, description, source, enabled}] }. Map it

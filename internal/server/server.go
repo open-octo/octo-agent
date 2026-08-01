@@ -771,6 +771,7 @@ func (s *Server) registerRoutes() {
 	s.api("PATCH /api/sessions/{id}/show_reasoning", s.handleUpdateSessionShowReasoning)
 	s.api("PATCH /api/sessions/{id}/permission_mode", s.handleUpdateSessionPermissionMode)
 	s.api("PATCH /api/sessions/{id}/working_dir", s.handleUpdateSessionWorkingDir)
+	s.api("PATCH /api/sessions/{id}/agent_profile", s.handleUpdateSessionAgentProfile)
 	s.api("GET /api/sessions/{id}/goal", s.handleGetSessionGoal)
 	s.api("PUT /api/sessions/{id}/goal", s.handleUpdateSessionGoal)
 	s.api("DELETE /api/sessions/{id}/goal", s.handleDeleteSessionGoal)

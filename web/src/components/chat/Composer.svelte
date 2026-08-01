@@ -307,9 +307,9 @@
   function parseSlashInput(value: string): { mode: SlashItem['kind'] | null; query: string; serverName?: string } {
     const trimmed = normalizeSlash(value)
     // A leading "@" with no whitespace summons the agent picker — only
-    // meaningful before a session exists (see handleSlashInput's hasSession
-    // guard): agent_profile is fixed at session creation, so this can only
-    // ever pick the agent for a session that doesn't exist yet.
+    // meaningful before the session is locked (see handleSlashInput's
+    // agentLocked guard): agent_profile can be reassigned up until the
+    // session's first turn runs, never after.
     if (/^@\S*$/.test(trimmed)) {
       return { mode: 'agent', query: trimmed.slice(1).toLowerCase() }
     }
@@ -453,9 +453,9 @@
       return
     }
     if (parsed.mode === 'agent') {
-      // agent_profile is fixed at session creation — once a session exists,
-      // "@" is just a character, not a picker trigger.
-      if (!currentSession) showSlashMenu('agents', parsed.query)
+      // Once a session has run its first turn, agent_profile is locked —
+      // "@" is just a character then, not a picker trigger.
+      if (!agentLocked) showSlashMenu('agents', parsed.query)
       else hideSlashMenu()
       return
     }
@@ -619,29 +619,40 @@
   })
 
   // ── agent assignment ───────────────────────────────────────────────────────
-  // agent_profile is fixed at session creation (no server-side update path),
-  // so a picker only makes sense before a session exists — once currentSession
-  // is set, its profile can never change and the chip becomes a read-only
-  // label. Pre-creation, the chip assigns the agent for the session about to
-  // be auto-created (ensureActiveSession in ChatView reads the activeAgent
-  // store), mirroring the sidebar's own new-session picker.
+  // agent_profile can be (re)assigned right up until the session's first turn
+  // runs — the server 409s a rebind past that point, since a turn may already
+  // have applied the old profile's system prompt/tool allowlist (see
+  // handleUpdateSessionAgentProfile). Before that point — no session yet, or
+  // an existing session with turn_count 0 — the chip stays a live picker;
+  // once locked, it becomes a read-only label of the session's own profile.
   let agents = $state<api.Agent[]>([])
+  let agentLocked = $derived(!!currentSession && ((currentSession as any)?.turn_count ?? 0) > 0)
   let sessionAgent = $derived((currentSession as any)?.agent_profile ?? '')
-  let sessionAgentName = $derived.by(() => {
-    if (!sessionAgent || sessionAgent === 'default') return ''
-    return agents.find(a => a.id === sessionAgent)?.name ?? sessionAgent
-  })
-  let pendingAgentName = $derived.by(() => {
-    if ($activeAgent === 'default') return ''
-    return agents.find(a => a.id === $activeAgent)?.name ?? $activeAgent
-  })
+  // Which id is "current" right now: the session's own profile once one
+  // exists (even pre-lock), else the pending pick for the session about to
+  // be auto-created (ensureActiveSession in ChatView reads the activeAgent
+  // store, mirroring the sidebar's own new-session picker).
+  let effectiveAgentId = $derived(currentSession ? sessionAgent : $activeAgent)
   // Empty when the default agent applies — the chip only renders for an
-  // expert agent, whichever source (bound session vs. pending pre-creation
-  // pick) is relevant right now.
-  let agentLabel = $derived(currentSession ? sessionAgentName : pendingAgentName)
-  function pickAgent(id: string) {
-    activeAgent.set(id)
+  // expert agent.
+  let agentLabel = $derived.by(() => {
+    if (!effectiveAgentId || effectiveAgentId === 'default') return ''
+    return agents.find(a => a.id === effectiveAgentId)?.name ?? effectiveAgentId
+  })
+  async function pickAgent(id: string) {
     agentMenu = false
+    if (currentSession) {
+      if (id !== sessionAgent) {
+        try {
+          await api.updateSessionAgentProfile(sid, id)
+          sessions.update(list => list.map((s: any) => s.id === sid ? { ...s, agent_profile: id } : s))
+        } catch (e: any) {
+          showToast(e.message ?? 'Failed to change agent', 'error')
+        }
+      }
+    } else {
+      activeAgent.set(id)
+    }
     queueMicrotask(() => textareaEl?.focus())
   }
   let dirDraft = $state('')
@@ -913,6 +924,16 @@
       }
     }
 
+    // Backspace on an empty box un-assigns the picked agent (back to Default)
+    // instead of doing nothing — only while it's still changeable (agentLocked
+    // false) and there's actually something assigned to clear. Lets the user
+    // immediately reselect via "@" without hunting for the dropdown.
+    if (e.key === 'Backspace' && text === '' && !slashMenu && !agentLocked && agentLabel) {
+      e.preventDefault()
+      pickAgent('default')
+      return
+    }
+
     // Enter sends (mid-turn: steers); Cmd/Ctrl+Enter queues as the next turn;
     // Shift+Enter falls through to the textarea's own newline. See composerKeys.
     const intent = submitIntent(e)
@@ -974,7 +995,7 @@
       {/if}
       <div class="input-row">
         {#if agentLabel}
-        {#if currentSession}
+        {#if agentLocked}
         <span class="agent-chip" title={$t('composer.session_agent')}>
           <span class="agent-at">@</span>
           <span class="agent-name">{agentLabel}</span>
@@ -988,11 +1009,11 @@
           {#if agentMenu}
             <div class="menu agent-menu" onclick={(e) => e.stopPropagation()}>
               <div class="menu-label">{$t('composer.assign_agent')}</div>
-              <button class="menu-item" class:active={$activeAgent === 'default'} onclick={() => pickAgent('default')}>
+              <button class="menu-item" class:active={effectiveAgentId === 'default'} onclick={() => pickAgent('default')}>
                 <span class="mi-name">Default</span>
               </button>
               {#each agents as a (a.id)}
-                <button class="menu-item" class:active={$activeAgent === a.id} onclick={() => pickAgent(a.id)}>
+                <button class="menu-item" class:active={effectiveAgentId === a.id} onclick={() => pickAgent(a.id)}>
                   <span class="mi-name">{a.name}</span>
                 </button>
               {/each}

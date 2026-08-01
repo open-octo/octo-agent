@@ -514,7 +514,7 @@ func (s *Session) ChunkDir() (string, error) {
 // type as authoritative; rewriteAll folds them back into the meta header when
 // compacting.
 type sessionRecord struct {
-	Type              string    `json:"type"` // "meta" | "message" | "title" | "model_config" | "working_dir" | "permission_mode" | "context_tokens" | "lease" | "goal"
+	Type              string    `json:"type"` // "meta" | "message" | "title" | "model_config" | "agent_id" | "working_dir" | "permission_mode" | "context_tokens" | "lease" | "goal"
 	ID                string    `json:"id,omitempty"`
 	CreatedAt         time.Time `json:"created_at,omitempty"`
 	Model             string    `json:"model,omitempty"`
@@ -787,6 +787,50 @@ func (s *Session) SetWorkingDir(dir string) error {
 	defer f.Close()
 	if err := json.NewEncoder(f).Encode(sessionRecord{Type: "working_dir", WorkingDir: dir}); err != nil {
 		return fmt.Errorf("session: append working_dir: %w", err)
+	}
+	return nil
+}
+
+// SetAgentID rebinds the session to a different agent profile. Only called
+// while the session still has zero turns (enforced by the caller, the
+// agent_profile PATCH handler) — AgentID is otherwise fixed for the life of
+// the session once a turn has run against it. Same persistence mechanics as
+// SetWorkingDir: append a record when the transcript is already on disk so
+// the change survives without rewriting the file, rewrite when the on-disk
+// prefix is stale, and carry the value in memory for a not-yet-saved session
+// until its first Save folds it into the meta header. Setting the id already
+// in place is a no-op.
+func (s *Session) SetAgentID(id string) error {
+	if id == s.AgentID {
+		return nil
+	}
+	s.AgentID = id
+	if s.persisted == 0 {
+		// See SetWorkingDir: a meta-only transcript must be rewritten now, since
+		// the load-modify-discard handler won't get a "next Save"; a session with
+		// no file yet just carries the value until its first Save.
+		if path, perr := s.SavePath(); perr == nil {
+			if _, statErr := os.Stat(path); statErr == nil {
+				return s.rewriteAll()
+			}
+		}
+		return nil
+	}
+	if s.forceRewrite {
+		return s.rewriteAll()
+	}
+	path, err := s.SavePath()
+	if err != nil {
+		return err
+	}
+	// No O_CREATE — see SetTitle: never materialise an orphan transcript.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("session: open %s: %w", path, err)
+	}
+	defer f.Close()
+	if err := json.NewEncoder(f).Encode(sessionRecord{Type: "agent_id", AgentID: id}); err != nil {
+		return fmt.Errorf("session: append agent_id: %w", err)
 	}
 	return nil
 }
@@ -1189,6 +1233,8 @@ func LoadSession(id string) (*Session, error) {
 			if rec.Model != "" {
 				s.Model = rec.Model
 			}
+		case "agent_id":
+			s.AgentID = rec.AgentID // last one wins, like title
 		case "working_dir":
 			s.WorkingDir = rec.WorkingDir // last one wins, like title
 		case "permission_mode":

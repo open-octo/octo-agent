@@ -1590,6 +1590,78 @@ func (s *Server) handleUpdateSessionWorkingDir(w http.ResponseWriter, r *http.Re
 	})
 }
 
+// ─── PATCH /api/sessions/{id}/agent_profile ─────────────────────────────────
+
+type updateSessionAgentProfileRequest struct {
+	AgentProfile string `json:"agent_profile"`
+}
+
+// handleUpdateSessionAgentProfile rebinds THIS session's agent profile —
+// allowed only while the session still has zero turns (nothing has been sent
+// to it yet), since a running turn may already have applied the old profile's
+// system prompt/tool allowlist. Once a turn has run, agent_profile is fixed
+// for the life of the session, same as every other backend surface (there is
+// no way to un-apply a prompt/tools a turn already saw).
+func (s *Server) handleUpdateSessionAgentProfile(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing session id")
+		return
+	}
+
+	var req updateSessionAgentProfileRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	agentProfile := req.AgentProfile
+	if agentProfile == "" {
+		agentProfile = agentprofile.DefaultID
+	}
+	if err := s.validateAgentID(agentProfile); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if _, err := agent.LoadSession(id); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if ok, _, berr := s.acquireSessionBinding(id, agent.EntryWeb, false); !ok {
+		writeError(w, http.StatusConflict, berr.Error())
+		return
+	}
+	defer s.releaseSessionBinding(id, agent.EntryWeb)
+
+	// Reload after acquiring the binding in case another process saved.
+	sess, err := agent.LoadSession(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if len(sess.Messages) > 0 {
+		writeError(w, http.StatusConflict, "agent_profile can only be changed before the session's first turn")
+		return
+	}
+	if err := sess.SetAgentID(agentProfile); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save session: %v", err))
+		return
+	}
+
+	if s.wsHub != nil {
+		s.wsHub.broadcast(id, map[string]any{
+			"type":          "session_update",
+			"session_id":    id,
+			"agent_profile": agentProfile,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":            true,
+		"agent_profile": agentProfile,
+	})
+}
+
 // unwrapPathError strips the "stat <path>:" wrapper os.Stat adds so the
 // error message doesn't repeat the path the caller already reports.
 func unwrapPathError(err error) error {

@@ -954,6 +954,65 @@ func TestSetWorkingDir_BeforeSave(t *testing.T) {
 	}
 }
 
+func TestSetAgentID_AppendsAndReloads(t *testing.T) {
+	// An agent id set after the first Save is appended as its own record and
+	// survives a reload; setting a new one wins over the old.
+	setTempHome(t)
+
+	s := NewSession("m", "")
+	s.Messages = []Message{NewUserMessage("ping"), NewAssistantMessage("pong")}
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAgentID("copywriter"); err != nil {
+		t.Fatalf("SetAgentID: %v", err)
+	}
+
+	got, err := LoadSession(s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AgentID != "copywriter" {
+		t.Errorf("reloaded AgentID = %q, want copywriter", got.AgentID)
+	}
+	if len(got.Messages) != 2 {
+		t.Errorf("Messages len = %d, want 2", len(got.Messages))
+	}
+
+	// Last write wins across a reload.
+	if err := got.SetAgentID("resume-coach"); err != nil {
+		t.Fatal(err)
+	}
+	again, err := LoadSession(s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.AgentID != "resume-coach" {
+		t.Errorf("after re-set AgentID = %q, want resume-coach", again.AgentID)
+	}
+}
+
+func TestSetAgentID_BeforeSave(t *testing.T) {
+	// An agent id set before the first Save just rides the meta header.
+	setTempHome(t)
+
+	s := NewSession("m", "")
+	if err := s.SetAgentID("copywriter"); err != nil {
+		t.Fatal(err)
+	}
+	s.Messages = []Message{NewUserMessage("ping")}
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadSession(s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AgentID != "copywriter" {
+		t.Errorf("loaded AgentID = %q, want copywriter", got.AgentID)
+	}
+}
+
 // TestIsAutoNamePlaceholder pins THE placeholder predicate: the title
 // generation gate, turn-end adoption (server and channel), and list overlays
 // all share it — if they disagree a title is generated but never adopted.

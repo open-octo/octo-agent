@@ -1720,6 +1720,87 @@ func TestHandleUpdateSessionWorkingDir_NotADirectory(t *testing.T) {
 	}
 }
 
+func TestHandleUpdateSessionAgentProfile_ZeroTurns(t *testing.T) {
+	srv := curatedTestServer(t)
+
+	sess := agent.NewSession("stub-model", "")
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	payload, _ := json.Marshal(updateSessionAgentProfileRequest{AgentProfile: "test-expert"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/agent_profile", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["agent_profile"] != "test-expert" {
+		t.Fatalf("response agent_profile = %v, want %q", body["agent_profile"], "test-expert")
+	}
+
+	got, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AgentID != "test-expert" {
+		t.Fatalf("session AgentID = %q, want %q", got.AgentID, "test-expert")
+	}
+}
+
+func TestHandleUpdateSessionAgentProfile_RejectsAfterFirstTurn(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := agent.NewSession("stub-model", "")
+	sess.Messages = []agent.Message{agent.NewUserMessage("hi"), agent.NewAssistantMessage("ok")}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	payload, _ := json.Marshal(updateSessionAgentProfileRequest{AgentProfile: "default"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/agent_profile", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleUpdateSessionAgentProfile_UnknownAgentRejected(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := agent.NewSession("stub-model", "")
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	payload, _ := json.Marshal(updateSessionAgentProfileRequest{AgentProfile: "no-such-agent"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/agent_profile", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestHandleUpdateSessionModel_RawStringIsPerSession(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
