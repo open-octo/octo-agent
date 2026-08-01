@@ -33,7 +33,8 @@
   // the server was not started with --tunnel).
   let tunnelPairing = $state<api.TunnelPairing | null>(null)
 
-  // ── Agent defaults (display-only, configured through conversation) ──────────
+  // ── Agent defaults — each control saves immediately on change (see the
+  // save* functions below), no separate Save button.
   let reasoningEffort  = $state('off')
   let permissionMode   = $state('interactive')
   let showReasoningVal = $state(true)
@@ -44,21 +45,6 @@
   let endpoints  = $state<EndpointConfig[]>([])
   let defaultCid = $state('')
   let liteCid    = $state('')
-
-  // ── helpers ─────────────────────────────────────────────────────────────────
-  function effortLabel(effort: string): string {
-    const labels: Record<string, string> = {
-      off: 'Off', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Xhigh', max: 'Max',
-    }
-    return labels[effort.toLowerCase()] ?? 'Off'
-  }
-
-  function permissionLabel(mode: string): string {
-    const labels: Record<string, string> = {
-      interactive: 'Ask', auto: 'Auto', strict: 'Strict',
-    }
-    return labels[mode.toLowerCase()] ?? 'Ask'
-  }
 
   const langOptions = [
     { value: 'en', label: 'English' },
@@ -167,10 +153,53 @@
     }
   }
 
-  // ── agentic-first actions ───────────────────────────────────────────────────
-  function configureDefaults() {
-    settingsModalOpen.set(false)
-    openAgentSession('/config-setup', tr('settings.session_configure_defaults'))
+  // ── agent defaults — each saves immediately via its own PUT endpoint
+  // (internal/skills/defaults/config-setup/SKILL.md documents the same 5
+  // endpoints for the conversational path; this is the identical contract,
+  // just called directly instead of through the agent).
+  async function saveReasoningEffort(v: string) {
+    try {
+      await api.updateReasoningEffort(v)
+      reasoningEffort = v
+    } catch (e: any) {
+      showToast(e.message ?? 'Failed to update reasoning effort', 'error')
+    }
+  }
+
+  async function savePermissionMode(v: string) {
+    try {
+      await api.updatePermissionMode(v)
+      permissionMode = v
+    } catch (e: any) {
+      showToast(e.message ?? 'Failed to update permission mode', 'error')
+    }
+  }
+
+  async function saveShowReasoning(v: boolean) {
+    try {
+      await api.updateShowReasoning(v)
+      showReasoningVal = v
+    } catch (e: any) {
+      showToast(e.message ?? 'Failed to update show-reasoning', 'error')
+    }
+  }
+
+  async function saveCoauthor(v: boolean) {
+    try {
+      await api.updateCoauthor(v)
+      coauthorVal = v
+    } catch (e: any) {
+      showToast(e.message ?? 'Failed to update coauthor', 'error')
+    }
+  }
+
+  async function saveWorkspaceDir(v: string) {
+    try {
+      await api.updateWorkspaceDir(v)
+      workspaceDir = v
+    } catch (e: any) {
+      showToast(e.message ?? 'Failed to update workspace directory', 'error')
+    }
   }
 
   function configureEndpoints() {
@@ -357,41 +386,56 @@
               <span class="setl">{$t('settings.reasoning')}</span>
               <span class="setd">{$t('settings.reasoning_desc')}</span>
             </div>
-            <span class="setro">{effortLabel(reasoningEffort)}</span>
+            <Segment
+              options={['low', 'medium', 'high', 'xhigh', 'max']}
+              labels={{
+                low: $t('models.reasoning.low'), medium: $t('models.reasoning.medium'), high: $t('models.reasoning.high'),
+                xhigh: $t('models.reasoning.xhigh'), max: $t('models.reasoning.max'),
+              }}
+              value={reasoningEffort}
+              onchange={(v) => saveReasoningEffort(v)}
+            />
           </div>
           <div class="setrow">
             <div class="seti">
               <span class="setl">{$t('settings.perm_mode')}</span>
               <span class="setd">{$t('settings.perm_mode_desc')}</span>
             </div>
-            <span class="setro">{permissionLabel(permissionMode)}</span>
+            <Segment
+              options={['interactive', 'auto', 'strict']}
+              labels={{
+                interactive: $t('settings.perm_mode.interactive'), auto: $t('settings.perm_mode.auto'), strict: $t('settings.perm_mode.strict'),
+              }}
+              value={permissionMode}
+              onchange={(v) => savePermissionMode(v)}
+            />
           </div>
           <div class="setrow">
             <div class="seti">
               <span class="setl">{$t('settings.show_reasoning')}</span>
               <span class="setd">{$t('settings.show_reasoning_desc')}</span>
             </div>
-            <span class="setro">{showReasoningVal ? $t('settings.on') : $t('settings.off')}</span>
+            <Switch checked={showReasoningVal} onchange={(v) => saveShowReasoning(v)} />
           </div>
           <div class="setrow">
             <div class="seti">
               <span class="setl">{$t('settings.coauthor')}</span>
               <span class="setd">{$t('settings.coauthor_desc')}</span>
             </div>
-            <span class="setro">{coauthorVal ? $t('settings.on') : $t('settings.off')}</span>
+            <Switch checked={coauthorVal} onchange={(v) => saveCoauthor(v)} />
           </div>
           <div class="setrow">
             <div class="seti">
               <span class="setl">{$t('settings.workspace_dir')}</span>
               <span class="setd">{$t('settings.workspace_dir_desc')}</span>
             </div>
-            <span class="setro mono">{workspaceDir || 'auto'}</span>
-          </div>
-          <div class="pane-foot">
-            <button class="btns" onclick={configureDefaults}>
-              <iconify-icon icon="ant-design:message-outlined" width="13"></iconify-icon>
-              {$t('settings.configure_with_agent')}
-            </button>
+            <input
+              class="sinput mono"
+              type="text"
+              placeholder="auto"
+              value={workspaceDir}
+              onchange={(e) => saveWorkspaceDir(e.currentTarget.value)}
+            />
           </div>
 
         {:else if cat === 'mobile'}
@@ -508,7 +552,6 @@
 .pane { flex: 1; min-width: 0; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 0; }
 .loading-state { padding: 40px; text-align: center; color: var(--text-tertiary); font-size: 14px; }
 .pane-head { display: flex; justify-content: flex-end; padding-bottom: 14px; }
-.pane-foot { display: flex; justify-content: flex-start; padding-top: 14px; }
 
 .setrow {
   display: flex; align-items: center; justify-content: space-between;
@@ -521,10 +564,6 @@
 .seti { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .setl { font-size: 13px; color: var(--text); }
 .setd { font-size: 12px; color: var(--text-secondary); margin-top: 2px; line-height: 1.45; max-width: 42ch; }
-.setro {
-  font-size: 13px; color: var(--text-secondary); flex: 0 0 auto;
-  background: var(--bg-table-header); padding: 4px 12px; border-radius: 6px;
-}
 .setver { font-size: 13px; color: var(--text-tertiary); flex: 0 0 auto; }
 .link-btn {
   border: none; background: transparent; color: var(--blue-6); font-size: 13px;
@@ -535,8 +574,9 @@
 .sinput {
   width: 220px; flex: 0 0 auto; height: 32px; padding: 0 10px;
   border: 1px solid var(--border); border-radius: 8px; font-size: 13px;
-  color: var(--text); font-family: inherit; background: var(--bg-container); cursor: pointer; outline: none;
+  color: var(--text); font-family: inherit; background: var(--bg-container); outline: none;
 }
+select.sinput { cursor: pointer; }
 .sinput:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px var(--focus-ring); }
 
 /* ── buttons ───────────────────────────────────────────────────────────────── */
