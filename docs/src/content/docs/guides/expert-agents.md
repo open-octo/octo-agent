@@ -20,6 +20,29 @@ octo chat --agent code-review "review the diff"
 The Web UI also has an **Agents** panel (`/agents`) where you can create, edit,
 and delete expert agents — plus assign them to IM channels.
 
+## Built-in expert gallery
+
+Alongside any experts you create yourself, the **Agents** panel ships with a
+curated gallery of officially maintained personas for everyday, non-coding
+tasks — a copywriting assistant, a resume coach, a trip planner, and others.
+Search or filter by category, then click a card to see its description, tags,
+and a few example prompts you can tap to send immediately. The **Summon**
+button starts a new session pinned to that expert.
+
+Curated experts behave like any other expert agent (their own system prompt,
+tool allowlist, isolated session pool) with a few differences:
+
+- **Hide, don't delete.** A curated expert can be hidden from the gallery (via
+  its card's hide action, or by asking the Default Agent conversationally) —
+  it disappears from the gallery and can no longer be picked for a new
+  session, but nothing is lost; hiding it again shows it back.
+- **Editing forks it.** If you edit a curated expert's prompt or settings, it
+  becomes your own personal copy from that point on — it stops receiving
+  octo's future content updates for that persona (the same trade-off as
+  editing any other built-in default content, e.g. a bundled skill).
+- **Can't be deleted.** Only your own custom experts can be permanently
+  removed; a curated one can only be hidden.
+
 ## Creating an agent
 
 ### From the Web UI

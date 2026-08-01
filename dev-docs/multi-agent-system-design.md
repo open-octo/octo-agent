@@ -37,7 +37,7 @@
 | **Default Agent** | 代码内建的顶级 agent，system prompt 由代码 base prompt + onboard 注入的 `~/.octo/soul.md` 和 `~/.octo/user.md` 构成，**不可通过 profile 编辑器修改**。拥有所有 skill/MCP 的定义权。没有对应的 .md 文件 |
 | **Expert Agent** | 用户在 Default Agent 视图下创建的 Agent Profile，只能从 Default Agent 已有的资源池中启用/禁用，不能新增 |
 | **sub_agent** | 工具名。所有 agent 都可通过此工具在会话内部调度匿名子 agent 执行隔离任务。子 agent 的生命周期、上下文、工具集完全独立，运行结束后结果回传给主 agent |
-| **Profile Store** | 统一加载三来源：`~/.octo/agents/*.md`（用户级，双模式）、`<repo>/.octo/agents/*.md`（项目级，仅委派）、内建 profile；每个 expert agent 一个 `<id>.md` 文件（Markdown + frontmatter） |
+| **Profile Store** | 统一加载四来源：`~/.octo/agents/*.md`（用户级，双模式）、`<repo>/.octo/agents/*.md`（项目级，仅委派）、`~/.octo/agents-default/*.md`（官方策划专家，见 1.4 节）、内建 profile；每个 expert agent 一个 `<id>.md` 文件（Markdown + frontmatter） |
 | **Agent Router** | 根据 InboundEvent（平台、chatID）按频道绑定决定消息路由到哪个 agent profile |
 | **Session Key** | `platform:chat_id[:user_id]`；expert agent 加 `agentID#` 前缀形成命名空间（如 `a3f9b2c1#weixin:c1:u1`）。default agent 保持 legacy 格式字节级不变 |
 | **Agent 绑定** | 会话创建时绑定 agent，一旦建立不可切换；通过新建会话选择其他 agent |
@@ -176,7 +176,11 @@ type CapabilitySpec struct {
 type Source string
 
 const (
-    SourceBuiltin Source = "builtin" // 代码内建（default / explore / general / code-review）
+    SourceBuiltin Source = "builtin" // 代码内建（default / explore / general / code-review），永远不出现在
+                                      // 公开的 agent 列表 / API 中，只供 sub_agent 委派模式使用
+    SourceDefault Source = "default" // 官方策划的专家人设（文案助手、简历教练、旅行规划师等），
+                                      // 随二进制内嵌，启动时物化到 ~/.octo/agents-default（见下文
+                                      // "内置专家画廊"）
     SourceUser    Source = "user"    // ~/.octo/agents/*.md，对话+委派双模式
     SourceProject Source = "project" // <repo>/.octo/agents/*.md，仅委派模式
 )
@@ -191,6 +195,15 @@ type Profile struct {
     Source          Source
     CreatedAt       time.Time
     UpdatedAt       time.Time
+
+    // 以下字段只服务于 SourceDefault 的画廊展示（搜索、分类筛选、详情卡片），
+    // 刻意放在 CapabilitySpec 之外，确保它们不会随 sub_agent 委派模式泄漏出去。
+    Category         string   // 分类 slug，前端映射为本地化的分类标签
+    Tags, TagsEN     []string // "擅长领域"标签，中英各一份
+    ExamplePrompts, ExamplePromptsEN []string // 详情卡片里可直接点击发送的示例问题
+    Icon             string   // iconify 图标名；为空时前端退回首字母+哈希色头像
+    NameEN, DescriptionEN string // 中英双语内容直接写在 frontmatter 里，不走 i18n 字典
+                                  // （因为这是人设内容，不是 UI 文案）
 }
 
 type ChannelBinding struct {
@@ -205,10 +218,11 @@ func (p *Profile) IsDefault() bool { return p.ID == "default" }
 
 #### 1.3 Profile Store
 
-Store 统一加载三个来源的 profile，**取代现有 `internal/tools/agents.go` 的 `discoverAgents()`**（sub_agent 的 profile 查找改由 Store 提供）：
+Store 统一加载四个来源的 profile，**取代现有 `internal/tools/agents.go` 的 `discoverAgents()`**（sub_agent 的 profile 查找改由 Store 提供）：
 
 - 用户级 `~/.octo/agents/*.md`（对话 + 委派双模式）
 - 项目级 `<repo>/.octo/agents/*.md`（仅委派模式；同名覆盖用户级，对齐现有 `.claude/agents` 语义）
+- 官方策划的专家人设 `~/.octo/agents-default/*.md`（`SourceDefault`，见 1.4 节），介于内建和用户级之间，用户级同名文件优先
 - 内建 profile（代码定义：default / explore / general / code-review）
 
 ```go
@@ -216,16 +230,21 @@ Store 统一加载三个来源的 profile，**取代现有 `internal/tools/agent
 // Store 是 read-through 的：每次读操作实时扫描目录，无内存缓存、无
 // fsnotify。任何路径的变更（API / Web UI / 直接编辑 .md）下一次读取即生效。
 type Store struct {
-    dir string // ~/.octo/agents/
+    dir              string          // ~/.octo/agents/
+    disabledDefaults map[string]bool // 当前被隐藏的 SourceDefault id 集合
 }
 
 func New(dir string) (*Store, error)
-func (s *Store) Load() error                    // 全量加载（用户级 + 项目级 + 内建）
-func (s *Store) Get(id string) (*Profile, bool)
-func (s *Store) List() []*Profile               // 返回所有 profile（不含内建）
+func (s *Store) Load() error                    // 全量加载（用户级 + 项目级 + 内建 + 官方策划）
+func (s *Store) Get(id string) (*Profile, bool) // 解析视图：被隐藏的 SourceDefault 按不存在处理
+func (s *Store) List() []*Profile               // 解析视图：不含内建，隐藏的 SourceDefault 也不含
+func (s *Store) All() []*Profile                // 管理视图：不含内建，隐藏的 SourceDefault 仍然包含
+func (s *Store) LookupAny(id string) (*Profile, bool) // 绕过隐藏过滤，仅供 toggle handler 内部使用
+func (s *Store) IsEnabled(p *Profile) bool      // !isDisabledDefault(p)
+func (s *Store) SetDisabledDefaults(ids []string)
 func (s *Store) Create(p *Profile) error        // 序列化为 .md 写入用户级目录
-func (s *Store) Update(p *Profile) error
-func (s *Store) Delete(id string) error
+func (s *Store) Update(p *Profile) error        // 对 SourceDefault 的 id 调用会 fork 成用户级覆盖，见 1.4 节
+func (s *Store) Delete(id string) error         // SourceBuiltin 和 SourceDefault 均拒绝删除
 func (s *Store) ByChannel(platform, chatID string) []*Profile  // 按频道绑定索引（仅 user 级）
 ```
 
@@ -235,10 +254,63 @@ func (s *Store) ByChannel(platform, chatID string) []*Profile  // 按频道绑�
 - `description` 必填（与现有解析规则一致）；其余字段在 `Create`/`Update` 时做非空校验
 - `model` 必须在 `~/.octo/config.yml` 的 `models` 列表中
 
-**热加载**（2026-07-25 修正 Q5：read-through，无缓存、无 fsnotify、无 reload API）：
+**热加载**（read-through，无缓存、无 fsnotify、无 reload API）：
 - Store 每次读操作实时扫描目录——任何路径的变更（REST API、Web UI、直接编辑 .md）**下一次读取即生效**，无需重启
 - 与现有 agent 加载机制（`discoverAgents` 每次 lookup 全扫，`internal/tools/agents.go`）语义一致，已有 .md 用户无行为回退
 - 目录文件量小（几十个小文件），扫描成本可忽略——现状即如此运行
+
+### 1.4 内置专家画廊（SourceDefault）
+
+octo 随二进制内嵌一批官方策划的专家人设（文案助手、简历教练、旅行规划师等），
+面向日常场景而非编码任务。这些内容与 `internal/skills/defaults.go`、
+`internal/tools/workflow_defaults.go` 采用同一套"内嵌 + 物化"模式：
+
+```go
+// internal/agentprofile/defaults.go
+//go:embed defaults
+var embeddedDefaults embed.FS
+
+func MaterializeDefaults(version string) error  // 首次或版本变更时全量覆写
+func UpdateDefaults(version string) error       // 版本戳门控，未变更时是 no-op
+```
+
+启动时物化到独立的 `~/.octo/agents-default/`（与用户级 `~/.octo/agents/` 分开，
+用户从不需要直接碰这个目录），通过版本戳文件（`.octo-version`）判断是否需要
+重写——版本不变则跳过，版本变更（新增/下线人设、内容修订）则整目录覆写。
+
+**隐藏而非删除**：Web UI 的专家画廊卡片可以把某个官方人设从画廊里隐藏。隐藏
+状态记在 `~/.octo/config.yml` 的 `agents.disabled_defaults` 列表里，语义完全对齐
+`skills.Registry` 的"禁用 = 视为不存在"：
+
+- `Get(id)` / `List()` 是**解析视图**：把隐藏的 `SourceDefault` 当作不存在，
+  `GET /api/agents/:id` 因此对一个已隐藏的官方专家返回 404——和这个 id 从未
+  存在过没有区别。
+- `All(p)` / `IsEnabled(p)` 是**管理视图**：仍然包含隐藏的 `SourceDefault`（额外
+  带一个 `enabled: false` 标记），`GET /api/agents`（列表接口）用的正是这个视图，
+  这样画廊 UI 才有办法找到并重新显示一个已隐藏的专家。
+- `LookupAny(id)` 绕过隐藏过滤，只供 `PATCH /api/agents/:id/toggle`（隐藏/显示
+  切换）内部使用——它必须能在专家被隐藏的状态下仍然找到它，才能把它翻回来。
+
+**编辑即分叉**：对一个当前解析为 `SourceDefault` 的 id 调用 `Update()`，会把它
+写入 `~/.octo/agents/<id>.md`，永久变成一份用户级覆盖——用户级同名文件优先于
+`agents-default/`，所以此后这个 id 就不再吃 `MaterializeDefaults` 的后续内容更新
+（与编辑一个内置 skill 的取舍完全一致）。
+
+**不能删除，只能隐藏**：`Delete()` 对 `SourceBuiltin` 和 `SourceDefault` 一律拒绝——
+官方人设只能通过上面的隐藏/显示切换控制可见性，永远不会真正从磁盘上消失。
+
+**画廊专属字段留在能力片之外**：`Category`/`Tags`/`ExamplePrompts`/`Icon` 等字段
+（见 1.2 节 Profile 结构）刻意放在 `CapabilitySpec` 之外——`sub_agent` 委派模式
+只消费能力片，这样画廊展示信息就不会顺着委派路径泄漏出去。
+
+**中英双语内容**：人设内容（name/description/tags/example_prompts）在 frontmatter
+里直接写两份（`_en` 后缀字段），不走 UI 的 i18n 字典——因为这是人设内容，不是界面文案。
+
+**每个专家的工具白名单必须显式声明**：`DefaultToolsForProfile`/`ManifestForProfile`
+的"空 allowlist = 全部"规则只对 `SourceBuiltin` 生效（见第 5 节）；`SourceDefault`
+和 `SourceUser` 一样，空 `tools`/`tool_skills` 解析为零工具/零技能，所以每个官方
+人设的 `.md` 都必须显式列出 `tools:`（以及需要的话 `tool_skills:`），不能依赖默认
+agent 那种"留空即拿到一切"的行为。
 
 ### 2. Agent Router
 
@@ -356,8 +428,11 @@ Tool registry 在构建 tool list 时传入 profile，只包含 profile 声明�
 // internal/tools/registry.go
 func DefaultToolsForProfile(ctx context.Context, profile *agentprofile.Profile, serverModel string) []agent.ToolDefinition {
     all := DefaultToolsForCtx(ctx, serverModel)
-    if profile == nil || len(profile.Tools) == 0 {
-        return all  // Default Agent：返回全部
+    if len(profile.Tools) == 0 {
+        if profile.Source == agentprofile.SourceBuiltin {
+            return all // 只有内建 profile 的空白名单才等于"全部工具"
+        }
+        return nil // SourceDefault / SourceUser 的空白名单等于零工具，必须显式声明
     }
     allowed := make(map[string]bool, len(profile.Tools))
     for _, t := range profile.Tools {
@@ -373,13 +448,17 @@ func DefaultToolsForProfile(ctx context.Context, profile *agentprofile.Profile, 
 }
 ```
 
-同理，skill manifest 只包含 profile 声明的 skills：
+同理，skill manifest 只包含 profile 声明的 skills，遵循同一条按来源判定的规则——
+空 `tool_skills` 只有 `SourceBuiltin` 才展示全部技能，其余来源一律展示零技能：
 
 ```go
 // internal/skills/skills.go
 func ManifestForProfile(reg *Registry, profile *agentprofile.Profile) string {
-    if profile == nil || len(profile.ToolSkills) == 0 {
-        return RenderManifest(reg)  // Default Agent：全部
+    if len(profile.ToolSkills) == 0 {
+        if profile.Source != agentprofile.SourceBuiltin {
+            return ""
+        }
+        return RenderManifest(reg)
     }
     return renderFilteredManifest(reg, profile.ToolSkills)
 }
@@ -728,10 +807,12 @@ TUI 会话建立后 agent 不可切换。提供查看命令：
 #### 9.1 REST API
 
 ```
-GET    /api/agents               — 列出所有 profiles
+GET    /api/agents               — 列出所有 profiles（管理视图：含隐藏的 SourceDefault，带 enabled 标记）
 POST   /api/agents               — 创建 profile
-PUT    /api/agents/:id           — 更新 profile
-DELETE /api/agents/:id           — 删除 profile
+GET    /api/agents/:id           — 获取单个 profile（解析视图：隐藏的 SourceDefault 返回 404）
+PUT    /api/agents/:id           — 更新 profile（对 SourceDefault 的 id 会 fork 成用户级覆盖）
+DELETE /api/agents/:id           — 删除 profile（SourceBuiltin/SourceDefault 拒绝，只能隐藏）
+PATCH  /api/agents/:id/toggle    — 隐藏/显示一个 SourceDefault 专家（对非 SourceDefault 的 id 拒绝）
 POST   /api/agents/:id/bind      — 绑定频道   body: {"platform": "weixin", "chat_id": "xxx"}
 DELETE /api/agents/:id/bind      — 解绑频道
 ```
@@ -810,11 +891,12 @@ octo 已有的用户 agent 定义机制（`~/.octo/agents/*.md`，供 `subagent_
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/agents` | 列出所有 profiles（不含 default） |
+| GET | `/api/agents` | 列出所有 profiles（不含 default；含隐藏的 SourceDefault，带 enabled 标记） |
 | POST | `/api/agents` | 创建新 profile（body: profile json） |
-| GET | `/api/agents/:id` | 获取单个 profile |
-| PUT | `/api/agents/:id` | 更新 profile |
-| DELETE | `/api/agents/:id` | 删除 profile |
+| GET | `/api/agents/:id` | 获取单个 profile（隐藏的 SourceDefault 返回 404） |
+| PUT | `/api/agents/:id` | 更新 profile（对 SourceDefault 的 id 会 fork 成用户级覆盖） |
+| DELETE | `/api/agents/:id` | 删除 profile（SourceBuiltin/SourceDefault 拒绝） |
+| PATCH | `/api/agents/:id/toggle` | 隐藏/显示一个 SourceDefault 专家 |
 | POST | `/api/agents/:id/bind` | 绑定频道 |
 | DELETE | `/api/agents/:id/bind` | 解绑频道 |
 

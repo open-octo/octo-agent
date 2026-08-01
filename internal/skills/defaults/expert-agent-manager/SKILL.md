@@ -15,14 +15,39 @@ a conversational naming convention only — API fields, IDs, and code
 identifiers (`agent_id`, `/api/agents`, etc.) are unaffected.
 
 octo's multi-agent system lets users define **agent profiles** — each with its
-own system prompt, model, tool allowlist, and IM chat bindings. Profiles are
-stored as Markdown files in `~/.octo/agents/<id>.md` (body = system prompt,
-YAML frontmatter = metadata).
+own system prompt, model, tool allowlist, and IM chat bindings. User-created
+profiles are stored as Markdown files in `~/.octo/agents/<id>.md` (body =
+system prompt, YAML frontmatter = metadata).
 
 This skill manages profiles by calling the REST API on the running octo
 server. It is **only available to the Default Agent** — expert agents cannot
 create or modify profiles (they can only enable/disable from their own
 allowlist).
+
+### Curated vs. user-created experts
+
+`GET`/`POST`/`PUT`/`DELETE` on `/api/agents` see two kinds of profile,
+distinguished by a `source` field on every response:
+
+- **`"source": "user"`** — created via this skill or the Web UI form, stored
+  in `~/.octo/agents/`. Freely editable and deletable.
+- **`"source": "default"`** — an **officially curated expert** shipped in the
+  binary (the ones shown in the Web UI's expert gallery, e.g. copywriter,
+  resume-coach, trip-planner). These can be hidden or edited, but **never
+  deleted** — `DELETE` on one 409s. Editing one **forks** it into a
+  `~/.octo/agents/<id>.md` user override; the forked copy then stops receiving
+  future content updates when octo ships a new curated-persona revision (same
+  trade-off as editing a default skill).
+
+  A curated expert can be **hidden** from the gallery by the user (or by this
+  skill). While hidden, `GET /api/agents/:id` (and `PUT`/`DELETE` on that id)
+  return **404 — indistinguishable from the profile not existing at all.**
+  Only the list endpoint, `GET /api/agents`, still shows it, tagged with
+  `"enabled": false`. **If a lookup or edit 404s and you don't recognize the
+  id as one you or the user created, don't assume it was deleted** — call
+  `GET /api/agents` and check for that id with `enabled: false` before telling
+  the user it doesn't exist. See "Modifying an agent" below for the full
+  recovery flow.
 
 ## API Base
 
@@ -32,11 +57,12 @@ localhost is blocked by SSRF protection.) All requests return JSON.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/agents` | List all profiles (excludes default) |
-| `POST` | `/api/agents` | Create a new profile |
-| `GET` | `/api/agents/:id` | Get a single profile |
-| `PUT` | `/api/agents/:id` | Update a profile |
-| `DELETE` | `/api/agents/:id` | Delete a profile |
+| `GET` | `/api/agents` | List all profiles (excludes the default agent; includes hidden curated experts, tagged `enabled: false`) |
+| `POST` | `/api/agents` | Create a new user profile |
+| `GET` | `/api/agents/:id` | Get a single profile (404 if hidden — see "Curated vs. user-created experts" above) |
+| `PUT` | `/api/agents/:id` | Update a profile (editing a curated one forks it into a user override) |
+| `DELETE` | `/api/agents/:id` | Delete a user profile (409 for a curated one — hide it instead, see toggle below) |
+| `PATCH` | `/api/agents/:id/toggle` | Hide/show a **curated** expert; returns `{"id", "enabled"}` (400 on a user profile — those aren't hideable, just delete them) |
 | `POST` | `/api/agents/:id/bind` | Bind a profile to an IM chat |
 | `DELETE` | `/api/agents/:id/bind` | Remove an IM binding |
 
@@ -61,6 +87,9 @@ localhost is blocked by SSRF protection.) All requests return JSON.
 - `model`: optional model override (must be in `~/.octo/config.yml`'s models).
 - `tools`: tool allowlist; `[]` = no tools. User-created agents with empty `tools` get nothing (unlike the default agent which gets all tools with empty allowlist).
 - `tool_skills`: skills exposed as tools.
+- `source` (`"user"` or `"default"`) and `enabled` (bool): **response-only** —
+  present on every `GET`, never sent in a `POST`/`PUT` body. See "Curated vs.
+  user-created experts" above.
 
 ## Writing Effective System Prompts — Core Principles
 
@@ -204,20 +233,38 @@ can drive a real test; you cannot simulate it.
 ### Modifying an agent
 
 1. **Fetch the current profile** via `GET /api/agents/:id`.
+   - **If this 404s, don't tell the user the agent doesn't exist yet.** Call
+     `GET /api/agents` (the list) and look for that id. If it's there with
+     `"enabled": false`, it's a hidden curated expert — tell the user it's
+     currently hidden, and (with their OK) call
+     `PATCH /api/agents/:id/toggle` to re-enable it (this call itself never
+     404s on a hidden id — it's the one endpoint that can still find it), then
+     retry step 1. Only report "no such agent" if it's absent from the list
+     entirely.
 2. **Show the user the current state** and ask what to change.
 3. **Apply the smallest edit** that satisfies the request.
 4. **Call `PUT /api/agents/:id`** with the full updated profile (the API
-   replaces the whole object — send all fields, not just changed ones).
+   replaces the whole object — send all fields, not just changed ones). If
+   the profile's `source` is `"default"`, mention to the user that this edit
+   forks it into a personal copy that will no longer receive octo's future
+   updates to that curated persona's content.
 
 Note: `id` is immutable. `channel_bindings` from the
 existing profile are preserved unless the user explicitly changes them.
+`source` and `enabled` are response-only — never send them in the request body.
 
 ### Deleting an agent
 
 1. **Confirm with the user** — deletion is destructive and cannot be undone.
-2. **Call `DELETE /api/agents/:id`.** Returns 204 on success.
-3. **Error cases:** the profile has active channel bindings (409 — unbind
-   first), or it's a builtin profile (403/409 — cannot delete defaults).
+2. **If the user wants to get rid of a curated (`source: "default"`) expert,
+   don't delete it — hide it instead** via `PATCH /api/agents/:id/toggle`.
+   Deletion is permanent and only applies to user-created profiles; curated
+   ones can always be re-shown later, which a delete could never undo.
+3. **Call `DELETE /api/agents/:id`.** Returns 200 with `{"deleted": id}` on
+   success.
+4. **Error cases:** the profile has active channel bindings (409 — unbind
+   first), or it's a builtin/curated profile (409 — cannot delete; hide the
+   curated ones instead, see step 2).
 
 ### Binding to an IM chat
 
@@ -233,8 +280,12 @@ existing profile are preserved unless the user explicitly changes them.
 
 ### Listing agents
 
-1. **Call `GET /api/agents`.** Returns all profiles (excludes default).
-2. **Present the list** to the user in a readable format.
+1. **Call `GET /api/agents`.** Returns all profiles (excludes the default
+   agent) — user-created and curated, including curated experts currently
+   hidden from the gallery (tagged `"enabled": false`).
+2. **Present the list** to the user in a readable format — note each one's
+   `source` (curated vs. their own) and, for curated ones, whether it's
+   currently hidden (`enabled: false`).
 
 ## Rules
 
@@ -260,5 +311,15 @@ existing profile are preserved unless the user explicitly changes them.
   different name or use the existing profile.
 - **400 "model not found"** — the model isn't in config. List available models
   via `GET /api/config/endpoints` and ask the user to pick one.
+- **404 on `GET`/`PUT`/bind for an id you didn't just delete yourself** — don't
+  assume it's gone. Check `GET /api/agents` for that id with
+  `"enabled": false`; if found, it's a hidden curated expert — see "Modifying
+  an agent" above for the re-enable-then-retry flow.
+- **409 on `DELETE`** — either it's a builtin/curated profile (hide the
+  curated ones instead via toggle, see "Deleting an agent") or it still has
+  active channel bindings (unbind first).
+- **400 on `PATCH .../toggle`** — the id belongs to a user-created profile,
+  not a curated one; toggling only applies to curated experts. Delete it
+  instead if the user wants it gone.
 - **Duplicate bindings** — binding the same chat twice returns 200 (idempotent);
   no error to handle.
