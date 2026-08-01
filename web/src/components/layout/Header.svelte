@@ -111,8 +111,9 @@
     </button>
   {/if}
 
-  <button class="search-btn" title={$t('header.search_sessions')} onclick={() => cmdkOpen.set(true)}>
+  <button class="search-btn" onclick={() => cmdkOpen.set(true)}>
     <iconify-icon icon="ant-design:search-outlined" width="15"></iconify-icon>
+    <span>{$t('header.search_sessions')}</span>
     <kbd>⌘K</kbd>
   </button>
 
