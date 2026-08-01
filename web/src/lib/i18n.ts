@@ -373,8 +373,8 @@ export const en: Record<string, string> = {
   "tasks.last_run_label": "Last:",
   "tasks.next_run_label": "Next:",
   "tasks.col_status": "Status",
-  "tasks.session_new": "New task",
-  "tasks.session_edit": "Edit task: {name}",
+  "tasks.session_new": "New scheduled task",
+  "tasks.session_edit": "Edit scheduled task: {name}",
   "tasks.empty": "No scheduled tasks yet — create one to get started.",
   "tasks.run_now": "Run now",
   // Session controls how a task's runs relate to each other.
@@ -1214,8 +1214,8 @@ export const zh: Record<string, string> = {
   "tasks.last_run_label": "上次：",
   "tasks.next_run_label": "下次：",
   "tasks.col_status": "状态",
-  "tasks.session_new": "新建任务",
-  "tasks.session_edit": "编辑任务：{name}",
+  "tasks.session_new": "新建定时任务",
+  "tasks.session_edit": "编辑定时任务：{name}",
   "tasks.empty": "暂无定时任务 — 创建一个即可开始。",
   "tasks.run_now": "立即运行",
   // Session controls how a task's runs relate to each other.
