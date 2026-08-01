@@ -6,6 +6,14 @@ description: Manage octo's agent profiles through conversation — create, modif
 
 # Manage Agent Profiles
 
+## Terminology
+
+When conversing in Chinese, refer to this concept as **专家** (not 智能体, and
+not a bare "agent") — this matches the desktop/web UI's Chinese labels
+(创建专家 / 编辑专家 / 删除专家). English conversations keep "agent". This is
+a conversational naming convention only — API fields, IDs, and code
+identifiers (`agent_id`, `/api/agents`, etc.) are unaffected.
+
 octo's multi-agent system lets users define **agent profiles** — each with its
 own system prompt, model, tool allowlist, and IM chat bindings. Profiles are
 stored as Markdown files in `~/.octo/agents/<id>.md` (body = system prompt,
