@@ -24,6 +24,12 @@
   let updateAvail   = $state(false)
   let downloadUrl   = $state('')
   let checkingUpdate = $state(false)
+  // 'installer' (desktop build) downloads the release page; 'cli' (plain
+  // `octo serve`) can swap itself in place — same distinction VersionBadge
+  // uses, which stays mounted (Sidebar.svelte) and picks up this modal's
+  // triggered upgrade via the same global upgrade_log/upgrade_complete WS
+  // broadcasts, so its badge reflects progress after this modal closes.
+  let upgradeMode   = $state<'cli' | 'installer'>('cli')
   let loading       = $state(true)
 
   let cat = $state<'general' | 'endpoints' | 'agent' | 'mobile' | 'about'>('general')
@@ -128,6 +134,7 @@
       latestStr = v.latest ?? ''
       updateAvail = !!v.needs_update
       downloadUrl = v.download_url ?? ''
+      upgradeMode = v.upgrade_mode === 'installer' ? 'installer' : 'cli'
     } catch { /* non-critical */ }
   }
 
@@ -136,11 +143,21 @@
     checkingUpdate = true
     try {
       await loadVersion()
-      if (updateAvail && downloadUrl) {
-        try { await api.openExternal(downloadUrl) }
-        catch { window.open(downloadUrl, '_blank', 'noopener') }
-      } else {
+      if (!updateAvail) {
         showToast($t('settings.update.uptodate'), 'success')
+        return
+      }
+      if (upgradeMode === 'installer') {
+        if (downloadUrl) {
+          try { await api.openExternal(downloadUrl) }
+          catch { window.open(downloadUrl, '_blank', 'noopener') }
+        }
+      } else {
+        // Same endpoint VersionBadge's badge uses (POST /api/version/upgrade)
+        // — fire it here too and let the badge (always mounted) show live
+        // progress via the WS broadcasts it already listens for.
+        await fetch('/api/version/upgrade', { method: 'POST' })
+        showToast($t('settings.update.started'), 'success')
       }
     } finally {
       checkingUpdate = false
@@ -425,13 +442,14 @@
                 <span class="setl">{$t('settings.update')}</span>
                 <span class="setd">{$t('settings.update_desc')}</span>
               </div>
-              {#if $nativeShell}
-                <button class="btns" onclick={checkUpdate} disabled={checkingUpdate}>
-                  {checkingUpdate ? $t('settings.update.checking') : updateAvail ? $t('upgrade.btn.download') : $t('settings.update.check')}
-                </button>
-              {/if}
+              <button class="btns" onclick={checkUpdate} disabled={checkingUpdate}>
+                {checkingUpdate ? $t('settings.update.checking')
+                  : !updateAvail ? $t('settings.update.check')
+                  : upgradeMode === 'installer' ? $t('upgrade.btn.download')
+                  : $t('upgrade.btn.upgrade')}
+              </button>
             </div>
-            {#if $nativeShell && updateAvail}
+            {#if updateAvail}
               <div class="setrow">
                 <div class="seti">
                   <span class="setl">{$t('settings.update_available')} v{latestStr}</span>
