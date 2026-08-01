@@ -1,6 +1,6 @@
 ---
 name: onboard
-description: Onboard a new user OR curate a single piece of the assistant's inner state. Without arguments, runs the full first-run ceremony (AI name, personality, user profile, soul.md + user.md). With `scope:soul` or `scope:user`, runs a quick chat to update just that one profile file. With `path:<abs>`, runs a quick chat to update / keep / delete one memory file under ~/.octo/memories/.
+description: Onboard a new user OR curate a single piece of the assistant's inner state. Without arguments, runs the full first-run ceremony (AI name, personality, user profile, soul.md + user.md). With `scope:soul` or `scope:user`, runs a quick chat to update just that one profile file. With `path:<abs>`, runs a quick chat to update / keep / delete one memory file under ~/.octo/memories/. Use when the user wants to change the assistant's name/personality, update their own profile, or review/edit a saved memory, e.g. "改一下你的性格", "更新一下我的资料", "帮我看看记忆里的内容", "重新做一遍引导".
 ---
 
 # Skill: onboard

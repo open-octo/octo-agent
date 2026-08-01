@@ -46,7 +46,7 @@
   // Agentic-first: creating a skill opens a fresh chat that invokes the
   // skill-creator skill, which guides the user through it in conversation.
   function handleCreateSkill() {
-    openAgentSession('/skill-creator', 'New skill')
+    openAgentSession('/skill-creator', tr('skills.session_new'))
   }
 
   // Use: open a fresh chat that invokes the skill (matches the old UI's per-card
@@ -99,7 +99,7 @@
   // skill-creator skill at this skill. (There is no in-browser file editor; the
   // agent edits the skill on disk.)
   function handleEdit(name: string) {
-    openAgentSession(`/skill-creator Edit the existing "${name}" skill.`, `Edit skill: ${name}`)
+    openAgentSession(`/skill-creator Edit the existing "${name}" skill.`, tr('skills.session_edit').replace('{name}', name))
   }
 
   // ── Import (GitHub URL / owner-repo / local path / browsed upload) ───────────

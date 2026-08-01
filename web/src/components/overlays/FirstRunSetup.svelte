@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { t, locale, setLocale } from '../../lib/i18n'
+  import { t, tr, locale, setLocale } from '../../lib/i18n'
   import { onboardPhase, openAgentSession, showToast } from '../../lib/stores'
   import * as api from '../../lib/api'
   import type { ProviderPreset, ModelConfigInput, ModelEntry } from '../../lib/api'
@@ -82,7 +82,7 @@
     // reopening re-fires the soul_setup nudge (this path set phase to '' and
     // never went through maybeLaunchOnboard, so nothing else marked it) (#1660).
     await api.markOnboardAttempted().catch(() => {})
-    await openAgentSession(`/onboard lang:${lang}`, '✨ Onboard')
+    await openAgentSession(`/onboard lang:${lang}`, tr('onboard.session_title'))
     onboardPhase.set('')
   }
 </script>

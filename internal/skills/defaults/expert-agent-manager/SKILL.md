@@ -1,10 +1,18 @@
 ---
 name: expert-agent-manager
 system: true
-description: Manage octo's agent profiles through conversation — create, modify, delete, list, and bind agents to IM chats by calling REST APIs. This skill is exclusive to the Default Agent (full-access). Use when the user wants to manage agents conversationally, e.g. "create a code review agent", "list all agents", "bind agent X to this group", "delete agent Y", "帮我建一个 agent", "管理 agent".
+description: Manage octo's agent profiles through conversation — create, modify, delete, list, and bind agents to IM chats by calling REST APIs. This skill is exclusive to the Default Agent (full-access). Use when the user wants to manage agents conversationally, e.g. "create a code review agent", "list all agents", "bind agent X to this group", "delete agent Y", "创建一个专家", "帮我建个专家", "管理专家", "编辑专家", "删除专家", "专家列表", "把专家 X 绑定到这个群".
 ---
 
 # Manage Agent Profiles
+
+## Terminology
+
+When conversing in Chinese, refer to this concept as **专家** (not 智能体, and
+not a bare "agent") — this matches the desktop/web UI's Chinese labels
+(创建专家 / 编辑专家 / 删除专家). English conversations keep "agent". This is
+a conversational naming convention only — API fields, IDs, and code
+identifiers (`agent_id`, `/api/agents`, etc.) are unaffected.
 
 octo's multi-agent system lets users define **agent profiles** — each with its
 own system prompt, model, tool allowlist, and IM chat bindings. Profiles are

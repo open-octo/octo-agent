@@ -109,7 +109,7 @@
   // Agentic-first: open a fresh chat that invokes the channel-manager skill,
   // which guides the user through the platform console + credentials.
   function openSetup(platform: string) {
-    openAgentSession(`/channel-manager setup ${platform}`, `Channel Setup — ${labelFor(platform)}`)
+    openAgentSession(`/channel-manager setup ${platform}`, tr('channels.session_setup').replace('{platform}', labelFor(platform)))
   }
 
   function iconFor(platform: string) {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { t } from '../lib/i18n'
+  import { t, tr } from '../lib/i18n'
   import { showToast, openAgentSession } from '../lib/stores'
   import { confirmDialog } from '../lib/confirm'
   import * as api from '../lib/api'
@@ -36,11 +36,11 @@
   // Agentic-first: create and edit through conversation with the
   // expert-agent-manager skill.
   function handleCreateWithAgent() {
-    openAgentSession('/expert-agent-manager', 'New agent')
+    openAgentSession('/expert-agent-manager', tr('agents.session_new'))
   }
 
   function handleEditWithAgent(agent: api.Agent) {
-    openAgentSession(`/expert-agent-manager edit ${agent.id}`, `Edit agent: ${agent.name}`)
+    openAgentSession(`/expert-agent-manager edit ${agent.id}`, tr('agents.session_edit').replace('{name}', agent.name))
   }
 
   // Derive icon avatar from agent name

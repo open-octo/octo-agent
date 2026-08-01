@@ -46,14 +46,14 @@
       const prompt = tr('lightapps.edit_prompt')
         .replace('{name}', app.name)
         .replace('{content}', contentPreview)
-      await openAgentSession(prompt, `Edit: ${app.name}`)
+      await openAgentSession(prompt, tr('lightapps.session_edit').replace('{name}', app.name))
     } catch (e: any) {
       showToast(`Failed to load app: ${e.message}`, 'error')
     }
   }
 
   async function handleNew() {
-    await openAgentSession($t('lightapps.new_prompt'), 'New Light App')
+    await openAgentSession($t('lightapps.new_prompt'), tr('lightapps.session_new'))
   }
 
   async function handleDelete(slug: string, name: string) {

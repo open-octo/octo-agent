@@ -8,11 +8,19 @@ description: |
   Trigger on: "channel setup", "setup feishu", "setup weixin", "setup wechat", "setup wecom",
   "setup dingtalk", "setup discord", "setup telegram",
   "channel config", "channel status", "channel enable", "channel disable", "channel doctor",
-  "connect feishu", "connect wechat", "connect wecom", "connect dingtalk", "connect discord", "connect telegram".
+  "connect feishu", "connect wechat", "connect wecom", "connect dingtalk", "connect discord", "connect telegram",
+  "配置飞书", "设置微信", "接入企业微信", "配置钉钉", "连接飞书", "渠道设置", "渠道状态",
+  "启用渠道", "禁用渠道", "渠道诊断", "绑定飞书机器人", "配置 IM 渠道".
   Subcommands: setup, status, enable <platform>, disable <platform>, doctor.
 ---
 
 # Channel Manager Skill
+
+## Terminology
+
+When conversing in Chinese, refer to a user-created agent profile as **专家**
+(not 智能体) when asking whether to bind a channel instance to one — matches
+the desktop/web UI's Chinese labels. English conversations keep "agent".
 
 Configure IM platform channels for octo. Supported platforms: `feishu`, `weixin`, `wecom`, `dingtalk`, `discord`, `telegram`.
 

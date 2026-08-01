@@ -5,7 +5,7 @@
   import QrCode from '../ui/QrCode.svelte'
   import { get } from 'svelte/store'
   import { showToast, nativeShell, openAgentSession, settingsModalOpen, onboardPhase } from '../../lib/stores'
-  import { setLocale, t } from '../../lib/i18n'
+  import { setLocale, t, tr } from '../../lib/i18n'
   import { getMode, setMode, type ThemeMode } from '../../lib/theme'
   import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
   import { openUrl } from '../../lib/externalLinks'
@@ -170,17 +170,17 @@
   // ── agentic-first actions ───────────────────────────────────────────────────
   function configureDefaults() {
     settingsModalOpen.set(false)
-    openAgentSession('/config-setup', 'Configure defaults')
+    openAgentSession('/config-setup', tr('settings.session_configure_defaults'))
   }
 
   function configureEndpoints() {
     settingsModalOpen.set(false)
-    openAgentSession('/config-setup add endpoint', 'Configure endpoints')
+    openAgentSession('/config-setup add endpoint', tr('settings.session_configure_endpoints'))
   }
 
   function editEndpoint(id: string) {
     settingsModalOpen.set(false)
-    openAgentSession(`/config-setup edit endpoint ${id}`, `Edit endpoint: ${id}`)
+    openAgentSession(`/config-setup edit endpoint ${id}`, tr('settings.session_edit_endpoint').replace('{id}', id))
   }
 
   function close() {
