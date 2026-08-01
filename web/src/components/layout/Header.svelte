@@ -164,8 +164,11 @@ header {
   z-index: 100;
 }
 /* Mac's native hidden-inset title bar floats the real traffic-light buttons
-   over the top-left of the content area, so inset the header past them. */
-header.native-inset { padding-left: 82px; }
+   over the top-left of the content area, so inset the header past them.
+   Their vertical position is fixed by macOS (not by our header height), and
+   it sits a few px below this row's flex-centered line, so nudge the whole
+   row down by the same amount — measured against a live build, not guessed. */
+header.native-inset { padding-left: 82px; padding-top: 6px; }
 /* The header is a window drag handle. Every interactive control on it opts
    back to no-drag so it stays clickable — the blank strips between controls
    drag the window. Applied for all platforms (frameless window now), not just
