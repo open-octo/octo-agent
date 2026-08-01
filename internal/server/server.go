@@ -1641,14 +1641,11 @@ func (s *Server) curSkillsManifest() string {
 }
 
 // curSkillsManifestForProfile is curSkillsManifest filtered to the profile's
-// ToolSkills. When profile is nil or declares no ToolSkills, the full manifest
-// is returned (default agent behavior). Resolved fresh per turn so profile
-// edits land on the next message.
+// ToolSkills — see skills.ManifestForProfile for the per-source empty-
+// allowlist rule (builtin sees everything, everyone else sees nothing until
+// they opt in). Resolved fresh per turn so profile edits land on the next
+// message.
 func (s *Server) curSkillsManifestForProfile(profile *agentprofile.Profile) string {
-	raw := s.curSkillsManifest()
-	if profile == nil || len(profile.ToolSkills) == 0 {
-		return raw
-	}
 	return skills.ManifestForProfile(s.skillReg, profile)
 }
 

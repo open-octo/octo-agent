@@ -130,7 +130,9 @@ func (s *Store) LookupAny(id string) (*Profile, bool) {
 }
 
 // List returns every user-level and curated-default profile (excluding
-// builtins and hidden curated experts), sorted by ID for stable output.
+// builtins and hidden curated experts), sorted by ID for stable output. This
+// is the "resolvable" view — what Get() would find — used wherever a hidden
+// expert should behave as if it doesn't exist (e.g. delegation contexts).
 func (s *Store) List() []*Profile {
 	var out []*Profile
 	for _, p := range s.load() {
@@ -144,6 +146,30 @@ func (s *Store) List() []*Profile {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+// All returns every user-level and curated-default profile, INCLUDING hidden
+// curated experts (excluding only builtins), sorted by ID. Mirrors
+// skills.Registry.All() — the management-surface view (the gallery UI needs
+// to see a hidden expert to offer a way to re-show it, unlike List()/Get()
+// which treat it as gone).
+func (s *Store) All() []*Profile {
+	var out []*Profile
+	for _, p := range s.load() {
+		if p.Source == SourceBuiltin {
+			continue
+		}
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// IsEnabled reports whether p is currently visible/resolvable — always true
+// except for a hidden (toggled-off) curated expert. Mirrors
+// skills.Registry.IsEnabled.
+func (s *Store) IsEnabled(p *Profile) bool {
+	return !s.isDisabledDefault(p)
 }
 
 // Create validates p and writes it as <userDir>/<id>.md.

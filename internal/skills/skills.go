@@ -353,26 +353,31 @@ func RenderManifest(r *Registry) string {
 }
 
 // ManifestForProfile is RenderManifest filtered to the profile's ToolSkills.
-// When profile is non-nil and declares ToolSkills, only those skills are
-// listed — the design's per-agent skill isolation. A nil profile or an empty
-// ToolSkills list means "all skills" (the default agent behavior).
+// Mirrors tools.DefaultToolsForProfile's per-source rule for an empty
+// allowlist: a builtin profile (explore/general/code-review/the Default
+// agent) sees every skill when it declares no ToolSkills, matching its
+// general-purpose role; every other profile — curated experts and
+// user-created agents alike — sees NONE until it explicitly opts in via
+// tool_skills. Previously an empty ToolSkills list meant "all skills" for
+// any profile, which let an agent that never intended to touch skills at all
+// (e.g. a narrowly-scoped curated persona) still discover — and, combined
+// with the generic `skill` tool, invoke — skills well outside its intended
+// role.
 //
-// Expert agents (non-default profiles) additionally have system-level skills
-// hidden — skills marked system:true in their frontmatter (e.g.
-// expert-agent-manager, channel-manager) exist for the Default Agent's
-// management surface and make no sense in an expert agent's context.
+// Expert agents (non-builtin profiles) additionally have system-level skills
+// hidden even from an explicit allowlist — skills marked system:true in their
+// frontmatter (e.g. expert-agent-manager, channel-manager) exist for the
+// Default Agent's management surface and make no sense in an expert agent's
+// context.
 func ManifestForProfile(r *Registry, profile *agentprofile.Profile) string {
-	if r.Len() == 0 {
+	if r.Len() == 0 || profile == nil {
 		return ""
 	}
-	if profile == nil || len(profile.ToolSkills) == 0 {
-		manifest := RenderManifest(r)
-		// Default agent sees everything; expert agents without an allowlist
-		// still have system skills filtered from the raw manifest.
-		if profile != nil && !profile.IsDefault() {
-			manifest = stripSystemSkills(r, manifest)
+	if len(profile.ToolSkills) == 0 {
+		if profile.Source != agentprofile.SourceBuiltin {
+			return ""
 		}
-		return manifest
+		return RenderManifest(r)
 	}
 	allowed := make(map[string]bool, len(profile.ToolSkills))
 	for _, name := range profile.ToolSkills {
@@ -383,7 +388,7 @@ func ManifestForProfile(r *Registry, profile *agentprofile.Profile) string {
 	b.WriteString("When a task matches a skill's description, call the `skill` tool with its " +
 		"name to load the full instructions before acting. Don't guess the instructions " +
 		"from the one-line description. The user can also trigger one directly by typing /<name>.\n\n")
-	expert := !profile.IsDefault()
+	expert := profile.Source != agentprofile.SourceBuiltin
 	n := 0
 	for _, s := range r.List() {
 		if allowed[s.Name] && !(expert && s.System) {
@@ -395,41 +400,6 @@ func ManifestForProfile(r *Registry, profile *agentprofile.Profile) string {
 		return ""
 	}
 	return strings.TrimRight(b.String(), "\n")
-}
-
-// stripSystemSkills filters system-level skill lines from the rendered manifest
-// text. It looks for "- <name>: " prefixed lines whose name matches a skill with
-// System==true in the registry, and removes them.
-func stripSystemSkills(r *Registry, manifest string) string {
-	// Collect the names of system skills.
-	sys := map[string]bool{}
-	for _, s := range r.List() {
-		if s.System {
-			sys[s.Name] = true
-		}
-	}
-	if len(sys) == 0 {
-		return manifest
-	}
-	var b strings.Builder
-	for _, line := range strings.Split(manifest, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "- ") {
-			// Extract skill name: "- name: description..."
-			rest := trimmed[2:]
-			if colon := strings.IndexByte(rest, ':'); colon > 0 {
-				name := rest[:colon]
-				if sys[name] {
-					continue // skip system skill lines
-				}
-			}
-		}
-		if b.Len() > 0 {
-			b.WriteByte('\n')
-		}
-		b.WriteString(line)
-	}
-	return b.String()
 }
 
 // ccCompatNote bridges skills authored for Claude Code — the ecosystem most

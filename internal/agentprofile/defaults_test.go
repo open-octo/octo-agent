@@ -165,6 +165,17 @@ func TestStore_SetDisabledDefaults(t *testing.T) {
 		t.Fatal("LookupAny should still see a disabled default")
 	}
 
+	// All() is the management-surface view: unlike List(), it must still
+	// include the hidden default (with IsEnabled reporting false) so a
+	// caller (the gallery UI) can offer a way to re-show it.
+	all := s.All()
+	if len(all) != 1 || all[0].ID != "copywriter" {
+		t.Fatalf("All() should still include the hidden default: %+v", all)
+	}
+	if s.IsEnabled(all[0]) {
+		t.Fatal("IsEnabled should report false for a hidden default")
+	}
+
 	s.SetDisabledDefaults(nil)
 	if _, ok := s.Get("copywriter"); !ok {
 		t.Fatal("re-enabled default should be visible again")

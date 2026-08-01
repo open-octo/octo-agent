@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount, onDestroy } from 'svelte'
   import { get } from 'svelte/store'
   import { fade } from 'svelte/transition'
   import {
@@ -55,7 +56,7 @@
   import * as api from '../lib/api'
   import { observeArtifact, resetArtifacts } from '../lib/artifacts'
   import { renderMarkdown, setupCopyButtons } from '../lib/markdown'
-  import { t, tr } from '../lib/i18n'
+  import { t, tr, pickLocalized } from '../lib/i18n'
   import { insertPendingSend } from '../lib/pendingSendOrder'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
   import SubAgentsCard from '../components/chat/SubAgentsCard.svelte'
@@ -81,6 +82,35 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   let subAgents   = $derived($chatSubAgents[$activeSessionId ?? ''] ?? [])
   let workflows   = $derived($chatWorkflows[$activeSessionId ?? ''] ?? [])
   let currentSession = $derived($sessions.find(s => s.id === $activeSessionId) ?? null)
+
+  // Message-bubble identity: a session bound to a non-default agent_profile
+  // (e.g. a summoned expert) should show that agent's own name/icon instead
+  // of the generic Octo mark. Mirrors the same lookup Composer's "@agent"
+  // chip and Sidebar's per-session label already do (api.listAgents() +
+  // find-by-id) — no shared store for this exists yet, so it's fetched here
+  // too, refreshed on the same 'agents_changed' WS event Sidebar listens for.
+  let agents = $state<api.Agent[]>([])
+  let boundAgent = $derived.by(() => {
+    const id = (currentSession as any)?.agent_profile
+    if (!id || id === 'default') return null
+    return agents.find(a => a.id === id) ?? null
+  })
+  let boundAgentName = $derived(boundAgent ? pickLocalized(boundAgent.name, boundAgent.name_en) : '')
+
+  onMount(async () => {
+    try { agents = await api.listAgents() } catch { /* agents list is optional */ }
+  })
+  const unsubAgentsChanged = ws.on('agents_changed', async () => {
+    try { agents = await api.listAgents() } catch { /* ignore */ }
+  })
+  onDestroy(() => { unsubAgentsChanged() })
+
+  function agentAvatarColor(name: string): string {
+    const colors = ['#1677ff', '#722ed1', '#13c2c2', '#52c41a', '#eb2f96', '#fa8c16', '#2f54eb', '#a0d911']
+    let hash = 0
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
+    return colors[Math.abs(hash) % colors.length]
+  }
   let artifactCount  = $derived($artifacts.length)
   let wsDisconnected = $derived($wsState === 'disconnected')
   let showReasoning  = $derived($chatShowReasoning[$activeSessionId ?? ''] ?? currentSession?.show_reasoning ?? true)
@@ -1771,8 +1801,23 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           {#snippet agentMeta(show: boolean, ts?: number)}
             {#if show}
               <div class="msg-meta">
-                <span class="meta-avatar bot" aria-hidden="true"><OctoLogo size={22} /></span>
-                <span class="meta-name">Octo</span>
+                {#if boundAgent}
+                  <span
+                    class="meta-avatar expert"
+                    aria-hidden="true"
+                    style="background-color:{agentAvatarColor(boundAgentName)}22;color:{agentAvatarColor(boundAgentName)}"
+                  >
+                    {#if boundAgent.icon}
+                      <iconify-icon icon={boundAgent.icon} width="13"></iconify-icon>
+                    {:else}
+                      {boundAgentName.charAt(0).toUpperCase()}
+                    {/if}
+                  </span>
+                  <span class="meta-name">{boundAgentName}</span>
+                {:else}
+                  <span class="meta-avatar bot" aria-hidden="true"><OctoLogo size={22} /></span>
+                  <span class="meta-name">Octo</span>
+                {/if}
                 {#if ts}<span class="meta-time">{fmtTime(ts)}</span>{/if}
               </div>
             {/if}
@@ -2404,6 +2449,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 /* The logo is already an app-icon style mark (blue rounded square); no well. */
 .meta-avatar.bot { background: transparent; color: var(--blue-6); }
 .meta-avatar.bot :global(svg) { width: 22px; height: 22px; }
+.meta-avatar.expert { font-size: 11px; font-weight: 600; }
 .meta-name { font-size: 13px; font-weight: 600; color: var(--text-heading); }
 .meta-time { font-size: 11px; color: var(--text-secondary); }
 

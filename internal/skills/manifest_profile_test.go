@@ -22,12 +22,10 @@ func discoverWithDefaults(t *testing.T) *Registry {
 	return Discover(t.TempDir())
 }
 
-func TestManifestForProfile_NoProfileReturnsAll(t *testing.T) {
+func TestManifestForProfile_NoProfileReturnsEmpty(t *testing.T) {
 	r := discoverWithDefaults(t)
-	full := RenderManifest(r)
-	profiled := ManifestForProfile(r, nil)
-	if full != profiled {
-		t.Fatalf("nil profile should return full manifest.\nfull:\n%s\nprofiled:\n%s", full, profiled)
+	if profiled := ManifestForProfile(r, nil); profiled != "" {
+		t.Fatalf("nil profile should return an empty manifest, got:\n%s", profiled)
 	}
 }
 
@@ -89,21 +87,25 @@ func countSkillLines(manifest string) int {
 	return n
 }
 
-func TestManifestForProfile_EmptyToolSkillsReturnsAll(t *testing.T) {
+func TestManifestForProfile_EmptyToolSkills(t *testing.T) {
 	r := discoverWithDefaults(t)
 	full := RenderManifest(r)
-	// Default agent sees the full manifest including system skills.
+	// A builtin profile (the Default agent, or explore/general/code-review)
+	// sees the full manifest including system skills — same "empty means
+	// unrestricted" rule tools.DefaultToolsForProfile applies to Tools.
 	profiled := ManifestForProfile(r, agentprofile.DefaultProfile())
 	if full != profiled {
-		t.Fatalf("empty ToolSkills should return full manifest for default agent")
+		t.Fatalf("empty ToolSkills should return full manifest for a builtin profile")
 	}
-	// Non-default agent with empty ToolSkills gets manifest minus system skills.
-	expertProfiled := ManifestForProfile(r, &agentprofile.Profile{
+	// Any non-builtin profile (curated expert or user-created agent) with no
+	// ToolSkills declared sees NO skills — it must opt in explicitly, same as
+	// the Tools allowlist rule for non-builtin profiles.
+	unscopedProfiled := ManifestForProfile(r, &agentprofile.Profile{
 		ID:          "test",
 		Description: "d",
 	})
-	if expertProfiled == full {
-		t.Fatalf("non-default agent with empty ToolSkills should strip system skills")
+	if unscopedProfiled != "" {
+		t.Fatalf("non-builtin agent with empty ToolSkills should see no skills, got:\n%s", unscopedProfiled)
 	}
 }
 

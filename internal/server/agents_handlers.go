@@ -71,6 +71,13 @@ type agentResponse struct {
 	// Builtin capability-tier profiles never reach this struct — Store.List
 	// excludes them.
 	Source string `json:"source"`
+
+	// Enabled is always present: false only for a hidden (toggled-off)
+	// curated expert, listed via Store.All() so the gallery UI has a way to
+	// show and re-enable it. Every other profile is trivially true — Get(),
+	// Create(), and Update() never surface a hidden default in the first
+	// place (Get() treats it as not-found).
+	Enabled bool `json:"enabled"`
 }
 
 func agentToResp(p *agentprofile.Profile) agentResponse {
@@ -92,6 +99,7 @@ func agentToResp(p *agentprofile.Profile) agentResponse {
 		NameEN:           p.NameEN,
 		DescriptionEN:    p.DescriptionEN,
 		Source:           string(p.Source),
+		Enabled:          true,
 	}
 }
 
@@ -106,14 +114,18 @@ func (s *Server) agentStoreOrInit() *agentprofile.Store {
 	return s.agentStore
 }
 
-// handleListAgents serves GET /api/agents — list all profiles (excluding the
-// code-defined default).
+// handleListAgents serves GET /api/agents — list all profiles (excluding
+// builtins), INCLUDING hidden curated experts (Store.All(), not List()) so
+// the gallery UI can offer a way to re-show one — mirrors handleListSkills
+// using skillReg.All() + IsEnabled for the same reason.
 func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	store := s.agentStoreOrInit()
-	profiles := store.List()
+	profiles := store.All()
 	resp := make([]agentResponse, 0, len(profiles))
 	for _, p := range profiles {
-		resp = append(resp, agentToResp(p))
+		item := agentToResp(p)
+		item.Enabled = store.IsEnabled(p)
+		resp = append(resp, item)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

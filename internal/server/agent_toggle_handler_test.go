@@ -63,8 +63,19 @@ func TestHandleAgents_ToggleHidesAndReshowsCuratedDefault(t *testing.T) {
 	if resp["enabled"] != false {
 		t.Fatalf("first toggle should disable: %+v", resp)
 	}
-	if list := doAgents(t, srv); len(list) != 0 {
-		t.Fatalf("expected 0 agents after hiding, got %d", len(list))
+	// The hidden expert must still be LISTED (with enabled: false) — GET
+	// /api/agents uses Store.All(), not List(), specifically so the gallery
+	// UI has a way to find and re-show it. It just must not be resolvable
+	// via Get() (checked separately below).
+	list := doAgents(t, srv)
+	if len(list) != 1 || list[0].Enabled {
+		t.Fatalf("expected 1 agent listed with enabled=false after hiding, got %+v", list)
+	}
+	// GET /api/agents/:id (single-item) goes through Store.Get(), which still
+	// treats a hidden default as not-found — only the list endpoint (Store.All())
+	// exposes it, since that's the only place the gallery UI needs to see it.
+	if w := doJSON(t, srv, http.MethodGet, "/api/agents/test-expert", ""); w.Code != http.StatusNotFound {
+		t.Fatalf("GET /api/agents/test-expert on a hidden default = %d, want 404: %s", w.Code, w.Body.String())
 	}
 
 	// Re-show it.
@@ -78,8 +89,9 @@ func TestHandleAgents_ToggleHidesAndReshowsCuratedDefault(t *testing.T) {
 	if resp["enabled"] != true {
 		t.Fatalf("second toggle should re-enable: %+v", resp)
 	}
-	if list := doAgents(t, srv); len(list) != 1 {
-		t.Fatalf("expected 1 agent after re-showing, got %d", len(list))
+	list = doAgents(t, srv)
+	if len(list) != 1 || !list[0].Enabled {
+		t.Fatalf("expected 1 agent listed with enabled=true after re-showing, got %+v", list)
 	}
 }
 
