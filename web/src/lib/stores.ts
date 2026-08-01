@@ -10,12 +10,6 @@ export const onboardPhase = writable<'unknown' | 'key_setup' | 'soul_setup' | ''
 // Navigation
 export const view = writable('chat')
 
-// Which category ManageView shows (view === 'manage'). Persists across nav —
-// unlike a modal's category, this is a real page, so it should stay put
-// rather than reset to a default every time the user comes back to it.
-export type ManageCategory = 'agents' | 'skills' | 'mcp' | 'workflows' | 'browser' | 'channels'
-export const manageCat = writable<ManageCategory>('agents')
-
 // The currently active agent profile ID. Default is the code-defined default
 // agent; switching to a profile routes sessions to its isolated session pool.
 export const activeAgent = writable<string>('default')
