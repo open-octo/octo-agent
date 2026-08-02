@@ -174,7 +174,7 @@ POST /api/config/endpoints
   "api_key": "sk-…",
   "base_url": "https://api.example.com",
   "protocol": "openai",
-  "models": ["gpt-4o"]
+  "models": [{"model": "gpt-4o", "vision": false}]
 }
 ```
 
@@ -186,7 +186,7 @@ POST /api/config/endpoints
 | `api_key` | no | The API key (never echo it back to the user after saving) |
 | `base_url` | no | Override for API base URL; only for `"custom"` provider — named providers use their registry URL |
 | `protocol` | no | `"anthropic"` or `"openai"` — only needed for `"custom"` provider |
-| `models` | no | Initial model names to register |
+| `models` | no | Initial models to register — array of `{"model": "...", "vision": bool}`, **not** plain strings |
 
 ### Update an Endpoint
 

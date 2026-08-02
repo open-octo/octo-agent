@@ -289,7 +289,7 @@ func (s *Server) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 		Servers map[string]mcp.ServerEntry `json:"mcpServers"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	if len(req.Servers) == 0 {
@@ -506,7 +506,7 @@ func (s *Server) handlePutToolSearch(w http.ResponseWriter, r *http.Request) {
 		Enabled string `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	switch req.Enabled {

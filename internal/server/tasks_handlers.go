@@ -494,7 +494,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	var req taskRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	if req.Name == "" || req.Cron == "" || req.Prompt == "" {
@@ -592,7 +592,7 @@ func (s *Server) handleTransferTask(w http.ResponseWriter, r *http.Request) {
 	}
 	var req agentTransferRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	if req.AgentID == "" {
@@ -649,7 +649,7 @@ func (s *Server) handlePatchTask(w http.ResponseWriter, r *http.Request) {
 	}
 	var req patchTaskRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	task, err := s.scheduler.Get(id)

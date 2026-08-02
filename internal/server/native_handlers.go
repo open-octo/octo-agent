@@ -168,7 +168,7 @@ func (s *Server) handleNativeNotify(w http.ResponseWriter, r *http.Request) {
 	}
 	var req nativeNotifyRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	if req.SessionID != "" {
@@ -213,7 +213,7 @@ func (s *Server) handleNativeAutostartSet(w http.ResponseWriter, r *http.Request
 	}
 	var req nativeAutostartRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	if err := s.cfg.Native.SetAutostart(req.Enabled); err != nil {
@@ -319,7 +319,7 @@ func (s *Server) handleNativeOpenExternal(w http.ResponseWriter, r *http.Request
 	}
 	var req nativeOpenExternalRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	u, err := url.Parse(req.URL)
@@ -381,7 +381,7 @@ func (s *Server) handleNativeSaveFile(w http.ResponseWriter, r *http.Request) {
 	}
 	var req nativeSaveFileRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	content := req.Content

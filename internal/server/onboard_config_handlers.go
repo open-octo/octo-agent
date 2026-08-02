@@ -324,7 +324,7 @@ type putShowReasoningRequest struct {
 func (s *Server) handlePutShowReasoning(w http.ResponseWriter, r *http.Request) {
 	var req putShowReasoningRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 
@@ -390,7 +390,7 @@ type putCoauthorRequest struct {
 func (s *Server) handlePutCoauthor(w http.ResponseWriter, r *http.Request) {
 	var req putCoauthorRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 
@@ -418,7 +418,7 @@ type putLanguageRequest struct {
 func (s *Server) handlePutLanguage(w http.ResponseWriter, r *http.Request) {
 	var req putLanguageRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	if req.Language != "en" && req.Language != "zh" {
@@ -456,7 +456,7 @@ type putWorkspaceDirRequest struct {
 func (s *Server) handlePutWorkspaceDir(w http.ResponseWriter, r *http.Request) {
 	var req putWorkspaceDirRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 
@@ -499,7 +499,7 @@ type putReasoningEffortRequest struct {
 func (s *Server) handlePutReasoningEffort(w http.ResponseWriter, r *http.Request) {
 	var req putReasoningEffortRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 
@@ -574,7 +574,7 @@ type putPermissionModeRequest struct {
 func (s *Server) handlePutPermissionMode(w http.ResponseWriter, r *http.Request) {
 	var req putPermissionModeRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 
@@ -667,7 +667,7 @@ func storedAPIKey(cfg config.Config, provider, baseURL string) string {
 func (s *Server) handleTestConfig(w http.ResponseWriter, r *http.Request) {
 	var req testConfigRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	if req.Model == "" || req.BaseURL == "" {
@@ -793,7 +793,7 @@ func endpointToJSON(ep config.Endpoint) endpointJSONOut {
 func (s *Server) handleCreateEndpoint(w http.ResponseWriter, r *http.Request) {
 	var req createEndpointRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	if req.ID == "" {
@@ -852,7 +852,7 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 	var req updateEndpointRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 
@@ -982,7 +982,7 @@ func (s *Server) handleAddEndpointModel(w http.ResponseWriter, r *http.Request) 
 	}
 	var req endpointModelIn
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	if req.Model == "" {
