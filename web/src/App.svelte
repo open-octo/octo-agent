@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sessions, sessionGroups, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent, cmdkOpen } from './lib/stores'
+  import { view, sessions, sessionGroups, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent, cmdkOpen, settingsModalOpen } from './lib/stores'
   import MobileApp from './mobile/MobileApp.svelte'
   import { ws, wsState } from './lib/ws'
   import { notificationsEnabled } from './lib/notifications'
@@ -49,6 +49,17 @@
     const h = location.hash.replace(/^#\/?/, '')
     if (!h) return
     const [v, ...rest] = h.split('/')
+    // The desktop shell's tray "Settings" item navigates to #settings; the
+    // full-page view became a modal (settings modal redesign, PR #1955), so
+    // route the hash to the modal instead of a VALID_VIEWS entry. Normalize
+    // the hash back to the current view so a reload doesn't re-open the modal.
+    if (v === 'settings') {
+      settingsModalOpen.set(true)
+      const cv = get(view) || 'chat'
+      const hash = cv === 'chat' ? '#/chat' : `#/${cv}`
+      history.replaceState(null, '', location.pathname + location.search + hash)
+      return
+    }
     if (!VALID_VIEWS.includes(v)) return
     if (get(view) !== v) view.set(v)
     if (v === 'chat' && rest[0]) {

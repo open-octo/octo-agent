@@ -391,7 +391,8 @@ func (b *nativeBridge) WindowState() bool {
 // showWindow brings the hub window to the foreground on the current view.
 func (b *nativeBridge) showWindow() { b.showWindowAt("") }
 
-// openSettings brings the window up on the Settings view (tray "Settings").
+// openSettings brings the window up and opens the Settings modal (tray
+// "Settings"). The frontend maps the "settings" hash route to the modal.
 func (b *nativeBridge) openSettings() { b.showWindowAt("settings") }
 
 // showWindowAt brings the hub window to the foreground, re-creating it if it was
