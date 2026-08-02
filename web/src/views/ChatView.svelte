@@ -176,6 +176,8 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     open: false, index: 0, draft: '', busy: false,
   })
 
+  let lightboxSrc = $state<string | null>(null)
+
   let pendingSteerList = $state<{ pendingId: string; text: string; files?: any[]; retracting?: boolean; queued?: boolean }[]>([])
 
   // Sync pendingSteerList with the current session's pending steers. Uses $effect
@@ -1192,8 +1194,32 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     // thumb (or a touch drag) emits no 'wheel' events at all, so `interacting`
     // additionally blocks the ResizeObserver outright for the duration of any
     // pointer press on the scroller.
+    //
+    // The synchronous unstick latches, though — and a macOS trackpad emits a
+    // few tiny negative deltas at the tail of a *downward* flick (momentum
+    // decay / rubber-band bounce) right as the user lands at the bottom. That
+    // noise latched stick off at the exact bottom, where no downward 'scroll'
+    // event ever follows to re-arm it, so the ResizeObserver stopped pinning
+    // for good and new cards piled up below the fold with the last one
+    // half-hidden behind the composer. Disengage immediately as before (the
+    // #1069 guard needs it), but if the whole upward gesture settles with
+    // barely any net movement it never meant to leave the bottom — re-arm.
+    let unstickTimer: ReturnType<typeof setTimeout> | null = null
+    let gestureStartTop: number | null = null
+    let lastWheelUpAt = 0
     const onWheel = (e: WheelEvent) => {
-      if (e.deltaY < 0) stick = false
+      if (e.deltaY >= 0) return
+      stick = false
+      const now = performance.now()
+      // A new gesture starts after a quiet gap; track where it began so the
+      // settle check measures the gesture's TOTAL travel, not one tick's —
+      // a genuinely gentle scroll-up accumulates many px and stays disengaged.
+      if (now - lastWheelUpAt > 300 || gestureStartTop === null) gestureStartTop = scroller.scrollTop
+      lastWheelUpAt = now
+      if (unstickTimer) clearTimeout(unstickTimer)
+      unstickTimer = setTimeout(() => {
+        if (!interacting && gestureStartTop !== null && scroller.scrollTop >= gestureStartTop - 4) stick = true
+      }, 150)
     }
     scroller.addEventListener('wheel', onWheel, { passive: true })
 
@@ -1208,8 +1234,20 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     // document, which would otherwise leave `interacting` stuck true and
     // silently disable auto-scroll for the rest of the tab's life.
     window.addEventListener('blur', onPointerUp)
+    // Belt-and-braces for the same stuck-true hazard: a pointerup swallowed
+    // by the OS (context menu dismissed with Esc, an HTML5 drag) never
+    // reaches the window either. Any pointer motion with no buttons held
+    // proves the press is over, so clear the flag on the next move.
+    const onPointerMove = (e: PointerEvent) => { if (interacting && e.buttons === 0) interacting = false }
+    scroller.addEventListener('pointermove', onPointerMove, { passive: true })
 
     const ro = new ResizeObserver(() => {
+      // Sitting at the very bottom with no pointer held down is objective
+      // proof the user is following the stream, not reading history — re-arm
+      // stick even if stray wheel noise latched it off, so auto-scroll can
+      // never die while the view is pinned to the latest message.
+      const atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 1
+      if (atBottom && !interacting) stick = true
       if (stick && !interacting) scroller.scrollTop = scroller.scrollHeight
     })
     ro.observe(content)
@@ -1221,9 +1259,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       scroller.removeEventListener('scroll', onScroll)
       scroller.removeEventListener('wheel', onWheel)
       scroller.removeEventListener('pointerdown', onPointerDown)
+      scroller.removeEventListener('pointermove', onPointerMove)
       window.removeEventListener('pointerup', onPointerUp)
       window.removeEventListener('pointercancel', onPointerUp)
       window.removeEventListener('blur', onPointerUp)
+      if (unstickTimer) clearTimeout(unstickTimer)
       ro.disconnect()
     }
   })
@@ -1840,7 +1880,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                       <div class="msg-attachments">
                         {#each msg.files as f}
                           {#if f.mime_type?.startsWith('image/')}
-                            <img src={f.data_url} alt={f.name} class="msg-image" />
+                            <img src={f.data_url} alt={f.name} class="msg-image" onclick={() => { lightboxSrc = f.data_url }} />
                           {:else}
                             <span class="attach-chip"><iconify-icon icon="ant-design:paper-clip-outlined" width="12"></iconify-icon>{f.name}</span>
                           {/if}
@@ -1855,7 +1895,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                           {#if ref.startsWith('pdf:')}
                             <span class="attach-chip"><iconify-icon icon="ant-design:paper-clip-outlined" width="12"></iconify-icon>{ref.slice(4)}</span>
                           {:else}
-                            <img src={ref} alt="attachment" class="msg-image" />
+                            <img src={ref} alt="attachment" class="msg-image" onclick={() => { lightboxSrc = ref }} />
                           {/if}
                         {/each}
                       </div>
@@ -2215,6 +2255,18 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   </div>
 {/if}
 
+<!-- Image lightbox: click any message attachment thumbnail to view full-size -->
+{#if lightboxSrc}
+  <div class="lightbox-overlay" onclick={() => { lightboxSrc = null }}>
+    <button class="lightbox-close" aria-label={$t('chat.image_close')} onclick={() => { lightboxSrc = null }}>
+      <iconify-icon icon="ant-design:close-outlined" width="18"></iconify-icon>
+    </button>
+    <img src={lightboxSrc} alt="" class="lightbox-image" onclick={(e) => e.stopPropagation()} />
+  </div>
+{/if}
+
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape' && lightboxSrc) lightboxSrc = null }} />
+
 <style>
 /* ── Layout ──────────────────────────────────────────────────────────────── */
 .chat-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -2476,7 +2528,22 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
 /* ── Inline attachments inside user cards ────────────────────────────────── */
 .msg-attachments { display: flex; flex-wrap: wrap; gap: 8px; }
-.msg-image { max-width: 100%; max-height: 320px; border-radius: 8px; border: 1px solid var(--border); }
+.msg-image { max-width: 100%; max-height: 320px; border-radius: 8px; border: 1px solid var(--border); cursor: zoom-in; }
+
+.lightbox-overlay {
+  position: fixed; inset: 0; background: var(--scrim); z-index: 2000;
+  display: flex; align-items: center; justify-content: center; padding: 40px;
+}
+.lightbox-image {
+  max-width: 100%; max-height: 100%; border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); cursor: zoom-out;
+}
+.lightbox-close {
+  position: fixed; top: 20px; right: 20px; background: rgba(0, 0, 0, 0.4); border: none;
+  color: #fff; width: 36px; height: 36px; border-radius: 50%; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.lightbox-close:hover { background: rgba(0, 0, 0, 0.6); }
 
 /* ── Agent message ───────────────────────────────────────────────────────── */
 .msg-agent { display: flex; flex-direction: column; gap: 12px; }
