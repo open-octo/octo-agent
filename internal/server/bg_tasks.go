@@ -152,10 +152,14 @@ func (s *Server) kickIdleSteerTurn(sessionID string) bool {
 			defer s.drain.end()
 		}
 		defer func() {
+			// Release the binding — which reloads the session and writes a
+			// lease-clear record — BEFORE clearing turnRunning, so the flag only
+			// flips once the trailing session write is done. Tests (and the
+			// drain gate) wait on this flag as "turn fully wound down".
+			s.releaseSessionBinding(sessionID, agent.EntryWeb)
 			mu.Lock()
 			s.turnRunning[sessionID] = false
 			mu.Unlock()
-			s.releaseSessionBinding(sessionID, agent.EntryWeb)
 		}()
 		s.runAgentTurnLoop(sess, content, blocks, imageRefsFromBlocks(blocks))
 	}()
