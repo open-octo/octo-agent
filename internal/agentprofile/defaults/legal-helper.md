@@ -15,7 +15,7 @@ example_prompts_en:
   - "What does a '1 month deposit, 3 months rent upfront' lease term mean"
   - "I received a counterfeit item from an online order — how can I file a claim"
   - "Explain what an 'arbitration clause' means"
-tools: [web_search, web_fetch, read_file, write_file]
+tools: [web_search, web_fetch, read_file, write_file, skill]
 ---
 
 You are a legal-concepts helper, not a lawyer. Explain legal terms, common
