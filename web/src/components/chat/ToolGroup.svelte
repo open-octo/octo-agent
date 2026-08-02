@@ -281,10 +281,6 @@
     return code ? `exit ${code[1]}` : reason
   }
 
-  function isTerminalTool(tool: any): boolean {
-    return tool.name === 'terminal' || tool.name === 'bash'
-  }
-
   // Per-tool open/closed override, seeded by the default (see lib/toolFold).
   // Binding <details open> straight to the default would let every streaming
   // re-render revert a manual collapse of the auto-opened last tool.
@@ -354,31 +350,28 @@
     return list.map((t: any) => ({ status: t.status ?? 'pending', content: t.content ?? t.text ?? String(t) }))
   }
 
-  // Long output folding: show the first FOLD_LINES, reveal the rest on click.
-  // For terminal/bash (tail=true) show the LAST FOLD_LINES instead — errors
-  // and summaries land at the bottom of shell output, not the top, so a
-  // head-fold buries exactly the lines the user needs to see (#1106).
-  // `foldable`/`expanded` ride along so the caller can always offer a way back
-  // to collapsed, even once `hidden` drops to 0 because the user expanded it
-  // (#1114 — expand used to be a one-way trip).
-  const FOLD_LINES = 14
-  const DIFF_FOLD_LINES = 12
-  let expanded = $state<Record<string, boolean>>({})
-  function foldInfo(id: string, text: string, tail = false, foldLines = FOLD_LINES) {
-    const lines = text.split('\n')
-    const foldable = lines.length > foldLines
-    const isExpanded = !!expanded[id]
-    if (!foldable || isExpanded) {
-      return { shown: text, hidden: 0, foldable, expanded: isExpanded }
+  // Long output is NOT truncated: every body renders in full and its container
+  // is capped at ~10 lines with a scrollbar (see the max-height rules below).
+  // For terminal/bash the scroll starts pinned to the BOTTOM — errors and
+  // summaries land at the end of shell output, not the top (#1106) — and stays
+  // pinned while streaming until the user scrolls up.
+  function pinBottom(node: HTMLElement) {
+    let userScrolled = false
+    const onScroll = () => {
+      userScrolled = node.scrollHeight - node.scrollTop - node.clientHeight > 24
     }
-    if (tail) {
-      return { shown: lines.slice(-foldLines).join('\n'), hidden: lines.length - foldLines, foldable, expanded: false }
+    node.addEventListener('scroll', onScroll)
+    const obs = new MutationObserver(() => {
+      if (!userScrolled) node.scrollTop = node.scrollHeight
+    })
+    obs.observe(node, { childList: true, characterData: true, subtree: true })
+    node.scrollTop = node.scrollHeight
+    return {
+      destroy() {
+        obs.disconnect()
+        node.removeEventListener('scroll', onScroll)
+      },
     }
-    return { shown: lines.slice(0, foldLines).join('\n'), hidden: lines.length - foldLines, foldable, expanded: false }
-  }
-
-  function toggleFold(id: string) {
-    expanded[id] = !expanded[id]
   }
 </script>
 
@@ -496,9 +489,8 @@
             {/each}
           </div>
         {:else if tool.ui_payload?.diff}
-          {@const fold = foldInfo(tool.id, tool.ui_payload.diff, false, DIFF_FOLD_LINES)}
           <div class="diff-block">
-            {#each fold.shown.split('\n') as line}
+            {#each tool.ui_payload.diff.split('\n') as line}
               {#if line.startsWith('@@')}
                 <div class="diff-hdr mono">{line}</div>
               {:else if line.startsWith('-')}
@@ -510,17 +502,6 @@
               {/if}
             {/each}
           </div>
-          {#if fold.hidden > 0}
-            <button class="fold-btn" onclick={() => toggleFold(tool.id)}>
-              <iconify-icon icon="lucide:chevron-down" width="13"></iconify-icon>
-              {$t('tools.show_more').replace('{n}', String(fold.hidden))}
-            </button>
-          {:else if fold.foldable && fold.expanded}
-            <button class="fold-btn" onclick={() => toggleFold(tool.id)}>
-              <iconify-icon icon="lucide:chevron-up" width="13"></iconify-icon>
-              {$t('tools.show_less')}
-            </button>
-          {/if}
           {#if tool.ui_payload?.undo_id}
             <button class="undo-btn" disabled={undone[tool.id]} onclick={() => undoOverwrite(tool.ui_payload.undo_id, tool.id)}>
               <iconify-icon icon="ant-design:undo-outlined" width="12"></iconify-icon>
@@ -529,23 +510,9 @@
           {/if}
         {:else if tool.stdout && tool.stdout.length > 0}
           {@const full = tool.stdout.join('\n')}
-          {@const isTerm = isTerminalTool(tool)}
-          {@const fold = foldInfo(tool.id, full, isTerm)}
           <div class="term-wrap">
-            {#if isTerm && (fold.hidden > 0 || fold.expanded)}
-              <button class="fold-btn" onclick={() => toggleFold(tool.id)}>
-                <iconify-icon icon={fold.hidden > 0 ? 'lucide:chevron-up' : 'lucide:chevron-down'} width="13"></iconify-icon>
-                {fold.hidden > 0 ? $t('tools.show_earlier').replace('{n}', String(fold.hidden)) : $t('tools.show_less')}
-              </button>
-            {/if}
-            <pre class="terminal-output">{#each fold.shown.split('\n') as line, i}{#if i === 0 && fold.hidden === 0 && (line.startsWith('$ ') || line === '$')}<span class="term-prompt">$</span>{line.slice(1)}{:else}{line}{/if}
+            <pre class="terminal-output" use:pinBottom>{#each full.split('\n') as line, i}{#if i === 0 && (line.startsWith('$ ') || line === '$')}<span class="term-prompt">$</span>{line.slice(1)}{:else}{line}{/if}
 {/each}{#if !tool.done}<span class="blink-caret"></span>{/if}</pre>
-            {#if !isTerm && (fold.hidden > 0 || fold.expanded)}
-              <button class="fold-btn" onclick={() => toggleFold(tool.id)}>
-                <iconify-icon icon={fold.hidden > 0 ? 'lucide:chevron-down' : 'lucide:chevron-up'} width="13"></iconify-icon>
-                {fold.hidden > 0 ? $t('tools.show_more').replace('{n}', String(fold.hidden)) : $t('tools.show_less')}
-              </button>
-            {/if}
           </div>
         {:else if tool.name === 'web_search' && searchResults(tool)}
           {@const results = searchResults(tool)}
@@ -585,24 +552,7 @@
             </button>
           {/if}
         {:else if tool.result}
-          {@const pretty = prettyResult(tool.result)}
-          {@const isTerm = isTerminalTool(tool)}
-          {@const fold = foldInfo(tool.id, pretty, isTerm)}
-          <div>
-            {#if isTerm && (fold.hidden > 0 || fold.expanded)}
-              <button class="fold-btn light" onclick={() => toggleFold(tool.id)}>
-                <iconify-icon icon={fold.hidden > 0 ? 'lucide:chevron-up' : 'lucide:chevron-down'} width="13"></iconify-icon>
-                {fold.hidden > 0 ? $t('tools.show_earlier').replace('{n}', String(fold.hidden)) : $t('tools.show_less')}
-              </button>
-            {/if}
-            <pre class="tool-output">{fold.shown}</pre>
-            {#if !isTerm && (fold.hidden > 0 || fold.expanded)}
-              <button class="fold-btn light" onclick={() => toggleFold(tool.id)}>
-                <iconify-icon icon={fold.hidden > 0 ? 'lucide:chevron-down' : 'lucide:chevron-up'} width="13"></iconify-icon>
-                {fold.hidden > 0 ? $t('tools.show_more').replace('{n}', String(fold.hidden)) : $t('tools.show_less')}
-              </button>
-            {/if}
-          </div>
+          <pre class="tool-output">{prettyResult(tool.result)}</pre>
         {/if}
         </div></div>
       </details>
@@ -649,12 +599,13 @@
 .st.err { color: var(--error); }
 .st.warn { color: var(--warning); }
 .st.run { color: var(--blue-6); font-size: 12px; gap: 6px; }
+/* Body regions are capped at ~10 text lines; longer content scrolls. */
 .tool-output {
   margin: 0; padding: 10px 14px; border-top: 1px solid var(--border-table);
   background: var(--bg-sidebar); font-size: 12px; line-height: 1.7;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--text-secondary); overflow-x: auto; white-space: pre-wrap; word-break: break-word;
-  max-height: 420px; overflow-y: auto;
+  max-height: 224px; overflow-y: auto;
 }
 /* Chevron rotates from ▸ (collapsed) to ▾ (open). */
 .chev { transition: transform 0.15s ease; flex: 0 0 auto; }
@@ -662,18 +613,11 @@ details[open] > summary .chev { transform: rotate(90deg); }
 .tool-body { display: grid; grid-template-rows: 1fr; }
 .tool-body-inner { overflow: hidden; min-height: 0; }
 /* todo_write checklist */
-.todo-list { border-top: 1px solid var(--border-table); padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+.todo-list { border-top: 1px solid var(--border-table); padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; max-height: 224px; overflow-y: auto; }
 .todo-step { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
 .todo-done { color: var(--text-tertiary); text-decoration: line-through; }
 .todo-pending { color: var(--text-tertiary); }
-/* Long-output fold button */
 .term-wrap { display: flex; flex-direction: column; }
-.fold-btn {
-  width: 100%; padding: 8px 12px; border: none; border-top: 1px solid var(--border-table);
-  background: var(--bg-table-header); display: flex; align-items: center; justify-content: center;
-  gap: 6px; font-size: 12px; color: var(--blue-6); cursor: pointer; font-family: inherit;
-}
-.fold-btn:hover { background: var(--active-blue-bg); }
 .undo-btn {
   width: 100%; padding: 7px 12px; border: none; border-top: 1px solid var(--border-table);
   background: var(--bg-table-header); display: flex; align-items: center; justify-content: center;
@@ -690,6 +634,7 @@ details[open] > summary .chev { transform: rotate(90deg); }
 .search-results {
   border-top: 1px solid var(--border-table); padding: 10px 14px;
   display: flex; flex-direction: column; gap: 10px;
+  max-height: 224px; overflow-y: auto;
 }
 .search-row { display: flex; flex-direction: column; gap: 2px; }
 .search-title { font-size: 13px; color: var(--blue-6); cursor: pointer; text-decoration: none; }
@@ -699,7 +644,7 @@ details[open] > summary .chev { transform: rotate(90deg); }
 .search-hint { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-tertiary); }
 .search-hint a { color: var(--blue-6); text-decoration: none; }
 .search-hint a:hover { text-decoration: underline; }
-.diff-block { border-top: 1px solid var(--border-table); font-size: 12px; line-height: 1.7; overflow-x: auto; }
+.diff-block { border-top: 1px solid var(--border-table); font-size: 12px; line-height: 1.7; overflow: auto; max-height: 224px; }
 .diff-hdr { padding: 4px 14px; color: var(--text-tertiary); border-bottom: 1px solid var(--border-table); }
 .diff-line { padding: 1px 14px; }
 .diff-line.rm { background: var(--error-bg); color: var(--error-dark); border-left: 2px solid var(--error); }
@@ -708,7 +653,7 @@ details[open] > summary .chev { transform: rotate(90deg); }
   margin: 0; padding: 12px 14px; border-top: 1px solid var(--border-table);
   background: var(--terminal-bg); color: var(--terminal-text); font-size: 12px; line-height: 1.6;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-x: auto;
-  max-height: 420px; overflow-y: auto;
+  max-height: 216px; overflow-y: auto;
 }
 .blink-caret {
   display: inline-block; width: 7px; height: 13px;
@@ -718,7 +663,8 @@ details[open] > summary .chev { transform: rotate(90deg); }
 .error-output {
   border-top: 1px solid var(--border-table); background: var(--error-bg);
   border-left: 2px solid var(--error); padding: 10px 14px;
-  font-size: 12px; line-height: 1.6; color: var(--error-dark); overflow-x: auto;
+  font-size: 12px; line-height: 1.6; color: var(--error-dark); overflow: auto;
+  max-height: 216px;
 }
 /* web_fetch that hit an HTTP error: the tool ran, the page didn't. */
 .warning-output {
@@ -726,7 +672,7 @@ details[open] > summary .chev { transform: rotate(90deg); }
   border-left: 2px solid var(--warning); padding: 10px 14px;
   font-size: 12px; line-height: 1.6; color: var(--warning-text);
   overflow-x: auto; white-space: pre-wrap; word-break: break-word;
-  max-height: 280px; overflow-y: auto;
+  max-height: 216px; overflow-y: auto;
 }
 .promote-btn {
   height: 20px; padding: 0 8px;
