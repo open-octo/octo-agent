@@ -88,8 +88,8 @@ end
 
 新文件 `internal/tools/workflow_registry.go`,镜像 `agents.go`:
 - `userWorkflowsRoot()` = `~/.octo/workflows`
-- `projectWorkflowsRoot()` = `<project-root>/.octo/workflows`
-- 扫 `*.rb`,**项目级覆盖用户级**(同名)。
+- 扫 `*.rb`,**用户级覆盖内置默认**(同名)。(曾经有过项目级 `<project-root>/.octo/workflows`
+  第三层,后来砍掉了——原因见 default-skills-design.md 里同类精简的说明。)
 - 元信息用文件开头的注释行(`.rb` 没有干净的 frontmatter):
   ```ruby
   # @description Find bugs, adversarially verify, dedupe, then synthesize a report
@@ -105,12 +105,12 @@ end
 
 **新工具 `workflow_save`**
 ```
-workflow_save(name, script, description?, scope?)
+workflow_save(name, script, description?)
   name:        kebab-case 标识,作为 <name>.rb 文件名
   script:      Ruby 脚本主体
   description: 写进 @description 注释行
-  scope:       "project"(默认,写 <root>/.octo/workflows/)| "user"(写 ~/.octo/workflows/)
 ```
+恒写入 `~/.octo/workflows/`(曾经有过 `scope: "project"|"user"` 选择,砍掉项目级后不再需要）。
 - 校验 `name` 合法(kebab,无路径分隔符)。
 - 文件已存在则覆盖并在返回里说明(工具不能交互确认);返回写入的绝对路径。
 - 落盘内容 = `# @description ...\n\n` + script。

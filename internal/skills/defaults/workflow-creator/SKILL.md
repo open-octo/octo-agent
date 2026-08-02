@@ -141,10 +141,9 @@ Chrome *right now*. So if the chain contains a recording:
 Fix any wiring error and re-run before saving.
 
 ### 5. Save it and show how to run it
-Call `workflow_save(name, script, description, scope)`. `scope` defaults to
-`project` (`.octo/workflows`) and **errors when you're not inside a git repo** —
-if there's no repo, use `scope: "user"` (`~/.octo/workflows`, available across
-projects). Ask the user if it's unclear. Confirm the name with them first.
+Call `workflow_save(name, script, description)` — it writes to
+`~/.octo/workflows`, available across every project. Confirm the name with
+the user first.
 
 Then tell them the three ways to run it:
 - **In chat** — ask to run the workflow by name (passing `args`).
@@ -164,5 +163,5 @@ Then tell them the three ways to run it:
 - Don't design cadence/state/trigger for a recurring loop — use `cron-task-creator` to schedule a saved workflow instead; don't ask "定时跑还是手动触发" or "这个 workflow 解决什么场景"
   as scoping questions, since scheduling is only ever a *consumer* of a saved
   workflow (mentioned once, in Step 5, as one of three ways to run it by name).
-- Don't save before the user has confirmed the name and scope.
+- Don't save before the user has confirmed the name.
 - Don't report the dry-run as passing before `workflow_status` says done.

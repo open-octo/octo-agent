@@ -20,7 +20,7 @@ func TestLoadConfig_MissingFilesIsZero(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
-	cfg, err := LoadConfig("")
+	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestLoadConfig_UserGlobalOnly(t *testing.T) {
           "fs": {"command": "npx", "args": ["-y", "server-filesystem"]}
         }
     }`)
-	cfg, err := LoadConfig("")
+	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -47,39 +47,6 @@ func TestLoadConfig_UserGlobalOnly(t *testing.T) {
 	}
 	if got := cfg.Servers["fs"].Kind(); got != "stdio" {
 		t.Errorf("fs.Kind() = %q, want stdio", got)
-	}
-}
-
-func TestLoadConfig_ProjectOverridesUserGlobal(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
-	writeFile(t, filepath.Join(tmp, ".octo", "mcp.json"), `{
-        "mcpServers": {
-          "fs": {"command": "global-fs"}
-        }
-    }`)
-	proj := t.TempDir()
-	writeFile(t, filepath.Join(proj, ".octo", "mcp.json"), `{
-        "mcpServers": {
-          "fs":     {"command": "project-fs"},
-          "github": {"url": "https://gh.example/mcp"}
-        }
-    }`)
-	cfg, err := LoadConfig(proj)
-	if err != nil {
-		t.Fatalf("LoadConfig: %v", err)
-	}
-	// "fs" overridden by project entry.
-	if got := cfg.Servers["fs"].Command; got != "project-fs" {
-		t.Errorf("expected project override, got %q", got)
-	}
-	// "github" comes from project only.
-	if got := cfg.Servers["github"].URL; got != "https://gh.example/mcp" {
-		t.Errorf("github.URL = %q", got)
-	}
-	if got := cfg.Servers["github"].Kind(); got != "http" {
-		t.Errorf("github.Kind() = %q, want http", got)
 	}
 }
 
@@ -93,7 +60,7 @@ func TestLoadConfig_DisabledIsSkipped(t *testing.T) {
           "on":  {"command": "y"}
         }
     }`)
-	cfg, err := LoadConfig("")
+	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -114,7 +81,7 @@ func TestLoadConfig_ValidationRejectsBothTransports(t *testing.T) {
           "bad": {"command": "x", "url": "https://example.com/mcp"}
         }
     }`)
-	if _, err := LoadConfig(""); err == nil {
+	if _, err := LoadConfig(); err == nil {
 		t.Fatal("expected validation error for entry with both command and url")
 	}
 }
@@ -128,7 +95,7 @@ func TestLoadConfig_ValidationRejectsNeither(t *testing.T) {
           "bad": {"env": {"X": "y"}}
         }
     }`)
-	if _, err := LoadConfig(""); err == nil {
+	if _, err := LoadConfig(); err == nil {
 		t.Fatal("expected validation error for entry with neither command nor url")
 	}
 }
@@ -142,7 +109,7 @@ func TestLoadConfig_RejectsBadURLScheme(t *testing.T) {
           "bad": {"url": "file:///etc/passwd"}
         }
     }`)
-	if _, err := LoadConfig(""); err == nil {
+	if _, err := LoadConfig(); err == nil {
 		t.Fatal("expected validation error for non-http url")
 	}
 }

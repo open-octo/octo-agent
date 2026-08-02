@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -84,13 +83,12 @@ func TestDiscoverWorkflows_DefaultSurfacesAndIsOverridable(t *testing.T) {
 	}
 
 	userRoot := t.TempDir()
-	ou, op := userWorkflowsRoot, projectWorkflowsRoot
+	ou := userWorkflowsRoot
 	userWorkflowsRoot = func() string { return userRoot }
-	projectWorkflowsRoot = func(_ string) string { return "" }
-	t.Cleanup(func() { userWorkflowsRoot, projectWorkflowsRoot = ou, op })
+	t.Cleanup(func() { userWorkflowsRoot = ou })
 
 	// Default-only: batch-migrate is discovered with source "default".
-	w, ok := lookupWorkflow(context.Background(), "batch-migrate")
+	w, ok := lookupWorkflow("batch-migrate")
 	if !ok {
 		t.Fatal("default batch-migrate not discovered")
 	}
@@ -100,7 +98,7 @@ func TestDiscoverWorkflows_DefaultSurfacesAndIsOverridable(t *testing.T) {
 
 	// A user workflow of the same name overrides the default.
 	writeWorkflowFile(t, userRoot, "batch-migrate.rb", "# @description my override\n\"x\"\n")
-	w, ok = lookupWorkflow(context.Background(), "batch-migrate")
+	w, ok = lookupWorkflow("batch-migrate")
 	if !ok || w.source != "user" || w.description != "my override" {
 		t.Errorf("user workflow should override default, got %+v, ok=%v", w, ok)
 	}

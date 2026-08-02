@@ -6,12 +6,8 @@ description: Configure and connect MCP (Model Context Protocol) servers through 
 
 # Configure an MCP server
 
-octo connects to MCP servers declared in two config files, both using the
-Claude Code-compatible `mcpServers` shape:
-
-- `~/.octo/mcp.json` — user-global; this is where you write.
-- `.octo/mcp.json` in a project — project-local; read-only from the web UI,
-  only edit it when the user explicitly wants a project-scoped server.
+octo connects to MCP servers declared in `~/.octo/mcp.json`, using the
+Claude Code-compatible `mcpServers` shape. This is the file you write to.
 
 Your job is to turn "I want my assistant to talk to X" into a working entry in
 that file. Not every user knows what MCP is — briefly explain terms if in doubt.
@@ -54,26 +50,17 @@ tool the server exposes.
 
 ## Editing an existing server
 
-The web UI's per-row "Edit with Agent" button routes here too — for any
-existing server, user- or project-scoped alike. This skips most of the
-Workflow below; there's no new package to find or transport to choose:
+The web UI's per-row "Edit with Agent" button routes here too. This skips
+most of the Workflow below; there's no new package to find or transport to
+choose:
 
-1. **Locate the entry** — check `~/.octo/mcp.json` first, then the current
-   project's `.octo/mcp.json` if it's not in the user config.
+1. **Locate the entry** in `~/.octo/mcp.json`.
 2. **Show the user the current entry** before changing anything.
 3. **Ask what they want changed.** Apply the smallest edit that satisfies
    the request — preserve every other field and every other server entry
    verbatim.
 4. **Write the file back**, then do step 6 of the Workflow below (verify,
    tell them to Reload).
-
-If the entry lives in a project's `.octo/mcp.json`: that file is normally
-checked into the project's git repo and shared by the whole team. Editing
-it through this skill is expected — it's the supported way to change a
-project-scoped server (the web UI never writes there directly, by design).
-After writing, remind the user the file is version-controlled: they should
-review the diff and commit + push (or open a PR) themselves. Don't run git
-commands on their behalf unless they ask you to.
 
 ## Workflow
 
@@ -121,14 +108,9 @@ Use this for adding a brand-new server. (Editing one? See above.)
    where it comes from and put it in `env` (stdio) or `headers` (http). Never
    invent placeholder keys without flagging them as placeholders.
 
-5. **Write the config.** Default to `~/.octo/mcp.json` (create it with
-   `{"mcpServers": {}}` if absent). If the user explicitly wants this server
-   scoped to the current project instead, write to `.octo/mcp.json` in the
-   project root (create the file/directory if absent), and afterward remind
-   them this file is normally checked into git — they should review the diff
-   and commit + push (or open a PR) themselves. Either way: merge the new
-   entry in, preserve existing entries verbatim, and echo the final entry
-   back to the user.
+5. **Write the config.** Write to `~/.octo/mcp.json` (create it with
+   `{"mcpServers": {}}` if absent). Merge the new entry in, preserve existing
+   entries verbatim, and echo the final entry back to the user.
 
 6. **Verify before handing off.** Don't just write the config and trust it. For
    a stdio server, do a quick smoke test yourself first — launch the exact

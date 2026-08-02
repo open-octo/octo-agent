@@ -40,20 +40,20 @@ separate concern from the built-in defaults.
 default  ~/.octo/skills-default/   (shipped, materialized)
    ↓ overridden by
 user     ~/.octo/skills/
-   ↓ overridden by
-project  ./.octo/skills/
 ```
 
 A user overrides a default skill by dropping a same-named skill in
 `~/.octo/skills/`. `--list-skills` / `octo skills list` tag each with its
-source.
+source. (A project-level `.octo/skills/` tier existed briefly but was removed
+— it never tracked a session's actual working directory, only the server's
+launch dir, and added complexity nobody used.)
 
 ## 5. CLI
 
 ```
-octo skills list      # all skills, grouped default → user → project
+octo skills list      # all skills, grouped default → user
 octo skills update    # force re-materialize the defaults (ignores the stamp)
-octo skills path      # print the three roots
+octo skills path      # print the two roots
 ```
 
 ## 6. Adding a default skill

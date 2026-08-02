@@ -30,7 +30,7 @@ var mcpChildStderr io.Writer
 // nil to restore the os.Stderr default. Set it before connecting.
 func SetMCPChildStderr(w io.Writer) { mcpChildStderr = w }
 
-// ConnectMCP loads the MCP server config under cwd, connects every server
+// ConnectMCP loads the user-global MCP server config, connects every server
 // non-interactively, and registers the resulting surface so DefaultToolsFor /
 // the tool executor pick it up. It is the server/IM counterpart to the CLI's
 // own (interactive, OAuth-prompting) connect path — here authPromptFor is nil,
@@ -41,8 +41,8 @@ func SetMCPChildStderr(w io.Writer) { mcpChildStderr = w }
 // Returns a cleanup that unregisters and closes the registry; it is always
 // non-nil (a no-op when no servers connected), so callers can defer it
 // unconditionally. warn receives per-server skip diagnostics.
-func ConnectMCP(ctx context.Context, cwd string, warn io.Writer) (func(), error) {
-	cfg, err := mcp.LoadConfig(cwd)
+func ConnectMCP(ctx context.Context, warn io.Writer) (func(), error) {
+	cfg, err := mcp.LoadConfig()
 	if err != nil {
 		return func() {}, err
 	}
@@ -72,7 +72,7 @@ func mcpInfo() mcp.Implementation {
 	return mcp.Implementation{Name: "octo", Version: version.Version}
 }
 
-// SwapMCP reloads the MCP config under cwd, connects a fresh registry, and
+// SwapMCP reloads the user-global MCP config, connects a fresh registry, and
 // atomically replaces the active one (closing the old registry after the
 // swap so in-flight readers holding it can finish dialing). Unlike ConnectMCP
 // it installs the registry even when zero servers connected — the per-server
@@ -82,8 +82,8 @@ func mcpInfo() mcp.Implementation {
 //
 // Callers that expose this concurrently (the web server) must serialise calls
 // themselves; two overlapping swaps would race on which registry survives.
-func SwapMCP(ctx context.Context, cwd string, warn io.Writer) error {
-	cfg, err := mcp.LoadConfig(cwd)
+func SwapMCP(ctx context.Context, warn io.Writer) error {
+	cfg, err := mcp.LoadConfig()
 	if err != nil {
 		return err
 	}

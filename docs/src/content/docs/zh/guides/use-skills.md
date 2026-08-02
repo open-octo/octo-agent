@@ -11,7 +11,6 @@ Skills 是可复用的指令集，模型只在任务匹配时才加载它们—�
   （升级后用 `octo skills update` 重新同步）。单独放一个目录，是为了刷新内置 skill 永远不会碰到
   你自己写的那些。
 - `~/.octo/skills/<name>/SKILL.md` —— 用户级，所有项目共用。同名会覆盖内置 skill。
-- `.octo/skills/<name>/SKILL.md` —— 项目级，同名时覆盖前两者。
 
 格式和 Claude Code 完全一致，所以你可以把 `~/.claude/skills` 软链接到 `~/.octo/skills`，
 直接复用你已经有的一切：
@@ -39,7 +38,7 @@ Walk the diff hunk by hunk and flag correctness bugs first, then style.
 
 ```bash
 octo skills list     # 看看发现了哪些 skill
-octo skills path     # 打印用户级/项目级/内置 skill 目录
+octo skills path     # 打印用户级/内置 skill 目录
 octo skills add      # 从某个来源引导安装一个 skill
 octo skills update   # 升级后重新同步内置 skill
 ```

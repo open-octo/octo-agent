@@ -102,20 +102,13 @@ you write to do it).
 Save a script once, run it by name afterward:
 
 ```
-workflow_save(name: "my-check", script: "...")   # writes .octo/workflows/my-check.rb
+workflow_save(name: "my-check", script: "...")   # writes ~/.octo/workflows/my-check.rb
 workflow(name: "my-check", args: { target: "src/" })
 ```
 
-- `name` must match `^[a-z0-9][a-z0-9-]*$`. `scope: "project"` (default) writes to
-  `.octo/workflows/` — this needs a git repo, or the save fails; `scope: "user"` writes to
-  `~/.octo/workflows/` instead.
-- The registry merges **built-in presets < user workflows < project workflows** by name, rescanned
-  fresh on every call — no caching, no restart needed after editing a saved script by hand.
-  Project workflows are resolved from the **current working directory** of the turn (the directory
-  you ran `octo` from, the `directory` of a [scheduled cron task](/docs/guides/cron-tasks/), or a web/IM session's working
-  directory when it's been changed from the server default), not necessarily the server's process
-  CWD. A running workflow script's own `agent()`/`skill()` calls keep resolving against that same
-  directory too, even in background mode.
+- `name` must match `^[a-z0-9][a-z0-9-]*$`. Always writes to `~/.octo/workflows/`.
+- The registry merges **built-in presets < user workflows** by name, rescanned fresh on every
+  call — no caching, no restart needed after editing a saved script by hand.
 - A workflow's description comes from a leading `# @description ...` comment line.
 - Declare named inputs with `# @param <name> [required] [description]` comment lines. Required
   params that are missing at run time are prompted for interactively instead of failing the run.

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -14,9 +13,9 @@ import (
 )
 
 // runSkills handles `octo skills [list|add|update|path]`. Bare `octo skills`
-// defaults to list. Skills are discovered from three roots (default < user <
-// project); the default set ships embedded in the binary and is materialized to
-// disk on startup (see internal/skills/defaults.go).
+// defaults to list. Skills are discovered from two roots (default < user); the
+// default set ships embedded in the binary and is materialized to disk on
+// startup (see internal/skills/defaults.go).
 func runSkills(args []string, stdout, stderr io.Writer) int {
 	sub := "list"
 	if len(args) > 0 {
@@ -81,23 +80,22 @@ func skillsAdd(args []string, stdout, stderr io.Writer) int {
 }
 
 func skillsList(stdout io.Writer) int {
-	cwd, _ := os.Getwd()
-	reg := skills.Discover(cwd)
+	reg := skills.Discover()
 	all := reg.List()
 	if len(all) == 0 {
 		fmt.Fprintln(stdout, "No skills found.")
-		fmt.Fprintln(stdout, "Defaults ship with the binary; add your own under ~/.octo/skills or ./.octo/skills.")
+		fmt.Fprintln(stdout, "Defaults ship with the binary; add your own under ~/.octo/skills.")
 		return 0
 	}
-	// Group by source for a readable overview: default → user → project.
-	order := map[string]int{"default": 0, "user": 1, "project": 2}
+	// Group by source for a readable overview: default → user.
+	order := map[string]int{"default": 0, "user": 1}
 	sort.SliceStable(all, func(i, j int) bool {
 		if order[all[i].Source] != order[all[j].Source] {
 			return order[all[i].Source] < order[all[j].Source]
 		}
 		return all[i].Name < all[j].Name
 	})
-	fmt.Fprintln(stdout, "Skills (trigger with /<name>; project overrides user overrides default):")
+	fmt.Fprintln(stdout, "Skills (trigger with /<name>; user overrides default):")
 	for _, s := range all {
 		fmt.Fprintf(stdout, "  /%-18s [%-7s] %s\n", s.Name, s.Source, s.Description)
 	}
@@ -114,10 +112,8 @@ func skillsUpdate(stdout, stderr io.Writer) int {
 }
 
 func skillsPath(stdout io.Writer) int {
-	cwd, _ := os.Getwd()
 	fmt.Fprintln(stdout, "Skill roots (lowest → highest precedence):")
 	fmt.Fprintf(stdout, "  default  %s\n", skills.DefaultRoot())
 	fmt.Fprintf(stdout, "  user     %s\n", skills.UserRoot())
-	fmt.Fprintf(stdout, "  project  %s\n", filepath.Join(cwd, ".octo", "skills"))
 	return 0
 }

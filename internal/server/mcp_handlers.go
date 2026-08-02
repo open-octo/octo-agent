@@ -61,18 +61,16 @@ func parseStdioCommand(name, line string, allowArbitrary bool) (string, []string
 	return base, fields[1:], nil
 }
 
-// MCP server management API. Reads merge the user-global and project-local
-// configs (internal/mcp.LoadManaged); writes go to ~/.octo/mcp.json only —
-// project-local entries are presented read-only. Mutations apply to the live
-// registry incrementally (connect/disconnect just the touched server), so a
-// change is effective for the next turn of every session without a restart.
-// All mutation handlers hold s.mcpMu — the registry swap inside reload must
-// not interleave with incremental connects.
+// MCP server management API. Reads and writes both go to ~/.octo/mcp.json
+// (internal/mcp.LoadManaged). Mutations apply to the live registry
+// incrementally (connect/disconnect just the touched server), so a change is
+// effective for the next turn of every session without a restart. All
+// mutation handlers hold s.mcpMu — the registry swap inside reload must not
+// interleave with incremental connects.
 
 type mcpServerInfo struct {
 	Name      string            `json:"name"`
 	Transport string            `json:"transport"` // "stdio" | "http" | "" (invalid entry)
-	Source    string            `json:"source"`    // "user" | "project"
 	Disabled  bool              `json:"disabled"`
 	Invalid   string            `json:"invalid,omitempty"`
 	Command   string            `json:"command,omitempty"`
@@ -102,7 +100,7 @@ type mcpServerDetail struct {
 // mcpServerList builds the management view: configured entries joined with
 // live-registry state.
 func (s *Server) mcpServerList() ([]mcpServerInfo, error) {
-	managed, err := mcp.LoadManaged(s.curCwd())
+	managed, err := mcp.LoadManaged()
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +110,6 @@ func (s *Server) mcpServerList() ([]mcpServerInfo, error) {
 		info := mcpServerInfo{
 			Name:      m.Name,
 			Transport: m.Entry.Kind(),
-			Source:    m.Source,
 			Disabled:  m.Entry.Disabled,
 			Invalid:   m.Invalid,
 			Command:   m.Entry.Command,
@@ -192,7 +189,7 @@ func (s *Server) handleListMCPServers(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetMCPServer(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
-	managed, err := mcp.LoadManaged(s.curCwd())
+	managed, err := mcp.LoadManaged()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -213,7 +210,6 @@ func (s *Server) handleGetMCPServer(w http.ResponseWriter, r *http.Request) {
 	info := mcpServerInfo{
 		Name:      entry.Name,
 		Transport: entry.Entry.Kind(),
-		Source:    entry.Source,
 		Disabled:  entry.Entry.Disabled,
 		Invalid:   entry.Invalid,
 		Command:   entry.Entry.Command,
@@ -282,8 +278,8 @@ func (s *Server) handleGetMCPServer(w http.ResponseWriter, r *http.Request) {
 //
 // This is the only way to add a server through the API — the structured
 // single-server "Add Server" form was removed from the web UI in favor of
-// the mcp-creator skill, which edits ~/.octo/mcp.json (or a project's)
-// directly and isn't subject to this endpoint's command allowlist.
+// the mcp-creator skill, which edits ~/.octo/mcp.json directly and isn't
+// subject to this endpoint's command allowlist.
 func (s *Server) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Servers map[string]mcp.ServerEntry `json:"mcpServers"`
@@ -334,24 +330,18 @@ func (s *Server) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 	s.writeMCPServerList(w)
 }
 
-// userManagedServer resolves a path name to its managed entry, rejecting
-// project-level entries (read-only from the web UI). Writes the HTTP error
-// itself; the second return is false when the caller should stop.
-func (s *Server) userManagedServer(w http.ResponseWriter, name string) (mcp.ManagedServer, bool) {
-	managed, err := mcp.LoadManaged(s.curCwd())
+// lookupManagedServer resolves a path name to its managed entry. Writes the
+// HTTP error itself; the second return is false when the caller should stop.
+func (s *Server) lookupManagedServer(w http.ResponseWriter, name string) (mcp.ManagedServer, bool) {
+	managed, err := mcp.LoadManaged()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return mcp.ManagedServer{}, false
 	}
 	for _, m := range managed {
-		if m.Name != name {
-			continue
+		if m.Name == name {
+			return m, true
 		}
-		if m.Source != "user" {
-			writeError(w, http.StatusConflict, "project-level MCP servers are read-only here; edit .octo/mcp.json in the project")
-			return mcp.ManagedServer{}, false
-		}
-		return m, true
 	}
 	writeError(w, http.StatusNotFound, "mcp server not found")
 	return mcp.ManagedServer{}, false
@@ -365,7 +355,7 @@ func (s *Server) handleDeleteMCPServer(w http.ResponseWriter, r *http.Request) {
 	s.mcpMu.Lock()
 	defer s.mcpMu.Unlock()
 
-	if _, ok := s.userManagedServer(w, name); !ok {
+	if _, ok := s.lookupManagedServer(w, name); !ok {
 		return
 	}
 	if err := mcp.DeleteUserServer(name); err != nil {
@@ -384,7 +374,7 @@ func (s *Server) handleToggleMCPServer(w http.ResponseWriter, r *http.Request) {
 	s.mcpMu.Lock()
 	defer s.mcpMu.Unlock()
 
-	m, ok := s.userManagedServer(w, name)
+	m, ok := s.lookupManagedServer(w, name)
 	if !ok {
 		return
 	}
@@ -405,15 +395,13 @@ func (s *Server) handleToggleMCPServer(w http.ResponseWriter, r *http.Request) {
 
 // ─── POST /api/mcp/servers/{name}/reconnect ─────────────────────────────────
 
-// Reconnect works for any source (project entries too — it touches only the
-// live connection, not the config files).
 func (s *Server) handleReconnectMCPServer(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
 	s.mcpMu.Lock()
 	defer s.mcpMu.Unlock()
 
-	managed, err := mcp.LoadManaged(s.curCwd())
+	managed, err := mcp.LoadManaged()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -457,7 +445,7 @@ func (s *Server) handleReloadMCP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "tools are disabled on this server")
 		return
 	}
-	if err := app.SwapMCP(r.Context(), s.curCwd(), nil); err != nil {
+	if err := app.SwapMCP(r.Context(), nil); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

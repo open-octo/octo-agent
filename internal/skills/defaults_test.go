@@ -115,7 +115,7 @@ func TestDiscover_DefaultSkillSurfacesAndIsOverridable(t *testing.T) {
 	useUserRoot(t, userRoot)
 
 	// Default-only: worktree-isolate is discovered with source "default".
-	reg := Discover("")
+	reg := Discover()
 	s, ok := reg.Get("worktree-isolate")
 	if !ok {
 		t.Fatal("default worktree-isolate not discovered")
@@ -131,7 +131,7 @@ func TestDiscover_DefaultSkillSurfacesAndIsOverridable(t *testing.T) {
 	}
 	mustWrite(t, filepath.Join(dir, "SKILL.md"), "---\nname: worktree-isolate\ndescription: my override\n---\nbody")
 
-	reg = Discover("")
+	reg = Discover()
 	s, _ = reg.Get("worktree-isolate")
 	if s.Source != "user" || s.Description != "my override" {
 		t.Errorf("user skill should override default, got source=%q desc=%q", s.Source, s.Description)

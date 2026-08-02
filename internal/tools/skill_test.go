@@ -10,19 +10,21 @@ import (
 	"github.com/open-octo/octo-agent/internal/skills"
 )
 
-// discoverSkills builds a registry from a temp project dir holding the given
+// discoverSkills builds a registry from a temp $HOME holding the given user
 // skill (name → SKILL.md content) and restores the package state after.
 func setSkillsFor(t *testing.T, name, content string) {
 	t.Helper()
-	cwd := t.TempDir()
-	dir := filepath.Join(cwd, ".octo", "skills", name)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	dir := filepath.Join(home, ".octo", "skills", name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, skills.SkillFile), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	SetSkills(skills.Discover(cwd))
+	SetSkills(skills.Discover())
 	t.Cleanup(func() { SetSkills(nil) })
 }
 

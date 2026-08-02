@@ -3,7 +3,6 @@ package skills
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -36,7 +35,7 @@ func TestReload_PicksUpLateSkill(t *testing.T) {
 	userRoot := t.TempDir()
 	useUserRoot(t, userRoot)
 
-	r := Discover("")
+	r := Discover()
 	if _, ok := r.Get("latecomer"); ok {
 		t.Fatal("latecomer should not exist before it is written")
 	}
@@ -59,7 +58,7 @@ func TestReload_PicksUpLateSkill(t *testing.T) {
 
 func TestDiscover_Empty(t *testing.T) {
 	useUserRoot(t, filepath.Join(t.TempDir(), "nonexistent"))
-	r := Discover(filepath.Join(t.TempDir(), "alsogone"))
+	r := Discover()
 	if r.Len() != 0 {
 		t.Errorf("Len = %d, want 0", r.Len())
 	}
@@ -73,7 +72,7 @@ func TestDiscover_UserSkill(t *testing.T) {
 	useUserRoot(t, userRoot)
 	writeSkill(t, userRoot, "greet", "---\nname: Greeter\ndescription: Say hello nicely\n---\nBe warm and friendly.")
 
-	r := Discover("")
+	r := Discover()
 	s, ok := r.Get("greet")
 	if !ok {
 		t.Fatal("greet not discovered")
@@ -89,73 +88,6 @@ func TestDiscover_UserSkill(t *testing.T) {
 	}
 	if s.Source != "user" {
 		t.Errorf("Source = %q, want user", s.Source)
-	}
-}
-
-func TestDiscover_ProjectOverridesUser(t *testing.T) {
-	userRoot := t.TempDir()
-	useUserRoot(t, userRoot)
-	writeSkill(t, userRoot, "deploy", "---\ndescription: user version\n---\nuser body")
-
-	cwd := t.TempDir()
-	writeSkill(t, filepath.Join(cwd, ".octo", "skills"), "deploy", "---\ndescription: project version\n---\nproject body")
-
-	r := Discover(cwd)
-	if r.Len() != 1 {
-		t.Fatalf("Len = %d, want 1 (same name should collapse)", r.Len())
-	}
-	s, _ := r.Get("deploy")
-	if s.Description != "project version" || s.Source != "project" {
-		t.Errorf("project did not override user: %+v", s)
-	}
-}
-
-// When cwd is the home directory itself, filepath.Join(cwd, ".octo/skills")
-// resolves to the exact same directory as userSkillsRoot(). Skills there must
-// stay labeled "user", not get relabeled "project" by scanning the same
-// directory a second time.
-func TestDiscover_CwdIsHomeDoesNotRelabelAsProject(t *testing.T) {
-	home := t.TempDir()
-	useUserRoot(t, filepath.Join(home, ".octo", "skills"))
-	writeSkill(t, filepath.Join(home, ".octo", "skills"), "greet", "---\ndescription: hi\n---\nbody")
-
-	r := Discover(home)
-	if r.Len() != 1 {
-		t.Fatalf("Len = %d, want 1", r.Len())
-	}
-	s, _ := r.Get("greet")
-	if s.Source != "user" {
-		t.Errorf("Source = %q, want user (cwd == home must not double-count as project)", s.Source)
-	}
-}
-
-// Same collision as TestDiscover_CwdIsHomeDoesNotRelabelAsProject, but the
-// home directory is reached through a symlink while cwd is passed as the
-// resolved real path — e.g. a network home mount, where os.Getwd()'s
-// syscall fallback (taken when $PWD is unset, as under a process
-// supervisor) returns the resolved path but userSkillsRoot's
-// os.UserHomeDir() returns $HOME verbatim. A raw string comparison would see
-// two different strings for the same directory.
-func TestDiscover_CwdIsHomeDoesNotRelabelAsProject_ThroughSymlink(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlinks require elevated privileges on windows")
-	}
-	real := t.TempDir()
-	root := t.TempDir()
-	link := filepath.Join(root, "home-link")
-	if err := os.Symlink(real, link); err != nil {
-		t.Fatal(err)
-	}
-	useUserRoot(t, filepath.Join(link, ".octo", "skills"))
-	writeSkill(t, filepath.Join(link, ".octo", "skills"), "greet", "---\ndescription: hi\n---\nbody")
-
-	r := Discover(real)
-	if r.Len() != 1 {
-		t.Fatalf("Len = %d, want 1", r.Len())
-	}
-	s, _ := r.Get("greet")
-	if s.Source != "user" {
-		t.Errorf("Source = %q, want user (symlinked home == cwd must not double-count as project)", s.Source)
 	}
 }
 
@@ -178,7 +110,7 @@ func TestDiscover_SkipsMalformed(t *testing.T) {
 	// One good skill.
 	writeSkill(t, userRoot, "ok", "---\ndescription: works\n---\nbody")
 
-	r := Discover("")
+	r := Discover()
 	if r.Len() != 1 {
 		t.Fatalf("Len = %d, want 1 (only 'ok' is well-formed)", r.Len())
 	}
@@ -203,7 +135,7 @@ metadata:
 ---
 Do the thing.`)
 
-	r := Discover("")
+	r := Discover()
 	s, ok := r.Get("cc")
 	if !ok {
 		t.Fatal("cc not discovered — nested metadata block likely broke parsing")
@@ -216,20 +148,21 @@ Do the thing.`)
 	}
 }
 
-func TestList_ProjectBeforeUserThenByName(t *testing.T) {
+func TestList_UserBeforeDefaultThenByName(t *testing.T) {
+	defaultRoot := t.TempDir()
+	useDefaultRoot(t, defaultRoot)
+	writeSkill(t, defaultRoot, "yak", "---\ndescription: d\n---\nb")
+
 	userRoot := t.TempDir()
 	useUserRoot(t, userRoot)
 	writeSkill(t, userRoot, "zebra", "---\ndescription: u\n---\nb")
 	writeSkill(t, userRoot, "alpha", "---\ndescription: u\n---\nb")
 
-	cwd := t.TempDir()
-	writeSkill(t, filepath.Join(cwd, ".octo", "skills"), "yak", "---\ndescription: p\n---\nb")
-
 	got := make([]string, 0)
-	for _, s := range Discover(cwd).List() {
+	for _, s := range Discover().List() {
 		got = append(got, s.Name)
 	}
-	want := []string{"yak", "alpha", "zebra"} // project first, then user by name
+	want := []string{"alpha", "zebra", "yak"} // user first (by name), then default
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("List order = %v, want %v", got, want)
 	}
@@ -240,7 +173,7 @@ func TestRenderManifest(t *testing.T) {
 	useUserRoot(t, userRoot)
 	writeSkill(t, userRoot, "greet", "---\ndescription: Say hello\n---\nbody")
 
-	m := RenderManifest(Discover(""))
+	m := RenderManifest(Discover())
 	if !strings.Contains(m, "# Available skills") {
 		t.Error("manifest missing header")
 	}
@@ -273,7 +206,7 @@ func TestRenderSkill(t *testing.T) {
 		t.Errorf("body should follow the header; got:\n%s", got)
 	}
 
-	// User/project skills get the Claude Code → octo bridging note; octo-native
+	// User skills get the Claude Code → octo bridging note; octo-native
 	// defaults don't.
 	u := Skill{Name: "ext", Body: "B", Dir: "/d", Source: "user"}
 	uGot := RenderSkill(u, "")
@@ -297,7 +230,7 @@ func TestSetDisabled(t *testing.T) {
 	writeSkill(t, userRoot, "alpha", "---\ndescription: a\n---\nbody")
 	writeSkill(t, userRoot, "beta", "---\ndescription: b\n---\nbody")
 
-	r := Discover("")
+	r := Discover()
 	if r.Len() != 2 {
 		t.Fatalf("Len = %d, want 2", r.Len())
 	}
@@ -353,7 +286,7 @@ func TestSetDisabled_ReloadPreserves(t *testing.T) {
 	useUserRoot(t, userRoot)
 	writeSkill(t, userRoot, "keep", "---\ndescription: k\n---\nbody")
 
-	r := Discover("")
+	r := Discover()
 	r.SetDisabled([]string{"keep"})
 	if r.Len() != 0 {
 		t.Fatalf("Len = %d, want 0", r.Len())

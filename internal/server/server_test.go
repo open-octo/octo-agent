@@ -764,7 +764,7 @@ func mustServer(t *testing.T, cfg Config) *Server {
 		mux:                 http.NewServeMux(),
 		model:               "stub-model",
 		system:              "",
-		skillReg:            skills.Discover(""),
+		skillReg:            skills.Discover(),
 		skillsManifest:      "",
 		cwd:                 "",
 		envCtx:              "",
@@ -1152,7 +1152,7 @@ func TestHandleToggleSkill(t *testing.T) {
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	// Replace the skillReg with one that sees our temp skill.
-	srv.skillReg = skills.Discover("")
+	srv.skillReg = skills.Discover()
 	srv.skillsManifest = skills.RenderManifest(srv.skillReg)
 
 	// Toggle off (disable).

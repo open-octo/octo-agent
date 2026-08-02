@@ -87,9 +87,12 @@ func (f *captureSpawner) Continue(_ context.Context, _, _ string) (SpawnResult, 
 	return SpawnResult{}, nil
 }
 
-func writeSkillMD(t *testing.T, cwd, name, desc, body string) {
+// writeSkillMD writes a user-level SKILL.md under home/.octo/skills/<name>.
+// The caller must t.Setenv HOME/USERPROFILE to home before calling
+// skills.Discover.
+func writeSkillMD(t *testing.T, home, name, desc, body string) {
 	t.Helper()
-	dir := filepath.Join(cwd, ".octo", "skills", name)
+	dir := filepath.Join(home, ".octo", "skills", name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -111,10 +114,12 @@ func TestDispatchWorkflowSkill_Routing(t *testing.T) {
 	saveRec("wf_c_dl")   // browser only
 	saveRec("wf_c_proc") // also an md skill below → ambiguous
 
-	cwd := t.TempDir()
-	writeSkillMD(t, cwd, "wf_c_proc", "process a table", "do the thing")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	writeSkillMD(t, home, "wf_c_proc", "process a table", "do the thing")
 	prev := activeSkills
-	SetSkills(skills.Discover(cwd))
+	SetSkills(skills.Discover())
 	defer SetSkills(prev)
 
 	fs := &captureSpawner{reply: "done"}
@@ -174,10 +179,12 @@ func TestDispatchWorkflowRecording_NotFound(t *testing.T) {
 
 func TestDispatchWorkflowSkill_MD(t *testing.T) {
 	t.Setenv("OCTO_BROWSER_SKILLS_DIR", t.TempDir()) // no browser recordings
-	cwd := t.TempDir()
-	writeSkillMD(t, cwd, "wf_c_only", "merge excels", "MERGE THE FILES")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	writeSkillMD(t, home, "wf_c_only", "merge excels", "MERGE THE FILES")
 	prev := activeSkills
-	SetSkills(skills.Discover(cwd))
+	SetSkills(skills.Discover())
 	defer SetSkills(prev)
 
 	// No schema → free-text reply JSON-encoded to a string; body + inputs reach

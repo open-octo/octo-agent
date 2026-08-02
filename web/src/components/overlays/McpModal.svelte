@@ -36,12 +36,9 @@
       // Import silently overwrites a same-named entry in ~/.octo/mcp.json —
       // fine for a genuine re-paste, but this is now the only structured UI
       // path for adding even a single server, so warn before clobbering one
-      // that already exists (project-scoped names don't collide: they live
-      // in a different file this never touches).
-      const existingUserNames = new Set(
-        ($mcpServers as any[]).filter(s => s.source === 'user').map(s => s.name)
-      )
-      const collisions = Object.keys(servers).filter(name => existingUserNames.has(name))
+      // that already exists.
+      const existingNames = new Set(($mcpServers as any[]).map(s => s.name))
+      const collisions = Object.keys(servers).filter(name => existingNames.has(name))
       if (collisions.length > 0 && !(await confirmDialog(tr('mcp.confirm_import_overwrite').replace('{names}', collisions.join(', '))))) {
         submitting = false
         return

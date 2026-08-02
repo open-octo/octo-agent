@@ -118,23 +118,13 @@ func isAllowedURLScheme(rawURL string) bool {
 	return strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://")
 }
 
-// LoadConfig reads + merges the user-global config and the project-local
-// config, returning the merged result.
+// LoadConfig reads the user-global MCP server config at ~/.octo/mcp.json.
 //
-//   - User-global lives at ~/.octo/mcp.json. Always loaded if present.
-//   - Project-local lives at <projectDir>/.octo/mcp.json. Loaded when
-//     projectDir is non-empty AND the file exists.
-//
-// Merge rule: project-local entries OVERRIDE user-global entries with the
-// same name. This matches the skills layer's same-name precedence so
-// users can keep a shared user-global config and tweak per-project.
-//
-// Disabled entries are filtered out at load time. Missing files are not an
-// error — they produce a zero-server config.
-func LoadConfig(projectDir string) (*Config, error) {
+// Disabled entries are filtered out at load time. A missing file is not an
+// error — it produces a zero-server config.
+func LoadConfig() (*Config, error) {
 	merged := &Config{Servers: map[string]ServerEntry{}}
 
-	// 1. User-global.
 	if home, err := os.UserHomeDir(); err == nil {
 		userPath := filepath.Join(home, ".octo", "mcp.json")
 		if cfg, err := readConfigFile(userPath); err != nil {
@@ -146,19 +136,7 @@ func LoadConfig(projectDir string) (*Config, error) {
 		}
 	}
 
-	// 2. Project-local (overrides user-global on name collision).
-	if projectDir != "" {
-		projPath := filepath.Join(projectDir, ".octo", "mcp.json")
-		if cfg, err := readConfigFile(projPath); err != nil {
-			return nil, err
-		} else if cfg != nil {
-			for name, e := range cfg.Servers {
-				merged.Servers[name] = e
-			}
-		}
-	}
-
-	// 3. Filter disabled + validate the rest.
+	// Filter disabled + validate the rest.
 	for name, e := range merged.Servers {
 		if e.Disabled {
 			delete(merged.Servers, name)

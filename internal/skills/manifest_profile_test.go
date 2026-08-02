@@ -19,7 +19,7 @@ func discoverWithDefaults(t *testing.T) *Registry {
 	if err := MaterializeDefaults("test"); err != nil {
 		t.Fatal(err)
 	}
-	return Discover(t.TempDir())
+	return Discover()
 }
 
 func TestManifestForProfile_NoProfileReturnsEmpty(t *testing.T) {

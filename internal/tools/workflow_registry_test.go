@@ -1,33 +1,30 @@
 package tools
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/trash"
 )
 
-// useWorkflowRoots points the default/user/project registries at temp dirs
-// for the test. The default root is materialized from the real embedded
-// workflow scripts (not left empty), so tests exercise the same disk-backed
-// "default" tier production uses — deterministically, rather than depending
-// on whatever might already be materialized on the machine running the test.
-func useWorkflowRoots(t *testing.T, userDir, projectDir string) {
+// useWorkflowRoots points the default/user registries at temp dirs for the
+// test. The default root is materialized from the real embedded workflow
+// scripts (not left empty), so tests exercise the same disk-backed "default"
+// tier production uses — deterministically, rather than depending on
+// whatever might already be materialized on the machine running the test.
+func useWorkflowRoots(t *testing.T, userDir string) {
 	t.Helper()
-	ou, op, od := userWorkflowsRoot, projectWorkflowsRoot, defaultWorkflowsRoot
+	ou, od := userWorkflowsRoot, defaultWorkflowsRoot
 	dflt := t.TempDir()
 	if err := materializeDefaultWorkflows(dflt, "test", true); err != nil {
 		t.Fatalf("materialize default workflows: %v", err)
 	}
 	userWorkflowsRoot = func() string { return userDir }
-	projectWorkflowsRoot = func(_ string) string { return projectDir }
 	defaultWorkflowsRoot = func() string { return dflt }
-	t.Cleanup(func() { userWorkflowsRoot, projectWorkflowsRoot, defaultWorkflowsRoot = ou, op, od })
+	t.Cleanup(func() { userWorkflowsRoot, defaultWorkflowsRoot = ou, od })
 }
 
 func writeWorkflowFile(t *testing.T, root, name, content string) {
@@ -42,10 +39,10 @@ func writeWorkflowFile(t *testing.T, root, name, content string) {
 
 func TestLookupWorkflow_LoadsAndParsesDescription(t *testing.T) {
 	user := t.TempDir()
-	useWorkflowRoots(t, user, "")
+	useWorkflowRoots(t, user)
 	writeWorkflowFile(t, user, "bug-hunt.rb", "# @description Find and verify bugs\nagent(args[\"q\"])\n")
 
-	w, ok := lookupWorkflow(context.Background(), "bug-hunt")
+	w, ok := lookupWorkflow("bug-hunt")
 	if !ok {
 		t.Fatal("lookupWorkflow: not found")
 	}
@@ -117,71 +114,13 @@ func TestWorkflowParams_NoneWhenNoParamComments(t *testing.T) {
 	}
 }
 
-func TestLookupWorkflow_ProjectOverridesUser(t *testing.T) {
-	user, project := t.TempDir(), t.TempDir()
-	useWorkflowRoots(t, user, project)
-	writeWorkflowFile(t, user, "dup.rb", "# @description user version\n\"u\"\n")
-	writeWorkflowFile(t, project, "dup.rb", "# @description project version\n\"p\"\n")
-
-	w, ok := lookupWorkflow(context.Background(), "dup")
-	if !ok || w.description != "project version" {
-		t.Errorf("workflow = %+v, ok = %v; want project version to win", w, ok)
-	}
-}
-
-// When cwd is the home directory itself, projectWorkflowsRoot falls back to
-// cwd and resolves to the exact same path as userWorkflowsRoot. Workflows
-// there must stay labeled "user", not get relabeled "project" by scanning
-// the same directory a second time.
-func TestLookupWorkflow_SameUserAndProjectRootStaysUser(t *testing.T) {
-	home := t.TempDir()
-	useWorkflowRoots(t, home, home)
-	writeWorkflowFile(t, home, "solo.rb", "# @description only copy\n\"x\"\n")
-
-	w, ok := lookupWorkflow(context.Background(), "solo")
-	if !ok {
-		t.Fatal("lookupWorkflow: not found")
-	}
-	if w.source != "user" {
-		t.Errorf("source = %q, want user (cwd == home must not double-count as project)", w.source)
-	}
-}
-
-// Same collision as TestLookupWorkflow_SameUserAndProjectRootStaysUser, but
-// the two roots are reached through a symlink on one side only — e.g. a
-// network home mount, where os.Getwd()'s syscall fallback (taken when $PWD
-// is unset, as under a process supervisor) returns the resolved path while
-// userWorkflowsRoot's os.UserHomeDir() returns $HOME verbatim. A raw string
-// comparison would see two different strings for the same directory.
-func TestLookupWorkflow_SameUserAndProjectRootStaysUser_ThroughSymlink(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlinks require elevated privileges on windows")
-	}
-	real := t.TempDir()
-	root := t.TempDir()
-	link := filepath.Join(root, "home-link")
-	if err := os.Symlink(real, link); err != nil {
-		t.Fatal(err)
-	}
-	useWorkflowRoots(t, link, real)
-	writeWorkflowFile(t, real, "solo.rb", "# @description only copy\n\"x\"\n")
-
-	w, ok := lookupWorkflow(context.Background(), "solo")
-	if !ok {
-		t.Fatal("lookupWorkflow: not found")
-	}
-	if w.source != "user" {
-		t.Errorf("source = %q, want user (symlinked home == cwd must not double-count as project)", w.source)
-	}
-}
-
 func TestLookupWorkflow_ParsesParams(t *testing.T) {
 	user := t.TempDir()
-	useWorkflowRoots(t, user, "")
+	useWorkflowRoots(t, user)
 	writeWorkflowFile(t, user, "migrate.rb",
 		"# @description Migrate\n# @param target required: Path to migrate\nagent(args[\"target\"])\n")
 
-	w, ok := lookupWorkflow(context.Background(), "migrate")
+	w, ok := lookupWorkflow("migrate")
 	if !ok {
 		t.Fatal("lookupWorkflow: not found")
 	}
@@ -191,20 +130,20 @@ func TestLookupWorkflow_ParsesParams(t *testing.T) {
 }
 
 func TestLookupWorkflow_UnknownName(t *testing.T) {
-	useWorkflowRoots(t, t.TempDir(), t.TempDir())
-	if _, ok := lookupWorkflow(context.Background(), "nope"); ok {
+	useWorkflowRoots(t, t.TempDir())
+	if _, ok := lookupWorkflow("nope"); ok {
 		t.Error("lookupWorkflow returned ok for unknown name")
 	}
 }
 
 func TestListWorkflows_SortedUnionOfRoots(t *testing.T) {
-	user, project := t.TempDir(), t.TempDir()
-	useWorkflowRoots(t, user, project)
+	user := t.TempDir()
+	useWorkflowRoots(t, user)
 	writeWorkflowFile(t, user, "zeta.rb", "\"z\"\n")
-	writeWorkflowFile(t, project, "alpha.rb", "\"a\"\n")
+	writeWorkflowFile(t, user, "alpha.rb", "\"a\"\n")
 	writeWorkflowFile(t, user, "ignored.txt", "not a workflow")
 
-	got := listWorkflows(context.Background())
+	got := listWorkflows()
 	names := make([]string, len(got))
 	for i, w := range got {
 		names[i] = w.name
@@ -234,8 +173,8 @@ func containsName(names []string, want string) bool {
 // `# @param`, so the workflow tool prompts for it up front instead of silently
 // mapping a non-git "this repository" default.
 func TestLookupWorkflow_ParallelUnderstandDeclaresRequiredTarget(t *testing.T) {
-	useWorkflowRoots(t, "", "")
-	w, ok := lookupWorkflow(context.Background(), "parallel-understand")
+	useWorkflowRoots(t, "")
+	w, ok := lookupWorkflow("parallel-understand")
 	if !ok {
 		t.Fatal("parallel-understand not found")
 	}
@@ -249,8 +188,8 @@ func TestLookupWorkflow_ParallelUnderstandDeclaresRequiredTarget(t *testing.T) {
 // `# @param`, so the workflow tool prompts for it up front instead of
 // silently triaging the current directory.
 func TestLookupWorkflow_DailyTriageDeclaresRequiredRepo(t *testing.T) {
-	useWorkflowRoots(t, "", "")
-	w, ok := lookupWorkflow(context.Background(), "daily-triage")
+	useWorkflowRoots(t, "")
+	w, ok := lookupWorkflow("daily-triage")
 	if !ok {
 		t.Fatal("daily-triage not found")
 	}
@@ -264,8 +203,8 @@ func TestLookupWorkflow_DailyTriageDeclaresRequiredRepo(t *testing.T) {
 // `# @param`, so the workflow tool prompts for it up front instead of
 // batch-migrate's own defensive empty-string check firing after a wasted run.
 func TestLookupWorkflow_BatchMigrateDeclaresRequiredChange(t *testing.T) {
-	useWorkflowRoots(t, "", "")
-	w, ok := lookupWorkflow(context.Background(), "batch-migrate")
+	useWorkflowRoots(t, "")
+	w, ok := lookupWorkflow("batch-migrate")
 	if !ok {
 		t.Fatal("batch-migrate not found")
 	}
@@ -275,10 +214,10 @@ func TestLookupWorkflow_BatchMigrateDeclaresRequiredChange(t *testing.T) {
 }
 
 func TestLookupWorkflow_EmbeddedDefaultAlwaysAvailable(t *testing.T) {
-	// No user/project roots: every built-in preset must still resolve.
-	useWorkflowRoots(t, "", "")
+	// No user root: every built-in preset must still resolve.
+	useWorkflowRoots(t, "")
 	for _, name := range []string{"parallel-understand", "batch-migrate", "daily-triage"} {
-		w, ok := lookupWorkflow(context.Background(), name)
+		w, ok := lookupWorkflow(name)
 		if !ok {
 			t.Errorf("embedded default %q not found", name)
 			continue
@@ -291,81 +230,18 @@ func TestLookupWorkflow_EmbeddedDefaultAlwaysAvailable(t *testing.T) {
 
 func TestLookupWorkflow_UserOverridesEmbeddedDefault(t *testing.T) {
 	user := t.TempDir()
-	useWorkflowRoots(t, user, "")
+	useWorkflowRoots(t, user)
 	writeWorkflowFile(t, user, "batch-migrate.rb", "# @description my override\n\"x\"\n")
 
-	w, ok := lookupWorkflow(context.Background(), "batch-migrate")
+	w, ok := lookupWorkflow("batch-migrate")
 	if !ok || w.description != "my override" {
 		t.Errorf("workflow = %+v, ok = %v; want the user file to override the embedded default", w, ok)
 	}
 }
 
-// assertProjectWorkflowsRootSeesCWDFallback verifies that invoking fn with a
-// WithWorkingDir-stamped ctx resolves the project-level registry from that
-// stamped directory, and from the process CWD when ctx carries none — the
-// shared "does this ctx-aware entrypoint fall back correctly" check needed by
-// both lookupWorkflow (workflow_registry_test.go) and WorkflowSaveTool.Execute
-// (workflow_save_test.go), which each depend on the exact same guarantee.
-func assertProjectWorkflowsRootSeesCWDFallback(t *testing.T, fn func(ctx context.Context)) {
-	t.Helper()
-	ou, op := userWorkflowsRoot, projectWorkflowsRoot
-	var seenCWD string
-	userWorkflowsRoot = func() string { return "" }
-	projectWorkflowsRoot = func(cwd string) string {
-		seenCWD = cwd
-		return t.TempDir() // any writable root; its content isn't asserted here
-	}
-	t.Cleanup(func() { userWorkflowsRoot, projectWorkflowsRoot = ou, op })
-
-	stamped := t.TempDir()
-	fn(WithWorkingDir(context.Background(), stamped))
-	if seenCWD != stamped {
-		t.Errorf("projectWorkflowsRoot got cwd %q, want the stamped dir %q", seenCWD, stamped)
-	}
-
-	// Without a stamped working dir, the process CWD fallback should be passed.
-	seenCWD = ""
-	otherDir := t.TempDir()
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(otherDir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chdir(origDir); err != nil {
-			t.Error(err)
-		}
-	})
-	fn(context.Background())
-	resolvedSeen, err := filepath.EvalSymlinks(seenCWD)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolvedOther, err := filepath.EvalSymlinks(otherDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolvedSeen != resolvedOther {
-		t.Errorf("projectWorkflowsRoot fallback cwd = %q, want %q", resolvedSeen, resolvedOther)
-	}
-}
-
-func TestLookupWorkflow_UsesContextWorkingDir(t *testing.T) {
-	// When the process CWD is not inside the project but the context carries a
-	// working directory, lookupWorkflow should resolve project-level workflows
-	// from that directory (content-parsing itself is already covered by
-	// TestLookupWorkflow_LoadsAndParsesDescription; this test is only about
-	// which directory gets used).
-	assertProjectWorkflowsRootSeesCWDFallback(t, func(ctx context.Context) {
-		lookupWorkflow(ctx, "whatever")
-	})
-}
-
 func TestGetNamedWorkflow_FoundAndNotFound(t *testing.T) {
 	user := t.TempDir()
-	useWorkflowRoots(t, user, "")
+	useWorkflowRoots(t, user)
 	writeWorkflowFile(t, user, "release-notes.rb", "# @description Draft release notes\n\"ok\"\n")
 
 	detail, ok := GetNamedWorkflow("release-notes")
@@ -382,7 +258,7 @@ func TestGetNamedWorkflow_FoundAndNotFound(t *testing.T) {
 }
 
 func TestDeleteWorkflow_RefusesBuiltin(t *testing.T) {
-	useWorkflowRoots(t, "", "")
+	useWorkflowRoots(t, "")
 	err := DeleteWorkflow("batch-migrate")
 	if err == nil {
 		t.Fatal("DeleteWorkflow: want error deleting a built-in workflow, got nil")
@@ -393,7 +269,7 @@ func TestDeleteWorkflow_RefusesBuiltin(t *testing.T) {
 }
 
 func TestDeleteWorkflow_UnknownName(t *testing.T) {
-	useWorkflowRoots(t, t.TempDir(), t.TempDir())
+	useWorkflowRoots(t, t.TempDir())
 	err := DeleteWorkflow("does-not-exist")
 	if err == nil {
 		t.Fatal("DeleteWorkflow: want error for an unknown name, got nil")
@@ -409,7 +285,7 @@ func TestDeleteWorkflow_RemovesUserFileAndTrashesIt(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 
 	user := t.TempDir()
-	useWorkflowRoots(t, user, "")
+	useWorkflowRoots(t, user)
 	writeWorkflowFile(t, user, "scratch.rb", "# @description Throwaway\n\"ok\"\n")
 	path := filepath.Join(user, "scratch.rb")
 
@@ -440,14 +316,11 @@ func TestDeleteWorkflow_RemovesUserFileAndTrashesIt(t *testing.T) {
 	}
 }
 
-func TestUserAndProjectWorkflowsRoot_ExportPrivateResolvers(t *testing.T) {
-	user, project := t.TempDir(), t.TempDir()
-	useWorkflowRoots(t, user, project)
+func TestUserWorkflowsRoot_ExportsPrivateResolver(t *testing.T) {
+	user := t.TempDir()
+	useWorkflowRoots(t, user)
 
 	if got := UserWorkflowsRoot(); got != user {
 		t.Errorf("UserWorkflowsRoot() = %q, want %q", got, user)
-	}
-	if got := ProjectWorkflowsRoot("/whatever/cwd"); got != project {
-		t.Errorf("ProjectWorkflowsRoot() = %q, want %q", got, project)
 	}
 }

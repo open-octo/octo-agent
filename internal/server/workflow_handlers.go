@@ -30,8 +30,8 @@ func (s *Server) handleGetWorkflow(w http.ResponseWriter, r *http.Request) {
 
 // ─── DELETE /api/workflows/{name} ───────────────────────────────────────────
 
-// handleDeleteWorkflow removes a user- or project-level workflow file.
-// Built-in (source=default) workflows can't be deleted.
+// handleDeleteWorkflow removes a user-level workflow file. Built-in
+// (source=default) workflows can't be deleted.
 func (s *Server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {

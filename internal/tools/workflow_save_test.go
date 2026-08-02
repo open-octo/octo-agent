@@ -2,16 +2,15 @@ package tools
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestWorkflowSave_ProjectScopeRoundTrips(t *testing.T) {
-	user, project := t.TempDir(), t.TempDir()
-	useWorkflowRoots(t, user, project)
+func TestWorkflowSave_RoundTrips(t *testing.T) {
+	user := t.TempDir()
+	useWorkflowRoots(t, user)
 
 	res, err := WorkflowSaveTool{}.Execute(context.Background(), "c", map[string]any{
 		"name":        "bug-hunt",
@@ -25,8 +24,7 @@ func TestWorkflowSave_ProjectScopeRoundTrips(t *testing.T) {
 		t.Errorf("result = %q", res.Text)
 	}
 
-	// Default scope is project: the file lands in the project root.
-	b, err := os.ReadFile(filepath.Join(project, "bug-hunt.rb"))
+	b, err := os.ReadFile(filepath.Join(user, "bug-hunt.rb"))
 	if err != nil {
 		t.Fatalf("read saved file: %v", err)
 	}
@@ -35,31 +33,15 @@ func TestWorkflowSave_ProjectScopeRoundTrips(t *testing.T) {
 	}
 
 	// And it's immediately resolvable by name.
-	w, ok := lookupWorkflow(context.Background(), "bug-hunt")
+	w, ok := lookupWorkflow("bug-hunt")
 	if !ok || w.description != "Find and verify bugs" {
 		t.Errorf("lookupWorkflow = %+v, ok = %v", w, ok)
 	}
 }
 
-func TestWorkflowSave_ProjectScopeUsesContextWorkingDir(t *testing.T) {
-	// When the server process is not in the project directory but the context
-	// carries a working directory, project-scope saves should land in the
-	// context's project root, not the process CWD.
-	n := 0
-	assertProjectWorkflowsRootSeesCWDFallback(t, func(ctx context.Context) {
-		n++
-		if _, err := (WorkflowSaveTool{}).Execute(ctx, "c", map[string]any{
-			"name":   fmt.Sprintf("ctx-wf-%d", n),
-			"script": `"ok"`,
-		}); err != nil {
-			t.Fatalf("Execute: %v", err)
-		}
-	})
-}
-
 func TestWorkflowSave_WritesParamComments(t *testing.T) {
-	user, project := t.TempDir(), t.TempDir()
-	useWorkflowRoots(t, user, project)
+	user := t.TempDir()
+	useWorkflowRoots(t, user)
 
 	_, err := WorkflowSaveTool{}.Execute(context.Background(), "c", map[string]any{
 		"name":        "migrate",
@@ -74,7 +56,7 @@ func TestWorkflowSave_WritesParamComments(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	b, err := os.ReadFile(filepath.Join(project, "migrate.rb"))
+	b, err := os.ReadFile(filepath.Join(user, "migrate.rb"))
 	if err != nil {
 		t.Fatalf("read saved file: %v", err)
 	}
@@ -86,7 +68,7 @@ func TestWorkflowSave_WritesParamComments(t *testing.T) {
 		t.Errorf("file = %q, want an optional @param line", content)
 	}
 
-	w, ok := lookupWorkflow(context.Background(), "migrate")
+	w, ok := lookupWorkflow("migrate")
 	if !ok {
 		t.Fatal("lookupWorkflow: not found")
 	}
@@ -105,8 +87,8 @@ func TestWorkflowSave_WritesParamComments(t *testing.T) {
 // as an optional param with the description intact — not silently flip to
 // required with the leading word eaten.
 func TestWorkflowSave_ParamDescriptionStartingWithRequiredWordRoundTrips(t *testing.T) {
-	user, project := t.TempDir(), t.TempDir()
-	useWorkflowRoots(t, user, project)
+	user := t.TempDir()
+	useWorkflowRoots(t, user)
 
 	_, err := WorkflowSaveTool{}.Execute(context.Background(), "c", map[string]any{
 		"name":   "verify-step",
@@ -119,7 +101,7 @@ func TestWorkflowSave_ParamDescriptionStartingWithRequiredWordRoundTrips(t *test
 		t.Fatalf("Execute: %v", err)
 	}
 
-	w, ok := lookupWorkflow(context.Background(), "verify-step")
+	w, ok := lookupWorkflow("verify-step")
 	if !ok {
 		t.Fatal("lookupWorkflow: not found")
 	}
@@ -141,8 +123,8 @@ func TestWorkflowSave_ParamDescriptionStartingWithRequiredWordRoundTrips(t *test
 // corrupting leadingComments' parse (and, worse, could be read as literal
 // script by the mruby interpreter that follows the header).
 func TestWorkflowSave_SanitizesEmbeddedNewlines(t *testing.T) {
-	user, project := t.TempDir(), t.TempDir()
-	useWorkflowRoots(t, user, project)
+	user := t.TempDir()
+	useWorkflowRoots(t, user)
 
 	_, err := WorkflowSaveTool{}.Execute(context.Background(), "c", map[string]any{
 		"name":        "injected",
@@ -156,7 +138,7 @@ func TestWorkflowSave_SanitizesEmbeddedNewlines(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	b, err := os.ReadFile(filepath.Join(project, "injected.rb"))
+	b, err := os.ReadFile(filepath.Join(user, "injected.rb"))
 	if err != nil {
 		t.Fatalf("read saved file: %v", err)
 	}
@@ -171,7 +153,7 @@ func TestWorkflowSave_SanitizesEmbeddedNewlines(t *testing.T) {
 		}
 	}
 
-	w, ok := lookupWorkflow(context.Background(), "injected")
+	w, ok := lookupWorkflow("injected")
 	if !ok {
 		t.Fatal("lookupWorkflow: not found")
 	}
@@ -181,7 +163,7 @@ func TestWorkflowSave_SanitizesEmbeddedNewlines(t *testing.T) {
 }
 
 func TestWorkflowSave_RejectsBadParamName(t *testing.T) {
-	useWorkflowRoots(t, t.TempDir(), t.TempDir())
+	useWorkflowRoots(t, t.TempDir())
 	_, err := WorkflowSaveTool{}.Execute(context.Background(), "c", map[string]any{
 		"name":   "bad-param",
 		"script": `"x"`,
@@ -192,24 +174,8 @@ func TestWorkflowSave_RejectsBadParamName(t *testing.T) {
 	}
 }
 
-func TestWorkflowSave_UserScope(t *testing.T) {
-	user, project := t.TempDir(), t.TempDir()
-	useWorkflowRoots(t, user, project)
-
-	if _, err := (WorkflowSaveTool{}).Execute(context.Background(), "c", map[string]any{
-		"name":   "shared",
-		"script": `"x"`,
-		"scope":  "user",
-	}); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(user, "shared.rb")); err != nil {
-		t.Errorf("expected file in user root: %v", err)
-	}
-}
-
 func TestWorkflowSave_RejectsBadName(t *testing.T) {
-	useWorkflowRoots(t, t.TempDir(), t.TempDir())
+	useWorkflowRoots(t, t.TempDir())
 	for _, bad := range []string{"../escape", "Has Space", "UPPER", ""} {
 		_, err := WorkflowSaveTool{}.Execute(context.Background(), "c", map[string]any{
 			"name":   bad,
@@ -222,8 +188,8 @@ func TestWorkflowSave_RejectsBadName(t *testing.T) {
 }
 
 func TestWorkflowSave_OverwriteReported(t *testing.T) {
-	user, project := t.TempDir(), t.TempDir()
-	useWorkflowRoots(t, user, project)
+	user := t.TempDir()
+	useWorkflowRoots(t, user)
 	args := map[string]any{"name": "dup", "script": `"x"`}
 
 	if _, err := (WorkflowSaveTool{}).Execute(context.Background(), "c", args); err != nil {

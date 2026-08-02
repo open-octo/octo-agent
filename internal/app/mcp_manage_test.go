@@ -73,7 +73,7 @@ func TestSwapMCP_InstallsThenClears(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := SwapMCP(ctx, t.TempDir(), io.Discard); err != nil {
+	if err := SwapMCP(ctx, io.Discard); err != nil {
 		t.Fatalf("SwapMCP: %v", err)
 	}
 	reg := tools.ActiveMCPRegistry()
@@ -84,7 +84,7 @@ func TestSwapMCP_InstallsThenClears(t *testing.T) {
 	// A server that fails to connect must still leave the registry installed
 	// (carrying the error) — that's what the management UI reads.
 	writeUserMCPConfig(t, home, `{"mcpServers": {"dead": {"url": "http://127.0.0.1:1"}}}`)
-	if err := SwapMCP(ctx, t.TempDir(), io.Discard); err != nil {
+	if err := SwapMCP(ctx, io.Discard); err != nil {
 		t.Fatalf("SwapMCP: %v", err)
 	}
 	reg = tools.ActiveMCPRegistry()
@@ -97,7 +97,7 @@ func TestSwapMCP_InstallsThenClears(t *testing.T) {
 
 	// Zero servers configured clears the registry.
 	writeUserMCPConfig(t, home, `{"mcpServers": {}}`)
-	if err := SwapMCP(ctx, t.TempDir(), io.Discard); err != nil {
+	if err := SwapMCP(ctx, io.Discard); err != nil {
 		t.Fatalf("SwapMCP: %v", err)
 	}
 	if tools.ActiveMCPRegistry() != nil {
@@ -117,13 +117,13 @@ func TestSwapMCP_ConfigErrorKeepsOldRegistry(t *testing.T) {
 	writeUserMCPConfig(t, home, `{"mcpServers": {"fake": {"url": "`+srv.URL+`"}}}`)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := SwapMCP(ctx, t.TempDir(), io.Discard); err != nil {
+	if err := SwapMCP(ctx, io.Discard); err != nil {
 		t.Fatalf("SwapMCP: %v", err)
 	}
 	old := tools.ActiveMCPRegistry()
 
 	writeUserMCPConfig(t, home, `not json`)
-	if err := SwapMCP(ctx, t.TempDir(), io.Discard); err == nil {
+	if err := SwapMCP(ctx, io.Discard); err == nil {
 		t.Fatal("expected config parse error")
 	}
 	if tools.ActiveMCPRegistry() != old {

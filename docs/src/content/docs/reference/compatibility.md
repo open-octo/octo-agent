@@ -17,9 +17,9 @@ in the [release notes](https://github.com/open-octo/octo-agent/releases).
 |---|---|
 | `~/.octo/config.yml` | Recognized fields keep their name and meaning; new fields are optional with working defaults; unknown fields are ignored |
 | `~/.octo/permissions.yml` | The rule format (tool-keyed `allow`/`deny`/`ask` lists, `pattern`/`hostname`/`path` matchers); first-match-wins semantics are part of the contract |
-| `~/.octo/mcp.json`, `.octo/mcp.json` | The `mcpServers` shape (stdio `command`/`args`/`env`, HTTP `url`/`headers`/`auth`); project file overrides user file by name |
+| `~/.octo/mcp.json` | The `mcpServers` shape (stdio `command`/`args`/`env`, HTTP `url`/`headers`/`auth`) |
 | `~/.octo/channels.yml` | The `channels` map keyed by platform, each platform's documented keys |
-| `SKILL.md` | YAML frontmatter + markdown body, Claude Code's format, discovered from `~/.octo/skills/` and `.octo/skills/` |
+| `SKILL.md` | YAML frontmatter + markdown body, Claude Code's format, discovered from `~/.octo/skills/` |
 | `~/.octo/agents/<name>.md` | Custom [sub-agent](/docs/guides/sub-agents/) definitions — `description`/`read_only`/`tools`/`disallowed_tools`/`model` frontmatter + a system-prompt body; filename is the type name |
 | `soul.md` / `user.md` / `octorules.md` / `.octorules` | Same layering and `@include` support |
 | `~/.octo/memories/<slug>/` | `MEMORY.md` index + on-demand topic files, plain markdown |

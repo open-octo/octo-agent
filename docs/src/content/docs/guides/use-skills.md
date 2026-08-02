@@ -13,7 +13,6 @@ context on turns that don't need them.
   defaults never touches a skill you wrote yourself.
 - `~/.octo/skills/<name>/SKILL.md` — user-level, available across all projects. A same-named skill
   here overrides a default.
-- `.octo/skills/<name>/SKILL.md` — project-level, overrides both of the above on a name collision.
 
 The format is identical to Claude Code's, so you can symlink `~/.claude/skills` to `~/.octo/skills`
 and reuse everything you already have:
@@ -42,7 +41,7 @@ tool) only when a task matches.
 
 ```bash
 octo skills list     # see what's discovered
-octo skills path     # print the user/project/default skill directories
+octo skills path     # print the user/default skill directories
 octo skills add      # install a skill from a source (guided)
 octo skills update   # re-sync the built-in defaults after an upgrade
 ```

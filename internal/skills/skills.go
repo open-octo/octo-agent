@@ -7,8 +7,7 @@
 //
 // A skill is a directory containing a SKILL.md file with YAML frontmatter:
 //
-//	~/.octo/skills/<name>/SKILL.md      (user-level, cross-project)
-//	<cwd>/.octo/skills/<name>/SKILL.md  (project-level, takes precedence)
+//	~/.octo/skills/<name>/SKILL.md  (user-level, cross-project)
 //
 // The directory name is the authoritative trigger name (matching Claude Code);
 // the frontmatter `name` is display-only. The format is identical to
@@ -24,7 +23,6 @@ import (
 	"sync"
 
 	"github.com/open-octo/octo-agent/internal/agentprofile"
-	"github.com/open-octo/octo-agent/internal/pathutil"
 	"github.com/open-octo/octo-agent/internal/trash"
 	"gopkg.in/yaml.v3"
 )
@@ -40,19 +38,17 @@ type Skill struct {
 	Description string // frontmatter description; the L1 manifest + trigger cue
 	Body        string // SKILL.md body after frontmatter
 	Dir         string // absolute path of the skill directory
-	Source      string // "project" | "user" (display only, for --list-skills)
+	Source      string // "user" | "default" (display only, for --list-skills)
 	System      bool   // frontmatter system: true → hidden from expert agent manifests
 }
 
 // Registry holds the skills discovered for a session, indexed by name. It is
 // safe for concurrent use (sub-agents share one registry and call the skill
-// tool from separate goroutines). cwd is remembered so Reload can re-scan the
-// same roots a session was discovered from.
+// tool from separate goroutines).
 type Registry struct {
 	mu       sync.RWMutex
 	skills   map[string]Skill
 	disabled map[string]bool // names toggled off by the user
-	cwd      string
 }
 
 // userSkillsRoot returns ~/.octo/skills, or "" when the home dir can't be
@@ -65,30 +61,21 @@ var userSkillsRoot = func() string {
 	return filepath.Join(home, ".octo", "skills")
 }
 
-// Discover scans the user-level then project-level skill roots and returns a
-// Registry. Project skills override user skills of the same name (the project
+// Discover scans the default then user-level skill roots and returns a
+// Registry. User skills override default skills of the same name (the user
 // root is scanned last, overwriting the map entry). A missing root is not an
 // error — most environments won't have both.
-func Discover(cwd string) *Registry {
-	r := &Registry{skills: make(map[string]Skill), cwd: cwd}
-	// Lowest precedence first; scanRoot overwrites by name, so user then
-	// project win. Default skills (shipped with the binary, materialized to
+func Discover() *Registry {
+	r := &Registry{skills: make(map[string]Skill)}
+	// Lowest precedence first; scanRoot overwrites by name, so user wins.
+	// Default skills (shipped with the binary, materialized to
 	// ~/.octo/skills-default) are the floor — a user overrides one by dropping
 	// a same-named skill in ~/.octo/skills.
 	if root := defaultSkillsRoot(); root != "" {
 		r.scanRoot(root, "default")
 	}
-	userRoot := userSkillsRoot()
-	if userRoot != "" {
+	if userRoot := userSkillsRoot(); userRoot != "" {
 		r.scanRoot(userRoot, "user")
-	}
-	// If cwd is the home directory itself, this resolves to the exact same
-	// directory as userRoot (even reached through a symlinked $HOME) —
-	// re-scanning it would relabel every skill "project" for no reason.
-	if cwd != "" {
-		if projectRoot := filepath.Join(cwd, ".octo", "skills"); !pathutil.SameDir(projectRoot, userRoot) {
-			r.scanRoot(projectRoot, "project")
-		}
 	}
 	return r
 }
@@ -198,7 +185,7 @@ func (r *Registry) Reload() {
 	if r == nil {
 		return
 	}
-	fresh := Discover(r.cwd) // build off the lock, then swap atomically
+	fresh := Discover() // build off the lock, then swap atomically
 	r.mu.Lock()
 	r.skills = fresh.skills
 	r.mu.Unlock()
@@ -221,8 +208,8 @@ func (r *Registry) Len() int {
 	return n
 }
 
-// List returns enabled skills only, in a stable order: project skills first,
-// then user skills, each group sorted by name.
+// List returns enabled skills only, in a stable order: user skills first,
+// then default skills, each group sorted by name.
 func (r *Registry) List() []Skill {
 	if r == nil {
 		return nil
@@ -235,12 +222,9 @@ func (r *Registry) List() []Skill {
 		}
 	}
 	r.mu.RUnlock()
-	// Source priority: project overrides user, user overrides default.
-	// Must use a total order (strict weak ordering) — the old
-	// out[i].Source == "project" shortcut was not antisymmetric
-	// (e.g. "user" vs "default" returned false for both directions),
-	// which made sort.Slice non-deterministic.
-	sourceOrder := map[string]int{"project": 0, "user": 1, "default": 2}
+	// Source priority: user overrides default. Must use a total order (strict
+	// weak ordering) for sort.Slice to stay deterministic.
+	sourceOrder := map[string]int{"user": 0, "default": 1}
 	sort.Slice(out, func(i, j int) bool {
 		si, sj := sourceOrder[out[i].Source], sourceOrder[out[j].Source]
 		if si != sj {
@@ -264,7 +248,7 @@ func (r *Registry) All() []Skill {
 		out = append(out, s)
 	}
 	r.mu.RUnlock()
-	sourceOrder := map[string]int{"project": 0, "user": 1, "default": 2}
+	sourceOrder := map[string]int{"user": 0, "default": 1}
 	sort.Slice(out, func(i, j int) bool {
 		si, sj := sourceOrder[out[i].Source], sourceOrder[out[j].Source]
 		if si != sj {
@@ -407,7 +391,7 @@ func ManifestForProfile(r *Registry, profile *agentprofile.Profile) string {
 // note beats rewriting the skill on install: rewriting can't tell a tool
 // reference from a string inside a bundled script, and for source-available
 // skills a rewrite is a derivative work their license forbids. Injected for
-// user/project skills only; octo-native defaults don't need it.
+// user skills only; octo-native defaults don't need it.
 const ccCompatNote = "This skill may have been written for Claude Code. In this environment, " +
 	"map tool references accordingly: Bash → terminal; Read/Write/Edit → read_file / " +
 	"write_file / edit_file; Grep/Glob → grep / glob; Task/Agent → sub_agent; " +

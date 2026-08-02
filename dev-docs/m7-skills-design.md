@@ -37,19 +37,19 @@ description: 一句话说明「何时该用这个 skill」——模型自主触�
 - frontmatter 用 `gopkg.in/yaml.v3` 解析到只含 `Name`/`Description` 的 struct,其余字段
   自动忽略——这是处理 CC 嵌套 `metadata:` 块的正确方式(手写「顶层 key:value」会解坏它)。
 
-## 2. 三层发现与优先级
+## 2. 两层发现与优先级
 
-`internal/skills` 的 `Discover(cwd)` 扫三个 root,**后扫覆盖同名**:
+`internal/skills` 的 `Discover()` 扫两个 root,**后扫覆盖同名**:
 
 ```
 default   ~/.octo/skills-default/   随二进制 ship、首次运行落地(见 §4)
    ↓ 被覆盖
 user      ~/.octo/skills/           跨项目,用户级
-   ↓ 被覆盖
-project   <cwd>/.octo/skills/        项目级,最高优先
 ```
 
 任一 root 缺失都不是错误。用户覆盖某个默认 skill,只要在 `~/.octo/skills/` 放同名目录。
+(曾经有过 `<cwd>/.octo/skills/` 项目级第三层,后来砍掉了——它只跟 server 启动目录绑定、
+不跟单个会话的工作目录走,而且几乎没人用,纯粹增加心智负担。)
 
 ```go
 type Skill struct {
@@ -57,7 +57,7 @@ type Skill struct {
     Description string // frontmatter description(L1 清单 + 触发依据)
     Body        string // SKILL.md frontmatter 之后的正文
     Dir         string // skill 目录绝对路径(正文引用相对文件时的基准)
-    Source      string // "default" | "user" | "project",用于 list 展示
+    Source      string // "default" | "user",用于 list 展示
 }
 
 type Registry struct{ skills map[string]Skill } // 按 name 索引
@@ -139,8 +139,8 @@ turn
   scrollback,resume 时也只显示 `> /<name>`。无工具模式下 `skill` 工具不存在、触发无从谈起,
   直接拒绝(`/<name> needs tools — restart with: octo --tools`,与 `/init` 一致)。未命中的
   `/` 前缀文本当普通用户输入照发(路径、正则等)。
-- **`octo skills list|update|path`**:`list` 按来源(default → user → project)列出;
-  `update` 强制重新落地默认集;`path` 打印三个 root。
+- **`octo skills list|update|path`**:`list` 按来源(default → user)列出;
+  `update` 强制重新落地默认集;`path` 打印两个 root。
 - **`octo chat --list-skills`**:发现并打印后退出,不需 provider/key。
 - **REPL `/skills`**:列出本会话可用 skill。
 
@@ -149,7 +149,7 @@ description 时,先调 `skill` 工具加载完整指令再行动,不要凭一句
 
 ## 6. 测试(stdlib,无外部框架)
 
-- `internal/skills`:`Discover` 三层覆盖(project > user > default)、缺失目录不报错、坏/缺
+- `internal/skills`:`Discover` 两层覆盖(user > default)、缺失目录不报错、坏/缺
   frontmatter 跳过、目录名作 name;`RenderManifest` 稳定有序、空 registry → 空串;
   `MaterializeDefaults` 写嵌入 + 版本戳、同版本 no-op、版本变重写;默认 skill 被同名 user
   skill 覆盖。

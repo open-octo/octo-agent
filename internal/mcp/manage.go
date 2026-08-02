@@ -7,27 +7,20 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/open-octo/octo-agent/internal/pathutil"
 )
 
 // This file is the management view of the MCP config — what a settings UI
 // needs, as opposed to what a connecting session needs. LoadConfig (config.go)
-// answers "which servers should I connect": it merges, drops disabled entries,
-// and fails hard on invalid ones. LoadManaged answers "which servers exist":
-// it keeps disabled entries, annotates invalid ones instead of failing, and
-// remembers which file each entry came from so the UI can mark project-level
-// entries read-only.
+// answers "which servers should I connect": it drops disabled entries and
+// fails hard on invalid ones. LoadManaged answers "which servers exist": it
+// keeps disabled entries and annotates invalid ones instead of failing.
 //
-// All mutations target the user-global file (~/.octo/mcp.json) only. The
-// project-local file is owned by the repository it lives in; a web UI writing
-// into someone's checkout would be a surprise.
+// All mutations target the user-global file (~/.octo/mcp.json).
 
 // ManagedServer is one config entry in the management view.
 type ManagedServer struct {
-	Name   string
-	Entry  ServerEntry
-	Source string // "user" | "project"; project entries shadow user ones
+	Name  string
+	Entry ServerEntry
 	// Invalid carries the validation error for a malformed entry ("" when
 	// valid). Malformed entries are kept visible so the UI can show — and
 	// the user can fix — what LoadConfig would reject.
@@ -35,41 +28,19 @@ type ManagedServer struct {
 }
 
 // LoadManaged returns every configured server, including disabled and invalid
-// entries, sorted by name. Project-local entries override user-global ones
-// with the same name, mirroring LoadConfig's merge rule.
-func LoadManaged(projectDir string) ([]ManagedServer, error) {
+// entries, sorted by name.
+func LoadManaged() ([]ManagedServer, error) {
 	byName := map[string]ManagedServer{}
 
-	userPath := ""
 	if home, err := os.UserHomeDir(); err == nil {
-		userPath = filepath.Join(home, ".octo", "mcp.json")
+		userPath := filepath.Join(home, ".octo", "mcp.json")
 		cfg, err := readConfigFile(userPath)
 		if err != nil {
 			return nil, err
 		}
 		if cfg != nil {
 			for name, e := range cfg.Servers {
-				byName[name] = managedEntry(name, e, "user")
-			}
-		}
-	}
-
-	// If the server's cwd is the home directory itself (e.g. `octo serve`
-	// launched from ~, even through a symlinked $HOME), this resolves to the
-	// exact same file as userPath — re-reading it here would relabel every
-	// entry "project" and make a perfectly normal user config look read-only
-	// in the management UI.
-	if projectDir != "" {
-		projectPath := filepath.Join(projectDir, ".octo", "mcp.json")
-		if !pathutil.SameDir(projectPath, userPath) {
-			cfg, err := readConfigFile(projectPath)
-			if err != nil {
-				return nil, err
-			}
-			if cfg != nil {
-				for name, e := range cfg.Servers {
-					byName[name] = managedEntry(name, e, "project")
-				}
+				byName[name] = managedEntry(name, e)
 			}
 		}
 	}
@@ -82,8 +53,8 @@ func LoadManaged(projectDir string) ([]ManagedServer, error) {
 	return out, nil
 }
 
-func managedEntry(name string, e ServerEntry, source string) ManagedServer {
-	m := ManagedServer{Name: name, Entry: e, Source: source}
+func managedEntry(name string, e ServerEntry) ManagedServer {
+	m := ManagedServer{Name: name, Entry: e}
 	if err := e.Validate(name); err != nil {
 		m.Invalid = err.Error()
 	}
@@ -132,8 +103,7 @@ func UpsertUserServer(name string, e ServerEntry) error {
 }
 
 // DeleteUserServer removes the named entry from the user-global config.
-// Deleting a name that isn't there is an error so the caller can distinguish
-// "removed" from "was a project-level entry all along".
+// Deleting a name that isn't there is an error rather than a silent no-op.
 func DeleteUserServer(name string) error {
 	return mutateUserConfig(func(cfg *Config) error {
 		if _, ok := cfg.Servers[name]; !ok {

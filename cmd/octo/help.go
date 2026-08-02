@@ -38,8 +38,7 @@ server listed in mcp.json gets connected at session start; its tools, resources,
 and prompts ride alongside octo's built-in tools. Pass --no-tools to skip them.
 
 Configuration:
-  ~/.octo/mcp.json                 user-global config (always loaded)
-  ./.octo/mcp.json                 project-local config (overrides user-global per name)
+  ~/.octo/mcp.json                 user-global config
 
 mcp.json format (mirrors Claude Code):
   {

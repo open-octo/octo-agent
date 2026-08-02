@@ -12,17 +12,16 @@ import (
 	"github.com/open-octo/octo-agent/internal/skills"
 )
 
-// skillRegFor builds a project-level skill registry from name→SKILL.md content,
-// with HOME pointed at an empty dir so no real user skills leak in.
+// skillRegFor builds a user-level skill registry from name→SKILL.md content,
+// with HOME pointed at a fresh temp dir so no real user skills leak in.
 func skillRegFor(t *testing.T, m map[string]string) *skills.Registry {
 	t.Helper()
-	empty := t.TempDir()
-	t.Setenv("HOME", empty)
-	t.Setenv("USERPROFILE", empty)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
-	cwd := t.TempDir()
 	for name, content := range m {
-		dir := filepath.Join(cwd, ".octo", "skills", name)
+		dir := filepath.Join(home, ".octo", "skills", name)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -30,7 +29,7 @@ func skillRegFor(t *testing.T, m map[string]string) *skills.Registry {
 			t.Fatal(err)
 		}
 	}
-	return skills.Discover(cwd)
+	return skills.Discover()
 }
 
 func TestSkillTrigger(t *testing.T) {

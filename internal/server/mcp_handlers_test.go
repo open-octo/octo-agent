@@ -245,30 +245,6 @@ func TestHandleToggleMCPServer(t *testing.T) {
 	}
 }
 
-func TestMCPHandlers_ProjectEntriesReadOnly(t *testing.T) {
-	mcpTestHome(t, "")
-	proj := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(proj, ".octo"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(proj, ".octo", "mcp.json"),
-		[]byte(`{"mcpServers": {"proj": {"command": "echo"}}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	srv.cwd = proj
-
-	for _, c := range []struct{ method, path, body string }{
-		{http.MethodDelete, "/api/mcp/servers/proj", ""},
-		{http.MethodPatch, "/api/mcp/servers/proj/toggle", ""},
-	} {
-		w := doJSON(t, srv, c.method, c.path, c.body)
-		if w.Code != http.StatusConflict {
-			t.Errorf("%s %s: status = %d, want 409", c.method, c.path, w.Code)
-		}
-	}
-}
-
 func TestMCPLifecycle_LiveConnect(t *testing.T) {
 	mcpTestHome(t, "")
 	t.Cleanup(app.ShutdownMCP)

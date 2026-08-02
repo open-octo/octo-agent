@@ -661,10 +661,10 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	cwd, _ := os.Getwd()
 	env := buildEnvContext(cwd)
 
-	// Discover skills (user + project) once at session start. The manifest goes
-	// into the frozen system prompt (L1); the registry backs the `skill` tool so
-	// it can serve full bodies on demand (L2).
-	skillReg := skills.Discover(cwd)
+	// Discover skills once at session start. The manifest goes into the frozen
+	// system prompt (L1); the registry backs the `skill` tool so it can serve
+	// full bodies on demand (L2).
+	skillReg := skills.Discover()
 	skillsManifest := tools.SkillsManifest(skillReg)
 	tools.SetSkills(skillReg)
 
@@ -877,7 +877,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// arrives a moment later.
 	var mcpBoot *mcpBootstrap
 	if toolsOn {
-		mcpCfg, err := mcp.LoadConfig(cwd)
+		mcpCfg, err := mcp.LoadConfig()
 		if err != nil {
 			fmt.Fprintf(stderr, "octo: mcp config: %v\n", err)
 		} else if len(mcpCfg.Servers) > 0 {

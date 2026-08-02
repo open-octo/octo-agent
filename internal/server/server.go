@@ -433,7 +433,7 @@ func New(cfg Config) (*Server, error) {
 	cwd, _ := os.Getwd()
 	envCtx := buildEnvContext(cwd)
 
-	skillReg := skills.Discover(cwd)
+	skillReg := skills.Discover()
 	fileCfg, _ := config.Load()
 	skillReg.SetDisabled(fileCfg.Tools.DisabledSkills)
 	skillsManifest := tools.SkillsManifest(skillReg)
@@ -640,7 +640,7 @@ func (s *Server) enableMCP() {
 	app.SetMCPChildStderr(newMCPStderrWriter(slog.Default()))
 	s.mcpMu.Lock()
 	defer s.mcpMu.Unlock()
-	if err := app.SwapMCP(context.Background(), s.curCwd(), os.Stderr); err != nil {
+	if err := app.SwapMCP(context.Background(), os.Stderr); err != nil {
 		slog.Error("mcp setup", "err", err)
 	}
 	s.mcpCleanup = func() {

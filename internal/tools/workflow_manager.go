@@ -62,11 +62,11 @@ type WorkflowRunRequest struct {
 	Foreground bool
 	// WorkingDir is the directory this run's own tool calls (agent()'s
 	// sub-agents, and any nested workflow()/workflow_save() they make) should
-	// resolve relative paths and project-level workflows against. Start()
-	// launches every run under a fresh, detached context (so it survives past
-	// the request that started it) — WorkingDir is what lets that detached
-	// context still carry the caller's WithWorkingDir value instead of
-	// silently reverting to the server's own launch directory once the script
+	// resolve relative paths against. Start() launches every run under a
+	// fresh, detached context (so it survives past the request that started
+	// it) — WorkingDir is what lets that detached context still carry the
+	// caller's WithWorkingDir value instead of silently reverting to the
+	// server's own launch directory once the script
 	// starts running (#1140 follow-up: the outer workflow(name: ...) lookup
 	// was fixed to honor the caller's cwd, but a script's own internal calls
 	// were still losing it here).

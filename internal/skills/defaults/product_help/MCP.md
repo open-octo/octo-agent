@@ -2,7 +2,7 @@
 
 octo connects to MCP servers for extra tools — databases, ticket trackers, internal APIs. Tools are on by default; each configured server connects at session start and its tools ride alongside octo's built-ins as `mcp__<server>__<tool>`.
 
-Declared in `~/.octo/mcp.json` (user-global) and `./.octo/mcp.json` (project-local, overrides by server name):
+Declared in `~/.octo/mcp.json` (user-global):
 
 ```json
 {

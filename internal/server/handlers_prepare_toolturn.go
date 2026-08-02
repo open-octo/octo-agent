@@ -29,10 +29,7 @@ import (
 // ...) — using the ctx returned here — rather than the ctx-blind
 // tools.DefaultToolsFor, so sub_agent/workflow are advertised off the
 // ctx-scoped manager just stamped in above (#1133). prepareToolTurn no longer
-// touches the process-global spawner/sub-agent-manager slots at all; the
-// returned cleanup only restores the separate ActiveWorkflowDiscoveryCWD swap
-// (see its doc comment — a different concern, since WorkflowTool.Definition()
-// has no ctx to read a.CWD from).
+// touches the process-global spawner/sub-agent-manager slots at all.
 func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agent.Session) (context.Context, agent.ToolExecutor, *tools.SubAgentManager, func(), error) {
 	sid, _ := ctx.Value(ctxKeySessionID{}).(string)
 	if sid == "" {
@@ -186,18 +183,6 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 			s.deliverModelNote(sid, tools.FormatWorkflowNote(ev))
 		},
 	})
-
-	// The workflow tool's Definition(), unlike its Execute, takes no ctx and
-	// so can't see a.CWD directly — that one remains a save-and-restore
-	// process-global swap (a separate concern from advertisement gating; see
-	// workflow.go's ActiveWorkflowDiscoveryCWD doc comment).
-	prevWorkflowDiscoveryCWD := tools.ActiveWorkflowDiscoveryCWD()
-	tools.SetWorkflowDiscoveryCWD(a.CWD)
-	prevCleanup := cleanup
-	cleanup = func() {
-		prevCleanup()
-		tools.SetWorkflowDiscoveryCWD(prevWorkflowDiscoveryCWD)
-	}
 
 	return ctx, executor, mgr, cleanup, nil
 }

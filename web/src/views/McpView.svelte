@@ -97,12 +97,10 @@
 
   // ─── add / edit / import / AI setup ───────────────────────────────────────────
 
-  // Adding and editing a server — whether it lives in ~/.octo/mcp.json or a
-  // project's .octo/mcp.json — both go through the mcp-creator skill instead
-  // of a structured form. That works identically regardless of which file
-  // the entry is defined in, so there's no need for a separate "Add Server"
-  // form, and it keeps edit behavior in one place (the skill) instead of a
-  // second hand-written prompt that could drift from it.
+  // Adding and editing a server goes through the mcp-creator skill instead of
+  // a structured form, so there's no need for a separate "Add Server" form,
+  // and it keeps edit behavior in one place (the skill) instead of a second
+  // hand-written prompt that could drift from it.
   function askAgentToEdit(name: string) {
     openAgentSession(`/mcp-creator Edit the existing MCP server "${name}" — find its entry, show me the current config, then ask what I want changed.`, tr('mcp.session_edit').replace('{name}', name))
   }
@@ -144,8 +142,8 @@
     } catch (e: any) {
       showToast(tr('mcp.toast_toggle_fail'), 'error')
       // The Switch already flipped optimistically on click; a rejected
-      // toggle (e.g. a project-scoped server) needs a real reload to snap
-      // its visual state back to what the server actually has.
+      // toggle needs a real reload to snap its visual state back to what
+      // the server actually has.
       reload()
     }
   }
@@ -338,9 +336,6 @@
                 <span class="server-name">{srv.name}</span>
                 {#if srv.transport}
                   <span class="transport-badge mono">{srv.transport}</span>
-                {/if}
-                {#if srv.source === 'project'}
-                  <span class="transport-badge mono">{$t('mcp.badge_project')}</span>
                 {/if}
                 <StatusTag status={tag.tagStatus}>{tag.tagLabel}</StatusTag>
                 {#if srv.status === 'connected'}

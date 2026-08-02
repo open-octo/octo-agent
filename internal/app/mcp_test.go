@@ -33,15 +33,15 @@ func TestToolSearchConfigFrom(t *testing.T) {
 	}
 }
 
-// TestConnectMCPNoServers verifies the no-config path: with no MCP config under
-// HOME or the project dir, ConnectMCP is a no-op that returns a non-nil cleanup
-// and registers nothing.
+// TestConnectMCPNoServers verifies the no-config path: with no MCP config
+// under HOME, ConnectMCP is a no-op that returns a non-nil cleanup and
+// registers nothing.
 func TestConnectMCPNoServers(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp) // Windows home
 
-	cleanup, err := ConnectMCP(context.Background(), t.TempDir(), io.Discard)
+	cleanup, err := ConnectMCP(context.Background(), io.Discard)
 	if err != nil {
 		t.Fatalf("ConnectMCP: %v", err)
 	}

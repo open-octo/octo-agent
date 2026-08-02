@@ -73,7 +73,7 @@ func schemaFakeAgent(_ context.Context, _ string, opts workflow.AgentOptions) wo
 // shell backticks — so a script that assumes otherwise fails here with a
 // Ruby-level error before ever reaching its final expression.
 func TestEmbeddedDefaultWorkflows_Execute(t *testing.T) {
-	useWorkflowRoots(t, "", "")
+	useWorkflowRoots(t, "")
 
 	type run struct {
 		name string
@@ -87,7 +87,7 @@ func TestEmbeddedDefaultWorkflows_Execute(t *testing.T) {
 
 	for _, r := range runs {
 		t.Run(fmt.Sprintf("%s/%s", r.name, r.args), func(t *testing.T) {
-			w, ok := lookupWorkflow(context.Background(), r.name)
+			w, ok := lookupWorkflow(r.name)
 			if !ok {
 				t.Fatalf("lookupWorkflow(%q): not found", r.name)
 			}

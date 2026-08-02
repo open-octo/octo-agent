@@ -91,45 +91,5 @@ func TestPrepareToolTurn_WiresWorkingDirFromAgentCWD(t *testing.T) {
 	if got := tools.WorkingDir(ctx); got != a.CWD {
 		t.Errorf("WorkingDir(ctx) = %q, want %q (a.CWD)", got, a.CWD)
 	}
-	if got := tools.ActiveWorkflowDiscoveryCWD(); got != a.CWD {
-		t.Errorf("ActiveWorkflowDiscoveryCWD() = %q, want %q", got, a.CWD)
-	}
-
 	cleanup()
-	if got := tools.ActiveWorkflowDiscoveryCWD(); got != "" {
-		t.Errorf("ActiveWorkflowDiscoveryCWD() after cleanup = %q, want restored to \"\"", got)
-	}
-}
-
-// A permission-engine failure returns before the spawner/manager globals
-// (and now ActiveWorkflowDiscoveryCWD) are ever set — this pins that the
-// early-return path really is early enough that there's nothing to leak, by
-// confirming a normal, later call still starts from a clean slate.
-func TestPrepareToolTurn_WorkflowDiscoveryCWDStartsCleanAcrossCalls(t *testing.T) {
-	setTestHome(t)
-	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
-
-	a1 := agent.New(&stubSender{}, "qwen3.7-max")
-	a1.CWD = "/repo/A"
-	_, _, _, cleanup1, err := srv.prepareToolTurn(prepareToolTurnCtx(t, "clean-slate-a"), a1, nil)
-	if err != nil {
-		t.Fatalf("prepareToolTurn (a1): %v", err)
-	}
-	cleanup1()
-
-	if got := tools.ActiveWorkflowDiscoveryCWD(); got != "" {
-		t.Fatalf("ActiveWorkflowDiscoveryCWD() after a1's cleanup = %q, want \"\"", got)
-	}
-
-	a2 := agent.New(&stubSender{}, "qwen3.7-max")
-	a2.CWD = "/repo/B"
-	_, _, _, cleanup2, err := srv.prepareToolTurn(prepareToolTurnCtx(t, "clean-slate-b"), a2, nil)
-	if err != nil {
-		t.Fatalf("prepareToolTurn (a2): %v", err)
-	}
-	defer cleanup2()
-
-	if got := tools.ActiveWorkflowDiscoveryCWD(); got != "/repo/B" {
-		t.Errorf("ActiveWorkflowDiscoveryCWD() during a2's turn = %q, want /repo/B", got)
-	}
 }

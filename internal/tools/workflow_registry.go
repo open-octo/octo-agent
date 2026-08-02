@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"context"
 	"embed"
 	"errors"
 	"fmt"
@@ -10,8 +9,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/open-octo/octo-agent/internal/memory"
-	"github.com/open-octo/octo-agent/internal/pathutil"
 	"github.com/open-octo/octo-agent/internal/trash"
 )
 
@@ -29,8 +26,8 @@ var (
 // available even in a process that never calls MaterializeDefaultWorkflows
 // (a library consumer of this package, or a test). MaterializeDefaultWorkflows
 // (workflow_defaults.go) additionally writes them to ~/.octo/workflows-default
-// so they're discoverable, listable and editable on disk exactly like a user-
-// or project-level workflow (mirrors internal/skills/defaults.go); when
+// so they're discoverable, listable and editable on disk exactly like a
+// user-level workflow (mirrors internal/skills/defaults.go); when
 // present, that materialized copy overlays the embedded one of the same name,
 // so a local edit takes effect immediately rather than waiting for a version
 // bump to re-materialize.
@@ -46,7 +43,7 @@ type savedWorkflow struct {
 	description string
 	params      []workflowParam
 	script      string
-	source      string // "default" | "user" | "project"
+	source      string // "default" | "user"
 	path        string // on-disk file path; "" for embedded defaults
 }
 
@@ -71,58 +68,23 @@ var userWorkflowsRoot = func() string {
 	return filepath.Join(home, ".octo", "workflows")
 }
 
-// projectWorkflowsRoot returns <project-root>/.octo/workflows for the given
-// working directory, or "" when it can't be resolved. Project-level workflows
-// override user-level ones of the same name (matching .octo/agents semantics).
-// A var so tests can point discovery at a temp directory.
-//
-// Every current caller pre-resolves cwd via WorkingDirOrCWD before calling
-// this, so the os.Getwd() fallback below is normally unreachable — it's kept
-// as defense in depth for any future or direct caller that passes "" without
-// going through that helper first (os.Getwd() itself failing is the only way
-// today's callers would still hit it).
-var projectWorkflowsRoot = func(cwd string) string {
-	if cwd == "" {
-		var err error
-		cwd, err = os.Getwd()
-		if err != nil || cwd == "" {
-			return ""
-		}
-	}
-	root := memory.ProjectRoot(cwd)
-	if root == "" {
-		return ""
-	}
-	return filepath.Join(root, ".octo", "workflows")
-}
-
 // discoverWorkflows seeds the embedded default workflows, overlays the
-// materialized default root (if present), then scans the user- and
-// project-level registries, and returns a fresh map. Precedence is embedded <
-// materialized-default < user < project: a same-named file at a higher level
-// overrides the one below. cwd is the working directory used to resolve the
-// project-level registry; when empty it falls back to the process CWD. Safe
-// to call concurrently; each call returns an independent snapshot.
-func discoverWorkflows(cwd string) map[string]savedWorkflow {
+// materialized default root (if present), then scans the user registry, and
+// returns a fresh map. Precedence is embedded < materialized-default < user: a
+// same-named file at a higher level overrides the one below. Safe to call
+// concurrently; each call returns an independent snapshot.
+func discoverWorkflows() map[string]savedWorkflow {
 	fresh := make(map[string]savedWorkflow)
 	scanEmbeddedWorkflows(fresh)
 	scanWorkflowsRoot(defaultWorkflowsRoot(), "default", fresh)
-	userRoot := userWorkflowsRoot()
-	scanWorkflowsRoot(userRoot, "user", fresh)
-	// projectWorkflowsRoot falls back to cwd itself when cwd isn't inside a
-	// git repo, which resolves to the same directory as userRoot when cwd is
-	// the home directory (even through a symlinked $HOME or a git-resolved
-	// worktree path) — re-scanning it would relabel every workflow "project".
-	if projectRoot := projectWorkflowsRoot(cwd); !pathutil.SameDir(projectRoot, userRoot) {
-		scanWorkflowsRoot(projectRoot, "project", fresh)
-	}
+	scanWorkflowsRoot(userWorkflowsRoot(), "user", fresh)
 	return fresh
 }
 
 // scanEmbeddedWorkflows loads the binary's built-in *.rb workflows into dst.
 // Their file name (without .rb) is the authoritative name, matching on-disk
-// discovery so a materialized-default/user/project file of the same name
-// overrides it.
+// discovery so a materialized-default/user file of the same name overrides
+// it.
 func scanEmbeddedWorkflows(dst map[string]savedWorkflow) {
 	entries, err := defaultWorkflowsFS.ReadDir("workflow_defaults")
 	if err != nil {
@@ -149,7 +111,7 @@ func scanEmbeddedWorkflows(dst map[string]savedWorkflow) {
 }
 
 // scanWorkflowsRoot reads *.rb workflow scripts from root into dst (existing
-// keys are overwritten), tagging each with source ("user" or "project"). A
+// keys are overwritten), tagging each with source ("default" or "user"). A
 // missing or unreadable root is a no-op.
 func scanWorkflowsRoot(root, source string, dst map[string]savedWorkflow) {
 	if root == "" {
@@ -269,21 +231,17 @@ func workflowParams(script string) []workflowParam {
 	return out
 }
 
-// lookupWorkflow returns the named workflow, scanning the registries fresh so a
-// just-authored file is picked up without a restart. The project-level registry
-// is resolved from ctx's working directory when present (e.g. a cron task's
-// directory), otherwise from the process CWD.
-func lookupWorkflow(ctx context.Context, name string) (savedWorkflow, bool) {
-	workflows := discoverWorkflows(WorkingDirOrCWD(ctx))
+// lookupWorkflow returns the named workflow, scanning the registry fresh so a
+// just-authored file is picked up without a restart.
+func lookupWorkflow(name string) (savedWorkflow, bool) {
+	workflows := discoverWorkflows()
 	w, ok := workflows[name]
 	return w, ok
 }
 
 // listWorkflows returns every named workflow, sorted by name, scanning fresh.
-// The project-level registry is resolved from ctx's working directory when
-// present, otherwise from the process CWD.
-func listWorkflows(ctx context.Context) []savedWorkflow {
-	workflows := discoverWorkflows(WorkingDirOrCWD(ctx))
+func listWorkflows() []savedWorkflow {
+	workflows := discoverWorkflows()
 	out := make([]savedWorkflow, 0, len(workflows))
 	for _, w := range workflows {
 		out = append(out, w)
@@ -297,15 +255,13 @@ func listWorkflows(ctx context.Context) []savedWorkflow {
 type NamedWorkflow struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Source      string `json:"source"` // "default" | "user" | "project"
+	Source      string `json:"source"` // "default" | "user"
 }
 
 // ListNamedWorkflows returns every registered workflow (embedded defaults +
-// user + project), sorted by name, as a public view for the web panel.
-// Project-level workflows are resolved from ActiveWorkflowDiscoveryCWD when a
-// turn has stamped one (see workflow.go), otherwise the process CWD.
+// user), sorted by name, as a public view for the web panel.
 func ListNamedWorkflows() []NamedWorkflow {
-	saved := listWorkflows(WithWorkingDir(context.Background(), ActiveWorkflowDiscoveryCWD()))
+	saved := listWorkflows()
 	out := make([]NamedWorkflow, 0, len(saved))
 	for _, w := range saved {
 		out = append(out, NamedWorkflow{Name: w.name, Description: w.description, Source: w.source})
@@ -323,20 +279,20 @@ type WorkflowDetail struct {
 }
 
 // GetNamedWorkflow returns the full detail (including script) of one
-// registered workflow, resolved the same way ListNamedWorkflows is.
+// registered workflow.
 func GetNamedWorkflow(name string) (WorkflowDetail, bool) {
-	w, ok := lookupWorkflow(WithWorkingDir(context.Background(), ActiveWorkflowDiscoveryCWD()), name)
+	w, ok := lookupWorkflow(name)
 	if !ok {
 		return WorkflowDetail{}, false
 	}
 	return WorkflowDetail{Name: w.name, Description: w.description, Source: w.source, Script: w.script}, true
 }
 
-// DeleteWorkflow removes a user- or project-level workflow's on-disk file,
-// resolved the same way ListNamedWorkflows is. Embedded default workflows
-// cannot be deleted. The file is moved to trash, not permanently removed.
+// DeleteWorkflow removes a user-level workflow's on-disk file. Embedded
+// default workflows cannot be deleted. The file is moved to trash, not
+// permanently removed.
 func DeleteWorkflow(name string) error {
-	w, ok := lookupWorkflow(WithWorkingDir(context.Background(), ActiveWorkflowDiscoveryCWD()), name)
+	w, ok := lookupWorkflow(name)
 	if !ok {
 		return fmt.Errorf("workflow %q: %w", name, ErrWorkflowNotFound)
 	}
@@ -355,7 +311,3 @@ func DeleteWorkflow(name string) error {
 // UserWorkflowsRoot exports the on-disk root of user-level saved workflows,
 // for `octo workflows path`.
 func UserWorkflowsRoot() string { return userWorkflowsRoot() }
-
-// ProjectWorkflowsRoot exports the on-disk root of project-level saved
-// workflows for the given working directory, for `octo workflows path`.
-func ProjectWorkflowsRoot(cwd string) string { return projectWorkflowsRoot(cwd) }

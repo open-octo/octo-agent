@@ -448,13 +448,11 @@ interface SkillInfoRaw {
 export async function listSkills(): Promise<Skill[]> {
   const d = await request<{ skills: SkillInfoRaw[] }>('/api/skills')
   return (d.skills ?? []).map((s): Skill => {
-    // Server source is "default" (built-in/system) | "project" | "user".
+    // Server source is "default" (built-in/system) | "user".
     const src = s.source ?? 'user'
-    const tag: { tagStatus: TagStatus; tagLabel: string } = src === 'project'
-      ? { tagStatus: 'info', tagLabel: 'Project' }
-      : src === 'default'
-        ? { tagStatus: 'default', tagLabel: 'System' }
-        : { tagStatus: 'success', tagLabel: 'User' }
+    const tag: { tagStatus: TagStatus; tagLabel: string } = src === 'default'
+      ? { tagStatus: 'default', tagLabel: 'System' }
+      : { tagStatus: 'success', tagLabel: 'User' }
     return {
       name: s.name,
       desc: s.description ?? '',
@@ -494,11 +492,9 @@ export async function listWorkflowsView(): Promise<Workflow[]> {
   const named = await listWorkflows()
   return named.map((w): Workflow => {
     const src = w.source || 'user'
-    const tag: { tagStatus: TagStatus; tagLabel: string } = src === 'project'
-      ? { tagStatus: 'info', tagLabel: 'Project' }
-      : src === 'default'
-        ? { tagStatus: 'default', tagLabel: 'System' }
-        : { tagStatus: 'success', tagLabel: 'User' }
+    const tag: { tagStatus: TagStatus; tagLabel: string } = src === 'default'
+      ? { tagStatus: 'default', tagLabel: 'System' }
+      : { tagStatus: 'success', tagLabel: 'User' }
     return {
       name: w.name,
       desc: w.description ?? '',

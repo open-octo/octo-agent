@@ -30,34 +30,6 @@ var workflowForeground atomic.Bool
 // tool's description tells the model which mode it is in.
 func SetWorkflowForeground(v bool) { workflowForeground.Store(v) }
 
-// workflowDiscoveryCWD holds the working directory savedWorkflowsParamDesc and
-// ListNamedWorkflows resolve project-level workflows from. It exists because
-// agent.ToolDefinition's Definition() method takes no context — there is no
-// way for it to see a specific turn's WithWorkingDir value directly — so
-// prepareToolTurn (regular sessions) and the scheduled-task runner (cron
-// tasks) stamp this process-global right before building tool definitions for
-// their turn, restoring the previous value once the turn ends (see
-// SetWorkflowDiscoveryCWD). This is the one process-global swap-and-restore
-// prepareToolTurn still does — sub_agent/workflow advertisement itself moved
-// to the ctx-aware DefaultToolsForCtx and no longer needs one (#1133). Empty
-// (the zero value) falls back to the process CWD, matching every caller that
-// never sets it (CLI, tests).
-var workflowDiscoveryCWD atomic.Value // string
-
-// SetWorkflowDiscoveryCWD records the directory the next Definition()-driven
-// workflow listing (the `workflow` tool's `name` parameter description, and
-// ListNamedWorkflows for the web panel) should resolve project-level
-// workflows from. Callers should restore the previous value (via
-// ActiveWorkflowDiscoveryCWD, read before overwriting) once their turn ends.
-func SetWorkflowDiscoveryCWD(cwd string) { workflowDiscoveryCWD.Store(cwd) }
-
-// ActiveWorkflowDiscoveryCWD returns the cwd most recently set by
-// SetWorkflowDiscoveryCWD, or "" if never set.
-func ActiveWorkflowDiscoveryCWD() string {
-	v, _ := workflowDiscoveryCWD.Load().(string)
-	return v
-}
-
 // workflowJournalDir overrides the workflow runtime's journal directory
 // (~/.octo/workflow-journals by default, resolved by internal/workflow).
 // Empty (the zero value) leaves the runtime default in place — every real
@@ -183,17 +155,13 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 }
 
 // savedWorkflowsParamDesc builds the `name` parameter description, listing the
-// saved workflows currently in the registries (~/.octo/workflows and the
-// project's .octo/workflows) so the model knows what it can run by name.
-// Project-level workflows are resolved from ActiveWorkflowDiscoveryCWD when
-// set (prepareToolTurn / the scheduled-task runner stamp it before building
-// tool definitions for their turn) — Definition() itself takes no context, so
-// this is the only way it can see a specific turn's working directory.
+// saved workflows currently in the registry (~/.octo/workflows) so the model
+// knows what it can run by name.
 func savedWorkflowsParamDesc() string {
 	var b strings.Builder
-	b.WriteString("Run a saved workflow by name (from ~/.octo/workflows or the project's " +
-		".octo/workflows). Provide exactly one of script or name; args are passed in either way.")
-	saved := listWorkflows(WithWorkingDir(context.Background(), ActiveWorkflowDiscoveryCWD()))
+	b.WriteString("Run a saved workflow by name (from ~/.octo/workflows). " +
+		"Provide exactly one of script or name; args are passed in either way.")
+	saved := listWorkflows()
 	if len(saved) == 0 {
 		b.WriteString(" (No saved workflows found yet — author one with workflow_save.)")
 		return b.String()
@@ -265,9 +233,9 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 	case script == "" && name == "":
 		return agent.ToolResult{}, fmt.Errorf("workflow: provide a script, or a name of a saved workflow")
 	case name != "":
-		w, ok := lookupWorkflow(ctx, name)
+		w, ok := lookupWorkflow(name)
 		if !ok {
-			return agent.ToolResult{}, fmt.Errorf("workflow: no saved workflow named %q (looked in ~/.octo/workflows and .octo/workflows)", name)
+			return agent.ToolResult{}, fmt.Errorf("workflow: no saved workflow named %q (looked in ~/.octo/workflows)", name)
 		}
 		script = w.script
 		if description == "" {
