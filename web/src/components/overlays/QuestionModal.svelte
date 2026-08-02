@@ -89,7 +89,7 @@
         <iconify-icon icon="ant-design:form-outlined" width="14" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
         <span class="qnote-label">{sessionLabel(sid)}</span>
         <span class="qnote-q">{entry.question}</span>
-        <span class="qnote-go">$t('m.view')} ›</span>
+        <span class="qnote-go">{$t('m.view')} ›</span>
       </button>
     {/each}
   </div>
