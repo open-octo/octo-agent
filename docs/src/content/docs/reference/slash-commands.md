@@ -20,7 +20,7 @@ is the process; an IM chat can be re-bound to a different session entirely).
 | `/loop` | `/loop [interval] <task>` | Not a router command: the message passes through to the model, which handles the convention via the `schedule_wakeup` tool — see [Run a recurring loop](/docs/guides/loop/) |
 | `/skills` | `/skills` | Lists discovered skills with their source and description |
 | `/mcp` | `/mcp` | Lists connected MCP servers — tool/resource/prompt counts, server instructions |
-| `/workflows` | `/workflows` | Lists named workflows (embedded, user, and project); run one by describing the task, not by slash-invoking it |
+| `/workflows` | `/workflows` | Lists named workflows (embedded and user); run one by describing the task, not by slash-invoking it |
 | `/memory` | `/memory` | Lists files under the memory directory with sizes |
 | `/init` | `/init` | Runs a full tool-enabled turn that generates or updates `.octorules` |
 | `/save` | `/save` | Saves the session now, prints the file path |

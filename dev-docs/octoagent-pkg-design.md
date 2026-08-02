@@ -121,12 +121,14 @@ tools.SetBrowserHealer(app.MakeBrowserHealer(a.GetSender(), a.Model))
 "已知限制"一节。（后续更新：这三行已经改成 ctx-scoped 写法，不再是进程级覆写——见"已知限制"一节里
 对应条目。）
 
-### 7. 第四个未 ctx 化的全局状态:workflow discovery cwd
+### 7.（已解决）第四个未 ctx 化的全局状态曾是:workflow discovery cwd
 
-`prepareToolTurn` 末尾还有一处 save-and-restore 式的进程级全局交换
+`prepareToolTurn` 末尾曾有一处 save-and-restore 式的进程级全局交换
 (`tools.SetWorkflowDiscoveryCWD`/`ActiveWorkflowDiscoveryCWD`,`internal/tools/workflow.go`),跟
 第 6 点的三个 browser setter 是同一类问题——如果 Director 并发跑的两个 agent working directory 不同
-且都用到 workflow 工具,会互相踩。第一版文档漏记了这一条,现在补进"已知限制"。
+且都用到 workflow 工具,会互相踩。**这套机制连同它唯一的调用点已经被整个删掉**（砍掉 workflow 项目级
+发现那次改动的副产品——它存在的唯一理由就是给没有 ctx 的 `WorkflowTool.Definition()` 一个"当前项目
+目录"去解析项目级 workflow,项目级没了这套也就没用了),不再是需要绕开的已知限制。
 
 ### 8. MCP client 注册也是同一类全局状态,且目前完全没有导出路径
 
@@ -501,13 +503,11 @@ Director 侧用法：`agent.Gate = approval.GateFunc(func(ctx, name, input) (boo
   string)`，没有单独的"pending/等待中"状态）。调用方如果要做异步审批（等人工审批几十分钟），
   `Check` 内部必须自己阻塞等待（在一个 goroutine 里挂起），而不是让 octo 提供任何挂起/恢复机制——
   这是设计上的既有事实，pkg/ 不改变它。
-- **workflow-discovery-cwd 仍未 ctx 化，且不能用同一套方案修**（`tools.SetWorkflowDiscoveryCWD`/
-  `ActiveWorkflowDiscoveryCWD`，`internal/tools/workflow.go`）——跟上面三个 browser setter 不同,
-  它读取的地方是 `WorkflowTool.Definition()`,而 `agent.ToolDefinition` 接口的 `Definition()`
-  方法本身不带 `ctx` 参数,没有 ctx 可读。要修就得改 `Definition()` 的方法签名,这会牵动代码库里
-  每一个 `ToolExecutor` 实现,是量级完全不同的改动,这次不做。并发跑的多个 agent 若 working
-  directory 不同且都用 workflow 工具,仍会互相踩;`toolenv.WireForSession` 不处理它,调用方不启用
-  workflow 工具即可绕开。
+- **（已解决）workflow-discovery-cwd 曾未 ctx 化**（`tools.SetWorkflowDiscoveryCWD`/
+  `ActiveWorkflowDiscoveryCWD`，`internal/tools/workflow.go`）——砍掉 workflow 项目级发现那次改动
+  把这套机制连同它唯一的调用点整个删掉了（它存在的唯一理由就是给没有 ctx 的
+  `WorkflowTool.Definition()` 解析项目级 workflow 用,项目级没了这套也就没用了),不再是需要绕开的
+  已知限制。
 - **MCP client 注册目前没有库安全路径**（`tools.SetMCPRegistry`，`internal/tools/mcp.go:40`，以及
   `internal/app/mcp.go` 里 CLI/server 专属的 `ConnectMCP`/`SwapMCP` 编排逻辑）——同样是进程级
   全局，同样完全没有导出规划。Sinew Director 大概率会想用 MCP 工具（Forge/Spine 本身就是 MCP

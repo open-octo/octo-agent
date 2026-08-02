@@ -66,10 +66,10 @@ type WorkflowRunRequest struct {
 	// fresh, detached context (so it survives past the request that started
 	// it) — WorkingDir is what lets that detached context still carry the
 	// caller's WithWorkingDir value instead of silently reverting to the
-	// server's own launch directory once the script
-	// starts running (#1140 follow-up: the outer workflow(name: ...) lookup
-	// was fixed to honor the caller's cwd, but a script's own internal calls
-	// were still losing it here).
+	// server's own launch directory once the script starts running (#1140
+	// follow-up: the outer workflow(name: ...) lookup was fixed to honor the
+	// caller's cwd, but a script's own internal calls were still losing it
+	// here).
 	WorkingDir string
 	// JournalDir overrides the workflow runtime's journal directory
 	// (~/.octo/workflow-journals by default). Empty leaves the runtime

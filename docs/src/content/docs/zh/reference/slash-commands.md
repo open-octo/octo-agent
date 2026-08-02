@@ -19,7 +19,7 @@ description: 每一个 / 命令，以及它们在 TUI、Web UI、IM 渠道之间
 | `/loop` | `/loop [间隔] <任务>` | 不是 router 命令：消息原样透传给模型，由模型按约定调用 `schedule_wakeup` 工具处理——见[跑一个循环任务](/docs/zh/guides/loop/) |
 | `/skills` | `/skills` | 列出已发现的 skill，附上来源和描述 |
 | `/mcp` | `/mcp` | 列出已连接的 MCP 服务——工具/资源/prompt 数量、服务的说明文字 |
-| `/workflows` | `/workflows` | 列出具名工作流（内置、用户、项目三层）；跑某一个是靠描述任务，不是靠 slash 调用 |
+| `/workflows` | `/workflows` | 列出具名工作流（内置、用户两层）；跑某一个是靠描述任务，不是靠 slash 调用 |
 | `/memory` | `/memory` | 列出记忆目录下的文件及其大小 |
 | `/init` | `/init` | 跑一次完整的、带工具的轮次，生成或更新 `.octorules` |
 | `/save` | `/save` | 立即保存会话，打印文件路径 |
