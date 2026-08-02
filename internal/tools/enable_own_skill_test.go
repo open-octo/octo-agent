@@ -33,6 +33,9 @@ func setupTestSkills(t *testing.T, specs map[string]bool) {
 		}
 	}
 	t.Setenv("HOME", home)
+	// os.UserHomeDir reads USERPROFILE (not HOME) on Windows — set both or
+	// skills.Discover scans the CI runner's real home and finds nothing.
+	t.Setenv("USERPROFILE", home)
 	SetSkills(skills.Discover())
 	t.Cleanup(func() { SetSkills(nil) })
 }

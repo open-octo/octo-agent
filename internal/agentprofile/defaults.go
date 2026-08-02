@@ -34,7 +34,7 @@ var defaultAgentsRoot = func() string {
 }
 
 // DefaultRoot is the on-disk location of the materialized curated experts
-// (~/.octo/agents-default), exported for `octo agents path`.
+// (~/.octo/agents-default).
 func DefaultRoot() string { return defaultAgentsRoot() }
 
 // MaterializeDefaults writes the embedded curated experts to the default root
@@ -45,8 +45,7 @@ func MaterializeDefaults(version string) error {
 	return materializeDefaults(defaultAgentsRoot(), version, false)
 }
 
-// UpdateDefaults forces a rewrite regardless of the stamp — backs
-// `octo agents update`.
+// UpdateDefaults forces a rewrite regardless of the stamp.
 func UpdateDefaults(version string) error {
 	return materializeDefaults(defaultAgentsRoot(), version, true)
 }
