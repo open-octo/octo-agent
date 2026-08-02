@@ -9,6 +9,7 @@
   import { get } from 'svelte/store'
   import * as api from './lib/api'
   import { installExternalLinkInterceptor } from './lib/externalLinks'
+  import { normalizeHash } from './lib/hashRouting'
   import AuthGate from './components/overlays/AuthGate.svelte'
   import FirstRunSetup from './components/overlays/FirstRunSetup.svelte'
   import Header from './components/layout/Header.svelte'
@@ -55,8 +56,7 @@
     // the hash back to the current view so a reload doesn't re-open the modal.
     if (v === 'settings') {
       settingsModalOpen.set(true)
-      const cv = get(view) || 'chat'
-      const hash = cv === 'chat' ? '#/chat' : `#/${cv}`
+      const hash = normalizeHash(get(view), get(activeSessionId))
       history.replaceState(null, '', location.pathname + location.search + hash)
       return
     }
@@ -111,7 +111,7 @@
   $effect(() => {
     const v = $view, sid = $activeSessionId, phase = $onboardPhase
     if (!routeReady || phase === 'unknown' || phase === 'key_setup') return
-    const hash = v === 'chat' ? (sid ? `#/chat/${encodeURIComponent(sid)}` : '#/chat') : `#/${v}`
+    const hash = normalizeHash(v, sid)
     if (location.hash !== hash) location.hash = hash
   })
 
