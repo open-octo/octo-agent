@@ -1,11 +1,10 @@
 # Desktop redesign — design reference
 
-`desktop-redesign-mock.html` is the interactive design mock for the desktop/web UI
-redesign (self-contained bundled HTML; open it in a browser — it needs JavaScript to
-unpack). It covers all 12 views, the settings modal (6 categories), the
-endpoint/model modals, the 3-step onboarding, both platforms (macOS/Windows title
-bars), and both agent states (idle/running). The mock exposes these as editable
-props on the embedded component.
+All 8 implementation phases below shipped and merged; this doc is kept for the
+design tokens and scope decisions. The original interactive design mock
+(`desktop-redesign-mock.html`, covering all 12 views, the settings modal, the
+endpoint/model modals, onboarding, both platforms, and both agent states) has
+been removed now that the real implementation supersedes it.
 
 ## Design tokens
 
