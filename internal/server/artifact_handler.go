@@ -90,12 +90,26 @@ func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 }
 
 // sessionWrotePath looks for a write_file, edit_file, or show_artifact tool_use
-// in the transcript whose path input matches reqPath (after Clean on both
-// sides — the payloads carry absolute paths, so no base-dir join is needed) and
+// in the transcript whose path matches reqPath (after Clean on both sides) and
 // which actually ran. show_artifact is how script-produced files (built rather
 // than written through the file tools) enter the whitelist. On a match it
 // returns the transcript's own copy of the path so callers serve a value sourced
 // from what the agent recorded rather than from the raw request.
+//
+// A call's path is matched in two places, because the two record different
+// forms of it:
+//
+//   - The tool_use input is the model's *raw* path — frequently relative or
+//     ~/-prefixed, since the file tools accept those and resolve them against
+//     the session working dir. It matches only when the model happened to
+//     pass an absolute path.
+//   - The answering tool_result's ui payload carries the path as the tool
+//     *resolved* it (always absolute; see write_file/edit_file/show_artifact),
+//     persisted with the transcript and invisible to the model. This is the
+//     same value the panel lists, and the only form that matches for the
+//     common relative-input case. The payload lives on the result block, so
+//     this form exists only once the call has finished — an in-flight write
+//     is still matched by its raw input alone.
 //
 // The "actually ran" half matters: the agent records a tool_use before the
 // permission gate rules on it, so a write the user *denied* sits in the
@@ -113,10 +127,44 @@ func sessionWrotePath(sess *agent.Session, reqPath string) (string, bool) {
 			if !ok {
 				continue
 			}
-			clean := filepath.Clean(p)
-			if clean != want || !callAuthorized(sess.Messages, i, b.ID) {
+			served := ""
+			if clean := filepath.Clean(p); clean == want {
+				served = clean
+			} else if resolved, ok := resultUIPath(sess.Messages, i, b.ID, want); ok {
+				served = resolved
+			}
+			if served == "" || !callAuthorized(sess.Messages, i, b.ID) {
 				continue
 			}
+			return served, true
+		}
+	}
+	return "", false
+}
+
+// resultUIPath returns the tool-resolved path from the ui payload of the
+// result answering the tool_use with the given id in messages[i], when that
+// path matches want. Scoping mirrors callAuthorized: tool-call ids come from
+// the model, so only the next message's blocks answer this call, and an error
+// result (a denial, a failed write) has no resolved path to vouch for. After
+// the transcript's JSON round-trip the payload decodes as map[string]any.
+func resultUIPath(msgs []agent.Message, i int, id, want string) (string, bool) {
+	if id == "" || i+1 >= len(msgs) {
+		return "", false
+	}
+	for _, rb := range msgs[i+1].Blocks {
+		if rb.Type != "tool_result" || rb.ToolUseID != id || rb.IsError {
+			continue
+		}
+		ui, ok := rb.UI.(map[string]any)
+		if !ok {
+			continue
+		}
+		p, ok := ui["path"].(string)
+		if !ok {
+			continue
+		}
+		if clean := filepath.Clean(p); clean == want {
 			return clean, true
 		}
 	}

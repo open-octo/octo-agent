@@ -182,6 +182,76 @@ func TestHandleGetArtifact_SizeCap(t *testing.T) {
 	}
 }
 
+// Models routinely pass relative paths (or ~/…) to write_file/edit_file; the
+// tools resolve them against the session working dir and record the absolute
+// result in the ui payload, which is also what the panel lists. The whitelist
+// must serve from that resolved path — matching only the raw tool_use input
+// 404s every relative-path write in the panel, which is most code edits.
+func TestHandleGetArtifact_RelativeInputPath(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	artDir := t.TempDir()
+	abs := filepath.Join(artDir, "main.go")
+	if err := os.WriteFile(abs, []byte("package main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Exactly what the transcript records when the model passes a relative
+	// path: the raw relative input on the tool_use, the tool-resolved absolute
+	// path on the answering result's ui payload.
+	sess := agent.NewSession("stub-model", "")
+	sess.Messages = append(sess.Messages, agent.Message{
+		Role: agent.RoleAssistant,
+		Blocks: []agent.ContentBlock{{
+			Type: "tool_use", ID: "t1", Name: "write_file",
+			Input: map[string]any{"path": "main.go", "content": "package main"},
+		}},
+	})
+	res := agent.NewToolResultBlock("t1", "wrote main.go", false)
+	res.UI = map[string]any{"type": "write", "path": abs, "size_bytes": 12}
+	sess.Messages = append(sess.Messages, agent.Message{
+		Role:   agent.RoleUser,
+		Blocks: []agent.ContentBlock{res},
+	})
+	if err := sess.Save(); err != nil {
+		t.Fatal(err)
+	}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	w := getArtifact(t, srv, sess.ID, abs)
+	if w.Code != http.StatusOK {
+		t.Fatalf("relative-input write: status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "package main" {
+		t.Errorf("body = %q", w.Body.String())
+	}
+
+	// The resolved path must still come from an *authorized* call: a ui
+	// payload on an error result (e.g. a denied write) proves nothing ran.
+	denied := agent.NewSession("stub-model", "")
+	denied.Messages = append(denied.Messages, agent.Message{
+		Role: agent.RoleAssistant,
+		Blocks: []agent.ContentBlock{{
+			Type: "tool_use", ID: "t1", Name: "write_file",
+			Input: map[string]any{"path": "main.go", "content": "x"},
+		}},
+	})
+	deniedRes := agent.NewToolResultBlock("t1", "permission_denied: user declined to run write_file", true)
+	deniedRes.UI = map[string]any{"type": "write", "path": abs}
+	denied.Messages = append(denied.Messages, agent.Message{
+		Role:   agent.RoleUser,
+		Blocks: []agent.ContentBlock{deniedRes},
+	})
+	if err := denied.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if w := getArtifact(t, srv, denied.ID, abs); w.Code != http.StatusNotFound {
+		t.Errorf("ui path on a denied write: status = %d, want 404", w.Code)
+	}
+}
+
 func TestHandleGetArtifact_ShowArtifactCountsAsWrite(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
