@@ -68,11 +68,15 @@
     // Optimistic update
     rows = rows.map(r => r.platform === platform ? { ...r, enabled } : r)
     try {
-      await api.saveChannel(platform, { enabled, fields: row.fields })
+      // Send only the flag — the backend merges fields, and echoing row.fields
+      // back would overwrite real secrets with their masked display values.
+      // The backend rejects enabling a channel whose adapter can't start
+      // (no/invalid credentials); on failure we revert below.
+      await api.saveChannel(platform, { enabled })
     } catch (e: any) {
       // Revert
       rows = rows.map(r => r.platform === platform ? { ...r, enabled: !enabled } : r)
-      showToast(`Failed to save channel: ${e.message}`, 'error')
+      showToast(`${e.message}`, 'error')
     }
   }
 

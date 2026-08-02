@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/channel/adapters/weixin/ilink"
 )
 
 // ─── Channels REST API ────────────────────────────────────────────────────
@@ -81,7 +82,9 @@ func (s *Server) handleGetChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 type channelUpdateRequest struct {
-	Enabled bool              `json:"enabled"`
+	// Enabled is a pointer so "field absent" (a credentials-only save, which
+	// implies enable) is distinguishable from an explicit toggle-off.
+	Enabled *bool             `json:"enabled"`
 	Fields  map[string]string `json:"fields"`
 }
 
@@ -121,11 +124,23 @@ func (s *Server) handleSaveChannel(w http.ResponseWriter, r *http.Request) {
 	for k, v := range req.Fields {
 		fields[k] = v
 	}
-	if _, ok := fields["enabled"]; !ok {
-		fields["enabled"] = req.Enabled
+	if req.Enabled != nil {
+		fields["enabled"] = *req.Enabled
 	}
 
 	cfg.SetPlatform(platform, fields)
+
+	// Reject enabling a platform whose adapter can't start from the merged
+	// config — it would fail at startup and enter a crash-restart loop.
+	// Configure the channel first; a successful configuration enables it
+	// automatically.
+	if inst := cfg.Platform(platform); len(inst) > 0 && inst[0].Enabled {
+		if err := channelStartupCheck(platform, inst[0].Config); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("cannot enable %s: %v", platform, err))
+			return
+		}
+	}
+
 	if err := cfg.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
 		return
@@ -320,6 +335,32 @@ func (s *Server) handleChannelSendFile(w http.ResponseWriter, r *http.Request) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
+// channelStartupCheck reports whether a platform's adapter could start with
+// the given config: it must construct, pass ValidateConfig, and — for weixin,
+// whose credentials live outside channels.yml — have a readable credential
+// file (the check Start performs).
+func channelStartupCheck(platform string, cfg channel.PlatformConfig) error {
+	ctor, err := channel.Find(platform)
+	if err != nil {
+		return nil // unregistered platform: nothing to validate against
+	}
+	ad, err := ctor(cfg)
+	if err != nil {
+		return err
+	}
+	if errs := ad.ValidateConfig(cfg); len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	if platform == "weixin" {
+		credPath, _ := cfg["cred_path"].(string)
+		creds, err := ilink.LoadCredentials(credPath)
+		if err != nil || creds == nil {
+			return fmt.Errorf("no credentials — log in first (channel-manager setup weixin)")
+		}
+	}
+	return nil
+}
+
 func instanceToInfo(platform, adapterID string, ic channel.InstanceConfig) channelInfo {
 	fields := make(map[string]string)
 	for k, v := range ic.Config {
@@ -336,11 +377,20 @@ func instanceToInfo(platform, adapterID string, ic channel.InstanceConfig) chann
 		fields[k] = s
 	}
 
+	// Weixin keeps credentials in ~/.octo/weixin-credentials.json rather than
+	// channels.yml, so an empty field map can still mean "configured".
+	hasConfig := len(fields) > 0
+	if platform == "weixin" && !hasConfig {
+		if creds, err := ilink.LoadCredentials(fields["cred_path"]); err == nil && creds != nil {
+			hasConfig = true
+		}
+	}
+
 	return channelInfo{
 		Platform:  platform,
 		AdapterID: adapterID,
 		Enabled:   ic.Enabled,
-		HasConfig: len(fields) > 0,
+		HasConfig: hasConfig,
 		Fields:    fields,
 	}
 }

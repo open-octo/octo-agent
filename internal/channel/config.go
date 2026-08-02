@@ -171,7 +171,14 @@ func (c *Config) SetPlatform(name string, fields map[string]any) {
 	for k, v := range fields {
 		ic.Config[k] = v
 	}
-	ic.Enabled = true
+	// An explicit `enabled` key wins — a toggle-off save must persist.
+	// Absent means the caller is only merging credentials, which has always
+	// implied "configure ⇒ enable".
+	if _, ok := fields["enabled"]; ok {
+		ic.Enabled = isEnabled(fields)
+	} else {
+		ic.Enabled = true
+	}
 	delete(ic.Config, "enabled") // promoted to struct field, must not linger in map
 	c.Channels[name] = list
 }
