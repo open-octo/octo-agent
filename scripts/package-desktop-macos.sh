@@ -44,7 +44,16 @@ for arch in amd64 arm64; do
 
 	echo "==> building octo-desktop (darwin/$arch)"
 	out="$ROOT/octo-desktop-$arch"
-	macos_ver="$(sw_vers -productVersion | cut -d. -f1)"
+	# Fixed, not derived from the build machine's own macOS version (a prior
+	# version of this script used `sw_vers -productVersion` here, which baked
+	# the CI runner's live OS version into the binary's LC_VERSION_MIN load
+	# command — on a runner newer than a user's Mac, launching failed with
+	# "You can't use this version of the application... with this version of
+	# macOS", unrelated to the LSMinimumSystemVersion=11.0 in Info.plist).
+	# 11.0 matches that Info.plist value and Go's own linker default, so it
+	# also fully eliminates the SDK-vs-link-target warning this flag was
+	# added for in the first place.
+	macos_ver="11.0"
 	( cd "$MOD_DIR" && \
 		GOOS=darwin GOARCH="$arch" CGO_ENABLED=1 CC="clang -arch $cc_arch" \
 		CGO_CFLAGS="-mmacosx-version-min=$macos_ver" \

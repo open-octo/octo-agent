@@ -94,7 +94,12 @@ build-full: build
 # WebView2). Embeds the web UI first (the in-process server go:embeds webdist).
 # Produces a bare binary; use `wails3 build` inside cmd/octo-desktop for a
 # packaged .app / installer.
-DESKTOP_MACOS_VERSION ?= $(shell sw_vers -productVersion 2>/dev/null | cut -d. -f1 || echo 11)
+# Fixed at 11.0 (matches cmd/octo-desktop's Info.plist LSMinimumSystemVersion
+# and Go's own linker default) rather than derived from the build machine's
+# live macOS version — deriving it from `sw_vers` bakes whatever OS the
+# builder happens to run into the binary's LC_VERSION_MIN, silently raising
+# the real minimum macOS required to launch it.
+DESKTOP_MACOS_VERSION ?= 11.0
 desktop: web-build
 	cd cmd/octo-desktop && CGO_ENABLED=1 \
 		CGO_CFLAGS="-mmacosx-version-min=$(DESKTOP_MACOS_VERSION)" \
