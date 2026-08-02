@@ -2454,8 +2454,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 .meta-time { font-size: 11px; color: var(--text-secondary); }
 
 /* ── User message ────────────────────────────────────────────────────────── */
-.msg-user { display: flex; flex-direction: column; gap: 9px; }
-.user-card-wrap { display: flex; flex-direction: column; gap: 4px; }
+.msg-user { display: flex; flex-direction: column; gap: 9px; align-items: flex-end; }
+/* Right-side chat layout: meta row reads "time · name · avatar" left→right. */
+.msg-user .msg-meta { flex-direction: row-reverse; }
+.user-card-wrap { display: flex; flex-direction: column; gap: 4px; max-width: 80%; }
 .user-card {
   background: var(--bg-container); border: 1px solid var(--border);
   border-radius: 12px; padding: 14px 16px; box-shadow: var(--card-shadow);
