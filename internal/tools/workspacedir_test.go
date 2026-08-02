@@ -5,19 +5,22 @@ import (
 	"testing"
 )
 
-// Unset config: no override, today's behavior (server launch dir) is untouched.
+// Unset config resolves to the global default, ~/Octo.
 func TestResolveWorkspaceDir_Empty(t *testing.T) {
+	home := setTestHomeDir(t)
+
 	got, err := ResolveWorkspaceDir("")
 	if err != nil {
 		t.Fatalf("ResolveWorkspaceDir(\"\") error = %v, want nil", err)
 	}
-	if got != "" {
-		t.Fatalf("ResolveWorkspaceDir(\"\") = %q, want \"\"", got)
+	want := filepath.Join(home, "Octo")
+	if got != want {
+		t.Fatalf("ResolveWorkspaceDir(\"\") = %q, want %q", got, want)
 	}
 }
 
-// A literal path (anything other than "" or "auto") is a power-user override:
-// returned unchanged.
+// A literal path (anything other than "") is an explicit override that
+// replaces the ~/Octo default: returned unchanged.
 func TestResolveWorkspaceDir_LiteralPath(t *testing.T) {
 	const want = "/some/literal/path"
 	got, err := ResolveWorkspaceDir(want)
@@ -52,18 +55,14 @@ func setTestHomeDir(t *testing.T) string {
 	return tmp
 }
 
-// "auto" resolves to ~/Desktop/octo — a discoverable, non-technical-user
-// friendly default. No existence check: Desktop (and octo under it) is
-// created lazily via MkdirAll the first time a session actually needs it.
-func TestResolveWorkspaceDir_Auto(t *testing.T) {
-	home := setTestHomeDir(t)
-
+// A literal value equal to the old magic keyword is now just an ordinary
+// relative path override — "auto" is no longer special-cased.
+func TestResolveWorkspaceDir_LiteralNamedAuto(t *testing.T) {
 	got, err := ResolveWorkspaceDir("auto")
 	if err != nil {
 		t.Fatalf("ResolveWorkspaceDir(\"auto\") error = %v, want nil", err)
 	}
-	want := filepath.Join(home, "Desktop", "octo")
-	if got != want {
-		t.Fatalf("ResolveWorkspaceDir(\"auto\") = %q, want %q", got, want)
+	if got != "auto" {
+		t.Fatalf("ResolveWorkspaceDir(\"auto\") = %q, want %q", got, "auto")
 	}
 }

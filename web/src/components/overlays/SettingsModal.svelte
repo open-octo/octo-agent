@@ -45,7 +45,11 @@
   let permissionMode   = $state('interactive')
   let showReasoningVal = $state(true)
   let coauthorVal      = $state(true)
-  let workspaceDir     = $state('')
+  let workspaceDir        = $state('')
+  // Resolved default new sessions get when workspaceDir is empty (~/Octo,
+  // expanded server-side) — shown as the input's placeholder instead of a
+  // bare "auto" that's easy to mistake for an actually-saved value.
+  let workspaceDirDefault = $state('')
 
   // ── Endpoints (display-only, configured through conversation) ───────────────
   let endpoints  = $state<EndpointConfig[]>([])
@@ -92,7 +96,8 @@
       permissionMode   = cfg.permission_mode ?? 'interactive'
       showReasoningVal = cfg.show_reasoning ?? true
       coauthorVal      = cfg.coauthor ?? true
-      workspaceDir     = cfg.workspace_dir ?? ''
+      workspaceDir        = cfg.workspace_dir ?? ''
+      workspaceDirDefault = cfg.workspace_dir_default ?? ''
       if (cfg.language) language = cfg.language
       setLocale(cfg.language === 'zh' || cfg.language === 'zh-TW' ? 'zh' : 'en')
 
@@ -449,7 +454,7 @@
             <input
               class="sinput mono"
               type="text"
-              placeholder="auto"
+              placeholder={workspaceDirDefault}
               value={workspaceDir}
               onchange={(e) => saveWorkspaceDir(e.currentTarget.value)}
             />

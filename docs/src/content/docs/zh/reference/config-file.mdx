@@ -29,7 +29,7 @@ flag。所有字段都是可选的——文件不存在，或者字段缺失，�
 | `compact_auto_pct` | int | 自动压缩阈值,按上下文窗口的百分比（默认 `75`）；同一个阈值在轮次之间和每个工具调用批次后都会检查 |
 | `reasoning_effort` | string | 全局推理强度：`low` \| `medium` \| `high` \| `xhigh` \| `max`；留空表示关闭 |
 | `show_reasoning` | bool | 是否把推理轨迹提供给 Web UI 的全局默认值 |
-| `workspace_dir` | string | 新建 Web 会话的默认工作目录；`"auto"` → `~/Desktop/octo` |
+| `workspace_dir` | string | 新建 Web 会话的默认工作目录；留空 → `~/Octo`，也可填写具体路径覆盖 |
 | `tools` | [tools 配置块](#tools-配置块) | 各工具的行为开关 |
 | `browser` | [browser 配置块](#browser-配置块) | Chrome 连接设置 |
 | `goal` | `{ enabled: bool }` | 控制 `/goal` 和目标相关工具（默认启用） |

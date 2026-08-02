@@ -101,10 +101,10 @@ func homeIfRootLaunch(wd, home string) string {
 }
 
 // ensureWorkingDir moves the process out of a root/unknown launch directory
-// into the user's home. New sessions with no configured workspace_dir default
-// to the server's launch directory, so a Finder-launched app left at "/" would
-// run the agent's tools from the filesystem root — the reported bug. Best
-// effort: a chdir failure leaves the inherited dir in place.
+// into the user's home. The server's launch dir still seeds skill discovery
+// and the project-memory root (server.go), so a Finder-launched app left at
+// "/" would otherwise run those from the filesystem root — the reported bug.
+// Best effort: a chdir failure leaves the inherited dir in place.
 func ensureWorkingDir() {
 	wd, _ := os.Getwd()
 	home, _ := os.UserHomeDir()
@@ -123,7 +123,7 @@ func main() {
 
 	// A GUI launch inherits "/" as the working directory; move to the user's
 	// home before anything reads it (the in-process server records its launch
-	// dir as the default for sessions without a configured workspace_dir).
+	// dir as the skill-discovery and project-memory root).
 	ensureWorkingDir()
 
 	// A GUI launch also inherits a minimal PATH (macOS: no ~/.local/bin,

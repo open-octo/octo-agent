@@ -13,7 +13,7 @@ Path: `~/.octo/config.yml`. Every field is optional — a missing file or field 
 | `coauthor` | bool | Append `Co-authored-by` to git commits (default true) |
 | `reasoning_effort` | string | Global reasoning intensity: `low`\|`medium`\|`high`\|`xhigh`\|`max`; empty = off |
 | `show_reasoning` | bool | Global default for surfacing the reasoning trace to the web UI (default off; terminal never renders it) |
-| `workspace_dir` | string | Default working dir for new **web** sessions only; `"auto"` → `~/Desktop/octo` |
+| `workspace_dir` | string | Default working dir for new **web** sessions only; empty → `~/Octo`, or set a literal path to override |
 | `goal.enabled` | bool | Gates `/goal` and the goal tools (default true) |
 | `browser.connect_port` / `browser.attach_running` | int / bool | Chrome connection settings — see `octo browser setup` |
 | `memory_backend` | object | Optional external semantic memory (hindsight/mem0/agentmemory) — see `MEMORY.md` |
@@ -31,7 +31,7 @@ endpoints:
 default: anthropic::claude-sonnet-5
 permission_mode: interactive
 coauthor: true
-workspace_dir: auto
+workspace_dir: ~/projects
 ```
 
 Full field reference (every endpoint/model field, `tools.disabled_skills`, compaction thresholds): **https://octo-agent.dev/docs/reference/config-file/** (`web_fetch`).

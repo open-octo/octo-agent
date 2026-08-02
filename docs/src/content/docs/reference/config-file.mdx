@@ -31,7 +31,7 @@ anything friendly.
 | `compact_auto_pct` | int | Auto-compaction threshold as % of the context window (default `75`); the same threshold is checked both between turns and after each tool-call batch |
 | `reasoning_effort` | string | Global reasoning intensity: `low` \| `medium` \| `high` \| `xhigh` \| `max`; empty means off |
 | `show_reasoning` | bool | Global default for surfacing the reasoning trace to the Web UI |
-| `workspace_dir` | string | Default working dir for new web sessions; `"auto"` → `~/Desktop/octo` |
+| `workspace_dir` | string | Default working dir for new web sessions; empty → `~/Octo`, or set a literal path to override |
 | `tools` | [tools block](#tools-block) | Per-tool behavior knobs |
 | `browser` | [browser block](#browser-block) | Chrome connection settings |
 | `goal` | `{ enabled: bool }` | Gates `/goal` and the goal tools (default enabled) |

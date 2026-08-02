@@ -845,6 +845,9 @@ export interface ConfigResponse {
   show_reasoning?: boolean
   coauthor?: boolean
   workspace_dir?: string
+  // workspace_dir_default is the resolved directory sessions actually get
+  // when workspace_dir is empty (~/Octo) — display this, not a bare "auto".
+  workspace_dir_default?: string
   reasoning_effort?: string   // PR5: global reasoning effort
   permission_mode?: string    // PR6: global permission mode (was per-default-entry)
 }

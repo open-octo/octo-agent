@@ -94,10 +94,10 @@ type Config struct {
 
 	// WorkspaceDir overrides the default working directory new web sessions
 	// are created with (see config.Config.WorkspaceDir / tools.ResolveWorkspaceDir).
-	// Empty (default) falls back to ~/.octo/config.yml's workspace_dir, then
-	// to no override at all — unchanged from today's curCwd() behavior. No
-	// `octo serve` flag sets this; it exists mainly so tests can inject a
-	// literal path without touching the real config file.
+	// Empty (default) falls back to ~/.octo/config.yml's workspace_dir, which
+	// itself resolves to ~/Octo when unset. No `octo serve` flag sets this;
+	// it exists mainly so tests can inject a literal path without touching
+	// the real config file.
 	WorkspaceDir string
 
 	// Native, when non-nil, is the desktop shell's hook into OS-native
@@ -442,8 +442,9 @@ func New(cfg Config) (*Server, error) {
 	// Resolve the default workspace dir new web sessions get. cfg.WorkspaceDir
 	// (no `octo serve` flag sets it today) takes precedence so tests can inject
 	// a literal path without touching ~/.octo/config.yml; production falls back
-	// to the file config's workspace_dir. A resolve error (e.g. no home dir)
-	// degrades to "" — no override — rather than failing server startup.
+	// to the file config's workspace_dir, which resolves to ~/Octo when unset.
+	// A resolve error (e.g. no home dir) degrades to "" — no override, session
+	// keeps using the server's launch directory — rather than failing startup.
 	rawWorkspaceDir := cfg.WorkspaceDir
 	if rawWorkspaceDir == "" {
 		rawWorkspaceDir = fileCfg.WorkspaceDir

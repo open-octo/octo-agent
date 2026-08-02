@@ -234,13 +234,13 @@ type skillInfo struct {
 }
 
 // applyDefaultWorkspaceDir sets sess's WorkingDir to the server's configured
-// default workspace dir (cfg.WorkspaceDir / tools.ResolveWorkspaceDir),
-// unless the session already has one of its own — so it composes with the
-// PATCH /api/sessions/{id}/working_dir override without special-casing. The
-// directory is created lazily here, the first time a session actually needs
-// it, rather than at server startup. A failure here is logged and otherwise
-// a no-op: the session just falls back to the server's launch directory,
-// exactly like before workspace_dir existed.
+// default workspace dir (cfg.WorkspaceDir / tools.ResolveWorkspaceDir, ~/Octo
+// unless overridden), unless the session already has one of its own — so it
+// composes with the PATCH /api/sessions/{id}/working_dir override without
+// special-casing. The directory is created lazily here, the first time a
+// session actually needs it, rather than at server startup. A failure here
+// is logged and otherwise a no-op: the session just falls back to the
+// server's launch directory, exactly like before workspace_dir existed.
 func (s *Server) applyDefaultWorkspaceDir(sess *agent.Session) {
 	dir := s.curWorkspaceDir()
 	if dir == "" || sess.WorkingDir != "" {

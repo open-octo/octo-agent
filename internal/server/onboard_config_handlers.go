@@ -203,12 +203,16 @@ func (s *Server) handleOnboardAttempt(w http.ResponseWriter, r *http.Request) {
 // only the global settings remain. ReasoningEffort is the global reasoning
 // level (PR5 deleted per-entry reasoning).
 type configResponse struct {
-	FontSize        string `json:"font_size,omitempty"`
-	Language        string `json:"language,omitempty"`
-	ShowReasoning   *bool  `json:"show_reasoning,omitempty"`
-	Coauthor        *bool  `json:"coauthor,omitempty"`
-	WorkspaceDir    string `json:"workspace_dir,omitempty"`
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	FontSize      string `json:"font_size,omitempty"`
+	Language      string `json:"language,omitempty"`
+	ShowReasoning *bool  `json:"show_reasoning,omitempty"`
+	Coauthor      *bool  `json:"coauthor,omitempty"`
+	WorkspaceDir  string `json:"workspace_dir,omitempty"`
+	// WorkspaceDirDefault is the resolved directory sessions actually get
+	// when WorkspaceDir is empty (i.e. ~/Octo) — the Settings UI shows it
+	// as the effective default instead of a bare, easily-misread "auto".
+	WorkspaceDirDefault string `json:"workspace_dir_default,omitempty"`
+	ReasoningEffort     string `json:"reasoning_effort,omitempty"`
 	// PermissionMode is the global default permission mode. PR5 lifted
 	// per-entry permission_mode to global (per-entry reasoning was deleted;
 	// permission_mode was always global in practice — the old default entry
@@ -234,13 +238,14 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		re = "off"
 	}
 	writeJSON(w, http.StatusOK, configResponse{
-		FontSize:        "medium",
-		Language:        cfg.Language,
-		ShowReasoning:   cfg.ShowReasoning,
-		Coauthor:        &effCoauthor,
-		WorkspaceDir:    cfg.WorkspaceDir,
-		ReasoningEffort: re,
-		PermissionMode:  cfg.PermissionMode,
+		FontSize:            "medium",
+		Language:            cfg.Language,
+		ShowReasoning:       cfg.ShowReasoning,
+		Coauthor:            &effCoauthor,
+		WorkspaceDir:        cfg.WorkspaceDir,
+		WorkspaceDirDefault: s.curWorkspaceDir(),
+		ReasoningEffort:     re,
+		PermissionMode:      cfg.PermissionMode,
 	})
 }
 
@@ -448,11 +453,10 @@ type putWorkspaceDirRequest struct {
 }
 
 // handlePutWorkspaceDir updates the global default working directory used for
-// new web sessions. It accepts the raw config value: empty clears the override
-// and falls back to the server's launch directory, "auto" resolves to
-// ~/Desktop/octo, and anything else is stored as a literal path. The server's
-// resolved default is also updated so new sessions pick it up immediately
-// without a restart.
+// new web sessions. It accepts the raw config value: empty clears the
+// override and resolves to ~/Octo, and anything else is stored as a literal
+// path. The server's resolved default is also updated so new sessions pick
+// it up immediately without a restart.
 func (s *Server) handlePutWorkspaceDir(w http.ResponseWriter, r *http.Request) {
 	var req putWorkspaceDirRequest
 	if err := readBodyJSON(r, &req); err != nil {

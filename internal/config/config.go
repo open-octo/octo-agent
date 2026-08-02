@@ -191,11 +191,11 @@ type Config struct {
 	// is separate from and does not affect the built-in MEMORY.md layer.
 	MemoryBackend MemoryBackendConfig `yaml:"memory_backend,omitempty"`
 	// WorkspaceDir sets the default working directory new web sessions are
-	// created with. Empty (default) changes nothing: a session still falls
-	// back to the server's own launch directory. "auto" resolves to
-	// ~/Desktop/octo (see tools.ResolveWorkspaceDir); anything else is used
-	// as a literal path. Does not affect CLI/TUI sessions or the server's
-	// own cwd, and composes with the per-session working_dir override.
+	// created with. Empty (default) resolves to ~/Octo (see
+	// tools.ResolveWorkspaceDir); anything else is used as a literal path,
+	// letting the user override the global default explicitly. Does not
+	// affect CLI/TUI sessions or the server's own cwd, and composes with the
+	// per-session working_dir override.
 	WorkspaceDir string `yaml:"workspace_dir,omitempty"`
 	// Language persists the user's UI language preference ("en" | "zh").
 	// Empty means the default (English).

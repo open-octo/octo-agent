@@ -292,10 +292,10 @@ func TestCreateSession_EntryIDBindsSession(t *testing.T) {
 }
 
 // Regression guard: with no workspace dir configured, a newly created
-// session's WorkingDir stays empty — the server's launch directory keeps
-// being the default, exactly like before workspace_dir existed.
-func TestCreateSession_NoWorkspaceDir_WorkingDirEmpty(t *testing.T) {
-	setTestHome(t)
+// session's WorkingDir defaults to ~/Octo — the global default every user
+// gets unless they explicitly override it.
+func TestCreateSession_NoWorkspaceDir_DefaultsToOcto(t *testing.T) {
+	home := setTestHome(t)
 	seedModels(t, config.Config{
 		Endpoints: []config.Endpoint{{ID: "ep-a", Provider: "anthropic", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}}},
 		Default:   "ep-a::claude-sonnet-4-6",
@@ -318,8 +318,9 @@ func TestCreateSession_NoWorkspaceDir_WorkingDirEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sess.WorkingDir != "" {
-		t.Errorf("WorkingDir = %q, want \"\" (no workspace_dir configured)", sess.WorkingDir)
+	wantDir := filepath.Join(home, "Octo")
+	if sess.WorkingDir != wantDir {
+		t.Errorf("WorkingDir = %q, want %q (default ~/Octo)", sess.WorkingDir, wantDir)
 	}
 }
 
@@ -595,6 +596,27 @@ func TestGetConfig_WorkspaceDir(t *testing.T) {
 	resp := getConfigResponse(t, srv)
 	if resp.WorkspaceDir != "~/octo-projects" {
 		t.Errorf("workspace_dir = %q, want %q", resp.WorkspaceDir, "~/octo-projects")
+	}
+}
+
+// GET /api/config always reports the resolved effective default too, so the
+// Settings UI can show it instead of a bare, easily-misread "auto" — even
+// when the raw config value is empty and resolves to ~/Octo.
+func TestGetConfig_WorkspaceDirDefault_ResolvesToOcto(t *testing.T) {
+	home := setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{{ID: "ep-a", Provider: "anthropic", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}}},
+		Default:   "ep-a::claude-sonnet-4-6",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	resp := getConfigResponse(t, srv)
+	wantDefault := filepath.Join(home, "Octo")
+	if resp.WorkspaceDirDefault != wantDefault {
+		t.Errorf("workspace_dir_default = %q, want %q", resp.WorkspaceDirDefault, wantDefault)
+	}
+	if resp.WorkspaceDir != "" {
+		t.Errorf("workspace_dir = %q, want \"\" (not customized)", resp.WorkspaceDir)
 	}
 }
 
