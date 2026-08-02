@@ -305,7 +305,7 @@ type createSessionGroupRequest struct {
 func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request) {
 	var req createSessionGroupRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 	name := strings.TrimSpace(req.Name)
@@ -348,7 +348,7 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 	}
 	var req updateSessionGroupRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 	if req.Name == nil && req.Collapsed == nil {
@@ -448,7 +448,7 @@ type reorderSessionGroupsRequest struct {
 func (s *Server) handleReorderSessionGroups(w http.ResponseWriter, r *http.Request) {
 	var req reorderSessionGroupsRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 
@@ -505,7 +505,7 @@ func (s *Server) handleSetSessionGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	var req setSessionGroupRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 
@@ -569,7 +569,7 @@ func (s *Server) handleSetSessionPin(w http.ResponseWriter, r *http.Request) {
 	}
 	var req setSessionPinRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 

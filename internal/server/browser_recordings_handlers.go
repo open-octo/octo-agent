@@ -108,7 +108,7 @@ func (s *Server) handleSaveBrowserRecording(w http.ResponseWriter, r *http.Reque
 		YAML string `json:"yaml"`
 	}
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 	sk, err := browser.ParseRecording([]byte(req.YAML))

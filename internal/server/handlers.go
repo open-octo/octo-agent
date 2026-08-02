@@ -265,7 +265,7 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 
 	var req createChatRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 	if strings.TrimSpace(req.Message) == "" {
@@ -329,7 +329,7 @@ func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 
 	var req turnRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 	if strings.TrimSpace(req.Message) == "" {
@@ -426,7 +426,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	var req sessionCreateRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 
@@ -741,7 +741,7 @@ type deleteSessionsRequest struct {
 func (s *Server) handleDeleteSessions(w http.ResponseWriter, r *http.Request) {
 	var req deleteSessionsRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 	if len(req.IDs) == 0 {
@@ -791,7 +791,7 @@ func (s *Server) handleBranchSession(w http.ResponseWriter, r *http.Request) {
 	}
 	var req branchSessionRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 	src, err := agent.LoadSession(id)
@@ -844,7 +844,7 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	var req editMessageRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 	if strings.TrimSpace(req.NewContent) == "" {
@@ -1069,7 +1069,7 @@ type fileActionRequest struct {
 func (s *Server) handleFileAction(w http.ResponseWriter, r *http.Request) {
 	var req fileActionRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 	if req.Path == "" {
@@ -1156,7 +1156,7 @@ func (s *Server) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	var req updateSessionRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 	name := strings.TrimSpace(req.Name)
@@ -1198,7 +1198,7 @@ func (s *Server) handleUpdateSessionModel(w http.ResponseWriter, r *http.Request
 
 	var req updateSessionModelRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 	if req.ModelID == "" {
@@ -1276,7 +1276,7 @@ func (s *Server) handleUpdateSessionReasoningEffort(w http.ResponseWriter, r *ht
 
 	var req updateSessionReasoningEffortRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 
@@ -1375,7 +1375,7 @@ func (s *Server) handleUpdateSessionPermissionMode(w http.ResponseWriter, r *htt
 
 	var req updateSessionPermissionModeRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 
@@ -1449,7 +1449,7 @@ func (s *Server) handleUpdateSessionShowReasoning(w http.ResponseWriter, r *http
 
 	var req updateSessionShowReasoningRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 
@@ -1524,7 +1524,7 @@ func (s *Server) handleUpdateSessionWorkingDir(w http.ResponseWriter, r *http.Re
 
 	var req updateSessionWorkingDirRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 	if req.WorkingDir == "" {
@@ -1611,7 +1611,7 @@ func (s *Server) handleUpdateSessionAgentProfile(w http.ResponseWriter, r *http.
 
 	var req updateSessionAgentProfileRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 	agentProfile := req.AgentProfile

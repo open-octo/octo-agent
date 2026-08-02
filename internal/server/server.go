@@ -1366,6 +1366,13 @@ func readBodyJSON(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
+// writeInvalidJSONBody writes the standard 400 response for a readBodyJSON
+// failure, including the decode error so callers can tell a body-shape
+// mismatch from a syntax error instead of guessing.
+func writeInvalidJSONBody(w http.ResponseWriter, err error) {
+	writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+}
+
 // ─── Provider resolution ────────────────────────────────────────────────────
 //
 // The server resolves provider/model/key/base-URL exactly as before, then hands

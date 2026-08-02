@@ -109,7 +109,7 @@ func (s *Server) handleSaveChannel(w http.ResponseWriter, r *http.Request) {
 
 	var req channelUpdateRequest
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 
@@ -294,7 +294,7 @@ func (s *Server) handleChannelSendText(w http.ResponseWriter, r *http.Request) {
 		Text   string `json:"text"`
 	}
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 	if strings.TrimSpace(req.ChatID) == "" || strings.TrimSpace(req.Text) == "" {
@@ -319,7 +319,7 @@ func (s *Server) handleChannelSendFile(w http.ResponseWriter, r *http.Request) {
 		Name   string `json:"name"`
 	}
 	if err := readBodyJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		writeInvalidJSONBody(w, err)
 		return
 	}
 	if strings.TrimSpace(req.ChatID) == "" || strings.TrimSpace(req.Path) == "" {

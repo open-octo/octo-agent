@@ -716,6 +716,56 @@ func TestPutPermissionMode_InvalidMode_Rejects(t *testing.T) {
 	}
 }
 
+// TestCreateEndpoint_DocumentedModelsShape sends the exact request body
+// documented in config-setup/SKILL.md's "Create an Endpoint" example — a
+// models array of {"model": ..., "vision": ...} objects, matching
+// createEndpointRequest.Models []endpointModelIn. Regression guard for #1941,
+// where the doc and the wire format had drifted apart.
+func TestCreateEndpoint_DocumentedModelsShape(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	body := `{
+		"id": "my-relay",
+		"name": "My Relay",
+		"provider": "custom",
+		"api_key": "sk-test",
+		"base_url": "https://api.example.com",
+		"protocol": "openai",
+		"models": [{"model": "gpt-4o", "vision": false}]
+	}`
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints", body)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST /api/config/endpoints = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var resp endpointJSONOut
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v (body: %s)", err, w.Body.String())
+	}
+	if len(resp.Models) != 1 || resp.Models[0].Model != "gpt-4o" {
+		t.Fatalf("models = %+v, want one gpt-4o entry", resp.Models)
+	}
+}
+
+// TestCreateEndpoint_StringModelsRejectedWithDetail covers the failure mode
+// #1941 actually hit: a plain string models array (the shape SKILL.md wrongly
+// documented before this fix) doesn't unmarshal into []endpointModelIn. The
+// 400 must explain why instead of the old bare "invalid JSON body".
+func TestCreateEndpoint_StringModelsRejectedWithDetail(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	body := `{"id": "my-relay", "provider": "custom", "models": ["gpt-4o"]}`
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints", body)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("POST /api/config/endpoints with string models = %d, want %d: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "cannot unmarshal") {
+		t.Errorf("error body = %q, want the underlying decode error, not a bare message", w.Body.String())
+	}
+}
+
 func TestSetEndpointDefault_WithModelQuery_SetsSpecificModel(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
