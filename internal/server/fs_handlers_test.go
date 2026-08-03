@@ -232,20 +232,41 @@ func TestFsListWindowsDriveSelect(t *testing.T) {
 		t.Skip("Windows-only: drive selection")
 	}
 	letter := strings.TrimSuffix(currentDrive(t), ":")
-	rec := doFsList(t, fsThisPCPath+"/"+letter+":")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("got %d, want 200 (%s)", rec.Code, rec.Body.String())
+	for _, l := range []string{letter, strings.ToLower(letter)} {
+		rec := doFsList(t, fsThisPCPath+"/"+l+":")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("letter %q: got %d, want 200 (%s)", l, rec.Code, rec.Body.String())
+		}
+		var resp fsListResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("letter %q: decode: %v", l, err)
+		}
+		want := letter + `:\`
+		if resp.Path != want {
+			t.Errorf("letter %q: path: got %q, want %q", l, resp.Path, want)
+		}
+		if resp.IsThisPC {
+			t.Errorf("letter %q: is_this_pc: got true, want false (this is a real directory listing)", l)
+		}
+		// End-to-end: this should be an ordinary listing of the drive's real
+		// contents, not an empty stand-in — a Windows system drive always has
+		// at least Windows/Program Files/Users at its root.
+		if len(resp.Entries) == 0 {
+			t.Errorf("letter %q: entries empty, want the drive root's real contents", l)
+		}
 	}
-	var resp fsListResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
+}
+
+// The sentinel is meaningless outside Windows — every project CI runner that
+// isn't windows-latest (ubuntu, macos) exercises this path on every run, so
+// it's the one guard in this file that isn't gated behind t.Skip.
+func TestFsListThisPCSentinelIgnoredOnNonWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("covered by the Windows-only tests above")
 	}
-	want := letter + `:\`
-	if resp.Path != want {
-		t.Errorf("path: got %q, want %q", resp.Path, want)
-	}
-	if resp.IsThisPC {
-		t.Error("is_this_pc: got true, want false (this is a real directory listing)")
+	rec := doFsList(t, fsThisPCPath)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d, want 400 (the sentinel isn't a real path here) (%s)", rec.Code, rec.Body.String())
 	}
 }
 

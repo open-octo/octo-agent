@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 )
 
 // fsListCap bounds how many entries a single listing returns so a pathological
@@ -28,19 +29,56 @@ const fsListCap = 1000
 const fsThisPCPath = "<This PC>"
 
 var (
+	// winDriveRootRe only recognizes a lettered drive root (C:\), not a UNC
+	// share (\\server\share) or an extended-length path (\\?\C:\) — those
+	// also collapse under filepath.Dir but have no "This PC" entry to
+	// navigate back from, so they're left with the pre-fix parent == ""
+	// behavior. Not reachable through the picker's own navigation (nothing
+	// it lists ever becomes a UNC path), so only a directly-typed working
+	// dir on one would hit this.
 	winDriveRootRe   = regexp.MustCompile(`^[A-Za-z]:\\?$`)
 	winDriveSelectRe = regexp.MustCompile(`^` + regexp.QuoteMeta(fsThisPCPath) + `/([A-Za-z]):$`)
 )
 
 // listWindowsDrives probes each possible drive letter with os.Stat rather
 // than calling the GetLogicalDrives Win32 API — one less cgo/syscall surface
-// to maintain for a call made once per "This PC" navigation, and the 26
-// stats it costs are negligible.
+// to maintain. Probes run concurrently with a bounded overall wait: os.Stat
+// has no cancellation of its own, and a stale mapped network drive (common
+// on a corporate machine after a VPN drops) can block for the OS's SMB
+// timeout — tens of seconds, the classic cause of Explorer hanging on "This
+// PC". A drive that hasn't answered within the deadline is just left off
+// the list rather than stalling the whole navigation; its goroutine is
+// abandoned and exits harmlessly whenever the OS call eventually returns.
 func listWindowsDrives() []fsEntry {
-	var drives []fsEntry
+	type probe struct {
+		letter rune
+		ok     bool
+	}
+	results := make(chan probe, 26)
 	for c := 'A'; c <= 'Z'; c++ {
-		root := string(c) + ":\\"
-		if info, err := os.Stat(root); err == nil && info.IsDir() {
+		go func(c rune) {
+			info, err := os.Stat(string(c) + ":\\")
+			results <- probe{c, err == nil && info.IsDir()}
+		}(c)
+	}
+
+	seen := make(map[rune]bool, 26)
+	deadline := time.After(2 * time.Second)
+collect:
+	for i := 0; i < 26; i++ {
+		select {
+		case p := <-results:
+			if p.ok {
+				seen[p.letter] = true
+			}
+		case <-deadline:
+			break collect
+		}
+	}
+
+	drives := make([]fsEntry, 0, len(seen))
+	for c := 'A'; c <= 'Z'; c++ {
+		if seen[c] {
 			drives = append(drives, fsEntry{Name: string(c) + ":", IsDir: true})
 		}
 	}
