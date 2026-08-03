@@ -113,16 +113,16 @@ func ensureWorkingDir() {
 	}
 }
 
-// ensureValidTempDir unsets $TMPDIR when it points at a directory that no
-// longer exists, so Go's os.TempDir() (and the Wails updater's
-// os.MkdirTemp("", ...) on top of it) falls back to the platform default
-// instead of failing outright.
+// ensureValidTempDir unsets $TMPDIR when it doesn't point at a usable
+// directory (missing, or a file rather than a directory), so Go's
+// os.TempDir() (and the Wails updater's os.MkdirTemp("", ...) on top of it)
+// falls back to the platform default instead of failing outright.
 func ensureValidTempDir() {
 	dir := os.Getenv("TMPDIR")
 	if dir == "" {
 		return
 	}
-	if _, err := os.Stat(dir); err != nil {
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		os.Unsetenv("TMPDIR")
 	}
 }
