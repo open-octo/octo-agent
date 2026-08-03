@@ -34,6 +34,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/uploads"
 )
 
 const (
@@ -696,7 +697,8 @@ func (a *Adapter) extractPayload(ev dtEvent) (string, []channel.FileAttachment, 
 		if code != "" {
 			data, _, err := a.downloadDTFile(code, robotCode)
 			if err == nil && len(data) > 0 {
-				tmpFile, err := os.CreateTemp("", "dingtalk-*-"+fileName)
+				dir, _ := uploads.ChannelTempDir("dingtalk") // "" falls back to the OS temp root on error
+				tmpFile, err := os.CreateTemp(dir, "dingtalk-*-"+fileName)
 				if err == nil {
 					_, writeErr := tmpFile.Write(data)
 					tmpFile.Close()

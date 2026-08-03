@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/uploads"
 )
 
 const (
@@ -807,7 +808,8 @@ func (a *Adapter) processUpdate(upd tgUpdate, onMessage func(channel.InboundEven
 			if name == "" {
 				name = "attachment"
 			}
-			f, err := os.CreateTemp("", "tg-doc-*-"+name)
+			dir, _ := uploads.ChannelTempDir("telegram") // "" falls back to the OS temp root on error
+			f, err := os.CreateTemp(dir, "tg-doc-*-"+name)
 			if err == nil {
 				f.Write(rawBytes)
 				f.Close()

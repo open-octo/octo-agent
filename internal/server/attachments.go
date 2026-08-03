@@ -93,6 +93,12 @@ type userAttachments struct {
 	notes []string
 }
 
+// UploadsDir returns ~/.octo/uploads, creating it if needed. Exported for
+// cmd/octo's startup housekeeping sweep (internal/uploads.Sweep).
+func UploadsDir() (string, error) {
+	return ensureUploadsDir()
+}
+
 // ensureUploadsDir returns ~/.octo/uploads, creating it if needed.
 func ensureUploadsDir() (string, error) {
 	home, err := os.UserHomeDir()

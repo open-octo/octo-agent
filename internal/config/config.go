@@ -203,6 +203,9 @@ type Config struct {
 	// Trash configures the file recycle bin (agent-issued deletes and
 	// overwrites are staged there for recovery).
 	Trash TrashConfig `yaml:"trash,omitempty"`
+	// Uploads configures age-out for web/IM attachment files (~/.octo/uploads
+	// and IM-channel temp attachments).
+	Uploads UploadsConfig `yaml:"uploads,omitempty"`
 	// Notify controls whether the TUI sends a desktop notification when a turn
 	// completes and is waiting for input (Ghostty / iTerm2 / Kitty forward the
 	// OSC sequence to the OS; other terminals fall back to the terminal bell).
@@ -289,6 +292,27 @@ func (c *Config) TrashMaxBytes() int64 {
 		return 0
 	default:
 		return int64(c.Trash.MaxSizeMB) * 1024 * 1024
+	}
+}
+
+// UploadsConfig configures the age-out of files received as attachments —
+// web uploads and IM-channel images/documents.
+type UploadsConfig struct {
+	// RetentionDays ages out attachment files older than this at startup. 0
+	// means the default (30); a negative value disables the age-out.
+	RetentionDays int `yaml:"retention_days,omitempty"`
+}
+
+// UploadsRetention returns how long attachment files are kept before age-out
+// (default 30 days; a negative config value disables it, returning 0).
+func (c *Config) UploadsRetention() time.Duration {
+	switch {
+	case c.Uploads.RetentionDays == 0:
+		return 30 * 24 * time.Hour
+	case c.Uploads.RetentionDays < 0:
+		return 0
+	default:
+		return time.Duration(c.Uploads.RetentionDays) * 24 * time.Hour
 	}
 }
 

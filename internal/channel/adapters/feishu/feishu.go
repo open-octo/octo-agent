@@ -30,6 +30,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/uploads"
 )
 
 const (
@@ -764,7 +765,8 @@ func (a *Adapter) downloadResource(messageID, key, resourceType, fileName string
 	}
 
 	// File: save to temp.
-	tmpFile, err := os.CreateTemp("", "feishu-file-*")
+	dir, _ := uploads.ChannelTempDir("feishu") // "" falls back to the OS temp root on error
+	tmpFile, err := os.CreateTemp(dir, "feishu-file-*")
 	if err != nil {
 		return channel.FileAttachment{}, err
 	}

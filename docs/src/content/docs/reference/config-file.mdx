@@ -36,6 +36,7 @@ anything friendly.
 | `browser` | [browser block](#browser-block) | Chrome connection settings |
 | `goal` | `{ enabled: bool }` | Gates `/goal` and the goal tools (default enabled) |
 | `trash` | [trash block](#trash-block) | File recycle-bin behavior (overwrite backups, retention, size cap) |
+| `uploads` | `{ retention_days: int }` | Age-out for received attachment files — web uploads, IM-channel images, and IM document/file temp copies (default `30`; negative disables) |
 | `memory_backend` | object | Optional external semantic memory backend — see [Memory backends](/docs/guides/memory-backends/) |
 | `language` | string | UI language preference (`en` \| `zh`); empty means English |
 | `notify` | bool | TUI only: send a desktop notification when a turn completes and is waiting for input. Ghostty / iTerm2 / Kitty forward it to the OS; other terminals fall back to the terminal bell (default `true`) |

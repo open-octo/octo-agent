@@ -34,6 +34,7 @@ flag。所有字段都是可选的——文件不存在，或者字段缺失，�
 | `browser` | [browser 配置块](#browser-配置块) | Chrome 连接设置 |
 | `goal` | `{ enabled: bool }` | 控制 `/goal` 和目标相关工具（默认启用） |
 | `trash` | [trash 配置块](#trash-配置块) | 文件回收站行为（覆盖备份、保留天数、容量上限） |
+| `uploads` | `{ retention_days: int }` | 接收到的附件文件的清理策略——Web 上传、IM 渠道图片、IM 文档/文件临时副本（默认 `30` 天；负数关闭） |
 | `memory_backend` | object | 可选的外部语义记忆后端——见[记忆后端](/docs/zh/guides/memory-backends/) |
 | `language` | string | UI 语言偏好（`en` \| `zh`）；留空为英文 |
 | `notify` | bool | 仅 TUI：turn 完成等待输入时发送桌面通知。Ghostty / iTerm2 / Kitty 会转发到操作系统；其他终端回退到终端响铃（默认 `true`） |

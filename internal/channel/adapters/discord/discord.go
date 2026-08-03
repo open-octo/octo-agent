@@ -34,6 +34,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/uploads"
 	"github.com/open-octo/octo-agent/internal/version"
 )
 
@@ -888,7 +889,8 @@ func (a *Adapter) processAttachments(atts []dcAttachment) []channel.FileAttachme
 				DataURL:  dataURL,
 			})
 		} else {
-			tmp, err := os.CreateTemp("", "discord-att-*-"+att.Filename)
+			dir, _ := uploads.ChannelTempDir("discord") // "" falls back to the OS temp root on error
+			tmp, err := os.CreateTemp(dir, "discord-att-*-"+att.Filename)
 			if err != nil {
 				log.Printf("[discord] temp file creation failed (%s): %v", att.Filename, err)
 				continue
