@@ -113,7 +113,30 @@ func ensureWorkingDir() {
 	}
 }
 
+// ensureValidTempDir unsets $TMPDIR when it points at a directory that no
+// longer exists, so Go's os.TempDir() (and the Wails updater's
+// os.MkdirTemp("", ...) on top of it) falls back to the platform default
+// instead of failing outright.
+func ensureValidTempDir() {
+	dir := os.Getenv("TMPDIR")
+	if dir == "" {
+		return
+	}
+	if _, err := os.Stat(dir); err != nil {
+		os.Unsetenv("TMPDIR")
+	}
+}
+
 func main() {
+	// macOS's postinstall script launches the app with `open` from inside
+	// installd's ephemeral PKInstallSandbox.*; the launched process can inherit
+	// that sandbox's $TMPDIR. The desktop app then runs for days as a tray
+	// resident, long after the sandbox is torn down, so a later update check's
+	// os.MkdirTemp fails with "no such file or directory" against a $TMPDIR
+	// that hasn't existed since install. Clear it before anything (including
+	// the updater helper below) can use it.
+	ensureValidTempDir()
+
 	// When spawned as the updater's helper child (sentinel env vars set), swap
 	// the staged update over the installed app and exit — before any of the
 	// launch side effects below (chdir, CLI/uv seeding, settings) run in a
