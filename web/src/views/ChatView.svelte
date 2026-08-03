@@ -1563,9 +1563,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     URL.revokeObjectURL(url)
   }
 
-  async function exportAsMarkdown(events: any[], title: string) {
+  // Returns whether the export actually completed, so the caller only exits
+  // export mode (and drops the user's checkbox selection) on success — not on
+  // "nothing selected" or a cancelled/failed native save.
+  async function exportAsMarkdown(events: any[], title: string): Promise<boolean> {
     const filtered = filterEventsBySelection(events)
-    if (!filtered.length) { showToast(tr('chat.nothing_to_export'), 'error'); return }
+    if (!filtered.length) { showToast(tr('chat.nothing_to_export'), 'error'); return false }
 
     const lines: string[] = [`# ${title}`, '']
     let omittedToolEvents = false
@@ -1601,10 +1604,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     if (get(nativeShell)) {
       try {
         const r = await api.nativeSaveFile(`${title_safe}.md`, content)
-        if (r.cancelled) return
+        if (r.cancelled) return false
       } catch {
         showToast(tr('chat.export_failed'), 'error')
-        return
+        return false
       }
     } else {
       triggerDownload(content, `${title_safe}.md`, 'text/markdown')
@@ -1613,6 +1616,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     if (omittedToolEvents) {
       showToast(tr('chat.export_tools_omitted'), 'info')
     }
+    return true
   }
 
   function exportAsJSON(events: any[], title: string) {
@@ -1631,15 +1635,16 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // lossless and ignores the checkbox selection.
       const result = await fetchEvents()
       if (!result) { exportBusy = false; return }
+      let ok = true
       switch (format) {
         case 'md':
-          await exportAsMarkdown(result.events, title)
+          ok = await exportAsMarkdown(result.events, title)
           break
         case 'json':
           exportAsJSON(result.events, title)
           break
       }
-      exitExportMode()
+      if (ok) exitExportMode()
     } catch (e: any) {
       console.error('Export error:', e)
       showToast(tr('chat.export_failed'), 'error')
