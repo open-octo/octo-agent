@@ -1,6 +1,6 @@
 <script lang="ts">
   import { get } from 'svelte/store'
-  import { onMount, untrack } from 'svelte'
+  import { onMount, untrack, tick } from 'svelte'
   import {
     running, activeSessionId, chatStreaming, sessions,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
@@ -44,6 +44,7 @@
   let attachmentsBySession: Record<string, Attachment[]> = {}
   let draftSid = ''
   let textareaEl = $state<HTMLTextAreaElement | null>(null)
+  let skillMenuEl = $state<HTMLDivElement | null>(null)
   let attachments = $state<Attachment[]>([])
   let dragOver = $state(false)
 
@@ -517,6 +518,11 @@
     const items = filteredItems()
     if (!slashMenu || items.length === 0) return
     slashActiveIndex = (slashActiveIndex + delta + items.length) % items.length
+    // Keyboard nav can move the active item outside the menu's scroll
+    // viewport (max-height: 240px); scroll it back into view.
+    tick().then(() => {
+      skillMenuEl?.querySelector('.skill-menu-item.active')?.scrollIntoView({ block: 'nearest' })
+    })
   }
 
 
@@ -1052,7 +1058,7 @@
         </button>
       </div>
       {#if slashMenu}
-        <div class="skill-menu">
+        <div class="skill-menu" bind:this={skillMenuEl}>
           {#each filteredItems() as item, i (item.kind + ':' + (item.kind === 'builtin' ? item.name : item.kind === 'skill' ? item.skill.name : item.kind === 'workflow' ? item.workflow.name : item.kind === 'mcp-server' ? item.name : item.kind === 'agent' ? item.id : item.kind === 'agent-create' ? '' : item.server + '/' + item.tool.name))}
             <button
               class="skill-menu-item"
