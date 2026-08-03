@@ -342,6 +342,10 @@ export interface FsListing {
   parent: string
   entries: FsEntry[]
   truncated: boolean
+  // True for the synthetic "This PC" drive list a Windows client sees above
+  // a drive root (C:\) — `path` is an opaque token, not a real directory, so
+  // it can't be picked; other platforms never set this.
+  is_this_pc: boolean
 }
 
 // Read-only directory listing for the folder picker. Omit `path` to start at

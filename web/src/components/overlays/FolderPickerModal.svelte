@@ -105,7 +105,9 @@
       >
         <iconify-icon icon="lucide:corner-left-up" width="14"></iconify-icon>
       </button>
-      <span class="cur-path mono" title={listing?.path ?? ''}>{shortPath(listing?.path ?? '')}</span>
+      <span class="cur-path mono" title={listing?.path ?? ''}>
+        {listing?.is_this_pc ? $t('folder.this_pc') : shortPath(listing?.path ?? '')}
+      </span>
     </div>
 
     <div class="modal-body">
@@ -157,7 +159,7 @@
       {#if mode === 'folder'}
         <button
           class="btn-primary"
-          disabled={!listing || loading}
+          disabled={!listing || loading || listing.is_this_pc}
           onclick={() => listing && onSelect(listing.path)}
         >
           <iconify-icon icon="ant-design:check-outlined" width="12"></iconify-icon>

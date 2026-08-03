@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -16,15 +19,16 @@ type fsListResponse struct {
 	Parent    string    `json:"parent"`
 	Entries   []fsEntry `json:"entries"`
 	Truncated bool      `json:"truncated"`
+	IsThisPC  bool      `json:"is_this_pc"`
 }
 
 func doFsList(t *testing.T, path string) *httptest.ResponseRecorder {
 	t.Helper()
-	url := "/api/fs/list"
+	target := "/api/fs/list"
 	if path != "" {
-		url += "?path=" + path
+		target += "?path=" + url.QueryEscape(path)
 	}
-	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req := httptest.NewRequest(http.MethodGet, target, nil)
 	rec := httptest.NewRecorder()
 	(&Server{}).handleFsList(rec, req)
 	return rec
@@ -153,6 +157,95 @@ func TestFsListDefaultsToHome(t *testing.T) {
 	}
 	if resp.Path != home {
 		t.Errorf("default path: got %q, want home %q", resp.Path, home)
+	}
+}
+
+// currentDrive returns the volume of the test process's cwd (e.g. "C:") —
+// always a mounted, listable drive, unlike a hardcoded letter that may not
+// exist on a given CI runner.
+func currentDrive(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vol := filepath.VolumeName(wd)
+	if vol == "" {
+		t.Fatal("no volume name for cwd")
+	}
+	return vol
+}
+
+func TestFsListWindowsThisPCListsDrives(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only: drive enumeration")
+	}
+	rec := doFsList(t, fsThisPCPath)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	var resp fsListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.IsThisPC {
+		t.Error("is_this_pc: got false, want true")
+	}
+	if resp.Parent != "" {
+		t.Errorf("parent: got %q, want empty (top of the Windows hierarchy)", resp.Parent)
+	}
+	want := currentDrive(t) // e.g. "C:"
+	found := false
+	for _, e := range resp.Entries {
+		if e.Name == want {
+			found = true
+			if !e.IsDir {
+				t.Errorf("%s: got IsDir=false, want true", want)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("drive list %+v missing the test process's own drive %q", resp.Entries, want)
+	}
+}
+
+func TestFsListWindowsDriveRootParentIsThisPC(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only: drive roots")
+	}
+	root := currentDrive(t) + `\`
+	rec := doFsList(t, root)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	var resp fsListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Parent != fsThisPCPath {
+		t.Errorf("parent of drive root %q: got %q, want %q", root, resp.Parent, fsThisPCPath)
+	}
+}
+
+func TestFsListWindowsDriveSelect(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only: drive selection")
+	}
+	letter := strings.TrimSuffix(currentDrive(t), ":")
+	rec := doFsList(t, fsThisPCPath+"/"+letter+":")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	var resp fsListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := letter + `:\`
+	if resp.Path != want {
+		t.Errorf("path: got %q, want %q", resp.Path, want)
+	}
+	if resp.IsThisPC {
+		t.Error("is_this_pc: got true, want false (this is a real directory listing)")
 	}
 }
 
