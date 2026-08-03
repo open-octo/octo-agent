@@ -733,12 +733,12 @@
 .agent-picker-menu {
   position: absolute; top: 100%; left: 12px; right: 12px; z-index: 30;
   margin-top: 2px; padding: 4px;
-  background: var(--bg-elevated, #fff); border: 1px solid var(--border-secondary);
+  background: var(--bg-container); border: 1px solid var(--border-secondary);
   border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.18);
 }
 .ap-item {
   display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px; border: none;
-  background: transparent; color: var(--text-primary); font-size: 13px;
+  background: transparent; color: var(--text); font-size: 13px;
   text-align: left; cursor: pointer; border-radius: 6px;
 }
 .ap-item:hover { background: var(--hover-neutral); }
@@ -749,7 +749,7 @@
 .more-popover {
   position: fixed; z-index: 30;
   padding: 4px;
-  background: var(--bg-elevated, #fff); border: 1px solid var(--border-secondary);
+  background: var(--bg-container); border: 1px solid var(--border-secondary);
   border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.18);
 }
 .ap-sep { height: 1px; margin: 4px 8px; background: var(--border-secondary); }
@@ -802,7 +802,7 @@
   position: absolute; top: 100%; right: 8px; z-index: 30;
   min-width: 160px; max-width: 220px; max-height: 260px; overflow-y: auto;
   margin-top: 2px; padding: 4px;
-  background: var(--bg-elevated, #fff); border: 1px solid var(--border-secondary);
+  background: var(--bg-container); border: 1px solid var(--border-secondary);
   border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.18);
 }
 .grp-opt {
