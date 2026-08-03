@@ -254,13 +254,13 @@
 .vb-title.warn { color: var(--warning-text, #d46b08); }
 .vb-ok { color: var(--success); }
 .vb-desc { margin: 0 0 8px; font-size: 12px; line-height: 1.6; color: var(--text-secondary); }
-.vb-versions { margin: 0 0 12px; font-size: 13px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.vb-versions { margin: 0 0 12px; font-size: 13px; color: var(--text); font-variant-numeric: tabular-nums; }
 .vb-arrow { color: var(--text-tertiary); margin: 0 4px; }
 .vb-list { margin: 0 0 12px; padding-left: 18px; font-size: 12px; line-height: 1.7; color: var(--text-secondary); }
 .vb-cmd {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px; padding: 1px 5px; border-radius: 4px;
-  background: var(--hover-neutral); color: var(--text-primary);
+  background: var(--hover-neutral); color: var(--text);
 }
 .vb-actions { display: flex; gap: 8px; }
 .vb-btn-primary {

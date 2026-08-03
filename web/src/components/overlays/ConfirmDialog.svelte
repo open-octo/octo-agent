@@ -54,7 +54,7 @@
 .modal:focus { outline: none; }
 .msg {
   margin: 0; padding: 20px 20px 4px;
-  font-size: 14px; line-height: 1.6; color: var(--text-primary);
+  font-size: 14px; line-height: 1.6; color: var(--text);
   white-space: pre-wrap; word-break: break-word;
 }
 .footer {

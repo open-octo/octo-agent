@@ -104,7 +104,7 @@
   height: 36px; padding: 0 12px;
   border: 1px solid var(--border); background: var(--bg-base);
   border-radius: 6px;
-  font-size: 13px; color: var(--text-primary);
+  font-size: 13px; color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .key-input:focus {

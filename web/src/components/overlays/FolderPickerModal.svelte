@@ -231,7 +231,7 @@
   text-align: left;
 }
 .entry.dir {
-  border: none; background: none; cursor: pointer; color: var(--text-primary);
+  border: none; background: none; cursor: pointer; color: var(--text);
   font-family: inherit;
 }
 .entry.dir:hover { background: var(--bg-hover, var(--bg-layout)); }
