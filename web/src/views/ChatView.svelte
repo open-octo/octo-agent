@@ -1504,6 +1504,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // Filter server events to only those corresponding to selected local messages.
   // User/assistant events are matched by running index against local msgs of the
   // same type; tool_call, tool_result and thinking events always ride along.
+  //
+  // handleHistoryEvent skips creating a local bubble for an assistant_message
+  // whose content AND thinking are both empty (tool-only rounds) — see its
+  // comment above. That predicate is duplicated here so the index walk stays
+  // aligned: without it, any such event would consume a uaIdx slot that no
+  // local message ever occupied, permanently shifting every match after it.
   function filterEventsBySelection(events: any[]): any[] {
     const sid = get(activeSessionId)
     if (!sid) return events
@@ -1515,7 +1521,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     const result: any[] = []
     for (const ev of events) {
       const etype = ev.type ?? ''
-      if (etype === 'history_user_message' || etype === 'assistant_message') {
+      const isEmptyAssistant = etype === 'assistant_message' &&
+        !(ev.content ?? '').trim() && !(ev.thinking ?? '').trim()
+      if ((etype === 'history_user_message' || etype === 'assistant_message') && !isEmptyAssistant) {
         const local = localUA[uaIdx]
         uaIdx++
         if (local && selected.has(local.id)) result.push(ev)
