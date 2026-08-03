@@ -3,7 +3,7 @@ import { writable, get } from 'svelte/store'
 // Each session can independently be in export mode, so the store maps
 // session id → boolean. A null session id is always false.
 function createExportModeStore() {
-  const { subscribe, set, update } = writable<Record<string, boolean>>({})
+  const { subscribe, update } = writable<Record<string, boolean>>({})
 
   function enter(sid: string) {
     update(m => ({ ...m, [sid]: true }))
@@ -13,18 +13,13 @@ function createExportModeStore() {
     update(m => ({ ...m, [sid]: false }))
   }
 
-  function isActive(sid: string | null): boolean {
-    if (!sid) return false
-    return get({ subscribe })[sid] === true
-  }
-
-  return { subscribe, enter, exit, isActive }
+  return { subscribe, enter, exit }
 }
 
 // Selected message IDs per session. Only user/assistant messages are
 // selectable; tool messages are excluded from the selection set.
 function createSelectedMessagesStore() {
-  const { subscribe, set, update } = writable<Record<string, Set<string>>>({})
+  const { subscribe, update } = writable<Record<string, Set<string>>>({})
 
   function initForSession(sid: string, ids: string[]) {
     update(m => ({ ...m, [sid]: new Set(ids) }))

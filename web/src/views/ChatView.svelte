@@ -1501,12 +1501,29 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     selectedMessagesStore.toggle(sid, msgId)
   }
 
-  function selectedLocalMsgs(): any[] {
+  // Filter server events to only those corresponding to selected local messages.
+  // User/assistant events are matched by running index against local msgs of the
+  // same type; tool_call, tool_result and thinking events always ride along.
+  function filterEventsBySelection(events: any[]): any[] {
     const sid = get(activeSessionId)
-    if (!sid) return []
-    const all = get(chatMessages)[sid] ?? []
-    const sel = selectedMessagesStore.getForSession(sid)
-    return all.filter((m: any) => sel.has(m.id) && (m.type === 'user' || m.type === 'assistant'))
+    if (!sid) return events
+    const selected = selectedMessagesStore.getForSession(sid)
+    const allLocal = get(chatMessages)[sid] ?? []
+    const localUA = allLocal.filter((m: any) => m.type === 'user' || m.type === 'assistant')
+    let uaIdx = 0
+
+    const result: any[] = []
+    for (const ev of events) {
+      const etype = ev.type ?? ''
+      if (etype === 'history_user_message' || etype === 'assistant_message') {
+        const local = localUA[uaIdx]
+        uaIdx++
+        if (local && selected.has(local.id)) result.push(ev)
+      } else {
+        result.push(ev)
+      }
+    }
+    return result
   }
 
   async function fetchEvents(): Promise<{ events: any[]; sid: string } | null> {
@@ -1538,28 +1555,35 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     URL.revokeObjectURL(url)
   }
 
-  async function exportAsMarkdown(title: string) {
-    const msgs = selectedLocalMsgs()
-    if (!msgs.length) { showToast(tr('chat.nothing_to_export'), 'error'); return }
+  async function exportAsMarkdown(events: any[], title: string) {
+    const filtered = filterEventsBySelection(events)
+    if (!filtered.length) { showToast(tr('chat.nothing_to_export'), 'error'); return }
 
     const lines: string[] = [`# ${title}`, '']
     let omittedToolEvents = false
 
-    for (const msg of msgs) {
-      if (msg.type === 'user') {
+    for (const ev of filtered) {
+      const type = ev.type ?? ''
+      if (type === 'history_user_message') {
         lines.push('## You', '')
-        lines.push(msg.content ?? '', '')
-      } else if (msg.type === 'assistant') {
+        lines.push(ev.content ?? '', '')
+      } else if (type === 'assistant_message') {
         lines.push('## Octo', '')
-        if (msg.thinking) {
-          lines.push('<details><summary>Thoughts</summary>', '', msg.thinking, '', '</details>', '')
+        if (ev.thinking) {
+          lines.push('<details><summary>Thoughts</summary>', '', ev.thinking, '', '</details>', '')
         }
-        lines.push(msg.content ?? '', '')
-      }
-      if (exportIncludeTools && msg.tools) {
-        for (const tool of msg.tools) {
-          if (tool.name) lines.push(`- **Tool call**: ${tool.name}`, '')
-          if (tool.result) lines.push(`  - Result: ${typeof tool.result === 'string' ? tool.result.slice(0, 500) : '(non-text result)'}`, '')
+        lines.push(ev.content ?? '', '')
+      } else if (type === 'thinking' && ev.text) {
+        lines.push('<!-- Thinking -->', ev.text, '')
+      } else if (type === 'tool_call' || type === 'tool_result') {
+        if (exportIncludeTools) {
+          if (type === 'tool_call') {
+            lines.push(`- **Tool call**: ${ev.tool_name ?? ev.name ?? 'unknown'}`, '')
+          } else {
+            lines.push(`- **Tool result**: ${typeof ev.content === 'string' ? ev.content.slice(0, 500) : '(non-text result)'}`, '')
+          }
+        } else {
+          omittedToolEvents = true
         }
       }
     }
@@ -1594,16 +1618,18 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     exportBusy = true
     try {
       const title = currentSession?.title ?? currentSession?.name ?? 'session'
+      // Both MD and JSON fetch the full server transcript. MD filters by
+      // selection internally (filterEventsBySelection); JSON is always
+      // lossless and ignores the checkbox selection.
+      const result = await fetchEvents()
+      if (!result) { exportBusy = false; return }
       switch (format) {
         case 'md':
-          await exportAsMarkdown(title)
+          await exportAsMarkdown(result.events, title)
           break
-        case 'json': {
-          const result = await fetchEvents()
-          if (!result) { exportBusy = false; return }
+        case 'json':
           exportAsJSON(result.events, title)
           break
-        }
       }
       exitExportMode()
     } catch (e: any) {
@@ -1851,7 +1877,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           <iconify-icon icon="ant-design:file-markdown-outlined" width="16"></iconify-icon>
           <span>MD</span>
         </button>
-        <button class="export-fmt-btn" title={$t('chat.export_json')} disabled={exportBusy} onclick={() => exportByFormat('json')}>
+        <button class="export-fmt-btn" title="{$t('chat.export_json')} — {$t('chat.export_json_full')}" disabled={exportBusy} onclick={() => exportByFormat('json')}>
           <iconify-icon icon="ant-design:file-text-outlined" width="16"></iconify-icon>
           <span>JSON</span>
         </button>

@@ -10,8 +10,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@emnapi/core": "^2.0.0-alpha.3",
-    "@rolldown/binding-win32-x64-msvc": "^1.2.1",
     "dompurify": "^3.4.12",
     "highlight.js": "^11.10.0",
     "marked": "^18.0.7",
