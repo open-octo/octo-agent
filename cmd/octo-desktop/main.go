@@ -410,6 +410,12 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 		bridge.closeLog.Store(&closeLog)
 	}
 
+	// Also now-we're-the-sole-backend: age out old upload/attachment files
+	// (#2004). The desktop hub never goes through cmd/octo's runServe, so
+	// without this call here it would silently never run — this IS the
+	// long-running "desktop hub" instance the housekeeping is for.
+	server.StartUploadsHousekeeping()
+
 	srv, err := server.New(server.Config{
 		Tools: true,
 		// On: the version badge needs the latest-release lookup to know an update

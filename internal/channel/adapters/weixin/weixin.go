@@ -25,6 +25,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/channel"
 	"github.com/open-octo/octo-agent/internal/channel/adapters/weixin/ilink"
+	"github.com/open-octo/octo-agent/internal/uploads"
 )
 
 const platformName = "weixin"
@@ -887,8 +888,11 @@ func extractFiles(client *ilink.Client, items []ilink.MessageItem) []extractedFi
 				continue
 			}
 			// Save to disk.
-			dir := filepath.Join(os.TempDir(), "octo-weixin")
-			os.MkdirAll(dir, 0700)
+			dir, err := uploads.ChannelTempDir("weixin")
+			if err != nil {
+				files = append(files, extractedFile{ftype: "file", name: name})
+				continue
+			}
 			f, err := os.CreateTemp(dir, "wxfile-*"+filepath.Ext(name))
 			if err != nil {
 				files = append(files, extractedFile{ftype: "file", name: name})

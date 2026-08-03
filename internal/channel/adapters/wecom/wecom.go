@@ -41,6 +41,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/uploads"
 )
 
 const (
@@ -940,8 +941,8 @@ func (a *Adapter) handleInbound(body json.RawMessage, onMessage func(channel.Inb
 		if filename == "" {
 			filename = "attachment"
 		}
-		dir := filepath.Join(os.TempDir(), "octo-wecom")
-		if err := os.MkdirAll(dir, 0o700); err != nil {
+		dir, err := uploads.ChannelTempDir("wecom")
+		if err != nil {
 			log.Printf("[wecom] mkdir temp dir: %v", err)
 			return
 		}
