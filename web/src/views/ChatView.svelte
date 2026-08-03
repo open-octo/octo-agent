@@ -2355,6 +2355,13 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
      that the composer's status chips (model · reasoning · cwd · context · mode)
      sit on one row without wrapping. */
   --chat-content-max-width: 960px;
+  /* Safety net: on short viewports the header/banners/plan-card/composer
+     (all flex: 0 0 auto) can together exceed the available height even after
+     .messages shrinks to 0. Without this, the excess silently overflows past
+     every ancestor up to .app's `overflow: hidden` and clips the composer
+     with no way to recover it. This lets the conversation column itself
+     scroll into view when that happens. */
+  overflow-y: auto;
 }
 .workflows-bar {
   flex: 0 0 auto;
