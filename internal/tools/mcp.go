@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -122,66 +123,70 @@ func mcpToolDefs() []agent.ToolDefinition {
 // through to its normal dispatch. Errors from the underlying client are
 // propagated as-is so the agent loop sees the same error surface it would
 // for any other tool.
-func executeMCP(ctx context.Context, name string, input map[string]any) (out string, ok bool, err error) {
+func executeMCP(ctx context.Context, name string, input map[string]any) (out agent.ToolResult, ok bool, err error) {
 	if !strings.HasPrefix(name, "mcp__") {
-		return "", false, nil
+		return agent.ToolResult{}, false, nil
+	}
+	fail := func(format string, args ...any) (agent.ToolResult, bool, error) {
+		return agent.ToolResult{}, true, fmt.Errorf(format, args...)
 	}
 	server, tool, ok2 := parseMCPName(name)
 	if !ok2 {
-		return "", true, fmt.Errorf("mcp: malformed tool name %q (want mcp__<server>__<tool>)", name)
+		return fail("mcp: malformed tool name %q (want mcp__<server>__<tool>)", name)
 	}
 	reg := ActiveMCPRegistry()
 	if reg == nil {
-		return "", true, fmt.Errorf("mcp: no registry registered")
+		return fail("mcp: no registry registered")
 	}
 	conn := reg.Get(server)
 	if conn == nil {
-		return "", true, fmt.Errorf("mcp: server %q is not connected", server)
+		return fail("mcp: server %q is not connected", server)
 	}
 
 	switch tool {
 	case "resource_read":
 		uri, _ := input["uri"].(string)
 		if uri == "" {
-			return "", true, fmt.Errorf("mcp: resource_read needs uri")
+			return fail("mcp: resource_read needs uri")
 		}
 		contents, err := conn.Client.ReadResource(ctx, uri)
 		if err != nil {
 			markIfReauthRequired(conn, err)
-			return "", true, err
+			return agent.ToolResult{}, true, err
 		}
 		conn.ClearReauthRequired()
-		return formatResourceContents(contents), true, nil
+		return agent.ToolResult{Text: formatResourceContents(contents)}, true, nil
 
 	case "prompt_get":
 		promptName, _ := input["name"].(string)
 		if promptName == "" {
-			return "", true, fmt.Errorf("mcp: prompt_get needs name")
+			return fail("mcp: prompt_get needs name")
 		}
 		argMap := convertStringMap(input["arguments"])
 		result, err := conn.Client.GetPrompt(ctx, promptName, argMap)
 		if err != nil {
 			markIfReauthRequired(conn, err)
-			return "", true, err
+			return agent.ToolResult{}, true, err
 		}
 		conn.ClearReauthRequired()
-		return formatPromptResult(result), true, nil
+		return agent.ToolResult{Text: formatPromptResult(result)}, true, nil
 
 	default:
 		result, err := conn.Client.CallTool(ctx, tool, input)
 		if err != nil {
 			markIfReauthRequired(conn, err)
-			return "", true, err
+			return agent.ToolResult{}, true, err
 		}
 		conn.ClearReauthRequired()
-		out := formatToolResult(result)
+		res := formatToolResult(result)
 		if result.IsError {
 			// The tool ran but reported an error in-band. Surface it as a
 			// Go error so the agent loop tags the tool_result IsError too —
-			// matches the contract built-in tools use.
-			return out, true, fmt.Errorf("mcp tool error: %s", out)
+			// matches the contract built-in tools use. Blocks are dropped:
+			// an errored result's image, if any, isn't worth sending.
+			return agent.ToolResult{Text: res.Text}, true, fmt.Errorf("mcp tool error: %s", res.Text)
 		}
-		return out, true, nil
+		return res, true, nil
 	}
 }
 
@@ -286,14 +291,21 @@ func joinPromptNames(ps []mcp.Prompt) string {
 	return strings.Join(names, ", ")
 }
 
-// formatToolResult flattens an MCP tool result's content blocks into a
-// single string for the agent's text-content tool_result. Non-text blocks
-// are summarised so the agent at least knows what came back.
-func formatToolResult(r *mcp.CallToolResult) string {
+// formatToolResult turns an MCP tool result into the agent's ToolResult:
+// text content is flattened into Text, and image content becomes real image
+// Blocks so a multimodal model actually sees the pixels rather than a
+// description of them. Every block still leaves a line in Text — a
+// screenshot's accompanying "[image: image/png, 48 KiB]" is what a non-vision
+// model, the transcript, and the UI have to go on.
+//
+// Content types the agent has no block for (audio; a resource carrying binary
+// blob data) stay text-only summaries.
+func formatToolResult(r *mcp.CallToolResult) agent.ToolResult {
 	if r == nil {
-		return ""
+		return agent.ToolResult{}
 	}
 	var b strings.Builder
+	var blocks []agent.ContentBlock
 	for i, c := range r.Content {
 		if i > 0 {
 			b.WriteString("\n")
@@ -302,7 +314,15 @@ func formatToolResult(r *mcp.CallToolResult) string {
 		case "text":
 			b.WriteString(c.Text)
 		case "image":
-			fmt.Fprintf(&b, "[image: %s, %d bytes]", c.MIMEType, len(c.Data))
+			data, err := base64.StdEncoding.DecodeString(c.Data)
+			if err != nil || len(data) == 0 {
+				// Undecodable payload: say so rather than handing the model a
+				// broken image block it can't interpret.
+				fmt.Fprintf(&b, "[image: %s, undecodable payload]", c.MIMEType)
+				break
+			}
+			blocks = append(blocks, agent.NewImageBlock(c.MIMEType, data))
+			fmt.Fprintf(&b, "[image: %s, %s]", c.MIMEType, humanBytes(len(data)))
 		case "audio":
 			fmt.Fprintf(&b, "[audio: %s, %d bytes]", c.MIMEType, len(c.Data))
 		case "resource":
@@ -317,7 +337,21 @@ func formatToolResult(r *mcp.CallToolResult) string {
 			fmt.Fprintf(&b, "[unknown content type %q]", c.Type)
 		}
 	}
-	return b.String()
+	return agent.ToolResult{Text: b.String(), Blocks: blocks}
+}
+
+// humanBytes renders a decoded payload size for the text summary. The raw
+// count is noise at image sizes; KiB/MiB is what tells someone reading the
+// transcript whether a screenshot came back at all.
+func humanBytes(n int) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KiB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%d bytes", n)
+	}
 }
 
 func formatResourceContents(cs []mcp.ResourceContent) string {

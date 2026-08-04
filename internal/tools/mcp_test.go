@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,9 +77,10 @@ func TestParseMCPName_RejectsMalformed(t *testing.T) {
 }
 
 func TestFormatToolResult_MixedContent(t *testing.T) {
+	imgBytes := []byte("not-really-an-image-but-round-trips")
 	r := &mcp.CallToolResult{Content: []mcp.Content{
 		{Type: "text", Text: "first"},
-		{Type: "image", MIMEType: "image/png", Data: "<base64 …>"},
+		{Type: "image", MIMEType: "image/png", Data: base64.StdEncoding.EncodeToString(imgBytes)},
 		{Type: "resource", Resource: &mcp.EmbeddedResource{
 			URI: "file:///x", MIMEType: "text/plain", Text: "embedded",
 		}},
@@ -90,9 +92,51 @@ func TestFormatToolResult_MixedContent(t *testing.T) {
 		"[resource file:///x]",
 		"embedded",
 	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q in:\n%s", want, out)
+		if !strings.Contains(out.Text, want) {
+			t.Errorf("missing %q in:\n%s", want, out.Text)
 		}
+	}
+	// The point of the change: the image reaches the model as a real block,
+	// not just as the text summary above.
+	if len(out.Blocks) != 1 {
+		t.Fatalf("Blocks = %d, want 1 image block", len(out.Blocks))
+	}
+	blk := out.Blocks[0]
+	if blk.Type != "image" || blk.Image == nil {
+		t.Fatalf("block = %+v, want an image block with data", blk)
+	}
+	if string(blk.Image.Data) != string(imgBytes) {
+		t.Errorf("block data = %q, want the decoded payload %q", blk.Image.Data, imgBytes)
+	}
+}
+
+// TestFormatToolResult_UndecodableImage: a server sending a payload that
+// isn't valid base64 must not produce a broken image block — say so in text
+// instead.
+func TestFormatToolResult_UndecodableImage(t *testing.T) {
+	r := &mcp.CallToolResult{Content: []mcp.Content{
+		{Type: "image", MIMEType: "image/png", Data: "<not base64 …>"},
+	}}
+	out := formatToolResult(r)
+	if len(out.Blocks) != 0 {
+		t.Errorf("Blocks = %d, want none for an undecodable payload", len(out.Blocks))
+	}
+	if !strings.Contains(out.Text, "undecodable") {
+		t.Errorf("Text = %q, want it to mention the undecodable payload", out.Text)
+	}
+}
+
+// TestFormatToolResult_TextOnlyHasNoBlocks keeps the common case allocation-
+// free of blocks, so text results look exactly as they did before.
+func TestFormatToolResult_TextOnlyHasNoBlocks(t *testing.T) {
+	out := formatToolResult(&mcp.CallToolResult{Content: []mcp.Content{
+		{Type: "text", Text: "plain"},
+	}})
+	if out.Text != "plain" {
+		t.Errorf("Text = %q, want plain", out.Text)
+	}
+	if out.Blocks != nil {
+		t.Errorf("Blocks = %v, want nil for a text-only result", out.Blocks)
 	}
 }
 
@@ -202,7 +246,7 @@ func TestExecuteMCP_SuccessfulCallClearsReauthFlag(t *testing.T) {
 		t.Fatal("expected executeMCP to recognize the mcp__ tool name")
 	}
 	if err != nil {
-		t.Fatalf("executeMCP: %v (out=%q)", err, out)
+		t.Fatalf("executeMCP: %v (out=%q)", err, out.Text)
 	}
 	if _, ok := conn.ReauthRequired(); ok {
 		t.Error("a successful call through the connection must clear the reauth flag")

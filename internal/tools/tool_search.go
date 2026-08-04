@@ -277,12 +277,12 @@ func execToolCall(ctx context.Context, input map[string]any) (agent.ToolResult, 
 	if args == nil {
 		args = map[string]any{}
 	}
-	out, ok, err := executeMCP(ctx, name, args)
+	res, ok, err := executeMCP(ctx, name, args)
 	if !ok {
 		// executeMCP only declines names without the mcp__ prefix.
 		return agent.ToolResult{Text: ""}, fmt.Errorf("mcp_call: %q is not an MCP tool (MCP names look like 'mcp__<server>__<tool>'). If it's a built-in tool such as sub_agent, call it directly by name instead of through mcp_call", name)
 	}
-	return agent.ToolResult{Text: out}, err
+	return res, err
 }
 
 // ToolCallTarget unwraps an mcp_call bridge invocation into the real MCP tool

@@ -114,8 +114,8 @@ func (r DefaultRegistry) ExecuteStream(ctx context.Context, name string, input m
 	// MCP tools land here too — route them first so an "mcp__…" name
 	// never falls through to the unknown-tool path. executeMCP returns
 	// ok=false when the name isn't ours, then dispatch continues below.
-	if out, ok, err := executeMCP(ctx, name, input); ok {
-		return agent.ToolResult{Text: out}, err
+	if res, ok, err := executeMCP(ctx, name, input); ok {
+		return res, err
 	}
 
 	// Tool Search bridge: describe the deferred MCP catalog, or invoke a tool
