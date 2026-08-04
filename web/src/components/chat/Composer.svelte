@@ -298,6 +298,7 @@
     { name: 'loop', descKey: 'composer.cmd_loop', takesArgs: true },
     { name: 'goal', descKey: 'composer.cmd_goal', takesArgs: true },
     { name: 'compact', descKey: 'composer.cmd_compact', takesArgs: false },
+    { name: 'reload', descKey: 'composer.cmd_reload', takesArgs: false },
     { name: 'clear', descKey: 'composer.cmd_clear', takesArgs: false },
   ]
 

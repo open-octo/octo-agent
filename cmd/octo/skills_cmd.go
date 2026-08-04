@@ -76,6 +76,7 @@ func skillsAdd(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "Installed /%s → %s\n", name, filepath.Join(skills.UserRoot(), name))
 	fmt.Fprintf(stdout, "  %s\n", desc)
 	fmt.Fprintln(stdout, "The skill was fetched from its source repository for your local use; check that repository's license before redistributing it.")
+	fmt.Fprintln(stdout, "Run /reload in any already-open octo session (TUI, web, or IM) — or start a new one — to use it there.")
 	return 0
 }
 

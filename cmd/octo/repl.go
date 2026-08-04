@@ -64,6 +64,16 @@ type replConfig struct {
 	// which connects synchronously before its system prompt is composed and
 	// so never needs a second pass.
 	recomposeMCPManifest func()
+	// recomposeSystemPrompt, when non-nil, fully rebuilds the system prompt
+	// against live skills/MCP/memory and writes the result into
+	// a.System/a.LeanSystem. Backs the /reload slash command: the web/IM
+	// transports freeze the composed prompt onto the session file (see
+	// Session.SetComposedSystem) and /reload there just clears that field for
+	// the next turn to recompose, but the CLI/TUI freezes purely in this
+	// process's memory, so reloading means redoing the compose in place. nil
+	// for the headless one-shot, which has no slash-command REPL to call it
+	// from.
+	recomposeSystemPrompt func()
 	// modelName is the resolved model displayed in the TUI status bar.
 	modelName string
 	// reasoningEffort is the resolved reasoning level ("low" | "medium" | "high" | "xhigh" | "max" | "")
@@ -282,6 +292,7 @@ func printTuiHelp(w io.Writer) {
 	fmt.Fprintln(w, "  /agent       Show the current agent, or list available ones (/agent list)")
 	fmt.Fprintln(w, "  /init        Analyze the repo and generate/update .octorules (needs --tools)")
 	fmt.Fprintln(w, "  /compact     Summarize older history now to free up context")
+	fmt.Fprintln(w, "  /reload      Reload the system prompt to pick up a newly installed/toggled skill")
 	fmt.Fprintln(w, "  /transcript  Re-print the last (or last N) tool call(s) uncapped")
 	fmt.Fprintln(w, "  /loop        Repeat a task this session (/loop [interval] <task>; stop with Ctrl-C)")
 	fmt.Fprintln(w, "  /clear       Wipe the conversation and start fresh (keeps model + tools)")

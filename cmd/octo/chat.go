@@ -1091,6 +1091,22 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		cfg.recomposeMCPManifest = func() {
 			a.System, a.LeanSystem = prompt.ComposePair(sess.System, cwd, env, skillsManifest, tools.MCPManifestFor(a.Model, agentProfile), memInjection, coauthor, agentProfile != nil && agentProfile.SystemPrompt != "")
 		}
+		// Backs /reload: re-renders every layer that can go stale mid-session
+		// (skills manifest, MCP manifest, memory injection) and re-composes,
+		// rather than just the MCP layer above. skillReg.Reload() rescans
+		// ~/.octo/skills and ./.octo/skills so a skill installed after this
+		// session started is picked up.
+		cfg.recomposeSystemPrompt = func() {
+			skillReg.Reload()
+			skillsManifest = tools.SkillsManifest(skillReg)
+			if memDir != "" {
+				memInjection = memory.RenderInjection(memDir, homeMemDir)
+			}
+			if g := tools.MemoryBackendGuidance(); g != "" {
+				memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
+			}
+			a.System, a.LeanSystem = prompt.ComposePair(sess.System, cwd, env, skillsManifest, tools.MCPManifestFor(a.Model, agentProfile), memInjection, coauthor, agentProfile != nil && agentProfile.SystemPrompt != "")
+		}
 		if toolsOn {
 			// Built-ins only at first paint — the MCP registry is still nil
 			// (mcpBoot connects it in the background). mcpReadyMsg recomputes

@@ -506,6 +506,42 @@ func TestCmdClear_RefusesWhileRunning(t *testing.T) {
 	}
 }
 
+// TestCmdReload_ClearsComposedSystemAndRefusesWhileRunning: /reload clears the
+// session's frozen system prompt so the next turn recomposes it, and refuses
+// (without cancelling the turn) while one is running — same contract as
+// /clear and /compact.
+func TestCmdReload_ClearsComposedSystemAndRefusesWhileRunning(t *testing.T) {
+	tempHome(t)
+	ev := InboundEvent{Platform: "feishu", ChatID: "c1", UserID: "u1"}
+
+	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
+	sess := mgr.GetOrCreateSession(ev, nil)
+	if err := sess.Store.SetComposedSystem("full prompt", "lean prompt"); err != nil {
+		t.Fatalf("SetComposedSystem: %v", err)
+	}
+
+	runCtx, done := sess.BeginRun(context.Background())
+	reply := mgr.cmdReload(ev, "")
+	if !strings.Contains(strings.ToLower(reply), "can't reload") {
+		t.Fatalf("expected refusal while running, got %q", reply)
+	}
+	if runCtx.Err() != nil {
+		t.Fatal("/reload should not cancel the running turn")
+	}
+	if sess.Store.ComposedSystem == "" {
+		t.Fatal("refused /reload must not have cleared ComposedSystem")
+	}
+	done()
+
+	reply = mgr.cmdReload(ev, "")
+	if strings.Contains(strings.ToLower(reply), "failed") {
+		t.Fatalf("cmdReload: %q", reply)
+	}
+	if sess.Store.ComposedSystem != "" || sess.Store.ComposedLeanSystem != "" {
+		t.Errorf("cmdReload did not clear ComposedSystem/ComposedLeanSystem: %q / %q", sess.Store.ComposedSystem, sess.Store.ComposedLeanSystem)
+	}
+}
+
 // TestCmdCompact_FoldsHistory: /compact summarizes older turns and persists the
 // shorter history.
 func TestCmdCompact_FoldsHistory(t *testing.T) {

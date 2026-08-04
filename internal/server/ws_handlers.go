@@ -526,6 +526,9 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 		case "/compact":
 			s.wsCompactSession(sid)
 			return
+		case "/reload":
+			s.wsReloadSession(sid)
+			return
 		}
 		if trimmed == "/goal" || strings.HasPrefix(trimmed, "/goal ") {
 			s.wsGoalCommand(sid, strings.TrimSpace(strings.TrimPrefix(trimmed, "/goal")))
@@ -686,6 +689,35 @@ func (s *Server) wsClearSession(sid string) {
 	s.wsHub.broadcast(sid, map[string]any{"type": "session_update", "session_id": sid, "status": "idle", "context_usage": 0, "context_tokens": 0})
 	s.broadcastHistoryReload(sid)
 	s.wsToast(sid, "Conversation cleared.", "success")
+}
+
+// wsReloadSession clears the session's frozen system prompt
+// (Session.ClearComposedSystem) so the next turn recomposes it against live
+// skills/MCP/memory — the way to pick up a skill installed/toggled since this
+// session's prompt was composed, without starting a new session. Unlike
+// /clear, no cached state needs dropping: buildAgent already builds a fresh
+// *agent.Agent every turn, so clearing the session field is enough for the
+// next one to recompose. Backs the /reload command.
+func (s *Server) wsReloadSession(sid string) {
+	mu := s.sessionTurnLock(sid)
+	mu.Lock()
+	running := s.turnRunning[sid]
+	mu.Unlock()
+	if running {
+		s.wsToast(sid, "Can't reload while a turn is running — interrupt it first.", "error")
+		return
+	}
+
+	sess, err := agent.LoadSession(sid)
+	if err != nil {
+		s.wsToast(sid, "Session not found.", "error")
+		return
+	}
+	if err := sess.ClearComposedSystem(); err != nil {
+		s.wsToast(sid, "Reload failed: "+err.Error(), "error")
+		return
+	}
+	s.wsToast(sid, "System prompt reloaded — new skills, MCP tools, and memory are now visible.", "success")
 }
 
 // wsCompactSession force-compacts a session's history now and reloads the

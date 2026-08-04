@@ -23,6 +23,7 @@ var builtinSlashCommands = []complItem{
 	{"/model", "Switch to another model (--default to make it the default)"},
 	{"/thinking", "Set reasoning effort (off/low/medium/high/xhigh/max)"},
 	{"/compact", "Summarize older history to free up context"},
+	{"/reload", "Reload the system prompt to pick up a newly installed/toggled skill"},
 	{"/transcript", "Re-print the last (or last N) tool call(s) with full output"},
 	{"/goal", "Set or view the session goal (edit/pause/resume/clear)"},
 	{"/loop", "Repeat a task in this session (/loop [interval] <task>)"},

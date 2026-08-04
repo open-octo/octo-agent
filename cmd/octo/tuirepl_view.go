@@ -920,6 +920,8 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.startCompact()
+	case "/reload":
+		return m.dispatchReload()
 	case "/agent":
 		return m.dispatchAgent(strings.TrimSpace(strings.TrimPrefix(text, first)))
 	case "/transcript":
@@ -985,6 +987,21 @@ func (m *tuiModel) dispatchClear() (tea.Model, tea.Cmd) {
 	}
 	m.assistantFirstBlock = true
 	m.println(noticeStyle.Render("✦ context cleared — starting fresh"))
+	return m, nil
+}
+
+// dispatchReload handles "/reload" — rebuilds the system prompt against live
+// skills/MCP/memory, the way to pick up a skill installed or toggled since
+// this session started without restarting octo. See
+// cfg.recomposeSystemPrompt's doc comment for why the TUI needs its own path
+// here rather than the web/IM Session.ClearComposedSystem mechanism.
+func (m *tuiModel) dispatchReload() (tea.Model, tea.Cmd) {
+	if m.cfg.recomposeSystemPrompt == nil {
+		m.println(noticeStyle.Render("/reload: not available in this session"))
+		return m, nil
+	}
+	m.cfg.recomposeSystemPrompt()
+	m.println(noticeStyle.Render("✦ system prompt reloaded — new skills, MCP tools, and memory are now visible"))
 	return m, nil
 }
 

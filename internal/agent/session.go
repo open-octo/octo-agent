@@ -961,6 +961,42 @@ func (s *Session) IsComposedFor(model string) bool {
 	return s.ComposedSystem != "" && s.ComposedForModel == model
 }
 
+// ClearComposedSystem un-freezes the composed system prompt so the next turn
+// that builds this session (buildAgent / runChannelTurns) recomposes it from
+// the live layers — e.g. after a skill install/toggle the user wants this
+// session to pick up without starting a new one. Backs the /reload command.
+// Unlike SetComposedSystem this is NOT a no-op when already set: it exists
+// specifically to undo a previous freeze. Same append-or-rewrite persistence
+// mechanics; the appended record's omitted (empty) fields mean "not frozen"
+// on replay, same as a session that has never taken a turn.
+func (s *Session) ClearComposedSystem() error {
+	s.ComposedSystem, s.ComposedLeanSystem, s.ComposedForModel = "", "", ""
+	if s.persisted == 0 {
+		if path, perr := s.SavePath(); perr == nil {
+			if _, statErr := os.Stat(path); statErr == nil {
+				return s.rewriteAll()
+			}
+		}
+		return nil
+	}
+	if s.forceRewrite {
+		return s.rewriteAll()
+	}
+	path, err := s.SavePath()
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("session: open %s: %w", path, err)
+	}
+	defer f.Close()
+	if err := json.NewEncoder(f).Encode(sessionRecord{Type: "composed_system"}); err != nil {
+		return fmt.Errorf("session: append composed_system(clear): %w", err)
+	}
+	return nil
+}
+
 // SetLastContextTokens records the context-window fill (real input-token count)
 // as of the just-finished turn, so an idle/resumed session reports its true
 // usage without a live Agent. Same append-or-rewrite persistence mechanics as

@@ -390,12 +390,14 @@ func (m *Manager) CommandRouter(ev InboundEvent, agentID string) string {
 		return m.cmdNew(ev, agentID)
 	case "/compact":
 		return m.cmdCompact(ev, agentID)
+	case "/reload":
+		return m.cmdReload(ev, agentID)
 	case "/goal":
 		return m.cmdGoal(ev, strings.Join(args, " "), agentID)
 	case "/model":
 		return m.cmdModel(ev, strings.Join(args, " "), agentID)
 	case "/help":
-		return "Available: /bind [--force] <number|id>, /unbind, /list, /clear, /new, /compact, /goal, /model [name|default], /loop [interval] <task>, /stop, /status, /help"
+		return "Available: /bind [--force] <number|id>, /unbind, /list, /clear, /new, /compact, /reload, /goal, /model [name|default], /loop [interval] <task>, /stop, /status, /help"
 	default:
 		return fmt.Sprintf("Unknown command: %s", cmd)
 	}
@@ -587,6 +589,32 @@ func (m *Manager) cmdClear(ev InboundEvent, agentID string) string {
 		return fmt.Sprintf("Cleared, but saving the empty history failed: %v", err)
 	}
 	return "Conversation cleared. Starting fresh."
+}
+
+// cmdReload clears the session's frozen system prompt
+// (Session.ClearComposedSystem) so the next turn recomposes it against live
+// skills/MCP/memory — the way to pick up a skill installed/toggled since this
+// session's prompt was composed, without starting a new session or /bind-ing
+// away and back. Mirrors the web /reload command.
+func (m *Manager) cmdReload(ev InboundEvent, agentID string) string {
+	key := sessionKeyFor(m.mode, ev, agentID)
+	val, loaded := m.sessions.Load(key)
+	if !loaded {
+		return "No active session to reload."
+	}
+	sess := val.(*Session)
+	if sess.IsRunning() {
+		return "Can't reload while a turn is running — /stop it first or wait for it to finish."
+	}
+	// Serialize with agent turns so the reload cannot race a turn that starts
+	// immediately after the IsRunning check.
+	_, done := sess.BeginRun(context.Background())
+	defer done()
+
+	if err := sess.Store.ClearComposedSystem(); err != nil {
+		return fmt.Sprintf("Reload failed: %v", err)
+	}
+	return "System prompt will be recomposed on your next message — new skills, MCP tools, and memory are now visible."
 }
 
 // cmdCompact force-compacts the current session's conversation history now,

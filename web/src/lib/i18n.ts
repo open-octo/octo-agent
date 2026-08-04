@@ -235,8 +235,9 @@ export const en: Record<string, string> = {
   "mcp.btn.edit_with_agent": "Edit with Agent",
   // Skills view
   "skills.confirm_delete": "Delete skill \"{name}\"?",
-  "skills.toast_deleted": "Skill \"{name}\" deleted",
-  "skills.toast_imported": "Skill \"{name}\" imported",
+  "skills.toast_deleted": "Skill \"{name}\" deleted — /reload an open session, or start a new one, for the change to take effect there",
+  "skills.toast_imported": "Skill \"{name}\" imported — /reload an open session, or start a new one, to use it there",
+  "skills.toast_toggled": "Skill \"{name}\" updated — /reload an open session, or start a new one, for the change to take effect there",
   // Workflows view
   "workflows.confirm_delete": "Delete workflow \"{name}\"?",
   "workflows.toast_deleted": "Workflow \"{name}\" deleted",
@@ -291,6 +292,7 @@ export const en: Record<string, string> = {
   "composer.cmd_loop": "Repeat a task this session (/loop [interval] <task>)",
   "composer.cmd_goal": "Set or view the session goal",
   "composer.cmd_compact": "Summarize older history to free up context",
+  "composer.cmd_reload": "Reload the system prompt to pick up a newly installed/toggled skill",
   "composer.cmd_clear": "Wipe the conversation and start fresh",
   "agent.plan": "Plan",
   "agent.thoughts": "Thoughts",
@@ -1074,8 +1076,9 @@ export const zh: Record<string, string> = {
   "mcp.btn.edit_with_agent": "请 Agent 修改",
   // 技能视图
   "skills.confirm_delete": "删除技能 \"{name}\"?",
-  "skills.toast_deleted": "技能 \"{name}\" 已删除",
-  "skills.toast_imported": "技能 \"{name}\" 已导入",
+  "skills.toast_deleted": "技能 \"{name}\" 已删除 —— 对已打开的会话执行 /reload，或新建一个会话，才能生效",
+  "skills.toast_imported": "技能 \"{name}\" 已导入 —— 对已打开的会话执行 /reload，或新建一个会话，才能使用",
+  "skills.toast_toggled": "技能 \"{name}\" 已更新 —— 对已打开的会话执行 /reload，或新建一个会话，才能生效",
   // 工作流视图
   "workflows.confirm_delete": "删除工作流 \"{name}\"?",
   "workflows.toast_deleted": "工作流 \"{name}\" 已删除",
@@ -1129,6 +1132,7 @@ export const zh: Record<string, string> = {
   "composer.cmd_loop": "在本会话里重复执行一个任务(/loop [间隔] <任务>)",
   "composer.cmd_goal": "设置或查看会话目标",
   "composer.cmd_compact": "压缩较早的历史以释放上下文",
+  "composer.cmd_reload": "重新加载系统提示词，以识别新安装/切换的技能",
   "composer.cmd_clear": "清空对话，重新开始",
   "agent.plan": "计划",
   "agent.thoughts": "思考",

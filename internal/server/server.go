@@ -2889,7 +2889,7 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 	// Reserved commands must not be intercepted by a skill (matching
 	// the TUI reservedReplCommands pattern).
 	switch cmd {
-	case "/stop", "/bind", "/unbind", "/clear", "/new", "/status", "/list", "/help", "/goal", "/compact":
+	case "/stop", "/bind", "/unbind", "/clear", "/new", "/status", "/list", "/help", "/goal", "/compact", "/reload":
 		// fall through to CommandRouter
 	case "/loop":
 		// /loop is a built-in the model handles via the schedule_wakeup tool

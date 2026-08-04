@@ -411,6 +411,55 @@ func TestSetComposedSystem_PersistedZeroRewritesWhenFileExists(t *testing.T) {
 	}
 }
 
+// TestClearComposedSystem_UnfreezesAndRoundTrips: ClearComposedSystem
+// un-freezes an already-frozen session (unlike SetComposedSystem, it is NOT a
+// no-op when there's something to clear) and appends its own composed_system
+// record; the cleared state round-trips through a reload, and the session can
+// be frozen again afterward — each step verified against a fresh LoadSession,
+// not just the in-memory value.
+func TestClearComposedSystem_UnfreezesAndRoundTrips(t *testing.T) {
+	setTempHome(t)
+	s := NewSession("m", "")
+	s.Messages = []Message{NewUserMessage("hi"), NewAssistantMessage("hello")}
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := s.SetComposedSystem("full prompt", "lean prompt"); err != nil {
+		t.Fatalf("SetComposedSystem: %v", err)
+	}
+
+	if err := s.ClearComposedSystem(); err != nil {
+		t.Fatalf("ClearComposedSystem: %v", err)
+	}
+	if s.ComposedSystem != "" || s.ComposedLeanSystem != "" {
+		t.Errorf("ClearComposedSystem left fields set: %q / %q", s.ComposedSystem, s.ComposedLeanSystem)
+	}
+	reloaded, err := LoadSession(s.ID)
+	if err != nil {
+		t.Fatalf("LoadSession after clear: %v", err)
+	}
+	if reloaded.ComposedSystem != "" || reloaded.ComposedLeanSystem != "" {
+		t.Errorf("reloaded after clear = %q / %q, want empty", reloaded.ComposedSystem, reloaded.ComposedLeanSystem)
+	}
+
+	// And it can be frozen again after clearing — round-trips too, confirming
+	// the third composed_system record (freeze, clear, re-freeze) replays
+	// correctly rather than getting lost among the earlier ones.
+	if err := reloaded.SetComposedSystem("second prompt", "second lean"); err != nil {
+		t.Fatalf("SetComposedSystem after clear: %v", err)
+	}
+	if reloaded.ComposedSystem != "second prompt" {
+		t.Errorf("SetComposedSystem after clear = %q, want %q", reloaded.ComposedSystem, "second prompt")
+	}
+	refrozen, err := LoadSession(reloaded.ID)
+	if err != nil {
+		t.Fatalf("LoadSession after re-freeze: %v", err)
+	}
+	if refrozen.ComposedSystem != "second prompt" || refrozen.ComposedLeanSystem != "second lean" {
+		t.Errorf("reloaded after re-freeze = %q / %q, want %q / %q", refrozen.ComposedSystem, refrozen.ComposedLeanSystem, "second prompt", "second lean")
+	}
+}
+
 // PersistContextUsage records the agent's current context-token count on the
 // session and round-trips it, and is a safe no-op with a nil session or no
 // count. Every transport (web, IM, CLI, scheduled) calls it at turn end so a

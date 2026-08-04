@@ -27,6 +27,7 @@
     try {
       await api.toggleSkill(name, next)
       skills.update(list => list.map(s => s.name === name ? { ...s, enabled: next } : s))
+      showToast(tr('skills.toast_toggled').replace('{name}', name))
     } catch (err: any) {
       showToast(err.message, 'error')
     }
