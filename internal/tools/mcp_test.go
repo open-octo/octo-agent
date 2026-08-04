@@ -77,7 +77,10 @@ func TestParseMCPName_RejectsMalformed(t *testing.T) {
 }
 
 func TestFormatToolResult_MixedContent(t *testing.T) {
-	imgBytes := []byte("not-really-an-image-but-round-trips")
+	// A real PNG signature: the image block is built by sniffing the bytes, so
+	// an arbitrary payload is (correctly) refused no matter what the server
+	// calls it — see TestFormatToolResult_UnsupportedImageFormat.
+	imgBytes := []byte("\x89PNG\r\n\x1a\nIHDR-and-the-rest")
 	r := &mcp.CallToolResult{Content: []mcp.Content{
 		{Type: "text", Text: "first"},
 		{Type: "image", MIMEType: "image/png", Data: base64.StdEncoding.EncodeToString(imgBytes)},
@@ -107,6 +110,36 @@ func TestFormatToolResult_MixedContent(t *testing.T) {
 	}
 	if string(blk.Image.Data) != string(imgBytes) {
 		t.Errorf("block data = %q, want the decoded payload %q", blk.Image.Data, imgBytes)
+	}
+}
+
+// TestFormatToolResult_UnsupportedImageFormat: an MCP server names its own
+// media type and can name anything. A format the providers reject must degrade
+// to a text line — building the block anyway fails the entire turn at the
+// provider, which is worse than the placeholder this used to produce.
+func TestFormatToolResult_UnsupportedImageFormat(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		mime  string
+		bytes []byte
+	}{
+		{"svg", "image/svg+xml", []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)},
+		{"bmp", "image/bmp", []byte("BM\x00\x00\x00\x00\x00\x00")},
+		{"tiff", "image/tiff", []byte("II*\x00\x08\x00\x00\x00")},
+		{"empty media type with junk bytes", "", []byte("nonsense")},
+		{"png label, non-png bytes", "image/png", []byte("lying about this")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			out := formatToolResult(&mcp.CallToolResult{Content: []mcp.Content{
+				{Type: "image", MIMEType: c.mime, Data: base64.StdEncoding.EncodeToString(c.bytes)},
+			}})
+			if len(out.Blocks) != 0 {
+				t.Errorf("Blocks = %d, want none for a format no provider accepts", len(out.Blocks))
+			}
+			if !strings.Contains(out.Text, "not supported") {
+				t.Errorf("Text = %q, want it to say the format isn't supported", out.Text)
+			}
+		})
 	}
 }
 

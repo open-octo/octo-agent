@@ -614,10 +614,13 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		}
 		// Return the image as a vision block so the model actually sees the page
 		// (not just a file path), and keep the on-disk copy for artifacts.
-		return agent.ToolResult{
-			Text:   "screenshot saved to " + path,
-			Blocks: []agent.ContentBlock{agent.NewImageBlock("image/png", shot)},
-		}, nil
+		res := agent.ToolResult{Text: "screenshot saved to " + path}
+		// CDP hands back PNG, so the sniff should always pass; if it somehow
+		// doesn't, the path in Text still tells the user where the file is.
+		if blk, ok := agent.NewImageBlock("image/png", shot); ok {
+			res.Blocks = []agent.ContentBlock{blk}
+		}
+		return res, nil
 
 	case "observe":
 		// Text-only "look at this page": the current URL/title + the page's

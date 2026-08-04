@@ -129,10 +129,64 @@ func NewToolResultBlock(toolUseID, result string, isError bool) ContentBlock {
 // (see compressImageData): oversized captures are downscaled and re-encoded
 // so every attach path — clipboard, composer, IM, tool results — stays under
 // provider size limits without each caller re-implementing it.
-func NewImageBlock(mimeType string, data []byte) ContentBlock {
-	mimeType, data = compressImageData(mimeType, data)
+//
+// ok is false when the bytes aren't an image format the providers accept, in
+// which case there is no block to send and the caller should describe the
+// content in text instead. Sending one anyway costs the whole turn: the media
+// type travels verbatim into Anthropic's `source.media_type` and OpenAI's data
+// URL, and an unsupported value fails the entire request, not just the image.
+//
+// The format is decided by sniffing the bytes, not by the caller's mimeType.
+// Callers get that string from somewhere untrustworthy — a file extension, or
+// an MCP server that names whatever it likes (including nothing) — and a wrong
+// label is indistinguishable from a wrong image until the provider rejects it.
+func NewImageBlock(mimeType string, data []byte) (ContentBlock, bool) {
+	sniffed := sniffImageType(data)
+	if sniffed == "" {
+		return ContentBlock{}, false
+	}
+	// Trust the bytes over the label. compressImageData may re-encode to JPEG,
+	// which is itself supported, so the result stays valid either way.
+	outType, outData := compressImageData(sniffed, data)
+	if !modelImageTypes[outType] {
+		return ContentBlock{}, false
+	}
 	return ContentBlock{
 		Type:  "image",
-		Image: &ImageData{MIMEType: mimeType, Data: data},
+		Image: &ImageData{MIMEType: outType, Data: outData},
+	}, true
+}
+
+// modelImageTypes are the formats every provider adapter can put on the wire.
+// Anthropic documents exactly these four; OpenAI accepts a superset, so the
+// intersection is what's safe to send without branching per vendor.
+var modelImageTypes = map[string]bool{
+	"image/jpeg": true,
+	"image/png":  true,
+	"image/gif":  true,
+	"image/webp": true,
+}
+
+// sniffImageType identifies an image from its magic bytes, returning "" for
+// anything that isn't one of the provider-supported formats. Hand-rolled
+// rather than using http.DetectContentType because only these four matter and
+// the decision needs to be exact — DetectContentType also reports formats
+// (bmp, tiff) the providers reject, which would just move the problem.
+//
+// Deliberately not attempting conversion for the rejects: the standard library
+// decodes png, jpeg and gif only, which are already supported, so there is no
+// bmp/tiff/heic/svg case that could be re-encoded without a new dependency.
+func sniffImageType(data []byte) string {
+	switch {
+	case len(data) >= 8 && string(data[:8]) == "\x89PNG\r\n\x1a\n":
+		return "image/png"
+	case len(data) >= 3 && string(data[:3]) == "\xff\xd8\xff":
+		return "image/jpeg"
+	case len(data) >= 6 && (string(data[:6]) == "GIF87a" || string(data[:6]) == "GIF89a"):
+		return "image/gif"
+	// RIFF container: bytes 8..12 name the payload, "WEBP" for an image.
+	case len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP":
+		return "image/webp"
 	}
+	return ""
 }

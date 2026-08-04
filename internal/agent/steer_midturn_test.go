@@ -11,8 +11,11 @@ import (
 // historically dropped any image blocks). Covers the three steer shapes the
 // feature must support: image-only, text-only, and multiple images.
 func TestAgent_MidTurnSteer_AnsweredInTurn(t *testing.T) {
-	img1 := NewImageBlock("image/png", []byte("one"))
-	img2 := NewImageBlock("image/jpeg", []byte("two"))
+	img1 := mustPNGBlock(t)
+	img2, ok := NewImageBlock("image/jpeg", []byte("\xff\xd8\xffJPEGBODY"))
+	if !ok {
+		t.Fatal("fixture JPEG was rejected by NewImageBlock")
+	}
 
 	cases := []struct {
 		name        string

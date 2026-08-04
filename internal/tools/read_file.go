@@ -247,9 +247,19 @@ func readImageFile(absPath, displayPath, mimeType string) (agent.ToolResult, err
 	}
 
 	desc := fmt.Sprintf("Image: %s (%s, %s)", displayPath, mimeType, formatBytes(info.Size()))
+	blk, ok := agent.NewImageBlock(mimeType, data)
+	if !ok {
+		// imageExtensions admits formats the providers don't accept (bmp, ico,
+		// tiff, heic). Sending one fails the whole request, so say what
+		// happened instead — the model can suggest converting the file.
+		return agent.ToolResult{Text: fmt.Sprintf(
+			"%s — this format cannot be sent to the model (only PNG, JPEG, GIF and WebP are accepted). Convert it first if it needs to be viewed.",
+			desc,
+		)}, nil
+	}
 	return agent.ToolResult{
 		Text:   desc,
-		Blocks: []agent.ContentBlock{agent.NewImageBlock(mimeType, data)},
+		Blocks: []agent.ContentBlock{blk},
 	}, nil
 }
 

@@ -563,9 +563,18 @@ func (m *tuiModel) tryAttachDroppedImage() bool {
 	case ".tif":
 		mime = "image/tiff"
 	}
-	label := fmt.Sprintf("image (%s, %s)", shortMIME(mime), humanByteSize(len(data)))
+	blk, ok := agent.NewImageBlock(mime, data)
+	if !ok {
+		// The extension said image but the bytes aren't a format the model
+		// accepts (imageExts admits .bmp/.tiff/.heic/.ico). Refuse here —
+		// attaching it would fail the whole turn at the provider instead.
+		m.println(noticeStyle.Render(fmt.Sprintf(
+			"📎 %s is not a format the model accepts (PNG, JPEG, GIF or WebP)", shortMIME(mime))))
+		return false
+	}
+	label := fmt.Sprintf("image (%s, %s)", shortMIME(blk.Image.MIMEType), humanByteSize(len(blk.Image.Data)))
 	m.pendingAttachments = append(m.pendingAttachments, pendingAttachment{
-		block: agent.NewImageBlock(mime, data),
+		block: blk,
 		label: label,
 	})
 	// Splice the path token out of the (original) textarea value.
@@ -693,9 +702,15 @@ func (m *tuiModel) pasteClipboardImage() (tea.Model, tea.Cmd) {
 		m.println(noticeStyle.Render("📋 " + err.Error()))
 		return m, nil
 	}
-	label := fmt.Sprintf("image (%s, %s)", shortMIME(mime), humanByteSize(len(data)))
+	blk, ok := agent.NewImageBlock(mime, data)
+	if !ok {
+		m.println(noticeStyle.Render(fmt.Sprintf(
+			"📋 clipboard image is %s, which the model can't accept (PNG, JPEG, GIF or WebP)", shortMIME(mime))))
+		return m, nil
+	}
+	label := fmt.Sprintf("image (%s, %s)", shortMIME(blk.Image.MIMEType), humanByteSize(len(blk.Image.Data)))
 	m.pendingAttachments = append(m.pendingAttachments, pendingAttachment{
-		block: agent.NewImageBlock(mime, data),
+		block: blk,
 		label: label,
 	})
 	return m, nil

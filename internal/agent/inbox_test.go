@@ -43,7 +43,7 @@ func TestInbox_EnqueueDrain(t *testing.T) {
 
 func TestInbox_EnqueueWithBlocks(t *testing.T) {
 	var ib Inbox
-	img := NewImageBlock("image/png", []byte{0x89, 'P', 'N', 'G'})
+	img := mustPNGBlock(t)
 	ib.EnqueueWithBlocks("look at this", []ContentBlock{img})
 	ib.Enqueue("plain text")
 
@@ -61,7 +61,7 @@ func TestInbox_EnqueueWithBlocks(t *testing.T) {
 
 func TestInbox_EnqueueWithBlocks_ImageOnly(t *testing.T) {
 	var ib Inbox
-	img := NewImageBlock("image/png", []byte{1, 2, 3})
+	img := mustPNGBlock(t)
 	ib.EnqueueWithBlocks("", []ContentBlock{img})
 
 	items := ib.Drain()

@@ -115,11 +115,17 @@ func TestCompressImageData_PixelBombUntouched(t *testing.T) {
 // NewImageBlock wires the normalization: a big image comes out as a JPEG
 // block, a small one keeps its bytes.
 func TestNewImageBlock_Normalizes(t *testing.T) {
-	big := NewImageBlock("image/png", encodePNG(t, 2400, 1600))
+	big, ok := NewImageBlock("image/png", encodePNG(t, 2400, 1600))
+	if !ok {
+		t.Fatal("big PNG rejected")
+	}
 	if big.Image.MIMEType != "image/jpeg" {
 		t.Errorf("big block mime = %q, want image/jpeg", big.Image.MIMEType)
 	}
-	small := NewImageBlock("image/png", encodePNG(t, 64, 64))
+	small, ok := NewImageBlock("image/png", encodePNG(t, 64, 64))
+	if !ok {
+		t.Fatal("small PNG rejected")
+	}
 	if small.Image.MIMEType != "image/png" {
 		t.Errorf("small block mime = %q, want unchanged image/png", small.Image.MIMEType)
 	}

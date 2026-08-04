@@ -193,7 +193,14 @@ func saveImageAttachment(name, dataURL string) (agent.ContentBlock, string, erro
 	// raw upload: rehydration from disk deliberately bypasses recompression,
 	// so a raw multi-megabyte copy would otherwise be sent verbatim on every
 	// resumed session. The block and its on-disk copy now agree.
-	block := agent.NewImageBlock(mime, data)
+	block, ok := agent.NewImageBlock(mime, data)
+	if !ok {
+		// Reject at the upload boundary rather than letting an unsupported
+		// format through to fail the whole turn later, where the error would
+		// name the provider instead of the file the user picked.
+		return agent.ContentBlock{}, "", fmt.Errorf(
+			"%s is not an image format the model accepts (PNG, JPEG, GIF or WebP)", name)
+	}
 	dstName := fmt.Sprintf("%d_%s%s", time.Now().UnixNano(), base, extForImageMIME(block.Image.MIMEType))
 	dstPath := filepath.Join(dir, dstName)
 	if err := os.WriteFile(dstPath, block.Image.Data, 0o600); err != nil {

@@ -149,7 +149,7 @@ func TestLastVisibleUserIdx_None(t *testing.T) {
 // An image-only user message (no text) is still a retryable prompt.
 func TestLastVisibleUserIdx_ImageOnly(t *testing.T) {
 	img := agent.NewUserMessage("")
-	img.Blocks = []agent.ContentBlock{agent.NewImageBlock("image/png", []byte("hi"))}
+	img.Blocks = []agent.ContentBlock{mustPNGBlock(t)}
 	msgs := []agent.Message{
 		agent.NewUserMessage("first"), // 0
 		agent.NewAssistantMessage("ok"),
@@ -159,4 +159,17 @@ func TestLastVisibleUserIdx_ImageOnly(t *testing.T) {
 	if got := lastVisibleUserIdx(msgs); got != 2 {
 		t.Errorf("lastVisibleUserIdx = %d, want 2 (image-only prompt)", got)
 	}
+}
+
+// mustPNGBlock builds an image block from a minimal valid PNG. NewImageBlock
+// identifies the format by sniffing the bytes rather than trusting the caller's
+// label, so a fixture needs the real 8-byte signature — truncated stand-ins are
+// correctly rejected.
+func mustPNGBlock(t *testing.T) agent.ContentBlock {
+	t.Helper()
+	blk, ok := agent.NewImageBlock("image/png", []byte("\x89PNG\r\n\x1a\n"))
+	if !ok {
+		t.Fatal("fixture PNG was rejected by NewImageBlock")
+	}
+	return blk
 }

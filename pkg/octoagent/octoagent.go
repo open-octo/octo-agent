@@ -142,8 +142,11 @@ func NewToolResultBlock(toolUseID, result string, isError bool) ContentBlock {
 	return agent.NewToolResultBlock(toolUseID, result, isError)
 }
 
-// NewImageBlock creates a ContentBlock with Type=="image".
-func NewImageBlock(mimeType string, data []byte) ContentBlock {
+// NewImageBlock creates a ContentBlock with Type=="image". ok is false when
+// the bytes aren't an image format the providers accept, in which case there
+// is no block to send — describe the content in text instead. The format is
+// determined by sniffing the bytes; mimeType is only a hint.
+func NewImageBlock(mimeType string, data []byte) (ContentBlock, bool) {
 	return agent.NewImageBlock(mimeType, data)
 }
 

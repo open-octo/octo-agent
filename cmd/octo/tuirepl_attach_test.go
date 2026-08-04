@@ -8,9 +8,10 @@ import (
 )
 
 // fakeAttachment builds a pendingAttachment with a dummy image block for tests.
-func fakeAttachment() pendingAttachment {
+func fakeAttachment(t *testing.T) pendingAttachment {
+	t.Helper()
 	return pendingAttachment{
-		block: agent.NewImageBlock("image/png", []byte{0x89, 'P', 'N', 'G'}),
+		block: mustPNGBlock(t),
 		label: "image (PNG, 4 B)",
 	}
 }
@@ -20,7 +21,7 @@ func fakeAttachment() pendingAttachment {
 // image-only message is valid).
 func TestTUI_SubmitImageOnlyStartsTurn(t *testing.T) {
 	m := newTestModel()
-	m.pendingAttachments = []pendingAttachment{fakeAttachment()}
+	m.pendingAttachments = []pendingAttachment{fakeAttachment(t)}
 	setInput(m, "")
 
 	_, _ = m.submit()
@@ -37,7 +38,7 @@ func TestTUI_SubmitImageOnlyStartsTurn(t *testing.T) {
 // through the real key handler.
 func TestTUI_EscDiscardsAttachments(t *testing.T) {
 	m := newTestModel()
-	m.pendingAttachments = []pendingAttachment{fakeAttachment()}
+	m.pendingAttachments = []pendingAttachment{fakeAttachment(t)}
 
 	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
 
@@ -51,7 +52,7 @@ func TestTUI_EscDiscardsAttachments(t *testing.T) {
 func TestTUI_MidTurnSendsAttachments(t *testing.T) {
 	m := newTestModel()
 	m.turnRunning = true
-	m.pendingAttachments = []pendingAttachment{fakeAttachment()}
+	m.pendingAttachments = []pendingAttachment{fakeAttachment(t)}
 	setInput(m, "also look here")
 
 	_, _ = m.submit()
@@ -72,4 +73,17 @@ func TestTUI_MidTurnSendsAttachments(t *testing.T) {
 	if len(items[0].Blocks) != 1 {
 		t.Errorf("inbox blocks = %d, want 1 (the image)", len(items[0].Blocks))
 	}
+}
+
+// mustPNGBlock builds an image block from a minimal valid PNG. NewImageBlock
+// identifies the format by sniffing the bytes rather than trusting the caller's
+// label, so a fixture needs the real 8-byte signature — truncated stand-ins are
+// correctly rejected.
+func mustPNGBlock(t *testing.T) agent.ContentBlock {
+	t.Helper()
+	blk, ok := agent.NewImageBlock("image/png", []byte("\x89PNG\r\n\x1a\n"))
+	if !ok {
+		t.Fatal("fixture PNG was rejected by NewImageBlock")
+	}
+	return blk
 }

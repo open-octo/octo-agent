@@ -422,7 +422,7 @@ func TestSend_ImageBlock_WireFormat(t *testing.T) {
 		}),
 		agent.NewToolResultMessage([]agent.ContentBlock{
 			agent.NewToolResultBlock("call-1", "Image: /tmp/img.png (image/png, 12 B)", false),
-			agent.NewImageBlock("image/png", []byte{0x89, 0x50}),
+			mustPNGBlock(t),
 		}),
 	}
 
@@ -483,8 +483,10 @@ func TestSend_ImageBlock_WireFormat(t *testing.T) {
 	if src["media_type"] != "image/png" {
 		t.Errorf("source.media_type = %v, want image/png", src["media_type"])
 	}
-	if src["data"] != "iVA=" { // base64 of {0x89, 0x50}
-		t.Errorf("source.data = %v, want iVA=", src["data"])
+	// base64 of the PNG signature the fixture carries. NewImageBlock sniffs
+	// the bytes, so the fixture must be a real signature rather than a stub.
+	if want := "iVBORw0KGgo="; src["data"] != want {
+		t.Errorf("source.data = %v, want %s", src["data"], want)
 	}
 }
 

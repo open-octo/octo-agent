@@ -11,7 +11,7 @@ func TestAttachUserBlocks_MergedWithText(t *testing.T) {
 	send := &fakeSender{reply: Reply{Content: "ok", StopReason: "end_turn"}}
 	a := New(send, "m")
 
-	a.AttachUserBlocks([]ContentBlock{NewImageBlock("image/png", []byte{0x89, 'P', 'N', 'G'})})
+	a.AttachUserBlocks([]ContentBlock{mustPNGBlock(t)})
 	if _, err := a.Turn(context.Background(), "what is this?"); err != nil {
 		t.Fatalf("Turn: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestAttachUserBlocks_ImageOnly(t *testing.T) {
 	send := &fakeSender{reply: Reply{Content: "ok", StopReason: "end_turn"}}
 	a := New(send, "m")
 
-	a.AttachUserBlocks([]ContentBlock{NewImageBlock("image/png", []byte{1, 2, 3})})
+	a.AttachUserBlocks([]ContentBlock{mustPNGBlock(t)})
 	if _, err := a.Turn(context.Background(), ""); err != nil {
 		t.Fatalf("image-only Turn should be allowed: %v", err)
 	}
@@ -68,4 +68,17 @@ func TestEmptyInput_StillRejectedWithoutBlocks(t *testing.T) {
 	if _, err := a.Turn(context.Background(), ""); err == nil {
 		t.Fatal("empty input with no attachment should still error")
 	}
+}
+
+// mustPNGBlock builds an image block from a minimal valid PNG. NewImageBlock
+// identifies the format by sniffing the bytes rather than trusting the caller's
+// label, so a fixture needs the real 8-byte signature — truncated stand-ins are
+// correctly rejected.
+func mustPNGBlock(t *testing.T) ContentBlock {
+	t.Helper()
+	blk, ok := NewImageBlock("image/png", []byte("\x89PNG\r\n\x1a\n"))
+	if !ok {
+		t.Fatal("fixture PNG was rejected by NewImageBlock")
+	}
+	return blk
 }

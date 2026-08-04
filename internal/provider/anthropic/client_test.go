@@ -172,7 +172,7 @@ func TestSend_UserImage_WireFormat(t *testing.T) {
 			Role: agent.RoleUser,
 			Blocks: []agent.ContentBlock{
 				agent.NewTextBlock("what is this?"),
-				agent.NewImageBlock("image/png", []byte{0x89, 'P', 'N', 'G'}),
+				mustPNGBlock(t),
 			},
 		}},
 	})
@@ -503,4 +503,17 @@ func TestSend_ToolUseWithNonToolUseStopReason(t *testing.T) {
 	if !gotTool {
 		t.Error("expected an edit_file tool_use block")
 	}
+}
+
+// mustPNGBlock builds an image block from a minimal valid PNG. NewImageBlock
+// identifies the format by sniffing the bytes rather than trusting the caller's
+// label, so a fixture needs the real 8-byte signature — truncated stand-ins are
+// correctly rejected.
+func mustPNGBlock(t *testing.T) agent.ContentBlock {
+	t.Helper()
+	blk, ok := agent.NewImageBlock("image/png", []byte("\x89PNG\r\n\x1a\n"))
+	if !ok {
+		t.Fatal("fixture PNG was rejected by NewImageBlock")
+	}
+	return blk
 }

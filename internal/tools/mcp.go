@@ -321,8 +321,17 @@ func formatToolResult(r *mcp.CallToolResult) agent.ToolResult {
 				fmt.Fprintf(&b, "[image: %s, undecodable payload]", c.MIMEType)
 				break
 			}
-			blocks = append(blocks, agent.NewImageBlock(c.MIMEType, data))
-			fmt.Fprintf(&b, "[image: %s, %s]", c.MIMEType, humanBytes(len(data)))
+			blk, ok := agent.NewImageBlock(c.MIMEType, data)
+			if !ok {
+				// The server names its own media type and can name anything —
+				// svg, bmp, or nothing at all. Sending one the provider rejects
+				// fails the entire turn, so fall back to describing it.
+				fmt.Fprintf(&b, "[image: %s, %s — format not supported for model input]",
+					c.MIMEType, humanBytes(len(data)))
+				break
+			}
+			blocks = append(blocks, blk)
+			fmt.Fprintf(&b, "[image: %s, %s]", blk.Image.MIMEType, humanBytes(len(blk.Image.Data)))
 		case "audio":
 			fmt.Fprintf(&b, "[audio: %s, %d bytes]", c.MIMEType, len(c.Data))
 		case "resource":
