@@ -202,6 +202,16 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 		return false, fmt.Errorf("mcp: http %d: %s", resp.StatusCode, bytes.TrimSpace(b))
 	}
 
+	if msg.IsNotification() {
+		// The spec has servers accept a notification with 202 and no body,
+		// but 204 is handled above and some servers instead answer 200 with
+		// an empty (or non-JSON-RPC) body. Notify never registers a pending
+		// response, so there's nothing to decode or queue either way —
+		// drain the small ack body so the connection can be reused.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		return false, nil
+	}
+
 	ct := resp.Header.Get("Content-Type")
 	switch {
 	case ct == "" || isJSONContentType(ct):

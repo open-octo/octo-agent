@@ -361,6 +361,27 @@ func TestHTTPTransport_NotificationGet204(t *testing.T) {
 	}
 }
 
+// TestHTTPTransport_NotificationEmptyBody200 covers a server that
+// acknowledges a notification with 200 (not the spec-preferred 202, and not
+// the 204 the previous test covers) and an empty body: since Notify never
+// expects a response frame, this must not be treated as a JSON decode
+// failure (an empty body isn't valid JSON).
+func TestHTTPTransport_NotificationEmptyBody200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	tx, _ := NewHTTPTransport(HTTPConfig{URL: srv.URL})
+	defer tx.Close()
+
+	notif := &Message{JSONRPC: "2.0", Method: "notifications/initialized"}
+	if err := tx.Send(context.Background(), notif); err != nil {
+		t.Errorf("notification Send returned error: %v", err)
+	}
+}
+
 func TestNewHTTPTransport_EmptyURLRejected(t *testing.T) {
 	_, err := NewHTTPTransport(HTTPConfig{})
 	if err == nil {
