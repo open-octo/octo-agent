@@ -50,6 +50,75 @@ func fakeMCPServer(t *testing.T, toolNames ...string) *httptest.Server {
 	}))
 }
 
+// TestRegistryClose_ConcurrentAcrossServers pins the exit-latency invariant.
+// Closing an HTTP connection now waits on a session-terminating DELETE, so
+// closing servers one after another would make teardown cost scale with the
+// number of configured servers. Several servers that stall their DELETE must
+// still close in about the time one takes, not the sum.
+func TestRegistryClose_ConcurrentAcrossServers(t *testing.T) {
+	const servers = 4
+	const stall = 400 * time.Millisecond
+
+	makeStalling := func() *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodDelete {
+				time.Sleep(stall) // a server that's slow to let go
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			body, _ := io.ReadAll(r.Body)
+			var in Message
+			_ = json.Unmarshal(body, &in)
+			if in.ID == nil {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			var result any
+			switch in.Method {
+			case "initialize":
+				result = InitializeResult{
+					ProtocolVersion: ProtocolVersion,
+					Capabilities:    ServerCapabilities{Tools: &ToolsCapability{}},
+					ServerInfo:      Implementation{Name: "slow", Version: "0"},
+				}
+			case "tools/list":
+				result = map[string]any{"tools": []Tool{}}
+			default:
+				result = map[string]any{}
+			}
+			raw, _ := json.Marshal(result)
+			// Hand out a session id so Close has something to release.
+			w.Header().Set("Mcp-Session-Id", "sess-close")
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(Message{JSONRPC: "2.0", ID: in.ID, Result: raw})
+		}))
+	}
+
+	reg := NewRegistry()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for i := range servers {
+		srv := makeStalling()
+		defer srv.Close()
+		name := "slow" + string(rune('a'+i))
+		if err := reg.Connect(ctx, name, ServerEntry{URL: srv.URL},
+			Implementation{Name: "test", Version: "1"}, nil, nil); err != nil {
+			t.Fatalf("connect %s: %v", name, err)
+		}
+	}
+
+	start := time.Now()
+	reg.Close()
+	elapsed := time.Since(start)
+
+	// Serial teardown would take servers*stall; allow generous headroom over
+	// a single stall while still failing if the cost is being summed.
+	if limit := stall * 5 / 2; elapsed > limit {
+		t.Errorf("Close took %v for %d stalling servers (limit %v) — teardown looks serial",
+			elapsed, servers, limit)
+	}
+}
+
 func TestRegistryConnect_AddAndReplace(t *testing.T) {
 	srv := fakeMCPServer(t, "ping", "pong")
 	defer srv.Close()

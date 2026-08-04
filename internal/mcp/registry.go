@@ -278,6 +278,12 @@ func (r *Registry) Len() int {
 // Close tears every connection down. Idempotent. Errors per server are
 // dropped — Close is end-of-life and the user can't do anything with the
 // errors anyway.
+//
+// Connections close concurrently because closing one is no longer purely
+// local: an HTTP transport releases its session with a DELETE, which waits on
+// a server that may be slow or gone. Serially that cost would add up across
+// servers and stall process exit; in parallel the whole teardown is bounded
+// by the slowest single connection however many are configured.
 func (r *Registry) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -285,9 +291,15 @@ func (r *Registry) Close() {
 		return
 	}
 	r.closed = true
+	var wg sync.WaitGroup
 	for _, c := range r.conns {
-		_ = c.Client.Close()
+		wg.Add(1)
+		go func(c *Connection) {
+			defer wg.Done()
+			_ = c.Client.Close()
+		}(c)
 	}
+	wg.Wait()
 }
 
 func sortedKeys(m map[string]*Connection) []string {

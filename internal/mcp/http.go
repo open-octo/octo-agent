@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // HTTPTransport speaks JSON-RPC 2.0 over a single HTTP endpoint, per the
@@ -29,7 +30,10 @@ import (
 //     anyway) or the stream itself closes.
 //   - The server-issued Mcp-Session-Id header is captured on the first
 //     response and echoed on every subsequent request, so the server can
-//     resume per-client state.
+//     resume per-client state. Close releases it with a DELETE.
+//   - The protocol revision the server picks during initialize is echoed
+//     back in MCP-Protocol-Version on every later request, which servers
+//     implementing 2025-03-26 or later require.
 //
 // What we don't implement (v1 omission)
 //   - SSE stream resumption via Last-Event-ID on reconnect.
@@ -52,6 +56,16 @@ type HTTPTransport struct {
 	// Mcp-Session-Id. Subsequent requests echo it back.
 	sessionMu sync.Mutex
 	sessionID string
+
+	// protocolVersion is the revision the server chose during initialize,
+	// pushed in by Client.Initialize via SetProtocolVersion. Echoed back in
+	// MCP-Protocol-Version on every request once known — servers
+	// implementing 2025-03-26 or later require the header and reject
+	// requests without it. Empty until the handshake completes (the
+	// initialize request itself carries the version in its params, not a
+	// header), so we simply omit it then.
+	protoMu         sync.Mutex
+	protocolVersion string
 
 	// inbox queues the response of each Send so Receive can hand it back.
 	// Buffered so a Send never blocks (paired with one Receive per Send,
@@ -153,6 +167,11 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 		req.Header.Set("Mcp-Session-Id", t.sessionID)
 	}
 	t.sessionMu.Unlock()
+	t.protoMu.Lock()
+	if t.protocolVersion != "" {
+		req.Header.Set("MCP-Protocol-Version", t.protocolVersion)
+	}
+	t.protoMu.Unlock()
 
 	// Bearer-token injection from OAuth provider, if configured.
 	if t.oauth != nil {
@@ -247,6 +266,12 @@ func (t *HTTPTransport) queue(ctx context.Context, m *Message) error {
 // scanning once the frame answering our request has been queued — it is
 // never returned to the caller.
 var errSSEResponseReceived = errors.New("mcp: sse response received")
+
+// sessionDeleteTimeout bounds the best-effort session-termination DELETE that
+// Close fires. Short on purpose: Close runs on teardown paths (process exit,
+// /exit, a server being removed) where blocking is worse than leaking a
+// session the server will time out on its own. A var so tests can shrink it.
+var sessionDeleteTimeout = 3 * time.Second
 
 // maxSSEEventBytes bounds both a single SSE line (via scanner.Buffer) and
 // the total size of one event's "data:" lines accumulated across multiple
@@ -361,14 +386,70 @@ func (t *HTTPTransport) Receive(ctx context.Context) (*Message, error) {
 	}
 }
 
+// SetProtocolVersion records the revision the server chose during the
+// initialize handshake so later requests can advertise it. Called by
+// Client.Initialize before it sends notifications/initialized, so every
+// post-handshake request carries the header.
+func (t *HTTPTransport) SetProtocolVersion(v string) {
+	t.protoMu.Lock()
+	t.protocolVersion = v
+	t.protoMu.Unlock()
+}
+
 // Close tears the transport down. Idempotent. After Close, any pending
 // Receive caller is unblocked with io.EOF; further Sends return an error.
+//
+// If the server issued a session id, Close first tries to release it with a
+// DELETE (the spec's session-termination request) so the server can drop its
+// per-client state instead of holding it until an idle timeout. That is a
+// courtesy on a teardown path: it gets a short independent timeout — the
+// caller's context is typically already cancelled by the time we're closing —
+// and any failure is ignored, since there is nothing useful to do about a
+// server that won't let go of a session we're abandoning anyway.
 func (t *HTTPTransport) Close() error {
 	if !t.closed.CompareAndSwap(false, true) {
 		return nil
 	}
+	t.deleteSession()
 	close(t.done)
 	return nil
+}
+
+func (t *HTTPTransport) deleteSession() {
+	t.sessionMu.Lock()
+	sid := t.sessionID
+	t.sessionMu.Unlock()
+	if sid == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sessionDeleteTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, t.url, nil)
+	if err != nil {
+		return
+	}
+	for k, v := range t.headers {
+		req.Header.Set(k, v)
+	}
+	req.Header.Set("Mcp-Session-Id", sid)
+	t.protoMu.Lock()
+	if t.protocolVersion != "" {
+		req.Header.Set("MCP-Protocol-Version", t.protocolVersion)
+	}
+	t.protoMu.Unlock()
+	// Reuse the cached OAuth token if we have one, but never start an
+	// interactive authorization just to say goodbye.
+	if t.oauth != nil {
+		if tok, terr := t.oauth.Token(ctx); terr == nil && tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+	}
+	resp, err := t.hc.Do(req)
+	if err != nil {
+		return
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	_ = resp.Body.Close()
 }
 
 // isJSONContentType reports whether ct (a Content-Type header value)

@@ -19,11 +19,12 @@ import (
 	"encoding/json"
 )
 
-// ProtocolVersion is the MCP spec revision this client implements. Sent in
-// the initialize request; the server is expected to echo it back (or a
-// compatible newer/older version it can downgrade to). We don't currently
-// negotiate — if the server returns a different version we accept it and
-// hope for the best.
+// ProtocolVersion is the MCP spec revision this client implements and asks
+// for in the initialize request. The server answers with the revision it
+// will actually speak — the same one, or another it can serve — and that
+// answer, not this constant, is what the session runs on. Client.Initialize
+// records it and the HTTP transport echoes it back in MCP-Protocol-Version
+// on every later request, which servers from 2025-03-26 onward require.
 const ProtocolVersion = "2024-11-05"
 
 // ── JSON-RPC 2.0 frame ───────────────────────────────────────────────────
@@ -151,6 +152,14 @@ type Tool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	InputSchema json.RawMessage `json:"inputSchema,omitempty"`
+}
+
+// PaginatedParams is the request shape shared by the list methods. An empty
+// Cursor asks for the first page — which marshals to the same `{}` the
+// unpaginated calls used to send — and each later request carries the
+// NextCursor the previous page handed back.
+type PaginatedParams struct {
+	Cursor string `json:"cursor,omitempty"`
 }
 
 type ListToolsResult struct {

@@ -41,6 +41,9 @@ type Client struct {
 	caps         ServerCapabilities
 	serverInfo   Implementation
 	instructions string
+	// protocolVersion is what the server answered with in the handshake, not
+	// necessarily the ProtocolVersion constant we asked for.
+	protocolVersion string
 
 	nextID atomic.Uint64
 
@@ -95,6 +98,15 @@ func (c *Client) Initialize(ctx context.Context) error {
 	c.caps = result.Capabilities
 	c.serverInfo = result.ServerInfo
 	c.instructions = result.Instructions
+	c.protocolVersion = result.ProtocolVersion
+
+	// Transports that carry the negotiated revision on the wire (HTTP, via
+	// the MCP-Protocol-Version header) learn it here — before the
+	// initialized notification below, so every post-handshake request
+	// advertises it. stdio needs nothing and doesn't implement the setter.
+	if pv, ok := c.transport.(protocolVersionSetter); ok && result.ProtocolVersion != "" {
+		pv.SetProtocolVersion(result.ProtocolVersion)
+	}
 
 	// notifications/initialized lets the server know we're done handshaking
 	// and ready for normal traffic. Fire-and-forget — the server doesn't
@@ -105,9 +117,22 @@ func (c *Client) Initialize(ctx context.Context) error {
 	return nil
 }
 
+// protocolVersionSetter is implemented by transports that must advertise the
+// negotiated protocol revision on every request. Only HTTP needs it — stdio
+// carries no per-request metadata — so it stays an optional capability
+// rather than part of the Transport interface.
+type protocolVersionSetter interface {
+	SetProtocolVersion(v string)
+}
+
 // ServerInfo returns the {name, version} the server advertised in its
 // initialize response. Useful for /mcp output.
 func (c *Client) ServerInfo() Implementation { return c.serverInfo }
+
+// ProtocolVersion returns the spec revision the server chose in the
+// handshake, which may differ from the ProtocolVersion we requested. Empty
+// before Initialize completes.
+func (c *Client) ProtocolVersion() string { return c.protocolVersion }
 
 // Capabilities returns the server's advertised capabilities so callers can
 // avoid calling tools/list against a server that doesn't support tools.
@@ -275,15 +300,42 @@ func (c *Client) Close() error {
 
 // ── Typed convenience wrappers ───────────────────────────────────────────
 
+// maxListPages bounds cursor-following so a server that keeps handing back a
+// fresh cursor can't spin us forever. Generous enough that hitting it means
+// the server is broken, not that someone has a lot of tools.
+const maxListPages = 100
+
+// nextPageCursor decides whether to fetch another page. A server signals the
+// end with an empty cursor; one that repeats the cursor it just gave us is
+// buggy, and following it would loop forever, so treat that as the end too.
+func nextPageCursor(next, current string) (string, bool) {
+	if next == "" || next == current {
+		return "", false
+	}
+	return next, true
+}
+
 func (c *Client) ListTools(ctx context.Context) ([]Tool, error) {
 	if c.caps.Tools == nil {
 		return nil, nil
 	}
-	var r ListToolsResult
-	if err := c.Call(ctx, MethodToolsList, struct{}{}, &r); err != nil {
-		return nil, err
+	var all []Tool
+	cursor := ""
+	for range maxListPages {
+		var r ListToolsResult
+		if err := c.Call(ctx, MethodToolsList, PaginatedParams{Cursor: cursor}, &r); err != nil {
+			return nil, err
+		}
+		all = append(all, r.Tools...)
+		next, more := nextPageCursor(r.NextCursor, cursor)
+		if !more {
+			return all, nil
+		}
+		cursor = next
 	}
-	return r.Tools, nil
+	// Erroring rather than returning a truncated list: silently exposing a
+	// subset of a server's tools is the failure this pagination exists to fix.
+	return nil, fmt.Errorf("mcp: tools/list did not terminate within %d pages", maxListPages)
 }
 
 func (c *Client) CallTool(ctx context.Context, name string, args map[string]any) (*CallToolResult, error) {
@@ -298,11 +350,21 @@ func (c *Client) ListResources(ctx context.Context) ([]Resource, error) {
 	if c.caps.Resources == nil {
 		return nil, nil
 	}
-	var r ListResourcesResult
-	if err := c.Call(ctx, MethodResourcesList, struct{}{}, &r); err != nil {
-		return nil, err
+	var all []Resource
+	cursor := ""
+	for range maxListPages {
+		var r ListResourcesResult
+		if err := c.Call(ctx, MethodResourcesList, PaginatedParams{Cursor: cursor}, &r); err != nil {
+			return nil, err
+		}
+		all = append(all, r.Resources...)
+		next, more := nextPageCursor(r.NextCursor, cursor)
+		if !more {
+			return all, nil
+		}
+		cursor = next
 	}
-	return r.Resources, nil
+	return nil, fmt.Errorf("mcp: resources/list did not terminate within %d pages", maxListPages)
 }
 
 func (c *Client) ReadResource(ctx context.Context, uri string) ([]ResourceContent, error) {
@@ -317,11 +379,21 @@ func (c *Client) ListPrompts(ctx context.Context) ([]Prompt, error) {
 	if c.caps.Prompts == nil {
 		return nil, nil
 	}
-	var r ListPromptsResult
-	if err := c.Call(ctx, MethodPromptsList, struct{}{}, &r); err != nil {
-		return nil, err
+	var all []Prompt
+	cursor := ""
+	for range maxListPages {
+		var r ListPromptsResult
+		if err := c.Call(ctx, MethodPromptsList, PaginatedParams{Cursor: cursor}, &r); err != nil {
+			return nil, err
+		}
+		all = append(all, r.Prompts...)
+		next, more := nextPageCursor(r.NextCursor, cursor)
+		if !more {
+			return all, nil
+		}
+		cursor = next
 	}
-	return r.Prompts, nil
+	return nil, fmt.Errorf("mcp: prompts/list did not terminate within %d pages", maxListPages)
 }
 
 func (c *Client) GetPrompt(ctx context.Context, name string, args map[string]string) (*GetPromptResult, error) {

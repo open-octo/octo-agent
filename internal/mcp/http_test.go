@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -379,6 +380,176 @@ func TestHTTPTransport_NotificationEmptyBody200(t *testing.T) {
 	notif := &Message{JSONRPC: "2.0", Method: "notifications/initialized"}
 	if err := tx.Send(context.Background(), notif); err != nil {
 		t.Errorf("notification Send returned error: %v", err)
+	}
+}
+
+// TestHTTPTransport_ProtocolVersionHeader: once the handshake settles on a
+// revision, every later request must advertise it — servers implementing
+// 2025-03-26 or later reject requests that don't.
+func TestHTTPTransport_ProtocolVersionHeader(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Header.Get("MCP-Protocol-Version"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(Message{
+			JSONRPC: "2.0", ID: json.RawMessage(`1`), Result: json.RawMessage(`{}`),
+		})
+	}))
+	defer srv.Close()
+
+	tx, _ := NewHTTPTransport(HTTPConfig{URL: srv.URL})
+	defer tx.Close()
+	req := &Message{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "tools/list"}
+
+	// Before the handshake there is no negotiated version to send.
+	if err := tx.Send(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Receive(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	tx.SetProtocolVersion("2025-03-26")
+	if err := tx.Send(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Receive(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(seen))
+	}
+	if seen[0] != "" {
+		t.Errorf("pre-handshake request carried version %q, want none", seen[0])
+	}
+	if seen[1] != "2025-03-26" {
+		t.Errorf("post-handshake request carried %q, want 2025-03-26", seen[1])
+	}
+}
+
+// TestHTTPTransport_CloseDeletesSession: Close releases a server-issued
+// session so the server can drop its state instead of holding it to timeout.
+func TestHTTPTransport_CloseDeletesSession(t *testing.T) {
+	type call struct{ method, session, version string }
+	var mu sync.Mutex
+	var calls []call
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls = append(calls, call{r.Method, r.Header.Get("Mcp-Session-Id"), r.Header.Get("MCP-Protocol-Version")})
+		mu.Unlock()
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Mcp-Session-Id", "sess-9")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(Message{
+			JSONRPC: "2.0", ID: json.RawMessage(`1`), Result: json.RawMessage(`{}`),
+		})
+	}))
+	defer srv.Close()
+
+	tx, _ := NewHTTPTransport(HTTPConfig{URL: srv.URL})
+	tx.SetProtocolVersion("2025-03-26")
+	req := &Message{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "tools/list"}
+	if err := tx.Send(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Receive(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(calls) != 2 {
+		t.Fatalf("calls = %+v, want a POST then a DELETE", calls)
+	}
+	del := calls[1]
+	if del.method != http.MethodDelete {
+		t.Errorf("second call method = %s, want DELETE", del.method)
+	}
+	if del.session != "sess-9" {
+		t.Errorf("DELETE session = %q, want sess-9", del.session)
+	}
+	if del.version != "2025-03-26" {
+		t.Errorf("DELETE version header = %q, want 2025-03-26", del.version)
+	}
+}
+
+// TestHTTPTransport_CloseWithoutSessionSkipsDelete: no session id means there
+// is nothing to release, so Close must not fire a stray DELETE.
+func TestHTTPTransport_CloseWithoutSessionSkipsDelete(t *testing.T) {
+	var mu sync.Mutex
+	deletes := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			mu.Lock()
+			deletes++
+			mu.Unlock()
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	tx, _ := NewHTTPTransport(HTTPConfig{URL: srv.URL})
+	notif := &Message{JSONRPC: "2.0", Method: "notifications/initialized"}
+	if err := tx.Send(context.Background(), notif); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Close(); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if deletes != 0 {
+		t.Errorf("fired %d DELETEs without a session id, want 0", deletes)
+	}
+}
+
+// TestHTTPTransport_CloseSurvivesDeleteFailure: the DELETE is a courtesy on a
+// teardown path — an unreachable or hostile server must not make Close hang
+// or fail.
+func TestHTTPTransport_CloseSurvivesDeleteFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Mcp-Session-Id", "sess-x")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(Message{
+			JSONRPC: "2.0", ID: json.RawMessage(`1`), Result: json.RawMessage(`{}`),
+		})
+	}))
+	defer srv.Close()
+
+	tx, _ := NewHTTPTransport(HTTPConfig{URL: srv.URL})
+	req := &Message{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "tools/list"}
+	if err := tx.Send(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Receive(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- tx.Close() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Close returned %v, want nil despite the failed DELETE", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close hung on a failing DELETE")
 	}
 }
 
