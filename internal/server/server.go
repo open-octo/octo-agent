@@ -1272,28 +1272,46 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// MemoryBackendGuidance()/registering its hooks below — both need this
 	// turn's config, not whatever the last turn (of any kind) left set. See
 	// app.RefreshMemoryBackend's doc comment for why prepareToolTurn alone
-	// (which runs after this function returns) is one turn too late.
+	// (which runs after this function returns) is one turn too late. Runs
+	// every turn regardless of the freeze below: RegisterMemoryBackendHooks
+	// further down needs a fresh backend even on a turn that reuses the
+	// session's already-composed system prompt.
 	app.RefreshMemoryBackend()
 
-	// L1: project memory embedded in the system prompt (stable across turns).
-	var memInjection string
-	if s.memDir != "" {
-		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
+	// The composed system prompt is frozen the first time a turn builds this
+	// session (see Session.SetComposedSystem) — every later turn reuses the
+	// identical string instead of recomposing it, so the provider's prompt-
+	// cache prefix survives turn over turn. Recomposing would otherwise vary
+	// the text on things that legitimately change mid-session (the live
+	// memory file, a skill/profile edit landing elsewhere) and bust the cache
+	// on literally every turn. This mirrors the CLI/TUI, which compose once
+	// per process: a profile/skill edit now takes effect in a new session,
+	// not a running one.
+	if sess.ComposedSystem != "" {
+		a.System, a.LeanSystem = sess.ComposedSystem, sess.ComposedLeanSystem
+	} else {
+		// L1: project memory embedded in the system prompt, snapshotted once.
+		var memInjection string
+		if s.memDir != "" {
+			memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
+		}
+		if g := tools.MemoryBackendGuidance(); g != "" {
+			memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
+		}
+		// A profile with its own system prompt replaces the server's base
+		// prompt (default agent: unchanged, s.system).
+		profile := s.profileForAgent(sess.EffectiveAgentID())
+		base := s.system
+		expertMode := false
+		if profile.SystemPrompt != "" {
+			base = profile.SystemPrompt
+			expertMode = true
+		}
+		a.System, a.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
+		if err := sess.SetComposedSystem(a.System, a.LeanSystem); err != nil {
+			slog.Warn("freeze composed system prompt", "session", sess.ID, "err", err)
+		}
 	}
-	if g := tools.MemoryBackendGuidance(); g != "" {
-		memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
-	}
-	// A profile with its own system prompt replaces the server's base prompt
-	// (default agent: unchanged, s.system). Resolved fresh per turn so profile
-	// edits land on the next message; a deleted profile falls back to default.
-	profile := s.profileForAgent(sess.EffectiveAgentID())
-	base := s.system
-	expertMode := false
-	if profile.SystemPrompt != "" {
-		base = profile.SystemPrompt
-		expertMode = true
-	}
-	a.System, a.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
 
 	// L2: attention-layer rules (triggered keywords) + save-nudge on milestone
 	// tool results, plus any shell hooks (env/hooks.yml), unified on the agent's
@@ -3156,18 +3174,6 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	ctx = tools.WithProfileStore(ctx, s.agentStore)
 	ctx = tools.WithSessionAgentID(ctx, sess.AgentID)
 
-	// Recompose the system prompt every turn so memory written and skills
-	// imported/toggled since server start are visible — web turns get this
-	// for free from buildAgent; the IM factory's compose-once snapshot went
-	// stale until restart. Unconditional: the skills manifest changes at
-	// runtime even when memory is disabled.
-	var memInjection string
-	if s.memDir != "" {
-		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
-	}
-	if g := tools.MemoryBackendGuidance(); g != "" {
-		memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
-	}
 	cwd, envCtx := s.sessionCwdEnv(sess.Store)
 	sess.Agent.CWD = cwd          // keep tool cwd aligned with the per-session dir the prompt/hooks use
 	cfg, _ := config.LoadCached() // zero value on error (no last-good yet) still resolves correctly via EffectiveCoauthor
@@ -3179,16 +3185,36 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	if cfg.CompactAutoPct > 0 {
 		sess.Agent.CompactAutoFraction = float64(cfg.CompactAutoPct) / 100.0
 	}
-	// A profile with its own system prompt replaces the server's base prompt
-	// (default agent: unchanged, s.system). Resolved fresh per turn so profile
-	// edits land on the next message; a deleted profile falls back to default.
-	base := s.system
-	expertMode := false
-	if profile.SystemPrompt != "" {
-		base = profile.SystemPrompt
-		expertMode = true
+	// The composed system prompt is frozen the first time a turn builds this
+	// channel session (see Session.SetComposedSystem) — every later turn
+	// reuses the identical string instead of recomposing it, matching the web
+	// path (buildAgent) and the CLI/TUI. This used to recompose every turn so
+	// memory writes and skill/profile edits landed without a restart; that
+	// traded prompt-cache stability for immediacy. A profile/skill edit now
+	// takes effect in a new session, not a running one.
+	if sess.Store.ComposedSystem != "" {
+		sess.Agent.System, sess.Agent.LeanSystem = sess.Store.ComposedSystem, sess.Store.ComposedLeanSystem
+	} else {
+		var memInjection string
+		if s.memDir != "" {
+			memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
+		}
+		if g := tools.MemoryBackendGuidance(); g != "" {
+			memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
+		}
+		// A profile with its own system prompt replaces the server's base
+		// prompt (default agent: unchanged, s.system).
+		base := s.system
+		expertMode := false
+		if profile.SystemPrompt != "" {
+			base = profile.SystemPrompt
+			expertMode = true
+		}
+		sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
+		if err := sess.Store.SetComposedSystem(sess.Agent.System, sess.Agent.LeanSystem); err != nil {
+			slog.Warn("freeze composed system prompt", "session", string(sess.Key), "err", err)
+		}
 	}
-	sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
 
 	// L2 memory hooks + shell hooks, same engine buildAgent gives web turns,
 	// rebuilt per IM turn. The injector is session-sticky (recall latch) and

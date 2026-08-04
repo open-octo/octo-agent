@@ -103,7 +103,9 @@ func (s *systemRecordingSender) StreamMessagesWithTools(_ context.Context, _, sy
 // tools.MemoryBackendGuidance() into the sub-agent template's System prompt
 // ONCE — at server startup, and again after onboarding — and spawned
 // sub-agents reuse that baked template rather than recomposing per spawn
-// (unlike buildAgent/runChannelTurns, which do recompose every turn). Without
+// (unlike buildAgent/runChannelTurns, which each compose once per session and
+// freeze — see Session.SetComposedSystem — rather than reusing one shared
+// template). Without
 // refreshing the memory-backend globals first, a server that starts with
 // memory_backend already configured would still bake an empty guidance
 // block, because nothing had ever called the refresh before this function's

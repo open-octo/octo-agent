@@ -551,9 +551,12 @@ func TestHandleChannelMessage_PersistsTurn(t *testing.T) {
 	}
 }
 
-// TestHandleChannelMessage_RefreshesSystemPerTurn: memory written after the
-// session was created must be visible on the next turn without a restart.
-func TestHandleChannelMessage_RefreshesSystemPerTurn(t *testing.T) {
+// TestHandleChannelMessage_FreezesSystemAfterFirstTurn: the composed system
+// prompt is frozen on the session's first turn (Session.SetComposedSystem)
+// and reused as-is afterward — memory written mid-session must NOT change an
+// already-open IM session's prompt, so the provider's prompt-cache prefix
+// stays stable turn over turn. Mirrors buildAgent's web-path behavior.
+func TestHandleChannelMessage_FreezesSystemAfterFirstTurn(t *testing.T) {
 	srv := chanServer(t)
 	srv.memDir = t.TempDir()
 	ad := &fullFakeAdapter{}
@@ -563,13 +566,20 @@ func TestHandleChannelMessage_RefreshesSystemPerTurn(t *testing.T) {
 	if strings.Contains(sess.Agent.System, "fresh-fact-9000") {
 		t.Fatal("memory marker present before it was written")
 	}
+	frozen := sess.Agent.System
+	if sess.Store.ComposedSystem != frozen {
+		t.Fatal("first turn did not freeze ComposedSystem on the session")
+	}
 
 	if err := os.WriteFile(srv.memDir+"/MEMORY.md", []byte("- fresh-fact-9000"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	srv.handleChannelMessage(context.Background(), ad, evFor("turn two"), nil)
-	if !strings.Contains(sess.Agent.System, "fresh-fact-9000") {
-		t.Error("system prompt not recomposed: memory written mid-session is invisible to IM turns")
+	if strings.Contains(sess.Agent.System, "fresh-fact-9000") {
+		t.Error("system prompt recomposed: memory written mid-session should stay invisible until a new session")
+	}
+	if sess.Agent.System != frozen {
+		t.Error("second turn's system prompt drifted from the frozen one")
 	}
 }
 

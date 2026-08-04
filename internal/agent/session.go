@@ -31,8 +31,16 @@ type Session struct {
 	CreatedAt time.Time `json:"created_at"`
 	Model     string    `json:"model"`
 	System    string    `json:"system,omitempty"`
-	Title     string    `json:"title,omitempty"`
-	Source    string    `json:"source,omitempty"` // how the session was created: "" (manual) | "cron" | "channel" | "setup"
+	// ComposedSystem/ComposedLeanSystem are the fully-composed system prompt
+	// (base + env + skills + mcp + memory + profile/user/project + System),
+	// frozen by SetComposedSystem the first time a turn builds this session
+	// and reused by every later turn — see SetComposedSystem's doc comment
+	// for why. Empty for a session that hasn't taken its first turn yet, and
+	// for every session predating this field (it freezes on its next turn).
+	ComposedSystem     string `json:"composed_system,omitempty"`
+	ComposedLeanSystem string `json:"composed_lean_system,omitempty"`
+	Title              string `json:"title,omitempty"`
+	Source             string `json:"source,omitempty"` // how the session was created: "" (manual) | "cron" | "channel" | "setup"
 	// AgentID is the ID of the agent profile (agentprofile.Profile) that owns
 	// this session. Empty means the default agent — also the value for every
 	// session predating multi-agent, so legacy files need no migration.
@@ -514,26 +522,28 @@ func (s *Session) ChunkDir() (string, error) {
 // type as authoritative; rewriteAll folds them back into the meta header when
 // compacting.
 type sessionRecord struct {
-	Type              string    `json:"type"` // "meta" | "message" | "title" | "model_config" | "agent_id" | "working_dir" | "permission_mode" | "context_tokens" | "lease" | "goal"
-	ID                string    `json:"id,omitempty"`
-	CreatedAt         time.Time `json:"created_at,omitempty"`
-	Model             string    `json:"model,omitempty"`
-	System            string    `json:"system,omitempty"`
-	Title             string    `json:"title,omitempty"`
-	Source            string    `json:"source,omitempty"`
-	ModelConfig       string    `json:"model_config,omitempty"`
-	AgentID           string    `json:"agent_id,omitempty"`
-	WorkingDir        string    `json:"working_dir,omitempty"`
-	PermissionMode    string    `json:"permission_mode,omitempty"`
-	BoundEntry        string    `json:"bound_entry,omitempty"`
-	BoundAt           time.Time `json:"bound_at,omitempty"`
-	LeaseEntry        string    `json:"lease_entry,omitempty"`
-	LeaseExpires      time.Time `json:"lease_expires,omitempty"`
-	HookStarted       bool      `json:"hook_started,omitempty"`
-	BranchedFrom      string    `json:"branched_from,omitempty"`
-	LastContextTokens int       `json:"last_context_tokens,omitempty"`
-	Message           *Message  `json:"message,omitempty"`
-	Goal              *Goal     `json:"goal,omitempty"`
+	Type               string    `json:"type"` // "meta" | "message" | "title" | "model_config" | "agent_id" | "working_dir" | "permission_mode" | "context_tokens" | "composed_system" | "lease" | "goal"
+	ID                 string    `json:"id,omitempty"`
+	CreatedAt          time.Time `json:"created_at,omitempty"`
+	Model              string    `json:"model,omitempty"`
+	System             string    `json:"system,omitempty"`
+	ComposedSystem     string    `json:"composed_system,omitempty"`
+	ComposedLeanSystem string    `json:"composed_lean_system,omitempty"`
+	Title              string    `json:"title,omitempty"`
+	Source             string    `json:"source,omitempty"`
+	ModelConfig        string    `json:"model_config,omitempty"`
+	AgentID            string    `json:"agent_id,omitempty"`
+	WorkingDir         string    `json:"working_dir,omitempty"`
+	PermissionMode     string    `json:"permission_mode,omitempty"`
+	BoundEntry         string    `json:"bound_entry,omitempty"`
+	BoundAt            time.Time `json:"bound_at,omitempty"`
+	LeaseEntry         string    `json:"lease_entry,omitempty"`
+	LeaseExpires       time.Time `json:"lease_expires,omitempty"`
+	HookStarted        bool      `json:"hook_started,omitempty"`
+	BranchedFrom       string    `json:"branched_from,omitempty"`
+	LastContextTokens  int       `json:"last_context_tokens,omitempty"`
+	Message            *Message  `json:"message,omitempty"`
+	Goal               *Goal     `json:"goal,omitempty"`
 }
 
 func (s *Session) metaRecord() sessionRecord {
@@ -548,7 +558,7 @@ func (s *Session) metaRecord() sessionRecord {
 		goal = &g
 	}
 	s.mu.Unlock()
-	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, AgentID: s.AgentID, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, LastContextTokens: s.LastContextTokens, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, BranchedFrom: s.BranchedFrom, Goal: goal}
+	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, ComposedSystem: s.ComposedSystem, ComposedLeanSystem: s.ComposedLeanSystem, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, AgentID: s.AgentID, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, LastContextTokens: s.LastContextTokens, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, BranchedFrom: s.BranchedFrom, Goal: goal}
 }
 
 // MarkHookStarted records that SessionStart has fired for this session, so a
@@ -872,6 +882,53 @@ func (s *Session) SetPermissionMode(mode string) error {
 	defer f.Close()
 	if err := json.NewEncoder(f).Encode(sessionRecord{Type: "permission_mode", PermissionMode: mode}); err != nil {
 		return fmt.Errorf("session: append permission_mode: %w", err)
+	}
+	return nil
+}
+
+// SetComposedSystem freezes the fully-composed system prompt (base + env +
+// skills + mcp + memory + profile/user/project + System) the first time a
+// turn builds this session, so every later turn reuses the identical string
+// instead of recomposing it from layers that can legitimately change mid-
+// session — the live memory file an agent's own tools just wrote, a skill
+// toggle, a profile edit. Recomposing on any of those would vary the text and
+// invalidate the provider's prompt-cache prefix on that turn (and every turn
+// after, since the changed layer stays changed). This mirrors the CLI/TUI,
+// which compose once per process and never touch System again: a skill or
+// profile edit now takes effect in a new session, not a running one. A no-op
+// once already frozen — system is only ever empty before the first turn.
+// Same append-or-rewrite persistence mechanics as SetPermissionMode.
+func (s *Session) SetComposedSystem(system, lean string) error {
+	if s.ComposedSystem != "" {
+		return nil
+	}
+	s.ComposedSystem, s.ComposedLeanSystem = system, lean
+	if s.persisted == 0 {
+		// See SetWorkingDir: a meta-only transcript must be rewritten now, since
+		// the load-modify-discard handler won't get a "next Save"; a session with
+		// no file yet just carries the value until its first Save.
+		if path, perr := s.SavePath(); perr == nil {
+			if _, statErr := os.Stat(path); statErr == nil {
+				return s.rewriteAll()
+			}
+		}
+		return nil
+	}
+	if s.forceRewrite {
+		return s.rewriteAll()
+	}
+	path, err := s.SavePath()
+	if err != nil {
+		return err
+	}
+	// No O_CREATE — see SetTitle: never materialise an orphan transcript.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("session: open %s: %w", path, err)
+	}
+	defer f.Close()
+	if err := json.NewEncoder(f).Encode(sessionRecord{Type: "composed_system", ComposedSystem: system, ComposedLeanSystem: lean}); err != nil {
+		return fmt.Errorf("session: append composed_system: %w", err)
 	}
 	return nil
 }
@@ -1213,7 +1270,8 @@ func LoadSession(id string) (*Session, error) {
 		switch rec.Type {
 		case "meta":
 			s.ID, s.CreatedAt, s.Model, s.System = rec.ID, rec.CreatedAt, rec.Model, rec.System
-			s.Title = rec.Title // a compacted file carries the title in its meta header
+			s.ComposedSystem, s.ComposedLeanSystem = rec.ComposedSystem, rec.ComposedLeanSystem // a rewritten file carries it in its meta header
+			s.Title = rec.Title                                                                 // a compacted file carries the title in its meta header
 			s.Source = rec.Source
 			s.ModelConfig = rec.ModelConfig
 			s.AgentID = rec.AgentID
@@ -1241,6 +1299,8 @@ func LoadSession(id string) (*Session, error) {
 			s.PermissionMode = rec.PermissionMode // last one wins, like title
 		case "context_tokens":
 			s.LastContextTokens = rec.LastContextTokens // last one wins, like title
+		case "composed_system":
+			s.ComposedSystem, s.ComposedLeanSystem = rec.ComposedSystem, rec.ComposedLeanSystem // frozen once, so first (and only) one wins
 		case "message":
 			if rec.Message != nil {
 				s.Messages = append(s.Messages, *rec.Message)
