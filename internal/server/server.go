@@ -2202,9 +2202,10 @@ func (s *Server) initChannels() {
 // same shape prepareToolTurn gives web turns. A factory-time gate would freeze
 // one policy snapshot for the session's whole life.
 // System/LeanSystem and CWD are deliberately NOT set here (unlike buildAgent):
-// runChannelTurns unconditionally recomposes both on every IM turn before the
-// first LLM call ever happens, so baking them here once at session-creation
-// time only produced a value nothing would ever read. MaxTokens and the
+// runChannelTurns sets both on the session's first turn (freezing them
+// thereafter — see Session.SetComposedSystem) before the first LLM call ever
+// happens, so baking them here once at session-creation time only produced a
+// value nothing would ever read. MaxTokens and the
 // LiteSender/LiteModel resolved below have no such per-turn refresh anywhere
 // in the IM path, so they stay — this is genuinely the only place they're set
 // for the session's whole lifetime.

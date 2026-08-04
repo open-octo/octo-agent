@@ -275,6 +275,99 @@ func TestSetLastContextTokens_AppendsAndRoundTrips(t *testing.T) {
 	}
 }
 
+// TestSetComposedSystem_FreezesAppendsAndRoundTrips: the first call freezes
+// and appends a composed_system record; a later call (already frozen) is a
+// no-op that appends nothing; both an initial in-memory freeze and a fresh
+// LoadSession afterward (simulating a server restart) see the frozen value —
+// the actual cache-stability guarantee this mechanism exists to provide.
+func TestSetComposedSystem_FreezesAppendsAndRoundTrips(t *testing.T) {
+	setTempHome(t)
+	s := NewSession("m", "")
+	s.Messages = []Message{NewUserMessage("hi"), NewAssistantMessage("hello")}
+	if err := s.Save(); err != nil { // persisted > 0, transcript on disk
+		t.Fatalf("Save: %v", err)
+	}
+
+	if err := s.SetComposedSystem("full prompt", "lean prompt"); err != nil {
+		t.Fatalf("SetComposedSystem: %v", err)
+	}
+	if s.ComposedSystem != "full prompt" || s.ComposedLeanSystem != "lean prompt" {
+		t.Fatalf("SetComposedSystem did not set fields: got %q / %q", s.ComposedSystem, s.ComposedLeanSystem)
+	}
+
+	path, err := s.SavePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"type":"composed_system"`) {
+		t.Fatalf("expected an appended composed_system record; file was:\n%s", data)
+	}
+
+	// Already-frozen no-op: a second call must not overwrite or append.
+	before := len(data)
+	if err := s.SetComposedSystem("different prompt", "different lean"); err != nil {
+		t.Fatal(err)
+	}
+	if s.ComposedSystem != "full prompt" {
+		t.Errorf("already-frozen SetComposedSystem overwrote the value: got %q", s.ComposedSystem)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != before {
+		t.Errorf("no-op SetComposedSystem must not append: file grew %d -> %d bytes", before, len(after))
+	}
+
+	// Round-trips through a reload — simulates a server restart reloading the
+	// session from disk rather than reusing the in-memory Session.
+	got, err := LoadSession(s.ID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got.ComposedSystem != "full prompt" || got.ComposedLeanSystem != "lean prompt" {
+		t.Errorf("reloaded composed system = %q / %q, want %q / %q", got.ComposedSystem, got.ComposedLeanSystem, "full prompt", "lean prompt")
+	}
+}
+
+// TestSetComposedSystem_PersistedZeroRewritesWhenFileExists: a session with no
+// prior Save (persisted == 0) that already has a transcript file on disk (the
+// load-modify-discard case SetWorkingDir's sibling comment describes) must
+// rewrite the file with the frozen value rather than silently dropping it.
+func TestSetComposedSystem_PersistedZeroRewritesWhenFileExists(t *testing.T) {
+	setTempHome(t)
+	s := NewSession("m", "")
+	s.Messages = []Message{NewUserMessage("hi")}
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// A second Session value pointed at the same on-disk file via a shared ID,
+	// but never itself Save()d — persisted is its zero value, 0, even though
+	// a transcript already exists at its path. Mirrors a handler that
+	// constructs/loads a Session without going through the normal Save path
+	// (LoadSession itself sets persisted = len(Messages), so it can't produce
+	// this state — see SetWorkingDir's sibling comment for the scenario).
+	shadow := NewSession(s.Model, s.System)
+	shadow.ID = s.ID
+
+	if err := shadow.SetComposedSystem("rewritten prompt", "rewritten lean"); err != nil {
+		t.Fatalf("SetComposedSystem: %v", err)
+	}
+
+	again, err := LoadSession(s.ID)
+	if err != nil {
+		t.Fatalf("LoadSession after SetComposedSystem: %v", err)
+	}
+	if again.ComposedSystem != "rewritten prompt" || again.ComposedLeanSystem != "rewritten lean" {
+		t.Errorf("reloaded composed system = %q / %q, want %q / %q", again.ComposedSystem, again.ComposedLeanSystem, "rewritten prompt", "rewritten lean")
+	}
+}
+
 // PersistContextUsage records the agent's current context-token count on the
 // session and round-trips it, and is a safe no-op with a nil session or no
 // count. Every transport (web, IM, CLI, scheduled) calls it at turn end so a
