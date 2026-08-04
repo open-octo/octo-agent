@@ -135,8 +135,8 @@ func TestRegistryConnect_AddAndReplace(t *testing.T) {
 	if conn == nil {
 		t.Fatal("connection not installed")
 	}
-	if len(conn.Tools) != 2 {
-		t.Fatalf("tools = %d, want 2", len(conn.Tools))
+	if len(conn.Tools()) != 2 {
+		t.Fatalf("tools = %d, want 2", len(conn.Tools()))
 	}
 	if _, ok := r.ConnectError("fake"); ok {
 		t.Error("successful connect must not leave an error")

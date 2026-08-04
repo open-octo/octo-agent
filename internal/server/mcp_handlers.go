@@ -138,7 +138,7 @@ func (s *Server) mcpServerList() ([]mcpServerInfo, error) {
 				info.Error = msg
 			} else {
 				info.Status = "connected"
-				info.Tools = len(conn.Tools)
+				info.Tools = len(conn.Tools())
 			}
 		default:
 			info.Status = "disconnected"
@@ -236,7 +236,7 @@ func (s *Server) handleGetMCPServer(w http.ResponseWriter, r *http.Request) {
 				info.Error = msg
 			} else {
 				info.Status = "connected"
-				info.Tools = len(conn.Tools)
+				info.Tools = len(conn.Tools())
 			}
 		} else {
 			info.Status = "disconnected"
@@ -255,8 +255,8 @@ func (s *Server) handleGetMCPServer(w http.ResponseWriter, r *http.Request) {
 		if reg != nil {
 			conn := reg.Get(name)
 			if conn != nil {
-				detail.ToolList = make([]mcpToolInfo, 0, len(conn.Tools))
-				for _, t := range conn.Tools {
+				detail.ToolList = make([]mcpToolInfo, 0, len(conn.Tools()))
+				for _, t := range conn.Tools() {
 					detail.ToolList = append(detail.ToolList, mcpToolInfo{
 						Name:        t.Name,
 						Description: t.Description,

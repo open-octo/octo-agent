@@ -190,7 +190,7 @@ func TestMCPOAuth_WebAuthCodeFlow_EndToEnd(t *testing.T) {
 	if reg == nil || reg.Get("secure") == nil {
 		t.Fatal("authorized server should be connected in the registry")
 	}
-	if n := len(reg.Get("secure").Tools); n != 1 {
+	if n := len(reg.Get("secure").Tools()); n != 1 {
 		t.Fatalf("tools = %d, want 1", n)
 	}
 

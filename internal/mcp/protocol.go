@@ -91,6 +91,13 @@ const (
 	MethodPromptsList   = "prompts/list"
 	MethodPromptsGet    = "prompts/get"
 	MethodShutdown      = "shutdown"
+
+	// Server-initiated notifications announcing that a surface's contents
+	// changed, sent by servers that advertised the matching listChanged
+	// capability. Connection.watchListChanges re-lists in response.
+	MethodToolListChanged     = "notifications/tools/list_changed"
+	MethodResourceListChanged = "notifications/resources/list_changed"
+	MethodPromptListChanged   = "notifications/prompts/list_changed"
 )
 
 // ── initialize handshake ─────────────────────────────────────────────────

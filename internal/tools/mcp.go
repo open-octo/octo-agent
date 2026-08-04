@@ -65,7 +65,7 @@ func mcpToolDefs() []agent.ToolDefinition {
 		// Server tools: one definition per advertised tool. The MCP tool's
 		// inputSchema is already a JSON Schema object, so we pass it through
 		// verbatim into Parameters.
-		for _, t := range conn.Tools {
+		for _, t := range conn.Tools() {
 			defs = append(defs, agent.ToolDefinition{
 				Name:        mcpToolName(conn.Name, t.Name),
 				Description: fmt.Sprintf("[mcp:%s] %s", conn.Name, t.Description),
@@ -78,7 +78,7 @@ func mcpToolDefs() []agent.ToolDefinition {
 		if conn.Client.Capabilities().Resources != nil {
 			defs = append(defs, agent.ToolDefinition{
 				Name:        mcpToolName(conn.Name, "resource_read"),
-				Description: fmt.Sprintf("[mcp:%s] Read an MCP resource by URI. Available resources: %s", conn.Name, joinResourceURIs(conn.Resources)),
+				Description: fmt.Sprintf("[mcp:%s] Read an MCP resource by URI. Available resources: %s", conn.Name, joinResourceURIs(conn.Resources())),
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -96,7 +96,7 @@ func mcpToolDefs() []agent.ToolDefinition {
 		if conn.Client.Capabilities().Prompts != nil {
 			defs = append(defs, agent.ToolDefinition{
 				Name:        mcpToolName(conn.Name, "prompt_get"),
-				Description: fmt.Sprintf("[mcp:%s] Materialise an MCP prompt template. Available prompts: %s", conn.Name, joinPromptNames(conn.Prompts)),
+				Description: fmt.Sprintf("[mcp:%s] Materialise an MCP prompt template. Available prompts: %s", conn.Name, joinPromptNames(conn.Prompts())),
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{

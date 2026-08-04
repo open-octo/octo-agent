@@ -33,12 +33,29 @@ func NewRegistry() *Registry {
 // Connection is the per-server bundle of state the adapters need: the
 // client itself plus the pre-fetched tools/resources/prompts lists so the
 // agent loop doesn't re-list on every turn.
+//
+// The listings are behind accessors rather than exported fields because they
+// are no longer written once at connect time: a server that advertises
+// listChanged can announce a new set at any moment, which refreshes them
+// underneath readers. Unexporting is what makes that safe — the compiler finds
+// every reader instead of leaving a silent race for the next one added.
 type Connection struct {
-	Name      string
-	Client    *Client
-	Tools     []Tool
-	Resources []Resource
-	Prompts   []Prompt
+	Name   string
+	Client *Client
+
+	// listMu guards the three surface listings against the refresh a
+	// listChanged notification triggers.
+	listMu    sync.RWMutex
+	tools     []Tool
+	resources []Resource
+	prompts   []Prompt
+
+	// refreshMu serialises refreshes and coalesces bursts: a server that fires
+	// several listChanged notifications in a row should cause one more refresh
+	// after the current one, not one per notification.
+	refreshMu      sync.Mutex
+	refreshing     bool
+	refreshPending bool
 
 	// reauthMu guards reauthErr, set by MarkReauthRequired when a call made
 	// through this (otherwise still "live") connection surfaces
@@ -50,6 +67,126 @@ type Connection struct {
 	reauthMu  sync.Mutex
 	reauthErr error
 }
+
+// Tools returns the server's advertised tools as of the last listing. The
+// slice is not copied — treat it as read-only; a refresh replaces it wholesale
+// rather than mutating it, so a caller iterating an older slice keeps seeing a
+// consistent snapshot.
+func (c *Connection) Tools() []Tool {
+	c.listMu.RLock()
+	defer c.listMu.RUnlock()
+	return c.tools
+}
+
+// Resources returns the server's advertised resources. Same contract as Tools.
+func (c *Connection) Resources() []Resource {
+	c.listMu.RLock()
+	defer c.listMu.RUnlock()
+	return c.resources
+}
+
+// Prompts returns the server's advertised prompts. Same contract as Tools.
+func (c *Connection) Prompts() []Prompt {
+	c.listMu.RLock()
+	defer c.listMu.RUnlock()
+	return c.prompts
+}
+
+func (c *Connection) setTools(t []Tool) {
+	c.listMu.Lock()
+	c.tools = t
+	c.listMu.Unlock()
+}
+
+func (c *Connection) setResources(r []Resource) {
+	c.listMu.Lock()
+	c.resources = r
+	c.listMu.Unlock()
+}
+
+func (c *Connection) setPrompts(p []Prompt) {
+	c.listMu.Lock()
+	c.prompts = p
+	c.listMu.Unlock()
+}
+
+// watchListChanges makes the connection react to the server announcing that a
+// surface changed. Without this a server's new tools stayed invisible until
+// someone reconnected it by hand, even though it had said so.
+//
+// Wired for every connection: the notification only arrives if the server
+// chose to send it, so gating on the advertised listChanged capability would
+// only add a way to ignore a server that changed its mind.
+func (c *Connection) watchListChanges() {
+	c.Client.SetNotificationHandler(func(method string) {
+		switch method {
+		case MethodToolListChanged, MethodResourceListChanged, MethodPromptListChanged:
+			c.refreshSurfaces(method)
+		}
+	})
+}
+
+// refreshSurfaces re-lists the surface named by method. Runs at most one
+// refresh at a time per connection; a notification arriving during one is
+// collapsed into a single follow-up pass, so a server that fires a burst
+// doesn't produce a burst of list calls.
+//
+// It re-lists all three surfaces on the follow-up pass rather than tracking
+// which methods were coalesced — three cheap list calls beat the bookkeeping,
+// and a server churning one surface is usually churning others.
+func (c *Connection) refreshSurfaces(method string) {
+	c.refreshMu.Lock()
+	if c.refreshing {
+		c.refreshPending = true
+		c.refreshMu.Unlock()
+		return
+	}
+	c.refreshing = true
+	c.refreshMu.Unlock()
+
+	for {
+		c.refreshOnce(method)
+
+		c.refreshMu.Lock()
+		if !c.refreshPending {
+			c.refreshing = false
+			c.refreshMu.Unlock()
+			return
+		}
+		c.refreshPending = false
+		c.refreshMu.Unlock()
+		method = "" // follow-up pass: refresh everything
+	}
+}
+
+// refreshOnce performs one round of list calls. A failure leaves the previous
+// listing in place: a stale list the model can still call beats an empty one
+// that makes the server look like it has nothing.
+func (c *Connection) refreshOnce(method string) {
+	ctx, cancel := context.WithTimeout(context.Background(), listRefreshTimeout)
+	defer cancel()
+
+	if method == "" || method == MethodToolListChanged {
+		if tools, err := c.Client.ListTools(ctx); err == nil {
+			c.setTools(tools)
+		}
+	}
+	if method == "" || method == MethodResourceListChanged {
+		if resources, err := c.Client.ListResources(ctx); err == nil {
+			c.setResources(resources)
+		}
+	}
+	if method == "" || method == MethodPromptListChanged {
+		if prompts, err := c.Client.ListPrompts(ctx); err == nil {
+			c.setPrompts(prompts)
+		}
+	}
+}
+
+// listRefreshTimeout bounds a listChanged-triggered refresh. It runs on its own
+// goroutine with no user waiting, so it needs a ceiling of its own rather than
+// inheriting a turn's context. A var so tests can shrink it.
+var listRefreshTimeout = 30 * time.Second
 
 // MarkReauthRequired records that a call through this connection hit
 // ErrReauthRequired. Safe for concurrent callers.
@@ -181,14 +318,17 @@ func connectOne(ctx context.Context, name string, entry ServerEntry, info Implem
 	// to enumerate. We tolerate per-surface failures — a server with
 	// broken resources/list still gets its tools/list cached.
 	if tools, err := client.ListTools(connectCtx); err == nil {
-		conn.Tools = tools
+		conn.setTools(tools)
 	}
 	if resources, err := client.ListResources(connectCtx); err == nil {
-		conn.Resources = resources
+		conn.setResources(resources)
 	}
 	if prompts, err := client.ListPrompts(connectCtx); err == nil {
-		conn.Prompts = prompts
+		conn.setPrompts(prompts)
 	}
+	// Only now, with the initial listings in hand: a notification arriving
+	// mid-prefetch would otherwise race the pre-fetch to write them.
+	conn.watchListChanges()
 	return conn, nil
 }
 

@@ -364,11 +364,12 @@ func printMCP(w io.Writer) {
 		if info.Version != "" {
 			nameVer = fmt.Sprintf("%s %s", info.Name, info.Version)
 		}
+		nTools, nRes, nPrompts := len(c.Tools()), len(c.Resources()), len(c.Prompts())
 		fmt.Fprintf(w, "  %s (%s): %d tool%s, %d resource%s, %d prompt%s\n",
 			c.Name, nameVer,
-			len(c.Tools), pluralS(len(c.Tools)),
-			len(c.Resources), pluralS(len(c.Resources)),
-			len(c.Prompts), pluralS(len(c.Prompts)))
+			nTools, pluralS(nTools),
+			nRes, pluralS(nRes),
+			nPrompts, pluralS(nPrompts))
 		if instr := c.Client.Instructions(); instr != "" {
 			for _, line := range strings.Split(instr, "\n") {
 				fmt.Fprintf(w, "      %s\n", line)

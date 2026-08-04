@@ -66,6 +66,12 @@ type Client struct {
 	// at the Call call site.
 	sendMu sync.Mutex
 
+	// onNotification, when set, receives server-initiated notifications by
+	// method name. Guarded because it's read from the receive loop and set
+	// from whoever owns the client.
+	notifyMu       sync.Mutex
+	onNotification func(method string)
+
 	rxDone chan struct{} // closed when the receive loop exits
 	closed atomic.Bool
 }
@@ -342,10 +348,29 @@ func (c *Client) rehandshakeLocked(ctx context.Context) error {
 	return c.transport.Send(ctx, &Message{JSONRPC: "2.0", Method: MethodInitialized})
 }
 
+// SetNotificationHandler registers fn to receive server-initiated
+// notifications by method name (e.g. notifications/tools/list_changed). Pass
+// nil to clear. Set it before Initialize if the very first notifications
+// matter.
+//
+// fn is invoked on its own goroutine, one per notification, deliberately: the
+// receive loop is the only thing that delivers responses, so a handler that
+// called back into the client and waited for a reply would block the loop that
+// has to deliver that reply — a deadlock. Spawning means handlers can call the
+// client freely, at the cost of no ordering guarantee between concurrent
+// notifications, so a handler must tolerate being run more than once
+// concurrently.
+func (c *Client) SetNotificationHandler(fn func(method string)) {
+	c.notifyMu.Lock()
+	c.onNotification = fn
+	c.notifyMu.Unlock()
+}
+
 // receiveLoop runs for the life of the Client, pulling frames off the
 // transport and dispatching responses to the matching pending channel.
-// Notifications from the server are silently dropped — v1 doesn't react to
-// list_changed / progress / log messages.
+// Notifications are handed to the registered handler, if any; server-initiated
+// requests are still ignored (nothing here implements a server-callable
+// surface, and answering with an error would be noise).
 func (c *Client) receiveLoop() {
 	defer close(c.rxDone)
 	ctx := context.Background()
@@ -359,8 +384,15 @@ func (c *Client) receiveLoop() {
 			c.deliverResponse(msg)
 			continue
 		}
-		// Server-initiated request or notification: ignore for v1. A
-		// future revision can add a handler hook here.
+		if msg.IsNotification() {
+			c.notifyMu.Lock()
+			fn := c.onNotification
+			c.notifyMu.Unlock()
+			if fn != nil {
+				go fn(msg.Method)
+			}
+		}
+		// Server-initiated request: ignored — see the doc comment above.
 	}
 }
 
