@@ -58,21 +58,20 @@ future sessions need to respect. It fires at most once per user turn, so a long 
 commands doesn't nag repeatedly; see it listed alongside every other configured hook via
 [`octo hooks list`](/docs/guides/hooks/).
 
-## Freshness differs by transport
+## When memory changes take effect
 
-- **Web and IM** recompose the system prompt fresh on every turn, so anything written to `MEMORY.md`
-  — by this session or another — is visible starting the very next turn. IM specifically drops and
-  rebuilds this state on `/bind`/`/unbind`, so a rebound chat picks up whatever the session's memory
-  currently contains. This matters there because a `octo serve` process, and the sessions it holds
-  open, routinely outlive any single task — across restarts, and across an IM chat being rebound to
-  a different underlying session entirely.
-- **The CLI composes once**, when the interactive session starts, and reuses that system prompt for
-  the rest of the process. This is deliberate, not an oversight: a CLI session is normally one
-  continuous conversation for one task, opened and closed around it, so anything you tell the agent
-  mid-session is already live in that conversation's own history — the agent doesn't need a fresh
-  read of `MEMORY.md` to know it. What the agent *writes* to memory during that session surfaces the
-  *next* time you run `octo` in that repo, which is exactly when a plain index file is supposed to
-  matter — for a session that hasn't lived through the conversation where it was learned.
+Every transport — CLI, web, and IM — composes the system prompt once, the first time a session
+takes a turn, and reuses that exact text for the rest of the session's life: resuming it later, or
+an IM chat being rebound to it, picks up the same frozen prompt rather than recomposing it. This is
+deliberate, not an oversight: recomposing on every turn would vary the text on anything that can
+change mid-session — the memory file included — and invalidate the provider's prompt-cache prefix on
+that turn and every one after.
+
+So what you tell the agent mid-session is already live in that conversation's own history — it
+doesn't need a fresh read of `MEMORY.md` to know it. What the agent *writes* to memory during a
+session surfaces starting the *next* session (over any transport), which is exactly when a plain
+index file is supposed to matter — for a conversation that hasn't lived through the one where it was
+learned.
 
 ## What ends up in it
 

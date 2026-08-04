@@ -40,10 +40,11 @@ var toolchainProbes = []struct {
 // DetectToolchain reports which curated developer tools resolve on the current
 // PATH, plus (for uv) octo's own bundled ~/.octo/bin fallback. The PATH
 // check is via exec.LookPath — a filesystem lookup, not a subprocess — so it
-// stays cheap enough to call on every context build, including the server's
-// per-turn recompose. Versions are deliberately not probed; the agent runs
-// `<tool> --version` on demand when it actually needs one. On Windows
-// LookPath honours PATHEXT, so npm.cmd / npx.cmd resolve as expected.
+// stays cheap enough to call on every context build (once per process for the
+// CLI/TUI, once per session for the server — see Session.SetComposedSystem).
+// Versions are deliberately not probed; the agent runs `<tool> --version` on
+// demand when it actually needs one. On Windows LookPath honours PATHEXT, so
+// npm.cmd / npx.cmd resolve as expected.
 //
 // The bundled-dir check matters because withBundledBinPath (sandbox.go)
 // already makes a bundled uv resolvable inside every child process octo

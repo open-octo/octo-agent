@@ -70,9 +70,11 @@ on `PATH`:
 ```go
 // DetectToolchain reports which of a curated set of developer tools resolve on
 // the current PATH. Presence-only: it uses exec.LookPath (a filesystem lookup,
-// no subprocess), so it is safe to call on every context build — including the
-// server's per-turn recompose. Versions are deliberately not probed; the agent
-// runs `<tool> --version` on demand when it actually needs one.
+// no subprocess), so it is safe to call on every context build — once per
+// process for the CLI/TUI, once per session for the server (the composed
+// system prompt freezes after that — see Session.SetComposedSystem). Versions
+// are deliberately not probed; the agent runs `<tool> --version` on demand
+// when it actually needs one.
 func DetectToolchain() (present, missing []string)
 ```
 
@@ -93,9 +95,9 @@ block is injected in the same place, e.g.:
 Paired with the existing `ShellEnvNote()` install guidance, the agent now knows
 both *what is missing* and *how to install it* on this platform.
 
-Cost: `len(list)` filesystem lookups per context build, no subprocess. Cheap
-enough that the server's per-turn recompose is unaffected — the reason versions
-are excluded.
+Cost: `len(list)` filesystem lookups per context build, no subprocess — cheap
+even though a version probe (a real subprocess per tool) would not have been,
+which is the reason versions are excluded.
 
 ## Part B — Windows installer
 

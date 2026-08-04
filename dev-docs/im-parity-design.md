@@ -32,15 +32,9 @@ config changes), every restart wiped every conversation.
   crash costs at most one turn, not a whole chain. Failures are logged to
   the server console and never eat the reply the user already received.
 
-## Per-turn memory freshness
+## Memory hooks parity
 
-`handleChannelMessage` recomposes the agent's system prompt (memory
-injection and the skills manifest included) at the start of every turn. Web
-turns always had this — `buildAgent` runs per turn — but the IM factory
-composed the prompt once at session creation, so memory written and skills
-imported mid-session were invisible to IM until a restart.
-
-IM turns also carry the L2 memory hooks, the same pair `buildAgent` wires
+IM turns carry the L2 memory hooks, the same pair `buildAgent` wires
 for web sessions: `UserInputHook` keyword reminders and the
 `ToolResultHook` save-nudge. The injector comes from the shared
 `injectorFor` store (keyed `im:<session key>`), is session-sticky — the
@@ -92,7 +86,7 @@ reply.
 |---|---|---|
 | Store | `internal/channel/persist.go` | deterministic ID, restore-or-init, `Persist`, store delete on /bind //unbind |
 | Steer intake | `internal/server/server.go` `routeChannelEvent` | command → ask → steer-if-running → turn |
-| Chained turns + persist + recompose | `internal/server/server.go` `handleChannelMessage` | leftover-inbox loop, per-turn `prompt.Compose`, post-turn `Persist` |
+| Chained turns + persist | `internal/server/server.go` `handleChannelMessage` | leftover-inbox loop, `prompt.Compose` frozen after the session's first turn (`Session.SetComposedSystem`), post-turn `Persist` |
 | Ctx asker | `internal/tools/ask_user_question.go` | `WithAsker` / `askerFrom`, global fallback |
 | Chat asker | `internal/server/channel_ask.go` | numbered options, reply parsing, timeout |
 
@@ -103,6 +97,8 @@ reply.
   `handleChannelMessage` with a stub sender.
 - Steer: blocking-sender test pins enqueue-while-running and the chained
   drain reaching the model.
-- Freshness: memory file written between two turns is visible to the second.
+- Freeze: the composed system prompt is set on the session's first turn and
+  a memory file written between two turns stays invisible to the second —
+  `TestHandleChannelMessage_FreezesSystemAfterFirstTurn`.
 - Asker: ctx-beats-global, global fallback, reply parsing table, numbered
   pick end-to-end, timeout cancel.
