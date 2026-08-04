@@ -71,9 +71,40 @@ func TestRPCError_ErrorReturnsMessage(t *testing.T) {
 }
 
 func TestProtocolVersion_IsSpecRevision(t *testing.T) {
-	// Sanity guard against accidental version bumps. If we ever upgrade
-	// this string the test should flag the change so it's intentional.
-	if ProtocolVersion != "2024-11-05" {
-		t.Errorf("ProtocolVersion = %q, expected the documented 2024-11-05 spec", ProtocolVersion)
+	// Sanity guard against accidental version bumps: changing the requested
+	// revision changes what the server is told we implement, so it should
+	// never happen as a side effect of something else.
+	//
+	// 2025-03-26 is the revision that defines the transport in http.go
+	// (Streamable HTTP, Mcp-Session-Id, DELETE, Last-Event-ID). It replaced
+	// 2024-11-05's HTTP+SSE transport, which is why asking for 2024-11-05 here
+	// was wrong: it named a revision with no Streamable HTTP.
+	if ProtocolVersion != "2025-03-26" {
+		t.Errorf("ProtocolVersion = %q, want 2025-03-26 — the revision whose transport this package implements", ProtocolVersion)
+	}
+	// Whatever it is, we must claim to support it ourselves.
+	if !SupportedProtocolVersion(ProtocolVersion) {
+		t.Errorf("ProtocolVersion %q is not in supportedProtocolVersions", ProtocolVersion)
+	}
+}
+
+func TestSupportedProtocolVersion(t *testing.T) {
+	for _, v := range []string{"2024-11-05", "2025-03-26"} {
+		if !SupportedProtocolVersion(v) {
+			t.Errorf("SupportedProtocolVersion(%q) = false, want true", v)
+		}
+	}
+	// Empty means the server omitted it; assume the revision we asked for.
+	if !SupportedProtocolVersion("") {
+		t.Error("an omitted version should count as supported")
+	}
+	// Real revisions we deliberately don't claim: 2025-06-18 (elicitation,
+	// structured output), 2025-11-25, and 2026-07-28, which replaces the
+	// initialize handshake with per-request metadata entirely. See the
+	// ProtocolVersion doc comment.
+	for _, v := range []string{"2025-06-18", "2025-11-25", "2026-07-28", "2099-01-01", "garbage"} {
+		if SupportedProtocolVersion(v) {
+			t.Errorf("SupportedProtocolVersion(%q) = true, want false", v)
+		}
 	}
 }

@@ -260,6 +260,13 @@ func ConnectAll(ctx context.Context, cfg *Config, info Implementation, authPromp
 			}
 			continue
 		}
+		// A revision we don't implement is worth saying out loud here. Left
+		// silent, it surfaces later as some unrelated-looking failure on a
+		// specific feature, with nothing pointing at the version as the cause.
+		if pv := conn.Client.ProtocolVersion(); !SupportedProtocolVersion(pv) && warn != nil {
+			fmt.Fprintf(warn, "mcp: server %q negotiated protocol version %s, which this client does not implement (asked for %s) — it may misbehave in ways unrelated to what you were doing\n",
+				name, pv, ProtocolVersion)
+		}
 		r.conns[name] = conn
 	}
 	return r
@@ -419,20 +426,34 @@ func (r *Registry) Len() int {
 // dropped — Close is end-of-life and the user can't do anything with the
 // errors anyway.
 //
-// Connections close concurrently because closing one is no longer purely
-// local: an HTTP transport releases its session with a DELETE, which waits on
-// a server that may be slow or gone. Serially that cost would add up across
-// servers and stall process exit; in parallel the whole teardown is bounded
-// by the slowest single connection however many are configured.
+// Connections close concurrently because closing one is not purely local: an
+// HTTP transport releases its session with a DELETE, and a stdio transport
+// waits on a subprocess. Serially that cost would add up across servers and
+// stall process exit; in parallel the whole teardown is bounded by the slowest
+// single connection however many are configured.
+//
+// The waiting happens outside r.mu, which matters more than the parallelism.
+// Closing can block indefinitely — a stdio server whose stderr is a log file
+// (so os/exec builds a pipe) keeps cmd.Wait blocked as long as any grandchild
+// holds the write end, even after a Kill. Holding the registry lock across
+// that would wedge every reader with it: Get on each MCP tool dispatch, /mcp
+// output, the panel's server list. Marking closed and snapshotting under the
+// lock is enough to make this idempotent and to stop new work being registered.
 func (r *Registry) Close() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.closed {
+		r.mu.Unlock()
 		return
 	}
 	r.closed = true
-	var wg sync.WaitGroup
+	conns := make([]*Connection, 0, len(r.conns))
 	for _, c := range r.conns {
+		conns = append(conns, c)
+	}
+	r.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for _, c := range conns {
 		wg.Add(1)
 		go func(c *Connection) {
 			defer wg.Done()

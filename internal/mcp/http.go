@@ -32,8 +32,11 @@ import (
 //     response and echoed on every subsequent request, so the server can
 //     resume per-client state. Close releases it with a DELETE.
 //   - The protocol revision the server picks during initialize is echoed
-//     back in MCP-Protocol-Version on every later request, which servers
-//     implementing 2025-03-26 or later require.
+//     back in MCP-Protocol-Version on every later request. That header is a
+//     2025-06-18 requirement ("Require negotiated protocol version to be
+//     specified via MCP-Protocol-Version header in subsequent requests when
+//     using HTTP"); it does not exist in 2025-03-26. Sending it regardless
+//     costs nothing against older servers and is mandatory for newer ones.
 //   - A response stream that breaks before answering is resumed with a GET
 //     carrying Last-Event-ID, when the server tagged its events with ids.
 //   - A 404 answering a request that carried a session id is reported as
@@ -63,11 +66,10 @@ type HTTPTransport struct {
 
 	// protocolVersion is the revision the server chose during initialize,
 	// pushed in by Client.Initialize via SetProtocolVersion. Echoed back in
-	// MCP-Protocol-Version on every request once known — servers
-	// implementing 2025-03-26 or later require the header and reject
-	// requests without it. Empty until the handshake completes (the
-	// initialize request itself carries the version in its params, not a
-	// header), so we simply omit it then.
+	// MCP-Protocol-Version on every request once known — a 2025-06-18 server
+	// requires that header and answers 400 without it. Empty until the
+	// handshake completes (initialize carries the version in its params, not a
+	// header) and again after an expiry, so it is simply omitted then.
 	protoMu         sync.Mutex
 	protocolVersion string
 
@@ -207,8 +209,15 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 	}
 
 	if resp.StatusCode == http.StatusNoContent {
-		// 204: server accepted a notification. No body to parse, no inbox
-		// queue — the client doesn't expect a response for notifications.
+		// 204 with nothing to parse. For a notification that's the accepted
+		// outcome (the spec's own answer is 202, and both are handled below
+		// anyway). For a request it's a protocol violation — the spec requires
+		// either application/json or an SSE stream — and returning success
+		// would queue nothing, leaving the caller to wait out its whole
+		// timeout for a response that is never coming. Name it instead.
+		if !msg.IsNotification() {
+			return false, fmt.Errorf("mcp: http 204 to a %s request: server must answer with JSON or an SSE stream", msg.Method)
+		}
 		return false, nil
 	}
 	if resp.StatusCode == http.StatusUnauthorized {

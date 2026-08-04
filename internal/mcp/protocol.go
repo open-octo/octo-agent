@@ -19,13 +19,62 @@ import (
 	"encoding/json"
 )
 
-// ProtocolVersion is the MCP spec revision this client implements and asks
-// for in the initialize request. The server answers with the revision it
-// will actually speak — the same one, or another it can serve — and that
-// answer, not this constant, is what the session runs on. Client.Initialize
-// records it and the HTTP transport echoes it back in MCP-Protocol-Version
-// on every later request, which servers from 2025-03-26 onward require.
-const ProtocolVersion = "2024-11-05"
+// ProtocolVersion is the revision this client asks for in initialize. The
+// server answers with the revision it will actually speak — the same one, or
+// another it can serve — and that answer, not this constant, is what the
+// session runs on; Client.Initialize records it.
+//
+// 2025-03-26 is the revision whose transport this package implements: it is
+// where Streamable HTTP, Mcp-Session-Id, DELETE termination and Last-Event-ID
+// resumption are defined. Asking for 2024-11-05, as this used to, was
+// incoherent — that revision has no Streamable HTTP at all (2025-03-26 states
+// it "replaces the HTTP+SSE transport from protocol version 2024-11-05"), so
+// the client named a revision without the transport it was speaking.
+//
+// Newer revisions exist and are deliberately not claimed:
+//
+//   - 2025-06-18 contributes the MCP-Protocol-Version header this client does
+//     send, but also adds elicitation (server-to-client requests, which
+//     receiveLoop drops) and structured tool output, whose servers only SHOULD
+//     keep filling the plain content field this package reads.
+//   - 2025-11-25 is the last revision built on the initialize handshake.
+//   - 2026-07-28 removes the handshake altogether: version, identity and
+//     capabilities travel as per-request _meta, servers must implement
+//     server/discover, and an unsupported version comes back as a typed
+//     UnsupportedProtocolVersionError to retry against. In its own terminology
+//     this client is "legacy", and a legacy client cannot talk to a
+//     modern-only server at all — there is no fall-forward. Becoming
+//     "dual-era" is a separate piece of work, not a bump of this constant.
+//
+// The header is sent regardless of which revision was negotiated: it costs
+// nothing against a server that ignores it and is mandatory for one that
+// doesn't.
+const ProtocolVersion = "2025-03-26"
+
+// supportedProtocolVersions are the revisions this client can actually speak —
+// the ones whose semantics are implemented here, not every revision that
+// exists. A server may legitimately answer initialize with something else,
+// which is what SupportedProtocolVersion exists to detect.
+var supportedProtocolVersions = map[string]bool{
+	"2024-11-05": true, // stdio only in practice; no Streamable HTTP
+	"2025-03-26": true,
+}
+
+// SupportedProtocolVersion reports whether v is a revision this client
+// implements. An empty version counts as supported: servers that omit it from
+// the initialize result are assumed to mean the one we asked for.
+//
+// The spec says a client SHOULD disconnect when it doesn't support the
+// server's version. This client warns instead, and that is a deliberate
+// deviation from a SHOULD: newer revisions have so far stayed wire-compatible
+// for the subset used here, so disconnecting would break setups that work
+// today in exchange for strictness no user asked for. What the spec is really
+// guarding against — an unsupported revision failing later in some unrelated
+// way, with an error that doesn't mention versions — is addressed by saying so
+// up front at connect time.
+func SupportedProtocolVersion(v string) bool {
+	return v == "" || supportedProtocolVersions[v]
+}
 
 // ── JSON-RPC 2.0 frame ───────────────────────────────────────────────────
 //

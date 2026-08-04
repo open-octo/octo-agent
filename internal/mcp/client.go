@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -22,7 +23,7 @@ var defaultCallTimeout = 60 * time.Second
 
 // Client is a single MCP server connection: one transport, one initialize
 // handshake, request/response dispatch by ID. It's safe for concurrent
-// callers — Call serialises through the transport via sendMu, and the
+// callers — Call serialises writes through a one-slot send semaphore, and the
 // receive loop demultiplexes responses on a per-request channel.
 //
 // Lifecycle:
@@ -61,10 +62,15 @@ type Client struct {
 	pendingMu sync.Mutex
 	pending   map[string]chan *Message
 
-	// sendMu is the transport's write lock. Stdio transport already
-	// serialises but the contract is per-Client, so we hold it explicitly
-	// at the Call call site.
-	sendMu sync.Mutex
+	// sendSem is the transport's write lock, held for a whole send attempt so a
+	// session recovery can't have another request interleaved onto the dead
+	// session. A 1-buffered channel rather than a Mutex because acquisition has
+	// to be abandonable: an SSE response keeps the lock for as long as the
+	// server streams (plus resume attempts), and sync.Mutex.Lock ignores
+	// context — so queued callers could not be released by their own deadline
+	// or by an interrupt, only by the holder finishing. Waiting on a channel
+	// lets them select on ctx instead.
+	sendSem chan struct{}
 
 	// onNotification, when set, receives server-initiated notifications by
 	// method name. Guarded because it's read from the receive loop and set
@@ -74,6 +80,11 @@ type Client struct {
 
 	rxDone chan struct{} // closed when the receive loop exits
 	closed atomic.Bool
+
+	// deadErr is set when the receive loop exits, recording why. Distinct from
+	// closed on purpose — see markDead.
+	deadMu  sync.Mutex
+	deadErr error
 }
 
 // NewClient builds a Client around an already-Open transport. The caller
@@ -85,6 +96,7 @@ func NewClient(t Transport, info Implementation) *Client {
 		info:      info,
 		pending:   make(map[string]chan *Message),
 		rxDone:    make(chan struct{}),
+		sendSem:   make(chan struct{}, 1),
 	}
 }
 
@@ -189,6 +201,12 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 	if c.closed.Load() {
 		return errors.New("mcp: client closed")
 	}
+	// The receive loop is what matches a response to this request. If it has
+	// already exited there is nobody left to do that, so waiting out the
+	// deadline below would just be a slow way to fail.
+	if err := c.dead(); err != nil {
+		return fmt.Errorf("mcp: connection is no longer readable: %w", err)
+	}
 	// Bound the call when the caller gave no deadline, so a server that never
 	// replies can't wedge the turn indefinitely (stdio's Receive can't be
 	// interrupted by ctx once it blocks in Decode — only Close or a deadline
@@ -263,20 +281,29 @@ func (c *Client) Notify(ctx context.Context, method string, params any) error {
 	return c.sendRecoveringSession(ctx, msg)
 }
 
-// sendRecoveringSession is the single write path to the transport. It holds
-// sendMu for the whole attempt, so if the server reports our session gone it
+// sendRecoveringSession is the single write path to the transport. It holds the
+// send slot for the whole attempt, so if the server reports our session gone it
 // can run the recovery handshake and replay msg with no other sender able to
 // slip a request onto the dead session in between.
 //
-// The handshake deliberately does NOT go back through Call/Notify: those take
-// sendMu, which is not reentrant, so reusing them here would deadlock. It
-// talks to the transport directly instead — safe precisely because we already
-// hold the lock. Only one recovery is attempted; a second expiry in a row is
-// a server we can't keep a session with, and returning the error beats
+// The handshake deliberately does NOT go back through Call/Notify: those
+// acquire the same slot, which isn't reentrant, so reusing them here would
+// deadlock. It talks to the transport directly instead — safe precisely because
+// we already hold the slot. Only one recovery is attempted; a second expiry in
+// a row is a server we can't keep a session with, and returning the error beats
 // looping.
 func (c *Client) sendRecoveringSession(ctx context.Context, msg *Message) error {
-	c.sendMu.Lock()
-	defer c.sendMu.Unlock()
+	// An SSE response can hold this slot for the length of the stream, so a
+	// waiting caller must be able to give up on its own deadline rather than
+	// only when the holder finishes.
+	select {
+	case c.sendSem <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.rxDone:
+		return fmt.Errorf("mcp: connection is no longer readable while waiting to send")
+	}
+	defer func() { <-c.sendSem }()
 
 	err := c.transport.Send(ctx, msg)
 	if !errors.Is(err, ErrSessionExpired) {
@@ -291,10 +318,10 @@ func (c *Client) sendRecoveringSession(ctx context.Context, msg *Message) error 
 }
 
 // rehandshakeLocked re-runs initialize + initialized on a transport whose
-// session the server has forgotten. Caller must hold sendMu; this sends on
+// session the server has forgotten. Caller must hold the send slot; this sends on
 // the transport without taking it. Waiting for the initialize response is
 // fine under the lock: the receive loop is a separate goroutine and delivers
-// it through the pending map, which sendMu doesn't guard.
+// it through the pending map, which the send slot doesn't guard.
 func (c *Client) rehandshakeLocked(ctx context.Context) error {
 	id := c.nextID.Add(1)
 	idBytes := []byte(strconv.FormatUint(id, 10))
@@ -377,6 +404,9 @@ func (c *Client) receiveLoop() {
 	for {
 		msg, err := c.transport.Receive(ctx)
 		if err != nil {
+			// Nothing will demux responses after this, so record why and let
+			// Call fail fast instead of waiting out a full timeout per attempt.
+			c.markDead(err)
 			c.abortPending(err)
 			return
 		}
@@ -414,6 +444,43 @@ func (c *Client) removePending(id string) {
 		close(ch)
 	}
 	c.pendingMu.Unlock()
+}
+
+// markDead records that the receive loop has stopped, so no response will ever
+// be demuxed again. Kept separate from closed: Close's CompareAndSwap on that
+// flag is what gates tearing the transport down, so reusing it here would make
+// a later Close skip transport.Close and leak the connection.
+//
+// The distinction matters most on stdio, where this is reachable without
+// anything being closed: one malformed line desynchronises the JSON decoder, or
+// a server closes stdout while staying alive. Before this, the client stayed
+// "connected" — writes to stdin still succeeded, so /mcp and the panel kept
+// reporting it live while every call sat out its full deadline waiting for a
+// reply nobody was left to deliver.
+func (c *Client) markDead(err error) {
+	if err == nil {
+		err = io.EOF
+	}
+	c.deadMu.Lock()
+	if c.deadErr == nil {
+		c.deadErr = err
+	}
+	c.deadMu.Unlock()
+}
+
+// dead reports the receive loop's exit error, or nil while it's running.
+func (c *Client) dead() error {
+	c.deadMu.Lock()
+	defer c.deadMu.Unlock()
+	return c.deadErr
+}
+
+// Live reports whether this client can still carry traffic: not closed, and its
+// receive loop still running. Callers that report connection status (the /mcp
+// listing, the panel) should prefer it over assuming a registered connection is
+// usable.
+func (c *Client) Live() bool {
+	return !c.closed.Load() && c.dead() == nil
 }
 
 func (c *Client) abortPending(_ error) {

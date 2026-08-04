@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -243,6 +244,73 @@ func TestRegistryConnect_AfterCloseRejected(t *testing.T) {
 
 	if err := r.Connect(ctx, "late", ServerEntry{URL: srv.URL}, Implementation{Name: "test"}, nil, nil); err == nil {
 		t.Fatal("Connect on a closed registry must error")
+	}
+}
+
+// TestConnectAll_WarnsOnUnsupportedProtocolVersion: a server answering with a
+// revision this client doesn't implement must say so at connect time. Silent,
+// it resurfaces later as a feature-specific failure with nothing pointing at
+// the version.
+func TestConnectAll_WarnsOnUnsupportedProtocolVersion(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var in Message
+		_ = json.Unmarshal(body, &in)
+		if in.ID == nil {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var result any
+		switch in.Method {
+		case "initialize":
+			result = InitializeResult{
+				ProtocolVersion: "2099-01-01", // a revision we can't possibly implement
+				Capabilities:    ServerCapabilities{Tools: &ToolsCapability{}},
+				ServerInfo:      Implementation{Name: "futuristic", Version: "0"},
+			}
+		case "tools/list":
+			result = map[string]any{"tools": []Tool{}}
+		default:
+			result = map[string]any{}
+		}
+		raw, _ := json.Marshal(result)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(Message{JSONRPC: "2.0", ID: in.ID, Result: raw})
+	}))
+	defer srv.Close()
+
+	var warn strings.Builder
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cfg := &Config{Servers: map[string]ServerEntry{"future": {URL: srv.URL}}}
+	r := ConnectAll(ctx, cfg, Implementation{Name: "test"}, nil, &warn, nil)
+	defer r.Close()
+
+	// Warned, but still connected — the deviation from the spec's SHOULD
+	// disconnect is deliberate, so a working setup keeps working.
+	if r.Get("future") == nil {
+		t.Error("server should still connect despite the version warning")
+	}
+	got := warn.String()
+	if !strings.Contains(got, "2099-01-01") || !strings.Contains(got, "does not implement") {
+		t.Errorf("warn output = %q, want it to name the unsupported version", got)
+	}
+}
+
+// TestConnectAll_QuietOnSupportedVersion: the happy path must not nag.
+func TestConnectAll_QuietOnSupportedVersion(t *testing.T) {
+	srv := fakeMCPServer(t, "ok-tool") // answers with ProtocolVersion
+	defer srv.Close()
+
+	var warn strings.Builder
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cfg := &Config{Servers: map[string]ServerEntry{"good": {URL: srv.URL}}}
+	r := ConnectAll(ctx, cfg, Implementation{Name: "test"}, nil, &warn, nil)
+	defer r.Close()
+
+	if got := warn.String(); got != "" {
+		t.Errorf("warn output = %q, want nothing for a supported version", got)
 	}
 }
 
