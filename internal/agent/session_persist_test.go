@@ -424,15 +424,15 @@ func TestClearComposedSystem_UnfreezesAndRoundTrips(t *testing.T) {
 	if err := s.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	if err := s.SetComposedSystem("full prompt", "lean prompt"); err != nil {
+	if err := s.SetComposedSystem("full prompt", "lean prompt", "model-a"); err != nil {
 		t.Fatalf("SetComposedSystem: %v", err)
 	}
 
 	if err := s.ClearComposedSystem(); err != nil {
 		t.Fatalf("ClearComposedSystem: %v", err)
 	}
-	if s.ComposedSystem != "" || s.ComposedLeanSystem != "" {
-		t.Errorf("ClearComposedSystem left fields set: %q / %q", s.ComposedSystem, s.ComposedLeanSystem)
+	if s.ComposedSystem != "" || s.ComposedLeanSystem != "" || s.ComposedForModel != "" {
+		t.Errorf("ClearComposedSystem left fields set: %q / %q / %q", s.ComposedSystem, s.ComposedLeanSystem, s.ComposedForModel)
 	}
 	reloaded, err := LoadSession(s.ID)
 	if err != nil {
@@ -445,7 +445,7 @@ func TestClearComposedSystem_UnfreezesAndRoundTrips(t *testing.T) {
 	// And it can be frozen again after clearing — round-trips too, confirming
 	// the third composed_system record (freeze, clear, re-freeze) replays
 	// correctly rather than getting lost among the earlier ones.
-	if err := reloaded.SetComposedSystem("second prompt", "second lean"); err != nil {
+	if err := reloaded.SetComposedSystem("second prompt", "second lean", "model-a"); err != nil {
 		t.Fatalf("SetComposedSystem after clear: %v", err)
 	}
 	if reloaded.ComposedSystem != "second prompt" {
