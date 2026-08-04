@@ -3,9 +3,11 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -64,6 +66,234 @@ func TestHTTPTransport_RoundtripWithSessionHeader(t *testing.T) {
 	}
 	if _, err := tx.Receive(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHTTPTransport_SSEResponse(t *testing.T) {
+	// Server streams the response as a single SSE "data:" event instead of
+	// a plain application/json body.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var in Message
+		_ = json.Unmarshal(body, &in)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		resp, _ := json.Marshal(Message{JSONRPC: "2.0", ID: in.ID, Result: json.RawMessage(`{"ok":true}`)})
+		fmt.Fprintf(w, "data: %s\n\n", resp)
+	}))
+	defer srv.Close()
+
+	tx, err := NewHTTPTransport(HTTPConfig{URL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req := &Message{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "tools/list"}
+	if err := tx.Send(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	got, err := tx.Receive(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got.Result) != `{"ok":true}` {
+		t.Errorf("result = %s, want {\"ok\":true}", got.Result)
+	}
+}
+
+// TestHTTPTransport_SSEResponse_InterleavedNotification covers a server that
+// emits a notification frame ahead of the actual response on the same SSE
+// stream — both must be queued, in order, and reading must stop once the
+// frame matching our request id arrives rather than wait for stream close.
+func TestHTTPTransport_SSEResponse_InterleavedNotification(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var in Message
+		_ = json.Unmarshal(body, &in)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		notif, _ := json.Marshal(Message{JSONRPC: "2.0", Method: "notifications/progress"})
+		fmt.Fprintf(w, "event: message\ndata: %s\n\n", notif)
+		resp, _ := json.Marshal(Message{JSONRPC: "2.0", ID: in.ID, Result: json.RawMessage(`{"ok":true}`)})
+		fmt.Fprintf(w, "data: %s\n\n", resp)
+	}))
+	defer srv.Close()
+
+	tx, err := NewHTTPTransport(HTTPConfig{URL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req := &Message{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "tools/list"}
+	if err := tx.Send(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := tx.Receive(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Method != "notifications/progress" {
+		t.Errorf("first queued frame method = %q, want notifications/progress", first.Method)
+	}
+
+	second, err := tx.Receive(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.IsResponse() || string(second.Result) != `{"ok":true}` {
+		t.Errorf("second queued frame = %+v, want the tools/list response", second)
+	}
+}
+
+// TestHTTPTransport_SSEResponse_MultiLineData covers the SSE spec's
+// multi-"data:" line form — several lines joined with "\n" reconstitute the
+// original (here, pretty-printed) JSON text.
+func TestHTTPTransport_SSEResponse_MultiLineData(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var in Message
+		_ = json.Unmarshal(body, &in)
+
+		resp, _ := json.MarshalIndent(Message{
+			JSONRPC: "2.0",
+			ID:      in.ID,
+			Result:  json.RawMessage(`{"ok":true}`),
+		}, "", "  ")
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, line := range strings.Split(string(resp), "\n") {
+			fmt.Fprintf(w, "data: %s\n", line)
+		}
+		fmt.Fprint(w, "\n")
+	}))
+	defer srv.Close()
+
+	tx, err := NewHTTPTransport(HTTPConfig{URL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req := &Message{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "tools/list"}
+	if err := tx.Send(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	got, err := tx.Receive(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// MarshalIndent reformats the whole document, including nested raw
+	// messages, so compare parsed content rather than the exact bytes.
+	var out struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(got.Result, &out); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if !out.OK {
+		t.Errorf("result = %s, want ok:true", got.Result)
+	}
+}
+
+// TestHTTPTransport_SSEResponse_MalformedFrame ensures a data: line that
+// isn't valid JSON surfaces a decode error rather than being swallowed.
+func TestHTTPTransport_SSEResponse_MalformedFrame(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "data: not-json\n\n")
+	}))
+	defer srv.Close()
+
+	tx, _ := NewHTTPTransport(HTTPConfig{URL: srv.URL})
+	defer tx.Close()
+
+	req := &Message{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "tools/list"}
+	err := tx.Send(context.Background(), req)
+	if err == nil || !strings.Contains(err.Error(), "decode sse frame") {
+		t.Errorf("Send error = %v, want a decode sse frame error", err)
+	}
+}
+
+// TestHTTPTransport_SSEResponse_ClosedWithoutAnswer covers a server that
+// closes the SSE stream (e.g. after an unrelated notification) without ever
+// sending the frame that answers our request — this must surface as an
+// error, not hang until the caller's context timeout.
+func TestHTTPTransport_SSEResponse_ClosedWithoutAnswer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		notif, _ := json.Marshal(Message{JSONRPC: "2.0", Method: "notifications/progress"})
+		fmt.Fprintf(w, "data: %s\n\n", notif)
+		// Stream ends here — no response frame for our request id.
+	}))
+	defer srv.Close()
+
+	tx, _ := NewHTTPTransport(HTTPConfig{URL: srv.URL})
+	defer tx.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req := &Message{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "tools/list"}
+	err := tx.Send(ctx, req)
+	if err == nil || !strings.Contains(err.Error(), "closed without a response") {
+		t.Errorf("Send error = %v, want a closed-without-a-response error", err)
+	}
+}
+
+// TestHTTPTransport_SSEResponse_EventSizeCapped guards the fix for a server
+// that never emits the blank line ending an event: without a cumulative
+// bound, readSSE's per-event buffer would grow without limit. Shrinks
+// maxSSEEventBytes (a var for exactly this reason) so the test doesn't need
+// to push real megabytes over the wire.
+func TestHTTPTransport_SSEResponse_EventSizeCapped(t *testing.T) {
+	orig := maxSSEEventBytes
+	maxSSEEventBytes = 64
+	defer func() { maxSSEEventBytes = orig }()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		for i := 0; i < 10; i++ {
+			fmt.Fprintf(w, "data: %s\n", strings.Repeat("x", 20))
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		// Deliberately never sends the blank line that would end the event.
+	}))
+	defer srv.Close()
+
+	tx, err := NewHTTPTransport(HTTPConfig{URL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req := &Message{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "tools/list"}
+	err = tx.Send(ctx, req)
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("Send error = %v, want an event-size-exceeds error", err)
 	}
 }
 

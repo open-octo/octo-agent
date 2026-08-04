@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -17,24 +19,29 @@ import (
 //
 // What we implement
 //   - POST one JSON-RPC frame per request, body Content-Type application/json.
-//   - Each response body holds exactly one JSON-RPC frame (the response to
-//     the request we just sent). We treat that as a synchronous RPC.
+//   - A plain application/json response body holds exactly one JSON-RPC
+//     frame (the response to the request we just sent): treated as a
+//     synchronous RPC.
+//   - A text/event-stream response is read as a sequence of SSE "data:"
+//     frames, each decoded as a JSON-RPC message and queued for Receive in
+//     order; reading stops once the frame whose id matches our request
+//     arrives (the spec has the server close the stream at that point
+//     anyway) or the stream itself closes.
 //   - The server-issued Mcp-Session-Id header is captured on the first
 //     response and echoed on every subsequent request, so the server can
 //     resume per-client state.
 //
 // What we don't implement (v1 omission)
-//   - The SSE upgrade path (server responding with text/event-stream and
-//     streaming multiple frames). Almost no server requires it for the
-//     tools/list / tools/call request-response flow we care about.
-//   - The optional GET endpoint for server-initiated notifications.
+//   - SSE stream resumption via Last-Event-ID on reconnect.
+//   - The optional GET endpoint for server-initiated notifications outside
+//     of a request/response cycle.
 //   - Bidirectional concurrent sends. The client serialises one request at
 //     a time anyway.
 //
 // Receive is wired through an in-memory channel: each Send queues the
-// parsed response, Receive pops the next one. This keeps the same
-// "Send / Receive interleaved" interface stdio uses, so the client logic
-// is transport-agnostic.
+// frame(s) decoded from its response, Receive pops the next one. This
+// keeps the same "Send / Receive interleaved" interface stdio uses, so the
+// client logic is transport-agnostic.
 type HTTPTransport struct {
 	url     string
 	headers map[string]string
@@ -90,9 +97,10 @@ func NewHTTPTransport(cfg HTTPConfig) (*HTTPTransport, error) {
 	}, nil
 }
 
-// Send POSTs msg to the configured URL and queues the response for the
-// next Receive call. Honors the documented Send-then-Receive pairing — one
-// Send does exactly one HTTP round-trip and yields exactly one frame.
+// Send POSTs msg to the configured URL and queues the decoded response
+// frame(s) for Receive. One Send does exactly one HTTP round-trip; a plain
+// JSON response yields exactly one queued frame, an SSE response may yield
+// several.
 //
 // When an OAuth provider is configured: every request injects the cached
 // access token; a 401 response invalidates the cache and triggers exactly
@@ -101,14 +109,10 @@ func (t *HTTPTransport) Send(ctx context.Context, msg *Message) error {
 	if t.closed.Load() {
 		return errors.New("mcp: http transport: closed")
 	}
-	body, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("mcp: marshal: %w", err)
-	}
 
 	// At most one retry on 401 — the retry uses a freshly-acquired token.
 	for attempt := 0; attempt < 2; attempt++ {
-		retry, err := t.doRequest(ctx, body, attempt > 0)
+		retry, err := t.doRequest(ctx, msg, attempt > 0)
 		if !retry {
 			return err
 		}
@@ -127,7 +131,11 @@ func (t *HTTPTransport) Send(ctx context.Context, msg *Message) error {
 //
 // forceFreshToken=true on the retry attempt forces a token refresh path
 // even if the cached token still looks unexpired.
-func (t *HTTPTransport) doRequest(ctx context.Context, body []byte, forceFreshToken bool) (retry bool, err error) {
+func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshToken bool) (retry bool, err error) {
+	body, err := json.Marshal(msg)
+	if err != nil {
+		return false, fmt.Errorf("mcp: marshal: %w", err)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(body))
 	if err != nil {
 		return false, fmt.Errorf("mcp: request: %w", err)
@@ -194,32 +202,141 @@ func (t *HTTPTransport) doRequest(ctx context.Context, body []byte, forceFreshTo
 		return false, fmt.Errorf("mcp: http %d: %s", resp.StatusCode, bytes.TrimSpace(b))
 	}
 
-	// We only handle plain-JSON responses for v1. If the server insists on
-	// text/event-stream we surface a clear error rather than silently
-	// hanging — the user can pick a different server or file an issue.
 	ct := resp.Header.Get("Content-Type")
-	if ct != "" && !isJSONContentType(ct) {
-		return false, fmt.Errorf("mcp: http: unsupported response Content-Type %q (v1 needs application/json)", ct)
+	switch {
+	case ct == "" || isJSONContentType(ct):
+		var m Message
+		if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+			return false, fmt.Errorf("mcp: decode response: %w", err)
+		}
+		return false, t.queue(ctx, &m)
+	case isEventStreamContentType(ct):
+		return false, t.readSSE(ctx, resp.Body, msg.ID)
+	default:
+		return false, fmt.Errorf("mcp: http: unsupported response Content-Type %q (expected application/json or text/event-stream)", ct)
 	}
+}
 
-	var m Message
-	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
-		return false, fmt.Errorf("mcp: decode response: %w", err)
-	}
+// queue hands a decoded frame to the next Receive call. Shared by the
+// plain-JSON and SSE response paths so both honor transport shutdown and
+// context cancellation identically.
+func (t *HTTPTransport) queue(ctx context.Context, m *Message) error {
 	select {
-	case t.inbox <- &m:
+	case t.inbox <- m:
+		return nil
 	case <-t.done:
 		// Transport closed while this request was in flight — drop the response
 		// rather than send on a channel teardown is tearing down.
-		return false, errors.New("mcp: http transport: closed")
+		return errors.New("mcp: http transport: closed")
 	case <-ctx.Done():
-		return false, ctx.Err()
+		return ctx.Err()
 	}
-	return false, nil
 }
 
-// Receive blocks for the next queued response. The pairing with Send is
-// strict: one Send produces one inbox entry, one Receive consumes it.
+// errSSEResponseReceived is an internal sentinel readSSE uses to stop
+// scanning once the frame answering our request has been queued — it is
+// never returned to the caller.
+var errSSEResponseReceived = errors.New("mcp: sse response received")
+
+// maxSSEEventBytes bounds both a single SSE line (via scanner.Buffer) and
+// the total size of one event's "data:" lines accumulated across multiple
+// lines before a blank line flushes them. Without the latter bound, a
+// server that never emits the terminating blank line would grow readSSE's
+// buffer unboundedly. A var (not const) so tests can shrink it.
+var maxSSEEventBytes = 16 * 1024 * 1024
+
+// readSSE parses a Streamable-HTTP SSE response body: a sequence of events
+// separated by blank lines, each carrying its payload on one or more
+// "data:" lines (joined with "\n" per the SSE spec). Every decoded frame is
+// queued in arrival order — including any notifications the server
+// interleaves ahead of the response — so the Client's by-ID demuxer sees
+// them exactly as it would over the plain-JSON or stdio transports.
+//
+// wantID is the id of the request this response body answers; once a
+// queued frame is a response carrying that id, we stop reading rather than
+// wait for the server to close the stream — which also means we return
+// before resp.Body reaches EOF, so Go's http.Transport can't recycle the
+// underlying connection (it requires the body be read to completion). We
+// accept that cost: waiting for EOF instead would hang forever against a
+// server that intentionally keeps the SSE stream open past the response
+// (e.g. for later server-initiated messages), which is worse than an extra
+// TCP/TLS handshake on the next call. wantID is empty for notifications,
+// which expect no response; every frame is still queued as it arrives
+// (some servers may emit acks or other notifications on that stream), the
+// loop just never exits early and instead runs to stream close.
+func (t *HTTPTransport) readSSE(ctx context.Context, body io.Reader, wantID []byte) error {
+	scanner := bufio.NewScanner(body)
+	// Default 64KiB line limit is too small for a single-line JSON-RPC
+	// frame carrying a large tool result; give it room.
+	scanner.Buffer(make([]byte, 0, 64*1024), maxSSEEventBytes)
+
+	var data []string
+	var dataLen int
+	flush := func() error {
+		if len(data) == 0 {
+			return nil
+		}
+		payload := strings.Join(data, "\n")
+		data = data[:0]
+		dataLen = 0
+		var m Message
+		if err := json.Unmarshal([]byte(payload), &m); err != nil {
+			return fmt.Errorf("mcp: decode sse frame: %w", err)
+		}
+		if err := t.queue(ctx, &m); err != nil {
+			return err
+		}
+		if len(wantID) > 0 && m.IsResponse() && bytes.Equal(m.ID, wantID) {
+			return errSSEResponseReceived
+		}
+		return nil
+	}
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case line == "":
+			if err := flush(); err != nil {
+				if err == errSSEResponseReceived {
+					return nil
+				}
+				return err
+			}
+		case strings.HasPrefix(line, "data:"):
+			field := strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")
+			// A server that never emits the blank line ending an event would
+			// otherwise grow data unboundedly — bufio.Scanner's per-line cap
+			// doesn't help since this accumulates across many lines.
+			dataLen += len(field) + 1 // +1 for the "\n" separator flush joins lines with
+			if dataLen > maxSSEEventBytes {
+				return fmt.Errorf("mcp: sse event exceeds %d bytes without a terminating blank line", maxSSEEventBytes)
+			}
+			data = append(data, field)
+		default:
+			// event:, id:, retry:, or a comment line — v1 doesn't act on these.
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("mcp: read sse stream: %w", err)
+	}
+	// Stream closed without a trailing blank line before EOF: flush
+	// whatever event was still buffered.
+	if err := flush(); err != nil {
+		if err == errSSEResponseReceived {
+			return nil
+		}
+		return err
+	}
+	if len(wantID) > 0 {
+		return fmt.Errorf("mcp: sse stream closed without a response to request id %s", wantID)
+	}
+	return nil
+}
+
+// Receive blocks for the next queued frame. A plain-JSON response queues
+// exactly one frame per Send; an SSE response may queue several (server
+// notifications ahead of the response), each delivered by its own Receive
+// call in arrival order.
 func (t *HTTPTransport) Receive(ctx context.Context) (*Message, error) {
 	select {
 	case m, ok := <-t.inbox:
@@ -254,4 +371,11 @@ func isJSONContentType(ct string) bool {
 		}
 	}
 	return false
+}
+
+// isEventStreamContentType reports whether ct indicates an SSE body.
+// Tolerant of the "; charset=utf-8" suffix.
+func isEventStreamContentType(ct string) bool {
+	const prefix = "text/event-stream"
+	return len(ct) >= len(prefix) && ct[:len(prefix)] == prefix
 }
