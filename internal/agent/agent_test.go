@@ -1920,8 +1920,8 @@ func TestAgent_GenerateTitle(t *testing.T) {
 	if n := len(send.gotMessages); n != 1 {
 		t.Fatalf("sent %d messages, want 1 (first user message only)", n)
 	}
-	if send.gotMessages[0].Content != "the login page redirects in a loop" {
-		t.Errorf("first sent message = %q, want the first user message only", send.gotMessages[0].Content)
+	if want := "<message>the login page redirects in a loop</message>"; send.gotMessages[0].Content != want {
+		t.Errorf("first sent message = %q, want %q (wrapped in <message> tags)", send.gotMessages[0].Content, want)
 	}
 	if send.gotSystem != titleInstruction {
 		t.Errorf("system = %q, want the title instruction", send.gotSystem)
@@ -2118,14 +2118,15 @@ func TestAgent_GenerateTitle_LiteFailureSurfacesWithoutRetry(t *testing.T) {
 
 func TestCleanTitle(t *testing.T) {
 	cases := map[string]string{
-		"Refactor the parser":          "Refactor the parser",
-		"\"Quoted title\"":             "Quoted title",
-		"# Markdown heading":           "Markdown heading",
-		"trailing period.":             "trailing period",
-		"中文标题。":                        "中文标题",
-		"  \n  spaced out  \n ignored": "spaced out",
-		"":                             "",
-		"\n\n":                         "",
+		"Refactor the parser":            "Refactor the parser",
+		"\"Quoted title\"":               "Quoted title",
+		"# Markdown heading":             "Markdown heading",
+		"trailing period.":               "trailing period",
+		"中文标题。":                          "中文标题",
+		"  \n  spaced out  \n ignored":   "spaced out",
+		"<message>Fix the bug</message>": "Fix the bug",
+		"":                               "",
+		"\n\n":                           "",
 	}
 	for in, want := range cases {
 		if got := cleanTitle(in); got != want {
