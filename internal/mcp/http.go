@@ -34,11 +34,15 @@ import (
 //   - The protocol revision the server picks during initialize is echoed
 //     back in MCP-Protocol-Version on every later request, which servers
 //     implementing 2025-03-26 or later require.
+//   - A response stream that breaks before answering is resumed with a GET
+//     carrying Last-Event-ID, when the server tagged its events with ids.
+//   - A 404 answering a request that carried a session id is reported as
+//     ErrSessionExpired so the Client can re-handshake and replay.
 //
 // What we don't implement (v1 omission)
-//   - SSE stream resumption via Last-Event-ID on reconnect.
-//   - The optional GET endpoint for server-initiated notifications outside
-//     of a request/response cycle.
+//   - A standing GET listener for server-initiated messages outside of a
+//     request/response cycle. The GET above is only used to resume a broken
+//     response stream.
 //   - Bidirectional concurrent sends. The client serialises one request at
 //     a time anyway.
 //
@@ -163,10 +167,11 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 		req.Header.Set(k, v)
 	}
 	t.sessionMu.Lock()
-	if t.sessionID != "" {
-		req.Header.Set("Mcp-Session-Id", t.sessionID)
-	}
+	sentSession := t.sessionID
 	t.sessionMu.Unlock()
+	if sentSession != "" {
+		req.Header.Set("Mcp-Session-Id", sentSession)
+	}
 	t.protoMu.Lock()
 	if t.protocolVersion != "" {
 		req.Header.Set("MCP-Protocol-Version", t.protocolVersion)
@@ -216,6 +221,21 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return false, fmt.Errorf("mcp: http 401: %s", bytes.TrimSpace(b))
 	}
+	if resp.StatusCode == http.StatusNotFound && sentSession != "" {
+		// A 404 answering a request that carried a session id is how the spec
+		// says a server reports that session gone (idle timeout, restart).
+		// Drop it so the caller's recovery handshake goes out clean, and
+		// report it as the typed error Client watches for. A 404 on a request
+		// with no session id is an ordinary wrong-endpoint error and falls
+		// through below.
+		t.sessionMu.Lock()
+		if t.sessionID == sentSession {
+			t.sessionID = ""
+		}
+		t.sessionMu.Unlock()
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return false, fmt.Errorf("%w: %s", ErrSessionExpired, bytes.TrimSpace(b))
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return false, fmt.Errorf("mcp: http %d: %s", resp.StatusCode, bytes.TrimSpace(b))
@@ -262,10 +282,29 @@ func (t *HTTPTransport) queue(ctx context.Context, m *Message) error {
 	}
 }
 
-// errSSEResponseReceived is an internal sentinel readSSE uses to stop
+// errSSEResponseReceived is an internal sentinel scanSSE uses to stop
 // scanning once the frame answering our request has been queued — it is
 // never returned to the caller.
 var errSSEResponseReceived = errors.New("mcp: sse response received")
+
+// errSSEIncomplete marks a stream that ended or broke before delivering the
+// response we were waiting for. It's the one failure resumption can repair,
+// so it's what separates "try Last-Event-ID" from "give up". Wrapped with
+// detail at each return site; callers match it with errors.Is.
+var errSSEIncomplete = errors.New("mcp: sse stream incomplete")
+
+// maxSSEResumeAttempts bounds Last-Event-ID replays for a single request. A
+// server that drops the stream this many times running isn't going to deliver
+// it, and retrying past that turns a visible failure into a hang.
+const maxSSEResumeAttempts = 3
+
+// ErrSessionExpired reports that the server no longer recognises the session
+// id we were using — it answered 404 to a request that carried one, which is
+// how the spec has a server say a session is gone (idle timeout, restart).
+// The transport has already dropped the dead id by the time this surfaces.
+// Client.Call watches for it and recovers by re-running the handshake and
+// replaying the request once; callers of Call therefore never normally see it.
+var ErrSessionExpired = errors.New("mcp: session expired")
 
 // sessionDeleteTimeout bounds the best-effort session-termination DELETE that
 // Close fires. Short on purpose: Close runs on teardown paths (process exit,
@@ -299,7 +338,112 @@ var maxSSEEventBytes = 16 * 1024 * 1024
 // which expect no response; every frame is still queued as it arrives
 // (some servers may emit acks or other notifications on that stream), the
 // loop just never exits early and instead runs to stream close.
+//
+// A stream that dies before delivering the response is resumed rather than
+// failed, provided the server opted into resumability by tagging events with
+// id: — see resumeSSE.
 func (t *HTTPTransport) readSSE(ctx context.Context, body io.Reader, wantID []byte) error {
+	lastID, err := t.scanSSE(ctx, body, wantID)
+	if !errors.Is(err, errSSEIncomplete) {
+		return err
+	}
+	return t.resumeSSE(ctx, wantID, lastID, err)
+}
+
+// resumeSSE picks up a response stream that broke before answering. The spec's
+// mechanism is a GET to the same endpoint carrying Last-Event-ID, which the
+// server answers by replaying what came after that event.
+//
+// Resumption needs an event id to resume from: a server that never tagged its
+// events hasn't opted in and has no way to know where to restart, so there the
+// original failure stands. Attempts are capped — a server that keeps dropping
+// the stream is broken, and retrying forever would just hide that.
+func (t *HTTPTransport) resumeSSE(ctx context.Context, wantID []byte, lastID string, cause error) error {
+	for attempt := 0; attempt < maxSSEResumeAttempts; attempt++ {
+		if lastID == "" {
+			break
+		}
+		body, err := t.openResumeStream(ctx, lastID)
+		if err != nil {
+			return fmt.Errorf("%w (resume attempt %d: %v)", cause, attempt+1, err)
+		}
+		var next string
+		next, err = t.scanSSE(ctx, body, wantID)
+		_ = body.Close()
+		if !errors.Is(err, errSSEIncomplete) {
+			return err // delivered the response, or failed for a reason resuming won't fix
+		}
+		cause = err
+		if next == "" || next == lastID {
+			break // no forward progress; resuming again would replay the same gap
+		}
+		lastID = next
+	}
+	return cause
+}
+
+// openResumeStream issues the spec's replay request: a GET on the endpoint
+// with Last-Event-ID set, asking the server to continue an interrupted stream.
+func (t *HTTPTransport) openResumeStream(ctx context.Context, lastID string) (io.ReadCloser, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Last-Event-ID", lastID)
+	for k, v := range t.headers {
+		req.Header.Set(k, v)
+	}
+	t.sessionMu.Lock()
+	sid := t.sessionID
+	t.sessionMu.Unlock()
+	if sid != "" {
+		req.Header.Set("Mcp-Session-Id", sid)
+	}
+	t.protoMu.Lock()
+	if t.protocolVersion != "" {
+		req.Header.Set("MCP-Protocol-Version", t.protocolVersion)
+	}
+	t.protoMu.Unlock()
+	if t.oauth != nil {
+		tok, terr := t.oauth.Token(ctx)
+		if terr != nil {
+			return nil, fmt.Errorf("oauth token: %w", terr)
+		}
+		if tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+	}
+
+	resp, err := t.hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		_ = resp.Body.Close()
+		// A server with no GET endpoint (405) lands here; the caller reports
+		// the original stream failure, which is the more useful error.
+		return nil, fmt.Errorf("http %d: %s", resp.StatusCode, bytes.TrimSpace(b))
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "" && !isEventStreamContentType(ct) {
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("resume stream Content-Type %q, want text/event-stream", ct)
+	}
+	return resp.Body, nil
+}
+
+// scanSSE consumes one SSE body, queuing every frame it decodes. It returns
+// the last event id the server tagged (empty if it tagged none, which means
+// the stream isn't resumable) plus:
+//
+//   - nil once the frame answering wantID has been queued, or once a
+//     wantID-less (notification) stream ends;
+//   - errSSEIncomplete if the stream ended or broke before that, which is the
+//     resumable case;
+//   - any other error for failures resuming can't fix (undecodable frame,
+//     oversized event, transport shutdown).
+func (t *HTTPTransport) scanSSE(ctx context.Context, body io.Reader, wantID []byte) (string, error) {
 	scanner := bufio.NewScanner(body)
 	// Default 64KiB line limit is too small for a single-line JSON-RPC
 	// frame carrying a large tool result; give it room.
@@ -307,6 +451,10 @@ func (t *HTTPTransport) readSSE(ctx context.Context, body io.Reader, wantID []by
 
 	var data []string
 	var dataLen int
+	// lastID is the most recent id: the server tagged an event with. It's what
+	// a resume request replays from, so it's tracked even though nothing else
+	// here acts on it.
+	var lastID string
 	flush := func() error {
 		if len(data) == 0 {
 			return nil
@@ -333,9 +481,9 @@ func (t *HTTPTransport) readSSE(ctx context.Context, body io.Reader, wantID []by
 		case line == "":
 			if err := flush(); err != nil {
 				if err == errSSEResponseReceived {
-					return nil
+					return lastID, nil
 				}
-				return err
+				return lastID, err
 			}
 		case strings.HasPrefix(line, "data:"):
 			field := strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")
@@ -344,28 +492,32 @@ func (t *HTTPTransport) readSSE(ctx context.Context, body io.Reader, wantID []by
 			// doesn't help since this accumulates across many lines.
 			dataLen += len(field) + 1 // +1 for the "\n" separator flush joins lines with
 			if dataLen > maxSSEEventBytes {
-				return fmt.Errorf("mcp: sse event exceeds %d bytes without a terminating blank line", maxSSEEventBytes)
+				return lastID, fmt.Errorf("mcp: sse event exceeds %d bytes without a terminating blank line", maxSSEEventBytes)
 			}
 			data = append(data, field)
+		case strings.HasPrefix(line, "id:"):
+			lastID = strings.TrimPrefix(strings.TrimPrefix(line, "id:"), " ")
 		default:
-			// event:, id:, retry:, or a comment line — v1 doesn't act on these.
+			// event:, retry:, or a comment line — nothing acts on these.
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("mcp: read sse stream: %w", err)
+		// A mid-stream read failure is exactly what resumption is for.
+		return lastID, fmt.Errorf("%w: read sse stream: %v", errSSEIncomplete, err)
 	}
 	// Stream closed without a trailing blank line before EOF: flush
 	// whatever event was still buffered.
 	if err := flush(); err != nil {
 		if err == errSSEResponseReceived {
-			return nil
+			return lastID, nil
 		}
-		return err
+		return lastID, err
 	}
 	if len(wantID) > 0 {
-		return fmt.Errorf("mcp: sse stream closed without a response to request id %s", wantID)
+		return lastID, fmt.Errorf("%w: stream closed without a response to request id %s",
+			errSSEIncomplete, wantID)
 	}
-	return nil
+	return lastID, nil
 }
 
 // Receive blocks for the next queued frame. A plain-JSON response queues

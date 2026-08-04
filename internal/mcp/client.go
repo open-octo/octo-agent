@@ -38,6 +38,14 @@ type Client struct {
 	// caps is populated after Initialize so callers can branch on which
 	// surfaces the server actually advertised. Tools/Resources/Prompts are
 	// pointers in the spec; nil means "not supported".
+	//
+	// metaMu guards all four: they are written by the initialize handshake,
+	// which is no longer a once-at-startup event — recovering an expired
+	// session re-runs it mid-session, concurrently with readers like
+	// Capabilities() or a ListTools call already in flight. A restarted server
+	// may legitimately answer with different capabilities than the session we
+	// lost, so these really can change under readers.
+	metaMu       sync.RWMutex
 	caps         ServerCapabilities
 	serverInfo   Implementation
 	instructions string
@@ -95,10 +103,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 	if err := c.Call(ctx, MethodInitialize, params, &result); err != nil {
 		return fmt.Errorf("mcp: initialize: %w", err)
 	}
-	c.caps = result.Capabilities
-	c.serverInfo = result.ServerInfo
-	c.instructions = result.Instructions
-	c.protocolVersion = result.ProtocolVersion
+	c.storeHandshake(result)
 
 	// Transports that carry the negotiated revision on the wire (HTTP, via
 	// the MCP-Protocol-Version header) learn it here — before the
@@ -125,23 +130,50 @@ type protocolVersionSetter interface {
 	SetProtocolVersion(v string)
 }
 
+// storeHandshake records what a (re)initialize answered with. Called from
+// both the startup handshake and expired-session recovery.
+func (c *Client) storeHandshake(r InitializeResult) {
+	c.metaMu.Lock()
+	c.caps = r.Capabilities
+	c.serverInfo = r.ServerInfo
+	c.instructions = r.Instructions
+	c.protocolVersion = r.ProtocolVersion
+	c.metaMu.Unlock()
+}
+
 // ServerInfo returns the {name, version} the server advertised in its
 // initialize response. Useful for /mcp output.
-func (c *Client) ServerInfo() Implementation { return c.serverInfo }
+func (c *Client) ServerInfo() Implementation {
+	c.metaMu.RLock()
+	defer c.metaMu.RUnlock()
+	return c.serverInfo
+}
 
 // ProtocolVersion returns the spec revision the server chose in the
 // handshake, which may differ from the ProtocolVersion we requested. Empty
 // before Initialize completes.
-func (c *Client) ProtocolVersion() string { return c.protocolVersion }
+func (c *Client) ProtocolVersion() string {
+	c.metaMu.RLock()
+	defer c.metaMu.RUnlock()
+	return c.protocolVersion
+}
 
 // Capabilities returns the server's advertised capabilities so callers can
 // avoid calling tools/list against a server that doesn't support tools.
-func (c *Client) Capabilities() ServerCapabilities { return c.caps }
+func (c *Client) Capabilities() ServerCapabilities {
+	c.metaMu.RLock()
+	defer c.metaMu.RUnlock()
+	return c.caps
+}
 
 // Instructions returns the optional human-readable instructions the server
 // included in its initialize response. Some servers use this to tell the
 // agent how their tools should be used.
-func (c *Client) Instructions() string { return c.instructions }
+func (c *Client) Instructions() string {
+	c.metaMu.RLock()
+	defer c.metaMu.RUnlock()
+	return c.instructions
+}
 
 // Call issues a request and blocks for the matched response. params is
 // json-marshalled; result, if non-nil, is unmarshalled from the response's
@@ -185,10 +217,7 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 		msg.Params = p
 	}
 
-	c.sendMu.Lock()
-	err := c.transport.Send(ctx, msg)
-	c.sendMu.Unlock()
-	if err != nil {
+	if err := c.sendRecoveringSession(ctx, msg); err != nil {
 		return err
 	}
 
@@ -225,9 +254,92 @@ func (c *Client) Notify(ctx context.Context, method string, params any) error {
 		}
 		msg.Params = p
 	}
+	return c.sendRecoveringSession(ctx, msg)
+}
+
+// sendRecoveringSession is the single write path to the transport. It holds
+// sendMu for the whole attempt, so if the server reports our session gone it
+// can run the recovery handshake and replay msg with no other sender able to
+// slip a request onto the dead session in between.
+//
+// The handshake deliberately does NOT go back through Call/Notify: those take
+// sendMu, which is not reentrant, so reusing them here would deadlock. It
+// talks to the transport directly instead — safe precisely because we already
+// hold the lock. Only one recovery is attempted; a second expiry in a row is
+// a server we can't keep a session with, and returning the error beats
+// looping.
+func (c *Client) sendRecoveringSession(ctx context.Context, msg *Message) error {
 	c.sendMu.Lock()
 	defer c.sendMu.Unlock()
+
+	err := c.transport.Send(ctx, msg)
+	if !errors.Is(err, ErrSessionExpired) {
+		return err
+	}
+	if rerr := c.rehandshakeLocked(ctx); rerr != nil {
+		// Report the original expiry as the cause — that's what the caller
+		// needs to understand — with the recovery failure as context.
+		return fmt.Errorf("%w (recovery handshake failed: %v)", err, rerr)
+	}
 	return c.transport.Send(ctx, msg)
+}
+
+// rehandshakeLocked re-runs initialize + initialized on a transport whose
+// session the server has forgotten. Caller must hold sendMu; this sends on
+// the transport without taking it. Waiting for the initialize response is
+// fine under the lock: the receive loop is a separate goroutine and delivers
+// it through the pending map, which sendMu doesn't guard.
+func (c *Client) rehandshakeLocked(ctx context.Context) error {
+	id := c.nextID.Add(1)
+	idBytes := []byte(strconv.FormatUint(id, 10))
+	idKey := string(idBytes)
+
+	ch := make(chan *Message, 1)
+	c.pendingMu.Lock()
+	c.pending[idKey] = ch
+	c.pendingMu.Unlock()
+	defer c.removePending(idKey)
+
+	params, err := json.Marshal(InitializeParams{
+		ProtocolVersion: ProtocolVersion,
+		Capabilities:    ClientCapabilities{},
+		ClientInfo:      c.info,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal initialize params: %w", err)
+	}
+	if err := c.transport.Send(ctx, &Message{
+		JSONRPC: "2.0", ID: idBytes, Method: MethodInitialize, Params: params,
+	}); err != nil {
+		return err
+	}
+
+	select {
+	case resp := <-ch:
+		if resp == nil {
+			return errors.New("connection closed")
+		}
+		if resp.Error != nil {
+			return resp.Error
+		}
+		var result InitializeResult
+		if len(resp.Result) > 0 {
+			if err := json.Unmarshal(resp.Result, &result); err != nil {
+				return fmt.Errorf("unmarshal initialize result: %w", err)
+			}
+		}
+		// A restarted server may answer with different capabilities or even a
+		// different protocol revision than the session we lost, so adopt what
+		// it says now rather than assuming continuity.
+		c.storeHandshake(result)
+		if pv, ok := c.transport.(protocolVersionSetter); ok && result.ProtocolVersion != "" {
+			pv.SetProtocolVersion(result.ProtocolVersion)
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	return c.transport.Send(ctx, &Message{JSONRPC: "2.0", Method: MethodInitialized})
 }
 
 // receiveLoop runs for the life of the Client, pulling frames off the
@@ -316,7 +428,7 @@ func nextPageCursor(next, current string) (string, bool) {
 }
 
 func (c *Client) ListTools(ctx context.Context) ([]Tool, error) {
-	if c.caps.Tools == nil {
+	if c.Capabilities().Tools == nil {
 		return nil, nil
 	}
 	var all []Tool
@@ -347,7 +459,7 @@ func (c *Client) CallTool(ctx context.Context, name string, args map[string]any)
 }
 
 func (c *Client) ListResources(ctx context.Context) ([]Resource, error) {
-	if c.caps.Resources == nil {
+	if c.Capabilities().Resources == nil {
 		return nil, nil
 	}
 	var all []Resource
@@ -376,7 +488,7 @@ func (c *Client) ReadResource(ctx context.Context, uri string) ([]ResourceConten
 }
 
 func (c *Client) ListPrompts(ctx context.Context) ([]Prompt, error) {
-	if c.caps.Prompts == nil {
+	if c.Capabilities().Prompts == nil {
 		return nil, nil
 	}
 	var all []Prompt
