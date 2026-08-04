@@ -179,9 +179,16 @@ octo 站在两个项目的肩膀上，这点不遮掩：**[Claude Code](https://
 
 感谢每一位为 octo 做出贡献的人：
 
-<a href="https://github.com/open-octo/octo-agent/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=open-octo/octo-agent" alt="Contributors" />
-</a>
+<!-- 这里刻意手写而不是用 contrib.rocks 生成的整图：那张图要过 GitHub 的 camo
+     代理，各边缘节点缓存不一致，同一时间不同访客看到的人数可能不一样，新贡献者
+     被漏掉多久也没有上限。少写一个人比手动维护更糟。新增贡献者时在这里加一行。 -->
+<p>
+  <a href="https://github.com/Leihb"><img src="https://avatars.githubusercontent.com/u/28055438?v=4&s=64" width="64" height="64" alt="Leihb" title="Leihb" /></a>
+  <a href="https://github.com/eternalweightlessness"><img src="https://avatars.githubusercontent.com/u/210714574?v=4&s=64" width="64" height="64" alt="eternalweightlessness" title="eternalweightlessness" /></a>
+  <a href="https://github.com/kunyuanhe-sudo"><img src="https://avatars.githubusercontent.com/u/292632541?v=4&s=64" width="64" height="64" alt="kunyuanhe-sudo" title="kunyuanhe-sudo" /></a>
+</p>
+
+完整记录见 [contributors 图表](https://github.com/open-octo/octo-agent/graphs/contributors)。
 
 ## 许可
 
