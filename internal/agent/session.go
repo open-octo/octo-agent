@@ -970,6 +970,9 @@ func (s *Session) IsComposedFor(model string) bool {
 // mechanics; the appended record's omitted (empty) fields mean "not frozen"
 // on replay, same as a session that has never taken a turn.
 func (s *Session) ClearComposedSystem() error {
+	if s.ComposedSystem == "" && s.ComposedLeanSystem == "" {
+		return nil
+	}
 	s.ComposedSystem, s.ComposedLeanSystem, s.ComposedForModel = "", "", ""
 	if s.persisted == 0 {
 		if path, perr := s.SavePath(); perr == nil {

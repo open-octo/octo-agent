@@ -717,7 +717,7 @@ func (s *Server) wsReloadSession(sid string) {
 		s.wsToast(sid, "Reload failed: "+err.Error(), "error")
 		return
 	}
-	s.wsToast(sid, "System prompt reloaded — new skills, MCP tools, and memory are now visible.", "success")
+	s.wsToast(sid, "System prompt will be recomposed on your next message — new skills, MCP tools, and memory will be visible.", "success")
 }
 
 // wsCompactSession force-compacts a session's history now and reloads the
