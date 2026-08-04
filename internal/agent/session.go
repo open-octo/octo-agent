@@ -37,8 +37,20 @@ type Session struct {
 	// and reused by every later turn — see SetComposedSystem's doc comment
 	// for why. Empty for a session that hasn't taken its first turn yet, and
 	// for every session predating this field (it freezes on its next turn).
+	//
+	// ComposedForModel is the model the freeze was composed against. The MCP
+	// tools manifest baked into the prompt (see tools.MCPManifestFor) depends
+	// on the model's context window — the same MCP tool set can render a
+	// manifest under a small-window model but not a large one, or vice versa.
+	// A mid-session model switch (session.SetModelConfig, IM's /model) would
+	// silently strand the frozen prompt's manifest out of sync with the
+	// per-turn tools array (which is always computed fresh for the current
+	// model — see registry.go's defaultToolsFor), so SetComposedSystem
+	// re-freezes instead of no-op-ing when the model at call time differs
+	// from this field.
 	ComposedSystem     string `json:"composed_system,omitempty"`
 	ComposedLeanSystem string `json:"composed_lean_system,omitempty"`
+	ComposedForModel   string `json:"composed_for_model,omitempty"`
 	Title              string `json:"title,omitempty"`
 	Source             string `json:"source,omitempty"` // how the session was created: "" (manual) | "cron" | "channel" | "setup"
 	// AgentID is the ID of the agent profile (agentprofile.Profile) that owns
@@ -529,6 +541,7 @@ type sessionRecord struct {
 	System             string    `json:"system,omitempty"`
 	ComposedSystem     string    `json:"composed_system,omitempty"`
 	ComposedLeanSystem string    `json:"composed_lean_system,omitempty"`
+	ComposedForModel   string    `json:"composed_for_model,omitempty"`
 	Title              string    `json:"title,omitempty"`
 	Source             string    `json:"source,omitempty"`
 	ModelConfig        string    `json:"model_config,omitempty"`
@@ -558,7 +571,7 @@ func (s *Session) metaRecord() sessionRecord {
 		goal = &g
 	}
 	s.mu.Unlock()
-	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, ComposedSystem: s.ComposedSystem, ComposedLeanSystem: s.ComposedLeanSystem, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, AgentID: s.AgentID, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, LastContextTokens: s.LastContextTokens, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, BranchedFrom: s.BranchedFrom, Goal: goal}
+	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, ComposedSystem: s.ComposedSystem, ComposedLeanSystem: s.ComposedLeanSystem, ComposedForModel: s.ComposedForModel, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, AgentID: s.AgentID, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, LastContextTokens: s.LastContextTokens, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, BranchedFrom: s.BranchedFrom, Goal: goal}
 }
 
 // MarkHookStarted records that SessionStart has fired for this session, so a
@@ -895,14 +908,20 @@ func (s *Session) SetPermissionMode(mode string) error {
 // invalidate the provider's prompt-cache prefix on that turn (and every turn
 // after, since the changed layer stays changed). This mirrors the CLI/TUI,
 // which compose once per process and never touch System again: a skill or
-// profile edit now takes effect in a new session, not a running one. A no-op
-// once already frozen — system is only ever empty before the first turn.
-// Same append-or-rewrite persistence mechanics as SetPermissionMode.
-func (s *Session) SetComposedSystem(system, lean string) error {
-	if s.ComposedSystem != "" {
+// profile edit now takes effect in a new session, not a running one.
+//
+// model is the model this compose ran against — see ComposedForModel's doc
+// comment for why it matters. A no-op only when already frozen for THIS
+// model; a call for a different model (a mid-session model switch) overwrites
+// the freeze instead, since the per-turn tools array is always computed fresh
+// for the current model and a stale MCP-manifest freeze would silently drift
+// out of sync with it. Same append-or-rewrite persistence mechanics as
+// SetPermissionMode.
+func (s *Session) SetComposedSystem(system, lean, model string) error {
+	if s.ComposedSystem != "" && s.ComposedForModel == model {
 		return nil
 	}
-	s.ComposedSystem, s.ComposedLeanSystem = system, lean
+	s.ComposedSystem, s.ComposedLeanSystem, s.ComposedForModel = system, lean, model
 	if s.persisted == 0 {
 		// See SetWorkingDir: a meta-only transcript must be rewritten now, since
 		// the load-modify-discard handler won't get a "next Save"; a session with
@@ -927,10 +946,19 @@ func (s *Session) SetComposedSystem(system, lean string) error {
 		return fmt.Errorf("session: open %s: %w", path, err)
 	}
 	defer f.Close()
-	if err := json.NewEncoder(f).Encode(sessionRecord{Type: "composed_system", ComposedSystem: system, ComposedLeanSystem: lean}); err != nil {
+	if err := json.NewEncoder(f).Encode(sessionRecord{Type: "composed_system", ComposedSystem: system, ComposedLeanSystem: lean, ComposedForModel: model}); err != nil {
 		return fmt.Errorf("session: append composed_system: %w", err)
 	}
 	return nil
+}
+
+// IsComposedFor reports whether the session's system prompt is already
+// frozen for model — the condition SetComposedSystem itself uses to decide
+// overwrite-vs-no-op, exposed so callers (buildAgent, runChannelTurns) can
+// skip the memory/skills/MCP recompute entirely when the freeze would just
+// be reused rather than replaced.
+func (s *Session) IsComposedFor(model string) bool {
+	return s.ComposedSystem != "" && s.ComposedForModel == model
 }
 
 // SetLastContextTokens records the context-window fill (real input-token count)
@@ -1270,8 +1298,8 @@ func LoadSession(id string) (*Session, error) {
 		switch rec.Type {
 		case "meta":
 			s.ID, s.CreatedAt, s.Model, s.System = rec.ID, rec.CreatedAt, rec.Model, rec.System
-			s.ComposedSystem, s.ComposedLeanSystem = rec.ComposedSystem, rec.ComposedLeanSystem // a rewritten file carries it in its meta header
-			s.Title = rec.Title                                                                 // a compacted file carries the title in its meta header
+			s.ComposedSystem, s.ComposedLeanSystem, s.ComposedForModel = rec.ComposedSystem, rec.ComposedLeanSystem, rec.ComposedForModel // a rewritten file carries it in its meta header
+			s.Title = rec.Title                                                                                                           // a compacted file carries the title in its meta header
 			s.Source = rec.Source
 			s.ModelConfig = rec.ModelConfig
 			s.AgentID = rec.AgentID
@@ -1300,7 +1328,7 @@ func LoadSession(id string) (*Session, error) {
 		case "context_tokens":
 			s.LastContextTokens = rec.LastContextTokens // last one wins, like title
 		case "composed_system":
-			s.ComposedSystem, s.ComposedLeanSystem = rec.ComposedSystem, rec.ComposedLeanSystem // frozen once, so first (and only) one wins
+			s.ComposedSystem, s.ComposedLeanSystem, s.ComposedForModel = rec.ComposedSystem, rec.ComposedLeanSystem, rec.ComposedForModel // last one wins — a mid-session model switch appends a second record
 		case "message":
 			if rec.Message != nil {
 				s.Messages = append(s.Messages, *rec.Message)

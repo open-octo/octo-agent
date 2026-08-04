@@ -1286,8 +1286,13 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// memory file, a skill/profile edit landing elsewhere) and bust the cache
 	// on literally every turn. This mirrors the CLI/TUI, which compose once
 	// per process: a profile/skill edit now takes effect in a new session,
-	// not a running one.
-	if sess.ComposedSystem != "" {
+	// not a running one. A model switch is the one exception that DOES force
+	// a re-freeze (IsComposedFor checks the model, not just emptiness) — the
+	// MCP tools manifest baked into the prompt depends on the model's context
+	// window, and the per-turn tools array is always computed fresh for the
+	// current model regardless of the freeze, so a stale manifest would drift
+	// out of sync with what's actually offered.
+	if sess.IsComposedFor(model) {
 		a.System, a.LeanSystem = sess.ComposedSystem, sess.ComposedLeanSystem
 	} else {
 		// L1: project memory embedded in the system prompt, snapshotted once.
@@ -1308,7 +1313,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 			expertMode = true
 		}
 		a.System, a.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
-		if err := sess.SetComposedSystem(a.System, a.LeanSystem); err != nil {
+		if err := sess.SetComposedSystem(a.System, a.LeanSystem, model); err != nil {
 			slog.Warn("freeze composed system prompt", "session", sess.ID, "err", err)
 		}
 	}
@@ -3192,8 +3197,11 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// path (buildAgent) and the CLI/TUI. This used to recompose every turn so
 	// memory writes and skill/profile edits landed without a restart; that
 	// traded prompt-cache stability for immediacy. A profile/skill edit now
-	// takes effect in a new session, not a running one.
-	if sess.Store.ComposedSystem != "" {
+	// takes effect in a new session, not a running one. A model switch (IM's
+	// /model, applied above via applyChannelModel) DOES force a re-freeze —
+	// see IsComposedFor's doc comment for why a stale MCP manifest can't just
+	// be left frozen under the old model.
+	if sess.Store.IsComposedFor(sess.Agent.Model) {
 		sess.Agent.System, sess.Agent.LeanSystem = sess.Store.ComposedSystem, sess.Store.ComposedLeanSystem
 	} else {
 		var memInjection string
@@ -3212,7 +3220,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 			expertMode = true
 		}
 		sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
-		if err := sess.Store.SetComposedSystem(sess.Agent.System, sess.Agent.LeanSystem); err != nil {
+		if err := sess.Store.SetComposedSystem(sess.Agent.System, sess.Agent.LeanSystem, sess.Agent.Model); err != nil {
 			slog.Warn("freeze composed system prompt", "session", string(sess.Key), "err", err)
 		}
 	}
