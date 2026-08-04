@@ -228,11 +228,7 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 		// report it as the typed error Client watches for. A 404 on a request
 		// with no session id is an ordinary wrong-endpoint error and falls
 		// through below.
-		t.sessionMu.Lock()
-		if t.sessionID == sentSession {
-			t.sessionID = ""
-		}
-		t.sessionMu.Unlock()
+		t.forgetSession(sentSession)
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return false, fmt.Errorf("%w: %s", ErrSessionExpired, bytes.TrimSpace(b))
 	}
@@ -365,6 +361,12 @@ func (t *HTTPTransport) resumeSSE(ctx context.Context, wantID []byte, lastID str
 		}
 		body, err := t.openResumeStream(ctx, lastID)
 		if err != nil {
+			// An expiry discovered here must stay recognisable: it's the one
+			// failure the Client can repair, and burying it under the
+			// stream-incomplete cause would strand the connection.
+			if errors.Is(err, ErrSessionExpired) {
+				return err
+			}
 			return fmt.Errorf("%w (resume attempt %d: %v)", cause, attempt+1, err)
 		}
 		var next string
@@ -418,6 +420,18 @@ func (t *HTTPTransport) openResumeStream(ctx context.Context, lastID string) (io
 	resp, err := t.hc.Do(req)
 	if err != nil {
 		return nil, err
+	}
+	if resp.StatusCode == http.StatusNotFound && sid != "" {
+		// The spec names an expiring session as the one sanctioned reason for a
+		// server to close a response stream early, so this is a likely way for
+		// a resume to fail rather than an exotic one. Report it as the expiry
+		// it is — the caller propagates it so the Client re-handshakes — and
+		// not as "the stream broke", which would leave the dead session id in
+		// place and fail the call with an unrelated message.
+		t.forgetSession(sid)
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("%w: %s", ErrSessionExpired, bytes.TrimSpace(b))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
@@ -538,6 +552,33 @@ func (t *HTTPTransport) Receive(ctx context.Context) (*Message, error) {
 	}
 }
 
+// forgetSession drops the state that belonged to a session the server has
+// declared gone, so the recovery handshake starts from nothing.
+//
+// The protocol version goes with the session id, not just the id alone: a
+// revision is negotiated per session, and the recovery initialize is precisely
+// the request that renegotiates it. Carrying the old value into it would make
+// a server that restarted onto a revision it no longer supports answer 400
+// (which the spec requires for an unsupported version header) instead of
+// negotiating, turning a recoverable expiry into a wedged connection.
+//
+// sentSession guards against clobbering a newer session: by the time a 404
+// lands, a concurrent request may already have established a replacement.
+func (t *HTTPTransport) forgetSession(sentSession string) {
+	t.sessionMu.Lock()
+	stale := t.sessionID == sentSession
+	if stale {
+		t.sessionID = ""
+	}
+	t.sessionMu.Unlock()
+	if !stale {
+		return
+	}
+	t.protoMu.Lock()
+	t.protocolVersion = ""
+	t.protoMu.Unlock()
+}
+
 // SetProtocolVersion records the revision the server chose during the
 // initialize handshake so later requests can advertise it. Called by
 // Client.Initialize before it sends notifications/initialized, so every
@@ -589,10 +630,14 @@ func (t *HTTPTransport) deleteSession() {
 		req.Header.Set("MCP-Protocol-Version", t.protocolVersion)
 	}
 	t.protoMu.Unlock()
-	// Reuse the cached OAuth token if we have one, but never start an
-	// interactive authorization just to say goodbye.
-	if t.oauth != nil {
-		if tok, terr := t.oauth.Token(ctx); terr == nil && tok != "" {
+	// Reuse an already-cached OAuth token if there is one, but never start an
+	// interactive authorization just to say goodbye. This must not call
+	// Token: that escalates through refresh to a full authorize, which opens
+	// a browser — so a near-expired token whose refresh failed would pop an
+	// authorization page when the user typed /exit, then fail anyway on this
+	// path's short deadline.
+	if cp, ok := t.oauth.(cachedTokenProvider); ok {
+		if tok := cp.CachedToken(); tok != "" {
 			req.Header.Set("Authorization", "Bearer "+tok)
 		}
 	}

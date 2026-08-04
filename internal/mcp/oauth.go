@@ -83,6 +83,14 @@ type OAuthProvider interface {
 	Invalidate()
 }
 
+// cachedTokenProvider is the optional half of OAuthProvider used on teardown
+// paths, where Token's escalation to refresh-then-authorize is unacceptable —
+// nobody wants a browser opening because they typed /exit. A provider that
+// doesn't implement it simply contributes no Authorization header there.
+type cachedTokenProvider interface {
+	CachedToken() string
+}
+
 // OAuthClient implements OAuthProvider against a single MCP resource URL.
 // Persists state under ~/.octo/mcp-tokens/<server>.json so a fresh
 // `octo` session reuses the access token + refresh token from the
@@ -195,6 +203,34 @@ func (o *OAuthClient) Token(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return o.state.AccessToken, nil
+}
+
+// CachedToken returns the cached access token only if one is present and not
+// close to expiry. It never refreshes, never registers, and never starts an
+// authorization flow — unlike Token, which escalates through all three.
+//
+// This exists for teardown paths (releasing a session on Close): they want to
+// authenticate the goodbye if they cheaply can, but must not open a browser
+// for it. Empty means "nothing usable cached", and the caller should proceed
+// without an Authorization header rather than trying harder.
+func (o *OAuthClient) CachedToken() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	o.loadOnce.Do(func() {
+		if st, err := loadOAuthState(o.storePath); err == nil {
+			o.state = st
+		}
+	})
+	// Same staleness rule Token uses: a token cached before resource-binding
+	// was recorded isn't audience-bound and would 401 anyway.
+	if o.state == nil || o.state.AccessToken == "" || o.state.Resource == "" {
+		return ""
+	}
+	if !o.state.ExpiresAt.After(time.Now().Add(60 * time.Second)) {
+		return ""
+	}
+	return o.state.AccessToken
 }
 
 // Invalidate forgets the current access token without throwing away the
