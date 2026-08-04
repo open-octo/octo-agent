@@ -111,9 +111,9 @@
     </button>
   {/if}
 
-  <button class="search-btn" onclick={() => cmdkOpen.set(true)}>
+  <button class="search-btn" title={$t('header.search_sessions')} onclick={() => cmdkOpen.set(true)}>
     <iconify-icon icon="ant-design:search-outlined" width="15"></iconify-icon>
-    <span>{$t('header.search_sessions')}</span>
+    <span class="label">{$t('header.search_sessions')}</span>
     <kbd>⌘K</kbd>
   </button>
 
@@ -195,9 +195,28 @@ header .window-controls { --wails-draggable: no-drag; }
   height: 30px; padding: 0 9px;
   background: transparent; border: none; border-radius: var(--radius-sm);
   color: var(--text-secondary); cursor: pointer; font-family: inherit;
+  /* The header can't wrap (fixed 48px) and every other control is
+     fixed-width, so the label was the only thing that could give: it wrapped
+     to several lines inside the 30px-tall button and spilled over the
+     header's edge into the view below. */
+  flex: 0 0 auto; white-space: nowrap;
 }
 .search-btn:hover { background: var(--hover-neutral); color: var(--text); }
 kbd { font-size: 11px; font-family: var(--font-mono); }
+
+/* Narrow windows: nothing here shrinks, so shed the label-only decoration
+   instead of letting controls collide. Steps reuse the widths the sidebar
+   already switches on (Sidebar.svelte: rail below 860, hidden below 640). */
+@media (max-width: 860px) {
+  .sub, .brand-divider { display: none; }
+  .search-btn kbd { display: none; }
+}
+@media (max-width: 640px) {
+  /* Icon-only from here — the title attribute carries the meaning, the same
+     way ChatView's header buttons drop their labels below 680px. */
+  .search-btn .label { display: none; }
+  .search-btn { padding: 0 7px; }
+}
 
 .ptoggle-group {
   display: inline-flex; gap: 2px; padding: 2px;
