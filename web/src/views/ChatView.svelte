@@ -513,6 +513,14 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       showToast((ev as any).message ?? '', (ev as any).level ?? 'info')
     }))
 
+    // Another entry stole this session's binding (force bind from Web, TUI
+    // --take-over, …). Informational only: the turn is not blocked and the
+    // notice never lands in the persisted history.
+    cleanups.push(ws.on('session_taken_over', (ev) => {
+      if ((ev as any).session_id !== sid) return
+      showToast(tr('chat.session_taken_over').replace('{entry}', (ev as any).entry ?? ''), 'info')
+    }))
+
     // Operation errors surfaced over WS (e.g. "can't retry while a turn is
     // running", session-not-found). The payload carries no session_id — delivery
     // is already scoped to this session — so only filter when one is present.

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -271,6 +272,105 @@ drainLoop:
 	}
 	if !sawComplete {
 		t.Fatal("expected turn to complete after force takeover")
+	}
+}
+
+// TestHandleWSUserMessage_ForceTakeoverEmitsSessionTakenOver: a successful
+// force takeover must notify every watcher of the session — including the
+// displaced client — with a structured session_taken_over event carrying the
+// previous owner, so the frontend can localise the notice. The notice is a
+// client-side event only: nothing about it may land in the persisted history.
+func TestHandleWSUserMessage_ForceTakeoverEmitsSessionTakenOver(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.initWS()
+	srv.turnRunning = make(map[string]bool)
+	srv.steerQueues = make(map[string][]queuedTurn)
+	srv.sessionAgents = make(map[string]*agent.Agent)
+
+	sess := agent.NewSession("stub-model", "")
+	if _, _, err := sess.Bind(agent.EntryTUI, false); err != nil {
+		t.Fatalf("bind to TUI: %v", err)
+	}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	// No turn lease: the binding is stale, so the force takeover succeeds.
+
+	conn := &wsConn{
+		hub:        srv.wsHub,
+		send:       make(chan []byte, 256),
+		subscribed: map[string]struct{}{},
+	}
+	srv.wsHub.register <- conn
+	srv.wsHub.subscribe(conn, sess.ID)
+
+	// Let the turn complete immediately; the takeover event is broadcast
+	// synchronously before the turn goroutine starts.
+	block := make(chan struct{})
+	close(block)
+	started := make(chan struct{})
+	srv.sender = &holdSender{block: block, started: started}
+
+	srv.handleWSUserMessage(conn, &wsMsgUserMessage{
+		SessionID: sess.ID,
+		Content:   json.RawMessage(`"hello from web"`),
+		Force:     true,
+	})
+
+	var got map[string]any
+	var sawComplete bool
+	deadline := time.After(3 * time.Second)
+drain:
+	for {
+		select {
+		case b := <-conn.send:
+			var ev map[string]any
+			if err := json.Unmarshal(b, &ev); err != nil {
+				continue
+			}
+			switch typ, _ := ev["type"].(string); typ {
+			case "session_taken_over":
+				got = ev
+			case "complete":
+				sawComplete = true
+			}
+			if got != nil && sawComplete {
+				break drain
+			}
+		case <-deadline:
+			break drain
+		}
+	}
+	if got == nil {
+		t.Fatal("expected session_taken_over event after a successful force takeover")
+	}
+	if sid, _ := got["session_id"].(string); sid != sess.ID {
+		t.Errorf("session_taken_over session_id = %q, want %q", sid, sess.ID)
+	}
+	if prev, _ := got["previous_entry"].(string); prev != agent.EntryTUI {
+		t.Errorf("session_taken_over previous_entry = %q, want %q", prev, agent.EntryTUI)
+	}
+	if entry, _ := got["entry"].(string); entry != agent.EntryWeb {
+		t.Errorf("session_taken_over entry = %q, want %q", entry, agent.EntryWeb)
+	}
+	if !sawComplete {
+		t.Fatal("expected the turn to still complete: the takeover notice must not block it")
+	}
+
+	// The notice is informational for connected clients only — the persisted
+	// transcript must not gain any record of it.
+	fresh, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	for _, m := range fresh.Messages {
+		if strings.Contains(m.Content, "taken over") {
+			t.Fatalf("takeover notice leaked into persisted history: %q", m.Content)
+		}
 	}
 }
 

@@ -1060,7 +1060,9 @@ func (s *Server) sessionBindingLock(id string) *sync.Mutex {
 // A local cache with a short lease avoids repeated disk reads for the same
 // owner within this process. On success the binding and a turn lease are
 // persisted, and the cache is refreshed. The load→bind→save sequence is
-// serialised per session id.
+// serialised per session id. The returned string names the previous owner when
+// the binding was stolen (steal=true) so callers can notify the displaced
+// client; it is empty when no takeover happened.
 func (s *Server) acquireSessionBinding(id, entry string, steal bool) (bool, string, error) {
 	mu := s.sessionBindingLock(id)
 	mu.Lock()
@@ -1126,7 +1128,7 @@ func (s *Server) acquireSessionBinding(id, entry string, steal bool) (bool, stri
 	s.entryBindingsMu.Lock()
 	s.entryBindings[id] = &cachedEntryBinding{entry: entry, expires: now.Add(entryBindingCacheLease)}
 	s.entryBindingsMu.Unlock()
-	return true, fmt.Sprintf("session taken over from %s", bound), nil
+	return true, bound, nil
 }
 
 // canForceBind reports whether a failed binding acquisition is recoverable

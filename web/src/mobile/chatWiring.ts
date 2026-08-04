@@ -214,6 +214,13 @@ export function wireMobileSession(sid: string): () => void {
     showToast(ev.message ?? '', ev.level ?? 'info')
   }))
 
+  // Another entry stole this session's binding: informational toast, nothing
+  // is persisted and the turn is not blocked.
+  cleanups.push(ws.on('session_taken_over', (ev: any) => {
+    if (ev.session_id !== sid) return
+    showToast(tr('chat.session_taken_over').replace('{entry}', ev.entry ?? ''), 'info')
+  }))
+
   // Operation errors surfaced over WS (retry-while-running, session-not-found…).
   cleanups.push(ws.on('error', (ev: any) => {
     if (!forSid(ev)) return

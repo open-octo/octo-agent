@@ -343,12 +343,11 @@ func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if ok, msg, berr := s.acquireSessionBinding(id, agent.EntryWeb, false); !ok {
+	if ok, prevEntry, berr := s.acquireSessionBinding(id, agent.EntryWeb, false); !ok {
 		writeError(w, http.StatusConflict, berr.Error())
 		return
-	} else if msg != "" {
-		// TODO: surface takeover notice to the client via an event.
-		_ = msg
+	} else if prevEntry != "" {
+		s.wsSessionTakenOver(id, prevEntry, agent.EntryWeb)
 	}
 
 	mu := s.sessionTurnLock(id)

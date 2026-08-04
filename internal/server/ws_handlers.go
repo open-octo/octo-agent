@@ -541,7 +541,7 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 		content = strings.TrimSpace(content + "\n\n" + strings.Join(att.notes, "\n"))
 	}
 
-	if ok, bindMsg, berr := s.acquireSessionBinding(sid, agent.EntryWeb, msg.Force); !ok {
+	if ok, prevEntry, berr := s.acquireSessionBinding(sid, agent.EntryWeb, msg.Force); !ok {
 		// A binding held by another entry without an active lease is recoverable:
 		// ask the user to confirm a takeover instead of silently dropping the message.
 		if s.canForceBind(sid, berr) {
@@ -558,8 +558,8 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 			"message":    berr.Error(),
 		})
 		return
-	} else if bindMsg != "" {
-		s.wsToast(sid, bindMsg, "info")
+	} else if prevEntry != "" {
+		s.wsSessionTakenOver(sid, prevEntry, agent.EntryWeb)
 	}
 
 	mu := s.sessionTurnLock(sid)
@@ -803,6 +803,19 @@ func (s *Server) wsToast(sid, message, level string) {
 		"session_id": sid,
 		"message":    message,
 		"level":      level,
+	})
+}
+
+// wsSessionTakenOver tells watchers that the session's binding was stolen from
+// prev by entry. It carries the entries as structured fields (not a pre-baked
+// string) so the frontend can localise the notice. The event is transient —
+// informational for connected clients, never persisted to the session history.
+func (s *Server) wsSessionTakenOver(sid, prev, entry string) {
+	s.wsHub.broadcast(sid, map[string]string{
+		"type":           "session_taken_over",
+		"session_id":     sid,
+		"previous_entry": prev,
+		"entry":          entry,
 	})
 }
 
