@@ -1310,7 +1310,7 @@ textarea {
   border: none; outline: none; resize: none; font-size: 14px; line-height: 1.6;
   font-family: inherit; color: var(--text); background: transparent;
   flex: 1; min-width: 0; margin: 4px 4px 5px;
-  max-height: 156px; overflow-y: hidden; min-height: 24px; /* ≈ MIN_TEXTAREA_PX in autoResize */
+  max-height: 156px; overflow-y: hidden; overflow-x: hidden; min-height: 24px; /* ≈ MIN_TEXTAREA_PX in autoResize */
 }
 .agent-chip {
   display: inline-flex; align-items: center; gap: 6px;
