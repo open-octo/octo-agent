@@ -1571,6 +1571,25 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     URL.revokeObjectURL(url)
   }
 
+  // Hand the built transcript to the user. Every format must go through here:
+  // the octo-served desktop webview has no download delegate, so a blob
+  // <a download> click there silently does nothing and the bytes have to take
+  // the native save dialog instead. Returns false when the save was cancelled
+  // or failed, so the caller keeps export mode (and the selection) open.
+  async function deliverExport(content: string, filename: string, mime: string): Promise<boolean> {
+    if (get(nativeShell)) {
+      try {
+        const r = await api.nativeSaveFile(filename, content)
+        return !r.cancelled
+      } catch {
+        showToast(tr('chat.export_failed'), 'error')
+        return false
+      }
+    }
+    triggerDownload(content, filename, mime)
+    return true
+  }
+
   // Returns whether the export actually completed, so the caller only exits
   // export mode (and drops the user's checkbox selection) on success — not on
   // "nothing selected" or a cancelled/failed native save.
@@ -1609,17 +1628,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
     const title_safe = title.replace(/[^\w.-]+/g, '_')
     const content = lines.join('\n')
-    if (get(nativeShell)) {
-      try {
-        const r = await api.nativeSaveFile(`${title_safe}.md`, content)
-        if (r.cancelled) return false
-      } catch {
-        showToast(tr('chat.export_failed'), 'error')
-        return false
-      }
-    } else {
-      triggerDownload(content, `${title_safe}.md`, 'text/markdown')
-    }
+    if (!(await deliverExport(content, `${title_safe}.md`, 'text/markdown'))) return false
 
     if (omittedToolEvents) {
       showToast(tr('chat.export_tools_omitted'), 'info')
@@ -1627,10 +1636,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     return true
   }
 
-  function exportAsJSON(events: any[], title: string) {
+  async function exportAsJSON(events: any[], title: string): Promise<boolean> {
     const title_safe = title.replace(/[^\w.-]+/g, '_')
     const json = JSON.stringify(events, null, 2)
-    triggerDownload(json, `${title_safe}.json`, 'application/json')
+    return deliverExport(json, `${title_safe}.json`, 'application/json')
   }
 
   async function exportByFormat(format: string) {
@@ -1649,7 +1658,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           ok = await exportAsMarkdown(result.events, title)
           break
         case 'json':
-          exportAsJSON(result.events, title)
+          ok = await exportAsJSON(result.events, title)
           break
       }
       if (ok) exitExportMode()
