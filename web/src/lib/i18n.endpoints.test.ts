@@ -20,6 +20,7 @@ const ENDPOINT_KEYS = [
   'settings.endpoints.badge.lite',
   'settings.endpoints.add_model',
   'settings.endpoints.add_model.placeholder',
+  'settings.endpoints.add_model.custom',
   'settings.endpoints.set_default',
   'settings.endpoints.set_lite',
   'settings.endpoints.unset_lite',

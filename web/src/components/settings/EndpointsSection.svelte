@@ -42,10 +42,11 @@
   let newModel       = $state('')
   let newModelVision = $state(true)
 
-  // ── popover menu: chip actions, or a model picker for the footer buttons ──
+  // ── popover menu: chip actions, a model picker for the footer buttons, or
+  // the catalogue picker behind "+ Add model" ──
   type Menu =
     | { kind: 'chip'; epId: string; model: string }
-    | { kind: 'default' | 'lite'; epId: string }
+    | { kind: 'default' | 'lite' | 'add'; epId: string }
   let menu = $state<Menu | null>(null)
 
   onMount(async () => {
@@ -133,11 +134,35 @@
 
   // ── add model ──
 
+  // Catalogue models of the endpoint's provider not yet added to it — the
+  // one-click options behind "+ Add model" for a known (preset) provider.
+  function addableModels(ep: EndpointConfig): string[] {
+    const catalogue = presetFor(ep.provider)?.models ?? []
+    return catalogue.filter((m) => !ep.models.some((x) => x.model === m))
+  }
+
+  // "+ Add model": a known provider gets a catalogue picker menu (with a
+  // manual-entry escape hatch); a provider without a catalogue goes straight
+  // to the free-text row.
   function startAddModel(ep: EndpointConfig) {
+    if (addableModels(ep).length > 0) {
+      menu = menu?.kind === 'add' && menu.epId === ep.id ? null : { kind: 'add', epId: ep.id }
+      return
+    }
+    openAddModelInput(ep)
+  }
+
+  function openAddModelInput(ep: EndpointConfig) {
     addingFor = ep.id
     newModel = ''
     newModelVision = true
     menu = null
+  }
+
+  function addCatalogueModel(ep: EndpointConfig, model: string) {
+    const vision = presetFor(ep.provider)?.model_vision?.[model] ?? true
+    menu = null
+    run(() => api.addEndpointModel(ep.id, model, vision))
   }
 
   // Pre-fill the vision flag from the provider catalogue while typing; an
@@ -472,10 +497,23 @@
                 </button>
               </div>
             {:else}
-              <button class="chip chip-add" onclick={(e) => { e.stopPropagation(); startAddModel(ep) }} disabled={busy}>
-                <iconify-icon icon="ant-design:plus-outlined" width="12"></iconify-icon>
-                {$t('settings.endpoints.add_model')}
-              </button>
+              <div class="chip-wrap">
+                <button class="chip chip-add" onclick={(e) => { e.stopPropagation(); startAddModel(ep) }} disabled={busy}>
+                  <iconify-icon icon="ant-design:plus-outlined" width="12"></iconify-icon>
+                  {$t('settings.endpoints.add_model')}
+                </button>
+                {#if menu?.kind === 'add' && menu.epId === ep.id}
+                  <div class="menu">
+                    {#each addableModels(ep) as m (m)}
+                      <button class="menu-item mono" onclick={() => addCatalogueModel(ep, m)} disabled={busy}>{m}</button>
+                    {/each}
+                    <div class="menu-sep"></div>
+                    <button class="menu-item" onclick={(e) => { e.stopPropagation(); openAddModelInput(ep) }} disabled={busy}>
+                      {$t('settings.endpoints.add_model.custom')}
+                    </button>
+                  </div>
+                {/if}
+              </div>
             {/if}
           </div>
 
@@ -620,6 +658,7 @@
   box-shadow: 0 8px 24px rgba(15,23,42,0.14); padding: 4px; display: flex; flex-direction: column;
 }
 .menu-title { font-size: 11px; color: var(--text-tertiary); padding: 4px 8px 2px; }
+.menu-sep { height: 1px; background: var(--border-secondary); margin: 4px 2px; }
 .menu-item {
   border: none; background: transparent; text-align: left; padding: 6px 8px;
   border-radius: 6px; font-size: 12.5px; color: var(--text); cursor: pointer; font-family: inherit;
