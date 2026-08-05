@@ -138,7 +138,7 @@
 .modal-body {
   padding: 0 20px 16px;
   display: flex; flex-direction: column; gap: 16px;
-  max-height: 50vh; overflow-y: auto;
+  max-height: calc(50vh / var(--font-zoom)); overflow-y: auto;
 }
 h4 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--text-tertiary); }
 .desc-text { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-secondary); }

@@ -228,7 +228,7 @@
   .qo-card {
     pointer-events: auto;
     width: 100%;
-    max-height: 90vh;
+    max-height: calc(90vh / var(--font-zoom));
     overflow-y: auto;
     display: flex;
     flex-direction: column;

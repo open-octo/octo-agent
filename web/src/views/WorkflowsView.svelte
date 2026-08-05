@@ -223,7 +223,7 @@
   display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-tertiary);
 }
 .modal-close:hover { background: var(--hover-neutral); color: var(--text); }
-.modal-body { padding: 20px 24px; max-height: 60vh; overflow-y: auto; }
+.modal-body { padding: 20px 24px; max-height: calc(60vh / var(--font-zoom)); overflow-y: auto; }
 .modal-footer {
   padding: 16px 24px 20px; display: flex; align-items: center; justify-content: flex-end; gap: 8px;
   border-top: 1px solid var(--border-table);

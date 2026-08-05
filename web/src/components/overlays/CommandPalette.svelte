@@ -201,7 +201,7 @@
 .backdrop {
   position: fixed; inset: 0; z-index: 1000;
   background: var(--scrim);
-  display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh;
+  display: flex; align-items: flex-start; justify-content: center; padding-top: calc(12vh / var(--font-zoom));
 }
 .palette {
   width: 92%; max-width: 520px; background: var(--bg-container);

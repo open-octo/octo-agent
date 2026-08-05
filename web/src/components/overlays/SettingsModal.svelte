@@ -247,7 +247,11 @@
   }
 
   $effect(() => {
-    ;(document.documentElement.style as any).zoom = fontZoomMap[fontSize] ?? '1'
+    const zoom = fontZoomMap[fontSize] ?? '1'
+    ;(document.documentElement.style as any).zoom = zoom
+    // Viewport units are not compensated for zoom — publish the factor so
+    // vh/vw-sized boxes can divide themselves back onto the real viewport.
+    document.documentElement.style.setProperty('--font-zoom', zoom)
     localStorage.setItem('octo.fontSize', fontSize)
   })
 
@@ -539,7 +543,7 @@
   /* Fixed height (not max-height) so switching between categories with very
      different content lengths (关于 vs 端点) never resizes the modal itself
      — each pane scrolls internally instead. */
-  width: 100%; max-width: 760px; height: 78vh;
+  width: 100%; max-width: 760px; height: calc(78vh / var(--font-zoom));
   background: var(--bg-container); border: 1px solid var(--border); border-radius: var(--radius-card);
   box-shadow: 0 24px 48px rgba(15,23,42,0.18);
   display: flex; flex-direction: column; overflow: hidden;

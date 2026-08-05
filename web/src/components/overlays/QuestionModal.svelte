@@ -294,7 +294,7 @@
     margin: 0;
     font-size: 14px; line-height: 1.6; color: var(--text-secondary);
     white-space: pre-wrap; word-break: break-word;
-    max-height: 40vh; overflow-y: auto;
+    max-height: calc(40vh / var(--font-zoom)); overflow-y: auto;
   }
   .options { display: flex; flex-wrap: wrap; gap: 10px; }
   .custom-input-wrap { display: flex; }
