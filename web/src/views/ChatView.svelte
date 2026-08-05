@@ -55,11 +55,12 @@
   import { ws, wsState, wsReconnect } from '../lib/ws'
   import * as api from '../lib/api'
   import { observeArtifact, resetArtifacts } from '../lib/artifacts'
-  import { renderMarkdown, setupCopyButtons } from '../lib/markdown'
+  import { renderMarkdown, escapeHtml, setupCopyButtons } from '../lib/markdown'
   import { t, tr, pickLocalized } from '../lib/i18n'
   import { insertPendingSend } from '../lib/pendingSendOrder'
   import { exportModeStore, selectedMessagesStore } from '../lib/exportStore'
   import { filenameStem } from '../lib/filename'
+  import DOMPurify from 'dompurify'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
   import SubAgentsCard from '../components/chat/SubAgentsCard.svelte'
   import WorkflowsCard from '../components/chat/WorkflowsCard.svelte'
@@ -1660,6 +1661,202 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     window.print()
   }
 
+  // ── PNG / HTML export ───────────────────────────────────────────────────
+  // PNG captures an off-screen render of the conversation as a single long
+  // image (html2canvas, dynamically imported so it never touches the main
+  // bundle). HTML builds the same self-contained document and hands it to
+  // deliverExport, so it rides the native save dialog in the desktop webview
+  // just like MD and JSON. Both honour the checkbox selection via
+  // filterEventsBySelection, and only carry user/assistant turns — tool calls
+  // stay in MD/JSON where they belong.
+  const EXPORT_CAPTURE_WIDTH = 960
+
+  function getExportLocale(): string {
+    return document.documentElement.lang || navigator.language || 'en'
+  }
+
+  function triggerBlobDownload(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function exportConversationStyles(): string {
+    return `
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; padding: 32px 20px 40px;
+        background: #f8fafc; color: #111827;
+        font: 14px/1.6 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .export-shell { width: min(960px, 100%); margin: 0 auto; }
+      .export-header {
+        margin-bottom: 20px; padding: 20px 24px;
+        border: 1px solid #e5e7eb; border-radius: 18px;
+        background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      }
+      .export-title { margin: 0; font-size: 24px; line-height: 1.25; }
+      .export-meta { margin-top: 8px; color: #64748b; font-size: 13px; }
+      .conversation { display: flex; flex-direction: column; gap: 14px; }
+      .msg {
+        display: flex; flex-direction: column; gap: 8px;
+        padding: 16px 18px; border: 1px solid #e5e7eb; border-radius: 18px;
+        background: #f9fafb; box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      }
+      .msg.user { background: #eff6ff; }
+      .msg.assistant { background: #f8fafc; }
+      .msg-head {
+        display: flex; align-items: center; gap: 12px;
+        color: #64748b; font-size: 12px;
+        text-transform: uppercase; letter-spacing: 0.08em;
+      }
+      .msg-label { font-weight: 700; }
+      .msg-body { min-width: 0; overflow-wrap: anywhere; }
+      .msg-body > :first-child, .msg-thinking > :first-child { margin-top: 0; }
+      .msg-body > :last-child, .msg-thinking > :last-child { margin-bottom: 0; }
+      .msg-thinking-wrap { border-top: 1px solid #e5e7eb; padding-top: 10px; }
+      .msg-thinking-label {
+        margin-bottom: 8px; color: #64748b; font-size: 12px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.08em;
+      }
+      .msg-thinking {
+        padding: 12px 14px; border: 1px solid #e5e7eb; border-radius: 14px;
+        background: #f1f5f9;
+      }
+      p, ul, ol, pre, blockquote { margin: 0 0 12px; }
+      pre {
+        overflow: auto; padding: 14px; border-radius: 14px;
+        background: #f1f5f9; border: 1px solid #e5e7eb;
+        white-space: pre-wrap; word-break: break-word;
+      }
+      code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+      a { color: #2563eb; text-decoration: none; }
+      blockquote {
+        margin-left: 0; padding-left: 14px;
+        border-left: 3px solid rgba(37,99,235,0.45); color: #475569;
+      }
+    `
+  }
+
+  // Build the inner conversation markup from filtered server events. Only
+  // user/assistant turns are rendered — tool calls are intentionally absent
+  // (MD is the lossless format; PNG/HTML are for sharing a readable snapshot).
+  function buildExportConversation(events: any[]): string {
+    return events
+      .map((ev) => {
+        const type = ev.type ?? ''
+        if (type === 'history_user_message') {
+          return `<article class="msg user"><div class="msg-head"><span class="msg-label">You</span></div><div class="msg-body">${escapeHtml(ev.content ?? '').replace(/\n/g, '<br>')}</div></article>`
+        }
+        if (type === 'assistant_message') {
+          const thinking = ev.thinking
+            ? `<div class="msg-thinking-wrap"><div class="msg-thinking-label">Thoughts</div><div class="msg-thinking">${renderMarkdown(ev.thinking, true)}</div></div>`
+            : ''
+          return `<article class="msg assistant"><div class="msg-head"><span class="msg-label">Octo</span></div><div class="msg-body">${renderMarkdown(ev.content ?? '', true)}</div>${thinking}</article>`
+        }
+        return ''
+      })
+      .filter(Boolean)
+      .join('\n')
+  }
+
+  // Self-contained HTML document shared by the HTML export and the PNG render
+  // root. DOMPurify sanitises the whole document so a session title or message
+  // can't inject script or event handlers.
+  function buildExportHTMLDocument(events: any[], title: string, locale: string): string {
+    const zh = locale.startsWith('zh')
+    const exportTime = new Intl.DateTimeFormat(zh ? 'zh-CN' : 'en-US', {
+      dateStyle: 'medium', timeStyle: 'short',
+    }).format(new Date())
+    const dirty = `<!DOCTYPE html>
+<html lang="${zh ? 'zh' : 'en'}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(title)} - Octo Export</title>
+  <style>${exportConversationStyles()}</style>
+</head>
+<body>
+  <main class="export-shell">
+    <header class="export-header">
+      <h1 class="export-title">${escapeHtml(title)}</h1>
+      <div class="export-meta">${escapeHtml(exportTime)} · Exported from octo</div>
+    </header>
+    <section class="conversation">
+      ${buildExportConversation(events)}
+    </section>
+  </main>
+</body>
+</html>`
+    return DOMPurify.sanitize(dirty, { WHOLE_DOCUMENT: true, ADD_ATTR: ['target', 'rel', 'class'] })
+  }
+
+  // Render the conversation off-screen so html2canvas can capture it without
+  // the live chat chrome. The host is parked far off the left edge and never
+  // visible to the user.
+  function createExportRenderRoot(events: any[], title: string, locale: string): { root: HTMLElement; cleanup: () => void } {
+    const htmlDoc = buildExportHTMLDocument(events, title, locale)
+    const parsed = new DOMParser().parseFromString(htmlDoc, 'text/html')
+    const styleText = parsed.querySelector('style')?.textContent ?? ''
+    const shell = parsed.querySelector('.export-shell')?.cloneNode(true) as HTMLElement | null
+    const host = document.createElement('div')
+    host.style.cssText = 'position:fixed;left:-10000px;top:0;width:960px;padding:0;margin:0;z-index:-1;pointer-events:none'
+    // The style element from the parsed document head is not part of the
+    // cloned shell, so append it separately or html2canvas captures unstyled markup.
+    const styleEl = document.createElement('style')
+    styleEl.textContent = styleText
+    host.appendChild(styleEl)
+    if (shell) host.appendChild(shell)
+    document.body.appendChild(host)
+    return { root: host, cleanup: () => host.remove() }
+  }
+
+  async function exportAsPNG(events: any[], title: string): Promise<boolean> {
+    const filtered = filterEventsBySelection(events)
+    if (!filtered.length) { showToast(tr('chat.nothing_to_export'), 'error'); return false }
+    const { default: html2canvas } = await import('html2canvas')
+    const { root, cleanup } = createExportRenderRoot(filtered, title, getExportLocale())
+    try {
+      const canvas = await html2canvas(root, {
+        scale: 2, useCORS: true, backgroundColor: '#ffffff',
+        windowWidth: EXPORT_CAPTURE_WIDTH,
+      })
+      const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'))
+      if (!blob) throw new Error('png_blob_failed')
+      const filename = `${filenameStem(title)}.png`
+      if (get(nativeShell)) {
+        // Desktop webview has no <a download> delegate — base64-encode the
+        // PNG and route it through the native binary save dialog.
+        const b64 = await new Promise<string>(r => {
+          const fr = new FileReader()
+          fr.onload = () => r((fr.result as string).split(',')[1] ?? '')
+          fr.readAsDataURL(blob)
+        })
+        try {
+          const res = await api.nativeSaveBinary(filename, b64)
+          if (res.cancelled) return false
+        } catch {
+          showToast(tr('chat.export_failed'), 'error')
+          return false
+        }
+      } else {
+        triggerBlobDownload(blob, filename)
+      }
+      return true
+    } finally { cleanup() }
+  }
+
+  async function exportAsHTML(events: any[], title: string): Promise<boolean> {
+    const filtered = filterEventsBySelection(events)
+    if (!filtered.length) { showToast(tr('chat.nothing_to_export'), 'error'); return false }
+    const content = buildExportHTMLDocument(filtered, title, getExportLocale())
+    return deliverExport(content, `${filenameStem(title)}.html`, 'text/html')
+  }
+
   async function exportByFormat(format: string) {
     if (exportBusy) return
     exportBusy = true
@@ -1673,7 +1870,8 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       const title = currentSession?.title ?? currentSession?.name ?? 'session'
       // Both MD and JSON fetch the full server transcript. MD filters by
       // selection internally (filterEventsBySelection); JSON is always
-      // lossless and ignores the checkbox selection.
+      // lossless and ignores the checkbox selection. PNG and HTML ride the
+      // same fetch+filter path so they honour the checkboxes too.
       const result = await fetchEvents()
       if (!result) { exportBusy = false; return }
       let ok = true
@@ -1683,6 +1881,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           break
         case 'json':
           ok = await exportAsJSON(result.events, title)
+          break
+        case 'png':
+          ok = await exportAsPNG(result.events, title)
+          break
+        case 'html':
+          ok = await exportAsHTML(result.events, title)
           break
       }
       if (ok) exitExportMode()
@@ -1938,6 +2142,14 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         <button class="export-fmt-btn" title="{$t('chat.export_pdf')} — {$t('chat.export_pdf_hint')}" disabled={exportBusy} onclick={() => exportByFormat('pdf')}>
           <iconify-icon icon="ant-design:file-pdf-outlined" width="16"></iconify-icon>
           <span>PDF</span>
+        </button>
+        <button class="export-fmt-btn" title={$t('chat.export_png')} disabled={exportBusy} onclick={() => exportByFormat('png')}>
+          <iconify-icon icon="ant-design:file-image-outlined" width="16"></iconify-icon>
+          <span>PNG</span>
+        </button>
+        <button class="export-fmt-btn" title={$t('chat.export_html')} disabled={exportBusy} onclick={() => exportByFormat('html')}>
+          <iconify-icon icon="ant-design:html5-outlined" width="16"></iconify-icon>
+          <span>HTML</span>
         </button>
       </div>
       <span class="export-count">{$t('chat.export_selected_count').replace('{n}', String(selectedIds.size))}</span>
