@@ -12,12 +12,12 @@
   },
   "dependencies": {
     "@capacitor/app": "^8.1.1",
-    "@capacitor/core": "^8.4.2",
+    "@capacitor/core": "^8.5.0",
     "jsqr": "^1.4.0"
   },
   "devDependencies": {
     "@capacitor/android": "^8.4.2",
-    "@capacitor/cli": "^8.4.2",
+    "@capacitor/cli": "^8.5.0",
     "@capacitor/ios": "^8.4.2",
     "esbuild": "^0.28.1",
     "typescript": "^6.0.3",
