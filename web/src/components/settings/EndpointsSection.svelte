@@ -274,8 +274,15 @@
   }
 </script>
 
-<svelte:window onclick={() => (menu = null)} />
-
+<!--
+  SettingsModal's .modal stops click propagation to window (so clicking
+  inside the modal doesn't bubble out and close it as a backdrop click),
+  which means a `<svelte:window onclick>` here never fires. Closing the
+  popover menu on outside clicks has to happen on this component's own
+  root instead, since toggle buttons and menu items already stopPropagation
+  or clear `menu` themselves.
+-->
+<div class="ep-section" onclick={() => (menu = null)}>
 {#if loading}
   <div class="ep-loading">{$t('settings.loading')}</div>
 {:else if view === 'form'}
@@ -564,8 +571,10 @@
     </div>
   {/if}
 {/if}
+</div>
 
 <style>
+.ep-section { display: contents; }
 .ep-loading { padding: 40px; text-align: center; color: var(--text-tertiary); font-size: 14px; }
 
 /* ── list head ── */
