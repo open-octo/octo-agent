@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import { en, zh } from './i18n'
 
-// Agent-First UI alignment (PR #1827): the endpoints section in SettingsModal
-// is now read-only display — configuration happens through conversation via
-// the config-setup skill. Only display keys remain.
+// Settings → Endpoints is a direct-edit UI (EndpointsSection.svelte): card
+// list, inline create/edit form, per-model chip actions, plus a secondary
+// "edit with agent" conversational entry. Every key it renders must exist in
+// both locales.
 const ENDPOINT_KEYS = [
   'settings.endpoints.title',
+  'settings.endpoints.list_label',
   'settings.endpoints.configure',
   'settings.endpoints.configure_with_agent',
   'settings.endpoints.empty',
@@ -16,6 +18,19 @@ const ENDPOINT_KEYS = [
   'settings.endpoints.models.vision',
   'settings.endpoints.badge.default',
   'settings.endpoints.badge.lite',
+  'settings.endpoints.add_model',
+  'settings.endpoints.add_model.placeholder',
+  'settings.endpoints.set_default',
+  'settings.endpoints.set_lite',
+  'settings.endpoints.unset_lite',
+  'settings.endpoints.pick_model',
+  'settings.endpoints.delete_confirm',
+  'settings.endpoints.delete_model_confirm',
+  'settings.endpoints.form.title.edit',
+  'settings.endpoints.form.id',
+  'settings.endpoints.form.name',
+  'settings.endpoints.form.key_keep',
+  'settings.endpoints.form.initial_model',
 ] as const
 
 describe('settings.endpoints.* i18n coverage', () => {

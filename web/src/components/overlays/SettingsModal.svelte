@@ -1,16 +1,15 @@
 <script lang="ts">
   import Segment from '../ui/Segment.svelte'
   import Switch from '../ui/Switch.svelte'
-  import StatusTag from '../ui/StatusTag.svelte'
+  import EndpointsSection from '../settings/EndpointsSection.svelte'
   import QrCode from '../ui/QrCode.svelte'
   import { get } from 'svelte/store'
-  import { showToast, nativeShell, openAgentSession, settingsModalOpen, onboardPhase } from '../../lib/stores'
-  import { setLocale, t, tr } from '../../lib/i18n'
+  import { showToast, nativeShell, settingsModalOpen, onboardPhase } from '../../lib/stores'
+  import { setLocale, t } from '../../lib/i18n'
   import { getMode, setMode, type ThemeMode } from '../../lib/theme'
   import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
   import { openUrl } from '../../lib/externalLinks'
   import * as api from '../../lib/api'
-  import type { EndpointConfig } from '../../lib/api'
 
   const LICENSE_URL = 'https://github.com/open-octo/octo-agent/blob/main/LICENSE.txt'
 
@@ -50,11 +49,6 @@
   // expanded server-side) — shown as the input's placeholder instead of a
   // bare "auto" that's easy to mistake for an actually-saved value.
   let workspaceDirDefault = $state('')
-
-  // ── Endpoints (display-only, configured through conversation) ───────────────
-  let endpoints  = $state<EndpointConfig[]>([])
-  let defaultCid = $state('')
-  let liteCid    = $state('')
 
   const langOptions = [
     { value: 'en', label: 'English' },
@@ -100,17 +94,6 @@
       workspaceDirDefault = cfg.workspace_dir_default ?? ''
       if (cfg.language) language = cfg.language
       setLocale(cfg.language === 'zh' || cfg.language === 'zh-TW' ? 'zh' : 'en')
-
-      try {
-        const ep = await api.getEndpoints()
-        endpoints = ep.endpoints ?? []
-        defaultCid = ep.default ?? ''
-        liteCid = ep.lite ?? ''
-      } catch {
-        endpoints = []
-        defaultCid = ''
-        liteCid = ''
-      }
     } catch (e: any) {
       showToast(`Failed to load config: ${e.message}`, 'error')
     } finally {
@@ -224,16 +207,6 @@
     }
   }
 
-  function configureEndpoints() {
-    settingsModalOpen.set(false)
-    openAgentSession('/config-setup add endpoint', tr('settings.session_configure_endpoints'))
-  }
-
-  function editEndpoint(id: string) {
-    settingsModalOpen.set(false)
-    openAgentSession(`/config-setup edit endpoint ${id}`, tr('settings.session_edit_endpoint').replace('{id}', id))
-  }
-
   function close() {
     settingsModalOpen.set(false)
   }
@@ -336,71 +309,7 @@
           </div>
 
         {:else if cat === 'endpoints'}
-          <div class="pane-head">
-            <button class="btnp" onclick={configureEndpoints}>
-              <iconify-icon icon="ant-design:message-outlined" width="13"></iconify-icon>
-              {$t('settings.endpoints.configure')}
-            </button>
-          </div>
-          {#if endpoints.length === 0}
-            <div class="models-empty">{$t('settings.endpoints.empty')}</div>
-          {:else}
-            <div class="card2">
-              {#each endpoints as ep (ep.id)}
-                <div class="endpoint-card">
-                  <div class="endpoint-head">
-                    <div class="endpoint-title-line">
-                      <span class="endpoint-id mono">{ep.id}</span>
-                      {#if ep.name}<span class="endpoint-name">{ep.name}</span>{/if}
-                      {#if defaultCid.startsWith(`${ep.id}::`)}
-                        <StatusTag status="success">{$t('settings.endpoints.badge.default')}</StatusTag>
-                      {/if}
-                      {#if liteCid.startsWith(`${ep.id}::`)}
-                        <StatusTag status="info">{$t('settings.endpoints.badge.lite')}</StatusTag>
-                      {/if}
-                    </div>
-                    <div class="endpoint-meta mono">
-                      <span>{ep.provider}</span>
-                      {#if ep.base_url}<span> · {ep.base_url}</span>{/if}
-                      {#if ep.protocol}<span> · {ep.protocol}</span>{/if}
-                    </div>
-                    <div class="endpoint-key">
-                      {#if ep.has_api_key}
-                        <span class="key-set">{$t('settings.endpoints.api_key')}: {$t('settings.endpoints.api_key.set')}</span>
-                      {:else}
-                        <span class="key-missing">{$t('settings.endpoints.api_key')}: {$t('settings.endpoints.api_key.missing')}</span>
-                      {/if}
-                    </div>
-                    <div class="endpoint-actions">
-                      <button class="btns" onclick={() => editEndpoint(ep.id)}>
-                        <iconify-icon icon="ant-design:message-outlined" width="13"></iconify-icon>
-                        {$t('settings.endpoints.configure_with_agent')}
-                      </button>
-                    </div>
-                  </div>
-                  {#if ep.models && ep.models.length > 0}
-                    <div class="endpoint-models">
-                      <div class="endpoint-models-head">{$t('settings.endpoints.models')} ({ep.models.length})</div>
-                      {#each ep.models as m (m.model)}
-                        {@const isDefault = defaultCid === `${ep.id}::${m.model}`}
-                        {@const isLite = liteCid === `${ep.id}::${m.model}`}
-                        <div class="endpoint-model-row">
-                          <span class="mono">{m.model}</span>
-                          {#if m.vision}<span class="vision-tag">{$t('settings.endpoints.models.vision')}</span>{/if}
-                          {#if isDefault}
-                            <StatusTag status="success">{$t('settings.endpoints.badge.default')}</StatusTag>
-                          {/if}
-                          {#if isLite}
-                            <StatusTag status="info">{$t('settings.endpoints.badge.lite')}</StatusTag>
-                          {/if}
-                        </div>
-                      {/each}
-                    </div>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-          {/if}
+          <EndpointsSection />
 
         {:else if cat === 'agent'}
           <div class="setrow">
@@ -577,7 +486,6 @@
 /* ── content pane ──────────────────────────────────────────────────────────── */
 .pane { flex: 1; min-width: 0; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 0; }
 .loading-state { padding: 40px; text-align: center; color: var(--text-tertiary); font-size: 14px; }
-.pane-head { display: flex; justify-content: flex-end; padding-bottom: 14px; }
 
 .setrow {
   display: flex; align-items: center; justify-content: space-between;
@@ -606,13 +514,6 @@ select.sinput { cursor: pointer; }
 .sinput:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px var(--focus-ring); }
 
 /* ── buttons ───────────────────────────────────────────────────────────────── */
-.btnp {
-  height: 32px; padding: 0 14px; border: none; background: var(--blue-6);
-  border-radius: 8px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer;
-  font-family: inherit; display: flex; align-items: center; gap: 8px;
-  box-shadow: 0 1px 2px rgba(0,122,255,0.35);
-}
-.btnp:hover { background: var(--blue-5); }
 .btns {
   height: 30px; padding: 0 12px; border: 1px solid var(--border); background: var(--bg-container);
   border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--text); cursor: pointer;
@@ -621,33 +522,8 @@ select.sinput { cursor: pointer; }
 .btns:hover:not(:disabled) { background: var(--hover-neutral); border-color: var(--text-quaternary); }
 .btns:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* ── endpoints (read-only display) ──────────────────────────────────────────── */
+/* ── about card ────────────────────────────────────────────────────────────── */
 .card2 { background: var(--bg-container); border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; }
-.endpoint-card { padding: 14px 16px; border-bottom: 1px solid var(--border-secondary); }
-.endpoint-card:last-child { border-bottom: none; }
-.endpoint-head { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
-.endpoint-title-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.endpoint-id { font-size: 14px; font-weight: 600; color: var(--text); }
-.endpoint-name { font-size: 13px; color: var(--text-secondary); }
-.endpoint-meta { font-size: 12px; color: var(--text-tertiary); display: flex; flex-wrap: wrap; }
-.endpoint-key { font-size: 12px; }
-.endpoint-key .key-set { color: var(--success-text); }
-.endpoint-key .key-missing { color: var(--error); }
-.endpoint-actions { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
-.endpoint-models { margin-top: 6px; padding-left: 12px; border-left: 2px solid var(--border-secondary); }
-.endpoint-models-head {
-  font-size: 12px; color: var(--text-tertiary);
-  text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px;
-}
-.endpoint-model-row {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 4px 0; font-size: 13px; color: var(--text);
-}
-.vision-tag {
-  font-size: 11px; padding: 1px 6px; border-radius: 4px;
-  background: var(--hover-neutral); color: var(--text-tertiary);
-}
-.models-empty { padding: 28px 16px; text-align: center; font-size: 13px; color: var(--text-tertiary); }
 
 /* ── mobile ─────────────────────────────────────────────────────────────────── */
 .mobile-pair { display: flex; gap: 20px; padding: 6px 2px; align-items: flex-start; flex-wrap: wrap; }
