@@ -59,6 +59,7 @@
   import { t, tr, pickLocalized } from '../lib/i18n'
   import { insertPendingSend } from '../lib/pendingSendOrder'
   import { exportModeStore, selectedMessagesStore } from '../lib/exportStore'
+  import { filenameStem } from '../lib/filename'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
   import SubAgentsCard from '../components/chat/SubAgentsCard.svelte'
   import WorkflowsCard from '../components/chat/WorkflowsCard.svelte'
@@ -1626,7 +1627,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       }
     }
 
-    const title_safe = title.replace(/[^\w.-]+/g, '_')
+    const title_safe = filenameStem(title)
     const content = lines.join('\n')
     if (!(await deliverExport(content, `${title_safe}.md`, 'text/markdown'))) return false
 
@@ -1637,7 +1638,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   }
 
   async function exportAsJSON(events: any[], title: string): Promise<boolean> {
-    const title_safe = title.replace(/[^\w.-]+/g, '_')
+    const title_safe = filenameStem(title)
     const json = JSON.stringify(events, null, 2)
     return deliverExport(json, `${title_safe}.json`, 'application/json')
   }
