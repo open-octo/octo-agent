@@ -180,7 +180,7 @@
 .modal {
   width: 100%; max-width: 520px;
   display: flex; flex-direction: column;
-  max-height: 70vh;
+  max-height: calc(70vh / var(--font-zoom));
   background: var(--bg-container);
   border: 1px solid var(--border);
   border-radius: 12px;

@@ -243,6 +243,14 @@
           s.id === sid ? { ...s, pending_confirmation: ev.kind === 'confirm_pending' } : s
         ))
       }
+      // Running-state pair — keeps the sidebar's activity spinner live for
+      // sessions this tab isn't subscribed to (session_update carries status
+      // only to subscribers).
+      if (ev.kind === 'turn_started' || ev.kind === 'turn_ended') {
+        sessions.update(list => list.map(s =>
+          s.id === sid ? { ...s, status: ev.kind === 'turn_started' ? 'running' : 'idle' } : s
+        ))
+      }
       if (ev.kind === 'question_pending' || ev.kind === 'confirm_pending' || ev.kind === 'turn_complete') {
         notifyForSessionActivity(sid, ev.kind)
       }
@@ -410,8 +418,11 @@
 <Toast />
 
 <style>
+/* height 100% (via the html/body/#app chain), NOT 100vh: viewport units are
+   not compensated for the root zoom the font-size setting applies, so 100vh
+   under zoom 1.1 paints 110% of the viewport and clips the composer. */
 .app {
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--bg-layout);
@@ -430,7 +441,7 @@
   min-height: 0;
 }
 .splash {
-  height: 100vh; display: flex; align-items: center; justify-content: center;
+  height: 100%; display: flex; align-items: center; justify-content: center;
   background: var(--bg-layout);
 }
 .splash-msg {

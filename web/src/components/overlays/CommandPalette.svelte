@@ -15,7 +15,7 @@
   function sessionIcon(s: any): string {
     if (s.source === 'cron') return 'ant-design:clock-circle-outlined'
     if (s.source === 'channel') return 'ant-design:send-outlined'
-    if (s.status === 'working') return 'ant-design:loading-outlined'
+    if (s.status === 'running') return 'ant-design:loading-outlined'
     return 'ant-design:message-outlined'
   }
 
@@ -201,7 +201,7 @@
 .backdrop {
   position: fixed; inset: 0; z-index: 1000;
   background: var(--scrim);
-  display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh;
+  display: flex; align-items: flex-start; justify-content: center; padding-top: calc(12vh / var(--font-zoom));
 }
 .palette {
   width: 92%; max-width: 520px; background: var(--bg-container);

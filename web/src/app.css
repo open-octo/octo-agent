@@ -15,6 +15,11 @@
    Any var a pack omits falls back to the default pack, so packs can be partial.
    ────────────────────────────────────────────────────────────────────────── */
 :root {
+  /* Written by the font-size setting alongside the root CSS zoom. Viewport
+     units are NOT compensated for zoom, so viewport-sized lengths must use
+     calc(Nvh / var(--font-zoom)) to land back on the real viewport. */
+  --font-zoom: 1;
+
   /* Primary */
   --blue-1: #E5F2FF;
   --blue-2: #B3D7FF;

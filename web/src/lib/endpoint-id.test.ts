@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { generateEndpointID } from './api'
+import { generateEndpointID, freshEndpointID } from './api'
 import type { EndpointConfig } from './api'
 
 // generateEndpointID produces the human-readable endpoint id the wizard
@@ -53,5 +53,34 @@ describe('generateEndpointID', () => {
 
   it('different base_url same provider does not trigger overwrite', () => {
     expect(generateEndpointID('anthropic', 'https://relay.example.com', [ep('anthropic', 'anthropic', '')])).toBe('anthropic-1')
+  })
+})
+
+// freshEndpointID backs the Settings "Add endpoint" form: it must NEVER
+// return an existing endpoint's id (the create API rejects id conflicts), so
+// the wizard's overwrite-reuse branch does not apply here.
+describe('freshEndpointID', () => {
+  const ep = (id: string, provider: string, base_url?: string): EndpointConfig => ({
+    id, provider, base_url, has_api_key: false, models: [],
+  })
+
+  it('named vendor with no existing endpoints', () => {
+    expect(freshEndpointID('anthropic', [])).toBe('anthropic')
+  })
+
+  it('empty/custom provider falls back to custom', () => {
+    expect(freshEndpointID('', [])).toBe('custom')
+    expect(freshEndpointID('custom', [])).toBe('custom')
+  })
+
+  it('never reuses an existing id even for the same provider', () => {
+    expect(freshEndpointID('anthropic', [ep('anthropic', 'anthropic', '')])).toBe('anthropic-1')
+  })
+
+  it('skips over taken suffixes', () => {
+    expect(freshEndpointID('anthropic', [
+      ep('anthropic', 'anthropic', ''),
+      ep('anthropic-1', 'anthropic', 'https://relay1.example.com'),
+    ])).toBe('anthropic-2')
   })
 })

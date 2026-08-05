@@ -181,7 +181,7 @@
   function sessionIcon(s: any): string {
     if (s.source === 'cron') return 'ant-design:clock-circle-outlined'
     if (s.source === 'channel') return 'ant-design:send-outlined'
-    if (s.status === 'working') return 'ant-design:code-outlined'
+    if (s.status === 'running') return 'ant-design:code-outlined'
     return 'ant-design:message-outlined'
   }
 
@@ -518,7 +518,7 @@
           </span>
           {/if}
 
-          {#if (s as any).status === 'working'}
+          {#if (s as any).status === 'running'}
             <iconify-icon icon="ant-design:loading-outlined" width="14" style="color:var(--blue-6);flex:0 0 auto;animation:octo-spin 0.8s linear infinite"></iconify-icon>
           {:else}
             <iconify-icon icon={icon} width="14" style="color:{solid ? 'var(--blue-6)' : 'var(--text-tertiary)'};flex:0 0 auto"></iconify-icon>

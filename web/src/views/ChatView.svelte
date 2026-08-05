@@ -2585,7 +2585,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
    scrollable conversation underneath rather than hiding it. Cap the height so a
    long plan scrolls inside the bar instead of swallowing the message area. */
 .session-tasks .plan-steps {
-  max-height: min(320px, 40vh);
+  max-height: min(320px, calc(40vh / var(--font-zoom)));
   overflow-y: auto;
 }
 
@@ -2999,7 +2999,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 }
 .modal {
   background: var(--bg-container); border: 1px solid var(--border-secondary);
-  border-radius: 12px; width: 520px; max-width: 90vw; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  border-radius: 12px; width: 520px; max-width: calc(90vw / var(--font-zoom)); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
 }
 .modal-header {
   display: flex; align-items: center; justify-content: space-between;

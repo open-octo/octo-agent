@@ -1249,6 +1249,20 @@ export function generateEndpointID(provider: string, baseURL: string, existing: 
   }
 }
 
+// freshEndpointID picks an unused id for a NEW endpoint. Unlike
+// generateEndpointID it never reuses an existing endpoint's id — the wizard's
+// overwrite semantics don't apply to an explicit "Add endpoint" form, where a
+// reused id would just make the create request fail with an id conflict.
+export function freshEndpointID(provider: string, existing: EndpointConfig[]): string {
+  const base = (provider && provider !== 'custom') ? provider : 'custom'
+  const taken = (id: string) => existing.some(e => e.id === id)
+  if (!taken(base)) return base
+  for (let n = 1; ; n++) {
+    const id = `${base}-${n}`
+    if (!taken(id)) return id
+  }
+}
+
 // The four flat-Models mutations below are STUBS. PR5 deleted their backend
 // routes (/api/config/models*), so calling them throws. They're kept only so
 // the (PR5-hidden, {#if false}) flat AI Models section in SettingsModal still
