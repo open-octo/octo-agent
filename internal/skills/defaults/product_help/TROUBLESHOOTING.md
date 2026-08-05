@@ -84,6 +84,12 @@ Also remember that a session is **bound to a model at creation time**. Changing 
 - `octo serve --status` tells you whether the process holding the port is octo's own daemon
 - Use a different port (`-addr :<port>`) or stop the existing instance (`octo serve --stop`) first
 
+### Agent says "refusing to kill the octo server process"
+
+- Expected behavior, not an error: the agent runs inside `octo serve`, so shell commands that would kill the server (`kill <pid>`, `pkill octo`, including variable-expanded forms like `kill $P`) are refused — otherwise the agent would drop your session mid-turn
+- To restart properly: let the agent call the `restart_server` tool (it asks for confirmation), hit `POST /api/restart`, or run `octo serve --stop` and start it again yourself
+- Desktop app: the server runs in-process with no supervisor, so `restart_server` doesn't exist there — restart the app instead
+
 ## MCP
 
 ### "No MCP servers connected"

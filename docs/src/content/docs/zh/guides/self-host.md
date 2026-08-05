@@ -61,6 +61,12 @@ octo serve -addr :8088 --access-key <key>
 轮次跑完（或者等满 30 秒超时，以先到者为准）才真正退出进程；在这段排空窗口期新发起的轮次会被拒绝，
 提示你过一会儿再试一次——所有传输方式（包括 IM）都是这个提示。
 
+模型没法绕开这套机制走粗暴路线：agent 本身就跑在 server 进程里，所以会杀掉 `octo serve` 或其
+supervisor 的 shell 命令（`kill <pid>`、`pkill octo`，包括 `kill $P` 这类要等 shell 展开后才现形的
+间接写法）都会被拒绝，并提示模型改用 `restart_server`。这层防护针对的是模型条件反射式的
+"杀进程重启"，避免你的会话被它自己掐断；它不是沙箱——真正的隔离见
+[沙箱化运行](/docs/zh/guides/sandbox-the-agent/)。
+
 > `restart_server` 依赖 supervisor 重启契约。桌面版以内嵌进程方式运行 server，没有 supervisor，
 > 所以不提供这个工具——channel 配置走热加载生效（`POST /api/channels/<platform>/reload`），
 > 其他改动则需重启应用。

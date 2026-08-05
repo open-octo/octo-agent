@@ -74,6 +74,13 @@ can never end up on an allow-list by accident. Either path waits for in-flight t
 during that drain window are refused with a message asking you to try again in a moment, on every
 transport including IM.
 
+The agent can't take the crude route instead: it runs inside the very server process, so shell
+commands that would kill `octo serve` or its supervisor (`kill <pid>`, `pkill octo` — including
+indirect forms that only become visible after shell expansion, like `kill $P`) are refused with a
+message pointing the model at `restart_server`. This guards against the model reflexively killing
+its own host and dropping your session; it is not a sandbox — for real confinement see
+[Sandbox the agent](/docs/guides/sandbox-the-agent/).
+
 > The `restart_server` tool relies on a supervisor respawn contract. The desktop build runs the
 > server in-process with no supervisor, so the tool is omitted there — channel config is instead
 > applied via hot-reload (`POST /api/channels/<platform>/reload`), and other changes take effect when

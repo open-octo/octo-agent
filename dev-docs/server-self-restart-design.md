@@ -93,6 +93,44 @@ confirmation prompt; on IM channels the in-chat reply prompt (see
 sub-agents see the tool (the restarter registration is process-global) but
 inherit the parent's gate, so they face the same confirmation.
 
+## Self-kill guard
+
+The agent runs inside the very process its shell commands can kill. Left
+alone, a "restart the service" instruction routinely turns into `pkill octo`
+or `kill <pid>` — taking down worker, supervisor, and the user's web/IM
+session mid-turn. The terminal tool therefore refuses commands that would
+terminate the server or its supervisor, steering the model to
+`restart_server`. Two layers, both armed only in server mode
+(`tools.SetServerGuard`):
+
+1. **Textual** (`guardServerSelfKill` in `internal/tools/server_guard.go`) —
+   scans the command string before execution: `pkill`/`killall … octo`,
+   `kill` of a protected pid (positive, or the `kill -- -PGID` process-group
+   form — a daemonized server leads its own group), and
+   pgrep/pidof-resolve-then-kill shapes. This is the only layer on the
+   `--sandbox` branch, where no shell wrapper is injected.
+2. **Runtime shadows** (`posixKillGuardWrapper` / `windowsKillGuardWrapper`,
+   injected by `shellCommand` alongside the safe-rm wrapper) — shell
+   functions shadowing `kill`/`pkill`/`killall` (POSIX) and
+   `Stop-Process`/`taskkill` (PowerShell, plus a `taskkill.exe` alias) that
+   check targets **after** the shell has expanded variables and command
+   substitutions, catching what the textual pass cannot see (`kill $P`,
+   `pkill -f serve`, `kill $(cat pidfile)`). pkill/killall patterns are
+   matched against `ps` output for just the protected pids — deliberately
+   not via pgrep, whose macOS build cannot see its own ancestors while
+   procps on Linux can.
+
+The shadows read `OCTO_SERVER_PID` / `OCTO_SERVER_PPID` / `OCTO_GUARD_MSG`,
+exported by `guardEnv` only while the guard is on; inherited copies are
+scrubbed first (`scrubGuardEnv`), so a nested octo never arms its shadows
+with a stale parent pid set and plain CLI/TUI runs are behavior-identical.
+Anything ambiguous fails open: rich pkill matching flags, `ps` lookup
+failures, PowerShell pipeline input and abbreviated parameters. Function
+shadows also only intercept shell-function dispatch — `/bin/kill`,
+`command kill`, `env`/`xargs`, nested shells, and script files written then
+executed all bypass them. Accepted residual holes: this guards reflexive
+model behavior, not an adversary; real confinement is `--sandbox`.
+
 ## Drain sequence
 
 A restart request flips the server into draining state (`drainGate` in
@@ -154,6 +192,7 @@ catch-all for everything else.
 | Drain state | `internal/server/drain.go` | `drainGate`: in-flight count, intake refusal, drain wait + timeout |
 | Restart endpoint | `internal/server/restart.go` | `POST /api/restart`, 202 then background drain |
 | Restart tool | `internal/tools/restart.go` + server wiring | `restart_server`, `SetRestarter`-injected, permission-gated |
+| Self-kill guard | `internal/tools/server_guard.go` + `sandbox.go` wrapper injection | textual scan + runtime kill shadows, `SetServerGuard`-armed |
 
 ## Testing
 
@@ -166,6 +205,10 @@ catch-all for everything else.
   draining 503 on turn endpoints, scheduled-run refusal, polite IM reply via a
   fake adapter, restart-vs-plain-shutdown sentinel on a real ephemeral-port
   listener, single-flight `Shutdown` under `-race`.
+- Self-kill guard: textual cases as pure unit tests, plus real wrapped-shell
+  execution of the runtime shadows on POSIX and Windows. Blocked cases use
+  signal-0 probes (POSIX) or a decoy process and `-WhatIf` (Windows), so a
+  shadow regression fails an assertion instead of killing the test run.
 - CI matrix (Linux/macOS/Windows) exercises the spawn/wait path on all three;
   the Windows rename dance belongs to the (future) upgrade flow, not this
   machinery.
