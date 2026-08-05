@@ -114,9 +114,12 @@
   display: flex; align-items: center; justify-content: center;
   padding: 12px;
 }
+/* Percentages of the fixed inset:0 backdrop, NOT vw/vh: viewport units are
+   not compensated for the root zoom the font-size setting applies, so 94vh
+   under zoom 1.1 would overflow the screen. */
 .modal {
-  width: min(1400px, 96vw);
-  height: 94vh;
+  width: min(1400px, 96%);
+  height: 94%;
   min-width: 320px;
   background: var(--bg-container);
   border: 1px solid var(--border-secondary);
@@ -128,9 +131,9 @@
 }
 /* Small desktop window / narrow viewport: fill the screen, drop the chrome */
 @media (max-width: 900px), (max-height: 600px) {
-  .backdrop { padding: 8px; }
+  .backdrop { padding: 0; }
   .modal {
-    width: 100vw; height: 100vh; max-width: none; max-height: none;
+    width: 100%; height: 100%; max-width: none; max-height: none;
     border-radius: 0; border: none;
   }
 }

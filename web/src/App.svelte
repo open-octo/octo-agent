@@ -410,8 +410,11 @@
 <Toast />
 
 <style>
+/* height 100% (via the html/body/#app chain), NOT 100vh: viewport units are
+   not compensated for the root zoom the font-size setting applies, so 100vh
+   under zoom 1.1 paints 110% of the viewport and clips the composer. */
 .app {
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--bg-layout);
@@ -430,7 +433,7 @@
   min-height: 0;
 }
 .splash {
-  height: 100vh; display: flex; align-items: center; justify-content: center;
+  height: 100%; display: flex; align-items: center; justify-content: center;
   background: var(--bg-layout);
 }
 .splash-msg {
