@@ -208,11 +208,6 @@ Thanks to everyone who has contributed to octo:
 
 The full record lives in the [contributors graph](https://github.com/open-octo/octo-agent/graphs/contributors).
 
-## Community acknowledgement
-
-Thanks to the [LINUX DO community](https://linux.do) for supporting open-source
-exchange and this project's growth.
-
 ## License
 
 MIT. See [`LICENSE.txt`](LICENSE.txt).
