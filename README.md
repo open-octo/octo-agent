@@ -183,6 +183,10 @@ octo 站在两个项目的肩膀上，这点不遮掩：**[Claude Code](https://
   <img src="https://contrib.rocks/image?repo=open-octo/octo-agent" alt="Contributors" />
 </a>
 
+## 社区鸣谢
+
+感谢 [LINUX DO 社区](https://linux.do) 对开源交流与项目成长的支持。
+
 ## 许可
 
 MIT。见 [`LICENSE.txt`](LICENSE.txt)。

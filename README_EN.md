@@ -198,6 +198,11 @@ Thanks to everyone who has contributed to octo:
   <img src="https://contrib.rocks/image?repo=open-octo/octo-agent" alt="Contributors" />
 </a>
 
+## Community acknowledgement
+
+Thanks to the [LINUX DO community](https://linux.do) for supporting open-source
+exchange and this project's growth.
+
 ## License
 
 MIT. See [`LICENSE.txt`](LICENSE.txt).
