@@ -9,19 +9,6 @@ import (
 	"testing"
 )
 
-// runGuardedCommand builds and runs a terminal command through shellCommand
-// with the self-kill guard armed, returning the combined output and the
-// process error (non-nil on refusal as well as on ordinary command failure).
-func runGuardedCommand(t *testing.T, command string) (string, error) {
-	t.Helper()
-	cmd, err := shellCommand(context.Background(), command)
-	if err != nil {
-		t.Fatalf("shellCommand(%q) failed to build: %v", command, err)
-	}
-	out, runErr := cmd.CombinedOutput()
-	return string(out), runErr
-}
-
 func TestGuardEnv_ArmedOnlyWhenGuardOn(t *testing.T) {
 	SetServerGuard(false)
 	if got := guardEnv(); len(got) != 0 {
@@ -51,18 +38,24 @@ func TestGuardEnv_ArmedOnlyWhenGuardOn(t *testing.T) {
 // expands a variable or after pkill resolves a name/pattern at runtime. The
 // commands are chosen to slip past guardServerSelfKill so the refusal
 // provably comes from the runtime shadow.
+//
+// Every case uses signal 0 (existence probe): the shadow's decision path is
+// signal-independent, but if the shadow ever regresses the real command sends
+// no signal — the assertion fails cleanly instead of the test run killing
+// itself mid-flight.
 func TestKillGuardShadow_BlocksExpandedSelfKill(t *testing.T) {
 	SetServerGuard(true)
 	defer SetServerGuard(false)
 
 	self := strconv.Itoa(serverSelfPID)
 	blocked := []string{
-		"P=$(echo " + self + "); kill $P",         // variable indirection
-		"P=$(echo " + self + "); kill -s TERM $P", // signal spec consuming an arg
-		"P=$(echo " + self + "); kill -n 9 $P",    // -n form
-		"pkill -f tools.test",                     // -f pattern without the word "octo"
-		"pkill -x tools.test",                     // exact name
-		"killall tools.test",                      // killall by name
+		"P=$(echo " + self + "); kill -0 $P",     // variable indirection
+		"P=$(echo " + self + "); kill -s 0 $P",   // signal spec consuming an arg
+		"P=$(echo " + self + "); kill -n 0 $P",   // -n form
+		"P=$(echo " + self + "); kill -0 -- -$P", // negative pid: whole process group
+		"pkill -0 -f tools.test",                 // -f pattern without the word "octo"
+		"pkill -0 -x tools.test",                 // exact name
+		"killall -0 tools.test",                  // killall by name
 	}
 	for _, c := range blocked {
 		// Prove the command actually reaches the runtime shadow: the textual
@@ -111,9 +104,15 @@ func TestKillGuardShadow_AllowsUnrelatedTargets(t *testing.T) {
 
 // TestKillGuardShadow_GuardOffIsInert: with the guard disarmed (plain CLI/TUI
 // usage) the shadows are no-ops — no OCTO_SERVER_PID is exported and nothing
-// is refused.
+// is refused. Guard variables inherited from a parent process (a nested octo
+// run from a guarded server's own terminal command) are scrubbed rather than
+// passed through, so the invariant holds regardless of environment hygiene.
 func TestKillGuardShadow_GuardOffIsInert(t *testing.T) {
 	SetServerGuard(false)
+
+	// Simulate a stale parent value; it must not survive into the command env.
+	t.Setenv("OCTO_SERVER_PID", "4242")
+	t.Setenv("OCTO_GUARD_MSG", "stale parent refusal")
 
 	cmd, err := shellCommand(context.Background(), "echo hi")
 	if err != nil {

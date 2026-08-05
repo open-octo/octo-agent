@@ -47,6 +47,14 @@ var (
 	// a bare boundary) also keeps digits glued to a word — e.g. "octo123" — from
 	// matching, matching the old `\b\d+\b` behavior for that case.
 	reNum = regexp.MustCompile(`(?:^|[^-\w])(\d+)\b`)
+	// reNegNum matches a negative pid argument inside a kill tail: `kill -- -PGID`
+	// signals a whole process group, and a daemonized server is its own group
+	// leader, so its pid doubles as a killable pgid. The digits are compared
+	// against the exact protected pids, so signal specs (`-9`, `-15`) can never
+	// collide — signal numbers stop far below real pid ranges. The leading
+	// whitespace requirement keeps digits inside hyphenated words (a script
+	// named kill-server-1234) from matching.
+	reNegNum = regexp.MustCompile(`(?:^|\s)-(\d+)\b`)
 )
 
 // guardServerSelfKill returns a non-nil error when command, run inside an octo
@@ -85,6 +93,11 @@ func guardServerSelfKill(command string) error {
 				return errServerSelfKill()
 			}
 		}
+		for _, m := range reNegNum.FindAllStringSubmatch(seg[1], -1) {
+			if protected[m[1]] {
+				return errServerSelfKill()
+			}
+		}
 	}
 	return nil
 }
@@ -109,6 +122,25 @@ func guardEnv() []string {
 	return env
 }
 
+// scrubGuardEnv removes inherited guard variables from env. A terminal command
+// spawned by a guarded server carries them, so a nested octo run from that
+// command would otherwise arm its own wrapper shadows with the parent's
+// (possibly stale, possibly pid-recycled) values. Scrubbing first makes
+// guardEnv the only source of truth: guard off means inert shadows, guard on
+// means this process's own pids.
+func scrubGuardEnv(env []string) []string {
+	out := env[:0]
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "OCTO_SERVER_PID=") ||
+			strings.HasPrefix(kv, "OCTO_SERVER_PPID=") ||
+			strings.HasPrefix(kv, "OCTO_GUARD_MSG=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
 // posixKillGuardWrapper shadows kill/pkill/killall in the injected POSIX shell
 // so the self-kill guard holds at RUNTIME — after the shell has expanded
 // variables and command substitutions (`kill $P`, `kill $(cat pidfile)`,
@@ -123,6 +155,12 @@ func guardEnv() []string {
 // simple invocation shapes ([signal] [-f] [-x] pattern / killall name) are
 // resolved; richer matching flags (-u/-P/-t/-n/-o/-v/...) fail open, as does
 // any lookup failure — the textual guard upstream remains as a backstop.
+//
+// Function shadows only intercept shell-function dispatch: a direct binary
+// path (/bin/kill), `command kill`, dispatch via env/xargs, and nested shells
+// (`sh -c 'kill …'`, commands written to a script file and executed) all
+// bypass them. Accepted residual holes — this guards against reflexive model
+// behavior, not an adversary.
 //
 // Not fmt.Sprintf'd — concatenated raw — so `%` needs no escaping. Requires
 // the guardEnv() variables; with OCTO_SERVER_PID unset every shadow passes
@@ -151,7 +189,7 @@ __octo_kill_guard() {
   local _self="${OCTO_SERVER_PID:-}" _super="${OCTO_SERVER_PPID:-}"
   [ -z "$_self" ] && return 0
   local _msg="${OCTO_GUARD_MSG:-refusing to kill the octo server process that is hosting this session}"
-  local _a _skip=0
+  local _a _t _skip=0
   case "$_op" in
   (kill)
     for _a in "$@"; do
@@ -160,6 +198,20 @@ __octo_kill_guard() {
       else
         case "$_a" in
           (-s|-n|--signal) _skip=1 ;;  # signal spec consumes the next arg
+          (-[0-9]*)
+            # Signal spec (-9) or negative pid (kill -- -PGID: a whole process
+            # group, and a daemonized server leads its own group). Signal
+            # numbers never reach pid range, so an exact digit match can only
+            # be a group kill of a protected process.
+            _t="${_a#-}"
+            case "$_t" in
+              (*[!0-9]*) : ;;
+              (*)
+                if [ "$_t" = "$_self" ]; then printf '%s\n' "$_msg" >&2; return 1; fi
+                if [ -n "$_super" ] && [ "$_t" = "$_super" ]; then printf '%s\n' "$_msg" >&2; return 1; fi
+                ;;
+            esac
+            ;;
           (-*|%*) : ;;                 # other flags and job specs carry no target pid
           (*[!0-9]*) : ;;              # non-numeric: not a pid
           (*)
@@ -217,14 +269,16 @@ killall() { if __octo_kill_guard killall "$@"; then command killall "$@"; else r
 // windowsKillGuardWrapper is the PowerShell counterpart of
 // posixKillGuardWrapper: it shadows Stop-Process (whose aliases kill/spps
 // resolve to the cmdlet name and so hit this function — functions take
-// precedence) and taskkill.exe, resolving their -Id//PID arguments directly
-// and their -Name//IM process names via Get-Process, then refusing when a
-// guarded pid is among the targets. Variable-expanded targets
-// (`Stop-Process -Id $p`) are already concrete by the time the function runs,
-// which is what closes the holes the textual guard cannot see. Best-effort
-// like the Remove-Item wrapper: pipeline input and /FI filter expressions are
-// not resolved and fall through to the real command. Concatenated raw (not
-// fmt.Sprintf'd).
+// precedence) and taskkill (plus a taskkill.exe alias, so the
+// extension-qualified spelling resolves here too — aliases outrank
+// applications), resolving their -Id//PID arguments directly and their
+// -Name//IM process names via Get-Process, then refusing when a guarded pid
+// is among the targets. Variable-expanded targets (`Stop-Process -Id $p`) are
+// already concrete by the time the function runs, which is what closes the
+// holes the textual guard cannot see. Best-effort like the Remove-Item
+// wrapper: pipeline input, /FI filter expressions, and abbreviated or
+// colon-joined parameter forms (`-Nam octo`, `-Id:123`) are not resolved and
+// fall through to the real command. Concatenated raw (not fmt.Sprintf'd).
 const windowsKillGuardWrapper = `$__octoGuardPids = @()
 if ($env:OCTO_SERVER_PID) { $__octoGuardPids += [int]$env:OCTO_SERVER_PID }
 if ($env:OCTO_SERVER_PPID) { $__octoGuardPids += [int]$env:OCTO_SERVER_PPID }
@@ -275,6 +329,7 @@ function taskkill {
   }
   & "$env:SystemRoot\System32\taskkill.exe" @args
 }
+Set-Alias -Name taskkill.exe -Value taskkill
 `
 
 // errServerSelfKill is returned by guardServerSelfKill when the model tries to

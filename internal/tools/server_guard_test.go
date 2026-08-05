@@ -29,6 +29,8 @@ func TestGuardServerSelfKill_Blocks(t *testing.T) {
 		"kill " + self,
 		"kill -9 " + self,
 		"kill -TERM " + super,
+		"kill -- -" + self, // negative pid: the server's own process group
+		"kill -TERM -- -" + super,
 		"kill $(pgrep octo)",
 		"kill $(pidof octo)",
 	}

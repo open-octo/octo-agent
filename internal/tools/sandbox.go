@@ -141,7 +141,7 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 			wrapped := executil.PowerShellUTF8EncodingPrefix + windowsKillGuardWrapper +
 				fmt.Sprintf(windowsSafeRmWrapper, strings.ReplaceAll(exe, "'", "''"), command)
 			cmd = exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-Command", wrapped)
-			cmd.Env = withBundledBinPath(append(append(os.Environ(), "OCTO_TRASH_PROJECT="+projectDir), guardEnv()...))
+			cmd.Env = withBundledBinPath(append(append(scrubGuardEnv(os.Environ()), "OCTO_TRASH_PROJECT="+projectDir), guardEnv()...))
 		} else {
 			cmd = exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-Command", executil.PowerShellUTF8EncodingPrefix+command)
 			cmd.Env = withBundledBinPath(os.Environ())
@@ -151,9 +151,10 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 		// Always wrap: the rm shadow no-ops without OCTO_TRASH_DIR and the
 		// kill shadows no-op without OCTO_SERVER_PID, so plain CLI usage sees
 		// no behavior change — wrapping unconditionally just lets octo serve
-		// arm the runtime self-kill guard via guardEnv().
+		// arm the runtime self-kill guard via guardEnv(). Inherited guard
+		// variables are scrubbed first so only guardEnv() ever arms a shadow.
 		projectDir := WorkingDirOrCWD(ctx)
-		env := os.Environ()
+		env := scrubGuardEnv(os.Environ())
 		if projectDir != "" {
 			env = append(env, "OCTO_TRASH_DIR="+trash.ProjectDir(projectDir))
 		}
