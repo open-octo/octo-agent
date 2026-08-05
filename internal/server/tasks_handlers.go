@@ -291,6 +291,12 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID st
 	runCtx, cancel := context.WithCancel(context.WithValue(context.Background(), ctxKeySessionID{}, sessionID))
 	runCtx = tools.WithSessionID(runCtx, sessionID)
 	s.registerInterrupt(sessionID, cancel)
+	// Global running-state pair: cron fires session_created before this turn
+	// body runs, which makes every tab refresh its session list and seed
+	// status "running" — without the paired turn_ended, an unsubscribed tab's
+	// sidebar spinner would stick forever (session_update below only reaches
+	// subscribers).
+	defer s.broadcastTurnActivityStart(sessionID)()
 	defer func() {
 		cancel()
 		s.interruptMu.Lock()

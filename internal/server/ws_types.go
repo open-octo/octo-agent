@@ -111,7 +111,7 @@ type wsEventSessionList struct {
 type wsSessionInfo struct {
 	ID                  string `json:"id"`
 	Name                string `json:"name"`
-	Status              string `json:"status,omitempty"` // "idle" | "working"
+	Status              string `json:"status,omitempty"` // "idle" | "running"
 	CreatedAt           int64  `json:"created_at"`       // unix ms
 	Source              string `json:"source,omitempty"` // "manual" | "cron" | "channel" | "setup"
 	AgentProfile        string `json:"agent_profile,omitempty"`

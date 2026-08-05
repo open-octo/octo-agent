@@ -757,6 +757,10 @@ func (s *Server) wsCompactSession(sid string) {
 		ctx, cancel := context.WithCancel(context.WithValue(context.Background(), ctxKeySessionID{}, sid))
 		ctx = tools.WithSessionID(ctx, sid)
 		s.registerInterrupt(sid, cancel)
+		// Compaction holds an interrupt registration too, so sessionStatus
+		// reports "running" for its duration — a session list fetched meanwhile
+		// seeds other tabs' spinners, and only this global pair clears them.
+		defer s.broadcastTurnActivityStart(sid)()
 		defer func() {
 			cancel()
 			s.interruptMu.Lock()
@@ -1468,6 +1472,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	// kickIdleSteerTurn, which also flow through here.
 	runCtx = tools.WithWaker(runCtx, s.wakerFor(sess.ID))
 	s.registerInterrupt(sess.ID, cancel)
+	defer s.broadcastTurnActivityStart(sess.ID)()
 	defer func() {
 		cancel()
 		s.interruptMu.Lock()
@@ -1481,23 +1486,6 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		"type":       "session_update",
 		"session_id": sess.ID,
 		"status":     "running",
-	})
-
-	// Cross-session running-state pair for the sidebar's activity spinner:
-	// session_update above only reaches tabs subscribed to this session, so a
-	// tab looking at another session needs a global signal. turn_ended rides a
-	// defer so no exit path (early tool-prep error, interrupt, panic) leaves a
-	// session stuck "running". turn_complete stays separate — it means "clean
-	// completion" and drives the desktop notification.
-	s.wsHub.broadcast("", wsEventSessionActivity{
-		Type:      "session_activity",
-		SessionID: sess.ID,
-		Kind:      "turn_started",
-	})
-	defer s.wsHub.broadcast("", wsEventSessionActivity{
-		Type:      "session_activity",
-		SessionID: sess.ID,
-		Kind:      "turn_ended",
 	})
 
 	a := s.buildAgent(sess)
@@ -2289,6 +2277,32 @@ func (s *Server) registerInterrupt(sessionID string, cancel context.CancelFunc) 
 	s.interruptMu.Lock()
 	s.interrupts[sessionID] = cancel
 	s.interruptMu.Unlock()
+}
+
+// broadcastTurnActivityStart emits the global session_activity turn_started
+// signal and returns the matching turn_ended emitter. session_update{status}
+// only reaches tabs subscribed to the session, so this pair is what keeps the
+// sidebar's running spinner honest on every other tab. Every body that
+// registers an interrupt (doAgentTurn, RunTask, compaction) must call this
+// right after registerInterrupt and defer the returned func BEFORE the
+// interrupt-unregister defer — LIFO runs the unregister first, so a status
+// snapshot taken after turn_ended can never still report "running". The defer
+// also guarantees the pair survives every exit path (early tool-prep error,
+// interrupt, panic): an unpaired turn_started would stick a session spinning
+// in other tabs' sidebars forever.
+func (s *Server) broadcastTurnActivityStart(sessionID string) func() {
+	s.wsHub.broadcast("", wsEventSessionActivity{
+		Type:      "session_activity",
+		SessionID: sessionID,
+		Kind:      "turn_started",
+	})
+	return func() {
+		s.wsHub.broadcast("", wsEventSessionActivity{
+			Type:      "session_activity",
+			SessionID: sessionID,
+			Kind:      "turn_ended",
+		})
+	}
 }
 
 // sessionStatus returns the status string the frontend keys on ("running"
