@@ -243,6 +243,14 @@
           s.id === sid ? { ...s, pending_confirmation: ev.kind === 'confirm_pending' } : s
         ))
       }
+      // Running-state pair — keeps the sidebar's activity spinner live for
+      // sessions this tab isn't subscribed to (session_update carries status
+      // only to subscribers).
+      if (ev.kind === 'turn_started' || ev.kind === 'turn_ended') {
+        sessions.update(list => list.map(s =>
+          s.id === sid ? { ...s, status: ev.kind === 'turn_started' ? 'running' : 'idle' } : s
+        ))
+      }
       if (ev.kind === 'question_pending' || ev.kind === 'confirm_pending' || ev.kind === 'turn_complete') {
         notifyForSessionActivity(sid, ev.kind)
       }

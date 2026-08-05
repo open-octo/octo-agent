@@ -40,7 +40,7 @@ export const feedGroups = derived(
       // session list), so the feed sees it without subscribing to the session.
       if (s.pending_confirmation) todo.push({ session: s, kind: 'approval' })
       else if (s.pending_question) todo.push({ session: s, kind: 'reply' })
-      else if (s.status === 'working') active.push({ session: s, kind: 'running' })
+      else if (s.status === 'running') active.push({ session: s, kind: 'running' })
       else recent.push({ session: s, kind: 'done' })
     }
 

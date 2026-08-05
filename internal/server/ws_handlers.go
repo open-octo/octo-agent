@@ -1483,6 +1483,23 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		"status":     "running",
 	})
 
+	// Cross-session running-state pair for the sidebar's activity spinner:
+	// session_update above only reaches tabs subscribed to this session, so a
+	// tab looking at another session needs a global signal. turn_ended rides a
+	// defer so no exit path (early tool-prep error, interrupt, panic) leaves a
+	// session stuck "running". turn_complete stays separate — it means "clean
+	// completion" and drives the desktop notification.
+	s.wsHub.broadcast("", wsEventSessionActivity{
+		Type:      "session_activity",
+		SessionID: sess.ID,
+		Kind:      "turn_started",
+	})
+	defer s.wsHub.broadcast("", wsEventSessionActivity{
+		Type:      "session_activity",
+		SessionID: sess.ID,
+		Kind:      "turn_ended",
+	})
+
 	a := s.buildAgent(sess)
 	if len(blocks) > 0 {
 		// Image attachments fold into the same user turn as the text when

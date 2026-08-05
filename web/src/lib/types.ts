@@ -15,7 +15,10 @@ export interface Session {
   updated_at: string
   model: string
   model_id: string
-  status: 'idle' | 'working' | string
+  // "running" while a turn is in flight (see server sessionStatus) — seeded by
+  // session_list, kept live via session_update (subscribed tabs) and the
+  // global session_activity turn_started/turn_ended pair (all tabs).
+  status: 'idle' | 'running' | string
   source: string
   agent_profile: string
   pinned: boolean
@@ -388,7 +391,7 @@ export interface WsEventNextMessageSuggestion {
 export interface WsEventSessionActivity {
   type: 'session_activity'
   session_id: string
-  kind: 'question_pending' | 'question_resolved' | 'confirm_pending' | 'confirm_resolved' | 'turn_complete'
+  kind: 'question_pending' | 'question_resolved' | 'confirm_pending' | 'confirm_resolved' | 'turn_started' | 'turn_ended' | 'turn_complete'
 }
 
 // Discriminated union of all WebSocket event types

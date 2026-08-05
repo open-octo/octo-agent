@@ -15,7 +15,7 @@
   function sessionIcon(s: any): string {
     if (s.source === 'cron') return 'ant-design:clock-circle-outlined'
     if (s.source === 'channel') return 'ant-design:send-outlined'
-    if (s.status === 'working') return 'ant-design:loading-outlined'
+    if (s.status === 'running') return 'ant-design:loading-outlined'
     return 'ant-design:message-outlined'
   }
 

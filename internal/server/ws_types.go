@@ -300,7 +300,7 @@ type wsEventDismissConfirmation struct {
 type wsEventSessionActivity struct {
 	Type      string `json:"type"`
 	SessionID string `json:"session_id"`
-	Kind      string `json:"kind"` // "question_pending" | "question_resolved" | "confirm_pending" | "confirm_resolved" | "turn_complete"
+	Kind      string `json:"kind"` // "question_pending" | "question_resolved" | "confirm_pending" | "confirm_resolved" | "turn_started" | "turn_ended" | "turn_complete"
 }
 
 type wsEventBackgroundTaskUpdate struct {
