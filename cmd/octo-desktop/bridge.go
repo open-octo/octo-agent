@@ -235,6 +235,21 @@ func (b *nativeBridge) SaveFile(_ context.Context, defaultName, content string) 
 	return path, false, nil
 }
 
+// Print opens the OS print dialog for the window's current content — how the
+// transcript's PDF export lands a file, since the shell can't be relied on to
+// honour an in-page window.print(). Wails prints natively on macOS and forwards
+// to window.print() on Windows and Linux.
+//
+// Non-blocking: on macOS the print panel runs as a window sheet, so this
+// returns while it is still open and the page must keep its print layout up.
+// No-op before the window exists.
+func (b *nativeBridge) Print() error {
+	if b.window == nil {
+		return nil
+	}
+	return b.window.Print()
+}
+
 // Notify raises an OS-native notification. No-op when the notifications service
 // isn't available (an unbundled dev binary — the service needs a bundle id).
 // Best-effort by contract: a delivery failure (e.g. permission not yet granted)

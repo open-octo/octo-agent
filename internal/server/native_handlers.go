@@ -68,6 +68,18 @@ type NativeBridge interface {
 	// desktop shell writes the file through a native dialog instead.
 	SaveFile(ctx context.Context, defaultName, content string) (path string, cancelled bool, err error)
 
+	// Print opens the OS print dialog for the window's current content. Backs
+	// the transcript's PDF export, which prints the live DOM through a print
+	// stylesheet rather than generating a PDF itself — no PDF library, no
+	// embedded font, and the engine handles pagination and CJK. The frontend
+	// routes through here rather than calling window.print() because Wails
+	// implements print natively on macOS.
+	//
+	// Returns as soon as the dialog is up, not when printing finishes: on macOS
+	// the print panel is a window sheet. Callers must leave the DOM the print
+	// stylesheet depends on in place after this returns.
+	Print() error
+
 	// CanSelfUpdate reports whether the desktop build can replace itself in
 	// place (bundled release build on a swappable platform). Surfaced to the
 	// frontend as /api/version's self_update flag so the update badge knows
@@ -402,4 +414,26 @@ func (s *Server) handleNativeSaveFile(w http.ResponseWriter, r *http.Request) {
 		"path":      path,
 		"cancelled": cancelled,
 	})
+}
+
+// POST /api/native/print — open the OS print dialog for the desktop window.
+// Backs the transcript's PDF export: the print stylesheet lays the conversation
+// out and the webview's own engine paginates it. Returns once the dialog is up,
+// not once printing finishes, so the frontend must keep the transcript on screen
+// afterwards. Loopback-gated like the other native routes; registered only with
+// a bridge.
+func (s *Server) handleNativePrint(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRemote(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "native dialogs are available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+	if err := s.cfg.Native.Print(); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

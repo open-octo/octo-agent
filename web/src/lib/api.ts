@@ -247,6 +247,14 @@ export async function nativeSaveFile(name: string, content: string): Promise<{ p
   })
 }
 
+// Desktop shell only: open the OS print dialog for the window. Backs the PDF
+// export, which prints the live transcript through the print stylesheet instead
+// of building a PDF client-side. Resolves once the dialog is up — on macOS it is
+// a window sheet — so the caller must keep the transcript rendered afterwards.
+export async function nativePrint(): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('/api/native/print', { method: 'POST' })
+}
+
 // Desktop shell variant for binary payloads. The content is base64-encoded; the
 // server decodes it to bytes before writing, so zips (and any other non-UTF-8
 // blob) survive the JSON round-trip intact.

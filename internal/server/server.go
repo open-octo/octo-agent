@@ -804,6 +804,7 @@ func (s *Server) registerRoutes() {
 		s.api("POST /api/native/open-external", s.handleNativeOpenExternal)
 		s.api("POST /api/native/self-update", s.handleNativeSelfUpdate)
 		s.api("POST /api/native/save-file", s.handleNativeSaveFile)
+		s.api("POST /api/native/print", s.handleNativePrint)
 	}
 	s.api("GET /api/tools", s.handleListTools)
 	s.api("GET /api/skills", s.handleListSkills)

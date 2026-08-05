@@ -33,6 +33,8 @@ type fakeNative struct {
 	canSelfUpdate      bool
 	selfUpdateCalls    int
 	selfUpdateErr      error
+	printCalls         int
+	printErr           error
 }
 
 func (f *fakeNative) PickFolder(_ context.Context, startDir string) (string, bool, error) {
@@ -67,6 +69,10 @@ func (f *fakeNative) SaveFile(_ context.Context, defaultName, content string) (s
 	f.saveCalls++
 	f.gotSaveName, f.gotSaveContent = defaultName, content
 	return f.retPath, f.retCancel, nil
+}
+func (f *fakeNative) Print() error {
+	f.printCalls++
+	return f.printErr
 }
 func (f *fakeNative) CanSelfUpdate() bool { return f.canSelfUpdate }
 func (f *fakeNative) SelfUpdate() error {
@@ -577,6 +583,81 @@ func TestNativeSaveFileRejectsInvalidBase64(t *testing.T) {
 	}
 	if fake.saveCalls != 0 {
 		t.Errorf("SaveFile called %d times; invalid input should short-circuit before the bridge", fake.saveCalls)
+	}
+}
+
+func TestNativePrintDelegatesToBridge(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	fake := &fakeNative{}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/print", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	if fake.printCalls != 1 {
+		t.Errorf("Print calls=%d, want 1", fake.printCalls)
+	}
+}
+
+func TestNativePrintReportsBridgeError(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	fake := &fakeNative{printErr: errors.New("no window")}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/print", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("got %d, want 500 (%s)", w.Code, w.Body.String())
+	}
+}
+
+// The print dialog is an OS-level surface driven from the served page, so a
+// remote browser on the same hub must not be able to raise it on the desktop.
+func TestNativePrintRejectsNonLoopback(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	fake := &fakeNative{}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/print", nil)
+	req.RemoteAddr = "203.0.113.9:5000" // non-loopback
+	req.Host = "127.0.0.1:8080"
+	// Valid key clears requireAuth (which would otherwise 401 a non-loopback
+	// peer), so the request reaches the handler's own same-machine guard.
+	req.Header.Set("Authorization", "Bearer "+srv.AccessKey())
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("got %d, want 403 (%s)", w.Code, w.Body.String())
+	}
+	if fake.printCalls != 0 {
+		t.Errorf("bridge must not be called for a non-loopback peer (calls=%d)", fake.printCalls)
+	}
+}
+
+func TestNativePrintNotRegisteredWithoutBridge(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/print", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("without a bridge the route must not exist: got %d, want 404", w.Code)
 	}
 }
 

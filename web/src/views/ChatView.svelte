@@ -1642,10 +1642,33 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     return deliverExport(json, `${title_safe}.json`, 'application/json')
   }
 
+  // PDF prints the conversation that is already on screen rather than building a
+  // document: the print stylesheet in app.css strips the chrome and un-clips the
+  // scroll box, and the engine paginates. That is what keeps this export free of
+  // a PDF library and an embedded CJK font.
+  //
+  // Unlike MD and JSON this never reports success, because there is nothing to
+  // report: the print dialog outlives the call (on macOS it is a window sheet),
+  // and it reads the live DOM — so export mode has to stay up, selection and all,
+  // until the user dismisses it themselves.
+  async function exportAsPDF(): Promise<void> {
+    if (get(nativeShell)) {
+      await api.nativePrint()
+      return
+    }
+    window.print()
+  }
+
   async function exportByFormat(format: string) {
     if (exportBusy) return
     exportBusy = true
     try {
+      // PDF is the odd one out: it prints the rendered DOM, so it needs no
+      // server transcript and leaves export mode open (see exportAsPDF).
+      if (format === 'pdf') {
+        await exportAsPDF()
+        return
+      }
       const title = currentSession?.title ?? currentSession?.name ?? 'session'
       // Both MD and JSON fetch the full server transcript. MD filters by
       // selection internally (filterEventsBySelection); JSON is always
@@ -1860,7 +1883,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   }
 </script>
 
-<div class="chat-view">
+<div class="chat-view" class:print-omit-tools={!exportIncludeTools}>
   <!-- Chat header -->
   <div class="chat-header">
     <div class="title-row">
@@ -1910,6 +1933,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         <button class="export-fmt-btn" title="{$t('chat.export_json')} — {$t('chat.export_json_full')}" disabled={exportBusy} onclick={() => exportByFormat('json')}>
           <iconify-icon icon="ant-design:file-text-outlined" width="16"></iconify-icon>
           <span>JSON</span>
+        </button>
+        <button class="export-fmt-btn" title="{$t('chat.export_pdf')} — {$t('chat.export_pdf_hint')}" disabled={exportBusy} onclick={() => exportByFormat('pdf')}>
+          <iconify-icon icon="ant-design:file-pdf-outlined" width="16"></iconify-icon>
+          <span>PDF</span>
         </button>
       </div>
       <span class="export-count">{$t('chat.export_selected_count').replace('{n}', String(selectedIds.size))}</span>
@@ -2021,7 +2048,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           {#each msgs as msg, i (msg.id)}
             {#if msg.type === 'user'}
               <!-- Right-aligned user bubble -->
-              <div class="msg-row" class:export-mode={inExportMode}>
+              <div class="msg-row" class:export-mode={inExportMode} class:export-unselected={inExportMode && !selectedIds.has(msg.id)}>
                 {#if inExportMode}
                   <label class="msg-checkbox">
                     <input type="checkbox" checked={selectedIds.has(msg.id)} onchange={() => toggleSelect(msg.id)} />
@@ -2108,7 +2135,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
             {:else if msg.type === 'assistant'}
               <!-- Assistant message with avatar -->
-              <div class="msg-row" class:export-mode={inExportMode}>
+              <div class="msg-row" class:export-mode={inExportMode} class:export-unselected={inExportMode && !selectedIds.has(msg.id)}>
                 {#if inExportMode}
                   <label class="msg-checkbox">
                     <input type="checkbox" checked={selectedIds.has(msg.id)} onchange={() => toggleSelect(msg.id)} />

@@ -202,3 +202,89 @@ textarea::placeholder { color: var(--placeholder); }
 .spin { animation: octo-spin 0.8s linear infinite; }
 .blink { animation: octo-blink 1s step-end infinite; }
 .fadein { animation: octo-fadein 0.25s ease; }
+
+/* ── Print: the transcript as a paginated document ─────────────────────────────
+   Backs the PDF export. The engine does the pagination, font handling and text
+   layout, which is why the export needs no PDF library and no embedded CJK font.
+   Lives here rather than in ChatView so it can reach the app chrome — Svelte
+   scopes a component's styles to that component.
+
+   The app is a fixed-viewport flex layout whose conversation lives inside a
+   scroll box, so printing needs two things: the chrome gone, and every ancestor
+   of the transcript un-clipped, so the content becomes one long document rather
+   than one clipped screenful.
+
+   Every declaration here is !important, and it is load-bearing rather than
+   defensive. Svelte compiles a component rule to `.msg-row.svelte-1mg2b0j`,
+   which ties or beats the plain global selector a print sheet can write, and the
+   component styles are injected after this file — so without !important the
+   screen layout wins the cascade and the print rules are inert. Verified: they
+   silently were. */
+@media print {
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  /* Ancestors of the transcript: drop the viewport-sized flex/scroll geometry. */
+  #app, .app, .content, .main, .chat-view, .conversation, .messages-wrap, .messages {
+    display: block !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    position: static !important;
+    flex: none !important;
+    background: #fff !important;
+  }
+
+  /* Chrome. The transcript is the document; everything framing it goes away. */
+  header, aside, .chat-header, .export-bar, .composer, .toast-host, .scroll-bottom-btn {
+    display: none !important;
+  }
+
+  /* Export-mode affordances are UI, not content — but the selection they carry
+     decides what prints, so the checkboxes go and unselected messages go with
+     them. */
+  .msg-checkbox { display: none !important; }
+  .msg-row.export-unselected { display: none !important; }
+
+  /* Controls that live inside a message. A code block's "Copy" prints as the
+     literal word next to its snippet otherwise. */
+  .copy-btn, .msg-actions { display: none !important; }
+
+  /* Honours the export bar's "include tool calls" toggle, so a printed
+     transcript matches what the Markdown export of the same selection holds. */
+  .chat-view.print-omit-tools .tool-group { display: none !important; }
+
+  /* Let the engine keep a message whole rather than splitting mid-bubble, and
+     avoid orphaning a speaker label at a page foot. */
+  .msg-row {
+    display: block !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .msg-meta { break-after: avoid; page-break-after: avoid; }
+
+  /* Long code and output has no horizontal page to scroll into. */
+  pre, code {
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+    overflow: visible !important;
+  }
+
+  /* Collapsed thinking/tool/plan cards print as their open selves — a folded
+     <details> would otherwise export as a bare summary line. */
+  details > *:not(summary) { display: revert !important; }
+
+  /* Ink. The dark theme's surfaces would print as slabs of toner. */
+  * {
+    background: transparent !important;
+    color: #000 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+  a { color: #000 !important; text-decoration: underline; }
+  .fadein { animation: none !important; }
+}
