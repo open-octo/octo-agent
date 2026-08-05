@@ -132,28 +132,35 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 		ps := resolvePowerShell()
 		projectDir := WorkingDirOrCWD(ctx)
 		// Wrap Remove-Item to copy to trash first (parity with the POSIX rm
-		// wrapper), but only when we can locate the octo binary and a project
-		// dir; otherwise run the command bare (no protection, but never broken).
+		// wrapper) and shadow Stop-Process/taskkill so the self-kill guard
+		// holds after variable expansion, but only when we can locate the
+		// octo binary and a project dir; otherwise run the command bare (no
+		// protection, but never broken). The kill-guard shadows are inert
+		// no-ops unless guardEnv() armed them (octo serve only).
 		if exe, err := os.Executable(); err == nil && projectDir != "" {
-			wrapped := executil.PowerShellUTF8EncodingPrefix + fmt.Sprintf(windowsSafeRmWrapper, strings.ReplaceAll(exe, "'", "''"), command)
+			wrapped := executil.PowerShellUTF8EncodingPrefix + windowsKillGuardWrapper +
+				fmt.Sprintf(windowsSafeRmWrapper, strings.ReplaceAll(exe, "'", "''"), command)
 			cmd = exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-Command", wrapped)
-			cmd.Env = withBundledBinPath(append(os.Environ(), "OCTO_TRASH_PROJECT="+projectDir))
+			cmd.Env = withBundledBinPath(append(append(os.Environ(), "OCTO_TRASH_PROJECT="+projectDir), guardEnv()...))
 		} else {
 			cmd = exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-Command", executil.PowerShellUTF8EncodingPrefix+command)
 			cmd.Env = withBundledBinPath(os.Environ())
 		}
 		executil.SetNoWindow(cmd)
 	} else {
+		// Always wrap: the rm shadow no-ops without OCTO_TRASH_DIR and the
+		// kill shadows no-op without OCTO_SERVER_PID, so plain CLI usage sees
+		// no behavior change — wrapping unconditionally just lets octo serve
+		// arm the runtime self-kill guard via guardEnv().
 		projectDir := WorkingDirOrCWD(ctx)
+		env := os.Environ()
 		if projectDir != "" {
-			trashDir := trash.ProjectDir(projectDir)
-			wrapped := fmt.Sprintf(safeRmWrapper, command)
-			cmd = exec.CommandContext(ctx, "sh", "-c", wrapped)
-			cmd.Env = withBundledBinPath(append(os.Environ(), "OCTO_TRASH_DIR="+trashDir))
-		} else {
-			cmd = exec.CommandContext(ctx, "sh", "-c", command)
-			cmd.Env = withBundledBinPath(os.Environ())
+			env = append(env, "OCTO_TRASH_DIR="+trash.ProjectDir(projectDir))
 		}
+		env = append(env, guardEnv()...)
+		wrapped := posixKillGuardWrapper + fmt.Sprintf(safeRmWrapper, command)
+		cmd = exec.CommandContext(ctx, "sh", "-c", wrapped)
+		cmd.Env = withBundledBinPath(env)
 	}
 	if attr := setProcessGroupOpts(); attr != nil {
 		cmd.SysProcAttr = attr

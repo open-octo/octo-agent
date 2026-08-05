@@ -50,10 +50,13 @@ var (
 )
 
 // guardServerSelfKill returns a non-nil error when command, run inside an octo
-// server process, would terminate that server (or its supervisor). It is a
-// best-effort textual guard over the common vectors — `pkill/killall octo` and
-// `kill <server-pid>` — not a sandbox; it exists to stop the model from
-// reflexively killing the process it is hosted by.
+// server process, would terminate that server (or its supervisor). It is the
+// first of two layers: a best-effort TEXTUAL guard over the common vectors —
+// `pkill/killall octo` and `kill <server-pid>` — that also covers the --sandbox
+// branch where no wrapper is injected. The second layer is the runtime shadow
+// (posixKillGuardWrapper / windowsKillGuardWrapper), which sees target pids
+// after shell expansion and so catches the indirections (`kill $P`,
+// `pkill -f serve`) this textual pass cannot.
 func guardServerSelfKill(command string) error {
 	if !serverGuardOn.Load() {
 		return nil
@@ -85,6 +88,194 @@ func guardServerSelfKill(command string) error {
 	}
 	return nil
 }
+
+// guardEnv returns the environment variables that arm the runtime self-kill
+// guard inside the injected shell wrappers: the protected pid set plus the
+// refusal message the shadow prints. Empty when the guard is off (plain
+// CLI/TUI usage), so the wrapper shadows stay inert no-ops there.
+func guardEnv() []string {
+	if !serverGuardOn.Load() {
+		return nil
+	}
+	env := []string{
+		"OCTO_SERVER_PID=" + strconv.Itoa(serverSelfPID),
+		"OCTO_GUARD_MSG=" + errServerSelfKill().Error(),
+	}
+	// PPID 1 (reparented to init/launchd) is unkillable and not protected,
+	// mirroring the textual guard.
+	if serverSuperPID > 1 {
+		env = append(env, "OCTO_SERVER_PPID="+strconv.Itoa(serverSuperPID))
+	}
+	return env
+}
+
+// posixKillGuardWrapper shadows kill/pkill/killall in the injected POSIX shell
+// so the self-kill guard holds at RUNTIME — after the shell has expanded
+// variables and command substitutions (`kill $P`, `kill $(cat pidfile)`,
+// `pkill -f serve`) that the textual guardServerSelfKill cannot see. This is
+// the same shadow-function mechanism as safeRmWrapper.
+//
+// Resolution does NOT use pgrep: on macOS pgrep/pkill deliberately cannot see
+// their own ancestors (the octo server IS the wrapper's ancestor, so macOS
+// pkill can't hit it anyway), while procps on Linux has no such blind spot —
+// exactly where the guard matters. Instead each pkill/killall invocation is
+// matched locally against `ps` output for just the protected pids. Only the
+// simple invocation shapes ([signal] [-f] [-x] pattern / killall name) are
+// resolved; richer matching flags (-u/-P/-t/-n/-o/-v/...) fail open, as does
+// any lookup failure — the textual guard upstream remains as a backstop.
+//
+// Not fmt.Sprintf'd — concatenated raw — so `%` needs no escaping. Requires
+// the guardEnv() variables; with OCTO_SERVER_PID unset every shadow passes
+// straight through to the real command. Every case pattern carries the
+// optional leading paren: a bare ')' inside a pattern can prematurely close
+// command substitutions on older bash (macOS /bin/sh is bash 3.2).
+const posixKillGuardWrapper = `__octo_guard_match() {
+  # Would the pattern match process $3? Matched against ps output for just
+  # that pid. $1: name|namex|full|fullx  $2: ERE pattern  $3: pid
+  local _mode="$1" _pat="$2" _pid="$3" _args _name _comm
+  _args=$(ps -p "$_pid" -o args= 2>/dev/null)
+  [ -z "$_args" ] && return 1
+  _name="${_args%% *}"; _name="${_name##*/}"
+  _comm=$(ps -p "$_pid" -o comm= 2>/dev/null)
+  case "$_mode" in
+    (name)  printf '%s\n%s\n' "$_name" "$_comm" | grep -E -e "$_pat" >/dev/null 2>&1 ;;
+    (namex) [ "$_name" = "$_pat" ] || [ "$_comm" = "$_pat" ] ;;
+    (full)  printf '%s\n' "$_args" | grep -E -e "$_pat" >/dev/null 2>&1 ;;
+    (fullx) [ "$_args" = "$_pat" ] ;;
+    (*) return 1 ;;
+  esac
+}
+__octo_kill_guard() {
+  # $1: op (kill|pkill|killall); rest: original args, already shell-expanded.
+  local _op="$1"; shift
+  local _self="${OCTO_SERVER_PID:-}" _super="${OCTO_SERVER_PPID:-}"
+  [ -z "$_self" ] && return 0
+  local _msg="${OCTO_GUARD_MSG:-refusing to kill the octo server process that is hosting this session}"
+  local _a _skip=0
+  case "$_op" in
+  (kill)
+    for _a in "$@"; do
+      if [ "$_skip" = 1 ]; then
+        _skip=0
+      else
+        case "$_a" in
+          (-s|-n|--signal) _skip=1 ;;  # signal spec consumes the next arg
+          (-*|%*) : ;;                 # other flags and job specs carry no target pid
+          (*[!0-9]*) : ;;              # non-numeric: not a pid
+          (*)
+            if [ "$_a" = "$_self" ]; then printf '%s\n' "$_msg" >&2; return 1; fi
+            if [ -n "$_super" ] && [ "$_a" = "$_super" ]; then printf '%s\n' "$_msg" >&2; return 1; fi
+            ;;
+        esac
+      fi
+    done
+    ;;
+  (pkill)
+    # Simple shapes only: [signal] [-f] [-x] pattern. Anything richer
+    # (_bad=1) falls through unguarded.
+    local _mode=name _pat= _bad=0
+    for _a in "$@"; do
+      if [ "$_skip" = 1 ]; then
+        _skip=0
+      else
+        case "$_a" in
+          (--signal|--queue) _skip=1 ;;
+          (--signal=*|--queue=*|-e|--echo|-[0-9]*|-SIG*) : ;;
+          (-HUP|-INT|-QUIT|-ILL|-TRAP|-ABRT|-BUS|-FPE|-KILL|-USR1|-SEGV|-USR2|-PIPE|-ALRM|-TERM|-STKFLT|-CHLD|-CONT|-STOP|-TSTP|-TTIN|-TTOU|-URG|-XCPU|-XFSZ|-VTALRM|-PROF|-WINCH|-IO|-PWR|-SYS|-POLL|-IOT|-CLD) : ;;
+          (-f|--full)  case "$_mode" in (name) _mode=full ;; (namex) _mode=fullx ;; esac ;;
+          (-x|--exact) case "$_mode" in (name) _mode=namex ;; (full) _mode=fullx ;; esac ;;
+          (-*) _bad=1 ;;
+          (*) if [ -n "$_pat" ]; then _bad=1; else _pat="$_a"; fi ;;
+        esac
+      fi
+    done
+    if [ "$_bad" = 0 ] && [ -n "$_pat" ]; then
+      if __octo_guard_match "$_mode" "$_pat" "$_self"; then printf '%s\n' "$_msg" >&2; return 1; fi
+      if [ -n "$_super" ] && __octo_guard_match "$_mode" "$_pat" "$_super"; then printf '%s\n' "$_msg" >&2; return 1; fi
+    fi
+    ;;
+  (killall)
+    # killall signals processes by exact name; flags carry no target.
+    for _a in "$@"; do
+      case "$_a" in
+        (-*) : ;;
+        (*)
+          if __octo_guard_match namex "$_a" "$_self"; then printf '%s\n' "$_msg" >&2; return 1; fi
+          if [ -n "$_super" ] && __octo_guard_match namex "$_a" "$_super"; then printf '%s\n' "$_msg" >&2; return 1; fi
+          ;;
+      esac
+    done
+    ;;
+  esac
+  return 0
+}
+kill() { if __octo_kill_guard kill "$@"; then command kill "$@"; else return 1; fi }
+pkill() { if __octo_kill_guard pkill "$@"; then command pkill "$@"; else return 1; fi }
+killall() { if __octo_kill_guard killall "$@"; then command killall "$@"; else return 1; fi }
+`
+
+// windowsKillGuardWrapper is the PowerShell counterpart of
+// posixKillGuardWrapper: it shadows Stop-Process (whose aliases kill/spps
+// resolve to the cmdlet name and so hit this function — functions take
+// precedence) and taskkill.exe, resolving their -Id//PID arguments directly
+// and their -Name//IM process names via Get-Process, then refusing when a
+// guarded pid is among the targets. Variable-expanded targets
+// (`Stop-Process -Id $p`) are already concrete by the time the function runs,
+// which is what closes the holes the textual guard cannot see. Best-effort
+// like the Remove-Item wrapper: pipeline input and /FI filter expressions are
+// not resolved and fall through to the real command. Concatenated raw (not
+// fmt.Sprintf'd).
+const windowsKillGuardWrapper = `$__octoGuardPids = @()
+if ($env:OCTO_SERVER_PID) { $__octoGuardPids += [int]$env:OCTO_SERVER_PID }
+if ($env:OCTO_SERVER_PPID) { $__octoGuardPids += [int]$env:OCTO_SERVER_PPID }
+$__octoGuardMsg = "$env:OCTO_GUARD_MSG"
+if (-not $__octoGuardMsg) { $__octoGuardMsg = 'refusing to kill the octo server process that is hosting this session' }
+function __octo-TestGuardedPid($pids) {
+  foreach ($p in @($pids)) {
+    $v = 0
+    if ([int]::TryParse("$p", [ref]$v) -and ($__octoGuardPids -contains $v)) { return $true }
+  }
+  return $false
+}
+function Stop-Process {
+  if ($__octoGuardPids.Count -gt 0) {
+    $targets = @()
+    $names = @()
+    for ($i = 0; $i -lt $args.Count; $i++) {
+      $a = $args[$i]
+      if ($a -is [string]) {
+        if (($a -ieq '-Id') -or ($a -ieq '-PID')) { if ($i + 1 -lt $args.Count) { $targets += $args[$i + 1]; $i++ } }
+        elseif (($a -ieq '-Name') -or ($a -ieq '-ProcessName')) { if ($i + 1 -lt $args.Count) { $names += $args[$i + 1]; $i++ } }
+        elseif (-not $a.StartsWith('-')) {
+          $v = 0
+          if ([int]::TryParse($a, [ref]$v)) { $targets += $v } else { $names += $a }
+        }
+      } elseif ($a -is [int]) { $targets += $a }
+    }
+    foreach ($n in $names) {
+      Get-Process -Name "$n" -ErrorAction SilentlyContinue | ForEach-Object { $targets += $_.Id }
+    }
+    if (__octo-TestGuardedPid $targets) { throw $__octoGuardMsg }
+  }
+  Microsoft.PowerShell.Management\Stop-Process @args
+}
+function taskkill {
+  if ($__octoGuardPids.Count -gt 0) {
+    $targets = @()
+    $names = @()
+    for ($i = 0; $i -lt $args.Count; $i++) {
+      $a = "$($args[$i])"
+      if ($a -ieq '/PID') { if ($i + 1 -lt $args.Count) { $targets += $args[$i + 1]; $i++ } }
+      elseif ($a -ieq '/IM') { if ($i + 1 -lt $args.Count) { $names += ("$($args[$i + 1])" -replace '\.exe$', ''); $i++ } }
+    }
+    foreach ($n in $names) {
+      Get-Process -Name $n -ErrorAction SilentlyContinue | ForEach-Object { $targets += $_.Id }
+    }
+    if (__octo-TestGuardedPid $targets) { throw $__octoGuardMsg }
+  }
+  & "$env:SystemRoot\System32\taskkill.exe" @args
+}
+`
 
 // errServerSelfKill is returned by guardServerSelfKill when the model tries to
 // kill the octo server process hosting the current session. The message
