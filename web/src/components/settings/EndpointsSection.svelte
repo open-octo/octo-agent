@@ -144,7 +144,7 @@
   // unknown model keeps whatever the user last chose.
   function onNewModelInput(ep: EndpointConfig) {
     const mv = presetFor(ep.provider)?.model_vision
-    if (mv && newModel in mv) newModelVision = mv[newModel]
+    if (mv && Object.hasOwn(mv, newModel)) newModelVision = mv[newModel]
   }
 
   function submitAddModel(ep: EndpointConfig) {
@@ -192,7 +192,7 @@
       fBaseUrl = ''
       fModel = p?.default_model ?? ''
       fVision = p?.model_vision?.[fModel] ?? true
-      if (!fIdTouched) fId = api.generateEndpointID(fProvider, fBaseUrl, endpoints)
+      if (!fIdTouched) fId = api.freshEndpointID(fProvider, endpoints)
     }
   }
 
@@ -217,8 +217,10 @@
           models: model ? [{ model, vision: fVision }] : [],
         })
         // First usable endpoint on a config with no default yet — point the
-        // default at it so the save is immediately effective.
-        if (!defaultCid && model) await api.setEndpointDefault(id)
+        // default at it so the save is immediately effective. Non-fatal: the
+        // endpoint is already created, so a failure here must not strand the
+        // user on the form (retrying would hit an id conflict).
+        if (!defaultCid && model) await api.setEndpointDefault(id).catch(() => {})
       } else {
         const patch: api.EndpointUpdateInput = {}
         if (id !== editing.id) patch.new_id = id
@@ -226,7 +228,10 @@
         if (fProvider !== editing.provider) patch.provider = fProvider
         if (fBaseUrl.trim() && fBaseUrl.trim() !== (editing.base_url ?? '')) patch.base_url = fBaseUrl.trim()
         if (fApiKey) patch.api_key = fApiKey
-        if (isCustom && fProtocol !== editing.protocol) patch.protocol = fProtocol
+        // Normalise the stored protocol the same way openEdit seeds the select
+        // (absent = openai), so an untouched select never produces a patch.
+        const prevProtocol = editing.protocol === 'anthropic' ? 'anthropic' : 'openai'
+        if (isCustom && fProtocol !== prevProtocol) patch.protocol = fProtocol
         if (Object.keys(patch).length > 0) await api.updateEndpoint(editing.id, patch)
       }
       await reload()
@@ -320,7 +325,7 @@
           class="field-input mono"
           type="text"
           bind:value={fModel}
-          oninput={() => { const mv = formPreset?.model_vision; if (mv && fModel in mv) fVision = mv[fModel] }}
+          oninput={() => { const mv = formPreset?.model_vision; if (mv && Object.hasOwn(mv, fModel)) fVision = mv[fModel] }}
           list="ep-form-models"
           disabled={busy}
         />
@@ -441,7 +446,12 @@
                   placeholder={$t('settings.endpoints.add_model.placeholder')}
                   bind:value={newModel}
                   oninput={() => onNewModelInput(ep)}
-                  onkeydown={(e) => { if (e.key === 'Enter') submitAddModel(ep); if (e.key === 'Escape') addingFor = null }}
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter') submitAddModel(ep)
+                    // stopPropagation: SettingsModal closes on Escape; here it
+                    // only means "cancel this row".
+                    if (e.key === 'Escape') { e.stopPropagation(); addingFor = null }
+                  }}
                   list={`ep-models-${ep.id}`}
                   disabled={busy}
                 />
