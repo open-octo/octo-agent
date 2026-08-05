@@ -210,20 +210,29 @@ func (AskUserQuestionTool) Execute(ctx context.Context, _ string, input map[stri
 }
 
 // formatAskResponse turns the asker's structured reply into the text the LLM
-// reads as its tool_result. Three shapes:
+// reads as its tool_result. Four shapes:
 //
-//	cancelled                  → "(user cancelled)"
-//	plain selection(s)         → "User chose: A" or "User chose: A, B"
-//	"Other" with free text     → "User chose: Other — <text>"
+//	cancelled                       → "(user cancelled)"
+//	plain selection(s)              → "User chose: A" or "User chose: A, B"
+//	"Other" with free text          → "User chose: Other — <text>"
+//	selection(s) plus free text     → "User chose: A — <text>"
+//
+// The web UI lets a user pick an option and add free text in the same
+// submission (unlike the TUI/IM askers, which only ever populate one of
+// Choices or Custom), so both fields must be surfaced rather than one
+// silently dropping the other.
 func formatAskResponse(r AskResponse) string {
 	if r.Cancelled {
 		return "(user cancelled)"
 	}
-	if r.Custom != "" && len(r.Choices) == 0 {
-		return "User chose: Other — " + r.Custom
-	}
 	if len(r.Choices) == 0 {
+		if r.Custom != "" {
+			return "User chose: Other — " + r.Custom
+		}
 		return "(user cancelled)" // defensive: no choices and no custom → nothing to report
+	}
+	if r.Custom != "" {
+		return "User chose: " + strings.Join(r.Choices, ", ") + " — " + r.Custom
 	}
 	return "User chose: " + strings.Join(r.Choices, ", ")
 }

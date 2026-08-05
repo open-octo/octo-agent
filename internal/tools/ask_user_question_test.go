@@ -422,6 +422,8 @@ func TestFormatAskResponse(t *testing.T) {
 		{"single", AskResponse{Choices: []string{"OAuth"}}, "User chose: OAuth"},
 		{"multi", AskResponse{Choices: []string{"a", "b"}}, "User chose: a, b"},
 		{"other", AskResponse{Custom: "Kerberos"}, "User chose: Other — Kerberos"},
+		{"choice plus custom", AskResponse{Choices: []string{"OAuth"}, Custom: "because xxx"}, "User chose: OAuth — because xxx"},
+		{"multi plus custom", AskResponse{Choices: []string{"a", "b"}, Custom: "because xxx"}, "User chose: a, b — because xxx"},
 		{"empty (defensive)", AskResponse{}, "(user cancelled)"},
 	}
 	for _, tc := range cases {
