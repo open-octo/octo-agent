@@ -59,6 +59,12 @@
   import { t, tr, pickLocalized } from '../lib/i18n'
   import { insertPendingSend } from '../lib/pendingSendOrder'
   import { exportModeStore, selectedMessagesStore } from '../lib/exportStore'
+  import {
+    exportAsHTML as buildHtmlExport,
+    sanitizeExportTitle,
+    pickSelectedMessages,
+    type ExportableMessage,
+  } from '../lib/sessionExport'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
   import SubAgentsCard from '../components/chat/SubAgentsCard.svelte'
   import WorkflowsCard from '../components/chat/WorkflowsCard.svelte'
@@ -184,6 +190,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   let selectedIds   = $derived($selectedMessagesStore[$activeSessionId ?? ''] ?? new Set<string>())
   let exportBusy    = $state(false)
   let exportIncludeTools = $state(false)
+  const EXPORT_CAPTURE_WIDTH = 960
 
   let pendingSteerList = $state<{ pendingId: string; text: string; files?: any[]; retracting?: boolean; queued?: boolean }[]>([])
 
@@ -1563,6 +1570,15 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     URL.revokeObjectURL(url)
   }
 
+  function triggerBlobDownload(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   // Returns whether the export actually completed, so the caller only exits
   // export mode (and drops the user's checkbox selection) on success — not on
   // "nothing selected" or a cancelled/failed native save.
@@ -1640,8 +1656,17 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         case 'md':
           ok = await exportAsMarkdown(result.events, title)
           break
+        case 'pdf':
+          ok = await exportAsPDF(title)
+          break
+        case 'png':
+          ok = await exportAsPNG(title)
+          break
         case 'json':
           exportAsJSON(result.events, title)
+          break
+        case 'html':
+          ok = await exportAsHTML(title)
           break
       }
       if (ok) exitExportMode()
@@ -1651,6 +1676,81 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     } finally {
       exportBusy = false
     }
+  }
+
+  // ── PDF / PNG / HTML export (image-based, via html2canvas) ──────────────
+
+  function getExportLocale(): string {
+    return document.documentElement.lang || navigator.language || 'en'
+  }
+
+  async function exportAsPDF(title: string): Promise<boolean> {
+    const selected = getSelectedMessagesForExport()
+    if (!selected.length) { showToast(tr('chat.nothing_to_export'), 'error'); return false }
+    const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas'), import('jspdf')])
+    const { root, cleanup } = createExportRenderRoot(selected, title)
+    try {
+      const canvas = await html2canvas(root, { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: EXPORT_CAPTURE_WIDTH })
+      const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' })
+      const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight()
+      const m = 24, rw = pw - m * 2, rh = (canvas.height * rw) / canvas.width
+      if (rh <= ph - m * 2) {
+        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', m, m, rw, rh)
+      } else {
+        const slicePx = Math.floor(((ph - m * 2) * canvas.width) / rw)
+        for (let off = 0, pg = 0; off < canvas.height; off += slicePx, pg++) {
+          const h = Math.min(slicePx, canvas.height - off)
+          const pc = document.createElement('canvas'); pc.width = canvas.width; pc.height = h
+          pc.getContext('2d')!.drawImage(canvas, 0, off, canvas.width, h, 0, 0, canvas.width, h)
+          if (pg > 0) pdf.addPage()
+          pdf.addImage(pc.toDataURL('image/png'), 'PNG', m, m, rw, (h * rw) / canvas.width)
+        }
+      }
+      triggerBlobDownload(pdf.output('blob'), `${sanitizeExportTitle(title)}.pdf`)
+      return true
+    } finally { cleanup() }
+  }
+
+  async function exportAsPNG(title: string): Promise<boolean> {
+    const selected = getSelectedMessagesForExport()
+    if (!selected.length) { showToast(tr('chat.nothing_to_export'), 'error'); return false }
+    const { default: html2canvas } = await import('html2canvas')
+    const { root, cleanup } = createExportRenderRoot(selected, title)
+    try {
+      const canvas = await html2canvas(root, { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: EXPORT_CAPTURE_WIDTH })
+      const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'))
+      if (!blob) throw new Error('png_blob_failed')
+      triggerBlobDownload(blob, `${sanitizeExportTitle(title)}.png`)
+      return true
+    } finally { cleanup() }
+  }
+
+  async function exportAsHTML(title: string): Promise<boolean> {
+    const selected = getSelectedMessagesForExport()
+    if (!selected.length) { showToast(tr('chat.nothing_to_export'), 'error'); return false }
+    const exported = buildHtmlExport(selected, { title, exportedAt: new Date(), locale: getExportLocale() })
+    triggerDownload(exported.content, exported.filename, exported.mime)
+    return true
+  }
+
+  function getSelectedMessagesForExport(): ExportableMessage[] {
+    const sid = get(activeSessionId)
+    if (!sid) return []
+    const all = get(chatMessages)[sid] ?? []
+    const ua = all.filter((m: any) => m.type === 'user' || m.type === 'assistant') as ExportableMessage[]
+    const selected = selectedMessagesStore.getForSession(sid)
+    return pickSelectedMessages(ua, selected)
+  }
+
+  function createExportRenderRoot(messages: any[], title: string): { root: HTMLElement; cleanup: () => void } {
+    const htmlDoc = buildHtmlExport(messages, { title, exportedAt: new Date(), locale: getExportLocale() }).content
+    const parsed = new DOMParser().parseFromString(htmlDoc, 'text/html')
+    const shell = parsed.querySelector('.export-shell')?.cloneNode(true) as HTMLElement | null
+    const host = document.createElement('div')
+    host.style.cssText = 'position:fixed;left:-10000px;top:0;width:960px;padding:0;margin:0;z-index:-1;pointer-events:none'
+    if (shell) host.appendChild(shell)
+    document.body.appendChild(host)
+    return { root: host, cleanup: () => host.remove() }
   }
 
   // ensureActiveSession returns the active session id, creating one first if
@@ -1890,9 +1990,21 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           <iconify-icon icon="ant-design:file-markdown-outlined" width="16"></iconify-icon>
           <span>MD</span>
         </button>
+        <button class="export-fmt-btn" title={$t('chat.export_pdf')} disabled={exportBusy} onclick={() => exportByFormat('pdf')}>
+          <iconify-icon icon="ant-design:file-pdf-outlined" width="16"></iconify-icon>
+          <span>PDF</span>
+        </button>
+        <button class="export-fmt-btn" title={$t('chat.export_png')} disabled={exportBusy} onclick={() => exportByFormat('png')}>
+          <iconify-icon icon="ant-design:file-image-outlined" width="16"></iconify-icon>
+          <span>PNG</span>
+        </button>
         <button class="export-fmt-btn" title="{$t('chat.export_json')} — {$t('chat.export_json_full')}" disabled={exportBusy} onclick={() => exportByFormat('json')}>
           <iconify-icon icon="ant-design:file-text-outlined" width="16"></iconify-icon>
           <span>JSON</span>
+        </button>
+        <button class="export-fmt-btn" title={$t('chat.export_html')} disabled={exportBusy} onclick={() => exportByFormat('html')}>
+          <iconify-icon icon="ant-design:html5-outlined" width="16"></iconify-icon>
+          <span>HTML</span>
         </button>
       </div>
       <span class="export-count">{$t('chat.export_selected_count').replace('{n}', String(selectedIds.size))}</span>
