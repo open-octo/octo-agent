@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/tasks"
@@ -25,18 +26,34 @@ type TaskStore interface {
 // advertisement in DefaultTools. Set by cmd/octo at REPL start with a fresh
 // per-session Store. Nil → task_create / task_update / task_list don't
 // appear in the catalog (single-turn mode and unattended runs).
-var activeTasks TaskStore
+//
+// Guarded by a mutex: SetTaskStore runs at startup, but the store is read
+// from turn goroutines (the TUI's runTurn clear-and-rebuild, taskListView
+// renders) that can outlive the goroutine that set it, and tests swap stores
+// between runs — an unsynchronized pointer is a data race under -race.
+var (
+	activeTasksMu sync.RWMutex
+	activeTasks   TaskStore
+)
 
 // SetTaskStore registers the store the task_* tools delegate to. Pass nil to
 // disable; the three tools then drop out of DefaultTools.
-func SetTaskStore(s TaskStore) { activeTasks = s }
+func SetTaskStore(s TaskStore) {
+	activeTasksMu.Lock()
+	activeTasks = s
+	activeTasksMu.Unlock()
+}
 
 // ActiveTaskStore returns the currently registered store, or nil. Used by
 // cmd/octo's /tasks REPL command (and the post-tool summary line) without
 // going through a LLM-driven tool call.
-func ActiveTaskStore() TaskStore { return activeTasks }
+func ActiveTaskStore() TaskStore {
+	activeTasksMu.RLock()
+	defer activeTasksMu.RUnlock()
+	return activeTasks
+}
 
-func tasksEnabled() bool { return activeTasks != nil }
+func tasksEnabled() bool { return ActiveTaskStore() != nil }
 
 // taskStoreCtxKey carries a per-turn TaskStore so the task_* tools dispatch to
 // it instead of the process-global activeTasks. A request/response transport
@@ -64,7 +81,7 @@ func resolveTaskStore(ctx context.Context) TaskStore {
 	if s := taskStoreFromContext(ctx); s != nil {
 		return s
 	}
-	return activeTasks
+	return ActiveTaskStore()
 }
 
 // ============================================================================

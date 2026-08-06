@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/tasks"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
@@ -61,6 +62,15 @@ type TurnStats struct {
 // sink; the caller owns input reading, slash-command dispatch, the turn's
 // cancellable context, and the save/loop decision based on the returned error.
 func runTurn(ctx context.Context, a *agent.Agent, cfg replConfig, sink ViewSink, line string) (agent.Reply, error) {
+	// Clear-and-rebuild: a fully-completed plan is closed, so drop it before
+	// this turn's tools run — the new turn's tasks then start a fresh plan
+	// instead of piling onto old, done ones (same semantics as the server's
+	// prepareToolTurn). An incomplete plan carries over so the agent keeps
+	// working on it. No-op when tasks are disabled (nil store), empty, or
+	// only-deleted (nothing to close).
+	if tools.AllTasksComplete(tools.ActiveTaskStore()) {
+		tools.SetTaskStore(tasks.New())
+	}
 	// Scope the turn's tools-layer per-session state (the replay-secret cache)
 	// to this CLI session. With no session (a nil cfg.session, e.g. an
 	// ephemeral one-shot) the cache degrades to process-level — correct,
