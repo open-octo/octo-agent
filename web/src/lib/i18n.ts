@@ -1198,7 +1198,7 @@ export const zh: Record<string, string> = {
   "skills.export_zip": "导出为 .zip",
   "skills.use": "在新对话中使用",
   "workflows.title": "工作流",
-  "workflows.desc": "串联技能的可复用已保存工作流 — 运行、编辑或导出",
+  "workflows.desc": "将技能串联为可复用工作流 — 运行、编辑或导出",
   "workflows.create": "新建工作流",
   "workflows.show_system": "显示内置工作流",
   "workflows.col_name": "工作流",
