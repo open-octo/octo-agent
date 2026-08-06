@@ -2,7 +2,7 @@
   import { artifacts, panelContent, artifactSel, artifactView, artifactModalOpen, lightappSel, lightapps, lightappHTML, showToast } from '../lib/stores'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
-  import { hydrateArtifact, lightAppSource } from '../lib/artifacts'
+  import { hydrateArtifact, lightAppSource, pathIsInside } from '../lib/artifacts'
   import * as api from '../lib/api'
 
   // ── Session artifacts (existing) ──────────────────────────────────────────
@@ -86,9 +86,11 @@
   // "Save to Light App" is pointless for a file that already lives inside the
   // Light Apps directory (a Light App's own index.html, or a file beside it).
   // The directory itself is server-side knowledge (~/.octo/light-apps), so it
-  // is fetched once, lazily, only once an HTML artifact is showing. A failed
-  // lookup must not hide a working action, so the button stays visible until
-  // the directory is actually known.
+  // is fetched once, lazily, while the session panel shows an HTML artifact.
+  // A failed lookup must not hide a working action, so the button stays
+  // visible until the directory is actually known — and the attempt resets,
+  // so a transient failure is retried on the next artifact switch instead of
+  // disabling the feature for the rest of the session.
   let laDir = $state<string | null>(null)
   let laDirAttempted = $state(false)
 
@@ -99,25 +101,20 @@
       laDir = await api.getLightAppsDir()
     } catch {
       laDir = ''
+      laDirAttempted = false
     }
   }
 
-  // Path comparison is normalized: separators unified, trailing slashes
-  // stripped, case folded — Windows paths are case-insensitive, and the
-  // server's filepath.Join and the artifact path from the transcript may
-  // differ in spelling.
-  function isInsideLaDir(p: string): boolean {
-    if (!laDir) return false
-    const norm = (s: string) => s.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
-    const dir = norm(laDir)
-    const path = norm(p)
-    return path.startsWith(dir + '/')
-  }
-
-  const curIsLightApp = $derived(curIsHTML && isInsideLaDir(cur?.path ?? ''))
+  const curIsLightApp = $derived(curIsHTML && pathIsInside(cur?.path ?? '', laDir ?? ''))
 
   $effect(() => {
-    if (curIsHTML) void ensureLaDir()
+    if ($panelContent === 'session' && curIsHTML) void ensureLaDir()
+  })
+
+  // The Save dialog must not outlive the button: once the lookup settles and
+  // the artifact turns out to be inside the Light Apps directory, close it.
+  $effect(() => {
+    if (curIsLightApp) saveToLADialog = false
   })
 
   // ── Light Apps (new) ──────────────────────────────────────────────────────

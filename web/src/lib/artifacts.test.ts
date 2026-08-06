@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { get } from 'svelte/store'
 import { artifacts, artifactSel, panelContent } from './stores'
-import { lightAppSource, observeArtifact, hydrateArtifact, resetArtifacts } from './artifacts'
+import { lightAppSource, observeArtifact, hydrateArtifact, resetArtifacts, pathIsInside } from './artifacts'
 
 // Nothing a preview document references can authenticate: the srcdoc iframe has
 // no allow-same-origin, so its subresource requests are cross-site and the
@@ -705,5 +705,45 @@ describe('installArtifactThemeRefresh — theme switch busts baked previews', ()
     // to rebuild it, so resetting it would strand a permanent spinner.
     expect(get(artifacts)[1].loaded).toBe(true)
     expect(get(artifacts)[1].src).toBe('/api/x.png')
+  })
+})
+
+describe('pathIsInside — Light Apps directory detection', () => {
+  const LA_DIR = '/Users/qiao/.octo/light-apps'
+
+  it('matches files inside the directory, including nested ones', () => {
+    expect(pathIsInside(`${LA_DIR}/my-app/index.html`, LA_DIR)).toBe(true)
+    expect(pathIsInside(`${LA_DIR}/my-app/sub/asset.js`, LA_DIR)).toBe(true)
+  })
+
+  it('rejects siblings that merely share a prefix', () => {
+    expect(pathIsInside('/Users/qiao/.octo/light-apps2/x.html', LA_DIR)).toBe(false)
+    expect(pathIsInside('/Users/qiao/.octo/light-apps.js', LA_DIR)).toBe(false)
+    expect(pathIsInside('/Users/qiao/.octo/light-apps-other/x.html', LA_DIR)).toBe(false)
+  })
+
+  it('rejects unrelated paths and relative paths', () => {
+    expect(pathIsInside('/Users/qiao/Downloads/report.html', LA_DIR)).toBe(false)
+    expect(pathIsInside('my-app/index.html', LA_DIR)).toBe(false)
+    expect(pathIsInside('', LA_DIR)).toBe(false)
+  })
+
+  it('normalizes backslashes (Windows)', () => {
+    expect(pathIsInside('C:\\Users\\qiao\\.octo\\light-apps\\my-app\\index.html', 'C:\\Users\\qiao\\.octo\\light-apps')).toBe(true)
+    expect(pathIsInside('C:\\Users\\qiao\\.octo\\light-apps2\\x.html', 'C:\\Users\\qiao\\.octo\\light-apps')).toBe(false)
+  })
+
+  it('folds case so Windows drive letters and spelling differences match', () => {
+    expect(pathIsInside('/Users/QIAO/.OCTO/Light-Apps/my-app/index.html', LA_DIR)).toBe(true)
+    expect(pathIsInside('C:/Users/Qiao/.octo/light-apps/my-app/index.html', 'c:\\users\\qiao\\.octo\\light-apps')).toBe(true)
+  })
+
+  it('tolerates a trailing slash on either side', () => {
+    expect(pathIsInside(`${LA_DIR}/my-app/index.html`, `${LA_DIR}/`)).toBe(true)
+    expect(pathIsInside(`${LA_DIR}/my-app/index.html/`, LA_DIR)).toBe(true)
+  })
+
+  it('matches nothing when the directory is unknown', () => {
+    expect(pathIsInside(`${LA_DIR}/my-app/index.html`, '')).toBe(false)
   })
 })

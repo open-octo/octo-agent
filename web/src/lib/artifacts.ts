@@ -392,6 +392,19 @@ function cleanPath(p: string): string {
   return (norm.startsWith('/') ? '/' : '') + out.join('/')
 }
 
+// True when `path` lives inside `dir` — used to detect artifacts that already
+// sit in the Light Apps directory, where "Save to Light App" is pointless.
+// Both sides are normalized before comparing: separators unified, trailing
+// slashes stripped, case folded. Windows paths are case-insensitive, and the
+// server's filepath.Join and a transcript path may spell the same directory
+// differently (C:\Users vs c:/users). An empty `dir` (unknown) matches
+// nothing, so callers keep showing the action when the lookup failed.
+export function pathIsInside(path: string, dir: string): boolean {
+  if (!dir) return false
+  const norm = (s: string) => s.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  return norm(path).startsWith(norm(dir) + '/')
+}
+
 function blobToDataURL(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
