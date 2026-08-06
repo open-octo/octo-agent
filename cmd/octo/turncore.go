@@ -67,7 +67,8 @@ func runTurn(ctx context.Context, a *agent.Agent, cfg replConfig, sink ViewSink,
 	// instead of piling onto old, done ones (same semantics as the server's
 	// prepareToolTurn). An incomplete plan carries over so the agent keeps
 	// working on it. No-op when tasks are disabled (nil store), empty, or
-	// only-deleted (nothing to close).
+	// only-deleted (nothing to close). Turns are serialized (one turn
+	// goroutine at a time), so this read-then-swap is safe.
 	if tools.AllTasksComplete(tools.ActiveTaskStore()) {
 		tools.SetTaskStore(tasks.New())
 	}
