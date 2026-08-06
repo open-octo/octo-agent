@@ -288,6 +288,20 @@ p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 6
   border: 1px solid var(--border-table); border-radius: 8px; font-size: 12.5px; line-height: 1.6;
 }
 :global(.md-content a) { color: var(--blue-6); }
+/* Markdown tables (rendered via lib/markdown.ts which wraps them in .table-scroll) */
+:global(.md-content .table-scroll) { overflow-x: auto; margin: 8px 0; }
+:global(.md-content table) {
+  width: max-content; min-width: 100%; max-width: none;
+  border-collapse: collapse; border-spacing: 0; font-size: 13.5px; line-height: 1.55;
+}
+:global(.md-content th), :global(.md-content td) {
+  padding: 7px 14px; text-align: left; vertical-align: top;
+  border: 1px solid var(--border-table);
+}
+:global(.md-content th) {
+  background: var(--bg-table-header); font-weight: 600; color: var(--text-heading); white-space: nowrap;
+}
+:global(.md-content tbody tr:nth-child(even) td) { background: var(--bg-table-header); }
 .card-footer {
   display: flex; align-items: center; gap: 16px;
   padding: 16px 24px; border-top: 1px dashed var(--border-secondary);

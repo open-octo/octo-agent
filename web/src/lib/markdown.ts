@@ -87,6 +87,23 @@ export function renderMarkdown(text: string, showReasoning = true): string {
     return `<blockquote class="md-bq">${this.parser.parse(tokens)}</blockquote>`
   }
 
+  // Wrap marked's default table in a horizontal-scroll container so wide
+  // tables don't blow out the flex bubble / .md-content column. The table
+  // itself stays a real <table> (reusing the default tablecell/tablerow), so
+  // thead/tbody columns keep aligning and per-cell alignment survives.
+  renderer.table = function (token: Tokens.Table) {
+    let header = ""
+    for (const cell of token.header) header += this.tablecell(cell)
+    let body = ""
+    for (const row of token.rows) {
+      let cells = ""
+      for (const cell of row) cells += this.tablecell(cell)
+      body += this.tablerow({ text: cells })
+    }
+    if (body) body = `<tbody>${body}</tbody>`
+    return `<div class="table-scroll"><table><thead>${header}</thead>${body}</table></div>`
+  }
+
   marked.use({ renderer })
 
   // 3. Parse remaining text with marked

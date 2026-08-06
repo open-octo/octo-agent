@@ -2854,6 +2854,26 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   background: var(--surface-info); border-radius: 0 6px 6px 0;
   font-size: 13px; line-height: 1.6; color: var(--text-secondary);
 }
+/* Markdown tables: marked emits plain <table>/<th>/<td> (no classes), so style
+   the elements directly. Keep wide tables scrollable inside the bubble instead
+   of blowing up the flex column, and give cells real padding + borders so they
+   don't read as one squeezed wall of text. */
+:global(.rich-answer .table-scroll), :global(.think-body .table-scroll) { overflow-x: auto; }
+:global(.rich-answer table), :global(.think-body table) {
+  width: max-content; min-width: 100%; max-width: none;
+  border-collapse: collapse; border-spacing: 0; font-size: 13.5px; line-height: 1.55;
+}
+:global(.rich-answer th), :global(.rich-answer td),
+:global(.think-body th), :global(.think-body td) {
+  padding: 7px 14px; text-align: left; vertical-align: top;
+  border: 1px solid var(--border-table);
+}
+:global(.rich-answer th), :global(.think-body th) {
+  background: var(--bg-table-header); font-weight: 600; color: var(--text-heading); white-space: nowrap;
+}
+:global(.rich-answer tbody tr:nth-child(even) td), :global(.think-body tbody tr:nth-child(even) td) {
+  background: var(--bg-table-header);
+}
 /* Reasoning card — a bordered fold matching the design's tool-card look. */
 :global(.think-block) {
   border: 1px solid var(--border); border-radius: 10px;
