@@ -35,12 +35,18 @@ func TestListLightApps_EmptyDir(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	var out struct{ Apps []lightAppManifest }
+	var out struct {
+		Apps []lightAppManifest
+		Dir  string
+	}
 	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
 	if len(out.Apps) != 0 {
 		t.Errorf("expected 0 apps, got %d", len(out.Apps))
+	}
+	if want := filepath.Join(home, ".octo", "light-apps"); out.Dir != want {
+		t.Errorf("expected dir %q, got %q", want, out.Dir)
 	}
 }
 
@@ -56,7 +62,10 @@ func TestListLightApps_WithApps(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	var out struct{ Apps []lightAppManifest }
+	var out struct {
+		Apps []lightAppManifest
+		Dir  string
+	}
 	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
@@ -65,6 +74,9 @@ func TestListLightApps_WithApps(t *testing.T) {
 	}
 	if out.Apps[0].Name != "CSV Tool" || out.Apps[0].Slug != "csv-tool" {
 		t.Errorf("unexpected app: %+v", out.Apps[0])
+	}
+	if want := filepath.Join(home, ".octo", "light-apps"); out.Dir != want {
+		t.Errorf("expected dir %q, got %q", want, out.Dir)
 	}
 }
 

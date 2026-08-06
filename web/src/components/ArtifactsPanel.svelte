@@ -82,6 +82,44 @@
 
   const curIsHTML = $derived(cur?.type === 'HTML')
 
+  // ── Already-a-Light-App detection ──────────────────────────────────────────
+  // "Save to Light App" is pointless for a file that already lives inside the
+  // Light Apps directory (a Light App's own index.html, or a file beside it).
+  // The directory itself is server-side knowledge (~/.octo/light-apps), so it
+  // is fetched once, lazily, only once an HTML artifact is showing. A failed
+  // lookup must not hide a working action, so the button stays visible until
+  // the directory is actually known.
+  let laDir = $state<string | null>(null)
+  let laDirAttempted = $state(false)
+
+  async function ensureLaDir() {
+    if (laDir !== null || laDirAttempted) return
+    laDirAttempted = true
+    try {
+      laDir = await api.getLightAppsDir()
+    } catch {
+      laDir = ''
+    }
+  }
+
+  // Path comparison is normalized: separators unified, trailing slashes
+  // stripped, case folded — Windows paths are case-insensitive, and the
+  // server's filepath.Join and the artifact path from the transcript may
+  // differ in spelling.
+  function isInsideLaDir(p: string): boolean {
+    if (!laDir) return false
+    const norm = (s: string) => s.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+    const dir = norm(laDir)
+    const path = norm(p)
+    return path.startsWith(dir + '/')
+  }
+
+  const curIsLightApp = $derived(curIsHTML && isInsideLaDir(cur?.path ?? ''))
+
+  $effect(() => {
+    if (curIsHTML) void ensureLaDir()
+  })
+
   // ── Light Apps (new) ──────────────────────────────────────────────────────
   let laLoading = $state(false)
   let laAttempted = $state(false)
@@ -304,7 +342,7 @@
           <iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon>
           {$t('artifacts.download')}
         </button>
-        {#if curIsHTML}
+        {#if curIsHTML && !curIsLightApp}
           <button class="wbtn" disabled={!cur.loaded || cur.loadFailed} onclick={openSaveToLA}>
             <iconify-icon icon="ant-design:save-outlined" width="14"></iconify-icon>
             {$t('artifacts.save_to_lightapp')}

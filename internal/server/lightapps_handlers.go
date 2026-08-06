@@ -31,13 +31,15 @@ type lightAppManifest struct {
 }
 
 // handleListLightApps lists all Light Apps by scanning ~/.octo/light-apps/ for
-// subdirectories containing a valid manifest.json.
+// subdirectories containing a valid manifest.json. The response also carries
+// the directory itself, so the web UI can tell whether a session artifact
+// already lives inside it (and skip the redundant "Save to Light App" action).
 func (s *Server) handleListLightApps(w http.ResponseWriter, r *http.Request) {
 	dir := lightAppsDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			writeJSON(w, http.StatusOK, map[string]any{"apps": []lightAppManifest{}})
+			writeJSON(w, http.StatusOK, map[string]any{"apps": []lightAppManifest{}, "dir": dir})
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "list_lightapps_failed")
@@ -68,7 +70,7 @@ func (s *Server) handleListLightApps(w http.ResponseWriter, r *http.Request) {
 	if apps == nil {
 		apps = []lightAppManifest{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"apps": apps})
+	writeJSON(w, http.StatusOK, map[string]any{"apps": apps, "dir": dir})
 }
 
 // handleGetLightApp returns the full manifest and index.html content for a

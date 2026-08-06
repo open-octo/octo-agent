@@ -775,9 +775,27 @@ export interface LightAppDetail {
   html: string
 }
 
+// The list response also carries the Light Apps directory itself — the web UI
+// uses it to detect session artifacts that already live inside it.
+export interface LightAppList {
+  apps: LightApp[]
+  dir: string
+}
+
 export async function listLightApps(): Promise<LightApp[]> {
-  const d = await request<{ apps: LightApp[] }>('/api/light-apps')
+  const d = await request<LightAppList>('/api/light-apps')
   return d.apps ?? []
+}
+
+// Absolute path of the Light Apps directory (~/.octo/light-apps). Cached so
+// repeated lookups (per artifact selection) cost one request per session.
+let lightAppsDirCache: string | null = null
+
+export async function getLightAppsDir(): Promise<string> {
+  if (lightAppsDirCache) return lightAppsDirCache
+  const d = await request<LightAppList>('/api/light-apps')
+  lightAppsDirCache = d.dir || ''
+  return lightAppsDirCache
 }
 
 export async function getLightApp(slug: string): Promise<LightAppDetail> {
