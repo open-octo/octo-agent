@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { cmdkOpen, view, sessions, activeSessionId, skills, openAgentSession, createNewSession, showToast, panelContent, settingsModalOpen } from '../../lib/stores'
+  import { cmdkOpen, view, sessions, activeSessionId, skills, openAgentSession, createNewSession, showToast, panelContent, settingsModalOpen, isDesktopShell } from '../../lib/stores'
   import { t } from '../../lib/i18n'
 
   let query = $state('')
@@ -43,7 +43,7 @@
 
   // Static actions (always available)
   const actions = [
-    { id: 'new', icon: 'ant-design:plus-outlined', label: () => $t('nav.new_session'), shortcut: '', run: () => newSession() },
+    { id: 'new', icon: 'ant-design:plus-outlined', label: () => $t('nav.new_session'), shortcut: isDesktopShell ? '⌘N' : '', run: () => newSession() },
     { id: 'agents', icon: 'ant-design:robot-outlined', label: () => $t('nav.agents'), shortcut: '', run: () => goTo('agents') },
     { id: 'skills', icon: 'ant-design:thunderbolt-outlined', label: () => $t('nav.skills'), shortcut: '', run: () => goTo('skills') },
     { id: 'workflows', icon: 'ant-design:partition-outlined', label: () => $t('nav.workflows'), shortcut: '', run: () => goTo('workflows') },

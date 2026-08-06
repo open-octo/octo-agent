@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sessions, sessionGroups, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent, cmdkOpen, settingsModalOpen } from './lib/stores'
+  import { view, sessions, sessionGroups, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent, cmdkOpen, settingsModalOpen, createNewSession, isDesktopShell } from './lib/stores'
   import MobileApp from './mobile/MobileApp.svelte'
   import { ws, wsState } from './lib/ws'
   import { notificationsEnabled } from './lib/notifications'
@@ -350,10 +350,19 @@
 
   // Cmd/Ctrl+K toggles the command palette — the Header pill advertises the
   // shortcut, and it fires even while an input has focus (palette convention).
+  // Cmd/Ctrl+N starts a new session — a native desktop-shell bind. Under a
+  // plain browser Cmd+N is a reserved browser shortcut (new window) the page
+  // never sees, so the handler is gated to the Wails shell (isDesktopShell)
+  // where the keypress actually reaches the page and is safe to claim.
   function onGlobalKeydown(e: KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
       e.preventDefault()
       cmdkOpen.update(v => !v)
+      return
+    }
+    if (isDesktopShell && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'n') {
+      e.preventDefault()
+      createNewSession().catch((err: any) => showToast(err.message, 'error'))
     }
   }
 </script>
