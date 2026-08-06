@@ -335,6 +335,38 @@ func TestModelPickerView_EmptyWhenInactive(t *testing.T) {
 	}
 }
 
+// TestDispatchModel_PersistsOnSession verifies that /model records the switch
+// on the session (via SetModelConfig) so a later `octo -c` resume honors it —
+// without this the session file keeps the model it was created with, and a
+// mid-session /model switch would be silently forgotten on resume (resuming
+// would re-resolve the creation-time model).
+func TestDispatchModel_PersistsOnSession(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "test-deepseek-key")
+	writeModelsConfig(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}},
+			{ID: "ep-b", Provider: "deepseek", BaseURL: "https://api.deepseek.com", Models: []config.EndpointModel{{Model: "deepseek-v4-flash"}}},
+		},
+		Default: "ep-a::gpt-4o",
+	})
+
+	m := newPickerTestModel("gpt-4o")
+	m.cfg.session = agent.NewSession("gpt-4o", "")
+
+	// Bare form: the session records the bare wire model.
+	m.dispatchModel("deepseek-v4-flash")
+	if m.cfg.session.Model != "deepseek-v4-flash" || m.cfg.session.ModelConfig != "deepseek-v4-flash" {
+		t.Errorf("session after bare switch = (Model=%q, ModelConfig=%q), want (deepseek-v4-flash, deepseek-v4-flash)",
+			m.cfg.session.Model, m.cfg.session.ModelConfig)
+	}
+
+	// Composite form: the binding keeps the exact endpoint.
+	m.dispatchModel("ep-b::deepseek-v4-flash")
+	if m.cfg.session.ModelConfig != "ep-b::deepseek-v4-flash" {
+		t.Errorf("session ModelConfig after composite switch = %q, want ep-b::deepseek-v4-flash", m.cfg.session.ModelConfig)
+	}
+}
+
 // TestDispatchModel_DefaultFlag verifies that `/model <name> --default` sets
 // the model as default in the persisted config.
 func TestDispatchModel_DefaultFlag(t *testing.T) {

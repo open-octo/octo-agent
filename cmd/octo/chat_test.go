@@ -73,67 +73,77 @@ func TestResolveResumedModel(t *testing.T) {
 	deepseekEntry := config.ModelEntry{Provider: "deepseek", Model: "deepseek-v4-pro", BaseURL: "https://api.deepseek.com"}
 
 	tests := []struct {
-		name         string
-		sessionModel string
-		startProv    string
-		startEntry   config.ModelEntry
-		wantProv     string
-		wantModel    string
-		wantRebuild  bool
-		wantOK       bool
+		name        string
+		sessionRef  string
+		startProv   string
+		startEntry  config.ModelEntry
+		wantProv    string
+		wantModel   string
+		wantRebuild bool
+		wantOK      bool
 	}{
 		{
-			name:         "session model on another endpoint rebuilds the sender",
-			sessionModel: "deepseek-v4-pro",
-			startProv:    "openai",
-			startEntry:   openaiEntry,
-			wantProv:     "deepseek",
-			wantModel:    "deepseek-v4-pro",
-			wantRebuild:  true,
-			wantOK:       true,
+			name:        "session model on another endpoint rebuilds the sender",
+			sessionRef:  "deepseek-v4-pro",
+			startProv:   "openai",
+			startEntry:  openaiEntry,
+			wantProv:    "deepseek",
+			wantModel:   "deepseek-v4-pro",
+			wantRebuild: true,
+			wantOK:      true,
 		},
 		{
-			name:         "same endpoint, different model keeps the sender",
-			sessionModel: "deepseek-v4-pro",
-			startProv:    "deepseek",
-			startEntry:   deepseekEntry,
-			wantProv:     "deepseek",
-			wantModel:    "deepseek-v4-pro",
-			wantRebuild:  false,
-			wantOK:       true,
+			name:        "same endpoint, different model keeps the sender",
+			sessionRef:  "deepseek-v4-pro",
+			startProv:   "deepseek",
+			startEntry:  deepseekEntry,
+			wantProv:    "deepseek",
+			wantModel:   "deepseek-v4-pro",
+			wantRebuild: false,
+			wantOK:      true,
 		},
 		{
-			name:         "same provider, different base URL rebuilds the sender",
-			sessionModel: "deepseek-v4-flash",
-			startProv:    "deepseek",
-			startEntry:   config.ModelEntry{Provider: "deepseek", Model: "deepseek-v4-flash", BaseURL: "https://relay.example.com"},
-			wantProv:     "deepseek",
-			wantModel:    "deepseek-v4-flash",
-			wantRebuild:  true,
-			wantOK:       true,
+			name:        "same provider, different base URL rebuilds the sender",
+			sessionRef:  "deepseek-v4-flash",
+			startProv:   "deepseek",
+			startEntry:  config.ModelEntry{Provider: "deepseek", Model: "deepseek-v4-flash", BaseURL: "https://relay.example.com"},
+			wantProv:    "deepseek",
+			wantModel:   "deepseek-v4-flash",
+			wantRebuild: true,
+			wantOK:      true,
 		},
 		{
-			name:         "model deleted from config is rejected",
-			sessionModel: "claude-opus-4-7",
-			startProv:    "openai",
-			startEntry:   openaiEntry,
-			wantOK:       false,
+			name:        "composite ref resolves to the bound endpoint",
+			sessionRef:  "ep-deepseek::deepseek-v4-pro",
+			startProv:   "openai",
+			startEntry:  openaiEntry,
+			wantProv:    "deepseek",
+			wantModel:   "deepseek-v4-pro",
+			wantRebuild: true,
+			wantOK:      true,
 		},
 		{
-			name:         "empty session model passes the startup resolution through",
-			sessionModel: "",
-			startProv:    "deepseek",
-			startEntry:   deepseekEntry,
-			wantProv:     "deepseek",
-			wantModel:    "deepseek-v4-pro",
-			wantRebuild:  false,
-			wantOK:       true,
+			name:       "model deleted from config is rejected",
+			sessionRef: "claude-opus-4-7",
+			startProv:  "openai",
+			startEntry: openaiEntry,
+			wantOK:     false,
+		},
+		{
+			name:        "empty session ref passes the startup resolution through",
+			sessionRef:  "",
+			startProv:   "deepseek",
+			startEntry:  deepseekEntry,
+			wantProv:    "deepseek",
+			wantModel:   "deepseek-v4-pro",
+			wantRebuild: false,
+			wantOK:      true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p, m, e, rebuild, ok := resolveResumedModel(tt.sessionModel, tt.startProv, tt.startEntry, cfg)
+			p, m, e, rebuild, ok := resolveResumedModel(tt.sessionRef, tt.startProv, tt.startEntry, cfg)
 			if ok != tt.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
 			}

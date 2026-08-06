@@ -1290,6 +1290,23 @@ func (m *tuiModel) dispatchModel(name string) (tea.Model, tea.Cmd) {
 	// which also set Agent.Model from the resolved entry.
 	m.a.Model = entry.Model
 	m.cfg.modelName = entry.Model
+	// Persist the switch on the session so a later `octo -c` resume honors it —
+	// the session file otherwise keeps the model it was created with (SyncFrom
+	// only syncs history), so a mid-session /model would be silently forgotten
+	// on resume. Mirrors the IM /model path, which persists via SetModelConfig.
+	// The ref is the composite "<endpoint>::<model>" form when the user (or the
+	// picker) addressed an endpoint explicitly, else the bare model id — both
+	// are valid EntryByModel references; the composite keeps the binding exact
+	// when the same model exists on several endpoints.
+	if m.cfg.session != nil {
+		ref := entry.Model
+		if strings.Contains(name, "::") {
+			ref = name
+		}
+		if err := m.cfg.session.SetModelConfig(ref, entry.Model); err != nil {
+			m.println(noticeStyle.Render(fmt.Sprintf("switched to %q but failed to save the session's model: %v", entry.Model, err)))
+		}
+	}
 	// Tool surface may differ per model (e.g. vision vs non-vision).
 	if m.cfg.tools != nil {
 		m.cfg.tools = tools.DefaultToolsFor(entry.Model)

@@ -382,12 +382,14 @@ func init() {
 }
 
 // resolveResumedModel resolves the (provider, model, entry) a resumed session
-// should run on, given the session's saved model and the startup resolution
-// for the current config default. A saved session carries its own model —
-// often from a different endpoint than the one the config now defaults to
+// should run on, given the session's saved model reference and the startup
+// resolution for the current config default. sessionRef is the session's
+// binding — a bare model id (legacy sessions) or a composite
+// "<endpoint>::<model>" id (a session that recorded a /model switch) — and
+// may come from a different endpoint than the one the config now defaults to
 // (e.g. created on the kimi endpoint, resumed after the default moved to
-// deepseek) — and sending that model through a sender built for another
-// endpoint misroutes the request (deepseek endpoint + k3-256k → HTTP 400).
+// deepseek). Sending that model through a sender built for another endpoint
+// misroutes the request (deepseek endpoint + k3-256k → HTTP 400).
 //
 // The returned entry anchors the rebuilt sender; rebuild reports whether it
 // targets a different provider or base URL than the startup entry (the same
@@ -395,19 +397,19 @@ func init() {
 // only the wire model name changes). ok is false when the session model is no
 // longer present in the config (its endpoint was deleted) — the caller then
 // falls back to the current default rather than replaying the stale model.
-// An empty sessionModel passes the startup resolution through untouched.
-func resolveResumedModel(sessionModel, startProvider string, startEntry config.ModelEntry, cfg config.Config) (provider, model string, entry config.ModelEntry, rebuild, ok bool) {
-	if sessionModel == "" {
+// An empty sessionRef passes the startup resolution through untouched.
+func resolveResumedModel(sessionRef, startProvider string, startEntry config.ModelEntry, cfg config.Config) (provider, model string, entry config.ModelEntry, rebuild, ok bool) {
+	if sessionRef == "" {
 		return startProvider, startEntry.Model, startEntry, false, true
 	}
 	// Guard before resolveProviderModel: with an unconfigured model name it
 	// would silently fall back to the current provider (matching on the flag),
 	// reporting ok=true for a model the config no longer carries — the exact
 	// misroute this resolution exists to prevent (mirrors ensureSender).
-	if _, found := cfg.EntryByModel(sessionModel); !found {
+	if _, found := cfg.EntryByModel(sessionRef); !found {
 		return "", "", config.ModelEntry{}, false, false
 	}
-	p, m, e, ok := resolveProviderModel("", sessionModel, cfg)
+	p, m, e, ok := resolveProviderModel("", sessionRef, cfg)
 	if !ok {
 		return "", "", config.ModelEntry{}, false, false
 	}
@@ -1056,7 +1058,15 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				// and keep the status bar (modelName) on the model actually in
 				// use. A session model that left the config falls back to the
 				// current default so the session stays usable.
-				p, m, e, rebuild, ok := resolveResumedModel(sess.Model, provName, entry, cfg)
+				// Prefer the session's binding (ModelConfig, set by a mid-session
+				// /model switch) over its bare wire model — the binding keeps the
+				// exact endpoint when the same model exists on several ones,
+				// mirroring the server's senderForSession.
+				ref := sess.Model
+				if sess.ModelConfig != "" {
+					ref = sess.ModelConfig
+				}
+				p, m, e, rebuild, ok := resolveResumedModel(ref, provName, entry, cfg)
 				if !ok {
 					fmt.Fprintf(stderr, "octo: warning: session model %q is no longer configured; resuming on %q\n", sess.Model, resolvedModel)
 					a.Model = resolvedModel
