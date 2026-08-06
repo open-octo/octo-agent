@@ -549,6 +549,7 @@ func buildTrayMenu(app *application.App, bridge *nativeBridge) *application.Menu
 	}
 	m.AddSeparator()
 	m.Add(L().trayShow).OnClick(func(*application.Context) { bridge.showWindow() })
+	m.Add(L().trayNewSession).OnClick(func(*application.Context) { bridge.openNewSession() })
 	m.Add(L().traySettings).OnClick(func(*application.Context) { bridge.openSettings() })
 	// A known-newer release replaces the "check" item with a one-click update
 	// (in-place when this build supports it, else the download page) — the

@@ -410,6 +410,12 @@ func (b *nativeBridge) showWindow() { b.showWindowAt("") }
 // "Settings"). The frontend maps the "settings" hash route to the modal.
 func (b *nativeBridge) openSettings() { b.showWindowAt("settings") }
 
+// openNewSession brings the window up and starts a new session (tray
+// "New Session" / a keyboard-⌘N-equivalent from the shell side). The frontend
+// maps the "new" hash route to createNewSession(), the same action the in-app
+// "New Session" button and Cmd/Ctrl+N trigger.
+func (b *nativeBridge) openNewSession() { b.showWindowAt("new") }
+
 // showWindowAt brings the hub window to the foreground, re-creating it if it was
 // closed to the tray (KeepRunningInBackground), and navigates to the given
 // frontend hash route (empty = leave it where it is). The frontend routes on
