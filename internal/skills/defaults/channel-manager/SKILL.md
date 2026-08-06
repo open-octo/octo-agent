@@ -180,6 +180,20 @@ List the available agents via `GET /api/agents`. When the user picks one, call
 `POST /api/agents/:id/bind` with `{"platform": "<platform>", "adapter_id": "<name>", "chat_id": "<group or DM id>"}`.
 The `adapter_id` must match the instance `name` in channels.yml.
 
+**Unbinding** — when the user asks to unbind (解绑 / 改回默认 agent / 换回默认):
+
+Call `DELETE /api/agents/:id/bind` with the same body
+`{"platform": "<platform>", "adapter_id": "<name>", "chat_id": "<group or DM id>"}`.
+The match is exact on **all three fields** (platform, adapter_id, chat_id) — the
+`chat_id` for a DM is the user's IM id (e.g. the weixin `user_id` from the login
+response). After the call the agent's `channel_bindings` no longer contains that
+entry and the chat falls back to the default agent. Confirm success by checking the
+response — the returned agent JSON must not list the removed binding.
+
+> The `chat_id` to use for unbind is the same one used at bind time. If you don't
+> have it handy, list the agent via `GET /api/agents/:id` and read
+> `channel_bindings` for the exact `platform` / `adapter_id` / `chat_id` triple.
+
 ### Feishu setup
 
 #### Phase 1 — Create the app
