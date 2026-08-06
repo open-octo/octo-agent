@@ -381,6 +381,40 @@ func init() {
 	}
 }
 
+// resolveResumedModel resolves the (provider, model, entry) a resumed session
+// should run on, given the session's saved model and the startup resolution
+// for the current config default. A saved session carries its own model —
+// often from a different endpoint than the one the config now defaults to
+// (e.g. created on the kimi endpoint, resumed after the default moved to
+// deepseek) — and sending that model through a sender built for another
+// endpoint misroutes the request (deepseek endpoint + k3-256k → HTTP 400).
+//
+// The returned entry anchors the rebuilt sender; rebuild reports whether it
+// targets a different provider or base URL than the startup entry (the same
+// no-rebuild criterion ensureSender uses: same endpoint → reuse the sender,
+// only the wire model name changes). ok is false when the session model is no
+// longer present in the config (its endpoint was deleted) — the caller then
+// falls back to the current default rather than replaying the stale model.
+// An empty sessionModel passes the startup resolution through untouched.
+func resolveResumedModel(sessionModel, startProvider string, startEntry config.ModelEntry, cfg config.Config) (provider, model string, entry config.ModelEntry, rebuild, ok bool) {
+	if sessionModel == "" {
+		return startProvider, startEntry.Model, startEntry, false, true
+	}
+	// Guard before resolveProviderModel: with an unconfigured model name it
+	// would silently fall back to the current provider (matching on the flag),
+	// reporting ok=true for a model the config no longer carries — the exact
+	// misroute this resolution exists to prevent (mirrors ensureSender).
+	if _, found := cfg.EntryByModel(sessionModel); !found {
+		return "", "", config.ModelEntry{}, false, false
+	}
+	p, m, e, ok := resolveProviderModel("", sessionModel, cfg)
+	if !ok {
+		return "", "", config.ModelEntry{}, false, false
+	}
+	rebuild = p != startProvider || e.BaseURL != startEntry.BaseURL
+	return p, m, e, rebuild, true
+}
+
 // runChat handles `octo [flags] [message]` — every invocation that isn't a
 // named subcommand.
 //
@@ -1011,6 +1045,61 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			a.History = sess.ToHistory()
 			if sess.Model != "" {
 				a.Model = sess.Model
+				// The sender was built for the current config default, but a
+				// saved session carries its own model — often from a different
+				// endpoint (created on the kimi endpoint, resumed after the
+				// default moved to deepseek). Sending a.Model through a sender
+				// built for another endpoint misroutes the request (deepseek
+				// endpoint + k3-256k → HTTP 400). Mirror the server's
+				// senderForSession: re-resolve the session's model to its
+				// config entry, rebuild the sender when the endpoint differs,
+				// and keep the status bar (modelName) on the model actually in
+				// use. A session model that left the config falls back to the
+				// current default so the session stays usable.
+				p, m, e, rebuild, ok := resolveResumedModel(sess.Model, provName, entry, cfg)
+				if !ok {
+					fmt.Fprintf(stderr, "octo: warning: session model %q is no longer configured; resuming on %q\n", sess.Model, resolvedModel)
+					a.Model = resolvedModel
+				} else {
+					prevProvider, prevModel, prevEntry := provName, resolvedModel, entry
+					prevSender := llmSender
+					provName, resolvedModel, entry = p, m, e
+					if rebuild {
+						newSender, serr := buildSender(p, e, stderr, senderTuning{
+							thinkingBudget:  anthropicThinkingBudget(resolvedEffort),
+							reasoningEffort: resolvedEffort,
+							showReasoning:   resolvedShowReasoning,
+						})
+						if serr != nil {
+							// Rebuild failed (missing key, …) — revert to the
+							// default rather than sending the session's model
+							// to the wrong endpoint.
+							provName, resolvedModel, entry = prevProvider, prevModel, prevEntry
+							a.Model = prevModel
+							fmt.Fprintf(stderr, "octo: warning: could not rebuild the sender for the resumed session's model %q (%v); resuming on %q\n", sess.Model, serr, resolvedModel)
+						} else {
+							llmSender = newSender
+							a.SetSender(llmSender)
+							// The implicit lite model was inferred for the
+							// config default above; re-infer it on the
+							// session's own sender so compaction stays on the
+							// session's endpoint, key, and prompt cache (an
+							// explicit cfg.Lite entry — built from its own
+							// sender — is untouched).
+							if a.LiteSender == prevSender {
+								if lm := app.ImplicitLiteModel(p, m, resolveBaseURL(p, e)); lm != "" {
+									a.LiteSender = llmSender
+									a.LiteModel = lm
+								} else {
+									a.LiteSender, a.LiteModel = nil, ""
+								}
+							}
+							a.Model = m
+						}
+					} else {
+						a.Model = m
+					}
+				}
 			}
 			// Recompose from the session's raw user layer so base/project/env
 			// pick up any changes since the session was created. Rerender the
