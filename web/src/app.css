@@ -39,6 +39,9 @@
   --bg-container: #FFFFFF;
   --bg-sidebar: #F5F5F7;
   --bg-table-header: #FAFAFC;
+  /* Zebra stripe fill for rendered markdown table body rows — kept distinct
+     from --bg-table-header so banding is actually visible. */
+  --bg-zebra: #F3F3F6;
 
   /* Borders */
   --border: rgba(0,0,0,0.08);
@@ -131,6 +134,7 @@
   --bg-container: #2C2C2E;
   --bg-sidebar: #232325;
   --bg-table-header: #323234;
+  --bg-zebra: #3A3A3D;
 
   --border: rgba(255,255,255,0.10);
   --border-secondary: rgba(255,255,255,0.06);

@@ -2872,7 +2872,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   background: var(--bg-table-header); font-weight: 600; color: var(--text-heading); white-space: nowrap;
 }
 :global(.rich-answer tbody tr:nth-child(even) td), :global(.think-body tbody tr:nth-child(even) td) {
-  background: var(--bg-table-header);
+  background: var(--bg-zebra);
 }
 /* Reasoning card — a bordered fold matching the design's tool-card look. */
 :global(.think-block) {

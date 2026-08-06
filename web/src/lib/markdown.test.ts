@@ -61,4 +61,18 @@ describe('renderMarkdown: tables', () => {
     expect(out).toContain('<th align="left">A</th>')
     expect(out).toContain('<th align="center">B</th>')
   })
+
+  it('wraps header cells in a tr (matching marked default output)', () => {
+    const out = renderMarkdown('| A | B |\n|---|---|\n| x | y |')
+    // The <th>s must sit inside a <tr> (marked emits newlines inside the row).
+    expect(out).toMatch(/<thead><tr>\s*<th>A<\/th>\s*<th>B<\/th>\s*<\/tr>\s*<\/thead>/)
+    expect(out).not.toMatch(/<thead>\s*<th\b/)
+  })
+
+  it('renders an escaped pipe as a literal single cell', () => {
+    const out = renderMarkdown('| A |\n|---|\n| a\\|b |')
+    expect(out).toContain('<td>a|b</td>')
+    // The escaped pipe must not create a spurious second column.
+    expect(out.match(/<td>/g)).toHaveLength(1)
+  })
 })

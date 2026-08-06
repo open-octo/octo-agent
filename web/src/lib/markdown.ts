@@ -94,6 +94,7 @@ export function renderMarkdown(text: string, showReasoning = true): string {
   renderer.table = function (token: Tokens.Table) {
     let header = ""
     for (const cell of token.header) header += this.tablecell(cell)
+    header = this.tablerow({ text: header })
     let body = ""
     for (const row of token.rows) {
       let cells = ""

@@ -301,7 +301,7 @@ p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 6
 :global(.md-content th) {
   background: var(--bg-table-header); font-weight: 600; color: var(--text-heading); white-space: nowrap;
 }
-:global(.md-content tbody tr:nth-child(even) td) { background: var(--bg-table-header); }
+:global(.md-content tbody tr:nth-child(even) td) { background: var(--bg-zebra); }
 .card-footer {
   display: flex; align-items: center; gap: 16px;
   padding: 16px 24px; border-top: 1px dashed var(--border-secondary);
