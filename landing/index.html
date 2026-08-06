@@ -78,6 +78,7 @@
     /* hero */
     .hero{padding:132px 32px 0;text-align:center;background:linear-gradient(180deg,var(--blue-wash) 0%,#fff 72%);}
     .hero-inner{max-width:880px;margin:0 auto;}
+    .hero-logo{width:64px;height:64px;margin:0 auto 20px;display:block;}
     .kicker{display:inline-flex;align-items:center;gap:8px;padding:4px 14px;border:1px solid rgba(22,119,255,.5);background:rgba(22,119,255,.06);border-radius:9999px;font-size:12.5px;font-weight:600;color:var(--blue);margin-bottom:22px;}
     .hero h1{font-size:60px;line-height:1.08;letter-spacing:-.03em;font-weight:600;color:var(--ink);margin-bottom:18px;}
     .hero h1 .accent{color:var(--blue);}
@@ -264,6 +265,12 @@
 
   <header id="top" class="hero">
     <div class="hero-inner">
+      <svg class="hero-logo" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Octo logo">
+        <rect width="100" height="100" rx="22" fill="#1677FF"/>
+        <path fill="#ffffff" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/>
+        <circle cx="40" cy="42" r="5" fill="#1677FF"/>
+        <circle cx="60" cy="42" r="5" fill="#1677FF"/>
+      </svg>
       <div class="kicker">
         <iconify-icon icon="ant-design:safety-outlined" width="14"></iconify-icon>
         <span data-en="Open source · MIT · Self-hosted · Zero telemetry" data-zh="开源 · MIT · 自托管 · 零遥测"></span>
@@ -389,7 +396,7 @@
           <path fill="#6b7280" opacity="0.32" d="M 381.49 288.68 L 387.88 294.35 L 394.33 299.86 L 400.85 305.21 L 407.45 310.39 L 414.11 315.42 L 420.84 320.29 L 427.65 325.01 L 434.52 329.56 L 441.46 333.95 L 448.46 338.19 L 455.54 342.27 L 462.68 346.19 L 469.89 349.96 L 477.17 353.57 L 484.51 357.03 L 491.93 360.33 L 499.41 363.48 L 506.96 366.47 L 514.57 369.31 L 522.25 372.00 L 530.00 374.54 L 537.82 376.93 L 545.70 379.17 L 553.65 381.27 L 561.67 383.23 L 569.75 385.07 L 570.25 382.93 L 562.25 380.92 L 554.35 378.73 L 546.53 376.37 L 538.80 373.84 L 531.15 371.15 L 523.59 368.31 L 516.12 365.31 L 508.74 362.15 L 501.44 358.83 L 494.23 355.36 L 487.10 351.74 L 480.06 347.97 L 473.11 344.04 L 466.24 339.96 L 459.46 335.73 L 452.77 331.35 L 446.16 326.82 L 439.64 322.13 L 433.20 317.30 L 426.85 312.32 L 420.58 307.19 L 414.40 301.91 L 408.30 296.49 L 402.28 290.91 L 396.35 285.19 L 390.51 279.32 Z"/>
             <ellipse fill="#E6F4FF" opacity="0.55" cx="360" cy="248" rx="64" ry="58"/>
             <g transform="translate(360,250) scale(1.35) translate(-53,-53)">
-              <path fill="#1677FF" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/>
+              <path fill="#1677FF" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C42 74 64 74 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/>
               <circle fill="#ffffff" cx="40" cy="42" r="5"/>
               <circle fill="#ffffff" cx="60" cy="42" r="5"/>
             </g>
