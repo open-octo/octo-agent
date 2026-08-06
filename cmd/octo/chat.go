@@ -417,6 +417,38 @@ func resolveResumedModel(sessionRef, startProvider string, startEntry config.Mod
 	return p, m, e, rebuild, true
 }
 
+// resumeModelRef returns the session's model reference for resume: the
+// binding recorded by a mid-session /model switch (ModelConfig, a composite
+// "<endpoint>::<model>" when an endpoint was addressed explicitly) when
+// present, else the bare wire model. The binding keeps the exact endpoint
+// when the same model exists on several ones, mirroring the server's
+// senderForSession.
+func resumeModelRef(sess *agent.Session) string {
+	if sess.ModelConfig != "" {
+		return sess.ModelConfig
+	}
+	return sess.Model
+}
+
+// resumeLite re-infers the session's implicit lite model after a resume
+// changed the active model. The startup lite inference ran against the config
+// default; after resume the conversation runs on the session's own model, so
+// compaction should follow the session's endpoint, key, and prompt cache.
+// Only a lite that came from the startup sender (implicit inference) or was
+// absent is touched — an explicit cfg.Lite entry built from its own sender is
+// left alone.
+func resumeLite(a *agent.Agent, prevSender agent.Sender, provider, model string, entry config.ModelEntry) {
+	if a.LiteSender != prevSender && a.LiteSender != nil {
+		return
+	}
+	if lm := app.ImplicitLiteModel(provider, model, resolveBaseURL(provider, entry)); lm != "" {
+		a.LiteSender = a.GetSender()
+		a.LiteModel = lm
+	} else {
+		a.LiteSender, a.LiteModel = nil, ""
+	}
+}
+
 // runChat handles `octo [flags] [message]` — every invocation that isn't a
 // named subcommand.
 //
@@ -1032,6 +1064,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if useTUI {
 		var sess *agent.Session
 		if resumeID != "" {
+			startProvider, startModel, startEntry := provName, resolvedModel, entry
 			sess, err = agent.LoadSession(resumeID)
 			if err != nil {
 				fmt.Fprintf(stderr, "octo: %v\n", err)
@@ -1062,11 +1095,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				// /model switch) over its bare wire model — the binding keeps the
 				// exact endpoint when the same model exists on several ones,
 				// mirroring the server's senderForSession.
-				ref := sess.Model
-				if sess.ModelConfig != "" {
-					ref = sess.ModelConfig
-				}
-				p, m, e, rebuild, ok := resolveResumedModel(ref, provName, entry, cfg)
+				p, m, e, rebuild, ok := resolveResumedModel(resumeModelRef(sess), provName, entry, cfg)
 				if !ok {
 					fmt.Fprintf(stderr, "octo: warning: session model %q is no longer configured; resuming on %q\n", sess.Model, resolvedModel)
 					a.Model = resolvedModel
@@ -1090,25 +1119,25 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 						} else {
 							llmSender = newSender
 							a.SetSender(llmSender)
-							// The implicit lite model was inferred for the
-							// config default above; re-infer it on the
-							// session's own sender so compaction stays on the
-							// session's endpoint, key, and prompt cache (an
-							// explicit cfg.Lite entry — built from its own
-							// sender — is untouched).
-							if a.LiteSender == prevSender {
-								if lm := app.ImplicitLiteModel(p, m, resolveBaseURL(p, e)); lm != "" {
-									a.LiteSender = llmSender
-									a.LiteModel = lm
-								} else {
-									a.LiteSender, a.LiteModel = nil, ""
-								}
-							}
 							a.Model = m
+							// Compaction's lite model was inferred for the
+							// config default above; re-infer it on the session's
+							// own sender (resumeLite no-ops when the lite is an
+							// explicit cfg.Lite entry).
+							resumeLite(a, prevSender, p, m, e)
 						}
 					} else {
 						a.Model = m
+						resumeLite(a, prevSender, p, m, e)
 					}
+				}
+				// The startup banner (above) printed the config-default
+				// resolution; when a resumed session overrode it, say so under
+				// --verbose so the line matches the wire.
+				if resolveVerbosity(*quietFlag, *verboseFlag).verbose() &&
+					(provName != startProvider || resolvedModel != startModel || entry.BaseURL != startEntry.BaseURL) {
+					fmt.Fprintf(stderr, "octo: resumed session: provider=%s model=%s endpoint=%s\n",
+						provName, resolvedModel, effectiveEndpoint(provName, entry))
 				}
 			}
 			// Recompose from the session's raw user layer so base/project/env

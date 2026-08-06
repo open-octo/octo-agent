@@ -79,6 +79,7 @@ func TestResolveResumedModel(t *testing.T) {
 		startEntry  config.ModelEntry
 		wantProv    string
 		wantModel   string
+		wantBaseURL string
 		wantRebuild bool
 		wantOK      bool
 	}{
@@ -109,6 +110,7 @@ func TestResolveResumedModel(t *testing.T) {
 			startEntry:  config.ModelEntry{Provider: "deepseek", Model: "deepseek-v4-flash", BaseURL: "https://relay.example.com"},
 			wantProv:    "deepseek",
 			wantModel:   "deepseek-v4-flash",
+			wantBaseURL: "https://api.deepseek.com",
 			wantRebuild: true,
 			wantOK:      true,
 		},
@@ -158,6 +160,9 @@ func TestResolveResumedModel(t *testing.T) {
 			}
 			if e.Model != tt.wantModel {
 				t.Errorf("entry.Model = %q, want %q", e.Model, tt.wantModel)
+			}
+			if tt.wantBaseURL != "" && e.BaseURL != tt.wantBaseURL {
+				t.Errorf("entry.BaseURL = %q, want %q", e.BaseURL, tt.wantBaseURL)
 			}
 		})
 	}
@@ -945,5 +950,22 @@ func TestRunChat_ResumedPlainSession_NoWarning(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "may make the model emit tool calls as text") {
 		t.Errorf("plain session should not warn; got stderr:\n%s", stderr.String())
+	}
+}
+
+// TestResumeModelRef pins the resume ref selection: a session that recorded a
+// mid-session /model switch (ModelConfig, possibly a composite
+// "<endpoint>::<model>" binding) resumes on that binding; a plain session
+// falls back to its bare wire model.
+func TestResumeModelRef(t *testing.T) {
+	sess := agent.NewSession("deepseek-v4-flash", "")
+	if got := resumeModelRef(sess); got != "deepseek-v4-flash" {
+		t.Errorf("bare session ref = %q, want deepseek-v4-flash", got)
+	}
+	if err := sess.SetModelConfig("ep-b::deepseek-v4-flash", "deepseek-v4-flash"); err != nil {
+		t.Fatalf("SetModelConfig: %v", err)
+	}
+	if got := resumeModelRef(sess); got != "ep-b::deepseek-v4-flash" {
+		t.Errorf("bound session ref = %q, want ep-b::deepseek-v4-flash", got)
 	}
 }
