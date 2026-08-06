@@ -669,6 +669,13 @@ function darkMDStyles(): string {
     `.code-lang{font-size:11px;color:#888;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}`,
     `.copy-btn{margin-left:auto;height:24px;padding:0 8px;border:none;background:transparent;border-radius:5px;font-size:11px;color:#888;cursor:pointer;font-family:inherit}`,
     `.copy-btn:hover{background:#3d3d3d;color:#58a6ff}`,
+    // Markdown tables — mirrors the app's .rich-answer/.md-content table skin
+    // (see ChatView/ProfileView) with the preview iframe's own palette.
+    `.table-scroll{overflow-x:auto;margin:10px 0}`,
+    `table{width:max-content;min-width:100%;max-width:none;border-collapse:collapse;border-spacing:0;font-size:13.5px;line-height:1.55}`,
+    `th,td{padding:7px 14px;text-align:left;vertical-align:top;border:1px solid #30363d}`,
+    `th{background:#2d2d2d;font-weight:600;color:#e6edf3;white-space:nowrap}`,
+    `tbody tr:nth-child(even) td{background:#282a2e}`,
     `pre{margin:0;padding:12px 14px;overflow-x:auto;font-size:13px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#d4d4d4}`,
     `code.hljs{background:transparent;padding:0}`,
     `.hljs{color:#c9d1d9;background:#0d1117}`,
@@ -698,6 +705,13 @@ function lightMDStyles(): string {
     `.code-lang{font-size:11px;color:#57606a;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}`,
     `.copy-btn{margin-left:auto;height:24px;padding:0 8px;border:none;background:transparent;border-radius:5px;font-size:11px;color:#57606a;cursor:pointer;font-family:inherit}`,
     `.copy-btn:hover{background:#d0d7de;color:#0969da}`,
+    // Markdown tables — mirrors the app's .rich-answer/.md-content table skin
+    // (see ChatView/ProfileView) with the preview iframe's own palette.
+    `.table-scroll{overflow-x:auto;margin:10px 0}`,
+    `table{width:max-content;min-width:100%;max-width:none;border-collapse:collapse;border-spacing:0;font-size:13.5px;line-height:1.55}`,
+    `th,td{padding:7px 14px;text-align:left;vertical-align:top;border:1px solid #d0d7de}`,
+    `th{background:#eaeef2;font-weight:600;color:#1f2328;white-space:nowrap}`,
+    `tbody tr:nth-child(even) td{background:#f6f8fa}`,
     `pre{margin:0;padding:12px 14px;overflow-x:auto;font-size:13px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#24292f}`,
     `code.hljs{background:transparent;padding:0}`,
     // highlight.js GitHub (light) theme — simplified
