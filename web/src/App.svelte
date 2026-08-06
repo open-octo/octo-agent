@@ -10,6 +10,7 @@
   import * as api from './lib/api'
   import { installExternalLinkInterceptor } from './lib/externalLinks'
   import { normalizeHash } from './lib/hashRouting'
+  import { globalKeyIntent } from './lib/globalKeys'
   import AuthGate from './components/overlays/AuthGate.svelte'
   import FirstRunSetup from './components/overlays/FirstRunSetup.svelte'
   import Header from './components/layout/Header.svelte'
@@ -353,14 +354,14 @@
   // Cmd/Ctrl+N starts a new session — a native desktop-shell bind. Under a
   // plain browser Cmd+N is a reserved browser shortcut (new window) the page
   // never sees, so the handler is gated to the Wails shell (isDesktopShell)
-  // where the keypress actually reaches the page and is safe to claim.
+  // where the keypress actually reaches the page and is safe to claim. The
+  // key→intent mapping lives in lib/globalKeys for unit testing.
   function onGlobalKeydown(e: KeyboardEvent) {
-    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+    const intent = globalKeyIntent(e, { shell: isDesktopShell })
+    if (intent === 'palette') {
       e.preventDefault()
       cmdkOpen.update(v => !v)
-      return
-    }
-    if (isDesktopShell && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'n') {
+    } else if (intent === 'new-session') {
       e.preventDefault()
       createNewSession().catch((err: any) => showToast(err.message, 'error'))
     }
