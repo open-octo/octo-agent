@@ -122,7 +122,7 @@ Codex 桌面版和 WorkBuddy 动辄 **1 GB 上下**。一个薄薄的 agent harn
 
 ### 9. 最后的建议
 
-如果你能合法稳定地使用 Codex / Claude 订阅，请继续用它们——它们依旧是这个星球上
+如果你能合规稳定地使用 Codex / Claude 订阅，请继续用它们——它们依旧是这个星球上
 最顶级的 agent harness。否则，octo 值得你认真看一看。
 
 ## 界面
