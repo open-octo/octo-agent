@@ -26,6 +26,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/memory"
 	"github.com/open-octo/octo-agent/internal/permission"
 	"github.com/open-octo/octo-agent/internal/prompt"
+	"github.com/open-octo/octo-agent/internal/server"
 	"github.com/open-octo/octo-agent/internal/skills"
 	"github.com/open-octo/octo-agent/internal/tools"
 	"github.com/open-octo/octo-agent/internal/version"
@@ -130,6 +131,25 @@ func wireSessionHooks(a *agent.Agent, sess *agent.Session, transport string) {
 	// hook_started field) — treat it as resume, not startup, on first touch.
 	a.SessionStarted = sess.HookStarted || len(sess.Messages) > 0
 	a.OnSessionStart = func() { sess.MarkHookStarted() }
+}
+
+// projectRunDir returns the directory this run should work in: the project's
+// directory when resuming a session that belongs to one, otherwise cwd
+// unchanged. lookup is server.ProjectDirForSession (injected for testing).
+//
+// Only the project directory, never the session's own WorkingDir. Every web
+// session is seeded with the default workspace dir (~/Octo), so honouring that
+// would drag `octo -c` out of whatever repo the user is standing in; a project
+// directory, by contrast, is something the user set explicitly for a group of
+// sessions.
+func projectRunDir(cwd, resumeID string, lookup func(string) string) string {
+	if resumeID == "" {
+		return cwd
+	}
+	if dir := lookup(resumeID); dir != "" {
+		return dir
+	}
+	return cwd
 }
 
 // resolveProjectHooksTrust decides whether the project-level <cwd>/.octo/hooks.yml
@@ -727,6 +747,29 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// provider's system+tools prompt cache. The session stores only the raw
 	// user layer; base/project are recomposed fresh each run.
 	cwd, _ := os.Getwd()
+	// Resuming a session that belongs to a project relocates this whole run to
+	// the project's directory: tools, sandbox roots, project hooks, project
+	// memory, and the env context all key off cwd, and letting them disagree
+	// (tools in one directory, hooks discovered from another) would be worse
+	// than either choice on its own.
+	//
+	// Deliberately only the PROJECT directory, not the session's own
+	// WorkingDir: every web session gets the default workspace dir seeded onto
+	// it (~/Octo), so honouring that would drag `octo -c` out of whatever repo
+	// the user is standing in. A project directory is something the user set
+	// explicitly for a group of sessions.
+	//
+	// Resolved once here, like everything else in this block — switching
+	// sessions inside the REPL does not recompute it, matching the
+	// compose-once-per-process model the CLI already follows for the system
+	// prompt. The CLI has no way to CHANGE a working directory; a project's
+	// setting is editable only where it was made (the Web UI / desktop).
+	if dir := projectRunDir(cwd, resumeID, server.ProjectDirForSession); dir != cwd {
+		// Announce it — silently running tools somewhere other than the
+		// directory the user is standing in would be baffling.
+		fmt.Fprintf(stderr, "Session belongs to a project — working in %s\n", dir)
+		cwd = dir
+	}
 	env := buildEnvContext(cwd)
 
 	// Discover skills once at session start. The manifest goes into the frozen

@@ -292,6 +292,37 @@ func TestProject_NewSessionNotSeededWithDefaultDir(t *testing.T) {
 	}
 }
 
+// TestProject_ExportedDirLookup covers the CLI/TUI entry point: it must report
+// a project's directory and nothing else — notably not the session's own
+// working dir, which is seeded on every web session and would otherwise pull
+// `octo -c` out of the directory the user is standing in.
+func TestProject_ExportedDirLookup(t *testing.T) {
+	srv := groupTestServer(t)
+	projectDir := t.TempDir()
+	ownDir := t.TempDir()
+
+	inProject := saveSessionWithDir(t, ownDir)
+	outside := saveSessionWithDir(t, ownDir)
+
+	gid := newProjectGroup(t, srv, "Work", projectDir)
+	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+inProject.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
+		t.Fatalf("move in: status %d", rec.Code)
+	}
+
+	if got := ProjectDirForSession(inProject.ID); got != projectDir {
+		t.Errorf("session in project: %q, want %q", got, projectDir)
+	}
+	if got := ProjectDirForSession(outside.ID); got != "" {
+		t.Errorf("session outside a project must report no dir, got %q (its own dir must not leak)", got)
+	}
+	if got := ProjectDirForSession(""); got != "" {
+		t.Errorf("empty session id: %q, want \"\"", got)
+	}
+	if got := ProjectDirForSession("does-not-exist"); got != "" {
+		t.Errorf("unknown session id: %q, want \"\"", got)
+	}
+}
+
 // TestProject_ListReportsProjectFields makes sure the Web UI can tell a project
 // from a plain group without a second request.
 func TestProject_ListReportsProjectFields(t *testing.T) {

@@ -282,6 +282,19 @@ func projectForSession(sessionID string) *sessionGroup {
 	return projects[sessionID]
 }
 
+// ProjectDirForSession returns the working directory of the project owning
+// sessionID, or "" when the session is not in one. Exported for the CLI/TUI,
+// which have no server to ask: a session filed under a project should run in
+// the project's directory there too, wherever octo happened to be launched
+// from. Read-only by design — the CLI offers no way to change a working
+// directory, so a project's setting can only be edited where it was made.
+func ProjectDirForSession(sessionID string) string {
+	if p := projectForSession(sessionID); p != nil {
+		return p.WorkingDir
+	}
+	return ""
+}
+
 // projectNotesFor returns the project notes that apply to sessionID, or "".
 func projectNotesFor(sessionID string) string {
 	if p := projectForSession(sessionID); p != nil {

@@ -27,13 +27,19 @@ cron task 已经在自动建同名分组（`tasks_handlers.go` → `createSessio
 |---|---|---|
 | Web / 桌面 | 是 | 有（项目内的会话返回 409） |
 | IM channel | 是 | 无 |
-| CLI / TUI | 否 | 无 |
+| CLI / TUI | 是（resume 时） | 无 |
 
-IM 走 `runChannelTurns` → `sessionCwdEnv`，和 Web 共用解析点，所以一条被拖进项目的 channel 会话下一轮就落在项目目录，冻结身份也随之更新。
+**管理界面只在 Web/桌面**——项目的创建和编辑只有一处入口。但目录解析在服务端，所有入口都遵守。
 
-CLI/TUI 是唯一的例外：`cmd/octo/chat.go` 的 `a.CWD` 恒为进程启动目录，整个 `cmd/octo/` 从不读 `Session.WorkingDir`。这是**先于项目就存在**的行为——今天 resume 一条在 Web 里设过工作目录的普通会话也一样不遵守——项目没有加剧它，只是让它更容易被撞见。
+IM 走 `runChannelTurns` → `sessionCwdEnv`，和 Web 共用解析点，一条被拖进项目的 channel 会话下一轮就落在项目目录，冻结身份也随之更新。
 
-反向的静默失效不存在：`SetWorkingDir` 只有 `internal/server` 的三个调用点，CLI/TUI/IM 都没有改目录的入口，所以不会出现"在别处改了目录、Web 里不生效"。CLI/TUI 也不调 `SetComposedSystem`（每进程组一次提示词），因此用 TUI 跑一条项目会话不会把进程目录写进 `ComposedForCWD` 去污染 Web 侧的冻结身份。
+CLI/TUI 在 resume 时查一次 `server.ProjectDirForSession`（`cmd/octo/chat.go` 的 `projectRunDir`）：会话属于项目就把**整个 run** 重定位到项目目录。不是只改 `a.CWD` —— 沙箱根、项目 hooks 的信任根、项目记忆目录、env context 全都由同一个 `cwd` 派生，让它们分裂（工具在一个目录跑、hooks 从另一个目录找）比两种选择中的任何一种都糟。
+
+CLI 只认**项目目录**，不认会话自己的 `WorkingDir`。因为 `applyDefaultWorkspaceDir` 给每条 web 会话都 seed 了默认工作区（`~/Octo`），跟随它会把 `octo -c` 从用户所在的仓库里拽走；项目目录则是用户为一组会话显式设的。
+
+解析只发生一次，和这段代码里其它所有东西一样——REPL 内切换会话不重算，与 CLI 既有的"每进程组一次系统提示词"模型一致。重定位会打印一行说明：静默地在别处跑工具会让人莫名其妙。
+
+CLI 仍然**没有**修改工作目录的入口。`SetWorkingDir` 只有 `internal/server` 三个调用点，所以不存在"在别处改了目录、Web 里不生效"的反向静默失效；项目设置只能在它被创建的地方改。CLI/TUI 也不调 `SetComposedSystem`（每进程组一次提示词），因此用 TUI 跑一条项目会话不会把目录写进 `ComposedForCWD` 去污染 Web 侧的冻结身份。
 
 ## 数据模型
 
