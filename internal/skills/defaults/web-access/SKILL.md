@@ -50,12 +50,11 @@ metadata:
 | 场景 | 工具 |
 |------|------|
 | 搜索摘要、关键词结果、发现信息来源 | **web_search** |
-| URL 已知，按 prompt 从页面定向提取信息（直接 HTTP 抓取，自带浏览器 UA 和同源 Referer） | **web_fetch**（直接传原始 URL） |
-| URL 已知，需要原始 HTML（meta、JSON-LD 等结构化字段） | **terminal**（curl） |
+| URL 已知，按 prompt 从页面提取信息，或要页面的原始 HTML（meta、JSON-LD 等结构化字段） | **web_fetch**（直接传原始 URL；直接 HTTP 抓取，自带浏览器 UA 和同源 Referer，返回页面原始文本） |
 | 非公开内容，或已知静态层无效的平台（小红书、公众号等） | **browser**（直接，跳过静态层） |
 | 需要登录态、交互操作，或要像人一样在浏览器内自由导航探索 | **browser** |
 
-`web_search` / `web_fetch` / curl 都不处理登录态。`browser` 不要求 URL 已知——可从任意入口出发，靠页面内搜索、点击、跳转找到目标。
+`web_search` / `web_fetch` 都不处理登录态。`browser` 不要求 URL 已知——可从任意入口出发，靠页面内搜索、点击、跳转找到目标。
 
 ## browser 工具要点
 

@@ -116,9 +116,7 @@ MCP 工具的 JSON schema 可能非常庞大——配置几十个 MCP 服务器�
 
 ### 抽掉 SSRF 的地板
 
-`web_fetch` 不能直接 `http.Get(userURL)`——那是教科书级的 SSRF（Server-Side Request Forgery，服务端请求伪造）。它的回应（`internal/tools/web_fetch.go`）把每个请求压进**一条加固路径**：
-
-- **直接请求路径**——直接抓取原始 URL，因此**必须**跟随跨主机重定向（URL 短链、`www` 规范化跳转都正常），但共享链路本地封禁，并把重定向链上限设为 10 跳，避免环让 agent 挂起。
+`web_fetch` 不能直接 `http.Get(userURL)`——那是教科书级的 SSRF（Server-Side Request Forgery，服务端请求伪造）。它的回应（`internal/tools/web_fetch.go`）是**一条加固过的抓取路径**：直接打原始 URL，因此**必须**跟随跨主机重定向（对任意 URL 来说，短链、`www` 规范化跳转都是常态），但每一跳都经由 `secureFetchTransport` 拨号——链路本地地址与云元数据端点一律拒绝——并把重定向链上限设为 10 跳，避免环让 agent 挂起。
 
 `net.Dialer.Control` 钩子在 DNS 解析**之后**拿到真实 IP 时触发，所以 DNS 重绑定（一个主机名此刻解析成公网 IP，下一刻就解析成 `169.254.x.x` / `127.0.0.1`）也被拦下。身体也有边界：`WebFetchInlineBytes`（64 KB）是内联阈值；`WebFetchMaxBytes`（5 MB）是硬上限；超出就截断落盘到临时文件。大页面 = 摘要 + 头尾预览 + 指一条 `read_file` 路径给剩余部分，绝不一墙文字糊进模型的 context。
 
