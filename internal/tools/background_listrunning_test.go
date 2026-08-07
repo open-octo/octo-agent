@@ -1,13 +1,14 @@
 package tools
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
 
 func TestBackgroundManager_ListRunning(t *testing.T) {
 	m := NewBackgroundManager()
-	id, err := m.Start("sleep 2", BgModeAsync)
+	id, err := m.Start(context.Background(), "sleep 2", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -35,7 +36,7 @@ func TestBackgroundManager_ListRunning(t *testing.T) {
 
 func TestBackgroundManager_ListRunning_ExcludesExited(t *testing.T) {
 	m := NewBackgroundManager()
-	id, err := m.Start("echo done", BgModeAsync)
+	id, err := m.Start(context.Background(), "echo done", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -58,7 +59,7 @@ func TestRunningBackground_DefaultManagerDelegates(t *testing.T) {
 // started with visible=false do not appear in ListRunning until Promoted.
 func TestBackgroundManager_ListRunning_ExcludesInvisible(t *testing.T) {
 	m := NewBackgroundManager()
-	id, err := m.Start("sleep 2", BgModeAsync, WithVisible(false))
+	id, err := m.Start(context.Background(), "sleep 2", BgModeAsync, WithVisible(false))
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

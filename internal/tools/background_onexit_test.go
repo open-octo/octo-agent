@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"runtime"
 	"strings"
 	"testing"
@@ -34,7 +35,7 @@ func TestBackgroundManager_OnExitHookFires(t *testing.T) {
 		}
 	})
 
-	id, err := m.Start("echo hi-from-bg", BgModeAsync)
+	id, err := m.Start(context.Background(), "echo hi-from-bg", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -83,7 +84,7 @@ func TestBackgroundManager_OnExitHookFires(t *testing.T) {
 // leaves the original poll-only behaviour intact — Start/Read still work.
 func TestBackgroundManager_NoHookByDefault(t *testing.T) {
 	m := NewBackgroundManager()
-	id, err := m.Start("echo plain", BgModeAsync)
+	id, err := m.Start(context.Background(), "echo plain", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -115,7 +116,7 @@ func TestBackgroundManager_OnExitNotFiredForInvisibleProcess(t *testing.T) {
 	})
 
 	// Start invisible (visible=false), exactly like the sync path does.
-	id, err := m.Start("echo sync-done", BgModeAsync, WithVisible(false))
+	id, err := m.Start(context.Background(), "echo sync-done", BgModeAsync, WithVisible(false))
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestBackgroundManager_OnExitFiresAfterPromote(t *testing.T) {
 	})
 
 	// Start invisible, then promote before it finishes.
-	id, err := m.Start("sleep 0.1", BgModeAsync, WithVisible(false))
+	id, err := m.Start(context.Background(), "sleep 0.1", BgModeAsync, WithVisible(false))
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

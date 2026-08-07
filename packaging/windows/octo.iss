@@ -121,22 +121,6 @@ begin
   RegWriteExpandStringValue(HKEY_CURRENT_USER, EnvKey, 'Path', Path);
 end;
 
-// WriteDefaultConfigIfMissing seeds ~/.octo/config.yml with workspace_dir: auto
-// on a genuinely fresh install; never overwrites an existing user config.
-procedure WriteDefaultConfigIfMissing;
-var
-  ConfigDir, ConfigPath: string;
-begin
-  ConfigDir := ExpandConstant('{%USERPROFILE}') + '\.octo';
-  ConfigPath := ConfigDir + '\config.yml';
-  if FileExists(ConfigPath) then
-    exit;
-  if not DirExists(ConfigDir) then
-    if not CreateDir(ConfigDir) then
-      exit;
-  SaveStringToFile(ConfigPath, 'workspace_dir: auto' + #13#10, False);
-end;
-
 // SeedUvToOctoBin copies the bundled uv into ~/.octo/bin so the CLI has Python
 // tooling immediately (the app also self-provisions this on first launch).
 procedure SeedUvToOctoBin;
@@ -230,7 +214,6 @@ begin
   begin
     AddToPath;
     EnsurePowerShell7;
-    WriteDefaultConfigIfMissing;
     SeedUvToOctoBin;
     LaunchApp;
   end;

@@ -55,14 +55,22 @@ func setTestHomeDir(t *testing.T) string {
 	return tmp
 }
 
-// A literal value equal to the old magic keyword is now just an ordinary
-// relative path override — "auto" is no longer special-cased.
-func TestResolveWorkspaceDir_LiteralNamedAuto(t *testing.T) {
-	got, err := ResolveWorkspaceDir("auto")
-	if err != nil {
-		t.Fatalf("ResolveWorkspaceDir(\"auto\") error = %v, want nil", err)
-	}
-	if got != "auto" {
-		t.Fatalf("ResolveWorkspaceDir(\"auto\") = %q, want %q", got, "auto")
+// The legacy "auto" keyword resolves to the same default as "". #1986 made it
+// a literal relative path, but the Windows/macOS installers had been seeding
+// `workspace_dir: auto` into every fresh config since before that change —
+// those configs would otherwise root every new session at the literal
+// directory "auto" under the server's process cwd.
+func TestResolveWorkspaceDir_LegacyAutoResolvesToDefault(t *testing.T) {
+	home := setTestHomeDir(t)
+	want := filepath.Join(home, "Octo")
+
+	for _, raw := range []string{"auto", "Auto", " auto "} {
+		got, err := ResolveWorkspaceDir(raw)
+		if err != nil {
+			t.Fatalf("ResolveWorkspaceDir(%q) error = %v, want nil", raw, err)
+		}
+		if got != want {
+			t.Fatalf("ResolveWorkspaceDir(%q) = %q, want %q", raw, got, want)
+		}
 	}
 }

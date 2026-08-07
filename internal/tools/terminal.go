@@ -248,7 +248,7 @@ func (t TerminalTool) ExecuteStream(
 	// Skipped for sub-agents (see subAgent above) — the requested async/
 	// interactive mode is ignored and the command runs synchronously instead.
 	if useBg && !subAgent {
-		id, err := t.managerFor(ctx).Start(command, bgMode)
+		id, err := t.managerFor(ctx).Start(ctx, command, bgMode)
 		if err != nil {
 			return agent.ToolResult{Text: ""}, err
 		}
@@ -337,7 +337,7 @@ func (t TerminalTool) ExecuteStream(
 	}
 
 	mgr := t.managerFor(ctx)
-	id, err := mgr.Start(command, BgModeAsync, WithOnLine(onLine), WithVisible(false))
+	id, err := mgr.Start(ctx, command, BgModeAsync, WithOnLine(onLine), WithVisible(false))
 	if err != nil {
 		return agent.ToolResult{Text: ""}, err
 	}

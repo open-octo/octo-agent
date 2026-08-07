@@ -635,7 +635,7 @@ func main() {
 		t.Fatalf("go build helper: %v\n%s", err, buildOut)
 	}
 
-	id, err := mgr.Start(bin, BgModeInteractive)
+	id, err := mgr.Start(context.Background(), bin, BgModeInteractive)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -682,7 +682,7 @@ func TestTerminalInputTool_ExitedProcess(t *testing.T) {
 	inputTool := TerminalInputTool{mgr: mgr}
 
 	// Start a trivial command that exits immediately.
-	id, err := mgr.Start("echo done", BgModeInteractive)
+	id, err := mgr.Start(context.Background(), "echo done", BgModeInteractive)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

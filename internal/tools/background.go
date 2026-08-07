@@ -354,13 +354,22 @@ func WithVisible(v bool) StartOption {
 // its background id. Output streams into a capped buffer; the process is killed
 // if its context is cancelled (Kill / KillAll). The mode argument determines
 // whether the process is an async one-shot task or an interactive service/REPL.
-func (m *BackgroundManager) Start(command string, mode BackgroundMode, opts ...StartOption) (string, error) {
+//
+// ctx contributes VALUES only — most importantly the working directory stamped
+// by WithWorkingDir, so the command runs where the session's tools run (the
+// per-session dir, a sub-agent's worktree, a cron task's directory) instead of
+// the server process's cwd. The child's lifecycle is deliberately NOT tied to
+// ctx's cancellation: async/interactive processes must survive the turn that
+// started them, so the process runs under its own cancel (Kill / KillAll).
+func (m *BackgroundManager) Start(ctx context.Context, command string, mode BackgroundMode, opts ...StartOption) (string, error) {
 	if mode != BgModeAsync && mode != BgModeInteractive {
 		return "", fmt.Errorf("background: invalid mode %q (want %q or %q)", mode, BgModeAsync, BgModeInteractive)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cmd, err := shellCommand(ctx, command)
+	bgCtx, cancel := context.WithCancel(context.Background())
+	// WithWorkingDir no-ops on "" — an unstamped caller keeps the process CWD.
+	bgCtx = WithWorkingDir(bgCtx, WorkingDir(ctx))
+	cmd, err := shellCommand(bgCtx, command)
 	if err != nil {
 		cancel()
 		return "", err

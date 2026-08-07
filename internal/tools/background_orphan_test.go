@@ -3,6 +3,7 @@
 package tools
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"syscall"
@@ -16,7 +17,7 @@ import (
 // (the direct child / group leader) is SIGKILLed instead of the whole group.
 func startWithBackgroundChild(t *testing.T, mgr *BackgroundManager) (id string, childPID int) {
 	t.Helper()
-	id, err := mgr.Start("sleep 60 & echo $! ; wait", BgModeAsync)
+	id, err := mgr.Start(context.Background(), "sleep 60 & echo $! ; wait", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

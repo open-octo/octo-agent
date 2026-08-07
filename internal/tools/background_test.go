@@ -33,7 +33,7 @@ func waitFor(t *testing.T, what string, fn func() bool) {
 
 func TestBackgroundManager_RunsAndReportsExit(t *testing.T) {
 	m := NewBackgroundManager()
-	id, err := m.Start("echo hello", BgModeAsync)
+	id, err := m.Start(context.Background(), "echo hello", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestBackgroundManager_RunsAndReportsExit(t *testing.T) {
 
 func TestBackgroundManager_IncrementalRead(t *testing.T) {
 	m := NewBackgroundManager()
-	id, err := m.Start("echo one; sleep 0.3; echo two", BgModeAsync)
+	id, err := m.Start(context.Background(), "echo one; sleep 0.3; echo two", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestBackgroundManager_IncrementalRead(t *testing.T) {
 
 func TestBackgroundManager_Kill(t *testing.T) {
 	m := NewBackgroundManager()
-	id, err := m.Start("sleep 30", BgModeAsync)
+	id, err := m.Start(context.Background(), "sleep 30", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

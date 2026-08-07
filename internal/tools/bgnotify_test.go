@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -119,15 +120,15 @@ func TestFormatBgNote_NoNudgeForKilled(t *testing.T) {
 func TestFormatBgNoteWithSummary_SkipsFinishedAndSelf(t *testing.T) {
 	mgr := NewBackgroundManager()
 	// Launch three processes; we will simulate bg_1 finishing.
-	_, err := mgr.Start("echo one", BgModeAsync)
+	_, err := mgr.Start(context.Background(), "echo one", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start bg_1: %v", err)
 	}
-	_, err = mgr.Start("sleep 60", BgModeAsync)
+	_, err = mgr.Start(context.Background(), "sleep 60", BgModeAsync)
 	if err != nil {
 		t.Fatalf("Start bg_2: %v", err)
 	}
-	_, err = mgr.Start("node server.js", BgModeInteractive)
+	_, err = mgr.Start(context.Background(), "node server.js", BgModeInteractive)
 	if err != nil {
 		t.Fatalf("Start bg_3: %v", err)
 	}

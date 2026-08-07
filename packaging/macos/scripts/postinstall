@@ -27,15 +27,13 @@ if [ -f "$res/uv" ]; then
   chmod +x "$octo_bin_dir/uv"
 fi
 
-# Seed ~/.octo/config.yml (workspace_dir: auto) only on a genuinely fresh
-# install; never overwrite an existing user config.
+# No config.yml seeding: an absent/empty workspace_dir already resolves to
+# ~/Octo (the pre-#1986 "auto" magic string is gone). The dir is still needed
+# for the uninstall helper below.
 config_dir="$HOME/.octo"
-config_path="$config_dir/config.yml"
-if [ ! -f "$config_path" ]; then
+if [ ! -d "$config_dir" ]; then
   mkdir -p "$config_dir"
   chmod 700 "$config_dir"
-  printf 'workspace_dir: auto\n' > "$config_path"
-  chmod 600 "$config_path"
 fi
 
 # Uninstall helper (a .pkg has no native uninstaller). Leaves ~/.octo data.
