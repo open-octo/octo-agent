@@ -80,10 +80,29 @@ r, err := charset.NewReader(bytes.NewReader(body), contentType)
 3. 遍历候选块（`p`、`article`、`div`、`section`、`td` 等），对每个节点打分：
    - 加分：文本长度、段落数
    - 减分：链接文本占比（链接密度高 → 导航/聚合页特征）、class/id 命中噪声词（`nav`、`menu`、`sidebar`、`comment`、`footer`、`ad` 等）
-4. 选出得分最高的候选块作为正文容器
-5. 若最高分低于阈值（提取出的文本 < 200 字符），判定**提取失败**，回退全页转换
+4. 选出得分最高的候选块
+5. **向上提升**：从该候选逐级向上，只要父节点的原始正文得分 ≥ 当前节点的 50%，就上提到父节点（见下）
+6. 若提取出的文本 < 200 字符，判定**提取失败**，回退全页转换
 
-阈值（200 字符）为起步值，实现后用真实页面样本校准。
+### 为什么需要向上提升
+
+只取"得分最高的候选"会让引用密集的长文输给它自己的某一章：链接密度惩罚把整篇文章的分压下去，而文章内部某个代码密集、链接稀少的章节几乎不受惩罚，于是赢了——页面被清洗成"第七章"，前六章无声消失。
+
+上提用的是**原始正文得分**（未乘链接密度和 class 权重），因为这个机制存在的意义正是"父节点链接多不构成淘汰理由"。
+
+阈值 50% 是拿真实页面扫出来的拐点，不是拍的：
+
+| 页面 | 原始 | 无上提 | 上提 50% |
+|------|------|--------|----------|
+| Wikipedia《Go》 | 720 KB | 13 KB（只有 Types 一节） | 101 KB（全文 + infobox） |
+| go.dev/blog/go1.22 | 36 KB | 3.3 KB | 3.4 KB（多出作者、日期） |
+| MDN Referer | 174 KB | 2.3 KB | 2.3 KB |
+
+再往下放宽到 0.35 / 0.25，六个样本的结果**完全不变**——50% 处父节点得分已经断崖，说明这是结构自然边界而非调参凑出来的数。文章页几乎不受影响（只多出作者/日期这类真元数据），Wikipedia 从残缺变完整。
+
+### 提取阈值
+
+200 字符经真实样本验证保留：达到该量级的提取结果都是真正文，未观察到误判。知乎反爬空壳页（650 B）正确落到兜底路径。
 
 ### 两条路径的去噪范围不同（有意）
 
@@ -169,14 +188,14 @@ r, err := charset.NewReader(bytes.NewReader(body), contentType)
 
 ## 依赖变更
 
-两个模块从 indirect 转 direct，**无新增模块**（都已在依赖树里，`go mod tidy` 自动处理）：
+**无新增模块**，两个已有模块从 indirect 转 direct：
 
-| 模块 | 现状 | 用途 |
-|------|------|------|
-| `golang.org/x/net` v0.55.0 | indirect → direct | `html`（DOM 解析）、`html/charset`（编码嗅探） |
-| `golang.org/x/text` v0.40.0 | indirect → direct | `html/charset` 的转码后端（`encoding/htmlindex` 等），间接引入 |
+| 模块 | 用途 |
+|------|------|
+| `golang.org/x/net` v0.55.0 | 生产代码：`html`（DOM 解析）、`html/charset`（编码嗅探） |
+| `golang.org/x/text` v0.40.0 | 测试代码：`encoding/simplifiedchinese` 构造 GBK 样本 |
 
-`x/text` 是 `html/charset` 的必然依赖，不能只转 `x/net`。两者都已锁在 go.sum 里，不引入任何新的供应链面。
+`x/text` 本来就是 `html/charset` 的转码后端，只是因为测试**直接** import 它来编码 GBK 断言数据，`go mod tidy` 才把它一并提为 direct。两者早已锁在 go.sum 里，不引入任何新的供应链面。
 
 顺带收尾：`internal/tools/web_search.go` 的 `stripHTML` 注释写着 "pulling one in would balloon dependencies"——`x/net/html` 转 direct 后这句已过期；那里的实体解码只认 6 个实体（`&amp;` / `&lt;` / `&gt;` / `&quot;` / `&#39;` / `&nbsp;`），可以统一到 `html.UnescapeString`。搜索摘要的正则去标签逻辑本身不动。
 
@@ -188,11 +207,16 @@ r, err := charset.NewReader(bytes.NewReader(body), contentType)
 | 性能：5MB 上限 HTML 的 DOM 解析 | x/net/html 单次遍历 O(n)，5MB 内耗时可接受；清洗前先截断到 WebFetchMaxBytes 的既有逻辑不变 |
 | 转换器覆盖面不足（少见标签） | 未映射标签降级为保留文本内容，不丢信息；后续按需扩展 |
 | 编码嗅探误判（无声明的非 UTF-8 页） | charset 嗅探失败按原字节继续，行为退回今天的现状，不是新增退化 |
-| 自研代码量与维护成本 | 首版按范围控制压到 ~300 行（表格只做规整情形），靠真实样本驱动扩展，不预先覆盖长尾 |
+| 自研代码量与维护成本 | 812 行（含注释），其中约一半是 HTML→Markdown 转换器。表格只做规整情形，长尾按真实样本驱动扩展 |
+
+## 已知限制
+
+- **`<table>` 布局的老页面**（Hacker News 首页是典型）：整页嵌套在不规整表格里，降级成按行文本后所有条目挤成极少数几行。内容、链接、分数都在，模型能用，但可读性差。真要治需要"表格是布局还是数据"的判别，留到有实际需求再说。
+- **客户端渲染页面**：返回静态骨架，清洗只是把骨架变干净。归 `browser` 兜底，与本设计无关。
 
 ## 落地计划
 
 1. **docs-only PR**：本设计文档（`dev-docs/web-fetch-cleaner.md`）
-2. **实现 PR**：`internal/tools/web_fetch_clean.go`（提取 + 转换器，首版 ~300 行）+ 测试 + `web_fetch.go` 管线接入（charset 解码 + 清洗）+ 参数/描述更新 + `web-access` / `deep-research` skill 路由说明回改
+2. **实现 PR**：`internal/tools/web_fetch_clean.go`（提取 + 转换器，812 行）+ `web_fetch_clean_test.go`（435 行）+ `web_fetch.go` 管线接入（charset 解码 + 清洗）+ `clean` 参数与描述 + `web-access` / `deep-research` skill 路由说明回改
 
 **发布顺序**：删 Jina 那个 PR 单独落地会让 web_fetch 明显退化——小页面把几十 KB 原始 HTML 灌进上下文，大页面 spill 后 outline 恒空、预览只剩 `<head>` 骨架。两者要么一起进 release，要么在本设计实现前不切版本。

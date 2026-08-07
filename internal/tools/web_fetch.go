@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/net/html/charset"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 )
@@ -40,8 +43,9 @@ const (
 )
 
 // WebFetchTool fetches a URL and returns its body as text via a direct HTTP
-// GET with a browser-like header set. JS-rendered pages come back as their
-// static HTML skeleton; for interactive or login-walled content, use browser.
+// GET with a browser-like header set. HTML is converted to readable Markdown
+// by default. JS-rendered pages come back as their static HTML skeleton; for
+// interactive or login-walled content, use browser.
 type WebFetchTool struct{}
 
 func (WebFetchTool) Definition() agent.ToolDefinition {
@@ -50,6 +54,8 @@ func (WebFetchTool) Definition() agent.ToolDefinition {
 		Description: "Fetch a URL and return its content via a direct HTTP GET with a " +
 			"browser-like header set (JS-rendered pages return their static HTML skeleton; " +
 			"for interactive or login-walled content use the browser tool). " +
+			"HTML pages are converted to clean Markdown — the main article when it can be " +
+			"identified, the whole page otherwise; pass clean=false for the raw response body. " +
 			"Responses larger than ~64 KB are saved to a temp file; the tool returns a " +
 			"preview summary (size, content-type, first/last lines) plus the file path. " +
 			"Use read_file or grep on that path to inspect the full content. " +
@@ -73,6 +79,10 @@ func (WebFetchTool) Definition() agent.ToolDefinition {
 				"user_agent": map[string]any{
 					"type":        "string",
 					"description": "Optional User-Agent override. Rarely needed (a realistic browser UA is sent by default).",
+				},
+				"clean": map[string]any{
+					"type":        "boolean",
+					"description": "Convert HTML responses to clean Markdown (extracting the main content when possible). Default true. Set false to get the raw response body — useful when you need the markup itself (meta tags, JSON-LD, inline data).",
 				},
 			},
 			"required": []string{"url"},
@@ -100,11 +110,19 @@ func (WebFetchTool) Execute(ctx context.Context, _ string, input map[string]any)
 	referer := strings.TrimSpace(stringArg(input, "referer"))
 	userAgent := strings.TrimSpace(stringArg(input, "user_agent"))
 
+	// Clean by default. A non-boolean value is treated as absent rather than
+	// rejected — the useful reading of a malformed flag is "caller didn't mean
+	// to turn cleaning off".
+	clean := true
+	if v, ok := input["clean"].(bool); ok {
+		clean = v
+	}
+
 	// fetchDirect supplies a same-origin Referer and a browser UA by default;
 	// explicit overrides are passed through when the caller needs to clear a
 	// hotlink/anti-bot 403/404.
 	directCtx, directCancel := context.WithTimeout(ctx, 30*time.Second)
-	out, err := fetchDirect(directCtx, raw, referer, userAgent)
+	out, err := fetchDirect(directCtx, raw, referer, userAgent, clean)
 	directCancel()
 	if err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: %w", err)
@@ -135,7 +153,7 @@ const defaultDirectUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) 
 // when referer is empty a same-origin Referer (scheme://host/) is sent, which
 // a browser would send navigating within a site and which clears many
 // hotlink/anti-bot 403/404s.
-func fetchDirect(ctx context.Context, rawURL, referer, userAgent string) (agent.ToolResult, error) {
+func fetchDirect(ctx context.Context, rawURL, referer, userAgent string, clean bool) (agent.ToolResult, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("build request: %w", err)
@@ -166,13 +184,23 @@ func fetchDirect(ctx context.Context, rawURL, referer, userAgent string) (agent.
 		return agent.ToolResult{Text: ""}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	return readBody(resp.Body, rawURL, resp.Header.Get("Content-Type"))
+	// resp.Request.URL is the LAST hop, not the URL we asked for. Relative
+	// links in the body resolve against it, so a shortener or www-canonical
+	// redirect doesn't turn every link in the page into a dead one.
+	finalURL := resp.Request.URL
+	if finalURL == nil {
+		finalURL, _ = url.Parse(rawURL)
+	}
+	return readBody(resp.Body, rawURL, finalURL, resp.Header.Get("Content-Type"), clean)
 }
 
-// readBody reads the body (capped at WebFetchMaxBytes), then either returns it
-// inline (≤ WebFetchInlineBytes) or spills the full content to a temp file and
-// returns a head+tail preview summary.
-func readBody(r io.Reader, sourceURL, contentType string) (agent.ToolResult, error) {
+// readBody reads the body (capped at WebFetchMaxBytes), decodes it to UTF-8,
+// optionally converts HTML to Markdown, then either returns it inline
+// (≤ WebFetchInlineBytes) or spills the full content to a temp file and
+// returns a head+tail preview summary. finalURL is the last redirect hop and
+// resolves relative links; sourceURL is what the caller asked for and labels
+// the output.
+func readBody(r io.Reader, sourceURL string, finalURL *url.URL, contentType string, clean bool) (agent.ToolResult, error) {
 	// Content-type guard: web_fetch only returns text. A binary response
 	// (image, PDF, audio/video, archive, …) would otherwise be stringified into
 	// garbage that wastes the model's context. Return a clean pointer to the
@@ -191,6 +219,16 @@ func readBody(r io.Reader, sourceURL, contentType string) (agent.ToolResult, err
 		truncated = true
 	}
 
+	body = decodeToUTF8(body, contentType)
+
+	if clean && isHTMLContentType(contentType) {
+		// truncated stays as-is on purpose: cleaning shrinks the output, but
+		// the bytes the server never got to send are still missing.
+		if md, ok := cleanHTMLToMarkdown(body, finalURL); ok {
+			body = []byte(md)
+		}
+	}
+
 	// Within the inline budget — return it directly. An inline body is always
 	// well under WebFetchMaxBytes, so it is never truncated here.
 	if len(body) <= WebFetchInlineBytes {
@@ -199,6 +237,39 @@ func readBody(r io.Reader, sourceURL, contentType string) (agent.ToolResult, err
 
 	// Larger — spill the full body to a temp file and return a preview summary.
 	return spillWebFetch(body, sourceURL, contentType, truncated)
+}
+
+// decodeToUTF8 converts a response body to UTF-8. html.Parse — and the model
+// itself — assume UTF-8, so a GBK/Big5/Shift-JIS page would otherwise come
+// back as mojibake, and silently: nothing errors, so no fallback fires. The
+// charset is taken from the Content-Type parameter, then the document's own
+// <meta charset>, then a BOM, then content sniffing.
+//
+// This runs regardless of the clean flag. Decoding is transport normalisation,
+// not cleaning — "raw" means unextracted and unconverted, not undecoded. When
+// the encoding can't be determined the body is returned untouched.
+func decodeToUTF8(body []byte, contentType string) []byte {
+	r, err := charset.NewReader(bytes.NewReader(body), contentType)
+	if err != nil {
+		return body
+	}
+	decoded, err := io.ReadAll(io.LimitReader(r, WebFetchMaxBytes+1))
+	if err != nil {
+		return body
+	}
+	return decoded
+}
+
+// isHTMLContentType reports whether a response is HTML worth running the
+// cleaner over. An empty Content-Type is common on static hosts and the body
+// is usually HTML, so it is included — cleanHTMLToMarkdown declines anything
+// that doesn't parse into real content anyway.
+func isHTMLContentType(contentType string) bool {
+	switch mediaType(contentType) {
+	case "", "text/html", "application/xhtml+xml":
+		return true
+	}
+	return false
 }
 
 // mediaType returns the lowercased media type of a Content-Type header,

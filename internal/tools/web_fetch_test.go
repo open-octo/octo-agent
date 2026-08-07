@@ -54,7 +54,7 @@ func TestFetchDirect_DefaultSameOriginReferer(t *testing.T) {
 	}))
 	defer target.Close()
 
-	if _, err := fetchDirect(context.Background(), target.URL, "", ""); err != nil {
+	if _, err := fetchDirect(context.Background(), target.URL, "", "", true); err != nil {
 		t.Fatalf("fetchDirect: %v", err)
 	}
 	if want := target.URL + "/"; gotReferer != want {
@@ -87,7 +87,7 @@ func TestBlockedFetchIP(t *testing.T) {
 // readBody returns a clean notice pointing at the right tool, with no raw bytes.
 func TestReadBody_BinaryContentTypeGuarded(t *testing.T) {
 	png := "\x89PNG\r\n\x1a\nBINARY-PIXEL-JUNK"
-	res, err := readBody(strings.NewReader(png), "https://x.test/logo.png", "image/png")
+	res, err := readBody(strings.NewReader(png), "https://x.test/logo.png", nil, "image/png", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestReadBody_BinaryContentTypeGuarded(t *testing.T) {
 }
 
 func TestReadBody_TextContentTypePassesThrough(t *testing.T) {
-	res, err := readBody(strings.NewReader("# hello world"), "https://x.test", "text/markdown; charset=utf-8")
+	res, err := readBody(strings.NewReader("# hello world"), "https://x.test", nil, "text/markdown; charset=utf-8", true)
 	if err != nil {
 		t.Fatal(err)
 	}

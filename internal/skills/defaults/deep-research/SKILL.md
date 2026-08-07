@@ -71,9 +71,10 @@ claim that matters, reach the **primary source** and read it:
 | Product capability / API | Official docs or source, not blog posts |
 | Statistics | The dataset publisher, not the article citing it |
 
-Use `web_fetch` on the source URL to pull the page (pass the raw URL — it
-fetches directly, no proxy prefix). When the source is behind a
-login, renders via JS, or blocks fetching, switch to `browser` per `web-access`.
+Use `web_fetch` on the source URL to pull the page as clean Markdown — pass the
+raw URL; it fetches directly and extracts the main content for you. When the
+source is behind a login, renders via JS, or blocks fetching, switch to
+`browser` per `web-access`.
 
 When no official source exists, an original report from an authoritative outlet
 (not a reprint) can serve as a secondary basis — but say so explicitly:
