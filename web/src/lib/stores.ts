@@ -13,6 +13,12 @@ export const view = writable('chat')
 // The currently active agent profile ID. Default is the code-defined default
 // agent; switching to a profile routes sessions to its isolated session pool.
 export const activeAgent = writable<string>('default')
+// Model picked in the composer BEFORE any session exists (composite
+// "<endpoint>::<model>" id, '' = server default). Consumed once by
+// ChatView.ensureActiveSession when it auto-creates the session — without
+// this, picking a model on the blank new-chat view was a silent no-op
+// (#2066).
+export const pendingModel = writable<string>('')
 export const sidebar = writable('full')
 export const cmdkOpen = writable(false)
 // Drives the MCP import-JSON modal. Adding a single server and editing an

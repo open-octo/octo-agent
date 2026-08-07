@@ -5,6 +5,7 @@
   import {
     activeSessionId,
     activeAgent,
+    pendingModel,
     sessions,
     chatMessages,
     chatStreaming,
@@ -1925,7 +1926,13 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     const existing = get(activeSessionId)
     if (existing) return existing
     try {
-      const created = await api.createSession({ source: 'manual', agent_profile: get(activeAgent) }) as any
+      // A model picked in the composer before any session existed rides the
+      // pendingModel store (composite "<endpoint>::<model>" id — the create
+      // handler resolves it via cfg.EntryByModel); consumed here so it only
+      // applies to the session it was picked for.
+      const model = get(pendingModel)
+      const created = await api.createSession({ source: 'manual', agent_profile: get(activeAgent), ...(model ? { model } : {}) }) as any
+      if (model) pendingModel.set('')
       const newSess = created.session ?? created
       sessions.update(ss => [newSess, ...ss])
       activeSessionId.set(newSess.id)

@@ -4,7 +4,7 @@
   import {
     running, activeSessionId, chatStreaming, sessions, sessionGroups,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
-    globalPermissionMode, nativeShell, activeAgent, view, settingsModalOpen,
+    globalPermissionMode, nativeShell, activeAgent, pendingModel, view, settingsModalOpen,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
@@ -565,7 +565,16 @@
 
   // Session meta chips — pull live values from per-session stores, fall back
   // to the session record, then to sensible defaults.
-  let modelName = $derived($chatModel[sid] || currentSession?.model || currentSession?.model_id || '—')
+  // No session yet → show the pending pick (composite "<endpoint>::<model>"
+  // id; display just the model half) that ensureActiveSession will apply.
+  let modelName = $derived(
+    $chatModel[sid] || currentSession?.model || currentSession?.model_id
+    || ($pendingModel ? $pendingModel.split('::').pop() : '') || '—',
+  )
+  // A pending pick belongs to the blank new-chat view only. Once a session is
+  // active (auto-created — which consumed it — or picked/created any other
+  // way), drop any leftover so it can't leak into a later blank view.
+  $effect(() => { if (sid) pendingModel.set('') })
   // "" (off) is a legitimate resolved value, not "no data yet" — only fall
   // back to the bootstrap default when neither source has reported anything
   // at all (?? only skips null/undefined, not ""). That default is 'off':
@@ -673,7 +682,11 @@
   const reasoningLevels = ['off', 'low', 'medium', 'high', 'xhigh', 'max']
   const showReasoningIcon = $derived(showReasoning ? 'ant-design:eye-outlined' : 'ant-design:eye-invisible-outlined')
 
-  onMount(async () => {
+  // Loaded at mount AND re-fetched every time the model menu opens: the list
+  // otherwise freezes at page load, so an endpoint/model configured in
+  // Settings never appeared (and rows for since-edited endpoints kept stale
+  // composite ids that no longer resolve) until a full reload (#2066).
+  async function refreshModels() {
     try {
       const ep = await api.getEndpoints()
       const flat: { id: string; model: string; endpoint: string }[] = []
@@ -683,7 +696,11 @@
         }
       }
       models = flat
-    } catch { /* leave empty */ }
+    } catch { /* keep the previous list */ }
+  }
+
+  onMount(async () => {
+    await refreshModels()
     try { skills = await api.listSkills() } catch { /* leave empty */ }
     try { agents = await api.listAgents() } catch { /* leave empty */ }
     try { workflows = await api.listWorkflows() } catch { /* leave empty */ }
@@ -697,7 +714,14 @@
 
   async function pickModel(m: { id: string; model: string; endpoint: string }) {
     modelMenu = false
-    if (!sid) return
+    if (!sid) {
+      // No session yet: remember the pick for the session about to be
+      // auto-created (ensureActiveSession in ChatView), mirroring pickAgent.
+      // Silently returning here made the menu look broken (#2066).
+      pendingModel.set(m.id)
+      queueMicrotask(() => textareaEl?.focus())
+      return
+    }
     try {
       // m.id is the composite id "<endpoint>::<model>" — the backend's
       // handleUpdateSessionModel resolves it via cfg.EntryByModel (composite-
@@ -1111,7 +1135,7 @@
       {/if}
       <div class="meta-row">
         <div class="picker">
-          <button class="meta-chip" onclick={(e) => { e.stopPropagation(); const open = modelMenu; closeMenus(); modelMenu = !open }}>
+          <button class="meta-chip" onclick={(e) => { e.stopPropagation(); const open = modelMenu; closeMenus(); modelMenu = !open; if (!open) void refreshModels() }}>
             <iconify-icon icon="ant-design:robot-outlined" width="13"></iconify-icon>
             <span class="mono">{modelName}</span>
             <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
