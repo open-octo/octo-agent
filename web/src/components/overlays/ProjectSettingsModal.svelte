@@ -19,6 +19,13 @@
   let notes = $state(untrack(() => group.notes ?? ''))
   let saving = $state(false)
   let pickerOpen = $state(false)
+  let modalEl = $state<HTMLDivElement | null>(null)
+
+  // Focus the modal so Esc works without the user having to click into a
+  // field first (same pattern as FolderPickerModal).
+  $effect(() => {
+    if (modalEl && !pickerOpen) modalEl.focus()
+  })
 
   const wasProject = untrack(() => !!group.working_dir)
   // Clearing the directory on an existing project is a demotion, not an edit —
@@ -40,12 +47,16 @@
 
   async function save() {
     if (saving) return
+    // Only submit what actually changed: sending an unchanged working_dir
+    // would re-validate it, so a project whose directory was deleted on disk
+    // couldn't even edit its notes.
+    const patch: { working_dir?: string; notes?: string } = {}
+    if (dir.trim() !== (group.working_dir ?? '')) patch.working_dir = dir.trim()
+    if (notes.trim() !== (group.notes ?? '')) patch.notes = notes.trim()
+    if (Object.keys(patch).length === 0) { onClose(); return }
     saving = true
     try {
-      const updated = await api.updateSessionGroup(group.id, {
-        working_dir: dir.trim(),
-        notes: notes.trim(),
-      })
+      const updated = await api.updateSessionGroup(group.id, patch)
       // Patch the store in place so the sidebar header and every composer dir
       // chip in the project reflect the change without a refetch.
       sessionGroups.update(gs => gs.map(g => (g.id === group.id ? { ...g, ...updated } : g)))
@@ -68,7 +79,7 @@
 </script>
 
 <div class="backdrop" role="presentation" onclick={onClose}>
-  <div class="modal" role="dialog" aria-modal="true" tabindex="-1" onkeydown={onKeydown} onclick={(e) => e.stopPropagation()}>
+  <div class="modal" role="dialog" aria-modal="true" tabindex="-1" bind:this={modalEl} onkeydown={onKeydown} onclick={(e) => e.stopPropagation()}>
     <div class="modal-header">
       <iconify-icon icon="ant-design:folder-open-outlined" width="16" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
       <span class="modal-title">{$t('project.title').replace('{name}', group.name)}</span>

@@ -39,6 +39,8 @@ CLI 只认**项目目录**，不认会话自己的 `WorkingDir`。因为 `applyD
 
 解析只发生一次，和这段代码里其它所有东西一样——REPL 内切换会话不重算，与 CLI 既有的"每进程组一次系统提示词"模型一致。重定位会打印一行说明：静默地在别处跑工具会让人莫名其妙。
 
+CLI 只重定位目录，**不注入项目 notes**——同一会话在 CLI 和 Web 下的 system prompt 因此不同。这是范围裁剪的直接推论（CLI 每进程组一次提示词，且不走服务端的组装点），不是遗漏。
+
 CLI 仍然**没有**修改工作目录的入口。`SetWorkingDir` 只有 `internal/server` 三个调用点，所以不存在"在别处改了目录、Web 里不生效"的反向静默失效；项目设置只能在它被创建的地方改。CLI/TUI 也不调 `SetComposedSystem`（每进程组一次提示词），因此用 TUI 跑一条项目会话不会把目录写进 `ComposedForCWD` 去污染 Web 侧的冻结身份。
 
 ## 数据模型
@@ -143,6 +145,8 @@ func (s *Session) IsComposedFor(model, cwd, notesHash string) bool {
 ## 新会话的创建行为
 
 `applyDefaultWorkspaceDir`（`handlers.go:236`）今天给每个新 web 会话 seed 一个 `WorkingDir`。**在项目下创建的会话不 seed** ——留空，让项目解析生效。seed 了反而会在会话移出项目后留下一个莫名其妙的残值。
+
+注意当前 UI 流程是"先建会话、再拖进项目"，seed 发生在创建时，所以这条守卫今天实际不触发——先建后拖的会话仍带着 seeded 的 `~/Octo`，只是被项目遮蔽，移出项目后回落到它。守卫是给将来"在项目内直接新建"流程的预埋（届时 POST /api/sessions 带 group 参数），语义先钉住。
 
 ## API
 

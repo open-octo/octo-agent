@@ -63,6 +63,22 @@ type sessionGroup struct {
 // isProject reports whether this group carries project settings.
 func (g sessionGroup) isProject() bool { return g.WorkingDir != "" }
 
+// maxProjectNotes caps the notes field. Notes are injected verbatim into the
+// system prompt of EVERY session in the project, so an oversized value would
+// silently eat context across all of them; 16 KiB is far beyond any sane
+// project brief while still an obvious mistake-catcher.
+const maxProjectNotes = 16 * 1024
+
+// validateProjectNotes trims and bounds a user-supplied notes value. The
+// returned error is user-facing.
+func validateProjectNotes(raw string) (string, error) {
+	notes := strings.TrimSpace(raw)
+	if len(notes) > maxProjectNotes {
+		return "", fmt.Errorf("notes too long: %d bytes (max %d) — notes are injected into every session's system prompt, keep them brief", len(notes), maxProjectNotes)
+	}
+	return notes, nil
+}
+
 // groupFile is the on-disk shape of the registry. Group order is array order.
 // PinnedSessionIDs is the Web-UI "pinned" set — sessions the user floated to a
 // dedicated section at the top of the sidebar. It lives in this same file (the
@@ -214,11 +230,11 @@ type registryCache struct {
 	projects map[string]*sessionGroup // session ID → the project owning it
 }
 
-// cache is guarded by groupMu, like every other access to the registry.
-var cache *registryCache
+// regCache is guarded by groupMu, like every other access to the registry.
+var regCache *registryCache
 
 // invalidateRegistryCache drops the cached registry. Caller must hold groupMu.
-func invalidateRegistryCache() { cache = nil }
+func invalidateRegistryCache() { regCache = nil }
 
 // cachedRegistry returns the parsed registry and the session→project index,
 // re-reading the file only when it has changed on disk. The returned values
@@ -237,8 +253,8 @@ func cachedRegistry() (groupFile, map[string]*sessionGroup, error) {
 		}
 		return groupFile{}, nil, fmt.Errorf("session groups: stat %s: %w", path, statErr)
 	}
-	if cache != nil && cache.path == path && cache.modTime.Equal(info.ModTime()) && cache.size == info.Size() {
-		return cache.file, cache.projects, nil
+	if regCache != nil && regCache.path == path && regCache.modTime.Equal(info.ModTime()) && regCache.size == info.Size() {
+		return regCache.file, regCache.projects, nil
 	}
 
 	data, err := os.ReadFile(path)
@@ -259,7 +275,7 @@ func cachedRegistry() (groupFile, map[string]*sessionGroup, error) {
 			projects[sid] = g
 		}
 	}
-	cache = &registryCache{path: path, modTime: info.ModTime(), size: info.Size(), file: gf, projects: projects}
+	regCache = &registryCache{path: path, modTime: info.ModTime(), size: info.Size(), file: gf, projects: projects}
 	return gf, projects, nil
 }
 
@@ -470,6 +486,11 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		}
 		workingDir = dir
 	}
+	notes, nerr := validateProjectNotes(req.Notes)
+	if nerr != nil {
+		writeError(w, http.StatusBadRequest, nerr.Error())
+		return
+	}
 
 	groupMu.Lock()
 	defer groupMu.Unlock()
@@ -478,7 +499,7 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workingDir, Notes: strings.TrimSpace(req.Notes)}
+	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workingDir, Notes: notes}
 	groups = append(groups, g)
 	if err := saveSessionGroups(groups); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -537,6 +558,15 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 		}
 		workingDir = dir
 	}
+	var notes string
+	if req.Notes != nil {
+		n, nerr := validateProjectNotes(*req.Notes)
+		if nerr != nil {
+			writeError(w, http.StatusBadRequest, nerr.Error())
+			return
+		}
+		notes = n
+	}
 
 	groupMu.Lock()
 	defer groupMu.Unlock()
@@ -566,7 +596,7 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 		groups[idx].WorkingDir = workingDir
 	}
 	if req.Notes != nil {
-		groups[idx].Notes = strings.TrimSpace(*req.Notes)
+		groups[idx].Notes = notes
 	}
 	if err := saveSessionGroups(groups); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

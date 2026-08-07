@@ -195,6 +195,27 @@ func TestProject_RejectsBadDir(t *testing.T) {
 	}
 }
 
+// TestProject_RejectsOversizedNotes: notes land in every member session's
+// system prompt, so the server bounds them instead of silently eating context.
+func TestProject_RejectsOversizedNotes(t *testing.T) {
+	srv := groupTestServer(t)
+	projectDir := t.TempDir()
+	gid := newProjectGroup(t, srv, "Work", projectDir)
+
+	big := strings.Repeat("x", maxProjectNotes+1)
+	rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"notes": big})
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("oversized notes: status %d, want 400", rec.Code)
+	}
+
+	// At the limit is fine.
+	ok := strings.Repeat("x", maxProjectNotes)
+	rec, _ = doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"notes": ok})
+	if rec.Code != http.StatusOK {
+		t.Errorf("notes at limit: status %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestProject_BlocksPerSessionDirOverride: a session in a project must not
 // accept a per-session dir that the resolver would ignore anyway.
 func TestProject_BlocksPerSessionDirOverride(t *testing.T) {
