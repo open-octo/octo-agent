@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/html"
+
 	"github.com/open-octo/octo-agent/internal/agent"
 )
 
@@ -621,20 +623,14 @@ func decodeBingURL(wrapped string) string {
 // ───────────────────── helpers ─────────────────────
 
 var tagRE = regexp.MustCompile(`<[^>]+>`)
-var htmlEntities = strings.NewReplacer(
-	"&amp;", "&",
-	"&lt;", "<",
-	"&gt;", ">",
-	"&quot;", `"`,
-	"&#39;", "'",
-	"&nbsp;", " ",
-)
 
-// stripHTML removes inline tags and decodes the most common HTML entities.
-// Search-result snippets are short and noisy; we don't need a real HTML
-// parser, and pulling one in would balloon dependencies.
+// stripHTML removes inline tags and decodes HTML entities. Search-result
+// snippets are short, well-formed fragments, so a regex handles the tags —
+// standing up a parser per snippet would cost more than it buys. Entities are
+// another matter: html.UnescapeString knows the full set, where the hand-rolled
+// replacer this used to carry knew six and passed the rest through verbatim.
 func stripHTML(s string) string {
 	s = tagRE.ReplaceAllString(s, "")
-	s = htmlEntities.Replace(s)
+	s = html.UnescapeString(s)
 	return strings.TrimSpace(s)
 }
