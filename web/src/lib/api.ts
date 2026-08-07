@@ -71,6 +71,10 @@ export interface CreateSessionOpts {
   model?: string
   source?: string
   agent_profile?: string
+  // Files the session under an existing group (the sidebar's per-group "+").
+  // For a project, the server skips seeding a default working dir so the
+  // session runs purely in the project's directory.
+  group_id?: string
 }
 
 export async function createSession(opts: CreateSessionOpts): Promise<Session> {

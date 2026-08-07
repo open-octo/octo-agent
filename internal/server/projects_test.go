@@ -344,6 +344,87 @@ func TestProject_ExportedDirLookup(t *testing.T) {
 	}
 }
 
+// createSessionInGroupViaAPI POSTs /api/sessions with a group_id and returns
+// the new session's id.
+func createSessionInGroupViaAPI(t *testing.T, srv *Server, groupID string) string {
+	t.Helper()
+	rec, out := doGroupReq(t, srv, http.MethodPost, "/api/sessions", map[string]any{"group_id": groupID})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create session in group: status %d body %s", rec.Code, rec.Body.String())
+	}
+	sess, _ := out["session"].(map[string]any)
+	if sess == nil {
+		t.Fatalf("create session: no session in response %s", rec.Body.String())
+	}
+	id, _ := sess["id"].(string)
+	if id == "" {
+		t.Fatalf("create session: empty id in %s", rec.Body.String())
+	}
+	return id
+}
+
+// TestProject_CreateSessionDirectlyInProject covers the sidebar's per-group
+// "+" button: the session is filed under the project at creation, gets NO
+// seeded default workspace dir (membership lands before
+// applyDefaultWorkspaceDir), and resolves to the project directory. This is
+// the flow that makes the seed guard reachable end-to-end.
+func TestProject_CreateSessionDirectlyInProject(t *testing.T) {
+	srv := groupTestServer(t)
+	srv.setWorkspaceDir(t.TempDir()) // a default that WOULD be seeded without the guard
+	projectDir := t.TempDir()
+	gid := newProjectGroup(t, srv, "Work", projectDir)
+
+	sid := createSessionInGroupViaAPI(t, srv, gid)
+
+	if p := projectForSession(sid); p == nil || p.ID != gid {
+		t.Fatalf("session not filed under the project: %+v", p)
+	}
+	loaded, err := agent.LoadSession(sid)
+	if err != nil {
+		t.Fatalf("load created session: %v", err)
+	}
+	if loaded.WorkingDir != "" {
+		t.Errorf("session born in a project was seeded with %q, want no own dir", loaded.WorkingDir)
+	}
+	if got := srv.sessionCwd(loaded); got != projectDir {
+		t.Errorf("cwd = %q, want project dir %q", got, projectDir)
+	}
+}
+
+// TestProject_CreateSessionInPlainGroup: a plain group files the session but
+// seeding proceeds as usual — only a project suppresses it.
+func TestProject_CreateSessionInPlainGroup(t *testing.T) {
+	srv := groupTestServer(t)
+	workspace := t.TempDir()
+	srv.setWorkspaceDir(workspace)
+	rec, out := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Plain"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create plain group: status %d", rec.Code)
+	}
+	g, _ := out["group"].(map[string]any)
+	gid, _ := g["id"].(string)
+
+	sid := createSessionInGroupViaAPI(t, srv, gid)
+
+	loaded, err := agent.LoadSession(sid)
+	if err != nil {
+		t.Fatalf("load created session: %v", err)
+	}
+	if loaded.WorkingDir != workspace {
+		t.Errorf("session in plain group: WorkingDir = %q, want seeded default %q", loaded.WorkingDir, workspace)
+	}
+}
+
+// TestProject_CreateSessionInUnknownGroup rejects a bad group id up front
+// rather than creating an orphan session.
+func TestProject_CreateSessionInUnknownGroup(t *testing.T) {
+	srv := groupTestServer(t)
+	rec, _ := doGroupReq(t, srv, http.MethodPost, "/api/sessions", map[string]any{"group_id": "g-nope"})
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("unknown group: status %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestProject_ListReportsProjectFields makes sure the Web UI can tell a project
 // from a plain group without a second request.
 func TestProject_ListReportsProjectFields(t *testing.T) {

@@ -146,7 +146,9 @@ func (s *Session) IsComposedFor(model, cwd, notesHash string) bool {
 
 `applyDefaultWorkspaceDir`（`handlers.go:236`）今天给每个新 web 会话 seed 一个 `WorkingDir`。**在项目下创建的会话不 seed** ——留空，让项目解析生效。seed 了反而会在会话移出项目后留下一个莫名其妙的残值。
 
-注意当前 UI 流程是"先建会话、再拖进项目"，seed 发生在创建时，所以这条守卫今天实际不触发——先建后拖的会话仍带着 seeded 的 `~/Octo`，只是被项目遮蔽，移出项目后回落到它。守卫是给将来"在项目内直接新建"流程的预埋（届时 POST /api/sessions 带 group 参数），语义先钉住。
+入口是分组头的「+」按钮（对普通分组同样可用，行为统一）：`POST /api/sessions` 带 `group_id`，服务端**先入组、再走 seed 逻辑**——顺序是语义的一部分，守卫查的就是"这个会话在不在项目里"。把尚未落盘的会话 ID 先写进 registry 是安全的：registry 只存裸 ID，后续 Save 失败留下的死 ID 按既有设计无害（前端与活会话列表交叉过滤）。未知 `group_id` 直接 404，不产出孤儿会话。
+
+注意"先建会话、再拖进项目"的旧流程里 seed 已经发生——这种会话带着 seeded 的 `~/Octo`，只是被项目遮蔽，移出项目后回落到它。这是两种入口固有的语义差异，不是缺陷。
 
 ## API
 

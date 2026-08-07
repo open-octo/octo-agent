@@ -246,6 +246,21 @@ export async function createNewSession(agentProfile?: string): Promise<void> {
   view.set('chat')
 }
 
+// Per-group "new session" entry point (the sidebar's group-header "+"): the
+// server files the session under the group at creation time, so a project
+// member is born in the project's working directory with no seeded dir of its
+// own. The local group store is patched so the sidebar shows the session under
+// its group without a refetch.
+export async function createSessionInGroup(groupId: string): Promise<void> {
+  const sess = await api.createSession({ source: 'manual', group_id: groupId })
+  sessions.update(ss => [sess, ...ss])
+  sessionGroups.update(gs =>
+    gs.map(g => (g.id === groupId ? { ...g, session_ids: [...g.session_ids, sess.id] } : g)),
+  )
+  activeSessionId.set(sess.id)
+  view.set('chat')
+}
+
 // Agentic-first entry point shared by the Skills / Tasks / MCP / Channels /
 // Profile panels: open a fresh chat session and queue a slash-command to
 // auto-send once the WS subscription is confirmed (see pendingPrompt). The

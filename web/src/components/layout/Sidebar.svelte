@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, settingsModalOpen } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, settingsModalOpen } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
@@ -471,6 +471,13 @@
           <span class="grp-name" onclick={() => toggleCollapse(g.id, !g.collapsed)}>{g.name}</span>
           <span class="grp-count">{gv.items.length}</span>
           {#if !$selMode}
+          <span
+            class="row-action"
+            title={tr('sidebar.new_session_in_group')}
+            onclick={(e) => { e.stopPropagation(); createSessionInGroup(g.id).catch((err: any) => showToast(err?.message ?? tr('sidebar.new_session_fail'), 'error')) }}
+          >
+            <iconify-icon icon="ant-design:plus-outlined" width="13"></iconify-icon>
+          </span>
           <span
             class="row-action"
             class:is-project={!!g.working_dir}

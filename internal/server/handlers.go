@@ -85,6 +85,12 @@ type sessionCreateRequest struct {
 	AgentProfile string `json:"agent_profile"`
 	Source       string `json:"source"`
 	Model        string `json:"model,omitempty"`
+	// GroupID files the session under an existing group at creation time —
+	// the sidebar's per-group "+" button. For a project this is the ordered
+	// path that lets applyDefaultWorkspaceDir see the membership and skip
+	// seeding, so the session runs in the project directory with no leftover
+	// own dir to strand later.
+	GroupID string `json:"group_id,omitempty"`
 }
 
 // toSessionItem builds a frontend-friendly session descriptor.
@@ -498,6 +504,18 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := agent.NewSession(model, "")
+	// Group membership must land BEFORE applyDefaultWorkspaceDir: its guard
+	// asks "is this session in a project?", and a session created via the
+	// sidebar's per-group button is in one from the start. Registering the
+	// yet-unsaved ID is safe — the registry stores bare IDs, and if the Save
+	// below fails the stale entry is harmless by design (the frontend
+	// cross-references the live session list).
+	if req.GroupID != "" {
+		if err := addSessionToGroup(req.GroupID, sess.ID); err != nil {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+	}
 	s.applyDefaultWorkspaceDir(sess)
 	sess.Source = source
 	sess.ModelConfig = modelConfig
