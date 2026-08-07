@@ -207,6 +207,19 @@
     }
   }
 
+  // Persist the language like every other config-backed field in this modal.
+  // The $effect below already applies it to the live locale store; without
+  // this PUT the choice only lived in memory and a refresh reverted to the
+  // server's stored language (#2076). FirstRunSetup persists through the same
+  // endpoint.
+  async function saveLanguage(v: string) {
+    try {
+      await api.updateLanguage(v)
+    } catch (e: any) {
+      showToast(e.message ?? 'Failed to update language', 'error')
+    }
+  }
+
   function close() {
     settingsModalOpen.set(false)
   }
@@ -275,7 +288,7 @@
               <span class="setl">{$t('settings.language')}</span>
               <span class="setd">{$t('settings.language_desc')}</span>
             </div>
-            <select class="sinput" bind:value={language}>
+            <select class="sinput" bind:value={language} onchange={() => saveLanguage(language)}>
               {#each langOptions as o}
                 <option value={o.value}>{o.label}</option>
               {/each}
