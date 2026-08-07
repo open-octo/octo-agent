@@ -48,11 +48,16 @@ export interface Session {
 // IDs), not on the session, so the CLI/TUI listing is unaffected. Collapsed is
 // persisted server-side so the folded state is consistent across the Web UI
 // and the desktop webview.
+// A group with a working_dir is a "project": every session in it runs its
+// tools there, overriding each session's own working dir. Without one it is a
+// plain group, exactly as before projects existed.
 export interface SessionGroup {
   id: string
   name: string
   session_ids: string[]
   collapsed?: boolean
+  working_dir?: string
+  notes?: string
 }
 
 export interface Skill {

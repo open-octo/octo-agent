@@ -2,7 +2,7 @@
   import { get } from 'svelte/store'
   import { onMount, untrack, tick } from 'svelte'
   import {
-    running, activeSessionId, chatStreaming, sessions,
+    running, activeSessionId, chatStreaming, sessions, sessionGroups,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
     globalPermissionMode, nativeShell, activeAgent, view, settingsModalOpen,
   } from '../../lib/stores'
@@ -575,7 +575,12 @@
     const v = $chatReasoningEffort[sid] ?? currentSession?.reasoning_effort
     return v === undefined ? 'off' : (v || 'off')
   })
-  let workingDir = $derived($chatWorkingDir[sid] || currentSession?.working_dir || '')
+  // The project (a session group carrying a working dir) this session belongs
+  // to, if any. A project's directory governs every session in it, so the dir
+  // chip below goes read-only rather than letting the user edit a value the
+  // server would refuse.
+  let project = $derived($sessionGroups.find(g => !!g.working_dir && g.session_ids.includes(sid)) ?? null)
+  let workingDir = $derived(project?.working_dir || $chatWorkingDir[sid] || currentSession?.working_dir || '')
   let permMode = $derived($chatPermMode[sid] || currentSession?.permission_mode || $globalPermissionMode)
   // Effective show-reasoning for this session: live store > session record > default true.
   let showReasoning = $derived($chatShowReasoning[sid] ?? currentSession?.show_reasoning ?? true)
@@ -1159,7 +1164,13 @@
             </div>
           {/if}
         </div>
-        {#if workingDir}
+        {#if workingDir && project}
+          <span class="meta-chip static" title={$t('chat.dir_from_project').replace('{name}', project.name) + ` — ${workingDir}`}>
+            <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
+            <span class="mono dir-path">{shortDir(workingDir)}</span>
+            <span class="dir-owner">{project.name}</span>
+          </span>
+        {:else if workingDir}
           <div class="picker">
             <button class="meta-chip" title={workingDir} onclick={(e) => { e.stopPropagation(); openDirMenu() }}>
               <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
@@ -1290,6 +1301,13 @@
 .reasoning-eye { color: var(--success); }
 .mono { font-family: var(--font-mono); }
 .dir-path { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Names the project that owns this session's directory, so a read-only dir
+   chip explains itself without needing the tooltip. */
+.dir-owner {
+  max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding-left: 5px; margin-left: 1px; border-left: 1px solid var(--border-secondary);
+  color: var(--text-tertiary);
+}
 .input-wrap { max-width: var(--chat-content-max-width, 1080px); margin: 0 auto; padding: 8px 24px 14px; }
 .input-card {
   background: var(--bg-container); border: 1px solid var(--border); border-radius: 14px;

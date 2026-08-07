@@ -233,6 +233,31 @@ type skillInfo struct {
 	Enabled     bool   `json:"enabled"`
 }
 
+// validateWorkingDir expands and checks a user-supplied working directory,
+// returning the canonical absolute path. Shared by the per-session override
+// (PATCH …/working_dir) and the project directory (POST/PATCH
+// …/session-groups) so both reject the same paths with the same wording. The
+// returned error is already user-facing — hand it straight to writeError.
+func validateWorkingDir(raw string) (string, error) {
+	dir := expandDir(raw)
+	info, err := os.Stat(dir)
+	switch {
+	case os.IsNotExist(err):
+		return "", fmt.Errorf("working_dir does not exist: %s (create it first)", dir)
+	case os.IsPermission(err):
+		return "", fmt.Errorf("working_dir is not accessible: %s (permission denied)", dir)
+	case err != nil:
+		// Neither IsNotExist nor IsPermission — e.g. a path component that
+		// exists but isn't a directory (ENOTDIR). Report the reason without
+		// the raw "stat <path>:" prefix, which just repeats dir.
+		return "", fmt.Errorf("invalid working_dir: %s (%v)", dir, unwrapPathError(err))
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("working_dir is not a directory")
+	}
+	return dir, nil
+}
+
 // applyDefaultWorkspaceDir sets sess's WorkingDir to the server's configured
 // default workspace dir (cfg.WorkspaceDir / tools.ResolveWorkspaceDir, ~/Octo
 // unless overridden), unless the session already has one of its own — so it
@@ -241,9 +266,16 @@ type skillInfo struct {
 // session actually needs it, rather than at server startup. A failure here
 // is logged and otherwise a no-op: the session just falls back to the
 // server's launch directory, exactly like before workspace_dir existed.
+//
+// A session created inside a project gets NO seeded dir: the project's
+// directory already governs where its tools run, and a seeded value would only
+// surface later as a stale leftover if the session is moved out of the project.
 func (s *Server) applyDefaultWorkspaceDir(sess *agent.Session) {
 	dir := s.curWorkspaceDir()
 	if dir == "" || sess.WorkingDir != "" {
+		return
+	}
+	if p := projectForSession(sess.ID); p != nil {
 		return
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -1531,29 +1563,21 @@ func (s *Server) handleUpdateSessionWorkingDir(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	dir := expandDir(req.WorkingDir)
-	info, err := os.Stat(dir)
-	switch {
-	case os.IsNotExist(err):
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("working_dir does not exist: %s (create it first)", dir))
-		return
-	case os.IsPermission(err):
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("working_dir is not accessible: %s (permission denied)", dir))
-		return
-	case err != nil:
-		// Neither IsNotExist nor IsPermission — e.g. a path component that
-		// exists but isn't a directory (ENOTDIR). Report the reason without
-		// the raw "stat <path>:" prefix, which just repeats dir.
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid working_dir: %s (%v)", dir, unwrapPathError(err)))
-		return
-	}
-	if !info.IsDir() {
-		writeError(w, http.StatusBadRequest, "working_dir is not a directory")
+	dir, verr := validateWorkingDir(req.WorkingDir)
+	if verr != nil {
+		writeError(w, http.StatusBadRequest, verr.Error())
 		return
 	}
 
 	if _, err := agent.LoadSession(id); err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	// A session inside a project runs where the project says; accepting a
+	// per-session dir here would store a value that never takes effect. The UI
+	// disables the control, so this is the defence for direct API callers.
+	if p := projectForSession(id); p != nil {
+		writeError(w, http.StatusConflict, fmt.Sprintf("session belongs to project %q, which sets the working directory for all its sessions — change it on the project, or move the session out first", p.Name))
 		return
 	}
 	if ok, _, berr := s.acquireSessionBinding(id, agent.EntryWeb, false); !ok {

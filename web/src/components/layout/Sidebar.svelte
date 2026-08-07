@@ -6,6 +6,23 @@
   import { confirmDialog } from '../../lib/confirm'
   import { ws } from '../../lib/ws'
   import VersionBadge from './VersionBadge.svelte'
+  import ProjectSettingsModal from '../overlays/ProjectSettingsModal.svelte'
+
+  // Group whose project settings are open, by id ('' = none). Held by id
+  // rather than by object so the modal always renders the live group from the
+  // store, even if it changes underneath.
+  let projectModalFor = $state('')
+  let projectModalGroup = $derived($sessionGroups.find(g => g.id === projectModalFor) ?? null)
+
+  // Abbreviate a project directory for the sidebar: drop the home prefix, and
+  // keep only the last two segments of anything still long.
+  function shortDir(p: string): string {
+    const home = p.match(/^\/(?:Users|home)\/[^/]+/)
+    let s = home ? '~' + p.slice(home[0].length) : p
+    if (s.length <= 28) return s
+    const parts = s.split('/').filter(Boolean)
+    return parts.length > 2 ? '…/' + parts.slice(-2).join('/') : s
+  }
 
   // Agent list for the new-session picker dropdown.
   let agents: api.Agent[] = $state([])
@@ -454,6 +471,14 @@
           <span class="grp-name" onclick={() => toggleCollapse(g.id, !g.collapsed)}>{g.name}</span>
           <span class="grp-count">{gv.items.length}</span>
           {#if !$selMode}
+          <span
+            class="row-action"
+            class:is-project={!!g.working_dir}
+            title={g.working_dir ? `${tr('project.settings')} — ${g.working_dir}` : tr('project.make_project')}
+            onclick={(e) => { e.stopPropagation(); projectModalFor = g.id }}
+          >
+            <iconify-icon icon={g.working_dir ? 'ant-design:folder-open-outlined' : 'ant-design:folder-add-outlined'} width="13"></iconify-icon>
+          </span>
           {#if gi > 0}
           <span class="row-action" title={$t('sidebar.move_group_up')} onclick={() => moveGroup(g.id, -1)}>
             <iconify-icon icon="ant-design:arrow-up-outlined" width="13"></iconify-icon>
@@ -473,6 +498,11 @@
           {/if}
           {/if}
         </div>
+        {#if g.working_dir && !editingG}
+          <!-- A project's directory governs every session under it, so it
+               belongs on the group header rather than hidden in each session. -->
+          <div class="grp-dir mono" title={g.working_dir}>{shortDir(g.working_dir)}</div>
+        {/if}
         {#if !g.collapsed}
           {#each gv.items as s (s.id)}
             {@render sessionRow(s)}
@@ -711,6 +741,10 @@
   {/if}
 </aside>
 
+{#if projectModalGroup}
+  <ProjectSettingsModal group={projectModalGroup} onClose={() => (projectModalFor = '')} />
+{/if}
+
 <style>
 .full { width: 256px; height: 100%; display: flex; flex-direction: column; min-height: 0; }
 .new-btn-wrap { padding: 12px 12px 8px; display: flex; gap: 4px; position: relative; }
@@ -797,6 +831,13 @@
 .grp-count { font-size: 11px; color: var(--text-quaternary); flex: 0 0 auto; padding: 0 2px; }
 .grp-header .row-action { opacity: 0; }
 .grp-header:hover .row-action { opacity: 1; }
+/* The project marker stays visible unhovered — it is status, not an action. */
+.grp-header .row-action.is-project { opacity: 1; color: var(--blue-6); }
+.grp-dir {
+  padding: 0 8px 2px 28px; margin-top: -2px;
+  font-size: 11px; color: var(--text-quaternary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 /* Move-to-group popover */
 .grp-popover {
   position: absolute; top: 100%; right: 8px; z-index: 30;

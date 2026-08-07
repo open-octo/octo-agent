@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -33,6 +34,13 @@ import (
 // Web UI and the desktop shell with no extra wiring.
 
 // sessionGroup is one named group in the registry.
+//
+// A group with a WorkingDir is a "project": every session in it runs its tools
+// in that one directory, overriding whatever working dir the sessions carry
+// themselves. A group without one is a plain group and behaves exactly as it
+// did before projects existed — which is what makes the two concepts one
+// struct rather than two. Nothing needs migrating: an existing
+// session-groups.json deserialises with both new fields empty.
 type sessionGroup struct {
 	ID         string   `json:"id"`
 	Name       string   `json:"name"`
@@ -42,7 +50,18 @@ type sessionGroup struct {
 	// the Web UI and the Wails desktop webview, whose local storage may not
 	// persist the same way.
 	Collapsed bool `json:"collapsed,omitempty"`
+	// WorkingDir, when set, makes this group a project (see above). Stored
+	// already expanded and absolute — the write paths resolve and validate it,
+	// so every reader can use it verbatim.
+	WorkingDir string `json:"working_dir,omitempty"`
+	// Notes is project-level context injected into the system prompt of every
+	// session in the project, alongside the project-memory layer. Only
+	// meaningful on a project; a plain group ignores it.
+	Notes string `json:"notes,omitempty"`
 }
+
+// isProject reports whether this group carries project settings.
+func (g sessionGroup) isProject() bool { return g.WorkingDir != "" }
 
 // groupFile is the on-disk shape of the registry. Group order is array order.
 // PinnedSessionIDs is the Web-UI "pinned" set — sessions the user floated to a
@@ -121,6 +140,7 @@ func saveRegistry(gf groupFile) error {
 		os.Remove(tmp)
 		return fmt.Errorf("session groups: write %s: %w", path, err)
 	}
+	invalidateRegistryCache()
 	return nil
 }
 
@@ -165,6 +185,116 @@ func savePinnedSessions(pins []string) error {
 		return err
 	}
 	return saveRegistry(groupFile{Groups: groups, PinnedSessionIDs: pins})
+}
+
+// ─── Read-side cache + session→project reverse index ────────────────────────
+//
+// Resolving a session's working directory now has to answer "which project
+// owns this session?", and the session-list endpoint asks that once per
+// session. Re-reading and re-parsing session-groups.json N times per request
+// would be silly, so reads go through a small cache holding the parsed
+// registry plus a sessionID→project index built alongside it.
+//
+// Invalidation is belt-and-braces: saveRegistry drops the cache outright
+// (exact for this process's own writes), and every load re-stats the file so a
+// write by another process serving the same ~/.octo (the desktop shell) is
+// picked up too. Callers must treat the returned data as READ-ONLY — it is the
+// cached copy, not a clone. The read-modify-write paths deliberately keep
+// using loadSessionGroups, which always re-reads from disk and hands back
+// data they may mutate freely.
+
+type registryCache struct {
+	// path is part of the key, not just modTime/size: HOME is redirected
+	// per-test, and without it a cache entry from one temp dir could be served
+	// for another whose file happens to match in size and timestamp.
+	path     string
+	modTime  time.Time
+	size     int64
+	file     groupFile
+	projects map[string]*sessionGroup // session ID → the project owning it
+}
+
+// cache is guarded by groupMu, like every other access to the registry.
+var cache *registryCache
+
+// invalidateRegistryCache drops the cached registry. Caller must hold groupMu.
+func invalidateRegistryCache() { cache = nil }
+
+// cachedRegistry returns the parsed registry and the session→project index,
+// re-reading the file only when it has changed on disk. The returned values
+// are read-only. Caller must hold groupMu.
+func cachedRegistry() (groupFile, map[string]*sessionGroup, error) {
+	path, err := sessionGroupsPath()
+	if err != nil {
+		return groupFile{}, nil, err
+	}
+	info, statErr := os.Stat(path)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			// No registry yet — nothing is grouped. Cache nothing; a stat per
+			// call is already the cheap path.
+			return groupFile{}, nil, nil
+		}
+		return groupFile{}, nil, fmt.Errorf("session groups: stat %s: %w", path, statErr)
+	}
+	if cache != nil && cache.path == path && cache.modTime.Equal(info.ModTime()) && cache.size == info.Size() {
+		return cache.file, cache.projects, nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return groupFile{}, nil, fmt.Errorf("session groups: read %s: %w", path, err)
+	}
+	var gf groupFile
+	if err := json.Unmarshal(data, &gf); err != nil {
+		return groupFile{}, nil, fmt.Errorf("session groups: parse %s: %w", path, err)
+	}
+	projects := make(map[string]*sessionGroup)
+	for i := range gf.Groups {
+		g := &gf.Groups[i]
+		if !g.isProject() {
+			continue
+		}
+		for _, sid := range g.SessionIDs {
+			projects[sid] = g
+		}
+	}
+	cache = &registryCache{path: path, modTime: info.ModTime(), size: info.Size(), file: gf, projects: projects}
+	return gf, projects, nil
+}
+
+// projectForSession returns the project owning sessionID, or nil when the
+// session is ungrouped or its group is a plain group. The result is read-only.
+// Registry errors resolve to "no project" rather than propagating: a session's
+// working directory must still resolve (to its own dir, or the server default)
+// when the group file is unreadable.
+func projectForSession(sessionID string) *sessionGroup {
+	if sessionID == "" {
+		return nil
+	}
+	groupMu.Lock()
+	defer groupMu.Unlock()
+	_, projects, err := cachedRegistry()
+	if err != nil {
+		slog.Warn("resolve project for session", "session", sessionID, "err", err)
+		return nil
+	}
+	return projects[sessionID]
+}
+
+// projectNotesFor returns the project notes that apply to sessionID, or "".
+func projectNotesFor(sessionID string) string {
+	if p := projectForSession(sessionID); p != nil {
+		return p.Notes
+	}
+	return ""
+}
+
+// renderProjectNotes wraps project notes for the system prompt's memory layer.
+// The heading gives the model a frame for what it is reading — otherwise a
+// bare paragraph of project context reads as an instruction from the user.
+func renderProjectNotes(notes string) string {
+	return "# Project notes\n\nContext for the project this session belongs to:\n\n" + notes
 }
 
 // newGroupID returns a short random group id ("g-" + 8 hex chars).
@@ -300,6 +430,11 @@ func (s *Server) handleListSessionGroups(w http.ResponseWriter, r *http.Request)
 
 type createSessionGroupRequest struct {
 	Name string `json:"name"`
+	// WorkingDir creates the group as a project outright, so the UI's "new
+	// project" flow doesn't have to create a plain group and immediately PATCH
+	// it (which would briefly show it as a plain group in every other tab).
+	WorkingDir string `json:"working_dir,omitempty"`
+	Notes      string `json:"notes,omitempty"`
 }
 
 func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request) {
@@ -313,6 +448,15 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
+	var workingDir string
+	if strings.TrimSpace(req.WorkingDir) != "" {
+		dir, verr := validateWorkingDir(req.WorkingDir)
+		if verr != nil {
+			writeError(w, http.StatusBadRequest, verr.Error())
+			return
+		}
+		workingDir = dir
+	}
 
 	groupMu.Lock()
 	defer groupMu.Unlock()
@@ -321,7 +465,7 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}}
+	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workingDir, Notes: strings.TrimSpace(req.Notes)}
 	groups = append(groups, g)
 	if err := saveSessionGroups(groups); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -332,12 +476,17 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 
 // ─── PATCH /api/session-groups/{id} ─────────────────────────────────────────
 
-// updateSessionGroupRequest carries the editable group fields. Both are
-// optional pointers so a request can rename, toggle collapsed, or both, without
-// one clobbering the other.
+// updateSessionGroupRequest carries the editable group fields. All are
+// optional pointers so a request can rename, toggle collapsed, retarget the
+// project directory, or edit the notes, without one clobbering the others.
 type updateSessionGroupRequest struct {
 	Name      *string `json:"name,omitempty"`
 	Collapsed *bool   `json:"collapsed,omitempty"`
+	// WorkingDir promotes the group to a project (see sessionGroup). An
+	// explicit "" demotes it back to a plain group, at which point its
+	// sessions fall back to their own working dirs.
+	WorkingDir *string `json:"working_dir,omitempty"`
+	Notes      *string `json:"notes,omitempty"`
 }
 
 func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request) {
@@ -351,8 +500,8 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeInvalidJSONBody(w, err)
 		return
 	}
-	if req.Name == nil && req.Collapsed == nil {
-		writeError(w, http.StatusBadRequest, "name or collapsed is required")
+	if req.Name == nil && req.Collapsed == nil && req.WorkingDir == nil && req.Notes == nil {
+		writeError(w, http.StatusBadRequest, "name, collapsed, working_dir or notes is required")
 		return
 	}
 	var name string
@@ -362,6 +511,18 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusBadRequest, "name cannot be empty")
 			return
 		}
+	}
+	// Validate the directory before touching the registry, so a bad path
+	// leaves the group untouched. "" is the demote-to-plain-group signal and
+	// skips validation.
+	var workingDir string
+	if req.WorkingDir != nil && strings.TrimSpace(*req.WorkingDir) != "" {
+		dir, verr := validateWorkingDir(*req.WorkingDir)
+		if verr != nil {
+			writeError(w, http.StatusBadRequest, verr.Error())
+			return
+		}
+		workingDir = dir
 	}
 
 	groupMu.Lock()
@@ -387,6 +548,12 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 	}
 	if req.Collapsed != nil {
 		groups[idx].Collapsed = *req.Collapsed
+	}
+	if req.WorkingDir != nil {
+		groups[idx].WorkingDir = workingDir
+	}
+	if req.Notes != nil {
+		groups[idx].Notes = strings.TrimSpace(*req.Notes)
 	}
 	if err := saveSessionGroups(groups); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

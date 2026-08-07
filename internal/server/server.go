@@ -1295,7 +1295,11 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// window, and the per-turn tools array is always computed fresh for the
 	// current model regardless of the freeze, so a stale manifest would drift
 	// out of sync with what's actually offered.
-	if sess.IsComposedFor(model) {
+	// The freeze is keyed on cwd and project notes as well as the model: both
+	// are baked into the prompt (the env context's working directory, the
+	// project-notes block below) and both can change under a live session.
+	notes := projectNotesFor(sess.ID)
+	if sess.IsComposedFor(model, cwd, agent.ComposedNotesHash(notes)) {
 		a.System, a.LeanSystem = sess.ComposedSystem, sess.ComposedLeanSystem
 	} else {
 		// L1: project memory embedded in the system prompt, snapshotted once.
@@ -1305,6 +1309,9 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 		}
 		if g := tools.MemoryBackendGuidance(); g != "" {
 			memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
+		}
+		if notes != "" {
+			memInjection = strings.TrimSpace(renderProjectNotes(notes) + "\n\n" + memInjection)
 		}
 		// A profile with its own system prompt replaces the server's base
 		// prompt (default agent: unchanged, s.system).
@@ -1316,7 +1323,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 			expertMode = true
 		}
 		a.System, a.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
-		if err := sess.SetComposedSystem(a.System, a.LeanSystem, model); err != nil {
+		if err := sess.SetComposedSystem(a.System, a.LeanSystem, model, cwd, agent.ComposedNotesHash(notes)); err != nil {
 			slog.Warn("freeze composed system prompt", "session", sess.ID, "err", err)
 		}
 	}
@@ -1723,34 +1730,61 @@ func (s *Server) curCwdEnv() (string, string) {
 	return s.cwd, s.envCtx
 }
 
-// sessionCwdEnv returns the working directory and env-context a turn for sess
-// should run in: the session's own WorkingDir (with a freshly built env context
-// — cheap, DetectToolchain is a PATH lookup) when it has one, otherwise the
-// server default. Threading it through buildAgent means tool cwd, prompt env,
-// and project-hook trust all follow the same per-session directory, so one
-// session retargeting its dir can't silently move another's tools.
-func (s *Server) sessionCwdEnv(sess *agent.Session) (string, string) {
-	if sess != nil && sess.WorkingDir != "" {
-		return sess.WorkingDir, buildEnvContext(sess.WorkingDir)
+// resolveSessionDir is the single arbiter of where a session's tools run:
+//
+//	project working dir  >  the session's own WorkingDir  >  server default
+//
+// The project wins over the session's own value — that is what makes a project
+// directory a shared setting rather than a default. The session's own value is
+// left on disk untouched, merely shadowed, so moving a session out of a project
+// restores it.
+//
+// Every surface that reports or uses a session's directory goes through here.
+// Keeping display and execution on one code path is the point: when they were
+// resolved separately, a session could show one directory in the composer and
+// run its tools in another.
+func (s *Server) resolveSessionDir(sessionID, own string) string {
+	if p := projectForSession(sessionID); p != nil {
+		return p.WorkingDir
 	}
-	return s.curCwdEnv()
-}
-
-// sessionCwd returns the session's own working dir, or the server default when
-// it has none. Used by the status/list surfaces so the UI shows where a
-// session's tools actually run rather than the server launch dir.
-func (s *Server) sessionCwd(sess *agent.Session) string {
-	if sess != nil && sess.WorkingDir != "" {
-		return sess.WorkingDir
+	if own != "" {
+		return own
 	}
 	return s.curCwd()
+}
+
+// sessionCwdEnv returns the working directory and env-context a turn for sess
+// should run in (see resolveSessionDir for the precedence), with a freshly
+// built env context — cheap, DetectToolchain is a PATH lookup. Threading it
+// through buildAgent means tool cwd, prompt env, and project-hook trust all
+// follow the same directory, so one session retargeting its dir can't silently
+// move another's tools.
+func (s *Server) sessionCwdEnv(sess *agent.Session) (string, string) {
+	if sess == nil {
+		return s.curCwdEnv()
+	}
+	dir := s.resolveSessionDir(sess.ID, sess.WorkingDir)
+	if dir == s.curCwd() {
+		// Unchanged from the server default — reuse the cached env context
+		// instead of rebuilding an identical one.
+		return s.curCwdEnv()
+	}
+	return dir, buildEnvContext(dir)
+}
+
+// sessionCwd resolves a loaded session's working dir. Used by the status/list
+// surfaces so the UI shows where a session's tools actually run.
+func (s *Server) sessionCwd(sess *agent.Session) string {
+	if sess == nil {
+		return s.curCwd()
+	}
+	return s.resolveSessionDir(sess.ID, sess.WorkingDir)
 }
 
 // sessionCwdByID resolves a session's working dir from its id alone, for the WS
 // status pushes that only carry a session id. A live turn's agent (registered
 // in sessionAgents) already holds the resolved cwd, so the common case avoids a
-// disk read; a cold session falls back to loading its persisted WorkingDir,
-// then to the server default.
+// disk read; a cold session falls back to loading its persisted WorkingDir.
 func (s *Server) sessionCwdByID(sessionID string) string {
 	s.sessionAgentsMu.Lock()
 	a := s.sessionAgents[sessionID]
@@ -1758,10 +1792,11 @@ func (s *Server) sessionCwdByID(sessionID string) string {
 	if a != nil && a.CWD != "" {
 		return a.CWD
 	}
-	if sess, err := agent.LoadSession(sessionID); err == nil && sess.WorkingDir != "" {
-		return sess.WorkingDir
+	var own string
+	if sess, err := agent.LoadSession(sessionID); err == nil {
+		own = sess.WorkingDir
 	}
-	return s.curCwd()
+	return s.resolveSessionDir(sessionID, own)
 }
 
 // buildEnvContext mirrors cmd/octo's env context builder.
@@ -3204,7 +3239,11 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// /model, applied above via applyChannelModel) DOES force a re-freeze —
 	// see IsComposedFor's doc comment for why a stale MCP manifest can't just
 	// be left frozen under the old model.
-	if sess.Store.IsComposedFor(sess.Agent.Model) {
+	// cwd and project notes join the model in the freeze identity — a channel
+	// session dragged into a project in the Web UI picks the change up on its
+	// next turn, the same as a web one.
+	notes := projectNotesFor(sess.Store.ID)
+	if sess.Store.IsComposedFor(sess.Agent.Model, cwd, agent.ComposedNotesHash(notes)) {
 		sess.Agent.System, sess.Agent.LeanSystem = sess.Store.ComposedSystem, sess.Store.ComposedLeanSystem
 	} else {
 		var memInjection string
@@ -3213,6 +3252,9 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		}
 		if g := tools.MemoryBackendGuidance(); g != "" {
 			memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
+		}
+		if notes != "" {
+			memInjection = strings.TrimSpace(renderProjectNotes(notes) + "\n\n" + memInjection)
 		}
 		// A profile with its own system prompt replaces the server's base
 		// prompt (default agent: unchanged, s.system).
@@ -3223,7 +3265,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 			expertMode = true
 		}
 		sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
-		if err := sess.Store.SetComposedSystem(sess.Agent.System, sess.Agent.LeanSystem, sess.Agent.Model); err != nil {
+		if err := sess.Store.SetComposedSystem(sess.Agent.System, sess.Agent.LeanSystem, sess.Agent.Model, cwd, agent.ComposedNotesHash(notes)); err != nil {
 			slog.Warn("freeze composed system prompt", "session", string(sess.Key), "err", err)
 		}
 	}
