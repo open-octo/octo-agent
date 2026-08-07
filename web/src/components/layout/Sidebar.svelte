@@ -414,9 +414,12 @@
           <span class="group-label">{$t('nav.sessions')}</span>
           <span class="header-actions">
             {#if !$selMode}
-            <span class="header-btn" title={$t('sidebar.new_group')} onclick={newGroup}>
-              <iconify-icon icon="ant-design:folder-add-outlined" width="14"></iconify-icon>
-            </span>
+            <!-- A labeled button rather than a bare icon: since groups became
+                 projects, creating one is a high-frequency action. -->
+            <button class="new-group-btn" onclick={newGroup}>
+              <iconify-icon icon="ant-design:folder-add-outlined" width="13"></iconify-icon>
+              {$t('sidebar.new_group')}
+            </button>
             {/if}
             <span class="sel-toggle" onclick={() => { selMode.update(v => !v); sel.set({}); menuFor.set(null); editId.set(null); groupMenuFor.set(null) }}>
               {$selMode ? $t('sidebar.done') : $t('sidebar.select')}
@@ -478,21 +481,22 @@
           >
             <iconify-icon icon="ant-design:plus-outlined" width="13"></iconify-icon>
           </span>
+          <!-- Every group is configurable (working dir + shared prompt) — one
+               settings gear, no separate "project" concept in the UI. -->
           <span
             class="row-action"
-            class:is-project={!!g.working_dir}
-            title={g.working_dir ? `${tr('project.settings')} — ${g.working_dir}` : tr('project.make_project')}
+            title={g.working_dir ? `${tr('project.settings')} — ${g.working_dir}` : tr('project.settings')}
             onclick={(e) => { e.stopPropagation(); projectModalFor = g.id }}
           >
-            <iconify-icon icon={g.working_dir ? 'ant-design:folder-open-outlined' : 'ant-design:folder-add-outlined'} width="13"></iconify-icon>
+            <iconify-icon icon="ant-design:setting-outlined" width="13"></iconify-icon>
           </span>
           {#if gi > 0}
-          <span class="row-action" title={$t('sidebar.move_group_up')} onclick={() => moveGroup(g.id, -1)}>
+          <span class="row-action hover-only" title={$t('sidebar.move_group_up')} onclick={() => moveGroup(g.id, -1)}>
             <iconify-icon icon="ant-design:arrow-up-outlined" width="13"></iconify-icon>
           </span>
           {/if}
           {#if gi < groupedView.groups.length - 1}
-          <span class="row-action" title={$t('sidebar.move_group_down')} onclick={() => moveGroup(g.id, 1)}>
+          <span class="row-action hover-only" title={$t('sidebar.move_group_down')} onclick={() => moveGroup(g.id, 1)}>
             <iconify-icon icon="ant-design:arrow-down-outlined" width="13"></iconify-icon>
           </span>
           {/if}
@@ -813,11 +817,14 @@
 .group-header { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 6px; }
 .group-label { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; color: var(--text-quaternary); }
 .header-actions { display: flex; align-items: center; gap: 8px; }
-.header-btn {
-  display: flex; align-items: center; justify-content: center;
-  color: var(--text-tertiary); cursor: pointer;
+.new-group-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 22px; padding: 0 8px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-container); color: var(--text-secondary);
+  font: 600 11px/1 inherit; font-family: inherit; cursor: pointer;
 }
-.header-btn:hover { color: var(--blue-6); }
+.new-group-btn:hover { color: var(--blue-6); border-color: var(--blue-5); }
 .sel-toggle { font-size: 11px; font-weight: 600; color: var(--blue-6); cursor: pointer; }
 /* Group section header (folder row) */
 .grp-header {
@@ -836,10 +843,14 @@
 }
 .grp-name.muted { font-weight: 600; color: var(--text-quaternary); cursor: default; }
 .grp-count { font-size: 11px; color: var(--text-quaternary); flex: 0 0 auto; padding: 0 2px; }
-.grp-header .row-action { opacity: 0; }
-.grp-header:hover .row-action { opacity: 1; }
-/* The project marker stays visible unhovered — it is status, not an action. */
-.grp-header .row-action.is-project { opacity: 1; color: var(--blue-6); }
+/* Group-header actions are always visible — these are a group's primary
+   controls, not occasional housekeeping. The explicit opacity:1 overrides
+   .row-action's base opacity:0 (the session rows' hover-reveal). Only the
+   reorder arrows stay hover-revealed: with them a header would carry six
+   icons, and reordering is the one genuinely occasional action here. */
+.grp-header .row-action { opacity: 1; }
+.grp-header .row-action.hover-only { opacity: 0; }
+.grp-header:hover .row-action.hover-only { opacity: 1; }
 .grp-dir {
   padding: 0 8px 2px 28px; margin-top: -2px;
   font-size: 11px; color: var(--text-quaternary);

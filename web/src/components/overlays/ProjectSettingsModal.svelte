@@ -81,7 +81,7 @@
 <div class="backdrop" role="presentation" onclick={onClose}>
   <div class="modal" role="dialog" aria-modal="true" tabindex="-1" bind:this={modalEl} onkeydown={onKeydown} onclick={(e) => e.stopPropagation()}>
     <div class="modal-header">
-      <iconify-icon icon="ant-design:folder-open-outlined" width="16" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
+      <iconify-icon icon="ant-design:setting-outlined" width="16" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
       <span class="modal-title">{$t('project.title').replace('{name}', group.name)}</span>
     </div>
 
