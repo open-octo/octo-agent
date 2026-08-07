@@ -904,6 +904,7 @@ export interface EndpointsResponse {
   endpoints: EndpointConfig[]
   default?: string
   lite?: string
+  vision_helper?: string
 }
 
 export async function getEndpoints(): Promise<EndpointsResponse> {
@@ -991,6 +992,17 @@ export async function setEndpointLite(id: string, model?: string): Promise<{ ok:
 
 export async function unsetEndpointLite(id: string): Promise<{ ok: boolean; lite: string }> {
   return request<{ ok: boolean; lite: string }>(`/api/config/endpoints/${encodeURIComponent(id)}/lite`, { method: 'DELETE' })
+}
+
+// The vision helper describes images for text-only models. Only a model with
+// vision: true may be assigned; the server rejects anything else with 400.
+export async function setEndpointVisionHelper(id: string, model?: string): Promise<{ ok: boolean; vision_helper: string }> {
+  const qs = model ? `?model=${encodeURIComponent(model)}` : ''
+  return request<{ ok: boolean; vision_helper: string }>(`/api/config/endpoints/${encodeURIComponent(id)}/vision_helper${qs}`, { method: 'POST' })
+}
+
+export async function unsetEndpointVisionHelper(id: string): Promise<{ ok: boolean; vision_helper: string }> {
+  return request<{ ok: boolean; vision_helper: string }>(`/api/config/endpoints/${encodeURIComponent(id)}/vision_helper`, { method: 'DELETE' })
 }
 
 export async function updateShowReasoning(showReasoning: boolean): Promise<{ ok: boolean; show_reasoning?: boolean }> {

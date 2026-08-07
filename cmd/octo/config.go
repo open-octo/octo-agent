@@ -242,6 +242,16 @@ func runConfigShow(stdout, stderr io.Writer) int {
 	} else {
 		fmt.Fprintln(stdout, "  lite = (none)")
 	}
+	switch _, ok := cfg.ResolveVisionHelper(); {
+	case cfg.VisionHelper == "":
+		fmt.Fprintln(stdout, "  vision_helper = (none, text-only models cannot read images)")
+	case ok:
+		fmt.Fprintf(stdout, "  vision_helper = %s\n", cfg.VisionHelper)
+	default:
+		// Configured but unusable — say so here rather than letting it fail
+		// silently on the next screenshot. `octo doctor` explains why.
+		fmt.Fprintf(stdout, "  vision_helper = %s (UNRESOLVED — run `octo doctor`)\n", cfg.VisionHelper)
+	}
 
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "reasoning:")

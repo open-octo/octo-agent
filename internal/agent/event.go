@@ -99,6 +99,14 @@ const (
 	// turn (slash commands, HTTP API) don't flow through here; the mutating
 	// surface returns the Goal to its caller directly.
 	EventGoalUpdated EventKind = "goal_updated"
+
+	// EventImageDescribing fires around each image the pre-send transform hands
+	// to the vision helper, so the UI can explain the pause before the model
+	// starts replying. ImageStatus is "started", "done" or "failed";
+	// ImageName/ImageIndex/ImageTotal identify which image, and Err carries the
+	// reason on "failed". Cached descriptions emit nothing — there is no wait
+	// to explain.
+	EventImageDescribing EventKind = "image_describing"
 )
 
 // EventToolOutputCap is the maximum length of the Output field emitted on
@@ -130,6 +138,7 @@ const EventToolOutputCap = 8 * 1024
 //   - EventCompactProgress: Chunk, Compact (SummaryTokens, MaxTokens)
 //   - EventCompactDone:     Compact (BeforeTokens, AfterTokens, FoldedMsgs)
 //   - EventGoalUpdated:     Goal
+//   - EventImageDescribing: ImageName, ImageIndex, ImageTotal, ImageStatus, Err (on "failed")
 //
 // JSON tags are included so the WS transport (M8 web server) can marshal
 // events directly without an intermediate type.
@@ -157,6 +166,15 @@ type AgentEvent struct {
 	// including attachment blocks — for handlers that render more than the
 	// plain texts in Messages.
 	Steer []InboxItem `json:"-"`
+
+	// Image* describe one image going through the vision helper
+	// (EventImageDescribing). ImageName is the file's basename, or "image"
+	// when the block has no on-disk copy; ImageIndex/ImageTotal are 1-based
+	// over the images needing description this turn.
+	ImageName   string `json:"image_name,omitempty"`
+	ImageIndex  int    `json:"image_index,omitempty"`
+	ImageTotal  int    `json:"image_total,omitempty"`
+	ImageStatus string `json:"image_status,omitempty"`
 
 	// SteerBaseIndex is the history position the first steer item was appended
 	// at (EventSteerInjected only). Item k of Steer/Messages lands at

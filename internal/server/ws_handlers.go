@@ -503,9 +503,10 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 	// text-only model isn't sent image blocks it rejects (HTTP 400). LoadCached
 	// keeps the last good vision setting even if config.yml is mid-edit.
 	cfg, _ := config.LoadCached()
-	vision := cfg.ModelVision(sess.Model)
+	_, helperOK := cfg.ResolveVisionHelper()
+	sendImageBlocks := cfg.ModelVision(sess.Model) || helperOK
 
-	att := parseUserFiles(msg.Files, loopback, vision)
+	att := parseUserFiles(msg.Files, loopback, sendImageBlocks)
 	if content == "" && len(att.blocks) == 0 && len(att.notes) == 0 {
 		return
 	}
@@ -2182,6 +2183,21 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 			}
 			w.server.liveStateMu.Unlock()
 		}
+
+	case agent.EventImageDescribing:
+		// The vision helper roundtrip happens before the model says anything,
+		// so without this the UI would just sit silent. Not buffered into the
+		// turn replay: it's a transient progress line, and by the time a tab
+		// re-subscribes the description is already in the transcript.
+		w.hub.broadcast(w.sessionID, map[string]any{
+			"type":        "image_describing",
+			"session_id":  w.sessionID,
+			"image_name":  ev.ImageName,
+			"image_index": ev.ImageIndex,
+			"image_total": ev.ImageTotal,
+			"status":      ev.ImageStatus,
+			"error":       ev.Err,
+		})
 
 	case agent.EventSteerInjected:
 		// Prefer the full inbox items (text + attachment blocks) so a steer

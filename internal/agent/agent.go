@@ -167,6 +167,16 @@ type Agent struct {
 	LiteSender Sender
 	LiteModel  string
 
+	// Describer, when non-nil, renders images as text for a primary model that
+	// can't accept image input. The pre-send transform consults it every turn
+	// (see describeImages).
+	//
+	// The agent knows nothing about vision: whether descriptions are needed at
+	// all, which endpoint answers, and what prompt it gets are all decided
+	// behind this interface (app.NewVisionDescriber builds it). Guarded by mu
+	// like Sender, since /model can swap the model underneath a running turn.
+	Describer ImageDescriber
+
 	// CWD is the working directory used to resolve project context (e.g.
 	// .octorules) for the planner. Callers should set this to the repo root
 	// before invoking PlanTask.
@@ -592,6 +602,39 @@ func (a *Agent) SetSender(s Sender) {
 	a.Sender = s
 }
 
+// GetModel returns the agent's current model under a read lock. Pairs with
+// SetModel for callers outside the turn goroutine (the image describer reads
+// it mid-turn to decide whether descriptions are needed at all).
+func (a *Agent) GetModel() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.Model
+}
+
+// SetModel swaps the agent's model under a write lock. Callers that also swap
+// the sender should use both setters — they guard the same mutex.
+func (a *Agent) SetModel(model string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.Model = model
+}
+
+// SetImageDescriber installs (or clears, with nil) the image describer under a
+// write lock. Called once during agent construction by the entry point that
+// has the config in hand; nil leaves images untouched.
+func (a *Agent) SetImageDescriber(d ImageDescriber) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.Describer = d
+}
+
+// getImageDescriber reads the describer under a read lock.
+func (a *Agent) getImageDescriber() ImageDescriber {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.Describer
+}
+
 // Turn appends the user's input to history, asks the Sender for a reply,
 // appends the reply to history, and returns it. Errors leave History
 // unchanged from before the call.
@@ -981,7 +1024,12 @@ func (a *Agent) runLoop(
 		// error tool_results prevents Anthropic HTTP 400 errors.
 		a.ensureToolPairing()
 
-		reply, err := send(ctx, a.History.Snapshot(), a.MaxTokens)
+		// Images a text-only model can't read become text before they go on
+		// the wire. No-op when no describer is wired or the model has vision.
+		msgs := a.History.Snapshot()
+		a.describeImages(ctx, handler, msgs)
+
+		reply, err := send(ctx, msgs, a.MaxTokens)
 		if err != nil {
 			// Interrupt during the provider call: finalize cleanly rather than
 			// surfacing context.Canceled as a turn error.

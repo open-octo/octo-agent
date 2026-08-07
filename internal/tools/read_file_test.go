@@ -329,3 +329,33 @@ func TestIsUNCPath(t *testing.T) {
 		}
 	}
 }
+
+// With a vision helper configured, read_file hands back the image block even
+// though the model itself can't see: the agent layer replaces it with a
+// description before the request goes out. Refusing here would make the helper
+// unreachable from the tool that most needs it.
+func TestReadFile_ImageTextOnlyModelWithVisionHelper(t *testing.T) {
+	SetModelVision(false)
+	SetImageDescriberActive(true)
+	t.Cleanup(func() { SetModelVision(true); SetImageDescriberActive(false) })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shot.png")
+	if err := os.WriteFile(path, []byte("\x89PNG\r\n\x1a\nfake"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	res, err := ReadFileTool{}.Execute(context.Background(), "", map[string]any{"path": path})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(res.Blocks) == 0 {
+		t.Fatalf("expected an image block when a vision helper is configured, got text: %q", res.Text)
+	}
+	if res.Blocks[0].Type != "image" {
+		t.Errorf("block type = %q, want image", res.Blocks[0].Type)
+	}
+	if strings.Contains(res.Text, "does not accept image input") {
+		t.Errorf("should not refuse when a helper is configured, got: %q", res.Text)
+	}
+}

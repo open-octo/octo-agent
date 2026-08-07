@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/hooks"
 	"github.com/open-octo/octo-agent/internal/permission"
 	"github.com/open-octo/octo-agent/internal/tools"
@@ -99,6 +100,16 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 	// Children compact on the same lite model as the parent.
 	child.LiteSender = s.parent.LiteSender
 	child.LiteModel = s.parent.LiteModel
+
+	// A child gets its own describer rather than the parent's: the two may run
+	// different models, and the describer decides whether to translate images
+	// from the model it is bound to. Nil (no helper configured, or config
+	// unreadable) leaves the child's images untouched, as before.
+	if s.parent.Describer != nil {
+		if cfg, err := config.LoadCached(); err == nil {
+			child.SetImageDescriber(NewVisionDescriber(child, cfg))
+		}
+	}
 
 	// Create the session dir before registering the child: a permissions
 	// failure here must abort the spawn, not leave a dead entry in the registry

@@ -1118,3 +1118,140 @@ func TestGetConfig_ReasoningEffortOffSentinel(t *testing.T) {
 		t.Errorf("reasoning_effort = %q, want \"off\"", resp.ReasoningEffort)
 	}
 }
+
+// visionSeed is an endpoint carrying one vision model and one text-only model.
+func visionSeed() config.Config {
+	return config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "anthropic", APIKey: "sk-test", Models: []config.EndpointModel{
+				{Model: "text-model", Vision: false},
+				{Model: "vision-model", Vision: true},
+			}},
+		},
+		Default: "ep-a::text-model",
+	}
+}
+
+func TestSetEndpointVisionHelper(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, visionSeed())
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints/ep-a/vision_helper?model=vision-model", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST vision_helper = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if cfg.VisionHelper != "ep-a::vision-model" {
+		t.Errorf("vision_helper = %q, want ep-a::vision-model", cfg.VisionHelper)
+	}
+	if _, ok := cfg.ResolveVisionHelper(); !ok {
+		t.Error("the value written by the API must resolve")
+	}
+}
+
+// Omitting ?model picks the first vision-capable model, not simply the first
+// model — the endpoint's first entry here is text-only.
+func TestSetEndpointVisionHelper_WithoutModelPicksFirstVisionModel(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, visionSeed())
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints/ep-a/vision_helper", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST vision_helper = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if cfg.VisionHelper != "ep-a::vision-model" {
+		t.Errorf("vision_helper = %q, want ep-a::vision-model", cfg.VisionHelper)
+	}
+}
+
+func TestSetEndpointVisionHelper_RejectsTextOnlyModel(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, visionSeed())
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints/ep-a/vision_helper?model=text-model", "")
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("POST vision_helper (text-only) = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if cfg.VisionHelper != "" {
+		t.Errorf("vision_helper = %q, want it left unset", cfg.VisionHelper)
+	}
+}
+
+func TestUnsetEndpointVisionHelper(t *testing.T) {
+	setTestHome(t)
+	seed := visionSeed()
+	seed.VisionHelper = "ep-a::vision-model"
+	seedModels(t, seed)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodDelete, "/api/config/endpoints/ep-a/vision_helper", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("DELETE vision_helper = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if cfg.VisionHelper != "" {
+		t.Errorf("vision_helper = %q, want cleared", cfg.VisionHelper)
+	}
+}
+
+// A dangling vision_helper would silently disable the feature and show up in
+// `octo doctor`, so deleting the model it names must clear it.
+func TestDeleteEndpointModel_ClearsVisionHelper(t *testing.T) {
+	setTestHome(t)
+	seed := visionSeed()
+	seed.VisionHelper = "ep-a::vision-model"
+	seedModels(t, seed)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodDelete, "/api/config/endpoints/ep-a/models/vision-model", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("DELETE model = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if cfg.VisionHelper != "" {
+		t.Errorf("vision_helper = %q, want cleared with the model it named", cfg.VisionHelper)
+	}
+}
+
+func TestDeleteEndpoint_ClearsVisionHelper(t *testing.T) {
+	setTestHome(t)
+	seed := visionSeed()
+	seed.VisionHelper = "ep-a::vision-model"
+	seed.Endpoints = append(seed.Endpoints, config.Endpoint{
+		ID: "ep-b", Provider: "anthropic", APIKey: "sk-test",
+		Models: []config.EndpointModel{{Model: "other"}},
+	})
+	seed.Default = "ep-b::other"
+	seedModels(t, seed)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodDelete, "/api/config/endpoints/ep-a", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("DELETE endpoint = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if cfg.VisionHelper != "" {
+		t.Errorf("vision_helper = %q, want cleared with its endpoint", cfg.VisionHelper)
+	}
+}
+
+func TestListEndpoints_ExposesVisionHelper(t *testing.T) {
+	setTestHome(t)
+	seed := visionSeed()
+	seed.VisionHelper = "ep-a::vision-model"
+	seedModels(t, seed)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodGet, "/api/config/endpoints", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET endpoints = %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"vision_helper":"ep-a::vision-model"`) {
+		t.Errorf("response should carry vision_helper so the UI can mark the chip: %s", w.Body.String())
+	}
+}

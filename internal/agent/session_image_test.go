@@ -82,3 +82,69 @@ func TestLoadSession_MissingImageFileBecomesPlaceholder(t *testing.T) {
 		}
 	}
 }
+
+// A description already paid for must survive a session reload even though the
+// image bytes don't. Tool-produced images (read_file, browser screenshots, MCP
+// results) never carry an ImagePath, so this is the common case for exactly
+// the images the vision helper exists to serve.
+func TestLoadSession_KeepsDescriptionWhenBytesAreGone(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := NewSession("m", "")
+	sess.Messages = append(sess.Messages, Message{
+		Role: RoleUser,
+		Blocks: []ContentBlock{
+			{Type: "image", ImageDescription: "a login form with an email field"},
+		},
+	})
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	loaded, err := LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	b := loaded.Messages[0].Blocks[0]
+	if b.Type != "text" {
+		t.Fatalf("block type = %q, want text", b.Type)
+	}
+	if !strings.Contains(b.Text, "a login form with an email field") {
+		t.Errorf("description was dropped on reload: %q", b.Text)
+	}
+	if strings.Contains(b.Text, "no longer available") {
+		t.Errorf("described image should not degrade to the unavailable placeholder: %q", b.Text)
+	}
+}
+
+// The retry budget is per-session: a helper that was down must be retried
+// after a restart, not stay permanently written off.
+func TestLoadSession_ResetsImageDescFailures(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	imgPath := filepath.Join(tmp, "pic.png")
+	if err := os.WriteFile(imgPath, []byte{0x89, 'P', 'N', 'G'}, 0o600); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
+
+	sess := NewSession("m", "")
+	sess.Messages = append(sess.Messages, Message{
+		Role:   RoleUser,
+		Blocks: []ContentBlock{{Type: "image", ImagePath: imgPath, ImageDescFailures: visionHelperMaxFailures}},
+	})
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	loaded, err := LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := loaded.Messages[0].Blocks[0].ImageDescFailures; got != 0 {
+		t.Errorf("ImageDescFailures = %d after reload, want 0 (fresh budget)", got)
+	}
+}

@@ -23,6 +23,7 @@ flag。所有字段都是可选的——文件不存在，或者字段缺失，�
 | `endpoints` | [端点](#端点) 列表 | 配置好的 provider，每个端点打包共享的连接参数和一组模型 |
 | `default` | string | 复合 id `<端点id>::<model>`，没有其他选择时使用；留空则回退到第一个端点的第一个模型 |
 | `lite` | string | 用于低成本内部调用（[历史压缩](/docs/zh/concepts/compaction/)的总结步骤和会话标题生成）的复合 id `<端点id>::<model>`；留空则从端点的 `lite_model` 或 vendor 默认推断 |
+| `vision_helper` | string | 复合 id `<端点id>::<model>`，指定一个有视觉能力的模型替纯文本模型描述图片。留空（默认）则图片仍按原样拒绝。指向的模型必须是 `vision: true` |
 | `permission_mode` | string | `interactive` \| `strict` \| `auto` |
 | `coauthor` | bool | 在 agent 写的 git commit 里追加 `Co-authored-by`（默认 `true`） |
 | `access_key` | string | 暴露到回环之外时,Web UI / API 认证用的共享密钥 |
@@ -98,6 +99,7 @@ endpoints:
       - model: deepseek-chat
 default: anthropic::claude-sonnet-5
 lite: anthropic::claude-sonnet-5
+vision_helper: ""        # 例如 anthropic::claude-sonnet-5 —— 让纯文本模型也能"看懂"图片
 reasoning_effort: ""      # low | medium | high | xhigh | max；留空 = 关闭
 permission_mode: interactive
 coauthor: true

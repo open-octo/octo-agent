@@ -126,6 +126,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // Set on turn_error WS event, cleared when the user sends a new message or
   // dismisses it manually.
   let turnError = $state<string | null>(null)
+  // Vision helper progress: the roundtrip that turns an image into text
+  // happens before the model replies, so it needs its own status line.
+  let describingImage = $state<{ name: string; index: number; total: number } | null>(null)
 
   // Tracks optimistic UI state for in-flight sends. A FIFO queue per session
   // supports multiple messages (e.g. consecutive steer messages mid-turn); if
@@ -435,6 +438,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     resetSessionRuntimeState(sid)
     // Stale turn-error banner from a previous session must not carry over.
     turnError = null
+    describingImage = null
     if (get(pendingPrompt)?.sessionId === sid) {
       // A freshly opened agentic session (openAgentSession queued a
       // pendingPrompt) is empty at creation, so loadHistory has nothing to
@@ -888,6 +892,17 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     cleanups.push(ws.on('tool_error', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       setToolError(sid, (ev as any).tool_id, (ev as any).error ?? 'error')
+    }))
+
+    // A text-only model is having an image described for it. "started" shows
+    // the line; anything else clears it — a failure surfaces in the transcript
+    // as the fallback text the model itself receives, so no banner is needed.
+    cleanups.push(ws.on('image_describing', (ev) => {
+      if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      const e = ev as any
+      describingImage = e.status === 'started'
+        ? { name: e.image_name ?? 'image', index: e.image_index ?? 1, total: e.image_total ?? 1 }
+        : null
     }))
 
     // Turn-level failure (sender/tool setup or the LLM call itself errored).
@@ -2615,6 +2630,21 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       <!-- Question banner (aligned with composer) -->
       <QuestionModal />
 
+      <!-- Vision helper progress: transient, cleared by done/failed -->
+      {#if describingImage}
+        <div class="vision-describing">
+          <iconify-icon icon="ant-design:eye-outlined" width="14"></iconify-icon>
+          <span>
+            {describingImage.total > 1
+              ? tr('chat.describing_image_n')
+                  .replace('{name}', describingImage.name)
+                  .replace('{index}', String(describingImage.index))
+                  .replace('{total}', String(describingImage.total))
+              : tr('chat.describing_image').replace('{name}', describingImage.name)}
+          </span>
+        </div>
+      {/if}
+
       <!-- Turn-error banner: persists until dismissed or new message -->
       {#if turnError}
         <div class="turn-error-banner transition:fade|100">
@@ -3283,6 +3313,21 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 }
 
 /* ── Turn-error banner ──────────────────────────────────────────────────── */
+.vision-describing {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 24px;
+  margin: 0 24px 10px;
+  background: var(--bg-subtle, var(--active-blue-bg));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  max-width: var(--chat-content-max-width);
+  margin-left: auto; margin-right: auto;
+  width: 100%;
+  box-sizing: border-box;
+}
 .turn-error-banner {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 24px;

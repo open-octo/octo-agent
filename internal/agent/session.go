@@ -1404,14 +1404,22 @@ func LoadSession(id string) (*Session, error) {
 // rehydrateImageBlocks reloads persisted image attachments (ImagePath) into
 // memory so provider adapters can re-send them on resumed turns — image bytes
 // are never serialised into the transcript itself. A block whose file is gone,
-// or a legacy block saved without a path, degrades to a text placeholder: the
-// anthropic adapter hard-errors on an image block with no data, which would
-// otherwise make every later turn of the resumed session fail.
+// or a legacy block saved without a path, degrades to text: the anthropic
+// adapter hard-errors on an image block with no data, which would otherwise
+// make every later turn of the resumed session fail.
+//
+// It also resets each image's vision-helper retry budget. A budget spent on a
+// broken endpoint shouldn't outlive the session that spent it — resuming after
+// fixing the endpoint has to be able to try again.
 func rehydrateImageBlocks(msgs []Message) {
 	for mi := range msgs {
 		for bi := range msgs[mi].Blocks {
 			b := &msgs[mi].Blocks[bi]
-			if b.Type != "image" || b.Image != nil {
+			if b.Type != "image" {
+				continue
+			}
+			b.ImageDescFailures = 0
+			if b.Image != nil {
 				continue
 			}
 			if b.ImagePath != "" {
@@ -1419,6 +1427,15 @@ func rehydrateImageBlocks(msgs []Message) {
 					b.Image = &ImageData{MIMEType: imageMIMEFromPath(b.ImagePath), Data: data}
 					continue
 				}
+			}
+			// The bytes are gone, but a description of them may not be. Tool
+			// output (read_file, screenshots, MCP) never carries an ImagePath,
+			// so this is the normal path for exactly the images the vision
+			// helper exists to handle — dropping to "no longer available"
+			// would throw away a description already paid for.
+			if b.ImageDescription != "" {
+				*b = NewTextBlock(describedImageText(*b, b.ImageDescription))
+				continue
 			}
 			name := "image"
 			if b.ImagePath != "" {

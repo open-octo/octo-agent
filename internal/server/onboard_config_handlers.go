@@ -259,9 +259,10 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 // Security: APIKey is never echoed. HasAPIKey reports presence so the UI can
 // badge "已配置 / 未设置" without exposing the secret.
 type endpointsResponse struct {
-	Endpoints []endpointConfigJSON `json:"endpoints"`
-	Default   string               `json:"default,omitempty"`
-	Lite      string               `json:"lite,omitempty"`
+	Endpoints    []endpointConfigJSON `json:"endpoints"`
+	Default      string               `json:"default,omitempty"`
+	Lite         string               `json:"lite,omitempty"`
+	VisionHelper string               `json:"vision_helper,omitempty"`
 }
 
 // endpointConfigJSON is one channel in the two-level response.
@@ -297,9 +298,10 @@ func (s *Server) handleGetEndpoints(w http.ResponseWriter, r *http.Request) {
 	cfg, _ := config.Load()
 
 	out := endpointsResponse{
-		Endpoints: make([]endpointConfigJSON, 0, len(cfg.Endpoints)),
-		Default:   cfg.Default,
-		Lite:      cfg.Lite,
+		Endpoints:    make([]endpointConfigJSON, 0, len(cfg.Endpoints)),
+		Default:      cfg.Default,
+		Lite:         cfg.Lite,
+		VisionHelper: cfg.VisionHelper,
 	}
 	for _, ep := range cfg.Endpoints {
 		em := endpointConfigJSON{
@@ -957,12 +959,16 @@ func (s *Server) handleDeleteEndpoint(w http.ResponseWriter, r *http.Request) {
 			return fmt.Errorf("%w: %s", config.ErrEndpointNotFound, id)
 		}
 		cfg.Endpoints = append(cfg.Endpoints[:idx], cfg.Endpoints[idx+1:]...)
-		// Clear Default/Lite if they pointed at the deleted endpoint's prefix.
+		// Clear Default/Lite/VisionHelper if they pointed at the deleted
+		// endpoint's prefix.
 		if strings.HasPrefix(cfg.Default, id+"::") {
 			cfg.Default = ""
 		}
 		if strings.HasPrefix(cfg.Lite, id+"::") {
 			cfg.Lite = ""
+		}
+		if strings.HasPrefix(cfg.VisionHelper, id+"::") {
+			cfg.VisionHelper = ""
 		}
 		return nil
 	}); err != nil {
@@ -1039,12 +1045,15 @@ func (s *Server) handleDeleteEndpointModel(w http.ResponseWriter, r *http.Reques
 				kept = append(kept, m)
 			}
 			cfg.Endpoints[i].Models = kept
-			// Clear Default/Lite if they pointed at the deleted model.
+			// Clear Default/Lite/VisionHelper if they pointed at the deleted model.
 			if cfg.Default == id+"::"+model {
 				cfg.Default = ""
 			}
 			if cfg.Lite == id+"::"+model {
 				cfg.Lite = ""
+			}
+			if cfg.VisionHelper == id+"::"+model {
+				cfg.VisionHelper = ""
 			}
 			return nil
 		}
@@ -1196,4 +1205,104 @@ func (s *Server) handleUnsetEndpointLite(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "cleared": cleared, "lite": currentLite})
+}
+
+// handleSetEndpointVisionHelper: POST /api/config/endpoints/{id}/vision_helper[?model=<model>]
+// Sets cfg.VisionHelper to "<id>::<model>". If ?model is omitted, the
+// endpoint's first vision-capable model is used. A model that doesn't exist
+// under the endpoint, or that can't accept images, is rejected with 400 — a
+// text-only helper would leave the feature silently dead.
+func (s *Server) handleSetEndpointVisionHelper(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing endpoint id")
+		return
+	}
+	model := r.URL.Query().Get("model")
+	var newHelper string
+	if err := config.Mutate(func(cfg *config.Config) error {
+		for _, ep := range cfg.Endpoints {
+			if ep.ID != id {
+				continue
+			}
+			m, err := resolveVisionEndpointModel(ep, model)
+			if err != nil {
+				return err
+			}
+			newHelper = ep.CompositeID(m)
+			cfg.VisionHelper = newHelper
+			return nil
+		}
+		return fmt.Errorf("%w: %s", config.ErrEndpointNotFound, id)
+	}); err != nil {
+		if errors.Is(err, config.ErrEndpointNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "vision_helper": newHelper})
+}
+
+// handleUnsetEndpointVisionHelper: DELETE /api/config/endpoints/{id}/vision_helper
+// Clears cfg.VisionHelper if it currently points at this endpoint. If it names
+// a different endpoint, the call is a no-op and returns the existing value.
+func (s *Server) handleUnsetEndpointVisionHelper(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing endpoint id")
+		return
+	}
+	var cleared bool
+	var current string
+	if err := config.Mutate(func(cfg *config.Config) error {
+		for _, ep := range cfg.Endpoints {
+			if ep.ID != id {
+				continue
+			}
+			current = cfg.VisionHelper
+			if strings.HasPrefix(cfg.VisionHelper, id+"::") {
+				cfg.VisionHelper = ""
+				cleared = true
+			}
+			return nil
+		}
+		return fmt.Errorf("%w: %s", config.ErrEndpointNotFound, id)
+	}); err != nil {
+		if errors.Is(err, config.ErrEndpointNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "cleared": cleared, "vision_helper": current})
+}
+
+// resolveVisionEndpointModel is resolveEndpointModel with the extra rule that
+// the model must accept image input. An empty model picks the endpoint's first
+// vision-capable one rather than its first model outright.
+func resolveVisionEndpointModel(ep config.Endpoint, model string) (string, error) {
+	if len(ep.Models) == 0 {
+		return "", fmt.Errorf("endpoint %q has no models", ep.ID)
+	}
+	if model == "" {
+		for _, m := range ep.Models {
+			if m.Vision {
+				return m.Model, nil
+			}
+		}
+		return "", fmt.Errorf("endpoint %q has no vision-capable model", ep.ID)
+	}
+	for _, m := range ep.Models {
+		if m.Model != model {
+			continue
+		}
+		if !m.Vision {
+			return "", fmt.Errorf("model %q in endpoint %q does not accept image input", model, ep.ID)
+		}
+		return model, nil
+	}
+	return "", fmt.Errorf("model %q not found in endpoint %q", model, ep.ID)
 }

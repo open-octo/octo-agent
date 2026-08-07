@@ -102,3 +102,111 @@ func TestConfigValidate_GlobalScalars(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveVisionHelper covers the vision_helper resolver. The critical case
+// is a model name that isn't in the config at all: ModelVision would answer
+// through the ModelSupportsVision heuristic (which errs toward true), so the
+// resolver must go through EntryByModel and report false instead.
+func TestResolveVisionHelper(t *testing.T) {
+	cfg := Config{Endpoints: []Endpoint{
+		{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{
+			{Model: "claude-sonnet-4-6", Vision: true},
+			{Model: "text-only-model", Vision: false},
+		}},
+		{ID: "ep-b", Provider: "custom", BaseURL: "http://x", Protocol: "openai", Models: []EndpointModel{
+			{Model: "qwen-vl-max", Vision: true},
+		}},
+	}}
+
+	tests := []struct {
+		name         string
+		helper       string
+		wantOK       bool
+		wantProvider string
+	}{
+		{"empty is disabled", "", false, ""},
+		{"whitespace is disabled", "   ", false, ""},
+		{"composite id to vision model", "ep-b::qwen-vl-max", true, "custom"},
+		{"bare name to vision model", "qwen-vl-max", true, "custom"},
+		{"composite id to text-only model", "ep-a::text-only-model", false, ""},
+		{"bare name of text-only model", "text-only-model", false, ""},
+		{"unknown endpoint", "ghost::qwen-vl-max", false, ""},
+		{"unknown model name is not rescued by the heuristic", "gpt-4o", false, ""},
+		{"typo'd model name is not rescued by the heuristic", "claude-sonnet-4-6-typo", false, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := cfg
+			c.VisionHelper = tt.helper
+			entry, ok := c.ResolveVisionHelper()
+			if ok != tt.wantOK {
+				t.Fatalf("ResolveVisionHelper() ok = %v, want %v (entry %+v)", ok, tt.wantOK, entry)
+			}
+			if ok && entry.Provider != tt.wantProvider {
+				t.Errorf("provider = %q, want %q", entry.Provider, tt.wantProvider)
+			}
+			if ok && !entry.Vision {
+				t.Error("resolved entry must carry Vision: true")
+			}
+		})
+	}
+}
+
+// TestConfigValidate_VisionHelper checks the validation message paths. A
+// dangling or text-only vision_helper is reported (with the available vision
+// models listed) rather than silently disabling the feature.
+func TestConfigValidate_VisionHelper(t *testing.T) {
+	eps := []Endpoint{{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{
+		{Model: "claude-sonnet-4-6", Vision: true},
+		{Model: "qwen-plus", Vision: false},
+	}}}
+	textOnly := []Endpoint{{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{{Model: "qwen-plus", Vision: false}}}}
+
+	tests := []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{"unset is fine", Config{Endpoints: eps}, ""},
+		{"resolves to a vision model", Config{Endpoints: eps, VisionHelper: "ep-a::claude-sonnet-4-6"}, ""},
+		{"bare name resolves", Config{Endpoints: eps, VisionHelper: "claude-sonnet-4-6"}, ""},
+		{"dangling reference", Config{Endpoints: eps, VisionHelper: "ghost::model"}, "vision_helper"},
+		{"points at a text-only model", Config{Endpoints: eps, VisionHelper: "ep-a::qwen-plus"}, "vision_helper"},
+		{"message lists available vision models", Config{Endpoints: eps, VisionHelper: "ghost::model"}, "ep-a::claude-sonnet-4-6"},
+		{"message says so when none are configured", Config{Endpoints: textOnly, VisionHelper: "ghost::model"}, "no vision-capable model is configured"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			probs := tt.cfg.Validate()
+			joined := strings.Join(probs, "; ")
+			if tt.want == "" {
+				if len(probs) != 0 {
+					t.Errorf("want no problems, got %v", probs)
+				}
+				return
+			}
+			if !strings.Contains(joined, tt.want) {
+				t.Errorf("want a problem containing %q, got %v", tt.want, probs)
+			}
+		})
+	}
+}
+
+// TestRenameEndpointRewritesVisionHelper pins that renaming an endpoint carries
+// the vision_helper composite id along, the same as Default and Lite. Without
+// it a rename silently disables the feature.
+func TestRenameEndpointRewritesVisionHelper(t *testing.T) {
+	c := &Config{
+		Endpoints:    []Endpoint{{ID: "old", Provider: "anthropic", Models: []EndpointModel{{Model: "m", Vision: true}}}},
+		VisionHelper: "old::m",
+	}
+	if err := c.RenameEndpoint("old", "new"); err != nil {
+		t.Fatalf("RenameEndpoint: %v", err)
+	}
+	if c.VisionHelper != "new::m" {
+		t.Errorf("VisionHelper = %q, want %q", c.VisionHelper, "new::m")
+	}
+	if _, ok := c.ResolveVisionHelper(); !ok {
+		t.Error("vision helper should still resolve after the rename")
+	}
+}

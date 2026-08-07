@@ -82,9 +82,14 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 	// Gate image content (browser screenshots, read_file) on the active model's
 	// vision capability so a text-only model isn't handed images its endpoint
 	// rejects.
+	// A configured vision helper relaxes that gate: the tools may hand back
+	// image blocks even to a text-only model, because the agent layer turns
+	// them into descriptions before the request goes out.
 	cfg, cfgErr := config.Load()
 	if cfgErr == nil {
 		tools.SetModelVision(cfg.ModelVision(a.Model))
+		_, helperOK := cfg.ResolveVisionHelper()
+		tools.SetImageDescriberActive(helperOK)
 	}
 
 	// Optional external semantic memory backend (hindsight/mem0/agentmemory) — the
@@ -97,6 +102,7 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 		tools.SetBrowserRecordingGenerator(nil)
 		tools.SetBrowserHealer(nil)
 		tools.SetModelVision(true)
+		tools.SetImageDescriberActive(false)
 		tools.ResetBrowserSession()
 		tools.SetMemoryBackend(nil)
 		tools.SetMemoryBackendAutoRecall(false)

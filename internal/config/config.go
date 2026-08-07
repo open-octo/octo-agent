@@ -157,6 +157,13 @@ type Config struct {
 	// fall back to ImplicitLiteModel inference (endpoint.lite_model, else
 	// the vendor registry's LiteModel for official endpoints).
 	Lite string `yaml:"lite,omitempty"`
+	// VisionHelper is the composite id (or bare model name) of a vision-capable
+	// model that describes images on behalf of a text-only primary model. Empty
+	// disables the feature: images keep the historical refusal/path-note
+	// treatment. The referenced model must exist under some endpoint AND carry
+	// Vision: true — see ResolveVisionHelper, which is the only sanctioned way
+	// to read this field.
+	VisionHelper string `yaml:"vision_helper,omitempty"`
 
 	PermissionMode string `yaml:"permission_mode,omitempty"`
 	// Coauthor, when true, instructs the agent to append a Co-authored-by line
@@ -635,7 +642,35 @@ func (c Config) Validate() []string {
 			problems = append(problems, fmt.Sprintf("lite %q does not resolve to any endpoint+model", c.Lite))
 		}
 	}
+	// vision_helper must land on a model that can actually see. Unlike
+	// Default/Lite this is checked through ResolveVisionHelper so the Vision
+	// flag is part of the verdict: a text-only model here would leave the
+	// feature silently dead at runtime.
+	if c.VisionHelper != "" {
+		if _, ok := c.ResolveVisionHelper(); !ok {
+			problems = append(problems, fmt.Sprintf("vision_helper %q does not resolve to a vision-capable endpoint model%s", c.VisionHelper, c.visionModelHint()))
+		}
+	}
 	return problems
+}
+
+// visionModelHint lists the composite ids of every vision-capable model in the
+// config, for the vision_helper validation message. Returns "" when there are
+// none — the message then just states the failure rather than trailing an
+// empty "available:" list.
+func (c Config) visionModelHint() string {
+	var ids []string
+	for _, ep := range c.Endpoints {
+		for _, m := range ep.Models {
+			if m.Vision {
+				ids = append(ids, ep.CompositeID(m.Model))
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return " (no vision-capable model is configured)"
+	}
+	return " (available: " + strings.Join(ids, ", ") + ")"
 }
 
 // isValidEndpointID reports whether id matches the endpoint id regex
@@ -741,6 +776,27 @@ func (c Config) EntryByModel(model string) (ModelEntry, bool) {
 	return ModelEntry{}, false
 }
 
+// ResolveVisionHelper resolves the vision_helper reference to the endpoint
+// model that will describe images for text-only models. ok is false when the
+// field is empty, doesn't resolve, or resolves to a model with Vision: false —
+// all three mean "no vision helper", and every caller (validation, the tool
+// gates, the describer closure) must treat them identically.
+//
+// Deliberately built on EntryByModel rather than ModelVision: ModelVision falls
+// back to the ModelSupportsVision heuristic for a model that isn't in the
+// config, and that heuristic errs toward true, so a typo would resolve to a
+// model nothing can send to.
+func (c Config) ResolveVisionHelper() (ModelEntry, bool) {
+	if strings.TrimSpace(c.VisionHelper) == "" {
+		return ModelEntry{}, false
+	}
+	entry, ok := c.EntryByModel(c.VisionHelper)
+	if !ok || !entry.Vision {
+		return ModelEntry{}, false
+	}
+	return entry, true
+}
+
 // UpsertEndpoint inserts or replaces the endpoint with ep.ID. If an endpoint
 // with that ID already exists, it's replaced in place; otherwise ep is
 // appended. Default/Lite composite-id references are NOT rewritten here — use
@@ -843,6 +899,7 @@ func (c *Config) RenameEndpoint(oldID, newID string) error {
 	// "<endpoint_id>::<model>" — we only swap the prefix, the model stays.
 	c.Default = renameCompositePrefix(c.Default, oldID, newID)
 	c.Lite = renameCompositePrefix(c.Lite, oldID, newID)
+	c.VisionHelper = renameCompositePrefix(c.VisionHelper, oldID, newID)
 	return nil
 }
 

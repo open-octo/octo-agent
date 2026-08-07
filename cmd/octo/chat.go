@@ -789,6 +789,9 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			a.LiteModel = liteEntry.Model
 		}
 	}
+	// Images become text for a text-only model when a vision helper is
+	// configured. Nil (unconfigured) leaves every image path unchanged.
+	a.SetImageDescriber(app.NewVisionDescriber(a, cfg))
 	if a.LiteSender == nil {
 		// No explicit lite entry — fall back to the vendor's registry lite
 		// model on the SAME sender, so compaction stays on the endpoint, key,

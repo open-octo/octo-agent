@@ -73,6 +73,11 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	cfg, cfgErr := config.LoadCached()
 	if cfgErr == nil {
 		ctx = tools.WithModelVision(ctx, cfg.ModelVision(a.Model))
+		// A configured vision helper relaxes that gate: the tools may return
+		// image blocks even to a text-only model, because agent.describeImages
+		// turns them into text before the request goes out.
+		_, helperOK := cfg.ResolveVisionHelper()
+		ctx = tools.WithImageDescriberActive(ctx, helperOK)
 	}
 
 	// Same omission for the LLM-backed browser helpers: record_stop's

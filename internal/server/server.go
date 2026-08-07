@@ -866,6 +866,8 @@ func (s *Server) registerRoutes() {
 	s.api("POST /api/config/endpoints/{id}/default", s.handleSetEndpointDefault)
 	s.api("POST /api/config/endpoints/{id}/lite", s.handleSetEndpointLite)
 	s.api("DELETE /api/config/endpoints/{id}/lite", s.handleUnsetEndpointLite)
+	s.api("POST /api/config/endpoints/{id}/vision_helper", s.handleSetEndpointVisionHelper)
+	s.api("DELETE /api/config/endpoints/{id}/vision_helper", s.handleUnsetEndpointVisionHelper)
 
 	// Browser automation setup
 	s.api("GET /api/browser/status", s.handleBrowserStatus)
@@ -1248,6 +1250,9 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// revert to for as long as the file stays broken.
 	cfg, cfgErr := config.LoadCached()
 	if cfgErr == nil {
+		// Images become text for a text-only model when a vision helper is
+		// configured. Nil (unconfigured) leaves every image path unchanged.
+		a.SetImageDescriber(app.NewVisionDescriber(a, cfg))
 		a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
 		if a.LiteSender == nil {
 			// No explicit lite entry — fall back to the vendor's registry
@@ -2237,6 +2242,9 @@ func (s *Server) buildChannelAgent(profile *agentprofile.Profile) *agent.Agent {
 	a := agent.New(defaultSender, model)
 	a.MaxTokens = s.cfg.MaxTokens
 	if cfg, err := config.Load(); err == nil {
+		// IM attachments are a primary reason this feature exists — a channel
+		// agent needs the describer as much as a Web session does.
+		a.SetImageDescriber(app.NewVisionDescriber(a, cfg))
 		a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
 		if a.LiteSender == nil {
 			if lm := app.ImplicitLiteModel(s.getProvider(), model, resolveBaseURL(s.getProvider(), cfg)); lm != "" {
@@ -2421,7 +2429,7 @@ func (s *Server) applyChannelModel(sess *channel.Session) {
 				s.applyChannelDefault(sess, st)
 			} else {
 				sess.Agent.SetSender(sender)
-				sess.Agent.Model = entry.Model
+				sess.Agent.SetModel(entry.Model)
 				sess.AppliedModelConfig = entry.Model
 			}
 			return
@@ -2443,7 +2451,7 @@ func (s *Server) applyChannelModel(sess *channel.Session) {
 		return
 	}
 	if st.Model != "" {
-		sess.Agent.Model = st.Model
+		sess.Agent.SetModel(st.Model)
 	}
 }
 
@@ -2456,7 +2464,7 @@ func (s *Server) applyChannelDefault(sess *channel.Session, st *agent.Session) {
 		model = st.Model
 	}
 	sess.Agent.SetSender(sender)
-	sess.Agent.Model = model
+	sess.Agent.SetModel(model)
 	sess.AppliedModelConfig = ""
 }
 
@@ -3064,7 +3072,12 @@ func (s *Server) attachInboundFiles(sess *channel.Session, ev channel.InboundEve
 	var notes []string
 
 	cfg, _ := config.LoadCached()
-	vision := cfg.ModelVision(sess.Agent.Model)
+	// Send real image blocks when the model can read them itself, and also when
+	// a vision helper will describe them before the request goes out. Without
+	// the second case the image never becomes a block at all, and the helper
+	// never sees it.
+	_, helperOK := cfg.ResolveVisionHelper()
+	sendImageBlocks := cfg.ModelVision(sess.Agent.GetModel()) || helperOK
 
 	for _, f := range ev.Files {
 		switch {
@@ -3074,7 +3087,7 @@ func (s *Server) attachInboundFiles(sess *channel.Session, ev channel.InboundEve
 				slog.Debug("channel image attachment", "platform", ev.Platform, "name", f.Name, "err", err)
 				continue
 			}
-			if vision {
+			if sendImageBlocks {
 				blocks = append(blocks, block)
 			} else {
 				notes = append(notes, agent.AttachmentNote(block.ImagePath))

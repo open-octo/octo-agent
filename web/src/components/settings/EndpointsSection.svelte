@@ -17,6 +17,7 @@
   let endpoints  = $state<EndpointConfig[]>([])
   let defaultCid = $state('')
   let liteCid    = $state('')
+  let visionCid  = $state('')
   let providers  = $state<ProviderPreset[]>([])
   let loading    = $state(true)
   let busy       = $state(false)
@@ -65,6 +66,7 @@
       endpoints = ep.endpoints ?? []
       defaultCid = ep.default ?? ''
       liteCid = ep.lite ?? ''
+      visionCid = ep.vision_helper ?? ''
     } catch (e: any) {
       showToast(e.message ?? 'Failed to load endpoints', 'error')
     }
@@ -106,6 +108,19 @@
   function unsetLite(epId: string) {
     menu = null
     run(() => api.unsetEndpointLite(epId))
+  }
+
+  // The vision helper lets text-only models "see" images: it describes them
+  // before the turn is sent. Only offered on models the endpoint marks as
+  // vision-capable — the server rejects the rest.
+  function setVisionHelper(epId: string, model: string) {
+    menu = null
+    run(() => api.setEndpointVisionHelper(epId, model))
+  }
+
+  function unsetVisionHelper(epId: string) {
+    menu = null
+    run(() => api.unsetEndpointVisionHelper(epId))
   }
 
   async function removeModel(ep: EndpointConfig, model: string) {
@@ -426,8 +441,9 @@
             {#each ep.models as m (m.model)}
               {@const isDef = defaultCid === cid(ep.id, m.model)}
               {@const isLit = liteCid === cid(ep.id, m.model)}
+              {@const isVis = visionCid === cid(ep.id, m.model)}
               <div class="chip-wrap">
-                <div class="chip" class:chip-default={isDef} class:chip-lite={isLit}>
+                <div class="chip" class:chip-default={isDef} class:chip-lite={isLit} class:chip-vision={isVis}>
                   <button
                     class="chip-label mono"
                     onclick={(e) => {
@@ -441,6 +457,7 @@
                     {m.model}
                     {#if isDef}<span class="chip-badge badge-default">{$t('settings.endpoints.badge.default')}</span>{/if}
                     {#if isLit}<span class="chip-badge badge-lite">{$t('settings.endpoints.badge.lite')}</span>{/if}
+                    {#if isVis}<span class="chip-badge badge-vision">{$t('settings.endpoints.badge.vision_helper')}</span>{/if}
                   </button>
                   <button
                     class="chip-x"
@@ -463,6 +480,15 @@
                     {:else}
                       <button class="menu-item" onclick={() => setLite(ep.id, m.model)}>
                         {$t('settings.endpoints.set_lite')}
+                      </button>
+                    {/if}
+                    {#if isVis}
+                      <button class="menu-item" onclick={() => unsetVisionHelper(ep.id)}>
+                        {$t('settings.endpoints.unset_vision_helper')}
+                      </button>
+                    {:else if m.vision}
+                      <button class="menu-item" onclick={() => setVisionHelper(ep.id, m.model)}>
+                        {$t('settings.endpoints.set_vision_helper')}
                       </button>
                     {/if}
                   </div>
@@ -608,6 +634,7 @@
 }
 .chip-default { border-color: var(--success-text); }
 .chip-lite { border-color: var(--blue-5); }
+.chip-vision { border-color: var(--purple-5, var(--blue-5)); }
 .chip-label {
   height: 100%; padding: 0 4px 0 10px; border: none; background: transparent;
   font-size: 12.5px; color: var(--text); cursor: pointer;
@@ -617,6 +644,7 @@
 .chip-badge { font-size: 10px; padding: 0 5px; border-radius: 4px; font-weight: 600; }
 .badge-default { background: var(--success-bg); color: var(--success-text); }
 .badge-lite { background: var(--active-blue-bg); color: var(--blue-6); }
+.badge-vision { background: var(--active-blue-bg); color: var(--blue-6); }
 .chip-x {
   height: 100%; padding: 0 8px 0 4px; border: none; background: transparent;
   color: var(--text-quaternary); cursor: pointer; display: inline-flex; align-items: center;

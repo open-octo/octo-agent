@@ -76,6 +76,25 @@ type ContentBlock struct {
 	// saved with a path is rehydrated from it by LoadSession so a resumed
 	// conversation can re-send the image to the provider.
 	ImagePath string `json:"image_path,omitempty"`
+
+	// ImageDescription is the vision helper's rendering of this image as text
+	// (type=="image"), for primary models that can't accept image input. It is
+	// filled lazily by the pre-send transform (see describeImages) and persists
+	// with the session; non-empty means "already described", and the helper is
+	// never called for this block again — the block is its own cache.
+	//
+	// Only a successful description is stored. The failure fallback text goes
+	// into the outgoing snapshot alone, so this field never holds an apology.
+	ImageDescription string `json:"image_description,omitempty"`
+
+	// ImageDescFailures counts consecutive description failures for this block
+	// (type=="image"). At visionHelperMaxFailures the block stops calling the
+	// helper for the rest of the session, so a dead endpoint costs one timeout
+	// per image rather than one per turn. LoadSession resets it to zero, which
+	// is what gives a resumed session a fresh budget once the endpoint is
+	// fixed; it is serialised only so an in-process Save/Load round-trip
+	// doesn't lose the count mid-session.
+	ImageDescFailures int `json:"image_desc_failures,omitempty"`
 }
 
 // ImageData holds raw image bytes and their MIME type for multimodal uploads.

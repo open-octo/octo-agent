@@ -109,6 +109,23 @@ func (h *History) replaceLast(m Message) {
 	h.rewritten = true
 }
 
+// UpdateMessage applies mutate to the i-th message in place under the write
+// lock and marks history rewritten, so the next Session.Save rewrites the file
+// instead of appending. Out-of-range indices are a no-op.
+//
+// Snapshot hands out copies, so a caller that walks a snapshot and wants a
+// change to stick has to come back through here with the index it saw. Used by
+// the pre-send image transform to cache a description onto the original block.
+func (h *History) UpdateMessage(i int, mutate func(*Message)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if i < 0 || i >= len(h.messages) {
+		return
+	}
+	mutate(&h.messages[i])
+	h.rewritten = true
+}
+
 // RewriteDirty reports whether history has been rewritten (any non-append
 // mutation) since the flag was last consumed by takeRewriteDirty. Callers use
 // it as a cheap "do I need to re-sync" check; it does not clear the flag.
