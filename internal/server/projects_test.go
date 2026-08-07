@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -423,6 +424,81 @@ func TestProject_CreateSessionInUnknownGroup(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("unknown group: status %d, want 404: %s", rec.Code, rec.Body.String())
 	}
+}
+
+// TestProject_RegistryWritesNotifyTabs: every registry write must fire the
+// groups-changed notification — it is what keeps other tabs' sidebar headers
+// and composer chips from lying about where a project's tools run. Hooked at
+// saveRegistry, so one test can sweep every write path.
+func TestProject_RegistryWritesNotifyTabs(t *testing.T) {
+	srv := groupTestServer(t)
+	projectDir := t.TempDir()
+	sess := saveSessionWithDir(t, "")
+
+	notified := 0
+	prev := notifyGroupsChanged
+	notifyGroupsChanged = func() { notified++ }
+	t.Cleanup(func() { notifyGroupsChanged = prev })
+
+	steps := []struct {
+		name string
+		do   func() *httptest.ResponseRecorder
+	}{
+		{"create project", func() *httptest.ResponseRecorder {
+			rec, _ := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Work", "working_dir": projectDir})
+			return rec
+		}},
+		{"move session in", func() *httptest.ResponseRecorder {
+			gid := projectIDByName(t, srv, "Work")
+			rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sess.ID+"/group", map[string]any{"group_id": gid})
+			return rec
+		}},
+		{"edit notes", func() *httptest.ResponseRecorder {
+			gid := projectIDByName(t, srv, "Work")
+			rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"notes": "n"})
+			return rec
+		}},
+		{"pin session", func() *httptest.ResponseRecorder {
+			rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sess.ID+"/pin", map[string]any{"pinned": true})
+			return rec
+		}},
+		{"delete group", func() *httptest.ResponseRecorder {
+			gid := projectIDByName(t, srv, "Work")
+			rec, _ := doGroupReq(t, srv, http.MethodDelete, "/api/session-groups/"+gid, nil)
+			return rec
+		}},
+	}
+	for _, step := range steps {
+		before := notified
+		if rec := step.do(); rec.Code != http.StatusOK {
+			t.Fatalf("%s: status %d: %s", step.name, rec.Code, rec.Body.String())
+		}
+		if notified <= before {
+			t.Errorf("%s: registry write did not notify", step.name)
+		}
+	}
+}
+
+// projectIDByName finds a group id by name via the list endpoint.
+func projectIDByName(t *testing.T, srv *Server, name string) string {
+	t.Helper()
+	rec, _ := doGroupReq(t, srv, http.MethodGet, "/api/session-groups", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list groups: status %d", rec.Code)
+	}
+	var resp struct {
+		Groups []sessionGroup `json:"groups"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, g := range resp.Groups {
+		if g.Name == name {
+			return g.ID
+		}
+	}
+	t.Fatalf("group %q not found", name)
+	return ""
 }
 
 // TestProject_ListReportsProjectFields makes sure the Web UI can tell a project

@@ -90,6 +90,22 @@ type groupFile struct {
 	PinnedSessionIDs []string       `json:"pinned_session_ids,omitempty"`
 }
 
+// notifyGroupsChanged, when set (Server.New), is called after every successful
+// registry write so open Web/desktop tabs can refetch the groups snapshot —
+// without it, a project's working directory changed in one tab stays stale in
+// every other until reload, and a stale project directory misleads about
+// where a session's tools run. One hook at the single write point
+// (saveRegistry) rather than a broadcast per HTTP handler: the programmatic
+// writers (cron's group helpers, create-session-in-group) are covered too,
+// and no future write path can forget it. Called under groupMu — the hub's
+// buffered events channel makes that non-blocking in practice, same as every
+// other broadcast issued under a lock.
+//
+// Package-level like groupMu/regCache: the registry is per-~/.octo process
+// state, and the last Server to start owns the notification. A no-op when nil
+// (tests that never construct a Server).
+var notifyGroupsChanged func()
+
 // groupMu serialises read-modify-write cycles on the registry within this
 // process — the common case, since a given ~/.octo is normally served by one
 // process. It does NOT coordinate across processes: if `octo serve` and the
@@ -157,6 +173,9 @@ func saveRegistry(gf groupFile) error {
 		return fmt.Errorf("session groups: write %s: %w", path, err)
 	}
 	invalidateRegistryCache()
+	if notifyGroupsChanged != nil {
+		notifyGroupsChanged()
+	}
 	return nil
 }
 

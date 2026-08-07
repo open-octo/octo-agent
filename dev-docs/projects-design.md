@@ -173,6 +173,12 @@ type updateSessionGroupRequest struct {
 - **Composer 的 cwd chip**：会话属于项目时显示项目目录，且**置为只读**，点击提示「由项目〈名字〉统一管理」。这一条不能省——否则用户改了没反应，就是一次静默失效。
 - **拖入 / 移出项目**：复用现有的 `PUT /api/sessions/{id}/group`。移入后工作目录立刻显示为项目目录，移出后回落到会话自己的值。
 
+## 多 tab 同步
+
+registry 的每次成功写盘（分组增删改、成员移动、pin、项目目录/notes 编辑）都会全局广播 `session_groups_changed`，钩在唯一写点 `saveRegistry` 上（`notifyGroupsChanged`，Server `initWS` 时装配）——而不是散在每个 handler 里，这样 cron 的编程式写入和将来的新写路径都不会漏。事件**不带 payload**：客户端收到后重新拉 `GET /api/session-groups`，registry 的形状不用在客户端镜像一份。
+
+没有它，一个 tab 里改掉的项目目录在其它 tab 里保持陈旧——sidebar 头和 composer chip（从 groups store 派生）会误报工具实际运行的位置。执行侧永远正确（解析在服务端），这纯粹是显示同步。发起方 tab 自己也会收到广播并重拉一次，幂等无害。
+
 ## 测试要点
 
 - 解析优先级三种组合：有项目、无项目有会话值、两者都无。

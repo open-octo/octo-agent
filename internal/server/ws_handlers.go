@@ -2280,6 +2280,14 @@ func (s *Server) initWS() {
 	s.interrupts = make(map[string]context.CancelFunc)
 	s.confirmations = make(map[string]chan string)
 	s.liveStates = make(map[string]*sessionLiveState)
+	// Every registry write (group/pin/project edits, from any writer) tells
+	// all connected tabs to refetch the groups snapshot — see
+	// notifyGroupsChanged's doc comment for why this is hooked at the write
+	// point rather than in each handler.
+	hub := s.wsHub
+	notifyGroupsChanged = func() {
+		hub.broadcast("", wsEventSessionGroupsChanged{Type: "session_groups_changed"})
+	}
 }
 
 // toolDefsFor returns tool definitions for the given model.

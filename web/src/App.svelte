@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sessions, sessionGroups, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent, cmdkOpen, settingsModalOpen, createNewSession, isDesktopShell } from './lib/stores'
+  import { view, sessions, sessionGroups, pinnedSessions, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent, cmdkOpen, settingsModalOpen, createNewSession, isDesktopShell } from './lib/stores'
   import MobileApp from './mobile/MobileApp.svelte'
   import { ws, wsState } from './lib/ws'
   import { notificationsEnabled } from './lib/notifications'
@@ -231,6 +231,21 @@
     ws.on('session_created', () => {
       refreshSessionsFromServer()
       api.listSessionGroups().then(org => sessionGroups.set(org.groups)).catch(() => { /* non-critical */ })
+    })
+
+    // The group registry changed — in this tab or another (a group edit, a
+    // membership move, a pin, a project's working directory or notes). The
+    // groups snapshot is otherwise fetched once at sidebar mount, so without
+    // this a project directory retargeted in one tab stays stale in every
+    // other: the sidebar header keeps the old path and the composer chip of
+    // member sessions (which derives from the groups store) misleads about
+    // where tools actually run. The event carries no payload by design —
+    // refetch, so there's no registry shape to mirror client-side.
+    ws.on('session_groups_changed', () => {
+      api.listSessionGroups().then(org => {
+        sessionGroups.set(org.groups)
+        pinnedSessions.set(org.pinned)
+      }).catch(() => { /* non-critical; next mount refetches */ })
     })
 
     // session_activity is a lightweight global signal (unlike

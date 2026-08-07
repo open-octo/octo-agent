@@ -212,6 +212,15 @@ type wsEventSessionCreated struct {
 	SessionID string `json:"session_id"`
 }
 
+// wsEventSessionGroupsChanged is broadcast globally after every session-group
+// registry write (group create/rename/delete/reorder, membership moves, pins,
+// project directory/notes edits). It deliberately carries no payload: clients
+// refetch GET /api/session-groups, so there is no second copy of the registry
+// shape to keep in sync.
+type wsEventSessionGroupsChanged struct {
+	Type string `json:"type"`
+}
+
 type wsEventRequestFeedback struct {
 	Type string `json:"type"`
 	// SessionID is required: the ws-dispatcher drops any event whose session_id
