@@ -90,7 +90,12 @@
       permissionMode   = cfg.permission_mode ?? 'interactive'
       showReasoningVal = cfg.show_reasoning ?? true
       coauthorVal      = cfg.coauthor ?? true
-      workspaceDir        = cfg.workspace_dir ?? ''
+      // Legacy installer-seeded "auto" resolves to the same default as ""
+      // (see tools.ResolveWorkspaceDir) — show it as the empty input with
+      // the resolved-default placeholder, not as a literal "auto" the user
+      // would mistake for a real path.
+      const wd = cfg.workspace_dir ?? ''
+      workspaceDir        = wd.trim().toLowerCase() === 'auto' ? '' : wd
       workspaceDirDefault = cfg.workspace_dir_default ?? ''
       if (cfg.language) language = cfg.language
       setLocale(cfg.language === 'zh' || cfg.language === 'zh-TW' ? 'zh' : 'en')

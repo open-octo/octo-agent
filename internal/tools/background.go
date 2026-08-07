@@ -366,9 +366,10 @@ func (m *BackgroundManager) Start(ctx context.Context, command string, mode Back
 		return "", fmt.Errorf("background: invalid mode %q (want %q or %q)", mode, BgModeAsync, BgModeInteractive)
 	}
 
-	bgCtx, cancel := context.WithCancel(context.Background())
-	// WithWorkingDir no-ops on "" — an unstamped caller keeps the process CWD.
-	bgCtx = WithWorkingDir(bgCtx, WorkingDir(ctx))
+	// WithoutCancel keeps every ctx value (working dir today, whatever
+	// shellCommand consumes tomorrow) while severing the caller's
+	// cancellation/deadline, so only the WithCancel below can kill the process.
+	bgCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	cmd, err := shellCommand(bgCtx, command)
 	if err != nil {
 		cancel()

@@ -246,7 +246,13 @@ export const agenticSessions = new Set<string>()
 export async function createNewSession(agentProfile?: string): Promise<void> {
   const opts: api.CreateSessionOpts = { source: 'manual' }
   if (agentProfile) opts.agent_profile = agentProfile
+  // A model picked on the blank new-chat view rides pendingModel until a
+  // session exists — honor it here too, or the sidebar "+" would silently
+  // discard the pick that ChatView.ensureActiveSession applies on send.
+  const pending = get(pendingModel)
+  if (pending) opts.model = pending
   const sess = await api.createSession(opts)
+  if (pending) pendingModel.set('')
   sessions.update(ss => [sess, ...ss])
   activeSessionId.set(sess.id)
   view.set('chat')

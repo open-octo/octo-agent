@@ -473,10 +473,14 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		model = req.Model
 		// The web modal sends a config entry id; the session binds to that
 		// entry so its turns run on the entry's sender. A non-matching value
-		// stays a raw model string on the default sender.
+		// stays a raw model string on the default sender. The binding stores
+		// the id AS RECEIVED: collapsing a composite "<endpoint>::<model>" id
+		// to the bare model name (as this once did) loses the endpoint half,
+		// so a later EntryByModel re-resolution could land on a DIFFERENT
+		// endpoint exposing the same model name.
 		if cfg, err := config.Load(); err == nil {
 			if e, ok := cfg.EntryByModel(req.Model); ok {
-				modelConfig = e.Model
+				modelConfig = req.Model
 				if e.Model != "" {
 					model = e.Model
 				}
@@ -1278,7 +1282,10 @@ func (s *Server) handleUpdateSessionModel(w http.ResponseWriter, r *http.Request
 	var model string
 	if entry, ok := cfg.EntryByModel(req.ModelID); ok {
 		model = entry.Model
-		err = sess.SetModelConfig(entry.Model, entry.Model)
+		// Bind with the id AS RECEIVED — a composite "<endpoint>::<model>"
+		// id must survive verbatim, or re-resolving the bare model name
+		// later could land on a different endpoint exposing the same model.
+		err = sess.SetModelConfig(req.ModelID, entry.Model)
 	} else if req.ModelID == "default" {
 		// Legacy id for "the default entry". Unbind so the session follows
 		// whatever the default is at turn time.

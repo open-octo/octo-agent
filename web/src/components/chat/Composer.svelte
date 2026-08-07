@@ -686,9 +686,15 @@
   // otherwise freezes at page load, so an endpoint/model configured in
   // Settings never appeared (and rows for since-edited endpoints kept stale
   // composite ids that no longer resolve) until a full reload (#2066).
+  // The sequence guard drops out-of-order responses — reopening the menu
+  // quickly fires overlapping fetches, and a slow first response must not
+  // overwrite a newer one.
+  let modelsFetchSeq = 0
   async function refreshModels() {
+    const seq = ++modelsFetchSeq
     try {
       const ep = await api.getEndpoints()
+      if (seq !== modelsFetchSeq) return
       const flat: { id: string; model: string; endpoint: string }[] = []
       for (const e of ep.endpoints) {
         for (const m of e.models) {
