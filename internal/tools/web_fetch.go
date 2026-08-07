@@ -15,18 +15,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
-	"github.com/open-octo/octo-agent/internal/version"
 )
-
-// JinaReaderHost is the public Jina AI Reader endpoint. Sending a URL via
-// `https://r.jina.ai/<URL>` returns the page rendered to Markdown — handles
-// JavaScript-rendered pages, paywalls (where Jina has access), and most
-// of the noisy chrome a raw curl would dump on the LLM.
-const JinaReaderHost = "https://r.jina.ai/"
-
-// jinaReaderHostForTest is the actual host the tool uses. Tests swap it
-// out to a local httptest server; production reads the const default.
-var jinaReaderHostForTest = JinaReaderHost
 
 // WebFetchMaxBytes is the absolute ceiling on a single fetched body, whether
 // returned inline or spilled to a temp file. It bounds memory and disk for a
@@ -50,17 +39,17 @@ const (
 	webFetchOutlineMaxHeadings = 50
 )
 
-// WebFetchTool fetches a URL and returns its body as Markdown. It prefers
-// the Jina AI Reader proxy for JS-rendered pages and clean HTML-to-Markdown
-// conversion, but falls back to a direct HTTP fetch when the proxy fails.
+// WebFetchTool fetches a URL and returns its body as text via a direct HTTP
+// GET with a browser-like header set. JS-rendered pages come back as their
+// static HTML skeleton; for interactive or login-walled content, use browser.
 type WebFetchTool struct{}
 
 func (WebFetchTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "web_fetch",
-		Description: "Fetch a URL and return its content. Prefers the Jina Reader proxy " +
-			"for JS-rendered pages and clean HTML-to-Markdown conversion; falls back to " +
-			"a direct HTTP fetch when the proxy is unavailable. " +
+		Description: "Fetch a URL and return its content via a direct HTTP GET with a " +
+			"browser-like header set (JS-rendered pages return their static HTML skeleton; " +
+			"for interactive or login-walled content use the browser tool). " +
 			"Responses larger than ~64 KB are saved to a temp file; the tool returns a " +
 			"preview summary (size, content-type, first/last lines) plus the file path. " +
 			"Use read_file or grep on that path to inspect the full content. " +
@@ -69,9 +58,7 @@ func (WebFetchTool) Definition() agent.ToolDefinition {
 			"Public web only — no authentication.\n\n" +
 			"If a URL returns 403/404 even though it works in a browser (hotlink/anti-bot " +
 			"checks), set `referer` — e.g. the page's own origin (https://example.com) or the " +
-			"search engine you found it from. Setting `referer` or `user_agent` forces a direct " +
-			"fetch with those headers (the Jina proxy is skipped, since its outbound headers " +
-			"aren't controllable).",
+			"search engine you found it from — or override `user_agent`.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -81,11 +68,11 @@ func (WebFetchTool) Definition() agent.ToolDefinition {
 				},
 				"referer": map[string]any{
 					"type":        "string",
-					"description": "Optional Referer header. Use when a page 403/404s without one (hotlink protection, anti-bot). Often the page's own origin or the search-result source. Forces a direct fetch (skips the Jina proxy).",
+					"description": "Optional Referer header. Use when a page 403/404s without one (hotlink protection, anti-bot). Often the page's own origin or the search-result source.",
 				},
 				"user_agent": map[string]any{
 					"type":        "string",
-					"description": "Optional User-Agent override. Rarely needed (a realistic browser UA is sent by default). Forces a direct fetch (skips the Jina proxy).",
+					"description": "Optional User-Agent override. Rarely needed (a realistic browser UA is sent by default).",
 				},
 			},
 			"required": []string{"url"},
@@ -102,15 +89,6 @@ func (WebFetchTool) Execute(ctx context.Context, _ string, input map[string]any)
 	if strings.TrimSpace(raw) == "" {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: url is required")
 	}
-	// Strip a mistakenly-passed Jina prefix so both the proxy and fallback
-	// paths operate on the original URL.
-	jinaHost := jinaReaderHostForTest
-	if !strings.HasSuffix(jinaHost, "/") {
-		jinaHost += "/"
-	}
-	if strings.HasPrefix(raw, jinaHost) {
-		raw = strings.TrimPrefix(raw, jinaHost)
-	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: parse url: %w", err)
@@ -122,51 +100,17 @@ func (WebFetchTool) Execute(ctx context.Context, _ string, input map[string]any)
 	referer := strings.TrimSpace(stringArg(input, "referer"))
 	userAgent := strings.TrimSpace(stringArg(input, "user_agent"))
 
-	// Custom headers requested: the model wants this page fetched with a
-	// specific Referer/User-Agent (typically to clear a hotlink/anti-bot 403/404).
-	// Go straight to the direct fetch — the Jina proxy's outbound headers aren't
-	// controllable, so it can't honour the override.
-	if referer != "" || userAgent != "" {
-		directCtx, directCancel := context.WithTimeout(ctx, 30*time.Second)
-		out, err := fetchDirect(directCtx, raw, referer, userAgent)
-		directCancel()
-		if err != nil {
-			return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: %w", err)
-		}
-		out.UI = webFetchUI(raw, out.Text)
-		return out, nil
+	// fetchDirect supplies a same-origin Referer and a browser UA by default;
+	// explicit overrides are passed through when the caller needs to clear a
+	// hotlink/anti-bot 403/404.
+	directCtx, directCancel := context.WithTimeout(ctx, 30*time.Second)
+	out, err := fetchDirect(directCtx, raw, referer, userAgent)
+	directCancel()
+	if err != nil {
+		return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: %w", err)
 	}
-
-	// Strategy: try Jina Reader proxy first (better quality), then fall back
-	// to a direct fetch on network-level or 5xx/429 proxy failures.
-	// Jina gets a short 5s timeout so a slow proxy doesn't block the fallback.
-	jinaCtx, jinaCancel := context.WithTimeout(ctx, 5*time.Second)
-	out, jinaErr := fetchViaJina(jinaCtx, raw)
-	jinaCancel()
-	if jinaErr == nil {
-		out.UI = webFetchUI(raw, out.Text)
-		return out, nil
-	}
-
-	// Fallback conditions: network errors (TLS, DNS, timeout), 5xx proxy
-	// errors, or 429 rate-limit. 4xx client errors (e.g. 404) from the proxy
-	// are NOT retried — the proxy correctly reflected an upstream 404.
-	if shouldFallback(jinaErr) {
-		// Give the direct fetch the remaining time up to 30s total. No explicit
-		// referer/UA here — fetchDirect supplies a same-origin Referer and a
-		// browser UA by default.
-		directCtx, directCancel := context.WithTimeout(ctx, 30*time.Second)
-		out, directErr := fetchDirect(directCtx, raw, "", "")
-		directCancel()
-		if directErr == nil {
-			out.UI = webFetchUI(raw, out.Text)
-			return out, nil
-		}
-		// Both failed — surface both errors so the LLM knows what happened.
-		return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: jina proxy failed (%v); direct fetch also failed (%v)", jinaErr, directErr)
-	}
-
-	return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: %w", jinaErr)
+	out.UI = webFetchUI(raw, out.Text)
+	return out, nil
 }
 
 // webFetchUI builds the "web_fetch" UI payload. Title and status code are
@@ -178,65 +122,6 @@ func webFetchUI(url, text string) map[string]any {
 		"url":             url,
 		"content_preview": uiHead(text, 4, 300),
 	}
-}
-
-// shouldFallback returns true when a Jina proxy error is worth retrying
-// with a direct fetch. 4xx errors (except 429 rate-limit) are assumed to
-// be legitimate upstream responses and are not retried.
-func shouldFallback(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := err.Error()
-	// Network-level errors always fallback.
-	if strings.Contains(s, "tls:") ||
-		strings.Contains(s, "x509:") ||
-		strings.Contains(s, "no such host") ||
-		strings.Contains(s, "connection refused") ||
-		strings.Contains(s, "connection reset by peer") ||
-		strings.Contains(s, "timeout") ||
-		strings.Contains(s, "temporary failure") ||
-		strings.Contains(s, "i/o timeout") ||
-		strings.Contains(s, "context deadline exceeded") ||
-		strings.Contains(s, "EOF") {
-		return true
-	}
-	// HTTP 5xx or 429 from the proxy — the proxy itself is struggling.
-	if strings.Contains(s, "HTTP 5") || strings.Contains(s, "HTTP 429") {
-		return true
-	}
-	return false
-}
-
-// fetchViaJina calls the Jina Reader proxy and returns the rendered Markdown.
-func fetchViaJina(ctx context.Context, rawURL string) (agent.ToolResult, error) {
-	// Jina's contract is literal string concatenation: r.jina.ai/<rest>.
-	// Do NOT QueryEscape — Jina parses the rest-of-path itself, and
-	// escaping breaks routing. A `#fragment` in raw is technically lost
-	// here (Jina won't see it), but fragments are never sent to servers
-	// anyway, so this matches normal HTTP semantics.
-	jinaURL := jinaReaderHostForTest + rawURL
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jinaURL, nil)
-	if err != nil {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Accept", "text/markdown,text/plain,*/*")
-	// Identify ourselves so Jina can reach us about issues.
-	req.Header.Set("User-Agent", version.UserAgent())
-
-	resp, err := webFetchHTTPClient().Do(req)
-	if err != nil {
-		return agent.ToolResult{Text: ""}, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return agent.ToolResult{Text: ""}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
-	return readBody(resp.Body, rawURL, resp.Header.Get("Content-Type"))
 }
 
 // defaultDirectUserAgent is the browser-like UA sent on direct fetches when the
@@ -528,7 +413,7 @@ func blockedFetchIP(ip net.IP) bool {
 // destinations. The check runs in net.Dialer.Control, which fires AFTER DNS
 // resolution with the concrete remote IP — so a hostname that resolves to a
 // blocked address (DNS rebinding) is refused too, and every redirect hop is
-// re-dialed through the same hook. Shared by both web_fetch clients.
+// re-dialed through the same hook. Used by the web_fetch client.
 func secureFetchTransport() *http.Transport {
 	dialer := &net.Dialer{
 		Timeout:   30 * time.Second,
@@ -554,37 +439,11 @@ func secureFetchTransport() *http.Transport {
 	}
 }
 
-// webFetchHTTPClient is the client used for the Jina-proxy path. On top of the
-// shared link-local block it refuses to follow a cross-host 3xx redirect: the
-// proxy always targets r.jina.ai, so a redirect to a different host means it is
-// bouncing us somewhere unexpected — a classic SSRF / data-exfil vector.
-// Same-host redirects (path changes) are still followed. web_search keeps the
-// plain webHTTPClient because search backends legitimately redirect across
-// hosts.
-func webFetchHTTPClient() *http.Client {
-	return &http.Client{
-		Timeout:   30 * time.Second,
-		Transport: secureFetchTransport(),
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) == 0 {
-				return nil
-			}
-			prev := via[len(via)-1].URL.Host
-			if !strings.EqualFold(req.URL.Host, prev) {
-				return fmt.Errorf("refusing cross-host redirect to %q (from %q); "+
-					"re-issue web_fetch against the final URL if that destination is intended",
-					req.URL.Host, prev)
-			}
-			return nil
-		},
-	}
-}
-
-// directFetchHTTPClient is the client for the direct-fetch fallback. Unlike the
-// proxy client it MUST allow cross-host redirects (URL shorteners, www-canonical
-// hops, http→https on another host are all normal for an arbitrary URL), but it
-// shares the link-local block via secureFetchTransport and caps the redirect
-// chain so a redirect loop can't hang the agent.
+// directFetchHTTPClient is the client used by web_fetch. It MUST allow
+// cross-host redirects (URL shorteners, www-canonical hops, http→https on
+// another host are all normal for an arbitrary URL), but it shares the
+// link-local block via secureFetchTransport and caps the redirect chain so a
+// redirect loop can't hang the agent.
 func directFetchHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout:   30 * time.Second,

@@ -50,7 +50,7 @@ metadata:
 | 场景 | 工具 |
 |------|------|
 | 搜索摘要、关键词结果、发现信息来源 | **web_search** |
-| URL 已知，按 prompt 从页面定向提取信息（内部自动走 Jina 转 Markdown，省 token） | **web_fetch**（直接传原始 URL，不要自己拼 `r.jina.ai/` 前缀） |
+| URL 已知，按 prompt 从页面定向提取信息（直接 HTTP 抓取，自带浏览器 UA 和同源 Referer） | **web_fetch**（直接传原始 URL） |
 | URL 已知，需要原始 HTML（meta、JSON-LD 等结构化字段） | **terminal**（curl） |
 | 非公开内容，或已知静态层无效的平台（小红书、公众号等） | **browser**（直接，跳过静态层） |
 | 需要登录态、交互操作，或要像人一样在浏览器内自由导航探索 | **browser** |

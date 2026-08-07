@@ -33,7 +33,7 @@ const (
 
 // mcpCatalog returns the deferred MCP tool catalog (the same defs mcpToolDefs
 // would upload in full). A package var so tests can inject a fixed catalog
-// without standing up a live MCP registry — mirrors jinaReaderHostForTest.
+// without standing up a live MCP registry.
 var mcpCatalog = mcpToolDefs
 
 // ── configuration ──────────────────────────────────────────────────────────

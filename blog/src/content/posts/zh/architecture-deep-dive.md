@@ -116,10 +116,9 @@ MCP 工具的 JSON schema 可能非常庞大——配置几十个 MCP 服务器�
 
 ### 抽掉 SSRF 的地板
 
-`web_fetch` 不能直接 `http.Get(userURL)`——那是教科书级的 SSRF（Server-Side Request Forgery，服务端请求伪造）。它的回应（`internal/tools/web_fetch.go`）把请求拆成**两条加固路径**，共享同一个 `secureFetchTransport`：
+`web_fetch` 不能直接 `http.Get(userURL)`——那是教科书级的 SSRF（Server-Side Request Forgery，服务端请求伪造）。它的回应（`internal/tools/web_fetch.go`）把每个请求压进**一条加固路径**：
 
-- **Jina 代理路径**——把渲染交给 `r.jina.ai`（Jina AI 的网页内容解析服务），但拒绝**跨主机**重定向（离开 `r.jina.ai` 的重定向意味着被弹到意外的地方），在解析后 IP 是链路本地地址/云元数据时直接断连接。调用方传入自定义 header 时强制走直接请求（Jina 的出站 header 不可控，无法执行覆盖）。
-- **直接请求路径**——处理任意 URL 所必须，因此**必须**跟随跨主机重定向（URL 短链、`www` 规范化跳转都正常）。共享链路本地封禁，并把重定向链上限设为 10 跳，避免环让 agent 挂起。
+- **直接请求路径**——直接抓取原始 URL，因此**必须**跟随跨主机重定向（URL 短链、`www` 规范化跳转都正常），但共享链路本地封禁，并把重定向链上限设为 10 跳，避免环让 agent 挂起。
 
 `net.Dialer.Control` 钩子在 DNS 解析**之后**拿到真实 IP 时触发，所以 DNS 重绑定（一个主机名此刻解析成公网 IP，下一刻就解析成 `169.254.x.x` / `127.0.0.1`）也被拦下。身体也有边界：`WebFetchInlineBytes`（64 KB）是内联阈值；`WebFetchMaxBytes`（5 MB）是硬上限；超出就截断落盘到临时文件。大页面 = 摘要 + 头尾预览 + 指一条 `read_file` 路径给剩余部分，绝不一墙文字糊进模型的 context。
 

@@ -48,18 +48,14 @@ func TestWebFetch_SandboxAllowsNetwork(t *testing.T) {
 	SetSandbox(&p)
 	defer SetSandbox(nil)
 
-	// Point Jina at a local server so we don't need real network.
+	// Point at a local server so we don't need real network.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("# allowed"))
 	}))
 	defer srv.Close()
 
-	old := jinaReaderHostForTest
-	jinaReaderHostForTest = srv.URL + "/"
-	defer func() { jinaReaderHostForTest = old }()
-
 	out, err := WebFetchTool{}.Execute(context.Background(), "web_fetch", map[string]any{
-		"url": "https://example.com",
+		"url": srv.URL,
 	})
 	if err != nil {
 		t.Fatalf("expected success when network is allowed, got: %v", err)

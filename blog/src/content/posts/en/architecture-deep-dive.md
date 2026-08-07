@@ -116,10 +116,9 @@ Guarding on an external file's mtime is inherently strict. What if a command the
 
 ### Pulling the Floor Out from Under SSRF
 
-`web_fetch` can't just `http.Get(userURL)`. That's textbook SSRF (Server-Side Request Forgery). Its answer (`internal/tools/web_fetch.go`) splits requests into **two hardened paths** sharing one `secureFetchTransport`:
+`web_fetch` can't just `http.Get(userURL)`. That's textbook SSRF (Server-Side Request Forgery). Its answer (`internal/tools/web_fetch.go`) runs every request through one hardened path:
 
-- **The Jina proxy path**. Rendering is handed to `r.jina.ai` (Jina AI's page-parsing service), but **cross-host** redirects are refused (a redirect off `r.jina.ai` means being bounced somewhere unexpected), and the connection is cut if the resolved IP is link-local or cloud metadata. When the caller passes custom headers, the request is forced onto the direct path (Jina's outbound headers aren't controllable, so the overrides can't be enforced).
-- **The direct path**. Required for arbitrary URLs, so it **must** follow cross-host redirects (URL shorteners and `www` canonicalization are normal). It shares the link-local ban and caps the redirect chain at 10 hops so a loop can't hang the agent.
+- **The direct path**. It fetches the URL straight up, and **must** follow cross-host redirects (URL shorteners and `www` canonicalization are normal), but it shares the link-local ban and caps the redirect chain at 10 hops so a loop can't hang the agent.
 
 The `net.Dialer.Control` hook fires **after** DNS resolution with the concrete IP, so DNS rebinding (a hostname that resolves to a public IP now and `169.254.x.x` / `127.0.0.1` a moment later) is blocked too. Bodies have bounds as well: `WebFetchInlineBytes` (64 KB) is the inline threshold; `WebFetchMaxBytes` (5 MB) is the hard cap; beyond that the body is truncated to a temp file. A big page = summary + head/tail preview + a `read_file` pointer to the rest. Never a wall of text shoved into the model's context.
 
