@@ -43,11 +43,11 @@
   let newModel       = $state('')
   let newModelVision = $state(true)
 
-  // ── popover menu: chip actions, a model picker for the footer buttons, or
-  // the catalogue picker behind "+ Add model" ──
-  type Menu =
-    | { kind: 'chip'; epId: string; model: string }
-    | { kind: 'default' | 'lite' | 'add'; epId: string }
+  // ── popover menu: the catalogue picker behind "+ Add model". Model-level
+  // actions (default/Lite/vision helper) are inline icon toggles on each
+  // chip — they used to hide behind a chip-click dropdown, which nobody
+  // discovered. ──
+  type Menu = { kind: 'add'; epId: string }
   let menu = $state<Menu | null>(null)
 
   onMount(async () => {
@@ -96,17 +96,14 @@
   }
 
   function setDefault(epId: string, model?: string) {
-    menu = null
     run(() => api.setEndpointDefault(epId, model))
   }
 
   function setLite(epId: string, model?: string) {
-    menu = null
     run(() => api.setEndpointLite(epId, model))
   }
 
   function unsetLite(epId: string) {
-    menu = null
     run(() => api.unsetEndpointLite(epId))
   }
 
@@ -114,12 +111,10 @@
   // before the turn is sent. Only offered on models the endpoint marks as
   // vision-capable — the server rejects the rest.
   function setVisionHelper(epId: string, model: string) {
-    menu = null
     run(() => api.setEndpointVisionHelper(epId, model))
   }
 
   function unsetVisionHelper(epId: string) {
-    menu = null
     run(() => api.unsetEndpointVisionHelper(epId))
   }
 
@@ -135,16 +130,6 @@
     const msg = tr('settings.endpoints.delete_confirm').replace('{id}', ep.id)
     if (!(await confirmDialog(msg))) return
     run(() => api.deleteEndpoint(ep.id))
-  }
-
-  // Footer 设为默认/设为 Lite: single-model endpoints act directly; with
-  // several models a picker popover chooses which one the composite id names.
-  function footerSet(kind: 'default' | 'lite', ep: EndpointConfig) {
-    if (ep.models.length <= 1) {
-      kind === 'default' ? setDefault(ep.id) : setLite(ep.id)
-      return
-    }
-    menu = menu?.kind === kind && menu.epId === ep.id ? null : { kind, epId: ep.id }
   }
 
   // ── add model ──
@@ -442,57 +427,48 @@
               {@const isDef = defaultCid === cid(ep.id, m.model)}
               {@const isLit = liteCid === cid(ep.id, m.model)}
               {@const isVis = visionCid === cid(ep.id, m.model)}
-              <div class="chip-wrap">
-                <div class="chip" class:chip-default={isDef} class:chip-lite={isLit} class:chip-vision={isVis}>
+              <!-- Model-level actions are always-visible icon toggles: the
+                   colored (active) icon doubles as the state badge, so the
+                   chip reads its roles at a glance and one click toggles. -->
+              <div class="chip" class:chip-default={isDef} class:chip-lite={isLit} class:chip-vision={isVis}>
+                <span class="chip-label mono">{m.model}</span>
+                <button
+                  class="chip-act"
+                  class:on-default={isDef}
+                  title={$t(isDef ? 'settings.endpoints.badge.default' : 'settings.endpoints.set_default')}
+                  onclick={() => { if (!isDef) setDefault(ep.id, m.model) }}
+                  disabled={busy || isDef}
+                >
+                  <iconify-icon icon={isDef ? 'ant-design:star-filled' : 'ant-design:star-outlined'} width="13"></iconify-icon>
+                </button>
+                <button
+                  class="chip-act"
+                  class:on-lite={isLit}
+                  title={$t(isLit ? 'settings.endpoints.unset_lite' : 'settings.endpoints.set_lite')}
+                  onclick={() => (isLit ? unsetLite(ep.id) : setLite(ep.id, m.model))}
+                  disabled={busy}
+                >
+                  <iconify-icon icon={isLit ? 'ant-design:thunderbolt-filled' : 'ant-design:thunderbolt-outlined'} width="13"></iconify-icon>
+                </button>
+                {#if m.vision || isVis}
                   <button
-                    class="chip-label mono"
-                    onclick={(e) => {
-                      e.stopPropagation()
-                      menu = menu?.kind === 'chip' && menu.epId === ep.id && menu.model === m.model
-                        ? null
-                        : { kind: 'chip', epId: ep.id, model: m.model }
-                    }}
+                    class="chip-act"
+                    class:on-vision={isVis}
+                    title={$t(isVis ? 'settings.endpoints.unset_vision_helper' : 'settings.endpoints.set_vision_helper')}
+                    onclick={() => (isVis ? unsetVisionHelper(ep.id) : setVisionHelper(ep.id, m.model))}
                     disabled={busy}
                   >
-                    {m.model}
-                    {#if isDef}<span class="chip-badge badge-default">{$t('settings.endpoints.badge.default')}</span>{/if}
-                    {#if isLit}<span class="chip-badge badge-lite">{$t('settings.endpoints.badge.lite')}</span>{/if}
-                    {#if isVis}<span class="chip-badge badge-vision">{$t('settings.endpoints.badge.vision_helper')}</span>{/if}
+                    <iconify-icon icon={isVis ? 'ant-design:eye-filled' : 'ant-design:eye-outlined'} width="13"></iconify-icon>
                   </button>
-                  <button
-                    class="chip-x"
-                    title={$t('common.delete')}
-                    onclick={(e) => { e.stopPropagation(); removeModel(ep, m.model) }}
-                    disabled={busy}
-                  >
-                    <iconify-icon icon="ant-design:close-outlined" width="11"></iconify-icon>
-                  </button>
-                </div>
-                {#if menu?.kind === 'chip' && menu.epId === ep.id && menu.model === m.model}
-                  <div class="menu">
-                    <button class="menu-item" onclick={() => setDefault(ep.id, m.model)} disabled={isDef}>
-                      {$t('settings.endpoints.set_default')}
-                    </button>
-                    {#if isLit}
-                      <button class="menu-item" onclick={() => unsetLite(ep.id)}>
-                        {$t('settings.endpoints.unset_lite')}
-                      </button>
-                    {:else}
-                      <button class="menu-item" onclick={() => setLite(ep.id, m.model)}>
-                        {$t('settings.endpoints.set_lite')}
-                      </button>
-                    {/if}
-                    {#if isVis}
-                      <button class="menu-item" onclick={() => unsetVisionHelper(ep.id)}>
-                        {$t('settings.endpoints.unset_vision_helper')}
-                      </button>
-                    {:else if m.vision}
-                      <button class="menu-item" onclick={() => setVisionHelper(ep.id, m.model)}>
-                        {$t('settings.endpoints.set_vision_helper')}
-                      </button>
-                    {/if}
-                  </div>
                 {/if}
+                <button
+                  class="chip-x"
+                  title={$t('common.delete')}
+                  onclick={(e) => { e.stopPropagation(); removeModel(ep, m.model) }}
+                  disabled={busy}
+                >
+                  <iconify-icon icon="ant-design:close-outlined" width="11"></iconify-icon>
+                </button>
               </div>
             {/each}
 
@@ -550,45 +526,11 @@
             {/if}
           </div>
 
+          <!-- Endpoint-level actions only. Model-level ones (default / Lite /
+               vision helper) live on each chip as inline icon toggles — the
+               footer duplicates existed because those used to hide behind a
+               chip-click dropdown. -->
           <div class="ep-actions">
-            {#if !isDefaultEp(ep)}
-              <span class="act-wrap">
-                <button
-                  class="act"
-                  onclick={(e) => { e.stopPropagation(); footerSet('default', ep) }}
-                  disabled={busy || ep.models.length === 0}
-                >{$t('settings.endpoints.set_default')}</button>
-                {#if menu?.kind === 'default' && menu.epId === ep.id}
-                  <div class="menu">
-                    <div class="menu-title">{$t('settings.endpoints.pick_model')}</div>
-                    {#each ep.models as m (m.model)}
-                      <button class="menu-item mono" onclick={() => setDefault(ep.id, m.model)}>{m.model}</button>
-                    {/each}
-                  </div>
-                {/if}
-              </span>
-            {/if}
-            {#if isLiteEp(ep)}
-              <button class="act" onclick={(e) => { e.stopPropagation(); unsetLite(ep.id) }} disabled={busy}>
-                {$t('settings.endpoints.unset_lite')}
-              </button>
-            {:else}
-              <span class="act-wrap">
-                <button
-                  class="act"
-                  onclick={(e) => { e.stopPropagation(); footerSet('lite', ep) }}
-                  disabled={busy || ep.models.length === 0}
-                >{$t('settings.endpoints.set_lite')}</button>
-                {#if menu?.kind === 'lite' && menu.epId === ep.id}
-                  <div class="menu">
-                    <div class="menu-title">{$t('settings.endpoints.pick_model')}</div>
-                    {#each ep.models as m (m.model)}
-                      <button class="menu-item mono" onclick={() => setLite(ep.id, m.model)}>{m.model}</button>
-                    {/each}
-                  </div>
-                {/if}
-              </span>
-            {/if}
             <button class="act" onclick={() => openEdit(ep)} disabled={busy}>{$t('common.edit')}</button>
             <button class="act danger" onclick={() => removeEndpoint(ep)} disabled={busy}>{$t('common.delete')}</button>
           </div>
@@ -636,15 +578,22 @@
 .chip-lite { border-color: var(--blue-5); }
 .chip-vision { border-color: var(--purple-5, var(--blue-5)); }
 .chip-label {
-  height: 100%; padding: 0 4px 0 10px; border: none; background: transparent;
-  font-size: 12.5px; color: var(--text); cursor: pointer;
-  display: inline-flex; align-items: center; gap: 6px;
+  height: 100%; padding: 0 4px 0 10px;
+  font-size: 12.5px; color: var(--text);
+  display: inline-flex; align-items: center;
 }
-.chip-label:hover:not(:disabled) { color: var(--blue-6); }
-.chip-badge { font-size: 10px; padding: 0 5px; border-radius: 4px; font-weight: 600; }
-.badge-default { background: var(--success-bg); color: var(--success-text); }
-.badge-lite { background: var(--active-blue-bg); color: var(--blue-6); }
-.badge-vision { background: var(--active-blue-bg); color: var(--blue-6); }
+/* Inline action toggles: grey when inactive, role-colored when active (the
+   colored icon IS the state badge). */
+.chip-act {
+  height: 100%; padding: 0 4px; border: none; background: transparent;
+  color: var(--text-quaternary); cursor: pointer;
+  display: inline-flex; align-items: center;
+}
+.chip-act:hover:not(:disabled) { color: var(--text-secondary); }
+.chip-act:disabled { cursor: default; }
+.chip-act.on-default, .chip-act.on-default:disabled { color: var(--success-text); }
+.chip-act.on-lite { color: var(--blue-6); }
+.chip-act.on-vision { color: var(--purple-6, var(--blue-6)); }
 .chip-x {
   height: 100%; padding: 0 8px 0 4px; border: none; background: transparent;
   color: var(--text-quaternary); cursor: pointer; display: inline-flex; align-items: center;
@@ -679,7 +628,6 @@
 
 /* ── footer actions ── */
 .ep-actions { display: flex; align-items: center; gap: 16px; padding-top: 2px; }
-.act-wrap { position: relative; display: inline-flex; }
 .act {
   border: none; background: transparent; padding: 0; font-size: 13px; font-weight: 500;
   color: var(--blue-6); cursor: pointer; font-family: inherit;
@@ -694,7 +642,6 @@
   background: var(--bg-container); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 8px 24px rgba(15,23,42,0.14); padding: 4px; display: flex; flex-direction: column;
 }
-.menu-title { font-size: 11px; color: var(--text-tertiary); padding: 4px 8px 2px; }
 .menu-sep { height: 1px; background: var(--border-secondary); margin: 4px 2px; }
 .menu-item {
   border: none; background: transparent; text-align: left; padding: 6px 8px;
