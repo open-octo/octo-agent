@@ -433,3 +433,90 @@ func TestResolveRejectsNonNavigableSchemes(t *testing.T) {
 		t.Errorf("resolve(../c) = %q", got)
 	}
 }
+
+// A javascript:/data: base must not poison relative links: the scheme check
+// runs on the RESOLVED result, and base adoption itself refuses non-http(s).
+func TestClean_MaliciousBaseHrefNeutralized(t *testing.T) {
+	page := `<html><head><title>T</title><base href="javascript:alert(1)//x/"></head><body><article>
+	<p>` + strings.Repeat("Prose to clear the extraction floor. ", 10) + `</p>
+	<p><a href="pwn">click me</a></p></article></body></html>`
+
+	srv := htmlServer(t, page)
+	got := fetchText(t, srv.URL+"/dir/page", nil)
+
+	if strings.Contains(got, "javascript:") {
+		t.Errorf("javascript: leaked through <base> resolution\n---\n%s", got)
+	}
+	// The poisoned base is discarded, so the link resolves against the
+	// response URL instead of being dropped.
+	if !strings.Contains(got, "("+srv.URL+"/dir/pwn)") {
+		t.Errorf("relative link should resolve against the response URL\n---\n%s", got)
+	}
+}
+
+func TestResolveRejectsSchemeSmuggledViaBase(t *testing.T) {
+	base, _ := url.Parse("javascript:alert(1)//x/")
+	c := &mdConv{base: base}
+	if got := c.resolve("pwn"); got != "" {
+		t.Errorf("resolve over a javascript: base = %q, want empty", got)
+	}
+}
+
+// A ')' in a URL would close the Markdown link early.
+func TestResolveEscapesClosingParen(t *testing.T) {
+	base, _ := url.Parse("https://en.wikipedia.org/wiki/")
+	c := &mdConv{base: base}
+	got := c.resolve("Go_(programming_language)")
+	if strings.Contains(got, ")") {
+		t.Errorf("unescaped ')' in %q", got)
+	}
+	if !strings.Contains(got, "Go_(programming_language%29") {
+		t.Errorf("resolve = %q, want %%29-escaped paren", got)
+	}
+}
+
+func TestIsHidden(t *testing.T) {
+	page := `<html><head><title>T</title></head><body><article>
+	<p>` + strings.Repeat("Prose to clear the extraction floor. ", 10) + `</p>
+	<p hidden>HIDDEN-ATTR</p>
+	<p aria-hidden="true">ARIA-HIDDEN</p>
+	<p style="display: none">DISPLAY-NONE</p>
+	<p style="visibility:hidden">VIS-HIDDEN</p>
+	<p aria-hidden="false">aria-false stays visible</p>
+	</article></body></html>`
+
+	got := fetchText(t, htmlServer(t, page).URL, nil)
+	for _, hidden := range []string{"HIDDEN-ATTR", "ARIA-HIDDEN", "DISPLAY-NONE", "VIS-HIDDEN"} {
+		if strings.Contains(got, hidden) {
+			t.Errorf("hidden text %q leaked into output\n---\n%s", hidden, got)
+		}
+	}
+	if !strings.Contains(got, "aria-false stays visible") {
+		t.Errorf("aria-hidden=false must remain visible\n---\n%s", got)
+	}
+}
+
+func TestInlineCodeWithBackticks(t *testing.T) {
+	page := `<html><head><title>T</title></head><body><article>
+	<p>` + strings.Repeat("Prose to clear the extraction floor. ", 10) + `</p>
+	<p>Use <code>a ` + "`" + `tick` + "`" + ` inside</code> carefully.</p></article></body></html>`
+
+	got := fetchText(t, htmlServer(t, page).URL, nil)
+	if !strings.Contains(got, "`` a `tick` inside ``") {
+		t.Errorf("backtick-bearing code span not double-delimited\n---\n%s", got)
+	}
+}
+
+func TestPreLanguageRejectsUnsafeToken(t *testing.T) {
+	page := `<html><head><title>T</title></head><body><article>
+	<p>` + strings.Repeat("Prose to clear the extraction floor. ", 10) + `</p>
+	<pre><code class="language-go` + "```" + `injected">x := 1</code></pre></article></body></html>`
+
+	got := fetchText(t, htmlServer(t, page).URL, nil)
+	if strings.Contains(got, "injected") {
+		t.Errorf("unsafe class token leaked into the fence line\n---\n%s", got)
+	}
+	if !strings.Contains(got, "x := 1") {
+		t.Errorf("code body lost\n---\n%s", got)
+	}
+}

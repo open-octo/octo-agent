@@ -32,9 +32,16 @@ func cleanHTMLToMarkdown(raw []byte, base *url.URL) (string, bool) {
 	dropNoiseSubtrees(doc)
 	if href := baseHref(doc); href != "" {
 		if u, err := url.Parse(href); err == nil {
-			if base != nil {
-				base = base.ResolveReference(u)
-			} else if u.IsAbs() {
+			switch {
+			case base != nil:
+				// A base that resolves to a non-http(s) scheme (e.g.
+				// <base href="javascript:…">) would poison every relative
+				// link on the page; better to resolve against the response
+				// URL than to adopt it.
+				if resolved := base.ResolveReference(u); isFetchableURL(resolved) {
+					base = resolved
+				}
+			case u.IsAbs() && isFetchableURL(u):
 				base = u
 			}
 		}
@@ -529,7 +536,16 @@ func (c *mdConv) inline(n *html.Node) string {
 		if inner == "" {
 			return ""
 		}
-		return "`" + inner + "`"
+		// A backtick inside the span needs a longer delimiter, same as the
+		// fence-lengthening rule for code blocks.
+		delim := "`"
+		for strings.Contains(inner, delim) {
+			delim += "`"
+		}
+		if delim == "`" {
+			return "`" + inner + "`"
+		}
+		return delim + " " + inner + " " + delim
 	}
 	return c.inlineChildren(n)
 }
@@ -584,13 +600,26 @@ func preLanguage(n *html.Node) string {
 	for _, f := range strings.Fields(strings.ToLower(classes)) {
 		for _, prefix := range []string{"language-", "lang-", "highlight-source-"} {
 			if strings.HasPrefix(f, prefix) {
-				if lang := strings.TrimPrefix(f, prefix); lang != "" {
+				if lang := strings.TrimPrefix(f, prefix); lang != "" && isFenceInfoToken(lang) {
 					return lang
 				}
 			}
 		}
 	}
 	return ""
+}
+
+// isFenceInfoToken restricts a language hint to characters that can't corrupt
+// the fence line — the class attribute is attacker-controlled page content.
+func isFenceInfoToken(s string) bool {
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '+', r == '#', r == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (c *mdConv) renderList(n *html.Node) string {
@@ -723,39 +752,42 @@ func tableIsIrregular(n *html.Node) bool {
 }
 
 // resolve turns a relative href/src into an absolute URL against the page's
-// base. Non-navigable schemes and unparseable values return "" so the caller
-// keeps just the text.
+// base. Anything that doesn't come out as plain http(s) — javascript:, data:,
+// a scheme smuggled in via <base> — returns "" so the caller keeps just the
+// text. Checking the RESOLVED result (not the raw input) is what closes the
+// base-poisoning hole; the same check also drops relative links on non-HTML
+// contexts and unparseable values.
 func (c *mdConv) resolve(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || strings.HasPrefix(raw, "#") {
-		return ""
-	}
-	switch strings.ToLower(schemeOf(raw)) {
-	case "javascript", "data", "about", "vbscript":
 		return ""
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		return ""
 	}
-	if c.base == nil {
-		if !u.IsAbs() {
-			return ""
-		}
-		return u.String()
+	if c.base != nil {
+		u = c.base.ResolveReference(u)
 	}
-	return c.base.ResolveReference(u).String()
+	if !isFetchableURL(u) {
+		return ""
+	}
+	// A ')' in the URL would close the Markdown link early and dump the rest
+	// of the URL into the text.
+	return strings.ReplaceAll(u.String(), ")", "%29")
 }
 
-func schemeOf(raw string) string {
-	i := strings.IndexByte(raw, ':')
-	if i <= 0 {
-		return ""
+// isFetchableURL reports whether u is an absolute http(s) URL — the only kind
+// worth emitting into Markdown, and the only kind web_fetch would follow.
+func isFetchableURL(u *url.URL) bool {
+	if u == nil || u.Host == "" {
+		return false
 	}
-	if j := strings.IndexAny(raw, "/?#"); j >= 0 && j < i {
-		return ""
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		return true
 	}
-	return raw[:i]
+	return false
 }
 
 // ── text helpers ───────────────────────────────────────────────────────────

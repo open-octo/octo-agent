@@ -253,6 +253,10 @@ func decodeToUTF8(body []byte, contentType string) []byte {
 	if err != nil {
 		return body
 	}
+	// The limit re-caps the DECODED size: a legacy-encoded body near
+	// WebFetchMaxBytes can grow ~1.5× as UTF-8. The tail past the cap is
+	// dropped without a truncation marker — accepted, since the input was
+	// already cut at the same cap and real pages don't get near it.
 	decoded, err := io.ReadAll(io.LimitReader(r, WebFetchMaxBytes+1))
 	if err != nil {
 		return body
