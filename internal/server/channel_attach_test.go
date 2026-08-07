@@ -111,3 +111,52 @@ func TestAttachInboundFiles_Image_NonVision(t *testing.T) {
 		t.Error("expected the inbound image to be persisted under uploads")
 	}
 }
+
+// With a vision helper configured, the same text-only model gets a real image
+// block: the agent's pre-send transform will describe it. Without this the
+// image never becomes a block and the helper has nothing to translate.
+func TestAttachInboundFiles_Image_TextOnlyWithVisionHelper(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("USERPROFILE", tmpHome)
+
+	// Config resolvable from the fake home: a text-only primary and a vision
+	// helper on the same endpoint.
+	octoDir := filepath.Join(tmpHome, ".octo")
+	if err := os.MkdirAll(octoDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfgYAML := `endpoints:
+  - id: ep
+    provider: custom
+    protocol: openai
+    base_url: http://127.0.0.1:1
+    api_key: k
+    models:
+      - model: deepseek-v4-pro
+        vision: false
+      - model: seer
+        vision: true
+default: ep::deepseek-v4-pro
+vision_helper: ep::seer
+`
+	if err := os.WriteFile(filepath.Join(octoDir, "config.yml"), []byte(cfgYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{}
+	sess := &channel.Session{Agent: agent.New(&stubSender{}, "deepseek-v4-pro")}
+	dataURL := "data:image/png;base64," + tinyPNG
+	ev := channel.InboundEvent{
+		Platform: "telegram",
+		Text:     "what is this",
+		Files:    []channel.FileAttachment{{Type: "image", Name: "pic.png", MimeType: "image/png", DataURL: dataURL}},
+	}
+	got := s.attachInboundFiles(sess, ev)
+	if strings.Contains(got, "[Attached file:") {
+		t.Errorf("image degraded to a path note despite the vision helper: %q", got)
+	}
+	if got != "what is this" {
+		t.Errorf("content = %q, want the caption only (image rides as a block)", got)
+	}
+}

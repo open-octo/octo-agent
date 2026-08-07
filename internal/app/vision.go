@@ -35,24 +35,36 @@ type visionDescriber struct {
 	cfg    config.Config
 	sender agent.Sender
 	model  string
+	// buildErr, when non-nil, records why the helper's sender could not be
+	// built (missing key, unknown provider). Describe fails with it instead of
+	// calling anything, so the model gets a fallback line naming the fix.
+	buildErr error
 }
 
 // NewVisionDescriber builds the image describer for an agent, or returns nil
 // when the feature is off: no vision_helper configured, the reference doesn't
-// resolve, the model it names can't see, or no API key is available. A nil
-// return is the signal for callers to skip SetImageDescriber entirely, which
-// leaves every image path behaving exactly as it did before this feature.
+// resolve, or the model it names can't see.
+//
+// Nil must track exactly the condition the tool gates check
+// (ResolveVisionHelper): the gates start handing image blocks to a text-only
+// model on the promise that this describer will translate them. A helper that
+// resolves but can't be called — no API key, sender construction failure — is
+// therefore returned as a describer whose Describe errors with the reason;
+// that flows into the per-image fallback text (and the retry budget stops the
+// repeats), instead of raw image blocks 400-ing every turn at the provider.
 func NewVisionDescriber(a *agent.Agent, cfg config.Config) agent.ImageDescriber {
 	entry, ok := cfg.ResolveVisionHelper()
 	if !ok {
 		return nil
 	}
+	d := &visionDescriber{agent: a, cfg: cfg, model: entry.Model}
 	apiKey := os.Getenv(VendorAPIKeyEnvVar(entry.Provider))
 	if apiKey == "" {
 		apiKey = entry.APIKey
 	}
 	if apiKey == "" {
-		return nil
+		d.buildErr = fmt.Errorf("vision helper %q has no API key — set %s or the endpoint's api_key", cfg.VisionHelper, VendorAPIKeyEnvVar(entry.Provider))
+		return d
 	}
 	sender, err := NewSender(SenderOptions{
 		Provider: entry.Provider,
@@ -62,9 +74,11 @@ func NewVisionDescriber(a *agent.Agent, cfg config.Config) agent.ImageDescriber 
 		CacheKey: "vision-helper:" + entry.Model,
 	})
 	if err != nil {
-		return nil
+		d.buildErr = fmt.Errorf("vision helper %q: %w", cfg.VisionHelper, err)
+		return d
 	}
-	return &visionDescriber{agent: a, cfg: cfg, sender: sender, model: entry.Model}
+	d.sender = sender
+	return d
 }
 
 // Active reports whether the primary model needs images translated. Re-read
@@ -76,6 +90,9 @@ func (d *visionDescriber) Active() bool {
 
 // Describe sends one image to the helper and returns its rendering as text.
 func (d *visionDescriber) Describe(ctx context.Context, img agent.ImageData) (string, error) {
+	if d.buildErr != nil {
+		return "", d.buildErr
+	}
 	ctx, cancel := context.WithTimeout(ctx, visionDescribeTimeout)
 	defer cancel()
 

@@ -513,6 +513,11 @@ func emitCompactDone(handler EventHandler, before, after, folded int) {
 // entry must not break compaction. The caller is responsible for rebuilding
 // history with the summary.
 func (a *Agent) summarize(ctx context.Context, msgs []Message, handler EventHandler) (string, error) {
+	// Described images fold as their descriptions: neither the lite model nor
+	// (under vision_helper) the primary is guaranteed to accept image blocks,
+	// and a 400 here would leave compaction permanently failing while the
+	// context only grows. Undescribed blocks pass through as before.
+	msgs = textifyDescribedImages(msgs)
 	if a.LiteSender != nil && a.LiteModel != "" {
 		summary, err := a.summarizeOn(ctx, a.LiteSender, a.LiteModel, msgs, handler)
 		if err == nil {

@@ -315,3 +315,85 @@ func TestUpdateMessageMarksRewrittenAndBoundsCheck(t *testing.T) {
 		t.Errorf("history length changed to %d", h.Len())
 	}
 }
+
+// An interrupted turn must not spend the retry budget: a cancelled ctx fails
+// every remaining Describe instantly, and charging those would write the whole
+// batch off for the session in one keypress.
+func TestDescribeImagesInterruptDoesNotBurnBudget(t *testing.T) {
+	d := &fakeDescriber{active: true, err: context.Canceled}
+	a := imageAgent(t, d)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	msgs := a.History.Snapshot()
+	a.describeImages(ctx, nil, msgs)
+
+	if got := a.History.Snapshot()[0].Blocks[1].ImageDescFailures; got != 0 {
+		t.Errorf("ImageDescFailures = %d after an interrupt, want 0", got)
+	}
+	// The snapshot still gets a fallback (the turn is ending anyway).
+	if !strings.Contains(msgs[0].Blocks[1].Text, "image description unavailable") {
+		t.Errorf("snapshot text = %q, want the fallback line", msgs[0].Blocks[1].Text)
+	}
+}
+
+// The truncation-escalation retry re-snapshots history; it must run the image
+// transform too, or the retry hands raw image blocks to a text-only model and
+// the whole turn fails at the provider.
+func TestRunLoop_Truncation_EscalatedRetryDescribesImages(t *testing.T) {
+	send := &fakeToolSender{replies: []Reply{
+		{StopReason: StopReasonMaxTokens, Content: "half-writt"}, // truncated
+		{StopReason: "end_turn", Content: "done"},                // escalated retry
+	}}
+	a := New(send, "text-only-model")
+	a.MaxTokens = 4096
+	a.MaxTokensEscalate = 16384
+	a.History.Append(Message{Role: RoleUser, Blocks: []ContentBlock{
+		NewTextBlock("earlier turn with an image"),
+		{Type: "image", Image: &ImageData{MIMEType: "image/png", Data: []byte{1}}, ImagePath: "/tmp/x.png"},
+	}})
+	a.History.Append(Message{Role: RoleAssistant, Content: "noted"})
+	a.SetImageDescriber(&fakeDescriber{active: true})
+	defs, exec := truncSetup()
+
+	if _, err := a.Run(context.Background(), "continue", defs, exec); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if want := []int{4096, 16384}; !equalInts(send.gotMaxToks, want) {
+		t.Fatalf("gotMaxToks = %v, want %v (escalation did not fire)", send.gotMaxToks, want)
+	}
+	// gotMsgs holds the LAST call's messages — the escalated retry.
+	if got := imageBlocksOf(send.gotMsgs); got != 0 {
+		t.Errorf("escalated retry carried %d raw image block(s), want 0", got)
+	}
+	if !strings.Contains(send.gotMsgs[0].Blocks[1].Text, "a cat sitting on a keyboard") {
+		t.Errorf("escalated retry lost the description: %q", send.gotMsgs[0].Blocks[1].Text)
+	}
+}
+
+// Compaction folds described images as their descriptions — neither the lite
+// model nor (under vision_helper) the primary is guaranteed to accept image
+// blocks, and a 400 would leave compaction permanently failing.
+func TestTextifyDescribedImages(t *testing.T) {
+	in := []Message{
+		{Role: RoleUser, Blocks: []ContentBlock{
+			NewTextBlock("look"),
+			{Type: "image", ImagePath: "/tmp/a.png", ImageDescription: "a pie chart",
+				Image: &ImageData{MIMEType: "image/png", Data: []byte{1}}},
+			{Type: "image", ImagePath: "/tmp/b.png",
+				Image: &ImageData{MIMEType: "image/png", Data: []byte{2}}}, // undescribed
+		}},
+	}
+	out := textifyDescribedImages(in)
+
+	if out[0].Blocks[1].Type != "text" || !strings.Contains(out[0].Blocks[1].Text, "a pie chart") {
+		t.Errorf("described block not textified: %+v", out[0].Blocks[1])
+	}
+	if out[0].Blocks[2].Type != "image" {
+		t.Errorf("undescribed block must keep pre-feature behavior, got %+v", out[0].Blocks[2])
+	}
+	// The input (aliasing history) must be untouched.
+	if in[0].Blocks[1].Type != "image" {
+		t.Error("textify mutated its input — history corruption")
+	}
+}

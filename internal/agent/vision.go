@@ -90,7 +90,13 @@ func (a *Agent) describeImages(ctx context.Context, handler EventHandler, msgs [
 				desc, err := d.Describe(ctx, *b.Image)
 				if err != nil {
 					emitImageDescribing(handler, name, index, total, "failed", err.Error())
-					bumpImageDescFailures(a.History, mi, bi)
+					// The budget pays for a broken endpoint, not for a user's
+					// Esc: a cancelled turn fails every remaining Describe
+					// instantly and would write the whole batch off for the
+					// session in one keypress.
+					if ctx.Err() == nil {
+						bumpImageDescFailures(a.History, mi, bi)
+					}
 					replaceBlock(msgs, cloned, mi, bi, imageDescFallback(b, err.Error()))
 					continue
 				}
@@ -167,6 +173,28 @@ func describedImageText(b ContentBlock, desc string) string {
 // feature existed.
 func imageDescFallback(b ContentBlock, reason string) string {
 	return fmt.Sprintf("[image description unavailable — %s; the active model cannot view images and the vision helper failed (%s). Do not guess what the image shows.]", imageBlockName(b), reason)
+}
+
+// textifyDescribedImages returns msgs with every image block that carries a
+// cached description replaced by that description as text. Used for internal
+// calls whose target model may not accept images — compaction's summarize runs
+// on the lite model and falls back to the primary, and under this feature the
+// primary is exactly the model that can't take image blocks. Blocks without a
+// description are left untouched (pre-feature behavior). Modified messages get
+// private Blocks arrays; the input and history are never mutated.
+func textifyDescribedImages(msgs []Message) []Message {
+	out := append([]Message(nil), msgs...)
+	cloned := make(map[int]bool)
+	for mi := range out {
+		for bi := range out[mi].Blocks {
+			b := out[mi].Blocks[bi]
+			if b.Type != "image" || b.ImageDescription == "" {
+				continue
+			}
+			replaceBlock(out, cloned, mi, bi, describedImageText(b, b.ImageDescription))
+		}
+	}
+	return out
 }
 
 // emitImageDescribing sends one EventImageDescribing, if anyone is listening.

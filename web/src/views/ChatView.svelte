@@ -977,6 +977,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
     cleanups.push(ws.on('complete', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
+      // Belt-and-braces: the describing line normally clears on its own
+      // done/failed event, but a WS reconnect between started and done would
+      // otherwise leave it hanging forever.
+      describingImage = null
       // The turn is over: turn_error (which arrives before this) already had its
       // chance to restore the input, so drop it rather than letting it leak into
       // a later turn this tab didn't compose.

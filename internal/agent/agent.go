@@ -1080,7 +1080,13 @@ func (a *Agent) runLoop(
 		// handling needed. Fires only when escalation raises the cap.
 		// See dev-docs/truncation-recovery.md.
 		if isTruncated(reply.StopReason) && !escalateExhausted && a.MaxTokensEscalate > a.MaxTokens {
-			escalated, eerr := send(ctx, a.History.Snapshot(), a.MaxTokensEscalate)
+			// A fresh snapshot needs the image transform too — the blocks kept
+			// their type "image" in history, and this send would otherwise hand
+			// them raw to a text-only model. Descriptions were cached by the
+			// first attempt, so this costs no helper calls.
+			emsgs := a.History.Snapshot()
+			a.describeImages(ctx, handler, emsgs)
+			escalated, eerr := send(ctx, emsgs, a.MaxTokensEscalate)
 			switch {
 			case eerr == nil:
 				reply = escalated

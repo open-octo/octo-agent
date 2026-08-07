@@ -1287,8 +1287,10 @@ func (m *tuiModel) dispatchModel(name string) (tea.Model, tea.Cmd) {
 	// form) — that is endpoint addressing, not a model id providers accept;
 	// sending it verbatim makes upstreams 401 (e.g. "model id does not
 	// exist, recognized as Kimi::K3"). Mirrors the server/IM switch paths,
-	// which also set Agent.Model from the resolved entry.
-	m.a.Model = entry.Model
+	// which also set Agent.Model from the resolved entry. SetModel (not a
+	// bare write): the vision describer reads Model from the turn goroutine
+	// under the same lock.
+	m.a.SetModel(entry.Model)
 	m.cfg.modelName = entry.Model
 	// Persist the switch on the session so a later `octo -c` resume honors it —
 	// the session file otherwise keeps the model it was created with (SyncFrom

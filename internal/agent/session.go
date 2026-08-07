@@ -1432,9 +1432,15 @@ func rehydrateImageBlocks(msgs []Message) {
 			// output (read_file, screenshots, MCP) never carries an ImagePath,
 			// so this is the normal path for exactly the images the vision
 			// helper exists to handle — dropping to "no longer available"
-			// would throw away a description already paid for.
+			// would throw away a description already paid for. Wording is
+			// neutral about the active model: the session may have been
+			// resumed on a vision-capable one.
 			if b.ImageDescription != "" {
-				*b = NewTextBlock(describedImageText(*b, b.ImageDescription))
+				name := "image"
+				if b.ImagePath != "" {
+					name = filepath.Base(b.ImagePath)
+				}
+				*b = NewTextBlock("[Image: " + name + " — original no longer available; a vision helper described it earlier:]\n" + b.ImageDescription)
 				continue
 			}
 			name := "image"

@@ -103,12 +103,12 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 
 	// A child gets its own describer rather than the parent's: the two may run
 	// different models, and the describer decides whether to translate images
-	// from the model it is bound to. Nil (no helper configured, or config
+	// from the model it is bound to. Built from config rather than gated on
+	// the parent's field — reading parent.Describer here would race the mu it
+	// is documented to be guarded by. Nil (no helper configured, or config
 	// unreadable) leaves the child's images untouched, as before.
-	if s.parent.Describer != nil {
-		if cfg, err := config.LoadCached(); err == nil {
-			child.SetImageDescriber(NewVisionDescriber(child, cfg))
-		}
+	if cfg, err := config.LoadCached(); err == nil {
+		child.SetImageDescriber(NewVisionDescriber(child, cfg))
 	}
 
 	// Create the session dir before registering the child: a permissions

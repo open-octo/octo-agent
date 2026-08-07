@@ -124,7 +124,7 @@ type ImageDescriber interface {
 
 `Agent` 增加设置器 `SetImageDescriber`（模式同 `SetSender`，`internal/agent/agent.go:589`），nil 表示未启用。`describeImages` 只在描述器非 nil 且 `Active()` 为真时执行。
 
-**app 侧**（`internal/app`）：新增 `NewVisionDescriber(a *agent.Agent, cfg config.Config) agent.ImageDescriber`，不可用时返回 nil（未配置 / 解析不到 / 指向的模型无视觉能力 / 拿不到 API key），调用方据此跳过注入。
+**app 侧**（`internal/app`）：新增 `NewVisionDescriber(a *agent.Agent, cfg config.Config) agent.ImageDescriber`，返回 nil 当且仅当 `ResolveVisionHelper` 失败（未配置 / 解析不到 / 指向的模型无视觉能力）——**与工具闸门的判定完全一致**。闸门放行图片块的前提是描述器会翻译它们；若"解析得到但调不通"（没有 API key、sender 构造失败）也返回 nil，闸门照常放行而描述器缺席，原始图片就会直发 text-only 端点每轮 400。所以这类情况返回一个 `Describe` 恒报明确错误的描述器：错误进入单图 fallback 文案（指名修法），重试预算挡住重复尝试。
 
 1. `Active()` = `!cfg.ModelVision(a.GetModel())`（`internal/config/config.go:426`）。`GetModel` 走读锁（与 `GetSender` 同款，`internal/agent/agent.go:580`），因为 `/model` 切换在另一个 goroutine 里写 `Model`。**每轮重新判定**，所以切换后行为自动跟随，无需额外接线。
 2. 用 `ResolveVisionHelper()` 拿到的 `ModelEntry` 构造 sender：`app.NewSender(app.SenderOptions{Provider, APIKey, BaseURL, Protocol})`（`internal/app/sender.go:79`）。API key 沿用现有优先级——`os.Getenv(app.VendorAPIKeyEnvVar(entry.Provider))` 优先，空则回落 `entry.APIKey`（同 `internal/server/server.go:1644-1647`）。sender 在闭包构造时建一次并复用，描述调用共享同一个 prompt cache key。
@@ -178,7 +178,9 @@ transform 持有快照索引 `mi`，写回时调 `a.History.UpdateMessage(mi, ..
 
 **快照的 Blocks 与 history 共享底层数组**：`Snapshot` 只 `copy` 了 `[]Message`，每条 `Message.Blocks` 仍是同一个 slice header，指向同一份数据。直接写 `msgs[mi].Blocks[bi]` 会把 history 里的图片块一起改掉——UI 里图片消失，会话重放没有图，切回 vision 模型也无图可发。所以替换前先给该消息复制一份私有的 Blocks 数组（每条消息只复制一次）。这是本方案唯一一处必须显式防护的别名问题。
 
-**多图**：顺序处理，事件带 `index/total`。**失败语义**：描述失败不打断 turn——fallback 文本进入发送快照，模型照常收到可读内容。
+**多图**：顺序处理，事件带 `index/total`。**失败语义**：描述失败不打断 turn——fallback 文本进入发送快照，模型照常收到可读内容。用户打断（ctx 取消）造成的失败**不计入重试预算**：取消后剩余每张图的 Describe 都会立即失败，计数会一键写死整批图。
+
+**还有两条发送路径要过同一转换**：截断升档重试（`runLoop` 内 `send(ctx, …, a.MaxTokensEscalate)`）重新取快照，必须同样先跑 `describeImages`（缓存全命中，零成本）；compaction 的 `summarize` 把折叠段发给 lite 模型、失败回落主模型——主模型正是 text-only，所以摘要输入里**已有描述的**图片块替换为描述文本（`textifyDescribedImages`），未描述的块保持原行为。
 
 **fallback 文案**：
 
@@ -308,7 +310,7 @@ Web 端（`ChatView.svelte`）渲染为一条状态行（"🔍 正在用看图�
 | `Agent.GetModel()` / `SetModel(string)` | `internal/agent/agent.go` | 带锁读写 Model，与 `GetSender`/`SetSender` 配对 |
 | `History.UpdateMessage(i, mutate)` | `internal/agent/history.go` | 原地修改第 i 条消息并标记 rewritten |
 | `tools.ImageDescriberActive(ctx)` / `SetImageDescriberActive` / `WithImageDescriberActive` | `internal/tools/vision.go` | 与 ModelVisionEnabled 同构 |
-| `app.NewVisionDescriber(a, cfg)` | `internal/app` | 构造描述器；不可用时返回 nil |
+| `app.NewVisionDescriber(a, cfg)` | `internal/app` | 构造描述器；nil 判定与闸门一致（仅解析失败），无 key 时 Describe 报错走 fallback |
 | `tools.ImagesAllowed(ctx)` | `internal/tools/vision.go` | `ModelVisionEnabled \|\| ImageDescriberActive`，工具统一查这一个 |
 | `EventImageDescribing` + `AgentEvent.ImageName/ImageIndex/ImageTotal/ImageStatus` | `internal/agent/event.go` | 状态事件 |
 | `POST`/`DELETE /api/config/endpoints/{id}/vision_helper` | `internal/server/onboard_config_handlers.go` | 设置入口，同构 lite |
@@ -341,7 +343,7 @@ Web 端（`ChatView.svelte`）渲染为一条状态行（"🔍 正在用看图�
 | `internal/tools` | read_file / browser 降级矩阵：{vision 模型, text-only+未配置, text-only+已配置} × {读图, 截图} 六格（配置态用 `SetImageDescriberActive` 模拟） |
 | `internal/server` | `parseUserFiles` 与 `attachInboundFiles`：text-only+已配置时产出 image block 而非 path note，且 `att.images` 缩略图仍在；text-only+未配置时行为不变 |
 | `internal/config` | `ResolveVisionHelper`：composite id 命中 / 裸名命中 / 模型不存在（**不得**被 `ModelSupportsVision` 启发式救活）/ 模型存在但 `Vision:false` / 空值。`Validate` 对应报 problem |
-| `internal/app` | NewVisionDescriber：不可用的四种情形均返回 nil；`Active()` 跟随 `SetModel`；JSON / fenced JSON / 纯文本回复的渲染；端点 401 与空回复报错 |
+| `internal/app` | NewVisionDescriber：解析失败的三种情形返回 nil、无 key 时返回 Describe 报明确错误的描述器；`Active()` 跟随 `SetModel`；JSON / fenced JSON / 纯文本回复的渲染；端点 401 与空回复报错 |
 | 端到端（本地手测） | fake provider 返回 6.7 JSON → 文本模型正确引用 text_content；provider 返回 500 → fallback 文案含原因；粘贴截图 → 文本模型能复述截图内容 |
 
 ## 兼容性

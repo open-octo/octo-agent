@@ -50,19 +50,39 @@ func TestNewVisionDescriber_NilWhenUnusable(t *testing.T) {
 		{"no vision_helper", config.Config{Endpoints: visionCfg("http://x").Endpoints}},
 		{"dangling reference", func() config.Config { c := visionCfg("http://x"); c.VisionHelper = "ghost::model"; return c }()},
 		{"helper is text-only", func() config.Config { c := visionCfg("http://x"); c.VisionHelper = "ep::blind"; return c }()},
-		{"no api key", func() config.Config {
-			c := visionCfg("http://x")
-			c.Endpoints[0].APIKey = ""
-			return c
-		}()},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("OCTO_API_KEY", "")
+			t.Setenv("CUSTOM_API_KEY", "")
 			if d := NewVisionDescriber(agent.New(nil, "blind"), tt.cfg); d != nil {
 				t.Errorf("NewVisionDescriber() = %T, want nil (feature must stay off)", d)
 			}
 		})
+	}
+}
+
+// A helper that resolves but can't be called (no API key) must NOT be nil:
+// nil here while the tool gates check only ResolveVisionHelper would let raw
+// image blocks through to a text-only endpoint (HTTP 400 every turn). Instead
+// Describe fails with the reason, which becomes the per-image fallback text.
+func TestNewVisionDescriber_NoKeyDescribesWithClearError(t *testing.T) {
+	t.Setenv("CUSTOM_API_KEY", "")
+	cfg := visionCfg("http://x")
+	cfg.Endpoints[0].APIKey = ""
+
+	d := NewVisionDescriber(agent.New(nil, "blind"), cfg)
+	if d == nil {
+		t.Fatal("NewVisionDescriber() = nil; the gates rely on resolve-only semantics")
+	}
+	if !d.Active() {
+		t.Fatal("a text-only primary still needs the describer active")
+	}
+	_, err := d.Describe(context.Background(), agent.ImageData{MIMEType: "image/png", Data: pngBytes})
+	if err == nil {
+		t.Fatal("Describe must fail when no key is available")
+	}
+	if !strings.Contains(err.Error(), "no API key") {
+		t.Errorf("error should name the fix, got: %v", err)
 	}
 }
 

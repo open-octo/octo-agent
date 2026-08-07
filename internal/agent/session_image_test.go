@@ -114,7 +114,7 @@ func TestLoadSession_KeepsDescriptionWhenBytesAreGone(t *testing.T) {
 	if !strings.Contains(b.Text, "a login form with an email field") {
 		t.Errorf("description was dropped on reload: %q", b.Text)
 	}
-	if strings.Contains(b.Text, "no longer available") {
+	if strings.Contains(b.Text, "[image attachment no longer available") {
 		t.Errorf("described image should not degrade to the unavailable placeholder: %q", b.Text)
 	}
 }
