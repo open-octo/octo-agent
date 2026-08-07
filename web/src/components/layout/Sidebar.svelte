@@ -474,6 +474,27 @@
           <span class="grp-name" onclick={() => toggleCollapse(g.id, !g.collapsed)}>{g.name}</span>
           <span class="grp-count">{gv.items.length}</span>
           {#if !$selMode}
+          <!-- Two frequency tiers: new-session and settings stay anchored at
+               the right edge; rename / delete / reorder appear on hover,
+               expanding between the name and the anchored pair (display:none,
+               NOT opacity — invisible icons must not reserve width, that's
+               what squeezed the group name to an ellipsis). -->
+          {#if gi > 0}
+          <span class="row-action hover-only" title={$t('sidebar.move_group_up')} onclick={() => moveGroup(g.id, -1)}>
+            <iconify-icon icon="ant-design:arrow-up-outlined" width="12"></iconify-icon>
+          </span>
+          {/if}
+          {#if gi < groupedView.groups.length - 1}
+          <span class="row-action hover-only" title={$t('sidebar.move_group_down')} onclick={() => moveGroup(g.id, 1)}>
+            <iconify-icon icon="ant-design:arrow-down-outlined" width="12"></iconify-icon>
+          </span>
+          {/if}
+          <span class="row-action hover-only" title={$t('sidebar.rename_group')} onclick={(e) => { e.stopPropagation(); editGroupId.set(g.id); editGroupDraft.set(g.name) }}>
+            <iconify-icon icon="ant-design:edit-outlined" width="12"></iconify-icon>
+          </span>
+          <span class="row-action hover-only del" title={$t('sidebar.delete_group')} onclick={() => deleteGroup(g.id, g.name)}>
+            <iconify-icon icon="ant-design:delete-outlined" width="12"></iconify-icon>
+          </span>
           <span
             class="row-action"
             title={tr('sidebar.new_session_in_group')}
@@ -489,22 +510,6 @@
             onclick={(e) => { e.stopPropagation(); projectModalFor = g.id }}
           >
             <iconify-icon icon="ant-design:setting-outlined" width="13"></iconify-icon>
-          </span>
-          {#if gi > 0}
-          <span class="row-action hover-only" title={$t('sidebar.move_group_up')} onclick={() => moveGroup(g.id, -1)}>
-            <iconify-icon icon="ant-design:arrow-up-outlined" width="13"></iconify-icon>
-          </span>
-          {/if}
-          {#if gi < groupedView.groups.length - 1}
-          <span class="row-action hover-only" title={$t('sidebar.move_group_down')} onclick={() => moveGroup(g.id, 1)}>
-            <iconify-icon icon="ant-design:arrow-down-outlined" width="13"></iconify-icon>
-          </span>
-          {/if}
-          <span class="row-action" title={$t('sidebar.rename_group')} onclick={(e) => { e.stopPropagation(); editGroupId.set(g.id); editGroupDraft.set(g.name) }}>
-            <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
-          </span>
-          <span class="row-action del" title={$t('sidebar.delete_group')} onclick={() => deleteGroup(g.id, g.name)}>
-            <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
           </span>
           {/if}
           {/if}
@@ -843,14 +848,17 @@
 }
 .grp-name.muted { font-weight: 600; color: var(--text-quaternary); cursor: default; }
 .grp-count { font-size: 11px; color: var(--text-quaternary); flex: 0 0 auto; padding: 0 2px; }
-/* Group-header actions are always visible — these are a group's primary
-   controls, not occasional housekeeping. The explicit opacity:1 overrides
-   .row-action's base opacity:0 (the session rows' hover-reveal). Only the
-   reorder arrows stay hover-revealed: with them a header would carry six
-   icons, and reordering is the one genuinely occasional action here. */
-.grp-header .row-action { opacity: 1; }
-.grp-header .row-action.hover-only { opacity: 0; }
-.grp-header:hover .row-action.hover-only { opacity: 1; }
+/* Group-header actions in two frequency tiers. The high-frequency pair
+   (new session, settings) is always visible, anchored at the right edge
+   (explicit opacity:1 overrides .row-action's base opacity:0, the session
+   rows' hover-reveal). The occasional ones (rename / delete / reorder)
+   appear on hover and — crucially — take NO width until then: display:none,
+   not opacity:0, because an invisible 22px slot per icon is what squeezed
+   the group name into an ellipsis. They expand between the name and the
+   anchored pair, so the icons that are always there never shift. */
+.grp-header .row-action { opacity: 1; width: 20px; flex-basis: 20px; }
+.grp-header .row-action.hover-only { display: none; }
+.grp-header:hover .row-action.hover-only { display: flex; }
 .grp-dir {
   padding: 0 8px 2px 28px; margin-top: -2px;
   font-size: 11px; color: var(--text-quaternary);
