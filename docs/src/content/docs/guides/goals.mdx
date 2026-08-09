@@ -25,12 +25,16 @@ instead of a recurring prompt. The underlying tools (`get_goal`, `create_goal`, 
 also available to the model directly, so a goal can be created or refined mid-conversation, not
 just via the slash command.
 
-:::note[`/goal edit` differs by transport]
-In the TUI, `/goal edit` with no text prefills the input box with the current objective for you to
-revise on the next Enter — `/goal edit <text>` is rejected outright, it's prefill-only. In the Web
-UI and IM channels, `/goal edit <text>` edits the objective inline in one step. Everything else
-(`pause`/`resume`/`clear`/`replace`) works the same way everywhere, since goal state lives on the
-session itself, not the transport.
+:::note[`/goal` is a TUI and Web command]
+IM channels have no `/goal` command: they run turns one message at a time, with no idle
+continuation loop to pursue a goal between them. A session bound to a chat still carries whatever
+goal the model or another transport set — the record lives on the session, not the transport — and
+the model can still create or update one through the goal tools mid-conversation.
+
+Between the two surfaces that do have it, only `edit` differs. In the TUI, `/goal edit` with no
+text prefills the input box with the current objective for you to revise on the next Enter, and
+`/goal edit <text>` is rejected outright — it's prefill-only. In the Web UI, `/goal edit <text>`
+edits the objective inline in one step.
 :::
 
 ## Turning it off

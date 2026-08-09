@@ -5,15 +5,15 @@ import (
 	"strings"
 )
 
-// GoalCommandUsage is the one-line grammar hint shared by the text-reply
-// transports (web slash command, IM command).
+// GoalCommandUsage is the one-line grammar hint for the text-reply form of
+// the command (the web slash command's toast).
 const GoalCommandUsage = "Usage: /goal <objective> · /goal edit <objective> · /goal pause|resume|clear · /goal replace <objective>"
 
 // GoalCommand applies a "/goal …" command to the session and returns a plain
-// text reply, the shared surface for transports whose command feedback is a
-// text message (web toast, IM chat reply). The grammar matches the TUI except
-// `edit`, which takes the new objective inline — these transports have no
-// input-prefill to hand the current objective back for editing.
+// text reply — the web composer's surface, whose command feedback is a toast.
+// The grammar matches the TUI except `edit`, which takes the new objective
+// inline: the web has no input-prefill to hand the current objective back for
+// editing.
 //
 // startWork reports that the command left the goal ready to be pursued right
 // now — a goal was created, replaced, or resumed. The TUI starts the

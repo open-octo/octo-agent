@@ -206,6 +206,28 @@ func TestManager_CommandRouter(t *testing.T) {
 	}
 }
 
+// /goal is not an IM command. Goals still exist on an IM-bound session — the
+// model owns them through the goal tools, and every other transport sees the
+// same record — but IM has no continuation loop to pursue one, so offering the
+// command here only ever set state nothing would act on.
+func TestManager_NoGoalCommand(t *testing.T) {
+	tempHome(t)
+	cfg := &Config{Channels: map[string]InstanceList{}}
+	mgr := NewManager(cfg, fakeAgentFactory, BindByChatUser)
+
+	ev := InboundEvent{Platform: "mock", ChatID: "c1", UserID: "u1"}
+	mgr.GetOrCreateSession(ev, nil)
+
+	ev.Text = "/goal ship the release"
+	if reply := mgr.CommandRouter(ev, ""); !strings.Contains(reply, "Unknown command") {
+		t.Errorf("/goal reply = %q, want an unknown-command reply", reply)
+	}
+	ev.Text = "/help"
+	if reply := mgr.CommandRouter(ev, ""); strings.Contains(reply, "/goal") {
+		t.Errorf("/help still advertises /goal: %q", reply)
+	}
+}
+
 func TestManager_StopInterruptsRunningTurn(t *testing.T) {
 	tempHome(t)
 	cfg := &Config{Channels: map[string]InstanceList{}}

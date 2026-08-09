@@ -283,13 +283,6 @@ type Manager struct {
 	// deterministic default (see resolveStoreID).
 	bindings *bindingStore
 
-	// goalsEnabled mirrors the main config's goal.enabled (default true,
-	// matching config.Config.GoalEnabled's default). The server sets it via
-	// SetGoalsEnabled once it has loaded the real config; until then /goal
-	// stays enabled so tests and callers that never call SetGoalsEnabled see
-	// the historical always-on behavior.
-	goalsEnabled atomic.Bool
-
 	// modelOps backs the /model command. Set once by the server alongside the
 	// factory; nil means /model replies that switching is unavailable rather
 	// than guessing at config it cannot see from this package.
@@ -306,24 +299,12 @@ func NewManager(cfg *Config, factory AgentFactory, mode BindingMode) *Manager {
 	if mode == "" {
 		mode = BindByChatUser
 	}
-	m := &Manager{
+	return &Manager{
 		cfg:      cfg,
 		factory:  factory,
 		mode:     mode,
 		bindings: newBindingStore(),
 	}
-	m.goalsEnabled.Store(true)
-	return m
-}
-
-// SetGoalsEnabled mirrors the main config's goal.enabled into the manager, so
-// the IM /goal command is gated the same way the REST and TUI surfaces are
-// (internal/server/goal.go, cmd/octo/chat.go). Without this, /goal.enabled:
-// false could be silently bypassed via any bound IM platform: a goal set
-// through chat would persist to the session's backing store and spring back
-// to life the moment a REST/TUI/Web surface later touches that same session.
-func (m *Manager) SetGoalsEnabled(enabled bool) {
-	m.goalsEnabled.Store(enabled)
 }
 
 // SetModelOps injects the server's model table + sender resolver for /model.
@@ -392,40 +373,13 @@ func (m *Manager) CommandRouter(ev InboundEvent, agentID string) string {
 		return m.cmdCompact(ev, agentID)
 	case "/reload":
 		return m.cmdReload(ev, agentID)
-	case "/goal":
-		return m.cmdGoal(ev, strings.Join(args, " "), agentID)
 	case "/model":
 		return m.cmdModel(ev, strings.Join(args, " "), agentID)
 	case "/help":
-		return "Available: /bind [--force] <number|id>, /unbind, /list, /clear, /new, /compact, /reload, /goal, /model [name|default], /loop [interval] <task>, /stop, /status, /help"
+		return "Available: /bind [--force] <number|id>, /unbind, /list, /clear, /new, /compact, /reload, /model [name|default], /loop [interval] <task>, /stop, /status, /help"
 	default:
 		return fmt.Sprintf("Unknown command: %s", cmd)
 	}
-}
-
-// cmdGoal applies the shared /goal grammar to the chat's persisted session.
-// Goal state lives on the backing store, so it is visible to every transport
-// bound to the same session. Mutations are safe against a running turn — the
-// session's goal methods are mutex-guarded and the turn's accounting picks
-// the change up at its next tick.
-func (m *Manager) cmdGoal(ev InboundEvent, args string, agentID string) string {
-	if !m.goalsEnabled.Load() {
-		return "Goals are disabled (goal.enabled)."
-	}
-	key := sessionKeyFor(m.mode, ev, agentID)
-	val, loaded := m.sessions.Load(key)
-	if !loaded {
-		return "No active session. Send a message first, or /bind one."
-	}
-	sess := val.(*Session)
-	store := sess.GoalStore()
-	if store == nil {
-		return "Goals are unavailable for this session."
-	}
-	// IM has no idle-turn kick of its own, so the startWork flag is dropped:
-	// the goal starts moving at the end of the next turn the chat runs.
-	reply, _ := agent.GoalCommand(store, args)
-	return reply
 }
 
 // cmdModel lists the configured models (no argument) or switches the session

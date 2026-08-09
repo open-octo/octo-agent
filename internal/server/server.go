@@ -1848,16 +1848,12 @@ func (s *Server) ensureSender() error {
 	s.provider = provName
 	enableTools := s.cfg.Tools
 	if enableTools {
-		// Sync goal.enabled before releasing senderMu, not after. Once
-		// unlocked, getSender() != nil is visible to other goroutines —
-		// initChannels/reloadChannel gate solely on that and construct a
-		// channel.Manager immediately, locking in whatever s.goalsEnabled
-		// holds at that instant via SetGoalsEnabled. reloadChannel only
-		// re-syncs when it constructs a fresh manager, so a channel-settings
-		// save landing in the gap between unlock and enableSubAgentTools
-		// (below) finishing would otherwise capture a stale value
-		// permanently. syncGoalsEnabled needs no lock of its own, so running
-		// it here adds no deadlock risk.
+		// goal.enabled belongs to the same tools-on switch this branch is
+		// applying, so sync it here rather than after the unlock: the flags it
+		// sets gate tool visibility, and a turn that starts the moment
+		// getSender() becomes non-nil must already see the configured value.
+		// syncGoalsEnabled needs no lock of its own, so running it under
+		// senderMu adds no deadlock risk.
 		s.syncGoalsEnabled()
 	}
 	s.senderMu.Unlock()
@@ -2236,7 +2232,6 @@ func (s *Server) initChannels() {
 		return
 	}
 	s.channelMgr = channel.NewManager(chCfg, s.buildChannelAgent, channel.BindByChatUser)
-	s.channelMgr.SetGoalsEnabled(s.goalsEnabled.Load())
 	s.channelMgr.SetModelOps(s.channelModelOps())
 	s.channelMgr.SetProfileLookup(func(id string) (*agentprofile.Profile, bool) {
 		return s.profileForAgent(id), true
@@ -2772,7 +2767,6 @@ func (s *Server) reloadChannel(platform string) {
 	s.channelCfg = chCfg
 	if s.channelMgr == nil {
 		s.channelMgr = channel.NewManager(chCfg, s.buildChannelAgent, channel.BindByChatUser)
-		s.channelMgr.SetGoalsEnabled(s.goalsEnabled.Load())
 		s.channelMgr.SetModelOps(s.channelModelOps())
 		s.channelMgr.SetProfileLookup(func(id string) (*agentprofile.Profile, bool) {
 			return s.profileForAgent(id), true
@@ -2935,7 +2929,7 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 	// Reserved commands must not be intercepted by a skill (matching
 	// the TUI reservedReplCommands pattern).
 	switch cmd {
-	case "/stop", "/bind", "/unbind", "/clear", "/new", "/status", "/list", "/help", "/goal", "/compact", "/reload":
+	case "/stop", "/bind", "/unbind", "/clear", "/new", "/status", "/list", "/help", "/compact", "/reload":
 		// fall through to CommandRouter
 	case "/loop":
 		// /loop is a built-in the model handles via the schedule_wakeup tool
