@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "dompurify": "^3.4.12",
+    "dompurify": "^3.4.13",
     "highlight.js": "^11.10.0",
     "html2canvas": "^1.4.1",
     "marked": "^18.0.7",
