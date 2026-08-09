@@ -325,9 +325,11 @@ func TestGoalStatusTransitionNotices(t *testing.T) {
 	}
 
 	// Clearing forgets the history: the next goal's first status is a fresh
-	// baseline, not a change back from complete.
+	// baseline, not a change away from complete. Blocked is the probe because
+	// it is announceable — a status the silent default branch would swallow
+	// (active, paused) would pass whether or not the history was forgotten.
 	srv.broadcastGoalCleared(sess.ID)
-	limited := agent.Goal{ID: "g2", Objective: "next", Status: agent.GoalActive}
+	limited := agent.Goal{ID: "g2", Objective: "next", Status: agent.GoalBlocked}
 	srv.broadcastGoalUpdated(sess.ID, limited) // baseline — silent
 	limited.Status = agent.GoalBudgetLimited
 	limited.TokensUsed, limited.TokenBudget = 63900, 50000
@@ -335,10 +337,73 @@ func TestGoalStatusTransitionNotices(t *testing.T) {
 
 	ev = waitEventType(t, conn, "goal_notice")
 	if text, _ := ev["text"].(string); !strings.Contains(text, "63.9K/50K tokens") {
-		t.Errorf("text = %q, want the budget line with usage", text)
+		t.Errorf("text = %q, want the budget line with usage; a blocked line here "+
+			"means the cleared goal's status history outlived it", text)
 	}
 	if ev["level"] != "warning" {
 		t.Errorf("level = %v, want warning", ev["level"])
+	}
+}
+
+// The shared idle-turn helper's contract, tested on the helper rather than
+// through one of its callers: a callback that declines must leave the session
+// exactly as it found it — no turn, no binding held, and whatever queue the
+// callback chose not to consume still intact for the next kick.
+func TestKickIdleTurn_DeclineLeavesNothingHeld(t *testing.T) {
+	srv, sess := goalTestServer(t)
+	srv.enqueueSteer(sess.ID, agent.InboxItem{Text: "still waiting"})
+
+	called := false
+	if srv.kickIdleTurn(sess.ID, func(*agent.Session) (string, []agent.ContentBlock, bool) {
+		called = true
+		return "", nil, false
+	}) {
+		t.Fatal("kickIdleTurn reported a turn started for a declining callback")
+	}
+	if !called {
+		t.Fatal("callback never ran")
+	}
+
+	mu := srv.sessionTurnLock(sess.ID)
+	mu.Lock()
+	running := srv.turnRunning[sess.ID]
+	mu.Unlock()
+	if running {
+		t.Error("turnRunning stayed set after a declined kick")
+	}
+	if !srv.steerPending(sess.ID) {
+		t.Error("the declined kick consumed the steer queue")
+	}
+	// The binding must be released. Probing from another entry, not from web
+	// again: re-acquiring for the entry that already holds it succeeds either
+	// way, so only a foreign entry can tell a released binding from a leaked
+	// one. A leak locks the session away from the TUI until the lease expires.
+	if ok, _, err := srv.acquireSessionBinding(sess.ID, agent.EntryTUI, false); !ok {
+		t.Errorf("the declined kick kept the web binding: %v", err)
+	} else {
+		srv.releaseSessionBinding(sess.ID, agent.EntryTUI)
+	}
+}
+
+// Queued user input outranks the goal: the kick stands down and leaves the
+// message alone, so the turn it starts is the user's, and that turn's end is
+// where the goal picks back up.
+func TestKickIdleGoalTurn_DefersToQueuedSteer(t *testing.T) {
+	srv, sess := goalTestServer(t)
+	if _, err := sess.CreateGoal("keep going", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Save(); err != nil {
+		t.Fatal(err)
+	}
+	srv.enqueueSteer(sess.ID, agent.InboxItem{Text: "actually, do this first"})
+	srv.sender = &goalRoundSender{}
+
+	if srv.kickIdleGoalTurn(sess.ID, agent.GoalStartFresh) {
+		t.Error("the goal kicked a turn over queued user input")
+	}
+	if !srv.steerPending(sess.ID) {
+		t.Error("the queued message was consumed by the goal kick")
 	}
 }
 

@@ -1027,6 +1027,10 @@ func (s *Server) forgetTurnLock(id string) {
 	s.askSlotsMu.Lock()
 	delete(s.askSlots, id)
 	s.askSlotsMu.Unlock()
+
+	s.goalStatusMu.Lock()
+	delete(s.goalLastStatus, id)
+	s.goalStatusMu.Unlock()
 }
 
 // cachedEntryBinding is a short-lease, in-process cache of a session's binding.

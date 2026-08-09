@@ -353,11 +353,16 @@ type wsEventLoopTickNotice struct {
 }
 
 // wsEventGoalNotice is the goal's scrollback line, mirroring the TUI's "●
-// Goal …" notices. Kind "command" carries the /goal reply in Text; "start" and
-// "continue" announce a continuation turn and carry no text (the frontend owns
-// that wording, as it does for the loop tick). Status transitions need no event
-// of their own: the frontend derives them from consecutive goal_updated
-// payloads, the way the TUI compares against its own last-seen status.
+// Goal …" notices. Three kinds:
+//
+//	command  — the /goal reply, verbatim in Text.
+//	status   — a transition into complete / blocked / budget_limited /
+//	           usage_limited, worded in Text. Built server-side so it shares
+//	           agent's formatters with the TUI lines it mirrors; see
+//	           noticeGoalTransition for which changes qualify.
+//	start,
+//	continue — a continuation turn is beginning. No Text: the wording is fixed
+//	           and the frontend owns it, as it does for the loop tick.
 type wsEventGoalNotice struct {
 	Type      string `json:"type"`
 	SessionID string `json:"session_id"`

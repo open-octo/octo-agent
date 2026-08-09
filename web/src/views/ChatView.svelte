@@ -506,8 +506,15 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     cleanups.push(ws.on('goal_notice', (ev) => {
       if ((ev as any).session_id !== sid) return
       const kind = (ev as any).kind ?? ''
-      const text = (ev as any).text
-        || (kind === 'start' ? 'Goal starts — /goal pause to stop' : 'Goal continues — /goal pause to stop')
+      // Only start/continue are textless by design; an unknown textless kind is
+      // a newer server talking to this build, and mislabelling it "continues"
+      // would be worse than dropping it.
+      const fixed: Record<string, string> = {
+        start: 'Goal starts — /goal pause to stop',
+        continue: 'Goal continues — /goal pause to stop',
+      }
+      const text = (ev as any).text || fixed[kind]
+      if (!text) return
       addChatMsg(sid, {
         id: uid('note'),
         type: 'notice',

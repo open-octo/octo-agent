@@ -128,6 +128,10 @@ func (s *Server) kickIdleSteerTurn(sessionID string) bool {
 // receives is the one that runs the turn — per-turn runtime state a caller
 // stamps on it (the goal continuation's pending mark, say) survives into the
 // turn.
+//
+// next must not block: it holds the session's turn lock, and callers reach
+// this from the WS read pump, so anything that waits in there stalls both that
+// connection's reader and every other path contending for the session.
 func (s *Server) kickIdleTurn(sessionID string, next func(*agent.Session) (string, []agent.ContentBlock, bool)) bool {
 	// Acquire the persistent binding before locking the turn: this keeps the
 	// same lock order as the user-initiated web path and prevents idle
