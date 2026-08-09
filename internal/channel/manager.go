@@ -422,7 +422,10 @@ func (m *Manager) cmdGoal(ev InboundEvent, args string, agentID string) string {
 	if store == nil {
 		return "Goals are unavailable for this session."
 	}
-	return agent.GoalCommand(store, args)
+	// IM has no idle-turn kick of its own, so the startWork flag is dropped:
+	// the goal starts moving at the end of the next turn the chat runs.
+	reply, _ := agent.GoalCommand(store, args)
+	return reply
 }
 
 // cmdModel lists the configured models (no argument) or switches the session

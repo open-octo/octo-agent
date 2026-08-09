@@ -15,9 +15,15 @@ const GoalCommandUsage = "Usage: /goal <objective> · /goal edit <objective> · 
 // `edit`, which takes the new objective inline — these transports have no
 // input-prefill to hand the current objective back for editing.
 //
+// startWork reports that the command left the goal ready to be pursued right
+// now — a goal was created, replaced, or resumed. The TUI starts the
+// continuation turn itself for exactly these three (startGoalNow); transports
+// that can kick an idle turn gate on this flag to match. It says nothing about
+// whether a turn should actually run: that stays GoalContinuation's call.
+//
 // The TUI keeps its own richer dispatcher (prefilled edit, styled summary);
 // the semantics here and there must stay aligned.
-func GoalCommand(s *Session, args string) string {
+func GoalCommand(s *Session, args string) (reply string, startWork bool) {
 	args = strings.TrimSpace(args)
 	sub := strings.ToLower(args)
 
@@ -25,49 +31,51 @@ func GoalCommand(s *Session, args string) string {
 	case args == "":
 		g, ok := s.GoalSnapshot()
 		if !ok {
-			return "No goal is currently set. " + GoalCommandUsage
+			return "No goal is currently set. " + GoalCommandUsage, false
 		}
-		return goalCommandSummary(g)
+		return goalCommandSummary(g), false
 
 	case sub == "pause":
 		g, err := s.SetGoalStatus(GoalPaused)
 		if err != nil {
-			return "/goal pause: " + err.Error()
+			return "/goal pause: " + err.Error(), false
 		}
-		return "Goal " + GoalStatusLabel(g.Status) + " — " + goalObjectiveLine(g.Objective)
+		return "Goal " + GoalStatusLabel(g.Status) + " — " + goalObjectiveLine(g.Objective), false
 
 	case sub == "resume":
 		g, err := s.SetGoalStatus(GoalActive)
 		if err != nil {
-			return "/goal resume: " + err.Error()
+			return "/goal resume: " + err.Error(), false
 		}
-		return "Goal " + GoalStatusLabel(g.Status) + " — " + goalObjectiveLine(g.Objective)
+		return "Goal " + GoalStatusLabel(g.Status) + " — " + goalObjectiveLine(g.Objective), true
 
 	case sub == "clear":
 		if s.ClearGoal() {
-			return "Goal cleared"
+			return "Goal cleared", false
 		}
-		return "No goal to clear"
+		return "No goal to clear", false
 
 	case sub == "edit":
-		return "Usage: /goal edit <objective> — rewrites the objective, keeping usage and budget"
+		return "Usage: /goal edit <objective> — rewrites the objective, keeping usage and budget", false
 
 	case strings.HasPrefix(sub, "edit "):
+		// No kick: editing hands the running or next turn a one-time steer
+		// rather than starting fresh work, matching the TUI's edit path.
 		g, err := s.EditGoalObjective(strings.TrimSpace(args[len("edit "):]))
 		if err != nil {
-			return "/goal edit: " + err.Error()
+			return "/goal edit: " + err.Error(), false
 		}
-		return "Goal updated — " + goalObjectiveLine(g.Objective)
+		return "Goal updated — " + goalObjectiveLine(g.Objective), false
 
 	case sub == "replace":
-		return "Usage: /goal replace <objective>"
+		return "Usage: /goal replace <objective>", false
 
 	case strings.HasPrefix(sub, "replace "):
 		g, err := s.ReplaceGoal(strings.TrimSpace(args[len("replace "):]), 0)
 		if err != nil {
-			return "/goal replace: " + err.Error()
+			return "/goal replace: " + err.Error(), false
 		}
-		return "Goal replaced — " + goalObjectiveLine(g.Objective)
+		return "Goal replaced — " + goalObjectiveLine(g.Objective), true
 
 	default:
 		// "/goal <objective>": start a goal. A finished goal is replaced
@@ -76,19 +84,19 @@ func GoalCommand(s *Session, args string) string {
 		if g, ok := s.GoalSnapshot(); ok {
 			if g.Status != GoalComplete {
 				return "A goal already exists (" + GoalStatusLabel(g.Status) + "): " + goalObjectiveLine(g.Objective) +
-					"\nUse /goal replace <objective> to replace it, or /goal clear."
+					"\nUse /goal replace <objective> to replace it, or /goal clear.", false
 			}
 			ng, err := s.ReplaceGoal(args, 0)
 			if err != nil {
-				return "/goal: " + err.Error()
+				return "/goal: " + err.Error(), false
 			}
-			return "Goal set — " + goalObjectiveLine(ng.Objective)
+			return "Goal set — " + goalObjectiveLine(ng.Objective), true
 		}
 		g, err := s.CreateGoal(args, 0)
 		if err != nil {
-			return "/goal: " + err.Error()
+			return "/goal: " + err.Error(), false
 		}
-		return "Goal set — " + goalObjectiveLine(g.Objective)
+		return "Goal set — " + goalObjectiveLine(g.Objective), true
 	}
 }
 

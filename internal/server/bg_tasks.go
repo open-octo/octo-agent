@@ -107,6 +107,28 @@ func (s *Server) deliverModelNote(sessionID, note string) {
 // (e.g. the loop-tick notice) must gate on it, since the session may have been
 // taken over by another entry or have nothing left to drain.
 func (s *Server) kickIdleSteerTurn(sessionID string) bool {
+	return s.kickIdleTurn(sessionID, func(*agent.Session) (string, []agent.ContentBlock, bool) {
+		// Only the first batch starts this turn; anything the user explicitly
+		// queued behind it goes back on the queue so runAgentTurnLoop chains it
+		// as its own turn instead of folding everything into one.
+		batches := batchQueuedTurns(s.drainSteer(sessionID))
+		if len(batches) == 0 {
+			return "", nil, false
+		}
+		s.requeueFront(sessionID, batches[1:])
+		content, blocks := foldQueuedBatch(batches[0])
+		return content, blocks, true
+	})
+}
+
+// kickIdleTurn starts a turn on an idle session with the content next picks.
+// next runs with the turn lock held and the freshly loaded session in hand, so
+// it can both read session state and consume a queue without racing another
+// kick; returning false aborts without starting anything. The session it
+// receives is the one that runs the turn — per-turn runtime state a caller
+// stamps on it (the goal continuation's pending mark, say) survives into the
+// turn.
+func (s *Server) kickIdleTurn(sessionID string, next func(*agent.Session) (string, []agent.ContentBlock, bool)) bool {
 	// Acquire the persistent binding before locking the turn: this keeps the
 	// same lock order as the user-initiated web path and prevents idle
 	// follow-up turns from interleaving with another entry (cli/tui/im) that
@@ -125,25 +147,20 @@ func (s *Server) kickIdleSteerTurn(sessionID string) bool {
 	sess, err := agent.LoadSession(sessionID)
 	if err != nil {
 		// Session not loadable (deleted, or a transient read error) — leave
-		// the queue untouched; the next turn will pick the note up.
+		// any queue untouched; the next turn will pick the note up.
 		mu.Unlock()
 		s.releaseSessionBinding(sessionID, agent.EntryWeb)
 		return false
 	}
-	// Only the first batch starts this turn; anything the user explicitly queued
-	// behind it goes back on the queue so runAgentTurnLoop chains it as its own
-	// turn instead of folding everything into one.
-	batches := batchQueuedTurns(s.drainSteer(sessionID))
-	if len(batches) == 0 {
+	content, blocks, ok := next(sess)
+	if !ok {
 		mu.Unlock()
 		s.releaseSessionBinding(sessionID, agent.EntryWeb)
 		return false
 	}
-	s.requeueFront(sessionID, batches[1:])
 	s.turnRunning[sessionID] = true
 	mu.Unlock()
 
-	content, blocks := foldQueuedBatch(batches[0])
 	go func() {
 		// Hold the drain gate past the deferred binding release, whose session
 		// write would otherwise escape a drain — see the same pattern (and the

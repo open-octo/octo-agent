@@ -70,7 +70,7 @@ func (s *Server) wsGoalCommand(sessionID, args string) {
 		s.wsToast(sessionID, fmt.Sprintf("/goal: %v", err), "error")
 		return
 	}
-	reply := agent.GoalCommand(sess, args)
+	reply, startWork := agent.GoalCommand(sess, args)
 	level := "info"
 	if len(reply) > 6 && (reply[:6] == "/goal:" || reply[:6] == "/goal ") {
 		level = "error"
@@ -81,6 +81,27 @@ func (s *Server) wsGoalCommand(sessionID, args string) {
 	} else {
 		s.broadcastGoalCleared(sessionID)
 	}
+	if startWork {
+		s.kickIdleGoalTurn(sessionID)
+	}
+}
+
+// kickIdleGoalTurn starts the goal's continuation turn right away when the
+// session is idle, so a goal created, replaced, or resumed from the web
+// composer begins work at once instead of waiting for the user's next message
+// — the TUI's startGoalNow behavior. A running turn needs no kick:
+// runAgentTurnLoop consults GoalContinuation at every turn end.
+func (s *Server) kickIdleGoalTurn(sessionID string) bool {
+	return s.kickIdleTurn(sessionID, func(sess *agent.Session) (string, []agent.ContentBlock, bool) {
+		// Queued user input outranks the continuation, the same rule the
+		// turn-end kick follows: let that input run and its own turn end pick
+		// the goal back up.
+		if s.steerPending(sessionID) {
+			return "", nil, false
+		}
+		prompt, ok := sess.GoalContinuation()
+		return prompt, nil, ok
+	})
 }
 
 // handleGetSessionGoal serves GET /api/sessions/{id}/goal → {goal: …|null}.

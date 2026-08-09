@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/agentprofile"
@@ -167,6 +168,85 @@ func TestRunAgentTurnLoop_ErroredTurnSuppressesContinuation(t *testing.T) {
 	}
 	if _, ok := sess.GoalContinuation(); ok {
 		t.Error("continuation must stay suppressed after an errored turn")
+	}
+}
+
+// waitGoalTurnIdle blocks until the session has no turn running. The kick sets
+// turnRunning synchronously before returning, so a caller that has already
+// issued the command sees a true reading before this ever observes false.
+func waitGoalTurnIdle(t *testing.T, srv *Server, sessionID string) {
+	t.Helper()
+	mu := srv.sessionTurnLock(sessionID)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		running := srv.turnRunning[sessionID]
+		mu.Unlock()
+		if !running {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("turn never wound down")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A goal set from the web composer must start pursuing itself immediately, the
+// way the TUI's /goal does. Web used to only continue a goal at the tail of a
+// turn already running, so a goal created while idle sat active and untouched
+// until the user happened to send an unrelated message.
+func TestWSGoalCommand_StartsIdleTurn(t *testing.T) {
+	srv, sess := goalTestServer(t)
+	sender := &goalRoundSender{}
+	srv.sender = sender
+
+	srv.wsGoalCommand(sess.ID, "ship the release")
+	waitGoalTurnIdle(t, srv, sess.ID)
+
+	sender.mu.Lock()
+	defer sender.mu.Unlock()
+	if len(sender.calls) == 0 {
+		t.Fatal("/goal <objective> started no turn")
+	}
+	saw := 0
+	for _, call := range sender.calls {
+		saw += countGoalContextUserMsgs(call)
+	}
+	if saw == 0 {
+		t.Error("the turn that started did not carry the goal continuation prompt")
+	}
+}
+
+// Pause must not start work; the resume that follows must. Both run against a
+// reloaded session — wsGoalCommand mutates whatever copy is authoritative, so
+// the pause has to be durable for the resume to see it.
+func TestWSGoalCommand_PauseIdleResume(t *testing.T) {
+	srv, sess := goalTestServer(t)
+	if _, err := sess.CreateGoal("keep going", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Save(); err != nil {
+		t.Fatal(err)
+	}
+	sender := &goalRoundSender{}
+	srv.sender = sender
+
+	srv.wsGoalCommand(sess.ID, "pause")
+	waitGoalTurnIdle(t, srv, sess.ID)
+	sender.mu.Lock()
+	calls := len(sender.calls)
+	sender.mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("/goal pause started %d LLM call(s), want none", calls)
+	}
+
+	srv.wsGoalCommand(sess.ID, "resume")
+	waitGoalTurnIdle(t, srv, sess.ID)
+	sender.mu.Lock()
+	defer sender.mu.Unlock()
+	if len(sender.calls) == 0 {
+		t.Error("/goal resume started no turn")
 	}
 }
 
