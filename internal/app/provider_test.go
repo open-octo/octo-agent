@@ -65,7 +65,7 @@ func TestVendor_KimiCodingPlan_BuildClient_CustomBaseURL(t *testing.T) {
 func TestIsKnownVendor(t *testing.T) {
 	for _, id := range []string{
 		"openrouter", "deepseek", "minimax", "kimi", "kimi-coding-plan",
-		"glm", "openai", "anthropic", "bailian", "mimo", "longcat",
+		"glm", "openai", "anthropic", "bailian", "mimo", "longcat", "xai",
 		ProviderCustom,
 	} {
 		if !IsKnownVendor(id) {
@@ -169,6 +169,62 @@ func TestBuildClient_EmptyBaseURL_UsesVendorEndpoint(t *testing.T) {
 	}
 }
 
+func TestVendor_XAI(t *testing.T) {
+	v := vendorByID("xai")
+	if v == nil {
+		t.Fatal("xai not found in registry")
+	}
+	if v.DisplayName != "xAI (Grok)" {
+		t.Errorf("DisplayName = %q, want xAI (Grok)", v.DisplayName)
+	}
+	if v.Protocol != "openai" {
+		t.Errorf("Protocol = %q, want openai", v.Protocol)
+	}
+	if v.API != "openai-completions" {
+		t.Errorf("API = %q, want openai-completions", v.API)
+	}
+	if v.DefaultBaseURL != "https://api.x.ai" {
+		t.Errorf("DefaultBaseURL = %q, want https://api.x.ai", v.DefaultBaseURL)
+	}
+	if v.DefaultModel != "grok-4.5" {
+		t.Errorf("DefaultModel = %q, want grok-4.5", v.DefaultModel)
+	}
+	if v.APIKeyEnvVar != "XAI_API_KEY" {
+		t.Errorf("APIKeyEnvVar = %q, want XAI_API_KEY", v.APIKeyEnvVar)
+	}
+	if v.LiteModel != "grok-4.20-non-reasoning" {
+		t.Errorf("LiteModel = %q, want grok-4.20-non-reasoning", v.LiteModel)
+	}
+	found := false
+	for _, m := range v.Models {
+		if m.ID == v.LiteModel {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("LiteModel %q must be a member of Models", v.LiteModel)
+	}
+	// All current Grok chat models accept image input (docs.x.ai, 2026-07-09).
+	for _, m := range v.Models {
+		if !m.Vision {
+			t.Errorf("xai model %q: Vision = false, want true", m.ID)
+		}
+	}
+}
+
+func TestVendor_XAI_BuildClient(t *testing.T) {
+	// openai-protocol client with the registry endpoint, no override needed.
+	client, err := buildClient("xai", "sk-dummy", "", "")
+	if err != nil {
+		t.Fatalf("buildClient(xai) error: %v", err)
+	}
+	if c, ok := client.(*openai.Client); !ok {
+		t.Fatalf("buildClient(xai) client type = %T, want *openai.Client", client)
+	} else if c.BaseURL != "https://api.x.ai" {
+		t.Errorf("buildClient(xai) BaseURL = %q, want https://api.x.ai", c.BaseURL)
+	}
+}
+
 func TestVendorEnvVars(t *testing.T) {
 	tests := []struct {
 		id, wantEnv string
@@ -181,6 +237,7 @@ func TestVendorEnvVars(t *testing.T) {
 		{"bailian", "DASHSCOPE_API_KEY"},
 		{"mimo", "MIMO_API_KEY"},
 		{"longcat", "LONGCAT_API_KEY"},
+		{"xai", "XAI_API_KEY"},
 	}
 	for _, tc := range tests {
 		got := VendorAPIKeyEnvVar(tc.id)
@@ -255,8 +312,12 @@ func TestVendorModelVision(t *testing.T) {
 		{"kimi", "kimi-k2.6", true, true},       // MoonViT multimodal
 		{"openai", "o3-mini", false, true},      // no image input
 		{"openai", "o4-mini", true, true},
-		{"bailian", "not-a-model", false, false}, // unknown model
-		{"bogus", "whatever", false, false},      // unknown vendor
+		{"xai", "grok-4.5", true, true},
+		{"xai", "grok-4.20", true, true},
+		{"xai", "grok-build-0.1", true, true},
+		{"xai", "grok-4.20-multi-agent", false, false}, // excluded from catalogue
+		{"bailian", "not-a-model", false, false},       // unknown model
+		{"bogus", "whatever", false, false},            // unknown vendor
 		{ProviderCustom, "anything", false, false},
 	}
 	for _, tc := range cases {

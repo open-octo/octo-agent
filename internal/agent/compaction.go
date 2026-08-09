@@ -192,9 +192,17 @@ func contextWindow(model string) int {
 		return 64_000
 
 	// ── XAI Grok ──
+	// Context windows per xAI's model catalogue (docs.x.ai, 2026-07-09):
+	// grok-4.5 = 500k, grok-4.20 / grok-4.3 = 1M, grok-build-0.1 = 256k.
 	case strings.Contains(m, "grok-4.5") || strings.Contains(m, "grok4.5"):
 		return 500_000
+	case strings.Contains(m, "grok-4.20") || strings.Contains(m, "grok4.20"):
+		return 1_000_000
+	case strings.Contains(m, "grok-4.3") || strings.Contains(m, "grok4.3"):
+		return 1_000_000
 	case strings.Contains(m, "grok-4") || strings.Contains(m, "grok4"):
+		return 256_000
+	case strings.Contains(m, "grok-build") || strings.Contains(m, "grokbuild"):
 		return 256_000
 	case strings.Contains(m, "grok"):
 		return 64_000

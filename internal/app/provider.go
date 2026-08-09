@@ -140,6 +140,28 @@ var Registry = []Vendor{
 		WebsiteURL:   "https://openrouter.ai/keys",
 	},
 	{
+		ID:             "xai",
+		DisplayName:    "xAI (Grok)",
+		Protocol:       "openai",
+		API:            "openai-completions",
+		DefaultBaseURL: "https://api.x.ai",
+		DefaultModel:   "grok-4.5",
+		// All current Grok chat models accept image input (jpg/jpeg, png, up to
+		// 20 MiB) — verified against xAI's model catalogue (docs.x.ai, 2026-07-09).
+		// grok-4.20-multi-agent is excluded: it targets xAI's multi-agent
+		// orchestration API, not a plain OpenAI-compatible chat client.
+		Models: []VendorModel{
+			{ID: "grok-4.5", Vision: true},
+			{ID: "grok-4.20", Vision: true},
+			{ID: "grok-4.20-non-reasoning", Vision: true},
+			{ID: "grok-4.3", Vision: true},
+			{ID: "grok-build-0.1", Vision: true},
+		},
+		LiteModel:    "grok-4.20-non-reasoning",
+		APIKeyEnvVar: "XAI_API_KEY",
+		WebsiteURL:   "https://console.x.ai/",
+	},
+	{
 		ID:             "deepseek",
 		DisplayName:    "DeepSeek",
 		Protocol:       "openai",

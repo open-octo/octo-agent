@@ -126,6 +126,23 @@ func TestContextWindow(t *testing.T) {
 	if got := contextWindow("x-ai/grok-4.5"); got != 500_000 {
 		t.Errorf("grok-4.5 window = %d, want 500000", got)
 	}
+	if got := contextWindow("grok-4.20"); got != 1_000_000 {
+		t.Errorf("grok-4.20 window = %d, want 1000000", got)
+	}
+	if got := contextWindow("grok-4.20-non-reasoning"); got != 1_000_000 {
+		t.Errorf("grok-4.20-non-reasoning window = %d, want 1000000", got)
+	}
+	if got := contextWindow("grok-4.3"); got != 1_000_000 {
+		t.Errorf("grok-4.3 window = %d, want 1000000", got)
+	}
+	// The OpenRouter-prefixed id resolves by substring and shares the model's
+	// real window — regression pin for the grok-4 (256k) → grok-4.3 (1M) change.
+	if got := contextWindow("x-ai/grok-4.3"); got != 1_000_000 {
+		t.Errorf("x-ai/grok-4.3 window = %d, want 1000000", got)
+	}
+	if got := contextWindow("grok-build-0.1"); got != 256_000 {
+		t.Errorf("grok-build-0.1 window = %d, want 256000", got)
+	}
 	if got := contextWindow("xiaomi/mimo-v2.5"); got != 1_000_000 {
 		t.Errorf("mimo-v2.5 window = %d, want 1000000", got)
 	}
