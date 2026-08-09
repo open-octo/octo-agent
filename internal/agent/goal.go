@@ -188,10 +188,17 @@ func (s *Session) startGoalLocked(objective string, tokenBudget int64) Goal {
 	// not billed to the fresh goal. Cleared unconsumed at the next turn start.
 	s.goalSkipNextTokenDelta = true
 	records := []sessionRecord{{Type: "goal", Goal: s.Goal}}
-	if s.Title == "" || s.Title == "*Octo Agent" {
+	if IsAutoNamePlaceholder(s.Title) {
 		// Seed the title from the objective (the Codex thread-preview
 		// behavior). It needs its own record — a "goal" record doesn't carry
 		// the title, so without one the seed would vanish on reload.
+		//
+		// IsAutoNamePlaceholder is THE placeholder predicate: hand-rolling the
+		// check here missed the web frontend's "Session N" name, so a session
+		// started by "/goal <objective>" from the browser went unnamed — and
+		// the ordinary title path can't rescue it either, since the turn that
+		// kick starts carries only the hidden <goal_context> prompt, which
+		// FirstUserSnippet strips to nothing.
 		s.Title = goalTitle(objective)
 		records = append(records, sessionRecord{Type: "title", Title: s.Title})
 	}

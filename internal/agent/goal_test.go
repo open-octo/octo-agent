@@ -50,6 +50,33 @@ func TestCreateGoal(t *testing.T) {
 	}
 }
 
+// TestCreateGoal_SeedsTitleOverEveryPlaceholder: the objective must name a
+// session whatever placeholder it was born with. The web frontend's "Session
+// N" was the gap — the seed check was hand-rolled ("" or "*Octo Agent") and
+// missed it, so a browser session started by "/goal <objective>" stayed
+// unnamed. The ordinary title path can't cover for it: the turn that command
+// kicks off carries only the hidden <goal_context> prompt, which strips to
+// nothing. A title the user chose is never overwritten.
+func TestCreateGoal_SeedsTitleOverEveryPlaceholder(t *testing.T) {
+	for _, tc := range []struct{ title, want string }{
+		{"", "ship the release"},
+		{"*Octo Agent", "ship the release"},
+		{"Session 7", "ship the release"},
+		{"my own name", "my own name"},
+	} {
+		t.Run(tc.title, func(t *testing.T) {
+			s := NewSession("m", "")
+			s.Title = tc.title
+			if _, err := s.CreateGoal("ship the release", 0); err != nil {
+				t.Fatalf("CreateGoal: %v", err)
+			}
+			if s.Title != tc.want {
+				t.Errorf("title = %q, want %q", s.Title, tc.want)
+			}
+		})
+	}
+}
+
 func TestCreateGoal_RejectsBadInput(t *testing.T) {
 	s := NewSession("m", "")
 	if _, err := s.CreateGoal("   ", 0); err == nil {

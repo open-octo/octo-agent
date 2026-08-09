@@ -3037,8 +3037,15 @@ func (s *Server) handleChannelGoal(ad channel.Adapter, ev channel.InboundEvent, 
 		ad.SendText(ev.ChatID, "Goals are unavailable for this session.", ev.MessageID)
 		return
 	}
+	titleBefore := store.Title
 	reply, start := agent.GoalCommand(store, args)
 	ad.SendText(ev.ChatID, reply, ev.MessageID)
+	// The objective seeds a placeholder-named session's title (startGoalLocked).
+	// IM has no session list of its own, but the web sidebar lists IM sessions
+	// too — tell it, the same as wsGoalCommand does.
+	if store.Title != titleBefore {
+		s.broadcastSessionRenamed(store.ID, store.Title)
+	}
 	if start == agent.GoalStartNone {
 		return
 	}

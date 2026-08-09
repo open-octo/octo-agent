@@ -152,12 +152,21 @@ func (s *Server) wsGoalCommand(sessionID, args string) {
 		s.broadcastGoalNotice(sessionID, "command", fmt.Sprintf("/goal: %v", err), "error")
 		return
 	}
+	titleBefore := sess.Title
 	reply, start := agent.GoalCommand(sess, args)
 	level := "info"
 	if len(reply) > 6 && (reply[:6] == "/goal:" || reply[:6] == "/goal ") {
 		level = "error"
 	}
 	s.broadcastGoalNotice(sessionID, "command", reply, level)
+	// Creating or replacing a goal seeds a placeholder-named session's title
+	// from the objective (startGoalLocked, which also persists it). Tell the
+	// sidebar: without this the rename would only surface on the next refetch,
+	// so a session started by "/goal …" would look unnamed for as long as the
+	// tab stayed open.
+	if sess.Title != titleBefore {
+		s.broadcastSessionRenamed(sessionID, sess.Title)
+	}
 	if g, ok := sess.GoalSnapshot(); ok {
 		s.broadcastGoalUpdated(sessionID, g)
 	} else {
@@ -235,6 +244,7 @@ func (s *Server) handleUpdateSessionGoal(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	titleBefore := sess.Title
 	var g agent.Goal
 	var err error
 	switch {
@@ -265,6 +275,10 @@ func (s *Server) handleUpdateSessionGoal(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.broadcastGoalUpdated(sess.ID, g)
+	// Same objective-seeded rename as the composer's /goal (see wsGoalCommand).
+	if sess.Title != titleBefore {
+		s.broadcastSessionRenamed(sess.ID, sess.Title)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"goal": g})
 }
 

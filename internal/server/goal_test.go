@@ -265,6 +265,39 @@ func waitEventType(t *testing.T, conn *wsConn, typ string) map[string]any {
 	return nil
 }
 
+// TestWSGoalCommand_NamesPlaceholderSessionFromObjective is the regression
+// guard for a browser session started by "/goal <objective>" staying unnamed:
+// the objective seeds the title, the sidebar is told live, and the seed
+// survives the reload. Web sessions are born as "Session N", which the goal
+// seed's hand-rolled placeholder check used to miss — and nothing else could
+// name them, since the turn the command kicks off carries only the hidden
+// continuation prompt.
+func TestWSGoalCommand_NamesPlaceholderSessionFromObjective(t *testing.T) {
+	srv, sess := goalTestServer(t)
+	sess.Title = "Session 4" // the web frontend's auto-assigned name
+	if err := sess.Save(); err != nil {
+		t.Fatal(err)
+	}
+	// Registered but not subscribed: session_renamed is a global broadcast.
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.wsHub.register <- conn
+	srv.sender = &goalRoundSender{}
+
+	srv.wsGoalCommand(sess.ID, "ship the 1.16 release")
+	waitGoalTurnIdle(t, srv, sess.ID)
+
+	if ev := waitEventType(t, conn, "session_renamed"); ev["name"] != "ship the 1.16 release" {
+		t.Errorf("rename name = %v, want the objective", ev["name"])
+	}
+	loaded, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Title != "ship the 1.16 release" {
+		t.Errorf("persisted Title = %q, want the objective", loaded.Title)
+	}
+}
+
 // The web's answer to the TUI's "● Goal …" scrollback: the command's reply
 // lands in the transcript, and the continuation turn it kicks announces itself
 // — without that line the turn's output would read as unprompted, since the
