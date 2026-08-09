@@ -376,7 +376,7 @@ func (m *Manager) CommandRouter(ev InboundEvent, agentID string) string {
 	case "/model":
 		return m.cmdModel(ev, strings.Join(args, " "), agentID)
 	case "/help":
-		return "Available: /bind [--force] <number|id>, /unbind, /list, /clear, /new, /compact, /reload, /model [name|default], /loop [interval] <task>, /stop, /status, /help"
+		return "Available: /bind [--force] <number|id>, /unbind, /list, /clear, /new, /compact, /reload, /goal, /model [name|default], /loop [interval] <task>, /stop, /status, /help"
 	default:
 		return fmt.Sprintf("Unknown command: %s", cmd)
 	}

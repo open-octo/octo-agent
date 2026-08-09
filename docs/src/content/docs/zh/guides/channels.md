@@ -30,4 +30,5 @@ octo serve
   octo 也可以用 `send_file` 工具把文件发回来。
 - 交互式权限确认会以一条聊天消息的形式出现——你的下一条回复就是答案，不需要另外找一个审批入口。
 
-下一步：完整能力面见 [HTTP API 参考](/docs/zh/reference/http-api/)。
+下一步：把渠道和[目标](/docs/zh/guides/goals/)搭在一起，处理那些在消息之间还要继续跑的任务；完整
+能力面见 [HTTP API 参考](/docs/zh/reference/http-api/)。

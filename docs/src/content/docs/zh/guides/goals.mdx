@@ -27,16 +27,14 @@ import { Badge } from '@astrojs/starlight/components';
 ——状态变化同样会留一行：`Goal complete` 带最终用量，以及 `Goal blocked`、`Goal budget reached`、
 `Goal usage limited`。驱动续跑的那段 prompt 是隐藏的，所以这行字就是你判断「这段输出是目标自己跑
 出来的，不是我让它做的」的依据。TUI 打在滚动区，Web UI 内联渲染在会话里；`/goal` 命令本身的回复
-也走同一个位置。
+也走同一个位置。IM 渠道刻意安静一些——聊天里只会收到 `/goal` 的回复，以及目标结束或卡住时的通知，
+不会每续跑一轮就报一行。
 
-:::note[`/goal` 只在 TUI 和 Web 上有]
-IM 渠道没有 `/goal` 命令：它是一条消息跑一轮，中间没有空闲续跑的循环去推进目标。绑在聊天上的会话
-依然带着模型或者别的端设下的目标——目标状态挂在会话本身上，不挂在具体传输方式上——模型也照样能在
-对话过程中用目标工具创建或更新它。
-
-在有这个命令的两个端之间，只有 `edit` 行为不同。TUI 里不带文本的 `/goal edit` 会把当前目标的描述
-预填进输入框，等你下次按 Enter 才真正提交，`/goal edit <文本>` 这种直接带文本的写法会被拒绝——它
-只支持预填。Web UI 里 `/goal edit <文本>` 一步到位直接改。
+:::note[`/goal edit` 各端行为不同]
+TUI 里不带文本的 `/goal edit` 会把当前目标的描述预填进输入框，等你下次按 Enter 才真正提交，
+`/goal edit <文本>` 这种直接带文本的写法会被拒绝——它只支持预填。Web UI 和 IM 渠道里
+`/goal edit <文本>` 一步到位直接改。其余子命令（`pause`/`resume`/`clear`/`replace`）在各端行为
+一致，因为目标状态挂在会话本身上，不挂在具体传输方式上。
 :::
 
 ## 关掉这个功能
@@ -51,4 +49,5 @@ goal:
 
 关闭之后，`/goal` 会报告自己不可用，而不是悄悄什么都不做。
 
-下一步：如果你要的是一条反复执行的 prompt 而不是单个持久目标，见 [`/loop`](/docs/zh/guides/loop/)。
+下一步：目标和[渠道](/docs/zh/guides/channels/)可以配合——在手机上起一个，让它自己跑，回头再来看。
+如果你要的是一条反复执行的 prompt 而不是单个持久目标，见 [`/loop`](/docs/zh/guides/loop/)。

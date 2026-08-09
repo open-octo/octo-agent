@@ -34,4 +34,5 @@ a **Send test message** action per platform before you rely on it.
 - Interactive permission prompts arrive as a chat message — your next reply answers it, no separate
   approval channel to check.
 
-Next: read the full surface in the [HTTP API reference](/docs/reference/http-api/).
+Next: pair channels with [goals](/docs/guides/goals/) for tasks that keep running between messages,
+or read the full surface in the [HTTP API reference](/docs/reference/http-api/).

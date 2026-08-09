@@ -2937,6 +2937,14 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 		s.handleChannelCompact(ad, ev, profile.ID)
 		return true
 	}
+	// /goal is handled here rather than in CommandRouter for the same reason
+	// /compact is: a command that leaves the goal ready to be pursued must also
+	// start its continuation turn, and the turn machinery lives on the server,
+	// not in the channel manager.
+	if cmd == "/goal" {
+		s.handleChannelGoal(ad, ev, profile.ID, strings.TrimSpace(text[len(strings.Fields(text)[0]):]))
+		return true
+	}
 	// Reserved commands must not be intercepted by a skill (matching
 	// the TUI reservedReplCommands pattern).
 	switch cmd {
@@ -3006,6 +3014,45 @@ func (s *Server) handleChannelCompact(ad channel.Adapter, ev channel.InboundEven
 			ad.SendText(ev.ChatID, fmt.Sprintf("Compacted — folded %d message(s).", stats.FoldedMsgs), ev.MessageID)
 		}
 	}()
+}
+
+// handleChannelGoal applies the shared "/goal …" grammar to the chat's
+// persisted session — the IM counterpart of wsGoalCommand. Goal state lives on
+// the backing store, so every transport bound to the same session sees it.
+//
+// Mutations are safe against a running turn: the session's goal methods are
+// mutex-guarded and the turn's accounting picks the change up at its next tick.
+func (s *Server) handleChannelGoal(ad channel.Adapter, ev channel.InboundEvent, agentID, args string) {
+	if !s.goalsEnabled.Load() {
+		ad.SendText(ev.ChatID, "Goals are disabled (goal.enabled).", ev.MessageID)
+		return
+	}
+	sess := s.channelMgr.GetSession(ev, agentID)
+	if sess == nil {
+		ad.SendText(ev.ChatID, "No active session. Send a message first, or /bind one.", ev.MessageID)
+		return
+	}
+	store := sess.GoalStore()
+	if store == nil {
+		ad.SendText(ev.ChatID, "Goals are unavailable for this session.", ev.MessageID)
+		return
+	}
+	reply, start := agent.GoalCommand(store, args)
+	ad.SendText(ev.ChatID, reply, ev.MessageID)
+	if start == agent.GoalStartNone {
+		return
+	}
+	// A goal left ready to be pursued starts working now rather than waiting
+	// for the user's next message — the web's kickIdleGoalTurn, and the TUI's
+	// startGoalNow, in IM form. The prompt rides the Inbox because that is the
+	// only way into a channel turn; runChannelIdleTurn serialises against a
+	// running turn, whose own chain would have picked the goal up anyway.
+	prompt, ok := store.GoalContinuation()
+	if !ok {
+		return
+	}
+	sess.Agent.Inbox.Enqueue(prompt)
+	go s.runChannelIdleTurn(context.Background(), sess, ad, ev)
 }
 
 // handleChannelMessage runs an agent turn for a channel inbound event and

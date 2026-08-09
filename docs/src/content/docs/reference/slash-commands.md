@@ -41,7 +41,7 @@ plain text (model/skill/workflow switching in the Web UI happens through dedicat
 |---|---|
 | `/clear` | Wipes the session's messages, saves, drops the cached agent and memory latch, broadcasts a history reload |
 | `/compact` | Compacts in the background (registered so a stop/interrupt can cancel it) |
-| `/goal [...]` | `/goal edit <text>` works inline here, unlike the TUI's prefill |
+| `/goal [...]` | Same shared implementation IM uses — `/goal edit <text>` works inline here |
 
 The composer's own `/` autocomplete is a picker for skills, workflows, and MCP tools/servers — not
 a fixed command list. Selecting an entry just fills `/<name> ` into the box, which then triggers the
@@ -59,6 +59,7 @@ IM sessions can be re-bound between chats, so this surface has commands the othe
 | `/clear` | `/clear` | Wipes history but keeps the current binding |
 | `/compact` | `/compact` | Compacts now, out-of-band so it doesn't block the chat |
 | `/model` | `/model [name\|default]` | No argument lists the configured models; `/model <name>` binds the session to that model, `/model default` unbinds back to the default. The binding persists and is the same one the Web UI's model picker shows |
+| `/goal` | `/goal [...]` | Same shared implementation as Web — `/goal edit <text>` works inline. Setting or resuming a goal starts pursuing it right away, without waiting for your next message |
 | `/stop` | `/stop` | Interrupts the in-flight turn |
 | `/status` | `/status` | Reports how long this chat has been bound, plus input/output token counts |
 | `/list` | `/list` | Lists up to 20 saved sessions, numbered for `/bind` |
@@ -83,7 +84,7 @@ injector state, since those are scoped to the conversation that's being replaced
 | `/thinking` | ✓ | | |
 | `/compact` | ✓ | ✓ | ✓ |
 | `/clear` | ✓ | ✓ | ✓ |
-| `/goal ...` | ✓ | ✓ | |
+| `/goal ...` | ✓ | ✓ | ✓ |
 | `/skills` `/mcp` `/workflows` `/memory` `/save` `/sessions` `/init` | ✓ | | |
 | `/exit` `/quit` | ✓ | | |
 | `/<skill-name>` | ✓ | ✓ (via picker) | |

@@ -666,3 +666,108 @@ func TestGoalWorkPending_IgnoresInteractiveProcess(t *testing.T) {
 		t.Error("an interactive process must not hold the continuation loop back")
 	}
 }
+
+// goalChatEv builds an IM event on a chat id of its own. The chat key decides
+// the session id, so sharing evFor's "c1" with the rest of the channel tests
+// lets a turn goroutine that outlives its test persist that session into this
+// test's fresh HOME — and a goal with it.
+func goalChatEv(chatID, text string) channel.InboundEvent {
+	return channel.InboundEvent{Platform: "fake", ChatID: chatID, UserID: "u1", MessageID: "m1", Text: text}
+}
+
+// goalContextTurns counts the hidden continuation prompts in a session's
+// history — the marker that the goal was actually pursued, not just recorded.
+func goalContextTurns(a *agent.Agent) int {
+	n := 0
+	for _, m := range a.History.Snapshot() {
+		if m.Role != agent.RoleUser {
+			continue
+		}
+		text := m.Content
+		for _, b := range m.Blocks {
+			if b.Type == "text" {
+				text += b.Text
+			}
+		}
+		if strings.Contains(text, "<goal_context>") {
+			n++
+		}
+	}
+	return n
+}
+
+// /goal from an IM chat sets the goal AND starts pursuing it, the way the web
+// composer does. Without the kick the goal would sit untouched until the user
+// happened to send an unrelated message.
+func TestChannelGoalCommand_SetsAndStartsTheGoal(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	srv := chanServer(t)
+	srv.goalsEnabled.Store(true)
+	ad := &fullFakeAdapter{}
+
+	profile := agentprofile.DefaultProfile()
+	sess := srv.channelMgr.GetOrCreateSession(goalChatEv("goal-start", "seed"), profile)
+
+	if !srv.handleChannelCommand(ad, goalChatEv("goal-start", "/goal ship the release"), profile) {
+		t.Fatal("/goal was not handled as a command")
+	}
+	g, ok := sess.GoalStore().GoalSnapshot()
+	if !ok || g.Objective != "ship the release" {
+		t.Fatalf("goal = %+v (exists=%v), want the objective recorded", g, ok)
+	}
+	// The kick runs in its own goroutine; the zero-usage stub sender means the
+	// zero-progress guard stops the chain after the first hidden turn.
+	waitFor(t, func() bool { return goalContextTurns(sess.Agent) > 0 })
+}
+
+// A command that only reports or parks the goal must not start a turn.
+func TestChannelGoalCommand_PauseDoesNotStartATurn(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	srv := chanServer(t)
+	srv.goalsEnabled.Store(true)
+	ad := &fullFakeAdapter{}
+
+	profile := agentprofile.DefaultProfile()
+	sess := srv.channelMgr.GetOrCreateSession(goalChatEv("goal-pause", "seed"), profile)
+	if _, err := sess.GoalStore().CreateGoal("keep going", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	srv.handleChannelCommand(ad, goalChatEv("goal-pause", "/goal pause"), profile)
+	if g, _ := sess.GoalStore().GoalSnapshot(); g.Status != agent.GoalPaused {
+		t.Fatalf("status = %q, want paused", g.Status)
+	}
+	time.Sleep(50 * time.Millisecond) // give a wrongly-kicked turn time to show up
+	if n := goalContextTurns(sess.Agent); n != 0 {
+		t.Errorf("continuation prompts = %d, want 0 — /goal pause must not start a turn", n)
+	}
+}
+
+// Goals disabled in config means the IM command is refused too, not just the
+// REST and TUI surfaces — otherwise a goal set through chat would persist to
+// the shared session store and spring to life on the next web/TUI touch.
+func TestChannelGoalCommand_RespectsGoalsDisabled(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	srv := chanServer(t)
+	srv.goalsEnabled.Store(false)
+	ad := &fullFakeAdapter{}
+
+	profile := agentprofile.DefaultProfile()
+	sess := srv.channelMgr.GetOrCreateSession(goalChatEv("goal-disabled", "seed"), profile)
+
+	if !srv.handleChannelCommand(ad, goalChatEv("goal-disabled", "/goal ship the release"), profile) {
+		t.Fatal("/goal was not handled as a command")
+	}
+	if _, ok := sess.GoalStore().GoalSnapshot(); ok {
+		t.Error("a goal was created while goals are disabled")
+	}
+	if texts := ad.texts(); len(texts) == 0 || !strings.Contains(texts[0], "disabled") {
+		t.Errorf("reply = %v, want it to say goals are disabled", texts)
+	}
+}
