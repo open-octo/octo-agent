@@ -16,6 +16,7 @@ import { ws } from '../lib/ws'
 import { tr } from '../lib/i18n'
 import * as api from '../lib/api'
 import { observeArtifact, resetArtifacts } from '../lib/artifacts'
+import { inlineSlashCommand } from '../lib/inlineSlash'
 import {
   chatMessages,
   chatStreaming,
@@ -91,6 +92,20 @@ export function loadMobileHistory(sid: string): Promise<void> {
 export function sendMobile(sid: string, text: string, files?: unknown[]) {
   const t = text.trim()
   if (!t) return
+  // Server-inline commands never enter history, so no history_user_message
+  // comes back to reconcile the echo — it would spin forever. Mobile has no
+  // slash menu, so these only arrive typed by hand, but /reload and /goal do
+  // reach here. /compact keeps the optimistic busy flag: it is a long
+  // server-side job that closes with its own session_update idle, which the
+  // handler below already listens for. What the others report is the server's
+  // own doing (a history_reload, a toast); goal notices have no mobile surface
+  // yet, which is a separate gap, not something a spinner should paper over.
+  const inline = inlineSlashCommand(t, !!(files && files.length))
+  if (inline) {
+    if (inline === 'compact') chatStreaming.update(s => ({ ...s, [sid]: true }))
+    ws.sendMessage(sid, t, files)
+    return
+  }
   addChatMsg(sid, {
     id: uid('u'), type: 'user', content: t, createdAt: Date.now(),
     streaming: false, pending: true, tools: [], todos: [], images: [],
