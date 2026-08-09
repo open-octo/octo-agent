@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/logfile"
 	"github.com/open-octo/octo-agent/internal/serveproc"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // daemonReadyTimeout bounds how long startDaemon waits for the spawned server
@@ -162,6 +163,21 @@ func waitDaemonReady(addr string, pid int, timeout time.Duration) bool {
 
 // stopDaemon reads the PID file and terminates the daemon process.
 func stopDaemon(stdout, stderr io.Writer) int {
+	// A shell spawned by a guarded octo server's terminal tool carries
+	// OCTO_SERVER_PID (see tools.ServerGuardEnvActive). Stopping the daemon
+	// from there would kill the very server hosting the agent's session
+	// mid-turn — the textual guard in shellCommand already refuses the
+	// literal `octo serve stop` spelling; this catches the indirections it
+	// cannot see (scripts, variable expansion, copied binaries). Agents must
+	// restart via the restart_server tool; the user can stop the daemon from
+	// their own terminal, which never carries the guard variable.
+	if tools.ServerGuardEnvActive() {
+		fmt.Fprintf(stderr, "octo serve: refusing to stop the daemon from a shell spawned by the "+
+			"octo server hosting this session — stopping it would kill that server mid-turn and "+
+			"drop the session. Use the restart_server tool for a graceful restart, or run "+
+			"`octo serve stop` from your own terminal.\n")
+		return 1
+	}
 	pidFile, err := daemonPidFile()
 	if err != nil {
 		fmt.Fprintf(stderr, "octo serve: %v\n", err)

@@ -93,10 +93,31 @@ func isolatePidFile(t *testing.T) {
 	t.Cleanup(func() { daemonPidFile = orig })
 }
 
+// TestServeStopRefusedInsideServer pins that `octo serve stop` refuses when
+// invoked from a shell spawned by a guarded octo server: OCTO_SERVER_PID is
+// only ever set by the terminal tool's guard env (scrubGuardEnv keeps it out
+// of plain CLI usage), so its presence means an agent is trying to stop the
+// daemon hosting its own session. The refusal fires before any pid-file
+// access, and the agent is pointed at the restart_server tool instead.
+func TestServeStopRefusedInsideServer(t *testing.T) {
+	t.Setenv("OCTO_SERVER_PID", "12345")
+	var stdout, stderr bytes.Buffer
+	if code := stopDaemon(&stdout, &stderr); code != 1 {
+		t.Fatalf("exit = %d, want 1 (refused)", code)
+	}
+	if !strings.Contains(stderr.String(), "restart_server") {
+		t.Errorf("want refusal pointing at restart_server, got:\n%s", stderr.String())
+	}
+}
+
 // TestServeStopSubcommand pins the #1842 fix: `octo serve stop` is accepted
 // as a positional subcommand equivalent to --stop. With no daemon running it
 // reaches stopDaemon and reports that, rather than the positional-arg error.
 func TestServeStopSubcommand(t *testing.T) {
+	// Clear any inherited guard env: when `go test` itself runs from a
+	// guarded server's terminal shell, OCTO_SERVER_PID would otherwise make
+	// stopDaemon take the refusal branch instead of reaching the pid file.
+	t.Setenv("OCTO_SERVER_PID", "")
 	isolatePidFile(t)
 	var stdout, stderr bytes.Buffer
 	code := runServe([]string{"stop"}, strings.NewReader(""), &stdout, &stderr)

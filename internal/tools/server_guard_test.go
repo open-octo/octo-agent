@@ -68,6 +68,61 @@ func TestGuardServerSelfKill_Allows(t *testing.T) {
 	}
 }
 
+// TestGuardServerSelfKill_BlocksServeStop pins the `octo serve stop` vector:
+// the daemon is terminated from inside the nested octo process, so no
+// kill-family command ever appears for the other patterns (or the runtime
+// shadows) to catch. stopDaemon's own ServerGuardEnvActive refusal is the
+// backstop for spellings this textual pass cannot see.
+func TestGuardServerSelfKill_BlocksServeStop(t *testing.T) {
+	SetServerGuard(true)
+	defer SetServerGuard(false)
+
+	blocked := []string{
+		"octo serve stop",
+		"octo serve --stop",
+		"octo serve -stop", // Go flag package single-dash form
+		"./octo serve stop",
+		"/usr/local/bin/octo serve stop",
+		"sh -c 'octo serve stop'",    // nested shell: still literal in the text
+		"cd /tmp && octo serve stop", // later command segment
+	}
+	for _, c := range blocked {
+		if err := guardServerSelfKill(c); err == nil {
+			t.Errorf("want %q blocked, got nil", c)
+		}
+	}
+
+	allowed := []string{
+		"octo serve status",
+		"octo serve -d",
+		"octo serve --addr 127.0.0.1:8088",
+		"octo serve",
+		"octo status",
+		"octop serve stop",               // not the bare octo binary token
+		"octo serve status; echo stop",   // `;` ends the segment: stop is unrelated
+		"systemctl stop octo-serve",      // stop precedes octo; a different mechanism
+		"echo restarting the octo serve", // no stop at all
+	}
+	for _, c := range allowed {
+		if err := guardServerSelfKill(c); err != nil {
+			t.Errorf("want %q allowed, got %v", c, err)
+		}
+	}
+}
+
+// TestServerGuardEnvActive pins the env contract stopDaemon relies on: only
+// a non-empty OCTO_SERVER_PID marks a shell spawned by a guarded server.
+func TestServerGuardEnvActive(t *testing.T) {
+	t.Setenv("OCTO_SERVER_PID", "")
+	if ServerGuardEnvActive() {
+		t.Error("empty OCTO_SERVER_PID must read as inactive")
+	}
+	t.Setenv("OCTO_SERVER_PID", "12345")
+	if !ServerGuardEnvActive() {
+		t.Error("set OCTO_SERVER_PID must read as active")
+	}
+}
+
 // TestGuardServerSelfKill_PPID1NotProtected guards against the false positive
 // where a server reparented to init/launchd (PPID 1) blocked any command whose
 // text contained the digit "1". With PPID 1 excluded, only the real self PID is

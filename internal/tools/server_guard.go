@@ -29,6 +29,15 @@ var (
 // server turns it on at start and off at shutdown.
 func SetServerGuard(on bool) { serverGuardOn.Store(on) }
 
+// ServerGuardEnvActive reports whether the current process was spawned from
+// a guarded octo server's terminal tool — i.e. guardEnv armed it with
+// OCTO_SERVER_PID (scrubGuardEnv guarantees the variable never leaks into
+// plain CLI/TUI usage). cmd/octo's stopDaemon uses it to refuse
+// `octo serve stop` issued by an agent-hosted shell: stopping the daemon
+// from there kills the very server hosting the session, which must go
+// through the restart_server tool instead.
+func ServerGuardEnvActive() bool { return os.Getenv("OCTO_SERVER_PID") != "" }
+
 var (
 	// pkill/killall … octo — signalling octo processes by name. `\bocto\b`
 	// matches "octo", "octo serve", and "octo-agent" but not unrelated names
@@ -55,13 +64,21 @@ var (
 	// whitespace requirement keeps digits inside hyphenated words (a script
 	// named kill-server-1234) from matching.
 	reNegNum = regexp.MustCompile(`(?:^|\s)-(\d+)\b`)
+	// `octo serve stop` / `octo serve --stop` — stopping the daemon through
+	// the CLI instead of a kill command. The nested octo process reads the
+	// pid file and terminates the daemon itself, so the kill shadows below
+	// never see it. `\bocto\b` matches the binary however it is invoked
+	// (bare, ./octo, absolute path, quoted inside sh -c '…') but not glued
+	// inside another word ("octop"); `serve` and then `stop` must follow
+	// within the same command segment.
+	reServeStop = regexp.MustCompile(`(?i)\bocto\b[^|;&\n]*\bserve\b[^|;&\n]*\bstop\b`)
 )
 
 // guardServerSelfKill returns a non-nil error when command, run inside an octo
 // server process, would terminate that server (or its supervisor). It is the
 // first of two layers: a best-effort TEXTUAL guard over the common vectors —
-// `pkill/killall octo` and `kill <server-pid>` — that also covers the --sandbox
-// branch where no wrapper is injected. The second layer is the runtime shadow
+// `pkill/killall octo`, `kill <server-pid>`, and `octo serve stop` — that also
+// covers the --sandbox branch where no wrapper is injected. The second layer is the runtime shadow
 // (posixKillGuardWrapper / windowsKillGuardWrapper), which sees target pids
 // after shell expansion and so catches the indirections (`kill $P`,
 // `pkill -f serve`) this textual pass cannot.
@@ -70,6 +87,14 @@ func guardServerSelfKill(command string) error {
 		return nil
 	}
 	if reKillByName.MatchString(command) {
+		return errServerSelfKill()
+	}
+	// `octo serve stop` terminates the daemon from inside the nested octo
+	// process — no kill-family command ever appears, so it needs its own
+	// pattern. stopDaemon independently refuses when it detects it was
+	// spawned by a guarded server (ServerGuardEnvActive), which covers the
+	// indirections (scripts, variable expansion) this textual pass cannot.
+	if reServeStop.MatchString(command) {
 		return errServerSelfKill()
 	}
 	// `kill $(pgrep octo)` / `kill $(pidof octo)` — resolve-then-kill by name.
