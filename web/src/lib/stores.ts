@@ -162,7 +162,7 @@ export const chatWorkflows = writable<Record<string, WorkflowRunState[]>>({})
 // old hand-written UI's Sessions.setPendingMessage → ws "subscribed" flush, so
 // the agentic-first panels invoke a skill in a fresh chat instead of opening a
 // blank session or popping a form.
-export const pendingPrompt = writable<{ sessionId: string; content: string } | null>(null)
+export const pendingPrompt = writable<{ sessionId: string; content: string; files?: any[] } | null>(null)
 
 // Permission/question modals
 // Keyed by sessionId so a second session's confirmation doesn't clobber a

@@ -58,7 +58,7 @@
   import { observeArtifact, resetArtifacts } from '../lib/artifacts'
   import { renderMarkdown, escapeHtml, setupCopyButtons } from '../lib/markdown'
   import { t, tr, pickLocalized } from '../lib/i18n'
-  import { insertPendingSend } from '../lib/pendingSendOrder'
+  import { insertPendingSend, takeConfirmedSend } from '../lib/pendingSendOrder'
   import { inlineSlashCommand } from '../lib/inlineSlash'
   import { exportModeStore, selectedMessagesStore } from '../lib/exportStore'
   import { filenameStem } from '../lib/filename'
@@ -486,7 +486,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       const pend = get(pendingPrompt)
       if (pend && pend.sessionId === sid) {
         pendingPrompt.set(null)
-        send(pend.content)
+        send(pend.content, pend.files)
       }
     }))
 
@@ -843,8 +843,15 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       const createdAt = (ev as any).created_at ?? Date.now()
       const images = (ev as any).images ?? []
       const queue = pendingSends.get(sid)
-      const meta = queue?.shift()
+      // Entries ahead of the confirmed one never got a confirmation of their
+      // own. Retiring them here — instead of letting the queue stay short —
+      // keeps one lost confirmation from misreading every send after it.
+      const { meta, dropped } = takeConfirmedSend(queue ?? [], content)
       if (queue && queue.length === 0) pendingSends.delete(sid)
+      if (dropped.length) {
+        const stale = new Set(dropped.map(d => d.pendingId))
+        pendingSteers = { ...pendingSteers, [sid]: pendingSteers[sid]?.filter(s => !stale.has(s.pendingId)) ?? [] }
+      }
       // Trust the FIFO queue to decide whether this confirmation belongs to a
       // steer. If the queue is empty (e.g. page refresh), any pendingSteers are
       // orphaned UI state from before the refresh; don't guess by content and
@@ -1024,9 +1031,13 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       chatProgress.update(p => ({ ...p, [sid]: null }))
       // A turn that ends without an assistant_message (interrupt / error) would
       // otherwise leave the live bubble's streaming caret blinking forever, so
-      // clear any lingering per-message streaming flags here.
+      // clear any lingering per-message streaming flags here. Same for a user
+      // bubble still marked pending: its confirmation is broadcast at turn
+      // start, so by the time the turn ends it either arrived or never will —
+      // a spinner that outlives its own turn is only ever a lie.
       chatMessages.update(m => {
-        const msgs = (m[sid] || []).map((x: any) => (x.streaming ? { ...x, streaming: false } : x))
+        const msgs = (m[sid] || []).map((x: any) =>
+          x.streaming || x.pending ? { ...x, streaming: false, pending: false } : x)
         return { ...m, [sid]: msgs }
       })
       // Close open tool groups AND mark any still-spinning tools done — a
@@ -1952,13 +1963,15 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     }
   }
 
-  // ensureActiveSession returns the active session id, creating one first if
-  // none is active — e.g. right after deleting the session that was open.
+  // ensureActiveSession returns the session to send into, creating one first
+  // if none is active — e.g. right after deleting the session that was open.
   // Mirrors Sidebar's "+" new-session flow so typing into that empty state
-  // and hitting send works instead of silently dropping the message.
-  async function ensureActiveSession(): Promise<string | null> {
+  // and hitting send works instead of silently dropping the message. `created`
+  // reports whether this call is what created it: the caller must not send
+  // straight into a session it just created (see send()).
+  async function ensureActiveSession(): Promise<{ id: string; created: boolean } | null> {
     const existing = get(activeSessionId)
-    if (existing) return existing
+    if (existing) return { id: existing, created: false }
     try {
       // A model picked in the composer before any session existed rides the
       // pendingModel store (composite "<endpoint>::<model>" id — the create
@@ -1970,7 +1983,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       const newSess = created.session ?? created
       sessions.update(ss => [newSess, ...ss])
       activeSessionId.set(newSess.id)
-      return newSess.id
+      return { id: newSess.id, created: true }
     } catch (e: any) {
       showToast(e.message, 'error')
       return null
@@ -1991,8 +2004,21 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
   async function send(text: string, files?: any[], queued = false) {
     if (!text.trim() && !(files && files.length)) return
-    const sid = await ensureActiveSession()
-    if (!sid) return
+    const active = await ensureActiveSession()
+    if (!active) return
+    const sid = active.id
+    if (active.created) {
+      // Nothing is subscribed to a session that existed a millisecond ago: the
+      // effect above only issues the subscribe once this call returns. Sending
+      // now would have the server broadcast this message's confirmation to an
+      // empty room, and a turn's own history_user_message — unlike the steers
+      // that follow it — is not in the replay buffer, so a later subscribe
+      // never sees it. The bubble would spin for good and the queue would sit
+      // one entry ahead for the rest of the tab's life. Hand the text to the
+      // flush-on-subscribe path the panel-opened sessions already use.
+      pendingPrompt.set({ sessionId: sid, content: text, files })
+      return
+    }
     // Steering: a message sent while a turn is already running rides the
     // running turn's Inbox on the server. It must NOT reset the live UI —
     // the sub-agents panel and thinking buffer belong to the turn in flight.

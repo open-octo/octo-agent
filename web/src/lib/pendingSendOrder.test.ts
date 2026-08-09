@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { insertPendingSend, pendingSendInsertIndex } from './pendingSendOrder'
+import { insertPendingSend, pendingSendInsertIndex, takeConfirmedSend } from './pendingSendOrder'
 
 type Entry = { id: string; queued?: boolean }
 
@@ -65,5 +65,54 @@ describe('insertPendingSend', () => {
     const q: Entry[] = [queued('Q1')]
     insertPendingSend(q, steer('S2'))
     expect(ids(q)).toEqual(['S2', 'Q1'])
+  })
+})
+
+describe('takeConfirmedSend', () => {
+  type Send = { pendingId: string; text: string; queued?: boolean }
+  const send = (id: string, text: string): Send => ({ pendingId: id, text })
+
+  it('retires the head when it is the message confirmed', () => {
+    const q = [send('a', 'first'), send('b', 'second')]
+    const { meta, dropped } = takeConfirmedSend(q, 'first')
+    expect(meta?.pendingId).toBe('a')
+    expect(dropped).toEqual([])
+    expect(q.map(m => m.pendingId)).toEqual(['b'])
+  })
+
+  it('ignores whitespace the server trimmed off', () => {
+    const q = [send('a', '  padded  ')]
+    expect(takeConfirmedSend(q, 'padded').meta?.pendingId).toBe('a')
+  })
+
+  // The desync this exists for: 'a' never got a confirmation, so a plain
+  // shift() would hand 'a' back for 'second' and stay one entry ahead forever.
+  it('re-anchors past entries whose confirmation never arrived', () => {
+    const q = [send('a', 'first'), send('b', 'second'), send('c', 'third')]
+    const { meta, dropped } = takeConfirmedSend(q, 'second')
+    expect(meta?.pendingId).toBe('b')
+    expect(dropped.map(m => m.pendingId)).toEqual(['a'])
+    expect(q.map(m => m.pendingId)).toEqual(['c'])
+  })
+
+  it('matches the earliest of two identical messages', () => {
+    const q = [send('a', 'same'), send('b', 'same')]
+    expect(takeConfirmedSend(q, 'same').meta?.pendingId).toBe('a')
+    expect(q.map(m => m.pendingId)).toEqual(['b'])
+  })
+
+  // Content the client can't match (an attachment-only send the server
+  // re-rendered, an older server): behave exactly as the old shift() did.
+  it('falls back to the head when nothing matches', () => {
+    const q = [send('a', 'first'), send('b', 'second')]
+    const { meta, dropped } = takeConfirmedSend(q, 'something else entirely')
+    expect(meta?.pendingId).toBe('a')
+    expect(dropped).toEqual([])
+    expect(q.map(m => m.pendingId)).toEqual(['b'])
+  })
+
+  it('reports nothing for an empty queue', () => {
+    const q: Send[] = []
+    expect(takeConfirmedSend(q, 'anything')).toEqual({ meta: undefined, dropped: [] })
   })
 })
