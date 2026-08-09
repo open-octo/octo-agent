@@ -101,12 +101,26 @@ func isolatePidFile(t *testing.T) {
 // access, and the agent is pointed at the restart_server tool instead.
 func TestServeStopRefusedInsideServer(t *testing.T) {
 	t.Setenv("OCTO_SERVER_PID", "12345")
+	t.Setenv("OCTO_GUARD_MSG", "")
 	var stdout, stderr bytes.Buffer
 	if code := stopDaemon(&stdout, &stderr); code != 1 {
 		t.Fatalf("exit = %d, want 1 (refused)", code)
 	}
 	if !strings.Contains(stderr.String(), "restart_server") {
 		t.Errorf("want refusal pointing at restart_server, got:\n%s", stderr.String())
+	}
+
+	// When the hosting server armed the guard env it also computed the
+	// refusal message for its own build — the refusal must use it verbatim
+	// rather than assuming restart_server exists (desktop has no restarter).
+	t.Setenv("OCTO_GUARD_MSG", "host-computed desktop guidance")
+	stdout.Reset()
+	stderr.Reset()
+	if code := stopDaemon(&stdout, &stderr); code != 1 {
+		t.Fatalf("exit = %d, want 1 (refused)", code)
+	}
+	if !strings.Contains(stderr.String(), "host-computed desktop guidance") {
+		t.Errorf("want the host-computed guard message, got:\n%s", stderr.String())
 	}
 }
 

@@ -85,6 +85,10 @@ func TestGuardServerSelfKill_BlocksServeStop(t *testing.T) {
 		"/usr/local/bin/octo serve stop",
 		"sh -c 'octo serve stop'",    // nested shell: still literal in the text
 		"cd /tmp && octo serve stop", // later command segment
+		// Windows spellings — the pattern must survive .exe suffixes,
+		// backslash paths, and the PowerShell call operator.
+		"octo.exe serve stop",
+		`& "C:\Program Files\octo\octo.exe" serve stop`,
 	}
 	for _, c := range blocked {
 		if err := guardServerSelfKill(c); err == nil {

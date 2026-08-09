@@ -170,12 +170,21 @@ func stopDaemon(stdout, stderr io.Writer) int {
 	// literal `octo serve stop` spelling; this catches the indirections it
 	// cannot see (scripts, variable expansion, copied binaries). Agents must
 	// restart via the restart_server tool; the user can stop the daemon from
-	// their own terminal, which never carries the guard variable.
+	// their own terminal, which never carries the guard variable. Caveat:
+	// the --sandbox terminal branch injects no guard env, so there only the
+	// textual layer applies.
 	if tools.ServerGuardEnvActive() {
+		// Prefer the host-computed message: the hosting server evaluated it
+		// for its own build (restart_server on serve, reload/restart guidance
+		// on desktop), which this nested CLI process cannot determine.
+		msg := tools.ServerGuardEnvMessage()
+		if msg == "" {
+			msg = "stopping it would kill that server mid-turn and drop the session. " +
+				"Use the restart_server tool for a graceful restart, or run " +
+				"`octo serve stop` from your own terminal."
+		}
 		fmt.Fprintf(stderr, "octo serve: refusing to stop the daemon from a shell spawned by the "+
-			"octo server hosting this session — stopping it would kill that server mid-turn and "+
-			"drop the session. Use the restart_server tool for a graceful restart, or run "+
-			"`octo serve stop` from your own terminal.\n")
+			"octo server hosting this session — %s\n", msg)
 		return 1
 	}
 	pidFile, err := daemonPidFile()

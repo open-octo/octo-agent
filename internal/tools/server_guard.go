@@ -38,6 +38,13 @@ func SetServerGuard(on bool) { serverGuardOn.Store(on) }
 // through the restart_server tool instead.
 func ServerGuardEnvActive() bool { return os.Getenv("OCTO_SERVER_PID") != "" }
 
+// ServerGuardEnvMessage returns the refusal text the hosting server computed
+// for its own build when it armed the guard env (OCTO_GUARD_MSG): it points
+// at restart_server on serve and at the reload/restart alternatives on
+// desktop — a distinction a nested CLI process cannot make on its own.
+// Empty outside guarded-server shells.
+func ServerGuardEnvMessage() string { return os.Getenv("OCTO_GUARD_MSG") }
+
 var (
 	// pkill/killall … octo — signalling octo processes by name. `\bocto\b`
 	// matches "octo", "octo serve", and "octo-agent" but not unrelated names
