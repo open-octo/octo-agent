@@ -1177,8 +1177,9 @@ func (s *Server) runAgentTurnLoop(sess *agent.Session, initialContent string, bl
 		// prompt so the chain below starts the follow-up turn. User steers
 		// queued meanwhile take priority — GoalContinuation is only consulted
 		// when the queue is empty, and its own guards (status, zero-progress
-		// suppression) decide whether the loop keeps going.
-		if s.goalsEnabled.Load() && !s.steerPending(sess.ID) {
+		// suppression) decide whether the loop keeps going. Async work the turn
+		// is waiting on holds the loop back too — see goalWorkPending.
+		if s.goalsEnabled.Load() && !s.steerPending(sess.ID) && !s.goalWorkPending(sess.ID) {
 			if prompt, ok := sess.GoalContinuation(); ok {
 				s.enqueueSteer(sess.ID, agent.InboxItem{Text: prompt})
 				// The prompt is hidden (StripSystemReminders drops the

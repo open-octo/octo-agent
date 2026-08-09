@@ -3366,6 +3366,9 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 
 	var toolDefs []agent.ToolDefinition
 	var executor agent.ToolExecutor
+	// Declared out here so the goal-continuation gate at the end of the turn
+	// chain can see this chat's in-flight async sub-agents.
+	var subMgr *tools.SubAgentManager
 	if s.cfg.Tools {
 		// Session-scoped tracker (same "im:"+sess.Key identity used for the
 		// background/workflow managers below) so a file read_file'd in one chat
@@ -3391,7 +3394,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 			}
 			return tools.WithoutGoalTools(tools.DefaultToolsForCtx(ctx, sess.Agent.Model))
 		})
-		subMgr := tools.NewSubAgentManager(spawner)
+		subMgr = tools.NewSubAgentManager(spawner)
 		// A background sub-agent finishes after this turn's chain ends; its
 		// result reaches the model via the agent Inbox + an idle follow-up turn,
 		// the same channel every background process and workflow completion uses
@@ -3534,7 +3537,8 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// Steer messages that arrived after the turn's final inbox drain chain
 	// into follow-up turns (web runAgentTurnLoop parity), and an active goal
 	// keeps the chain going with hidden continuation prompts once the inbox
-	// is dry (user input always drains first). Still inside BeginRun, so no
+	// is dry (user input always drains first) and no async work this turn is
+	// waiting on is still in flight. Still inside BeginRun, so no
 	// new turn can interleave. Persist after each chained turn — one crash
 	// must cost at most one turn, not the whole chain. A chained error stops
 	// the chain (its rollback already dropped the steer message; looping
@@ -3543,7 +3547,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		next := ""
 		if items := sess.Agent.Inbox.Drain(); len(items) > 0 {
 			next = strings.Join(agent.Texts(items), "\n\n")
-		} else if goalsOn {
+		} else if goalsOn && !tools.PendingAsyncWork(tools.SessionBackgroundManager("im:"+string(sess.Key)), subMgr) {
 			if prompt, ok := goalStore.GoalContinuation(); ok {
 				next = prompt
 			}

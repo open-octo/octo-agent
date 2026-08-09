@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // steerPending reports whether user steer input is queued for the session,
@@ -15,6 +16,18 @@ func (s *Server) steerPending(sessionID string) bool {
 	s.steerMu.Lock()
 	defer s.steerMu.Unlock()
 	return len(s.steerQueues[sessionID]) > 0
+}
+
+// goalWorkPending reports whether the session has async work in flight that
+// the goal-continuation kick must wait for — a one-shot background process or
+// a running async sub-agent. Continuing on top of one only buys a turn that
+// says "still waiting" and bills for it; the completion hook starts its own
+// turn, and that turn's end re-enters the continuation check.
+func (s *Server) goalWorkPending(sessionID string) bool {
+	return tools.PendingAsyncWork(
+		tools.SessionBackgroundManager(sessionID),
+		tools.SessionSubAgentManager(sessionID, nil),
+	)
 }
 
 // broadcastGoalUpdated pushes the goal snapshot to the session's subscribers.

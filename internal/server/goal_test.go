@@ -14,6 +14,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/agentprofile"
 	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // goalRoundSender replies (or errs) per main-loop round, recording each call's
@@ -626,5 +627,42 @@ func TestChannelTurn_BudgetCrossingSendsNotice(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected a budget-reached notice, got %v", ad.texts())
+	}
+}
+
+// The continuation loop must sit out while an async background task the turn is
+// waiting on is still running. Its only other guard is zero token progress, and
+// a "still waiting" turn bills real tokens — so without this the loop spins
+// unbounded until the task finishes.
+func TestGoalWorkPending_AsyncBackgroundTask(t *testing.T) {
+	srv := &Server{}
+	const sid = "sess-goal-work-pending"
+	mgr := tools.SessionBackgroundManager(sid)
+	t.Cleanup(func() { tools.CloseSessionBackgroundManager(sid) })
+
+	if srv.goalWorkPending(sid) {
+		t.Fatal("an idle session must not hold the continuation loop back")
+	}
+	if _, err := mgr.Start(context.Background(), "sleep 30", tools.BgModeAsync); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if !srv.goalWorkPending(sid) {
+		t.Error("a running async task must hold the continuation loop back")
+	}
+}
+
+// An interactive background process (a service or REPL) may never exit, so it
+// must not park the goal.
+func TestGoalWorkPending_IgnoresInteractiveProcess(t *testing.T) {
+	srv := &Server{}
+	const sid = "sess-goal-work-interactive"
+	mgr := tools.SessionBackgroundManager(sid)
+	t.Cleanup(func() { tools.CloseSessionBackgroundManager(sid) })
+
+	if _, err := mgr.Start(context.Background(), "sleep 30", tools.BgModeInteractive); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if srv.goalWorkPending(sid) {
+		t.Error("an interactive process must not hold the continuation loop back")
 	}
 }

@@ -2262,8 +2262,12 @@ func (m *tuiModel) handleTurnFinished(err error) (tea.Model, tea.Cmd) {
 
 	// Idle with nothing queued: an active goal keeps going. The session owns
 	// the policy (status, zero-progress suppression); user input always won
-	// above by reaching the queue/inbox branches first.
-	if err == nil {
+	// above by reaching the queue/inbox branches first. Async work this turn is
+	// waiting on holds the loop back — continuing on top of it only buys a turn
+	// that says "still waiting" and bills for it, and the completion note
+	// (bgExitMsg / subAgentNoteMsg) starts its own turn whose end lands back
+	// here.
+	if err == nil && !tools.PendingAsyncWork(tools.DefaultBackgroundManager(), m.cfg.subAgentMgr) {
 		if prompt, ok := m.goalContinuationKick(false); ok {
 			return m, tea.Sequence(m.flushPrints(), m.startTurnEcho(prompt, ""))
 		}
