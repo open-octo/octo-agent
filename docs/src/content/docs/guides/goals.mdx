@@ -25,6 +25,13 @@ instead of a recurring prompt. The underlying tools (`get_goal`, `create_goal`, 
 also available to the model directly, so a goal can be created or refined mid-conversation, not
 just via the slash command.
 
+Each of those self-started turns announces itself in the transcript — `Goal starts` for a new
+objective, `Goal continues` for each turn after — and so does every status change: `Goal complete`
+with the final usage, `Goal blocked`, `Goal budget reached`, `Goal usage limited`. The prompt that
+drives a continuation turn stays hidden, so the line is what tells you the output came from the
+goal rather than from something you asked. The TUI prints these to its scrollback and the Web UI
+renders them inline in the conversation; the `/goal` reply itself lands the same way.
+
 :::note[`/goal` is a TUI and Web command]
 IM channels have no `/goal` command: they run turns one message at a time, with no idle
 continuation loop to pursue a goal between them. A session bound to a chat still carries whatever

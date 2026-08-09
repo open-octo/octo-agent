@@ -23,6 +23,12 @@ import { Badge } from '@astrojs/starlight/components';
 只不过应用在单个持久目标上，而不是一条重复的 prompt。底层工具（`get_goal`、`create_goal`、
 `update_goal`）模型也能直接调用，所以目标可以在对话过程中被创建或调整，不一定非要走 slash 命令。
 
+每一轮自动开跑的回合都会在对话里留一行说明——新目标是 `Goal starts`，之后每轮是 `Goal continues`
+——状态变化同样会留一行：`Goal complete` 带最终用量，以及 `Goal blocked`、`Goal budget reached`、
+`Goal usage limited`。驱动续跑的那段 prompt 是隐藏的，所以这行字就是你判断「这段输出是目标自己跑
+出来的，不是我让它做的」的依据。TUI 打在滚动区，Web UI 内联渲染在会话里；`/goal` 命令本身的回复
+也走同一个位置。
+
 :::note[`/goal` 只在 TUI 和 Web 上有]
 IM 渠道没有 `/goal` 命令：它是一条消息跑一轮，中间没有空闲续跑的循环去推进目标。绑在聊天上的会话
 依然带着模型或者别的端设下的目标——目标状态挂在会话本身上，不挂在具体传输方式上——模型也照样能在

@@ -1181,6 +1181,11 @@ func (s *Server) runAgentTurnLoop(sess *agent.Session, initialContent string, bl
 		if s.goalsEnabled.Load() && !s.steerPending(sess.ID) {
 			if prompt, ok := sess.GoalContinuation(); ok {
 				s.enqueueSteer(sess.ID, agent.InboxItem{Text: prompt})
+				// The prompt is hidden (StripSystemReminders drops the
+				// <goal_context> span, so no user bubble is broadcast) —
+				// without this line the next turn's output would appear
+				// unattributed, as if the user had asked for it.
+				s.broadcastGoalNotice(sess.ID, "continue", "", "info")
 			}
 		}
 		batches := batchQueuedTurns(s.drainSteer(sess.ID))

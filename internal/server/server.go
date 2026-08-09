@@ -233,12 +233,18 @@ type Server struct {
 	// goalsEnabled mirrors the config's goal.enabled at server start: it
 	// gates the goal-continuation kick after each turn (the goal tools'
 	// visibility is gated separately via tools.SetGoalsEnabled). atomic.Bool
-	// because syncGoalsEnabled can write it from inside ensureSender's
-	// senderMu-guarded section (to close a race with initChannels/
-	// reloadChannel, which read it from other goroutines with no lock of
-	// their own) while every other reader/writer here still needs a
-	// consistent, lock-free way to see the same value.
+	// because syncGoalsEnabled writes it from inside ensureSender's
+	// senderMu-guarded section while turn paths read it from their own
+	// goroutines with no lock of their own.
 	goalsEnabled atomic.Bool
+
+	// goalLastStatus is the last goal status broadcast per session, the
+	// baseline noticeGoalTransition compares against so a status change is
+	// announced once instead of on every accounting tick. Web-only state: it
+	// exists to render scrollback lines, so it is not persisted and a restart
+	// simply starts the comparison over.
+	goalLastStatus map[string]agent.GoalStatus
+	goalStatusMu   sync.Mutex
 
 	// confirmation channels (from request_user_feedback in browser).
 	confirmations map[string]chan string
@@ -512,6 +518,7 @@ func New(cfg Config) (*Server, error) {
 		sessionInjectors:    make(map[string]*memory.Injector),
 		wakeupTimers:        make(map[string]*time.Timer),
 		wakeupStart:         make(map[string]time.Time),
+		goalLastStatus:      make(map[string]agent.GoalStatus),
 	}
 
 	// Register the WebSocket-backed asker so ask_user_question appears in the

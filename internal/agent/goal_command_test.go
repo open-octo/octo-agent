@@ -14,8 +14,8 @@ func TestGoalCommand_Grammar(t *testing.T) {
 	}
 
 	// Create.
-	if r, start := GoalCommand(s, "ship the release"); !strings.Contains(r, "Goal set") || !start {
-		t.Errorf("create reply = %q, startWork = %v", r, start)
+	if r, start := GoalCommand(s, "ship the release"); !strings.Contains(r, "Goal set") || start != GoalStartFresh {
+		t.Errorf("create reply = %q, start = %v", r, start)
 	}
 	if g, ok := s.GoalSnapshot(); !ok || g.Objective != "ship the release" || g.Status != GoalActive {
 		t.Fatalf("create failed: %+v", g)
@@ -26,13 +26,13 @@ func TestGoalCommand_Grammar(t *testing.T) {
 	if !strings.Contains(r, "ship the release") || !strings.Contains(r, "active") || !strings.Contains(r, "/goal pause") {
 		t.Errorf("summary reply = %q", r)
 	}
-	if start {
+	if start != GoalStartNone {
 		t.Error("reading the goal must not start work")
 	}
 
 	// New objective over an unfinished goal is refused with the replace hint.
-	if r, start := GoalCommand(s, "something else"); !strings.Contains(r, "/goal replace") || start {
-		t.Errorf("refusal reply = %q, startWork = %v", r, start)
+	if r, start := GoalCommand(s, "something else"); !strings.Contains(r, "/goal replace") || start != GoalStartNone {
+		t.Errorf("refusal reply = %q, start = %v", r, start)
 	}
 	if g, _ := s.GoalSnapshot(); g.Objective != "ship the release" {
 		t.Error("unfinished goal must not be silently replaced")
@@ -42,33 +42,33 @@ func TestGoalCommand_Grammar(t *testing.T) {
 	// starting one of its own.
 	s.ResetGoalWallClock()
 	s.AccountGoalUsage(42)
-	if r, start := GoalCommand(s, "edit revised objective"); !strings.Contains(r, "Goal updated") || start {
-		t.Errorf("edit reply = %q, startWork = %v", r, start)
+	if r, start := GoalCommand(s, "edit revised objective"); !strings.Contains(r, "Goal updated") || start != GoalStartNone {
+		t.Errorf("edit reply = %q, start = %v", r, start)
 	}
 	if g, _ := s.GoalSnapshot(); g.Objective != "revised objective" || g.TokensUsed != 42 {
 		t.Errorf("edit lost state: %+v", g)
 	}
 
 	// Bare edit/replace print usage without touching the goal.
-	if r, start := GoalCommand(s, "edit"); !strings.Contains(r, "Usage: /goal edit") || start {
-		t.Errorf("bare edit reply = %q, startWork = %v", r, start)
+	if r, start := GoalCommand(s, "edit"); !strings.Contains(r, "Usage: /goal edit") || start != GoalStartNone {
+		t.Errorf("bare edit reply = %q, start = %v", r, start)
 	}
-	if r, start := GoalCommand(s, "replace"); !strings.Contains(r, "Usage: /goal replace") || start {
-		t.Errorf("bare replace reply = %q, startWork = %v", r, start)
+	if r, start := GoalCommand(s, "replace"); !strings.Contains(r, "Usage: /goal replace") || start != GoalStartNone {
+		t.Errorf("bare replace reply = %q, start = %v", r, start)
 	}
 
 	// Pause / resume. Only resume returns to pursuing the goal.
-	if r, start := GoalCommand(s, "pause"); !strings.Contains(r, "paused") || start {
-		t.Errorf("pause reply = %q, startWork = %v", r, start)
+	if r, start := GoalCommand(s, "pause"); !strings.Contains(r, "paused") || start != GoalStartNone {
+		t.Errorf("pause reply = %q, start = %v", r, start)
 	}
-	if r, start := GoalCommand(s, "resume"); !strings.Contains(r, "active") || !start {
-		t.Errorf("resume reply = %q, startWork = %v", r, start)
+	if r, start := GoalCommand(s, "resume"); !strings.Contains(r, "active") || start != GoalStartResumed {
+		t.Errorf("resume reply = %q, start = %v", r, start)
 	}
 
 	// Explicit replace mints a fresh goal.
 	old, _ := s.GoalSnapshot()
-	if r, start := GoalCommand(s, "replace brand new goal"); !strings.Contains(r, "Goal replaced") || !start {
-		t.Errorf("replace reply = %q, startWork = %v", r, start)
+	if r, start := GoalCommand(s, "replace brand new goal"); !strings.Contains(r, "Goal replaced") || start != GoalStartFresh {
+		t.Errorf("replace reply = %q, start = %v", r, start)
 	}
 	if g, _ := s.GoalSnapshot(); g.ID == old.ID || g.TokensUsed != 0 {
 		t.Errorf("replace not fresh: %+v", g)
@@ -78,16 +78,16 @@ func TestGoalCommand_Grammar(t *testing.T) {
 	if _, err := s.SetGoalStatus(GoalComplete); err != nil {
 		t.Fatal(err)
 	}
-	if r, start := GoalCommand(s, "next objective"); !strings.Contains(r, "Goal set") || !start {
-		t.Errorf("complete-replace reply = %q, startWork = %v", r, start)
+	if r, start := GoalCommand(s, "next objective"); !strings.Contains(r, "Goal set") || start != GoalStartFresh {
+		t.Errorf("complete-replace reply = %q, start = %v", r, start)
 	}
 
 	// Clear.
-	if r, start := GoalCommand(s, "clear"); r != "Goal cleared" || start {
-		t.Errorf("clear reply = %q, startWork = %v", r, start)
+	if r, start := GoalCommand(s, "clear"); r != "Goal cleared" || start != GoalStartNone {
+		t.Errorf("clear reply = %q, start = %v", r, start)
 	}
-	if r, start := GoalCommand(s, "clear"); r != "No goal to clear" || start {
-		t.Errorf("re-clear reply = %q, startWork = %v", r, start)
+	if r, start := GoalCommand(s, "clear"); r != "No goal to clear" || start != GoalStartNone {
+		t.Errorf("re-clear reply = %q, start = %v", r, start)
 	}
 }
 

@@ -5,25 +5,43 @@ import (
 	"strings"
 )
 
+// GoalCommandStart says whether a command left the goal ready to be pursued
+// right now, and how the turn that follows should be described.
+type GoalCommandStart int
+
+const (
+	// GoalStartNone: nothing to start — the command read, paused, cleared or
+	// edited the goal.
+	GoalStartNone GoalCommandStart = iota
+	// GoalStartFresh: a brand-new goal that has never run a turn (create,
+	// replace). The TUI announces this one as "Goal starts".
+	GoalStartFresh
+	// GoalStartResumed: an existing goal picking back up after a pause. The
+	// TUI announces it as "Goal continues", the same word a turn-end
+	// continuation uses.
+	GoalStartResumed
+)
+
 // GoalCommandUsage is the one-line grammar hint for the text-reply form of
-// the command (the web slash command's toast).
+// the command (the web slash command's notice).
 const GoalCommandUsage = "Usage: /goal <objective> · /goal edit <objective> · /goal pause|resume|clear · /goal replace <objective>"
 
 // GoalCommand applies a "/goal …" command to the session and returns a plain
-// text reply — the web composer's surface, whose command feedback is a toast.
+// text reply — the web composer's surface, which renders it as a scrollback
+// notice.
 // The grammar matches the TUI except `edit`, which takes the new objective
 // inline: the web has no input-prefill to hand the current objective back for
 // editing.
 //
-// startWork reports that the command left the goal ready to be pursued right
-// now — a goal was created, replaced, or resumed. The TUI starts the
-// continuation turn itself for exactly these three (startGoalNow); transports
-// that can kick an idle turn gate on this flag to match. It says nothing about
-// whether a turn should actually run: that stays GoalContinuation's call.
+// start reports whether the command left the goal ready to be pursued right
+// now — created, replaced, or resumed. The TUI starts the continuation turn
+// itself for exactly these three (startGoalNow); transports that can kick an
+// idle turn gate on it to match. It says nothing about whether a turn should
+// actually run: that stays GoalContinuation's call.
 //
 // The TUI keeps its own richer dispatcher (prefilled edit, styled summary);
 // the semantics here and there must stay aligned.
-func GoalCommand(s *Session, args string) (reply string, startWork bool) {
+func GoalCommand(s *Session, args string) (reply string, start GoalCommandStart) {
 	args = strings.TrimSpace(args)
 	sub := strings.ToLower(args)
 
@@ -31,51 +49,51 @@ func GoalCommand(s *Session, args string) (reply string, startWork bool) {
 	case args == "":
 		g, ok := s.GoalSnapshot()
 		if !ok {
-			return "No goal is currently set. " + GoalCommandUsage, false
+			return "No goal is currently set. " + GoalCommandUsage, GoalStartNone
 		}
-		return goalCommandSummary(g), false
+		return goalCommandSummary(g), GoalStartNone
 
 	case sub == "pause":
 		g, err := s.SetGoalStatus(GoalPaused)
 		if err != nil {
-			return "/goal pause: " + err.Error(), false
+			return "/goal pause: " + err.Error(), GoalStartNone
 		}
-		return "Goal " + GoalStatusLabel(g.Status) + " — " + goalObjectiveLine(g.Objective), false
+		return "Goal " + GoalStatusLabel(g.Status) + " — " + goalObjectiveLine(g.Objective), GoalStartNone
 
 	case sub == "resume":
 		g, err := s.SetGoalStatus(GoalActive)
 		if err != nil {
-			return "/goal resume: " + err.Error(), false
+			return "/goal resume: " + err.Error(), GoalStartNone
 		}
-		return "Goal " + GoalStatusLabel(g.Status) + " — " + goalObjectiveLine(g.Objective), true
+		return "Goal " + GoalStatusLabel(g.Status) + " — " + goalObjectiveLine(g.Objective), GoalStartResumed
 
 	case sub == "clear":
 		if s.ClearGoal() {
-			return "Goal cleared", false
+			return "Goal cleared", GoalStartNone
 		}
-		return "No goal to clear", false
+		return "No goal to clear", GoalStartNone
 
 	case sub == "edit":
-		return "Usage: /goal edit <objective> — rewrites the objective, keeping usage and budget", false
+		return "Usage: /goal edit <objective> — rewrites the objective, keeping usage and budget", GoalStartNone
 
 	case strings.HasPrefix(sub, "edit "):
 		// No kick: editing hands the running or next turn a one-time steer
 		// rather than starting fresh work, matching the TUI's edit path.
 		g, err := s.EditGoalObjective(strings.TrimSpace(args[len("edit "):]))
 		if err != nil {
-			return "/goal edit: " + err.Error(), false
+			return "/goal edit: " + err.Error(), GoalStartNone
 		}
-		return "Goal updated — " + goalObjectiveLine(g.Objective), false
+		return "Goal updated — " + goalObjectiveLine(g.Objective), GoalStartNone
 
 	case sub == "replace":
-		return "Usage: /goal replace <objective>", false
+		return "Usage: /goal replace <objective>", GoalStartNone
 
 	case strings.HasPrefix(sub, "replace "):
 		g, err := s.ReplaceGoal(strings.TrimSpace(args[len("replace "):]), 0)
 		if err != nil {
-			return "/goal replace: " + err.Error(), false
+			return "/goal replace: " + err.Error(), GoalStartNone
 		}
-		return "Goal replaced — " + goalObjectiveLine(g.Objective), true
+		return "Goal replaced — " + goalObjectiveLine(g.Objective), GoalStartFresh
 
 	default:
 		// "/goal <objective>": start a goal. A finished goal is replaced
@@ -84,19 +102,19 @@ func GoalCommand(s *Session, args string) (reply string, startWork bool) {
 		if g, ok := s.GoalSnapshot(); ok {
 			if g.Status != GoalComplete {
 				return "A goal already exists (" + GoalStatusLabel(g.Status) + "): " + goalObjectiveLine(g.Objective) +
-					"\nUse /goal replace <objective> to replace it, or /goal clear.", false
+					"\nUse /goal replace <objective> to replace it, or /goal clear.", GoalStartNone
 			}
 			ng, err := s.ReplaceGoal(args, 0)
 			if err != nil {
-				return "/goal: " + err.Error(), false
+				return "/goal: " + err.Error(), GoalStartNone
 			}
-			return "Goal set — " + goalObjectiveLine(ng.Objective), true
+			return "Goal set — " + goalObjectiveLine(ng.Objective), GoalStartFresh
 		}
 		g, err := s.CreateGoal(args, 0)
 		if err != nil {
-			return "/goal: " + err.Error(), false
+			return "/goal: " + err.Error(), GoalStartNone
 		}
-		return "Goal set — " + goalObjectiveLine(g.Objective), true
+		return "Goal set — " + goalObjectiveLine(g.Objective), GoalStartFresh
 	}
 }
 

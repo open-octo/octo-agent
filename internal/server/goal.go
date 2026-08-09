@@ -29,6 +29,52 @@ func (s *Server) broadcastGoalUpdated(sessionID string, g agent.Goal) {
 		"session_id": sessionID,
 		"goal":       g,
 	})
+	s.noticeGoalTransition(sessionID, g)
+}
+
+// noticeGoalTransition emits the scrollback line for the statuses that end or
+// stall a goal, once per transition into them. Accounting fires this broadcast
+// on every tick, so the last status seen per session is what makes it a
+// transition — the same comparison the TUI makes against its own last-seen
+// status. A session with no recorded status yet is only recorded, never
+// announced: a page that connects to an already-blocked goal must not replay
+// the transition that blocked it.
+//
+// The wording is deliberately built here rather than in the browser: it shares
+// agent's formatters with the TUI lines it mirrors, so the two can't drift.
+func (s *Server) noticeGoalTransition(sessionID string, g agent.Goal) {
+	s.goalStatusMu.Lock()
+	if s.goalLastStatus == nil {
+		// Hand-built Servers in tests skip New's map init.
+		s.goalLastStatus = make(map[string]agent.GoalStatus)
+	}
+	prev, seen := s.goalLastStatus[sessionID]
+	s.goalLastStatus[sessionID] = g.Status
+	s.goalStatusMu.Unlock()
+	if !seen || prev == g.Status {
+		return
+	}
+	var text, level string
+	switch g.Status {
+	case agent.GoalBudgetLimited:
+		text = fmt.Sprintf("Goal budget reached (%s/%s tokens) — wrapping up",
+			agent.FormatGoalTokens(g.TokensUsed), agent.FormatGoalTokens(g.TokenBudget))
+		level = "warning"
+	case agent.GoalComplete:
+		text = "Goal complete — " + agent.GoalUsageLine(g)
+		level = "success"
+	case agent.GoalBlocked:
+		text = "Goal blocked — the agent is at an impasse; /goal resume to retry"
+		level = "warning"
+	case agent.GoalUsageLimited:
+		text = "Goal usage limited (provider rate limit) — /goal resume to retry"
+		level = "warning"
+	default:
+		// active / paused are always the direct result of a command, which
+		// reports itself. Announcing them here would double up.
+		return
+	}
+	s.broadcastGoalNotice(sessionID, "status", text, level)
 }
 
 // broadcastGoalCleared tells subscribers the goal is gone (nil payload — the
@@ -37,6 +83,11 @@ func (s *Server) broadcastGoalCleared(sessionID string) {
 	if s.wsHub == nil {
 		return
 	}
+	// Forget the last status too: a goal created later starts a fresh
+	// transition history, so its first status is a baseline, not a change.
+	s.goalStatusMu.Lock()
+	delete(s.goalLastStatus, sessionID)
+	s.goalStatusMu.Unlock()
 	s.wsHub.broadcast(sessionID, map[string]any{
 		"type":       "goal_updated",
 		"session_id": sessionID,
@@ -57,32 +108,50 @@ func (s *Server) goalSession(sessionID string) (*agent.Session, error) {
 	return agent.LoadSession(sessionID)
 }
 
+// broadcastGoalNotice emits a "● Goal …" scrollback line to the session's web
+// subscribers, the counterpart of the TUI's goal notices. No-op without a
+// wsHub (IM sessions, tests).
+func (s *Server) broadcastGoalNotice(sessionID, kind, text, level string) {
+	if s.wsHub == nil {
+		return
+	}
+	s.wsHub.broadcast(sessionID, wsEventGoalNotice{
+		Type:      "goal_notice",
+		SessionID: sessionID,
+		Kind:      kind,
+		Text:      text,
+		Level:     level,
+	})
+}
+
 // wsGoalCommand applies a "/goal …" slash command from the web composer and
-// reports the outcome as a toast plus a goal_updated broadcast so every tab's
-// chip refreshes.
+// reports the outcome as a scrollback notice plus a goal_updated broadcast so
+// every tab's chip refreshes. The reply lands in the transcript rather than a
+// toast: it is the TUI's scrollback line, and a goal outlives the seconds a
+// toast is on screen.
 func (s *Server) wsGoalCommand(sessionID, args string) {
 	if !s.goalsEnabled.Load() {
-		s.wsToast(sessionID, "Goals are disabled (goal.enabled)", "error")
+		s.broadcastGoalNotice(sessionID, "command", "Goals are disabled (goal.enabled)", "error")
 		return
 	}
 	sess, err := s.goalSession(sessionID)
 	if err != nil {
-		s.wsToast(sessionID, fmt.Sprintf("/goal: %v", err), "error")
+		s.broadcastGoalNotice(sessionID, "command", fmt.Sprintf("/goal: %v", err), "error")
 		return
 	}
-	reply, startWork := agent.GoalCommand(sess, args)
+	reply, start := agent.GoalCommand(sess, args)
 	level := "info"
 	if len(reply) > 6 && (reply[:6] == "/goal:" || reply[:6] == "/goal ") {
 		level = "error"
 	}
-	s.wsToast(sessionID, reply, level)
+	s.broadcastGoalNotice(sessionID, "command", reply, level)
 	if g, ok := sess.GoalSnapshot(); ok {
 		s.broadcastGoalUpdated(sessionID, g)
 	} else {
 		s.broadcastGoalCleared(sessionID)
 	}
-	if startWork {
-		s.kickIdleGoalTurn(sessionID)
+	if start != agent.GoalStartNone {
+		s.kickIdleGoalTurn(sessionID, start)
 	}
 }
 
@@ -91,7 +160,11 @@ func (s *Server) wsGoalCommand(sessionID, args string) {
 // composer begins work at once instead of waiting for the user's next message
 // — the TUI's startGoalNow behavior. A running turn needs no kick:
 // runAgentTurnLoop consults GoalContinuation at every turn end.
-func (s *Server) kickIdleGoalTurn(sessionID string) bool {
+//
+// The notice is emitted only once the kick is committed, from inside the
+// callback: announcing "Goal starts" and then finding the session busy or the
+// continuation suppressed would promise a turn that never runs.
+func (s *Server) kickIdleGoalTurn(sessionID string, start agent.GoalCommandStart) bool {
 	return s.kickIdleTurn(sessionID, func(sess *agent.Session) (string, []agent.ContentBlock, bool) {
 		// Queued user input outranks the continuation, the same rule the
 		// turn-end kick follows: let that input run and its own turn end pick
@@ -100,7 +173,15 @@ func (s *Server) kickIdleGoalTurn(sessionID string) bool {
 			return "", nil, false
 		}
 		prompt, ok := sess.GoalContinuation()
-		return prompt, nil, ok
+		if !ok {
+			return "", nil, false
+		}
+		kind := "continue"
+		if start == agent.GoalStartFresh {
+			kind = "start"
+		}
+		s.broadcastGoalNotice(sessionID, kind, "", "info")
+		return prompt, nil, true
 	})
 }
 

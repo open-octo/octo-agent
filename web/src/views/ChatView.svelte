@@ -497,6 +497,32 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       chatGoal.update(m => ({ ...m, [gsid]: (ev as any).goal ?? null }))
     }))
 
+    // The goal's scrollback lines, mirroring the TUI's "● Goal …" notices: the
+    // /goal reply (kind "command"), a status change (kind "status"), and the
+    // start of a continuation turn (kind "start"/"continue"). The continuation
+    // prompt itself is hidden server-side — StripSystemReminders drops the
+    // <goal_context> span, so no user bubble is broadcast — which is exactly
+    // why the turn needs this line: without it the output looks unprompted.
+    cleanups.push(ws.on('goal_notice', (ev) => {
+      if ((ev as any).session_id !== sid) return
+      const kind = (ev as any).kind ?? ''
+      const text = (ev as any).text
+        || (kind === 'start' ? 'Goal starts — /goal pause to stop' : 'Goal continues — /goal pause to stop')
+      addChatMsg(sid, {
+        id: uid('note'),
+        type: 'notice',
+        // marked collapses single newlines, and the bare `/goal` summary is
+        // genuinely multi-line (status, usage, command hints) — promote its
+        // line breaks to markdown hard breaks so it reads as it does in the TUI.
+        content: text.replace(/\n/g, '  \n'),
+        level: (ev as any).level ?? 'info',
+        createdAt: Date.now(),
+        streaming: false,
+        tools: [],
+        todos: [],
+      })
+    }))
+
     cleanups.push(ws.on('history_reload', (ev) => {
       if ((ev as any).session_id !== sid) return
       clearMsgs(sid)

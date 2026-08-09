@@ -250,6 +250,98 @@ func TestWSGoalCommand_PauseIdleResume(t *testing.T) {
 	}
 }
 
+// waitEventType reads broadcasts off conn until one of the wanted type shows
+// up, skipping the unrelated events (goal_updated, context usage) that share
+// the stream.
+func waitEventType(t *testing.T, conn *wsConn, typ string) map[string]any {
+	t.Helper()
+	for i := 0; i < 32; i++ {
+		if ev := nextEvent(t, conn); ev["type"] == typ {
+			return ev
+		}
+	}
+	t.Fatalf("no %s event in the first 32 broadcasts", typ)
+	return nil
+}
+
+// The web's answer to the TUI's "● Goal …" scrollback: the command's reply
+// lands in the transcript, and the continuation turn it kicks announces itself
+// — without that line the turn's output would read as unprompted, since the
+// continuation prompt is hidden.
+func TestWSGoalCommand_EmitsNotices(t *testing.T) {
+	srv, sess := goalTestServer(t)
+	conn := subscribedConn(t, srv, sess.ID)
+	srv.sender = &goalRoundSender{}
+
+	srv.wsGoalCommand(sess.ID, "ship the release")
+
+	ev := waitEventType(t, conn, "goal_notice")
+	if ev["kind"] != "command" {
+		t.Fatalf("first notice kind = %v, want command", ev["kind"])
+	}
+	if text, _ := ev["text"].(string); !strings.Contains(text, "Goal set") {
+		t.Errorf("command notice text = %q, want the /goal reply", text)
+	}
+
+	// A brand-new goal "starts"; a resumed one would "continue".
+	ev = waitEventType(t, conn, "goal_notice")
+	if ev["kind"] != "start" {
+		t.Errorf("second notice kind = %v, want start", ev["kind"])
+	}
+	if text, _ := ev["text"].(string); text != "" {
+		t.Errorf("start notice carries text %q; the frontend owns that wording", text)
+	}
+
+	waitGoalTurnIdle(t, srv, sess.ID)
+}
+
+// Only genuine transitions are announced. Accounting re-broadcasts the goal on
+// every tick, so a repeated status must stay silent, and the first status a
+// session is seen in is a baseline — a page connecting to an already-blocked
+// goal must not replay the transition that blocked it.
+func TestGoalStatusTransitionNotices(t *testing.T) {
+	srv, sess := goalTestServer(t)
+	conn := subscribedConn(t, srv, sess.ID)
+
+	blocked := agent.Goal{ID: "g1", Objective: "keep going", Status: agent.GoalBlocked}
+	srv.broadcastGoalUpdated(sess.ID, blocked) // baseline — silent
+	srv.broadcastGoalUpdated(sess.ID, blocked) // unchanged — silent
+
+	done := blocked
+	done.Status = agent.GoalComplete
+	done.TokensUsed = 1200
+	srv.broadcastGoalUpdated(sess.ID, done)
+
+	// If either silent broadcast had spoken, this would be the blocked line.
+	ev := waitEventType(t, conn, "goal_notice")
+	if ev["kind"] != "status" {
+		t.Fatalf("kind = %v, want status", ev["kind"])
+	}
+	if text, _ := ev["text"].(string); !strings.Contains(text, "Goal complete") {
+		t.Errorf("text = %q, want the complete line", text)
+	}
+	if ev["level"] != "success" {
+		t.Errorf("level = %v, want success", ev["level"])
+	}
+
+	// Clearing forgets the history: the next goal's first status is a fresh
+	// baseline, not a change back from complete.
+	srv.broadcastGoalCleared(sess.ID)
+	limited := agent.Goal{ID: "g2", Objective: "next", Status: agent.GoalActive}
+	srv.broadcastGoalUpdated(sess.ID, limited) // baseline — silent
+	limited.Status = agent.GoalBudgetLimited
+	limited.TokensUsed, limited.TokenBudget = 63900, 50000
+	srv.broadcastGoalUpdated(sess.ID, limited)
+
+	ev = waitEventType(t, conn, "goal_notice")
+	if text, _ := ev["text"].(string); !strings.Contains(text, "63.9K/50K tokens") {
+		t.Errorf("text = %q, want the budget line with usage", text)
+	}
+	if ev["level"] != "warning" {
+		t.Errorf("level = %v, want warning", ev["level"])
+	}
+}
+
 func TestSteerPending(t *testing.T) {
 	s := &Server{steerQueues: make(map[string][]queuedTurn)}
 	if s.steerPending("sid") {
