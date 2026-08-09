@@ -59,6 +59,7 @@
   import { renderMarkdown, escapeHtml, setupCopyButtons } from '../lib/markdown'
   import { t, tr, pickLocalized } from '../lib/i18n'
   import { insertPendingSend } from '../lib/pendingSendOrder'
+  import { inlineSlashCommand } from '../lib/inlineSlash'
   import { exportModeStore, selectedMessagesStore } from '../lib/exportStore'
   import { filenameStem } from '../lib/filename'
   import DOMPurify from 'dompurify'
@@ -1977,6 +1978,17 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   }
 
   // ── send message ───────────────────────────────────────────────────────────
+  // The previous turn's leftovers, cleared before anything that can start the
+  // next one: finished sub-agents, the thinking buffer, the error banner, and
+  // the follow-up suggestion (it belongs to a conversation that has now moved
+  // on and must not re-render when this turn ends).
+  function clearLastTurnUi(sid: string) {
+    turnError = null
+    clearDoneSubAgents(sid)
+    chatThinking.update(tt => ({ ...tt, [sid]: '' }))
+    chatSuggestion.update(s => ({ ...s, [sid]: '' }))
+  }
+
   async function send(text: string, files?: any[], queued = false) {
     if (!text.trim() && !(files && files.length)) return
     const sid = await ensureActiveSession()
@@ -1986,18 +1998,34 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     // the sub-agents panel and thinking buffer belong to the turn in flight.
     const wasStreaming = get(chatStreaming)[sid] ?? false
     const steering = wasStreaming
+
+    // Server-inline commands (/clear, /compact, /reload, /goal …) are applied
+    // by the server and never enter history, so no history_user_message ever
+    // comes back for them. Everything that echo retires — the optimistic
+    // bubble, its pendingSends entry, the ghost steer — has to be skipped, or
+    // it hangs there forever. The server speaks for these itself: a goal_notice
+    // line, a history_reload, a toast.
+    const inline = inlineSlashCommand(text, !!(files && files.length))
+    if (inline) {
+      if (!steering) {
+        clearLastTurnUi(sid)
+        // Only /compact is a long server-side job with no other busy signal
+        // (its own session_update idle clears this again). /goal may start a
+        // continuation turn, whose events flip streaming on for real; the rest
+        // finish in a single round-trip. Claiming "streaming" for those would
+        // stick — nothing would ever flip it back.
+        if (inline === 'compact') chatStreaming.update(s => ({ ...s, [sid]: true }))
+      }
+      ws.sendMessage(sid, text, files, false, false)
+      pinToBottom()
+      return
+    }
+
     if (!steering) {
-      // A fresh turn starts: clear the previous turn's finished sub-agents and
-      // thinking buffer, clear the error banner, clear any stale follow-up
-      // suggestion from the last turn (it belongs to a conversation that has now
-      // moved on and must not re-render when this turn ends), and flip the
-      // session into streaming.
-      turnError = null
+      // A fresh turn starts.
+      clearLastTurnUi(sid)
       // Remember what started this turn so turn_error can hand it back.
       turnInput.set(sid, { text, files })
-      clearDoneSubAgents(sid)
-      chatThinking.update(tt => ({ ...tt, [sid]: '' }))
-      chatSuggestion.update(s => ({ ...s, [sid]: '' }))
       chatStreaming.update(s => ({ ...s, [sid]: true }))
     }
     // Queueing only means anything mid-turn: idle there is no turn to wait for,
