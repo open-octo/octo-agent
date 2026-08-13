@@ -15,16 +15,27 @@ import (
 // Upload destination under ~/.octo/uploads/.
 const uploadsDirName = "uploads"
 
-// maxUploadBytes is the hard cap on a single upload request body. Keep in sync
-// with MAX_ATTACHMENT_BYTES in web/src/components/chat/Composer.svelte.
-const maxUploadBytes = 32 << 20 // 32 MB
+// maxUploadBytes is the hard cap on a single upload request body. Uploads
+// stream to disk (memory use is bounded by maxUploadMemory below), so the cap
+// only guards against a runaway multi-GB drop filling ~/.octo/uploads. Keep in
+// sync with MAX_FILE_BYTES in web/src/components/chat/Composer.svelte. A var,
+// not a const, so the oversize-rejection test doesn't have to build a >512 MB
+// body.
+var maxUploadBytes int64 = 512 << 20 // 512 MB
+
+// maxUploadMemory bounds the multipart parser's in-memory buffering; anything
+// beyond it spills to temp files on the way to ~/.octo/uploads.
+const maxUploadMemory = 32 << 20
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	// The server-wide 30s ReadTimeout would cut off a large body on a slow
+	// remote link; give the upload request its own generous read deadline.
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(10 * time.Minute))
 	// MaxBytesReader is the real ceiling: ParseMultipartForm's argument only
 	// bounds in-memory buffering (the overflow spills to temp files), so
 	// without this a client could stream an arbitrarily large body to disk.
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
-	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+	if err := r.ParseMultipartForm(maxUploadMemory); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("parse form: %v", err))
 		return
 	}

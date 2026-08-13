@@ -76,6 +76,11 @@ func TestHandleUpload_RejectsOversized(t *testing.T) {
 	ts := httptest.NewServer(srv.http.Handler)
 	defer ts.Close()
 
+	// Lower the cap so the test doesn't have to build a >512 MB body.
+	old := maxUploadBytes
+	maxUploadBytes = 1 << 20
+	t.Cleanup(func() { maxUploadBytes = old })
+
 	body, ct := multipartUpload(t, "huge.bin", make([]byte, maxUploadBytes+1))
 	resp, err := http.Post(ts.URL+"/api/upload", ct, body)
 	if err != nil {

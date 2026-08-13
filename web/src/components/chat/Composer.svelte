@@ -30,9 +30,13 @@
   type Attachment = { id?: string; name: string; mime_type?: string; data_url?: string; path?: string; local_path?: string; uploading?: boolean }
 
   // Reject oversized attachments client-side with a clear message rather than
-  // letting the upload fail late (or bloating a WS message with a huge inline
-  // image). Keep in sync with maxUploadBytes in internal/server/upload_handler.go.
-  const MAX_ATTACHMENT_BYTES = 32 * 1024 * 1024
+  // letting them fail late. Images keep a conservative cap: they are canvas-
+  // decoded for compression and ride inline as data URLs. Other files stream
+  // to ~/.octo/uploads and are read from disk by the agent, so they only stop
+  // at the server's much larger request cap — keep MAX_FILE_BYTES in sync with
+  // maxUploadBytes in internal/server/upload_handler.go.
+  const MAX_IMAGE_BYTES = 32 * 1024 * 1024
+  const MAX_FILE_BYTES = 512 * 1024 * 1024
 
   let text = $state('')
   // Per-session composer draft: keyed by session id so switching sessions
@@ -187,13 +191,14 @@
 
   async function addAttachment(file: File, fallbackName?: string) {
     const name = file.name || fallbackName || 'attachment'
-    if (file.size > MAX_ATTACHMENT_BYTES) {
-      showToast($t('chat.attach_too_large'), 'error')
+    const isImage = file.type.startsWith('image/')
+    if (file.size > (isImage ? MAX_IMAGE_BYTES : MAX_FILE_BYTES)) {
+      showToast($t(isImage ? 'chat.attach_img_too_large' : 'chat.attach_too_large'), 'error')
       return
     }
     const originSid = sid
     // Images ride inline as a data URL (decoded into an image block server-side).
-    if (file.type.startsWith('image/')) {
+    if (isImage) {
       // Stage a placeholder synchronously (same pattern as the upload branch
       // below): canvas compression takes ~100ms-1s for a large photo, and a
       // send() in that window must be blocked — not fire with text only while
