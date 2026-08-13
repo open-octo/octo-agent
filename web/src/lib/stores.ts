@@ -93,6 +93,9 @@ export const sessionGroups = writable<SessionGroup[]>([])
 // Pinned session IDs (server registry, web-only). Pinned sessions float into a
 // dedicated section at the top of the sidebar, above all groups.
 export const pinnedSessions = writable<string[]>([])
+// Collapsed session IDs (server registry, web-only). Collapsed sessions sink
+// into a folded panel at the bottom of the sidebar's session list.
+export const collapsedSessions = writable<string[]>([])
 // Sidebar UI state for groups: the session whose "move to group" popover is
 // open, and the group being renamed inline.
 export const groupMenuFor = writable<string | null>(null)

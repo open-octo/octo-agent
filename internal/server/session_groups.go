@@ -88,6 +88,13 @@ func validateProjectNotes(raw string) (string, error) {
 type groupFile struct {
 	Groups           []sessionGroup `json:"groups"`
 	PinnedSessionIDs []string       `json:"pinned_session_ids,omitempty"`
+	// CollapsedSessionIDs is the Web-UI "collapsed" set — sessions the user
+	// explicitly tucked into a folded panel at the bottom of the sidebar to keep
+	// the main list short. Mutually exclusive with pinning and group membership
+	// (a collapsed session belongs to neither); the write handlers enforce that.
+	// Array order is collapse order; an ID that no longer resolves to a live
+	// session is simply not rendered.
+	CollapsedSessionIDs []string `json:"collapsed_session_ids,omitempty"`
 }
 
 // notifyGroupsChanged, when set (Server.New), is called after every successful
@@ -129,23 +136,35 @@ func sessionGroupsPath() (string, error) {
 	return filepath.Join(dir, "session-groups.json"), nil
 }
 
-// loadSessionGroups reads the registry. A missing file is not an error — it
-// means no groups yet. Caller should hold groupMu for read-modify-write cycles.
-func loadSessionGroups() ([]sessionGroup, error) {
+// loadRegistryFile reads and parses the whole registry file. A missing file is
+// not an error — it means an empty registry. The field-scoped load/save
+// helpers below all go through it, so a save of one field can never clobber
+// the others. Caller should hold groupMu for read-modify-write cycles.
+func loadRegistryFile() (groupFile, error) {
+	var gf groupFile
 	path, err := sessionGroupsPath()
 	if err != nil {
-		return nil, err
+		return gf, err
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return gf, nil
 		}
-		return nil, fmt.Errorf("session groups: read %s: %w", path, err)
+		return gf, fmt.Errorf("session groups: read %s: %w", path, err)
 	}
-	var gf groupFile
 	if err := json.Unmarshal(data, &gf); err != nil {
-		return nil, fmt.Errorf("session groups: parse %s: %w", path, err)
+		return gf, fmt.Errorf("session groups: parse %s: %w", path, err)
+	}
+	return gf, nil
+}
+
+// loadSessionGroups reads the registry. A missing file is not an error — it
+// means no groups yet. Caller should hold groupMu for read-modify-write cycles.
+func loadSessionGroups() ([]sessionGroup, error) {
+	gf, err := loadRegistryFile()
+	if err != nil {
+		return nil, err
 	}
 	return gf.Groups, nil
 }
@@ -179,47 +198,38 @@ func saveRegistry(gf groupFile) error {
 	return nil
 }
 
-// saveSessionGroups persists the group list while preserving the pinned-session
-// list, which shares the same file — a group edit must never clobber pins.
-// Caller must hold groupMu.
+// saveSessionGroups persists the group list while preserving every other list
+// sharing the same file (pins, collapsed) — a group edit must never clobber
+// them. Caller must hold groupMu.
 func saveSessionGroups(groups []sessionGroup) error {
-	pins, err := loadPinnedSessions()
+	gf, err := loadRegistryFile()
 	if err != nil {
 		return err
 	}
-	return saveRegistry(groupFile{Groups: groups, PinnedSessionIDs: pins})
+	gf.Groups = groups
+	return saveRegistry(gf)
 }
 
 // loadPinnedSessions reads the pinned-session list from the registry. A missing
 // file means nothing is pinned. Caller should hold groupMu for
 // read-modify-write cycles.
 func loadPinnedSessions() ([]string, error) {
-	path, err := sessionGroupsPath()
+	gf, err := loadRegistryFile()
 	if err != nil {
 		return nil, err
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("session groups: read %s: %w", path, err)
-	}
-	var gf groupFile
-	if err := json.Unmarshal(data, &gf); err != nil {
-		return nil, fmt.Errorf("session groups: parse %s: %w", path, err)
 	}
 	return gf.PinnedSessionIDs, nil
 }
 
-// savePinnedSessions persists the pinned-session list while preserving the
-// group list, mirroring saveSessionGroups. Caller must hold groupMu.
-func savePinnedSessions(pins []string) error {
-	groups, err := loadSessionGroups()
+// loadCollapsedSessions reads the collapsed-session list from the registry. A
+// missing file means nothing is collapsed. Caller should hold groupMu for
+// read-modify-write cycles.
+func loadCollapsedSessions() ([]string, error) {
+	gf, err := loadRegistryFile()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return saveRegistry(groupFile{Groups: groups, PinnedSessionIDs: pins})
+	return gf.CollapsedSessionIDs, nil
 }
 
 // ─── Read-side cache + session→project reverse index ────────────────────────
@@ -455,23 +465,26 @@ func deleteSessionGroup(groupID string) error {
 
 func (s *Server) handleListSessionGroups(w http.ResponseWriter, r *http.Request) {
 	groupMu.Lock()
-	groups, err := loadSessionGroups()
-	var pins []string
-	if err == nil {
-		pins, err = loadPinnedSessions()
-	}
+	gf, err := loadRegistryFile()
 	groupMu.Unlock()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if groups == nil {
-		groups = []sessionGroup{}
+	if gf.Groups == nil {
+		gf.Groups = []sessionGroup{}
 	}
-	if pins == nil {
-		pins = []string{}
+	if gf.PinnedSessionIDs == nil {
+		gf.PinnedSessionIDs = []string{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"groups": groups, "pinned_session_ids": pins})
+	if gf.CollapsedSessionIDs == nil {
+		gf.CollapsedSessionIDs = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"groups":                gf.Groups,
+		"pinned_session_ids":    gf.PinnedSessionIDs,
+		"collapsed_session_ids": gf.CollapsedSessionIDs,
+	})
 }
 
 // ─── POST /api/session-groups ───────────────────────────────────────────────
@@ -740,21 +753,16 @@ func (s *Server) handleSetSessionGroup(w http.ResponseWriter, r *http.Request) {
 
 	groupMu.Lock()
 	defer groupMu.Unlock()
-	groups, err := loadSessionGroups()
+	gf, err := loadRegistryFile()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	groups := gf.Groups
 
 	// Remove the session from every group first (enforces single membership).
 	for i := range groups {
-		ids := groups[i].SessionIDs[:0]
-		for _, existing := range groups[i].SessionIDs {
-			if existing != sid {
-				ids = append(ids, existing)
-			}
-		}
-		groups[i].SessionIDs = ids
+		groups[i].SessionIDs = removeID(groups[i].SessionIDs, sid)
 	}
 
 	// Add to the target group when one is requested.
@@ -771,9 +779,13 @@ func (s *Server) handleSetSessionGroup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		groups[idx].SessionIDs = append(groups[idx].SessionIDs, sid)
+		// Group membership and collapsing are mutually exclusive; filing the
+		// session into a group wins over a stale collapsed entry.
+		gf.CollapsedSessionIDs = removeID(gf.CollapsedSessionIDs, sid)
 	}
+	gf.Groups = groups
 
-	if err := saveSessionGroups(groups); err != nil {
+	if err := saveRegistry(gf); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -804,7 +816,7 @@ func (s *Server) handleSetSessionPin(w http.ResponseWriter, r *http.Request) {
 
 	groupMu.Lock()
 	defer groupMu.Unlock()
-	pins, err := loadPinnedSessions()
+	gf, err := loadRegistryFile()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -812,19 +824,97 @@ func (s *Server) handleSetSessionPin(w http.ResponseWriter, r *http.Request) {
 
 	// Drop any existing entry first, then re-add at the end when pinning. This
 	// keeps the list free of duplicates and gives a stable "unpin" path.
-	out := make([]string, 0, len(pins)+1)
-	for _, id := range pins {
+	out := make([]string, 0, len(gf.PinnedSessionIDs)+1)
+	for _, id := range gf.PinnedSessionIDs {
 		if id != sid {
 			out = append(out, id)
 		}
 	}
 	if req.Pinned {
 		out = append(out, sid)
+		// Pinning and collapsing are mutually exclusive; pinning wins over a
+		// stale collapsed entry (e.g. set from another tab) instead of leaving
+		// the session in both lists.
+		gf.CollapsedSessionIDs = removeID(gf.CollapsedSessionIDs, sid)
 	}
+	gf.PinnedSessionIDs = out
 
-	if err := savePinnedSessions(out); err != nil {
+	if err := saveRegistry(gf); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "pinned": req.Pinned})
+}
+
+// removeID returns ids without sid, preserving order.
+func removeID(ids []string, sid string) []string {
+	out := ids[:0]
+	for _, id := range ids {
+		if id != sid {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// ─── PUT /api/sessions/{id}/collapse ────────────────────────────────────────
+
+type setSessionCollapsedRequest struct {
+	Collapsed bool `json:"collapsed"`
+}
+
+// handleSetSessionCollapsed collapses a session into the sidebar's folded
+// panel, or restores it. Collapsing a pinned or grouped session is rejected —
+// the two states contradict each other (the UI hides the collapse action for
+// those sessions; this guards racing tabs). Idempotent like pin: collapsing an
+// already-collapsed session keeps its position, restoring an absent one is a
+// no-op.
+func (s *Server) handleSetSessionCollapsed(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("id")
+	if sid == "" {
+		writeError(w, http.StatusBadRequest, "missing session id")
+		return
+	}
+	var req setSessionCollapsedRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeInvalidJSONBody(w, err)
+		return
+	}
+
+	groupMu.Lock()
+	defer groupMu.Unlock()
+	gf, err := loadRegistryFile()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if req.Collapsed {
+		for _, id := range gf.PinnedSessionIDs {
+			if id == sid {
+				writeError(w, http.StatusConflict, "session is pinned; unpin it before collapsing")
+				return
+			}
+		}
+		for _, g := range gf.Groups {
+			for _, id := range g.SessionIDs {
+				if id == sid {
+					writeError(w, http.StatusConflict, "session is in a group; remove it from the group before collapsing")
+					return
+				}
+			}
+		}
+	}
+
+	out := removeID(gf.CollapsedSessionIDs, sid)
+	if req.Collapsed {
+		out = append(out, sid)
+	}
+	gf.CollapsedSessionIDs = out
+
+	if err := saveRegistry(gf); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "collapsed": req.Collapsed})
 }

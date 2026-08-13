@@ -322,3 +322,118 @@ func TestSessionPin_CoexistsWithGroups(t *testing.T) {
 		t.Fatalf("group lost after unpin, got %+v", groups)
 	}
 }
+
+func TestSessionCollapse_CollapseListRestore(t *testing.T) {
+	srv := groupTestServer(t)
+	const sid = "20260101-000000-deadbeef"
+
+	// Nothing collapsed yet.
+	_, out := doGroupReq(t, srv, http.MethodGet, "/api/session-groups", nil)
+	if col, ok := out["collapsed_session_ids"].([]any); !ok || len(col) != 0 {
+		t.Fatalf("expected empty collapsed list, got %v", out["collapsed_session_ids"])
+	}
+
+	// Collapse it.
+	rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/collapse", map[string]any{"collapsed": true})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("collapse: status %d", rec.Code)
+	}
+	col, err := loadCollapsedSessions()
+	if err != nil || len(col) != 1 || col[0] != sid {
+		t.Fatalf("expected [%s], got %v (err %v)", sid, col, err)
+	}
+
+	// GET reflects it.
+	_, out = doGroupReq(t, srv, http.MethodGet, "/api/session-groups", nil)
+	if got := out["collapsed_session_ids"].([]any); len(got) != 1 || got[0].(string) != sid {
+		t.Fatalf("GET collapsed list = %v", got)
+	}
+
+	// Collapsing again is idempotent (no duplicate).
+	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/collapse", map[string]any{"collapsed": true})
+	if col, _ = loadCollapsedSessions(); len(col) != 1 {
+		t.Fatalf("re-collapse duplicated: %v", col)
+	}
+
+	// Restore.
+	rec, _ = doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/collapse", map[string]any{"collapsed": false})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("restore: status %d", rec.Code)
+	}
+	if col, _ = loadCollapsedSessions(); len(col) != 0 {
+		t.Fatalf("expected empty after restore, got %v", col)
+	}
+}
+
+// A pinned or grouped session cannot be collapsed — the states contradict.
+func TestSessionCollapse_RejectsPinnedAndGrouped(t *testing.T) {
+	srv := groupTestServer(t)
+	const pinned = "sess-pinned"
+	const grouped = "sess-grouped"
+
+	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+pinned+"/pin", map[string]any{"pinned": true})
+	rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+pinned+"/collapse", map[string]any{"collapsed": true})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("collapse of pinned session: status %d, want 409", rec.Code)
+	}
+
+	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Work"})
+	gid := o["group"].(map[string]any)["id"].(string)
+	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+grouped+"/group", map[string]any{"group_id": gid})
+	rec, _ = doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+grouped+"/collapse", map[string]any{"collapsed": true})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("collapse of grouped session: status %d, want 409", rec.Code)
+	}
+	if col, _ := loadCollapsedSessions(); len(col) != 0 {
+		t.Fatalf("rejected collapses still landed: %v", col)
+	}
+}
+
+// Pinning or filing a collapsed session (possible from a racing stale tab)
+// wins over the collapse: the session leaves the collapsed list.
+func TestSessionCollapse_PinAndGroupDropCollapsed(t *testing.T) {
+	srv := groupTestServer(t)
+	const sid = "sess-1"
+
+	// Collapse, then pin — the pin drops the collapsed entry.
+	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/collapse", map[string]any{"collapsed": true})
+	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/pin", map[string]any{"pinned": true})
+	if col, _ := loadCollapsedSessions(); len(col) != 0 {
+		t.Fatalf("pin left session collapsed: %v", col)
+	}
+	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/pin", map[string]any{"pinned": false})
+
+	// Collapse, then move into a group — the move drops the collapsed entry.
+	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Work"})
+	gid := o["group"].(map[string]any)["id"].(string)
+	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/collapse", map[string]any{"collapsed": true})
+	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/group", map[string]any{"group_id": gid})
+	if col, _ := loadCollapsedSessions(); len(col) != 0 {
+		t.Fatalf("group move left session collapsed: %v", col)
+	}
+	groups, _ := loadSessionGroups()
+	if len(groups) != 1 || len(groups[0].SessionIDs) != 1 || groups[0].SessionIDs[0] != sid {
+		t.Fatalf("group membership wrong: %+v", groups)
+	}
+}
+
+// The collapsed list shares the registry with groups and pins; editing those
+// must not clobber it.
+func TestSessionCollapse_CoexistsWithGroupsAndPins(t *testing.T) {
+	srv := groupTestServer(t)
+	const sid = "sess-collapsed"
+
+	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/collapse", map[string]any{"collapsed": true})
+
+	// Group create/rename/reorder and an unrelated pin cycle all leave it intact.
+	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Work"})
+	gid := o["group"].(map[string]any)["id"].(string)
+	doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"name": "Work2"})
+	doGroupReq(t, srv, http.MethodPut, "/api/session-groups/order", map[string]any{"ids": []string{gid}})
+	doGroupReq(t, srv, http.MethodPut, "/api/sessions/other/pin", map[string]any{"pinned": true})
+	doGroupReq(t, srv, http.MethodPut, "/api/sessions/other/pin", map[string]any{"pinned": false})
+
+	if col, _ := loadCollapsedSessions(); len(col) != 1 || col[0] != sid {
+		t.Fatalf("collapsed list lost across registry edits, got %v", col)
+	}
+}
