@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -140,7 +141,10 @@ func waitAgentIdle(t *testing.T, mgr *SubAgentManager, id string) {
 	}
 }
 
-func TestWorkflowManager_PanickingAgentFinishesRun(t *testing.T) {
+// Named for what it actually covers: the panic happens in the goroutine
+// internal/workflow spawns per agent() call, not in the manager's run
+// goroutine, so this pins the workflow runtime's own settle path.
+func TestWorkflow_PanickingAgentReachesScriptAndFinishes(t *testing.T) {
 	m := NewWorkflowManager()
 
 	id, err := m.Start(WorkflowRunRequest{
@@ -179,6 +183,90 @@ func TestWorkflowManager_PanickingAgentFinishesRun(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// The manager's own run goroutine, whose reachable panic source is the
+// completion hook it calls after the run has finished.
+func TestWorkflowManager_PanickingDoneHookSurvives(t *testing.T) {
+	m := NewWorkflowManager()
+	m.SetOnDone(func(WorkflowNotification) { panic("done hook exploded") })
+
+	id, err := m.Start(WorkflowRunRequest{
+		Description: "hookboom",
+		Script:      `"ok"`,
+		Agent: func(context.Context, string, workflow.AgentOptions) workflow.AgentResult {
+			return workflow.AgentResult{Reply: "unused"}
+		},
+		JournalDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		snap, ok := m.Read(id)
+		if !ok {
+			t.Fatalf("run %s disappeared", id)
+		}
+		if snap.Status != "running" {
+			// The hook panics after finish, so the result must be intact — the
+			// notification is what failed, not the run.
+			if snap.Status != "done" {
+				t.Errorf("status = %q, want done", snap.Status)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("run never finished")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestBackgroundManager_PanickingOutputHandlerStillExits(t *testing.T) {
+	m := NewBackgroundManager()
+
+	// The output handler panics on the first line, with plenty of output still
+	// to come. Draining the pipe is what this goroutine really owns: cmd.Stdout
+	// is an *io.PipeWriter, so os/exec copies into it from its own goroutine and
+	// Wait blocks on that copy — a reader that dies without closing its end
+	// leaves the copy blocked forever, and with it Wait, finish, and the exit
+	// notification. That is the crash-turned-hang this whole change exists to
+	// avoid, so it gets a regression test of its own.
+	id, err := m.Start(context.Background(), unfinishedOutputCommand(), BgModeAsync,
+		WithOnLine(func(string) { panic("output handler exploded") }))
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	deadline := time.Now().Add(hookTimeout())
+	for {
+		_, status, found, _, _ := m.Read(id)
+		if !found {
+			t.Fatalf("process %s disappeared", id)
+		}
+		if status != "running" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("process still running: the reader died without releasing the pipe, so cmd.Wait never returned")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// unfinishedOutputCommand returns a shell command that emits a line, pauses,
+// then emits another. The pause is what makes the test deterministic: the
+// reader panics on the first line while the second is still unwritten, so the
+// copy goroutine is guaranteed to be mid-Write against a pipe nobody drains.
+// Sheer volume works too, but only past whatever buffering happens to be in
+// play — 2000 lines slipped through and passed against the broken code.
+func unfinishedOutputCommand() string {
+	if runtime.GOOS == "windows" {
+		return "Write-Output a; Start-Sleep -Seconds 1; Write-Output b"
+	}
+	return "echo a; sleep 1; echo b"
 }
 
 func TestBackgroundManager_PanickingExitHookSurvives(t *testing.T) {

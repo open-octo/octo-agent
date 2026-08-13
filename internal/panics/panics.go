@@ -5,8 +5,7 @@
 // handler, no agent turn — and the desktop app hosts the whole server in its
 // own process. An unrecovered panic in one therefore doesn't just fail a tool
 // call: it closes the user's window and takes every other session with it,
-// historically without leaving so much as a stack trace behind (which is why
-// ~/.octo/crash.log exists — see internal/crashlog).
+// historically without leaving so much as a stack trace behind.
 //
 // Recovering on its own is not enough. Most of these goroutines are the only
 // thing that will ever mark their work finished — delivering a result the

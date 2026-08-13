@@ -624,15 +624,9 @@ func (m *SubAgentManager) Start(req SpawnRequest) (string, error) {
 
 	go func() {
 		settled := false
-		// Registered first so it runs last, after the defers below have
-		// released the async budget and cleared the live panel. Nothing else
-		// ever clears this agent's busy flag — the goal loop's idle check reads
-		// it — so a panic before setDone has to settle the agent itself.
-		defer func() {
-			if err := panics.Error(recover(), "sub-agent spawn", "agent_id", id); err != nil && !settled {
-				agent.setDone(err, "")
-			}
-		}()
+		// Outermost, so it also covers the defers below — sink is
+		// caller-supplied and can panic in its own right.
+		defer func() { _ = panics.Error(recover(), "sub-agent cleanup", "agent_id", id) }()
 		defer func() {
 			m.mu.Lock()
 			m.activeAsync--
@@ -643,6 +637,15 @@ func (m *SubAgentManager) Start(req SpawnRequest) (string, error) {
 			// clears the live-panel entry, even on spawn error.
 			defer sink(SubAgentEvent{Kind: "done"})
 		}
+		// Innermost, so it runs before the "done" event above: nothing else ever
+		// clears this agent's busy flag — the goal loop's idle check reads it —
+		// and the event carries the stop reason read off that same state, so the
+		// agent has to be settled before the panel is told it finished.
+		defer func() {
+			if err := panics.Error(recover(), "sub-agent spawn", "agent_id", id); err != nil && !settled {
+				agent.setDone(err, "")
+			}
+		}()
 		res, err := m.spawner.Spawn(ctx, req)
 		stopReason := ""
 		if err == nil {
@@ -719,15 +722,7 @@ func (m *SubAgentManager) runContinue(agentID, message string) {
 		return
 	}
 
-	// Send marks the agent busy before launching this, and setDone below is the
-	// only thing that ever clears it — so a panicking Continue would leave the
-	// agent permanently "working" to the UI and to the goal loop's idle check.
 	settled := false
-	defer func() {
-		if err := panics.Error(recover(), "sub-agent continue", "agent_id", agentID); err != nil && !settled {
-			agent.setDone(err, "")
-		}
-	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -754,6 +749,24 @@ func (m *SubAgentManager) runContinue(agentID, message string) {
 		ctx = WithSubAgentEventSink(ctx, sink)
 		sink(SubAgentEvent{Kind: "started"})
 	}
+
+	// Send marks the agent busy before launching this round, and setDone below
+	// is the only thing that ever clears it — so a panicking Continue would
+	// leave the agent permanently "working" to the UI and to the goal loop's
+	// idle check. The round's context and its live-panel entry are this
+	// goroutine's to release too; registered here rather than at the top of the
+	// function because both only exist from this point on.
+	defer func() {
+		err := panics.Error(recover(), "sub-agent continue", "agent_id", agentID)
+		if err == nil || settled {
+			return
+		}
+		cancel()
+		agent.setDone(err, "")
+		if sink != nil {
+			sink(SubAgentEvent{Kind: "done"})
+		}
+	}()
 
 	// Continue addresses the child by its Spawner-side id, not the manager's
 	// agent_N handle — the two id spaces are distinct.

@@ -285,9 +285,10 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 		finished := false
 		// finish closes the channel Wait blocks on, and Wait's own cancellation
 		// path waits on it too — so a panic that skipped it would leave a
-		// foreground workflow_start blocked with no way out. The Log/Progress
-		// callbacks below run inside workflow.Run and reach a caller-supplied
-		// event sink, which is what makes this reachable.
+		// foreground workflow_start blocked with no way out. What's reachable
+		// here is the emit and hook calls after the run itself: a panic inside
+		// workflow.Run's own host functions never gets this far, because wazero
+		// recovers those and returns them as a Call error instead.
 		defer func() {
 			if err := panics.Error(recover(), "workflow run", "run_id", id); err != nil && !finished {
 				run.finish("", "", err.Error(), time.Now())

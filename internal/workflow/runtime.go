@@ -403,6 +403,9 @@ func (b *backend) agentStart(_ context.Context, mod api.Module, ptr, length, mpt
 		// Replayed from journal: deliver without calling Agent.
 		ce := b.cached[seq]
 		go func() {
+			// delivered is set before the call, not after: the only statement
+			// here that can panic is deliver itself, and re-entering it would
+			// double-count usage and append a second journal entry for this seq.
 			delivered := false
 			defer func() {
 				if err := panics.Error(recover(), "workflow agent() replay", "token", tok); err != nil && !delivered {
@@ -417,8 +420,8 @@ func (b *backend) agentStart(_ context.Context, mod api.Module, ptr, length, mpt
 				res.InputTokens = ce.InputTokens
 				res.OutputTokens = ce.OutputTokens
 			}
-			b.deliver(tok, res)
 			delivered = true
+			b.deliver(tok, res)
 		}()
 		return tok
 	}
@@ -478,6 +481,7 @@ func (b *backend) skillStart(_ context.Context, mod api.Module, nptr, nlen, pptr
 		// Replayed from journal: deliver the stored outputs without re-running.
 		ce := b.cached[seq]
 		go func() {
+			// Set before the call — see the agent() replay above.
 			delivered := false
 			defer func() {
 				if err := panics.Error(recover(), "workflow skill() replay", "token", tok); err != nil && !delivered {
@@ -492,8 +496,8 @@ func (b *backend) skillStart(_ context.Context, mod api.Module, nptr, nlen, pptr
 				res.InputTokens = ce.InputTokens
 				res.OutputTokens = ce.OutputTokens
 			}
-			b.deliver(tok, res)
 			delivered = true
+			b.deliver(tok, res)
 		}()
 		return tok
 	}

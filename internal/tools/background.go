@@ -424,6 +424,15 @@ func (m *BackgroundManager) Start(ctx context.Context, command string, mode Back
 		// panic unwinds, or the waiter below would block on it forever.
 		defer func() { _ = panics.Error(recover(), "background process reader", "id", id) }()
 		defer close(readerDone)
+		// What this goroutine really owns is draining pr. cmd.Stdout is an
+		// *io.PipeWriter, so os/exec copies into it from a goroutine of its own
+		// that cmd.Wait blocks on — a reader that stops without closing its end
+		// leaves that copy blocked on an undrained pipe forever, and with it
+		// Wait, finish, the exit notification, and the child process itself.
+		// Closing pr fails the copy instead, which is how the panic surfaces as
+		// an exit status rather than a task stuck on "running". Redundant on the
+		// normal path, where the scan ends at EOF.
+		defer pr.Close()
 		scanner := bufio.NewScanner(pr)
 		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 		for scanner.Scan() {
