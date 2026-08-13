@@ -4,7 +4,7 @@
   import {
     running, activeSessionId, chatStreaming, sessions, sessionGroups,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
-    globalPermissionMode, nativeShell, activeAgent, pendingModel, view, settingsModalOpen,
+    globalPermissionMode, nativeShell, localAccess, activeAgent, pendingModel, view, settingsModalOpen,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
@@ -30,9 +30,13 @@
   type Attachment = { id?: string; name: string; mime_type?: string; data_url?: string; path?: string; local_path?: string; uploading?: boolean }
 
   // Reject oversized attachments client-side with a clear message rather than
-  // letting the upload fail late (or bloating a WS message with a huge inline
-  // image). Keep in sync with maxUploadBytes in internal/server/upload_handler.go.
-  const MAX_ATTACHMENT_BYTES = 32 * 1024 * 1024
+  // letting them fail late. Images keep a conservative cap: they are canvas-
+  // decoded for compression and ride inline as data URLs. Other files stream
+  // to ~/.octo/uploads and are read from disk by the agent, so they only stop
+  // at the server's much larger request cap — keep MAX_FILE_BYTES in sync with
+  // maxUploadBytes in internal/server/upload_handler.go.
+  const MAX_IMAGE_BYTES = 32 * 1024 * 1024
+  const MAX_FILE_BYTES = 512 * 1024 * 1024
 
   let text = $state('')
   // Per-session composer draft: keyed by session id so switching sessions
@@ -44,6 +48,7 @@
   let attachmentsBySession: Record<string, Attachment[]> = {}
   let draftSid = ''
   let textareaEl = $state<HTMLTextAreaElement | null>(null)
+  let fileInputEl = $state<HTMLInputElement | null>(null)
   let skillMenuEl = $state<HTMLDivElement | null>(null)
   let attachments = $state<Attachment[]>([])
   let dragOver = $state(false)
@@ -100,6 +105,43 @@
     text // track the bound value so the effect re-runs when it changes
     autoResize()
   })
+
+  // The attach button. Same machine as the agent: attach by real path, no
+  // upload (and no size cap — the agent reads the file in place).
+  //  - desktop shell → native OS file dialog
+  //  - localhost web → in-app file picker (server-side fs browse)
+  // Remote web → browser upload (front and back aren't co-located).
+  async function openAttach() {
+    if (get(nativeShell)) {
+      try {
+        const res = await api.nativePickFile(workingDir)
+        if (!res.cancelled && res.path) attachLocalFile(res.path)
+      } catch (e: any) {
+        showToast(e.message ?? 'Failed to open file dialog', 'error')
+      }
+      return
+    }
+    if (get(localAccess)) {
+      pickerMode = 'file'
+      pickerOpen = true
+      return
+    }
+    fileInputEl?.click()
+  }
+
+  // Attach a real local file by its absolute path — the agent reads it in place
+  // (see server parseUserFiles' local_path handling), no upload round-trip.
+  function attachLocalFile(path: string) {
+    const name = path.split(/[/\\]/).pop() || path
+    attachTo(sid, { name, local_path: path })
+  }
+
+  function onFilesPicked(e: Event) {
+    const input = e.target as HTMLInputElement
+    const files = Array.from(input.files ?? [])
+    for (const f of files) addAttachment(f)
+    input.value = ''
+  }
 
   // Attachment reads (image FileReader, non-image upload) resolve asynchronously.
   // These helpers land the result on the session that STARTED the read, not
@@ -187,13 +229,14 @@
 
   async function addAttachment(file: File, fallbackName?: string) {
     const name = file.name || fallbackName || 'attachment'
-    if (file.size > MAX_ATTACHMENT_BYTES) {
-      showToast($t('chat.attach_too_large'), 'error')
+    const isImage = file.type.startsWith('image/')
+    if (file.size > (isImage ? MAX_IMAGE_BYTES : MAX_FILE_BYTES)) {
+      showToast($t(isImage ? 'chat.attach_img_too_large' : 'chat.attach_too_large'), 'error')
       return
     }
     const originSid = sid
     // Images ride inline as a data URL (decoded into an image block server-side).
-    if (file.type.startsWith('image/')) {
+    if (isImage) {
       // Stage a placeholder synchronously (same pattern as the upload branch
       // below): canvas compression takes ~100ms-1s for a large photo, and a
       // send() in that window must be blocked — not fire with text only while
@@ -679,6 +722,7 @@
   let dirDraft = $state('')
   let dirSaving = $state(false)
   let pickerOpen = $state(false)
+  let pickerMode = $state<'folder' | 'file'>('folder')
   const reasoningLevels = ['off', 'low', 'medium', 'high', 'xhigh', 'max']
   const showReasoningIcon = $derived(showReasoning ? 'ant-design:eye-outlined' : 'ant-design:eye-invisible-outlined')
 
@@ -831,11 +875,18 @@
       }
       return
     }
+    pickerMode = 'folder'
     pickerOpen = true
   }
 
-  // The in-app picker sets the session working directory.
+  // The in-app picker either attaches a file (openAttach) or sets the session
+  // working directory, depending on the mode it was opened in.
   async function onPickerSelect(path: string) {
+    if (pickerMode === 'file') {
+      attachLocalFile(path)
+      pickerOpen = false
+      return
+    }
     if (await applyWorkingDir(path)) pickerOpen = false
   }
 
@@ -1140,6 +1191,16 @@
         </div>
       {/if}
       <div class="meta-row">
+        <input
+          bind:this={fileInputEl}
+          type="file"
+          multiple
+          style="display:none"
+          onchange={onFilesPicked}
+        />
+        <button class="meta-chip" title={$t('chat.attach_file')} onclick={openAttach}>
+          <iconify-icon icon="ant-design:paper-clip-outlined" width="13"></iconify-icon>
+        </button>
         <div class="picker">
           <button class="meta-chip" onclick={(e) => { e.stopPropagation(); const open = modelMenu; closeMenus(); modelMenu = !open; if (!open) void refreshModels() }}>
             <iconify-icon icon="ant-design:robot-outlined" width="13"></iconify-icon>
@@ -1264,7 +1325,7 @@
 {#if pickerOpen}
   <FolderPickerModal
     initialPath={workingDir}
-    mode="folder"
+    mode={pickerMode}
     onSelect={onPickerSelect}
     onClose={() => (pickerOpen = false)}
   />

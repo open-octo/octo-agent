@@ -76,13 +76,55 @@ func TestHandleUpload_RejectsOversized(t *testing.T) {
 	ts := httptest.NewServer(srv.http.Handler)
 	defer ts.Close()
 
+	// Lower the cap so the test doesn't have to build a >512 MB body. This
+	// mutates package state: tests in this package must stay serial (they
+	// already are — t.Setenv forbids t.Parallel).
+	old := maxUploadBytes
+	maxUploadBytes = 1 << 20
+	t.Cleanup(func() { maxUploadBytes = old })
+
 	body, ct := multipartUpload(t, "huge.bin", make([]byte, maxUploadBytes+1))
 	resp, err := http.Post(ts.URL+"/api/upload", ct, body)
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400 for oversized upload", resp.StatusCode)
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want 413 for oversized upload", resp.StatusCode)
+	}
+}
+
+// A body larger than the multipart memory buffer but under the request cap
+// streams through the temp-file spill path and is accepted — i.e. the cap
+// raise past the old 32 MB limit actually took effect.
+func TestHandleUpload_AcceptsFileBeyondMemoryBuffer(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	ts := httptest.NewServer(srv.http.Handler)
+	defer ts.Close()
+
+	body, ct := multipartUpload(t, "deck.pptx", make([]byte, maxUploadMemory+1))
+	resp, err := http.Post(ts.URL+"/api/upload", ct, body)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var out struct {
+		Files []struct {
+			URL   string `json:"url"`
+			Error string `json:"error"`
+		} `json:"files"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Files) != 1 || out.Files[0].Error != "" || !strings.HasPrefix(out.Files[0].URL, "/api/uploads/") {
+		t.Fatalf("files = %+v", out.Files)
 	}
 }
