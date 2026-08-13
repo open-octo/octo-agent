@@ -334,6 +334,23 @@ type Agent struct {
 	// so runLoop can detect when the model is stuck repeating the same call(s).
 	// Guarded by the implicit serialisation of runLoop (single goroutine).
 	recentToolCalls [][]toolCallFingerprint
+
+	// TurnEndReminder, when set, is consulted at the moment a turn would end:
+	// the model answered in prose and nothing else is pending. A non-empty
+	// return is appended as a user message and the loop runs one more round, so
+	// the model can act on it before the turn really closes; "" ends the turn.
+	//
+	// It is the seam for harness-side end-of-turn bookkeeping the model tends
+	// to forget — today the task-checklist guard (tools.PendingTaskReminder),
+	// which catches a plan left with an in_progress task after the model has
+	// already reported the work done. The agent layer stays ignorant of what
+	// is being checked; the ctx is the running turn's, so a ctx-scoped store
+	// (server / IM) resolves the same way the tools do.
+	//
+	// Fired at most once per turn: a model that ignores the reminder must not
+	// be able to hold the turn open. Wired only on top-level agents — a
+	// sub-agent shares the parent's checklist and must not report on it.
+	TurnEndReminder func(ctx context.Context) string
 }
 
 // toolCallFingerprint is a lightweight hash of a single tool-use block.
@@ -982,6 +999,7 @@ func (a *Agent) runLoop(
 	streamStalls := 0      // transient mid-stream stalls re-issued for the current round
 	truncationResumes := 0 // layer-2 resume-and-chunk budget
 	escalateExhausted := false
+	reminded := false // TurnEndReminder already fired this turn
 	a.turnIterations = 0
 	for i := 0; limit == unlimitedTurns || i < limit; i++ {
 		a.turnIterations = i + 1
@@ -1234,6 +1252,21 @@ func (a *Agent) runLoop(
 		// once-only — it fires only when we actually return below.
 		if a.Inbox.HasPending() {
 			continue
+		}
+
+		// End-of-turn bookkeeping the model forgot (a task left in_progress
+		// after it reported the work done). Inject the reminder as a user
+		// message and run one more round so it can fix the record inside this
+		// turn — the once-per-turn latch keeps a model that ignores it from
+		// holding the turn open.
+		// (Skipped on the last allowed iteration: the extra round would run out
+		// of loop budget and turn a clean finish into a max-turns stop.)
+		if !reminded && a.TurnEndReminder != nil && (limit == unlimitedTurns || i+1 < limit) {
+			if note := a.TurnEndReminder(ctx); note != "" {
+				reminded = true
+				a.History.Append(NewUserMessage(note))
+				continue
+			}
 		}
 
 		if handler != nil {

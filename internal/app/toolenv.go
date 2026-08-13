@@ -48,6 +48,11 @@ func NewSessionToolEnv(
 	// tasks.New() here is why the panel used to vanish). Callers that want a plan
 	// reset between turns do it via CloseSessionTaskStore before this call.
 	ctx = tools.WithTaskStore(ctx, tools.SessionTaskStore(sessionID))
+	// Turn-end guard over that same store: a plan left with an in_progress task
+	// after the model reported the work done gets one reminder to file the
+	// closing task_update. It resolves the store from the turn's ctx, so it
+	// reads exactly what the task_* tools just wrote.
+	a.TurnEndReminder = tools.PendingTaskReminder
 
 	mkSpawner := func() tools.Spawner {
 		return NewSpawner(a, executor, func(ctx context.Context) []agent.ToolDefinition {

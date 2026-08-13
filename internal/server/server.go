@@ -3471,6 +3471,12 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		// The task store lives on the session, so the task list persists
 		// across messages in this chat.
 		ctx = tools.WithTaskStore(ctx, sess.Tasks)
+		// Same turn-end guard the CLI and web turns get (app.WireTools /
+		// app.NewSessionToolEnv): a plan whose last step is still in_progress
+		// when the model stops talking earns one reminder to file the closing
+		// task_update. This path builds its tool env by hand, so it has to wire
+		// the guard itself.
+		sess.Agent.TurnEndReminder = tools.PendingTaskReminder
 		// Per-chat background manager: completions are surfaced to the model
 		// via the Inbox and also trigger idle follow-up turns above.
 		ctx = tools.WithBackgroundManager(ctx, tools.SessionBackgroundManager("im:"+string(sess.Key)))
