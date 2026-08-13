@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/open-octo/octo-agent/internal/panics"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/experimental"
@@ -402,6 +403,12 @@ func (b *backend) agentStart(_ context.Context, mod api.Module, ptr, length, mpt
 		// Replayed from journal: deliver without calling Agent.
 		ce := b.cached[seq]
 		go func() {
+			delivered := false
+			defer func() {
+				if err := panics.Error(recover(), "workflow agent() replay", "token", tok); err != nil && !delivered {
+					b.deliver(tok, AgentResult{Err: err})
+				}
+			}()
 			var res AgentResult
 			if ce.ErrMsg != "" {
 				res.Err = errors.New(ce.ErrMsg)
@@ -411,22 +418,33 @@ func (b *backend) agentStart(_ context.Context, mod api.Module, ptr, length, mpt
 				res.OutputTokens = ce.OutputTokens
 			}
 			b.deliver(tok, res)
+			delivered = true
 		}()
 		return tok
 	}
 
 	go func() {
+		// The script is blocked on this token until deliver runs, and the run
+		// isn't finished until the script returns — so a panicking Agent has to
+		// deliver a failure, or the whole workflow (and any Wait on it) hangs.
+		delivered := false
+		settle := func(res AgentResult) { delivered = true; b.deliver(tok, res) }
+		defer func() {
+			if err := panics.Error(recover(), "workflow agent() call", "token", tok); err != nil && !delivered {
+				b.deliver(tok, AgentResult{Err: err})
+			}
+		}()
 		if b.sem != nil {
 			select {
 			case b.sem <- struct{}{}:
 				defer func() { <-b.sem }()
 			case <-b.ctx.Done():
-				b.deliver(tok, AgentResult{Err: b.ctx.Err()})
+				settle(AgentResult{Err: b.ctx.Err()})
 				return
 			}
 		}
 		res := b.opt.Agent(b.ctx, prompt, opts)
-		b.deliver(tok, res)
+		settle(res)
 	}()
 	return tok
 }
@@ -460,6 +478,12 @@ func (b *backend) skillStart(_ context.Context, mod api.Module, nptr, nlen, pptr
 		// Replayed from journal: deliver the stored outputs without re-running.
 		ce := b.cached[seq]
 		go func() {
+			delivered := false
+			defer func() {
+				if err := panics.Error(recover(), "workflow skill() replay", "token", tok); err != nil && !delivered {
+					b.deliver(tok, AgentResult{Err: err})
+				}
+			}()
 			var res AgentResult
 			if ce.ErrMsg != "" {
 				res.Err = errors.New(ce.ErrMsg)
@@ -469,25 +493,34 @@ func (b *backend) skillStart(_ context.Context, mod api.Module, nptr, nlen, pptr
 				res.OutputTokens = ce.OutputTokens
 			}
 			b.deliver(tok, res)
+			delivered = true
 		}()
 		return tok
 	}
 
 	go func() {
+		// Same contract as agent() above: deliver or the script waits forever.
+		delivered := false
+		settle := func(res AgentResult) { delivered = true; b.deliver(tok, res) }
+		defer func() {
+			if err := panics.Error(recover(), "workflow skill() call", "token", tok); err != nil && !delivered {
+				b.deliver(tok, AgentResult{Err: err})
+			}
+		}()
 		if b.sem != nil {
 			select {
 			case b.sem <- struct{}{}:
 				defer func() { <-b.sem }()
 			case <-b.ctx.Done():
-				b.deliver(tok, AgentResult{Err: b.ctx.Err()})
+				settle(AgentResult{Err: b.ctx.Err()})
 				return
 			}
 		}
 		if b.opt.Skill == nil {
-			b.deliver(tok, AgentResult{Err: errors.New("skill() is not available in this run")})
+			settle(AgentResult{Err: errors.New("skill() is not available in this run")})
 			return
 		}
-		b.deliver(tok, b.opt.Skill(b.ctx, name, params, schema))
+		settle(b.opt.Skill(b.ctx, name, params, schema))
 	}()
 	return tok
 }

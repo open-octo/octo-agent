@@ -10,6 +10,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/panics"
 )
 
 // maxBgOutputBytes caps how much output is retained per background process.
@@ -418,6 +420,9 @@ func (m *BackgroundManager) Start(ctx context.Context, command string, mode Back
 
 	// Reader: forward combined output into the capped buffer.
 	go func() {
+		// Registered first so it runs last: readerDone is still closed as the
+		// panic unwinds, or the waiter below would block on it forever.
+		defer func() { _ = panics.Error(recover(), "background process reader", "id", id) }()
 		defer close(readerDone)
 		scanner := bufio.NewScanner(pr)
 		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -436,11 +441,22 @@ func (m *BackgroundManager) Start(ctx context.Context, command string, mode Back
 	// Waiter: wait for the process, close pipe so the reader sees EOF,
 	// then wait for the reader to drain before firing onExit.
 	go func() {
+		finished := false
+		// Until finish runs, the process reads as "running" to every status
+		// query and to the exit-notification path — so a panic before it has
+		// to record an exit itself, or the task hangs in the UI forever. The
+		// caller-supplied onExit hook below is the reachable panic source.
+		defer func() {
+			if err := panics.Error(recover(), "background process waiter", "id", id); err != nil && !finished {
+				p.finish(err)
+			}
+		}()
 		err := cmd.Wait()
 		_ = pw.Close()
 		_ = stdinW.Close() // close stdin so any blocked reads on the process side get EOF
 		<-readerDone       // ensures reader flushed all pipe data
 		p.finish(err)
+		finished = true
 
 		m.mu.Lock()
 		hook := m.onExit

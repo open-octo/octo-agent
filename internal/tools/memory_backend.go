@@ -10,6 +10,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/hooks"
 	"github.com/open-octo/octo-agent/internal/memorybackend"
+	"github.com/open-octo/octo-agent/internal/panics"
 )
 
 // activeMemoryBackend, when non-nil, backs the `memory_recall` tool and the
@@ -145,6 +146,9 @@ func RegisterMemoryBackendHooks(e *hooks.Engine) {
 		// lands in long-term memory and can't resurface via memory_recall.
 		content = agent.StripSystemReminders(content)
 		go func() {
+			// Fire-and-forget: nothing waits on this, so logging the panic is
+			// the whole obligation.
+			defer func() { _ = panics.Error(recover(), "memory backend store") }()
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			_ = b.Store(ctx, content)

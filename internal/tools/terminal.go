@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/panics"
 )
 
 // TerminalTimeout is the DEFAULT wait for a synchronous command when the call
@@ -311,6 +312,10 @@ func (t TerminalTool) ExecuteStream(
 	if progress != nil {
 		progressCh = make(chan string, 128)
 		go func() {
+			// A panicking progress handler costs this command its live output —
+			// senders drop lines once nobody is receiving (the select below
+			// falls through to default) — but it must not cost the process.
+			defer func() { _ = panics.Error(recover(), "terminal progress handler") }()
 			for line := range progressCh {
 				progress(line)
 			}

@@ -15,6 +15,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/browser"
 	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/panics"
 )
 
 // browserSession holds the per-session Chrome connection, reused across tool
@@ -337,8 +338,11 @@ func browserPage(ctx context.Context) (*browser.Page, *browser.Browser, error) {
 		// stall the reconnect — wait up to 3s for it to finish, then move on.
 		closeDone := make(chan struct{})
 		go func() {
+			// Deferred so a panicking close still releases the wait below
+			// immediately instead of parking the reconnect for the full 3s.
+			defer close(closeDone)
+			defer func() { _ = panics.Error(recover(), "browser session close") }()
 			closeSession(browserSession.b, nil)
-			close(closeDone)
 		}()
 		select {
 		case <-closeDone:

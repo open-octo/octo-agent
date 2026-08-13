@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/panics"
 )
 
 // maxSubAgentResultBytes caps how much result text is retained per async sub-agent.
@@ -374,6 +376,18 @@ func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnR
 	done := make(chan outcome, 1)
 
 	go func() {
+		var o outcome
+		// The select below blocks on `done` while holding a sync-concurrency
+		// slot, so the outcome has to be delivered even when the spawner
+		// panics: recovering without sending would turn a crash into a tool
+		// call that never returns and a slot that is never released.
+		defer func() {
+			if err := panics.Error(recover(), "sub-agent spawn", "agent_id", id); err != nil {
+				o = outcome{err: err}
+				a.setDone(err, "")
+			}
+			done <- o
+		}()
 		res, err := m.spawner.Spawn(spawnCtx, req)
 		if err == nil {
 			a.mu.Lock()
@@ -386,7 +400,7 @@ func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnR
 			stopReason = res.StopReason
 		}
 		a.setDone(err, stopReason)
-		done <- outcome{res: res, err: err}
+		o = outcome{res: res, err: err}
 	}()
 
 	select {
@@ -409,6 +423,10 @@ func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnR
 		m.mu.Unlock()
 
 		go func() {
+			// Registered first so it runs last: the async-budget release below
+			// still happens while the panic unwinds. The exit notification hook
+			// is caller-supplied, which is what makes this reachable.
+			defer func() { _ = panics.Error(recover(), "sub-agent background wait", "agent_id", id) }()
 			defer func() {
 				m.mu.Lock()
 				m.activeAsync--
@@ -605,6 +623,16 @@ func (m *SubAgentManager) Start(req SpawnRequest) (string, error) {
 	}
 
 	go func() {
+		settled := false
+		// Registered first so it runs last, after the defers below have
+		// released the async budget and cleared the live panel. Nothing else
+		// ever clears this agent's busy flag — the goal loop's idle check reads
+		// it — so a panic before setDone has to settle the agent itself.
+		defer func() {
+			if err := panics.Error(recover(), "sub-agent spawn", "agent_id", id); err != nil && !settled {
+				agent.setDone(err, "")
+			}
+		}()
 		defer func() {
 			m.mu.Lock()
 			m.activeAsync--
@@ -625,6 +653,7 @@ func (m *SubAgentManager) Start(req SpawnRequest) (string, error) {
 			stopReason = res.StopReason
 		}
 		agent.setDone(err, stopReason)
+		settled = true
 
 		m.mu.Lock()
 		hook := m.onExit
@@ -690,6 +719,16 @@ func (m *SubAgentManager) runContinue(agentID, message string) {
 		return
 	}
 
+	// Send marks the agent busy before launching this, and setDone below is the
+	// only thing that ever clears it — so a panicking Continue would leave the
+	// agent permanently "working" to the UI and to the goal loop's idle check.
+	settled := false
+	defer func() {
+		if err := panics.Error(recover(), "sub-agent continue", "agent_id", agentID); err != nil && !settled {
+			agent.setDone(err, "")
+		}
+	}()
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Replace the agent's cancel so Kill targets the current operation. Call the
@@ -731,6 +770,7 @@ func (m *SubAgentManager) runContinue(agentID, message string) {
 		stopReason = res.StopReason
 	}
 	agent.setDone(err, stopReason)
+	settled = true
 
 	m.mu.Lock()
 	hook := m.onExit
