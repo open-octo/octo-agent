@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/panics"
 	"github.com/open-octo/octo-agent/internal/workflow"
 )
 
@@ -281,6 +282,18 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 	}
 
 	go func() {
+		finished := false
+		// finish closes the channel Wait blocks on, and Wait's own cancellation
+		// path waits on it too — so a panic that skipped it would leave a
+		// foreground workflow_start blocked with no way out. What's reachable
+		// here is the emit and hook calls after the run itself: a panic inside
+		// workflow.Run's own host functions never gets this far, because wazero
+		// recovers those and returns them as a Call error instead.
+		defer func() {
+			if err := panics.Error(recover(), "workflow run", "run_id", id); err != nil && !finished {
+				run.finish("", "", err.Error(), time.Now())
+			}
+		}()
 		defer func() {
 			m.mu.Lock()
 			m.active--
@@ -310,6 +323,7 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 			errMsg = err.Error()
 		}
 		run.finish(res.Output, res.RunID, errMsg, time.Now())
+		finished = true
 
 		status := "done"
 		if errMsg != "" {

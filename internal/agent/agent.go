@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/hooks"
+	"github.com/open-octo/octo-agent/internal/panics"
 )
 
 // Sender is the minimal slice of provider.Provider the Agent depends on:
@@ -1874,6 +1875,19 @@ func dispatchTools(ctx context.Context, executor ToolExecutor, blocks []ContentB
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
+				// Only the parallel branch needs this: the serial one below runs
+				// on the turn's own goroutine, where the caller's recover (the
+				// server's recoverTurn) still applies. Here a panicking tool
+				// would kill the process — and the desktop build hosts the
+				// server in it. An empty slot is not an option either: every
+				// tool_use must come back with a tool_result or the next request
+				// is malformed, so the panic is reported as this call's failure.
+				defer func() {
+					if err := panics.Error(recover(), "tool call", "tool", calls[i].block.Name); err != nil && resultSlices[i] == nil {
+						resultSlices[i] = toolResultBlocks(calls[i].block.ID, ToolResult{}, err)
+						emit(calls[i].block.Name, resultSlices[i])
+					}
+				}()
 				res, err := executor.Execute(ctx, calls[i].block.Name, calls[i].block.Input)
 				resultSlices[i] = toolResultBlocks(calls[i].block.ID, res, err)
 				emit(calls[i].block.Name, resultSlices[i])

@@ -144,6 +144,19 @@ func (c *Connection) refreshSurfaces(method string) {
 	c.refreshing = true
 	c.refreshMu.Unlock()
 
+	// refreshing is what gates every later refresh; leaving it set would
+	// collapse them all into a pending flag nobody ever acts on, so this
+	// connection's tool list would silently freeze at whatever it last saw.
+	// The recover above this one (the notification goroutine) logs the panic.
+	defer func() {
+		if r := recover(); r != nil {
+			c.refreshMu.Lock()
+			c.refreshing = false
+			c.refreshMu.Unlock()
+			panic(r)
+		}
+	}()
+
 	for {
 		c.refreshOnce(method)
 

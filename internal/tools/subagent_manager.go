@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/panics"
 )
 
 // maxSubAgentResultBytes caps how much result text is retained per async sub-agent.
@@ -374,6 +376,18 @@ func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnR
 	done := make(chan outcome, 1)
 
 	go func() {
+		var o outcome
+		// The select below blocks on `done` while holding a sync-concurrency
+		// slot, so the outcome has to be delivered even when the spawner
+		// panics: recovering without sending would turn a crash into a tool
+		// call that never returns and a slot that is never released.
+		defer func() {
+			if err := panics.Error(recover(), "sub-agent spawn", "agent_id", id); err != nil {
+				o = outcome{err: err}
+				a.setDone(err, "")
+			}
+			done <- o
+		}()
 		res, err := m.spawner.Spawn(spawnCtx, req)
 		if err == nil {
 			a.mu.Lock()
@@ -386,7 +400,7 @@ func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnR
 			stopReason = res.StopReason
 		}
 		a.setDone(err, stopReason)
-		done <- outcome{res: res, err: err}
+		o = outcome{res: res, err: err}
 	}()
 
 	select {
@@ -409,6 +423,10 @@ func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnR
 		m.mu.Unlock()
 
 		go func() {
+			// Registered first so it runs last: the async-budget release below
+			// still happens while the panic unwinds. The exit notification hook
+			// is caller-supplied, which is what makes this reachable.
+			defer func() { _ = panics.Error(recover(), "sub-agent background wait", "agent_id", id) }()
 			defer func() {
 				m.mu.Lock()
 				m.activeAsync--
@@ -605,6 +623,10 @@ func (m *SubAgentManager) Start(req SpawnRequest) (string, error) {
 	}
 
 	go func() {
+		settled := false
+		// Outermost, so it also covers the defers below — sink is
+		// caller-supplied and can panic in its own right.
+		defer func() { _ = panics.Error(recover(), "sub-agent cleanup", "agent_id", id) }()
 		defer func() {
 			m.mu.Lock()
 			m.activeAsync--
@@ -615,6 +637,15 @@ func (m *SubAgentManager) Start(req SpawnRequest) (string, error) {
 			// clears the live-panel entry, even on spawn error.
 			defer sink(SubAgentEvent{Kind: "done"})
 		}
+		// Innermost, so it runs before the "done" event above: nothing else ever
+		// clears this agent's busy flag — the goal loop's idle check reads it —
+		// and the event carries the stop reason read off that same state, so the
+		// agent has to be settled before the panel is told it finished.
+		defer func() {
+			if err := panics.Error(recover(), "sub-agent spawn", "agent_id", id); err != nil && !settled {
+				agent.setDone(err, "")
+			}
+		}()
 		res, err := m.spawner.Spawn(ctx, req)
 		stopReason := ""
 		if err == nil {
@@ -625,6 +656,7 @@ func (m *SubAgentManager) Start(req SpawnRequest) (string, error) {
 			stopReason = res.StopReason
 		}
 		agent.setDone(err, stopReason)
+		settled = true
 
 		m.mu.Lock()
 		hook := m.onExit
@@ -690,6 +722,8 @@ func (m *SubAgentManager) runContinue(agentID, message string) {
 		return
 	}
 
+	settled := false
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Replace the agent's cancel so Kill targets the current operation. Call the
@@ -716,6 +750,24 @@ func (m *SubAgentManager) runContinue(agentID, message string) {
 		sink(SubAgentEvent{Kind: "started"})
 	}
 
+	// Send marks the agent busy before launching this round, and setDone below
+	// is the only thing that ever clears it — so a panicking Continue would
+	// leave the agent permanently "working" to the UI and to the goal loop's
+	// idle check. The round's context and its live-panel entry are this
+	// goroutine's to release too; registered here rather than at the top of the
+	// function because both only exist from this point on.
+	defer func() {
+		err := panics.Error(recover(), "sub-agent continue", "agent_id", agentID)
+		if err == nil || settled {
+			return
+		}
+		cancel()
+		agent.setDone(err, "")
+		if sink != nil {
+			sink(SubAgentEvent{Kind: "done"})
+		}
+	}()
+
 	// Continue addresses the child by its Spawner-side id, not the manager's
 	// agent_N handle — the two id spaces are distinct.
 	res, err := m.spawner.Continue(ctx, backingID, message)
@@ -731,6 +783,7 @@ func (m *SubAgentManager) runContinue(agentID, message string) {
 		stopReason = res.StopReason
 	}
 	agent.setDone(err, stopReason)
+	settled = true
 
 	m.mu.Lock()
 	hook := m.onExit

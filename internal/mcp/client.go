@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/panics"
 )
 
 // defaultCallTimeout bounds a single request/response when the caller's context
@@ -419,7 +421,14 @@ func (c *Client) receiveLoop() {
 			fn := c.onNotification
 			c.notifyMu.Unlock()
 			if fn != nil {
-				go fn(msg.Method)
+				// The handler is caller-supplied and runs detached, with
+				// nothing above it to recover — a server that fires a
+				// notification mid-tool-call could otherwise take the whole
+				// process down.
+				go func() {
+					defer func() { _ = panics.Error(recover(), "mcp notification handler", "method", msg.Method) }()
+					fn(msg.Method)
+				}()
 			}
 		}
 		// Server-initiated request: ignored — see the doc comment above.
