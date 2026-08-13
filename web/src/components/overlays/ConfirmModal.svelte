@@ -140,7 +140,12 @@
 }
 .modal {
   width: 100%; max-width: 480px;
-  background: var(--warning-bg);
+  /* #2103: --warning-bg is a translucent tint meant for badges and notices
+     that already sit on an opaque surface. As a floating panel's background
+     it left the whole dialog at 16% opacity, so the chat behind it bled
+     through the very content being approved. Layer the tint over an opaque
+     surface instead — same warm colour, nothing shows through. */
+  background: linear-gradient(var(--warning-bg), var(--warning-bg)), var(--bg-container);
   border: 1px solid var(--warning-border);
   border-radius: 12px;
   overflow: hidden;
@@ -167,7 +172,11 @@
 }
 .desc {
   margin: 0;
-  font-size: 13px; line-height: 1.6; color: var(--text-secondary);
+  /* #2103: full-strength text, not --text-secondary. This line says what is
+     about to be approved, and against the tinted panel the secondary grey
+     lands at ~3.2:1 (light) / ~3.6:1 (dark) — under the 4.5:1 AA floor for
+     13px. The rest of the modal's greys are chrome; this one is content. */
+  font-size: 13px; line-height: 1.6; color: var(--text);
 }
 .terminal {
   margin: 0; padding: 10px 12px;
@@ -182,6 +191,10 @@
 /* #1105: edit_file preview — same classification/coloring ToolGroup.svelte
    uses for the post-execution diff card, scoped to this modal's spacing. */
 .diff-block {
+  /* #2103: its own surface, so the half-opaque add/rm line fills blend with
+     the neutral container the way they do in ToolGroup's diff card, not with
+     the modal's orange tint. */
+  background: var(--bg-container);
   border: 1px solid var(--border); border-radius: 6px;
   overflow: hidden; overflow-y: auto; max-height: 220px;
   font-size: 12px; line-height: 1.6;
