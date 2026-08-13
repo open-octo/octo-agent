@@ -477,6 +477,25 @@ func TestAgentSpawner_ChildStartsFresh(t *testing.T) {
 	}
 }
 
+// A child must not inherit the parent's turn-end guard: the task checklist is
+// the parent's, and a sub-agent ending its round is not the plan closing.
+func TestAgentSpawner_ChildHasNoTurnEndReminder(t *testing.T) {
+	send := &subAgentSender{reply: "ok"}
+	parent := agent.New(send, "parent-model")
+	parent.TurnEndReminder = func(context.Context, []string) string {
+		return "<system-reminder>close the plan</system-reminder>"
+	}
+
+	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
+	if _, err := sp.Spawn(context.Background(), tools.SpawnRequest{Prompt: "go"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if sp.reg.m[onlyChildID(t, sp)].agent.TurnEndReminder != nil {
+		t.Error("a child must not carry the parent's turn-end reminder")
+	}
+}
+
 // onlyChildID returns the single registered child id, failing if there isn't
 // exactly one.
 func onlyChildID(t *testing.T, sp *Spawner) string {

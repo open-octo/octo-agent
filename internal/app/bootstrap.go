@@ -109,10 +109,15 @@ func WireTools(a *agent.Agent, enableTasks bool) (ToolEnv, func()) {
 	}
 	if enableTasks {
 		tools.SetTaskStore(tasks.New())
+		// Close the loop on the checklist: a turn that worked the plan and then
+		// ends with its last step still in_progress gets one reminder to file
+		// the closing task_update before it really ends.
+		a.TurnEndReminder = tools.PendingTaskReminder
 		prev := cleanup
 		cleanup = func() {
 			prev()
 			tools.SetTaskStore(nil)
+			a.TurnEndReminder = nil
 		}
 	}
 

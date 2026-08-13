@@ -334,6 +334,26 @@ type Agent struct {
 	// so runLoop can detect when the model is stuck repeating the same call(s).
 	// Guarded by the implicit serialisation of runLoop (single goroutine).
 	recentToolCalls [][]toolCallFingerprint
+
+	// TurnEndReminder, when set, is consulted at the moment a turn would end:
+	// the model answered in prose and nothing else is pending. A non-empty
+	// return is appended as a user message and the loop runs one more round, so
+	// the model can act on it before the turn really closes; "" ends the turn.
+	// toolsUsed carries the tool names dispatched so far this turn, so a
+	// reminder can scope itself to turns that actually touched what it guards
+	// instead of re-billing a round-trip on every turn of the session.
+	//
+	// It is the seam for harness-side end-of-turn bookkeeping the model tends
+	// to forget — today the task-checklist guard (tools.PendingTaskReminder),
+	// which catches a plan left with an in_progress task after the model has
+	// already reported the work done. The agent layer stays ignorant of what
+	// is being checked; the ctx is the running turn's, so a ctx-scoped store
+	// (server / IM) resolves the same way the tools do.
+	//
+	// Fired at most once per turn: a model that ignores the reminder must not
+	// be able to hold the turn open. Wired only on top-level agents — a
+	// sub-agent shares the parent's checklist and must not report on it.
+	TurnEndReminder func(ctx context.Context, toolsUsed []string) string
 }
 
 // toolCallFingerprint is a lightweight hash of a single tool-use block.
@@ -982,6 +1002,16 @@ func (a *Agent) runLoop(
 	streamStalls := 0      // transient mid-stream stalls re-issued for the current round
 	truncationResumes := 0 // layer-2 resume-and-chunk budget
 	escalateExhausted := false
+	reminded := false // TurnEndReminder already fired this turn
+	// reminderCarry holds the answer the model had already delivered when the
+	// turn-end reminder fired, while the extra round runs. If that round
+	// answers in prose too (no tool call in between), both texts belong to one
+	// unbroken stretch of assistant speech: every UI streamed them into the
+	// same block, so the final Reply — which the web transport broadcasts as
+	// the block's settled content — has to carry both or the answer the user
+	// just read gets overwritten by the bookkeeping line. A tool call in
+	// between opens a new block, so it clears the carry.
+	reminderCarry := ""
 	a.turnIterations = 0
 	for i := 0; limit == unlimitedTurns || i < limit; i++ {
 		a.turnIterations = i + 1
@@ -1007,6 +1037,16 @@ func (a *Agent) runLoop(
 					a.History.Append(Message{Role: RoleUser, Blocks: blocks})
 				} else {
 					a.History.Append(NewUserMessage(it.Text))
+				}
+			}
+			// A steer the user can see (every UI hides pure injected context —
+			// same StripSystemReminders test they render by) puts a message
+			// between the two halves of a carried reply, so they are no longer
+			// one block and must not be re-joined. See reminderCarry.
+			for _, it := range steerItems {
+				if strings.TrimSpace(StripSystemReminders(it.Text)) != "" || len(it.Blocks) > 0 {
+					reminderCarry = ""
+					break
 				}
 			}
 			if handler != nil {
@@ -1155,6 +1195,10 @@ func (a *Agent) runLoop(
 
 		if reply.StopReason == "tool_use" {
 			a.History.Append(NewToolUseMessage(reply.Blocks))
+			// A tool call ends the current stretch of assistant speech (every
+			// UI starts a new block after it), so a carried pre-reminder answer
+			// stops being part of what the final reply settles.
+			reminderCarry = ""
 
 			// ── Duplicate-tool-call loop detection ──
 			// If the model keeps issuing the exact same tool_use batch, it is
@@ -1234,6 +1278,36 @@ func (a *Agent) runLoop(
 		// once-only — it fires only when we actually return below.
 		if a.Inbox.HasPending() {
 			continue
+		}
+
+		// End-of-turn bookkeeping the model forgot (a task left in_progress
+		// after it reported the work done). Inject the reminder as a user
+		// message and run one more round so it can fix the record inside this
+		// turn — the once-per-turn latch keeps a model that ignores it from
+		// holding the turn open.
+		//
+		// Skipped in two cases: on the last allowed iteration, where the extra
+		// round would run out of loop budget and turn a clean finish into a
+		// max-turns stop; and once the turn is cancelled, where spending
+		// another provider round-trip would only widen the window in which an
+		// interrupt lands on top of an answer the model already delivered.
+		if !reminded && a.TurnEndReminder != nil && ctx.Err() == nil && (limit == unlimitedTurns || i+1 < limit) {
+			if note := a.TurnEndReminder(ctx, a.turnTools); note != "" {
+				reminded = true
+				reminderCarry = content
+				a.History.Append(NewUserMessage(note))
+				continue
+			}
+		}
+
+		// Re-attach the pre-reminder answer (see reminderCarry): this reply is
+		// the tail of a block the user has already been reading the head of.
+		if reminderCarry != "" {
+			if reply.Content != "" {
+				reply.Content = reminderCarry + "\n\n" + reply.Content
+			} else {
+				reply.Content = reminderCarry
+			}
 		}
 
 		if handler != nil {

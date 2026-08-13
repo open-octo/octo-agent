@@ -24,14 +24,20 @@ type ToolEnvCallbacks struct {
 // Contracts:
 //   - It does NOT read or write Agent.Gate. Callers set a.Gate before or after
 //     this call.
+//   - It DOES set Agent.TurnEndReminder, the only Agent field it writes: the
+//     guard belongs to the per-session task store this function stamps in, and
+//     it makes a turn that ends with the plan's last step still in_progress
+//     spend one extra provider round-trip filing the closing task_update.
+//     cleanup clears it.
 //   - It does NOT call config.Load() or permission.New(). It performs no local
 //     file I/O.
 //   - It does NOT handle process-global browser state (SetBrowserVision etc.) or
 //     workflow-discovery-cwd state. See dev-docs/octoagent-pkg-design.md.
 //   - It does NOT register or use an MCP registry.
 //
-// The returned cleanup function is currently a no-op but is reserved for future
-// resource release. It does NOT destroy the session-scoped managers (sub-agent,
+// The returned cleanup function clears Agent.TurnEndReminder and is otherwise
+// reserved for future resource release. It does NOT destroy the session-scoped
+// managers (sub-agent,
 // background, workflow), because those are cached by sessionID and reused across
 // turns. Callers manage session lifecycle resources themselves.
 func NewSessionToolEnv(
@@ -48,6 +54,11 @@ func NewSessionToolEnv(
 	// tasks.New() here is why the panel used to vanish). Callers that want a plan
 	// reset between turns do it via CloseSessionTaskStore before this call.
 	ctx = tools.WithTaskStore(ctx, tools.SessionTaskStore(sessionID))
+	// Turn-end guard over that same store: a turn that worked the plan and left
+	// a task in_progress after reporting the work done gets one reminder to
+	// file the closing task_update. It resolves the store from the turn's ctx,
+	// so it reads exactly what the task_* tools just wrote.
+	a.TurnEndReminder = tools.PendingTaskReminder
 
 	mkSpawner := func() tools.Spawner {
 		return NewSpawner(a, executor, func(ctx context.Context) []agent.ToolDefinition {
@@ -72,6 +83,6 @@ func NewSessionToolEnv(
 	}
 	ctx = tools.WithWorkflowManager(ctx, wfMgr)
 
-	cleanup := func() {}
+	cleanup := func() { a.TurnEndReminder = nil }
 	return ctx, executor, mgr, cleanup
 }

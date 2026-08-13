@@ -23,6 +23,9 @@ func TestWireTools_SetsUpEnvAndCleansUp(t *testing.T) {
 	if tools.ActiveTaskStore() == nil {
 		t.Error("WireTools(enableTasks=true) should install a task store")
 	}
+	if a.TurnEndReminder == nil {
+		t.Error("WireTools(enableTasks=true) should wire the turn-end task guard")
+	}
 	if env.SubAgentMgr == nil {
 		t.Error("WireTools should return a sub-agent manager")
 	}
@@ -53,6 +56,9 @@ func TestWireTools_SetsUpEnvAndCleansUp(t *testing.T) {
 	if tools.ActiveTaskStore() != nil {
 		t.Error("cleanup should reset the task store")
 	}
+	if a.TurnEndReminder != nil {
+		t.Error("cleanup should reset the turn-end task guard")
+	}
 	// After cleanup, the sub_agent tool should no longer be advertised.
 	for _, d := range env.ToolsFor(context.Background()) {
 		if d.Name == "sub_agent" {
@@ -71,6 +77,9 @@ func TestWireTools_TasksDisabled(t *testing.T) {
 
 	if tools.ActiveTaskStore() != nil {
 		t.Error("WireTools(enableTasks=false) must not install a task store")
+	}
+	if a.TurnEndReminder != nil {
+		t.Error("WireTools(enableTasks=false) must not wire the turn-end task guard")
 	}
 	if tools.ActiveSpawner() == nil {
 		t.Error("spawner should still be registered when tasks are disabled")
