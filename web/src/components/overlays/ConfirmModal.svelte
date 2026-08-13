@@ -172,7 +172,11 @@
 }
 .desc {
   margin: 0;
-  font-size: 13px; line-height: 1.6; color: var(--text-secondary);
+  /* #2103: full-strength text, not --text-secondary. This line says what is
+     about to be approved, and against the tinted panel the secondary grey
+     lands at ~3.2:1 (light) / ~3.6:1 (dark) — under the 4.5:1 AA floor for
+     13px. The rest of the modal's greys are chrome; this one is content. */
+  font-size: 13px; line-height: 1.6; color: var(--text);
 }
 .terminal {
   margin: 0; padding: 10px 12px;
