@@ -28,6 +28,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattn/go-isatty"
+	"github.com/open-octo/octo-agent/internal/crashlog"
 	"github.com/open-octo/octo-agent/internal/logfile"
 	"github.com/open-octo/octo-agent/internal/serveenv"
 	"github.com/open-octo/octo-agent/internal/serveproc"
@@ -136,6 +138,16 @@ func main() {
 	// that hasn't existed since install. Clear it before anything (including
 	// the updater helper below) can use it.
 	ensureValidTempDir()
+
+	// Point stderr at ~/.octo/crash.log before anything that can die runs. This
+	// process has no usable stderr of its own (Windows: built with -H windowsgui,
+	// so no console; macOS: launched from Finder), and the runtime writes panic
+	// traces straight to the descriptor — below the slog/log redirection
+	// setupHubLog installs later. Without this, an unrecovered panic in any
+	// goroutine closes the window and leaves nothing behind to report. Ahead of
+	// the helper mode below on purpose: swapping a staged update over a running
+	// install is exactly the kind of file work whose failures need a record.
+	setupCrashLog()
 
 	// When spawned as the updater's helper child (sentinel env vars set), swap
 	// the staged update over the installed app and exit — before any of the
@@ -327,6 +339,27 @@ func main() {
 	if err != nil {
 		log.Fatalf("octo-desktop: %v", err)
 	}
+}
+
+// setupCrashLog redirects the process's stderr to ~/.octo/crash.log so a panic
+// that kills the app leaves a trace behind. Best-effort: if it fails there is
+// nowhere to report that failure to (that being the whole problem), so the app
+// starts anyway.
+func setupCrashLog() {
+	// Started from a terminal (a developer running the binary directly): that
+	// terminal is a better place for a crash than a file nobody is tailing, and
+	// taking stderr away would leave them staring at a silent window. The
+	// shipped app never gets here — a -H windowsgui build has no console even
+	// when launched from one, and a Finder/launchd launch has no terminal.
+	if isatty.IsTerminal(os.Stderr.Fd()) {
+		return
+	}
+	path, err := serveproc.CrashLogPath()
+	if err != nil {
+		return
+	}
+	banner := fmt.Sprintf("octo-desktop %s (%s/%s)", version.Version, runtime.GOOS, runtime.GOARCH)
+	_ = crashlog.Install(path, banner)
 }
 
 // setupHubLog routes slog and the stdlib logger to a self-rotating
