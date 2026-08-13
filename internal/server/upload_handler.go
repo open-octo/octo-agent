@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,6 +37,15 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// without this a client could stream an arbitrarily large body to disk.
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	if err := r.ParseMultipartForm(maxUploadMemory); err != nil {
+		// The client pre-checks against the same cap, but multipart boundary
+		// overhead can tip a right-at-the-limit file over it server-side —
+		// name the limit instead of echoing MaxBytesReader's raw error.
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			writeError(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("file exceeds the %d MB upload limit", maxUploadBytes>>20))
+			return
+		}
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("parse form: %v", err))
 		return
 	}
@@ -77,6 +87,9 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		src.Close()
 		dst.Close()
 		if err != nil {
+			// Don't leave a truncated file behind (e.g. disk full) — nothing
+			// ever references or cleans it up.
+			os.Remove(dstPath)
 			results = append(results, uploadResult{Name: fh.Filename, Error: err.Error()})
 			continue
 		}

@@ -1198,7 +1198,7 @@
           style="display:none"
           onchange={onFilesPicked}
         />
-        <button class="meta-chip attach-btn" title={$t('chat.attach_file')} onclick={openAttach}>
+        <button class="meta-chip" title={$t('chat.attach_file')} onclick={openAttach}>
           <iconify-icon icon="ant-design:paper-clip-outlined" width="13"></iconify-icon>
         </button>
         <div class="picker">
