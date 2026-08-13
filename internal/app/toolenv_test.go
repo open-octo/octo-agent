@@ -25,13 +25,13 @@ func TestNewSessionToolEnv_WiresTurnEndTaskGuard(t *testing.T) {
 	a := agent.New(sender{p: &mockProvider{}}, "claude-haiku-4-5")
 	executor := tools.NewDefaultRegistry()
 	ctx, _, _, cleanup := NewSessionToolEnv(context.Background(), a, sid, executor, ToolEnvCallbacks{})
-	defer cleanup()
 
 	if a.TurnEndReminder == nil {
 		t.Fatal("NewSessionToolEnv should wire the turn-end task guard")
 	}
+	planTools := []string{"task_update"}
 	// Quiet while the plan is empty…
-	if got := a.TurnEndReminder(ctx); got != "" {
+	if got := a.TurnEndReminder(ctx, planTools); got != "" {
 		t.Errorf("empty plan should not fire the guard, got %q", got)
 	}
 	// …and it reads the same session store the task_* tools write to.
@@ -44,7 +44,13 @@ func TestNewSessionToolEnv_WiresTurnEndTaskGuard(t *testing.T) {
 	if _, err := store.Update(id, tasks.UpdateField{Status: &st}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if got := a.TurnEndReminder(ctx); got == "" {
+	if got := a.TurnEndReminder(ctx, planTools); got == "" {
 		t.Error("a task left in_progress should fire the guard")
+	}
+	// …and cleanup takes it back off, so an SDK caller reusing one agent across
+	// sessions doesn't inherit a stale guard.
+	cleanup()
+	if a.TurnEndReminder != nil {
+		t.Error("cleanup should clear the turn-end task guard")
 	}
 }

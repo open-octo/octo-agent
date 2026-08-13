@@ -71,15 +71,19 @@ func WithWorkflowEvents(
 //
 // Contracts:
 //   - It does NOT read or write a.Gate. Set a.Gate before or after this call.
+//   - It DOES set a.TurnEndReminder, the only Agent field it writes: a turn
+//     that ends with the session plan's last task still in_progress spends one
+//     extra provider round-trip prompting the model to file the closing
+//     task_update. cleanup clears it.
 //   - It does NOT call config.Load() or permission.New(). It performs no local
 //     file I/O.
 //   - It does NOT handle process-global browser state (SetBrowserVision etc.) or
 //     workflow-discovery-cwd state.
 //   - It does NOT register or use an MCP registry.
 //
-// The returned cleanup function is reserved for future resource release and is
-// currently a no-op. It does NOT destroy session-scoped managers, which are
-// cached by sessionID and reused across turns.
+// The returned cleanup function clears a.TurnEndReminder and is otherwise
+// reserved for future resource release. It does NOT destroy session-scoped
+// managers, which are cached by sessionID and reused across turns.
 func WireForSession(
 	ctx context.Context,
 	a *octoagent.Agent,

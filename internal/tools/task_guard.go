@@ -15,17 +15,41 @@ import (
 // forgets the closing task_update — leaving the plan panel showing "1/2 done"
 // against a reply that says everything is finished.
 //
-// It fires only when nothing is left pending: an in_progress task with pending
-// work queued behind it is a plan the model is legitimately in the middle of
-// (it commonly stops there to ask the user something), and nagging about it
-// would cost an extra round-trip on every such turn. With the queue empty, the
-// model believes it is on the final step — ending the turn there is exactly
-// the case this guard exists for.
+// Two conditions keep it from billing round-trips it hasn't earned:
+//
+//   - The turn must have touched the plan itself. An unfinished plan survives
+//     across turns by design (only a fully-completed one is cleared), and the
+//     reminder explicitly allows the model to answer "that task really isn't
+//     done". Without this check, one task the model refuses to close would tax
+//     every later turn in the session — including turns about something else
+//     entirely. It also keeps the reminder from naming task_update at a turn
+//     where the active profile never advertised it.
+//   - Nothing may be left pending. An in_progress task with work still queued
+//     behind it is a plan the model is mid-way through, not one it is closing.
+//
+// Neither condition can tell "finished the last step but forgot to file it"
+// (the bug) from "stopped on the last step to ask the user something" (fine) —
+// nothing observable separates those, so the second case costs one extra
+// round-trip. The reminder is worded to keep that case cheap: acknowledge and
+// stop, don't restate the question.
 //
 // Returns "" when there is nothing to remind about, which ends the turn
 // normally. The reminder is a <system-reminder>, so no UI renders it.
-func PendingTaskReminder(ctx context.Context) string {
+func PendingTaskReminder(ctx context.Context, toolsUsed []string) string {
+	if !touchedPlan(toolsUsed) {
+		return ""
+	}
 	return pendingTaskReminder(resolveTaskStore(ctx))
+}
+
+// touchedPlan reports whether any task_* tool ran during the turn.
+func touchedPlan(toolsUsed []string) bool {
+	for _, name := range toolsUsed {
+		if strings.HasPrefix(name, "task_") {
+			return true
+		}
+	}
+	return false
 }
 
 func pendingTaskReminder(store TaskStore) string {

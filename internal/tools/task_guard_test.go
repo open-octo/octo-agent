@@ -38,7 +38,7 @@ func TestPendingTaskReminder(t *testing.T) {
 		{"mid-plan: work still queued behind the active task", []tasks.Status{tasks.InProgress, tasks.Pending}, false},
 		{"nothing started yet", []tasks.Status{tasks.Pending, tasks.Pending}, false},
 		{"no plan at all", nil, false},
-		{"dropped tasks don't count as queued work", []tasks.Status{tasks.Deleted, tasks.InProgress}, true},
+		{"a dropped task is not queued work", []tasks.Status{tasks.Deleted, tasks.InProgress}, true},
 		{"several tasks left open", []tasks.Status{tasks.InProgress, tasks.InProgress}, true},
 	}
 	for _, tc := range cases {
@@ -82,11 +82,41 @@ func TestPendingTaskReminder_NilStore(t *testing.T) {
 // dispatch to, so the guard reads what they just wrote.
 func TestPendingTaskReminder_ResolvesCtxStore(t *testing.T) {
 	SetTaskStore(nil)
-	if got := PendingTaskReminder(context.Background()); got != "" {
+	t.Cleanup(func() { SetTaskStore(nil) })
+	planTools := []string{"task_update"}
+	if got := PendingTaskReminder(context.Background(), planTools); got != "" {
 		t.Fatalf("unconfigured session = %q, want empty", got)
 	}
 	ctx := WithTaskStore(context.Background(), mkTaskStore(t, tasks.InProgress))
-	if got := PendingTaskReminder(ctx); got == "" {
+	if got := PendingTaskReminder(ctx, planTools); got == "" {
 		t.Error("ctx-scoped store with an in_progress task should fire")
+	}
+}
+
+// An unfinished plan survives across turns, and the model is allowed to answer
+// "that task really isn't done" — so a turn that never touched the plan must
+// not re-bill a round-trip for it, however many turns later it is.
+func TestPendingTaskReminder_OnlyOnTurnsThatTouchedThePlan(t *testing.T) {
+	SetTaskStore(nil)
+	t.Cleanup(func() { SetTaskStore(nil) })
+	ctx := WithTaskStore(context.Background(), mkTaskStore(t, tasks.InProgress))
+
+	for _, tc := range []struct {
+		name      string
+		toolsUsed []string
+		want      bool
+	}{
+		{"no tools at all", nil, false},
+		{"unrelated work", []string{"read_file", "terminal"}, false},
+		{"the plan was updated", []string{"terminal", "task_update"}, true},
+		{"the plan was created", []string{"task_create"}, true},
+		{"the plan was only read", []string{"task_list"}, true},
+		{"a lookalike tool name", []string{"tasks_of_mine"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := PendingTaskReminder(ctx, tc.toolsUsed) != ""; got != tc.want {
+				t.Errorf("fired = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

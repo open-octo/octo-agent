@@ -35,7 +35,8 @@ func TestHandleChannelMessage_WiresTurnEndTaskGuard(t *testing.T) {
 	if sess.Agent.TurnEndReminder == nil {
 		t.Fatal("handleChannelMessage must wire the turn-end task guard")
 	}
-	if got := sess.Agent.TurnEndReminder(context.Background()); got != "" {
+	planTools := []string{"task_update"}
+	if got := sess.Agent.TurnEndReminder(context.Background(), planTools); got != "" {
 		t.Errorf("empty plan should not fire the guard, got %q", got)
 	}
 
@@ -50,7 +51,7 @@ func TestHandleChannelMessage_WiresTurnEndTaskGuard(t *testing.T) {
 	// The guard resolves the store from the turn's ctx — the same stamping the
 	// handler does — so an unfinished plan is what the next turn ends against.
 	ctx := tools.WithTaskStore(context.Background(), sess.Tasks)
-	if got := sess.Agent.TurnEndReminder(ctx); got == "" {
+	if got := sess.Agent.TurnEndReminder(ctx, planTools); got == "" {
 		t.Error("a task left in_progress should fire the guard")
 	}
 }
