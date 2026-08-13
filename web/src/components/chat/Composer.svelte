@@ -4,7 +4,7 @@
   import {
     running, activeSessionId, chatStreaming, sessions, sessionGroups,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
-    globalPermissionMode, nativeShell, activeAgent, pendingModel, view, settingsModalOpen,
+    globalPermissionMode, nativeShell, localAccess, activeAgent, pendingModel, view, settingsModalOpen,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
@@ -48,6 +48,7 @@
   let attachmentsBySession: Record<string, Attachment[]> = {}
   let draftSid = ''
   let textareaEl = $state<HTMLTextAreaElement | null>(null)
+  let fileInputEl = $state<HTMLInputElement | null>(null)
   let skillMenuEl = $state<HTMLDivElement | null>(null)
   let attachments = $state<Attachment[]>([])
   let dragOver = $state(false)
@@ -104,6 +105,43 @@
     text // track the bound value so the effect re-runs when it changes
     autoResize()
   })
+
+  // The attach button. Same machine as the agent: attach by real path, no
+  // upload (and no size cap — the agent reads the file in place).
+  //  - desktop shell → native OS file dialog
+  //  - localhost web → in-app file picker (server-side fs browse)
+  // Remote web → browser upload (front and back aren't co-located).
+  async function openAttach() {
+    if (get(nativeShell)) {
+      try {
+        const res = await api.nativePickFile(workingDir)
+        if (!res.cancelled && res.path) attachLocalFile(res.path)
+      } catch (e: any) {
+        showToast(e.message ?? 'Failed to open file dialog', 'error')
+      }
+      return
+    }
+    if (get(localAccess)) {
+      pickerMode = 'file'
+      pickerOpen = true
+      return
+    }
+    fileInputEl?.click()
+  }
+
+  // Attach a real local file by its absolute path — the agent reads it in place
+  // (see server parseUserFiles' local_path handling), no upload round-trip.
+  function attachLocalFile(path: string) {
+    const name = path.split(/[/\\]/).pop() || path
+    attachTo(sid, { name, local_path: path })
+  }
+
+  function onFilesPicked(e: Event) {
+    const input = e.target as HTMLInputElement
+    const files = Array.from(input.files ?? [])
+    for (const f of files) addAttachment(f)
+    input.value = ''
+  }
 
   // Attachment reads (image FileReader, non-image upload) resolve asynchronously.
   // These helpers land the result on the session that STARTED the read, not
@@ -684,6 +722,7 @@
   let dirDraft = $state('')
   let dirSaving = $state(false)
   let pickerOpen = $state(false)
+  let pickerMode = $state<'folder' | 'file'>('folder')
   const reasoningLevels = ['off', 'low', 'medium', 'high', 'xhigh', 'max']
   const showReasoningIcon = $derived(showReasoning ? 'ant-design:eye-outlined' : 'ant-design:eye-invisible-outlined')
 
@@ -836,11 +875,18 @@
       }
       return
     }
+    pickerMode = 'folder'
     pickerOpen = true
   }
 
-  // The in-app picker sets the session working directory.
+  // The in-app picker either attaches a file (openAttach) or sets the session
+  // working directory, depending on the mode it was opened in.
   async function onPickerSelect(path: string) {
+    if (pickerMode === 'file') {
+      attachLocalFile(path)
+      pickerOpen = false
+      return
+    }
     if (await applyWorkingDir(path)) pickerOpen = false
   }
 
@@ -1145,6 +1191,16 @@
         </div>
       {/if}
       <div class="meta-row">
+        <input
+          bind:this={fileInputEl}
+          type="file"
+          multiple
+          style="display:none"
+          onchange={onFilesPicked}
+        />
+        <button class="meta-chip attach-btn" title={$t('chat.attach_file')} onclick={openAttach}>
+          <iconify-icon icon="ant-design:paper-clip-outlined" width="13"></iconify-icon>
+        </button>
         <div class="picker">
           <button class="meta-chip" onclick={(e) => { e.stopPropagation(); const open = modelMenu; closeMenus(); modelMenu = !open; if (!open) void refreshModels() }}>
             <iconify-icon icon="ant-design:robot-outlined" width="13"></iconify-icon>
@@ -1269,7 +1325,7 @@
 {#if pickerOpen}
   <FolderPickerModal
     initialPath={workingDir}
-    mode="folder"
+    mode={pickerMode}
     onSelect={onPickerSelect}
     onClose={() => (pickerOpen = false)}
   />
