@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattn/go-isatty"
 	"github.com/open-octo/octo-agent/internal/crashlog"
 	"github.com/open-octo/octo-agent/internal/logfile"
 	"github.com/open-octo/octo-agent/internal/serveenv"
@@ -138,21 +139,22 @@ func main() {
 	// the updater helper below) can use it.
 	ensureValidTempDir()
 
+	// Point stderr at ~/.octo/crash.log before anything that can die runs. This
+	// process has no usable stderr of its own (Windows: built with -H windowsgui,
+	// so no console; macOS: launched from Finder), and the runtime writes panic
+	// traces straight to the descriptor — below the slog/log redirection
+	// setupHubLog installs later. Without this, an unrecovered panic in any
+	// goroutine closes the window and leaves nothing behind to report. Ahead of
+	// the helper mode below on purpose: swapping a staged update over a running
+	// install is exactly the kind of file work whose failures need a record.
+	setupCrashLog()
+
 	// When spawned as the updater's helper child (sentinel env vars set), swap
 	// the staged update over the installed app and exit — before any of the
 	// launch side effects below (chdir, CLI/uv seeding, settings) run in a
 	// process that only exists to copy files. No-op on a normal launch;
 	// application.New would also catch it, just later.
 	updater.HandleHelperMode()
-
-	// Point stderr at ~/.octo/crash.log before the launch work below begins.
-	// This process has no usable stderr of its own (Windows: built with
-	// -H windowsgui, so no console; macOS: launched from Finder), and the
-	// runtime writes panic traces straight to the descriptor — below the
-	// slog/log redirection setupHubLog installs later. Without this, an
-	// unrecovered panic in any goroutine closes the window and leaves nothing
-	// behind to report.
-	setupCrashLog()
 
 	// A GUI launch inherits "/" as the working directory; move to the user's
 	// home before anything reads it (the in-process server records its launch
@@ -344,6 +346,14 @@ func main() {
 // nowhere to report that failure to (that being the whole problem), so the app
 // starts anyway.
 func setupCrashLog() {
+	// Started from a terminal (a developer running the binary directly): that
+	// terminal is a better place for a crash than a file nobody is tailing, and
+	// taking stderr away would leave them staring at a silent window. The
+	// shipped app never gets here — a -H windowsgui build has no console even
+	// when launched from one, and a Finder/launchd launch has no terminal.
+	if isatty.IsTerminal(os.Stderr.Fd()) {
+		return
+	}
 	path, err := serveproc.CrashLogPath()
 	if err != nil {
 		return

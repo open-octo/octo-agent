@@ -130,7 +130,12 @@ automatically on the next `--status`, `--stop`, or start.
 If the desktop app disappears instead of reporting an error, look in `~/.octo/crash.log`
 (`%USERPROFILE%\.octo\crash.log` on Windows). A GUI process has no terminal to print a crash to, so
 the app points its stderr at that file at startup; each run appends a banner line with its version
-and pid, followed by the crash trace if there was one. Attach it when reporting the crash.
+and pid, followed by the crash trace if there was one. Attach it when reporting the crash — but read
+it first: stderr is also where MCP servers and their child processes write their own diagnostics, so
+the file can hold more than stack frames.
+
+Running the desktop binary from a terminal skips the redirection, leaving crashes on the terminal
+where a developer will see them.
 
 Next: put a reverse proxy in front for TLS/a real domain, then [bridge chat apps](/docs/guides/channels/)
 to the same running instance.

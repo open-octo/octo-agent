@@ -1,3 +1,7 @@
+// Only the platforms with a redirectStderr implementation — elsewhere Install
+// reports "unsupported" by design and there is no behaviour to assert.
+//go:build windows || darwin || linux
+
 package crashlog
 
 import (
@@ -47,7 +51,10 @@ func parkedGoroutine(started chan struct{}) {
 func runCrashChild(t *testing.T, path string) string {
 	t.Helper()
 	cmd := exec.Command(os.Args[0])
-	cmd.Env = append(os.Environ(), crashEnv+"="+path)
+	// GOTRACEBACK=single so the all-goroutines assertion can only be satisfied
+	// by Install's own SetTraceback call, not by the environment the test
+	// happens to run in.
+	cmd.Env = append(os.Environ(), crashEnv+"="+path, "GOTRACEBACK=single")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("child exited 0, want a crash; output:\n%s", out)
@@ -102,5 +109,32 @@ func TestInstallAppendsAcrossRuns(t *testing.T) {
 	// still reproduce, which is rarely the one they had the log open for.
 	if n := strings.Count(string(data), "child-banner"); n != 2 {
 		t.Errorf("banner count = %d, want 2 (second run truncated the log?)", n)
+	}
+}
+
+func TestInstallRotatesOversizedLog(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "crash.log")
+	if err := os.WriteFile(path, make([]byte, maxBytes+1), 0o600); err != nil {
+		t.Fatalf("seed oversized log: %v", err)
+	}
+
+	runCrashChild(t, path)
+
+	// The crash that matters is the one that just happened, so it must not be
+	// appended to the far end of a megabyte of history.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read crash log: %v", err)
+	}
+	if int64(len(data)) >= maxBytes {
+		t.Errorf("crash log is %d bytes, want a fresh file below %d", len(data), maxBytes)
+	}
+	if !strings.Contains(string(data), "panic: boom-from-child") {
+		t.Errorf("rotated crash log lost the new trace; got:\n%s", data)
+	}
+	// …and the history it displaced is kept, not deleted.
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Errorf("previous log not preserved as crash.log.1: %v", err)
 	}
 }

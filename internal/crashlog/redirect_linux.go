@@ -13,6 +13,9 @@ func redirectStderr(f *os.File) error {
 		return err
 	}
 	// fd 2 is now its own descriptor for the same file, so f's is redundant —
-	// and holding it open would leak it for the life of the process.
-	return f.Close()
+	// and holding it open would leak it for the life of the process. The close
+	// is best-effort: stderr is already redirected, and reporting a failure
+	// here would tell the caller the opposite.
+	_ = f.Close()
+	return nil
 }

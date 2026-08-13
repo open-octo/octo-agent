@@ -1,6 +1,7 @@
 package crashlog
 
 import (
+	"log"
 	"os"
 
 	"golang.org/x/sys/windows"
@@ -18,5 +19,13 @@ func redirectStderr(f *os.File) error {
 		return err
 	}
 	os.Stderr = f
+	// Only Windows needs this. The stdlib logger captured os.Stderr by value at
+	// init (log.std), and slog's default handler goes through it, so replacing
+	// the variable leaves both writing to the handle we just redirected away
+	// from — while on the dup platforms they keep working untouched, because
+	// there it's the descriptor under the unchanged os.File that moved. Without
+	// it, everything logged before setupHubLog switches to serve.log would be
+	// lost on the one platform that has no console to lose it to.
+	log.SetOutput(f)
 	return nil
 }

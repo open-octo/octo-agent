@@ -55,13 +55,25 @@ func Install(path, banner string) error {
 	// Best-effort, like the daemon's open-time rotation: an oversized crash log
 	// is still worth having, an absent one isn't.
 	_ = logfile.RotateIfLarger(path, maxBytes, backups)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	// 0o600, not serve.log's 0o644: stderr is where several subsystems'
+	// diagnostics converge (MCP server warnings and their child processes' own
+	// stderr among them), so this file can end up holding more than stack
+	// frames. internal/audit takes the same precaution for the same reason.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}
-	// redirectStderr takes ownership of f: on success stderr is the only handle
-	// on the file that matters from here on.
-	if err := redirectStderr(f); err != nil {
+	if f.Fd() == os.Stderr.Fd() {
+		// Stderr was closed before we started (`2>&-`), so the open above
+		// landed on its descriptor: the file already *is* stderr. Duplicating
+		// it onto itself would be a no-op that then closes it (darwin) or a
+		// plain EINVAL (linux), so adopt it instead — assigning os.Stderr also
+		// keeps f reachable, which is what stops the descriptor being closed
+		// out from under us.
+		os.Stderr = f
+	} else if err := redirectStderr(f); err != nil {
+		// redirectStderr owns f from here on; it only reports failures that
+		// left the original stderr in place.
 		_ = f.Close()
 		return err
 	}
