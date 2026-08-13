@@ -108,5 +108,10 @@ octo serve --stop
 守护进程的 pid 记录在 `~/.octo/serve.pid` 里；`--status`/`--stop` 直接读这个文件，不会去扫进程表。
 一个指向已经死掉的进程的过期 pid，会在下一次 `--status`、`--stop` 或启动时自动清掉。
 
+如果桌面端不是报错而是直接闪退，看 `~/.octo/crash.log`（Windows 上是
+`%USERPROFILE%\.octo\crash.log`）。GUI 进程没有终端可以把崩溃信息打出来，所以 app 启动时会把自己的
+stderr 指向这个文件：每次启动都会追加一行带版本号和 pid 的标记，后面跟着崩溃时的调用栈（如果崩了的话）。
+报告崩溃时请把它一起附上。
+
 下一步：在前面挂一个反向代理做 TLS/域名，然后把同一个运行中的实例
 [接入聊天应用](/docs/zh/guides/channels/)。

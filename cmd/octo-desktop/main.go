@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/crashlog"
 	"github.com/open-octo/octo-agent/internal/logfile"
 	"github.com/open-octo/octo-agent/internal/serveenv"
 	"github.com/open-octo/octo-agent/internal/serveproc"
@@ -143,6 +144,15 @@ func main() {
 	// process that only exists to copy files. No-op on a normal launch;
 	// application.New would also catch it, just later.
 	updater.HandleHelperMode()
+
+	// Point stderr at ~/.octo/crash.log before the launch work below begins.
+	// This process has no usable stderr of its own (Windows: built with
+	// -H windowsgui, so no console; macOS: launched from Finder), and the
+	// runtime writes panic traces straight to the descriptor — below the
+	// slog/log redirection setupHubLog installs later. Without this, an
+	// unrecovered panic in any goroutine closes the window and leaves nothing
+	// behind to report.
+	setupCrashLog()
 
 	// A GUI launch inherits "/" as the working directory; move to the user's
 	// home before anything reads it (the in-process server records its launch
@@ -327,6 +337,19 @@ func main() {
 	if err != nil {
 		log.Fatalf("octo-desktop: %v", err)
 	}
+}
+
+// setupCrashLog redirects the process's stderr to ~/.octo/crash.log so a panic
+// that kills the app leaves a trace behind. Best-effort: if it fails there is
+// nowhere to report that failure to (that being the whole problem), so the app
+// starts anyway.
+func setupCrashLog() {
+	path, err := serveproc.CrashLogPath()
+	if err != nil {
+		return
+	}
+	banner := fmt.Sprintf("octo-desktop %s (%s/%s)", version.Version, runtime.GOOS, runtime.GOARCH)
+	_ = crashlog.Install(path, banner)
 }
 
 // setupHubLog routes slog and the stdlib logger to a self-rotating

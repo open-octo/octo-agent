@@ -47,6 +47,18 @@ func LogPath() (string, error) {
 	return filepath.Join(dir, "serve.log"), nil
 }
 
+// CrashLogPath returns the path of the crash log (~/.octo/crash.log), creating
+// ~/.octo if needed. Kept separate from serve.log: this file holds only the
+// output of a process dying, so it stays short enough to paste into a bug
+// report without hunting through normal operational logging.
+func CrashLogPath() (string, error) {
+	dir, err := octoDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "crash.log"), nil
+}
+
 // ReadPid reads an integer pid from path.
 func ReadPid(path string) (int, error) {
 	data, err := os.ReadFile(path)

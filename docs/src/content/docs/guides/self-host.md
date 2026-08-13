@@ -127,5 +127,10 @@ The daemon's pid is tracked in `~/.octo/serve.pid`; `--status`/`--stop` read it 
 scanning the process table. A stale pid (pointing at a process that's already dead) is cleared
 automatically on the next `--status`, `--stop`, or start.
 
+If the desktop app disappears instead of reporting an error, look in `~/.octo/crash.log`
+(`%USERPROFILE%\.octo\crash.log` on Windows). A GUI process has no terminal to print a crash to, so
+the app points its stderr at that file at startup; each run appends a banner line with its version
+and pid, followed by the crash trace if there was one. Attach it when reporting the crash.
+
 Next: put a reverse proxy in front for TLS/a real domain, then [bridge chat apps](/docs/guides/channels/)
 to the same running instance.
