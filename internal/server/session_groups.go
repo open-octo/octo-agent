@@ -378,10 +378,11 @@ func createSessionGroupNamed(name string) (sessionGroup, error) {
 	return g, nil
 }
 
-// addSessionToGroup appends a session ID to a group, enforcing single
-// membership (the session is first removed from every other group, matching
-// handleSetSessionGroup). Returns an error if the target group no longer
-// exists.
+// addSessionToGroup prepends a session ID to a group — a newly created
+// session shows at the top of its group, matching the newest-first session
+// list — enforcing single membership (the session is first removed from every
+// other group, matching handleSetSessionGroup). Returns an error if the
+// target group no longer exists.
 func addSessionToGroup(groupID, sessionID string) error {
 	groupMu.Lock()
 	defer groupMu.Unlock()
@@ -399,7 +400,7 @@ func addSessionToGroup(groupID, sessionID string) error {
 		}
 		groups[i].SessionIDs = ids
 		if groups[i].ID == groupID {
-			groups[i].SessionIDs = append(groups[i].SessionIDs, sessionID)
+			groups[i].SessionIDs = append([]string{sessionID}, groups[i].SessionIDs...)
 			found = true
 		}
 	}

@@ -166,6 +166,31 @@ func TestSessionGroups_SingleMembership(t *testing.T) {
 	}
 }
 
+func TestAddSessionToGroup_PrependsNewest(t *testing.T) {
+	srv := groupTestServer(t)
+	_, out := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "G"})
+	gid := out["group"].(map[string]any)["id"].(string)
+
+	// Newly created sessions land at the top of their group, newest first —
+	// matching the sidebar's newest-first session list.
+	for _, sid := range []string{"s-old", "s-mid", "s-new"} {
+		if err := addSessionToGroup(gid, sid); err != nil {
+			t.Fatalf("addSessionToGroup(%s): %v", sid, err)
+		}
+	}
+	groups, _ := loadSessionGroups()
+	want := []string{"s-new", "s-mid", "s-old"}
+	got := groups[0].SessionIDs
+	if len(got) != len(want) {
+		t.Fatalf("SessionIDs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("SessionIDs = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestSessionGroups_Delete(t *testing.T) {
 	srv := groupTestServer(t)
 	_, out := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Temp"})
