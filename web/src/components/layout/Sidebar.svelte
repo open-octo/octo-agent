@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, settingsModalOpen } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, settingsModalOpen } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
@@ -92,6 +92,7 @@
       const org = await api.listSessionGroups()
       sessionGroups.set(org.groups)
       pinnedSessions.set(org.pinned)
+      collapsedSessions.set(org.collapsed)
     } catch { /* ignore — sessions just render flat under Ungrouped */ }
     try {
       agents = await api.listAgents()
@@ -119,13 +120,20 @@
     // claimed first, so they don't also appear under their group or Ungrouped.
     const pinned = $pinnedSessions.map(id => byId.get(id)).filter(Boolean) as typeof $sessions
     pinned.forEach(s => claimed.add(s.id))
+    // Collapsed sessions sink into a folded panel at the bottom (registry
+    // order). Claiming keeps a stale registry overlap from rendering the same
+    // session twice; pinned claims first so a pin+collapse overlap (possible
+    // only via a cross-process last-writer-wins race) resolves the same way
+    // the server does — the pin wins.
+    const folded = $collapsedSessions.map(id => byId.get(id)).filter(Boolean).filter(s => !claimed.has((s as any).id)) as typeof $sessions
+    folded.forEach(s => claimed.add(s.id))
     const groups = $sessionGroups.map(g => {
       const items = g.session_ids.map(id => byId.get(id)).filter(Boolean).filter(s => !claimed.has((s as any).id)) as typeof $sessions
       items.forEach(s => claimed.add(s.id))
       return { group: g, items }
     })
     const ungrouped = $sessions.filter(s => !claimed.has(s.id))
-    return { pinned, groups, ungrouped }
+    return { folded, pinned, groups, ungrouped }
   })
 
   function groupIdOf(sessionId: string): string {
@@ -133,6 +141,7 @@
   }
 
   const isPinned = (sessionId: string): boolean => $pinnedSessions.includes(sessionId)
+  const isCollapsed = (sessionId: string): boolean => $collapsedSessions.includes(sessionId)
 
   // Pin/unpin a session. Optimistic: the row jumps into (or out of) the Pinned
   // section immediately, then the registry write follows; on failure, revert.
@@ -148,6 +157,28 @@
     } catch {
       pinnedSessions.set(before)
       showToast(tr('sidebar.pin_failed'))
+    }
+  }
+
+  // Whether the folded panel's list is expanded. Deliberately ephemeral (not
+  // persisted like a group's collapsed flag): the panel exists to keep the
+  // list short, so every fresh mount starts folded shut.
+  let foldedOpen = $state(false)
+
+  // Collapse a session into the folded panel, or restore it. Optimistic like
+  // togglePin. The collapse action is only offered on unpinned, ungrouped
+  // sessions (the server rejects the rest), so no local guard is needed.
+  async function toggleSessionCollapse(sessionId: string, collapse: boolean) {
+    menuFor.set(null)
+    const before = $collapsedSessions
+    collapsedSessions.set(collapse
+      ? [...before.filter(id => id !== sessionId), sessionId]
+      : before.filter(id => id !== sessionId))
+    try {
+      await api.setSessionCollapsed(sessionId, collapse)
+    } catch {
+      collapsedSessions.set(before)
+      showToast(tr('sidebar.collapse_failed'))
     }
   }
 
@@ -538,6 +569,24 @@
             {@render sessionRow(s)}
           {/each}
         {/if}
+
+        <!-- Collapsed: a folded panel at the very bottom. The panel itself
+             starts shut on every mount (only the count shows) — it exists to
+             keep the list short, so it never opens on its own. -->
+        {#if groupedView.folded.length > 0}
+        <div class="grp-header">
+          <span class="grp-caret" onclick={() => (foldedOpen = !foldedOpen)}>
+            <iconify-icon icon={foldedOpen ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="10"></iconify-icon>
+          </span>
+          <span class="grp-name muted" onclick={() => (foldedOpen = !foldedOpen)}>{$t('sidebar.collapsed')}</span>
+          <span class="grp-count">{groupedView.folded.length}</span>
+        </div>
+        {#if foldedOpen}
+          {#each groupedView.folded as s (s.id)}
+            {@render sessionRow(s)}
+          {/each}
+        {/if}
+        {/if}
       </div>
 
       {#snippet sessionRow(s: any)}
@@ -603,18 +652,42 @@
             </span>
           {/if}
           {#if !menuOpen && !$selMode}
+            {#if isCollapsed(s.id)}
+            <!-- Restoring is the whole point of visiting the folded panel, so
+                 it gets a direct button rather than hiding in the kebab. -->
+            <span class="row-action" title={$t('sidebar.uncollapse')} onclick={(e) => { e.stopPropagation(); toggleSessionCollapse(s.id, false) }}>
+              <iconify-icon icon="ant-design:vertical-align-top-outlined" width="13"></iconify-icon>
+            </span>
+            {/if}
             <span class="row-action kebab" onclick={(e) => { e.stopPropagation(); menuFor.update(m => m === s.id ? null : s.id); groupMenuFor.set(null) }} style="color:{solid ? 'var(--blue-6)' : 'var(--text-tertiary)'}">
               <iconify-icon icon="ant-design:more-outlined" width="14"></iconify-icon>
             </span>
           {/if}
           {#if menuOpen}
             {@const pinned = isPinned(s.id)}
+            {@const collapsed = isCollapsed(s.id)}
+            {#if collapsed}
+            <!-- A collapsed session only offers restore (plus rename/delete):
+                 pinning or grouping it contradicts the collapse, and the
+                 server would reject the combination anyway. -->
+            <span class="row-action" onclick={(e) => { e.stopPropagation(); toggleSessionCollapse(s.id, false) }} title={$t('sidebar.uncollapse')}>
+              <iconify-icon icon="ant-design:vertical-align-top-outlined" width="13"></iconify-icon>
+            </span>
+            {:else}
             <span class="row-action" onclick={(e) => { e.stopPropagation(); togglePin(s.id, !pinned) }} title={pinned ? $t('sidebar.unpin') : $t('sidebar.pin')}>
               <iconify-icon icon={pinned ? 'ant-design:pushpin-filled' : 'ant-design:pushpin-outlined'} width="13"></iconify-icon>
             </span>
             <span class="row-action" onclick={(e) => { e.stopPropagation(); groupMenuFor.set(s.id); menuFor.set(null) }} title={$t('sidebar.move_to_group')}>
               <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
             </span>
+            {#if !pinned && !groupIdOf(s.id)}
+            <!-- Collapse is only offered where it's legal (unpinned +
+                 ungrouped), matching the server's guard. -->
+            <span class="row-action" onclick={(e) => { e.stopPropagation(); toggleSessionCollapse(s.id, true) }} title={$t('sidebar.collapse')}>
+              <iconify-icon icon="ant-design:vertical-align-bottom-outlined" width="13"></iconify-icon>
+            </span>
+            {/if}
+            {/if}
             <span class="row-action" onclick={(e) => { e.stopPropagation(); editId.set(s.id); editDraft.set((s as any).name || (s as any).title || s.id); menuFor.set(null) }} title={$t('sidebar.rename')}>
               <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
             </span>

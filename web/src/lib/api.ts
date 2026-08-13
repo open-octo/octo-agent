@@ -98,11 +98,11 @@ export async function updateSession(id: string, patch: { name?: string }): Promi
 
 // ─── Session groups (Web-UI sidebar organisation) ───────────────────────────
 
-// listSessionGroups returns both the sidebar groups and the pinned-session IDs;
-// they share one registry file and one endpoint.
-export async function listSessionGroups(): Promise<{ groups: SessionGroup[]; pinned: string[] }> {
-  const d = await request<{ groups: SessionGroup[]; pinned_session_ids: string[] }>('/api/session-groups')
-  return { groups: d.groups ?? [], pinned: d.pinned_session_ids ?? [] }
+// listSessionGroups returns the sidebar groups plus the pinned- and
+// collapsed-session IDs; they share one registry file and one endpoint.
+export async function listSessionGroups(): Promise<{ groups: SessionGroup[]; pinned: string[]; collapsed: string[] }> {
+  const d = await request<{ groups: SessionGroup[]; pinned_session_ids: string[]; collapsed_session_ids: string[] }>('/api/session-groups')
+  return { groups: d.groups ?? [], pinned: d.pinned_session_ids ?? [], collapsed: d.collapsed_session_ids ?? [] }
 }
 
 // Pass working_dir to create the group as a project outright.
@@ -137,6 +137,12 @@ export async function setSessionGroup(sessionId: string, groupId: string): Promi
 // Pin a session to the top of the sidebar, or unpin it.
 export async function setSessionPinned(sessionId: string, pinned: boolean): Promise<void> {
   await request<unknown>(`/api/sessions/${sessionId}/pin`, { method: 'PUT', ...json({ pinned }) })
+}
+
+// Collapse a session into the sidebar's folded panel, or restore it. The
+// server rejects collapsing a pinned or grouped session (409).
+export async function setSessionCollapsed(sessionId: string, collapsed: boolean): Promise<void> {
+  await request<unknown>(`/api/sessions/${sessionId}/collapse`, { method: 'PUT', ...json({ collapsed }) })
 }
 
 // Branch a session from a specific message index, optionally overriding that

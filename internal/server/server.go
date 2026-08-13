@@ -785,6 +785,7 @@ func (s *Server) registerRoutes() {
 	s.api("DELETE /api/sessions/{id}/goal", s.handleDeleteSessionGoal)
 	s.api("PUT /api/sessions/{id}/group", s.handleSetSessionGroup)
 	s.api("PUT /api/sessions/{id}/pin", s.handleSetSessionPin)
+	s.api("PUT /api/sessions/{id}/collapse", s.handleSetSessionCollapsed)
 	s.api("POST /api/sessions/{id}/branch", s.handleBranchSession)
 	s.api("POST /api/sessions/{id}/edit_message", s.handleEditMessage)
 	// Session groups: a Web-UI-only sidebar organisation layer (see
