@@ -267,7 +267,7 @@ export async function createSessionInGroup(groupId: string): Promise<void> {
   const sess = await api.createSession({ source: 'manual', group_id: groupId })
   sessions.update(ss => [sess, ...ss])
   sessionGroups.update(gs =>
-    gs.map(g => (g.id === groupId ? { ...g, session_ids: [...g.session_ids, sess.id] } : g)),
+    gs.map(g => (g.id === groupId ? { ...g, session_ids: [sess.id, ...g.session_ids] } : g)),
   )
   activeSessionId.set(sess.id)
   view.set('chat')

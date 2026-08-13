@@ -166,6 +166,52 @@ func TestSessionGroups_SingleMembership(t *testing.T) {
 	}
 }
 
+func TestAddSessionToGroup_PrependsNewest(t *testing.T) {
+	srv := groupTestServer(t)
+	_, out := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "G"})
+	gid := out["group"].(map[string]any)["id"].(string)
+
+	// Newly created sessions land at the top of their group, newest first —
+	// matching the sidebar's newest-first session list.
+	for _, sid := range []string{"s-old", "s-mid", "s-new"} {
+		if err := addSessionToGroup(gid, sid); err != nil {
+			t.Fatalf("addSessionToGroup(%s): %v", sid, err)
+		}
+	}
+	assertGroupOrder(t, gid, []string{"s-new", "s-mid", "s-old"})
+
+	// Re-adding an existing member moves it to the top (filter + prepend).
+	if err := addSessionToGroup(gid, "s-old"); err != nil {
+		t.Fatalf("addSessionToGroup(s-old again): %v", err)
+	}
+	assertGroupOrder(t, gid, []string{"s-old", "s-new", "s-mid"})
+}
+
+// assertGroupOrder reloads the registry from disk and asserts the group's
+// SessionIDs exactly match want, in order.
+func assertGroupOrder(t *testing.T, gid string, want []string) {
+	t.Helper()
+	groups, err := loadSessionGroups()
+	if err != nil {
+		t.Fatalf("loadSessionGroups: %v", err)
+	}
+	for _, g := range groups {
+		if g.ID != gid {
+			continue
+		}
+		if len(g.SessionIDs) != len(want) {
+			t.Fatalf("SessionIDs = %v, want %v", g.SessionIDs, want)
+		}
+		for i := range want {
+			if g.SessionIDs[i] != want[i] {
+				t.Fatalf("SessionIDs = %v, want %v", g.SessionIDs, want)
+			}
+		}
+		return
+	}
+	t.Fatalf("group %s not found", gid)
+}
+
 func TestSessionGroups_Delete(t *testing.T) {
 	srv := groupTestServer(t)
 	_, out := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Temp"})
