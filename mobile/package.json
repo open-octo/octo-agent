@@ -19,7 +19,7 @@
     "@capacitor/android": "^8.4.2",
     "@capacitor/cli": "^8.5.0",
     "@capacitor/ios": "^8.4.2",
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },
