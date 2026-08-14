@@ -46,6 +46,27 @@ func TestReadFile_RefusesUTF16WithConversionHint(t *testing.T) {
 	}
 }
 
+// TestReadFile_RefusesUTF16BENoNUL: a big-endian BOM must be recognized even
+// when the first 512 bytes contain no NUL at all (pure non-ASCII text, where
+// UTF-16BE code units have no zero byte) — the BOM check must not be gated
+// behind the NUL check.
+func TestReadFile_RefusesUTF16BENoNUL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cjk16.txt")
+	// UTF-16BE BOM + "中文" (U+4E2D U+6587) — no zero bytes anywhere.
+	if err := os.WriteFile(path, []byte{0xfe, 0xff, 0x4e, 0x2d, 0x65, 0x87}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ReadFileTool{}.Execute(context.Background(), "read_file", map[string]any{"path": path})
+	if err == nil {
+		t.Fatal("expected refusal for UTF-16BE content")
+	}
+	if !strings.Contains(err.Error(), "UTF-16") {
+		t.Errorf("refusal should name UTF-16, got: %v", err)
+	}
+}
+
 // TestReadFile_SniffAllowsUTF8AndRewinds: multi-byte UTF-8 (and a NUL past
 // the 512-byte sniff window) must not trip the sniff, and the rewind must
 // leave the scanner reading from line 1.

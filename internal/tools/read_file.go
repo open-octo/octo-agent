@@ -58,7 +58,8 @@ func (ReadFileTool) Definition() agent.ToolDefinition {
 			"has been read; do not call read_file again for the same path. " +
 			"Absolute paths are preferred; relative paths resolve against the current " +
 			"working directory. Refuses binary extensions (executables, archives, " +
-			"PDFs, DBs) and blocking device files (/dev/random, /dev/tty etc). " +
+			"PDFs, DBs), files whose content is binary or UTF-16 (use the terminal " +
+			"tool for those), and blocking device files (/dev/random, /dev/tty etc). " +
 			"Image files (.png, .jpg, .jpeg, .gif, .webp, .bmp, .tiff, .heic, .ico) " +
 			"are returned as image content for multimodal model consumption, or a " +
 			"refusal if the active model does not accept image input.",
@@ -148,7 +149,7 @@ func (ReadFileTool) Execute(ctx context.Context, _ string, input map[string]any)
 	// them yields NUL-laced garbage lines the model can't use — refuse and
 	// point at the terminal tool instead.
 	if reason, serr := sniffBinaryPrefix(f); serr != nil {
-		return agent.ToolResult{}, fmt.Errorf("read_file: %q: %w", path, serr)
+		return agent.ToolResult{}, fmt.Errorf("read_file: %s: %w", path, serr)
 	} else if reason != "" {
 		return agent.ToolResult{}, fmt.Errorf("read_file: refusing to read %s — %s", path, reason)
 	}
@@ -410,12 +411,15 @@ func sniffBinaryPrefix(f *os.File) (reason string, err error) {
 	}
 	buf = buf[:n]
 
+	// BOM check first, not nested under the NUL check: UTF-16 text that is
+	// pure non-ASCII (e.g. CJK-only with no newline in the first 512 bytes)
+	// has no NUL byte, but the BOM still identifies it.
+	if bytes.HasPrefix(buf, []byte{0xff, 0xfe}) || bytes.HasPrefix(buf, []byte{0xfe, 0xff}) {
+		return "file is UTF-16 encoded text (BOM detected); read_file only handles UTF-8/ASCII. " +
+			"Convert it via the terminal tool first (e.g. iconv -f utf-16 -t utf-8, or PowerShell " +
+			"Get-Content <file> | Set-Content -Encoding utf8 <out>)", nil
+	}
 	if bytes.IndexByte(buf, 0) >= 0 {
-		if bytes.HasPrefix(buf, []byte{0xff, 0xfe}) || bytes.HasPrefix(buf, []byte{0xfe, 0xff}) {
-			return "file is UTF-16 encoded text (BOM detected); read_file only handles UTF-8/ASCII. " +
-				"Convert it via the terminal tool first (e.g. iconv -f utf-16 -t utf-8, or PowerShell " +
-				"Get-Content <file> | Set-Content -Encoding utf8 <out>)", nil
-		}
 		return "file content looks binary (NUL byte in the first 512 bytes); read_file only handles text. " +
 			"Use the terminal tool to inspect binary files (e.g. file, strings, xxd, or a script)", nil
 	}
