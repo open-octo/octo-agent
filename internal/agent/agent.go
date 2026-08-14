@@ -1959,13 +1959,15 @@ func canParallelize(calls []toolCall) bool {
 
 // toolResultBlocks builds a slice of content blocks from a ToolResult.
 // The first element is always the tool_result block; any additional blocks
-// (e.g. images) from the result are appended after it.
+// (e.g. images) from the result are appended after it. Text is sanitized
+// (control bytes, invalid UTF-8, ANSI escapes) before the size backstop so
+// the 40 KB cap holds on the bytes that actually enter history.
 func toolResultBlocks(id string, result ToolResult, err error) []ContentBlock {
 	if err != nil {
-		return []ContentBlock{NewToolResultBlock(id, microCompact(err.Error()), true)}
+		return []ContentBlock{NewToolResultBlock(id, microCompact(sanitizeToolResultText(err.Error())), true)}
 	}
 	blocks := make([]ContentBlock, 0, 1+len(result.Blocks))
-	rb := NewToolResultBlock(id, microCompact(result.Text), false)
+	rb := NewToolResultBlock(id, microCompact(sanitizeToolResultText(result.Text)), false)
 	rb.UI = result.UI
 	blocks = append(blocks, rb)
 	blocks = append(blocks, result.Blocks...)
