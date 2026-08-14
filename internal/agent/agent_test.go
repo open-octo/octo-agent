@@ -1369,11 +1369,15 @@ func TestAgent_RunStream_GateDenies_EmitsErrorEvent(t *testing.T) {
 
 func TestAccrueChildUsage_FoldsIntoSessionTotals(t *testing.T) {
 	a := New(nil, "m")
-	a.AccrueChildUsage(100, 50)
-	a.AccrueChildUsage(200, 75)
+	a.AccrueChildUsage(100, 50, 800, 40)
+	a.AccrueChildUsage(200, 75, 1600, 60)
 	in, out := a.SessionTokens()
 	if in != 300 || out != 125 {
 		t.Errorf("SessionTokens after two AccrueChildUsage = (%d,%d), want (300,125)", in, out)
+	}
+	cr, cw := a.SessionCacheTokens()
+	if cr != 2400 || cw != 100 {
+		t.Errorf("SessionCacheTokens after two AccrueChildUsage = (%d,%d), want (2400,100)", cr, cw)
 	}
 }
 

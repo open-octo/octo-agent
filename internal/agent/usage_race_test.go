@@ -18,7 +18,7 @@ func TestAccrueChildUsageConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			a.AccrueChildUsage(1, 2)
+			a.AccrueChildUsage(1, 2, 3, 4)
 		}()
 	}
 	wg.Wait()
@@ -26,5 +26,9 @@ func TestAccrueChildUsageConcurrent(t *testing.T) {
 	in, out := a.SessionTokens()
 	if in != n || out != 2*n {
 		t.Errorf("SessionTokens = (%d, %d), want (%d, %d)", in, out, n, 2*n)
+	}
+	cr, cw := a.SessionCacheTokens()
+	if cr != 3*n || cw != 4*n {
+		t.Errorf("SessionCacheTokens = (%d, %d), want (%d, %d)", cr, cw, 3*n, 4*n)
 	}
 }

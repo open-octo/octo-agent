@@ -313,11 +313,14 @@ func (s *Spawner) runChild(ctx context.Context, lc *liveChild, prompt string) (r
 	}
 
 	// Accrue the round's token delta even on a max-turns checkpoint — the
-	// partial work cost real tokens.
+	// partial work cost real tokens. Cache deltas ride along so the parent's
+	// per-turn cache utilization readout stays a true value.
 	totIn, totOut := lc.agent.SessionTokens()
+	totCR, totCW := lc.agent.SessionCacheTokens()
 	in, out = totIn-lc.accruedIn, totOut-lc.accruedOut
 	lc.accruedIn, lc.accruedOut = totIn, totOut
-	s.parent.AccrueChildUsage(in, out)
+	s.parent.AccrueChildUsage(in, out, totCR-lc.accruedCacheRead, totCW-lc.accruedCacheWrite)
+	lc.accruedCacheRead, lc.accruedCacheWrite = totCR, totCW
 
 	lc.syncSession()
 	s.fireSubagentStop(r.Content)
@@ -417,11 +420,13 @@ type liveChild struct {
 
 	mu sync.Mutex // serializes runChild on this child
 
-	// accruedIn/accruedOut track how much of the child's cumulative
-	// SessionTokens has already been folded into the parent, so each round
-	// accrues only its delta.
-	accruedIn  int
-	accruedOut int
+	// accruedIn/accruedOut/accruedCacheRead/accruedCacheWrite track how much
+	// of the child's cumulative SessionTokens/SessionCacheTokens has already
+	// been folded into the parent, so each round accrues only its delta.
+	accruedIn         int
+	accruedOut        int
+	accruedCacheRead  int
+	accruedCacheWrite int
 
 	lastUsed time.Time // for TTL eviction
 	seq      uint64    // monotonic touch order, for LRU eviction (clock-independent)

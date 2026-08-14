@@ -608,8 +608,9 @@ func (a *Agent) summarizeOn(ctx context.Context, sender Sender, model string, ms
 		return "", fmt.Errorf("agent: compact: LLM returned tool_calls instead of summary")
 	}
 
-	// Summary tokens count toward the session budget like any other call.
-	a.addUsage(reply.InputTokens, reply.OutputTokens)
+	// Summary tokens count toward the session budget like any other call,
+	// cache hits included so the turn's cache utilization stays accurate.
+	a.addUsage(reply.InputTokens, reply.OutputTokens, reply.CacheReadTokens, reply.CacheWriteTokens)
 	return reply.Content, nil
 }
 
