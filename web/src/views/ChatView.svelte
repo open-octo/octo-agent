@@ -1685,7 +1685,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           if (type === 'tool_call') {
             lines.push(`- **Tool call**: ${ev.tool_name ?? ev.name ?? 'unknown'}`, '')
           } else {
-            lines.push(`- **Tool result**: ${typeof ev.content === 'string' ? ev.content.slice(0, 500) : '(non-text result)'}`, '')
+            lines.push(`- **Tool result**: ${typeof ev.result === 'string' ? ev.result.slice(0, 500) : '(non-text result)'}`, '')
           }
         } else {
           omittedToolEvents = true
