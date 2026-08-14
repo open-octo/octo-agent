@@ -53,6 +53,27 @@ type ViewSink interface {
 type TurnStats struct {
 	Elapsed time.Duration
 	Tokens  int // input + output tokens billed during this turn
+	// Prompt-side cache accounting for the turn, from Agent.SessionCacheTokens()
+	// deltas. InputTokens is the uncached remainder (non-overlapping with the
+	// cache buckets), so views can derive utilization via
+	// agent.CacheUtilizationPct. All zero when the backend reports no cache info.
+	// Sub-agent and mid-turn compaction/consolidation usage folds into these
+	// counters too (AccrueChildUsage/addUsage carry cache deltas), so the
+	// percentage is the true share, not a lower bound.
+	InputTokens      int
+	CacheReadTokens  int
+	CacheWriteTokens int
+}
+
+// cacheSuffix renders the summary line's ", cache NN%" tail — the share of
+// this turn's prompt served from the provider cache — or "" when the backend
+// reported no cache activity, so cache-less providers keep the old line.
+func (s TurnStats) cacheSuffix() string {
+	pct, ok := agent.CacheUtilizationPct(s.InputTokens, s.CacheReadTokens, s.CacheWriteTokens)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf(", cache %d%%", pct)
 }
 
 // runTurn executes one user turn: it applies the memory nudge and the pre-turn
@@ -102,6 +123,7 @@ func runTurn(ctx context.Context, a *agent.Agent, cfg replConfig, sink ViewSink,
 
 	turnStart := time.Now()
 	inBefore, outBefore := a.SessionTokens()
+	crBefore, cwBefore := a.SessionCacheTokens()
 
 	// RunStream owns the streaming + agentic tool loop. With no tools it falls
 	// back internally to TurnStream, adapting text deltas into EventTextDelta
@@ -111,9 +133,13 @@ func runTurn(ctx context.Context, a *agent.Agent, cfg replConfig, sink ViewSink,
 	reply, err := a.RunStream(ctx, turnInput, cfg.tools, cfg.executor, sink.Emit)
 
 	inAfter, outAfter := a.SessionTokens()
+	crAfter, cwAfter := a.SessionCacheTokens()
 	stats := TurnStats{
-		Elapsed: time.Since(turnStart),
-		Tokens:  (inAfter - inBefore) + (outAfter - outBefore),
+		Elapsed:          time.Since(turnStart),
+		Tokens:           (inAfter - inBefore) + (outAfter - outBefore),
+		InputTokens:      inAfter - inBefore,
+		CacheReadTokens:  crAfter - crBefore,
+		CacheWriteTokens: cwAfter - cwBefore,
 	}
 
 	sink.TurnEnded(reply, stats, err)
@@ -188,8 +214,9 @@ func (v *plainView) TurnEnded(reply agent.Reply, stats TurnStats, err error) {
 			// one-shot run (`octo "…" | program`) leaves stdout carrying only the
 			// reply text. Interactive plain-REPL users still see it (their stderr
 			// is the terminal). Mirrors printUsageLine's stderr routing.
-			fmt.Fprintf(v.errOut, "  ⏱ %s, %s tokens\n",
-				agent.FormatElapsedSeconds(int64(stats.Elapsed.Seconds())), agent.FormatGoalTokens(int64(stats.Tokens)))
+			fmt.Fprintf(v.errOut, "  ⏱ %s, %s tokens%s\n",
+				agent.FormatElapsedSeconds(int64(stats.Elapsed.Seconds())), agent.FormatGoalTokens(int64(stats.Tokens)),
+				stats.cacheSuffix())
 		}
 	}
 }

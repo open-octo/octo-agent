@@ -193,6 +193,22 @@ func FormatElapsedSeconds(seconds int64) string {
 	return fmt.Sprintf("%dm%ds", seconds/60, seconds%60)
 }
 
+// CacheUtilizationPct returns the share of a turn's prompt tokens that were
+// served from the provider's prompt cache: read / (input + read + write).
+// InputTokens and CacheRead/WriteTokens are non-overlapping buckets (see
+// accrueUsage), so the denominator is the whole prompt sent. ok is false when
+// the backend reported no cache activity at all — callers omit the readout
+// then instead of rendering a misleading "cache 0%". A warming turn (write
+// only, read 0) does report 0%, which is honest: the cache exists but nothing
+// was served from it yet.
+func CacheUtilizationPct(inputTokens, cacheRead, cacheWrite int) (pct int, ok bool) {
+	total := inputTokens + cacheRead + cacheWrite
+	if cacheRead+cacheWrite <= 0 || total <= 0 {
+		return 0, false
+	}
+	return cacheRead * 100 / total, true
+}
+
 // GoalUsageLine summarizes a goal's spend: "12m, 63.9K/50K tokens".
 func GoalUsageLine(g Goal) string {
 	var parts []string

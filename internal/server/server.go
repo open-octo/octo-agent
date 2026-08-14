@@ -3591,6 +3591,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// after, the same technique the goal accountant uses for its own totals.
 	turnStart := time.Now()
 	inBefore, outBefore := sess.Agent.SessionTokens()
+	crBefore, cwBefore := sess.Agent.SessionCacheTokens()
 
 	_, runErr := channel.RunAgent(ctx, sess, toolDefs, executor, ctrl, content)
 	persist()
@@ -3667,9 +3668,14 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// goal-terminal turn skips it in favor of the terminal notice below.
 	if runErr == nil && goalTerminalNotice == "" {
 		inAfter, outAfter := sess.Agent.SessionTokens()
+		crAfter, cwAfter := sess.Agent.SessionCacheTokens()
 		tokens := (inAfter - inBefore) + (outAfter - outBefore)
 		elapsed := agent.FormatElapsedSeconds(int64(time.Since(turnStart).Seconds()))
-		ad.SendText(ev.ChatID, "⏱ "+elapsed+", "+agent.FormatGoalTokens(int64(tokens))+" tokens", ev.MessageID)
+		line := "⏱ " + elapsed + ", " + agent.FormatGoalTokens(int64(tokens)) + " tokens"
+		if pct, ok := agent.CacheUtilizationPct(inAfter-inBefore, crAfter-crBefore, cwAfter-cwBefore); ok {
+			line += fmt.Sprintf(", cache %d%%", pct)
+		}
+		ad.SendText(ev.ChatID, line, ev.MessageID)
 	}
 
 	if goalTerminalNotice != "" {

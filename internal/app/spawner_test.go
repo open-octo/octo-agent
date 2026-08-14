@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -264,6 +265,64 @@ func TestAgentSpawner_ContinueAccruesOnlyDeltaTokens(t *testing.T) {
 	in, out := parent.SessionTokens()
 	if in != 400 || out != 160 {
 		t.Errorf("parent session tokens = (%d,%d), want (400,160) — double-counting bug if 600/240", in, out)
+	}
+}
+
+// erroringChildSender succeeds once with a tool_use reply (accruing tokens
+// and cache activity), then fails — a partial round that burned real tokens
+// before dying.
+type erroringChildSender struct {
+	calls int32
+}
+
+func (s *erroringChildSender) scripted() (agent.Reply, error) {
+	if atomic.AddInt32(&s.calls, 1) == 1 {
+		return agent.Reply{
+			StopReason:       "tool_use",
+			Blocks:           []agent.ContentBlock{agent.NewToolUseBlock("c1", "read_file", map[string]any{"path": "x"})},
+			InputTokens:      120,
+			OutputTokens:     30,
+			CacheReadTokens:  40,
+			CacheWriteTokens: 6,
+		}, nil
+	}
+	return agent.Reply{}, errors.New("boom")
+}
+
+func (s *erroringChildSender) SendMessages(_ context.Context, _, _ string, _ []agent.Message, _ int) (agent.Reply, error) {
+	return s.scripted()
+}
+
+// SendMessagesWithTools makes the sender a ToolSender so the child stays on
+// the runLoop path (a plain Sender falls back to single-shot TurnStream and
+// round 2 would never run).
+func (s *erroringChildSender) SendMessagesWithTools(_ context.Context, _, _ string, _ []agent.Message, _ int, _ []agent.ToolDefinition) (agent.Reply, error) {
+	return s.scripted()
+}
+
+// TestAgentSpawner_ErrorRoundStillAccruesTokens: when a child round dies on
+// an error after burning tokens, the delta (cache included) still folds into
+// the parent before the error propagates — otherwise a failed Spawn leaves
+// the parent's session totals and per-turn cache utilization under-counted.
+func TestAgentSpawner_ErrorRoundStillAccruesTokens(t *testing.T) {
+	send := &erroringChildSender{}
+	parent := agent.New(send, "parent-model")
+	// A non-empty toolbelt keeps the child on the tool-loop path — with no
+	// tools RunStream takes the single-shot fast path and round 2 never runs.
+	childTools := []agent.ToolDefinition{{Name: "read_file"}}
+	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return childTools })
+
+	_, err := sp.Spawn(context.Background(), tools.SpawnRequest{Description: "x", Prompt: "go"})
+	if err == nil {
+		t.Fatal("expected the child's round-2 failure to propagate")
+	}
+	in, out := parent.SessionTokens()
+	if in != 120 || out != 30 {
+		t.Errorf("parent session tokens = (%d,%d), want (120,30) from the partial round", in, out)
+	}
+	cr, cw := parent.SessionCacheTokens()
+	if cr != 40 || cw != 6 {
+		t.Errorf("parent session cache tokens = (%d,%d), want (40,6) from the partial round", cr, cw)
 	}
 }
 

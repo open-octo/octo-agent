@@ -2255,23 +2255,29 @@ func (a *Agent) SessionTokens() (inputTokens, outputTokens int) {
 }
 
 // AccrueChildUsage folds tokens spent by a spawned sub-agent into this
-// agent's session totals, so SessionTokens still reports one
-// consolidated number even when the LLM used sub_agent. cache totals are
-// left untouched — the child runs against the same provider but reports its
-// own cache hits internally; the parent only sees the bottom-line counts here.
-func (a *Agent) AccrueChildUsage(inputTokens, outputTokens int) {
-	a.addUsage(inputTokens, outputTokens)
+// agent's session totals, so SessionTokens and SessionCacheTokens still
+// report one consolidated number even when the LLM used sub_agent. The
+// child's cache read/write deltas ride along so the per-turn cache
+// utilization readout (CacheUtilizationPct) stays a true value rather
+// than a lower bound on turns that spawned sub-agents.
+func (a *Agent) AccrueChildUsage(inputTokens, outputTokens, cacheRead, cacheWrite int) {
+	a.addUsage(inputTokens, outputTokens, cacheRead, cacheWrite)
 }
 
-// addUsage folds input/output token counts into the session totals under the
-// usage lock. Shared by AccrueChildUsage (concurrent sub-agent goroutines) and
-// the internal sub-operation accruals (compaction / consolidation / planning),
-// all of which can run while a sub-agent goroutine is still accruing.
-func (a *Agent) addUsage(inputTokens, outputTokens int) {
+// addUsage folds input/output/cache token counts into the session totals
+// under the usage lock. Shared by AccrueChildUsage (concurrent sub-agent
+// goroutines) and the internal sub-operation accruals (compaction /
+// consolidation / planning), all of which can run while a sub-agent
+// goroutine is still accruing. Unlike accrueUsage it does NOT touch
+// lastInputTokens — a summary call's prompt size must not corrupt the
+// main conversation's context-usage gauge.
+func (a *Agent) addUsage(inputTokens, outputTokens, cacheRead, cacheWrite int) {
 	a.usageMu.Lock()
 	defer a.usageMu.Unlock()
 	a.sessionInputTokens += inputTokens
 	a.sessionOutputTokens += outputTokens
+	a.sessionCacheReadTokens += cacheRead
+	a.sessionCacheWriteTokens += cacheWrite
 }
 
 // ClearHistory drops the entire conversation history, returning the agent to a

@@ -14,12 +14,16 @@ type summarizeFake struct {
 	summary string
 	calls   int
 	gotMsgs []Message
+	// cacheRead/cacheWrite ride the fake Reply so tests can verify the
+	// summary call's cache tokens fold into the session totals.
+	cacheRead  int
+	cacheWrite int
 }
 
 func (f *summarizeFake) SendMessages(_ context.Context, _, _ string, msgs []Message, _ int) (Reply, error) {
 	f.calls++
 	f.gotMsgs = msgs
-	return Reply{Content: f.summary, InputTokens: 5, OutputTokens: 3}, nil
+	return Reply{Content: f.summary, InputTokens: 5, OutputTokens: 3, CacheReadTokens: f.cacheRead, CacheWriteTokens: f.cacheWrite}, nil
 }
 
 func TestSafeSplitIndexByBudget(t *testing.T) {
@@ -385,6 +389,34 @@ func TestForceCompact_FoldsBelowAutoThreshold(t *testing.T) {
 	}
 	if a.lastInputTokens != 0 {
 		t.Errorf("trigger should reset to 0 after compaction, got %d", a.lastInputTokens)
+	}
+}
+
+// TestForceCompact_AccruesCacheTokens: the summary call's cache read/write
+// tokens fold into the session cache totals (via addUsage), so a turn that
+// compacted mid-flight reports true cache utilization instead of a lower
+// bound — while lastInputTokens (the ctx-usage gauge) stays unpolluted.
+func TestForceCompact_AccruesCacheTokens(t *testing.T) {
+	f := &summarizeFake{summary: "GOAL: build X.", cacheRead: 40, cacheWrite: 6}
+	a := New(f, "m")
+	a.CompactThreshold = 4000
+
+	longMsg := strings.Repeat("x ", 500)
+	for i := 0; i < 6; i++ {
+		a.History.Append(NewUserMessage(longMsg))
+		a.History.Append(NewAssistantMessage(longMsg))
+	}
+
+	if _, err := a.ForceCompact(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	in, out := a.SessionTokens()
+	if in != 5 || out != 3 {
+		t.Errorf("SessionTokens = (%d,%d), want (5,3) from the summary call", in, out)
+	}
+	cr, cw := a.SessionCacheTokens()
+	if cr != 40 || cw != 6 {
+		t.Errorf("SessionCacheTokens = (%d,%d), want (40,6) from the summary call", cr, cw)
 	}
 }
 

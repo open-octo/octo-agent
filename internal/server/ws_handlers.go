@@ -1755,6 +1755,12 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		inTok, outTok := a.SessionTokens()
 		completeEvent["duration_ms"] = time.Since(turnCallStart).Milliseconds()
 		completeEvent["tokens"] = inTok + outTok
+		// Cache utilization for the turn's prompt side; omitted (not 0) when
+		// the backend reported no cache activity, so the UI hides the readout.
+		cr, cw := a.SessionCacheTokens()
+		if pct, ok := agent.CacheUtilizationPct(inTok, cr, cw); ok {
+			completeEvent["cache_pct"] = pct
+		}
 	}
 	s.wsHub.broadcast(sess.ID, completeEvent)
 	// completeEvent above only reaches tabs subscribed to this session; a tab
