@@ -57,6 +57,11 @@ type TurnStats struct {
 	// deltas. InputTokens is the uncached remainder (non-overlapping with the
 	// cache buckets), so views can derive utilization via
 	// agent.CacheUtilizationPct. All zero when the backend reports no cache info.
+	//
+	// Scope caveat: AccrueChildUsage folds sub-agent and mid-turn compaction /
+	// consolidation tokens into the input total but never their cache hits
+	// (internal/agent/agent.go), so for turns that spawned sub-agents or
+	// compacted, the percentage is a lower bound rather than the true figure.
 	InputTokens      int
 	CacheReadTokens  int
 	CacheWriteTokens int
