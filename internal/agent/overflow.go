@@ -18,6 +18,8 @@ var (
 	// OpenAI: "maximum context length is 128000 tokens ... you requested 130000".
 	reMaxContextLen = regexp.MustCompile(`maximum context length is (\d+)`)
 	reRequested     = regexp.MustCompile(`requested (?:about |~)?(\d+)`)
+	// Moonshot/Kimi: "Your request exceeded model token limit: 262144 (requested: 269030)".
+	reTokenLimitRequested = regexp.MustCompile(`token limit:\s*(\d+)\s*\(requested:\s*(\d+)\)`)
 )
 
 // parseOverflowTokens extracts (have, max) token counts from a context-overflow
@@ -44,6 +46,13 @@ func parseOverflowTokens(err error) (have, max int, ok bool) {
 			}
 		}
 	}
+	if m := reTokenLimitRequested.FindStringSubmatch(msg); m != nil {
+		mx, _ := strconv.Atoi(m[1])
+		h, _ := strconv.Atoi(m[2])
+		if h > mx && mx > 0 {
+			return h, mx, true
+		}
+	}
 	return 0, 0, false
 }
 
@@ -57,12 +66,16 @@ type overflowRecovery struct {
 // contextTooLongError detects whether an error is about exceeding the model's
 // context window. Aligned with Ruby's context_too_long_error?.
 //
-// Coverage (verified against real production error strings):
+// Coverage (verified against real production error strings, except where a
+// phrase's own comment marks it as a defensive generic):
 //
 //	OpenAI:    "This model's maximum context length is 128000 tokens..."
 //	Anthropic: "prompt is too long: 218849 tokens > 200000 maximum"
 //	Qwen:      "You passed 117345 input tokens... context length is only 125536"
 //	DeepSeek:  Variants of "context length" / "tokens exceeds"
+//	Kimi:      "Invalid request: Your request exceeded model token limit: 262144 (requested: 269030)"
+//	Zhipu:     "Prompt 超长" (bigmodel.cn error code 1261)
+//	DashScope: "InternalError.Algo.InvalidParameter: Range of input length should be [1, 202752]"
 //	Generic:   "The total number of tokens exceeds the model's maximum context length"
 func contextTooLongError(err error) bool {
 	if err == nil {
@@ -86,6 +99,25 @@ func contextTooLongError(err error) bool {
 		"reduce the length of your",
 		"reduce the length of the prompt",
 		"range of input length",
+		// Moonshot/Kimi (OpenAI protocol): "Your request exceeded model
+		// token limit: 262144 (requested: 269030)". Deliberately the full
+		// phrase — a bare "token limit" would also match rate-limit (TPM)
+		// errors, and "max_tokens exceeds the maximum" parameter rejections
+		// must not be classified as context overflow.
+		"exceeded model token limit",
+		// Zhipu bigmodel.cn error code 1261. The message is Chinese-only
+		// ("Prompt 超长" per the official error-code table); matched against
+		// the lowercased error string, with a no-space variant in case the
+		// endpoint omits it.
+		"prompt 超长",
+		"prompt超长",
+		// Defensive generics for CN-hosted endpoints (not verified against a
+		// specific production string). Deliberately INPUT-scoped: a bare
+		// "长度超限" would also match "输出长度超限" — the Chinese wording of
+		// an output-side max_tokens rejection, which must not be classified
+		// as context overflow (same trap as the English guard above).
+		"输入长度超限",
+		"上下文长度超过",
 	}
 	for _, p := range strongPhrases {
 		if strings.Contains(msg, p) {

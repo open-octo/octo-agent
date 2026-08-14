@@ -22,11 +22,19 @@ func TestParseOverflowTokens(t *testing.T) {
 			130512, 128000, true,
 		},
 		{
+			"kimi", "Invalid request: Your request exceeded model token limit: 262144 (requested: 269030)",
+			269030, 262144, true,
+		},
+		{
 			"not an overflow error", "some unrelated failure",
 			0, 0, false,
 		},
 		{
 			"have not greater than max is rejected", "5 tokens > 9 maximum",
+			0, 0, false,
+		},
+		{
+			"kimi have not greater than max is rejected", "exceeded model token limit: 262144 (requested: 1000)",
 			0, 0, false,
 		},
 	}
@@ -36,6 +44,39 @@ func TestParseOverflowTokens(t *testing.T) {
 			if ok != c.ok || (ok && (have != c.have || max != c.max)) {
 				t.Errorf("parseOverflowTokens(%q) = (%d, %d, %v), want (%d, %d, %v)",
 					c.msg, have, max, ok, c.have, c.max, c.ok)
+			}
+		})
+	}
+}
+
+func TestContextTooLongError(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  string
+		want bool
+	}{
+		{"anthropic", "prompt is too long: 218849 tokens > 200000 maximum", true},
+		{"openai", "This model's maximum context length is 128000 tokens", true},
+		{"dashscope glm", "InternalError.Algo.InvalidParameter: Range of input length should be [1, 202752]", true},
+		{"kimi", "Invalid request: Your request exceeded model token limit: 262144 (requested: 269030)", true},
+		{"zhipu 1261", "Prompt 超长", true},
+		{"zhipu 1261 no space", "Prompt超长", true},
+		{"cn generic length limit", "输入长度超限，请减少输入内容", true},
+		{"cn generic context", "上下文长度超过模型限制", true},
+		// The Chinese wording of an OUTPUT-side max_tokens rejection must
+		// not be classified as context overflow — a bare "长度超限" phrase
+		// would match it.
+		{"cn output length rejection", "输出长度超限，请降低 max_tokens", false},
+		{"unrelated failure", "connection reset by peer", false},
+		// A max_tokens PARAMETER rejection is not a context overflow —
+		// treating it as one dead-ends recovery in a compression loop.
+		{"max_tokens rejection", "max_tokens: expected a value <= 32768, but got 65536 instead", false},
+		{"rate limit", "rate limit exceeded, please retry later", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := contextTooLongError(errors.New(c.msg)); got != c.want {
+				t.Errorf("contextTooLongError(%q) = %v, want %v", c.msg, got, c.want)
 			}
 		})
 	}
