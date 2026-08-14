@@ -62,11 +62,14 @@ renderer.code = function ({ text: codeText, lang }: { text: string; lang?: strin
 </div>`
 }
 
-renderer.link = function ({ href, title, text }: { href: string; title?: string | null; text: string }) {
+renderer.link = function ({ href, title, tokens }: Tokens.Link) {
   // Only allow safe URL schemes; strip everything else.
   const safe = isSafeHref(href)
   const titleAttr = title ? ` title="${escapeHtml(title)}"` : ""
-  return `<a href="${safe ? escapeHtml(href) : ""}"${titleAttr} target="_blank" rel="noopener">${escapeHtml(text)}</a>`
+  // Render the label from the token's parsed inline children — token.text is
+  // the raw markdown source (same bug class as blockquote below), so escaping
+  // it leaked literal ** and backticks into every formatted link label.
+  return `<a href="${safe ? escapeHtml(href) : ""}"${titleAttr} target="_blank" rel="noopener">${this.parser.parseInline(tokens)}</a>`
 }
 
 // Render the quote's children, don't interpolate token.text — that field is

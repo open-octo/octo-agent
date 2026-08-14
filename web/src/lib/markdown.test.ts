@@ -78,6 +78,36 @@ describe('renderMarkdown: tables', () => {
   })
 })
 
+describe('renderMarkdown: link labels (#2088)', () => {
+  it('renders bold inside a link label instead of leaking asterisks', () => {
+    const out = renderMarkdown('See [**PR #123**](https://example.com)')
+    expect(out).toContain('href="https://example.com"')
+    expect(out).toContain('<strong>PR #123</strong>')
+    expect(out).not.toContain('**')
+  })
+
+  it('renders inline code inside a link label instead of leaking backticks', () => {
+    const out = renderMarkdown('Open [`foo.ts`](https://example.com/foo)')
+    expect(out).toContain('<code>foo.ts</code>')
+    expect(out).not.toContain('`')
+  })
+
+  it('sanitizes dangerous HTML in link labels', () => {
+    // Inline HTML in the label now flows through parseInline like everywhere
+    // else in the document; the final DOMPurify pass is what keeps it safe.
+    const out = renderMarkdown('[a <img src=x onerror=alert(1)> c](https://example.com)')
+    expect(out).not.toContain('onerror')
+    const out2 = renderMarkdown('[x <script>alert(1)</script>](https://example.com)')
+    expect(out2).not.toContain('<script>')
+  })
+
+  it('still blanks unsafe hrefs', () => {
+    const out = renderMarkdown('[click](javascript:alert(1))')
+    expect(out).not.toContain('javascript:')
+    expect(out).toContain('>click</a>')
+  })
+})
+
 describe('renderMarkdown: renderer installed once (#2089)', () => {
   it('does not re-wrap the global renderer methods on every render', () => {
     // marked.use() wraps already-installed renderer methods in a new closure
