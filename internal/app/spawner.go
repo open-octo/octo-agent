@@ -292,8 +292,9 @@ func (s *Spawner) runChild(ctx context.Context, lc *liveChild, prompt string) (r
 	// When the manager stamped an event sink into ctx (TUI live panel), stream
 	// the child's tool-level activity to it. Only tool_started/tool_error are
 	// forwarded — not per-token text — to keep event volume sane with several
-	// sub-agents running at once. No sink (headless) => nil handler =>
-	// RunStream behaves exactly like Run.
+	// sub-agents running at once. No sink (headless) => nil handler => no
+	// events; unlike Run, a nil-handler RunStream still keeps a streamed
+	// partial reply in history when a round dies on an error.
 	var handler agent.EventHandler
 	if sink := tools.SubAgentEventSink(ctx); sink != nil {
 		handler = func(ev agent.AgentEvent) {

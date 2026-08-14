@@ -842,8 +842,9 @@ func (a *Agent) Run(ctx context.Context, userInput string, tools []ToolDefinitio
 	}
 
 	// Buffered send + nil handler: runLoop runs the same dispatch/history
-	// machinery as the streaming path but emits no events.
-	return a.runLoop(ctx, userInput, tools, executor, nil,
+	// machinery as the streaming path but emits no events. No roundText —
+	// a buffered send that errors has streamed nothing worth keeping.
+	return a.runLoop(ctx, userInput, tools, executor, nil, nil,
 		func(ctx context.Context, msgs []Message, maxTokens int) (Reply, error) {
 			return ts.SendMessagesWithTools(ctx, a.Model, a.System, msgs, maxTokens, tools)
 		})
@@ -879,8 +880,20 @@ func (a *Agent) RunStream(
 
 	// onChunk adapts text deltas from provider streams into EventTextDelta
 	// events. Nil-safe; empty deltas are silently dropped.
+	//
+	// roundText mirrors every delta of the CURRENT provider round: when the
+	// round dies on an unrecoverable error, the text the user already watched
+	// stream in is persisted as a partial reply (see keepPartialReply) instead
+	// of existing only in the dying view. runLoop resets it before each round
+	// — retries (overflow recovery, stream stalls, escalation) re-stream from
+	// scratch, so carrying the failed attempt's text would double it.
+	var roundText strings.Builder
 	onChunk := func(delta string) {
-		if handler == nil || delta == "" {
+		if delta == "" {
+			return
+		}
+		roundText.WriteString(delta)
+		if handler == nil {
 			return
 		}
 		handler(AgentEvent{Kind: EventTextDelta, Text: delta})
@@ -923,13 +936,13 @@ func (a *Agent) RunStream(
 
 	// Try ToolStreamingSender first, then fall back to ToolSender (buffered).
 	if tss, ok := sender.(ToolStreamingSender); ok {
-		return a.runLoop(ctx, userInput, tools, executor, handler,
+		return a.runLoop(ctx, userInput, tools, executor, handler, &roundText,
 			func(ctx context.Context, msgs []Message, maxTokens int) (Reply, error) {
 				return tss.StreamMessagesWithTools(ctx, a.Model, a.System, msgs, maxTokens, tools, onChunk, onToolDelta, onThinking)
 			})
 	}
 	if ts, ok := sender.(ToolSender); ok {
-		return a.runLoop(ctx, userInput, tools, executor, handler,
+		return a.runLoop(ctx, userInput, tools, executor, handler, &roundText,
 			func(ctx context.Context, msgs []Message, maxTokens int) (Reply, error) {
 				reply, err := ts.SendMessagesWithTools(ctx, a.Model, a.System, msgs, maxTokens, tools)
 				if err == nil && reply.Content != "" {
@@ -962,6 +975,7 @@ func (a *Agent) runLoop(
 	tools []ToolDefinition,
 	executor ToolExecutor,
 	handler EventHandler,
+	roundText *strings.Builder,
 	send func(ctx context.Context, msgs []Message, maxTokens int) (Reply, error),
 ) (Reply, error) {
 	// Goal accounting brackets the whole turn: the baseline reset pins the
@@ -1070,6 +1084,12 @@ func (a *Agent) runLoop(
 		msgs := a.History.Snapshot()
 		a.describeImages(ctx, handler, msgs)
 
+		// Each provider round streams its own text from scratch — a retry of
+		// this round (overflow recovery, stream stall) re-streams, so the
+		// accumulator must not carry the failed attempt's text.
+		if roundText != nil {
+			roundText.Reset()
+		}
 		reply, err := send(ctx, msgs, a.MaxTokens)
 		if err != nil {
 			// Interrupt during the provider call: finalize cleanly rather than
@@ -1100,7 +1120,11 @@ func (a *Agent) runLoop(
 				continue
 			}
 
-			if i == 0 {
+			if a.keepPartialReply(handler, roundText, "") {
+				// The words the user watched stream in are persisted — even a
+				// first-round failure must not roll them (and the user input)
+				// back into oblivion.
+			} else if i == 0 {
 				a.History.TruncateTo(baseHistoryLen)
 				a.inputRolledBack = true
 			}
@@ -1127,6 +1151,16 @@ func (a *Agent) runLoop(
 			// first attempt, so this costs no helper calls.
 			emsgs := a.History.Snapshot()
 			a.describeImages(ctx, handler, emsgs)
+			// The escalated retry re-streams the whole reply; drop the
+			// truncated attempt's text so a failure here keeps only the
+			// retry's partial, not both concatenated. Snapshot it first:
+			// if the retry dies having streamed nothing, the truncated
+			// attempt's fully-streamed text is still the best partial to keep.
+			truncatedText := ""
+			if roundText != nil {
+				truncatedText = roundText.String()
+				roundText.Reset()
+			}
 			escalated, eerr := send(ctx, emsgs, a.MaxTokensEscalate)
 			switch {
 			case eerr == nil:
@@ -1141,7 +1175,10 @@ func (a *Agent) runLoop(
 				// Claude 3 caps at 4096). Keep the truncated reply and fall
 				// through to the graceful stop below.
 			default:
-				if i == 0 {
+				if a.keepPartialReply(handler, roundText, truncatedText) {
+					// Persisted the escalated attempt's partial (or the
+					// truncated first attempt's text) — no rollback.
+				} else if i == 0 {
 					a.History.TruncateTo(baseHistoryLen)
 					a.inputRolledBack = true
 				}
@@ -1374,6 +1411,40 @@ func (a *Agent) finishInterrupted(handler EventHandler) (Reply, error) {
 	// before finishInterrupted is reached) so the UI shows how many iterations
 	// completed before the interrupt.
 	return reply, context.Canceled
+}
+
+// partialReplyNote caps a partial reply persisted by keepPartialReply, so
+// both the user and the model (on the next turn) can see the text is
+// incomplete rather than mistaking it for a finished answer.
+const partialReplyNote = "[Reply interrupted by an error — the text above is incomplete.]"
+
+// keepPartialReply persists the text the model already streamed in the
+// failing round as an assistant message. Without it, a turn that dies on an
+// unrecoverable send error discards everything the user watched arrive: the
+// text was never appended to history, so it survives only in the live view
+// and vanishes on the next transcript reload. fallback covers the escalation
+// path, where the accumulator was reset for the retry but the truncated
+// first attempt had streamed a complete text worth keeping. Returns false
+// when there is nothing worth keeping, in which case the caller applies its
+// normal rollback.
+func (a *Agent) keepPartialReply(handler EventHandler, roundText *strings.Builder, fallback string) bool {
+	partial := ""
+	if roundText != nil {
+		partial = strings.TrimSpace(roundText.String())
+	}
+	if partial == "" {
+		partial = strings.TrimSpace(fallback)
+	}
+	if partial == "" {
+		return false
+	}
+	a.History.Append(NewAssistantMessage(partial + "\n\n" + partialReplyNote))
+	// The live view already rendered the partial via deltas — deliver the
+	// marker too, so the bubble on screen matches what history persisted.
+	if handler != nil {
+		handler(AgentEvent{Kind: EventTextDelta, Text: "\n\n" + partialReplyNote})
+	}
+	return true
 }
 
 // TakeBackInterrupted undoes an interrupt that produced no output: when
