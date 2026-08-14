@@ -2266,8 +2266,9 @@ func turnSummaryLine(v verbosity, stats TurnStats) string {
 	if v.quiet() {
 		return ""
 	}
-	return noticeStyle.Render(fmt.Sprintf("  ⏱ %s, %s tokens",
-		agent.FormatElapsedSeconds(int64(stats.Elapsed.Seconds())), agent.FormatGoalTokens(int64(stats.Tokens))))
+	return noticeStyle.Render(fmt.Sprintf("  ⏱ %s, %s tokens%s",
+		agent.FormatElapsedSeconds(int64(stats.Elapsed.Seconds())), agent.FormatGoalTokens(int64(stats.Tokens)),
+		stats.cacheSuffix()))
 }
 
 // thinkingPhrases rotate (slowly) on the initial-wait placeholder so the

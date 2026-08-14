@@ -1057,13 +1057,16 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       clearDoneSubAgents(sid)
       // Per-turn summary: elapsed time + tokens spent. The backend omits both
       // fields on error/interrupt, so this only fires on a clean completion.
+      // cache_pct is omitted (not 0) when the backend reported no cache
+      // activity, so cache-less providers keep the two-part line.
       const durationMs = (ev as any).duration_ms
       const tokens = (ev as any).tokens
+      const cachePct = (ev as any).cache_pct
       if (typeof durationMs === 'number' && typeof tokens === 'number') {
         addChatMsg(sid, {
           id: uid('sum'),
           type: 'notice',
-          content: `⏱ ${fmtDur(Math.round(durationMs / 1000))}, ${fmtTokens(tokens)} tokens`,
+          content: `⏱ ${fmtDur(Math.round(durationMs / 1000))}, ${fmtTokens(tokens)} tokens${typeof cachePct === 'number' ? `, cache ${cachePct}%` : ''}`,
           level: 'info',
           createdAt: Date.now(),
           streaming: false,

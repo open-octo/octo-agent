@@ -107,3 +107,25 @@ func TestFormatGoalHelpers(t *testing.T) {
 		t.Errorf("GoalUsageLine = %q", got)
 	}
 }
+
+func TestCacheUtilizationPct(t *testing.T) {
+	cases := []struct {
+		name                    string
+		input, read, write, pct int
+		ok                      bool
+	}{
+		{"no cache info at all", 1000, 0, 0, 0, false},
+		{"zero everything", 0, 0, 0, 0, false},
+		{"warming turn (write only)", 100, 0, 2000, 0, true},
+		{"typical hit", 114, 2304, 0, 95, true},
+		{"hit plus write", 100, 800, 100, 80, true},
+		{"fully cached", 0, 500, 0, 100, true},
+	}
+	for _, c := range cases {
+		pct, ok := CacheUtilizationPct(c.input, c.read, c.write)
+		if pct != c.pct || ok != c.ok {
+			t.Errorf("%s: CacheUtilizationPct(%d, %d, %d) = (%d, %v), want (%d, %v)",
+				c.name, c.input, c.read, c.write, pct, ok, c.pct, c.ok)
+		}
+	}
+}
