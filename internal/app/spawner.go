@@ -281,8 +281,9 @@ func (s *Spawner) Continue(ctx context.Context, agentID, message string) (tools.
 //
 // A max-turns checkpoint is NOT an error: the partial reply and StopReason
 // ("max_turns") are returned so the caller can checkpoint and Continue.
-// Tokens spent on the partial round are still accrued. Callers that
-// drive a continuation can inspect the child StopReason themselves.
+// Tokens spent on partial rounds — checkpoint OR error — are still accrued
+// into the parent before the error is returned. Callers that drive a
+// continuation can inspect the child StopReason themselves.
 func (s *Spawner) runChild(ctx context.Context, lc *liveChild, prompt string) (reply string, in, out int, stopReason string, turns int, err error) {
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
@@ -308,19 +309,22 @@ func (s *Spawner) runChild(ctx context.Context, lc *liveChild, prompt string) (r
 	}
 	r, err := lc.agent.RunStream(childCtx, prompt, lc.tools, lc.executor, handler)
 	turns = lc.agent.TurnIterations()
-	if err != nil {
-		return "", 0, 0, "", turns, err
-	}
 
-	// Accrue the round's token delta even on a max-turns checkpoint — the
-	// partial work cost real tokens. Cache deltas ride along so the parent's
-	// per-turn cache utilization readout stays a true value.
+	// Accrue the round's token delta BEFORE the error check: a failed or
+	// max-turns-checkpoint round still burned real tokens on its partial
+	// work (a streamed partial reply is kept in history on error), so the
+	// parent's session totals and per-turn cache utilization must see it.
+	// Cache deltas ride along so the readout stays a true value.
 	totIn, totOut := lc.agent.SessionTokens()
 	totCR, totCW := lc.agent.SessionCacheTokens()
 	in, out = totIn-lc.accruedIn, totOut-lc.accruedOut
 	lc.accruedIn, lc.accruedOut = totIn, totOut
 	s.parent.AccrueChildUsage(in, out, totCR-lc.accruedCacheRead, totCW-lc.accruedCacheWrite)
 	lc.accruedCacheRead, lc.accruedCacheWrite = totCR, totCW
+
+	if err != nil {
+		return "", in, out, "", turns, err
+	}
 
 	lc.syncSession()
 	s.fireSubagentStop(r.Content)
