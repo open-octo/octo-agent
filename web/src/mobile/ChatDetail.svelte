@@ -13,13 +13,17 @@
   import ArtifactViewer from './ArtifactViewer.svelte'
   import { t } from '../lib/i18n'
 
-  let { onBack, onViewApproval, initialPrompt = '', onInitialSent }: {
+  let { onBack, onViewApproval, initial = null, onInitialSent }: {
     onBack: () => void
     onViewApproval: () => void
     // Queued first message from the new-task sheet, sent once the WS
-    // subscription is live (so the reply stream isn't missed). onInitialSent
-    // lets the owner clear it so a remount doesn't re-send.
-    initialPrompt?: string
+    // subscription is live (so the reply stream isn't missed). Carries the id
+    // of the session it was queued for: activeSessionId can flip to another
+    // session while the history fetch is in flight (the question-toast "View"
+    // button sets it without going through openSession), and the prompt must
+    // only ever be sent to its own session (#2093). onInitialSent lets the
+    // owner clear it so a remount doesn't re-send.
+    initial?: { id: string; prompt: string } | null
     onInitialSent?: () => void
   } = $props()
 
@@ -57,8 +61,8 @@
     loadMobileHistory(s).then(() => {
       if (cancelled) return
       ws.subscribe(s)
-      if (initialPrompt) {
-        sendMobile(s, initialPrompt, [])
+      if (initial?.prompt && initial.id === s) {
+        sendMobile(s, initial.prompt, [])
         onInitialSent?.()
       }
     })

@@ -57,7 +57,7 @@
           <ChatDetail
             onBack={closeDetail}
             onViewApproval={() => (openKind = 'approval')}
-            initialPrompt={initial?.id === openId ? initial.prompt : ''}
+            {initial}
             onInitialSent={() => (initial = null)}
           />
         {/if}
