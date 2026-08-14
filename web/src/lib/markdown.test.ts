@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { marked } from 'marked'
 import { renderMarkdown } from './markdown'
 
 describe('renderMarkdown: blockquote contents', () => {
@@ -74,5 +75,24 @@ describe('renderMarkdown: tables', () => {
     expect(out).toContain('<td>a|b</td>')
     // The escaped pipe must not create a spurious second column.
     expect(out.match(/<td>/g)).toHaveLength(1)
+  })
+})
+
+describe('renderMarkdown: renderer installed once (#2089)', () => {
+  it('does not re-wrap the global renderer methods on every render', () => {
+    // marked.use() wraps already-installed renderer methods in a new closure
+    // per call; installing per render grew an unbounded wrapper chain. With a
+    // single module-scope install, the installed method references must stay
+    // identical across renders.
+    renderMarkdown('warm-up **render**')
+    const installed = (marked.defaults as any).renderer
+    const before = { code: installed.code, link: installed.link, blockquote: installed.blockquote, table: installed.table }
+    for (let i = 0; i < 5; i++) renderMarkdown(`render pass ${i} with \`code\` and [a link](https://example.com)`)
+    const after = (marked.defaults as any).renderer
+    expect(after).toBe(installed)
+    expect(after.code).toBe(before.code)
+    expect(after.link).toBe(before.link)
+    expect(after.blockquote).toBe(before.blockquote)
+    expect(after.table).toBe(before.table)
   })
 })
