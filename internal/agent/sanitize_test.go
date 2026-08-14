@@ -18,6 +18,9 @@ func TestSanitizeToolResultText(t *testing.T) {
 		{"tab newline cr kept", "a\tb\nc\rd", "a\tb\nc\rd"},
 		{"csi color stripped", "\x1b[31mred\x1b[0m plain", "red plain"},
 		{"csi cursor stripped", "\x1b[2Kline", "line"},
+		{"csi with intermediate byte stripped", "\x1b[4 qcursor", "cursor"},
+		// Correctly-encoded C1 controls are valid UTF-8 and pass through.
+		{"encoded c1 kept", "a\u0085b", "a\u0085b"},
 		{"osc bel stripped", "\x1b]0;title\x07body", "body"},
 		{"osc st stripped", "\x1b]8;;https://x\x1b\\link\x1b]8;;\x1b\\", "link"},
 		{"bare esc replaced", "a\x1bb", "a�b"},

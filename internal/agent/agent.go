@@ -2002,7 +2002,10 @@ func (a *Agent) applyPostToolUse(ctx context.Context, uses, results []ContentBlo
 		p.ToolName = u.Name
 		p.ToolInput = u.Input
 		p.ToolResult = rb.Result
-		if extra := a.Hooks.Inject(ctx, p); extra != "" {
+		// Hook output is external script stdout appended AFTER the
+		// toolResultBlocks chokepoint — sanitize it here too, or it would
+		// reintroduce the very bytes the chokepoint just scrubbed.
+		if extra := sanitizeToolResultText(a.Hooks.Inject(ctx, p)); extra != "" {
 			if rb.Result == "" {
 				rb.Result = extra
 			} else {

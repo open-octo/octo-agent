@@ -23,7 +23,9 @@ var ansiEscape = regexp.MustCompile(`\x1b(?:\[[0-9;:?<=>]*[ -/]*[@-~]|\][^\x07\x
 //     not information, and once the ESC byte is replaced below they would
 //     degrade into "�[31m" noise.
 //   - Remaining C0 control bytes other than \t, \n, \r — plus DEL — are
-//     replaced with U+FFFD.
+//     replaced with U+FFFD. Correctly-encoded C1 controls (U+0080–U+009F)
+//     are deliberately left alone: they are valid UTF-8 and harmless on the
+//     JSON wire, while a raw C1 byte is invalid UTF-8 and caught below.
 //   - Invalid UTF-8 is coerced to U+FFFD here, eagerly, so history matches
 //     the bytes actually sent.
 //
