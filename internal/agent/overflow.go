@@ -66,7 +66,8 @@ type overflowRecovery struct {
 // contextTooLongError detects whether an error is about exceeding the model's
 // context window. Aligned with Ruby's context_too_long_error?.
 //
-// Coverage (verified against real production error strings):
+// Coverage (verified against real production error strings, except where a
+// phrase's own comment marks it as a defensive generic):
 //
 //	OpenAI:    "This model's maximum context length is 128000 tokens..."
 //	Anthropic: "prompt is too long: 218849 tokens > 200000 maximum"
@@ -104,12 +105,18 @@ func contextTooLongError(err error) bool {
 		// errors, and "max_tokens exceeds the maximum" parameter rejections
 		// must not be classified as context overflow.
 		"exceeded model token limit",
-		// Zhipu bigmodel.cn error code 1261. The message is Chinese-only;
-		// matched against the lowercased error string.
+		// Zhipu bigmodel.cn error code 1261. The message is Chinese-only
+		// ("Prompt 超长" per the official error-code table); matched against
+		// the lowercased error string, with a no-space variant in case the
+		// endpoint omits it.
 		"prompt 超长",
-		// Common Chinese phrasing used by CN-hosted endpoints for the same
-		// condition (e.g. "输入长度超限", "上下文长度超过限制").
-		"长度超限",
+		"prompt超长",
+		// Defensive generics for CN-hosted endpoints (not verified against a
+		// specific production string). Deliberately INPUT-scoped: a bare
+		// "长度超限" would also match "输出长度超限" — the Chinese wording of
+		// an output-side max_tokens rejection, which must not be classified
+		// as context overflow (same trap as the English guard above).
+		"输入长度超限",
 		"上下文长度超过",
 	}
 	for _, p := range strongPhrases {
