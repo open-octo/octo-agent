@@ -1120,7 +1120,7 @@ func (a *Agent) runLoop(
 				continue
 			}
 
-			if a.keepPartialReply(roundText) {
+			if a.keepPartialReply(handler, roundText, "") {
 				// The words the user watched stream in are persisted — even a
 				// first-round failure must not roll them (and the user input)
 				// back into oblivion.
@@ -1153,8 +1153,12 @@ func (a *Agent) runLoop(
 			a.describeImages(ctx, handler, emsgs)
 			// The escalated retry re-streams the whole reply; drop the
 			// truncated attempt's text so a failure here keeps only the
-			// retry's partial, not both concatenated.
+			// retry's partial, not both concatenated. Snapshot it first:
+			// if the retry dies having streamed nothing, the truncated
+			// attempt's fully-streamed text is still the best partial to keep.
+			truncatedText := ""
 			if roundText != nil {
+				truncatedText = roundText.String()
 				roundText.Reset()
 			}
 			escalated, eerr := send(ctx, emsgs, a.MaxTokensEscalate)
@@ -1171,8 +1175,9 @@ func (a *Agent) runLoop(
 				// Claude 3 caps at 4096). Keep the truncated reply and fall
 				// through to the graceful stop below.
 			default:
-				if a.keepPartialReply(roundText) {
-					// Persisted the escalated attempt's partial — no rollback.
+				if a.keepPartialReply(handler, roundText, truncatedText) {
+					// Persisted the escalated attempt's partial (or the
+					// truncated first attempt's text) — no rollback.
 				} else if i == 0 {
 					a.History.TruncateTo(baseHistoryLen)
 					a.inputRolledBack = true
@@ -1417,18 +1422,28 @@ const partialReplyNote = "[Reply interrupted by an error — the text above is i
 // failing round as an assistant message. Without it, a turn that dies on an
 // unrecoverable send error discards everything the user watched arrive: the
 // text was never appended to history, so it survives only in the live view
-// and vanishes on the next transcript reload. Returns false when there is
-// nothing worth keeping (no streaming accumulator, or the round died before
-// any text arrived), in which case the caller applies its normal rollback.
-func (a *Agent) keepPartialReply(roundText *strings.Builder) bool {
-	if roundText == nil {
-		return false
+// and vanishes on the next transcript reload. fallback covers the escalation
+// path, where the accumulator was reset for the retry but the truncated
+// first attempt had streamed a complete text worth keeping. Returns false
+// when there is nothing worth keeping, in which case the caller applies its
+// normal rollback.
+func (a *Agent) keepPartialReply(handler EventHandler, roundText *strings.Builder, fallback string) bool {
+	partial := ""
+	if roundText != nil {
+		partial = strings.TrimSpace(roundText.String())
 	}
-	partial := strings.TrimSpace(roundText.String())
+	if partial == "" {
+		partial = strings.TrimSpace(fallback)
+	}
 	if partial == "" {
 		return false
 	}
 	a.History.Append(NewAssistantMessage(partial + "\n\n" + partialReplyNote))
+	// The live view already rendered the partial via deltas — deliver the
+	// marker too, so the bubble on screen matches what history persisted.
+	if handler != nil {
+		handler(AgentEvent{Kind: EventTextDelta, Text: "\n\n" + partialReplyNote})
+	}
 	return true
 }
 

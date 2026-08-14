@@ -126,3 +126,39 @@ func TestRunStream_PartialReplyKeptOnLaterRoundError(t *testing.T) {
 		t.Error("a later-round failure must never report the input rolled back")
 	}
 }
+
+// TestRunStream_TruncatedTextKeptWhenEscalationFails: the accumulator is
+// reset before the escalated retry, but the truncated first attempt streamed
+// a complete text the user watched arrive — when the retry dies having
+// streamed nothing, that snapshot must be the partial that gets kept.
+func TestRunStream_TruncatedTextKeptWhenEscalationFails(t *testing.T) {
+	send := &perCallStreamingSender{
+		fakeToolSender: fakeToolSender{
+			replies: []Reply{{Content: "truncated answer", StopReason: StopReasonMaxTokens}},
+			errs:    []error{nil, errors.New("boom")},
+		},
+		chunksPerCall: [][]string{{"truncated answer"}}, // escalated retry streams nothing
+	}
+	a := New(send, "m")
+	a.MaxTokens = 100
+	a.MaxTokensEscalate = 200
+
+	if _, err := a.RunStream(context.Background(), "hi", dummyOverflowTools, &fakeExecutor{}, nil); err == nil {
+		t.Fatal("expected the escalated turn to fail")
+	}
+
+	msgs := a.History.Snapshot()
+	last := msgs[len(msgs)-1]
+	if last.Role != RoleAssistant {
+		t.Fatalf("last message role = %q, want assistant", last.Role)
+	}
+	if !strings.Contains(last.Content, "truncated answer") {
+		t.Errorf("truncated attempt's text was not kept, got: %q", last.Content)
+	}
+	if !strings.Contains(last.Content, partialReplyNote) {
+		t.Errorf("kept text is not marked incomplete, got: %q", last.Content)
+	}
+	if a.InputRolledBack() {
+		t.Error("input must not be rolled back when the truncated text was kept")
+	}
+}
