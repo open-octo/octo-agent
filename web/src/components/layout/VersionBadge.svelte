@@ -87,6 +87,14 @@
     // upgrade_log / upgrade_complete are global broadcasts (no session_id); the
     // WS dispatch is by type, so these fire regardless of the active session.
     const offLog = ws.on('upgrade_log', (ev: any) => {
+      // An upgrade can be started elsewhere (the Settings modal's Upgrade
+      // button, another client, or before this page loaded) — the broadcasts
+      // are the only signal. Enter the upgrading phase and open the popover
+      // so progress is visible no matter who triggered it (#2120). Drop any
+      // log kept from an earlier failed run; a self-triggered upgrade has
+      // already left idle by the time its broadcasts arrive, so this never
+      // clears its own stream.
+      if (phase === 'idle') { phase = 'upgrading'; logLines = []; open = true }
       logLines = [...logLines, ev.line ?? '']
       queueMicrotask(() => { if (logEl) logEl.scrollTop = logEl.scrollHeight })
     })

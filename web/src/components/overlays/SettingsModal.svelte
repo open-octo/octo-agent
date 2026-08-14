@@ -134,9 +134,16 @@
       } else {
         // Same endpoint VersionBadge's badge uses (POST /api/version/upgrade)
         // — fire it here too and let the badge (always mounted) show live
-        // progress via the WS broadcasts it already listens for.
-        await fetch('/api/version/upgrade', { method: 'POST' })
-        showToast($t('settings.update.started'), 'success')
+        // progress via the WS broadcasts it already listens for. Close this
+        // modal so the badge's progress popover isn't hidden behind it (#2120).
+        // 409 = an upgrade is already in flight; its broadcasts drive the
+        // badge, so treat it as started. Any other failure sends no
+        // broadcasts — keep the modal open instead of claiming success.
+        const res = await fetch('/api/version/upgrade', { method: 'POST' })
+        if (res.ok || res.status === 409) {
+          showToast($t('settings.update.started'), 'success')
+          settingsModalOpen.set(false)
+        }
       }
     } finally {
       checkingUpdate = false
