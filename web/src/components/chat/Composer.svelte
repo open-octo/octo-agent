@@ -485,7 +485,13 @@
     }
   }
 
+  // Generation guard (like modelsFetchSeq): the mcp-tool branch awaits a
+  // fetch mid-keystroke-stream, and a stale invocation resuming after the
+  // user deleted the trigger or switched servers must not re-open its menu.
+  let slashInputSeq = 0
+
   async function handleSlashInput() {
+    const seq = ++slashInputSeq
     const normalized = normalizeSlash(text)
     if (normalized !== text) text = normalized
     const parsed = parseSlashInput(text)
@@ -514,6 +520,7 @@
     }
     if (parsed.mode === 'mcp-tool' && parsed.serverName) {
       await maybeLoadMcpTools(parsed.serverName)
+      if (seq !== slashInputSeq) return
       showSlashMenu('mcp-tools', parsed.query, parsed.serverName)
       return
     }
