@@ -300,9 +300,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   }
 
   // ── history handler ────────────────────────────────────────────────────────
-  function handleHistoryEvent(ev: Record<string, any>, historyShowReasoning: boolean) {
-    const sid = get(activeSessionId)   // get() is fine in imperative functions
-    if (!sid) return
+  // sid is the session the fetch was started for — NOT re-read from
+  // activeSessionId, which may have moved on while the fetch was in flight
+  // (issue #2090); the mobile port (chatWiring.ts) threads it the same way.
+  function handleHistoryEvent(sid: string, ev: Record<string, any>, historyShowReasoning: boolean) {
     if (ev.type === 'history_user_message') {
       addChatMsg(sid, {
         id: uid('u'),
@@ -379,13 +380,20 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // rewrote history out of band). Returns a promise that resolves once the
   // fetch settles (success or failure) — the mount effect below awaits it
   // before subscribing over WS; see the comment there for why.
-  function loadHistory(sid: string): Promise<void> {
+  //
+  // isStale is checked after the fetch resolves: the user may have switched
+  // sessions while it was in flight, and a stale response must not write into
+  // the stores at all — even keyed by its own sid, a late append would
+  // duplicate the transcript when the user switches straight back and the
+  // fresh effect's own loadHistory appends the same events again (#2090).
+  function loadHistory(sid: string, isStale: () => boolean): Promise<void> {
     // Seed the goal chip for this session; failures (older server, goals
     // disabled) just leave the chip hidden.
     api.getSessionGoal(sid)
       .then(resp => chatGoal.update(m => ({ ...m, [sid]: resp?.goal ?? null })))
       .catch(() => {})
     return api.getSessionMessages(sid).then((resp: any) => {
+      if (isStale()) return
       const events: any[] = resp?.events ?? []
       // Server-resolved, so it's correct even before $sessions has loaded —
       // see the comment on the 'thinking' branch in handleHistoryEvent.
@@ -395,7 +403,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       const historyToolIds = new Set<string>()
       for (const ev of events) {
         if (ev.type === 'tool_call' && ev.tool_id) historyToolIds.add(ev.tool_id)
-        handleHistoryEvent(ev, historyShowReasoning)
+        handleHistoryEvent(sid, ev, historyShowReasoning)
       }
       // Finish only the history tools (not live-turn tools from WS replay).
       finishToolsById(sid, historyToolIds)
@@ -465,7 +473,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // costs nothing: the server's replay buffer is per-session, not
       // per-connection, so it still holds everything broadcast since turn
       // start whenever we do subscribe.
-      loadHistory(sid).then(() => {
+      loadHistory(sid, () => cancelled).then(() => {
         // The user may have switched sessions (or this view unmounted)
         // while the fetch was in flight — the effect's cleanup below already
         // unsubscribed sid in that case, so subscribing now would resurrect
@@ -535,7 +543,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       if ((ev as any).session_id !== sid) return
       clearMsgs(sid)
       resetArtifacts(sid)
-      loadHistory(sid)
+      loadHistory(sid, () => cancelled)
     }))
 
     // The transcript tail was stripped server-side (retry / rollback): re-render
@@ -545,7 +553,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       if ((ev as any).session_id !== sid) return
       clearMsgs(sid)
       resetArtifacts(sid)
-      loadHistory(sid)
+      loadHistory(sid, () => cancelled)
     }))
 
     // Transient server-side notice (command result, error).
