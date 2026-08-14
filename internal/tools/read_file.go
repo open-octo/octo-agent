@@ -2,8 +2,10 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,7 +58,8 @@ func (ReadFileTool) Definition() agent.ToolDefinition {
 			"has been read; do not call read_file again for the same path. " +
 			"Absolute paths are preferred; relative paths resolve against the current " +
 			"working directory. Refuses binary extensions (executables, archives, " +
-			"PDFs, DBs) and blocking device files (/dev/random, /dev/tty etc). " +
+			"PDFs, DBs), files whose content is binary or UTF-16 (use the terminal " +
+			"tool for those), and blocking device files (/dev/random, /dev/tty etc). " +
 			"Image files (.png, .jpg, .jpeg, .gif, .webp, .bmp, .tiff, .heic, .ico) " +
 			"are returned as image content for multimodal model consumption, or a " +
 			"refusal if the active model does not accept image input.",
@@ -140,6 +143,16 @@ func (ReadFileTool) Execute(ctx context.Context, _ string, input map[string]any)
 		return agent.ToolResult{}, fmt.Errorf("read_file: open %q: %w", path, err)
 	}
 	defer f.Close()
+
+	// Content sniff: the extension check above misses binaries with an
+	// unknown or missing extension (./a.out, a PNG saved as .txt). Reading
+	// them yields NUL-laced garbage lines the model can't use — refuse and
+	// point at the terminal tool instead.
+	if reason, serr := sniffBinaryPrefix(f); serr != nil {
+		return agent.ToolResult{}, fmt.Errorf("read_file: %s: %w", path, serr)
+	} else if reason != "" {
+		return agent.ToolResult{}, fmt.Errorf("read_file: refusing to read %s — %s", path, reason)
+	}
 
 	// Larger initial buffer than bufio.Scanner's 64KiB default so long
 	// lines (minified JS, base64 blobs) don't trip MaxScanTokenSize.
@@ -376,6 +389,45 @@ func isLikelyBinaryPath(absPath string) string {
 		return reason + " (read_file only handles text)"
 	}
 	return ""
+}
+
+// sniffPrefixBytes is how much of the file the content sniff examines. 512
+// bytes matches net/http.DetectContentType's window: enough to catch any
+// real binary format's header without a meaningful read cost.
+const sniffPrefixBytes = 512
+
+// sniffBinaryPrefix reads the first sniffPrefixBytes of f and reports a
+// refusal reason when the content is not text read_file can serve: a NUL
+// byte in the prefix marks a binary (every common binary format has one
+// early; UTF-8/ASCII text never does). UTF-16 text — NUL-laced by encoding,
+// not by nature — gets its own message pointing at a terminal conversion
+// instead of being lumped in with executables. The reader is rewound to the
+// start on success so the caller's scanner sees the whole file.
+func sniffBinaryPrefix(f *os.File) (reason string, err error) {
+	buf := make([]byte, sniffPrefixBytes)
+	n, rerr := io.ReadFull(f, buf)
+	if rerr != nil && rerr != io.EOF && rerr != io.ErrUnexpectedEOF {
+		return "", fmt.Errorf("sniff: %w", rerr)
+	}
+	buf = buf[:n]
+
+	// BOM check first, not nested under the NUL check: UTF-16 text that is
+	// pure non-ASCII (e.g. CJK-only with no newline in the first 512 bytes)
+	// has no NUL byte, but the BOM still identifies it.
+	if bytes.HasPrefix(buf, []byte{0xff, 0xfe}) || bytes.HasPrefix(buf, []byte{0xfe, 0xff}) {
+		return "file is UTF-16 encoded text (BOM detected); read_file only handles UTF-8/ASCII. " +
+			"Convert it via the terminal tool first (e.g. iconv -f utf-16 -t utf-8, or PowerShell " +
+			"Get-Content <file> | Set-Content -Encoding utf8 <out>)", nil
+	}
+	if bytes.IndexByte(buf, 0) >= 0 {
+		return "file content looks binary (NUL byte in the first 512 bytes); read_file only handles text. " +
+			"Use the terminal tool to inspect binary files (e.g. file, strings, xxd, or a script)", nil
+	}
+
+	if _, serr := f.Seek(0, io.SeekStart); serr != nil {
+		return "", fmt.Errorf("sniff rewind: %w", serr)
+	}
+	return "", nil
 }
 
 // blockedDevicePaths are paths whose read would block the agent forever
