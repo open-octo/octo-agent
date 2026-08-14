@@ -13,10 +13,24 @@
 
   const LICENSE_URL = 'https://github.com/open-octo/octo-agent/blob/main/LICENSE.txt'
 
+  const fontZoomMap: Record<string, string> = { Small: '0.9', Medium: '1', Large: '1.1' }
+  const modeToThemeLabel: Record<string, string> = { light: 'Light', dark: 'Dark', system: 'System' }
+
+  // This modal is mounted unconditionally at app root, so the applying
+  // $effects at the bottom run at boot, not on open. Seeding fontSize/theme
+  // from the persisted prefs (not hardcoded defaults) is what keeps a page
+  // reload from overwriting the stored choice before Settings is ever opened
+  // (#2087) — and since nothing else reads octo.fontSize, this seed is also
+  // the font-size restore path.
+  function storedFontSize(): string {
+    const v = localStorage.getItem('octo.fontSize')
+    return v === 'Small' || v === 'Medium' || v === 'Large' ? v : 'Medium'
+  }
+
   // --- local state ---
   let language      = $state('en')
-  let fontSize      = $state('Medium')
-  let theme         = $state('Light')
+  let fontSize      = $state(storedFontSize())
+  let theme         = $state(modeToThemeLabel[getMode()] ?? 'Light')
   let autostart     = $state(false) // desktop shell only
   let versionStr    = $state('')
   let latestStr     = $state('')
@@ -55,9 +69,6 @@
     { value: 'zh', label: '简体中文' },
   ]
 
-  const fontZoomMap: Record<string, string> = { Small: '0.9', Medium: '1', Large: '1.1' }
-  const modeToThemeLabel: Record<string, string> = { light: 'Light', dark: 'Dark', system: 'System' }
-
   const categories: { key: typeof cat, icon: string, label: string }[] = [
     { key: 'general',   icon: 'ant-design:sliders-outlined',       label: 'settings.general' },
     { key: 'endpoints', icon: 'ant-design:api-outlined',           label: 'settings.endpoints.title' },
@@ -77,6 +88,7 @@
       if (get(nativeShell)) api.getAutostart().then(v => (autostart = v)).catch(() => {})
       api.getTunnelPairing().then(p => { tunnelPairing = p }).catch(() => {})
       theme = modeToThemeLabel[getMode()] ?? 'Light'
+      fontSize = storedFontSize()
       modalEl?.focus()
     }
   })
