@@ -31,6 +31,73 @@ export function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;")
 }
 
+function isSafeHref(href: string): boolean {
+  if (!href) return false
+  const lower = href.trim().toLowerCase()
+  return lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("mailto:") || lower.startsWith("tel:")
+}
+
+// Custom renderer, installed ONCE at module scope. marked.use() re-wraps the
+// already-installed renderer methods in a fresh closure layer on every call,
+// so installing per render() grew an unbounded wrapper chain on the global
+// marked instance — a monotonic memory leak in streaming chat views (#2089).
+// None of the overrides capture per-call state, so a single install is
+// semantically identical.
+const renderer = new Renderer()
+
+renderer.code = function ({ text: codeText, lang }: { text: string; lang?: string }) {
+  const language = lang && hljs.getLanguage(lang) ? lang : "plaintext"
+  let highlighted: string
+  if (language !== "plaintext") {
+    highlighted = hljs.highlight(codeText, { language }).value
+  } else {
+    highlighted = escapeHtml(codeText)
+  }
+  return `<div class="code-block">
+  <div class="code-header">
+    <span class="code-lang">${escapeHtml(language)}</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="hljs language-${escapeHtml(language)}">${highlighted}</code></pre>
+</div>`
+}
+
+renderer.link = function ({ href, title, text }: { href: string; title?: string | null; text: string }) {
+  // Only allow safe URL schemes; strip everything else.
+  const safe = isSafeHref(href)
+  const titleAttr = title ? ` title="${escapeHtml(title)}"` : ""
+  return `<a href="${safe ? escapeHtml(href) : ""}"${titleAttr} target="_blank" rel="noopener">${escapeHtml(text)}</a>`
+}
+
+// Render the quote's children, don't interpolate token.text — that field is
+// the raw markdown source, so `> quoted **bold**` reached the DOM with the
+// asterisks intact and every link, inline code span and nested list inside a
+// quote came out as literal text. The default renderer parses token.tokens;
+// this override exists only to add the md-bq class, so it has to do the same.
+renderer.blockquote = function ({ tokens }: Tokens.Blockquote) {
+  return `<blockquote class="md-bq">${this.parser.parse(tokens)}</blockquote>`
+}
+
+// Wrap marked's default table in a horizontal-scroll container so wide
+// tables don't blow out the flex bubble / .md-content column. The table
+// itself stays a real <table> (reusing the default tablecell/tablerow), so
+// thead/tbody columns keep aligning and per-cell alignment survives.
+renderer.table = function (token: Tokens.Table) {
+  let header = ""
+  for (const cell of token.header) header += this.tablecell(cell)
+  header = this.tablerow({ text: header })
+  let body = ""
+  for (const row of token.rows) {
+    let cells = ""
+    for (const cell of row) cells += this.tablecell(cell)
+    body += this.tablerow({ text: cells })
+  }
+  if (body) body = `<tbody>${body}</tbody>`
+  return `<div class="table-scroll"><table><thead>${header}</thead>${body}</table></div>`
+}
+
+marked.use({ renderer })
+
 export function renderMarkdown(text: string, showReasoning = true): string {
   if (!text) return ""
 
@@ -45,72 +112,10 @@ export function renderMarkdown(text: string, showReasoning = true): string {
     return `${PLACEHOLDER}${index}\x00`
   })
 
-  // 3. Set up custom renderer
-  const renderer = new Renderer()
-
-  renderer.code = function ({ text: codeText, lang }: { text: string; lang?: string }) {
-    const language = lang && hljs.getLanguage(lang) ? lang : "plaintext"
-    let highlighted: string
-    if (language !== "plaintext") {
-      highlighted = hljs.highlight(codeText, { language }).value
-    } else {
-      highlighted = escapeHtml(codeText)
-    }
-    return `<div class="code-block">
-  <div class="code-header">
-    <span class="code-lang">${escapeHtml(language)}</span>
-    <button class="copy-btn">Copy</button>
-  </div>
-  <pre><code class="hljs language-${escapeHtml(language)}">${highlighted}</code></pre>
-</div>`
-  }
-
-  renderer.link = function ({ href, title, text }: { href: string; title?: string | null; text: string }) {
-    // Only allow safe URL schemes; strip everything else.
-    const safe = isSafeHref(href)
-    const titleAttr = title ? ` title="${escapeHtml(title)}"` : ""
-    return `<a href="${safe ? escapeHtml(href) : ""}"${titleAttr} target="_blank" rel="noopener">${escapeHtml(text)}</a>`
-  }
-
-  function isSafeHref(href: string): boolean {
-    if (!href) return false
-    const lower = href.trim().toLowerCase()
-    return lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("mailto:") || lower.startsWith("tel:")
-  }
-
-  // Render the quote's children, don't interpolate token.text — that field is
-  // the raw markdown source, so `> quoted **bold**` reached the DOM with the
-  // asterisks intact and every link, inline code span and nested list inside a
-  // quote came out as literal text. The default renderer parses token.tokens;
-  // this override exists only to add the md-bq class, so it has to do the same.
-  renderer.blockquote = function ({ tokens }: Tokens.Blockquote) {
-    return `<blockquote class="md-bq">${this.parser.parse(tokens)}</blockquote>`
-  }
-
-  // Wrap marked's default table in a horizontal-scroll container so wide
-  // tables don't blow out the flex bubble / .md-content column. The table
-  // itself stays a real <table> (reusing the default tablecell/tablerow), so
-  // thead/tbody columns keep aligning and per-cell alignment survives.
-  renderer.table = function (token: Tokens.Table) {
-    let header = ""
-    for (const cell of token.header) header += this.tablecell(cell)
-    header = this.tablerow({ text: header })
-    let body = ""
-    for (const row of token.rows) {
-      let cells = ""
-      for (const cell of row) cells += this.tablecell(cell)
-      body += this.tablerow({ text: cells })
-    }
-    if (body) body = `<tbody>${body}</tbody>`
-    return `<div class="table-scroll"><table><thead>${header}</thead>${body}</table></div>`
-  }
-
-  marked.use({ renderer })
-
-  // 3. Parse remaining text with marked
+  // 2. Parse remaining text with marked
   const renderedMain = marked.parse(textWithPlaceholders) as string
 
-  // 2. Build think block HTML for each segment
+  // 3. Build think block HTML for each segment
   const thinkBlocks = thinkSegments.map((segment) => {
     const renderedSegment = DOMPurify.sanitize(marked.parse(segment) as string)
     return `<details class="think-block"><summary class="think-summary"><iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>Thoughts</summary><div class="think-body">${renderedSegment}</div></details>`
