@@ -14,7 +14,13 @@ import (
 // skill. Embedding (rather than downloading) keeps a fresh install offline-
 // capable and version-locked to the binary — no network, no supply chain.
 //
-//go:embed defaults
+// The `all:` prefix is deliberate: plain directory embedding skips files
+// whose names start with "." or "_", which silently drops skill files that
+// need to ship — e.g. ppt-master's Python package markers (`__init__.py`),
+// its underscore-prefixed modules (`_dispatcher.py`, `_batch.py`, …), and
+// the `_index.md` catalogs that several skills' instructions read.
+//
+//go:embed all:defaults
 var defaultsFS embed.FS
 
 // defaultStampFile records which binary version last materialized the default
