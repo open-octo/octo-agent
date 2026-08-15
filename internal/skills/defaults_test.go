@@ -104,6 +104,36 @@ func TestMaterializeDefaults_NoOpWhenCurrent(t *testing.T) {
 	}
 }
 
+func TestMaterializeDefaults_UnderscorePrefixedFilesShip(t *testing.T) {
+	// Regression: a plain //go:embed defaults silently skips files whose
+	// names start with "." or "_", which used to drop Python package markers
+	// (__init__.py), underscore-prefixed modules (_dispatcher.py, _batch.py,
+	// _conversion_profile.py), and the _index.md catalogs several skills'
+	// instructions read — all absent from the binary even though they exist
+	// in the repo tree. The all: prefix must include them.
+	root := filepath.Join(t.TempDir(), "skills-default")
+	useDefaultRoot(t, root)
+	if err := MaterializeDefaults("v1"); err != nil {
+		t.Fatalf("MaterializeDefaults: %v", err)
+	}
+
+	want := []string{
+		filepath.Join("ppt-master", "scripts", "source_to_md", "_dispatcher.py"),
+		filepath.Join("ppt-master", "scripts", "source_to_md", "_conversion_profile.py"),
+		filepath.Join("ppt-master", "scripts", "source_to_md", "_batch.py"),
+		filepath.Join("ppt-master", "scripts", "svg_to_pptx", "native_objects", "__init__.py"),
+		filepath.Join("ppt-master", "references", "modes", "_index.md"),
+		filepath.Join("ppt-master", "references", "visual-styles", "_index.md"),
+		filepath.Join("image-gen", "references", "image-palettes", "_index.md"),
+		filepath.Join("image-gen", "scripts", "image_backends", "__init__.py"),
+	}
+	for _, f := range want {
+		if _, err := os.Stat(filepath.Join(root, f)); err != nil {
+			t.Errorf("expected %s materialized (was it embedded?): %v", f, err)
+		}
+	}
+}
+
 func TestDiscover_DefaultSkillSurfacesAndIsOverridable(t *testing.T) {
 	defaultRoot := filepath.Join(t.TempDir(), "skills-default")
 	useDefaultRoot(t, defaultRoot)
