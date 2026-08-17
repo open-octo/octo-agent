@@ -112,6 +112,11 @@ type Client struct {
 	// what each DialectXxx constant changes. Set at construction (see
 	// internal/app).
 	Dialect string
+
+	// Headers are extra HTTP headers sent with every request. Applied after
+	// the built-in headers (Content-Type/User-Agent/Authorization), so a key
+	// here overrides the built-in value.
+	Headers map[string]string
 }
 
 // applyReasoning populates the reasoning fields of body for the given effort
@@ -278,6 +283,9 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("User-Agent", version.UserAgent())
 		httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
+		for k, v := range c.Headers {
+			httpReq.Header.Set(k, v)
+		}
 
 		resp, err := httpClient.Do(httpReq)
 		if err != nil {

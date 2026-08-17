@@ -12,7 +12,10 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/provider"
+	"github.com/open-octo/octo-agent/internal/provider/anthropic"
+	"github.com/open-octo/octo-agent/internal/provider/openai"
 )
 
 func TestSender_PassesRequestThrough(t *testing.T) {
@@ -289,6 +292,78 @@ func TestSender_StreamingFallback_NonStreamingProvider(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != "buffered" {
 		t.Errorf("fallback should emit one chunk with full content; got %v", got)
+	}
+}
+
+// TestBuildClient_PassesHeadersThrough verifies that the headers argument
+// reaches the constructed provider client for both the anthropic and openai
+// protocol branches.
+func TestBuildClient_PassesHeadersThrough(t *testing.T) {
+	headers := map[string]string{"X-Tenant-Id": "tenant-42"}
+
+	p, err := buildClient(ProviderAnthropic, "test-key", "", "", headers)
+	if err != nil {
+		t.Fatalf("buildClient(anthropic): %v", err)
+	}
+	ac, ok := p.(*anthropic.Client)
+	if !ok {
+		t.Fatalf("buildClient(anthropic) returned %T, want *anthropic.Client", p)
+	}
+	if ac.Headers["X-Tenant-Id"] != "tenant-42" {
+		t.Errorf("anthropic client Headers = %+v, want X-Tenant-Id=tenant-42", ac.Headers)
+	}
+
+	p, err = buildClient(ProviderOpenAI, "test-key", "", "", headers)
+	if err != nil {
+		t.Fatalf("buildClient(openai): %v", err)
+	}
+	oc, ok := p.(*openai.Client)
+	if !ok {
+		t.Fatalf("buildClient(openai) returned %T, want *openai.Client", p)
+	}
+	if oc.Headers["X-Tenant-Id"] != "tenant-42" {
+		t.Errorf("openai client Headers = %+v, want X-Tenant-Id=tenant-42", oc.Headers)
+	}
+}
+
+// TestEntryConnectionOverrides_MatchingProviderAppliesBoth verifies that when
+// the resolved provider matches the config entry's own provider, both
+// Protocol and Headers are carried through.
+func TestEntryConnectionOverrides_MatchingProviderAppliesBoth(t *testing.T) {
+	entry := config.ModelEntry{
+		Provider: "custom",
+		Protocol: "anthropic",
+		Headers:  map[string]string{"X-Tenant-Id": "abc"},
+	}
+	protocol, headers := EntryConnectionOverrides("custom", entry)
+	if protocol != "anthropic" {
+		t.Errorf("protocol = %q, want anthropic", protocol)
+	}
+	if headers["X-Tenant-Id"] != "abc" {
+		t.Errorf("headers = %+v, want X-Tenant-Id=abc", headers)
+	}
+}
+
+// TestEntryConnectionOverrides_MismatchedProviderClearsBoth is the regression
+// test for the bug caught in review: a resolved provider that differs from
+// the config entry's own provider (e.g. a --provider flag or OCTO_PROVIDER
+// env var picked a different vendor than the config's default entry, while
+// still reusing that entry's API key) must NOT carry the entry's Protocol or
+// Headers through — those belong to a different endpoint, and Headers in
+// particular may override Authorization/x-api-key, so leaking it would send
+// that value to the wrong provider's API.
+func TestEntryConnectionOverrides_MismatchedProviderClearsBoth(t *testing.T) {
+	entry := config.ModelEntry{
+		Provider: "custom",
+		Protocol: "anthropic",
+		Headers:  map[string]string{"Authorization": "should-not-leak"},
+	}
+	protocol, headers := EntryConnectionOverrides("openai", entry)
+	if protocol != "" {
+		t.Errorf("protocol = %q, want empty (provider mismatch)", protocol)
+	}
+	if headers != nil {
+		t.Errorf("headers = %+v, want nil (provider mismatch must not leak entry's headers)", headers)
 	}
 }
 

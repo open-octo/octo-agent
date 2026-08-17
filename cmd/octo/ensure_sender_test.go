@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -60,7 +61,7 @@ func TestEnsureSender_ConfigLoadFailure(t *testing.T) {
 	if cfg.providerName != "openai" {
 		t.Errorf("providerName = %q, want openai (unchanged)", cfg.providerName)
 	}
-	if cfg.configEntry != origEntry {
+	if !reflect.DeepEqual(cfg.configEntry, origEntry) {
 		t.Errorf("configEntry = %+v, want unchanged %+v", cfg.configEntry, origEntry)
 	}
 	if cfg.a.GetSender() != stub {
@@ -210,7 +211,7 @@ func TestEnsureSender_ErrorLeavesConfigUnchanged(t *testing.T) {
 	if cfg.providerName != "openai" {
 		t.Errorf("providerName = %q, want openai (unchanged)", cfg.providerName)
 	}
-	if cfg.configEntry != origEntry {
+	if !reflect.DeepEqual(cfg.configEntry, origEntry) {
 		t.Errorf("configEntry = %+v, want unchanged %+v", cfg.configEntry, origEntry)
 	}
 	if cfg.a.GetSender() != stub {
@@ -290,7 +291,7 @@ func TestEnsureSender_UnconfiguredModel(t *testing.T) {
 	if cfg.providerName != "openai" {
 		t.Errorf("providerName = %q, want openai (unchanged)", cfg.providerName)
 	}
-	if cfg.configEntry != origEntry {
+	if !reflect.DeepEqual(cfg.configEntry, origEntry) {
 		t.Errorf("configEntry = %+v, want unchanged %+v", cfg.configEntry, origEntry)
 	}
 	if cfg.a.Sender != stub {

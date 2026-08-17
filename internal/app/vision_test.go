@@ -135,6 +135,39 @@ func TestVisionDescriber_DescribeRendersJSON(t *testing.T) {
 	}
 }
 
+// TestVisionDescriber_ThreadsCustomHeaders pins design Test Case #8: a
+// vision_helper endpoint's custom Headers must reach the actual HTTP request
+// NewVisionDescriber's sender makes, the same as any other sender built via
+// SenderOptions.
+func TestVisionDescriber_ThreadsCustomHeaders(t *testing.T) {
+	var gotHeader string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Get("X-Tenant-Id")
+		chatCompletion(w, `{"summary":"ok"}`)
+	}))
+	defer srv.Close()
+
+	cfg := config.Config{
+		Endpoints: []config.Endpoint{{
+			ID: "ep", Provider: "custom", BaseURL: srv.URL, APIKey: "k", Protocol: "openai",
+			Headers: map[string]string{"X-Tenant-Id": "abc"},
+			Models: []config.EndpointModel{
+				{Model: "seer", Vision: true},
+				{Model: "blind", Vision: false},
+			},
+		}},
+		VisionHelper: "ep::seer",
+	}
+
+	d := NewVisionDescriber(agent.New(nil, "blind"), cfg)
+	if _, err := d.Describe(context.Background(), agent.ImageData{MIMEType: "image/png", Data: pngBytes}); err != nil {
+		t.Fatalf("Describe: %v", err)
+	}
+	if gotHeader != "abc" {
+		t.Errorf("X-Tenant-Id header = %q, want abc (endpoint's custom header must reach the vision-helper request)", gotHeader)
+	}
+}
+
 // A helper that answers in prose instead of JSON still described the image;
 // throwing that away would spend the retry budget on a working endpoint.
 func TestVisionDescriber_NonJSONReplyIsUsedAsIs(t *testing.T) {

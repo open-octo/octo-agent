@@ -17,6 +17,77 @@ import (
 	"github.com/open-octo/octo-agent/internal/provider/retry"
 )
 
+// TestSend_CustomHeaders verifies that Client.Headers are attached to the
+// outgoing request.
+func TestSend_CustomHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.Header.Get("X-Tenant-Id"), "tenant-42"; got != want {
+			t.Errorf("X-Tenant-Id header = %q, want %q", got, want)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id": "msg_01",
+			"type": "message",
+			"role": "assistant",
+			"model": "claude-haiku-4-5-20251001",
+			"content": [{"type": "text", "text": "hi"}],
+			"stop_reason": "end_turn",
+			"usage": {"input_tokens": 1, "output_tokens": 1}
+		}`))
+	}))
+	defer srv.Close()
+
+	c, err := New("test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.BaseURL = srv.URL
+	c.Headers = map[string]string{"X-Tenant-Id": "tenant-42"}
+
+	if _, err := c.Send(context.Background(), provider.Request{
+		Model:    "claude-haiku-4-5-20251001",
+		Messages: []agent.Message{agent.NewUserMessage("hello")},
+	}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+}
+
+// TestSend_CustomHeaderOverridesBuiltin verifies that a custom header can
+// override a built-in one (x-api-key), for gateways that require a
+// non-standard auth header.
+func TestSend_CustomHeaderOverridesBuiltin(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.Header.Get("x-api-key"), "override-value"; got != want {
+			t.Errorf("x-api-key header = %q, want %q", got, want)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id": "msg_01",
+			"type": "message",
+			"role": "assistant",
+			"model": "claude-haiku-4-5-20251001",
+			"content": [{"type": "text", "text": "hi"}],
+			"stop_reason": "end_turn",
+			"usage": {"input_tokens": 1, "output_tokens": 1}
+		}`))
+	}))
+	defer srv.Close()
+
+	c, err := New("test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.BaseURL = srv.URL
+	c.Headers = map[string]string{"x-api-key": "override-value"}
+
+	if _, err := c.Send(context.Background(), provider.Request{
+		Model:    "claude-haiku-4-5-20251001",
+		Messages: []agent.Message{agent.NewUserMessage("hello")},
+	}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+}
+
 func TestNew_EmptyKeyRejected(t *testing.T) {
 	for _, k := range []string{"", "   ", "\t\n"} {
 		if _, err := New(k); err == nil {

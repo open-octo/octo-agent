@@ -913,6 +913,7 @@ export interface EndpointConfig {
   protocol?: string
   has_api_key: boolean
   lite_model?: string
+  headers?: Record<string, string>
   models: EndpointModel[]
 }
 export interface EndpointsResponse {
@@ -948,6 +949,7 @@ export interface EndpointConfigInput {
   api_key?: string
   protocol?: string
   lite_model?: string
+  headers?: Record<string, string>
   models?: EndpointModelInput[]
 }
 
@@ -960,6 +962,7 @@ export interface EndpointMutationResult {
   protocol?: string
   has_api_key: boolean
   lite_model?: string
+  headers?: Record<string, string>
   models: EndpointModel[]
 }
 
@@ -977,6 +980,11 @@ export interface EndpointUpdateInput {
   base_url?: string
   api_key?: string
   protocol?: string
+  // headers is a full-replacement patch, not a merge: omit the key entirely to
+  // leave existing headers untouched, or send (possibly {}) to replace them
+  // wholesale. Unlike the string fields above, an empty object is NOT the
+  // same as "unchanged" — see EndpointsSection.svelte's submitForm.
+  headers?: Record<string, string>
 }
 
 export async function updateEndpoint(id: string, req: EndpointUpdateInput): Promise<EndpointMutationResult> {

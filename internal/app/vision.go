@@ -71,6 +71,7 @@ func NewVisionDescriber(a *agent.Agent, cfg config.Config) agent.ImageDescriber 
 		APIKey:   apiKey,
 		BaseURL:  entry.BaseURL,
 		Protocol: entry.Protocol,
+		Headers:  entry.Headers,
 		CacheKey: "vision-helper:" + entry.Model,
 	})
 	if err != nil {

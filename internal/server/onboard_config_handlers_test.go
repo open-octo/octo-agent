@@ -511,6 +511,40 @@ func TestGetEndpoints_EmptyConfigReturnsEmptyShape(t *testing.T) {
 	}
 }
 
+// TestGetEndpoints_HeadersRoundTrip pins that an endpoint with custom Headers
+// echoes them back under the "headers" key, while an endpoint with none
+// reports an empty/absent map (design's Server API DTO extension).
+func TestGetEndpoints_HeadersRoundTrip(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-with-headers", Provider: "custom", BaseURL: "https://gw.example", APIKey: "sk-a", Headers: map[string]string{"X-Tenant-Id": "abc"}, Models: []config.EndpointModel{{Model: "m1"}}},
+			{ID: "ep-no-headers", Provider: "custom", BaseURL: "https://plain.example", APIKey: "sk-b", Models: []config.EndpointModel{{Model: "m2"}}},
+		},
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	resp := getEndpointsResponse(t, srv)
+	var withHeaders, noHeaders *endpointConfigJSON
+	for i := range resp.Endpoints {
+		switch resp.Endpoints[i].ID {
+		case "ep-with-headers":
+			withHeaders = &resp.Endpoints[i]
+		case "ep-no-headers":
+			noHeaders = &resp.Endpoints[i]
+		}
+	}
+	if withHeaders == nil || noHeaders == nil {
+		t.Fatalf("missing expected endpoints: %+v", resp.Endpoints)
+	}
+	if got := withHeaders.Headers["X-Tenant-Id"]; got != "abc" {
+		t.Errorf("ep-with-headers headers[X-Tenant-Id] = %q, want %q", got, "abc")
+	}
+	if len(noHeaders.Headers) != 0 {
+		t.Errorf("ep-no-headers headers = %+v, want empty/absent", noHeaders.Headers)
+	}
+}
+
 func TestBuildAgent_ImplicitLiteFromVendorRegistry(t *testing.T) {
 	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
@@ -770,6 +804,47 @@ func TestCreateEndpoint_DocumentedModelsShape(t *testing.T) {
 	}
 }
 
+// TestCreateEndpoint_HeadersPersisted covers a create request that includes a
+// headers object — it must be persisted onto the new config.Endpoint and
+// echoed back both in the create response and a subsequent GET.
+func TestCreateEndpoint_HeadersPersisted(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	body := `{
+		"id": "my-relay",
+		"provider": "custom",
+		"base_url": "https://api.example.com",
+		"headers": {"X-Tenant-Id": "abc", "X-Trace": "1"}
+	}`
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints", body)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST /api/config/endpoints = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+	var resp endpointJSONOut
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v (body: %s)", err, w.Body.String())
+	}
+	if resp.Headers["X-Tenant-Id"] != "abc" || resp.Headers["X-Trace"] != "1" {
+		t.Fatalf("create response headers = %+v, want both custom headers echoed", resp.Headers)
+	}
+
+	// Also verify persistence via a fresh GET.
+	cfg, _ := config.Load()
+	var saved *config.Endpoint
+	for i := range cfg.Endpoints {
+		if cfg.Endpoints[i].ID == "my-relay" {
+			saved = &cfg.Endpoints[i]
+		}
+	}
+	if saved == nil {
+		t.Fatalf("endpoint my-relay not found in saved config: %+v", cfg.Endpoints)
+	}
+	if saved.Headers["X-Tenant-Id"] != "abc" || saved.Headers["X-Trace"] != "1" {
+		t.Errorf("saved config headers = %+v, want both custom headers persisted", saved.Headers)
+	}
+}
+
 // TestCreateEndpoint_StringModelsRejectedWithDetail covers the failure mode
 // #1941 actually hit: a plain string models array (the shape SKILL.md wrongly
 // documented before this fix) doesn't unmarshal into []endpointModelIn. The
@@ -785,6 +860,72 @@ func TestCreateEndpoint_StringModelsRejectedWithDetail(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "cannot unmarshal") {
 		t.Errorf("error body = %q, want the underlying decode error, not a bare message", w.Body.String())
+	}
+}
+
+// TestUpdateEndpoint_HeadersOmitted_LeavesUnchanged covers the nil-vs-empty-map
+// distinction: a PATCH body that omits "headers" entirely must not touch the
+// existing custom headers.
+func TestUpdateEndpoint_HeadersOmitted_LeavesUnchanged(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "custom", BaseURL: "https://api.example.com", APIKey: "sk-test", Headers: map[string]string{"X-Old": "1"}, Models: []config.EndpointModel{{Model: "m1"}}},
+		},
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPatch, "/api/config/endpoints/ep-a", `{"name": "renamed"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH /api/config/endpoints/ep-a = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if len(cfg.Endpoints) != 1 || cfg.Endpoints[0].Headers["X-Old"] != "1" {
+		t.Errorf("headers after omitted-headers PATCH = %+v, want X-Old=1 unchanged", cfg.Endpoints[0].Headers)
+	}
+}
+
+// TestUpdateEndpoint_HeadersReplace_WholesaleNotMerge covers that a PATCH
+// with a non-empty "headers" object wholesale replaces the existing map
+// rather than merging keys.
+func TestUpdateEndpoint_HeadersReplace_WholesaleNotMerge(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "custom", BaseURL: "https://api.example.com", APIKey: "sk-test", Headers: map[string]string{"X-Old": "1"}, Models: []config.EndpointModel{{Model: "m1"}}},
+		},
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPatch, "/api/config/endpoints/ep-a", `{"headers": {"X-New": "1"}}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH /api/config/endpoints/ep-a = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	got := cfg.Endpoints[0].Headers
+	if len(got) != 1 || got["X-New"] != "1" {
+		t.Errorf("headers after replace PATCH = %+v, want only X-New=1 (wholesale replace, not merge)", got)
+	}
+}
+
+// TestUpdateEndpoint_HeadersExplicitEmpty_ClearsAll covers that an explicit
+// "headers": {} clears all existing custom headers.
+func TestUpdateEndpoint_HeadersExplicitEmpty_ClearsAll(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "custom", BaseURL: "https://api.example.com", APIKey: "sk-test", Headers: map[string]string{"X-Old": "1"}, Models: []config.EndpointModel{{Model: "m1"}}},
+		},
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPatch, "/api/config/endpoints/ep-a", `{"headers": {}}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH /api/config/endpoints/ep-a = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if len(cfg.Endpoints[0].Headers) != 0 {
+		t.Errorf("headers after explicit-empty PATCH = %+v, want cleared to empty/nil", cfg.Endpoints[0].Headers)
 	}
 }
 

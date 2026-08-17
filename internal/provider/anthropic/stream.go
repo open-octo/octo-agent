@@ -96,6 +96,9 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 			apiVer = DefaultAPIVersion
 		}
 		httpReq.Header.Set("anthropic-version", apiVer)
+		for k, v := range c.Headers {
+			httpReq.Header.Set(k, v)
+		}
 
 		resp, err := c.streamingHTTPClient().Do(httpReq)
 		if err != nil {

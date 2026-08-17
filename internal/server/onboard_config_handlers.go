@@ -280,6 +280,7 @@ type endpointConfigJSON struct {
 	HasAPIKey bool                `json:"has_api_key"`
 	LiteModel string              `json:"lite_model,omitempty"`
 	Models    []endpointModelJSON `json:"models"`
+	Headers   map[string]string   `json:"headers,omitempty"`
 }
 
 // endpointModelJSON is one model under an endpoint.
@@ -313,6 +314,7 @@ func (s *Server) handleGetEndpoints(w http.ResponseWriter, r *http.Request) {
 			HasAPIKey: ep.APIKey != "",
 			LiteModel: ep.LiteModel,
 			Models:    make([]endpointModelJSON, 0, len(ep.Models)),
+			Headers:   ep.Headers,
 		}
 		for _, m := range ep.Models {
 			em.Models = append(em.Models, endpointModelJSON{Model: m.Model, Vision: m.Vision})
@@ -747,6 +749,7 @@ type createEndpointRequest struct {
 	APIKey   string            `json:"api_key,omitempty"`
 	Protocol string            `json:"protocol,omitempty"`
 	Models   []endpointModelIn `json:"models,omitempty"`
+	Headers  map[string]string `json:"headers,omitempty"`
 }
 
 type endpointModelIn struct {
@@ -756,12 +759,13 @@ type endpointModelIn struct {
 
 type updateEndpointRequest struct {
 	// NewID, when non-empty, triggers a rename (RenameEndpoint + cascade).
-	NewID    string `json:"new_id,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Provider string `json:"provider,omitempty"`
-	BaseURL  string `json:"base_url,omitempty"`
-	APIKey   string `json:"api_key,omitempty"`
-	Protocol string `json:"protocol,omitempty"`
+	NewID    string            `json:"new_id,omitempty"`
+	Name     string            `json:"name,omitempty"`
+	Provider string            `json:"provider,omitempty"`
+	BaseURL  string            `json:"base_url,omitempty"`
+	APIKey   string            `json:"api_key,omitempty"`
+	Protocol string            `json:"protocol,omitempty"`
+	Headers  map[string]string `json:"headers,omitempty"`
 }
 
 // endpointJSONOut is the response shape for a single endpoint — same as
@@ -776,6 +780,7 @@ type endpointJSONOut struct {
 	HasAPIKey bool                `json:"has_api_key"`
 	LiteModel string              `json:"lite_model,omitempty"`
 	Models    []endpointModelJSON `json:"models"`
+	Headers   map[string]string   `json:"headers,omitempty"`
 }
 
 func endpointToJSON(ep config.Endpoint) endpointJSONOut {
@@ -788,6 +793,7 @@ func endpointToJSON(ep config.Endpoint) endpointJSONOut {
 		HasAPIKey: ep.APIKey != "",
 		LiteModel: ep.LiteModel,
 		Models:    make([]endpointModelJSON, 0, len(ep.Models)),
+		Headers:   ep.Headers,
 	}
 	for _, m := range ep.Models {
 		out.Models = append(out.Models, endpointModelJSON{Model: m.Model, Vision: m.Vision})
@@ -826,6 +832,7 @@ func (s *Server) handleCreateEndpoint(w http.ResponseWriter, r *http.Request) {
 			BaseURL:  req.BaseURL,
 			APIKey:   req.APIKey,
 			Protocol: req.Protocol,
+			Headers:  req.Headers,
 		}
 		for _, m := range req.Models {
 			if m.Model == "" {
@@ -912,6 +919,13 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Protocol != "" {
 			ep.Protocol = req.Protocol
+		}
+		// Headers is a map, so unlike the string fields above, encoding/json
+		// distinguishes "omitted" (nil) from "explicitly sent, possibly empty"
+		// (non-nil). req.Headers != nil means the caller submitted a full
+		// replacement for the headers set; {} clears it.
+		if req.Headers != nil {
+			ep.Headers = req.Headers
 		}
 		cfg.Endpoints[idx] = ep
 		updated = ep

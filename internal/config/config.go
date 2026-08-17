@@ -50,6 +50,9 @@ type ModelEntry struct {
 	// env var is empty. Opt-in via `octo config` and stored mode 0600. Prefer
 	// the env var.
 	APIKey string `yaml:"api_key,omitempty"`
+	// Headers are extra HTTP headers sent with every request to this entry's
+	// endpoint. Projected from Endpoint.Headers — see projectToModelEntry.
+	Headers map[string]string `yaml:"headers,omitempty"`
 	// Vision controls whether tools may hand this model images (e.g. the
 	// browser tool's screenshot). It is always recorded: predefined models get
 	// their catalogue value at add time, custom models are answered by the user.
@@ -116,6 +119,13 @@ type Endpoint struct {
 	// for compaction. Empty falls back to vendor inference (see
 	// ImplicitLiteModel).
 	LiteModel string `yaml:"lite_model,omitempty"`
+	// Headers are extra HTTP headers sent with every request to this
+	// endpoint's BaseURL. Applied after the client's built-in headers
+	// (Content-Type/User-Agent/Authorization/x-api-key/anthropic-version), so
+	// a key here overrides the built-in value — lets a reverse-proxy gateway
+	// that requires a non-standard auth header take over from the client
+	// default. Values are static plaintext; no env-var interpolation.
+	Headers map[string]string `yaml:"headers,omitempty"`
 	// Models is the list of models offered through this endpoint. Each
 	// carries its own Vision flag (model-level capability, not endpoint-level).
 	Models []EndpointModel `yaml:"models"`
@@ -528,6 +538,7 @@ func projectToModelEntry(ep Endpoint, m EndpointModel) ModelEntry {
 		BaseURL:  ep.BaseURL,
 		APIKey:   ep.APIKey,
 		Protocol: ep.Protocol,
+		Headers:  ep.Headers,
 		Vision:   m.Vision,
 	}
 }
@@ -628,6 +639,12 @@ func (c Config) Validate() []string {
 				problems = append(problems, fmt.Sprintf("duplicate model %q in endpoint %q", m.Model, ep.ID))
 			}
 			seenModel[m.Model] = true
+		}
+
+		for k := range ep.Headers {
+			if strings.TrimSpace(k) == "" {
+				problems = append(problems, fmt.Sprintf("endpoint %q has a header with an empty name", ep.ID))
+			}
 		}
 	}
 
@@ -741,6 +758,7 @@ func (c Config) EntryByModel(model string) (ModelEntry, bool) {
 						BaseURL:  ep.BaseURL,
 						APIKey:   ep.APIKey,
 						Protocol: ep.Protocol,
+						Headers:  ep.Headers,
 						Vision:   m.Vision,
 					}, true
 				}
