@@ -672,6 +672,9 @@
   // updateSessionModel, which resolves it via cfg.EntryByModel (composite-id
   // aware since PR2).
   let models = $state<{ id: string; model: string; endpoint: string }[]>([])
+  // Composite id of the configured default entry (EndpointsResponse.default),
+  // refreshed together with the model list.
+  let defaultModelId = $state('')
   let modelMenu = $state(false)
   let reasonMenu = $state(false)
   let dirMenu = $state(false)
@@ -687,6 +690,23 @@
       g.items.push({ id: m.id, model: m.model })
     }
     return out
+  })
+
+  // Composite id of the row the menu should highlight as current. Rows are
+  // unique by composite id but NOT by model name (two endpoints may expose
+  // the same model, #2141), so matching by name alone lights up both — prefer
+  // the composite id whenever one is known: the session's own binding
+  // (model_id), the pending pick for a yet-to-be-created session, or the
+  // configured default for an unbound session. Empty means identity unknown
+  // (legacy bare-model binding) and the menu falls back to name matching.
+  let activeModelId = $derived.by(() => {
+    const bound = currentSession?.model_id ?? ''
+    if (bound.includes('::')) return bound
+    if (bound) return ''
+    if (!sid) return $pendingModel || defaultModelId
+    // Unbound session: it runs on the default entry — trust that only while
+    // the default still points at the model the session displays.
+    return defaultModelId.split('::').pop() === modelName ? defaultModelId : ''
   })
 
   // ── agent assignment ───────────────────────────────────────────────────────
@@ -753,6 +773,10 @@
         }
       }
       models = flat
+      // Default is echoed verbatim from config — a hand-written file may
+      // carry a bare model name, which no menu row's composite id can ever
+      // equal. Treat that as identity-unknown so name matching still applies.
+      defaultModelId = ep.default?.includes('::') ? ep.default : ''
     } catch { /* keep the previous list */ }
   }
 
@@ -1222,7 +1246,7 @@
                 {#each modelGroups as g (g.endpoint)}
                   <div class="menu-label mono">{g.endpoint}</div>
                   {#each g.items as m (m.id)}
-                    <button class="menu-item" class:active={m.model === modelName} onclick={() => pickModel({ id: m.id, model: m.model, endpoint: g.endpoint })}>
+                    <button class="menu-item" class:active={activeModelId ? m.id === activeModelId : m.model === modelName} onclick={() => pickModel({ id: m.id, model: m.model, endpoint: g.endpoint })}>
                       <span class="mi-name mono">{m.model}</span>
                     </button>
                   {/each}

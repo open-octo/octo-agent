@@ -122,6 +122,7 @@ func (s *Server) listSessionsBrief() []wsSessionInfo {
 			Source:              source,
 			AgentProfile:        sess.EffectiveAgentID(),
 			Model:               sess.Model,
+			ModelID:             sess.ModelConfig,
 			TotalTurns:          sess.TurnCount(),
 			WorkingDir:          s.sessionCwd(sess),
 			PermissionMode:      pm,
