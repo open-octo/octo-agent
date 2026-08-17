@@ -71,6 +71,11 @@ type Client struct {
 	// StreamIdleTimeout overrides DefaultStreamIdleTimeout for SendStream. Zero
 	// uses the default; a negative value disables the idle guard entirely.
 	StreamIdleTimeout time.Duration
+
+	// Headers are extra HTTP headers sent with every request. Applied after
+	// the built-in headers (Content-Type/User-Agent/x-api-key/anthropic-version),
+	// so a key here overrides the built-in value.
+	Headers map[string]string
 }
 
 // policy returns the configured retry policy, or the package default when the
@@ -163,6 +168,9 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 			apiVer = DefaultAPIVersion
 		}
 		httpReq.Header.Set("anthropic-version", apiVer)
+		for k, v := range c.Headers {
+			httpReq.Header.Set(k, v)
+		}
 
 		resp, err := httpClient.Do(httpReq)
 		if err != nil {
