@@ -12,15 +12,18 @@ type agentPreset struct {
 	// tools, when non-empty, is the agent's tool allowlist (frontmatter
 	// `tools`). disallowedTools (frontmatter `disallowed_tools`) is subtracted
 	// from the inherited set. model (frontmatter `model`, default "inherit")
-	// pins the child's model; empty means inherit the parent's.
+	// pins the child's model; empty means inherit the parent's, and "lite"
+	// resolves to the parent's lite model at spawn time (parent's model when
+	// none is configured).
 	tools           []string
 	disallowedTools []string
 	model           string
 	// leanSystem seeds the agent with the parent's lean system prompt (skills
-	// manifest + memory dropped) to keep its context small. Presets always
-	// run on the parent's model (or an explicit model override) — a research
-	// agent's findings gate the parent's next step, so model quality is never
-	// traded for cost; only context is trimmed.
+	// manifest + memory dropped) to keep its context small. Presets run on
+	// the parent's model unless the frontmatter or the call opts into an
+	// explicit override — a research agent's findings gate the parent's next
+	// step, so model quality is never traded for cost implicitly; only
+	// context is trimmed.
 	leanSystem bool
 }
 

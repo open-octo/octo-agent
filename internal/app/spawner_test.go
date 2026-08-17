@@ -152,6 +152,51 @@ func TestAgentSpawner_ModelOverride(t *testing.T) {
 	}
 }
 
+func TestAgentSpawner_LiteModelOverrideUsesLiteSender(t *testing.T) {
+	send := &subAgentSender{reply: "ok"}
+	lite := &subAgentSender{reply: "lite ok"}
+	parent := agent.New(send, "parent-model")
+	parent.LiteSender = lite
+	parent.LiteModel = "lite-model"
+	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
+
+	_, err := sp.Spawn(context.Background(), tools.SpawnRequest{
+		Description: "x",
+		Prompt:      "y",
+		Model:       "lite",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lite.calls != 1 {
+		t.Fatalf("lite sender calls = %d, want 1", lite.calls)
+	}
+	if lite.lastModel != "lite-model" {
+		t.Errorf("child ran with %q, want lite-model", lite.lastModel)
+	}
+	if send.calls != 0 {
+		t.Errorf("primary sender called %d times, want 0", send.calls)
+	}
+}
+
+func TestAgentSpawner_LiteModelFallsBackToParentWhenUnconfigured(t *testing.T) {
+	send := &subAgentSender{reply: "ok"}
+	parent := agent.New(send, "parent-model")
+	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
+
+	_, err := sp.Spawn(context.Background(), tools.SpawnRequest{
+		Description: "x",
+		Prompt:      "y",
+		Model:       "lite",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if send.lastModel != "parent-model" {
+		t.Errorf("child ran with %q, want fallback to parent-model", send.lastModel)
+	}
+}
+
 func TestAgentSpawner_SpawnReturnsIDAndContinueResumesSameChild(t *testing.T) {
 	send := &subAgentSender{reply: "round one", inputTokens: 200, outputTokens: 80}
 	parent := agent.New(send, "parent-model")

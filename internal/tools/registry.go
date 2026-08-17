@@ -671,7 +671,13 @@ func defaultToolsFor(ctx context.Context, model string) []agent.ToolDefinition {
 		if _, isEnableOwn := t.(EnableOwnSkillTool); isEnableOwn && !enableOwnSkillOn(ctx) {
 			continue
 		}
-		if _, isAgent := t.(AgentTool); isAgent && !mgrOn {
+		if at, isAgent := t.(AgentTool); isAgent {
+			if !mgrOn {
+				continue
+			}
+			// Model-aware schema: the model-override parameter lists the
+			// sibling models reachable on the session model's endpoint.
+			defs = append(defs, at.DefinitionFor(model))
 			continue
 		}
 		if _, isSend := t.(AgentSendTool); isSend && !mgrOn {
