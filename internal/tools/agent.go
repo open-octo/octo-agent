@@ -51,7 +51,7 @@ func profileNames(store *agentprofile.Store) string {
 //   - description: short label for UI/logging
 //   - prompt:      the task. Self-contained — the child starts with zero
 //     conversation context and can't see this conversation.
-//   - subagent_type: agent type (explore, plan, general, code-review, or a
+//   - subagent_type: agent type (explore, general, code-review, or a
 //     user-defined agent from ~/.octo/agents). Required.
 //   - run_in_background: when true the agent runs async and you are notified
 //     on completion. When false (default) it blocks and returns the result.
@@ -78,7 +78,7 @@ func (AgentTool) DefinitionFor(sessionModel string) agent.ToolDefinition {
 			"The child always starts with zero conversation context and the persona named by " +
 			"subagent_type — it can never see this conversation, so make the prompt a complete, " +
 			"self-contained task description (file paths, constraints, deliverable). " +
-			"'explore' for read-only investigation/research, 'plan' for read-only planning, " +
+			"'explore' for read-only investigation/research and planning, " +
 			"'general' for delegated work that modifies files, 'code-review' for an independent " +
 			"read of changes. To branch the conversation itself, use the session branch feature " +
 			"instead — a sub-agent is not a conversation fork.\n\n" +
