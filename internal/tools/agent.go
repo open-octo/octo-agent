@@ -8,6 +8,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/agentprofile"
+	"github.com/open-octo/octo-agent/internal/config"
 )
 
 // ctxKeyProfileStore is the context key for the per-turn agentprofile.Store.
@@ -54,13 +55,20 @@ func profileNames(store *agentprofile.Store) string {
 //     user-defined agent from ~/.octo/agents). Required.
 //   - run_in_background: when true the agent runs async and you are notified
 //     on completion. When false (default) it blocks and returns the result.
-//   - model: optional model override
+//   - model: optional model override ("lite" resolves to the endpoint's lite
+//     model, falling back to the parent's model when none is configured)
 //   - tools: optional tool-name allowlist for the child
 //
 // The tool is advertised only when a SubAgentManager is registered.
 type AgentTool struct{}
 
-func (AgentTool) Definition() agent.ToolDefinition {
+func (t AgentTool) Definition() agent.ToolDefinition { return t.DefinitionFor("") }
+
+// DefinitionFor is Definition with session-model context: when the registry
+// knows which model this turn runs on, the model-override parameter lists the
+// sibling models reachable on that model's endpoint (the child reuses the
+// parent's endpoint connection, so only those are valid overrides).
+func (AgentTool) DefinitionFor(sessionModel string) agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "sub_agent",
 		Description: "Launch an autonomous sub-agent to handle a focused sub-task. " +
@@ -102,7 +110,7 @@ func (AgentTool) Definition() agent.ToolDefinition {
 				},
 				"model": map[string]any{
 					"type":        "string",
-					"description": "Optional model override. Defaults to the parent's model.",
+					"description": subAgentModelParamDesc(sessionModel),
 				},
 				"tools": map[string]any{
 					"type":        "array",
@@ -113,6 +121,53 @@ func (AgentTool) Definition() agent.ToolDefinition {
 			"required": []string{"description", "prompt", "subagent_type"},
 		},
 	}
+}
+
+// subAgentModelParamBase documents the model-override parameter without any
+// endpoint context: the plain default plus the "lite" keyword.
+const subAgentModelParamBase = "Optional model override. Defaults to the parent's model. " +
+	"Pass \"lite\" to run the sub-agent on the endpoint's configured lite model — right for " +
+	"mechanical subtasks where speed/cost beats quality; it falls back to the parent's model " +
+	"when no lite model is configured."
+
+// subAgentModelParamDesc returns the model-override parameter description,
+// appending the sibling models of the session model's endpoint when the
+// config resolves them. Only same-endpoint models are listed because the
+// child reuses the parent's endpoint connection — a model served elsewhere
+// would be rejected by the endpoint.
+func subAgentModelParamDesc(sessionModel string) string {
+	if sessionModel == "" {
+		return subAgentModelParamBase
+	}
+	cfg, err := config.LoadCached()
+	if err != nil {
+		return subAgentModelParamBase
+	}
+	return subAgentModelParamDescFor(cfg, sessionModel)
+}
+
+// subAgentModelParamDescFor is subAgentModelParamDesc over an explicit config,
+// split out so tests don't touch the on-disk config cache.
+func subAgentModelParamDescFor(cfg config.Config, sessionModel string) string {
+	for _, ep := range cfg.Endpoints {
+		for _, m := range ep.Models {
+			if m.Model != sessionModel {
+				continue
+			}
+			names := make([]string, 0, len(ep.Models))
+			for _, mm := range ep.Models {
+				name := mm.Model
+				if name == ep.LiteModel {
+					name += " (lite)"
+				}
+				names = append(names, name)
+			}
+			return subAgentModelParamBase +
+				" Models available on the current endpoint: " + strings.Join(names, ", ") + "."
+		}
+	}
+	// Session model not in the config (e.g. an ad-hoc --model value): no list.
+	return subAgentModelParamBase
 }
 
 func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {

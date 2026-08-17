@@ -67,10 +67,18 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 	childTools := filterChildTools(s.toolsFn(ctx), req.Tools, req.DisallowedTools, req.ReadOnly)
 
 	// The child runs on the parent's sender + model unless the request
-	// overrides the model explicitly. No preset downgrades to the lite model:
-	// a sub-agent's output gates the parent's next step, so cost is trimmed
-	// via the lean system prompt (below), never via model quality.
+	// overrides the model explicitly. No preset downgrades to the lite model
+	// SILENTLY — a sub-agent's output gates the parent's next step, so cost
+	// is trimmed via the lean system prompt (below) by default — but an
+	// explicit "lite" override (call parameter or frontmatter `model: lite`)
+	// opts the child onto the parent's lite sender/model.
 	sender, model := s.parent.GetSender(), req.Model
+	if strings.EqualFold(model, "lite") {
+		model = "" // no lite configured: inherit the parent's model
+		if s.parent.LiteSender != nil && s.parent.LiteModel != "" {
+			sender, model = s.parent.LiteSender, s.parent.LiteModel
+		}
+	}
 	if model == "" {
 		model = s.parent.Model
 	}

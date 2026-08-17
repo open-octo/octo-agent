@@ -98,8 +98,9 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 			"Primitives:\n" +
 			"- `agent(prompt, opts = {}) -> String`: run one sub-agent to completion, return " +
 			"its reply. Inside parallel/pipeline it runs concurrently with siblings. " +
-			"Optional opts: `model:` (override the model for this call, e.g. a cheaper model " +
-			"for mechanical stages), `tools:` (Array restricting the child's tools), " +
+			"Optional opts: `model:` (override the model for this call — pass \"lite\" for the " +
+			"endpoint's lite model on mechanical stages; falls back to the parent's model when " +
+			"no lite model is configured), `tools:` (Array restricting the child's tools), " +
 			"`read_only: true` (strip write_file/edit_file), `schema:` (a JSON Schema as a " +
 			"JSON **string** — the call then returns the sub-agent's reply as JSON text matching it), " +
 			"`isolation: \"worktree\"` (run the sub-agent in a fresh git worktree so its file changes " +
