@@ -14,6 +14,81 @@ import (
 	"github.com/open-octo/octo-agent/internal/provider"
 )
 
+// TestSend_CustomHeaders verifies that Client.Headers are attached to the
+// outgoing request.
+func TestSend_CustomHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.Header.Get("X-Tenant-Id"), "tenant-42"; got != want {
+			t.Errorf("X-Tenant-Id header = %q, want %q", got, want)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-test",
+			"object":"chat.completion",
+			"model":"gpt-4o-mini",
+			"choices":[{
+				"index":0,
+				"message":{"role":"assistant","content":"hi"},
+				"finish_reason":"stop"
+			}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`))
+	}))
+	defer srv.Close()
+
+	c, err := New("test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.BaseURL = srv.URL
+	c.Headers = map[string]string{"X-Tenant-Id": "tenant-42"}
+
+	if _, err := c.Send(context.Background(), provider.Request{
+		Model:    "gpt-4o-mini",
+		Messages: []agent.Message{agent.NewUserMessage("hello")},
+	}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+}
+
+// TestSend_CustomHeaderOverridesBuiltin verifies that a custom header can
+// override the built-in Authorization header, for gateways that require a
+// non-standard auth scheme.
+func TestSend_CustomHeaderOverridesBuiltin(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.Header.Get("Authorization"), "Custom xyz"; got != want {
+			t.Errorf("Authorization header = %q, want %q", got, want)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-test",
+			"object":"chat.completion",
+			"model":"gpt-4o-mini",
+			"choices":[{
+				"index":0,
+				"message":{"role":"assistant","content":"hi"},
+				"finish_reason":"stop"
+			}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`))
+	}))
+	defer srv.Close()
+
+	c, err := New("test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.BaseURL = srv.URL
+	c.Headers = map[string]string{"Authorization": "Custom xyz"}
+
+	if _, err := c.Send(context.Background(), provider.Request{
+		Model:    "gpt-4o-mini",
+		Messages: []agent.Message{agent.NewUserMessage("hello")},
+	}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+}
+
 func TestNew_EmptyKeyRejected(t *testing.T) {
 	for _, k := range []string{"", "   ", "\t\n"} {
 		if _, err := New(k); err == nil {
