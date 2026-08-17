@@ -749,6 +749,7 @@ type createEndpointRequest struct {
 	APIKey   string            `json:"api_key,omitempty"`
 	Protocol string            `json:"protocol,omitempty"`
 	Models   []endpointModelIn `json:"models,omitempty"`
+	Headers  map[string]string `json:"headers,omitempty"`
 }
 
 type endpointModelIn struct {
@@ -778,6 +779,7 @@ type endpointJSONOut struct {
 	HasAPIKey bool                `json:"has_api_key"`
 	LiteModel string              `json:"lite_model,omitempty"`
 	Models    []endpointModelJSON `json:"models"`
+	Headers   map[string]string   `json:"headers,omitempty"`
 }
 
 func endpointToJSON(ep config.Endpoint) endpointJSONOut {
@@ -790,6 +792,7 @@ func endpointToJSON(ep config.Endpoint) endpointJSONOut {
 		HasAPIKey: ep.APIKey != "",
 		LiteModel: ep.LiteModel,
 		Models:    make([]endpointModelJSON, 0, len(ep.Models)),
+		Headers:   ep.Headers,
 	}
 	for _, m := range ep.Models {
 		out.Models = append(out.Models, endpointModelJSON{Model: m.Model, Vision: m.Vision})
@@ -828,6 +831,7 @@ func (s *Server) handleCreateEndpoint(w http.ResponseWriter, r *http.Request) {
 			BaseURL:  req.BaseURL,
 			APIKey:   req.APIKey,
 			Protocol: req.Protocol,
+			Headers:  req.Headers,
 		}
 		for _, m := range req.Models {
 			if m.Model == "" {

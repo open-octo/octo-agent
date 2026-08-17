@@ -804,6 +804,47 @@ func TestCreateEndpoint_DocumentedModelsShape(t *testing.T) {
 	}
 }
 
+// TestCreateEndpoint_HeadersPersisted covers a create request that includes a
+// headers object — it must be persisted onto the new config.Endpoint and
+// echoed back both in the create response and a subsequent GET.
+func TestCreateEndpoint_HeadersPersisted(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	body := `{
+		"id": "my-relay",
+		"provider": "custom",
+		"base_url": "https://api.example.com",
+		"headers": {"X-Tenant-Id": "abc", "X-Trace": "1"}
+	}`
+	w := doJSON(t, srv, http.MethodPost, "/api/config/endpoints", body)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST /api/config/endpoints = %d, want %d: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+	var resp endpointJSONOut
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v (body: %s)", err, w.Body.String())
+	}
+	if resp.Headers["X-Tenant-Id"] != "abc" || resp.Headers["X-Trace"] != "1" {
+		t.Fatalf("create response headers = %+v, want both custom headers echoed", resp.Headers)
+	}
+
+	// Also verify persistence via a fresh GET.
+	cfg, _ := config.Load()
+	var saved *config.Endpoint
+	for i := range cfg.Endpoints {
+		if cfg.Endpoints[i].ID == "my-relay" {
+			saved = &cfg.Endpoints[i]
+		}
+	}
+	if saved == nil {
+		t.Fatalf("endpoint my-relay not found in saved config: %+v", cfg.Endpoints)
+	}
+	if saved.Headers["X-Tenant-Id"] != "abc" || saved.Headers["X-Trace"] != "1" {
+		t.Errorf("saved config headers = %+v, want both custom headers persisted", saved.Headers)
+	}
+}
+
 // TestCreateEndpoint_StringModelsRejectedWithDetail covers the failure mode
 // #1941 actually hit: a plain string models array (the shape SKILL.md wrongly
 // documented before this fix) doesn't unmarshal into []endpointModelIn. The
