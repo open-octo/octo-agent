@@ -951,6 +951,14 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 		invalidID = id
 	}
 	s.invalidateEndpointSenders(invalidID)
+	// Connection params (base_url, api_key, headers, ...) of the endpoint
+	// backing the default entry may have changed; unbound sessions ride the
+	// default sender, so rebuild it too — otherwise the update only reaches
+	// bound sessions and the default sender keeps the stale connection until
+	// restart.
+	if err := s.reloadDefaultSender(); err != nil {
+		log.Printf("[server] reload default sender after endpoint update: %v", err)
+	}
 	writeJSON(w, http.StatusOK, endpointToJSON(updated))
 }
 
@@ -994,6 +1002,12 @@ func (s *Server) handleDeleteEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.invalidateEndpointSenders(id)
+	// Deleting the endpoint may have cleared Default (when it pointed at this
+	// endpoint) — rebuild the default sender so unbound sessions stop riding
+	// a sender built against the deleted endpoint.
+	if err := s.reloadDefaultSender(); err != nil {
+		log.Printf("[server] reload default sender after endpoint delete: %v", err)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -1081,6 +1095,12 @@ func (s *Server) handleDeleteEndpointModel(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.invalidateEndpointSenders(id)
+	// Deleting the model may have cleared Default (when it pointed exactly at
+	// "<id>::<model>") — rebuild the default sender so unbound sessions pick
+	// up the new default (or fall out of the stale one) on their next turn.
+	if err := s.reloadDefaultSender(); err != nil {
+		log.Printf("[server] reload default sender after endpoint model delete: %v", err)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

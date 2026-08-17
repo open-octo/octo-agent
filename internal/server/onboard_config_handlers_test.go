@@ -929,6 +929,113 @@ func TestUpdateEndpoint_HeadersExplicitEmpty_ClearsAll(t *testing.T) {
 	}
 }
 
+// TestUpdateEndpoint_ReloadsDefaultSender is the regression test for the
+// missing reloadDefaultSender call in handleUpdateEndpoint: editing an
+// endpoint's connection params (base_url, api_key, headers, …) used to reach
+// only bound sessions via invalidateEndpointSenders, while unbound sessions
+// kept riding the server's stale default sender until restart — e.g. a newly
+// added custom User-Agent header never hit the wire for them.
+func TestUpdateEndpoint_ReloadsDefaultSender(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "custom", BaseURL: "https://api.example.com", Protocol: "anthropic", APIKey: "sk-test", Models: []config.EndpointModel{{Model: "m1"}}},
+		},
+		Default: "ep-a::m1",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	before := srv.getSender()
+	if before == nil {
+		t.Fatal("server should have a default sender after startup")
+	}
+
+	w := doJSON(t, srv, http.MethodPatch, "/api/config/endpoints/ep-a", `{"headers": {"user-agent": "cc-test"}}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH /api/config/endpoints/ep-a = %d: %s", w.Code, w.Body.String())
+	}
+
+	after := srv.getSender()
+	if after == nil {
+		t.Fatal("server default sender missing after endpoint update")
+	}
+	if after == before {
+		t.Error("default sender pointer did not change after endpoint update — unbound sessions would keep the stale connection params")
+	}
+
+	// An unbound session must resolve to the rebuilt default sender.
+	sess := agent.NewSession("m1", "")
+	sender, _ := srv.senderForSession(sess)
+	if sender != after {
+		t.Error("unbound session did not pick up the rebuilt default sender")
+	}
+}
+
+// TestDeleteEndpoint_ReloadsDefaultSender covers the same wiring gap in
+// handleDeleteEndpoint: removing an endpoint can clear Default, and even when
+// it doesn't, the default sender must be rebuilt from the post-delete config.
+func TestDeleteEndpoint_ReloadsDefaultSender(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "custom", BaseURL: "https://api.example.com", Protocol: "anthropic", APIKey: "sk-test", Models: []config.EndpointModel{{Model: "m1"}}},
+			{ID: "ep-b", Provider: "custom", BaseURL: "https://api2.example.com", Protocol: "anthropic", APIKey: "sk-test", Models: []config.EndpointModel{{Model: "m2"}}},
+		},
+		Default: "ep-a::m1",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	before := srv.getSender()
+	if before == nil {
+		t.Fatal("server should have a default sender after startup")
+	}
+
+	w := doJSON(t, srv, http.MethodDelete, "/api/config/endpoints/ep-b", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("DELETE /api/config/endpoints/ep-b = %d: %s", w.Code, w.Body.String())
+	}
+
+	after := srv.getSender()
+	if after == nil {
+		t.Fatal("server default sender missing after endpoint delete")
+	}
+	if after == before {
+		t.Error("default sender pointer did not change after endpoint delete")
+	}
+}
+
+// TestDeleteEndpointModel_ReloadsDefaultSender covers the same wiring gap in
+// handleDeleteEndpointModel: deleting a model can clear Default (when it
+// pointed at "<id>::<model>"), so the default sender must be rebuilt.
+func TestDeleteEndpointModel_ReloadsDefaultSender(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "custom", BaseURL: "https://api.example.com", Protocol: "anthropic", APIKey: "sk-test", Models: []config.EndpointModel{{Model: "m1"}, {Model: "m2"}}},
+		},
+		Default: "ep-a::m1",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	before := srv.getSender()
+	if before == nil {
+		t.Fatal("server should have a default sender after startup")
+	}
+
+	w := doJSON(t, srv, http.MethodDelete, "/api/config/endpoints/ep-a/models/m2", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("DELETE /api/config/endpoints/ep-a/models/m2 = %d: %s", w.Code, w.Body.String())
+	}
+
+	after := srv.getSender()
+	if after == nil {
+		t.Fatal("server default sender missing after endpoint model delete")
+	}
+	if after == before {
+		t.Error("default sender pointer did not change after endpoint model delete")
+	}
+}
+
 func TestSetEndpointDefault_WithModelQuery_SetsSpecificModel(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
