@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/provider"
 	"github.com/open-octo/octo-agent/internal/provider/anthropic"
 	"github.com/open-octo/octo-agent/internal/provider/openai"
@@ -111,6 +112,25 @@ func NewSender(opts SenderOptions) (agent.Sender, error) {
 // Deprecated: prefer VendorBaseURL(id) from provider.go.
 func DefaultBaseURL(providerName string) string {
 	return VendorBaseURL(providerName)
+}
+
+// EntryConnectionOverrides returns the Protocol and Headers to apply when
+// building a sender for resolvedProvider, given the config entry that
+// supplied the API key. Both fields are only meaningful for the entry's own
+// provider: a caller may resolve a DIFFERENT vendor than the config's default
+// entry (e.g. a --provider flag, OCTO_PROVIDER, or a <PROVIDER>_MODEL env var
+// picking a vendor other than entry.Provider) while still reusing that
+// entry's API key. In that mismatch case, entry.Protocol/entry.Headers
+// belong to a different endpoint and must not be applied to the mismatched
+// vendor's requests — Headers in particular may carry a value that
+// overrides Authorization/x-api-key for a completely different gateway, so
+// leaking it onto the wrong provider's API would send that secret to the
+// wrong place.
+func EntryConnectionOverrides(resolvedProvider string, entry config.ModelEntry) (protocol string, headers map[string]string) {
+	if resolvedProvider != entry.Provider {
+		return "", nil
+	}
+	return entry.Protocol, entry.Headers
 }
 
 // buildClient constructs the vendor client and applies an optional base-URL

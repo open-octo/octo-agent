@@ -1386,18 +1386,16 @@ func buildSender(name string, entry config.ModelEntry, stderr io.Writer, tuning 
 	if err != nil {
 		return nil, err
 	}
-	// Protocol matters only for the Custom vendor; it comes from the entry when
-	// the resolved provider is that entry's provider.
-	protocol := ""
-	if name == entry.Provider {
-		protocol = entry.Protocol
-	}
+	// Protocol and Headers matter only for the Custom vendor; they come from
+	// the entry when the resolved provider is that entry's provider — see
+	// app.EntryConnectionOverrides.
+	protocol, headers := app.EntryConnectionOverrides(name, entry)
 	s, err := app.NewSender(app.SenderOptions{
 		Provider:        name,
 		APIKey:          apiKey,
 		BaseURL:         resolveBaseURL(name, entry),
 		Protocol:        protocol,
-		Headers:         entry.Headers,
+		Headers:         headers,
 		CacheKey:        newCacheKey(),
 		ThinkingBudget:  tuning.thinkingBudget,
 		ReasoningEffort: tuning.reasoningEffort,
