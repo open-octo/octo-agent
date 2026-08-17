@@ -99,3 +99,40 @@ func TestHandleCreateSession_CompositeIDKeepsEndpoint(t *testing.T) {
 		t.Fatalf("re-resolved entry = (%+v, %v), want the ep-proxy endpoint", entry, ok)
 	}
 }
+
+// The session list must surface the binding as model_id: the composer's model
+// menu highlights the current row by composite id, and two endpoints exposing
+// the same model name are indistinguishable by the bare name alone.
+func TestHandleListSessions_SurfacesModelID(t *testing.T) {
+	sameModelTwoEndpointsConfig(t)
+
+	sess := agent.NewSession("kimi-k2.6", "")
+	sess.ModelConfig = "ep-proxy::kimi-k2.6"
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	w := doJSON(t, srv, http.MethodGet, "/api/sessions", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/sessions = %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Sessions []struct {
+			ID      string `json:"id"`
+			ModelID string `json:"model_id"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range resp.Sessions {
+		if s.ID == sess.ID {
+			if s.ModelID != "ep-proxy::kimi-k2.6" {
+				t.Fatalf("model_id = %q, want the composite id ep-proxy::kimi-k2.6", s.ModelID)
+			}
+			return
+		}
+	}
+	t.Fatalf("session %s not in list", sess.ID)
+}

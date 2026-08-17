@@ -123,6 +123,7 @@ func (srv *Server) toSessionItem(s *agent.Session, source, agentProfile string) 
 		CreatedAt:           s.CreatedAt,
 		UpdatedAt:           updated,
 		Model:               s.Model,
+		ModelID:             s.ModelConfig,
 		Status:              srv.sessionStatus(s.ID),
 		Source:              source,
 		AgentProfile:        agentProfile,

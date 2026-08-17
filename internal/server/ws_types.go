@@ -116,6 +116,7 @@ type wsSessionInfo struct {
 	Source              string `json:"source,omitempty"` // "manual" | "cron" | "channel" | "setup"
 	AgentProfile        string `json:"agent_profile,omitempty"`
 	Model               string `json:"model,omitempty"`
+	ModelID             string `json:"model_id,omitempty"`
 	TotalTurns          int    `json:"total_turns,omitempty"`
 	WorkingDir          string `json:"working_dir,omitempty"`
 	PermissionMode      string `json:"permission_mode,omitempty"`
