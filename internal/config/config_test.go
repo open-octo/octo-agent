@@ -133,6 +133,9 @@ func TestSaveLoad_RoundTrip_Headers(t *testing.T) {
 			t.Errorf("ep-b Headers[%q] = %q, want %q", k, got.Endpoints[1].Headers[k], v)
 		}
 	}
+	if probs := got.Validate(); len(probs) != 0 {
+		t.Errorf("Validate() after round trip = %v, want no problems", probs)
+	}
 }
 
 // TestEntryByModel_CompositeIDProjectsHeaders pins the composite-id branch of
