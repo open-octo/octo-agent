@@ -1473,6 +1473,7 @@ func resolveProviderAndModel(flagProvider, flagModel string) (agent.Sender, stri
 		APIKey:          apiKey,
 		BaseURL:         resolveBaseURL(provName, cfg),
 		Protocol:        protocol,
+		Headers:         entry.Headers,
 		ReasoningEffort: cfg.ReasoningEffort,
 		ShowReasoning:   cfg.EffectiveShowReasoning(nil),
 	})
@@ -1678,6 +1679,7 @@ func senderForEntry(entry config.ModelEntry) (agent.Sender, error) {
 		APIKey:          apiKey,
 		BaseURL:         entry.BaseURL,
 		Protocol:        entry.Protocol,
+		Headers:         entry.Headers,
 		ReasoningEffort: cfg.ReasoningEffort,
 		ShowReasoning:   cfg.EffectiveShowReasoning(nil),
 	})

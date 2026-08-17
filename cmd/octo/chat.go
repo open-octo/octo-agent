@@ -1397,6 +1397,7 @@ func buildSender(name string, entry config.ModelEntry, stderr io.Writer, tuning 
 		APIKey:          apiKey,
 		BaseURL:         resolveBaseURL(name, entry),
 		Protocol:        protocol,
+		Headers:         entry.Headers,
 		CacheKey:        newCacheKey(),
 		ThinkingBudget:  tuning.thinkingBudget,
 		ReasoningEffort: tuning.reasoningEffort,
