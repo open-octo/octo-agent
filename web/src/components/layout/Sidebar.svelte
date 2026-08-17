@@ -485,8 +485,10 @@
         {@const g = gv.group}
         {@const editingG = $editGroupId === g.id}
         <div class="grp-header">
+          <!-- Folder icon doubles as the collapse toggle: open when expanded,
+               closed when collapsed, so it carries both identity and state. -->
           <span class="grp-caret" onclick={() => toggleCollapse(g.id, !g.collapsed)}>
-            <iconify-icon icon={g.collapsed ? 'ant-design:right-outlined' : 'ant-design:down-outlined'} width="10"></iconify-icon>
+            <iconify-icon icon={g.collapsed ? 'ant-design:folder-outlined' : 'ant-design:folder-open-outlined'} width="13"></iconify-icon>
           </span>
           {#if editingG}
           <input
