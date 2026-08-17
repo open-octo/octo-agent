@@ -87,6 +87,48 @@ func TestSendStream_OpenAI_AggregatesAndCallsBack(t *testing.T) {
 	}
 }
 
+// TestSendStream_CustomHeaders is the regression test for the streaming path
+// missing Client.Headers entirely: SendStream builds its own request
+// independently of Send, so the header-merge loop had to be added there too.
+// This is the primary code path for real interactive chat (agent.go prefers
+// StreamMessagesWithTools whenever the provider implements it), so a gap here
+// would silently defeat the whole feature for normal usage.
+func TestSendStream_CustomHeaders(t *testing.T) {
+	var gotTenant, gotOverride string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotTenant = r.Header.Get("X-Tenant-Id")
+		gotOverride = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, canonicalOpenAIStream)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}))
+	defer srv.Close()
+
+	c, err := New("test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.BaseURL = srv.URL
+	c.Headers = map[string]string{"X-Tenant-Id": "tenant-42", "Authorization": "Custom override-value"}
+
+	if _, err := c.SendStream(context.Background(), provider.Request{
+		Model:    "gpt-4o-mini",
+		Messages: []agent.Message{agent.NewUserMessage("hi")},
+	}, provider.StreamCallbacks{}); err != nil {
+		t.Fatalf("SendStream: %v", err)
+	}
+
+	if gotTenant != "tenant-42" {
+		t.Errorf("X-Tenant-Id = %q, want tenant-42 (custom header must reach the streaming request)", gotTenant)
+	}
+	if gotOverride != "Custom override-value" {
+		t.Errorf("Authorization = %q, want 'Custom override-value' (custom header must override the built-in Bearer token on the streaming path too)", gotOverride)
+	}
+}
+
 // reasoningOpenAIStream interleaves reasoning_content deltas (the field
 // DeepSeek/Kimi-style reasoning models stream) with the visible answer.
 const reasoningOpenAIStream = "" +

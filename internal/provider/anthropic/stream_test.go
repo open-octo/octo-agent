@@ -103,6 +103,48 @@ func TestSendStream_AggregatesAndCallsBack(t *testing.T) {
 	}
 }
 
+// TestSendStream_CustomHeaders is the regression test for the streaming path
+// missing Client.Headers entirely: SendStream builds its own request
+// independently of Send, so the header-merge loop had to be added there too.
+// This is the primary code path for real interactive chat (agent.go prefers
+// StreamMessagesWithTools whenever the provider implements it), so a gap here
+// would silently defeat the whole feature for normal usage.
+func TestSendStream_CustomHeaders(t *testing.T) {
+	var gotTenant, gotOverride string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotTenant = r.Header.Get("X-Tenant-Id")
+		gotOverride = r.Header.Get("x-api-key")
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, canonicalStream)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}))
+	defer srv.Close()
+
+	c, err := New("test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.BaseURL = srv.URL
+	c.Headers = map[string]string{"X-Tenant-Id": "tenant-42", "x-api-key": "override-value"}
+
+	if _, err := c.SendStream(context.Background(), provider.Request{
+		Model:    "claude-haiku-4-5-20251001",
+		Messages: []agent.Message{agent.NewUserMessage("hi")},
+	}, provider.StreamCallbacks{}); err != nil {
+		t.Fatalf("SendStream: %v", err)
+	}
+
+	if gotTenant != "tenant-42" {
+		t.Errorf("X-Tenant-Id = %q, want tenant-42 (custom header must reach the streaming request)", gotTenant)
+	}
+	if gotOverride != "override-value" {
+		t.Errorf("x-api-key = %q, want override-value (custom header must override the built-in one on the streaming path too)", gotOverride)
+	}
+}
+
 func TestSendStream_NilCallbackTolerated(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

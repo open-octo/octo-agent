@@ -87,6 +87,9 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 		httpReq.Header.Set("User-Agent", version.UserAgent())
 		httpReq.Header.Set("Accept", "text/event-stream")
 		httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
+		for k, v := range c.Headers {
+			httpReq.Header.Set(k, v)
+		}
 
 		resp, err := c.streamingHTTPClient().Do(httpReq)
 		if err != nil {
