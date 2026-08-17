@@ -773,7 +773,10 @@
         }
       }
       models = flat
-      defaultModelId = ep.default ?? ''
+      // Default is echoed verbatim from config — a hand-written file may
+      // carry a bare model name, which no menu row's composite id can ever
+      // equal. Treat that as identity-unknown so name matching still applies.
+      defaultModelId = ep.default?.includes('::') ? ep.default : ''
     } catch { /* keep the previous list */ }
   }
 
