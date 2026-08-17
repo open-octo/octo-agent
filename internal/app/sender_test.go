@@ -13,6 +13,8 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/provider"
+	"github.com/open-octo/octo-agent/internal/provider/anthropic"
+	"github.com/open-octo/octo-agent/internal/provider/openai"
 )
 
 func TestSender_PassesRequestThrough(t *testing.T) {
@@ -289,6 +291,37 @@ func TestSender_StreamingFallback_NonStreamingProvider(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != "buffered" {
 		t.Errorf("fallback should emit one chunk with full content; got %v", got)
+	}
+}
+
+// TestBuildClient_PassesHeadersThrough verifies that the headers argument
+// reaches the constructed provider client for both the anthropic and openai
+// protocol branches.
+func TestBuildClient_PassesHeadersThrough(t *testing.T) {
+	headers := map[string]string{"X-Tenant-Id": "tenant-42"}
+
+	p, err := buildClient(ProviderAnthropic, "test-key", "", "", headers)
+	if err != nil {
+		t.Fatalf("buildClient(anthropic): %v", err)
+	}
+	ac, ok := p.(*anthropic.Client)
+	if !ok {
+		t.Fatalf("buildClient(anthropic) returned %T, want *anthropic.Client", p)
+	}
+	if ac.Headers["X-Tenant-Id"] != "tenant-42" {
+		t.Errorf("anthropic client Headers = %+v, want X-Tenant-Id=tenant-42", ac.Headers)
+	}
+
+	p, err = buildClient(ProviderOpenAI, "test-key", "", "", headers)
+	if err != nil {
+		t.Fatalf("buildClient(openai): %v", err)
+	}
+	oc, ok := p.(*openai.Client)
+	if !ok {
+		t.Fatalf("buildClient(openai) returned %T, want *openai.Client", p)
+	}
+	if oc.Headers["X-Tenant-Id"] != "tenant-42" {
+		t.Errorf("openai client Headers = %+v, want X-Tenant-Id=tenant-42", oc.Headers)
 	}
 }
 

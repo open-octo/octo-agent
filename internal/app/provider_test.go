@@ -36,7 +36,7 @@ func TestVendor_KimiCodingPlan(t *testing.T) {
 
 func TestVendor_KimiCodingPlan_BuildClient(t *testing.T) {
 	// buildClient should succeed with a dummy key for the anthropic protocol.
-	_, err := buildClient("kimi-coding-plan", "sk-dummy-key", "", "")
+	_, err := buildClient("kimi-coding-plan", "sk-dummy-key", "", "", nil)
 	if err != nil {
 		t.Fatalf("buildClient(kimi-coding-plan) error: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestVendor_KimiCodingPlan_BuildClient(t *testing.T) {
 
 func TestVendor_KimiCodingPlan_BuildClient_CustomBaseURL(t *testing.T) {
 	// Verify the custom base URL override is applied.
-	client, err := buildClient("kimi-coding-plan", "sk-dummy-key", "https://custom.example/v1", "")
+	client, err := buildClient("kimi-coding-plan", "sk-dummy-key", "https://custom.example/v1", "", nil)
 
 	if err != nil {
 		t.Fatalf("buildClient error: %v", err)
@@ -120,21 +120,21 @@ func TestVendor_CustomCatchAll(t *testing.T) {
 
 func TestBuildClient_CustomRequiresBaseURLAndProtocol(t *testing.T) {
 	// No base URL → fail regardless of protocol.
-	if _, err := buildClient(ProviderCustom, "sk-dummy", "", "openai"); err == nil {
+	if _, err := buildClient(ProviderCustom, "sk-dummy", "", "openai", nil); err == nil {
 		t.Errorf("buildClient(custom) without base URL must fail")
 	}
 	// Base URL but no protocol → fail (Custom has no registry-pinned protocol).
-	if _, err := buildClient(ProviderCustom, "sk-dummy", "https://gw.example/v1", ""); err == nil {
+	if _, err := buildClient(ProviderCustom, "sk-dummy", "https://gw.example/v1", "", nil); err == nil {
 		t.Errorf("buildClient(custom) without protocol must fail")
 	}
 	// Base URL + protocol → ok, both wire formats.
 	for _, proto := range []string{"openai", "anthropic"} {
-		if _, err := buildClient(ProviderCustom, "sk-dummy", "https://gw.example/v1", proto); err != nil {
+		if _, err := buildClient(ProviderCustom, "sk-dummy", "https://gw.example/v1", proto, nil); err != nil {
 			t.Errorf("buildClient(custom, %s): %v", proto, err)
 		}
 	}
 	// Pinned vendors still build with no override and ignore a supplied protocol.
-	if _, err := buildClient("anthropic", "sk-dummy", "", ""); err != nil {
+	if _, err := buildClient("anthropic", "sk-dummy", "", "", nil); err != nil {
 		t.Errorf("buildClient(anthropic) without base URL: %v", err)
 	}
 }
@@ -148,7 +148,7 @@ func TestBuildClient_EmptyBaseURL_UsesVendorEndpoint(t *testing.T) {
 		if v.CustomEndpoint {
 			continue
 		}
-		client, err := buildClient(v.ID, "sk-dummy", "", "")
+		client, err := buildClient(v.ID, "sk-dummy", "", "", nil)
 		if err != nil {
 			t.Errorf("buildClient(%s): %v", v.ID, err)
 			continue
@@ -214,7 +214,7 @@ func TestVendor_XAI(t *testing.T) {
 
 func TestVendor_XAI_BuildClient(t *testing.T) {
 	// openai-protocol client with the registry endpoint, no override needed.
-	client, err := buildClient("xai", "sk-dummy", "", "")
+	client, err := buildClient("xai", "sk-dummy", "", "", nil)
 	if err != nil {
 		t.Fatalf("buildClient(xai) error: %v", err)
 	}

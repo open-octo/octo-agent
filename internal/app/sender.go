@@ -36,6 +36,9 @@ type SenderOptions struct {
 	// Protocol ("anthropic" | "openai") is required only for the Custom vendor,
 	// which has no registry-pinned wire format; named vendors ignore it.
 	Protocol string
+	// Headers are extra HTTP headers sent with every request to this
+	// endpoint's BaseURL, forwarded from config.Endpoint/ModelEntry.Headers.
+	Headers map[string]string
 
 	// CacheKey is forwarded as the provider's prompt-cache key, stable across a
 	// conversation's turns so the backend routes them to the same cache.
@@ -77,7 +80,7 @@ func AnthropicThinkingBudget(effort string) int {
 // NewSender builds the provider client for opts and wraps it as an agent.Sender.
 // It is the single entry point through which every transport obtains a sender.
 func NewSender(opts SenderOptions) (agent.Sender, error) {
-	p, err := buildClient(opts.Provider, opts.APIKey, opts.BaseURL, opts.Protocol)
+	p, err := buildClient(opts.Provider, opts.APIKey, opts.BaseURL, opts.Protocol, opts.Headers)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +117,7 @@ func DefaultBaseURL(providerName string) string {
 // override. The caller is responsible for having resolved a non-empty key.
 // protocol is used only for vendors with no registry-pinned wire format (the
 // Custom catch-all); named vendors ignore it and use their own protocol.
-func buildClient(name, apiKey, baseURL, protocol string) (provider.Provider, error) {
+func buildClient(name, apiKey, baseURL, protocol string, headers map[string]string) (provider.Provider, error) {
 	v := vendorByID(name)
 	if v == nil {
 		return nil, fmt.Errorf("unknown provider %q", name)
@@ -150,6 +153,7 @@ func buildClient(name, apiKey, baseURL, protocol string) (provider.Provider, err
 		if baseURL != "" {
 			client.BaseURL = baseURL
 		}
+		client.Headers = headers
 		return client, nil
 	case "openai":
 		client, err := openai.New(apiKey)
@@ -163,6 +167,7 @@ func buildClient(name, apiKey, baseURL, protocol string) (provider.Provider, err
 		// vendor-specific quirks (DeepSeek's thinking-mode toggle); names the
 		// client doesn't recognise leave the request in its generic shape.
 		client.Dialect = name
+		client.Headers = headers
 		return client, nil
 	default:
 		return nil, fmt.Errorf("unknown protocol %q for provider %q", proto, name)
@@ -369,7 +374,7 @@ func replyFromResponse(resp provider.Response) agent.Reply {
 // the API key, base URL, and model all work. It returns a descriptive error
 // on failure (auth, model not found, network, etc.).
 func TestConnection(ctx context.Context, providerName, apiKey, baseURL, model, protocol string) error {
-	p, err := buildClient(providerName, apiKey, baseURL, protocol)
+	p, err := buildClient(providerName, apiKey, baseURL, protocol, nil)
 	if err != nil {
 		return err
 	}
