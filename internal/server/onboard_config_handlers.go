@@ -759,12 +759,13 @@ type endpointModelIn struct {
 
 type updateEndpointRequest struct {
 	// NewID, when non-empty, triggers a rename (RenameEndpoint + cascade).
-	NewID    string `json:"new_id,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Provider string `json:"provider,omitempty"`
-	BaseURL  string `json:"base_url,omitempty"`
-	APIKey   string `json:"api_key,omitempty"`
-	Protocol string `json:"protocol,omitempty"`
+	NewID    string            `json:"new_id,omitempty"`
+	Name     string            `json:"name,omitempty"`
+	Provider string            `json:"provider,omitempty"`
+	BaseURL  string            `json:"base_url,omitempty"`
+	APIKey   string            `json:"api_key,omitempty"`
+	Protocol string            `json:"protocol,omitempty"`
+	Headers  map[string]string `json:"headers,omitempty"`
 }
 
 // endpointJSONOut is the response shape for a single endpoint — same as
@@ -918,6 +919,13 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Protocol != "" {
 			ep.Protocol = req.Protocol
+		}
+		// Headers is a map, so unlike the string fields above, encoding/json
+		// distinguishes "omitted" (nil) from "explicitly sent, possibly empty"
+		// (non-nil). req.Headers != nil means the caller submitted a full
+		// replacement for the headers set; {} clears it.
+		if req.Headers != nil {
+			ep.Headers = req.Headers
 		}
 		cfg.Endpoints[idx] = ep
 		updated = ep

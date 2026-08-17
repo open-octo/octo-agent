@@ -863,6 +863,72 @@ func TestCreateEndpoint_StringModelsRejectedWithDetail(t *testing.T) {
 	}
 }
 
+// TestUpdateEndpoint_HeadersOmitted_LeavesUnchanged covers the nil-vs-empty-map
+// distinction: a PATCH body that omits "headers" entirely must not touch the
+// existing custom headers.
+func TestUpdateEndpoint_HeadersOmitted_LeavesUnchanged(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "custom", BaseURL: "https://api.example.com", APIKey: "sk-test", Headers: map[string]string{"X-Old": "1"}, Models: []config.EndpointModel{{Model: "m1"}}},
+		},
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPatch, "/api/config/endpoints/ep-a", `{"name": "renamed"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH /api/config/endpoints/ep-a = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if len(cfg.Endpoints) != 1 || cfg.Endpoints[0].Headers["X-Old"] != "1" {
+		t.Errorf("headers after omitted-headers PATCH = %+v, want X-Old=1 unchanged", cfg.Endpoints[0].Headers)
+	}
+}
+
+// TestUpdateEndpoint_HeadersReplace_WholesaleNotMerge covers that a PATCH
+// with a non-empty "headers" object wholesale replaces the existing map
+// rather than merging keys.
+func TestUpdateEndpoint_HeadersReplace_WholesaleNotMerge(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "custom", BaseURL: "https://api.example.com", APIKey: "sk-test", Headers: map[string]string{"X-Old": "1"}, Models: []config.EndpointModel{{Model: "m1"}}},
+		},
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPatch, "/api/config/endpoints/ep-a", `{"headers": {"X-New": "1"}}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH /api/config/endpoints/ep-a = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	got := cfg.Endpoints[0].Headers
+	if len(got) != 1 || got["X-New"] != "1" {
+		t.Errorf("headers after replace PATCH = %+v, want only X-New=1 (wholesale replace, not merge)", got)
+	}
+}
+
+// TestUpdateEndpoint_HeadersExplicitEmpty_ClearsAll covers that an explicit
+// "headers": {} clears all existing custom headers.
+func TestUpdateEndpoint_HeadersExplicitEmpty_ClearsAll(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "custom", BaseURL: "https://api.example.com", APIKey: "sk-test", Headers: map[string]string{"X-Old": "1"}, Models: []config.EndpointModel{{Model: "m1"}}},
+		},
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPatch, "/api/config/endpoints/ep-a", `{"headers": {}}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH /api/config/endpoints/ep-a = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if len(cfg.Endpoints[0].Headers) != 0 {
+		t.Errorf("headers after explicit-empty PATCH = %+v, want cleared to empty/nil", cfg.Endpoints[0].Headers)
+	}
+}
+
 func TestSetEndpointDefault_WithModelQuery_SetsSpecificModel(t *testing.T) {
 	setTestHome(t)
 	seedModels(t, config.Config{
