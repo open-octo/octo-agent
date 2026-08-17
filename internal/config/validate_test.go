@@ -31,6 +31,8 @@ func TestConfigValidate_EndpointLevel(t *testing.T) {
 		{"dangling Default composite id", Config{Endpoints: []Endpoint{goodEP}, Default: "ghost::claude-sonnet-4-6"}, "default"},
 		{"dangling Lite composite id", Config{Endpoints: []Endpoint{goodEP}, Lite: "ghost::claude-haiku-4-5"}, "lite"},
 		{"Default points at existing endpoint but missing model", Config{Endpoints: []Endpoint{goodEP}, Default: "ep-a::ghost-model"}, "default"},
+		{"endpoint header with empty key", Config{Endpoints: []Endpoint{{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}, Headers: map[string]string{"": "x"}}}}, "empty"},
+		{"endpoint header with non-empty key is fine", Config{Endpoints: []Endpoint{{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-sonnet-4-6"}}, Headers: map[string]string{"X-Tenant-Id": "abc"}}}}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

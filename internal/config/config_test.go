@@ -99,6 +99,100 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestSaveLoad_RoundTrip_Headers covers the new Endpoint.Headers field: it
+// must survive a Save/Load round trip, and an endpoint with no headers set
+// must come back with a nil map (omitempty — no stray "headers: {}" written).
+func TestSaveLoad_RoundTrip_Headers(t *testing.T) {
+	setHome(t)
+
+	want := Config{
+		Endpoints: []Endpoint{
+			{ID: "ep-a", Provider: "anthropic", Models: []EndpointModel{{Model: "claude-fable-5"}}},
+			{ID: "ep-b", Provider: "custom", BaseURL: "https://relay.example.com", Protocol: "anthropic",
+				Headers: map[string]string{"X-Tenant-Id": "abc", "X-Trace": "xyz"},
+				Models:  []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+	}
+	if err := want.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Endpoints[0].Headers != nil {
+		t.Errorf("ep-a Headers = %v, want nil (no headers configured)", got.Endpoints[0].Headers)
+	}
+	want2 := map[string]string{"X-Tenant-Id": "abc", "X-Trace": "xyz"}
+	if len(got.Endpoints[1].Headers) != len(want2) {
+		t.Fatalf("ep-b Headers = %v, want %v", got.Endpoints[1].Headers, want2)
+	}
+	for k, v := range want2 {
+		if got.Endpoints[1].Headers[k] != v {
+			t.Errorf("ep-b Headers[%q] = %q, want %q", k, got.Endpoints[1].Headers[k], v)
+		}
+	}
+}
+
+// TestEntryByModel_CompositeIDProjectsHeaders pins the composite-id branch of
+// EntryByModel (internal/config/config.go — the inline projection, not
+// projectToModelEntry): an endpoint's Headers must be projected onto the
+// returned ModelEntry the same way BaseURL/APIKey/Protocol already are.
+func TestEntryByModel_CompositeIDProjectsHeaders(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "relay-a", Provider: "custom", BaseURL: "https://relay.example.com", Protocol: "anthropic",
+				Headers: map[string]string{"X-Tenant-Id": "abc"},
+				Models:  []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+	}
+	got, ok := cfg.EntryByModel("relay-a::claude-sonnet-4-6")
+	if !ok {
+		t.Fatal("EntryByModel(composite id) = false, want true")
+	}
+	if got.Headers["X-Tenant-Id"] != "abc" {
+		t.Errorf("EntryByModel(composite).Headers = %v, want X-Tenant-Id=abc", got.Headers)
+	}
+}
+
+// TestEntryByModel_BareModelProjectsHeaders pins the bare-model branch of
+// EntryByModel, which calls projectToModelEntry — the other of the two
+// projection sites that must carry Headers through.
+func TestEntryByModel_BareModelProjectsHeaders(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "ep-a", Provider: "anthropic", BaseURL: "https://api.anthropic.com",
+				Headers: map[string]string{"X-Tenant-Id": "abc"},
+				Models:  []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+	}
+	got, ok := cfg.EntryByModel("claude-sonnet-4-6")
+	if !ok {
+		t.Fatal("EntryByModel(bare model) = false, want true")
+	}
+	if got.Headers["X-Tenant-Id"] != "abc" {
+		t.Errorf("EntryByModel(bare).Headers = %v, want X-Tenant-Id=abc", got.Headers)
+	}
+}
+
+// TestDefaultEntry_ProjectsHeaders pins the projectToModelEntry call inside
+// DefaultEntry's own fallback loop (config.go:510-514), a third callsite of
+// the same projection helper.
+func TestDefaultEntry_ProjectsHeaders(t *testing.T) {
+	cfg := Config{
+		Endpoints: []Endpoint{
+			{ID: "ep-a", Provider: "anthropic",
+				Headers: map[string]string{"X-Tenant-Id": "abc"},
+				Models:  []EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+	}
+	got := cfg.DefaultEntry()
+	if got.Headers["X-Tenant-Id"] != "abc" {
+		t.Errorf("DefaultEntry().Headers = %v, want X-Tenant-Id=abc", got.Headers)
+	}
+}
+
 func TestLoad_LegacyYAMLIsNormalised(t *testing.T) {
 	home := setHome(t)
 	writeOcto(t, home, "config.yaml",
