@@ -280,6 +280,7 @@ type endpointConfigJSON struct {
 	HasAPIKey bool                `json:"has_api_key"`
 	LiteModel string              `json:"lite_model,omitempty"`
 	Models    []endpointModelJSON `json:"models"`
+	Headers   map[string]string   `json:"headers,omitempty"`
 }
 
 // endpointModelJSON is one model under an endpoint.
@@ -313,6 +314,7 @@ func (s *Server) handleGetEndpoints(w http.ResponseWriter, r *http.Request) {
 			HasAPIKey: ep.APIKey != "",
 			LiteModel: ep.LiteModel,
 			Models:    make([]endpointModelJSON, 0, len(ep.Models)),
+			Headers:   ep.Headers,
 		}
 		for _, m := range ep.Models {
 			em.Models = append(em.Models, endpointModelJSON{Model: m.Model, Vision: m.Vision})

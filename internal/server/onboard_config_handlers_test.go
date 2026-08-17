@@ -511,6 +511,40 @@ func TestGetEndpoints_EmptyConfigReturnsEmptyShape(t *testing.T) {
 	}
 }
 
+// TestGetEndpoints_HeadersRoundTrip pins that an endpoint with custom Headers
+// echoes them back under the "headers" key, while an endpoint with none
+// reports an empty/absent map (design's Server API DTO extension).
+func TestGetEndpoints_HeadersRoundTrip(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-with-headers", Provider: "custom", BaseURL: "https://gw.example", APIKey: "sk-a", Headers: map[string]string{"X-Tenant-Id": "abc"}, Models: []config.EndpointModel{{Model: "m1"}}},
+			{ID: "ep-no-headers", Provider: "custom", BaseURL: "https://plain.example", APIKey: "sk-b", Models: []config.EndpointModel{{Model: "m2"}}},
+		},
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	resp := getEndpointsResponse(t, srv)
+	var withHeaders, noHeaders *endpointConfigJSON
+	for i := range resp.Endpoints {
+		switch resp.Endpoints[i].ID {
+		case "ep-with-headers":
+			withHeaders = &resp.Endpoints[i]
+		case "ep-no-headers":
+			noHeaders = &resp.Endpoints[i]
+		}
+	}
+	if withHeaders == nil || noHeaders == nil {
+		t.Fatalf("missing expected endpoints: %+v", resp.Endpoints)
+	}
+	if got := withHeaders.Headers["X-Tenant-Id"]; got != "abc" {
+		t.Errorf("ep-with-headers headers[X-Tenant-Id] = %q, want %q", got, "abc")
+	}
+	if len(noHeaders.Headers) != 0 {
+		t.Errorf("ep-no-headers headers = %+v, want empty/absent", noHeaders.Headers)
+	}
+}
+
 func TestBuildAgent_ImplicitLiteFromVendorRegistry(t *testing.T) {
 	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
