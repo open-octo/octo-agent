@@ -35,6 +35,10 @@
   let fProtocol = $state<'openai' | 'anthropic'>('openai')
   let fModel    = $state('')  // create only: optional first model
   let fVision   = $state(true)
+  // Raw JSON text for the custom-headers textarea; parsed on submit. Unlike
+  // fApiKey, this is pre-filled on edit (headers aren't masked like the API
+  // key — see design doc "兼容性" for the tradeoff).
+  let fHeadersText = $state('')
   // Once the user touches the id field, stop regenerating it from provider.
   let fIdTouched = $state(false)
 
@@ -191,6 +195,7 @@
     fBaseUrl = ''
     fApiKey = ''
     fProtocol = 'openai'
+    fHeadersText = ''
     fIdTouched = false
     applyProviderPreset()
     view = 'form'
@@ -204,6 +209,7 @@
     fBaseUrl = ep.base_url ?? ''
     fApiKey = ''
     fProtocol = ep.protocol === 'anthropic' ? 'anthropic' : 'openai'
+    fHeadersText = ep.headers && Object.keys(ep.headers).length > 0 ? JSON.stringify(ep.headers, null, 2) : ''
     fIdTouched = true
     view = 'form'
   }
@@ -228,6 +234,21 @@
   async function submitForm() {
     const id = fId.trim()
     if (!id || !fProvider) return
+
+    // Parse the headers textarea up front — invalid JSON blocks the save
+    // entirely (for either create or update) rather than silently dropping
+    // the field or saving a partial config.
+    const headersText = fHeadersText.trim()
+    let parsedHeaders: Record<string, string> | undefined
+    if (headersText) {
+      try {
+        parsedHeaders = JSON.parse(headersText)
+      } catch {
+        showToast($t('models.headers_invalid_json'), 'error')
+        return
+      }
+    }
+
     busy = true
     try {
       if (!editing) {
@@ -239,6 +260,7 @@
           base_url: fBaseUrl.trim() || undefined,
           api_key: fApiKey || undefined,
           protocol: isCustom ? fProtocol : undefined,
+          headers: parsedHeaders,
           models: model ? [{ model, vision: fVision }] : [],
         })
         // First usable endpoint on a config with no default yet — point the
@@ -257,6 +279,13 @@
         // (absent = openai), so an untouched select never produces a patch.
         const prevProtocol = editing.protocol === 'anthropic' ? 'anthropic' : 'openai'
         if (isCustom && fProtocol !== prevProtocol) patch.protocol = fProtocol
+        // headers is a full-replacement patch (server: nil = unchanged, {} =
+        // clear all). Only include it when the textarea's parsed value
+        // actually differs from what was loaded — an untouched textarea must
+        // never send "headers: {}" and silently wipe existing headers.
+        const currentCanonical = JSON.stringify(editing.headers ?? {})
+        const newCanonical = JSON.stringify(parsedHeaders ?? {})
+        if (newCanonical !== currentCanonical) patch.headers = parsedHeaders ?? {}
         if (Object.keys(patch).length > 0) await api.updateEndpoint(editing.id, patch)
       }
       await reload()
@@ -338,6 +367,17 @@
         placeholder={editing?.has_api_key ? $t('settings.endpoints.form.key_keep') : ''}
         disabled={busy}
       />
+    </label>
+
+    <label class="field">
+      <span class="field-label">{$t('models.headers')}</span>
+      <textarea
+        class="field-input mono headers-textarea"
+        rows={4}
+        placeholder={$t('models.headers.placeholder')}
+        bind:value={fHeadersText}
+        disabled={busy}
+      ></textarea>
     </label>
 
     {#if isCustom}
@@ -661,6 +701,7 @@
 }
 .field-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 3px var(--active-blue-bg); }
 select.field-input { cursor: pointer; }
+textarea.headers-textarea { height: auto; min-height: 90px; padding: 8px 12px; resize: vertical; white-space: pre; }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
 
 /* ── shared buttons (mirrors SettingsModal) ── */
