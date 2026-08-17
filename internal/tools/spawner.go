@@ -49,7 +49,7 @@ type SpawnRequest struct {
 	// Model, when non-empty, overrides the parent's model for this child.
 	// The special value "lite" (case-insensitive) resolves to the parent's
 	// lite sender/model at spawn time, falling back to the parent's model
-	// when no lite model is configured.
+	// when the parent has no lite sender/model.
 	Model string
 
 	// SystemSuffix, when non-empty, is appended to the child's system prompt
