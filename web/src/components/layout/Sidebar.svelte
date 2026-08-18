@@ -128,11 +128,19 @@
     const folded = $collapsedSessions.map(id => byId.get(id)).filter(Boolean).filter(s => !claimed.has((s as any).id)) as typeof $sessions
     folded.forEach(s => claimed.add(s.id))
     const groups = $sessionGroups.map(g => {
-      const items = g.session_ids.map(id => byId.get(id)).filter(Boolean).filter(s => !claimed.has((s as any).id)) as typeof $sessions
+      // A duplicate id in session_ids (e.g. an optimistic prepend racing the
+      // 'session_created' broadcast's own full sessionGroups refresh) would
+      // otherwise map to the same session object twice and throw Svelte's
+      // each_key_duplicate on the keyed {#each} below.
+      const ids = [...new Set(g.session_ids)]
+      const items = ids.map(id => byId.get(id)).filter(Boolean).filter(s => !claimed.has((s as any).id)) as typeof $sessions
       items.forEach(s => claimed.add(s.id))
       return { group: g, items }
     })
-    const ungrouped = $sessions.filter(s => !claimed.has(s.id))
+    // Route through byId (already deduped by id) rather than $sessions
+    // directly, for the same reason as the groups' session_ids above — a
+    // duplicate session id would otherwise reach this keyed {#each} twice.
+    const ungrouped = [...byId.values()].filter(s => !claimed.has((s as any).id))
     return { folded, pinned, groups, ungrouped }
   })
 
