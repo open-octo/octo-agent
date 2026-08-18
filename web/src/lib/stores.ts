@@ -237,6 +237,17 @@ export function setActiveSession(id: string) {
   chatMessages.update(m => ({ ...m, [id]: m[id] || [] }))
 }
 
+// Prepend a freshly created session, replacing any entry the same id already
+// has. Without the dedup, a session-creation call racing the 'session_created'
+// broadcast's own sessions.set() refresh (App.svelte) can leave the id twice
+// in the list — which throws Svelte's each_key_duplicate in the sidebar's
+// keyed {#each} and aborts that render flush before ChatView's own
+// activeSessionId effect gets to run, freezing the chat pane on the old
+// session even though the URL/active id already moved on.
+function prependSession(sess: Session) {
+  sessions.update(ss => [sess, ...ss.filter(s => s.id !== sess.id)])
+}
+
 // Sessions opened by openAgentSession — single-purpose, panel-launched (Browser
 // Replay/Record/Edit, Skills, Tasks, …). The after-turn follow-up suggestion is
 // noise here, so ChatView skips it for these ids.
@@ -256,7 +267,7 @@ export async function createNewSession(agentProfile?: string): Promise<void> {
   if (pending) opts.model = pending
   const sess = await api.createSession(opts)
   if (pending) pendingModel.set('')
-  sessions.update(ss => [sess, ...ss])
+  prependSession(sess)
   activeSessionId.set(sess.id)
   view.set('chat')
 }
@@ -268,9 +279,9 @@ export async function createNewSession(agentProfile?: string): Promise<void> {
 // its group without a refetch.
 export async function createSessionInGroup(groupId: string): Promise<void> {
   const sess = await api.createSession({ source: 'manual', group_id: groupId })
-  sessions.update(ss => [sess, ...ss])
+  prependSession(sess)
   sessionGroups.update(gs =>
-    gs.map(g => (g.id === groupId ? { ...g, session_ids: [sess.id, ...g.session_ids] } : g)),
+    gs.map(g => (g.id === groupId ? { ...g, session_ids: [sess.id, ...g.session_ids.filter(id => id !== sess.id)] } : g)),
   )
   activeSessionId.set(sess.id)
   view.set('chat')
@@ -283,7 +294,7 @@ export async function createSessionInGroup(groupId: string): Promise<void> {
 export async function openAgentSession(content: string, name?: string): Promise<void> {
   const sess = await api.createSession({ source: 'manual', ...(name ? { name } : {}) })
   agenticSessions.add(sess.id)
-  sessions.update(s => [sess, ...s])
+  prependSession(sess)
   pendingPrompt.set({ sessionId: sess.id, content })
   activeSessionId.set(sess.id)
   view.set('chat')
@@ -297,7 +308,7 @@ export async function openAgentSession(content: string, name?: string): Promise<
 // deliberately NOT added to agenticSessions.
 export async function summonAgent(agentId: string, agentName: string, examplePrompt?: string): Promise<void> {
   const sess = await api.createSession({ source: 'manual', agent_profile: agentId, name: agentName })
-  sessions.update(ss => [sess, ...ss])
+  prependSession(sess)
   if (examplePrompt) pendingPrompt.set({ sessionId: sess.id, content: examplePrompt })
   activeSessionId.set(sess.id)
   view.set('chat')
