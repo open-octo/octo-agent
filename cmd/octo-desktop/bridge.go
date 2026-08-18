@@ -44,6 +44,45 @@ type nativeBridge struct {
 	// option; ShouldQuit there always allows the quit).
 	allowQuit atomic.Bool
 
+	// Webview liveness, fed by POST /api/native/heartbeat from the page in
+	// nativeShell mode (see startNativeHeartbeat in the frontend). All unix
+	// nanos, atomic: HTTP-handler goroutines write, the show/probe paths read.
+	// lastBeat is when a beat last arrived (JS provably alive then).
+	// lastFrame is when the page last observed a requestAnimationFrame tick
+	// (the render pipeline provably alive then). lastHiddenBeat is when the
+	// page last reported itself hidden — it owes no frames then, so a missing
+	// frame must not read as a black window. Together they separate the three
+	// states judgePage distinguishes: healthy, black, and silent.
+	// probeInFlight collapses concurrent probes; lastRevive rate-limits
+	// re-creation.
+	lastBeat       atomic.Int64
+	lastFrame      atomic.Int64
+	lastHiddenBeat atomic.Int64
+	probeInFlight  atomic.Bool
+	lastRevive     atomic.Int64
+
+	// creating guards window CREATION (not the pointer, which windowMu covers):
+	// two shows racing on a nil window would each build one, leaving an orphan
+	// that the frontend's close button can't reach on the frameless platforms.
+	// A CAS rather than a mutex on purpose — showWindowAt can run on the UI
+	// thread (a notification click), and a lock held across the InvokeSync in
+	// window creation would deadlock against it.
+	creating atomic.Bool
+
+	// Test seams: testProbeDelay shortens probeAfterShow's sleep, reviveFn
+	// substitutes the window swap. Both zero/nil in production.
+	testProbeDelay time.Duration
+	reviveFn       func(old *application.WebviewWindow)
+
+	// windowMu guards every read and write of b.window that could race the
+	// pointer being REPLACED: showWindowAt's snapshot, the liveness probe's
+	// background goroutine, the WindowClosing handler that clears it, and the
+	// read-only accessors (Minimise, Close, WindowState…), which load through
+	// currentWindow now that the probe can swap the pointer autonomously. Held
+	// only around the pointer access, never across a window method — those
+	// marshal to the UI thread and would deadlock under a lock.
+	windowMu sync.Mutex
+
 	// notifySeq makes each Notify call's notification identifier unique. macOS
 	// rejects an addNotificationRequest with an empty identifier (its completion
 	// handler errors and nothing is delivered), and a shared constant id would
@@ -160,6 +199,17 @@ func (b *nativeBridge) persistSettings() {
 	_ = saveDesktopSettings(snapshot)
 }
 
+// currentWindow loads the window pointer under windowMu. Callers must not
+// hold windowMu across any method on the returned window — those marshal to
+// the UI thread and would deadlock under the lock. A liveness probe can still
+// detach and close the window between the load and the call; that sliver is
+// unavoidable without locking across UI-thread marshalling.
+func (b *nativeBridge) currentWindow() *application.WebviewWindow {
+	b.windowMu.Lock()
+	defer b.windowMu.Unlock()
+	return b.window
+}
+
 // PickFolder opens the OS directory-choose dialog and returns the chosen path.
 // PromptForSingleSelection returns "" when the user cancels, which we surface
 // as cancelled=true so the caller leaves the working dir untouched.
@@ -171,8 +221,8 @@ func (b *nativeBridge) PickFolder(_ context.Context, startDir string) (string, b
 	// Attach to the window so it opens as a sheet. A detached panel (Wails'
 	// beginWithCompletionHandler path when no window is set) stops responding
 	// to its buttons after the user switches away from the app and back.
-	if b.window != nil {
-		dlg.AttachToWindow(b.window)
+	if win := b.currentWindow(); win != nil {
+		dlg.AttachToWindow(win)
 	}
 	if startDir != "" {
 		dlg.SetDirectory(startDir)
@@ -193,8 +243,8 @@ func (b *nativeBridge) PickFile(_ context.Context, startDir string) (string, boo
 	dlg := b.app.Dialog.OpenFile().
 		CanChooseFiles(true).
 		CanChooseDirectories(false)
-	if b.window != nil { // sheet, not a detached panel — see PickFolder.
-		dlg.AttachToWindow(b.window)
+	if win := b.currentWindow(); win != nil { // sheet, not a detached panel — see PickFolder.
+		dlg.AttachToWindow(win)
 	}
 	if startDir != "" {
 		dlg.SetDirectory(startDir)
@@ -216,8 +266,8 @@ func (b *nativeBridge) PickFile(_ context.Context, startDir string) (string, boo
 // download does nothing.
 func (b *nativeBridge) SaveFile(_ context.Context, defaultName, content string) (string, bool, error) {
 	dlg := b.app.Dialog.SaveFile().CanCreateDirectories(true)
-	if b.window != nil { // sheet, not a detached panel — see PickFolder.
-		dlg.AttachToWindow(b.window)
+	if win := b.currentWindow(); win != nil { // sheet, not a detached panel — see PickFolder.
+		dlg.AttachToWindow(win)
 	}
 	if defaultName != "" {
 		dlg.SetFilename(defaultName)
@@ -244,10 +294,11 @@ func (b *nativeBridge) SaveFile(_ context.Context, defaultName, content string) 
 // returns while it is still open and the page must keep its print layout up.
 // No-op before the window exists.
 func (b *nativeBridge) Print() error {
-	if b.window == nil {
+	win := b.currentWindow()
+	if win == nil {
 		return nil
 	}
-	return b.window.Print()
+	return win.Print()
 }
 
 // Notify raises an OS-native notification. No-op when the notifications service
@@ -373,15 +424,15 @@ func (b *nativeBridge) SetAutostart(enable bool) error {
 // ToggleMaximise maximises or restores the window (the double-click-titlebar
 // zoom the frontend can't trigger itself). No-op before the window exists.
 func (b *nativeBridge) ToggleMaximise() {
-	if b.window != nil {
-		b.window.ToggleMaximise()
+	if win := b.currentWindow(); win != nil {
+		win.ToggleMaximise()
 	}
 }
 
 // Minimise minimises the window to the taskbar/dock. No-op before the window exists.
 func (b *nativeBridge) Minimise() {
-	if b.window != nil {
-		b.window.Minimise()
+	if win := b.currentWindow(); win != nil {
+		win.Minimise()
 	}
 }
 
@@ -389,18 +440,19 @@ func (b *nativeBridge) Minimise() {
 // decides whether the hub actually terminates or keeps running in the tray).
 // No-op before the window exists.
 func (b *nativeBridge) Close() {
-	if b.window != nil {
-		b.window.Close()
+	if win := b.currentWindow(); win != nil {
+		win.Close()
 	}
 }
 
 // WindowState reports whether the window is currently maximised. Returns false
 // before the window exists.
 func (b *nativeBridge) WindowState() bool {
-	if b.window == nil {
+	win := b.currentWindow()
+	if win == nil {
 		return false
 	}
-	return b.window.IsMaximised()
+	return win.IsMaximised()
 }
 
 // showWindow brings the hub window to the foreground on the current view.
@@ -425,10 +477,29 @@ func (b *nativeBridge) showWindowAt(hash string) {
 	// The marker rides on every navigation the shell performs (fresh window and
 	// SetURL alike) so nativeShell stays true across reloads and route changes.
 	target := shellURL(b.url, hash)
-	if b.window == nil {
+	// Snapshot the pointer once: the frame probe's goroutine can clear it
+	// concurrently, and a lock-free re-read mid-function could see that nil and
+	// panic. Everything below works off win, then publishes it back.
+	win := b.currentWindow()
+	created := false
+	if win == nil {
 		if b.app == nil || b.url == "" {
 			return // not bound yet
 		}
+		// Only one goroutine builds the window. A loser re-reads the pointer:
+		// if the winner has already published one it just shows that, otherwise
+		// it leaves the work to the winner, which shows the window itself.
+		if !b.creating.CompareAndSwap(false, true) {
+			win = b.currentWindow()
+			if win == nil {
+				return
+			}
+		} else {
+			defer b.creating.Store(false)
+			created = true
+		}
+	}
+	if created {
 		// Restore the size and maximised state saved from the last session.
 		b.settingsMu.Lock()
 		width, height, maximised := b.settings.WindowWidth, b.settings.WindowHeight, b.settings.WindowMaximised
@@ -474,7 +545,22 @@ func (b *nativeBridge) showWindowAt(hash string) {
 			}
 			b.settingsMu.Unlock()
 			b.persistSettings()
-			b.window = nil
+			// Guarded: when a revive replaced this window, b.window already
+			// points at the successor and must survive the old one's close.
+			b.windowMu.Lock()
+			replaced := b.window != w
+			if !replaced {
+				b.window = nil
+			}
+			b.windowMu.Unlock()
+			// Windows only: the framework's own last-window-close quit is
+			// suppressed (see DisableQuitOnLastWindowClosed in main.go), so a
+			// user who opted out of background running needs the quit performed
+			// here. Never for a revive's discarded window — that close is the
+			// shell repairing itself, not the user leaving.
+			if !replaced && closeShouldQuit(runtime.GOOS, b.allowQuit.Load()) {
+				b.app.Quit()
+			}
 		})
 		// Capture size/maximised changes as the user drags or zooms the window.
 		w.OnWindowEvent(events.Common.WindowDidResize, func(*application.WindowEvent) {
@@ -491,30 +577,234 @@ func (b *nativeBridge) showWindowAt(hash string) {
 		// isDestroyed check, so it could otherwise touch a freed NSWindow.
 		if runtime.GOOS == "darwin" {
 			w.OnWindowEvent(events.Mac.WebViewWebContentProcessDidTerminate, func(*application.WindowEvent) {
-				if b.window != w {
+				if b.currentWindow() != w {
 					return
 				}
 				w.SetURL(shellURL(b.url, ""))
 			})
 		}
+		win = w
+		b.windowMu.Lock()
 		b.window = w
-	} else if hash != "" {
-		// Already open — navigate to the route. ExecJS can't be used here: the
-		// page is served by octo's own server, not Wails' asset server, so the
-		// Wails runtime never loads and ExecJS stays queued forever. SetURL is a
-		// native navigation that doesn't depend on it.
-		b.window.SetURL(target)
+		b.windowMu.Unlock()
+	} else {
+		// Re-validate the snapshot before touching the window: a liveness
+		// probe may have detached and closed it meanwhile (its revive path
+		// brings up the replacement itself, so there is nothing to do here).
+		// SetURL on a destroyed window touches a freed NSWindow on macOS — the
+		// hazard the terminate handler in the create path guards against. The
+		// check cannot close the race entirely — the corpse is closed outside
+		// windowMu, and holding the lock across a window method would deadlock
+		// on the UI thread — but it shrinks it to the sliver between this
+		// check and the first method call.
+		if b.currentWindow() != win {
+			return
+		}
+		if hash != "" {
+			// Already open — navigate to the route. ExecJS can't be used here:
+			// the page is served by octo's own server, not Wails' asset server,
+			// so the Wails runtime never loads and ExecJS stays queued forever.
+			// SetURL is a native navigation that doesn't depend on it.
+			win.SetURL(target)
+		}
 	}
-	b.window.Show()
+	win.Show()
 	// Only un-minimise here. Wails' Restore() also un-maximises (and exits
 	// fullscreen), so calling it unconditionally on every show/reopen — e.g.
 	// clicking the dock icon to return to a maximised window — would shrink the
 	// window back to its launch size. Guard on IsMinimised so a visible
 	// maximised/fullscreen window keeps its size.
-	if b.window.IsMinimised() {
-		b.window.Restore()
+	if win.IsMinimised() {
+		win.Restore()
 	}
-	b.window.Focus()
+	win.Focus()
+	// The probe anchors its verdict to this moment: a page only owes evidence
+	// of life AFTER it was asked to come up. A freshly created window is
+	// exempt — its first load can outlast the probe window, and if it never
+	// comes up the next show judges it.
+	if !created {
+		b.probeAfterShow(win)
+	}
+}
+
+// Webview liveness timings. Every verdict is reached from evidence produced
+// AFTER a show, never from how long the page was quiet before one: a page has
+// many legitimate reasons to go silent in the background (system sleep freezes
+// it wholesale, Chromium throttles a long-hidden page's timers to ~1/minute)
+// and destroying a healthy window is far worse than a few more seconds of
+// black. probeDelay therefore only has to outlast two scheduled beats, so a
+// page that came back has certainly reported in.
+const (
+	heartbeatInterval   = 5 * time.Second // matches BEAT_MS in web/src/lib/nativeHeartbeat.ts
+	frameProbeDelay     = 3 * heartbeatInterval
+	reviveCooldown      = 90 * time.Second
+	maxReportedFrameAge = 10 * time.Minute // clamp: a bad/hostile beat must not move lastFrame far
+)
+
+// closeShouldQuit reports whether closing the window must terminate the app.
+// Only Windows needs this: mac routes last-window-close through
+// ApplicationShouldTerminateAfterLastWindowClosed and Linux's
+// unregisterWindow consults ShouldQuit, but the Windows backend's own quit is
+// suppressed (DisableQuitOnLastWindowClosed) because it fired unconditionally
+// — killing a hub the user wanted kept alive. allowQuit is false exactly when
+// the user has KeepRunningInBackground on, so closing hides to the tray.
+func closeShouldQuit(goos string, allowQuit bool) bool {
+	return goos == "windows" && allowQuit
+}
+
+// reviveAllowed rate-limits automatic window re-creation so a page that is
+// broken for a persistent reason (server wedged, port hijacked) can't put the
+// shell into a destroy/create loop.
+func (b *nativeBridge) reviveAllowed(now time.Time) bool {
+	last := b.lastRevive.Load()
+	return last == 0 || now.Sub(time.Unix(0, last)) > reviveCooldown
+}
+
+// pageVerdict is what the evidence collected after a show says about the page.
+type pageVerdict int
+
+const (
+	// pageHealthy: it painted, or it reported itself hidden and owes no frames.
+	pageHealthy pageVerdict = iota
+	// pageBlack: it beats while claiming to be visible but has never painted
+	// since the show — the black-window signature. Unambiguous, act at once.
+	pageBlack
+	// pageSilent: no beat at all. Usually a dead renderer, but a wedged hub or
+	// a main thread stuck on a huge render looks identical from here, and both
+	// of those recover on their own — so this verdict earns a second look
+	// before the window is destroyed.
+	pageSilent
+)
+
+// judgePage reads the post-show evidence. Nothing before shownAt counts: a page
+// has ordinary reasons to be silent in the background (system sleep freezes it,
+// Chromium throttles a long-hidden page's timers), and pre-show silence must
+// never cost a healthy window.
+func (b *nativeBridge) judgePage(shownAt time.Time) pageVerdict {
+	after := func(v *atomic.Int64) bool {
+		ns := v.Load()
+		return ns != 0 && time.Unix(0, ns).After(shownAt)
+	}
+	if after(&b.lastFrame) || after(&b.lastHiddenBeat) {
+		return pageHealthy
+	}
+	if after(&b.lastBeat) {
+		return pageBlack
+	}
+	return pageSilent
+}
+
+// detachStalled detaches w when it is still the current window and a revive is
+// off cooldown. Identity-keyed so a probe that slept through the user closing
+// the window — or through another revive — leaves the successor alone. The
+// caller closes the returned window; detaching first is what lets the
+// replacement survive the old window's WindowClosing handler.
+func (b *nativeBridge) detachStalled(w *application.WebviewWindow, now time.Time) *application.WebviewWindow {
+	b.windowMu.Lock()
+	defer b.windowMu.Unlock()
+	if b.window != w || !b.reviveAllowed(now) {
+		return nil
+	}
+	b.lastRevive.Store(now.UnixNano())
+	b.window = nil
+	return w
+}
+
+// probeAfterShow schedules the liveness verdict for a window that was already
+// open when it was shown — the two failure modes a Show can't fix by itself:
+// a renderer that died (no beats at all) and a compositor that died while JS
+// kept running (beats, no frames — WebView2 across sleep/wake). The window is
+// replaced rather than reloaded because a broken WebView2 surface survives
+// navigation. Runs off the UI thread; the window methods it calls marshal
+// themselves.
+func (b *nativeBridge) probeAfterShow(shown *application.WebviewWindow) {
+	if shown == nil {
+		return
+	}
+	if !b.probeInFlight.CompareAndSwap(false, true) {
+		return
+	}
+	shownAt := time.Now()
+	go func() {
+		defer b.probeInFlight.Store(false)
+		time.Sleep(b.probeDelay())
+		switch b.judgePage(shownAt) {
+		case pageHealthy:
+			return
+		case pageSilent:
+			// Silence is ambiguous — a wedged hub or a blocked main thread
+			// recovers by itself, and replacing the window would lose the
+			// user's page state for nothing. Give it one more cycle; only
+			// persistent silence (or a black verdict by then) is acted on.
+			time.Sleep(b.probeDelay())
+			if b.judgePage(shownAt) == pageHealthy {
+				return
+			}
+		}
+		old := b.detachStalled(shown, time.Now())
+		if old == nil {
+			return
+		}
+		b.revive(old)
+	}()
+}
+
+// revive brings up a replacement for a window whose page can't be saved. The
+// new window is created BEFORE the corpse is closed: Wails' Windows backend
+// posts a quit message when its window map empties (unregisterWindow, which
+// does not consult ShouldQuit), and macOS/Linux quit on last-window-close
+// unless the hub keeps running in the background — closing first would race
+// the shell's own survival. Indirected through a field so tests can observe
+// the decision without a live Wails app.
+func (b *nativeBridge) revive(old *application.WebviewWindow) {
+	if b.reviveFn != nil {
+		b.reviveFn(old)
+		return
+	}
+	b.showWindowAt("")
+	old.Close()
+}
+
+// probeDelay is frameProbeDelay unless a test shortened it.
+func (b *nativeBridge) probeDelay() time.Duration {
+	if d := b.testProbeDelay; d > 0 {
+		return d
+	}
+	return frameProbeDelay
+}
+
+// Heartbeat implements server.NativeBridge: the page beats every
+// heartbeatInterval (and on focus/visibilitychange) with the age of the last
+// requestAnimationFrame it observed, or -1 while it is hidden and owes no
+// frames. The beat proves JS alive; the frame timestamp proves the render
+// pipeline alive; the hidden flag says frames aren't expected.
+func (b *nativeBridge) Heartbeat(frameAgeMS int64, hidden bool) {
+	now := time.Now()
+	b.lastBeat.Store(now.UnixNano())
+	if hidden {
+		// Not visible, so no frames are owed: record that explicitly, or the
+		// probe would read the missing frame as a black window.
+		b.lastHiddenBeat.Store(now.UnixNano())
+		return
+	}
+	if frameAgeMS < 0 {
+		// Visible but has never painted. Deliberately records NO frame
+		// evidence — this is the black-window signature, not an excuse.
+		return
+	}
+	age := time.Duration(frameAgeMS) * time.Millisecond
+	if frameAgeMS > int64(maxReportedFrameAge/time.Millisecond) {
+		age = maxReportedFrameAge
+	}
+	frame := now.Add(-age).UnixNano()
+	// Monotonic: a stale report (a focus beat whose rAF has not ticked yet,
+	// clock skew, a hostile local caller) must never erase newer evidence.
+	for {
+		prev := b.lastFrame.Load()
+		if frame <= prev || b.lastFrame.CompareAndSwap(prev, frame) {
+			return
+		}
+	}
 }
 
 // confirm shows a modal question dialog and reports whether the user chose the

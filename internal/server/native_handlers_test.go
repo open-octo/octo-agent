@@ -35,6 +35,9 @@ type fakeNative struct {
 	selfUpdateErr      error
 	printCalls         int
 	printErr           error
+	heartbeatCalls     int
+	gotFrameAgeMS      int64
+	gotHidden          bool
 }
 
 func (f *fakeNative) PickFolder(_ context.Context, startDir string) (string, bool, error) {
@@ -74,6 +77,12 @@ func (f *fakeNative) Print() error {
 	f.printCalls++
 	return f.printErr
 }
+func (f *fakeNative) Heartbeat(frameAgeMS int64, hidden bool) {
+	f.heartbeatCalls++
+	f.gotFrameAgeMS = frameAgeMS
+	f.gotHidden = hidden
+}
+
 func (f *fakeNative) CanSelfUpdate() bool { return f.canSelfUpdate }
 func (f *fakeNative) SelfUpdate() error {
 	f.selfUpdateCalls++
@@ -249,6 +258,52 @@ func TestNativeToggleMaximise(t *testing.T) {
 	}
 	if fake.toggleMaxCalls != 1 {
 		t.Errorf("ToggleMaximise calls = %d, want 1", fake.toggleMaxCalls)
+	}
+}
+
+func TestNativeHeartbeatDelegatesToBridge(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	fake := &fakeNative{}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/heartbeat", strings.NewReader(`{"frame_age_ms":1234}`))
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	if fake.heartbeatCalls != 1 || fake.gotFrameAgeMS != 1234 || fake.gotHidden {
+		t.Errorf("Heartbeat calls = %d frameAge = %d hidden = %v, want 1 / 1234 / false",
+			fake.heartbeatCalls, fake.gotFrameAgeMS, fake.gotHidden)
+	}
+
+	// The hidden flag rides separately from the frame age: a hidden page owes
+	// no frames, which is NOT the same as a visible page that never painted.
+	req = httptest.NewRequest(http.MethodPost, "/api/native/heartbeat", strings.NewReader(`{"frame_age_ms":-1,"hidden":true}`))
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("hidden beat: got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	if fake.heartbeatCalls != 2 || fake.gotFrameAgeMS != -1 || !fake.gotHidden {
+		t.Errorf("hidden beat: calls = %d frameAge = %d hidden = %v, want 2 / -1 / true",
+			fake.heartbeatCalls, fake.gotFrameAgeMS, fake.gotHidden)
+	}
+
+	// A body-less beat still counts as liveness, but must claim NO frame
+	// evidence: defaulting the age to zero would read as "just painted" and let
+	// a malformed beat mask a black window.
+	req = httptest.NewRequest(http.MethodPost, "/api/native/heartbeat", nil)
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("body-less beat: got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	if fake.heartbeatCalls != 3 || fake.gotFrameAgeMS != -1 || fake.gotHidden {
+		t.Errorf("body-less beat: calls = %d frameAge = %d hidden = %v, want 3 / -1 / false",
+			fake.heartbeatCalls, fake.gotFrameAgeMS, fake.gotHidden)
 	}
 }
 
