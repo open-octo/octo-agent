@@ -484,13 +484,19 @@ func (b *nativeBridge) showWindowAt(hash string) {
 		// leaving a permanently blank window — nothing reloads it on its own.
 		// Navigate back to the hub root to revive the page (SetURL for the
 		// same reason as below: the page is octo-served, so the Wails runtime
-		// and ExecJS are unavailable). The event only fires on macOS; the
-		// registration is inert elsewhere. Windows' equivalent (WebView2
+		// and ExecJS are unavailable). Windows' equivalent (WebView2
 		// ProcessFailed) isn't reachable through Wails — prevention lives in
-		// the browser flags set in main.go instead.
-		w.OnWindowEvent(events.Mac.WebViewWebContentProcessDidTerminate, func(*application.WindowEvent) {
-			w.SetURL(shellURL(b.url, ""))
-		})
+		// the browser flags set in main.go instead. The b.window guard skips
+		// a terminate that races window close: Wails' SetURL has no
+		// isDestroyed check, so it could otherwise touch a freed NSWindow.
+		if runtime.GOOS == "darwin" {
+			w.OnWindowEvent(events.Mac.WebViewWebContentProcessDidTerminate, func(*application.WindowEvent) {
+				if b.window != w {
+					return
+				}
+				w.SetURL(shellURL(b.url, ""))
+			})
+		}
 		b.window = w
 	} else if hash != "" {
 		// Already open — navigate to the route. ExecJS can't be used here: the
