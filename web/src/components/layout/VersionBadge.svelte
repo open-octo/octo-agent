@@ -253,7 +253,7 @@
 .vb-scrim { position: fixed; inset: 0; z-index: 60; background: none; border: none; cursor: default; }
 .vb-pop {
   position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 61;
-  width: 260px; padding: 14px;
+  width: 232px; padding: 14px;
   background: var(--bg-container); border: 1px solid var(--border);
   border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.16);
   animation: octo-fadein 0.14s ease;
