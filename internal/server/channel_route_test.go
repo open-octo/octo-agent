@@ -938,16 +938,16 @@ func TestInjectorFor_SessionStickyAndDroppedOnUnbind(t *testing.T) {
 	ev := evFor("/unbind")
 
 	key := "im:" + string(srv.channelMgr.KeyFor(ev, ""))
-	first := srv.injectorFor(key)
+	first := srv.injectorFor(key, srv.memDir)
 	if first == nil {
 		t.Fatal("injectorFor returned nil")
 	}
-	if srv.injectorFor(key) != first {
+	if srv.injectorFor(key, srv.memDir) != first {
 		t.Error("injector must be sticky across turns in one session")
 	}
 
 	srv.handleChannelCommand(ad, ev, agentprofile.DefaultProfile())
-	if srv.injectorFor(key) == first {
+	if srv.injectorFor(key, srv.memDir) == first {
 		t.Error("/unbind must drop the session injector (fresh recall latch)")
 	}
 }
@@ -961,13 +961,13 @@ func TestInjectorFor_DroppedOnNew(t *testing.T) {
 	ev := evFor("/new")
 
 	key := "im:" + string(srv.channelMgr.KeyFor(ev, ""))
-	first := srv.injectorFor(key)
+	first := srv.injectorFor(key, srv.memDir)
 	if first == nil {
 		t.Fatal("injectorFor returned nil")
 	}
 
 	srv.handleChannelCommand(ad, ev, agentprofile.DefaultProfile())
-	if srv.injectorFor(key) == first {
+	if srv.injectorFor(key, srv.memDir) == first {
 		t.Error("/new must drop the session injector (fresh recall latch)")
 	}
 }

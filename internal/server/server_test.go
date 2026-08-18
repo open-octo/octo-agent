@@ -1326,6 +1326,9 @@ func TestHandleGetMemories_DedupesProjectAndHomeDir(t *testing.T) {
 	// inherited home memory directory. Without deduplication the endpoint
 	// returns the same file twice, which causes the front-end {#each} keyed by
 	// path to throw a duplicate-key error and freeze on "Loading memories…".
+	// The coincident directory IS the home/global tier, so it must be listed
+	// once as "inherited" — labeling it "project" was the pre-sessionMemDir
+	// mislabel.
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte("# test"), 0o600); err != nil {
 		t.Fatal(err)
@@ -1352,8 +1355,8 @@ func TestHandleGetMemories_DedupesProjectAndHomeDir(t *testing.T) {
 	if len(body.Files) != 1 {
 		t.Fatalf("got %d files, want 1: %+v", len(body.Files), body.Files)
 	}
-	if body.Files[0].Source != "project" {
-		t.Fatalf("source = %q, want project", body.Files[0].Source)
+	if body.Files[0].Source != "inherited" {
+		t.Fatalf("source = %q, want inherited", body.Files[0].Source)
 	}
 }
 

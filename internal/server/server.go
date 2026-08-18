@@ -148,6 +148,11 @@ type Server struct {
 	cwdMu      sync.RWMutex
 	memDir     string
 	homeMemDir string
+	// memDirCache holds per-session-cwd project-memory resolutions (see
+	// sessionMemDir) — memory.ProjectRoot shells out to git and the lookup
+	// runs on every turn, so results are cached for the process lifetime.
+	memDirCache   map[string]string
+	memDirCacheMu sync.Mutex
 
 	// workspaceDir is the resolved default WorkingDir new web sessions get
 	// when the caller requests none of their own (see cfg.WorkspaceDir /
@@ -1320,9 +1325,17 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 		a.System, a.LeanSystem = sess.ComposedSystem, sess.ComposedLeanSystem
 	} else {
 		// L1: project memory embedded in the system prompt, snapshotted once.
+		// Resolved from the session's cwd (not the server's launch directory),
+		// so a session working inside a project reads and writes that
+		// project's memory. The freeze above is keyed on cwd, so a prompt
+		// frozen from HERE on can't carry a memDir that disagrees with its
+		// cwd. Sessions frozen before this per-cwd resolution existed still
+		// carry the server-level dir baked into their prompt until something
+		// re-freezes them (model/cwd/notes change) — old memories keep
+		// flowing in via the inherited tier either way.
 		var memInjection string
-		if s.memDir != "" {
-			memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
+		if memDir := s.sessionMemDir(cwd); memDir != "" {
+			memInjection = memory.RenderInjection(memDir, s.homeMemDir)
 		}
 		if g := tools.MemoryBackendGuidance(); g != "" {
 			memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
@@ -1351,8 +1364,8 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// per OS process across the serve process's many sessions.
 	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd))
 	hookEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
-	if s.memDir != "" {
-		s.injectorFor(sess.ID).RegisterHooks(hookEngine)
+	if memDir := s.sessionMemDir(cwd); memDir != "" {
+		s.injectorFor(sess.ID, memDir).RegisterHooks(hookEngine)
 	}
 	// Workflow save-nudge — memory-independent, wired for every session.
 	tools.NewWorkflowNudger().RegisterHooks(hookEngine)
@@ -1380,8 +1393,11 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 // survive turns; it is created even when MEMORY.md has no structured rules —
 // Reminder is silent then, but the save-nudge still needs the latch. Keyed
 // by web session ID or "im:<session key>"; dropped via forgetTurnLock (web)
-// or /unbind //bind (IM).
-func (s *Server) injectorFor(key string) *memory.Injector {
+// or /unbind //bind (IM). memDir (the session's project-memory directory)
+// is bound on first use: a session retargeted into another project keeps
+// its old rules until the injector is dropped, matching how the recall
+// latch already survives across turns.
+func (s *Server) injectorFor(key, memDir string) *memory.Injector {
 	s.injectorMu.Lock()
 	defer s.injectorMu.Unlock()
 	if s.sessionInjectors == nil {
@@ -1389,8 +1405,8 @@ func (s *Server) injectorFor(key string) *memory.Injector {
 	}
 	inj, ok := s.sessionInjectors[key]
 	if !ok {
-		rules := memory.ParseRules(s.memDir)
-		if s.homeMemDir != "" {
+		rules := memory.ParseRules(memDir)
+		if s.homeMemDir != "" && s.homeMemDir != memDir {
 			rules.Merge(memory.ParseRules(s.homeMemDir))
 		}
 		inj = memory.NewInjector(rules)
@@ -1787,6 +1803,37 @@ func (s *Server) sessionCwdEnv(sess *agent.Session) (string, string) {
 		return s.curCwdEnv()
 	}
 	return dir, buildEnvContext(dir)
+}
+
+// sessionMemDir returns the project-memory directory for a turn running in
+// cwd, resolved from the session's working directory rather than the server's
+// launch directory. Without this, a serve/desktop process launched from home
+// resolves memDir once to the home slug and EVERY session's memories land in
+// the global tier, no matter which project the session works in. Resolution
+// (and directory creation) happens on first use per cwd and is cached — the
+// CLI likewise freezes its memory dir per process. Falls back to the
+// server-default memDir when resolution fails; empty when memory is disabled.
+func (s *Server) sessionMemDir(cwd string) string {
+	if s.cfg.NoMemory {
+		return ""
+	}
+	if cwd == "" || cwd == s.curCwd() {
+		return s.memDir
+	}
+	s.memDirCacheMu.Lock()
+	defer s.memDirCacheMu.Unlock()
+	if d, ok := s.memDirCache[cwd]; ok {
+		return d
+	}
+	dir := s.memDir
+	if d, err := memory.Dir(memory.ProjectRoot(cwd)); err == nil && memory.EnsureDir(d) == nil {
+		dir = d
+	}
+	if s.memDirCache == nil {
+		s.memDirCache = make(map[string]string)
+	}
+	s.memDirCache[cwd] = dir
+	return dir
 }
 
 // sessionCwd resolves a loaded session's working dir. Used by the status/list
@@ -3319,9 +3366,14 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	if sess.Store.IsComposedFor(sess.Agent.Model, cwd, agent.ComposedNotesHash(notes)) {
 		sess.Agent.System, sess.Agent.LeanSystem = sess.Store.ComposedSystem, sess.Store.ComposedLeanSystem
 	} else {
+		// Per-session memory dir, same as buildAgent gives web turns: the
+		// freeze above is keyed on cwd, so a prompt frozen from here on
+		// can't carry a memDir that disagrees with its cwd (sessions frozen
+		// before per-cwd resolution keep the server-level dir until
+		// re-frozen — see buildAgent).
 		var memInjection string
-		if s.memDir != "" {
-			memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
+		if memDir := s.sessionMemDir(cwd); memDir != "" {
+			memInjection = memory.RenderInjection(memDir, s.homeMemDir)
 		}
 		if g := tools.MemoryBackendGuidance(); g != "" {
 			memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
@@ -3348,8 +3400,8 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// dropped on /unbind; a fresh engine each turn just re-registers it.
 	imEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd))
 	imEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
-	if s.memDir != "" {
-		s.injectorFor("im:" + string(sess.Key)).RegisterHooks(imEngine)
+	if memDir := s.sessionMemDir(cwd); memDir != "" {
+		s.injectorFor("im:"+string(sess.Key), memDir).RegisterHooks(imEngine)
 	}
 	// Workflow save-nudge — memory-independent, wired for every IM session.
 	tools.NewWorkflowNudger().RegisterHooks(imEngine)
@@ -3388,7 +3440,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	if st := sess.Store; st != nil && st.PermissionMode != "" {
 		mode = permission.Mode(st.PermissionMode)
 	}
-	engine, err := permission.New(permissionConfigPath(), cwd, mode, s.memDir, s.homeMemDir)
+	engine, err := permission.New(permissionConfigPath(), cwd, mode, s.sessionMemDir(cwd), s.homeMemDir)
 	if err != nil {
 		// Generic chat reply — err.Error() can leak local paths into a
 		// group chat; the operator gets the detail on the server console.
