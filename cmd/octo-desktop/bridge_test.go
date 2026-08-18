@@ -2,6 +2,7 @@ package main
 
 import (
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -347,6 +348,66 @@ func TestProbeAfterShowGivesSilenceASecondChance(t *testing.T) {
 	if b.window != win {
 		t.Error("window must stay attached")
 	}
+}
+
+// TestProbeAfterShowCollapsesConcurrentProbes pins the probeInFlight CAS: a
+// second probe requested while one is still running must be skipped, not
+// queued — two overlapping probes would judge overlapping windows of evidence
+// and could both reach for the window. The test parks the first probe inside
+// the revive hand-off, then asks for another probe against a fresh window
+// whose evidence would revive it if a second goroutine were actually running
+// (the revive cooldown is reset so it couldn't mask the attempt).
+func TestProbeAfterShowCollapsesConcurrentProbes(t *testing.T) {
+	first := &application.WebviewWindow{}
+	second := &application.WebviewWindow{}
+	release := make(chan struct{})
+	var revives atomic.Int32
+
+	b := &nativeBridge{window: first, testProbeDelay: 10 * time.Millisecond}
+	b.reviveFn = func(*application.WebviewWindow) {
+		revives.Add(1)
+		<-release // park the first probe with probeInFlight still held
+	}
+
+	b.probeAfterShow(first)
+	// Evidence must land AFTER the show to count: visible, never painted → black.
+	b.Heartbeat(-1, false)
+
+	// Wait until the first probe is parked inside the revive hand-off.
+	deadline := time.Now().Add(2 * time.Second)
+	for revives.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if revives.Load() != 1 {
+		t.Fatal("first probe never reached the revive")
+	}
+	if !b.probeInFlight.Load() {
+		t.Fatal("probeInFlight must stay held while the first probe runs")
+	}
+
+	// A second show during the in-flight probe: its window has black evidence
+	// and (with the cooldown reset) would be revived IF a second probe
+	// goroutine were scheduled. The CAS must collapse it instead.
+	b.windowMu.Lock()
+	b.window = second
+	b.windowMu.Unlock()
+	b.lastRevive.Store(0)
+	b.probeAfterShow(second)
+	b.Heartbeat(-1, false) // black evidence for the second window, after its show
+
+	close(release) // let the first probe finish
+	time.Sleep(100 * time.Millisecond)
+	if n := revives.Load(); n != 1 {
+		t.Errorf("revives = %d, want 1 — the second probe was not collapsed", n)
+	}
+	if b.probeInFlight.Load() {
+		t.Error("probeInFlight leaked after the first probe finished")
+	}
+	b.windowMu.Lock()
+	if b.window != second {
+		t.Error("the collapsed probe must not touch the successor window")
+	}
+	b.windowMu.Unlock()
 }
 
 // TestCloseShouldQuit pins who owns the last-window-close quit on each

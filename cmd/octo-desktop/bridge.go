@@ -76,10 +76,11 @@ type nativeBridge struct {
 
 	// windowMu guards every read and write of b.window that could race the
 	// pointer being REPLACED: showWindowAt's snapshot, the liveness probe's
-	// background goroutine, and the WindowClosing handler that clears it. Held
+	// background goroutine, the WindowClosing handler that clears it, and the
+	// read-only accessors (Minimise, Close, WindowState…), which load through
+	// currentWindow now that the probe can swap the pointer autonomously. Held
 	// only around the pointer access, never across a window method — those
-	// marshal to the UI thread and would deadlock under a lock. The read-only
-	// accessors (Minimise, Close, WindowState…) stay lock-free as they were.
+	// marshal to the UI thread and would deadlock under a lock.
 	windowMu sync.Mutex
 
 	// notifySeq makes each Notify call's notification identifier unique. macOS
@@ -198,6 +199,17 @@ func (b *nativeBridge) persistSettings() {
 	_ = saveDesktopSettings(snapshot)
 }
 
+// currentWindow loads the window pointer under windowMu. Callers must not
+// hold windowMu across any method on the returned window — those marshal to
+// the UI thread and would deadlock under the lock. A liveness probe can still
+// detach and close the window between the load and the call; that sliver is
+// unavoidable without locking across UI-thread marshalling.
+func (b *nativeBridge) currentWindow() *application.WebviewWindow {
+	b.windowMu.Lock()
+	defer b.windowMu.Unlock()
+	return b.window
+}
+
 // PickFolder opens the OS directory-choose dialog and returns the chosen path.
 // PromptForSingleSelection returns "" when the user cancels, which we surface
 // as cancelled=true so the caller leaves the working dir untouched.
@@ -209,8 +221,8 @@ func (b *nativeBridge) PickFolder(_ context.Context, startDir string) (string, b
 	// Attach to the window so it opens as a sheet. A detached panel (Wails'
 	// beginWithCompletionHandler path when no window is set) stops responding
 	// to its buttons after the user switches away from the app and back.
-	if b.window != nil {
-		dlg.AttachToWindow(b.window)
+	if win := b.currentWindow(); win != nil {
+		dlg.AttachToWindow(win)
 	}
 	if startDir != "" {
 		dlg.SetDirectory(startDir)
@@ -231,8 +243,8 @@ func (b *nativeBridge) PickFile(_ context.Context, startDir string) (string, boo
 	dlg := b.app.Dialog.OpenFile().
 		CanChooseFiles(true).
 		CanChooseDirectories(false)
-	if b.window != nil { // sheet, not a detached panel — see PickFolder.
-		dlg.AttachToWindow(b.window)
+	if win := b.currentWindow(); win != nil { // sheet, not a detached panel — see PickFolder.
+		dlg.AttachToWindow(win)
 	}
 	if startDir != "" {
 		dlg.SetDirectory(startDir)
@@ -254,8 +266,8 @@ func (b *nativeBridge) PickFile(_ context.Context, startDir string) (string, boo
 // download does nothing.
 func (b *nativeBridge) SaveFile(_ context.Context, defaultName, content string) (string, bool, error) {
 	dlg := b.app.Dialog.SaveFile().CanCreateDirectories(true)
-	if b.window != nil { // sheet, not a detached panel — see PickFolder.
-		dlg.AttachToWindow(b.window)
+	if win := b.currentWindow(); win != nil { // sheet, not a detached panel — see PickFolder.
+		dlg.AttachToWindow(win)
 	}
 	if defaultName != "" {
 		dlg.SetFilename(defaultName)
@@ -282,10 +294,11 @@ func (b *nativeBridge) SaveFile(_ context.Context, defaultName, content string) 
 // returns while it is still open and the page must keep its print layout up.
 // No-op before the window exists.
 func (b *nativeBridge) Print() error {
-	if b.window == nil {
+	win := b.currentWindow()
+	if win == nil {
 		return nil
 	}
-	return b.window.Print()
+	return win.Print()
 }
 
 // Notify raises an OS-native notification. No-op when the notifications service
@@ -411,15 +424,15 @@ func (b *nativeBridge) SetAutostart(enable bool) error {
 // ToggleMaximise maximises or restores the window (the double-click-titlebar
 // zoom the frontend can't trigger itself). No-op before the window exists.
 func (b *nativeBridge) ToggleMaximise() {
-	if b.window != nil {
-		b.window.ToggleMaximise()
+	if win := b.currentWindow(); win != nil {
+		win.ToggleMaximise()
 	}
 }
 
 // Minimise minimises the window to the taskbar/dock. No-op before the window exists.
 func (b *nativeBridge) Minimise() {
-	if b.window != nil {
-		b.window.Minimise()
+	if win := b.currentWindow(); win != nil {
+		win.Minimise()
 	}
 }
 
@@ -427,18 +440,19 @@ func (b *nativeBridge) Minimise() {
 // decides whether the hub actually terminates or keeps running in the tray).
 // No-op before the window exists.
 func (b *nativeBridge) Close() {
-	if b.window != nil {
-		b.window.Close()
+	if win := b.currentWindow(); win != nil {
+		win.Close()
 	}
 }
 
 // WindowState reports whether the window is currently maximised. Returns false
 // before the window exists.
 func (b *nativeBridge) WindowState() bool {
-	if b.window == nil {
+	win := b.currentWindow()
+	if win == nil {
 		return false
 	}
-	return b.window.IsMaximised()
+	return win.IsMaximised()
 }
 
 // showWindow brings the hub window to the foreground on the current view.
@@ -466,9 +480,7 @@ func (b *nativeBridge) showWindowAt(hash string) {
 	// Snapshot the pointer once: the frame probe's goroutine can clear it
 	// concurrently, and a lock-free re-read mid-function could see that nil and
 	// panic. Everything below works off win, then publishes it back.
-	b.windowMu.Lock()
-	win := b.window
-	b.windowMu.Unlock()
+	win := b.currentWindow()
 	created := false
 	if win == nil {
 		if b.app == nil || b.url == "" {
@@ -478,9 +490,7 @@ func (b *nativeBridge) showWindowAt(hash string) {
 		// if the winner has already published one it just shows that, otherwise
 		// it leaves the work to the winner, which shows the window itself.
 		if !b.creating.CompareAndSwap(false, true) {
-			b.windowMu.Lock()
-			win = b.window
-			b.windowMu.Unlock()
+			win = b.currentWindow()
 			if win == nil {
 				return
 			}
@@ -567,10 +577,7 @@ func (b *nativeBridge) showWindowAt(hash string) {
 		// isDestroyed check, so it could otherwise touch a freed NSWindow.
 		if runtime.GOOS == "darwin" {
 			w.OnWindowEvent(events.Mac.WebViewWebContentProcessDidTerminate, func(*application.WindowEvent) {
-				b.windowMu.Lock()
-				current := b.window
-				b.windowMu.Unlock()
-				if current != w {
+				if b.currentWindow() != w {
 					return
 				}
 				w.SetURL(shellURL(b.url, ""))
@@ -580,12 +587,26 @@ func (b *nativeBridge) showWindowAt(hash string) {
 		b.windowMu.Lock()
 		b.window = w
 		b.windowMu.Unlock()
-	} else if hash != "" {
-		// Already open — navigate to the route. ExecJS can't be used here: the
-		// page is served by octo's own server, not Wails' asset server, so the
-		// Wails runtime never loads and ExecJS stays queued forever. SetURL is a
-		// native navigation that doesn't depend on it.
-		win.SetURL(target)
+	} else {
+		// Re-validate the snapshot before touching the window: a liveness
+		// probe may have detached and closed it meanwhile (its revive path
+		// brings up the replacement itself, so there is nothing to do here).
+		// SetURL on a destroyed window touches a freed NSWindow on macOS — the
+		// hazard the terminate handler in the create path guards against. The
+		// check cannot close the race entirely — the corpse is closed outside
+		// windowMu, and holding the lock across a window method would deadlock
+		// on the UI thread — but it shrinks it to the sliver between this
+		// check and the first method call.
+		if b.currentWindow() != win {
+			return
+		}
+		if hash != "" {
+			// Already open — navigate to the route. ExecJS can't be used here:
+			// the page is served by octo's own server, not Wails' asset server,
+			// so the Wails runtime never loads and ExecJS stays queued forever.
+			// SetURL is a native navigation that doesn't depend on it.
+			win.SetURL(target)
+		}
 	}
 	win.Show()
 	// Only un-minimise here. Wails' Restore() also un-maximises (and exits
