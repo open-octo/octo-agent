@@ -244,7 +244,7 @@ export function setActiveSession(id: string) {
 // keyed {#each} and aborts that render flush before ChatView's own
 // activeSessionId effect gets to run, freezing the chat pane on the old
 // session even though the URL/active id already moved on.
-function prependSession(sess: Session) {
+export function prependSession(sess: Session) {
   sessions.update(ss => [sess, ...ss.filter(s => s.id !== sess.id)])
 }
 

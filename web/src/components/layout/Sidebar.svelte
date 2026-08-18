@@ -137,7 +137,10 @@
       items.forEach(s => claimed.add(s.id))
       return { group: g, items }
     })
-    const ungrouped = $sessions.filter(s => !claimed.has(s.id))
+    // Route through byId (already deduped by id) rather than $sessions
+    // directly, for the same reason as the groups' session_ids above — a
+    // duplicate session id would otherwise reach this keyed {#each} twice.
+    const ungrouped = [...byId.values()].filter(s => !claimed.has((s as any).id))
     return { folded, pinned, groups, ungrouped }
   })
 
