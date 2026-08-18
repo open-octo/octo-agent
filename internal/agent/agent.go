@@ -2322,6 +2322,17 @@ func (a *Agent) ContextUsage() (used, window int) {
 	return estimateMessages(a.History.Snapshot()), contextWindow(a.Model)
 }
 
+// RealContextTokens returns the provider-reported size of the most recently
+// sent context, or 0 when no round-trip has reported usage yet (a fresh Agent
+// before its first reply lands). Unlike ContextUsage it never falls back to
+// the transcript estimate — for callers that have a better zero fallback
+// (e.g. the persisted Session.LastContextTokens).
+func (a *Agent) RealContextTokens() int {
+	a.usageMu.Lock()
+	defer a.usageMu.Unlock()
+	return a.lastInputTokens
+}
+
 // PersistContextUsage records this agent's current context-window token count on
 // the session (Session.LastContextTokens) so an idle or resumed session — one
 // with no live Agent in memory — reports its true context usage instead of a

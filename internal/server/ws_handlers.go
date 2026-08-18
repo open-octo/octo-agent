@@ -179,16 +179,25 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 	s.sessionAgentsMu.Unlock()
 	sess, _ := agent.LoadSession(sessionID)
 	if a != nil {
-		// Turn in flight: the live Agent has the exact current count.
-		if used, window := a.ContextUsage(); window > 0 && used > 0 {
-			pct = used * 100 / window
-			usedTokens = used
+		// Turn in flight: the live Agent has the exact current count. Only the
+		// provider-reported count qualifies — before the turn's first
+		// round-trip lands, ContextUsage() would fall back to a chars/4
+		// transcript estimate that undercounts (no system-prompt/tools
+		// overhead), making the bar visibly SHRINK on a mid-turn resubscribe.
+		// The persisted last-turn count below is far closer; the next round's
+		// usage broadcast corrects it.
+		if used := a.RealContextTokens(); used > 0 {
+			if window := agent.ContextWindow(a.Model); window > 0 {
+				pct = used * 100 / window
+				usedTokens = used
+			}
 		}
 	}
 	if pct == 0 && sess != nil && sess.LastContextTokens > 0 {
 		// Idle/resumed session — or a turn whose first provider call hasn't
-		// reported usage yet (live agent returns 0). Report the real count
-		// persisted from its last turn (matches what the turn-end broadcast sent).
+		// reported usage yet (RealContextTokens returns 0). Report the real
+		// count persisted from its last turn (matches what the turn-end
+		// broadcast sent).
 		if window := agent.ContextWindow(sess.Model); window > 0 {
 			pct = sess.LastContextTokens * 100 / window
 			usedTokens = sess.LastContextTokens

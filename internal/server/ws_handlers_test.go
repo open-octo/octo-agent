@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -103,6 +104,54 @@ func TestSendContextUsage_UsesPersistedTokens(t *testing.T) {
 	}
 	if reloaded.LastContextTokens != 6400 {
 		t.Fatalf("reloaded LastContextTokens = %d, want 6400", reloaded.LastContextTokens)
+	}
+}
+
+// A mid-turn resubscribe before the turn's first provider round-trip reports
+// usage must fall back to the persisted last-turn count, NOT the live Agent's
+// transcript estimate. serve registers a fresh Agent (restored history, no
+// real count yet) at turn start; the estimate omits the system-prompt/tools
+// overhead, so trusting it made the Context bar visibly shrink on a page
+// refresh during a turn, then jump back once usage landed.
+func TestSendContextUsage_PrefersPersistedOverLiveEstimate(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	sess := agent.NewSession("stub-model", "")
+	sess.LastContextTokens = 6400
+	if err := sess.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A turn-in-flight Agent whose first round-trip hasn't reported usage:
+	// restored history yields a chars/4 estimate (~2000 tokens here) that
+	// undercuts the persisted 6400.
+	a := agent.New(&stubSender{}, "stub-model")
+	a.History.Append(agent.NewUserMessage(strings.Repeat("x", 8000)))
+	srv.sessionAgentsMu.Lock()
+	srv.sessionAgents[sess.ID] = a
+	srv.sessionAgentsMu.Unlock()
+
+	conn := &wsConn{send: make(chan []byte, 4), subscribed: map[string]struct{}{}}
+	srv.sendContextUsage(sess.ID, conn)
+
+	select {
+	case b := <-conn.send:
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if ct, _ := m["context_tokens"].(float64); ct != 6400 {
+			t.Fatalf("context_tokens = %v, want the persisted 6400 (a smaller value means the live estimate won)", m["context_tokens"])
+		}
+		if cu, _ := m["context_usage"].(float64); cu != 5 {
+			t.Fatalf("context_usage = %v, want 5 (6400/128000)", cu)
+		}
+	default:
+		t.Fatal("sendContextUsage sent no frame")
 	}
 }
 
