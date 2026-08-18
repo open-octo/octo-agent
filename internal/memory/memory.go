@@ -119,6 +119,13 @@ func projectRoot(dir string) (string, bool) {
 // linked worktree — and whether one was found. It is the fallback verdict for
 // "is this a project, and which one" when git itself cannot answer, and it
 // works with no git binary present at all.
+//
+// Known divergence: a .git *file* (linked worktree / submodule) is treated as
+// the repo root, so on a git-less machine a linked worktree gets its own slug
+// instead of sharing the main repo's — the worktree-sharing guarantee only
+// holds when git can answer. Resolving it would mean parsing the gitdir:
+// pointer; the mode that needs this fallback (git broken or absent) is rare
+// enough that the extra slug is acceptable.
 func gitEntryAncestor(dir string) (string, bool) {
 	for d := dir; ; {
 		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
@@ -270,10 +277,13 @@ const truncationWarning = "\n\n⚠ This MEMORY.md exceeds the injection budget (
 // If inheritedDirs are provided, their MEMORY.md files are also injected
 // first, so home-directory (global) memories are available in every project.
 func RenderInjection(dir string, inheritedDirs ...string) string {
-	// dedupe inheritedDirs against dir so home-dir doesn't double-inject
+	// dedupe inheritedDirs against dir so home-dir doesn't double-inject;
+	// drop empty entries too — an unresolvable home dir would otherwise
+	// print an "Inherited memories" header followed by a blank path, and
+	// flip the shared-tier wording off (len check below).
 	var filtered []string
 	for _, d := range inheritedDirs {
-		if d != dir {
+		if d != "" && d != dir {
 			filtered = append(filtered, d)
 		}
 	}
@@ -314,6 +324,9 @@ func RenderInjection(dir string, inheritedDirs ...string) string {
 	// project X" from a scratch workspace). Without this, such a fact is filed
 	// under the working directory's memory, where the session that later works
 	// inside project X never reads it.
+	// "created on first write" rests on write_file's MkdirAll
+	// (internal/tools/write_file.go) — if that tool ever stops creating
+	// parent dirs, this guidance silently breaks.
 	crossProject := "- A durable fact about a DIFFERENT project than the one above — you were asked to work on another repo — belongs in THAT repo's memory. " +
 		"Get its directory with `octo memory path <repo path>` (terminal), then write to it directly: the whole memories tree is writable, and the directory is created on first write. "
 	if shared {

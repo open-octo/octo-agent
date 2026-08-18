@@ -166,6 +166,21 @@ func TestRenderInjection_CrossProjectGuidanceAlwaysPresent(t *testing.T) {
 	}
 }
 
+// An unresolvable home dir arrives as an empty inherited entry. It must be
+// dropped, not printed as a blank path under an "Inherited memories" header —
+// and the wording must stay single-tier (the empty entry must not count).
+func TestRenderInjection_EmptyInheritedDirDropped(t *testing.T) {
+	dir := t.TempDir()
+	out := RenderInjection(dir, "")
+
+	if strings.Contains(out, "Inherited memories") {
+		t.Errorf("empty inherited dir must not produce an inherited header:\n%s", out)
+	}
+	if !strings.Contains(out, "not a project of its own") {
+		t.Errorf("empty inherited dir must leave the injection single-tier:\n%s", out)
+	}
+}
+
 func TestIsMemoryPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
