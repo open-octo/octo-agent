@@ -75,7 +75,15 @@ func TestRunMemory_ListNamesOrphanedSlugDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Seed what an older octo would have written for this non-repo directory.
-	legacy, err := memory.Dir(scratch)
+	// A session running there resolves its cwd (os.Getwd reports the
+	// symlink-free form, and macOS temp dirs live under /var → /private/var),
+	// so the legacy slug is the resolved path's — which is what the dir
+	// argument now resolves to as well.
+	resolvedScratch, err := filepath.EvalSymlinks(scratch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := memory.Dir(resolvedScratch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,6 +118,29 @@ func TestRunMemory_ListNamesOrphanedSlugDir(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "no longer loaded") {
 		t.Error("an empty legacy dir should not be reported")
+	}
+}
+
+// The CLI's write-allowlist roots: the whole memories tree when memory is on,
+// nothing at all when it's off (--no-memory leaves memDir empty). Mirrors the
+// server's TestMemoryWriteRoots_*.
+func TestMemoryWriteRoots_CLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	root, err := memory.RootDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := memoryWriteRoots(filepath.Join(root, "proj-1234abcd"), filepath.Join(root, "home-5678ef01"))
+	if len(got) != 1 || got[0] != root {
+		t.Errorf("roots = %v, want [%s]", got, root)
+	}
+
+	// --no-memory (or an unresolvable/uncreatable dir) → no standing write pass.
+	if got := memoryWriteRoots("", ""); len(got) != 0 {
+		t.Errorf("roots = %v, want none when memory is disabled", got)
 	}
 }
 

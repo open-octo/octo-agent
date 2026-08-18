@@ -97,8 +97,11 @@ the index, injected into the system prompt each session; topic files beside it
 hold detail and load on demand.
 
 Commands:
-  octo memory list     List the project's and inherited memory files (default)
-  octo memory path     Print the project's and inherited memory directories
+  octo memory list           List the project's and inherited memory files (default)
+  octo memory path           Print the project's and inherited memory directories
+  octo memory list|path DIR  …for DIR instead of the current directory. How the agent
+                             resolves another repo's memory when a durable fact belongs
+                             there rather than in the project it is running in.
 
 Layout:
   ~/.octo/memories/<repo-slug>/MEMORY.md   Project index, injected every session
@@ -106,8 +109,14 @@ Layout:
   ~/.octo/memories/<home-slug>/MEMORY.md   Inherited (home) index, available in every project
 
 The project directory is keyed by git repo root. Home-directory memories are
-inherited into every project. To disable memory injection for a single session,
-run "octo --no-memory".`)
+inherited into every project. A directory that is not a git repo (the default
+~/Octo workspace, ~, a scratch path) has no project of its own and uses the
+inherited set instead — a session there is usually working on code elsewhere,
+and notes filed under the scratch directory would be read by nothing.
+
+The whole ~/.octo/memories tree is writable without a prompt, so the agent can
+file a fact into another project's memory. To disable memory injection — and
+that write rule — for a single session, run "octo --no-memory".`)
 }
 
 func initHelp(w io.Writer) {

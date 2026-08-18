@@ -187,6 +187,80 @@ func TestDirForSession_LinkedWorktreeSharesRepoDir(t *testing.T) {
 	}
 }
 
+func TestGitEntryAncestor(t *testing.T) {
+	root := t.TempDir()
+	deep := filepath.Join(root, "a", "b", "c")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nothing anywhere above: must terminate at the filesystem root, not spin.
+	if got, ok := gitEntryAncestor(deep); ok {
+		t.Errorf("got %q, want no ancestor", got)
+	}
+
+	// A .git FILE counts — that is how submodules and linked worktrees mark it.
+	marker := filepath.Join(root, "a", ".git")
+	if err := os.WriteFile(marker, []byte("gitdir: /elsewhere\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(root, "a")
+	if got, ok := gitEntryAncestor(deep); !ok || got != want {
+		t.Errorf("gitEntryAncestor(deep) = %q,%v, want %q,true", got, ok, want)
+	}
+	// The directory holding .git resolves to itself.
+	if got, ok := gitEntryAncestor(want); !ok || got != want {
+		t.Errorf("gitEntryAncestor(self) = %q,%v, want %q,true", got, ok, want)
+	}
+	// A relative path terminates too (filepath.Dir walks down to ".").
+	if _, ok := gitEntryAncestor("."); ok {
+		t.Log("relative path found a .git above — fine, it terminated")
+	}
+	// The filesystem root itself must terminate.
+	if _, ok := gitEntryAncestor(string(filepath.Separator)); ok {
+		t.Log("filesystem root has a .git — unusual but it terminated")
+	}
+}
+
+// With git unable to answer, every subdirectory of one repo must still resolve
+// to a single memory dir — the repo's — rather than a slug each.
+func TestDirForSession_GitUnavailableIsStablePerRepo(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(repo, "internal", "pkg")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Join(home, "no-such-bin"))
+
+	rootDir, inProject, err := DirForSession(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subDir, _, err := DirForSession(sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inProject || subDir != rootDir {
+		t.Errorf("subdir = %q, want the repo's dir %q (inProject=%v)", subDir, rootDir, inProject)
+	}
+	// And it agrees with what git would have produced, so the same repo keeps
+	// one directory whether or not git could be consulted.
+	want, err := Dir(resolveSymlinks(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rootDir != want {
+		t.Errorf("git-less dir = %q, want the same slug git yields: %q", rootDir, want)
+	}
+}
+
 // A subdirectory inside a repo shares the repo's memory, and the home dir
 // itself (not a repo) resolves to the shared dir — the two ends of the rule.
 func TestDirForSession_SubdirAndHome(t *testing.T) {

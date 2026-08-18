@@ -43,6 +43,12 @@ func runMemory(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "octo memory: not a directory: %s\n", target)
 			return 1
 		}
+		// Resolve symlinks so an explicit path lands on the same slug a session
+		// running in that directory would get: os.Getwd() reports the resolved
+		// form, and on macOS /tmp/x vs /private/tmp/x hash to different slugs.
+		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = resolved
+		}
 		cwd = abs
 	}
 	dir, inProject, err := memory.DirForSession(cwd)
@@ -64,18 +70,21 @@ func runMemory(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if !inProject {
-		// Say so explicitly: the notes written here are the shared/global set,
-		// not a project's — otherwise the header reads as if this scratch
-		// directory had project memory of its own.
-		fmt.Fprintf(stdout, "%s is not a git repo — using the shared memory directory.\n", cwd)
+		// Say so explicitly: the notes here are the shared/global set, not a
+		// project's — otherwise the header reads as if this directory had
+		// project memory of its own. "no project of its own" rather than "not a
+		// git repo": a bare repo IS a repo, it just has no work tree.
+		fmt.Fprintf(stdout, "%s has no project of its own — using the shared memory directory.\n", cwd)
 		// Sessions that ran here before non-repo dirs shared the global tier
 		// wrote into a slug directory for this path. Those notes are no longer
 		// injected anywhere, so name the directory rather than orphaning it
 		// silently — moving them is a judgement call, not something to do
 		// behind the user's back.
-		if legacy, err := memory.Dir(cwd); err == nil && legacy != dir && countMarkdown(legacy) > 0 {
-			fmt.Fprintf(stdout, "Note: %d earlier note file(s) for this directory are no longer loaded, in:\n  %s\n"+
-				"Move anything still useful into the shared directory above.\n", countMarkdown(legacy), legacy)
+		if legacy, err := memory.Dir(cwd); err == nil && legacy != dir {
+			if n := countMarkdown(legacy); n > 0 {
+				fmt.Fprintf(stdout, "Note: %d earlier note file(s) for this directory are no longer loaded, in:\n  %s\n"+
+					"Move anything still useful into the shared directory below.\n", n, legacy)
+			}
 		}
 	}
 	fmt.Fprintf(stdout, "Memory directory: %s\n", dir)
@@ -96,6 +105,25 @@ func printLint(w io.Writer, dir string) {
 	for _, warn := range memory.Lint(dir) {
 		fmt.Fprintf(w, "  ⚠ %s\n", warn)
 	}
+}
+
+// memoryWriteRoots returns the write-allowlist roots for the permission engine,
+// mirroring the server's Server.memoryWriteRoots: the whole ~/.octo/memories
+// tree rather than just this session's two directories, so a durable fact about
+// ANOTHER repo can be filed in that repo's memory dir (see
+// memory.RenderInjection's cross-project guidance) without a prompt per save.
+//
+// memDir == "" means memory is off or unresolvable — then there is nothing to
+// whitelist, and no standing write pass is handed out. Falls back to the
+// concrete dirs if the root itself can't be resolved.
+func memoryWriteRoots(memDir, homeMemDir string) []string {
+	if memDir == "" {
+		return nil
+	}
+	if root, err := memory.RootDir(); err == nil {
+		return []string{root}
+	}
+	return []string{memDir, homeMemDir}
 }
 
 // countMarkdown counts the .md files directly in dir — "does this directory

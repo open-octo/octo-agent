@@ -1853,7 +1853,10 @@ func (s *Server) sessionMemDir(cwd string) string {
 // pass behind. Falls back to the concrete resolved dirs if the root can't be
 // resolved (unresolvable home), which is also when those two are empty anyway.
 func (s *Server) memoryWriteRoots(cwd string) []string {
-	if s.cfg.NoMemory {
+	// s.memDir == "" covers both --no-memory and a resolve/EnsureDir failure
+	// (read-only home): nothing is injected then, so nothing should be
+	// writable either — matches the CLI's memoryWriteRoots.
+	if s.cfg.NoMemory || s.memDir == "" {
 		return nil
 	}
 	if root, err := memory.RootDir(); err == nil {

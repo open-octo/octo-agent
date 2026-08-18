@@ -130,21 +130,39 @@ func TestRenderInjection_CrossProjectGuidanceAlwaysPresent(t *testing.T) {
 	proj := t.TempDir()
 	inherited := t.TempDir()
 
-	for _, out := range []string{
-		RenderInjection(proj, inherited), // two tiers
-		RenderInjection(proj),            // single tier (non-repo session)
-	} {
+	two := RenderInjection(proj, inherited)
+	single := RenderInjection(proj)
+
+	for _, out := range []string{two, single} {
 		if !strings.Contains(out, "DIFFERENT project") {
 			t.Errorf("injection lacks cross-project guidance:\n%s", out)
 		}
 		if !strings.Contains(out, "octo memory path") {
 			t.Errorf("injection must name the command that resolves another repo's dir:\n%s", out)
 		}
-		// The fallback matters: an unresolvable repo must degrade to the shared
-		// tier, never to mis-filing under this project.
-		if !strings.Contains(out, "inherited (shared) memory") {
-			t.Errorf("injection must name the shared-tier fallback:\n%s", out)
-		}
+	}
+
+	// Two tiers: the fallback points at the inherited dir, which IS introduced
+	// above with its path.
+	if !strings.Contains(two, "inherited (shared) memory above") {
+		t.Errorf("two-tier injection must point the fallback at the inherited memory:\n%s", two)
+	}
+
+	// Single tier: this dir IS the shared set. Calling it "this project" and
+	// pointing the fallback at an "inherited" tier that is never introduced
+	// (and whose path is never given) would be incoherent — and this is the
+	// non-repo case the guidance matters most for.
+	if strings.Contains(single, "for this project live in") {
+		t.Errorf("single-tier injection must not call the shared dir a project:\n%s", single)
+	}
+	if !strings.Contains(single, "not a project of its own") {
+		t.Errorf("single-tier injection must say the directory has no project:\n%s", single)
+	}
+	if strings.Contains(single, "inherited") {
+		t.Errorf("single-tier injection must not refer to an inherited tier it never introduced:\n%s", single)
+	}
+	if !strings.Contains(single, "keep it here") {
+		t.Errorf("single-tier fallback should be 'keep it here', not a tier that doesn't exist:\n%s", single)
 	}
 }
 

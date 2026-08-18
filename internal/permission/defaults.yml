@@ -115,6 +115,12 @@ terminal:
   - allow: { pattern: "go build" }
   - allow: { pattern: "go vet" }
   - allow: { pattern: "gofmt" }
+  # Read-only locator for the agent's own memory directories. Without this it
+  # falls through to the implicit ask — which ModeStrict (the unattended /IM
+  # default) turns into a deny, so the agent could never resolve another
+  # project's memory dir and every cross-project note would pile into the
+  # shared index instead (see memory.RenderInjection's guidance).
+  - allow: { pattern: "^octo memory" }
   # Anything else falls through to the implicit `ask`.
 
 web_fetch:

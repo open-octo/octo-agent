@@ -800,23 +800,8 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				homeMemDir = d
 			}
 		}
-		// Whitelist the whole memories tree, not just this session's two
-		// directories: a durable fact about ANOTHER repo belongs in that
-		// repo's memory dir (see RenderInjection's cross-project guidance),
-		// and prompting for every such save would train the user to click
-		// through. Gated on --no-memory — disabling memory must not leave a
-		// standing write pass behind.
-		if memDir != "" {
-			if root, err := memory.RootDir(); err == nil {
-				memWriteRoots = []string{root}
-			}
-		}
 	}
-	if len(memWriteRoots) == 0 {
-		// RootDir failed (unresolvable home) or memory is off — fall back to
-		// whatever concrete dirs we did resolve.
-		memWriteRoots = []string{memDir, homeMemDir}
-	}
+	memWriteRoots = memoryWriteRoots(memDir, homeMemDir)
 
 	if *useSandbox {
 		opts := sandboxOpts{allowNet: *sandboxAllowNet, writeRoots: sandboxWrite, readRoots: sandboxRead}
@@ -1095,7 +1080,10 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	hooks.SetSpillNotify(func(m string) { fmt.Fprintln(stderr, "↳ hook: "+m) })
 	if memDir != "" {
 		rules := memory.ParseRules(memDir)
-		if homeMemDir != "" {
+		// Skip the merge when both resolve to the same directory (a non-repo
+		// cwd shares the home tier) — parsing it twice only to dedupe by rule
+		// text is wasted work. Matches the server's injectorFor.
+		if homeMemDir != "" && homeMemDir != memDir {
 			rules.Merge(memory.ParseRules(homeMemDir))
 		}
 		memory.NewInjector(rules).RegisterHooks(hookEngine)

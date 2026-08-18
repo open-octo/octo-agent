@@ -16,21 +16,30 @@ keeping to one convention:
   whichever comes first — mirrors Claude Code's own injection cap).
 - `<topic>.md` — detail files the agent creates and reads on demand, linked from the index.
 
-The memory directory gets an automatic `allow` rule for `write_file`/`edit_file` in the
-[permission engine](/docs/reference/permissions/), so the agent manages it without a prompt on
-every write — everything outside the memory directory is still gated normally.
+The whole `~/.octo/memories` tree gets an automatic `allow` rule for `write_file`/`edit_file` in the
+[permission engine](/docs/reference/permissions/), so the agent manages its notes without a prompt on
+every write — including filing a fact into *another* project's memory when you ask it to work on a
+repo other than the current directory. Everything outside that tree is still gated normally, and
+`--no-memory` withdraws the rule along with the injection.
 
 ```bash
-octo memory list     # list the project's and inherited memory files
-octo memory path     # print the project's and inherited memory directories
-octo --no-memory     # disable memory injection for a single session
+octo memory list           # list the project's and inherited memory files
+octo memory path           # print the project's and inherited memory directories
+octo memory path <dir>     # …for another directory (how the agent resolves another repo's memory)
+octo --no-memory           # disable memory injection for a single session
 ```
 
 ## Scope
 
 Memory is scoped per repository, keyed off the git **common** directory rather than the per-worktree
 top-level — so every linked worktree of a repo shares one memory scope instead of starting from
-empty. Working outside a git repo scopes memory to that directory directly.
+empty.
+
+A directory that is **not** a git repo — the default `~/Octo` workspace, `~`, a scratch path — has no
+project of its own, so it uses the shared home-level memory below instead of getting a directory of
+its own. Such a session is usually working on code somewhere else entirely ("fix the login bug in
+project X"), and notes filed under the scratch directory would be invisible to the session that later
+works inside project X, while the shared set is read by every session.
 
 A second, home-level index (`~/.octo/memories/<home-slug>/MEMORY.md`) is inherited into *every*
 project, injected **before** the project's own index — it's the place for things that aren't about
