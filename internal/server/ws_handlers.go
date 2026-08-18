@@ -234,14 +234,23 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 
 // estimateContextPct approximates how full the model's context window a
 // persisted transcript occupies, using the same heuristic Agent.ContextUsage
-// falls back to (agent.EstimateTokens). Used only when no live token count is
-// available (no Agent has run in this process for the session yet).
+// falls back to (agent.EstimateTokens). Used only when no real token count is
+// available anywhere (neither a live Agent nor a persisted LastContextTokens).
+// The frozen system prompt rides every request, so it counts too — the
+// transcript alone reads far lower than what a turn actually sends. Tool
+// schemas also ride along but the session doesn't record them; this stays a
+// (closer) lower bound.
 func estimateContextPct(sess *agent.Session) int {
 	window := agent.ContextWindow(sess.Model)
 	if window <= 0 {
 		return 0
 	}
-	return agent.EstimateTokens(sess.Messages) * 100 / window
+	sys := sess.ComposedSystem
+	if sys == "" {
+		sys = sess.System
+	}
+	est := agent.EstimateTokens(sess.Messages) + agent.EstimateTextTokens(sys)
+	return est * 100 / window
 }
 
 // replayLiveState replays in-progress agent state (progress + stdout) to a
