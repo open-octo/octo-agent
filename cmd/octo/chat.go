@@ -784,10 +784,13 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// front, injected into the system prompt (below), and whitelisted for writes
 	// when the permission engine is built. --no-memory disables it; a resolve
 	// error degrades to no memory rather than failing.
-	// Home-directory memories are inherited into every project.
+	// Home-directory memories are inherited into every project. A cwd that is
+	// not a repo resolves to that same home dir rather than a slug of its own
+	// — see memory.DirForSession.
 	var memDir, homeMemDir string
+	var memWriteRoots []string
 	if !*noMemory {
-		if d, err := memory.Dir(memory.ProjectRoot(cwd)); err == nil {
+		if d, _, err := memory.DirForSession(cwd); err == nil {
 			if memory.EnsureDir(d) == nil {
 				memDir = d
 			}
@@ -798,6 +801,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			}
 		}
 	}
+	memWriteRoots = memoryWriteRoots(memDir, homeMemDir)
 
 	if *useSandbox {
 		opts := sandboxOpts{allowNet: *sandboxAllowNet, writeRoots: sandboxWrite, readRoots: sandboxRead}
@@ -1076,7 +1080,10 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	hooks.SetSpillNotify(func(m string) { fmt.Fprintln(stderr, "↳ hook: "+m) })
 	if memDir != "" {
 		rules := memory.ParseRules(memDir)
-		if homeMemDir != "" {
+		// Skip the merge when both resolve to the same directory (a non-repo
+		// cwd shares the home tier) — parsing it twice only to dedupe by rule
+		// text is wasted work. Matches the server's injectorFor.
+		if homeMemDir != "" && homeMemDir != memDir {
 			rules.Merge(memory.ParseRules(homeMemDir))
 		}
 		memory.NewInjector(rules).RegisterHooks(hookEngine)
@@ -1094,11 +1101,11 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	a.HookMeta = hooks.Meta{Cwd: cwd}
 
 	// Permission engine — gates every tool call; shared by both paths. The
-	// memory directory (outside CWD) is whitelisted for writes so the agent can
+	// memory tree (outside CWD) is whitelisted for writes so the agent can
 	// manage its memory files without a prompt on every save.
 	var permEngine *permission.Engine
 	if toolsOn {
-		eng, perr := permission.New(permissionConfigPath(), cwd, resolvePermissionMode(resolvedPermMode), memDir, homeMemDir)
+		eng, perr := permission.New(permissionConfigPath(), cwd, resolvePermissionMode(resolvedPermMode), memWriteRoots...)
 		if perr != nil {
 			fmt.Fprintf(stderr, "octo: permission config: %v\n", perr)
 			return 1

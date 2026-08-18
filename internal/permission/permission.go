@@ -259,6 +259,12 @@ func New(configPath string, cwd string, mode Mode, allowWriteRoots ...string) (*
 		if root == "" {
 			continue
 		}
+		// Callers build these roots with filepath.Join, so on Windows they
+		// arrive back-slashed while the candidate path is forward-slashed by
+		// absPath before matching — pathMatch splits on "/", so a back-slashed
+		// glob matches nothing and the whitelist silently did nothing on
+		// Windows. Normalize to the form the matcher speaks.
+		root = filepath.ToSlash(root)
 		allow := Rule{Decision: Allow, Path: []string{root, root + "/**"}}
 		rules["write_file"] = append([]Rule{allow}, rules["write_file"]...)
 		rules["edit_file"] = append([]Rule{allow}, rules["edit_file"]...)

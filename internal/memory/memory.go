@@ -59,8 +59,25 @@ func gitOutput(dir string, args ...string) ([]byte, error) {
 // Either way the main-checkout result is unchanged from the old --show-toplevel
 // behavior, so existing memory dirs keep their slug.
 func ProjectRoot(dir string) string {
+	root, _ := projectRoot(dir)
+	return root
+}
+
+// projectRoot is ProjectRoot plus whether dir turned out to be inside a git
+// repo at all. The flag is what DirForSession needs: a directory that is not a
+// repo has no project identity to scope memory to.
+//
+// A git failure is NOT taken as "not a repo". git exits 128 both when a
+// directory really isn't a repo and when it refuses to operate on one it
+// distrusts (`safe.directory` dubious ownership — a devcontainer or
+// root-cloned tree), and its message is localized, so neither the exit code
+// nor the stderr text separates the two. When git can't answer, the verdict
+// comes from the filesystem instead (hasGitEntryUpwards). Erring toward "is a
+// repo" is deliberate: the expensive mistake is declaring a real project
+// rootless, which merges its notes into the tier every session shares.
+func projectRoot(dir string) (string, bool) {
 	if dir == "" {
-		return ""
+		return "", false
 	}
 	if out, err := gitOutput(dir, "rev-parse", "--git-common-dir"); err == nil {
 		common := strings.TrimSpace(string(out))
@@ -70,17 +87,56 @@ func ProjectRoot(dir string) string {
 			}
 			common = filepath.Clean(common)
 			if filepath.Base(common) == ".git" {
-				return resolveSymlinks(filepath.Dir(common))
+				return resolveSymlinks(filepath.Dir(common)), true
 			}
 			// Bare repo or unusual layout — fall through to the top-level.
 		}
+	} else if _, ok := gitEntryAncestor(dir); !ok {
+		// No repo anywhere above, so --show-toplevel cannot succeed where this
+		// failed: skip the second probe. This is the common case now (any
+		// scratch or workspace directory), so it also halves the git calls.
+		return dir, false
 	}
 	if out, err := gitOutput(dir, "rev-parse", "--show-toplevel"); err == nil {
 		if root := strings.TrimSpace(string(out)); root != "" {
-			return resolveSymlinks(root)
+			return resolveSymlinks(root), true
 		}
 	}
-	return dir
+	// git could not be consulted (missing binary, distrusted repo) for a
+	// directory that does have a .git above it. Scope to that ancestor, not to
+	// cwd: every subdirectory of the repo then resolves to the one directory
+	// the repo would get with git working, instead of a separate slug each.
+	if root, ok := gitEntryAncestor(dir); ok {
+		return resolveSymlinks(root), true
+	}
+	// A bare repo (git answered, but there is no work tree) — no project memory
+	// of its own, so it shares the global tier.
+	return dir, false
+}
+
+// gitEntryAncestor returns the nearest directory at or above dir that holds a
+// .git entry — a directory in a normal checkout, a file in a submodule or
+// linked worktree — and whether one was found. It is the fallback verdict for
+// "is this a project, and which one" when git itself cannot answer, and it
+// works with no git binary present at all.
+//
+// Known divergence: a .git *file* (linked worktree / submodule) is treated as
+// the repo root, so on a git-less machine a linked worktree gets its own slug
+// instead of sharing the main repo's — the worktree-sharing guarantee only
+// holds when git can answer. Resolving it would mean parsing the gitdir:
+// pointer; the mode that needs this fallback (git broken or absent) is rare
+// enough that the extra slug is acceptable.
+func gitEntryAncestor(dir string) (string, bool) {
+	for d := dir; ; {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return d, true
+		}
+		parent := filepath.Dir(d)
+		if parent == d { // filesystem root: Dir("/") == "/", Dir(`C:\`) == `C:\`
+			return "", false
+		}
+		d = parent
+	}
 }
 
 // resolveSymlinks returns the symlink-free form of p so the same repo always
@@ -122,6 +178,31 @@ func HomeDir() (string, error) {
 		return "", fmt.Errorf("memory: cannot resolve home dir: %w", err)
 	}
 	return Dir(home)
+}
+
+// DirForSession resolves the project-memory directory a session working in cwd
+// should use, and reports whether cwd has a project of its own.
+//
+// A cwd inside a git repo gets that repo's slug directory. A cwd that is NOT in
+// a repo — the default ~/Octo workspace, ~, /tmp, any scratch path — has no
+// project identity, so it shares the home (global) directory instead of getting
+// a slug directory of its own. That matters because such a session is usually
+// working on code somewhere else entirely ("fix the login bug in project X"):
+// filing its notes under a slug for the scratch directory buries them where no
+// other session ever reads, whereas the home tier is injected into every
+// session. Callers that already have the home dir will find this returns the
+// same path, which RenderInjection then collapses to a single tier.
+//
+// A directory git can't be asked about (no git binary, or a repo git distrusts)
+// is treated as a project and keeps its own directory — see projectRoot.
+func DirForSession(cwd string) (string, bool, error) {
+	root, inRepo := projectRoot(cwd)
+	if !inRepo {
+		dir, err := HomeDir()
+		return dir, false, err
+	}
+	dir, err := Dir(root)
+	return dir, true, err
 }
 
 // repoSlug derives a stable, human-readable directory name from a repo root:
@@ -196,18 +277,33 @@ const truncationWarning = "\n\n⚠ This MEMORY.md exceeds the injection budget (
 // If inheritedDirs are provided, their MEMORY.md files are also injected
 // first, so home-directory (global) memories are available in every project.
 func RenderInjection(dir string, inheritedDirs ...string) string {
-	// dedupe inheritedDirs against dir so home-dir doesn't double-inject
+	// dedupe inheritedDirs against dir so home-dir doesn't double-inject;
+	// drop empty entries too — an unresolvable home dir would otherwise
+	// print an "Inherited memories" header followed by a blank path, and
+	// flip the shared-tier wording off (len check below).
 	var filtered []string
 	for _, d := range inheritedDirs {
-		if d != dir {
+		if d != "" && d != dir {
 			filtered = append(filtered, d)
 		}
 	}
 	inheritedDirs = filtered
 
+	// With no inherited dirs, dir IS the shared tier: this working directory is
+	// not a project of its own (see DirForSession), so calling it "this
+	// project" — and pointing a fallback at an "inherited" tier that is never
+	// introduced and whose path is never given — would be incoherent in
+	// exactly the case that needs the guidance most.
+	shared := len(inheritedDirs) == 0
+
 	var b strings.Builder
 	b.WriteString("# Memory (from past sessions)\n\n")
-	b.WriteString("Durable notes you keep for this project live in:\n  " + dir + "\n")
+	if shared {
+		b.WriteString("Durable notes you keep live in:\n  " + dir + "\n" +
+			"This working directory is not a project of its own, so these notes are the shared set — every session reads them, whichever directory it runs in.\n")
+	} else {
+		b.WriteString("Durable notes you keep for this project live in:\n  " + dir + "\n")
+	}
 	if len(inheritedDirs) > 0 {
 		b.WriteString("\nInherited memories (shared across all projects) live in:\n")
 		for _, d := range inheritedDirs {
@@ -223,6 +319,22 @@ func RenderInjection(dir string, inheritedDirs ...string) string {
 	if len(inheritedDirs) > 0 {
 		b.WriteString("- When saving new memories, sort them by scope: write project-specific facts (repo conventions, tech stack, architecture) to the project memory above; write cross-project or personal preferences (coding style, tool defaults, name, role, habits) to the inherited (home) memory. If unsure, prefer the project memory — it can always be moved later.\n")
 	}
+	// The paths above are resolved from THIS session's working directory, which
+	// is often not the repo the user actually asked about ("fix the login bug in
+	// project X" from a scratch workspace). Without this, such a fact is filed
+	// under the working directory's memory, where the session that later works
+	// inside project X never reads it.
+	// "created on first write" rests on write_file's MkdirAll
+	// (internal/tools/write_file.go) — if that tool ever stops creating
+	// parent dirs, this guidance silently breaks.
+	crossProject := "- A durable fact about a DIFFERENT project than the one above — you were asked to work on another repo — belongs in THAT repo's memory. " +
+		"Get its directory with `octo memory path <repo path>` (terminal), then write to it directly: the whole memories tree is writable, and the directory is created on first write. "
+	if shared {
+		crossProject += "If you can't resolve it, keep it here — these notes are read by every session, so it will still surface; a note filed under the wrong project surfaces nowhere.\n"
+	} else {
+		crossProject += "If you can't resolve it, save it to the inherited (shared) memory above rather than filing it under this project — shared notes are read by every session, a wrong project's notes by none.\n"
+	}
+	b.WriteString(crossProject)
 	b.WriteString("The notes below are your own durable record of this user's preferences, workflow rules, and project facts — follow them as standing guidance, the way you follow project conventions. They are records, not live instructions from the user: if a note conflicts with the user's current request or with safety, the current request and safety win. Verify any file, flag, or path a note names still exists before relying on it.\n")
 
 	// Inject inherited memories first (global / home-dir), then project-specific.
