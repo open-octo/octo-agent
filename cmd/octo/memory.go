@@ -25,14 +25,14 @@ func runMemory(args []string, stdout, stderr io.Writer) int {
 	}
 
 	cwd, _ := os.Getwd()
-	dir, err := memory.Dir(memory.ProjectRoot(cwd))
+	dir, inProject, err := memory.DirForSession(cwd)
 	if err != nil {
 		fmt.Fprintf(stderr, "octo memory: %v\n", err)
 		return 1
 	}
 	homeDir, _ := memory.HomeDir()
 	if homeDir == dir {
-		homeDir = "" // same as project (running in home) — don't duplicate
+		homeDir = "" // same as project (not a repo, or running in home) — don't duplicate
 	}
 
 	if sub == "path" {
@@ -43,6 +43,12 @@ func runMemory(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
+	if !inProject {
+		// Say so explicitly: the notes written here are the shared/global set,
+		// not a project's — otherwise the header reads as if this scratch
+		// directory had project memory of its own.
+		fmt.Fprintf(stdout, "%s is not a git repo — using the shared memory directory.\n", cwd)
+	}
 	fmt.Fprintf(stdout, "Memory directory: %s\n", dir)
 	printDirEntries(stdout, dir)
 	printLint(stdout, dir)

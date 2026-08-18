@@ -478,10 +478,12 @@ func New(cfg Config) (*Server, error) {
 		}
 	}
 
-	// Resolve cross-session memory directory.
+	// Resolve cross-session memory directory. A non-repo launch dir (the
+	// default ~/Octo workspace, ~, …) has no project of its own and resolves
+	// to the home dir — see memory.DirForSession.
 	var memDir, homeMemDir string
 	if !cfg.NoMemory {
-		if d, err := memory.Dir(memory.ProjectRoot(cwd)); err == nil {
+		if d, _, err := memory.DirForSession(cwd); err == nil {
 			if memory.EnsureDir(d) == nil {
 				memDir = d
 			}
@@ -1813,6 +1815,10 @@ func (s *Server) sessionCwdEnv(sess *agent.Session) (string, string) {
 // (and directory creation) happens on first use per cwd and is cached — the
 // CLI likewise freezes its memory dir per process. Falls back to the
 // server-default memDir when resolution fails; empty when memory is disabled.
+//
+// A session whose cwd is not a git repo (the default ~/Octo workspace being
+// the common case) resolves to the home dir, not to a slug directory of its
+// own — see memory.DirForSession for why.
 func (s *Server) sessionMemDir(cwd string) string {
 	if s.cfg.NoMemory {
 		return ""
@@ -1826,7 +1832,7 @@ func (s *Server) sessionMemDir(cwd string) string {
 		return d
 	}
 	dir := s.memDir
-	if d, err := memory.Dir(memory.ProjectRoot(cwd)); err == nil && memory.EnsureDir(d) == nil {
+	if d, _, err := memory.DirForSession(cwd); err == nil && memory.EnsureDir(d) == nil {
 		dir = d
 	}
 	if s.memDirCache == nil {

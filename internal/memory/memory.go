@@ -59,8 +59,16 @@ func gitOutput(dir string, args ...string) ([]byte, error) {
 // Either way the main-checkout result is unchanged from the old --show-toplevel
 // behavior, so existing memory dirs keep their slug.
 func ProjectRoot(dir string) string {
+	root, _ := projectRoot(dir)
+	return root
+}
+
+// projectRoot is ProjectRoot plus whether dir turned out to be inside a git
+// repo at all. The flag is what DirForSession needs: a directory that is not a
+// repo has no project identity to scope memory to.
+func projectRoot(dir string) (string, bool) {
 	if dir == "" {
-		return ""
+		return "", false
 	}
 	if out, err := gitOutput(dir, "rev-parse", "--git-common-dir"); err == nil {
 		common := strings.TrimSpace(string(out))
@@ -70,17 +78,17 @@ func ProjectRoot(dir string) string {
 			}
 			common = filepath.Clean(common)
 			if filepath.Base(common) == ".git" {
-				return resolveSymlinks(filepath.Dir(common))
+				return resolveSymlinks(filepath.Dir(common)), true
 			}
 			// Bare repo or unusual layout — fall through to the top-level.
 		}
 	}
 	if out, err := gitOutput(dir, "rev-parse", "--show-toplevel"); err == nil {
 		if root := strings.TrimSpace(string(out)); root != "" {
-			return resolveSymlinks(root)
+			return resolveSymlinks(root), true
 		}
 	}
-	return dir
+	return dir, false
 }
 
 // resolveSymlinks returns the symlink-free form of p so the same repo always
@@ -122,6 +130,28 @@ func HomeDir() (string, error) {
 		return "", fmt.Errorf("memory: cannot resolve home dir: %w", err)
 	}
 	return Dir(home)
+}
+
+// DirForSession resolves the project-memory directory a session working in cwd
+// should use, and reports whether cwd has a project of its own.
+//
+// A cwd inside a git repo gets that repo's slug directory. A cwd that is NOT in
+// a repo — the default ~/Octo workspace, ~, /tmp, any scratch path — has no
+// project identity, so it shares the home (global) directory instead of getting
+// a slug directory of its own. That matters because such a session is usually
+// working on code somewhere else entirely ("fix the login bug in project X"):
+// filing its notes under a slug for the scratch directory buries them where no
+// other session ever reads, whereas the home tier is injected into every
+// session. Callers that already have the home dir will find this returns the
+// same path, which RenderInjection then collapses to a single tier.
+func DirForSession(cwd string) (string, bool, error) {
+	root, inRepo := projectRoot(cwd)
+	if !inRepo {
+		dir, err := HomeDir()
+		return dir, false, err
+	}
+	dir, err := Dir(root)
+	return dir, true, err
 }
 
 // repoSlug derives a stable, human-readable directory name from a repo root:

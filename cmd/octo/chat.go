@@ -784,10 +784,12 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// front, injected into the system prompt (below), and whitelisted for writes
 	// when the permission engine is built. --no-memory disables it; a resolve
 	// error degrades to no memory rather than failing.
-	// Home-directory memories are inherited into every project.
+	// Home-directory memories are inherited into every project. A cwd that is
+	// not a repo resolves to that same home dir rather than a slug of its own
+	// — see memory.DirForSession.
 	var memDir, homeMemDir string
 	if !*noMemory {
-		if d, err := memory.Dir(memory.ProjectRoot(cwd)); err == nil {
+		if d, _, err := memory.DirForSession(cwd); err == nil {
 			if memory.EnsureDir(d) == nil {
 				memDir = d
 			}
