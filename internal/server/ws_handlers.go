@@ -1946,6 +1946,11 @@ type wsStreamWriter struct {
 	hub       *wsHub
 	server    *Server // for live state tracking
 	mu        sync.Mutex
+
+	// lastCtxTokens is the context-token count most recently broadcast by
+	// broadcastContextUsage, so parallel tool calls in one round (same count)
+	// broadcast once. Guarded by mu (handleEvent holds it).
+	lastCtxTokens int
 }
 
 func (s *Server) newWSStreamWriter(sessionID string) *wsStreamWriter {
@@ -2042,6 +2047,37 @@ func (w *wsStreamWriter) reseedThinkingProgress() {
 	})
 }
 
+// broadcastContextUsage pushes the live context-window fill to subscribed
+// tabs mid-turn. The Agent updates its count after every provider round-trip,
+// but the only other context_usage broadcasts happen at subscribe time and at
+// turn end — without this, a long multi-tool turn leaves the composer's
+// Context bar frozen at its turn-start value until the turn finishes. Called
+// on EventToolStarted (the first event after each round-trip's usage lands)
+// and deduped by token count. Caller must hold w.mu.
+func (w *wsStreamWriter) broadcastContextUsage() {
+	w.server.sessionAgentsMu.Lock()
+	a := w.server.sessionAgents[w.sessionID]
+	w.server.sessionAgentsMu.Unlock()
+	if a == nil {
+		return
+	}
+	used, window := a.ContextUsage()
+	if used <= 0 || window <= 0 || used == w.lastCtxTokens {
+		return
+	}
+	w.lastCtxTokens = used
+	pct := used * 100 / window
+	if pct > 100 {
+		pct = 100
+	}
+	w.hub.broadcast(w.sessionID, map[string]any{
+		"type":           "session_update",
+		"session_id":     w.sessionID,
+		"context_usage":  pct,
+		"context_tokens": used,
+	})
+}
+
 // handleEvent converts agent.AgentEvent to WS JSON events and broadcasts them.
 // It also updates the server's live state for late-subscriber replay.
 func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
@@ -2091,6 +2127,11 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 			ls.stdoutToolID = ""
 		}
 		w.server.liveStateMu.Unlock()
+
+		// The provider round-trip that produced this tool call already folded
+		// its usage into the live Agent (accrueUsage), so this is the earliest
+		// point each round where the fresh count is available.
+		w.broadcastContextUsage()
 
 	case agent.EventToolProgress:
 		// Live output for a running terminal command (issue #1094). Only

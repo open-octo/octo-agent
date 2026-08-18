@@ -2631,6 +2631,102 @@ func TestWSStreamWriter_TurnError_DistinctType(t *testing.T) {
 	}
 }
 
+// TestWSStreamWriter_BroadcastsContextUsageMidTurn guards the live refresh of
+// the composer's Context bar: the only other context_usage broadcasts happen
+// at subscribe time and at turn end, so each tool round must push the Agent's
+// fresh count — and parallel tool calls in one round (same count) must push
+// it once, not per tool.
+func TestWSStreamWriter_BroadcastsContextUsageMidTurn(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+
+	const sid = "sess-ctx-usage"
+	a := agent.New(&stubSender{}, "stub-model")
+	// A resumed-history estimate is the only usage source reachable from a
+	// test (real counts come from provider replies); any positive count
+	// exercises the same broadcast path.
+	a.History.Append(agent.NewUserMessage(strings.Repeat("x", 8000)))
+	srv.sessionAgentsMu.Lock()
+	srv.sessionAgents[sid] = a
+	srv.sessionAgentsMu.Unlock()
+
+	conn := &wsConn{
+		hub:        srv.wsHub,
+		send:       make(chan []byte, 256),
+		subscribed: map[string]struct{}{},
+	}
+	srv.wsHub.register <- conn
+	srv.wsHub.subscribe(conn, sid)
+
+	sw := srv.newWSStreamWriter(sid)
+
+	// drainUntil reads broadcasts until an event of type typ (or deadline),
+	// returning it plus every session_update seen on the way.
+	drainUntil := func(typ string) (map[string]any, []map[string]any) {
+		deadline := time.After(2 * time.Second)
+		var updates []map[string]any
+		for {
+			select {
+			case b := <-conn.send:
+				var ev map[string]any
+				if err := json.Unmarshal(b, &ev); err != nil {
+					continue
+				}
+				if got, _ := ev["type"].(string); got == "session_update" {
+					updates = append(updates, ev)
+				} else if got == typ {
+					return ev, updates
+				}
+			case <-deadline:
+				return nil, updates
+			}
+		}
+	}
+
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolStarted, ToolName: "terminal", ToolID: "t1"})
+	// Sentinel: hub delivery is FIFO per conn, so once the delta arrives every
+	// broadcast from the tool start has been delivered.
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "sentinel"})
+	if ev, updates := drainUntil("text_delta"); ev == nil {
+		t.Fatal("sentinel text_delta never arrived")
+	} else if len(updates) != 1 {
+		t.Fatalf("got %d session_update broadcasts after first tool start, want 1: %v", len(updates), updates)
+	} else {
+		if tok, _ := updates[0]["context_tokens"].(float64); tok <= 0 {
+			t.Errorf("context_tokens = %v, want > 0", updates[0]["context_tokens"])
+		}
+		if _, ok := updates[0]["context_usage"].(float64); !ok {
+			t.Errorf("context_usage missing from mid-turn session_update: %v", updates[0])
+		}
+		if _, ok := updates[0]["status"]; ok {
+			t.Errorf("mid-turn session_update must not carry status (it would clobber \"running\"): %v", updates[0])
+		}
+	}
+
+	// Same count again (a second tool in the same round) — deduped.
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolStarted, ToolName: "terminal", ToolID: "t2"})
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "sentinel"})
+	if ev, updates := drainUntil("text_delta"); ev == nil {
+		t.Fatal("sentinel text_delta never arrived")
+	} else if len(updates) != 0 {
+		t.Fatalf("got %d session_update broadcasts for an unchanged count, want 0: %v", len(updates), updates)
+	}
+
+	// The count grows (next provider round-trip landed) — broadcast resumes.
+	a.History.Append(agent.NewUserMessage(strings.Repeat("y", 8000)))
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolStarted, ToolName: "terminal", ToolID: "t3"})
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "sentinel"})
+	if ev, updates := drainUntil("text_delta"); ev == nil {
+		t.Fatal("sentinel text_delta never arrived")
+	} else if len(updates) != 1 {
+		t.Fatalf("got %d session_update broadcasts after the count grew, want 1: %v", len(updates), updates)
+	}
+}
+
 // PATCH /api/sessions/{id} is the sidebar rename action — the title must
 // persist through a session reload, and bad input must not slip through.
 func TestHandleUpdateSession_Rename(t *testing.T) {
