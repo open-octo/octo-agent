@@ -38,36 +38,58 @@ func TestShellURL(t *testing.T) {
 	}
 }
 
-// TestWebviewDead pins the shell's revive decision: a window is declared dead
-// only when it is old enough to have beaten AND the beats stopped (or never
-// started). Young windows and actively-beating pages must never be revived —
-// a false positive here destroys a healthy window.
-func TestWebviewDead(t *testing.T) {
-	now := time.Now()
+// TestNeedsRevive is the false-positive guard for the whole feature: destroying
+// a healthy window (losing the user's draft and stealing focus) is far worse
+// than a few more seconds of black, so every legitimate reason a page has to be
+// quiet must read as healthy. Only post-show evidence counts — how long the
+// page was silent BEFORE the show is deliberately irrelevant, because system
+// sleep freezes the page wholesale and Chromium throttles a long-hidden page's
+// timers to roughly once a minute.
+func TestNeedsRevive(t *testing.T) {
+	shownAt := time.Now()
 	cases := []struct {
-		name    string
-		shownAt time.Time // zero = no window recorded
-		beatAt  time.Time // zero = never beat
-		want    bool
+		name       string
+		frameAt    time.Time // zero = never
+		hiddenAt   time.Time // zero = never
+		wantRevive bool
 	}{
-		{"no window recorded", time.Time{}, time.Time{}, false},
-		{"young window, no beat yet (still loading)", now.Add(-10 * time.Second), time.Time{}, false},
-		{"old window, never beat", now.Add(-2 * beatGrace), time.Time{}, true},
-		{"old window, fresh beat", now.Add(-time.Hour), now.Add(-2 * time.Second), false},
-		{"old window, beats stopped", now.Add(-time.Hour), now.Add(-2 * beatGrace), true},
-		{"beat predates this window (belongs to a previous one)", now.Add(-2 * beatGrace), now.Add(-3 * beatGrace), true},
+		{"frame after the show: compositor is painting", shownAt.Add(time.Second), time.Time{}, false},
+		{"hidden beat after the show: owes no frames", time.Time{}, shownAt.Add(time.Second), false},
+		{"both after the show", shownAt.Add(time.Second), shownAt.Add(2 * time.Second), false},
+		{"nothing at all: dead renderer", time.Time{}, time.Time{}, true},
+		{"only frames from before the show: black compositor", shownAt.Add(-time.Minute), time.Time{}, true},
+		{"only a hidden beat from before the show", time.Time{}, shownAt.Add(-time.Minute), true},
 	}
 	for _, tc := range cases {
 		b := &nativeBridge{}
-		if !tc.shownAt.IsZero() {
-			b.windowShownAt.Store(tc.shownAt.UnixNano())
+		if !tc.frameAt.IsZero() {
+			b.lastFrame.Store(tc.frameAt.UnixNano())
 		}
-		if !tc.beatAt.IsZero() {
-			b.lastBeat.Store(tc.beatAt.UnixNano())
+		if !tc.hiddenAt.IsZero() {
+			b.lastHiddenBeat.Store(tc.hiddenAt.UnixNano())
 		}
-		if got := b.webviewDead(now); got != tc.want {
-			t.Errorf("%s: webviewDead = %v, want %v", tc.name, got, tc.want)
+		if got := b.needsRevive(shownAt); got != tc.wantRevive {
+			t.Errorf("%s: needsRevive = %v, want %v", tc.name, got, tc.wantRevive)
 		}
+	}
+}
+
+// TestNeedsReviveIgnoresPreShowSilence pins the sleep/wake case explicitly: a
+// page frozen for hours (so every timestamp is ancient) that reports in right
+// after the show is healthy. Judging the pre-show gap instead would destroy
+// this window.
+func TestNeedsReviveIgnoresPreShowSilence(t *testing.T) {
+	shownAt := time.Now()
+	b := &nativeBridge{}
+	b.lastBeat.Store(shownAt.Add(-8 * time.Hour).UnixNano()) // asleep all night
+	b.lastFrame.Store(shownAt.Add(-8 * time.Hour).UnixNano())
+	if !b.needsRevive(shownAt) {
+		t.Fatal("precondition: with only pre-show evidence the verdict is still revive")
+	}
+	// The page wakes and paints a frame after the show.
+	b.lastFrame.Store(shownAt.Add(200 * time.Millisecond).UnixNano())
+	if b.needsRevive(shownAt) {
+		t.Error("a page that painted after the show must never be revived, however long it slept")
 	}
 }
 
@@ -90,82 +112,81 @@ func TestReviveAllowed(t *testing.T) {
 	}
 }
 
-// TestHeartbeatRecordsFrameTime pins the frame-timestamp derivation the
-// post-show probe depends on: lastFrame = beat arrival minus the reported rAF
-// age, and a negative age (clock skew, bad client) must not move lastFrame
-// into the future.
-func TestHeartbeatRecordsFrameTime(t *testing.T) {
+// TestHeartbeatSignals pins the three things a beat can say, including the two
+// ways a stale or hostile report must NOT erase good evidence: lastFrame only
+// moves forward, and an absurd frame age is clamped rather than trusted (any
+// local process can reach this endpoint on loopback).
+func TestHeartbeatSignals(t *testing.T) {
 	b := &nativeBridge{}
+
+	// Visible beat: records JS liveness and a frame time derived from the age.
 	before := time.Now()
 	b.Heartbeat(3000)
 	after := time.Now()
-
-	beat := time.Unix(0, b.lastBeat.Load())
-	if beat.Before(before) || beat.After(after) {
+	if beat := time.Unix(0, b.lastBeat.Load()); beat.Before(before) || beat.After(after) {
 		t.Errorf("lastBeat = %v, want within [%v, %v]", beat, before, after)
 	}
 	frame := time.Unix(0, b.lastFrame.Load())
-	wantLo, wantHi := before.Add(-3*time.Second), after.Add(-3*time.Second)
-	if frame.Before(wantLo) || frame.After(wantHi) {
+	if frame.Before(before.Add(-3*time.Second)) || frame.After(after.Add(-3*time.Second)) {
 		t.Errorf("lastFrame = %v, want ~3s before the beat", frame)
 	}
-
-	prevFrame := b.lastFrame.Load()
-	b.Heartbeat(-50)
-	if b.lastFrame.Load() != prevFrame {
-		t.Error("negative frame age must not update lastFrame")
+	if b.lastHiddenBeat.Load() != 0 {
+		t.Error("a visible beat must not record a hidden beat")
 	}
-	if time.Unix(0, b.lastBeat.Load()).Before(after) {
-		t.Error("beat with negative frame age must still record JS liveness")
+
+	// Hidden beat (negative age): records liveness + "owes no frames", and
+	// leaves the frame evidence untouched.
+	frameBefore := b.lastFrame.Load()
+	b.Heartbeat(-1)
+	if b.lastHiddenBeat.Load() == 0 {
+		t.Error("a hidden beat must be recorded so the probe expects no frames")
+	}
+	if b.lastFrame.Load() != frameBefore {
+		t.Error("a hidden beat must not touch lastFrame")
+	}
+
+	// Monotonic: a stale report (a focus beat whose rAF has not ticked yet,
+	// clock skew) must not move lastFrame backwards.
+	b.Heartbeat(0) // fresh frame, now
+	newest := b.lastFrame.Load()
+	b.Heartbeat(int64(time.Minute / time.Millisecond)) // claims a minute-old frame
+	if b.lastFrame.Load() != newest {
+		t.Error("a staler frame report must not overwrite newer frame evidence")
+	}
+
+	// Clamp: an absurd age can't push lastFrame into the distant past (which,
+	// with the monotonic rule, is the only way to fake a stall).
+	b2 := &nativeBridge{}
+	b2.Heartbeat(1 << 62)
+	if age := time.Since(time.Unix(0, b2.lastFrame.Load())); age > maxReportedFrameAge+time.Minute {
+		t.Errorf("frame age clamp failed: lastFrame is %v old", age)
 	}
 }
 
-// TestDetachHelpersGuardWindowIdentity pins the revive swap's core invariant:
+// TestProbeConstants pins the relationship the protocol depends on: the probe
+// must outlast at least two scheduled beats, so a page that came back has
+// certainly reported in before any verdict. A future tweak to one constant
+// that breaks this would otherwise silently start destroying healthy windows.
+func TestProbeConstants(t *testing.T) {
+	if frameProbeDelay <= 2*heartbeatInterval {
+		t.Errorf("frameProbeDelay (%v) must exceed two beats (%v)", frameProbeDelay, 2*heartbeatInterval)
+	}
+	if reviveCooldown <= frameProbeDelay {
+		t.Errorf("reviveCooldown (%v) must exceed one probe cycle (%v)", reviveCooldown, frameProbeDelay)
+	}
+}
+
+// TestDetachStalledGuardsWindowIdentity pins the revive swap's core invariant:
 // the pointer is detached BEFORE the old window is closed (so the replacement
-// survives the old window's WindowClosing handler), and a stalled-window
-// detach only fires for the exact window the probe judged — never for a
-// successor the user or another revive installed meanwhile.
-func TestDetachHelpersGuardWindowIdentity(t *testing.T) {
+// survives the old one's WindowClosing handler), and the detach only fires for
+// the exact window the probe judged — never for a successor the user or another
+// revive installed meanwhile.
+func TestDetachStalledGuardsWindowIdentity(t *testing.T) {
 	now := time.Now()
 	first := &application.WebviewWindow{}  // identity tokens only: no method is
-	second := &application.WebviewWindow{} // called on them in these paths
-	markDead := func(b *nativeBridge) {
-		b.windowShownAt.Store(now.Add(-2 * beatGrace).UnixNano())
-		b.lastBeat.Store(0)
-	}
+	second := &application.WebviewWindow{} // called on them in this path
 
-	// detachIfDead hands back the dead window and clears the field, so the
-	// caller closes a window the bridge no longer points at.
-	b := &nativeBridge{window: first}
-	markDead(b)
-	if got := b.detachIfDead(now); got != first {
-		t.Errorf("detachIfDead = %v, want the dead window", got)
-	}
-	if b.window != nil {
-		t.Error("detachIfDead must clear b.window before the caller closes it")
-	}
-
-	// A live (beating) window is never detached.
-	b = &nativeBridge{window: first}
-	b.windowShownAt.Store(now.Add(-time.Hour).UnixNano())
-	b.lastBeat.Store(now.Add(-time.Second).UnixNano())
-	if got := b.detachIfDead(now); got != nil {
-		t.Error("a beating window must not be detached")
-	}
-	if b.window != first {
-		t.Error("a beating window must stay attached")
-	}
-
-	// Cooldown blocks a second revive.
-	b = &nativeBridge{window: first}
-	markDead(b)
-	b.lastRevive.Store(now.Add(-reviveCooldown / 2).UnixNano())
-	if got := b.detachIfDead(now); got != nil {
-		t.Error("revive inside the cooldown must not detach")
-	}
-
-	// detachStalled is identity-keyed: a successor window is left alone.
-	b = &nativeBridge{window: second}
+	b := &nativeBridge{window: second}
 	if got := b.detachStalled(first, now); got != nil {
 		t.Error("detachStalled must not touch a different (successor) window")
 	}
@@ -177,5 +198,48 @@ func TestDetachHelpersGuardWindowIdentity(t *testing.T) {
 	}
 	if b.window != nil {
 		t.Error("detachStalled must clear b.window before the caller closes it")
+	}
+
+	// Cooldown blocks the detach entirely.
+	b = &nativeBridge{window: first}
+	b.lastRevive.Store(now.Add(-reviveCooldown / 2).UnixNano())
+	if got := b.detachStalled(first, now); got != nil {
+		t.Error("detach inside the cooldown must not fire")
+	}
+	if b.window != first {
+		t.Error("window must stay attached when the cooldown blocks the revive")
+	}
+}
+
+// TestProbeAfterShowHealthyPathAndFlag covers the probe goroutine's two
+// bookkeeping duties: a healthy page short-circuits without touching the
+// window, and probeInFlight is always released — a leak there would silently
+// disable every future probe.
+func TestProbeAfterShowHealthyPathAndFlag(t *testing.T) {
+	win := &application.WebviewWindow{} // identity token; the healthy path calls nothing on it
+	b := &nativeBridge{window: win, testProbeDelay: 10 * time.Millisecond}
+
+	// Nil window: no probe, no flag left set.
+	b.probeAfterShow(nil)
+	if b.probeInFlight.Load() {
+		t.Error("probeInFlight must not stay set when there is no window to probe")
+	}
+
+	// Healthy: a frame lands after the show, so the probe must leave the window
+	// attached and clear its flag.
+	b.lastFrame.Store(time.Now().Add(time.Second).UnixNano())
+	b.probeAfterShow(win)
+	deadline := time.Now().Add(2 * time.Second)
+	for b.probeInFlight.Load() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if b.probeInFlight.Load() {
+		t.Fatal("probeInFlight leaked: future probes would never run")
+	}
+	if b.window != win {
+		t.Error("a healthy window must not be detached by the probe")
+	}
+	if b.lastRevive.Load() != 0 {
+		t.Error("a healthy probe must not consume the revive budget")
 	}
 }
