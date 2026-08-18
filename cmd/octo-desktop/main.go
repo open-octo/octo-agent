@@ -244,6 +244,15 @@ func main() {
 			ApplicationShouldTerminateAfterLastWindowClosed: !settings.KeepRunningInBackground,
 		},
 		Windows: application.WindowsOptions{
+			// Wails' Windows backend posts a quit message the moment its window
+			// map empties (unregisterWindow), without consulting ShouldQuit —
+			// so closing the window terminated the whole hub even when the user
+			// asked it to keep running in the tray, and it also raced the
+			// webview revive's window swap. Suppress that and let octo's own
+			// ShouldQuit be the only authority, as it already is on mac/Linux;
+			// the close path quits explicitly when the user opted out of
+			// background running (see closeShouldQuit).
+			DisableQuitOnLastWindowClosed: true,
 			// Chromium's native-window occlusion tracker stops rendering a
 			// WebView2 whose window is minimised or fully covered; on some
 			// machines the compositor never paints again after restore,

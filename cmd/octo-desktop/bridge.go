@@ -514,10 +514,19 @@ func (b *nativeBridge) showWindowAt(hash string) {
 			// Guarded: when a revive replaced this window, b.window already
 			// points at the successor and must survive the old one's close.
 			b.windowMu.Lock()
-			if b.window == w {
+			replaced := b.window != w
+			if !replaced {
 				b.window = nil
 			}
 			b.windowMu.Unlock()
+			// Windows only: the framework's own last-window-close quit is
+			// suppressed (see DisableQuitOnLastWindowClosed in main.go), so a
+			// user who opted out of background running needs the quit performed
+			// here. Never for a revive's discarded window — that close is the
+			// shell repairing itself, not the user leaving.
+			if !replaced && closeShouldQuit(runtime.GOOS, b.allowQuit.Load()) {
+				b.app.Quit()
+			}
 		})
 		// Capture size/maximised changes as the user drags or zooms the window.
 		w.OnWindowEvent(events.Common.WindowDidResize, func(*application.WindowEvent) {
@@ -587,6 +596,17 @@ const (
 	reviveCooldown      = 90 * time.Second
 	maxReportedFrameAge = 10 * time.Minute // clamp: a bad/hostile beat must not move lastFrame far
 )
+
+// closeShouldQuit reports whether closing the window must terminate the app.
+// Only Windows needs this: mac routes last-window-close through
+// ApplicationShouldTerminateAfterLastWindowClosed and Linux's
+// unregisterWindow consults ShouldQuit, but the Windows backend's own quit is
+// suppressed (DisableQuitOnLastWindowClosed) because it fired unconditionally
+// — killing a hub the user wanted kept alive. allowQuit is false exactly when
+// the user has KeepRunningInBackground on, so closing hides to the tray.
+func closeShouldQuit(goos string, allowQuit bool) bool {
+	return goos == "windows" && allowQuit
+}
 
 // reviveAllowed rate-limits automatic window re-creation so a page that is
 // broken for a persistent reason (server wedged, port hijacked) can't put the

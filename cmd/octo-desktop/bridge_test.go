@@ -243,3 +243,29 @@ func TestProbeAfterShowHealthyPathAndFlag(t *testing.T) {
 		t.Error("a healthy probe must not consume the revive budget")
 	}
 }
+
+// TestCloseShouldQuit pins who owns the last-window-close quit on each
+// platform. Windows' framework-level quit is suppressed because it fired
+// unconditionally — killing a hub the user had asked to keep running — so the
+// close path must perform the quit itself, and ONLY when the user opted out of
+// background running. mac and Linux already route this through their own hooks
+// and must never get a second quit from here.
+func TestCloseShouldQuit(t *testing.T) {
+	cases := []struct {
+		goos      string
+		allowQuit bool
+		want      bool
+	}{
+		{"windows", true, true},   // user opted out of background running
+		{"windows", false, false}, // keep running in the tray
+		{"darwin", true, false},   // ApplicationShouldTerminateAfterLastWindowClosed owns it
+		{"darwin", false, false},
+		{"linux", true, false}, // unregisterWindow consults ShouldQuit
+		{"linux", false, false},
+	}
+	for _, tc := range cases {
+		if got := closeShouldQuit(tc.goos, tc.allowQuit); got != tc.want {
+			t.Errorf("closeShouldQuit(%q, allowQuit=%v) = %v, want %v", tc.goos, tc.allowQuit, got, tc.want)
+		}
+	}
+}
