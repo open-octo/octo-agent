@@ -155,6 +155,27 @@ func TestSendContextUsage_PrefersPersistedOverLiveEstimate(t *testing.T) {
 	}
 }
 
+// The cold-start estimate must count the frozen system prompt riding every
+// request (transcript alone reads far too low) — but never on an empty
+// transcript, where any nonzero gauge misleads (new session, or just
+// /clear-ed with the persisted count reset).
+func TestEstimateContextPct_ComposedSystemAndEmptyGate(t *testing.T) {
+	sess := agent.NewSession("stub-model", "")
+	sess.ComposedSystem = strings.Repeat("rule ", 8000) // ~10k tokens of a 128k window
+
+	if got := estimateContextPct(sess); got != 0 {
+		t.Errorf("estimateContextPct on empty transcript = %d, want 0", got)
+	}
+
+	sess.Messages = []agent.Message{agent.NewUserMessage(strings.Repeat("word ", 800))}
+	withComposed := estimateContextPct(sess)
+	sess.ComposedSystem = ""
+	transcriptOnly := estimateContextPct(sess)
+	if withComposed <= transcriptOnly {
+		t.Errorf("estimateContextPct with composed system = %d, want > transcript-only %d", withComposed, transcriptOnly)
+	}
+}
+
 // lastVisibleUserIdx must land on the typed prompt, not the tool_result
 // carrier an agentic turn leaves as its most recent user-role message.
 func TestLastVisibleUserIdx_SkipsToolResultCarriers(t *testing.T) {

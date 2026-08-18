@@ -193,25 +193,27 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 			}
 		}
 	}
-	if pct == 0 && sess != nil && sess.LastContextTokens > 0 {
+	if usedTokens == 0 && sess != nil && sess.LastContextTokens > 0 {
 		// Idle/resumed session — or a turn whose first provider call hasn't
 		// reported usage yet (RealContextTokens returns 0). Report the real
 		// count persisted from its last turn (matches what the turn-end
-		// broadcast sent).
+		// broadcast sent). Keyed on usedTokens, not pct: a live count too
+		// small to reach 1% of the window (a huge-window model, or right
+		// after a mid-turn compaction) is still authoritative and must not
+		// be displaced by a larger stale persisted count.
 		if window := agent.ContextWindow(sess.Model); window > 0 {
 			pct = sess.LastContextTokens * 100 / window
 			usedTokens = sess.LastContextTokens
 		}
 	}
-	if pct == 0 && sess != nil {
-		// No real count anywhere (a session predating the field, one that never
-		// completed a turn with a real count, or a count too small to reach 1% of
-		// the window): fall back to a transcript estimate. It carries no exact
-		// token count, so clear usedTokens — the UI shows a bare arrow.
+	if usedTokens == 0 && sess != nil {
+		// No real count anywhere (a session predating the field, or one that
+		// never completed a turn with a real count): fall back to a transcript
+		// estimate. It carries no exact token count, so usedTokens stays 0 —
+		// the UI shows a bare arrow.
 		pct = estimateContextPct(sess)
-		usedTokens = 0
 	}
-	if pct <= 0 {
+	if pct <= 0 && usedTokens <= 0 {
 		return
 	}
 	if pct > 100 {
@@ -243,6 +245,12 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 func estimateContextPct(sess *agent.Session) int {
 	window := agent.ContextWindow(sess.Model)
 	if window <= 0 {
+		return 0
+	}
+	if len(sess.Messages) == 0 {
+		// Same gate as Agent.ContextUsage: an empty transcript (new session,
+		// or just /clear-ed) shows no gauge — the system prompt overhead is
+		// real but a "ctx N%" on a conversation that hasn't started misleads.
 		return 0
 	}
 	sys := sess.ComposedSystem
@@ -683,6 +691,10 @@ func (s *Server) wsClearSession(sid string) {
 		return
 	}
 	sess.Messages = nil
+	// The persisted count describes the wiped conversation — left in place, a
+	// resubscribe after /clear would report the pre-clear context usage (the
+	// broadcast below says 0, but sendContextUsage reads this field).
+	sess.LastContextTokens = 0
 	if err := sess.Save(); err != nil {
 		s.wsToast(sid, "Clear failed: "+err.Error(), "error")
 		return

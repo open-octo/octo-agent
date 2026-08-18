@@ -2330,7 +2330,15 @@ func (a *Agent) ContextUsage() (used, window int) {
 	// undercounts what a request actually sends: the system prompt and tool
 	// schemas ride every call and routinely add 10k+ tokens, so include both
 	// (tool schemas once Run/RunStream has stashed their size).
-	est := estimateMessages(a.History.Snapshot()) + estimateText(a.System) + overhead
+	msgs := a.History.Snapshot()
+	if len(msgs) == 0 {
+		// A conversation that hasn't started (or was just /clear-ed) shows no
+		// gauge at all — the system/tools overhead is real but reporting it
+		// here would put a misleading "ctx N%" on an empty transcript (the
+		// TUI status bar keys on used > 0).
+		return 0, contextWindow(a.Model)
+	}
+	est := estimateMessages(msgs) + estimateText(a.System) + overhead
 	return est, contextWindow(a.Model)
 }
 
