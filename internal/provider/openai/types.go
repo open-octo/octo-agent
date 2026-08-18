@@ -100,8 +100,13 @@ type apiMessage struct {
 	ToolCallID string        `json:"tool_call_id,omitempty"`
 	// ReasoningContent is the thinking trace returned by reasoning models
 	// (deepseek-v4 etc.). It must be echoed back on the assistant message that
-	// carries tool_calls, or the next request is rejected; omitted otherwise.
-	ReasoningContent string `json:"reasoning_content,omitempty"`
+	// carries tool_calls, or the next request is rejected. DeepSeek V4 goes
+	// further: once a tool call happened in thinking mode, EVERY later
+	// assistant message must carry the field — empty string when that turn has
+	// no trace. A pointer distinguishes "send empty" (non-nil "") from "omit
+	// entirely" (nil), which matters for models that reject the field outright
+	// on plain text turns (R1) — see toAPIMessages.
+	ReasoningContent *string `json:"reasoning_content,omitempty"`
 	// ContentParts is the array form of content used for vision/multimodal
 	// messages. When non-empty it overrides Content in JSON serialization.
 	ContentParts []apiContentPart `json:"-"`

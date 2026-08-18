@@ -362,7 +362,9 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 	}
 	// Stash the reasoning trace on the tool_use block so it round-trips back to
 	// the API on the follow-up request (required by thinking models).
-	attachReasoning(blocks, first.Message.ReasoningContent)
+	if first.Message.ReasoningContent != nil {
+		attachReasoning(blocks, *first.Message.ReasoningContent)
+	}
 
 	return provider.Response{
 		Content:      first.Message.Content,
@@ -467,6 +469,21 @@ func toAPIMessages(systemPrompt string, in []agent.Message) ([]apiMessage, error
 	if strings.TrimSpace(systemPrompt) != "" {
 		out = append(out, apiMessage{Role: "system", Content: systemPrompt})
 	}
+	// DeepSeek V4 thinking mode: once a tool call carried a reasoning trace,
+	// every LATER assistant message must include reasoning_content — an empty
+	// string when that turn has none (a tool round where the model skipped
+	// thinking, a plain text answer) — or strict backends reject the request
+	// with HTTP 400. Gating on an actually-seen trace keeps the field
+	// completely off sessions with non-thinking models and R1 (which rejects
+	// it on plain text turns); before the first trace nothing changes either.
+	// Known gap, accepted deliberately: a session whose every tool round
+	// skipped thinking never flips the gate, so a backend that demands the
+	// field even then still 400s. Closing it would need tracking field
+	// PRESENCE (not content) from responses through history — an agent-layer
+	// marker the streaming deltas can't reliably supply — for a case no
+	// real-world report has exhibited yet.
+	thinkingSeen := false
+	emptyReasoning := ""
 	for _, m := range in {
 		if m.Role == agent.RoleSystem {
 			continue
@@ -481,7 +498,8 @@ func toAPIMessages(systemPrompt string, in []agent.Message) ([]apiMessage, error
 					msg.Content = b.Text
 				case "tool_use":
 					if b.Reasoning != "" {
-						msg.ReasoningContent = b.Reasoning
+						r := b.Reasoning
+						msg.ReasoningContent = &r
 					}
 					msg.ToolCalls = append(msg.ToolCalls, apiToolCall{
 						ID:   b.ID,
@@ -492,6 +510,12 @@ func toAPIMessages(systemPrompt string, in []agent.Message) ([]apiMessage, error
 						},
 					})
 				}
+			}
+			if thinkingSeen && msg.ReasoningContent == nil {
+				msg.ReasoningContent = &emptyReasoning
+			}
+			if msg.ReasoningContent != nil && *msg.ReasoningContent != "" {
+				thinkingSeen = true
 			}
 			out = append(out, msg)
 			continue
@@ -566,7 +590,11 @@ func toAPIMessages(systemPrompt string, in []agent.Message) ([]apiMessage, error
 		}
 
 		// Plain text message.
-		out = append(out, apiMessage{Role: string(m.Role), Content: m.Content})
+		msg := apiMessage{Role: string(m.Role), Content: m.Content}
+		if m.Role == agent.RoleAssistant && thinkingSeen {
+			msg.ReasoningContent = &emptyReasoning
+		}
+		out = append(out, msg)
 	}
 	return out, nil
 }
@@ -574,8 +602,10 @@ func toAPIMessages(systemPrompt string, in []agent.Message) ([]apiMessage, error
 // attachReasoning records a thinking model's reasoning trace on the first
 // tool_use block so it survives in history and is re-sent on the follow-up
 // request. No-op when reasoning is empty or there is no tool_use block — which
-// keeps reasoning_content off plain text turns (some reasoning models reject it
-// there).
+// keeps stored reasoning off plain text turns (some reasoning models reject a
+// non-empty echo there). toAPIMessages may still emit an EMPTY
+// reasoning_content on later assistant turns once a trace has been seen; see
+// the thinkingSeen note there.
 func attachReasoning(blocks []agent.ContentBlock, reasoning string) {
 	if reasoning == "" {
 		return
