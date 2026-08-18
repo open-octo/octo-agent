@@ -213,6 +213,88 @@ func TestReasoningContent_RoundTrips(t *testing.T) {
 	}
 }
 
+// TestReasoningContent_EmptyEchoAfterThinking verifies the DeepSeek V4
+// thinking-mode contract: once an assistant message carried a reasoning
+// trace, every LATER assistant message must include reasoning_content —
+// empty string when that turn has none. Assistant messages BEFORE the first
+// trace, and whole sessions without one, must keep the field omitted (R1
+// rejects it on plain text turns).
+func TestReasoningContent_EmptyEchoAfterThinking(t *testing.T) {
+	withReasoning := agent.NewToolUseBlock("call-1", "read_file", map[string]any{"path": "go.mod"})
+	withReasoning.Reasoning = "I should read the file."
+	withoutReasoning := agent.NewToolUseBlock("call-2", "read_file", map[string]any{"path": "go.sum"})
+
+	msgs, err := toAPIMessages("", []agent.Message{
+		agent.NewUserMessage("read go.mod"),
+		agent.NewAssistantMessage("a plain reply before any thinking"),
+		agent.NewToolUseMessage([]agent.ContentBlock{withReasoning}),
+		agent.NewToolResultMessage([]agent.ContentBlock{agent.NewToolResultBlock("call-1", "module x", false)}),
+		agent.NewAssistantMessage("final answer of that turn"),
+		agent.NewUserMessage("now read go.sum"),
+		agent.NewToolUseMessage([]agent.ContentBlock{withoutReasoning}),
+	})
+	if err != nil {
+		t.Fatalf("toAPIMessages: %v", err)
+	}
+
+	reasoningByIndex := map[int]*string{}
+	var assistants []int
+	for i, m := range msgs {
+		if m.Role == "assistant" {
+			assistants = append(assistants, i)
+			reasoningByIndex[i] = m.ReasoningContent
+		}
+	}
+	if len(assistants) != 4 {
+		t.Fatalf("assistant messages = %d, want 4", len(assistants))
+	}
+	if rc := reasoningByIndex[assistants[0]]; rc != nil {
+		t.Errorf("assistant before first trace: reasoning_content = %q, want omitted", *rc)
+	}
+	if rc := reasoningByIndex[assistants[1]]; rc == nil || *rc != "I should read the file." {
+		t.Errorf("tool-call assistant with trace: reasoning_content = %v, want the trace", rc)
+	}
+	if rc := reasoningByIndex[assistants[2]]; rc == nil || *rc != "" {
+		t.Errorf("plain text assistant after thinking: reasoning_content = %v, want empty string", rc)
+	}
+	if rc := reasoningByIndex[assistants[3]]; rc == nil || *rc != "" {
+		t.Errorf("tool-call assistant without trace after thinking: reasoning_content = %v, want empty string", rc)
+	}
+
+	// The empty echo must serialize as "reasoning_content":"" — omitempty on a
+	// nil pointer omits, but a pointer to "" must survive marshalling.
+	wire, err := json.Marshal(msgs[assistants[2]])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(wire), `"reasoning_content":""`) {
+		t.Errorf("empty echo not on the wire: %s", wire)
+	}
+	wire, err = json.Marshal(msgs[assistants[0]])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(wire), "reasoning_content") {
+		t.Errorf("pre-thinking assistant must omit the field: %s", wire)
+	}
+
+	// A session with no trace anywhere keeps the field off every message.
+	msgs, err = toAPIMessages("", []agent.Message{
+		agent.NewUserMessage("read go.sum"),
+		agent.NewToolUseMessage([]agent.ContentBlock{withoutReasoning}),
+		agent.NewToolResultMessage([]agent.ContentBlock{agent.NewToolResultBlock("call-2", "hash y", false)}),
+		agent.NewAssistantMessage("done"),
+	})
+	if err != nil {
+		t.Fatalf("toAPIMessages: %v", err)
+	}
+	for _, m := range msgs {
+		if m.ReasoningContent != nil {
+			t.Errorf("non-thinking session: role=%s carries reasoning_content %q, want omitted", m.Role, *m.ReasoningContent)
+		}
+	}
+}
+
 // TestSend_ToolResultMessages_WireFormat verifies that tool_result blocks are
 // serialized as individual role="tool" messages (OpenAI format).
 func TestSend_ToolResultMessages_WireFormat(t *testing.T) {
