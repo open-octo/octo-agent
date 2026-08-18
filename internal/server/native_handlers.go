@@ -80,6 +80,15 @@ type NativeBridge interface {
 	// stylesheet depends on in place after this returns.
 	Print() error
 
+	// Heartbeat records a liveness beat from the frontend running inside the
+	// desktop webview. frameAgeMS is how long ago the page's last
+	// requestAnimationFrame fired: it separates "JS alive and rendering" from
+	// "JS alive but the frame pipeline is stalled" — the signature of a
+	// webview whose compositor went black while the page kept running. The
+	// shell uses beat recency to decide whether to revive (destroy and
+	// re-create) the window instead of foregrounding a dead surface.
+	Heartbeat(frameAgeMS int64)
+
 	// CanSelfUpdate reports whether the desktop build can replace itself in
 	// place (bundled release build on a swappable platform). Surfaced to the
 	// frontend as /api/version's self_update flag so the update badge knows
@@ -262,6 +271,30 @@ func (s *Server) handleNativeMinimise(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.cfg.Native.Minimise()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+type nativeHeartbeatRequest struct {
+	FrameAgeMS int64 `json:"frame_age_ms"`
+}
+
+// POST /api/native/heartbeat — liveness beat from the page inside the desktop
+// webview (nativeShell mode only sends it). Desktop only, loopback-gated.
+func (s *Server) handleNativeHeartbeat(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRemote(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+	// Body is optional-tolerant like the other native handlers; a missing or
+	// malformed one records a beat with frame age 0 (JS provably alive —
+	// the request itself is the liveness signal).
+	var req nativeHeartbeatRequest
+	_ = readBodyJSON(r, &req)
+	s.cfg.Native.Heartbeat(req.FrameAgeMS)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

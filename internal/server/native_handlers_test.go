@@ -35,6 +35,8 @@ type fakeNative struct {
 	selfUpdateErr      error
 	printCalls         int
 	printErr           error
+	heartbeatCalls     int
+	gotFrameAgeMS      int64
 }
 
 func (f *fakeNative) PickFolder(_ context.Context, startDir string) (string, bool, error) {
@@ -74,6 +76,11 @@ func (f *fakeNative) Print() error {
 	f.printCalls++
 	return f.printErr
 }
+func (f *fakeNative) Heartbeat(frameAgeMS int64) {
+	f.heartbeatCalls++
+	f.gotFrameAgeMS = frameAgeMS
+}
+
 func (f *fakeNative) CanSelfUpdate() bool { return f.canSelfUpdate }
 func (f *fakeNative) SelfUpdate() error {
 	f.selfUpdateCalls++
@@ -249,6 +256,35 @@ func TestNativeToggleMaximise(t *testing.T) {
 	}
 	if fake.toggleMaxCalls != 1 {
 		t.Errorf("ToggleMaximise calls = %d, want 1", fake.toggleMaxCalls)
+	}
+}
+
+func TestNativeHeartbeatDelegatesToBridge(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	fake := &fakeNative{}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/heartbeat", strings.NewReader(`{"frame_age_ms":1234}`))
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	if fake.heartbeatCalls != 1 || fake.gotFrameAgeMS != 1234 {
+		t.Errorf("Heartbeat calls = %d frameAge = %d, want 1 / 1234", fake.heartbeatCalls, fake.gotFrameAgeMS)
+	}
+
+	// A body-less beat still counts: the request itself is the liveness signal.
+	req = httptest.NewRequest(http.MethodPost, "/api/native/heartbeat", nil)
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("body-less beat: got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	if fake.heartbeatCalls != 2 || fake.gotFrameAgeMS != 0 {
+		t.Errorf("body-less beat: calls = %d frameAge = %d, want 2 / 0", fake.heartbeatCalls, fake.gotFrameAgeMS)
 	}
 }
 

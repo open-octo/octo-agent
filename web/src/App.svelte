@@ -9,6 +9,7 @@
   import { get } from 'svelte/store'
   import * as api from './lib/api'
   import { installExternalLinkInterceptor } from './lib/externalLinks'
+  import { startNativeHeartbeat } from './lib/nativeHeartbeat'
   import { normalizeHash } from './lib/hashRouting'
   import { globalKeyIntent } from './lib/globalKeys'
   import AuthGate from './components/overlays/AuthGate.svelte'
@@ -86,7 +87,10 @@
     // Desktop shell: send http(s) link clicks to the system browser (the
     // webview can't open target="_blank" itself). Inert in a real browser.
     const uninstallLinks = installExternalLinkInterceptor()
-    const cleanup = () => { cancelled = true; uninstallLinks(); ws.disconnect() }
+    // Desktop shell: report page liveness so the shell can revive a dead or
+    // black webview instead of foregrounding it. Inert in a real browser.
+    const stopHeartbeat = startNativeHeartbeat()
+    const cleanup = () => { cancelled = true; uninstallLinks(); stopHeartbeat(); ws.disconnect() }
     checkAuth().then(async ok => {
       if (cancelled) return
       if (!ok) {

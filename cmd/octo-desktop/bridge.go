@@ -44,6 +44,31 @@ type nativeBridge struct {
 	// option; ShouldQuit there always allows the quit).
 	allowQuit atomic.Bool
 
+	// Webview liveness, fed by POST /api/native/heartbeat from the page in
+	// nativeShell mode (see startNativeHeartbeat in the frontend). lastBeat is
+	// when the last beat arrived (JS provably alive then); lastFrame is when
+	// the page's requestAnimationFrame last fired (beat time minus the
+	// reported frame age — the frame pipeline provably alive then). All unix
+	// nanos, atomic: HTTP-handler goroutines write, show/probe paths read.
+	// windowShownAt is when the current window was created, the grace anchor
+	// so a still-loading fresh window isn't declared dead before its first
+	// beat. probeInFlight collapses concurrent post-show probes; lastRevive
+	// rate-limits automatic re-creation so a persistently broken page can't
+	// enter a destroy/create loop.
+	lastBeat      atomic.Int64
+	lastFrame     atomic.Int64
+	windowShownAt atomic.Int64
+	probeInFlight atomic.Bool
+	lastRevive    atomic.Int64
+
+	// windowMu serialises the paths that REPLACE b.window: a show that finds
+	// the webview dead, the frame probe's background goroutine, and the
+	// WindowClosing handler that clears it. Held only around the pointer
+	// swap, never across a window method — those marshal to the UI thread and
+	// would deadlock under a lock. The read-only accessors (Minimise, Close,
+	// WindowState…) stay lock-free as they were.
+	windowMu sync.Mutex
+
 	// notifySeq makes each Notify call's notification identifier unique. macOS
 	// rejects an addNotificationRequest with an empty identifier (its completion
 	// handler errors and nothing is delivered), and a shared constant id would
@@ -425,7 +450,15 @@ func (b *nativeBridge) showWindowAt(hash string) {
 	// The marker rides on every navigation the shell performs (fresh window and
 	// SetURL alike) so nativeShell stays true across reloads and route changes.
 	target := shellURL(b.url, hash)
+	// A webview whose page stopped beating is a dead surface (renderer or
+	// browser process gone) — foregrounding it shows a black window forever.
+	// Destroy it and fall through to the fresh-window path instead.
+	if old := b.detachIfDead(time.Now()); old != nil {
+		old.Close()
+	}
+	created := false
 	if b.window == nil {
+		created = true
 		if b.app == nil || b.url == "" {
 			return // not bound yet
 		}
@@ -474,7 +507,13 @@ func (b *nativeBridge) showWindowAt(hash string) {
 			}
 			b.settingsMu.Unlock()
 			b.persistSettings()
-			b.window = nil
+			// Guarded: when a revive replaced this window, b.window already
+			// points at the successor and must survive the old one's close.
+			b.windowMu.Lock()
+			if b.window == w {
+				b.window = nil
+			}
+			b.windowMu.Unlock()
 		})
 		// Capture size/maximised changes as the user drags or zooms the window.
 		w.OnWindowEvent(events.Common.WindowDidResize, func(*application.WindowEvent) {
@@ -497,7 +536,10 @@ func (b *nativeBridge) showWindowAt(hash string) {
 				w.SetURL(shellURL(b.url, ""))
 			})
 		}
+		b.windowMu.Lock()
 		b.window = w
+		b.windowMu.Unlock()
+		b.windowShownAt.Store(time.Now().UnixNano())
 	} else if hash != "" {
 		// Already open — navigate to the route. ExecJS can't be used here: the
 		// page is served by octo's own server, not Wails' asset server, so the
@@ -515,6 +557,136 @@ func (b *nativeBridge) showWindowAt(hash string) {
 		b.window.Restore()
 	}
 	b.window.Focus()
+	// Probe only a window that already existed: a black-but-alive webview is
+	// something that happens TO a window over time, and a freshly created one
+	// that never comes up is webviewDead's business on the next show — probing
+	// it here would race a slow first load into a pointless reload.
+	if !created {
+		b.probeFramesAfterShow()
+	}
+}
+
+// Webview liveness thresholds. The frontend beats every heartbeatInterval
+// while alive (plus immediately on focus/visibility, which Show/Focus above
+// trigger), so a beat gap several intervals wide means the page is gone, not
+// slow. beatGrace also covers a fresh window's load time before its first
+// beat. The probe delay exceeds the beat interval so a healthy shown page is
+// guaranteed at least one scheduled beat — with a running requestAnimationFrame
+// — inside the probe window even if no focus/visibility event fired.
+const (
+	heartbeatInterval = 5 * time.Second  // matches web/src/lib/nativeHeartbeat.ts
+	beatGrace         = 45 * time.Second // webviewDead threshold and fresh-window grace
+	frameProbeDelay   = 12 * time.Second
+	reviveCooldown    = 90 * time.Second
+)
+
+// webviewDead reports whether the page inside the current window has provably
+// stopped running: the window has been up longer than the grace period yet no
+// beat arrived within it. Never true before the first beat of a young window
+// (still loading) and never true while beats keep flowing — a black-but-alive
+// compositor is probeFramesAfterShow's job, not this one's.
+func (b *nativeBridge) webviewDead(now time.Time) bool {
+	shownAt := b.windowShownAt.Load()
+	if shownAt == 0 || now.Sub(time.Unix(0, shownAt)) < beatGrace {
+		return false
+	}
+	lastBeat := b.lastBeat.Load()
+	if lastBeat > shownAt {
+		return now.Sub(time.Unix(0, lastBeat)) > beatGrace
+	}
+	// No beat since this window appeared and the grace is over: the page
+	// never came up (or died before beating).
+	return true
+}
+
+// reviveAllowed rate-limits automatic window re-creation so a page that is
+// broken for a persistent reason (server wedged, port hijacked) can't put the
+// shell into a destroy/create loop.
+func (b *nativeBridge) reviveAllowed(now time.Time) bool {
+	last := b.lastRevive.Load()
+	return last == 0 || now.Sub(time.Unix(0, last)) > reviveCooldown
+}
+
+// detachIfDead detaches the current window when its page has stopped beating
+// and a revive is off cooldown, returning it for the caller to Close OUTSIDE
+// the lock (Close marshals to the UI thread). Returns nil when there is
+// nothing to revive. Detaching before the close is what lets the replacement
+// window survive the old one's WindowClosing handler.
+func (b *nativeBridge) detachIfDead(now time.Time) *application.WebviewWindow {
+	b.windowMu.Lock()
+	defer b.windowMu.Unlock()
+	if b.window == nil || !b.webviewDead(now) || !b.reviveAllowed(now) {
+		return nil
+	}
+	b.lastRevive.Store(now.UnixNano())
+	old := b.window
+	b.window = nil
+	return old
+}
+
+// detachStalled detaches w when it is still the current window and a revive is
+// off cooldown — the frame-probe counterpart of detachIfDead, keyed on window
+// identity because the probe already decided (from frame timestamps) that this
+// particular surface is black. Same Close-outside-the-lock contract.
+func (b *nativeBridge) detachStalled(w *application.WebviewWindow, now time.Time) *application.WebviewWindow {
+	b.windowMu.Lock()
+	defer b.windowMu.Unlock()
+	if b.window != w || !b.reviveAllowed(now) {
+		return nil
+	}
+	b.lastRevive.Store(now.UnixNano())
+	b.window = nil
+	return w
+}
+
+// probeFramesAfterShow schedules the black-window check for a webview that is
+// alive but no longer rendering — the WebView2 failure mode where the GPU
+// process died (e.g. across sleep/wake) and the compositor never recovers:
+// JS keeps running, beats keep arriving, the window stays black. Frames are
+// the tell: a healthy page's requestAnimationFrame resumes within a frame of
+// the window becoming visible, so if no beat with a fresh frame timestamp
+// lands within frameProbeDelay of this Show, the surface is gone — destroy
+// the window and bring up a replacement. Runs off the UI thread; the window
+// methods it calls marshal themselves.
+func (b *nativeBridge) probeFramesAfterShow() {
+	if !b.probeInFlight.CompareAndSwap(false, true) {
+		return
+	}
+	shownAt := time.Now()
+	b.windowMu.Lock()
+	shown := b.window
+	b.windowMu.Unlock()
+	if shown == nil {
+		b.probeInFlight.Store(false)
+		return
+	}
+	go func() {
+		defer b.probeInFlight.Store(false)
+		time.Sleep(frameProbeDelay)
+		if lastFrame := b.lastFrame.Load(); lastFrame != 0 && time.Unix(0, lastFrame).After(shownAt) {
+			return // frames flowed after this Show — healthy
+		}
+		// Identity-keyed: skips the case where the user closed this window (or
+		// a revive already replaced it) while the probe was sleeping.
+		old := b.detachStalled(shown, time.Now())
+		if old == nil {
+			return
+		}
+		old.Close()
+		b.showWindowAt("")
+	}()
+}
+
+// Heartbeat implements server.NativeBridge: the page beats every
+// heartbeatInterval (and on focus/visibilitychange) with the age of its last
+// requestAnimationFrame tick. The beat itself proves JS alive; the derived
+// frame timestamp proves the render pipeline alive.
+func (b *nativeBridge) Heartbeat(frameAgeMS int64) {
+	now := time.Now()
+	b.lastBeat.Store(now.UnixNano())
+	if frameAgeMS >= 0 {
+		b.lastFrame.Store(now.Add(-time.Duration(frameAgeMS) * time.Millisecond).UnixNano())
+	}
 }
 
 // confirm shows a modal question dialog and reports whether the user chose the
