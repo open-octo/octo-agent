@@ -232,6 +232,7 @@ Thanks to everyone who has contributed to octo:
   <a href="https://github.com/Leihb"><img src="https://avatars.githubusercontent.com/u/28055438?v=4&s=64" width="64" height="64" alt="Leihb" title="Leihb" /></a>
   <a href="https://github.com/eternalweightlessness"><img src="https://avatars.githubusercontent.com/u/210714574?v=4&s=64" width="64" height="64" alt="eternalweightlessness" title="eternalweightlessness" /></a>
   <a href="https://github.com/kunyuanhe-sudo"><img src="https://avatars.githubusercontent.com/u/292632541?v=4&s=64" width="64" height="64" alt="kunyuanhe-sudo" title="kunyuanhe-sudo" /></a>
+  <a href="https://github.com/linauror"><img src="https://avatars.githubusercontent.com/u/3039051?v=4&s=64" width="64" height="64" alt="linauror" title="linauror" /></a>
 </p>
 
 The full record lives in the [contributors graph](https://github.com/open-octo/octo-agent/graphs/contributors).
