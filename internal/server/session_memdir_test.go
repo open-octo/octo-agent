@@ -40,7 +40,7 @@ func TestSessionMemDir_PerSessionCwd(t *testing.T) {
 		t.Errorf("dir %q not under ~/.octo/memories", got)
 	}
 
-	// Cached: same cwd resolves to the same dir without re-shelling git.
+	// Stable: repeated resolution for the same cwd returns the same dir.
 	if again := s.sessionMemDir(sessCwd); again != got {
 		t.Errorf("second resolution %q != first %q", again, got)
 	}

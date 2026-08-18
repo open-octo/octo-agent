@@ -98,15 +98,39 @@ func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-// resolveMemoryPath resolves fname to an absolute path. If source is
-// "inherited" it looks only in homeMemDir; otherwise it looks first in
-// memDir then in homeMemDir.
+// resolveMemoryPath resolves fname to an absolute path. "inherited" targets
+// the home directory; "" and "project" keep the historical default (the
+// server-default project dir, falling back to home). Any other source is a
+// per-project slug from the expanded listing (handleGetMemories) and resolves
+// under the memories root — Base() pins it to a single path segment and the
+// directory must already exist, so a crafted source can't escape the root or
+// conjure new directories.
 func (s *Server) resolveMemoryPath(fname, source string) (string, bool) {
-	if source == "inherited" && s.homeMemDir != "" {
-		return filepath.Join(s.homeMemDir, fname), true
-	}
-	for _, dir := range []string{s.memDir, s.homeMemDir} {
-		if dir != "" {
+	switch source {
+	case "inherited":
+		if s.homeMemDir != "" {
+			return filepath.Join(s.homeMemDir, fname), true
+		}
+	case "", "project":
+		for _, dir := range []string{s.memDir, s.homeMemDir} {
+			if dir != "" {
+				return filepath.Join(dir, fname), true
+			}
+		}
+	default:
+		root, err := memory.RootDir()
+		if err != nil {
+			return "", false
+		}
+		// Base can still yield "." or ".." (Base("../..") == ".."), which
+		// would resolve to the root itself or its parent — reject those so a
+		// slug is always exactly one component below the root.
+		slug := filepath.Base(source)
+		if slug == "." || slug == ".." {
+			return "", false
+		}
+		dir := filepath.Join(root, slug)
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
 			return filepath.Join(dir, fname), true
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/memory"
 	"github.com/open-octo/octo-agent/internal/prompt"
 	"github.com/open-octo/octo-agent/internal/trash"
 )
@@ -57,32 +58,10 @@ func (s *Server) handleGetMemories(w http.ResponseWriter, r *http.Request) {
 		Source    string `json:"source"`
 	}
 	files := make([]memFile, 0)
-
-	// If the project memory directory coincides with the inherited (home)
-	// directory — e.g. the server was started from a non-repo path — listing
-	// both would emit duplicate paths. The front-end keys rows by path, so
-	// duplicates freeze the UI on "Loading memories…". Skip the inherited
-	// directory when it is the same as the project one, matching the dedupe
-	// already done in memory.RenderInjection.
-	homeMemDir := s.homeMemDir
-	if homeMemDir == s.memDir {
-		homeMemDir = ""
-	}
-
-	for _, src := range []struct {
-		dir   string
-		label string
-	}{{
-		s.memDir, "project",
-	}, {
-		homeMemDir, "inherited",
-	}} {
-		if src.dir == "" {
-			continue
-		}
-		entries, err := os.ReadDir(src.dir)
+	appendDir := func(dir, label string) {
+		entries, err := os.ReadDir(dir)
 		if err != nil {
-			continue
+			return
 		}
 		for _, e := range entries {
 			if e.IsDir() || filepath.Ext(e.Name()) != ".md" {
@@ -94,11 +73,50 @@ func (s *Server) handleGetMemories(w http.ResponseWriter, r *http.Request) {
 			}
 			files = append(files, memFile{
 				Name:      e.Name(),
-				Path:      filepath.Join(src.dir, e.Name()),
+				Path:      filepath.Join(dir, e.Name()),
 				Size:      info.Size(),
 				UpdatedAt: info.ModTime().UTC().Format(time.RFC3339),
-				Source:    src.label,
+				Source:    label,
 			})
+		}
+	}
+
+	// Memory disabled — the panel stays empty rather than surfacing
+	// directories no session can write to.
+	if s.cfg.NoMemory {
+		writeJSON(w, http.StatusOK, map[string]any{"files": files})
+		return
+	}
+
+	// The two well-known tiers first, in the order the UI has always shown
+	// them. When the server-default project dir coincides with the home dir
+	// (serve launched from a non-repo path), that directory IS the global
+	// tier: list it once, as "inherited" — listing both would emit duplicate
+	// paths, and the front-end keys rows by path, so duplicates freeze the
+	// UI on "Loading memories…".
+	if s.memDir != "" && s.memDir != s.homeMemDir {
+		appendDir(s.memDir, "project")
+	}
+	if s.homeMemDir != "" {
+		appendDir(s.homeMemDir, "inherited")
+	}
+
+	// Then every other slug directory under the memories root: per-project
+	// memories written by sessions working in those projects (sessionMemDir).
+	// Each is labeled with its slug, which resolveMemoryPath accepts as the
+	// `source` for GET/DELETE, so the rows stay addressable.
+	if root, err := memory.RootDir(); err == nil {
+		if entries, err := os.ReadDir(root); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() {
+					continue
+				}
+				dir := filepath.Join(root, e.Name())
+				if dir == s.memDir || dir == s.homeMemDir {
+					continue
+				}
+				appendDir(dir, e.Name())
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"files": files})

@@ -1327,8 +1327,12 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 		// L1: project memory embedded in the system prompt, snapshotted once.
 		// Resolved from the session's cwd (not the server's launch directory),
 		// so a session working inside a project reads and writes that
-		// project's memory. The freeze above is keyed on cwd, so a per-cwd
-		// memDir can't go stale under a frozen prompt.
+		// project's memory. The freeze above is keyed on cwd, so a prompt
+		// frozen from HERE on can't carry a memDir that disagrees with its
+		// cwd. Sessions frozen before this per-cwd resolution existed still
+		// carry the server-level dir baked into their prompt until something
+		// re-freezes them (model/cwd/notes change) — old memories keep
+		// flowing in via the inherited tier either way.
 		var memInjection string
 		if memDir := s.sessionMemDir(cwd); memDir != "" {
 			memInjection = memory.RenderInjection(memDir, s.homeMemDir)
@@ -3363,8 +3367,10 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		sess.Agent.System, sess.Agent.LeanSystem = sess.Store.ComposedSystem, sess.Store.ComposedLeanSystem
 	} else {
 		// Per-session memory dir, same as buildAgent gives web turns: the
-		// freeze above is keyed on cwd, so a per-cwd memDir can't go stale
-		// under a frozen prompt.
+		// freeze above is keyed on cwd, so a prompt frozen from here on
+		// can't carry a memDir that disagrees with its cwd (sessions frozen
+		// before per-cwd resolution keep the server-level dir until
+		// re-frozen — see buildAgent).
 		var memInjection string
 		if memDir := s.sessionMemDir(cwd); memDir != "" {
 			memInjection = memory.RenderInjection(memDir, s.homeMemDir)

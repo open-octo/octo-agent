@@ -95,13 +95,24 @@ func resolveSymlinks(p string) string {
 	return p
 }
 
-// Dir returns the memory directory for repoRoot: ~/.octo/memories/<repo-slug>.
-func Dir(repoRoot string) (string, error) {
+// RootDir returns ~/.octo/memories — the parent holding every per-repo slug
+// directory (see Dir). Callers that enumerate all project memories (e.g. the
+// serve memory panel) read it instead of hard-coding the layout.
+func RootDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return "", fmt.Errorf("memory: cannot resolve home dir: %w", err)
 	}
-	return filepath.Join(home, ".octo", "memories", repoSlug(repoRoot)), nil
+	return filepath.Join(home, ".octo", "memories"), nil
+}
+
+// Dir returns the memory directory for repoRoot: ~/.octo/memories/<repo-slug>.
+func Dir(repoRoot string) (string, error) {
+	root, err := RootDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, repoSlug(repoRoot)), nil
 }
 
 // HomeDir returns the memory directory for the user's home directory.
