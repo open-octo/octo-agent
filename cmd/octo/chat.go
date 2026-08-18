@@ -788,6 +788,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// not a repo resolves to that same home dir rather than a slug of its own
 	// — see memory.DirForSession.
 	var memDir, homeMemDir string
+	var memWriteRoots []string
 	if !*noMemory {
 		if d, _, err := memory.DirForSession(cwd); err == nil {
 			if memory.EnsureDir(d) == nil {
@@ -799,6 +800,22 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				homeMemDir = d
 			}
 		}
+		// Whitelist the whole memories tree, not just this session's two
+		// directories: a durable fact about ANOTHER repo belongs in that
+		// repo's memory dir (see RenderInjection's cross-project guidance),
+		// and prompting for every such save would train the user to click
+		// through. Gated on --no-memory — disabling memory must not leave a
+		// standing write pass behind.
+		if memDir != "" {
+			if root, err := memory.RootDir(); err == nil {
+				memWriteRoots = []string{root}
+			}
+		}
+	}
+	if len(memWriteRoots) == 0 {
+		// RootDir failed (unresolvable home) or memory is off — fall back to
+		// whatever concrete dirs we did resolve.
+		memWriteRoots = []string{memDir, homeMemDir}
 	}
 
 	if *useSandbox {
@@ -1096,11 +1113,11 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	a.HookMeta = hooks.Meta{Cwd: cwd}
 
 	// Permission engine — gates every tool call; shared by both paths. The
-	// memory directory (outside CWD) is whitelisted for writes so the agent can
+	// memory tree (outside CWD) is whitelisted for writes so the agent can
 	// manage its memory files without a prompt on every save.
 	var permEngine *permission.Engine
 	if toolsOn {
-		eng, perr := permission.New(permissionConfigPath(), cwd, resolvePermissionMode(resolvedPermMode), memDir, homeMemDir)
+		eng, perr := permission.New(permissionConfigPath(), cwd, resolvePermissionMode(resolvedPermMode), memWriteRoots...)
 		if perr != nil {
 			fmt.Fprintf(stderr, "octo: permission config: %v\n", perr)
 			return 1

@@ -1842,6 +1842,26 @@ func (s *Server) sessionMemDir(cwd string) string {
 	return dir
 }
 
+// memoryWriteRoots returns the write-allowlist roots handed to the permission
+// engine: the whole ~/.octo/memories tree rather than just this session's two
+// directories. A durable fact about ANOTHER repo belongs in that repo's memory
+// dir (see memory.RenderInjection's cross-project guidance) — the common case
+// being a session with no project of its own asked to work on one — and
+// prompting for every such save would train the user to click through.
+//
+// Empty when memory is disabled: --no-memory must not leave a standing write
+// pass behind. Falls back to the concrete resolved dirs if the root can't be
+// resolved (unresolvable home), which is also when those two are empty anyway.
+func (s *Server) memoryWriteRoots(cwd string) []string {
+	if s.cfg.NoMemory {
+		return nil
+	}
+	if root, err := memory.RootDir(); err == nil {
+		return []string{root}
+	}
+	return []string{s.sessionMemDir(cwd), s.homeMemDir}
+}
+
 // sessionCwd resolves a loaded session's working dir. Used by the status/list
 // surfaces so the UI shows where a session's tools actually run.
 func (s *Server) sessionCwd(sess *agent.Session) string {
@@ -3446,7 +3466,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	if st := sess.Store; st != nil && st.PermissionMode != "" {
 		mode = permission.Mode(st.PermissionMode)
 	}
-	engine, err := permission.New(permissionConfigPath(), cwd, mode, s.sessionMemDir(cwd), s.homeMemDir)
+	engine, err := permission.New(permissionConfigPath(), cwd, mode, s.memoryWriteRoots(cwd)...)
 	if err != nil {
 		// Generic chat reply — err.Error() can leak local paths into a
 		// group chat; the operator gets the detail on the server console.

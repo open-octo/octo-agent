@@ -77,6 +77,116 @@ func TestDirForSession_RepoGetsOwnSlug(t *testing.T) {
 	}
 }
 
+// A git failure must NOT be read as "not a repo". git exits 128 both outside a
+// repo and when it distrusts one (safe.directory dubious ownership), and the
+// message is localized — so when git can't answer, the .git entry decides.
+// Getting this wrong merges a real project's notes into the shared tier.
+func TestDirForSession_GitUnavailableKeepsRepoIsolated(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	repo := t.TempDir()
+	if out, err := exec.Command("git", "-C", repo, "init").CombinedOutput(); err != nil {
+		t.Skipf("git init unavailable: %v (%s)", err, out)
+	}
+	homeDir, err := HomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No git binary reachable at all.
+	t.Setenv("PATH", filepath.Join(home, "no-such-bin"))
+
+	dir, inProject, err := DirForSession(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inProject {
+		t.Error("a directory with .git must count as a project even when git cannot be run")
+	}
+	if dir == homeDir {
+		t.Errorf("repo collapsed into the shared tier %q when git was unavailable", homeDir)
+	}
+
+	// The rule still works without git for the case it was written for: a
+	// non-repo directory shares the global tier.
+	scratch := filepath.Join(home, "Octo")
+	if err := os.MkdirAll(scratch, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, inProject, err := DirForSession(scratch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inProject || got != homeDir {
+		t.Errorf("non-repo without git = %q (inProject=%v), want shared dir %q", got, inProject, homeDir)
+	}
+}
+
+// A bare repo has no work tree, so it has no project memory of its own — it
+// shares the global tier. Pinned because it is a behavior change and it falls
+// out of the --git-common-dir fall-through rather than being written directly.
+func TestDirForSession_BareRepoUsesSharedTier(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	bare := filepath.Join(t.TempDir(), "repo.git")
+	if out, err := exec.Command("git", "init", "--bare", bare).CombinedOutput(); err != nil {
+		t.Skipf("git init --bare unavailable: %v (%s)", err, out)
+	}
+
+	dir, inProject, err := DirForSession(bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantHome, err := HomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inProject || dir != wantHome {
+		t.Errorf("bare repo = %q (inProject=%v), want shared dir %q", dir, inProject, wantHome)
+	}
+}
+
+// A linked worktree shares its main repo's memory — a checkout must not start
+// with empty project memory. ProjectRoot has covered this; assert it survives
+// through DirForSession too.
+func TestDirForSession_LinkedWorktreeSharesRepoDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	repo := t.TempDir()
+	if out, err := exec.Command("git", "-C", repo, "init").CombinedOutput(); err != nil {
+		t.Skipf("git init unavailable: %v (%s)", err, out)
+	}
+	for _, args := range [][]string{
+		{"-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "init"},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Skipf("git commit unavailable: %v (%s)", err, out)
+		}
+	}
+	wt := filepath.Join(t.TempDir(), "wt")
+	if out, err := exec.Command("git", "-C", repo, "worktree", "add", wt).CombinedOutput(); err != nil {
+		t.Skipf("git worktree add unavailable: %v (%s)", err, out)
+	}
+
+	repoDir, _, err := DirForSession(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wtDir, inProject, err := DirForSession(wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inProject || wtDir != repoDir {
+		t.Errorf("worktree = %q (inProject=%v), want the main repo's dir %q", wtDir, inProject, repoDir)
+	}
+}
+
 // A subdirectory inside a repo shares the repo's memory, and the home dir
 // itself (not a repo) resolves to the shared dir — the two ends of the rule.
 func TestDirForSession_SubdirAndHome(t *testing.T) {

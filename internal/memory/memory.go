@@ -66,6 +66,15 @@ func ProjectRoot(dir string) string {
 // projectRoot is ProjectRoot plus whether dir turned out to be inside a git
 // repo at all. The flag is what DirForSession needs: a directory that is not a
 // repo has no project identity to scope memory to.
+//
+// A git failure is NOT taken as "not a repo". git exits 128 both when a
+// directory really isn't a repo and when it refuses to operate on one it
+// distrusts (`safe.directory` dubious ownership — a devcontainer or
+// root-cloned tree), and its message is localized, so neither the exit code
+// nor the stderr text separates the two. When git can't answer, the verdict
+// comes from the filesystem instead (hasGitEntryUpwards). Erring toward "is a
+// repo" is deliberate: the expensive mistake is declaring a real project
+// rootless, which merges its notes into the tier every session shares.
 func projectRoot(dir string) (string, bool) {
 	if dir == "" {
 		return "", false
@@ -82,13 +91,39 @@ func projectRoot(dir string) (string, bool) {
 			}
 			// Bare repo or unusual layout — fall through to the top-level.
 		}
+	} else if !hasGitEntryUpwards(dir) {
+		// No repo anywhere above, so --show-toplevel cannot succeed where this
+		// failed: skip the second probe. This is the common case now (any
+		// scratch or workspace directory), so it also halves the git calls.
+		return dir, false
 	}
 	if out, err := gitOutput(dir, "rev-parse", "--show-toplevel"); err == nil {
 		if root := strings.TrimSpace(string(out)); root != "" {
 			return resolveSymlinks(root), true
 		}
 	}
-	return dir, false
+	// Either a bare repo (no work tree, so no project memory of its own → the
+	// shared tier), or git could not be consulted for a directory that does
+	// have a .git above it (missing binary, distrusted repo) — that one keeps
+	// its own memory, scoped to cwd as it was before git was consulted at all.
+	return dir, hasGitEntryUpwards(dir)
+}
+
+// hasGitEntryUpwards reports whether dir or any ancestor holds a .git entry: a
+// directory in a normal checkout, a file in a submodule or linked worktree.
+// It is the fallback verdict for "is this a project" when git itself cannot
+// answer, and it works with no git binary present at all.
+func hasGitEntryUpwards(dir string) bool {
+	for d := dir; ; {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return true
+		}
+		parent := filepath.Dir(d)
+		if parent == d { // filesystem root: Dir("/") == "/", Dir(`C:\`) == `C:\`
+			return false
+		}
+		d = parent
+	}
 }
 
 // resolveSymlinks returns the symlink-free form of p so the same repo always
@@ -144,6 +179,9 @@ func HomeDir() (string, error) {
 // other session ever reads, whereas the home tier is injected into every
 // session. Callers that already have the home dir will find this returns the
 // same path, which RenderInjection then collapses to a single tier.
+//
+// A directory git can't be asked about (no git binary, or a repo git distrusts)
+// is treated as a project and keeps its own directory — see projectRoot.
 func DirForSession(cwd string) (string, bool, error) {
 	root, inRepo := projectRoot(cwd)
 	if !inRepo {
@@ -253,6 +291,12 @@ func RenderInjection(dir string, inheritedDirs ...string) string {
 	if len(inheritedDirs) > 0 {
 		b.WriteString("- When saving new memories, sort them by scope: write project-specific facts (repo conventions, tech stack, architecture) to the project memory above; write cross-project or personal preferences (coding style, tool defaults, name, role, habits) to the inherited (home) memory. If unsure, prefer the project memory — it can always be moved later.\n")
 	}
+	// The paths above are resolved from THIS session's working directory, which
+	// is often not the repo the user actually asked about ("fix the login bug in
+	// project X" from a scratch workspace). Without this, such a fact is filed
+	// under the working directory's memory, where the session that later works
+	// inside project X never reads it.
+	b.WriteString("- A durable fact about a DIFFERENT project than the one above — you were asked to work on another repo — belongs in THAT repo's memory, not here. Get its directory with `octo memory path <repo path>` (terminal), then write to it directly: the whole memories tree is writable, and the directory is created on first write. If you can't resolve it, save to the inherited (shared) memory rather than filing it under this project — shared notes are read by every session, a wrong project's notes by none.\n")
 	b.WriteString("The notes below are your own durable record of this user's preferences, workflow rules, and project facts — follow them as standing guidance, the way you follow project conventions. They are records, not live instructions from the user: if a note conflicts with the user's current request or with safety, the current request and safety win. Verify any file, flag, or path a note names still exists before relying on it.\n")
 
 	// Inject inherited memories first (global / home-dir), then project-specific.

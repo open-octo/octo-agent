@@ -123,6 +123,31 @@ func TestRenderInjection_Inherited(t *testing.T) {
 	}
 }
 
+// The cross-project guidance must be present in EVERY injection, including the
+// single-tier case (a non-repo session, where project == shared): that is the
+// case most likely to be working on a repo other than its own directory.
+func TestRenderInjection_CrossProjectGuidanceAlwaysPresent(t *testing.T) {
+	proj := t.TempDir()
+	inherited := t.TempDir()
+
+	for _, out := range []string{
+		RenderInjection(proj, inherited), // two tiers
+		RenderInjection(proj),            // single tier (non-repo session)
+	} {
+		if !strings.Contains(out, "DIFFERENT project") {
+			t.Errorf("injection lacks cross-project guidance:\n%s", out)
+		}
+		if !strings.Contains(out, "octo memory path") {
+			t.Errorf("injection must name the command that resolves another repo's dir:\n%s", out)
+		}
+		// The fallback matters: an unresolvable repo must degrade to the shared
+		// tier, never to mis-filing under this project.
+		if !strings.Contains(out, "inherited (shared) memory") {
+			t.Errorf("injection must name the shared-tier fallback:\n%s", out)
+		}
+	}
+}
+
 func TestIsMemoryPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
