@@ -295,6 +295,50 @@ func TestReasoningContent_EmptyEchoAfterThinking(t *testing.T) {
 	}
 }
 
+// TestReasoningContent_GateFlipsMidConversation pins the deliberate semantics
+// of the thinkingSeen gate when the FIRST tool round skipped thinking: that
+// round's assistant message stays without the field (nothing was seen yet),
+// and only messages after the first actual trace get the empty echo. This is
+// a known, accepted gap versus the literal V4 contract — do not "fix" the
+// pre-trace omission without solving field-presence tracking end to end (see
+// the thinkingSeen note in toAPIMessages).
+func TestReasoningContent_GateFlipsMidConversation(t *testing.T) {
+	round1 := agent.NewToolUseBlock("call-1", "read_file", map[string]any{"path": "go.mod"})
+	round2 := agent.NewToolUseBlock("call-2", "read_file", map[string]any{"path": "go.sum"})
+	round2.Reasoning = "now I should check the lockfile"
+
+	msgs, err := toAPIMessages("", []agent.Message{
+		agent.NewUserMessage("read both files"),
+		agent.NewToolUseMessage([]agent.ContentBlock{round1}),
+		agent.NewToolResultMessage([]agent.ContentBlock{agent.NewToolResultBlock("call-1", "module x", false)}),
+		agent.NewToolUseMessage([]agent.ContentBlock{round2}),
+		agent.NewToolResultMessage([]agent.ContentBlock{agent.NewToolResultBlock("call-2", "hash y", false)}),
+		agent.NewAssistantMessage("both read"),
+	})
+	if err != nil {
+		t.Fatalf("toAPIMessages: %v", err)
+	}
+
+	var assistants []*string
+	for _, m := range msgs {
+		if m.Role == "assistant" {
+			assistants = append(assistants, m.ReasoningContent)
+		}
+	}
+	if len(assistants) != 3 {
+		t.Fatalf("assistant messages = %d, want 3", len(assistants))
+	}
+	if assistants[0] != nil {
+		t.Errorf("traceless round before the first trace: reasoning_content = %q, want omitted", *assistants[0])
+	}
+	if assistants[1] == nil || *assistants[1] != "now I should check the lockfile" {
+		t.Errorf("first traced round: reasoning_content = %v, want the trace", assistants[1])
+	}
+	if assistants[2] == nil || *assistants[2] != "" {
+		t.Errorf("text turn after the trace: reasoning_content = %v, want empty string", assistants[2])
+	}
+}
+
 // TestSend_ToolResultMessages_WireFormat verifies that tool_result blocks are
 // serialized as individual role="tool" messages (OpenAI format).
 func TestSend_ToolResultMessages_WireFormat(t *testing.T) {

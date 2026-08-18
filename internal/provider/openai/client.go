@@ -476,6 +476,12 @@ func toAPIMessages(systemPrompt string, in []agent.Message) ([]apiMessage, error
 	// with HTTP 400. Gating on an actually-seen trace keeps the field
 	// completely off sessions with non-thinking models and R1 (which rejects
 	// it on plain text turns); before the first trace nothing changes either.
+	// Known gap, accepted deliberately: a session whose every tool round
+	// skipped thinking never flips the gate, so a backend that demands the
+	// field even then still 400s. Closing it would need tracking field
+	// PRESENCE (not content) from responses through history — an agent-layer
+	// marker the streaming deltas can't reliably supply — for a case no
+	// real-world report has exhibited yet.
 	thinkingSeen := false
 	emptyReasoning := ""
 	for _, m := range in {
