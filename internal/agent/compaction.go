@@ -41,6 +41,11 @@ func ContextWindow(model string) int { return contextWindow(model) }
 // ContextUsage instead of maintaining a second implementation.
 func EstimateTokens(msgs []Message) int { return estimateMessages(msgs) }
 
+// EstimateTextTokens exposes estimateText for the same reason — the web
+// server folds a resumed session's frozen system prompt into its cold-start
+// context-percent estimate, which the transcript-only count omits.
+func EstimateTextTokens(s string) int { return estimateText(s) }
+
 // contextWindow returns the approximate context-window size (in tokens) for a
 // model. Values are deliberately conservative; matched case-insensitively by
 // substring so dated/aliased names ("claude-haiku-4-5-2025…") still resolve.

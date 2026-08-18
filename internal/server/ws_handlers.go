@@ -179,30 +179,41 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 	s.sessionAgentsMu.Unlock()
 	sess, _ := agent.LoadSession(sessionID)
 	if a != nil {
-		// Turn in flight: the live Agent has the exact current count.
-		if used, window := a.ContextUsage(); window > 0 && used > 0 {
-			pct = used * 100 / window
-			usedTokens = used
+		// Turn in flight: the live Agent has the exact current count. Only the
+		// provider-reported count qualifies — before the turn's first
+		// round-trip lands, ContextUsage() would fall back to a chars/4
+		// transcript estimate that undercounts (no system-prompt/tools
+		// overhead), making the bar visibly SHRINK on a mid-turn resubscribe.
+		// The persisted last-turn count below is far closer; the next round's
+		// usage broadcast corrects it.
+		if used := a.RealContextTokens(); used > 0 {
+			if window := agent.ContextWindow(a.Model); window > 0 {
+				pct = used * 100 / window
+				usedTokens = used
+			}
 		}
 	}
-	if pct == 0 && sess != nil && sess.LastContextTokens > 0 {
+	if usedTokens == 0 && sess != nil && sess.LastContextTokens > 0 {
 		// Idle/resumed session — or a turn whose first provider call hasn't
-		// reported usage yet (live agent returns 0). Report the real count
-		// persisted from its last turn (matches what the turn-end broadcast sent).
+		// reported usage yet (RealContextTokens returns 0). Report the real
+		// count persisted from its last turn (matches what the turn-end
+		// broadcast sent). Keyed on usedTokens, not pct: a live count too
+		// small to reach 1% of the window (a huge-window model, or right
+		// after a mid-turn compaction) is still authoritative and must not
+		// be displaced by a larger stale persisted count.
 		if window := agent.ContextWindow(sess.Model); window > 0 {
 			pct = sess.LastContextTokens * 100 / window
 			usedTokens = sess.LastContextTokens
 		}
 	}
-	if pct == 0 && sess != nil {
-		// No real count anywhere (a session predating the field, one that never
-		// completed a turn with a real count, or a count too small to reach 1% of
-		// the window): fall back to a transcript estimate. It carries no exact
-		// token count, so clear usedTokens — the UI shows a bare arrow.
+	if usedTokens == 0 && sess != nil {
+		// No real count anywhere (a session predating the field, or one that
+		// never completed a turn with a real count): fall back to a transcript
+		// estimate. It carries no exact token count, so usedTokens stays 0 —
+		// the UI shows a bare arrow.
 		pct = estimateContextPct(sess)
-		usedTokens = 0
 	}
-	if pct <= 0 {
+	if pct <= 0 && usedTokens <= 0 {
 		return
 	}
 	if pct > 100 {
@@ -225,14 +236,29 @@ func (s *Server) sendContextUsage(sessionID string, conn *wsConn) {
 
 // estimateContextPct approximates how full the model's context window a
 // persisted transcript occupies, using the same heuristic Agent.ContextUsage
-// falls back to (agent.EstimateTokens). Used only when no live token count is
-// available (no Agent has run in this process for the session yet).
+// falls back to (agent.EstimateTokens). Used only when no real token count is
+// available anywhere (neither a live Agent nor a persisted LastContextTokens).
+// The frozen system prompt rides every request, so it counts too — the
+// transcript alone reads far lower than what a turn actually sends. Tool
+// schemas also ride along but the session doesn't record them; this stays a
+// (closer) lower bound.
 func estimateContextPct(sess *agent.Session) int {
 	window := agent.ContextWindow(sess.Model)
 	if window <= 0 {
 		return 0
 	}
-	return agent.EstimateTokens(sess.Messages) * 100 / window
+	if len(sess.Messages) == 0 {
+		// Same gate as Agent.ContextUsage: an empty transcript (new session,
+		// or just /clear-ed) shows no gauge — the system prompt overhead is
+		// real but a "ctx N%" on a conversation that hasn't started misleads.
+		return 0
+	}
+	sys := sess.ComposedSystem
+	if sys == "" {
+		sys = sess.System
+	}
+	est := agent.EstimateTokens(sess.Messages) + agent.EstimateTextTokens(sys)
+	return est * 100 / window
 }
 
 // replayLiveState replays in-progress agent state (progress + stdout) to a
@@ -665,6 +691,10 @@ func (s *Server) wsClearSession(sid string) {
 		return
 	}
 	sess.Messages = nil
+	// The persisted count describes the wiped conversation — left in place, a
+	// resubscribe after /clear would report the pre-clear context usage (the
+	// broadcast below says 0, but sendContextUsage reads this field).
+	sess.LastContextTokens = 0
 	if err := sess.Save(); err != nil {
 		s.wsToast(sid, "Clear failed: "+err.Error(), "error")
 		return
@@ -1946,6 +1976,11 @@ type wsStreamWriter struct {
 	hub       *wsHub
 	server    *Server // for live state tracking
 	mu        sync.Mutex
+
+	// lastCtxTokens is the context-token count most recently broadcast by
+	// broadcastContextUsage, so parallel tool calls in one round (same count)
+	// broadcast once. Guarded by mu (handleEvent holds it).
+	lastCtxTokens int
 }
 
 func (s *Server) newWSStreamWriter(sessionID string) *wsStreamWriter {
@@ -2042,6 +2077,37 @@ func (w *wsStreamWriter) reseedThinkingProgress() {
 	})
 }
 
+// broadcastContextUsage pushes the live context-window fill to subscribed
+// tabs mid-turn. The Agent updates its count after every provider round-trip,
+// but the only other context_usage broadcasts happen at subscribe time and at
+// turn end — without this, a long multi-tool turn leaves the composer's
+// Context bar frozen at its turn-start value until the turn finishes. Called
+// on EventToolStarted (the first event after each round-trip's usage lands)
+// and deduped by token count. Caller must hold w.mu.
+func (w *wsStreamWriter) broadcastContextUsage() {
+	w.server.sessionAgentsMu.Lock()
+	a := w.server.sessionAgents[w.sessionID]
+	w.server.sessionAgentsMu.Unlock()
+	if a == nil {
+		return
+	}
+	used, window := a.ContextUsage()
+	if used <= 0 || window <= 0 || used == w.lastCtxTokens {
+		return
+	}
+	w.lastCtxTokens = used
+	pct := used * 100 / window
+	if pct > 100 {
+		pct = 100
+	}
+	w.hub.broadcast(w.sessionID, map[string]any{
+		"type":           "session_update",
+		"session_id":     w.sessionID,
+		"context_usage":  pct,
+		"context_tokens": used,
+	})
+}
+
 // handleEvent converts agent.AgentEvent to WS JSON events and broadcasts them.
 // It also updates the server's live state for late-subscriber replay.
 func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
@@ -2091,6 +2157,11 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 			ls.stdoutToolID = ""
 		}
 		w.server.liveStateMu.Unlock()
+
+		// The provider round-trip that produced this tool call already folded
+		// its usage into the live Agent (accrueUsage), so this is the earliest
+		// point each round where the fresh count is available.
+		w.broadcastContextUsage()
 
 	case agent.EventToolProgress:
 		// Live output for a running terminal command (issue #1094). Only

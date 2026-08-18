@@ -1429,11 +1429,57 @@ func TestContextUsage_EstimatesFromHistoryBeforeFirstTurn(t *testing.T) {
 	}
 }
 
+// The estimate fallback must count the whole request, not just the transcript:
+// the system prompt and tool schemas ride every call and routinely add 10k+
+// tokens, so a transcript-only estimate read far below the real count the
+// provider reports one round-trip later (the gauge visibly jumped up).
+func TestContextUsage_EstimateIncludesSystemAndToolSchemas(t *testing.T) {
+	a := New(nil, "m")
+	a.History.Append(Message{Role: "user", Content: strings.Repeat("word ", 200)})
+	base, _ := a.ContextUsage()
+
+	a.System = strings.Repeat("rule ", 400)
+	withSystem, _ := a.ContextUsage()
+	if want := base + estimateText(a.System); withSystem != want {
+		t.Errorf("ContextUsage with system = %d, want %d (transcript + system prompt)", withSystem, want)
+	}
+
+	defs := []ToolDefinition{{
+		Name:        "terminal",
+		Description: strings.Repeat("runs a shell command ", 20),
+		Parameters: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"command": map[string]any{"type": "string"}},
+		},
+	}}
+	a.setToolDefOverhead(defs)
+	withTools, _ := a.ContextUsage()
+	if withTools <= withSystem {
+		t.Errorf("ContextUsage with tool schemas = %d, want > %d", withTools, withSystem)
+	}
+
+	// A no-tools turn sends no schemas — nil must clear the stash.
+	a.setToolDefOverhead(nil)
+	if cleared, _ := a.ContextUsage(); cleared != withSystem {
+		t.Errorf("ContextUsage after clearing tool overhead = %d, want %d", cleared, withSystem)
+	}
+
+	// A real provider-reported count always wins over the estimate.
+	a.accrueUsage(Reply{InputTokens: 12345})
+	if real, _ := a.ContextUsage(); real != 12345 {
+		t.Errorf("ContextUsage with real count = %d, want 12345", real)
+	}
+}
+
 // A brand new session with no history yet must report used == 0, not a
 // nonzero estimate, or the TUI status bar's used > 0 guard would show a
-// misleading "ctx N%" for a conversation that hasn't started.
+// misleading "ctx N%" for a conversation that hasn't started. The real TUI
+// always has a composed System (and, once a turn ran, stashed tool schemas)
+// before the first message — the empty-transcript gate must beat both.
 func TestContextUsage_ZeroForEmptyHistory(t *testing.T) {
 	a := New(nil, "m")
+	a.System = strings.Repeat("rule ", 400)
+	a.setToolDefOverhead([]ToolDefinition{{Name: "terminal", Description: "runs a command"}})
 
 	if used, _ := a.ContextUsage(); used != 0 {
 		t.Errorf("ContextUsage used = %d, want 0 for empty history", used)
@@ -1445,6 +1491,10 @@ func TestContextUsage_ZeroForEmptyHistory(t *testing.T) {
 func TestContextUsage_ZeroAfterClearHistory(t *testing.T) {
 	send := &fakeSender{reply: Reply{Content: "ok", InputTokens: 500}}
 	a := New(send, "m")
+	// ClearHistory keeps System and the stashed tool overhead — only the
+	// transcript is wiped, so the empty-transcript gate must carry the reset.
+	a.System = strings.Repeat("rule ", 400)
+	a.setToolDefOverhead([]ToolDefinition{{Name: "terminal", Description: "runs a command"}})
 	if _, err := a.Turn(context.Background(), "hi"); err != nil {
 		t.Fatalf("Turn: %v", err)
 	}

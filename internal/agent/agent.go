@@ -245,6 +245,11 @@ type Agent struct {
 	// lastInputTokens is the size of the most recently sent context, used as
 	// the compaction trigger.
 	lastInputTokens int
+	// toolDefTokens is the estimated size of the tool schemas sent with each
+	// request, stashed at Run/RunStream entry from the actual definitions.
+	// Folded into ContextUsage's estimate fallback only — the transcript
+	// alone badly undercounts what a request actually sends.
+	toolDefTokens int
 
 	// Inbox holds user messages that arrived while a turn was running.
 	// The run loop drains it at the start of each iteration, before the LLM
@@ -824,6 +829,7 @@ func (a *Agent) Run(ctx context.Context, userInput string, tools []ToolDefinitio
 	if userInput == "" && len(a.pendingUserBlocks) == 0 {
 		return Reply{}, fmt.Errorf("agent: userInput must be non-empty")
 	}
+	a.setToolDefOverhead(tools)
 
 	// Fire Stop once the turn concludes — success or failure. Registered after
 	// validation so config errors (no turn ran) don't emit a spurious Stop. The
@@ -874,6 +880,7 @@ func (a *Agent) RunStream(
 	if userInput == "" && len(a.pendingUserBlocks) == 0 {
 		return Reply{}, fmt.Errorf("agent: userInput must be non-empty")
 	}
+	a.setToolDefOverhead(tools)
 
 	// Fire Stop once the turn concludes — success or failure. See Run.
 	defer func() { a.fireStop(userInput, reply, err) }()
@@ -2312,14 +2319,52 @@ func (a *Agent) resetContextTrigger() {
 func (a *Agent) ContextUsage() (used, window int) {
 	a.usageMu.Lock()
 	real := a.lastInputTokens
+	overhead := a.toolDefTokens
 	a.usageMu.Unlock()
 	if real > 0 {
 		return real, contextWindow(a.Model)
 	}
 	// Only pay for the History snapshot + heuristic estimate when there's no
 	// real count yet (cold start) — this is called at TUI render-tick rate,
-	// where a real count is the common case.
-	return estimateMessages(a.History.Snapshot()), contextWindow(a.Model)
+	// where a real count is the common case. The transcript alone badly
+	// undercounts what a request actually sends: the system prompt and tool
+	// schemas ride every call and routinely add 10k+ tokens, so include both
+	// (tool schemas once Run/RunStream has stashed their size).
+	msgs := a.History.Snapshot()
+	if len(msgs) == 0 {
+		// A conversation that hasn't started (or was just /clear-ed) shows no
+		// gauge at all — the system/tools overhead is real but reporting it
+		// here would put a misleading "ctx N%" on an empty transcript (the
+		// TUI status bar keys on used > 0).
+		return 0, contextWindow(a.Model)
+	}
+	est := estimateMessages(msgs) + estimateText(a.System) + overhead
+	return est, contextWindow(a.Model)
+}
+
+// setToolDefOverhead stashes the estimated wire size of the tool schemas sent
+// with each request, so ContextUsage's estimate fallback accounts for them.
+// Called at Run/RunStream entry with the actual definitions (nil clears it —
+// a no-tools turn sends none).
+func (a *Agent) setToolDefOverhead(tools []ToolDefinition) {
+	total := 0
+	for _, d := range tools {
+		total += estimateText(d.Name) + estimateText(d.Description) + estimateMap(d.Parameters)
+	}
+	a.usageMu.Lock()
+	a.toolDefTokens = total
+	a.usageMu.Unlock()
+}
+
+// RealContextTokens returns the provider-reported size of the most recently
+// sent context, or 0 when no round-trip has reported usage yet (a fresh Agent
+// before its first reply lands). Unlike ContextUsage it never falls back to
+// the transcript estimate — for callers that have a better zero fallback
+// (e.g. the persisted Session.LastContextTokens).
+func (a *Agent) RealContextTokens() int {
+	a.usageMu.Lock()
+	defer a.usageMu.Unlock()
+	return a.lastInputTokens
 }
 
 // PersistContextUsage records this agent's current context-window token count on
