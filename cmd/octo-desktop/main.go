@@ -243,6 +243,17 @@ func main() {
 			// reachable. When they opt out, last-window-close quits as usual.
 			ApplicationShouldTerminateAfterLastWindowClosed: !settings.KeepRunningInBackground,
 		},
+		Windows: application.WindowsOptions{
+			// Chromium's native-window occlusion tracker stops rendering a
+			// WebView2 whose window is minimised or fully covered; on some
+			// machines the compositor never paints again after restore,
+			// leaving a permanently black window (WebView2Feedback#5171).
+			// Disable the tracker so a backgrounded window keeps its render
+			// pipeline alive. Wails appends this to its own disabled-feature
+			// defaults. The cost is a still-rendering hidden webview, which
+			// is acceptable for a tray-resident hub.
+			DisabledFeatures: []string{"CalculateNativeWinOcclusion"},
+		},
 	})
 	bridge.app = app
 
