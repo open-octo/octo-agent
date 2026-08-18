@@ -86,7 +86,12 @@ func TestJudgePage(t *testing.T) {
 // with it a replacement window that also came up black, which is precisely when
 // the retry matters. A visible page that beats without ever painting is black.
 func TestJudgePageBlackFromBirth(t *testing.T) {
-	shownAt := time.Now()
+	// Back off the show anchor: CI clocks (Windows ~0.5ms, virtualised macOS)
+	// can return the same time.Now() value for the show and the beats, and
+	// judgePage's After() is strict — equal timestamps would read as pre-show
+	// evidence. A beat in the same clock tick as the show is a non-case in
+	// production (beats arrive seconds later).
+	shownAt := time.Now().Add(-time.Millisecond)
 
 	b := &nativeBridge{}
 	for i := 0; i < 5; i++ {
