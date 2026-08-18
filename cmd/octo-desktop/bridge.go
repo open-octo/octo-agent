@@ -51,19 +51,28 @@ type nativeBridge struct {
 	// lastFrame is when the page last observed a requestAnimationFrame tick
 	// (the render pipeline provably alive then). lastHiddenBeat is when the
 	// page last reported itself hidden — it owes no frames then, so a missing
-	// frame must not read as a black window. windowShownAt anchors every
-	// verdict to the last show, probeInFlight collapses concurrent probes, and
-	// lastRevive rate-limits re-creation.
+	// frame must not read as a black window. Together they separate the three
+	// states judgePage distinguishes: healthy, black, and silent.
+	// probeInFlight collapses concurrent probes; lastRevive rate-limits
+	// re-creation.
 	lastBeat       atomic.Int64
 	lastFrame      atomic.Int64
 	lastHiddenBeat atomic.Int64
-	windowShownAt  atomic.Int64
 	probeInFlight  atomic.Bool
 	lastRevive     atomic.Int64
 
-	// testProbeDelay shortens probeAfterShow's sleep in tests; zero means the
-	// production frameProbeDelay.
+	// creating guards window CREATION (not the pointer, which windowMu covers):
+	// two shows racing on a nil window would each build one, leaving an orphan
+	// that the frontend's close button can't reach on the frameless platforms.
+	// A CAS rather than a mutex on purpose — showWindowAt can run on the UI
+	// thread (a notification click), and a lock held across the InvokeSync in
+	// window creation would deadlock against it.
+	creating atomic.Bool
+
+	// Test seams: testProbeDelay shortens probeAfterShow's sleep, reviveFn
+	// substitutes the window swap. Both zero/nil in production.
 	testProbeDelay time.Duration
+	reviveFn       func(old *application.WebviewWindow)
 
 	// windowMu guards every read and write of b.window that could race the
 	// pointer being REPLACED: showWindowAt's snapshot, the liveness probe's
@@ -462,10 +471,25 @@ func (b *nativeBridge) showWindowAt(hash string) {
 	b.windowMu.Unlock()
 	created := false
 	if win == nil {
-		created = true
 		if b.app == nil || b.url == "" {
 			return // not bound yet
 		}
+		// Only one goroutine builds the window. A loser re-reads the pointer:
+		// if the winner has already published one it just shows that, otherwise
+		// it leaves the work to the winner, which shows the window itself.
+		if !b.creating.CompareAndSwap(false, true) {
+			b.windowMu.Lock()
+			win = b.window
+			b.windowMu.Unlock()
+			if win == nil {
+				return
+			}
+		} else {
+			defer b.creating.Store(false)
+			created = true
+		}
+	}
+	if created {
 		// Restore the size and maximised state saved from the last session.
 		b.settingsMu.Lock()
 		width, height, maximised := b.settings.WindowWidth, b.settings.WindowHeight, b.settings.WindowMaximised
@@ -573,11 +597,10 @@ func (b *nativeBridge) showWindowAt(hash string) {
 		win.Restore()
 	}
 	win.Focus()
-	// Every show is the anchor for the liveness verdict: a page only owes
-	// evidence of life AFTER it was asked to come up. A freshly created window
-	// is exempt — its first load can outlast the probe window, and if it never
+	// The probe anchors its verdict to this moment: a page only owes evidence
+	// of life AFTER it was asked to come up. A freshly created window is
+	// exempt — its first load can outlast the probe window, and if it never
 	// comes up the next show judges it.
-	b.windowShownAt.Store(time.Now().UnixNano())
 	if !created {
 		b.probeAfterShow(win)
 	}
@@ -616,23 +639,38 @@ func (b *nativeBridge) reviveAllowed(now time.Time) bool {
 	return last == 0 || now.Sub(time.Unix(0, last)) > reviveCooldown
 }
 
-// webviewRevived reports whether the page proved itself after the given show.
-// Three kinds of evidence count, and any one of them clears the window:
-//
-//   - a frame later than the show: the compositor is producing pixels;
-//   - a beat that reported the page hidden: it is legitimately not rendering
-//     (minimised, fully occluded, another space) — frames are not owed;
-//   - nothing else. A page that beats while claiming to be visible yet never
-//     produces a frame is the black-window signature, and a page that does not
-//     beat at all is a dead renderer. Both need a new window.
-func (b *nativeBridge) needsRevive(shownAt time.Time) bool {
-	if lastFrame := b.lastFrame.Load(); lastFrame != 0 && time.Unix(0, lastFrame).After(shownAt) {
-		return false
+// pageVerdict is what the evidence collected after a show says about the page.
+type pageVerdict int
+
+const (
+	// pageHealthy: it painted, or it reported itself hidden and owes no frames.
+	pageHealthy pageVerdict = iota
+	// pageBlack: it beats while claiming to be visible but has never painted
+	// since the show — the black-window signature. Unambiguous, act at once.
+	pageBlack
+	// pageSilent: no beat at all. Usually a dead renderer, but a wedged hub or
+	// a main thread stuck on a huge render looks identical from here, and both
+	// of those recover on their own — so this verdict earns a second look
+	// before the window is destroyed.
+	pageSilent
+)
+
+// judgePage reads the post-show evidence. Nothing before shownAt counts: a page
+// has ordinary reasons to be silent in the background (system sleep freezes it,
+// Chromium throttles a long-hidden page's timers), and pre-show silence must
+// never cost a healthy window.
+func (b *nativeBridge) judgePage(shownAt time.Time) pageVerdict {
+	after := func(v *atomic.Int64) bool {
+		ns := v.Load()
+		return ns != 0 && time.Unix(0, ns).After(shownAt)
 	}
-	if hidden := b.lastHiddenBeat.Load(); hidden != 0 && time.Unix(0, hidden).After(shownAt) {
-		return false
+	if after(&b.lastFrame) || after(&b.lastHiddenBeat) {
+		return pageHealthy
 	}
-	return true
+	if after(&b.lastBeat) {
+		return pageBlack
+	}
+	return pageSilent
 }
 
 // detachStalled detaches w when it is still the current window and a revive is
@@ -669,21 +707,41 @@ func (b *nativeBridge) probeAfterShow(shown *application.WebviewWindow) {
 	go func() {
 		defer b.probeInFlight.Store(false)
 		time.Sleep(b.probeDelay())
-		if !b.needsRevive(shownAt) {
+		switch b.judgePage(shownAt) {
+		case pageHealthy:
 			return
+		case pageSilent:
+			// Silence is ambiguous — a wedged hub or a blocked main thread
+			// recovers by itself, and replacing the window would lose the
+			// user's page state for nothing. Give it one more cycle; only
+			// persistent silence (or a black verdict by then) is acted on.
+			time.Sleep(b.probeDelay())
+			if b.judgePage(shownAt) == pageHealthy {
+				return
+			}
 		}
 		old := b.detachStalled(shown, time.Now())
 		if old == nil {
 			return
 		}
-		// Create the replacement BEFORE closing the corpse. Wails' Windows
-		// backend posts a quit message when the window map empties
-		// (unregisterWindow, bypassing ShouldQuit), and macOS/Linux quit on
-		// last-window-close unless the user keeps the hub in the background —
-		// closing first would race the shell's own survival.
-		b.showWindowAt("")
-		old.Close()
+		b.revive(old)
 	}()
+}
+
+// revive brings up a replacement for a window whose page can't be saved. The
+// new window is created BEFORE the corpse is closed: Wails' Windows backend
+// posts a quit message when its window map empties (unregisterWindow, which
+// does not consult ShouldQuit), and macOS/Linux quit on last-window-close
+// unless the hub keeps running in the background — closing first would race
+// the shell's own survival. Indirected through a field so tests can observe
+// the decision without a live Wails app.
+func (b *nativeBridge) revive(old *application.WebviewWindow) {
+	if b.reviveFn != nil {
+		b.reviveFn(old)
+		return
+	}
+	b.showWindowAt("")
+	old.Close()
 }
 
 // probeDelay is frameProbeDelay unless a test shortened it.
@@ -699,14 +757,18 @@ func (b *nativeBridge) probeDelay() time.Duration {
 // requestAnimationFrame it observed, or -1 while it is hidden and owes no
 // frames. The beat proves JS alive; the frame timestamp proves the render
 // pipeline alive; the hidden flag says frames aren't expected.
-func (b *nativeBridge) Heartbeat(frameAgeMS int64) {
+func (b *nativeBridge) Heartbeat(frameAgeMS int64, hidden bool) {
 	now := time.Now()
 	b.lastBeat.Store(now.UnixNano())
-	if frameAgeMS < 0 {
-		// Hidden page (or one that has not yet seen a frame): record the beat
-		// as an explicit "not rendering, by design" so the probe doesn't read
-		// the missing frame as a black window.
+	if hidden {
+		// Not visible, so no frames are owed: record that explicitly, or the
+		// probe would read the missing frame as a black window.
 		b.lastHiddenBeat.Store(now.UnixNano())
+		return
+	}
+	if frameAgeMS < 0 {
+		// Visible but has never painted. Deliberately records NO frame
+		// evidence — this is the black-window signature, not an excuse.
 		return
 	}
 	age := time.Duration(frameAgeMS) * time.Millisecond

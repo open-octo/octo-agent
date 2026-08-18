@@ -12,9 +12,11 @@ import { request } from './api'
 // have reported in before any verdict.
 const BEAT_MS = 5000
 
-// Frame age reported when the page is hidden, or has not yet observed a frame:
-// it owes no frames then, and the shell must not read the absence as a black
-// window. Negative by contract — see Heartbeat in bridge.go.
+// Frame age reported when no frame has been observed yet. Negative by contract
+// (see Heartbeat in bridge.go). This is NOT interchangeable with the hidden
+// flag: a page that says it is visible and has never painted is precisely the
+// black window this mechanism exists to find, whereas a hidden page owes no
+// frames at all. They are sent as separate fields for that reason.
 const NO_FRAMES = -1
 
 // startNativeHeartbeat begins beating and returns a stop function. No-op (and
@@ -40,15 +42,13 @@ export function startNativeHeartbeat(): () => void {
   }
 
   const beat = () => {
-    // document.hidden and "no frame seen yet" both mean the same thing to the
-    // shell: don't expect pixels from this beat.
-    const frameAge = document.hidden || lastFrame === null
+    const frameAge = lastFrame === null
       ? NO_FRAMES
       : Math.max(0, Math.round(performance.now() - lastFrame))
     void request<{ ok: boolean }>('/api/native/heartbeat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ frame_age_ms: frameAge }),
+      body: JSON.stringify({ frame_age_ms: frameAge, hidden: document.hidden }),
     }).catch(() => {
       // Best-effort: a failed beat reads as silence, and silence after a show
       // is what the shell already treats as "needs a new window".

@@ -38,27 +38,29 @@ func TestShellURL(t *testing.T) {
 	}
 }
 
-// TestNeedsRevive is the false-positive guard for the whole feature: destroying
-// a healthy window (losing the user's draft and stealing focus) is far worse
-// than a few more seconds of black, so every legitimate reason a page has to be
-// quiet must read as healthy. Only post-show evidence counts — how long the
-// page was silent BEFORE the show is deliberately irrelevant, because system
-// sleep freezes the page wholesale and Chromium throttles a long-hidden page's
-// timers to roughly once a minute.
-func TestNeedsRevive(t *testing.T) {
+// TestJudgePage covers the feature's central decision, whose two failure
+// directions are both expensive: a wrong "healthy" leaves the user staring at a
+// black window forever, and a wrong "black" destroys a working one (losing the
+// draft, stealing focus). Only post-show evidence counts — pre-show silence is
+// legitimate, since system sleep freezes the page and Chromium throttles a
+// long-hidden page's timers to roughly once a minute.
+func TestJudgePage(t *testing.T) {
 	shownAt := time.Now()
+	before, after := shownAt.Add(-time.Minute), shownAt.Add(time.Second)
 	cases := []struct {
-		name       string
-		frameAt    time.Time // zero = never
-		hiddenAt   time.Time // zero = never
-		wantRevive bool
+		name     string
+		frameAt  time.Time // zero = never
+		hiddenAt time.Time // zero = never
+		beatAt   time.Time // zero = never
+		want     pageVerdict
 	}{
-		{"frame after the show: compositor is painting", shownAt.Add(time.Second), time.Time{}, false},
-		{"hidden beat after the show: owes no frames", time.Time{}, shownAt.Add(time.Second), false},
-		{"both after the show", shownAt.Add(time.Second), shownAt.Add(2 * time.Second), false},
-		{"nothing at all: dead renderer", time.Time{}, time.Time{}, true},
-		{"only frames from before the show: black compositor", shownAt.Add(-time.Minute), time.Time{}, true},
-		{"only a hidden beat from before the show", time.Time{}, shownAt.Add(-time.Minute), true},
+		{"painted after the show", after, time.Time{}, after, pageHealthy},
+		{"hidden after the show: owes no frames", time.Time{}, after, after, pageHealthy},
+		{"beats, visible, never painted: black", time.Time{}, time.Time{}, after, pageBlack},
+		{"beats, frames only from before the show: black", before, time.Time{}, after, pageBlack},
+		{"beats, hidden only from before the show: black", time.Time{}, before, after, pageBlack},
+		{"nothing at all since the show", time.Time{}, time.Time{}, time.Time{}, pageSilent},
+		{"only pre-show evidence of everything", before, before, before, pageSilent},
 	}
 	for _, tc := range cases {
 		b := &nativeBridge{}
@@ -68,28 +70,56 @@ func TestNeedsRevive(t *testing.T) {
 		if !tc.hiddenAt.IsZero() {
 			b.lastHiddenBeat.Store(tc.hiddenAt.UnixNano())
 		}
-		if got := b.needsRevive(shownAt); got != tc.wantRevive {
-			t.Errorf("%s: needsRevive = %v, want %v", tc.name, got, tc.wantRevive)
+		if !tc.beatAt.IsZero() {
+			b.lastBeat.Store(tc.beatAt.UnixNano())
+		}
+		if got := b.judgePage(shownAt); got != tc.want {
+			t.Errorf("%s: judgePage = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }
 
-// TestNeedsReviveIgnoresPreShowSilence pins the sleep/wake case explicitly: a
-// page frozen for hours (so every timestamp is ancient) that reports in right
-// after the show is healthy. Judging the pre-show gap instead would destroy
-// this window.
-func TestNeedsReviveIgnoresPreShowSilence(t *testing.T) {
+// TestJudgePageBlackFromBirth guards a hole an earlier cut of this protocol
+// had: reporting "hidden" and "no frame observed yet" through a single signal
+// made a window that was black from its first paint look healthy forever — and
+// with it a replacement window that also came up black, which is precisely when
+// the retry matters. A visible page that beats without ever painting is black.
+func TestJudgePageBlackFromBirth(t *testing.T) {
+	shownAt := time.Now()
+
+	b := &nativeBridge{}
+	for i := 0; i < 5; i++ {
+		b.Heartbeat(-1, false) // visible, rAF never fires
+	}
+	if got := b.judgePage(shownAt); got != pageBlack {
+		t.Errorf("visible page that never painted: judgePage = %v, want pageBlack", got)
+	}
+
+	b2 := &nativeBridge{}
+	for i := 0; i < 5; i++ {
+		b2.Heartbeat(-1, true) // same beats, but hidden
+	}
+	if got := b2.judgePage(shownAt); got != pageHealthy {
+		t.Errorf("hidden page: judgePage = %v, want pageHealthy", got)
+	}
+}
+
+// TestJudgePageIgnoresPreShowSilence pins the sleep/wake case explicitly: a page
+// frozen for hours (so every timestamp is ancient) that reports in right after
+// the show is healthy. Judging the pre-show gap instead would destroy it.
+func TestJudgePageIgnoresPreShowSilence(t *testing.T) {
 	shownAt := time.Now()
 	b := &nativeBridge{}
 	b.lastBeat.Store(shownAt.Add(-8 * time.Hour).UnixNano()) // asleep all night
 	b.lastFrame.Store(shownAt.Add(-8 * time.Hour).UnixNano())
-	if !b.needsRevive(shownAt) {
-		t.Fatal("precondition: with only pre-show evidence the verdict is still revive")
+	if got := b.judgePage(shownAt); got != pageSilent {
+		t.Fatalf("precondition: judgePage = %v, want pageSilent with only pre-show evidence", got)
 	}
-	// The page wakes and paints a frame after the show.
+	// The page wakes and paints after the show.
+	b.lastBeat.Store(shownAt.Add(200 * time.Millisecond).UnixNano())
 	b.lastFrame.Store(shownAt.Add(200 * time.Millisecond).UnixNano())
-	if b.needsRevive(shownAt) {
-		t.Error("a page that painted after the show must never be revived, however long it slept")
+	if got := b.judgePage(shownAt); got != pageHealthy {
+		t.Errorf("judgePage = %v, want pageHealthy: painting after the show clears it however long it slept", got)
 	}
 }
 
@@ -121,7 +151,7 @@ func TestHeartbeatSignals(t *testing.T) {
 
 	// Visible beat: records JS liveness and a frame time derived from the age.
 	before := time.Now()
-	b.Heartbeat(3000)
+	b.Heartbeat(3000, false)
 	after := time.Now()
 	if beat := time.Unix(0, b.lastBeat.Load()); beat.Before(before) || beat.After(after) {
 		t.Errorf("lastBeat = %v, want within [%v, %v]", beat, before, after)
@@ -134,10 +164,10 @@ func TestHeartbeatSignals(t *testing.T) {
 		t.Error("a visible beat must not record a hidden beat")
 	}
 
-	// Hidden beat (negative age): records liveness + "owes no frames", and
-	// leaves the frame evidence untouched.
+	// Hidden beat: records liveness + "owes no frames", and leaves the frame
+	// evidence untouched.
 	frameBefore := b.lastFrame.Load()
-	b.Heartbeat(-1)
+	b.Heartbeat(-1, true)
 	if b.lastHiddenBeat.Load() == 0 {
 		t.Error("a hidden beat must be recorded so the probe expects no frames")
 	}
@@ -145,11 +175,22 @@ func TestHeartbeatSignals(t *testing.T) {
 		t.Error("a hidden beat must not touch lastFrame")
 	}
 
+	// Visible with no frame yet: liveness only. It must NOT be filed as
+	// "owes no frames" — that is the black-window signature.
+	hiddenBefore := b.lastHiddenBeat.Load()
+	b.Heartbeat(-1, false)
+	if b.lastHiddenBeat.Load() != hiddenBefore {
+		t.Error("a visible never-painted beat must not count as hidden")
+	}
+	if b.lastFrame.Load() != frameBefore {
+		t.Error("a visible never-painted beat must not invent frame evidence")
+	}
+
 	// Monotonic: a stale report (a focus beat whose rAF has not ticked yet,
 	// clock skew) must not move lastFrame backwards.
-	b.Heartbeat(0) // fresh frame, now
+	b.Heartbeat(0, false) // fresh frame, now
 	newest := b.lastFrame.Load()
-	b.Heartbeat(int64(time.Minute / time.Millisecond)) // claims a minute-old frame
+	b.Heartbeat(int64(time.Minute/time.Millisecond), false) // claims a minute-old frame
 	if b.lastFrame.Load() != newest {
 		t.Error("a staler frame report must not overwrite newer frame evidence")
 	}
@@ -157,7 +198,7 @@ func TestHeartbeatSignals(t *testing.T) {
 	// Clamp: an absurd age can't push lastFrame into the distant past (which,
 	// with the monotonic rule, is the only way to fake a stall).
 	b2 := &nativeBridge{}
-	b2.Heartbeat(1 << 62)
+	b2.Heartbeat(1<<62, false)
 	if age := time.Since(time.Unix(0, b2.lastFrame.Load())); age > maxReportedFrameAge+time.Minute {
 		t.Errorf("frame age clamp failed: lastFrame is %v old", age)
 	}
@@ -241,6 +282,70 @@ func TestProbeAfterShowHealthyPathAndFlag(t *testing.T) {
 	}
 	if b.lastRevive.Load() != 0 {
 		t.Error("a healthy probe must not consume the revive budget")
+	}
+}
+
+// TestProbeAfterShowRevivesBlackWindow covers the branch that actually repairs
+// a black window, through the reviveFn seam (the real one needs a live Wails
+// app). It pins two things the shell's own survival depends on: the window is
+// detached from the bridge BEFORE it is handed over for closing, and the revive
+// budget is consumed so a still-broken page can't loop.
+func TestProbeAfterShowRevivesBlackWindow(t *testing.T) {
+	win := &application.WebviewWindow{}
+	got := make(chan *application.WebviewWindow, 1)
+	var detachedAtHandover bool
+
+	b := &nativeBridge{window: win, testProbeDelay: 10 * time.Millisecond}
+	b.reviveFn = func(old *application.WebviewWindow) {
+		b.windowMu.Lock()
+		detachedAtHandover = b.window == nil
+		b.windowMu.Unlock()
+		got <- old
+	}
+
+	// Beats arrive, the page claims to be visible, no frame ever lands: black.
+	b.Heartbeat(-1, false)
+	b.probeAfterShow(win)
+
+	select {
+	case old := <-got:
+		if old != win {
+			t.Errorf("revive got %v, want the probed window", old)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a black window was never revived")
+	}
+	if !detachedAtHandover {
+		t.Error("the window must be detached before it is handed over to be closed, or its close would nil the replacement")
+	}
+	if b.lastRevive.Load() == 0 {
+		t.Error("a revive must consume the budget so a persistently broken page can't loop")
+	}
+}
+
+// TestProbeAfterShowGivesSilenceASecondChance pins the deliberate asymmetry
+// between the two unhealthy verdicts: total silence can also mean a wedged hub
+// or a main thread stuck on a huge render, both of which recover on their own,
+// so the window is only replaced if the silence persists. A page that reports in
+// during the second cycle keeps its state.
+func TestProbeAfterShowGivesSilenceASecondChance(t *testing.T) {
+	win := &application.WebviewWindow{}
+	revived := make(chan struct{}, 1)
+	b := &nativeBridge{window: win, testProbeDelay: 30 * time.Millisecond}
+	b.reviveFn = func(*application.WebviewWindow) { revived <- struct{}{} }
+
+	b.probeAfterShow(win) // no beats at all → pageSilent
+	// Report in before the second cycle elapses.
+	time.Sleep(40 * time.Millisecond)
+	b.Heartbeat(0, false)
+
+	select {
+	case <-revived:
+		t.Error("a page that reported in during the second chance must not be revived")
+	case <-time.After(300 * time.Millisecond):
+	}
+	if b.window != win {
+		t.Error("window must stay attached")
 	}
 }
 

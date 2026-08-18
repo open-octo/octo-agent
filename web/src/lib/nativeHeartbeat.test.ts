@@ -13,8 +13,10 @@ vi.mock('./api', () => ({ request: mocks.request }))
 
 import { startNativeHeartbeat } from './nativeHeartbeat'
 
-// The shell contract: frame_age_ms < 0 means "not rendering, by design"
-// (hidden, or no frame observed yet); >= 0 is the measured age of a real frame.
+// The shell contract: frame_age_ms < 0 means no frame has been observed yet,
+// >= 0 is the measured age of a real frame, and `hidden` says separately
+// whether frames are owed at all. Keeping them apart is what lets the shell
+// distinguish a legitimately-idle hidden page from a black window.
 const NO_FRAMES = -1
 
 function lastBody() {
@@ -119,9 +121,10 @@ describe('startNativeHeartbeat inside the desktop shell', () => {
 
   it('reports no-frames until a frame is actually observed, then its age', () => {
     const stop = start()
-    // First beat: no frame has been seen yet, so the shell must not read the
-    // absence as a black window.
+    // First beat: no frame seen yet — reported as such, and NOT as hidden. A
+    // visible page that never paints is exactly what the shell must revive.
     expect(lastBody().frame_age_ms).toBe(NO_FRAMES)
+    expect(lastBody().hidden).toBe(false)
 
     // A frame lands, then the next beat reports a real (small) age.
     flushFrame()
@@ -147,15 +150,31 @@ describe('startNativeHeartbeat inside the desktop shell', () => {
     stop()
   })
 
-  it('reports no-frames while the page is hidden, whatever the frame history', () => {
+  it('flags hidden separately instead of disguising it as a frame age', () => {
     const stop = start()
     flushFrame()
     vi.advanceTimersByTime(5_000)
+    expect(lastBody().hidden).toBe(false)
     expect(lastBody().frame_age_ms).toBeGreaterThanOrEqual(0)
 
+    // Hidden: the flag flips. The frame age keeps describing the real frame
+    // history — the shell decides what to expect from the flag, and folding the
+    // two together is what previously made a black window undetectable.
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
     vi.advanceTimersByTime(5_000)
-    expect(lastBody().frame_age_ms).toBe(NO_FRAMES)
+    expect(lastBody().hidden).toBe(true)
+    stop()
+  })
+
+  it('keeps reporting visible + no-frames for a window that is black from birth', () => {
+    // rAF is never flushed: the compositor is dead, but the page thinks it is
+    // visible. Every beat must carry that combination, since it is the shell's
+    // only evidence of a black window.
+    const stop = start()
+    for (let i = 0; i < 4; i++) {
+      vi.advanceTimersByTime(5_000)
+      expect(lastBody()).toMatchObject({ frame_age_ms: NO_FRAMES, hidden: false })
+    }
     stop()
   })
 
@@ -181,9 +200,8 @@ describe('startNativeHeartbeat inside the desktop shell', () => {
     document.dispatchEvent(new Event('visibilitychange'))
     expect(mocks.request).toHaveBeenCalledTimes(2)
 
-    // Hidden: visibilitychange must not beat (nothing to prove, and the shell
-    // treats silence after a show as needing a new window only when the page
-    // was asked to be visible).
+    // Going hidden doesn't need an immediate beat — the next scheduled one
+    // carries the flag, and the shell only ever judges a window it just showed.
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
     document.dispatchEvent(new Event('visibilitychange'))
     expect(mocks.request).toHaveBeenCalledTimes(2)

@@ -81,13 +81,22 @@ type NativeBridge interface {
 	Print() error
 
 	// Heartbeat records a liveness beat from the frontend running inside the
-	// desktop webview. frameAgeMS is how long ago the page's last
-	// requestAnimationFrame fired: it separates "JS alive and rendering" from
-	// "JS alive but the frame pipeline is stalled" — the signature of a
-	// webview whose compositor went black while the page kept running. The
-	// shell uses beat recency to decide whether to revive (destroy and
-	// re-create) the window instead of foregrounding a dead surface.
-	Heartbeat(frameAgeMS int64)
+	// desktop webview, so the shell can tell a live page from a dead or black
+	// one and revive (destroy and re-create) the window rather than
+	// foregrounding a surface that will never paint again.
+	//
+	// The beat arriving is itself the proof that JS runs. The two arguments
+	// describe the render pipeline, and they must stay distinct:
+	//   - frameAgeMS >= 0: how long ago the page observed a
+	//     requestAnimationFrame tick, i.e. frames are being produced.
+	//   - frameAgeMS < 0: the page has not observed a frame at all yet.
+	//   - hidden: the page reports itself not visible, so it legitimately owes
+	//     no frames (minimised, occluded, another desktop).
+	//
+	// A visible page that beats without ever producing a frame is the black-
+	// window signature — conflating that with "hidden" would make the failure
+	// this whole mechanism exists for undetectable.
+	Heartbeat(frameAgeMS int64, hidden bool)
 
 	// CanSelfUpdate reports whether the desktop build can replace itself in
 	// place (bundled release build on a swappable platform). Surfaced to the
@@ -276,6 +285,7 @@ func (s *Server) handleNativeMinimise(w http.ResponseWriter, r *http.Request) {
 
 type nativeHeartbeatRequest struct {
 	FrameAgeMS int64 `json:"frame_age_ms"`
+	Hidden     bool  `json:"hidden"`
 }
 
 // POST /api/native/heartbeat — liveness beat from the page inside the desktop
@@ -289,12 +299,14 @@ func (s *Server) handleNativeHeartbeat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "native bridge not available")
 		return
 	}
-	// Body is optional-tolerant like the other native handlers; a missing or
-	// malformed one records a beat with frame age 0 (JS provably alive —
-	// the request itself is the liveness signal).
-	var req nativeHeartbeatRequest
+	// Body is optional-tolerant like the other native handlers, but the default
+	// must claim NO frame evidence: the request alone proves JS is alive and
+	// says nothing about rendering. Defaulting FrameAgeMS to its zero value
+	// would read as "a frame just landed" — the strongest health signal —
+	// letting a malformed beat mask a black window.
+	req := nativeHeartbeatRequest{FrameAgeMS: -1}
 	_ = readBodyJSON(r, &req)
-	s.cfg.Native.Heartbeat(req.FrameAgeMS)
+	s.cfg.Native.Heartbeat(req.FrameAgeMS, req.Hidden)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
