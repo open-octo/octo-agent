@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import * as api from '../../lib/api'
   import type { FsListing } from '../../lib/api'
   import { t } from '../../lib/i18n'
@@ -28,6 +28,7 @@
   let showHidden = $state(false)
   let modalEl = $state<HTMLDivElement | null>(null)
   let pathEl = $state<HTMLInputElement | null>(null)
+  let selectOnClick = false
   // The path bar is editable: typing or pasting a path and pressing Enter
   // jumps straight there. Clicking through a tree is the slow way to reach a
   // path you already know, and this dialog is now the only way to set a
@@ -35,29 +36,53 @@
   // so it has to carry both. Mirrors an OS file dialog's address bar.
   let pathDraft = $state('')
 
+  // Generation guard (like Composer's modelsFetchSeq): the path input stays
+  // enabled while a listing loads — disabling a field mid-type is worse than
+  // the race — so two Enters, or an edit before the first returns, can overlap.
+  // Without this a slow failure landing after a fast success would hang a stale
+  // error banner over the new listing and clear `loading` early.
+  let loadSeq = 0
+
   async function load(path?: string) {
+    const seq = ++loadSeq
     loading = true
     error = ''
     try {
-      listing = await api.fsList(path)
-      // Follow the listing: navigating the tree updates the field, and a
-      // rejected hand-typed path is replaced by where we actually are.
-      pathDraft = listing.is_this_pc ? '' : listing.path
+      const next = await api.fsList(path)
+      if (seq !== loadSeq) return // a newer navigation already won
+      listing = next
+      // Follow the listing: navigating the tree updates the field. A rejected
+      // path is deliberately NOT reverted (see the catch) so the typo stays
+      // there to be fixed; Escape restores it.
+      pathDraft = next.is_this_pc ? '' : next.path
       // A long path overflows the field from the left, hiding the tail — but
       // the tail (which folder am I in?) is the part worth reading. The
       // read-only bar this replaced elided the head for the same reason.
       // Scroll to the end unless the user is mid-edit.
-      queueMicrotask(() => {
-        if (pathEl && document.activeElement !== pathEl) pathEl.scrollLeft = pathEl.scrollWidth
-      })
+      await tick()
+      if (pathEl && document.activeElement !== pathEl) pathEl.scrollLeft = pathEl.scrollWidth
     } catch (e: any) {
+      if (seq !== loadSeq) return
       // A 403 lands here with the server's "local machine only" message; any
       // other failure (bad path, permission) shows its message too. Keep the
-      // previous listing so the user can still navigate elsewhere.
+      // previous listing — and the text the user typed — so the path can be
+      // corrected rather than retyped from scratch.
       error = e?.message ?? 'Failed to list directory'
     } finally {
-      loading = false
+      if (seq === loadSeq) loading = false
     }
+  }
+
+  // Escape in the path field restores it to the directory actually shown
+  // instead of closing the dialog. Without this a rejected path strands the
+  // user: chooseCurrent re-resolves the draft, so the confirm button keeps
+  // refusing, and nothing offers a way back to where they are.
+  function revertDraft(): boolean {
+    const shown = listing?.is_this_pc ? '' : (listing?.path ?? '')
+    if (pathDraft === shown) return false
+    pathDraft = shown
+    error = ''
+    return true
   }
 
   // Navigate to whatever is typed in the path bar. A bad path surfaces the
@@ -143,9 +168,25 @@
           autocomplete="off"
           placeholder={$t('folder.path_placeholder')}
           title={listing?.path ?? ''}
-          aria-label={$t('folder.path_placeholder')}
-          onfocus={() => pathEl?.select()}
-          onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); gotoDraft() } }}
+          aria-label={$t('folder.path_label')}
+          onfocus={() => { selectOnClick = true; pathEl?.select() }}
+          onblur={() => (selectOnClick = false)}
+          onmouseup={(e) => {
+            // focus() selects the whole path, then mouseup collapses the
+            // selection to the click point — so select-all only survives if
+            // we suppress that. A drag (selection already a range) is left
+            // alone: the user picked their own span deliberately.
+            if (!selectOnClick) return
+            selectOnClick = false
+            const el = e.currentTarget as HTMLInputElement
+            if (el.selectionStart === el.selectionEnd) { e.preventDefault(); el.select() }
+          }}
+          onkeydown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); gotoDraft() }
+            // Only swallow Escape when there is an edit to undo; otherwise let
+            // it bubble and close the dialog, as it does everywhere else.
+            else if (e.key === 'Escape' && revertDraft()) { e.preventDefault(); e.stopPropagation() }
+          }}
         />
       {/if}
     </div>
@@ -268,7 +309,7 @@ input.cur-path {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-container);
-  color: var(--text-primary);
+  color: var(--text);
 }
 input.cur-path:focus { outline: none; border-color: var(--blue-5); }
 .modal-body {

@@ -880,7 +880,9 @@
   }
 
   async function openPicker() {
-    modelMenu = false; reasonMenu = false
+    // The chip's onclick stops propagation, so the window-level closeMenus
+    // never runs — close them here or a dropdown stays open behind the modal.
+    closeMenus()
     // Desktop shell: use the OS folder dialog. Plain web: open the in-app tree.
     if (get(nativeShell)) {
       try {
@@ -900,10 +902,17 @@
   async function onPickerSelect(path: string) {
     if (pickerMode === 'file') {
       attachLocalFile(path)
-      pickerOpen = false
+      closePicker()
       return
     }
-    if (await applyWorkingDir(path)) pickerOpen = false
+    if (await applyWorkingDir(path)) closePicker()
+  }
+
+  // Dismissing the modal must hand focus back to the composer; otherwise it
+  // lands on <body> and the next keystroke goes nowhere.
+  function closePicker() {
+    pickerOpen = false
+    queueMicrotask(() => textareaEl?.focus())
   }
 
   // Show only the last two path segments so a long working dir doesn't push
@@ -1327,7 +1336,7 @@
     initialPath={workingDir}
     mode={pickerMode}
     onSelect={onPickerSelect}
-    onClose={() => (pickerOpen = false)}
+    onClose={closePicker}
   />
 {/if}
 
