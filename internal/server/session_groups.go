@@ -476,15 +476,19 @@ func createSessionGroupNamed(name, workingDir, taskID string) (sessionGroup, err
 // addSessionToGroup prepends a session ID to a group — a newly created
 // session shows at the top of its group, matching the newest-first session
 // list — enforcing single membership (the session is first removed from every
-// other group, matching handleSetSessionGroup). Returns an error if the
-// target group no longer exists.
+// other group). Returns an error if the target group no longer exists.
+//
+// This is a creation-time path only: the session-creation handler and the
+// scheduler. There is no move-between-projects path (see
+// handleSetSessionGroup).
 func addSessionToGroup(groupID, sessionID string) error {
 	groupMu.Lock()
 	defer groupMu.Unlock()
-	groups, err := loadSessionGroups()
+	gf, err := loadRegistryFile()
 	if err != nil {
 		return err
 	}
+	groups := gf.Groups
 	found := false
 	for i := range groups {
 		ids := groups[i].SessionIDs[:0]
@@ -502,7 +506,13 @@ func addSessionToGroup(groupID, sessionID string) error {
 	if !found {
 		return fmt.Errorf("session group %q not found", groupID)
 	}
-	return saveSessionGroups(groups)
+	// Group membership and collapsing are mutually exclusive (handleSetSessionCollapse
+	// refuses to collapse a session in a group). Since this is the only path that
+	// files a session anywhere, clearing a stale collapsed entry has to happen here
+	// for that guard to hold from both directions.
+	gf.Groups = groups
+	gf.CollapsedSessionIDs = removeID(gf.CollapsedSessionIDs, sessionID)
+	return saveRegistry(gf)
 }
 
 // renameSessionGroup renames a group by ID. A no-op (nil) if the group is gone
@@ -833,78 +843,23 @@ func (s *Server) handleReorderSessionGroups(w http.ResponseWriter, r *http.Reque
 
 // ─── PUT /api/sessions/{id}/group ───────────────────────────────────────────
 
-type setSessionGroupRequest struct {
-	// GroupID is the target group. Empty removes the session from every group
-	// (i.e. moves it to "ungrouped").
-	GroupID string `json:"group_id"`
-}
-
-// handleSetSessionGroup moves a session into a group (or out of all groups).
-// A session belongs to at most one group, so it is first removed from every
-// group and then, if a non-empty target is given, appended to that group.
+// handleSetSessionGroup refuses every attempt to move a session between
+// projects. Where a session lives is decided when it is created — by picking a
+// directory on the landing page, or by the "+" on a project — and is fixed after
+// that.
+//
+// It is fixed because moving is not one change but four, and they cannot be
+// made to agree after the fact: the tools' directory, the memory tier, the
+// project notes baked into the system prompt, and the hooks/sandbox root all
+// derive from the project. A moved session would keep a transcript half of which
+// ran somewhere else and read another project's notes, and the freeze that keeps
+// the prompt cache warm cannot tell that apart from an ordinary turn (it is
+// keyed on cwd + notes, so a session whose own directory already equals the
+// project's would not even re-compose). Deciding at creation makes the four
+// facts true for the whole life of the session.
 func (s *Server) handleSetSessionGroup(w http.ResponseWriter, r *http.Request) {
-	sid := r.PathValue("id")
-	if sid == "" {
-		writeError(w, http.StatusBadRequest, "missing session id")
-		return
-	}
-	var req setSessionGroupRequest
-	if err := readBodyJSON(r, &req); err != nil {
-		writeInvalidJSONBody(w, err)
-		return
-	}
-
-	groupMu.Lock()
-	defer groupMu.Unlock()
-	gf, err := loadRegistryFile()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	groups := gf.Groups
-
-	// A cron task's run cluster holds that task's runs and nothing else — the
-	// scheduler puts them there. Checked before the removal below, so a refused
-	// request leaves membership exactly as it was.
-	if req.GroupID != "" {
-		for i := range groups {
-			if groups[i].ID == req.GroupID && groups[i].isCronCluster() {
-				writeError(w, http.StatusConflict, "this group holds a scheduled task's runs — file the session under a project instead")
-				return
-			}
-		}
-	}
-
-	// Remove the session from every group first (enforces single membership).
-	for i := range groups {
-		groups[i].SessionIDs = removeID(groups[i].SessionIDs, sid)
-	}
-
-	// Add to the target group when one is requested.
-	if req.GroupID != "" {
-		idx := -1
-		for i := range groups {
-			if groups[i].ID == req.GroupID {
-				idx = i
-				break
-			}
-		}
-		if idx < 0 {
-			writeError(w, http.StatusNotFound, "group not found")
-			return
-		}
-		groups[idx].SessionIDs = append(groups[idx].SessionIDs, sid)
-		// Group membership and collapsing are mutually exclusive; filing the
-		// session into a group wins over a stale collapsed entry.
-		gf.CollapsedSessionIDs = removeID(gf.CollapsedSessionIDs, sid)
-	}
-	gf.Groups = groups
-
-	if err := saveRegistry(gf); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "group_id": req.GroupID})
+	writeError(w, http.StatusConflict,
+		"a session's project is decided when it is created — start a new session in the project instead")
 }
 
 // ─── PUT /api/sessions/{id}/pin ─────────────────────────────────────────────

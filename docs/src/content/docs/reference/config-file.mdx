@@ -62,11 +62,19 @@ octo tracks a working directory per surface, not one global cwd:
   new-session landing page is what files the session under the project for that directory, creating
   it if there isn't one. `PATCH /api/sessions/{id}/working_dir` answers 409 and says so.
 
+  Which project a session belongs to is decided when it is created and fixed after that — there is no
+  moving a session between projects (`PUT /api/sessions/{id}/group` answers 409). To work in a
+  project, start the session there: the "+" on the project's row, or pick its directory on the
+  landing page. Deleting a project is the only thing that takes its sessions out of it, and they
+  become tasks.
+
   The reason it works this way: a task that could point itself at a repo ran its tools there while
   its memory stayed in the shared tier, since project memory is scoped by project membership (see
   [memory](/docs/guides/memory/)). You got a session aimed at your project that remembered nothing
   about it. Attaching the directory to the project — the thing that already scopes memory — removes
-  the split instead of documenting it.
+  the split. Fixing membership at creation is the same argument applied to time: the directory, the
+  memory tier, the project notes in the system prompt, and the hooks root all come from the project,
+  and a move would leave a transcript whose first half ran somewhere else.
 - The **server's own launch directory** (where `octo serve` or the desktop app started) is separate
   from both of the above — it only seeds skill discovery and the project-level memory root, not any
   session's tool cwd.

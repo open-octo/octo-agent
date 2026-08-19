@@ -56,9 +56,7 @@ func TestProject_DirPrecedence(t *testing.T) {
 	bare := saveSessionWithDir(t, "")
 
 	gid := newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+inProject.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move into project: status %d", rec.Code)
-	}
+	fileInProject(t, gid, inProject.ID)
 
 	if got := srv.sessionCwd(inProject); got != projectDir {
 		t.Errorf("session in project: cwd = %q, want project dir %q", got, projectDir)
@@ -81,9 +79,7 @@ func TestProject_ResolutionAgreesAcrossSurfaces(t *testing.T) {
 	sess := saveSessionWithDir(t, t.TempDir())
 
 	gid := newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sess.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move into project: status %d", rec.Code)
-	}
+	fileInProject(t, gid, sess.ID)
 
 	byID := srv.sessionCwdByID(sess.ID)
 	bySession := srv.sessionCwd(sess)
@@ -97,28 +93,27 @@ func TestProject_ResolutionAgreesAcrossSurfaces(t *testing.T) {
 	}
 }
 
-// TestProject_MoveOutRestoresOwnDir verifies the project shadows the session's
-// own working dir rather than overwriting it on disk.
-func TestProject_MoveOutRestoresOwnDir(t *testing.T) {
+// The project shadows the session's own working dir rather than overwriting it
+// on disk. Deleting the project is what reveals the difference, and it is also
+// the only way a session leaves one: membership is fixed at creation, so there
+// is no move-out to test.
+func TestProject_ShadowsOwnDirAndRestoresOnDelete(t *testing.T) {
 	srv := groupTestServer(t)
 	projectDir := t.TempDir()
 	ownDir := t.TempDir()
 	sess := saveSessionWithDir(t, ownDir)
 
 	gid := newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sess.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move in: status %d", rec.Code)
-	}
+	fileInProject(t, gid, sess.ID)
 	if got := srv.sessionCwd(sess); got != projectDir {
 		t.Fatalf("in project: cwd = %q, want %q", got, projectDir)
 	}
 
-	// Out of every group again.
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sess.ID+"/group", map[string]any{"group_id": ""}); rec.Code != http.StatusOK {
-		t.Fatalf("move out: status %d", rec.Code)
+	if rec, _ := doGroupReq(t, srv, http.MethodDelete, "/api/session-groups/"+gid, nil); rec.Code != http.StatusOK {
+		t.Fatalf("delete project: status %d", rec.Code)
 	}
 	if got := srv.sessionCwd(sess); got != ownDir {
-		t.Errorf("after leaving project: cwd = %q, want own dir %q restored", got, ownDir)
+		t.Errorf("after the project was deleted: cwd = %q, want own dir %q", got, ownDir)
 	}
 
 	// Reloading from disk must show the own dir was never clobbered.
@@ -131,7 +126,6 @@ func TestProject_MoveOutRestoresOwnDir(t *testing.T) {
 	}
 }
 
-// TestProject_DemoteToPlainGroup covers clearing a project's directory.
 // A project's directory cannot be cleared. Clearing it used to demote the
 // project to a plain group, and there is no such thing to demote to — the
 // request has to be refused rather than quietly producing a row that is neither
@@ -142,9 +136,7 @@ func TestProject_DirCannotBeCleared(t *testing.T) {
 	sess := saveSessionWithDir(t, "")
 
 	gid := newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sess.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move in: status %d", rec.Code)
-	}
+	fileInProject(t, gid, sess.ID)
 	rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"working_dir": ""})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("clearing the dir: status %d, want 400: %s", rec.Code, rec.Body.String())
@@ -164,9 +156,7 @@ func TestProject_RetargetDirIsPickedUp(t *testing.T) {
 	sess := saveSessionWithDir(t, "")
 
 	gid := newProjectGroup(t, srv, "Work", first)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sess.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move in: status %d", rec.Code)
-	}
+	fileInProject(t, gid, sess.ID)
 	if got := srv.sessionCwd(sess); got != first {
 		t.Fatalf("before retarget: cwd = %q, want %q", got, first)
 	}
@@ -230,9 +220,7 @@ func TestProject_BlocksPerSessionDirOverride(t *testing.T) {
 	sess := saveSessionWithDir(t, "")
 
 	gid := newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sess.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move in: status %d", rec.Code)
-	}
+	fileInProject(t, gid, sess.ID)
 
 	rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/sessions/"+sess.ID+"/working_dir", map[string]any{"working_dir": t.TempDir()})
 	if rec.Code != http.StatusConflict {
@@ -273,9 +261,7 @@ func TestProject_NotesReachTheSystemPrompt(t *testing.T) {
 	outside := saveSessionWithDir(t, "")
 
 	gid := newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+inProject.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move in: status %d", rec.Code)
-	}
+	fileInProject(t, gid, inProject.ID)
 	const notes = "Ship behind a flag; never touch the billing tables."
 	if rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"notes": notes}); rec.Code != http.StatusOK {
 		t.Fatalf("set notes: status %d", rec.Code)
@@ -304,9 +290,7 @@ func TestProject_NewSessionNotSeededWithDefaultDir(t *testing.T) {
 	inProject := saveSessionWithDir(t, "")
 	outside := saveSessionWithDir(t, "")
 	gid := newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+inProject.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move in: status %d", rec.Code)
-	}
+	fileInProject(t, gid, inProject.ID)
 
 	srv.applyDefaultWorkspaceDir(inProject)
 	srv.applyDefaultWorkspaceDir(outside)
@@ -332,9 +316,7 @@ func TestProject_ExportedDirLookup(t *testing.T) {
 	outside := saveSessionWithDir(t, ownDir)
 
 	gid := newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+inProject.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move in: status %d", rec.Code)
-	}
+	fileInProject(t, gid, inProject.ID)
 
 	if got := ProjectDirForSession(inProject.ID); got != projectDir {
 		t.Errorf("session in project: %q, want %q", got, projectDir)
@@ -352,6 +334,17 @@ func TestProject_ExportedDirLookup(t *testing.T) {
 
 // createSessionInGroupViaAPI POSTs /api/sessions with a group_id and returns
 // the new session's id.
+// fileInProject puts an existing session in a project the way the server does
+// it internally at creation time. There is no HTTP move endpoint — where a
+// session lives is decided when it is created — so tests that need a session
+// already in a project reach for this rather than a request.
+func fileInProject(t *testing.T, groupID, sessionID string) {
+	t.Helper()
+	if err := addSessionToGroup(groupID, sessionID); err != nil {
+		t.Fatalf("file %s into %s: %v", sessionID, groupID, err)
+	}
+}
+
 func createSessionInGroupViaAPI(t *testing.T, srv *Server, groupID string) string {
 	t.Helper()
 	rec, out := doGroupReq(t, srv, http.MethodPost, "/api/sessions", map[string]any{"group_id": groupID})
@@ -453,9 +446,9 @@ func TestProject_RegistryWritesNotifyTabs(t *testing.T) {
 			rec, _ := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Work", "working_dir": projectDir})
 			return rec
 		}},
-		{"move session in", func() *httptest.ResponseRecorder {
+		{"create session in project", func() *httptest.ResponseRecorder {
 			gid := projectIDByName(t, srv, "Work")
-			rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sess.ID+"/group", map[string]any{"group_id": gid})
+			rec, _ := doGroupReq(t, srv, http.MethodPost, "/api/sessions", map[string]any{"group_id": gid})
 			return rec
 		}},
 		{"edit notes", func() *httptest.ResponseRecorder {

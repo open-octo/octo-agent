@@ -77,7 +77,7 @@ type sessionGroup struct {
 项目 WorkingDir  >  Session.WorkingDir  >  服务端默认 workspaceDir
 ```
 
-项目**优先于**会话自己的值——这是"强绑定"的含义。会话原有的 `WorkingDir` 留在盘上不删，只是被遮蔽；会话移出项目后自动恢复。
+项目**优先于**会话自己的值——这是"强绑定"的含义。会话原有的 `WorkingDir` 留在盘上不删，只是被遮蔽；项目被删除后自动恢复（删项目是会话离开项目的唯一途径，见下）。
 
 今天有三个解析点各自读 `sess.WorkingDir`：
 
@@ -136,7 +136,7 @@ func (s *Session) IsComposedFor(model, cwd, notesHash string) bool {
 这比"改项目时遍历组内会话逐个 `ClearComposedSystem`"好在三点：
 
 - **不需要处理并发**。遍历清理会和正在跑的 turn 抢写 session 文件；惰性判定发生在下一 turn 的组装点，天然串行。
-- **不会漏**。任何路径改了目录（项目、单会话 PATCH、移入移出项目）都自动生效，不用记得在每个写入点补一次清理。
+- **不会漏**。任何路径改了目录（改项目目录、删项目）都自动生效，不用记得在每个写入点补一次清理。
 - **顺手修掉存量缺口**，且不是"顺手优化"——它是强绑定正确性的前提。
 
 存量会话的 `ComposedForCWD` 为空，与当前 cwd 不匹配，下一 turn 会重新组装一次。一次性代价，可接受。
@@ -151,11 +151,13 @@ func (s *Session) IsComposedFor(model, cwd, notesHash string) bool {
 
 ## 新会话的创建行为
 
-`applyDefaultWorkspaceDir`（`handlers.go:236`）今天给每个新 web 会话 seed 一个 `WorkingDir`。**在项目下创建的会话不 seed** ——留空，让项目解析生效。seed 了反而会在会话移出项目后留下一个莫名其妙的残值。
+`applyDefaultWorkspaceDir`（`handlers.go:236`）今天给每个新 web 会话 seed 一个 `WorkingDir`。**在项目下创建的会话不 seed** ——留空，让项目解析生效。seed 了反而会在项目被删除后留下一个莫名其妙的残值。
 
 入口是项目头的「+」按钮：`POST /api/sessions` 带 `group_id`，服务端**先入组、再走 seed 逻辑**——顺序是语义的一部分，守卫查的就是"这个会话在不在项目里"。把尚未落盘的会话 ID 先写进 registry 是安全的：registry 只存裸 ID，后续 Save 失败留下的死 ID 按既有设计无害（前端与活会话列表交叉过滤）。未知 `group_id` 直接 404，不产出孤儿会话。
 
-注意"先建会话、再拖进项目"的旧流程里 seed 已经发生——这种会话带着 seeded 的 `~/Octo`，只是被项目遮蔽，移出项目后回落到它。这是两种入口固有的语义差异，不是缺陷。
+**会话的归属在创建时决定，之后不可改。** `PUT /api/sessions/{id}/group` 一律 409。因为"移动"不是一件事而是四件，且事后无法让它们一致：工具的目录、记忆层、烘焙进 system prompt 的项目 notes、hooks 与沙箱的信任根，全都由项目派生。被移动过的会话会留下一份"前半段在别处跑、读的是另一个项目的 notes"的记录，而保住 prompt cache 的冻结判据分辨不出这种情况（判据是 cwd + notesHash，会话自己的目录恰好等于项目目录时甚至不会重组）。在创建时决定，这四件事对会话的整个生命周期都成立。
+
+因此存量里"先建会话、再拖进项目"产生的会话（带着 seeded 的 `~/Octo`，被项目遮蔽）是历史形态，不会再新增。
 
 ## API
 
@@ -189,7 +191,7 @@ type updateSessionGroupRequest struct {
 - **新建项目**：先选目录再建，因为项目就是目录。目录决定名字（basename），已有同目录项目则复用而不是造重复。侧栏顶部按钮和会话行的「移动到项目 → 新建项目」走同一条 `resolveProjectForDir`。
 - **项目头**：额外显示一行缩写目录（`~/code/foo`）。行内齿轮打开项目设置，工作目录（复用现有 folder picker / 桌面原生目录对话框）+ 说明文本框；目录不可清空。
 - **Composer 的 cwd chip**：会话属于项目时显示项目目录，且**置为只读**，点击提示「由项目〈名字〉统一管理」。这一条不能省——否则用户改了没反应，就是一次静默失效。
-- **移入 / 移出项目**：复用现有的 `PUT /api/sessions/{id}/group`。移入后工作目录立刻显示为项目目录，移出后回落到会话自己的值。运行簇不是可选目标——服务端也会拒。
+- **没有"移入 / 移出项目"**。会话行没有这个动作，弹层也一并去掉了。要在某个项目里干活就在那个项目里新建会话（项目头的「+」），或者在落地页选它的目录。删除项目会把它的会话变回任务——这是会话离开项目的唯一途径。
 
 ## 多 tab 同步
 
@@ -200,7 +202,9 @@ registry 的每次成功写盘（分组增删改、成员移动、pin、项目�
 ## 测试要点
 
 - 解析优先级三种组合：有项目、无项目有会话值、两者都无。
-- 移入 / 移出项目后 `sessionCwd` 与 `sessionCwdEnv` 返回一致（防三个解析点分叉）。
+- 会话在项目里 / 项目被删除后，`sessionCwd` 与 `sessionCwdEnv` 返回一致（防三个解析点分叉）。
+- `PUT /api/sessions/{id}/group` 对任何目标（项目、空、不存在）都返回 409，且不改动既有归属。
+- 项目遮蔽而不覆写会话盘上的 `WorkingDir`：删项目后回落，重新加载可见原值未被改写。
 - 改项目目录后，下一 turn 的 composed system prompt 里的 `Working directory:` 跟着变。
 - 改 `notes` 触发重新组装；不改则复用冻结值（保住 prompt cache）。
 - 普通分组被解散、其会话变回任务；带目录的会话随后被 `adoptTaskWorkingDirs` 归入项目（顺序）。

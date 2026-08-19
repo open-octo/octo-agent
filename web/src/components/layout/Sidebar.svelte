@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, nativeShell, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen, resolveProjectForDir, normalizeDir } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, nativeShell, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen, resolveProjectForDir, normalizeDir } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
@@ -223,9 +223,8 @@
   $effect(() => {
     function onDocClick(e: MouseEvent) {
       const el = e.target as HTMLElement | null
-      if (el?.closest('.grp-popover, .rename-input')) return
+      if (el?.closest('.rename-input')) return
       menuFor.set(null)
-      groupMenuFor.set(null)
       commitRename()
       commitGroupRename()
     }
@@ -398,42 +397,6 @@
     }
   }
 
-  // From a session's "move to project" popover: pick a directory, then file the
-  // session under the project for it. Filing it there is what makes its tools
-  // run in that directory and its memory land in that project's tier — the two
-  // move together, which is the whole reason a session cannot carry a directory
-  // of its own.
-  async function newProjectForSession(sessionId: string) {
-    groupMenuFor.set(null)
-    await pickProjectDir(async (dir) => {
-      revealSection('projects')
-      try {
-        const gid = await resolveProjectForDir(dir)
-        await api.setSessionGroup(sessionId, gid)
-        sessionGroups.update(gs => gs.map(g => ({
-          ...g,
-          session_ids: g.id === gid
-            ? [...g.session_ids.filter(id => id !== sessionId), sessionId]
-            : g.session_ids.filter(id => id !== sessionId),
-        })))
-      } catch (e: any) { showToast(e.message, 'error') }
-    })
-  }
-
-  async function moveToGroup(sessionId: string, groupId: string) {
-    groupMenuFor.set(null)
-    try {
-      await api.setSessionGroup(sessionId, groupId)
-      // Update membership locally: drop from every group, then add to target.
-      sessionGroups.update(gs => gs.map(g => ({
-        ...g,
-        session_ids: g.id === groupId
-          ? [...g.session_ids.filter(id => id !== sessionId), sessionId]
-          : g.session_ids.filter(id => id !== sessionId),
-      })))
-    } catch (e: any) { showToast(e.message, 'error') }
-  }
-
   const selCount = $derived(Object.keys($sel).length)
 
   function agentNameOf(profileId: string): string {
@@ -494,7 +457,7 @@
               {$t('sidebar.new_project')}
             </button>
             {/if}
-            <span class="sel-toggle" onclick={() => { selMode.update(v => !v); sel.set({}); menuFor.set(null); editId.set(null); groupMenuFor.set(null) }}>
+            <span class="sel-toggle" onclick={() => { selMode.update(v => !v); sel.set({}); menuFor.set(null); editId.set(null) }}>
               {$selMode ? $t('sidebar.done') : $t('sidebar.select')}
             </span>
           </span>
@@ -695,14 +658,13 @@
         {@const selected = !!$sel[s.id]}
         {@const editing = $editId === s.id}
         {@const menuOpen = $menuFor === s.id && !$selMode}
-        {@const groupOpen = $groupMenuFor === s.id && !$selMode}
         {@const solid = active && !$selMode}
         {@const icon = sessionIcon(s)}
         <div
           class="nav-row"
           class:solid={solid}
           class:selected={selected && !solid}
-          onclick={() => { if ($selMode) toggleSel(s.id); else { view.set('chat'); activeSessionId.set(s.id); menuFor.set(null); groupMenuFor.set(null) } }}
+          onclick={() => { if ($selMode) toggleSel(s.id); else { view.set('chat'); activeSessionId.set(s.id); menuFor.set(null) } }}
         >
           {#if $selMode}
           <span
@@ -760,7 +722,7 @@
               <iconify-icon icon="lucide:archive-restore" width="13"></iconify-icon>
             </span>
             {/if}
-            <span class="row-action kebab" onclick={(e) => { e.stopPropagation(); menuFor.update(m => m === s.id ? null : s.id); groupMenuFor.set(null) }} style="color:{solid ? 'var(--blue-6)' : 'var(--text-tertiary)'}">
+            <span class="row-action kebab" onclick={(e) => { e.stopPropagation(); menuFor.update(m => m === s.id ? null : s.id) }} style="color:{solid ? 'var(--blue-6)' : 'var(--text-tertiary)'}">
               <iconify-icon icon="ant-design:more-outlined" width="14"></iconify-icon>
             </span>
           {/if}
@@ -778,9 +740,6 @@
             <span class="row-action" onclick={(e) => { e.stopPropagation(); togglePin(s.id, !pinned) }} title={pinned ? $t('sidebar.unpin') : $t('sidebar.pin')}>
               <iconify-icon icon={pinned ? 'ant-design:pushpin-filled' : 'ant-design:pushpin-outlined'} width="13"></iconify-icon>
             </span>
-            <span class="row-action" onclick={(e) => { e.stopPropagation(); groupMenuFor.set(s.id); menuFor.set(null) }} title={$t('sidebar.move_to_group')}>
-              <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
-            </span>
             {#if !pinned && !groupIdOf(s.id)}
             <!-- Collapse is only offered where it's legal (unpinned +
                  ungrouped), matching the server's guard. -->
@@ -796,31 +755,6 @@
               <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
             </span>
           {/if}
-          {/if}
-
-          {#if groupOpen}
-          {@const curGid = groupIdOf(s.id)}
-          <div class="grp-popover" onclick={(e) => e.stopPropagation()}>
-            <!-- Projects only. A scheduled task's cluster is not a destination:
-                 it holds that task's runs, and the server refuses the move. -->
-            {#each groupedView.projects as pv (pv.group.id)}
-            <div class="grp-opt" class:cur={curGid === pv.group.id} onclick={() => moveToGroup(s.id, pv.group.id)}>
-              <iconify-icon icon="ant-design:check-outlined" width="12" style="opacity:{curGid === pv.group.id ? 1 : 0}"></iconify-icon>
-              <span class="grp-opt-name">{pv.group.name}</span>
-            </div>
-            {/each}
-            {#if curGid}
-            <div class="grp-opt" onclick={() => moveToGroup(s.id, '')}>
-              <iconify-icon icon="ant-design:close-outlined" width="12"></iconify-icon>
-              <span class="grp-opt-name">{$t('sidebar.remove_from_project')}</span>
-            </div>
-            {/if}
-            <div class="grp-sep"></div>
-            <div class="grp-opt" onclick={() => newProjectForSession(s.id)}>
-              <iconify-icon icon="ant-design:plus-outlined" width="12"></iconify-icon>
-              <span class="grp-opt-name">{$t('sidebar.new_project')}</span>
-            </div>
-          </div>
           {/if}
         </div>
       {/snippet}
@@ -1074,23 +1008,6 @@
   font-size: 11px; color: var(--text-quaternary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* Move-to-group popover */
-.grp-popover {
-  position: absolute; top: 100%; right: 8px; z-index: 30;
-  min-width: 160px; max-width: 220px; max-height: 260px; overflow-y: auto;
-  margin-top: 2px; padding: 4px;
-  background: var(--bg-container); border: 1px solid var(--border-secondary);
-  border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.18);
-}
-.grp-opt {
-  display: flex; align-items: center; gap: 6px;
-  padding: 6px 8px; border-radius: 6px; cursor: pointer;
-  font-size: 13px; color: var(--text);
-}
-.grp-opt:hover { background: var(--hover-neutral); }
-.grp-opt.cur { color: var(--blue-6); }
-.grp-opt-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.grp-sep { height: 1px; margin: 4px 6px; background: var(--border-secondary); }
 .batch-bar {
   display: flex; align-items: center; gap: 8px;
   margin: 0 4px 6px; padding: 6px 8px 6px 12px;

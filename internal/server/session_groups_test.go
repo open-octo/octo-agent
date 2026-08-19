@@ -123,6 +123,9 @@ func TestSessionGroups_ToggleCollapsed(t *testing.T) {
 	}
 }
 
+// Single membership is enforced by addSessionToGroup, the only path that files
+// a session anywhere: the session is removed from every group before being
+// appended to the target.
 func TestSessionGroups_SingleMembership(t *testing.T) {
 	srv := groupTestServer(t)
 	_, o1 := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "A"))
@@ -132,15 +135,11 @@ func TestSessionGroups_SingleMembership(t *testing.T) {
 
 	const sid = "20260101-000000-deadbeef"
 
-	// Move into A.
-	rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/group", map[string]any{"group_id": g1})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("move to A: status %d", rec.Code)
+	if err := addSessionToGroup(g1, sid); err != nil {
+		t.Fatalf("file into A: %v", err)
 	}
-	// Move into B — must leave A.
-	rec, _ = doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/group", map[string]any{"group_id": g2})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("move to B: status %d", rec.Code)
+	if err := addSessionToGroup(g2, sid); err != nil {
+		t.Fatalf("file into B: %v", err)
 	}
 	groups, _ := loadSessionGroups()
 	byID := map[string]sessionGroup{}
@@ -154,22 +153,37 @@ func TestSessionGroups_SingleMembership(t *testing.T) {
 		t.Fatalf("B should hold %s, got %v", sid, byID[g2].SessionIDs)
 	}
 
-	// Ungroup (empty target).
-	rec, _ = doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/group", map[string]any{"group_id": ""})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("ungroup: status %d", rec.Code)
+	// A nonexistent target is an error, not a silently dropped write.
+	if err := addSessionToGroup("g-nope", sid); err == nil {
+		t.Error("filing into a missing group should fail")
 	}
-	groups, _ = loadSessionGroups()
-	for _, g := range groups {
-		if len(g.SessionIDs) != 0 {
-			t.Fatalf("group %s still holds %v after ungroup", g.ID, g.SessionIDs)
-		}
+}
+
+// Where a session lives is decided when it is created; there is no move. The
+// endpoint that used to move one refuses every request, so a stale client (or
+// another tab left open across an upgrade) gets a reason rather than silently
+// splitting a session's directory from its memory.
+func TestSessionGroups_MoveIsRefused(t *testing.T) {
+	srv := groupTestServer(t)
+	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "A"))
+	gid := o["group"].(map[string]any)["id"].(string)
+	const sid = "20260101-000000-deadbeef"
+	if err := addSessionToGroup(gid, sid); err != nil {
+		t.Fatalf("file in: %v", err)
 	}
 
-	// Move to a nonexistent group → 404.
-	rec, _ = doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/group", map[string]any{"group_id": "g-nope"})
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("move to missing group: expected 404, got %d", rec.Code)
+	for _, target := range []string{gid, "", "g-nope"} {
+		rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/group", map[string]any{"group_id": target})
+		if rec.Code != http.StatusConflict {
+			t.Errorf("move to %q: status %d, want 409", target, rec.Code)
+		}
+	}
+	// Membership is untouched by the refused requests.
+	groups, _ := loadSessionGroups()
+	for _, g := range groups {
+		if g.ID == gid && (len(g.SessionIDs) != 1 || g.SessionIDs[0] != sid) {
+			t.Errorf("membership changed: %v", g.SessionIDs)
+		}
 	}
 }
 
@@ -363,7 +377,7 @@ func TestSessionPin_CoexistsWithGroups(t *testing.T) {
 	}
 
 	// Moving a session into the group must not wipe the pin either.
-	doGroupReq(t, srv, http.MethodPut, "/api/sessions/other/group", map[string]any{"group_id": gid})
+	fileInProject(t, gid, "other")
 	if pins, _ := loadPinnedSessions(); len(pins) != 1 || pins[0] != sid {
 		t.Fatalf("pin lost after group membership change, got %v", pins)
 	}
@@ -432,7 +446,7 @@ func TestSessionCollapse_RejectsPinnedAndGrouped(t *testing.T) {
 
 	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "Work"))
 	gid := o["group"].(map[string]any)["id"].(string)
-	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+grouped+"/group", map[string]any{"group_id": gid})
+	fileInProject(t, gid, grouped)
 	rec, _ = doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+grouped+"/collapse", map[string]any{"collapsed": true})
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("collapse of grouped session: status %d, want 409", rec.Code)
@@ -460,7 +474,7 @@ func TestSessionCollapse_PinAndGroupDropCollapsed(t *testing.T) {
 	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "Work"))
 	gid := o["group"].(map[string]any)["id"].(string)
 	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/collapse", map[string]any{"collapsed": true})
-	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/group", map[string]any{"group_id": gid})
+	fileInProject(t, gid, sid)
 	if col, _ := loadCollapsedSessions(); len(col) != 0 {
 		t.Fatalf("group move left session collapsed: %v", col)
 	}

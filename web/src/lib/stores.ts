@@ -105,9 +105,7 @@ export const pinnedSessions = writable<string[]>([])
 // Collapsed session IDs (server registry, web-only). Collapsed sessions sink
 // into a folded panel at the bottom of the sidebar's session list.
 export const collapsedSessions = writable<string[]>([])
-// Sidebar UI state for groups: the session whose "move to group" popover is
-// open, and the group being renamed inline.
-export const groupMenuFor = writable<string | null>(null)
+// The project being renamed inline in the sidebar.
 export const editGroupId = writable<string | null>(null)
 export const editGroupDraft = writable('')
 // The configured default permission mode (~/.octo/config.yml), seeded once
