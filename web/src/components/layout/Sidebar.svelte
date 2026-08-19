@@ -4,6 +4,7 @@
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
+  import { splitSections, swapWithinSection, parseSectionFold, type SectionFold } from '../../lib/sidebarSections'
   import { ws } from '../../lib/ws'
   import VersionBadge from './VersionBadge.svelte'
   import ProjectSettingsModal from '../overlays/ProjectSettingsModal.svelte'
@@ -93,7 +94,7 @@
       sessionGroups.set(org.groups)
       pinnedSessions.set(org.pinned)
       collapsedSessions.set(org.collapsed)
-    } catch { /* ignore — sessions just render flat under Ungrouped */ }
+    } catch { /* ignore — sessions just render flat under Tasks */ }
     try {
       agents = await api.listAgents()
     } catch { /* agents list is optional */ }
@@ -109,72 +110,47 @@
 
   onDestroy(() => { unsubAgents() })
 
-  // The session list split into its groups (registry order) plus the leftover
-  // "ungrouped" ones. Membership lives in the group registry; member IDs that
-  // no longer resolve to a live session are dropped here, so a deleted session
-  // leaves no ghost row.
-  const groupedView = $derived.by(() => {
-    const byId = new Map($sessions.map(s => [s.id, s] as const))
-    const claimed = new Set<string>()
-    // Pinned sessions float to a dedicated top section (registry order) and are
-    // claimed first, so they don't also appear under their group or Ungrouped.
-    const pinned = $pinnedSessions.map(id => byId.get(id)).filter(Boolean) as typeof $sessions
-    pinned.forEach(s => claimed.add(s.id))
-    // Collapsed sessions sink into a folded panel at the bottom (registry
-    // order). Claiming keeps a stale registry overlap from rendering the same
-    // session twice; pinned claims first so a pin+collapse overlap (possible
-    // only via a cross-process last-writer-wins race) resolves the same way
-    // the server does — the pin wins.
-    const folded = $collapsedSessions.map(id => byId.get(id)).filter(Boolean).filter(s => !claimed.has((s as any).id)) as typeof $sessions
-    folded.forEach(s => claimed.add(s.id))
-    const all = $sessionGroups.map(g => {
-      // A duplicate id in session_ids (e.g. an optimistic prepend racing the
-      // 'session_created' broadcast's own full sessionGroups refresh) would
-      // otherwise map to the same session object twice and throw Svelte's
-      // each_key_duplicate on the keyed {#each} below.
-      const ids = [...new Set(g.session_ids)]
-      const items = ids.map(id => byId.get(id)).filter(Boolean).filter(s => !claimed.has((s as any).id)) as typeof $sessions
-      items.forEach(s => claimed.add(s.id))
-      return { group: g, items }
-    })
-    // The two sections the list is split into. A group carrying a working dir
-    // is a project — its directory governs every session under it — and one
-    // without is a plain grouping of loose tasks, so they answer different
-    // questions and are listed apart rather than interleaved in registry
-    // order. Ungrouped sessions are tasks too, and sit under that heading.
-    const projects = all.filter(gv => !!gv.group.working_dir)
-    const taskGroups = all.filter(gv => !gv.group.working_dir)
-    // Route through byId (already deduped by id) rather than $sessions
-    // directly, for the same reason as the groups' session_ids above — a
-    // duplicate session id would otherwise reach this keyed {#each} twice.
-    const ungrouped = [...byId.values()].filter(s => !claimed.has((s as any).id))
-    const taskCount = taskGroups.reduce((n, gv) => n + gv.items.length, 0) + ungrouped.length
-    return { folded, pinned, projects, taskGroups, ungrouped, taskCount }
-  })
+  // The session list split into the sections this sidebar renders. The logic
+  // lives in lib/sidebarSections so it can be tested: it decides whether a row
+  // renders at all, and a group that never renders is unreachable rather than
+  // merely misplaced.
+  const groupedView = $derived(
+    splitSections($sessions, $sessionGroups, $pinnedSessions, $collapsedSessions),
+  )
 
   // Which sections are expanded. This is a per-browser view preference about
   // screen space, not a fact about the sessions, so it stays in localStorage
   // rather than in the server-side group registry (unlike a group's own
   // collapsed flag, which is shared so every surface folds it the same way).
   const SECTIONS_KEY = 'octo.sidebar.sections'
-  function loadSections(): { tasks: boolean; projects: boolean } {
+  function loadSections(): SectionFold {
     try {
-      const raw = localStorage.getItem(SECTIONS_KEY)
-      if (raw) {
-        const v = JSON.parse(raw)
-        return { tasks: v?.tasks !== false, projects: v?.projects !== false }
-      }
-    } catch { /* unavailable or corrupt storage — both sections open */ }
-    return { tasks: true, projects: true }
+      return parseSectionFold(localStorage.getItem(SECTIONS_KEY))
+    } catch {
+      // Storage access itself can throw (privacy mode): both sections open.
+      return { tasks: true, projects: true }
+    }
   }
   let sections = $state(loadSections())
   // Id lists per section, so a group's reorder arrows know their own
   // neighbours (and whether they are at either end of their section).
   const taskGroupIds = $derived(groupedView.taskGroups.map(gv => gv.group.id))
   const projectIds = $derived(groupedView.projects.map(gv => gv.group.id))
+  function persistSections() {
+    try { localStorage.setItem(SECTIONS_KEY, JSON.stringify(sections)) } catch { /* ignore */ }
+  }
   function toggleSection(k: 'tasks' | 'projects') {
     sections = { ...sections, [k]: !sections[k] }
-    try { localStorage.setItem(SECTIONS_KEY, JSON.stringify(sections)) } catch { /* ignore */ }
+    persistSections()
+  }
+  // Creating a group opens an inline rename box on the new row, so a folded
+  // section would swallow the whole action: the group exists, unnamed, with no
+  // visible row to name, configure, or delete it. Anything that creates or
+  // retargets a group reveals the section it lands in.
+  function revealSection(k: 'tasks' | 'projects') {
+    if (sections[k]) return
+    sections = { ...sections, [k]: true }
+    persistSections()
   }
 
   function groupIdOf(sessionId: string): string {
@@ -343,6 +319,8 @@
   // rename so the user names it without a separate prompt dialog (native
   // prompt() is unreliable in the desktop webview).
   async function newGroup() {
+    // A new group carries no working dir, so it is born under Tasks.
+    revealSection('tasks')
     try {
       const g = await api.createSessionGroup(nextDefaultGroupName())
       sessionGroups.update(gs => [...gs, g])
@@ -381,15 +359,9 @@
   // it. Optimistic: swap locally, then persist the full new order; revert on
   // failure.
   async function moveGroup(id: string, dir: -1 | 1, siblings: string[]) {
-    const si = siblings.indexOf(id)
-    const sj = si + dir
-    if (si < 0 || sj < 0 || sj >= siblings.length) return
     const before = $sessionGroups
-    const i = before.findIndex(g => g.id === id)
-    const j = before.findIndex(g => g.id === siblings[sj])
-    if (i < 0 || j < 0) return
-    const next = [...before]
-    ;[next[i], next[j]] = [next[j], next[i]]
+    const next = swapWithinSection(before, id, dir, siblings)
+    if (!next) return
     sessionGroups.set(next)
     try {
       await api.reorderSessionGroups(next.map(g => g.id))
@@ -414,6 +386,7 @@
   // session into it, and open inline rename on the new group.
   async function newGroupForSession(sessionId: string) {
     groupMenuFor.set(null)
+    revealSection('tasks')
     try {
       const g = await api.createSessionGroup(nextDefaultGroupName())
       await api.setSessionGroup(sessionId, g.id)
@@ -530,7 +503,7 @@
         <!-- Tasks: loose sessions and the plain groups that gather them.
              Sessions with no group of their own are tasks by definition, so
              they land here rather than under a separate "ungrouped" heading. -->
-        {#if groupedView.taskCount > 0}
+        {#if groupedView.hasTasks}
         <div class="sec-header" onclick={() => toggleSection('tasks')}>
           <iconify-icon icon={sections.tasks ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="9"></iconify-icon>
           <span class="sec-name">{$t('sidebar.tasks')}</span>
@@ -983,7 +956,6 @@
   min-height: 24px; padding: 0 8px; margin-top: 10px;
   color: var(--text-quaternary); cursor: pointer; user-select: none;
 }
-.sec-header:first-child { margin-top: 2px; }
 .sec-header:hover { color: var(--text-tertiary); }
 .sec-name {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1019,9 +991,11 @@
 .grp-header .row-action.hover-only { display: none; }
 .grp-header:hover .row-action.hover-only { display: flex; }
 .grp-dir {
-  /* flex-shrink:0 — every sibling in this column carries a min-height, so a
-     list too tall for .sessions-group squeezed the one item that didn't, and
-     the project's path got sliced in half by the row below it. */
+  /* flex-shrink:0 — the overflow:hidden below drops this item's automatic
+     minimum size to zero (that floor only applies while overflow is visible),
+     and every sibling in this column carries an explicit min-height. So a list
+     too tall for .sessions-group took its shrink out of the one item with no
+     floor, slicing the project's path in half under the row below it. */
   flex: 0 0 auto;
   padding: 0 8px 2px 28px; margin-top: -2px;
   font-size: 11px; color: var(--text-quaternary);
