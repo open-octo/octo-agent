@@ -33,6 +33,7 @@ var allTools = []tool{
 	WriteFileTool{},
 	EditFileTool{},
 	ShowArtifactTool{},
+	RenderUITool{},
 	SendFileTool{},
 	SendMessageTool{},
 	GlobTool{},
