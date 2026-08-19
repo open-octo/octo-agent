@@ -288,11 +288,6 @@
     editId.set(null)
   }
 
-  async function newSession(agentId?: string) {
-    try {
-      await createNewSession(agentId)
-    } catch (e: any) { showToast(e.message, 'error') }
-  }
 
   // A default name for a freshly created group: "Group N" / "分组N", where N is
   // the smallest positive integer whose name isn't already taken. Naming groups
@@ -416,7 +411,7 @@
   {#if $sidebar === 'full'}
   <div class="full">
     <div class="new-btn-wrap" bind:this={agentPickerEl}>
-      <button class="new-btn" onclick={() => newSession()}>
+      <button class="new-btn" onclick={() => createNewSession()}>
         <iconify-icon icon="ant-design:plus-outlined" width="14"></iconify-icon>
         <span>{$t('nav.new_session')}</span>
         <span class="btn-caret" title={$t('nav.new_session_with_agent')} onclick={(e) => { e.stopPropagation(); agentPickerOpen = !agentPickerOpen }}>
@@ -425,11 +420,11 @@
       </button>
       {#if agentPickerOpen}
         <div class="agent-picker-menu">
-          <button class="ap-item" onclick={() => { newSession(); agentPickerOpen = false }}>
+          <button class="ap-item" onclick={() => { createNewSession(); agentPickerOpen = false }}>
             <span class="ap-name">Default</span>
           </button>
           {#each agents as a (a.id)}
-            <button class="ap-item" onclick={() => { newSession(a.id); agentPickerOpen = false }}>
+            <button class="ap-item" onclick={() => { createNewSession(a.id); agentPickerOpen = false }}>
               <span class="ap-name">{a.name}</span>
             </button>
           {/each}
@@ -539,7 +534,7 @@
           <span
             class="row-action"
             title={tr('sidebar.new_session_in_group')}
-            onclick={(e) => { e.stopPropagation(); createSessionInGroup(g.id).catch((err: any) => showToast(err?.message ?? tr('sidebar.new_session_fail'), 'error')) }}
+            onclick={(e) => { e.stopPropagation(); createSessionInGroup(g.id) }}
           >
             <iconify-icon icon="ant-design:plus-outlined" width="13"></iconify-icon>
           </span>
@@ -790,7 +785,7 @@
   {#if $sidebar === 'rail'}
   <div class="rail">
     <div style="padding:16px 0 8px 0;">
-      <button class="rail-btn primary" title={$t('nav.new_session')} onclick={() => newSession()}>
+      <button class="rail-btn primary" title={$t('nav.new_session')} onclick={() => createNewSession()}>
         <iconify-icon icon="ant-design:plus-outlined" width="16"></iconify-icon>
       </button>
     </div>

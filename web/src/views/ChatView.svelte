@@ -6,7 +6,12 @@
     activeSessionId,
     activeAgent,
     pendingModel,
+    pendingAgent,
+    pendingWorkingDir,
+    pendingGroupId,
+    resolveProjectForDir,
     sessions,
+    sessionGroups,
     chatMessages,
     chatStreaming,
     chatLastTextAt,
@@ -1975,11 +1980,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   }
 
   // ensureActiveSession returns the session to send into, creating one first
-  // if none is active — e.g. right after deleting the session that was open.
-  // Mirrors Sidebar's "+" new-session flow so typing into that empty state
-  // and hitting send works instead of silently dropping the message. `created`
-  // reports whether this call is what created it: the caller must not send
-  // straight into a session it just created (see send()).
+  // if none is active. This is the ONLY place a chat session is created: the
+  // sidebar "+", the command palette, the desktop tray and ⌘N all just open
+  // this blank landing and park their picks in the pending* stores, so a
+  // session exists on disk and in the sidebar only once something is actually
+  // said in it. `created` reports whether this call is what created it: the
+  // caller must not send straight into a session it just created (see send()).
   async function ensureActiveSession(): Promise<{ id: string; created: boolean } | null> {
     const existing = get(activeSessionId)
     if (existing) return { id: existing, created: false }
@@ -1987,12 +1993,38 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // A model picked in the composer before any session existed rides the
       // pendingModel store (composite "<endpoint>::<model>" id — the create
       // handler resolves it via cfg.EntryByModel); consumed here so it only
-      // applies to the session it was picked for.
+      // applies to the session it was picked for. Same for the agent, which
+      // the sidebar's "+" caret can pin per new session, falling back to the
+      // globally active one.
       const model = get(pendingModel)
-      const created = await api.createSession({ source: 'manual', agent_profile: get(activeAgent), ...(model ? { model } : {}) }) as any
-      if (model) pendingModel.set('')
+      const opts: api.CreateSessionOpts = {
+        source: 'manual',
+        agent_profile: get(pendingAgent) || get(activeAgent),
+        ...(model ? { model } : {}),
+      }
+      // Where the session lands. An explicitly chosen group (the sidebar's
+      // per-group "+") wins outright. Otherwise a working directory picked on
+      // the landing page files the session under the project that owns that
+      // directory — creating the project on the spot if there isn't one yet.
+      // With neither, it stays an ungrouped task.
+      const groupId = get(pendingGroupId)
+      const dir = get(pendingWorkingDir)
+      opts.group_id = groupId || (dir ? await resolveProjectForDir(dir) : undefined)
+      const created = await api.createSession(opts) as any
+      pendingModel.set('')
+      pendingAgent.set('')
+      pendingGroupId.set('')
+      pendingWorkingDir.set('')
       const newSess = created.session ?? created
-      sessions.update(ss => [newSess, ...ss])
+      sessions.update(ss => [newSess, ...ss.filter((s: any) => s.id !== newSess.id)])
+      // The server filed it under the group; mirror that locally so the
+      // sidebar shows the row under its project without waiting for a refetch.
+      if (opts.group_id) {
+        const gid = opts.group_id
+        sessionGroups.update(gs => gs.map(g => g.id === gid
+          ? { ...g, session_ids: [newSess.id, ...g.session_ids.filter(id => id !== newSess.id)] }
+          : g))
+      }
       activeSessionId.set(newSess.id)
       return { id: newSess.id, created: true }
     } catch (e: any) {
@@ -2217,7 +2249,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   <div class="chat-header">
     <div class="title-row">
       <span class="session-title">
-        {currentSession?.title ?? currentSession?.name ?? 'Chat'}
+        {#if !id}{$t('nav.new_session')}{:else}{currentSession?.title ?? currentSession?.name ?? 'Chat'}{/if}
       </span>
       {#if currentSession?.branched_from}
         {@const src = $sessions.find(s => s.id === currentSession!.branched_from)}
@@ -2381,6 +2413,17 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
               </div>
             {/if}
           {/snippet}
+
+          <!-- Landing page. No session exists yet: the composer below collects
+               the model, agent and working directory, and the first message is
+               what actually creates the session (ensureActiveSession). -->
+          {#if !id}
+            <div class="landing">
+              <span class="landing-mark"><OctoLogo size={44} /></span>
+              <h1 class="landing-title">{$t('chat.landing_title')}</h1>
+              <p class="landing-sub">{$t('chat.landing_sub')}</p>
+            </div>
+          {/if}
 
           {#each msgs as msg, i (msg.id)}
             {#if msg.type === 'user'}
@@ -3091,6 +3134,19 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   max-width: var(--chat-content-max-width); margin: 0 auto;
   padding: 24px 24px 16px; display: flex; flex-direction: column; gap: 20px;
 }
+
+/* ── Landing page (no session yet) ───────────────────────────────────────── */
+/* Sits in the empty scroll area above the composer rather than replacing it,
+   so the composer stays exactly where it is once the first message lands and
+   the conversation starts scrolling in above it. */
+.landing {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 48px 0 24px; text-align: center;
+}
+.landing-mark { opacity: 0.9; }
+.landing-title { margin: 0; font-size: 26px; font-weight: 600; color: var(--text); }
+.landing-sub { margin: 0; font-size: 13px; color: var(--text-tertiary); max-width: 460px; }
 
 /* ── Message meta row (avatar · name · time) ─────────────────────────────── */
 .msg-meta { display: flex; align-items: center; gap: 8px; }

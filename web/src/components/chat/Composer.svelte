@@ -5,6 +5,7 @@
     running, activeSessionId, chatStreaming, sessions, sessionGroups,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
     globalPermissionMode, nativeShell, localAccess, activeAgent, pendingModel, view, settingsModalOpen,
+    pendingAgent, pendingWorkingDir, normalizeDir,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
@@ -638,8 +639,20 @@
   // to, if any. A project's directory governs every session in it, so the dir
   // chip below goes read-only rather than letting the user edit a value the
   // server would refuse.
-  let project = $derived($sessionGroups.find(g => !!g.working_dir && g.session_ids.includes(sid)) ?? null)
-  let workingDir = $derived(project?.working_dir || $chatWorkingDir[sid] || currentSession?.working_dir || '')
+  // On the landing page there is no session to look up membership for, so the
+  // project is whichever one already owns the directory the user just picked —
+  // the same match ensureActiveSession will make when it files the session.
+  let project = $derived.by(() => {
+    if (sid) return $sessionGroups.find(g => !!g.working_dir && g.session_ids.includes(sid)) ?? null
+    const dir = $pendingWorkingDir
+    if (!dir) return null
+    return $sessionGroups.find(g => !!g.working_dir && normalizeDir(g.working_dir!) === normalizeDir(dir)) ?? null
+  })
+  let workingDir = $derived(
+    sid
+      ? (project?.working_dir || $chatWorkingDir[sid] || currentSession?.working_dir || '')
+      : $pendingWorkingDir,
+  )
   let permMode = $derived($chatPermMode[sid] || currentSession?.permission_mode || $globalPermissionMode)
   // Effective show-reasoning for this session: live store > session record > default true.
   let showReasoning = $derived($chatShowReasoning[sid] ?? currentSession?.show_reasoning ?? true)
@@ -722,7 +735,7 @@
   // exists (even pre-lock), else the pending pick for the session about to
   // be auto-created (ensureActiveSession in ChatView reads the activeAgent
   // store, mirroring the sidebar's own new-session picker).
-  let effectiveAgentId = $derived(currentSession ? sessionAgent : $activeAgent)
+  let effectiveAgentId = $derived(currentSession ? sessionAgent : ($pendingAgent || $activeAgent))
   // Empty when the default agent applies — the chip only renders for an
   // expert agent.
   let agentLabel = $derived.by(() => {
@@ -741,7 +754,10 @@
         }
       }
     } else {
+      // Overwrite the sidebar caret's pick too, or ensureActiveSession would
+      // prefer the parked one over what the composer now displays.
       activeAgent.set(id)
+      pendingAgent.set(id)
     }
     queueMicrotask(() => textareaEl?.focus())
   }
@@ -864,7 +880,13 @@
   // dir and store the canonical path the server resolved (~ expanded, absolute).
   // Returns whether it succeeded so callers can close their own UI.
   async function applyWorkingDir(dir: string): Promise<boolean> {
-    if (!sid) return false
+    // Landing page: park the pick instead. ensureActiveSession consumes it to
+    // decide which project the session is born in, and the server canonicalises
+    // the path there (the pickers already hand back an absolute one).
+    if (!sid) {
+      pendingWorkingDir.set(dir)
+      return true
+    }
     dirSaving = true
     try {
       const res = await api.updateSessionWorkingDir(sid, dir)
@@ -1280,21 +1302,33 @@
             </div>
           {/if}
         </div>
-        {#if workingDir && project}
+        {#if sid && workingDir && project}
           <span class="meta-chip static" title={$t('chat.dir_from_project').replace('{name}', project.name) + ` — ${workingDir}`}>
             <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
             <span class="mono dir-path">{shortDir(workingDir)}</span>
             <span class="dir-owner">{project.name}</span>
           </span>
-        {:else if workingDir}
+        {:else if workingDir || !sid}
+          <!-- The landing page always offers the chip, even with nothing picked
+               yet: the directory is what decides whether the first message
+               starts a loose task or lands in a project, so it has to be
+               reachable before there is a session to hang it on. -->
           <button
             class="meta-chip"
-            title={$t('chat.dir_change') + ` — ${workingDir}`}
+            class:empty={!workingDir}
+            title={workingDir ? $t('chat.dir_change') + ` — ${workingDir}` : $t('chat.dir_pick')}
             disabled={dirSaving}
             onclick={(e) => { e.stopPropagation(); openPicker() }}
           >
             <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
-            <span class="mono dir-path">{shortDir(workingDir)}</span>
+            {#if workingDir}
+              <span class="mono dir-path">{shortDir(workingDir)}</span>
+            {:else}
+              <span>{$t('chat.dir_pick')}</span>
+            {/if}
+            {#if !sid && project}
+              <span class="dir-owner">{project.name}</span>
+            {/if}
           </button>
         {/if}
         {#if goalChip}
@@ -1380,8 +1414,9 @@
 .reasoning-eye { color: var(--success); }
 .mono { font-family: var(--font-mono); }
 .dir-path { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Names the project that owns this session's directory, so a read-only dir
-   chip explains itself without needing the tooltip. */
+/* Names the project that owns this directory, so the chip explains itself
+   without needing the tooltip — both for a session already inside a project
+   and on the landing page, where it previews where the first message lands. */
 .dir-owner {
   max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   padding-left: 5px; margin-left: 1px; border-left: 1px solid var(--border-secondary);
@@ -1464,6 +1499,8 @@ textarea {
 .meta-chip:hover { color: var(--text); background: var(--hover-neutral); }
 .meta-chip.static { cursor: default; }
 .meta-chip.static:hover { color: var(--text-secondary); background: transparent; }
+/* Nothing picked yet: reads as an invitation rather than as state. */
+.meta-chip.empty { color: var(--text-tertiary); }
 .ctx-pct { color: var(--text); font-weight: 600; }
 .send-btn {
   width: 38px; height: 30px; flex: 0 0 auto; margin-bottom: 1px;

@@ -34,11 +34,9 @@
     close()
   }
 
-  async function newSession() {
+  function newSession() {
     close()
-    try {
-      await createNewSession()
-    } catch (e: any) { showToast(e.message, 'error') }
+    createNewSession()
   }
 
   // Static actions (always available)

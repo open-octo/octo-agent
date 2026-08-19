@@ -19,6 +19,15 @@ export const activeAgent = writable<string>('default')
 // this, picking a model on the blank new-chat view was a silent no-op
 // (#2066).
 export const pendingModel = writable<string>('')
+// The rest of the picks the blank new-chat landing collects before a session
+// exists, consumed by the same ensureActiveSession call that consumes
+// pendingModel. pendingWorkingDir also decides whether the session is born
+// inside a project — see resolveProjectForDir.
+export const pendingAgent = writable<string>('')
+export const pendingWorkingDir = writable<string>('')
+// Set by the sidebar's per-group "+": the group the not-yet-created session
+// belongs to. An explicit group wins over pendingWorkingDir's inference.
+export const pendingGroupId = writable<string>('')
 export const sidebar = writable('full')
 export const cmdkOpen = writable(false)
 // Drives the MCP import-JSON modal. Adding a single server and editing an
@@ -253,38 +262,62 @@ export function prependSession(sess: Session) {
 // noise here, so ChatView skips it for these ids.
 export const agenticSessions = new Set<string>()
 
+// Clear every pick the landing page parks, so one "new session" click never
+// inherits the leftovers of the last one that was abandoned without sending.
+function clearPendingSessionOpts() {
+  pendingAgent.set('')
+  pendingGroupId.set('')
+  pendingWorkingDir.set('')
+  pendingModel.set('')
+}
+
 // Plain "new session" entry point shared by the sidebar button and the
-// command palette — creates an empty chat session with no queued prompt.
+// command palette. Nothing is created here — it opens the blank chat landing
+// and parks the picks until the first message actually arrives, at which point
+// ChatView.ensureActiveSession creates the session for real. Creating up front
+// left an empty session on disk and a dead row in the sidebar every time the
+// button was touched, whether or not anything was ever said in it.
 // agentProfile (optional) is the agent ID to bind the session to;
 // '' or undefined means Default Agent.
-export async function createNewSession(agentProfile?: string): Promise<void> {
-  const opts: api.CreateSessionOpts = { source: 'manual' }
-  if (agentProfile) opts.agent_profile = agentProfile
-  // A model picked on the blank new-chat view rides pendingModel until a
-  // session exists — honor it here too, or the sidebar "+" would silently
-  // discard the pick that ChatView.ensureActiveSession applies on send.
-  const pending = get(pendingModel)
-  if (pending) opts.model = pending
-  const sess = await api.createSession(opts)
-  if (pending) pendingModel.set('')
-  prependSession(sess)
-  activeSessionId.set(sess.id)
+export function createNewSession(agentProfile?: string): void {
+  clearPendingSessionOpts()
+  if (agentProfile) pendingAgent.set(agentProfile)
+  activeSessionId.set(null)
   view.set('chat')
 }
 
-// Per-group "new session" entry point (the sidebar's group-header "+"): the
-// server files the session under the group at creation time, so a project
-// member is born in the project's working directory with no seeded dir of its
-// own. The local group store is patched so the sidebar shows the session under
-// its group without a refetch.
-export async function createSessionInGroup(groupId: string): Promise<void> {
-  const sess = await api.createSession({ source: 'manual', group_id: groupId })
-  prependSession(sess)
-  sessionGroups.update(gs =>
-    gs.map(g => (g.id === groupId ? { ...g, session_ids: [sess.id, ...g.session_ids.filter(id => id !== sess.id)] } : g)),
-  )
-  activeSessionId.set(sess.id)
+// Per-group "new session" entry point (the sidebar's group-header "+"). Same
+// deferred creation as createNewSession, with the target group parked too: on
+// send the server files the session under the group at creation time, so a
+// project member is born in the project's working directory with no seeded
+// dir of its own.
+export function createSessionInGroup(groupId: string): void {
+  clearPendingSessionOpts()
+  pendingGroupId.set(groupId)
+  activeSessionId.set(null)
   view.set('chat')
+}
+
+// Trailing slashes are the only shape difference the pickers can produce —
+// both the in-app tree and the native dialog return absolute paths, and the
+// server has already expanded any "~" in what it stored.
+export function normalizeDir(p: string): string {
+  return p.replace(/\/+$/, '')
+}
+
+// Resolve a working directory picked on the landing page to the project that
+// owns it, creating that project if none exists yet. Returns the group id to
+// file the new session under. Matching is by directory, not by name: two
+// projects can share a name, but the directory is what actually governs where
+// a session's tools run.
+export async function resolveProjectForDir(dir: string): Promise<string> {
+  const target = normalizeDir(dir)
+  const existing = get(sessionGroups).find(g => !!g.working_dir && normalizeDir(g.working_dir!) === target)
+  if (existing) return existing.id
+  const name = target.split('/').filter(Boolean).pop() || target
+  const g = await api.createSessionGroup(name, { working_dir: dir })
+  sessionGroups.update(gs => [...gs, g])
+  return g.id
 }
 
 // Agentic-first entry point shared by the Skills / Tasks / MCP / Channels /
