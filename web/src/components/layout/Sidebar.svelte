@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
+  import { get } from 'svelte/store'
   import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
@@ -13,6 +14,9 @@
   // rather than by object so the modal always renders the live group from the
   // store, even if it changes underneath.
   let projectModalFor = $state('')
+  // Project whose row menu is open, by id ('' = none). Local rather than a store:
+  // nothing outside this sidebar opens or reads it.
+  let projectMenuFor = $state('')
   let projectModalGroup = $derived($sessionGroups.find(g => g.id === projectModalFor) ?? null)
 
   // Abbreviate a project directory for the sidebar: drop the home prefix, and
@@ -224,6 +228,7 @@
       const el = e.target as HTMLElement | null
       if (el?.closest('.rename-input')) return
       menuFor.set(null)
+      projectMenuFor = ''
       commitRename()
       commitGroupRename()
     }
@@ -392,11 +397,33 @@
     editGroupId.set(null)
   }
 
-  async function deleteGroup(id: string, name: string) {
-    if (!(await confirmDialog(tr('sidebar.confirm_delete_group').replace('{name}', name)))) return
+  // Deleting a project takes its sessions with it — they were work on that
+  // directory, and leaving them behind as unattached tasks is a mess nobody asked
+  // for. The confirmation therefore says how many transcripts are about to go,
+  // and the deletion is one request so it cannot half-happen.
+  async function deleteGroup(id: string, name: string, count: number) {
+    projectMenuFor = ''
+    const msg = count > 0
+      ? tr('sidebar.confirm_delete_project').replace('{name}', name).replace('{n}', String(count))
+      : tr('sidebar.confirm_delete_empty_project').replace('{name}', name)
+    const ok = await confirmDialog(msg, {
+      title: tr('sidebar.confirm_delete_project_title'),
+      danger: count > 0,
+      confirmLabel: tr('sidebar.confirm_delete_project_ok'),
+    })
+    if (!ok) return
     try {
-      await api.deleteSessionGroup(id)
+      await api.deleteSessionGroup(id, count > 0)
+      const gone = new Set(get(sessionGroups).find(g => g.id === id)?.session_ids ?? [])
       sessionGroups.update(gs => gs.filter(g => g.id !== id))
+      if (gone.size) {
+        sessions.update(ss => ss.filter(x => !gone.has(x.id)))
+        if (gone.has($activeSessionId ?? '')) {
+          activeSessionId.set(null)
+          clearPendingSessionOpts()
+          view.set('chat')
+        }
+      }
     } catch (e: any) { showToast(e.message, 'error') }
   }
 
@@ -553,7 +580,7 @@
       {#snippet groupBlock(gv: any, gi: number, siblings: string[])}
         {@const g = gv.group}
         {@const editingG = $editGroupId === g.id}
-        <div class="grp-header">
+        <div class="grp-header" class:menu-open={projectMenuFor === g.id}>
           {#if $selMode}{@render triBox(triStateOf(gv.items.map((s: any) => s.id)), () => toggleMany(gv.items.map((s: any) => s.id)))}{/if}
           <!-- Folder icon doubles as the collapse toggle: open when expanded,
                closed when collapsed, so it carries both identity and state. -->
@@ -580,44 +607,48 @@
                  its own: it is an ordinary project, made by the scheduler. -->
             <iconify-icon class="from-cron" icon="ant-design:clock-circle-outlined" width="11" title={$t('sidebar.from_scheduled_task')}></iconify-icon>
           {/if}
-          <span class="grp-count">{gv.items.length}</span>
+          <span class="grp-count on-rest">{gv.items.length}</span>
           {#if !$selMode}
-          <!-- Two frequency tiers: new-session and settings stay anchored at
-               the right edge; rename / delete / reorder appear on hover,
-               expanding between the name and the anchored pair (display:none,
-               NOT opacity — invisible icons must not reserve width, that's
-               what squeezed the group name to an ellipsis). -->
-          {#if gi > 0}
-          <span class="row-action hover-only" title={$t('sidebar.move_group_up')} onclick={() => moveGroup(g.id, -1, siblings)}>
-            <iconify-icon icon="ant-design:arrow-up-outlined" width="12"></iconify-icon>
+          <!-- Six icons used to sit here — reorder, rename, delete, new session,
+               settings — and the row read as a toolbar with a name attached. Two
+               remain, both things you do TO the project rather than to its
+               configuration: start work in it, and open its menu. The rest are in
+               the menu, where a destructive action is not one stray click away. -->
+          <span class="row-action on-hover" title={$t('sidebar.project_more')} onclick={(e) => { e.stopPropagation(); projectMenuFor = projectMenuFor === g.id ? '' : g.id }}>
+            <iconify-icon icon="ant-design:more-outlined" width="14"></iconify-icon>
           </span>
-          {/if}
-          {#if gi < siblings.length - 1}
-          <span class="row-action hover-only" title={$t('sidebar.move_group_down')} onclick={() => moveGroup(g.id, 1, siblings)}>
-            <iconify-icon icon="ant-design:arrow-down-outlined" width="12"></iconify-icon>
-          </span>
-          {/if}
-          <span class="row-action hover-only" title={$t('sidebar.rename_group')} onclick={(e) => { e.stopPropagation(); editGroupId.set(g.id); editGroupDraft.set(g.name) }}>
-            <iconify-icon icon="ant-design:edit-outlined" width="12"></iconify-icon>
-          </span>
-          <span class="row-action hover-only del" title={$t('sidebar.delete_group')} onclick={() => deleteGroup(g.id, g.name)}>
-            <iconify-icon icon="ant-design:delete-outlined" width="12"></iconify-icon>
-          </span>
-          <span
-            class="row-action"
-            title={tr('sidebar.new_session_in_group')}
-            onclick={(e) => { e.stopPropagation(); createSessionInGroup(g.id) }}
-          >
+          <span class="row-action on-hover" title={tr('sidebar.new_session_in_group')} onclick={(e) => { e.stopPropagation(); createSessionInGroup(g.id) }}>
             <iconify-icon icon="ant-design:plus-outlined" width="13"></iconify-icon>
           </span>
-          <!-- A project's directory and shared prompt, behind one gear. -->
-          <span
-            class="row-action"
-            title={g.working_dir ? `${tr('project.settings')} — ${g.working_dir}` : tr('project.settings')}
-            onclick={(e) => { e.stopPropagation(); projectModalFor = g.id }}
-          >
-            <iconify-icon icon="ant-design:setting-outlined" width="13"></iconify-icon>
-          </span>
+          {#if projectMenuFor === g.id}
+          <div class="row-menu" onclick={(e) => e.stopPropagation()}>
+            <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; editGroupId.set(g.id); editGroupDraft.set(g.name) }}>
+              <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
+              <span>{$t('sidebar.rename_group')}</span>
+            </div>
+            <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; projectModalFor = g.id }}>
+              <iconify-icon icon="ant-design:setting-outlined" width="13"></iconify-icon>
+              <span>{$t('project.settings')}</span>
+            </div>
+            {#if gi > 0}
+            <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; moveGroup(g.id, -1, siblings) }}>
+              <iconify-icon icon="ant-design:arrow-up-outlined" width="13"></iconify-icon>
+              <span>{$t('sidebar.move_group_up')}</span>
+            </div>
+            {/if}
+            {#if gi < siblings.length - 1}
+            <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; moveGroup(g.id, 1, siblings) }}>
+              <iconify-icon icon="ant-design:arrow-down-outlined" width="13"></iconify-icon>
+              <span>{$t('sidebar.move_group_down')}</span>
+            </div>
+            {/if}
+            <div class="row-menu-sep"></div>
+            <div class="row-menu-item del" onclick={(e) => { e.stopPropagation(); deleteGroup(g.id, g.name, gv.items.length) }}>
+              <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
+              <span>{$t('sidebar.delete_group')}</span>
+            </div>
+          </div>
+          {/if}
           {/if}
           {/if}
         </div>
@@ -939,6 +970,7 @@
 .sec-count { font-size: 11px; flex: 0 0 auto; }
 
 .grp-header {
+  position: relative;
   display: flex; align-items: center; gap: 6px;
   min-height: 28px; padding: 0 6px 0 6px; margin-top: 2px;
   border-radius: 6px;
@@ -963,18 +995,21 @@
    the group name into an ellipsis. They expand between the name and the
    anchored pair, so the icons that are always there never shift. */
 .grp-header .row-action { opacity: 1; width: 20px; flex-basis: 20px; }
-.grp-header .row-action.hover-only { display: none; }
-.grp-header:hover .row-action.hover-only { display: flex; }
 /* A session row swaps its metadata for its actions on hover. Kept in CSS rather
    than a hover-tracking $state: the row must not re-render (and the title must
    not reflow) just because the cursor crossed it. The menu-open case holds the
    swap while the panel is up, so the kebab the panel belongs to stays under the
    cursor that opened it. */
-.nav-row .row-action.on-hover { display: none; }
+.nav-row .row-action.on-hover,
+.grp-header .row-action.on-hover { display: none; }
 .nav-row:hover .row-action.on-hover,
-.nav-row.menu-open .row-action.on-hover { display: flex; }
+.nav-row.menu-open .row-action.on-hover,
+.grp-header:hover .row-action.on-hover,
+.grp-header.menu-open .row-action.on-hover { display: flex; }
 .nav-row:hover .on-rest,
-.nav-row.menu-open .on-rest { display: none; }
+.nav-row.menu-open .on-rest,
+.grp-header:hover .on-rest,
+.grp-header.menu-open .on-rest { display: none; }
 .row-menu {
   position: absolute; top: 100%; right: 6px; z-index: 30;
   min-width: 132px; margin-top: 2px; padding: 4px;

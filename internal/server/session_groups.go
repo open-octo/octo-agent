@@ -735,14 +735,49 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 
 // ─── DELETE /api/session-groups/{id} ────────────────────────────────────────
 
-// handleDeleteSessionGroup removes a group. Its member sessions are not
-// deleted — they fall back to "ungrouped".
+// handleDeleteSessionGroup removes a project. With ?sessions=delete its member
+// sessions are deleted along with it; without it they are left on disk and become
+// tasks.
+//
+// Deleting the sessions is what the UI asks for, and it is one request rather
+// than "delete these ids, then delete the project" so a failure halfway cannot
+// leave a project standing over sessions that are already gone. The sessions go
+// first: a project whose sessions were deleted but which survived a crash is a
+// visible empty row the user can delete again, while the reverse is a set of
+// sessions with no row to reach them from.
 func (s *Server) handleDeleteSessionGroup(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "missing group id")
 		return
 	}
+	withSessions := r.URL.Query().Get("sessions") == "delete"
+	if withSessions {
+		groupMu.Lock()
+		groups, lerr := loadSessionGroups()
+		var members []string
+		if lerr == nil {
+			for i := range groups {
+				if groups[i].ID == id {
+					members = append(members, groups[i].SessionIDs...)
+					break
+				}
+			}
+		}
+		groupMu.Unlock()
+		if lerr != nil {
+			writeError(w, http.StatusInternalServerError, lerr.Error())
+			return
+		}
+		if _, failed := s.deleteSessionsByID(members); len(failed) > 0 {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":  "some sessions could not be deleted; the project was left in place",
+				"failed": failed,
+			})
+			return
+		}
+	}
+
 	groupMu.Lock()
 	defer groupMu.Unlock()
 	groups, err := loadSessionGroups()

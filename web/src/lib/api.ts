@@ -120,8 +120,12 @@ export async function updateSessionGroup(
   return d.group
 }
 
-export async function deleteSessionGroup(id: string): Promise<void> {
-  await request<unknown>(`/api/session-groups/${id}`, { method: 'DELETE' })
+// Delete a project. withSessions deletes its sessions along with it, in the same
+// request — so a failure cannot leave the project standing over sessions that are
+// already gone.
+export async function deleteSessionGroup(id: string, withSessions = false): Promise<void> {
+  const q = withSessions ? '?sessions=delete' : ''
+  await request<unknown>(`/api/session-groups/${id}${q}`, { method: 'DELETE' })
 }
 
 // Persist a new group order. Pass the full group-ID list in the desired order.

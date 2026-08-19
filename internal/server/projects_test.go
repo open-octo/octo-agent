@@ -126,6 +126,57 @@ func TestProject_ShadowsOwnDirAndRestoresOnDelete(t *testing.T) {
 	}
 }
 
+// Deleting a project with ?sessions=delete takes its sessions with it: they were
+// work on that directory, and leaving them as unattached tasks is a mess nobody
+// asked for. One request, so it cannot half-happen.
+func TestProject_DeleteWithSessions(t *testing.T) {
+	srv := groupTestServer(t)
+	projectDir := t.TempDir()
+	keep := saveSessionWithDir(t, "")
+	doomed := saveSessionWithDir(t, "")
+
+	gid := newProjectGroup(t, srv, "Work", projectDir)
+	fileInProject(t, gid, doomed.ID)
+
+	rec, _ := doGroupReq(t, srv, http.MethodDelete, "/api/session-groups/"+gid+"?sessions=delete", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete: status %d: %s", rec.Code, rec.Body.String())
+	}
+	if _, err := agent.LoadSession(doomed.ID); err == nil {
+		t.Error("the project's session survived")
+	}
+	if _, err := agent.LoadSession(keep.ID); err != nil {
+		t.Errorf("a session outside the project was deleted: %v", err)
+	}
+	groupMu.Lock()
+	groups, _ := loadSessionGroups()
+	groupMu.Unlock()
+	for i := range groups {
+		if groups[i].ID == gid {
+			t.Error("the project itself survived")
+		}
+	}
+}
+
+// Without the flag the sessions stay and become tasks — the old behaviour, kept
+// so a client that does not ask cannot destroy transcripts.
+func TestProject_DeleteKeepsSessionsByDefault(t *testing.T) {
+	srv := groupTestServer(t)
+	sess := saveSessionWithDir(t, "")
+	gid := newProjectGroup(t, srv, "Work", t.TempDir())
+	fileInProject(t, gid, sess.ID)
+
+	if rec, _ := doGroupReq(t, srv, http.MethodDelete, "/api/session-groups/"+gid, nil); rec.Code != http.StatusOK {
+		t.Fatalf("delete: status %d", rec.Code)
+	}
+	if _, err := agent.LoadSession(sess.ID); err != nil {
+		t.Errorf("session was deleted without being asked for: %v", err)
+	}
+	if p := projectForSession(sess.ID); p != nil {
+		t.Errorf("session is still in a project: %+v", p)
+	}
+}
+
 // A project's directory cannot be cleared. Clearing it used to demote the
 // project to a plain group, and there is no such thing to demote to — the
 // request has to be refused rather than quietly producing a row that is neither

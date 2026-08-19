@@ -27,10 +27,15 @@
 <div class="backdrop" role="presentation" onclick={() => answer(false)}>
   <div class="modal" role="dialog" aria-modal="true" tabindex="-1" bind:this={modalEl}
        onkeydown={onKeydown} onclick={(e) => e.stopPropagation()}>
-    <p class="msg">{$confirmRequest.message}</p>
+    {#if $confirmRequest.title}
+      <h2 class="title">{$confirmRequest.title}</h2>
+    {/if}
+    <p class="msg" class:under-title={!!$confirmRequest.title}>{$confirmRequest.message}</p>
     <div class="footer">
       <button class="btn-secondary" onclick={() => answer(false)}>{$t('common.cancel')}</button>
-      <button class="btn-primary" onclick={() => answer(true)}>{$t('common.ok')}</button>
+      <button class:btn-danger={$confirmRequest.danger} class:btn-primary={!$confirmRequest.danger} onclick={() => answer(true)}>
+        {$confirmRequest.confirmLabel ?? $t('common.ok')}
+      </button>
     </div>
   </div>
 </div>
@@ -52,6 +57,17 @@
   animation: octo-fadein 0.16s ease;
 }
 .modal:focus { outline: none; }
+.title {
+  margin: 0; padding: 20px 20px 0;
+  font-size: 16px; font-weight: 600; color: var(--text);
+}
+.btn-danger {
+  height: 32px; padding: 0 14px; border: none; border-radius: 7px;
+  background: var(--error); color: #fff;
+  font: 600 13px/1 inherit; font-family: inherit; cursor: pointer;
+}
+.btn-danger:hover { background: #FF7875; }
+.msg.under-title { padding-top: 10px; color: var(--text-secondary); }
 .msg {
   margin: 0; padding: 20px 20px 4px;
   font-size: 14px; line-height: 1.6; color: var(--text);
