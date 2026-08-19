@@ -1019,6 +1019,10 @@
 .grp-header .row-action.hover-only { display: none; }
 .grp-header:hover .row-action.hover-only { display: flex; }
 .grp-dir {
+  /* flex-shrink:0 — every sibling in this column carries a min-height, so a
+     list too tall for .sessions-group squeezed the one item that didn't, and
+     the project's path got sliced in half by the row below it. */
+  flex: 0 0 auto;
   padding: 0 8px 2px 28px; margin-top: -2px;
   font-size: 11px; color: var(--text-quaternary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
