@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/tools/genui"
 )
 
 func TestUIController_TextDeltaAccumulation(t *testing.T) {
@@ -507,6 +508,71 @@ func TestUIController_NoUpdatesPlatformCarriesFenceAcrossFlushes(t *testing.T) {
 		if open, _ := fenceStateAfter(text, false, ""); open {
 			t.Errorf("message %d ends with an unclosed fence: %q", i, text)
 		}
+	}
+}
+
+// A fully-buffered, fully-closed ```octo-ui fence delivered in one turn must
+// never reach the adapter's SendText call as raw JSON — it must show
+// genui.PlaceholderText instead. This is the IM half of the design doc's
+// "IM/TUI degrade" subsection.
+func TestUIController_OctoUIFenceStrippedBeforeSend(t *testing.T) {
+	mock := &mockAdapter{platform: "mock"}
+	ctrl := NewUIController(mock, "chat1", "msg1", nil)
+	handler := ctrl.Handler()
+
+	reply := "Here is a panel:\n" +
+		"```octo-ui\n{\"items\":[{\"type\":\"text\",\"text\":\"hi\"}]}\n```\n" +
+		"Done."
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: reply})
+	handler(agent.AgentEvent{Kind: agent.EventTurnDone, Reply: &agent.Reply{Content: reply}})
+
+	if mock.sentTextCount() != 1 {
+		t.Fatalf("expected 1 sent text after turn_done, got %d", mock.sentTextCount())
+	}
+	got := mock.lastSentText().text
+	if strings.Contains(got, "octo-ui") || strings.Contains(got, "\"items\"") {
+		t.Fatalf("raw fence JSON leaked into the sent text: %q", got)
+	}
+	want := "Here is a panel:\n" + genui.PlaceholderText + "\nDone."
+	if got != want {
+		t.Fatalf("text = %q, want %q", got, want)
+	}
+}
+
+// On a platform with message updates, a ```octo-ui fence that opens in one
+// flush and only closes in a later one is retroactively replaced: the edit
+// redraws the FULL cumulative text every time, and StripOctoUIFences is
+// re-run against that full text on every flush (see the comment in
+// flushTextLocked). The first, mid-fence flush may still show a raw JSON
+// fragment transiently — that part is the documented, accepted limitation —
+// but the corrected edit must show the placeholder, not raw JSON.
+func TestUIController_OctoUIFenceAcrossFlushesFixedByLaterEdit(t *testing.T) {
+	mock := &mockAdapter{platform: "mock", issueMsgIDs: true}
+	ctrl := NewUIController(mock, "chat1", "", nil)
+	handler := ctrl.Handler()
+
+	// Flush 1 (paragraph-break heuristic fires mid-fence, before the closing
+	// ``` has streamed in): first message, no pending message ID yet.
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "Before.\n```octo-ui\n{\n\n"})
+	if mock.sentTextCount() != 1 {
+		t.Fatalf("expected 1 sent text after first flush, got %d", mock.sentTextCount())
+	}
+
+	// Flush 2 (turn end): the fence closes here. Because a message ID is now
+	// pending, this flush edits message 1 with the full accumulated text.
+	handler(agent.AgentEvent{Kind: agent.EventTextDelta, Text: "\"items\":[1]}\n```\nAfter."})
+	handler(agent.AgentEvent{Kind: agent.EventTurnDone, Reply: &agent.Reply{}})
+
+	mock.mu.Lock()
+	updates := append([]updatedMsg(nil), mock.updatedMsgs...)
+	mock.mu.Unlock()
+	if len(updates) == 0 {
+		t.Fatalf("expected at least one message update")
+	}
+	final := updates[len(updates)-1]
+	want := "Before.\n" + genui.PlaceholderText + "\nAfter."
+	if final.text != want {
+		t.Fatalf("final edit text = %q, want %q", final.text, want)
 	}
 }
 

@@ -1367,6 +1367,41 @@ func TestTUI_AppendText_BlockBufferingNonPlain(t *testing.T) {
 	}
 }
 
+// A complete ```octo-ui fence committed through appendText must never reach
+// the glamour-rendered scrollback as raw JSON — glamour has no concept of
+// that language tag and would render the fence body as an unstyled code
+// block. See dev-docs/genui-design.md's "IM/TUI degrade" subsection.
+func TestTUI_AppendText_OctoUIFenceStrippedBeforeGlamour(t *testing.T) {
+	m := newTestModel() // cfg.plain == false → glamour renders the commit
+	m.width = 80
+
+	reply := "Here is a panel:\n" +
+		"```octo-ui\n{\"items\":[{\"type\":\"text\",\"text\":\"hi\"}]}\n```\n" +
+		"\nDone."
+	m.appendText(reply)
+
+	if len(m.printlnBuf) == 0 {
+		t.Fatalf("expected the fenced block to have committed to the scrollback")
+	}
+	rendered := stripANSI(strings.Join(m.printlnBuf, "\n"))
+	if strings.Contains(rendered, "octo-ui") || strings.Contains(rendered, "\"items\"") {
+		t.Fatalf("raw fence JSON leaked into the glamour-rendered output: %q", rendered)
+	}
+	if !strings.Contains(rendered, "interactive panel") {
+		t.Fatalf("expected the placeholder text in the rendered output, got %q", rendered)
+	}
+
+	// The trailing "Done." (after the blank line boundary) is still
+	// buffered, not yet committed — flush it and confirm it, too, is clean.
+	if s, ok := m.flushTextString(); ok {
+		m.printlnBlock(s)
+	}
+	final := stripANSI(strings.Join(m.printlnBuf, "\n"))
+	if strings.Contains(final, "octo-ui") || strings.Contains(final, "\"items\"") {
+		t.Fatalf("raw fence JSON leaked after the final flush: %q", final)
+	}
+}
+
 func TestTUI_AppendText_PlainLineFlush(t *testing.T) {
 	m := newTestModel()
 	m.cfg.plain = true // --plain keeps the line-by-line raw flush
