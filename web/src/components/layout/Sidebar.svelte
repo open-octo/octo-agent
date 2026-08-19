@@ -153,17 +153,6 @@
   // the active state of the New session row.
   const onLanding = $derived($view === 'chat' && !$activeSessionId)
 
-  // Which section header carries the select/done toggle. With no "Sessions"
-  // header above them, the sections are top level and there is no shared row to
-  // put it in — so it rides the first section that renders, and is therefore
-  // never stranded in a list whose first section happens to be empty.
-  const selHost = $derived(
-    groupedView.pinned.length ? 'pinned'
-      : groupedView.ungrouped.length ? 'tasks'
-        : groupedView.cronGroups.length ? 'scheduled'
-          : groupedView.projects.length ? 'projects'
-            : null,
-  )
 
   function groupIdOf(sessionId: string): string {
     return $sessionGroups.find(g => g.session_ids.includes(sessionId))?.id ?? ''
@@ -265,9 +254,57 @@
     sel.update(s => { const n = { ...s }; n[id] ? delete n[id] : (n[id] = true); return n })
   }
 
+  // Batch mode is entered from one session's menu, and that session starts
+  // selected: the row you opened the menu on is the one you meant, so the first
+  // action is one click away rather than two.
+  function enterBatchMode(seedId: string) {
+    menuFor.set(null)
+    editId.set(null)
+    sel.set({ [seedId]: true })
+    selMode.set(true)
+  }
+
+  function exitBatchMode() {
+    selMode.set(false)
+    sel.set({})
+  }
+
+  // Every session the list can reach, in render order — the pool "select all"
+  // acts on, and what a section's own checkbox is a slice of.
+  const allListedIds = $derived([
+    ...groupedView.pinned.map(s => s.id),
+    ...groupedView.ungrouped.map(s => s.id),
+    ...groupedView.cronGroups.flatMap(gv => gv.items.map(s => s.id)),
+    ...groupedView.projects.flatMap(gv => gv.items.map(s => s.id)),
+    ...groupedView.folded.map(s => s.id),
+  ])
+
+  type TriState = 'none' | 'some' | 'all'
+
+  // A group's checkbox reflects its members rather than holding state of its
+  // own: partial selection has to be visible, or clicking a half-selected
+  // section would look like it did nothing.
+  function triStateOf(ids: string[]): TriState {
+    if (ids.length === 0) return 'none'
+    const n = ids.reduce((acc, id) => acc + ($sel[id] ? 1 : 0), 0)
+    return n === 0 ? 'none' : n === ids.length ? 'all' : 'some'
+  }
+
+  // Clicking a partially selected group selects the rest of it, matching what
+  // the box shows: anything short of "all" fills up.
+  function toggleMany(ids: string[]) {
+    const on = triStateOf(ids) !== 'all'
+    sel.update(s => {
+      const n = { ...s }
+      for (const id of ids) on ? (n[id] = true) : delete n[id]
+      return n
+    })
+  }
+
   async function delSelected() {
-    if (!(await confirmDialog(tr('sidebar.confirm_delete_selected').replace('{n}', String(Object.keys($sel).length))))) return
     const ids = Object.keys($sel)
+    if (ids.length === 0) return
+    if (!(await confirmDialog(tr('sidebar.confirm_delete_selected').replace('{n}', String(ids.length))))) return
     try {
       await api.deleteSessions(ids)
       sessions.update(ss => ss.filter(s => !$sel[s.id]))
@@ -277,7 +314,39 @@
         view.set('chat')
       }
     } catch (e: any) { showToast(e.message, 'error') }
-    sel.set({}); selMode.set(false)
+    exitBatchMode()
+  }
+
+  // Archiving is only legal for a session that is neither pinned nor in a group
+  // (the server refuses the rest), so a selection spanning both kinds archives
+  // what it can and says how many it left alone — refusing the whole batch
+  // because one member is pinned would be the more annoying answer.
+  async function archiveSelected() {
+    const ids = Object.keys($sel)
+    if (ids.length === 0) return
+    const eligible = ids.filter(id => !isPinned(id) && !isCollapsed(id) && !groupIdOf(id))
+    const skipped = ids.length - eligible.length
+    if (eligible.length === 0) {
+      showToast(tr('sidebar.archive_none_eligible'), 'error')
+      return
+    }
+    const before = $collapsedSessions
+    collapsedSessions.set([...before.filter(id => !eligible.includes(id)), ...eligible])
+    const failed: string[] = []
+    for (const id of eligible) {
+      try {
+        await api.setSessionCollapsed(id, true)
+      } catch {
+        failed.push(id)
+      }
+    }
+    if (failed.length) {
+      collapsedSessions.set(before)
+      showToast(tr('sidebar.collapse_failed'), 'error')
+    } else if (skipped > 0) {
+      showToast(tr('sidebar.archived_some').replace('{n}', String(eligible.length)).replace('{k}', String(skipped)))
+    }
+    exitBatchMode()
   }
 
   async function delSession(id: string) {
@@ -374,6 +443,24 @@
 
 <svelte:window onclick={dismissPicker} />
 
+<!-- One checkbox shape for a session, a group, and the whole list. The
+     group and list boxes are three-state because partial selection has
+     to be visible: a half-filled box that clicked to "all" is honest,
+     a full-looking one that clicked to "none" is not. -->
+{#snippet triBox(state: TriState, onPick: () => void)}
+  <span
+    class="checkbox tri"
+    class:on={state !== 'none'}
+    onclick={(e) => { e.stopPropagation(); onPick() }}
+  >
+    {#if state === 'all'}
+      <iconify-icon icon="ant-design:check-outlined" width="11" style="color:#fff"></iconify-icon>
+    {:else if state === 'some'}
+      <iconify-icon icon="ant-design:minus-outlined" width="11" style="color:#fff"></iconify-icon>
+    {/if}
+  </span>
+{/snippet}
+
 <aside style="width:{$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};flex:0 0 {$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};background:var(--sidebar-frost);backdrop-filter:blur(var(--frost-blur));-webkit-backdrop-filter:blur(var(--frost-blur));border-right:1px solid var(--border);overflow:hidden;transition:width 0.32s cubic-bezier(0.2,0,0,1),flex-basis 0.32s cubic-bezier(0.2,0,0,1);">
 
   {#if $sidebar === 'full'}
@@ -396,29 +483,14 @@
            overflow .scroll, scrolling internally so a long session list never
            pushes Config/My Data out of view or requires scrolling past it. -->
       <div class="nav-group sessions-group">
-        {#snippet selToggle()}
-          <span class="sel-toggle" onclick={(e) => { e.stopPropagation(); selMode.update(v => !v); sel.set({}); menuFor.set(null); editId.set(null) }}>
-            {$selMode ? $t('sidebar.done') : $t('sidebar.select')}
-          </span>
-        {/snippet}
-
-        {#if $selMode && Object.keys($sel).length > 0}
-        <div class="batch-bar">
-          <span class="batch-count">{$t('sidebar.n_selected').replace('{n}', String(Object.keys($sel).length))}</span>
-          <button class="batch-del" onclick={delSelected}>
-            <iconify-icon icon="ant-design:delete-outlined" width="12"></iconify-icon>
-            {$t('common.delete')}
-          </button>
-        </div>
-        {/if}
 
         <!-- Pinned: a dedicated top section, above all groups -->
         {#if groupedView.pinned.length > 0}
         <div class="grp-header">
+          {#if $selMode}{@render triBox(triStateOf(groupedView.pinned.map(s => s.id)), () => toggleMany(groupedView.pinned.map(s => s.id)))}{/if}
           <iconify-icon icon="ant-design:pushpin-filled" width="11" style="color:var(--text-quaternary)"></iconify-icon>
           <span class="grp-name muted">{$t('sidebar.pinned')}</span>
           <span class="grp-count">{groupedView.pinned.length}</span>
-          {#if selHost === 'pinned'}{@render selToggle()}{/if}
         </div>
         {#each groupedView.pinned as s (s.id)}
           {@render sessionRow(s)}
@@ -430,10 +502,10 @@
              section, which is what the retired "plain group" used to add. -->
         {#if groupedView.ungrouped.length > 0}
         <div class="sec-header" onclick={() => toggleSection('tasks')}>
+          {#if $selMode}{@render triBox(triStateOf(groupedView.ungrouped.map(s => s.id)), () => toggleMany(groupedView.ungrouped.map(s => s.id)))}{/if}
           <iconify-icon icon={sections.tasks ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="9"></iconify-icon>
           <span class="sec-name">{$t('sidebar.tasks')}</span>
           <span class="sec-count">{groupedView.taskCount}</span>
-          {#if selHost === 'tasks'}{@render selToggle()}{/if}
         </div>
         {#if sections.tasks}
           {#each groupedView.ungrouped as s (s.id)}
@@ -447,10 +519,10 @@
              actions — the task itself is edited in the Scheduled tasks view. -->
         {#if groupedView.cronGroups.length > 0}
         <div class="sec-header" onclick={() => toggleSection('scheduled')}>
+          {#if $selMode}{@render triBox(triStateOf(groupedView.cronGroups.flatMap(gv => gv.items.map(s => s.id))), () => toggleMany(groupedView.cronGroups.flatMap(gv => gv.items.map(s => s.id))))}{/if}
           <iconify-icon icon={sections.scheduled ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="9"></iconify-icon>
           <span class="sec-name">{$t('sidebar.scheduled')}</span>
           <span class="sec-count">{groupedView.cronCount}</span>
-          {#if selHost === 'scheduled'}{@render selToggle()}{/if}
         </div>
         {#if sections.scheduled}
           {#each groupedView.cronGroups as gv (gv.group.id)}
@@ -464,10 +536,10 @@
              header already carries how many sessions are in it. -->
         {#if groupedView.projects.length > 0}
         <div class="sec-header" onclick={() => toggleSection('projects')}>
+          {#if $selMode}{@render triBox(triStateOf(groupedView.projects.flatMap(gv => gv.items.map(s => s.id))), () => toggleMany(groupedView.projects.flatMap(gv => gv.items.map(s => s.id))))}{/if}
           <iconify-icon icon={sections.projects ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="9"></iconify-icon>
           <span class="sec-name">{$t('sidebar.projects')}</span>
           <span class="sec-count">{groupedView.projects.length}</span>
-          {#if selHost === 'projects'}{@render selToggle()}{/if}
         </div>
         {#if sections.projects}
           {#each groupedView.projects as gv, gi (gv.group.id)}
@@ -481,6 +553,7 @@
              keep the list short, so it never opens on its own. -->
         {#if groupedView.folded.length > 0}
         <div class="grp-header">
+          {#if $selMode}{@render triBox(triStateOf(groupedView.folded.map(s => s.id)), () => toggleMany(groupedView.folded.map(s => s.id)))}{/if}
           <span class="grp-caret" onclick={() => (foldedOpen = !foldedOpen)}>
             <iconify-icon icon={foldedOpen ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="10"></iconify-icon>
           </span>
@@ -498,6 +571,7 @@
       {#snippet cronBlock(gv: any)}
         {@const g = gv.group}
         <div class="grp-header">
+          {#if $selMode}{@render triBox(triStateOf(gv.items.map((s: any) => s.id)), () => toggleMany(gv.items.map((s: any) => s.id)))}{/if}
           <span class="grp-caret" onclick={() => toggleCollapse(g.id, !g.collapsed)}>
             <iconify-icon icon="ant-design:clock-circle-outlined" width="13"></iconify-icon>
           </span>
@@ -523,6 +597,7 @@
         {@const g = gv.group}
         {@const editingG = $editGroupId === g.id}
         <div class="grp-header">
+          {#if $selMode}{@render triBox(triStateOf(gv.items.map((s: any) => s.id)), () => toggleMany(gv.items.map((s: any) => s.id)))}{/if}
           <!-- Folder icon doubles as the collapse toggle: open when expanded,
                closed when collapsed, so it carries both identity and state. -->
           <span class="grp-caret" onclick={() => toggleCollapse(g.id, !g.collapsed)}>
@@ -611,13 +686,7 @@
           onclick={() => { if ($selMode) toggleSel(s.id); else { view.set('chat'); activeSessionId.set(s.id); menuFor.set(null) } }}
         >
           {#if $selMode}
-          <span
-            class="checkbox"
-            style="border-color:{selected ? 'var(--blue-6)' : 'var(--border)'};background:{selected ? 'var(--blue-6)' : 'var(--bg-container)'}"
-            onclick={(e) => { e.stopPropagation(); toggleSel(s.id) }}
-          >
-            {#if selected}<iconify-icon icon="ant-design:check-outlined" width="11" style="color:#fff"></iconify-icon>{/if}
-          </span>
+            {@render triBox(selected ? 'all' : 'none', () => toggleSel(s.id))}
           {/if}
 
           {#if (s as any).status === 'running'}
@@ -688,6 +757,13 @@
             {/if}
             {#if menuOpen}
             <div class="row-menu" onclick={(e) => e.stopPropagation()}>
+              <!-- First entry: acting on many sessions starts from one of them,
+                   which is also why this one is pre-selected. -->
+              <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); enterBatchMode(s.id) }}>
+                <iconify-icon icon="ant-design:profile-outlined" width="13"></iconify-icon>
+                <span>{$t('sidebar.batch_actions')}</span>
+              </div>
+              <div class="row-menu-sep"></div>
               <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); menuFor.set(null); editId.set(s.id); editDraft.set((s as any).name || (s as any).title || s.id) }}>
                 <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
                 <span>{$t('sidebar.rename')}</span>
@@ -748,6 +824,31 @@
       </div>
     </div>
 
+    {#if $selMode}
+    <!-- Batch mode replaces the footer rather than stacking on it: while a
+         selection is live, settings and the version badge are not what the
+         bottom of the sidebar is for. -->
+    <div class="batch-bar">
+      <div class="batch-top">
+        {@render triBox(triStateOf(allListedIds), () => toggleMany(allListedIds))}
+        <span class="batch-label">{$t('sidebar.select_all')}</span>
+        <span class="batch-count">({selCount})</span>
+        <span class="batch-close" title={$t('sidebar.done')} onclick={exitBatchMode}>
+          <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
+        </span>
+      </div>
+      <div class="batch-actions">
+        <button class="batch-btn del" disabled={selCount === 0} onclick={delSelected}>
+          <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
+          {$t('common.delete')}
+        </button>
+        <button class="batch-btn" disabled={selCount === 0} onclick={archiveSelected}>
+          <iconify-icon icon="lucide:archive" width="13"></iconify-icon>
+          {$t('sidebar.collapse')}
+        </button>
+      </div>
+    </div>
+    {:else}
     <div class="footer">
       <div class="footer-settings" style="color:{$settingsModalOpen ? 'var(--blue-6)' : 'var(--text-secondary)'}" onclick={() => settingsModalOpen.set(true)}>
         <iconify-icon icon="ant-design:setting-outlined" width="14"></iconify-icon>
@@ -755,6 +856,7 @@
       </div>
       <VersionBadge />
     </div>
+    {/if}
   </div>
   {/if}
 
@@ -854,7 +956,6 @@
 .sessions-group { flex: 0 1 auto; min-height: 80px; overflow-y: auto; }
 .group-header { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 6px; }
 .group-label { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; color: var(--text-quaternary); }
-.sel-toggle { font-size: 11px; font-weight: 600; color: var(--blue-6); cursor: pointer; }
 /* Group section header (folder row) */
 /* Section heading (Tasks / Projects). Sits a tier above .grp-header: it names
    a whole kind of entry rather than one group, so it reads quieter and tighter
@@ -936,18 +1037,38 @@
   font-size: 11px; color: var(--text-quaternary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* Sits where the footer does, so entering batch mode does not shift the list
+   above it — the rows must stay under the cursor that is selecting them. */
 .batch-bar {
-  display: flex; align-items: center; gap: 8px;
-  margin: 0 4px 6px; padding: 6px 8px 6px 12px;
-  background: var(--error-bg); border: 1px solid var(--error-border); border-radius: 8px;
+  flex: 0 0 auto; padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 8px;
 }
-.batch-count { font-size: 12px; color: var(--error-dark); flex: 1; }
-.batch-del {
-  height: 26px; padding: 0 10px; border: none; background: var(--error);
-  border-radius: 6px; display: flex; align-items: center; gap: 6px;
-  font-size: 12px; color: #fff; cursor: pointer; font-family: inherit;
+.batch-top { display: flex; align-items: center; gap: 10px; }
+.batch-label { font-size: 13px; color: var(--text); }
+.batch-count { font-size: 12px; color: var(--text-tertiary); flex: 1; }
+.batch-close {
+  flex: 0 0 auto; width: 22px; height: 22px; border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-tertiary); cursor: pointer;
 }
-.batch-del:hover { background: #FF7875; }
+.batch-close:hover { background: var(--hover-neutral); color: var(--text); }
+.batch-actions { display: flex; gap: 8px; }
+.batch-btn {
+  flex: 1; height: 32px; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: 7px;
+  background: var(--bg-container); color: var(--text-secondary);
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font: 500 13px/1 inherit; font-family: inherit; cursor: pointer;
+}
+.batch-btn:hover:not(:disabled) { border-color: var(--blue-5); color: var(--blue-6); }
+.batch-btn.del { border-color: var(--error-border); color: var(--error); }
+.batch-btn.del:hover:not(:disabled) { border-color: var(--error); background: var(--error-bg); }
+.batch-btn:disabled { opacity: 0.45; cursor: default; }
+/* One box for a session, a group, and the whole list. */
+.checkbox.tri { border-color: var(--border); background: var(--bg-container); cursor: pointer; }
+.checkbox.tri.on { border-color: var(--blue-6); background: var(--blue-6); }
+.row-menu-sep { height: 1px; margin: 4px 6px; background: var(--border-secondary); }
 .nav-row {
   position: relative;
   display: flex; align-items: center; gap: 10px;
