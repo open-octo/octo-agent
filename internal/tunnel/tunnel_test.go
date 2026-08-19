@@ -511,3 +511,27 @@ func TestHostTunnel_WSStampsForwardedMarker(t *testing.T) {
 		return
 	}
 }
+
+// A phone cannot suppress the marker by sending it under a different casing: Go
+// canonicalizes header names, so its lower-case attempt lands on the same key
+// the bridge then overwrites. Nor can it substitute its own access key.
+func TestHostTunnel_LowercaseForgeAttemptStillMarked(t *testing.T) {
+	phone := newPairedPhone(t)
+
+	phone.sendShim(t, shimFrame{
+		Kind:    shimHTTPReq,
+		ID:      "h3",
+		Method:  "GET",
+		Path:    "/api/hdr",
+		Headers: map[string]string{"x-octo-forwarded": "", "x-access-key": "phone-chosen-key"},
+	})
+
+	resp := phone.recvShim(t)
+	if resp.Kind != shimHTTPResp || resp.ID != "h3" {
+		t.Fatalf("got %+v, want an http-resp for h3", resp)
+	}
+	want := `{"forwarded":"` + headerForwardedValue + `","key":"` + testAccessKey + `"}`
+	if resp.Body == nil || *resp.Body != want {
+		t.Errorf("body = %v, want the bridge's own values %s", resp.Body, want)
+	}
+}
