@@ -14,8 +14,13 @@ import (
 // Structural caps shared by every node type. Mirrored in the TS guard
 // (web/src/lib/genui/guard.ts) — a change here must be mirrored there.
 const (
-	MaxDepth        = 8
-	MaxNodes        = 200
+	MaxDepth = 8
+	MaxNodes = 200
+	// MaxStringLen clamps by byte length here (clampString below), while the
+	// TS guard clamps the same numeric value in UTF-16 code units. Both are
+	// correct for their own string representation, but the same non-ASCII
+	// input can survive to a different length through the two guards — the
+	// shared constant value does not imply a shared character count kept.
 	MaxStringLen    = 500
 	MaxTableCellLen = 2000
 	MaxListItems    = 200

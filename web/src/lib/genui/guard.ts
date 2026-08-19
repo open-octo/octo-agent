@@ -12,6 +12,12 @@ import type { GenuiNode, GenuiSpec } from './types'
 
 export const MAX_DEPTH = 8
 export const MAX_NODES = 200
+// Same numeric value as the Go guard's MaxStringLen, but a different unit:
+// this clamps UTF-16 code units (clampString below), while the Go side
+// clamps bytes. Both are correct clamps for their own string
+// representation, but the same input can survive to a different length
+// through the two guards (e.g. non-ASCII text) — don't assume "same
+// constant value" implies "same character count kept."
 export const MAX_STRING_LEN = 500
 export const MAX_TABLE_CELL_LEN = 2000
 export const MAX_LIST_ITEMS = 200
