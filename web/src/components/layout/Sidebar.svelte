@@ -257,9 +257,11 @@
   }
 
   // Every session the list can reach, in render order — the pool "select all"
-  // acts on, and what a section's own checkbox is a slice of.
+  // acts on, and what a section's own checkbox is a slice of. Pinned sessions
+  // are left out: they have no checkbox of their own (see sessionRow), so a
+  // pool that included them would select something the UI never showed as
+  // selected.
   const allListedIds = $derived([
-    ...groupedView.pinned.map(s => s.id),
     ...groupedView.ungrouped.map(s => s.id),
     ...groupedView.projects.flatMap(gv => gv.items.map(s => s.id)),
   ])
@@ -520,7 +522,6 @@
         <!-- Pinned: a dedicated top section, above all groups -->
         {#if groupedView.pinned.length > 0}
         <div class="grp-header">
-          {#if $selMode}{@render triBox(triStateOf(groupedView.pinned.map(s => s.id)), () => toggleMany(groupedView.pinned.map(s => s.id)))}{/if}
           <iconify-icon icon="ant-design:pushpin-filled" width="11" style="color:var(--text-quaternary)"></iconify-icon>
           <span class="grp-name muted">{$t('sidebar.pinned')}</span>
           <span class="grp-count">{groupedView.pinned.length}</span>
@@ -659,9 +660,12 @@
           class:solid={solid}
           class:selected={selected && !solid}
           class:menu-open={menuOpen}
-          onclick={() => { if ($selMode) toggleSel(s.id); else { view.set('chat'); activeSessionId.set(s.id); menuFor.set(null) } }}
+          onclick={() => {
+          if ($selMode) { if (!isPinned(s.id)) toggleSel(s.id) }
+          else { view.set('chat'); activeSessionId.set(s.id); menuFor.set(null) }
+        }}
         >
-          {#if $selMode}
+          {#if $selMode && !isPinned(s.id)}
             {@render triBox(selected ? 'all' : 'none', () => toggleSel(s.id))}
           {/if}
 
@@ -733,13 +737,17 @@
             </span>
             {#if menuOpen}
             <div class="row-menu" onclick={(e) => e.stopPropagation()}>
+              {#if !pinned}
               <!-- First entry: acting on many sessions starts from one of them,
-                   which is also why this one is pre-selected. -->
+                   which is also why this one is pre-selected. Not offered on a
+                   pinned session — it has no checkbox to seed a selection with,
+                   so there is nothing for this to start. -->
               <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); enterBatchMode(s.id) }}>
                 <iconify-icon icon="ant-design:profile-outlined" width="13"></iconify-icon>
                 <span>{$t('sidebar.batch_actions')}</span>
               </div>
               <div class="row-menu-sep"></div>
+              {/if}
               <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); menuFor.set(null); editId.set(s.id); editDraft.set((s as any).name || (s as any).title || s.id) }}>
                 <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
                 <span>{$t('sidebar.rename')}</span>
