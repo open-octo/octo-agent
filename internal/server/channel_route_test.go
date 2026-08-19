@@ -558,7 +558,7 @@ func TestHandleChannelMessage_PersistsTurn(t *testing.T) {
 // stays stable turn over turn. Mirrors buildAgent's web-path behavior.
 func TestHandleChannelMessage_FreezesSystemAfterFirstTurn(t *testing.T) {
 	srv := chanServer(t)
-	srv.memDir = t.TempDir()
+	srv.homeMemDir = t.TempDir()
 	ad := &fullFakeAdapter{}
 
 	srv.handleChannelMessage(context.Background(), ad, evFor("turn one"), nil)
@@ -571,7 +571,7 @@ func TestHandleChannelMessage_FreezesSystemAfterFirstTurn(t *testing.T) {
 		t.Fatal("first turn did not freeze ComposedSystem on the session")
 	}
 
-	if err := os.WriteFile(srv.memDir+"/MEMORY.md", []byte("- fresh-fact-9000"), 0o600); err != nil {
+	if err := os.WriteFile(srv.homeMemDir+"/MEMORY.md", []byte("- fresh-fact-9000"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	srv.handleChannelMessage(context.Background(), ad, evFor("turn two"), nil)
@@ -587,7 +587,7 @@ func TestHandleChannelMessage_FreezesSystemAfterFirstTurn(t *testing.T) {
 // hooks (keyword reminders + save-nudge) like web turns do via buildAgent.
 func TestHandleChannelMessage_WiresMemoryHooks(t *testing.T) {
 	srv := chanServer(t)
-	srv.memDir = t.TempDir()
+	srv.homeMemDir = t.TempDir()
 	ad := &fullFakeAdapter{}
 
 	srv.handleChannelMessage(context.Background(), ad, evFor("hello"), nil)
@@ -933,21 +933,21 @@ func TestRunChannelIdleTurn_SkipsWhenBoundToOtherEntry(t *testing.T) {
 // once-per-session recall latch must survive turns but reset with /unbind.
 func TestInjectorFor_SessionStickyAndDroppedOnUnbind(t *testing.T) {
 	srv := chanServer(t)
-	srv.memDir = t.TempDir()
+	srv.homeMemDir = t.TempDir()
 	ad := &fullFakeAdapter{}
 	ev := evFor("/unbind")
 
 	key := "im:" + string(srv.channelMgr.KeyFor(ev, ""))
-	first := srv.injectorFor(key, srv.memDir)
+	first := srv.injectorFor(key, srv.homeMemDir)
 	if first == nil {
 		t.Fatal("injectorFor returned nil")
 	}
-	if srv.injectorFor(key, srv.memDir) != first {
+	if srv.injectorFor(key, srv.homeMemDir) != first {
 		t.Error("injector must be sticky across turns in one session")
 	}
 
 	srv.handleChannelCommand(ad, ev, agentprofile.DefaultProfile())
-	if srv.injectorFor(key, srv.memDir) == first {
+	if srv.injectorFor(key, srv.homeMemDir) == first {
 		t.Error("/unbind must drop the session injector (fresh recall latch)")
 	}
 }
@@ -956,18 +956,18 @@ func TestInjectorFor_SessionStickyAndDroppedOnUnbind(t *testing.T) {
 // must reset with /new, which creates a brand-new session.
 func TestInjectorFor_DroppedOnNew(t *testing.T) {
 	srv := chanServer(t)
-	srv.memDir = t.TempDir()
+	srv.homeMemDir = t.TempDir()
 	ad := &fullFakeAdapter{}
 	ev := evFor("/new")
 
 	key := "im:" + string(srv.channelMgr.KeyFor(ev, ""))
-	first := srv.injectorFor(key, srv.memDir)
+	first := srv.injectorFor(key, srv.homeMemDir)
 	if first == nil {
 		t.Fatal("injectorFor returned nil")
 	}
 
 	srv.handleChannelCommand(ad, ev, agentprofile.DefaultProfile())
-	if srv.injectorFor(key, srv.memDir) == first {
+	if srv.injectorFor(key, srv.homeMemDir) == first {
 		t.Error("/new must drop the session injector (fresh recall latch)")
 	}
 }

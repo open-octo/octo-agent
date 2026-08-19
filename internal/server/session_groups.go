@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/memory"
 )
 
 // Session groups are a Web-UI-only organisation layer: a way to cluster the
@@ -340,12 +342,49 @@ func ProjectDirForSession(sessionID string) string {
 	return ""
 }
 
+// ProjectExistsForDir reports whether some project already owns dir. Exported
+// for the CLI, which treats the directory it runs in as the project and so
+// always has memory of its own there — but under `octo serve` that same
+// directory only gets project memory once it IS a project, so notes written
+// from the CLI would go unread there. `octo memory` uses this to say so rather
+// than let the difference stay invisible.
+func ProjectExistsForDir(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	target := memory.NormalizeDir(dir)
+	groupMu.Lock()
+	defer groupMu.Unlock()
+	gf, _, err := cachedRegistry()
+	if err != nil {
+		return false
+	}
+	for i := range gf.Groups {
+		if wd := gf.Groups[i].WorkingDir; wd != "" && memory.NormalizeDir(wd) == target {
+			return true
+		}
+	}
+	return false
+}
+
 // projectNotesFor returns the project notes that apply to sessionID, or "".
 func projectNotesFor(sessionID string) string {
 	if p := projectForSession(sessionID); p != nil {
 		return p.Notes
 	}
 	return ""
+}
+
+// projectNotesAndDir returns both facts a turn needs from the project owning
+// sessionID — its notes and its working directory — in one registry lookup.
+// Both are empty when the session belongs to no project. The notes go into the
+// prompt; the directory is what scopes the session's memory (see
+// Server.sessionMemDir).
+func projectNotesAndDir(sessionID string) (notes, dir string) {
+	if p := projectForSession(sessionID); p != nil {
+		return p.Notes, p.WorkingDir
+	}
+	return "", ""
 }
 
 // renderProjectNotes wraps project notes for the system prompt's memory layer.
@@ -373,14 +412,31 @@ func newGroupID() string {
 
 // createSessionGroupNamed creates a new group with the given name and returns
 // it. The caller records the group's ID on the task so later runs reuse it.
-func createSessionGroupNamed(name string) (sessionGroup, error) {
+//
+// workingDir, when set, makes the group a project — which is what scopes its
+// sessions' memory (see Server.sessionMemDir). A cron task with a directory is
+// working on that directory every run, so its notes belong to it rather than to
+// the tier every session on the machine reads. An unusable directory degrades
+// to a plain group rather than failing: grouping is best-effort here, and a
+// task must still run.
+func createSessionGroupNamed(name, workingDir string) (sessionGroup, error) {
+	if workingDir != "" {
+		dir, verr := validateWorkingDir(workingDir)
+		if verr != nil {
+			slog.Warn("cron group working dir unusable; filing runs as a plain group",
+				"group", name, "dir", workingDir, "err", verr)
+			workingDir = ""
+		} else {
+			workingDir = dir
+		}
+	}
 	groupMu.Lock()
 	defer groupMu.Unlock()
 	groups, err := loadSessionGroups()
 	if err != nil {
 		return sessionGroup{}, err
 	}
-	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}}
+	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workingDir}
 	groups = append(groups, g)
 	if err := saveSessionGroups(groups); err != nil {
 		return sessionGroup{}, err

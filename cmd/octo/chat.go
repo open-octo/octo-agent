@@ -779,18 +779,24 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	skillsManifest := tools.SkillsManifest(skillReg)
 	tools.SetSkills(skillReg)
 
-	// Cross-session memory (Claude Code model): a per-repo directory of markdown
-	// files the agent manages with its own file tools. memDir is created up
-	// front, injected into the system prompt (below), and whitelisted for writes
-	// when the permission engine is built. --no-memory disables it; a resolve
-	// error degrades to no memory rather than failing.
-	// Home-directory memories are inherited into every project. A cwd that is
-	// not a repo resolves to that same home dir rather than a slug of its own
-	// — see memory.DirForSession.
+	// Cross-session memory (Claude Code model): a per-project directory of
+	// markdown files the agent manages with its own file tools. memDir is
+	// created up front, injected into the system prompt (below), and
+	// whitelisted for writes when the permission engine is built. --no-memory
+	// disables it; a resolve error degrades to no memory rather than failing.
+	//
+	// On the CLI the working directory IS the project — you cd somewhere to
+	// work on it — so cwd scopes the memory, whether or not git has ever heard
+	// of that directory. Note this runs AFTER the project-run-dir resolution
+	// above, so a session filed under a project in the Web UI gets that
+	// project's memory here too, not the memory of wherever octo was launched.
+	// Running from home needs no special case: its slug directory IS the home
+	// directory, so it lands on the shared tier and RenderInjection collapses
+	// the two into one.
 	var memDir, homeMemDir string
 	var memWriteRoots []string
 	if !*noMemory {
-		if d, _, err := memory.DirForSession(cwd); err == nil {
+		if d, err := memory.DirForProject(cwd); err == nil {
 			if memory.EnsureDir(d) == nil {
 				memDir = d
 			}

@@ -23,9 +23,9 @@ func TestMemoryWriteRoots_CoversOtherProjectsDirs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{cwd: home, memDir: homeMem, homeMemDir: homeMem}
+	s := &Server{cwd: home, homeMemDir: homeMem}
 
-	roots := s.memoryWriteRoots(home)
+	roots := s.memoryWriteRoots()
 	if len(roots) != 1 {
 		t.Fatalf("roots = %v, want exactly the memories root", roots)
 	}
@@ -99,7 +99,7 @@ func TestOctoMemoryCommandNeverGated(t *testing.T) {
 // --no-memory must not leave a standing write pass into the memories tree.
 func TestMemoryWriteRoots_EmptyWhenMemoryDisabled(t *testing.T) {
 	s := &Server{cwd: t.TempDir(), cfg: Config{NoMemory: true}}
-	if roots := s.memoryWriteRoots(s.cwd); len(roots) != 0 {
+	if roots := s.memoryWriteRoots(); len(roots) != 0 {
 		t.Errorf("roots = %v, want none when memory is disabled", roots)
 	}
 }

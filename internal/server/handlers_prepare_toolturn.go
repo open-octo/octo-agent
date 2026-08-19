@@ -119,7 +119,7 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 		// otherwise be stuck denying every write forever.
 		mode = permission.ResolveUnattendedDefaultMode()
 	}
-	engine, err := permission.New(permissionConfigPath(), a.CWD, mode, s.memoryWriteRoots(a.CWD)...)
+	engine, err := permission.New(permissionConfigPath(), a.CWD, mode, s.memoryWriteRoots()...)
 	if err != nil {
 		return ctx, nil, nil, func() {}, fmt.Errorf("permission engine: %w", err)
 	}

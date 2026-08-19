@@ -143,14 +143,16 @@ type Server struct {
 	// when it has no working dir of its own (agent.Session.WorkingDir), and the
 	// root MCP/skills/file handlers resolve against. cwdMu guards reads so the
 	// (cwd, envCtx) pair is always observed together.
-	cwd        string
-	envCtx     string
-	cwdMu      sync.RWMutex
-	memDir     string
+	cwd    string
+	envCtx string
+	cwdMu  sync.RWMutex
+	// homeMemDir is the shared tier every session reads, and the only memory
+	// directory the server itself has: a project's directory comes from the
+	// session-group registry per turn, never from where the process started
+	// (see sessionMemDir).
 	homeMemDir string
-	// memDirCache holds per-session-cwd project-memory resolutions (see
-	// sessionMemDir) — memory.ProjectRoot shells out to git and the lookup
-	// runs on every turn, so results are cached for the process lifetime.
+	// memDirCache holds per-project memory-dir resolutions (see sessionMemDir),
+	// cached for the process lifetime — the lookup runs on every turn.
 	memDirCache   map[string]string
 	memDirCacheMu sync.Mutex
 
@@ -478,16 +480,12 @@ func New(cfg Config) (*Server, error) {
 		}
 	}
 
-	// Resolve cross-session memory directory. A non-repo launch dir (the
-	// default ~/Octo workspace, ~, …) has no project of its own and resolves
-	// to the home dir — see memory.DirForSession.
-	var memDir, homeMemDir string
+	// Resolve the shared memory tier. The launch directory deliberately plays
+	// no part: project memory is scoped by the session-group registry, per
+	// turn, so a serve process started inside a checkout gets no more claim on
+	// that project's memory than one started from home (see sessionMemDir).
+	var homeMemDir string
 	if !cfg.NoMemory {
-		if d, _, err := memory.DirForSession(cwd); err == nil {
-			if memory.EnsureDir(d) == nil {
-				memDir = d
-			}
-		}
 		if d, err := memory.HomeDir(); err == nil {
 			if memory.EnsureDir(d) == nil {
 				homeMemDir = d
@@ -506,7 +504,6 @@ func New(cfg Config) (*Server, error) {
 		skillsManifest:      skillsManifest,
 		cwd:                 cwd,
 		envCtx:              envCtx,
-		memDir:              memDir,
 		homeMemDir:          homeMemDir,
 		workspaceDir:        workspaceDir,
 		turnLocks:           map[string]*sync.Mutex{},
@@ -601,8 +598,8 @@ func (s *Server) enableSubAgentTools() {
 	// app.NewSpawner below).
 	app.RefreshMemoryBackend()
 	var memInjection string
-	if s.memDir != "" {
-		memInjection = memory.RenderInjection(s.memDir, s.homeMemDir)
+	if s.homeMemDir != "" {
+		memInjection = memory.RenderInjection(s.homeMemDir)
 	}
 	if g := tools.MemoryBackendGuidance(); g != "" {
 		memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
@@ -1323,21 +1320,24 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// The freeze is keyed on cwd and project notes as well as the model: both
 	// are baked into the prompt (the env context's working directory, the
 	// project-notes block below) and both can change under a live session.
-	notes := projectNotesFor(sess.ID)
+	// One registry lookup for both facts the project contributes to this turn:
+	// its notes (baked into the prompt) and its directory (what scopes memory).
+	notes, projectDir := projectNotesAndDir(sess.ID)
 	if sess.IsComposedFor(model, cwd, agent.ComposedNotesHash(notes)) {
 		a.System, a.LeanSystem = sess.ComposedSystem, sess.ComposedLeanSystem
 	} else {
 		// L1: project memory embedded in the system prompt, snapshotted once.
-		// Resolved from the session's cwd (not the server's launch directory),
-		// so a session working inside a project reads and writes that
-		// project's memory. The freeze above is keyed on cwd, so a prompt
-		// frozen from HERE on can't carry a memDir that disagrees with its
-		// cwd. Sessions frozen before this per-cwd resolution existed still
-		// carry the server-level dir baked into their prompt until something
-		// re-freezes them (model/cwd/notes change) — old memories keep
-		// flowing in via the inherited tier either way.
+		// Scoped to the project the session is filed under, so every session in
+		// a project reads and writes that project's notes and a loose task
+		// reads the shared tier. Filing a session into a project (or out of
+		// one) moves its cwd with it, which re-freezes this prompt — the one
+		// gap being a session whose own working dir already equals the
+		// project's, where cwd doesn't change and the frozen memDir outlives
+		// the move until something else re-freezes it. Widening the freeze
+		// identity to cover that would miss the cache for every session,
+		// which is the worse trade.
 		var memInjection string
-		if memDir := s.sessionMemDir(cwd); memDir != "" {
+		if memDir := s.sessionMemDir(projectDir); memDir != "" {
 			memInjection = memory.RenderInjection(memDir, s.homeMemDir)
 		}
 		if g := tools.MemoryBackendGuidance(); g != "" {
@@ -1367,7 +1367,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// per OS process across the serve process's many sessions.
 	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd))
 	hookEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
-	if memDir := s.sessionMemDir(cwd); memDir != "" {
+	if memDir := s.sessionMemDir(projectDir); memDir != "" {
 		s.injectorFor(sess.ID, memDir).RegisterHooks(hookEngine)
 	}
 	// Workflow save-nudge — memory-independent, wired for every session.
@@ -1808,39 +1808,56 @@ func (s *Server) sessionCwdEnv(sess *agent.Session) (string, string) {
 	return dir, buildEnvContext(dir)
 }
 
-// sessionMemDir returns the project-memory directory for a turn running in
-// cwd, resolved from the session's working directory rather than the server's
-// launch directory. Without this, a serve/desktop process launched from home
-// resolves memDir once to the home slug and EVERY session's memories land in
-// the global tier, no matter which project the session works in. Resolution
-// (and directory creation) happens on first use per cwd and is cached — the
-// CLI likewise freezes its memory dir per process. Falls back to the
-// server-default memDir when resolution fails; empty when memory is disabled.
+// sessionMemDir returns the memory directory for a turn belonging to the
+// project rooted at projectDir — "" for a session in no project, which is the
+// shared home tier every session reads. Callers get projectDir from
+// sessionProjectDir, i.e. from the session-group registry.
 //
-// A session whose cwd is not a git repo (the default ~/Octo workspace being
-// the common case) resolves to the home dir, not to a slug directory of its
-// own — see memory.DirForSession for why.
-func (s *Server) sessionMemDir(cwd string) string {
+// What makes a project a project is that the user filed sessions under it, so
+// that is what scopes memory. Neither the server's launch directory nor a
+// session's own working directory takes part: a serve process started from a
+// checkout is not thereby working on it, and a session pointed at a directory
+// without being filed under a project is a task — its notes belong in the tier
+// every session reads, not buried under a slug nothing else opens.
+//
+// Resolution (and directory creation) happens on first use per project and is
+// cached for the process lifetime. Falls back to the home tier when resolution
+// fails; empty when memory is disabled.
+func (s *Server) sessionMemDir(projectDir string) string {
 	if s.cfg.NoMemory {
 		return ""
 	}
-	if cwd == "" || cwd == s.curCwd() {
-		return s.memDir
+	if projectDir == "" {
+		return s.homeMemDir
 	}
 	s.memDirCacheMu.Lock()
 	defer s.memDirCacheMu.Unlock()
-	if d, ok := s.memDirCache[cwd]; ok {
+	if d, ok := s.memDirCache[projectDir]; ok {
 		return d
 	}
-	dir := s.memDir
-	if d, _, err := memory.DirForSession(cwd); err == nil && memory.EnsureDir(d) == nil {
-		dir = d
+	dir := s.homeMemDir
+	d, err := memory.DirForProject(projectDir)
+	if err != nil || memory.EnsureDir(d) != nil {
+		// Don't cache a failure: a full disk or a transient permission problem
+		// would otherwise pin this project to the shared tier for the rest of
+		// the process's life, silently merging its notes into everyone's.
+		return dir
 	}
 	if s.memDirCache == nil {
 		s.memDirCache = make(map[string]string)
 	}
-	s.memDirCache[cwd] = dir
-	return dir
+	s.memDirCache[projectDir] = d
+	return d
+}
+
+// sessionProjectDir returns the working directory of the project owning
+// sessionID, or "" when the session belongs to none. The single place the
+// server asks "which project scopes this session's memory?".
+func (s *Server) sessionProjectDir(sessionID string) string {
+	if p := projectForSession(sessionID); p != nil {
+		return p.WorkingDir
+	}
+	return ""
 }
 
 // memoryWriteRoots returns the write-allowlist roots handed to the permission
@@ -1853,17 +1870,21 @@ func (s *Server) sessionMemDir(cwd string) string {
 // Empty when memory is disabled: --no-memory must not leave a standing write
 // pass behind. Falls back to the concrete resolved dirs if the root can't be
 // resolved (unresolvable home), which is also when those two are empty anyway.
-func (s *Server) memoryWriteRoots(cwd string) []string {
-	// s.memDir == "" covers both --no-memory and a resolve/EnsureDir failure
-	// (read-only home): nothing is injected then, so nothing should be
+func (s *Server) memoryWriteRoots() []string {
+	// s.homeMemDir == "" covers both --no-memory and a resolve/EnsureDir
+	// failure (read-only home): nothing is injected then, so nothing should be
 	// writable either — matches the CLI's memoryWriteRoots.
-	if s.cfg.NoMemory || s.memDir == "" {
+	if s.cfg.NoMemory || s.homeMemDir == "" {
 		return nil
 	}
-	if root, err := memory.RootDir(); err == nil {
-		return []string{root}
+	root, err := memory.RootDir()
+	if err != nil {
+		// Unreachable in practice: homeMemDir is non-empty above, and it and
+		// RootDir fail under exactly the same condition (an unresolvable home).
+		// Withhold the pass rather than guess at a narrower root.
+		return nil
 	}
-	return []string{s.sessionMemDir(cwd), s.homeMemDir}
+	return []string{root}
 }
 
 // sessionCwd resolves a loaded session's working dir. Used by the status/list
@@ -3392,17 +3413,15 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// cwd and project notes join the model in the freeze identity — a channel
 	// session dragged into a project in the Web UI picks the change up on its
 	// next turn, the same as a web one.
-	notes := projectNotesFor(sess.Store.ID)
+	notes, projectDir := projectNotesAndDir(sess.Store.ID)
 	if sess.Store.IsComposedFor(sess.Agent.Model, cwd, agent.ComposedNotesHash(notes)) {
 		sess.Agent.System, sess.Agent.LeanSystem = sess.Store.ComposedSystem, sess.Store.ComposedLeanSystem
 	} else {
-		// Per-session memory dir, same as buildAgent gives web turns: the
-		// freeze above is keyed on cwd, so a prompt frozen from here on
-		// can't carry a memDir that disagrees with its cwd (sessions frozen
-		// before per-cwd resolution keep the server-level dir until
-		// re-frozen — see buildAgent).
+		// Per-project memory dir, same as buildAgent gives web turns — an IM
+		// session dragged into a project in the Web UI picks it up on its next
+		// turn (see buildAgent for the one freeze gap).
 		var memInjection string
-		if memDir := s.sessionMemDir(cwd); memDir != "" {
+		if memDir := s.sessionMemDir(projectDir); memDir != "" {
 			memInjection = memory.RenderInjection(memDir, s.homeMemDir)
 		}
 		if g := tools.MemoryBackendGuidance(); g != "" {
@@ -3430,7 +3449,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// dropped on /unbind; a fresh engine each turn just re-registers it.
 	imEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd))
 	imEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
-	if memDir := s.sessionMemDir(cwd); memDir != "" {
+	if memDir := s.sessionMemDir(projectDir); memDir != "" {
 		s.injectorFor("im:"+string(sess.Key), memDir).RegisterHooks(imEngine)
 	}
 	// Workflow save-nudge — memory-independent, wired for every IM session.
@@ -3470,7 +3489,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	if st := sess.Store; st != nil && st.PermissionMode != "" {
 		mode = permission.Mode(st.PermissionMode)
 	}
-	engine, err := permission.New(permissionConfigPath(), cwd, mode, s.memoryWriteRoots(cwd)...)
+	engine, err := permission.New(permissionConfigPath(), cwd, mode, s.memoryWriteRoots()...)
 	if err != nil {
 		// Generic chat reply — err.Error() can leak local paths into a
 		// group chat; the operator gets the detail on the server console.

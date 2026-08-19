@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/open-octo/octo-agent/internal/memory"
+	"github.com/open-octo/octo-agent/internal/server"
 )
 
 // runMemory handles `octo memory <subcommand> [dir]`:
@@ -43,22 +44,21 @@ func runMemory(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "octo memory: not a directory: %s\n", target)
 			return 1
 		}
-		// Resolve symlinks so an explicit path lands on the same slug a session
-		// running in that directory would get: os.Getwd() reports the resolved
-		// form, and on macOS /tmp/x vs /private/tmp/x hash to different slugs.
-		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-			abs = resolved
-		}
+		// No symlink resolution here: memory.Dir normalizes what it is given,
+		// which is the one place it happens.
 		cwd = abs
 	}
-	dir, inProject, err := memory.DirForSession(cwd)
+	dir, err := memory.DirForProject(cwd)
 	if err != nil {
 		fmt.Fprintf(stderr, "octo memory: %v\n", err)
 		return 1
 	}
 	homeDir, _ := memory.HomeDir()
-	if homeDir == dir {
-		homeDir = "" // same as project (not a repo, or running in home) — don't duplicate
+	// One directory, two names: running in the home directory, its own slug IS
+	// the shared tier. Print it once.
+	shared := homeDir == dir
+	if shared {
+		homeDir = ""
 	}
 
 	if sub == "path" {
@@ -69,23 +69,20 @@ func runMemory(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	if !inProject {
-		// Say so explicitly: the notes here are the shared/global set, not a
-		// project's — otherwise the header reads as if this directory had
-		// project memory of its own. "no project of its own" rather than "not a
-		// git repo": a bare repo IS a repo, it just has no work tree.
-		fmt.Fprintf(stdout, "%s has no project of its own — using the shared memory directory.\n", cwd)
-		// Sessions that ran here before non-repo dirs shared the global tier
-		// wrote into a slug directory for this path. Those notes are no longer
-		// injected anywhere, so name the directory rather than orphaning it
-		// silently — moving them is a judgement call, not something to do
-		// behind the user's back.
-		if legacy, err := memory.Dir(cwd); err == nil && legacy != dir {
-			if n := countMarkdown(legacy); n > 0 {
-				fmt.Fprintf(stdout, "Note: %d earlier note file(s) for this directory are no longer loaded, in:\n  %s\n"+
-					"Move anything still useful into the shared directory below.\n", n, legacy)
-			}
-		}
+	if shared {
+		// Otherwise the header reads as if this directory had memory of its
+		// own, when in fact these are the notes every session gets wherever it
+		// runs. True for the home directory, and for a project pointed at it.
+		fmt.Fprintln(stdout, "These are the shared notes, read by every session — this directory has no separate memory of its own.")
+	}
+	// The CLI treats any directory as a project, so these notes always exist
+	// here. Under `octo serve` the same directory reads the shared tier until it
+	// is actually a project, and nothing else would tell the user that the notes
+	// they are looking at are invisible over there.
+	if !shared && !server.ProjectExistsForDir(cwd) && countMarkdownFiles(dir) > 0 {
+		fmt.Fprintf(stdout, "Note: no project in the web UI points at this directory, so these notes\n"+
+			"are only read by CLI sessions running here. Make it a project (Projects → its\n"+
+			"settings) to have web and IM sessions read them too.\n")
 	}
 	fmt.Fprintf(stdout, "Memory directory: %s\n", dir)
 	printDirEntries(stdout, dir)
@@ -126,9 +123,9 @@ func memoryWriteRoots(memDir, homeMemDir string) []string {
 	return []string{memDir, homeMemDir}
 }
 
-// countMarkdown counts the .md files directly in dir — "does this directory
-// hold notes worth telling the user about", not a recursive inventory.
-func countMarkdown(dir string) int {
+// countMarkdownFiles counts the .md files directly in dir — "does this hold
+// notes worth telling the user about", not a recursive inventory.
+func countMarkdownFiles(dir string) int {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return 0
