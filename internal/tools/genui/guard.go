@@ -6,7 +6,10 @@
 // defense in depth, not the only checkpoint.
 package genui
 
-import "fmt"
+import (
+	"fmt"
+	"unicode/utf8"
+)
 
 // Structural caps shared by every node type. Mirrored in the TS guard
 // (web/src/lib/genui/guard.ts) — a change here must be mirrored there.
@@ -17,6 +20,12 @@ const (
 	MaxTableCellLen = 2000
 	MaxListItems    = 200
 	MaxTableRows    = 100
+	// MaxTableColumns bounds both a table's "columns" header length and each
+	// row's cell count. The design doc only names row-count (100) and
+	// cell-length (2000) caps for tables; this column-count cap is this
+	// package's own addition, not a "select/radio options" cap — it happens
+	// to share the value 50 with that unrelated cap by coincidence, not
+	// because the two are the same limit.
 	MaxTableColumns = 50
 )
 
@@ -89,6 +98,12 @@ func sanitizeNode(node map[string]any, allowed map[string]bool, depth int, count
 	if !allowed[typ] {
 		return nil
 	}
+	// Reserve this node's own slot in the budget *before* recursing into any
+	// children — sanitizeChildren must see a budget that already accounts
+	// for this node, or a chain of containers can push the total past
+	// MaxNodes by up to MaxDepth-1 (each container's own increment landing
+	// "underneath" a child count that already spent the full budget).
+	*count++
 
 	out := map[string]any{"type": typ}
 	switch typ {
@@ -98,7 +113,7 @@ func sanitizeNode(node map[string]any, allowed map[string]bool, depth int, count
 
 	case "row", "col":
 		if gap, ok := numberField(node, "gap"); ok {
-			out["gap"] = gap
+			out["gap"] = clampNumber(gap, 0, 64)
 		}
 		out["children"] = sanitizeChildren(node, "children", allowed, depth, count)
 
@@ -147,7 +162,6 @@ func sanitizeNode(node map[string]any, allowed map[string]bool, depth int, count
 		}
 	}
 
-	*count++
 	return out
 }
 
@@ -261,7 +275,10 @@ func sanitizeStringArray(node map[string]any, key string, maxItems, maxLen int) 
 
 // sanitizeTableRows clamps a "table" node's rows to MaxTableRows entries,
 // each row's cells to MaxTableColumns entries, and each cell to a string
-// (clamped to MaxTableCellLen) or a number, passed through unchanged.
+// (clamped to MaxTableCellLen) or a number, passed through unchanged. A cell
+// of any other JSON type becomes an empty string rather than being skipped —
+// skipping would shift every later cell in that row left by one, silently
+// misaligning it against the table's "columns" header.
 func sanitizeTableRows(node map[string]any) []any {
 	raw, ok := node["rows"]
 	if !ok {
@@ -288,8 +305,12 @@ func sanitizeTableRows(node map[string]any) []any {
 			switch v := c.(type) {
 			case string:
 				row = append(row, clampString(v, MaxTableCellLen))
-			case float64, int, int64:
+			case float64:
+				// The only numeric kind encoding/json (and the tool-call
+				// argument map) ever decodes a JSON number into.
 				row = append(row, v)
+			default:
+				row = append(row, "")
 			}
 		}
 		out = append(out, row)
@@ -326,11 +347,19 @@ func numberField(node map[string]any, key string) (float64, bool) {
 	return v, ok
 }
 
+// clampString truncates s to at most maxLen bytes, backing off to the
+// nearest earlier rune boundary so a multi-byte UTF-8 character (Chinese,
+// emoji, …) is never split — a byte-blind s[:maxLen] can produce invalid
+// UTF-8 that downstream JSON encoding silently mangles into U+FFFD.
 func clampString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen]
+	cut := maxLen
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 func clampNumber(v, lo, hi float64) float64 {
