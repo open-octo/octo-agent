@@ -200,7 +200,7 @@ func TestAdoptTaskWorkingDirs_SkipsSessionsAlreadyInAProject(t *testing.T) {
 	staleOwnDir := t.TempDir()
 
 	sess := saveSessionIn(t, staleOwnDir)
-	g, err := createSessionGroupNamed("Existing", projectDir)
+	g, err := createSessionGroupNamed("Existing", projectDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}

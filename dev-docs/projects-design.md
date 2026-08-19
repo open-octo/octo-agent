@@ -1,23 +1,23 @@
-# 项目（Projects）：给会话分组加上统一的工作目录
+# 任务与项目：侧栏的两个概念
 
 ## 要解决的问题
 
-octo 的工作目录是纯粹的**每会话**属性（`agent.Session.WorkingDir`）。围绕同一个代码库开五个会话，就要设置五次工作目录；改仓库位置，要挨个改回来。会话之间没有任何"它们属于同一件事"的表达。
+octo 的工作目录曾是纯粹的**每会话**属性（`agent.Session.WorkingDir`）。围绕同一个代码库开五个会话，就要设置五次工作目录；改仓库位置，要挨个改回来。会话之间没有任何"它们属于同一件事"的表达。
 
-侧栏已经有分组（`internal/server/session_groups.go`）——但分组只有一个名字，不携带任何配置。
+**项目 = 一个工作目录 + 在它上面干活的会话。** 项目内所有会话共享这个目录，改一处，全项目生效；项目也是记忆分层的作用域单位。
 
-**项目 = 带工作目录的分组。** 项目内所有会话共享一个工作目录，改一处，全项目生效。
+用户能创建的东西只有两种：**任务**（一条散落会话）和**项目**。除此之外，侧栏还渲染一类系统自己造的聚合：定时任务的运行簇。曾经存在过第三种用户概念——"普通分组"，一个只有名字、不带目录的组——已经取消：它占着一行看起来像项目的位置，却不携带项目所携带的任何东西（工具的目录、记忆层、总体提示词），让同一个列表用三种行表达两种事物。
 
 ## 范围
 
 | 做 | 不做 |
 |---|---|
-| 分组携带 `working_dir` + `notes` | 项目级默认模型 / 专家 / 权限模式 |
+| 项目携带 `working_dir` + `notes` | 项目级默认模型 / 专家 / 权限模式 |
 | 项目目录强绑定，实时生效 | CLI / TUI 感知项目 |
 | `notes` 注入项目内会话的 system prompt | 嵌套项目、一个会话属于多个项目 |
 | Web + 桌面 UI | IM channel / cron 显式绑定项目 |
 
-cron task 已经在自动建同名分组（`tasks_handlers.go` → `createSessionGroupNamed`）。这些分组保持"普通分组"形态，不受影响。
+cron task 自动为每个任务建一个同名运行簇（`tasks_handlers.go` → `createSessionGroupNamed`，带 `TaskID`）。它是唯一不带目录也合法存在的组：由调度器创建和命名，用户不能改名、不能单独删除、也不能往里塞别的会话——三个 handler 都会拒。侧栏把它渲染在独立的「定时任务」区。
 
 ### 各入口的实际行为
 
@@ -29,7 +29,7 @@ cron task 已经在自动建同名分组（`tasks_handlers.go` → `createSessio
 | IM channel | 是 | 无 |
 | CLI / TUI | 是（resume 时） | 无 |
 
-**没有任何入口能给会话单独设工作目录。** 目录是项目的属性，落地页上选目录这个动作本身就是把新会话归入该目录对应的项目（没有就建）。曾经允许过：散落任务可以把自己指向某个仓库，工具确实在那儿跑，但记忆留在共享层——因为项目记忆按项目归属划作用域，而任务不属于任何项目。于是用户得到一个对着仓库、却对它一无所知的会话。把目录挂到项目上消除了这个割裂。写在这之前的会话，启动时由 `adoptTaskWorkingDirs` 归入其目录对应的项目。唯一排除的是工作区目录——`applyDefaultWorkspaceDir` 给每条没选目录的会话都 seed 了它，收进去等于把整份任务列表塞进一个以工作区命名的项目。排除同时看两个值：当前 `workspace_dir` 解析出的目录，以及内置默认 `~/Octo`（后者无条件排除，因为改过 `workspace_dir`、换过机器、或从备份恢复的会话里仍然写着 `~/Octo`，只比当前配置就正好会把这些扫进项目）。除此之外的目录都算用户选过，一律升级成项目。
+**没有任何入口能给会话单独设工作目录，也没有任何入口能创建不带目录的组。** 目录是项目的属性，落地页上选目录这个动作本身就是把新会话归入该目录对应的项目（没有就建）。曾经允许过：散落任务可以把自己指向某个仓库，工具确实在那儿跑，但记忆留在共享层——因为项目记忆按项目归属划作用域，而任务不属于任何项目。于是用户得到一个对着仓库、却对它一无所知的会话。把目录挂到项目上消除了这个割裂。写在这之前的会话，启动时由 `adoptTaskWorkingDirs` 归入其目录对应的项目。唯一排除的是工作区目录——`applyDefaultWorkspaceDir` 给每条没选目录的会话都 seed 了它，收进去等于把整份任务列表塞进一个以工作区命名的项目。排除同时看两个值：当前 `workspace_dir` 解析出的目录，以及内置默认 `~/Octo`（后者无条件排除，因为改过 `workspace_dir`、换过机器、或从备份恢复的会话里仍然写着 `~/Octo`，只比当前配置就正好会把这些扫进项目）。除此之外的目录都算用户选过，一律升级成项目。
 
 **管理界面只在 Web/桌面**——项目的创建和编辑只有一处入口。但目录解析在服务端，所有入口都遵守。
 
@@ -56,15 +56,20 @@ type sessionGroup struct {
 	SessionIDs []string `json:"session_ids"`
 	Collapsed  bool     `json:"collapsed,omitempty"`
 
-	// WorkingDir 非空 ⇒ 这个分组是一个「项目」，组内所有会话的工具都在
-	// 这里运行。空 ⇒ 普通分组，行为与今天完全一致。
+	// WorkingDir 非空 ⇒ 这个组是一个「项目」，组内所有会话的工具都在
+	// 这里运行，记忆也按它划作用域。
 	WorkingDir string `json:"working_dir,omitempty"`
 	// Notes 是项目级说明，注入组内会话 system prompt 的项目记忆层。
 	Notes string `json:"notes,omitempty"`
+	// TaskID 非空 ⇒ 这个组是该 cron 任务的运行簇。它是不带目录也不被解散的
+	// 唯一形态，也是侧栏「定时任务」区的判据。
+	TaskID string `json:"task_id,omitempty"`
 }
 ```
 
-**`WorkingDir != ""` 是「项目」的唯一判据。** 存量 `~/.octo/session-groups.json` 无需迁移，反序列化后两个字段为空，就是今天的普通分组。这也让"把分组升级成项目"和"把项目降级回分组"都只是一次字段写入。
+**`WorkingDir != ""` 是「项目」的唯一判据；`TaskID != ""` 是「运行簇」的唯一判据。** 两者皆空的组是已取消的"普通分组"，启动时由 `dissolvePlainGroups` 解散——只删组，不动会话：不属于任何组的会话就是任务，而那正是这些会话原本被组织成的东西。它们各自 `WorkingDir` 里的真实目录随后由 `adoptTaskWorkingDirs` 接手，所以两个 pass 的顺序是语义的一部分（`reconcileRegistry`）。
+
+存量运行簇写在 `TaskID` 字段存在之前，所以解散前先从 scheduler 反查回填（task 的 `SessionGroupID` → 组）。没有这一步，每个定时任务的全部运行历史会连同普通分组一起被解散。
 
 ## 工作目录的解析优先级
 
@@ -148,7 +153,7 @@ func (s *Session) IsComposedFor(model, cwd, notesHash string) bool {
 
 `applyDefaultWorkspaceDir`（`handlers.go:236`）今天给每个新 web 会话 seed 一个 `WorkingDir`。**在项目下创建的会话不 seed** ——留空，让项目解析生效。seed 了反而会在会话移出项目后留下一个莫名其妙的残值。
 
-入口是分组头的「+」按钮（对普通分组同样可用，行为统一）：`POST /api/sessions` 带 `group_id`，服务端**先入组、再走 seed 逻辑**——顺序是语义的一部分，守卫查的就是"这个会话在不在项目里"。把尚未落盘的会话 ID 先写进 registry 是安全的：registry 只存裸 ID，后续 Save 失败留下的死 ID 按既有设计无害（前端与活会话列表交叉过滤）。未知 `group_id` 直接 404，不产出孤儿会话。
+入口是项目头的「+」按钮：`POST /api/sessions` 带 `group_id`，服务端**先入组、再走 seed 逻辑**——顺序是语义的一部分，守卫查的就是"这个会话在不在项目里"。把尚未落盘的会话 ID 先写进 registry 是安全的：registry 只存裸 ID，后续 Save 失败留下的死 ID 按既有设计无害（前端与活会话列表交叉过滤）。未知 `group_id` 直接 404，不产出孤儿会话。
 
 注意"先建会话、再拖进项目"的旧流程里 seed 已经发生——这种会话带着 seeded 的 `~/Octo`，只是被项目遮蔽，移出项目后回落到它。这是两种入口固有的语义差异，不是缺陷。
 
@@ -160,7 +165,7 @@ func (s *Session) IsComposedFor(model, cwd, notesHash string) bool {
 type updateSessionGroupRequest struct {
 	Name       *string `json:"name,omitempty"`
 	Collapsed  *bool   `json:"collapsed,omitempty"`
-	WorkingDir *string `json:"working_dir,omitempty"` // "" 显式降级回普通分组
+	WorkingDir *string `json:"working_dir,omitempty"` // 不可置空（400）——降级的目标已不存在
 	Notes      *string `json:"notes,omitempty"`
 }
 ```
@@ -171,9 +176,20 @@ type updateSessionGroupRequest struct {
 
 ## UI
 
-- **分组头**：项目额外显示一行缩写目录（`~/code/foo`）。行内菜单加「项目设置」，弹出工作目录（复用现有 folder picker / 桌面原生目录对话框）+ 说明文本框。
+侧栏分三节，判据全在 `web/src/lib/sidebarSections.ts` 的 `splitSections`：
+
+| 节 | 内容 | 用户可编辑 |
+|---|---|---|
+| 任务 | 不属于任何组的会话，平铺 | 会话自身（改名 / 删除 / 置顶 / 折叠 / 移入项目） |
+| 定时任务 | 每个 cron 任务一行，装它的全部运行 | 否（只能折叠，和跳转到定时任务视图） |
+| 项目 | 每个项目一行，装它的会话 | 是（改名 / 删除 / 排序 / 设置 / 在项目内新建会话） |
+
+两者皆空的组前端直接丢弃而不是渲染成第四种行——服务端启动时已经解散它们，在那之前把它的会话渲染两遍比不渲染更糟。
+
+- **新建项目**：先选目录再建，因为项目就是目录。目录决定名字（basename），已有同目录项目则复用而不是造重复。侧栏顶部按钮和会话行的「移动到项目 → 新建项目」走同一条 `resolveProjectForDir`。
+- **项目头**：额外显示一行缩写目录（`~/code/foo`）。行内齿轮打开项目设置，工作目录（复用现有 folder picker / 桌面原生目录对话框）+ 说明文本框；目录不可清空。
 - **Composer 的 cwd chip**：会话属于项目时显示项目目录，且**置为只读**，点击提示「由项目〈名字〉统一管理」。这一条不能省——否则用户改了没反应，就是一次静默失效。
-- **拖入 / 移出项目**：复用现有的 `PUT /api/sessions/{id}/group`。移入后工作目录立刻显示为项目目录，移出后回落到会话自己的值。
+- **移入 / 移出项目**：复用现有的 `PUT /api/sessions/{id}/group`。移入后工作目录立刻显示为项目目录，移出后回落到会话自己的值。运行簇不是可选目标——服务端也会拒。
 
 ## 多 tab 同步
 
@@ -187,5 +203,9 @@ registry 的每次成功写盘（分组增删改、成员移动、pin、项目�
 - 移入 / 移出项目后 `sessionCwd` 与 `sessionCwdEnv` 返回一致（防三个解析点分叉）。
 - 改项目目录后，下一 turn 的 composed system prompt 里的 `Working directory:` 跟着变。
 - 改 `notes` 触发重新组装；不改则复用冻结值（保住 prompt cache）。
-- 存量 `session-groups.json`（无新字段）加载后仍是普通分组，会话工作目录不受影响。
+- 普通分组被解散、其会话变回任务；带目录的会话随后被 `adoptTaskWorkingDirs` 归入项目（顺序）。
+- 运行簇在没有 `TaskID` 时靠 scheduler 回填存活；已有 `TaskID` 时不依赖 scheduler。
+- 两个 pass 各自幂等（每次启动都跑）。
+- 创建不带 `working_dir` 的组返回 400；清空既有项目目录返回 400。
+- 运行簇的改名 / 删除 / 塞入会话都返回 409。
 - 项目下新建的会话 `WorkingDir` 为空。

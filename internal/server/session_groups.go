@@ -17,9 +17,17 @@ import (
 	"github.com/open-octo/octo-agent/internal/memory"
 )
 
-// Session groups are a Web-UI-only organisation layer: a way to cluster the
-// sidebar session list into named, collapsible groups when there are too many
-// sessions to scan flat. They live entirely in one registry file
+// The sidebar has exactly two concepts the user can create: a task (one loose
+// session) and a project (a named directory plus the sessions working in it).
+// This registry is where projects live, and it also holds the one group the
+// system makes on its own: a cron task's per-run cluster. There is no third
+// user-facing concept — a "plain group", a name with sessions under it and no
+// directory, used to exist and no longer does: it split the sidebar into three
+// kinds of row for two kinds of thing, and offered organisation that carried
+// none of what a project carries (a directory for the tools, a memory tier, a
+// notes block). dissolvePlainGroups retires the ones already on disk.
+//
+// The registry lives entirely in one file
 // (~/.octo/session-groups.json) and never touch the session transcript format
 // — group membership is stored here as group→session-ID lists, so the CLI/TUI
 // session listing is unaffected and no session field is added. A session
@@ -35,14 +43,20 @@ import (
 // the same ~/.octo, so groups and their collapsed state are shared between the
 // Web UI and the desktop shell with no extra wiring.
 
-// sessionGroup is one named group in the registry.
+// sessionGroup is one named group in the registry. Two kinds exist, told apart
+// by which field is set:
 //
-// A group with a WorkingDir is a "project": every session in it runs its tools
-// in that one directory, overriding whatever working dir the sessions carry
-// themselves. A group without one is a plain group and behaves exactly as it
-// did before projects existed — which is what makes the two concepts one
-// struct rather than two. Nothing needs migrating: an existing
-// session-groups.json deserialises with both new fields empty.
+//   - WorkingDir set — a project. Every session in it runs its tools in that
+//     one directory and reads that project's memory tier.
+//   - TaskID set — a cron task's run cluster, created and named by the
+//     scheduler. Read-only to the user: it is not something they made, so they
+//     cannot rename it, file a session into it, or delete it on its own (it
+//     goes when the cron task does).
+//
+// Neither set means a plain group, which no longer exists as a concept and is
+// dissolved at startup. Both set is legal and means a cron task with a
+// directory: the runs cluster under the task in the sidebar, and the directory
+// still scopes what they can see.
 type sessionGroup struct {
 	ID         string   `json:"id"`
 	Name       string   `json:"name"`
@@ -58,12 +72,21 @@ type sessionGroup struct {
 	WorkingDir string `json:"working_dir,omitempty"`
 	// Notes is project-level context injected into the system prompt of every
 	// session in the project, alongside the project-memory layer. Only
-	// meaningful on a project; a plain group ignores it.
+	// meaningful on a project.
 	Notes string `json:"notes,omitempty"`
+	// TaskID, when set, marks this group as the run cluster of that cron task.
+	// It is what keeps such a group from being dissolved as a plain group when
+	// the task has no directory, and what tells the sidebar to render it under
+	// "Scheduled" rather than as something the user can edit.
+	TaskID string `json:"task_id,omitempty"`
 }
 
 // isProject reports whether this group carries project settings.
 func (g sessionGroup) isProject() bool { return g.WorkingDir != "" }
+
+// isCronCluster reports whether this group is a cron task's run cluster, which
+// the user did not create and cannot edit.
+func (g sessionGroup) isCronCluster() bool { return g.TaskID != "" }
 
 // maxProjectNotes caps the notes field. Notes are injected verbatim into the
 // system prompt of EVERY session in the project, so an oversized value would
@@ -413,17 +436,23 @@ func newGroupID() string {
 // createSessionGroupNamed creates a new group with the given name and returns
 // it. The caller records the group's ID on the task so later runs reuse it.
 //
+// taskID marks the group as that cron task's run cluster, which is what lets it
+// exist without a directory — the one group the user did not create and cannot
+// edit. Pass "" from any other caller, in which case workingDir must be set or
+// the group would be a plain group and dissolved at the next start.
+//
 // workingDir, when set, makes the group a project — which is what scopes its
 // sessions' memory (see Server.sessionMemDir). A cron task with a directory is
 // working on that directory every run, so its notes belong to it rather than to
-// the tier every session on the machine reads. An unusable directory degrades
-// to a plain group rather than failing: grouping is best-effort here, and a
-// task must still run.
-func createSessionGroupNamed(name, workingDir string) (sessionGroup, error) {
+// the tier every session on the machine reads. An unusable directory is dropped
+// rather than failing the call: for a cron task the cluster still works without
+// one, and a task must run regardless. Callers that need the directory to have
+// landed check WorkingDir on the returned group.
+func createSessionGroupNamed(name, workingDir, taskID string) (sessionGroup, error) {
 	if workingDir != "" {
 		dir, verr := validateWorkingDir(workingDir)
 		if verr != nil {
-			slog.Warn("cron group working dir unusable; filing runs as a plain group",
+			slog.Warn("group working dir unusable; dropping it",
 				"group", name, "dir", workingDir, "err", verr)
 			workingDir = ""
 		} else {
@@ -436,7 +465,7 @@ func createSessionGroupNamed(name, workingDir string) (sessionGroup, error) {
 	if err != nil {
 		return sessionGroup{}, err
 	}
-	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workingDir}
+	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workingDir, TaskID: taskID}
 	groups = append(groups, g)
 	if err := saveSessionGroups(groups); err != nil {
 		return sessionGroup{}, err
@@ -548,10 +577,10 @@ func (s *Server) handleListSessionGroups(w http.ResponseWriter, r *http.Request)
 
 type createSessionGroupRequest struct {
 	Name string `json:"name"`
-	// WorkingDir creates the group as a project outright, so the UI's "new
-	// project" flow doesn't have to create a plain group and immediately PATCH
-	// it (which would briefly show it as a plain group in every other tab).
-	WorkingDir string `json:"working_dir,omitempty"`
+	// WorkingDir is required: a group the user creates is a project, and a
+	// project is a directory. Creating without one used to be how a plain group
+	// was made, and that concept is gone.
+	WorkingDir string `json:"working_dir"`
 	Notes      string `json:"notes,omitempty"`
 }
 
@@ -566,14 +595,14 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	var workingDir string
-	if strings.TrimSpace(req.WorkingDir) != "" {
-		dir, verr := validateWorkingDir(req.WorkingDir)
-		if verr != nil {
-			writeError(w, http.StatusBadRequest, verr.Error())
-			return
-		}
-		workingDir = dir
+	if strings.TrimSpace(req.WorkingDir) == "" {
+		writeError(w, http.StatusBadRequest, "working_dir is required: a project is a directory, and a group without one no longer exists")
+		return
+	}
+	workingDir, verr := validateWorkingDir(req.WorkingDir)
+	if verr != nil {
+		writeError(w, http.StatusBadRequest, verr.Error())
+		return
 	}
 	notes, nerr := validateProjectNotes(req.Notes)
 	if nerr != nil {
@@ -605,9 +634,10 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 type updateSessionGroupRequest struct {
 	Name      *string `json:"name,omitempty"`
 	Collapsed *bool   `json:"collapsed,omitempty"`
-	// WorkingDir promotes the group to a project (see sessionGroup). An
-	// explicit "" demotes it back to a plain group, at which point its
-	// sessions fall back to their own working dirs.
+	// WorkingDir retargets the project's directory. It cannot be cleared: that
+	// used to demote the project to a plain group, and there is nothing left to
+	// demote to — deleting the project is the way to break it up, which leaves
+	// its sessions as tasks.
 	WorkingDir *string `json:"working_dir,omitempty"`
 	Notes      *string `json:"notes,omitempty"`
 }
@@ -636,10 +666,13 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 		}
 	}
 	// Validate the directory before touching the registry, so a bad path
-	// leaves the group untouched. "" is the demote-to-plain-group signal and
-	// skips validation.
+	// leaves the group untouched.
 	var workingDir string
-	if req.WorkingDir != nil && strings.TrimSpace(*req.WorkingDir) != "" {
+	if req.WorkingDir != nil {
+		if strings.TrimSpace(*req.WorkingDir) == "" {
+			writeError(w, http.StatusBadRequest, "working_dir cannot be cleared: delete the project instead, which leaves its sessions as tasks")
+			return
+		}
 		dir, verr := validateWorkingDir(*req.WorkingDir)
 		if verr != nil {
 			writeError(w, http.StatusBadRequest, verr.Error())
@@ -673,6 +706,13 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 	}
 	if idx < 0 {
 		writeError(w, http.StatusNotFound, "group not found")
+		return
+	}
+	// A cron task's run cluster is the scheduler's, not the user's: its name
+	// comes from the task and its directory from the task's. Collapsing it is
+	// the one thing the sidebar does offer, so that alone is allowed through.
+	if groups[idx].isCronCluster() && (req.Name != nil || req.WorkingDir != nil || req.Notes != nil) {
+		writeError(w, http.StatusConflict, "this group belongs to a scheduled task — edit the task instead")
 		return
 	}
 	if req.Name != nil {
@@ -710,6 +750,12 @@ func (s *Server) handleDeleteSessionGroup(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	for i := range groups {
+		if groups[i].ID == id && groups[i].isCronCluster() {
+			writeError(w, http.StatusConflict, "this group belongs to a scheduled task — delete the task to remove it")
+			return
+		}
 	}
 	out := groups[:0]
 	found := false
@@ -816,6 +862,18 @@ func (s *Server) handleSetSessionGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	groups := gf.Groups
+
+	// A cron task's run cluster holds that task's runs and nothing else — the
+	// scheduler puts them there. Checked before the removal below, so a refused
+	// request leaves membership exactly as it was.
+	if req.GroupID != "" {
+		for i := range groups {
+			if groups[i].ID == req.GroupID && groups[i].isCronCluster() {
+				writeError(w, http.StatusConflict, "this group holds a scheduled task's runs — file the session under a project instead")
+				return
+			}
+		}
+	}
 
 	// Remove the session from every group first (enforces single membership).
 	for i := range groups {

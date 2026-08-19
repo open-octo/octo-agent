@@ -94,7 +94,7 @@ func (s *Server) CreateSession(task scheduler.Task) (string, error) {
 		// A task predating grouping (or whose group creation failed at create
 		// time): create the group now and persist its ID back on the task so
 		// later runs reuse it.
-		g, gerr := createSessionGroupNamed(task.Name, task.Directory)
+		g, gerr := createSessionGroupNamed(task.Name, task.Directory, task.ID)
 		if gerr != nil {
 			slog.Warn("cron: create session group", "task", task.Name, "err", gerr)
 		} else {
@@ -536,7 +536,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	// Created after Add (which validates the cron and assigns the ID) so an
 	// invalid task never leaves an orphan group; best-effort, since a run can
 	// still create the group lazily if this fails.
-	if g, gerr := createSessionGroupNamed(task.Name, task.Directory); gerr != nil {
+	if g, gerr := createSessionGroupNamed(task.Name, task.Directory, task.ID); gerr != nil {
 		slog.Warn("cron: create session group", "task", task.Name, "err", gerr)
 	} else if serr := s.scheduler.SetSessionGroup(task.ID, g.ID); serr != nil {
 		slog.Warn("cron: persist session group", "task", task.Name, "err", serr)

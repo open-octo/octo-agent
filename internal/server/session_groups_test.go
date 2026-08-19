@@ -41,6 +41,13 @@ func doGroupReq(t *testing.T, srv *Server, method, target string, body any) (*ht
 	return rec, out
 }
 
+// newGroupBody is the body for creating a group over HTTP. Every group a client
+// creates is a project, so a working directory is part of the minimum request.
+func newGroupBody(t *testing.T, name string) map[string]any {
+	t.Helper()
+	return map[string]any{"name": name, "working_dir": t.TempDir()}
+}
+
 func TestSessionGroups_CreateListRename(t *testing.T) {
 	srv := groupTestServer(t)
 
@@ -54,7 +61,7 @@ func TestSessionGroups_CreateListRename(t *testing.T) {
 	}
 
 	// Create.
-	rec, out = doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "  Work  "})
+	rec, out = doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "  Work  "))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create: status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -74,7 +81,7 @@ func TestSessionGroups_CreateListRename(t *testing.T) {
 	}
 
 	// Rename.
-	rec, out = doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+id, map[string]any{"name": "学习"})
+	rec, out = doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+id, newGroupBody(t, "学习"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("rename: status %d", rec.Code)
 	}
@@ -94,7 +101,7 @@ func TestSessionGroups_CreateListRename(t *testing.T) {
 
 func TestSessionGroups_ToggleCollapsed(t *testing.T) {
 	srv := groupTestServer(t)
-	_, out := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "G"})
+	_, out := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "G"))
 	id := out["group"].(map[string]any)["id"].(string)
 
 	rec, out := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+id, map[string]any{"collapsed": true})
@@ -118,9 +125,9 @@ func TestSessionGroups_ToggleCollapsed(t *testing.T) {
 
 func TestSessionGroups_SingleMembership(t *testing.T) {
 	srv := groupTestServer(t)
-	_, o1 := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "A"})
+	_, o1 := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "A"))
 	g1 := o1["group"].(map[string]any)["id"].(string)
-	_, o2 := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "B"})
+	_, o2 := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "B"))
 	g2 := o2["group"].(map[string]any)["id"].(string)
 
 	const sid = "20260101-000000-deadbeef"
@@ -168,7 +175,7 @@ func TestSessionGroups_SingleMembership(t *testing.T) {
 
 func TestAddSessionToGroup_PrependsNewest(t *testing.T) {
 	srv := groupTestServer(t)
-	_, out := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "G"})
+	_, out := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "G"))
 	gid := out["group"].(map[string]any)["id"].(string)
 
 	// Newly created sessions land at the top of their group, newest first —
@@ -214,7 +221,7 @@ func assertGroupOrder(t *testing.T, gid string, want []string) {
 
 func TestSessionGroups_Delete(t *testing.T) {
 	srv := groupTestServer(t)
-	_, out := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Temp"})
+	_, out := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "Temp"))
 	id := out["group"].(map[string]any)["id"].(string)
 
 	rec, _ := doGroupReq(t, srv, http.MethodDelete, "/api/session-groups/"+id, nil)
@@ -235,7 +242,7 @@ func TestSessionGroups_Delete(t *testing.T) {
 
 func TestSessionGroups_RenameUnknown(t *testing.T) {
 	srv := groupTestServer(t)
-	rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/g-missing", map[string]any{"name": "X"})
+	rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/g-missing", newGroupBody(t, "X"))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("rename missing: expected 404, got %d", rec.Code)
 	}
@@ -245,7 +252,7 @@ func TestSessionGroups_Reorder(t *testing.T) {
 	srv := groupTestServer(t)
 	ids := make([]string, 3)
 	for i, name := range []string{"A", "B", "C"} {
-		_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": name})
+		_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, name))
 		ids[i] = o["group"].(map[string]any)["id"].(string)
 	}
 
@@ -346,9 +353,9 @@ func TestSessionPin_CoexistsWithGroups(t *testing.T) {
 
 	// Pin a session, then create/rename a group.
 	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/pin", map[string]any{"pinned": true})
-	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Work"})
+	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "Work"))
 	gid := o["group"].(map[string]any)["id"].(string)
-	doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"name": "Work2"})
+	doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, newGroupBody(t, "Work2"))
 
 	// The pin survived the group writes.
 	if pins, _ := loadPinnedSessions(); len(pins) != 1 || pins[0] != sid {
@@ -423,7 +430,7 @@ func TestSessionCollapse_RejectsPinnedAndGrouped(t *testing.T) {
 		t.Fatalf("collapse of pinned session: status %d, want 409", rec.Code)
 	}
 
-	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Work"})
+	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "Work"))
 	gid := o["group"].(map[string]any)["id"].(string)
 	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+grouped+"/group", map[string]any{"group_id": gid})
 	rec, _ = doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+grouped+"/collapse", map[string]any{"collapsed": true})
@@ -450,7 +457,7 @@ func TestSessionCollapse_PinAndGroupDropCollapsed(t *testing.T) {
 	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/pin", map[string]any{"pinned": false})
 
 	// Collapse, then move into a group — the move drops the collapsed entry.
-	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Work"})
+	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "Work"))
 	gid := o["group"].(map[string]any)["id"].(string)
 	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/collapse", map[string]any{"collapsed": true})
 	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/group", map[string]any{"group_id": gid})
@@ -472,9 +479,9 @@ func TestSessionCollapse_CoexistsWithGroupsAndPins(t *testing.T) {
 	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/collapse", map[string]any{"collapsed": true})
 
 	// Group create/rename/reorder and an unrelated pin cycle all leave it intact.
-	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Work"})
+	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "Work"))
 	gid := o["group"].(map[string]any)["id"].(string)
-	doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"name": "Work2"})
+	doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, newGroupBody(t, "Work2"))
 	doGroupReq(t, srv, http.MethodPut, "/api/session-groups/order", map[string]any{"ids": []string{gid}})
 	doGroupReq(t, srv, http.MethodPut, "/api/sessions/other/pin", map[string]any{"pinned": true})
 	doGroupReq(t, srv, http.MethodPut, "/api/sessions/other/pin", map[string]any{"pinned": false})

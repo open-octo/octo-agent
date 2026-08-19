@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, nativeShell, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen, resolveProjectForDir, normalizeDir } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
@@ -8,6 +8,7 @@
   import { ws } from '../../lib/ws'
   import VersionBadge from './VersionBadge.svelte'
   import ProjectSettingsModal from '../overlays/ProjectSettingsModal.svelte'
+  import FolderPickerModal from '../overlays/FolderPickerModal.svelte'
 
   // Group whose project settings are open, by id ('' = none). Held by id
   // rather than by object so the modal always renders the live group from the
@@ -127,27 +128,28 @@
     try {
       return parseSectionFold(localStorage.getItem(SECTIONS_KEY))
     } catch {
-      // Storage access itself can throw (privacy mode): both sections open.
-      return { tasks: true, projects: true }
+      // Storage access itself can throw (privacy mode): every section open.
+      return { tasks: true, scheduled: true, projects: true }
     }
   }
   let sections = $state(loadSections())
-  // Id lists per section, so a group's reorder arrows know their own
-  // neighbours (and whether they are at either end of their section).
-  const taskGroupIds = $derived(groupedView.taskGroups.map(gv => gv.group.id))
+  // Ids of the reorderable section, so a project's arrows know their own
+  // neighbours (and whether they are at either end). Only Projects reorders:
+  // Tasks is a flat recency list, and the Scheduled section is the scheduler's.
   const projectIds = $derived(groupedView.projects.map(gv => gv.group.id))
   function persistSections() {
     try { localStorage.setItem(SECTIONS_KEY, JSON.stringify(sections)) } catch { /* ignore */ }
   }
-  function toggleSection(k: 'tasks' | 'projects') {
+  type SectionKey = 'tasks' | 'scheduled' | 'projects'
+  function toggleSection(k: SectionKey) {
     sections = { ...sections, [k]: !sections[k] }
     persistSections()
   }
-  // Creating a group opens an inline rename box on the new row, so a folded
-  // section would swallow the whole action: the group exists, unnamed, with no
-  // visible row to name, configure, or delete it. Anything that creates or
-  // retargets a group reveals the section it lands in.
-  function revealSection(k: 'tasks' | 'projects') {
+  // Creating a project opens an inline rename box on the new row, so a folded
+  // section would swallow the whole action: the project exists, named after its
+  // directory, with no visible row to rename or configure. Anything that creates
+  // or retargets a project reveals the section it lands in.
+  function revealSection(k: SectionKey) {
     if (sections[k]) return
     sections = { ...sections, [k]: true }
     persistSections()
@@ -300,33 +302,47 @@
   }
 
 
-  // A default name for a freshly created group: "Group N" / "分组N", where N is
-  // the smallest positive integer whose name isn't already taken. Naming groups
-  // distinctly (rather than every new group being "New group", which collides
-  // with the "New group" create action in the popover) keeps the list readable.
-  function nextDefaultGroupName(): string {
-    const taken = new Set($sessionGroups.map(g => g.name))
-    let n = 1
-    let name = tr('sidebar.default_group_name').replace('{n}', String(n))
-    while (taken.has(name)) {
-      n++
-      name = tr('sidebar.default_group_name').replace('{n}', String(n))
+  // Creating a project starts with picking its directory, because that is what
+  // a project is — there is no directory-less group to create first and fill in
+  // later. The picked path decides the name (its basename) and, when a project
+  // for it already exists, resolves to that one instead of a duplicate.
+  //
+  // afterPick is what to do with the resulting project id: the plain create
+  // just reveals it, the from-a-session variant files that session into it.
+  let pickerOpen = $state(false)
+  let afterPick: ((dir: string) => Promise<void>) | null = null
+
+  async function pickProjectDir(then: (dir: string) => Promise<void>) {
+    if ($nativeShell) {
+      try {
+        const res = await api.nativePickFolder('')
+        if (res.cancelled || !res.path) return
+        await then(res.path)
+      } catch (e: any) {
+        showToast(e?.message ?? tr('project.browse_fail'), 'error')
+      }
+      return
     }
-    return name
+    afterPick = then
+    pickerOpen = true
   }
 
-  // Create an empty group with a default name, then drop straight into inline
-  // rename so the user names it without a separate prompt dialog (native
-  // prompt() is unreliable in the desktop webview).
-  async function newGroup() {
-    // A new group carries no working dir, so it is born under Tasks.
-    revealSection('tasks')
-    try {
-      const g = await api.createSessionGroup(nextDefaultGroupName())
-      sessionGroups.update(gs => [...gs, g])
-      editGroupId.set(g.id)
-      editGroupDraft.set(g.name)
-    } catch (e: any) { showToast(e.message, 'error') }
+  // Create (or reuse) the project for a directory and drop into inline rename,
+  // so the directory basename it is named after can be changed on the spot
+  // without a separate prompt dialog (native prompt() is unreliable in the
+  // desktop webview). An existing project is revealed, not renamed.
+  async function newProject() {
+    await pickProjectDir(async (dir) => {
+      revealSection('projects')
+      try {
+        const existing = $sessionGroups.find(g => !g.task_id && !!g.working_dir && normalizeDir(g.working_dir!) === normalizeDir(dir))
+        const gid = await resolveProjectForDir(dir)
+        if (!existing) {
+          const g = $sessionGroups.find(x => x.id === gid)
+          if (g) { editGroupId.set(gid); editGroupDraft.set(g.name) }
+        }
+      } catch (e: any) { showToast(e.message, 'error') }
+    })
   }
 
   async function commitGroupRename() {
@@ -382,21 +398,26 @@
     }
   }
 
-  // From a session's "move to group" popover: create a fresh group, drop the
-  // session into it, and open inline rename on the new group.
-  async function newGroupForSession(sessionId: string) {
+  // From a session's "move to project" popover: pick a directory, then file the
+  // session under the project for it. Filing it there is what makes its tools
+  // run in that directory and its memory land in that project's tier — the two
+  // move together, which is the whole reason a session cannot carry a directory
+  // of its own.
+  async function newProjectForSession(sessionId: string) {
     groupMenuFor.set(null)
-    revealSection('tasks')
-    try {
-      const g = await api.createSessionGroup(nextDefaultGroupName())
-      await api.setSessionGroup(sessionId, g.id)
-      sessionGroups.update(gs => [
-        ...gs.map(x => ({ ...x, session_ids: x.session_ids.filter(id => id !== sessionId) })),
-        { ...g, session_ids: [sessionId] },
-      ])
-      editGroupId.set(g.id)
-      editGroupDraft.set(g.name)
-    } catch (e: any) { showToast(e.message, 'error') }
+    await pickProjectDir(async (dir) => {
+      revealSection('projects')
+      try {
+        const gid = await resolveProjectForDir(dir)
+        await api.setSessionGroup(sessionId, gid)
+        sessionGroups.update(gs => gs.map(g => ({
+          ...g,
+          session_ids: g.id === gid
+            ? [...g.session_ids.filter(id => id !== sessionId), sessionId]
+            : g.session_ids.filter(id => id !== sessionId),
+        })))
+      } catch (e: any) { showToast(e.message, 'error') }
+    })
   }
 
   async function moveToGroup(sessionId: string, groupId: string) {
@@ -465,11 +486,12 @@
           <span class="group-label">{$t('nav.sessions')}</span>
           <span class="header-actions">
             {#if !$selMode}
-            <!-- A labeled button rather than a bare icon: since groups became
-                 projects, creating one is a high-frequency action. -->
-            <button class="new-group-btn" onclick={newGroup}>
+            <!-- A labeled button rather than a bare icon: creating a project is
+                 a high-frequency action. It opens a directory picker first,
+                 because the directory is what a project is. -->
+            <button class="new-group-btn" onclick={newProject}>
               <iconify-icon icon="ant-design:folder-add-outlined" width="13"></iconify-icon>
-              {$t('sidebar.new_group')}
+              {$t('sidebar.new_project')}
             </button>
             {/if}
             <span class="sel-toggle" onclick={() => { selMode.update(v => !v); sel.set({}); menuFor.set(null); editId.set(null); groupMenuFor.set(null) }}>
@@ -500,28 +522,41 @@
         {/each}
         {/if}
 
-        <!-- Tasks: loose sessions and the plain groups that gather them.
-             Sessions with no group of their own are tasks by definition, so
-             they land here rather than under a separate "ungrouped" heading. -->
-        {#if groupedView.hasTasks}
+        <!-- Tasks: every session that belongs to no project, flat. A task is
+             one session — there is no naming or nesting layer inside this
+             section, which is what the retired "plain group" used to add. -->
+        {#if groupedView.ungrouped.length > 0}
         <div class="sec-header" onclick={() => toggleSection('tasks')}>
           <iconify-icon icon={sections.tasks ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="9"></iconify-icon>
           <span class="sec-name">{$t('sidebar.tasks')}</span>
           <span class="sec-count">{groupedView.taskCount}</span>
         </div>
         {#if sections.tasks}
-          {#each groupedView.taskGroups as gv, gi (gv.group.id)}
-            {@render groupBlock(gv, gi, taskGroupIds)}
-          {/each}
           {#each groupedView.ungrouped as s (s.id)}
             {@render sessionRow(s)}
           {/each}
         {/if}
         {/if}
 
-        <!-- Projects: groups carrying a working directory. Counted by project,
-             not by session — a project is the unit here, and its own header
-             already carries how many sessions are in it. -->
+        <!-- Scheduled: one row per cron task, holding that task's runs. The
+             scheduler makes and names these, so the row carries no edit
+             actions — the task itself is edited in the Scheduled tasks view. -->
+        {#if groupedView.cronGroups.length > 0}
+        <div class="sec-header" onclick={() => toggleSection('scheduled')}>
+          <iconify-icon icon={sections.scheduled ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="9"></iconify-icon>
+          <span class="sec-name">{$t('sidebar.scheduled')}</span>
+          <span class="sec-count">{groupedView.cronCount}</span>
+        </div>
+        {#if sections.scheduled}
+          {#each groupedView.cronGroups as gv (gv.group.id)}
+            {@render cronBlock(gv)}
+          {/each}
+        {/if}
+        {/if}
+
+        <!-- Projects: a directory plus the sessions working in it. Counted by
+             project, not by session — a project is the unit here, and its own
+             header already carries how many sessions are in it. -->
         {#if groupedView.projects.length > 0}
         <div class="sec-header" onclick={() => toggleSection('projects')}>
           <iconify-icon icon={sections.projects ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="9"></iconify-icon>
@@ -553,6 +588,30 @@
         {/if}
         {/if}
       </div>
+
+      {#snippet cronBlock(gv: any)}
+        {@const g = gv.group}
+        <div class="grp-header">
+          <span class="grp-caret" onclick={() => toggleCollapse(g.id, !g.collapsed)}>
+            <iconify-icon icon="ant-design:clock-circle-outlined" width="13"></iconify-icon>
+          </span>
+          <span class="grp-name" onclick={() => toggleCollapse(g.id, !g.collapsed)}>{g.name}</span>
+          <span class="grp-count">{gv.items.length}</span>
+          {#if !$selMode}
+          <!-- The one action that belongs here: jump to the task itself. The
+               row has no rename / delete / new-session actions because none of
+               them are this row's to offer — the server refuses them too. -->
+          <span class="row-action" title={$t('sidebar.open_scheduled_task')} onclick={(e) => { e.stopPropagation(); view.set('tasks') }}>
+            <iconify-icon icon="ant-design:setting-outlined" width="13"></iconify-icon>
+          </span>
+          {/if}
+        </div>
+        {#if !g.collapsed}
+          {#each gv.items as s (s.id)}
+            {@render sessionRow(s)}
+          {/each}
+        {/if}
+      {/snippet}
 
       {#snippet groupBlock(gv: any, gi: number, siblings: string[])}
         {@const g = gv.group}
@@ -608,8 +667,7 @@
           >
             <iconify-icon icon="ant-design:plus-outlined" width="13"></iconify-icon>
           </span>
-          <!-- Every group is configurable (working dir + shared prompt) — one
-               settings gear, no separate "project" concept in the UI. -->
+          <!-- A project's directory and shared prompt, behind one gear. -->
           <span
             class="row-action"
             title={g.working_dir ? `${tr('project.settings')} — ${g.working_dir}` : tr('project.settings')}
@@ -743,22 +801,24 @@
           {#if groupOpen}
           {@const curGid = groupIdOf(s.id)}
           <div class="grp-popover" onclick={(e) => e.stopPropagation()}>
-            {#each $sessionGroups as pg (pg.id)}
-            <div class="grp-opt" class:cur={curGid === pg.id} onclick={() => moveToGroup(s.id, pg.id)}>
-              <iconify-icon icon="ant-design:check-outlined" width="12" style="opacity:{curGid === pg.id ? 1 : 0}"></iconify-icon>
-              <span class="grp-opt-name">{pg.name}</span>
+            <!-- Projects only. A scheduled task's cluster is not a destination:
+                 it holds that task's runs, and the server refuses the move. -->
+            {#each groupedView.projects as pv (pv.group.id)}
+            <div class="grp-opt" class:cur={curGid === pv.group.id} onclick={() => moveToGroup(s.id, pv.group.id)}>
+              <iconify-icon icon="ant-design:check-outlined" width="12" style="opacity:{curGid === pv.group.id ? 1 : 0}"></iconify-icon>
+              <span class="grp-opt-name">{pv.group.name}</span>
             </div>
             {/each}
             {#if curGid}
             <div class="grp-opt" onclick={() => moveToGroup(s.id, '')}>
               <iconify-icon icon="ant-design:close-outlined" width="12"></iconify-icon>
-              <span class="grp-opt-name">{$t('sidebar.remove_from_group')}</span>
+              <span class="grp-opt-name">{$t('sidebar.remove_from_project')}</span>
             </div>
             {/if}
             <div class="grp-sep"></div>
-            <div class="grp-opt" onclick={() => newGroupForSession(s.id)}>
+            <div class="grp-opt" onclick={() => newProjectForSession(s.id)}>
               <iconify-icon icon="ant-design:plus-outlined" width="12"></iconify-icon>
-              <span class="grp-opt-name">{$t('sidebar.new_group')}</span>
+              <span class="grp-opt-name">{$t('sidebar.new_project')}</span>
             </div>
           </div>
           {/if}
@@ -875,6 +935,19 @@
 
 {#if projectModalGroup}
   <ProjectSettingsModal group={projectModalGroup} onClose={() => (projectModalFor = '')} />
+{/if}
+
+{#if pickerOpen}
+  <FolderPickerModal
+    mode="folder"
+    onSelect={(dirPath) => {
+      pickerOpen = false
+      const then = afterPick
+      afterPick = null
+      if (then) void then(dirPath)
+    }}
+    onClose={() => { pickerOpen = false; afterPick = null }}
+  />
 {/if}
 
 <style>

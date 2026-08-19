@@ -41,9 +41,11 @@ timeout instead of finishing once the answer is "nothing to report."
 
 Every run creates a **new session**, titled with the run's local date and time (e.g.
 `2026-07-22 15:04`) and starting from an empty transcript — runs never share a session. Each task
-also gets a **session group** named after the task; all of its runs are filed under it, so they
-cluster together in the sidebar. The group is created with the task and renamed/deleted along with it
-(deleting the group only ungroups its sessions — the sessions themselves stay on disk).
+also gets a cluster named after it, holding all of its runs, which is what the sidebar's
+**Scheduled** section lists — one row per task. That row is the scheduler's, not yours: it cannot be
+renamed, deleted on its own, or have other sessions filed into it. It appears with the task, is
+renamed with it, and goes when the task is deleted (the run sessions themselves stay on disk and
+become ordinary tasks).
 
 ## Cron expression — 6 fields, seconds first
 
@@ -89,8 +91,8 @@ curl -s -X PATCH http://127.0.0.1:8088/api/tasks/{id} \
 ```
 
 `PATCH /api/tasks/{id}` accepts `name`, `enabled`, `cron`, `prompt`, `model`, `agent`, `directory`,
-`notify` — send only what you're changing; renaming via `name` also renames the task's session
-group. The Web UI's scheduler panel is a client of this
+`notify` — send only what you're changing; renaming via `name` also renames the task's row in the
+sidebar's Scheduled section. The Web UI's scheduler panel is a client of this
 same API, so a task created by `curl` shows up there and vice versa; the panel is also the
 recommended place to **smoke-test a new task's `Run` button** rather than triggering
 `/api/tasks/{id}/run` from a chat session — a run is a full agent turn (up to 30 minutes) in the

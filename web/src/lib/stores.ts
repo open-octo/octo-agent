@@ -319,7 +319,9 @@ export function normalizeDir(p: string): string {
 // a session's tools run.
 export async function resolveProjectForDir(dir: string): Promise<string> {
   const target = normalizeDir(dir)
-  const existing = get(sessionGroups).find(g => !!g.working_dir && normalizeDir(g.working_dir!) === target)
+  // A scheduled task's run cluster can carry a directory too, and it is not a
+  // project: filing a session there would drop it into that task's run history.
+  const existing = get(sessionGroups).find(g => !g.task_id && !!g.working_dir && normalizeDir(g.working_dir!) === target)
   if (existing) return existing.id
   // Split on either separator: on Windows a path has no '/' at all, and the
   // project would otherwise be named after the whole path.

@@ -652,7 +652,9 @@
     if (docked) return $sessionGroups.find(g => g.id === docked && !!g.working_dir) ?? null
     const dir = $pendingWorkingDir
     if (!dir) return null
-    return $sessionGroups.find(g => !!g.working_dir && normalizeDir(g.working_dir!) === normalizeDir(dir)) ?? null
+    // Excluding a scheduled task's cluster: it can carry a directory and is
+    // still not a project to file a new session under.
+    return $sessionGroups.find(g => !g.task_id && !!g.working_dir && normalizeDir(g.working_dir!) === normalizeDir(dir)) ?? null
   })
   // A docked group's own directory governs the session, exactly as it does for
   // a session already inside a project. A plain group has no directory to show,

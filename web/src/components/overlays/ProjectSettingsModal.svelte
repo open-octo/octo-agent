@@ -1,8 +1,9 @@
 <script lang="ts">
-  // Project settings for a session group. A group with a working directory is
-  // a project: every session in it runs its tools there, overriding whatever
-  // working dir the sessions carry themselves. Clearing the directory demotes
-  // the group back to a plain group and each session falls back to its own.
+  // Project settings. A project is a directory plus the sessions working in it:
+  // every session in it runs its tools there, and its memory is scoped to the
+  // project. The directory cannot be emptied — that used to demote the project
+  // to a plain group, a concept that no longer exists — so Save refuses an empty
+  // one here rather than sending a request the server will reject.
   import { get } from 'svelte/store'
   import { untrack } from 'svelte'
   import * as api from '../../lib/api'
@@ -27,11 +28,6 @@
     if (modalEl && !pickerOpen) modalEl.focus()
   })
 
-  const wasProject = untrack(() => !!group.working_dir)
-  // Clearing the directory on an existing project is a demotion, not an edit —
-  // warn rather than let it look like a no-op save.
-  let demoting = $derived(wasProject && dir.trim() === '')
-
   async function browse() {
     if (get(nativeShell)) {
       try {
@@ -50,6 +46,10 @@
     // Only submit what actually changed: sending an unchanged working_dir
     // would re-validate it, so a project whose directory was deleted on disk
     // couldn't even edit its notes.
+    if (dir.trim() === '') {
+      showToast(tr('project.dir_required'), 'error')
+      return
+    }
     const patch: { working_dir?: string; notes?: string } = {}
     if (dir.trim() !== (group.working_dir ?? '')) patch.working_dir = dir.trim()
     if (notes.trim() !== (group.notes ?? '')) patch.notes = notes.trim()
@@ -60,12 +60,7 @@
       // Patch the store in place so the sidebar header and every composer dir
       // chip in the project reflect the change without a refetch.
       sessionGroups.update(gs => gs.map(g => (g.id === group.id ? { ...g, ...updated } : g)))
-      showToast(
-        updated.working_dir
-          ? tr('project.saved').replace('{dir}', updated.working_dir)
-          : tr('project.demoted'),
-        'success',
-      )
+      showToast(tr('project.saved').replace('{dir}', updated.working_dir ?? dir.trim()), 'success')
       onClose()
     } catch (e: any) {
       showToast(e?.message ?? tr('project.save_fail'), 'error')
@@ -112,10 +107,6 @@
         placeholder={$t('project.notes_ph')}
       ></textarea>
       <p class="hint">{$t('project.notes_hint')}</p>
-
-      {#if demoting}
-        <p class="warn">{$t('project.demote_warn')}</p>
-      {/if}
     </div>
 
     <div class="modal-footer">
@@ -181,12 +172,6 @@
 .notes { resize: vertical; line-height: 1.5; }
 .browse { flex-shrink: 0; white-space: nowrap; }
 .hint { margin: 6px 2px 16px; font-size: 12px; color: var(--text-tertiary); }
-.warn {
-  margin: 0 0 4px; padding: 8px 10px;
-  border-radius: 7px;
-  background: var(--warning-bg, rgba(250, 173, 20, 0.12));
-  font-size: 12px; color: var(--text-secondary);
-}
 .modal-footer {
   display: flex; align-items: center; gap: 8px;
   padding: 12px 18px;

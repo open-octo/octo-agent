@@ -132,21 +132,26 @@ func TestProject_MoveOutRestoresOwnDir(t *testing.T) {
 }
 
 // TestProject_DemoteToPlainGroup covers clearing a project's directory.
-func TestProject_DemoteToPlainGroup(t *testing.T) {
+// A project's directory cannot be cleared. Clearing it used to demote the
+// project to a plain group, and there is no such thing to demote to — the
+// request has to be refused rather than quietly producing a row that is neither
+// a task nor a project.
+func TestProject_DirCannotBeCleared(t *testing.T) {
 	srv := groupTestServer(t)
 	projectDir := t.TempDir()
-	ownDir := t.TempDir()
-	sess := saveSessionWithDir(t, ownDir)
+	sess := saveSessionWithDir(t, "")
 
 	gid := newProjectGroup(t, srv, "Work", projectDir)
 	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sess.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
 		t.Fatalf("move in: status %d", rec.Code)
 	}
-	if rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"working_dir": ""}); rec.Code != http.StatusOK {
-		t.Fatalf("demote: status %d", rec.Code)
+	rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"working_dir": ""})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("clearing the dir: status %d, want 400: %s", rec.Code, rec.Body.String())
 	}
-	if got := srv.sessionCwd(sess); got != ownDir {
-		t.Errorf("after demote: cwd = %q, want own dir %q", got, ownDir)
+	// And the project still governs its session.
+	if got := srv.sessionCwd(sess); got != projectDir {
+		t.Errorf("cwd = %q, want the project's %q", got, projectDir)
 	}
 }
 
@@ -392,18 +397,18 @@ func TestProject_CreateSessionDirectlyInProject(t *testing.T) {
 	}
 }
 
-// TestProject_CreateSessionInPlainGroup: a plain group files the session but
-// seeding proceeds as usual — only a project suppresses it.
-func TestProject_CreateSessionInPlainGroup(t *testing.T) {
+// A group with no directory — the one kind left, a cron task's run cluster —
+// files the session but seeding proceeds as usual. Only a project suppresses it,
+// because only a project has a directory to override it with.
+func TestProject_CreateSessionInDirlessGroup(t *testing.T) {
 	srv := groupTestServer(t)
 	workspace := t.TempDir()
 	srv.setWorkspaceDir(workspace)
-	rec, out := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Plain"})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("create plain group: status %d", rec.Code)
+	g, err := createSessionGroupNamed("nightly", "", "task-1")
+	if err != nil {
+		t.Fatalf("create cron cluster: %v", err)
 	}
-	g, _ := out["group"].(map[string]any)
-	gid, _ := g["id"].(string)
+	gid := g.ID
 
 	sid := createSessionInGroupViaAPI(t, srv, gid)
 
@@ -412,7 +417,7 @@ func TestProject_CreateSessionInPlainGroup(t *testing.T) {
 		t.Fatalf("load created session: %v", err)
 	}
 	if loaded.WorkingDir != workspace {
-		t.Errorf("session in plain group: WorkingDir = %q, want seeded default %q", loaded.WorkingDir, workspace)
+		t.Errorf("session in a dirless group: WorkingDir = %q, want seeded default %q", loaded.WorkingDir, workspace)
 	}
 }
 
@@ -501,14 +506,15 @@ func projectIDByName(t *testing.T, srv *Server, name string) string {
 	return ""
 }
 
-// TestProject_ListReportsProjectFields makes sure the Web UI can tell a project
-// from a plain group without a second request.
+// TestProject_ListReportsProjectFields makes sure the Web UI can tell the two
+// kinds of group apart from the list alone, without a second request: a project
+// by its working_dir, a cron cluster by its task_id.
 func TestProject_ListReportsProjectFields(t *testing.T) {
 	srv := groupTestServer(t)
 	projectDir := t.TempDir()
 	newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Just a group"}); rec.Code != http.StatusOK {
-		t.Fatalf("create plain group: status %d", rec.Code)
+	if _, err := createSessionGroupNamed("nightly", "", "task-1"); err != nil {
+		t.Fatalf("create cron cluster: %v", err)
 	}
 
 	rec, _ := doGroupReq(t, srv, http.MethodGet, "/api/session-groups", nil)
@@ -527,7 +533,7 @@ func TestProject_ListReportsProjectFields(t *testing.T) {
 	if !resp.Groups[0].isProject() || resp.Groups[0].WorkingDir != projectDir {
 		t.Errorf("first group should be a project at %q, got %+v", projectDir, resp.Groups[0])
 	}
-	if resp.Groups[1].isProject() {
-		t.Errorf("second group should be plain, got %+v", resp.Groups[1])
+	if resp.Groups[1].isProject() || !resp.Groups[1].isCronCluster() {
+		t.Errorf("second group should be a cron cluster with no dir, got %+v", resp.Groups[1])
 	}
 }

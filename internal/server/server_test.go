@@ -1650,7 +1650,7 @@ func TestHandleUpdateSessionWorkingDir_RefusedForAProjectMember(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	g, err := createSessionGroupNamed("Alpha", t.TempDir())
+	g, err := createSessionGroupNamed("Alpha", t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}

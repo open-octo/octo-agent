@@ -4,6 +4,14 @@
 // partition in particular decides whether a row is rendered at all, and a
 // group that exists but never renders is unreachable rather than merely
 // misplaced.
+//
+// Three sections, two of which the user creates in: Tasks (loose sessions),
+// Scheduled (one row per cron task, holding its runs — made by the scheduler,
+// not the user), and Projects (a directory plus the sessions working in it). A
+// group with neither a working_dir nor a task_id is a plain group, a concept
+// that no longer exists; the server dissolves those at startup, and anything
+// left in a registry this frontend is handed is dropped rather than rendered as
+// a fourth kind of row.
 
 import type { Session, SessionGroup } from './types'
 
@@ -17,19 +25,16 @@ export interface SidebarSections {
   pinned: Session[]
   /** Groups carrying a working directory — projects. */
   projects: GroupView[]
-  /** Groups without one — plain groupings of loose tasks. */
-  taskGroups: GroupView[]
+  /** One per scheduled task, holding that task's runs. Read-only. */
+  cronGroups: GroupView[]
   /** Sessions in no group at all. Tasks by definition. */
   ungrouped: Session[]
   /** Collapsed sessions, in registry order, in the folded panel at the bottom. */
   folded: Session[]
-  /** How many sessions the Tasks section holds, groups included. */
+  /** How many loose sessions the Tasks section holds. */
   taskCount: number
-  /** True when the Tasks section has anything to show — INCLUDING an empty
-   *  group, which has no sessions but is still a row the user must be able to
-   *  see, rename, and configure. Gating on taskCount alone hid a freshly
-   *  created group along with its inline rename box. */
-  hasTasks: boolean
+  /** How many runs the Scheduled section holds across every task. */
+  cronCount: number
 }
 
 /**
@@ -70,21 +75,26 @@ export function splitSections(
   const folded = take(collapsedIds)
   const all = groups.map(group => ({ group, items: take(group.session_ids ?? []) }))
 
-  const projects = all.filter(gv => !!gv.group.working_dir)
-  const taskGroups = all.filter(gv => !gv.group.working_dir)
+  // A cron cluster is claimed by its task_id even when it also has a directory:
+  // it is the scheduler's row, and rendering it as a project would offer edits
+  // that belong to the task.
+  const cronGroups = all.filter(gv => !!gv.group.task_id)
+  const projects = all.filter(gv => !gv.group.task_id && !!gv.group.working_dir)
   // Route through byId (already deduped) rather than the input array, for the
-  // same keyed-each reason as a group's own membership.
+  // same keyed-each reason as a group's own membership. A session in a dissolved
+  // plain group was claimed by it above and so does NOT resurface here — that
+  // group is gone from the registry the moment the server has run, and until
+  // then showing its sessions twice would be worse than showing them nowhere.
   const ungrouped = [...byId.values()].filter(s => !claimed.has(s.id))
-  const taskCount = taskGroups.reduce((n, gv) => n + gv.items.length, 0) + ungrouped.length
 
   return {
     pinned,
     projects,
-    taskGroups,
+    cronGroups,
     ungrouped,
     folded,
-    taskCount,
-    hasTasks: taskGroups.length > 0 || ungrouped.length > 0,
+    taskCount: ungrouped.length,
+    cronCount: cronGroups.reduce((n, gv) => n + gv.items.length, 0),
   }
 }
 
@@ -94,9 +104,9 @@ export function splitSections(
  * of the section, or a sibling that has since disappeared).
  *
  * `siblings` is the id list of the section the group renders in, so a project
- * swaps with the previous project and a task group with the previous task
- * group. Swapping with whichever group happens to be adjacent in the registry
- * would make the row vanish from under the cursor into the other section.
+ * swaps with the previous project rather than with whichever group happens to be
+ * adjacent in the registry, which would make the row vanish from under the
+ * cursor into the other section.
  * Only the two groups exchange places in the registry; every other group keeps
  * its position, so the other section's order is untouched.
  */
@@ -119,6 +129,7 @@ export function swapWithinSection(
 
 export interface SectionFold {
   tasks: boolean
+  scheduled: boolean
   projects: boolean
 }
 
@@ -128,11 +139,11 @@ export interface SectionFold {
  * since a section the user cannot see is worse than one they must re-fold.
  */
 export function parseSectionFold(raw: string | null): SectionFold {
-  if (!raw) return { tasks: true, projects: true }
+  if (!raw) return { tasks: true, scheduled: true, projects: true }
   try {
     const v = JSON.parse(raw)
-    return { tasks: v?.tasks !== false, projects: v?.projects !== false }
+    return { tasks: v?.tasks !== false, scheduled: v?.scheduled !== false, projects: v?.projects !== false }
   } catch {
-    return { tasks: true, projects: true }
+    return { tasks: true, scheduled: true, projects: true }
   }
 }
