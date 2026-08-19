@@ -524,7 +524,6 @@
         <div class="grp-header">
           <iconify-icon icon="ant-design:pushpin-filled" width="11" style="color:var(--text-quaternary)"></iconify-icon>
           <span class="grp-name muted">{$t('sidebar.pinned')}</span>
-          <span class="grp-count">{groupedView.pinned.length}</span>
         </div>
         {#each groupedView.pinned as s (s.id)}
           {@render sessionRow(s)}
@@ -555,7 +554,6 @@
           {#if $selMode}{@render triBox(triStateOf(groupedView.ungrouped.map(s => s.id)), () => toggleMany(groupedView.ungrouped.map(s => s.id)))}{/if}
           <span class="sec-name">{$t('sidebar.tasks')}</span>
           <iconify-icon class="sec-caret" class:folded={!sections.tasks} icon="ant-design:right-outlined" width="10"></iconify-icon>
-          <span class="sec-count">{groupedView.taskCount}</span>
         </div>
         {#if sections.tasks}
           {#each groupedView.ungrouped as s (s.id)}
@@ -907,10 +905,13 @@
   flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 12px; font-weight: 600;
 }
-.sec-caret { flex: 0 0 auto; opacity: 0; transition: opacity 0.1s; }
+/* Right-pointing at rest reads as "expand this way"; rotated a quarter turn
+   it reads as "collapse downward" — so the base icon points right (folded)
+   and rotates to point down once the section is actually open. */
+.sec-caret { flex: 0 0 auto; opacity: 0; transform: rotate(90deg); transition: opacity 0.1s, transform 0.15s; }
 .sec-header:hover .sec-caret,
 .sec-caret.folded { opacity: 1; }
-.sec-count { font-size: 11px; flex: 0 0 auto; margin-left: auto; }
+.sec-caret.folded { transform: rotate(0deg); }
 
 .grp-header {
   position: relative;
@@ -928,7 +929,6 @@
   font-size: 12px; font-weight: 600; color: var(--text-secondary); cursor: pointer;
 }
 .grp-name.muted { font-weight: 600; color: var(--text-quaternary); cursor: default; }
-.grp-count { font-size: 11px; color: var(--text-quaternary); flex: 0 0 auto; padding: 0 2px; }
 /* Group-header actions in two frequency tiers. The high-frequency pair
    (new session, settings) is always visible, anchored at the right edge
    (explicit opacity:1 overrides .row-action's base opacity:0, the session
