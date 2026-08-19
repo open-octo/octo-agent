@@ -638,13 +638,16 @@
           {/if}
         </div>
         {#if !g.collapsed}
+          <!-- Indented under the project's own row, the way a child sits under
+               its parent — a session filed under a project is one, and looked
+               flat before like it wasn't. -->
           {#each gv.items as s (s.id)}
-            {@render sessionRow(s)}
+            {@render sessionRow(s, true)}
           {/each}
         {/if}
       {/snippet}
 
-      {#snippet sessionRow(s: any)}
+      {#snippet sessionRow(s: any, nested = false)}
         {@const active = s.id === $activeSessionId && $view === 'chat'}
         {@const selected = !!$sel[s.id]}
         {@const editing = $editId === s.id}
@@ -652,6 +655,7 @@
         {@const solid = active && !$selMode}
         <div
           class="nav-row"
+          class:nested
           class:solid={solid}
           class:selected={selected && !solid}
           class:menu-open={menuOpen}
@@ -991,6 +995,11 @@
   min-height: 34px; padding: 0 6px 0 9px;
   border-radius: 7px; cursor: pointer;
 }
+/* A session filed under a project is indented under it, the way a child sits
+   under its parent, rather than sharing the project header's own left edge —
+   which is what made a project's sessions read as siblings of the project
+   instead of members of it. */
+.nav-row.nested { padding-left: 40px; }
 /* Active row is a soft accent tint with accent text (the redesign's
    data-on state), not a solid blue pill. */
 .nav-row.solid { background: var(--active-blue-bg); }
