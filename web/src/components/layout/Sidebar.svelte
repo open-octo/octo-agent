@@ -531,25 +531,6 @@
         {/each}
         {/if}
 
-        <!-- Tasks: every session that belongs to no project, flat. A task is
-             one session — there is no naming or nesting layer inside this
-             section, which is what the retired "plain group" used to add. -->
-        {#if groupedView.ungrouped.length > 0}
-        <div class="sec-header" onclick={() => toggleSection('tasks')}>
-          {#if $selMode}{@render triBox(triStateOf(groupedView.ungrouped.map(s => s.id)), () => toggleMany(groupedView.ungrouped.map(s => s.id)))}{/if}
-          <span class="sec-name">{$t('sidebar.tasks')}</span>
-          {#if !sections.tasks}
-            <iconify-icon class="sec-caret" icon="ant-design:right-outlined" width="10"></iconify-icon>
-          {/if}
-          <span class="sec-count">{groupedView.taskCount}</span>
-        </div>
-        {#if sections.tasks}
-          {#each groupedView.ungrouped as s (s.id)}
-            {@render sessionRow(s)}
-          {/each}
-        {/if}
-        {/if}
-
         <!-- Projects: a directory plus the sessions working in it. Counted by
              project, not by session — a project is the unit here, and its own
              header already carries how many sessions are in it. -->
@@ -565,6 +546,25 @@
         {#if sections.projects}
           {#each groupedView.projects as gv, gi (gv.group.id)}
             {@render groupBlock(gv, gi, projectIds)}
+          {/each}
+        {/if}
+        {/if}
+
+        <!-- Tasks: every session that belongs to no project, flat. A task is
+             one session — there is no naming or nesting layer inside this
+             section, which is what the retired "plain group" used to add. -->
+        {#if groupedView.ungrouped.length > 0}
+        <div class="sec-header" onclick={() => toggleSection('tasks')}>
+          {#if $selMode}{@render triBox(triStateOf(groupedView.ungrouped.map(s => s.id)), () => toggleMany(groupedView.ungrouped.map(s => s.id)))}{/if}
+          <span class="sec-name">{$t('sidebar.tasks')}</span>
+          {#if !sections.tasks}
+            <iconify-icon class="sec-caret" icon="ant-design:right-outlined" width="10"></iconify-icon>
+          {/if}
+          <span class="sec-count">{groupedView.taskCount}</span>
+        </div>
+        {#if sections.tasks}
+          {#each groupedView.ungrouped as s (s.id)}
+            {@render sessionRow(s)}
           {/each}
         {/if}
         {/if}
