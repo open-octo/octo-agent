@@ -6,6 +6,7 @@
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
   import { splitSections, swapWithinSection, parseSectionFold, type SectionFold } from '../../lib/sidebarSections'
+  import { ago } from '../../lib/relTime'
   import { ws } from '../../lib/ws'
   import VersionBadge from './VersionBadge.svelte'
 
@@ -241,13 +242,6 @@
 
   function navActive(v: string) { return $view === v }
   function moreActive() { return moreCategories.some(c => c.v === $view) }
-
-  function sessionIcon(s: any): string {
-    if (s.source === 'cron') return 'ant-design:clock-circle-outlined'
-    if (s.source === 'channel') return 'ant-design:send-outlined'
-    if (s.status === 'running') return 'ant-design:code-outlined'
-    return 'ant-design:message-outlined'
-  }
 
   function toggleSel(id: string) {
     sel.update(s => { const n = { ...s }; n[id] ? delete n[id] : (n[id] = true); return n })
@@ -678,7 +672,6 @@
         {@const editing = $editId === s.id}
         {@const menuOpen = $menuFor === s.id && !$selMode}
         {@const solid = active && !$selMode}
-        {@const icon = sessionIcon(s)}
         <div
           class="nav-row"
           class:solid={solid}
@@ -690,12 +683,11 @@
             {@render triBox(selected ? 'all' : 'none', () => toggleSel(s.id))}
           {/if}
 
-          {#if (s as any).status === 'running'}
-            <iconify-icon icon="ant-design:loading-outlined" width="14" style="color:var(--blue-6);flex:0 0 auto;animation:octo-spin 0.8s linear infinite"></iconify-icon>
-          {:else}
-            <iconify-icon icon={icon} width="14" style="color:{solid ? 'var(--blue-6)' : 'var(--text-tertiary)'};flex:0 0 auto"></iconify-icon>
-          {/if}
-
+          <!-- No icon in front of the name. It was one of four glyphs standing
+               for the session's source, which is either obvious from the project
+               it sits under or not worth a column in every row. Whether a session
+               is RUNNING is worth showing, and that goes on the right where the
+               timestamp it replaces was. -->
           {#if editing}
           <input
             class="rename-input"
@@ -726,9 +718,13 @@
           {#if (s as any).pending_question}
             <span class="pending-dot" title={$t('sidebar.pending_question')}></span>
           {/if}
-          <span class="session-time on-rest" style="color:var(--text-quaternary);">
-            {(s as any).source === 'cron' ? $t('sidebar.cron') : ''}
-          </span>
+          {#if (s as any).status === 'running'}
+            <iconify-icon class="on-rest" icon="ant-design:loading-outlined" width="13" style="color:var(--blue-6);flex:0 0 auto;animation:octo-spin 0.8s linear infinite" title={$t('sidebar.running')}></iconify-icon>
+          {:else}
+            <span class="session-time on-rest" style="color:var(--text-quaternary);">
+              {ago((s as any).updated_at, $t)}
+            </span>
+          {/if}
           {#if !$selMode}
             {@const pinned = isPinned(s.id)}
             {@const collapsed = isCollapsed(s.id)}
