@@ -127,7 +127,7 @@
     // the server does — the pin wins.
     const folded = $collapsedSessions.map(id => byId.get(id)).filter(Boolean).filter(s => !claimed.has((s as any).id)) as typeof $sessions
     folded.forEach(s => claimed.add(s.id))
-    const groups = $sessionGroups.map(g => {
+    const all = $sessionGroups.map(g => {
       // A duplicate id in session_ids (e.g. an optimistic prepend racing the
       // 'session_created' broadcast's own full sessionGroups refresh) would
       // otherwise map to the same session object twice and throw Svelte's
@@ -137,12 +137,45 @@
       items.forEach(s => claimed.add(s.id))
       return { group: g, items }
     })
+    // The two sections the list is split into. A group carrying a working dir
+    // is a project — its directory governs every session under it — and one
+    // without is a plain grouping of loose tasks, so they answer different
+    // questions and are listed apart rather than interleaved in registry
+    // order. Ungrouped sessions are tasks too, and sit under that heading.
+    const projects = all.filter(gv => !!gv.group.working_dir)
+    const taskGroups = all.filter(gv => !gv.group.working_dir)
     // Route through byId (already deduped by id) rather than $sessions
     // directly, for the same reason as the groups' session_ids above — a
     // duplicate session id would otherwise reach this keyed {#each} twice.
     const ungrouped = [...byId.values()].filter(s => !claimed.has((s as any).id))
-    return { folded, pinned, groups, ungrouped }
+    const taskCount = taskGroups.reduce((n, gv) => n + gv.items.length, 0) + ungrouped.length
+    return { folded, pinned, projects, taskGroups, ungrouped, taskCount }
   })
+
+  // Which sections are expanded. This is a per-browser view preference about
+  // screen space, not a fact about the sessions, so it stays in localStorage
+  // rather than in the server-side group registry (unlike a group's own
+  // collapsed flag, which is shared so every surface folds it the same way).
+  const SECTIONS_KEY = 'octo.sidebar.sections'
+  function loadSections(): { tasks: boolean; projects: boolean } {
+    try {
+      const raw = localStorage.getItem(SECTIONS_KEY)
+      if (raw) {
+        const v = JSON.parse(raw)
+        return { tasks: v?.tasks !== false, projects: v?.projects !== false }
+      }
+    } catch { /* unavailable or corrupt storage — both sections open */ }
+    return { tasks: true, projects: true }
+  }
+  let sections = $state(loadSections())
+  // Id lists per section, so a group's reorder arrows know their own
+  // neighbours (and whether they are at either end of their section).
+  const taskGroupIds = $derived(groupedView.taskGroups.map(gv => gv.group.id))
+  const projectIds = $derived(groupedView.projects.map(gv => gv.group.id))
+  function toggleSection(k: 'tasks' | 'projects') {
+    sections = { ...sections, [k]: !sections[k] }
+    try { localStorage.setItem(SECTIONS_KEY, JSON.stringify(sections)) } catch { /* ignore */ }
+  }
 
   function groupIdOf(sessionId: string): string {
     return $sessionGroups.find(g => g.session_ids.includes(sessionId))?.id ?? ''
@@ -339,13 +372,22 @@
     } catch (e: any) { showToast(e.message, 'error') }
   }
 
-  // Move a group one slot up or down. Optimistic: swap locally, then persist
-  // the full new order. On failure, revert.
-  async function moveGroup(id: string, dir: -1 | 1) {
+  // Move a group one slot up or down WITHIN ITS OWN SECTION: `siblings` is the
+  // id list of the section it renders in, so a project swaps with the previous
+  // project and a task group with the previous task group. Swapping with
+  // whichever group happens to be adjacent in the registry would make the row
+  // vanish from under the cursor into the other section. The registry itself
+  // stays one flat ordered list — only the two groups actually swap places in
+  // it. Optimistic: swap locally, then persist the full new order; revert on
+  // failure.
+  async function moveGroup(id: string, dir: -1 | 1, siblings: string[]) {
+    const si = siblings.indexOf(id)
+    const sj = si + dir
+    if (si < 0 || sj < 0 || sj >= siblings.length) return
     const before = $sessionGroups
     const i = before.findIndex(g => g.id === id)
-    const j = i + dir
-    if (i < 0 || j < 0 || j >= before.length) return
+    const j = before.findIndex(g => g.id === siblings[sj])
+    if (i < 0 || j < 0) return
     const next = [...before]
     ;[next[i], next[j]] = [next[j], next[i]]
     sessionGroups.set(next)
@@ -485,8 +527,61 @@
         {/each}
         {/if}
 
-        <!-- Groups (registry order), each collapsible -->
-        {#each groupedView.groups as gv, gi (gv.group.id)}
+        <!-- Tasks: loose sessions and the plain groups that gather them.
+             Sessions with no group of their own are tasks by definition, so
+             they land here rather than under a separate "ungrouped" heading. -->
+        {#if groupedView.taskCount > 0}
+        <div class="sec-header" onclick={() => toggleSection('tasks')}>
+          <iconify-icon icon={sections.tasks ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="9"></iconify-icon>
+          <span class="sec-name">{$t('sidebar.tasks')}</span>
+          <span class="sec-count">{groupedView.taskCount}</span>
+        </div>
+        {#if sections.tasks}
+          {#each groupedView.taskGroups as gv, gi (gv.group.id)}
+            {@render groupBlock(gv, gi, taskGroupIds)}
+          {/each}
+          {#each groupedView.ungrouped as s (s.id)}
+            {@render sessionRow(s)}
+          {/each}
+        {/if}
+        {/if}
+
+        <!-- Projects: groups carrying a working directory. Counted by project,
+             not by session — a project is the unit here, and its own header
+             already carries how many sessions are in it. -->
+        {#if groupedView.projects.length > 0}
+        <div class="sec-header" onclick={() => toggleSection('projects')}>
+          <iconify-icon icon={sections.projects ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="9"></iconify-icon>
+          <span class="sec-name">{$t('sidebar.projects')}</span>
+          <span class="sec-count">{groupedView.projects.length}</span>
+        </div>
+        {#if sections.projects}
+          {#each groupedView.projects as gv, gi (gv.group.id)}
+            {@render groupBlock(gv, gi, projectIds)}
+          {/each}
+        {/if}
+        {/if}
+
+        <!-- Collapsed: a folded panel at the very bottom. The panel itself
+             starts shut on every mount (only the count shows) — it exists to
+             keep the list short, so it never opens on its own. -->
+        {#if groupedView.folded.length > 0}
+        <div class="grp-header">
+          <span class="grp-caret" onclick={() => (foldedOpen = !foldedOpen)}>
+            <iconify-icon icon={foldedOpen ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="10"></iconify-icon>
+          </span>
+          <span class="grp-name muted" onclick={() => (foldedOpen = !foldedOpen)}>{$t('sidebar.collapsed')}</span>
+          <span class="grp-count">{groupedView.folded.length}</span>
+        </div>
+        {#if foldedOpen}
+          {#each groupedView.folded as s (s.id)}
+            {@render sessionRow(s)}
+          {/each}
+        {/if}
+        {/if}
+      </div>
+
+      {#snippet groupBlock(gv: any, gi: number, siblings: string[])}
         {@const g = gv.group}
         {@const editingG = $editGroupId === g.id}
         <div class="grp-header">
@@ -518,12 +613,12 @@
                NOT opacity — invisible icons must not reserve width, that's
                what squeezed the group name to an ellipsis). -->
           {#if gi > 0}
-          <span class="row-action hover-only" title={$t('sidebar.move_group_up')} onclick={() => moveGroup(g.id, -1)}>
+          <span class="row-action hover-only" title={$t('sidebar.move_group_up')} onclick={() => moveGroup(g.id, -1, siblings)}>
             <iconify-icon icon="ant-design:arrow-up-outlined" width="12"></iconify-icon>
           </span>
           {/if}
-          {#if gi < groupedView.groups.length - 1}
-          <span class="row-action hover-only" title={$t('sidebar.move_group_down')} onclick={() => moveGroup(g.id, 1)}>
+          {#if gi < siblings.length - 1}
+          <span class="row-action hover-only" title={$t('sidebar.move_group_down')} onclick={() => moveGroup(g.id, 1, siblings)}>
             <iconify-icon icon="ant-design:arrow-down-outlined" width="12"></iconify-icon>
           </span>
           {/if}
@@ -562,39 +657,7 @@
             {@render sessionRow(s)}
           {/each}
         {/if}
-        {/each}
-
-        <!-- Ungrouped: header only shown when at least one group exists -->
-        {#if groupedView.ungrouped.length > 0}
-          {#if groupedView.groups.length > 0}
-          <div class="grp-header">
-            <span class="grp-name muted">{$t('sidebar.ungrouped')}</span>
-            <span class="grp-count">{groupedView.ungrouped.length}</span>
-          </div>
-          {/if}
-          {#each groupedView.ungrouped as s (s.id)}
-            {@render sessionRow(s)}
-          {/each}
-        {/if}
-
-        <!-- Collapsed: a folded panel at the very bottom. The panel itself
-             starts shut on every mount (only the count shows) — it exists to
-             keep the list short, so it never opens on its own. -->
-        {#if groupedView.folded.length > 0}
-        <div class="grp-header">
-          <span class="grp-caret" onclick={() => (foldedOpen = !foldedOpen)}>
-            <iconify-icon icon={foldedOpen ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="10"></iconify-icon>
-          </span>
-          <span class="grp-name muted" onclick={() => (foldedOpen = !foldedOpen)}>{$t('sidebar.collapsed')}</span>
-          <span class="grp-count">{groupedView.folded.length}</span>
-        </div>
-        {#if foldedOpen}
-          {#each groupedView.folded as s (s.id)}
-            {@render sessionRow(s)}
-          {/each}
-        {/if}
-        {/if}
-      </div>
+      {/snippet}
 
       {#snippet sessionRow(s: any)}
         {@const active = s.id === $activeSessionId && $view === 'chat'}
@@ -912,6 +975,22 @@
 .new-group-btn:hover { color: var(--blue-6); border-color: var(--blue-5); }
 .sel-toggle { font-size: 11px; font-weight: 600; color: var(--blue-6); cursor: pointer; }
 /* Group section header (folder row) */
+/* Section heading (Tasks / Projects). Sits a tier above .grp-header: it names
+   a whole kind of entry rather than one group, so it reads quieter and tighter
+   than the group rows nested under it. */
+.sec-header {
+  display: flex; align-items: center; gap: 6px;
+  min-height: 24px; padding: 0 8px; margin-top: 10px;
+  color: var(--text-quaternary); cursor: pointer; user-select: none;
+}
+.sec-header:first-child { margin-top: 2px; }
+.sec-header:hover { color: var(--text-tertiary); }
+.sec-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+}
+.sec-count { font-size: 11px; flex: 0 0 auto; }
+
 .grp-header {
   display: flex; align-items: center; gap: 6px;
   min-height: 28px; padding: 0 6px 0 6px; margin-top: 2px;
