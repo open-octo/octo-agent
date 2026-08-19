@@ -243,10 +243,6 @@
                   <span class="sep"></span>
                   <span class="mono">{provenance(f)}</span>
                 {/if}
-                {#if f.project}
-                  <span class="sep"></span>
-                  <span class="meta-project">{f.project}</span>
-                {/if}
               </div>
             </div>
             <div class="file-actions">
@@ -335,11 +331,6 @@ p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 6
    rather than wrap, especially once this view sits inside Settings' narrower
    pane rather than a full page. */
 .file-meta .mono { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* f.project is the other open-ended piece in this row (it's a working-directory
-   path, not a short label) — same treatment, and the one that was actually
-   free-wrapping across several lines: a bare <span> has no width constraint of
-   its own to shrink against. */
-.file-meta .meta-project { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sep { width: 3px; height: 3px; border-radius: 9999px; background: var(--text-quaternary); }
 .file-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .icon-btn {
