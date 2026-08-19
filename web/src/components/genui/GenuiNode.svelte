@@ -22,6 +22,13 @@
   import GenuiBadge from './GenuiBadge.svelte'
   import GenuiProgress from './GenuiProgress.svelte'
   import GenuiCallout from './GenuiCallout.svelte'
+  import GenuiButton from './GenuiButton.svelte'
+  import GenuiInput from './GenuiInput.svelte'
+  import GenuiSelect from './GenuiSelect.svelte'
+  import GenuiCheckbox from './GenuiCheckbox.svelte'
+  import GenuiSwitch from './GenuiSwitch.svelte'
+  import GenuiRadio from './GenuiRadio.svelte'
+  import GenuiTabs from './GenuiTabs.svelte'
 
   let { node }: { node: GenuiNodeType } = $props()
 </script>
@@ -54,4 +61,18 @@
   <GenuiProgress {node} />
 {:else if node.type === 'callout'}
   <GenuiCallout {node} />
+{:else if node.type === 'button'}
+  <GenuiButton {node} />
+{:else if node.type === 'input'}
+  <GenuiInput {node} />
+{:else if node.type === 'select'}
+  <GenuiSelect {node} />
+{:else if node.type === 'checkbox'}
+  <GenuiCheckbox {node} />
+{:else if node.type === 'switch'}
+  <GenuiSwitch {node} />
+{:else if node.type === 'radio'}
+  <GenuiRadio {node} />
+{:else if node.type === 'tabs'}
+  <GenuiTabs {node} />
 {/if}

@@ -84,6 +84,64 @@ export interface GenuiCalloutNode {
   text?: string
 }
 
+// ─── Slice B — interactive node types (inline octo-ui-fence only) ──────────
+// render_ui's tool-card path never accepts these — see guard.ts's
+// INTERACTIVE_NODE_TYPES / the Go guard's ReadOnlyNodeTypes, which does not
+// mirror them.
+export type GenuiInteractiveType = 'button' | 'input' | 'select' | 'checkbox' | 'switch' | 'radio' | 'tabs'
+
+export interface GenuiButtonNode {
+  type: 'button'
+  label: string
+  action: string
+  payload?: Record<string, unknown>
+  variant?: 'primary' | 'default' | 'danger'
+}
+
+// Deliberately no `inputType` field — always a plain <input type="text">.
+// See dev-docs/genui-design.md "Security design": no password-style input,
+// by construction rather than by validation.
+export interface GenuiInputNode {
+  type: 'input'
+  field: string
+  label?: string
+  placeholder?: string
+  value?: string
+}
+
+export interface GenuiOption {
+  label: string
+  value: string
+}
+
+export interface GenuiSelectNode {
+  type: 'select'
+  field: string
+  label?: string
+  options: GenuiOption[]
+  value?: string
+}
+
+export interface GenuiCheckboxNode {
+  type: 'checkbox' | 'switch'
+  field: string
+  label?: string
+  checked?: boolean
+}
+
+export interface GenuiRadioNode {
+  type: 'radio'
+  field: string
+  label?: string
+  options: GenuiOption[]
+  value?: string
+}
+
+export interface GenuiTabsNode {
+  type: 'tabs'
+  tabs: { label: string; children: GenuiNode[] }[]
+}
+
 export type GenuiNode =
   | GenuiTextNode
   | GenuiRowNode
@@ -95,6 +153,12 @@ export type GenuiNode =
   | GenuiBadgeNode
   | GenuiProgressNode
   | GenuiCalloutNode
+  | GenuiButtonNode
+  | GenuiInputNode
+  | GenuiSelectNode
+  | GenuiCheckboxNode
+  | GenuiRadioNode
+  | GenuiTabsNode
 
 export interface GenuiSpec {
   title?: string

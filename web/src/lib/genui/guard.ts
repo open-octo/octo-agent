@@ -23,6 +23,10 @@ export const MAX_TABLE_CELL_LEN = 2000
 export const MAX_LIST_ITEMS = 200
 export const MAX_TABLE_ROWS = 100
 export const MAX_TABLE_COLUMNS = 50
+// Slice B caps (select/radio options, tabs) — see dev-docs/genui-design.md
+// "GenUI spec shape".
+export const MAX_OPTIONS = 50
+export const MAX_TABS = 8
 
 /** Node "type" values render_ui / inline octo-ui fences accept in Slice A
  * (read-only components). Interactive types are added by a later slice. */
@@ -38,6 +42,19 @@ export const READ_ONLY_NODE_TYPES: ReadonlySet<string> = new Set([
   'badge',
   'progress',
   'callout',
+])
+
+/** Interactive node "type" values, added by Slice B. Inline-octo-ui-fence
+ * only — render_ui's tool-card path never accepts these, and the Go guard
+ * (internal/tools/genui/guard.go, ReadOnlyNodeTypes) does not mirror them. */
+export const INTERACTIVE_NODE_TYPES: ReadonlySet<string> = new Set([
+  'button',
+  'input',
+  'select',
+  'checkbox',
+  'switch',
+  'radio',
+  'tabs',
 ])
 
 export interface SanitizeResult {
@@ -165,6 +182,65 @@ function sanitizeNode(
       return out
     }
 
+    case 'button': {
+      const out: any = {
+        type: 'button',
+        label: clampString(stringField(node, 'label'), MAX_STRING_LEN),
+        action: clampString(stringField(node, 'action'), MAX_STRING_LEN),
+      }
+      const variant = node.variant
+      if (typeof variant === 'string' && ['primary', 'default', 'danger'].includes(variant)) out.variant = variant
+      if (typeof node.payload === 'object' && node.payload !== null && !Array.isArray(node.payload)) {
+        out.payload = sanitizePayload(node.payload as Record<string, unknown>)
+      }
+      return out
+    }
+
+    case 'input': {
+      // No `inputType` field is ever read or passed through — see the
+      // security note on GenuiInputNode in types.ts. Any such field the
+      // model sends anyway is silently dropped by construction (this
+      // switch only ever assembles the fields listed below).
+      const out: any = { type: 'input', field: clampString(stringField(node, 'field'), MAX_STRING_LEN) }
+      if (typeof node.label === 'string') out.label = clampString(node.label, MAX_STRING_LEN)
+      if (typeof node.placeholder === 'string') out.placeholder = clampString(node.placeholder, MAX_STRING_LEN)
+      if (typeof node.value === 'string') out.value = clampString(node.value, MAX_STRING_LEN)
+      return out
+    }
+
+    case 'select': {
+      const out: any = {
+        type: 'select',
+        field: clampString(stringField(node, 'field'), MAX_STRING_LEN),
+        options: sanitizeOptions(node),
+      }
+      if (typeof node.label === 'string') out.label = clampString(node.label, MAX_STRING_LEN)
+      if (typeof node.value === 'string') out.value = clampString(node.value, MAX_STRING_LEN)
+      return out
+    }
+
+    case 'checkbox':
+    case 'switch': {
+      const out: any = { type, field: clampString(stringField(node, 'field'), MAX_STRING_LEN) }
+      if (typeof node.label === 'string') out.label = clampString(node.label, MAX_STRING_LEN)
+      if (typeof node.checked === 'boolean') out.checked = node.checked
+      return out
+    }
+
+    case 'radio': {
+      const out: any = {
+        type: 'radio',
+        field: clampString(stringField(node, 'field'), MAX_STRING_LEN),
+        options: sanitizeOptions(node),
+      }
+      if (typeof node.label === 'string') out.label = clampString(node.label, MAX_STRING_LEN)
+      if (typeof node.value === 'string') out.value = clampString(node.value, MAX_STRING_LEN)
+      return out
+    }
+
+    case 'tabs':
+      return { type: 'tabs', tabs: sanitizeTabs(node, allowed, depth, count) }
+
     default:
       return null
   }
@@ -220,6 +296,83 @@ function sanitizeKeyValueItems(node: Record<string, unknown>): { label: string; 
     })
   }
   return out
+}
+
+function sanitizeOptions(node: Record<string, unknown>): { label: string; value: string }[] {
+  const raw = node.options
+  if (!Array.isArray(raw)) return []
+  const out: { label: string; value: string }[] = []
+  for (const opt of raw) {
+    if (out.length >= MAX_OPTIONS) break
+    if (typeof opt !== 'object' || opt === null) continue
+    const rec = opt as Record<string, unknown>
+    out.push({
+      label: clampString(stringField(rec, 'label'), MAX_STRING_LEN),
+      value: clampString(stringField(rec, 'value'), MAX_STRING_LEN),
+    })
+  }
+  return out
+}
+
+function sanitizeTabs(
+  node: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+  depth: number,
+  count: { value: number }
+): { label: string; children: GenuiNode[] }[] {
+  const raw = node.tabs
+  if (!Array.isArray(raw)) return []
+  const out: { label: string; children: GenuiNode[] }[] = []
+  for (const tab of raw) {
+    if (out.length >= MAX_TABS) break
+    if (typeof tab !== 'object' || tab === null) continue
+    const rec = tab as Record<string, unknown>
+    out.push({
+      label: clampString(stringField(rec, 'label'), MAX_STRING_LEN),
+      children: sanitizeChildren(rec, allowed, depth, count),
+    })
+  }
+  return out
+}
+
+// payload is never rendered as HTML/text (see GenuiButtonNode) — it only
+// round-trips through the [octo-ui-action] synthetic message back to the
+// model, the same trust boundary an ordinary typed chat message already
+// has. This still bounds its size/depth defensively, same spirit as every
+// other field here, rather than passing it through completely unchecked.
+// sanitizePayload's depth (MAX_DEPTH) and per-level width (reusing
+// MAX_OPTIONS as a generic "how many keys/array entries at this level" cap,
+// not because it's semantically the select/radio options cap) bound one
+// button's payload in isolation. They are NOT counted against the spec-wide
+// MAX_NODES node budget — a spec with MAX_NODES button nodes, each carrying
+// a near-max-size payload, carries more total JSON than "200 nodes" alone
+// suggests. Not a safety gap (this data never renders as HTML/DOM, it only
+// ever gets JSON.stringify'd into an [octo-ui-action] reply — see
+// ChatView.svelte's sendGenuiAction — and its total size is still bounded by
+// the input JSON text size itself), but worth knowing if a future caller
+// wants a tighter combined budget.
+function sanitizePayload(obj: Record<string, unknown>, depth = 1): Record<string, unknown> {
+  if (depth > MAX_DEPTH) return {}
+  const out: Record<string, unknown> = {}
+  let n = 0
+  for (const [k, v] of Object.entries(obj)) {
+    if (n >= MAX_OPTIONS) break
+    out[clampString(k, MAX_STRING_LEN)] = sanitizePayloadValue(v, depth)
+    n++
+  }
+  return out
+}
+
+function sanitizePayloadValue(v: unknown, depth: number): unknown {
+  if (typeof v === 'string') return clampString(v, MAX_STRING_LEN)
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0
+  if (typeof v === 'boolean' || v === null) return v
+  if (Array.isArray(v)) {
+    if (depth + 1 > MAX_DEPTH) return []
+    return v.slice(0, MAX_OPTIONS).map((item) => sanitizePayloadValue(item, depth + 1))
+  }
+  if (typeof v === 'object') return sanitizePayload(v as Record<string, unknown>, depth + 1)
+  return null
 }
 
 function sanitizeStringArray(node: Record<string, unknown>, key: string, maxItems: number, maxLen: number): string[] {
