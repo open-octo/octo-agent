@@ -11,7 +11,7 @@ require (
 	github.com/mattn/go-isatty v0.0.24
 	github.com/open-octo/octo-agent v0.0.0
 	github.com/tc-hib/winres v0.3.1
-	github.com/wailsapp/wails/v3 v3.0.0-beta.5
+	github.com/wailsapp/wails/v3 v3.0.0-beta.8
 )
 
 require (
