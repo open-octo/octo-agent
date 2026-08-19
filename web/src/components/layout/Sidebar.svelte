@@ -538,7 +538,9 @@
         <div class="sec-header" onclick={() => toggleSection('tasks')}>
           {#if $selMode}{@render triBox(triStateOf(groupedView.ungrouped.map(s => s.id)), () => toggleMany(groupedView.ungrouped.map(s => s.id)))}{/if}
           <span class="sec-name">{$t('sidebar.tasks')}</span>
-          <iconify-icon class="sec-caret" icon={sections.tasks ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="10"></iconify-icon>
+          {#if !sections.tasks}
+            <iconify-icon class="sec-caret" icon="ant-design:right-outlined" width="10"></iconify-icon>
+          {/if}
           <span class="sec-count">{groupedView.taskCount}</span>
         </div>
         {#if sections.tasks}
@@ -555,7 +557,9 @@
         <div class="sec-header" onclick={() => toggleSection('projects')}>
           {#if $selMode}{@render triBox(triStateOf(groupedView.projects.flatMap(gv => gv.items.map(s => s.id))), () => toggleMany(groupedView.projects.flatMap(gv => gv.items.map(s => s.id))))}{/if}
           <span class="sec-name">{$t('sidebar.projects')}</span>
-          <iconify-icon class="sec-caret" icon={sections.projects ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="10"></iconify-icon>
+          {#if !sections.projects}
+            <iconify-icon class="sec-caret" icon="ant-design:right-outlined" width="10"></iconify-icon>
+          {/if}
           <span class="sec-count">{groupedView.projects.length}</span>
         </div>
         {#if sections.projects}
@@ -697,9 +701,6 @@
             <span class="agent-tag on-rest" style="background:{solid ? 'rgba(255,255,255,0.2)' : 'var(--active-blue-bg)'};color:var(--blue-6);">
               {aName}
             </span>
-          {/if}
-          {#if isPinned(s.id)}
-            <iconify-icon class="on-rest" icon="ant-design:pushpin-filled" width="11" title={$t('sidebar.pinned')} style="color:var(--text-quaternary);flex:0 0 auto"></iconify-icon>
           {/if}
           {#if (s as any).pending_question}
             <span class="pending-dot" title={$t('sidebar.pending_question')}></span>
@@ -897,16 +898,19 @@
 .sec-header {
   display: flex; align-items: center; gap: 6px;
   min-height: 24px; padding: 0 8px; margin-top: 10px;
-  color: var(--text-tertiary); cursor: pointer; user-select: none;
+  color: var(--text-quaternary); cursor: pointer; user-select: none;
 }
 .sec-header:first-child { margin-top: 0; }
 .sec-header:hover { color: var(--text-secondary); }
-/* Reads as a quiet label, not a heading: normal weight, no tracking, the
-   caret right after the name rather than leading it — the name is what's
-   being scanned for, the caret is a detail about it. */
+/* Same font and color as Pinned's own label (.grp-name.muted) — Tasks,
+   Projects and Pinned are three peers at the same level, not three different
+   weights of heading. The caret sits right after the name rather than leading
+   it — the name is what's being scanned for, the caret is a detail about it —
+   and only appears while collapsed: expanded, the content below already says
+   so, and the arrow is one more thing to look at for nothing. */
 .sec-name {
   flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 13px; font-weight: 400;
+  font-size: 12px; font-weight: 600;
 }
 .sec-caret { flex: 0 0 auto; }
 .sec-count { font-size: 11px; flex: 0 0 auto; margin-left: auto; }
