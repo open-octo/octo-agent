@@ -53,14 +53,14 @@
     { icon: 'ant-design:api-outlined', label: 'nav.mcp', v: 'mcp' },
     { icon: 'ant-design:partition-outlined', label: 'nav.workflows', v: 'workflows' },
     { icon: 'ant-design:user-outlined', label: 'nav.memory', v: 'profile' },
+    { icon: 'ant-design:global-outlined', label: 'nav.browser', v: 'browser' },
+    { icon: 'ant-design:mobile-outlined', label: 'nav.channels', v: 'channels' },
   ]
 
   // The nav group, in both widths: the destinations worth a row of their own.
   const topNav = [
     { icon: 'ant-design:clock-circle-outlined', label: 'nav.tasks', v: 'tasks' },
-    { icon: 'ant-design:global-outlined', label: 'nav.browser', v: 'browser' },
     { icon: 'ant-design:appstore-outlined', label: 'nav.light_apps', v: 'lightapps' },
-    { icon: 'ant-design:mobile-outlined', label: 'nav.channels', v: 'channels' },
   ]
   function goToMore(v: string) {
     view.set(v as any)
