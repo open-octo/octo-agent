@@ -8,26 +8,10 @@
   import { splitSections, swapWithinSection, parseSectionFold, type SectionFold } from '../../lib/sidebarSections'
   import { ws } from '../../lib/ws'
   import VersionBadge from './VersionBadge.svelte'
-  import ProjectSettingsModal from '../overlays/ProjectSettingsModal.svelte'
 
-  // Group whose project settings are open, by id ('' = none). Held by id
-  // rather than by object so the modal always renders the live group from the
-  // store, even if it changes underneath.
-  let projectModalFor = $state('')
   // Project whose row menu is open, by id ('' = none). Local rather than a store:
   // nothing outside this sidebar opens or reads it.
   let projectMenuFor = $state('')
-  let projectModalGroup = $derived($sessionGroups.find(g => g.id === projectModalFor) ?? null)
-
-  // Abbreviate a project directory for the sidebar: drop the home prefix, and
-  // keep only the last two segments of anything still long.
-  function shortDir(p: string): string {
-    const home = p.match(/^\/(?:Users|home)\/[^/]+/)
-    let s = home ? '~' + p.slice(home[0].length) : p
-    if (s.length <= 28) return s
-    const parts = s.split('/').filter(Boolean)
-    return parts.length > 2 ? '…/' + parts.slice(-2).join('/') : s
-  }
 
   // Agent list for the new-session picker dropdown.
   let agents: api.Agent[] = $state([])
@@ -601,7 +585,7 @@
             <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
           </span>
           {:else}
-          <span class="grp-name" onclick={() => toggleCollapse(g.id, !g.collapsed)}>{g.name}</span>
+          <span class="grp-name" title={g.working_dir} onclick={() => toggleCollapse(g.id, !g.collapsed)}>{g.name}</span>
           {#if g.task_id}
             <!-- Marks where the project came from without giving it a section of
                  its own: it is an ordinary project, made by the scheduler. -->
@@ -626,10 +610,6 @@
               <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
               <span>{$t('sidebar.rename_group')}</span>
             </div>
-            <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; projectModalFor = g.id }}>
-              <iconify-icon icon="ant-design:setting-outlined" width="13"></iconify-icon>
-              <span>{$t('project.settings')}</span>
-            </div>
             {#if gi > 0}
             <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; moveGroup(g.id, -1, siblings) }}>
               <iconify-icon icon="ant-design:arrow-up-outlined" width="13"></iconify-icon>
@@ -652,11 +632,6 @@
           {/if}
           {/if}
         </div>
-        {#if g.working_dir && !editingG}
-          <!-- A project's directory governs every session under it, so it
-               belongs on the group header rather than hidden in each session. -->
-          <div class="grp-dir mono" title={g.working_dir}>{shortDir(g.working_dir)}</div>
-        {/if}
         {#if !g.collapsed}
           {#each gv.items as s (s.id)}
             {@render sessionRow(s)}
@@ -906,10 +881,6 @@
   {/if}
 </aside>
 
-{#if projectModalGroup}
-  <ProjectSettingsModal group={projectModalGroup} onClose={() => (projectModalFor = '')} />
-{/if}
-
 
 <style>
 .full { width: 256px; height: 100%; display: flex; flex-direction: column; min-height: 0; }
@@ -1023,17 +994,6 @@
 }
 .row-menu-item:hover { background: var(--hover-neutral); }
 .row-menu-item.del { color: var(--error); }
-.grp-dir {
-  /* flex-shrink:0 — the overflow:hidden below drops this item's automatic
-     minimum size to zero (that floor only applies while overflow is visible),
-     and every sibling in this column carries an explicit min-height. So a list
-     too tall for .sessions-group took its shrink out of the one item with no
-     floor, slicing the project's path in half under the row below it. */
-  flex: 0 0 auto;
-  padding: 0 8px 2px 28px; margin-top: -2px;
-  font-size: 11px; color: var(--text-quaternary);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
 /* Sits where the footer does, so entering batch mode does not shift the list
    above it — the rows must stay under the cursor that is selecting them. */
 .batch-bar {
