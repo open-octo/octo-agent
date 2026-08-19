@@ -4,6 +4,8 @@
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
   import { toolOpenState, applyToolToggle, keepOpenAction } from '../../lib/toolFold'
+  import { sanitizeSpec, READ_ONLY_NODE_TYPES } from '../../lib/genui/guard'
+  import GenuiBlock from '../genui/GenuiBlock.svelte'
 
   // Tracks which overwrite-undo buttons have already fired, keyed by tool id.
   let undone = $state<Record<string, boolean>>({})
@@ -551,6 +553,15 @@
               {undone[tool.id] ? $t('tools.undo_done') : $t('tools.undo_overwrite')}
             </button>
           {/if}
+        {:else if tool.name === 'render_ui' && tool.ui_payload?.spec}
+          {@const guarded = sanitizeSpec(tool.ui_payload.spec, READ_ONLY_NODE_TYPES).spec}
+          {#if guarded}
+            <div class="genui-card-wrap">
+              <GenuiBlock spec={guarded} />
+            </div>
+          {:else if tool.result}
+            <pre class="tool-output">{prettyResult(tool.result)}</pre>
+          {/if}
         {:else if tool.result}
           <pre class="tool-output">{prettyResult(tool.result)}</pre>
         {/if}
@@ -631,6 +642,9 @@ details[open] > summary .chev { transform: rotate(90deg); }
   gap: 6px; font-size: 12px; color: var(--text-tertiary); font-family: inherit;
 }
 .term-prompt { color: var(--success); }
+.genui-card-wrap {
+  border-top: 1px solid var(--border-table); padding: 10px 14px;
+}
 .search-results {
   border-top: 1px solid var(--border-table); padding: 10px 14px;
   display: flex; flex-direction: column; gap: 10px;
