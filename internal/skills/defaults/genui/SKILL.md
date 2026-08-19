@@ -70,12 +70,23 @@ what happens past them").
 
 ### Interactive nodes (inline fence only)
 
-Interactive components ship in a later update. Right now, `button`, `input`,
-`select`, `checkbox`, `switch`, `radio`, and `tabs` node types are not
-supported by either the `render_ui` tool or an `octo-ui` fence — a node with
-one of those `type` values is dropped like any other unrecognized type.
-Build turns entirely out of the read-only node table above until this
-section is updated.
+These only work inside an inline ` ```octo-ui ` fence — the `render_ui` tool
+drops any of these types like any other unrecognized `type`, since its
+tool-card output has no path back to you for a click or a field change.
+
+| `type` | Fields | Notes |
+|---|---|---|
+| `button` | `label: string`, `action: string`, `payload?: object`, `variant?: "primary"\|"default"\|"danger"` | Fires the `[octo-ui-action]` feedback below |
+| `input` | `field: string`, `label?: string`, `placeholder?: string`, `value?: string` | Always a plain text input — there is no `inputType` field, and one you send anyway is silently dropped; never render a password-style field here |
+| `select` | `field: string`, `label?: string`, `options: {label: string, value: string}[]`, `value?: string` | |
+| `checkbox` / `switch` | `field: string`, `label?: string`, `checked?: boolean` | |
+| `radio` | `field: string`, `label?: string`, `options: {label: string, value: string}[]`, `value?: string` | |
+| `tabs` | `tabs: {label: string, children: GenuiNode[]}[]` | Each tab's `children` can be any node type, including nested interactive ones |
+
+A field's current value (from `input`/`select`/`checkbox`/`switch`/`radio`)
+is tracked live as the user changes it, independent of any `button` — when a
+`button` fires, the feedback message below carries the value of every field
+in the same fence at that moment, not just the button's own data.
 
 ## The `[octo-ui-action]` feedback convention
 
@@ -113,12 +124,17 @@ oversized spec — going over a cap doesn't fail your call, it silently trims:
 - Max table rows: **100**
 - Max table columns: **50**
 - Max `list`/`keyvalue` items: **200**
+- Max `select`/`radio` options: **50**
+- Max `tabs` entries: **8**
+- A `button`'s `payload` object: also depth- and width-capped (same depth
+  limit as the node tree; up to 50 keys/entries per level), but that budget
+  is separate from — not subtracted from — the 200-node total above.
 
-An unrecognized `type` (including any of the not-yet-shipped interactive
-types above) causes just that node — and its subtree — to be dropped; its
-siblings still render. A spec with no valid `items` array is the one case
-that fails the `render_ui` tool call outright with an error you can see and
-retry.
+An unrecognized `type` (including an interactive type sent through the
+`render_ui` tool, which only accepts the read-only table) causes just that
+node — and its subtree — to be dropped; its siblings still render. A spec
+with no valid `items` array is the one case that fails the `render_ui` tool
+call outright with an error you can see and retry.
 
 ## Boundary with artifacts (`write_file` / `edit_file` / `show_artifact`)
 
