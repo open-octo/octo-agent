@@ -3,6 +3,8 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -101,16 +103,26 @@ func TestWSUpgrade_RelayedConnectionIsNotLoopback(t *testing.T) {
 // path is honoured only for a local peer. Without this the relayed case would
 // hand the agent an absolute path on the host's disk.
 func TestParseUserFiles_LocalPathOnlyForALocalPeer(t *testing.T) {
-	files := []wsUserFile{{Name: "notes.md", LocalPath: "/etc/hosts"}}
+	// A file that really exists, since parseUserFiles stats the path before
+	// honouring it — and one built with the platform's own separators, so this
+	// means the same thing on Windows as it does elsewhere.
+	hostFile := filepath.Join(t.TempDir(), "on-the-host.md")
+	if err := os.WriteFile(hostFile, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	files := []wsUserFile{{Name: "notes.md", LocalPath: hostFile}}
 
 	local := parseUserFiles(files, true, false)
-	if len(local.notes) == 0 && len(local.blocks) == 0 {
+	if len(local.notes) == 0 {
 		t.Error("a local peer's real path should be honoured")
 	}
 
 	relayed := parseUserFiles(files, false, false)
+	if len(relayed.notes) != 0 || len(relayed.blocks) != 0 {
+		t.Errorf("relayed peer got something through: notes=%v blocks=%d", relayed.notes, len(relayed.blocks))
+	}
 	for _, n := range relayed.notes {
-		if strings.Contains(n, "/etc/hosts") {
+		if strings.Contains(n, hostFile) {
 			t.Errorf("relayed peer got the host path through: %q", n)
 		}
 	}
