@@ -538,10 +538,7 @@
         <div class="sec-header" onclick={() => toggleSection('projects')}>
           {#if $selMode}{@render triBox(triStateOf(groupedView.projects.flatMap(gv => gv.items.map(s => s.id))), () => toggleMany(groupedView.projects.flatMap(gv => gv.items.map(s => s.id))))}{/if}
           <span class="sec-name">{$t('sidebar.projects')}</span>
-          {#if !sections.projects}
-            <iconify-icon class="sec-caret" icon="ant-design:right-outlined" width="10"></iconify-icon>
-          {/if}
-          <span class="sec-count">{groupedView.projects.length}</span>
+          <iconify-icon class="sec-caret" class:folded={!sections.projects} icon="ant-design:right-outlined" width="10"></iconify-icon>
         </div>
         {#if sections.projects}
           {#each groupedView.projects as gv, gi (gv.group.id)}
@@ -557,9 +554,7 @@
         <div class="sec-header" onclick={() => toggleSection('tasks')}>
           {#if $selMode}{@render triBox(triStateOf(groupedView.ungrouped.map(s => s.id)), () => toggleMany(groupedView.ungrouped.map(s => s.id)))}{/if}
           <span class="sec-name">{$t('sidebar.tasks')}</span>
-          {#if !sections.tasks}
-            <iconify-icon class="sec-caret" icon="ant-design:right-outlined" width="10"></iconify-icon>
-          {/if}
+          <iconify-icon class="sec-caret" class:folded={!sections.tasks} icon="ant-design:right-outlined" width="10"></iconify-icon>
           <span class="sec-count">{groupedView.taskCount}</span>
         </div>
         {#if sections.tasks}
@@ -601,7 +596,6 @@
                  its own: it is an ordinary project, made by the scheduler. -->
             <iconify-icon class="from-cron" icon="ant-design:clock-circle-outlined" width="11" title={$t('sidebar.from_scheduled_task')}></iconify-icon>
           {/if}
-          <span class="grp-count on-rest">{gv.items.length}</span>
           {#if !$selMode}
           <!-- Six icons used to sit here — reorder, rename, delete, new session,
                settings — and the row read as a toolbar with a name attached. Two
@@ -905,14 +899,17 @@
 /* Same font and color as Pinned's own label (.grp-name.muted) — Tasks,
    Projects and Pinned are three peers at the same level, not three different
    weights of heading. The caret sits right after the name rather than leading
-   it — the name is what's being scanned for, the caret is a detail about it —
-   and only appears while collapsed: expanded, the content below already says
-   so, and the arrow is one more thing to look at for nothing. */
+   it — the name is what's being scanned for, the caret is a detail about it.
+   Expanded, the content below already says so, so the caret stays invisible
+   until the row is hovered — folded, there is nothing below to say it, so it
+   stays visible at rest. */
 .sec-name {
   flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 12px; font-weight: 600;
 }
-.sec-caret { flex: 0 0 auto; }
+.sec-caret { flex: 0 0 auto; opacity: 0; transition: opacity 0.1s; }
+.sec-header:hover .sec-caret,
+.sec-caret.folded { opacity: 1; }
 .sec-count { font-size: 11px; flex: 0 0 auto; margin-left: auto; }
 
 .grp-header {
@@ -953,9 +950,7 @@
 .grp-header:hover .row-action.on-hover,
 .grp-header.menu-open .row-action.on-hover { display: flex; }
 .nav-row:hover .on-rest,
-.nav-row.menu-open .on-rest,
-.grp-header:hover .on-rest,
-.grp-header.menu-open .on-rest { display: none; }
+.nav-row.menu-open .on-rest { display: none; }
 .row-menu {
   position: absolute; top: 100%; right: 6px; z-index: 30;
   min-width: 132px; margin-top: 2px; padding: 4px;
@@ -1011,8 +1006,9 @@
 /* A session filed under a project is indented under it, the way a child sits
    under its parent, rather than sharing the project header's own left edge —
    which is what made a project's sessions read as siblings of the project
-   instead of members of it. */
-.nav-row.nested { padding-left: 40px; }
+   instead of members of it. Aligned to the project name's own text start
+   (6px padding + 16px folder icon + 6px gap), not indented past it. */
+.nav-row.nested { padding-left: 28px; }
 /* Active row is a soft accent tint with accent text (the redesign's
    data-on state), not a solid blue pill. */
 .nav-row.solid { background: var(--active-blue-bg); }
