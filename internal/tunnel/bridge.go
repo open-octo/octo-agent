@@ -105,6 +105,9 @@ func (b *bridge) doHTTP(f shimFrame) {
 		}
 		req.Header.Set(k, v)
 	}
+	// Set AFTER the phone's headers are copied, so a phone cannot clear or
+	// forge it: this request came off the relay, however it is dressed.
+	req.Header.Set(headerForwarded, headerForwardedValue)
 	resp, err := b.t.httpClient.Do(req)
 	if err != nil {
 		b.send(httpError(f.ID, err))
@@ -123,6 +126,19 @@ func httpError(id string, err error) shimFrame {
 	return shimFrame{Kind: shimHTTPResp, ID: id, Status: http.StatusBadGateway, Headers: map[string]string{}, Body: strPtr(err.Error())}
 }
 
+// headerForwarded marks every request this bridge replays into the local
+// server as relayed. internal/server declares the same literal as
+// server.HeaderForwarded and treats its presence as proof the peer is not on
+// this machine — necessary because the bridge dials loopback and drops the
+// phone's Host (see skipRequestHeader), so a phone across the relay would
+// otherwise be indistinguishable from a browser on the host, and would inherit
+// the local-peer capabilities: the unauthenticated loopback exemption, the OS
+// dialogs, and referencing files by their real path on the host's disk.
+const (
+	headerForwarded      = "X-Octo-Forwarded"
+	headerForwardedValue = "relay"
+)
+
 // skipRequestHeader drops headers the loopback HTTP client must set itself; the
 // phone's copy of them would be wrong or rejected.
 func skipRequestHeader(k string) bool {
@@ -134,7 +150,8 @@ func skipRequestHeader(k string) bool {
 }
 
 func (b *bridge) openWS(f shimFrame) {
-	conn, _, err := websocket.DefaultDialer.DialContext(b.ctx, b.t.wsBase+f.Path, nil)
+	conn, _, err := websocket.DefaultDialer.DialContext(b.ctx, b.t.wsBase+f.Path,
+		http.Header{headerForwarded: []string{headerForwardedValue}})
 	if err != nil {
 		b.send(shimFrame{Kind: shimWSError, ID: f.ID, Message: err.Error()})
 		return

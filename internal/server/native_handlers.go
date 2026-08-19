@@ -121,10 +121,11 @@ type nativePickFolderRequest struct {
 // reusing that endpoint's validation and the cwd-chip refresh rather than
 // duplicating them here. Registered only when a NativeBridge is present.
 func (s *Server) handleNativePickFolder(w http.ResponseWriter, r *http.Request) {
-	// Same-machine only, matching /api/fs/list. In the desktop build every
-	// request is loopback anyway; the guard just refuses to drive a native
-	// dialog on behalf of some other peer if the port were ever reachable.
-	if !isLoopbackRemote(r.RemoteAddr) {
+	// Same-machine only. In the desktop build every request is genuinely local
+	// anyway; the guard refuses to drive a native dialog on behalf of some other
+	// peer if the port is reachable — including a phone across octo's own
+	// tunnel, which dials the server from loopback (see isLocalRequest).
+	if !isLocalRequest(r) {
 		writeError(w, http.StatusForbidden, "native dialogs are available only from the local machine")
 		return
 	}
@@ -154,7 +155,7 @@ func (s *Server) handleNativePickFolder(w http.ResponseWriter, r *http.Request) 
 // return the chosen absolute path. The frontend attaches it by real path (no
 // upload) so the agent reads it in place. Registered only with a bridge.
 func (s *Server) handleNativePickFile(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r.RemoteAddr) {
+	if !isLocalRequest(r) {
 		writeError(w, http.StatusForbidden, "native dialogs are available only from the local machine")
 		return
 	}
@@ -188,7 +189,7 @@ type nativeNotifyRequest struct {
 // Best-effort: it always returns ok; the bridge swallows delivery failures.
 // Registered only with a bridge.
 func (s *Server) handleNativeNotify(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r.RemoteAddr) {
+	if !isLocalRequest(r) {
 		writeError(w, http.StatusForbidden, "native notifications are available only from the local machine")
 		return
 	}
@@ -215,7 +216,7 @@ type nativeAutostartRequest struct {
 
 // GET /api/native/autostart — report launch-at-login state (desktop only).
 func (s *Server) handleNativeAutostartGet(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r.RemoteAddr) {
+	if !isLocalRequest(r) {
 		writeError(w, http.StatusForbidden, "available only from the local machine")
 		return
 	}
@@ -233,7 +234,7 @@ func (s *Server) handleNativeAutostartGet(w http.ResponseWriter, r *http.Request
 
 // PUT /api/native/autostart — set launch-at-login (desktop only).
 func (s *Server) handleNativeAutostartSet(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r.RemoteAddr) {
+	if !isLocalRequest(r) {
 		writeError(w, http.StatusForbidden, "available only from the local machine")
 		return
 	}
@@ -256,7 +257,7 @@ func (s *Server) handleNativeAutostartSet(w http.ResponseWriter, r *http.Request
 // POST /api/native/window/toggle-maximise — maximise/restore the desktop window
 // (the double-click-titlebar zoom). Desktop only, loopback-gated.
 func (s *Server) handleNativeToggleMaximise(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r.RemoteAddr) {
+	if !isLocalRequest(r) {
 		writeError(w, http.StatusForbidden, "available only from the local machine")
 		return
 	}
@@ -271,7 +272,7 @@ func (s *Server) handleNativeToggleMaximise(w http.ResponseWriter, r *http.Reque
 // POST /api/native/window/minimise — minimise the desktop window to the
 // taskbar/dock. Desktop only, loopback-gated.
 func (s *Server) handleNativeMinimise(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r.RemoteAddr) {
+	if !isLocalRequest(r) {
 		writeError(w, http.StatusForbidden, "available only from the local machine")
 		return
 	}
@@ -291,7 +292,7 @@ type nativeHeartbeatRequest struct {
 // POST /api/native/heartbeat — liveness beat from the page inside the desktop
 // webview (nativeShell mode only sends it). Desktop only, loopback-gated.
 func (s *Server) handleNativeHeartbeat(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r.RemoteAddr) {
+	if !isLocalRequest(r) {
 		writeError(w, http.StatusForbidden, "available only from the local machine")
 		return
 	}
@@ -314,7 +315,7 @@ func (s *Server) handleNativeHeartbeat(w http.ResponseWriter, r *http.Request) {
 // decides whether the hub actually terminates or keeps running in the tray.
 // Desktop only, loopback-gated.
 func (s *Server) handleNativeClose(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r.RemoteAddr) {
+	if !isLocalRequest(r) {
 		writeError(w, http.StatusForbidden, "available only from the local machine")
 		return
 	}
@@ -330,7 +331,7 @@ func (s *Server) handleNativeClose(w http.ResponseWriter, r *http.Request) {
 // maximised. Lets the frontend keep its maximise icon in sync after Aero Snap,
 // keyboard shortcuts, etc. Desktop only, loopback-gated.
 func (s *Server) handleNativeWindowState(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r.RemoteAddr) {
+	if !isLocalRequest(r) {
 		writeError(w, http.StatusForbidden, "available only from the local machine")
 		return
 	}
@@ -366,7 +367,7 @@ func openExternalSchemeAllowed(scheme string) bool {
 }
 
 func (s *Server) handleNativeOpenExternal(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r.RemoteAddr) {
+	if !isLocalRequest(r) {
 		writeError(w, http.StatusForbidden, "available only from the local machine")
 		return
 	}
@@ -396,7 +397,7 @@ func (s *Server) handleNativeOpenExternal(w http.ResponseWriter, r *http.Request
 // native routes: a remote peer must not drive the desktop host's update — the
 // badge sends remote users to the download page instead.
 func (s *Server) handleNativeSelfUpdate(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r.RemoteAddr) {
+	if !isLocalRequest(r) {
 		writeError(w, http.StatusForbidden, "available only from the local machine")
 		return
 	}
@@ -428,7 +429,7 @@ type nativeSaveFileRequest struct {
 // nothing. Loopback-gated like the other native routes; registered only with a
 // bridge.
 func (s *Server) handleNativeSaveFile(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r.RemoteAddr) {
+	if !isLocalRequest(r) {
 		writeError(w, http.StatusForbidden, "native dialogs are available only from the local machine")
 		return
 	}
@@ -468,7 +469,7 @@ func (s *Server) handleNativeSaveFile(w http.ResponseWriter, r *http.Request) {
 // afterwards. Loopback-gated like the other native routes; registered only with
 // a bridge.
 func (s *Server) handleNativePrint(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r.RemoteAddr) {
+	if !isLocalRequest(r) {
 		writeError(w, http.StatusForbidden, "native dialogs are available only from the local machine")
 		return
 	}
