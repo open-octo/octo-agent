@@ -11,19 +11,19 @@
   },
   "dependencies": {
     "dompurify": "^3.4.13",
-    "highlight.js": "^11.10.0",
+    "highlight.js": "^11.12.0",
     "html2canvas": "^1.4.1",
     "marked": "^18.0.9",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
-    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/svelte": "^5.4.2",
     "@types/qrcode": "^1.5.5",
     "jsdom": "^30.0.1",
-    "svelte": "^5.56.8",
-    "svelte-check": "^4.7.5",
+    "svelte": "^5.56.9",
+    "svelte-check": "^4.7.6",
     "typescript": "^6.0.3",
     "vite": "^8.2.1",
     "vitest": "^4.1.10"
