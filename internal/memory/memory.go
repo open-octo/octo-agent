@@ -1,7 +1,7 @@
 // Package memory implements octo's cross-session memory as plain markdown
 // files the agent manages with its own file tools — the Claude Code model.
 //
-// Layout: ~/.octo/memories/<repo-slug>/
+// Layout: ~/.octo/memories/<project-slug>/
 //   - MEMORY.md      the index, loaded into the system prompt each session
 //     (first maxInjectLines lines / maxInjectBytes, whichever
 //     comes first)
@@ -20,14 +20,11 @@ import (
 	"fmt"
 	"hash/fnv"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"github.com/open-octo/octo-agent/internal/executil"
 )
 
-// IndexFile is the per-repo memory index, loaded into the system prompt.
+// IndexFile is the per-project memory index, loaded into the system prompt.
 const IndexFile = "MEMORY.md"
 
 // Injection budget for MEMORY.md — mirrors Claude Code's 200 lines / 25KB cap.
@@ -36,114 +33,10 @@ const (
 	maxInjectBytes = 25 * 1024
 )
 
-// gitOutput runs git -C dir with stdout captured. SetNoWindow keeps the
-// console-subsystem git.exe from flashing a console window when the parent is
-// the windowless Windows desktop app.
-func gitOutput(dir string, args ...string) ([]byte, error) {
-	args = append([]string{"-C", dir}, args...)
-	cmd := exec.Command("git", args...)
-	executil.SetNoWindow(cmd)
-	return cmd.Output()
-}
-
-// ProjectRoot returns the repo root that memory is scoped to for dir, or dir
-// itself when it's not in a git repo (or git is unavailable).
-//
-// It derives the root from the git *common* dir rather than the per-worktree
-// top-level, so every linked worktree of a repo shares one memory scope (a
-// worktree checkout doesn't start with empty project memory). The common dir is
-// `<root>/.git`, shared by the main worktree and all linked ones:
-//   - main worktree → ".git" (relative to dir) → root = dir
-//   - linked worktree → "<root>/.git" (absolute) → root = <root>
-//
-// Either way the main-checkout result is unchanged from the old --show-toplevel
-// behavior, so existing memory dirs keep their slug.
-func ProjectRoot(dir string) string {
-	root, _ := projectRoot(dir)
-	return root
-}
-
-// projectRoot is ProjectRoot plus whether dir turned out to be inside a git
-// repo at all. The flag is what DirForSession needs: a directory that is not a
-// repo has no project identity to scope memory to.
-//
-// A git failure is NOT taken as "not a repo". git exits 128 both when a
-// directory really isn't a repo and when it refuses to operate on one it
-// distrusts (`safe.directory` dubious ownership — a devcontainer or
-// root-cloned tree), and its message is localized, so neither the exit code
-// nor the stderr text separates the two. When git can't answer, the verdict
-// comes from the filesystem instead (hasGitEntryUpwards). Erring toward "is a
-// repo" is deliberate: the expensive mistake is declaring a real project
-// rootless, which merges its notes into the tier every session shares.
-func projectRoot(dir string) (string, bool) {
-	if dir == "" {
-		return "", false
-	}
-	if out, err := gitOutput(dir, "rev-parse", "--git-common-dir"); err == nil {
-		common := strings.TrimSpace(string(out))
-		if common != "" {
-			if !filepath.IsAbs(common) {
-				common = filepath.Join(dir, common) // relative paths are relative to `dir` (the -C target)
-			}
-			common = filepath.Clean(common)
-			if filepath.Base(common) == ".git" {
-				return resolveSymlinks(filepath.Dir(common)), true
-			}
-			// Bare repo or unusual layout — fall through to the top-level.
-		}
-	} else if _, ok := gitEntryAncestor(dir); !ok {
-		// No repo anywhere above, so --show-toplevel cannot succeed where this
-		// failed: skip the second probe. This is the common case now (any
-		// scratch or workspace directory), so it also halves the git calls.
-		return dir, false
-	}
-	if out, err := gitOutput(dir, "rev-parse", "--show-toplevel"); err == nil {
-		if root := strings.TrimSpace(string(out)); root != "" {
-			return resolveSymlinks(root), true
-		}
-	}
-	// git could not be consulted (missing binary, distrusted repo) for a
-	// directory that does have a .git above it. Scope to that ancestor, not to
-	// cwd: every subdirectory of the repo then resolves to the one directory
-	// the repo would get with git working, instead of a separate slug each.
-	if root, ok := gitEntryAncestor(dir); ok {
-		return resolveSymlinks(root), true
-	}
-	// A bare repo (git answered, but there is no work tree) — no project memory
-	// of its own, so it shares the global tier.
-	return dir, false
-}
-
-// gitEntryAncestor returns the nearest directory at or above dir that holds a
-// .git entry — a directory in a normal checkout, a file in a submodule or
-// linked worktree — and whether one was found. It is the fallback verdict for
-// "is this a project, and which one" when git itself cannot answer, and it
-// works with no git binary present at all.
-//
-// Known divergence: a .git *file* (linked worktree / submodule) is treated as
-// the repo root, so on a git-less machine a linked worktree gets its own slug
-// instead of sharing the main repo's — the worktree-sharing guarantee only
-// holds when git can answer. Resolving it would mean parsing the gitdir:
-// pointer; the mode that needs this fallback (git broken or absent) is rare
-// enough that the extra slug is acceptable.
-func gitEntryAncestor(dir string) (string, bool) {
-	for d := dir; ; {
-		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
-			return d, true
-		}
-		parent := filepath.Dir(d)
-		if parent == d { // filesystem root: Dir("/") == "/", Dir(`C:\`) == `C:\`
-			return "", false
-		}
-		d = parent
-	}
-}
-
-// resolveSymlinks returns the symlink-free form of p so the same repo always
-// maps to one slug — git reports a resolved absolute path for a linked
-// worktree's common dir, and the old --show-toplevel was likewise resolved, so
-// the main checkout and its worktrees must normalize the same way. Falls back
-// to p when it can't be resolved.
+// resolveSymlinks returns the symlink-free form of p so one directory always
+// maps to one slug, however it was reached — /tmp and /private/tmp on macOS, a
+// symlinked checkout, a project whose working dir was typed one way and a
+// session's cwd another. Falls back to p when it can't be resolved.
 func resolveSymlinks(p string) string {
 	if r, err := filepath.EvalSymlinks(p); err == nil {
 		return r
@@ -162,13 +55,16 @@ func RootDir() (string, error) {
 	return filepath.Join(home, ".octo", "memories"), nil
 }
 
-// Dir returns the memory directory for repoRoot: ~/.octo/memories/<repo-slug>.
-func Dir(repoRoot string) (string, error) {
+// Dir returns the memory directory for projectDir: ~/.octo/memories/<slug>.
+// The path is normalized here, the one place it happens, so every caller —
+// DirForProject, HomeDir, a directory named on the command line — agrees on the
+// slug for a given directory however that directory was spelled.
+func Dir(projectDir string) (string, error) {
 	root, err := RootDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, repoSlug(repoRoot)), nil
+	return filepath.Join(root, dirSlug(resolveSymlinks(projectDir))), nil
 }
 
 // HomeDir returns the memory directory for the user's home directory.
@@ -180,38 +76,41 @@ func HomeDir() (string, error) {
 	return Dir(home)
 }
 
-// DirForSession resolves the project-memory directory a session working in cwd
-// should use, and reports whether cwd has a project of its own.
+// DirForProject resolves the memory directory for a session belonging to the
+// project rooted at projectDir, and reports whether that is a project of its
+// own. An empty projectDir means the session belongs to no project — a task —
+// and resolves to the home directory every session shares.
 //
-// A cwd inside a git repo gets that repo's slug directory. A cwd that is NOT in
-// a repo — the default ~/Octo workspace, ~, /tmp, any scratch path — has no
-// project identity, so it shares the home (global) directory instead of getting
-// a slug directory of its own. That matters because such a session is usually
-// working on code somewhere else entirely ("fix the login bug in project X"):
-// filing its notes under a slug for the scratch directory buries them where no
-// other session ever reads, whereas the home tier is injected into every
-// session. Callers that already have the home dir will find this returns the
-// same path, which RenderInjection then collapses to a single tier.
+// Project membership is the caller's fact to establish, not this package's to
+// guess. Under `octo serve` it comes from the session-group registry: a session
+// filed under a project inherits that project's directory (see
+// server.ProjectDirForSession); a loose task is filed under none and passes "".
+// On the CLI the working directory *is* the project — you cd somewhere to work
+// on it — so cmd/octo passes its cwd. Running from the home directory needs no
+// special case: Dir(home) is the home directory, so it lands on the shared tier
+// on its own.
 //
-// A directory git can't be asked about (no git binary, or a repo git distrusts)
-// is treated as a project and keeps its own directory — see projectRoot.
-func DirForSession(cwd string) (string, bool, error) {
-	root, inRepo := projectRoot(cwd)
-	if !inRepo {
+// This deliberately does not consult git. A project is whatever the user made a
+// project, which is not the same question as whether a directory happens to be
+// a checkout: plenty of real work lives in directories git knows nothing about,
+// and plenty of checkouts are passed through rather than worked on.
+func DirForProject(projectDir string) (string, bool, error) {
+	if projectDir == "" {
 		dir, err := HomeDir()
 		return dir, false, err
 	}
-	dir, err := Dir(root)
+	dir, err := Dir(projectDir)
 	return dir, true, err
 }
 
-// repoSlug derives a stable, human-readable directory name from a repo root:
-// the basename plus a short hash of the full path, so two repos sharing a
-// basename (e.g. two checkouts of "app") don't collide.
-func repoSlug(repoRoot string) string {
+// dirSlug derives a stable, human-readable directory name from a project
+// directory: the basename plus a short hash of the full path, so two projects
+// sharing a basename (e.g. two checkouts of "app") don't collide. Callers reach
+// it through Dir, which normalizes the path first.
+func dirSlug(projectDir string) string {
 	h := fnv.New32a()
-	_, _ = h.Write([]byte(repoRoot))
-	base := Slugify(filepath.Base(repoRoot))
+	_, _ = h.Write([]byte(projectDir))
+	base := Slugify(filepath.Base(projectDir))
 	if base == "" {
 		return fmt.Sprintf("repo-%08x", h.Sum32())
 	}
@@ -290,7 +189,7 @@ func RenderInjection(dir string, inheritedDirs ...string) string {
 	inheritedDirs = filtered
 
 	// With no inherited dirs, dir IS the shared tier: this working directory is
-	// not a project of its own (see DirForSession), so calling it "this
+	// not a project of its own (see DirForProject), so calling it "this
 	// project" — and pointing a fallback at an "inherited" tier that is never
 	// introduced and whose path is never given — would be incoherent in
 	// exactly the case that needs the guidance most.

@@ -88,15 +88,10 @@ func (s *Server) handleGetMemories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The two well-known tiers first, in the order the UI has always shown
-	// them. When the server-default project dir coincides with the home dir
-	// (serve launched from a non-repo path), that directory IS the global
-	// tier: list it once, as "inherited" — listing both would emit duplicate
-	// paths, and the front-end keys rows by path, so duplicates freeze the
-	// UI on "Loading memories…".
-	if s.memDir != "" && s.memDir != s.homeMemDir {
-		appendDir(s.memDir, "project")
-	}
+	// The shared tier first, the row the UI has always shown at the top. There
+	// is no longer a second server-level tier beside it: the server has no
+	// project of its own, so every project directory below is reached through
+	// the session-group registry instead.
 	if s.homeMemDir != "" {
 		appendDir(s.homeMemDir, "inherited")
 	}
@@ -112,7 +107,7 @@ func (s *Server) handleGetMemories(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				dir := filepath.Join(root, e.Name())
-				if dir == s.memDir || dir == s.homeMemDir {
+				if dir == s.homeMemDir {
 					continue
 				}
 				appendDir(dir, e.Name())

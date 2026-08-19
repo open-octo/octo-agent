@@ -2,7 +2,6 @@ package server
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,39 +9,30 @@ import (
 	"github.com/open-octo/octo-agent/internal/memory"
 )
 
-// initRepo makes dir a git repo, skipping the test when git is unavailable.
-func initRepo(t *testing.T, dir string) {
-	t.Helper()
-	if out, err := exec.Command("git", "-C", dir, "init").CombinedOutput(); err != nil {
-		t.Skipf("git init unavailable: %v (%s)", err, out)
-	}
-}
-
-// sessionMemDir must resolve the memory directory from the session's cwd, not
-// the server's launch directory — a serve/desktop process launched from home
-// would otherwise file every session's memories under the global home slug.
-func TestSessionMemDir_PerSessionCwd(t *testing.T) {
-	serverCwd := t.TempDir()
-	serverDefault, _, err := memory.DirForSession(serverCwd)
+// A session filed under a project writes into that project's memory, and the
+// server's launch directory has no say in it — a serve/desktop process started
+// from home used to file every session's notes under the global home slug.
+func TestSessionMemDir_ScopedToProject(t *testing.T) {
+	homeMem, err := memory.HomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{cwd: serverCwd, memDir: serverDefault}
+	s := &Server{cwd: t.TempDir(), homeMemDir: homeMem}
 
-	// A real repo is what earns a project-memory directory of its own.
-	sessCwd := t.TempDir()
-	initRepo(t, sessCwd)
+	// A plain directory, deliberately not a git repo: being a project is what
+	// earns project memory now, not being a checkout.
+	projectDir := t.TempDir()
 
-	got := s.sessionMemDir(sessCwd)
-	want, err := memory.Dir(memory.ProjectRoot(sessCwd))
+	got := s.sessionMemDir(projectDir)
+	want, err := memory.Dir(projectDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != want {
-		t.Errorf("sessionMemDir(%q) = %q, want per-repo dir %q", sessCwd, got, want)
+		t.Errorf("sessionMemDir(%q) = %q, want the project's dir %q", projectDir, got, want)
 	}
-	if got == serverDefault {
-		t.Error("a repo session must not share the server default dir")
+	if got == homeMem {
+		t.Error("a project session must not fall back to the shared tier")
 	}
 	if fi, err := os.Stat(got); err != nil || !fi.IsDir() {
 		t.Errorf("sessionMemDir must create the directory; stat: %v", err)
@@ -52,57 +42,60 @@ func TestSessionMemDir_PerSessionCwd(t *testing.T) {
 		t.Errorf("dir %q not under ~/.octo/memories", got)
 	}
 
-	// Stable: repeated resolution for the same cwd returns the same dir.
-	if again := s.sessionMemDir(sessCwd); again != got {
+	// Stable: repeated resolution for the same project returns the same dir.
+	if again := s.sessionMemDir(projectDir); again != got {
 		t.Errorf("second resolution %q != first %q", again, got)
 	}
 }
 
-// The reported black-hole case: a session with no project, working in the
-// default ~/Octo workspace, while the user verbally asks for work on some
-// other project. Such a cwd has no project identity, so its notes must land
-// in the shared home tier (visible to every session) rather than in a slug
-// directory for the scratch dir that nothing else ever reads.
-func TestSessionMemDir_NonRepoWorkspaceUsesHomeTier(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
-	}
+// The black-hole case that motivated scoping by project rather than by
+// directory: a loose task, pointed at some scratch directory, while the user
+// verbally asks for work on a project. Its notes must land in the shared tier
+// every session reads, not in a slug directory nothing else opens.
+func TestSessionMemDir_TaskUsesSharedTier(t *testing.T) {
 	homeMem, err := memory.HomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{cwd: home, memDir: homeMem, homeMemDir: homeMem}
+	s := &Server{cwd: t.TempDir(), homeMemDir: homeMem}
 
+	if got := s.sessionMemDir(""); got != homeMem {
+		t.Errorf("a session in no project = %q, want the shared home dir %q", got, homeMem)
+	}
+}
+
+// A directory a session merely runs in is not a project. Only what the session
+// group registry calls a project reaches sessionMemDir, so the server never
+// invents project memory for a working directory on its own — the regression
+// that buried notes under a slug for the default workspace.
+func TestSessionMemDir_WorkingDirAloneIsNotAProject(t *testing.T) {
+	homeMem, err := memory.HomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
 	workspace := filepath.Join(t.TempDir(), "Octo")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	s := &Server{cwd: workspace, homeMemDir: homeMem}
 
-	got := s.sessionMemDir(workspace)
+	// The session is in no project, so it passes "" however its own working
+	// directory is set — including when that directory is the server's.
+	got := s.sessionMemDir(s.sessionProjectDir("no-such-session"))
 	if got != homeMem {
-		t.Errorf("sessionMemDir(%q) = %q, want the shared home dir %q", workspace, got, homeMem)
+		t.Errorf("ungrouped session = %q, want the shared home dir %q", got, homeMem)
 	}
 	if slug, err := memory.Dir(workspace); err == nil && got == slug {
 		t.Errorf("workspace got its own slug dir %q — notes would be invisible to other sessions", slug)
 	}
 }
 
-func TestSessionMemDir_ServerCwdAndEmptyUseDefault(t *testing.T) {
-	serverCwd := t.TempDir()
-	s := &Server{cwd: serverCwd, memDir: "/srv/default-memdir"}
-
-	if got := s.sessionMemDir(serverCwd); got != s.memDir {
-		t.Errorf("server-cwd session should reuse the default memDir; got %q", got)
-	}
-	if got := s.sessionMemDir(""); got != s.memDir {
-		t.Errorf("empty cwd should reuse the default memDir; got %q", got)
-	}
-}
-
 func TestSessionMemDir_DisabledByNoMemory(t *testing.T) {
-	s := &Server{cwd: t.TempDir(), memDir: "/srv/default-memdir", cfg: Config{NoMemory: true}}
+	s := &Server{cwd: t.TempDir(), homeMemDir: "/srv/home-memdir", cfg: Config{NoMemory: true}}
 	if got := s.sessionMemDir(t.TempDir()); got != "" {
 		t.Errorf("NoMemory must disable per-session memory; got %q", got)
+	}
+	if got := s.sessionMemDir(""); got != "" {
+		t.Errorf("NoMemory must disable the shared tier too; got %q", got)
 	}
 }

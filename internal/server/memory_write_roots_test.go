@@ -23,9 +23,9 @@ func TestMemoryWriteRoots_CoversOtherProjectsDirs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{cwd: home, memDir: homeMem, homeMemDir: homeMem}
+	s := &Server{cwd: home, homeMemDir: homeMem}
 
-	roots := s.memoryWriteRoots(home)
+	roots := s.memoryWriteRoots("")
 	if len(roots) != 1 {
 		t.Fatalf("roots = %v, want exactly the memories root", roots)
 	}

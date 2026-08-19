@@ -1,6 +1,6 @@
 # Cross-session memory
 
-octo's memory is a per-repo directory of plain markdown that the agent manages
+octo's memory is a per-project directory of plain markdown that the agent manages
 with its own file tools — the Claude Code model. There is no dedicated
 remember/forget tool, no typed-entry store, and no code-driven consolidation:
 the agent reads, writes, edits, and deletes memory files directly, so editing
@@ -13,19 +13,34 @@ separate and described in `identity-files-design.md`.
 ## Layout
 
 ```
-~/.octo/memories/<repo-slug>/
+~/.octo/memories/<project-slug>/
   MEMORY.md      index, injected into the system prompt every session
   <topic>.md     detail files the agent creates and reads on demand
 ```
 
-- **Per repo, shared across worktrees.** The directory is keyed by the repo
-  root (`memory.ProjectRoot`), so each project has its own memory and facts
-  don't bleed across repos. The root is derived from the git *common* dir
-  (`<root>/.git`), which the main checkout and every linked worktree share, so a
-  worktree doesn't start with empty project memory; the result is symlink-
-  resolved so one repo always maps to one slug. Outside a git repo the working
-  directory is used. The slug is the repo basename plus a short hash of the full
-  path, so two checkouts that share a basename don't collide.
+- **Per project.** The directory is keyed by the project's directory
+  (`memory.DirForProject`), so each project has its own memory and facts don't
+  bleed between them. The slug is that directory's basename plus a short hash of
+  the full path, so two projects sharing a basename don't collide; the path is
+  symlink-resolved inside `memory.Dir` — the single normalization point — so one
+  directory always maps to one slug however it was spelled.
+
+  What counts as a project is the caller's fact to establish, and `internal/memory`
+  never guesses it. Under `octo serve` it comes from the session-group registry:
+  `server.sessionProjectDir` returns the working dir of the project a session is
+  filed under, or `""` for a loose task, which resolves to the home tier. On the
+  CLI/TUI the working directory *is* the project, so `cmd/octo` passes its cwd —
+  resolved *after* `projectRunDir`, so a session filed under a project in the Web
+  UI gets that project's memory there too.
+
+  Deliberately **not** git-derived. Being a checkout is a different question from
+  being something the user works on: real work lives in directories git has never
+  heard of, and checkouts get passed through without being worked on. Scoping by
+  git also made the two ends disagree — the same directory could resolve one way
+  in the Web UI and another on the CLI. One consequence of dropping it: a linked
+  worktree no longer shares the main checkout's memory automatically, since it is
+  a different directory; file it under the same project (or run there and accept
+  its own memory) as suits the work.
 - **Inheritance.** The home directory (`~`) also has its own memory slot.
   When running inside any project, the home MEMORY.md is injected *before* the
   project MEMORY.md, so cross-project preferences and personal facts are

@@ -21,5 +21,5 @@ it inspects the codebase and drafts conventions rather than leaving you with a b
 Identity and rule files support `@include path/to/fragment.md` to pull in shared content — useful
 for a fragment reused across several `.octorules` files in related repos.
 
-Next: the memory system layers on top of this as a separate, per-repo index — see
+Next: the memory system layers on top of this as a separate, per-project index — see
 [Give it memory](/docs/guides/memory/).

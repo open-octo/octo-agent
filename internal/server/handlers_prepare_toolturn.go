@@ -119,7 +119,9 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 		// otherwise be stuck denying every write forever.
 		mode = permission.ResolveUnattendedDefaultMode()
 	}
-	engine, err := permission.New(permissionConfigPath(), a.CWD, mode, s.memoryWriteRoots(a.CWD)...)
+	// Write roots follow the session's project, from sid rather than sess — the
+	// id is guaranteed above, while sess is nil for callers that only carry one.
+	engine, err := permission.New(permissionConfigPath(), a.CWD, mode, s.memoryWriteRoots(s.sessionProjectDir(sid))...)
 	if err != nil {
 		return ctx, nil, nil, func() {}, fmt.Errorf("permission engine: %w", err)
 	}

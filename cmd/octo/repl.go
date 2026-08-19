@@ -323,19 +323,12 @@ func printMemory(w io.Writer, memDir string) {
 		fmt.Fprintln(w, "Memory is disabled for this session (--no-memory).")
 		return
 	}
-	// When this session's directory has no project of its own, memDir IS the
-	// shared tier — say so, and point at any notes an older octo filed under a
-	// slug for this directory, which nothing loads any more. Same disclosure
-	// `octo memory list` makes; a TUI user has no reason to run that.
+	// Running in the home directory, its slug directory IS the shared tier —
+	// say so, or the header reads as if home had project memory of its own.
+	// Same disclosure `octo memory list` makes; a TUI user has no reason to
+	// run that.
 	if home, err := memory.HomeDir(); err == nil && home == memDir {
-		fmt.Fprintln(w, "This directory has no project of its own — these are the shared notes, read by every session.")
-		if cwd, err := os.Getwd(); err == nil {
-			if legacy, err := memory.Dir(cwd); err == nil && legacy != memDir {
-				if n := countMarkdown(legacy); n > 0 {
-					fmt.Fprintf(w, "Note: %d earlier note file(s) for this directory are no longer loaded, in:\n  %s\n", n, legacy)
-				}
-			}
-		}
+		fmt.Fprintln(w, "Running in the home directory — these are the shared notes, read by every session.")
 	}
 	fmt.Fprintf(w, "Memory directory: %s\n", memDir)
 	entries, err := os.ReadDir(memDir)

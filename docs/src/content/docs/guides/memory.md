@@ -4,7 +4,7 @@ description: Cross-session memory as plain markdown files, stored locally.
 ---
 
 octo remembers your preferences, project conventions, and past corrections across sessions —
-stored locally in `~/.octo/memories/<repo-slug>/`, never in the cloud.
+stored locally in `~/.octo/memories/<project-slug>/`, never in the cloud.
 
 ## How it works
 
@@ -25,25 +25,32 @@ repo other than the current directory. Everything outside that tree is still gat
 ```bash
 octo memory list           # list the project's and inherited memory files
 octo memory path           # print the project's and inherited memory directories
-octo memory path <dir>     # …for another directory (how the agent resolves another repo's memory)
+octo memory path <dir>     # …for another directory (how the agent resolves another project's memory)
 octo --no-memory           # disable memory injection for a single session
 ```
 
 ## Scope
 
-Memory is scoped per repository, keyed off the git **common** directory rather than the per-worktree
-top-level — so every linked worktree of a repo shares one memory scope instead of starting from
-empty.
+Memory is scoped to the **project**, and what counts as a project is what you made one — not what
+git thinks. Plenty of real work lives in directories git has never heard of, and plenty of checkouts
+are passed through rather than worked on.
 
-A directory that is **not** a git repo — the default `~/Octo` workspace, `~`, a scratch path — has no
-project of its own, so it uses the shared home-level memory below instead of getting a directory of
-its own. Such a session is usually working on code somewhere else entirely ("fix the login bug in
-project X"), and notes filed under the scratch directory would be invisible to the session that later
-works inside project X, while the shared set is read by every session.
+Where that project comes from depends on how you're running octo:
+
+- **Web UI / desktop / IM** — from the project a session is filed under (the *Projects* section of
+  the sidebar: a group with a working directory). Every session in a project reads and writes that
+  project's notes. A loose task, filed under no project, uses the shared set below — which is the
+  point: such a session is often working on code somewhere else entirely ("fix the login bug in
+  project X"), and notes buried under a directory nothing else opens would be invisible to the
+  session that later works inside project X.
+- **CLI / TUI** — the directory you're standing in *is* the project; you `cd` somewhere to work on
+  it. A session you resume with `-c` that belongs to a project in the Web UI gets that project's
+  memory instead, wherever you launched octo from.
 
 A second, home-level index (`~/.octo/memories/<home-slug>/MEMORY.md`) is inherited into *every*
 project, injected **before** the project's own index — it's the place for things that aren't about
-one repo, like how you like to work; project-specific facts belong in the project's own memory.
+one project, like how you like to work; project-specific facts belong in the project's own memory.
+Running from your home directory needs no special case: home's own directory *is* that shared set.
 
 ## Two rule tiers, beyond plain notes
 

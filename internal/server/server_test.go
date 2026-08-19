@@ -1333,7 +1333,6 @@ func TestHandleGetMemories_DedupesProjectAndHomeDir(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte("# test"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	srv.memDir = dir
 	srv.homeMemDir = dir
 
 	req := httptest.NewRequest(http.MethodGet, "/api/memories", nil)

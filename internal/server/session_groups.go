@@ -348,6 +348,18 @@ func projectNotesFor(sessionID string) string {
 	return ""
 }
 
+// projectNotesAndDir returns both facts a turn needs from the project owning
+// sessionID — its notes and its working directory — in one registry lookup.
+// Both are empty when the session belongs to no project. The notes go into the
+// prompt; the directory is what scopes the session's memory (see
+// Server.sessionMemDir).
+func projectNotesAndDir(sessionID string) (notes, dir string) {
+	if p := projectForSession(sessionID); p != nil {
+		return p.Notes, p.WorkingDir
+	}
+	return "", ""
+}
+
 // renderProjectNotes wraps project notes for the system prompt's memory layer.
 // The heading gives the model a frame for what it is reading — otherwise a
 // bare paragraph of project context reads as an instruction from the user.

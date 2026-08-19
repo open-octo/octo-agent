@@ -51,14 +51,17 @@ func runMemory(args []string, stdout, stderr io.Writer) int {
 		}
 		cwd = abs
 	}
-	dir, inProject, err := memory.DirForSession(cwd)
+	dir, _, err := memory.DirForProject(cwd)
 	if err != nil {
 		fmt.Fprintf(stderr, "octo memory: %v\n", err)
 		return 1
 	}
 	homeDir, _ := memory.HomeDir()
-	if homeDir == dir {
-		homeDir = "" // same as project (not a repo, or running in home) — don't duplicate
+	// One directory, two names: running in the home directory, its own slug IS
+	// the shared tier. Print it once.
+	shared := homeDir == dir
+	if shared {
+		homeDir = ""
 	}
 
 	if sub == "path" {
@@ -69,23 +72,11 @@ func runMemory(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	if !inProject {
-		// Say so explicitly: the notes here are the shared/global set, not a
-		// project's — otherwise the header reads as if this directory had
-		// project memory of its own. "no project of its own" rather than "not a
-		// git repo": a bare repo IS a repo, it just has no work tree.
-		fmt.Fprintf(stdout, "%s has no project of its own — using the shared memory directory.\n", cwd)
-		// Sessions that ran here before non-repo dirs shared the global tier
-		// wrote into a slug directory for this path. Those notes are no longer
-		// injected anywhere, so name the directory rather than orphaning it
-		// silently — moving them is a judgement call, not something to do
-		// behind the user's back.
-		if legacy, err := memory.Dir(cwd); err == nil && legacy != dir {
-			if n := countMarkdown(legacy); n > 0 {
-				fmt.Fprintf(stdout, "Note: %d earlier note file(s) for this directory are no longer loaded, in:\n  %s\n"+
-					"Move anything still useful into the shared directory below.\n", n, legacy)
-			}
-		}
+	if shared {
+		// Otherwise the header reads as if the home directory had project
+		// memory of its own, when in fact these are the notes every session
+		// gets wherever it runs.
+		fmt.Fprintln(stdout, "Running in the home directory — these are the shared notes, read by every session.")
 	}
 	fmt.Fprintf(stdout, "Memory directory: %s\n", dir)
 	printDirEntries(stdout, dir)
