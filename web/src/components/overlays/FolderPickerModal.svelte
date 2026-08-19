@@ -27,6 +27,7 @@
   let error = $state('')
   let showHidden = $state(false)
   let modalEl = $state<HTMLDivElement | null>(null)
+  let pathEl = $state<HTMLInputElement | null>(null)
   // The path bar is editable: typing or pasting a path and pressing Enter
   // jumps straight there. Clicking through a tree is the slow way to reach a
   // path you already know, and this dialog is now the only way to set a
@@ -42,6 +43,13 @@
       // Follow the listing: navigating the tree updates the field, and a
       // rejected hand-typed path is replaced by where we actually are.
       pathDraft = listing.is_this_pc ? '' : listing.path
+      // A long path overflows the field from the left, hiding the tail — but
+      // the tail (which folder am I in?) is the part worth reading. The
+      // read-only bar this replaced elided the head for the same reason.
+      // Scroll to the end unless the user is mid-edit.
+      queueMicrotask(() => {
+        if (pathEl && document.activeElement !== pathEl) pathEl.scrollLeft = pathEl.scrollWidth
+      })
     } catch (e: any) {
       // A 403 lands here with the server's "local machine only" message; any
       // other failure (bad path, permission) shows its message too. Keep the
@@ -129,12 +137,14 @@
       {:else}
         <input
           class="cur-path mono"
+          bind:this={pathEl}
           bind:value={pathDraft}
           spellcheck="false"
           autocomplete="off"
           placeholder={$t('folder.path_placeholder')}
           title={listing?.path ?? ''}
           aria-label={$t('folder.path_placeholder')}
+          onfocus={() => pathEl?.select()}
           onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); gotoDraft() } }}
         />
       {/if}
