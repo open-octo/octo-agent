@@ -75,7 +75,7 @@ type NativeBridge interface {
 
 - The Wails `main` implements `NativeBridge` using Wails runtime dialogs and the notifications service, and passes it into `server.New` via config.
 - New endpoints — `POST /api/native/pick-folder`, and internal use of `Notify` — are registered **only when a bridge is present**, so `octo serve` exposes no new surface.
-- The frontend learns it's in desktop mode from a capability flag on an existing response (e.g. `native: true` on `/api/version`). When set, the folder picker's "Browse…" calls `/api/native/pick-folder` (OS dialog) instead of opening the in-app directory tree; when unset (plain `serve`), it keeps the in-app tree from phase 1. Both paths end in the same `PATCH /api/sessions/{id}/working_dir`.
+- The frontend learns it's in desktop mode from a capability flag on an existing response (e.g. `native: true` on `/api/version`). When set, the folder picker's "Browse…" calls `/api/native/pick-folder` (OS dialog) instead of opening the in-app directory tree; when unset (plain `serve`), it keeps the in-app tree from phase 1. Both paths end in the same place: the chosen directory decides which project the new session is created in.
 
 This is the whole bridge: a two-method Go interface and one conditional route group. Tray, single-instance, and autostart live entirely in the Wails `main` and need no frontend or server change.
 

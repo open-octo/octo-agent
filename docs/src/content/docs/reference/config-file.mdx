@@ -56,10 +56,17 @@ octo tracks a working directory per surface, not one global cwd:
   `workspace_dir` and the per-session override below don't apply. Whatever directory the shell
   process inherited is what `read_file`, `terminal`, and every other tool resolve relative paths
   against.
-- **Web sessions** get theirs in two steps: a new session with no directory of its own defaults to
-  `workspace_dir` (empty → `~/Octo`, created on first use); the directory chip in the Composer (or
-  `PATCH /api/sessions/{id}/working_dir`) then overrides that default for just that session, and
-  the override sticks even if `workspace_dir` changes later.
+- **Web sessions** take theirs from the project they belong to. A loose task — one filed under no
+  project — runs in `workspace_dir` (empty → `~/Octo`, created on first use), and that is not
+  something the session can override: a directory is a project's property. Choosing one on the
+  new-session landing page is what files the session under the project for that directory, creating
+  it if there isn't one. `PATCH /api/sessions/{id}/working_dir` answers 409 and says so.
+
+  The reason it works this way: a task that could point itself at a repo ran its tools there while
+  its memory stayed in the shared tier, since project memory is scoped by project membership (see
+  [memory](/docs/guides/memory/)). You got a session aimed at your project that remembered nothing
+  about it. Attaching the directory to the project — the thing that already scopes memory — removes
+  the split instead of documenting it.
 - The **server's own launch directory** (where `octo serve` or the desktop app started) is separate
   from both of the above — it only seeds skill discovery and the project-level memory root, not any
   session's tool cwd.

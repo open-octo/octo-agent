@@ -1561,10 +1561,6 @@ func (s *Server) handleUpdateSessionShowReasoning(w http.ResponseWriter, r *http
 
 // ─── PATCH /api/sessions/{id}/working_dir ───────────────────────────────────
 
-type updateSessionWorkingDirRequest struct {
-	WorkingDir string `json:"working_dir"`
-}
-
 // handleUpdateSessionWorkingDir sets THIS session's working directory: the cwd
 // its tools run in, the root its project hooks/skills resolve against, and the
 // path shown in its env context, applied from the next turn. It is per-session
@@ -1578,65 +1574,25 @@ func (s *Server) handleUpdateSessionWorkingDir(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, "missing session id")
 		return
 	}
-
-	var req updateSessionWorkingDirRequest
-	if err := readBodyJSON(r, &req); err != nil {
-		writeInvalidJSONBody(w, err)
-		return
-	}
-	if req.WorkingDir == "" {
-		writeError(w, http.StatusBadRequest, "working_dir is required")
-		return
-	}
-
-	dir, verr := validateWorkingDir(req.WorkingDir)
-	if verr != nil {
-		writeError(w, http.StatusBadRequest, verr.Error())
-		return
-	}
-
-	if _, err := agent.LoadSession(id); err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	// A session inside a project runs where the project says; accepting a
-	// per-session dir here would store a value that never takes effect. The UI
-	// disables the control, so this is the defence for direct API callers.
+	// A session's working directory is no longer its own to set. It comes from
+	// the project the session is filed under; a loose task runs in the server's
+	// configured workspace.
+	//
+	// Letting a task choose a directory promised something it could not deliver:
+	// its tools ran there, but its memory did not follow, because project memory
+	// is scoped by project membership and a task belongs to none (see
+	// Server.sessionMemDir). The user was left with a session pointed at their
+	// repo that remembered nothing about it. Making the directory a property of
+	// the project — the thing that DOES scope memory — is what removes the split
+	// rather than papering over it.
+	//
+	// Kept as an explaining 409 rather than an unregistered route so a direct
+	// API caller or an older client learns what to do instead of getting a 404.
 	if p := projectForSession(id); p != nil {
-		writeError(w, http.StatusConflict, fmt.Sprintf("session belongs to project %q, which sets the working directory for all its sessions — change it on the project, or move the session out first", p.Name))
+		writeError(w, http.StatusConflict, fmt.Sprintf("project %q sets the working directory for every session in it — change it on the project instead", p.Name))
 		return
 	}
-	if ok, _, berr := s.acquireSessionBinding(id, agent.EntryWeb, false); !ok {
-		writeError(w, http.StatusConflict, berr.Error())
-		return
-	}
-	defer s.releaseSessionBinding(id, agent.EntryWeb)
-
-	// Reload after acquiring the binding in case another process saved.
-	sess, err := agent.LoadSession(id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	if err := sess.SetWorkingDir(dir); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save session: %v", err))
-		return
-	}
-
-	// Push the new dir so the composer's cwd chip refreshes without waiting for
-	// the next turn's session_update.
-	if s.wsHub != nil {
-		s.wsHub.broadcast(id, map[string]any{
-			"type":        "session_update",
-			"session_id":  id,
-			"working_dir": dir,
-		})
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":          true,
-		"working_dir": dir,
-	})
+	writeError(w, http.StatusConflict, "a session's working directory comes from its project; file this session under a project for that directory (creating one if needed) to change where its tools run")
 }
 
 // ─── PATCH /api/sessions/{id}/agent_profile ─────────────────────────────────

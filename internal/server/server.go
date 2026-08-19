@@ -573,6 +573,11 @@ func New(cfg Config) (*Server, error) {
 		IdleTimeout:  120 * time.Second,
 	}
 
+	// Reconcile sessions written while a working directory was a session's own
+	// property. Idempotent and a no-op on a machine that never used the setting,
+	// so it runs on every start rather than behind a version stamp.
+	s.adoptTaskWorkingDirs()
+
 	return s, nil
 }
 

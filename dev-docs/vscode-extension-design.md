@@ -102,7 +102,7 @@ Access key 只在插件将来支持"连接到绑定了非 loopback 地址的 ser
 - 执行后:`tool_result.ui_payload`,内容是各工具自己拼的 `map[string]any`(不是命名 struct),字段因工具而异——`edit_file` 给 `{type:"edit", path, occurrences, diff}`,`diff` 是"每行加 `- `/`+ ` 前缀"的删除/新增块,**不是** unified diff(没有 `@@` hunk header),来自 `tools.EditUIDiff`;`write_file` 给 `{type:"write", path, size_bytes, line_count, preview, preview_truncated}`,没有 diff(整篇覆写,给不出旧内容);`read_file` 给 `{type:"file_read", path, lines_read, truncated, content_preview, total_lines?}`,这里的 `path`是模型传入的原始路径,不一定是绝对路径;`terminal` 给 `{type:"terminal", command, status, output_preview}`。
 - 执行前(权限确认阶段):`request_confirmation.diff`(同样是 `EditUIDiff` 格式,`buildConfirmDetail` 复用的)和 `request_confirmation.command`(terminal),但这个事件不带路径字段。
 
-REST 侧用到的既有路由:`POST /api/sessions`(创建)、`GET /api/sessions`(列表)、`PATCH /api/sessions/{id}/working_dir`(绑定工作区)、`POST /api/upload`(附件)、`POST /api/file-action`。全部是现成路由,插件不新增任何 API。
+REST 侧用到的既有路由:`POST /api/sessions`(创建,可带 `group_id`)、`GET /api/sessions`(列表)、`GET`/`POST /api/session-groups`(查找或创建 workspace 根目录对应的项目)、`POST /api/upload`(附件)、`POST /api/file-action`。全部是现成路由,插件不新增任何 API。
 
 ## IDE 双向集成
 
@@ -113,7 +113,7 @@ REST 侧用到的既有路由:`POST /api/sessions`(创建)、`GET /api/sessions`
 - 当前选区/打开文件的内容拼进 `user_message` 的 `content`。
 - `@` 文件引用补全,插入 workspace 相对路径。
 - 诊断(红波浪线报错)可作为"修复这个问题"这类 turn 的上下文来源。
-- session 创建后立刻 `PATCH /api/sessions/{id}/working_dir` 绑定到当前 workspace 根目录。
+- 会话绑定到 workspace 根目录的方式是**归入该目录对应的项目**:先在 `/api/session-groups` 里找 `working_dir` 等于该根目录的项目,没有就以目录名建一个,然后创建会话时带上它的 `group_id`。会话自身不能携带工作目录——目录是项目的属性,记忆也按项目划分作用域,两者必须一起走(见 projects-design.md)。
 
 ### agent → IDE(原生渲染)
 
