@@ -5,7 +5,7 @@
     running, activeSessionId, chatStreaming, sessions, sessionGroups,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
     globalPermissionMode, nativeShell, localAccess, activeAgent, pendingModel, view, settingsModalOpen,
-    pendingAgent, pendingWorkingDir, normalizeDir,
+    pendingAgent, pendingWorkingDir, pendingGroupId, normalizeDir,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
@@ -640,18 +640,29 @@
   // chip below goes read-only rather than letting the user edit a value the
   // server would refuse.
   // On the landing page there is no session to look up membership for, so the
-  // project is whichever one already owns the directory the user just picked —
-  // the same match ensureActiveSession will make when it files the session.
+  // project comes from whichever pick is going to decide it. A group docked by
+  // the sidebar's per-group "+" wins outright — the same precedence
+  // ensureActiveSession applies — so show THAT project, or the chip would offer
+  // to choose a directory whose value the send then discards. Otherwise the
+  // project is whoever already owns the directory the user picked, which is the
+  // match ensureActiveSession will make when it files the session.
   let project = $derived.by(() => {
     if (sid) return $sessionGroups.find(g => !!g.working_dir && g.session_ids.includes(sid)) ?? null
+    const docked = $pendingGroupId
+    if (docked) return $sessionGroups.find(g => g.id === docked && !!g.working_dir) ?? null
     const dir = $pendingWorkingDir
     if (!dir) return null
     return $sessionGroups.find(g => !!g.working_dir && normalizeDir(g.working_dir!) === normalizeDir(dir)) ?? null
   })
+  // A docked group's own directory governs the session, exactly as it does for
+  // a session already inside a project. A plain group has no directory to show,
+  // but the user still just clicked ITS "+", so name it — otherwise the landing
+  // page says nothing at all about where the session is headed.
+  let dockedGroup = $derived(!sid ? ($sessionGroups.find(g => g.id === $pendingGroupId) ?? null) : null)
   let workingDir = $derived(
     sid
       ? (project?.working_dir || $chatWorkingDir[sid] || currentSession?.working_dir || '')
-      : $pendingWorkingDir,
+      : (project?.working_dir || $pendingWorkingDir),
   )
   let permMode = $derived($chatPermMode[sid] || currentSession?.permission_mode || $globalPermissionMode)
   // Effective show-reasoning for this session: live store > session record > default true.
@@ -1302,17 +1313,19 @@
             </div>
           {/if}
         </div>
-        {#if sid && workingDir && project}
+        {#if workingDir && project && (sid || dockedGroup)}
           <span class="meta-chip static" title={$t('chat.dir_from_project').replace('{name}', project.name) + ` — ${workingDir}`}>
             <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
             <span class="mono dir-path">{shortDir(workingDir)}</span>
             <span class="dir-owner">{project.name}</span>
           </span>
-        {:else if workingDir || !sid}
-          <!-- The landing page always offers the chip, even with nothing picked
-               yet: the directory is what decides whether the first message
-               starts a loose task or lands in a project, so it has to be
-               reachable before there is a session to hang it on. -->
+        {:else if workingDir || (!sid && !dockedGroup)}
+          <!-- The landing page offers the chip even with nothing picked yet:
+               the directory is what decides whether the first message starts a
+               loose task or lands in a project, so it has to be reachable
+               before there is a session to hang it on. Not when a group is
+               already docked, though — then the group owns the directory and
+               an editable chip would promise something send would drop. -->
           <button
             class="meta-chip"
             class:empty={!workingDir}
@@ -1330,6 +1343,14 @@
               <span class="dir-owner">{project.name}</span>
             {/if}
           </button>
+        {/if}
+        {#if dockedGroup && !workingDir}
+          <!-- A plain group: no directory to inherit, but naming it is the only
+               signal on this page that the session is being filed there. -->
+          <span class="meta-chip static" title={$t('chat.dir_from_project').replace('{name}', dockedGroup.name)}>
+            <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
+            <span class="dir-owner">{dockedGroup.name}</span>
+          </span>
         {/if}
         {#if goalChip}
           <span class="meta-chip static" title={goal?.objective ?? ''}>

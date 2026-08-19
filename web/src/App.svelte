@@ -76,6 +76,14 @@
     // the landing page there. createNewSession() re-normalizes the hash to
     // #/chat, so a reload won't loop back into #new.
     if (v === 'new' && isDesktopShell) {
+      // Claim the auto-select slot before opening the landing page. Reaching
+      // #new from the tray with the window closed loads the page at this hash
+      // from scratch, so the session list is still on its way; without this it
+      // would arrive to an unset activeSessionId and helpfully open the most
+      // recent session, throwing away the new-session the user just asked for.
+      // (Nothing overwrites it any more — this used to be covered by
+      // createNewSession awaiting a POST and setting the id itself.)
+      autoSelectDone = true
       createNewSession()
       return
     }
