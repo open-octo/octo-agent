@@ -37,15 +37,24 @@ needs to be self-contained: what to do, where, and what the output should look l
 explicit stop condition too — an open-ended prompt keeps the model re-verifying until the 30-minute
 timeout instead of finishing once the answer is "nothing to report."
 
-## Sessions and grouping
+## Sessions, and a project per task
 
 Every run creates a **new session**, titled with the run's local date and time (e.g.
-`2026-07-22 15:04`) and starting from an empty transcript — runs never share a session. Each task
-also gets a cluster named after it, holding all of its runs, which is what the sidebar's
-**Scheduled** section lists — one row per task. That row is the scheduler's, not yours: it cannot be
-renamed, deleted on its own, or have other sessions filed into it. It appears with the task, is
-renamed with it, and goes when the task is deleted (the run sessions themselves stay on disk and
-become ordinary tasks).
+`2026-07-22 15:04`) and starting from an empty transcript — runs never share a session.
+
+Each task also gets its own **project**, named after the task and working in
+`<workspace_dir>/<task name>` (so `~/Octo/daily report` by default), created the first time it is
+needed. That is where the task's runs execute their tools, and — because memory is scoped by project
+— where the task's own notes accumulate, separate from every other task on the machine. Set
+`directory` on the task to point it somewhere else instead.
+
+The directory is derived from the name once and then belongs to the project: **renaming the task
+renames the project, not the directory.** Moving it would either strand whatever the task has
+already written there or have to relocate it, and neither is what renaming asks for.
+
+The project appears in the sidebar's Projects section like any other, marked with a small clock, and
+can be renamed, configured, or deleted from there. Deleting it leaves the run sessions on disk as
+ordinary tasks; the next run creates the project again.
 
 ## Cron expression — 6 fields, seconds first
 
@@ -91,8 +100,8 @@ curl -s -X PATCH http://127.0.0.1:8088/api/tasks/{id} \
 ```
 
 `PATCH /api/tasks/{id}` accepts `name`, `enabled`, `cron`, `prompt`, `model`, `agent`, `directory`,
-`notify` — send only what you're changing; renaming via `name` also renames the task's row in the
-sidebar's Scheduled section. The Web UI's scheduler panel is a client of this
+`notify` — send only what you're changing; renaming via `name` also renames the task's project (its
+directory stays put). The Web UI's scheduler panel is a client of this
 same API, so a task created by `curl` shows up there and vice versa; the panel is also the
 recommended place to **smoke-test a new task's `Run` button** rather than triggering
 `/api/tasks/{id}/run` from a chat session — a run is a full agent turn (up to 30 minutes) in the

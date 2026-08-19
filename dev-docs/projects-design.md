@@ -17,7 +17,11 @@ octo 的工作目录曾是纯粹的**每会话**属性（`agent.Session.WorkingD
 | `notes` 注入项目内会话的 system prompt | 嵌套项目、一个会话属于多个项目 |
 | Web + 桌面 UI | IM channel / cron 显式绑定项目 |
 
-cron task 自动为每个任务建一个同名运行簇（`tasks_handlers.go` → `createSessionGroupNamed`，带 `TaskID`）。它是唯一不带目录也合法存在的组：由调度器创建和命名，用户不能改名、不能单独删除、也不能往里塞别的会话——三个 handler 都会拒。侧栏把它渲染在独立的「定时任务」区。
+**每个 cron task 就是一个项目**：调度器为它建一个同名项目，工作目录 `<workspace>/<任务名>`（`cronProjectDir`，按需创建，`TaskID` 记录来源）。这解决了一个实打实的 bug——调度器不像 HTTP 创建路径那样 seed 工作目录，所以运行会话既没有自己的目录、簇也没有，一路落到**服务器的启动目录**：机器上所有定时任务都在 `octo serve` 恰好启动的那个目录里跑，两个任务写同名文件会互相覆盖。一任务一目录同时给了它自己的记忆层（记忆按项目划作用域）。
+
+目录在创建时由任务名派生一次，之后属于项目：**改任务名只改项目名，不动目录**——搬目录要么把任务已经写下的东西留在原地，要么得整体搬走，而改标题的人要的不是这个。任务显式设了 `directory` 时以它为准。
+
+侧栏不给定时任务单独一节：它就是项目，只在项目行上带一个小时钟标记来源。
 
 ### 各入口的实际行为
 
@@ -61,15 +65,15 @@ type sessionGroup struct {
 	WorkingDir string `json:"working_dir,omitempty"`
 	// Notes 是项目级说明，注入组内会话 system prompt 的项目记忆层。
 	Notes string `json:"notes,omitempty"`
-	// TaskID 非空 ⇒ 这个组是该 cron 任务的运行簇。它是不带目录也不被解散的
-	// 唯一形态，也是侧栏「定时任务」区的判据。
+	// TaskID 非空 ⇒ 这个项目是为该 cron 任务创建的。只用于启动时的修复
+	// （给写在这之前、还没有目录的簇补上目录），不参与任何 UI 或权限判定。
 	TaskID string `json:"task_id,omitempty"`
 }
 ```
 
-**`WorkingDir != ""` 是「项目」的唯一判据；`TaskID != ""` 是「运行簇」的唯一判据。** 两者皆空的组是已取消的"普通分组"，启动时由 `dissolvePlainGroups` 解散——只删组，不动会话：不属于任何组的会话就是任务，而那正是这些会话原本被组织成的东西。它们各自 `WorkingDir` 里的真实目录随后由 `adoptTaskWorkingDirs` 接手，所以两个 pass 的顺序是语义的一部分（`reconcileRegistry`）。
+**`WorkingDir != ""` 是「项目」的唯一判据。** 没有目录的组是已取消的"普通分组"，启动时由 `dissolvePlainGroups` 解散——只删组，不动会话：不属于任何组的会话就是任务，而那正是这些会话原本被组织成的东西。它们各自 `WorkingDir` 里的真实目录随后由 `adoptTaskWorkingDirs` 接手，所以两个 pass 的顺序是语义的一部分（`reconcileRegistry`）。
 
-存量运行簇写在 `TaskID` 字段存在之前，所以解散前先从 scheduler 反查回填（task 的 `SessionGroupID` → 组）。没有这一步，每个定时任务的全部运行历史会连同普通分组一起被解散。
+定时任务的簇写在它成为项目之前，既没有 `TaskID` 也没有目录，所以解散前先修：从 scheduler 反查回填 `TaskID`（task 的 `SessionGroupID` → 组），再补上 `<workspace>/<任务名>`。没有这一步，每个定时任务的全部运行历史会连同普通分组一起被解散。`TaskID` 也让 scheduler 启动失败时这些项目仍然认得出来。
 
 ## 工作目录的解析优先级
 
@@ -178,15 +182,14 @@ type updateSessionGroupRequest struct {
 
 ## UI
 
-侧栏分三节，判据全在 `web/src/lib/sidebarSections.ts` 的 `splitSections`：
+侧栏分两节，判据全在 `web/src/lib/sidebarSections.ts` 的 `splitSections`：
 
 | 节 | 内容 | 用户可编辑 |
 |---|---|---|
-| 任务 | 不属于任何组的会话，平铺 | 会话自身（改名 / 删除 / 置顶 / 折叠 / 移入项目） |
-| 定时任务 | 每个 cron 任务一行，装它的全部运行 | 否（只能折叠，和跳转到定时任务视图） |
-| 项目 | 每个项目一行，装它的会话 | 是（改名 / 删除 / 排序 / 设置 / 在项目内新建会话） |
+| 任务 | 不属于任何项目的会话，平铺 | 会话自身（改名 / 删除 / 置顶 / 归档） |
+| 项目 | 每个项目一行，装它的会话；定时任务的项目也在这里 | 是（改名 / 删除 / 排序 / 设置 / 在项目内新建会话） |
 
-两者皆空的组前端直接丢弃而不是渲染成第四种行——服务端启动时已经解散它们，在那之前把它的会话渲染两遍比不渲染更糟。
+没有目录的组前端直接丢弃而不是渲染成第三种行——服务端启动时已经解散它们，在那之前把它的会话渲染两遍比不渲染更糟。
 
 - **新建项目**：先选目录再建，因为项目就是目录。目录决定名字（basename），已有同目录项目则复用而不是造重复。侧栏顶部按钮和会话行的「移动到项目 → 新建项目」走同一条 `resolveProjectForDir`。
 - **项目头**：额外显示一行缩写目录（`~/code/foo`）。行内齿轮打开项目设置，工作目录（复用现有 folder picker / 桌面原生目录对话框）+ 说明文本框；目录不可清空。

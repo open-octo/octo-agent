@@ -43,20 +43,17 @@ import (
 // the same ~/.octo, so groups and their collapsed state are shared between the
 // Web UI and the desktop shell with no extra wiring.
 
-// sessionGroup is one named group in the registry. Two kinds exist, told apart
-// by which field is set:
+// sessionGroup is one project in the registry: a working directory plus the
+// sessions working in it. WorkingDir being set is what makes it one, and a group
+// without one is a plain group — a concept that no longer exists, dissolved at
+// startup.
 //
-//   - WorkingDir set — a project. Every session in it runs its tools in that
-//     one directory and reads that project's memory tier.
-//   - TaskID set — a cron task's run cluster, created and named by the
-//     scheduler. Read-only to the user: it is not something they made, so they
-//     cannot rename it, file a session into it, or delete it on its own (it
-//     goes when the cron task does).
-//
-// Neither set means a plain group, which no longer exists as a concept and is
-// dissolved at startup. Both set is legal and means a cron task with a
-// directory: the runs cluster under the task in the sidebar, and the directory
-// still scopes what they can see.
+// A scheduled task's runs live in a project too, created by the scheduler and
+// named after the task, working in <workspace>/<task name>. TaskID records which
+// task that was: it is what lets the startup pass repair such a project instead
+// of dissolving it, and it survives a scheduler that failed to start. It carries
+// no UI or permission meaning — the project behaves like any other, because it is
+// one.
 type sessionGroup struct {
 	ID         string   `json:"id"`
 	Name       string   `json:"name"`
@@ -74,18 +71,17 @@ type sessionGroup struct {
 	// session in the project, alongside the project-memory layer. Only
 	// meaningful on a project.
 	Notes string `json:"notes,omitempty"`
-	// TaskID, when set, marks this group as the run cluster of that cron task.
-	// It is what keeps such a group from being dissolved as a plain group when
-	// the task has no directory, and what tells the sidebar to render it under
-	// "Scheduled" rather than as something the user can edit.
+	// TaskID, when set, is the scheduled task this project was created for. It
+	// is what lets the startup pass repair such a project (backfilling the
+	// directory a task written before this had none) rather than dissolving it.
 	TaskID string `json:"task_id,omitempty"`
 }
 
 // isProject reports whether this group carries project settings.
 func (g sessionGroup) isProject() bool { return g.WorkingDir != "" }
 
-// isCronCluster reports whether this group is a cron task's run cluster, which
-// the user did not create and cannot edit.
+// isCronCluster reports whether this project was created for a scheduled task.
+// Used by the startup repair pass, not to gate anything the user can do.
 func (g sessionGroup) isCronCluster() bool { return g.TaskID != "" }
 
 // maxProjectNotes caps the notes field. Notes are injected verbatim into the
@@ -718,13 +714,6 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusNotFound, "group not found")
 		return
 	}
-	// A cron task's run cluster is the scheduler's, not the user's: its name
-	// comes from the task and its directory from the task's. Collapsing it is
-	// the one thing the sidebar does offer, so that alone is allowed through.
-	if groups[idx].isCronCluster() && (req.Name != nil || req.WorkingDir != nil || req.Notes != nil) {
-		writeError(w, http.StatusConflict, "this group belongs to a scheduled task — edit the task instead")
-		return
-	}
 	if req.Name != nil {
 		groups[idx].Name = name
 	}
@@ -760,12 +749,6 @@ func (s *Server) handleDeleteSessionGroup(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-	for i := range groups {
-		if groups[i].ID == id && groups[i].isCronCluster() {
-			writeError(w, http.StatusConflict, "this group belongs to a scheduled task — delete the task to remove it")
-			return
-		}
 	}
 	out := groups[:0]
 	found := false

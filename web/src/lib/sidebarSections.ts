@@ -5,13 +5,13 @@
 // group that exists but never renders is unreachable rather than merely
 // misplaced.
 //
-// Three sections, two of which the user creates in: Tasks (loose sessions),
-// Scheduled (one row per cron task, holding its runs — made by the scheduler,
-// not the user), and Projects (a directory plus the sessions working in it). A
-// group with neither a working_dir nor a task_id is a plain group, a concept
-// that no longer exists; the server dissolves those at startup, and anything
-// left in a registry this frontend is handed is dropped rather than rendered as
-// a fourth kind of row.
+// Two sections: Tasks (sessions in no project) and Projects (a directory plus
+// the sessions working in it). A scheduled task's runs are a project too — the
+// scheduler creates one per task, named after it — so they need no section of
+// their own. A group with no working_dir is a plain group, a concept that no
+// longer exists; the server dissolves those at startup, and anything left in a
+// registry this frontend is handed is dropped rather than rendered as a third
+// kind of row.
 
 import type { Session, SessionGroup } from './types'
 
@@ -23,18 +23,14 @@ export interface GroupView {
 export interface SidebarSections {
   /** Pinned sessions, in registry order, above every section. */
   pinned: Session[]
-  /** Groups carrying a working directory — projects. */
+  /** Groups carrying a working directory — projects, scheduled ones included. */
   projects: GroupView[]
-  /** One per scheduled task, holding that task's runs. Read-only. */
-  cronGroups: GroupView[]
   /** Sessions in no group at all. Tasks by definition. */
   ungrouped: Session[]
   /** Collapsed sessions, in registry order, in the folded panel at the bottom. */
   folded: Session[]
   /** How many loose sessions the Tasks section holds. */
   taskCount: number
-  /** How many runs the Scheduled section holds across every task. */
-  cronCount: number
 }
 
 /**
@@ -75,11 +71,7 @@ export function splitSections(
   const folded = take(collapsedIds)
   const all = groups.map(group => ({ group, items: take(group.session_ids ?? []) }))
 
-  // A cron cluster is claimed by its task_id even when it also has a directory:
-  // it is the scheduler's row, and rendering it as a project would offer edits
-  // that belong to the task.
-  const cronGroups = all.filter(gv => !!gv.group.task_id)
-  const projects = all.filter(gv => !gv.group.task_id && !!gv.group.working_dir)
+  const projects = all.filter(gv => !!gv.group.working_dir)
   // Route through byId (already deduped) rather than the input array, for the
   // same keyed-each reason as a group's own membership. A session in a dissolved
   // plain group was claimed by it above and so does NOT resurface here — that
@@ -90,11 +82,9 @@ export function splitSections(
   return {
     pinned,
     projects,
-    cronGroups,
     ungrouped,
     folded,
     taskCount: ungrouped.length,
-    cronCount: cronGroups.reduce((n, gv) => n + gv.items.length, 0),
   }
 }
 
@@ -129,7 +119,6 @@ export function swapWithinSection(
 
 export interface SectionFold {
   tasks: boolean
-  scheduled: boolean
   projects: boolean
 }
 
@@ -139,11 +128,11 @@ export interface SectionFold {
  * since a section the user cannot see is worse than one they must re-fold.
  */
 export function parseSectionFold(raw: string | null): SectionFold {
-  if (!raw) return { tasks: true, scheduled: true, projects: true }
+  if (!raw) return { tasks: true, projects: true }
   try {
     const v = JSON.parse(raw)
-    return { tasks: v?.tasks !== false, scheduled: v?.scheduled !== false, projects: v?.projects !== false }
+    return { tasks: v?.tasks !== false, projects: v?.projects !== false }
   } catch {
-    return { tasks: true, scheduled: true, projects: true }
+    return { tasks: true, projects: true }
   }
 }

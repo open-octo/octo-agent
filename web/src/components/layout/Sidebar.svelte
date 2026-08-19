@@ -122,8 +122,8 @@
     try {
       return parseSectionFold(localStorage.getItem(SECTIONS_KEY))
     } catch {
-      // Storage access itself can throw (privacy mode): every section open.
-      return { tasks: true, scheduled: true, projects: true }
+      // Storage access itself can throw (privacy mode): both sections open.
+      return { tasks: true, projects: true }
     }
   }
   let sections = $state(loadSections())
@@ -134,7 +134,7 @@
   function persistSections() {
     try { localStorage.setItem(SECTIONS_KEY, JSON.stringify(sections)) } catch { /* ignore */ }
   }
-  type SectionKey = 'tasks' | 'scheduled' | 'projects'
+  type SectionKey = 'tasks' | 'projects'
   function toggleSection(k: SectionKey) {
     sections = { ...sections, [k]: !sections[k] }
     persistSections()
@@ -274,7 +274,6 @@
   const allListedIds = $derived([
     ...groupedView.pinned.map(s => s.id),
     ...groupedView.ungrouped.map(s => s.id),
-    ...groupedView.cronGroups.flatMap(gv => gv.items.map(s => s.id)),
     ...groupedView.projects.flatMap(gv => gv.items.map(s => s.id)),
     ...groupedView.folded.map(s => s.id),
   ])
@@ -514,23 +513,6 @@
         {/if}
         {/if}
 
-        <!-- Scheduled: one row per cron task, holding that task's runs. The
-             scheduler makes and names these, so the row carries no edit
-             actions — the task itself is edited in the Scheduled tasks view. -->
-        {#if groupedView.cronGroups.length > 0}
-        <div class="sec-header" onclick={() => toggleSection('scheduled')}>
-          {#if $selMode}{@render triBox(triStateOf(groupedView.cronGroups.flatMap(gv => gv.items.map(s => s.id))), () => toggleMany(groupedView.cronGroups.flatMap(gv => gv.items.map(s => s.id))))}{/if}
-          <iconify-icon icon={sections.scheduled ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="9"></iconify-icon>
-          <span class="sec-name">{$t('sidebar.scheduled')}</span>
-          <span class="sec-count">{groupedView.cronCount}</span>
-        </div>
-        {#if sections.scheduled}
-          {#each groupedView.cronGroups as gv (gv.group.id)}
-            {@render cronBlock(gv)}
-          {/each}
-        {/if}
-        {/if}
-
         <!-- Projects: a directory plus the sessions working in it. Counted by
              project, not by session — a project is the unit here, and its own
              header already carries how many sessions are in it. -->
@@ -568,31 +550,6 @@
         {/if}
       </div>
 
-      {#snippet cronBlock(gv: any)}
-        {@const g = gv.group}
-        <div class="grp-header">
-          {#if $selMode}{@render triBox(triStateOf(gv.items.map((s: any) => s.id)), () => toggleMany(gv.items.map((s: any) => s.id)))}{/if}
-          <span class="grp-caret" onclick={() => toggleCollapse(g.id, !g.collapsed)}>
-            <iconify-icon icon="ant-design:clock-circle-outlined" width="13"></iconify-icon>
-          </span>
-          <span class="grp-name" onclick={() => toggleCollapse(g.id, !g.collapsed)}>{g.name}</span>
-          <span class="grp-count">{gv.items.length}</span>
-          {#if !$selMode}
-          <!-- The one action that belongs here: jump to the task itself. The
-               row has no rename / delete / new-session actions because none of
-               them are this row's to offer — the server refuses them too. -->
-          <span class="row-action" title={$t('sidebar.open_scheduled_task')} onclick={(e) => { e.stopPropagation(); view.set('tasks') }}>
-            <iconify-icon icon="ant-design:setting-outlined" width="13"></iconify-icon>
-          </span>
-          {/if}
-        </div>
-        {#if !g.collapsed}
-          {#each gv.items as s (s.id)}
-            {@render sessionRow(s)}
-          {/each}
-        {/if}
-      {/snippet}
-
       {#snippet groupBlock(gv: any, gi: number, siblings: string[])}
         {@const g = gv.group}
         {@const editingG = $editGroupId === g.id}
@@ -618,6 +575,11 @@
           </span>
           {:else}
           <span class="grp-name" onclick={() => toggleCollapse(g.id, !g.collapsed)}>{g.name}</span>
+          {#if g.task_id}
+            <!-- Marks where the project came from without giving it a section of
+                 its own: it is an ordinary project, made by the scheduler. -->
+            <iconify-icon class="from-cron" icon="ant-design:clock-circle-outlined" width="11" title={$t('sidebar.from_scheduled_task')}></iconify-icon>
+          {/if}
           <span class="grp-count">{gv.items.length}</span>
           {#if !$selMode}
           <!-- Two frequency tiers: new-session and settings stay anchored at
@@ -1069,6 +1031,7 @@
 .checkbox.tri { border-color: var(--border); background: var(--bg-container); cursor: pointer; }
 .checkbox.tri.on { border-color: var(--blue-6); background: var(--blue-6); }
 .row-menu-sep { height: 1px; margin: 4px 6px; background: var(--border-secondary); }
+.from-cron { flex: 0 0 auto; color: var(--text-quaternary); }
 .nav-row {
   position: relative;
   display: flex; align-items: center; gap: 10px;
