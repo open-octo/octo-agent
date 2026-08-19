@@ -42,12 +42,13 @@ func startStubLoopback(t *testing.T) *httptest.Server {
 	// relayed request is distinguishable from a genuine local one.
 	mux.HandleFunc("/api/hdr", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("content-type", "application/json")
-		fmt.Fprintf(w, `{"forwarded":%q}`, r.Header.Get(headerForwarded))
+		fmt.Fprintf(w, `{"forwarded":%q,"key":%q}`,
+			r.Header.Get(headerForwarded), r.Header.Get("X-Access-Key"))
 	})
 	// Same, for a tunnelled /ws stream: the marker rides the handshake, so it is
 	// reported once on connect rather than per message.
 	mux.HandleFunc("/ws-hdr", func(w http.ResponseWriter, r *http.Request) {
-		marker := r.Header.Get(headerForwarded)
+		marker := r.Header.Get(headerForwarded) + "/" + r.Header.Get("X-Access-Key")
 		ws, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
@@ -305,6 +306,11 @@ func (p *mockPhone) recvShim(t *testing.T) shimFrame {
 	return shimFrame{}
 }
 
+// testAccessKey is the host key the bridge must present on everything it
+// replays: marking its traffic as relayed costs it the server's
+// loopback-without-a-key exemption, so without this the phone gets 401s.
+const testAccessKey = "tunnel-test-key-0123456789abcdef"
+
 func newPairedPhone(t *testing.T) *mockPhone {
 	t.Helper()
 	stub := startStubLoopback(t)
@@ -314,6 +320,7 @@ func newPairedPhone(t *testing.T) *mockPhone {
 		TunnelID:    "tunnel-A",
 		PairTokens:  []string{"tok-1"},
 		LoopbackURL: wsScheme(stub) + "/ws",
+		AccessKey:   testAccessKey,
 		Logf:        func(string, ...any) {},
 	})
 	if err != nil {
@@ -452,7 +459,7 @@ func TestHostTunnel_HTTPStampsForwardedMarker(t *testing.T) {
 	if resp.Kind != shimHTTPResp || resp.ID != "h1" {
 		t.Fatalf("got %+v, want an http-resp for h1", resp)
 	}
-	want := `{"forwarded":"` + headerForwardedValue + `"}`
+	want := `{"forwarded":"` + headerForwardedValue + `","key":"` + testAccessKey + `"}`
 	if resp.Body == nil || *resp.Body != want {
 		t.Errorf("body = %v, want %s", resp.Body, want)
 	}
@@ -475,9 +482,9 @@ func TestHostTunnel_PhoneCannotForgeForwardedMarker(t *testing.T) {
 	if resp.Kind != shimHTTPResp || resp.ID != "h2" {
 		t.Fatalf("got %+v, want an http-resp for h2", resp)
 	}
-	want := `{"forwarded":"` + headerForwardedValue + `"}`
+	want := `{"forwarded":"` + headerForwardedValue + `","key":"` + testAccessKey + `"}`
 	if resp.Body == nil || *resp.Body != want {
-		t.Errorf("body = %v, want the bridge's own value %s", resp.Body, want)
+		t.Errorf("body = %v, want the bridge's own values %s", resp.Body, want)
 	}
 }
 
@@ -489,7 +496,7 @@ func TestHostTunnel_WSStampsForwardedMarker(t *testing.T) {
 
 	phone.sendShim(t, shimFrame{Kind: shimWSOpen, ID: "w9", Path: "/ws-hdr"})
 
-	want := "forwarded:" + headerForwardedValue
+	want := "forwarded:" + headerForwardedValue + "/" + testAccessKey
 	for {
 		f := phone.recvShim(t)
 		if f.Kind == shimWSError {

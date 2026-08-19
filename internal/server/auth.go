@@ -117,10 +117,12 @@ func isLoopbackRemote(remoteAddr string) bool {
 // across the relay is indistinguishable from a browser on this machine.
 const HeaderForwarded = "X-Octo-Forwarded"
 
-// forwardedHeaders are set by something that relayed the request: reverse
-// proxies and tunnel clients (nginx, caddy, ngrok, cloudflared, and octo's own
-// tunnel) all add at least one. Their presence means the peer we see is the
-// relay, not the client, whichever address it dials us from.
+// forwardedHeaders are set by something that relayed the request. ngrok,
+// cloudflared, Caddy and octo's own tunnel all add at least one; nginx does NOT
+// unless configured to (a bare proxy_pass sets only Host), which is why it
+// lands in the uncoverable case described on isLocalRequest rather than here.
+// Their presence means the peer we see is the relay, not the client, whichever
+// address it dials us from.
 //
 // These headers are client-spoofable, which is exactly why they are only ever
 // read to NARROW what a request may do — see isLocalRequest. isLoopbackRemote
@@ -133,6 +135,7 @@ var forwardedHeaders = []string{
 	"X-Forwarded-Proto",
 	"X-Real-Ip",
 	"Forwarded",
+	"Via",
 	HeaderForwarded,
 }
 
@@ -156,15 +159,20 @@ var forwardedHeaders = []string{
 // request by the time it reaches us. Capabilities gated on this must therefore
 // stay recoverable rather than assume the answer is certain.
 func isLocalRequest(r *http.Request) bool {
-	if !isLoopbackRemote(r.RemoteAddr) {
-		return false
-	}
+	return isLoopbackRemote(r.RemoteAddr) && !isForwarded(r) && isLocalName(canonicalHost(r.Host))
+}
+
+// isForwarded reports whether any forwarding header is present at all — by
+// count, not by value. A client that sends an empty X-Forwarded-For which the
+// relay then appends its own value to would otherwise hide behind Get()
+// returning only the first, empty, value.
+func isForwarded(r *http.Request) bool {
 	for _, h := range forwardedHeaders {
-		if r.Header.Get(h) != "" {
-			return false
+		if len(r.Header.Values(h)) > 0 {
+			return true
 		}
 	}
-	return isLocalName(canonicalHost(r.Host))
+	return false
 }
 
 // canonicalHost lowercases a Host header (or origin host) and strips the
@@ -294,11 +302,9 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		// unauthenticated exemption to whoever found the URL — an access key
 		// configured on the server does not close it, since this branch is the
 		// fallback for requests that carry no key at all.
-		for _, h := range forwardedHeaders {
-			if r.Header.Get(h) != "" {
-				writeError(w, http.StatusUnauthorized, "unauthorized")
-				return
-			}
+		if isForwarded(r) {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
 		}
 		if !s.hostAllowed(r.Host) {
 			writeError(w, http.StatusForbidden, "forbidden host")

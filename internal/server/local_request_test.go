@@ -153,9 +153,67 @@ func TestRequireAuth_ForwardedRequestLosesExemption(t *testing.T) {
 
 	// A forwarded request that DOES carry the key is fine — the key is the
 	// gate for remote peers, and narrowing the exemption must not break it.
+	// This is the shape octo's own tunnel bridge sends (its marker plus the
+	// host's key), so it is also the regression test for phones across the
+	// relay: they must authenticate, while still not counting as local.
 	w := authRequest(t, srv, http.MethodGet, "http://127.0.0.1:8088/api/sessions", "127.0.0.1:50000",
 		map[string]string{"X-Forwarded-For": "203.0.113.7", "X-Access-Key": testAccessKey})
 	if w.Code != http.StatusOK {
 		t.Errorf("forwarded request with a valid key: got %d, want 200", w.Code)
+	}
+	w = authRequest(t, srv, http.MethodGet, "http://127.0.0.1:8088/api/sessions", "127.0.0.1:50000",
+		map[string]string{HeaderForwarded: "relay", "X-Access-Key": testAccessKey})
+	if w.Code != http.StatusOK {
+		t.Errorf("tunnel-shaped request with a valid key: got %d, want 200", w.Code)
+	}
+}
+
+// Presence of a forwarding header is judged by count, not by first value: a
+// client that prepends an empty X-Forwarded-For which the relay then appends
+// its own value to would otherwise hide behind Get() returning only the first,
+// empty, one. Whether a given relay appends or coalesces is not ours to assume.
+func TestIsLocalRequest_DuplicateHeaderWithEmptyFirstValue(t *testing.T) {
+	req := localReq("http://127.0.0.1:8088/api/version", "127.0.0.1:50000", nil)
+	req.Header.Add("X-Forwarded-For", "")
+	req.Header.Add("X-Forwarded-For", "203.0.113.7")
+	if req.Header.Get("X-Forwarded-For") != "" {
+		t.Fatal("fixture broken: Get should return the empty first value")
+	}
+	if isLocalRequest(req) {
+		t.Error("an empty first value must not mask the relay's own")
+	}
+}
+
+// Host forms that look loopback-ish but are not, alongside the ones that are.
+// All of these reach canonicalHost/isLocalName; pinning them keeps a future
+// normalization tweak from quietly opening a DNS-rebinding path.
+func TestIsLocalRequest_HostEdgeForms(t *testing.T) {
+	cases := []struct {
+		host string
+		want bool
+	}{
+		{"localhost:8088", true},
+		{"LOCALHOST:8088", true},  // case-insensitive
+		{"localhost.:8088", true}, // fully-qualified root dot
+		{"127.0.0.1:8088", true},
+		{"[::1]:8088", true},
+		{"[::ffff:127.0.0.1]:8088", true},
+		{"0.0.0.0:8088", false},    // parses, but is not loopback
+		{"127.1:8088", false},      // shorthand net.ParseIP rejects
+		{"2130706433:8088", false}, // decimal-encoded 127.0.0.1
+		{"attacker.example:8088", false},
+		{"localhost.attacker.example:8088", false},
+		{"", false}, // HTTP/1.0 with no Host
+	}
+	for _, tc := range cases {
+		t.Run(tc.host, func(t *testing.T) {
+			// Host is set explicitly rather than through the URL, so forms Go's
+			// URL parser would reject still reach the predicate.
+			req := localReq("http://127.0.0.1:8088/api/version", "127.0.0.1:50000",
+				map[string]string{"Host": tc.host})
+			if got := isLocalRequest(req); got != tc.want {
+				t.Errorf("Host %q: isLocalRequest = %v, want %v", tc.host, got, tc.want)
+			}
+		})
 	}
 }

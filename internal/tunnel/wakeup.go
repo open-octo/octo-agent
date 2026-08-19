@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -149,7 +150,11 @@ func (t *Tunnel) watchActivity(ctx context.Context) {
 }
 
 func (t *Tunnel) watchActivityOnce(ctx context.Context) error {
-	ws, _, err := websocket.DefaultDialer.DialContext(ctx, t.wsBase+"/ws", nil)
+	// Authenticated like the bridge's own dials: this is a loopback client with
+	// no key otherwise, and the exemption that used to carry it is gone.
+	h := http.Header{}
+	t.authorize(h)
+	ws, _, err := websocket.DefaultDialer.DialContext(ctx, t.wsBase+"/ws", h)
 	if err != nil {
 		return err
 	}

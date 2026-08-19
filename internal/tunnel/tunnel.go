@@ -94,9 +94,11 @@ type Config struct {
 	// Its host:port is the base the bridge dials for both loopback HTTP (/api)
 	// and loopback WebSocket (/ws) calls.
 	LoopbackURL string
-	// AccessKey would authenticate a non-loopback client. The bridge dials
-	// 127.0.0.1, which the server exempts from the key check, so it is unused for
-	// now; kept for a future non-loopback bind.
+	// AccessKey authenticates every request the bridge replays into the local
+	// server. Required: the bridge marks its traffic as relayed (see
+	// bridge.go's headerForwarded), which costs it the server's
+	// loopback-without-a-key exemption — as it should, since the client on the
+	// other end is a phone across the internet, not someone at this keyboard.
 	AccessKey string
 	// Identity supplies the host's Noise static keypair (and, if TunnelID is
 	// unset, the tunnel id). Load it with LoadOrCreateIdentity to persist it in
