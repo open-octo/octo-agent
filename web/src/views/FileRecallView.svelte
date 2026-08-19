@@ -19,6 +19,13 @@
     orphan: boolean
   }
 
+  // embedded=true when mounted inside Settings' 数据管理 pane rather than as a
+  // full page: the sub-view header there already carries the "文件回收站"
+  // title, so this component's own big header would just repeat it, and its
+  // own flex/scroll wrapper would fight the pane's (which already scrolls
+  // internally — the modal's fixed height and comment on .pane say so).
+  let { embedded = false }: { embedded?: boolean } = $props()
+
   let items       = $state<TrashEntry[]>([])
   let loading     = $state(true)
   let busyId      = $state<string | null>(null)
@@ -169,12 +176,14 @@
   }
 </script>
 
-<div class="page">
-  <div class="inner">
+<div class="page" class:embedded>
+  <div class="inner" class:embedded>
+    {#if !embedded}
     <div class="page-header">
       <h2>{$t('files.title')}</h2>
       <p>{$t('files.subtitle')}</p>
     </div>
+    {/if}
 
     <!-- Stats + actions -->
     <div class="stats-bar">
@@ -236,7 +245,7 @@
                 {/if}
                 {#if f.project}
                   <span class="sep"></span>
-                  <span>{f.project}</span>
+                  <span class="meta-project">{f.project}</span>
                 {/if}
               </div>
             </div>
@@ -267,7 +276,13 @@
 
 <style>
 .page { flex: 1; overflow-y: auto; min-height: 0; background: var(--bg-layout); }
+/* Embedded in Settings: let the modal's own pane do the scrolling (it already
+   does, for every other category) instead of nesting a second scroll context,
+   and drop the background/margins that made sense as a full page but not as
+   one section of a settings pane. */
+.page.embedded { flex: none; overflow: visible; background: none; }
 .inner { max-width: 1000px; margin: 0 auto; padding: 26px 28px 40px; display: flex; flex-direction: column; gap: 20px; }
+.inner.embedded { max-width: none; margin: 0; padding: 0; }
 .page-header { display: flex; flex-direction: column; }
 h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; color: var(--text-heading); }
 p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 60ch; }
@@ -275,8 +290,13 @@ p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 6
   background: var(--bg-container); border: 1px solid var(--border); border-radius: var(--radius-card); box-shadow: var(--card-shadow);
   padding: 14px 20px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
 }
+/* Embedded in Settings' narrower pane, the count/size line and four action
+   buttons no longer fit one row — rather than squeezing the text into a sliver
+   that wraps word-by-word, stack them. */
+.page.embedded .stats-bar { flex-direction: column; align-items: stretch; }
 .stats-text { font-size: 13px; color: var(--text-tertiary); flex: 1; min-width: 0; }
-.bar-actions { display: flex; align-items: center; gap: 8px; }
+.page.embedded .stats-text { flex: none; width: 100%; }
+.bar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .btn-outline {
   height: 30px; padding: 0 12px; border: 1px solid var(--border); background: var(--bg-container); border-radius: 8px;
   display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: var(--text);
@@ -309,7 +329,17 @@ p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 6
 .file-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .file-name { font-size: 15px; font-weight: 600; color: var(--text-heading); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-path { font-size: 12px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-tertiary); padding-top: 1px; }
+.file-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-tertiary); padding-top: 1px; min-width: 0; }
+/* The provenance path (session id / cwd) is the one open-ended-length piece in
+   this row — without its own shrink+ellipsis it forces the row to overflow
+   rather than wrap, especially once this view sits inside Settings' narrower
+   pane rather than a full page. */
+.file-meta .mono { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* f.project is the other open-ended piece in this row (it's a working-directory
+   path, not a short label) — same treatment, and the one that was actually
+   free-wrapping across several lines: a bare <span> has no width constraint of
+   its own to shrink against. */
+.file-meta .meta-project { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sep { width: 3px; height: 3px; border-radius: 9999px; background: var(--text-quaternary); }
 .file-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .icon-btn {

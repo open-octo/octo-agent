@@ -53,7 +53,6 @@
     { icon: 'ant-design:api-outlined', label: 'nav.mcp', v: 'mcp' },
     { icon: 'ant-design:partition-outlined', label: 'nav.workflows', v: 'workflows' },
     { icon: 'ant-design:user-outlined', label: 'nav.memory', v: 'profile' },
-    { icon: 'ant-design:folder-open-outlined', label: 'nav.file_recall', v: 'files' },
   ]
 
   // The nav group, in both widths: the destinations worth a row of their own.
@@ -182,19 +181,18 @@
   // Whether the folded panel's list is expanded. Deliberately ephemeral (not
   // persisted like a group's collapsed flag): the panel exists to keep the
   // list short, so every fresh mount starts folded shut.
-  let foldedOpen = $state(false)
 
   // Collapse a session into the folded panel, or restore it. Optimistic like
   // togglePin. The collapse action is only offered on unpinned, ungrouped
   // sessions (the server rejects the rest), so no local guard is needed.
-  async function toggleSessionCollapse(sessionId: string, collapse: boolean) {
+  // Un-archiving lives in Settings' 数据管理 now (SettingsModal.svelte), the
+  // only place an archived session is still visible — hence one direction only.
+  async function archiveSession(sessionId: string) {
     menuFor.set(null)
     const before = $collapsedSessions
-    collapsedSessions.set(collapse
-      ? [...before.filter(id => id !== sessionId), sessionId]
-      : before.filter(id => id !== sessionId))
+    collapsedSessions.set([...before.filter(id => id !== sessionId), sessionId])
     try {
-      await api.setSessionCollapsed(sessionId, collapse)
+      await api.setSessionCollapsed(sessionId, true)
     } catch {
       collapsedSessions.set(before)
       showToast(tr('sidebar.collapse_failed'))
@@ -268,7 +266,6 @@
     ...groupedView.pinned.map(s => s.id),
     ...groupedView.ungrouped.map(s => s.id),
     ...groupedView.projects.flatMap(gv => gv.items.map(s => s.id)),
-    ...groupedView.folded.map(s => s.id),
   ])
 
   type TriState = 'none' | 'some' | 'all'
@@ -568,24 +565,6 @@
         {/if}
         {/if}
 
-        <!-- Collapsed: a folded panel at the very bottom. The panel itself
-             starts shut on every mount (only the count shows) — it exists to
-             keep the list short, so it never opens on its own. -->
-        {#if groupedView.folded.length > 0}
-        <div class="grp-header">
-          {#if $selMode}{@render triBox(triStateOf(groupedView.folded.map(s => s.id)), () => toggleMany(groupedView.folded.map(s => s.id)))}{/if}
-          <span class="grp-caret" onclick={() => (foldedOpen = !foldedOpen)}>
-            <iconify-icon icon={foldedOpen ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="10"></iconify-icon>
-          </span>
-          <span class="grp-name muted" onclick={() => (foldedOpen = !foldedOpen)}>{$t('sidebar.collapsed')}</span>
-          <span class="grp-count">{groupedView.folded.length}</span>
-        </div>
-        {#if foldedOpen}
-          {#each groupedView.folded as s (s.id)}
-            {@render sessionRow(s)}
-          {/each}
-        {/if}
-        {/if}
       </div>
 
       {#snippet groupBlock(gv: any, gi: number, siblings: string[])}
@@ -727,31 +706,27 @@
           {/if}
           {#if !$selMode}
             {@const pinned = isPinned(s.id)}
-            {@const collapsed = isCollapsed(s.id)}
             <!-- Two actions earn a place on the row: they are the ones used
                  while scanning the list, and both are one click with nothing to
                  confirm. Everything else lives in the menu — rename opens an
                  input, delete destroys a transcript; neither belongs under a
-                 cursor that is just passing over the row. -->
+                 cursor that is just passing over the row. Archiving a session
+                 (and un-archiving one) now lives in Settings' 数据管理, not here
+                 — a session dropped off this list entirely once archived, so
+                 there was no row left to offer "un-archive" from anyway. -->
             <span class="row-action on-hover kebab" onclick={(e) => { e.stopPropagation(); menuFor.update(m => m === s.id ? null : s.id) }} style="color:{solid ? 'var(--blue-6)' : 'var(--text-tertiary)'}">
               <iconify-icon icon="ant-design:more-outlined" width="14"></iconify-icon>
             </span>
-            {#if collapsed}
-            <span class="row-action on-hover" title={$t('sidebar.uncollapse')} onclick={(e) => { e.stopPropagation(); toggleSessionCollapse(s.id, false) }}>
-              <iconify-icon icon="lucide:archive-restore" width="13"></iconify-icon>
-            </span>
-            {:else if !pinned && !groupIdOf(s.id)}
-            <!-- Collapse is only offered where it's legal (unpinned +
-                 ungrouped), matching the server's guard. -->
-            <span class="row-action on-hover" title={$t('sidebar.collapse')} onclick={(e) => { e.stopPropagation(); toggleSessionCollapse(s.id, true) }}>
+            {#if !pinned && !groupIdOf(s.id)}
+            <!-- Archiving is only legal where unpinned + ungrouped, matching
+                 the server's guard. -->
+            <span class="row-action on-hover" title={$t('sidebar.collapse')} onclick={(e) => { e.stopPropagation(); archiveSession(s.id) }}>
               <iconify-icon icon="lucide:archive" width="13"></iconify-icon>
             </span>
             {/if}
-            {#if !collapsed}
             <span class="row-action on-hover" title={pinned ? $t('sidebar.unpin') : $t('sidebar.pin')} onclick={(e) => { e.stopPropagation(); togglePin(s.id, !pinned) }}>
               <iconify-icon icon={pinned ? 'ant-design:pushpin-filled' : 'ant-design:pushpin-outlined'} width="13"></iconify-icon>
             </span>
-            {/if}
             {#if menuOpen}
             <div class="row-menu" onclick={(e) => e.stopPropagation()}>
               <!-- First entry: acting on many sessions starts from one of them,

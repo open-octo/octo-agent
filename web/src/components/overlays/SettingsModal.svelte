@@ -3,12 +3,15 @@
   import Switch from '../ui/Switch.svelte'
   import EndpointsSection from '../settings/EndpointsSection.svelte'
   import QrCode from '../ui/QrCode.svelte'
+  import FileRecallView from '../../views/FileRecallView.svelte'
   import { get } from 'svelte/store'
-  import { showToast, nativeShell, settingsModalOpen, onboardPhase } from '../../lib/stores'
-  import { setLocale, t } from '../../lib/i18n'
+  import { showToast, nativeShell, settingsModalOpen, onboardPhase, sessions, collapsedSessions, activeSessionId, view, clearPendingSessionOpts } from '../../lib/stores'
+  import { setLocale, t, tr } from '../../lib/i18n'
   import { getMode, setMode, type ThemeMode } from '../../lib/theme'
   import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
   import { openUrl } from '../../lib/externalLinks'
+  import { confirmDialog } from '../../lib/confirm'
+  import { ago } from '../../lib/relTime'
   import * as api from '../../lib/api'
 
   const LICENSE_URL = 'https://github.com/open-octo/octo-agent/blob/main/LICENSE.txt'
@@ -45,8 +48,44 @@
   let upgradeMode   = $state<'cli' | 'installer'>('cli')
   let loading       = $state(true)
 
-  let cat = $state<'general' | 'endpoints' | 'agent' | 'mobile' | 'about'>('general')
+  let cat = $state<'general' | 'endpoints' | 'agent' | 'mobile' | 'data' | 'about'>('general')
   let modalEl = $state<HTMLDivElement | null>(null)
+
+  // 数据管理 has its own two-level nav — a list of managed things, and one
+  // sub-view per thing — because unlike every other category here it isn't a
+  // handful of settings but potentially long lists (archived sessions, trashed
+  // files). Reset whenever the category (or the whole modal) changes, so
+  // leaving and returning to 数据管理 always lands on the list, not wherever
+  // you left off.
+  let dataSubView = $state<'none' | 'archived' | 'trash'>('none')
+  const archivedSessions = $derived($sessions.filter(s => $collapsedSessions.includes(s.id)))
+
+  async function unarchiveSession(id: string) {
+    const before = get(collapsedSessions)
+    collapsedSessions.set(before.filter(x => x !== id))
+    try {
+      await api.setSessionCollapsed(id, false)
+    } catch (e: any) {
+      collapsedSessions.set(before)
+      showToast(e?.message ?? tr('sidebar.collapse_failed'), 'error')
+    }
+  }
+
+  async function deleteArchivedSession(id: string) {
+    if (!(await confirmDialog(tr('sidebar.confirm_delete')))) return
+    try {
+      await api.deleteSession(id)
+      sessions.update(ss => ss.filter(s => s.id !== id))
+      collapsedSessions.update(ids => ids.filter(x => x !== id))
+      if (get(activeSessionId) === id) {
+        activeSessionId.set(null)
+        clearPendingSessionOpts()
+        view.set('chat')
+      }
+    } catch (e: any) {
+      showToast(e.message, 'error')
+    }
+  }
 
   // Managed-tunnel pairing material (null until fetched; .enabled false when
   // the server was not started with --tunnel).
@@ -74,6 +113,7 @@
     { key: 'endpoints', icon: 'ant-design:api-outlined',           label: 'settings.endpoints.title' },
     { key: 'agent',     icon: 'ant-design:robot-outlined',         label: 'settings.agent' },
     { key: 'mobile',    icon: 'ant-design:mobile-outlined',        label: 'settings.mobile' },
+    { key: 'data',      icon: 'ant-design:database-outlined',       label: 'settings.data' },
     { key: 'about',     icon: 'ant-design:info-circle-outlined',   label: 'settings.about' },
   ]
 
@@ -83,6 +123,7 @@
   $effect(() => {
     if ($settingsModalOpen) {
       cat = 'general'
+      dataSubView = 'none'
       loadConfig()
       loadVersion()
       if (get(nativeShell)) api.getAutostart().then(v => (autostart = v)).catch(() => {})
@@ -296,7 +337,7 @@
     <div class="modal-body">
       <div class="rail">
         {#each categories as c (c.key)}
-          <div class="scat" class:on={cat === c.key} onclick={() => (cat = c.key)}>
+          <div class="scat" class:on={cat === c.key} onclick={() => { cat = c.key; dataSubView = 'none' }}>
             <iconify-icon icon={c.icon} width="15"></iconify-icon>
             <span>{$t(c.label)}</span>
           </div>
@@ -425,6 +466,56 @@
             </div>
           {:else}
             <div class="mobile-disabled">{$t('settings.mobile.disabled')}</div>
+          {/if}
+
+        {:else if cat === 'data'}
+          {#if dataSubView === 'none'}
+            <div class="data-row">
+              <div class="data-row-main">
+                <iconify-icon icon="lucide:archive" width="15"></iconify-icon>
+                <span class="setl">{$t('settings.data.archived')}</span>
+                <span class="data-count">{archivedSessions.length}</span>
+              </div>
+              <button class="link-btn" onclick={() => (dataSubView = 'archived')}>{$t('settings.data.manage')}</button>
+            </div>
+            <div class="data-row">
+              <div class="data-row-main">
+                <iconify-icon icon="ant-design:delete-outlined" width="15"></iconify-icon>
+                <span class="setl">{$t('nav.file_recall')}</span>
+              </div>
+              <button class="link-btn" onclick={() => (dataSubView = 'trash')}>{$t('settings.data.manage')}</button>
+            </div>
+          {:else}
+            <div class="data-subhead">
+              <button class="back-btn" onclick={() => (dataSubView = 'none')}>
+                <iconify-icon icon="ant-design:left-outlined" width="14"></iconify-icon>
+              </button>
+              <span class="data-subtitle">
+                {dataSubView === 'archived' ? $t('settings.data.archived') : $t('nav.file_recall')}
+              </span>
+            </div>
+            {#if dataSubView === 'archived'}
+              {#if archivedSessions.length === 0}
+                <div class="data-empty">{$t('settings.data.archived_empty')}</div>
+              {:else}
+                <div class="archived-list">
+                  {#each archivedSessions as s (s.id)}
+                    <div class="archived-row">
+                      <div class="archived-info">
+                        <span class="archived-name">{(s as any).name || (s as any).title || s.id}</span>
+                        <span class="archived-meta mono">{s.id} · {ago((s as any).updated_at, $t)}</span>
+                      </div>
+                      <div class="archived-actions">
+                        <button class="btns danger" onclick={() => deleteArchivedSession(s.id)}>{$t('common.delete')}</button>
+                        <button class="btns" onclick={() => unarchiveSession(s.id)}>{$t('sidebar.uncollapse')}</button>
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            {:else}
+              <FileRecallView embedded />
+            {/if}
           {/if}
 
         {:else if cat === 'about'}
@@ -575,4 +666,33 @@ select.sinput { cursor: pointer; }
 .mobile-info .btns { align-self: flex-start; }
 .mobile-disabled { padding: 28px 16px; text-align: center; font-size: 13px; color: var(--text-tertiary); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* ── data management ─────────────────────────────────────────────────────── */
+.data-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 12px 10px; margin: 0 -10px; border-radius: 8px;
+}
+.data-row:hover { background: var(--hover-neutral); }
+.data-row-main { display: flex; align-items: center; gap: 9px; min-width: 0; color: var(--text-tertiary); }
+.data-count { font-size: 12px; color: var(--text-tertiary); }
+.data-subhead { display: flex; align-items: center; gap: 8px; padding: 2px 0 14px; }
+.back-btn {
+  width: 26px; height: 26px; border: none; background: transparent; border-radius: 7px;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-secondary);
+}
+.back-btn:hover { background: var(--hover-neutral); color: var(--text); }
+.data-subtitle { font-size: 14px; font-weight: 600; color: var(--text-heading); }
+.data-empty { padding: 32px 4px; text-align: center; font-size: 13px; color: var(--text-tertiary); }
+.archived-list { display: flex; flex-direction: column; }
+.archived-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 12px 2px; border-bottom: 1px solid var(--border-secondary);
+}
+.archived-row:last-child { border-bottom: none; }
+.archived-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.archived-name { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.archived-meta { font-size: 11px; color: var(--text-tertiary); }
+.archived-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.btns.danger { color: var(--error); }
+.btns.danger:hover:not(:disabled) { background: var(--error-bg); border-color: var(--error-border); }
 </style>
