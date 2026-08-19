@@ -182,7 +182,9 @@ type updateSessionGroupRequest struct {
 
 ## UI
 
-侧栏分两节，判据全在 `web/src/lib/sidebarSections.ts` 的 `splitSections`：
+侧栏从上到下是：**去哪**（新建会话 / 定时任务 / 浏览器 / 轻应用 / 渠道 / 更多），然后才是**做过什么**（会话列表）。会话列表是这里唯一会无限增长的东西，放在最后意味着一个导航项的位置不随会话数变化，再长的历史也推不走一个入口。「更多」里是访问频率低的配置（专家 / 技能 / MCP / 工作流 / 助手记忆 / 文件回收站）；窄栏（rail）的图标列表由同一份 `topNav` 派生，两者不会漂移。
+
+会话列表分两节，判据全在 `web/src/lib/sidebarSections.ts` 的 `splitSections`：
 
 | 节 | 内容 | 用户可编辑 |
 |---|---|---|

@@ -43,11 +43,23 @@
       : { top: r.bottom + 2, left: r.left, width: r.width + 8 }
     morePopoverOpen = true
   }
+  // Everything reachable but not reached often. The four destinations that ARE
+  // reached often sit in the nav group instead; what is left is configuration you
+  // visit to change something and then leave.
   const moreCategories = [
     { icon: 'ant-design:robot-outlined', label: 'nav.agents', v: 'agents' },
     { icon: 'ant-design:thunderbolt-outlined', label: 'nav.skills', v: 'skills' },
     { icon: 'ant-design:api-outlined', label: 'nav.mcp', v: 'mcp' },
     { icon: 'ant-design:partition-outlined', label: 'nav.workflows', v: 'workflows' },
+    { icon: 'ant-design:user-outlined', label: 'nav.memory', v: 'profile' },
+    { icon: 'ant-design:folder-open-outlined', label: 'nav.file_recall', v: 'files' },
+  ]
+
+  // The nav group, in both widths: the destinations worth a row of their own.
+  const topNav = [
+    { icon: 'ant-design:clock-circle-outlined', label: 'nav.tasks', v: 'tasks' },
+    { icon: 'ant-design:global-outlined', label: 'nav.browser', v: 'browser' },
+    { icon: 'ant-design:appstore-outlined', label: 'nav.light_apps', v: 'lightapps' },
     { icon: 'ant-design:mobile-outlined', label: 'nav.channels', v: 'channels' },
   ]
   function goToMore(v: string) {
@@ -220,13 +232,11 @@
     return () => window.removeEventListener('click', onDocClick)
   })
 
+  // Same destinations as topNav, plus chat — the rail is the same sidebar with
+  // the labels taken away, so the two must not drift apart.
   const railNav = [
     { icon: 'ant-design:message-outlined', title: 'sidebar.chat', v: 'chat' },
-    { icon: 'ant-design:clock-circle-outlined', title: 'nav.tasks', v: 'tasks' },
-    { icon: 'ant-design:global-outlined', title: 'nav.browser', v: 'browser' },
-    { icon: 'ant-design:user-outlined', title: 'nav.memory', v: 'profile' },
-    { icon: 'ant-design:appstore-outlined', title: 'nav.light_apps', v: 'lightapps' },
-    { icon: 'ant-design:folder-open-outlined', title: 'nav.file_recall', v: 'files' },
+    ...topNav.map(item => ({ icon: item.icon, title: item.label, v: item.v })),
   ]
 
   function navActive(v: string) { return $view === v }
@@ -475,23 +485,46 @@
 
   {#if $sidebar === 'full'}
   <div class="full">
-    <!-- New session is a nav row like every other destination, not an accent
-         button: it goes to the same landing page they go to, and the sidebar
-         should not imply otherwise. Its active state is being ON that landing
-         page — chat view with no session picked. -->
-    <div class="new-row-wrap">
-      <div class="nav-row" class:solid={onLanding} onclick={() => createNewSession()}>
-        <iconify-icon icon="ant-design:plus-circle-outlined" width="14" style="color:{onLanding ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
-        <span style="font-size:13px;color:{onLanding ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{onLanding ? '600' : '400'};">{$t('nav.new_session')}</span>
-      </div>
-    </div>
-
     <div class="scroll">
-      <!-- Sessions — sized to its own content (no forced grow-to-fill), so a
-           short list doesn't leave a reserved gap above Config/My Data; it
-           still shrinks (bounded by min-height) once the combined stack would
-           overflow .scroll, scrolling internally so a long session list never
-           pushes Config/My Data out of view or requires scrolling past it. -->
+      <!-- Where you go, above what you have been doing. The session list is the
+           long, growing part of this sidebar; putting it last means a nav row's
+           position does not depend on how many sessions exist, and no amount of
+           history can push a destination out of reach.
+           New session is one of these rows rather than an accent button: it goes
+           to the same landing page they go to, and its active state is being ON
+           that landing page — chat view with no session picked. -->
+      <div class="nav-group">
+        <div class="nav-row" class:solid={onLanding} onclick={() => createNewSession()}>
+          <iconify-icon icon="ant-design:plus-circle-outlined" width="14" style="color:{onLanding ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
+          <span style="font-size:13px;color:{onLanding ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{onLanding ? '600' : '400'};">{$t('nav.new_session')}</span>
+        </div>
+        {#each topNav as item (item.v)}
+        <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>
+          <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
+          <span style="font-size:13px;color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive(item.v) ? '600' : '400'};">{$t(item.label)}</span>
+        </div>
+        {/each}
+        <div class="more-wrap" bind:this={morePopoverEl}>
+          <div class="nav-row" class:solid={moreActive()} onclick={(e) => toggleMorePopover(e.currentTarget as HTMLElement, 'full')}>
+            <iconify-icon icon="ant-design:menu-outlined" width="14" style="color:{moreActive() ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
+            <span style="font-size:13px;color:{moreActive() ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{moreActive() ? '600' : '400'};">{$t('nav.manage')}</span>
+          </div>
+          {#if morePopoverOpen}
+          <div class="more-popover" use:portal style="top:{morePos.top}px; left:{morePos.left}px; width:{morePos.width}px;">
+            {#each moreCategories as c (c.v)}
+            <button class="ap-item" onclick={() => goToMore(c.v)}>
+              <iconify-icon icon={c.icon} width="14" style="color:var(--text-tertiary)"></iconify-icon>
+              <span>{$t(c.label)}</span>
+            </button>
+            {/each}
+          </div>
+          {/if}
+        </div>
+      </div>
+
+      <!-- The session list, last and elastic: it sizes to its own content and is
+           the one thing that gives (bounded by min-height, scrolling internally)
+           once the stack would overflow .scroll. -->
       <div class="nav-group sessions-group">
 
         <!-- Pinned: a dedicated top section, above all groups -->
@@ -747,49 +780,6 @@
         </div>
       {/snippet}
 
-      <!-- Config -->
-      <div class="nav-group">
-        <div class="group-header"><span class="group-label">{$t('nav.config')}</span></div>
-        <div class="nav-row" class:solid={navActive('tasks')} onclick={() => view.set('tasks')}>
-          <iconify-icon icon="ant-design:clock-circle-outlined" width="14" style="color:{navActive('tasks') ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
-          <span style="font-size:13px;color:{navActive('tasks') ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive('tasks') ? '600' : '400'};">{$t('nav.tasks')}</span>
-        </div>
-        <div class="nav-row" class:solid={navActive('browser')} onclick={() => view.set('browser')}>
-          <iconify-icon icon="ant-design:global-outlined" width="14" style="color:{navActive('browser') ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
-          <span style="font-size:13px;color:{navActive('browser') ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive('browser') ? '600' : '400'};">{$t('nav.browser')}</span>
-        </div>
-        <div class="more-wrap" bind:this={morePopoverEl}>
-          <div class="nav-row" class:solid={moreActive()} onclick={(e) => toggleMorePopover(e.currentTarget as HTMLElement, 'full')}>
-            <iconify-icon icon="ant-design:menu-outlined" width="14" style="color:{moreActive() ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
-            <span style="font-size:13px;color:{moreActive() ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{moreActive() ? '600' : '400'};">{$t('nav.manage')}</span>
-          </div>
-          {#if morePopoverOpen}
-          <div class="more-popover" use:portal style="top:{morePos.top}px; left:{morePos.left}px; width:{morePos.width}px;">
-            {#each moreCategories as c (c.v)}
-            <button class="ap-item" onclick={() => goToMore(c.v)}>
-              <iconify-icon icon={c.icon} width="14" style="color:var(--text-tertiary)"></iconify-icon>
-              <span>{$t(c.label)}</span>
-            </button>
-            {/each}
-          </div>
-          {/if}
-        </div>
-      </div>
-
-      <!-- My Data -->
-      <div class="nav-group">
-        <div class="group-header"><span class="group-label">{$t('nav.my_data')}</span></div>
-        {#each [
-          { icon: 'ant-design:user-outlined', label: 'nav.memory', v: 'profile' },
-          { icon: 'ant-design:appstore-outlined', label: 'nav.light_apps', v: 'lightapps' },
-          { icon: 'ant-design:folder-open-outlined', label: 'nav.file_recall', v: 'files' },
-        ] as item}
-        <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>
-          <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
-          <span style="font-size:13px;color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive(item.v) ? '600' : '400'};">{$t(item.label)}</span>
-        </div>
-        {/each}
-      </div>
     </div>
 
     {#if $selMode}
@@ -886,7 +876,6 @@
 .full { width: 256px; height: 100%; display: flex; flex-direction: column; min-height: 0; }
 /* Matches .scroll's horizontal padding so the row lines up with every nav row
    below it — it is one of them, just pinned above the scrolling area. */
-.new-row-wrap { padding: 12px 12px 4px; }
 .ap-item {
   display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px; border: none;
   background: transparent; color: var(--text); font-size: 13px;
@@ -908,7 +897,7 @@
   font-size: 10px; font-weight: 600; white-space: nowrap;
   max-width: 64px; overflow: hidden; text-overflow: ellipsis;
 }
-.scroll { flex: 1; min-height: 0; overflow: hidden; padding: 8px 12px; display: flex; flex-direction: column; gap: 20px; }
+.scroll { flex: 1; min-height: 0; overflow: hidden; padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 18px; }
 .nav-group { display: flex; flex-direction: column; gap: 2px; flex: 0 0 auto; }
 /* Sessions is the only group with no forced grow-to-fill (flex-grow:0, unlike
    the "1 1 auto" this used to be) — a short list sizes to its own content
@@ -918,8 +907,6 @@
    would overflow .scroll, sessions is still the one that gives, scrolling
    internally so a long list never pushes Config/My Data out of view. */
 .sessions-group { flex: 0 1 auto; min-height: 80px; overflow-y: auto; }
-.group-header { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 6px; }
-.group-label { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; color: var(--text-quaternary); }
 /* Group section header (folder row) */
 /* Section heading (Tasks / Projects). Sits a tier above .grp-header: it names
    a whole kind of entry rather than one group, so it reads quieter and tighter

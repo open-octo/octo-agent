@@ -2,8 +2,6 @@ import { writable, derived, get } from "svelte/store";
 
 export const en: Record<string, string> = {
   "nav.sessions": "Sessions",
-  "nav.config": "MANAGE",
-  "nav.my_data": "MY DATA",
   "nav.new_session": "New Session",
   "nav.tasks": "Scheduled Tasks",
   "nav.skills": "Skills",
@@ -885,8 +883,6 @@ export const en: Record<string, string> = {
 
 export const zh: Record<string, string> = {
   "nav.sessions": "会话",
-  "nav.config": "管理",
-  "nav.my_data": "我的数据",
   "nav.new_session": "新建会话",
   "nav.tasks": "定时任务",
   "nav.skills": "技能",
