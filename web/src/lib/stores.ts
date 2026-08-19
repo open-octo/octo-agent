@@ -262,9 +262,13 @@ export function prependSession(sess: Session) {
 // noise here, so ChatView skips it for these ids.
 export const agenticSessions = new Set<string>()
 
-// Clear every pick the landing page parks, so one "new session" click never
-// inherits the leftovers of the last one that was abandoned without sending.
-function clearPendingSessionOpts() {
+// Clear every pick the landing page parks. Called by the entry points that
+// open it, and by every route that lands there by other means — deleting the
+// open session, or a session_deleted broadcast — because a docked group is
+// invisible on that page: without this, clicking a group's "+", changing your
+// mind, and later deleting some session would file your next message into that
+// group with nothing on screen having said so.
+export function clearPendingSessionOpts() {
   pendingAgent.set('')
   pendingGroupId.set('')
   pendingWorkingDir.set('')
@@ -298,11 +302,14 @@ export function createSessionInGroup(groupId: string): void {
   view.set('chat')
 }
 
-// Trailing slashes are the only shape difference the pickers can produce —
-// both the in-app tree and the native dialog return absolute paths, and the
-// server has already expanded any "~" in what it stored.
+// Trailing slashes are the shape difference the pickers produce: both the
+// in-app tree and the native dialog return absolute paths, and the server has
+// already expanded any "~" in what it stored. Not a guarantee of uniqueness —
+// on a case-insensitive filesystem a hand-typed path differing only in case
+// stats fine and comes back verbatim, which would match no existing project and
+// build a second one for the same directory.
 export function normalizeDir(p: string): string {
-  return p.replace(/\/+$/, '')
+  return p.replace(/[\\/]+$/, '')
 }
 
 // Resolve a working directory picked on the landing page to the project that
@@ -314,7 +321,9 @@ export async function resolveProjectForDir(dir: string): Promise<string> {
   const target = normalizeDir(dir)
   const existing = get(sessionGroups).find(g => !!g.working_dir && normalizeDir(g.working_dir!) === target)
   if (existing) return existing.id
-  const name = target.split('/').filter(Boolean).pop() || target
+  // Split on either separator: on Windows a path has no '/' at all, and the
+  // project would otherwise be named after the whole path.
+  const name = target.split(/[\\/]/).filter(Boolean).pop() || target
   const g = await api.createSessionGroup(name, { working_dir: dir })
   sessionGroups.update(gs => [...gs, g])
   return g.id

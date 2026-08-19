@@ -10,6 +10,7 @@
     pendingWorkingDir,
     pendingGroupId,
     resolveProjectForDir,
+    prependSession,
     sessions,
     sessionGroups,
     chatMessages,
@@ -1980,15 +1981,30 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   }
 
   // ensureActiveSession returns the session to send into, creating one first
-  // if none is active. This is the ONLY place a chat session is created: the
-  // sidebar "+", the command palette, the desktop tray and ⌘N all just open
-  // this blank landing and park their picks in the pending* stores, so a
-  // session exists on disk and in the sidebar only once something is actually
-  // said in it. `created` reports whether this call is what created it: the
+  // if none is active. This is the only place the ORDINARY new-session flow
+  // creates one: the sidebar "+", the command palette, the desktop tray and ⌘N
+  // all just open this blank landing and park their picks in the pending*
+  // stores, so a session exists on disk and in the sidebar only once something
+  // is actually said in it. (The panel-launched flows in stores.ts —
+  // openAgentSession, summonAgent — create their own up front, since they always
+  // have a prompt to send.) `created` reports whether this call is what created it: the
   // caller must not send straight into a session it just created (see send()).
+  // In-flight creation, shared by concurrent callers. Creating a session is now
+  // up to two round-trips (a project, then the session), and a second send
+  // arriving inside that window would see activeSessionId still unset and start
+  // its own — two sessions, one message in each. It also protects
+  // resolveProjectForDir from building the same project twice.
+  let creating: Promise<{ id: string; created: boolean } | null> | null = null
+
   async function ensureActiveSession(): Promise<{ id: string; created: boolean } | null> {
     const existing = get(activeSessionId)
     if (existing) return { id: existing, created: false }
+    if (creating) return creating
+    creating = createSessionForFirstMessage().finally(() => { creating = null })
+    return creating
+  }
+
+  async function createSessionForFirstMessage(): Promise<{ id: string; created: boolean } | null> {
     try {
       // A model picked in the composer before any session existed rides the
       // pendingModel store (composite "<endpoint>::<model>" id — the create
@@ -2009,14 +2025,31 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // With neither, it stays an ungrouped task.
       const groupId = get(pendingGroupId)
       const dir = get(pendingWorkingDir)
-      opts.group_id = groupId || (dir ? await resolveProjectForDir(dir) : undefined)
-      const created = await api.createSession(opts) as any
+      // Track whether THIS call is what created the project, so a failure to
+      // create the session can take it back down again. Otherwise a server
+      // restart or a rejected create leaves an empty project in the sidebar
+      // that the user has to notice and delete by hand.
+      let createdProject = ''
+      if (groupId) {
+        opts.group_id = groupId
+      } else if (dir) {
+        const before = get(sessionGroups).length
+        opts.group_id = await resolveProjectForDir(dir)
+        if (get(sessionGroups).length > before) createdProject = opts.group_id
+      }
+      let created: any
+      try {
+        created = await api.createSession(opts) as any
+      } catch (e) {
+        if (createdProject) await discardProject(createdProject)
+        throw e
+      }
       pendingModel.set('')
       pendingAgent.set('')
       pendingGroupId.set('')
       pendingWorkingDir.set('')
       const newSess = created.session ?? created
-      sessions.update(ss => [newSess, ...ss.filter((s: any) => s.id !== newSess.id)])
+      prependSession(newSess)
       // The server filed it under the group; mirror that locally so the
       // sidebar shows the row under its project without waiting for a refetch.
       if (opts.group_id) {
@@ -2031,6 +2064,17 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       showToast(e.message, 'error')
       return null
     }
+  }
+
+  // Undo a project this send created moments ago, after the session it was
+  // created for failed. Best-effort: a failure here is not worth a second toast
+  // on top of the one the caller already showed, and the project is visible in
+  // the sidebar for the user to remove.
+  async function discardProject(groupId: string) {
+    try {
+      await api.deleteSessionGroup(groupId)
+      sessionGroups.update(gs => gs.filter(g => g.id !== groupId))
+    } catch { /* leave it; the user can delete it from the sidebar */ }
   }
 
   // ── send message ───────────────────────────────────────────────────────────
@@ -2048,7 +2092,14 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   async function send(text: string, files?: any[], queued = false) {
     if (!text.trim() && !(files && files.length)) return
     const active = await ensureActiveSession()
-    if (!active) return
+    if (!active) {
+      // The composer cleared its input before calling us, so without this the
+      // user's first message is simply gone — and this path now runs for EVERY
+      // new session's first message, across two requests that can each fail,
+      // not just the rare post-delete case it started as.
+      composer?.restore(text, files)
+      return
+    }
     const sid = active.id
     if (active.created) {
       // Nothing is subscribed to a session that existed a millisecond ago: the

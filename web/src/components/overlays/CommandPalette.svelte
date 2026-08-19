@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { cmdkOpen, view, sessions, activeSessionId, skills, openAgentSession, createNewSession, showToast, panelContent, settingsModalOpen, isDesktopShell } from '../../lib/stores'
+  import { cmdkOpen, view, sessions, activeSessionId, skills, openAgentSession, createNewSession, panelContent, settingsModalOpen, isDesktopShell } from '../../lib/stores'
   import { t } from '../../lib/i18n'
 
   let query = $state('')

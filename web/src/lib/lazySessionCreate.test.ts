@@ -20,6 +20,7 @@ import * as api from './api'
 import {
   createNewSession,
   createSessionInGroup,
+  clearPendingSessionOpts,
   resolveProjectForDir,
   activeSessionId,
   view,
@@ -129,5 +130,25 @@ describe('resolveProjectForDir', () => {
     vi.mocked(api.createSessionGroup).mockRejectedValueOnce(new Error('nope'))
     await expect(resolveProjectForDir('/work/app')).rejects.toThrow('nope')
     expect(get(sessionGroups)).toEqual([])
+  })
+})
+
+describe('clearPendingSessionOpts', () => {
+  // A docked group leaves no mark on the landing page, so a pick that survives
+  // into an unrelated session files that session somewhere the user never saw
+  // named. Every route back to the landing page — deleting the open session, a
+  // session_deleted broadcast — calls this for that reason.
+  it('drops every parked pick', () => {
+    createSessionInGroup('g-42')
+    pendingWorkingDir.set('/work/app')
+    pendingAgent.set('expert-7')
+    pendingModel.set('ep::gpt')
+
+    clearPendingSessionOpts()
+
+    expect(get(pendingGroupId)).toBe('')
+    expect(get(pendingWorkingDir)).toBe('')
+    expect(get(pendingAgent)).toBe('')
+    expect(get(pendingModel)).toBe('')
   })
 })

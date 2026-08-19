@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sessions, sessionGroups, pinnedSessions, collapsedSessions, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent, cmdkOpen, settingsModalOpen, createNewSession, isDesktopShell } from './lib/stores'
+  import { view, sessions, sessionGroups, pinnedSessions, collapsedSessions, activeSessionId, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent, cmdkOpen, settingsModalOpen, createNewSession, clearPendingSessionOpts, isDesktopShell } from './lib/stores'
   import MobileApp from './mobile/MobileApp.svelte'
   import { ws, wsState } from './lib/ws'
   import { notificationsEnabled } from './lib/notifications'
@@ -202,6 +202,7 @@
       sessions.update(list => list.filter(s => s.id !== ev.session_id))
       if (get(activeSessionId) === ev.session_id) {
         activeSessionId.set(null)
+        clearPendingSessionOpts()
         // A session deleted by another entry (e.g. another tab or the CLI)
         // should not leave the chat view stuck on a bound-to-another-entry
         // banner. Reset to the default chat landing.

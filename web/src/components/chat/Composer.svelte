@@ -743,9 +743,10 @@
   let agentLocked = $derived(!!currentSession && ((currentSession as any)?.turn_count ?? 0) > 0)
   let sessionAgent = $derived((currentSession as any)?.agent_profile ?? '')
   // Which id is "current" right now: the session's own profile once one
-  // exists (even pre-lock), else the pending pick for the session about to
-  // be auto-created (ensureActiveSession in ChatView reads the activeAgent
-  // store, mirroring the sidebar's own new-session picker).
+  // exists (even pre-lock), else the pending pick for the session about to be
+  // created on send (ensureActiveSession prefers pendingAgent — what the
+  // sidebar's "+" caret or this picker chose for THIS landing page — and falls
+  // back to the globally active agent).
   let effectiveAgentId = $derived(currentSession ? sessionAgent : ($pendingAgent || $activeAgent))
   // Empty when the default agent applies — the chip only renders for an
   // expert agent.

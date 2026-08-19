@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, settingsModalOpen } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
@@ -253,6 +253,7 @@
       sessions.update(ss => ss.filter(s => !$sel[s.id]))
       if (ids.includes($activeSessionId ?? '')) {
         activeSessionId.set(null)
+        clearPendingSessionOpts()
         view.set('chat')
       }
     } catch (e: any) { showToast(e.message, 'error') }
@@ -266,6 +267,7 @@
       sessions.update(ss => ss.filter(s => s.id !== id))
       if ($activeSessionId === id) {
         activeSessionId.set(null)
+        clearPendingSessionOpts()
         // Clearing the active session while still on the chat view would leave
         // ChatView rendering a phantom "bound to another entry" banner. Fall
         // back to the session list landing so the deleted session is gone and
