@@ -796,7 +796,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	var memDir, homeMemDir string
 	var memWriteRoots []string
 	if !*noMemory {
-		if d, _, err := memory.DirForProject(cwd); err == nil {
+		if d, err := memory.DirForProject(cwd); err == nil {
 			if memory.EnsureDir(d) == nil {
 				memDir = d
 			}

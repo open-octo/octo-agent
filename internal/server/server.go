@@ -1836,14 +1836,18 @@ func (s *Server) sessionMemDir(projectDir string) string {
 		return d
 	}
 	dir := s.homeMemDir
-	if d, _, err := memory.DirForProject(projectDir); err == nil && memory.EnsureDir(d) == nil {
-		dir = d
+	d, err := memory.DirForProject(projectDir)
+	if err != nil || memory.EnsureDir(d) != nil {
+		// Don't cache a failure: a full disk or a transient permission problem
+		// would otherwise pin this project to the shared tier for the rest of
+		// the process's life, silently merging its notes into everyone's.
+		return dir
 	}
 	if s.memDirCache == nil {
 		s.memDirCache = make(map[string]string)
 	}
-	s.memDirCache[projectDir] = dir
-	return dir
+	s.memDirCache[projectDir] = d
+	return d
 }
 
 // sessionProjectDir returns the working directory of the project owning
@@ -1866,17 +1870,21 @@ func (s *Server) sessionProjectDir(sessionID string) string {
 // Empty when memory is disabled: --no-memory must not leave a standing write
 // pass behind. Falls back to the concrete resolved dirs if the root can't be
 // resolved (unresolvable home), which is also when those two are empty anyway.
-func (s *Server) memoryWriteRoots(projectDir string) []string {
+func (s *Server) memoryWriteRoots() []string {
 	// s.homeMemDir == "" covers both --no-memory and a resolve/EnsureDir
 	// failure (read-only home): nothing is injected then, so nothing should be
 	// writable either — matches the CLI's memoryWriteRoots.
 	if s.cfg.NoMemory || s.homeMemDir == "" {
 		return nil
 	}
-	if root, err := memory.RootDir(); err == nil {
-		return []string{root}
+	root, err := memory.RootDir()
+	if err != nil {
+		// Unreachable in practice: homeMemDir is non-empty above, and it and
+		// RootDir fail under exactly the same condition (an unresolvable home).
+		// Withhold the pass rather than guess at a narrower root.
+		return nil
 	}
-	return []string{s.sessionMemDir(projectDir), s.homeMemDir}
+	return []string{root}
 }
 
 // sessionCwd resolves a loaded session's working dir. Used by the status/list
@@ -3481,7 +3489,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	if st := sess.Store; st != nil && st.PermissionMode != "" {
 		mode = permission.Mode(st.PermissionMode)
 	}
-	engine, err := permission.New(permissionConfigPath(), cwd, mode, s.memoryWriteRoots(projectDir)...)
+	engine, err := permission.New(permissionConfigPath(), cwd, mode, s.memoryWriteRoots()...)
 	if err != nil {
 		// Generic chat reply — err.Error() can leak local paths into a
 		// group chat; the operator gets the detail on the server console.

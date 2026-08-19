@@ -33,6 +33,13 @@ const (
 	maxInjectBytes = 25 * 1024
 )
 
+// NormalizeDir returns the form of p that Dir slugs, so callers comparing a
+// directory against a stored one (a project's working_dir, say) agree with the
+// memory layout instead of doing their own string munging.
+func NormalizeDir(p string) string {
+	return resolveSymlinks(p)
+}
+
 // resolveSymlinks returns the symlink-free form of p so one directory always
 // maps to one slug, however it was reached — /tmp and /private/tmp on macOS, a
 // symlinked checkout, a project whose working dir was typed one way and a
@@ -120,9 +127,10 @@ func hasNotes(dir string) bool {
 }
 
 // DirForProject resolves the memory directory for a session belonging to the
-// project rooted at projectDir, and reports whether that is a project of its
-// own. An empty projectDir means the session belongs to no project — a task —
-// and resolves to the home directory every session shares.
+// project rooted at projectDir. An empty projectDir means the session belongs
+// to no project — a task — and resolves to the home directory every session
+// shares, which is also what a caller gets by passing the home directory
+// itself, so no caller needs to special-case it.
 //
 // Project membership is the caller's fact to establish, not this package's to
 // guess. Under `octo serve` it comes from the session-group registry: a session
@@ -137,13 +145,11 @@ func hasNotes(dir string) bool {
 // project, which is not the same question as whether a directory happens to be
 // a checkout: plenty of real work lives in directories git knows nothing about,
 // and plenty of checkouts are passed through rather than worked on.
-func DirForProject(projectDir string) (string, bool, error) {
+func DirForProject(projectDir string) (string, error) {
 	if projectDir == "" {
-		dir, err := HomeDir()
-		return dir, false, err
+		return HomeDir()
 	}
-	dir, err := Dir(projectDir)
-	return dir, true, err
+	return Dir(projectDir)
 }
 
 // dirSlug derives a stable, human-readable directory name from a project
@@ -155,7 +161,7 @@ func dirSlug(projectDir string) string {
 	_, _ = h.Write([]byte(projectDir))
 	base := Slugify(filepath.Base(projectDir))
 	if base == "" {
-		return fmt.Sprintf("repo-%08x", h.Sum32())
+		return fmt.Sprintf("project-%08x", h.Sum32())
 	}
 	return fmt.Sprintf("%s-%08x", base, h.Sum32())
 }

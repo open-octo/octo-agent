@@ -323,12 +323,12 @@ func printMemory(w io.Writer, memDir string) {
 		fmt.Fprintln(w, "Memory is disabled for this session (--no-memory).")
 		return
 	}
-	// Running in the home directory, its slug directory IS the shared tier —
-	// say so, or the header reads as if home had project memory of its own.
-	// Same disclosure `octo memory list` makes; a TUI user has no reason to
-	// run that.
+	// This directory's memory IS the shared tier — say so, or the header reads
+	// as if it had memory of its own. True when running in the home directory,
+	// and equally true for a project pointed at it. Same disclosure
+	// `octo memory list` makes; a TUI user has no reason to run that.
 	if home, err := memory.HomeDir(); err == nil && home == memDir {
-		fmt.Fprintln(w, "Running in the home directory — these are the shared notes, read by every session.")
+		fmt.Fprintln(w, "These are the shared notes, read by every session — this directory has no separate memory of its own.")
 	}
 	fmt.Fprintf(w, "Memory directory: %s\n", memDir)
 	entries, err := os.ReadDir(memDir)

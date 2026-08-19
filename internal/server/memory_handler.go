@@ -107,11 +107,7 @@ func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 // conjure new directories.
 func (s *Server) resolveMemoryPath(fname, source string) (string, bool) {
 	switch source {
-	case "inherited":
-		if s.homeMemDir != "" {
-			return filepath.Join(s.homeMemDir, fname), true
-		}
-	case "", "project":
+	case "", "inherited", "project":
 		if s.homeMemDir != "" {
 			return filepath.Join(s.homeMemDir, fname), true
 		}

@@ -15,12 +15,9 @@ func TestDirForProject_TaskUsesHomeDir(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 
-	dir, inProject, err := DirForProject("")
+	dir, err := DirForProject("")
 	if err != nil {
 		t.Fatal(err)
-	}
-	if inProject {
-		t.Error("a session with no project must not report as being in one")
 	}
 	want, err := HomeDir()
 	if err != nil {
@@ -45,12 +42,9 @@ func TestDirForProject_PlainDirGetsOwnSlug(t *testing.T) {
 		t.Fatalf("fixture must not be a git repo: %v", err)
 	}
 
-	dir, inProject, err := DirForProject(project)
+	dir, err := DirForProject(project)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !inProject {
-		t.Error("a project directory must report as a project, git or no git")
 	}
 	homeDir, err := HomeDir()
 	if err != nil {
@@ -79,11 +73,11 @@ func TestDirForProject_SameBasenameDistinctDirs(t *testing.T) {
 		}
 	}
 
-	dirA, _, err := DirForProject(a)
+	dirA, err := DirForProject(a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dirB, _, err := DirForProject(b)
+	dirB, err := DirForProject(b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,11 +107,11 @@ func TestDirForProject_NormalizesSymlinkedPaths(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	viaReal, _, err := DirForProject(real)
+	viaReal, err := DirForProject(real)
 	if err != nil {
 		t.Fatal(err)
 	}
-	viaLink, _, err := DirForProject(link)
+	viaLink, err := DirForProject(link)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,12 +128,9 @@ func TestDirForProject_HomeIsTheSharedTier(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 
-	dir, inProject, err := DirForProject(home)
+	dir, err := DirForProject(home)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !inProject {
-		t.Error("an explicit project dir reports as a project even when it is home")
 	}
 	want, err := HomeDir()
 	if err != nil {
@@ -164,11 +155,11 @@ func TestDirForProject_SubdirIsItsOwnProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rootDir, _, err := DirForProject(root)
+	rootDir, err := DirForProject(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	subDir, _, err := DirForProject(sub)
+	subDir, err := DirForProject(sub)
 	if err != nil {
 		t.Fatal(err)
 	}

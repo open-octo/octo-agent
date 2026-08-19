@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/memory"
 )
 
 // Session groups are a Web-UI-only organisation layer: a way to cluster the
@@ -338,6 +340,31 @@ func ProjectDirForSession(sessionID string) string {
 		return p.WorkingDir
 	}
 	return ""
+}
+
+// ProjectExistsForDir reports whether some project already owns dir. Exported
+// for the CLI, which treats the directory it runs in as the project and so
+// always has memory of its own there — but under `octo serve` that same
+// directory only gets project memory once it IS a project, so notes written
+// from the CLI would go unread there. `octo memory` uses this to say so rather
+// than let the difference stay invisible.
+func ProjectExistsForDir(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	target := memory.NormalizeDir(dir)
+	groupMu.Lock()
+	defer groupMu.Unlock()
+	gf, _, err := cachedRegistry()
+	if err != nil {
+		return false
+	}
+	for i := range gf.Groups {
+		if wd := gf.Groups[i].WorkingDir; wd != "" && memory.NormalizeDir(wd) == target {
+			return true
+		}
+	}
+	return false
 }
 
 // projectNotesFor returns the project notes that apply to sessionID, or "".

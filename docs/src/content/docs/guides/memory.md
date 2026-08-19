@@ -47,6 +47,12 @@ Where that project comes from depends on how you're running octo:
   it. A session you resume with `-c` that belongs to a project in the Web UI gets that project's
   memory instead, wherever you launched octo from.
 
+Those two rules can give the same directory different answers, and it's worth knowing when. A
+checkout you work in from the CLI has memory of its own there — but a web session merely *pointed at*
+that directory is a task, and reads the shared set instead. Make it a project (in the sidebar's
+*Projects* section) and both ends agree. `octo memory list` says so when it notices: if no project
+points at the directory you're in, it tells you those notes are CLI-only.
+
 A second, home-level index (`~/.octo/memories/<home-slug>/MEMORY.md`) is inherited into *every*
 project, injected **before** the project's own index — it's the place for things that aren't about
 one project, like how you like to work; project-specific facts belong in the project's own memory.

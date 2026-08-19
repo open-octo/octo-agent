@@ -23,7 +23,7 @@ func TestChannelPerTurnGate(t *testing.T) {
 	ad := &drainTestAdapter{}
 	ev := channel.InboundEvent{ChatID: "c1", MessageID: "m1"}
 
-	engine, err := permission.New(permissionConfigPath(), srv.cwd, resolvePermissionMode(), srv.memoryWriteRoots(srv.cwd)...)
+	engine, err := permission.New(permissionConfigPath(), srv.cwd, resolvePermissionMode(), srv.memoryWriteRoots()...)
 	if err != nil {
 		t.Fatalf("permission engine: %v", err)
 	}

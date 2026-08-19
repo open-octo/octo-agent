@@ -41,6 +41,18 @@ separate and described in `identity-files-design.md`.
   worktree no longer shares the main checkout's memory automatically, since it is
   a different directory; file it under the same project (or run there and accept
   its own memory) as suits the work.
+- **Cross-end divergence, disclosed.** Because the CLI treats its cwd as a
+  project and `serve` does not, one directory can resolve two ways: CLI sessions
+  there get its slug, while a web session merely pointed at it reads the shared
+  tier. `octo memory list` says so when no project owns the directory
+  (`server.ProjectExistsForDir`), since the alternative is a user writing notes
+  from one end that the other silently never reads. Making it a project
+  reconciles both ends.
+- **Home-slug migration.** `Dir` normalizes, `os.UserHomeDir` does not, so a home
+  behind a symlink would have changed slug when normalization moved into `Dir`.
+  `HomeDir` falls back to the pre-normalization slug while that is the one
+  holding notes, and hands over once the normalized directory holds its own. A
+  fresh install never sees either branch.
 - **Inheritance.** The home directory (`~`) also has its own memory slot.
   When running inside any project, the home MEMORY.md is injected *before* the
   project MEMORY.md, so cross-project preferences and personal facts are

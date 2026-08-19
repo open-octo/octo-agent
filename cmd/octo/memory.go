@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/open-octo/octo-agent/internal/memory"
+	"github.com/open-octo/octo-agent/internal/server"
 )
 
 // runMemory handles `octo memory <subcommand> [dir]`:
@@ -43,15 +44,11 @@ func runMemory(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "octo memory: not a directory: %s\n", target)
 			return 1
 		}
-		// Resolve symlinks so an explicit path lands on the same slug a session
-		// running in that directory would get: os.Getwd() reports the resolved
-		// form, and on macOS /tmp/x vs /private/tmp/x hash to different slugs.
-		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-			abs = resolved
-		}
+		// No symlink resolution here: memory.Dir normalizes what it is given,
+		// which is the one place it happens.
 		cwd = abs
 	}
-	dir, _, err := memory.DirForProject(cwd)
+	dir, err := memory.DirForProject(cwd)
 	if err != nil {
 		fmt.Fprintf(stderr, "octo memory: %v\n", err)
 		return 1
@@ -73,10 +70,19 @@ func runMemory(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if shared {
-		// Otherwise the header reads as if the home directory had project
-		// memory of its own, when in fact these are the notes every session
-		// gets wherever it runs.
-		fmt.Fprintln(stdout, "Running in the home directory — these are the shared notes, read by every session.")
+		// Otherwise the header reads as if this directory had memory of its
+		// own, when in fact these are the notes every session gets wherever it
+		// runs. True for the home directory, and for a project pointed at it.
+		fmt.Fprintln(stdout, "These are the shared notes, read by every session — this directory has no separate memory of its own.")
+	}
+	// The CLI treats any directory as a project, so these notes always exist
+	// here. Under `octo serve` the same directory reads the shared tier until it
+	// is actually a project, and nothing else would tell the user that the notes
+	// they are looking at are invisible over there.
+	if !shared && !server.ProjectExistsForDir(cwd) && countMarkdownFiles(dir) > 0 {
+		fmt.Fprintf(stdout, "Note: no project in the web UI points at this directory, so these notes\n"+
+			"are only read by CLI sessions running here. Make it a project (Projects → its\n"+
+			"settings) to have web and IM sessions read them too.\n")
 	}
 	fmt.Fprintf(stdout, "Memory directory: %s\n", dir)
 	printDirEntries(stdout, dir)
@@ -115,6 +121,22 @@ func memoryWriteRoots(memDir, homeMemDir string) []string {
 		return []string{root}
 	}
 	return []string{memDir, homeMemDir}
+}
+
+// countMarkdownFiles counts the .md files directly in dir — "does this hold
+// notes worth telling the user about", not a recursive inventory.
+func countMarkdownFiles(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".md" {
+			n++
+		}
+	}
+	return n
 }
 
 func printDirEntries(w io.Writer, dir string) {
