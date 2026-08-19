@@ -260,6 +260,9 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 input.cur-path {
+  /* An input scrolls; the inherited ellipsis fights scrollLeft and paints a
+     "…" mid-path, hiding both ends at once. */
+  text-overflow: clip;
   height: 26px;
   padding: 0 8px;
   border: 1px solid var(--border);
