@@ -7,6 +7,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/memory"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // adoptTaskWorkingDirs is the one-time reconciliation for sessions written
@@ -16,12 +17,17 @@ import (
 // control closes for new sessions. For the ones already on disk, the directory
 // they picked is turned into what it should have been: a project.
 //
-// Only directories a user can plausibly have CHOSEN are adopted. Every session
-// that never set one carries the server's default workspace instead
-// (applyDefaultWorkspaceDir seeds it), and adopting those would file the whole
-// task list under a single project named after the workspace — destroying the
-// task/project distinction rather than honouring it. The same goes for the home
-// directory and the server's launch directory: they are defaults, not choices.
+// The workspace directory is the one thing never adopted. Every session that
+// never chose a directory carries it instead (applyDefaultWorkspaceDir seeds
+// it), so adopting those would file the whole task list under a single project
+// named after the workspace — destroying the task/project distinction rather
+// than honouring it. Both the built-in default (~/Octo) and whatever
+// workspace_dir currently resolves to are excluded, and the built-in one
+// unconditionally: a machine whose workspace_dir was changed later, or whose
+// sessions were restored from a backup, still carries ~/Octo in sessions
+// written before the change, and comparing only against the live setting would
+// sweep exactly those into a project. Everything else is treated as a choice
+// the user made and becomes a project.
 //
 // Idempotent, so it can run on every start: a session already in a project is
 // skipped, and a second run over the same directory finds the project the first
@@ -34,7 +40,8 @@ func (s *Server) adoptTaskWorkingDirs() {
 		return
 	}
 
-	// The directories that mean "nobody chose this".
+	// The directories that mean "nobody chose this": the workspace as configured
+	// now, and the built-in default regardless of configuration (see above).
 	defaults := map[string]bool{}
 	addDefault := func(dir string) {
 		if dir != "" {
@@ -42,9 +49,8 @@ func (s *Server) adoptTaskWorkingDirs() {
 		}
 	}
 	addDefault(s.curWorkspaceDir())
-	addDefault(s.curCwd())
-	if home, herr := os.UserHomeDir(); herr == nil {
-		addDefault(home)
+	if builtin, berr := tools.ResolveWorkspaceDir(""); berr == nil {
+		addDefault(builtin)
 	}
 
 	// Group the candidates by directory so one project is made per directory

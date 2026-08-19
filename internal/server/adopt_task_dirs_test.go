@@ -50,11 +50,10 @@ func TestAdoptTaskWorkingDirs_ChosenDirectoryBecomesAProject(t *testing.T) {
 }
 
 // The case that makes the exclusion non-negotiable: every session that never
-// chose a directory carries the server's default workspace, because
-// applyDefaultWorkspaceDir seeds it. Adopting those would sweep the entire task
-// list into one project named after the workspace — destroying the very
-// distinction this is meant to honour.
-func TestAdoptTaskWorkingDirs_LeavesDefaultsAlone(t *testing.T) {
+// chose a directory carries the workspace, because applyDefaultWorkspaceDir
+// seeds it. Adopting those would sweep the entire task list into one project
+// named after the workspace — destroying the very distinction this honours.
+func TestAdoptTaskWorkingDirs_LeavesTheWorkspaceAlone(t *testing.T) {
 	setTestHome(t)
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -64,25 +63,66 @@ func TestAdoptTaskWorkingDirs_LeavesDefaultsAlone(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	serverCwd := t.TempDir()
-
-	inWorkspace := saveSessionIn(t, workspace)
-	inHome := saveSessionIn(t, home)
-	inServerCwd := saveSessionIn(t, serverCwd)
+	sess := saveSessionIn(t, workspace)
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	srv.workspaceDir = workspace
-	srv.cwd = serverCwd
 	srv.adoptTaskWorkingDirs()
 
-	for name, id := range map[string]string{
-		"default workspace": inWorkspace.ID,
-		"home":              inHome.ID,
-		"server cwd":        inServerCwd.ID,
-	} {
-		if p := projectFor(t, id); p != nil {
-			t.Errorf("%s was adopted into project %q; it is a default, not a choice", name, p.Name)
-		}
+	if p := projectFor(t, sess.ID); p != nil {
+		t.Errorf("the workspace was adopted into project %q; it is a default, not a choice", p.Name)
+	}
+}
+
+// ~/Octo is excluded whether or not it is the configured workspace. A machine
+// whose workspace_dir was changed later — or whose sessions came from a backup —
+// still has ~/Octo in everything written before the change, and comparing only
+// against the live setting would sweep exactly those into a project. This is the
+// case a dry run against real data caught.
+func TestAdoptTaskWorkingDirs_ExcludesTheBuiltinDefaultUnconditionally(t *testing.T) {
+	setTestHome(t)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	builtin := filepath.Join(home, "Octo")
+	if err := os.MkdirAll(builtin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := t.TempDir()
+
+	inBuiltin := saveSessionIn(t, builtin)
+	inChosen := saveSessionIn(t, elsewhere)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	// The configured workspace has since been moved somewhere else entirely.
+	srv.workspaceDir = t.TempDir()
+	srv.adoptTaskWorkingDirs()
+
+	if p := projectFor(t, inBuiltin.ID); p != nil {
+		t.Errorf("~/Octo was adopted into project %q despite no longer being the configured workspace", p.Name)
+	}
+	// …while a directory that really was chosen is still adopted.
+	if p := projectFor(t, inChosen.ID); p == nil {
+		t.Error("a chosen directory should still become a project")
+	}
+}
+
+// Everything that is not the workspace counts as a choice — including the home
+// directory, which some sessions were pointed at deliberately.
+func TestAdoptTaskWorkingDirs_AdoptsAnythingElse(t *testing.T) {
+	setTestHome(t)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := saveSessionIn(t, home)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.adoptTaskWorkingDirs()
+
+	if p := projectFor(t, sess.ID); p == nil {
+		t.Error("home was not adopted; only the workspace is excluded")
 	}
 }
 
