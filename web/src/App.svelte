@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sessions, sessionGroups, pinnedSessions, collapsedSessions, activeSessionId, showToast, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent, cmdkOpen, settingsModalOpen, createNewSession, isDesktopShell } from './lib/stores'
+  import { view, sessions, sessionGroups, pinnedSessions, collapsedSessions, activeSessionId, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent, cmdkOpen, settingsModalOpen, createNewSession, clearPendingSessionOpts, isDesktopShell } from './lib/stores'
   import MobileApp from './mobile/MobileApp.svelte'
   import { ws, wsState } from './lib/ws'
   import { notificationsEnabled } from './lib/notifications'
@@ -10,7 +10,7 @@
   import * as api from './lib/api'
   import { installExternalLinkInterceptor } from './lib/externalLinks'
   import { startNativeHeartbeat } from './lib/nativeHeartbeat'
-  import { normalizeHash } from './lib/hashRouting'
+  import { normalizeHash, hashPicksChatTarget } from './lib/hashRouting'
   import { globalKeyIntent } from './lib/globalKeys'
   import AuthGate from './components/overlays/AuthGate.svelte'
   import FirstRunSetup from './components/overlays/FirstRunSetup.svelte'
@@ -46,6 +46,14 @@
   // Reflect the current view (and active chat session) in the hash so a refresh
   // lands back where the user was instead of the default chat view.
   let routeReady = false
+  // The "open the most recent session" fallback below fires at most once, on
+  // the first session list of the boot — and not at all when the URL already
+  // names the chat target. After that the active session belongs to the user:
+  // a later list (another tab creating a session, a WS reconnect) must not
+  // yank them off the new-session landing page, nor out of the empty state a
+  // delete leaves behind. Read synchronously at module init, before any list
+  // can arrive.
+  let autoSelectDone = typeof location !== 'undefined' && hashPicksChatTarget(location.hash)
   const VALID_VIEWS = ['chat', 'agents', 'skills', 'workflows', 'browser', 'tasks', 'mcp', 'channels', 'profile', 'files', 'lightapps']
 
   function applyHash() {
@@ -64,11 +72,19 @@
     }
     // The desktop tray's "New Session" item navigates to #new (see
     // nativeBridge.openNewSession). Desktop-gated: under a plain browser this
-    // hash is unreachable from the shell, so don't let a hand-typed #new create
-    // a throwaway session there. createNewSession() re-normalizes the hash to
-    // the fresh #/chat/{id}, so a reload won't loop back into #new.
+    // hash is unreachable from the shell, so don't let a hand-typed #new open
+    // the landing page there. createNewSession() re-normalizes the hash to
+    // #/chat, so a reload won't loop back into #new.
     if (v === 'new' && isDesktopShell) {
-      createNewSession().catch((err: any) => showToast(err.message, 'error'))
+      // Claim the auto-select slot before opening the landing page. Reaching
+      // #new from the tray with the window closed loads the page at this hash
+      // from scratch, so the session list is still on its way; without this it
+      // would arrive to an unset activeSessionId and helpfully open the most
+      // recent session, throwing away the new-session the user just asked for.
+      // (Nothing overwrites it any more — this used to be covered by
+      // createNewSession awaiting a POST and setting the id itself.)
+      autoSelectDone = true
+      createNewSession()
       return
     }
     if (!VALID_VIEWS.includes(v)) return
@@ -153,8 +169,9 @@
         }
         return next
       })
-      if (!get(activeSessionId) && list.length > 0) {
-        activeSessionId.set(list[0].id)
+      if (!autoSelectDone) {
+        autoSelectDone = true
+        if (!get(activeSessionId) && list.length > 0) activeSessionId.set(list[0].id)
       }
     })
 
@@ -185,6 +202,7 @@
       sessions.update(list => list.filter(s => s.id !== ev.session_id))
       if (get(activeSessionId) === ev.session_id) {
         activeSessionId.set(null)
+        clearPendingSessionOpts()
         // A session deleted by another entry (e.g. another tab or the CLI)
         // should not leave the chat view stuck on a bound-to-another-entry
         // banner. Reset to the default chat landing.
@@ -298,13 +316,17 @@
           }
           return next
         })
-        if (!get(activeSessionId)) activeSessionId.set(list[0].id)
+        if (!autoSelectDone) {
+          autoSelectDone = true
+          if (!get(activeSessionId)) activeSessionId.set(list[0].id)
+        }
       }
     }).catch(() => { /* non-critical: WS session_list will arrive shortly */ })
 
     // Restore the view/session from the URL now — synchronously, before the
     // WS/REST auto-select above resolves (both guard on activeSessionId being
-    // unset, so this wins). Then start tracking forward/back + manual edits.
+    // unset, and autoSelectDone already accounts for a chat hash, so this
+    // wins). Then start tracking forward/back + manual edits.
     applyHash()
     routeReady = true
     window.addEventListener('hashchange', applyHash)
@@ -392,7 +414,7 @@
       cmdkOpen.update(v => !v)
     } else if (intent === 'new-session') {
       e.preventDefault()
-      createNewSession().catch((err: any) => showToast(err.message, 'error'))
+      createNewSession()
     }
   }
 </script>
