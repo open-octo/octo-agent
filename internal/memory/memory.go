@@ -67,13 +67,56 @@ func Dir(projectDir string) (string, error) {
 	return filepath.Join(root, dirSlug(resolveSymlinks(projectDir))), nil
 }
 
-// HomeDir returns the memory directory for the user's home directory.
+// HomeDir returns the memory directory for the user's home directory — the
+// shared tier every session reads.
+//
+// Dir normalizes the path it is given, and os.UserHomeDir reports $HOME
+// unresolved, so on a machine whose home sits behind a symlink (enterprise
+// autofs or NFS layouts, /home → /net/home) the normalized slug differs from
+// the one earlier versions wrote under. Falling back to the unresolved slug
+// when it is the one holding notes keeps those users' global memory reachable
+// instead of silently starting them over in an empty directory. Everyone else —
+// the overwhelming majority, whose home path resolves to itself — is unaffected,
+// and a fresh install takes the normalized path.
 func HomeDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return "", fmt.Errorf("memory: cannot resolve home dir: %w", err)
 	}
-	return Dir(home)
+	dir, err := Dir(home)
+	if err != nil {
+		return "", err
+	}
+	if legacy, lerr := legacyHomeDir(home); lerr == nil && legacy != dir && hasNotes(legacy) && !hasNotes(dir) {
+		return legacy, nil
+	}
+	return dir, nil
+}
+
+// legacyHomeDir is the pre-normalization slug for home: the same computation as
+// Dir, minus the symlink resolution.
+func legacyHomeDir(home string) (string, error) {
+	root, err := RootDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, dirSlug(home)), nil
+}
+
+// hasNotes reports whether dir holds any markdown — the test for "this is where
+// the user's memory actually lives", as opposed to a directory some earlier
+// EnsureDir created and nothing ever wrote to.
+func hasNotes(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".md") {
+			return true
+		}
+	}
+	return false
 }
 
 // DirForProject resolves the memory directory for a session belonging to the

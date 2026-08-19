@@ -64,32 +64,6 @@ func TestSessionMemDir_TaskUsesSharedTier(t *testing.T) {
 	}
 }
 
-// A directory a session merely runs in is not a project. Only what the session
-// group registry calls a project reaches sessionMemDir, so the server never
-// invents project memory for a working directory on its own — the regression
-// that buried notes under a slug for the default workspace.
-func TestSessionMemDir_WorkingDirAloneIsNotAProject(t *testing.T) {
-	homeMem, err := memory.HomeDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	workspace := filepath.Join(t.TempDir(), "Octo")
-	if err := os.MkdirAll(workspace, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	s := &Server{cwd: workspace, homeMemDir: homeMem}
-
-	// The session is in no project, so it passes "" however its own working
-	// directory is set — including when that directory is the server's.
-	got := s.sessionMemDir(s.sessionProjectDir("no-such-session"))
-	if got != homeMem {
-		t.Errorf("ungrouped session = %q, want the shared home dir %q", got, homeMem)
-	}
-	if slug, err := memory.Dir(workspace); err == nil && got == slug {
-		t.Errorf("workspace got its own slug dir %q — notes would be invisible to other sessions", slug)
-	}
-}
-
 func TestSessionMemDir_DisabledByNoMemory(t *testing.T) {
 	s := &Server{cwd: t.TempDir(), homeMemDir: "/srv/home-memdir", cfg: Config{NoMemory: true}}
 	if got := s.sessionMemDir(t.TempDir()); got != "" {

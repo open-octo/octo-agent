@@ -385,14 +385,31 @@ func newGroupID() string {
 
 // createSessionGroupNamed creates a new group with the given name and returns
 // it. The caller records the group's ID on the task so later runs reuse it.
-func createSessionGroupNamed(name string) (sessionGroup, error) {
+//
+// workingDir, when set, makes the group a project — which is what scopes its
+// sessions' memory (see Server.sessionMemDir). A cron task with a directory is
+// working on that directory every run, so its notes belong to it rather than to
+// the tier every session on the machine reads. An unusable directory degrades
+// to a plain group rather than failing: grouping is best-effort here, and a
+// task must still run.
+func createSessionGroupNamed(name, workingDir string) (sessionGroup, error) {
+	if workingDir != "" {
+		dir, verr := validateWorkingDir(workingDir)
+		if verr != nil {
+			slog.Warn("cron group working dir unusable; filing runs as a plain group",
+				"group", name, "dir", workingDir, "err", verr)
+			workingDir = ""
+		} else {
+			workingDir = dir
+		}
+	}
 	groupMu.Lock()
 	defer groupMu.Unlock()
 	groups, err := loadSessionGroups()
 	if err != nil {
 		return sessionGroup{}, err
 	}
-	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}}
+	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workingDir}
 	groups = append(groups, g)
 	if err := saveSessionGroups(groups); err != nil {
 		return sessionGroup{}, err

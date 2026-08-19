@@ -117,22 +117,6 @@ func memoryWriteRoots(memDir, homeMemDir string) []string {
 	return []string{memDir, homeMemDir}
 }
 
-// countMarkdown counts the .md files directly in dir — "does this directory
-// hold notes worth telling the user about", not a recursive inventory.
-func countMarkdown(dir string) int {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return 0
-	}
-	n := 0
-	for _, e := range entries {
-		if !e.IsDir() && filepath.Ext(e.Name()) == ".md" {
-			n++
-		}
-	}
-	return n
-}
-
 func printDirEntries(w io.Writer, dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) == 0 {
