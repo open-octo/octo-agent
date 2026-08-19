@@ -792,20 +792,14 @@ type deleteSessionsRequest struct {
 	IDs []string `json:"ids"`
 }
 
-func (s *Server) handleDeleteSessions(w http.ResponseWriter, r *http.Request) {
-	var req deleteSessionsRequest
-	if err := readBodyJSON(r, &req); err != nil {
-		writeInvalidJSONBody(w, err)
-		return
-	}
-	if len(req.IDs) == 0 {
-		writeError(w, http.StatusBadRequest, "ids is required")
-		return
-	}
-
-	deleted := make([]string, 0, len(req.IDs))
-	failed := map[string]string{}
-	for _, id := range req.IDs {
+// deleteSessionsByID deletes sessions and tears down everything scoped to them,
+// returning what went and what refused. Shared by the batch endpoint and by
+// deleting a project, which takes its sessions with it — the teardown list is
+// long enough that a second copy of it would drift.
+func (s *Server) deleteSessionsByID(ids []string) (deleted []string, failed map[string]string) {
+	deleted = make([]string, 0, len(ids))
+	failed = map[string]string{}
+	for _, id := range ids {
 		s.interruptSession(id)
 		if err := agent.DeleteSession(id); err != nil {
 			failed[id] = err.Error()
@@ -821,6 +815,21 @@ func (s *Server) handleDeleteSessions(w http.ResponseWriter, r *http.Request) {
 		s.wsHub.broadcast("", wsEventSessionDeleted{Type: "session_deleted", SessionID: id})
 		deleted = append(deleted, id)
 	}
+	return deleted, failed
+}
+
+func (s *Server) handleDeleteSessions(w http.ResponseWriter, r *http.Request) {
+	var req deleteSessionsRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeInvalidJSONBody(w, err)
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "ids is required")
+		return
+	}
+
+	deleted, failed := s.deleteSessionsByID(req.IDs)
 
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted, "failed": failed})
 }

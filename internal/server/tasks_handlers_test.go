@@ -201,7 +201,7 @@ func TestCreateSession_FilesSessionUnderTaskGroup(t *testing.T) {
 	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	g, err := createSessionGroupNamed("daily report", "")
+	g, err := createSessionGroupNamed("daily report", "", "task-1")
 	if err != nil {
 		t.Fatalf("createSessionGroupNamed: %v", err)
 	}

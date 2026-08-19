@@ -652,7 +652,9 @@
     if (docked) return $sessionGroups.find(g => g.id === docked && !!g.working_dir) ?? null
     const dir = $pendingWorkingDir
     if (!dir) return null
-    return $sessionGroups.find(g => !!g.working_dir && normalizeDir(g.working_dir!) === normalizeDir(dir)) ?? null
+    // Excluding a scheduled task's cluster: it can carry a directory and is
+    // still not a project to file a new session under.
+    return $sessionGroups.find(g => !g.task_id && !!g.working_dir && normalizeDir(g.working_dir!) === normalizeDir(dir)) ?? null
   })
   // A docked group's own directory governs the session, exactly as it does for
   // a session already inside a project. A plain group has no directory to show,
@@ -1452,9 +1454,11 @@
 }
 .input-wrap { max-width: var(--chat-content-max-width, 1080px); margin: 0 auto; padding: 8px 24px 14px; }
 .input-card {
-  background: var(--bg-container); border: 1px solid var(--border); border-radius: 14px;
+  /* A quiet block rather than a bordered card: a hairline edge, no shadow. The
+     rounder corner (18 vs the old 14) reads more like a single soft shape. */
+  background: var(--bg-container); border: 1px solid var(--border-secondary); border-radius: 18px;
   padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;
-  position: relative; box-shadow: var(--card-shadow);
+  position: relative;
 }
 .input-card:focus-within {
   border-color: var(--blue-6);

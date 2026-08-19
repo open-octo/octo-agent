@@ -56,9 +56,7 @@ func TestProject_DirPrecedence(t *testing.T) {
 	bare := saveSessionWithDir(t, "")
 
 	gid := newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+inProject.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move into project: status %d", rec.Code)
-	}
+	fileInProject(t, gid, inProject.ID)
 
 	if got := srv.sessionCwd(inProject); got != projectDir {
 		t.Errorf("session in project: cwd = %q, want project dir %q", got, projectDir)
@@ -81,9 +79,7 @@ func TestProject_ResolutionAgreesAcrossSurfaces(t *testing.T) {
 	sess := saveSessionWithDir(t, t.TempDir())
 
 	gid := newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sess.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move into project: status %d", rec.Code)
-	}
+	fileInProject(t, gid, sess.ID)
 
 	byID := srv.sessionCwdByID(sess.ID)
 	bySession := srv.sessionCwd(sess)
@@ -97,28 +93,27 @@ func TestProject_ResolutionAgreesAcrossSurfaces(t *testing.T) {
 	}
 }
 
-// TestProject_MoveOutRestoresOwnDir verifies the project shadows the session's
-// own working dir rather than overwriting it on disk.
-func TestProject_MoveOutRestoresOwnDir(t *testing.T) {
+// The project shadows the session's own working dir rather than overwriting it
+// on disk. Deleting the project is what reveals the difference, and it is also
+// the only way a session leaves one: membership is fixed at creation, so there
+// is no move-out to test.
+func TestProject_ShadowsOwnDirAndRestoresOnDelete(t *testing.T) {
 	srv := groupTestServer(t)
 	projectDir := t.TempDir()
 	ownDir := t.TempDir()
 	sess := saveSessionWithDir(t, ownDir)
 
 	gid := newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sess.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move in: status %d", rec.Code)
-	}
+	fileInProject(t, gid, sess.ID)
 	if got := srv.sessionCwd(sess); got != projectDir {
 		t.Fatalf("in project: cwd = %q, want %q", got, projectDir)
 	}
 
-	// Out of every group again.
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sess.ID+"/group", map[string]any{"group_id": ""}); rec.Code != http.StatusOK {
-		t.Fatalf("move out: status %d", rec.Code)
+	if rec, _ := doGroupReq(t, srv, http.MethodDelete, "/api/session-groups/"+gid, nil); rec.Code != http.StatusOK {
+		t.Fatalf("delete project: status %d", rec.Code)
 	}
 	if got := srv.sessionCwd(sess); got != ownDir {
-		t.Errorf("after leaving project: cwd = %q, want own dir %q restored", got, ownDir)
+		t.Errorf("after the project was deleted: cwd = %q, want own dir %q", got, ownDir)
 	}
 
 	// Reloading from disk must show the own dir was never clobbered.
@@ -131,22 +126,75 @@ func TestProject_MoveOutRestoresOwnDir(t *testing.T) {
 	}
 }
 
-// TestProject_DemoteToPlainGroup covers clearing a project's directory.
-func TestProject_DemoteToPlainGroup(t *testing.T) {
+// Deleting a project with ?sessions=delete takes its sessions with it: they were
+// work on that directory, and leaving them as unattached tasks is a mess nobody
+// asked for. One request, so it cannot half-happen.
+func TestProject_DeleteWithSessions(t *testing.T) {
 	srv := groupTestServer(t)
 	projectDir := t.TempDir()
-	ownDir := t.TempDir()
-	sess := saveSessionWithDir(t, ownDir)
+	keep := saveSessionWithDir(t, "")
+	doomed := saveSessionWithDir(t, "")
 
 	gid := newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sess.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move in: status %d", rec.Code)
+	fileInProject(t, gid, doomed.ID)
+
+	rec, _ := doGroupReq(t, srv, http.MethodDelete, "/api/session-groups/"+gid+"?sessions=delete", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete: status %d: %s", rec.Code, rec.Body.String())
 	}
-	if rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"working_dir": ""}); rec.Code != http.StatusOK {
-		t.Fatalf("demote: status %d", rec.Code)
+	if _, err := agent.LoadSession(doomed.ID); err == nil {
+		t.Error("the project's session survived")
 	}
-	if got := srv.sessionCwd(sess); got != ownDir {
-		t.Errorf("after demote: cwd = %q, want own dir %q", got, ownDir)
+	if _, err := agent.LoadSession(keep.ID); err != nil {
+		t.Errorf("a session outside the project was deleted: %v", err)
+	}
+	groupMu.Lock()
+	groups, _ := loadSessionGroups()
+	groupMu.Unlock()
+	for i := range groups {
+		if groups[i].ID == gid {
+			t.Error("the project itself survived")
+		}
+	}
+}
+
+// Without the flag the sessions stay and become tasks — the old behaviour, kept
+// so a client that does not ask cannot destroy transcripts.
+func TestProject_DeleteKeepsSessionsByDefault(t *testing.T) {
+	srv := groupTestServer(t)
+	sess := saveSessionWithDir(t, "")
+	gid := newProjectGroup(t, srv, "Work", t.TempDir())
+	fileInProject(t, gid, sess.ID)
+
+	if rec, _ := doGroupReq(t, srv, http.MethodDelete, "/api/session-groups/"+gid, nil); rec.Code != http.StatusOK {
+		t.Fatalf("delete: status %d", rec.Code)
+	}
+	if _, err := agent.LoadSession(sess.ID); err != nil {
+		t.Errorf("session was deleted without being asked for: %v", err)
+	}
+	if p := projectForSession(sess.ID); p != nil {
+		t.Errorf("session is still in a project: %+v", p)
+	}
+}
+
+// A project's directory cannot be cleared. Clearing it used to demote the
+// project to a plain group, and there is no such thing to demote to — the
+// request has to be refused rather than quietly producing a row that is neither
+// a task nor a project.
+func TestProject_DirCannotBeCleared(t *testing.T) {
+	srv := groupTestServer(t)
+	projectDir := t.TempDir()
+	sess := saveSessionWithDir(t, "")
+
+	gid := newProjectGroup(t, srv, "Work", projectDir)
+	fileInProject(t, gid, sess.ID)
+	rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"working_dir": ""})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("clearing the dir: status %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	// And the project still governs its session.
+	if got := srv.sessionCwd(sess); got != projectDir {
+		t.Errorf("cwd = %q, want the project's %q", got, projectDir)
 	}
 }
 
@@ -159,9 +207,7 @@ func TestProject_RetargetDirIsPickedUp(t *testing.T) {
 	sess := saveSessionWithDir(t, "")
 
 	gid := newProjectGroup(t, srv, "Work", first)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sess.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move in: status %d", rec.Code)
-	}
+	fileInProject(t, gid, sess.ID)
 	if got := srv.sessionCwd(sess); got != first {
 		t.Fatalf("before retarget: cwd = %q, want %q", got, first)
 	}
@@ -225,9 +271,7 @@ func TestProject_BlocksPerSessionDirOverride(t *testing.T) {
 	sess := saveSessionWithDir(t, "")
 
 	gid := newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sess.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move in: status %d", rec.Code)
-	}
+	fileInProject(t, gid, sess.ID)
 
 	rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/sessions/"+sess.ID+"/working_dir", map[string]any{"working_dir": t.TempDir()})
 	if rec.Code != http.StatusConflict {
@@ -268,9 +312,7 @@ func TestProject_NotesReachTheSystemPrompt(t *testing.T) {
 	outside := saveSessionWithDir(t, "")
 
 	gid := newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+inProject.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move in: status %d", rec.Code)
-	}
+	fileInProject(t, gid, inProject.ID)
 	const notes = "Ship behind a flag; never touch the billing tables."
 	if rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"notes": notes}); rec.Code != http.StatusOK {
 		t.Fatalf("set notes: status %d", rec.Code)
@@ -299,9 +341,7 @@ func TestProject_NewSessionNotSeededWithDefaultDir(t *testing.T) {
 	inProject := saveSessionWithDir(t, "")
 	outside := saveSessionWithDir(t, "")
 	gid := newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+inProject.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move in: status %d", rec.Code)
-	}
+	fileInProject(t, gid, inProject.ID)
 
 	srv.applyDefaultWorkspaceDir(inProject)
 	srv.applyDefaultWorkspaceDir(outside)
@@ -327,9 +367,7 @@ func TestProject_ExportedDirLookup(t *testing.T) {
 	outside := saveSessionWithDir(t, ownDir)
 
 	gid := newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+inProject.ID+"/group", map[string]any{"group_id": gid}); rec.Code != http.StatusOK {
-		t.Fatalf("move in: status %d", rec.Code)
-	}
+	fileInProject(t, gid, inProject.ID)
 
 	if got := ProjectDirForSession(inProject.ID); got != projectDir {
 		t.Errorf("session in project: %q, want %q", got, projectDir)
@@ -347,6 +385,17 @@ func TestProject_ExportedDirLookup(t *testing.T) {
 
 // createSessionInGroupViaAPI POSTs /api/sessions with a group_id and returns
 // the new session's id.
+// fileInProject puts an existing session in a project the way the server does
+// it internally at creation time. There is no HTTP move endpoint — where a
+// session lives is decided when it is created — so tests that need a session
+// already in a project reach for this rather than a request.
+func fileInProject(t *testing.T, groupID, sessionID string) {
+	t.Helper()
+	if err := addSessionToGroup(groupID, sessionID); err != nil {
+		t.Fatalf("file %s into %s: %v", sessionID, groupID, err)
+	}
+}
+
 func createSessionInGroupViaAPI(t *testing.T, srv *Server, groupID string) string {
 	t.Helper()
 	rec, out := doGroupReq(t, srv, http.MethodPost, "/api/sessions", map[string]any{"group_id": groupID})
@@ -392,18 +441,18 @@ func TestProject_CreateSessionDirectlyInProject(t *testing.T) {
 	}
 }
 
-// TestProject_CreateSessionInPlainGroup: a plain group files the session but
-// seeding proceeds as usual — only a project suppresses it.
-func TestProject_CreateSessionInPlainGroup(t *testing.T) {
+// A group with no directory — the one kind left, a cron task's run cluster —
+// files the session but seeding proceeds as usual. Only a project suppresses it,
+// because only a project has a directory to override it with.
+func TestProject_CreateSessionInDirlessGroup(t *testing.T) {
 	srv := groupTestServer(t)
 	workspace := t.TempDir()
 	srv.setWorkspaceDir(workspace)
-	rec, out := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Plain"})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("create plain group: status %d", rec.Code)
+	g, err := createSessionGroupNamed("nightly", "", "task-1")
+	if err != nil {
+		t.Fatalf("create cron cluster: %v", err)
 	}
-	g, _ := out["group"].(map[string]any)
-	gid, _ := g["id"].(string)
+	gid := g.ID
 
 	sid := createSessionInGroupViaAPI(t, srv, gid)
 
@@ -412,7 +461,7 @@ func TestProject_CreateSessionInPlainGroup(t *testing.T) {
 		t.Fatalf("load created session: %v", err)
 	}
 	if loaded.WorkingDir != workspace {
-		t.Errorf("session in plain group: WorkingDir = %q, want seeded default %q", loaded.WorkingDir, workspace)
+		t.Errorf("session in a dirless group: WorkingDir = %q, want seeded default %q", loaded.WorkingDir, workspace)
 	}
 }
 
@@ -448,9 +497,9 @@ func TestProject_RegistryWritesNotifyTabs(t *testing.T) {
 			rec, _ := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Work", "working_dir": projectDir})
 			return rec
 		}},
-		{"move session in", func() *httptest.ResponseRecorder {
+		{"create session in project", func() *httptest.ResponseRecorder {
 			gid := projectIDByName(t, srv, "Work")
-			rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sess.ID+"/group", map[string]any{"group_id": gid})
+			rec, _ := doGroupReq(t, srv, http.MethodPost, "/api/sessions", map[string]any{"group_id": gid})
 			return rec
 		}},
 		{"edit notes", func() *httptest.ResponseRecorder {
@@ -501,14 +550,15 @@ func projectIDByName(t *testing.T, srv *Server, name string) string {
 	return ""
 }
 
-// TestProject_ListReportsProjectFields makes sure the Web UI can tell a project
-// from a plain group without a second request.
+// TestProject_ListReportsProjectFields makes sure the Web UI can tell the two
+// kinds of group apart from the list alone, without a second request: a project
+// by its working_dir, a cron cluster by its task_id.
 func TestProject_ListReportsProjectFields(t *testing.T) {
 	srv := groupTestServer(t)
 	projectDir := t.TempDir()
 	newProjectGroup(t, srv, "Work", projectDir)
-	if rec, _ := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{"name": "Just a group"}); rec.Code != http.StatusOK {
-		t.Fatalf("create plain group: status %d", rec.Code)
+	if _, err := createSessionGroupNamed("nightly", "", "task-1"); err != nil {
+		t.Fatalf("create cron cluster: %v", err)
 	}
 
 	rec, _ := doGroupReq(t, srv, http.MethodGet, "/api/session-groups", nil)
@@ -527,7 +577,7 @@ func TestProject_ListReportsProjectFields(t *testing.T) {
 	if !resp.Groups[0].isProject() || resp.Groups[0].WorkingDir != projectDir {
 		t.Errorf("first group should be a project at %q, got %+v", projectDir, resp.Groups[0])
 	}
-	if resp.Groups[1].isProject() {
-		t.Errorf("second group should be plain, got %+v", resp.Groups[1])
+	if resp.Groups[1].isProject() || !resp.Groups[1].isCronCluster() {
+		t.Errorf("second group should be a cron cluster with no dir, got %+v", resp.Groups[1])
 	}
 }

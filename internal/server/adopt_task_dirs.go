@@ -112,7 +112,7 @@ func (s *Server) projectForDirectory(dir string) (string, error) {
 	if name == "" || name == "." || name == string(filepath.Separator) {
 		name = target
 	}
-	g, cerr := createSessionGroupNamed(name, dir)
+	g, cerr := createSessionGroupNamed(name, dir, "")
 	if cerr != nil {
 		return "", cerr
 	}

@@ -17,9 +17,17 @@ import (
 	"github.com/open-octo/octo-agent/internal/memory"
 )
 
-// Session groups are a Web-UI-only organisation layer: a way to cluster the
-// sidebar session list into named, collapsible groups when there are too many
-// sessions to scan flat. They live entirely in one registry file
+// The sidebar has exactly two concepts the user can create: a task (one loose
+// session) and a project (a named directory plus the sessions working in it).
+// This registry is where projects live, and it also holds the one group the
+// system makes on its own: a cron task's per-run cluster. There is no third
+// user-facing concept — a "plain group", a name with sessions under it and no
+// directory, used to exist and no longer does: it split the sidebar into three
+// kinds of row for two kinds of thing, and offered organisation that carried
+// none of what a project carries (a directory for the tools, a memory tier, a
+// notes block). dissolvePlainGroups retires the ones already on disk.
+//
+// The registry lives entirely in one file
 // (~/.octo/session-groups.json) and never touch the session transcript format
 // — group membership is stored here as group→session-ID lists, so the CLI/TUI
 // session listing is unaffected and no session field is added. A session
@@ -35,14 +43,17 @@ import (
 // the same ~/.octo, so groups and their collapsed state are shared between the
 // Web UI and the desktop shell with no extra wiring.
 
-// sessionGroup is one named group in the registry.
+// sessionGroup is one project in the registry: a working directory plus the
+// sessions working in it. WorkingDir being set is what makes it one, and a group
+// without one is a plain group — a concept that no longer exists, dissolved at
+// startup.
 //
-// A group with a WorkingDir is a "project": every session in it runs its tools
-// in that one directory, overriding whatever working dir the sessions carry
-// themselves. A group without one is a plain group and behaves exactly as it
-// did before projects existed — which is what makes the two concepts one
-// struct rather than two. Nothing needs migrating: an existing
-// session-groups.json deserialises with both new fields empty.
+// A scheduled task's runs live in a project too, created by the scheduler and
+// named after the task, working in <workspace>/<task name>. TaskID records which
+// task that was: it is what lets the startup pass repair such a project instead
+// of dissolving it, and it survives a scheduler that failed to start. It carries
+// no UI or permission meaning — the project behaves like any other, because it is
+// one.
 type sessionGroup struct {
 	ID         string   `json:"id"`
 	Name       string   `json:"name"`
@@ -58,12 +69,20 @@ type sessionGroup struct {
 	WorkingDir string `json:"working_dir,omitempty"`
 	// Notes is project-level context injected into the system prompt of every
 	// session in the project, alongside the project-memory layer. Only
-	// meaningful on a project; a plain group ignores it.
+	// meaningful on a project.
 	Notes string `json:"notes,omitempty"`
+	// TaskID, when set, is the scheduled task this project was created for. It
+	// is what lets the startup pass repair such a project (backfilling the
+	// directory a task written before this had none) rather than dissolving it.
+	TaskID string `json:"task_id,omitempty"`
 }
 
 // isProject reports whether this group carries project settings.
 func (g sessionGroup) isProject() bool { return g.WorkingDir != "" }
+
+// isCronCluster reports whether this project was created for a scheduled task.
+// Used by the startup repair pass, not to gate anything the user can do.
+func (g sessionGroup) isCronCluster() bool { return g.TaskID != "" }
 
 // maxProjectNotes caps the notes field. Notes are injected verbatim into the
 // system prompt of EVERY session in the project, so an oversized value would
@@ -413,17 +432,23 @@ func newGroupID() string {
 // createSessionGroupNamed creates a new group with the given name and returns
 // it. The caller records the group's ID on the task so later runs reuse it.
 //
+// taskID marks the group as that cron task's run cluster, which is what lets it
+// exist without a directory — the one group the user did not create and cannot
+// edit. Pass "" from any other caller, in which case workingDir must be set or
+// the group would be a plain group and dissolved at the next start.
+//
 // workingDir, when set, makes the group a project — which is what scopes its
 // sessions' memory (see Server.sessionMemDir). A cron task with a directory is
 // working on that directory every run, so its notes belong to it rather than to
-// the tier every session on the machine reads. An unusable directory degrades
-// to a plain group rather than failing: grouping is best-effort here, and a
-// task must still run.
-func createSessionGroupNamed(name, workingDir string) (sessionGroup, error) {
+// the tier every session on the machine reads. An unusable directory is dropped
+// rather than failing the call: for a cron task the cluster still works without
+// one, and a task must run regardless. Callers that need the directory to have
+// landed check WorkingDir on the returned group.
+func createSessionGroupNamed(name, workingDir, taskID string) (sessionGroup, error) {
 	if workingDir != "" {
 		dir, verr := validateWorkingDir(workingDir)
 		if verr != nil {
-			slog.Warn("cron group working dir unusable; filing runs as a plain group",
+			slog.Warn("group working dir unusable; dropping it",
 				"group", name, "dir", workingDir, "err", verr)
 			workingDir = ""
 		} else {
@@ -436,7 +461,7 @@ func createSessionGroupNamed(name, workingDir string) (sessionGroup, error) {
 	if err != nil {
 		return sessionGroup{}, err
 	}
-	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workingDir}
+	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workingDir, TaskID: taskID}
 	groups = append(groups, g)
 	if err := saveSessionGroups(groups); err != nil {
 		return sessionGroup{}, err
@@ -447,15 +472,19 @@ func createSessionGroupNamed(name, workingDir string) (sessionGroup, error) {
 // addSessionToGroup prepends a session ID to a group — a newly created
 // session shows at the top of its group, matching the newest-first session
 // list — enforcing single membership (the session is first removed from every
-// other group, matching handleSetSessionGroup). Returns an error if the
-// target group no longer exists.
+// other group). Returns an error if the target group no longer exists.
+//
+// This is a creation-time path only: the session-creation handler and the
+// scheduler. There is no move-between-projects path (see
+// handleSetSessionGroup).
 func addSessionToGroup(groupID, sessionID string) error {
 	groupMu.Lock()
 	defer groupMu.Unlock()
-	groups, err := loadSessionGroups()
+	gf, err := loadRegistryFile()
 	if err != nil {
 		return err
 	}
+	groups := gf.Groups
 	found := false
 	for i := range groups {
 		ids := groups[i].SessionIDs[:0]
@@ -473,7 +502,13 @@ func addSessionToGroup(groupID, sessionID string) error {
 	if !found {
 		return fmt.Errorf("session group %q not found", groupID)
 	}
-	return saveSessionGroups(groups)
+	// Group membership and collapsing are mutually exclusive (handleSetSessionCollapse
+	// refuses to collapse a session in a group). Since this is the only path that
+	// files a session anywhere, clearing a stale collapsed entry has to happen here
+	// for that guard to hold from both directions.
+	gf.Groups = groups
+	gf.CollapsedSessionIDs = removeID(gf.CollapsedSessionIDs, sessionID)
+	return saveRegistry(gf)
 }
 
 // renameSessionGroup renames a group by ID. A no-op (nil) if the group is gone
@@ -548,10 +583,10 @@ func (s *Server) handleListSessionGroups(w http.ResponseWriter, r *http.Request)
 
 type createSessionGroupRequest struct {
 	Name string `json:"name"`
-	// WorkingDir creates the group as a project outright, so the UI's "new
-	// project" flow doesn't have to create a plain group and immediately PATCH
-	// it (which would briefly show it as a plain group in every other tab).
-	WorkingDir string `json:"working_dir,omitempty"`
+	// WorkingDir is required: a group the user creates is a project, and a
+	// project is a directory. Creating without one used to be how a plain group
+	// was made, and that concept is gone.
+	WorkingDir string `json:"working_dir"`
 	Notes      string `json:"notes,omitempty"`
 }
 
@@ -566,14 +601,14 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	var workingDir string
-	if strings.TrimSpace(req.WorkingDir) != "" {
-		dir, verr := validateWorkingDir(req.WorkingDir)
-		if verr != nil {
-			writeError(w, http.StatusBadRequest, verr.Error())
-			return
-		}
-		workingDir = dir
+	if strings.TrimSpace(req.WorkingDir) == "" {
+		writeError(w, http.StatusBadRequest, "working_dir is required: a project is a directory, and a group without one no longer exists")
+		return
+	}
+	workingDir, verr := validateWorkingDir(req.WorkingDir)
+	if verr != nil {
+		writeError(w, http.StatusBadRequest, verr.Error())
+		return
 	}
 	notes, nerr := validateProjectNotes(req.Notes)
 	if nerr != nil {
@@ -605,9 +640,10 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 type updateSessionGroupRequest struct {
 	Name      *string `json:"name,omitempty"`
 	Collapsed *bool   `json:"collapsed,omitempty"`
-	// WorkingDir promotes the group to a project (see sessionGroup). An
-	// explicit "" demotes it back to a plain group, at which point its
-	// sessions fall back to their own working dirs.
+	// WorkingDir retargets the project's directory. It cannot be cleared: that
+	// used to demote the project to a plain group, and there is nothing left to
+	// demote to — deleting the project is the way to break it up, which leaves
+	// its sessions as tasks.
 	WorkingDir *string `json:"working_dir,omitempty"`
 	Notes      *string `json:"notes,omitempty"`
 }
@@ -636,10 +672,13 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 		}
 	}
 	// Validate the directory before touching the registry, so a bad path
-	// leaves the group untouched. "" is the demote-to-plain-group signal and
-	// skips validation.
+	// leaves the group untouched.
 	var workingDir string
-	if req.WorkingDir != nil && strings.TrimSpace(*req.WorkingDir) != "" {
+	if req.WorkingDir != nil {
+		if strings.TrimSpace(*req.WorkingDir) == "" {
+			writeError(w, http.StatusBadRequest, "working_dir cannot be cleared: delete the project instead, which leaves its sessions as tasks")
+			return
+		}
 		dir, verr := validateWorkingDir(*req.WorkingDir)
 		if verr != nil {
 			writeError(w, http.StatusBadRequest, verr.Error())
@@ -696,14 +735,49 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 
 // ─── DELETE /api/session-groups/{id} ────────────────────────────────────────
 
-// handleDeleteSessionGroup removes a group. Its member sessions are not
-// deleted — they fall back to "ungrouped".
+// handleDeleteSessionGroup removes a project. With ?sessions=delete its member
+// sessions are deleted along with it; without it they are left on disk and become
+// tasks.
+//
+// Deleting the sessions is what the UI asks for, and it is one request rather
+// than "delete these ids, then delete the project" so a failure halfway cannot
+// leave a project standing over sessions that are already gone. The sessions go
+// first: a project whose sessions were deleted but which survived a crash is a
+// visible empty row the user can delete again, while the reverse is a set of
+// sessions with no row to reach them from.
 func (s *Server) handleDeleteSessionGroup(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "missing group id")
 		return
 	}
+	withSessions := r.URL.Query().Get("sessions") == "delete"
+	if withSessions {
+		groupMu.Lock()
+		groups, lerr := loadSessionGroups()
+		var members []string
+		if lerr == nil {
+			for i := range groups {
+				if groups[i].ID == id {
+					members = append(members, groups[i].SessionIDs...)
+					break
+				}
+			}
+		}
+		groupMu.Unlock()
+		if lerr != nil {
+			writeError(w, http.StatusInternalServerError, lerr.Error())
+			return
+		}
+		if _, failed := s.deleteSessionsByID(members); len(failed) > 0 {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":  "some sessions could not be deleted; the project was left in place",
+				"failed": failed,
+			})
+			return
+		}
+	}
+
 	groupMu.Lock()
 	defer groupMu.Unlock()
 	groups, err := loadSessionGroups()
@@ -787,66 +861,23 @@ func (s *Server) handleReorderSessionGroups(w http.ResponseWriter, r *http.Reque
 
 // ─── PUT /api/sessions/{id}/group ───────────────────────────────────────────
 
-type setSessionGroupRequest struct {
-	// GroupID is the target group. Empty removes the session from every group
-	// (i.e. moves it to "ungrouped").
-	GroupID string `json:"group_id"`
-}
-
-// handleSetSessionGroup moves a session into a group (or out of all groups).
-// A session belongs to at most one group, so it is first removed from every
-// group and then, if a non-empty target is given, appended to that group.
+// handleSetSessionGroup refuses every attempt to move a session between
+// projects. Where a session lives is decided when it is created — by picking a
+// directory on the landing page, or by the "+" on a project — and is fixed after
+// that.
+//
+// It is fixed because moving is not one change but four, and they cannot be
+// made to agree after the fact: the tools' directory, the memory tier, the
+// project notes baked into the system prompt, and the hooks/sandbox root all
+// derive from the project. A moved session would keep a transcript half of which
+// ran somewhere else and read another project's notes, and the freeze that keeps
+// the prompt cache warm cannot tell that apart from an ordinary turn (it is
+// keyed on cwd + notes, so a session whose own directory already equals the
+// project's would not even re-compose). Deciding at creation makes the four
+// facts true for the whole life of the session.
 func (s *Server) handleSetSessionGroup(w http.ResponseWriter, r *http.Request) {
-	sid := r.PathValue("id")
-	if sid == "" {
-		writeError(w, http.StatusBadRequest, "missing session id")
-		return
-	}
-	var req setSessionGroupRequest
-	if err := readBodyJSON(r, &req); err != nil {
-		writeInvalidJSONBody(w, err)
-		return
-	}
-
-	groupMu.Lock()
-	defer groupMu.Unlock()
-	gf, err := loadRegistryFile()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	groups := gf.Groups
-
-	// Remove the session from every group first (enforces single membership).
-	for i := range groups {
-		groups[i].SessionIDs = removeID(groups[i].SessionIDs, sid)
-	}
-
-	// Add to the target group when one is requested.
-	if req.GroupID != "" {
-		idx := -1
-		for i := range groups {
-			if groups[i].ID == req.GroupID {
-				idx = i
-				break
-			}
-		}
-		if idx < 0 {
-			writeError(w, http.StatusNotFound, "group not found")
-			return
-		}
-		groups[idx].SessionIDs = append(groups[idx].SessionIDs, sid)
-		// Group membership and collapsing are mutually exclusive; filing the
-		// session into a group wins over a stale collapsed entry.
-		gf.CollapsedSessionIDs = removeID(gf.CollapsedSessionIDs, sid)
-	}
-	gf.Groups = groups
-
-	if err := saveRegistry(gf); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "group_id": req.GroupID})
+	writeError(w, http.StatusConflict,
+		"a session's project is decided when it is created — start a new session in the project instead")
 }
 
 // ─── PUT /api/sessions/{id}/pin ─────────────────────────────────────────────
@@ -920,12 +951,13 @@ type setSessionCollapsedRequest struct {
 	Collapsed bool `json:"collapsed"`
 }
 
-// handleSetSessionCollapsed collapses a session into the sidebar's folded
-// panel, or restores it. Collapsing a pinned or grouped session is rejected —
-// the two states contradict each other (the UI hides the collapse action for
-// those sessions; this guards racing tabs). Idempotent like pin: collapsing an
-// already-collapsed session keeps its position, restoring an absent one is a
-// no-op.
+// handleSetSessionCollapsed archives a session (hides it from the sidebar's
+// Tasks/Projects sections, moves it into Settings' 数据管理), or restores it.
+// Archiving keeps whatever project membership the session already has —
+// unlike pin, which still can't coexist with it — so restoring puts a project's
+// session back exactly where it was, with no second write needed. Idempotent
+// like pin: collapsing an already-collapsed session keeps its position,
+// restoring an absent one is a no-op.
 func (s *Server) handleSetSessionCollapsed(w http.ResponseWriter, r *http.Request) {
 	sid := r.PathValue("id")
 	if sid == "" {
@@ -951,14 +983,6 @@ func (s *Server) handleSetSessionCollapsed(w http.ResponseWriter, r *http.Reques
 			if id == sid {
 				writeError(w, http.StatusConflict, "session is pinned; unpin it before collapsing")
 				return
-			}
-		}
-		for _, g := range gf.Groups {
-			for _, id := range g.SessionIDs {
-				if id == sid {
-					writeError(w, http.StatusConflict, "session is in a group; remove it from the group before collapsing")
-					return
-				}
 			}
 		}
 	}

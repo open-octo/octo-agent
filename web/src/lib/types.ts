@@ -56,8 +56,11 @@ export interface SessionGroup {
   name: string
   session_ids: string[]
   collapsed?: boolean
+  /** Set on a project — the directory its sessions run in. */
   working_dir?: string
   notes?: string
+  /** Set on a scheduled task's run cluster, which the user cannot edit. */
+  task_id?: string
 }
 
 export interface Skill {

@@ -356,7 +356,7 @@
   background: var(--panel-frost);
   backdrop-filter: blur(var(--frost-blur));
   -webkit-backdrop-filter: blur(var(--frost-blur));
-  border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0;
+  border-left: 1px solid var(--border-secondary); display: flex; flex-direction: column; min-height: 0;
   position: relative;
 }
 .resize-handle {
