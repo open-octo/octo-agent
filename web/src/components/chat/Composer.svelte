@@ -677,7 +677,6 @@
   let defaultModelId = $state('')
   let modelMenu = $state(false)
   let reasonMenu = $state(false)
-  let dirMenu = $state(false)
   let agentMenu = $state(false)
   let permMenu = $state(false)
 
@@ -746,7 +745,6 @@
     }
     queueMicrotask(() => textareaEl?.focus())
   }
-  let dirDraft = $state('')
   let dirSaving = $state(false)
   let pickerOpen = $state(false)
   let pickerMode = $state<'folder' | 'file'>('folder')
@@ -860,20 +858,7 @@
     }
   }
 
-  function closeMenus() { modelMenu = false; reasonMenu = false; dirMenu = false; agentMenu = false; permMenu = false }
-
-  // Open the working-dir editor seeded with the current dir.
-  function openDirMenu() {
-    modelMenu = false; reasonMenu = false
-    dirDraft = workingDir
-    dirMenu = !dirMenu
-  }
-
-  async function saveWorkingDir() {
-    const dir = dirDraft.trim()
-    if (!dir || dir === workingDir) { dirMenu = false; return }
-    if (await applyWorkingDir(dir)) dirMenu = false
-  }
+  function closeMenus() { modelMenu = false; reasonMenu = false; agentMenu = false; permMenu = false }
 
   // Shared by the typed input and the folder picker: PATCH the session working
   // dir and store the canonical path the server resolved (~ expanded, absolute).
@@ -895,7 +880,9 @@
   }
 
   async function openPicker() {
-    dirMenu = false
+    // The chip's onclick stops propagation, so the window-level closeMenus
+    // never runs — close them here or a dropdown stays open behind the modal.
+    closeMenus()
     // Desktop shell: use the OS folder dialog. Plain web: open the in-app tree.
     if (get(nativeShell)) {
       try {
@@ -915,10 +902,17 @@
   async function onPickerSelect(path: string) {
     if (pickerMode === 'file') {
       attachLocalFile(path)
-      pickerOpen = false
+      closePicker()
       return
     }
-    if (await applyWorkingDir(path)) pickerOpen = false
+    if (await applyWorkingDir(path)) closePicker()
+  }
+
+  // Dismissing the modal must hand focus back to the composer; otherwise it
+  // lands on <body> and the next keystroke goes nowhere.
+  function closePicker() {
+    pickerOpen = false
+    queueMicrotask(() => textareaEl?.focus())
   }
 
   // Show only the last two path segments so a long working dir doesn't push
@@ -1293,31 +1287,15 @@
             <span class="dir-owner">{project.name}</span>
           </span>
         {:else if workingDir}
-          <div class="picker">
-            <button class="meta-chip" title={workingDir} onclick={(e) => { e.stopPropagation(); openDirMenu() }}>
-              <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
-              <span class="mono dir-path">{shortDir(workingDir)}</span>
-              <iconify-icon icon="lucide:chevron-down" width="12"></iconify-icon>
-            </button>
-            {#if dirMenu}
-              <div class="menu dir-menu" onclick={(e) => e.stopPropagation()}>
-                <input
-                  class="dir-input mono"
-                  bind:value={dirDraft}
-                  placeholder="~/code/my-project"
-                  spellcheck="false"
-                  onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveWorkingDir() } else if (e.key === 'Escape') { dirMenu = false } }}
-                />
-                <button class="dir-save" disabled={dirSaving} onclick={() => saveWorkingDir()}>
-                  {dirSaving ? $t('chat.dir_saving') : $t('chat.dir_save')}
-                </button>
-                <button class="dir-browse" onclick={() => openPicker()}>
-                  <iconify-icon icon="ant-design:folder-open-outlined" width="12"></iconify-icon>
-                  {$t('chat.dir_browse')}
-                </button>
-              </div>
-            {/if}
-          </div>
+          <button
+            class="meta-chip"
+            title={$t('chat.dir_change') + ` — ${workingDir}`}
+            disabled={dirSaving}
+            onclick={(e) => { e.stopPropagation(); openPicker() }}
+          >
+            <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
+            <span class="mono dir-path">{shortDir(workingDir)}</span>
+          </button>
         {/if}
         {#if goalChip}
           <span class="meta-chip static" title={goal?.objective ?? ''}>
@@ -1358,7 +1336,7 @@
     initialPath={workingDir}
     mode={pickerMode}
     onSelect={onPickerSelect}
-    onClose={() => (pickerOpen = false)}
+    onClose={closePicker}
   />
 {/if}
 
@@ -1399,27 +1377,6 @@
 .toggle.on .toggle-knob { transform: translateX(14px); }
 .mi-name { font-size: 13px; color: var(--text); }
 .menu-empty { padding: 8px 10px; font-size: 12px; color: var(--text-tertiary); }
-.dir-menu { min-width: 300px; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; align-items: center; }
-.dir-input {
-  flex: 1; min-width: 0; height: 28px; padding: 0 8px;
-  border: 1px solid var(--border); border-radius: 6px; background: var(--bg-container);
-  color: var(--text); font-size: 12px;
-}
-.dir-input:focus { outline: none; border-color: var(--blue-5); }
-.dir-save {
-  height: 28px; padding: 0 12px; border: none; border-radius: 6px;
-  background: var(--blue-5); color: #fff; font-size: 12px; font-family: inherit;
-  cursor: pointer; white-space: nowrap;
-}
-.dir-save:hover { opacity: 0.9; }
-.dir-save:disabled { opacity: 0.6; cursor: default; }
-.dir-browse {
-  height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--bg-container); color: var(--text-secondary); font-size: 12px; font-family: inherit;
-  cursor: pointer; white-space: nowrap;
-  display: flex; align-items: center; gap: 4px;
-}
-.dir-browse:hover { border-color: var(--blue-5); color: var(--blue-5); }
 .reasoning-eye { color: var(--success); }
 .mono { font-family: var(--font-mono); }
 .dir-path { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
