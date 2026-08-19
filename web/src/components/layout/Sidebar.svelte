@@ -536,8 +536,8 @@
         {#if groupedView.ungrouped.length > 0}
         <div class="sec-header" onclick={() => toggleSection('tasks')}>
           {#if $selMode}{@render triBox(triStateOf(groupedView.ungrouped.map(s => s.id)), () => toggleMany(groupedView.ungrouped.map(s => s.id)))}{/if}
-          <iconify-icon icon={sections.tasks ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="9"></iconify-icon>
           <span class="sec-name">{$t('sidebar.tasks')}</span>
+          <iconify-icon class="sec-caret" icon={sections.tasks ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="10"></iconify-icon>
           <span class="sec-count">{groupedView.taskCount}</span>
         </div>
         {#if sections.tasks}
@@ -553,8 +553,8 @@
         {#if groupedView.projects.length > 0}
         <div class="sec-header" onclick={() => toggleSection('projects')}>
           {#if $selMode}{@render triBox(triStateOf(groupedView.projects.flatMap(gv => gv.items.map(s => s.id))), () => toggleMany(groupedView.projects.flatMap(gv => gv.items.map(s => s.id))))}{/if}
-          <iconify-icon icon={sections.projects ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="9"></iconify-icon>
           <span class="sec-name">{$t('sidebar.projects')}</span>
+          <iconify-icon class="sec-caret" icon={sections.projects ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="10"></iconify-icon>
           <span class="sec-count">{groupedView.projects.length}</span>
         </div>
         {#if sections.projects}
@@ -893,14 +893,15 @@
 }
 .sec-header:first-child { margin-top: 0; }
 .sec-header:hover { color: var(--text-secondary); }
-/* These are the top-level headings of the session list now — there is no
-   "Sessions" row above them — so they read a step above the footnote weight
-   they had while nested under one. */
+/* Reads as a quiet label, not a heading: normal weight, no tracking, the
+   caret right after the name rather than leading it — the name is what's
+   being scanned for, the caret is a detail about it. */
 .sec-name {
-  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 12px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase;
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 13px; font-weight: 400;
 }
-.sec-count { font-size: 11px; flex: 0 0 auto; }
+.sec-caret { flex: 0 0 auto; }
+.sec-count { font-size: 11px; flex: 0 0 auto; margin-left: auto; }
 
 .grp-header {
   position: relative;
