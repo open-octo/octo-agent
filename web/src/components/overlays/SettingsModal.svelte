@@ -5,7 +5,8 @@
   import QrCode from '../ui/QrCode.svelte'
   import FileRecallView from '../../views/FileRecallView.svelte'
   import { get } from 'svelte/store'
-  import { showToast, nativeShell, settingsModalOpen, onboardPhase, sessions, collapsedSessions, activeSessionId, view, clearPendingSessionOpts } from '../../lib/stores'
+  import { showToast, nativeShell, settingsModalOpen, onboardPhase, sessions, sessionGroups, collapsedSessions, activeSessionId, view, clearPendingSessionOpts } from '../../lib/stores'
+  import type { Session, SessionGroup } from '../../lib/types'
   import { setLocale, t, tr } from '../../lib/i18n'
   import { getMode, setMode, type ThemeMode } from '../../lib/theme'
   import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
@@ -58,7 +59,92 @@
   // leaving and returning to 数据管理 always lands on the list, not wherever
   // you left off.
   let dataSubView = $state<'none' | 'archived' | 'trash'>('none')
+  let archiveSearch = $state('')
+  // '' = every project, 'none' = no project, else a project's group id.
+  let archiveProjectFilter = $state('')
+  let archiveSel = $state<Record<string, true>>({})
+
+  function resetDataView() {
+    dataSubView = 'none'
+    archiveSearch = ''
+    archiveProjectFilter = ''
+    archiveSel = {}
+  }
+
   const archivedSessions = $derived($sessions.filter(s => $collapsedSessions.includes(s.id)))
+
+  // Archiving keeps a session's project membership (see handleSetSessionCollapsed
+  // on the server), so an archived session's project is looked up the same way
+  // Sidebar.svelte does it for a live one: by scanning which project's
+  // session_ids includes it. Needed both to group the list and to offer the
+  // project filter.
+  const projectBySession = $derived.by(() => {
+    const m = new Map<string, SessionGroup>()
+    for (const g of $sessionGroups) {
+      if (!g.working_dir) continue
+      for (const id of g.session_ids) m.set(id, g)
+    }
+    return m
+  })
+
+  const archivedFiltered = $derived.by(() => {
+    const q = archiveSearch.trim().toLowerCase()
+    return archivedSessions.filter(s => {
+      if (q && !nameOf(s).toLowerCase().includes(q)) return false
+      if (archiveProjectFilter === 'none') return !projectBySession.get(s.id)
+      if (archiveProjectFilter) return projectBySession.get(s.id)?.id === archiveProjectFilter
+      return true
+    })
+  })
+
+  // One bucket per project, in the sidebar's own project order, then a final
+  // "no project" bucket — same shape as the sidebar's own Tasks-after-Projects
+  // ordering, just projects first here since a filtered-to-one-project view is
+  // the common case this list exists for.
+  const archivedGroups = $derived.by(() => {
+    const buckets = new Map<string, { group: SessionGroup | null; items: Session[] }>()
+    for (const s of archivedFiltered) {
+      const g = projectBySession.get(s.id) ?? null
+      const key = g ? g.id : ''
+      if (!buckets.has(key)) buckets.set(key, { group: g, items: [] })
+      buckets.get(key)!.items.push(s)
+    }
+    const ordered: { group: SessionGroup | null; items: Session[] }[] = []
+    for (const g of $sessionGroups) {
+      if (buckets.has(g.id)) ordered.push(buckets.get(g.id)!)
+    }
+    if (buckets.has('')) ordered.push(buckets.get('')!)
+    return ordered
+  })
+
+  // Only projects that actually have an archived session offer a filter for —
+  // an empty option nobody could ever pick is not a choice, it's clutter.
+  const archiveProjectOptions = $derived(
+    $sessionGroups.filter(g => !!g.working_dir && archivedSessions.some(s => projectBySession.get(s.id)?.id === g.id)),
+  )
+
+  function nameOf(s: Session): string {
+    return (s as any).name || (s as any).title || s.id
+  }
+
+  function toggleArchiveSel(id: string) {
+    const n = { ...archiveSel }
+    if (n[id]) delete n[id]
+    else n[id] = true
+    archiveSel = n
+  }
+
+  function toggleArchiveSelAll() {
+    const ids = archivedFiltered.map(s => s.id)
+    const allSelected = ids.length > 0 && ids.every(id => archiveSel[id])
+    if (allSelected) {
+      archiveSel = {}
+    } else {
+      const n: Record<string, true> = {}
+      for (const id of ids) n[id] = true
+      archiveSel = n
+    }
+  }
 
   async function unarchiveSession(id: string) {
     const before = get(collapsedSessions)
@@ -77,6 +163,8 @@
       await api.deleteSession(id)
       sessions.update(ss => ss.filter(s => s.id !== id))
       collapsedSessions.update(ids => ids.filter(x => x !== id))
+      const { [id]: _drop, ...rest } = archiveSel
+      archiveSel = rest
       if (get(activeSessionId) === id) {
         activeSessionId.set(null)
         clearPendingSessionOpts()
@@ -84,6 +172,39 @@
       }
     } catch (e: any) {
       showToast(e.message, 'error')
+    }
+  }
+
+  // Deletes every selected session in one confirmation rather than one
+  // per-row — the whole point of selecting several at once. Sessions that
+  // fail to delete are reported and kept selected, so retrying is just
+  // pressing the button again on what's left.
+  async function deleteSelectedArchived() {
+    const ids = Object.keys(archiveSel)
+    if (ids.length === 0) return
+    if (!(await confirmDialog(tr('settings.data.confirm_delete_selected').replace('{n}', String(ids.length))))) return
+    const failed: string[] = []
+    for (const id of ids) {
+      try {
+        await api.deleteSession(id)
+        sessions.update(ss => ss.filter(s => s.id !== id))
+        collapsedSessions.update(cs => cs.filter(x => x !== id))
+        if (get(activeSessionId) === id) {
+          activeSessionId.set(null)
+          clearPendingSessionOpts()
+          view.set('chat')
+        }
+      } catch {
+        failed.push(id)
+      }
+    }
+    if (failed.length) {
+      const n: Record<string, true> = {}
+      for (const id of failed) n[id] = true
+      archiveSel = n
+      showToast(tr('settings.data.delete_selected_partial').replace('{n}', String(failed.length)), 'error')
+    } else {
+      archiveSel = {}
     }
   }
 
@@ -123,7 +244,7 @@
   $effect(() => {
     if ($settingsModalOpen) {
       cat = 'general'
-      dataSubView = 'none'
+      resetDataView()
       loadConfig()
       loadVersion()
       if (get(nativeShell)) api.getAutostart().then(v => (autostart = v)).catch(() => {})
@@ -337,7 +458,7 @@
     <div class="modal-body">
       <div class="rail">
         {#each categories as c (c.key)}
-          <div class="scat" class:on={cat === c.key} onclick={() => { cat = c.key; dataSubView = 'none' }}>
+          <div class="scat" class:on={cat === c.key} onclick={() => { cat = c.key; resetDataView() }}>
             <iconify-icon icon={c.icon} width="15"></iconify-icon>
             <span>{$t(c.label)}</span>
           </div>
@@ -487,7 +608,7 @@
             </div>
           {:else}
             <div class="data-subhead">
-              <button class="back-btn" onclick={() => (dataSubView = 'none')}>
+              <button class="back-btn" onclick={resetDataView}>
                 <iconify-icon icon="ant-design:left-outlined" width="14"></iconify-icon>
               </button>
               <span class="data-subtitle">
@@ -498,20 +619,60 @@
               {#if archivedSessions.length === 0}
                 <div class="data-empty">{$t('settings.data.archived_empty')}</div>
               {:else}
-                <div class="archived-list">
-                  {#each archivedSessions as s (s.id)}
-                    <div class="archived-row">
-                      <div class="archived-info">
-                        <span class="archived-name">{(s as any).name || (s as any).title || s.id}</span>
-                        <span class="archived-meta mono">{s.id} · {ago((s as any).updated_at, $t)}</span>
+                {@const selCount = Object.keys(archiveSel).length}
+                {@const visibleIds = archivedFiltered.map(s => s.id)}
+                {@const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => archiveSel[id])}
+                <div class="archive-toolbar">
+                  <div class="archive-search">
+                    <iconify-icon icon="ant-design:search-outlined" width="14"></iconify-icon>
+                    <input type="text" placeholder={$t('settings.data.search_placeholder')} bind:value={archiveSearch} />
+                  </div>
+                  <select class="sinput archive-project-select" bind:value={archiveProjectFilter}>
+                    <option value="">{$t('settings.data.all_projects')}</option>
+                    <option value="none">{$t('settings.data.no_project')}</option>
+                    {#each archiveProjectOptions as g (g.id)}
+                      <option value={g.id}>{g.name}</option>
+                    {/each}
+                  </select>
+                </div>
+                <div class="archive-selectbar">
+                  <label class="archive-selectall">
+                    <input type="checkbox" checked={allVisibleSelected} disabled={visibleIds.length === 0} onchange={toggleArchiveSelAll} />
+                    <span>{$t('settings.data.select_all')}</span>
+                  </label>
+                  {#if selCount > 0}
+                    <span class="archive-selcount">{$t('settings.data.n_selected').replace('{n}', String(selCount))}</span>
+                    <button class="btns danger" onclick={deleteSelectedArchived}>{$t('settings.data.delete_selected')}</button>
+                  {/if}
+                </div>
+                {#if archivedFiltered.length === 0}
+                  <div class="data-empty">{$t('settings.data.archived_no_match')}</div>
+                {:else}
+                  {#each archivedGroups as bucket (bucket.group?.id ?? '')}
+                    <div class="archive-bucket">
+                      <div class="archive-bucket-head">
+                        <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
+                        <span>{bucket.group ? bucket.group.name : $t('settings.data.no_project')}</span>
+                        <span class="archive-bucket-count">{bucket.items.length}</span>
                       </div>
-                      <div class="archived-actions">
-                        <button class="btns danger" onclick={() => deleteArchivedSession(s.id)}>{$t('common.delete')}</button>
-                        <button class="btns" onclick={() => unarchiveSession(s.id)}>{$t('sidebar.uncollapse')}</button>
+                      <div class="archived-list">
+                        {#each bucket.items as s (s.id)}
+                          <div class="archived-row">
+                            <input type="checkbox" checked={!!archiveSel[s.id]} onchange={() => toggleArchiveSel(s.id)} />
+                            <div class="archived-info">
+                              <span class="archived-name">{nameOf(s)}</span>
+                              <span class="archived-meta mono">{s.id} · {ago((s as any).updated_at, $t)}</span>
+                            </div>
+                            <div class="archived-actions">
+                              <button class="btns danger" onclick={() => deleteArchivedSession(s.id)}>{$t('common.delete')}</button>
+                              <button class="btns" onclick={() => unarchiveSession(s.id)}>{$t('sidebar.uncollapse')}</button>
+                            </div>
+                          </div>
+                        {/each}
                       </div>
                     </div>
                   {/each}
-                </div>
+                {/if}
               {/if}
             {:else}
               <FileRecallView embedded />
@@ -683,13 +844,43 @@ select.sinput { cursor: pointer; }
 .back-btn:hover { background: var(--hover-neutral); color: var(--text); }
 .data-subtitle { font-size: 14px; font-weight: 600; color: var(--text-heading); }
 .data-empty { padding: 32px 4px; text-align: center; font-size: 13px; color: var(--text-tertiary); }
+
+/* ── archived tasks: search/filter + select-all bar + project buckets ────── */
+.archive-toolbar { display: flex; gap: 10px; padding-bottom: 12px; }
+.archive-search {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px;
+  height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-container); color: var(--text-tertiary);
+}
+.archive-search input {
+  flex: 1; min-width: 0; border: none; outline: none; background: transparent;
+  font-size: 13px; color: var(--text); font-family: inherit;
+}
+.archive-project-select { width: 160px; flex: 0 0 auto; }
+.archive-selectbar {
+  display: flex; align-items: center; gap: 10px; padding: 4px 2px 10px;
+  border-bottom: 1px solid var(--border-secondary); margin-bottom: 4px;
+}
+.archive-selectall {
+  display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-secondary);
+  cursor: pointer; user-select: none;
+}
+.archive-selectall input { cursor: pointer; }
+.archive-selcount { font-size: 12px; color: var(--text-tertiary); flex: 1; }
+.archive-bucket { padding: 10px 0 4px; }
+.archive-bucket-head {
+  display: flex; align-items: center; gap: 7px; padding: 0 2px 6px;
+  font-size: 12px; font-weight: 600; color: var(--text-tertiary);
+}
+.archive-bucket-count { color: var(--text-quaternary); font-weight: 400; }
 .archived-list { display: flex; flex-direction: column; }
 .archived-row {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 16px; padding: 12px 2px; border-bottom: 1px solid var(--border-secondary);
+  display: flex; align-items: center; gap: 12px; padding: 10px 2px;
+  border-bottom: 1px solid var(--border-secondary);
 }
 .archived-row:last-child { border-bottom: none; }
-.archived-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.archived-row > input[type="checkbox"] { flex: 0 0 auto; cursor: pointer; }
+.archived-info { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .archived-name { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .archived-meta { font-size: 11px; color: var(--text-tertiary); }
 .archived-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }

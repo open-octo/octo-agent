@@ -432,8 +432,12 @@ func TestSessionCollapse_CollapseListRestore(t *testing.T) {
 	}
 }
 
-// A pinned or grouped session cannot be collapsed — the states contradict.
-func TestSessionCollapse_RejectsPinnedAndGrouped(t *testing.T) {
+// A pinned session still can't be collapsed — the two states contradict (pin
+// means always at the top, archive means out of sight). A session that
+// belongs to a project can, and keeps its membership: archiving is meant to
+// work inside a project too, and restoring one has to put it back exactly
+// where it was.
+func TestSessionCollapse_RejectsPinnedAllowsGrouped(t *testing.T) {
 	srv := groupTestServer(t)
 	const pinned = "sess-pinned"
 	const grouped = "sess-grouped"
@@ -448,11 +452,25 @@ func TestSessionCollapse_RejectsPinnedAndGrouped(t *testing.T) {
 	gid := o["group"].(map[string]any)["id"].(string)
 	fileInProject(t, gid, grouped)
 	rec, _ = doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+grouped+"/collapse", map[string]any{"collapsed": true})
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("collapse of grouped session: status %d, want 409", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("collapse of grouped session: status %d, want 200", rec.Code)
 	}
-	if col, _ := loadCollapsedSessions(); len(col) != 0 {
-		t.Fatalf("rejected collapses still landed: %v", col)
+	col, _ := loadCollapsedSessions()
+	if len(col) != 1 || col[0] != grouped {
+		t.Fatalf("collapse did not land: %v", col)
+	}
+	if p := projectForSession(grouped); p == nil || p.ID != gid {
+		t.Fatalf("session lost its project on archive: %+v", p)
+	}
+
+	// Restoring puts it back with no further write — membership was never
+	// touched.
+	rec, _ = doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+grouped+"/collapse", map[string]any{"collapsed": false})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("restore: status %d", rec.Code)
+	}
+	if p := projectForSession(grouped); p == nil || p.ID != gid {
+		t.Fatalf("session did not restore into its project: %+v", p)
 	}
 }
 

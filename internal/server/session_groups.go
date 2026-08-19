@@ -951,12 +951,13 @@ type setSessionCollapsedRequest struct {
 	Collapsed bool `json:"collapsed"`
 }
 
-// handleSetSessionCollapsed collapses a session into the sidebar's folded
-// panel, or restores it. Collapsing a pinned or grouped session is rejected —
-// the two states contradict each other (the UI hides the collapse action for
-// those sessions; this guards racing tabs). Idempotent like pin: collapsing an
-// already-collapsed session keeps its position, restoring an absent one is a
-// no-op.
+// handleSetSessionCollapsed archives a session (hides it from the sidebar's
+// Tasks/Projects sections, moves it into Settings' 数据管理), or restores it.
+// Archiving keeps whatever project membership the session already has —
+// unlike pin, which still can't coexist with it — so restoring puts a project's
+// session back exactly where it was, with no second write needed. Idempotent
+// like pin: collapsing an already-collapsed session keeps its position,
+// restoring an absent one is a no-op.
 func (s *Server) handleSetSessionCollapsed(w http.ResponseWriter, r *http.Request) {
 	sid := r.PathValue("id")
 	if sid == "" {
@@ -982,14 +983,6 @@ func (s *Server) handleSetSessionCollapsed(w http.ResponseWriter, r *http.Reques
 			if id == sid {
 				writeError(w, http.StatusConflict, "session is pinned; unpin it before collapsing")
 				return
-			}
-		}
-		for _, g := range gf.Groups {
-			for _, id := range g.SessionIDs {
-				if id == sid {
-					writeError(w, http.StatusConflict, "session is in a group; remove it from the group before collapsing")
-					return
-				}
 			}
 		}
 	}

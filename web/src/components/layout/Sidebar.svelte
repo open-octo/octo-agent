@@ -154,10 +154,6 @@
   const onLanding = $derived($view === 'chat' && !$activeSessionId)
 
 
-  function groupIdOf(sessionId: string): string {
-    return $sessionGroups.find(g => g.session_ids.includes(sessionId))?.id ?? ''
-  }
-
   const isPinned = (sessionId: string): boolean => $pinnedSessions.includes(sessionId)
   const isCollapsed = (sessionId: string): boolean => $collapsedSessions.includes(sessionId)
 
@@ -306,14 +302,17 @@
     exitBatchMode()
   }
 
-  // Archiving is only legal for a session that is neither pinned nor in a group
-  // (the server refuses the rest), so a selection spanning both kinds archives
-  // what it can and says how many it left alone — refusing the whole batch
-  // because one member is pinned would be the more annoying answer.
+  // Archiving is only illegal for a pinned session (the two states contradict —
+  // pin means always at the top, archive means out of sight; the server refuses
+  // it). A session in a project archives fine and keeps its membership, so
+  // restoring it later puts it back exactly where it was. A selection spanning
+  // pinned and unpinned sessions archives what it can and says how many it left
+  // alone — refusing the whole batch over one pinned member would be the more
+  // annoying answer.
   async function archiveSelected() {
     const ids = Object.keys($sel)
     if (ids.length === 0) return
-    const eligible = ids.filter(id => !isPinned(id) && !isCollapsed(id) && !groupIdOf(id))
+    const eligible = ids.filter(id => !isPinned(id) && !isCollapsed(id))
     const skipped = ids.length - eligible.length
     if (eligible.length === 0) {
       showToast(tr('sidebar.archive_none_eligible'), 'error')
@@ -717,9 +716,10 @@
             <span class="row-action on-hover kebab" onclick={(e) => { e.stopPropagation(); menuFor.update(m => m === s.id ? null : s.id) }} style="color:{solid ? 'var(--blue-6)' : 'var(--text-tertiary)'}">
               <iconify-icon icon="ant-design:more-outlined" width="14"></iconify-icon>
             </span>
-            {#if !pinned && !groupIdOf(s.id)}
-            <!-- Archiving is only legal where unpinned + ungrouped, matching
-                 the server's guard. -->
+            {#if !pinned}
+            <!-- Archiving is only illegal while pinned, matching the server's
+                 guard — a session in a project archives fine and keeps its
+                 membership. -->
             <span class="row-action on-hover" title={$t('sidebar.collapse')} onclick={(e) => { e.stopPropagation(); archiveSession(s.id) }}>
               <iconify-icon icon="lucide:archive" width="13"></iconify-icon>
             </span>
