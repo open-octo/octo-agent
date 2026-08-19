@@ -44,12 +44,14 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		"needs_update": needs,
 		"cli_command":  "octo",
 		// native is true in the Wails desktop build (a NativeBridge is wired):
-		// the frontend can use OS dialogs/notifications. local is true whenever
-		// the browser is on this machine (loopback) — desktop or localhost web —
+		// the frontend can use OS dialogs/notifications. local is true when the
+		// browser is genuinely on this machine — desktop or localhost web —
 		// telling the frontend to pick files/folders by real path instead of
-		// uploading. Remote web gets neither and falls back to upload.
+		// uploading. A peer that merely reaches us over loopback because
+		// something forwards the port (ngrok, a proxy, octo's own tunnel) is not
+		// local and falls back to upload; see isLocalRequest.
 		"native": s.cfg.Native != nil,
-		"local":  isLoopbackRemote(r.RemoteAddr),
+		"local":  isLocalRequest(r),
 		// upgrade_mode tells the badge which update mechanism this server offers:
 		// "cli" — the in-place binary swap of POST /api/version/upgrade (octo
 		// serve); "installer" — the desktop build, whose binary can't be swapped

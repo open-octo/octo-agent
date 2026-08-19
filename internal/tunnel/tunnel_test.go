@@ -38,6 +38,29 @@ func startStubLoopback(t *testing.T) *httptest.Server {
 		w.WriteHeader(http.StatusCreated)
 		fmt.Fprintf(w, `{"method":%q,"body":%q}`, r.Method, string(body))
 	})
+	// Reports the forwarding marker the bridge stamped, so a test can prove a
+	// relayed request is distinguishable from a genuine local one.
+	mux.HandleFunc("/api/hdr", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		fmt.Fprintf(w, `{"forwarded":%q,"key":%q}`,
+			r.Header.Get(headerForwarded), r.Header.Get("X-Access-Key"))
+	})
+	// Same, for a tunnelled /ws stream: the marker rides the handshake, so it is
+	// reported once on connect rather than per message.
+	mux.HandleFunc("/ws-hdr", func(w http.ResponseWriter, r *http.Request) {
+		marker := r.Header.Get(headerForwarded) + "/" + r.Header.Get("X-Access-Key")
+		ws, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.Close()
+		_ = ws.WriteMessage(websocket.TextMessage, []byte("forwarded:"+marker))
+		for {
+			if _, _, err := ws.ReadMessage(); err != nil {
+				return
+			}
+		}
+	})
 	// Echoes each WebSocket message with a "reply-to:" prefix.
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		ws, err := upgrader.Upgrade(w, r, nil)
@@ -283,6 +306,11 @@ func (p *mockPhone) recvShim(t *testing.T) shimFrame {
 	return shimFrame{}
 }
 
+// testAccessKey is the host key the bridge must present on everything it
+// replays: marking its traffic as relayed costs it the server's
+// loopback-without-a-key exemption, so without this the phone gets 401s.
+const testAccessKey = "tunnel-test-key-0123456789abcdef"
+
 func newPairedPhone(t *testing.T) *mockPhone {
 	t.Helper()
 	stub := startStubLoopback(t)
@@ -292,6 +320,7 @@ func newPairedPhone(t *testing.T) *mockPhone {
 		TunnelID:    "tunnel-A",
 		PairTokens:  []string{"tok-1"},
 		LoopbackURL: wsScheme(stub) + "/ws",
+		AccessKey:   testAccessKey,
 		Logf:        func(string, ...any) {},
 	})
 	if err != nil {
@@ -413,5 +442,96 @@ func TestRelayDialBase_RuleParity(t *testing.T) {
 		if got := relayDialBase(c.relay, c.tunnel); got != c.want {
 			t.Errorf("relayDialBase(%q, %q) = %q, want %q", c.relay, c.tunnel, got, c.want)
 		}
+	}
+}
+
+// The bridge dials loopback and drops the phone's Host, so without a marker a
+// phone across the relay is indistinguishable from a browser on the host — and
+// would inherit every local-peer capability (the unauthenticated loopback
+// exemption, OS dialogs, referencing files by their real path on the host's
+// disk). internal/server reads this header as proof the peer is remote.
+func TestHostTunnel_HTTPStampsForwardedMarker(t *testing.T) {
+	phone := newPairedPhone(t)
+
+	phone.sendShim(t, shimFrame{Kind: shimHTTPReq, ID: "h1", Method: "GET", Path: "/api/hdr"})
+
+	resp := phone.recvShim(t)
+	if resp.Kind != shimHTTPResp || resp.ID != "h1" {
+		t.Fatalf("got %+v, want an http-resp for h1", resp)
+	}
+	want := `{"forwarded":"` + headerForwardedValue + `","key":"` + testAccessKey + `"}`
+	if resp.Body == nil || *resp.Body != want {
+		t.Errorf("body = %v, want %s", resp.Body, want)
+	}
+}
+
+// A phone must not be able to clear or rewrite the marker: the bridge sets it
+// after copying the phone's headers, so whatever the phone sent loses.
+func TestHostTunnel_PhoneCannotForgeForwardedMarker(t *testing.T) {
+	phone := newPairedPhone(t)
+
+	phone.sendShim(t, shimFrame{
+		Kind:    shimHTTPReq,
+		ID:      "h2",
+		Method:  "GET",
+		Path:    "/api/hdr",
+		Headers: map[string]string{headerForwarded: ""},
+	})
+
+	resp := phone.recvShim(t)
+	if resp.Kind != shimHTTPResp || resp.ID != "h2" {
+		t.Fatalf("got %+v, want an http-resp for h2", resp)
+	}
+	want := `{"forwarded":"` + headerForwardedValue + `","key":"` + testAccessKey + `"}`
+	if resp.Body == nil || *resp.Body != want {
+		t.Errorf("body = %v, want the bridge's own values %s", resp.Body, want)
+	}
+}
+
+// A tunnelled /ws stream carries the marker on its handshake too — that is the
+// connection the phone does all its real work over, and the one whose loopback
+// flag gates referencing files by their real path.
+func TestHostTunnel_WSStampsForwardedMarker(t *testing.T) {
+	phone := newPairedPhone(t)
+
+	phone.sendShim(t, shimFrame{Kind: shimWSOpen, ID: "w9", Path: "/ws-hdr"})
+
+	want := "forwarded:" + headerForwardedValue + "/" + testAccessKey
+	for {
+		f := phone.recvShim(t)
+		if f.Kind == shimWSError {
+			t.Fatalf("ws-open failed: %s", f.Message)
+		}
+		if f.Kind != shimWSMessage || f.ID != "w9" {
+			continue
+		}
+		if f.Data != want {
+			t.Errorf("ws greeting = %q, want %q", f.Data, want)
+		}
+		return
+	}
+}
+
+// A phone cannot suppress the marker by sending it under a different casing: Go
+// canonicalizes header names, so its lower-case attempt lands on the same key
+// the bridge then overwrites. Nor can it substitute its own access key.
+func TestHostTunnel_LowercaseForgeAttemptStillMarked(t *testing.T) {
+	phone := newPairedPhone(t)
+
+	phone.sendShim(t, shimFrame{
+		Kind:    shimHTTPReq,
+		ID:      "h3",
+		Method:  "GET",
+		Path:    "/api/hdr",
+		Headers: map[string]string{"x-octo-forwarded": "", "x-access-key": "phone-chosen-key"},
+	})
+
+	resp := phone.recvShim(t)
+	if resp.Kind != shimHTTPResp || resp.ID != "h3" {
+		t.Fatalf("got %+v, want an http-resp for h3", resp)
+	}
+	want := `{"forwarded":"` + headerForwardedValue + `","key":"` + testAccessKey + `"}`
+	if resp.Body == nil || *resp.Body != want {
+		t.Errorf("body = %v, want the bridge's own values %s", resp.Body, want)
 	}
 }

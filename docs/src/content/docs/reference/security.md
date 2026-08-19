@@ -25,7 +25,8 @@ scope.
 | LAN / internet attacker calling an exposed API | Loopback-only default bind; 256-bit access key (constant-time compare) on every non-loopback request |
 | Malicious website CSRF-ing `http://localhost:8088` from your browser | `Origin` must be local or `--cors`-allowlisted (a literal `*` is never honored); auth cookie is `SameSite=Strict` |
 | DNS rebinding (attacker domain resolving to 127.0.0.1) | The loopback exemption requires a local `Host` header |
-| Spoofed client IPs | `X-Forwarded-For` is never consulted for the loopback exemption |
+| Spoofed client IPs | The peer address is never taken from a header; `X-Forwarded-For` and friends can only *remove* the loopback exemption, never grant it |
+| A forwarded port (ngrok, a reverse proxy, octo's own tunnel) | Forwarding headers and a non-loopback `Host` both withdraw the exemption, so a remote client cannot inherit local trust |
 | XSSI reads of uploaded files | `X-Content-Type-Options: nosniff` on served uploads |
 | Agent wiping the OS with a destructive command | Permission engine with hardcoded `deny` rules for `rm -rf /`, `dd`, `mkfs`, `fdisk`, `format`, `shutdown`, `reboot`, `kill -9 -1`, system-directory removal (`rm -rf /usr`, `rmdir /s /q C:\Windows` and every other deletion spelling targeting `C:\Windows` / `C:\ProgramData` / `C:\Program Files`, including the PowerShell `ri`/`del`/`erase` aliases), plus `diskpart`, `bcdedit`, `reg delete`, `vssadmin delete`, `wbadmin delete`; these cannot be overridden by `~/.octo/permissions.yml` |
 | Agent writing to system directories | `write_file`/`edit_file` hardcoded `deny` for `/bin`, `/sbin`, `/usr`, `/System`, `/boot`, `/lib`, `/Windows`, `C:/Windows`, `C:/Windows/System32`, `C:/Windows/SysWOW64`, `C:/ProgramData`, etc. across Unix, macOS, and Windows |

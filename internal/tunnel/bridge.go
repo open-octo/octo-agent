@@ -105,6 +105,11 @@ func (b *bridge) doHTTP(f shimFrame) {
 		}
 		req.Header.Set(k, v)
 	}
+	// Both set AFTER the phone's headers are copied, so a phone can neither
+	// clear the marker nor substitute its own key: this request came off the
+	// relay, however it is dressed, and it authenticates as this host.
+	req.Header.Set(headerForwarded, headerForwardedValue)
+	b.t.authorize(req.Header)
 	resp, err := b.t.httpClient.Do(req)
 	if err != nil {
 		b.send(httpError(f.ID, err))
@@ -123,6 +128,30 @@ func httpError(id string, err error) shimFrame {
 	return shimFrame{Kind: shimHTTPResp, ID: id, Status: http.StatusBadGateway, Headers: map[string]string{}, Body: strPtr(err.Error())}
 }
 
+// headerForwarded marks every request this bridge replays into the local
+// server as relayed. internal/server declares the same literal as
+// server.HeaderForwarded and treats its presence as proof the peer is not on
+// this machine — necessary because the bridge dials loopback and drops the
+// phone's Host (see skipRequestHeader), so a phone across the relay would
+// otherwise be indistinguishable from a browser on the host, and would inherit
+// the local-peer capabilities: the unauthenticated loopback exemption, the OS
+// dialogs, and referencing files by their real path on the host's disk.
+const (
+	headerForwarded      = "X-Octo-Forwarded"
+	headerForwardedValue = "relay"
+)
+
+// authorize adds the host's access key so the local server accepts a relayed
+// request. A tunnel configured without a key sends none, which the server will
+// refuse — better a clear 401 than silently reopening the exemption the marker
+// above just closed.
+func (t *Tunnel) authorize(h http.Header) {
+	if t.cfg.AccessKey == "" {
+		return
+	}
+	h.Set("X-Access-Key", t.cfg.AccessKey)
+}
+
 // skipRequestHeader drops headers the loopback HTTP client must set itself; the
 // phone's copy of them would be wrong or rejected.
 func skipRequestHeader(k string) bool {
@@ -134,7 +163,13 @@ func skipRequestHeader(k string) bool {
 }
 
 func (b *bridge) openWS(f shimFrame) {
-	conn, _, err := websocket.DefaultDialer.DialContext(b.ctx, b.t.wsBase+f.Path, nil)
+	// The phone's own headers never reach this dial, so the handshake carries
+	// exactly what the bridge puts on it: the relay marker and the access key.
+	// The key cannot ride the query string here — mobile/src/shim.ts forwards
+	// only the path — so the header is the whole mechanism.
+	h := http.Header{headerForwarded: []string{headerForwardedValue}}
+	b.t.authorize(h)
+	conn, _, err := websocket.DefaultDialer.DialContext(b.ctx, b.t.wsBase+f.Path, h)
 	if err != nil {
 		b.send(shimFrame{Kind: shimWSError, ID: f.ID, Message: err.Error()})
 		return

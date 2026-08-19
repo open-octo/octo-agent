@@ -109,6 +109,72 @@ func isLoopbackRemote(remoteAddr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// HeaderForwarded is the header octo's own managed tunnel stamps on every
+// request it replays into the local server (internal/tunnel/bridge.go defines
+// the same literal — a one-string constant is not worth a package dependency
+// between the two). The tunnel dials loopback and, having dropped the phone's
+// Host, dials it under a loopback Host too, so without this marker a phone
+// across the relay is indistinguishable from a browser on this machine.
+const HeaderForwarded = "X-Octo-Forwarded"
+
+// forwardedHeaders are set by something that relayed the request. ngrok,
+// cloudflared, Caddy and octo's own tunnel all add at least one; nginx does NOT
+// unless configured to (a bare proxy_pass sets only Host), which is why it
+// lands in the uncoverable case described on isLocalRequest rather than here.
+// Their presence means the peer we see is the relay, not the client, whichever
+// address it dials us from.
+//
+// These headers are client-spoofable, which is exactly why they are only ever
+// read to NARROW what a request may do — see isLocalRequest. isLoopbackRemote
+// deliberately never consults them, because there the answer would WIDEN the
+// loopback exemption, and a forged header must never buy privilege. Faking one
+// here can only cost the sender the local-peer capabilities, never grant them.
+var forwardedHeaders = []string{
+	"X-Forwarded-For",
+	"X-Forwarded-Host",
+	"X-Forwarded-Proto",
+	"X-Real-Ip",
+	"Forwarded",
+	"Via",
+	HeaderForwarded,
+}
+
+// isLocalRequest reports whether a request genuinely came from this machine —
+// the question behind every local-peer capability: the unauthenticated loopback
+// exemption, the OS-dialog and filesystem routes, referencing a file by its real
+// path instead of uploading it, and the `local` flag the frontend switches those
+// affordances on.
+//
+// A loopback peer address alone does not answer it. Anything that forwards a
+// port — ngrok, cloudflared, a local reverse proxy, `ssh -L`, octo's own tunnel
+// — runs on this machine and dials us from loopback, so a remote client arrives
+// looking local. Two more signals narrow it down:
+//
+//   - a forwarding header means a relay is in the path (see forwardedHeaders);
+//   - the Host the client actually asked for must name this machine, which rules
+//     out a tunnel or proxy that passes the public hostname through.
+//
+// What remains uncoverable is a plain TCP forward that rewrites Host to loopback
+// and adds no headers — `ssh -L 8088:localhost:8088` is byte-for-byte a local
+// request by the time it reaches us. Capabilities gated on this must therefore
+// stay recoverable rather than assume the answer is certain.
+func isLocalRequest(r *http.Request) bool {
+	return isLoopbackRemote(r.RemoteAddr) && !isForwarded(r) && isLocalName(canonicalHost(r.Host))
+}
+
+// isForwarded reports whether any forwarding header is present at all — by
+// count, not by value. A client that sends an empty X-Forwarded-For which the
+// relay then appends its own value to would otherwise hide behind Get()
+// returning only the first, empty, value.
+func isForwarded(r *http.Request) bool {
+	for _, h := range forwardedHeaders {
+		if len(r.Header.Values(h)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // canonicalHost lowercases a Host header (or origin host) and strips the
 // port, IPv6 brackets, and any trailing dot.
 func canonicalHost(hostport string) string {
@@ -228,6 +294,15 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		if !isLoopbackRemote(r.RemoteAddr) {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		// A relayed request reaches us from loopback too (see isLocalRequest):
+		// without this, exposing the port through ngrok or a proxy handed the
+		// unauthenticated exemption to whoever found the URL — an access key
+		// configured on the server does not close it, since this branch is the
+		// fallback for requests that carry no key at all.
+		if isForwarded(r) {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}

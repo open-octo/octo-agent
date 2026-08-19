@@ -68,7 +68,15 @@ mux. Decision order:
    - `RemoteAddr` is loopback, determined by `net.SplitHostPort` +
      `net.ParseIP(...).IsLoopback()` — this covers `127.0.0.0/8`, `::1`,
      and the IPv4-mapped `::ffff:127.0.0.1`; a string-prefix match does
-     not. `X-Forwarded-For` is never consulted — a spoofable header must
+     not. A spoofable header is never consulted to WIDEN this — the peer
+     address cannot come from a header. It is consulted only to withdraw the
+     exemption: any forwarding header (`X-Forwarded-For`, `Forwarded`, `Via`,
+     octo's own `X-Octo-Forwarded`, …) means a relay sits in the path, and a
+     relay's loopback dial must not inherit the trust of someone at the
+     keyboard. Faking one costs the sender the exemption; it can never buy it.
+     The residual case is a plain TCP forward that rewrites `Host` and adds no
+     headers (`ssh -L`), which is indistinguishable from a local request —
+     see isLocalRequest. A spoofable header must
      not widen the exemption.
    - `Host` is local: `localhost` or a loopback IP literal (any port,
      compared case-insensitively, trailing dot stripped), or a host named
@@ -212,6 +220,10 @@ a separate-origin frontend authenticates with explicit headers.
     200; via query parameter → 200 on `/ws`, 401 elsewhere
   - any source, wrong key → 401
   - `X-Forwarded-For: 127.0.0.1` from non-loopback, no key → 401
+  - any forwarding header from loopback, no key → 401 (a relayed request
+    cannot use the exemption)
+  - a forwarding header from loopback WITH a valid key → 200 (the key is the
+    gate for a relayed peer; octo's own tunnel sends exactly this shape)
   - `--cors '*'` configured: foreign Origin from loopback still 403
 - Route-coverage assertion: every registered `/api/*` mux entry except
   `/api/health` and `/api/version` returns 401 to a keyless non-loopback
