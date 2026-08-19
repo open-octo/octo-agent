@@ -153,6 +153,18 @@
   // the active state of the New session row.
   const onLanding = $derived($view === 'chat' && !$activeSessionId)
 
+  // Which section header carries the select/done toggle. With no "Sessions"
+  // header above them, the sections are top level and there is no shared row to
+  // put it in — so it rides the first section that renders, and is therefore
+  // never stranded in a list whose first section happens to be empty.
+  const selHost = $derived(
+    groupedView.pinned.length ? 'pinned'
+      : groupedView.ungrouped.length ? 'tasks'
+        : groupedView.cronGroups.length ? 'scheduled'
+          : groupedView.projects.length ? 'projects'
+            : null,
+  )
+
   function groupIdOf(sessionId: string): string {
     return $sessionGroups.find(g => g.session_ids.includes(sessionId))?.id ?? ''
   }
@@ -384,14 +396,11 @@
            overflow .scroll, scrolling internally so a long session list never
            pushes Config/My Data out of view or requires scrolling past it. -->
       <div class="nav-group sessions-group">
-        <div class="group-header">
-          <span class="group-label">{$t('nav.sessions')}</span>
-          <span class="header-actions">
-            <span class="sel-toggle" onclick={() => { selMode.update(v => !v); sel.set({}); menuFor.set(null); editId.set(null) }}>
-              {$selMode ? $t('sidebar.done') : $t('sidebar.select')}
-            </span>
+        {#snippet selToggle()}
+          <span class="sel-toggle" onclick={(e) => { e.stopPropagation(); selMode.update(v => !v); sel.set({}); menuFor.set(null); editId.set(null) }}>
+            {$selMode ? $t('sidebar.done') : $t('sidebar.select')}
           </span>
-        </div>
+        {/snippet}
 
         {#if $selMode && Object.keys($sel).length > 0}
         <div class="batch-bar">
@@ -409,6 +418,7 @@
           <iconify-icon icon="ant-design:pushpin-filled" width="11" style="color:var(--text-quaternary)"></iconify-icon>
           <span class="grp-name muted">{$t('sidebar.pinned')}</span>
           <span class="grp-count">{groupedView.pinned.length}</span>
+          {#if selHost === 'pinned'}{@render selToggle()}{/if}
         </div>
         {#each groupedView.pinned as s (s.id)}
           {@render sessionRow(s)}
@@ -423,6 +433,7 @@
           <iconify-icon icon={sections.tasks ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="9"></iconify-icon>
           <span class="sec-name">{$t('sidebar.tasks')}</span>
           <span class="sec-count">{groupedView.taskCount}</span>
+          {#if selHost === 'tasks'}{@render selToggle()}{/if}
         </div>
         {#if sections.tasks}
           {#each groupedView.ungrouped as s (s.id)}
@@ -439,6 +450,7 @@
           <iconify-icon icon={sections.scheduled ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="9"></iconify-icon>
           <span class="sec-name">{$t('sidebar.scheduled')}</span>
           <span class="sec-count">{groupedView.cronCount}</span>
+          {#if selHost === 'scheduled'}{@render selToggle()}{/if}
         </div>
         {#if sections.scheduled}
           {#each groupedView.cronGroups as gv (gv.group.id)}
@@ -455,6 +467,7 @@
           <iconify-icon icon={sections.projects ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="9"></iconify-icon>
           <span class="sec-name">{$t('sidebar.projects')}</span>
           <span class="sec-count">{groupedView.projects.length}</span>
+          {#if selHost === 'projects'}{@render selToggle()}{/if}
         </div>
         {#if sections.projects}
           {#each groupedView.projects as gv, gi (gv.group.id)}
@@ -841,7 +854,6 @@
 .sessions-group { flex: 0 1 auto; min-height: 80px; overflow-y: auto; }
 .group-header { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 6px; }
 .group-label { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; color: var(--text-quaternary); }
-.header-actions { display: flex; align-items: center; gap: 8px; }
 .sel-toggle { font-size: 11px; font-weight: 600; color: var(--blue-6); cursor: pointer; }
 /* Group section header (folder row) */
 /* Section heading (Tasks / Projects). Sits a tier above .grp-header: it names
@@ -850,12 +862,16 @@
 .sec-header {
   display: flex; align-items: center; gap: 6px;
   min-height: 24px; padding: 0 8px; margin-top: 10px;
-  color: var(--text-quaternary); cursor: pointer; user-select: none;
+  color: var(--text-tertiary); cursor: pointer; user-select: none;
 }
-.sec-header:hover { color: var(--text-tertiary); }
+.sec-header:first-child { margin-top: 0; }
+.sec-header:hover { color: var(--text-secondary); }
+/* These are the top-level headings of the session list now — there is no
+   "Sessions" row above them — so they read a step above the footnote weight
+   they had while nested under one. */
 .sec-name {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase;
 }
 .sec-count { font-size: 11px; flex: 0 0 auto; }
 
