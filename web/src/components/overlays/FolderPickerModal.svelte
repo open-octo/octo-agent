@@ -27,12 +27,21 @@
   let error = $state('')
   let showHidden = $state(false)
   let modalEl = $state<HTMLDivElement | null>(null)
+  // The path bar is editable: typing or pasting a path and pressing Enter
+  // jumps straight there. Clicking through a tree is the slow way to reach a
+  // path you already know, and this dialog is now the only way to set a
+  // working directory (the composer's typed-path popover was folded into it),
+  // so it has to carry both. Mirrors an OS file dialog's address bar.
+  let pathDraft = $state('')
 
   async function load(path?: string) {
     loading = true
     error = ''
     try {
       listing = await api.fsList(path)
+      // Follow the listing: navigating the tree updates the field, and a
+      // rejected hand-typed path is replaced by where we actually are.
+      pathDraft = listing.is_this_pc ? '' : listing.path
     } catch (e: any) {
       // A 403 lands here with the server's "local machine only" message; any
       // other failure (bad path, permission) shows its message too. Keep the
@@ -41,6 +50,25 @@
     } finally {
       loading = false
     }
+  }
+
+  // Navigate to whatever is typed in the path bar. A bad path surfaces the
+  // server's error and leaves the current listing in place.
+  async function gotoDraft() {
+    const p = pathDraft.trim()
+    if (!p || p === listing?.path) return
+    await load(p)
+  }
+
+  // Confirm the current directory. A path typed but not yet entered would
+  // otherwise silently confirm the OLD directory, so resolve it first and
+  // only confirm if it actually loaded.
+  async function chooseCurrent() {
+    if (pathDraft.trim() && pathDraft.trim() !== listing?.path) {
+      await gotoDraft()
+      if (error) return
+    }
+    if (listing && !listing.is_this_pc) onSelect(listing.path)
   }
 
   // Focus the modal so Esc works without stealing the composer's focus
@@ -54,15 +82,6 @@
   let visibleEntries = $derived(
     (listing?.entries ?? []).filter((e) => showHidden || !e.name.startsWith('.'))
   )
-
-  // Show the last few path segments so a long or non-ASCII path (e.g. a CJK
-  // folder name) stays readable without a `direction: rtl` hack, which can
-  // reorder bidirectional text. Full path is in the title tooltip.
-  function shortPath(p: string): string {
-    if (!p) return ''
-    const parts = p.split('/').filter(Boolean)
-    return parts.length <= 3 ? p : '…/' + parts.slice(-3).join('/')
-  }
 
   function enter(name: string) {
     if (!listing) return
@@ -105,9 +124,20 @@
       >
         <iconify-icon icon="lucide:corner-left-up" width="14"></iconify-icon>
       </button>
-      <span class="cur-path mono" title={listing?.path ?? ''}>
-        {listing?.is_this_pc ? $t('folder.this_pc') : shortPath(listing?.path ?? '')}
-      </span>
+      {#if listing?.is_this_pc}
+        <span class="cur-path mono">{$t('folder.this_pc')}</span>
+      {:else}
+        <input
+          class="cur-path mono"
+          bind:value={pathDraft}
+          spellcheck="false"
+          autocomplete="off"
+          placeholder={$t('folder.path_placeholder')}
+          title={listing?.path ?? ''}
+          aria-label={$t('folder.path_placeholder')}
+          onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); gotoDraft() } }}
+        />
+      {/if}
     </div>
 
     <div class="modal-body">
@@ -160,7 +190,7 @@
         <button
           class="btn-primary"
           disabled={!listing || loading || listing.is_this_pc}
-          onclick={() => listing && onSelect(listing.path)}
+          onclick={() => chooseCurrent()}
         >
           <iconify-icon icon="ant-design:check-outlined" width="12"></iconify-icon>
           {$t('folder.select')}
@@ -215,9 +245,19 @@
 .up-btn:hover:not(:disabled) { border-color: var(--blue-5); color: var(--blue-5); }
 .up-btn:disabled { opacity: 0.4; cursor: default; }
 .cur-path {
+  flex: 1; min-width: 0;
   font-size: 12px; color: var(--text-secondary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+input.cur-path {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-container);
+  color: var(--text-primary);
+}
+input.cur-path:focus { outline: none; border-color: var(--blue-5); }
 .modal-body {
   padding: 8px 10px;
   overflow-y: auto;
