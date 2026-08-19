@@ -666,7 +666,7 @@
             <!-- Restoring is the whole point of visiting the folded panel, so
                  it gets a direct button rather than hiding in the kebab. -->
             <span class="row-action" title={$t('sidebar.uncollapse')} onclick={(e) => { e.stopPropagation(); toggleSessionCollapse(s.id, false) }}>
-              <iconify-icon icon="ant-design:vertical-align-top-outlined" width="13"></iconify-icon>
+              <iconify-icon icon="lucide:archive-restore" width="13"></iconify-icon>
             </span>
             {/if}
             <span class="row-action kebab" onclick={(e) => { e.stopPropagation(); menuFor.update(m => m === s.id ? null : s.id); groupMenuFor.set(null) }} style="color:{solid ? 'var(--blue-6)' : 'var(--text-tertiary)'}">
@@ -681,7 +681,7 @@
                  pinning or grouping it contradicts the collapse, and the
                  server would reject the combination anyway. -->
             <span class="row-action" onclick={(e) => { e.stopPropagation(); toggleSessionCollapse(s.id, false) }} title={$t('sidebar.uncollapse')}>
-              <iconify-icon icon="ant-design:vertical-align-top-outlined" width="13"></iconify-icon>
+              <iconify-icon icon="lucide:archive-restore" width="13"></iconify-icon>
             </span>
             {:else}
             <span class="row-action" onclick={(e) => { e.stopPropagation(); togglePin(s.id, !pinned) }} title={pinned ? $t('sidebar.unpin') : $t('sidebar.pin')}>
@@ -694,7 +694,7 @@
             <!-- Collapse is only offered where it's legal (unpinned +
                  ungrouped), matching the server's guard. -->
             <span class="row-action" onclick={(e) => { e.stopPropagation(); toggleSessionCollapse(s.id, true) }} title={$t('sidebar.collapse')}>
-              <iconify-icon icon="ant-design:vertical-align-bottom-outlined" width="13"></iconify-icon>
+              <iconify-icon icon="lucide:archive" width="13"></iconify-icon>
             </span>
             {/if}
             {/if}
