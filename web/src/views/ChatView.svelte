@@ -2918,7 +2918,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
 .chat-header {
-  flex: 0 0 auto; background: var(--bg-layout); border-bottom: 1px solid var(--border);
+  flex: 0 0 auto; background: var(--bg-layout); border-bottom: 1px solid var(--border-secondary);
   padding: 7px 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
   container-type: inline-size;
 }
@@ -2938,17 +2938,17 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 @keyframes octo-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .header-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 .hdr-btn {
-  height: 30px; padding: 0 11px; border: 1px solid var(--border); background: var(--bg-container);
+  height: 30px; padding: 0 11px; border: none; background: transparent;
   border-radius: var(--radius-sm); display: flex; align-items: center; gap: 6px; white-space: nowrap;
-  font-size: 12px; font-weight: 500; color: var(--text); cursor: pointer; font-family: inherit;
-  box-shadow: 0 1px 1.5px rgba(0,0,0,0.04); transition: 0.12s;
+  font-size: 12px; font-weight: 500; color: var(--text-secondary); cursor: pointer; font-family: inherit;
+  transition: 0.12s;
 }
 /* Not enough room for labels: keep the icons (tooltips carry the meaning). */
 @container (max-width: 680px) {
   .btn-label { display: none; }
   .hdr-btn { padding: 0 8px; }
 }
-.hdr-btn:hover { background: var(--bg-table-header); border-color: var(--border); }
+.hdr-btn:hover { background: var(--hover-neutral); color: var(--text); }
 .hdr-btn:disabled { opacity: 0.5; cursor: not-allowed; color: var(--text-quaternary); }
 
 /* ── WS banner ───────────────────────────────────────────────────────────── */
@@ -3219,8 +3219,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 .msg-user .msg-meta { flex-direction: row-reverse; }
 .user-card-wrap { display: flex; flex-direction: column; gap: 4px; max-width: 80%; }
 .user-card {
-  background: var(--bg-container); border: 1px solid var(--border);
-  border-radius: 12px; padding: 14px 16px; box-shadow: var(--card-shadow);
+  /* No border, no shadow: the fill against the page's own --bg-layout is
+     enough contrast to read as a distinct block without a drawn edge. */
+  background: var(--bg-container);
+  border-radius: 14px; padding: 14px 16px;
   font-size: 13px; line-height: 1.65; color: var(--text);
   white-space: pre-wrap; word-break: break-word;
   display: flex; flex-direction: column; gap: 8px;

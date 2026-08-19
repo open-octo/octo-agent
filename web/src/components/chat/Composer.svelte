@@ -1454,9 +1454,11 @@
 }
 .input-wrap { max-width: var(--chat-content-max-width, 1080px); margin: 0 auto; padding: 8px 24px 14px; }
 .input-card {
-  background: var(--bg-container); border: 1px solid var(--border); border-radius: 14px;
+  /* A quiet block rather than a bordered card: a hairline edge, no shadow. The
+     rounder corner (18 vs the old 14) reads more like a single soft shape. */
+  background: var(--bg-container); border: 1px solid var(--border-secondary); border-radius: 18px;
   padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;
-  position: relative; box-shadow: var(--card-shadow);
+  position: relative;
 }
 .input-card:focus-within {
   border-color: var(--blue-6);
