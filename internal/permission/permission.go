@@ -244,6 +244,13 @@ func New(configPath string, cwd string, mode Mode, allowWriteRoots ...string) (*
 		// will just not match anything.
 		cwd, _ = os.Getwd()
 	}
+	// Store the working directory in the form the matcher speaks. Candidate
+	// paths are slash-normalized by absPath before matching and pathMatch
+	// splits on "/", but `$CWD` in a rule is expanded with this string
+	// verbatim — so on Windows, where os.Getwd() yields `C:\Users\...`, a
+	// `$CWD/**` rule produced a back-slashed glob that could never match and
+	// silently degraded every such rule to the implicit ask.
+	cwd = filepath.ToSlash(cwd)
 	if mode == "" {
 		mode = ModeInteractive
 	}

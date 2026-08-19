@@ -1014,3 +1014,43 @@ func TestResolveUnattendedDefaultMode_ExplicitConfigHonored(t *testing.T) {
 		}
 	}
 }
+
+// TestPathRules_NativeSeparators pins that path rules work when the engine is
+// given directories in the host's native form. Every path here is built with
+// t.TempDir/filepath.Join, so on Windows they carry backslashes — the shape
+// that used to match nothing: candidates are slash-normalized by absPath and
+// pathMatch splits on "/", while `$CWD` expansion and the allowWriteRoots
+// globs used the raw strings. On Unix the separator is already "/", so this
+// test is a tautology there and earns its keep on the Windows CI runner.
+func TestPathRules_NativeSeparators(t *testing.T) {
+	cwd := t.TempDir()
+	memRoot := filepath.Join(t.TempDir(), ".octo", "memories")
+
+	cfg := filepath.Join(t.TempDir(), "permissions.yml")
+	if err := os.WriteFile(cfg, []byte("write_file:\n  - allow: { path: [\"$CWD/**\"] }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	e, err := New(cfg, cwd, ModeInteractive, memRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A user rule written as $CWD/** must match a file under the working dir.
+	inCWD := filepath.Join(cwd, "sub", "main.go")
+	if got := e.Check("write_file", map[string]any{"path": inCWD}); got != Allow {
+		t.Errorf("write_file %q: got %s, want allow ($CWD rule must survive native separators)", inCWD, got)
+	}
+
+	// An allowWriteRoots entry must match a file under that root.
+	inRoot := filepath.Join(memRoot, "someproj-0badf00d", "MEMORY.md")
+	if got := e.Check("write_file", map[string]any{"path": inRoot}); got != Allow {
+		t.Errorf("write_file %q: got %s, want allow (write root must survive native separators)", inRoot, got)
+	}
+
+	// And the widening still stops where it should.
+	outside := filepath.Join(filepath.Dir(memRoot), "config.yml")
+	if got := e.Check("write_file", map[string]any{"path": outside}); got == Allow {
+		t.Errorf("write_file %q: got allow, want ask/deny", outside)
+	}
+}
