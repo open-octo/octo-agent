@@ -927,7 +927,7 @@ export const zh: Record<string, string> = {
   "nav.light_apps": "轻应用",
   "nav.file_recall": "文件回收站",
   "nav.settings": "设置",
-  "nav.manage": "更多配置",
+  "nav.manage": "更多",
   "nav.agents": "专家",
   "nav.workbench": "智能体工作台",
   "agents.desc": "为不同任务创建和管理自定义专家角色",
