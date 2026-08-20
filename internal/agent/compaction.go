@@ -693,6 +693,15 @@ func IsPlainUserMessage(m Message) bool {
 	return m.Role == RoleUser && !hasToolResult(m)
 }
 
+// IsSettledAssistantMessage reports whether m closes a turn: role assistant
+// with no tool_use block still awaiting a result. A history prefix ending at
+// such a message is a valid resume point — the same invariant IsPlainUserMessage
+// expresses from the other side of the cut, and what the server's branch
+// endpoint checks on the prefix it copies.
+func IsSettledAssistantMessage(m Message) bool {
+	return m.Role == RoleAssistant && !hasToolUse(m)
+}
+
 // hasToolResult reports whether m carries any tool_result block (i.e. it's a
 // synthetic user message returning tool output, not a real user turn).
 func hasToolResult(m Message) bool {

@@ -143,10 +143,11 @@ func TestHandleDeleteSession(t *testing.T) {
 }
 
 // TestHandleBranchSession verifies POST /api/sessions/{id}/branch:
-// 200 with a new session whose history is copied up to message_index, 400
-// when the index is out of range or does not name a plain user message
-// (branching at an assistant or tool_result message would orphan a tool_use —
-// issue #1899), and 404 when the source does not exist.
+// 200 with a new session whose history is copied up to message_index (an
+// exclusive count, so len(Messages) copies the whole transcript), 400 when the
+// index is out of range or lands anywhere but a turn boundary (a prefix ending
+// on an assistant tool_use would orphan it — issue #1899), and 404 when the
+// source does not exist.
 func TestHandleBranchSession(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -165,8 +166,9 @@ func TestHandleBranchSession(t *testing.T) {
 		}},
 		{Role: agent.RoleAssistant, Content: "ok"},
 		// Steer-shaped user message: blocks-only text, no Content — the closest
-		// legitimate neighbour of the rejected shapes above; must stay branchable.
+		// legitimate neighbour of the rejected shapes above.
 		{Role: agent.RoleUser, Blocks: []agent.ContentBlock{{Type: "text", Text: "steer"}}},
+		{Role: agent.RoleAssistant, Content: "done"},
 	}
 	if err := sess.Save(); err != nil {
 		t.Fatalf("save: %v", err)
@@ -192,38 +194,57 @@ func TestHandleBranchSession(t *testing.T) {
 		t.Fatalf("out-of-range: status = %d, want 400; body=%s", w.Code, w.Body.String())
 	}
 
-	// 400 — index names an assistant message
+	// 400 — the prefix would stop mid-turn, on the user message
 	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/branch",
 		strings.NewReader(`{"message_index":1}`))
 	w = httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusBadRequest {
-		t.Fatalf("assistant index: status = %d, want 400; body=%s", w.Code, w.Body.String())
+		t.Fatalf("mid-turn index: status = %d, want 400; body=%s", w.Code, w.Body.String())
 	}
 
-	// 400 — index names a tool_result message: the branch would end on the
-	// assistant tool_use with no answering result
+	// 400 — the prefix would end on the assistant tool_use with no answering
+	// result
 	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/branch",
 		strings.NewReader(`{"message_index":4}`))
 	w = httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusBadRequest {
-		t.Fatalf("tool_result index: status = %d, want 400; body=%s", w.Code, w.Body.String())
+		t.Fatalf("tool_use index: status = %d, want 400; body=%s", w.Code, w.Body.String())
 	}
 
-	// 200 — a steer-shaped user message (blocks-only text) right after the tool
-	// exchange is a plain user turn and must remain branchable
+	// 200 — cutting right after the reply that closed the tool exchange
 	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/branch",
 		strings.NewReader(`{"message_index":6}`))
 	w = httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
-		t.Fatalf("steer index: status = %d, want 200; body=%s", w.Code, w.Body.String())
+		t.Fatalf("post-tool-exchange index: status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
 
-	// 200 — valid branch with prompt override
+	// 400 — a prefix stopping on the steer message has the same problem as any
+	// other mid-turn cut
 	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/branch",
-		strings.NewReader(`{"message_index":2,"prompt_override":"BRANCHED VARIANT"}`))
+		strings.NewReader(`{"message_index":7}`))
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("steer-tail index: status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+
+	// 200 — message_index == len(Messages) copies the whole transcript: this is
+	// what "branch off the latest reply" sends
+	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/branch",
+		strings.NewReader(`{"message_index":8}`))
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("full-length index: status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+
+	// 200 — valid branch
+	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/branch",
+		strings.NewReader(`{"message_index":2}`))
 	w = httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusOK {
@@ -244,13 +265,13 @@ func TestHandleBranchSession(t *testing.T) {
 		t.Fatal("branch returned the same session id")
 	}
 
-	// Branch was saved and carries the override + lineage.
+	// Branch was saved and carries the copied prefix + lineage.
 	branch, err := agent.LoadSession(resp.Session.ID)
 	if err != nil {
 		t.Fatalf("load branch: %v", err)
 	}
 	if len(branch.Messages) != 2 {
-		t.Fatalf("branch Messages len = %d, want 2 (user message at message_index is excluded)", len(branch.Messages))
+		t.Fatalf("branch Messages len = %d, want 2 (message_index is an exclusive count)", len(branch.Messages))
 	}
 	if branch.BranchedFrom != sess.ID {
 		t.Fatalf("BranchedFrom = %q, want %q", branch.BranchedFrom, sess.ID)
@@ -264,8 +285,45 @@ func TestHandleBranchSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload source: %v", err)
 	}
-	if len(srcReloaded.Messages) != 7 {
-		t.Fatalf("source Messages len = %d, want 7 (untouched)", len(srcReloaded.Messages))
+	if len(srcReloaded.Messages) != 8 {
+		t.Fatalf("source Messages len = %d, want 8 (untouched)", len(srcReloaded.Messages))
+	}
+}
+
+// TestLastBranchableIndex covers what the `complete` event tells the browser
+// about the reply it just streamed: the reply's own index when the turn closed
+// cleanly, and -1 (field omitted) for every tail the branch endpoint would
+// reject anyway.
+func TestLastBranchableIndex(t *testing.T) {
+	toolUse := agent.NewToolUseMessage([]agent.ContentBlock{
+		agent.NewToolUseBlock("call_1", "terminal", map[string]any{"command": "ls"}),
+	})
+	tests := []struct {
+		name string
+		msgs []agent.Message
+		want int
+	}{
+		{"empty", nil, -1},
+		{"ends on reply", []agent.Message{
+			{Role: agent.RoleUser, Content: "hi"},
+			{Role: agent.RoleAssistant, Content: "hello"},
+		}, 1},
+		{"ends on unanswered user turn", []agent.Message{
+			{Role: agent.RoleUser, Content: "hi"},
+		}, -1},
+		{"ends on unanswered tool_use", []agent.Message{
+			{Role: agent.RoleUser, Content: "hi"},
+			toolUse,
+		}, -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sess := agent.NewSession("stub-model", "")
+			sess.Messages = tt.msgs
+			if got := lastBranchableIndex(sess); got != tt.want {
+				t.Errorf("lastBranchableIndex() = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -2147,6 +2205,20 @@ func TestHandleGetSessionMessages_ThinkingBeforeTools(t *testing.T) {
 	}
 	if got, _ := body.Events[4]["content"].(string); got != "It's sunny." {
 		t.Errorf("events[4].content = %q, want answer text", got)
+	}
+	// The answer that closed the turn is a branch point and says so; the
+	// intermediate tool round is not, so it carries no index and the Web UI
+	// offers no Branch action there.
+	if idx, ok := body.Events[4]["message_index"].(float64); !ok || int(idx) != 3 {
+		t.Errorf("events[4].message_index = %v, want 3", body.Events[4]["message_index"])
+	}
+	for i, ev := range body.Events {
+		if i == 4 || ev["type"] != "assistant_message" {
+			continue
+		}
+		if _, present := ev["message_index"]; present {
+			t.Errorf("events[%d] (intermediate assistant_message) carries message_index %v, want absent", i, ev["message_index"])
+		}
 	}
 }
 

@@ -719,10 +719,16 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 			} else {
 				// Final answer turn: keep the reasoning inline on the answer
 				// bubble, mirroring the live assistant_message.
+				//
+				// message_index rides along only on this branch: a reply that
+				// closes a turn is a valid branch point, an intermediate
+				// (tool_use) round is not — the web UI shows the Branch action
+				// exactly where the index is present.
 				events = append(events, map[string]any{
-					"type":     "assistant_message",
-					"content":  m.Content,
-					"thinking": thinking,
+					"type":          "assistant_message",
+					"content":       m.Content,
+					"thinking":      thinking,
+					"message_index": i,
 				})
 			}
 		}
@@ -836,16 +842,28 @@ func (s *Server) handleDeleteSessions(w http.ResponseWriter, r *http.Request) {
 
 // ─── POST /api/sessions/{id}/branch ────────────────────────────────────────
 
+// lastBranchableIndex returns the index of the session's final message when it
+// closes a turn, so a `complete` event can tell the browser which live
+// assistant bubble is a valid branch point without a history re-fetch. Returns
+// -1 when the transcript doesn't end on a settled assistant reply (interrupted
+// mid tool round, or a turn that produced no reply at all).
+func lastBranchableIndex(sess *agent.Session) int {
+	n := len(sess.Messages)
+	if n == 0 || !agent.IsSettledAssistantMessage(sess.Messages[n-1]) {
+		return -1
+	}
+	return n - 1
+}
+
 type branchSessionRequest struct {
-	MessageIndex   int    `json:"message_index"`
-	PromptOverride string `json:"prompt_override,omitempty"`
+	MessageIndex int `json:"message_index"`
 }
 
 // handleBranchSession creates a new session branched from the source session's
-// history up to (but not including) message_index. The source session is
-// untouched. The user message at message_index is NOT copied — the client
-// sends it fresh via ws.sendMessage so there is no duplicate. Returns the
-// new session so the client can navigate to it.
+// history up to (but not including) message_index — an exclusive count, so
+// message_index == len(Messages) copies the whole transcript. The source
+// session is untouched. Returns the new session so the client can navigate
+// to it.
 func (s *Server) handleBranchSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -862,18 +880,33 @@ func (s *Server) handleBranchSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	if req.MessageIndex < 0 || req.MessageIndex >= len(src.Messages) {
+	if req.MessageIndex < 0 || req.MessageIndex > len(src.Messages) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index out of range: %d (have %d messages)", req.MessageIndex, len(src.Messages)))
 		return
 	}
-	// Branching is only valid at a plain user message: cutting at an assistant
-	// message or a tool_result message would leave the branch's last assistant
-	// tool_use with no answering result (issue #1899).
-	if !agent.IsPlainUserMessage(src.Messages[req.MessageIndex]) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index %d does not name a plain user message; history can only branch at a user turn", req.MessageIndex))
+	// The copied prefix has to end on a settled turn: cutting after an
+	// assistant tool_use, or mid-way through a tool exchange, would leave that
+	// tool_use with no answering result (issue #1899). An empty prefix is fine.
+	if req.MessageIndex > 0 && !agent.IsSettledAssistantMessage(src.Messages[req.MessageIndex-1]) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index %d does not name a turn boundary; history can only branch after a completed assistant reply", req.MessageIndex))
 		return
 	}
-	branch := agent.BranchFrom(src, req.MessageIndex) // BranchFrom takes an exclusive count; exclude the user message so the client can send it fresh
+	branch := agent.BranchFrom(src, req.MessageIndex)
+	// A fork of a project session belongs to the same project. This is not
+	// cosmetic: a session created inside a project deliberately carries no
+	// WorkingDir of its own (applyDefaultWorkspaceDir skips it, so the project's
+	// directory can't leave a stale value behind), so a branch left unfiled
+	// resolves its dir from the server default and runs somewhere else, reading
+	// the global memory tier instead of the project's. Filed before Save for the
+	// same reason handleCreateChat does it: membership decides what the session
+	// is, and a stale entry from a failed Save is harmless (the frontend
+	// cross-references the live session list).
+	if p := projectForSession(src.ID); p != nil {
+		if err := addSessionToGroup(p.ID, branch.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("file branch under project: %v", err))
+			return
+		}
+	}
 
 	if err := branch.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

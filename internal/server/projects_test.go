@@ -581,3 +581,47 @@ func TestProject_ListReportsProjectFields(t *testing.T) {
 		t.Errorf("second group should be a cron cluster with no dir, got %+v", resp.Groups[1])
 	}
 }
+
+// TestProject_BranchStaysInProject covers what Branch has to carry across for a
+// session inside a project. A project session deliberately holds no WorkingDir
+// of its own (applyDefaultWorkspaceDir skips it — the project's dir governs),
+// so a fork that isn't filed under the same project resolves its dir from the
+// server default instead and quietly runs somewhere else, with the global
+// memory tier instead of the project's.
+func TestProject_BranchStaysInProject(t *testing.T) {
+	srv := groupTestServer(t)
+	projectDir := t.TempDir()
+
+	src := agent.NewSession("test-model", "")
+	src.Messages = []agent.Message{
+		{Role: agent.RoleUser, Content: "hello"},
+		{Role: agent.RoleAssistant, Content: "hi"},
+	}
+	if err := src.Save(); err != nil {
+		t.Fatalf("save source: %v", err)
+	}
+	gid := newProjectGroup(t, srv, "Work", projectDir)
+	fileInProject(t, gid, src.ID)
+
+	rec, out := doGroupReq(t, srv, http.MethodPost, "/api/sessions/"+src.ID+"/branch",
+		map[string]any{"message_index": 2})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("branch: status %d body %s", rec.Code, rec.Body.String())
+	}
+	s, _ := out["session"].(map[string]any)
+	branchID, _ := s["id"].(string)
+	if branchID == "" {
+		t.Fatalf("branch: no session id in %s", rec.Body.String())
+	}
+
+	if p := projectForSession(branchID); p == nil || p.ID != gid {
+		t.Errorf("branch filed under %+v, want project %s", p, gid)
+	}
+	branch, err := agent.LoadSession(branchID)
+	if err != nil {
+		t.Fatalf("load branch: %v", err)
+	}
+	if got := srv.resolveSessionDir(branch.ID, branch.WorkingDir); got != projectDir {
+		t.Errorf("branch working dir = %q, want the project's %q", got, projectDir)
+	}
+}

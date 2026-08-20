@@ -410,6 +410,11 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID st
 		"session_id": sessionID,
 		"iterations": a.TurnIterations(),
 	}
+	// Same as doAgentTurn: hand the browser the reply's persisted index so a
+	// tab watching this task's session can branch off the live bubble.
+	if idx := lastBranchableIndex(sess); idx >= 0 {
+		completeEvent["message_index"] = idx
+	}
 	if err == nil {
 		// a is freshly built per turn (buildAgent), so its usage counters start
 		// at zero — no before/after diff needed here.
