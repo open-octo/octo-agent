@@ -14,7 +14,9 @@ func TestShellEnvNoteContent(t *testing.T) {
 		"GetEnvironmentVariable('Path','Machine')", // in-command PATH refresh
 		"restart octo",
 		"UAC",
-		"npm.cmd", // execution-policy workaround
+		"Set-Content", // ANSI/UTF-16 default encodings corrupt UTF-8 files
+		"write_file",  // the encoding-safe alternative it must point at
+		"npm.cmd",     // execution-policy workaround
 	} {
 		if !strings.Contains(shellEnvNoteWindows, want) {
 			t.Errorf("windows note missing %q", want)
