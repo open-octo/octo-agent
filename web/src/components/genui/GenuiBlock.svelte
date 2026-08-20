@@ -49,8 +49,20 @@
     persistKey ? loadPanelFields(persistKey.sessionId, persistKey.panelId) : {}
   )
 
+  // Every control reports its value once on mount, before the user has done
+  // anything. That first report is a seed, not a change, and persisting it
+  // would both fill storage with values nobody set and — worse — pin the
+  // field to today's default, so a later version of the panel could never
+  // introduce a new one. Remember the seed, persist everything after it.
+  const seeded = new Map<string, true>()
+
   function persist(field: string, value: GenuiFieldValue) {
-    if (persistKey) savePanelField(persistKey.sessionId, persistKey.panelId, field, value)
+    if (!persistKey) return
+    if (!seeded.has(field)) {
+      seeded.set(field, true)
+      return
+    }
+    savePanelField(persistKey.sessionId, persistKey.panelId, field, value)
   }
 
   provideGenuiFieldContext({

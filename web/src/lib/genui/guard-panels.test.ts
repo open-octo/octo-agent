@@ -58,6 +58,15 @@ describe('reserved field names', () => {
     const t = one({ type: 'table', columns: ['a'], rows: [], filterBy: { field: '__tab:0', column: 'a' } })
     expect(t.filterBy).toBeUndefined()
   })
+
+  it('refuses a reserved field as a condition source', () => {
+    // A condition only reads, but reading internal state is still a leak: it
+    // would let a spec observe which tab is open or which section is folded.
+    for (const field of ['__tab:0', '__open:1.2', '__anything']) {
+      const n = one({ type: 'text', text: 'x', visibleWhen: { field, equals: 1 } })
+      expect(n.visibleWhen, `field ${field}`).toBeUndefined()
+    }
+  })
 })
 
 describe('visibleWhen', () => {

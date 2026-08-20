@@ -24,7 +24,19 @@
     <thead>
       <tr>
         {#each node.columns as col, i (i)}
-          <th class:sortable={node.sortable} onclick={() => toggleSort(i)}>
+          <th
+            class:sortable={node.sortable}
+            role={node.sortable ? 'button' : undefined}
+            tabindex={node.sortable ? 0 : undefined}
+            aria-sort={sort?.column === i ? (sort.direction === 'asc' ? 'ascending' : 'descending') : undefined}
+            onclick={() => toggleSort(i)}
+            onkeydown={e => {
+              if (node.sortable && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault()
+                toggleSort(i)
+              }
+            }}
+          >
             {col}
             {#if node.sortable && sort?.column === i}
               <span class="sort-caret">{sort.direction === 'asc' ? '▲' : '▼'}</span>

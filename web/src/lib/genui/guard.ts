@@ -457,7 +457,11 @@ function sanitizeCondition(input: unknown): Record<string, unknown> | null {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) return null
   const raw = input as Record<string, unknown>
   const field = stringField(raw, 'field')
-  if (field === '') return null
+  // Reserved names are rejected here as well as on input nodes: a condition
+  // reads a field, so without this a spec could observe internal panel state
+  // (which tab is open, which section is unfolded) even though it can never
+  // write it.
+  if (field === '' || isReservedField(field)) return null
   const out: Record<string, unknown> = { field: clampString(field, MAX_STRING_LEN) }
 
   if (isScalar(raw.equals)) {
@@ -469,10 +473,11 @@ function sanitizeCondition(input: unknown): Record<string, unknown> | null {
       .filter(v => typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v)))
       .slice(0, MAX_OPTIONS)
       .map(v => clampScalar(v) as string | number)
-    if (list.length > 0) {
-      out.in = list
-      return out
-    }
+    // `in` present but with nothing usable in it ends the condition rather
+    // than falling through to `not` or a range: the family that wins is the
+    // first one the author supplied, and quietly evaluating a different one
+    // would be a surprise the author never asked for.
+    return list.length > 0 ? ((out.in = list), out) : null
   }
   if (isScalar(raw.not)) {
     out.not = clampScalar(raw.not)

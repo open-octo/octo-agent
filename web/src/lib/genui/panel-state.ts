@@ -37,16 +37,35 @@ function hasStorage(): boolean {
   return typeof localStorage !== 'undefined'
 }
 
+/** Storage is shared, long-lived, and hand-editable, so a stored value can be
+ * any shape at all — an older format, another tool's key collision, a partial
+ * write. Every entry is checked rather than assumed, because the alternative
+ * is a TypeError thrown from the first interaction with any panel. */
 function load(): Store {
   if (!hasStorage()) return {}
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return {}
     const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Store) : {}
+    if (!isPlainObject(parsed)) return {}
+    const out: Store = {}
+    for (const [sessionId, entry] of Object.entries(parsed)) {
+      if (!isPlainObject(entry) || !isPlainObject((entry as Record<string, unknown>).panels)) continue
+      const rec = entry as Record<string, unknown>
+      const panels: Record<string, PanelFields> = {}
+      for (const [panelId, fields] of Object.entries(rec.panels as Record<string, unknown>)) {
+        if (isPlainObject(fields)) panels[panelId] = fields as PanelFields
+      }
+      out[sessionId] = { at: typeof rec.at === 'number' && Number.isFinite(rec.at) ? rec.at : 0, panels }
+    }
+    return out
   } catch {
     return {}
   }
+}
+
+function isPlainObject(v: unknown): boolean {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 // The in-memory copy is authoritative for reads within a page's lifetime;
@@ -139,4 +158,19 @@ export function pruneSessions(liveSessionIds: Iterable<string>): void {
 export function resetPanelState(): void {
   store = {}
   flush()
+}
+
+/**
+ * Test seam: re-read from storage the way a fresh page load would.
+ *
+ * Distinct from resetPanelState, which *writes* an empty store — using that
+ * to set up a "what's already in storage" case silently overwrites the very
+ * value under test.
+ */
+export function reloadPanelState(): void {
+  if (flushTimer !== null) {
+    clearTimeout(flushTimer)
+    flushTimer = null
+  }
+  store = load()
 }

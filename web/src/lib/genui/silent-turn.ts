@@ -9,7 +9,7 @@
 // frame, no session schema change, no backend awareness of the concept.
 
 import type { ChatMessage } from '../types'
-import { splitOctoUiFences } from './fence-split'
+import { splitOctoUiFences, FENCE_OPEN } from './fence-split'
 
 export const OCTO_UI_ACTION_PREFIX = '[octo-ui-action] '
 
@@ -48,24 +48,45 @@ export function silentActionPanel(msg: ChatMessage | undefined): string | null {
 /**
  * Whether a reply's text still has the shape of a silent update.
  *
- * Monotone by construction, which is what makes it safe to call on every
- * streaming delta: it is true while the content is empty or is exactly one
- * octo-ui fence, and goes false the moment any non-whitespace text appears
- * outside a fence or a second fence starts. Since message text only grows,
- * it never flips back — so a reply that starts rendering as an ordinary
- * bubble mid-stream stays one.
+ * Called on every streaming delta, so it must be monotone: once false it must
+ * stay false, or a bubble would appear and then vanish.
+ *
+ * The subtle part is the opening fence arriving one character at a time.
+ * "```octo-ui" is only recognized as a fence once it is complete, so the
+ * intermediate states ("`", "``", "```", "```oct") split as ordinary markdown
+ * — and rejecting those would make this flicker false on the way in for
+ * *every* silent turn, which is the opposite of what it is for. A trailing
+ * run that is still a prefix of the opening marker is therefore treated as
+ * "not prose yet".
+ *
+ * That tolerance is safe precisely because it is anchored to the end of the
+ * text: any prefix that later turns out to be something else (a code fence in
+ * another language, prose starting with a backtick) grows into a trailing
+ * segment that no longer prefixes the marker, and the answer goes false and
+ * stays false.
  */
 export function couldBeSilentReply(content: string): boolean {
+  const segments = splitOctoUiFences(content)
   let fences = 0
-  for (const seg of splitOctoUiFences(content)) {
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]
     if (seg.kind === 'markdown') {
-      if (seg.text.trim() !== '') return false
-    } else {
-      fences++
-      if (fences > 1) return false
+      const text = seg.text.trim()
+      if (text === '') continue
+      if (i === segments.length - 1 && isPartialFenceOpen(text)) continue
+      return false
     }
+    fences++
+    if (fences > 1) return false
   }
   return true
+}
+
+/** True when `text` is a strict prefix of the opening fence marker — i.e. it
+ * could still grow into one rather than being prose that merely starts with a
+ * backtick. */
+function isPartialFenceOpen(text: string): boolean {
+  return text.length < FENCE_OPEN.length && FENCE_OPEN.startsWith(text)
 }
 
 /**
@@ -94,9 +115,29 @@ export function isSilentReply(msg: ChatMessage, expectedPanelId: string): boolea
   return fences === 1 && matched
 }
 
-/** True when this assistant message is the silent half of a pair with the
- * message before it. `prev` is the immediately preceding message. */
-export function isSilentPair(prev: ChatMessage | undefined, msg: ChatMessage): boolean {
-  const panel = silentActionPanel(prev)
+/**
+ * The conversational message preceding `index`, skipping the rows that are
+ * turn scaffolding rather than something said: tool groups and progress
+ * lines.
+ *
+ * This matters because the archetypal silent turn — "the panel needs data the
+ * model doesn't have" — is exactly the case where the model calls a tool
+ * first. Looking only at index-1 would find that tool group, conclude the
+ * reply answers nothing, and fall back to a visible bubble in precisely the
+ * situation the feature exists for.
+ */
+export function precedingSaid(msgs: ChatMessage[], index: number): ChatMessage | undefined {
+  for (let i = index - 1; i >= 0; i--) {
+    const t = msgs[i].type
+    if (t === 'user' || t === 'assistant') return msgs[i]
+  }
+  return undefined
+}
+
+/** True when the message at `index` is the silent half of a pair. */
+export function isSilentPairAt(msgs: ChatMessage[], index: number): boolean {
+  const msg = msgs[index]
+  if (!msg) return false
+  const panel = silentActionPanel(precedingSaid(msgs, index))
   return panel !== null && isSilentReply(msg, panel)
 }

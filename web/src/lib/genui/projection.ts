@@ -10,7 +10,7 @@
 import type { ChatMessage } from '../types'
 import type { GenuiSpec } from './types'
 import { splitOctoUiFences } from './fence-split'
-import { isSilentPair } from './silent-turn'
+import { isSilentPairAt } from './silent-turn'
 
 export interface PanelProjection {
   /** The newest version's spec — whatever the model most recently said this
@@ -40,7 +40,7 @@ export function projectPanels(messages: ChatMessage[]): Map<string, PanelProject
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]
     if (msg.type !== 'assistant' || !msg.content) continue
-    const silent = isSilentPair(messages[i - 1], msg)
+    const silent = isSilentPairAt(messages, i)
 
     const segments = splitOctoUiFences(msg.content)
     for (let segIdx = 0; segIdx < segments.length; segIdx++) {

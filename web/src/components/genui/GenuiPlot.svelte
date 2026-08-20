@@ -55,18 +55,23 @@
   function lineSegments(row: (number | null)[]): string[] {
     const out: string[] = []
     let cur: string[] = []
+    // A lone point would be invisible as a polyline, so it is emitted as a
+    // degenerate two-point segment. This has to run at every gap, not just at
+    // the end: a single point sandwiched between two gaps is exactly the case
+    // that would otherwise render nothing at all.
+    const flush = () => {
+      if (cur.length > 1) out.push(cur.join(' '))
+      else if (cur.length === 1) out.push(`${cur[0]} ${cur[0]}`)
+      cur = []
+    }
     row.forEach((v, i) => {
       if (v === null) {
-        if (cur.length > 1) out.push(cur.join(' '))
-        cur = []
+        flush()
         return
       }
       cur.push(`${xOf(i)},${yOf(v)}`)
     })
-    if (cur.length > 1) out.push(cur.join(' '))
-    // A lone point would be invisible as a polyline; emit it as a degenerate
-    // two-point segment so a single-value series still shows something.
-    if (cur.length === 1) out.push(`${cur[0]} ${cur[0]}`)
+    flush()
     return out
   }
 
@@ -97,7 +102,7 @@
               <rect
                 x={isStacked ? bandX(i) + bandW * 0.15 : bandX(i) + bandW * (0.15 + (0.7 / aligned.length) * si)}
                 width={isStacked ? bandW * 0.7 : (bandW * 0.7) / aligned.length}
-                y={yOf(base + val)}
+                y={Math.min(yOf(base), yOf(base + val))}
                 height={Math.abs(yOf(base) - yOf(base + val))}
                 fill={PLOT_COLORS[si % PLOT_COLORS.length]}
               />

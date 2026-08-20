@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { parseActionEnvelope, silentActionPanel, couldBeSilentReply, isSilentReply, isSilentPair } from './silent-turn'
+import {
+  parseActionEnvelope,
+  silentActionPanel,
+  couldBeSilentReply,
+  isSilentReply,
+  isSilentPairAt,
+  precedingSaid,
+} from './silent-turn'
 import type { ChatMessage } from '../types'
 
 function msg(type: ChatMessage['type'], content: string, streaming = false): ChatMessage {
@@ -47,14 +54,45 @@ describe('couldBeSilentReply (streaming predicate)', () => {
     expect(couldBeSilentReply(fence('p') + '\n\n')).toBe(true)
   })
 
-  it('goes false once prose appears, and is monotone', () => {
+  it('goes false once prose appears', () => {
     expect(couldBeSilentReply('Here you go:')).toBe(false)
     expect(couldBeSilentReply('Here you go:\n' + fence('p'))).toBe(false)
-    // Prose after the fence also disqualifies, and adding more text can never
-    // bring it back — the caller relies on that to keep a bubble shown.
     const withTail = fence('p') + '\nanything else'
     expect(couldBeSilentReply(withTail)).toBe(false)
     expect(couldBeSilentReply(withTail + ' more')).toBe(false)
+  })
+
+  // Scans every prefix rather than a few hand-picked strings: the opening
+  // marker arrives one character at a time, and an intermediate state like
+  // "`" or "```oct" splits as ordinary markdown. Asserting only on whole
+  // strings hides that, and the caller hides a bubble based on this — a
+  // single false frame is a visible flash.
+  it('never goes false while a real silent reply streams in, character by character', () => {
+    const full = fence('sales')
+    for (let i = 0; i <= full.length; i++) {
+      const prefix = full.slice(0, i)
+      expect(couldBeSilentReply(prefix), `prefix ${JSON.stringify(prefix)}`).toBe(true)
+    }
+  })
+
+  it('is monotone: once false it stays false for every longer prefix', () => {
+    const full = 'Updated:\n' + fence('sales') + '\nlet me know'
+    let seenFalse = false
+    for (let i = 0; i <= full.length; i++) {
+      const prefix = full.slice(0, i)
+      const cur = couldBeSilentReply(prefix)
+      if (!cur) seenFalse = true
+      else if (seenFalse) throw new Error(`flipped back to true at ${JSON.stringify(prefix)}`)
+    }
+    expect(seenFalse).toBe(true)
+  })
+
+  it('does not mistake another language fence for the opening marker', () => {
+    // "```octo" prefixes the marker and is tolerated while trailing, but
+    // "```json" diverges and must disqualify immediately.
+    expect(couldBeSilentReply('```octo')).toBe(true)
+    expect(couldBeSilentReply('```json')).toBe(false)
+    expect(couldBeSilentReply('```octo-uix')).toBe(false)
   })
 
   it('goes false on a second fence', () => {
@@ -84,13 +122,35 @@ describe('isSilentReply', () => {
   })
 })
 
-describe('isSilentPair', () => {
+describe('isSilentPairAt', () => {
+  const action = () => msg('user', '[octo-ui-action] {"panel":"sales","action":"refresh"}')
+
   it('needs both halves', () => {
-    const action = msg('user', '[octo-ui-action] {"panel":"sales","action":"refresh"}')
-    expect(isSilentPair(action, msg('assistant', fence('sales')))).toBe(true)
+    expect(isSilentPairAt([action(), msg('assistant', fence('sales'))], 1)).toBe(true)
     // Reply is fine but nothing addressed it.
-    expect(isSilentPair(msg('user', 'hi'), msg('assistant', fence('sales')))).toBe(false)
+    expect(isSilentPairAt([msg('user', 'hi'), msg('assistant', fence('sales'))], 1)).toBe(false)
     // Action is fine but the reply talks.
-    expect(isSilentPair(action, msg('assistant', 'sure thing'))).toBe(false)
+    expect(isSilentPairAt([action(), msg('assistant', 'sure thing')], 1)).toBe(false)
+  })
+
+  it('looks past tool calls between the action and the reply', () => {
+    // "The panel needs data the model doesn't have" is the archetypal silent
+    // turn, and it is exactly the case where a tool group sits in between.
+    const msgs = [action(), msg('tool_group', ''), msg('progress', ''), msg('assistant', fence('sales'))]
+    expect(isSilentPairAt(msgs, 3)).toBe(true)
+  })
+
+  it('does not look past something the model actually said', () => {
+    const msgs = [action(), msg('assistant', 'working on it'), msg('assistant', fence('sales'))]
+    expect(isSilentPairAt(msgs, 2)).toBe(false)
+  })
+})
+
+describe('precedingSaid', () => {
+  it('skips turn scaffolding but stops at real messages', () => {
+    const msgs = [msg('user', 'hi'), msg('tool_group', ''), msg('progress', '')]
+    expect(precedingSaid(msgs, 3)?.content).toBe('hi')
+    expect(precedingSaid(msgs, 1)?.content).toBe('hi')
+    expect(precedingSaid(msgs, 0)).toBeUndefined()
   })
 })

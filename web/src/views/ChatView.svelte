@@ -80,7 +80,14 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   import { splitOctoUiFences, type Segment as GenuiSegment } from '../lib/genui/fence-split'
   import type { GenuiActionEvent } from '../lib/genui/context'
   import { projectPanels, isAnchor, type PanelProjection } from '../lib/genui/projection'
-  import { silentActionPanel, isSilentPair, couldBeSilentReply } from '../lib/genui/silent-turn'
+  import {
+    silentActionPanel,
+    isSilentPairAt,
+    precedingSaid,
+    couldBeSilentReply,
+    parseActionEnvelope,
+    OCTO_UI_ACTION_PREFIX,
+  } from '../lib/genui/silent-turn'
 
   // ── reactive state ─────────────────────────────────────────────────────────
   let messagesEl = $state<HTMLElement | null>(null)
@@ -1608,18 +1615,28 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     return next
   })
 
-  /** The panel waiting on a silent turn, if any. Cleared as soon as the reply
-   * settles or stops looking like a silent update — at which point the reply
-   * renders as an ordinary bubble and the panel is simply not pending. */
+  /**
+   * The panel waiting on a silent turn, if any.
+   *
+   * Gated on the session actually running a turn rather than on the shape of
+   * the transcript alone. A turn that errors or is interrupted before
+   * producing any assistant message would otherwise leave the action as the
+   * last thing in history — and a panel disabled forever, surviving reloads,
+   * since history is what it was derived from. The running flag comes from
+   * the server, so it clears on every ending a turn can have.
+   */
   const pendingPanel = $derived.by(() => {
+    if (!streaming) return null
     for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i]
       if (m.type === 'assistant') {
-        if (!m.streaming) return null
-        const p = silentActionPanel(msgs[i - 1])
+        const p = silentActionPanel(precedingSaid(msgs, i))
         return p && couldBeSilentReply(m.content) ? p : null
       }
       if (m.type === 'user') return silentActionPanel(m)
+      // Tool groups and progress rows are skipped: the model calling a tool
+      // before answering is the normal shape of a panel action that needs
+      // data, and the panel should stay pending across it.
     }
     return null
   })
@@ -1632,26 +1649,15 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     // could still turn out to be a silent update. The predicate is monotone,
     // so once prose appears the bubble shows and stays shown.
     if (m.streaming) {
-      const p = silentActionPanel(msgs[index - 1])
+      const p = silentActionPanel(precedingSaid(msgs, index))
       return p !== null && couldBeSilentReply(m.content)
     }
-    return isSilentPair(msgs[index - 1], m)
+    return isSilentPairAt(msgs, index)
   }
 
-  // Parses a "[octo-ui-action] {...}" user-bubble body for the compact chip
-  // rendering below. Returns null (fall back to plain text) if the prefix
-  // matches but the remainder isn't valid JSON — never show a broken chip.
-  const OCTO_UI_ACTION_PREFIX = '[octo-ui-action] '
-  function parseGenuiActionBubble(content: string): { action: string; fields: Record<string, unknown>; payload?: Record<string, unknown> } | null {
-    if (!content.startsWith(OCTO_UI_ACTION_PREFIX)) return null
-    try {
-      const parsed = JSON.parse(content.slice(OCTO_UI_ACTION_PREFIX.length))
-      if (typeof parsed !== 'object' || parsed === null || typeof parsed.action !== 'string') return null
-      return parsed
-    } catch {
-      return null
-    }
-  }
+  // The chip rendering below parses the same envelope the silent-turn
+  // classifier does, so it uses that parser rather than a second copy — two
+  // implementations of one wire convention would drift.
 
   // ── edit a prior user message: load it back into the composer for resend ─────
   let composer = $state<{ setText: (v: string) => void; restore: (v: string, files?: any[]) => void; isEmpty: () => boolean } | null>(null)
@@ -2664,7 +2670,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                         }}
                       ></textarea>
                     {:else}
-                      {@const genuiAction = msg.content ? parseGenuiActionBubble(msg.content) : null}
+                      {@const genuiAction = msg.content ? parseActionEnvelope(msg.content) : null}
                       {#if genuiAction}
                         <!-- Compact chip for a synthetic [octo-ui-action] turn — the
                              raw JSON convention text would otherwise leak into the
@@ -3410,7 +3416,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
    server confirms it via history_user_message. */
 .user-card.pending { opacity: 0.65; }
 /* Compact chip for a synthetic [octo-ui-action] turn (see
-   parseGenuiActionBubble) — the JSON body sits behind a click-to-expand
+   parseActionEnvelope) — the JSON body sits behind a click-to-expand
    <details>, so a genui button click doesn't leak raw JSON into the
    transcript at a glance. */
 .genui-action-chip { font-size: 13px; color: var(--text); }

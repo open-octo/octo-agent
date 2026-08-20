@@ -22,13 +22,12 @@
   // that never renders a diagram should never parse it.
   import DOMPurify from 'dompurify'
   import type { GenuiMermaidNode } from '../../lib/genui/types'
+  import { nextMermaidId } from '../../lib/genui/mermaid-id'
 
   let { node }: { node: GenuiMermaidNode } = $props()
 
   let svg = $state<string | null>(null)
   let failed = $state(false)
-
-  let seq = 0
 
   $effect(() => {
     const code = node.code
@@ -39,8 +38,28 @@
     void (async () => {
       try {
         const { default: mermaid } = await import('mermaid')
-        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict' })
-        const { svg: raw } = await mermaid.render(`genui-mermaid-${seq++}`, code)
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: 'strict',
+          // Without this, flowchart labels render inside a foreignObject and
+          // the SVG-only sanitize below drops the element *and its contents*
+          // (foreignObject is in DOMPurify's svgDisallowed AND its
+          // FORBID_CONTENTS), leaving a diagram of empty boxes and arrows —
+          // no error, just silently wordless. Off, mermaid emits a native SVG
+          // text element instead, which survives sanitizing untouched and
+          // needs no exemption carved into the whitelist.
+          // securityLevel does NOT imply this: getEffectiveHtmlLabels()
+          // defaults it to true independently.
+          htmlLabels: false,
+          // themeCSS/themeVariables are settable from inside the diagram
+          // source via a %%{init: …}%% directive and are NOT in mermaid's own
+          // `secure` list, so strict mode does not cover them. They end up in
+          // a style element that survives sanitizing, which would let a
+          // diagram pull an external url() — the only path in GenUI by which
+          // model output could make the page issue a network request.
+          secure: ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'suppressErrorRendering', 'maxEdges', 'htmlLabels', 'themeCSS', 'themeVariables'],
+        })
+        const { svg: raw } = await mermaid.render(nextMermaidId(), code)
         if (cancelled) return
         svg = DOMPurify.sanitize(raw, { USE_PROFILES: { svg: true, svgFilters: true } })
       } catch {

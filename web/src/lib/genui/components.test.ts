@@ -2,15 +2,32 @@
 // because vitest.config.ts sets resolve.conditions: ['browser'] — without it
 // Vitest resolves Svelte's server build and mount() throws
 // lifecycle_function_unavailable.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, unmount, flushSync } from 'svelte'
 import GenuiBlock from '../../components/genui/GenuiBlock.svelte'
 import type { GenuiSpec } from './types'
+import { loadPanelFields, resetPanelState } from './panel-state'
+
+// jsdom under Node 26 exposes no localStorage — same stand-in and reasoning as
+// unread.test.ts.
+const backing = new Map<string, string>()
+vi.stubGlobal('localStorage', {
+  getItem: (k: string) => (backing.has(k) ? backing.get(k)! : null),
+  setItem: (k: string, v: string) => {
+    backing.set(k, String(v))
+  },
+  removeItem: (k: string) => {
+    backing.delete(k)
+  },
+  clear: () => backing.clear(),
+})
 
 let target: HTMLElement
 let app: Record<string, unknown> | null = null
 
 beforeEach(() => {
+  resetPanelState()
+  backing.clear()
   target = document.createElement('div')
   document.body.appendChild(target)
 })
@@ -214,11 +231,63 @@ describe('plot', () => {
     expect(lines.length).toBeGreaterThanOrEqual(2)
   })
 
+  it('draws a negative bar from the baseline downward, not offset below it', () => {
+    const el = render({
+      items: [{ type: 'plot', plot: 'bar', series: [{ points: [{ label: 'a', value: -3 }, { label: 'b', value: 6 }] }] }],
+    })
+    const rects = Array.from(el.querySelectorAll('rect')) as SVGRectElement[]
+    expect(rects.length).toBe(2)
+    const y = (r: SVGRectElement) => parseFloat(r.getAttribute('y') || '0')
+    const h = (r: SVGRectElement) => parseFloat(r.getAttribute('height') || '0')
+    // The baseline is where zero sits. The negative bar's top edge must be at
+    // the baseline and its body below it; the positive bar's bottom edge must
+    // be at the baseline. If the top edge were computed from the value
+    // instead, the negative bar would sit a whole bar-height too low.
+    const negBottom = y(rects[0]) + h(rects[0])
+    const posBottom = y(rects[1]) + h(rects[1])
+    expect(y(rects[0])).toBeCloseTo(posBottom, 1)
+    expect(negBottom).toBeGreaterThan(y(rects[0]))
+  })
+
   it('renders a pie as arcs', () => {
     const el = render({
       items: [{ type: 'plot', plot: 'pie', series: [{ points: [{ label: 'a', value: 1 }, { label: 'b', value: 1 }] }] }],
     })
     expect(el.querySelectorAll('path').length).toBe(2)
+  })
+})
+
+describe('persistence seeding', () => {
+  it('does not persist a value the user never touched', () => {
+    // Persisting a control's seed would both fill storage with values nobody
+    // set and pin the field to today's default, so a later version of the
+    // panel could never introduce a new one.
+    const spec: GenuiSpec = { id: 'p1', items: [{ type: 'input', field: 'q', value: 'seeded' }] }
+    app = mount(GenuiBlock, { target, props: { spec, sessionId: 's1' } })
+    flushSync()
+    expect(loadPanelFields('s1', 'p1')).toEqual({})
+  })
+
+  it('persists once the user changes something', () => {
+    const spec: GenuiSpec = { id: 'p2', items: [{ type: 'input', field: 'q', value: 'seeded' }] }
+    app = mount(GenuiBlock, { target, props: { spec, sessionId: 's1' } })
+    flushSync()
+    const input = target.querySelector('input[type=text]') as HTMLInputElement
+    input.value = 'typed'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    flushSync()
+    expect(loadPanelFields('s1', 'p2').q).toBe('typed')
+  })
+
+  it('persists nothing at all for an anonymous panel', () => {
+    const spec: GenuiSpec = { items: [{ type: 'input', field: 'q' }] }
+    app = mount(GenuiBlock, { target, props: { spec, sessionId: 's1' } })
+    flushSync()
+    const input = target.querySelector('input[type=text]') as HTMLInputElement
+    input.value = 'typed'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    flushSync()
+    expect(loadPanelFields('s1', '')).toEqual({})
   })
 })
 

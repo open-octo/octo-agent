@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { loadPanelFields, savePanelField, pruneSessions, resetPanelState } from './panel-state'
+import { loadPanelFields, savePanelField, pruneSessions, resetPanelState, reloadPanelState } from './panel-state'
 
 const KEY = 'octo.genui-panel-state'
 
@@ -108,8 +108,37 @@ describe('panel state', () => {
 
   it('survives a corrupt stored value', () => {
     localStorage.setItem(KEY, '{not json')
-    resetPanelState()
+    reloadPanelState()
     expect(loadPanelFields('s1', 'p')).toEqual({})
+  })
+
+  it('survives stored values of the wrong shape', () => {
+    // Storage is shared, long-lived and hand-editable, so an entry can be any
+    // shape: an older format, a partial write, another tool's key. None of
+    // these may throw out of the first interaction with a panel.
+    for (const bad of [
+      '{"s1":5}',
+      '{"s1":{"at":1}}',
+      '{"s1":{"panels":null}}',
+      '{"s1":{"panels":{"p":7}}}',
+      '["array"]',
+      'null',
+      '"string"',
+    ]) {
+      backing.clear()
+      localStorage.setItem(KEY, bad)
+      reloadPanelState()
+      expect(() => loadPanelFields('s1', 'p'), bad).not.toThrow()
+      expect(() => savePanelField('s1', 'p', 'x', '1'), bad).not.toThrow()
+      expect(loadPanelFields('s1', 'p').x, bad).toBe('1')
+    }
+  })
+
+  it('keeps a well-formed entry when a sibling is malformed', () => {
+    localStorage.setItem(KEY, '{"good":{"at":5,"panels":{"p":{"x":"1"}}},"bad":7}')
+    reloadPanelState()
+    expect(loadPanelFields('good', 'p').x).toBe('1')
+    expect(loadPanelFields('bad', 'p')).toEqual({})
   })
 
   it('degrades to memory-only when storage refuses writes', () => {
