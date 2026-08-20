@@ -179,7 +179,7 @@ Create both files with `write_file`. No special tools needed.
 2. Ask the user: "保存为轻应用？以后随时在轻应用面板打开，不消耗 token。"
 3. On confirmation: `write_file` to `~/.octo/light-apps/<slug>/manifest.json` and `~/.octo/light-apps/<slug>/index.html`
 4. Choose a slug: lowercase letters, digits, hyphens. Derive from the app name.
-5. Report: "已保存！在「我的数据 → 轻应用」面板随时打开。"
+5. Report: "已保存！以后在「轻应用」面板随时打开。"
 
 ### Constraints on index.html
 
