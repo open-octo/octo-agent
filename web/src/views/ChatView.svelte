@@ -57,6 +57,7 @@
     agenticSessions,
     chatGoal,
     nativeShell,
+    chatHeaderSnippet,
   } from '../lib/stores'
   import { ws, wsState, wsReconnect } from '../lib/ws'
   import * as api from '../lib/api'
@@ -117,6 +118,16 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     try { agents = await api.listAgents() } catch { /* ignore */ }
   })
   onDestroy(() => { unsubAgentsChanged() })
+
+  // Register this view's title/status/actions with the page-spanning title
+  // bar (Header.svelte) — it renders whatever's here without knowing what it
+  // is. The snippet closes over this component's own reactive state, so a
+  // single registration on mount stays live; only the reference itself needs
+  // clearing so a different view's Header doesn't keep rendering a stale one.
+  onMount(() => {
+    chatHeaderSnippet.set(chatHeader)
+    return () => chatHeaderSnippet.set(null)
+  })
 
   function agentAvatarColor(name: string): string {
     const colors = ['#1677ff', '#722ed1', '#13c2c2', '#52c41a', '#eb2f96', '#fa8c16', '#2f54eb', '#a0d911']
@@ -2343,8 +2354,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   }
 </script>
 
-<div class="chat-view" class:print-omit-tools={!exportIncludeTools}>
-  <!-- Chat header -->
+<!-- Title/status/actions render inline in the page-spanning title bar
+     (Header.svelte), not as this view's own row — registered via a store so
+     that generic layout component can render a snippet it knows nothing
+     about the internals of. -->
+{#snippet chatHeader()}
   <div class="chat-header">
     <div class="title-row">
       <span class="session-title">
@@ -2374,7 +2388,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       </button>
     </div>
   </div>
+{/snippet}
 
+<div class="chat-view" class:print-omit-tools={!exportIncludeTools}>
   <!-- Export mode bar: sticky format selector -->
   {#if inExportMode}
     <div class="export-bar">

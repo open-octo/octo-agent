@@ -1,4 +1,5 @@
 import { writable, derived, get } from 'svelte/store'
+import type { Snippet } from 'svelte'
 import type { Session, SessionGroup, Skill, Workflow, ScheduledTask, McpServer, Channel, Memory, Artifact, ArtifactView } from './types'
 import * as api from './api'
 
@@ -87,6 +88,14 @@ export const artifactModalOpen = writable(false)
 // Artifacts panel sidebar mode. null = closed, 'session' = session artifacts,
 // 'lightapps' = Light Apps list + rendering.
 export const panelContent = writable<'session' | 'lightapps' | null>(null)
+
+// ChatView's own title/status/actions, rendered inline in the page-spanning
+// title bar rather than a separate row below it (the redesign merges main
+// content's header into that bar for chat specifically — every other view
+// keeps its own full-size page header). ChatView registers its snippet on
+// mount and clears it on destroy; it stays reactive to ChatView's own state
+// since a Svelte snippet is just a closure over it, not a one-time render.
+export const chatHeaderSnippet = writable<Snippet | null>(null)
 
 // Light Apps state for the sidebar (loaded on demand).
 export const lightappSel = writable<string>('')

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { sidebar, nativeShell, panelContent } from '../../lib/stores'
+  import { sidebar, nativeShell, panelContent, view, chatHeaderSnippet } from '../../lib/stores'
   import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
   import { nativeToggleMaximise, nativeMinimise, nativeClose, nativeWindowState } from '../../lib/api'
@@ -77,7 +77,15 @@
     <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
   </button>
 
-  <span class="spacer"></span>
+  <!-- ChatView registers its own title/status/actions here (via the store) so
+       they render in this shared row instead of a second row below it. Every
+       other view has no snippet to render, so this just falls back to a
+       spacer — their own page header stays exactly where it already was. -->
+  {#if $view === 'chat' && $chatHeaderSnippet}
+    <div class="chat-header-slot">{@render $chatHeaderSnippet()}</div>
+  {:else}
+    <span class="spacer"></span>
+  {/if}
 
   <!-- Visible on every view, not just ChatView, whose own inline banner only
        renders while a chat session is open — Settings/MCP/Skills/Tasks/etc.
@@ -133,6 +141,11 @@ header .icon-btn,
 header .window-controls { --wails-draggable: no-drag; }
 
 .spacer { flex: 1; }
+/* Plain block, not flex — ChatView's own .chat-header is already display:flex
+   with its own justify-content:space-between; as a block child here it fills
+   this slot's width the ordinary block-layout way, so none of its own CSS
+   needs to change to live in someone else's row. */
+.chat-header-slot { flex: 1; min-width: 0; }
 
 .icon-btn {
   width: 28px; height: 28px; border: none; background: transparent;
