@@ -348,6 +348,28 @@ func projectForSession(sessionID string) *sessionGroup {
 	return projects[sessionID]
 }
 
+// projectDirByGroupID returns the working directory of the project with this
+// group id, or "" when no group has that id or the group is not a project
+// (no working dir). Read-only, like projectForSession.
+func projectDirByGroupID(id string) string {
+	if id == "" {
+		return ""
+	}
+	groupMu.Lock()
+	defer groupMu.Unlock()
+	groups, err := loadSessionGroups()
+	if err != nil {
+		slog.Warn("resolve project dir by group", "group", id, "err", err)
+		return ""
+	}
+	for _, g := range groups {
+		if g.ID == id {
+			return g.WorkingDir
+		}
+	}
+	return ""
+}
+
 // ProjectDirForSession returns the working directory of the project owning
 // sessionID, or "" when the session is not in one. Exported for the CLI/TUI,
 // which have no server to ask: a session filed under a project should run in

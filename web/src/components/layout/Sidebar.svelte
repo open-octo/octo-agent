@@ -201,15 +201,15 @@
     }
   }
 
-  // Reveal a row's working directory in the OS file manager. Both callers pass
-  // a directory the listing already carries — a project's own working_dir, and
-  // for a session the dir the server resolved for it (project > session's own >
-  // server default), which is where its tools actually run. Desktop shell only:
-  // a browser tab has no file manager to open, so the menu entry is gated on
-  // nativeShell and this is never reached from one.
-  async function openFolder(dir: string) {
+  // Reveal a row's working directory in the OS file manager. The row is named
+  // by id and the server resolves the directory (a project's own working dir;
+  // for a session, project > its own > server default — where its tools
+  // actually run). Desktop shell only: a browser tab has no file manager to
+  // open, so the menu entry is gated on nativeShell and this is never reached
+  // from one.
+  async function openFolder(target: { sessionId?: string; groupId?: string }) {
     try {
-      await api.openFolder(dir)
+      await api.openFolder(target)
     } catch (e: any) {
       showToast(e?.message || tr('sidebar.open_folder_failed'), 'error')
     }
@@ -758,7 +758,7 @@
           {#if projectMenuFor === g.id}
           <div class="row-menu" onclick={(e) => e.stopPropagation()}>
             {#if $nativeShell && g.working_dir}
-            <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; openFolder(g.working_dir) }}>
+            <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; openFolder({ groupId: g.id }) }}>
               <iconify-icon icon="ant-design:folder-open-outlined" width="13"></iconify-icon>
               <span>{$t('sidebar.open_folder')}</span>
             </div>
@@ -905,7 +905,7 @@
               <div class="row-menu-sep"></div>
               {/if}
               {#if $nativeShell && (s as any).working_dir}
-              <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); menuFor.set(null); openFolder((s as any).working_dir) }}>
+              <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); menuFor.set(null); openFolder({ sessionId: s.id }) }}>
                 <iconify-icon icon="ant-design:folder-open-outlined" width="13"></iconify-icon>
                 <span>{$t('sidebar.open_folder')}</span>
               </div>
