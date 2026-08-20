@@ -20,7 +20,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/open-octo/octo-agent/internal/trash"
 	"github.com/robfig/cron/v3"
 )
 
@@ -203,12 +202,8 @@ func (s *Scheduler) Delete(id string) error {
 	s.mu.Unlock()
 	s.unschedule(id)
 	p := filepath.Join(s.dir, id+".json")
-	if _, err := os.Stat(p); err == nil {
-		if err := trash.Move(p, s.dir, trash.Options{DeletedBy: "scheduler", Kind: "delete"}); err != nil {
-			return fmt.Errorf("trash task %s: %w", p, err)
-		}
-	} else if !os.IsNotExist(err) {
-		return err
+	if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove task %s: %w", p, err)
 	}
 	return nil
 }

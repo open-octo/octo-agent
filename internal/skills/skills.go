@@ -23,7 +23,6 @@ import (
 	"sync"
 
 	"github.com/open-octo/octo-agent/internal/agentprofile"
-	"github.com/open-octo/octo-agent/internal/trash"
 	"gopkg.in/yaml.v3"
 )
 
@@ -308,11 +307,10 @@ func (r *Registry) Delete(name string) error {
 	delete(r.skills, name)
 	delete(r.disabled, name)
 
-	// Move to trash before permanently deleting.
+	// Deleting a skill is permanent — the UI says so before asking.
 	if s.Dir != "" {
-		projDir := filepath.Dir(s.Dir)
-		if err := trash.Move(s.Dir, projDir, trash.Options{DeletedBy: "skill", Kind: "delete"}); err != nil {
-			return fmt.Errorf("trash skill directory %s: %w", s.Dir, err)
+		if err := os.RemoveAll(s.Dir); err != nil {
+			return fmt.Errorf("remove skill directory %s: %w", s.Dir, err)
 		}
 	}
 	return nil

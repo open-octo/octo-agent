@@ -235,6 +235,10 @@ func TestDisableRemovesEntryAndStopsRuns(t *testing.T) {
 }
 
 func TestDeleteRemovesEntryAndStopsRuns(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
 	s, r := newTestScheduler(t)
 	if err := s.Add(&Task{ID: "t1", Name: "n", Cron: "0 0 9 * * *", Prompt: "p", Enabled: true}); err != nil {
 		t.Fatalf("Add: %v", err)
@@ -250,6 +254,14 @@ func TestDeleteRemovesEntryAndStopsRuns(t *testing.T) {
 	fire()
 	if got := len(r.calls()); got != 0 {
 		t.Fatalf("runner calls after delete = %d, want 0", got)
+	}
+
+	// The task file is gone for good — deletes the user asks for skip the trash.
+	if _, err := os.Stat(filepath.Join(s.dir, "t1.json")); !os.IsNotExist(err) {
+		t.Errorf("task file still on disk after delete: err = %v", err)
+	}
+	if entries, err := os.ReadDir(filepath.Join(home, ".octo", "trash")); err == nil && len(entries) > 0 {
+		t.Errorf("deleted task was staged in the trash: %d entr(ies)", len(entries))
 	}
 }
 

@@ -279,7 +279,7 @@ func TestDeleteWorkflow_UnknownName(t *testing.T) {
 	}
 }
 
-func TestDeleteWorkflow_RemovesUserFileAndTrashesIt(t *testing.T) {
+func TestDeleteWorkflow_RemovesUserFilePermanently(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -299,20 +299,15 @@ func TestDeleteWorkflow_RemovesUserFileAndTrashesIt(t *testing.T) {
 		t.Error("deleted workflow still resolves via GetNamedWorkflow")
 	}
 
-	// Trashed, not permanently destroyed — mirrors skills.Registry.Delete.
+	// Permanent — a workflow the user deleted leaves no shadow copy behind.
 	trashed, err := trash.List()
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := false
 	for _, e := range trashed {
 		if e.Original == path {
-			found = true
-			break
+			t.Errorf("deleted workflow was staged in the trash: %+v", e)
 		}
-	}
-	if !found {
-		t.Errorf("deleted workflow file not found in trash: entries = %+v", trashed)
 	}
 }
 

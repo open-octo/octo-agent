@@ -1,13 +1,16 @@
 # Trash / file recall
 
 Octo never lets an agent-issued deletion or overwrite destroy work irreversibly.
-Every destructive filesystem action the agent takes — an `rm`, a `write_file`
-that clobbers an existing file, a programmatic delete of a skill or workflow —
-first stages the old bytes in a per-project trash under
-`~/.octo/trash/`, from which they can be listed, restored, or permanently
-discarded. This is the "an AI agent that can't lose your work" guarantee: the
-recovery path exists in every interface (CLI, TUI, Web), and the moment right
-after a destructive action offers a one-step undo.
+Every destructive filesystem action the agent takes — an `rm`, a `write_file` or
+`edit_file` that clobbers an existing file — first stages the old bytes in a
+per-project trash under `~/.octo/trash/`, from which they can be listed,
+restored, or permanently discarded. This is the "an AI agent that can't lose your
+work" guarantee: the recovery path exists in every interface (CLI, TUI, Web), and
+the moment right after a destructive action offers a one-step undo.
+
+The trash covers what the *agent* does, not what the *user* asks for. Deleting a
+session, skill, workflow, scheduled task, or memory from the UI is permanent —
+see "Deletes the user asks for" below.
 
 The package lives at `internal/trash/`. Every interface reaches it through that
 package; nothing else touches the on-disk layout directly.
@@ -50,9 +53,10 @@ the scheme can evolve without migration.
 ```
 
 `deleted_by` records which surface removed the file (`rm`, `write_file`,
-`edit_file`, `skill`, `workflow`, `scheduler`, `memory`) and `kind`
-is `delete` or `overwrite`. Older sidecars that predate these fields read back
-as zero values — every reader treats them as optional.
+`edit_file`) and `kind` is `delete` or `overwrite`. Older sidecars that predate
+these fields read back as zero values — every reader treats them as optional,
+and entries staged by surfaces that no longer use the trash (`session`, `skill`,
+`workflow`, `scheduler`, `memory`) still list and restore normally.
 
 ### Human-readable labels
 
@@ -81,13 +85,31 @@ skipped for pathologically large files) so listing stays fast.
 | POSIX `rm` in a shell command | `__octo_safe_rm` wrapper injected by `shellCommand` (`internal/tools/sandbox.go`) hard-links (falls back to copy) each existing target into `$OCTO_TRASH_DIR`, then runs the real `command rm`. |
 | Windows `Remove-Item` (and its aliases) | `windowsSafeRmWrapper` shadows the cmdlet, calls `octo __trash-backup -- <path>…` to stage targets, then runs the real cmdlet. |
 | `write_file` / `edit_file` overwriting an existing file | The tool calls `trash.Backup` before writing, unless the file is tracked by git and clean (git already holds a recoverable copy). Default on; `trash.overwrite_backup: false` disables it. |
-| Programmatic deletes (skill, workflow, scheduler, memory) | `trash.Move` — stages then removes, atomically when possible. |
 
-Deleting a session is the exception: `agent.DeleteSession` unlinks the
-transcript outright. A session the user deletes is one they meant to be gone,
-and every delete affordance already says so ("this cannot be undone"), so
-keeping a shadow copy under `~/.octo/trash/` would contradict the promise the UI
-makes. Session transcripts still reach the trash the ordinary way — an `rm` in a
+### Deletes the user asks for
+
+Nothing else stages. When the user deletes a session, a skill, a workflow, a
+scheduled task, or a memory, the file (or, for a skill, its directory) is
+unlinked outright:
+
+| Object | Delete path |
+|---|---|
+| Session transcript | `agent.DeleteSession` → `os.Remove` |
+| Skill | `skills.Registry.Delete` → `os.RemoveAll` |
+| Workflow | `tools.DeleteWorkflow` → `os.Remove` |
+| Scheduled task | `scheduler.Delete` → `os.Remove` |
+| Memory | `handleDeleteMemory` → `os.Remove` |
+
+These are deliberate acts on the user's own configuration, not collateral damage
+from an agent editing files, so a shadow copy under `~/.octo/trash/` would be
+retention the user didn't ask for and can't see. What they get instead is a
+warning before the fact: every one of these deletes goes through a confirm
+dialog that says the delete cannot be undone (`skills.confirm_delete`,
+`workflows.confirm_delete`, `tasks.confirm_delete`, `profile.confirm_forget`,
+`sidebar.confirm_delete`). The web UI is the only surface that offers these
+deletes, so the confirmation covers all of them.
+
+Session transcripts can still land in the trash the ordinary way — an `rm` in a
 shell command stages them like any other file — which is why labels below still
 parse session titles.
 

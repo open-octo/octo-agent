@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/open-octo/octo-agent/internal/memory"
-	"github.com/open-octo/octo-agent/internal/trash"
 )
 
 // ─── GET /api/memories/{filename} ───────────────────────────────────────────
@@ -65,7 +64,7 @@ func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := trash.Move(p, filepath.Dir(p), trash.Options{DeletedBy: "memory", Kind: "delete"}); err != nil {
+	if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

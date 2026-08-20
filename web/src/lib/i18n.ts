@@ -253,17 +253,17 @@ export const en: Record<string, string> = {
   "mcp.tool_count": "{n} tool(s)",
   "mcp.btn.edit_with_agent": "Edit with Agent",
   // Skills view
-  "skills.confirm_delete": "Delete skill \"{name}\"?",
+  "skills.confirm_delete": "Delete skill \"{name}\"? This cannot be undone.",
   "skills.toast_deleted": "Skill \"{name}\" deleted — /reload an open session, or start a new one, for the change to take effect there",
   "skills.toast_imported": "Skill \"{name}\" imported — /reload an open session, or start a new one, to use it there",
   "skills.toast_toggled": "Skill \"{name}\" updated — /reload an open session, or start a new one, for the change to take effect there",
   // Workflows view
-  "workflows.confirm_delete": "Delete workflow \"{name}\"?",
+  "workflows.confirm_delete": "Delete workflow \"{name}\"? This cannot be undone.",
   "workflows.toast_deleted": "Workflow \"{name}\" deleted",
   // Tasks view
   "tasks.toast_started": "Task started",
   "tasks.toast_deleted": "Task deleted",
-  "tasks.confirm_delete": "Delete scheduled task \"{name}\"?",
+  "tasks.confirm_delete": "Delete scheduled task \"{name}\"? This cannot be undone.",
   // Channels view
   "channels.not_configured": "Not configured",
   "status.stopped": "Stopped",
@@ -477,6 +477,7 @@ export const en: Record<string, string> = {
   "profile.user": "User",
   "profile.memories": "Memories",
   "profile.forget": "Forget",
+  "profile.confirm_forget": "Forget the memory \"{name}\"? This cannot be undone.",
   "profile.update": "Have the Assistant Update This",
   "profile.session_soul": "Update soul.md",
   "profile.session_user": "Update user.md",
@@ -1159,12 +1160,12 @@ export const zh: Record<string, string> = {
   "mcp.tool_count": "{n} 个工具",
   "mcp.btn.edit_with_agent": "请 Agent 修改",
   // 技能视图
-  "skills.confirm_delete": "删除技能 \"{name}\"?",
+  "skills.confirm_delete": "删除技能 \"{name}\"？删除后无法恢复。",
   "skills.toast_deleted": "技能 \"{name}\" 已删除 —— 对已打开的会话执行 /reload，或新建一个会话，才能生效",
   "skills.toast_imported": "技能 \"{name}\" 已导入 —— 对已打开的会话执行 /reload，或新建一个会话，才能使用",
   "skills.toast_toggled": "技能 \"{name}\" 已更新 —— 对已打开的会话执行 /reload，或新建一个会话，才能生效",
   // 工作流视图
-  "workflows.confirm_delete": "删除工作流 \"{name}\"?",
+  "workflows.confirm_delete": "删除工作流 \"{name}\"？删除后无法恢复。",
   "workflows.toast_deleted": "工作流 \"{name}\" 已删除",
   // 任务视图
   "tasks.toast_started": "任务已启动",
@@ -1294,7 +1295,7 @@ export const zh: Record<string, string> = {
   "tasks.resume": "恢复",
   "tasks.paused_toast": "任务已暂停",
   "tasks.resumed": "任务已恢复",
-  "tasks.confirm_delete": "确认删除定时任务 \"{name}\"？",
+  "tasks.confirm_delete": "确认删除定时任务 \"{name}\"？删除后无法恢复。",
   "tasks.modal_edit": "编辑定时任务",
   "tasks.modal_new": "新建定时任务",
   "tasks.field_name": "名称",
@@ -1379,6 +1380,7 @@ export const zh: Record<string, string> = {
   "profile.user": "用户",
   "profile.memories": "记忆",
   "profile.forget": "忘记",
+  "profile.confirm_forget": "忘记记忆 \"{name}\"？删除后无法恢复。",
   "profile.update": "让助手更新此内容",
   "profile.session_soul": "更新 soul.md",
   "profile.session_user": "更新 user.md",

@@ -4,6 +4,7 @@
   import StatusTag from '../components/ui/StatusTag.svelte'
   import { renderMarkdown } from '../lib/markdown'
   import * as api from '../lib/api'
+  import { confirmDialog } from '../lib/confirm'
   import type { Memory } from '../lib/types'
   import { t, tr } from '../lib/i18n'
 
@@ -85,6 +86,7 @@
   }
 
   async function forgetMemory(f: Memory) {
+    if (!(await confirmDialog(tr('profile.confirm_forget').replace('{name}', f.name)))) return
     try {
       // #1109: was a raw fetch() with no res.ok check — a failing delete
       // (404/500) still reported "Memory removed" and the row reappeared on
