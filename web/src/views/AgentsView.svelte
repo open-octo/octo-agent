@@ -70,6 +70,9 @@
   function agentDesc(agent: api.Agent): string {
     return pickLocalized(agent.description, agent.description_en)
   }
+  function isHidden(agent: api.Agent): boolean {
+    return agent.enabled === false
+  }
   function agentCategory(agent: api.Agent): string {
     return agent.category && CATEGORY_ORDER.includes(agent.category) ? agent.category : 'mine'
   }
@@ -163,7 +166,7 @@
     {:else}
       <div class="agent-grid">
         {#each filtered as agent (agent.id)}
-          <div class="agent-card" onclick={() => selectedAgent = agent}>
+          <div class="agent-card" class:is-hidden={isHidden(agent)} onclick={() => selectedAgent = agent}>
             <div class="card-top">
               {#if agent.icon}
                 <span class="agent-icon" style="background-color: {agentIconColor(agentName(agent))}11; color: {agentIconColor(agentName(agent))}">
@@ -176,8 +179,8 @@
               {/if}
               <div class="card-actions">
                 {#if agent.source === 'default'}
-                  <button class="act-btn" title={$t('agents.hide')} onclick={(e) => { e.stopPropagation(); handleToggle(agent) }}>
-                    <iconify-icon icon="ant-design:eye-invisible-outlined" width="13"></iconify-icon>
+                  <button class="act-btn" title={isHidden(agent) ? $t('agents.show') : $t('agents.hide')} onclick={(e) => { e.stopPropagation(); handleToggle(agent) }}>
+                    <iconify-icon icon={isHidden(agent) ? 'ant-design:eye-outlined' : 'ant-design:eye-invisible-outlined'} width="13"></iconify-icon>
                   </button>
                   <button class="act-btn" title={$t('agents.edit_with_agent')} onclick={(e) => handleEditWithAgent(agent, e)}>
                     <iconify-icon icon="ant-design:message-outlined" width="13"></iconify-icon>
@@ -195,6 +198,9 @@
             <span class="agent-name">{agentName(agent)}</span>
             <span class="agent-desc">{agentDesc(agent)}</span>
             <div class="card-bottom">
+              {#if isHidden(agent)}
+                <span class="transport-badge hidden-badge">{$t('agents.hidden')}</span>
+              {/if}
               {#if agent.model}
                 <span class="transport-badge mono">{$t('agents.model')}: {agent.model}</span>
               {/if}
@@ -272,6 +278,11 @@ p  { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 
   cursor: pointer; transition: border-color 0.15s, transform 0.15s;
 }
 .agent-card:hover { border-color: var(--blue-2); transform: translateY(-1px); }
+/* A hidden curated expert stays in the gallery — dimmed, with its actions
+   always visible so the re-show button is reachable without hunting. */
+.agent-card.is-hidden { opacity: 0.5; border-style: dashed; }
+.agent-card.is-hidden:hover { opacity: 0.75; }
+.agent-card.is-hidden .card-actions { opacity: 1; }
 
 .card-top { display: flex; align-items: flex-start; justify-content: space-between; }
 .agent-icon {
@@ -303,6 +314,7 @@ p  { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 
   border-radius: 4px; display: flex; align-items: center; font-size: 11px; color: var(--text-tertiary);
 }
 .transport-badge.muted { opacity: 0.6; }
+.transport-badge.hidden-badge { border-color: var(--border); color: var(--text-secondary); }
 
 /* ── empty state ─────────────────────────────────────────────────────────── */
 .empty-state {

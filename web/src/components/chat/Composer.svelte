@@ -326,7 +326,7 @@
     | { kind: 'workflow'; workflow: api.NamedWorkflow }
     | { kind: 'mcp-server'; name: string }
     | { kind: 'mcp-tool'; server: string; tool: McpTool }
-    | { kind: 'agent'; id: string; name: string }
+    | { kind: 'agent'; id: string; name: string; icon?: string }
     | { kind: 'agent-create' }
 
   // Built-in slash commands that actually do something on web: /clear, /compact
@@ -445,7 +445,7 @@
       // Default is not one of the rows: @ is how you pick an expert, and
       // "no expert" is reached by clearing the mention (backspace on an empty
       // box) or from the agent menu's own Default entry.
-      const rows: SlashItem[] = agents.map(a => ({ kind: 'agent' as const, id: a.id, name: a.name }))
+      const rows: SlashItem[] = pickableAgents.map(a => ({ kind: 'agent' as const, id: a.id, name: a.name, icon: a.icon }))
       const filtered = rows
         .map(r => ({ r, score: scoreNameMatch(r.kind === 'agent' ? r.name : '', q) }))
         .filter(({ score }) => score > 0)
@@ -741,6 +741,10 @@
   // an existing session with turn_count 0 — the chip stays a live picker;
   // once locked, it becomes a read-only label of the session's own profile.
   let agents = $state<api.Agent[]>([])
+  // Pickable set: a curated expert the user hid in the gallery drops out of
+  // both pickers, while `agents` stays whole so an already-assigned (now
+  // hidden) expert still resolves to its own name in the chip label.
+  let pickableAgents = $derived(agents.filter(a => a.enabled !== false))
   let agentLocked = $derived(!!currentSession && ((currentSession as any)?.turn_count ?? 0) > 0)
   let sessionAgent = $derived((currentSession as any)?.agent_profile ?? '')
   // Which id is "current" right now: the session's own profile once one
@@ -1204,9 +1208,12 @@
               <button class="menu-item" class:active={effectiveAgentId === 'default'} onclick={() => pickAgent('default')}>
                 <span class="mi-name">Default</span>
               </button>
-              {#each agents as a (a.id)}
+              {#each pickableAgents as a (a.id)}
                 <button class="menu-item" class:active={effectiveAgentId === a.id} onclick={() => pickAgent(a.id)}>
-                  <span class="mi-name">{a.name}</span>
+                  <span class="mi-name with-icon">
+                    <iconify-icon icon={a.icon || 'ant-design:robot-outlined'} width="13"></iconify-icon>
+                    {a.name}
+                  </span>
                 </button>
               {/each}
               <div class="menu-divider"></div>
@@ -1265,7 +1272,10 @@
                   <span class="skill-desc">{item.workflow.description}</span>
                 {/if}
               {:else if item.kind === 'agent'}
-                <span class="skill-name">@{item.name}</span>
+                <span class="skill-name with-icon">
+                  <iconify-icon icon={item.icon || 'ant-design:robot-outlined'} width="13"></iconify-icon>
+                  @{item.name}
+                </span>
                 <span class="skill-desc">{$t('composer.assign_agent')}</span>
               {:else if item.kind === 'agent-create'}
                 <span class="skill-name create">
@@ -1454,6 +1464,7 @@
 }
 .toggle.on .toggle-knob { transform: translateX(14px); }
 .mi-name { font-size: 13px; color: var(--text); }
+.mi-name.with-icon, .skill-name.with-icon { display: inline-flex; align-items: center; gap: 6px; }
 .menu-empty { padding: 8px 10px; font-size: 12px; color: var(--text-tertiary); }
 .reasoning-eye { color: var(--success); }
 .mono { font-family: var(--font-mono); }
