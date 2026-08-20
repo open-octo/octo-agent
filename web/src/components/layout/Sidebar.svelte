@@ -920,6 +920,11 @@
   border-radius: 6px;
 }
 .grp-header:hover { background: var(--hover-neutral); }
+/* Pinned is the one .grp-header with no click target of its own — just a
+   label — so it needs the same hover feedback .sec-header gives Projects
+   and Recent, rather than relying on the (here, purely cosmetic) background
+   tint alone. */
+.grp-header:hover .grp-name.muted { color: var(--text-secondary); }
 .grp-caret {
   width: 16px; flex: 0 0 16px; display: flex; align-items: center; justify-content: center;
   color: var(--text-tertiary); cursor: pointer;
