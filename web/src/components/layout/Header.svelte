@@ -26,6 +26,12 @@
   // is Sidebar's header while the sidebar is showing (it insets itself), and
   // this row only once the sidebar is gone.
   const insetForTrafficLights = $derived($nativeShell && isMac && $sidebar === 'hidden')
+  // Making room for the lights is one thing; sitting on the same axis as them is
+  // another, and this row needs the second one whether or not it holds the first.
+  // While the sidebar shows, the lights are over ITS header — but if only that
+  // column lifted its content, the brand row and this row's chat title would sit
+  // 4px apart.
+  const liftForTrafficLights = $derived($nativeShell && isMac)
 
   // Desktop only: double-clicking the draggable header zooms the window, the way
   // a native title bar does. Wails' custom drag region doesn't wire this up, and
@@ -72,7 +78,7 @@
   })
 </script>
 
-<header class:native-inset={insetForTrafficLights} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
+<header class:native-inset={insetForTrafficLights} class:native-lift={liftForTrafficLights} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
   {#if $sidebar === 'hidden'}
     <button class="icon-btn" title={$t('header.toggle_left')} aria-pressed={false} onclick={toggleSidebar}>
       <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
@@ -131,10 +137,17 @@ header {
   padding: 0 10px;
   z-index: 20;
 }
-/* Only while the sidebar is hidden — see insetForTrafficLights. Padding-bottom
-   (not padding-top) pulls the centering axis up to meet the lights' fixed
-   vertical position instead of pushing content further away from them. */
-header.native-inset { padding-left: 82px; padding-bottom: 8px; }
+/* Only while the sidebar is hidden — see insetForTrafficLights: horizontal room
+   for the lights, nothing more. */
+header.native-inset { padding-left: 82px; }
+/* Lifting the axis is the other half, and max-height is the load-bearing part of
+   it. Padding-bottom alone only moves the axis while min-height still decides the
+   row height; .chat-header-slot is taller than the 36px that would leave, so the
+   row grew to 52px instead and the axis never moved. Pinning the height makes the
+   padding actually shorten the content box. */
+header.native-lift {
+  box-sizing: border-box; max-height: 44px; padding-bottom: 8px;
+}
 /* The row is a window drag handle; every control opts back out so it stays
    clickable, leaving the blank stretches to drag the window. */
 header .icon-btn,
