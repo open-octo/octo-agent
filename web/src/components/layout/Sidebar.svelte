@@ -873,7 +873,7 @@
   font-size: 10px; font-weight: 600; white-space: nowrap;
   max-width: 64px; overflow: hidden; text-overflow: ellipsis;
 }
-.scroll { flex: 1; min-height: 0; overflow: hidden; padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 18px; }
+.scroll { flex: 1; min-height: 0; overflow: hidden; padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 10px; }
 .nav-group { display: flex; flex-direction: column; gap: 2px; flex: 0 0 auto; }
 /* Sessions is the only group with no forced grow-to-fill (flex-grow:0, unlike
    the "1 1 auto" this used to be) — a short list sizes to its own content
