@@ -13,7 +13,7 @@
 <button
   type="button"
   class="genui-button variant-{node.variant ?? 'default'}"
-  disabled={!ctx?.interactive}
+  disabled={!ctx?.interactive || ctx?.pending}
   onclick={onClick}
 >
   {node.label}
