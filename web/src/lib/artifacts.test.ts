@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { get } from 'svelte/store'
-import { artifacts, artifactSel, panelContent } from './stores'
+import { artifacts, artifactSel, panelContent, panelExpanded } from './stores'
 import { lightAppSource, observeArtifact, hydrateArtifact, resetArtifacts, pathIsInside } from './artifacts'
 
 // Nothing a preview document references can authenticate: the srcdoc iframe has
@@ -39,6 +39,18 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+})
+
+describe('resetArtifacts', () => {
+  it('closes an expanded panel so the main column is never hidden with nothing beside it', () => {
+    panelContent.set('lightapps')
+    panelExpanded.set(true)
+
+    resetArtifacts('sess-2')
+
+    expect(get(panelContent)).toBe(null)
+    expect(get(panelExpanded)).toBe(false)
+  })
 })
 
 describe('observeArtifact — image artifacts', () => {
