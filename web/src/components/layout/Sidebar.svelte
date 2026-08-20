@@ -8,6 +8,7 @@
   import { splitSections, swapWithinSection, parseSectionFold, type SectionFold } from '../../lib/sidebarSections'
   import { SIDEBAR_MIN, SIDEBAR_MAX, CENTER_MIN, readSidebarWidth, saveSidebarWidth } from '../../lib/sidebarWidth'
   import { ago } from '../../lib/relTime'
+  import { isUnread, sessionSeenAt, sessionTouchedAt } from '../../lib/unread'
   import { ws } from '../../lib/ws'
   import VersionBadge from './VersionBadge.svelte'
   import OctoLogo from './OctoLogo.svelte'
@@ -475,11 +476,12 @@
     } catch (e: any) { showToast(e.message, 'error') }
   }
 
-  // Tooltip for a running badge. Takes the already-translated label so the
-  // caller reads $t in markup and the title re-renders on a language switch.
+  // Tooltip for a fold badge (running or unread). Takes the already-translated
+  // label so the caller reads $t in markup and the title re-renders on a
+  // language switch.
   // Names are clamped: one runaway session title should not stretch the
   // tooltip across the screen.
-  function runningTitle(label: string, items: any[]): string {
+  function badgeTitle(label: string, items: any[]): string {
     const names = items.map((s: any) => String(s.name || s.title || s.id).slice(0, 60)).join('\n')
     return label.replace('{names}', names)
   }
@@ -620,10 +622,12 @@
              header already carries how many sessions are in it. -->
         {#if groupedView.projects.length > 0}
         {@const runningProjects = sections.projects ? [] : groupedView.projects.flatMap(gv => gv.items).filter((s: any) => s.status === 'running')}
+        {@const unreadProjects = sections.projects ? [] : groupedView.projects.flatMap(gv => gv.items).filter((s: any) => isUnread(s, $sessionSeenAt, $sessionTouchedAt))}
         <div class="sec-header" onclick={() => toggleSection('projects')}>
           {#if $selMode}{@render triBox(triStateOf(groupedView.projects.flatMap(gv => gv.items.map(s => s.id))), () => toggleMany(groupedView.projects.flatMap(gv => gv.items.map(s => s.id))))}{/if}
           <span class="sec-name">{$t('sidebar.projects')}</span>
-          {#if runningProjects.length > 0}{@render runningBadge(runningProjects, null)}{/if}
+          {#if runningProjects.length > 0}{@render runningBadge(runningProjects, null)}
+          {:else if unreadProjects.length > 0}{@render unreadBadge(unreadProjects, null)}{/if}
           <iconify-icon class="sec-caret" class:folded={!sections.projects} icon="ant-design:right-outlined" width="10"></iconify-icon>
         </div>
         {#if sections.projects}
@@ -638,10 +642,12 @@
              section, which is what the retired "plain group" used to add. -->
         {#if groupedView.ungrouped.length > 0}
         {@const runningTasks = sections.tasks ? [] : groupedView.ungrouped.filter((s: any) => s.status === 'running')}
+        {@const unreadTasks = sections.tasks ? [] : groupedView.ungrouped.filter((s: any) => isUnread(s, $sessionSeenAt, $sessionTouchedAt))}
         <div class="sec-header" onclick={() => toggleSection('tasks')}>
           {#if $selMode}{@render triBox(triStateOf(groupedView.ungrouped.map(s => s.id)), () => toggleMany(groupedView.ungrouped.map(s => s.id)))}{/if}
           <span class="sec-name">{$t('sidebar.tasks')}</span>
-          {#if runningTasks.length > 0}{@render runningBadge(runningTasks, null)}{/if}
+          {#if runningTasks.length > 0}{@render runningBadge(runningTasks, null)}
+          {:else if unreadTasks.length > 0}{@render unreadBadge(unreadTasks, null)}{/if}
           <iconify-icon class="sec-caret" class:folded={!sections.tasks} icon="ant-design:right-outlined" width="10"></iconify-icon>
         </div>
         {#if sections.tasks}
@@ -662,10 +668,21 @@
       {#snippet runningBadge(items: any[], expand: (() => void) | null)}
         <span
           class="grp-running"
-          title={runningTitle($t('sidebar.running_list'), items)}
+          title={badgeTitle($t('sidebar.running_list'), items)}
           onclick={expand ? (e) => { e.stopPropagation(); expand() } : undefined}
         >
           <iconify-icon class="spin" icon="ant-design:loading-outlined" width="12"></iconify-icon>
+          {#if items.length > 1}<span class="grp-running-n">{items.length}</span>{/if}
+        </span>
+      {/snippet}
+
+      {#snippet unreadBadge(items: any[], expand: (() => void) | null)}
+        <span
+          class="grp-unread"
+          title={badgeTitle($t('sidebar.unread_list'), items)}
+          onclick={expand ? (e) => { e.stopPropagation(); expand() } : undefined}
+        >
+          <span class="unread-dot"></span>
           {#if items.length > 1}<span class="grp-running-n">{items.length}</span>{/if}
         </span>
       {/snippet}
@@ -674,6 +691,7 @@
         {@const g = gv.group}
         {@const editingG = $editGroupId === g.id}
         {@const runningIn = gv.items.filter((s: any) => s.status === 'running')}
+        {@const unreadIn = gv.items.filter((s: any) => isUnread(s, $sessionSeenAt, $sessionTouchedAt))}
         <div class="grp-header" class:menu-open={projectMenuFor === g.id}>
           {#if $selMode}{@render triBox(triStateOf(gv.items.map((s: any) => s.id)), () => toggleMany(gv.items.map((s: any) => s.id)))}{/if}
           <!-- Folder icon doubles as the collapse toggle: open when expanded,
@@ -704,6 +722,12 @@
           {#if g.collapsed && runningIn.length > 0}
             <!-- Not a .row-action: hover is exactly when this must not hide. -->
             {@render runningBadge(runningIn, () => toggleCollapse(g.id, false))}
+          {:else if g.collapsed && unreadIn.length > 0}
+            <!-- Unread work rolls up the same way, but only while nothing inside
+                 is running: one badge per row, and "running now" outranks
+                 "finished while you were away" exactly as it does on a session
+                 row. The dot takes over when the turn ends. -->
+            {@render unreadBadge(unreadIn, () => toggleCollapse(g.id, false))}
           {/if}
           {#if !$selMode}
           <!-- Six icons used to sit here — reorder, rename, delete, new session,
@@ -810,6 +834,13 @@
           {/if}
           {#if (s as any).status === 'running'}
             <iconify-icon class="on-rest" icon="ant-design:loading-outlined" width="13" style="color:var(--blue-6);flex:0 0 auto;animation:octo-spin 0.8s linear infinite" title={$t('sidebar.running')}></iconify-icon>
+          {:else if isUnread(s as any, $sessionSeenAt, $sessionTouchedAt)}
+            <!-- Idle, but something happened here the user hasn't opened yet —
+                 the reply to a message sent from a phone, a cron fire, a /loop
+                 tick. It takes the timestamp's slot rather than adding a third
+                 column: "when did this last change" is exactly the question
+                 the dot is already answering, more urgently. -->
+            <span class="unread-dot on-rest" title={$t('sidebar.unread')}></span>
           {:else}
             <span class="session-time on-rest" style="color:var(--text-quaternary);">
               {ago((s as any).updated_at, $t)}
@@ -1151,7 +1182,7 @@
 .checkbox.tri.on { border-color: var(--blue-6); background: var(--blue-6); }
 .row-menu-sep { height: 1px; margin: 4px 6px; background: var(--border-secondary); }
 .from-cron { flex: 0 0 auto; color: var(--text-quaternary); }
-.grp-running { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; color: var(--blue-6); cursor: pointer; }
+.grp-running, .grp-unread { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; color: var(--blue-6); cursor: pointer; }
 .grp-running-n { font-size: 10px; line-height: 1; font-variant-numeric: tabular-nums; }
 .nav-row {
   position: relative;
@@ -1188,6 +1219,12 @@
 .session-time { font-size: 11px; flex: 0 0 auto; padding-right: 4px; }
 .pending-dot {
   width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%;
+  background: var(--blue-6); margin-right: 4px;
+}
+/* Same dot as pending-dot, sitting where the timestamp does — so it keeps the
+   timestamp's trailing padding instead of pending-dot's leading margin. */
+.unread-dot {
+  width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%;
   background: var(--blue-6); margin-right: 4px;
 }
 .row-action {
