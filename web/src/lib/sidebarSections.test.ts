@@ -3,6 +3,7 @@ import { splitSections, swapWithinSection, parseSectionFold } from './sidebarSec
 import type { Session, SessionGroup } from './types'
 
 const sess = (id: string): Session => ({ id }) as Session
+const runs = (id: string): Session => ({ id, status: 'running' }) as Session
 const group = (id: string, session_ids: string[] = [], working_dir?: string): SessionGroup =>
   ({ id, name: id, session_ids, ...(working_dir ? { working_dir } : {}) }) as SessionGroup
 // A scheduled task's project: the scheduler gives it a directory named after the
@@ -49,6 +50,16 @@ describe('splitSections', () => {
     expect(s.pinned.map(x => x.id)).toEqual(['a'])
     expect(s.projects[0].items).toEqual([])
     expect(s.ungrouped).toEqual([])
+  })
+
+  // The collapsed-project running badge counts gv.items, so precedence decides
+  // its number: a running session the Pinned section already claimed must not be
+  // counted again under the project, where it also has a row of its own that is
+  // always visible.
+  it('leaves a running pinned session out of its project items', () => {
+    const s = splitSections([runs('a'), runs('b')], [cron('c', ['a', 'b'])], ['a'], [])
+    expect(s.pinned.map(x => x.id)).toEqual(['a'])
+    expect(s.projects[0].items.map(x => x.id)).toEqual(['b'])
   })
 
   it('resolves a pin+collapse overlap in favour of the pin', () => {
