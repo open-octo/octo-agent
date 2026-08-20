@@ -431,7 +431,10 @@
 <div class="app">
   <div class="content">
     <Sidebar />
-    <main class="main" class:yielded={$panelExpanded}>
+    <!-- Yield the width only while the panel is actually there to take it:
+         an expanded flag left over from a closed panel would hide the main
+         column with nothing rendered beside it, i.e. a blank page. -->
+    <main class="main" class:yielded={$panelExpanded && !!$panelContent}>
       <Header />
       {#if $view === 'chat'}
         <ChatView />

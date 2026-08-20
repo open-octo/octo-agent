@@ -25,7 +25,7 @@
 // inlineLocalRefs does).
 
 import { get, writable } from 'svelte/store'
-import { artifacts, panelContent, artifactSel } from './stores'
+import { artifacts, panelContent, panelExpanded, artifactSel } from './stores'
 import { renderMarkdown } from './markdown'
 import type { Artifact } from './types'
 
@@ -421,6 +421,10 @@ export function resetArtifacts(sessionId: string): void {
   artifacts.set([])
   artifactSel.set(0)
   panelContent.set(null)
+  // Closing the panel must clear the expanded flag with it, or the main column
+  // stays hidden with nothing in its place: a full-width Light App is open,
+  // switching to a chat resets the panel, and the layout paints blank.
+  panelExpanded.set(false)
   autoOpened = false
   imageRevisions.clear()
   artifactSelSession.set(sessionId)
