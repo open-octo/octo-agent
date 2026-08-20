@@ -89,6 +89,13 @@ export const artifactModalOpen = writable(false)
 // 'lightapps' = Light Apps list + rendering.
 export const panelContent = writable<'session' | 'lightapps' | null>(null)
 
+// Artifacts panel taking over the whole content area except the sidebar, so a
+// preview can be read at full width without leaving the layout. Deliberately
+// not persisted: it's a way of looking at something right now, not a setting,
+// and coming back to a booted app with the middle column gone would read as
+// broken. Cleared whenever the panel closes.
+export const panelExpanded = writable(false)
+
 // ChatView's own title/status/actions, rendered inline in the page-spanning
 // title bar rather than a separate row below it (the redesign merges main
 // content's header into that bar for chat specifically — every other view

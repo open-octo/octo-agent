@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sessions, sessionGroups, pinnedSessions, collapsedSessions, activeSessionId, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent, cmdkOpen, settingsModalOpen, createNewSession, clearPendingSessionOpts, isDesktopShell } from './lib/stores'
+  import { view, sessions, sessionGroups, pinnedSessions, collapsedSessions, activeSessionId, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent, panelExpanded, cmdkOpen, settingsModalOpen, createNewSession, clearPendingSessionOpts, isDesktopShell } from './lib/stores'
   import MobileApp from './mobile/MobileApp.svelte'
   import { ws, wsState } from './lib/ws'
   import { notificationsEnabled } from './lib/notifications'
@@ -431,7 +431,7 @@
 <div class="app">
   <div class="content">
     <Sidebar />
-    <main class="main">
+    <main class="main" class:yielded={$panelExpanded}>
       <Header />
       {#if $view === 'chat'}
         <ChatView />
@@ -495,6 +495,11 @@
   flex-direction: column;
   min-height: 0;
 }
+/* Gives its width to an expanded artifacts panel. display:none rather than
+   unmounting the view: the conversation keeps its scroll position, its
+   in-flight turn and its composer draft, so collapsing the panel comes back
+   to exactly what was there. */
+.main.yielded { display: none; }
 .splash {
   height: 100%; display: flex; align-items: center; justify-content: center;
   background: var(--bg-layout);

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { artifacts, panelContent, artifactSel, artifactView, artifactModalOpen, lightappSel, lightapps, lightappHTML, showToast } from '../lib/stores'
+  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightapps, lightappHTML, showToast } from '../lib/stores'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
   import { hydrateArtifact, lightAppSource, pathIsInside } from '../lib/artifacts'
@@ -151,7 +151,12 @@
     if ($panelContent !== 'lightapps') laAttempted = false
   })
 
-  function closePanel() { panelContent.set(null) }
+  // Closing drops the expanded state too, so re-opening comes back at its own
+  // width rather than silently swallowing the main column again.
+  function closePanel() {
+    panelExpanded.set(false)
+    panelContent.set(null)
+  }
 
   // Derive the current light app's HTML preview.
   const laCurSlug = $derived($lightappSel || $lightapps[0]?.slug || '')
@@ -173,12 +178,12 @@
     return Number.isFinite(v) && v >= PANEL_MIN ? v : 420
   }
 
-  // Hand the current artifact to the full-screen view, closing the panel behind
-  // it — the panel and the modal are two sizes of the same thing, not two
-  // things, so leaving both open would show it twice.
-  function expandFullScreen() {
-    panelContent.set(null)
-    artifactModalOpen.set(true)
+  // Take over the content area, leaving the sidebar in place: the main column
+  // yields its width (App.svelte hides it) and this panel grows into it. No
+  // pixel maths — flex fills whatever is left, so it stays right through a
+  // window resize or the sidebar collapsing underneath.
+  function toggleExpanded() {
+    panelExpanded.update(v => !v)
   }
 
   function startResize(e: MouseEvent) {
@@ -210,22 +215,24 @@
 </script>
 
 <!-- The panel's own controls, at the far right of its top row in every mode.
-     Expand goes straight to the full-screen view rather than widening the
-     panel; it needs something to show, so it greys out in the empty state and
-     in light-apps mode (the modal renders session artifacts). The toggle
-     carries an "on" fill because this row only exists while the panel is
-     open. -->
+     Expand is a layout action, so it stays clickable whatever the panel is
+     showing — including the empty state. The close toggle carries an "on" fill
+     because this row only exists while the panel is open. -->
 {#snippet topbarControls()}
-  <button class="icon-btn" title={$t('artifacts.maximize')} disabled={!cur} onclick={expandFullScreen}>
-    <iconify-icon icon="lucide:scan" width="15"></iconify-icon>
+  <button class="icon-btn" title={$panelExpanded ? $t('artifacts.collapse_panel') : $t('artifacts.maximize')} onclick={toggleExpanded}>
+    <iconify-icon icon={$panelExpanded ? 'ph:arrows-in-simple' : 'ph:corners-out'} width="15"></iconify-icon>
   </button>
   <button class="icon-btn on" title={$t('header.toggle_right')} onclick={closePanel}>
     <iconify-icon icon="lucide:panel-right" width="14"></iconify-icon>
   </button>
 {/snippet}
 
-<aside class="panel" bind:this={panelEl} style="width:{panelWidth}px;flex-basis:{panelWidth}px">
-  <div class="resize-handle" role="separator" aria-orientation="vertical" onmousedown={startResize}></div>
+<aside class="panel" bind:this={panelEl} style={$panelExpanded ? 'flex:1 1 auto' : `width:${panelWidth}px;flex-basis:${panelWidth}px`}>
+  <!-- Expanded, there is no neighbour left to drag against, so the handle goes
+       with it rather than sitting there inert against the sidebar. -->
+  {#if !$panelExpanded}
+    <div class="resize-handle" role="separator" aria-orientation="vertical" onmousedown={startResize}></div>
+  {/if}
   {#if $panelContent === 'lightapps'}
     <!-- ── Light Apps mode ───────────────────────────────────────────────── -->
     <div class="topbar">
