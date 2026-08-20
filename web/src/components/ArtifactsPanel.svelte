@@ -220,7 +220,7 @@
      because this row only exists while the panel is open. -->
 {#snippet topbarControls()}
   <button class="icon-btn" title={$panelExpanded ? $t('artifacts.collapse_panel') : $t('artifacts.maximize')} onclick={toggleExpanded}>
-    <iconify-icon icon={$panelExpanded ? 'ph:arrows-in-simple' : 'ph:corners-out'} width="15"></iconify-icon>
+    <iconify-icon icon={$panelExpanded ? 'ph:arrows-in-simple' : 'ph:arrows-out-simple'} width="15"></iconify-icon>
   </button>
   <button class="icon-btn on" title={$t('header.toggle_right')} onclick={closePanel}>
     <iconify-icon icon="lucide:panel-right" width="14"></iconify-icon>
