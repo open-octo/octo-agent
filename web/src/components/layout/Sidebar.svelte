@@ -1044,9 +1044,14 @@
   padding: 0 10px;
 }
 /* Mac's traffic lights float over the window's top-left corner, which is this
-   row whenever the sidebar is showing. Padding-bottom (not padding-top) pulls
-   the centering axis up to meet their fixed vertical position. */
-.side-header.native-inset { padding-left: 82px; padding-bottom: 8px; }
+   row whenever the sidebar is showing: horizontal room for them, then the same
+   axis lift Header applies to the main column, so the brand row and the chat
+   title stay on one line. Height pinned for the same reason as there — the
+   padding has to shorten the content box, not grow the row. */
+.side-header.native-inset {
+  box-sizing: border-box; max-height: 44px;
+  padding-left: 82px; padding-bottom: 8px;
+}
 .side-header .icon-btn { --wails-draggable: no-drag; }
 .side-header :global(.logo) { color: var(--blue-6); flex: 0 0 auto; }
 .brand-name { font-size: 14px; font-weight: 600; color: var(--text-heading); flex: 0 0 auto; }

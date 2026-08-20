@@ -1,10 +1,15 @@
 <script lang="ts">
-  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightapps, lightappHTML, showToast } from '../lib/stores'
+  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightapps, lightappHTML, showToast, nativeShell } from '../lib/stores'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
   import { hydrateArtifact, lightAppSource, pathIsInside } from '../lib/artifacts'
   import { CENTER_MIN } from '../lib/sidebarWidth'
   import * as api from '../lib/api'
+
+  // This column never holds the traffic lights, but its top row has to sit on
+  // the same axis as the chat title beside it, which Header lifts on mac.
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+  const liftForTrafficLights = $derived($nativeShell && isMac)
 
   // ── Session artifacts (existing) ──────────────────────────────────────────
   const cur = $derived($artifacts[$artifactSel] ?? $artifacts[0])
@@ -245,7 +250,7 @@
   {/if}
   {#if $panelContent === 'lightapps'}
     <!-- ── Light Apps mode ───────────────────────────────────────────────── -->
-    <div class="topbar">
+    <div class="topbar" class:native-lift={liftForTrafficLights}>
       <span style="flex:1"></span>
       <span class="sandboxed-label">{$t('artifacts.sandboxed')}</span>
       {@render lightAppControls()}
@@ -280,7 +285,7 @@
   {:else if $panelContent === 'session'}
     <!-- ── Session mode (existing behavior) ────────────────────────────────── -->
     {#if !cur}
-      <div class="topbar">
+      <div class="topbar" class:native-lift={liftForTrafficLights}>
         <span style="flex:1"></span>
         {@render topbarControls()}
       </div>
@@ -289,7 +294,7 @@
         <span>{$t('artifacts.empty')}</span>
       </div>
     {:else}
-      <div class="topbar">
+      <div class="topbar" class:native-lift={liftForTrafficLights}>
         <span style="flex:1"></span>
         {#if !curIsImage}
           <div class="seg">
@@ -395,6 +400,9 @@
   flex: 0 0 auto; min-height: 44px; padding: 0 8px 0 10px;
   display: flex; align-items: center; gap: 8px;
 }
+/* The same axis lift Header and Sidebar apply on mac — see Header.native-lift
+   for why the height has to be pinned for the padding to move anything. */
+.topbar.native-lift { box-sizing: border-box; max-height: 44px; padding-bottom: 8px; }
 .file-row {
   flex: 0 0 auto; padding: 7px 10px 7px 16px;
   border-bottom: 1px solid var(--border-secondary); display: flex; align-items: center; gap: 8px;
