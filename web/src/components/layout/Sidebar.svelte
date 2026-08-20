@@ -46,7 +46,7 @@
     const r = anchor.getBoundingClientRect()
     morePos = mode === 'rail'
       ? { top: r.top, left: r.right + 6, width: 168 }
-      : { top: r.bottom + 2, left: r.left, width: r.width + 8 }
+      : { top: r.bottom + 2, left: r.left + 8, width: r.width + 8 }
     morePopoverOpen = true
   }
   // Everything reachable but not reached often. The four destinations that ARE
