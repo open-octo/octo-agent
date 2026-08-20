@@ -1,34 +1,21 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, groupMenuFor, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen } from '../../lib/stores'
+  import { get } from 'svelte/store'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
   import { splitSections, swapWithinSection, parseSectionFold, type SectionFold } from '../../lib/sidebarSections'
+  import { ago } from '../../lib/relTime'
   import { ws } from '../../lib/ws'
   import VersionBadge from './VersionBadge.svelte'
-  import ProjectSettingsModal from '../overlays/ProjectSettingsModal.svelte'
 
-  // Group whose project settings are open, by id ('' = none). Held by id
-  // rather than by object so the modal always renders the live group from the
-  // store, even if it changes underneath.
-  let projectModalFor = $state('')
-  let projectModalGroup = $derived($sessionGroups.find(g => g.id === projectModalFor) ?? null)
-
-  // Abbreviate a project directory for the sidebar: drop the home prefix, and
-  // keep only the last two segments of anything still long.
-  function shortDir(p: string): string {
-    const home = p.match(/^\/(?:Users|home)\/[^/]+/)
-    let s = home ? '~' + p.slice(home[0].length) : p
-    if (s.length <= 28) return s
-    const parts = s.split('/').filter(Boolean)
-    return parts.length > 2 ? '…/' + parts.slice(-2).join('/') : s
-  }
+  // Project whose row menu is open, by id ('' = none). Local rather than a store:
+  // nothing outside this sidebar opens or reads it.
+  let projectMenuFor = $state('')
 
   // Agent list for the new-session picker dropdown.
   let agents: api.Agent[] = $state([])
-  let agentPickerOpen = $state(false)
-  let agentPickerEl = $state<HTMLElement>()
 
   // "More" flyout — collapses the remaining agentic-config surfaces (agents/
   // skills/mcp/workflows/channels) behind one sidebar row instead of a row
@@ -57,12 +44,23 @@
       : { top: r.bottom + 2, left: r.left, width: r.width + 8 }
     morePopoverOpen = true
   }
+  // Everything reachable but not reached often. The four destinations that ARE
+  // reached often sit in the nav group instead; what is left is configuration you
+  // visit to change something and then leave.
   const moreCategories = [
     { icon: 'ant-design:robot-outlined', label: 'nav.agents', v: 'agents' },
     { icon: 'ant-design:thunderbolt-outlined', label: 'nav.skills', v: 'skills' },
     { icon: 'ant-design:api-outlined', label: 'nav.mcp', v: 'mcp' },
     { icon: 'ant-design:partition-outlined', label: 'nav.workflows', v: 'workflows' },
+    { icon: 'ant-design:user-outlined', label: 'nav.memory', v: 'profile' },
+    { icon: 'ant-design:global-outlined', label: 'nav.browser', v: 'browser' },
     { icon: 'ant-design:mobile-outlined', label: 'nav.channels', v: 'channels' },
+  ]
+
+  // The nav group, in both widths: the destinations worth a row of their own.
+  const topNav = [
+    { icon: 'ant-design:clock-circle-outlined', label: 'nav.tasks', v: 'tasks' },
+    { icon: 'ant-design:appstore-outlined', label: 'nav.light_apps', v: 'lightapps' },
   ]
   function goToMore(v: string) {
     view.set(v as any)
@@ -70,9 +68,6 @@
   }
 
   function dismissPicker(e: MouseEvent) {
-    if (agentPickerOpen && agentPickerEl && !agentPickerEl.contains(e.target as Node)) {
-      agentPickerOpen = false
-    }
     // The popover itself is portaled to <body> in both modes, so it's no
     // longer a DOM descendant of morePopoverEl (the anchor's wrapper) —
     // check for a click inside it by class instead.
@@ -132,30 +127,32 @@
     }
   }
   let sections = $state(loadSections())
-  // Id lists per section, so a group's reorder arrows know their own
-  // neighbours (and whether they are at either end of their section).
-  const taskGroupIds = $derived(groupedView.taskGroups.map(gv => gv.group.id))
+  // Ids of the reorderable section, so a project's arrows know their own
+  // neighbours (and whether they are at either end). Only Projects reorders:
+  // Tasks is a flat recency list, and the Scheduled section is the scheduler's.
   const projectIds = $derived(groupedView.projects.map(gv => gv.group.id))
   function persistSections() {
     try { localStorage.setItem(SECTIONS_KEY, JSON.stringify(sections)) } catch { /* ignore */ }
   }
-  function toggleSection(k: 'tasks' | 'projects') {
+  type SectionKey = 'tasks' | 'projects'
+  function toggleSection(k: SectionKey) {
     sections = { ...sections, [k]: !sections[k] }
     persistSections()
   }
-  // Creating a group opens an inline rename box on the new row, so a folded
-  // section would swallow the whole action: the group exists, unnamed, with no
-  // visible row to name, configure, or delete it. Anything that creates or
-  // retargets a group reveals the section it lands in.
-  function revealSection(k: 'tasks' | 'projects') {
+  // Creating a project opens an inline rename box on the new row, so a folded
+  // section would swallow the whole action: the project exists, named after its
+  // directory, with no visible row to rename or configure. Anything that creates
+  // or retargets a project reveals the section it lands in.
+  function revealSection(k: SectionKey) {
     if (sections[k]) return
     sections = { ...sections, [k]: true }
     persistSections()
   }
 
-  function groupIdOf(sessionId: string): string {
-    return $sessionGroups.find(g => g.session_ids.includes(sessionId))?.id ?? ''
-  }
+  // On the new-session landing page: chat view with nothing selected. This is
+  // the active state of the New session row.
+  const onLanding = $derived($view === 'chat' && !$activeSessionId)
+
 
   const isPinned = (sessionId: string): boolean => $pinnedSessions.includes(sessionId)
   const isCollapsed = (sessionId: string): boolean => $collapsedSessions.includes(sessionId)
@@ -180,19 +177,18 @@
   // Whether the folded panel's list is expanded. Deliberately ephemeral (not
   // persisted like a group's collapsed flag): the panel exists to keep the
   // list short, so every fresh mount starts folded shut.
-  let foldedOpen = $state(false)
 
   // Collapse a session into the folded panel, or restore it. Optimistic like
   // togglePin. The collapse action is only offered on unpinned, ungrouped
   // sessions (the server rejects the rest), so no local guard is needed.
-  async function toggleSessionCollapse(sessionId: string, collapse: boolean) {
+  // Un-archiving lives in Settings' 数据管理 now (SettingsModal.svelte), the
+  // only place an archived session is still visible — hence one direction only.
+  async function archiveSession(sessionId: string) {
     menuFor.set(null)
     const before = $collapsedSessions
-    collapsedSessions.set(collapse
-      ? [...before.filter(id => id !== sessionId), sessionId]
-      : before.filter(id => id !== sessionId))
+    collapsedSessions.set([...before.filter(id => id !== sessionId), sessionId])
     try {
-      await api.setSessionCollapsed(sessionId, collapse)
+      await api.setSessionCollapsed(sessionId, true)
     } catch {
       collapsedSessions.set(before)
       showToast(tr('sidebar.collapse_failed'))
@@ -221,9 +217,9 @@
   $effect(() => {
     function onDocClick(e: MouseEvent) {
       const el = e.target as HTMLElement | null
-      if (el?.closest('.grp-popover, .rename-input')) return
+      if (el?.closest('.rename-input')) return
       menuFor.set(null)
-      groupMenuFor.set(null)
+      projectMenuFor = ''
       commitRename()
       commitGroupRename()
     }
@@ -231,32 +227,71 @@
     return () => window.removeEventListener('click', onDocClick)
   })
 
+  // Same destinations as topNav, plus chat — the rail is the same sidebar with
+  // the labels taken away, so the two must not drift apart.
   const railNav = [
     { icon: 'ant-design:message-outlined', title: 'sidebar.chat', v: 'chat' },
-    { icon: 'ant-design:clock-circle-outlined', title: 'nav.tasks', v: 'tasks' },
-    { icon: 'ant-design:global-outlined', title: 'nav.browser', v: 'browser' },
-    { icon: 'ant-design:user-outlined', title: 'nav.memory', v: 'profile' },
-    { icon: 'ant-design:appstore-outlined', title: 'nav.light_apps', v: 'lightapps' },
-    { icon: 'ant-design:folder-open-outlined', title: 'nav.file_recall', v: 'files' },
+    ...topNav.map(item => ({ icon: item.icon, title: item.label, v: item.v })),
   ]
 
   function navActive(v: string) { return $view === v }
   function moreActive() { return moreCategories.some(c => c.v === $view) }
 
-  function sessionIcon(s: any): string {
-    if (s.source === 'cron') return 'ant-design:clock-circle-outlined'
-    if (s.source === 'channel') return 'ant-design:send-outlined'
-    if (s.status === 'running') return 'ant-design:code-outlined'
-    return 'ant-design:message-outlined'
-  }
-
   function toggleSel(id: string) {
     sel.update(s => { const n = { ...s }; n[id] ? delete n[id] : (n[id] = true); return n })
   }
 
+  // Batch mode is entered from one session's menu, and that session starts
+  // selected: the row you opened the menu on is the one you meant, so the first
+  // action is one click away rather than two.
+  function enterBatchMode(seedId: string) {
+    menuFor.set(null)
+    editId.set(null)
+    sel.set({ [seedId]: true })
+    selMode.set(true)
+  }
+
+  function exitBatchMode() {
+    selMode.set(false)
+    sel.set({})
+  }
+
+  // Every session the list can reach, in render order — the pool "select all"
+  // acts on, and what a section's own checkbox is a slice of. Pinned sessions
+  // are left out: they have no checkbox of their own (see sessionRow), so a
+  // pool that included them would select something the UI never showed as
+  // selected.
+  const allListedIds = $derived([
+    ...groupedView.ungrouped.map(s => s.id),
+    ...groupedView.projects.flatMap(gv => gv.items.map(s => s.id)),
+  ])
+
+  type TriState = 'none' | 'some' | 'all'
+
+  // A group's checkbox reflects its members rather than holding state of its
+  // own: partial selection has to be visible, or clicking a half-selected
+  // section would look like it did nothing.
+  function triStateOf(ids: string[]): TriState {
+    if (ids.length === 0) return 'none'
+    const n = ids.reduce((acc, id) => acc + ($sel[id] ? 1 : 0), 0)
+    return n === 0 ? 'none' : n === ids.length ? 'all' : 'some'
+  }
+
+  // Clicking a partially selected group selects the rest of it, matching what
+  // the box shows: anything short of "all" fills up.
+  function toggleMany(ids: string[]) {
+    const on = triStateOf(ids) !== 'all'
+    sel.update(s => {
+      const n = { ...s }
+      for (const id of ids) on ? (n[id] = true) : delete n[id]
+      return n
+    })
+  }
+
   async function delSelected() {
-    if (!(await confirmDialog(tr('sidebar.confirm_delete_selected').replace('{n}', String(Object.keys($sel).length))))) return
     const ids = Object.keys($sel)
+    if (ids.length === 0) return
+    if (!(await confirmDialog(tr('sidebar.confirm_delete_selected').replace('{n}', String(ids.length))))) return
     try {
       await api.deleteSessions(ids)
       sessions.update(ss => ss.filter(s => !$sel[s.id]))
@@ -266,7 +301,42 @@
         view.set('chat')
       }
     } catch (e: any) { showToast(e.message, 'error') }
-    sel.set({}); selMode.set(false)
+    exitBatchMode()
+  }
+
+  // Archiving is only illegal for a pinned session (the two states contradict —
+  // pin means always at the top, archive means out of sight; the server refuses
+  // it). A session in a project archives fine and keeps its membership, so
+  // restoring it later puts it back exactly where it was. A selection spanning
+  // pinned and unpinned sessions archives what it can and says how many it left
+  // alone — refusing the whole batch over one pinned member would be the more
+  // annoying answer.
+  async function archiveSelected() {
+    const ids = Object.keys($sel)
+    if (ids.length === 0) return
+    const eligible = ids.filter(id => !isPinned(id) && !isCollapsed(id))
+    const skipped = ids.length - eligible.length
+    if (eligible.length === 0) {
+      showToast(tr('sidebar.archive_none_eligible'), 'error')
+      return
+    }
+    const before = $collapsedSessions
+    collapsedSessions.set([...before.filter(id => !eligible.includes(id)), ...eligible])
+    const failed: string[] = []
+    for (const id of eligible) {
+      try {
+        await api.setSessionCollapsed(id, true)
+      } catch {
+        failed.push(id)
+      }
+    }
+    if (failed.length) {
+      collapsedSessions.set(before)
+      showToast(tr('sidebar.collapse_failed'), 'error')
+    } else if (skipped > 0) {
+      showToast(tr('sidebar.archived_some').replace('{n}', String(eligible.length)).replace('{k}', String(skipped)))
+    }
+    exitBatchMode()
   }
 
   async function delSession(id: string) {
@@ -300,35 +370,6 @@
   }
 
 
-  // A default name for a freshly created group: "Group N" / "分组N", where N is
-  // the smallest positive integer whose name isn't already taken. Naming groups
-  // distinctly (rather than every new group being "New group", which collides
-  // with the "New group" create action in the popover) keeps the list readable.
-  function nextDefaultGroupName(): string {
-    const taken = new Set($sessionGroups.map(g => g.name))
-    let n = 1
-    let name = tr('sidebar.default_group_name').replace('{n}', String(n))
-    while (taken.has(name)) {
-      n++
-      name = tr('sidebar.default_group_name').replace('{n}', String(n))
-    }
-    return name
-  }
-
-  // Create an empty group with a default name, then drop straight into inline
-  // rename so the user names it without a separate prompt dialog (native
-  // prompt() is unreliable in the desktop webview).
-  async function newGroup() {
-    // A new group carries no working dir, so it is born under Tasks.
-    revealSection('tasks')
-    try {
-      const g = await api.createSessionGroup(nextDefaultGroupName())
-      sessionGroups.update(gs => [...gs, g])
-      editGroupId.set(g.id)
-      editGroupDraft.set(g.name)
-    } catch (e: any) { showToast(e.message, 'error') }
-  }
-
   async function commitGroupRename() {
     const id = $editGroupId
     if (!id) return
@@ -342,11 +383,33 @@
     editGroupId.set(null)
   }
 
-  async function deleteGroup(id: string, name: string) {
-    if (!(await confirmDialog(tr('sidebar.confirm_delete_group').replace('{name}', name)))) return
+  // Deleting a project takes its sessions with it — they were work on that
+  // directory, and leaving them behind as unattached tasks is a mess nobody asked
+  // for. The confirmation therefore says how many transcripts are about to go,
+  // and the deletion is one request so it cannot half-happen.
+  async function deleteGroup(id: string, name: string, count: number) {
+    projectMenuFor = ''
+    const msg = count > 0
+      ? tr('sidebar.confirm_delete_project').replace('{name}', name).replace('{n}', String(count))
+      : tr('sidebar.confirm_delete_empty_project').replace('{name}', name)
+    const ok = await confirmDialog(msg, {
+      title: tr('sidebar.confirm_delete_project_title'),
+      danger: count > 0,
+      confirmLabel: tr('sidebar.confirm_delete_project_ok'),
+    })
+    if (!ok) return
     try {
-      await api.deleteSessionGroup(id)
+      await api.deleteSessionGroup(id, count > 0)
+      const gone = new Set(get(sessionGroups).find(g => g.id === id)?.session_ids ?? [])
       sessionGroups.update(gs => gs.filter(g => g.id !== id))
+      if (gone.size) {
+        sessions.update(ss => ss.filter(x => !gone.has(x.id)))
+        if (gone.has($activeSessionId ?? '')) {
+          activeSessionId.set(null)
+          clearPendingSessionOpts()
+          view.set('chat')
+        }
+      }
     } catch (e: any) { showToast(e.message, 'error') }
   }
 
@@ -382,37 +445,6 @@
     }
   }
 
-  // From a session's "move to group" popover: create a fresh group, drop the
-  // session into it, and open inline rename on the new group.
-  async function newGroupForSession(sessionId: string) {
-    groupMenuFor.set(null)
-    revealSection('tasks')
-    try {
-      const g = await api.createSessionGroup(nextDefaultGroupName())
-      await api.setSessionGroup(sessionId, g.id)
-      sessionGroups.update(gs => [
-        ...gs.map(x => ({ ...x, session_ids: x.session_ids.filter(id => id !== sessionId) })),
-        { ...g, session_ids: [sessionId] },
-      ])
-      editGroupId.set(g.id)
-      editGroupDraft.set(g.name)
-    } catch (e: any) { showToast(e.message, 'error') }
-  }
-
-  async function moveToGroup(sessionId: string, groupId: string) {
-    groupMenuFor.set(null)
-    try {
-      await api.setSessionGroup(sessionId, groupId)
-      // Update membership locally: drop from every group, then add to target.
-      sessionGroups.update(gs => gs.map(g => ({
-        ...g,
-        session_ids: g.id === groupId
-          ? [...g.session_ids.filter(id => id !== sessionId), sessionId]
-          : g.session_ids.filter(id => id !== sessionId),
-      })))
-    } catch (e: any) { showToast(e.message, 'error') }
-  }
-
   const selCount = $derived(Object.keys($sel).length)
 
   function agentNameOf(profileId: string): string {
@@ -423,110 +455,89 @@
 
 <svelte:window onclick={dismissPicker} />
 
-<aside style="width:{$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};flex:0 0 {$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};background:var(--sidebar-frost);backdrop-filter:blur(var(--frost-blur));-webkit-backdrop-filter:blur(var(--frost-blur));border-right:1px solid var(--border);overflow:hidden;transition:width 0.32s cubic-bezier(0.2,0,0,1),flex-basis 0.32s cubic-bezier(0.2,0,0,1);">
+<!-- One checkbox shape for a session, a group, and the whole list. The
+     group and list boxes are three-state because partial selection has
+     to be visible: a half-filled box that clicked to "all" is honest,
+     a full-looking one that clicked to "none" is not. -->
+{#snippet triBox(state: TriState, onPick: () => void)}
+  <span
+    class="checkbox tri"
+    class:on={state !== 'none'}
+    onclick={(e) => { e.stopPropagation(); onPick() }}
+  >
+    {#if state === 'all'}
+      <iconify-icon icon="ant-design:check-outlined" width="11" style="color:#fff"></iconify-icon>
+    {:else if state === 'some'}
+      <iconify-icon icon="ant-design:minus-outlined" width="11" style="color:#fff"></iconify-icon>
+    {/if}
+  </span>
+{/snippet}
+
+<aside style="width:{$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};flex:0 0 {$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};background:var(--sidebar-frost);backdrop-filter:blur(var(--frost-blur));-webkit-backdrop-filter:blur(var(--frost-blur));border-right:1px solid var(--border-secondary);overflow:hidden;transition:width 0.32s cubic-bezier(0.2,0,0,1),flex-basis 0.32s cubic-bezier(0.2,0,0,1);">
 
   {#if $sidebar === 'full'}
   <div class="full">
-    <div class="new-btn-wrap" bind:this={agentPickerEl}>
-      <button class="new-btn" onclick={() => createNewSession()}>
-        <iconify-icon icon="ant-design:plus-outlined" width="14"></iconify-icon>
-        <span>{$t('nav.new_session')}</span>
-        <span class="btn-caret" title={$t('nav.new_session_with_agent')} onclick={(e) => { e.stopPropagation(); agentPickerOpen = !agentPickerOpen }}>
-          <iconify-icon icon="ant-design:down-outlined" width="10"></iconify-icon>
-        </span>
-      </button>
-      {#if agentPickerOpen}
-        <div class="agent-picker-menu">
-          <button class="ap-item" onclick={() => { createNewSession(); agentPickerOpen = false }}>
-            <span class="ap-name">Default</span>
-          </button>
-          {#each agents as a (a.id)}
-            <button class="ap-item" onclick={() => { createNewSession(a.id); agentPickerOpen = false }}>
-              <span class="ap-name">{a.name}</span>
-            </button>
-          {/each}
-          <div class="ap-sep"></div>
-          <button class="ap-item ap-new" onclick={() => { view.set('agents'); agentPickerOpen = false }}>
-            <iconify-icon icon="ant-design:plus-outlined" width="12"></iconify-icon>
-            <span>{$t('agents.create')}</span>
-          </button>
-        </div>
-      {/if}
-    </div>
-
     <div class="scroll">
-      <!-- Sessions — sized to its own content (no forced grow-to-fill), so a
-           short list doesn't leave a reserved gap above Config/My Data; it
-           still shrinks (bounded by min-height) once the combined stack would
-           overflow .scroll, scrolling internally so a long session list never
-           pushes Config/My Data out of view or requires scrolling past it. -->
-      <div class="nav-group sessions-group">
-        <div class="group-header">
-          <span class="group-label">{$t('nav.sessions')}</span>
-          <span class="header-actions">
-            {#if !$selMode}
-            <!-- A labeled button rather than a bare icon: since groups became
-                 projects, creating one is a high-frequency action. -->
-            <button class="new-group-btn" onclick={newGroup}>
-              <iconify-icon icon="ant-design:folder-add-outlined" width="13"></iconify-icon>
-              {$t('sidebar.new_group')}
+      <!-- Where you go, above what you have been doing. The session list is the
+           long, growing part of this sidebar; putting it last means a nav row's
+           position does not depend on how many sessions exist, and no amount of
+           history can push a destination out of reach.
+           New session is one of these rows rather than an accent button: it goes
+           to the same landing page they go to, and its active state is being ON
+           that landing page — chat view with no session picked. -->
+      <div class="nav-group">
+        <div class="nav-row" class:solid={onLanding} onclick={() => createNewSession()}>
+          <iconify-icon icon="ant-design:plus-circle-outlined" width="14" style="color:{onLanding ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
+          <span style="font-size:13px;color:{onLanding ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{onLanding ? '600' : '400'};">{$t('nav.new_session')}</span>
+        </div>
+        {#each topNav as item (item.v)}
+        <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>
+          <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
+          <span style="font-size:13px;color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive(item.v) ? '600' : '400'};">{$t(item.label)}</span>
+        </div>
+        {/each}
+        <div class="more-wrap" bind:this={morePopoverEl}>
+          <div class="nav-row" class:solid={moreActive()} onclick={(e) => toggleMorePopover(e.currentTarget as HTMLElement, 'full')}>
+            <iconify-icon icon="ant-design:menu-outlined" width="14" style="color:{moreActive() ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
+            <span style="font-size:13px;color:{moreActive() ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{moreActive() ? '600' : '400'};">{$t('nav.manage')}</span>
+          </div>
+          {#if morePopoverOpen}
+          <div class="more-popover" use:portal style="top:{morePos.top}px; left:{morePos.left}px; width:{morePos.width}px;">
+            {#each moreCategories as c (c.v)}
+            <button class="ap-item" onclick={() => goToMore(c.v)}>
+              <iconify-icon icon={c.icon} width="14" style="color:var(--text-tertiary)"></iconify-icon>
+              <span>{$t(c.label)}</span>
             </button>
-            {/if}
-            <span class="sel-toggle" onclick={() => { selMode.update(v => !v); sel.set({}); menuFor.set(null); editId.set(null); groupMenuFor.set(null) }}>
-              {$selMode ? $t('sidebar.done') : $t('sidebar.select')}
-            </span>
-          </span>
+            {/each}
+          </div>
+          {/if}
         </div>
+      </div>
 
-        {#if $selMode && Object.keys($sel).length > 0}
-        <div class="batch-bar">
-          <span class="batch-count">{$t('sidebar.n_selected').replace('{n}', String(Object.keys($sel).length))}</span>
-          <button class="batch-del" onclick={delSelected}>
-            <iconify-icon icon="ant-design:delete-outlined" width="12"></iconify-icon>
-            {$t('common.delete')}
-          </button>
-        </div>
-        {/if}
+      <!-- The session list, last and elastic: it sizes to its own content and is
+           the one thing that gives (bounded by min-height, scrolling internally)
+           once the stack would overflow .scroll. -->
+      <div class="nav-group sessions-group">
 
         <!-- Pinned: a dedicated top section, above all groups -->
         {#if groupedView.pinned.length > 0}
         <div class="grp-header">
           <iconify-icon icon="ant-design:pushpin-filled" width="11" style="color:var(--text-quaternary)"></iconify-icon>
           <span class="grp-name muted">{$t('sidebar.pinned')}</span>
-          <span class="grp-count">{groupedView.pinned.length}</span>
         </div>
         {#each groupedView.pinned as s (s.id)}
           {@render sessionRow(s)}
         {/each}
         {/if}
 
-        <!-- Tasks: loose sessions and the plain groups that gather them.
-             Sessions with no group of their own are tasks by definition, so
-             they land here rather than under a separate "ungrouped" heading. -->
-        {#if groupedView.hasTasks}
-        <div class="sec-header" onclick={() => toggleSection('tasks')}>
-          <iconify-icon icon={sections.tasks ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="9"></iconify-icon>
-          <span class="sec-name">{$t('sidebar.tasks')}</span>
-          <span class="sec-count">{groupedView.taskCount}</span>
-        </div>
-        {#if sections.tasks}
-          {#each groupedView.taskGroups as gv, gi (gv.group.id)}
-            {@render groupBlock(gv, gi, taskGroupIds)}
-          {/each}
-          {#each groupedView.ungrouped as s (s.id)}
-            {@render sessionRow(s)}
-          {/each}
-        {/if}
-        {/if}
-
-        <!-- Projects: groups carrying a working directory. Counted by project,
-             not by session — a project is the unit here, and its own header
-             already carries how many sessions are in it. -->
+        <!-- Projects: a directory plus the sessions working in it. Counted by
+             project, not by session — a project is the unit here, and its own
+             header already carries how many sessions are in it. -->
         {#if groupedView.projects.length > 0}
         <div class="sec-header" onclick={() => toggleSection('projects')}>
-          <iconify-icon icon={sections.projects ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="9"></iconify-icon>
+          {#if $selMode}{@render triBox(triStateOf(groupedView.projects.flatMap(gv => gv.items.map(s => s.id))), () => toggleMany(groupedView.projects.flatMap(gv => gv.items.map(s => s.id))))}{/if}
           <span class="sec-name">{$t('sidebar.projects')}</span>
-          <span class="sec-count">{groupedView.projects.length}</span>
+          <iconify-icon class="sec-caret" class:folded={!sections.projects} icon="ant-design:right-outlined" width="10"></iconify-icon>
         </div>
         {#if sections.projects}
           {#each groupedView.projects as gv, gi (gv.group.id)}
@@ -535,29 +546,29 @@
         {/if}
         {/if}
 
-        <!-- Collapsed: a folded panel at the very bottom. The panel itself
-             starts shut on every mount (only the count shows) — it exists to
-             keep the list short, so it never opens on its own. -->
-        {#if groupedView.folded.length > 0}
-        <div class="grp-header">
-          <span class="grp-caret" onclick={() => (foldedOpen = !foldedOpen)}>
-            <iconify-icon icon={foldedOpen ? 'ant-design:down-outlined' : 'ant-design:right-outlined'} width="10"></iconify-icon>
-          </span>
-          <span class="grp-name muted" onclick={() => (foldedOpen = !foldedOpen)}>{$t('sidebar.collapsed')}</span>
-          <span class="grp-count">{groupedView.folded.length}</span>
+        <!-- Tasks: every session that belongs to no project, flat. A task is
+             one session — there is no naming or nesting layer inside this
+             section, which is what the retired "plain group" used to add. -->
+        {#if groupedView.ungrouped.length > 0}
+        <div class="sec-header" onclick={() => toggleSection('tasks')}>
+          {#if $selMode}{@render triBox(triStateOf(groupedView.ungrouped.map(s => s.id)), () => toggleMany(groupedView.ungrouped.map(s => s.id)))}{/if}
+          <span class="sec-name">{$t('sidebar.tasks')}</span>
+          <iconify-icon class="sec-caret" class:folded={!sections.tasks} icon="ant-design:right-outlined" width="10"></iconify-icon>
         </div>
-        {#if foldedOpen}
-          {#each groupedView.folded as s (s.id)}
+        {#if sections.tasks}
+          {#each groupedView.ungrouped as s (s.id)}
             {@render sessionRow(s)}
           {/each}
         {/if}
         {/if}
+
       </div>
 
       {#snippet groupBlock(gv: any, gi: number, siblings: string[])}
         {@const g = gv.group}
         {@const editingG = $editGroupId === g.id}
-        <div class="grp-header">
+        <div class="grp-header" class:menu-open={projectMenuFor === g.id}>
+          {#if $selMode}{@render triBox(triStateOf(gv.items.map((s: any) => s.id)), () => toggleMany(gv.items.map((s: any) => s.id)))}{/if}
           <!-- Folder icon doubles as the collapse toggle: open when expanded,
                closed when collapsed, so it carries both identity and state. -->
           <span class="grp-caret" onclick={() => toggleCollapse(g.id, !g.collapsed)}>
@@ -577,91 +588,88 @@
             <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
           </span>
           {:else}
-          <span class="grp-name" onclick={() => toggleCollapse(g.id, !g.collapsed)}>{g.name}</span>
-          <span class="grp-count">{gv.items.length}</span>
+          <span class="grp-name" title={g.working_dir} onclick={() => toggleCollapse(g.id, !g.collapsed)}>{g.name}</span>
+          {#if g.task_id}
+            <!-- Marks where the project came from without giving it a section of
+                 its own: it is an ordinary project, made by the scheduler. -->
+            <iconify-icon class="from-cron" icon="ant-design:clock-circle-outlined" width="11" title={$t('sidebar.from_scheduled_task')}></iconify-icon>
+          {/if}
           {#if !$selMode}
-          <!-- Two frequency tiers: new-session and settings stay anchored at
-               the right edge; rename / delete / reorder appear on hover,
-               expanding between the name and the anchored pair (display:none,
-               NOT opacity — invisible icons must not reserve width, that's
-               what squeezed the group name to an ellipsis). -->
-          {#if gi > 0}
-          <span class="row-action hover-only" title={$t('sidebar.move_group_up')} onclick={() => moveGroup(g.id, -1, siblings)}>
-            <iconify-icon icon="ant-design:arrow-up-outlined" width="12"></iconify-icon>
+          <!-- Six icons used to sit here — reorder, rename, delete, new session,
+               settings — and the row read as a toolbar with a name attached. Two
+               remain, both things you do TO the project rather than to its
+               configuration: start work in it, and open its menu. The rest are in
+               the menu, where a destructive action is not one stray click away. -->
+          <span class="row-action on-hover" title={$t('sidebar.project_more')} onclick={(e) => { e.stopPropagation(); projectMenuFor = projectMenuFor === g.id ? '' : g.id }}>
+            <iconify-icon icon="ant-design:more-outlined" width="14"></iconify-icon>
           </span>
-          {/if}
-          {#if gi < siblings.length - 1}
-          <span class="row-action hover-only" title={$t('sidebar.move_group_down')} onclick={() => moveGroup(g.id, 1, siblings)}>
-            <iconify-icon icon="ant-design:arrow-down-outlined" width="12"></iconify-icon>
-          </span>
-          {/if}
-          <span class="row-action hover-only" title={$t('sidebar.rename_group')} onclick={(e) => { e.stopPropagation(); editGroupId.set(g.id); editGroupDraft.set(g.name) }}>
-            <iconify-icon icon="ant-design:edit-outlined" width="12"></iconify-icon>
-          </span>
-          <span class="row-action hover-only del" title={$t('sidebar.delete_group')} onclick={() => deleteGroup(g.id, g.name)}>
-            <iconify-icon icon="ant-design:delete-outlined" width="12"></iconify-icon>
-          </span>
-          <span
-            class="row-action"
-            title={tr('sidebar.new_session_in_group')}
-            onclick={(e) => { e.stopPropagation(); createSessionInGroup(g.id) }}
-          >
+          <span class="row-action on-hover" title={tr('sidebar.new_session_in_group')} onclick={(e) => { e.stopPropagation(); createSessionInGroup(g.id) }}>
             <iconify-icon icon="ant-design:plus-outlined" width="13"></iconify-icon>
           </span>
-          <!-- Every group is configurable (working dir + shared prompt) — one
-               settings gear, no separate "project" concept in the UI. -->
-          <span
-            class="row-action"
-            title={g.working_dir ? `${tr('project.settings')} — ${g.working_dir}` : tr('project.settings')}
-            onclick={(e) => { e.stopPropagation(); projectModalFor = g.id }}
-          >
-            <iconify-icon icon="ant-design:setting-outlined" width="13"></iconify-icon>
-          </span>
+          {#if projectMenuFor === g.id}
+          <div class="row-menu" onclick={(e) => e.stopPropagation()}>
+            <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; editGroupId.set(g.id); editGroupDraft.set(g.name) }}>
+              <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
+              <span>{$t('sidebar.rename_group')}</span>
+            </div>
+            {#if gi > 0}
+            <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; moveGroup(g.id, -1, siblings) }}>
+              <iconify-icon icon="ant-design:arrow-up-outlined" width="13"></iconify-icon>
+              <span>{$t('sidebar.move_group_up')}</span>
+            </div>
+            {/if}
+            {#if gi < siblings.length - 1}
+            <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; moveGroup(g.id, 1, siblings) }}>
+              <iconify-icon icon="ant-design:arrow-down-outlined" width="13"></iconify-icon>
+              <span>{$t('sidebar.move_group_down')}</span>
+            </div>
+            {/if}
+            <div class="row-menu-sep"></div>
+            <div class="row-menu-item del" onclick={(e) => { e.stopPropagation(); deleteGroup(g.id, g.name, gv.items.length) }}>
+              <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
+              <span>{$t('sidebar.delete_group')}</span>
+            </div>
+          </div>
+          {/if}
           {/if}
           {/if}
         </div>
-        {#if g.working_dir && !editingG}
-          <!-- A project's directory governs every session under it, so it
-               belongs on the group header rather than hidden in each session. -->
-          <div class="grp-dir mono" title={g.working_dir}>{shortDir(g.working_dir)}</div>
-        {/if}
         {#if !g.collapsed}
+          <!-- Indented under the project's own row, the way a child sits under
+               its parent — a session filed under a project is one, and looked
+               flat before like it wasn't. -->
           {#each gv.items as s (s.id)}
-            {@render sessionRow(s)}
+            {@render sessionRow(s, true)}
           {/each}
         {/if}
       {/snippet}
 
-      {#snippet sessionRow(s: any)}
+      {#snippet sessionRow(s: any, nested = false)}
         {@const active = s.id === $activeSessionId && $view === 'chat'}
         {@const selected = !!$sel[s.id]}
         {@const editing = $editId === s.id}
         {@const menuOpen = $menuFor === s.id && !$selMode}
-        {@const groupOpen = $groupMenuFor === s.id && !$selMode}
         {@const solid = active && !$selMode}
-        {@const icon = sessionIcon(s)}
         <div
           class="nav-row"
+          class:nested
           class:solid={solid}
           class:selected={selected && !solid}
-          onclick={() => { if ($selMode) toggleSel(s.id); else { view.set('chat'); activeSessionId.set(s.id); menuFor.set(null); groupMenuFor.set(null) } }}
+          class:menu-open={menuOpen}
+          onclick={() => {
+          if ($selMode) { if (!isPinned(s.id)) toggleSel(s.id) }
+          else { view.set('chat'); activeSessionId.set(s.id); menuFor.set(null) }
+        }}
         >
-          {#if $selMode}
-          <span
-            class="checkbox"
-            style="border-color:{selected ? 'var(--blue-6)' : 'var(--border)'};background:{selected ? 'var(--blue-6)' : 'var(--bg-container)'}"
-            onclick={(e) => { e.stopPropagation(); toggleSel(s.id) }}
-          >
-            {#if selected}<iconify-icon icon="ant-design:check-outlined" width="11" style="color:#fff"></iconify-icon>{/if}
-          </span>
+          {#if $selMode && !isPinned(s.id)}
+            {@render triBox(selected ? 'all' : 'none', () => toggleSel(s.id))}
           {/if}
 
-          {#if (s as any).status === 'running'}
-            <iconify-icon icon="ant-design:loading-outlined" width="14" style="color:var(--blue-6);flex:0 0 auto;animation:octo-spin 0.8s linear infinite"></iconify-icon>
-          {:else}
-            <iconify-icon icon={icon} width="14" style="color:{solid ? 'var(--blue-6)' : 'var(--text-tertiary)'};flex:0 0 auto"></iconify-icon>
-          {/if}
-
+          <!-- No icon in front of the name. It was one of four glyphs standing
+               for the session's source, which is either obvious from the project
+               it sits under or not worth a column in every row. Whether a session
+               is RUNNING is worth showing, and that goes on the right where the
+               timestamp it replaces was. -->
           {#if editing}
           <input
             class="rename-input"
@@ -677,139 +685,104 @@
           </span>
           {:else}
           <span class="session-title">{(s as any).name || (s as any).title || s.id}</span>
-          {#if (s as any).agent_profile && (s as any).agent_profile !== 'default' && !menuOpen}
+          <!-- Metadata gives way to the row's actions on hover (CSS, not state:
+               the actions are the same width every time, so swapping them in
+               must not reflow the title). -->
+          {#if (s as any).agent_profile && (s as any).agent_profile !== 'default'}
             {@const aName = agentNameOf((s as any).agent_profile)}
-            <span class="agent-tag" style="background:{solid ? 'rgba(255,255,255,0.2)' : 'var(--active-blue-bg)'};color:var(--blue-6);">
+            <span class="agent-tag on-rest" style="background:{solid ? 'rgba(255,255,255,0.2)' : 'var(--active-blue-bg)'};color:var(--blue-6);">
               {aName}
             </span>
-          {/if}
-          {#if isPinned(s.id) && !menuOpen}
-            <iconify-icon icon="ant-design:pushpin-filled" width="11" title={$t('sidebar.pinned')} style="color:var(--text-quaternary);flex:0 0 auto"></iconify-icon>
           {/if}
           {#if (s as any).pending_question}
             <span class="pending-dot" title={$t('sidebar.pending_question')}></span>
           {/if}
-          {#if !menuOpen}
-            <span class="session-time" style="color:var(--text-quaternary);">
-              {(s as any).source === 'cron' ? $t('sidebar.cron') : ''}
+          {#if (s as any).status === 'running'}
+            <iconify-icon class="on-rest" icon="ant-design:loading-outlined" width="13" style="color:var(--blue-6);flex:0 0 auto;animation:octo-spin 0.8s linear infinite" title={$t('sidebar.running')}></iconify-icon>
+          {:else}
+            <span class="session-time on-rest" style="color:var(--text-quaternary);">
+              {ago((s as any).updated_at, $t)}
             </span>
           {/if}
-          {#if !menuOpen && !$selMode}
-            {#if isCollapsed(s.id)}
-            <!-- Restoring is the whole point of visiting the folded panel, so
-                 it gets a direct button rather than hiding in the kebab. -->
-            <span class="row-action" title={$t('sidebar.uncollapse')} onclick={(e) => { e.stopPropagation(); toggleSessionCollapse(s.id, false) }}>
-              <iconify-icon icon="lucide:archive-restore" width="13"></iconify-icon>
-            </span>
-            {/if}
-            <span class="row-action kebab" onclick={(e) => { e.stopPropagation(); menuFor.update(m => m === s.id ? null : s.id); groupMenuFor.set(null) }} style="color:{solid ? 'var(--blue-6)' : 'var(--text-tertiary)'}">
+          {#if !$selMode}
+            {@const pinned = isPinned(s.id)}
+            <!-- Two actions earn a place on the row: they are the ones used
+                 while scanning the list, and both are one click with nothing to
+                 confirm. Everything else lives in the menu — rename opens an
+                 input, delete destroys a transcript; neither belongs under a
+                 cursor that is just passing over the row. Archiving a session
+                 (and un-archiving one) now lives in Settings' 数据管理, not here
+                 — a session dropped off this list entirely once archived, so
+                 there was no row left to offer "un-archive" from anyway. -->
+            <span class="row-action on-hover kebab" onclick={(e) => { e.stopPropagation(); menuFor.update(m => m === s.id ? null : s.id) }} style="color:{solid ? 'var(--blue-6)' : 'var(--text-tertiary)'}">
               <iconify-icon icon="ant-design:more-outlined" width="14"></iconify-icon>
             </span>
-          {/if}
-          {#if menuOpen}
-            {@const pinned = isPinned(s.id)}
-            {@const collapsed = isCollapsed(s.id)}
-            {#if collapsed}
-            <!-- A collapsed session only offers restore (plus rename/delete):
-                 pinning or grouping it contradicts the collapse, and the
-                 server would reject the combination anyway. -->
-            <span class="row-action" onclick={(e) => { e.stopPropagation(); toggleSessionCollapse(s.id, false) }} title={$t('sidebar.uncollapse')}>
-              <iconify-icon icon="lucide:archive-restore" width="13"></iconify-icon>
-            </span>
-            {:else}
-            <span class="row-action" onclick={(e) => { e.stopPropagation(); togglePin(s.id, !pinned) }} title={pinned ? $t('sidebar.unpin') : $t('sidebar.pin')}>
-              <iconify-icon icon={pinned ? 'ant-design:pushpin-filled' : 'ant-design:pushpin-outlined'} width="13"></iconify-icon>
-            </span>
-            <span class="row-action" onclick={(e) => { e.stopPropagation(); groupMenuFor.set(s.id); menuFor.set(null) }} title={$t('sidebar.move_to_group')}>
-              <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
-            </span>
-            {#if !pinned && !groupIdOf(s.id)}
-            <!-- Collapse is only offered where it's legal (unpinned +
-                 ungrouped), matching the server's guard. -->
-            <span class="row-action" onclick={(e) => { e.stopPropagation(); toggleSessionCollapse(s.id, true) }} title={$t('sidebar.collapse')}>
+            {#if !pinned}
+            <!-- Archiving is only illegal while pinned, matching the server's
+                 guard — a session in a project archives fine and keeps its
+                 membership. -->
+            <span class="row-action on-hover" title={$t('sidebar.collapse')} onclick={(e) => { e.stopPropagation(); archiveSession(s.id) }}>
               <iconify-icon icon="lucide:archive" width="13"></iconify-icon>
             </span>
             {/if}
-            {/if}
-            <span class="row-action" onclick={(e) => { e.stopPropagation(); editId.set(s.id); editDraft.set((s as any).name || (s as any).title || s.id); menuFor.set(null) }} title={$t('sidebar.rename')}>
-              <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
+            <span class="row-action on-hover" title={pinned ? $t('sidebar.unpin') : $t('sidebar.pin')} onclick={(e) => { e.stopPropagation(); togglePin(s.id, !pinned) }}>
+              <iconify-icon icon={pinned ? 'ant-design:pushpin-filled' : 'ant-design:pushpin-outlined'} width="13"></iconify-icon>
             </span>
-            <span class="row-action del" onclick={(e) => { e.stopPropagation(); delSession(s.id) }} title={$t('common.delete')}>
-              <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
-            </span>
-          {/if}
-          {/if}
-
-          {#if groupOpen}
-          {@const curGid = groupIdOf(s.id)}
-          <div class="grp-popover" onclick={(e) => e.stopPropagation()}>
-            {#each $sessionGroups as pg (pg.id)}
-            <div class="grp-opt" class:cur={curGid === pg.id} onclick={() => moveToGroup(s.id, pg.id)}>
-              <iconify-icon icon="ant-design:check-outlined" width="12" style="opacity:{curGid === pg.id ? 1 : 0}"></iconify-icon>
-              <span class="grp-opt-name">{pg.name}</span>
-            </div>
-            {/each}
-            {#if curGid}
-            <div class="grp-opt" onclick={() => moveToGroup(s.id, '')}>
-              <iconify-icon icon="ant-design:close-outlined" width="12"></iconify-icon>
-              <span class="grp-opt-name">{$t('sidebar.remove_from_group')}</span>
+            {#if menuOpen}
+            <div class="row-menu" onclick={(e) => e.stopPropagation()}>
+              {#if !pinned}
+              <!-- First entry: acting on many sessions starts from one of them,
+                   which is also why this one is pre-selected. Not offered on a
+                   pinned session — it has no checkbox to seed a selection with,
+                   so there is nothing for this to start. -->
+              <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); enterBatchMode(s.id) }}>
+                <iconify-icon icon="ant-design:profile-outlined" width="13"></iconify-icon>
+                <span>{$t('sidebar.batch_actions')}</span>
+              </div>
+              <div class="row-menu-sep"></div>
+              {/if}
+              <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); menuFor.set(null); editId.set(s.id); editDraft.set((s as any).name || (s as any).title || s.id) }}>
+                <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
+                <span>{$t('sidebar.rename')}</span>
+              </div>
+              <div class="row-menu-item del" onclick={(e) => { e.stopPropagation(); menuFor.set(null); delSession(s.id) }}>
+                <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
+                <span>{$t('common.delete')}</span>
+              </div>
             </div>
             {/if}
-            <div class="grp-sep"></div>
-            <div class="grp-opt" onclick={() => newGroupForSession(s.id)}>
-              <iconify-icon icon="ant-design:plus-outlined" width="12"></iconify-icon>
-              <span class="grp-opt-name">{$t('sidebar.new_group')}</span>
-            </div>
-          </div>
+          {/if}
           {/if}
         </div>
       {/snippet}
 
-      <!-- Config -->
-      <div class="nav-group">
-        <div class="group-header"><span class="group-label">{$t('nav.config')}</span></div>
-        <div class="nav-row" class:solid={navActive('tasks')} onclick={() => view.set('tasks')}>
-          <iconify-icon icon="ant-design:clock-circle-outlined" width="14" style="color:{navActive('tasks') ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
-          <span style="font-size:13px;color:{navActive('tasks') ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive('tasks') ? '600' : '400'};">{$t('nav.tasks')}</span>
-        </div>
-        <div class="nav-row" class:solid={navActive('browser')} onclick={() => view.set('browser')}>
-          <iconify-icon icon="ant-design:global-outlined" width="14" style="color:{navActive('browser') ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
-          <span style="font-size:13px;color:{navActive('browser') ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive('browser') ? '600' : '400'};">{$t('nav.browser')}</span>
-        </div>
-        <div class="more-wrap" bind:this={morePopoverEl}>
-          <div class="nav-row" class:solid={moreActive()} onclick={(e) => toggleMorePopover(e.currentTarget as HTMLElement, 'full')}>
-            <iconify-icon icon="ant-design:menu-outlined" width="14" style="color:{moreActive() ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
-            <span style="font-size:13px;color:{moreActive() ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{moreActive() ? '600' : '400'};">{$t('nav.manage')}</span>
-          </div>
-          {#if morePopoverOpen}
-          <div class="more-popover" use:portal style="top:{morePos.top}px; left:{morePos.left}px; width:{morePos.width}px;">
-            {#each moreCategories as c (c.v)}
-            <button class="ap-item" onclick={() => goToMore(c.v)}>
-              <iconify-icon icon={c.icon} width="14" style="color:var(--text-tertiary)"></iconify-icon>
-              <span>{$t(c.label)}</span>
-            </button>
-            {/each}
-          </div>
-          {/if}
-        </div>
-      </div>
-
-      <!-- My Data -->
-      <div class="nav-group">
-        <div class="group-header"><span class="group-label">{$t('nav.my_data')}</span></div>
-        {#each [
-          { icon: 'ant-design:user-outlined', label: 'nav.memory', v: 'profile' },
-          { icon: 'ant-design:appstore-outlined', label: 'nav.light_apps', v: 'lightapps' },
-          { icon: 'ant-design:folder-open-outlined', label: 'nav.file_recall', v: 'files' },
-        ] as item}
-        <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>
-          <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
-          <span style="font-size:13px;color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive(item.v) ? '600' : '400'};">{$t(item.label)}</span>
-        </div>
-        {/each}
-      </div>
     </div>
 
+    {#if $selMode}
+    <!-- Batch mode replaces the footer rather than stacking on it: while a
+         selection is live, settings and the version badge are not what the
+         bottom of the sidebar is for. -->
+    <div class="batch-bar">
+      <div class="batch-top">
+        {@render triBox(triStateOf(allListedIds), () => toggleMany(allListedIds))}
+        <span class="batch-label">{$t('sidebar.select_all')}</span>
+        <span class="batch-count">({selCount})</span>
+        <span class="batch-close" title={$t('sidebar.done')} onclick={exitBatchMode}>
+          <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
+        </span>
+      </div>
+      <div class="batch-actions">
+        <button class="batch-btn del" disabled={selCount === 0} onclick={delSelected}>
+          <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
+          {$t('common.delete')}
+        </button>
+        <button class="batch-btn" disabled={selCount === 0} onclick={archiveSelected}>
+          <iconify-icon icon="lucide:archive" width="13"></iconify-icon>
+          {$t('sidebar.collapse')}
+        </button>
+      </div>
+    </div>
+    {:else}
     <div class="footer">
       <div class="footer-settings" style="color:{$settingsModalOpen ? 'var(--blue-6)' : 'var(--text-secondary)'}" onclick={() => settingsModalOpen.set(true)}>
         <iconify-icon icon="ant-design:setting-outlined" width="14"></iconify-icon>
@@ -817,6 +790,7 @@
       </div>
       <VersionBadge />
     </div>
+    {/if}
   </div>
   {/if}
 
@@ -873,35 +847,11 @@
   {/if}
 </aside>
 
-{#if projectModalGroup}
-  <ProjectSettingsModal group={projectModalGroup} onClose={() => (projectModalFor = '')} />
-{/if}
 
 <style>
 .full { width: 256px; height: 100%; display: flex; flex-direction: column; min-height: 0; }
-.new-btn-wrap { padding: 12px 12px 8px; display: flex; gap: 4px; position: relative; }
-.new-btn {
-  flex: 1; height: 34px; border: none; border-radius: var(--radius-sm);
-  background: var(--blue-6); color: var(--on-accent); font-size: 13px; font-weight: 600;
-  display: flex; align-items: center; justify-content: center; gap: 7px;
-  cursor: pointer; font-family: inherit; position: relative;
-  box-shadow: 0 1px 2px var(--focus-ring);
-}
-.new-btn:hover { background: var(--blue-5); }
-.new-btn:active { background: var(--blue-7); }
-.btn-caret {
-  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
-  width: 22px; height: 22px; border: none; border-radius: 4px;
-  background: transparent; color: inherit;
-  display: flex; align-items: center; justify-content: center; cursor: pointer;
-}
-.btn-caret:hover { background: rgba(255,255,255,0.2); }
-.agent-picker-menu {
-  position: absolute; top: 100%; left: 12px; right: 12px; z-index: 30;
-  margin-top: 2px; padding: 4px;
-  background: var(--bg-container); border: 1px solid var(--border-secondary);
-  border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.18);
-}
+/* Matches .scroll's horizontal padding so the row lines up with every nav row
+   below it — it is one of them, just pinned above the scrolling area. */
 .ap-item {
   display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px; border: none;
   background: transparent; color: var(--text); font-size: 13px;
@@ -918,14 +868,12 @@
   background: var(--bg-container); border: 1px solid var(--border-secondary);
   border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.18);
 }
-.ap-sep { height: 1px; margin: 4px 8px; background: var(--border-secondary); }
-.ap-new { color: var(--blue-6); display: flex; align-items: center; gap: 6px; }
 .agent-tag {
   flex: 0 0 auto; padding: 0 5px; border-radius: 3px;
   font-size: 10px; font-weight: 600; white-space: nowrap;
   max-width: 64px; overflow: hidden; text-overflow: ellipsis;
 }
-.scroll { flex: 1; min-height: 0; overflow: hidden; padding: 8px 12px; display: flex; flex-direction: column; gap: 20px; }
+.scroll { flex: 1; min-height: 0; overflow: hidden; padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 18px; }
 .nav-group { display: flex; flex-direction: column; gap: 2px; flex: 0 0 auto; }
 /* Sessions is the only group with no forced grow-to-fill (flex-grow:0, unlike
    the "1 1 auto" this used to be) — a short list sizes to its own content
@@ -935,18 +883,6 @@
    would overflow .scroll, sessions is still the one that gives, scrolling
    internally so a long list never pushes Config/My Data out of view. */
 .sessions-group { flex: 0 1 auto; min-height: 80px; overflow-y: auto; }
-.group-header { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 6px; }
-.group-label { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; color: var(--text-quaternary); }
-.header-actions { display: flex; align-items: center; gap: 8px; }
-.new-group-btn {
-  display: inline-flex; align-items: center; gap: 4px;
-  height: 22px; padding: 0 8px;
-  border: 1px solid var(--border); border-radius: 6px;
-  background: var(--bg-container); color: var(--text-secondary);
-  font: 600 11px/1 inherit; font-family: inherit; cursor: pointer;
-}
-.new-group-btn:hover { color: var(--blue-6); border-color: var(--blue-5); }
-.sel-toggle { font-size: 11px; font-weight: 600; color: var(--blue-6); cursor: pointer; }
 /* Group section header (folder row) */
 /* Section heading (Tasks / Projects). Sits a tier above .grp-header: it names
    a whole kind of entry rather than one group, so it reads quieter and tighter
@@ -956,14 +892,29 @@
   min-height: 24px; padding: 0 8px; margin-top: 10px;
   color: var(--text-quaternary); cursor: pointer; user-select: none;
 }
-.sec-header:hover { color: var(--text-tertiary); }
+.sec-header:first-child { margin-top: 0; }
+.sec-header:hover { color: var(--text-secondary); }
+/* Same font and color as Pinned's own label (.grp-name.muted) — Tasks,
+   Projects and Pinned are three peers at the same level, not three different
+   weights of heading. The caret sits right after the name rather than leading
+   it — the name is what's being scanned for, the caret is a detail about it.
+   Expanded, the content below already says so, so the caret stays invisible
+   until the row is hovered — folded, there is nothing below to say it, so it
+   stays visible at rest. */
 .sec-name {
-  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px; font-weight: 600;
 }
-.sec-count { font-size: 11px; flex: 0 0 auto; }
+/* Right-pointing at rest reads as "expand this way"; rotated a quarter turn
+   it reads as "collapse downward" — so the base icon points right (folded)
+   and rotates to point down once the section is actually open. */
+.sec-caret { flex: 0 0 auto; opacity: 0; transform: rotate(90deg); transition: opacity 0.1s, transform 0.15s; }
+.sec-header:hover .sec-caret,
+.sec-caret.folded { opacity: 1; }
+.sec-caret.folded { transform: rotate(0deg); }
 
 .grp-header {
+  position: relative;
   display: flex; align-items: center; gap: 6px;
   min-height: 28px; padding: 0 6px 0 6px; margin-top: 2px;
   border-radius: 6px;
@@ -978,7 +929,6 @@
   font-size: 12px; font-weight: 600; color: var(--text-secondary); cursor: pointer;
 }
 .grp-name.muted { font-weight: 600; color: var(--text-quaternary); cursor: default; }
-.grp-count { font-size: 11px; color: var(--text-quaternary); flex: 0 0 auto; padding: 0 2px; }
 /* Group-header actions in two frequency tiers. The high-frequency pair
    (new session, settings) is always visible, anchored at the right edge
    (explicit opacity:1 overrides .row-action's base opacity:0, the session
@@ -988,54 +938,77 @@
    the group name into an ellipsis. They expand between the name and the
    anchored pair, so the icons that are always there never shift. */
 .grp-header .row-action { opacity: 1; width: 20px; flex-basis: 20px; }
-.grp-header .row-action.hover-only { display: none; }
-.grp-header:hover .row-action.hover-only { display: flex; }
-.grp-dir {
-  /* flex-shrink:0 — the overflow:hidden below drops this item's automatic
-     minimum size to zero (that floor only applies while overflow is visible),
-     and every sibling in this column carries an explicit min-height. So a list
-     too tall for .sessions-group took its shrink out of the one item with no
-     floor, slicing the project's path in half under the row below it. */
-  flex: 0 0 auto;
-  padding: 0 8px 2px 28px; margin-top: -2px;
-  font-size: 11px; color: var(--text-quaternary);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-/* Move-to-group popover */
-.grp-popover {
-  position: absolute; top: 100%; right: 8px; z-index: 30;
-  min-width: 160px; max-width: 220px; max-height: 260px; overflow-y: auto;
-  margin-top: 2px; padding: 4px;
+/* A session row swaps its metadata for its actions on hover. Kept in CSS rather
+   than a hover-tracking $state: the row must not re-render (and the title must
+   not reflow) just because the cursor crossed it. The menu-open case holds the
+   swap while the panel is up, so the kebab the panel belongs to stays under the
+   cursor that opened it. */
+.nav-row .row-action.on-hover,
+.grp-header .row-action.on-hover { display: none; }
+.nav-row:hover .row-action.on-hover,
+.nav-row.menu-open .row-action.on-hover,
+.grp-header:hover .row-action.on-hover,
+.grp-header.menu-open .row-action.on-hover { display: flex; }
+.nav-row:hover .on-rest,
+.nav-row.menu-open .on-rest { display: none; }
+.row-menu {
+  position: absolute; top: 100%; right: 6px; z-index: 30;
+  min-width: 132px; margin-top: 2px; padding: 4px;
   background: var(--bg-container); border: 1px solid var(--border-secondary);
   border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.18);
 }
-.grp-opt {
-  display: flex; align-items: center; gap: 6px;
-  padding: 6px 8px; border-radius: 6px; cursor: pointer;
+.row-menu-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 9px; border-radius: 6px; cursor: pointer;
   font-size: 13px; color: var(--text);
 }
-.grp-opt:hover { background: var(--hover-neutral); }
-.grp-opt.cur { color: var(--blue-6); }
-.grp-opt-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.grp-sep { height: 1px; margin: 4px 6px; background: var(--border-secondary); }
+.row-menu-item:hover { background: var(--hover-neutral); }
+.row-menu-item.del { color: var(--error); }
+/* Sits where the footer does, so entering batch mode does not shift the list
+   above it — the rows must stay under the cursor that is selecting them. */
 .batch-bar {
-  display: flex; align-items: center; gap: 8px;
-  margin: 0 4px 6px; padding: 6px 8px 6px 12px;
-  background: var(--error-bg); border: 1px solid var(--error-border); border-radius: 8px;
+  flex: 0 0 auto; padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 8px;
 }
-.batch-count { font-size: 12px; color: var(--error-dark); flex: 1; }
-.batch-del {
-  height: 26px; padding: 0 10px; border: none; background: var(--error);
-  border-radius: 6px; display: flex; align-items: center; gap: 6px;
-  font-size: 12px; color: #fff; cursor: pointer; font-family: inherit;
+.batch-top { display: flex; align-items: center; gap: 10px; }
+.batch-label { font-size: 13px; color: var(--text); }
+.batch-count { font-size: 12px; color: var(--text-tertiary); flex: 1; }
+.batch-close {
+  flex: 0 0 auto; width: 22px; height: 22px; border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-tertiary); cursor: pointer;
 }
-.batch-del:hover { background: #FF7875; }
+.batch-close:hover { background: var(--hover-neutral); color: var(--text); }
+.batch-actions { display: flex; gap: 8px; }
+.batch-btn {
+  flex: 1; height: 32px; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: 7px;
+  background: var(--bg-container); color: var(--text-secondary);
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font: 500 13px/1 inherit; font-family: inherit; cursor: pointer;
+}
+.batch-btn:hover:not(:disabled) { border-color: var(--blue-5); color: var(--blue-6); }
+.batch-btn.del { border-color: var(--error-border); color: var(--error); }
+.batch-btn.del:hover:not(:disabled) { border-color: var(--error); background: var(--error-bg); }
+.batch-btn:disabled { opacity: 0.45; cursor: default; }
+/* One box for a session, a group, and the whole list. */
+.checkbox.tri { border-color: var(--border); background: var(--bg-container); cursor: pointer; }
+.checkbox.tri.on { border-color: var(--blue-6); background: var(--blue-6); }
+.row-menu-sep { height: 1px; margin: 4px 6px; background: var(--border-secondary); }
+.from-cron { flex: 0 0 auto; color: var(--text-quaternary); }
 .nav-row {
   position: relative;
   display: flex; align-items: center; gap: 10px;
   min-height: 34px; padding: 0 6px 0 9px;
   border-radius: 7px; cursor: pointer;
 }
+/* A session filed under a project is indented under it, the way a child sits
+   under its parent, rather than sharing the project header's own left edge —
+   which is what made a project's sessions read as siblings of the project
+   instead of members of it. Aligned to the project name's own text start
+   (6px padding + 16px folder icon + 6px gap), not indented past it. */
+.nav-row.nested { padding-left: 28px; }
 /* Active row is a soft accent tint with accent text (the redesign's
    data-on state), not a solid blue pill. */
 .nav-row.solid { background: var(--active-blue-bg); }

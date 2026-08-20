@@ -105,9 +105,7 @@ export const pinnedSessions = writable<string[]>([])
 // Collapsed session IDs (server registry, web-only). Collapsed sessions sink
 // into a folded panel at the bottom of the sidebar's session list.
 export const collapsedSessions = writable<string[]>([])
-// Sidebar UI state for groups: the session whose "move to group" popover is
-// open, and the group being renamed inline.
-export const groupMenuFor = writable<string | null>(null)
+// The project being renamed inline in the sidebar.
 export const editGroupId = writable<string | null>(null)
 export const editGroupDraft = writable('')
 // The configured default permission mode (~/.octo/config.yml), seeded once
@@ -319,7 +317,9 @@ export function normalizeDir(p: string): string {
 // a session's tools run.
 export async function resolveProjectForDir(dir: string): Promise<string> {
   const target = normalizeDir(dir)
-  const existing = get(sessionGroups).find(g => !!g.working_dir && normalizeDir(g.working_dir!) === target)
+  // A scheduled task's run cluster can carry a directory too, and it is not a
+  // project: filing a session there would drop it into that task's run history.
+  const existing = get(sessionGroups).find(g => !g.task_id && !!g.working_dir && normalizeDir(g.working_dir!) === target)
   if (existing) return existing.id
   // Split on either separator: on Windows a path has no '/' at all, and the
   // project would otherwise be named after the whole path.

@@ -576,6 +576,19 @@ func New(cfg Config) (*Server, error) {
 	return s, nil
 }
 
+// reconcileRegistry brings a registry written by an older version in line with
+// the two concepts the sidebar has now, a task and a project. Both passes are
+// idempotent and a no-op on a registry that never used the retired features, so
+// they run on every start rather than behind a version stamp.
+//
+// Order matters: dissolving a plain group releases its sessions, and the
+// adoption pass is what then files any of them that were working in a real
+// directory under a project for it.
+func (s *Server) reconcileRegistry() {
+	s.dissolvePlainGroups()
+	s.adoptTaskWorkingDirs()
+}
+
 // enableSubAgentTools registers the process-global sub-agent manager + task
 // store so DefaultToolsFor advertises sub_agent / task_* . On
 // the server these globals are gating sentinels and a never-hit fallback: every
@@ -686,7 +699,10 @@ func (s *Server) ServeOn(ln net.Listener) error { return s.serveOn(ln) }
 // unless a restart was requested, in which case ErrRestartRequested tells the
 // caller to exit with ExitRestart.
 func (s *Server) serveOn(ln net.Listener) error {
+	// After initScheduler, which is what can tell a cron task's run cluster
+	// from a plain group, and before any request can read the registry.
 	s.initScheduler()
+	s.reconcileRegistry()
 	s.startChannels()
 	err := s.http.Serve(ln)
 	if errors.Is(err, http.ErrServerClosed) {

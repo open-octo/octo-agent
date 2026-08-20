@@ -35,7 +35,7 @@ func TestSessionMemDir_WiredThroughTheRegistry(t *testing.T) {
 	// that reads it instead of the project cannot accidentally pass.
 	ownDir := t.TempDir()
 
-	g, err := createSessionGroupNamed("proj", projectDir)
+	g, err := createSessionGroupNamed("proj", projectDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestCronTask_RunsGetProjectMemory(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	srv.homeMemDir = homeMem
 
-	g, err := createSessionGroupNamed("nightly", dir)
+	g, err := createSessionGroupNamed("nightly", dir, "cron-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestCronTask_WithoutDirectoryStaysAPlainGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := createSessionGroupNamed("dirless", "")
+	g, err := createSessionGroupNamed("dirless", "", "cron-2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestCronTask_WithoutDirectoryStaysAPlainGroup(t *testing.T) {
 // plain group, which is the pre-existing behaviour for grouping failures.
 func TestCronTask_UnusableDirectoryDegradesToPlainGroup(t *testing.T) {
 	setTestHome(t)
-	g, err := createSessionGroupNamed("bad-dir", filepath.Join(t.TempDir(), "does-not-exist"))
+	g, err := createSessionGroupNamed("bad-dir", filepath.Join(t.TempDir(), "does-not-exist"), "cron-3")
 	if err != nil {
 		t.Fatalf("an unusable directory must not fail group creation: %v", err)
 	}

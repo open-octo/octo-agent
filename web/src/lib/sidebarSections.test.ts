@@ -5,56 +5,49 @@ import type { Session, SessionGroup } from './types'
 const sess = (id: string): Session => ({ id }) as Session
 const group = (id: string, session_ids: string[] = [], working_dir?: string): SessionGroup =>
   ({ id, name: id, session_ids, ...(working_dir ? { working_dir } : {}) }) as SessionGroup
+// A scheduled task's project: the scheduler gives it a directory named after the
+// task, so it is a project like any other and needs no section of its own.
+const cron = (id: string, session_ids: string[] = [], working_dir = '/Octo/' + id): SessionGroup =>
+  ({ id, name: id, session_ids, task_id: 'task-' + id, working_dir }) as SessionGroup
 
 describe('splitSections', () => {
-  it('sorts groups into projects and tasks by working dir', () => {
+  it('files every group with a working dir under projects', () => {
     const s = splitSections(
       [sess('a'), sess('b')],
-      [group('p', ['a'], '/work/app'), group('t', ['b'])],
+      [group('p', ['a'], '/work/app'), cron('c', ['b'])],
       [], [],
     )
-    expect(s.projects.map(g => g.group.id)).toEqual(['p'])
-    expect(s.taskGroups.map(g => g.group.id)).toEqual(['t'])
+    expect(s.projects.map(g => g.group.id)).toEqual(['p', 'c'])
   })
 
   it('files a session with no group under ungrouped', () => {
-    const s = splitSections([sess('a'), sess('b')], [group('t', ['a'])], [], [])
-    expect(s.taskGroups[0].items.map(x => x.id)).toEqual(['a'])
+    const s = splitSections([sess('a'), sess('b')], [cron('c', ['a'])], [], [])
+    expect(s.projects[0].items.map(x => x.id)).toEqual(['a'])
     expect(s.ungrouped.map(x => x.id)).toEqual(['b'])
   })
 
-  // The regression this module was extracted for: an empty group has no
-  // sessions, so a session count says the section is empty — but the group is
-  // still a row the user has to see to rename, configure, or delete it. A
-  // freshly created group is always empty and opens its inline rename box.
-  it('reports the Tasks section as non-empty for an empty group', () => {
-    const s = splitSections([], [group('fresh')], [], [])
-    expect(s.taskCount).toBe(0)
-    expect(s.hasTasks).toBe(true)
+  // A plain group — no directory, no task — is the retired concept. The server
+  // dissolves those at startup; until it has, its sessions must not be rendered
+  // twice, and there is no row to render them under.
+  it('drops a plain group entirely', () => {
+    const s = splitSections([sess('a'), sess('b')], [group('leftover', ['a'])], [], [])
+    expect(s.projects).toEqual([])
+    expect(s.ungrouped.map(x => x.id)).toEqual(['b'])
   })
 
-  it('reports the Tasks section as empty only when there is nothing at all', () => {
-    expect(splitSections([], [], [], []).hasTasks).toBe(false)
-    // Every session lives in a project, and no plain group exists: Tasks really
-    // has nothing to show.
-    const s = splitSections([sess('a')], [group('p', ['a'], '/work/app')], [], [])
-    expect(s.hasTasks).toBe(false)
-    expect(s.taskCount).toBe(0)
-  })
-
-  it('counts sessions across task groups and ungrouped', () => {
+  it('counts tasks by loose sessions only', () => {
     const s = splitSections(
       [sess('a'), sess('b'), sess('c'), sess('d')],
-      [group('t1', ['a', 'b']), group('t2', ['c']), group('p', [], '/work/app')],
+      [cron('c1', ['a', 'b']), group('p', ['c'], '/work/app')],
       [], [],
     )
-    expect(s.taskCount).toBe(4)
+    expect(s.taskCount).toBe(1) // only 'd'
   })
 
   it('claims a pinned session once, ahead of its group', () => {
-    const s = splitSections([sess('a')], [group('t', ['a'])], ['a'], [])
+    const s = splitSections([sess('a')], [cron('c', ['a'])], ['a'], [])
     expect(s.pinned.map(x => x.id)).toEqual(['a'])
-    expect(s.taskGroups[0].items).toEqual([])
+    expect(s.projects[0].items).toEqual([])
     expect(s.ungrouped).toEqual([])
   })
 
@@ -65,62 +58,56 @@ describe('splitSections', () => {
   })
 
   it('drops group members that no longer resolve to a session', () => {
-    const s = splitSections([sess('a')], [group('t', ['a', 'gone'])], [], [])
-    expect(s.taskGroups[0].items.map(x => x.id)).toEqual(['a'])
+    const s = splitSections([sess('a')], [cron('c', ['a', 'gone'])], [], [])
+    expect(s.projects[0].items.map(x => x.id)).toEqual(['a'])
   })
 
   it('renders a session claimed by two groups only once', () => {
-    const s = splitSections([sess('a')], [group('t1', ['a']), group('t2', ['a'])], [], [])
-    expect(s.taskGroups[0].items.map(x => x.id)).toEqual(['a'])
-    expect(s.taskGroups[1].items).toEqual([])
+    const s = splitSections([sess('a')], [cron('c1', ['a']), cron('c2', ['a'])], [], [])
+    expect(s.projects[0].items.map(x => x.id)).toEqual(['a'])
+    expect(s.projects[1].items).toEqual([])
   })
 
   it('collapses a duplicate id inside one group', () => {
-    const s = splitSections([sess('a')], [group('t', ['a', 'a'])], [], [])
-    expect(s.taskGroups[0].items.map(x => x.id)).toEqual(['a'])
+    const s = splitSections([sess('a')], [cron('c', ['a', 'a'])], [], [])
+    expect(s.projects[0].items.map(x => x.id)).toEqual(['a'])
   })
 
   it('tolerates a group with no session_ids field', () => {
-    const s = splitSections([sess('a')], [{ id: 't', name: 't' } as SessionGroup], [], [])
-    expect(s.taskGroups[0].items).toEqual([])
+    const s = splitSections([sess('a')], [{ id: 'p', name: 'p', working_dir: '/w' } as SessionGroup], [], [])
+    expect(s.projects[0].items).toEqual([])
     expect(s.ungrouped.map(x => x.id)).toEqual(['a'])
   })
 })
 
 describe('swapWithinSection', () => {
-  // Registry order interleaves the sections, which is the case that made
-  // section-relative reordering necessary: moving a project up must swap it
-  // with the previous PROJECT, leaving the task group between them alone.
+  // The registry can hold rows the sidebar does not render — a plain group left
+  // by an older version, until the server's startup pass dissolves it. Reorder
+  // has to move a project past those rather than swapping with whatever is
+  // adjacent in the registry, which would make the row vanish from under the
+  // cursor.
   const registry = [
     group('p1', [], '/a'),
-    group('t1'),
+    group('leftover1'),
     group('p2', [], '/b'),
-    group('t2'),
+    group('leftover2'),
   ]
   const projectIds = ['p1', 'p2']
-  const taskIds = ['t1', 't2']
 
-  it('swaps a project past an intervening task group', () => {
+  it('swaps a project past an unrendered row', () => {
     const next = swapWithinSection(registry, 'p2', -1, projectIds)
-    expect(next?.map(g => g.id)).toEqual(['p2', 't1', 'p1', 't2'])
+    expect(next?.map(g => g.id)).toEqual(['p2', 'leftover1', 'p1', 'leftover2'])
   })
 
-  it('leaves the other section in the same relative order', () => {
+  it('leaves the unrendered rows in the same relative order', () => {
     const next = swapWithinSection(registry, 'p2', -1, projectIds)!
-    const tasks = next.filter(g => !g.working_dir).map(g => g.id)
-    expect(tasks).toEqual(['t1', 't2'])
-  })
-
-  it('moves a task group down within its own section', () => {
-    const next = swapWithinSection(registry, 't1', 1, taskIds)
-    expect(next?.map(g => g.id)).toEqual(['p1', 't2', 'p2', 't1'])
+    const rest = next.filter(g => !g.working_dir).map(g => g.id)
+    expect(rest).toEqual(['leftover1', 'leftover2'])
   })
 
   it('refuses to move past either end of the section', () => {
     expect(swapWithinSection(registry, 'p1', -1, projectIds)).toBeNull()
     expect(swapWithinSection(registry, 'p2', 1, projectIds)).toBeNull()
-    expect(swapWithinSection(registry, 't1', -1, taskIds)).toBeNull()
-    expect(swapWithinSection(registry, 't2', 1, taskIds)).toBeNull()
   })
 
   it('refuses when the sibling has disappeared from the registry', () => {
@@ -130,7 +117,7 @@ describe('swapWithinSection', () => {
   })
 
   it('refuses for a group that is not in the section at all', () => {
-    expect(swapWithinSection(registry, 't1', -1, projectIds)).toBeNull()
+    expect(swapWithinSection(registry, 'leftover1', -1, projectIds)).toBeNull()
   })
 
   it('does not mutate the registry it was given', () => {
@@ -141,13 +128,16 @@ describe('swapWithinSection', () => {
 })
 
 describe('parseSectionFold', () => {
-  it('defaults both sections open with nothing stored', () => {
-    expect(parseSectionFold(null)).toEqual({ tasks: true, projects: true })
-    expect(parseSectionFold('')).toEqual({ tasks: true, projects: true })
+  const allOpen = { tasks: true, projects: true }
+
+  it('defaults every section open with nothing stored', () => {
+    expect(parseSectionFold(null)).toEqual(allOpen)
+    expect(parseSectionFold('')).toEqual(allOpen)
   })
 
   it('round-trips a stored preference', () => {
-    expect(parseSectionFold('{"tasks":false,"projects":true}')).toEqual({ tasks: false, projects: true })
+    expect(parseSectionFold('{"tasks":false,"projects":true}'))
+      .toEqual({ tasks: false, projects: true })
   })
 
   it('treats a missing field as open', () => {
@@ -155,9 +145,9 @@ describe('parseSectionFold', () => {
   })
 
   it('falls back to open on corrupt or wrongly-shaped values', () => {
-    expect(parseSectionFold('{')).toEqual({ tasks: true, projects: true })
-    expect(parseSectionFold('null')).toEqual({ tasks: true, projects: true })
-    expect(parseSectionFold('"nope"')).toEqual({ tasks: true, projects: true })
-    expect(parseSectionFold('[]')).toEqual({ tasks: true, projects: true })
+    expect(parseSectionFold('{')).toEqual(allOpen)
+    expect(parseSectionFold('null')).toEqual(allOpen)
+    expect(parseSectionFold('"nope"')).toEqual(allOpen)
+    expect(parseSectionFold('[]')).toEqual(allOpen)
   })
 })

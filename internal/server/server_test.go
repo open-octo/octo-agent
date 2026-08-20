@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1596,7 +1595,12 @@ func TestHandleUpdateSessionPermissionMode(t *testing.T) {
 	}
 }
 
-func TestHandleUpdateSessionWorkingDir(t *testing.T) {
+// A working directory is a project's property, not a session's. The endpoint
+// stays registered so a direct API caller or an older client is told what to do
+// instead of getting a 404 — the three tests that used to live here covered the
+// per-session setter (success, a missing directory, a file instead of a
+// directory), all of which are now unreachable by design.
+func TestHandleUpdateSessionWorkingDir_RefusedForATask(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
@@ -1605,49 +1609,38 @@ func TestHandleUpdateSessionWorkingDir(t *testing.T) {
 	if err := sess.Save(); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-	serverCwd := srv.cwd // capture to assert it is NOT mutated
 
-	payload, _ := json.Marshal(updateSessionWorkingDirRequest{WorkingDir: tmp})
+	payload, _ := json.Marshal(map[string]string{"working_dir": tmp})
 	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/working_dir", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", w.Code, w.Body.String())
 	}
-	var body map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body["ok"] != true {
-		t.Fatalf("ok = %v, want true", body["ok"])
-	}
-	if body["working_dir"] != tmp {
-		t.Fatalf("response working_dir = %v, want %q", body["working_dir"], tmp)
-	}
-
-	// The change is per-session: the session's own WorkingDir is persisted...
+	// The session must be left alone, not partially updated.
 	got, err := agent.LoadSession(sess.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.WorkingDir != tmp {
-		t.Fatalf("session WorkingDir = %q, want %q", got.WorkingDir, tmp)
+	if got.WorkingDir == tmp {
+		t.Error("the refused directory was persisted anyway")
 	}
-	// ...while the server default cwd is left alone, so other sessions are not
-	// silently retargeted.
-	if srv.cwd != serverCwd {
-		t.Fatalf("server cwd mutated to %q, want unchanged %q", srv.cwd, serverCwd)
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
 	}
-	if srv.cwd == tmp {
-		t.Fatalf("server cwd = %q, should not equal the per-session dir", srv.cwd)
+	msg, _ := body["error"].(string)
+	if !strings.Contains(msg, "project") {
+		t.Errorf("error = %q, want it to point at projects", msg)
 	}
 }
 
-func TestHandleUpdateSessionWorkingDir_NotExist(t *testing.T) {
+// A session already in a project gets the more specific message: change it on
+// the project, which is where the directory lives.
+func TestHandleUpdateSessionWorkingDir_RefusedForAProjectMember(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
@@ -1656,69 +1649,30 @@ func TestHandleUpdateSessionWorkingDir_NotExist(t *testing.T) {
 	if err := sess.Save(); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	g, err := createSessionGroupNamed("Alpha", t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := addSessionToGroup(g.ID, sess.ID); err != nil {
+		t.Fatal(err)
+	}
 
-	missing := filepath.Join(tmp, "does-not-exist")
-	payload, _ := json.Marshal(updateSessionWorkingDirRequest{WorkingDir: missing})
+	payload, _ := json.Marshal(map[string]string{"working_dir": tmp})
 	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/working_dir", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	serveLoopback(srv.mux, w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
-	}
-	// The error should tell the user the dir doesn't exist and to create it
-	// first (#1073), not surface a raw os.Stat error string.
-	want := fmt.Sprintf("working_dir does not exist: %s (create it first)", missing)
-	var body map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body["error"] != want {
-		t.Fatalf("error = %q, want %q", body["error"], want)
-	}
-}
-
-func TestHandleUpdateSessionWorkingDir_NotADirectory(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
-
-	sess := agent.NewSession("stub-model", "")
-	if err := sess.Save(); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-
-	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-
-	// A regular file sitting where a directory component is expected trips
-	// ENOTDIR, which os.IsNotExist does not recognize (#1237) — the handler
-	// must still report a clean message instead of a raw "stat ...: not a
-	// directory" dump.
-	filePath := filepath.Join(tmp, "not-a-dir")
-	if err := os.WriteFile(filePath, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	nested := filepath.Join(filePath, "child")
-
-	payload, _ := json.Marshal(updateSessionWorkingDirRequest{WorkingDir: nested})
-	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/"+sess.ID+"/working_dir", bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	serveLoopback(srv.mux, w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", w.Code, w.Body.String())
 	}
 	var body map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	errMsg, _ := body["error"].(string)
-	if !strings.Contains(errMsg, nested) || strings.Contains(errMsg, "stat "+nested) {
-		t.Fatalf("error = %q, want it to name %q without echoing the raw stat prefix", errMsg, nested)
+	if msg, _ := body["error"].(string); !strings.Contains(msg, "Alpha") {
+		t.Errorf("error = %q, want it to name the project", msg)
 	}
 }
 

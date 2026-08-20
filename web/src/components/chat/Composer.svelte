@@ -652,7 +652,9 @@
     if (docked) return $sessionGroups.find(g => g.id === docked && !!g.working_dir) ?? null
     const dir = $pendingWorkingDir
     if (!dir) return null
-    return $sessionGroups.find(g => !!g.working_dir && normalizeDir(g.working_dir!) === normalizeDir(dir)) ?? null
+    // Excluding a scheduled task's cluster: it can carry a directory and is
+    // still not a project to file a new session under.
+    return $sessionGroups.find(g => !g.task_id && !!g.working_dir && normalizeDir(g.working_dir!) === normalizeDir(dir)) ?? null
   })
   // A docked group's own directory governs the session, exactly as it does for
   // a session already inside a project. A plain group has no directory to show,
@@ -1320,13 +1322,12 @@
             <span class="mono dir-path">{shortDir(workingDir)}</span>
             <span class="dir-owner">{project.name}</span>
           </span>
-        {:else if workingDir || (!sid && !dockedGroup)}
-          <!-- The landing page offers the chip even with nothing picked yet:
-               the directory is what decides whether the first message starts a
-               loose task or lands in a project, so it has to be reachable
-               before there is a session to hang it on. Not when a group is
-               already docked, though — then the group owns the directory and
-               an editable chip would promise something send would drop. -->
+        {:else if !sid && !dockedGroup}
+          <!-- Only the landing page offers a choice, and choosing there is what
+               files the session under a project. Once a session exists the
+               directory is the project's to set: a task that could point itself
+               at a repo ran its tools there while its memory stayed in the
+               shared tier, which is the split this removes. -->
           <button
             class="meta-chip"
             class:empty={!workingDir}
@@ -1340,10 +1341,17 @@
             {:else}
               <span>{$t('chat.dir_pick')}</span>
             {/if}
-            {#if !sid && project}
+            {#if project}
               <span class="dir-owner">{project.name}</span>
             {/if}
           </button>
+        {:else if workingDir}
+          <!-- A task's directory, read-only: where its tools run, decided by the
+               server's workspace setting rather than by this session. -->
+          <span class="meta-chip static" title={$t('chat.dir_task_fixed') + ` — ${workingDir}`}>
+            <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
+            <span class="mono dir-path">{shortDir(workingDir)}</span>
+          </span>
         {/if}
         {#if dockedGroup && !workingDir}
           <!-- A plain group: no directory to inherit, but naming it is the only
@@ -1446,9 +1454,11 @@
 }
 .input-wrap { max-width: var(--chat-content-max-width, 1080px); margin: 0 auto; padding: 8px 24px 14px; }
 .input-card {
-  background: var(--bg-container); border: 1px solid var(--border); border-radius: 14px;
+  /* A quiet block rather than a bordered card: a hairline edge, no shadow. The
+     rounder corner (18 vs the old 14) reads more like a single soft shape. */
+  background: var(--bg-container); border: 1px solid var(--border-secondary); border-radius: 18px;
   padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;
-  position: relative; box-shadow: var(--card-shadow);
+  position: relative;
 }
 .input-card:focus-within {
   border-color: var(--blue-6);

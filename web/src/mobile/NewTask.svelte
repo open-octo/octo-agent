@@ -1,7 +1,8 @@
 <script lang="ts">
   // New-task sheet, opened by the feed's FAB. The phone fires a task in one
   // step: describe it, optionally pick model / permission mode / working
-  // directory, and land in the streaming chat detail. Leaving the prompt
+  // and land in the streaming chat detail. A task takes no working directory:
+  // that belongs to a project, which is where memory is scoped too. Leaving the prompt
   // empty just creates a blank session (the old FAB behavior).
   import { get } from 'svelte/store'
   import { sessions, activeSessionId, globalPermissionMode, showToast } from '../lib/stores'
@@ -14,7 +15,6 @@
   } = $props()
 
   let prompt = $state('')
-  let dir = $state('')
   let creating = $state(false)
 
   // '' = the server default sender; anything else is the composite
@@ -68,10 +68,6 @@
         await api.updateSessionPermissionMode(sess.id, permMode).catch((e: any) =>
           showToast(e?.message ?? tr('m.perm_fail'), 'error'))
       }
-      if (dir.trim()) {
-        await api.updateSessionWorkingDir(sess.id, dir.trim()).catch((e: any) =>
-          showToast(e?.message ?? tr('m.dir_fail'), 'error'))
-      }
       onCreated(sess.id, prompt.trim())
     } catch (e: any) {
       showToast(e?.message ?? tr('m.create_fail'), 'error')
@@ -123,11 +119,6 @@
     </p>
   </div>
 
-  <p class="lbl">{$t('m.workdir')}</p>
-  <div class="card pad">
-    <input class="input" type="text" placeholder={$t('m.server_default')} bind:value={dir} aria-label={$t('m.workdir')} />
-  </div>
-
   <button class="go" disabled={creating} onclick={create}>
     {creating ? $t('m.creating') : prompt.trim() ? $t('m.create_start') : $t('m.create_blank')}
   </button>
@@ -154,11 +145,7 @@
   }
   .prompt::placeholder { color: var(--m-text-4); }
 
-  .select, .input {
-    display: block; width: 100%; border: none; background: none; outline: none;
-    font: inherit; font-size: 14.5px; color: var(--m-text); padding: 2px 0;
-  }
-  .input::placeholder { color: var(--m-text-4); }
+  .select, 
 
   .seg { display: flex; gap: 4px; background: var(--m-bg); border-radius: 8px; padding: 3px; }
   .segi {

@@ -4,6 +4,14 @@
 // partition in particular decides whether a row is rendered at all, and a
 // group that exists but never renders is unreachable rather than merely
 // misplaced.
+//
+// Two sections: Tasks (sessions in no project) and Projects (a directory plus
+// the sessions working in it). A scheduled task's runs are a project too — the
+// scheduler creates one per task, named after it — so they need no section of
+// their own. A group with no working_dir is a plain group, a concept that no
+// longer exists; the server dissolves those at startup, and anything left in a
+// registry this frontend is handed is dropped rather than rendered as a third
+// kind of row.
 
 import type { Session, SessionGroup } from './types'
 
@@ -15,21 +23,14 @@ export interface GroupView {
 export interface SidebarSections {
   /** Pinned sessions, in registry order, above every section. */
   pinned: Session[]
-  /** Groups carrying a working directory — projects. */
+  /** Groups carrying a working directory — projects, scheduled ones included. */
   projects: GroupView[]
-  /** Groups without one — plain groupings of loose tasks. */
-  taskGroups: GroupView[]
   /** Sessions in no group at all. Tasks by definition. */
   ungrouped: Session[]
   /** Collapsed sessions, in registry order, in the folded panel at the bottom. */
   folded: Session[]
-  /** How many sessions the Tasks section holds, groups included. */
+  /** How many loose sessions the Tasks section holds. */
   taskCount: number
-  /** True when the Tasks section has anything to show — INCLUDING an empty
-   *  group, which has no sessions but is still a row the user must be able to
-   *  see, rename, and configure. Gating on taskCount alone hid a freshly
-   *  created group along with its inline rename box. */
-  hasTasks: boolean
 }
 
 /**
@@ -71,20 +72,19 @@ export function splitSections(
   const all = groups.map(group => ({ group, items: take(group.session_ids ?? []) }))
 
   const projects = all.filter(gv => !!gv.group.working_dir)
-  const taskGroups = all.filter(gv => !gv.group.working_dir)
   // Route through byId (already deduped) rather than the input array, for the
-  // same keyed-each reason as a group's own membership.
+  // same keyed-each reason as a group's own membership. A session in a dissolved
+  // plain group was claimed by it above and so does NOT resurface here — that
+  // group is gone from the registry the moment the server has run, and until
+  // then showing its sessions twice would be worse than showing them nowhere.
   const ungrouped = [...byId.values()].filter(s => !claimed.has(s.id))
-  const taskCount = taskGroups.reduce((n, gv) => n + gv.items.length, 0) + ungrouped.length
 
   return {
     pinned,
     projects,
-    taskGroups,
     ungrouped,
     folded,
-    taskCount,
-    hasTasks: taskGroups.length > 0 || ungrouped.length > 0,
+    taskCount: ungrouped.length,
   }
 }
 
@@ -94,9 +94,9 @@ export function splitSections(
  * of the section, or a sibling that has since disappeared).
  *
  * `siblings` is the id list of the section the group renders in, so a project
- * swaps with the previous project and a task group with the previous task
- * group. Swapping with whichever group happens to be adjacent in the registry
- * would make the row vanish from under the cursor into the other section.
+ * swaps with the previous project rather than with whichever group happens to be
+ * adjacent in the registry, which would make the row vanish from under the
+ * cursor into the other section.
  * Only the two groups exchange places in the registry; every other group keeps
  * its position, so the other section's order is untouched.
  */

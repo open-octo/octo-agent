@@ -96,12 +96,14 @@
   --search-bg: rgba(0,0,0,0.05);       /* header search pill */
   --search-hover: rgba(0,0,0,0.08);
 
-  /* Frosted surfaces (sidebar / slide-in panels) — pair with backdrop-filter:
-     blur(var(--frost-blur)). Solid fallbacks are --bg-sidebar / --bg-container. */
-  --sidebar-frost: rgba(245,245,247,0.6);
-  --panel-frost: rgba(255,255,255,0.7);
-  --titlebar-frost: rgba(255,255,255,0.55);
-  --frost-blur: 20px;
+  /* Chrome surfaces (sidebar / slide-in panels / title bar) — opaque, flat.
+     Named "frost" for the blur-glass look they replace; kept as the same three
+     variables so Sidebar/Header/ArtifactsPanel need no changes, only quieter
+     values. --frost-blur is 0 below, so backdrop-filter is a harmless no-op. */
+  --sidebar-frost: var(--bg-sidebar);
+  --panel-frost: var(--bg-container);
+  --titlebar-frost: var(--bg-layout);
+  --frost-blur: 0px;
 
   /* Scrollbar + placeholder */
   --scrollbar-thumb: rgba(0,0,0,0.18);
@@ -175,9 +177,9 @@
   --search-bg: rgba(255,255,255,0.07);
   --search-hover: rgba(255,255,255,0.12);
 
-  --sidebar-frost: rgba(34,34,36,0.6);
-  --panel-frost: rgba(36,36,38,0.72);
-  --titlebar-frost: rgba(44,44,46,0.55);
+  --sidebar-frost: var(--bg-sidebar);
+  --panel-frost: var(--bg-container);
+  --titlebar-frost: var(--bg-layout);
 
   color-scheme: dark;
 }
