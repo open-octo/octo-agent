@@ -223,10 +223,6 @@ export class WsManager {
     this.send({ type: "promote_sync_sub_agent", session_id: sessionId });
   }
 
-  retry(sessionId: string): void {
-    this.send({ type: "retry", session_id: sessionId });
-  }
-
   rollback(sessionId: string): void {
     this.send({ type: "rollback", session_id: sessionId });
   }

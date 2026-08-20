@@ -198,10 +198,8 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   let bindRequiredFor = $state<string | null>(null)
   let bindRequiredMessage = $state('')
 
-  // ── branch modal: edit the selected prompt and run a variant ────────────────
-  let branchModal = $state<{ open: boolean; index: number; draft: string; busy: boolean }>({
-    open: false, index: 0, draft: '', busy: false,
-  })
+  // ── branch: fork the transcript at a reply into its own session ─────────────
+  let branchBusy = $state(false)
 
   let lightboxSrc = $state<string | null>(null)
 
@@ -355,6 +353,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         streaming: false,
         tools: [],
         todos: [],
+        // Present only on a reply that closes a turn — an intermediate
+        // (tool-round) bubble is not a valid branch point, so the Branch
+        // action keys off this being set.
+        messageIndex: ev.message_index,
       })
     } else if (ev.type === 'thinking') {
       // Standalone reasoning segment from an intermediate (tool) round — render
@@ -1062,9 +1064,25 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // bubble still marked pending: its confirmation is broadcast at turn
       // start, so by the time the turn ends it either arrived or never will —
       // a spinner that outlives its own turn is only ever a lie.
+      // The server sends the reply's persisted index when the turn ended on a
+      // branchable one; stamp it onto the bubble the turn just produced so
+      // Branch lights up there without waiting for a transcript reload.
+      const replyIndex = (ev as any).message_index
       chatMessages.update(m => {
         const msgs = (m[sid] || []).map((x: any) =>
           x.streaming || x.pending ? { ...x, streaming: false, pending: false } : x)
+        if (typeof replyIndex === 'number') {
+          for (let k = msgs.length - 1; k >= 0; k--) {
+            if (msgs[k].type !== 'assistant') continue
+            // Only an unstamped bubble: a turn that ended without producing one
+            // (interrupted before any text) must not relabel the previous
+            // reply with an index that reaches past it.
+            if (typeof msgs[k].messageIndex !== 'number') {
+              msgs[k] = { ...msgs[k], messageIndex: replyIndex }
+            }
+            break
+          }
+        }
         return { ...m, [sid]: msgs }
       })
       // Close open tool groups AND mark any still-spinning tools done — a
@@ -2335,33 +2353,22 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     }
   }
 
-  // Confirm: create the branched session with the (possibly edited) prompt,
-  // navigate to it, and auto-send so the variant reply streams immediately.
-  let branchSendTimer: ReturnType<typeof setTimeout> | null = null
-  function openBranch(index: number, content: string) {
-    branchModal.index = index
-    branchModal.draft = content
-    branchModal.open = true
-  }
-  async function confirmBranch() {
+  // Branch: copy the transcript through this reply into a fresh session and
+  // switch to it. Nothing is sent — the fork just sits there waiting for
+  // whatever the user wants to try instead.
+  async function branchFrom(messageIndex: number) {
     const sid = get(activeSessionId)
-    if (!sid || branchModal.busy) return
-    branchModal.busy = true
+    if (!sid || branchBusy) return
+    branchBusy = true
     try {
-      const newSess = await api.branchSession(sid, branchModal.index, branchModal.draft)
+      // message_index is an exclusive count, so +1 keeps this reply in the copy.
+      const newSess = await api.branchSession(sid, messageIndex + 1)
       sessions.update(ss => [newSess, ...ss])
       activeSessionId.set(newSess.id)
-      branchModal.open = false
-      // Defer the send until the new session's chat state registers.
-      if (branchSendTimer) clearTimeout(branchSendTimer)
-      branchSendTimer = setTimeout(() => {
-        ws.sendMessage(newSess.id, branchModal.draft)
-        branchSendTimer = null
-        branchModal.busy = false
-      }, 100)
     } catch (e: any) {
-      branchModal.busy = false
       showToast(e.message, 'error')
+    } finally {
+      branchBusy = false
     }
   }
 </script>
@@ -2647,9 +2654,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                     </div>
                   {:else}
                     <div class="msg-actions">
-                      <button class="action-btn" title={$t('chat.branch')} onclick={() => openBranch(msg.messageIndex, msg.content)}>
-                        <iconify-icon icon="lucide:git-branch" width="13"></iconify-icon>
-                      </button>
                       <!-- Editable even mid-stream: confirming the edit has the
                            server interrupt the in-flight turn before rerunning,
                            so the button needs no streaming gate. -->
@@ -2751,11 +2755,17 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                   <!-- Message actions -->
                   {#if !msg.streaming}
                     <div class="msg-actions reply-actions">
+                      <!-- Branch only on a reply that closed a turn: an
+                           intermediate tool-round bubble carries no
+                           messageIndex, and forking there would orphan the
+                           tool calls it hasn't answered yet. -->
+                      {#if typeof msg.messageIndex === 'number'}
+                        <button class="action-btn" title={$t('chat.branch')} disabled={branchBusy} onclick={() => branchFrom(msg.messageIndex)}>
+                          <iconify-icon icon="lucide:git-branch" width="14"></iconify-icon>
+                        </button>
+                      {/if}
                       <button class="action-btn" title={$t('chat.copy')} onclick={() => navigator.clipboard.writeText(msg.content)}>
                         <iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon>
-                      </button>
-                      <button class="action-btn" title={$t('chat.retry')} onclick={() => ws.retry($activeSessionId ?? '')}>
-                        <iconify-icon icon="ant-design:reload-outlined" width="14"></iconify-icon>
                       </button>
                     </div>
                   {/if}
@@ -2978,38 +2988,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     </div>
   </div>
 </div>
-
-<!-- Branch modal: edit the selected prompt and run a variant in a new session -->
-{#if branchModal.open}
-  <div class="modal-overlay" onclick={() => { if (!branchModal.busy) branchModal.open = false }}>
-    <div class="modal branch-modal" onclick={(e) => e.stopPropagation()}>
-      <div class="modal-header">
-        <span class="modal-title">{$t('chat.branch_title')}</span>
-        <button class="modal-close" onclick={() => { if (!branchModal.busy) branchModal.open = false }}>
-          <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
-        </button>
-      </div>
-      <div class="modal-body">
-        <p class="branch-desc">{$t('chat.branch_desc')}</p>
-        <textarea
-          class="branch-input"
-          bind:value={branchModal.draft}
-          rows={6}
-          disabled={branchModal.busy}
-        ></textarea>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick={() => branchModal.open = false} disabled={branchModal.busy}>
-          {$t('chat.branch_cancel')}
-        </button>
-        <button class="btn btn-primary" onclick={confirmBranch} disabled={branchModal.busy || !branchModal.draft.trim()}>
-          {#if branchModal.busy}<iconify-icon icon="ant-design:loading-outlined" width="13" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>{/if}
-          {$t('chat.branch_run')}
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
 
 <!-- Image lightbox: click any message attachment thumbnail to view full-size -->
 {#if lightboxSrc}
@@ -3635,49 +3613,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 /* ── Fade-in ─────────────────────────────────────────────────────────────── */
 .fadein { animation: octo-fadein 0.25s ease; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-
-/* ── Branch modal ───────────────────────────────────────────────────────── */
-/* Tokens must exist in app.css — var() with an undefined name invalidates the
-   whole declaration (the modal shipped fully transparent on --bg-elevated). */
-.modal-overlay {
-  position: fixed; inset: 0; background: var(--scrim);
-  display: flex; align-items: center; justify-content: center; z-index: 1000;
-}
-.modal {
-  background: var(--bg-container); border: 1px solid var(--border-secondary);
-  border-radius: 12px; width: 520px; max-width: calc(90vw / var(--font-zoom)); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
-}
-.modal-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 20px; border-bottom: 1px solid var(--border-secondary);
-}
-.modal-title { font-weight: 600; font-size: 15px; color: var(--text-heading); }
-.modal-close {
-  background: none; border: none; cursor: pointer; color: var(--text-tertiary);
-  padding: 4px; border-radius: 6px;
-}
-.modal-close:hover { background: var(--hover-neutral); color: var(--text); }
-.modal-body { padding: 20px; }
-.branch-desc { margin: 0 0 12px; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
-.branch-input {
-  width: 100%; border: 1px solid var(--border-secondary); border-radius: 8px;
-  padding: 10px 12px; font-size: 14px; font-family: inherit; resize: vertical;
-  background: var(--bg-container); color: var(--text); box-sizing: border-box;
-}
-.branch-input:focus { outline: none; border-color: var(--blue-5); }
-.modal-footer {
-  display: flex; justify-content: flex-end; gap: 8px;
-  padding: 16px 20px; border-top: 1px solid var(--border-secondary);
-}
-.btn {
-  padding: 8px 16px; border-radius: 8px; border: 1px solid transparent;
-  font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
-}
-.btn-ghost { background: transparent; border-color: var(--border-secondary); color: var(--text); }
-.btn-ghost:hover { background: var(--hover-neutral); }
-.btn-primary { background: var(--blue-6); color: #fff; border-color: var(--blue-6); }
-.btn-primary:hover { background: var(--blue-5); }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Inline message edit ───────────────────────────────────────────────── */
 .inline-edit-input {

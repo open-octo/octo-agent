@@ -144,12 +144,13 @@ export async function setSessionCollapsed(sessionId: string, collapsed: boolean)
   await request<unknown>(`/api/sessions/${sessionId}/collapse`, { method: 'PUT', ...json({ collapsed }) })
 }
 
-// Branch a session from a specific message index, optionally overriding that
-// message's content. Returns the new session.
-export async function branchSession(sessionId: string, messageIndex: number, promptOverride?: string): Promise<Session> {
+// Copy a session's history into a new session. messageIndex is an exclusive
+// count of messages to keep, so it must land on a turn boundary (right after a
+// completed assistant reply) or the server rejects it. Returns the new session.
+export async function branchSession(sessionId: string, messageIndex: number): Promise<Session> {
   const d = await request<{ session: Session }>(`/api/sessions/${sessionId}/branch`, {
     method: 'POST',
-    ...json({ message_index: messageIndex, prompt_override: promptOverride }),
+    ...json({ message_index: messageIndex }),
   })
   return d.session
 }

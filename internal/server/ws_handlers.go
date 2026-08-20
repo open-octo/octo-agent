@@ -1778,6 +1778,12 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		"session_id": sess.ID,
 		"iterations": a.TurnIterations(),
 	}
+	// Tells the browser the persisted index of the reply it just streamed, so
+	// the Branch action lights up on the live bubble too — omitted (not -1)
+	// when the turn didn't end on a branchable reply.
+	if idx := lastBranchableIndex(sess); idx >= 0 {
+		completeEvent["message_index"] = idx
+	}
 	if err == nil {
 		// a is freshly built per turn (buildAgent), so its usage counters start
 		// at zero — no before/after diff needed, unlike the CLI/IM persistent-
