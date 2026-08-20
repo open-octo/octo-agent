@@ -34,6 +34,22 @@
   import ArtifactsPanel from './components/ArtifactsPanel.svelte'
   import FeedbackModal from './components/overlays/FeedbackModal.svelte'
   import Toast from './components/overlays/Toast.svelte'
+  import { touchSession, markSessionSeen, sessionTouchedAt } from './lib/unread'
+
+  // The session on screen is read by definition — this is the only place the
+  // sidebar's unread dot gets cleared. It re-marks on every list change and
+  // every observed turn ending rather than once on selection, so a reply that
+  // lands while the user is watching (or a refetch carrying the server's newer
+  // updated_at) can't leave a dot on the row they're looking at. Reading a
+  // session means having its transcript open: parked on the tasks view with a
+  // session still "active" behind it does not count, and switching back to
+  // chat re-runs this and clears it then.
+  $effect(() => {
+    void $sessions; void $sessionTouchedAt
+    const sid = $activeSessionId
+    if ($view !== 'chat' || !sid) return
+    markSessionSeen(sid)
+  })
 
   let booted = false
   // Set when the server requires an access key the user couldn't provide; the
@@ -297,6 +313,11 @@
           s.id === sid ? { ...s, status: ev.kind === 'turn_started' ? 'running' : 'idle' } : s
         ))
       }
+      // A finished turn left something in that session to read. Stamped
+      // unconditionally: the effect at the top of this file immediately
+      // un-marks it again if it's the session on screen, and nothing else
+      // refreshes updated_at for an open tab.
+      if (ev.kind === 'turn_ended') touchSession(sid)
       if (ev.kind === 'question_pending' || ev.kind === 'confirm_pending' || ev.kind === 'turn_complete') {
         notifyForSessionActivity(sid, ev.kind)
       }
