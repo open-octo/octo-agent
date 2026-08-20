@@ -2371,7 +2371,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       </button>
       <button class="hdr-btn" title={$t('artifacts.toggle')} onclick={() => {
         if ($panelContent) panelContent.set(null)
-        else panelContent.set(id ? 'session' : 'lightapps')
+        else panelContent.set('session')
       }}>
         <iconify-icon icon="lucide:box" width="13"></iconify-icon>
         <span class="btn-label">{$t('artifacts.toggle')}</span>

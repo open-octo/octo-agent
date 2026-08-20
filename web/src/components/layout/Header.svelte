@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, cmdkOpen, sidebar, nativeShell, panelContent, activeSessionId, settingsModalOpen } from '../../lib/stores'
+  import { cmdkOpen, sidebar, nativeShell, panelContent, settingsModalOpen } from '../../lib/stores'
   import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
   import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
@@ -14,17 +14,12 @@
     sidebar.update(s => s === 'hidden' ? 'full' : 'hidden')
   }
 
-  // Toggle the Artifacts panel sidebar.
-  // With a session active → its artifacts (the empty state included); light
-  // apps only when no session is selected.
+  // Toggle the Artifacts panel sidebar. Always the artifacts pane — with no
+  // session selected that's just its empty state, same as a session with none.
   function togglePanel() {
     const cur = $panelContent
     if (cur) { panelContent.set(null); return }
-    if ($view === 'chat' && $activeSessionId) {
-      panelContent.set('session')
-    } else {
-      panelContent.set('lightapps')
-    }
+    panelContent.set('session')
   }
 
   // The bell toggles desktop notifications on/off — the same preference the
