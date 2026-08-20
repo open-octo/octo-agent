@@ -144,6 +144,13 @@ export function savePanelField(
  */
 export function pruneSessions(liveSessionIds: Iterable<string>): void {
   const live = new Set(liveSessionIds)
+  // An empty list means "not loaded yet" far more often than it means "this
+  // account has no sessions": a Svelte store subscription fires immediately
+  // with its initial [] before any fetch has completed, so treating that as
+  // "delete everything" wiped all persisted panel state on every page load.
+  // A genuinely empty account has nothing worth collecting, and MAX_SESSIONS
+  // remains the backstop, so refusing to act on an empty list costs nothing.
+  if (live.size === 0) return
   let changed = false
   for (const id of Object.keys(store)) {
     if (!live.has(id)) {

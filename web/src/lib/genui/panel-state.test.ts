@@ -91,6 +91,15 @@ describe('panel state', () => {
     expect(JSON.parse(localStorage.getItem(KEY) as string).s1.panels.p.x).toBe('mid-drag')
   })
 
+  it('ignores an empty list rather than treating it as "delete everything"', () => {
+    // A Svelte store subscription fires immediately with its initial [],
+    // before the session list has been fetched. Acting on that wiped every
+    // panel's state on every page load — verified end to end, not theory.
+    savePanelField('s1', 'p', 'x', '1')
+    pruneSessions([])
+    expect(loadPanelFields('s1', 'p').x).toBe('1')
+  })
+
   it('drops sessions that no longer exist', () => {
     savePanelField('live', 'p', 'x', '1')
     savePanelField('deleted', 'p', 'x', '2')

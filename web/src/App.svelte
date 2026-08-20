@@ -124,6 +124,10 @@
     // Drop persisted GenUI panel state for sessions that no longer exist. The
     // session list is the natural GC point: it is when a deletion made
     // anywhere else first becomes visible to this client.
+    //
+    // Note this subscription fires immediately with the store's initial [],
+    // before the list has been fetched. pruneSessions ignores an empty list
+    // for exactly that reason — see the comment there.
     const stopPanelGC = sessions.subscribe(list => pruneSessions(list.map(s => s.id)))
     const cleanup = () => { cancelled = true; uninstallLinks(); stopHeartbeat(); stopPanelGC(); ws.disconnect() }
     checkAuth().then(async ok => {

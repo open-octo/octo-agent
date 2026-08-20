@@ -271,6 +271,8 @@ shape: { [sessionId]: { [panelId]: { [field]: string | number | boolean } } }
 
 Two bounds keep this from growing without limit. Entries for sessions absent from the session list are dropped whenever the session list loads — the natural GC point, since that is when deletions become visible to the client. Independently, the store keeps at most 50 sessions, evicting least-recently-written first, so a client that never sees a session list still cannot grow unboundedly.
 
+**An empty session list is ignored rather than treated as "collect everything."** The list arrives through a store subscription, and a Svelte subscription fires immediately with the store's initial empty value — before anything has been fetched. Acting on that would delete every panel's state on every page load, which is precisely what it did until an end-to-end run caught it. A genuinely empty account has nothing worth collecting, and the session cap remains the backstop, so declining to act on an empty list costs nothing. The guard lives in the store rather than at the call site, since the same "initial value fires first" shape recurs throughout this frontend.
+
 Persisted state is deliberately keyed by panel id only, not by panel version. When the model sends a new spec for the same panel, previously entered values survive if their fields still exist and are silently discarded if they do not — the behaviour a user expects when a dashboard refreshes under a filter they set.
 
 ### Model visibility
