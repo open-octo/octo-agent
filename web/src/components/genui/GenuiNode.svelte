@@ -44,6 +44,7 @@
   import GenuiQuiz from './GenuiQuiz.svelte'
   import GenuiCollapsible from './GenuiCollapsible.svelte'
   import GenuiCode from './GenuiCode.svelte'
+  import GenuiLink from './GenuiLink.svelte'
   import GenuiDivider from './GenuiDivider.svelte'
   import GenuiPlot from './GenuiPlot.svelte'
   import GenuiMermaid from './GenuiMermaid.svelte'
@@ -98,6 +99,8 @@
     <GenuiDivider />
   {:else if node.type === 'code'}
     <GenuiCode {node} />
+  {:else if node.type === 'link'}
+    <GenuiLink {node} />
   {:else if node.type === 'plot'}
     <GenuiPlot {node} />
   {:else if node.type === 'mermaid'}

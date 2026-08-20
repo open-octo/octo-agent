@@ -64,6 +64,7 @@ fence.
 | `callout` | `tone?: "info"\|"success"\|"warning"\|"danger"`, `title?: string`, `text?: string` | Alert box |
 | `divider` | none | A rule between groups |
 | `code` | `code: string`, `lang?: string` | Monospaced excerpt. Highlighted for javascript, typescript, go, python, bash, json, xml; any other `lang` renders as plain monospace rather than failing |
+| `link` | `text: string`, `href: string` | Opens in a new tab. Only `http://`, `https://`, `mailto:` and `tel:` are accepted — anything else drops the whole node, since a link that cannot be followed still looks like one. Omit `text` and the href is shown instead |
 | `collapsible` | `title: string`, `children: GenuiNode[]`, `open?: boolean` | Foldable section. `open` seeds the first render only — after that the user's toggle wins, and it survives a reload |
 | `plot` | `plot: "bar"\|"line"\|"area"\|"pie"`, `series: {name?: string, points: {label: string, value: number}[]}[]`, `stacked?: boolean`, `legend?: boolean`, `xLabel?: string`, `yLabel?: string`, `height?: number` | See the plot notes below |
 | `mermaid` | `code: string` | A mermaid diagram, rendered inline |
@@ -77,9 +78,11 @@ clamped to zero. Colours are assigned automatically and follow the user's
 theme — there is no colour field, and there is no `type` for colour or CSS
 anywhere in this table.
 
-There is still no `href`-bearing node and no 3D node. Don't invent fields
-outside this table — anything not listed here is stripped before it reaches
-the renderer (see "Caps and what happens past them").
+`link` is the only node carrying a URL, and it is the way to send the user
+somewhere — don't put a `button` on it, which would cost a whole turn just to
+hand back a link. There is no 3D node. Don't invent fields outside this table
+— anything not listed here is stripped before it reaches the renderer (see
+"Caps and what happens past them").
 
 ### Interactive nodes (inline fence only)
 
@@ -231,6 +234,8 @@ oversized spec — going over a cap doesn't fail your call, it silently trims:
 - Max `tabs` entries: **8**
 - Max `code` / `mermaid` / `textarea` default text: **5000** characters
 - Max `plot` series: **8**; max points per series: **100**
+- Max `link` href: **2000** characters — an over-long one drops the node
+  rather than being truncated into a link pointing elsewhere
 - `textarea` `rows`: clamped to **2–12**
 - A `button`'s `payload` object: also depth- and width-capped (same depth
   limit as the node tree; up to 50 keys/entries per level), but that budget

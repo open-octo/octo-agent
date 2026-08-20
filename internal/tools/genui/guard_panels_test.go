@@ -90,6 +90,49 @@ func TestSanitize_TableSortableKeptFilterDropped(t *testing.T) {
 	}
 }
 
+func TestSanitize_LinkSchemeWhitelist(t *testing.T) {
+	for _, href := range []string{"http://a.test/x", "https://a.test/x", "mailto:a@b.test", "tel:+8613800138000"} {
+		got := sanitizeOne(t, map[string]any{"type": "link", "text": "go", "href": href})
+		if got == nil {
+			t.Fatalf("href %q was dropped, want kept", href)
+		}
+		if got["href"] != href {
+			t.Fatalf("href = %v, want %q", got["href"], href)
+		}
+	}
+
+	// A rejected link must not render as inert text — it would still look
+	// clickable. Casing and surrounding whitespace must not sneak past.
+	for _, href := range []string{
+		"javascript:alert(1)",
+		"  JavaScript:alert(1)",
+		"data:text/html,<script>",
+		"file:///etc/passwd",
+		"vbscript:x",
+		"//a.test",
+		"",
+	} {
+		if got := sanitizeOne(t, map[string]any{"type": "link", "text": "go", "href": href}); got != nil {
+			t.Fatalf("href %q was accepted: %#v", href, got)
+		}
+	}
+}
+
+func TestSanitize_LinkOverLongHrefDropped(t *testing.T) {
+	// Truncating would produce a link pointing somewhere other than it claims.
+	long := "https://a.test/" + strings.Repeat("x", MaxHrefLen)
+	if got := sanitizeOne(t, map[string]any{"type": "link", "text": "x", "href": long}); got != nil {
+		t.Fatalf("over-long href was kept: %#v", got)
+	}
+}
+
+func TestSanitize_LinkFallsBackToHrefAsText(t *testing.T) {
+	got := sanitizeOne(t, map[string]any{"type": "link", "href": "https://a.test/x"})
+	if got["text"] != "https://a.test/x" {
+		t.Fatalf("text = %v, want the href", got["text"])
+	}
+}
+
 func TestSanitize_PlotRejectsUnusableInput(t *testing.T) {
 	cases := []map[string]any{
 		{"type": "plot", "plot": "sankey", "series": []any{map[string]any{"points": []any{map[string]any{"label": "a", "value": 1.0}}}}},

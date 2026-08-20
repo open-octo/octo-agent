@@ -237,6 +237,19 @@ export interface GenuiCodeNode {
   lang?: string
 }
 
+/**
+ * The only node carrying a URL. `href` is checked against markdown.ts's
+ * isSafeHref — the same http/https/mailto/tel whitelist links in ordinary
+ * reply text go through — and a node whose href fails it is dropped rather
+ * than rendered as inert text, so a link is never shown in a state where
+ * clicking it does nothing.
+ */
+export interface GenuiLinkNode {
+  type: 'link'
+  text: string
+  href: string
+}
+
 export interface GenuiDividerNode {
   type: 'divider'
 }
@@ -285,6 +298,7 @@ type GenuiNodeVariant =
   | GenuiQuizNode
   | GenuiCollapsibleNode
   | GenuiCodeNode
+  | GenuiLinkNode
   | GenuiDividerNode
   | GenuiPlotNode
   | GenuiMermaidNode

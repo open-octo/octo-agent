@@ -12,6 +12,7 @@ import {
   MAX_TEXTAREA_LEN,
   MAX_PLOT_POINTS,
   MAX_PLOT_SERIES,
+  MAX_HREF_LEN,
 } from './guard'
 
 const ALL: ReadonlySet<string> = new Set([...READ_ONLY_NODE_TYPES, ...INTERACTIVE_NODE_TYPES])
@@ -138,6 +139,37 @@ describe('content nodes', () => {
     const n = one({ type: 'collapsible', title: 'more', open: true, children: [{ type: 'text', text: 'x' }] })
     expect(n.open).toBe(true)
     expect(n.children.length).toBe(1)
+  })
+})
+
+describe('link', () => {
+  it('keeps the whitelisted schemes', () => {
+    for (const href of ['http://a.test/x', 'https://a.test/x', 'mailto:a@b.test', 'tel:+8613800138000']) {
+      expect(one({ type: 'link', text: 'go', href })?.href).toBe(href)
+    }
+  })
+
+  it('drops a node whose href is not followable', () => {
+    // A rejected link must not render as inert text — it would still look
+    // clickable. Same whitelist markdown links go through.
+    for (const href of ['javascript:alert(1)', 'data:text/html,<script>', 'file:///etc/passwd', 'vbscript:x', '', '//a.test']) {
+      expect(one({ type: 'link', text: 'go', href })).toBeUndefined()
+    }
+  })
+
+  it('is not fooled by casing or surrounding whitespace', () => {
+    expect(one({ type: 'link', text: 'x', href: '  HTTPS://a.test/x  ' })?.href).toBe('HTTPS://a.test/x')
+    expect(one({ type: 'link', text: 'x', href: '  JavaScript:alert(1)' })).toBeUndefined()
+  })
+
+  it('drops an over-long href instead of truncating it', () => {
+    // Truncating would produce a link pointing somewhere other than it claims.
+    const long = 'https://a.test/' + 'x'.repeat(MAX_HREF_LEN)
+    expect(one({ type: 'link', text: 'x', href: long })).toBeUndefined()
+  })
+
+  it('falls back to showing the href when no text is given', () => {
+    expect(one({ type: 'link', href: 'https://a.test/x' })?.text).toBe('https://a.test/x')
   })
 })
 

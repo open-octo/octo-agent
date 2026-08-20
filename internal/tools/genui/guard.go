@@ -9,6 +9,7 @@ package genui
 import (
 	"fmt"
 	"math"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -42,6 +43,9 @@ const (
 	MaxMermaidLen = 5000
 	MaxCodeLen    = 5000
 	MaxPlotPoints = 100
+	// MaxHrefLen is well past any real URL; a longer one is dropped rather
+	// than truncated into something pointing elsewhere.
+	MaxHrefLen = 2000
 	// MaxPlotSeries matches the fixed colour sequence the renderer draws from;
 	// a ninth series would have no distinct colour left to take.
 	MaxPlotSeries = 8
@@ -71,9 +75,26 @@ var ReadOnlyNodeTypes = map[string]bool{
 	// rather than input: it reports nothing back and needs no field.
 	"collapsible": true,
 	"code":        true,
+	"link":        true,
 	"divider":     true,
 	"plot":        true,
 	"mermaid":     true,
+}
+
+// safeHrefSchemes mirrors the frontend's isSafeHref whitelist
+// (web/src/lib/markdown.ts). Deliberately a second, independent
+// implementation rather than a shared one — same posture as the rest of this
+// guard, which duplicates the TS policy so neither side is the only check.
+var safeHrefSchemes = []string{"http://", "https://", "mailto:", "tel:"}
+
+func isSafeHref(href string) bool {
+	lower := strings.ToLower(strings.TrimSpace(href))
+	for _, scheme := range safeHrefSchemes {
+		if strings.HasPrefix(lower, scheme) {
+			return true
+		}
+	}
+	return false
 }
 
 // Sanitize validates and clamps a GenUI spec against the allowed node-type
@@ -211,6 +232,21 @@ func sanitizeNode(node map[string]any, allowed map[string]bool, depth int, count
 		if lang, ok := node["lang"].(string); ok {
 			out["lang"] = clampString(lang, MaxStringLen)
 		}
+
+	case "link":
+		href := strings.TrimSpace(stringField(node, "href"))
+		// A rejected or over-long href drops the node rather than rendering an
+		// inert or truncated link: either still looks clickable and isn't, or
+		// points somewhere other than where it claims.
+		if !isSafeHref(href) || len(href) > MaxHrefLen {
+			return nil
+		}
+		text := clampString(stringField(node, "text"), MaxStringLen)
+		if text == "" {
+			text = href
+		}
+		out["text"] = text
+		out["href"] = href
 
 	case "divider":
 		// No fields at all.

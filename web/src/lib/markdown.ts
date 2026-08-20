@@ -14,7 +14,13 @@ export function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;")
 }
 
-function isSafeHref(href: string): boolean {
+/**
+ * The one URL scheme whitelist in the frontend. Exported so GenUI's `link`
+ * node uses this list rather than inventing a second one that would drift
+ * from it — a requirement stated in dev-docs/genui-design.md's security
+ * design before any linking node existed.
+ */
+export function isSafeHref(href: string): boolean {
   if (!href) return false
   const lower = href.trim().toLowerCase()
   return lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("mailto:") || lower.startsWith("tel:")

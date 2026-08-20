@@ -9,6 +9,7 @@
 // Cap values here must stay in lockstep with the Go guard's constants.
 
 import type { GenuiNode, GenuiSpec } from './types'
+import { isSafeHref } from '../markdown'
 
 export const MAX_DEPTH = 8
 export const MAX_NODES = 200
@@ -39,6 +40,9 @@ export const MAX_TEXTAREA_LEN = 5000
 export const MAX_TEXTAREA_ROWS = 12
 export const MIN_TEXTAREA_ROWS = 2
 export const MAX_PLOT_POINTS = 100
+/** Well past any real URL; a longer one is dropped rather than truncated
+ * into something pointing elsewhere. */
+export const MAX_HREF_LEN = 2000
 /** Matches the fixed colour sequence a plot draws from — a ninth series would
  * have no distinct colour left to take. */
 export const MAX_PLOT_SERIES = 8
@@ -76,6 +80,7 @@ export const READ_ONLY_NODE_TYPES: ReadonlySet<string> = new Set([
   // rather than input: it reports nothing back and needs no field.
   'collapsible',
   'code',
+  'link',
   'divider',
   'plot',
   'mermaid',
@@ -390,6 +395,20 @@ function sanitizeByType(
       const out: any = { type: 'code', code: clampString(stringField(node, 'code'), MAX_CODE_LEN) }
       if (typeof node.lang === 'string') out.lang = clampString(node.lang, MAX_STRING_LEN)
       return out
+    }
+
+    case 'link': {
+      const href = stringField(node, 'href').trim()
+      // Reuses markdown.ts's whitelist rather than a second copy that would
+      // drift from it. A rejected href drops the node: a link that cannot be
+      // followed is worse than no link, because it still looks like one.
+      //
+      // An over-long href is dropped rather than clamped for the same reason —
+      // truncating a URL produces a link that points somewhere other than
+      // where it claims, which is worse than showing nothing.
+      if (!isSafeHref(href) || href.length > MAX_HREF_LEN) return null
+      const text = clampString(stringField(node, 'text'), MAX_STRING_LEN)
+      return { type: 'link', text: text || href, href } as GenuiNode
     }
 
     case 'divider':

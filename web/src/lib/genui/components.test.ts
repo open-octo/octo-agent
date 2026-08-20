@@ -222,6 +222,18 @@ describe('plot', () => {
   })
 })
 
+describe('link', () => {
+  it('opens in a new tab without handing over window.opener', () => {
+    const el = render({ items: [{ type: 'link', text: 'docs', href: 'https://a.test/x' }] })
+    const a = el.querySelector('a.genui-link') as HTMLAnchorElement
+    expect(a.getAttribute('href')).toBe('https://a.test/x')
+    expect(a.getAttribute('target')).toBe('_blank')
+    // Without noopener the opened page can navigate this one through opener.
+    expect(a.getAttribute('rel')).toContain('noopener')
+    expect(a.textContent).toContain('docs')
+  })
+})
+
 describe('divider', () => {
   it('renders a rule', () => {
     const el = render({ items: [{ type: 'divider' }] })
