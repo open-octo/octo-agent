@@ -1,11 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, cmdkOpen, sidebar, nativeShell, panelContent, activeSessionId, settingsModalOpen } from '../../lib/stores'
+  import { sidebar, nativeShell } from '../../lib/stores'
   import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
-  import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
   import { nativeToggleMaximise, nativeMinimise, nativeClose, nativeWindowState } from '../../lib/api'
-  import OctoLogo from './OctoLogo.svelte'
 
   // The title-bar toggle is a plain show/hide (the redesign has no manual rail
   // state); 'rail' remains reachable only through the responsive auto-collapse
@@ -14,31 +12,14 @@
     sidebar.update(s => s === 'hidden' ? 'full' : 'hidden')
   }
 
-  // Toggle the Artifacts panel sidebar.
-  // With a session active → its artifacts (the empty state included); light
-  // apps only when no session is selected.
-  function togglePanel() {
-    const cur = $panelContent
-    if (cur) { panelContent.set(null); return }
-    if ($view === 'chat' && $activeSessionId) {
-      panelContent.set('session')
-    } else {
-      panelContent.set('lightapps')
-    }
-  }
-
-  // The bell toggles desktop notifications on/off — the same preference the
-  // "Desktop Notifications" switch in Settings drives. There is no feed.
-  function toggleNotifications() {
-    setNotificationsEnabled(!$notificationsEnabled)
-  }
-
-  // Mac keeps its native title bar (see bridge.go's MacTitleBarHiddenInset), so
-  // the real NSWindow traffic lights render themselves, inset top-left — the
-  // header just insets its own content past them (native-inset below).
-  // Windows/Linux are Frameless, so the frontend draws its own right-side
-  // window controls; the CSS --wails-draggable header region (framelessDrag.ts)
-  // handles dragging there, and the native bridge handles minimise/maximise/close.
+  // This bar now sits inside <main> — it spans the content column, not the
+  // whole window, so it carries none of the sidebar's own chrome (brand,
+  // search, notifications, the artifacts toggle all moved to Sidebar's own
+  // header). What's left is the sidebar-collapse toggle (it must stay
+  // reachable even with the sidebar hidden, so it can't live inside the thing
+  // it toggles) plus desktop-only window chrome. Mac's native traffic lights
+  // float over the window's true top-left corner, which is now Sidebar's
+  // header, not this one — so the inset padding lives there instead.
   const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
   // Desktop only: double-clicking the draggable header zooms the window, the way
@@ -86,18 +67,10 @@
   })
 </script>
 
-<header class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
-  <!-- Left: sidebar toggle + brand (on desktop mac they sit after the native
-       traffic lights' inset). -->
+<header style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
   <button class="icon-btn" title={$t('header.toggle_left')} aria-pressed={$sidebar !== 'hidden'} onclick={toggleSidebar}>
     <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
   </button>
-  <div class="brand">
-    <OctoLogo class="logo" size={22} />
-    <span class="name">Octo</span>
-    <span class="brand-divider"></span>
-    <span class="sub">{$t('nav.workbench')}</span>
-  </div>
 
   <span class="spacer"></span>
 
@@ -110,33 +83,6 @@
       <iconify-icon icon="ant-design:loading-outlined" width="16" style="color:var(--warning);animation:octo-spin 0.8s linear infinite"></iconify-icon>
     </button>
   {/if}
-
-  <button class="search-btn" title={$t('header.search_sessions')} onclick={() => cmdkOpen.set(true)}>
-    <iconify-icon icon="ant-design:search-outlined" width="15"></iconify-icon>
-    <span class="label">{$t('header.search_sessions')}</span>
-    <kbd>⌘K</kbd>
-  </button>
-
-  <div class="ptoggle-group">
-    <button
-      class="ptoggle"
-      class:on={$panelContent !== null}
-      title={$t('header.toggle_right')}
-      aria-pressed={$panelContent !== null}
-      onclick={togglePanel}
-    >
-      <iconify-icon icon="lucide:panel-right" width="16"></iconify-icon>
-    </button>
-  </div>
-
-  <span class="divider"></span>
-
-  <button class="icon-btn" class:active={$notificationsEnabled} title={$t('header.notifications')} aria-pressed={$notificationsEnabled} onclick={toggleNotifications}>
-    <iconify-icon icon={$notificationsEnabled ? 'ant-design:bell-filled' : 'ant-design:bell-outlined'} width="17"></iconify-icon>
-  </button>
-  <button class="icon-btn" class:active={$settingsModalOpen} title={$t('nav.settings')} onclick={() => settingsModalOpen.set(true)}>
-    <iconify-icon icon="ant-design:setting-outlined" width="17"></iconify-icon>
-  </button>
 
   {#if $nativeShell && !isMac}
     <div class="window-controls">
@@ -151,100 +97,35 @@
 
 <style>
 header {
-  height: 48px;
-  flex: 0 0 48px;
+  height: 40px;
+  flex: 0 0 40px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 16px;
+  padding: 0 10px;
   border-bottom: 1px solid var(--border-secondary);
   background: var(--titlebar-frost);
   backdrop-filter: blur(var(--frost-blur));
   -webkit-backdrop-filter: blur(var(--frost-blur));
   z-index: 100;
 }
-/* Mac's native hidden-inset title bar floats the real traffic-light buttons
-   over the top-left of the content area, so inset the header past them.
-   Their vertical position is fixed by macOS (not by our header height), and
-   it sits above this row's flex-centered line — padding-top would only push
-   the content further down, away from the lights, so pull the centering axis
-   up instead via padding-bottom (shrinks the box from the bottom, which
-   raises the align-items:center midpoint without moving the header's own
-   background/border box). Value confirmed by pixel-measuring a live build's
-   traffic-light center against the content center, not eyeballed. */
-header.native-inset { padding-left: 82px; padding-bottom: 8px; }
 /* The header is a window drag handle. Every interactive control on it opts
-   back to no-drag so it stays clickable — the blank strips between controls
-   drag the window. Applied for all platforms (frameless window now), not just
-   macOS, since --wails-draggable only activates under Frameless: true. */
+   back to no-drag so it stays clickable — the blank strip is what drags the
+   window. */
 header .icon-btn,
-header .search-btn,
-header .ptoggle-group,
-header .brand,
 header .window-controls { --wails-draggable: no-drag; }
 
 .spacer { flex: 1; }
-.brand { display: flex; align-items: center; gap: 9px; padding-left: 2px; }
-.brand :global(.logo) { color: var(--blue-6); flex: 0 0 auto; }
-.name { font-size: 14px; font-weight: 600; color: var(--text-heading); }
-.brand-divider { width: 1px; height: 15px; background: var(--border); }
-.sub { font-size: 12px; color: var(--text-tertiary); white-space: nowrap; }
-
-.search-btn {
-  display: flex; align-items: center; gap: 7px;
-  height: 30px; padding: 0 9px;
-  background: transparent; border: none; border-radius: var(--radius-sm);
-  color: var(--text-secondary); cursor: pointer; font-family: inherit;
-  /* The header can't wrap (fixed 48px) and every other control is
-     fixed-width, so the label was the only thing that could give: it wrapped
-     to several lines inside the 30px-tall button and spilled over the
-     header's edge into the view below. */
-  flex: 0 0 auto; white-space: nowrap;
-}
-.search-btn:hover { background: var(--hover-neutral); color: var(--text); }
-kbd { font-size: 11px; font-family: var(--font-mono); }
-
-/* Narrow windows: nothing here shrinks, so shed the label-only decoration
-   instead of letting controls collide. Steps reuse the widths the sidebar
-   already switches on (Sidebar.svelte: rail below 860, hidden below 640). */
-@media (max-width: 860px) {
-  .sub, .brand-divider { display: none; }
-  .search-btn kbd { display: none; }
-}
-@media (max-width: 640px) {
-  /* Icon-only from here — the title attribute carries the meaning, the same
-     way ChatView's header buttons drop their labels below 680px. */
-  .search-btn .label { display: none; }
-  .search-btn { padding: 0 7px; }
-}
-
-.ptoggle-group {
-  display: inline-flex; gap: 2px; padding: 2px;
-  background: var(--control-track); border-radius: var(--radius-sm);
-}
-.ptoggle {
-  width: 30px; height: 26px; display: grid; place-items: center;
-  border: none; background: transparent; border-radius: 6px;
-  cursor: pointer; color: var(--text-secondary); transition: 0.12s;
-}
-.ptoggle:hover { color: var(--text); }
-.ptoggle.on {
-  background: var(--bg-container); color: var(--blue-6);
-  box-shadow: 0 1px 2px rgba(0,0,0,0.14);
-}
-
-.divider { width: 1px; height: 18px; background: var(--border); }
 
 .icon-btn {
-  width: 30px; height: 30px; border: none; background: transparent;
+  width: 28px; height: 28px; border: none; background: transparent;
   border-radius: var(--radius-sm); display: grid; place-items: center;
-  cursor: pointer; color: var(--text-secondary);
+  cursor: pointer; color: var(--text-secondary); flex: 0 0 auto;
 }
 .icon-btn:hover { background: var(--hover-neutral); color: var(--text); }
-.icon-btn.active { color: var(--blue-6); }
 
-/* Window controls (Windows/Linux only — Mac uses native traffic lights via the
-   hidden-inset title bar). Stretch to the bar height and bleed into the right
+/* Window controls (Windows/Linux only — Mac uses native traffic lights over
+   Sidebar's own header). Stretch to the bar height and bleed into the right
    padding so the hit area reaches the window edge. Maximise icon flips □/❐ to
    reflect the window state. */
 .window-controls {
@@ -253,7 +134,7 @@ kbd { font-size: 11px; font-family: var(--font-mono); }
   align-items: stretch;
   gap: 0;
   margin-left: 4px;
-  margin-right: -16px;
+  margin-right: -10px;
 }
 .window-btn {
   width: 46px; border: none; background: transparent;

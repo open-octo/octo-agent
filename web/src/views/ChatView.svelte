@@ -57,7 +57,6 @@
     agenticSessions,
     chatGoal,
     nativeShell,
-    panelContent,
   } from '../lib/stores'
   import { ws, wsState, wsReconnect } from '../lib/ws'
   import * as api from '../lib/api'
@@ -2368,13 +2367,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       <button class="hdr-btn" title={$t('chat.compact_tooltip')} disabled={!id || streaming} onclick={() => send('/compact')}>
         <iconify-icon icon="ant-design:compress-outlined" width="13"></iconify-icon>
         <span class="btn-label">{$t('chat.compact')}</span>
-      </button>
-      <button class="hdr-btn" title={$t('artifacts.toggle')} onclick={() => {
-        if ($panelContent) panelContent.set(null)
-        else panelContent.set(id ? 'session' : 'lightapps')
-      }}>
-        <iconify-icon icon="lucide:box" width="13"></iconify-icon>
-        <span class="btn-label">{$t('artifacts.toggle')}</span>
       </button>
       <button class="hdr-btn" title={$t('chat.export')} onclick={enterExportMode}>
         <iconify-icon icon="ant-design:export-outlined" width="13"></iconify-icon>

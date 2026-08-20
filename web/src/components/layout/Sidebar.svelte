@@ -1,14 +1,32 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import { get } from 'svelte/store'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen, cmdkOpen, panelContent, nativeShell } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
   import { splitSections, swapWithinSection, parseSectionFold, type SectionFold } from '../../lib/sidebarSections'
   import { ago } from '../../lib/relTime'
   import { ws } from '../../lib/ws'
+  import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
   import VersionBadge from './VersionBadge.svelte'
+  import OctoLogo from './OctoLogo.svelte'
+
+  // Toggle the Artifacts panel.
+  function togglePanel() {
+    panelContent.update(v => v ? null : 'session')
+  }
+
+  // The bell toggles desktop notifications on/off — the same preference the
+  // "Desktop Notifications" switch in Settings drives. There is no feed.
+  function toggleNotifications() {
+    setNotificationsEnabled(!$notificationsEnabled)
+  }
+
+  // Mac's native traffic-light buttons float over the window's true top-left
+  // corner — now Sidebar's own header, since the old page-spanning title bar
+  // is gone. Inset past them the same way that bar used to.
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
   // Project whose row menu is open, by id ('' = none). Local rather than a store:
   // nothing outside this sidebar opens or reads it.
@@ -476,6 +494,20 @@
 
   {#if $sidebar === 'full'}
   <div class="full">
+    <div class="side-header" class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag">
+      <OctoLogo class="logo" size={20} />
+      <span class="brand-name">Octo</span>
+      <span class="spacer"></span>
+      <button class="icon-btn" title={$t('header.search_sessions')} onclick={() => cmdkOpen.set(true)}>
+        <iconify-icon icon="ant-design:search-outlined" width="15"></iconify-icon>
+      </button>
+      <button class="icon-btn" class:active={$panelContent !== null} title={$t('header.toggle_right')} aria-pressed={$panelContent !== null} onclick={togglePanel}>
+        <iconify-icon icon="lucide:panel-right" width="15"></iconify-icon>
+      </button>
+      <button class="icon-btn" class:active={$notificationsEnabled} title={$t('header.notifications')} aria-pressed={$notificationsEnabled} onclick={toggleNotifications}>
+        <iconify-icon icon={$notificationsEnabled ? 'ant-design:bell-filled' : 'ant-design:bell-outlined'} width="16"></iconify-icon>
+      </button>
+    </div>
     <div class="scroll">
       <!-- Where you go, above what you have been doing. The session list is the
            long, growing part of this sidebar; putting it last means a nav row's
@@ -849,6 +881,36 @@
 
 <style>
 .full { width: 256px; height: 100%; display: flex; flex-direction: column; min-height: 0; }
+/* Sidebar's own header — the redesign split the old page-spanning title bar
+   into per-block chrome; this is the sidebar's block. It carries the brand
+   and the controls that make sense wherever the sidebar is mounted, not tied
+   to any one view: search, the artifacts panel toggle, notifications.
+   Settings keeps its existing home in the footer below, rather than doubling
+   up here. */
+.side-header {
+  flex: 0 0 40px; height: 40px;
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border-secondary);
+}
+/* Mac's native traffic-light buttons float over the window's true top-left
+   corner, which is this row now that the old full-width title bar is gone.
+   Same padding-bottom-not-padding-top reasoning as the title bar used: their
+   vertical position is fixed by macOS, above this row's centered line, so
+   pulling the centering axis up (shrinking from the bottom) lines up with
+   them without moving the row's own background/border box. */
+.side-header.native-inset { padding-left: 82px; padding-bottom: 8px; }
+.side-header :global(.logo) { color: var(--blue-6); flex: 0 0 auto; }
+.brand-name { font-size: 14px; font-weight: 600; color: var(--text-heading); flex: 0 0 auto; }
+.side-header .spacer { flex: 1; }
+.side-header .icon-btn {
+  width: 28px; height: 28px; border: none; background: transparent;
+  border-radius: var(--radius-sm); display: grid; place-items: center;
+  cursor: pointer; color: var(--text-secondary); flex: 0 0 auto;
+  --wails-draggable: no-drag;
+}
+.side-header .icon-btn:hover { background: var(--hover-neutral); color: var(--text); }
+.side-header .icon-btn.active { color: var(--blue-6); }
 /* Matches .scroll's horizontal padding so the row lines up with every nav row
    below it — it is one of them, just pinned above the scrolling area. */
 .ap-item {
