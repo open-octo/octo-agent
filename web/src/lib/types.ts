@@ -1,4 +1,4 @@
-export type View = 'chat' | 'agents' | 'skills' | 'workflows' | 'tasks' | 'browser' | 'mcp' | 'channels' | 'files' | 'lightapps'
+export type View = 'chat' | 'agents' | 'skills' | 'workflows' | 'tasks' | 'browser' | 'mcp' | 'channels' | 'lightapps'
 export type SidebarMode = 'full' | 'rail' | 'hidden'
 export type MemTab = 'soul' | 'user' | 'memories'
 export type ArtifactView = 'preview' | 'code'
