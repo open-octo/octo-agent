@@ -13,10 +13,19 @@ import "runtime"
 //     is invisible until PATH is refreshed in-command or octo restarts;
 //   - installers raise a UAC dialog only a user at the screen can approve;
 //   - the default execution policy blocks Node's npm.ps1 shim.
+//
+// It also steers file writes away from the PowerShell cmdlets entirely: their
+// default encodings (ANSI from Set-Content, UTF-16LE from `>`) re-encode files
+// that were UTF-8, which users see as their source files getting corrupted.
 const shellEnvNoteWindows = "- Shell: PowerShell. Use PowerShell syntax and cmdlets " +
 	"(Get-ChildItem, Get-Content, Select-String, Remove-Item, $env:VAR), not POSIX sh. " +
 	"Chain commands with `;` rather than `&&` (Windows PowerShell 5.1 lacks `&&`). " +
 	"Prefer the built-in read_file / glob / grep tools over shelling out — they're identical across platforms.\n" +
+	"- Writing files: never create or rewrite a file with `Set-Content`, `Add-Content`, `Out-File`, `>` or `>>`. " +
+	"Windows PowerShell 5.1 writes ANSI (the host code page — GBK on a Chinese Windows) from Set-Content/Add-Content " +
+	"and UTF-16LE from `>`/Out-File, while Get-Content decodes as ANSI, so a read-modify-write pipeline such as " +
+	"`(Get-Content f) -replace 'a','b' | Set-Content f` silently re-encodes a UTF-8 file and drops every character " +
+	"the code page cannot map. Use write_file / edit_file instead — they always read and write UTF-8.\n" +
 	"- Installing tools mid-session: every terminal command runs in a fresh shell inheriting octo's " +
 	"startup PATH, so a tool installed via winget/MSI is NOT found afterwards even though the install " +
 	"succeeded. Refresh PATH inside the same command — " +
