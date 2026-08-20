@@ -597,6 +597,16 @@
 
         {:else if cat === 'data'}
           {#if dataSubView === 'none'}
+            <!-- Memory leads: it's the row users come here to edit, while the
+                 archive and the recycle bin are visited only when something
+                 needs recovering. -->
+            <div class="data-row">
+              <div class="data-row-main">
+                <iconify-icon icon="ant-design:user-outlined" width="15"></iconify-icon>
+                <span class="setl">{$t('nav.memory')}</span>
+              </div>
+              <button class="link-btn" onclick={() => (dataSubView = 'memory')}>{$t('settings.data.manage')}</button>
+            </div>
             <div class="data-row">
               <div class="data-row-main">
                 <iconify-icon icon="lucide:archive" width="15"></iconify-icon>
@@ -611,13 +621,6 @@
                 <span class="setl">{$t('nav.file_recall')}</span>
               </div>
               <button class="link-btn" onclick={() => (dataSubView = 'trash')}>{$t('settings.data.manage')}</button>
-            </div>
-            <div class="data-row">
-              <div class="data-row-main">
-                <iconify-icon icon="ant-design:user-outlined" width="15"></iconify-icon>
-                <span class="setl">{$t('nav.memory')}</span>
-              </div>
-              <button class="link-btn" onclick={() => (dataSubView = 'memory')}>{$t('settings.data.manage')}</button>
             </div>
           {:else}
             <div class="data-subhead">
