@@ -71,9 +71,10 @@ The moment you notice a signal worth carrying forward:
 - A correction ("don't do X") — save the rule **and** the WHY they gave (often a past incident).
 - A non-obvious choice the user accepts without pushback — validated judgment matters too, not just corrections.
 - A project decision or milestone — a direction settled, an approach **rejected** ("considered X, decided against — don't re-propose"), a phase shipped. The diff and git log already record *what* changed; save the *why*, the alternatives ruled out, and any constraint future sessions must respect.
+- A non-obvious environment or tooling behaviour you worked out the hard way — the symptom, the cause, and how to recognise it next time. Nobody will hand you this one: the signal is your own lost time, not something the user said, so it is the easiest kind to keep re-discovering.
 - An external resource and what it's for (a dashboard, ticket project, channel, repo).
 
-Do **not** save one-off task state, the content of code changes (the diff and git log already hold those), anything already in CLAUDE.md / .octorules, debug recipes already in the code, or secrets/tokens/credentials.
+Do **not** save one-off task state, the content of code changes (the diff and git log already hold those), anything already in `.octorules`, a recipe already written down where you would next go looking for it, or secrets/tokens/credentials.
 
 ### Grounding answers in memory
 

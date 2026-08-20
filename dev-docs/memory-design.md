@@ -83,10 +83,19 @@ what the agent writes now surfaces in the *next* session, not the current one.
 The session-prompt guidance (`internal/prompt/base.md`, "Memory" section)
 covers when to save (lasting preferences, corrections + the why, validated
 judgment, project decisions and milestones — the rationale and the
-alternatives ruled out, not the diff — and external resources), what not to
-save (one-off task state, the content of code changes, secrets), grounding
-answers in memory with a brief inline attribution, and verifying a remembered
-file/flag still exists before acting on it.
+alternatives ruled out, not the diff — a non-obvious environment or tooling
+behaviour the agent worked out the hard way, and external resources), what not
+to save (one-off task state, the content of code changes, anything already in
+`.octorules`, secrets), grounding answers in memory with a brief inline
+attribution, and verifying a remembered file/flag still exists before acting
+on it.
+
+The tooling-behaviour entry is the one signal nobody hands the agent. Every
+other item on that list originates with the user — a preference stated, a
+correction given, a decision accepted — and the save-nudge below covers the
+milestone case. A trap discovered through trial and error has neither: no
+utterance to react to and no `gh pr` to fire on, which makes it the kind most
+likely to be paid for twice.
 
 ## Attention layer — structured rules, re-surfaced at the point of action
 

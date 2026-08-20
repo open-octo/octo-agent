@@ -261,9 +261,10 @@ func RenderInjection(dir string, inheritedDirs ...string) string {
 	b.WriteString("\n" + IndexFile + " is the index, loaded here every session; topic files beside it hold detail and load on demand.\n\n")
 	b.WriteString("Manage memory yourself with your file tools — that directory is writable:\n")
 	b.WriteString("- When the user states a lasting preference, gives feedback or a correction, or shares something worth recalling in future sessions, save it (append to " + IndexFile + ", or to a topic file linked from it).\n")
+	b.WriteString("- Save what you worked out the hard way too: a non-obvious environment or tooling behaviour that cost you real time and would cost it again. Nobody will tell you that one — the signal is your own struggle, so it is the easiest kind to keep re-discovering.\n")
 	b.WriteString("- Keep " + IndexFile + " a concise index; move long detail into topic files.\n")
 	b.WriteString("- For a load-bearing rule you must not skip, write it in full under a '## 必须遵守' (always-apply) section, or, if it only matters for certain tasks, under a '## 触发提醒' section with a leading '(触发: keyword1, keyword2)' clause. Rules in those sections are re-surfaced to you at the point of action; everything else stays a pointer index.\n")
-	b.WriteString("- Edit or delete entries that become wrong or obsolete. Don't store one-off task details or things already in the repo / CLAUDE.md.\n")
+	b.WriteString("- Edit or delete entries that become wrong or obsolete. Don't store one-off task details, or anything already in .octorules or the repo's own docs.\n")
 	if len(inheritedDirs) > 0 {
 		b.WriteString("- When saving new memories, sort them by scope: write project-specific facts (repo conventions, tech stack, architecture) to the project memory above; write cross-project or personal preferences (coding style, tool defaults, name, role, habits) to the inherited (home) memory. If unsure, prefer the project memory — it can always be moved later.\n")
 	}
