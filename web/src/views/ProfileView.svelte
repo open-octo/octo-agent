@@ -1,11 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { memTab, showToast, openAgentSession } from '../lib/stores'
+  import { memTab, showToast, openAgentSession, settingsModalOpen } from '../lib/stores'
   import StatusTag from '../components/ui/StatusTag.svelte'
   import { renderMarkdown } from '../lib/markdown'
   import * as api from '../lib/api'
   import type { Memory } from '../lib/types'
   import { t, tr } from '../lib/i18n'
+
+  // embedded=true when mounted inside Settings' 数据管理 pane rather than as a
+  // standalone view — same pattern as FileRecallView.
+  let { embedded = false }: { embedded?: boolean } = $props()
 
   // --- state ---
   interface SoulData {
@@ -95,7 +99,10 @@
 
   // Agentic-first: open a fresh chat and auto-send the curate command. soul/user
   // run the onboard skill scoped to that one file; memories opens a freeform turn.
+  // Closing the modal is a no-op when this view isn't embedded in it — but
+  // embedded, the chat this opens would otherwise be stuck behind Settings.
   function openAssistantChat(prompt: string, name = 'Profile update') {
+    settingsModalOpen.set(false)
     openAgentSession(prompt, name)
   }
 
@@ -121,12 +128,14 @@
   })
 </script>
 
-<div class="page">
-  <div class="inner">
+<div class="page" class:embedded>
+  <div class="inner" class:embedded>
+    {#if !embedded}
     <div class="page-header">
       <h2>{$t('profile.title')}</h2>
       <p>{$t('profile.subtitle')}</p>
     </div>
+    {/if}
 
     <!-- Tabs -->
     <div class="tabs">
@@ -248,7 +257,9 @@
 
 <style>
 .page { flex: 1; overflow-y: auto; min-height: 0; background: var(--bg-layout); }
+.page.embedded { flex: none; overflow: visible; background: none; }
 .inner { max-width: 780px; margin: 0 auto; padding: 26px 28px 40px; display: flex; flex-direction: column; gap: 20px; }
+.inner.embedded { max-width: none; margin: 0; padding: 0; }
 .page-header { display: flex; flex-direction: column; }
 h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; color: var(--text-heading); }
 p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 60ch; }
