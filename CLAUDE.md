@@ -44,7 +44,7 @@ Five-layer stack with one-directional dependencies:
    Provider wire quirks are encapsulated here — the agent layer never branches on protocol.
 
 5. **Tools (`internal/tools/`)** — concrete `ToolExecutor` implementations.
-   - `terminal.go` — current canonical example. Tool name `terminal` rather than `bash` because the implementation shells out via the platform shell — `sh -c` on macOS/Linux, PowerShell (`pwsh`, else `powershell`) on Windows — not a hard `/bin/bash` dependency. The shell is selected in one place: `shellCommand` in `sandbox.go`. The model is told which shell it's on via the environment context (`cmd/octo/envcontext.go`).
+   - `terminal.go` — current canonical example. Tool name `terminal` rather than `bash` because the implementation shells out via the platform shell — `sh -c` on macOS/Linux, PowerShell (`pwsh`, else `powershell`) on Windows — not a hard `/bin/bash` dependency. The shell binary is selected in one place — `executil.PowerShell()` — shared by the terminal tool, hook scripts, and clipboard capture so a session never straddles two PowerShells; `shellCommand` in `sandbox.go` is the single place the command is wrapped. The model is told which shell it's on via the environment context (`cmd/octo/envcontext.go`).
    - `DefaultRegistry` dispatches by tool name. `DefaultTools()` returns the set sent to the LLM (tools are on by default; `--no-tools` disables them).
 
 ## Adding capability

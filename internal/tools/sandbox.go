@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 
 	"github.com/open-octo/octo-agent/internal/executil"
 	"github.com/open-octo/octo-agent/internal/sandbox"
@@ -129,7 +128,7 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 	if runtime.GOOS == "windows" {
 		// -NoProfile: reproducible env (don't run the user's $PROFILE).
 		// -NonInteractive: never block on a PowerShell prompt mid-command.
-		ps := resolvePowerShell()
+		ps := executil.PowerShell()
 		projectDir := WorkingDirOrCWD(ctx)
 		// Wrap Remove-Item to copy to trash first (parity with the POSIX rm
 		// wrapper) and shadow Stop-Process/taskkill so the self-kill guard
@@ -243,14 +242,3 @@ func applyWorkingDir(ctx context.Context, cmd *exec.Cmd) {
 		cmd.Dir = dir
 	}
 }
-
-// resolvePowerShell picks the Windows shell once: PowerShell 7+ (`pwsh`) when
-// present — it's the modern, cross-platform build and supports `&&`/`||`
-// pipeline chaining — else Windows PowerShell 5.1 (`powershell`), which ships
-// with every supported Windows and is always available as the fallback.
-var resolvePowerShell = sync.OnceValue(func() string {
-	if path, err := exec.LookPath("pwsh"); err == nil {
-		return path
-	}
-	return "powershell"
-})
