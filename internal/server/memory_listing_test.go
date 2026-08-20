@@ -119,3 +119,39 @@ func TestHandleGetMemory_SlugSourceAndTraversal(t *testing.T) {
 		t.Fatalf("unknown slug: status = %d, want 404", w.Code)
 	}
 }
+
+// Forgetting a memory unlinks the file — the user asked for it and the panel
+// warned that it can't be undone, so nothing is staged in the trash.
+func TestHandleDeleteMemory_RemovesFilePermanently(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	root, err := memory.RootDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	slug := "someproj-99887766"
+	if err := os.MkdirAll(filepath.Join(root, slug), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, slug, "notes.md")
+	if err := os.WriteFile(path, []byte("stale note"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/memories/notes.md?source="+slug, nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("memory file still on disk after delete: err = %v", err)
+	}
+	if entries, err := os.ReadDir(filepath.Join(tmp, ".octo", "trash")); err == nil && len(entries) > 0 {
+		t.Errorf("deleted memory was staged in the trash: %d entr(ies)", len(entries))
+	}
+}

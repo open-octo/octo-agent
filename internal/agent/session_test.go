@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -753,7 +754,7 @@ func TestSession_UsedTools_EmptyMessagesIsFalse(t *testing.T) {
 }
 
 func TestDeleteSession(t *testing.T) {
-	setTempHome(t)
+	home := setTempHome(t)
 
 	s := NewSession("claude-haiku-4-5-20251001", "")
 	s.Messages = []Message{{Role: RoleUser, Content: "hi"}}
@@ -766,6 +767,18 @@ func TestDeleteSession(t *testing.T) {
 	}
 	if _, err := LoadSession(s.ID); err == nil {
 		t.Fatal("session still loadable after delete")
+	}
+
+	// The transcript is gone for good — a session delete bypasses the trash.
+	trashed := 0
+	_ = filepath.WalkDir(filepath.Join(home, ".octo", "trash"), func(_ string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			trashed++
+		}
+		return nil
+	})
+	if trashed != 0 {
+		t.Errorf("deleted session staged %d file(s) in the trash, want 0", trashed)
 	}
 
 	// Deleting a missing session is not an error (idempotent).

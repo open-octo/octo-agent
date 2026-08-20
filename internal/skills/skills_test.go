@@ -56,6 +56,37 @@ func TestReload_PicksUpLateSkill(t *testing.T) {
 	}
 }
 
+// Deleting a skill wipes its directory outright — no copy is staged in the
+// trash, because the user asked for the delete and the UI warned them it can't
+// be undone.
+func TestDelete_RemovesDirectoryPermanently(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	useDefaultRoot(t, t.TempDir())
+	userRoot := t.TempDir()
+	useUserRoot(t, userRoot)
+	writeSkill(t, userRoot, "scratch", "---\nname: scratch\ndescription: throwaway\n---\nbody")
+
+	r := Discover()
+	if _, ok := r.Get("scratch"); !ok {
+		t.Fatal("scratch should be discovered before delete")
+	}
+	if err := r.Delete("scratch"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, ok := r.Get("scratch"); ok {
+		t.Error("deleted skill still resolves via Get")
+	}
+	if _, err := os.Stat(filepath.Join(userRoot, "scratch")); !os.IsNotExist(err) {
+		t.Errorf("skill directory still on disk after delete: err = %v", err)
+	}
+	if entries, err := os.ReadDir(filepath.Join(home, ".octo", "trash")); err == nil && len(entries) > 0 {
+		t.Errorf("deleted skill was staged in the trash: %d entr(ies)", len(entries))
+	}
+}
+
 func TestDiscover_Empty(t *testing.T) {
 	useUserRoot(t, filepath.Join(t.TempDir(), "nonexistent"))
 	r := Discover()

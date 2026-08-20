@@ -15,8 +15,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/open-octo/octo-agent/internal/trash"
 )
 
 // Session is a named conversation that persists to disk as a JSONL transcript
@@ -1684,7 +1682,8 @@ func ResolveSessionID(input string) (string, error) {
 		input, len(matches), strings.Join(matches, "\n  "))
 }
 
-// DeleteSession removes the transcript file for the given session id. id may be
+// DeleteSession permanently removes the transcript file for the given session
+// id — session deletes bypass the trash, so there is nothing to recall. id may be
 // a bare id or one with a .jsonl/.json suffix; absolute paths are rejected, and
 // any id that would resolve outside the sessions directory (e.g. via "..") is
 // refused so a caller-supplied id can't reach arbitrary files. A missing file
@@ -1707,12 +1706,8 @@ func DeleteSession(id string) error {
 		return err
 	}
 	path := filepath.Join(dir, stem+".jsonl")
-	if _, err := os.Stat(path); err == nil {
-		if err := trash.Move(path, dir, trash.Options{DeletedBy: "session", Kind: "delete"}); err != nil {
-			return fmt.Errorf("session: trash %s: %w", path, err)
-		}
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("session: stat %s: %w", path, err)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("session: remove %s: %w", path, err)
 	}
 	return nil
 }

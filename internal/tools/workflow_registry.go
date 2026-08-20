@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/open-octo/octo-agent/internal/trash"
 )
 
 // ErrWorkflowNotFound and ErrBuiltinWorkflow let callers (e.g. the HTTP
@@ -302,8 +300,8 @@ func DeleteWorkflow(name string) error {
 	if w.path == "" {
 		return fmt.Errorf("workflow %q has no on-disk file", name)
 	}
-	if err := trash.Move(w.path, filepath.Dir(w.path), trash.Options{DeletedBy: "workflow", Kind: "delete"}); err != nil {
-		return fmt.Errorf("trash workflow file %s: %w", w.path, err)
+	if err := os.Remove(w.path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove workflow file %s: %w", w.path, err)
 	}
 	return nil
 }

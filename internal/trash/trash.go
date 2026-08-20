@@ -44,7 +44,9 @@ const (
 // what removed a file. All fields are optional; the zero value is fine.
 type Options struct {
 	// DeletedBy names the surface that removed the file: "rm", "write_file",
-	// "edit_file", "session", "skill", "workflow", "scheduler", "memory".
+	// "edit_file". Older sidecars may carry surfaces that no longer stage
+	// anything ("session", "skill", "workflow", "scheduler", "memory") — those
+	// deletes are permanent now, but their existing entries still read back.
 	DeletedBy string
 	// Kind is "delete" or "overwrite".
 	Kind string
