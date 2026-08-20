@@ -6,6 +6,7 @@
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
   import { splitSections, swapWithinSection, parseSectionFold, type SectionFold } from '../../lib/sidebarSections'
+  import { SIDEBAR_MIN, SIDEBAR_MAX, CENTER_MIN, readSidebarWidth, saveSidebarWidth } from '../../lib/sidebarWidth'
   import { ago } from '../../lib/relTime'
   import { ws } from '../../lib/ws'
   import VersionBadge from './VersionBadge.svelte'
@@ -209,6 +210,63 @@
     onResize()
     return () => window.removeEventListener('resize', onResize)
   })
+
+  // ── Resizable width ────────────────────────────────────────────────────────
+  // Drag the right edge to widen the full sidebar; the width persists across
+  // sessions. The bounds keep the column doing its job: below SIDEBAR_MIN a
+  // session title has no room left beside its timestamp, above SIDEBAR_MAX it
+  // starts eating the conversation it exists to navigate. Rail and hidden are
+  // fixed widths and ignore this — there is nothing to drag in either.
+  let fullWidth = $state(readSidebarWidth())
+  // Drag applies a new width every mousemove, so the collapse transition has to
+  // step aside for the duration or the edge lags behind the cursor.
+  let resizing = $state(false)
+  let asideEl = $state<HTMLElement | null>(null)
+
+  // SIDEBAR_MAX is only the absolute ceiling. What the drag actually stops at
+  // also depends on the room left over: an open artifacts panel plus a wide
+  // sidebar can squeeze the conversation column to nothing on a small window,
+  // so the center's minimum wins over the ceiling (same rule the panel's own
+  // grip applies from its side).
+  function maxDraggableWidth(startW: number): number {
+    const row = asideEl?.parentElement
+    const main = asideEl?.nextElementSibling as HTMLElement | null
+    if (!row || !main) return SIDEBAR_MAX
+    const rowW = row.getBoundingClientRect().width
+    // Whatever sits beyond the center column — the artifacts panel, or nothing.
+    const beyondCenter = rowW - startW - main.getBoundingClientRect().width
+    return Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, rowW - beyondCenter - CENTER_MIN))
+  }
+
+  function startResize(e: MouseEvent) {
+    if (e.button !== 0) return
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = fullWidth
+    const maxW = maxDraggableWidth(startW)
+    resizing = true
+    const move = (ev: MouseEvent) => {
+      // A mouseup swallowed by browser chrome or a cross-origin frame never
+      // reaches us; the next move without a button held ends the drag instead
+      // of leaving the page stuck in col-resize with text unselectable.
+      if (ev.buttons === 0) { up(); return }
+      fullWidth = Math.max(SIDEBAR_MIN, Math.min(maxW, startW + (ev.clientX - startX)))
+    }
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      resizing = false
+      saveSidebarWidth(fullWidth)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }
+
+  const sidebarPx = $derived($sidebar === 'full' ? `${fullWidth}px` : $sidebar === 'rail' ? '64px' : '0px')
 
   // Dismiss any open floating UI (kebab menu, move-to-group popover, inline
   // rename) when the user clicks anywhere outside of it. Only clicks that land
@@ -477,10 +535,13 @@
   </span>
 {/snippet}
 
-<aside style="width:{$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};flex:0 0 {$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};background:var(--sidebar-frost);backdrop-filter:blur(var(--frost-blur));-webkit-backdrop-filter:blur(var(--frost-blur));border-right:1px solid var(--border-secondary);overflow:hidden;transition:width 0.32s cubic-bezier(0.2,0,0,1),flex-basis 0.32s cubic-bezier(0.2,0,0,1);">
+<aside bind:this={asideEl} style="width:{sidebarPx};flex:0 0 {sidebarPx};background:var(--sidebar-frost);backdrop-filter:blur(var(--frost-blur));-webkit-backdrop-filter:blur(var(--frost-blur));border-right:1px solid var(--border-secondary);overflow:hidden;position:relative;transition:{resizing ? 'none' : 'width 0.32s cubic-bezier(0.2,0,0,1),flex-basis 0.32s cubic-bezier(0.2,0,0,1)'};">
 
   {#if $sidebar === 'full'}
-  <div class="full">
+  <!-- The grip sits inside the column because the <aside> clips its overflow;
+       it stays flush with the divider rather than straddling it. -->
+  <div class="resize-grip" role="separator" aria-orientation="vertical" onmousedown={startResize}></div>
+  <div class="full" style="width:{fullWidth}px">
     <div class="side-header" class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag">
       <button class="icon-btn" title={$t('header.toggle_left')} aria-pressed={true} onclick={() => sidebar.set('hidden')}>
         <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
@@ -864,7 +925,21 @@
 
 
 <style>
-.full { width: 256px; height: 100%; display: flex; flex-direction: column; min-height: 0; }
+/* Width comes from the drag state inline, matching the <aside> around it, so
+   the content keeps a fixed box the aside clips during the collapse animation
+   instead of reflowing through it (same reason .rail pins its own width). */
+.full { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+/* A 6px strip along the divider. Absolute so it overlays the column's own rows
+   rather than taking layout space away from them. The no-drag is belt and
+   braces: --wails-draggable is inherited through the DOM, and the grip is a
+   sibling of the draggable header rather than a child, so it would not pick up
+   "drag" anyway — but it visually sits on top of that header, and a future
+   author moving it under one is the mistake worth pre-empting. */
+.resize-grip {
+  position: absolute; right: 0; top: 0; bottom: 0; width: 6px;
+  cursor: col-resize; z-index: 5; --wails-draggable: no-drag;
+}
+.resize-grip:hover { background: var(--focus-ring); }
 /* This column's own top row, starting at the very top of the window — there is
    no bar laid across the layout, so no bottom border here either: the only
    lines are the vertical dividers between columns. Carries the collapse toggle
