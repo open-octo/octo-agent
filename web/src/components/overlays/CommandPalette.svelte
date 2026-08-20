@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { cmdkOpen, view, sessions, activeSessionId, skills, openAgentSession, createNewSession, panelContent, settingsModalOpen, isDesktopShell } from '../../lib/stores'
+  import { cmdkOpen, view, sessions, activeSessionId, skills, openAgentSession, createNewSession, panelContent, settingsModalOpen, openSettingsAt, isDesktopShell } from '../../lib/stores'
   import { t } from '../../lib/i18n'
 
   let query = $state('')
@@ -34,10 +34,13 @@
     close()
   }
 
-  // Assistant Memory moved into Settings' 数据管理 — no standalone view left
-  // to route to, so this opens Settings instead of a dead view.set('profile').
-  function openMemorySettings() {
-    settingsModalOpen.set(true)
+  // Assistant Memory, the file recycle bin and archived sessions all moved
+  // into Settings' 数据管理 — no standalone views left to route to, so these
+  // deep-link straight to the sub-view instead of dropping the user on the
+  // Settings landing page (or, for 'files', on a dead view.set that rendered
+  // an empty main area).
+  function openDataSettings(sub: string) {
+    openSettingsAt('data', sub)
     close()
   }
 
@@ -56,8 +59,9 @@
     { id: 'browser', icon: 'ant-design:global-outlined', label: () => $t('nav.browser'), shortcut: '', run: () => goTo('browser') },
     { id: 'mcp', icon: 'ant-design:api-outlined', label: () => $t('nav.mcp'), shortcut: '', run: () => goTo('mcp') },
     { id: 'channels', icon: 'ant-design:mobile-outlined', label: () => $t('nav.channels'), shortcut: '', run: () => goTo('channels') },
-    { id: 'memory', icon: 'ant-design:user-outlined', label: () => $t('nav.memory'), shortcut: '', run: () => openMemorySettings() },
-    { id: 'files', icon: 'ant-design:folder-open-outlined', label: () => $t('nav.file_recall'), shortcut: '', run: () => goTo('files') },
+    { id: 'archived', icon: 'ant-design:inbox-outlined', label: () => $t('settings.data.archived'), shortcut: '', run: () => openDataSettings('archived') },
+    { id: 'files', icon: 'ant-design:folder-open-outlined', label: () => $t('nav.file_recall'), shortcut: '', run: () => openDataSettings('trash') },
+    { id: 'memory', icon: 'ant-design:user-outlined', label: () => $t('nav.memory'), shortcut: '', run: () => openDataSettings('memory') },
     { id: 'lightapps', icon: 'ant-design:appstore-outlined', label: () => $t('nav.light_apps'), shortcut: '', run: () => goTo('lightapps') },
     { id: 'artifacts', icon: 'ant-design:file-text-outlined', label: () => $t('artifacts.toggle'), shortcut: '', run: () => { panelContent.update(v => v ? null : 'session') } },
     { id: 'settings', icon: 'ant-design:setting-outlined', label: () => $t('nav.settings'), shortcut: '', run: () => { close(); settingsModalOpen.set(true) } },

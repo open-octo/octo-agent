@@ -38,6 +38,16 @@ export const cmdkOpen = writable(false)
 export const mcpModalOpen = writable(false)
 // Drives the Settings modal (replaces the old full-page 'settings' view).
 export const settingsModalOpen = writable(false)
+// Optional deep link consumed by the next Settings open: which category, and
+// for 数据管理 which sub-view. Callers that just want the modal set only
+// settingsModalOpen and land on the default category. The modal clears this
+// once applied, so a later plain open isn't stuck on the old target.
+export interface SettingsTarget { cat: string; dataSubView?: string }
+export const settingsTarget = writable<SettingsTarget | null>(null)
+export function openSettingsAt(cat: string, dataSubView?: string) {
+  settingsTarget.set({ cat, dataSubView })
+  settingsModalOpen.set(true)
+}
 export interface ToastEntry { id: number; msg: string; type: string }
 export const toasts = writable<ToastEntry[]>([])
 

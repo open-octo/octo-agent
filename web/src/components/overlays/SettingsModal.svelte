@@ -6,7 +6,7 @@
   import FileRecallView from '../../views/FileRecallView.svelte'
   import ProfileView from '../../views/ProfileView.svelte'
   import { get } from 'svelte/store'
-  import { showToast, nativeShell, settingsModalOpen, onboardPhase, sessions, sessionGroups, collapsedSessions, activeSessionId, view, clearPendingSessionOpts } from '../../lib/stores'
+  import { showToast, nativeShell, settingsModalOpen, settingsTarget, onboardPhase, sessions, sessionGroups, collapsedSessions, activeSessionId, view, clearPendingSessionOpts } from '../../lib/stores'
   import type { Session, SessionGroup } from '../../lib/types'
   import { setLocale, t, tr } from '../../lib/i18n'
   import { getMode, setMode, type ThemeMode } from '../../lib/theme'
@@ -244,8 +244,13 @@
   // the modal last closed.
   $effect(() => {
     if ($settingsModalOpen) {
-      cat = 'general'
+      // A deep link (command palette, in-app shortcut) picks the category and
+      // 数据管理 sub-view; a plain open falls back to the default landing.
+      const target = get(settingsTarget)
+      cat = (target?.cat as typeof cat) ?? 'general'
       resetDataView()
+      if (target?.dataSubView) dataSubView = target.dataSubView as typeof dataSubView
+      if (target) settingsTarget.set(null)
       loadConfig()
       loadVersion()
       if (get(nativeShell)) api.getAutostart().then(v => (autostart = v)).catch(() => {})
