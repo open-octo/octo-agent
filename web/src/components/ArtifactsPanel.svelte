@@ -206,13 +206,13 @@
   {#if $panelContent === 'lightapps'}
     <!-- ── Light Apps mode ───────────────────────────────────────────────── -->
     <div class="topbar">
+      <button class="icon-btn" title={$t('header.toggle_right')} onclick={closePanel}>
+        <iconify-icon icon="lucide:panel-right" width="14"></iconify-icon>
+      </button>
       <iconify-icon icon="ant-design:appstore-outlined" width="15" style="color:var(--blue-6);flex:0 0 auto"></iconify-icon>
       <span class="panel-title">{$t('artifacts.light_apps')}</span>
       <span style="flex:1"></span>
       <span class="sandboxed-label">{$t('artifacts.sandboxed')}</span>
-      <button class="icon-btn" title={$t('common.close')} onclick={closePanel}>
-        <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
-      </button>
     </div>
 
     <div class="body">
@@ -245,12 +245,12 @@
     <!-- ── Session mode (existing behavior) ────────────────────────────────── -->
     {#if !cur}
       <div class="topbar">
+        <button class="icon-btn" title={$t('header.toggle_right')} onclick={closePanel}>
+          <iconify-icon icon="lucide:panel-right" width="14"></iconify-icon>
+        </button>
         <iconify-icon icon="lucide:box" width="15" style="color:var(--blue-6);flex:0 0 auto"></iconify-icon>
         <span class="panel-title">{$t('artifacts.toggle')}</span>
         <span style="flex:1"></span>
-        <button class="icon-btn" title={$t('common.close')} onclick={closePanel}>
-          <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
-        </button>
       </div>
       <div class="empty">
         <iconify-icon icon="ant-design:file-text-outlined" width="28"></iconify-icon>
@@ -258,6 +258,9 @@
       </div>
     {:else}
       <div class="topbar">
+        <button class="icon-btn" title={$t('header.toggle_right')} onclick={closePanel}>
+          <iconify-icon icon="lucide:panel-right" width="14"></iconify-icon>
+        </button>
         <iconify-icon icon="lucide:box" width="15" style="color:var(--blue-6);flex:0 0 auto"></iconify-icon>
         <span class="panel-title">{$t('artifacts.toggle')}</span>
         <span style="flex:1"></span>
@@ -267,9 +270,6 @@
             <button class="seg-btn" class:active={$artifactView === 'code'} onclick={() => artifactView.set('code')}>{$t('artifacts.code')}</button>
           </div>
         {/if}
-        <button class="icon-btn" title={$t('common.close')} onclick={closePanel}>
-          <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
-        </button>
       </div>
 
       <div class="file-row">

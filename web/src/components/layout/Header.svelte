@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { sidebar, nativeShell } from '../../lib/stores'
+  import { sidebar, nativeShell, panelContent } from '../../lib/stores'
   import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
   import { nativeToggleMaximise, nativeMinimise, nativeClose, nativeWindowState } from '../../lib/api'
@@ -12,14 +12,19 @@
     sidebar.update(s => s === 'hidden' ? 'full' : 'hidden')
   }
 
-  // This bar now sits inside <main> — it spans the content column, not the
-  // whole window, so it carries none of the sidebar's own chrome (brand,
-  // search, notifications, the artifacts toggle all moved to Sidebar's own
-  // header). What's left is the sidebar-collapse toggle (it must stay
-  // reachable even with the sidebar hidden, so it can't live inside the thing
-  // it toggles) plus desktop-only window chrome. Mac's native traffic lights
-  // float over the window's true top-left corner, which is now Sidebar's
-  // header, not this one — so the inset padding lives there instead.
+  // Toggle the Artifacts panel. Only rendered here while it's closed — once
+  // open, the equivalent control lives at the panel's own left edge
+  // (ArtifactsPanel's topbar), the same way this bar's own sidebar toggle sits
+  // at the boundary of the block it reveals rather than inside it.
+  function togglePanel() {
+    panelContent.set('session')
+  }
+
+  // This is the one bar that spans the whole window — everything else (brand,
+  // search, notifications, settings) lives in Sidebar's own header instead, so
+  // this carries only what has to reach across every block: the sidebar
+  // toggle (has to work with the sidebar itself hidden), the artifacts toggle
+  // (same reasoning, mirrored), the connection indicator, and desktop chrome.
   const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
   // Desktop only: double-clicking the draggable header zooms the window, the way
@@ -67,7 +72,7 @@
   })
 </script>
 
-<header style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
+<header class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
   <button class="icon-btn" title={$t('header.toggle_left')} aria-pressed={$sidebar !== 'hidden'} onclick={toggleSidebar}>
     <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
   </button>
@@ -81,6 +86,12 @@
   {#if $wsState !== 'connected'}
     <button class="icon-btn" title={$t('chat.connection_lost')} onclick={() => ws.connect()}>
       <iconify-icon icon="ant-design:loading-outlined" width="16" style="color:var(--warning);animation:octo-spin 0.8s linear infinite"></iconify-icon>
+    </button>
+  {/if}
+
+  {#if !$panelContent}
+    <button class="icon-btn" title={$t('header.toggle_right')} onclick={togglePanel}>
+      <iconify-icon icon="lucide:panel-right" width="16"></iconify-icon>
     </button>
   {/if}
 
@@ -109,6 +120,12 @@ header {
   -webkit-backdrop-filter: blur(var(--frost-blur));
   z-index: 100;
 }
+/* Mac's native hidden-inset title bar floats the real traffic-light buttons
+   over the top-left of the window, so inset this bar's content past them —
+   this is the leftmost thing on screen again, now that it spans the full
+   width. Padding-bottom (not padding-top) pulls the centering axis up to meet
+   their fixed vertical position, the same reasoning as before the redesign. */
+header.native-inset { padding-left: 82px; padding-bottom: 8px; }
 /* The header is a window drag handle. Every interactive control on it opts
    back to no-drag so it stays clickable — the blank strip is what drags the
    window. */
@@ -124,10 +141,7 @@ header .window-controls { --wails-draggable: no-drag; }
 }
 .icon-btn:hover { background: var(--hover-neutral); color: var(--text); }
 
-/* Window controls (Windows/Linux only — Mac uses native traffic lights over
-   Sidebar's own header). Stretch to the bar height and bleed into the right
-   padding so the hit area reaches the window edge. Maximise icon flips □/❐ to
-   reflect the window state. */
+/* Window controls (Windows/Linux only — Mac uses native traffic lights). */
 .window-controls {
   display: flex;
   align-self: stretch;
