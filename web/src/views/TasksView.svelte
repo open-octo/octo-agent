@@ -33,22 +33,30 @@
 
   // ── data loading ─────────────────────────────────────────────────────────────
 
+  function fetchTasks(): Promise<api.TaskResponse[]> {
+    // When viewing a specific agent, filter tasks to its ownership.
+    const agentId = get(activeAgent)
+    const url = agentId !== 'default' ? `/api/tasks?agent_id=${encodeURIComponent(agentId)}` : '/api/tasks'
+    return agentId !== 'default' ? api.request<any[]>(url) : api.listTasks()
+  }
+
+  function applyTasks(list: api.TaskResponse[]) {
+    rawTasks = list
+    // Sync into shared store (ScheduledTask display shape) for other consumers
+    tasks.set(list.map(t => ({
+      name: t.name,
+      target: t.agent_id || t.agent || t.model || '',
+      cron: t.cron,
+      nextRun: t.enabled ? fmtDate(t.next_run) : '—',
+      tagStatus: t.enabled ? 'success' : 'default',
+      tagLabel: t.enabled ? tr('status.active') : tr('status.disabled'),
+    })))
+  }
+
   async function load() {
     loading = true
     try {
-      // When viewing a specific agent, filter tasks to its ownership.
-      const agentId = get(activeAgent)
-      const url = agentId !== 'default' ? `/api/tasks?agent_id=${encodeURIComponent(agentId)}` : '/api/tasks'
-      rawTasks = await (agentId !== 'default' ? api.request<any[]>(url) : api.listTasks())
-      // Sync into shared store (ScheduledTask display shape) for other consumers
-      tasks.set(rawTasks.map(t => ({
-        name: t.name,
-        target: t.agent_id || t.agent || t.model || '',
-        cron: t.cron,
-        nextRun: t.enabled ? fmtDate(t.next_run) : '—',
-        tagStatus: t.enabled ? 'success' : 'default',
-        tagLabel: t.enabled ? tr('status.active') : tr('status.disabled'),
-      })))
+      applyTasks(await fetchTasks())
     } catch (e: any) {
       showToast(e?.message ?? 'Failed to load tasks', 'error')
     } finally {
@@ -59,6 +67,28 @@
   onMount(load)
 
   // ── actions ──────────────────────────────────────────────────────────────────
+
+  let togglingId = $state<string | null>(null)
+
+  // The status tag doubles as the pause/resume control: clicking it flips the
+  // task between active and disabled.
+  async function handleToggle(t: api.TaskResponse) {
+    if (togglingId) return
+    togglingId = t.id
+    const next = !t.enabled
+    try {
+      await api.toggleTask(t.id, next)
+      applyTasks(rawTasks.map(r => (r.id === t.id ? { ...r, enabled: next } : r)))
+      showToast(next ? tr('tasks.resumed') : tr('tasks.paused_toast'))
+      // The server recomputes next_run on resume; refresh silently so the row
+      // doesn't keep showing the "—" it carried while paused.
+      fetchTasks().then(applyTasks).catch(() => {})
+    } catch (e: any) {
+      showToast(e?.message ?? 'Failed to update task', 'error')
+    } finally {
+      togglingId = null
+    }
+  }
 
   async function handleRun(t: api.TaskResponse) {
     try {
@@ -167,11 +197,18 @@
               <span class="run-line">{$t('tasks.next_run_label')} {task.enabled ? fmtDate(task.next_run) : '—'}</span>
             </div>
 
-            <!-- Status tag -->
+            <!-- Status tag — click to pause/resume -->
             <span>
-              <StatusTag status={task.enabled ? 'success' : 'default'}>
-                {task.enabled ? $t('status.active') : $t('status.disabled')}
-              </StatusTag>
+              <button
+                class="status-toggle"
+                title={task.enabled ? $t('tasks.pause') : $t('tasks.resume')}
+                disabled={togglingId !== null}
+                onclick={() => handleToggle(task)}
+              >
+                <StatusTag status={task.enabled ? 'success' : 'default'}>
+                  {task.enabled ? $t('status.active') : $t('status.disabled')}
+                </StatusTag>
+              </button>
             </span>
 
             <!-- Actions -->
@@ -250,6 +287,13 @@ p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 6
 .cron { font-size: 13px; color: var(--text-secondary); }
 .run-times-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .run-line { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-toggle {
+  border: none; background: transparent; padding: 0; margin: 0;
+  font: inherit; cursor: pointer; border-radius: 999px; display: inline-flex;
+}
+.status-toggle:hover:not(:disabled) { opacity: 0.72; }
+.status-toggle:focus-visible { outline: 2px solid var(--blue-6); outline-offset: 1px; }
+.status-toggle:disabled { cursor: default; }
 .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 .act-btn {
   width: 28px; height: 28px; border: none; background: transparent;
