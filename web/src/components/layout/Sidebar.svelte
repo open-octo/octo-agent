@@ -201,6 +201,20 @@
     }
   }
 
+  // Reveal a row's working directory in the OS file manager. Both callers pass
+  // a directory the listing already carries — a project's own working_dir, and
+  // for a session the dir the server resolved for it (project > session's own >
+  // server default), which is where its tools actually run. Desktop shell only:
+  // a browser tab has no file manager to open, so the menu entry is gated on
+  // nativeShell and this is never reached from one.
+  async function openFolder(dir: string) {
+    try {
+      await api.openFolder(dir)
+    } catch (e: any) {
+      showToast(e?.message || tr('sidebar.open_folder_failed'), 'error')
+    }
+  }
+
   $effect(() => {
     function onResize() {
       const w = window.innerWidth
@@ -743,6 +757,13 @@
           </span>
           {#if projectMenuFor === g.id}
           <div class="row-menu" onclick={(e) => e.stopPropagation()}>
+            {#if $nativeShell && g.working_dir}
+            <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; openFolder(g.working_dir) }}>
+              <iconify-icon icon="ant-design:folder-open-outlined" width="13"></iconify-icon>
+              <span>{$t('sidebar.open_folder')}</span>
+            </div>
+            <div class="row-menu-sep"></div>
+            {/if}
             <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; editGroupId.set(g.id); editGroupDraft.set(g.name) }}>
               <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
               <span>{$t('sidebar.rename_group')}</span>
@@ -882,6 +903,12 @@
                 <span>{$t('sidebar.batch_actions')}</span>
               </div>
               <div class="row-menu-sep"></div>
+              {/if}
+              {#if $nativeShell && (s as any).working_dir}
+              <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); menuFor.set(null); openFolder((s as any).working_dir) }}>
+                <iconify-icon icon="ant-design:folder-open-outlined" width="13"></iconify-icon>
+                <span>{$t('sidebar.open_folder')}</span>
+              </div>
               {/if}
               <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); menuFor.set(null); editId.set(s.id); editDraft.set((s as any).name || (s as any).title || s.id) }}>
                 <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>

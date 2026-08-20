@@ -333,6 +333,16 @@ export async function openExternal(url: string): Promise<void> {
   })
 }
 
+// Desktop shell only: reveal a directory in the OS file manager. Backs the
+// sidebar's "Open folder" action on a project or a session — a browser tab has
+// no way to do this, so the action is shown only when native:true.
+export async function openFolder(path: string): Promise<void> {
+  await request<{ ok: boolean }>('/api/native/open-folder', {
+    method: 'POST',
+    ...json({ path }),
+  })
+}
+
 // Desktop shell only: start the in-place update flow — the native updater
 // window takes over (download → verify → restart). Available when /api/version
 // reports self_update:true and the caller is loopback; the badge falls back to

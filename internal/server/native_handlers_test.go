@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -27,6 +29,8 @@ type fakeNative struct {
 	maximised          bool
 	gotOpenURL         string
 	openCalls          int
+	gotOpenDir         string
+	openDirCalls       int
 	gotSaveName        string
 	gotSaveContent     string
 	saveCalls          int
@@ -66,6 +70,11 @@ func (f *fakeNative) WindowState() bool               { return f.maximised }
 func (f *fakeNative) OpenExternal(url string) error {
 	f.openCalls++
 	f.gotOpenURL = url
+	return nil
+}
+func (f *fakeNative) OpenFolder(dir string) error {
+	f.openDirCalls++
+	f.gotOpenDir = dir
 	return nil
 }
 func (f *fakeNative) SaveFile(_ context.Context, defaultName, content string) (string, bool, error) {
@@ -729,4 +738,61 @@ func TestNativeSaveFileNotRegisteredWithoutBridge(t *testing.T) {
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("without a bridge the route must not exist: got %d, want 404", w.Code)
 	}
+}
+
+func TestNativeOpenFolderDelegatesToBridge(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	dir := filepath.Join(tmp, "project")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeNative{}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/open-folder", strings.NewReader(`{"path":"`+jsonPath(dir)+`"}`))
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	if fake.openDirCalls != 1 || fake.gotOpenDir != dir {
+		t.Errorf("bridge.OpenFolder calls=%d dir=%q, want 1/%s", fake.openDirCalls, fake.gotOpenDir, dir)
+	}
+}
+
+// A file is not a folder: handing one to the platform opener would launch it in
+// its default application instead of showing it in the file manager.
+func TestNativeOpenFolderRejectsNonDirectory(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	file := filepath.Join(tmp, "notes.md")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeNative{}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+	for _, path := range []string{file, filepath.Join(tmp, "missing"), ""} {
+		req := httptest.NewRequest(http.MethodPost, "/api/native/open-folder", strings.NewReader(`{"path":"`+jsonPath(path)+`"}`))
+		w := httptest.NewRecorder()
+		serveLoopback(srv.mux, w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("path=%q got %d, want 400 (%s)", path, w.Code, w.Body.String())
+		}
+	}
+	if fake.openDirCalls != 0 {
+		t.Errorf("bridge.OpenFolder called %d times for invalid paths, want 0", fake.openDirCalls)
+	}
+}
+
+// jsonPath escapes a filesystem path for embedding in a JSON string literal —
+// Windows separators would otherwise read as escape sequences.
+func jsonPath(p string) string {
+	return strings.ReplaceAll(p, `\`, `\\`)
 }

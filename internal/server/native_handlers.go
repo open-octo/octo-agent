@@ -3,8 +3,11 @@ package server
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"strings"
 )
 
 // NativeBridge is the desktop shell's hook into OS-native capabilities that a
@@ -60,6 +63,12 @@ type NativeBridge interface {
 	// desktop build updates through its installer, not an in-place swap. The
 	// server validates url is http/https before calling.
 	OpenExternal(url string) error
+
+	// OpenFolder reveals dir in the OS file manager (Finder, Explorer, the
+	// desktop's file browser) — the sidebar's "Open folder" action on a project
+	// or a session, which a browser tab cannot do at all. The server validates
+	// dir exists and is a directory before calling.
+	OpenFolder(dir string) error
 
 	// SaveFile shows an OS save dialog seeded with defaultName, writes content
 	// to the chosen path, and returns it. cancelled is true when the user
@@ -386,6 +395,54 @@ func (s *Server) handleNativeOpenExternal(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := s.cfg.Native.OpenExternal(req.URL); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+type nativeOpenFolderRequest struct {
+	Path string `json:"path"`
+}
+
+// POST /api/native/open-folder — reveal a directory in the OS file manager
+// (desktop only). Backs the sidebar's "Open folder" action on a project or a
+// session; the frontend sends the working dir the listing already resolved for
+// that row, so this endpoint only validates it and hands it to the shell.
+//
+// Loopback-gated like the other native routes: opening a window on the desktop
+// host is never something a remote peer gets to do. The path must be an
+// existing directory — handing the platform opener a file would launch it in
+// its default application, which is not what this action means.
+func (s *Server) handleNativeOpenFolder(w http.ResponseWriter, r *http.Request) {
+	if !isLocalRequest(r) {
+		writeError(w, http.StatusForbidden, "available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+	var req nativeOpenFolderRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeInvalidJSONBody(w, err)
+		return
+	}
+	if strings.TrimSpace(req.Path) == "" {
+		writeError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	dir := expandDir(req.Path)
+	info, err := os.Stat(dir)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("path is not accessible: %s (%v)", dir, unwrapPathError(err)))
+		return
+	}
+	if !info.IsDir() {
+		writeError(w, http.StatusBadRequest, "path is not a directory")
+		return
+	}
+	if err := s.cfg.Native.OpenFolder(dir); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
