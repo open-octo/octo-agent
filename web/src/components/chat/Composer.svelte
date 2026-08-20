@@ -959,6 +959,15 @@
     return parts.length <= 2 ? p : '…/' + parts.slice(-2).join('/')
   }
 
+  // The landing bar has room for a full path, but when one is too long the tail
+  // — the project directory itself — is the half worth keeping, so drop the
+  // middle instead of the end. Full path stays in the title tooltip.
+  function elideDir(p: string, max = 80): string {
+    if (p.length <= max) return p
+    const tail = p.slice(-48)
+    return p.slice(0, max - tail.length - 1) + '…' + tail
+  }
+
   // queued=true parks the message as its own follow-up turn instead of steering
   // the turn in flight (Cmd/Ctrl+Enter — the web counterpart of the TUI's
   // Ctrl+Q). Idle it makes no difference: the server just starts the turn.
@@ -1125,6 +1134,29 @@
 
 <div class="composer">
   <div class="input-wrap">
+    <!-- Picking a working directory is the landing page's first real decision
+         — and the one that files the session under a project — so it sits in a
+         bar of its own above the input instead of hiding among the toolbar
+         chips. Docked sessions inherit the directory and never see this. -->
+    {#if !sid && !dockedGroup}
+      <button
+        class="dir-bar"
+        class:empty={!workingDir}
+        title={workingDir ? $t('chat.dir_change') + ` — ${workingDir}` : $t('chat.dir_pick')}
+        disabled={dirSaving}
+        onclick={(e) => { e.stopPropagation(); openPicker() }}
+      >
+        <iconify-icon icon="ant-design:folder-outlined" width="15"></iconify-icon>
+        {#if workingDir}
+          <span class="mono dir-bar-path">{elideDir(workingDir)}</span>
+          {#if project}
+            <span class="dir-owner">{project.name}</span>
+          {/if}
+        {:else}
+          <span class="dir-bar-path">{$t('chat.dir_pick')}</span>
+        {/if}
+      </button>
+    {/if}
     <div
       class="input-card"
       class:drag-over={dragOver}
@@ -1316,50 +1348,33 @@
             </div>
           {/if}
         </div>
-        {#if workingDir && project && (sid || dockedGroup)}
-          <span class="meta-chip static" title={$t('chat.dir_from_project').replace('{name}', project.name) + ` — ${workingDir}`}>
-            <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
-            <span class="mono dir-path">{shortDir(workingDir)}</span>
-            <span class="dir-owner">{project.name}</span>
-          </span>
-        {:else if !sid && !dockedGroup}
-          <!-- Only the landing page offers a choice, and choosing there is what
-               files the session under a project. Once a session exists the
-               directory is the project's to set: a task that could point itself
-               at a repo ran its tools there while its memory stayed in the
-               shared tier, which is the split this removes. -->
-          <button
-            class="meta-chip"
-            class:empty={!workingDir}
-            title={workingDir ? $t('chat.dir_change') + ` — ${workingDir}` : $t('chat.dir_pick')}
-            disabled={dirSaving}
-            onclick={(e) => { e.stopPropagation(); openPicker() }}
-          >
-            <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
-            {#if workingDir}
+        <!-- Once the session exists the directory is settled, so the composer
+             says nothing about it: only the landing page shows it, and there
+             it lives in the bar above the input rather than in this row. The
+             chips left here cover the docked cases, where the choice was
+             already made by the group the session is being filed under. -->
+        {#if !sid}
+          {#if workingDir && project && dockedGroup}
+            <span class="meta-chip static" title={$t('chat.dir_from_project').replace('{name}', project.name) + ` — ${workingDir}`}>
+              <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
               <span class="mono dir-path">{shortDir(workingDir)}</span>
-            {:else}
-              <span>{$t('chat.dir_pick')}</span>
-            {/if}
-            {#if project}
               <span class="dir-owner">{project.name}</span>
-            {/if}
-          </button>
-        {:else if workingDir}
-          <!-- A task's directory, read-only: where its tools run, decided by the
-               server's workspace setting rather than by this session. -->
-          <span class="meta-chip static" title={$t('chat.dir_task_fixed') + ` — ${workingDir}`}>
-            <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
-            <span class="mono dir-path">{shortDir(workingDir)}</span>
-          </span>
-        {/if}
-        {#if dockedGroup && !workingDir}
-          <!-- A plain group: no directory to inherit, but naming it is the only
-               signal on this page that the session is being filed there. -->
-          <span class="meta-chip static" title={$t('chat.dir_from_project').replace('{name}', dockedGroup.name)}>
-            <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
-            <span class="dir-owner">{dockedGroup.name}</span>
-          </span>
+            </span>
+          {:else if dockedGroup && workingDir}
+            <!-- A task's directory, read-only: where its tools run, decided by
+                 the server's workspace setting rather than by this session. -->
+            <span class="meta-chip static" title={$t('chat.dir_task_fixed') + ` — ${workingDir}`}>
+              <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
+              <span class="mono dir-path">{shortDir(workingDir)}</span>
+            </span>
+          {:else if dockedGroup}
+            <!-- A plain group: no directory to inherit, but naming it is the only
+                 signal on this page that the session is being filed there. -->
+            <span class="meta-chip static" title={$t('chat.dir_from_project').replace('{name}', dockedGroup.name)}>
+              <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
+              <span class="dir-owner">{dockedGroup.name}</span>
+            </span>
+          {/if}
         {/if}
         {#if goalChip}
           <span class="meta-chip static" title={goal?.objective ?? ''}>
@@ -1453,6 +1468,18 @@
   color: var(--text-tertiary);
 }
 .input-wrap { max-width: var(--chat-content-max-width, 1080px); margin: 0 auto; padding: 8px 24px 14px; }
+.dir-bar {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  margin-bottom: 6px; padding: 9px 14px;
+  background: var(--bg-container); border: 1px solid var(--border-secondary);
+  border-radius: 14px; font-size: 13px; font-family: inherit; color: var(--text);
+  cursor: pointer; text-align: left;
+}
+.dir-bar:hover { border-color: var(--blue-6); background: var(--row-hover); }
+.dir-bar:disabled { cursor: default; opacity: 0.6; }
+/* Nothing picked yet: reads as an invitation rather than as state. */
+.dir-bar.empty { color: var(--text-tertiary); }
+.dir-bar-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .input-card {
   /* A quiet block rather than a bordered card: a hairline edge, no shadow. The
      rounder corner (18 vs the old 14) reads more like a single soft shape. */
@@ -1531,8 +1558,6 @@ textarea {
 .meta-chip:hover { color: var(--text); background: var(--hover-neutral); }
 .meta-chip.static { cursor: default; }
 .meta-chip.static:hover { color: var(--text-secondary); background: transparent; }
-/* Nothing picked yet: reads as an invitation rather than as state. */
-.meta-chip.empty { color: var(--text-tertiary); }
 .ctx-pct { color: var(--text); font-weight: 600; }
 .send-btn {
   width: 38px; height: 30px; flex: 0 0 auto; margin-bottom: 1px;
