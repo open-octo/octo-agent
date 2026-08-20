@@ -240,16 +240,13 @@ func runShellRaw(ctx context.Context, cmd string, stdin []byte, deadline time.Du
 	return res
 }
 
-// shellCmd wraps cmd in the platform shell: PowerShell on Windows (preferring
-// pwsh 7+, falling back to the always-present powershell 5.1), POSIX sh -c
-// elsewhere. Mirrors internal/tools' shell selection so a hook script behaves
-// like a command the terminal tool would run.
+// shellCmd wraps cmd in the platform shell: PowerShell on Windows, POSIX sh -c
+// elsewhere. The shell comes from executil.PowerShell — the same selection the
+// terminal tool makes — so a hook script behaves like a command the terminal
+// tool would run rather than landing on a different PowerShell.
 func shellCmd(ctx context.Context, cmd string) *exec.Cmd {
 	if runtime.GOOS == "windows" {
-		shell := "powershell"
-		if _, err := exec.LookPath("pwsh"); err == nil {
-			shell = "pwsh"
-		}
+		shell := executil.PowerShell()
 		c := exec.CommandContext(ctx, shell, "-NoProfile", "-NonInteractive", "-Command", executil.PowerShellUTF8EncodingPrefix+cmd)
 		executil.SetNoWindow(c)
 		return c

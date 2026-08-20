@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/open-octo/octo-agent/internal/executil"
 	"github.com/open-octo/octo-agent/internal/trash"
 )
 
@@ -24,7 +25,7 @@ func TestWindowsSafeRm_EndToEnd(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("windows Remove-Item wrapper only")
 	}
-	ps := resolvePowerShell()
+	ps := executil.PowerShell()
 	if _, err := exec.LookPath(ps); err != nil {
 		t.Skipf("no PowerShell (%s) available", ps)
 	}

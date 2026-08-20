@@ -36,43 +36,6 @@ func TestShellCommand_PlatformShell(t *testing.T) {
 	}
 }
 
-// TestProbePwshMSI covers the PATH-independent PowerShell 7 lookup: a pwsh
-// installed after octo started is on the machine PATH but not on this
-// process's inherited environment, so the MSI location is probed directly.
-// Path-shaped only, so it runs on every platform.
-func TestProbePwshMSI(t *testing.T) {
-	x86, win64 := t.TempDir(), t.TempDir()
-
-	if got := probePwshMSI(x86, win64); got != "" {
-		t.Errorf("no pwsh installed should probe to \"\", got %q", got)
-	}
-	if got := probePwshMSI("", ""); got != "" {
-		t.Errorf("unset Program Files roots should probe to \"\", got %q", got)
-	}
-
-	// A directory named pwsh.exe must not satisfy the probe.
-	dir := filepath.Join(x86, "PowerShell", "7", "pwsh.exe")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if got := probePwshMSI(x86, win64); got != "" {
-		t.Errorf("a pwsh.exe directory should not count, got %q", got)
-	}
-
-	// The 64-bit root wins when only it holds a real pwsh — the 32-bit-process
-	// case where ProgramFiles points at "Program Files (x86)".
-	want := filepath.Join(win64, "PowerShell", "7", "pwsh.exe")
-	if err := os.MkdirAll(filepath.Dir(want), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(want, nil, 0o755); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if got := probePwshMSI(x86, win64); got != want {
-		t.Errorf("probe = %q, want %q", got, want)
-	}
-}
-
 // TestWithBundledBinPath_AppendsAfterExistingSystemPath confirms the bundled
 // dir lands at the END of PATH, so a system-installed tool of the same name
 // still wins — the bundled copy is a fallback, never a shadow.

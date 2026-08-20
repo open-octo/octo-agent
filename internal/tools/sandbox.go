@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 
 	"github.com/open-octo/octo-agent/internal/executil"
 	"github.com/open-octo/octo-agent/internal/sandbox"
@@ -129,7 +128,7 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 	if runtime.GOOS == "windows" {
 		// -NoProfile: reproducible env (don't run the user's $PROFILE).
 		// -NonInteractive: never block on a PowerShell prompt mid-command.
-		ps := resolvePowerShell()
+		ps := executil.PowerShell()
 		projectDir := WorkingDirOrCWD(ctx)
 		// Wrap Remove-Item to copy to trash first (parity with the POSIX rm
 		// wrapper) and shadow Stop-Process/taskkill so the self-kill guard
@@ -242,46 +241,4 @@ func applyWorkingDir(ctx context.Context, cmd *exec.Cmd) {
 	if dir := WorkingDir(ctx); dir != "" {
 		cmd.Dir = dir
 	}
-}
-
-// resolvePowerShell picks the Windows shell once: PowerShell 7+ (`pwsh`) when
-// present — it's the modern, cross-platform build, supports `&&`/`||` pipeline
-// chaining, and defaults its file cmdlets to UTF-8 rather than 5.1's ANSI and
-// UTF-16 — else Windows PowerShell 5.1 (`powershell`), which ships with every
-// supported Windows and is always available as the fallback.
-//
-// PATH lookup alone is not enough. A pwsh installed after this process started
-// — notably by the installer's own EnsurePowerShell7 step, whose winget run
-// finishes moments before the installer launches the app — is on the machine
-// PATH but not on the environment block this process inherited, so LookPath
-// misses it and sync.OnceValue caches that miss for the whole session. Probing
-// the MSI's fixed install location covers that, and covers every install
-// channel rather than just octo-setup.exe.
-var resolvePowerShell = sync.OnceValue(func() string {
-	if path, err := exec.LookPath("pwsh"); err == nil {
-		return path
-	}
-	if path := probePwshMSI(os.Getenv("ProgramFiles"), os.Getenv("ProgramW6432")); path != "" {
-		return path
-	}
-	return "powershell"
-})
-
-// probePwshMSI returns the pwsh.exe the PowerShell 7 MSI installs under one of
-// the given Program Files roots, or "" when none holds one. Store-distributed
-// pwsh lives under WindowsApps behind an execution alias that LookPath already
-// resolves, so only the MSI layout needs probing. Both roots are consulted
-// because ProgramW6432 is the 64-bit directory when octo itself is a 32-bit
-// process, where ProgramFiles points at "Program Files (x86)".
-func probePwshMSI(roots ...string) string {
-	for _, dir := range roots {
-		if dir == "" {
-			continue
-		}
-		path := filepath.Join(dir, "PowerShell", "7", "pwsh.exe")
-		if st, err := os.Stat(path); err == nil && !st.IsDir() {
-			return path
-		}
-	}
-	return ""
 }

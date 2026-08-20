@@ -14,15 +14,11 @@ import (
 )
 
 // captureClipboardImage reads an image from the Windows clipboard via
-// PowerShell, saving it to a temp PNG and reading it back. Prefers pwsh
-// (PowerShell 7+) and falls back to the built-in powershell.exe — the same
-// selection the terminal tool makes. Returns a friendly error when the
-// clipboard holds no image.
+// PowerShell, saving it to a temp PNG and reading it back. The shell comes from
+// executil.PowerShell — the same selection the terminal tool makes. Returns a
+// friendly error when the clipboard holds no image.
 func captureClipboardImage() (data []byte, mime string, err error) {
-	shell := "powershell"
-	if p, e := exec.LookPath("pwsh"); e == nil {
-		shell = p
-	}
+	shell := executil.PowerShell()
 
 	tmp, err := os.CreateTemp("", "octo-clip-*.png")
 	if err != nil {
