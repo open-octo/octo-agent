@@ -173,41 +173,18 @@
     return Number.isFinite(v) && v >= PANEL_MIN ? v : 420
   }
 
-  // Widest the panel may get right now — the center column keeps CENTER_MIN and
-  // the sidebar keeps whatever it currently occupies. Same bound the drag
-  // handle enforces, read live since the sidebar can collapse under it.
-  function maxPanelWidth(): number {
-    const row = panelEl?.parentElement
-    if (!row) return PANEL_MIN
-    const rowW = row.getBoundingClientRect().width
-    const selfW = panelEl!.getBoundingClientRect().width
-    const sideW = rowW - selfW - (panelEl!.previousElementSibling as HTMLElement)?.getBoundingClientRect().width
-    return Math.max(PANEL_MIN, rowW - sideW - CENTER_MIN)
-  }
-
-  // Width to restore to when un-widening. Null means "not widened", which is
-  // also how a manual drag cancels the widened state: it clears this, so the
-  // button widens from wherever the user left the edge rather than snapping
-  // back to a width they've since moved away from.
-  let widthBeforeWiden = $state<number | null>(null)
-  const isWidened = $derived(widthBeforeWiden !== null)
-
-  function toggleWiden() {
-    if (widthBeforeWiden !== null) {
-      panelWidth = widthBeforeWiden
-      widthBeforeWiden = null
-    } else {
-      widthBeforeWiden = panelWidth
-      panelWidth = maxPanelWidth()
-    }
-    localStorage.setItem(PANEL_WIDTH_KEY, String(Math.round(panelWidth)))
+  // Hand the current artifact to the full-screen view, closing the panel behind
+  // it — the panel and the modal are two sizes of the same thing, not two
+  // things, so leaving both open would show it twice.
+  function expandFullScreen() {
+    panelContent.set(null)
+    artifactModalOpen.set(true)
   }
 
   function startResize(e: MouseEvent) {
     e.preventDefault()
     const row = panelEl?.parentElement
     if (!row) return
-    widthBeforeWiden = null // a manual drag takes over from the widen toggle
     const startX = e.clientX
     const startW = panelEl!.getBoundingClientRect().width
     // Everything left of the panel (sidebar + center) must keep CENTER_MIN for
@@ -232,14 +209,15 @@
   }
 </script>
 
-<!-- The controls that belong to the panel itself rather than to whatever it is
-     showing, so they sit at the far right of its top row in every mode. Widen
-     is panel-level on purpose: it works with nothing selected, unlike the
-     artifact-specific maximize down in .file-row. The toggle carries an "on"
-     fill because this row only exists while the panel is open. -->
+<!-- The panel's own controls, at the far right of its top row in every mode.
+     Expand goes straight to the full-screen view rather than widening the
+     panel; it needs something to show, so it greys out in the empty state and
+     in light-apps mode (the modal renders session artifacts). The toggle
+     carries an "on" fill because this row only exists while the panel is
+     open. -->
 {#snippet topbarControls()}
-  <button class="icon-btn" class:on={isWidened} title={isWidened ? $t('artifacts.restore_width') : $t('artifacts.widen')} onclick={toggleWiden}>
-    <iconify-icon icon="lucide:maximize" width="14"></iconify-icon>
+  <button class="icon-btn" title={$t('artifacts.maximize')} disabled={!cur} onclick={expandFullScreen}>
+    <iconify-icon icon="lucide:scan" width="15"></iconify-icon>
   </button>
   <button class="icon-btn on" title={$t('header.toggle_right')} onclick={closePanel}>
     <iconify-icon icon="lucide:panel-right" width="14"></iconify-icon>
@@ -311,9 +289,6 @@
         <span class="file-meta">{cur.type}</span>
         <span style="flex:1"></span>
         <span class="sandboxed-label">{$t('artifacts.sandboxed')}</span>
-        <button class="icon-btn" title={$t('artifacts.maximize')} onclick={() => { panelContent.set(null); artifactModalOpen.set(true) }}>
-          <iconify-icon icon="ant-design:expand-outlined" width="14"></iconify-icon>
-        </button>
       </div>
 
       {#if saveToLADialog}
