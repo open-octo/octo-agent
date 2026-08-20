@@ -302,3 +302,50 @@ func TestCreateSession_EmptyAgentID_DefaultsToDefault(t *testing.T) {
 		t.Errorf("EffectiveAgentID() = %q, want %q", got, "default")
 	}
 }
+
+// TestTaskToResponse_TimestampsAreUTC guards the timestamp layout: the API
+// stamps used to be formatted with a bare trailing "Z", which Go treats as a
+// literal rather than the UTC designator, so a task created at 19:25 +08:00
+// was published as "19:25Z" and every client rendered it 8 hours late.
+func TestTaskToResponse_TimestampsAreUTC(t *testing.T) {
+	shanghai := time.FixedZone("CST", 8*60*60)
+	srv := &Server{}
+	got := srv.taskToResponse(scheduler.Task{
+		ID:        "task_1",
+		Name:      "n",
+		CreatedAt: time.Date(2026, 8, 19, 19, 25, 59, 0, shanghai),
+		LastRun:   time.Date(2026, 8, 19, 19, 42, 35, 0, shanghai),
+	})
+	if want := "2026-08-19T11:25:59Z"; got.CreatedAt != want {
+		t.Errorf("created_at = %q, want %q", got.CreatedAt, want)
+	}
+	if want := "2026-08-19T11:42:35Z"; got.LastRun != want {
+		t.Errorf("last_run = %q, want %q", got.LastRun, want)
+	}
+}
+
+// TestTaskToResponse_NextRunIsTheSchedulerInstant: next_run comes from the live
+// cron entry (a local-zone time), so it must survive serialisation as the same
+// instant rather than as local wall-clock relabelled UTC.
+func TestTaskToResponse_NextRunIsTheSchedulerInstant(t *testing.T) {
+	setTestHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.initScheduler()
+
+	task := scheduler.Task{Name: "next-run", Cron: "0 */5 * * * *", Prompt: "p", Enabled: true}
+	if err := srv.scheduler.Add(&task); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	want := srv.scheduler.NextRun(task.ID)
+	if want.IsZero() {
+		t.Fatal("scheduler reported no next run for an enabled task")
+	}
+	got, err := time.Parse(time.RFC3339, srv.taskToResponse(task).NextRun)
+	if err != nil {
+		t.Fatalf("parse next_run: %v", err)
+	}
+	if !got.Equal(want.Truncate(time.Second)) {
+		t.Errorf("next_run = %v, want the scheduler instant %v", got, want.Truncate(time.Second))
+	}
+}

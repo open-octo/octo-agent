@@ -744,15 +744,19 @@ func (s *Server) taskToResponse(t scheduler.Task) taskResponse {
 		Notify:    t.Notify,
 		Enabled:   t.Enabled,
 	}
+	// A bare trailing "Z" is a literal in a Go layout, not the UTC designator,
+	// so formatting a local time with it used to claim local wall-clock as UTC
+	// and every client shifted these stamps by the local offset. Convert first,
+	// then let RFC3339 write the real "Z".
 	if !t.CreatedAt.IsZero() {
-		r.CreatedAt = t.CreatedAt.Format("2006-01-02T15:04:05Z")
+		r.CreatedAt = t.CreatedAt.UTC().Format(time.RFC3339)
 	}
 	if !t.LastRun.IsZero() {
-		r.LastRun = t.LastRun.Format("2006-01-02T15:04:05Z")
+		r.LastRun = t.LastRun.UTC().Format(time.RFC3339)
 	}
 	if s.scheduler != nil {
 		if next := s.scheduler.NextRun(t.ID); !next.IsZero() {
-			r.NextRun = next.Format("2006-01-02T15:04:05Z")
+			r.NextRun = next.UTC().Format(time.RFC3339)
 		}
 	}
 	r.SessionID = t.SessionID
