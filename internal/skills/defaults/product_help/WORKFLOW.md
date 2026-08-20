@@ -36,6 +36,6 @@ Dependency direction is one-way: `provider → agent`, `tools → agent`, never 
 
 ## Before opening a PR
 
-Read `.octorules` and `CLAUDE.md` at the repo root — layering, conventions, and common pitfalls, most "will this land" questions answered there. Branch off latest `main` (never commit on `main` directly); one concept per PR; `make test && make vet && make fmt-check` before pushing; squash-and-merge is the default.
+Read `.octorules` at the repo root — layering, conventions, and common pitfalls, most "will this land" questions answered there. Branch off latest `main` (never commit on `main` directly); one concept per PR; `make test && make vet && make fmt-check` before pushing; squash-and-merge is the default.
 
 Full contributor guide (what reviewers look for, dependency policy, comment style): **https://octo-agent.dev/docs/community/contributing/** (`web_fetch`).
