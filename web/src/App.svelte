@@ -24,7 +24,6 @@
   import TasksView from './views/TasksView.svelte'
   import McpView from './views/McpView.svelte'
   import ChannelsView from './views/ChannelsView.svelte'
-  import ProfileView from './views/ProfileView.svelte'
   import LightAppsView from './views/LightAppsView.svelte'
   import CommandPalette from './components/overlays/CommandPalette.svelte'
   import McpModal from './components/overlays/McpModal.svelte'
@@ -53,7 +52,7 @@
   // delete leaves behind. Read synchronously at module init, before any list
   // can arrive.
   let autoSelectDone = typeof location !== 'undefined' && hashPicksChatTarget(location.hash)
-  const VALID_VIEWS = ['chat', 'agents', 'skills', 'workflows', 'browser', 'tasks', 'mcp', 'channels', 'profile', 'lightapps']
+  const VALID_VIEWS = ['chat', 'agents', 'skills', 'workflows', 'browser', 'tasks', 'mcp', 'channels', 'lightapps']
 
   function applyHash() {
     const h = location.hash.replace(/^#\/?/, '')
@@ -450,8 +449,6 @@
         <McpView />
       {:else if $view === 'channels'}
         <ChannelsView />
-      {:else if $view === 'profile'}
-        <ProfileView />
       {:else if $view === 'lightapps'}
         <LightAppsView />
       {/if}

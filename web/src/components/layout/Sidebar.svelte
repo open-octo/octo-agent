@@ -52,7 +52,6 @@
     { icon: 'ant-design:thunderbolt-outlined', label: 'nav.skills', v: 'skills' },
     { icon: 'ant-design:api-outlined', label: 'nav.mcp', v: 'mcp' },
     { icon: 'ant-design:partition-outlined', label: 'nav.workflows', v: 'workflows' },
-    { icon: 'ant-design:user-outlined', label: 'nav.memory', v: 'profile' },
     { icon: 'ant-design:global-outlined', label: 'nav.browser', v: 'browser' },
     { icon: 'ant-design:mobile-outlined', label: 'nav.channels', v: 'channels' },
   ]

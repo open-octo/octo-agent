@@ -34,6 +34,13 @@
     close()
   }
 
+  // Assistant Memory moved into Settings' 数据管理 — no standalone view left
+  // to route to, so this opens Settings instead of a dead view.set('profile').
+  function openMemorySettings() {
+    settingsModalOpen.set(true)
+    close()
+  }
+
   function newSession() {
     close()
     createNewSession()
@@ -49,7 +56,7 @@
     { id: 'browser', icon: 'ant-design:global-outlined', label: () => $t('nav.browser'), shortcut: '', run: () => goTo('browser') },
     { id: 'mcp', icon: 'ant-design:api-outlined', label: () => $t('nav.mcp'), shortcut: '', run: () => goTo('mcp') },
     { id: 'channels', icon: 'ant-design:mobile-outlined', label: () => $t('nav.channels'), shortcut: '', run: () => goTo('channels') },
-    { id: 'memory', icon: 'ant-design:user-outlined', label: () => $t('nav.memory'), shortcut: '', run: () => goTo('profile') },
+    { id: 'memory', icon: 'ant-design:user-outlined', label: () => $t('nav.memory'), shortcut: '', run: () => openMemorySettings() },
     { id: 'files', icon: 'ant-design:folder-open-outlined', label: () => $t('nav.file_recall'), shortcut: '', run: () => goTo('files') },
     { id: 'lightapps', icon: 'ant-design:appstore-outlined', label: () => $t('nav.light_apps'), shortcut: '', run: () => goTo('lightapps') },
     { id: 'artifacts', icon: 'ant-design:file-text-outlined', label: () => $t('artifacts.toggle'), shortcut: '', run: () => { panelContent.update(v => v ? null : 'session') } },
