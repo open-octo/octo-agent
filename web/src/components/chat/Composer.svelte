@@ -959,13 +959,15 @@
     return parts.length <= 2 ? p : '…/' + parts.slice(-2).join('/')
   }
 
-  // The landing bar has room for a full path, but when one is too long the tail
-  // — the project directory itself — is the half worth keeping, so drop the
-  // middle instead of the end. Full path stays in the title tooltip.
-  function elideDir(p: string, max = 80): string {
-    if (p.length <= max) return p
-    const tail = p.slice(-48)
-    return p.slice(0, max - tail.length - 1) + '…' + tail
+  // Split for the landing bar: everything above the last segment collapses
+  // under CSS ellipsis, the last segment never does.
+  function dirHead(p: string): string {
+    const cut = p.lastIndexOf('/')
+    return cut <= 0 ? '' : p.slice(0, cut)
+  }
+  function dirTail(p: string): string {
+    const cut = p.lastIndexOf('/')
+    return cut < 0 ? p : p.slice(cut)
   }
 
   // queued=true parks the message as its own follow-up turn instead of steering
@@ -1142,13 +1144,18 @@
       <button
         class="dir-bar"
         class:empty={!workingDir}
-        title={workingDir ? $t('chat.dir_change') + ` — ${workingDir}` : $t('chat.dir_pick')}
-        disabled={dirSaving}
+        title={workingDir ? $t('chat.dir_change') + ` — ${workingDir}` : undefined}
         onclick={(e) => { e.stopPropagation(); openPicker() }}
       >
         <iconify-icon icon="ant-design:folder-outlined" width="15"></iconify-icon>
         {#if workingDir}
-          <span class="mono dir-bar-path">{elideDir(workingDir)}</span>
+          <!-- Two spans, not one elided string: the last segment is the
+               directory the user recognises, so it stays at its natural width
+               and only the parent path collapses when the bar runs out of
+               room. Full path is in the tooltip. -->
+          <span class="mono dir-bar-path">
+            <span class="dir-head">{dirHead(workingDir)}</span><span class="dir-tail">{dirTail(workingDir)}</span>
+          </span>
           {#if project}
             <span class="dir-owner">{project.name}</span>
           {/if}
@@ -1348,26 +1355,19 @@
             </div>
           {/if}
         </div>
-        <!-- Once the session exists the directory is settled, so the composer
-             says nothing about it: only the landing page shows it, and there
-             it lives in the bar above the input rather than in this row. The
-             chips left here cover the docked cases, where the choice was
-             already made by the group the session is being filed under. -->
-        {#if !sid}
-          {#if workingDir && project && dockedGroup}
+        <!-- Once the session exists the directory is settled and the composer
+             says nothing about it. What's left here is the docked landing page,
+             where the group the session is being filed under already made the
+             choice — dockedGroup is null the moment a session exists, so it
+             gates this row on its own. -->
+        {#if dockedGroup}
+          {#if workingDir && project}
             <span class="meta-chip static" title={$t('chat.dir_from_project').replace('{name}', project.name) + ` — ${workingDir}`}>
               <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
               <span class="mono dir-path">{shortDir(workingDir)}</span>
               <span class="dir-owner">{project.name}</span>
             </span>
-          {:else if dockedGroup && workingDir}
-            <!-- A task's directory, read-only: where its tools run, decided by
-                 the server's workspace setting rather than by this session. -->
-            <span class="meta-chip static" title={$t('chat.dir_task_fixed') + ` — ${workingDir}`}>
-              <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
-              <span class="mono dir-path">{shortDir(workingDir)}</span>
-            </span>
-          {:else if dockedGroup}
+          {:else}
             <!-- A plain group: no directory to inherit, but naming it is the only
                  signal on this page that the session is being filed there. -->
             <span class="meta-chip static" title={$t('chat.dir_from_project').replace('{name}', dockedGroup.name)}>
@@ -1459,9 +1459,9 @@
 .reasoning-eye { color: var(--success); }
 .mono { font-family: var(--font-mono); }
 .dir-path { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Names the project that owns this directory, so the chip explains itself
-   without needing the tooltip — both for a session already inside a project
-   and on the landing page, where it previews where the first message lands. */
+/* Names the project that owns this directory, so the landing page explains
+   itself without needing the tooltip: it previews where the first message
+   lands. */
 .dir-owner {
   max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   padding-left: 5px; margin-left: 1px; border-left: 1px solid var(--border-secondary);
@@ -1476,10 +1476,12 @@
   cursor: pointer; text-align: left;
 }
 .dir-bar:hover { border-color: var(--blue-6); background: var(--row-hover); }
-.dir-bar:disabled { cursor: default; opacity: 0.6; }
+.dir-bar:focus-visible { outline: none; border-color: var(--blue-6); box-shadow: 0 0 0 2px var(--focus-ring); }
 /* Nothing picked yet: reads as an invitation rather than as state. */
 .dir-bar.empty { color: var(--text-tertiary); }
-.dir-bar-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dir-bar-path { flex: 1; min-width: 0; display: flex; overflow: hidden; white-space: nowrap; }
+.dir-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dir-tail { flex: 0 0 auto; }
 .input-card {
   /* A quiet block rather than a bordered card: a hairline edge, no shadow. The
      rounder corner (18 vs the old 14) reads more like a single soft shape. */
