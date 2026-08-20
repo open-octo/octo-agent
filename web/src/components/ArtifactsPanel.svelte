@@ -227,6 +227,16 @@
   </button>
 {/snippet}
 
+<!-- A light app opens maximized, so there is no narrow state to shrink back to
+     and nothing for an expand/collapse pair to toggle between. One close
+     button instead — and only one, since the panel toggle beside it would have
+     done exactly the same thing here. -->
+{#snippet lightAppControls()}
+  <button class="icon-btn" title={$t('common.close')} onclick={closePanel}>
+    <iconify-icon icon="ant-design:close-outlined" width="15"></iconify-icon>
+  </button>
+{/snippet}
+
 <aside class="panel" bind:this={panelEl} style={$panelExpanded ? 'flex:1 1 auto' : `width:${panelWidth}px;flex-basis:${panelWidth}px`}>
   <!-- Expanded, there is no neighbour left to drag against, so the handle goes
        with it rather than sitting there inert against the sidebar. -->
@@ -238,7 +248,7 @@
     <div class="topbar">
       <span style="flex:1"></span>
       <span class="sandboxed-label">{$t('artifacts.sandboxed')}</span>
-      {@render topbarControls()}
+      {@render lightAppControls()}
     </div>
 
     <div class="body">
