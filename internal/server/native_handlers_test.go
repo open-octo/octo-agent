@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -27,6 +29,8 @@ type fakeNative struct {
 	maximised          bool
 	gotOpenURL         string
 	openCalls          int
+	gotOpenDir         string
+	openDirCalls       int
 	gotSaveName        string
 	gotSaveContent     string
 	saveCalls          int
@@ -66,6 +70,11 @@ func (f *fakeNative) WindowState() bool               { return f.maximised }
 func (f *fakeNative) OpenExternal(url string) error {
 	f.openCalls++
 	f.gotOpenURL = url
+	return nil
+}
+func (f *fakeNative) OpenFolder(dir string) error {
+	f.openDirCalls++
+	f.gotOpenDir = dir
 	return nil
 }
 func (f *fakeNative) SaveFile(_ context.Context, defaultName, content string) (string, bool, error) {
@@ -729,4 +738,125 @@ func TestNativeSaveFileNotRegisteredWithoutBridge(t *testing.T) {
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("without a bridge the route must not exist: got %d, want 404", w.Code)
 	}
+}
+
+func TestNativeOpenFolderDelegatesToBridge(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	proj := filepath.Join(tmp, "project")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeNative{}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+
+	post := func(path, body string) map[string]any {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		w := httptest.NewRecorder()
+		serveLoopback(srv.mux, w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("POST %s -> %d (%s)", path, w.Code, w.Body.String())
+		}
+		var out map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatalf("POST %s: %v", path, err)
+		}
+		return out
+	}
+
+	grp := post("/api/session-groups", `{"name":"proj","working_dir":"`+jsonPath(proj)+`"}`)
+	groupID, _ := grp["group"].(map[string]any)["id"].(string)
+	sess := post("/api/sessions", `{"name":"loose"}`)
+	sessionID, _ := sess["session"].(map[string]any)["id"].(string)
+	sessionDir, _ := sess["session"].(map[string]any)["working_dir"].(string)
+	if groupID == "" || sessionID == "" || sessionDir == "" {
+		t.Fatalf("fixture ids: group=%q session=%q dir=%q", groupID, sessionID, sessionDir)
+	}
+
+	// A project opens its own working dir; a loose session the dir the server
+	// resolved for it. Neither caller names a path.
+	for _, tc := range []struct{ name, body, wantDir string }{
+		{"group", `{"group_id":"` + groupID + `"}`, proj},
+		{"session", `{"session_id":"` + sessionID + `"}`, sessionDir},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := fake.openDirCalls
+			req := httptest.NewRequest(http.MethodPost, "/api/native/open-folder", strings.NewReader(tc.body))
+			w := httptest.NewRecorder()
+			serveLoopback(srv.mux, w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("got %d, want 200 (%s)", w.Code, w.Body.String())
+			}
+			if fake.openDirCalls != before+1 || fake.gotOpenDir != tc.wantDir {
+				t.Errorf("bridge.OpenFolder calls=%d dir=%q, want %d/%s", fake.openDirCalls, fake.gotOpenDir, before+1, tc.wantDir)
+			}
+		})
+	}
+}
+
+// The endpoint resolves the directory itself, so a caller cannot name one: a
+// path in the body is not a path, an unknown id opens nothing, and a project
+// whose folder has since been deleted fails loudly instead of opening the
+// server's default directory.
+func TestNativeOpenFolderRefusesWhatItCannotResolve(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	gone := filepath.Join(tmp, "deleted-project")
+	if err := os.MkdirAll(gone, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeNative{}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/session-groups", strings.NewReader(`{"name":"proj","working_dir":"`+jsonPath(gone)+`"}`))
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create group: %d (%s)", w.Code, w.Body.String())
+	}
+	var created map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	goneID, _ := created["group"].(map[string]any)["id"].(string)
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name, body string
+		want       int
+	}{
+		{"a path is not an id", `{"path":"` + jsonPath(tmp) + `"}`, http.StatusBadRequest},
+		{"neither id given", `{}`, http.StatusBadRequest},
+		{"unknown session", `{"session_id":"20260101-000000-deadbeef"}`, http.StatusNotFound},
+		{"session id escaping its dir", `{"session_id":"../../etc"}`, http.StatusNotFound},
+		{"unknown group", `{"group_id":"g-nope"}`, http.StatusNotFound},
+		{"project folder deleted", `{"group_id":"` + goneID + `"}`, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/native/open-folder", strings.NewReader(tc.body))
+			w := httptest.NewRecorder()
+			serveLoopback(srv.mux, w, req)
+			if w.Code != tc.want {
+				t.Errorf("got %d, want %d (%s)", w.Code, tc.want, w.Body.String())
+			}
+		})
+	}
+	if fake.openDirCalls != 0 {
+		t.Errorf("bridge.OpenFolder called %d times, want 0", fake.openDirCalls)
+	}
+}
+
+// jsonPath escapes a filesystem path for embedding in a JSON string literal —
+// Windows separators would otherwise read as escape sequences.
+func jsonPath(p string) string {
+	return strings.ReplaceAll(p, `\`, `\\`)
 }

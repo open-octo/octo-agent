@@ -333,6 +333,20 @@ export async function openExternal(url: string): Promise<void> {
   })
 }
 
+// Desktop shell only: reveal a session's or a project's working directory in
+// the OS file manager. Backs the sidebar's "Open folder" action — a browser tab
+// has no way to do this, so it is offered only when native:true.
+//
+// The row is named by id, not by path: the server resolves where that session
+// or project actually works (and refuses an id it doesn't know), so this can't
+// become a way to open any directory on the host.
+export async function openFolder(target: { sessionId?: string; groupId?: string }): Promise<void> {
+  await request<{ ok: boolean; path: string }>('/api/native/open-folder', {
+    method: 'POST',
+    ...json({ session_id: target.sessionId, group_id: target.groupId }),
+  })
+}
+
 // Desktop shell only: start the in-place update flow — the native updater
 // window takes over (download → verify → restart). Available when /api/version
 // reports self_update:true and the caller is loopback; the badge falls back to

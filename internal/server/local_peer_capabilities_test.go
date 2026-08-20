@@ -30,6 +30,7 @@ func TestNativeRoutes_RefuseARelayedPeer(t *testing.T) {
 		"/api/native/pick-folder",
 		"/api/native/pick-file",
 		"/api/native/window/minimise",
+		"/api/native/open-folder",
 		"/api/native/self-update",
 	} {
 		t.Run(path, func(t *testing.T) {

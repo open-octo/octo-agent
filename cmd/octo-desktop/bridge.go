@@ -863,6 +863,27 @@ func (b *nativeBridge) OpenExternal(url string) error {
 	}
 }
 
+// OpenFolder reveals a directory in the OS file manager, backing the sidebar's
+// "Open folder" action. It shells out to the platform's own file-manager opener
+// rather than reusing OpenExternal with a file:// URL: on Windows the URL
+// protocol handler would not necessarily bring up Explorer, and `explorer` is
+// the documented way to select a directory. The server has already checked that
+// dir exists and is a directory.
+//
+// Start() rather than Run() throughout: the returned error is about spawning the
+// opener, not about what it did. That also sidesteps `explorer` exiting non-zero
+// on success, which a Run() here would report as a failure.
+func (b *nativeBridge) OpenFolder(dir string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", dir).Start()
+	case "windows":
+		return exec.Command("explorer", dir).Start()
+	default:
+		return exec.Command("xdg-open", dir).Start()
+	}
+}
+
 // confirmTakeover asks whether to stop an already-running backend and become
 // the hub. Declining means the app will quit (it won't run windowed without
 // its own server to attach the native bridge to).

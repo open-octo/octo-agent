@@ -3,8 +3,13 @@ package server
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"strings"
+
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // NativeBridge is the desktop shell's hook into OS-native capabilities that a
@@ -60,6 +65,12 @@ type NativeBridge interface {
 	// desktop build updates through its installer, not an in-place swap. The
 	// server validates url is http/https before calling.
 	OpenExternal(url string) error
+
+	// OpenFolder reveals dir in the OS file manager (Finder, Explorer, the
+	// desktop's file browser) — the sidebar's "Open folder" action on a project
+	// or a session, which a browser tab cannot do at all. The server validates
+	// dir exists and is a directory before calling.
+	OpenFolder(dir string) error
 
 	// SaveFile shows an OS save dialog seeded with defaultName, writes content
 	// to the chosen path, and returns it. cancelled is true when the user
@@ -390,6 +401,80 @@ func (s *Server) handleNativeOpenExternal(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+type nativeOpenFolderRequest struct {
+	SessionID string `json:"session_id"`
+	GroupID   string `json:"group_id"`
+}
+
+// POST /api/native/open-folder — reveal a session's or a project's working
+// directory in the OS file manager (desktop only). Backs the sidebar's "Open
+// folder" action.
+//
+// The caller names a session or a group, never a path: the directory is looked
+// up here, from the same resolution every other surface uses (sessionCwdByID
+// for a session, the group registry for a project). A path in the request body
+// would make this endpoint an "open any directory on this machine" primitive
+// and put a caller-controlled string on its way to the platform opener — the
+// action means "take me to where this row's work happens", and that is a
+// question only the server can answer anyway.
+//
+// Loopback-gated like the other native routes: opening a window on the desktop
+// host is never something a remote peer gets to do.
+func (s *Server) handleNativeOpenFolder(w http.ResponseWriter, r *http.Request) {
+	if !isLocalRequest(r) {
+		writeError(w, http.StatusForbidden, "available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+	var req nativeOpenFolderRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeInvalidJSONBody(w, err)
+		return
+	}
+
+	var dir string
+	switch {
+	case strings.TrimSpace(req.GroupID) != "":
+		dir = projectDirByGroupID(strings.TrimSpace(req.GroupID))
+		if dir == "" {
+			writeError(w, http.StatusNotFound, "no project with that id, or it has no working directory")
+			return
+		}
+	case strings.TrimSpace(req.SessionID) != "":
+		id := strings.TrimSpace(req.SessionID)
+		// Existence check first: an unknown id would otherwise resolve to the
+		// server's default directory, quietly opening the wrong folder.
+		if _, err := agent.LoadSession(id); err != nil {
+			writeError(w, http.StatusNotFound, "no session with that id")
+			return
+		}
+		dir = s.sessionCwdByID(id)
+	default:
+		writeError(w, http.StatusBadRequest, "session_id or group_id is required")
+		return
+	}
+
+	// The dir is octo's own record, but records outlive directories: a project
+	// whose folder was deleted or moved still carries the old path.
+	info, err := os.Stat(dir)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("directory is not accessible: %s (%v)", dir, unwrapPathError(err)))
+		return
+	}
+	if !info.IsDir() {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("not a directory: %s", dir))
+		return
+	}
+	if err := s.cfg.Native.OpenFolder(dir); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "path": dir})
 }
 
 // handleNativeSelfUpdate starts the desktop shell's in-place update flow (the
