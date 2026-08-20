@@ -12,21 +12,21 @@
 
 That shape is wrong for the thing a panel actually is. Clicking a tab, filtering a table, or filling in a form is not a conversational act — it is manipulation of an object the model already handed over. Routing it through the conversation produces a transcript full of near-identical panels, leaves every earlier copy clickable and stale, costs a full model turn per click, and still loses every field value on page reload because the values live only in `GenuiBlock.svelte`'s in-memory `$state`.
 
-This document makes a GenUI panel a self-contained, addressable, locally-interactive object: it has an identity that survives across turns, it responds to most interaction instantly with no model involvement, it can be updated in place when the model *is* needed, and its interaction state survives a reload. It also adds the node types that only become worth having once interaction is local: `slider`, `number`, and `textarea` as inputs, and `plot`, `quiz`, and `mermaid` as content.
+This document makes a GenUI panel a self-contained, addressable, locally-interactive object: it has an identity that survives across turns, it responds to most interaction instantly with no model involvement, it can be updated in place when the model *is* needed, and its interaction state survives a reload. It also adds the node types that only become worth having once interaction is local: `slider`, `number`, and `textarea` as inputs, `collapsible`, `code`, `link` and `divider` for structure, and `plot`, `quiz`, and `mermaid` as content.
 
 ## Goals
 
 - Interaction that the panel can answer by itself is answered by itself: no message, no model turn, no latency.
 - Interaction that genuinely needs the model updates the existing panel in place, without adding a user bubble or an assistant bubble to the transcript.
 - A panel's interaction state (selected tab, filter text, form values, quiz answers) survives a page reload.
-- Add the nodes that local interaction makes worth having: `slider`, `number`, `textarea` as inputs, `collapsible`, `code`, `divider` for structure, and `plot`, `quiz`, `mermaid` as content.
+- Add the nodes that local interaction makes worth having: `slider`, `number`, `textarea` as inputs, `collapsible`, `code`, `link`, `divider` for structure, and `plot`, `quiz`, `mermaid` as content.
 - Every existing GenUI behaviour keeps working byte-identically when a spec omits the new fields.
 
 ## Non-goals
 
 Deliberately excluded, each for a stated reason rather than by omission:
 
-- **A persistent session-level dock.** Still deferred, for the reason `genui-design.md` gave: upstream dsh-genui's own history shows it is the most reworked part of their implementation. Nothing here creates a panel surface outside the message flow — an addressable panel still renders at a position in the transcript.
+- **A persistent session-level dock. Not planned** — this replaces the "deferred pending a later design" status `genui-design.md` gave it. A dock existed on that list to solve panel accumulation: many near-identical panels piling up, needing de-duplication and re-ordering. Addressable panels solve that directly, at the cost of one optional field, and they keep a panel where the conversation put it. What a dock would still add is a panel surface *outside* the message flow — a product direction, not a fix for anything currently broken, and the single most reworked part of upstream dsh-genui's implementation. If it is ever revisited it should be argued from "users want a panel area detached from the conversation", not from panel accumulation, which no longer happens.
 - **Cross-device state sync.** Interaction state is a property of a reader at a screen, not of the session on disk — the same judgement the client already applies to every other view-level preference it keeps in localStorage. A phone and a desktop viewing the same session keep independent panel state.
 - **3D / WebGL nodes.** The dependency and the WebGL-context lifecycle cost are both large, and unlike `mermaid` there is no everyday use for them in this product.
 - **The model automatically observing local interaction.** Local interaction is transparent to the model by construction (see "Model visibility" below). When the model needs to know, the user takes an explicit action that carries the field values — the mechanism `context.ts:26-27` already implements.
@@ -287,6 +287,18 @@ Three additions carry no new dependency and exist to keep a data-carrying panel 
 
 The registration (core build, language list, theme CSS) lives in `web/src/lib/highlight.ts`, which both `markdown.ts` and `GenuiCode.svelte` import. Keeping it in one module is what stops the code node from depending on markdown having been loaded first to have any language registered at all — a dependency that would hold in the running app by accident and fail anywhere markdown is not in play.
 
+`link` is the only node in GenUI carrying a URL:
+
+```ts
+{ type: 'link', text: string, href: string }
+```
+
+`href` is checked against `markdown.ts`'s `isSafeHref` — exported for this purpose, per the requirement `genui-design.md`'s security design set down before any linking node existed: a second scheme whitelist would drift from the first. Only `http://`, `https://`, `mailto:` and `tel:` pass. The Go guard implements the same list independently, matching the rest of its relationship with the TS guard.
+
+Two rejections drop the whole node rather than degrading it: an href outside the whitelist, and one longer than `MAX_HREF_LEN`. Rendering a rejected link as inert text would leave something that still looks clickable, and truncating a long URL would produce a link pointing somewhere other than where it claims — both worse than showing nothing. An empty `text` falls back to displaying the href. The rendered anchor carries `target="_blank"` with `rel="noopener noreferrer"`, so the opened page cannot reach back through `window.opener` and the chat session is never navigated away from.
+
+Its existence also removes a workaround: sending the user to a URL previously required a `button`, spending a whole model turn to hand back a link.
+
 `divider` has no fields and no state.
 
 ### New nodes: plot and mermaid
@@ -352,6 +364,7 @@ Local interaction changes what a panel must carry: the model now ships the data 
 | `MAX_TEXTAREA_LEN` | — | 5000 | New. Bounds a `textarea`'s model-supplied default, and is mirrored as the rendered element's `maxlength` so what the user types back is bounded by the same number. |
 | `MAX_TEXTAREA_ROWS` | — | 12 | New. `rows` clamps to 2–12; taller than that belongs in an artifact, not a chat panel. |
 | `MAX_CODE_LEN` | — | 5000 | New. A `code` node is an excerpt inside a reply; a whole file belongs in an artifact. |
+| `MAX_HREF_LEN` | — | 2000 | New. Well past any real URL. Exceeding it drops the node — see above for why truncation is not an option here. |
 
 `MAX_TABLE_ROWS` at 500 with `MAX_TABLE_CELL_LEN` at 2000 leaves a worst-case table well inside what the existing tool-result cards already render, and the guard trims rather than rejects, so an over-cap table still shows its first 500 rows.
 
@@ -439,6 +452,8 @@ No schema change. `Session` (`internal/agent/session.go:30-106`) is untouched: p
 | 11e | Number vs input separation | A spec sending `input` with an `inputType` field | Field dropped by the guard; `input` still renders as plain text |
 | 11f | Textarea bounds | `rows` outside 2–12; default `value` over 5000 chars | `rows` clamped; value trimmed; rendered element carries `maxlength=5000` |
 | 11g | Collapsible fold state | Fold a section, reload | Stays folded; `open` only seeds the first render; `__open:` key unaddressable from a spec |
+| 11h2 | Link scheme whitelist | `javascript:`, `data:`, `file:`, `vbscript:`, protocol-relative, empty, and the same with odd casing/whitespace | Node dropped in both guards; whitelisted schemes preserved verbatim |
+| 11h3 | Link degenerate input | href over `MAX_HREF_LEN`; missing `text` | Node dropped; `text` falls back to the href |
 | 11h | Code highlighting | Registered lang, unregistered lang, no lang | Highlighted / plain monospace / plain monospace — never an error |
 | 11i | Plot multi-series alignment | Series with differing labels and lengths | X axis is the union in first-appearance order; `line` breaks at gaps; `bar`/`area` treat gaps as zero |
 | 11j | Plot degenerate inputs | `pie` with several series; negative values under `stacked`; a ninth series; non-finite values | First series only; negatives clamped to zero; trimmed at 8; non-finite dropped |
