@@ -8,6 +8,7 @@ package genui
 
 import (
 	"fmt"
+	"math"
 	"unicode/utf8"
 )
 
@@ -24,7 +25,11 @@ const (
 	MaxStringLen    = 500
 	MaxTableCellLen = 2000
 	MaxListItems    = 200
-	MaxTableRows    = 100
+	// Raised from 100 when local filtering arrived on the inline-fence path:
+	// the core case is "here is the data set, narrow it down", and 100 rows is
+	// below the size where offering a filter is worth it. Kept in lockstep
+	// with the TS guard. See dev-docs/genui-interactive-panels-design.md.
+	MaxTableRows = 500
 	// MaxTableColumns bounds both a table's "columns" header length and each
 	// row's cell count. The design doc only names row-count (100) and
 	// cell-length (2000) caps for tables; this column-count cap is this
@@ -32,6 +37,17 @@ const (
 	// to share the value 50 with that unrelated cap by coincidence, not
 	// because the two are the same limit.
 	MaxTableColumns = 50
+
+	// Interactive-panel caps — see dev-docs/genui-interactive-panels-design.md.
+	MaxMermaidLen = 5000
+	MaxCodeLen    = 5000
+	MaxPlotPoints = 100
+	// MaxPlotSeries matches the fixed colour sequence the renderer draws from;
+	// a ninth series would have no distinct colour left to take.
+	MaxPlotSeries = 8
+	// MaxNumeric bounds numeric fields rather than trusting them, the same
+	// posture progress.value already takes.
+	MaxNumeric = 1e9
 )
 
 // ReadOnlyNodeTypes is the whitelist of node "type" values the render_ui
@@ -50,6 +66,14 @@ var ReadOnlyNodeTypes = map[string]bool{
 	"badge":    true,
 	"progress": true,
 	"callout":  true,
+	// These carry no field and fire no action, so a render_ui tool-result card
+	// can hold them too. collapsible does toggle, but folding is presentation
+	// rather than input: it reports nothing back and needs no field.
+	"collapsible": true,
+	"code":        true,
+	"divider":     true,
+	"plot":        true,
+	"mermaid":     true,
 }
 
 // Sanitize validates and clamps a GenUI spec against the allowed node-type
@@ -84,6 +108,9 @@ func Sanitize(spec map[string]any, allowed map[string]bool) (map[string]any, int
 		}
 	}
 
+	// A panel "id" is deliberately not carried through: identity exists so a
+	// panel can be re-addressed by a later turn, and a render_ui result is a
+	// one-shot card that no turn addresses again. Tool cards stay anonymous.
 	out := map[string]any{"items": cleaned}
 	if title, ok := spec["title"].(string); ok {
 		out["title"] = clampString(title, MaxStringLen)
@@ -134,6 +161,12 @@ func sanitizeNode(node map[string]any, allowed map[string]bool, depth int, count
 	case "table":
 		out["columns"] = sanitizeStringArray(node, "columns", MaxTableColumns, MaxStringLen)
 		out["rows"] = sanitizeTableRows(node)
+		// sortable is kept: sorting reads no field, so it works on a tool card
+		// too. filterBy is dropped for the same reason visibleWhen is — it
+		// names a field, and this path has no field-bearing node to set one.
+		if sortable, ok := node["sortable"].(bool); ok {
+			out["sortable"] = sortable
+		}
 
 	case "keyvalue":
 		out["items"] = sanitizeKeyValueItems(node)
@@ -165,8 +198,114 @@ func sanitizeNode(node map[string]any, allowed map[string]bool, depth int, count
 		if text, ok := node["text"].(string); ok {
 			out["text"] = clampString(text, MaxStringLen)
 		}
+
+	case "collapsible":
+		out["title"] = clampString(stringField(node, "title"), MaxStringLen)
+		if open, ok := node["open"].(bool); ok {
+			out["open"] = open
+		}
+		out["children"] = sanitizeChildren(node, "children", allowed, depth, count)
+
+	case "code":
+		out["code"] = clampString(stringField(node, "code"), MaxCodeLen)
+		if lang, ok := node["lang"].(string); ok {
+			out["lang"] = clampString(lang, MaxStringLen)
+		}
+
+	case "divider":
+		// No fields at all.
+
+	case "plot":
+		kind, _ := node["plot"].(string)
+		switch kind {
+		case "bar", "line", "area", "pie":
+		default:
+			return nil
+		}
+		series := sanitizePlotSeries(node)
+		if len(series) == 0 {
+			return nil
+		}
+		out["plot"] = kind
+		out["series"] = series
+		if stacked, ok := node["stacked"].(bool); ok {
+			out["stacked"] = stacked
+		}
+		if legend, ok := node["legend"].(bool); ok {
+			out["legend"] = legend
+		}
+		if xLabel, ok := node["xLabel"].(string); ok {
+			out["xLabel"] = clampString(xLabel, MaxStringLen)
+		}
+		if yLabel, ok := node["yLabel"].(string); ok {
+			out["yLabel"] = clampString(yLabel, MaxStringLen)
+		}
+		if h, ok := numberField(node, "height"); ok {
+			out["height"] = clampNumber(math.Round(h), 80, 400)
+		}
+
+	case "mermaid":
+		out["code"] = clampString(stringField(node, "code"), MaxMermaidLen)
 	}
 
+	// visibleWhen is deliberately NOT carried through here. It is a condition
+	// over a field value, and the render_ui path this guard serves accepts no
+	// field-bearing node at all (ReadOnlyNodeTypes above), so a condition on a
+	// tool card could only ever compare against an unset field — hiding the
+	// node for no reason a reader could act on. The inline-fence path, which
+	// does have fields, is guarded in TypeScript and keeps it there.
+
+	return out
+}
+
+// sanitizePlotSeries clamps a plot's series list to MaxPlotSeries entries and
+// each series' points to MaxPlotPoints, dropping points whose value is not a
+// finite number — a NaN would poison every axis calculation downstream.
+func sanitizePlotSeries(node map[string]any) []any {
+	raw, ok := toSlice(node["series"])
+	if !ok {
+		return nil
+	}
+	out := make([]any, 0, len(raw))
+	for _, s := range raw {
+		if len(out) >= MaxPlotSeries {
+			break
+		}
+		rec, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		pointsRaw, ok := toSlice(rec["points"])
+		if !ok {
+			continue
+		}
+		points := make([]any, 0, len(pointsRaw))
+		for _, p := range pointsRaw {
+			if len(points) >= MaxPlotPoints {
+				break
+			}
+			pr, ok := p.(map[string]any)
+			if !ok {
+				continue
+			}
+			v, ok := numberField(pr, "value")
+			if !ok || math.IsNaN(v) || math.IsInf(v, 0) {
+				continue
+			}
+			points = append(points, map[string]any{
+				"label": clampString(stringField(pr, "label"), MaxStringLen),
+				"value": clampNumber(v, -MaxNumeric, MaxNumeric),
+			})
+		}
+		if len(points) == 0 {
+			continue
+		}
+		entry := map[string]any{"points": points}
+		if name, ok := rec["name"].(string); ok {
+			entry["name"] = clampString(name, MaxStringLen)
+		}
+		out = append(out, entry)
+	}
 	return out
 }
 

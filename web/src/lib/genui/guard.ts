@@ -21,12 +21,41 @@ export const MAX_NODES = 200
 export const MAX_STRING_LEN = 500
 export const MAX_TABLE_CELL_LEN = 2000
 export const MAX_LIST_ITEMS = 200
-export const MAX_TABLE_ROWS = 100
+// Raised from 100 when local filtering arrived: the core case is "here is the
+// data set, narrow it down", and 100 rows is below the size where offering a
+// filter is worth it. See dev-docs/genui-interactive-panels-design.md.
+export const MAX_TABLE_ROWS = 500
 export const MAX_TABLE_COLUMNS = 50
 // Slice B caps (select/radio options, tabs) — see dev-docs/genui-design.md
 // "GenUI spec shape".
 export const MAX_OPTIONS = 50
 export const MAX_TABS = 8
+
+// Interactive-panel caps — see dev-docs/genui-interactive-panels-design.md.
+export const MAX_PANEL_ID_LEN = 64
+export const MAX_MERMAID_LEN = 5000
+export const MAX_CODE_LEN = 5000
+export const MAX_TEXTAREA_LEN = 5000
+export const MAX_TEXTAREA_ROWS = 12
+export const MIN_TEXTAREA_ROWS = 2
+export const MAX_PLOT_POINTS = 100
+/** Matches the fixed colour sequence a plot draws from — a ninth series would
+ * have no distinct colour left to take. */
+export const MAX_PLOT_SERIES = 8
+/** Numeric fields (slider/number bounds) are clamped to a finite range rather
+ * than trusted, the same posture progress.value already takes. */
+export const MAX_NUMERIC = 1e9
+
+/** Panel ids become part of a localStorage key and are compared against ids
+ * parsed out of model output, so the character class is restricted to remove
+ * any question of escaping. */
+const PANEL_ID_RE = /^[A-Za-z0-9_-]+$/
+
+/** Field names beginning with "__" are reserved for internal panel state
+ * (tab index, fold state) and must stay unaddressable from a spec. */
+function isReservedField(name: string): boolean {
+  return name.startsWith('__')
+}
 
 /** Node "type" values render_ui / inline octo-ui fences accept in Slice A
  * (read-only components). Interactive types are added by a later slice. */
@@ -42,6 +71,14 @@ export const READ_ONLY_NODE_TYPES: ReadonlySet<string> = new Set([
   'badge',
   'progress',
   'callout',
+  // These carry no field and fire no action, so a render_ui tool-result card
+  // can hold them too. `collapsible` does toggle, but folding is presentation
+  // rather than input: it reports nothing back and needs no field.
+  'collapsible',
+  'code',
+  'divider',
+  'plot',
+  'mermaid',
 ])
 
 /** Interactive node "type" values, added by Slice B. Inline-octo-ui-fence
@@ -55,6 +92,10 @@ export const INTERACTIVE_NODE_TYPES: ReadonlySet<string> = new Set([
   'switch',
   'radio',
   'tabs',
+  'slider',
+  'number',
+  'textarea',
+  'quiz',
 ])
 
 export interface SanitizeResult {
@@ -91,6 +132,11 @@ export function sanitizeSpec(input: unknown, allowed: ReadonlySet<string>): Sani
   }
 
   const spec: GenuiSpec = { items: cleanedItems }
+  // An id that fails validation is dropped, degrading the panel to anonymous
+  // — never an error, consistent with every other guard violation here.
+  if (typeof raw.id === 'string' && raw.id.length <= MAX_PANEL_ID_LEN && PANEL_ID_RE.test(raw.id)) {
+    spec.id = raw.id
+  }
   if (typeof raw.title === 'string') {
     spec.title = clampString(raw.title, MAX_STRING_LEN)
   }
@@ -111,6 +157,22 @@ function sanitizeNode(
   // otherwise push the total past MAX_NODES by up to MAX_DEPTH-1).
   count.value++
 
+  const out = sanitizeByType(node, allowed, depth, count, type)
+  if (out === null) return null
+  // Every node type may carry visibleWhen, so it is validated once here
+  // rather than repeated in each case below.
+  const cond = sanitizeCondition(node.visibleWhen)
+  if (cond) (out as unknown as Record<string, unknown>).visibleWhen = cond
+  return out
+}
+
+function sanitizeByType(
+  node: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+  depth: number,
+  count: { value: number },
+  type: string
+): GenuiNode | null {
   switch (type) {
     case 'text':
       return withTone({ type: 'text', text: clampString(stringField(node, 'text'), MAX_STRING_LEN) }, node, [
@@ -136,12 +198,23 @@ function sanitizeNode(
     case 'list':
       return { type: 'list', items: sanitizeListItems(node) }
 
-    case 'table':
-      return {
-        type: 'table',
-        columns: sanitizeStringArray(node, 'columns', MAX_TABLE_COLUMNS, MAX_STRING_LEN),
-        rows: sanitizeTableRows(node),
+    case 'table': {
+      const columns = sanitizeStringArray(node, 'columns', MAX_TABLE_COLUMNS, MAX_STRING_LEN)
+      const out: any = { type: 'table', columns, rows: sanitizeTableRows(node) }
+      if (typeof node.sortable === 'boolean') out.sortable = node.sortable
+      const fb = node.filterBy
+      if (typeof fb === 'object' && fb !== null && !Array.isArray(fb)) {
+        const rec = fb as Record<string, unknown>
+        const field = stringField(rec, 'field')
+        const column = stringField(rec, 'column')
+        // An unmatched column name is dropped rather than kept as a filter
+        // that silently matches nothing.
+        if (field !== '' && !isReservedField(field) && columns.includes(column)) {
+          out.filterBy = { field: clampString(field, MAX_STRING_LEN), column }
+        }
       }
+      return out
+    }
 
     case 'keyvalue':
       return { type: 'keyvalue', items: sanitizeKeyValueItems(node) }
@@ -201,7 +274,9 @@ function sanitizeNode(
       // security note on GenuiInputNode in types.ts. Any such field the
       // model sends anyway is silently dropped by construction (this
       // switch only ever assembles the fields listed below).
-      const out: any = { type: 'input', field: clampString(stringField(node, 'field'), MAX_STRING_LEN) }
+      const field = fieldName(node)
+      if (field === null) return null
+      const out: any = { type: 'input', field }
       if (typeof node.label === 'string') out.label = clampString(node.label, MAX_STRING_LEN)
       if (typeof node.placeholder === 'string') out.placeholder = clampString(node.placeholder, MAX_STRING_LEN)
       if (typeof node.value === 'string') out.value = clampString(node.value, MAX_STRING_LEN)
@@ -209,11 +284,9 @@ function sanitizeNode(
     }
 
     case 'select': {
-      const out: any = {
-        type: 'select',
-        field: clampString(stringField(node, 'field'), MAX_STRING_LEN),
-        options: sanitizeOptions(node),
-      }
+      const field = fieldName(node)
+      if (field === null) return null
+      const out: any = { type: 'select', field, options: sanitizeOptions(node) }
       if (typeof node.label === 'string') out.label = clampString(node.label, MAX_STRING_LEN)
       if (typeof node.value === 'string') out.value = clampString(node.value, MAX_STRING_LEN)
       return out
@@ -221,18 +294,18 @@ function sanitizeNode(
 
     case 'checkbox':
     case 'switch': {
-      const out: any = { type, field: clampString(stringField(node, 'field'), MAX_STRING_LEN) }
+      const field = fieldName(node)
+      if (field === null) return null
+      const out: any = { type, field }
       if (typeof node.label === 'string') out.label = clampString(node.label, MAX_STRING_LEN)
       if (typeof node.checked === 'boolean') out.checked = node.checked
       return out
     }
 
     case 'radio': {
-      const out: any = {
-        type: 'radio',
-        field: clampString(stringField(node, 'field'), MAX_STRING_LEN),
-        options: sanitizeOptions(node),
-      }
+      const field = fieldName(node)
+      if (field === null) return null
+      const out: any = { type: 'radio', field, options: sanitizeOptions(node) }
       if (typeof node.label === 'string') out.label = clampString(node.label, MAX_STRING_LEN)
       if (typeof node.value === 'string') out.value = clampString(node.value, MAX_STRING_LEN)
       return out
@@ -241,9 +314,202 @@ function sanitizeNode(
     case 'tabs':
       return { type: 'tabs', tabs: sanitizeTabs(node, allowed, depth, count) }
 
+    case 'slider': {
+      const field = fieldName(node)
+      if (field === null) return null
+      const min = clampNumber(numberField(node, 'min') ?? 0, -MAX_NUMERIC, MAX_NUMERIC)
+      const max = clampNumber(numberField(node, 'max') ?? 0, -MAX_NUMERIC, MAX_NUMERIC)
+      // A zero- or negative-width slider has no meaningful rendering, so the
+      // node is dropped rather than silently repaired into something the
+      // model didn't ask for.
+      if (!(max > min)) return null
+      const out: any = { type: 'slider', field, min, max }
+      const step = numberField(node, 'step')
+      out.step = step !== undefined && step > 0 ? clampNumber(step, 0, max - min) : (max - min) / 100
+      if (typeof node.label === 'string') out.label = clampString(node.label, MAX_STRING_LEN)
+      const value = numberField(node, 'value')
+      if (value !== undefined) out.value = clampNumber(value, min, max)
+      return out
+    }
+
+    case 'number': {
+      const field = fieldName(node)
+      if (field === null) return null
+      const out: any = { type: 'number', field }
+      const min = numberField(node, 'min')
+      const max = numberField(node, 'max')
+      if (min !== undefined) out.min = clampNumber(min, -MAX_NUMERIC, MAX_NUMERIC)
+      if (max !== undefined) out.max = clampNumber(max, -MAX_NUMERIC, MAX_NUMERIC)
+      const step = numberField(node, 'step')
+      if (step !== undefined && step > 0) out.step = clampNumber(step, 0, MAX_NUMERIC)
+      if (typeof node.label === 'string') out.label = clampString(node.label, MAX_STRING_LEN)
+      const value = numberField(node, 'value')
+      if (value !== undefined) {
+        out.value = clampNumber(value, out.min ?? -MAX_NUMERIC, out.max ?? MAX_NUMERIC)
+      }
+      return out
+    }
+
+    case 'textarea': {
+      const field = fieldName(node)
+      if (field === null) return null
+      const out: any = { type: 'textarea', field }
+      if (typeof node.label === 'string') out.label = clampString(node.label, MAX_STRING_LEN)
+      if (typeof node.placeholder === 'string') out.placeholder = clampString(node.placeholder, MAX_STRING_LEN)
+      if (typeof node.value === 'string') out.value = clampString(node.value, MAX_TEXTAREA_LEN)
+      const rows = numberField(node, 'rows')
+      if (rows !== undefined) out.rows = clampNumber(Math.round(rows), MIN_TEXTAREA_ROWS, MAX_TEXTAREA_ROWS)
+      return out
+    }
+
+    case 'quiz': {
+      const field = fieldName(node)
+      if (field === null) return null
+      const out: any = {
+        type: 'quiz',
+        field,
+        question: clampString(stringField(node, 'question'), MAX_STRING_LEN),
+        options: sanitizeOptions(node),
+        correct: clampString(stringField(node, 'correct'), MAX_STRING_LEN),
+      }
+      if (typeof node.explanation === 'string') out.explanation = clampString(node.explanation, MAX_STRING_LEN)
+      return out
+    }
+
+    case 'collapsible': {
+      const out: any = {
+        type: 'collapsible',
+        title: clampString(stringField(node, 'title'), MAX_STRING_LEN),
+        children: sanitizeChildren(node, allowed, depth, count),
+      }
+      if (typeof node.open === 'boolean') out.open = node.open
+      return out
+    }
+
+    case 'code': {
+      const out: any = { type: 'code', code: clampString(stringField(node, 'code'), MAX_CODE_LEN) }
+      if (typeof node.lang === 'string') out.lang = clampString(node.lang, MAX_STRING_LEN)
+      return out
+    }
+
+    case 'divider':
+      return { type: 'divider' } as GenuiNode
+
+    case 'plot': {
+      const kind = node.plot
+      if (typeof kind !== 'string' || !['bar', 'line', 'area', 'pie'].includes(kind)) return null
+      const series = sanitizePlotSeries(node)
+      if (series.length === 0) return null
+      const out: any = { type: 'plot', plot: kind, series }
+      if (typeof node.stacked === 'boolean') out.stacked = node.stacked
+      if (typeof node.legend === 'boolean') out.legend = node.legend
+      if (typeof node.xLabel === 'string') out.xLabel = clampString(node.xLabel, MAX_STRING_LEN)
+      if (typeof node.yLabel === 'string') out.yLabel = clampString(node.yLabel, MAX_STRING_LEN)
+      const height = numberField(node, 'height')
+      if (height !== undefined) out.height = clampNumber(Math.round(height), 80, 400)
+      return out
+    }
+
+    case 'mermaid':
+      return { type: 'mermaid', code: clampString(stringField(node, 'code'), MAX_MERMAID_LEN) } as GenuiNode
+
     default:
       return null
   }
+}
+
+/** A node's field name, or null when it is missing, empty, or reserved —
+ * in which case the caller drops the node, since an input nothing can read
+ * is not worth rendering. */
+function fieldName(node: Record<string, unknown>): string | null {
+  const raw = stringField(node, 'field')
+  if (raw === '' || isReservedField(raw)) return null
+  return clampString(raw, MAX_STRING_LEN)
+}
+
+/**
+ * Validates a visibleWhen condition. The equality family wins as a whole when
+ * any of its members is present (first of equals/in/not, others dropped), so
+ * the outcome never depends on JSON key ordering; otherwise the range
+ * predicates that are present are kept and ANDed at evaluation time.
+ * Returns null when there is nothing valid to keep.
+ */
+function sanitizeCondition(input: unknown): Record<string, unknown> | null {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return null
+  const raw = input as Record<string, unknown>
+  const field = stringField(raw, 'field')
+  if (field === '') return null
+  const out: Record<string, unknown> = { field: clampString(field, MAX_STRING_LEN) }
+
+  if (isScalar(raw.equals)) {
+    out.equals = clampScalar(raw.equals)
+    return out
+  }
+  if (Array.isArray(raw.in)) {
+    const list = raw.in
+      .filter(v => typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v)))
+      .slice(0, MAX_OPTIONS)
+      .map(v => clampScalar(v) as string | number)
+    if (list.length > 0) {
+      out.in = list
+      return out
+    }
+  }
+  if (isScalar(raw.not)) {
+    out.not = clampScalar(raw.not)
+    return out
+  }
+
+  let hasRange = false
+  for (const key of ['gt', 'gte', 'lt', 'lte'] as const) {
+    const v = raw[key]
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      out[key] = clampNumber(v, -MAX_NUMERIC, MAX_NUMERIC)
+      hasRange = true
+    }
+  }
+  return hasRange ? out : null
+}
+
+function isScalar(v: unknown): boolean {
+  return typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v))
+}
+
+function clampScalar(v: unknown): string | number | boolean {
+  if (typeof v === 'string') return clampString(v, MAX_STRING_LEN)
+  if (typeof v === 'number') return clampNumber(v, -MAX_NUMERIC, MAX_NUMERIC)
+  return v as boolean
+}
+
+function sanitizePlotSeries(node: Record<string, unknown>): { name?: string; points: { label: string; value: number }[] }[] {
+  const series = node.series
+  if (!Array.isArray(series)) return []
+  const out: { name?: string; points: { label: string; value: number }[] }[] = []
+  for (const s of series) {
+    if (out.length >= MAX_PLOT_SERIES) break
+    if (typeof s !== 'object' || s === null || Array.isArray(s)) continue
+    const rec = s as Record<string, unknown>
+    if (!Array.isArray(rec.points)) continue
+    const points: { label: string; value: number }[] = []
+    for (const p of rec.points) {
+      if (points.length >= MAX_PLOT_POINTS) break
+      if (typeof p !== 'object' || p === null || Array.isArray(p)) continue
+      const pr = p as Record<string, unknown>
+      const value = pr.value
+      // Non-finite values are dropped rather than coerced: a NaN would poison
+      // every axis calculation downstream.
+      if (typeof value !== 'number' || !Number.isFinite(value)) continue
+      points.push({
+        label: clampString(stringField(pr, 'label'), MAX_STRING_LEN),
+        value: clampNumber(value, -MAX_NUMERIC, MAX_NUMERIC),
+      })
+    }
+    if (points.length === 0) continue
+    const entry: { name?: string; points: { label: string; value: number }[] } = { points }
+    if (typeof rec.name === 'string') entry.name = clampString(rec.name, MAX_STRING_LEN)
+    out.push(entry)
+  }
+  return out
 }
 
 function sanitizeChildren(
