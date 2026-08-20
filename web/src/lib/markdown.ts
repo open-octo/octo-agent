@@ -99,6 +99,21 @@ renderer.table = function (token: Tokens.Table) {
   return `<div class="table-scroll"><table><thead>${header}</thead>${body}</table></div>`
 }
 
+// Raw HTML in reply text is shown as text, never handed to the DOM. marked
+// routes both block-level and inline HTML tokens through renderer.html, and
+// letting them pass meant a model writing a .svelte/.html file inline (no code
+// fence — some harnesses narrate and paste at once) put real nodes into the
+// chat: a GitDiffModal.svelte source dropped a live <div class="backdrop">/
+// <div class="modal"> plus its <style> into the bubble, where the app's global
+// CSS made it a fixed full-screen overlay covering the page. DOMPurify does not
+// stop that — it strips scripts, event handlers and javascript: URLs, not
+// layout markup or CSS — so the escape has to happen at the renderer.
+// Returning false here would make marked.use() fall back to the default
+// pass-through renderer; an escaped string (empty included) never does.
+renderer.html = function ({ text }: Tokens.HTML | Tokens.Tag) {
+  return escapeHtml(text)
+}
+
 marked.use({ renderer })
 
 export function renderMarkdown(text: string, showReasoning = true): string {
