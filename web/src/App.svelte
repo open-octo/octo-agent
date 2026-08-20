@@ -429,10 +429,10 @@
 <MobileApp />
 {:else}
 <div class="app">
-  <Header />
   <div class="content">
     <Sidebar />
     <main class="main">
+      <Header />
       {#if $view === 'chat'}
         <ChatView />
       {:else if $view === 'agents'}

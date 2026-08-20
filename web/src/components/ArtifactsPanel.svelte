@@ -364,9 +364,11 @@
   cursor: col-resize; z-index: 5;
 }
 .resize-handle:hover { background: var(--focus-ring); }
+/* This column's own top row. No bottom border, matching Sidebar's and the main
+   column's — the layout's only lines are the vertical dividers between them. */
 .topbar {
-  flex: 0 0 auto; padding: 8px 8px 8px 16px;
-  border-bottom: 1px solid var(--border-secondary); display: flex; align-items: center; gap: 8px;
+  flex: 0 0 auto; min-height: 44px; padding: 0 8px 0 10px;
+  display: flex; align-items: center; gap: 8px;
 }
 .panel-title { font-size: 13px; font-weight: 600; color: var(--text-heading); white-space: nowrap; }
 .file-row {

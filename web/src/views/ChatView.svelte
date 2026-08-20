@@ -3004,9 +3004,13 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 .chat-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
+/* Rendered inside the main column's own top row (Header.svelte's slot), so it
+   carries no border or background of its own — the layout's only lines are the
+   vertical dividers between columns. Horizontal padding is 0 for the same
+   reason: that row already pads itself. */
 .chat-header {
-  flex: 0 0 auto; background: var(--bg-layout); border-bottom: 1px solid var(--border-secondary);
-  padding: 7px 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  flex: 0 0 auto;
+  padding: 7px 0; display: flex; align-items: center; justify-content: space-between; gap: 16px;
   container-type: inline-size;
 }
 .title-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
