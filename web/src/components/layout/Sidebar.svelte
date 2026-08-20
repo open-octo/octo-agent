@@ -210,6 +210,54 @@
     return () => window.removeEventListener('resize', onResize)
   })
 
+  // ── Resizable width ────────────────────────────────────────────────────────
+  // Drag the right edge to widen the full sidebar; the width persists across
+  // sessions. Both bounds keep the column doing its job: below MIN a session
+  // title has no room left beside its timestamp, above MAX the sidebar starts
+  // eating the conversation it exists to navigate. Rail and hidden are fixed
+  // widths and ignore this — there is nothing to drag in either.
+  const SIDEBAR_WIDTH_KEY = 'octo.sidebarWidth'
+  const SIDEBAR_MIN = 200
+  const SIDEBAR_MAX = 480
+  const SIDEBAR_DEFAULT = 256
+  const clampWidth = (w: number) => Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, w))
+
+  let fullWidth = $state(readSavedWidth())
+  // Drag applies a new width every mousemove, so the collapse transition has to
+  // step aside for the duration or the edge lags behind the cursor.
+  let resizing = $state(false)
+
+  function readSavedWidth(): number {
+    const v = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY))
+    // A width stored under different bounds is clamped rather than discarded:
+    // the user asked for "as wide as possible", so give them the new maximum.
+    return Number.isFinite(v) && v > 0 ? clampWidth(v) : SIDEBAR_DEFAULT
+  }
+
+  function startResize(e: MouseEvent) {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = fullWidth
+    resizing = true
+    const move = (ev: MouseEvent) => {
+      fullWidth = clampWidth(startW + (ev.clientX - startX))
+    }
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      resizing = false
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(Math.round(fullWidth)))
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }
+
+  const sidebarPx = $derived($sidebar === 'full' ? `${fullWidth}px` : $sidebar === 'rail' ? '64px' : '0px')
+
   // Dismiss any open floating UI (kebab menu, move-to-group popover, inline
   // rename) when the user clicks anywhere outside of it. Only clicks that land
   // inside a popover or a rename input are ignored (those must swallow the
@@ -477,10 +525,13 @@
   </span>
 {/snippet}
 
-<aside style="width:{$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};flex:0 0 {$sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '0px'};background:var(--sidebar-frost);backdrop-filter:blur(var(--frost-blur));-webkit-backdrop-filter:blur(var(--frost-blur));border-right:1px solid var(--border-secondary);overflow:hidden;transition:width 0.32s cubic-bezier(0.2,0,0,1),flex-basis 0.32s cubic-bezier(0.2,0,0,1);">
+<aside style="width:{sidebarPx};flex:0 0 {sidebarPx};background:var(--sidebar-frost);backdrop-filter:blur(var(--frost-blur));-webkit-backdrop-filter:blur(var(--frost-blur));border-right:1px solid var(--border-secondary);overflow:hidden;position:relative;transition:{resizing ? 'none' : 'width 0.32s cubic-bezier(0.2,0,0,1),flex-basis 0.32s cubic-bezier(0.2,0,0,1)'};">
 
   {#if $sidebar === 'full'}
-  <div class="full">
+  <!-- The grip sits inside the column because the <aside> clips its overflow;
+       it stays flush with the divider rather than straddling it. -->
+  <div class="resize-grip" role="separator" aria-orientation="vertical" onmousedown={startResize}></div>
+  <div class="full" style="width:{fullWidth}px">
     <div class="side-header" class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag">
       <button class="icon-btn" title={$t('header.toggle_left')} aria-pressed={true} onclick={() => sidebar.set('hidden')}>
         <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
@@ -864,7 +915,18 @@
 
 
 <style>
-.full { width: 256px; height: 100%; display: flex; flex-direction: column; min-height: 0; }
+/* Width comes from the drag state inline, matching the <aside> around it, so
+   the content keeps a fixed box the aside clips during the collapse animation
+   instead of reflowing through it (same reason .rail pins its own width). */
+.full { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+/* A 6px strip along the divider. Absolute so it overlays the column's own rows
+   (including the draggable header, which it opts out of) rather than taking
+   layout space away from them. */
+.resize-grip {
+  position: absolute; right: 0; top: 0; bottom: 0; width: 6px;
+  cursor: col-resize; z-index: 5; --wails-draggable: no-drag;
+}
+.resize-grip:hover { background: var(--focus-ring); }
 /* This column's own top row, starting at the very top of the window — there is
    no bar laid across the layout, so no bottom border here either: the only
    lines are the vertical dividers between columns. Carries the collapse toggle
