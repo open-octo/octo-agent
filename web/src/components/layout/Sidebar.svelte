@@ -6,6 +6,7 @@
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
   import { splitSections, swapWithinSection, parseSectionFold, type SectionFold } from '../../lib/sidebarSections'
+  import { SIDEBAR_MIN, SIDEBAR_MAX, CENTER_MIN, readSidebarWidth, saveSidebarWidth } from '../../lib/sidebarWidth'
   import { ago } from '../../lib/relTime'
   import { ws } from '../../lib/ws'
   import VersionBadge from './VersionBadge.svelte'
@@ -212,35 +213,44 @@
 
   // ── Resizable width ────────────────────────────────────────────────────────
   // Drag the right edge to widen the full sidebar; the width persists across
-  // sessions. Both bounds keep the column doing its job: below MIN a session
-  // title has no room left beside its timestamp, above MAX the sidebar starts
-  // eating the conversation it exists to navigate. Rail and hidden are fixed
-  // widths and ignore this — there is nothing to drag in either.
-  const SIDEBAR_WIDTH_KEY = 'octo.sidebarWidth'
-  const SIDEBAR_MIN = 200
-  const SIDEBAR_MAX = 480
-  const SIDEBAR_DEFAULT = 256
-  const clampWidth = (w: number) => Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, w))
-
-  let fullWidth = $state(readSavedWidth())
+  // sessions. The bounds keep the column doing its job: below SIDEBAR_MIN a
+  // session title has no room left beside its timestamp, above SIDEBAR_MAX it
+  // starts eating the conversation it exists to navigate. Rail and hidden are
+  // fixed widths and ignore this — there is nothing to drag in either.
+  let fullWidth = $state(readSidebarWidth())
   // Drag applies a new width every mousemove, so the collapse transition has to
   // step aside for the duration or the edge lags behind the cursor.
   let resizing = $state(false)
+  let asideEl = $state<HTMLElement | null>(null)
 
-  function readSavedWidth(): number {
-    const v = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY))
-    // A width stored under different bounds is clamped rather than discarded:
-    // the user asked for "as wide as possible", so give them the new maximum.
-    return Number.isFinite(v) && v > 0 ? clampWidth(v) : SIDEBAR_DEFAULT
+  // SIDEBAR_MAX is only the absolute ceiling. What the drag actually stops at
+  // also depends on the room left over: an open artifacts panel plus a wide
+  // sidebar can squeeze the conversation column to nothing on a small window,
+  // so the center's minimum wins over the ceiling (same rule the panel's own
+  // grip applies from its side).
+  function maxDraggableWidth(startW: number): number {
+    const row = asideEl?.parentElement
+    const main = asideEl?.nextElementSibling as HTMLElement | null
+    if (!row || !main) return SIDEBAR_MAX
+    const rowW = row.getBoundingClientRect().width
+    // Whatever sits beyond the center column — the artifacts panel, or nothing.
+    const beyondCenter = rowW - startW - main.getBoundingClientRect().width
+    return Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, rowW - beyondCenter - CENTER_MIN))
   }
 
   function startResize(e: MouseEvent) {
+    if (e.button !== 0) return
     e.preventDefault()
     const startX = e.clientX
     const startW = fullWidth
+    const maxW = maxDraggableWidth(startW)
     resizing = true
     const move = (ev: MouseEvent) => {
-      fullWidth = clampWidth(startW + (ev.clientX - startX))
+      // A mouseup swallowed by browser chrome or a cross-origin frame never
+      // reaches us; the next move without a button held ends the drag instead
+      // of leaving the page stuck in col-resize with text unselectable.
+      if (ev.buttons === 0) { up(); return }
+      fullWidth = Math.max(SIDEBAR_MIN, Math.min(maxW, startW + (ev.clientX - startX)))
     }
     const up = () => {
       window.removeEventListener('mousemove', move)
@@ -248,7 +258,7 @@
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
       resizing = false
-      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(Math.round(fullWidth)))
+      saveSidebarWidth(fullWidth)
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
@@ -525,7 +535,7 @@
   </span>
 {/snippet}
 
-<aside style="width:{sidebarPx};flex:0 0 {sidebarPx};background:var(--sidebar-frost);backdrop-filter:blur(var(--frost-blur));-webkit-backdrop-filter:blur(var(--frost-blur));border-right:1px solid var(--border-secondary);overflow:hidden;position:relative;transition:{resizing ? 'none' : 'width 0.32s cubic-bezier(0.2,0,0,1),flex-basis 0.32s cubic-bezier(0.2,0,0,1)'};">
+<aside bind:this={asideEl} style="width:{sidebarPx};flex:0 0 {sidebarPx};background:var(--sidebar-frost);backdrop-filter:blur(var(--frost-blur));-webkit-backdrop-filter:blur(var(--frost-blur));border-right:1px solid var(--border-secondary);overflow:hidden;position:relative;transition:{resizing ? 'none' : 'width 0.32s cubic-bezier(0.2,0,0,1),flex-basis 0.32s cubic-bezier(0.2,0,0,1)'};">
 
   {#if $sidebar === 'full'}
   <!-- The grip sits inside the column because the <aside> clips its overflow;
@@ -920,8 +930,11 @@
    instead of reflowing through it (same reason .rail pins its own width). */
 .full { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 /* A 6px strip along the divider. Absolute so it overlays the column's own rows
-   (including the draggable header, which it opts out of) rather than taking
-   layout space away from them. */
+   rather than taking layout space away from them. The no-drag is belt and
+   braces: --wails-draggable is inherited through the DOM, and the grip is a
+   sibling of the draggable header rather than a child, so it would not pick up
+   "drag" anyway — but it visually sits on top of that header, and a future
+   author moving it under one is the mistake worth pre-empting. */
 .resize-grip {
   position: absolute; right: 0; top: 0; bottom: 0; width: 6px;
   cursor: col-resize; z-index: 5; --wails-draggable: no-drag;

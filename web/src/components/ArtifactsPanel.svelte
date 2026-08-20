@@ -3,6 +3,7 @@
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
   import { hydrateArtifact, lightAppSource, pathIsInside } from '../lib/artifacts'
+  import { CENTER_MIN } from '../lib/sidebarWidth'
   import * as api from '../lib/api'
 
   // ── Session artifacts (existing) ──────────────────────────────────────────
@@ -169,7 +170,6 @@
   // center column drops under its own minimum (mirrors the design mock).
   const PANEL_WIDTH_KEY = 'octo.panelWidth'
   const PANEL_MIN = 320
-  const CENTER_MIN = 460
   let panelEl = $state<HTMLElement | null>(null)
   let panelWidth = $state(readSavedWidth())
 
