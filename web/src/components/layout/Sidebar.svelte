@@ -475,6 +475,15 @@
     } catch (e: any) { showToast(e.message, 'error') }
   }
 
+  // Tooltip for a running badge. Takes the already-translated label so the
+  // caller reads $t in markup and the title re-renders on a language switch.
+  // Names are clamped: one runaway session title should not stretch the
+  // tooltip across the screen.
+  function runningTitle(label: string, items: any[]): string {
+    const names = items.map((s: any) => String(s.name || s.title || s.id).slice(0, 60)).join('\n')
+    return label.replace('{names}', names)
+  }
+
   // Move a group one slot up or down WITHIN ITS OWN SECTION: `siblings` is the
   // id list of the section it renders in, so a project swaps with the previous
   // project and a task group with the previous task group. Swapping with
@@ -610,9 +619,11 @@
              project, not by session — a project is the unit here, and its own
              header already carries how many sessions are in it. -->
         {#if groupedView.projects.length > 0}
+        {@const runningProjects = sections.projects ? [] : groupedView.projects.flatMap(gv => gv.items).filter((s: any) => s.status === 'running')}
         <div class="sec-header" onclick={() => toggleSection('projects')}>
           {#if $selMode}{@render triBox(triStateOf(groupedView.projects.flatMap(gv => gv.items.map(s => s.id))), () => toggleMany(groupedView.projects.flatMap(gv => gv.items.map(s => s.id))))}{/if}
           <span class="sec-name">{$t('sidebar.projects')}</span>
+          {#if runningProjects.length > 0}{@render runningBadge(runningProjects, null)}{/if}
           <iconify-icon class="sec-caret" class:folded={!sections.projects} icon="ant-design:right-outlined" width="10"></iconify-icon>
         </div>
         {#if sections.projects}
@@ -626,9 +637,11 @@
              one session — there is no naming or nesting layer inside this
              section, which is what the retired "plain group" used to add. -->
         {#if groupedView.ungrouped.length > 0}
+        {@const runningTasks = sections.tasks ? [] : groupedView.ungrouped.filter((s: any) => s.status === 'running')}
         <div class="sec-header" onclick={() => toggleSection('tasks')}>
           {#if $selMode}{@render triBox(triStateOf(groupedView.ungrouped.map(s => s.id)), () => toggleMany(groupedView.ungrouped.map(s => s.id)))}{/if}
           <span class="sec-name">{$t('sidebar.tasks')}</span>
+          {#if runningTasks.length > 0}{@render runningBadge(runningTasks, null)}{/if}
           <iconify-icon class="sec-caret" class:folded={!sections.tasks} icon="ant-design:right-outlined" width="10"></iconify-icon>
         </div>
         {#if sections.tasks}
@@ -640,9 +653,27 @@
 
       </div>
 
+      <!-- Folded, the rows this badge stands for are not rendered, and a
+           session running inside had no sign at all. The count says how many,
+           the tooltip says which ones. `expand` is passed where the badge sits
+           on a row that does something else when clicked (a project row toggles
+           itself, so the badge has to claim the click); on a section header,
+           clicking anywhere already unfolds it, so the click may bubble. -->
+      {#snippet runningBadge(items: any[], expand: (() => void) | null)}
+        <span
+          class="grp-running"
+          title={runningTitle($t('sidebar.running_list'), items)}
+          onclick={expand ? (e) => { e.stopPropagation(); expand() } : undefined}
+        >
+          <iconify-icon class="spin" icon="ant-design:loading-outlined" width="12"></iconify-icon>
+          {#if items.length > 1}<span class="grp-running-n">{items.length}</span>{/if}
+        </span>
+      {/snippet}
+
       {#snippet groupBlock(gv: any, gi: number, siblings: string[])}
         {@const g = gv.group}
         {@const editingG = $editGroupId === g.id}
+        {@const runningIn = gv.items.filter((s: any) => s.status === 'running')}
         <div class="grp-header" class:menu-open={projectMenuFor === g.id}>
           {#if $selMode}{@render triBox(triStateOf(gv.items.map((s: any) => s.id)), () => toggleMany(gv.items.map((s: any) => s.id)))}{/if}
           <!-- Folder icon doubles as the collapse toggle: open when expanded,
@@ -669,6 +700,10 @@
             <!-- Marks where the project came from without giving it a section of
                  its own: it is an ordinary project, made by the scheduler. -->
             <iconify-icon class="from-cron" icon="ant-design:clock-circle-outlined" width="11" title={$t('sidebar.from_scheduled_task')}></iconify-icon>
+          {/if}
+          {#if g.collapsed && runningIn.length > 0}
+            <!-- Not a .row-action: hover is exactly when this must not hide. -->
+            {@render runningBadge(runningIn, () => toggleCollapse(g.id, false))}
           {/if}
           {#if !$selMode}
           <!-- Six icons used to sit here — reorder, rename, delete, new session,
@@ -1116,6 +1151,8 @@
 .checkbox.tri.on { border-color: var(--blue-6); background: var(--blue-6); }
 .row-menu-sep { height: 1px; margin: 4px 6px; background: var(--border-secondary); }
 .from-cron { flex: 0 0 auto; color: var(--text-quaternary); }
+.grp-running { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; color: var(--blue-6); cursor: pointer; }
+.grp-running-n { font-size: 10px; line-height: 1; font-variant-numeric: tabular-nums; }
 .nav-row {
   position: relative;
   display: flex; align-items: center; gap: 10px;
