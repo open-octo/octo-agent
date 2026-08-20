@@ -27,6 +27,16 @@
   // (same reasoning, mirrored), the connection indicator, and desktop chrome.
   const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
+  // This bar's left slice is colored and sized to match Sidebar's own block
+  // exactly (same background, same width, same transition) so the two stack
+  // into what reads as one continuous column reaching the very top of the
+  // window — not a third, separately-colored strip cutting across it. Hidden
+  // still reserves 40px rather than tracking Sidebar's real 0px: the toggle
+  // that un-hides it has to stay visible even with nothing to match below.
+  const sidebarChromeWidth = $derived(
+    $sidebar === 'full' ? '256px' : $sidebar === 'rail' ? '64px' : '40px',
+  )
+
   // Desktop only: double-clicking the draggable header zooms the window, the way
   // a native title bar does. Wails' custom drag region doesn't wire this up, and
   // the octo-served page can't call Wails directly, so it goes through the native
@@ -43,7 +53,7 @@
   // maximize / taskbar restore the frontend can't otherwise observe), and after
   // every toggle so the icon always reflects reality. A sequence counter
   // prevents a stale focus response from overwriting a fresh toggle result.
-  let isMaximised = false
+  let isMaximised = $state(false)
   let stateSeq = 0
   async function refreshMaximised() {
     const seq = ++stateSeq
@@ -72,46 +82,50 @@
   })
 </script>
 
-<header class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag" ondblclick={onHeaderDblClick}>
-  <button class="icon-btn" title={$t('header.toggle_left')} aria-pressed={$sidebar !== 'hidden'} onclick={toggleSidebar}>
-    <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
-  </button>
-
-  <!-- ChatView registers its own title/status/actions here (via the store) so
-       they render in this shared row instead of a second row below it. Every
-       other view has no snippet to render, so this just falls back to a
-       spacer — their own page header stays exactly where it already was. -->
-  {#if $view === 'chat' && $chatHeaderSnippet}
-    <div class="chat-header-slot">{@render $chatHeaderSnippet()}</div>
-  {:else}
-    <span class="spacer"></span>
-  {/if}
-
-  <!-- Visible on every view, not just ChatView, whose own inline banner only
-       renders while a chat session is open — Settings/MCP/Skills/Tasks/etc.
-       otherwise had no indication a dropped socket was silently failing
-       their actions. -->
-  {#if $wsState !== 'connected'}
-    <button class="icon-btn" title={$t('chat.connection_lost')} onclick={() => ws.connect()}>
-      <iconify-icon icon="ant-design:loading-outlined" width="16" style="color:var(--warning);animation:octo-spin 0.8s linear infinite"></iconify-icon>
+<header ondblclick={onHeaderDblClick}>
+  <div class="chrome-sidebar" class:native-inset={$nativeShell && isMac} style="width:{sidebarChromeWidth};--wails-draggable:drag">
+    <button class="icon-btn" title={$t('header.toggle_left')} aria-pressed={$sidebar !== 'hidden'} onclick={toggleSidebar}>
+      <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
     </button>
-  {/if}
+  </div>
 
-  {#if !$panelContent}
-    <button class="icon-btn" title={$t('header.toggle_right')} onclick={togglePanel}>
-      <iconify-icon icon="lucide:panel-right" width="16"></iconify-icon>
-    </button>
-  {/if}
+  <div class="chrome-main" style="--wails-draggable:drag">
+    <!-- ChatView registers its own title/status/actions here (via the store)
+         so they render in this row instead of a second one below it. Every
+         other view has no snippet to render, so this just falls back to a
+         spacer — their own page header stays exactly where it already was. -->
+    {#if $view === 'chat' && $chatHeaderSnippet}
+      <div class="chat-header-slot">{@render $chatHeaderSnippet()}</div>
+    {:else}
+      <span class="spacer"></span>
+    {/if}
 
-  {#if $nativeShell && !isMac}
-    <div class="window-controls">
-      <button class="window-btn minimise" aria-label="Minimise" title="Minimise" onclick={() => nativeMinimise()}>−</button>
-      <button class="window-btn maximise" aria-label={isMaximised ? 'Restore' : 'Maximise'} title={isMaximised ? 'Restore' : 'Maximise'} onclick={flipMaximise}>
-        {isMaximised ? '❐' : '□'}
+    <!-- Visible on every view, not just ChatView, whose own inline banner only
+         renders while a chat session is open — Settings/MCP/Skills/Tasks/etc.
+         otherwise had no indication a dropped socket was silently failing
+         their actions. -->
+    {#if $wsState !== 'connected'}
+      <button class="icon-btn" title={$t('chat.connection_lost')} onclick={() => ws.connect()}>
+        <iconify-icon icon="ant-design:loading-outlined" width="16" style="color:var(--warning);animation:octo-spin 0.8s linear infinite"></iconify-icon>
       </button>
-      <button class="window-btn close" aria-label="Close" title="Close" onclick={() => nativeClose()}>×</button>
-    </div>
-  {/if}
+    {/if}
+
+    {#if !$panelContent}
+      <button class="icon-btn" title={$t('header.toggle_right')} onclick={togglePanel}>
+        <iconify-icon icon="lucide:panel-right" width="16"></iconify-icon>
+      </button>
+    {/if}
+
+    {#if $nativeShell && !isMac}
+      <div class="window-controls">
+        <button class="window-btn minimise" aria-label="Minimise" title="Minimise" onclick={() => nativeMinimise()}>−</button>
+        <button class="window-btn maximise" aria-label={isMaximised ? 'Restore' : 'Maximise'} title={isMaximised ? 'Restore' : 'Maximise'} onclick={flipMaximise}>
+          {isMaximised ? '❐' : '□'}
+        </button>
+        <button class="window-btn close" aria-label="Close" title="Close" onclick={() => nativeClose()}>×</button>
+      </div>
+    {/if}
+  </div>
 </header>
 
 <style>
@@ -119,26 +133,43 @@ header {
   height: 40px;
   flex: 0 0 40px;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px;
-  border-bottom: 1px solid var(--border-secondary);
-  background: var(--titlebar-frost);
-  backdrop-filter: blur(var(--frost-blur));
-  -webkit-backdrop-filter: blur(var(--frost-blur));
+  align-items: stretch;
   z-index: 100;
 }
+/* Colored and sized to match Sidebar's own block — see sidebarChromeWidth —
+   so this and Sidebar stack into one continuous column with no seam, instead
+   of a third strip in a different color sitting on top of it. */
+.chrome-sidebar {
+  flex: 0 0 auto;
+  display: flex; align-items: center;
+  background: var(--sidebar-frost);
+  border-right: 1px solid var(--border-secondary);
+  backdrop-filter: blur(var(--frost-blur));
+  -webkit-backdrop-filter: blur(var(--frost-blur));
+  transition: width 0.32s cubic-bezier(0.2,0,0,1);
+  padding-left: 10px;
+}
 /* Mac's native hidden-inset title bar floats the real traffic-light buttons
-   over the top-left of the window, so inset this bar's content past them —
-   this is the leftmost thing on screen again, now that it spans the full
-   width. Padding-bottom (not padding-top) pulls the centering axis up to meet
-   their fixed vertical position, the same reasoning as before the redesign. */
-header.native-inset { padding-left: 82px; padding-bottom: 8px; }
-/* The header is a window drag handle. Every interactive control on it opts
-   back to no-drag so it stays clickable — the blank strip is what drags the
-   window. */
-header .icon-btn,
-header .window-controls { --wails-draggable: no-drag; }
+   over the window's true top-left corner, which is this slice — inset its
+   content past them. Padding-bottom (not padding-top) pulls the centering
+   axis up to meet their fixed vertical position. */
+.chrome-sidebar.native-inset { padding-left: 82px; padding-bottom: 8px; }
+/* This slice is a window drag handle same as chrome-main below; its own
+   control opts back out so it stays clickable. */
+.chrome-sidebar .icon-btn { --wails-draggable: no-drag; }
+
+/* The rest of the bar — main content's own chrome. Its own background
+   (matching ChatView's .chat-header and every other view's page background)
+   keeps it visually part of that column, not a shared strip either. */
+.chrome-main {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 10px;
+  background: var(--bg-layout);
+  border-bottom: 1px solid var(--border-secondary);
+}
+.chrome-main .icon-btn,
+.chrome-main .window-controls { --wails-draggable: no-drag; }
 
 .spacer { flex: 1; }
 /* Plain block, not flex — ChatView's own .chat-header is already display:flex
