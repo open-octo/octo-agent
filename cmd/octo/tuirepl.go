@@ -21,6 +21,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/hooks"
 	"github.com/open-octo/octo-agent/internal/mcp"
 	"github.com/open-octo/octo-agent/internal/tools"
+	"github.com/open-octo/octo-agent/internal/tools/genui"
 	"github.com/open-octo/octo-agent/internal/tui"
 	"golang.org/x/term"
 )
@@ -2087,6 +2088,13 @@ func (m *tuiModel) appendText(text string) {
 	}
 	m.partial.Reset()
 	m.partial.WriteString(rest)
+	// splitCommittableMarkdown only commits a prefix ending at a blank line
+	// outside any fence, so a ```octo-ui fence inside commit is always fully
+	// closed by construction — but glamour has no concept of that language
+	// tag and would render it as an unstyled code block full of raw JSON.
+	// Replace it with a placeholder before it ever reaches glamour (see the
+	// design doc's "IM/TUI degrade" subsection).
+	commit = genui.StripOctoUIFences(commit)
 	rendered := m.md.render(commit, m.width)
 	if m.assistantFirstBlock {
 		rendered = injectAssistantPrefix(rendered, assistantPrefixStyle.Render("◆ "))
@@ -2123,6 +2131,14 @@ func (m *tuiModel) flushTextString() (string, bool) {
 		}
 		return p, true
 	}
+	// Unlike appendText's commit (bounded by splitCommittableMarkdown's
+	// outside-a-fence blank-line rule), this flush fires at turn end or
+	// before a tool call and hands over whatever is left in the buffer
+	// as-is — most commonly the case where a reply's ```octo-ui fence is
+	// the very last thing streamed, with no trailing blank line to have
+	// triggered appendText's own commit boundary. Strip it here too so
+	// this path doesn't leak raw JSON into glamour.
+	p = genui.StripOctoUIFences(p)
 	rendered := m.md.render(p, m.width)
 	if m.assistantFirstBlock {
 		rendered = injectAssistantPrefix(rendered, assistantPrefixStyle.Render("◆ "))

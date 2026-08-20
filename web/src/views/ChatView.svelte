@@ -76,6 +76,9 @@
   import Composer from '../components/chat/Composer.svelte'
   import OctoLogo from '../components/layout/OctoLogo.svelte'
 import QuestionModal from '../components/overlays/QuestionModal.svelte'
+  import GenuiBlock from '../components/genui/GenuiBlock.svelte'
+  import { splitOctoUiFences, type Segment as GenuiSegment } from '../lib/genui/fence-split'
+  import type { GenuiActionEvent } from '../lib/genui/context'
 
   // ── reactive state ─────────────────────────────────────────────────────────
   let messagesEl = $state<HTMLElement | null>(null)
@@ -1538,6 +1541,52 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     return html
   }
 
+  // ── throttled ```octo-ui fence segmentation while streaming ────────────────
+  // splitOctoUiFences() is a single O(n) scan (see fence-split.ts), but it is
+  // still called from the render body of every assistant message, so it hits
+  // the exact same call-frequency hazard #1114 was about (see
+  // throttledMarkdown above): a streaming message's content grows on every
+  // delta, and re-deriving segments on every one of those renders would be
+  // wasted work on the hot path. Mirror throttledMarkdown's cache shape
+  // exactly — same per-message key, same content-equality/time-window
+  // reuse, same "always fresh once streaming stops" guarantee.
+  const segmentCache = new Map<string, { segments: GenuiSegment[]; at: number; content: string }>()
+  function throttledSegments(cacheKey: string, content: string, streaming: boolean): GenuiSegment[] {
+    const cached = segmentCache.get(cacheKey)
+    if (streaming && cached && (content === cached.content || Date.now() - cached.at < RENDER_THROTTLE_MS)) {
+      return cached.segments
+    }
+    const segments = splitOctoUiFences(content)
+    segmentCache.set(cacheKey, { segments, at: Date.now(), content })
+    return segments
+  }
+
+  // ── octo-ui inline action feedback → synthetic user turn ───────────────────
+  // Builds the "[octo-ui-action] {...}" convention message and sends it
+  // exactly like an ordinary typed message (send(), below) — a plain new
+  // user turn, no force/queue flags, no backend change: it rides the
+  // existing user_message WS frame verbatim.
+  function sendGenuiAction(event: GenuiActionEvent) {
+    const body: Record<string, unknown> = { action: event.action, fields: event.fields }
+    if (event.payload !== undefined) body.payload = event.payload
+    send(`[octo-ui-action] ${JSON.stringify(body)}`)
+  }
+
+  // Parses a "[octo-ui-action] {...}" user-bubble body for the compact chip
+  // rendering below. Returns null (fall back to plain text) if the prefix
+  // matches but the remainder isn't valid JSON — never show a broken chip.
+  const OCTO_UI_ACTION_PREFIX = '[octo-ui-action] '
+  function parseGenuiActionBubble(content: string): { action: string; fields: Record<string, unknown>; payload?: Record<string, unknown> } | null {
+    if (!content.startsWith(OCTO_UI_ACTION_PREFIX)) return null
+    try {
+      const parsed = JSON.parse(content.slice(OCTO_UI_ACTION_PREFIX.length))
+      if (typeof parsed !== 'object' || parsed === null || typeof parsed.action !== 'string') return null
+      return parsed
+    } catch {
+      return null
+    }
+  }
+
   // ── edit a prior user message: load it back into the composer for resend ─────
   let composer = $state<{ setText: (v: string) => void; restore: (v: string, files?: any[]) => void; isEmpty: () => boolean } | null>(null)
   function editMessage(content: string) {
@@ -2531,7 +2580,24 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                         }}
                       ></textarea>
                     {:else}
-                      {#if msg.content}{msg.content}{/if}
+                      {@const genuiAction = msg.content ? parseGenuiActionBubble(msg.content) : null}
+                      {#if genuiAction}
+                        <!-- Compact chip for a synthetic [octo-ui-action] turn — the
+                             raw JSON convention text would otherwise leak into the
+                             bubble verbatim. Falls back to plain text above if the
+                             prefix matches but parsing fails, so a hand-typed
+                             message that happens to start the same way never shows
+                             a broken chip. -->
+                        <details class="genui-action-chip">
+                          <summary>
+                            <iconify-icon icon="ant-design:thunderbolt-outlined" width="12"></iconify-icon>
+                            {$t('chat.genui_action_triggered')}: {genuiAction.action}
+                          </summary>
+                          <pre class="genui-action-json">{JSON.stringify(genuiAction, null, 2)}</pre>
+                        </details>
+                      {:else if msg.content}
+                        {msg.content}
+                      {/if}
                     {/if}
                     {#if msg.pending}<span class="pending-spinner" title={$t('status.running')}></span>{/if}
                   </div>
@@ -2617,13 +2683,26 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                     </details>
                   {/if}
 
-                  <!-- Rendered markdown content -->
+                  <!-- Rendered markdown / inline octo-ui content. A message with
+                       no ```octo-ui fence yields exactly one markdown segment
+                       (splitOctoUiFences' no-op path), so this renders
+                       byte-identically to before for every pre-existing message. -->
                   {#if msg.content}
                     <div
                       class="rich-answer"
                       use:setupAssistantEl
                     >
-                      {@html throttledMarkdown(msg.id, msg.content, msg.streaming, showReasoning)}
+                      {#each throttledSegments(msg.id, msg.content, msg.streaming) as seg, segIdx (segIdx)}
+                        {#if seg.kind === 'markdown'}
+                          {@html throttledMarkdown(`${msg.id}:${segIdx}`, seg.text, msg.streaming, showReasoning)}
+                        {:else if seg.spec}
+                          <GenuiBlock spec={seg.spec} interactive={seg.complete} onaction={sendGenuiAction} />
+                        {/if}
+                        <!-- seg.kind === 'octo-ui' && seg.spec === null: the guard
+                             rejected everything in this fence, or nothing is
+                             safe to render yet — the design's documented
+                             fallback is to render nothing, not raw text. -->
+                      {/each}
                     </div>
                   {/if}
 
@@ -3231,6 +3310,22 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
    be drained into the running turn. Dimmed with a small spinner until the
    server confirms it via history_user_message. */
 .user-card.pending { opacity: 0.65; }
+/* Compact chip for a synthetic [octo-ui-action] turn (see
+   parseGenuiActionBubble) — the JSON body sits behind a click-to-expand
+   <details>, so a genui button click doesn't leak raw JSON into the
+   transcript at a glance. */
+.genui-action-chip { font-size: 13px; color: var(--text); }
+.genui-action-chip summary {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  color: var(--text-secondary); list-style: none;
+}
+.genui-action-chip summary::-webkit-details-marker { display: none; }
+.genui-action-json {
+  margin: 6px 0 0; padding: 8px 10px; border-radius: var(--radius-xs, 6px);
+  background: var(--bg-layout); border: 1px solid var(--border);
+  font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap; word-break: break-word; color: var(--text-secondary);
+}
 .pending-spinner {
   display: inline-block; width: 10px; height: 10px; margin-left: 6px;
   vertical-align: -1px; border-radius: 50%;

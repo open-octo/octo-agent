@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/tools/genui"
 )
 
 // UIController bridges agent.AgentEvent stream to IM platform messages.
@@ -228,7 +229,18 @@ func (u *UIController) flushTextLocked() {
 	// only the outer whitespace is trimmed for display.
 	if u.adapter.SupportsMessageUpdates() && u.pendingTextMsgID != "" {
 		full := u.sentText + chunk
-		if u.adapter.UpdateMessage(u.chatID, u.pendingTextMsgID, strings.TrimSpace(full)) {
+		// An edit redraws the FULL cumulative text every time (see the
+		// sentText field doc comment above), so a ```octo-ui fence that
+		// opened in an earlier flush and only closes in this one is
+		// retroactively replaced right here — the one path in this
+		// controller where a fence spanning multiple flushes does NOT keep
+		// showing raw JSON forever. u.sentText itself stays the raw,
+		// unstripped text (StripOctoUIFences is re-run from scratch against
+		// the full accumulated text on every flush); only the display value
+		// handed to the adapter is stripped. An still-unclosed fence is left
+		// untouched per StripOctoUIFences's own doc comment.
+		display := genui.StripOctoUIFences(full)
+		if u.adapter.UpdateMessage(u.chatID, u.pendingTextMsgID, strings.TrimSpace(display)) {
 			u.sentText = full
 			return
 		}
@@ -249,8 +261,18 @@ func (u *UIController) flushTextLocked() {
 	// itself ends mid-fence, so a code block spanning two messages still
 	// renders as valid markdown in both.
 	trimmed := strings.TrimSpace(chunk)
-	sendText := reopenFence(u.fenceOpen, u.fenceLang, trimmed)
-	open, lang := fenceStateAfter(trimmed, u.fenceOpen, u.fenceLang)
+	// Strip any complete ```octo-ui fence in this chunk before it becomes
+	// its own standalone IM message. An unclosed fence is left untouched
+	// (see StripOctoUIFences's doc comment) — and, unlike the in-place-edit
+	// branch above, a standalone message can't be retroactively fixed up
+	// once sent, so a fence that happens to straddle two SendText-flushed
+	// chunks leaks raw JSON permanently on platforms without message
+	// updates. This is the accepted, documented limitation from the design
+	// doc's "IM/TUI degrade" subsection — only a fully-buffered, fully-closed
+	// fence is guaranteed never to reach the adapter as raw JSON.
+	displayText := genui.StripOctoUIFences(trimmed)
+	sendText := reopenFence(u.fenceOpen, u.fenceLang, displayText)
+	open, lang := fenceStateAfter(displayText, u.fenceOpen, u.fenceLang)
 	if open {
 		sendText = strings.TrimRight(sendText, "\n") + "\n```"
 	}
