@@ -1334,13 +1334,11 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// window, and the per-turn tools array is always computed fresh for the
 	// current model regardless of the freeze, so a stale manifest would drift
 	// out of sync with what's actually offered.
-	// The freeze is keyed on cwd and project notes as well as the model: both
-	// are baked into the prompt (the env context's working directory, the
-	// project-notes block below) and both can change under a live session.
-	// One registry lookup for both facts the project contributes to this turn:
-	// its notes (baked into the prompt) and its directory (what scopes memory).
-	notes, projectDir := projectNotesAndDir(sess.ID)
-	if sess.IsComposedFor(model, cwd, agent.ComposedNotesHash(notes)) {
+	// The freeze is keyed on cwd as well as the model: the env context's
+	// working directory is baked into the prompt and can change under a live
+	// session.
+	projectDir := ProjectDirForSession(sess.ID)
+	if sess.IsComposedFor(model, cwd) {
 		a.System, a.LeanSystem = sess.ComposedSystem, sess.ComposedLeanSystem
 	} else {
 		// L1: project memory embedded in the system prompt, snapshotted once.
@@ -1360,9 +1358,6 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 		if g := tools.MemoryBackendGuidance(); g != "" {
 			memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
 		}
-		if notes != "" {
-			memInjection = strings.TrimSpace(renderProjectNotes(notes) + "\n\n" + memInjection)
-		}
 		// A profile with its own system prompt replaces the server's base
 		// prompt (default agent: unchanged, s.system).
 		profile := s.profileForAgent(sess.EffectiveAgentID())
@@ -1373,7 +1368,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 			expertMode = true
 		}
 		a.System, a.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
-		if err := sess.SetComposedSystem(a.System, a.LeanSystem, model, cwd, agent.ComposedNotesHash(notes)); err != nil {
+		if err := sess.SetComposedSystem(a.System, a.LeanSystem, model, cwd); err != nil {
 			slog.Warn("freeze composed system prompt", "session", sess.ID, "err", err)
 		}
 	}
@@ -3427,11 +3422,11 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// /model, applied above via applyChannelModel) DOES force a re-freeze —
 	// see IsComposedFor's doc comment for why a stale MCP manifest can't just
 	// be left frozen under the old model.
-	// cwd and project notes join the model in the freeze identity — a channel
-	// session dragged into a project in the Web UI picks the change up on its
-	// next turn, the same as a web one.
-	notes, projectDir := projectNotesAndDir(sess.Store.ID)
-	if sess.Store.IsComposedFor(sess.Agent.Model, cwd, agent.ComposedNotesHash(notes)) {
+	// cwd joins the model in the freeze identity — a channel session dragged
+	// into a project in the Web UI picks the change up on its next turn, the
+	// same as a web one.
+	projectDir := ProjectDirForSession(sess.Store.ID)
+	if sess.Store.IsComposedFor(sess.Agent.Model, cwd) {
 		sess.Agent.System, sess.Agent.LeanSystem = sess.Store.ComposedSystem, sess.Store.ComposedLeanSystem
 	} else {
 		// Per-project memory dir, same as buildAgent gives web turns — an IM
@@ -3444,9 +3439,6 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		if g := tools.MemoryBackendGuidance(); g != "" {
 			memInjection = strings.TrimSpace(memInjection + "\n\n" + g)
 		}
-		if notes != "" {
-			memInjection = strings.TrimSpace(renderProjectNotes(notes) + "\n\n" + memInjection)
-		}
 		// A profile with its own system prompt replaces the server's base
 		// prompt (default agent: unchanged, s.system).
 		base := s.system
@@ -3456,7 +3448,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 			expertMode = true
 		}
 		sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
-		if err := sess.Store.SetComposedSystem(sess.Agent.System, sess.Agent.LeanSystem, sess.Agent.Model, cwd, agent.ComposedNotesHash(notes)); err != nil {
+		if err := sess.Store.SetComposedSystem(sess.Agent.System, sess.Agent.LeanSystem, sess.Agent.Model, cwd); err != nil {
 			slog.Warn("freeze composed system prompt", "session", string(sess.Key), "err", err)
 		}
 	}

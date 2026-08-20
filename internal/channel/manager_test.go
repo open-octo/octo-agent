@@ -539,7 +539,7 @@ func TestCmdReload_ClearsComposedSystemAndRefusesWhileRunning(t *testing.T) {
 
 	mgr := NewManager(&Config{}, fakeAgentFactory, BindByChatUser)
 	sess := mgr.GetOrCreateSession(ev, nil)
-	if err := sess.Store.SetComposedSystem("full prompt", "lean prompt", "stub-model", "", ""); err != nil {
+	if err := sess.Store.SetComposedSystem("full prompt", "lean prompt", "stub-model", ""); err != nil {
 		t.Fatalf("SetComposedSystem: %v", err)
 	}
 

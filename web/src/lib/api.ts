@@ -106,7 +106,7 @@ export async function listSessionGroups(): Promise<{ groups: SessionGroup[]; pin
 }
 
 // Pass working_dir to create the group as a project outright.
-export async function createSessionGroup(name: string, project?: { working_dir?: string; notes?: string }): Promise<SessionGroup> {
+export async function createSessionGroup(name: string, project?: { working_dir?: string }): Promise<SessionGroup> {
   const d = await request<{ group: SessionGroup }>('/api/session-groups', { method: 'POST', ...json({ name, ...project }) })
   return d.group
 }
@@ -114,7 +114,7 @@ export async function createSessionGroup(name: string, project?: { working_dir?:
 // working_dir: '' demotes a project back to a plain group.
 export async function updateSessionGroup(
   id: string,
-  patch: { name?: string; collapsed?: boolean; working_dir?: string; notes?: string },
+  patch: { name?: string; collapsed?: boolean; working_dir?: string },
 ): Promise<SessionGroup> {
   const d = await request<{ group: SessionGroup }>(`/api/session-groups/${id}`, { method: 'PATCH', ...json(patch) })
   return d.group
