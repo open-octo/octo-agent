@@ -439,6 +439,9 @@ export interface Agent {
   description_en?: string
   // Always present: 'default' (officially curated) or 'user'.
   source?: 'default' | 'user'
+  // Visibility of a curated expert: false once the user hides it. User agents
+  // are always enabled.
+  enabled?: boolean
 }
 
 export async function listAgents(): Promise<Agent[]> {
