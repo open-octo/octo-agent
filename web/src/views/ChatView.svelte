@@ -1624,6 +1624,18 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     if (sid) chatSuggestion.update(s => ({ ...s, [sid]: '' }))
   }
 
+  // ── landing starter cards ──────────────────────────────────────────────────
+  // Four ways in, one per kind of work Octo is for. Clicking one loads its
+  // prompt into the composer without sending, so the working directory / model
+  // pickers still apply and the text stays editable — same contract as the
+  // suggestion chip above.
+  const starters = [
+    { icon: 'ant-design:code-outlined',   key: 'explore'  },
+    { icon: 'ant-design:tool-outlined',   key: 'build'    },
+    { icon: 'ant-design:global-outlined', key: 'research' },
+    { icon: 'ant-design:form-outlined',   key: 'write'    },
+  ]
+
   // ── export mode helpers ────────────────────────────────────────────────────
 
   function enterExportMode() {
@@ -2491,7 +2503,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       <!-- Messages scroll area -->
       <div class="messages-wrap">
       <div class="messages" bind:this={messagesEl}>
-        <div class="messages-inner" bind:this={innerEl}>
+        <div class="messages-inner" class:no-session={!id} bind:this={innerEl}>
 
           <!-- Meta row for an assistant turn: rendered on the first assistant
                chunk after a user message (text/thinking/tools are separate
@@ -2530,6 +2542,21 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
               <span class="landing-mark"><OctoLogo size={44} /></span>
               <h1 class="landing-title">{$t('chat.landing_title')}</h1>
               <p class="landing-sub">{$t('chat.landing_sub')}</p>
+              <div class="landing-cards">
+                {#each starters as card (card.key)}
+                  <button
+                    type="button"
+                    class="landing-card"
+                    onclick={() => composer?.setText($t(`chat.starter_${card.key}_prompt`))}
+                    title={$t(`chat.starter_${card.key}_prompt`)}
+                  >
+                    <span class="landing-card-icon" aria-hidden="true">
+                      <iconify-icon icon={card.icon} width="17"></iconify-icon>
+                    </span>
+                    <span class="landing-card-title">{$t(`chat.starter_${card.key}_title`)}</span>
+                  </button>
+                {/each}
+              </div>
             </div>
           {/if}
 
@@ -3276,6 +3303,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   max-width: var(--chat-content-max-width); margin: 0 auto;
   padding: 24px 24px 16px; display: flex; flex-direction: column; gap: 20px;
 }
+/* Landing only: nothing to scroll yet, so fill the scroll viewport instead of
+   collapsing to the content height — that is what lets .landing centre itself
+   vertically rather than sitting pinned to the top with all the slack below. */
+.messages-inner.no-session { min-height: 100%; box-sizing: border-box; }
 
 /* ── Landing page (no session yet) ───────────────────────────────────────── */
 /* Sits in the empty scroll area above the composer rather than replacing it,
@@ -3286,9 +3317,37 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 10px; padding: 48px 0 24px; text-align: center;
 }
-.landing-mark { opacity: 0.9; }
+/* OctoLogo's plate is fill="currentColor" while the octopus itself is a hard
+   #fff, so this has to name a colour: inheriting --text made the plate near-white
+   in dark mode and swallowed the mark. Brand blue, same as the sidebar logo. */
+.landing-mark { display: flex; color: var(--blue-6); }
 .landing-title { margin: 0; font-size: 26px; font-weight: 600; color: var(--text); }
 .landing-sub { margin: 0; font-size: 13px; color: var(--text-tertiary); max-width: 460px; }
+
+/* Starter cards: a grid of ways in, so the blank page suggests what Octo is
+   for instead of showing an empty column above the composer. */
+.landing-cards {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px; width: 100%; margin-top: 14px;
+}
+.landing-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 12px;
+  min-height: 92px; padding: 13px 14px;
+  background: var(--bg-container);
+  border: 1px solid var(--border); border-radius: var(--radius-card);
+  box-shadow: var(--card-shadow);
+  font-family: inherit; text-align: left; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.landing-card:hover { border-color: var(--blue-2); background: var(--surface-info); }
+.landing-card:focus-visible { outline: 2px solid var(--blue-6); outline-offset: 1px; }
+.landing-card-icon { display: flex; color: var(--blue-6); }
+.landing-card-title {
+  font-size: 13px; font-weight: 500; line-height: 1.45; color: var(--text);
+}
+@media (max-width: 620px) {
+  .landing-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 /* ── Message meta row (avatar · name · time) ─────────────────────────────── */
 .msg-meta { display: flex; align-items: center; gap: 8px; }
