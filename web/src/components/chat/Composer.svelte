@@ -441,12 +441,11 @@
     }
     if (slashMode === 'agents') {
       const q = slashQuery
-      // Mirrors the sidebar's new-session picker: "Default" first, the expert
-      // agents, then a fixed create row that ignores the filter.
-      const rows: SlashItem[] = [
-        { kind: 'agent', id: 'default', name: 'Default' },
-        ...agents.map(a => ({ kind: 'agent' as const, id: a.id, name: a.name })),
-      ]
+      // The expert agents, then a fixed create row that ignores the filter.
+      // Default is not one of the rows: @ is how you pick an expert, and
+      // "no expert" is reached by clearing the mention (backspace on an empty
+      // box) or from the agent menu's own Default entry.
+      const rows: SlashItem[] = agents.map(a => ({ kind: 'agent' as const, id: a.id, name: a.name }))
       const filtered = rows
         .map(r => ({ r, score: scoreNameMatch(r.kind === 'agent' ? r.name : '', q) }))
         .filter(({ score }) => score > 0)
