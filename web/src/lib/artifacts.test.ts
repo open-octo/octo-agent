@@ -255,6 +255,23 @@ describe('observeArtifact — markdown image references', () => {
     )
   })
 
+  it('inlines a raw <img> tag the document wrote itself', async () => {
+    // The document's own HTML is content inside the sandboxed preview iframe,
+    // so it survives rendering — chat bubbles escape it instead (markdown.ts).
+    // Without that, the tag never reaches the inliner and the image silently
+    // does not render.
+    const fetchMock = stubFetch('# Report\n\n<img src="chart.png" width="400">\n')
+
+    await observeHydrated('/tmp/report.md')
+
+    const [entry] = get(artifacts)
+    expect(entry.preview).toContain('src="data:image/png;base64,')
+    expect(entry.preview).not.toContain('&lt;img')
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/sessions/${SID}/artifacts?path=${encodeURIComponent('/tmp/chart.png')}`,
+    )
+  })
+
   it('resolves "." and ".." segments', async () => {
     const fetchMock = stubFetch('![shot](../shots/./a.png)\n')
 

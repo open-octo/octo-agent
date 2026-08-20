@@ -661,7 +661,11 @@ async function buildTextBody(
 	  }else{legacy()}
 	});
 	<\/script>`
-    const body = await inlineLocalRefs(renderMarkdown(code), sessionId, path, 'fragment')
+    // rawHtml: the document's own tags are content here, not injection — this
+    // iframe is sandboxed and styled by MD_STYLES alone, and inlineLocalRefs
+    // below has to see an <img src="chart.png"> to rewrite it to a data: URI.
+    // The chat's own bubbles get the escaping default instead (markdown.ts).
+    const body = await inlineLocalRefs(renderMarkdown(code, true, { rawHtml: true }), sessionId, path, 'fragment')
     preview = `<style>${MD_STYLES}</style><body style="${bodyStyle}">${body}${COPY_SCRIPT}</body>`
   } else {
     // code kind: show with theme-aware monospace style
