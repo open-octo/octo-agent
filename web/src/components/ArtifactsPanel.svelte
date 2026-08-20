@@ -173,10 +173,41 @@
     return Number.isFinite(v) && v >= PANEL_MIN ? v : 420
   }
 
+  // Widest the panel may get right now — the center column keeps CENTER_MIN and
+  // the sidebar keeps whatever it currently occupies. Same bound the drag
+  // handle enforces, read live since the sidebar can collapse under it.
+  function maxPanelWidth(): number {
+    const row = panelEl?.parentElement
+    if (!row) return PANEL_MIN
+    const rowW = row.getBoundingClientRect().width
+    const selfW = panelEl!.getBoundingClientRect().width
+    const sideW = rowW - selfW - (panelEl!.previousElementSibling as HTMLElement)?.getBoundingClientRect().width
+    return Math.max(PANEL_MIN, rowW - sideW - CENTER_MIN)
+  }
+
+  // Width to restore to when un-widening. Null means "not widened", which is
+  // also how a manual drag cancels the widened state: it clears this, so the
+  // button widens from wherever the user left the edge rather than snapping
+  // back to a width they've since moved away from.
+  let widthBeforeWiden = $state<number | null>(null)
+  const isWidened = $derived(widthBeforeWiden !== null)
+
+  function toggleWiden() {
+    if (widthBeforeWiden !== null) {
+      panelWidth = widthBeforeWiden
+      widthBeforeWiden = null
+    } else {
+      widthBeforeWiden = panelWidth
+      panelWidth = maxPanelWidth()
+    }
+    localStorage.setItem(PANEL_WIDTH_KEY, String(Math.round(panelWidth)))
+  }
+
   function startResize(e: MouseEvent) {
     e.preventDefault()
     const row = panelEl?.parentElement
     if (!row) return
+    widthBeforeWiden = null // a manual drag takes over from the widen toggle
     const startX = e.clientX
     const startW = panelEl!.getBoundingClientRect().width
     // Everything left of the panel (sidebar + center) must keep CENTER_MIN for
@@ -201,18 +232,28 @@
   }
 </script>
 
+<!-- The controls that belong to the panel itself rather than to whatever it is
+     showing, so they sit at the far right of its top row in every mode. Widen
+     is panel-level on purpose: it works with nothing selected, unlike the
+     artifact-specific maximize down in .file-row. The toggle carries an "on"
+     fill because this row only exists while the panel is open. -->
+{#snippet topbarControls()}
+  <button class="icon-btn" class:on={isWidened} title={isWidened ? $t('artifacts.restore_width') : $t('artifacts.widen')} onclick={toggleWiden}>
+    <iconify-icon icon="lucide:maximize" width="14"></iconify-icon>
+  </button>
+  <button class="icon-btn on" title={$t('header.toggle_right')} onclick={closePanel}>
+    <iconify-icon icon="lucide:panel-right" width="14"></iconify-icon>
+  </button>
+{/snippet}
+
 <aside class="panel" bind:this={panelEl} style="width:{panelWidth}px;flex-basis:{panelWidth}px">
   <div class="resize-handle" role="separator" aria-orientation="vertical" onmousedown={startResize}></div>
   {#if $panelContent === 'lightapps'}
     <!-- ── Light Apps mode ───────────────────────────────────────────────── -->
     <div class="topbar">
-      <button class="icon-btn" title={$t('header.toggle_right')} onclick={closePanel}>
-        <iconify-icon icon="lucide:panel-right" width="14"></iconify-icon>
-      </button>
-      <iconify-icon icon="ant-design:appstore-outlined" width="15" style="color:var(--blue-6);flex:0 0 auto"></iconify-icon>
-      <span class="panel-title">{$t('artifacts.light_apps')}</span>
       <span style="flex:1"></span>
       <span class="sandboxed-label">{$t('artifacts.sandboxed')}</span>
+      {@render topbarControls()}
     </div>
 
     <div class="body">
@@ -245,12 +286,8 @@
     <!-- ── Session mode (existing behavior) ────────────────────────────────── -->
     {#if !cur}
       <div class="topbar">
-        <button class="icon-btn" title={$t('header.toggle_right')} onclick={closePanel}>
-          <iconify-icon icon="lucide:panel-right" width="14"></iconify-icon>
-        </button>
-        <iconify-icon icon="lucide:box" width="15" style="color:var(--blue-6);flex:0 0 auto"></iconify-icon>
-        <span class="panel-title">{$t('artifacts.toggle')}</span>
         <span style="flex:1"></span>
+        {@render topbarControls()}
       </div>
       <div class="empty">
         <iconify-icon icon="ant-design:file-text-outlined" width="28"></iconify-icon>
@@ -258,11 +295,6 @@
       </div>
     {:else}
       <div class="topbar">
-        <button class="icon-btn" title={$t('header.toggle_right')} onclick={closePanel}>
-          <iconify-icon icon="lucide:panel-right" width="14"></iconify-icon>
-        </button>
-        <iconify-icon icon="lucide:box" width="15" style="color:var(--blue-6);flex:0 0 auto"></iconify-icon>
-        <span class="panel-title">{$t('artifacts.toggle')}</span>
         <span style="flex:1"></span>
         {#if !curIsImage}
           <div class="seg">
@@ -270,6 +302,7 @@
             <button class="seg-btn" class:active={$artifactView === 'code'} onclick={() => artifactView.set('code')}>{$t('artifacts.code')}</button>
           </div>
         {/if}
+        {@render topbarControls()}
       </div>
 
       <div class="file-row">
@@ -370,7 +403,6 @@
   flex: 0 0 auto; min-height: 44px; padding: 0 8px 0 10px;
   display: flex; align-items: center; gap: 8px;
 }
-.panel-title { font-size: 13px; font-weight: 600; color: var(--text-heading); white-space: nowrap; }
 .file-row {
   flex: 0 0 auto; padding: 7px 10px 7px 16px;
   border-bottom: 1px solid var(--border-secondary); display: flex; align-items: center; gap: 8px;
@@ -385,6 +417,10 @@
 }
 .icon-btn:hover:not(:disabled) { background: var(--hover-neutral); color: var(--blue-6); }
 .icon-btn:disabled { opacity: 0.45; cursor: default; }
+/* Pressed/on state: a filled rounded square with a full-strength icon, so a
+   control whose target is already showing reads as engaged rather than idle. */
+.icon-btn.on { background: var(--hover-neutral); color: var(--text); }
+.icon-btn.on:hover:not(:disabled) { color: var(--text); }
 .seg { display: inline-flex; padding: 2px; background: var(--control-track); border-radius: 8px; gap: 2px; flex: 0 0 auto; }
 .seg-btn {
   height: 24px; padding: 0 12px; border: none; border-radius: 6px; font-size: 12px;
