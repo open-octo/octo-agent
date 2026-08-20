@@ -13,7 +13,7 @@
   // value, but once the user starts typing, a later re-render of the same
   // node (e.g. the model's partial-parse prefix reshuffling as more of the
   // fence streams in) must not clobber what they've already typed.
-  let value = $state(untrack(() => node.value ?? ''))
+  let value = $state(untrack(() => ctx?.initialString(node.field, node.value ?? '') ?? node.value ?? ''))
 
   $effect(() => {
     ctx?.setFieldValue(node.field, value)

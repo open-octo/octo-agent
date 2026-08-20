@@ -79,6 +79,15 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   import GenuiBlock from '../components/genui/GenuiBlock.svelte'
   import { splitOctoUiFences, type Segment as GenuiSegment } from '../lib/genui/fence-split'
   import type { GenuiActionEvent } from '../lib/genui/context'
+  import { projectPanels, isAnchor, type PanelProjection } from '../lib/genui/projection'
+  import {
+    silentActionPanel,
+    isSilentPairAt,
+    precedingSaid,
+    couldBeSilentReply,
+    parseActionEnvelope,
+    OCTO_UI_ACTION_PREFIX,
+  } from '../lib/genui/silent-turn'
 
   // ── reactive state ─────────────────────────────────────────────────────────
   let messagesEl = $state<HTMLElement | null>(null)
@@ -1576,26 +1585,79 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // exactly like an ordinary typed message (send(), below) — a plain new
   // user turn, no force/queue flags, no backend change: it rides the
   // existing user_message WS frame verbatim.
-  function sendGenuiAction(event: GenuiActionEvent) {
+  // A `panel` key marks the turn silent: neither this message nor the reply
+  // that answers it renders as a bubble (see lib/genui/silent-turn.ts). An
+  // action from an anonymous panel omits it and keeps the visible chip.
+  function sendGenuiAction(event: GenuiActionEvent, panelId?: string) {
     const body: Record<string, unknown> = { action: event.action, fields: event.fields }
+    if (panelId) body.panel = panelId
     if (event.payload !== undefined) body.payload = event.payload
     send(`[octo-ui-action] ${JSON.stringify(body)}`)
   }
 
-  // Parses a "[octo-ui-action] {...}" user-bubble body for the compact chip
-  // rendering below. Returns null (fall back to plain text) if the prefix
-  // matches but the remainder isn't valid JSON — never show a broken chip.
-  const OCTO_UI_ACTION_PREFIX = '[octo-ui-action] '
-  function parseGenuiActionBubble(content: string): { action: string; fields: Record<string, unknown>; payload?: Record<string, unknown> } | null {
-    if (!content.startsWith(OCTO_UI_ACTION_PREFIX)) return null
-    try {
-      const parsed = JSON.parse(content.slice(OCTO_UI_ACTION_PREFIX.length))
-      if (typeof parsed !== 'object' || parsed === null || typeof parsed.action !== 'string') return null
-      return parsed
-    } catch {
-      return null
+  // ── panel projection ───────────────────────────────────────────────────────
+  // Which version of each addressable panel is live, and where it renders.
+  // projectPanels is O(total message text) and this runs on every streamed
+  // delta, so it inherits the same cache-and-throttle discipline #1114 forced
+  // on markdown rendering: reuse the previous result while the last message is
+  // still growing, and always recompute once it settles.
+  let panelCache: { sig: string; panels: Map<string, PanelProjection>; at: number } | null = null
+  const panels = $derived.by(() => {
+    const list = msgs
+    const last = list[list.length - 1]
+    const sig = `${list.length}:${last?.id ?? ''}:${last?.content?.length ?? 0}:${last?.streaming ?? false}`
+    if (panelCache) {
+      if (panelCache.sig === sig) return panelCache.panels
+      if (last?.streaming && Date.now() - panelCache.at < RENDER_THROTTLE_MS) return panelCache.panels
     }
+    const next = projectPanels(list)
+    panelCache = { sig, panels: next, at: Date.now() }
+    return next
+  })
+
+  /**
+   * The panel waiting on a silent turn, if any.
+   *
+   * Gated on the session actually running a turn rather than on the shape of
+   * the transcript alone. A turn that errors or is interrupted before
+   * producing any assistant message would otherwise leave the action as the
+   * last thing in history — and a panel disabled forever, surviving reloads,
+   * since history is what it was derived from. The running flag comes from
+   * the server, so it clears on every ending a turn can have.
+   */
+  const pendingPanel = $derived.by(() => {
+    if (!streaming) return null
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i]
+      if (m.type === 'assistant') {
+        const p = silentActionPanel(precedingSaid(msgs, i))
+        return p && couldBeSilentReply(m.content) ? p : null
+      }
+      if (m.type === 'user') return silentActionPanel(m)
+      // Tool groups and progress rows are skipped: the model calling a tool
+      // before answering is the normal shape of a panel action that needs
+      // data, and the panel should stay pending across it.
+    }
+    return null
+  })
+
+  /** True when this assistant message is the hidden half of a silent pair. */
+  function isHiddenReply(index: number): boolean {
+    const m = msgs[index]
+    if (!m || m.type !== 'assistant') return false
+    // While it is still streaming, hide it optimistically for as long as it
+    // could still turn out to be a silent update. The predicate is monotone,
+    // so once prose appears the bubble shows and stays shown.
+    if (m.streaming) {
+      const p = silentActionPanel(precedingSaid(msgs, index))
+      return p !== null && couldBeSilentReply(m.content)
+    }
+    return isSilentPairAt(msgs, index)
   }
+
+  // The chip rendering below parses the same envelope the silent-turn
+  // classifier does, so it uses that parser rather than a second copy — two
+  // implementations of one wire convention would drift.
 
   // ── edit a prior user message: load it back into the composer for resend ─────
   let composer = $state<{ setText: (v: string) => void; restore: (v: string, files?: any[]) => void; isEmpty: () => boolean } | null>(null)
@@ -2561,7 +2623,27 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           {/if}
 
           {#each msgs as msg, i (msg.id)}
-            {#if msg.type === 'user'}
+            {@const silentPanel = msg.type === 'user' ? silentActionPanel(msg) : null}
+            {#if silentPanel}
+              <!-- The user half of a silent turn. Hidden as a bubble — acting on
+                   a panel is manipulation of an object, not a thing said — but
+                   not hidden from the record: the message is in history and in
+                   every export, so a marker sits where it happened and opens to
+                   the raw action. Without it a panel would appear to change with
+                   no visible cause. -->
+              <div class="genui-silent-marker">
+                <details>
+                  <summary>
+                    <iconify-icon icon="ant-design:sync-outlined" width="11"></iconify-icon>
+                    {$t('chat.genui_panel_updated')}
+                  </summary>
+                  <pre class="genui-action-json">{msg.content.slice(OCTO_UI_ACTION_PREFIX.length)}</pre>
+                </details>
+              </div>
+            {:else if isHiddenReply(i)}
+              <!-- The model half of a silent turn: its single octo-ui fence is
+                   projected into the panel above instead of drawn here. -->
+            {:else if msg.type === 'user'}
               <!-- Right-aligned user bubble -->
               <div class="msg-row" class:export-mode={inExportMode} class:export-unselected={inExportMode && !selectedIds.has(msg.id)}>
                 {#if inExportMode}
@@ -2615,7 +2697,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                         }}
                       ></textarea>
                     {:else}
-                      {@const genuiAction = msg.content ? parseGenuiActionBubble(msg.content) : null}
+                      {@const genuiAction = msg.content ? parseActionEnvelope(msg.content) : null}
                       {#if genuiAction}
                         <!-- Compact chip for a synthetic [octo-ui-action] turn — the
                              raw JSON convention text would otherwise leak into the
@@ -2730,8 +2812,19 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                       {#each throttledSegments(msg.id, msg.content, msg.streaming) as seg, segIdx (segIdx)}
                         {#if seg.kind === 'markdown'}
                           {@html throttledMarkdown(`${msg.id}:${segIdx}`, seg.text, msg.streaming, showReasoning)}
-                        {:else if seg.spec}
-                          <GenuiBlock spec={seg.spec} interactive={seg.complete} onaction={sendGenuiAction} />
+                        {:else if seg.spec && isAnchor(panels, seg.spec, msg.id, segIdx)}
+                          <!-- An anonymous panel renders its own spec where it
+                               sits. An addressable one renders the newest
+                               version of itself, which a silent turn may have
+                               replaced since this message was written. -->
+                          {@const live = seg.spec.id ? (panels.get(seg.spec.id)?.spec ?? seg.spec) : seg.spec}
+                          <GenuiBlock
+                            spec={live}
+                            interactive={seg.complete}
+                            pending={!!seg.spec.id && pendingPanel === seg.spec.id}
+                            sessionId={id ?? ''}
+                            onaction={(a) => sendGenuiAction(a, seg.spec?.id)}
+                          />
                         {/if}
                         <!-- seg.kind === 'octo-ui' && seg.spec === null: the guard
                              rejected everything in this fence, or nothing is
@@ -3382,10 +3475,29 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
    server confirms it via history_user_message. */
 .user-card.pending { opacity: 0.65; }
 /* Compact chip for a synthetic [octo-ui-action] turn (see
-   parseGenuiActionBubble) — the JSON body sits behind a click-to-expand
+   parseActionEnvelope) — the JSON body sits behind a click-to-expand
    <details>, so a genui button click doesn't leak raw JSON into the
    transcript at a glance. */
 .genui-action-chip { font-size: 13px; color: var(--text); }
+/* Marker standing in for a hidden silent-turn pair. Deliberately quiet — it
+   records that a panel changed and why, without reading as a message. */
+.genui-silent-marker {
+  display: flex;
+  justify-content: center;
+  margin: 2px 0;
+}
+.genui-silent-marker summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 11px;
+  color: var(--text-tertiary, var(--text-secondary));
+  opacity: 0.75;
+}
+.genui-silent-marker summary::-webkit-details-marker { display: none; }
+.genui-silent-marker summary:hover { opacity: 1; }
 .genui-action-chip summary {
   display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
   color: var(--text-secondary); list-style: none;

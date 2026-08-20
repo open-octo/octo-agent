@@ -9,6 +9,10 @@ import { fileURLToPath } from 'node:url'
 export default defineConfig({
   plugins: [svelte()],
   resolve: {
+    // Without this Vitest resolves Svelte's server build and mount() throws
+    // lifecycle_function_unavailable, which is why components had no render
+    // tests before. Verified against the full suite when it was added.
+    conditions: ['browser'],
     alias: {
       '@lib': fileURLToPath(new URL('./src/lib', import.meta.url)),
     },

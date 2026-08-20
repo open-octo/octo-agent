@@ -8,7 +8,7 @@
 
   // See GenuiInput.svelte's comment: seed once, don't clobber a later
   // user toggle on a re-render of the same node.
-  let checked = $state(untrack(() => node.checked ?? false))
+  let checked = $state(untrack(() => ctx?.initialBoolean(node.field, node.checked ?? false) ?? node.checked ?? false))
 
   $effect(() => {
     ctx?.setFieldValue(node.field, checked)

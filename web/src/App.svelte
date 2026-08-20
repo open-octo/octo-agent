@@ -11,6 +11,7 @@
   import { installExternalLinkInterceptor } from './lib/externalLinks'
   import { startNativeHeartbeat } from './lib/nativeHeartbeat'
   import { normalizeHash, hashPicksChatTarget } from './lib/hashRouting'
+  import { pruneSessions } from './lib/genui/panel-state'
   import { globalKeyIntent } from './lib/globalKeys'
   import AuthGate from './components/overlays/AuthGate.svelte'
   import FirstRunSetup from './components/overlays/FirstRunSetup.svelte'
@@ -120,7 +121,15 @@
     // Desktop shell: report page liveness so the shell can revive a dead or
     // black webview instead of foregrounding it. Inert in a real browser.
     const stopHeartbeat = startNativeHeartbeat()
-    const cleanup = () => { cancelled = true; uninstallLinks(); stopHeartbeat(); ws.disconnect() }
+    // Drop persisted GenUI panel state for sessions that no longer exist. The
+    // session list is the natural GC point: it is when a deletion made
+    // anywhere else first becomes visible to this client.
+    //
+    // Note this subscription fires immediately with the store's initial [],
+    // before the list has been fetched. pruneSessions ignores an empty list
+    // for exactly that reason — see the comment there.
+    const stopPanelGC = sessions.subscribe(list => pruneSessions(list.map(s => s.id)))
+    const cleanup = () => { cancelled = true; uninstallLinks(); stopHeartbeat(); stopPanelGC(); ws.disconnect() }
     checkAuth().then(async ok => {
       if (cancelled) return
       if (!ok) {

@@ -1,26 +1,9 @@
 import { marked, Renderer, type Tokens } from "marked"
 import DOMPurify from "dompurify"
-import hljs from "highlight.js/lib/core"
-import javascript from "highlight.js/lib/languages/javascript"
-import typescript from "highlight.js/lib/languages/typescript"
-import go from "highlight.js/lib/languages/go"
-import python from "highlight.js/lib/languages/python"
-import bash from "highlight.js/lib/languages/bash"
-import json from "highlight.js/lib/languages/json"
-import xml from "highlight.js/lib/languages/xml"
-// Side-effect import: bundles the GitHub Dark highlight.js CSS theme so that
-// hljs-* class names (hljs-keyword, hljs-string, etc.) are styled in the main
-// DOM (ChatView, ProfileView, etc.). Without this, highlight() runs and
-// produces the right HTML spans but the colors are invisible.
-import "highlight.js/styles/github-dark.css"
-
-hljs.registerLanguage("javascript", javascript)
-hljs.registerLanguage("typescript", typescript)
-hljs.registerLanguage("go", go)
-hljs.registerLanguage("python", python)
-hljs.registerLanguage("bash", bash)
-hljs.registerLanguage("json", json)
-hljs.registerLanguage("xml", xml)
+// Configured (core build, registered languages, theme CSS) in one place so
+// GenuiCode.svelte gets the same registrations without depending on this
+// module having been imported first.
+import hljs from "./highlight"
 
 export function escapeHtml(s: string): string {
   return s
@@ -31,7 +14,13 @@ export function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;")
 }
 
-function isSafeHref(href: string): boolean {
+/**
+ * The one URL scheme whitelist in the frontend. Exported so GenUI's `link`
+ * node uses this list rather than inventing a second one that would drift
+ * from it — a requirement stated in dev-docs/genui-design.md's security
+ * design before any linking node existed.
+ */
+export function isSafeHref(href: string): boolean {
   if (!href) return false
   const lower = href.trim().toLowerCase()
   return lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("mailto:") || lower.startsWith("tel:")

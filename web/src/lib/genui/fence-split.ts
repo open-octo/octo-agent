@@ -26,7 +26,7 @@ export type Segment =
 // READ_ONLY_NODE_TYPES alone.
 const ALLOWED_TYPES: ReadonlySet<string> = new Set([...READ_ONLY_NODE_TYPES, ...INTERACTIVE_NODE_TYPES])
 
-const FENCE_OPEN = '```octo-ui'
+export const FENCE_OPEN = '```octo-ui'
 const FENCE_CLOSE = '```'
 
 /**

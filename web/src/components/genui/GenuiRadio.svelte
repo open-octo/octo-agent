@@ -8,7 +8,7 @@
 
   // See GenuiInput.svelte's comment: seed once, don't clobber a later
   // user pick on a re-render of the same node.
-  let value = $state(untrack(() => node.value ?? ''))
+  let value = $state(untrack(() => ctx?.initialString(node.field, node.value ?? '') ?? node.value ?? ''))
 
   $effect(() => {
     ctx?.setFieldValue(node.field, value)

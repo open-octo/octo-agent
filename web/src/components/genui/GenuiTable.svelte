@@ -1,7 +1,22 @@
 <script lang="ts">
+  // Filtering and sorting happen here, over the rows already in the spec —
+  // never by asking the model for anything. `filterBy` reads a field the
+  // panel's own controls set; `sortable` needs no field at all, which is why
+  // it survives on the render_ui tool-card path where filtering does not.
   import type { GenuiTableNode } from '../../lib/genui/types'
+  import { useGenuiFieldContext } from '../../lib/genui/context'
+  import { tableRows, nextSort, type TableSort } from '../../lib/genui/table-view'
 
   let { node }: { node: GenuiTableNode } = $props()
+  const ctx = useGenuiFieldContext()
+
+  let sort = $state<TableSort | null>(null)
+  const rows = $derived(tableRows(node, ctx?.fields ?? {}, sort))
+
+  function toggleSort(column: number) {
+    if (!node.sortable) return
+    sort = nextSort(sort, column)
+  }
 </script>
 
 <div class="table-scroll">
@@ -9,12 +24,29 @@
     <thead>
       <tr>
         {#each node.columns as col, i (i)}
-          <th>{col}</th>
+          <th
+            class:sortable={node.sortable}
+            role={node.sortable ? 'button' : undefined}
+            tabindex={node.sortable ? 0 : undefined}
+            aria-sort={sort?.column === i ? (sort.direction === 'asc' ? 'ascending' : 'descending') : undefined}
+            onclick={() => toggleSort(i)}
+            onkeydown={e => {
+              if (node.sortable && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault()
+                toggleSort(i)
+              }
+            }}
+          >
+            {col}
+            {#if node.sortable && sort?.column === i}
+              <span class="sort-caret">{sort.direction === 'asc' ? '▲' : '▼'}</span>
+            {/if}
+          </th>
         {/each}
       </tr>
     </thead>
     <tbody>
-      {#each node.rows as row, ri (ri)}
+      {#each rows as row, ri (ri)}
         <tr>
           {#each row as cell, ci (ci)}
             <td>{cell}</td>
@@ -23,6 +55,9 @@
       {/each}
     </tbody>
   </table>
+  {#if rows.length === 0 && node.rows.length > 0}
+    <div class="table-empty">no rows match</div>
+  {/if}
 </div>
 
 <style>
@@ -56,5 +91,18 @@
   }
   td {
     color: var(--text);
+  }
+  th.sortable {
+    cursor: pointer;
+    user-select: none;
+  }
+  .sort-caret {
+    font-size: 9px;
+    color: var(--text-secondary);
+  }
+  .table-empty {
+    padding: 6px 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
   }
 </style>
