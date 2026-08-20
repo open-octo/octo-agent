@@ -43,6 +43,36 @@
     document.body.appendChild(node)
     return { destroy() { node.remove() } }
   }
+
+  // Row menus (a session's kebab, a project's kebab) are portaled out too, for
+  // the same reason the flyout above is: .sessions-group scrolls and the
+  // <aside>'s backdrop-filter makes it a containing block, so an absolutely
+  // positioned menu was clipped by whichever box ended first — a row near the
+  // bottom of the list had its menu cut off by the panel's edge. The rect is
+  // captured from the row when the menu opens; `right` rather than `left` keeps
+  // it right-aligned to the row without having to know the menu's own width.
+  let rowMenuPos = $state({ top: 0, right: 0, anchorTop: 0 })
+  function captureRowMenuPos(kebab: HTMLElement) {
+    const row = kebab.closest('.nav-row, .grp-header') as HTMLElement | null
+    const r = (row ?? kebab).getBoundingClientRect()
+    rowMenuPos = { top: r.bottom + 2, right: Math.max(8, window.innerWidth - r.right + 6), anchorTop: r.top }
+  }
+  // One menu at a time: both kinds share rowMenuPos, and two menus at the same
+  // coordinates would stack on top of each other.
+  function closeRowMenus() {
+    menuFor.set(null)
+    projectMenuFor = ''
+  }
+  function rowMenuPortal(node: HTMLElement, anchorTop: number) {
+    document.body.appendChild(node)
+    // Anchored below its row, a menu on the last visible row can still run past
+    // the bottom of the window now that the panel no longer bounds it — flip it
+    // above the row in that case.
+    if (node.getBoundingClientRect().bottom > window.innerHeight - 8) {
+      node.style.top = `${Math.max(8, anchorTop - node.offsetHeight - 2)}px`
+    }
+    return { destroy() { node.remove() } }
+  }
   function toggleMorePopover(anchor: HTMLElement, mode: 'full' | 'rail') {
     if (morePopoverOpen) { morePopoverOpen = false; return }
     const r = anchor.getBoundingClientRect()
@@ -618,7 +648,7 @@
       <!-- The session list, last and elastic: it sizes to its own content and is
            the one thing that gives (bounded by min-height, scrolling internally)
            once the stack would overflow .scroll. -->
-      <div class="nav-group sessions-group">
+      <div class="nav-group sessions-group" onscroll={closeRowMenus}>
 
         <!-- Pinned: a dedicated top section, above all groups -->
         {#if groupedView.pinned.length > 0}
@@ -749,14 +779,14 @@
                remain, both things you do TO the project rather than to its
                configuration: start work in it, and open its menu. The rest are in
                the menu, where a destructive action is not one stray click away. -->
-          <span class="row-action on-hover" title={$t('sidebar.project_more')} onclick={(e) => { e.stopPropagation(); projectMenuFor = projectMenuFor === g.id ? '' : g.id }}>
+          <span class="row-action on-hover" title={$t('sidebar.project_more')} onclick={(e) => { e.stopPropagation(); const open = projectMenuFor === g.id; closeRowMenus(); if (!open) { captureRowMenuPos(e.currentTarget as HTMLElement); projectMenuFor = g.id } }}>
             <iconify-icon icon="ant-design:more-outlined" width="14"></iconify-icon>
           </span>
           <span class="row-action on-hover" title={tr('sidebar.new_session_in_group')} onclick={(e) => { e.stopPropagation(); createSessionInGroup(g.id) }}>
             <iconify-icon icon="ant-design:plus-outlined" width="13"></iconify-icon>
           </span>
           {#if projectMenuFor === g.id}
-          <div class="row-menu" onclick={(e) => e.stopPropagation()}>
+          <div class="row-menu" use:rowMenuPortal={rowMenuPos.anchorTop} style="top:{rowMenuPos.top}px;right:{rowMenuPos.right}px" onclick={(e) => e.stopPropagation()}>
             {#if $nativeShell && g.working_dir}
             <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; openFolder({ groupId: g.id }) }}>
               <iconify-icon icon="ant-design:folder-open-outlined" width="13"></iconify-icon>
@@ -877,7 +907,7 @@
                  (and un-archiving one) now lives in Settings' 数据管理, not here
                  — a session dropped off this list entirely once archived, so
                  there was no row left to offer "un-archive" from anyway. -->
-            <span class="row-action on-hover kebab" onclick={(e) => { e.stopPropagation(); menuFor.update(m => m === s.id ? null : s.id) }} style="color:{solid ? 'var(--blue-6)' : 'var(--text-tertiary)'}">
+            <span class="row-action on-hover kebab" onclick={(e) => { e.stopPropagation(); const open = $menuFor === s.id; closeRowMenus(); if (!open) { captureRowMenuPos(e.currentTarget as HTMLElement); menuFor.set(s.id) } }} style="color:{solid ? 'var(--blue-6)' : 'var(--text-tertiary)'}">
               <iconify-icon icon="ant-design:more-outlined" width="14"></iconify-icon>
             </span>
             {#if !pinned}
@@ -892,7 +922,7 @@
               <iconify-icon icon={pinned ? 'ant-design:pushpin-filled' : 'ant-design:pushpin-outlined'} width="13"></iconify-icon>
             </span>
             {#if menuOpen}
-            <div class="row-menu" onclick={(e) => e.stopPropagation()}>
+            <div class="row-menu" use:rowMenuPortal={rowMenuPos.anchorTop} style="top:{rowMenuPos.top}px;right:{rowMenuPos.right}px" onclick={(e) => e.stopPropagation()}>
               {#if !pinned}
               <!-- First entry: acting on many sessions starts from one of them,
                    which is also why this one is pre-selected. Not offered on a
@@ -1169,8 +1199,8 @@
 .nav-row:hover .on-rest,
 .nav-row.menu-open .on-rest { display: none; }
 .row-menu {
-  position: absolute; top: 100%; right: 6px; z-index: 30;
-  min-width: 132px; margin-top: 2px; padding: 4px;
+  position: fixed; z-index: 30;
+  min-width: 132px; padding: 4px;
   background: var(--bg-container); border: 1px solid var(--border-secondary);
   border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.18);
 }
