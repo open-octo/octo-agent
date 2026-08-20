@@ -289,7 +289,7 @@ func TestSetComposedSystem_FreezesAppendsAndRoundTrips(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	if err := s.SetComposedSystem("full prompt", "lean prompt", "model-a", "", ""); err != nil {
+	if err := s.SetComposedSystem("full prompt", "lean prompt", "model-a", ""); err != nil {
 		t.Fatalf("SetComposedSystem: %v", err)
 	}
 	if s.ComposedSystem != "full prompt" || s.ComposedLeanSystem != "lean prompt" || s.ComposedForModel != "model-a" {
@@ -311,7 +311,7 @@ func TestSetComposedSystem_FreezesAppendsAndRoundTrips(t *testing.T) {
 	// Already-frozen no-op: a second call for the SAME model must not
 	// overwrite or append.
 	before := len(data)
-	if err := s.SetComposedSystem("different prompt", "different lean", "model-a", "", ""); err != nil {
+	if err := s.SetComposedSystem("different prompt", "different lean", "model-a", ""); err != nil {
 		t.Fatal(err)
 	}
 	if s.ComposedSystem != "full prompt" {
@@ -349,17 +349,17 @@ func TestSetComposedSystem_ModelSwitchForcesRefreeze(t *testing.T) {
 	if err := s.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	if err := s.SetComposedSystem("prompt for model-a", "lean for model-a", "model-a", "", ""); err != nil {
+	if err := s.SetComposedSystem("prompt for model-a", "lean for model-a", "model-a", ""); err != nil {
 		t.Fatalf("SetComposedSystem: %v", err)
 	}
-	if !s.IsComposedFor("model-a", "", "") {
+	if !s.IsComposedFor("model-a", "") {
 		t.Fatal("expected IsComposedFor(\"model-a\") after freezing for model-a")
 	}
-	if s.IsComposedFor("model-b", "", "") {
+	if s.IsComposedFor("model-b", "") {
 		t.Fatal("IsComposedFor(\"model-b\") must be false when frozen for model-a")
 	}
 
-	if err := s.SetComposedSystem("prompt for model-b", "lean for model-b", "model-b", "", ""); err != nil {
+	if err := s.SetComposedSystem("prompt for model-b", "lean for model-b", "model-b", ""); err != nil {
 		t.Fatalf("SetComposedSystem for model-b: %v", err)
 	}
 	if s.ComposedSystem != "prompt for model-b" || s.ComposedForModel != "model-b" {
@@ -398,7 +398,7 @@ func TestSetComposedSystem_PersistedZeroRewritesWhenFileExists(t *testing.T) {
 	shadow := NewSession(s.Model, s.System)
 	shadow.ID = s.ID
 
-	if err := shadow.SetComposedSystem("rewritten prompt", "rewritten lean", "m", "", ""); err != nil {
+	if err := shadow.SetComposedSystem("rewritten prompt", "rewritten lean", "m", ""); err != nil {
 		t.Fatalf("SetComposedSystem: %v", err)
 	}
 
@@ -424,7 +424,7 @@ func TestClearComposedSystem_UnfreezesAndRoundTrips(t *testing.T) {
 	if err := s.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	if err := s.SetComposedSystem("full prompt", "lean prompt", "model-a", "", ""); err != nil {
+	if err := s.SetComposedSystem("full prompt", "lean prompt", "model-a", ""); err != nil {
 		t.Fatalf("SetComposedSystem: %v", err)
 	}
 
@@ -445,7 +445,7 @@ func TestClearComposedSystem_UnfreezesAndRoundTrips(t *testing.T) {
 	// And it can be frozen again after clearing — round-trips too, confirming
 	// the third composed_system record (freeze, clear, re-freeze) replays
 	// correctly rather than getting lost among the earlier ones.
-	if err := reloaded.SetComposedSystem("second prompt", "second lean", "model-a", "", ""); err != nil {
+	if err := reloaded.SetComposedSystem("second prompt", "second lean", "model-a", ""); err != nil {
 		t.Fatalf("SetComposedSystem after clear: %v", err)
 	}
 	if reloaded.ComposedSystem != "second prompt" {
@@ -472,17 +472,17 @@ func TestSetComposedSystem_CwdChangeForcesRefreeze(t *testing.T) {
 	if err := s.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	if err := s.SetComposedSystem("prompt in /a", "lean in /a", "m", "/a", ""); err != nil {
+	if err := s.SetComposedSystem("prompt in /a", "lean in /a", "m", "/a"); err != nil {
 		t.Fatalf("SetComposedSystem: %v", err)
 	}
-	if !s.IsComposedFor("m", "/a", "") {
+	if !s.IsComposedFor("m", "/a") {
 		t.Fatal("expected the freeze to hold for its own cwd")
 	}
-	if s.IsComposedFor("m", "/b", "") {
+	if s.IsComposedFor("m", "/b") {
 		t.Fatal("a freeze composed against /a must not be reused for /b")
 	}
 
-	if err := s.SetComposedSystem("prompt in /b", "lean in /b", "m", "/b", ""); err != nil {
+	if err := s.SetComposedSystem("prompt in /b", "lean in /b", "m", "/b"); err != nil {
 		t.Fatalf("SetComposedSystem after cwd change: %v", err)
 	}
 	if s.ComposedSystem != "prompt in /b" || s.ComposedForCWD != "/b" {
@@ -496,43 +496,13 @@ func TestSetComposedSystem_CwdChangeForcesRefreeze(t *testing.T) {
 	if reloaded.ComposedForCWD != "/b" || reloaded.ComposedSystem != "prompt in /b" {
 		t.Fatalf("cwd freeze did not round-trip: got %q / %q", reloaded.ComposedForCWD, reloaded.ComposedSystem)
 	}
-	if !reloaded.IsComposedFor("m", "/b", "") {
+	if !reloaded.IsComposedFor("m", "/b") {
 		t.Fatal("reloaded session should still be frozen for /b")
 	}
 }
 
-// TestSetComposedSystem_NotesChangeForcesRefreeze: project notes are injected
-// into the prompt, so editing them must invalidate the freeze — while leaving
-// them alone must not, or every turn would lose the provider's prompt cache.
-func TestSetComposedSystem_NotesChangeForcesRefreeze(t *testing.T) {
-	setTempHome(t)
-	s := NewSession("m", "")
-	s.Messages = []Message{NewUserMessage("hi"), NewAssistantMessage("hello")}
-	if err := s.Save(); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-	first := ComposedNotesHash("ship behind a flag")
-	second := ComposedNotesHash("ship behind a flag, and never touch billing")
-	if first == "" || first == second {
-		t.Fatalf("notes hashes should be non-empty and distinct: %q vs %q", first, second)
-	}
-	if ComposedNotesHash("") != "" {
-		t.Fatal("empty notes must hash to the empty string so unprojected sessions carry no value")
-	}
-
-	if err := s.SetComposedSystem("prompt", "lean", "m", "/a", first); err != nil {
-		t.Fatalf("SetComposedSystem: %v", err)
-	}
-	if !s.IsComposedFor("m", "/a", first) {
-		t.Fatal("unchanged notes must reuse the freeze (prompt cache)")
-	}
-	if s.IsComposedFor("m", "/a", second) {
-		t.Fatal("edited notes must invalidate the freeze")
-	}
-}
-
-// TestClearComposedSystem_ClearsFreezeIdentity: /reload must drop the cwd and
-// notes stamps too, or the next turn could match a stale identity.
+// TestClearComposedSystem_ClearsFreezeIdentity: /reload must drop the cwd stamp
+// too, or the next turn could match a stale identity.
 func TestClearComposedSystem_ClearsFreezeIdentity(t *testing.T) {
 	setTempHome(t)
 	s := NewSession("m", "")
@@ -540,17 +510,16 @@ func TestClearComposedSystem_ClearsFreezeIdentity(t *testing.T) {
 	if err := s.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	notes := ComposedNotesHash("some notes")
-	if err := s.SetComposedSystem("prompt", "lean", "m", "/a", notes); err != nil {
+	if err := s.SetComposedSystem("prompt", "lean", "m", "/a"); err != nil {
 		t.Fatalf("SetComposedSystem: %v", err)
 	}
 	if err := s.ClearComposedSystem(); err != nil {
 		t.Fatalf("ClearComposedSystem: %v", err)
 	}
-	if s.ComposedForCWD != "" || s.ComposedForNotes != "" {
-		t.Fatalf("clear left freeze identity behind: cwd=%q notes=%q", s.ComposedForCWD, s.ComposedForNotes)
+	if s.ComposedForCWD != "" {
+		t.Fatalf("clear left freeze identity behind: cwd=%q", s.ComposedForCWD)
 	}
-	if s.IsComposedFor("m", "/a", notes) {
+	if s.IsComposedFor("m", "/a") {
 		t.Fatal("a cleared session must not report as frozen")
 	}
 }

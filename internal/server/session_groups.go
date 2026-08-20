@@ -24,8 +24,8 @@ import (
 // user-facing concept — a "plain group", a name with sessions under it and no
 // directory, used to exist and no longer does: it split the sidebar into three
 // kinds of row for two kinds of thing, and offered organisation that carried
-// none of what a project carries (a directory for the tools, a memory tier, a
-// notes block). dissolvePlainGroups retires the ones already on disk.
+// none of what a project carries (a directory for the tools, a memory tier).
+// dissolvePlainGroups retires the ones already on disk.
 //
 // The registry lives entirely in one file
 // (~/.octo/session-groups.json) and never touch the session transcript format
@@ -67,10 +67,6 @@ type sessionGroup struct {
 	// already expanded and absolute — the write paths resolve and validate it,
 	// so every reader can use it verbatim.
 	WorkingDir string `json:"working_dir,omitempty"`
-	// Notes is project-level context injected into the system prompt of every
-	// session in the project, alongside the project-memory layer. Only
-	// meaningful on a project.
-	Notes string `json:"notes,omitempty"`
 	// TaskID, when set, is the scheduled task this project was created for. It
 	// is what lets the startup pass repair such a project (backfilling the
 	// directory a task written before this had none) rather than dissolving it.
@@ -83,22 +79,6 @@ func (g sessionGroup) isProject() bool { return g.WorkingDir != "" }
 // isCronCluster reports whether this project was created for a scheduled task.
 // Used by the startup repair pass, not to gate anything the user can do.
 func (g sessionGroup) isCronCluster() bool { return g.TaskID != "" }
-
-// maxProjectNotes caps the notes field. Notes are injected verbatim into the
-// system prompt of EVERY session in the project, so an oversized value would
-// silently eat context across all of them; 16 KiB is far beyond any sane
-// project brief while still an obvious mistake-catcher.
-const maxProjectNotes = 16 * 1024
-
-// validateProjectNotes trims and bounds a user-supplied notes value. The
-// returned error is user-facing.
-func validateProjectNotes(raw string) (string, error) {
-	notes := strings.TrimSpace(raw)
-	if len(notes) > maxProjectNotes {
-		return "", fmt.Errorf("notes too long: %d bytes (max %d) — notes are injected into every session's system prompt, keep them brief", len(notes), maxProjectNotes)
-	}
-	return notes, nil
-}
 
 // groupFile is the on-disk shape of the registry. Group order is array order.
 // PinnedSessionIDs is the Web-UI "pinned" set — sessions the user floated to a
@@ -408,33 +388,6 @@ func ProjectExistsForDir(dir string) bool {
 	return false
 }
 
-// projectNotesFor returns the project notes that apply to sessionID, or "".
-func projectNotesFor(sessionID string) string {
-	if p := projectForSession(sessionID); p != nil {
-		return p.Notes
-	}
-	return ""
-}
-
-// projectNotesAndDir returns both facts a turn needs from the project owning
-// sessionID — its notes and its working directory — in one registry lookup.
-// Both are empty when the session belongs to no project. The notes go into the
-// prompt; the directory is what scopes the session's memory (see
-// Server.sessionMemDir).
-func projectNotesAndDir(sessionID string) (notes, dir string) {
-	if p := projectForSession(sessionID); p != nil {
-		return p.Notes, p.WorkingDir
-	}
-	return "", ""
-}
-
-// renderProjectNotes wraps project notes for the system prompt's memory layer.
-// The heading gives the model a frame for what it is reading — otherwise a
-// bare paragraph of project context reads as an instruction from the user.
-func renderProjectNotes(notes string) string {
-	return "# Project notes\n\nContext for the project this session belongs to:\n\n" + notes
-}
-
 // newGroupID returns a short random group id ("g-" + 8 hex chars).
 func newGroupID() string {
 	var b [4]byte
@@ -609,7 +562,6 @@ type createSessionGroupRequest struct {
 	// project is a directory. Creating without one used to be how a plain group
 	// was made, and that concept is gone.
 	WorkingDir string `json:"working_dir"`
-	Notes      string `json:"notes,omitempty"`
 }
 
 func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request) {
@@ -632,11 +584,6 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, verr.Error())
 		return
 	}
-	notes, nerr := validateProjectNotes(req.Notes)
-	if nerr != nil {
-		writeError(w, http.StatusBadRequest, nerr.Error())
-		return
-	}
 
 	groupMu.Lock()
 	defer groupMu.Unlock()
@@ -645,7 +592,7 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workingDir, Notes: notes}
+	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workingDir}
 	groups = append(groups, g)
 	if err := saveSessionGroups(groups); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -657,8 +604,8 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 // ─── PATCH /api/session-groups/{id} ─────────────────────────────────────────
 
 // updateSessionGroupRequest carries the editable group fields. All are
-// optional pointers so a request can rename, toggle collapsed, retarget the
-// project directory, or edit the notes, without one clobbering the others.
+// optional pointers so a request can rename, toggle collapsed, or retarget the
+// project directory, without one clobbering the others.
 type updateSessionGroupRequest struct {
 	Name      *string `json:"name,omitempty"`
 	Collapsed *bool   `json:"collapsed,omitempty"`
@@ -667,7 +614,6 @@ type updateSessionGroupRequest struct {
 	// demote to — deleting the project is the way to break it up, which leaves
 	// its sessions as tasks.
 	WorkingDir *string `json:"working_dir,omitempty"`
-	Notes      *string `json:"notes,omitempty"`
 }
 
 func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request) {
@@ -681,8 +627,8 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeInvalidJSONBody(w, err)
 		return
 	}
-	if req.Name == nil && req.Collapsed == nil && req.WorkingDir == nil && req.Notes == nil {
-		writeError(w, http.StatusBadRequest, "name, collapsed, working_dir or notes is required")
+	if req.Name == nil && req.Collapsed == nil && req.WorkingDir == nil {
+		writeError(w, http.StatusBadRequest, "name, collapsed or working_dir is required")
 		return
 	}
 	var name string
@@ -707,15 +653,6 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 			return
 		}
 		workingDir = dir
-	}
-	var notes string
-	if req.Notes != nil {
-		n, nerr := validateProjectNotes(*req.Notes)
-		if nerr != nil {
-			writeError(w, http.StatusBadRequest, nerr.Error())
-			return
-		}
-		notes = n
 	}
 
 	groupMu.Lock()
@@ -744,9 +681,6 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 	}
 	if req.WorkingDir != nil {
 		groups[idx].WorkingDir = workingDir
-	}
-	if req.Notes != nil {
-		groups[idx].Notes = notes
 	}
 	if err := saveSessionGroups(groups); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -888,15 +822,14 @@ func (s *Server) handleReorderSessionGroups(w http.ResponseWriter, r *http.Reque
 // directory on the landing page, or by the "+" on a project — and is fixed after
 // that.
 //
-// It is fixed because moving is not one change but four, and they cannot be
-// made to agree after the fact: the tools' directory, the memory tier, the
-// project notes baked into the system prompt, and the hooks/sandbox root all
-// derive from the project. A moved session would keep a transcript half of which
-// ran somewhere else and read another project's notes, and the freeze that keeps
-// the prompt cache warm cannot tell that apart from an ordinary turn (it is
-// keyed on cwd + notes, so a session whose own directory already equals the
-// project's would not even re-compose). Deciding at creation makes the four
-// facts true for the whole life of the session.
+// It is fixed because moving is not one change but three, and they cannot be
+// made to agree after the fact: the tools' directory, the memory tier, and the
+// hooks/sandbox root all derive from the project. A moved session would keep a
+// transcript half of which ran somewhere else, and the freeze that keeps the
+// prompt cache warm cannot tell that apart from an ordinary turn (it is keyed on
+// cwd, so a session whose own directory already equals the project's would not
+// even re-compose). Deciding at creation makes the three facts true for the
+// whole life of the session.
 func (s *Server) handleSetSessionGroup(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusConflict,
 		"a session's project is decided when it is created — start a new session in the project instead")

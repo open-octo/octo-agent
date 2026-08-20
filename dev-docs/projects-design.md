@@ -12,9 +12,9 @@ octo 的工作目录曾是纯粹的**每会话**属性（`agent.Session.WorkingD
 
 | 做 | 不做 |
 |---|---|
-| 项目携带 `working_dir` + `notes` | 项目级默认模型 / 专家 / 权限模式 |
+| 项目携带 `working_dir` | 项目级默认模型 / 专家 / 权限模式 |
 | 项目目录强绑定，实时生效 | CLI / TUI 感知项目 |
-| `notes` 注入项目内会话的 system prompt | 嵌套项目、一个会话属于多个项目 |
+| 每个项目一个记忆层 | 嵌套项目、一个会话属于多个项目 |
 | Web + 桌面 UI | IM channel / cron 显式绑定项目 |
 
 **每个 cron task 就是一个项目**：调度器为它建一个同名项目，工作目录 `<workspace>/<任务名>`（`cronProjectDir`，按需创建，`TaskID` 记录来源）。这解决了一个实打实的 bug——调度器不像 HTTP 创建路径那样 seed 工作目录，所以运行会话既没有自己的目录、簇也没有，一路落到**服务器的启动目录**：机器上所有定时任务都在 `octo serve` 恰好启动的那个目录里跑，两个任务写同名文件会互相覆盖。一任务一目录同时给了它自己的记忆层（记忆按项目划作用域）。
@@ -45,8 +45,6 @@ CLI 只认**项目目录**，不认会话自己的 `WorkingDir`。因为 `applyD
 
 解析只发生一次，和这段代码里其它所有东西一样——REPL 内切换会话不重算，与 CLI 既有的"每进程组一次系统提示词"模型一致。重定位会打印一行说明：静默地在别处跑工具会让人莫名其妙。
 
-CLI 只重定位目录，**不注入项目 notes**——同一会话在 CLI 和 Web 下的 system prompt 因此不同。这是范围裁剪的直接推论（CLI 每进程组一次提示词，且不走服务端的组装点），不是遗漏。
-
 CLI 仍然**没有**修改工作目录的入口。`SetWorkingDir` 只有 `internal/server` 三个调用点，所以不存在"在别处改了目录、Web 里不生效"的反向静默失效；项目的目录只能在创建它的地方定。CLI/TUI 也不调 `SetComposedSystem`（每进程组一次提示词），因此用 TUI 跑一条项目会话不会把目录写进 `ComposedForCWD` 去污染 Web 侧的冻结身份。
 
 ## 数据模型
@@ -63,8 +61,6 @@ type sessionGroup struct {
 	// WorkingDir 非空 ⇒ 这个组是一个「项目」，组内所有会话的工具都在
 	// 这里运行，记忆也按它划作用域。
 	WorkingDir string `json:"working_dir,omitempty"`
-	// Notes 是项目级说明，注入组内会话 system prompt 的项目记忆层。
-	Notes string `json:"notes,omitempty"`
 	// TaskID 非空 ⇒ 这个项目是为该 cron 任务创建的。只用于启动时的修复
 	// （给写在这之前、还没有目录的簇补上目录），不参与任何 UI 或权限判定。
 	TaskID string `json:"task_id,omitempty"`
@@ -114,26 +110,24 @@ func (s *Server) resolveSessionDir(sessionID string, own string) string {
 
 这是本设计唯一的硬点。
 
-`Session.ComposedSystem` 在首个 turn 冻结，之后每个 turn 复用同一字符串，为的是保住 provider 的 prompt cache 前缀（`server.go:1284-1298`）。而**工作目录本身就烘焙在里面**——`buildEnvContext(cwd)` 产出的 `- Working directory: /path` 是 composed prompt 的一部分。项目级 `notes` 同理。
+`Session.ComposedSystem` 在首个 turn 冻结，之后每个 turn 复用同一字符串，为的是保住 provider 的 prompt cache 前缀。而**工作目录本身就烘焙在里面**——`buildEnvContext(cwd)` 产出的 `- Working directory: /path` 是 composed prompt 的一部分。
 
 所以改项目目录后，工具 cwd 会立刻跟着变（`buildAgent` 每 turn 重设 `a.CWD`），但 system prompt 里还写着老目录。模型会看到两个互相矛盾的事实。
 
 **这个缺口今天已经存在**：`handleUpdateSessionWorkingDir`（`handlers.go:1517`）改单会话工作目录时也没有解冻 prompt。项目功能必须修掉它，否则强绑定语义在模型眼里是假的。
 
-### 方案：把 cwd 和 notes 纳入冻结身份
+### 方案：把 cwd 纳入冻结身份
 
-已有先例——模型切换会强制重新冻结，因为 MCP manifest 依赖模型的上下文窗口（`IsComposedFor` 检查的是模型而不只是"是否为空"）。cwd 和 notes 是完全同构的第三、第四个维度。
+已有先例——模型切换会强制重新冻结，因为 MCP manifest 依赖模型的上下文窗口（`IsComposedFor` 检查的是模型而不只是"是否为空"）。cwd 是完全同构的第二个维度。
 
 ```go
-// agent 层：冻结时记下它是针对哪个 cwd / 哪份 notes 组装的
-ComposedForCWD   string `json:"composed_for_cwd,omitempty"`
-ComposedForNotes string `json:"composed_for_notes,omitempty"` // notes 的 sha256 前 12 位
+// agent 层：冻结时记下它是针对哪个 cwd 组装的
+ComposedForCWD string `json:"composed_for_cwd,omitempty"`
 
-func (s *Session) IsComposedFor(model, cwd, notesHash string) bool {
+func (s *Session) IsComposedFor(model, cwd string) bool {
 	return s.ComposedSystem != "" &&
 		s.ComposedForModel == model &&
-		s.ComposedForCWD == cwd &&
-		s.ComposedForNotes == notesHash
+		s.ComposedForCWD == cwd
 }
 ```
 
@@ -147,11 +141,7 @@ func (s *Session) IsComposedFor(model, cwd, notesHash string) bool {
 
 ### 缓存代价
 
-改项目目录 = 组内所有会话下一 turn 的 prompt 前缀变化 = 各失效一次 prompt cache。改目录是低频操作，可接受。但这也意味着**不要**把频繁变动的东西塞进 `notes`。
-
-### notes 的注入位置
-
-`prompt.ComposePair(base, cwd, envCtx, skills, mcpTools, memory, coauthor, expertMode)` 的 `memory` 参数就是 L1 项目记忆层。把 notes 拼在 `memInjection` 前面即可，不需要改 `ComposePair` 签名。
+改项目目录 = 组内所有会话下一 turn 的 prompt 前缀变化 = 各失效一次 prompt cache。改目录是低频操作，可接受。
 
 ## 新会话的创建行为
 
@@ -159,7 +149,7 @@ func (s *Session) IsComposedFor(model, cwd, notesHash string) bool {
 
 入口是项目头的「+」按钮：`POST /api/sessions` 带 `group_id`，服务端**先入组、再走 seed 逻辑**——顺序是语义的一部分，守卫查的就是"这个会话在不在项目里"。把尚未落盘的会话 ID 先写进 registry 是安全的：registry 只存裸 ID，后续 Save 失败留下的死 ID 按既有设计无害（前端与活会话列表交叉过滤）。未知 `group_id` 直接 404，不产出孤儿会话。
 
-**会话的归属在创建时决定，之后不可改。** `PUT /api/sessions/{id}/group` 一律 409。因为"移动"不是一件事而是四件，且事后无法让它们一致：工具的目录、记忆层、烘焙进 system prompt 的项目 notes、hooks 与沙箱的信任根，全都由项目派生。被移动过的会话会留下一份"前半段在别处跑、读的是另一个项目的 notes"的记录，而保住 prompt cache 的冻结判据分辨不出这种情况（判据是 cwd + notesHash，会话自己的目录恰好等于项目目录时甚至不会重组）。在创建时决定，这四件事对会话的整个生命周期都成立。
+**会话的归属在创建时决定，之后不可改。** `PUT /api/sessions/{id}/group` 一律 409。因为"移动"不是一件事而是三件，且事后无法让它们一致：工具的目录、记忆层、hooks 与沙箱的信任根，全都由项目派生。被移动过的会话会留下一份"前半段在别处跑"的记录，而保住 prompt cache 的冻结判据分辨不出这种情况（判据是 cwd，会话自己的目录恰好等于项目目录时甚至不会重组）。在创建时决定，这三件事对会话的整个生命周期都成立。
 
 因此存量里"先建会话、再拖进项目"产生的会话（带着 seeded 的 `~/Octo`，被项目遮蔽）是历史形态，不会再新增。
 
@@ -172,13 +162,12 @@ type updateSessionGroupRequest struct {
 	Name       *string `json:"name,omitempty"`
 	Collapsed  *bool   `json:"collapsed,omitempty"`
 	WorkingDir *string `json:"working_dir,omitempty"` // 不可置空（400）——降级的目标已不存在
-	Notes      *string `json:"notes,omitempty"`
 }
 ```
 
 目录校验（`expandDir` + `os.Stat` + `IsDir`）今天内联在 `handleUpdateSessionWorkingDir` 里，抽成共享 helper，两个入口的报错文案保持一致。
 
-`GET /api/session-groups` 与会话列表接口顺带返回 `working_dir` / `notes`，前端不额外发请求。
+`GET /api/session-groups` 与会话列表接口顺带返回 `working_dir`，前端不额外发请求。
 
 ## UI
 
@@ -195,14 +184,14 @@ type updateSessionGroupRequest struct {
 
 - **新建项目**：先选目录再建，因为项目就是目录。目录决定名字（basename），已有同目录项目则复用而不是造重复。侧栏顶部按钮和会话行的「移动到项目 → 新建项目」走同一条 `resolveProjectForDir`。
 - **项目头**：只有名字、会话数，以及 hover 时出现的两个动作：`···`（菜单：改名 / 上移 / 下移 / 删除项目）和 `+`（在这个项目里开新会话——落地页 + 该项目已选中）。曾经并排六个图标（上移/下移/重命名/删除/+/设置），整行读起来像一条工具栏后面挂了个名字。
-- **没有「项目设置」弹窗，行下也不再显示目录**。目录在创建项目时由落地页选定，之后不可改（和会话归属一样在创建时定死），所以那个弹窗里只剩下一件事可做——改 `notes`——而项目记忆层（agent 自己会写）已经覆盖了同一件事。目录仍然通过项目名（默认取目录 basename）、名字的 tooltip，以及会话里 Composer 的目录 chip 呈现。`PATCH /api/session-groups/{id}` 的 `working_dir` / `notes` 字段保留，供脚本和 agent 使用；`notes` 非空时照旧注入 system prompt。
+- **没有「项目设置」弹窗，行下也不再显示目录**。目录在创建项目时由落地页选定，之后不可改（和会话归属一样在创建时定死）。项目级说明这件事由项目记忆层承担——agent 自己会写、自己会读，不需要用户再手填一份。目录仍然通过项目名（默认取目录 basename）、名字的 tooltip，以及会话里 Composer 的目录 chip 呈现。`PATCH /api/session-groups/{id}` 的 `working_dir` 字段保留，供脚本和 agent 使用。
 - **删除项目连带删除它的会话**：`DELETE /api/session-groups/{id}?sessions=delete`，一个请求做完，失败不会留下"项目还在、会话已没"的中间态（会话先删——留下一个可见的空项目行比留下一堆无处可达的会话好）。确认框带标题、会话条数和红色确认按钮；空项目走另一份文案且不标危险。不带这个参数时会话保留并变回任务。
 - **Composer 的 cwd chip**：会话属于项目时显示项目目录，且**置为只读**，点击提示「由项目〈名字〉统一管理」。这一条不能省——否则用户改了没反应，就是一次静默失效。
 - **没有"移入 / 移出项目"**。会话行没有这个动作，弹层也一并去掉了。要在某个项目里干活就在那个项目里新建会话（项目头的「+」），或者在落地页选它的目录。删除项目会把它的会话变回任务——这是会话离开项目的唯一途径。
 
 ## 多 tab 同步
 
-registry 的每次成功写盘（分组增删改、成员移动、pin、项目目录/notes 编辑）都会全局广播 `session_groups_changed`，钩在唯一写点 `saveRegistry` 上（`notifyGroupsChanged`，Server `initWS` 时装配）——而不是散在每个 handler 里，这样 cron 的编程式写入和将来的新写路径都不会漏。事件**不带 payload**：客户端收到后重新拉 `GET /api/session-groups`，registry 的形状不用在客户端镜像一份。
+registry 的每次成功写盘（分组增删改、成员移动、pin、项目目录编辑）都会全局广播 `session_groups_changed`，钩在唯一写点 `saveRegistry` 上（`notifyGroupsChanged`，Server `initWS` 时装配）——而不是散在每个 handler 里，这样 cron 的编程式写入和将来的新写路径都不会漏。事件**不带 payload**：客户端收到后重新拉 `GET /api/session-groups`，registry 的形状不用在客户端镜像一份。
 
 没有它，一个 tab 里改掉的项目目录在其它 tab 里保持陈旧——sidebar 头和 composer chip（从 groups store 派生）会误报工具实际运行的位置。执行侧永远正确（解析在服务端），这纯粹是显示同步。发起方 tab 自己也会收到广播并重拉一次，幂等无害。
 
@@ -213,7 +202,6 @@ registry 的每次成功写盘（分组增删改、成员移动、pin、项目�
 - `PUT /api/sessions/{id}/group` 对任何目标（项目、空、不存在）都返回 409，且不改动既有归属。
 - 项目遮蔽而不覆写会话盘上的 `WorkingDir`：删项目后回落，重新加载可见原值未被改写。
 - 改项目目录后，下一 turn 的 composed system prompt 里的 `Working directory:` 跟着变。
-- 改 `notes` 触发重新组装；不改则复用冻结值（保住 prompt cache）。
 - 普通分组被解散、其会话变回任务；带目录的会话随后被 `adoptTaskWorkingDirs` 归入项目（顺序）。
 - 运行簇在没有 `TaskID` 时靠 scheduler 回填存活；已有 `TaskID` 时不依赖 scheduler。
 - 两个 pass 各自幂等（每次启动都跑）。

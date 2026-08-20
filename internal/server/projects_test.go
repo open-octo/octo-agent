@@ -242,27 +242,6 @@ func TestProject_RejectsBadDir(t *testing.T) {
 	}
 }
 
-// TestProject_RejectsOversizedNotes: notes land in every member session's
-// system prompt, so the server bounds them instead of silently eating context.
-func TestProject_RejectsOversizedNotes(t *testing.T) {
-	srv := groupTestServer(t)
-	projectDir := t.TempDir()
-	gid := newProjectGroup(t, srv, "Work", projectDir)
-
-	big := strings.Repeat("x", maxProjectNotes+1)
-	rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"notes": big})
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("oversized notes: status %d, want 400", rec.Code)
-	}
-
-	// At the limit is fine.
-	ok := strings.Repeat("x", maxProjectNotes)
-	rec, _ = doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"notes": ok})
-	if rec.Code != http.StatusOK {
-		t.Errorf("notes at limit: status %d, want 200: %s", rec.Code, rec.Body.String())
-	}
-}
-
 // TestProject_BlocksPerSessionDirOverride: a session in a project must not
 // accept a per-session dir that the resolver would ignore anyway.
 func TestProject_BlocksPerSessionDirOverride(t *testing.T) {
@@ -300,32 +279,6 @@ func TestProject_LegacyRegistryLoadsAsPlainGroup(t *testing.T) {
 	}
 	if got := srv.sessionCwd(sess); got != ownDir {
 		t.Errorf("legacy group member: cwd = %q, want own dir %q", got, ownDir)
-	}
-}
-
-// TestProject_NotesReachTheSystemPrompt checks the notes are rendered into the
-// prompt's memory layer for a session in the project, and only for it.
-func TestProject_NotesReachTheSystemPrompt(t *testing.T) {
-	srv := groupTestServer(t)
-	projectDir := t.TempDir()
-	inProject := saveSessionWithDir(t, "")
-	outside := saveSessionWithDir(t, "")
-
-	gid := newProjectGroup(t, srv, "Work", projectDir)
-	fileInProject(t, gid, inProject.ID)
-	const notes = "Ship behind a flag; never touch the billing tables."
-	if rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"notes": notes}); rec.Code != http.StatusOK {
-		t.Fatalf("set notes: status %d", rec.Code)
-	}
-
-	if got := projectNotesFor(inProject.ID); got != notes {
-		t.Errorf("notes for session in project = %q, want %q", got, notes)
-	}
-	if got := projectNotesFor(outside.ID); got != "" {
-		t.Errorf("notes leaked to a session outside the project: %q", got)
-	}
-	if rendered := renderProjectNotes(notes); !strings.Contains(rendered, notes) {
-		t.Errorf("rendered notes lost the text: %s", rendered)
 	}
 }
 
@@ -502,9 +455,9 @@ func TestProject_RegistryWritesNotifyTabs(t *testing.T) {
 			rec, _ := doGroupReq(t, srv, http.MethodPost, "/api/sessions", map[string]any{"group_id": gid})
 			return rec
 		}},
-		{"edit notes", func() *httptest.ResponseRecorder {
+		{"collapse project", func() *httptest.ResponseRecorder {
 			gid := projectIDByName(t, srv, "Work")
-			rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"notes": "n"})
+			rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"collapsed": true})
 			return rec
 		}},
 		{"pin session", func() *httptest.ResponseRecorder {

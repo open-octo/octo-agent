@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -48,22 +47,17 @@ type Session struct {
 	// re-freezes instead of no-op-ing when the model at call time differs
 	// from this field.
 	//
-	// ComposedForCWD and ComposedForNotes are the same idea for the other two
-	// inputs that can change under a live session. The working directory is
-	// baked into the prompt's env context ("- Working directory: …"), and the
-	// project notes (session-groups.json) are baked into its memory layer — so
-	// retargeting a session's directory, or moving it into a project with a
-	// different one, must re-freeze or the model keeps reading a path its
-	// tools no longer run in. ComposedForNotes holds a short hash rather than
-	// the notes themselves: it is only ever compared, never rendered, and the
-	// notes can be arbitrarily long. Both are empty for sessions frozen before
-	// these fields existed, which simply re-freezes them once on their next
-	// turn.
+	// ComposedForCWD is the same idea for the other input that can change
+	// under a live session: the working directory is baked into the prompt's
+	// env context ("- Working directory: …"), so retargeting a session's
+	// directory — or moving it into a project with a different one — must
+	// re-freeze or the model keeps reading a path its tools no longer run in.
+	// Empty for sessions frozen before the field existed, which simply
+	// re-freezes them once on their next turn.
 	ComposedSystem     string `json:"composed_system,omitempty"`
 	ComposedLeanSystem string `json:"composed_lean_system,omitempty"`
 	ComposedForModel   string `json:"composed_for_model,omitempty"`
 	ComposedForCWD     string `json:"composed_for_cwd,omitempty"`
-	ComposedForNotes   string `json:"composed_for_notes,omitempty"`
 	Title              string `json:"title,omitempty"`
 	Source             string `json:"source,omitempty"` // how the session was created: "" (manual) | "cron" | "channel" | "setup"
 	// AgentID is the ID of the agent profile (agentprofile.Profile) that owns
@@ -556,7 +550,6 @@ type sessionRecord struct {
 	ComposedLeanSystem string    `json:"composed_lean_system,omitempty"`
 	ComposedForModel   string    `json:"composed_for_model,omitempty"`
 	ComposedForCWD     string    `json:"composed_for_cwd,omitempty"`
-	ComposedForNotes   string    `json:"composed_for_notes,omitempty"`
 	Title              string    `json:"title,omitempty"`
 	Source             string    `json:"source,omitempty"`
 	ModelConfig        string    `json:"model_config,omitempty"`
@@ -586,7 +579,7 @@ func (s *Session) metaRecord() sessionRecord {
 		goal = &g
 	}
 	s.mu.Unlock()
-	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, ComposedSystem: s.ComposedSystem, ComposedLeanSystem: s.ComposedLeanSystem, ComposedForModel: s.ComposedForModel, ComposedForCWD: s.ComposedForCWD, ComposedForNotes: s.ComposedForNotes, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, AgentID: s.AgentID, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, LastContextTokens: s.LastContextTokens, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, BranchedFrom: s.BranchedFrom, Goal: goal}
+	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, ComposedSystem: s.ComposedSystem, ComposedLeanSystem: s.ComposedLeanSystem, ComposedForModel: s.ComposedForModel, ComposedForCWD: s.ComposedForCWD, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, AgentID: s.AgentID, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, LastContextTokens: s.LastContextTokens, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, BranchedFrom: s.BranchedFrom, Goal: goal}
 }
 
 // MarkHookStarted records that SessionStart has fired for this session, so a
@@ -925,20 +918,19 @@ func (s *Session) SetPermissionMode(mode string) error {
 // which compose once per process and never touch System again: a skill or
 // profile edit now takes effect in a new session, not a running one.
 //
-// model, cwd and notesHash are the freeze's identity — see ComposedForModel
-// and ComposedForCWD for why each matters. A no-op only when already frozen
-// for THIS exact triple; a call with any of them different (a mid-session
-// model switch, a retargeted working directory, an edited project note)
-// overwrites the freeze instead, since all three are baked into the prompt
-// while the per-turn tools array and tool cwd are always computed fresh — a
-// stale freeze would silently drift out of sync with them. Same
-// append-or-rewrite persistence mechanics as SetPermissionMode.
-func (s *Session) SetComposedSystem(system, lean, model, cwd, notesHash string) error {
-	if s.IsComposedFor(model, cwd, notesHash) {
+// model and cwd are the freeze's identity — see ComposedForModel and
+// ComposedForCWD for why each matters. A no-op only when already frozen for
+// THIS exact pair; a call with either different (a mid-session model switch, a
+// retargeted working directory) overwrites the freeze instead, since both are
+// baked into the prompt while the per-turn tools array and tool cwd are always
+// computed fresh — a stale freeze would silently drift out of sync with them.
+// Same append-or-rewrite persistence mechanics as SetPermissionMode.
+func (s *Session) SetComposedSystem(system, lean, model, cwd string) error {
+	if s.IsComposedFor(model, cwd) {
 		return nil
 	}
 	s.ComposedSystem, s.ComposedLeanSystem, s.ComposedForModel = system, lean, model
-	s.ComposedForCWD, s.ComposedForNotes = cwd, notesHash
+	s.ComposedForCWD = cwd
 	if s.persisted == 0 {
 		// See SetWorkingDir: a meta-only transcript must be rewritten now, since
 		// the load-modify-discard handler won't get a "next Save"; a session with
@@ -963,35 +955,21 @@ func (s *Session) SetComposedSystem(system, lean, model, cwd, notesHash string) 
 		return fmt.Errorf("session: open %s: %w", path, err)
 	}
 	defer f.Close()
-	if err := json.NewEncoder(f).Encode(sessionRecord{Type: "composed_system", ComposedSystem: system, ComposedLeanSystem: lean, ComposedForModel: model, ComposedForCWD: cwd, ComposedForNotes: notesHash}); err != nil {
+	if err := json.NewEncoder(f).Encode(sessionRecord{Type: "composed_system", ComposedSystem: system, ComposedLeanSystem: lean, ComposedForModel: model, ComposedForCWD: cwd}); err != nil {
 		return fmt.Errorf("session: append composed_system: %w", err)
 	}
 	return nil
 }
 
 // IsComposedFor reports whether the session's system prompt is already frozen
-// for this model / working directory / project-notes triple — the condition
-// SetComposedSystem itself uses to decide overwrite-vs-no-op, exposed so
-// callers (buildAgent, runChannelTurns) can skip the memory/skills/MCP
-// recompute entirely when the freeze would just be reused rather than
-// replaced.
-func (s *Session) IsComposedFor(model, cwd, notesHash string) bool {
+// for this model / working directory pair — the condition SetComposedSystem
+// itself uses to decide overwrite-vs-no-op, exposed so callers (buildAgent,
+// runChannelTurns) can skip the memory/skills/MCP recompute entirely when the
+// freeze would just be reused rather than replaced.
+func (s *Session) IsComposedFor(model, cwd string) bool {
 	return s.ComposedSystem != "" &&
 		s.ComposedForModel == model &&
-		s.ComposedForCWD == cwd &&
-		s.ComposedForNotes == notesHash
-}
-
-// ComposedNotesHash is the canonical hash of a project-notes string for the
-// ComposedForNotes freeze field. Empty notes hash to "" so a session with no
-// project (the overwhelmingly common case) carries no value at all and its
-// meta line stays byte-identical to a pre-projects one.
-func ComposedNotesHash(notes string) string {
-	if notes == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(notes))
-	return hex.EncodeToString(sum[:6])
+		s.ComposedForCWD == cwd
 }
 
 // ClearComposedSystem un-freezes the composed system prompt so the next turn
@@ -1007,7 +985,7 @@ func (s *Session) ClearComposedSystem() error {
 		return nil
 	}
 	s.ComposedSystem, s.ComposedLeanSystem, s.ComposedForModel = "", "", ""
-	s.ComposedForCWD, s.ComposedForNotes = "", ""
+	s.ComposedForCWD = ""
 	if s.persisted == 0 {
 		if path, perr := s.SavePath(); perr == nil {
 			if _, statErr := os.Stat(path); statErr == nil {
@@ -1372,7 +1350,7 @@ func LoadSession(id string) (*Session, error) {
 		case "meta":
 			s.ID, s.CreatedAt, s.Model, s.System = rec.ID, rec.CreatedAt, rec.Model, rec.System
 			s.ComposedSystem, s.ComposedLeanSystem, s.ComposedForModel = rec.ComposedSystem, rec.ComposedLeanSystem, rec.ComposedForModel // a rewritten file carries it in its meta header
-			s.ComposedForCWD, s.ComposedForNotes = rec.ComposedForCWD, rec.ComposedForNotes
+			s.ComposedForCWD = rec.ComposedForCWD
 			s.Title = rec.Title // a compacted file carries the title in its meta header
 			s.Source = rec.Source
 			s.ModelConfig = rec.ModelConfig
@@ -1402,10 +1380,10 @@ func LoadSession(id string) (*Session, error) {
 		case "context_tokens":
 			s.LastContextTokens = rec.LastContextTokens // last one wins, like title
 		case "composed_system":
-			// Last one wins — a mid-session model switch, a retargeted working
-			// directory, or an edited project note each append a new record.
+			// Last one wins — a mid-session model switch or a retargeted
+			// working directory each append a new record.
 			s.ComposedSystem, s.ComposedLeanSystem, s.ComposedForModel = rec.ComposedSystem, rec.ComposedLeanSystem, rec.ComposedForModel
-			s.ComposedForCWD, s.ComposedForNotes = rec.ComposedForCWD, rec.ComposedForNotes
+			s.ComposedForCWD = rec.ComposedForCWD
 		case "message":
 			if rec.Message != nil {
 				s.Messages = append(s.Messages, *rec.Message)
