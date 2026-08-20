@@ -1,0 +1,178 @@
+---
+title: Interactive panels (GenUI)
+description: The agent answers with real components — dashboards, filterable tables, charts, diagrams, forms — instead of prose, and most interaction never reaches the model.
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="New" variant="tip" /><br /><br />
+
+Ask for a comparison and you usually get a markdown table. Ask for a status summary and you get
+three paragraphs. GenUI lets the agent answer with a **panel** instead: a small tree of real
+components — stat cards, a filterable table, a chart, a mermaid diagram, a form — rendered inline
+in the chat.
+
+The part worth understanding is what happens *after* it renders. Switching a tab, filtering a
+table, dragging a slider, answering a quiz question — none of that is a conversational act, so
+none of it reaches the model. It resolves in your browser, instantly, at zero token cost. The
+model is only involved when the panel genuinely cannot answer by itself.
+
+## Two ways a panel arrives
+
+Which one the agent picks decides what the panel can do and where it shows up.
+
+| | `render_ui` tool | Inline ` ```octo-ui ` fence |
+|---|---|---|
+| Renders as | A tool-result card | A live component tree inline with the reply's markdown |
+| Interactive nodes | No — read-only components only | Yes |
+| Web UI | ✅ | ✅ |
+| TUI / IM | Tool cards aren't shown at all | Replaced with a placeholder line |
+
+The tool path degrades safely everywhere, so the agent is taught to prefer it — plus a
+self-contained plain-text reply — whenever it isn't confident you're on the Web UI. Interactive
+panels are a Web UI feature; there is no way to render a component tree into a terminal or a chat
+app.
+
+## What a panel can contain
+
+Read-only, available on both paths:
+
+- **Text and layout** — paragraphs, rows and columns, cards, dividers, foldable sections
+- **Data** — tables, bulleted lists, key/value definition lists
+- **Metrics** — stat cards with an up/down delta, badges, progress bars
+- **Emphasis** — callouts in info / success / warning / danger tones
+- **Code and diagrams** — syntax-highlighted excerpts, and mermaid diagrams rendered inline
+- **Charts** — bar, line, area and pie plots, optionally stacked, with axis labels and a legend
+
+Interactive, inline-fence only:
+
+- **Controls** — text inputs, numbers, sliders, textareas, selects, radios, checkboxes, switches
+- **Structure** — tabs
+- **Actions** — buttons
+- **Quizzes** — a scored multiple-choice question with an explanation
+
+Colours are assigned automatically and follow your theme. There is no colour or CSS field
+anywhere in a spec, and no 3D or WebGL node — the panel is structured data, not a styling
+surface.
+
+## Local interaction
+
+Three mechanisms let a panel answer for itself, and they're why most panels never cost a turn:
+
+- **Conditional blocks** — any node can declare a condition on a field's value and appear only
+  when it holds, by equality, set membership, or a numeric range. An "advanced options" section
+  that appears when a switch flips is a condition, not a round-trip.
+- **Table filtering** — a table can be filtered by a text input against one of its own columns,
+  case-insensitively, over the rows already loaded.
+- **Sortable tables** — clickable headers cycling unsorted → ascending → descending. A column
+  sorts numerically when every cell in it is a number.
+
+The agent is taught that an input nothing reads is a control that does nothing, so a slider
+should always be wired to a condition or a filter.
+
+When the panel *does* need the model — fetching data it doesn't have, taking a real-world action
+— that's a **button**. Pressing one sends the action name along with a snapshot of every field in
+the panel at that moment, so the agent sees the whole form, not just the button.
+
+## Addressable panels and silent turns
+
+A panel can carry an `id`. That single field changes what a button press feels like.
+
+Without an id, a panel is a one-shot: the action arrives as a visible user message and the agent's
+answer as a visible reply, with a new panel below the old one. Correct for a summary nobody will
+touch again.
+
+With an id, the exchange is a **silent turn**. Neither the action nor the reply is drawn in the
+conversation, and the reply **replaces that panel in place**, wherever it already sits. A dashboard
+with a Refresh button updates itself; the transcript doesn't grow a pair of bubbles every time you
+press it.
+
+Two consequences worth knowing:
+
+- **The agent has to reply with the panel and nothing else** for an in-place update. If it needs
+  to explain something, refuse, or ask a question, it writes normally — and then the reply is an
+  ordinary visible message. That's the intended fallback, not a failure.
+- **Silent turns hide rendering, never history.** Both messages are ordinary messages in the
+  session file and in exports, and the transcript shows a marker where a hidden pair sits. A panel
+  can never change without a trace in the record.
+
+## State survives a reload
+
+What you typed into a panel, which tab you had open, which sections you unfolded — all of it is
+keyed to the panel's id and restored when you come back.
+
+- **Per browser, per device.** Panel state is a property of a reader at a screen, so it lives in
+  `localStorage` rather than in the session file. A phone and a desktop viewing the same session
+  keep independent state, and it is never synced.
+- **It survives a refresh of the panel too.** When the agent sends a new version, values whose
+  fields still exist are kept and the rest are dropped — so a dashboard that refreshes stays under
+  the filter you set.
+- **Only what you typed.** No credentials, no tokens; a plain text input is the only free-text
+  control, and there is deliberately no password-style field.
+
+## What the model can and cannot see
+
+Local interaction is invisible to the agent by design. If you filter a table and then ask "why is
+this one so low?", you're asking about a view it cannot see — press the panel's submit button
+first, or say what you filtered to.
+
+This is a deliberate trade: attaching panel state to every outgoing message would inflate every
+message in every session to cover a case an explicit button already handles.
+
+## Limits
+
+A spec is capped, and going over a cap **silently trims** rather than failing:
+
+| | Limit |
+|---|---|
+| Total nodes per panel | 200 |
+| Tree depth | 8 |
+| Table rows / columns | 500 / 50 |
+| List or key-value items | 200 |
+| Select, radio or quiz options | 50 |
+| Tabs | 8 |
+| Chart series / points per series | 8 / 100 |
+| Text field length | 500 characters |
+| Table cell | 2000 characters |
+| Code, diagram or textarea text | 5000 characters |
+
+An unrecognized node type drops just that node and its subtree; its siblings still render. Links
+accept only `http`, `https`, `mailto` and `tel` — anything else drops the node, since a link that
+can't be followed still looks like one.
+
+Because truncation is silent, the agent is told not to route a report-sized document or a large
+dataset through a panel. If the content doesn't fit in a normal reply, that's the signal it belongs
+in an artifact.
+
+## Panel, artifact, or Light App?
+
+All three let the agent produce something other than plain text, and sending content down the
+wrong one produces a result that looks wrong without erroring.
+
+| Use | When |
+|---|---|
+| **Panel** (GenUI) | Disposable structure inside one reply that you might act on right now — a comparison, a status summary, a small form. No reason to exist as a file. |
+| **Artifact** | A deliverable that should outlive the reply — a document, a standalone page, a chart that *is* the output, anything needing a real charting library or a heatmap/sankey/map. Written with `write_file` and shown with [`show_artifact`](/docs/reference/tools/). |
+| **[Light App](/docs/guides/light-apps/)** | A tool you'll reopen later, saved and launchable from the Web UI at zero token cost. |
+
+The same line separates a `mermaid` node from a charting artifact: a diagram that explains what
+the agent just said belongs in the panel; a visualization that is itself the deliverable belongs in
+an artifact.
+
+## If you'd rather have prose
+
+Everything the model knows about panels comes from the built-in `genui` skill. Disable it and the
+model stops being taught the node types, so in practice it goes back to answering in markdown:
+
+```yaml
+# ~/.octo/config.yml
+tools:
+  disabled_skills: [genui]
+```
+
+This is a "stop teaching it" switch, not a hard off switch. The `render_ui` tool stays in the tool
+list and the renderer still parses an ` ```octo-ui ` fence, so a model that produces one anyway
+will still get a panel — and a panel already sitting in a transcript keeps rendering either way.
+
+Mermaid is loaded lazily, at the first diagram a session actually renders, so a session that never
+shows one never downloads or parses it.
