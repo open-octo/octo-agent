@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { marked } from 'marked'
 import { renderMarkdown } from './markdown'
 
@@ -154,8 +154,42 @@ describe('renderMarkdown: raw HTML in reply text', () => {
     expect(out).not.toContain('<div')
     expect(out).not.toContain('<button')
     expect(out).not.toContain('<style')
-    expect(out).toContain('&lt;div class="backdrop" role="presentation"')
+    expect(out).toContain('&lt;div class=')
     expect(out).toContain('&lt;style&gt;')
+  })
+
+  it('escapes HTML inside the overridden table and blockquote renderers', () => {
+    // renderer.table / renderer.blockquote are this module's own overrides, so
+    // they are the likeliest place for a future change to let markup back in.
+    const table = renderMarkdown('| A |\n|---|\n| <div class="modal">x</div> |')
+    expect(table).toContain('<table>')
+    // The wrapper <div class="table-scroll"> is this renderer's own output; the
+    // cell's markup is what must not have become an element.
+    expect(table).not.toContain('<div class="modal"')
+    expect(table).toContain('&lt;div class="modal"&gt;')
+
+    const quote = renderMarkdown('> quoted <div class="backdrop">x</div>')
+    expect(quote).toContain('<blockquote')
+    expect(quote).not.toContain('<div class="backdrop"')
+    expect(quote).toContain('&lt;div class=')
+  })
+
+  it('escapes HTML inside a think block', () => {
+    // The same overlay payload can arrive in reasoning text, which is parsed by
+    // a separate marked.parse call.
+    const out = renderMarkdown('<think>trying <style>.backdrop{position:fixed}</style></think>done')
+    expect(out).toContain('<details class="think-block"')
+    expect(out).not.toContain('<style')
+    expect(out).toContain('&lt;style&gt;')
+  })
+
+  it('escapes inline formatting tags too, by design', () => {
+    // <br>/<kbd>/<details> are harmless on their own, but the rule is "no
+    // element from reply text reaches the app's document" rather than a
+    // per-tag allowlist. Pinned so it is a decision, not an oversight.
+    const out = renderMarkdown('| A |\n|---|\n| one<br>two |')
+    expect(out).not.toContain('<br>')
+    expect(out).toContain('&lt;br&gt;')
   })
 
   it('escapes inline HTML too', () => {
@@ -191,5 +225,50 @@ describe('renderMarkdown: raw HTML in reply text', () => {
     const out = renderMarkdown('```html\n<div class="modal">x</div>\n```')
     expect(out).toContain('class="code-block"')
     expect(out).not.toContain('<div class="modal">x</div>')
+  })
+})
+
+describe('renderMarkdown: rawHtml opt-out', () => {
+  // The markdown artifact preview renders into a sandboxed srcdoc iframe with
+  // its own stylesheet, where a document's own tags are content — and
+  // artifacts.ts's local-ref inlining needs to see <img src="…"> to rewrite it.
+  it('keeps the source tags as markup when asked', () => {
+    const out = renderMarkdown('<img src="chart.png">', true, { rawHtml: true })
+    expect(out).toContain('<img src="chart.png"')
+    expect(out).not.toContain('&lt;img')
+  })
+
+  it('keeps <details> usable in a rendered document', () => {
+    const out = renderMarkdown('<details><summary>more</summary>body</details>', true, { rawHtml: true })
+    expect(out).toContain('<details>')
+    expect(out).toContain('<summary>')
+  })
+
+  it('still drops scripts and event handlers in rawHtml mode', () => {
+    // rawHtml relaxes the escape, not DOMPurify.
+    const out = renderMarkdown('<script>alert(1)</script><img src=x onerror=alert(1)>', true, { rawHtml: true })
+    expect(out).not.toContain('<script')
+    expect(out).not.toContain('onerror')
+  })
+
+  it('does not leak the mode into the next render', () => {
+    // The renderer is a module-level singleton; the flag has to be per-call or
+    // one artifact preview would disable escaping for every chat bubble after
+    // it.
+    renderMarkdown('<div class="backdrop">x</div>', true, { rawHtml: true })
+    const out = renderMarkdown('<div class="backdrop">x</div>')
+    expect(out).not.toContain('<div')
+    expect(out).toContain('&lt;div class=')
+  })
+
+  it('restores escaping even when the parse throws', () => {
+    const spy = vi.spyOn(marked, 'parse').mockImplementation(() => {
+      throw new Error('boom')
+    })
+    expect(() => renderMarkdown('x', true, { rawHtml: true })).toThrow('boom')
+    spy.mockRestore()
+    const out = renderMarkdown('<div class="backdrop">x</div>')
+    expect(out).not.toContain('<div')
+    expect(out).toContain('&lt;div class=')
   })
 })

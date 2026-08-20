@@ -99,24 +99,42 @@ renderer.table = function (token: Tokens.Table) {
   return `<div class="table-scroll"><table><thead>${header}</thead>${body}</table></div>`
 }
 
-// Raw HTML in reply text is shown as text, never handed to the DOM. marked
-// routes both block-level and inline HTML tokens through renderer.html, and
-// letting them pass meant a model writing a .svelte/.html file inline (no code
-// fence — some harnesses narrate and paste at once) put real nodes into the
-// chat: a GitDiffModal.svelte source dropped a live <div class="backdrop">/
-// <div class="modal"> plus its <style> into the bubble, where the app's global
-// CSS made it a fixed full-screen overlay covering the page. DOMPurify does not
-// stop that — it strips scripts, event handlers and javascript: URLs, not
-// layout markup or CSS — so the escape has to happen at the renderer.
+// Raw HTML in a reply is shown as text, never handed to the DOM (#2181). A
+// model writing a .svelte/.html file inline — no code fence around the source —
+// otherwise dropped real nodes into the chat: a GitDiffModal.svelte source put a
+// live <div class="backdrop">/<div class="modal"> plus its <style> in the
+// bubble, where the app's global CSS turned it into a fixed full-screen overlay.
+// DOMPurify is no defence against that shape — it strips scripts, event handlers
+// and javascript: URLs, not layout markup or CSS — so the escape belongs at the
+// renderer, which is also where marked funnels BOTH block-level and inline HTML
+// tokens. Inline formatting tags (<br>, <kbd>, <details>) become visible text
+// too; that bluntness is deliberate, since the risk is any element reaching the
+// app's document, not a specific tag list.
+//
+// A markdown artifact preview opts back out via renderMarkdown's rawHtml: it
+// renders in a sandboxed srcdoc iframe carrying its own stylesheet, so a
+// document's own <img src="chart.png"> is content there, not an injection (and
+// artifacts.ts's local-ref inlining has to see that tag to rewrite it). marked's
+// renderer is a module-level singleton — installing it per call leaks wrapper
+// chains (#2089) — so the mode is a flag flipped around the synchronous parse.
+let rawHtmlAllowed = false
+
 // Returning false here would make marked.use() fall back to the default
 // pass-through renderer; an escaped string (empty included) never does.
 renderer.html = function ({ text }: Tokens.HTML | Tokens.Tag) {
-  return escapeHtml(text)
+  return rawHtmlAllowed ? text : escapeHtml(text)
 }
 
 marked.use({ renderer })
 
-export function renderMarkdown(text: string, showReasoning = true): string {
+/** rawHtml keeps the source's own HTML tags as markup instead of escaping them
+ * into text. Only for a target that is not the app's own document — see the
+ * renderer.html note above. */
+export function renderMarkdown(
+  text: string,
+  showReasoning = true,
+  opts: { rawHtml?: boolean } = {}
+): string {
   if (!text) return ""
 
   // 1. Extract <think>...</think> blocks, replace with placeholders
@@ -130,14 +148,23 @@ export function renderMarkdown(text: string, showReasoning = true): string {
     return `${PLACEHOLDER}${index}\x00`
   })
 
-  // 2. Parse remaining text with marked
-  const renderedMain = marked.parse(textWithPlaceholders) as string
+  rawHtmlAllowed = opts.rawHtml === true
+  let renderedMain: string
+  let thinkBlocks: string[]
+  try {
+    // 2. Parse remaining text with marked
+    renderedMain = marked.parse(textWithPlaceholders) as string
 
-  // 3. Build think block HTML for each segment
-  const thinkBlocks = thinkSegments.map((segment) => {
-    const renderedSegment = DOMPurify.sanitize(marked.parse(segment) as string)
-    return `<details class="think-block"><summary class="think-summary"><iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>Thoughts</summary><div class="think-body">${renderedSegment}</div></details>`
-  })
+    // 3. Build think block HTML for each segment
+    thinkBlocks = thinkSegments.map((segment) => {
+      const renderedSegment = DOMPurify.sanitize(marked.parse(segment) as string)
+      return `<details class="think-block"><summary class="think-summary"><iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>Thoughts</summary><div class="think-body">${renderedSegment}</div></details>`
+    })
+  } finally {
+    // Escaping is the default the chat depends on: a throw mid-parse must not
+    // leave the singleton renderer in pass-through mode for the next caller.
+    rawHtmlAllowed = false
+  }
 
   // 4. Replace placeholders with think block HTML, then sanitize the combined
   //    output. DOMPurify removes dangerous markup (script, event handlers,
