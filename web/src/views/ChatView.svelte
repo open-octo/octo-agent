@@ -57,7 +57,7 @@
     agenticSessions,
     chatGoal,
     nativeShell,
-    panelContent,
+    chatHeaderSnippet,
   } from '../lib/stores'
   import { ws, wsState, wsReconnect } from '../lib/ws'
   import * as api from '../lib/api'
@@ -118,6 +118,16 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     try { agents = await api.listAgents() } catch { /* ignore */ }
   })
   onDestroy(() => { unsubAgentsChanged() })
+
+  // Register this view's title/status/actions with the page-spanning title
+  // bar (Header.svelte) — it renders whatever's here without knowing what it
+  // is. The snippet closes over this component's own reactive state, so a
+  // single registration on mount stays live; only the reference itself needs
+  // clearing so a different view's Header doesn't keep rendering a stale one.
+  onMount(() => {
+    chatHeaderSnippet.set(chatHeader)
+    return () => chatHeaderSnippet.set(null)
+  })
 
   function agentAvatarColor(name: string): string {
     const colors = ['#1677ff', '#722ed1', '#13c2c2', '#52c41a', '#eb2f96', '#fa8c16', '#2f54eb', '#a0d911']
@@ -2344,8 +2354,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   }
 </script>
 
-<div class="chat-view" class:print-omit-tools={!exportIncludeTools}>
-  <!-- Chat header -->
+<!-- Title/status/actions render inline in the page-spanning title bar
+     (Header.svelte), not as this view's own row — registered via a store so
+     that generic layout component can render a snippet it knows nothing
+     about the internals of. -->
+{#snippet chatHeader()}
   <div class="chat-header">
     <div class="title-row">
       <span class="session-title">
@@ -2369,20 +2382,15 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         <iconify-icon icon="ant-design:compress-outlined" width="13"></iconify-icon>
         <span class="btn-label">{$t('chat.compact')}</span>
       </button>
-      <button class="hdr-btn" title={$t('artifacts.toggle')} onclick={() => {
-        if ($panelContent) panelContent.set(null)
-        else panelContent.set(id ? 'session' : 'lightapps')
-      }}>
-        <iconify-icon icon="lucide:box" width="13"></iconify-icon>
-        <span class="btn-label">{$t('artifacts.toggle')}</span>
-      </button>
       <button class="hdr-btn" title={$t('chat.export')} onclick={enterExportMode}>
         <iconify-icon icon="ant-design:export-outlined" width="13"></iconify-icon>
         <span class="btn-label">{$t('chat.export')}</span>
       </button>
     </div>
   </div>
+{/snippet}
 
+<div class="chat-view" class:print-omit-tools={!exportIncludeTools}>
   <!-- Export mode bar: sticky format selector -->
   {#if inExportMode}
     <div class="export-bar">
@@ -2996,9 +3004,13 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 .chat-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
+/* Rendered inside the main column's own top row (Header.svelte's slot), so it
+   carries no border or background of its own — the layout's only lines are the
+   vertical dividers between columns. Horizontal padding is 0 for the same
+   reason: that row already pads itself. */
 .chat-header {
-  flex: 0 0 auto; background: var(--bg-layout); border-bottom: 1px solid var(--border-secondary);
-  padding: 7px 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  flex: 0 0 auto;
+  padding: 7px 0; display: flex; align-items: center; justify-content: space-between; gap: 16px;
   container-type: inline-size;
 }
 .title-row { display: flex; align-items: center; gap: 10px; min-width: 0; }

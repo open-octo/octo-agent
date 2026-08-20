@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import { get } from 'svelte/store'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen, cmdkOpen, nativeShell } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
@@ -9,6 +9,11 @@
   import { ago } from '../../lib/relTime'
   import { ws } from '../../lib/ws'
   import VersionBadge from './VersionBadge.svelte'
+  import OctoLogo from './OctoLogo.svelte'
+
+  // Mac's traffic lights float over the window's top-left corner, which is this
+  // column's own header row whenever the sidebar is showing.
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
   // Project whose row menu is open, by id ('' = none). Local rather than a store:
   // nothing outside this sidebar opens or reads it.
@@ -476,6 +481,17 @@
 
   {#if $sidebar === 'full'}
   <div class="full">
+    <div class="side-header" class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag">
+      <button class="icon-btn" title={$t('header.toggle_left')} aria-pressed={true} onclick={() => sidebar.set('hidden')}>
+        <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
+      </button>
+      <OctoLogo class="logo" size={20} />
+      <span class="brand-name">Octo</span>
+      <span class="spacer"></span>
+      <button class="icon-btn" title={$t('header.search_sessions')} onclick={() => cmdkOpen.set(true)}>
+        <iconify-icon icon="ant-design:search-outlined" width="15"></iconify-icon>
+      </button>
+    </div>
     <div class="scroll">
       <!-- Where you go, above what you have been doing. The session list is the
            long, growing part of this sidebar; putting it last means a nav row's
@@ -849,6 +865,30 @@
 
 <style>
 .full { width: 256px; height: 100%; display: flex; flex-direction: column; min-height: 0; }
+/* This column's own top row, starting at the very top of the window — there is
+   no bar laid across the layout, so no bottom border here either: the only
+   lines are the vertical dividers between columns. Carries the collapse toggle
+   (in the column it collapses, handed off to the main column's row only while
+   the sidebar is gone), the brand, and search. Settings keeps its footer home. */
+.side-header {
+  flex: 0 0 auto; min-height: 44px;
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 10px;
+}
+/* Mac's traffic lights float over the window's top-left corner, which is this
+   row whenever the sidebar is showing. Padding-bottom (not padding-top) pulls
+   the centering axis up to meet their fixed vertical position. */
+.side-header.native-inset { padding-left: 82px; padding-bottom: 8px; }
+.side-header .icon-btn { --wails-draggable: no-drag; }
+.side-header :global(.logo) { color: var(--blue-6); flex: 0 0 auto; }
+.brand-name { font-size: 14px; font-weight: 600; color: var(--text-heading); flex: 0 0 auto; }
+.side-header .spacer { flex: 1; }
+.side-header .icon-btn {
+  width: 28px; height: 28px; border: none; background: transparent;
+  border-radius: var(--radius-sm); display: grid; place-items: center;
+  cursor: pointer; color: var(--text-secondary); flex: 0 0 auto;
+}
+.side-header .icon-btn:hover { background: var(--hover-neutral); color: var(--text); }
 /* Matches .scroll's horizontal padding so the row lines up with every nav row
    below it — it is one of them, just pinned above the scrolling area. */
 .ap-item {

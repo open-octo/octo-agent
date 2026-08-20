@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { artifacts, panelContent, artifactSel, artifactView, artifactModalOpen, lightappSel, lightapps, lightappHTML, showToast } from '../lib/stores'
+  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightapps, lightappHTML, showToast } from '../lib/stores'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
   import { hydrateArtifact, lightAppSource, pathIsInside } from '../lib/artifacts'
@@ -151,7 +151,12 @@
     if ($panelContent !== 'lightapps') laAttempted = false
   })
 
-  function closePanel() { panelContent.set(null) }
+  // Closing drops the expanded state too, so re-opening comes back at its own
+  // width rather than silently swallowing the main column again.
+  function closePanel() {
+    panelExpanded.set(false)
+    panelContent.set(null)
+  }
 
   // Derive the current light app's HTML preview.
   const laCurSlug = $derived($lightappSel || $lightapps[0]?.slug || '')
@@ -171,6 +176,14 @@
   function readSavedWidth(): number {
     const v = Number(localStorage.getItem(PANEL_WIDTH_KEY))
     return Number.isFinite(v) && v >= PANEL_MIN ? v : 420
+  }
+
+  // Take over the content area, leaving the sidebar in place: the main column
+  // yields its width (App.svelte hides it) and this panel grows into it. No
+  // pixel maths — flex fills whatever is left, so it stays right through a
+  // window resize or the sidebar collapsing underneath.
+  function toggleExpanded() {
+    panelExpanded.update(v => !v)
   }
 
   function startResize(e: MouseEvent) {
@@ -201,18 +214,41 @@
   }
 </script>
 
-<aside class="panel" bind:this={panelEl} style="width:{panelWidth}px;flex-basis:{panelWidth}px">
-  <div class="resize-handle" role="separator" aria-orientation="vertical" onmousedown={startResize}></div>
+<!-- The panel's own controls, at the far right of its top row in every mode.
+     Expand is a layout action, so it stays clickable whatever the panel is
+     showing — including the empty state. The close toggle carries an "on" fill
+     because this row only exists while the panel is open. -->
+{#snippet topbarControls()}
+  <button class="icon-btn" title={$panelExpanded ? $t('artifacts.collapse_panel') : $t('artifacts.maximize')} onclick={toggleExpanded}>
+    <iconify-icon icon={$panelExpanded ? 'ph:arrows-in-simple' : 'ph:arrows-out-simple'} width="15"></iconify-icon>
+  </button>
+  <button class="icon-btn on" title={$t('header.toggle_right')} onclick={closePanel}>
+    <iconify-icon icon="lucide:panel-right" width="14"></iconify-icon>
+  </button>
+{/snippet}
+
+<!-- A light app opens maximized, so there is no narrow state to shrink back to
+     and nothing for an expand/collapse pair to toggle between. One close
+     button instead — and only one, since the panel toggle beside it would have
+     done exactly the same thing here. -->
+{#snippet lightAppControls()}
+  <button class="icon-btn" title={$t('common.close')} onclick={closePanel}>
+    <iconify-icon icon="ant-design:close-outlined" width="15"></iconify-icon>
+  </button>
+{/snippet}
+
+<aside class="panel" bind:this={panelEl} style={$panelExpanded ? 'flex:1 1 auto' : `width:${panelWidth}px;flex-basis:${panelWidth}px`}>
+  <!-- Expanded, there is no neighbour left to drag against, so the handle goes
+       with it rather than sitting there inert against the sidebar. -->
+  {#if !$panelExpanded}
+    <div class="resize-handle" role="separator" aria-orientation="vertical" onmousedown={startResize}></div>
+  {/if}
   {#if $panelContent === 'lightapps'}
     <!-- ── Light Apps mode ───────────────────────────────────────────────── -->
     <div class="topbar">
-      <iconify-icon icon="ant-design:appstore-outlined" width="15" style="color:var(--blue-6);flex:0 0 auto"></iconify-icon>
-      <span class="panel-title">{$t('artifacts.light_apps')}</span>
       <span style="flex:1"></span>
       <span class="sandboxed-label">{$t('artifacts.sandboxed')}</span>
-      <button class="icon-btn" title={$t('common.close')} onclick={closePanel}>
-        <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
-      </button>
+      {@render lightAppControls()}
     </div>
 
     <div class="body">
@@ -245,12 +281,8 @@
     <!-- ── Session mode (existing behavior) ────────────────────────────────── -->
     {#if !cur}
       <div class="topbar">
-        <iconify-icon icon="lucide:box" width="15" style="color:var(--blue-6);flex:0 0 auto"></iconify-icon>
-        <span class="panel-title">{$t('artifacts.toggle')}</span>
         <span style="flex:1"></span>
-        <button class="icon-btn" title={$t('common.close')} onclick={closePanel}>
-          <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
-        </button>
+        {@render topbarControls()}
       </div>
       <div class="empty">
         <iconify-icon icon="ant-design:file-text-outlined" width="28"></iconify-icon>
@@ -258,8 +290,6 @@
       </div>
     {:else}
       <div class="topbar">
-        <iconify-icon icon="lucide:box" width="15" style="color:var(--blue-6);flex:0 0 auto"></iconify-icon>
-        <span class="panel-title">{$t('artifacts.toggle')}</span>
         <span style="flex:1"></span>
         {#if !curIsImage}
           <div class="seg">
@@ -267,9 +297,7 @@
             <button class="seg-btn" class:active={$artifactView === 'code'} onclick={() => artifactView.set('code')}>{$t('artifacts.code')}</button>
           </div>
         {/if}
-        <button class="icon-btn" title={$t('common.close')} onclick={closePanel}>
-          <iconify-icon icon="ant-design:close-outlined" width="14"></iconify-icon>
-        </button>
+        {@render topbarControls()}
       </div>
 
       <div class="file-row">
@@ -278,9 +306,6 @@
         <span class="file-meta">{cur.type}</span>
         <span style="flex:1"></span>
         <span class="sandboxed-label">{$t('artifacts.sandboxed')}</span>
-        <button class="icon-btn" title={$t('artifacts.maximize')} onclick={() => { panelContent.set(null); artifactModalOpen.set(true) }}>
-          <iconify-icon icon="ant-design:expand-outlined" width="14"></iconify-icon>
-        </button>
       </div>
 
       {#if saveToLADialog}
@@ -364,11 +389,12 @@
   cursor: col-resize; z-index: 5;
 }
 .resize-handle:hover { background: var(--focus-ring); }
+/* This column's own top row. No bottom border, matching Sidebar's and the main
+   column's — the layout's only lines are the vertical dividers between them. */
 .topbar {
-  flex: 0 0 auto; padding: 8px 8px 8px 16px;
-  border-bottom: 1px solid var(--border-secondary); display: flex; align-items: center; gap: 8px;
+  flex: 0 0 auto; min-height: 44px; padding: 0 8px 0 10px;
+  display: flex; align-items: center; gap: 8px;
 }
-.panel-title { font-size: 13px; font-weight: 600; color: var(--text-heading); white-space: nowrap; }
 .file-row {
   flex: 0 0 auto; padding: 7px 10px 7px 16px;
   border-bottom: 1px solid var(--border-secondary); display: flex; align-items: center; gap: 8px;
@@ -383,6 +409,10 @@
 }
 .icon-btn:hover:not(:disabled) { background: var(--hover-neutral); color: var(--blue-6); }
 .icon-btn:disabled { opacity: 0.45; cursor: default; }
+/* Pressed/on state: a filled rounded square with a full-strength icon, so a
+   control whose target is already showing reads as engaged rather than idle. */
+.icon-btn.on { background: var(--hover-neutral); color: var(--text); }
+.icon-btn.on:hover:not(:disabled) { color: var(--text); }
 .seg { display: inline-flex; padding: 2px; background: var(--control-track); border-radius: 8px; gap: 2px; flex: 0 0 auto; }
 .seg-btn {
   height: 24px; padding: 0 12px; border: none; border-radius: 6px; font-size: 12px;
