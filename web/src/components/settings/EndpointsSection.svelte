@@ -53,6 +53,37 @@
   // discovered. ──
   type Menu = { kind: 'add'; epId: string }
   let menu = $state<Menu | null>(null)
+  // The picker is portaled to <body> and positioned from the button's rect:
+  // the settings pane scrolls and the modal clips its own overflow, so an
+  // absolutely positioned menu was cut off at the modal's bottom edge rather
+  // than floating over it.
+  let menuPos = $state({ top: 0, bottom: 0, left: 0 })
+  function portalMenu(node: HTMLElement) {
+    document.body.appendChild(node)
+    // Downward when there is room, upward when there isn't, and capped to
+    // whichever side it lands on — a long catalogue would otherwise run off
+    // the screen in either direction. It scrolls internally past that.
+    const below = window.innerHeight - menuPos.bottom - 12
+    const above = menuPos.top - 12
+    if (node.offsetHeight > below && above > below) {
+      node.style.top = ''
+      node.style.bottom = `${window.innerHeight - menuPos.top + 4}px`
+      node.style.maxHeight = `${above}px`
+    } else {
+      node.style.maxHeight = `${below}px`
+    }
+    // The coordinates were captured when the menu opened, so any ancestor
+    // scrolling away underneath it has to close it. Scroll events don't
+    // bubble — listen in the capture phase.
+    const onScroll = () => { menu = null }
+    window.addEventListener('scroll', onScroll, true)
+    return {
+      destroy() {
+        window.removeEventListener('scroll', onScroll, true)
+        node.remove()
+      },
+    }
+  }
 
   onMount(async () => {
     try {
@@ -148,9 +179,15 @@
   // "+ Add model": a known provider gets a catalogue picker menu (with a
   // manual-entry escape hatch); a provider without a catalogue goes straight
   // to the free-text row.
-  function startAddModel(ep: EndpointConfig) {
+  function startAddModel(ep: EndpointConfig, btn: HTMLElement) {
     if (addableModels(ep).length > 0) {
-      menu = menu?.kind === 'add' && menu.epId === ep.id ? null : { kind: 'add', epId: ep.id }
+      if (menu?.kind === 'add' && menu.epId === ep.id) {
+        menu = null
+        return
+      }
+      const r = btn.getBoundingClientRect()
+      menuPos = { top: r.top, bottom: r.bottom, left: r.left }
+      menu = { kind: 'add', epId: ep.id }
       return
     }
     openAddModelInput(ep)
@@ -547,12 +584,12 @@
               </div>
             {:else}
               <div class="chip-wrap">
-                <button class="chip chip-add" onclick={(e) => { e.stopPropagation(); startAddModel(ep) }} disabled={busy}>
+                <button class="chip chip-add" onclick={(e) => { e.stopPropagation(); startAddModel(ep, e.currentTarget as HTMLElement) }} disabled={busy}>
                   <iconify-icon icon="ant-design:plus-outlined" width="12"></iconify-icon>
                   {$t('settings.endpoints.add_model')}
                 </button>
                 {#if menu?.kind === 'add' && menu.epId === ep.id}
-                  <div class="menu">
+                  <div class="menu" use:portalMenu style="top:{menuPos.bottom + 4}px;left:{menuPos.left}px">
                     {#each addableModels(ep) as m (m)}
                       <button class="menu-item mono" onclick={() => addCatalogueModel(ep, m)} disabled={busy}>{m}</button>
                     {/each}
@@ -678,7 +715,7 @@
 
 /* ── popover menu ── */
 .menu {
-  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; min-width: 160px;
+  position: fixed; z-index: 1001; min-width: 160px; overflow-y: auto;
   background: var(--bg-container); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 8px 24px rgba(15,23,42,0.14); padding: 4px; display: flex; flex-direction: column;
 }
