@@ -770,6 +770,7 @@ func TestNativeOpenFolderDelegatesToBridge(t *testing.T) {
 
 	grp := post("/api/session-groups", `{"name":"proj","working_dir":"`+jsonPath(proj)+`"}`)
 	groupID, _ := grp["group"].(map[string]any)["id"].(string)
+	groupWS, _ := grp["group"].(map[string]any)["working_dir"].(string)
 	sess := post("/api/sessions", `{"name":"loose"}`)
 	sessionID, _ := sess["session"].(map[string]any)["id"].(string)
 	sessionDir, _ := sess["session"].(map[string]any)["working_dir"].(string)
@@ -777,10 +778,11 @@ func TestNativeOpenFolderDelegatesToBridge(t *testing.T) {
 		t.Fatalf("fixture ids: group=%q session=%q dir=%q", groupID, sessionID, sessionDir)
 	}
 
-	// A project opens its own working dir; a loose session the dir the server
-	// resolved for it. Neither caller names a path.
+	// A project opens its workspace — where its sessions actually run and
+	// write; a loose session the dir the server resolved for it. Neither
+	// caller names a path.
 	for _, tc := range []struct{ name, body, wantDir string }{
-		{"group", `{"group_id":"` + groupID + `"}`, proj},
+		{"group", `{"group_id":"` + groupID + `"}`, groupWS},
 		{"session", `{"session_id":"` + sessionID + `"}`, sessionDir},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -826,7 +828,13 @@ func TestNativeOpenFolderRefusesWhatItCannotResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 	goneID, _ := created["group"].(map[string]any)["id"].(string)
-	if err := os.RemoveAll(gone); err != nil {
+	// The directory a project opens is its generated workspace; deleting THAT
+	// is what must fail loudly.
+	goneWS, _ := created["group"].(map[string]any)["working_dir"].(string)
+	if goneWS == "" {
+		t.Fatal("create group: no workspace in response")
+	}
+	if err := os.RemoveAll(goneWS); err != nil {
 		t.Fatal(err)
 	}
 

@@ -65,10 +65,22 @@ type sessionGroup struct {
 	// the Web UI and the Wails desktop webview, whose local storage may not
 	// persist the same way.
 	Collapsed bool `json:"collapsed,omitempty"`
-	// WorkingDir, when set, makes this group a project (see above). Stored
-	// already expanded and absolute — the write paths resolve and validate it,
-	// so every reader can use it verbatim.
+	// WorkingDir, when set, makes this group a project (see above). It is the
+	// project's octo-owned workspace, generated under the workspace root at
+	// creation and fixed for the project's life. Stored already expanded and
+	// absolute — the write paths resolve and validate it, so every reader can
+	// use it verbatim. (Registries written before the workspace model may
+	// still carry a user directory here; the startup migration converts them.)
 	WorkingDir string `json:"working_dir,omitempty"`
+	// SourceDirs are the external directories the project references — code
+	// repositories and plain folders alike, mounted as additional roots for
+	// the tools. A directory may appear in several projects' SourceDirs; it
+	// may never lie under the workspace root (the write paths reject that).
+	SourceDirs []string `json:"source_dirs,omitempty"`
+	// OutputDir, when set, is one of SourceDirs marked as where deliverables
+	// go — the env context tells the model to write finished work there and
+	// keep scratch in the workspace.
+	OutputDir string `json:"output_dir,omitempty"`
 	// TaskID, when set, is the scheduled task this project was created for. It
 	// is what lets the startup pass repair such a project (backfilling the
 	// directory a task written before this had none) rather than dissolving it.
@@ -576,10 +588,15 @@ func (s *Server) handleListSessionGroups(w http.ResponseWriter, r *http.Request)
 
 type createSessionGroupRequest struct {
 	Name string `json:"name"`
-	// WorkingDir is required: a group the user creates is a project, and a
-	// project is a directory. Creating without one used to be how a plain group
-	// was made, and that concept is gone.
-	WorkingDir string `json:"working_dir"`
+	// SourceDirs are the external folders the project references, 0..N — a
+	// project needs none (writing projects, cron projects). The project's own
+	// directory is always generated; it is never one of these.
+	SourceDirs []string `json:"source_dirs,omitempty"`
+	// WorkingDir is the legacy field: it used to BE the project directory.
+	// A client still sending it gets that directory mounted as one more
+	// source folder, which preserves the intent ("this project works on that
+	// directory") under the workspace model.
+	WorkingDir string `json:"working_dir,omitempty"`
 }
 
 func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request) {
@@ -593,13 +610,18 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if strings.TrimSpace(req.WorkingDir) == "" {
-		writeError(w, http.StatusBadRequest, "working_dir is required: a project is a directory, and a group without one no longer exists")
-		return
+	raw := req.SourceDirs
+	if strings.TrimSpace(req.WorkingDir) != "" {
+		raw = append(raw, req.WorkingDir)
 	}
-	workingDir, verr := validateWorkingDir(req.WorkingDir)
+	sourceDirs, verr := validateSourceDirs(s.curWorkspaceDir(), raw)
 	if verr != nil {
 		writeError(w, http.StatusBadRequest, verr.Error())
+		return
+	}
+	workspace, err := workspaceDirForProject(s.curWorkspaceDir(), name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -610,7 +632,7 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workingDir}
+	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workspace, SourceDirs: sourceDirs}
 	groups = append(groups, g)
 	if err := saveSessionGroups(groups); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -627,10 +649,10 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 type updateSessionGroupRequest struct {
 	Name      *string `json:"name,omitempty"`
 	Collapsed *bool   `json:"collapsed,omitempty"`
-	// WorkingDir retargets the project's directory. It cannot be cleared: that
-	// used to demote the project to a plain group, and there is nothing left to
-	// demote to — deleting the project is the way to break it up, which leaves
-	// its sessions as tasks.
+	// WorkingDir is rejected outright: the workspace is generated at creation
+	// and fixed for the project's life. It stays in the request type so the
+	// handler can answer an old client with a real explanation instead of
+	// silently ignoring the field.
 	WorkingDir *string `json:"working_dir,omitempty"`
 }
 
@@ -657,20 +679,9 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	// Validate the directory before touching the registry, so a bad path
-	// leaves the group untouched.
-	var workingDir string
 	if req.WorkingDir != nil {
-		if strings.TrimSpace(*req.WorkingDir) == "" {
-			writeError(w, http.StatusBadRequest, "working_dir cannot be cleared: delete the project instead, which leaves its sessions as tasks")
-			return
-		}
-		dir, verr := validateWorkingDir(*req.WorkingDir)
-		if verr != nil {
-			writeError(w, http.StatusBadRequest, verr.Error())
-			return
-		}
-		workingDir = dir
+		writeError(w, http.StatusBadRequest, "working_dir is fixed at creation: the project's workspace cannot be retargeted or cleared")
+		return
 	}
 
 	groupMu.LockWrite()
@@ -696,9 +707,6 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 	}
 	if req.Collapsed != nil {
 		groups[idx].Collapsed = *req.Collapsed
-	}
-	if req.WorkingDir != nil {
-		groups[idx].WorkingDir = workingDir
 	}
 	if err := saveSessionGroups(groups); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

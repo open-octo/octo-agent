@@ -12,13 +12,23 @@ import (
 	"github.com/open-octo/octo-agent/internal/agent"
 )
 
-// newProjectGroup creates a group carrying dir and returns its id.
+// newProjectGroup creates a project mounting dir as a source folder ("" for a
+// zero-folder project) and returns its id.
 func newProjectGroup(t *testing.T, srv *Server, name, dir string) string {
 	t.Helper()
-	rec, out := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{
-		"name":        name,
-		"working_dir": dir,
-	})
+	id, _ := newProjectGroupWS(t, srv, name, dir)
+	return id
+}
+
+// newProjectGroupWS is newProjectGroup returning the generated workspace too,
+// for tests that assert where the project's sessions run.
+func newProjectGroupWS(t *testing.T, srv *Server, name, dir string) (id, workspace string) {
+	t.Helper()
+	body := map[string]any{"name": name}
+	if dir != "" {
+		body["source_dirs"] = []string{dir}
+	}
+	rec, out := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create project: status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -26,11 +36,12 @@ func newProjectGroup(t *testing.T, srv *Server, name, dir string) string {
 	if g == nil {
 		t.Fatalf("create project: no group in response %s", rec.Body.String())
 	}
-	if got, _ := g["working_dir"].(string); got != dir {
-		t.Fatalf("create project: working_dir = %q, want %q", got, dir)
+	workspace, _ = g["working_dir"].(string)
+	if workspace == "" || workspace == dir {
+		t.Fatalf("create project: working_dir = %q, want a generated workspace", workspace)
 	}
-	id, _ := g["id"].(string)
-	return id
+	id, _ = g["id"].(string)
+	return id, workspace
 }
 
 // saveSessionWithDir persists a session carrying its own working dir.
@@ -44,8 +55,11 @@ func saveSessionWithDir(t *testing.T, own string) *agent.Session {
 	return sess
 }
 
-// TestProject_DirPrecedence covers the three-way resolution: a project wins
-// over the session's own dir, which wins over the configured workspace.
+// TestProject_DirPrecedence covers the resolution order under the workspace
+// model: a directory the session chose itself wins over its project's
+// workspace, which wins over the configured workspace root. A session whose
+// own value is the seeded default workspace never chose anything, so it does
+// not outrank its project.
 //
 // The last resort is the workspace and NOT the server's launch directory: where
 // `octo serve` was started from is nobody's choice, and letting it decide meant
@@ -56,15 +70,25 @@ func TestProject_DirPrecedence(t *testing.T) {
 	projectDir := t.TempDir()
 	ownDir := t.TempDir()
 
-	inProject := saveSessionWithDir(t, ownDir)
+	cliBorn := saveSessionWithDir(t, ownDir)
+	seeded := saveSessionWithDir(t, srv.curWorkspaceDir())
+	inProject := saveSessionWithDir(t, "")
 	standalone := saveSessionWithDir(t, ownDir)
 	bare := saveSessionWithDir(t, "")
 
-	gid := newProjectGroup(t, srv, "Work", projectDir)
+	gid, ws := newProjectGroupWS(t, srv, "Work", projectDir)
+	fileInProject(t, gid, cliBorn.ID)
+	fileInProject(t, gid, seeded.ID)
 	fileInProject(t, gid, inProject.ID)
 
-	if got := srv.sessionCwd(inProject); got != projectDir {
-		t.Errorf("session in project: cwd = %q, want project dir %q", got, projectDir)
+	if got := srv.sessionCwd(cliBorn); got != ownDir {
+		t.Errorf("session with its own dir in a project: cwd = %q, want its own %q", got, ownDir)
+	}
+	if got := srv.sessionCwd(seeded); got != ws {
+		t.Errorf("seeded-default session in a project: cwd = %q, want the workspace %q (the seed is nobody's choice)", got, ws)
+	}
+	if got := srv.sessionCwd(inProject); got != ws {
+		t.Errorf("dirless session in a project: cwd = %q, want the workspace %q", got, ws)
 	}
 	if got := srv.sessionCwd(standalone); got != ownDir {
 		t.Errorf("session outside project: cwd = %q, want own dir %q", got, ownDir)
@@ -113,44 +137,45 @@ func TestProject_WorkspaceFallbackCreatesTheDirectory(t *testing.T) {
 func TestProject_ResolutionAgreesAcrossSurfaces(t *testing.T) {
 	srv := groupTestServer(t)
 	projectDir := t.TempDir()
-	sess := saveSessionWithDir(t, t.TempDir())
+	sess := saveSessionWithDir(t, "")
 
-	gid := newProjectGroup(t, srv, "Work", projectDir)
+	gid, ws := newProjectGroupWS(t, srv, "Work", projectDir)
 	fileInProject(t, gid, sess.ID)
 
 	byID := srv.sessionCwdByID(sess.ID)
 	bySession := srv.sessionCwd(sess)
 	turnDir, envCtx := srv.sessionCwdEnv(sess)
-	if byID != projectDir || bySession != projectDir || turnDir != projectDir {
-		t.Fatalf("cwd disagreement: byID=%q bySession=%q turn=%q, want %q", byID, bySession, turnDir, projectDir)
+	if byID != ws || bySession != ws || turnDir != ws {
+		t.Fatalf("cwd disagreement: byID=%q bySession=%q turn=%q, want the workspace %q", byID, bySession, turnDir, ws)
 	}
 	// The env context is what the model reads; it must name the same dir.
-	if !strings.Contains(envCtx, projectDir) {
-		t.Errorf("env context does not mention project dir %q:\n%s", projectDir, envCtx)
+	if !strings.Contains(envCtx, ws) {
+		t.Errorf("env context does not mention the workspace %q:\n%s", ws, envCtx)
 	}
 }
 
-// The project shadows the session's own working dir rather than overwriting it
-// on disk. Deleting the project is what reveals the difference, and it is also
+// A seeded-default own dir is masked by the project rather than overwritten on
+// disk. Deleting the project is what reveals the difference, and it is also
 // the only way a session leaves one: membership is fixed at creation, so there
-// is no move-out to test.
+// is no move-out to test. (A directory the session genuinely chose is never
+// masked at all — see TestProject_DirPrecedence.)
 func TestProject_ShadowsOwnDirAndRestoresOnDelete(t *testing.T) {
 	srv := groupTestServer(t)
 	projectDir := t.TempDir()
-	ownDir := t.TempDir()
-	sess := saveSessionWithDir(t, ownDir)
+	seededDir := srv.curWorkspaceDir()
+	sess := saveSessionWithDir(t, seededDir)
 
-	gid := newProjectGroup(t, srv, "Work", projectDir)
+	gid, ws := newProjectGroupWS(t, srv, "Work", projectDir)
 	fileInProject(t, gid, sess.ID)
-	if got := srv.sessionCwd(sess); got != projectDir {
-		t.Fatalf("in project: cwd = %q, want %q", got, projectDir)
+	if got := srv.sessionCwd(sess); got != ws {
+		t.Fatalf("in project: cwd = %q, want the workspace %q", got, ws)
 	}
 
 	if rec, _ := doGroupReq(t, srv, http.MethodDelete, "/api/session-groups/"+gid, nil); rec.Code != http.StatusOK {
 		t.Fatalf("delete project: status %d", rec.Code)
 	}
-	if got := srv.sessionCwd(sess); got != ownDir {
-		t.Errorf("after the project was deleted: cwd = %q, want own dir %q", got, ownDir)
+	if got := srv.sessionCwd(sess); got != seededDir {
+		t.Errorf("after the project was deleted: cwd = %q, want the seeded dir %q back", got, seededDir)
 	}
 
 	// Reloading from disk must show the own dir was never clobbered.
@@ -158,8 +183,8 @@ func TestProject_ShadowsOwnDirAndRestoresOnDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if reloaded.WorkingDir != ownDir {
-		t.Errorf("persisted WorkingDir = %q, want %q untouched", reloaded.WorkingDir, ownDir)
+	if reloaded.WorkingDir != seededDir {
+		t.Errorf("persisted WorkingDir = %q, want %q untouched", reloaded.WorkingDir, seededDir)
 	}
 }
 
@@ -223,37 +248,38 @@ func TestProject_DirCannotBeCleared(t *testing.T) {
 	projectDir := t.TempDir()
 	sess := saveSessionWithDir(t, "")
 
-	gid := newProjectGroup(t, srv, "Work", projectDir)
+	gid, ws := newProjectGroupWS(t, srv, "Work", projectDir)
 	fileInProject(t, gid, sess.ID)
 	rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"working_dir": ""})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("clearing the dir: status %d, want 400: %s", rec.Code, rec.Body.String())
 	}
 	// And the project still governs its session.
-	if got := srv.sessionCwd(sess); got != projectDir {
-		t.Errorf("cwd = %q, want the project's %q", got, projectDir)
+	if got := srv.sessionCwd(sess); got != ws {
+		t.Errorf("cwd = %q, want the project workspace %q", got, ws)
 	}
 }
 
 // TestProject_RetargetDirIsPickedUp verifies the read cache does not serve a
-// stale directory after the project is edited.
+// stale directory after a rejected edit — and that the rejection really left
+// the workspace alone.
 func TestProject_RetargetDirIsPickedUp(t *testing.T) {
 	srv := groupTestServer(t)
 	first := t.TempDir()
 	second := t.TempDir()
 	sess := saveSessionWithDir(t, "")
 
-	gid := newProjectGroup(t, srv, "Work", first)
+	gid, ws := newProjectGroupWS(t, srv, "Work", first)
 	fileInProject(t, gid, sess.ID)
-	if got := srv.sessionCwd(sess); got != first {
-		t.Fatalf("before retarget: cwd = %q, want %q", got, first)
+	if got := srv.sessionCwd(sess); got != ws {
+		t.Fatalf("before: cwd = %q, want %q", got, ws)
 	}
 
-	if rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"working_dir": second}); rec.Code != http.StatusOK {
-		t.Fatalf("retarget: status %d", rec.Code)
+	if rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"working_dir": second}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("retarget: status %d, want 400 (workspace is fixed at creation)", rec.Code)
 	}
-	if got := srv.sessionCwd(sess); got != second {
-		t.Errorf("after retarget: cwd = %q, want %q (stale cache?)", got, second)
+	if got := srv.sessionCwd(sess); got != ws {
+		t.Errorf("after rejected retarget: cwd = %q, want the workspace %q unchanged", got, ws)
 	}
 }
 
@@ -356,11 +382,11 @@ func TestProject_ExportedDirLookup(t *testing.T) {
 	inProject := saveSessionWithDir(t, ownDir)
 	outside := saveSessionWithDir(t, ownDir)
 
-	gid := newProjectGroup(t, srv, "Work", projectDir)
+	gid, ws := newProjectGroupWS(t, srv, "Work", projectDir)
 	fileInProject(t, gid, inProject.ID)
 
-	if got := ProjectDirForSession(inProject.ID); got != projectDir {
-		t.Errorf("session in project: %q, want %q", got, projectDir)
+	if got := ProjectDirForSession(inProject.ID); got != ws {
+		t.Errorf("session in project: %q, want the workspace %q", got, ws)
 	}
 	if got := ProjectDirForSession(outside.ID); got != "" {
 		t.Errorf("session outside a project must report no dir, got %q (its own dir must not leak)", got)
@@ -412,7 +438,7 @@ func TestProject_CreateSessionDirectlyInProject(t *testing.T) {
 	srv := groupTestServer(t)
 	srv.setWorkspaceDir(t.TempDir()) // a default that WOULD be seeded without the guard
 	projectDir := t.TempDir()
-	gid := newProjectGroup(t, srv, "Work", projectDir)
+	gid, ws := newProjectGroupWS(t, srv, "Work", projectDir)
 
 	sid := createSessionInGroupViaAPI(t, srv, gid)
 
@@ -426,8 +452,8 @@ func TestProject_CreateSessionDirectlyInProject(t *testing.T) {
 	if loaded.WorkingDir != "" {
 		t.Errorf("session born in a project was seeded with %q, want no own dir", loaded.WorkingDir)
 	}
-	if got := srv.sessionCwd(loaded); got != projectDir {
-		t.Errorf("cwd = %q, want project dir %q", got, projectDir)
+	if got := srv.sessionCwd(loaded); got != ws {
+		t.Errorf("cwd = %q, want the project workspace %q", got, ws)
 	}
 }
 
@@ -564,8 +590,8 @@ func TestProject_ListReportsProjectFields(t *testing.T) {
 	if len(resp.Groups) != 2 {
 		t.Fatalf("got %d groups, want 2", len(resp.Groups))
 	}
-	if !resp.Groups[0].isProject() || resp.Groups[0].WorkingDir != projectDir {
-		t.Errorf("first group should be a project at %q, got %+v", projectDir, resp.Groups[0])
+	if !resp.Groups[0].isProject() || len(resp.Groups[0].SourceDirs) != 1 || resp.Groups[0].SourceDirs[0] != projectDir {
+		t.Errorf("first group should be a project mounting %q, got %+v", projectDir, resp.Groups[0])
 	}
 	if resp.Groups[1].isProject() || !resp.Groups[1].isCronCluster() {
 		t.Errorf("second group should be a cron cluster with no dir, got %+v", resp.Groups[1])
@@ -590,7 +616,7 @@ func TestProject_BranchStaysInProject(t *testing.T) {
 	if err := src.Save(); err != nil {
 		t.Fatalf("save source: %v", err)
 	}
-	gid := newProjectGroup(t, srv, "Work", projectDir)
+	gid, ws := newProjectGroupWS(t, srv, "Work", projectDir)
 	fileInProject(t, gid, src.ID)
 
 	rec, out := doGroupReq(t, srv, http.MethodPost, "/api/sessions/"+src.ID+"/branch",
@@ -611,7 +637,7 @@ func TestProject_BranchStaysInProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load branch: %v", err)
 	}
-	if got := srv.resolveSessionDir(branch.ID, branch.WorkingDir); got != projectDir {
-		t.Errorf("branch working dir = %q, want the project's %q", got, projectDir)
+	if got := srv.resolveSessionDir(branch.ID, branch.WorkingDir); got != ws {
+		t.Errorf("branch working dir = %q, want the project workspace %q", got, ws)
 	}
 }

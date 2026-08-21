@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/memory"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
@@ -43,6 +45,42 @@ func workspaceDirForProject(base, name string) (string, error) {
 		return "", fmt.Errorf("project workspace: create %s: %w", candidate, err)
 	}
 	return candidate, nil
+}
+
+// validateSourceDirs expands and checks the source folders a project mounts.
+// Each must be an existing, accessible directory (validateWorkingDir), must
+// not lie under the workspace root — that would let one project's workspace
+// become another's source folder and split the directory→project reverse
+// lookup — and duplicates (however spelled) collapse to one entry.
+func validateSourceDirs(workspaceRoot string, raw []string) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	root := ""
+	if workspaceRoot != "" {
+		root = memory.NormalizeDir(expandDir(workspaceRoot))
+	}
+	dirs := make([]string, 0, len(raw))
+	seen := make(map[string]bool, len(raw))
+	for _, r := range raw {
+		if strings.TrimSpace(r) == "" {
+			continue
+		}
+		dir, err := validateWorkingDir(r)
+		if err != nil {
+			return nil, err
+		}
+		norm := memory.NormalizeDir(dir)
+		if root != "" && (norm == root || strings.HasPrefix(norm, root+string(filepath.Separator))) {
+			return nil, fmt.Errorf("source folder %s is inside the workspace root %s; project workspaces cannot be mounted", dir, workspaceRoot)
+		}
+		if seen[norm] {
+			continue
+		}
+		seen[norm] = true
+		dirs = append(dirs, dir)
+	}
+	return dirs, nil
 }
 
 // resolveWorkspaceBase resolves the workspace root from configuration rather

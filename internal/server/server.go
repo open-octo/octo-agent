@@ -1823,6 +1823,20 @@ func (s *Server) curCwdEnv() (string, string) {
 // resolved separately, a session could show one directory in the composer and
 // run its tools in another.
 func (s *Server) resolveSessionDir(sessionID, own string) string {
+	// A directory the session chose itself outranks its project's workspace —
+	// that is what keeps a CLI-born session running in the repository it was
+	// started in on every surface, instead of drifting to the workspace when
+	// resumed on the web. The old order (project first) existed so that
+	// retargeting a project's directory took effect across the project; the
+	// workspace is fixed at creation, so there is nothing left to retarget.
+	//
+	// The one own-value that does NOT count as chosen is the seeded default
+	// workspace: applyDefaultWorkspaceDir stamps it on every session that
+	// never picked anything, so it means "nobody chose" and must not shadow a
+	// project.
+	if own != "" && !s.isSeededWorkspaceValue(own) {
+		return own
+	}
 	if p := projectForSession(sessionID); p != nil {
 		return p.WorkingDir
 	}
@@ -1833,6 +1847,23 @@ func (s *Server) resolveSessionDir(sessionID, own string) string {
 		return ws
 	}
 	return s.curCwd()
+}
+
+// isSeededWorkspaceValue reports whether own is the "nobody chose this"
+// directory: the workspace root as configured now, or the built-in default
+// regardless of configuration — sessions written before a workspace_dir change
+// still carry the old default. The same rule isDefaultWorkspaceDir applies,
+// checked against the server's cached root rather than re-reading
+// configuration on every resolution.
+func (s *Server) isSeededWorkspaceValue(own string) bool {
+	norm := memory.NormalizeDir(own)
+	if ws := s.curWorkspaceDir(); ws != "" && (ws == own || memory.NormalizeDir(ws) == norm) {
+		return true
+	}
+	if def, err := tools.ResolveWorkspaceDir(""); err == nil && def != "" && memory.NormalizeDir(def) == norm {
+		return true
+	}
+	return false
 }
 
 // sessionCwdEnv returns the working directory and env-context a turn for sess

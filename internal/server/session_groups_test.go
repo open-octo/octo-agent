@@ -81,7 +81,7 @@ func TestSessionGroups_CreateListRename(t *testing.T) {
 	}
 
 	// Rename.
-	rec, out = doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+id, newGroupBody(t, "学习"))
+	rec, out = doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+id, map[string]any{"name": "学习"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("rename: status %d", rec.Code)
 	}
@@ -256,7 +256,7 @@ func TestSessionGroups_Delete(t *testing.T) {
 
 func TestSessionGroups_RenameUnknown(t *testing.T) {
 	srv := groupTestServer(t)
-	rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/g-missing", newGroupBody(t, "X"))
+	rec, _ := doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/g-missing", map[string]any{"name": "X"})
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("rename missing: expected 404, got %d", rec.Code)
 	}
@@ -369,7 +369,7 @@ func TestSessionPin_CoexistsWithGroups(t *testing.T) {
 	doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/pin", map[string]any{"pinned": true})
 	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "Work"))
 	gid := o["group"].(map[string]any)["id"].(string)
-	doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, newGroupBody(t, "Work2"))
+	doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"name": "Work2"})
 
 	// The pin survived the group writes.
 	if pins, _ := loadPinnedSessions(); len(pins) != 1 || pins[0] != sid {
@@ -513,7 +513,7 @@ func TestSessionCollapse_CoexistsWithGroupsAndPins(t *testing.T) {
 	// Group create/rename/reorder and an unrelated pin cycle all leave it intact.
 	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "Work"))
 	gid := o["group"].(map[string]any)["id"].(string)
-	doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, newGroupBody(t, "Work2"))
+	doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{"name": "Work2"})
 	doGroupReq(t, srv, http.MethodPut, "/api/session-groups/order", map[string]any{"ids": []string{gid}})
 	doGroupReq(t, srv, http.MethodPut, "/api/sessions/other/pin", map[string]any{"pinned": true})
 	doGroupReq(t, srv, http.MethodPut, "/api/sessions/other/pin", map[string]any{"pinned": false})
