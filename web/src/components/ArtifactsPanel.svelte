@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightapps, lightappHTML, showToast, nativeShell } from '../lib/stores'
+  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightapps, lightappHTML, showToast, nativeShell, activeSessionId, savePanelMode, type PanelMode } from '../lib/stores'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
   import { hydrateArtifact, lightAppSource, pathIsInside } from '../lib/artifacts'
   import { CENTER_MIN } from '../lib/sidebarWidth'
+  import { diffData, diffLoading, diffBadge, loadDiff } from '../lib/diff'
+  import DiffView from './diff/DiffView.svelte'
   import * as api from '../lib/api'
 
   // This column never holds the traffic lights, but its top row has to sit on
@@ -169,6 +171,39 @@
     panelContent.set(null)
   }
 
+  // ── Git Diff mode ─────────────────────────────────────────────────────────
+  // Loaded on open and on demand; a finished turn refreshes it from lib/diff's
+  // own WS subscription. No polling — a diff only moves when a turn does.
+  $effect(() => {
+    if ($panelContent === 'diff' && $activeSessionId) void loadDiff($activeSessionId)
+  })
+
+  const diffRepos = $derived($diffData?.repos ?? [])
+  // With one repository the topbar names it; with several, DiffView's group
+  // headers do, and the topbar just says how many files are in play.
+  const diffSoleRepo = $derived(diffRepos.length === 1 ? diffRepos[0] : null)
+  const diffFileCount = $derived(diffRepos.reduce((n, r) => n + r.files.length, 0))
+  const badgeCount = $derived($diffBadge[$activeSessionId ?? ''] ?? 0)
+
+  // ── Panel mode switcher ───────────────────────────────────────────────────
+  // The Header button stays a plain open/close toggle; which of the two modes
+  // the panel shows is decided here, from the topbar's leftmost icon slot.
+  // Light Apps is deliberately absent — it has its own entry point, and is not
+  // one of the two things a chat sidebar alternates between.
+  let modeMenu = $state(false)
+  const MODES: { id: PanelMode; icon: string; label: string }[] = [
+    { id: 'session', icon: 'ant-design:file-text-outlined', label: 'panel.mode_artifacts' },
+    { id: 'diff', icon: 'ant-design:branches-outlined', label: 'panel.mode_diff' },
+  ]
+  const curMode = $derived<PanelMode>($panelContent === 'diff' ? 'diff' : 'session')
+  const curModeIcon = $derived(MODES.find(m => m.id === curMode)?.icon ?? MODES[0].icon)
+
+  function pickMode(mode: PanelMode) {
+    modeMenu = false
+    savePanelMode(mode)
+    panelContent.set(mode)
+  }
+
   // Derive the current light app's HTML preview.
   const laCurSlug = $derived($lightappSel || $lightapps[0]?.slug || '')
   const laCurHTML = $derived($lightappHTML[laCurSlug] ?? '')
@@ -228,6 +263,39 @@
      Expand is a layout action, so it stays clickable whatever the panel is
      showing — including the empty state. The close toggle carries an "on" fill
      because this row only exists while the panel is open. -->
+<!-- The topbar's leftmost icon slot doubles as the mode switcher: the icon is
+     the mode you're in, clicking it offers the other. Absent in Light Apps
+     mode, which arrives from its own entry point rather than from here. The
+     changed-file badge rides on it while the panel is open — the Header button
+     carries the same count while it is closed. -->
+{#snippet modeSwitcher()}
+  <div class="mode-wrap">
+    <button
+      class="icon-btn mode-trigger"
+      class:on={modeMenu}
+      title={$t('panel.switch_mode')}
+      onclick={() => modeMenu = !modeMenu}
+    >
+      <iconify-icon icon={curModeIcon} width="14"></iconify-icon>
+      {#if badgeCount > 0 && curMode !== 'diff'}<span class="dot"></span>{/if}
+    </button>
+    {#if modeMenu}
+      <!-- Clicking anywhere else dismisses it; the backdrop is what makes that
+           work without a document-level listener that outlives the menu. -->
+      <button class="backdrop" aria-label={$t('common.cancel')} onclick={() => modeMenu = false}></button>
+      <div class="mode-menu" role="menu">
+        {#each MODES as m}
+          <button class="mode-item" class:active={m.id === curMode} role="menuitem" onclick={() => pickMode(m.id)}>
+            <iconify-icon icon={m.icon} width="14"></iconify-icon>
+            <span>{$t(m.label)}</span>
+            {#if m.id === 'diff' && badgeCount > 0}<span class="mode-count">{badgeCount}</span>{/if}
+          </button>
+        {/each}
+      </div>
+    {/if}
+  </div>
+{/snippet}
+
 {#snippet topbarControls()}
   <button class="icon-btn" title={$panelExpanded ? $t('artifacts.collapse_panel') : $t('artifacts.maximize')} onclick={toggleExpanded}>
     <iconify-icon icon={$panelExpanded ? 'ph:arrows-in-simple' : 'ph:arrows-out-simple'} width="15"></iconify-icon>
@@ -273,10 +341,41 @@
       {/if}
     </div>
 
+  {:else if $panelContent === 'diff'}
+    <!-- ── Git Diff mode ──────────────────────────────────────────────────── -->
+    <div class="topbar" class:native-lift={liftForTrafficLights}>
+      {@render modeSwitcher()}
+      {#if diffSoleRepo}
+        <span class="file-name mono">{diffSoleRepo.name}</span>
+        {#if diffSoleRepo.branch}<span class="file-meta">{diffSoleRepo.commit || diffSoleRepo.branch}</span>{/if}
+      {:else}
+        <span class="file-name">{$t('panel.mode_diff')}</span>
+        {#if diffFileCount > 0}<span class="file-meta">{$t('files.count_files').replace('{n}', String(diffFileCount))}</span>{/if}
+      {/if}
+      <span style="flex:1"></span>
+      <button
+        class="icon-btn"
+        title={$t('diff.refresh')}
+        disabled={$diffLoading || !$activeSessionId}
+        onclick={() => loadDiff($activeSessionId ?? '')}
+      >
+        <iconify-icon icon="ant-design:reload-outlined" width="14" class={$diffLoading ? 'spin' : ''}></iconify-icon>
+      </button>
+      {@render topbarControls()}
+    </div>
+
+    <!-- No footer: the panel is read-only. Acting on what you find here means
+         telling the agent in the chat, which is the whole point of reviewing
+         inside the agent rather than in a git client. -->
+    <div class="body">
+      <DiffView />
+    </div>
+
   {:else if $panelContent === 'session'}
     <!-- ── Session mode (existing behavior) ────────────────────────────────── -->
     {#if !cur}
       <div class="topbar" class:native-lift={liftForTrafficLights}>
+        {@render modeSwitcher()}
         <span style="flex:1"></span>
         {@render topbarControls()}
       </div>
@@ -286,7 +385,7 @@
       </div>
     {:else}
       <div class="topbar" class:native-lift={liftForTrafficLights}>
-        <iconify-icon icon={cur.icon} width="14" style="color:var(--text-secondary);flex:0 0 auto"></iconify-icon>
+        {@render modeSwitcher()}
         <span class="file-name mono">{cur.name}</span>
         <span class="file-meta">{cur.type}</span>
         <span style="flex:1"></span>
@@ -407,6 +506,38 @@
    control whose target is already showing reads as engaged rather than idle. */
 .icon-btn.on { background: var(--hover-neutral); color: var(--text); }
 .icon-btn.on:hover:not(:disabled) { color: var(--text); }
+/* ── Panel mode switcher ─────────────────────────────────────────────── */
+.mode-wrap { position: relative; flex: 0 0 auto; display: flex; }
+.mode-trigger { position: relative; }
+/* Same "there is something here" dot the sidebar's unread marker uses, sized
+   for a 28px control rather than a list row. */
+.mode-trigger .dot {
+  position: absolute; top: 4px; right: 4px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--blue-6);
+}
+.backdrop {
+  position: fixed; inset: 0; z-index: 40;
+  border: none; background: transparent; padding: 0; cursor: default;
+}
+.mode-menu {
+  position: absolute; top: 32px; left: 0; z-index: 41; min-width: 168px;
+  padding: 4px; background: var(--bg-elevated, var(--bg-container));
+  border: 1px solid var(--border-secondary); border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.14); display: flex; flex-direction: column; gap: 2px;
+}
+.mode-item {
+  display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px;
+  border: none; border-radius: 6px; background: transparent; cursor: pointer;
+  color: var(--text); font-size: 12px; font-family: inherit; text-align: left;
+}
+.mode-item:hover { background: var(--hover-neutral); }
+.mode-item.active { color: var(--blue-6); font-weight: 600; }
+.mode-count {
+  margin-left: auto; min-width: 18px; height: 16px; padding: 0 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; background: var(--active-blue-bg); color: var(--blue-6);
+  font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
 .seg { display: inline-flex; padding: 2px; background: var(--control-track); border-radius: 8px; gap: 2px; flex: 0 0 auto; }
 .seg-btn {
   height: 24px; padding: 0 12px; border: none; border-radius: 6px; font-size: 12px;

@@ -12,6 +12,7 @@
   import { startNativeHeartbeat } from './lib/nativeHeartbeat'
   import { normalizeHash, hashPicksChatTarget } from './lib/hashRouting'
   import { pruneSessions } from './lib/genui/panel-state'
+  import { onTurnEnded as onDiffTurnEnded, resetDiff } from './lib/diff'
   import { globalKeyIntent } from './lib/globalKeys'
   import AuthGate from './components/overlays/AuthGate.svelte'
   import FirstRunSetup from './components/overlays/FirstRunSetup.svelte'
@@ -50,6 +51,13 @@
     const sid = $activeSessionId
     if ($view !== 'chat' || !sid) return
     markSessionSeen(sid)
+  })
+
+  // Switching chats must never leave the previous session's diff on screen: the
+  // panel is per-session, and a stale patch list reads as this session's work.
+  $effect(() => {
+    void $activeSessionId
+    resetDiff()
   })
 
   let booted = false
@@ -341,6 +349,10 @@
       // un-marks it again if it's the session on screen, and nothing else
       // refreshes updated_at for an open tab.
       if (ev.kind === 'turn_ended') touchSession(sid)
+      // The agent just finished changing files. Re-render the Git Diff panel if
+      // it's open on this session, or move its badge if it isn't — that pair is
+      // the whole refresh story, no polling anywhere.
+      if (ev.kind === 'turn_ended') onDiffTurnEnded(sid)
       if (ev.kind === 'question_pending' || ev.kind === 'confirm_pending' || ev.kind === 'turn_complete') {
         notifyForSessionActivity(sid, ev.kind)
       }
