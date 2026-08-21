@@ -7,7 +7,7 @@
   import { confirmDialog } from '../../lib/confirm'
   import { splitSections, swapWithinSection, parseSectionFold, type SectionFold } from '../../lib/sidebarSections'
   import { SIDEBAR_MIN, SIDEBAR_MAX, CENTER_MIN, readSidebarWidth, saveSidebarWidth } from '../../lib/sidebarWidth'
-  import { ago } from '../../lib/relTime'
+  import { ago, clockTick } from '../../lib/relTime'
   import { isUnread, sessionSeenAt, sessionTouchedAt } from '../../lib/unread'
   import { ws } from '../../lib/ws'
   import VersionBadge from './VersionBadge.svelte'
@@ -903,7 +903,7 @@
             <span class="unread-dot on-rest" title={$t('sidebar.unread')}></span>
           {:else}
             <span class="session-time on-rest" style="color:var(--text-quaternary);">
-              {ago((s as any).updated_at, $t)}
+              {ago((s as any).updated_at, $t, $clockTick)}
             </span>
           {/if}
           {#if !$selMode}
