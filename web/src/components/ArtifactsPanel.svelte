@@ -295,6 +295,9 @@
       </div>
     {:else}
       <div class="topbar" class:native-lift={liftForTrafficLights}>
+        <iconify-icon icon={cur.icon} width="14" style="color:var(--text-secondary);flex:0 0 auto"></iconify-icon>
+        <span class="file-name mono">{cur.name}</span>
+        <span class="file-meta">{cur.type}</span>
         <span style="flex:1"></span>
         {#if !curIsImage}
           <div class="seg">
@@ -303,14 +306,6 @@
           </div>
         {/if}
         {@render topbarControls()}
-      </div>
-
-      <div class="file-row">
-        <iconify-icon icon={cur.icon} width="14" style="color:var(--text-secondary);flex:0 0 auto"></iconify-icon>
-        <span class="file-name mono">{cur.name}</span>
-        <span class="file-meta">{cur.type}</span>
-        <span style="flex:1"></span>
-        <span class="sandboxed-label">{$t('artifacts.sandboxed')}</span>
       </div>
 
       {#if saveToLADialog}
@@ -383,6 +378,10 @@
 <style>
 .panel {
   flex: 0 0 auto;
+  /* Without this, a code view's long unwrapped lines set the flex item's
+     automatic minimum width and push the topbar controls past the viewport
+     edge (worst when expanded: the panel is then the row's only item). */
+  min-width: 0;
   background: var(--panel-frost);
   backdrop-filter: blur(var(--frost-blur));
   -webkit-backdrop-filter: blur(var(--frost-blur));
@@ -403,11 +402,7 @@
 /* The same axis lift Header and Sidebar apply on mac — see Header.native-lift
    for why the height has to be pinned for the padding to move anything. */
 .topbar.native-lift { box-sizing: border-box; max-height: 44px; padding-bottom: 8px; }
-.file-row {
-  flex: 0 0 auto; padding: 7px 10px 7px 16px;
-  border-bottom: 1px solid var(--border-secondary); display: flex; align-items: center; gap: 8px;
-}
-.file-name { font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-name { min-width: 0; font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-meta { font-size: 11px; color: var(--text-tertiary); flex: 0 0 auto; }
 .mono { font-family: var(--font-mono); }
 .icon-btn {
