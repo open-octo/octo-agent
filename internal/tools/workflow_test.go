@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -37,6 +38,97 @@ func (replySpawner) Continue(_ context.Context, _, _ string) (SpawnResult, error
 }
 
 var wfRunIDRe = regexp.MustCompile(`wf_\d+`)
+
+// trailSpawner emits the sub-agent event trail a real child produces (tool
+// dispatch, completion with output, a text block) through the ctx sink, the
+// way internal/app/spawner.go's runChild does.
+type trailSpawner struct{}
+
+func (trailSpawner) Spawn(ctx context.Context, req SpawnRequest) (SpawnResult, error) {
+	if sink := SubAgentEventSink(ctx); sink != nil {
+		sink(SubAgentEvent{Kind: "tool", ToolID: "t1", ToolName: "read_file", ToolInput: map[string]any{"path": "go.mod"}})
+		sink(SubAgentEvent{Kind: "tool_done", ToolID: "t1", ToolName: "read_file", ToolOutput: "module contents"})
+		sink(SubAgentEvent{Kind: "text", Text: "looked it up"})
+	}
+	return SpawnResult{Reply: "R[" + req.Prompt + "]"}, nil
+}
+func (trailSpawner) Continue(_ context.Context, _, _ string) (SpawnResult, error) {
+	return SpawnResult{}, nil
+}
+
+// TestWorkflowAgentEvents verifies each agent() call is instrumented onto the
+// run's structured event stream: agent_started with the prompt label, the
+// child's tool/text trail translated onto agent_* kinds, and agent_done
+// carrying the reply — and that the same events are retained on the run
+// snapshot for late-join replay.
+func TestWorkflowAgentEvents(t *testing.T) {
+	SetSpawner(trailSpawner{})
+	t.Cleanup(func() { SetSpawner(nil) })
+	SetWorkflowForeground(true)
+	t.Cleanup(func() { SetWorkflowForeground(false) })
+
+	mgr := NewWorkflowManager()
+	ctx := WithWorkflowManager(context.Background(), mgr)
+
+	var mu sync.Mutex
+	var events []WorkflowEvent
+	mgr.SetOnEvent(func(ev WorkflowEvent) { mu.Lock(); events = append(events, ev); mu.Unlock() })
+
+	if _, err := (WorkflowTool{}).Execute(ctx, "c", map[string]any{
+		"script": `agent("inspect the module")`,
+	}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	mu.Lock()
+	var agentEvents []WorkflowEvent
+	for _, ev := range events {
+		if strings.HasPrefix(ev.Kind, "agent_") {
+			agentEvents = append(agentEvents, ev)
+		}
+	}
+	mu.Unlock()
+
+	wantKinds := []string{"agent_started", "agent_tool", "agent_tool_done", "agent_text", "agent_done"}
+	if len(agentEvents) != len(wantKinds) {
+		t.Fatalf("agent events = %+v, want kinds %v", agentEvents, wantKinds)
+	}
+	for i, want := range wantKinds {
+		if agentEvents[i].Kind != want {
+			t.Fatalf("event[%d].Kind = %q, want %q (all: %+v)", i, agentEvents[i].Kind, want, agentEvents)
+		}
+		if agentEvents[i].AgentID != "a1" {
+			t.Errorf("event[%d].AgentID = %q, want a1", i, agentEvents[i].AgentID)
+		}
+		if agentEvents[i].RunID == "" {
+			t.Errorf("event[%d] has no RunID", i)
+		}
+	}
+	if agentEvents[0].AgentLabel != "inspect the module" {
+		t.Errorf("agent_started label = %q", agentEvents[0].AgentLabel)
+	}
+	if agentEvents[1].ToolID != "t1" || agentEvents[1].ToolName != "read_file" {
+		t.Errorf("agent_tool = %+v", agentEvents[1])
+	}
+	if agentEvents[2].ToolOutput != "module contents" {
+		t.Errorf("agent_tool_done output = %q", agentEvents[2].ToolOutput)
+	}
+	if agentEvents[3].Text != "looked it up" {
+		t.Errorf("agent_text = %q", agentEvents[3].Text)
+	}
+	if agentEvents[4].Reply != "R[inspect the module]" || agentEvents[4].Error != "" {
+		t.Errorf("agent_done = %+v", agentEvents[4])
+	}
+
+	// The run snapshot retains the same structured events for late-join replay.
+	runs := mgr.List()
+	if len(runs) != 1 {
+		t.Fatalf("List() = %d runs, want 1", len(runs))
+	}
+	if len(runs[0].AgentEvents) != len(wantKinds) {
+		t.Fatalf("snapshot retained %d agent events, want %d", len(runs[0].AgentEvents), len(wantKinds))
+	}
+}
 
 // startWorkflowAndWait starts a background workflow via the tool, then polls
 // workflow_status by run id until it is no longer running, returning the final
