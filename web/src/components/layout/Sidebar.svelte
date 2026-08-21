@@ -1186,7 +1186,10 @@
 }
 .grp-name {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 12px; font-weight: 600; color: var(--text-secondary); cursor: pointer;
+  /* Matches .session-title's size so a project directory and the sessions filed
+     under it read on the same scale — the 600 weight and secondary color alone
+     keep the directory as the row's heading. */
+  font-size: 13px; font-weight: 600; color: var(--text-secondary); cursor: pointer;
 }
 .grp-name.muted { font-weight: 600; color: var(--text-quaternary); cursor: default; }
 /* Group-header actions in two frequency tiers. The high-frequency pair
