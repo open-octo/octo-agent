@@ -16,7 +16,7 @@ export interface Session {
   model: string
   model_id: string
   // "running" while a turn is in flight (see server sessionStatus) — seeded by
-  // session_list, kept live via session_update (subscribed tabs) and the
+  // GET /api/sessions, kept live via session_update (subscribed tabs) and the
   // global session_activity turn_started/turn_ended pair (all tabs).
   status: 'idle' | 'running' | string
   source: string
@@ -30,7 +30,7 @@ export interface Session {
   show_reasoning?: boolean
   context_usage: number
   // Set when this session has an outstanding ask_user_question awaiting an
-  // answer — seeded by the initial session_list, kept live via the global
+  // answer — seeded by the initial GET /api/sessions, kept live via the global
   // session_activity broadcast (App.svelte), independent of whether this
   // tab is currently subscribed to the session.
   pending_question?: boolean
@@ -214,28 +214,7 @@ export interface ToolSearchSettings {
   threshold_pct: number
 }
 
-// WsSessionInfo matches the Go server WebSocket session info struct
-export interface WsSessionInfo {
-  id: string
-  name: string
-  status: string
-  created_at: string
-  model: string
-  total_turns: number
-  working_dir: string
-  permission_mode: 'interactive' | 'auto' | 'strict'
-  reasoning_effort: 'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | string
-  show_reasoning?: boolean
-  context_usage: number
-  pending_question?: boolean
-}
-
 // WebSocket event interfaces
-export interface WsEventSessionList {
-  type: 'session_list'
-  sessions: WsSessionInfo[]
-}
-
 export interface WsEventOutput {
   type: 'output'
   content: string
@@ -407,7 +386,6 @@ export interface WsEventSessionActivity {
 
 // Discriminated union of all WebSocket event types
 export type WsEvent =
-  | WsEventSessionList
   | WsEventOutput
   | WsEventHistoryUserMessage
   | WsEventAssistantMessage
