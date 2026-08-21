@@ -1634,7 +1634,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     const body: Record<string, unknown> = { action: event.action, fields: event.fields }
     if (panelId) body.panel = panelId
     if (event.payload !== undefined) body.payload = event.payload
-    send(`[octo-ui-action] ${JSON.stringify(body)}`)
+    // A silent action's reply updates the panel in place, so the view must
+    // stay where the user is acting — scrolled up at the panel, not at the
+    // bottom. An anonymous panel's action keeps the pin: its reply is an
+    // ordinary bubble at the bottom.
+    send(`[octo-ui-action] ${JSON.stringify(body)}`, undefined, false, !panelId)
   }
 
   // ── panel projection ───────────────────────────────────────────────────────
@@ -2269,7 +2273,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     chatSuggestion.update(s => ({ ...s, [sid]: '' }))
   }
 
-  async function send(text: string, files?: any[], queued = false) {
+  // `pin` — whether sending re-pins the view to the bottom. True for anything
+  // the user typed; false for a silent panel action, whose reply renders into
+  // the panel the user is currently looking at rather than into the scrollback.
+  async function send(text: string, files?: any[], queued = false, pin = true) {
     if (!text.trim() && !(files && files.length)) return
     const active = await ensureActiveSession()
     if (!active) {
@@ -2358,7 +2365,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       })
     }
     ws.sendMessage(sid, text, files, false, isQueued)
-    pinToBottom()
+    if (pin) pinToBottom()
   }
 
   // ── force bind ─────────────────────────────────────────────────────────────
