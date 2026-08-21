@@ -8,18 +8,25 @@ import (
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/memory"
+	"github.com/open-octo/octo-agent/internal/server"
 )
 
 // `octo memory path <dir>` resolves memory for somewhere other than cwd —
 // how the agent finds ANOTHER project's memory dir when a durable fact belongs
-// there. One command, so it works on shells without && chaining.
+// there. Resolution goes through the registry: the directory's claiming
+// project owns the notes, keyed on its ID, so what this prints is a directory
+// some project actually reads.
 func TestRunMemory_PathWithDirArg(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 
 	project := t.TempDir()
-	want, err := memory.Dir(project)
+	ref, err := server.EnsureProjectForDirOnly(project)
+	if err != nil || ref.ID == "" {
+		t.Fatalf("create project: %+v %v", ref, err)
+	}
+	want, err := ref.MemoryDir()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,12 +37,13 @@ func TestRunMemory_PathWithDirArg(t *testing.T) {
 	}
 	got := strings.SplitN(strings.TrimSpace(stdout.String()), "\n", 2)[0]
 	if got != want {
-		t.Errorf("path %q = %q, want %q", project, got, want)
+		t.Errorf("path %q = %q, want the claiming project's %q", project, got, want)
 	}
 }
 
-// A target git knows nothing about still gets memory of its own: on the CLI the
-// directory you are standing in IS the project, checkout or not.
+// A directory no project references resolves to the shared tier — inventing a
+// path-derived directory nothing reads anymore would send notes into a black
+// hole.
 func TestRunMemory_PathWithNonRepoDirArg(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -43,10 +51,6 @@ func TestRunMemory_PathWithNonRepoDirArg(t *testing.T) {
 
 	scratch := filepath.Join(home, "notes")
 	if err := os.MkdirAll(scratch, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	want, err := memory.Dir(scratch)
-	if err != nil {
 		t.Fatal(err)
 	}
 	shared, err := memory.HomeDir()
@@ -59,11 +63,8 @@ func TestRunMemory_PathWithNonRepoDirArg(t *testing.T) {
 		t.Fatalf("exit = %d, stderr: %s", code, stderr.String())
 	}
 	got := strings.SplitN(strings.TrimSpace(stdout.String()), "\n", 2)[0]
-	if got != want {
-		t.Errorf("path %q = %q, want its own dir %q", scratch, got, want)
-	}
-	if got == shared {
-		t.Errorf("path %q collapsed into the shared dir", scratch)
+	if got != shared {
+		t.Errorf("path %q = %q, want the shared tier %q", scratch, got, shared)
 	}
 }
 

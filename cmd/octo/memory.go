@@ -48,16 +48,34 @@ func runMemory(args []string, stdout, stderr io.Writer) int {
 		// which is the one place it happens.
 		cwd = abs
 	}
-	dir, err := memory.DirForProject(cwd)
-	if err != nil {
-		fmt.Fprintf(stderr, "octo memory: %v\n", err)
-		return 1
+	// Memory belongs to projects, and a directory can be referenced by any
+	// number of them. Resolve through the registry: a unique claim is that
+	// project's tier; several are listed rather than guessed between; none
+	// means the shared tier — pointing at a path-derived directory nothing
+	// reads anymore would send notes into a black hole.
+	claims := server.ProjectsClaimingDir(cwd)
+	if len(claims) > 1 {
+		fmt.Fprintf(stdout, "%d projects reference this directory — each keeps its own memory:\n", len(claims))
+		for _, c := range claims {
+			if d, derr := c.MemoryDir(); derr == nil {
+				fmt.Fprintf(stdout, "  %s\t%s\n", c.Name, d)
+			}
+		}
+		return 0
 	}
 	homeDir, _ := memory.HomeDir()
-	// One directory, two names: running in the home directory, its own slug IS
-	// the shared tier. Print it once.
-	shared := homeDir == dir
-	if shared {
+	var dir string
+	shared := false
+	if len(claims) == 1 {
+		d, derr := claims[0].MemoryDir()
+		if derr != nil {
+			fmt.Fprintf(stderr, "octo memory: %v\n", derr)
+			return 1
+		}
+		dir = d
+	} else {
+		// No project references this directory: its notes are the shared tier.
+		dir, shared = homeDir, true
 		homeDir = ""
 	}
 
@@ -72,17 +90,8 @@ func runMemory(args []string, stdout, stderr io.Writer) int {
 	if shared {
 		// Otherwise the header reads as if this directory had memory of its
 		// own, when in fact these are the notes every session gets wherever it
-		// runs. True for the home directory, and for a project pointed at it.
-		fmt.Fprintln(stdout, "These are the shared notes, read by every session — this directory has no separate memory of its own.")
-	}
-	// The CLI treats any directory as a project, so these notes always exist
-	// here. Under `octo serve` the same directory reads the shared tier until it
-	// is actually a project, and nothing else would tell the user that the notes
-	// they are looking at are invisible over there.
-	if !shared && !server.ProjectExistsForDir(cwd) && countMarkdownFiles(dir) > 0 {
-		fmt.Fprintf(stdout, "Note: no project in the web UI points at this directory, so these notes\n"+
-			"are only read by CLI sessions running here. Make it a project (Projects → its\n"+
-			"settings) to have web and IM sessions read them too.\n")
+		// runs.
+		fmt.Fprintln(stdout, "No project references this directory — these are the shared notes every session reads.")
 	}
 	fmt.Fprintf(stdout, "Memory directory: %s\n", dir)
 	printDirEntries(stdout, dir)
@@ -121,22 +130,6 @@ func memoryWriteRoots(memDir, homeMemDir string) []string {
 		return []string{root}
 	}
 	return []string{memDir, homeMemDir}
-}
-
-// countMarkdownFiles counts the .md files directly in dir — "does this hold
-// notes worth telling the user about", not a recursive inventory.
-func countMarkdownFiles(dir string) int {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return 0
-	}
-	n := 0
-	for _, e := range entries {
-		if !e.IsDir() && filepath.Ext(e.Name()) == ".md" {
-			n++
-		}
-	}
-	return n
 }
 
 func printDirEntries(w io.Writer, dir string) {
