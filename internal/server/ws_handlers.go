@@ -95,47 +95,6 @@ func (ls *sessionLiveState) flushDeltas(sessionID string) {
 
 // ─── WS handler methods on Server ──────────────────────────────────────────
 
-// listSessionsBrief returns a brief session list for the initial WS handshake.
-func (s *Server) listSessionsBrief() []wsSessionInfo {
-	sessions, err := agent.ListSessions(50)
-	if err != nil {
-		return nil
-	}
-	out := make([]wsSessionInfo, 0, len(sessions))
-	for _, sess := range sessions {
-		source := sess.Source
-		if source == "" {
-			source = "manual"
-		}
-		name := sess.DisplayTitle()
-		// Same pending-title overlay as toSessionItem: a title broadcast
-		// mid-turn isn't on disk yet, and this list feeds the sidebar.
-		if pt := s.peekPendingTitle(sess.ID); pt != "" && agent.IsAutoNamePlaceholder(sess.Title) {
-			name = pt
-		}
-		_, pm, re, sr, ctxUsage := s.sessionStatusFields(sess)
-		out = append(out, wsSessionInfo{
-			ID:                  sess.ID,
-			Name:                name,
-			Status:              s.sessionStatus(sess.ID),
-			CreatedAt:           sess.CreatedAt.UnixMilli(),
-			Source:              source,
-			AgentProfile:        sess.EffectiveAgentID(),
-			Model:               sess.Model,
-			ModelID:             sess.ModelConfig,
-			TotalTurns:          sess.TurnCount(),
-			WorkingDir:          s.sessionCwd(sess),
-			PermissionMode:      pm,
-			ReasoningEffort:     re,
-			ShowReasoning:       sr,
-			ContextUsage:        ctxUsage,
-			PendingQuestion:     s.hasPendingQuestion(sess.ID),
-			PendingConfirmation: s.hasPendingConfirmation(sess.ID),
-		})
-	}
-	return out
-}
-
 // hasPendingQuestion reports whether a session has an outstanding
 // ask_user_question awaiting an answer, so a freshly-loaded session list
 // (initial connect / page refresh) shows the sidebar badge immediately

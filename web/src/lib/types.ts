@@ -16,7 +16,7 @@ export interface Session {
   model: string
   model_id: string
   // "running" while a turn is in flight (see server sessionStatus) — seeded by
-  // session_list, kept live via session_update (subscribed tabs) and the
+  // GET /api/sessions, kept live via session_update (subscribed tabs) and the
   // global session_activity turn_started/turn_ended pair (all tabs).
   status: 'idle' | 'running' | string
   source: string
@@ -30,7 +30,7 @@ export interface Session {
   show_reasoning?: boolean
   context_usage: number
   // Set when this session has an outstanding ask_user_question awaiting an
-  // answer — seeded by the initial session_list, kept live via the global
+  // answer — seeded by the initial GET /api/sessions, kept live via the global
   // session_activity broadcast (App.svelte), independent of whether this
   // tab is currently subscribed to the session.
   pending_question?: boolean
@@ -214,28 +214,7 @@ export interface ToolSearchSettings {
   threshold_pct: number
 }
 
-// WsSessionInfo matches the Go server WebSocket session info struct
-export interface WsSessionInfo {
-  id: string
-  name: string
-  status: string
-  created_at: string
-  model: string
-  total_turns: number
-  working_dir: string
-  permission_mode: 'interactive' | 'auto' | 'strict'
-  reasoning_effort: 'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | string
-  show_reasoning?: boolean
-  context_usage: number
-  pending_question?: boolean
-}
-
 // WebSocket event interfaces
-export interface WsEventSessionList {
-  type: 'session_list'
-  sessions: WsSessionInfo[]
-}
-
 export interface WsEventOutput {
   type: 'output'
   content: string
@@ -407,7 +386,6 @@ export interface WsEventSessionActivity {
 
 // Discriminated union of all WebSocket event types
 export type WsEvent =
-  | WsEventSessionList
   | WsEventOutput
   | WsEventHistoryUserMessage
   | WsEventAssistantMessage
@@ -431,6 +409,73 @@ export type WsEvent =
   | WsEventShellPreview
   | WsEventNextMessageSuggestion
   | WsEventSessionActivity
+
+// ── Git Diff review panel ─────────────────────────────────────────────────
+// Mirrors internal/server/diff_parse.go. Prefixed Git* because WsEventDiff
+// above is a different thing entirely (the edit_file tool's inline preview).
+
+export interface GitDiffLine {
+  kind: 'context' | 'add' | 'del'
+  content: string
+}
+
+export interface GitDiffHunk {
+  header: string
+  lines: GitDiffLine[]
+}
+
+export interface GitDiffPatch {
+  old_path: string
+  new_path: string
+  hunks: GitDiffHunk[]
+}
+
+export type GitDiffStatus = 'M' | 'A' | 'D' | 'R' | 'C' | 'T' | '?'
+
+export interface GitDiffFile {
+  path: string
+  /** Renames and copies only. */
+  old_path?: string
+  status: GitDiffStatus
+  staged: boolean
+  adds: number
+  dels: number
+  binary: boolean
+  /** patch holds a prefix of the change; total_lines is the full size. */
+  truncated: boolean
+  /** The response line budget ran out before this file, so patch is null. */
+  omitted: boolean
+  total_lines: number
+  patch: GitDiffPatch | null
+}
+
+export interface GitDiffRepo {
+  root: string
+  name: string
+  branch: string
+  /** Short commit, set only when HEAD is detached. */
+  commit?: string
+  files: GitDiffFile[]
+  /** This repository's git commands failed; the others still rendered. */
+  error?: string
+}
+
+export interface GitDiffResponse {
+  repos: GitDiffRepo[]
+  truncated_files: number
+  omitted_files: number
+}
+
+export interface GitDiffSummaryRepo {
+  root: string
+  name: string
+  files: { path: string; status: string; staged: boolean }[]
+  error?: string
+}
+
+export interface GitDiffSummaryResponse {
+  repos: GitDiffSummaryRepo[]
+}
 
 // ChatMessage is the UI-layer chat message type
 export interface ChatMessage {
