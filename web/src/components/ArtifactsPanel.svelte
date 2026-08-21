@@ -246,7 +246,15 @@
   {#if $panelContent === 'lightapps'}
     <!-- ── Light Apps mode ───────────────────────────────────────────────── -->
     <div class="topbar" class:native-lift={liftForTrafficLights}>
-      <span style="flex:1"></span>
+      <div class="la-chips">
+        <span class="footer-lbl">{$t('artifacts.light_apps')}</span>
+        {#each $lightapps as a}
+        <button class="chip" class:active={a.slug === laCurSlug} title={a.name} onclick={() => selectLightApp(a.slug)}>
+          <span>{a.icon || '📦'}</span>
+          {a.name}
+        </button>
+        {/each}
+      </div>
       {@render topbarControls()}
     </div>
 
@@ -261,19 +269,8 @@
           <span>{$t('lightapps.empty')}</span>
         </div>
       {:else}
-        <div class="empty"><span>Select a Light App below</span></div>
+        <div class="empty"><span>Select a Light App above</span></div>
       {/if}
-    </div>
-
-    <!-- Footer: Light Apps chip switcher -->
-    <div class="footer">
-      <span class="footer-lbl">{$t('artifacts.light_apps')}</span>
-      {#each $lightapps as a}
-      <button class="chip" class:active={a.slug === laCurSlug} title={a.name} onclick={() => selectLightApp(a.slug)}>
-        <span>{a.icon || '📦'}</span>
-        {a.name}
-      </button>
-      {/each}
     </div>
 
   {:else if $panelContent === 'session'}
@@ -448,6 +445,11 @@ iframe { border: 0; width: 100%; height: 100%; display: block; }
   padding: 10px 16px; display: flex; align-items: center; gap: 8px; overflow-x: auto;
 }
 .footer-lbl { font-size: 11px; color: var(--text-tertiary); flex: 0 0 auto; margin-right: 2px; }
+/* Light Apps switcher now lives in the topbar; it scrolls sideways rather
+   than crowding out the panel controls when many apps are installed. */
+.la-chips {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow-x: auto;
+}
 .wbtn {
   display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px;
   background: var(--bg-container); border: 1px solid var(--border); border-radius: var(--radius-sm);
