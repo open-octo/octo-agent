@@ -86,7 +86,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     precedingSaid,
     couldBeSilentReply,
     parseActionEnvelope,
-    OCTO_UI_ACTION_PREFIX,
   } from '../lib/genui/silent-turn'
 
   // ── reactive state ─────────────────────────────────────────────────────────
@@ -1109,29 +1108,26 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       const tokens = (ev as any).tokens
       const cachePct = (ev as any).cache_pct
       if (typeof durationMs === 'number' && typeof tokens === 'number') {
-        // A silent panel-update turn hides both of its bubbles, so a summary
-        // notice would float in the transcript anchored to nothing. Fold the
-        // stats into the "panel updated" marker instead — the turn still cost
-        // tokens, and hiding that entirely would make panel actions look free.
-        let stamped = false
-        chatMessages.update(m => {
-          const list = m[sid] || []
-          for (let k = list.length - 1; k >= 0; k--) {
-            if (list[k].type !== 'assistant') continue
-            if (isSilentPairAt(list, k)) {
-              for (let j = k - 1; j >= 0; j--) {
-                if (list[j].type !== 'user' && list[j].type !== 'assistant') continue
-                const next = list.slice()
-                next[j] = { ...next[j], turnStats: `${fmtDur(Math.round(durationMs / 1000))} · ${fmtTokens(tokens)} tokens` }
-                stamped = true
-                return { ...m, [sid]: next }
-              }
+        // A silent panel-update turn draws nothing in the transcript, so a
+        // summary notice would float anchored to nothing. Hand the stats to
+        // the panel's own status chip instead (GenuiBlock, via panelTurnStats)
+        // — the turn still cost tokens, and hiding that entirely would make
+        // panel actions look free.
+        let handed = false
+        const list = get(chatMessages)[sid] || []
+        for (let k = list.length - 1; k >= 0; k--) {
+          if (list[k].type !== 'assistant') continue
+          if (isSilentPairAt(list, k)) {
+            const panelId = silentActionPanel(precedingSaid(list, k))
+            if (panelId) {
+              panelTurnStats[`${sid}\x00${panelId}`] =
+                `${fmtDur(Math.round(durationMs / 1000))} · ${fmtTokens(tokens)} tokens`
+              handed = true
             }
-            break
           }
-          return m
-        })
-        if (!stamped) {
+          break
+        }
+        if (!handed) {
           addChatMsg(sid, {
             id: uid('sum'),
             type: 'notice',
@@ -1671,26 +1667,27 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
    * since history is what it was derived from. The running flag comes from
    * the server, so it clears on every ending a turn can have.
    */
-  const pendingAction = $derived.by(() => {
+  const pendingPanel = $derived.by(() => {
     if (!streaming) return null
     for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i]
       if (m.type === 'assistant') {
-        const said = precedingSaid(msgs, i)
-        const p = silentActionPanel(said)
-        return p && couldBeSilentReply(m.content) ? { panel: p, msgId: said!.id } : null
+        const p = silentActionPanel(precedingSaid(msgs, i))
+        return p && couldBeSilentReply(m.content) ? p : null
       }
-      if (m.type === 'user') {
-        const p = silentActionPanel(m)
-        return p ? { panel: p, msgId: m.id } : null
-      }
+      if (m.type === 'user') return silentActionPanel(m)
       // Tool groups and progress rows are skipped: the model calling a tool
       // before answering is the normal shape of a panel action that needs
       // data, and the panel should stay pending across it.
     }
     return null
   })
-  const pendingPanel = $derived(pendingAction?.panel ?? null)
+
+  // Per-panel stats of the last completed silent turn, keyed "sid\0panelId".
+  // Written by the turn-done handler, shown briefly by the panel's status
+  // chip. Client-session state only — it dies with the tab, like the per-turn
+  // summary notices.
+  const panelTurnStats = $state<Record<string, string>>({})
 
   /** True when this assistant message is the hidden half of a silent pair. */
   function isHiddenReply(index: number): boolean {
@@ -2668,27 +2665,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           {#each msgs as msg, i (msg.id)}
             {@const silentPanel = msg.type === 'user' ? silentActionPanel(msg) : null}
             {#if silentPanel}
-              <!-- The user half of a silent turn. Hidden as a bubble — acting on
-                   a panel is manipulation of an object, not a thing said — but
-                   not hidden from the record: the message is in history and in
-                   every export, so a marker sits where it happened and opens to
-                   the raw action. Without it a panel would appear to change with
-                   no visible cause. -->
-              {@const updating = pendingAction?.msgId === msg.id}
-              <div class="genui-silent-marker">
-                <details>
-                  <summary>
-                    {#if updating}
-                      <iconify-icon icon="ant-design:loading-outlined" width="11" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
-                      {$t('chat.genui_panel_updating')}
-                    {:else}
-                      <iconify-icon icon="ant-design:check-circle-outlined" width="11"></iconify-icon>
-                      {$t('chat.genui_panel_updated')}{#if msg.turnStats}&nbsp;· {msg.turnStats}{/if}
-                    {/if}
-                  </summary>
-                  <pre class="genui-action-json">{msg.content.slice(OCTO_UI_ACTION_PREFIX.length)}</pre>
-                </details>
-              </div>
+              <!-- The user half of a silent turn. Acting on a panel is
+                   manipulation of an object, not a thing said, so it draws
+                   nothing in the transcript at all — feedback lives on the
+                   panel itself (GenuiBlock's status chip). The message still
+                   exists in history and in every export; only this view
+                   elides it. -->
             {:else if isHiddenReply(i)}
               <!-- The model half of a silent turn: its single octo-ui fence is
                    projected into the panel above instead of drawn here. -->
@@ -2868,6 +2850,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                             spec={live}
                             interactive={seg.complete}
                             pending={!!seg.spec.id && pendingPanel === seg.spec.id}
+                            stats={seg.spec.id ? panelTurnStats[`${id ?? ''}\x00${seg.spec.id}`] : undefined}
                             sessionId={id ?? ''}
                             onaction={(a) => sendGenuiAction(a, seg.spec?.id)}
                           />
@@ -3499,25 +3482,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
    <details>, so a genui button click doesn't leak raw JSON into the
    transcript at a glance. */
 .genui-action-chip { font-size: 13px; color: var(--text); }
-/* Marker standing in for a hidden silent-turn pair. Deliberately quiet — it
-   records that a panel changed and why, without reading as a message. */
-.genui-silent-marker {
-  display: flex;
-  justify-content: center;
-  margin: 2px 0;
-}
-.genui-silent-marker summary {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-  list-style: none;
-  font-size: 11px;
-  color: var(--text-tertiary, var(--text-secondary));
-  opacity: 0.75;
-}
-.genui-silent-marker summary::-webkit-details-marker { display: none; }
-.genui-silent-marker summary:hover { opacity: 1; }
 .genui-action-chip summary {
   display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
   color: var(--text-secondary); list-style: none;

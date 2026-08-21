@@ -26,6 +26,7 @@
     spec,
     interactive = true,
     pending = false,
+    stats = undefined,
     sessionId = '',
     onaction,
   }: {
@@ -36,6 +37,9 @@
     interactive?: boolean
     /** True while a silent turn fired from this panel is in flight. */
     pending?: boolean
+    /** Cost summary of the last silent turn this panel fired ("5s · 1.6k
+     * tokens"), shown on the transient "updated" chip. */
+    stats?: string
     /** Session the panel belongs to; required for state to persist. */
     sessionId?: string
     onaction?: (event: GenuiActionEvent) => void
@@ -136,7 +140,7 @@
   {:else if justUpdated}
     <span class="genui-status done" role="status" out:fade={{ duration: 400 }}>
       <iconify-icon icon="ant-design:check-circle-outlined" width="11"></iconify-icon>
-      {$t('chat.genui_panel_updated')}
+      {$t('chat.genui_panel_updated')}{#if stats}&nbsp;· {stats}{/if}
     </span>
   {/if}
   {#if spec.title}
