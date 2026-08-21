@@ -152,6 +152,28 @@ func DirForProject(projectDir string) (string, error) {
 	return Dir(projectDir)
 }
 
+// DirForProjectID returns the memory directory for a project by its stable
+// identity: ~/.octo/memories/<Slugify(base)>-p<hash of id>. base is the
+// readable half — callers pass the workspace directory's basename, which is
+// fixed at the project's creation — and the id hash is what actually keys the
+// directory, so neither renaming the project nor anything happening to its
+// directories on disk ever moves its memory. The "-p" marker keeps these
+// slugs distinguishable from the path-derived ones Dir produces, which the
+// startup migration uses to tell already-migrated directories apart.
+func DirForProjectID(id, base string) (string, error) {
+	root, err := RootDir()
+	if err != nil {
+		return "", err
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(id))
+	seg := Slugify(base)
+	if seg == "" {
+		seg = "project"
+	}
+	return filepath.Join(root, fmt.Sprintf("%s-p%08x", seg, h.Sum32())), nil
+}
+
 // dirSlug derives a stable, human-readable directory name from a project
 // directory: the basename plus a short hash of the full path, so two projects
 // sharing a basename (e.g. two checkouts of "app") don't collide. Callers reach
