@@ -50,6 +50,16 @@ export function projectPanels(messages: ChatMessage[]): Map<string, PanelProject
       if (!id) continue
 
       const prev = out.get(id)
+      // An incomplete fence never replaces an existing version. While a new
+      // version streams in, its partial spec already carries the id, but the
+      // silent classification can't hold yet (isSilentReply requires a
+      // complete fence) — so the anchor would jump to a message the
+      // transcript hides, unmounting the panel mid-update, then jump back
+      // once the fence closes. Keeping the previous complete version until
+      // the new one finishes makes an update a single atomic swap. A panel's
+      // FIRST version has no fallback to show, so it still renders its
+      // partial spec live as it streams.
+      if (!seg.complete && prev) continue
       out.set(id, {
         spec: seg.spec as GenuiSpec,
         // A silent reply keeps the existing anchor. The `?? msg.id` fallback

@@ -58,6 +58,30 @@ describe('projectPanels', () => {
     expect((panels.get('a')?.spec.items[0] as any).text).toBe('A2')
     expect((panels.get('b')?.spec.items[0] as any).text).toBe('B1')
   })
+
+  it('holds the previous version steady while a new one is still streaming', () => {
+    // The incomplete fence's partial spec already carries the id, but the
+    // silent classification can't hold until the fence closes — without the
+    // guard the anchor jumps to the hidden streaming message and the panel
+    // unmounts mid-update.
+    const seed = msg('assistant', fence('p', 'v1'))
+    const streamingReply = msg('assistant', '```octo-ui\n{"id":"p","items":[{"type":"text","text":"v2 partial"')
+    streamingReply.streaming = true
+    const panels = projectPanels([seed, action('p'), streamingReply])
+    const p = panels.get('p')
+    expect((p?.spec.items[0] as any).text).toBe('v1')
+    expect(p?.anchorMsgId).toBe(seed.id)
+    expect(p?.versions).toBe(1)
+    expect(isAnchor(panels, p!.spec, seed.id, 0)).toBe(true)
+  })
+
+  it('still renders a first version live while its fence streams', () => {
+    const streaming = msg('assistant', '```octo-ui\n{"id":"p","items":[{"type":"text","text":"building"}')
+    streaming.streaming = true
+    const p = projectPanels([streaming]).get('p')
+    expect(p?.anchorMsgId).toBe(streaming.id)
+    expect((p?.spec.items[0] as any).text).toBe('building')
+  })
 })
 
 describe('isAnchor', () => {
