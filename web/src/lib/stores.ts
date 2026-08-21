@@ -96,8 +96,32 @@ export const artifactView = writable<ArtifactView>('preview')
 export const artifactModalOpen = writable(false)
 
 // Artifacts panel sidebar mode. null = closed, 'session' = session artifacts,
-// 'lightapps' = Light Apps list + rendering.
-export const panelContent = writable<'session' | 'lightapps' | null>(null)
+// 'lightapps' = Light Apps list + rendering, 'diff' = git diff review.
+export const panelContent = writable<'session' | 'lightapps' | 'diff' | null>(null)
+
+// The two modes the panel's own switcher offers, and the one it comes back to.
+// Light Apps is not among them: it has its own entry point and is never a
+// default. Persisted for the same reason the panel's width is — which of these
+// two a user reaches for is a habit, not a per-visit decision.
+export type PanelMode = 'session' | 'diff'
+const PANEL_MODE_KEY = 'octo.panelMode'
+
+export function readPanelMode(): PanelMode {
+  try {
+    return localStorage.getItem(PANEL_MODE_KEY) === 'diff' ? 'diff' : 'session'
+  } catch {
+    return 'session'
+  }
+}
+
+export function savePanelMode(mode: PanelMode): void {
+  try { localStorage.setItem(PANEL_MODE_KEY, mode) } catch { /* private mode: this visit only */ }
+}
+
+/** Open the panel in its remembered mode, or close it if it is already open. */
+export function togglePanel(): void {
+  panelContent.update(v => v ? null : readPanelMode())
+}
 
 // Artifacts panel taking over the whole content area except the sidebar, so a
 // preview can be read at full width without leaving the layout. Deliberately

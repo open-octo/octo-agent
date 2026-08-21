@@ -264,14 +264,6 @@ func (c *wsConn) readPump() {
 // dispatch routes an inbound WS message to the appropriate handler.
 func (c *wsConn) dispatch(msgType string, raw []byte) {
 	switch msgType {
-	case "list_sessions":
-		sessions := c.hub.s.listSessionsBrief()
-		b, _ := json.Marshal(wsEventSessionList{
-			Type:     "session_list",
-			Sessions: sessions,
-		})
-		c.send <- b
-
 	case "subscribe":
 		var msg wsMsgSubscribe
 		if err := json.Unmarshal(raw, &msg); err != nil {
@@ -383,7 +375,6 @@ func (c *wsConn) dispatch(msgType string, raw []byte) {
 // by embedding a hub field via interface.
 
 type wsHubOwner interface {
-	listSessionsBrief() []wsSessionInfo
 	handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage)
 	handleWSInterrupt(sessionID string)
 	handleWSRetry(conn *wsConn, sessionID string)

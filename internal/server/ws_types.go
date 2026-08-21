@@ -102,31 +102,6 @@ type wsOutEvent struct {
 	Type string `json:"type"`
 }
 
-// wsEventSessionList carries the full session list sent on connect + refresh.
-type wsEventSessionList struct {
-	Type     string          `json:"type"`
-	Sessions []wsSessionInfo `json:"sessions"`
-}
-
-type wsSessionInfo struct {
-	ID                  string `json:"id"`
-	Name                string `json:"name"`
-	Status              string `json:"status,omitempty"` // "idle" | "running"
-	CreatedAt           int64  `json:"created_at"`       // unix ms
-	Source              string `json:"source,omitempty"` // "manual" | "cron" | "channel" | "setup"
-	AgentProfile        string `json:"agent_profile,omitempty"`
-	Model               string `json:"model,omitempty"`
-	ModelID             string `json:"model_id,omitempty"`
-	TotalTurns          int    `json:"total_turns,omitempty"`
-	WorkingDir          string `json:"working_dir,omitempty"`
-	PermissionMode      string `json:"permission_mode,omitempty"`
-	ReasoningEffort     string `json:"reasoning_effort,omitempty"`
-	ShowReasoning       *bool  `json:"show_reasoning,omitempty"`
-	ContextUsage        int    `json:"context_usage,omitempty"`
-	PendingQuestion     bool   `json:"pending_question,omitempty"`
-	PendingConfirmation bool   `json:"pending_confirmation,omitempty"`
-}
-
 type wsEventHistoryUserMessage struct {
 	Type      string   `json:"type"`
 	Content   string   `json:"content"`
