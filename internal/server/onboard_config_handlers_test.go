@@ -318,9 +318,9 @@ func TestCreateSession_NoWorkspaceDir_DefaultsToOcto(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantDir := filepath.Join(home, "Octo")
+	wantDir := filepath.Join(home, "Octo", "tasks", sess.ID)
 	if sess.WorkingDir != wantDir {
-		t.Errorf("WorkingDir = %q, want %q (default ~/Octo)", sess.WorkingDir, wantDir)
+		t.Errorf("WorkingDir = %q, want the task workspace %q under the default ~/Octo", sess.WorkingDir, wantDir)
 	}
 }
 
@@ -351,11 +351,12 @@ func TestCreateSession_WorkspaceDirConfigured_SetsWorkingDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sess.WorkingDir != wantDir {
-		t.Errorf("WorkingDir = %q, want %q", sess.WorkingDir, wantDir)
+	wantTask := filepath.Join(wantDir, "tasks", sess.ID)
+	if sess.WorkingDir != wantTask {
+		t.Errorf("WorkingDir = %q, want the task workspace %q", sess.WorkingDir, wantTask)
 	}
-	if st, err := os.Stat(wantDir); err != nil || !st.IsDir() {
-		t.Errorf("workspace dir %q was not created: %v", wantDir, err)
+	if st, err := os.Stat(wantTask); err != nil || !st.IsDir() {
+		t.Errorf("task workspace %q was not created: %v", wantTask, err)
 	}
 }
 

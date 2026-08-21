@@ -89,9 +89,9 @@ func TestDoAgentTurn_TerminalRunsInSessionWorkingDir(t *testing.T) {
 	if err := sess.Save(); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	want := filepath.Join(tmp, "Octo")
+	want := filepath.Join(tmp, "Octo", "tasks", sess.ID)
 	if sess.WorkingDir != want {
-		t.Fatalf("precondition: seeded WorkingDir = %q, want %q", sess.WorkingDir, want)
+		t.Fatalf("precondition: seeded WorkingDir = %q, want the task workspace %q", sess.WorkingDir, want)
 	}
 
 	srv.doAgentTurn(sess, "where are you", nil, nil)

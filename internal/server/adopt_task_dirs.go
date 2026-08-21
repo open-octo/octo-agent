@@ -2,6 +2,8 @@ package server
 
 import (
 	"log/slog"
+	"path/filepath"
+	"strings"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/memory"
@@ -31,6 +33,17 @@ import (
 // skipped, and a second run over the same directory finds the project the first
 // one made. Every failure is logged and skipped — this is a convenience pass,
 // and a session that stays a task keeps working exactly as it did.
+// underAnyDefault reports whether normalized dir lies under any of the
+// "nobody chose this" roots — quiet skip, not a per-session validation error.
+func underAnyDefault(defaults map[string]bool, dir string) bool {
+	for d := range defaults {
+		if strings.HasPrefix(dir, d+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) adoptTaskWorkingDirs() {
 	sessions, err := agent.ListSessions(0)
 	if err != nil {
@@ -64,6 +77,11 @@ func (s *Server) adoptTaskWorkingDirs() {
 		dir := memory.NormalizeDir(sess.WorkingDir)
 		if defaults[dir] {
 			continue // a default, not a choice
+		}
+		if underAnyDefault(defaults, dir) {
+			// Inside the workspace root — a task's throwaway workspace or some
+			// other octo-owned ground. Never a choice, never a project.
+			continue
 		}
 		byDir[sess.WorkingDir] = append(byDir[sess.WorkingDir], sess.ID)
 	}

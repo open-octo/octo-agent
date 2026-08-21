@@ -365,8 +365,8 @@ func TestProject_NewSessionNotSeededWithDefaultDir(t *testing.T) {
 	if inProject.WorkingDir != "" {
 		t.Errorf("session in project was seeded with %q, want no own dir", inProject.WorkingDir)
 	}
-	if outside.WorkingDir != workspace {
-		t.Errorf("session outside project: WorkingDir = %q, want workspace default %q", outside.WorkingDir, workspace)
+	if want := filepath.Join(workspace, "tasks", outside.ID); outside.WorkingDir != want {
+		t.Errorf("session outside project: WorkingDir = %q, want its task workspace %q", outside.WorkingDir, want)
 	}
 }
 
@@ -476,8 +476,8 @@ func TestProject_CreateSessionInDirlessGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load created session: %v", err)
 	}
-	if loaded.WorkingDir != workspace {
-		t.Errorf("session in a dirless group: WorkingDir = %q, want seeded default %q", loaded.WorkingDir, workspace)
+	if want := filepath.Join(workspace, "tasks", sid); loaded.WorkingDir != want {
+		t.Errorf("session in a dirless group: WorkingDir = %q, want its task workspace %q", loaded.WorkingDir, want)
 	}
 }
 

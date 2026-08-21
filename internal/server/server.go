@@ -594,6 +594,9 @@ func New(cfg Config) (*Server, error) {
 func (s *Server) reconcileRegistry() {
 	s.dissolvePlainGroups()
 	s.adoptTaskWorkingDirs()
+	// After adoption so a directory the passes above still care about is
+	// settled; only ever touches <workspace>/tasks/ (see underTasksRoot).
+	s.sweepOrphanTaskWorkspaces()
 }
 
 // enableSubAgentTools registers the process-global sub-agent manager + task
