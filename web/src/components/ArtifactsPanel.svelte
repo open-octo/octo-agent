@@ -247,7 +247,6 @@
     <!-- ── Light Apps mode ───────────────────────────────────────────────── -->
     <div class="topbar" class:native-lift={liftForTrafficLights}>
       <span style="flex:1"></span>
-      <span class="sandboxed-label">{$t('artifacts.sandboxed')}</span>
       {@render topbarControls()}
     </div>
 
@@ -417,7 +416,6 @@
   cursor: pointer; background: transparent; color: var(--text-secondary); font-family: inherit;
 }
 .seg-btn.active { background: var(--bg-container); color: var(--blue-6); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
-.sandboxed-label { margin-left: auto; font-size: 11px; color: var(--text-tertiary); }
 .body { flex: 1; min-height: 0; background: var(--bg-container); }
 .body-loading { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); }
 .empty {
