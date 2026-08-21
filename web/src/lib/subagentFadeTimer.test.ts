@@ -17,7 +17,7 @@ function agent(id: string, status: SubAgentState['status']): SubAgentState {
     agentType: 'general',
     status,
     lastTool: '',
-    tools: [],
+    steps: [],
     startedAt: Date.now(),
   }
 }

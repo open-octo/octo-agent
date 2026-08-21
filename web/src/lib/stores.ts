@@ -590,13 +590,17 @@ export function setToolError(sessionId: string, toolId: string | undefined, erro
 
 // ── Sub-agents ───────────────────────────────────────────────────────────────
 // One live entry per concurrent sub-agent, driven by the sub_agent_event stream
-// (kind: started | tool | tool_error | done). The panel is a live view of the
-// current turn; resetSubAgents() clears it when a new turn starts.
-export interface SubAgentTool {
-  name: string
-  error: boolean
-  input?: Record<string, any> // optional tool arguments for display
-}
+// (kind: started | tool | tool_done | tool_error | text | done). The panel is a
+// live view of the current turn; resetSubAgents() clears it when a new turn
+// starts. The full trail persists server-side and is reviewable from the
+// transcript's sub_agent tool card.
+
+// One entry in an agent's trail: a tool call (input, then the capped output
+// once it finishes) or one of the agent's assistant text blocks, in order.
+export type AgentTrailStep =
+  | { kind: 'tool'; id: string; name: string; input?: Record<string, any>; output?: string; done: boolean; error: boolean }
+  | { kind: 'text'; text: string }
+
 export interface SubAgentState {
   id: string
   description: string
@@ -605,8 +609,54 @@ export interface SubAgentState {
   // or was killed. cancelled: user killed (context canceled) while running.
   status: 'running' | 'done' | 'error' | 'cancelled'
   lastTool: string
-  tools: SubAgentTool[]
+  steps: AgentTrailStep[]
+  result?: string // capped final reply, set on "done"
   startedAt: number
+}
+
+// The sub_agent_event WS payload fields the store folds (see the server's
+// subAgentEventPayload — one wire shape for live broadcast and replay).
+export interface SubAgentEventPayload {
+  agent_id?: string
+  description?: string
+  agent_type?: string
+  kind?: string
+  tool_id?: string
+  tool_name?: string
+  tool_input?: Record<string, any>
+  tool_output?: string
+  text?: string
+  stop_reason?: string
+  result?: string
+}
+
+// foldTrailStep folds one tool/text event into a steps array (mutates steps —
+// callers pass a fresh copy). Kind arrives already stripped of any "agent_"
+// prefix so sub-agent and workflow-agent events share the fold.
+export function foldTrailStep(steps: AgentTrailStep[], kind: string, ev: SubAgentEventPayload): void {
+  if (kind === 'tool') {
+    steps.push({ kind: 'tool', id: ev.tool_id ?? '', name: ev.tool_name || 'tool', input: ev.tool_input, done: false, error: false })
+    return
+  }
+  if (kind === 'tool_done' || kind === 'tool_error') {
+    const isErr = kind === 'tool_error'
+    const id = ev.tool_id ?? ''
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const st = steps[i]
+      if (st.kind !== 'tool' || st.done) continue
+      if ((id && st.id === id) || (!id && st.name === ev.tool_name)) {
+        steps[i] = { ...st, output: ev.tool_output, done: true, error: isErr }
+        return
+      }
+    }
+    // Unmatched completion (e.g. replay after the "tool" event aged out of the
+    // retention buffer) — append it so the output still shows.
+    steps.push({ kind: 'tool', id, name: ev.tool_name || 'tool', output: ev.tool_output, done: true, error: isErr })
+    return
+  }
+  if (kind === 'text' && ev.text) {
+    steps.push({ kind: 'text', text: ev.text })
+  }
 }
 
 export function resetSubAgents(sessionId: string) {
@@ -649,16 +699,11 @@ export function removeSubAgent(sessionId: string, agentId: string) {
   })
 }
 
-export function applySubAgentEvent(
-  sessionId: string,
-  agentId: string,
-  description: string,
-  agentType: string,
-  kind: string,
-  toolName: string,
-  toolInput?: Record<string, any>,
-  stopReason?: string,
-) {
+export function applySubAgentEvent(sessionId: string, ev: SubAgentEventPayload) {
+  const agentId = ev.agent_id ?? ''
+  const kind = ev.kind ?? ''
+  const description = ev.description ?? ''
+  const agentType = ev.agent_type ?? ''
   chatSubAgents.update(m => {
     const list = [...(m[sessionId] || [])]
     let idx = list.findIndex(a => a.id === agentId)
@@ -669,7 +714,7 @@ export function applySubAgentEvent(
         agentType,
         status: 'running',
         lastTool: '',
-        tools: [],
+        steps: [],
         startedAt: Date.now(),
       }
       if (idx >= 0) list[idx] = entry
@@ -678,16 +723,17 @@ export function applySubAgentEvent(
     }
     if (idx < 0) {
       // Tool/done arrived before a started event (e.g. resumed agent) — seed it.
-      list.push({ id: agentId, description: description || agentId, agentType, status: 'running', lastTool: '', tools: [], startedAt: Date.now() })
+      list.push({ id: agentId, description: description || agentId, agentType, status: 'running', lastTool: '', steps: [], startedAt: Date.now() })
       idx = list.length - 1
     }
-    const a = { ...list[idx], tools: [...list[idx].tools] }
+    const a = { ...list[idx], steps: [...list[idx].steps] }
     if (description && a.description === a.id) a.description = description
     if (agentType && !a.agentType) a.agentType = agentType
-    if (kind === 'tool' || kind === 'tool_error') {
-      a.tools.push({ name: toolName || 'tool', error: kind === 'tool_error', input: toolInput })
-      a.lastTool = toolName || a.lastTool
+    if (kind === 'tool' || kind === 'tool_done' || kind === 'tool_error' || kind === 'text') {
+      foldTrailStep(a.steps, kind, ev)
+      if (kind === 'tool' && ev.tool_name) a.lastTool = ev.tool_name
     } else if (kind === 'done') {
+      const stopReason = ev.stop_reason
       if (stopReason === 'killed') {
         a.status = 'cancelled'
       } else if (!stopReason || stopReason === 'error') {
@@ -695,6 +741,7 @@ export function applySubAgentEvent(
       } else {
         a.status = 'done'
       }
+      if (ev.result) a.result = ev.result
     }
     list[idx] = a
     return { ...m, [sessionId]: list }
@@ -703,33 +750,53 @@ export function applySubAgentEvent(
 
 // ── Background workflows ─────────────────────────────────────────────────────
 // Live running workflow runs, driven by the workflow_event stream
-// (kind: started | progress | done). The pinned panel only shows workflows that
-// are still running; once a run finishes it is removed so the bar does not grow
-// indefinitely. Completion is already visible as a chat message from the agent.
+// (kind: started | progress | agent_* | done). The pinned panel only shows
+// workflows that are still running; once a run finishes it is removed so the
+// bar does not grow indefinitely. Completion is already visible as a chat
+// message from the agent, and the full trail persists server-side for the
+// transcript's workflow tool card.
 const maxWorkflowProgressLines = 200
+
+// One agent()/skill() call inside a workflow run, with its own trail.
+export interface WorkflowAgentState {
+  id: string // per-run handle, e.g. "a1"
+  label: string
+  status: 'running' | 'done' | 'error'
+  steps: AgentTrailStep[]
+  reply?: string
+  error?: string
+}
 
 export interface WorkflowRunState {
   id: string
   description: string
   status: 'running' | 'done' | 'error'
   progress: string[]
+  agents: WorkflowAgentState[]
   startedAt: number
 }
 
-export function applyWorkflowEvent(
-  sessionId: string,
-  runId: string,
-  description: string,
-  kind: string,
-  line: string,
-  status: string,
-) {
+// The workflow_event WS payload fields the store folds (see the server's
+// workflowEventPayload — one wire shape for live broadcast and replay).
+export interface WorkflowEventPayload extends SubAgentEventPayload {
+  run_id?: string
+  line?: string
+  status?: string
+  agent_label?: string
+  reply?: string
+  error?: string
+}
+
+export function applyWorkflowEvent(sessionId: string, ev: WorkflowEventPayload) {
+  const runId = ev.run_id ?? ''
+  const kind = ev.kind ?? ''
+  const description = ev.description ?? ''
   if (!runId) return
   chatWorkflows.update(m => {
     let list = [...(m[sessionId] || [])]
     let idx = list.findIndex(r => r.id === runId)
     if (idx < 0) {
-      list.push({ id: runId, description: description || runId, status: 'running', progress: [], startedAt: Date.now() })
+      list.push({ id: runId, description: description || runId, status: 'running', progress: [], agents: [], startedAt: Date.now() })
       idx = list.length - 1
     }
     if (kind === 'done') {
@@ -739,14 +806,38 @@ export function applyWorkflowEvent(
       list = list.filter(r => r.id !== runId)
       return { ...m, [sessionId]: list }
     }
-    const r = { ...list[idx], progress: [...list[idx].progress] }
+    const r = { ...list[idx], progress: [...list[idx].progress], agents: [...list[idx].agents] }
     if (description && (r.description === r.id || !r.description)) r.description = description
     if (kind === 'progress') {
+      const line = ev.line ?? ''
       if (line) {
         r.progress.push(line)
         if (r.progress.length > maxWorkflowProgressLines) {
           r.progress = r.progress.slice(r.progress.length - maxWorkflowProgressLines)
         }
+      }
+    } else if (kind.startsWith('agent_')) {
+      const agentId = ev.agent_id ?? ''
+      if (agentId) {
+        let ai = r.agents.findIndex(a => a.id === agentId)
+        if (ai < 0) {
+          r.agents.push({ id: agentId, label: ev.agent_label || agentId, status: 'running', steps: [] })
+          ai = r.agents.length - 1
+        }
+        const a = { ...r.agents[ai], steps: [...r.agents[ai].steps] }
+        if (ev.agent_label) a.label = ev.agent_label
+        if (kind === 'agent_done') {
+          if (ev.error) {
+            a.error = ev.error
+            a.status = 'error'
+          } else {
+            a.reply = ev.reply
+            a.status = 'done'
+          }
+        } else {
+          foldTrailStep(a.steps, kind.slice('agent_'.length), ev)
+        }
+        r.agents[ai] = a
       }
     }
     list[idx] = r

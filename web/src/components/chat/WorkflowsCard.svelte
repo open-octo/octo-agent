@@ -1,6 +1,7 @@
 <script lang="ts">
-  import type { WorkflowRunState } from '../../lib/stores'
+  import type { WorkflowRunState, WorkflowAgentState } from '../../lib/stores'
   import { t } from '../../lib/i18n'
+  import AgentTrail from './AgentTrail.svelte'
 
   // Background workflow runs for the session. Fed from chatWorkflows; these
   // persist across turns (a workflow runs detached).
@@ -15,8 +16,17 @@
   }
 
   // Last few progress lines, newest last — the live tail shown under a run.
+  // Once structured agent rows are present, the engine's "→ label" / "✓ label"
+  // lifecycle lines duplicate them, so they're filtered from the tail.
   function tail(r: WorkflowRunState): string[] {
-    return r.progress.slice(-6)
+    const lines = r.agents.length > 0
+      ? r.progress.filter(l => !l.startsWith('→ ') && !l.startsWith('✓ '))
+      : r.progress
+    return lines.slice(-6)
+  }
+
+  function agentToolCount(a: WorkflowAgentState): number {
+    return a.steps.filter(s => s.kind === 'tool').length
   }
 </script>
 
@@ -63,11 +73,30 @@
         <iconify-icon icon="lucide:chevron-right" width="13" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
       </summary>
       <div class="run-body">
-        {#if tail(r).length === 0}
+        {#if tail(r).length === 0 && r.agents.length === 0}
           <span class="step mono" style="color:var(--text-tertiary)">{$t('workflow.no_progress')}</span>
         {:else}
           {#each tail(r) as line}
             <div class="step mono">{line}</div>
+          {/each}
+          {#each r.agents as a (a.id)}
+            <details class="wf-agent" open={a.status === 'running'}>
+              <summary class="wf-agent-summary">
+                {#if a.status === 'running'}
+                  <iconify-icon icon="ant-design:loading-outlined" width="12" style="color:var(--blue-6);animation:octo-spin 0.8s linear infinite"></iconify-icon>
+                {:else if a.status === 'error'}
+                  <iconify-icon icon="ant-design:close-circle-outlined" width="12" style="color:var(--error)"></iconify-icon>
+                {:else}
+                  <iconify-icon icon="ant-design:check-circle-outlined" width="12" style="color:var(--success)"></iconify-icon>
+                {/if}
+                <span class="wf-agent-id mono">{a.id}</span>
+                <span class="wf-agent-label">{a.label}</span>
+                <span class="wf-agent-count mono">{$t('agent.n_tools').replace('{n}', String(agentToolCount(a)))}</span>
+              </summary>
+              <div class="wf-agent-body">
+                <AgentTrail steps={a.steps} running={a.status === 'running'} result={a.reply ?? ''} resultError={a.error ?? ''} />
+              </div>
+            </details>
           {/each}
         {/if}
         {#if r.status !== 'running'}
@@ -124,4 +153,18 @@
   font-size: 12px; color: var(--text-secondary); word-break: break-word; overflow: hidden;
 }
 .hint { font-size: 11px; color: var(--text-tertiary); }
+.wf-agent { border: 1px solid var(--border-table); border-radius: 8px; background: var(--bg-container); }
+.wf-agent-summary {
+  list-style: none; display: flex; align-items: center; gap: 7px;
+  padding: 6px 10px; cursor: pointer; user-select: none; font-size: 12px; min-width: 0;
+}
+.wf-agent-summary::-webkit-details-marker { display: none; }
+.wf-agent-summary:hover { background: var(--hover-neutral); border-radius: 8px; }
+.wf-agent-id { color: var(--blue-6); font-weight: 600; font-size: 11px; flex: 0 0 auto; }
+.wf-agent-label {
+  color: var(--text-heading); font-weight: 500; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.wf-agent-count { color: var(--text-tertiary); font-size: 11px; flex: 0 0 auto; }
+.wf-agent-body { border-top: 1px solid var(--border-table); padding: 8px 10px; }
 </style>

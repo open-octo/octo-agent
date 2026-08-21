@@ -1,9 +1,14 @@
 <script lang="ts">
   import type { SubAgentState } from '../../lib/stores'
   import { t } from '../../lib/i18n'
+  import AgentTrail from './AgentTrail.svelte'
 
   // Live concurrent sub-agents for the current turn. Fed from chatSubAgents.
   let { agents = [], elapsed = 0 }: { agents?: SubAgentState[]; elapsed?: number } = $props()
+
+  function toolCount(a: SubAgentState): number {
+    return a.steps.filter(s => s.kind === 'tool').length
+  }
 
   let runningCount = $derived(agents.filter(a => a.status === 'running').length)
   let hasError = $derived(agents.some(a => a.status === 'error' || a.status === 'cancelled'))
@@ -87,41 +92,23 @@
         {#if a.status === 'running'}
           <span class="status-running">
             <iconify-icon icon="ant-design:loading-outlined" width="12" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
-            <span class="mono">{a.lastTool || $t('agent.working')} · {$t('agent.n_tools').replace('{n}', String(a.tools.length))}</span>
+            <span class="mono">{a.lastTool || $t('agent.working')} · {$t('agent.n_tools').replace('{n}', String(toolCount(a)))}</span>
           </span>
         {:else if a.status === 'error' || a.status === 'cancelled'}
           <span class="status-error">
             <iconify-icon icon="ant-design:close-circle-outlined" width="13"></iconify-icon>
-            {$t(a.status === 'cancelled' ? 'agent.cancelled_n_tools' : 'agent.error_n_tools').replace('{n}', String(a.tools.length))}
+            {$t(a.status === 'cancelled' ? 'agent.cancelled_n_tools' : 'agent.error_n_tools').replace('{n}', String(toolCount(a)))}
           </span>
         {:else}
           <span class="status-done">
             <iconify-icon icon="ant-design:check-circle-outlined" width="13"></iconify-icon>
-            {$t('agent.done_n_tools').replace('{n}', String(a.tools.length))}
+            {$t('agent.done_n_tools').replace('{n}', String(toolCount(a)))}
           </span>
         {/if}
         <iconify-icon icon={(expanded[a.id] ?? (a.status !== 'running')) ? 'lucide:chevron-down' : 'lucide:chevron-right'} width="13" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
       </summary>
       <div class="agent-body">
-        {#if a.tools.length === 0}
-          <span class="step mono" style="color:var(--text-tertiary)">{$t('agent.no_tools_yet')}</span>
-        {:else}
-          {#each a.tools as tool, i}
-            <div class="step mono" class:err={tool.error}>
-              {#if tool.error}
-                <iconify-icon icon="ant-design:close-circle-outlined" width="12" style="color:var(--error)"></iconify-icon>
-              {:else if a.status === 'running' && i === a.tools.length - 1}
-                <iconify-icon icon="ant-design:loading-outlined" width="12" style="color:var(--blue-6);animation:octo-spin 0.8s linear infinite"></iconify-icon>
-              {:else}
-                <iconify-icon icon="ant-design:check-circle-outlined" width="12" style="color:var(--success)"></iconify-icon>
-              {/if}
-              <span class="tool-name">{tool.name}</span>
-              {#if tool.input && Object.keys(tool.input).length > 0}
-                <span class="tool-input mono">({Object.entries(tool.input).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(', ')})</span>
-              {/if}
-            </div>
-          {/each}
-        {/if}
+        <AgentTrail steps={a.steps} running={a.status === 'running'} result={a.result ?? ''} />
       </div>
     </details>
   {/each}
@@ -177,13 +164,5 @@
 .agent-body {
   border-top: 1px solid var(--border-table); background: var(--bg-sidebar);
   padding: 8px 14px 8px 46px; display: flex; flex-direction: column; gap: 6px;
-}
-.step { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); flex-wrap: wrap; }
-.step.err { color: var(--error-dark); }
-.tool-name { font-weight: 500; }
-.tool-input {
-  font-size: 11px; color: var(--text-tertiary); opacity: 0.8;
-  display: inline-block; max-width: 420px; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
 }
 </style>
