@@ -176,50 +176,94 @@ func (s channelFileSender) SendFile(path, name string) error {
 }
 
 func (c chatAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskResponse, error) {
+	res := tools.AskResponse{Answers: make([]tools.AskAnswer, len(q.Questions))}
+	for i, question := range q.Questions {
+		answer, outcome, err := c.askOne(ctx, question, i, len(q.Questions))
+		if err != nil {
+			return tools.AskResponse{Outcome: tools.AskRejected}, err
+		}
+		if outcome != tools.AskSubmitted {
+			// Clarify and reject both end the set here. Clarify still carries
+			// the answers gathered so far, which is what the model reads.
+			res.Outcome = outcome
+			return res, nil
+		}
+		res.Answers[i] = answer
+	}
+	return res, nil
+}
+
+// askOne sends one question and consumes one reply. Each question takes its
+// own ask slot, so parseAskReply keeps working against a single question and
+// the "next plain message" contract is unchanged.
+func (c chatAsker) askOne(ctx context.Context, q tools.AskQuestion, idx, total int) (tools.AskAnswer, tools.AskOutcome, error) {
 	replyCh, release, err := c.sess.BeginAsk(c.ev.ChatID, c.ev.UserID)
 	if err != nil {
-		return tools.AskResponse{}, err
+		return tools.AskAnswer{}, tools.AskRejected, err
 	}
 	defer release()
 
-	var b strings.Builder
-	b.WriteString("❓ ")
-	if q.Header != "" {
-		fmt.Fprintf(&b, "[%s] ", q.Header)
-	}
-	b.WriteString(q.Question + "\n")
-	for i, opt := range q.Options {
-		fmt.Fprintf(&b, "%d. %s\n", i+1, opt)
-	}
-	if q.MultiSelect {
-		b.WriteString("Reply with number(s), e.g. 1,3 — or free text for something else.")
-	} else {
-		b.WriteString("Reply with a number — or free text for something else.")
-	}
-	c.ad.SendText(c.ev.ChatID, b.String(), c.ev.MessageID)
+	c.ad.SendText(c.ev.ChatID, renderChatQuestion(q, idx, total), c.ev.MessageID)
 
 	// No timeout: this is a clarifying question in an attended chat, so waiting
 	// for an actual reply is correct — released by cancelling the turn, same as
 	// the permission ask above.
 	select {
 	case text := <-replyCh:
-		return parseAskReply(text, q), nil
+		answer, outcome := parseAskReply(text, q)
+		return answer, outcome, nil
 	case <-ctx.Done():
-		return tools.AskResponse{Cancelled: true}, ctx.Err()
+		return tools.AskAnswer{}, tools.AskRejected, ctx.Err()
 	}
 }
 
-// parseAskReply maps the chat reply onto the structured response: numbers
-// pick options (several for multi-select), an exact label matches its
-// option, anything else is a free-text "Other" answer. Out-of-range numbers
-// fall through to free text rather than erroring — over chat, re-prompting
-// loops are worse than letting the model see the raw reply.
-func parseAskReply(text string, q tools.AskRequest) tools.AskResponse {
+// renderChatQuestion lays one question out for a chat timeline: numbered
+// options with their descriptions inline, then a "Chat about this" row.
+//
+// No "Other" row: over chat, free text already IS the reply, so listing it
+// would be a row telling the user to do what they were going to do anyway.
+// Previews and notes are omitted too — a preview exists to be compared side by
+// side, which a timeline can't do, and notes annotate that comparison.
+func renderChatQuestion(q tools.AskQuestion, idx, total int) string {
+	var b strings.Builder
+	b.WriteString("❓ ")
+	fmt.Fprintf(&b, "[%s] ", q.HeaderOrDefault(idx))
+	if total > 1 {
+		fmt.Fprintf(&b, "(%d/%d) ", idx+1, total)
+	}
+	b.WriteString(q.Question + "\n")
+	for i, opt := range q.Options {
+		fmt.Fprintf(&b, "%d. %s", i+1, opt.Label)
+		if opt.Description != "" {
+			fmt.Fprintf(&b, " — %s", opt.Description)
+		}
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(&b, "%d. Chat about this\n", len(q.Options)+1)
+	if q.MultiSelect {
+		b.WriteString("Reply with number(s), e.g. 1,3 — or free text for something else. An empty reply cancels.")
+	} else {
+		b.WriteString("Reply with a number — or free text for something else. An empty reply cancels.")
+	}
+	return b.String()
+}
+
+// parseAskReply maps the chat reply onto one question's answer: numbers pick
+// options (several for multi-select), the tail number is "Chat about this", an
+// exact label matches its option, anything else is free text. Out-of-range
+// numbers fall through to free text rather than erroring — over chat,
+// re-prompting loops are worse than letting the model see the raw reply.
+//
+// An empty reply rejects the whole set. Over chat there is no other way to say
+// "stop asking", and skipping silently would leave the user answering a set
+// they have already abandoned.
+func parseAskReply(text string, q tools.AskQuestion) (tools.AskAnswer, tools.AskOutcome) {
 	t := strings.TrimSpace(text)
 	if t == "" {
-		return tools.AskResponse{Cancelled: true}
+		return tools.AskAnswer{}, tools.AskRejected
 	}
 
+	clarifyIdx := len(q.Options) + 1
 	parts := strings.FieldsFunc(t, func(r rune) bool {
 		return r == ',' || r == '，' || r == '、' || r == ' '
 	})
@@ -227,23 +271,26 @@ func parseAskReply(text string, q tools.AskRequest) tools.AskResponse {
 	numeric := len(parts) > 0
 	for _, p := range parts {
 		n, err := strconv.Atoi(strings.TrimSpace(p))
-		if err != nil || n < 1 || n > len(q.Options) {
+		if err != nil || n < 1 || n > clarifyIdx {
 			numeric = false
 			break
 		}
-		choices = append(choices, q.Options[n-1])
+		if n == clarifyIdx {
+			return tools.AskAnswer{}, tools.AskClarify
+		}
+		choices = append(choices, q.Options[n-1].Label)
 	}
 	if numeric {
 		if !q.MultiSelect && len(choices) > 1 {
 			choices = choices[:1]
 		}
-		return tools.AskResponse{Choices: choices}
+		return tools.AskAnswer{Choices: choices}, tools.AskSubmitted
 	}
 
 	for _, opt := range q.Options {
-		if strings.EqualFold(t, opt) {
-			return tools.AskResponse{Choices: []string{opt}}
+		if strings.EqualFold(t, opt.Label) {
+			return tools.AskAnswer{Choices: []string{opt.Label}}, tools.AskSubmitted
 		}
 	}
-	return tools.AskResponse{Custom: t}
+	return tools.AskAnswer{Custom: t}, tools.AskSubmitted
 }

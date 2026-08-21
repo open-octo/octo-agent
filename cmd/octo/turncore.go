@@ -280,79 +280,112 @@ func (v *plainView) askPermission(p UserPrompt) UserResponse {
 	}
 }
 
-// askQuestion renders the ask_user_question card and parses the selection.
+// askQuestion renders the ask_user_question cards and parses the selections.
+// A line reader can't do tabs, so the set degrades to one card per question,
+// asked in order. Notes are not offered: there is no pane to annotate and no
+// spare key to open one, so a preview question keeps its "Other" row here.
 func (v *plainView) askQuestion(p UserPrompt) UserResponse {
 	if v.reader == nil {
-		return UserResponse{Cancelled: true}
+		return UserResponse{Outcome: PromptRejected}
 	}
 
-	prompt := v.printQuestion(p)
+	answers := make([]UserAnswer, len(p.Questions))
+	for i, q := range p.Questions {
+		answer, outcome := v.askOneQuestion(q, i, len(p.Questions))
+		if outcome != PromptSubmitted {
+			// Clarify carries what was answered so far; reject discards it in
+			// formatAskResponse, so passing it along costs nothing.
+			return UserResponse{Outcome: outcome, Answers: answers}
+		}
+		answers[i] = answer
+	}
+	return UserResponse{Outcome: PromptSubmitted, Answers: answers}
+}
+
+// askOneQuestion prints one card and reads one answer.
+func (v *plainView) askOneQuestion(q UserQuestion, idx, total int) (UserAnswer, UserAskOutcome) {
+	prompt := v.printQuestion(q, idx, total)
 	raw, ok := v.reader.ReadLine(prompt)
 	if !ok {
-		// EOF / empty → cancel; surfacing "(cancelled)" lets the model retry
-		// or pick a default itself.
+		// EOF rejects the rest of the set rather than answering blind.
 		fmt.Fprintln(v.out)
-		return UserResponse{Cancelled: true}
+		return UserAnswer{}, PromptRejected
 	}
 	choice := strings.TrimSpace(raw)
 	if choice == "" {
-		return UserResponse{Cancelled: true}
+		// An empty line skips this question; the set continues.
+		return UserAnswer{}, PromptSubmitted
 	}
 
-	otherIdx := len(p.Options) + 1
-	indices, parseErr := parseSelection(choice, otherIdx, p.MultiSelect)
+	otherIdx := len(q.Options) + 1
+	clarifyIdx := otherIdx + 1
+	indices, parseErr := parseSelection(choice, clarifyIdx, q.MultiSelect)
 	if parseErr != nil {
-		fmt.Fprintf(v.out, "  (couldn't parse %q, treating as cancellation)\n", choice)
-		return UserResponse{Cancelled: true}
+		fmt.Fprintf(v.out, "  (couldn't parse %q, skipping)\n", choice)
+		return UserAnswer{}, PromptSubmitted
 	}
 
 	var (
 		picks     []string
 		wantOther bool
 	)
-	for _, idx := range indices {
-		if idx == otherIdx {
+	for _, i := range indices {
+		switch {
+		case i == clarifyIdx:
+			return UserAnswer{}, PromptClarify
+		case i == otherIdx:
 			wantOther = true
-			continue
+		case i >= 1 && i <= len(q.Options):
+			picks = append(picks, q.Options[i-1].Label)
 		}
-		if idx < 1 || idx > len(p.Options) {
-			continue
-		}
-		picks = append(picks, p.Options[idx-1])
 	}
 
 	if wantOther {
 		text, ok := v.reader.ReadLine("  Other (free text): ")
 		if !ok || strings.TrimSpace(text) == "" {
-			return UserResponse{Cancelled: true}
+			return UserAnswer{}, PromptSubmitted
 		}
-		return UserResponse{Custom: strings.TrimSpace(text)}
+		return UserAnswer{Custom: strings.TrimSpace(text)}, PromptSubmitted
 	}
-	if len(picks) == 0 {
-		return UserResponse{Cancelled: true}
-	}
-	return UserResponse{Choices: picks}
+	return UserAnswer{Choices: picks}, PromptSubmitted
 }
 
 // printQuestion writes the multi-line question card and returns the final
 // inline "Select [...]: " prompt — passed to ReadLine so readline renders it
 // in place.
-func (v *plainView) printQuestion(p UserPrompt) string {
-	header := p.Header
+func (v *plainView) printQuestion(q UserQuestion, idx, total int) string {
+	header := q.Header
 	if header == "" {
 		header = "question"
 	}
-	fmt.Fprintf(v.out, "\n[ask_user_question · %s]\n", header)
-	fmt.Fprintf(v.out, "  %s\n", p.Question)
-	otherIdx := len(p.Options) + 1
-	for i, opt := range p.Options {
-		fmt.Fprintf(v.out, "    %d) %s\n", i+1, opt)
+	if total > 1 {
+		header = fmt.Sprintf("%s %d/%d", header, idx+1, total)
 	}
+	fmt.Fprintf(v.out, "\n[ask_user_question · %s]\n", header)
+	fmt.Fprintf(v.out, "  %s\n", q.Question)
+	for i, opt := range q.Options {
+		fmt.Fprintf(v.out, "    %d) %s\n", i+1, opt.Label)
+		if opt.Description != "" {
+			fmt.Fprintf(v.out, "       %s\n", opt.Description)
+		}
+		if opt.Preview != "" {
+			for _, line := range strings.Split(truncateRunes(opt.Preview, plainPreviewMaxRunes), "\n") {
+				fmt.Fprintf(v.out, "       │ %s\n", line)
+			}
+		}
+	}
+	otherIdx := len(q.Options) + 1
 	fmt.Fprintf(v.out, "    %d) Other (free text)\n", otherIdx)
+	fmt.Fprintf(v.out, "    %d) Chat about this\n", otherIdx+1)
 
-	hint := fmt.Sprintf("[1-%d]", otherIdx)
-	if p.MultiSelect {
+	hint := fmt.Sprintf("[1-%d]", otherIdx+1)
+	if q.MultiSelect {
 		hint = "[comma-separated, e.g. 1,3]"
 	}
-	return fmt.Sprintf("  Select %s: ", hint)
+	return fmt.Sprintf("  Select %s (empty skips): ", hint)
 }
+
+// plainPreviewMaxRunes bounds an inline preview on this surface. Same budget
+// the IM permission summary uses, for the same reason: enough to judge by,
+// not enough to scroll the prompt away.
+const plainPreviewMaxRunes = 600

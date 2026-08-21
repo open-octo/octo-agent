@@ -23,7 +23,7 @@ func TestReplayLiveState_ReplaysPendingPrompts(t *testing.T) {
 	defer tools.CloseSessionBackgroundManager(sid)
 
 	srv.pendingQuestions[sid] = wsEventRequestUserQuestion{
-		Type: "request_user_question", SessionID: sid, QuestionID: "q_1", Question: "pick one", Options: []string{"a", "b"},
+		Type: "request_user_question", SessionID: sid, QuestionID: "q_1", Questions: []wsAskQuestion{{Question: "pick one", Header: "h", Options: []wsAskOption{{Label: "a"}, {Label: "b"}}}},
 	}
 	srv.pendingConfirms[sid] = wsEventRequestConfirmation{
 		Type: "request_confirmation", SessionID: sid, ConfID: "conf_1", Message: "Allow terminal?", Kind: "yes_no",
@@ -84,19 +84,19 @@ func TestWSAsker_RegistersAndClearsPendingQuestion(t *testing.T) {
 			ev, ok := srv.pendingQuestions[sid]
 			srv.pendingPromptMu.Unlock()
 			if ok {
-				srv.handleWSUserQuestionAnswer(ev.QuestionID, []string{"a"}, "", false)
+				srv.handleWSUserQuestionAnswer(ev.QuestionID, "submitted", []wsMsgAskAnswer{{Choices: []string{"a"}}})
 				return
 			}
 			time.Sleep(5 * time.Millisecond)
 		}
 	}()
 
-	res, err := srv.wsAsker().Ask(ctx, tools.AskRequest{Question: "pick", Options: []string{"a", "b"}})
+	res, err := srv.wsAsker().Ask(ctx, tools.AskRequest{Questions: []tools.AskQuestion{{Question: "pick", Header: "h", Options: []tools.AskOption{{Label: "a"}, {Label: "b"}}}}})
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
-	if len(res.Choices) != 1 || res.Choices[0] != "a" {
-		t.Fatalf("choices = %v, want [a]", res.Choices)
+	if len(res.Answers) != 1 || len(res.Answers[0].Choices) != 1 || res.Answers[0].Choices[0] != "a" {
+		t.Fatalf("answers = %+v, want one answer of [a]", res.Answers)
 	}
 
 	srv.pendingPromptMu.Lock()
@@ -247,7 +247,7 @@ func TestWSAsker_SessionActivityReachesUnsubscribedConn(t *testing.T) {
 
 	done := make(chan tools.AskResponse, 1)
 	go func() {
-		res, _ := srv.wsAsker().Ask(ctx, tools.AskRequest{Question: "pick", Options: []string{"a", "b"}})
+		res, _ := srv.wsAsker().Ask(ctx, tools.AskRequest{Questions: []tools.AskQuestion{{Question: "pick", Header: "h", Options: []tools.AskOption{{Label: "a"}, {Label: "b"}}}}})
 		done <- res
 	}()
 
@@ -259,7 +259,7 @@ func TestWSAsker_SessionActivityReachesUnsubscribedConn(t *testing.T) {
 	}
 
 	qid := waitForPendingQuestionID(t, srv, sid)
-	srv.handleWSUserQuestionAnswer(qid, []string{"a"}, "", false)
+	srv.handleWSUserQuestionAnswer(qid, "submitted", []wsMsgAskAnswer{{Choices: []string{"a"}}})
 
 	select {
 	case <-done:
@@ -293,7 +293,7 @@ func TestWSAsker_SuccessDismissesOtherSubscribedTabs(t *testing.T) {
 
 	done := make(chan tools.AskResponse, 1)
 	go func() {
-		res, _ := srv.wsAsker().Ask(ctx, tools.AskRequest{Question: "pick", Options: []string{"a", "b"}})
+		res, _ := srv.wsAsker().Ask(ctx, tools.AskRequest{Questions: []tools.AskQuestion{{Question: "pick", Header: "h", Options: []tools.AskOption{{Label: "a"}, {Label: "b"}}}}})
 		done <- res
 	}()
 
@@ -301,7 +301,7 @@ func TestWSAsker_SuccessDismissesOtherSubscribedTabs(t *testing.T) {
 
 	qid := waitForPendingQuestionID(t, srv, sid)
 	// A different tab answers — watcher never does.
-	srv.handleWSUserQuestionAnswer(qid, []string{"a"}, "", false)
+	srv.handleWSUserQuestionAnswer(qid, "submitted", []wsMsgAskAnswer{{Choices: []string{"a"}}})
 
 	select {
 	case <-done:
@@ -338,7 +338,7 @@ func TestWSAsker_AskSecret(t *testing.T) {
 				if !ev.Secret {
 					t.Error("request_user_question event must carry secret:true")
 				}
-				srv.handleWSUserQuestionAnswer(ev.QuestionID, nil, "hunter2", false)
+				srv.handleWSUserQuestionAnswer(ev.QuestionID, "submitted", []wsMsgAskAnswer{{Custom: "hunter2"}})
 				return
 			}
 			time.Sleep(5 * time.Millisecond)
@@ -359,7 +359,7 @@ func TestWSAsker_AskSecret(t *testing.T) {
 	// Cancellation maps through.
 	go func() {
 		qid := waitForPendingQuestionID(t, srv, sid)
-		srv.handleWSUserQuestionAnswer(qid, nil, "", true)
+		srv.handleWSUserQuestionAnswer(qid, "rejected", nil)
 	}()
 	if _, cancelled, err := srv.wsAsker().(tools.SecretAsker).AskSecret(ctx, "?"); err != nil || !cancelled {
 		t.Fatalf("cancelled = %v, err = %v; want a clean cancellation", cancelled, err)

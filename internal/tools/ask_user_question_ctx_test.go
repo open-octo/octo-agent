@@ -17,21 +17,22 @@ func (r *recordingAsker) Ask(_ context.Context, q AskRequest) (AskResponse, erro
 	return r.resp, nil
 }
 
+func ctxAskInput() map[string]any {
+	return askInput(question("Which one?", opt("ctxpick", ""), opt("globalpick", "")))
+}
+
 // TestAskUserQuestion_CtxAskerOverridesGlobal: a ctx-scoped asker (stamped by
 // the IM turn) must win over the process-global one (the server's wsAsker) —
 // otherwise IM questions broadcast to browser tabs that don't exist.
 func TestAskUserQuestion_CtxAskerOverridesGlobal(t *testing.T) {
-	global := &recordingAsker{resp: AskResponse{Choices: []string{"globalpick"}}}
+	global := &recordingAsker{resp: AskResponse{Answers: []AskAnswer{{Choices: []string{"globalpick"}}}}}
 	SetAsker(global)
 	t.Cleanup(func() { SetAsker(nil) })
 
-	ctxAsker := &recordingAsker{resp: AskResponse{Choices: []string{"ctxpick"}}}
+	ctxAsker := &recordingAsker{resp: AskResponse{Answers: []AskAnswer{{Choices: []string{"ctxpick"}}}}}
 	ctx := WithAsker(context.Background(), ctxAsker)
 
-	res, err := AskUserQuestionTool{}.Execute(ctx, "ask_user_question", map[string]any{
-		"question": "Which one?",
-		"options":  []any{"A", "B"},
-	})
+	res, err := AskUserQuestionTool{}.Execute(ctx, "ask_user_question", ctxAskInput())
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -49,14 +50,11 @@ func TestAskUserQuestion_CtxAskerOverridesGlobal(t *testing.T) {
 // TestAskUserQuestion_GlobalFallback: without a ctx asker the global one
 // still serves (CLI/web behavior unchanged).
 func TestAskUserQuestion_GlobalFallback(t *testing.T) {
-	global := &recordingAsker{resp: AskResponse{Choices: []string{"globalpick"}}}
+	global := &recordingAsker{resp: AskResponse{Answers: []AskAnswer{{Choices: []string{"globalpick"}}}}}
 	SetAsker(global)
 	t.Cleanup(func() { SetAsker(nil) })
 
-	res, err := AskUserQuestionTool{}.Execute(context.Background(), "ask_user_question", map[string]any{
-		"question": "Which one?",
-		"options":  []any{"A", "B"},
-	})
+	res, err := AskUserQuestionTool{}.Execute(context.Background(), "ask_user_question", ctxAskInput())
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}

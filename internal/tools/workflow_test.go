@@ -533,7 +533,7 @@ func TestWorkflowTool_RunsSavedByName_ErrorsOnMissingRequiredArg(t *testing.T) {
 	writeWorkflowFile(t, user, "echo.rb",
 		"# @description echo the arg\n# @param q required: the text to echo\nagent(args[\"q\"])\n")
 
-	stub := &stubAsker{resp: AskResponse{Custom: "hi there"}}
+	stub := &stubAsker{resp: AskResponse{Answers: []AskAnswer{{Custom: "hi there"}}}}
 	useAsker(t, stub)
 
 	_, err := WorkflowTool{}.Execute(context.Background(), "c", map[string]any{"name": "echo"})
@@ -598,7 +598,7 @@ func TestWorkflowTool_RunsSavedByName_MissingRequiredArgWithAsker(t *testing.T) 
 	useWorkflowRoots(t, user)
 	writeWorkflowFile(t, user, "echo.rb",
 		"# @description echo the arg\n# @param q required: the text to echo\nagent(args[\"q\"])\n")
-	useAsker(t, &stubAsker{resp: AskResponse{Cancelled: true}})
+	useAsker(t, &stubAsker{resp: AskResponse{Outcome: AskRejected}})
 
 	_, err := WorkflowTool{}.Execute(context.Background(), "c", map[string]any{"name": "echo"})
 	if err == nil || !strings.Contains(err.Error(), "missing required arg") {

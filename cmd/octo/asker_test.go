@@ -19,14 +19,33 @@ func askInput(input string) (*replAsker, *bytes.Buffer) {
 	return newREPLAsker(view), out
 }
 
+// oneQuestion builds a single-question request with the given labels.
+func oneQuestion(header string, multi bool, labels ...string) tools.AskRequest {
+	opts := make([]tools.AskOption, 0, len(labels))
+	for _, l := range labels {
+		opts = append(opts, tools.AskOption{Label: l})
+	}
+	return tools.AskRequest{Questions: []tools.AskQuestion{{
+		Question:    "?",
+		Header:      header,
+		MultiSelect: multi,
+		Options:     opts,
+	}}}
+}
+
+func firstAnswer(r tools.AskResponse) tools.AskAnswer {
+	if len(r.Answers) == 0 {
+		return tools.AskAnswer{}
+	}
+	return r.Answers[0]
+}
+
 func TestReplAsker_PrintsQuestionAndOptions(t *testing.T) {
 	a, out := askInput("1\n")
-	_, err := a.Ask(context.Background(), tools.AskRequest{
-		Question: "Which library should we use?",
-		Options:  []string{"date-fns", "Day.js", "Luxon"},
-		Header:   "lib_choice",
-	})
-	if err != nil {
+	req := oneQuestion("lib_choice", false, "date-fns", "Day.js", "Luxon")
+	req.Questions[0].Question = "Which library should we use?"
+	req.Questions[0].Options[0].Description = "small and tree-shakeable"
+	if _, err := a.Ask(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
@@ -34,10 +53,12 @@ func TestReplAsker_PrintsQuestionAndOptions(t *testing.T) {
 		"[ask_user_question · lib_choice]",
 		"Which library should we use?",
 		"1) date-fns",
+		"small and tree-shakeable", // description renders under its label
 		"2) Day.js",
 		"3) Luxon",
-		"4) Other (free text)", // tail is always added
-		"Select [1-4]:",
+		"4) Other (free text)", // both tail rows are always added
+		"5) Chat about this",
+		"Select [1-5]",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("prompt missing %q in:\n%s", want, got)
@@ -45,26 +66,37 @@ func TestReplAsker_PrintsQuestionAndOptions(t *testing.T) {
 	}
 }
 
+// A preview renders inline here (no second column on a line reader), capped
+// so a long mockup can't scroll the prompt away.
+func TestReplAsker_PrintsPreviewInline(t *testing.T) {
+	a, out := askInput("1\n")
+	req := oneQuestion("layout", false, "left", "right")
+	req.Questions[0].Options[0].Preview = "+---+\n| A |\n+---+"
+	if _, err := a.Ask(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "| A |") {
+		t.Errorf("preview not rendered in:\n%s", out)
+	}
+}
+
 func TestReplAsker_SinglePickFirstOption(t *testing.T) {
 	a, _ := askInput("1\n")
-	r, _ := a.Ask(context.Background(), tools.AskRequest{
-		Question: "?",
-		Options:  []string{"alpha", "beta"},
-	})
-	if len(r.Choices) != 1 || r.Choices[0] != "alpha" {
-		t.Errorf("single pick = %+v, want [alpha]", r.Choices)
+	r, _ := a.Ask(context.Background(), oneQuestion("", false, "alpha", "beta"))
+	if got := firstAnswer(r).Choices; len(got) != 1 || got[0] != "alpha" {
+		t.Errorf("single pick = %+v, want [alpha]", got)
+	}
+	if r.Outcome != tools.AskSubmitted {
+		t.Errorf("outcome = %v, want submitted", r.Outcome)
 	}
 }
 
 func TestReplAsker_MultiSelect(t *testing.T) {
 	a, out := askInput("1,3\n")
-	r, _ := a.Ask(context.Background(), tools.AskRequest{
-		Question:    "?",
-		Options:     []string{"alpha", "beta", "gamma"},
-		MultiSelect: true,
-	})
-	if len(r.Choices) != 2 || r.Choices[0] != "alpha" || r.Choices[1] != "gamma" {
-		t.Errorf("multi-pick = %+v, want [alpha gamma]", r.Choices)
+	r, _ := a.Ask(context.Background(), oneQuestion("", true, "alpha", "beta", "gamma"))
+	got := firstAnswer(r).Choices
+	if len(got) != 2 || got[0] != "alpha" || got[1] != "gamma" {
+		t.Errorf("multi-pick = %+v, want [alpha gamma]", got)
 	}
 	if !strings.Contains(out.String(), "comma-separated") {
 		t.Errorf("multi-select prompt should hint at comma-separated input")
@@ -74,12 +106,9 @@ func TestReplAsker_MultiSelect(t *testing.T) {
 func TestReplAsker_SingleSelectIgnoresExtraPicks(t *testing.T) {
 	// Even when the user types "1,2", single-select keeps only the first.
 	a, _ := askInput("1,2\n")
-	r, _ := a.Ask(context.Background(), tools.AskRequest{
-		Question: "?",
-		Options:  []string{"alpha", "beta"},
-	})
-	if len(r.Choices) != 1 || r.Choices[0] != "alpha" {
-		t.Errorf("single-select must keep only the first pick, got %+v", r.Choices)
+	r, _ := a.Ask(context.Background(), oneQuestion("", false, "alpha", "beta"))
+	if got := firstAnswer(r).Choices; len(got) != 1 || got[0] != "alpha" {
+		t.Errorf("single-select must keep only the first pick, got %+v", got)
 	}
 }
 
@@ -87,79 +116,102 @@ func TestReplAsker_OtherFreeText(t *testing.T) {
 	// "Other" is the (len(opts)+1)-th slot; after picking it, the asker
 	// prompts again for the free-text follow-up.
 	a, out := askInput("3\nKerberos with constrained delegation\n")
-	r, _ := a.Ask(context.Background(), tools.AskRequest{
-		Question: "?",
-		Options:  []string{"OAuth", "API key"},
-	})
-	if r.Custom != "Kerberos with constrained delegation" {
-		t.Errorf("custom = %q", r.Custom)
+	r, _ := a.Ask(context.Background(), oneQuestion("", false, "OAuth", "API key"))
+	ans := firstAnswer(r)
+	if ans.Custom != "Kerberos with constrained delegation" {
+		t.Errorf("custom = %q", ans.Custom)
 	}
-	if len(r.Choices) != 0 {
-		t.Errorf("custom answer should leave Choices empty, got %+v", r.Choices)
+	if len(ans.Choices) != 0 {
+		t.Errorf("custom answer should leave Choices empty, got %+v", ans.Choices)
 	}
 	if !strings.Contains(out.String(), "Other (free text):") {
 		t.Errorf("Other follow-up prompt missing in:\n%s", out)
 	}
 }
 
-func TestReplAsker_OtherEmptyFreeText_Cancels(t *testing.T) {
-	a, _ := askInput("3\n\n")
-	r, _ := a.Ask(context.Background(), tools.AskRequest{
-		Question: "?",
-		Options:  []string{"a", "b"},
-	})
-	if !r.Cancelled {
-		t.Errorf("empty Other text should cancel, got %+v", r)
+// "Chat about this" is the tail row: it ends the set as a clarify request
+// rather than answering the question.
+func TestReplAsker_ChatAboutThis(t *testing.T) {
+	a, _ := askInput("4\n")
+	r, _ := a.Ask(context.Background(), oneQuestion("", false, "OAuth", "API key"))
+	if r.Outcome != tools.AskClarify {
+		t.Errorf("outcome = %v, want clarify", r.Outcome)
 	}
 }
 
-func TestReplAsker_EmptyInputCancels(t *testing.T) {
-	a, _ := askInput("\n")
-	r, _ := a.Ask(context.Background(), tools.AskRequest{
-		Question: "?",
-		Options:  []string{"a", "b"},
+// Each question gets its own card; the answers come back in order.
+func TestReplAsker_AsksEveryQuestion(t *testing.T) {
+	a, out := askInput("1\n2\n")
+	req := oneQuestion("first", false, "a", "b")
+	req.Questions = append(req.Questions, tools.AskQuestion{
+		Question: "second?", Header: "second",
+		Options: []tools.AskOption{{Label: "c"}, {Label: "d"}},
 	})
-	if !r.Cancelled {
-		t.Errorf("empty selection should cancel, got %+v", r)
+	r, _ := a.Ask(context.Background(), req)
+	if len(r.Answers) != 2 {
+		t.Fatalf("answers = %+v, want two", r.Answers)
+	}
+	if got := r.Answers[0].Choices; len(got) != 1 || got[0] != "a" {
+		t.Errorf("answer 0 = %v, want [a]", got)
+	}
+	if got := r.Answers[1].Choices; len(got) != 1 || got[0] != "d" {
+		t.Errorf("answer 1 = %v, want [d]", got)
+	}
+	if !strings.Contains(out.String(), "first 1/2") {
+		t.Errorf("card should show progress:\n%s", out)
 	}
 }
 
-func TestReplAsker_EOFCancels(t *testing.T) {
-	// Empty reader → Scan returns false immediately → cancel.
+// An empty line skips one question and moves on — it no longer abandons the
+// set, because with several questions that would throw away real answers.
+func TestReplAsker_EmptyInputSkipsQuestion(t *testing.T) {
+	a, _ := askInput("\n1\n")
+	req := oneQuestion("first", false, "a", "b")
+	req.Questions = append(req.Questions, tools.AskQuestion{
+		Question: "second?", Header: "second",
+		Options: []tools.AskOption{{Label: "c"}, {Label: "d"}},
+	})
+	r, _ := a.Ask(context.Background(), req)
+	if r.Outcome != tools.AskSubmitted {
+		t.Fatalf("outcome = %v, want submitted", r.Outcome)
+	}
+	if len(r.Answers[0].Choices) != 0 {
+		t.Errorf("skipped question should be blank, got %+v", r.Answers[0])
+	}
+	if got := r.Answers[1].Choices; len(got) != 1 || got[0] != "c" {
+		t.Errorf("answer 1 = %v, want [c]", got)
+	}
+}
+
+func TestReplAsker_EOFRejects(t *testing.T) {
+	// Empty reader → Scan returns false immediately → the set is abandoned.
 	a, _ := askInput("")
-	r, _ := a.Ask(context.Background(), tools.AskRequest{
-		Question: "?",
-		Options:  []string{"a", "b"},
-	})
-	if !r.Cancelled {
-		t.Errorf("EOF should cancel, got %+v", r)
+	r, _ := a.Ask(context.Background(), oneQuestion("", false, "a", "b"))
+	if r.Outcome != tools.AskRejected {
+		t.Errorf("EOF should reject the set, got %v", r.Outcome)
 	}
 }
 
-func TestReplAsker_NonNumericCancels(t *testing.T) {
-	// Garbage input → can't parse → cancel (with a friendly inline note).
+func TestReplAsker_NonNumericSkips(t *testing.T) {
+	// Garbage input → can't parse → skip (with a friendly inline note).
 	a, out := askInput("yes please\n")
-	r, _ := a.Ask(context.Background(), tools.AskRequest{
-		Question: "?",
-		Options:  []string{"a", "b"},
-	})
-	if !r.Cancelled {
-		t.Errorf("non-numeric input should cancel, got %+v", r)
+	r, _ := a.Ask(context.Background(), oneQuestion("", false, "a", "b"))
+	if len(firstAnswer(r).Choices) != 0 || firstAnswer(r).Custom != "" {
+		t.Errorf("unparseable input should leave the answer blank, got %+v", firstAnswer(r))
 	}
 	if !strings.Contains(out.String(), "couldn't parse") {
 		t.Errorf("expected user-facing parse note in:\n%s", out)
 	}
 }
 
+// A model that sends an empty header still gets a labelled card: Q1, Q2, …
 func TestReplAsker_HeaderDefault(t *testing.T) {
 	a, out := askInput("1\n")
-	_, _ = a.Ask(context.Background(), tools.AskRequest{
-		Question: "?",
-		Options:  []string{"a", "b"},
-		// no Header
-	})
-	if !strings.Contains(out.String(), "[ask_user_question · question]") {
-		t.Errorf("missing header should default to 'question':\n%s", out)
+	if _, err := a.Ask(context.Background(), oneQuestion("", false, "a", "b")); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "[ask_user_question · Q1]") {
+		t.Errorf("missing header should default to Q1:\n%s", out)
 	}
 }
 

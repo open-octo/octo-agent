@@ -2130,14 +2130,15 @@ func (a wsAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskResponse
 // returns to the runtime caller only — it never becomes a tool result or
 // lands in conversation history.
 func (a wsAsker) AskSecret(ctx context.Context, question string) (string, bool, error) {
-	res, err := a.ask(ctx, tools.AskRequest{Question: question}, true)
+	req := tools.AskRequest{Questions: []tools.AskQuestion{{Question: question}}}
+	res, err := a.ask(ctx, req, true)
 	if err != nil {
 		return "", false, err
 	}
-	if res.Cancelled {
+	if res.Outcome != tools.AskSubmitted || len(res.Answers) == 0 {
 		return "", true, nil
 	}
-	return res.Custom, false, nil
+	return res.Answers[0].Custom, false, nil
 }
 
 func (a wsAsker) ask(ctx context.Context, q tools.AskRequest, secret bool) (tools.AskResponse, error) {
@@ -2151,7 +2152,7 @@ func (a wsAsker) ask(ctx context.Context, q tools.AskRequest, secret bool) (tool
 	// single pending slot / frontend modal.
 	release, err := a.s.acquireAskSlot(ctx, sessionID)
 	if err != nil {
-		return tools.AskResponse{Cancelled: true}, nil
+		return tools.AskResponse{Outcome: tools.AskRejected}, nil
 	}
 	defer release()
 
@@ -2163,14 +2164,11 @@ func (a wsAsker) ask(ctx context.Context, q tools.AskRequest, secret bool) (tool
 	a.s.questionMu.Unlock()
 
 	ev := wsEventRequestUserQuestion{
-		Type:        "request_user_question",
-		SessionID:   sessionID,
-		QuestionID:  qid,
-		Question:    q.Question,
-		Options:     q.Options,
-		MultiSelect: q.MultiSelect,
-		Header:      q.Header,
-		Secret:      secret,
+		Type:       "request_user_question",
+		SessionID:  sessionID,
+		QuestionID: qid,
+		Questions:  wsAskQuestions(q),
+		Secret:     secret,
 	}
 
 	// Record the outstanding question so a tab that (re)subscribes mid-ask —
@@ -2232,13 +2230,35 @@ func (a wsAsker) ask(ctx context.Context, q tools.AskRequest, secret bool) (tool
 	case <-ctx.Done():
 		cleanup()
 		dismiss()
-		return tools.AskResponse{Cancelled: true}, nil
+		return tools.AskResponse{Outcome: tools.AskRejected}, nil
 	}
 }
 
+// wsAskQuestions projects the question set onto the wire shape.
+func wsAskQuestions(q tools.AskRequest) []wsAskQuestion {
+	out := make([]wsAskQuestion, 0, len(q.Questions))
+	for i, question := range q.Questions {
+		opts := make([]wsAskOption, 0, len(question.Options))
+		for _, opt := range question.Options {
+			opts = append(opts, wsAskOption{
+				Label:       opt.Label,
+				Description: opt.Description,
+				Preview:     opt.Preview,
+			})
+		}
+		out = append(out, wsAskQuestion{
+			Question:    question.Question,
+			Header:      question.HeaderOrDefault(i),
+			MultiSelect: question.MultiSelect,
+			Options:     opts,
+		})
+	}
+	return out
+}
+
 // handleWSUserQuestionAnswer delivers a user answer from the browser to a
-// pending wsAsker.Ask call.
-func (s *Server) handleWSUserQuestionAnswer(qid string, choices []string, custom string, cancelled bool) {
+// pending wsAsker.Ask call. One frame closes the whole question set.
+func (s *Server) handleWSUserQuestionAnswer(qid, outcome string, answers []wsMsgAskAnswer) {
 	s.questionMu.Lock()
 	defer s.questionMu.Unlock()
 	ch, ok := s.questionChans[qid]
@@ -2246,10 +2266,28 @@ func (s *Server) handleWSUserQuestionAnswer(qid string, choices []string, custom
 		slog.Warn("user_question_answer: no pending question channel", "qid", qid)
 		return
 	}
-	ch <- tools.AskResponse{
-		Choices:   choices,
-		Custom:    custom,
-		Cancelled: cancelled,
+	res := tools.AskResponse{Outcome: askOutcomeFromWire(outcome)}
+	for _, a := range answers {
+		res.Answers = append(res.Answers, tools.AskAnswer{
+			Choices: a.Choices,
+			Custom:  a.Custom,
+			Notes:   a.Notes,
+		})
+	}
+	ch <- res
+}
+
+// askOutcomeFromWire maps the frame's outcome string. An unrecognised value
+// is treated as a rejection: a client that can't say what the user did must
+// not have it read as a successful answer.
+func askOutcomeFromWire(outcome string) tools.AskOutcome {
+	switch outcome {
+	case "submitted":
+		return tools.AskSubmitted
+	case "clarify":
+		return tools.AskClarify
+	default:
+		return tools.AskRejected
 	}
 }
 
