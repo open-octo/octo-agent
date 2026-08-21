@@ -28,7 +28,14 @@
   // Per-session state: which tab is open and one draft per question.
   const state = $state<Record<string, { qIdx: number; drafts: AskDraft[] }>>({})
 
+  // Read-only view for the template. Seeding happens in the $effect below and
+  // in the event handlers — Svelte 5 forbids mutating state during render, and
+  // a lazily-creating getter called from the markup takes the whole card down.
   function slot(sid: string) {
+    return state[sid] ?? { qIdx: 0, drafts: emptyDrafts($questionModals[sid]?.questions ?? []) }
+  }
+
+  function ensure(sid: string) {
     if (!state[sid]) {
       state[sid] = { qIdx: 0, drafts: emptyDrafts($questionModals[sid]?.questions ?? []) }
     }
@@ -36,8 +43,7 @@
   }
 
   function draftAt(sid: string, i: number): AskDraft {
-    const s = slot(sid)
-    return s.drafts[i] ?? emptyDraft()
+    return slot(sid).drafts[i] ?? emptyDraft()
   }
 
   // Reset when the question set changes.
@@ -85,13 +91,17 @@
   })
 
   function setDraft(sid: string, i: number, next: AskDraft) {
-    const s = slot(sid)
+    const s = ensure(sid)
     s.drafts = s.drafts.map((d, j) => (j === i ? next : d))
+  }
+
+  function goTab(sid: string, i: number) {
+    ensure(sid).qIdx = i
   }
 
   function pick(sid: string, label: string) {
     const entry = $questionModals[sid]
-    const s = slot(sid)
+    const s = ensure(sid)
     const q = entry?.questions?.[s.qIdx]
     if (!q) return
     const next = toggleChoice(draftAt(sid, s.qIdx), q, label)
@@ -154,12 +164,12 @@
       {#if questions.length > 1 || hasReviewTab(questions)}
         <div class="qo-pager">
           {#each questions as pq, i}
-            <button class="qo-pill" class:on={i === s.qIdx} onclick={() => (s.qIdx = i)}>
+            <button class="qo-pill" class:on={i === s.qIdx} onclick={() => goTab(sid, i)}>
               {#if isAnswered(s.drafts[i])}✓{/if} {pq.header}
             </button>
           {/each}
           {#if hasReviewTab(questions)}
-            <button class="qo-pill" class:on={onReview} onclick={() => (s.qIdx = questions.length)}>
+            <button class="qo-pill" class:on={onReview} onclick={() => goTab(sid, questions.length)}>
               {$t('question.submit_tab')}
             </button>
           {/if}
@@ -198,7 +208,7 @@
               </button>
               {#if o.preview && usesPreviewLayout(q)}
                 <details class="qo-preview">
-                  <summary>{o.label}</summary>
+                  <summary>{$t('question.preview')}</summary>
                   <pre>{o.preview}</pre>
                 </details>
               {/if}
@@ -239,7 +249,7 @@
         {:else}
           <button
             class="qo-submit"
-            onclick={() => { const to = advanceIndex(questions, s.qIdx); if (to === -1) finish(sid, 'submitted'); else s.qIdx = to }}
+            onclick={() => { const to = advanceIndex(questions, s.qIdx); if (to === -1) finish(sid, 'submitted'); else goTab(sid, to) }}
             disabled={!isAnswered(d) && !d.notes.trim()}
           >
             {hasReviewTab(questions) ? $t('question.next') : $t('common.submit')}
