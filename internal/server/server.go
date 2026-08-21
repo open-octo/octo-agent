@@ -1924,7 +1924,7 @@ func (s *Server) sessionMemDir(proj *sessionGroup) string {
 		return d
 	}
 	dir := s.homeMemDir
-	d, err := memory.DirForProjectID(proj.ID, filepath.Base(memory.NormalizeDir(proj.WorkingDir)))
+	d, err := memory.DirForProjectID(proj.ID, filepath.Base(proj.WorkingDir))
 	if err != nil || memory.EnsureDir(d) != nil {
 		// Don't cache a failure: a full disk or a transient permission problem
 		// would otherwise pin this project to the shared tier for the rest of

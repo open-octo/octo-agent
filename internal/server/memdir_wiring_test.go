@@ -54,7 +54,7 @@ func TestSessionMemDir_WiredThroughTheRegistry(t *testing.T) {
 	srv := &Server{cwd: t.TempDir(), homeMemDir: homeMem}
 	got := srv.sessionMemDir(projectForSession(sess.ID))
 
-	want, err := memory.DirForProjectID(g.ID, filepath.Base(memory.NormalizeDir(g.WorkingDir)))
+	want, err := memory.DirForProjectID(g.ID, filepath.Base(g.WorkingDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestCronTask_RunsGetProjectMemory(t *testing.T) {
 	}
 
 	got := srv.sessionMemDir(projectForSession(sessionID))
-	want, err := memory.DirForProjectID(g.ID, filepath.Base(memory.NormalizeDir(g.WorkingDir)))
+	want, err := memory.DirForProjectID(g.ID, filepath.Base(g.WorkingDir))
 	if err != nil {
 		t.Fatal(err)
 	}

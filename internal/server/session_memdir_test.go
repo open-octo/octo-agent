@@ -22,7 +22,7 @@ func TestSessionMemDir_ScopedToProject(t *testing.T) {
 	proj := &sessionGroup{ID: "g-cafe0001", Name: "订单重构", WorkingDir: filepath.Join(t.TempDir(), "订单重构")}
 
 	got := s.sessionMemDir(proj)
-	want, err := memory.DirForProjectID(proj.ID, filepath.Base(memory.NormalizeDir(proj.WorkingDir)))
+	want, err := memory.DirForProjectID(proj.ID, filepath.Base(proj.WorkingDir))
 	if err != nil {
 		t.Fatal(err)
 	}
