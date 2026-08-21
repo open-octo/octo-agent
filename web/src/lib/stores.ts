@@ -1,6 +1,7 @@
 import { writable, derived, get } from 'svelte/store'
 import type { Snippet } from 'svelte'
 import type { Session, SessionGroup, Skill, Workflow, ScheduledTask, McpServer, Channel, Memory, Artifact, ArtifactView } from './types'
+import type { AskQuestion } from './askStepper'
 import * as api from './api'
 
 // First-run gate. 'unknown' until /api/onboard/status resolves (render a splash,
@@ -233,10 +234,8 @@ export const confirmModals = writable<Record<string, any>>({})
 export interface QuestionModalEntry {
   questionId: string
   sessionId: string
-  question: string
-  options?: string[]
-  multiSelect?: boolean
-  header?: string
+  /** 1-4 questions, rendered as tabs with a review/submit tab. */
+  questions: AskQuestion[]
   /** Masked-input question: the free-text input renders as a password field. */
   secret?: boolean
   dismissed: boolean

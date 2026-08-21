@@ -149,15 +149,24 @@ If the process is STOPPED but at least one platform is enabled, ask: "`octo serv
 
 ## `setup`
 
-Ask with `ask_user_question`:
+Ask which platform to connect. `ask_user_question` takes at most 4 options, so
+ask it in two steps rather than cramming all six in: first the family, then the
+platform within it.
+
 > Which platform would you like to connect?
 >
 > 1. Feishu (飞书)
-> 2. Weixin (Personal WeChat via iLink QR login)
-> 3. WeCom (企业微信 intelligent robot)
-> 4. DingTalk (钉钉)
-> 5. Discord
-> 6. Telegram (Bot API)
+> 2. Telegram (Bot API)
+> 3. Discord
+> 4. Something else (WeChat, WeCom, DingTalk)
+
+If they pick "Something else", ask again with those three:
+
+> Which one?
+>
+> 1. Weixin (Personal WeChat via iLink QR login)
+> 2. WeCom (企业微信 intelligent robot)
+> 3. DingTalk (钉钉)
 
 After a platform is chosen, ask whether this is a new configuration or an additional
 instance on an existing platform:
@@ -345,7 +354,7 @@ WeCom "API mode" intelligent robots connect over a WebSocket long connection —
 
 Discord requires manual portal interaction (hCaptcha gates application creation). Guide the user through the portal in one round-trip.
 
-1. Tell the user to open <https://discord.com/developers/applications>, then give **all** of the following in a single message and collect the values with `ask_user_question` (or a plain reply):
+1. Tell the user to open <https://discord.com/developers/applications>, then give **all** of the following in a single message and collect the values from their plain reply. Don't reach for `ask_user_question` here — it needs 2-4 discrete choices, and a token has none:
    > 1. Click **New Application** (top-right), name it (e.g. "octo"), accept the ToS, click **Create**.
    > 2. In the left nav click **Bot**.
    > 3. Scroll to **Privileged Gateway Intents** and turn on **MESSAGE CONTENT INTENT**, then **Save Changes**.

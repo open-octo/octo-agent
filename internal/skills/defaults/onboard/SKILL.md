@@ -42,6 +42,12 @@ Put each option's label + a short description in the tool's options, and rely on
 its built-in "Other" choice for free-text answers. Genuinely open prompts (the
 user's name, occupation, links) stay plain prose — those have no fixed options.
 
+The tool takes **2-4 options** per question. With more candidates than that,
+keep the best three or four and let "Other" carry the rest, or split the
+question in two — a list of seven will be rejected before the user sees it.
+The AI-name suggestions in A.3 are prose for exactly this reason: they're
+flavour, not a fixed set.
+
 ---
 
 ## A. First-run mode (no arguments)

@@ -1,3 +1,5 @@
+import type { AskQuestion } from './askStepper'
+
 export type View = 'chat' | 'agents' | 'skills' | 'workflows' | 'tasks' | 'browser' | 'mcp' | 'channels' | 'lightapps'
 export type SidebarMode = 'full' | 'rail' | 'hidden'
 export type MemTab = 'soul' | 'user' | 'memories'
@@ -334,10 +336,8 @@ export interface WsEventRequestUserQuestion {
   type: 'request_user_question'
   session_id: string
   question_id: string
-  question: string
-  options: string[]
-  multi_select: boolean
-  header: string
+  /** 1-4 questions, navigated as tabs with a review/submit tab. */
+  questions: AskQuestion[]
   /** Masked-input question (replay secret collection): render a password field. */
   secret?: boolean
 }

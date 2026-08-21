@@ -7,11 +7,18 @@
   //    ("Session B needs your input") — tapping one switches to that session,
   //    where the modal then appears.
   //
-  // This way: viewing session A while B asks → no modal, just a quiet row; the
-  // user clicks it only when ready to answer.
+  // A set is navigated as tabs with a review/submit tab, and each question
+  // renders in one of two mutually exclusive layouts (see askStepper).
+  // Everything decided rather than drawn lives in askStepper.ts.
   import { questionModals, activeSessionId, sessions, setActiveSession } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import { t } from '../../lib/i18n'
+  import {
+    advanceIndex, allAnswered, answerSummary, answersPayload, anyAnswered,
+    emptyDraft, emptyDrafts, focusedPreview, hasReviewTab, isAnswered,
+    isReviewTab, stepTab, toggleChoice, usesPreviewLayout,
+    type AskDraft, type AskOutcome,
+  } from '../../lib/askStepper'
 
   // Active session's own pending question → full modal/banner.
   const current = $derived($activeSessionId ? $questionModals[$activeSessionId] : undefined)
@@ -26,29 +33,67 @@
     return s?.title || s?.name || sid.slice(0, 8)
   }
 
-  let selected = $state<string[]>([])
-  let customText = $state('')
+  const questions = $derived(current?.questions ?? [])
+  let qIdx = $state(0)
+  let drafts = $state<AskDraft[]>([])
+  let focusedLabel = $state('')
   let inputEl = $state<HTMLInputElement | null>(null)
-  let modalEl = $state<HTMLDivElement | null>(null)
   let expanded = $state(false)
   let lastQuestionId = $state<string | null>(null)
+
+  const question = $derived(questions[qIdx])
+  const draft = $derived(drafts[qIdx] ?? emptyDraft())
+  const onReview = $derived(isReviewTab(questions, qIdx))
+  const preview = $derived(usesPreviewLayout(question))
+  const previewBody = $derived(preview ? focusedPreview(question, focusedLabel) : '')
 
   $effect(() => {
     if (current && current.questionId !== lastQuestionId) {
       lastQuestionId = current.questionId
-      selected = []
-      customText = ''
+      qIdx = 0
+      drafts = emptyDrafts(current.questions ?? [])
+      focusedLabel = current.questions?.[0]?.options?.[0]?.label ?? ''
       expanded = false
       inputEl?.focus()
     }
   })
 
-  function toggleOption(opt: string) {
-    if (current?.multiSelect) {
-      selected = selected.includes(opt) ? selected.filter(o => o !== opt) : [...selected, opt]
-    } else {
-      selected = selected[0] === opt ? [] : [opt]
+  function setDraft(next: AskDraft) {
+    drafts = drafts.map((d, i) => (i === qIdx ? next : d))
+  }
+
+  function goTab(i: number) {
+    qIdx = i
+    focusedLabel = questions[i]?.options?.[0]?.label ?? ''
+  }
+
+  function pick(label: string) {
+    if (!question) return
+    focusedLabel = label
+    const next = toggleChoice(draft, question, label)
+    setDraft(next)
+    // Multi-select accumulates: the user decides when the question is done.
+    if (question.multi_select) return
+    const to = advanceIndex(questions, qIdx)
+    if (to === -1) finish('submitted', drafts.map((d, i) => (i === qIdx ? next : d)))
+    else goTab(to)
+  }
+
+  function openOther() {
+    setDraft({ ...draft, otherOpen: true })
+    queueMicrotask(() => inputEl?.focus())
+  }
+
+  function commitOther() {
+    if (!draft.custom.trim()) {
+      setDraft({ ...draft, otherOpen: false })
+      return
     }
+    const next = { ...draft, choices: [], otherOpen: false }
+    setDraft(next)
+    const to = advanceIndex(questions, qIdx)
+    if (to === -1) finish('submitted', drafts.map((d, i) => (i === qIdx ? next : d)))
+    else goTab(to)
   }
 
   function clearCurrent() {
@@ -61,18 +106,16 @@
     })
   }
 
-  function submit() {
+  function finish(outcome: AskOutcome, ds: AskDraft[] = drafts) {
     if (!current) return
-    if (selected.length === 0 && !customText.trim()) return
-    ws.answerQuestion(current.questionId, [...selected], customText)
+    ws.answerQuestion(current.questionId, outcome, outcome === 'rejected' ? [] : answersPayload(ds))
     clearCurrent()
   }
 
-  function cancel() {
-    if (!current) return
-    ws.answerQuestion(current.questionId, [], '', true)
-    clearCurrent()
-  }
+  // "Chat about this": abandon the set and let the model ask what the user
+  // means. The answers given so far ride along in the result.
+  function clarify() { finish('clarify') }
+  function reject() { finish('rejected') }
 
   function softClose() { expanded = false }
   function onKeydown(e: KeyboardEvent) {
@@ -88,59 +131,162 @@
       <button class="qnote" onclick={() => setActiveSession(sid)}>
         <iconify-icon icon="ant-design:form-outlined" width="14" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
         <span class="qnote-label">{sessionLabel(sid)}</span>
-        <span class="qnote-q">{entry.question}</span>
+        <span class="qnote-q">
+          {entry.questions?.[0]?.question ?? ''}{(entry.questions?.length ?? 0) > 1 ? ` +${entry.questions.length - 1}` : ''}
+        </span>
         <span class="qnote-go">{$t('m.view')} ›</span>
       </button>
     {/each}
   </div>
 {/if}
 
+{#snippet tabs()}
+  {#if questions.length > 1 || hasReviewTab(questions)}
+    <div class="tabs" role="tablist">
+      {#each questions as q, i}
+        <button class="tab" class:active={i === qIdx} role="tab" aria-selected={i === qIdx} onclick={() => goTab(i)}>
+          {#if isAnswered(drafts[i])}
+            <iconify-icon icon="ant-design:check-outlined" width="10"></iconify-icon>
+          {/if}
+          {q.header}
+        </button>
+      {/each}
+      {#if hasReviewTab(questions)}
+        <button class="tab" class:active={onReview} role="tab" aria-selected={onReview} onclick={() => goTab(questions.length)}>
+          {$t('question.submit_tab')}
+        </button>
+      {/if}
+    </div>
+  {/if}
+{/snippet}
+
+{#snippet rows()}
+  <div class="rows" class:with-preview={preview}>
+    <div class="row-list">
+      {#each question?.options ?? [] as o, i}
+        <button
+          class="row"
+          class:selected={draft.choices.includes(o.label)}
+          class:focused={preview && focusedLabel === o.label}
+          onclick={() => (preview ? (focusedLabel = o.label) : pick(o.label))}
+          ondblclick={() => pick(o.label)}
+        >
+          <span class="row-mark">
+            {#if draft.choices.includes(o.label)}
+              <iconify-icon icon="ant-design:check-outlined" width="11"></iconify-icon>
+            {/if}
+          </span>
+          <span class="row-body">
+            <span class="row-label">{o.label}</span>
+            <!-- The preview layout drops descriptions: the preview stands in
+                 for them, exactly as Claude Code renders it. -->
+            {#if o.description && !preview}
+              <span class="row-desc">{o.description}</span>
+            {/if}
+          </span>
+          <span class="row-num">{i + 1}</span>
+        </button>
+      {/each}
+
+      <!-- No "Other" row in the preview layout: that text slot holds notes. -->
+      {#if !preview}
+        {#if draft.otherOpen}
+          <div class="other-open">
+            <input
+              bind:this={inputEl}
+              class="other-input"
+              type={current?.secret ? 'password' : 'text'}
+              autocomplete={current?.secret ? 'new-password' : 'off'}
+              placeholder={$t('question.custom_placeholder')}
+              value={draft.custom}
+              oninput={(e) => setDraft({ ...draft, custom: e.currentTarget.value })}
+              onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitOther() } }}
+            />
+            <button class="btn-primary btn-primary-sm" onclick={commitOther}>{$t('common.submit')}</button>
+          </div>
+        {:else}
+          <button class="row" onclick={openOther}>
+            <span class="row-mark"></span>
+            <span class="row-body"><span class="row-label">{$t('question.other')}</span></span>
+            <span class="row-num">{(question?.options?.length ?? 0) + 1}</span>
+          </button>
+        {/if}
+      {/if}
+
+      <button class="row row-clarify" onclick={clarify}>
+        <span class="row-mark"></span>
+        <span class="row-body"><span class="row-label">{$t('question.chat_about_this')}</span></span>
+      </button>
+    </div>
+
+    {#if preview}
+      <div class="preview-col">
+        <pre class="preview-body">{previewBody || $t('question.no_preview')}</pre>
+        <input
+          class="note-input"
+          placeholder={$t('question.add_note')}
+          value={draft.notes}
+          oninput={(e) => setDraft({ ...draft, notes: e.currentTarget.value })}
+        />
+      </div>
+    {/if}
+  </div>
+{/snippet}
+
+{#snippet review()}
+  <div class="review">
+    {#each questions as q, i}
+      {#if isAnswered(drafts[i])}
+        <div class="review-item">
+          <div class="review-q">{q.question}</div>
+          <div class="review-a">→ {answerSummary(drafts[i])}</div>
+        </div>
+      {/if}
+    {/each}
+    {#if !allAnswered(questions, drafts)}
+      <div class="review-warn">{$t('question.not_all_answered')}</div>
+    {/if}
+  </div>
+{/snippet}
+
 <!-- Active session's own question: full modal/banner. -->
 {#if current && expanded}
   <div class="backdrop" role="presentation">
-    <div class="modal" bind:this={modalEl} onkeydown={onKeydown} role="dialog" aria-modal="true" tabindex="-1">
+    <div class="modal" onkeydown={onKeydown} role="dialog" aria-modal="true" tabindex="-1">
       <div class="modal-header">
         <iconify-icon icon="ant-design:form-outlined" width="16" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
-        <span class="modal-title">{current.header || $t('question.title')}</span>
+        <span class="modal-title">{$t('question.title')}</span>
         <button class="close-btn" onclick={softClose} aria-label={$t('common.close')}>
           <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
         </button>
       </div>
 
       <div class="modal-body">
-        <p class="question-text">{current.question}</p>
-
-        {#if current.options?.length}
-          <div class="options">
-            {#each current.options as opt}
-              <button class="option-pill" class:selected={selected.includes(opt)} onclick={() => toggleOption(opt)}>
-                {#if selected.includes(opt)}<iconify-icon icon="ant-design:check-outlined" width="11"></iconify-icon>{/if}
-                {opt}
-              </button>
-            {/each}
-          </div>
+        {@render tabs()}
+        {#if onReview}
+          {@render review()}
+        {:else}
+          <p class="question-text">{question?.question}</p>
+          {@render rows()}
         {/if}
-
-        <div class="custom-input-wrap">
-          <input
-            bind:this={inputEl}
-            class="custom-input"
-            type={current.secret ? 'password' : 'text'}
-            autocomplete={current.secret ? 'new-password' : 'off'}
-            data-1p-ignore={current.secret ? true : undefined}
-            placeholder={$t('question.custom_placeholder')}
-            bind:value={customText}
-            onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit() } }}
-          />
-        </div>
       </div>
 
       <div class="modal-footer">
-        <button class="btn-cancel" onclick={cancel}>{$t('common.cancel')}</button>
+        <button class="btn-cancel" onclick={reject}>{$t('common.cancel')}</button>
         <span class="spacer"></span>
-        <button class="btn-primary" onclick={submit} disabled={selected.length === 0 && !customText.trim()}>
-          {$t('common.submit')}
-        </button>
+        {#if onReview}
+          <button class="btn-primary" onclick={() => finish('submitted')} disabled={!anyAnswered(drafts)}>
+            {$t('question.submit_answers')}
+          </button>
+        {:else if question?.multi_select}
+          <button
+            class="btn-primary"
+            onclick={() => { const to = advanceIndex(questions, qIdx); if (to === -1) finish('submitted'); else goTab(to) }}
+            disabled={draft.choices.length === 0}
+          >
+            {hasReviewTab(questions) ? $t('question.next') : $t('common.submit')}
+          </button>
+        {/if}
       </div>
     </div>
   </div>
@@ -149,38 +295,37 @@
     <div class="banner-inner">
       <div class="banner-main">
         <iconify-icon icon="ant-design:form-outlined" width="16" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
-        <span class="banner-question">{current.question}</span>
+        <span class="banner-question">{onReview ? $t('question.submit_tab') : question?.question}</span>
+        {#if questions.length > 1}
+          <span class="banner-progress">{Math.min(qIdx + 1, questions.length)}/{questions.length}</span>
+        {/if}
         <button class="banner-expand" onclick={() => { expanded = true; inputEl?.focus() }}>
           <iconify-icon icon="ant-design:arrows-alt-outlined" width="12"></iconify-icon>
         </button>
       </div>
 
-      {#if current.options?.length}
-        <div class="banner-options">
-          {#each current.options as opt}
-            <button class="option-pill" class:selected={selected.includes(opt)} onclick={() => toggleOption(opt)}>
-              {#if selected.includes(opt)}<iconify-icon icon="ant-design:check-outlined" width="11"></iconify-icon>{/if}
-              {opt}
-            </button>
-          {/each}
-        </div>
+      {@render tabs()}
+      {#if onReview}
+        {@render review()}
+      {:else}
+        {@render rows()}
       {/if}
 
       <div class="banner-actions">
-        <input
-          bind:this={inputEl}
-          class="banner-input"
-          type={current.secret ? 'password' : 'text'}
-          autocomplete={current.secret ? 'new-password' : 'off'}
-          data-1p-ignore={current.secret ? true : undefined}
-          placeholder={$t('question.custom_placeholder')}
-          bind:value={customText}
-          onkeydown={(e) => { if (e.key === 'Enter' && customText.trim()) { e.preventDefault(); submit() } }}
-        />
-        <button class="btn-cancel btn-cancel-sm" onclick={cancel}>{$t('common.cancel')}</button>
-        <button class="btn-primary btn-primary-sm" onclick={submit} disabled={selected.length === 0 && !customText.trim()}>
-          {$t('common.submit')}
-        </button>
+        <button class="btn-cancel btn-cancel-sm" onclick={reject}>{$t('common.cancel')}</button>
+        {#if onReview}
+          <button class="btn-primary btn-primary-sm" onclick={() => finish('submitted')} disabled={!anyAnswered(drafts)}>
+            {$t('question.submit_answers')}
+          </button>
+        {:else if question?.multi_select}
+          <button
+            class="btn-primary btn-primary-sm"
+            onclick={() => { const to = advanceIndex(questions, qIdx); if (to === -1) finish('submitted'); else goTab(to) }}
+            disabled={draft.choices.length === 0}
+          >
+            {hasReviewTab(questions) ? $t('question.next') : $t('common.submit')}
+          </button>
+        {/if}
       </div>
     </div>
   </div>
@@ -220,6 +365,81 @@
   }
   .qnote-go { color: var(--blue-6); flex-shrink: 0; }
 
+  /* ─── Question tabs ────────────────────────────────────────────── */
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tab {
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 26px; padding: 0 10px;
+    border: 1px solid var(--border); background: var(--bg-container);
+    border-radius: 6px;
+    font-size: 12px; color: var(--text-secondary);
+    cursor: pointer; font-family: inherit;
+    max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tab:hover { border-color: var(--blue-5); color: var(--blue-5); }
+  .tab.active { border-color: var(--blue-6); background: var(--blue-1); color: var(--blue-6); font-weight: 600; }
+
+  /* ─── Option rows / preview column ─────────────────────────────── */
+  .rows { display: flex; gap: 12px; }
+  .rows.with-preview .row-list { flex: 0 0 44%; }
+  .row-list { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+  .row {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border); background: var(--bg-container);
+    border-radius: 8px;
+    text-align: left; cursor: pointer; font-family: inherit;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .row:hover { border-color: var(--blue-5); }
+  .row.selected { border-color: var(--blue-6); background: var(--blue-1); }
+  .row.focused { border-color: var(--blue-5); background: var(--hover-neutral); }
+  .row-mark { width: 12px; flex-shrink: 0; color: var(--blue-6); padding-top: 2px; }
+  .row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .row-label { font-size: 13px; font-weight: 600; color: var(--text); word-break: break-word; }
+  .row-desc { font-size: 12px; color: var(--text-tertiary); line-height: 1.45; word-break: break-word; }
+  .row-num { font-size: 11px; color: var(--text-tertiary); flex-shrink: 0; }
+  .row-clarify { border-style: dashed; }
+  .row-clarify .row-label { font-weight: 500; color: var(--text-secondary); }
+
+  .other-open { display: flex; gap: 6px; }
+  .other-input {
+    flex: 1; height: 32px; padding: 0 10px;
+    border: 1px solid var(--blue-6); border-radius: 6px;
+    font-size: 13px; color: var(--text);
+    font-family: inherit; outline: none; background: var(--bg-container);
+  }
+
+  .preview-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .preview-body {
+    margin: 0; padding: 10px;
+    background: var(--bg-layout); border: 1px solid var(--border-table); border-radius: 8px;
+    font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.5;
+    color: var(--text-secondary);
+    max-height: calc(38vh / var(--font-zoom)); overflow: auto;
+    white-space: pre;
+  }
+  .note-input {
+    height: 30px; padding: 0 10px;
+    border: 1px solid var(--border); border-radius: 6px;
+    font-size: 12px; color: var(--text);
+    font-family: inherit; outline: none; background: var(--bg-container);
+  }
+  .note-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px var(--focus-ring); }
+
+  /* Narrow windows stack the preview under the list. */
+  @media (max-width: 640px) {
+    .rows { flex-direction: column; }
+    .rows.with-preview .row-list { flex: 1 1 auto; }
+  }
+
+  /* ─── Review / submit tab ──────────────────────────────────────── */
+  .review { display: flex; flex-direction: column; gap: 8px; }
+  .review-item { display: flex; flex-direction: column; gap: 2px; }
+  .review-q { font-size: 13px; color: var(--text); }
+  .review-a { font-size: 13px; color: var(--blue-6); padding-left: 10px; }
+  .review-warn { font-size: 12px; color: var(--text-tertiary); }
+
   /* ─── Bottom banner (active session, non-blocking) ─────────────── */
   .banner {
     flex: 0 0 auto;
@@ -245,21 +465,14 @@
     font-size: 14px; line-height: 1.5; color: var(--text);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
+  .banner-progress { font-size: 12px; color: var(--text-tertiary); flex-shrink: 0; }
   .banner-expand {
     width: 24px; height: 24px; border: none; background: transparent;
     border-radius: 6px; cursor: pointer; color: var(--text-tertiary);
     display: flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
   .banner-expand:hover { background: var(--hover-neutral); color: var(--blue-6); }
-  .banner-options { display: flex; flex-wrap: wrap; gap: 8px; }
-  .banner-actions { display: flex; align-items: center; gap: 8px; }
-  .banner-input {
-    flex: 1; height: 32px; padding: 0 10px;
-    border: 1px solid var(--border); border-radius: 6px;
-    font-size: 13px; color: var(--text);
-    font-family: inherit; outline: none; background: var(--bg-container);
-  }
-  .banner-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px var(--focus-ring); }
+  .banner-actions { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
 
   /* ─── Full modal (expanded) ──────────────────────────────────── */
   .backdrop {
@@ -269,7 +482,7 @@
     padding: 24px;
   }
   .modal {
-    width: 100%; max-width: 560px;
+    width: 100%; max-width: 720px;
     background: var(--bg-container);
     border-radius: 12px;
     overflow: hidden;
@@ -294,33 +507,12 @@
     margin: 0;
     font-size: 14px; line-height: 1.6; color: var(--text-secondary);
     white-space: pre-wrap; word-break: break-word;
-    max-height: calc(40vh / var(--font-zoom)); overflow-y: auto;
+    max-height: calc(30vh / var(--font-zoom)); overflow-y: auto;
   }
-  .options { display: flex; flex-wrap: wrap; gap: 10px; }
-  .custom-input-wrap { display: flex; }
-  .custom-input {
-    flex: 1; height: 34px; padding: 0 10px;
-    border: 1px solid var(--border); border-radius: 6px;
-    font-size: 13px; color: var(--text);
-    font-family: inherit; outline: none; background: var(--bg-container);
-  }
-  .custom-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 2px var(--focus-ring); }
 
   .modal-footer { padding: 14px 24px; border-top: 1px solid var(--border-table); display: flex; align-items: center; gap: 8px; }
   .spacer { flex: 1; }
 
-  .option-pill {
-    display: inline-flex; align-items: center; gap: 5px;
-    min-height: 34px; padding: 7px 14px;
-    border: 1px solid var(--border); background: var(--bg-container);
-    border-radius: 9999px;
-    font-size: 13px; color: var(--text-secondary); line-height: 1.4;
-    text-align: left; white-space: normal; word-break: break-word;
-    cursor: pointer; font-family: inherit;
-    transition: border-color 0.15s, background 0.15s, color 0.15s;
-  }
-  .option-pill:hover { border-color: var(--blue-5); color: var(--blue-5); }
-  .option-pill.selected { border-color: var(--blue-6); background: var(--blue-1); color: var(--blue-6); }
   .btn-cancel {
     height: 32px; padding: 0 14px;
     border: 1px solid var(--border); background: var(--bg-container);

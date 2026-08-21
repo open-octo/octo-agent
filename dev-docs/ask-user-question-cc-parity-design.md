@@ -320,8 +320,11 @@ The answer frame carries the outcome and the parallel answer array:
 `preview` — `Execute` fills it from the request, so a large preview never
 travels back over the socket.
 
-`handleWSUserQuestionAnswer` takes `(qid string, outcome string, answers
-[]tools.AskAnswer)`. `wsMsgUserQuestionAnswer`
+`handleWSUserQuestionAnswer` takes `(qid, outcome string, answers
+[]wsMsgAskAnswer)` and maps the wire answers onto `tools.AskAnswer`, so the
+frame shape stays in the server package. An unrecognised `outcome` is read as
+a rejection: a client that can't say what the user did must not have it taken
+for a successful answer. `wsMsgUserQuestionAnswer`
 (`internal/server/ws_types.go`) and its dispatch in
 `internal/server/ws_hub.go` change with it, as does `ws.answerQuestion`
 (`web/src/lib/ws.ts`).

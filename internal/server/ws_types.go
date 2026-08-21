@@ -60,11 +60,22 @@ type wsMsgConfirmation struct {
 	Result       string `json:"result"`
 }
 
+// wsMsgAskAnswer is one question's answer. The client never sends the chosen
+// option's preview — the server copies it out of the request it still holds,
+// so a large preview never travels back over the socket.
+type wsMsgAskAnswer struct {
+	Choices []string `json:"choices,omitempty"`
+	Custom  string   `json:"custom,omitempty"`
+	Notes   string   `json:"notes,omitempty"`
+}
+
+// wsMsgUserQuestionAnswer closes a whole question set in one frame: the
+// browser accumulates per-question drafts locally and submits once.
+// Outcome is "submitted", "clarify", or "rejected".
 type wsMsgUserQuestionAnswer struct {
-	QuestionID string   `json:"question_id"`
-	Choices    []string `json:"choices,omitempty"`
-	Custom     string   `json:"custom,omitempty"`
-	Cancelled  bool     `json:"cancelled,omitempty"`
+	QuestionID string           `json:"question_id"`
+	Outcome    string           `json:"outcome,omitempty"`
+	Answers    []wsMsgAskAnswer `json:"answers,omitempty"`
 }
 
 type wsMsgRetry struct {
@@ -239,16 +250,30 @@ type wsEventConfirmationComplete struct {
 	Result    string `json:"result"`
 }
 
+// wsAskOption is one choice inside a wsAskQuestion. Label and description
+// stay separate so the browser can render the label prominently with its
+// description beneath; preview drives the two-column layout.
+type wsAskOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	Preview     string `json:"preview,omitempty"`
+}
+
+// wsAskQuestion is one question of an ask_user_question set.
+type wsAskQuestion struct {
+	Question    string        `json:"question"`
+	Header      string        `json:"header"`
+	MultiSelect bool          `json:"multi_select"`
+	Options     []wsAskOption `json:"options,omitempty"`
+}
+
 type wsEventRequestUserQuestion struct {
 	Type string `json:"type"`
 	// SessionID is required by the dispatcher's session filter — without
 	// it the browser drops the event and the question modal never shows.
-	SessionID   string   `json:"session_id"`
-	QuestionID  string   `json:"question_id"`
-	Question    string   `json:"question"`
-	Options     []string `json:"options"`
-	MultiSelect bool     `json:"multi_select"`
-	Header      string   `json:"header,omitempty"`
+	SessionID  string          `json:"session_id"`
+	QuestionID string          `json:"question_id"`
+	Questions  []wsAskQuestion `json:"questions"`
 	// Secret marks a masked-input question (replay secret collection): the
 	// browser renders a password field, and the answer is only ever returned
 	// to the runtime caller — it must not be echoed into the chat.

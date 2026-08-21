@@ -187,7 +187,11 @@ func TestSanitizeForPrompt_NeutralizesControlBytes(t *testing.T) {
 func TestTUI_QuestionModalKeepsBorder(t *testing.T) {
 	m := newTestModel()
 	m.openModal(askMsg{prompt: UserPrompt{
-		Kind: KindQuestion, Question: "Pick one", Options: []string{"a", "b"},
+		Kind: KindQuestion,
+		Questions: []UserQuestion{{
+			Question: "Pick one", Header: "pick",
+			Options: []UserOption{{Label: "a"}, {Label: "b"}},
+		}},
 	}, resp: make(chan UserResponse, 1)})
 	out := m.View()
 	if !strings.ContainsAny(out, "╭╮╰╯") {

@@ -344,7 +344,7 @@ func (c *wsConn) dispatch(msgType string, raw []byte) {
 		if err := json.Unmarshal(raw, &msg); err != nil {
 			return
 		}
-		c.hub.s.handleWSUserQuestionAnswer(msg.QuestionID, msg.Choices, msg.Custom, msg.Cancelled)
+		c.hub.s.handleWSUserQuestionAnswer(msg.QuestionID, msg.Outcome, msg.Answers)
 
 	case "promote_sync_terminal":
 		var msg wsInPromoteSyncTerminal
@@ -382,7 +382,7 @@ type wsHubOwner interface {
 	handleWSRunTask(conn *wsConn, sessionID string)
 	handleWSRetractSteer(sessionID, pendingID, text string)
 	handleWSConfirmation(confID, result string)
-	handleWSUserQuestionAnswer(qid string, choices []string, custom string, cancelled bool)
+	handleWSUserQuestionAnswer(qid, outcome string, answers []wsMsgAskAnswer)
 	replayLiveState(sessionID string, conn *wsConn)
 	sendContextUsage(sessionID string, conn *wsConn)
 	SetSubscribed(conn *wsConn, sessionID string)

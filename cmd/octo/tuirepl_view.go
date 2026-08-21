@@ -1428,8 +1428,9 @@ func (m *tuiModel) openModal(msg askMsg) {
 func (m *tuiModel) newModalState(msg askMsg) *modalState {
 	st := &modalState{prompt: msg.prompt, resp: msg.resp, selected: map[int]bool{}}
 	if msg.prompt.Kind == KindQuestion {
-		st.options = append(st.options, msg.prompt.Options...)
-		st.options = append(st.options, "Other (free text)")
+		st.answers = make([]UserAnswer, len(msg.prompt.Questions))
+		st.notes = make([]string, len(msg.prompt.Questions))
+		st.rows = questionRows(st.currentQuestion())
 	}
 	st.cursor = 0
 	st.otherActive = false
@@ -1443,6 +1444,119 @@ func (m *tuiModel) newModalState(msg askMsg) *modalState {
 		st.otherInput.Focus()
 	}
 	return st
+}
+
+// currentQuestion is the question on screen, or the zero value on the review
+// tab (where there is none).
+func (st *modalState) currentQuestion() UserQuestion {
+	if st.qIdx >= 0 && st.qIdx < len(st.prompt.Questions) {
+		return st.prompt.Questions[st.qIdx]
+	}
+	return UserQuestion{}
+}
+
+// onReviewTab reports whether the review/submit tab is showing.
+func (st *modalState) onReviewTab() bool {
+	return st.qIdx >= len(st.prompt.Questions)
+}
+
+// hasReviewTab reports whether this set gets a review/submit tab at all. A
+// lone single-select question doesn't need one: picking an option is the
+// submission. A lone multi-select question does — toggling never advances.
+func (st *modalState) hasReviewTab() bool {
+	if len(st.prompt.Questions) == 1 {
+		return st.prompt.Questions[0].MultiSelect
+	}
+	return len(st.prompt.Questions) > 1
+}
+
+// previewLayout reports whether a question renders in the two-column preview
+// layout. Mirroring Claude Code, that layout REPLACES the flat one: it drops
+// the "Other" row (the text slot holds notes instead) and shows previews in
+// place of descriptions.
+func previewLayout(q UserQuestion) bool {
+	if q.MultiSelect {
+		return false
+	}
+	for _, opt := range q.Options {
+		if opt.Preview != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// questionRows builds the rows for one question, tail rows included.
+func questionRows(q UserQuestion) []modalRow {
+	rows := make([]modalRow, 0, len(q.Options)+2)
+	for i, opt := range q.Options {
+		rows = append(rows, modalRow{kind: rowOption, optIdx: i, label: opt.Label, desc: opt.Description})
+	}
+	if !previewLayout(q) {
+		rows = append(rows, modalRow{kind: rowOther, label: "Other (free text)"})
+	}
+	rows = append(rows, modalRow{kind: rowClarify, label: "Chat about this"})
+	return rows
+}
+
+// showQuestion switches to question i (or the review tab) and resets the
+// per-question row state.
+func (st *modalState) showQuestion(i int) {
+	st.qIdx = i
+	st.cursor = 0
+	st.selected = map[int]bool{}
+	st.otherActive = false
+	st.noteActive = false
+	st.rows = questionRows(st.currentQuestion())
+	if !st.onReviewTab() {
+		// Restore what the user already picked for this question, so tabbing
+		// back doesn't look like the answer was lost.
+		ans := st.answers[st.qIdx]
+		for i, row := range st.rows {
+			if row.kind != rowOption {
+				continue
+			}
+			for _, c := range ans.Choices {
+				if c == row.label {
+					st.selected[i] = true
+					st.cursor = i
+				}
+			}
+		}
+	}
+}
+
+// tabCount is how many tabs the picker has, review tab included.
+func (st *modalState) tabCount() int {
+	n := len(st.prompt.Questions)
+	if st.hasReviewTab() {
+		n++
+	}
+	return n
+}
+
+// collectAnswers folds the per-question notes into the answers.
+func (st *modalState) collectAnswers() []UserAnswer {
+	out := make([]UserAnswer, len(st.answers))
+	copy(out, st.answers)
+	for i := range out {
+		if i < len(st.notes) {
+			out[i].Notes = st.notes[i]
+		}
+	}
+	return out
+}
+
+// advance moves past the question just answered: to the next index (not the
+// next unanswered one, matching Claude Code), to the review tab if there is
+// one, or straight to submission.
+func (m *tuiModel) advance(st *modalState) {
+	next := st.qIdx + 1
+	if next < len(st.prompt.Questions) || (next == len(st.prompt.Questions) && st.hasReviewTab()) {
+		st.showQuestion(next)
+		return
+	}
+	m.answerModal(UserResponse{Outcome: PromptSubmitted, Answers: st.collectAnswers()})
 }
 
 // answerModal sends a response, clears the modal, and opens the next queued
@@ -1485,16 +1599,42 @@ func (m *tuiModel) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// cancels the modal (textinput has no cancel key of its own), and Enter
 	// confirms rather than inserting (textinput is single-line and ignores
 	// Enter anyway, but intercepting keeps the intent explicit).
-	if st.otherActive {
+	if st.otherActive || st.noteActive {
 		switch msg.Type {
 		case tea.KeyEsc:
-			m.answerModal(UserResponse{Cancelled: true})
+			if st.prompt.Kind == KindSecret {
+				m.answerModal(UserResponse{Cancelled: true})
+				return m, nil
+			}
+			// Back out of the text field, not out of the whole prompt.
+			st.otherActive = false
+			st.noteActive = false
+			st.otherInput.SetValue("")
+			st.otherInput.Blur()
 			return m, nil
 		case tea.KeyEnter:
-			if trimmed := strings.TrimSpace(st.otherInput.Value()); trimmed != "" {
-				m.answerModal(UserResponse{Custom: trimmed})
-			} else {
-				m.answerModal(UserResponse{Cancelled: true})
+			trimmed := strings.TrimSpace(st.otherInput.Value())
+			switch {
+			case st.prompt.Kind == KindSecret:
+				if trimmed == "" {
+					m.answerModal(UserResponse{Cancelled: true})
+				} else {
+					m.answerModal(UserResponse{Custom: trimmed})
+				}
+			case st.noteActive:
+				st.notes[st.qIdx] = trimmed
+				st.noteActive = false
+				st.otherInput.SetValue("")
+				st.otherInput.Blur()
+			default:
+				st.otherActive = false
+				st.otherInput.SetValue("")
+				st.otherInput.Blur()
+				if trimmed != "" {
+					st.answers[st.qIdx].Custom = trimmed
+					st.answers[st.qIdx].Choices = nil
+					m.advance(st)
+				}
 			}
 			return m, nil
 		}
@@ -1503,76 +1643,122 @@ func (m *tuiModel) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	// Question modal: arrow/j-k to move, space to toggle (multi), enter to
-	// confirm, esc to cancel.
+	// Question picker: tab between questions, arrow/j-k to move, space to
+	// toggle (multi), enter to confirm, esc to reject the whole set.
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.answerModal(UserResponse{Cancelled: true})
+		m.answerModal(UserResponse{Outcome: PromptRejected})
+	case tea.KeyTab:
+		st.showQuestion((st.qIdx + 1) % st.tabCount())
+	case tea.KeyShiftTab:
+		st.showQuestion((st.qIdx - 1 + st.tabCount()) % st.tabCount())
 	case tea.KeyUp:
 		if st.cursor > 0 {
 			st.cursor--
 		}
 	case tea.KeyDown:
-		if st.cursor < len(st.options)-1 {
+		if st.cursor < len(st.rows)-1 {
 			st.cursor++
 		}
 	case tea.KeySpace:
-		if st.prompt.MultiSelect {
+		if st.currentQuestion().MultiSelect && st.rowKind() == rowOption {
 			st.selected[st.cursor] = !st.selected[st.cursor]
 		}
 	case tea.KeyEnter:
 		m.confirmQuestion(st)
 	case tea.KeyRunes:
-		switch string(msg.Runes) {
-		case "j":
-			if st.cursor < len(st.options)-1 {
+		r := string(msg.Runes)
+		switch {
+		case r == "j":
+			if st.cursor < len(st.rows)-1 {
 				st.cursor++
 			}
-		case "k":
+		case r == "k":
 			if st.cursor > 0 {
 				st.cursor--
 			}
+		case r == "n" && previewLayout(st.currentQuestion()):
+			st.noteActive = true
+			st.otherInput.SetValue(st.notes[st.qIdx])
+			st.otherInput.Focus()
+		case len(r) == 1 && r[0] >= '1' && r[0] <= '9':
+			m.pickByNumber(st, int(r[0]-'0'))
 		}
 	}
 	return m, nil
 }
 
-// confirmQuestion maps the modal selection onto a UserResponse. Selecting the
-// trailing "Other" slot switches the modal into inline free-text input rather
-// than cancelling.
-func (m *tuiModel) confirmQuestion(st *modalState) {
-	otherIdx := len(st.options) - 1
+// rowKind is the kind of the highlighted row, or rowOption when there are no
+// rows (the review tab).
+func (st *modalState) rowKind() modalRowKind {
+	if st.cursor < len(st.rows) {
+		return st.rows[st.cursor].kind
+	}
+	return rowOption
+}
 
-	if st.prompt.MultiSelect {
-		wantOther := st.selected[otherIdx]
-		if wantOther {
-			st.otherActive = true
-			st.otherInput.Focus()
-			return
-		}
-		var picks []string
-		for i := range st.options {
-			if i == otherIdx {
-				continue
-			}
-			if st.selected[i] {
-				picks = append(picks, st.prompt.Options[i])
-			}
-		}
-		if len(picks) == 0 {
-			m.answerModal(UserResponse{Cancelled: true})
-			return
-		}
-		m.answerModal(UserResponse{Choices: picks})
+// pickByNumber handles a digit press. In the flat layout a digit selects that
+// row outright; in the preview layout it only moves the focus, because the
+// point there is to bring the option's preview up for comparison before
+// committing — the same split Claude Code makes.
+func (m *tuiModel) pickByNumber(st *modalState, n int) {
+	if st.onReviewTab() || n > len(st.rows) {
 		return
 	}
+	st.cursor = n - 1
+	if !previewLayout(st.currentQuestion()) {
+		m.confirmQuestion(st)
+	}
+}
 
-	if st.cursor == otherIdx {
+// confirmQuestion acts on the highlighted row: record a pick and advance,
+// open the free-text row, abandon the set for a conversation, or submit from
+// the review tab.
+func (m *tuiModel) confirmQuestion(st *modalState) {
+	if st.onReviewTab() {
+		m.answerModal(UserResponse{Outcome: PromptSubmitted, Answers: st.collectAnswers()})
+		return
+	}
+	q := st.currentQuestion()
+	if st.cursor >= len(st.rows) {
+		return
+	}
+	row := st.rows[st.cursor]
+
+	switch row.kind {
+	case rowClarify:
+		// Resolve now, carrying whatever was answered so far: the model reads
+		// the clarify instruction and asks the user what they meant. Nothing
+		// waits for a follow-up message.
+		m.answerModal(UserResponse{Outcome: PromptClarify, Answers: st.collectAnswers()})
+		return
+	case rowOther:
 		st.otherActive = true
+		st.otherInput.SetValue(st.answers[st.qIdx].Custom)
 		st.otherInput.Focus()
 		return
 	}
-	m.answerModal(UserResponse{Choices: []string{st.prompt.Options[st.cursor]}})
+
+	if q.MultiSelect {
+		var picks []string
+		for i, r := range st.rows {
+			if r.kind == rowOption && st.selected[i] {
+				picks = append(picks, r.label)
+			}
+		}
+		if len(picks) == 0 {
+			// Enter with nothing toggled acts as "pick the highlighted one",
+			// so a multi-select question can still be answered with one key.
+			picks = []string{row.label}
+		}
+		st.answers[st.qIdx].Choices = picks
+		m.advance(st)
+		return
+	}
+
+	st.answers[st.qIdx].Choices = []string{row.label}
+	st.answers[st.qIdx].Custom = ""
+	m.advance(st)
 }
 
 // keyIs reports whether msg is a single-rune press of r (case-insensitive).
@@ -2001,46 +2187,187 @@ func (m *tuiModel) modalView() string {
 		return b.String()
 	}
 
-	header := st.prompt.Header
-	if header == "" {
-		header = "question"
-		if st.prompt.Kind == KindSecret {
-			header = "secret"
+	if st.prompt.Kind == KindSecret {
+		b.WriteString(modalStyle.Render("[secret]"))
+		b.WriteByte('\n')
+		b.WriteString("  " + st.prompt.Question + "\n")
+		b.WriteString("  Secret: " + st.otherInput.View() + "\n")
+		b.WriteString(hintStyle.Render("Enter confirm · Esc cancel"))
+		return tui.Box(b.String())
+	}
+
+	b.WriteString(m.renderQuestionTabs(st))
+	b.WriteByte('\n')
+
+	if st.onReviewTab() {
+		b.WriteString("  Review your answers\n")
+		answered := 0
+		for i, q := range st.prompt.Questions {
+			ans := answerSummary(st.answers[i])
+			if ans == "" {
+				continue
+			}
+			answered++
+			b.WriteString(fmt.Sprintf("  %s\n    → %s\n", q.Question, ans))
+		}
+		if answered < len(st.prompt.Questions) {
+			b.WriteString(hintStyle.Render("  You have not answered all questions") + "\n")
+		}
+		b.WriteString(hintStyle.Render("Enter submit · Tab switch questions · Esc cancel"))
+		return tui.Box(b.String())
+	}
+
+	q := st.currentQuestion()
+	b.WriteString("  " + q.Question + "\n")
+	preview := previewLayout(q)
+	if preview {
+		b.WriteString(m.renderPreviewRows(st, q))
+	} else {
+		b.WriteString(renderFlatRows(st, q))
+	}
+
+	switch {
+	case st.otherActive:
+		b.WriteString("  Other: " + st.otherInput.View() + "\n")
+		b.WriteString(hintStyle.Render("Enter confirm · Esc back"))
+		return tui.Box(b.String())
+	case st.noteActive:
+		b.WriteString("  Notes: " + st.otherInput.View() + "\n")
+		b.WriteString(hintStyle.Render("Enter save · Esc back"))
+		return tui.Box(b.String())
+	}
+
+	hints := []string{"↑/↓ move"}
+	if q.MultiSelect {
+		hints = append(hints, "Space toggle", "Enter confirm")
+	} else if preview {
+		hints = append(hints, "1-9 focus", "Enter select", "n add notes")
+	} else {
+		hints = append(hints, "1-9 select", "Enter select")
+	}
+	if st.tabCount() > 1 {
+		hints = append(hints, "Tab switch questions")
+	}
+	hints = append(hints, "Esc cancel")
+	b.WriteString(hintStyle.Render(strings.Join(hints, " · ")))
+	return tui.Box(b.String())
+}
+
+// renderQuestionTabs draws the tab row: one tab per question plus the review
+// tab, the current one highlighted and answered ones ticked. A lone
+// single-select question has no tab row to draw.
+func (m *tuiModel) renderQuestionTabs(st *modalState) string {
+	if st.tabCount() < 2 {
+		return modalStyle.Render("[" + st.currentQuestion().Header + "]")
+	}
+	var parts []string
+	for i, q := range st.prompt.Questions {
+		label := q.Header
+		if answerSummary(st.answers[i]) != "" {
+			label = "✓ " + label
+		}
+		if i == st.qIdx {
+			parts = append(parts, modalStyle.Render("["+label+"]"))
+		} else {
+			parts = append(parts, hintStyle.Render(" "+label+" "))
 		}
 	}
-	b.WriteString(modalStyle.Render("[" + header + "]"))
-	b.WriteByte('\n')
-	b.WriteString("  " + st.prompt.Question + "\n")
-	for i, opt := range st.options {
+	if st.hasReviewTab() {
+		if st.onReviewTab() {
+			parts = append(parts, modalStyle.Render("[submit]"))
+		} else {
+			parts = append(parts, hintStyle.Render(" submit "))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// renderFlatRows draws the flat layout: label, description beneath, numbered.
+func renderFlatRows(st *modalState, q UserQuestion) string {
+	var b strings.Builder
+	for i, row := range st.rows {
 		cursor := "  "
 		if i == st.cursor {
 			cursor = "▸ "
 		}
 		mark := ""
-		if st.prompt.MultiSelect {
+		if q.MultiSelect && row.kind == rowOption {
 			if st.selected[i] {
 				mark = "[x] "
 			} else {
 				mark = "[ ] "
 			}
 		}
-		b.WriteString(fmt.Sprintf("  %s%s%s\n", cursor, mark, opt))
-	}
-	if st.otherActive {
-		label := "Other"
-		if st.prompt.Kind == KindSecret {
-			label = "Secret"
+		b.WriteString(fmt.Sprintf("  %s%d. %s%s\n", cursor, i+1, mark, row.label))
+		if row.desc != "" {
+			b.WriteString(hintStyle.Render("       "+row.desc) + "\n")
 		}
-		b.WriteString("  " + label + ": " + st.otherInput.View() + "\n")
-		b.WriteString(hintStyle.Render("Enter confirm · Esc cancel"))
-		return tui.Box(b.String())
 	}
-	hint := "↑/↓ move · Enter select · Esc cancel"
-	if st.prompt.MultiSelect {
-		hint = "↑/↓ move · Space toggle · Enter confirm · Esc cancel"
+	return b.String()
+}
+
+// renderPreviewRows draws the preview layout: labels only (the preview stands
+// in for the description), with the focused option's preview in a pane beside
+// the list on a wide terminal and beneath it otherwise. The pane is
+// height-capped because bubbletea's inline renderer truncates over-wide and
+// over-tall frames with no marker.
+func (m *tuiModel) renderPreviewRows(st *modalState, q UserQuestion) string {
+	var list strings.Builder
+	for i, row := range st.rows {
+		cursor := "  "
+		if i == st.cursor {
+			cursor = "▸ "
+		}
+		switch row.kind {
+		case rowClarify:
+			list.WriteString(hintStyle.Render("  ────") + "\n")
+			list.WriteString(fmt.Sprintf("  %s%s\n", cursor, row.label))
+		default:
+			list.WriteString(fmt.Sprintf("  %s%d. %s\n", cursor, i+1, row.label))
+		}
 	}
-	b.WriteString(hintStyle.Render(hint))
-	return tui.Box(b.String())
+
+	body := previewText(st, q)
+	if note := st.notes[st.qIdx]; note != "" && !st.noteActive {
+		body += "\n\nNotes: " + note
+	}
+	pane := tui.Box(body)
+	if m.width >= 100 {
+		return lipgloss.JoinHorizontal(lipgloss.Top, list.String(), pane) + "\n"
+	}
+	return list.String() + pane + "\n"
+}
+
+// previewText is the focused option's preview, or a placeholder when that
+// option has none.
+func previewText(st *modalState, q UserQuestion) string {
+	if st.cursor < len(st.rows) && st.rows[st.cursor].kind == rowOption {
+		if p := q.Options[st.rows[st.cursor].optIdx].Preview; p != "" {
+			return clampLines(p, modalPreviewMaxLines)
+		}
+	}
+	return "No preview available"
+}
+
+// modalPreviewMaxLines bounds the preview pane so a long mockup can't push the
+// picker off the screen.
+const modalPreviewMaxLines = 16
+
+func clampLines(s string, max int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= max {
+		return s
+	}
+	return strings.Join(lines[:max], "\n") + "\n…"
+}
+
+// answerSummary renders one answer for the review tab and the tab ticks.
+func answerSummary(a UserAnswer) string {
+	parts := append([]string{}, a.Choices...)
+	if a.Custom != "" {
+		parts = append(parts, a.Custom)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // permissionMaxKeys caps how many input keys the generic listing shows.

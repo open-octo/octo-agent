@@ -152,30 +152,44 @@ func waitFor(t *testing.T, cond func() bool) {
 	t.Fatal("condition not met within 2s")
 }
 
+// askQ builds one question with the given labels.
+func askQ(multi bool, labels ...string) tools.AskQuestion {
+	opts := make([]tools.AskOption, 0, len(labels))
+	for _, l := range labels {
+		opts = append(opts, tools.AskOption{Label: l})
+	}
+	return tools.AskQuestion{Question: "q", Header: "h", MultiSelect: multi, Options: opts}
+}
+
+func askOne(q tools.AskQuestion) tools.AskRequest {
+	return tools.AskRequest{Questions: []tools.AskQuestion{q}}
+}
+
 func TestParseAskReply(t *testing.T) {
-	q := tools.AskRequest{Question: "q", Options: []string{"Alpha", "Beta", "Gamma"}}
-	multi := tools.AskRequest{Question: "q", Options: []string{"Alpha", "Beta", "Gamma"}, MultiSelect: true}
+	q := askQ(false, "Alpha", "Beta", "Gamma")
+	multi := askQ(true, "Alpha", "Beta", "Gamma")
 
 	cases := []struct {
-		req     tools.AskRequest
+		q       tools.AskQuestion
 		text    string
 		choices []string
 		custom  string
-		cancel  bool
+		outcome tools.AskOutcome
 	}{
-		{q, "2", []string{"Beta"}, "", false},
-		{q, " 1 ", []string{"Alpha"}, "", false},
-		{q, "beta", []string{"Beta"}, "", false},        // label match, case-insensitive
-		{q, "do it my way", nil, "do it my way", false}, // free text
-		{q, "9", nil, "9", false},                       // out of range → custom text
-		{q, "", nil, "", true},
-		{multi, "1,3", []string{"Alpha", "Gamma"}, "", false},
-		{multi, "1、3", []string{"Alpha", "Gamma"}, "", false},
+		{q, "2", []string{"Beta"}, "", tools.AskSubmitted},
+		{q, " 1 ", []string{"Alpha"}, "", tools.AskSubmitted},
+		{q, "beta", []string{"Beta"}, "", tools.AskSubmitted},        // label match, case-insensitive
+		{q, "do it my way", nil, "do it my way", tools.AskSubmitted}, // free text
+		{q, "9", nil, "9", tools.AskSubmitted},                       // out of range → custom text
+		{q, "", nil, "", tools.AskRejected},                          // empty reply cancels the set
+		{q, "4", nil, "", tools.AskClarify},                          // the tail row: "Chat about this"
+		{multi, "1,3", []string{"Alpha", "Gamma"}, "", tools.AskSubmitted},
+		{multi, "1、3", []string{"Alpha", "Gamma"}, "", tools.AskSubmitted},
 	}
 	for _, c := range cases {
-		got := parseAskReply(c.text, c.req)
-		if got.Cancelled != c.cancel {
-			t.Errorf("parse(%q) cancelled = %v, want %v", c.text, got.Cancelled, c.cancel)
+		got, outcome := parseAskReply(c.text, c.q)
+		if outcome != c.outcome {
+			t.Errorf("parse(%q) outcome = %v, want %v", c.text, outcome, c.outcome)
 			continue
 		}
 		if strings.Join(got.Choices, "|") != strings.Join(c.choices, "|") || got.Custom != c.custom {
@@ -184,15 +198,114 @@ func TestParseAskReply(t *testing.T) {
 	}
 }
 
+// A set is asked one message per question, and each reply fills its own slot.
+func TestChannelAsker_AsksEachQuestionInTurn(t *testing.T) {
+	srv, sess, ad, ev := askEnv(t)
+	asker := srv.channelAsker(sess, ad, ev)
+
+	req := tools.AskRequest{Questions: []tools.AskQuestion{
+		askQ(false, "staging", "production"),
+		askQ(false, "now", "later"),
+	}}
+	req.Questions[0].Question = "Deploy where?"
+	req.Questions[1].Question = "Deploy when?"
+
+	done := make(chan tools.AskResponse, 1)
+	go func() {
+		res, _ := asker.Ask(context.Background(), req)
+		done <- res
+	}()
+
+	waitFor(t, func() bool { return len(ad.texts()) == 1 })
+	if first := ad.texts()[0]; !strings.Contains(first, "(1/2)") || !strings.Contains(first, "Deploy where?") {
+		t.Errorf("first prompt %q must show progress and the first question", first)
+	}
+	if !sess.DeliverAskReply("c1", "", "2") {
+		t.Fatal("ask slot not armed for the first question")
+	}
+	waitFor(t, func() bool { return len(ad.texts()) == 2 })
+	if second := ad.texts()[1]; !strings.Contains(second, "Deploy when?") {
+		t.Errorf("second prompt %q must show the second question", second)
+	}
+	waitFor(t, func() bool { return sess.DeliverAskReply("c1", "", "1") })
+
+	res := <-done
+	if res.Outcome != tools.AskSubmitted || len(res.Answers) != 2 {
+		t.Fatalf("res = %+v, want two submitted answers", res)
+	}
+	if got := res.Answers[0].Choices; len(got) != 1 || got[0] != "production" {
+		t.Errorf("answer 0 = %v, want [production]", got)
+	}
+	if got := res.Answers[1].Choices; len(got) != 1 || got[0] != "now" {
+		t.Errorf("answer 1 = %v, want [now]", got)
+	}
+}
+
+// "Chat about this" ends the set immediately, carrying what was answered so
+// far — no extra round-trip, because clarify resolves the call.
+func TestChannelAsker_ClarifyEndsSetWithPartialAnswers(t *testing.T) {
+	srv, sess, ad, ev := askEnv(t)
+	asker := srv.channelAsker(sess, ad, ev)
+
+	req := tools.AskRequest{Questions: []tools.AskQuestion{
+		askQ(false, "staging", "production"),
+		askQ(false, "now", "later"),
+	}}
+	done := make(chan tools.AskResponse, 1)
+	go func() {
+		res, _ := asker.Ask(context.Background(), req)
+		done <- res
+	}()
+
+	waitFor(t, func() bool { return len(ad.texts()) == 1 })
+	if !sess.DeliverAskReply("c1", "", "1") {
+		t.Fatal("ask slot not armed")
+	}
+	waitFor(t, func() bool { return len(ad.texts()) == 2 })
+	// 3 = the "Chat about this" row for a two-option question.
+	waitFor(t, func() bool { return sess.DeliverAskReply("c1", "", "3") })
+
+	res := <-done
+	if res.Outcome != tools.AskClarify {
+		t.Fatalf("outcome = %v, want clarify", res.Outcome)
+	}
+	if got := res.Answers[0].Choices; len(got) != 1 || got[0] != "staging" {
+		t.Errorf("answer 0 = %v, want the answer given before clarifying", got)
+	}
+}
+
+// Previews and notes never reach a chat timeline: they exist for a
+// side-by-side comparison a timeline can't render.
+func TestRenderChatQuestion_OmitsPreview(t *testing.T) {
+	q := askQ(false, "A", "B")
+	q.Options[0].Description = "the first one"
+	q.Options[0].Preview = "SECRET-PREVIEW-BODY"
+	out := renderChatQuestion(q, 0, 1)
+
+	if strings.Contains(out, "SECRET-PREVIEW-BODY") {
+		t.Errorf("prompt %q must not carry a preview", out)
+	}
+	if !strings.Contains(out, "1. A — the first one") {
+		t.Errorf("prompt %q must carry the description inline", out)
+	}
+	if !strings.Contains(out, "3. Chat about this") {
+		t.Errorf("prompt %q must offer the clarify row", out)
+	}
+	if strings.Contains(out, "Other") {
+		t.Errorf("prompt %q must not list Other — free text already is the reply", out)
+	}
+}
+
 func TestChannelAsker_NumberPicksOption(t *testing.T) {
 	srv, sess, ad, ev := askEnv(t)
 	asker := srv.channelAsker(sess, ad, ev)
 
+	q := askQ(false, "staging", "production")
+	q.Question = "Deploy where?"
+
 	done := make(chan tools.AskResponse, 1)
 	go func() {
-		res, _ := asker.Ask(context.Background(), tools.AskRequest{
-			Question: "Deploy where?", Options: []string{"staging", "production"},
-		})
+		res, _ := asker.Ask(context.Background(), askOne(q))
 		done <- res
 	}()
 	waitFor(t, func() bool { return len(ad.texts()) == 1 })
@@ -204,8 +317,8 @@ func TestChannelAsker_NumberPicksOption(t *testing.T) {
 		t.Fatal("ask slot not armed")
 	}
 	res := <-done
-	if len(res.Choices) != 1 || res.Choices[0] != "production" {
-		t.Errorf("choices = %v, want [production]", res.Choices)
+	if len(res.Answers) != 1 || len(res.Answers[0].Choices) != 1 || res.Answers[0].Choices[0] != "production" {
+		t.Errorf("answers = %+v, want one answer of [production]", res.Answers)
 	}
 }
 
@@ -222,7 +335,7 @@ func TestChannelAsker_ContextCancelReturnsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan tools.AskResponse, 1)
 	go func() {
-		res, _ := asker.Ask(ctx, tools.AskRequest{Question: "q", Options: []string{"a", "b"}})
+		res, _ := asker.Ask(ctx, askOne(askQ(false, "a", "b")))
 		done <- res
 	}()
 	waitFor(t, func() bool { return len(ad.texts()) == 1 })
@@ -230,8 +343,8 @@ func TestChannelAsker_ContextCancelReturnsCancelled(t *testing.T) {
 
 	select {
 	case res := <-done:
-		if !res.Cancelled {
-			t.Error("context cancellation must report Cancelled")
+		if res.Outcome != tools.AskRejected {
+			t.Errorf("outcome = %v, want rejected on context cancellation", res.Outcome)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("ask did not return on context cancellation")

@@ -19,12 +19,51 @@ type UserPrompt struct {
 	ToolName  string
 	ToolInput map[string]any
 
-	// Question (KindQuestion): the ask_user_question payload.
-	Header      string
-	Question    string
-	Options     []string
-	MultiSelect bool
+	// Question (KindQuestion): the ask_user_question payload — 1..4 questions
+	// answered in one prompt.
+	Questions []UserQuestion
+
+	// Question (KindSecret): the single prompt line for a masked read.
+	Question string
 }
+
+// UserQuestion is one question of an ask_user_question set.
+type UserQuestion struct {
+	Question    string
+	Header      string // labels this question; never empty (see HeaderOrDefault)
+	MultiSelect bool
+	Options     []UserOption
+}
+
+// UserOption is one choice. Label and Description stay separate so the view
+// can render the label prominently with its description beneath; a non-empty
+// Preview puts the question in the two-column preview layout.
+type UserOption struct {
+	Label       string
+	Description string
+	Preview     string
+}
+
+// UserAnswer is one question's answer. Custom is the "Other" free text;
+// Notes is a note attached in the preview layout.
+type UserAnswer struct {
+	Choices []string
+	Custom  string
+	Notes   string
+}
+
+// UserAskOutcome mirrors tools.AskOutcome for the view layer: the user either
+// submitted the set, asked to talk it over instead, or dismissed it.
+type UserAskOutcome int
+
+const (
+	// PromptSubmitted: answers (possibly partial) were submitted.
+	PromptSubmitted UserAskOutcome = iota
+	// PromptClarify: "Chat about this" — resolve now, let the model ask.
+	PromptClarify
+	// PromptRejected: dismissed; answers are discarded.
+	PromptRejected
+)
 
 // UserPromptKind tags a UserPrompt.
 type UserPromptKind int
@@ -46,10 +85,16 @@ type UserResponse struct {
 	Allow  bool // run this tool call
 	Always bool // ...and remember the allow for the rest of the session
 
-	// Question (KindQuestion):
-	Choices   []string // selected option label(s)
-	Custom    string   // free-text ("Other") answer
-	Cancelled bool     // user declined / no usable answer
+	// Question (KindQuestion): one entry per question asked.
+	Outcome UserAskOutcome
+	Answers []UserAnswer
+
+	// Secret (KindSecret): the value read with echo off. Also carries the
+	// answer for the single-question secret prompt.
+	Custom string
+
+	// Cancelled reports a dismissed secret prompt.
+	Cancelled bool
 }
 
 // userPrompter is the narrow capability the permission gate and the

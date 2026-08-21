@@ -213,7 +213,7 @@ func TestReplayLiveState_IdleWithPendingPrompt(t *testing.T) {
 	defer tools.CloseSessionBackgroundManager(sid)
 
 	srv.pendingQuestions[sid] = wsEventRequestUserQuestion{
-		Type: "request_user_question", SessionID: sid, QuestionID: "q_1", Question: "pick one", Options: []string{"a", "b"},
+		Type: "request_user_question", SessionID: sid, QuestionID: "q_1", Questions: []wsAskQuestion{{Question: "pick one", Header: "h", Options: []wsAskOption{{Label: "a"}, {Label: "b"}}}},
 	}
 
 	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}

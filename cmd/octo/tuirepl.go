@@ -673,15 +673,45 @@ type runningTool struct {
 // lines — enough to show the command is progressing, not a full replay.
 const runningTailMaxLines = 3
 
+// modalRowKind tags a row of the question picker. The tail rows are
+// synthetic: "Other" collects free text for this question, "Chat about this"
+// abandons the set and lets the model ask what the user wants to clarify.
+type modalRowKind int
+
+const (
+	rowOption modalRowKind = iota
+	rowOther
+	rowClarify
+)
+
+// modalRow is one rendered row of the current question.
+type modalRow struct {
+	kind modalRowKind
+	// optIdx indexes prompt.Questions[qIdx].Options for rowOption.
+	optIdx int
+	label  string
+	desc   string
+}
+
 // modalState renders a permission / question prompt and collects the answer.
 type modalState struct {
 	prompt UserPrompt
 	resp   chan UserResponse
-	// cursor is the highlighted option (question mode); options include the
-	// trailing "Other (free text)" slot.
-	cursor   int
-	options  []string // rendered option labels (questions only)
+	// cursor is the highlighted row of the current question.
+	cursor int
+	// rows are the current question's rows, rebuilt on every question
+	// change because the two layouts differ in which tail rows exist.
+	rows []modalRow
+	// selected holds multi-select toggles for the current question only.
 	selected map[int]bool
+	// qIdx is the question being shown, or len(Questions) for the review tab.
+	qIdx int
+	// answers and notes are parallel to prompt.Questions.
+	answers []UserAnswer
+	notes   []string
+	// noteActive is true while typing a note (preview layout only); the note
+	// shares otherInput, mirroring Claude Code's single text slot.
+	noteActive bool
 	// otherActive is true when the user has selected "Other" and is now typing
 	// free text inline inside the modal. otherInput is a real textinput.Model
 	// (not a hand-rolled append/backspace buffer) so it gets cursor movement,

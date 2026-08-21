@@ -4,55 +4,119 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 )
 
-// Asker presents a structured question to the user and waits for their
-// answer. Implementations live in cmd/octo (the REPL prompt reader); tests
-// substitute fakes. Like Spawner, this interface stays free of the
-// stdin/terminal mechanics so the tools package doesn't depend on cmd/octo.
+// Asker presents a structured question set to the user and waits for their
+// answer. Implementations live in cmd/octo (the REPL prompt reader) and
+// internal/server (web + IM); tests substitute fakes. Like Spawner, this
+// interface stays free of the stdin/terminal mechanics so the tools package
+// doesn't depend on cmd/octo.
 type Asker interface {
 	Ask(ctx context.Context, q AskRequest) (AskResponse, error)
 }
 
-// AskRequest is the structured question, parsed from the tool input.
+// AskRequest is the question set, parsed from the tool input. Up to four
+// questions are asked in one call; surfaces render them as tabs with a final
+// review/submit step rather than a forced sequence.
 type AskRequest struct {
+	Questions []AskQuestion
+}
+
+// AskQuestion is one question in the set.
+type AskQuestion struct {
 	// Question is the prompt shown to the user, complete with punctuation.
 	Question string
 
-	// Options are the mutually-exclusive (or, when MultiSelect, jointly
-	// selectable) labels. Empty means "free text answer" (the asker prompts
-	// for an open-ended response with no list).
-	Options []string
+	// Header labels this question's tab. Short (~12 chars); the model is
+	// required to supply one, and an empty value falls back to "Q1"/"Q2".
+	Header string
 
-	// MultiSelect lets the user pick more than one option. The asker is
-	// responsible for parsing a comma-separated selection and returning all
-	// chosen labels.
+	// MultiSelect lets the user pick more than one option. Previews and
+	// notes are single-select only, mirroring Claude Code.
 	MultiSelect bool
 
-	// Header is an optional short tag (≤12 chars) shown in the prompt UI.
-	// Helpful when several questions share visual real estate.
-	Header string
+	// Options are the choices. The model must supply 2-4; the internal
+	// secret-collection path passes none, which renders as a bare input.
+	Options []AskOption
 }
 
-// AskResponse is what the user provided. Cancelled is true when the user
-// dismissed the prompt (Ctrl-C, empty enter on a forced-pick, etc.); in
-// that case Choices and Custom are empty.
+// AskOption is one choice. Label and Description stay separate so surfaces
+// can render the label prominently with its description beneath, instead of
+// receiving one pre-folded string.
+type AskOption struct {
+	Label       string
+	Description string
+
+	// Preview is a multi-line artifact worth comparing side by side (a
+	// mockup, a snippet, a config variant). A question with any preview is
+	// rendered in the two-column preview layout instead of the flat list.
+	Preview string
+}
+
+// AskOutcome is how the user left the picker. Three outcomes, not two: a
+// user who answers one question and then dismisses the picker has withdrawn,
+// and reporting that one answer as a success is how a model ends up acting on
+// a decision the user backed out of.
+type AskOutcome int
+
+const (
+	// AskSubmitted: the user submitted the answer set (possibly partial).
+	AskSubmitted AskOutcome = iota
+	// AskClarify: the user chose "Chat about this" — they want to talk
+	// rather than pick. Answers given so far ride along in the result, and
+	// nothing waits for a follow-up message: the turn continues, the model
+	// asks what they want to clarify, and their next message is an ordinary
+	// turn.
+	AskClarify
+	// AskRejected: the user dismissed the picker. Answers are discarded.
+	AskRejected
+)
+
+// AskResponse is what the user did.
 type AskResponse struct {
-	// Choices are the labels the user selected from Options. Empty when
-	// the user picked "Other" (then Custom carries their free text) or
-	// when the question had no Options (free text only).
+	Outcome AskOutcome
+
+	// Answers is parallel to AskRequest.Questions. A zero-valued entry means
+	// the user submitted without answering that question.
+	Answers []AskAnswer
+}
+
+// AskAnswer is one question's answer.
+type AskAnswer struct {
+	// Choices are the labels the user selected.
 	Choices []string
 
-	// Custom is the free-text answer for "Other" picks or option-less
-	// questions. Empty for plain selections.
+	// Custom is the free text typed into the "Other" row (flat layout only).
 	Custom string
 
-	// Cancelled reports user dismissal. The tool surfaces this to the LLM
-	// as a non-error result so the model can decide what to do next.
-	Cancelled bool
+	// Notes is a note the user attached to the question (preview layout
+	// only). Claude Code shares one input slot between Other and notes, so a
+	// question there can never carry both; keeping them separate is harmless
+	// but widens what the label check below must handle.
+	Notes string
+
+	// Preview is the chosen option's preview, echoed back so the model sees
+	// what the user actually picked. Filled by Execute from the request —
+	// askers never populate it, which keeps a large preview off the wire.
+	Preview string
 }
+
+// notesOnlyAnswer marks a question the user annotated without selecting an
+// option. It renders as "(no option selected)" and does not push the result
+// into the "user answered" phrasing.
+const notesOnlyAnswer = "(notes only)"
+
+// maxPreviewChars caps an echoed preview. A preview is a comparison aid, not
+// a payload: past this size it would ride the WebSocket frame, wreck a TUI
+// frame, and land verbatim in the tool result.
+const maxPreviewChars = 2000
+
+// previewWithheld replaces an over-long preview, for display and for the
+// echo-back alike.
+const previewWithheld = "(preview cannot be shown in full — compare the option labels and descriptions instead)"
 
 // activeAsker, when non-nil, backs the ask_user_question tool and gates its
 // advertisement in DefaultTools. Set by the REPL at session start; nil in
@@ -87,85 +151,85 @@ func askerFrom(ctx context.Context) Asker {
 	return activeAsker
 }
 
-// AskUserQuestionTool lets the model ask the user a single structured
-// clarifying question. The point isn't to chat with the user — it's to
-// resolve a branch where the model genuinely doesn't have enough
-// information to pick a default and asking via free-form prose would
-// produce a sloppy, hard-to-parse answer.
+// AskUserQuestionTool lets the model ask the user up to four structured
+// clarifying questions in one call. The point isn't to chat with the user —
+// it's to resolve a branch where the model genuinely doesn't have enough
+// information to pick a default and asking via free-form prose would produce
+// a sloppy, hard-to-parse answer.
 //
-// The declared schema mirrors Claude Code's AskUserQuestion natively — a
-// `questions` array of {question, header, multiSelect, options:[{label,
-// description}]} — so the shape the model was trained to emit and the shape we
-// advertise are the same. That alignment is the point: a flat snake_case schema
-// drifted from the model's prior, and it would intermittently revert to the CC
-// shape, fail validation, and the prompt would never reach the user (the
-// "web modal didn't pop up" bug). We still cap at ONE question per call
-// (maxItems:1, per the M11-prep design — simpler REPL/web/IM UX; the model
-// fires multiple calls when it needs multiple), and Execute still tolerates the
-// old flat shape as a fallback. See normalizeAskInput.
+// The schema and the validation mirror Claude Code's AskUserQuestion: the
+// shape the model was trained to emit and the shape we advertise are the
+// same, and a malformed call is refused the way Claude Code's host refuses it
+// — including telling the model NOT to retry a single-option question rather
+// than inviting it to invent a filler choice.
 type AskUserQuestionTool struct{}
 
 func (AskUserQuestionTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "ask_user_question",
-		Description: "Ask the user one structured clarifying question and wait for their answer. " +
-			"Use this when you're at a branch where you genuinely lack the information to pick a " +
-			"reasonable default — preferences (\"which library?\"), trade-offs (\"prioritize speed " +
-			"or readability?\"), or scope (\"include the migration too?\"). Don't use it for " +
-			"information you could find in the repo or for questions you should have an opinion " +
-			"on yourself. Pass exactly one question in the `questions` array; fire another call if " +
-			"you need to ask more. Populate `options` with 2-4 mutually exclusive choices whenever " +
-			"the question has ANY plausible discrete answers — leaving `options` empty means the " +
-			"user sees a bare free-text box instead of choices, which is a worse experience, so " +
-			"don't skip it by default. Set multiSelect=true when the choices are NOT mutually " +
-			"exclusive and the user may pick several. Only omit `options` for genuinely open-ended " +
-			"questions with no natural choices (e.g. \"what should we name it?\"). An \"Other\" " +
-			"free-text tail is always added either way. Result text is shaped like 'User chose: " +
-			"<label>' or, for a free-text answer, 'User chose: Other — <free text>'.",
+		Description: "Ask the user up to four structured clarifying questions and wait for their answers. " +
+			"Use this only when you're blocked on a decision that is genuinely the user's to make: one you " +
+			"cannot resolve from the request, the code, or sensible defaults — preferences (\"which library?\"), " +
+			"trade-offs (\"prioritize speed or readability?\"), or scope (\"include the migration too?\"). " +
+			"Don't use it for information you could find in the repo, or for choices with a conventional " +
+			"default — pick the obvious option, say so, and continue. " +
+			"Every question needs 2-4 mutually exclusive options; if you recommend one, make it the first " +
+			"option and add \"(Recommended)\" to its label. Don't add an \"Other\" entry — the user always " +
+			"gets one, plus a way to reply in prose instead of picking. " +
+			"Set multiSelect=true when the choices are NOT mutually exclusive and the user may pick several. " +
+			"Use `preview` only when presenting concrete artifacts the user needs to compare side by side " +
+			"(ASCII mockups of a layout, code snippets of competing implementations, config or diagram " +
+			"variants) — not for simple preference questions, where labels and descriptions suffice. " +
+			"Previews are single-select only.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"questions": map[string]any{
 					"type":        "array",
 					"minItems":    1,
-					"maxItems":    1,
-					"description": "The question to ask, as a single-element array. octo asks one question per call — fire another call for the next question.",
+					"maxItems":    4,
+					"description": "The questions to ask (1-4). Question texts must be unique.",
 					"items": map[string]any{
 						"type": "object",
 						"properties": map[string]any{
 							"question": map[string]any{
 								"type":        "string",
-								"description": "The question to ask, complete with punctuation. Should be ONE sentence asking ONE thing. Do not pack multiple questions (\"1) … 2) …\") into a single string — ask one, then fire a separate call for the next. If you need more context, put it in the option labels instead of the question itself.",
+								"description": "The complete question, with punctuation. Should be ONE sentence asking ONE thing. Do not pack multiple questions (\"1) … 2) …\") into a single string — add another entry to `questions` instead. If you need more context, put it in the option labels and descriptions.",
 							},
 							"header": map[string]any{
 								"type":        "string",
-								"description": "Optional short tag shown in the prompt UI (≤12 chars). Example: 'auth_method', 'scope'.",
+								"description": "Very short label for this question's tab (max 12 chars). Examples: \"Auth method\", \"Scope\", \"Library\".",
 							},
 							"multiSelect": map[string]any{
 								"type":        "boolean",
-								"description": "Set true when the choices are NOT mutually exclusive (e.g. \"which features should we enable?\"). The user can then pick more than one.",
+								"description": "Set true when the choices are NOT mutually exclusive (e.g. \"which features should we enable?\"). The user can then pick more than one. Previews are ignored for multi-select questions.",
 							},
 							"options": map[string]any{
-								"type":     "array",
-								"maxItems": 4,
+								"type":        "array",
+								"minItems":    2,
+								"maxItems":    4,
+								"description": "2-4 distinct choices. Labels must be unique within the question. A question with only one option has no decision in it — don't ask it.",
 								"items": map[string]any{
 									"type": "object",
 									"properties": map[string]any{
 										"label": map[string]any{
 											"type":        "string",
-											"description": "The choice, as a complete label (\"OAuth with PKCE\" not just \"OAuth\"). Don't add an \"Other\" entry — one is appended automatically.",
+											"description": "The choice, as a complete label (\"OAuth with PKCE\" not just \"OAuth\"). Concise — 1-5 words.",
 										},
 										"description": map[string]any{
 											"type":        "string",
-											"description": "Optional extra context for this choice, shown alongside the label.",
+											"description": "What this option means or what happens if chosen — trade-offs and implications. Shown beneath the label.",
+										},
+										"preview": map[string]any{
+											"type":        "string",
+											"description": "Concrete artifact for this option, rendered in a monospace pane beside the choices: an ASCII mockup, a code snippet, a config or diagram variant. Multi-line text is supported. Only use it when the user needs to compare artifacts, and only on single-select questions.",
 										},
 									},
 									"required": []string{"label"},
 								},
-								"description": "Up to 4 mutually exclusive choices. Omit for an open-ended free-text question.",
 							},
 						},
-						"required": []string{"question"},
+						"required": []string{"question", "header", "options"},
 					},
 				},
 			},
@@ -174,89 +238,329 @@ func (AskUserQuestionTool) Definition() agent.ToolDefinition {
 	}
 }
 
+// Steering messages for a malformed call. These deliberately don't read like
+// field-validation errors: a model that genuinely has one path cannot invent
+// a second option, so "options must have 2-4 entries" would push it into
+// filler choices or a retry loop. Claude Code's wording tells it to stop and
+// proceed instead, and that is the recovery we want too.
+const (
+	steerTooFewOptions = "This call included a question with fewer than 2 options, so it was rejected and the person never saw it. " +
+		"A question with a single option has no decision in it. Do not retry this call and do not invent a filler second option. " +
+		"Instead, state the one path you were going to offer as the approach you are taking, then continue with the task. " +
+		"If this call also contained questions with 2 to 4 options (each with distinct labels), you may re-ask those questions alone in a new call. " +
+		"Ask a question only when the person has at least two genuinely distinct choices."
+
+	steerTooManyOptions = "This call included a question with more than 4 options, so it was rejected and the person never saw it. " +
+		"Do not retry this call verbatim. Re-ask with at most 4 options, keeping the choices that actually differ and folding the rest away — " +
+		"the person always gets a free-text option, so a long tail of near-duplicates buys nothing."
+
+	steerTooManyQuestions = "This call included more than 4 questions, so it was rejected and the person never saw it. " +
+		"Do not retry this call verbatim. Ask the 4 that most change what you do next, then ask again later if the answers make more questions necessary."
+
+	steerNotUnique = "This call was rejected and the person never saw it: question texts must be unique, and option labels must be unique within each question. " +
+		"Re-ask with distinct wording so each choice is identifiable."
+)
+
 func (AskUserQuestionTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
 	asker := askerFrom(ctx)
 	if asker == nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("ask_user_question: not available in this mode (REPL only)")
 	}
-	input = normalizeAskInput(input)
-	question := strings.TrimSpace(stringArg(input, "question"))
-	if question == "" {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("ask_user_question: question is required")
-	}
-	// Options are advisory, not required: every asker appends an "Other"
-	// free-text tail, so zero options degrades to a pure free-text prompt and
-	// one option to a single choice + free text. We don't reject on count —
-	// the model used to error out (and re-ask in prose) when it wanted an
-	// open-ended answer but the tool demanded 2-4 choices. We only trim an
-	// over-long list so the prompt UI stays compact.
-	options := optionLabels(input["options"])
-	if len(options) > 4 {
-		options = options[:4]
-	}
-	multi := askBool(input, "multi_select") || askBool(input, "multiSelect")
-	header := strings.TrimSpace(stringArg(input, "header"))
-
-	res, err := asker.Ask(ctx, AskRequest{
-		Question:    question,
-		Options:     options,
-		MultiSelect: multi,
-		Header:      header,
-	})
+	req, err := parseAskRequest(input)
 	if err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("ask_user_question: %w", err)
 	}
-	return agent.ToolResult{Text: formatAskResponse(res)}, nil
+
+	res, err := asker.Ask(ctx, req)
+	if err != nil {
+		return agent.ToolResult{Text: ""}, fmt.Errorf("ask_user_question: %w", err)
+	}
+	fillPreviews(req, &res)
+	return agent.ToolResult{Text: formatAskResponse(req, res)}, nil
 }
 
-// formatAskResponse turns the asker's structured reply into the text the LLM
-// reads as its tool_result. Four shapes:
-//
-//	cancelled                       → "(user cancelled)"
-//	plain selection(s)              → "User chose: A" or "User chose: A, B"
-//	"Other" with free text          → "User chose: Other — <text>"
-//	selection(s) plus free text     → "User chose: A — <text>"
-//
-// The web UI lets a user pick an option and add free text in the same
-// submission (unlike the TUI/IM askers, which only ever populate one of
-// Choices or Custom), so both fields must be surfaced rather than one
-// silently dropping the other.
-func formatAskResponse(r AskResponse) string {
-	if r.Cancelled {
-		return "(user cancelled)"
+// parseAskRequest reads the question set and enforces what Claude Code's host
+// enforces before the picker ever renders. `questions` is the only accepted
+// shape — there is no flat-shape fallback.
+func parseAskRequest(input map[string]any) (AskRequest, error) {
+	raw, ok := input["questions"].([]any)
+	if !ok || len(raw) == 0 {
+		return AskRequest{}, fmt.Errorf("questions is required: an array of 1-4 {question, header, options} objects")
 	}
-	if len(r.Choices) == 0 {
-		if r.Custom != "" {
-			return "User chose: Other — " + r.Custom
+	if len(raw) > 4 {
+		return AskRequest{}, fmt.Errorf("%s", steerTooManyQuestions)
+	}
+
+	seenQuestions := make(map[string]bool, len(raw))
+	out := make([]AskQuestion, 0, len(raw))
+	for _, item := range raw {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			return AskRequest{}, fmt.Errorf("each entry in questions must be an object")
 		}
-		return "(user cancelled)" // defensive: no choices and no custom → nothing to report
+		text := strings.TrimSpace(stringArg(obj, "question"))
+		if text == "" {
+			return AskRequest{}, fmt.Errorf("each question needs a question string")
+		}
+		if seenQuestions[text] {
+			return AskRequest{}, fmt.Errorf("%s", steerNotUnique)
+		}
+		seenQuestions[text] = true
+
+		opts, err := parseAskOptions(obj["options"])
+		if err != nil {
+			return AskRequest{}, err
+		}
+		out = append(out, AskQuestion{
+			Question:    text,
+			Header:      strings.TrimSpace(stringArg(obj, "header")),
+			MultiSelect: askBool(obj, "multiSelect") || askBool(obj, "multi_select"),
+			Options:     opts,
+		})
 	}
-	if r.Custom != "" {
-		return "User chose: " + strings.Join(r.Choices, ", ") + " — " + r.Custom
-	}
-	return "User chose: " + strings.Join(r.Choices, ", ")
+	return AskRequest{Questions: out}, nil
 }
 
-// normalizeAskInput flattens the question fields into a single map regardless
-// of which shape the model used. The declared schema is the nested CC shape
-// (a `questions` array wrapping {question, header, options, multiSelect}); the
-// old flat shape (top-level question/options/multi_select) is still accepted as
-// a fallback for any model that reverts to it. When a `questions` array carries
-// entries, promote the first one's fields; we cap at one question, so extra
-// entries are dropped — the model is told to fire multiple calls when it needs
-// to. A present top-level `question` always wins, so a flat call is left as-is.
-func normalizeAskInput(input map[string]any) map[string]any {
-	if strings.TrimSpace(stringArg(input, "question")) != "" {
-		return input // flat shape — use it directly
+// parseAskOptions reads one question's options. The schema asks for objects
+// with label/description/preview; a bare string is still read as a label so a
+// model that sends `["A","B"]` gets its options rendered rather than a
+// confusing "no options" rejection.
+func parseAskOptions(raw any) ([]AskOption, error) {
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%s", steerTooFewOptions)
 	}
-	arr, ok := input["questions"].([]any)
-	if !ok || len(arr) == 0 {
-		return input
+	out := make([]AskOption, 0, len(items))
+	seen := make(map[string]bool, len(items))
+	for _, item := range items {
+		var opt AskOption
+		switch v := item.(type) {
+		case string:
+			opt.Label = strings.TrimSpace(v)
+		case map[string]any:
+			opt.Label = strings.TrimSpace(stringArg(v, "label"))
+			opt.Description = strings.TrimSpace(stringArg(v, "description"))
+			opt.Preview = stringArg(v, "preview")
+		default:
+			continue
+		}
+		if opt.Label == "" {
+			continue
+		}
+		opt.Label = sanitizeLabel(opt.Label)
+		if seen[opt.Label] {
+			return nil, fmt.Errorf("%s", steerNotUnique)
+		}
+		seen[opt.Label] = true
+		if len([]rune(opt.Preview)) > maxPreviewChars {
+			opt.Preview = previewWithheld
+		}
+		out = append(out, opt)
 	}
-	if first, ok := arr[0].(map[string]any); ok {
-		return first
+	switch {
+	case len(out) < 2:
+		return nil, fmt.Errorf("%s", steerTooFewOptions)
+	case len(out) > 4:
+		return nil, fmt.Errorf("%s", steerTooManyOptions)
 	}
-	return input
+	return out, nil
+}
+
+// sanitizeLabel replaces control characters so a label can't corrupt a TUI
+// frame or a chat message. Tabs and newlines have no place in a one-line
+// choice either, so they go too.
+func sanitizeLabel(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return '�'
+		}
+		return r
+	}, s)
+}
+
+// HeaderOrDefault is the tab label for question i: the model-supplied header,
+// or "Q1"/"Q2" when it sent an empty one. Surfaces share this so a blank
+// header renders identically everywhere.
+func (q AskQuestion) HeaderOrDefault(i int) string {
+	if q.Header != "" {
+		return q.Header
+	}
+	return fmt.Sprintf("Q%d", i+1)
+}
+
+// fillPreviews copies the chosen option's preview into the answer. Only
+// single-select questions carry previews, and only a lone selection maps to
+// one option, so nothing else is filled.
+func fillPreviews(req AskRequest, res *AskResponse) {
+	if res.Outcome == AskRejected {
+		return
+	}
+	for i := range res.Answers {
+		if i >= len(req.Questions) {
+			break
+		}
+		q := req.Questions[i]
+		a := &res.Answers[i]
+		if q.MultiSelect || len(a.Choices) != 1 {
+			continue
+		}
+		for _, opt := range q.Options {
+			if opt.Label == a.Choices[0] {
+				a.Preview = opt.Preview
+				break
+			}
+		}
+	}
+}
+
+// Result texts. formatAskResponse reproduces Claude Code's mapper: a clarify
+// instruction, a rejection, or one of three submit phrasings.
+const (
+	clarifyPreamble = "The user wants to clarify these questions.\n" +
+		"This means they may have additional information, context or questions for you.\n" +
+		"Take their response into account and then reformulate the questions if appropriate.\n" +
+		"Start by asking them what they would like to clarify.\n\n" +
+		"Questions asked:"
+
+	rejectedText = "The user doesn't want to proceed with this tool use. The tool use was rejected. " +
+		"STOP what you are doing and wait for the user to tell you how to proceed."
+
+	answeredPrefix = "Your questions have been answered: "
+	answeredSuffix = ". You can now continue with these answers in mind."
+
+	respondedPrefix = "The user answered: "
+	respondedSuffix = ". Read the answers carefully — they may request clarification, changes, " +
+		"or that you not proceed — and follow what they actually say."
+
+	unansweredText = "The user did not answer the questions."
+)
+
+// formatAskResponse turns the structured reply into the text the LLM reads as
+// its tool_result. It needs the request as well as the response: the segments
+// are keyed by question text, and choosing between the two submit phrasings
+// requires each question's declared label set.
+func formatAskResponse(req AskRequest, res AskResponse) string {
+	switch res.Outcome {
+	case AskRejected:
+		return rejectedText
+	case AskClarify:
+		return formatClarify(req, res)
+	}
+
+	var segments []string
+	clean := true
+	for i, q := range req.Questions {
+		a := answerAt(res, i)
+		seg, ok := answerSegment(q, a)
+		if ok {
+			segments = append(segments, seg)
+		}
+		if !answerIsPlainSelection(q, a) {
+			clean = false
+		}
+	}
+	if len(segments) == 0 {
+		return unansweredText
+	}
+	joined := strings.Join(segments, ", ")
+	if clean {
+		return answeredPrefix + joined + answeredSuffix
+	}
+	return respondedPrefix + joined + respondedSuffix
+}
+
+// formatClarify lists every question with whatever the user had supplied
+// before choosing "Chat about this", so the model can reformulate instead of
+// starting over.
+func formatClarify(req AskRequest, res AskResponse) string {
+	var b strings.Builder
+	b.WriteString(clarifyPreamble)
+	for i, q := range req.Questions {
+		a := answerAt(res, i)
+		fmt.Fprintf(&b, "\n- %q", q.Question)
+		if ans := answerText(a); ans != "" {
+			fmt.Fprintf(&b, "\n  Answer: %s", ans)
+		} else {
+			b.WriteString("\n  (No answer provided)")
+		}
+		if a.Notes != "" {
+			fmt.Fprintf(&b, "\n  User notes: %s", a.Notes)
+		}
+	}
+	return b.String()
+}
+
+// answerSegment renders one question's segment, reporting false when the
+// question carries neither an answer nor a note and is therefore omitted.
+func answerSegment(q AskQuestion, a AskAnswer) (string, bool) {
+	ans := answerText(a)
+	if ans == "" && a.Notes == "" {
+		return "", false
+	}
+	seg := fmt.Sprintf("%q=%q", q.Question, ans)
+	if ans == "" || ans == notesOnlyAnswer {
+		seg = fmt.Sprintf("%q=(no option selected)", q.Question)
+	}
+	parts := []string{seg}
+	if a.Preview != "" {
+		parts = append(parts, "selected preview:\n"+a.Preview)
+	}
+	if a.Notes != "" {
+		parts = append(parts, "notes: "+a.Notes)
+	}
+	return strings.Join(parts, " "), true
+}
+
+// answerText is the user's answer as one string: selected labels, with any
+// free text appended as a further entry (Claude Code concatenates it into the
+// answer array the same way).
+func answerText(a AskAnswer) string {
+	parts := make([]string, 0, len(a.Choices)+1)
+	for _, c := range a.Choices {
+		if c = strings.TrimSpace(c); c != "" {
+			parts = append(parts, c)
+		}
+	}
+	if c := strings.TrimSpace(a.Custom); c != "" {
+		parts = append(parts, c)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// answerIsPlainSelection reports whether this answer is "just a pick" — every
+// selected label is one the model declared, with no free text and no notes.
+// One impure answer switches the whole result to the cautioning phrasing,
+// because a user who typed rather than picked often typed a correction.
+//
+// An unanswered question passes: skipping a question is not the same as
+// answering it in prose.
+func answerIsPlainSelection(q AskQuestion, a AskAnswer) bool {
+	if a.Notes != "" || strings.TrimSpace(a.Custom) != "" {
+		return false
+	}
+	if len(a.Choices) == 0 {
+		return true
+	}
+	if !q.MultiSelect && len(a.Choices) > 1 {
+		return false
+	}
+	declared := make(map[string]bool, len(q.Options))
+	for _, opt := range q.Options {
+		declared[opt.Label] = true
+	}
+	for _, c := range a.Choices {
+		if !declared[strings.TrimSpace(c)] {
+			return false
+		}
+	}
+	return true
+}
+
+func answerAt(res AskResponse, i int) AskAnswer {
+	if i < len(res.Answers) {
+		return res.Answers[i]
+	}
+	return AskAnswer{}
 }
 
 // askBool reads a boolean tool argument, tolerating the JSON-string forms
@@ -269,51 +573,4 @@ func askBool(input map[string]any, key string) bool {
 		return strings.EqualFold(strings.TrimSpace(v), "true")
 	}
 	return false
-}
-
-// optionLabels extracts the option labels from the tool input, tolerating both
-// shapes the model emits. The schema asks for an array of strings, but Claude
-// models trained on Claude Code's AskUserQuestion habitually send an array of
-// {label, description} objects instead; a strict string-only parse drops those
-// silently and the tool fails with "got 0 options". So we accept either:
-//
-//	["A", "B"]                                          → "A", "B"
-//	[{"label":"A","description":"short"}, {"label":"B"}] → "A — short", "B"
-//
-// For object options a non-empty description is folded into the displayed label
-// so the extra context the model provided still reaches the user.
-func optionLabels(raw any) []string {
-	items, ok := raw.([]any)
-	if !ok {
-		// Already-typed []string (e.g. from tests) takes the simple path.
-		if ss, ok := raw.([]string); ok {
-			out := make([]string, 0, len(ss))
-			for _, s := range ss {
-				if s = strings.TrimSpace(s); s != "" {
-					out = append(out, s)
-				}
-			}
-			return out
-		}
-		return nil
-	}
-	out := make([]string, 0, len(items))
-	for _, it := range items {
-		switch v := it.(type) {
-		case string:
-			if s := strings.TrimSpace(v); s != "" {
-				out = append(out, s)
-			}
-		case map[string]any:
-			label := strings.TrimSpace(stringArg(v, "label"))
-			if label == "" {
-				continue
-			}
-			if desc := strings.TrimSpace(stringArg(v, "description")); desc != "" {
-				label += " — " + desc
-			}
-			out = append(out, label)
-		}
-	}
-	return out
 }

@@ -21,23 +21,50 @@ func newREPLAsker(ask userPrompter) *replAsker {
 // Ask implements tools.Asker.
 func (a *replAsker) Ask(ctx context.Context, q tools.AskRequest) (tools.AskResponse, error) {
 	if a.ask == nil {
-		return tools.AskResponse{Cancelled: true}, nil
+		return tools.AskResponse{Outcome: tools.AskRejected}, nil
 	}
-	resp, err := a.ask.Ask(ctx, UserPrompt{
-		Kind:        KindQuestion,
-		Header:      q.Header,
-		Question:    q.Question,
-		Options:     q.Options,
-		MultiSelect: q.MultiSelect,
-	})
+	questions := make([]UserQuestion, 0, len(q.Questions))
+	for i, question := range q.Questions {
+		opts := make([]UserOption, 0, len(question.Options))
+		for _, opt := range question.Options {
+			opts = append(opts, UserOption{
+				Label:       opt.Label,
+				Description: opt.Description,
+				Preview:     opt.Preview,
+			})
+		}
+		questions = append(questions, UserQuestion{
+			Question:    question.Question,
+			Header:      question.HeaderOrDefault(i),
+			MultiSelect: question.MultiSelect,
+			Options:     opts,
+		})
+	}
+	resp, err := a.ask.Ask(ctx, UserPrompt{Kind: KindQuestion, Questions: questions})
 	if err != nil {
 		return tools.AskResponse{}, err
 	}
-	return tools.AskResponse{
-		Choices:   resp.Choices,
-		Custom:    resp.Custom,
-		Cancelled: resp.Cancelled,
-	}, nil
+	res := tools.AskResponse{Outcome: askOutcome(resp.Outcome)}
+	for _, ans := range resp.Answers {
+		res.Answers = append(res.Answers, tools.AskAnswer{
+			Choices: ans.Choices,
+			Custom:  ans.Custom,
+			Notes:   ans.Notes,
+		})
+	}
+	return res, nil
+}
+
+// askOutcome maps the view's outcome onto the tool contract's.
+func askOutcome(o UserAskOutcome) tools.AskOutcome {
+	switch o {
+	case PromptClarify:
+		return tools.AskClarify
+	case PromptRejected:
+		return tools.AskRejected
+	default:
+		return tools.AskSubmitted
+	}
 }
 
 // AskSecret implements tools.SecretAsker: the TUI/REPL collects secrets too —

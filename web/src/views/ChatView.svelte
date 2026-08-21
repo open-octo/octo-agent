@@ -1240,10 +1240,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         [qsid]: {
           questionId: (ev as any).question_id,
           sessionId: qsid,
-          question: (ev as any).question,
-          options: (ev as any).options,
-          multiSelect: (ev as any).multi_select,
-          header: (ev as any).header,
+          questions: (ev as any).questions ?? [],
           secret: (ev as any).secret === true,
           dismissed: false,
         },

@@ -1179,34 +1179,55 @@ func TestTUI_PermissionModalEscDenies(t *testing.T) {
 	}
 }
 
+// tuiQuestion builds one question for the picker tests.
+func tuiQuestion(text, header string, multi bool, labels ...string) UserQuestion {
+	opts := make([]UserOption, 0, len(labels))
+	for _, l := range labels {
+		opts = append(opts, UserOption{Label: l})
+	}
+	return UserQuestion{Question: text, Header: header, MultiSelect: multi, Options: opts}
+}
+
+func openQuestions(m *tuiModel, qs ...UserQuestion) chan UserResponse {
+	resp := make(chan UserResponse, 1)
+	m.openModal(askMsg{prompt: UserPrompt{Kind: KindQuestion, Questions: qs}, resp: resp})
+	return resp
+}
+
 func TestTUI_QuestionModalSelect(t *testing.T) {
 	m := newTestModel()
-	resp := make(chan UserResponse, 1)
-	m.openModal(askMsg{prompt: UserPrompt{
-		Kind:     KindQuestion,
-		Question: "pick",
-		Options:  []string{"alpha", "beta"},
-	}, resp: resp})
+	resp := openQuestions(m, tuiQuestion("pick", "p", false, "alpha", "beta"))
 
-	// Move to "beta" and confirm.
+	// Move to "beta" and confirm. A lone single-select question submits the
+	// whole set on pick — there is no review tab to land on.
 	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
 	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
 
 	got := <-resp
-	if len(got.Choices) != 1 || got.Choices[0] != "beta" {
-		t.Errorf("selection = %+v, want [beta]", got.Choices)
+	if got.Outcome != PromptSubmitted {
+		t.Fatalf("outcome = %v, want submitted", got.Outcome)
+	}
+	if len(got.Answers) != 1 || len(got.Answers[0].Choices) != 1 || got.Answers[0].Choices[0] != "beta" {
+		t.Errorf("selection = %+v, want [beta]", got.Answers)
+	}
+}
+
+// A digit selects outright in the flat layout.
+func TestTUI_QuestionModalDigitSelects(t *testing.T) {
+	m := newTestModel()
+	resp := openQuestions(m, tuiQuestion("pick", "p", false, "alpha", "beta"))
+
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+
+	got := <-resp
+	if len(got.Answers) != 1 || len(got.Answers[0].Choices) != 1 || got.Answers[0].Choices[0] != "beta" {
+		t.Errorf("digit selection = %+v, want [beta]", got.Answers)
 	}
 }
 
 func TestTUI_QuestionModalMultiSelect(t *testing.T) {
 	m := newTestModel()
-	resp := make(chan UserResponse, 1)
-	m.openModal(askMsg{prompt: UserPrompt{
-		Kind:        KindQuestion,
-		Question:    "pick many",
-		Options:     []string{"a", "b", "c"},
-		MultiSelect: true,
-	}, resp: resp})
+	resp := openQuestions(m, tuiQuestion("pick many", "p", true, "a", "b", "c"))
 
 	// Toggle index 0, move to 2, toggle, confirm.
 	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeySpace})
@@ -1215,20 +1236,120 @@ func TestTUI_QuestionModalMultiSelect(t *testing.T) {
 	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeySpace})
 	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
 
+	// A lone multi-select question keeps a review tab: toggling never
+	// advances, so submission has to be its own step.
+	if !m.modal.onReviewTab() {
+		t.Fatalf("confirming a lone multi-select question should land on the review tab")
+	}
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+
 	got := <-resp
-	if len(got.Choices) != 2 || got.Choices[0] != "a" || got.Choices[1] != "c" {
-		t.Errorf("multi-select = %+v, want [a c]", got.Choices)
+	picks := got.Answers[0].Choices
+	if len(picks) != 2 || picks[0] != "a" || picks[1] != "c" {
+		t.Errorf("multi-select = %+v, want [a c]", picks)
+	}
+}
+
+// Tab walks the set and the review tab submits it.
+func TestTUI_QuestionModalTabsAcrossQuestions(t *testing.T) {
+	m := newTestModel()
+	resp := openQuestions(m,
+		tuiQuestion("first?", "one", false, "a", "b"),
+		tuiQuestion("second?", "two", false, "c", "d"),
+	)
+
+	// Answer question 1; picking advances to question 2.
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.modal.qIdx != 1 {
+		t.Fatalf("qIdx = %d, want the next question", m.modal.qIdx)
+	}
+	// Tab back and forth: the earlier answer is still shown as chosen.
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	if m.modal.qIdx != 0 {
+		t.Fatalf("Shift-Tab should move back, qIdx = %d", m.modal.qIdx)
+	}
+	if !m.modal.selected[0] {
+		t.Error("tabbing back should show the answer already given")
+	}
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyTab})
+
+	// Answer question 2, landing on the review tab, then submit.
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.modal.onReviewTab() {
+		t.Fatalf("answering the last question should land on the review tab")
+	}
+	if view := m.View(); !strings.Contains(view, "Review your answers") {
+		t.Errorf("review tab should render its heading; got:\n%s", view)
+	}
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	got := <-resp
+	if len(got.Answers) != 2 {
+		t.Fatalf("answers = %+v, want two", got.Answers)
+	}
+	if got.Answers[0].Choices[0] != "a" || got.Answers[1].Choices[0] != "d" {
+		t.Errorf("answers = %+v, want [a] and [d]", got.Answers)
+	}
+}
+
+// The review tab warns when the user is about to submit a partial set.
+func TestTUI_QuestionModalReviewWarnsOnUnanswered(t *testing.T) {
+	m := newTestModel()
+	_ = openQuestions(m,
+		tuiQuestion("first?", "one", false, "a", "b"),
+		tuiQuestion("second?", "two", false, "c", "d"),
+	)
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter}) // answer 1 → question 2
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyTab})   // skip to the review tab
+
+	if !m.modal.onReviewTab() {
+		t.Fatalf("Tab from the last question should reach the review tab")
+	}
+	if view := m.View(); !strings.Contains(view, "You have not answered all questions") {
+		t.Errorf("review tab should warn about the unanswered question; got:\n%s", view)
+	}
+}
+
+// "Chat about this" resolves the call, carrying the answers given so far.
+func TestTUI_QuestionModalChatAboutThis(t *testing.T) {
+	m := newTestModel()
+	resp := openQuestions(m,
+		tuiQuestion("first?", "one", false, "a", "b"),
+		tuiQuestion("second?", "two", false, "c", "d"),
+	)
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter}) // answer question 1
+
+	// Rows on question 2: c, d, Other, Chat about this.
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+
+	got := <-resp
+	if got.Outcome != PromptClarify {
+		t.Fatalf("outcome = %v, want clarify", got.Outcome)
+	}
+	if len(got.Answers) != 2 || got.Answers[0].Choices[0] != "a" {
+		t.Errorf("clarify should carry the earlier answer, got %+v", got.Answers)
+	}
+}
+
+func TestTUI_QuestionModalEscRejects(t *testing.T) {
+	m := newTestModel()
+	resp := openQuestions(m,
+		tuiQuestion("first?", "one", false, "a", "b"),
+		tuiQuestion("second?", "two", false, "c", "d"),
+	)
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter}) // answer question 1
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEsc})
+
+	got := <-resp
+	if got.Outcome != PromptRejected {
+		t.Errorf("Esc should reject the set, got %v", got.Outcome)
 	}
 }
 
 func TestTUI_QuestionModalOtherFreeText(t *testing.T) {
 	m := newTestModel()
-	resp := make(chan UserResponse, 1)
-	m.openModal(askMsg{prompt: UserPrompt{
-		Kind:     KindQuestion,
-		Question: "pick",
-		Options:  []string{"alpha", "beta"},
-	}, resp: resp})
+	resp := openQuestions(m, tuiQuestion("pick", "p", false, "alpha", "beta"))
 
 	// Move to "Other" and confirm to enter free-text mode.
 	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
@@ -1244,11 +1365,11 @@ func TestTUI_QuestionModalOtherFreeText(t *testing.T) {
 	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
 
 	got := <-resp
-	if got.Custom != "custo" {
-		t.Errorf("custom = %q, want custo", got.Custom)
+	if got.Answers[0].Custom != "custo" {
+		t.Errorf("custom = %q, want custo", got.Answers[0].Custom)
 	}
-	if got.Cancelled {
-		t.Error("should not be cancelled after confirming non-empty text")
+	if got.Outcome != PromptSubmitted {
+		t.Errorf("outcome = %v, want submitted after confirming non-empty text", got.Outcome)
 	}
 }
 
@@ -1257,13 +1378,9 @@ func TestTUI_QuestionModalOtherFreeText(t *testing.T) {
 // inserting/deleting in the middle of the text (#1097).
 func TestTUI_QuestionModalOtherCursorMovement(t *testing.T) {
 	m := newTestModel()
-	resp := make(chan UserResponse, 1)
-	m.openModal(askMsg{prompt: UserPrompt{
-		Kind:     KindQuestion,
-		Question: "pick",
-		Options:  []string{"alpha"},
-	}, resp: resp})
+	resp := openQuestions(m, tuiQuestion("pick", "p", false, "alpha", "beta"))
 
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
 	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
 	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.modal.otherActive {
@@ -1278,77 +1395,99 @@ func TestTUI_QuestionModalOtherCursorMovement(t *testing.T) {
 	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
 
 	got := <-resp
-	if got.Custom != "abcd" {
-		t.Errorf("custom = %q, want abcd (cursor movement should allow mid-string insert)", got.Custom)
+	if got.Answers[0].Custom != "abcd" {
+		t.Errorf("custom = %q, want abcd (cursor movement should allow mid-string insert)", got.Answers[0].Custom)
 	}
 }
 
-func TestTUI_QuestionModalOtherEmptyCancels(t *testing.T) {
-	m := newTestModel()
-	resp := make(chan UserResponse, 1)
-	m.openModal(askMsg{prompt: UserPrompt{
-		Kind:     KindQuestion,
-		Question: "pick",
-		Options:  []string{"alpha"},
-	}, resp: resp})
+// Empty text or Esc backs out of the "Other" field without abandoning the
+// prompt — the set is still there to answer.
+func TestTUI_QuestionModalOtherBacksOut(t *testing.T) {
+	for _, key := range []tea.KeyType{tea.KeyEnter, tea.KeyEsc} {
+		m := newTestModel()
+		resp := openQuestions(m, tuiQuestion("pick", "p", false, "alpha", "beta"))
 
-	// Select Other (Enter), then confirm empty input (Enter) to cancel.
-	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
-	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
-	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+		_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
+		_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
+		_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
+		_, _ = m.handleModalKey(tea.KeyMsg{Type: key})
 
-	got := <-resp
-	if !got.Cancelled {
-		t.Errorf("empty Other should cancel, got %+v", got)
+		if m.modal == nil {
+			t.Fatalf("key %v in an empty Other field should not resolve the prompt", key)
+		}
+		if m.modal.otherActive {
+			t.Errorf("key %v should leave the Other field", key)
+		}
+		select {
+		case got := <-resp:
+			t.Fatalf("prompt resolved early with %+v", got)
+		default:
+		}
 	}
 }
 
-func TestTUI_QuestionModalOtherEscCancels(t *testing.T) {
+// A question with previews renders the second column instead of an Other row,
+// and digits move the focus rather than selecting.
+func TestTUI_QuestionModalPreviewLayout(t *testing.T) {
 	m := newTestModel()
-	resp := make(chan UserResponse, 1)
-	m.openModal(askMsg{prompt: UserPrompt{
-		Kind:     KindQuestion,
-		Question: "pick",
-		Options:  []string{"alpha"},
-	}, resp: resp})
+	q := tuiQuestion("which layout?", "layout", false, "left", "right")
+	q.Options[0].Preview = "PREVIEW-LEFT"
+	q.Options[1].Preview = "PREVIEW-RIGHT"
+	resp := openQuestions(m, q)
 
-	// Select Other (Enter), type something, then press Esc.
-	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
+	if !previewLayout(q) {
+		t.Fatal("a question with previews must use the preview layout")
+	}
+	for _, row := range m.modal.rows {
+		if row.kind == rowOther {
+			t.Error("the preview layout has no Other row")
+		}
+	}
+	if view := m.View(); !strings.Contains(view, "PREVIEW-LEFT") {
+		t.Errorf("focused option's preview should render; got:\n%s", view)
+	}
+
+	// A digit moves focus only: the prompt must still be open afterwards.
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	if m.modal == nil {
+		t.Fatal("a digit in the preview layout must not select outright")
+	}
+	if m.modal.cursor != 1 {
+		t.Errorf("cursor = %d, want the digit to move focus", m.modal.cursor)
+	}
+	if view := m.View(); !strings.Contains(view, "PREVIEW-RIGHT") {
+		t.Errorf("focus move should swap the preview; got:\n%s", view)
+	}
+
+	// n attaches a note, which rides along with the answer.
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if !m.modal.noteActive {
+		t.Fatal("n should open the note field in the preview layout")
+	}
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h', 'm'}})
 	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
-	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
-	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter}) // select the focused option
 
 	got := <-resp
-	if !got.Cancelled {
-		t.Errorf("Esc in Other input should cancel, got %+v", got)
+	if got.Answers[0].Notes != "hm" {
+		t.Errorf("notes = %q, want hm", got.Answers[0].Notes)
+	}
+	if got.Answers[0].Choices[0] != "right" {
+		t.Errorf("choice = %v, want right", got.Answers[0].Choices)
 	}
 }
 
-func TestTUI_QuestionModalMultiSelectOther(t *testing.T) {
+// A flat-layout question offers no note field: there is no comparison to
+// annotate, matching Claude Code.
+func TestTUI_QuestionModalNoNotesInFlatLayout(t *testing.T) {
 	m := newTestModel()
-	resp := make(chan UserResponse, 1)
-	m.openModal(askMsg{prompt: UserPrompt{
-		Kind:        KindQuestion,
-		Question:    "pick",
-		Options:     []string{"alpha", "beta"},
-		MultiSelect: true,
-	}, resp: resp})
-
-	// Toggle Other and confirm to enter free-text mode.
-	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
-	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyDown})
-	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeySpace})
-	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
-	if !m.modal.otherActive {
-		t.Fatal("selecting Other in multi-select should activate free-text input")
+	_ = openQuestions(m, tuiQuestion("pick", "p", false, "alpha", "beta"))
+	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if m.modal == nil {
+		t.Fatal("n must not resolve the prompt")
 	}
-
-	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m', 'y'}})
-	_, _ = m.handleModalKey(tea.KeyMsg{Type: tea.KeyEnter})
-
-	got := <-resp
-	if got.Custom != "my" {
-		t.Errorf("custom = %q, want my", got.Custom)
+	if m.modal.noteActive {
+		t.Error("the flat layout has no note field")
 	}
 }
 
@@ -1888,8 +2027,8 @@ func TestModalSecretMasksInput(t *testing.T) {
 	if !st.otherActive {
 		t.Error("secret modal should go straight to text entry (no options)")
 	}
-	if len(st.options) != 0 {
-		t.Errorf("secret modal must not offer options, got %v", st.options)
+	if len(st.rows) != 0 {
+		t.Errorf("secret modal must not offer rows, got %v", st.rows)
 	}
 	if st.otherInput.EchoMode != textinput.EchoPassword {
 		t.Errorf("EchoMode = %v, want EchoPassword", st.otherInput.EchoMode)

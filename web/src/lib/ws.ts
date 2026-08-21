@@ -2,6 +2,7 @@ import { writable } from "svelte/store";
 import { isUnauthorized, reauth } from "./auth";
 import { showToast } from "./stores";
 import { tr } from "./i18n";
+import type { AskAnswerPayload, AskOutcome } from "./askStepper";
 
 export const wsState = writable<"connecting" | "connected" | "disconnected">("disconnected");
 
@@ -200,18 +201,23 @@ export class WsManager {
     this.send({ type: "confirmation", id: confId, result });
   }
 
+  /**
+   * Close a whole ask_user_question set in one frame. `outcome` is
+   * "submitted" (answers stand), "clarify" (the user wants to talk it over
+   * instead) or "rejected" (dismissed — the server discards the answers).
+   * Answers carry no preview: the server copies the chosen option's preview
+   * out of the request it still holds.
+   */
   answerQuestion(
     questionId: string,
-    choices: unknown[],
-    custom?: string,
-    cancelled?: boolean
+    outcome: AskOutcome,
+    answers: AskAnswerPayload[] = []
   ): void {
     this.send({
       type: "user_question_answer",
       question_id: questionId,
-      choices,
-      custom,
-      cancelled,
+      outcome,
+      answers,
     });
   }
 

@@ -267,7 +267,7 @@ func TestResolveReplayParams_ErrorsOnMissingRequired(t *testing.T) {
 		Params: []browser.Param{{Name: "username", Description: "login name"}},
 		Steps:  []browser.Step{{Action: "type", Selector: "#u", Value: "{{username}}"}},
 	}
-	stub := &stubAsker{resp: AskResponse{Custom: "alice"}}
+	stub := &stubAsker{resp: AskResponse{Answers: []AskAnswer{{Custom: "alice"}}}}
 	useAsker(t, stub)
 
 	params := map[string]string{}
