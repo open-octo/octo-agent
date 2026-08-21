@@ -3122,7 +3122,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     <button class="lightbox-close" aria-label={$t('chat.image_close')} onclick={() => { lightboxSrc = null }}>
       <iconify-icon icon="ant-design:close-outlined" width="18"></iconify-icon>
     </button>
-    <img src={lightboxSrc} alt="" class="lightbox-image" onclick={(e) => e.stopPropagation()} />
+    <img src={lightboxSrc} alt="" class="lightbox-image" onclick={() => { lightboxSrc = null }} />
   </div>
 {/if}
 
