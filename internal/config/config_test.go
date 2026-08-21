@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/open-octo/octo-agent/internal/lockfile"
 )
 
 func setHome(t *testing.T) string {
@@ -1466,58 +1468,46 @@ func TestSave_ConcurrentWritersDontClobber(t *testing.T) {
 	}
 }
 
-// TestWithConfigLock_SerialisesConcurrentCallers verifies the flock itself
-// serialises: when two goroutines both call withConfigLock on the same path,
-// the second must wait for the first to release before its fn runs. We
-// assert this by having the first fn hold the lock until it observes the
-// second goroutine is waiting (via a channel), and the second fn only
-// signals it got the lock after the first releases.
+// TestConfigLock_SerialisesConcurrentCallers verifies the lock guarding the
+// config file serialises: with one holder in place, a second caller must wait
+// for the release before it gets in.
 //
-// This is the core invariant the PR3 concurrency design (§7.1) depends on:
-// without it, Slice 3.2's rename cascade (read old config → modify refs →
-// write new config) would race and drop the other writer's changes.
-func TestWithConfigLock_SerialisesConcurrentCallers(t *testing.T) {
+// This is the core invariant the concurrency design depends on: without it, the
+// rename cascade (read old config → modify refs → write new config) would race
+// and drop the other writer's changes.
+//
+// The second caller is started BEFORE the "did it get in?" assertion, so it is
+// genuinely contending while the first holds the lock. Started after, the
+// assertion could never fail — nobody would be asking for the lock yet.
+func TestConfigLock_SerialisesConcurrentCallers(t *testing.T) {
 	tmp := t.TempDir()
-	lockPath := filepath.Join(tmp, "test.lock")
+	lockPath := filepath.Join(tmp, "config.yml")
 
-	// firstHolder blocks until it sees the second goroutine is waiting, then
-	// releases the lock by closing releaseCh. secondRunning fires its fn
-	// body only once it has the lock.
-	firstStarted := make(chan struct{})
-	releaseFirst := make(chan struct{})
-	secondGotLock := make(chan struct{})
-
-	go func() {
-		_ = withConfigLock(lockPath, func() error {
-			close(firstStarted)
-			<-releaseFirst // hold the lock until the test releases us
-			return nil
-		})
-	}()
-
-	<-firstStarted // first goroutine is holding the lock
-
-	// Now the second goroutine should block on the lock — it must NOT
-	// have run its fn yet.
-	select {
-	case <-secondGotLock:
-		t.Fatal("second caller acquired the lock while the first still held it — flock not exclusive")
-	case <-time.After(50 * time.Millisecond):
-		// good — second is still waiting
+	first := lockfile.Acquire(lockPath)
+	if first == nil {
+		t.Skip("file locking unavailable here")
 	}
 
-	// Release the first; the second should then acquire and signal.
+	secondGotLock := make(chan struct{})
 	go func() {
-		_ = withConfigLock(lockPath, func() error {
+		h := lockfile.Acquire(lockPath)
+		if h != nil {
+			defer h.Release()
 			close(secondGotLock)
-			return nil
-		})
+		}
 	}()
 
-	close(releaseFirst)
+	// The second caller is contending now and must not be through.
 	select {
 	case <-secondGotLock:
-		// good — flock serialised correctly
+		first.Release()
+		t.Fatal("second caller acquired the lock while the first still held it — not exclusive")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	first.Release()
+	select {
+	case <-secondGotLock:
 	case <-time.After(5 * time.Second):
 		t.Fatal("second caller didn't acquire the lock within 5s after the first released")
 	}

@@ -31,6 +31,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/open-octo/octo-agent/internal/lockfile"
 )
 
 // ModelEntry is one model configuration: everything needed to build a sender
@@ -964,16 +966,17 @@ func Mutate(fn func(*Config) error) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	return withConfigLock(path, func() error {
-		cfg, err := Load()
-		if err != nil {
-			return fmt.Errorf("config.Mutate: load: %w", err)
-		}
-		if err := fn(&cfg); err != nil {
-			return err
-		}
-		return cfg.saveLocked(path)
-	})
+	held := lockfile.Acquire(path)
+	defer held.Release()
+
+	cfg, err := Load()
+	if err != nil {
+		return fmt.Errorf("config.Mutate: load: %w", err)
+	}
+	if err := fn(&cfg); err != nil {
+		return err
+	}
+	return cfg.saveLocked(path)
 }
 
 // Path returns the absolute path to the config file (~/.octo/config.yml).
@@ -1634,15 +1637,21 @@ func (c Config) Save() error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	return withConfigLock(path, func() error {
-		return c.saveLocked(path)
-	})
+	held := lockfile.Acquire(path)
+	defer held.Release()
+	return c.saveLocked(path)
 }
 
-// saveLocked writes the config without acquiring the flock. Used by Save
-// (which wraps it in withConfigLock) and by Mutate (which already holds the
-// lock and needs to save without re-locking — re-locking would deadlock since
-// flock on a fresh fd blocks on the same inode).
+// saveLocked writes the config without acquiring the lock. Used by Save (which
+// takes it around this) and by Mutate (which already holds it and needs to save
+// without re-taking it — the lock is per open file description, so a second
+// acquire in the same process contends with the first rather than passing
+// through).
+//
+// Re-taking it is no longer a hard deadlock: lockfile.Acquire gives up after
+// lockfile.Timeout and proceeds unlocked. That makes a nested call a silent
+// unsynchronised write instead of an obvious hang, so keeping the two entry
+// points distinct is what prevents it — not the lock's own behaviour.
 //
 // PR5: marshals Config directly. Endpoints/Default/Lite are the authoritative
 // fields now; nothing is cleared before marshal.

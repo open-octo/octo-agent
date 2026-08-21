@@ -1,5 +1,6 @@
-// Package lockfile provides an advisory cross-process lock for the JSON files
-// under ~/.octo that more than one octo process can write.
+// Package lockfile provides an advisory cross-process lock for the files under
+// ~/.octo that more than one octo process can write — the config and the
+// session-groups registry.
 //
 // octo has several entry points against one ~/.octo — a TUI process, `octo
 // serve`, the desktop shell, one-off subcommands — and the ones that write a
