@@ -177,6 +177,12 @@ export async function getSessionMessages(id: string): Promise<unknown> {
   return request<unknown>(`/api/sessions/${id}/messages`)
 }
 
+// The session's persisted sub-agent / workflow trails, for transcript review
+// (see stores.hydrateAgentRuns).
+export async function getAgentRuns(id: string): Promise<unknown> {
+  return request<unknown>(`/api/sessions/${id}/agent-runs`)
+}
+
 // The outstanding permission confirmation for a session, if any. The mobile feed
 // isn't subscribed to sessions (request_confirmation only reaches subscribers),
 // so ApprovalDetail fetches the pending ask over REST. Returns { pending: false }

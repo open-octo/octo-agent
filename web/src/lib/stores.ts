@@ -748,6 +748,157 @@ export function applySubAgentEvent(sessionId: string, ev: SubAgentEventPayload) 
   })
 }
 
+// ── Persistent agent-run trails (transcript review) ──────────────────────────
+// Unlike the live panels above, these accumulate for the whole session and are
+// never cleared by turn boundaries: the transcript's sub_agent / workflow tool
+// cards claim them by the agent_id / run_id in their ui_payload. Seeded from
+// GET /api/sessions/:id/agent-runs on session open (hydrateAgentRuns) and kept
+// current by folding the same live WS events the panels consume.
+
+export interface WorkflowTrailState {
+  id: string
+  description: string
+  status: 'running' | 'done' | 'error'
+  logs: string[]
+  agents: WorkflowAgentState[]
+}
+
+export interface AgentRunTrails {
+  subAgents: Record<string, SubAgentState>
+  workflows: Record<string, WorkflowTrailState>
+}
+
+export const agentRunTrails = writable<Record<string, AgentRunTrails>>({})
+
+export function recordAgentTrailEvent(sessionId: string, ev: SubAgentEventPayload) {
+  const agentId = ev.agent_id ?? ''
+  const kind = ev.kind ?? ''
+  if (!agentId) return
+  agentRunTrails.update(m => {
+    const t: AgentRunTrails = {
+      subAgents: { ...(m[sessionId]?.subAgents || {}) },
+      workflows: m[sessionId]?.workflows || {},
+    }
+    const prev = t.subAgents[agentId]
+    const a: SubAgentState = prev
+      ? { ...prev, steps: [...prev.steps] }
+      : { id: agentId, description: ev.description || agentId, agentType: ev.agent_type ?? '', status: 'running', lastTool: '', steps: [], startedAt: Date.now() }
+    if (ev.description && a.description === a.id) a.description = ev.description
+    if (ev.agent_type && !a.agentType) a.agentType = ev.agent_type
+    if (kind === 'started') {
+      // A Continue round re-opens the trail; earlier steps are kept — the
+      // review surface shows the whole history, not just the last round.
+      a.status = 'running'
+    } else if (kind === 'tool' || kind === 'tool_done' || kind === 'tool_error' || kind === 'text') {
+      foldTrailStep(a.steps, kind, ev)
+      if (kind === 'tool' && ev.tool_name) a.lastTool = ev.tool_name
+    } else if (kind === 'done') {
+      const stopReason = ev.stop_reason
+      a.status = stopReason === 'killed' ? 'cancelled' : (!stopReason || stopReason === 'error') ? 'error' : 'done'
+      if (ev.result) a.result = ev.result
+    }
+    t.subAgents[agentId] = a
+    return { ...m, [sessionId]: t }
+  })
+}
+
+export function recordWorkflowTrailEvent(sessionId: string, ev: WorkflowEventPayload) {
+  const runId = ev.run_id ?? ''
+  const kind = ev.kind ?? ''
+  if (!runId) return
+  agentRunTrails.update(m => {
+    const t: AgentRunTrails = {
+      subAgents: m[sessionId]?.subAgents || {},
+      workflows: { ...(m[sessionId]?.workflows || {}) },
+    }
+    const prev = t.workflows[runId]
+    const r: WorkflowTrailState = prev
+      ? { ...prev, logs: [...prev.logs], agents: [...prev.agents] }
+      : { id: runId, description: ev.description || runId, status: 'running', logs: [], agents: [] }
+    if (ev.description && (r.description === r.id || !r.description)) r.description = ev.description
+    if (kind === 'progress') {
+      if (ev.line) {
+        r.logs.push(ev.line)
+        if (r.logs.length > maxWorkflowProgressLines) r.logs = r.logs.slice(r.logs.length - maxWorkflowProgressLines)
+      }
+    } else if (kind === 'done') {
+      r.status = ev.status === 'error' ? 'error' : 'done'
+    } else if (kind.startsWith('agent_')) {
+      const agentId = ev.agent_id ?? ''
+      if (agentId) {
+        let ai = r.agents.findIndex(a => a.id === agentId)
+        if (ai < 0) {
+          r.agents.push({ id: agentId, label: ev.agent_label || agentId, status: 'running', steps: [] })
+          ai = r.agents.length - 1
+        }
+        const a = { ...r.agents[ai], steps: [...r.agents[ai].steps] }
+        if (ev.agent_label) a.label = ev.agent_label
+        if (kind === 'agent_done') {
+          if (ev.error) {
+            a.error = ev.error
+            a.status = 'error'
+          } else {
+            a.reply = ev.reply
+            a.status = 'done'
+          }
+        } else {
+          foldTrailStep(a.steps, kind.slice('agent_'.length), ev)
+        }
+        r.agents[ai] = a
+      }
+    }
+    t.workflows[runId] = r
+    return { ...m, [sessionId]: t }
+  })
+}
+
+// hydrateAgentRuns seeds the trail store from the REST snapshot. Entries the
+// live stream already created win — the snapshot only fills what this tab
+// hasn't seen (finished runs, earlier sessions of a reloaded page).
+export function hydrateAgentRuns(
+  sessionId: string,
+  resp: { sub_agents?: any[]; workflows?: any[] } | null | undefined,
+) {
+  if (!resp) return
+  agentRunTrails.update(m => {
+    const t: AgentRunTrails = {
+      subAgents: { ...(m[sessionId]?.subAgents || {}) },
+      workflows: { ...(m[sessionId]?.workflows || {}) },
+    }
+    for (const sa of resp.sub_agents ?? []) {
+      if (!sa?.agent_id || t.subAgents[sa.agent_id]) continue
+      t.subAgents[sa.agent_id] = {
+        id: sa.agent_id,
+        description: sa.description || sa.agent_id,
+        agentType: sa.agent_type ?? '',
+        status: sa.status ?? 'done',
+        lastTool: '',
+        steps: (sa.steps ?? []) as AgentTrailStep[],
+        result: sa.result,
+        startedAt: 0,
+      }
+    }
+    for (const wf of resp.workflows ?? []) {
+      if (!wf?.run_id || t.workflows[wf.run_id]) continue
+      t.workflows[wf.run_id] = {
+        id: wf.run_id,
+        description: wf.description || wf.run_id,
+        status: wf.status ?? 'done',
+        logs: wf.logs ?? [],
+        agents: (wf.agents ?? []).map((a: any): WorkflowAgentState => ({
+          id: a.agent_id,
+          label: a.label || a.agent_id,
+          status: a.status ?? 'done',
+          steps: (a.steps ?? []) as AgentTrailStep[],
+          reply: a.reply,
+          error: a.error,
+        })),
+      }
+    }
+    return { ...m, [sessionId]: t }
+  })
+}
+
 // ── Background workflows ─────────────────────────────────────────────────────
 // Live running workflow runs, driven by the workflow_event stream
 // (kind: started | progress | agent_* | done). The pinned panel only shows

@@ -1,11 +1,13 @@
 <script lang="ts">
   import { t, tr } from '../../lib/i18n'
-  import { activeSessionId, showToast } from '../../lib/stores'
+  import { activeSessionId, showToast, agentRunTrails } from '../../lib/stores'
+  import type { SubAgentState, WorkflowTrailState } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
   import { toolOpenState, applyToolToggle, keepOpenAction } from '../../lib/toolFold'
   import { sanitizeSpec, READ_ONLY_NODE_TYPES } from '../../lib/genui/guard'
   import GenuiBlock from '../genui/GenuiBlock.svelte'
+  import AgentTrail from './AgentTrail.svelte'
 
   // Tracks which overwrite-undo buttons have already fired, keyed by tool id.
   let undone = $state<Record<string, boolean>>({})
@@ -31,6 +33,19 @@
     tools?: any[] | null,
     streaming?: boolean,
   } = $props()
+
+  // Trails claimed by agent_id / run_id from the tool result's ui_payload —
+  // the full sub-agent / workflow output, hydrated from the server and kept
+  // current by the live event stream (see stores.agentRunTrails).
+  let sessionTrails = $derived($agentRunTrails[$activeSessionId ?? ''])
+  function subAgentTrail(tool: any): SubAgentState | undefined {
+    const id = tool.ui_payload?.agent_id
+    return id ? sessionTrails?.subAgents?.[id] : undefined
+  }
+  function workflowTrail(tool: any): WorkflowTrailState | undefined {
+    const id = tool.ui_payload?.run_id
+    return id ? sessionTrails?.workflows?.[id] : undefined
+  }
 
   function promoteTerminal() {
     const sid = $activeSessionId
@@ -490,6 +505,36 @@
               </div>
             {/each}
           </div>
+        {:else if tool.name === 'sub_agent' && subAgentTrail(tool)}
+          {@const trail = subAgentTrail(tool)!}
+          <div class="trail-wrap">
+            <AgentTrail steps={trail.steps} running={trail.status === 'running'} result={trail.result ?? ''} />
+          </div>
+        {:else if tool.name === 'workflow' && workflowTrail(tool)}
+          {@const wt = workflowTrail(tool)!}
+          <div class="trail-wrap">
+            {#each wt.logs.filter(l => !l.startsWith('→ ') && !l.startsWith('✓ ')) as line}
+              <div class="wf-log mono">{line}</div>
+            {/each}
+            {#each wt.agents as a (a.id)}
+              <details class="wf-agent" open={a.status === 'running'}>
+                <summary class="wf-agent-summary">
+                  {#if a.status === 'running'}
+                    <iconify-icon icon="ant-design:loading-outlined" width="12" style="color:var(--blue-6);animation:octo-spin 0.8s linear infinite"></iconify-icon>
+                  {:else if a.status === 'error'}
+                    <iconify-icon icon="ant-design:close-circle-outlined" width="12" style="color:var(--error)"></iconify-icon>
+                  {:else}
+                    <iconify-icon icon="ant-design:check-circle-outlined" width="12" style="color:var(--success)"></iconify-icon>
+                  {/if}
+                  <span class="wf-agent-id mono">{a.id}</span>
+                  <span class="wf-agent-label">{a.label}</span>
+                </summary>
+                <div class="wf-agent-body">
+                  <AgentTrail steps={a.steps} running={a.status === 'running'} result={a.reply ?? ''} resultError={a.error ?? ''} />
+                </div>
+              </details>
+            {/each}
+          </div>
         {:else if tool.ui_payload?.diff}
           <div class="diff-block">
             {#each tool.ui_payload.diff.split('\n') as line}
@@ -695,4 +740,23 @@ details[open] > summary .chev { transform: rotate(90deg); }
   cursor: pointer; font-family: inherit; line-height: 1;
 }
 .promote-btn:hover { background: var(--blue-1); }
+
+.trail-wrap { display: flex; flex-direction: column; gap: 6px; padding: 2px 0; }
+.wf-log {
+  font-size: 12px; color: var(--text-secondary); word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.wf-agent { border: 1px solid var(--border-table); border-radius: 8px; background: var(--bg-container); }
+.wf-agent-summary {
+  list-style: none; display: flex; align-items: center; gap: 7px;
+  padding: 6px 10px; cursor: pointer; user-select: none; font-size: 12px; min-width: 0;
+}
+.wf-agent-summary::-webkit-details-marker { display: none; }
+.wf-agent-summary:hover { background: var(--hover-neutral); border-radius: 8px; }
+.wf-agent-id { color: var(--blue-6); font-weight: 600; font-size: 11px; flex: 0 0 auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.wf-agent-label {
+  color: var(--text-heading); font-weight: 500; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.wf-agent-body { border-top: 1px solid var(--border-table); padding: 8px 10px; }
 </style>
