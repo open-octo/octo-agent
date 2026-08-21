@@ -3,8 +3,8 @@
 // 40 seconds ago, only that it was minutes rather than days.
 //
 // Takes the reactive `$t` rather than importing `tr`, so a locale flip re-renders
-// the timestamps — config-driven setLocale lands after the first session_list,
-// which would otherwise leave every row in the boot locale.
+// the timestamps — config-driven setLocale lands after the first session list
+// arrives, which would otherwise leave every row in the boot locale.
 
 export function ago(iso: string, tf: (k: string) => string): string {
   if (!iso) return ''

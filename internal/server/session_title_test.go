@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -121,10 +122,10 @@ func TestDoAgentTurn_GeneratesSessionTitle(t *testing.T) {
 	}
 }
 
-// TestListSessionsBrief_ReflectsGeneratedTitle guards the REST fallback path
-// used by the web UI when the live session_renamed broadcast is missed. The
-// sidebar should be able to refresh from listSessions and see the new title.
-func TestListSessionsBrief_ReflectsGeneratedTitle(t *testing.T) {
+// TestSessionList_ReflectsGeneratedTitle guards the list path the web UI
+// refetches when the live session_renamed broadcast is missed. The sidebar
+// should be able to refresh from GET /api/sessions and see the new title.
+func TestSessionList_ReflectsGeneratedTitle(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
@@ -155,13 +156,6 @@ func TestListSessionsBrief_ReflectsGeneratedTitle(t *testing.T) {
 	// is still running). List responses must already surface it — the web
 	// sidebar refetches on session_renamed, and without the overlay that
 	// refetch would regress the just-renamed session to the placeholder.
-	if brief := srv.listSessionsBrief(); len(brief) != 1 || brief[0].Name != "early title" {
-		n := ""
-		if len(brief) == 1 {
-			n = brief[0].Name
-		}
-		t.Errorf("mid-turn listSessionsBrief Name = %q (n=%d), want %q — pending-title overlay missing", n, len(brief), "early title")
-	}
 	if item := srv.toSessionItem(sess, "web", ""); item.Name != "early title" || item.Title != "early title" {
 		t.Errorf("mid-turn toSessionItem = (%q, %q), want (%q, %q)", item.Name, item.Title, "early title", "early title")
 	}
@@ -169,14 +163,26 @@ func TestListSessionsBrief_ReflectsGeneratedTitle(t *testing.T) {
 	close(sender.release)
 	<-turnDone
 
-	// listSessionsBrief is what the frontend REST fallback calls. It must
-	// report the generated title, not the placeholder.
-	brief := srv.listSessionsBrief()
-	if len(brief) != 1 {
-		t.Fatalf("listSessionsBrief returned %d sessions, want 1", len(brief))
+	// GET /api/sessions is what the sidebar refetches. It must report the
+	// generated title, not the placeholder.
+	w := doJSON(t, srv, http.MethodGet, "/api/sessions", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/sessions = %d: %s", w.Code, w.Body.String())
 	}
-	if brief[0].Name != "early title" {
-		t.Errorf("Name = %q, want %q", brief[0].Name, "early title")
+	var resp struct {
+		Sessions []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Sessions) != 1 {
+		t.Fatalf("list returned %d sessions, want 1", len(resp.Sessions))
+	}
+	if resp.Sessions[0].Name != "early title" {
+		t.Errorf("Name = %q, want %q", resp.Sessions[0].Name, "early title")
 	}
 }
 

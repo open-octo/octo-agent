@@ -204,22 +204,6 @@
       if (cfg.permission_mode) globalPermissionMode.set(cfg.permission_mode)
     }).catch(() => { /* non-critical */ })
 
-    ws.on('session_list', (ev: any) => {
-      const list = ev.sessions ?? []
-      sessions.set(list)
-      chatShowReasoning.update(m => {
-        const next = { ...m }
-        for (const s of list) {
-          if (typeof s.show_reasoning === 'boolean') next[s.id] = s.show_reasoning
-        }
-        return next
-      })
-      if (!autoSelectDone) {
-        autoSelectDone = true
-        if (!get(activeSessionId) && list.length > 0) activeSessionId.set(list[0].id)
-      }
-    })
-
     ws.on('session_update', (ev: any) => {
       // permission_mode is per-session (each session has its own, only
       // inheriting the global default at creation) — a mode change only
@@ -358,7 +342,8 @@
       }
     })
 
-    // REST fallback (WS session_list may be delayed)
+    // The sidebar's only source of session rows — nothing pushes the list
+    // over the WS, only per-session deltas (session_update / session_activity).
     api.listSessions().then((data: any) => {
       const list = data.sessions ?? []
       if (list.length > 0) {
@@ -375,7 +360,7 @@
           if (!get(activeSessionId)) activeSessionId.set(list[0].id)
         }
       }
-    }).catch(() => { /* non-critical: WS session_list will arrive shortly */ })
+    }).catch(() => { /* non-critical: an empty sidebar, not a broken page */ })
 
     // Restore the view/session from the URL now — synchronously, before the
     // WS/REST auto-select above resolves (both guard on activeSessionId being
