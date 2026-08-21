@@ -15,15 +15,18 @@
   // survives a reload. An anonymous panel keeps everything in memory, exactly
   // as it did before addressable panels existed.
   import { untrack } from 'svelte'
+  import { fade } from 'svelte/transition'
   import type { GenuiSpec, GenuiFieldValue } from '../../lib/genui/types'
   import GenuiNode from './GenuiNode.svelte'
   import { provideGenuiFieldContext, type GenuiActionEvent } from '../../lib/genui/context'
   import { loadPanelFields, savePanelField } from '../../lib/genui/panel-state'
+  import { t } from '../../lib/i18n'
 
   let {
     spec,
     interactive = true,
     pending = false,
+    stats = undefined,
     sessionId = '',
     onaction,
   }: {
@@ -34,6 +37,9 @@
     interactive?: boolean
     /** True while a silent turn fired from this panel is in flight. */
     pending?: boolean
+    /** Cost summary of the last silent turn this panel fired ("5s · 1.6k
+     * tokens"), shown on the transient "updated" chip. */
+    stats?: string
     /** Session the panel belongs to; required for state to persist. */
     sessionId?: string
     onaction?: (event: GenuiActionEvent) => void
@@ -64,6 +70,33 @@
     }
     savePanelField(persistKey.sessionId, persistKey.panelId, field, value)
   }
+
+  // In-place status feedback. The user acting on a panel may be scrolled far
+  // away from the transcript's tail, where the silent-turn marker and its
+  // stats land — so the panel itself must say what is happening: an
+  // "updating…" chip while the silent turn is in flight, and a short-lived
+  // "updated" confirmation once the new version has actually replaced this
+  // one. The confirmation compares spec content across the pending window
+  // rather than trusting the pending flag alone: a turn that ends without
+  // updating the panel (error, interrupt, reply degraded to a visible
+  // bubble) must not claim success.
+  let justUpdated = $state(false)
+  let flashTimer: ReturnType<typeof setTimeout> | null = null
+  let specAtPending: string | null = null
+  let wasPending = false
+  $effect(() => {
+    if (pending !== wasPending) {
+      if (pending) {
+        specAtPending = JSON.stringify(spec)
+      } else if (specAtPending !== null && JSON.stringify(spec) !== specAtPending) {
+        justUpdated = true
+        if (flashTimer) clearTimeout(flashTimer)
+        flashTimer = setTimeout(() => { justUpdated = false }, 2500)
+      }
+      wasPending = pending
+    }
+  })
+  $effect(() => () => { if (flashTimer) clearTimeout(flashTimer) })
 
   provideGenuiFieldContext({
     get interactive() {
@@ -99,6 +132,17 @@
 </script>
 
 <div class="genui-block" class:pending>
+  {#if pending}
+    <span class="genui-status" role="status">
+      <iconify-icon icon="ant-design:loading-outlined" width="11" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
+      {$t('chat.genui_panel_updating')}
+    </span>
+  {:else if justUpdated}
+    <span class="genui-status done" role="status" out:fade={{ duration: 400 }}>
+      <iconify-icon icon="ant-design:check-circle-outlined" width="11"></iconify-icon>
+      {$t('chat.genui_panel_updated')}{#if stats}&nbsp;· {stats}{/if}
+    </span>
+  {/if}
   {#if spec.title}
     <div class="genui-block-title">{spec.title}</div>
   {/if}
@@ -111,6 +155,7 @@
 
 <style>
   .genui-block {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -120,6 +165,28 @@
   .genui-block.pending {
     opacity: 0.6;
     transition: opacity 120ms ease;
+  }
+  /* In-place status chip, pinned to the panel's top-right corner. Overlay
+     rather than flow so appearing/vanishing never shifts the panel's layout;
+     pointer-events off so it can never block the controls beneath it. */
+  .genui-status {
+    position: absolute;
+    top: -4px;
+    right: 0;
+    z-index: 1;
+    pointer-events: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--bg-container, var(--bg));
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+  }
+  .genui-status.done {
+    color: var(--success-text, var(--success));
   }
   .genui-block-title {
     font-size: 13px;

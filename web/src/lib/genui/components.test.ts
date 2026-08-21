@@ -7,6 +7,7 @@ import { mount, unmount, flushSync } from 'svelte'
 import GenuiBlock from '../../components/genui/GenuiBlock.svelte'
 import type { GenuiSpec } from './types'
 import { loadPanelFields, resetPanelState } from './panel-state'
+import { reactiveProps } from '../../test/reactive.svelte'
 
 // jsdom under Node 26 exposes no localStorage — same stand-in and reasoning as
 // unread.test.ts.
@@ -307,5 +308,48 @@ describe('divider', () => {
   it('renders a rule', () => {
     const el = render({ items: [{ type: 'divider' }] })
     expect(el.querySelector('hr.genui-divider')).not.toBeNull()
+  })
+})
+
+describe('silent-turn status chip', () => {
+  const v1: GenuiSpec = { id: 'p9', items: [{ type: 'text', text: 'version one' }] }
+  const v2: GenuiSpec = { id: 'p9', items: [{ type: 'text', text: 'version two' }] }
+
+  it('shows the updating chip while a silent turn is pending', () => {
+    const props = reactiveProps({ spec: v1, pending: false })
+    app = mount(GenuiBlock, { target, props })
+    flushSync()
+    expect(target.querySelector('.genui-status')).toBeNull()
+
+    props.pending = true
+    flushSync()
+    const chip = target.querySelector('.genui-status')
+    expect(chip).not.toBeNull()
+    expect(chip!.classList.contains('done')).toBe(false)
+  })
+
+  it('flashes the updated chip (with stats) only when the spec actually changed', () => {
+    const props = reactiveProps({ spec: v1, pending: false, stats: '5s · 1.6k tokens' })
+    app = mount(GenuiBlock, { target, props })
+    flushSync()
+
+    // A pending window that ends with the spec unchanged — error, interrupt,
+    // or a reply that degraded to a visible bubble — must not claim success.
+    props.pending = true
+    flushSync()
+    props.pending = false
+    flushSync()
+    expect(target.querySelector('.genui-status')).toBeNull()
+
+    // A pending window across which a new version landed does confirm, and
+    // carries the turn's cost.
+    props.pending = true
+    flushSync()
+    props.spec = v2
+    props.pending = false
+    flushSync()
+    const chip = target.querySelector('.genui-status.done')
+    expect(chip).not.toBeNull()
+    expect(chip!.textContent).toContain('5s · 1.6k tokens')
   })
 })
