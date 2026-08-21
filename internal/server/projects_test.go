@@ -263,7 +263,7 @@ func TestProject_DirCannotBeCleared(t *testing.T) {
 // TestProject_RetargetDirIsPickedUp verifies the read cache does not serve a
 // stale directory after a rejected edit — and that the rejection really left
 // the workspace alone.
-func TestProject_RetargetDirIsPickedUp(t *testing.T) {
+func TestProject_RetargetIsRejected(t *testing.T) {
 	srv := groupTestServer(t)
 	first := t.TempDir()
 	second := t.TempDir()

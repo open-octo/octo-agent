@@ -1854,10 +1854,13 @@ func (s *Server) resolveSessionDir(sessionID, own string) string {
 // regardless of configuration — sessions written before a workspace_dir change
 // still carry the old default. The same rule isDefaultWorkspaceDir applies,
 // checked against the server's cached root rather than re-reading
-// configuration on every resolution.
+// configuration on every resolution. Known gap, shared with that rule: a
+// machine whose workspace_dir was changed twice leaves sessions seeded with
+// the intermediate value, which neither comparison recognises — those read as
+// chosen. Accepted there, accepted here.
 func (s *Server) isSeededWorkspaceValue(own string) bool {
 	norm := memory.NormalizeDir(own)
-	if ws := s.curWorkspaceDir(); ws != "" && (ws == own || memory.NormalizeDir(ws) == norm) {
+	if ws := s.curWorkspaceDir(); ws != "" && memory.NormalizeDir(ws) == norm {
 		return true
 	}
 	if def, err := tools.ResolveWorkspaceDir(""); err == nil && def != "" && memory.NormalizeDir(def) == norm {

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // ─── Workspace-model creation (project = generated workspace + source folders) ──
@@ -92,6 +94,45 @@ func TestProject_RejectsSourceDirUnderWorkspaceRoot(t *testing.T) {
 	})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("source dir under workspace root: expected 400, got %d", rec.Code)
+	}
+}
+
+// The workspace root itself is just as much off limits as its children.
+func TestProject_RejectsWorkspaceRootAsSourceDir(t *testing.T) {
+	srv := groupTestServer(t)
+	root := srv.curWorkspaceDir()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{
+		"name":        "根",
+		"source_dirs": []string{root},
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("workspace root as source dir: expected 400, got %d", rec.Code)
+	}
+}
+
+// A session carrying the BUILT-IN default workspace (~/Octo) while the server
+// is configured with a different one still reads as seeded: sessions written
+// before a workspace_dir change never chose that value either.
+func TestProject_BuiltinDefaultAlsoReadsAsSeeded(t *testing.T) {
+	srv := groupTestServer(t)
+	srv.setWorkspaceDir(t.TempDir()) // configured root differs from ~/Octo now
+	builtin, err := tools.ResolveWorkspaceDir("")
+	if err != nil {
+		t.Skipf("cannot resolve the built-in workspace dir: %v", err)
+	}
+	if err := os.MkdirAll(builtin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sess := saveSessionWithDir(t, builtin)
+
+	gid, ws := newProjectGroupWS(t, srv, "Work", t.TempDir())
+	fileInProject(t, gid, sess.ID)
+
+	if got := srv.sessionCwd(sess); got != ws {
+		t.Errorf("cwd = %q, want the workspace %q (a stale built-in default is nobody's choice)", got, ws)
 	}
 }
 

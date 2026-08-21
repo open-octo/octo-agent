@@ -77,8 +77,10 @@ func TestSessionsForDir_NoDirectoryBelongsNowhere(t *testing.T) {
 
 // TestSessionsForDir_ProjectWinsOverOwnDir: a session filed under a project
 // belongs to the project's directory, not to whatever it recorded for itself —
-// the precedence the server resolves tool cwd with.
-func TestSessionsForDir_ProjectWinsOverOwnDir(t *testing.T) {
+// the precedence the server resolves tool cwd with: a directory the session
+// chose itself outranks its project's workspace, so a terminal session filed
+// into a project keeps being offered in the directory it was started in.
+func TestSessionsForDir_OwnDirOutranksProject(t *testing.T) {
 	scopeTestHome(t)
 	ownDir, projectDir := t.TempDir(), t.TempDir()
 
@@ -87,20 +89,20 @@ func TestSessionsForDir_ProjectWinsOverOwnDir(t *testing.T) {
 		t.Fatalf("EnsureProjectForDir: %v", err)
 	}
 
-	inProject, err := sessionsForDir(projectDir, 0)
-	if err != nil {
-		t.Fatalf("sessionsForDir(project): %v", err)
-	}
-	if len(inProject) != 1 || inProject[0].ID != sess.ID {
-		t.Errorf("sessions for the project dir = %v, want %s", ids(inProject), sess.ID)
-	}
-
 	inOwn, err := sessionsForDir(ownDir, 0)
 	if err != nil {
 		t.Fatalf("sessionsForDir(own): %v", err)
 	}
-	if len(inOwn) != 0 {
-		t.Errorf("sessions for the shadowed own dir = %v, want none", ids(inOwn))
+	if len(inOwn) != 1 || inOwn[0].ID != sess.ID {
+		t.Errorf("sessions for the own dir = %v, want %s", ids(inOwn), sess.ID)
+	}
+
+	inProject, err := sessionsForDir(projectDir, 0)
+	if err != nil {
+		t.Fatalf("sessionsForDir(project): %v", err)
+	}
+	if len(inProject) != 0 {
+		t.Errorf("sessions for the project's source dir = %v, want none (the session belongs where it was started)", ids(inProject))
 	}
 }
 

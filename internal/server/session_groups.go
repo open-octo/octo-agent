@@ -619,6 +619,13 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, verr.Error())
 		return
 	}
+	if dirNameFor(name) == "" {
+		// A name with no character a path can carry is the client's problem,
+		// not a server failure.
+		writeError(w, http.StatusBadRequest, "name contains no characters usable in a directory name")
+		return
+	}
+
 	groupMu.LockWrite()
 	defer groupMu.Unlock()
 	// Workspace generation sits inside the write lock: its exists-check plus
@@ -631,12 +638,14 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 	}
 	groups, err := loadSessionGroups()
 	if err != nil {
+		dropWorkspaceDir(workspace)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workspace, SourceDirs: sourceDirs}
 	groups = append(groups, g)
 	if err := saveSessionGroups(groups); err != nil {
+		dropWorkspaceDir(workspace)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

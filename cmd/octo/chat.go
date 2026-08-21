@@ -134,9 +134,11 @@ func wireSessionHooks(a *agent.Agent, sess *agent.Session, transport string) {
 	a.OnSessionStart = func() { sess.MarkHookStarted() }
 }
 
-// projectRunDir returns the directory this run should work in: the project's
-// directory when resuming a session that belongs to one, otherwise cwd
-// unchanged. lookup is server.ProjectDirForSession (injected for testing).
+// projectRunDir returns the directory this run should work in: the directory
+// the resumed session belongs to, otherwise cwd unchanged. lookup is
+// sessionBindingDir (injected for testing) — the SAME precedence the listing
+// filters by, so a session's own directory outranks its project's workspace
+// here exactly as it does there.
 //
 // Since -c only resolves sessions belonging to this directory
 // (resolveSessionInDir), a resumed session's project directory and cwd already
@@ -797,7 +799,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// compose-once-per-process model the CLI already follows for the system
 	// prompt. The CLI has no way to CHANGE a working directory; a project's
 	// setting is editable only where it was made (the Web UI / desktop).
-	if dir := projectRunDir(cwd, resumeID, server.ProjectDirForSession); dir != cwd {
+	if dir := projectRunDir(cwd, resumeID, sessionBindingDir); dir != cwd {
 		// Announce it — silently running tools on a path other than the one
 		// the user typed would be baffling.
 		fmt.Fprintf(stderr, "Session belongs to a project — working in %s\n", dir)

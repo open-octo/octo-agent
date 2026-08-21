@@ -1,6 +1,8 @@
 package server
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -45,21 +47,38 @@ func findOrCreateProject(gf *groupFile, dir string) (string, error) {
 		}
 	}
 
-	validated, err := validateWorkingDir(dir)
+	// The same validation the HTTP create path runs — including the "not
+	// under the workspace root" rule, or this write path would mount what
+	// that one rejects.
+	base := tools.ConfiguredWorkspaceDir()
+	mounted, err := validateSourceDirs(base, []string{dir})
 	if err != nil {
 		return "", err
 	}
+	if len(mounted) == 0 {
+		return "", fmt.Errorf("project: no usable directory in %q", dir)
+	}
+	validated := mounted[0]
 	name := filepath.Base(memory.NormalizeDir(validated))
 	if name == "" || name == "." || name == string(filepath.Separator) {
 		name = validated
 	}
-	workspace, err := workspaceDirForProject(resolveWorkspaceBase(), name)
+	workspace, err := workspaceDirForProject(base, name)
 	if err != nil {
 		return "", err
 	}
 	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workspace, SourceDirs: []string{validated}}
 	gf.Groups = append(gf.Groups, g)
 	return g.ID, nil
+}
+
+// dropWorkspaceDir best-effort removes a workspace that was generated for a
+// creation that then failed — Remove, not RemoveAll: a freshly generated
+// workspace is empty, and anything else is not ours to delete.
+func dropWorkspaceDir(dir string) {
+	if dir != "" {
+		_ = os.Remove(dir)
+	}
 }
 
 // ensureProjectForDir files sessionIDs under the project working in dir,
@@ -123,6 +142,14 @@ func EnsureProjectForDir(dir, sessionID string) error {
 		return nil
 	}
 	return ensureProjectForDir(dir, sessionID)
+}
+
+// IsSeededWorkspaceDir reports whether dir is the seeded "nobody chose this"
+// workspace value. Exported for the CLI, whose session scoping must treat a
+// seeded directory exactly like the server's resolver does (a session carrying
+// it never chose it, so it must not outrank the session's project).
+func IsSeededWorkspaceDir(dir string) bool {
+	return isDefaultWorkspaceDir(dir)
 }
 
 // isDefaultWorkspaceDir reports whether dir is the directory that means

@@ -6,9 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/memory"
-	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // A project's workspace is an octo-owned directory under the configured
@@ -83,17 +81,48 @@ func validateSourceDirs(workspaceRoot string, raw []string) ([]string, error) {
 	return dirs, nil
 }
 
-// resolveWorkspaceBase resolves the workspace root from configuration rather
-// than from a running Server — project creation is also the CLI's path
-// (EnsureProjectForDir), and it has no server to ask. Empty when the root
-// cannot be resolved at all, which callers surface as a creation error.
-func resolveWorkspaceBase() string {
-	raw := ""
-	if cfg, err := config.Load(); err == nil {
-		raw = cfg.WorkspaceDir
+// workspaceDirForTask returns (and creates) the directory a cron task's runs
+// work in: <base>/<sanitized task name>, reusing it across repairs — the
+// directory belongs to the task, and suffixing it on every backfill would
+// orphan what earlier runs wrote there. Only a candidate already claimed as
+// ANOTHER group's workspace steps aside to a suffix; a project named like the
+// task and created first keeps its directory, and the disk-exists check in
+// workspaceDirForProject covers the reverse order.
+// Pure — the registry snapshot comes from the caller, because one caller (the
+// startup repair pass) already holds groupMu when it needs this and the lock
+// is not reentrant.
+func workspaceDirForTask(groups []sessionGroup, base, taskName, taskID string) (string, error) {
+	if base == "" {
+		return "", fmt.Errorf("task workspace: no workspace directory configured")
 	}
-	if w, err := tools.ResolveWorkspaceDir(raw); err == nil {
-		return w
+	seg := dirNameFor(taskName)
+	if seg == "" {
+		seg = dirNameFor(taskID)
 	}
-	return ""
+	if seg == "" {
+		return "", fmt.Errorf("task workspace: name %q yields no usable directory name", taskName)
+	}
+	claimed := map[string]string{} // normalized workspace -> owning task id ("" = not a cron group)
+	for i := range groups {
+		if wd := groups[i].WorkingDir; wd != "" {
+			claimed[memory.NormalizeDir(wd)] = groups[i].TaskID
+		}
+	}
+
+	base = expandDir(base)
+	candidate := filepath.Join(base, seg)
+	for i := 2; ; i++ {
+		owner, taken := claimed[memory.NormalizeDir(candidate)]
+		if !taken || owner == taskID {
+			break
+		}
+		if i > 99 {
+			return "", fmt.Errorf("task workspace: too many name collisions for %q under %s", seg, base)
+		}
+		candidate = filepath.Join(base, fmt.Sprintf("%s-%d", seg, i))
+	}
+	if err := os.MkdirAll(candidate, 0o755); err != nil {
+		return "", fmt.Errorf("task workspace: create %s: %w", candidate, err)
+	}
+	return candidate, nil
 }

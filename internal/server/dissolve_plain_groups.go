@@ -2,6 +2,7 @@ package server
 
 import (
 	"log/slog"
+	"strings"
 
 	"github.com/open-octo/octo-agent/internal/scheduler"
 )
@@ -64,8 +65,18 @@ func (s *Server) dissolvePlainGroups() {
 			if g.WorkingDir == "" {
 				// Written before a scheduled task was a project. Its runs have
 				// been falling through to the server's launch directory, so give
-				// it the directory it should have had.
-				if dir := s.cronTaskDir(task); dir != "" {
+				// it the directory it should have had. Not s.cronTaskDir: that
+				// re-reads the registry under groupMu, which this pass already
+				// holds — the snapshot in hand serves the claim check instead.
+				dir := strings.TrimSpace(task.Directory)
+				if dir == "" {
+					if d, derr := workspaceDirForTask(groups, s.curWorkspaceDir(), task.Name, task.ID); derr == nil {
+						dir = d
+					} else {
+						slog.Warn("scheduled task's directory", "task", task.Name, "err", derr)
+					}
+				}
+				if dir != "" {
 					if validated, verr := validateWorkingDir(dir); verr == nil {
 						g.WorkingDir = validated
 						changed = true

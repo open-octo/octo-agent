@@ -2,8 +2,6 @@ package server
 
 import (
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"unicode"
 )
@@ -33,16 +31,20 @@ func (s *Server) cronProjectDir(taskName, taskID string) string {
 	if base == "" {
 		return ""
 	}
-	name := dirNameFor(taskName)
-	if name == "" {
-		name = taskID // a name made entirely of separators or spaces
+	// Project workspaces now share this namespace and naming rule, so the
+	// candidate steps aside when another group already claims it — a project
+	// named like the task must not have a cron task quietly move into its
+	// workspace. The task's own directory is reused across repairs as before.
+	groupMu.Lock()
+	groups, err := loadSessionGroups()
+	groupMu.Unlock()
+	if err != nil {
+		slog.Warn("cron project dir: load registry", "task", taskName, "err", err)
+		groups = nil
 	}
-	if name == "" {
-		return ""
-	}
-	dir := filepath.Join(expandDir(base), name)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		slog.Warn("cron project dir: create", "task", taskName, "dir", dir, "err", err)
+	dir, err := workspaceDirForTask(groups, base, taskName, taskID)
+	if err != nil {
+		slog.Warn("cron project dir: create", "task", taskName, "err", err)
 		return ""
 	}
 	return dir
