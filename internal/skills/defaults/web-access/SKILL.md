@@ -125,7 +125,7 @@ action 级用法（observe / click / eval / record / replay 等的参数与语�
 
 ## 站点经验
 
-操作中积累的特定网站经验，按域名存在 `references/site-patterns/<domain>.md`（本地、gitignored、跨 session 复用）。
+操作中积累的特定网站经验，按域名存在 `~/.octo/site-patterns/<domain>.md`（本地目录，独立于技能文件，跨 session 与版本升级持久复用）。
 
 确定目标网站后，若已有对应站点经验文件，读取它获取先验（平台特征、有效模式、已知陷阱）。经验标注发现日期，当作"可能有效的提示"而非"保证正确的事实"——按经验失败就回退通用模式并更新文件。
 

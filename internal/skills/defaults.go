@@ -74,6 +74,10 @@ func materializeDefaults(root, version string, force bool) error {
 	// The default root is exclusively octo-managed (users override in
 	// ~/.octo/skills), so a wholesale wipe-and-rewrite is safe and keeps the
 	// set in lockstep with the binary — stale skills removed, renames handled.
+	// One exception predates that rule: earlier web-access versions had the
+	// agent write site-experience notes inside the managed tree; rescue those
+	// into the persistent sibling directory before the wipe destroys them.
+	rescueSitePatterns(root)
 	if err := os.RemoveAll(root); err != nil {
 		return err
 	}
@@ -101,4 +105,37 @@ func materializeDefaults(root, version string, force bool) error {
 	// Stamp last: if a write above failed mid-way the stamp is absent/stale, so
 	// the next run retries rather than trusting a partial materialization.
 	return os.WriteFile(filepath.Join(root, defaultStampFile), []byte(version), 0o644)
+}
+
+// rescueSitePatterns moves site-experience notes an earlier web-access skill
+// accumulated under the managed default root (web-access/references/
+// site-patterns/) into the persistent sibling directory ~/.octo/site-patterns,
+// where the skill reads and writes them today. They are user data written by
+// the agent, not shipped skill content, so the wipe-and-rewrite must not eat
+// them. Best-effort: an existing file in the destination wins (it is the copy
+// the skill has been updating since the move).
+func rescueSitePatterns(root string) {
+	legacy := filepath.Join(root, "web-access", "references", "site-patterns")
+	entries, err := os.ReadDir(legacy)
+	if err != nil {
+		return
+	}
+	dest := filepath.Join(filepath.Dir(root), "site-patterns")
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		target := filepath.Join(dest, e.Name())
+		if _, err := os.Stat(target); err == nil {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(legacy, e.Name()))
+		if err != nil {
+			continue
+		}
+		if err := os.MkdirAll(dest, 0o755); err != nil {
+			return
+		}
+		_ = os.WriteFile(target, data, 0o644)
+	}
 }

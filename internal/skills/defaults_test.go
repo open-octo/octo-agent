@@ -134,6 +134,47 @@ func TestMaterializeDefaults_UnderscorePrefixedFilesShip(t *testing.T) {
 	}
 }
 
+func TestMaterializeDefaults_RescuesLegacySitePatterns(t *testing.T) {
+	// Earlier web-access versions had the agent write per-domain
+	// site-experience notes inside the managed default root, which the
+	// version-bump wipe destroyed. The rewrite must move them to the
+	// persistent sibling ~/.octo/site-patterns first.
+	octoDir := t.TempDir()
+	root := filepath.Join(octoDir, "skills-default")
+	useDefaultRoot(t, root)
+	if err := MaterializeDefaults("v1"); err != nil {
+		t.Fatal(err)
+	}
+
+	legacy := filepath.Join(root, "web-access", "references", "site-patterns")
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(legacy, "example.com.md"), "legacy notes")
+	mustWrite(t, filepath.Join(legacy, "stale.com.md"), "older notes")
+
+	// A file already in the persistent directory wins over the legacy copy.
+	dest := filepath.Join(octoDir, "site-patterns")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(dest, "stale.com.md"), "current notes")
+
+	if err := MaterializeDefaults("v2"); err != nil {
+		t.Fatal(err)
+	}
+
+	if b, err := os.ReadFile(filepath.Join(dest, "example.com.md")); err != nil || string(b) != "legacy notes" {
+		t.Errorf("example.com.md = %q, %v; want rescued legacy notes", string(b), err)
+	}
+	if b, err := os.ReadFile(filepath.Join(dest, "stale.com.md")); err != nil || string(b) != "current notes" {
+		t.Errorf("stale.com.md = %q, %v; want the persistent copy kept", string(b), err)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Errorf("legacy site-patterns dir should be gone after the rewrite")
+	}
+}
+
 func TestDiscover_DefaultSkillSurfacesAndIsOverridable(t *testing.T) {
 	defaultRoot := filepath.Join(t.TempDir(), "skills-default")
 	useDefaultRoot(t, defaultRoot)

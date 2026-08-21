@@ -12,7 +12,7 @@
 
 ## 站点经验
 
-`references/site-patterns/<domain>.md` 按域名存放操作经验（本地、gitignored、跨 session 复用）。
+`~/.octo/site-patterns/<domain>.md` 按域名存放操作经验（本地、跨 session 持久）。放在 octo 管理的 `~/.octo/skills-default/` 之外，版本升级的 wipe-and-rewrite 不会清掉它。
 
 ## 已移除
 
