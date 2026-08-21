@@ -14,11 +14,6 @@ func watchConn(t *testing.T, srv *Server) *wsConn {
 	t.Helper()
 	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
 	srv.wsHub.register <- conn
-	// watchStop is created by New; mustServer builds a Server literal, so give
-	// the test one too — startStoreWatch selects on it.
-	if srv.watchStop == nil {
-		srv.watchStop = make(chan struct{})
-	}
 	return conn
 }
 
@@ -151,14 +146,20 @@ func TestStoreWatch_TurnWritesDoNotAnnounce(t *testing.T) {
 // TestStoreWatch_StopsWhenTold: the watch must not outlive the server, or every
 // server in a test binary — and every restart of the daemon — leaks a ticker
 // goroutine. doShutdown closes watchStop; this covers the goroutine honouring
-// it. Run under -race, a goroutine still ticking here would be visible.
+// it.
+//
+// The channel is closed through a local copy rather than through the field.
+// The running goroutine reads s.watchStop, so touching the field here would be
+// a write racing that read — which is exactly what -race caught when this test
+// nil'd the field out afterwards.
 func TestStoreWatch_StopsWhenTold(t *testing.T) {
 	srv := groupTestServer(t)
-	srv.watchStop = make(chan struct{})
+	stop := srv.watchStop
+	if stop == nil {
+		t.Fatal("watchStop was not created")
+	}
 	srv.startStoreWatch()
 
-	close(srv.watchStop)
-	srv.watchStop = nil // a later Shutdown must not double-close
-
+	close(stop)
 	time.Sleep(20 * time.Millisecond)
 }
