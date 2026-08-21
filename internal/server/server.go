@@ -224,6 +224,12 @@ type Server struct {
 	// WebSocket hub for real-time browser communication.
 	wsHub *wsHub
 
+	// watchStop stops the store watch (see store_watch.go). Closed by
+	// doShutdown, which is single-flight, so it is never closed twice. Created
+	// in New rather than in startStoreWatch so a shutdown that races the start
+	// still has something to close.
+	watchStop chan struct{}
+
 	// interrupt cancellation per session.
 	interrupts  map[string]context.CancelFunc
 	interruptMu sync.Mutex
@@ -516,6 +522,7 @@ func New(cfg Config) (*Server, error) {
 		accessKey:           accessKey,
 		confirmations:       make(map[string]chan string),
 		questionChans:       make(map[string]chan tools.AskResponse),
+		watchStop:           make(chan struct{}),
 		pendingQuestions:    make(map[string]wsEventRequestUserQuestion),
 		pendingConfirms:     make(map[string]wsEventRequestConfirmation),
 		askSlots:            make(map[string]chan struct{}),
@@ -704,6 +711,10 @@ func (s *Server) serveOn(ln net.Listener) error {
 	s.initScheduler()
 	s.reconcileRegistry()
 	s.startChannels()
+	// After the reconciliation passes, so the baseline sample reflects the
+	// registry this server is actually serving rather than announcing its own
+	// startup repairs as someone else's change.
+	s.startStoreWatch()
 	err := s.http.Serve(ln)
 	if errors.Is(err, http.ErrServerClosed) {
 		if s.restartPending.Load() {
@@ -751,6 +762,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) doShutdown(ctx context.Context) error {
+	if s.watchStop != nil {
+		close(s.watchStop)
+	}
 	s.stopChannels()
 	// Kill background processes started via web/IM sessions so they don't
 	// outlive the daemon — the same orphan-prevention the CLI/TUI do on exit.

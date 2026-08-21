@@ -493,6 +493,13 @@ func (s *Session) EndsMidTurn() bool {
 	return false
 }
 
+// SessionsDir returns (and creates if needed) the directory transcripts live
+// in. Exported for callers that need to observe the directory itself rather
+// than load what is in it — the server's store watch counts entries there to
+// notice sessions another process created, which loading them all would be a
+// wasteful way to learn.
+func SessionsDir() (string, error) { return sessionsDir() }
+
 // sessionsDir returns (and creates if needed) ~/.octo/sessions.
 func sessionsDir() (string, error) {
 	home, err := os.UserHomeDir()

@@ -834,6 +834,10 @@ func mustServer(t *testing.T, cfg Config) *Server {
 		sessionAgents:       make(map[string]*agent.Agent),
 		steerQueues:         make(map[string][]queuedTurn),
 		wsHub:               newWSHub(),
+		// Created here for the same reason New does it: the store watch selects
+		// on it, so it must exist before that goroutine can start. Assigning it
+		// afterwards would be a write racing that read.
+		watchStop: make(chan struct{}),
 	}
 	srv.registerRoutes()
 	// Wrap with CORS middleware so tests that exercise CORS hit the right layer.
