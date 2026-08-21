@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { showToast, openAgentSession, panelContent, panelExpanded, lightapps, lightappSel, lightappHTML } from '../lib/stores'
+  import { showToast, openAgentSession, panelContent, lightapps, lightappSel, lightappHTML } from '../lib/stores'
   import * as api from '../lib/api'
   import type { LightApp } from '../lib/api'
   import { t, tr } from '../lib/i18n'
@@ -25,17 +25,16 @@
 
   async function handleOpen(slug: string) {
     try {
-      // Load Light App data into global stores, then hand the whole content
-      // area to it. A light app is a program to use, not a preview to glance
-      // at beside something else, so it opens at full size rather than in a
-      // narrow strip the user would have to widen every time.
+      // Load Light App data into global stores, then open it in the side
+      // panel at its regular width — many light apps are laid out for a
+      // narrow column, and the panel's own maximize button is there for
+      // the ones that want the full content area.
       const detail = await api.getLightApp(slug)
       lightappHTML.update(m => ({ ...m, [slug]: detail.html }))
       // If not already loaded, populate the list.
       if ($lightapps.length === 0) lightapps.set(apps)
       lightappSel.set(slug)
       panelContent.set('lightapps')
-      panelExpanded.set(true)
     } catch (e: any) {
       showToast(`Failed to open: ${e.message}`, 'error')
     }
