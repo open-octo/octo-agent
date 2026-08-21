@@ -273,6 +273,7 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 		}
 		return agent.ToolResult{
 			Text: fmt.Sprintf("Started sub-agent %s. You will be notified when it completes.", id),
+			UI:   subAgentResultUI(id),
 		}, nil
 	}
 
@@ -285,6 +286,7 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 	if res.StopReason == "promoted" {
 		return agent.ToolResult{
 			Text: fmt.Sprintf("Sub-agent %s was promoted to background. You will be notified when it completes.", res.AgentID),
+			UI:   subAgentResultUI(res.AgentID),
 		}, nil
 	}
 	text := withAgentTag(res.AgentID, res.Reply)
@@ -296,7 +298,15 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 	if forcedSync {
 		text += "\n\n[note: ran synchronously and returned its full result here — this transport doesn't support background sub-agents, so run_in_background was ignored.]"
 	}
-	return agent.ToolResult{Text: text}, nil
+	return agent.ToolResult{Text: text, UI: subAgentResultUI(res.AgentID)}, nil
+}
+
+// subAgentResultUI is the structured payload on a sub_agent tool result that
+// lets the web transcript's tool card claim the agent's event trail (see
+// dev-docs/agent-run-panel-design.md). It persists with the session on the
+// tool_result block and never reaches the model.
+func subAgentResultUI(agentID string) map[string]any {
+	return map[string]any{"agent_id": agentID}
 }
 
 // boolArg pulls a boolean argument, defaulting to false.

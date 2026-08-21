@@ -170,6 +170,11 @@ type Server struct {
 	turnLocks map[string]*sync.Mutex
 	turnMu    sync.Mutex
 
+	// agentEventsMu serializes appends to the per-session agent-event sidecars
+	// (see agent_runs.go). One process-wide lock: the events are low-rate and
+	// the critical section is a single buffered write.
+	agentEventsMu sync.Mutex
+
 	// session-scoped memory injectors: one injector per session so triggered
 	// rules are recalled at most once per session. Deleted alongside turnLocks.
 	sessionInjectors map[string]*memory.Injector
@@ -811,6 +816,7 @@ func (s *Server) registerRoutes() {
 	s.api("POST /api/sessions/delete", s.handleDeleteSessions)
 	s.api("GET /api/sessions/{id}", s.handleGetSession)
 	s.api("GET /api/sessions/{id}/messages", s.handleGetSessionMessages)
+	s.api("GET /api/sessions/{id}/agent-runs", s.handleGetSessionAgentRuns)
 	s.api("GET /api/sessions/{id}/confirmation", s.handleGetSessionConfirmation)
 	s.api("GET /api/sessions/{id}/artifacts", s.handleGetArtifact)
 	s.api("DELETE /api/sessions/{id}", s.handleDeleteSession)

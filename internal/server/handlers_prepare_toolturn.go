@@ -141,10 +141,11 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	// injected here; the core function stays free of *Server dependencies.
 	ctx, _, mgr, cleanup := app.NewSessionToolEnv(ctx, a, sid, executor, app.ToolEnvCallbacks{
 		SubAgentOnEvent: func(ev tools.SubAgentEvent) {
-			if s.wsHub == nil {
-				return
+			p := subAgentEventPayload(sid, ev)
+			s.appendAgentEvent(sid, p)
+			if s.wsHub != nil {
+				s.wsHub.broadcast(sid, p)
 			}
-			s.wsHub.broadcast(sid, subAgentEventPayload(sid, ev))
 		},
 		SubAgentOnExit: func(ev tools.SubAgentNotification) {
 			if s.wsHub == nil {
@@ -161,10 +162,11 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 			s.notifySubAgentExit(sid, ev)
 		},
 		WorkflowOnEvent: func(ev tools.WorkflowEvent) {
-			if s.wsHub == nil {
-				return
+			p := workflowEventPayload(sid, ev)
+			s.appendAgentEvent(sid, p)
+			if s.wsHub != nil {
+				s.wsHub.broadcast(sid, p)
 			}
-			s.wsHub.broadcast(sid, workflowEventPayload(sid, ev))
 		},
 		WorkflowOnDone: func(ev tools.WorkflowNotification) {
 			s.deliverModelNote(sid, tools.FormatWorkflowNote(ev))

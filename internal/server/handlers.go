@@ -790,6 +790,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.forgetTurnLock(id)
+	s.removeAgentEvents(id)                 // and its persisted agent-event trails
 	tools.CloseSessionBackgroundManager(id) // reap the session's background daemons
 	tools.CloseSessionSubAgentManager(id)   // and its sub-agents
 	tools.CloseSessionWorkflowManager(id)   // and its background workflows
