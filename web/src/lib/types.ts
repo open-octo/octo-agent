@@ -432,6 +432,73 @@ export type WsEvent =
   | WsEventNextMessageSuggestion
   | WsEventSessionActivity
 
+// ── Git Diff review panel ─────────────────────────────────────────────────
+// Mirrors internal/server/diff_parse.go. Prefixed Git* because WsEventDiff
+// above is a different thing entirely (the edit_file tool's inline preview).
+
+export interface GitDiffLine {
+  kind: 'context' | 'add' | 'del'
+  content: string
+}
+
+export interface GitDiffHunk {
+  header: string
+  lines: GitDiffLine[]
+}
+
+export interface GitDiffPatch {
+  old_path: string
+  new_path: string
+  hunks: GitDiffHunk[]
+}
+
+export type GitDiffStatus = 'M' | 'A' | 'D' | 'R' | 'C' | 'T' | '?'
+
+export interface GitDiffFile {
+  path: string
+  /** Renames and copies only. */
+  old_path?: string
+  status: GitDiffStatus
+  staged: boolean
+  adds: number
+  dels: number
+  binary: boolean
+  /** patch holds a prefix of the change; total_lines is the full size. */
+  truncated: boolean
+  /** The response line budget ran out before this file, so patch is null. */
+  omitted: boolean
+  total_lines: number
+  patch: GitDiffPatch | null
+}
+
+export interface GitDiffRepo {
+  root: string
+  name: string
+  branch: string
+  /** Short commit, set only when HEAD is detached. */
+  commit?: string
+  files: GitDiffFile[]
+  /** This repository's git commands failed; the others still rendered. */
+  error?: string
+}
+
+export interface GitDiffResponse {
+  repos: GitDiffRepo[]
+  truncated_files: number
+  omitted_files: number
+}
+
+export interface GitDiffSummaryRepo {
+  root: string
+  name: string
+  files: { path: string; status: string; staged: boolean }[]
+  error?: string
+}
+
+export interface GitDiffSummaryResponse {
+  repos: GitDiffSummaryRepo[]
+}
+
 // ChatMessage is the UI-layer chat message type
 export interface ChatMessage {
   id: string
