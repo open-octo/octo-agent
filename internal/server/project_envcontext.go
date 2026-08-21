@@ -122,6 +122,20 @@ func trustMountedHooks(dirs []string) {
 		if path == "" {
 			continue
 		}
+		// The mount dirs originate in the HTTP mount request, so the read
+		// below is a CodeQL go/path-injection sink. Two guards: the ".."
+		// check is the barrier the query recognizes (Join already cleans, so
+		// it can never fire at runtime), and the containment check proves the
+		// target stays strictly inside the folder whose mount was just
+		// granted — it can only reject a dir that never passed
+		// validateSourceDirs (e.g. the filesystem root). Same idiom as
+		// resolveMemoryPath.
+		if strings.Contains(path, "..") {
+			continue
+		}
+		if root := filepath.Clean(d); !strings.HasPrefix(path, root+string(os.PathSeparator)) {
+			continue
+		}
 		b, err := os.ReadFile(path)
 		if err != nil {
 			continue
