@@ -593,6 +593,10 @@ func New(cfg Config) (*Server, error) {
 // directory under a project for it.
 func (s *Server) reconcileRegistry() {
 	s.dissolvePlainGroups()
+	// Migration before adoption: once a legacy project's directory is mounted
+	// as a source folder, the adoption pass files that directory's sessions
+	// into the migrated project instead of minting a duplicate.
+	s.migrateProjectWorkspaces()
 	s.adoptTaskWorkingDirs()
 	// After adoption, so the passes above see directories in their settled
 	// state; only ever touches <workspace>/tasks/ (see underTasksRoot).
