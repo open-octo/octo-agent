@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { FeedItem, FeedKind } from './feedGroups'
   import { t } from '../lib/i18n'
-  import { ago } from '../lib/relTime'
+  import { ago, clockTick } from '../lib/relTime'
 
   let { item, onOpen }: { item: FeedItem; onOpen: (id: string, kind: FeedKind) => void } = $props()
 
@@ -34,7 +34,7 @@
       <span class="mono">{s.model || s.model_id || ''}</span>
     {/if}
     <span class="dot">·</span>
-    <span>{ago(s.updated_at, $t)}</span>
+    <span>{ago(s.updated_at, $t, $clockTick)}</span>
   </div>
 </button>
 
