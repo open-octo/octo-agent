@@ -76,6 +76,49 @@ func TestEnsureProjectForDirOnly_SkipsWorkspaceDefaultsAndFilesNothing(t *testin
 	}
 }
 
+// A scheduled task's run cluster never claims a directory: not in the
+// read-only lookup, and not in find-or-create — the CLI's three-state rule
+// checks claims first and falls through to EnsureProjectForDirOnly when a
+// cron group is the only claimant, so both layers must agree or the session
+// drops into the task's run history.
+func TestProjectsClaimingDir_SkipsTaskGroups(t *testing.T) {
+	isolatedHome(t)
+	src := t.TempDir()
+
+	gf, err := loadRegistryFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cron := sessionGroup{ID: "g-cron", Name: "nightly", WorkingDir: t.TempDir(), SourceDirs: []string{src}, TaskID: "task-1"}
+	gf.Groups = append(gf.Groups, cron)
+	groupMu.LockWrite()
+	err = saveRegistry(gf)
+	groupMu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := ProjectsClaimingDir(src); len(got) != 0 {
+		t.Fatalf("claims for a cron-mounted dir = %+v, want none", got)
+	}
+	if got := ProjectsClaimingDir(cron.WorkingDir); len(got) != 0 {
+		t.Fatalf("claims for a cron workspace = %+v, want none", got)
+	}
+
+	// The find-or-create half: a fresh project mounting the folder, not the
+	// cron cluster.
+	ref, err := EnsureProjectForDirOnly(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.ID == "" || ref.ID == cron.ID {
+		t.Fatalf("EnsureProjectForDirOnly = %+v, want a NEW project, not the cron cluster", ref)
+	}
+	if got := ProjectsClaimingDir(src); len(got) != 1 || got[0].ID != ref.ID {
+		t.Fatalf("claims after create = %+v, want [%s]", got, ref.ID)
+	}
+}
+
 // projectForSessionMapKeys lists all session ids filed anywhere.
 func projectForSessionMapKeys(t *testing.T) []string {
 	t.Helper()

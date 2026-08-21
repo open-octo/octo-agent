@@ -347,8 +347,10 @@ export function normalizeDir(p: string): string {
 // pick, everything else takes the unique claim or creates.
 export function projectsClaimingDir(dir: string): SessionGroup[] {
   const target = normalizeDir(dir)
+  // Scheduled tasks' run clusters are excluded: adopting an ad-hoc session
+  // into one would drop it into that task's run history.
   return get(sessionGroups).filter(g =>
-    !!g.working_dir && (
+    !g.task_id && !!g.working_dir && (
       normalizeDir(g.working_dir!) === target ||
       (g.source_dirs ?? []).some(sd => normalizeDir(sd) === target)
     ),
@@ -357,8 +359,10 @@ export function projectsClaimingDir(dir: string): SessionGroup[] {
 
 export async function resolveProjectForDir(dir: string): Promise<string> {
   const claims = projectsClaimingDir(dir)
-  // First claim on ambiguity — the composer's picker resolves that case
-  // interactively before ever calling this.
+  // First claim on ambiguity. The composer's picker resolves that case
+  // interactively before parking a folder; the residue reaching here is a
+  // race (groups arriving after the pick, another tab mounting the folder
+  // in between) — accepted: the first claimant is stable and visible.
   if (claims.length > 0) return claims[0].id
   // Split on either separator: on Windows a path has no '/' at all, and the
   // project would otherwise be named after the whole path.

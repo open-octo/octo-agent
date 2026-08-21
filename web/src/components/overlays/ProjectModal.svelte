@@ -29,8 +29,8 @@
   let pickerOpen = $state(false)
   let modalEl = $state<HTMLDivElement | null>(null)
 
-  $effect(() => { if (modalEl) modalEl.focus() })
-
+  // No modal-level focus steal: the name input autofocuses, and Escape still
+  // reaches the modal div's onkeydown by bubbling from whatever child has focus.
   function addFolder(path: string) {
     const norm = normalizeDir(path)
     if (!sourceDirs.some(d => normalizeDir(d) === norm)) sourceDirs = [...sourceDirs, path]
@@ -69,10 +69,9 @@
         g = await api.updateSessionGroup(group.id, { name: trimmed, source_dirs: sourceDirs, output_dir: outputDir })
         sessionGroups.update(gs => gs.map(x => (x.id === g.id ? g : x)))
       } else {
-        g = await api.createSessionGroup(trimmed, { source_dirs: sourceDirs })
-        if (outputDir) {
-          g = await api.updateSessionGroup(g.id, { output_dir: outputDir })
-        }
+        // One request: the server accepts output_dir at creation, so there is
+        // no created-but-unmarked window for a failure to strand us in.
+        g = await api.createSessionGroup(trimmed, { source_dirs: sourceDirs, ...(outputDir ? { output_dir: outputDir } : {}) })
         sessionGroups.update(gs => [...gs, g])
       }
       onSaved?.(g)

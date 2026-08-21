@@ -12,14 +12,17 @@ import (
 // demand. Before this its runs had no working directory at all and fell through
 // to wherever `octo serve` was started from — every task on the machine writing
 // into the same place.
-func TestCronProjectDir_OnePerTaskUnderTheWorkspace(t *testing.T) {
-	setTestHome(t)
-	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+func TestWorkspaceDirForTask_OnePerTaskUnderTheWorkspace(t *testing.T) {
 	workspace := t.TempDir()
-	srv.setWorkspaceDir(workspace)
 
-	a := srv.cronProjectDir("daily report", "task-1")
-	b := srv.cronProjectDir("weekly digest", "task-2")
+	a, err := workspaceDirForTask(nil, workspace, "daily report", "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := workspaceDirForTask(nil, workspace, "weekly digest", "task-2")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if a != filepath.Join(workspace, "daily report") {
 		t.Errorf("dir = %q, want %q", a, filepath.Join(workspace, "daily report"))
@@ -32,6 +35,25 @@ func TestCronProjectDir_OnePerTaskUnderTheWorkspace(t *testing.T) {
 		if err != nil || !info.IsDir() {
 			t.Errorf("%q was not created as a directory: %v", d, err)
 		}
+	}
+
+	// A candidate another group already claims steps aside; the task's own
+	// directory is reused as-is.
+	claimed := []sessionGroup{{ID: "g-proj", Name: "proj", WorkingDir: filepath.Join(workspace, "daily report")}}
+	c, err := workspaceDirForTask(claimed, workspace, "daily report", "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c != filepath.Join(workspace, "daily report-2") {
+		t.Errorf("claimed-name dir = %q, want the suffixed candidate", c)
+	}
+	claimed = append(claimed, sessionGroup{ID: "g-cron", Name: "daily report", WorkingDir: c, TaskID: "task-1"})
+	d, err := workspaceDirForTask(claimed, workspace, "daily report", "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d != c {
+		t.Errorf("the task's own directory was suffixed: %q, want %q", d, c)
 	}
 }
 
@@ -59,13 +81,13 @@ func TestDirNameFor(t *testing.T) {
 // A name that reduces to nothing still gets a directory, named by the task id —
 // otherwise the runs would silently fall back to the server's launch directory,
 // which is the bug this whole path exists to fix.
-func TestCronProjectDir_FallsBackToTheTaskID(t *testing.T) {
-	setTestHome(t)
-	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+func TestWorkspaceDirForTask_FallsBackToTheTaskID(t *testing.T) {
 	workspace := t.TempDir()
-	srv.setWorkspaceDir(workspace)
 
-	got := srv.cronProjectDir("///", "task-9")
+	got, err := workspaceDirForTask(nil, workspace, "///", "task-9")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got != filepath.Join(workspace, "task-9") {
 		t.Errorf("dir = %q, want the task id under the workspace", got)
 	}

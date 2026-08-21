@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/hooks"
 	"github.com/open-octo/octo-agent/internal/memory"
 )
 
@@ -19,9 +20,10 @@ import (
 // into the prompt, so either changing must re-freeze the composed system on
 // the session's next turn (Session.IsComposedFor's third dimension).
 //
-// The set is normalized and sorted before hashing (and rendered sorted, so
-// text and hash agree) — mount ORDER never changes the prompt, so letting it
-// change the hash would churn the prompt cache for nothing.
+// The set hashes in MOUNT order, which is also the order the env context
+// lists folders and the order their .octorules layer into the prompt — so any
+// reordering that rewords the frozen prompt re-freezes it, and nothing else
+// does.
 //
 // Empty ONLY for a task: being in a project at all changes the prompt (the
 // Project block below exists), so a zero-folder project still hashes to a
@@ -37,7 +39,6 @@ func sourceDirsHash(proj *sessionGroup) string {
 	for i, d := range proj.SourceDirs {
 		dirs[i] = memory.NormalizeDir(d)
 	}
-	sort.Strings(dirs)
 	h := fnv.New64a()
 	_, _ = h.Write([]byte("project\x00"))
 	for _, d := range dirs {
@@ -55,6 +56,80 @@ func projSourceDirs(p *sessionGroup) []string {
 		return nil
 	}
 	return p.SourceDirs
+}
+
+// sourceRuleDirs are the mounted folders whose .octorules layer into the
+// composed prompt: every mount except the one that IS the cwd — a migrated
+// session runs in its old project directory, which is also SourceDirs[0], and
+// without this its conventions would appear twice in the frozen prompt.
+func sourceRuleDirs(cwd string, p *sessionGroup) []string {
+	dirs := projSourceDirs(p)
+	if len(dirs) == 0 {
+		return nil
+	}
+	normCwd := memory.NormalizeDir(cwd)
+	out := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		if memory.NormalizeDir(d) == normCwd {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// sourceHookDirs are the mounted folders whose .octo/hooks.yml the engine
+// loads: cwd-equal mounts are skipped (same double-load as above), and each
+// remaining folder must pass the SAME fingerprint trust gate a working_dir
+// retarget does. "Mounting is the trust grant" holds only for a mount a
+// person made — the UI write paths record the grant (trustMountedHooks); a
+// mount the migration manufactured records nothing, so hooks the old trust
+// gate refused to load do not silently start executing after an upgrade.
+func sourceHookDirs(cwd string, p *sessionGroup) []string {
+	dirs := sourceRuleDirs(cwd, p)
+	out := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		if hooksTrustedAt(d) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// hooksTrustedAt reports whether dir's project hooks file is fingerprint-
+// trusted — the standalone form of Server.projectHooksTrusted, shared with the
+// env-context markers so "loads hooks" is only ever claimed for a file that
+// actually will.
+func hooksTrustedAt(dir string) bool {
+	path := hooks.ProjectConfigPath(dir)
+	if path == "" {
+		return false
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return hooks.IsTrusted(path, hooks.Fingerprint(b))
+}
+
+// trustMountedHooks records the trust grant a person just made by mounting
+// dirs into a project: each folder's hooks file (when present) is trusted at
+// its current fingerprint, exactly as a CLI approval would record it. Content
+// that changes later must be re-granted, same as everywhere else.
+func trustMountedHooks(dirs []string) {
+	for _, d := range dirs {
+		path := hooks.ProjectConfigPath(d)
+		if path == "" {
+			continue
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if err := hooks.RecordTrust(path, hooks.Fingerprint(b)); err != nil {
+			slog.Warn("mount trust grant", "dir", d, "err", err)
+		}
+	}
 }
 
 // appendProjectEnvContext extends a turn's env context for a project session:
@@ -76,11 +151,10 @@ func appendProjectEnvContext(envCtx string, proj *sessionGroup) string {
 	b.WriteString("\n## Project\n\n")
 	b.WriteString("- The working directory is this project's own workspace: use it for scratch work and anything not asked to land elsewhere. It is octo's ground — no repository lives at the cwd itself.\n")
 	if len(proj.SourceDirs) > 0 {
-		// Rendered sorted so the text can never vary while the (sorted) hash
-		// stays put — a mount-order change must not silently reword a frozen
-		// prompt.
-		dirs := append([]string(nil), proj.SourceDirs...)
-		sort.Strings(dirs)
+		// Mount order — the order the hooks/rules load in, and the order the
+		// hash covers, so the listing, the loading, and the freeze identity
+		// can never disagree.
+		dirs := proj.SourceDirs
 		b.WriteString("- Source folders this project works on (cd into them or address them by absolute path):\n")
 		loadsAnything := false
 		for _, d := range dirs {
@@ -98,7 +172,7 @@ func appendProjectEnvContext(envCtx string, proj *sessionGroup) string {
 				line += " [loads .octorules]"
 				loadsAnything = true
 			}
-			if _, err := os.Stat(filepath.Join(d, ".octo", "hooks.yml")); err == nil {
+			if hooksTrustedAt(d) {
 				line += " [loads hooks]"
 				loadsAnything = true
 			}

@@ -47,6 +47,11 @@ func ProjectsClaimingDir(dir string) []ProjectRef {
 		if g.WorkingDir == "" {
 			continue
 		}
+		if g.TaskID != "" {
+			// A scheduled task's run cluster: adopting an ad-hoc session into
+			// it would drop the session into that task's run history.
+			continue
+		}
 		claimed := memory.NormalizeDir(g.WorkingDir) == target
 		for _, sd := range g.SourceDirs {
 			if claimed {

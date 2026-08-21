@@ -76,9 +76,9 @@ func (s *Server) initScheduler() {
 }
 
 // createCronProject creates the project a task's runs cluster under. The
-// workspace is generated like every other project's (cronProjectDir) — cron
-// and regular projects share one shape — and an explicit task directory is
-// mounted as the output folder rather than adopted as the directory itself:
+// workspace is generated like every other project's (workspaceDirForTask) —
+// cron and regular projects share one shape — and an explicit task directory
+// is mounted as the output folder rather than adopted as the directory itself:
 // the runs' deliverables land there, their scratch stays in the workspace.
 // An unusable explicit directory is dropped with a log, not fatal: a task
 // must run regardless.
@@ -94,13 +94,19 @@ func (s *Server) createCronProject(task scheduler.Task) (sessionGroup, error) {
 			outputDir = mounted[0]
 		}
 	}
-	workspace := s.cronProjectDir(task.Name, task.ID)
-
 	groupMu.LockWrite()
 	defer groupMu.Unlock()
 	groups, err := loadSessionGroups()
 	if err != nil {
 		return sessionGroup{}, err
+	}
+	// Workspace generation inside the write lock, same standard as the HTTP
+	// create handler: the claim check plus mkdir must be atomic or two
+	// same-named tasks created concurrently share one directory. The snapshot
+	// variant, because the lock is not reentrant and is already held here.
+	workspace, werr := workspaceDirForTask(groups, s.curWorkspaceDir(), task.Name, task.ID)
+	if werr != nil {
+		return sessionGroup{}, werr
 	}
 	g := sessionGroup{ID: newGroupID(), Name: task.Name, SessionIDs: []string{}, WorkingDir: workspace, SourceDirs: sourceDirs, OutputDir: outputDir, TaskID: task.ID}
 	groups = append(groups, g)

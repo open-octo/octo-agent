@@ -117,3 +117,101 @@ func TestCronProject_ExplicitDirectoryBecomesOutputMount(t *testing.T) {
 		t.Errorf("task id not recorded: %+v", g2)
 	}
 }
+
+// output_dir is accepted at creation so the whole project shape lands in one
+// write; a marker outside the mounts is a 400, same rule as PATCH.
+func TestProject_CreateWithOutputDir(t *testing.T) {
+	srv := groupTestServer(t)
+	src, out := t.TempDir(), t.TempDir()
+
+	rec, resp := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{
+		"name":        "Work",
+		"source_dirs": []string{src, out},
+		"output_dir":  out,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create: status %d body %s", rec.Code, rec.Body.String())
+	}
+	g, _ := resp["group"].(map[string]any)
+	if od, _ := g["output_dir"].(string); od != out {
+		t.Errorf("output_dir = %q, want %q", od, out)
+	}
+
+	rec, _ = doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{
+		"name":        "Bad",
+		"source_dirs": []string{src},
+		"output_dir":  t.TempDir(),
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("output_dir outside the mounts: status %d, want 400", rec.Code)
+	}
+}
+
+// Mounting a folder is the hooks trust grant: the create and edit gestures
+// record each mount's hooks.yml at its current fingerprint, and a later edit
+// of that file drops it out of the trusted set until re-granted. The
+// cwd-equal mount never double-loads.
+func TestMountedHooksTrust(t *testing.T) {
+	srv := groupTestServer(t)
+	writeHooks := func(dir, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(dir, ".octo"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".octo", "hooks.yml"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	src := t.TempDir()
+	writeHooks(src, "hooks: []\n")
+	if hooksTrustedAt(src) {
+		t.Fatal("an unmounted folder's hooks are trusted before any gesture")
+	}
+
+	rec, resp := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", map[string]any{
+		"name":        "Work",
+		"source_dirs": []string{src},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create: status %d body %s", rec.Code, rec.Body.String())
+	}
+	g, _ := resp["group"].(map[string]any)
+	gid, _ := g["id"].(string)
+	if !hooksTrustedAt(src) {
+		t.Error("the create gesture did not record the mount's trust grant")
+	}
+
+	proj := &sessionGroup{ID: gid, WorkingDir: t.TempDir(), SourceDirs: []string{src}}
+	if got := sourceHookDirs(proj.WorkingDir, proj); len(got) != 1 || got[0] != src {
+		t.Errorf("sourceHookDirs = %v, want [%s]", got, src)
+	}
+	// A migrated session running IN the old project dir (= a mount) must not
+	// load that mount's rules or hooks a second time.
+	if got := sourceRuleDirs(src, proj); len(got) != 0 {
+		t.Errorf("sourceRuleDirs with cwd == mount = %v, want none", got)
+	}
+	if got := sourceHookDirs(src, proj); len(got) != 0 {
+		t.Errorf("sourceHookDirs with cwd == mount = %v, want none", got)
+	}
+
+	// Content changing after the grant must be re-granted, same as everywhere.
+	writeHooks(src, "hooks: [changed]\n")
+	if hooksTrustedAt(src) {
+		t.Error("a changed hooks.yml stayed trusted")
+	}
+	if got := sourceHookDirs(proj.WorkingDir, proj); len(got) != 0 {
+		t.Errorf("sourceHookDirs after content change = %v, want none", got)
+	}
+
+	// The edit gesture re-grants at the new fingerprint.
+	rec, _ = doGroupReq(t, srv, http.MethodPatch, "/api/session-groups/"+gid, map[string]any{
+		"source_dirs": []string{src},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch: status %d body %s", rec.Code, rec.Body.String())
+	}
+	if !hooksTrustedAt(src) {
+		t.Error("the edit gesture did not re-grant the changed hooks.yml")
+	}
+}

@@ -37,6 +37,14 @@ import (
 func findOrCreateProject(gf *groupFile, dir string) (string, error) {
 	target := memory.NormalizeDir(dir)
 	for i := range gf.Groups {
+		if gf.Groups[i].TaskID != "" {
+			// A scheduled task's run cluster never claims a directory, same
+			// rule as ProjectsClaimingDir: filing an ad-hoc session into it
+			// would drop the session into that task's run history. The
+			// folder may still be mounted by a real project further down, or
+			// a fresh one is created below.
+			continue
+		}
 		if wd := gf.Groups[i].WorkingDir; wd != "" && memory.NormalizeDir(wd) == target {
 			return gf.Groups[i].ID, nil
 		}

@@ -907,7 +907,7 @@
   // The landing page's project list: claimants-only while an ambiguous folder
   // pick is being resolved, otherwise every project, filtered by the query.
   let projChoices = $derived.by(() => {
-    const base = claimChoices ?? $sessionGroups.filter(g => !!g.working_dir)
+    const base = claimChoices ?? $sessionGroups.filter(g => !g.task_id && !!g.working_dir)
     const q = projQuery.trim().toLowerCase()
     return q ? base.filter(g => g.name.toLowerCase().includes(q)) : base
   })

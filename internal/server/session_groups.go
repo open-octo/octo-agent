@@ -592,6 +592,9 @@ type createSessionGroupRequest struct {
 	// project needs none (writing projects, cron projects). The project's own
 	// directory is always generated; it is never one of these.
 	SourceDirs []string `json:"source_dirs,omitempty"`
+	// OutputDir optionally marks one of SourceDirs as where deliverables go —
+	// accepted at creation so the whole shape lands in one write.
+	OutputDir string `json:"output_dir,omitempty"`
 	// WorkingDir is the legacy field: it used to BE the project directory.
 	// A client still sending it gets that directory mounted as one more
 	// source folder, which preserves the intent ("this project works on that
@@ -619,6 +622,19 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, verr.Error())
 		return
 	}
+	outputDir := strings.TrimSpace(req.OutputDir)
+	if outputDir != "" {
+		if !dirInSet(outputDir, sourceDirs) {
+			writeError(w, http.StatusBadRequest, "output_dir must be one of the project's source folders")
+			return
+		}
+		for _, sd := range sourceDirs {
+			if memory.NormalizeDir(sd) == memory.NormalizeDir(outputDir) {
+				outputDir = sd
+				break
+			}
+		}
+	}
 	if dirNameFor(name) == "" {
 		// A name with no character a path can carry is the client's problem,
 		// not a server failure.
@@ -642,13 +658,16 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workspace, SourceDirs: sourceDirs}
+	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workspace, SourceDirs: sourceDirs, OutputDir: outputDir}
 	groups = append(groups, g)
 	if err := saveSessionGroups(groups); err != nil {
 		dropWorkspaceDir(workspace)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// The person just mounted these folders — that gesture is the hooks trust
+	// grant, recorded at the current fingerprints.
+	trustMountedHooks(sourceDirs)
 	writeJSON(w, http.StatusOK, map[string]any{"group": g})
 }
 
@@ -767,6 +786,10 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 	if err := saveSessionGroups(groups); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if req.SourceDirs != nil {
+		// The edit gesture is the hooks trust grant, same as creation.
+		trustMountedHooks(newSourceDirs)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"group": groups[idx]})
 }

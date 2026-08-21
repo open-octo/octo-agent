@@ -83,6 +83,58 @@ func TestMigrateWorkspaces_LegacyProject(t *testing.T) {
 	}
 }
 
+// A rerun after a crash between the memory rename and the registry save must
+// reuse the workspace the first run created — a suffixed twin would point the
+// ID-keyed memory slug (which embeds the workspace basename) away from where
+// the notes already moved.
+func TestMigrateWorkspaces_RerunAfterPartialFailureReusesWorkspace(t *testing.T) {
+	srv := groupTestServer(t)
+	oldDir := t.TempDir()
+	legacy := groupFile{Groups: []sessionGroup{{ID: "g-legacy", Name: "Work", SessionIDs: []string{}, WorkingDir: oldDir}}}
+	groupMu.LockWrite()
+	err := saveRegistry(legacy)
+	groupMu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldMem, err := memory.Dir(oldDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(oldMem, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oldMem, "MEMORY.md"), []byte("notes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	srv.migrateProjectWorkspaces()
+	first, _ := loadSessionGroups()
+	ws := first[0].WorkingDir
+
+	// Simulate the crash: the memory moved, the registry save did not.
+	groupMu.LockWrite()
+	err = saveRegistry(legacy)
+	groupMu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv.migrateProjectWorkspaces()
+
+	second, _ := loadSessionGroups()
+	if second[0].WorkingDir != ws {
+		t.Fatalf("rerun minted %q instead of reusing %q", second[0].WorkingDir, ws)
+	}
+	newMem, err := memory.DirForProjectID("g-legacy", filepath.Base(second[0].WorkingDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(filepath.Join(newMem, "MEMORY.md")); err != nil || string(b) != "notes" {
+		t.Errorf("memory unreachable after the rerun: %v %q", err, b)
+	}
+}
+
 // The one directory whose slug must never move: a project that pointed at
 // $HOME shares its slug with the home tier every session reads.
 func TestMigrateWorkspaces_NeverMovesTheSharedTier(t *testing.T) {

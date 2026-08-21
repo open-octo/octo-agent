@@ -107,7 +107,7 @@ export async function listSessionGroups(): Promise<{ groups: SessionGroup[]; pin
 
 // Every created group is a project: the server generates its workspace, and
 // source_dirs are the external folders it references (0..N is fine).
-export async function createSessionGroup(name: string, project?: { source_dirs?: string[] }): Promise<SessionGroup> {
+export async function createSessionGroup(name: string, project?: { source_dirs?: string[]; output_dir?: string }): Promise<SessionGroup> {
   const d = await request<{ group: SessionGroup }>('/api/session-groups', { method: 'POST', ...json({ name, ...project }) })
   return d.group
 }

@@ -88,6 +88,44 @@ func validateSourceDirs(workspaceRoot string, raw []string) ([]string, error) {
 // ANOTHER group's workspace steps aside to a suffix; a project named like the
 // task and created first keeps its directory, and the disk-exists check in
 // workspaceDirForProject covers the reverse order.
+// workspaceDirForMigration returns (and creates) the workspace for a project
+// being migrated. Unlike workspaceDirForProject it consults the registry
+// snapshot rather than the disk: a candidate directory that exists but that NO
+// group claims is reused, not suffixed — it is what a half-finished earlier
+// run left behind, and suffixing it would point the ID-keyed memory slug
+// (which embeds the workspace basename) away from where that run already
+// moved the notes. Pure over the snapshot: the caller holds groupMu.
+func workspaceDirForMigration(groups []sessionGroup, base, name string) (string, error) {
+	if base == "" {
+		return "", fmt.Errorf("project workspace: no workspace directory configured")
+	}
+	seg := dirNameFor(name)
+	if seg == "" {
+		return "", fmt.Errorf("project workspace: name %q yields no usable directory name", name)
+	}
+	claimed := map[string]bool{}
+	for i := range groups {
+		if wd := groups[i].WorkingDir; wd != "" {
+			claimed[memory.NormalizeDir(wd)] = true
+		}
+	}
+	base = expandDir(base)
+	candidate := filepath.Join(base, seg)
+	for i := 2; ; i++ {
+		if !claimed[memory.NormalizeDir(candidate)] {
+			break
+		}
+		if i > 99 {
+			return "", fmt.Errorf("project workspace: too many name collisions for %q under %s", seg, base)
+		}
+		candidate = filepath.Join(base, fmt.Sprintf("%s-%d", seg, i))
+	}
+	if err := os.MkdirAll(candidate, 0o755); err != nil {
+		return "", fmt.Errorf("project workspace: create %s: %w", candidate, err)
+	}
+	return candidate, nil
+}
+
 // Pure — the registry snapshot comes from the caller, because one caller (the
 // startup repair pass) already holds groupMu when it needs this and the lock
 // is not reentrant.

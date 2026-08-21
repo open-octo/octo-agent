@@ -61,7 +61,11 @@ func (s *Server) migrateProjectWorkspaces() {
 			continue // already workspace-form (new projects, cron)
 		}
 
-		workspace, werr := workspaceDirForProject(base, g.Name)
+		// Registry-aware, not disk-based: a rerun after a crash between the
+		// memory rename and the registry save must reuse the directory the
+		// first run created, or the ID-keyed memory slug (which embeds the
+		// workspace basename) would point away from the already-moved notes.
+		workspace, werr := workspaceDirForMigration(gf.Groups, base, g.Name)
 		if werr != nil {
 			slog.Warn("workspace migration: generate workspace", "project", g.Name, "err", werr)
 			continue

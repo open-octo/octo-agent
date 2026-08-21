@@ -12,8 +12,11 @@ func TestSourceDirsHash_Stability(t *testing.T) {
 	a, b := t.TempDir(), t.TempDir()
 	p1 := &sessionGroup{ID: "g-1", SourceDirs: []string{a, b}}
 	p2 := &sessionGroup{ID: "g-2", SourceDirs: []string{b, a}} // same set, other order
-	if sourceDirsHash(p1) != sourceDirsHash(p2) {
-		t.Error("mount order changed the hash — that would churn the prompt cache for nothing")
+	if sourceDirsHash(p1) == sourceDirsHash(p2) {
+		t.Error("mount order rewords the rendered prompt, so it must change the hash — or a reorder silently keeps a stale freeze")
+	}
+	if sourceDirsHash(p1) != sourceDirsHash(&sessionGroup{ID: "other-id", SourceDirs: []string{a, b}}) {
+		t.Error("the hash must depend only on the mounts, not the project id")
 	}
 	if sourceDirsHash(p1) == "" {
 		t.Error("a project with mounts must hash to a non-empty identity")
