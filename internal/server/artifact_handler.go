@@ -171,6 +171,28 @@ func resultUIPath(msgs []agent.Message, i int, id, want string) (string, bool) {
 	return "", false
 }
 
+// toolResultUIPath is resultUIPath without the match: it returns the
+// tool-resolved path from the answering result's ui payload, for callers that
+// collect candidate paths rather than authorise one (sessionTouchedDirs).
+func toolResultUIPath(msgs []agent.Message, i int, id string) (string, bool) {
+	if id == "" || i+1 >= len(msgs) {
+		return "", false
+	}
+	for _, rb := range msgs[i+1].Blocks {
+		if rb.Type != "tool_result" || rb.ToolUseID != id || rb.IsError {
+			continue
+		}
+		ui, ok := rb.UI.(map[string]any)
+		if !ok {
+			continue
+		}
+		if p, ok := ui["path"].(string); ok {
+			return p, true
+		}
+	}
+	return "", false
+}
+
 // callAuthorized reports whether the tool_use with the given id in messages[i]
 // may serve its path. A gate denial and a genuine execution failure both come
 // back as IsError=true (see dispatchTools), and the result is the only place the

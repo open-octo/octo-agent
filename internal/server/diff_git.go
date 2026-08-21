@@ -9,9 +9,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/executil"
 )
 
@@ -36,6 +38,12 @@ const (
 	// emptyTreeSHA is git's fixed empty-tree object, used as the diff base in a
 	// repository with no commits so the merged worktree view still works.
 	emptyTreeSHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+	// diffMaxTouchedDirs caps transcript-mined candidate directories so a long
+	// session cannot turn repository probing into a scan of the whole disk.
+	diffMaxTouchedDirs = 64
+	// diffMaxTokensPerCommand caps the absolute-path tokens mined from one
+	// terminal command.
+	diffMaxTokensPerCommand = 32
 )
 
 // errGitMissing reports that there is no git binary on this machine.
@@ -104,20 +112,28 @@ func gitRepoRoot(dir string) (string, bool) {
 }
 
 // diffRepoRootsForSession resolves the repositories a session may review: its
-// own working directory plus its project's workspace and mounted source dirs.
-// Callers never pass paths — that is the whole point (see handleGetSessionDiff)
-// — so this is the only place the set is decided.
-func (s *Server) diffRepoRootsForSession(sessionID string) []string {
+// own working directory, its project's workspace and mounted source dirs, plus
+// whatever its transcript shows the agent touching. Callers never pass paths —
+// that is the whole point (see handleGetSessionDiff) — so this is the only
+// place the set is decided.
+//
+// The transcript source (sessionTouchedDirs) is what connects a worktree the
+// agent created mid-session to the review set: the standard isolated-work flow
+// puts it under neither the session's working directory nor the project's
+// configured dirs, so without it the panel reports "no repository" over a
+// session that just changed files.
+func (s *Server) diffRepoRootsForSession(sess *agent.Session) []string {
 	var dirs []string
-	if cwd := s.sessionCwdByID(sessionID); cwd != "" {
+	if cwd := s.sessionCwdByID(sess.ID); cwd != "" {
 		dirs = append(dirs, cwd)
 	}
-	if p := projectForSession(sessionID); p != nil {
+	if p := projectForSession(sess.ID); p != nil {
 		if p.WorkingDir != "" {
 			dirs = append(dirs, p.WorkingDir)
 		}
 		dirs = append(dirs, p.SourceDirs...)
 	}
+	dirs = append(dirs, sessionTouchedDirs(sess)...)
 
 	var roots []string
 	seen := map[string]bool{}
@@ -130,6 +146,68 @@ func (s *Server) diffRepoRootsForSession(sessionID string) []string {
 		roots = append(roots, root)
 	}
 	return roots
+}
+
+// absPathTokenRE extracts absolute-path-looking tokens from a shell command:
+// slash-rooted on Unix, drive-lettered on Windows. Quotes, redirections and
+// other shell metacharacters terminate a token. False positives cost one stat
+// walk inside gitRepoRoot and are discarded there, so the pattern favours
+// recall over precision.
+var absPathTokenRE = regexp.MustCompile(`(?:[A-Za-z]:[\\/]|/)[^\s"'` + "`" + `()<>|;&]*`)
+
+// sessionTouchedDirs mines the session's own transcript for directories the
+// agent worked in: paths its file tools wrote, and absolute paths named in its
+// terminal commands. Only calls that actually ran contribute (callAuthorized,
+// the same gate the artifact endpoint uses): a denied call must not grant
+// anything. Reads are deliberately excluded — the question the panel answers
+// is where this session's *changes* can be, and reads would pull in every
+// repository the agent ever glanced at.
+func sessionTouchedDirs(sess *agent.Session) []string {
+	var dirs []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		if p == "" || !filepath.IsAbs(p) || len(dirs) >= diffMaxTouchedDirs {
+			return
+		}
+		d := filepath.Clean(p)
+		if fi, err := os.Stat(d); err != nil || !fi.IsDir() {
+			// A file path (or a file since deleted): the directory holding it
+			// is what resolves to a repository.
+			d = filepath.Dir(d)
+		}
+		if !seen[d] {
+			seen[d] = true
+			dirs = append(dirs, d)
+		}
+	}
+	for i, m := range sess.Messages {
+		for _, b := range m.Blocks {
+			if b.Type != "tool_use" || !callAuthorized(sess.Messages, i, b.ID) {
+				continue
+			}
+			switch b.Name {
+			case "write_file", "edit_file", "show_artifact":
+				// The input is the model's raw path — often relative, matched
+				// only when absolute. The answering result's ui payload carries
+				// the tool-resolved absolute form (see sessionWrotePath).
+				if p, ok := b.Input["path"].(string); ok {
+					add(p)
+				}
+				if p, ok := toolResultUIPath(sess.Messages, i, b.ID); ok {
+					add(p)
+				}
+			case "terminal":
+				cmd, ok := b.Input["command"].(string)
+				if !ok {
+					continue
+				}
+				for _, tok := range absPathTokenRE.FindAllString(cmd, diffMaxTokensPerCommand) {
+					add(tok)
+				}
+			}
+		}
+	}
+	return dirs
 }
 
 // statusEntry is one `git status --porcelain=v1 -z` record.
