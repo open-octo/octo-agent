@@ -462,7 +462,7 @@
                 <span class="tool-title mono">{tool.name}</span>
               {/if}
               {#if argText}
-                <span class="tool-arg mono" title={argText}>{argText}</span>
+                <span class="tool-arg mono" title={argText} onclick={(e) => e.stopPropagation()}>{argText}</span>
               {/if}
             </div>
             {#if meta && !fErr && !tErr}<div class="tool-submeta">{meta}</div>{/if}
