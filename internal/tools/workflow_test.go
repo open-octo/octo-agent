@@ -302,9 +302,14 @@ func TestWorkflowManager_RecordStatusRead(t *testing.T) {
 }
 
 // startBlockedRun starts a workflow whose single agent blocks until cancelled,
-// on an isolated manager, and waits for the launch progress line so
-// LastActivity is stable across subsequent status reads (a blocked agent emits
-// nothing further). Returns the ctx carrying the manager and the run id.
+// on an isolated manager, and waits for the run to become quiescent: the launch
+// progress line logged AND LastActivity not advancing for a short settle window.
+// A blocked agent emits nothing further, but the agent() call stamps a one-shot
+// agent_started structured event right after the launch line — returning on the
+// log line alone can hand the caller a LastActivity that is about to advance by
+// a few microseconds, which resets the anti-poll streak mid-loop and flakes
+// TestWorkflowStatus_AntiPollingGuard / _ListForm. Returns the ctx carrying the
+// manager and the run id.
 func startBlockedRun(t *testing.T, mgr *WorkflowManager) (context.Context, string) {
 	t.Helper()
 	SetSpawner(ctxBlockingSpawner{})
@@ -319,14 +324,18 @@ func startBlockedRun(t *testing.T, mgr *WorkflowManager) (context.Context, strin
 	if id == "" {
 		t.Fatalf("no run id in %q", res.Text)
 	}
+	// The settle window is the quiet period we demand after the last observed
+	// activity. It only needs to outlast the one-time agent_started stamp that
+	// follows the launch line, so a few tens of ms is plenty.
+	const quiesce = 50 * time.Millisecond
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
-		if snap, ok := mgr.Read(id); ok && len(snap.Logs) > 0 {
+		if snap, ok := mgr.Read(id); ok && len(snap.Logs) > 0 && time.Since(snap.LastActivity) > quiesce {
 			return ctx, id
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("workflow never logged its launch")
+	t.Fatal("workflow never reached quiescence")
 	return ctx, id
 }
 
