@@ -272,8 +272,9 @@ func TestSessionDiffNoRepo(t *testing.T) {
 	}
 }
 
-// TestSessionDiffClean: a repository with no uncommitted changes is left out
-// entirely, so the panel shows no group header for it.
+// TestSessionDiffClean: a repository with no uncommitted changes stays in the
+// response with an empty file list — that is how the panel tells "resolved,
+// nothing uncommitted" apart from "no repository in scope at all".
 func TestSessionDiffClean(t *testing.T) {
 	isolatedHome(t)
 	repo := filepath.Join(t.TempDir(), "app")
@@ -284,8 +285,11 @@ func TestSessionDiffClean(t *testing.T) {
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	resp := decodeDiff(t, getDiff(t, srv, diffSession(t, repo), ""))
-	if len(resp.Repos) != 0 {
-		t.Errorf("repos = %+v, want empty for a clean tree", resp.Repos)
+	if len(resp.Repos) != 1 {
+		t.Fatalf("repos = %+v, want the clean repository listed", resp.Repos)
+	}
+	if r := resp.Repos[0]; r.Root != resolvedRoot(t, repo) || len(r.Files) != 0 {
+		t.Errorf("repo = %+v, want root %s with no files", r, repo)
 	}
 }
 
@@ -317,6 +321,102 @@ func TestSessionDiffWorktree(t *testing.T) {
 	}
 	if f := fileByPath(t, resp.Repos[0], "a.txt"); f.Adds != 1 {
 		t.Errorf("a.txt = %+v", f)
+	}
+}
+
+// TestSessionDiffTranscriptWorktree: the isolated-work flow edits files in a
+// worktree that is neither the session's working directory nor a configured
+// source dir. The transcript's successful file-tool calls are what connect it
+// to the session, so its changes show up for review.
+func TestSessionDiffTranscriptWorktree(t *testing.T) {
+	isolatedHome(t)
+	base := t.TempDir()
+	main := filepath.Join(base, "main")
+	gitRepo(t, main)
+	writeFile(t, main, "a.txt", "a\n")
+	git(t, main, "add", "-A")
+	git(t, main, "commit", "-qm", "init")
+
+	wt := filepath.Join(base, "wt")
+	git(t, main, "worktree", "add", "-q", "-b", "side", wt)
+	writeFile(t, wt, "a.txt", "a\nb\n")
+
+	// The session's own directory is a plain non-repository folder, as the
+	// octo workspace is; only the transcript points at the worktree.
+	sess := agent.NewSession("stub-model", "")
+	sess.WorkingDir = t.TempDir()
+	edited := filepath.Join(wt, "a.txt")
+	sess.Messages = append(sess.Messages, agent.Message{
+		Role: agent.RoleAssistant,
+		Blocks: []agent.ContentBlock{{
+			Type: "tool_use", ID: "t1", Name: "edit_file",
+			Input: map[string]any{"path": edited, "old_string": "a", "new_string": "b"},
+		}},
+	})
+	sess.Messages = append(sess.Messages, agent.Message{
+		Role:   agent.RoleUser,
+		Blocks: []agent.ContentBlock{agent.NewToolResultBlock("t1", "edited", false)},
+	})
+	if err := sess.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	resp := decodeDiff(t, getDiff(t, srv, sess.ID, ""))
+	if len(resp.Repos) != 1 || resp.Repos[0].Root != resolvedRoot(t, wt) {
+		t.Fatalf("repos = %+v, want the transcript-attributed worktree %s", resp.Repos, wt)
+	}
+	if f := fileByPath(t, resp.Repos[0], "a.txt"); f.Adds != 1 {
+		t.Errorf("a.txt = %+v", f)
+	}
+}
+
+// TestSessionDiffTranscriptTerminal: a session that only touched a repository
+// through shell commands still gets it attributed, via the absolute paths in
+// its terminal commands. A denied call attributes nothing.
+func TestSessionDiffTranscriptTerminal(t *testing.T) {
+	isolatedHome(t)
+	repo := filepath.Join(t.TempDir(), "app")
+	gitRepo(t, repo)
+	writeFile(t, repo, "a.txt", "a\n")
+	git(t, repo, "add", "-A")
+	git(t, repo, "commit", "-qm", "init")
+	writeFile(t, repo, "a.txt", "a\nb\n")
+
+	deniedRepo := filepath.Join(t.TempDir(), "other")
+	gitRepo(t, deniedRepo)
+	writeFile(t, deniedRepo, "x.txt", "x\n")
+	git(t, deniedRepo, "add", "-A")
+	git(t, deniedRepo, "commit", "-qm", "init")
+	writeFile(t, deniedRepo, "x.txt", "x\ny\n")
+
+	sess := agent.NewSession("stub-model", "")
+	sess.WorkingDir = t.TempDir()
+	sess.Messages = append(sess.Messages,
+		agent.Message{Role: agent.RoleAssistant, Blocks: []agent.ContentBlock{
+			{Type: "tool_use", ID: "t1", Name: "terminal",
+				Input: map[string]any{"command": "cd " + repo + " && go test ./..."}},
+		}},
+		agent.Message{Role: agent.RoleUser, Blocks: []agent.ContentBlock{
+			agent.NewToolResultBlock("t1", "ok", false),
+		}},
+		// The user declined this one: its path must not enter the review set.
+		agent.Message{Role: agent.RoleAssistant, Blocks: []agent.ContentBlock{
+			{Type: "tool_use", ID: "t2", Name: "terminal",
+				Input: map[string]any{"command": "cd " + deniedRepo + " && make deploy"}},
+		}},
+		agent.Message{Role: agent.RoleUser, Blocks: []agent.ContentBlock{
+			agent.NewToolResultBlock("t2", "permission_denied: user declined to run terminal", true),
+		}},
+	)
+	if err := sess.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	resp := decodeDiff(t, getDiff(t, srv, sess.ID, ""))
+	if len(resp.Repos) != 1 || resp.Repos[0].Root != resolvedRoot(t, repo) {
+		t.Fatalf("repos = %+v, want only %s", resp.Repos, repo)
 	}
 }
 

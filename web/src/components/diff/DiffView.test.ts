@@ -94,6 +94,20 @@ describe('repository grouping', () => {
     const el = show(oneRepo([], { error: 'git status timed out' }))
     expect(el.textContent).toContain('git status timed out')
   })
+
+  it('renders no group header for a clean repository riding along a dirty one', () => {
+    const el = show({
+      repos: [
+        { root: '/clean', name: 'clean', branch: 'main', files: [] },
+        { root: '/dirty', name: 'dirty', branch: 'wt/x', files: [file('a.ts')] },
+      ],
+      truncated_files: 0,
+      omitted_files: 0,
+    })
+    // One visible repository, so no grouping at all — and no empty header.
+    expect(el.querySelectorAll('.repo-head')).toHaveLength(0)
+    expect(el.querySelectorAll('.ln-add')).toHaveLength(1)
+  })
 })
 
 describe('hunk rendering', () => {

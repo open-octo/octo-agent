@@ -69,10 +69,11 @@ flowchart TB
 
 ### 会话关联目录解析
 
-新增 `diffDirsForSession(sessionID string) []string`，组合两个现有解析器，去重后返回：
+`diffRepoRootsForSession(sess *agent.Session)` 组合三个来源，去重后返回：
 
 1. 会话工作目录：`sessionCwdByID(sessionID)`（`internal/server/server.go:1989`）
 2. 会话所属 project 的目录：`projectForSession(sessionID)`（`internal/server/session_groups.go:334`）返回的 `*sessionGroup`，取其 `WorkingDir` 与 `SourceDirs`（`internal/server/session_groups.go:74-78`）
+3. **transcript 归因目录**（`sessionTouchedDirs`，2026-08-21 补充）：扫描本会话 transcript 中已成功执行（`callAuthorized` 门控，同 artifact 端点）的 write_file/edit_file/show_artifact 路径与 terminal 命令里的绝对路径 token。这是 worktree 隔离开发流的关键——agent 会话中创建的 `.worktrees/<slug>` 既不在会话工作目录也不在 SourceDirs 下，只有 transcript 记录了归属。只取写操作与终端命令，不取读操作（读会把 agent 扫过的每个仓库都拉进 review 集）。
 
 对每个目录跑 `git -C <dir> rev-parse --show-toplevel`（2 s 超时，同 `project_envcontext.go:242-244` 的先例）：失败 → 非仓库，跳过；成功 → 以 toplevel 去重（worktree 的 `.git` 是文件而非目录，`rev-parse` 天然兼容；source dir 指向仓库子目录时归一到仓库根）。
 
@@ -165,6 +166,7 @@ staged 徽章的数据来源：porcelain 条目的 X 列非空格且非 `?` 即�
 |---|---|---|
 | 会话不存在 | 404 | `"session not found"` |
 | 没有任何关联目录是 git 仓库 | 200 | `{"repos": [], ...}`，前端空态区分处理 |
+| 仓库已解析但工作区干净 | 200 | 仓库条目保留（`files: []`），前端显示"工作区干净"而非"没有关联仓库"（2026-08-21 修正：clean 仓库原先被整条跳过，导致两种空态无法区分） |
 | 机器上没有 git 二进制 | 500 | `"git not available"`（`exec.ErrNotFound` 判定） |
 | 单仓库 git 命令失败/超时 | 该仓库降级：`repos[]` 中保留条目，加 `"error": "<message>"` 字段，不影响其他仓库 |
 

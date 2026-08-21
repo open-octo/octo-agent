@@ -25,7 +25,8 @@ func (s *Server) handleGetSessionDiff(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing session id")
 		return
 	}
-	if _, err := agent.LoadSession(id); err != nil {
+	sess, err := agent.LoadSession(id)
+	if err != nil {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
@@ -34,7 +35,7 @@ func (s *Server) handleGetSessionDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	roots := s.diffRepoRootsForSession(id)
+	roots := s.diffRepoRootsForSession(sess)
 	if r.URL.Query().Get("summary") == "1" {
 		writeJSON(w, http.StatusOK, buildDiffSummary(roots))
 		return
@@ -56,7 +57,8 @@ func (s *Server) handleGetSessionFileDiff(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "missing session id, repo or path")
 		return
 	}
-	if _, err := agent.LoadSession(id); err != nil {
+	sess, err := agent.LoadSession(id)
+	if err != nil {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
@@ -73,7 +75,7 @@ func (s *Server) handleGetSessionFileDiff(w http.ResponseWriter, r *http.Request
 	// than the request's.
 	//
 	// First whitelist: the repository must be one this session resolves to.
-	root, ok := matchedRoot(s.diffRepoRootsForSession(id), repo)
+	root, ok := matchedRoot(s.diffRepoRootsForSession(sess), repo)
 	if !ok {
 		writeError(w, http.StatusForbidden, "repository not in this session's scope")
 		return
@@ -167,7 +169,11 @@ func buildDiffResponse(roots []string) diffResponse {
 			continue
 		}
 		if len(entries) == 0 {
-			// A clean repository is not worth a group header.
+			// A clean repository stays in the response with an empty file list:
+			// it is what lets the panel tell "resolved, nothing uncommitted"
+			// apart from "no repository in scope at all". Summary mode still
+			// skips clean repositories — the badge counts changes only.
+			resp.Repos = append(resp.Repos, repo)
 			continue
 		}
 
