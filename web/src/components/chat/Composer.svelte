@@ -1575,6 +1575,9 @@
    primitives the model/reasoning pickers use, widened to the bar. */
 .dir-bar-wrap { position: relative; display: block; }
 .proj-menu { left: 0; right: 0; min-width: 0; max-height: 320px; overflow-y: auto; }
+/* Icon + name on one line — the column default exists for menu items that
+   stack a description under the name; these items have none. */
+.proj-menu .menu-item { flex-direction: row; align-items: center; gap: 6px; }
 .proj-search {
   width: calc(100% - 16px); margin: 6px 8px; padding: 6px 8px;
   background: var(--bg-layout); border: 1px solid var(--border-secondary);
