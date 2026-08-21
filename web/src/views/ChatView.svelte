@@ -1117,12 +1117,18 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         const list = get(chatMessages)[sid] || []
         for (let k = list.length - 1; k >= 0; k--) {
           if (list[k].type !== 'assistant') continue
-          if (isSilentPairAt(list, k)) {
-            const panelId = silentActionPanel(precedingSaid(list, k))
-            if (panelId) {
-              panelTurnStats[`${sid}\x00${panelId}`] =
+          const actionPanel = silentActionPanel(precedingSaid(list, k))
+          if (actionPanel) {
+            if (isSilentPairAt(list, k)) {
+              panelTurnStats[`${sid}\x00${actionPanel}`] =
                 `${fmtDur(Math.round(durationMs / 1000))} · ${fmtTokens(tokens)} tokens`
               handed = true
+            } else {
+              // Degraded silent turn: the model chose to answer with a visible
+              // bubble instead of updating the panel. The user who fired the
+              // action skipped the usual pin-to-bottom, so without this the
+              // reply lands off-screen and the click reads as a dead button.
+              pinToBottom()
             }
           }
           break
@@ -1630,6 +1636,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     const body: Record<string, unknown> = { action: event.action, fields: event.fields }
     if (panelId) body.panel = panelId
     if (event.payload !== undefined) body.payload = event.payload
+    // Clear the previous turn's stats up front: if this turn ends without a
+    // fresh entry (interrupt, error), the chip must not resurface last
+    // round's numbers on a later update.
+    if (panelId) delete panelTurnStats[`${id ?? ''}\x00${panelId}`]
     // A silent action's reply updates the panel in place, so the view must
     // stay where the user is acting — scrolled up at the panel, not at the
     // bottom. An anonymous panel's action keeps the pin: its reply is an
