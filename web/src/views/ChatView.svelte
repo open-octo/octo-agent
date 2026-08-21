@@ -51,6 +51,9 @@
     clearDoneSubAgents,
     removeSubAgent,
     applySubAgentEvent,
+    recordAgentTrailEvent,
+    recordWorkflowTrailEvent,
+    hydrateAgentRuns,
     markSubAgentFinished,
     showToast,
     uid,
@@ -380,7 +383,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // historyShowReasoning comes from this fetch's own response (not the
       // reactive `showReasoning` derived from $sessions) because on a
       // page-load landing directly on a session via URL hash, loadHistory's
-      // REST call races api.listSessions() —
+      // REST call races api.listSessions()/the WS session_list broadcast —
       // $sessions can still be empty when this loop runs, which would make
       // `showReasoning` fall back to its default (true) regardless of the
       // session's real setting.
@@ -420,6 +423,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     // disabled) just leave the chip hidden.
     api.getSessionGoal(sid)
       .then(resp => chatGoal.update(m => ({ ...m, [sid]: resp?.goal ?? null })))
+      .catch(() => {})
+    // Seed the persisted sub-agent / workflow trails so the transcript's tool
+    // cards can render finished runs after a reload; failures (older server)
+    // just leave the cards on their plain text result.
+    api.getAgentRuns(sid)
+      .then((resp: any) => { if (!isStale()) hydrateAgentRuns(sid, resp) })
       .catch(() => {})
     return api.getSessionMessages(sid).then((resp: any) => {
       if (isStale()) return
@@ -756,6 +765,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       const kind = (ev as any).kind ?? ''
       const agentId = (ev as any).agent_id ?? ''
       applySubAgentEvent(sid, ev as any)
+      recordAgentTrailEvent(sid, ev as any)
       // A background sub-agent that finishes while no turn is streaming has no
       // `complete` to clean it up — it would linger until an unrelated event
       // (next send / reconnect). Show its done state briefly, then auto-dismiss.
@@ -816,6 +826,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       const description = (ev as any).description ?? ''
       const status = (ev as any).status ?? ''
       applyWorkflowEvent(sid, ev as any)
+      recordWorkflowTrailEvent(sid, ev as any)
       // When a background workflow finishes, mirror the TUI scrollback notice
       // so the completion is visible in the message stream.
       if (kind === 'done') {

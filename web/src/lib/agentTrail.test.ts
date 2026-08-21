@@ -6,6 +6,10 @@ import {
   applySubAgentEvent,
   applyWorkflowEvent,
   resetSubAgents,
+  agentRunTrails,
+  recordAgentTrailEvent,
+  recordWorkflowTrailEvent,
+  hydrateAgentRuns,
 } from './stores'
 
 // Folding of the enriched sub_agent_event / workflow_event payloads into the
@@ -75,5 +79,57 @@ describe('applyWorkflowEvent agent folding', () => {
 
     applyWorkflowEvent(sid, { run_id: 'wf_2', kind: 'done', status: 'error' })
     expect(get(chatWorkflows)[sid].some(x => x.id === 'wf_2')).toBe(false)
+  })
+})
+
+describe('agentRunTrails (transcript review)', () => {
+  it('accumulates across rounds and survives done', () => {
+    const sid = 'persist-1'
+    recordAgentTrailEvent(sid, { agent_id: 'agent_1', description: 'do x', kind: 'started' })
+    recordAgentTrailEvent(sid, { agent_id: 'agent_1', kind: 'tool', tool_id: 't1', tool_name: 'grep' })
+    recordAgentTrailEvent(sid, { agent_id: 'agent_1', kind: 'done', stop_reason: 'end_turn', result: 'round 1' })
+    // A Continue round: trail re-opens, steps accumulate.
+    recordAgentTrailEvent(sid, { agent_id: 'agent_1', kind: 'started' })
+    recordAgentTrailEvent(sid, { agent_id: 'agent_1', kind: 'tool', tool_id: 't2', tool_name: 'read_file' })
+    recordAgentTrailEvent(sid, { agent_id: 'agent_1', kind: 'done', stop_reason: 'end_turn', result: 'round 2' })
+
+    const a = get(agentRunTrails)[sid].subAgents['agent_1']
+    expect(a.status).toBe('done')
+    expect(a.result).toBe('round 2')
+    expect(a.steps).toHaveLength(2)
+  })
+
+  it('keeps workflow trails after the run finishes', () => {
+    const sid = 'persist-2'
+    recordWorkflowTrailEvent(sid, { run_id: 'wf_1', description: 'audit', kind: 'started' })
+    recordWorkflowTrailEvent(sid, { run_id: 'wf_1', kind: 'agent_started', agent_id: 'a1', agent_label: 'scan' })
+    recordWorkflowTrailEvent(sid, { run_id: 'wf_1', kind: 'agent_done', agent_id: 'a1', reply: 'ok' })
+    recordWorkflowTrailEvent(sid, { run_id: 'wf_1', kind: 'done', status: 'done' })
+
+    const r = get(agentRunTrails)[sid].workflows['wf_1']
+    expect(r.status).toBe('done')
+    expect(r.agents[0]).toMatchObject({ id: 'a1', status: 'done', reply: 'ok' })
+  })
+
+  it('hydrates from the REST snapshot without clobbering live entries', () => {
+    const sid = 'persist-3'
+    recordAgentTrailEvent(sid, { agent_id: 'agent_1', kind: 'tool', tool_id: 't1', tool_name: 'live_tool' })
+    hydrateAgentRuns(sid, {
+      sub_agents: [
+        { agent_id: 'agent_1', description: 'stale snapshot', status: 'done', steps: [] },
+        { agent_id: 'agent_9', description: 'old run', agent_type: 'explore', status: 'done', steps: [{ kind: 'tool', id: 't1', name: 'grep', output: 'x', done: true }], result: 'archived' },
+      ],
+      workflows: [
+        { run_id: 'wf_9', description: 'old wf', status: 'error', logs: ['phase: a'], agents: [{ agent_id: 'a1', label: 'l', status: 'error', steps: [], error: 'boom' }] },
+      ],
+    })
+
+    const t = get(agentRunTrails)[sid]
+    // Live entry untouched by the snapshot.
+    expect(t.subAgents['agent_1'].steps[0]).toMatchObject({ name: 'live_tool' })
+    // Snapshot-only entries hydrated.
+    expect(t.subAgents['agent_9']).toMatchObject({ description: 'old run', status: 'done', result: 'archived' })
+    expect(t.workflows['wf_9']).toMatchObject({ status: 'error', logs: ['phase: a'] })
+    expect(t.workflows['wf_9'].agents[0]).toMatchObject({ id: 'a1', error: 'boom' })
   })
 })
