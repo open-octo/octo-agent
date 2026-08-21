@@ -800,6 +800,9 @@ export interface LightApp {
   description: string
   icon: string
   created_at: string
+  // Absolute path of the session artifact the app was saved from, if any —
+  // used to hide "Save to Light App" for artifacts that already were.
+  source_path?: string
 }
 
 export interface LightAppDetail {
@@ -830,11 +833,20 @@ export async function getLightAppsDir(): Promise<string> {
   return lightAppsDirCache
 }
 
+// Apps and directory from the one request the endpoint already answers with
+// both — for callers that need the pair (the session panel checks an artifact
+// against the dir AND the apps' source paths).
+export async function getLightAppList(): Promise<LightAppList> {
+  const d = await request<LightAppList>('/api/light-apps')
+  lightAppsDirCache = d.dir || ''
+  return { apps: d.apps ?? [], dir: lightAppsDirCache }
+}
+
 export async function getLightApp(slug: string): Promise<LightAppDetail> {
   return request<LightAppDetail>(`/api/light-apps/${encodeURIComponent(slug)}`)
 }
 
-export async function createLightApp(opts: { name: string; description?: string; html: string }): Promise<LightApp> {
+export async function createLightApp(opts: { name: string; description?: string; html: string; source_path?: string }): Promise<LightApp> {
   return request<LightApp>('/api/light-apps', { method: 'POST', ...json({ ...opts, icon: '📄' }) })
 }
 

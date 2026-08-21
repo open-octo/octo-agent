@@ -69,16 +69,12 @@
       // Save what the panel previews, not the raw source: a Light App renders
       // in the same kind of sandboxed iframe, where relative image paths
       // resolve against nothing (#1890).
-      const app = await api.createLightApp({ name, html: lightAppSource(cur) })
+      // source_path marks the app as saved from this artifact, which is what
+      // hides the Save button for it from here on (curSavedAsLA).
+      const app = await api.createLightApp({ name, html: lightAppSource(cur), source_path: cur.path })
       showToast(`Light App "${app.name}" saved`, 'success')
       saveToLADialog = false
-      // If the panel is in lightapps mode, refresh the list.
-      if ($panelContent === 'lightapps') {
-        try {
-          const list = await api.listLightApps()
-          lightapps.set(list)
-        } catch { /* ignore */ }
-      }
+      lightapps.update(list => [...list.filter(a => a.slug !== app.slug), app])
     } catch (e: any) {
       showToast(`Save failed: ${e.message}`, 'error')
     } finally {
@@ -104,7 +100,11 @@
     if (laDir !== null || laDirAttempted) return
     laDirAttempted = true
     try {
-      laDir = await api.getLightAppsDir()
+      // One request answers with both the directory and the apps; the apps
+      // land in the store so curSavedAsLA below can match source paths.
+      const { apps, dir } = await api.getLightAppList()
+      laDir = dir
+      lightapps.set(apps)
     } catch {
       laDir = ''
       laDirAttempted = false
@@ -113,6 +113,11 @@
 
   const curIsLightApp = $derived(curIsHTML && pathIsInside(cur?.path ?? '', laDir ?? ''))
 
+  // Already saved as a Light App: some app records this artifact's path as
+  // its source (manifest source_path). Equally redundant to save again — the
+  // slug exists, so the server would 409 anyway.
+  const curSavedAsLA = $derived(curIsHTML && !!cur?.path && $lightapps.some(a => a.source_path === cur.path))
+
   $effect(() => {
     if ($panelContent === 'session' && curIsHTML) void ensureLaDir()
   })
@@ -120,7 +125,7 @@
   // The Save dialog must not outlive the button: once the lookup settles and
   // the artifact turns out to be inside the Light Apps directory, close it.
   $effect(() => {
-    if (curIsLightApp) saveToLADialog = false
+    if (curIsLightApp || curSavedAsLA) saveToLADialog = false
   })
 
   // ── Light Apps (new) ──────────────────────────────────────────────────────
@@ -364,7 +369,7 @@
           <iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon>
           {$t('artifacts.download')}
         </button>
-        {#if curIsHTML && !curIsLightApp}
+        {#if curIsHTML && !curIsLightApp && !curSavedAsLA}
           <button class="wbtn" disabled={!cur.loaded || cur.loadFailed} onclick={openSaveToLA}>
             <iconify-icon icon="ant-design:save-outlined" width="14"></iconify-icon>
             {$t('artifacts.save_to_lightapp')}
