@@ -380,7 +380,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // historyShowReasoning comes from this fetch's own response (not the
       // reactive `showReasoning` derived from $sessions) because on a
       // page-load landing directly on a session via URL hash, loadHistory's
-      // REST call races api.listSessions()/the WS session_list broadcast —
+      // REST call races api.listSessions() —
       // $sessions can still be empty when this loop runs, which would make
       // `showReasoning` fall back to its default (true) regardless of the
       // session's real setting.

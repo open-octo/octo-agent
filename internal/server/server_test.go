@@ -2232,7 +2232,7 @@ func TestHandleGetSessionMessages_ThinkingBeforeTools(t *testing.T) {
 // event is allowed to end a tool-call group on this value instead of the
 // reactive session-list state, which can still be empty (defaulting to true)
 // on a page load that lands straight on this session via URL hash — before
-// api.listSessions()/the WS session_list broadcast has resolved.
+// api.listSessions() has resolved.
 func TestHandleGetSessionMessages_ShowReasoningField(t *testing.T) {
 	setTestHome(t)
 	off := false

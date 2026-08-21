@@ -13,7 +13,7 @@
   import { notificationsEnabled, setNotificationsEnabled } from '../../lib/notifications'
   import { openUrl } from '../../lib/externalLinks'
   import { confirmDialog } from '../../lib/confirm'
-  import { ago } from '../../lib/relTime'
+  import { ago, clockTick } from '../../lib/relTime'
   import * as api from '../../lib/api'
 
   const LICENSE_URL = 'https://github.com/open-octo/octo-agent/blob/main/LICENSE.txt'
@@ -677,7 +677,7 @@
                             <input type="checkbox" checked={!!archiveSel[s.id]} onchange={() => toggleArchiveSel(s.id)} />
                             <div class="archived-info">
                               <span class="archived-name">{nameOf(s)}</span>
-                              <span class="archived-meta mono">{s.id} · {ago((s as any).updated_at, $t)}</span>
+                              <span class="archived-meta mono">{s.id} · {ago((s as any).updated_at, $t, $clockTick)}</span>
                             </div>
                             <div class="archived-actions">
                               <button class="btns danger" onclick={() => deleteArchivedSession(s.id)}>{$t('common.delete')}</button>

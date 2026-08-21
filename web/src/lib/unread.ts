@@ -139,7 +139,7 @@ export function reconcileSeen(list: Session[]) {
   })
 }
 
-// The session list is replaced wholesale by several paths (the WS session_list,
-// the REST fallback, every post-broadcast refetch). Subscribing here means each
-// of them baselines and prunes without having to remember to.
+// The session list is replaced wholesale by several paths (the initial fetch,
+// every post-broadcast refetch). Subscribing here means each of them baselines
+// and prunes without having to remember to.
 sessions.subscribe(list => reconcileSeen(list))

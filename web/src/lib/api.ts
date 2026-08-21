@@ -1,4 +1,4 @@
-import type { Session, SessionGroup, Skill, Workflow, ScheduledTask, McpServer, McpServerDetail, Channel, Memory, RecallFile, TagStatus } from './types'
+import type { Session, SessionGroup, Skill, Workflow, ScheduledTask, McpServer, McpServerDetail, Channel, Memory, RecallFile, TagStatus, GitDiffResponse, GitDiffSummaryResponse, GitDiffFile } from './types'
 
 // TaskResponse matches the Go server task struct.
 export interface TaskResponse {
@@ -220,6 +220,26 @@ export async function updateSessionShowReasoning(id: string, show: boolean): Pro
 
 export async function getSessionGoal(id: string): Promise<{ goal: any | null }> {
   return request<{ goal: any | null }>(`/api/sessions/${id}/goal`)
+}
+
+// ── Git Diff review panel ────────────────────────────────────────────────────
+// The aggregate calls carry a session id and nothing else: the server decides
+// which repositories a session may review, so there is no path to pass.
+
+export async function getSessionDiff(id: string): Promise<GitDiffResponse> {
+  return request<GitDiffResponse>(`/api/sessions/${encodeURIComponent(id)}/diff`)
+}
+
+export async function getSessionDiffSummary(id: string): Promise<GitDiffSummaryResponse> {
+  return request<GitDiffSummaryResponse>(`/api/sessions/${encodeURIComponent(id)}/diff?summary=1`)
+}
+
+// One file's complete diff, for a file the aggregate response truncated or
+// omitted. repo comes from that response, never from the user.
+export async function getSessionFileDiff(id: string, repo: string, path: string): Promise<GitDiffFile> {
+  const q = new URLSearchParams({ repo, path })
+  const d = await request<{ file: GitDiffFile }>(`/api/sessions/${encodeURIComponent(id)}/diff/file?${q}`)
+  return d.file
 }
 
 export async function updateSessionPermissionMode(id: string, mode: string): Promise<void> {

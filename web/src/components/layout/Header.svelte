@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { sidebar, nativeShell, panelContent, view, chatHeaderSnippet } from '../../lib/stores'
+  import { sidebar, nativeShell, panelContent, view, chatHeaderSnippet, activeSessionId, readPanelMode } from '../../lib/stores'
+  import { diffBadge } from '../../lib/diff'
   import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
   import { nativeToggleMaximise, nativeMinimise, nativeClose, nativeWindowState } from '../../lib/api'
@@ -17,9 +18,16 @@
   // own header, the panel's at the panel's own left edge. Each falls back to
   // this row only while its column is gone, since a control inside a hidden
   // column can't be clicked to bring it back.
-  function togglePanel() {
-    panelContent.set('session')
+  //
+  // It opens the panel in whichever mode was last used, and stays a plain
+  // open/close toggle: choosing the mode is the panel's own job, from its
+  // topbar. What this button does gain is a badge — with the panel closed,
+  // nothing else can say the agent left changes to review.
+  function openPanel() {
+    panelContent.set(readPanelMode())
   }
+
+  const diffCount = $derived($diffBadge[$activeSessionId ?? ''] ?? 0)
 
   const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
   // Mac's traffic lights float over the window's top-left corner. That corner
@@ -106,8 +114,9 @@
   {/if}
 
   {#if !$panelContent}
-    <button class="icon-btn" title={$t('header.toggle_right')} onclick={togglePanel}>
+    <button class="icon-btn panel-btn" title={$t('header.toggle_right')} onclick={openPanel}>
       <iconify-icon icon="lucide:panel-right" width="16"></iconify-icon>
+      {#if diffCount > 0}<span class="dot"></span>{/if}
     </button>
   {/if}
 
@@ -165,6 +174,14 @@ header .window-controls { --wails-draggable: no-drag; }
   cursor: pointer; color: var(--text-secondary); flex: 0 0 auto;
 }
 .icon-btn:hover { background: var(--hover-neutral); color: var(--text); }
+/* Uncommitted changes waiting behind a closed panel. A dot, not a count: the
+   button's job is still to open the panel, and a number here would read as
+   something to act on in the header itself. */
+.panel-btn { position: relative; }
+.panel-btn .dot {
+  position: absolute; top: 4px; right: 4px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--blue-6);
+}
 
 /* Window controls (Windows/Linux only — Mac uses native traffic lights). */
 .window-controls {
