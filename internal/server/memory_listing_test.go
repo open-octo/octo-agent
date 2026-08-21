@@ -155,3 +155,41 @@ func TestHandleDeleteMemory_RemovesFilePermanently(t *testing.T) {
 		t.Errorf("deleted memory was staged in the trash: %d entr(ies)", len(entries))
 	}
 }
+
+// The filename is Base()'d by the handlers, but Base("..") is still ".." —
+// joined onto the memory dir it would address the dir itself or its parent.
+// resolveMemoryPath must reject any fname that isn't a local path component.
+func TestResolveMemoryPath_RejectsNonLocalFilename(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.homeMemDir = t.TempDir()
+
+	for _, fname := range []string{"..", ".", "", "/etc/passwd", "../escape.md"} {
+		if p, ok := srv.resolveMemoryPath(fname, ""); ok {
+			t.Errorf("fname %q: resolved to %q, want rejection", fname, p)
+		}
+	}
+	if _, ok := srv.resolveMemoryPath("notes.md", ""); !ok {
+		t.Errorf("fname \"notes.md\": rejected, want resolution")
+	}
+}
+
+// End-to-end: a traversal filename in the URL (encoded so the segment survives
+// routing) must 404 instead of touching the memory dir's parent.
+func TestHandleDeleteMemory_RejectsTraversalFilename(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/memories/..%2F..", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (body: %s)", w.Code, w.Body.String())
+	}
+}

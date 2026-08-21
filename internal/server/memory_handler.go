@@ -105,6 +105,13 @@ func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 // directory must already exist, so a crafted source can't escape the root or
 // conjure new directories.
 func (s *Server) resolveMemoryPath(fname, source string) (string, bool) {
+	// Callers pass fname through Base(), but Base("..") is still ".." and
+	// Base("") is "." — joined below, one escapes the memory directory and the
+	// other addresses it directly. IsLocal rejects ".." (and absolute paths)
+	// but accepts ".", so that one needs its own check.
+	if fname == "." || !filepath.IsLocal(fname) {
+		return "", false
+	}
 	switch source {
 	case "", "inherited", "project":
 		if s.homeMemDir != "" {
