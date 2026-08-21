@@ -1109,16 +1109,40 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       const tokens = (ev as any).tokens
       const cachePct = (ev as any).cache_pct
       if (typeof durationMs === 'number' && typeof tokens === 'number') {
-        addChatMsg(sid, {
-          id: uid('sum'),
-          type: 'notice',
-          content: `⏱ ${fmtDur(Math.round(durationMs / 1000))}, ${fmtTokens(tokens)} tokens${typeof cachePct === 'number' ? `, cache ${cachePct}%` : ''}`,
-          level: 'info',
-          createdAt: Date.now(),
-          streaming: false,
-          tools: [],
-          todos: [],
+        // A silent panel-update turn hides both of its bubbles, so a summary
+        // notice would float in the transcript anchored to nothing. Fold the
+        // stats into the "panel updated" marker instead — the turn still cost
+        // tokens, and hiding that entirely would make panel actions look free.
+        let stamped = false
+        chatMessages.update(m => {
+          const list = m[sid] || []
+          for (let k = list.length - 1; k >= 0; k--) {
+            if (list[k].type !== 'assistant') continue
+            if (isSilentPairAt(list, k)) {
+              for (let j = k - 1; j >= 0; j--) {
+                if (list[j].type !== 'user' && list[j].type !== 'assistant') continue
+                const next = list.slice()
+                next[j] = { ...next[j], turnStats: `${fmtDur(Math.round(durationMs / 1000))} · ${fmtTokens(tokens)} tokens` }
+                stamped = true
+                return { ...m, [sid]: next }
+              }
+            }
+            break
+          }
+          return m
         })
+        if (!stamped) {
+          addChatMsg(sid, {
+            id: uid('sum'),
+            type: 'notice',
+            content: `⏱ ${fmtDur(Math.round(durationMs / 1000))}, ${fmtTokens(tokens)} tokens${typeof cachePct === 'number' ? `, cache ${cachePct}%` : ''}`,
+            level: 'info',
+            createdAt: Date.now(),
+            streaming: false,
+            tools: [],
+            todos: [],
+          })
+        }
       }
     }))
 
@@ -1643,21 +1667,26 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
    * since history is what it was derived from. The running flag comes from
    * the server, so it clears on every ending a turn can have.
    */
-  const pendingPanel = $derived.by(() => {
+  const pendingAction = $derived.by(() => {
     if (!streaming) return null
     for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i]
       if (m.type === 'assistant') {
-        const p = silentActionPanel(precedingSaid(msgs, i))
-        return p && couldBeSilentReply(m.content) ? p : null
+        const said = precedingSaid(msgs, i)
+        const p = silentActionPanel(said)
+        return p && couldBeSilentReply(m.content) ? { panel: p, msgId: said!.id } : null
       }
-      if (m.type === 'user') return silentActionPanel(m)
+      if (m.type === 'user') {
+        const p = silentActionPanel(m)
+        return p ? { panel: p, msgId: m.id } : null
+      }
       // Tool groups and progress rows are skipped: the model calling a tool
       // before answering is the normal shape of a panel action that needs
       // data, and the panel should stay pending across it.
     }
     return null
   })
+  const pendingPanel = $derived(pendingAction?.panel ?? null)
 
   /** True when this assistant message is the hidden half of a silent pair. */
   function isHiddenReply(index: number): boolean {
@@ -2638,11 +2667,17 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                    every export, so a marker sits where it happened and opens to
                    the raw action. Without it a panel would appear to change with
                    no visible cause. -->
+              {@const updating = pendingAction?.msgId === msg.id}
               <div class="genui-silent-marker">
                 <details>
                   <summary>
-                    <iconify-icon icon="ant-design:sync-outlined" width="11"></iconify-icon>
-                    {$t('chat.genui_panel_updated')}
+                    {#if updating}
+                      <iconify-icon icon="ant-design:loading-outlined" width="11" style="animation:octo-spin 0.8s linear infinite"></iconify-icon>
+                      {$t('chat.genui_panel_updating')}
+                    {:else}
+                      <iconify-icon icon="ant-design:check-circle-outlined" width="11"></iconify-icon>
+                      {$t('chat.genui_panel_updated')}{#if msg.turnStats}&nbsp;· {msg.turnStats}{/if}
+                    {/if}
                   </summary>
                   <pre class="genui-action-json">{msg.content.slice(OCTO_UI_ACTION_PREFIX.length)}</pre>
                 </details>
