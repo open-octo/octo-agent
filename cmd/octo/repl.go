@@ -81,12 +81,12 @@ type replConfig struct {
 	// from.
 	recomposeSystemPrompt func()
 	// afterFirstSave, when non-nil, is called once after the session first
-	// lands on disk. It files the session under a project for the directory it
-	// works in (server.EnsureProjectForDir), which is deferred to here rather
+	// lands on disk. It files the session under the project the startup
+	// adoption resolved (server.FileSessionInProject), deferred to here rather
 	// than done at session creation because a session that never received a
-	// message never gets a transcript — and a project pointing at no session
-	// would still take a row in the sidebar. nil when saving is off, on a
-	// resumed session, or for the headless one-shot.
+	// message never gets a transcript — filing a ghost id would be harmless
+	// but pointless. nil when saving is off, on a resumed session, when the
+	// adoption resolved to "task", or for the headless one-shot.
 	afterFirstSave func()
 	// modelName is the resolved model displayed in the TUI status bar.
 	modelName string

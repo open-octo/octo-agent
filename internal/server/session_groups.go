@@ -65,10 +65,22 @@ type sessionGroup struct {
 	// the Web UI and the Wails desktop webview, whose local storage may not
 	// persist the same way.
 	Collapsed bool `json:"collapsed,omitempty"`
-	// WorkingDir, when set, makes this group a project (see above). Stored
-	// already expanded and absolute — the write paths resolve and validate it,
-	// so every reader can use it verbatim.
+	// WorkingDir, when set, makes this group a project (see above). It is the
+	// project's octo-owned workspace, generated under the workspace root at
+	// creation and fixed for the project's life. Stored already expanded and
+	// absolute — the write paths resolve and validate it, so every reader can
+	// use it verbatim. (Registries written before the workspace model may
+	// still carry a user directory here; the startup migration converts them.)
 	WorkingDir string `json:"working_dir,omitempty"`
+	// SourceDirs are the external directories the project references — code
+	// repositories and plain folders alike, mounted as additional roots for
+	// the tools. A directory may appear in several projects' SourceDirs; it
+	// may never lie under the workspace root (the write paths reject that).
+	SourceDirs []string `json:"source_dirs,omitempty"`
+	// OutputDir, when set, is one of SourceDirs marked as where deliverables
+	// go — the env context tells the model to write finished work there and
+	// keep scratch in the workspace.
+	OutputDir string `json:"output_dir,omitempty"`
 	// TaskID, when set, is the scheduled task this project was created for. It
 	// is what lets the startup pass repair such a project (backfilling the
 	// directory a task written before this had none) rather than dissolving it.
@@ -576,10 +588,18 @@ func (s *Server) handleListSessionGroups(w http.ResponseWriter, r *http.Request)
 
 type createSessionGroupRequest struct {
 	Name string `json:"name"`
-	// WorkingDir is required: a group the user creates is a project, and a
-	// project is a directory. Creating without one used to be how a plain group
-	// was made, and that concept is gone.
-	WorkingDir string `json:"working_dir"`
+	// SourceDirs are the external folders the project references, 0..N — a
+	// project needs none (writing projects, cron projects). The project's own
+	// directory is always generated; it is never one of these.
+	SourceDirs []string `json:"source_dirs,omitempty"`
+	// OutputDir optionally marks one of SourceDirs as where deliverables go —
+	// accepted at creation so the whole shape lands in one write.
+	OutputDir string `json:"output_dir,omitempty"`
+	// WorkingDir is the legacy field: it used to BE the project directory.
+	// A client still sending it gets that directory mounted as one more
+	// source folder, which preserves the intent ("this project works on that
+	// directory") under the workspace model.
+	WorkingDir string `json:"working_dir,omitempty"`
 }
 
 func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request) {
@@ -593,29 +613,61 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if strings.TrimSpace(req.WorkingDir) == "" {
-		writeError(w, http.StatusBadRequest, "working_dir is required: a project is a directory, and a group without one no longer exists")
-		return
+	raw := req.SourceDirs
+	if strings.TrimSpace(req.WorkingDir) != "" {
+		raw = append(raw, req.WorkingDir)
 	}
-	workingDir, verr := validateWorkingDir(req.WorkingDir)
+	sourceDirs, verr := validateSourceDirs(s.curWorkspaceDir(), raw)
 	if verr != nil {
 		writeError(w, http.StatusBadRequest, verr.Error())
+		return
+	}
+	outputDir := strings.TrimSpace(req.OutputDir)
+	if outputDir != "" {
+		if !dirInSet(outputDir, sourceDirs) {
+			writeError(w, http.StatusBadRequest, "output_dir must be one of the project's source folders")
+			return
+		}
+		for _, sd := range sourceDirs {
+			if memory.NormalizeDir(sd) == memory.NormalizeDir(outputDir) {
+				outputDir = sd
+				break
+			}
+		}
+	}
+	if dirNameFor(name) == "" {
+		// A name with no character a path can carry is the client's problem,
+		// not a server failure.
+		writeError(w, http.StatusBadRequest, "name contains no characters usable in a directory name")
 		return
 	}
 
 	groupMu.LockWrite()
 	defer groupMu.Unlock()
-	groups, err := loadSessionGroups()
+	// Workspace generation sits inside the write lock: its exists-check plus
+	// mkdir is what keeps two same-named projects off one directory, and only
+	// the cross-process lock makes that check-then-create atomic.
+	workspace, err := workspaceDirForProject(s.curWorkspaceDir(), name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workingDir}
-	groups = append(groups, g)
-	if err := saveSessionGroups(groups); err != nil {
+	groups, err := loadSessionGroups()
+	if err != nil {
+		dropWorkspaceDir(workspace)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workspace, SourceDirs: sourceDirs, OutputDir: outputDir}
+	groups = append(groups, g)
+	if err := saveSessionGroups(groups); err != nil {
+		dropWorkspaceDir(workspace)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// The person just mounted these folders — that gesture is the hooks trust
+	// grant, recorded at the current fingerprints.
+	trustMountedHooks(sourceDirs)
 	writeJSON(w, http.StatusOK, map[string]any{"group": g})
 }
 
@@ -627,11 +679,18 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 type updateSessionGroupRequest struct {
 	Name      *string `json:"name,omitempty"`
 	Collapsed *bool   `json:"collapsed,omitempty"`
-	// WorkingDir retargets the project's directory. It cannot be cleared: that
-	// used to demote the project to a plain group, and there is nothing left to
-	// demote to — deleting the project is the way to break it up, which leaves
-	// its sessions as tasks.
+	// WorkingDir is rejected outright: the workspace is generated at creation
+	// and fixed for the project's life. It stays in the request type so the
+	// handler can answer an old client with a real explanation instead of
+	// silently ignoring the field.
 	WorkingDir *string `json:"working_dir,omitempty"`
+	// SourceDirs replaces the mount set wholesale (same validation as
+	// creation). OutputDir marks one of the mounts as where deliverables go —
+	// it must name a member of the (possibly just-updated) set, or "" to
+	// clear the marker. Both changes reach running sessions on their next
+	// turn through the freeze identity's source-dirs hash.
+	SourceDirs *[]string `json:"source_dirs,omitempty"`
+	OutputDir  *string   `json:"output_dir,omitempty"`
 }
 
 func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request) {
@@ -645,8 +704,8 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeInvalidJSONBody(w, err)
 		return
 	}
-	if req.Name == nil && req.Collapsed == nil && req.WorkingDir == nil {
-		writeError(w, http.StatusBadRequest, "name, collapsed or working_dir is required")
+	if req.Name == nil && req.Collapsed == nil && req.WorkingDir == nil && req.SourceDirs == nil && req.OutputDir == nil {
+		writeError(w, http.StatusBadRequest, "name, collapsed, source_dirs or output_dir is required")
 		return
 	}
 	var name string
@@ -657,20 +716,20 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	// Validate the directory before touching the registry, so a bad path
-	// leaves the group untouched.
-	var workingDir string
 	if req.WorkingDir != nil {
-		if strings.TrimSpace(*req.WorkingDir) == "" {
-			writeError(w, http.StatusBadRequest, "working_dir cannot be cleared: delete the project instead, which leaves its sessions as tasks")
-			return
-		}
-		dir, verr := validateWorkingDir(*req.WorkingDir)
+		writeError(w, http.StatusBadRequest, "working_dir is fixed at creation: the project's workspace cannot be retargeted or cleared")
+		return
+	}
+	// Validate the mounts before touching the registry, so a bad path leaves
+	// the group untouched.
+	var newSourceDirs []string
+	if req.SourceDirs != nil {
+		dirs, verr := validateSourceDirs(s.curWorkspaceDir(), *req.SourceDirs)
 		if verr != nil {
 			writeError(w, http.StatusBadRequest, verr.Error())
 			return
 		}
-		workingDir = dir
+		newSourceDirs = dirs
 	}
 
 	groupMu.LockWrite()
@@ -697,14 +756,53 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 	if req.Collapsed != nil {
 		groups[idx].Collapsed = *req.Collapsed
 	}
-	if req.WorkingDir != nil {
-		groups[idx].WorkingDir = workingDir
+	if req.SourceDirs != nil {
+		groups[idx].SourceDirs = newSourceDirs
+		// A marker whose mount was just removed points at nothing — drop it
+		// rather than persist a lie (the explicit output_dir field below can
+		// re-establish it in the same request).
+		if groups[idx].OutputDir != "" && !dirInSet(groups[idx].OutputDir, newSourceDirs) {
+			groups[idx].OutputDir = ""
+		}
+	}
+	if req.OutputDir != nil {
+		out := strings.TrimSpace(*req.OutputDir)
+		if out != "" && !dirInSet(out, groups[idx].SourceDirs) {
+			writeError(w, http.StatusBadRequest, "output_dir must be one of the project's source folders")
+			return
+		}
+		if out != "" {
+			// Store the mount's own spelling so env-context marker matching
+			// is an exact comparison.
+			for _, sd := range groups[idx].SourceDirs {
+				if memory.NormalizeDir(sd) == memory.NormalizeDir(out) {
+					out = sd
+					break
+				}
+			}
+		}
+		groups[idx].OutputDir = out
 	}
 	if err := saveSessionGroups(groups); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if req.SourceDirs != nil {
+		// The edit gesture is the hooks trust grant, same as creation.
+		trustMountedHooks(newSourceDirs)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"group": groups[idx]})
+}
+
+// dirInSet reports whether dir names one of dirs, however spelled.
+func dirInSet(dir string, dirs []string) bool {
+	norm := memory.NormalizeDir(dir)
+	for _, d := range dirs {
+		if memory.NormalizeDir(d) == norm {
+			return true
+		}
+	}
+	return false
 }
 
 // ─── DELETE /api/session-groups/{id} ────────────────────────────────────────

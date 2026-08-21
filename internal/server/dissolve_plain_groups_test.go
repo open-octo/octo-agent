@@ -155,7 +155,7 @@ func TestDissolvePlainGroups_Idempotent(t *testing.T) {
 // at it and never gets its project.
 func TestReconcileRegistry_DissolvedSessionIsThenAdopted(t *testing.T) {
 	setTestHome(t)
-	dir := t.TempDir()
+	dir := gitMark(t, t.TempDir())
 	sess := saveSessionIn(t, dir)
 	writeGroups(t, sessionGroup{ID: "g-plain", Name: "Group 1", SessionIDs: []string{sess.ID}})
 
@@ -166,8 +166,8 @@ func TestReconcileRegistry_DissolvedSessionIsThenAdopted(t *testing.T) {
 	if p == nil {
 		t.Fatal("session was released but never adopted into a project")
 	}
-	if p.WorkingDir != dir {
-		t.Errorf("project dir = %q, want %q", p.WorkingDir, dir)
+	if len(p.SourceDirs) != 1 || p.SourceDirs[0] != dir {
+		t.Errorf("project source dirs = %v, want [%q]", p.SourceDirs, dir)
 	}
 	if p.Name == "Group 1" {
 		t.Error("the plain group was renamed into a project instead of being dissolved")

@@ -3,6 +3,7 @@ package server
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -20,7 +21,8 @@ func isolatedHome(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 }
 
-// projectWithDir returns the group working in dir, or nil.
+// projectWithDir returns the group owning dir — as its workspace or as a
+// mounted source folder — or nil.
 func projectWithDir(t *testing.T, dir string) *sessionGroup {
 	t.Helper()
 	groups, err := loadSessionGroups()
@@ -31,6 +33,11 @@ func projectWithDir(t *testing.T, dir string) *sessionGroup {
 	for i := range groups {
 		if wd := groups[i].WorkingDir; wd != "" && memory.NormalizeDir(wd) == target {
 			return &groups[i]
+		}
+		for _, sd := range groups[i].SourceDirs {
+			if memory.NormalizeDir(sd) == target {
+				return &groups[i]
+			}
 		}
 	}
 	return nil
@@ -59,6 +66,19 @@ func TestEnsureProject_CreatesAndFiles(t *testing.T) {
 	}
 	if len(g.SessionIDs) != 1 || g.SessionIDs[0] != "sess-1" {
 		t.Errorf("session ids = %v, want [sess-1]", g.SessionIDs)
+	}
+	// The user's directory is mounted, not taken as the project directory:
+	// the workspace is generated under the workspace root.
+	if len(g.SourceDirs) != 1 || g.SourceDirs[0] != dir {
+		t.Errorf("source dirs = %v, want [%s]", g.SourceDirs, dir)
+	}
+	if g.WorkingDir == dir || g.WorkingDir == "" {
+		t.Errorf("working dir = %q, want a generated workspace distinct from %s", g.WorkingDir, dir)
+	}
+	if root, err := tools.ResolveWorkspaceDir(""); err == nil {
+		if !strings.HasPrefix(g.WorkingDir, root+string(filepath.Separator)) {
+			t.Errorf("workspace %q is not under the workspace root %q", g.WorkingDir, root)
+		}
 	}
 }
 

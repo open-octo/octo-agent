@@ -24,16 +24,33 @@ import (
 // surfaces. Those sessions open in the Web UI, where the server resolves a
 // directory for them (the configured workspace).
 
-// sessionDir returns the directory a session belongs to: its project's
-// directory when it is in one, otherwise the directory recorded on the session
-// itself. The same precedence the server resolves tool cwd with
+// sessionDir returns the directory a session belongs to: the directory
+// recorded on the session itself when it genuinely chose one, otherwise its
+// project's workspace. The same precedence the server resolves tool cwd with
 // (Server.resolveSessionDir), minus the server-default fallback — there is no
 // server here, and "wherever some process was launched" is not an identity.
+// A seeded default-workspace value is nobody's choice (the server stamps it on
+// every session that never picked anything), so it does not outrank a project.
 func sessionDir(sessionID, own string) string {
+	if own != "" && !server.IsSeededWorkspaceDir(own) {
+		return own
+	}
 	if dir := server.ProjectDirForSession(sessionID); dir != "" {
 		return dir
 	}
 	return own
+}
+
+// sessionBindingDir resolves the directory the session with this id belongs
+// to, loading it from disk — the lookup projectRunDir relocates by, kept on
+// the same precedence as sessionDir so "which sessions -c offers" and "where
+// the resumed run works" can never disagree.
+func sessionBindingDir(sessionID string) string {
+	s, err := agent.LoadSession(sessionID)
+	if err != nil {
+		return ""
+	}
+	return sessionDir(sessionID, s.WorkingDir)
 }
 
 // sessionInDir reports whether s belongs to dir. Both sides are normalised so

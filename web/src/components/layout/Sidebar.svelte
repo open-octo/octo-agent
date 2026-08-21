@@ -12,6 +12,8 @@
   import { ws } from '../../lib/ws'
   import VersionBadge from './VersionBadge.svelte'
   import OctoLogo from './OctoLogo.svelte'
+  import ProjectModal from '../overlays/ProjectModal.svelte'
+  import type { SessionGroup } from '../../lib/types'
 
   // Mac's traffic lights float over the window's top-left corner, which is this
   // column's own header row whenever the sidebar is showing.
@@ -20,6 +22,9 @@
   // Project whose row menu is open, by id ('' = none). Local rather than a store:
   // nothing outside this sidebar opens or reads it.
   let projectMenuFor = $state('')
+  // The project whose settings modal (rename / source folders / output marker)
+  // is open; null when closed.
+  let settingsGroup = $state<SessionGroup | null>(null)
 
   // Agent list for the new-session picker dropdown.
   let agents: api.Agent[] = $state([])
@@ -794,6 +799,10 @@
             </div>
             <div class="row-menu-sep"></div>
             {/if}
+            <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; settingsGroup = g }}>
+              <iconify-icon icon="ant-design:setting-outlined" width="13"></iconify-icon>
+              <span>{$t('sidebar.project_settings')}</span>
+            </div>
             <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; editGroupId.set(g.id); editGroupDraft.set(g.name) }}>
               <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
               <span>{$t('sidebar.rename_group')}</span>
@@ -1045,6 +1054,10 @@
   </div>
   {/if}
 </aside>
+
+{#if settingsGroup}
+  <ProjectModal group={settingsGroup} onClose={() => (settingsGroup = null)} onSaved={() => (settingsGroup = null)} />
+{/if}
 
 
 <style>

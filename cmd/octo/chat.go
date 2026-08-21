@@ -134,9 +134,11 @@ func wireSessionHooks(a *agent.Agent, sess *agent.Session, transport string) {
 	a.OnSessionStart = func() { sess.MarkHookStarted() }
 }
 
-// projectRunDir returns the directory this run should work in: the project's
-// directory when resuming a session that belongs to one, otherwise cwd
-// unchanged. lookup is server.ProjectDirForSession (injected for testing).
+// projectRunDir returns the directory this run should work in: the directory
+// the resumed session belongs to, otherwise cwd unchanged. lookup is
+// sessionBindingDir (injected for testing) — the SAME precedence the listing
+// filters by, so a session's own directory outranks its project's workspace
+// here exactly as it does there.
 //
 // Since -c only resolves sessions belonging to this directory
 // (resolveSessionInDir), a resumed session's project directory and cwd already
@@ -797,7 +799,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// compose-once-per-process model the CLI already follows for the system
 	// prompt. The CLI has no way to CHANGE a working directory; a project's
 	// setting is editable only where it was made (the Web UI / desktop).
-	if dir := projectRunDir(cwd, resumeID, server.ProjectDirForSession); dir != cwd {
+	if dir := projectRunDir(cwd, resumeID, sessionBindingDir); dir != cwd {
 		// Announce it — silently running tools on a path other than the one
 		// the user typed would be baffling.
 		fmt.Fprintf(stderr, "Session belongs to a project — working in %s\n", dir)
@@ -818,26 +820,44 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// whitelisted for writes when the permission engine is built. --no-memory
 	// disables it; a resolve error degrades to no memory rather than failing.
 	//
-	// On the CLI the working directory IS the project — you cd somewhere to
-	// work on it — so cwd scopes the memory, whether or not git has ever heard
-	// of that directory. Note this runs AFTER the project-run-dir resolution
-	// above, so a session filed under a project in the Web UI gets that
-	// project's memory here too, not the memory of wherever octo was launched.
-	// Running from home needs no special case: its slug directory IS the home
-	// directory, so it lands on the shared tier and RenderInjection collapses
-	// the two into one.
+	// The CLI's cwd never moves, but memory follows the PROJECT: a resumed
+	// session reads its own project's tier, and a fresh one goes through the
+	// three-state adoption (decideProjectForCwd) — unique claim joins it, an
+	// ambiguous one asks, an unclaimed repo becomes a project, and anything
+	// else is a task on the shared tier. Falling back to the shared tier for
+	// a task keeps RenderInjection's two arguments collapsing into one, the
+	// same shape the server gives task turns.
+	// Adoption is about FILING, not memory, so it runs whether or not memory
+	// is on — but not for a session that will never be saved: creating a
+	// project row for it would leave the sidebar pointing at nothing. The
+	// picker may only pop for the interactive REPL/TUI: a one-shot's stdin
+	// can be a TTY while its stdout is a captured pipe, where a menu would
+	// hang the command invisibly.
+	var adoption projectDecision
+	if resumeID == "" && !*noSave {
+		adoption = decideProjectForCwd(cwd, isREPL && stdinIsTTY(stdin), stdin, stdout)
+		if adoption.Note != "" {
+			fmt.Fprintln(stderr, "octo: "+adoption.Note)
+		}
+	}
+
 	var memDir, homeMemDir string
 	var memWriteRoots []string
 	if !*noMemory {
-		if d, err := memory.DirForProject(cwd); err == nil {
-			if memory.EnsureDir(d) == nil {
-				memDir = d
-			}
-		}
 		if d, err := memory.HomeDir(); err == nil {
 			if memory.EnsureDir(d) == nil {
 				homeMemDir = d
 			}
+		}
+		if resumeID != "" {
+			memDir = server.ProjectMemoryDirForSession(resumeID)
+		} else {
+			memDir = adoption.MemDir
+		}
+		if memDir == "" {
+			memDir = homeMemDir
+		} else if memory.EnsureDir(memDir) != nil {
+			memDir = homeMemDir
 		}
 	}
 	memWriteRoots = memoryWriteRoots(memDir, homeMemDir)
@@ -1315,18 +1335,17 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			notify:          cfg.NotifyEnabled(),
 			terminalTitle:   cfg.TerminalTitleEnabled(),
 		}
-		// A fresh TUI session joins a project for the directory it works in,
-		// which is what scopes its memory to that directory on every surface
-		// (Server.sessionMemDir) rather than only in this process. Waits for
-		// the first save so no project is created for a session that never
-		// said anything; a failure here is left to the reconciliation pass the
-		// next `octo serve` start runs (adoptTaskWorkingDirs), which is why it
-		// only whispers into the debug log — the TUI owns the screen.
-		if !*noSave && resumeID == "" {
-			sid, projectDir := sess.ID, cwd
+		// A fresh TUI session is filed under the project the three-state
+		// adoption resolved at startup (decideProjectForCwd) — the project
+		// itself, when one had to be created, already exists so this very
+		// session composed with its memory. Waits for the first save so no
+		// session that never said anything is filed anywhere; a failure only
+		// whispers into the debug log — the TUI owns the screen.
+		if !*noSave && resumeID == "" && adoption.ProjectID != "" {
+			sid, pid := sess.ID, adoption.ProjectID
 			cfg.afterFirstSave = func() {
-				if err := server.EnsureProjectForDir(projectDir, sid); err != nil {
-					slog.Debug("could not file the session under a project", "dir", projectDir, "err", err)
+				if err := server.FileSessionInProject(pid, sid); err != nil {
+					slog.Debug("could not file the session under its project", "project", pid, "err", err)
 				}
 			}
 		}

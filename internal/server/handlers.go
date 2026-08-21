@@ -265,34 +265,34 @@ func validateWorkingDir(raw string) (string, error) {
 	return dir, nil
 }
 
-// applyDefaultWorkspaceDir sets sess's WorkingDir to the server's configured
-// default workspace dir (cfg.WorkspaceDir / tools.ResolveWorkspaceDir, ~/Octo
-// unless overridden), unless the session already has one of its own — so it
-// composes with the PATCH /api/sessions/{id}/working_dir override without
-// special-casing. The directory is created lazily here, the first time a
-// session actually needs it, rather than at server startup. A failure here
-// is logged and otherwise a no-op: the session keeps no directory of its own
-// and resolveSessionDir falls back to the workspace anyway — seeding it just
-// makes the value visible on the session (in the composer, and to the CLI's
-// per-directory listing).
+// applyDefaultWorkspaceDir gives a dirless non-project session a throwaway
+// workspace of its own — <workspace>/tasks/<sessionID> — created here, the
+// first time the session needs one. It used to seed the shared workspace ROOT
+// onto every such session, which meant every task on the machine ran in one
+// directory and two tasks writing the same filename overwrote each other. A
+// failure is logged and otherwise a no-op: the session keeps no directory of
+// its own and resolveSessionDir falls back to the workspace root as before.
 //
 // A session created inside a project gets NO seeded dir: the project's
-// directory already governs where its tools run, and a seeded value would only
-// surface later as a stale leftover if the session is moved out of the project.
+// workspace already governs where its tools run, and a seeded value would only
+// surface later as a stale leftover.
 func (s *Server) applyDefaultWorkspaceDir(sess *agent.Session) {
-	dir := s.curWorkspaceDir()
-	if dir == "" || sess.WorkingDir != "" {
+	if sess.WorkingDir != "" {
 		return
 	}
 	if p := projectForSession(sess.ID); p != nil {
 		return
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		slog.Warn("workspace dir: mkdir failed, session keeps using the launch directory", "dir", dir, "err", err)
+	dir, err := s.taskWorkspaceFor(sess.ID)
+	if err != nil {
+		slog.Warn("task workspace: mkdir failed, session falls back to the workspace root", "err", err)
 		return
 	}
+	if dir == "" {
+		return // no workspace resolves at all
+	}
 	if err := sess.SetWorkingDir(dir); err != nil {
-		slog.Warn("workspace dir: could not set session working dir", "err", err)
+		slog.Warn("task workspace: could not set session working dir", "err", err)
 	}
 }
 
@@ -779,6 +779,12 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	// would otherwise leak forever and, if answered via a stale modal,
 	// resave the very file this handler is about to delete.
 	s.interruptSession(id)
+	// The throwaway workspace goes with its session — read the dir before the
+	// transcript that records it is deleted.
+	var taskDir string
+	if sess, lerr := agent.LoadSession(id); lerr == nil {
+		taskDir = sess.WorkingDir
+	}
 	if err := agent.DeleteSession(id); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -790,6 +796,9 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	tools.CloseSessionReadTracker(id)       // and its read-before-write tracker
 	tools.CloseSessionTaskStore(id)         // and its task/plan checklist
 	tools.CloseSessionReplaySecrets(id)     // and any cached replay secrets
+	// After the teardown above: a background daemon still writing into the
+	// directory while it moves would race the rename.
+	s.stashTaskWorkspace(taskDir)
 	s.wsHub.broadcast("", wsEventSessionDeleted{Type: "session_deleted", SessionID: id})
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": []string{id}})
 }
@@ -809,6 +818,11 @@ func (s *Server) deleteSessionsByID(ids []string) (deleted []string, failed map[
 	failed = map[string]string{}
 	for _, id := range ids {
 		s.interruptSession(id)
+		// See handleDeleteSession: capture the dir before the transcript goes.
+		var taskDir string
+		if sess, lerr := agent.LoadSession(id); lerr == nil {
+			taskDir = sess.WorkingDir
+		}
 		if err := agent.DeleteSession(id); err != nil {
 			failed[id] = err.Error()
 			continue
@@ -820,6 +834,8 @@ func (s *Server) deleteSessionsByID(ids []string) (deleted []string, failed map[
 		tools.CloseSessionReadTracker(id)       // and its read-before-write tracker
 		tools.CloseSessionTaskStore(id)         // and its task/plan checklist
 		tools.CloseSessionReplaySecrets(id)     // and any cached replay secrets
+		// After the teardown above — see handleDeleteSession.
+		s.stashTaskWorkspace(taskDir)
 		s.wsHub.broadcast("", wsEventSessionDeleted{Type: "session_deleted", SessionID: id})
 		deleted = append(deleted, id)
 	}

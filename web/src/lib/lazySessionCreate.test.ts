@@ -115,13 +115,13 @@ describe('resolveProjectForDir', () => {
     sessionGroups.set([group('g-plain')])
     const id = await resolveProjectForDir('/work/app')
     expect(id).toBe('g-new')
-    expect(api.createSessionGroup).toHaveBeenCalledWith('app', { working_dir: '/work/app' })
+    expect(api.createSessionGroup).toHaveBeenCalledWith('app', { source_dirs: ['/work/app'] })
   })
 
   it('creates a project named after the directory and records it locally', async () => {
     const id = await resolveProjectForDir('/work/app')
     expect(id).toBe('g-new')
-    expect(api.createSessionGroup).toHaveBeenCalledWith('app', { working_dir: '/work/app' })
+    expect(api.createSessionGroup).toHaveBeenCalledWith('app', { source_dirs: ['/work/app'] })
     // Recorded without a refetch, so the sidebar shows the project immediately.
     expect(get(sessionGroups).map(g => g.id)).toContain('g-new')
   })

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -14,35 +16,77 @@ import (
 // for the directory it was started in. Both come through here so the
 // find-or-create and the filing happen under one lock and one save.
 
-// findOrCreateProject returns the id of the project working in dir, appending
-// one named after the directory when none exists. In-memory: the caller holds
+// findOrCreateProject returns the id of the project owning dir, appending one
+// named after the directory when none exists. In-memory: the caller holds
 // groupMu.LockWrite and owns the save, which is what lets a create and a filing
 // land as one write.
 //
-// The match is on the directory rather than the name, since names are not
-// unique and the directory is what governs where sessions run. A directory that
-// no longer validates (gone, unreadable) is an error rather than a group
-// without one: a plain group would file sessions somewhere that answers none of
-// the questions the directory did.
+// A directory is owned two ways: as a project's workspace (the session was
+// already running in the project's own ground — also how pre-workspace
+// registries, whose WorkingDir is still a user directory, keep matching), or
+// as a mounted source folder. A source folder may be mounted by several
+// projects; this returns the first, which is the right call for the startup
+// adoption pass — the interactive CLI disambiguates with a picker before ever
+// reaching here.
+//
+// Creating mounts the directory rather than adopting it as the project
+// directory: the project's own directory is always a generated workspace. A
+// directory that no longer validates (gone, unreadable) is an error rather
+// than a group without one: a plain group would file sessions somewhere that
+// answers none of the questions the directory did.
 func findOrCreateProject(gf *groupFile, dir string) (string, error) {
 	target := memory.NormalizeDir(dir)
 	for i := range gf.Groups {
+		if gf.Groups[i].TaskID != "" {
+			// A scheduled task's run cluster never claims a directory, same
+			// rule as ProjectsClaimingDir: filing an ad-hoc session into it
+			// would drop the session into that task's run history. The
+			// folder may still be mounted by a real project further down, or
+			// a fresh one is created below.
+			continue
+		}
 		if wd := gf.Groups[i].WorkingDir; wd != "" && memory.NormalizeDir(wd) == target {
 			return gf.Groups[i].ID, nil
 		}
+		for _, sd := range gf.Groups[i].SourceDirs {
+			if memory.NormalizeDir(sd) == target {
+				return gf.Groups[i].ID, nil
+			}
+		}
 	}
 
-	validated, err := validateWorkingDir(dir)
+	// The same validation the HTTP create path runs — including the "not
+	// under the workspace root" rule, or this write path would mount what
+	// that one rejects.
+	base := tools.ConfiguredWorkspaceDir()
+	mounted, err := validateSourceDirs(base, []string{dir})
 	if err != nil {
 		return "", err
 	}
+	if len(mounted) == 0 {
+		return "", fmt.Errorf("project: no usable directory in %q", dir)
+	}
+	validated := mounted[0]
 	name := filepath.Base(memory.NormalizeDir(validated))
 	if name == "" || name == "." || name == string(filepath.Separator) {
 		name = validated
 	}
-	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: validated}
+	workspace, err := workspaceDirForProject(base, name)
+	if err != nil {
+		return "", err
+	}
+	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workspace, SourceDirs: []string{validated}}
 	gf.Groups = append(gf.Groups, g)
 	return g.ID, nil
+}
+
+// dropWorkspaceDir best-effort removes a workspace that was generated for a
+// creation that then failed — Remove, not RemoveAll: a freshly generated
+// workspace is empty, and anything else is not ours to delete.
+func dropWorkspaceDir(dir string) {
+	if dir != "" {
+		_ = os.Remove(dir)
+	}
 }
 
 // ensureProjectForDir files sessionIDs under the project working in dir,
@@ -108,6 +152,14 @@ func EnsureProjectForDir(dir, sessionID string) error {
 	return ensureProjectForDir(dir, sessionID)
 }
 
+// IsSeededWorkspaceDir reports whether dir is the seeded "nobody chose this"
+// workspace value. Exported for the CLI, whose session scoping must treat a
+// seeded directory exactly like the server's resolver does (a session carrying
+// it never chose it, so it must not outrank the session's project).
+func IsSeededWorkspaceDir(dir string) bool {
+	return isDefaultWorkspaceDir(dir)
+}
+
 // isDefaultWorkspaceDir reports whether dir is the directory that means
 // "nobody chose this": the workspace as configured now, or the built-in default
 // regardless of configuration. Adopting those would file every session that
@@ -133,7 +185,16 @@ func isDefaultWorkspaceDir(dir string) bool {
 		builtin = ""
 	}
 	for _, candidate := range []string{configured, builtin} {
-		if candidate != "" && memory.NormalizeDir(candidate) == target {
+		if candidate == "" {
+			continue
+		}
+		norm := memory.NormalizeDir(candidate)
+		if norm == target {
+			return true
+		}
+		// Per-session task workspaces (<workspace>/tasks/<id>) are stamped,
+		// not chosen — the same "nobody chose this" rule as the root itself.
+		if strings.HasPrefix(target, filepath.Join(norm, "tasks")+string(filepath.Separator)) {
 			return true
 		}
 	}

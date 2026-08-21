@@ -152,6 +152,28 @@ func DirForProject(projectDir string) (string, error) {
 	return Dir(projectDir)
 }
 
+// DirForProjectID returns the memory directory for a project by its stable
+// identity: ~/.octo/memories/<Slugify(base)>-p<hash of id>. base is the
+// readable half — callers pass the workspace directory's basename, which is
+// fixed at the project's creation — and the id hash is what actually keys the
+// directory, so neither renaming the project nor anything happening to its
+// directories on disk ever moves its memory. The "-p" marker keeps these
+// slugs distinguishable from the path-derived ones Dir produces, which the
+// startup migration uses to tell already-migrated directories apart.
+func DirForProjectID(id, base string) (string, error) {
+	root, err := RootDir()
+	if err != nil {
+		return "", err
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(id))
+	seg := Slugify(base)
+	if seg == "" {
+		seg = "project"
+	}
+	return filepath.Join(root, fmt.Sprintf("%s-p%08x", seg, h.Sum32())), nil
+}
+
 // dirSlug derives a stable, human-readable directory name from a project
 // directory: the basename plus a short hash of the full path, so two projects
 // sharing a basename (e.g. two checkouts of "app") don't collide. Callers reach
@@ -276,8 +298,8 @@ func RenderInjection(dir string, inheritedDirs ...string) string {
 	// "created on first write" rests on write_file's MkdirAll
 	// (internal/tools/write_file.go) — if that tool ever stops creating
 	// parent dirs, this guidance silently breaks.
-	crossProject := "- A durable fact about a DIFFERENT project than the one above — you were asked to work on another repo — belongs in THAT repo's memory. " +
-		"Get its directory with `octo memory path <repo path>` (terminal), then write to it directly: the whole memories tree is writable, and the directory is created on first write. "
+	crossProject := "- A durable fact about a DIFFERENT project than the one above — you were asked to work on another repo — belongs in THAT project's memory. " +
+		"Get its directory with `octo memory path <repo path>` (terminal): it prints the memory directory of the project referencing that path (the shared tier when no project does — save there in that case), and the whole memories tree is writable. "
 	if shared {
 		crossProject += "If you can't resolve it, keep it here — these notes are read by every session, so it will still surface; a note filed under the wrong project surfaces nowhere.\n"
 	} else {

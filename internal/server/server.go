@@ -593,7 +593,14 @@ func New(cfg Config) (*Server, error) {
 // directory under a project for it.
 func (s *Server) reconcileRegistry() {
 	s.dissolvePlainGroups()
+	// Migration before adoption: once a legacy project's directory is mounted
+	// as a source folder, the adoption pass files that directory's sessions
+	// into the migrated project instead of minting a duplicate.
+	s.migrateProjectWorkspaces()
 	s.adoptTaskWorkingDirs()
+	// After adoption, so the passes above see directories in their settled
+	// state; only ever touches <workspace>/tasks/ (see underTasksRoot).
+	s.sweepOrphanTaskWorkspaces()
 }
 
 // enableSubAgentTools registers the process-global sub-agent manager + task
@@ -1263,15 +1270,7 @@ func resolveUnderCWD(cwd, path string) (string, bool) {
 // switched into are trusted only if a prior CLI run approved them — so a
 // working_dir retarget can't silently load an untrusted repo's hooks.
 func (s *Server) projectHooksTrusted(cwd string) bool {
-	path := hooks.ProjectConfigPath(cwd)
-	if path == "" {
-		return false
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	return hooks.IsTrusted(path, hooks.Fingerprint(b))
+	return hooksTrustedAt(cwd)
 }
 
 func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
@@ -1351,8 +1350,9 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// The freeze is keyed on cwd as well as the model: the env context's
 	// working directory is baked into the prompt and can change under a live
 	// session.
-	projectDir := ProjectDirForSession(sess.ID)
-	if sess.IsComposedFor(model, cwd) {
+	proj := projectForSession(sess.ID)
+	srcHash := sourceDirsHash(proj)
+	if sess.IsComposedFor(model, cwd, srcHash) {
 		a.System, a.LeanSystem = sess.ComposedSystem, sess.ComposedLeanSystem
 	} else {
 		// L1: project memory embedded in the system prompt, snapshotted once.
@@ -1366,7 +1366,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 		// identity to cover that would miss the cache for every session,
 		// which is the worse trade.
 		var memInjection string
-		if memDir := s.sessionMemDir(projectDir); memDir != "" {
+		if memDir := s.sessionMemDir(proj); memDir != "" {
 			memInjection = memory.RenderInjection(memDir, s.homeMemDir)
 		}
 		if g := tools.MemoryBackendGuidance(); g != "" {
@@ -1381,8 +1381,8 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 			base = profile.SystemPrompt
 			expertMode = true
 		}
-		a.System, a.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
-		if err := sess.SetComposedSystem(a.System, a.LeanSystem, model, cwd); err != nil {
+		a.System, a.LeanSystem = prompt.ComposePair(base, cwd, appendProjectEnvContext(envCtx, proj), s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode, sourceRuleDirs(cwd, proj)...)
+		if err := sess.SetComposedSystem(a.System, a.LeanSystem, model, cwd, srcHash); err != nil {
 			slog.Warn("freeze composed system prompt", "session", sess.ID, "err", err)
 		}
 	}
@@ -1391,9 +1391,9 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// tool results, plus any shell hooks (env/hooks.yml), unified on the agent's
 	// hook engine. Shares the process seen-set so SessionStart resume fires once
 	// per OS process across the serve process's many sessions.
-	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd))
+	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd), sourceHookDirs(cwd, proj)...)
 	hookEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
-	if memDir := s.sessionMemDir(projectDir); memDir != "" {
+	if memDir := s.sessionMemDir(proj); memDir != "" {
 		s.injectorFor(sess.ID, memDir).RegisterHooks(hookEngine)
 	}
 	// Workflow save-nudge — memory-independent, wired for every session.
@@ -1823,6 +1823,20 @@ func (s *Server) curCwdEnv() (string, string) {
 // resolved separately, a session could show one directory in the composer and
 // run its tools in another.
 func (s *Server) resolveSessionDir(sessionID, own string) string {
+	// A directory the session chose itself outranks its project's workspace —
+	// that is what keeps a CLI-born session running in the repository it was
+	// started in on every surface, instead of drifting to the workspace when
+	// resumed on the web. The old order (project first) existed so that
+	// retargeting a project's directory took effect across the project; the
+	// workspace is fixed at creation, so there is nothing left to retarget.
+	//
+	// The one own-value that does NOT count as chosen is the seeded default
+	// workspace: applyDefaultWorkspaceDir stamps it on every session that
+	// never picked anything, so it means "nobody chose" and must not shadow a
+	// project.
+	if own != "" && !s.isSeededWorkspaceValue(own) {
+		return own
+	}
 	if p := projectForSession(sessionID); p != nil {
 		return p.WorkingDir
 	}
@@ -1833,6 +1847,34 @@ func (s *Server) resolveSessionDir(sessionID, own string) string {
 		return ws
 	}
 	return s.curCwd()
+}
+
+// isSeededWorkspaceValue reports whether own is the "nobody chose this"
+// directory: the workspace root as configured now, or the built-in default
+// regardless of configuration — sessions written before a workspace_dir change
+// still carry the old default. The same rule isDefaultWorkspaceDir applies,
+// checked against the server's cached root rather than re-reading
+// configuration on every resolution. Known gap, shared with that rule: a
+// machine whose workspace_dir was changed twice leaves sessions seeded with
+// the intermediate value, which neither comparison recognises — those read as
+// chosen. Accepted there, accepted here.
+func (s *Server) isSeededWorkspaceValue(own string) bool {
+	// A per-session task workspace (<workspace>/tasks/<id>) is seeded too —
+	// applyDefaultWorkspaceDir stamps it on every dirless task, so it means
+	// "nobody chose" exactly like the root used to. Without this a task filed
+	// into a project keeps running in its throwaway directory while the
+	// re-frozen prompt claims the cwd is the project's workspace.
+	if s.underTasksRoot(own) {
+		return true
+	}
+	norm := memory.NormalizeDir(own)
+	if ws := s.curWorkspaceDir(); ws != "" && memory.NormalizeDir(ws) == norm {
+		return true
+	}
+	if def, err := tools.ResolveWorkspaceDir(""); err == nil && def != "" && memory.NormalizeDir(def) == norm {
+		return true
+	}
+	return false
 }
 
 // sessionCwdEnv returns the working directory and env-context a turn for sess
@@ -1863,35 +1905,34 @@ func (s *Server) sessionCwdEnv(sess *agent.Session) (string, string) {
 	return dir, buildEnvContext(dir)
 }
 
-// sessionMemDir returns the memory directory for a turn belonging to the
-// project rooted at projectDir — "" for a session in no project, which is the
-// shared home tier every session reads. Callers get projectDir from
-// sessionProjectDir, i.e. from the session-group registry.
+// sessionMemDir returns the memory directory for a turn belonging to proj —
+// nil for a session in no project, which is the shared home tier every
+// session reads. Callers get proj from projectForSession, i.e. from the
+// session-group registry.
 //
 // What makes a project a project is that the user filed sessions under it, so
-// that is what scopes memory. Neither the server's launch directory nor a
-// session's own working directory takes part: a serve process started from a
-// checkout is not thereby working on it, and a session pointed at a directory
-// without being filed under a project is a task — its notes belong in the tier
-// every session reads, not buried under a slug nothing else opens.
+// that is what scopes memory. The directory is keyed on the project's ID
+// (memory.DirForProjectID), not on any path: the workspace is pure scratch
+// and carries no memory identity, and nothing that happens to directories on
+// disk — a rename, a remount — can orphan a project's notes.
 //
 // Resolution (and directory creation) happens on first use per project and is
 // cached for the process lifetime. Falls back to the home tier when resolution
 // fails; empty when memory is disabled.
-func (s *Server) sessionMemDir(projectDir string) string {
+func (s *Server) sessionMemDir(proj *sessionGroup) string {
 	if s.cfg.NoMemory {
 		return ""
 	}
-	if projectDir == "" {
+	if proj == nil || proj.ID == "" {
 		return s.homeMemDir
 	}
 	s.memDirCacheMu.Lock()
 	defer s.memDirCacheMu.Unlock()
-	if d, ok := s.memDirCache[projectDir]; ok {
+	if d, ok := s.memDirCache[proj.ID]; ok {
 		return d
 	}
 	dir := s.homeMemDir
-	d, err := memory.DirForProject(projectDir)
+	d, err := memory.DirForProjectID(proj.ID, filepath.Base(proj.WorkingDir))
 	if err != nil || memory.EnsureDir(d) != nil {
 		// Don't cache a failure: a full disk or a transient permission problem
 		// would otherwise pin this project to the shared tier for the rest of
@@ -1901,18 +1942,8 @@ func (s *Server) sessionMemDir(projectDir string) string {
 	if s.memDirCache == nil {
 		s.memDirCache = make(map[string]string)
 	}
-	s.memDirCache[projectDir] = d
+	s.memDirCache[proj.ID] = d
 	return d
-}
-
-// sessionProjectDir returns the working directory of the project owning
-// sessionID, or "" when the session belongs to none. The single place the
-// server asks "which project scopes this session's memory?".
-func (s *Server) sessionProjectDir(sessionID string) string {
-	if p := projectForSession(sessionID); p != nil {
-		return p.WorkingDir
-	}
-	return ""
 }
 
 // memoryWriteRoots returns the write-allowlist roots handed to the permission
@@ -3468,15 +3499,16 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// cwd joins the model in the freeze identity — a channel session dragged
 	// into a project in the Web UI picks the change up on its next turn, the
 	// same as a web one.
-	projectDir := ProjectDirForSession(sess.Store.ID)
-	if sess.Store.IsComposedFor(sess.Agent.Model, cwd) {
+	proj := projectForSession(sess.Store.ID)
+	srcHash := sourceDirsHash(proj)
+	if sess.Store.IsComposedFor(sess.Agent.Model, cwd, srcHash) {
 		sess.Agent.System, sess.Agent.LeanSystem = sess.Store.ComposedSystem, sess.Store.ComposedLeanSystem
 	} else {
 		// Per-project memory dir, same as buildAgent gives web turns — an IM
 		// session dragged into a project in the Web UI picks it up on its next
 		// turn (see buildAgent for the one freeze gap).
 		var memInjection string
-		if memDir := s.sessionMemDir(projectDir); memDir != "" {
+		if memDir := s.sessionMemDir(proj); memDir != "" {
 			memInjection = memory.RenderInjection(memDir, s.homeMemDir)
 		}
 		if g := tools.MemoryBackendGuidance(); g != "" {
@@ -3490,8 +3522,8 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 			base = profile.SystemPrompt
 			expertMode = true
 		}
-		sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
-		if err := sess.Store.SetComposedSystem(sess.Agent.System, sess.Agent.LeanSystem, sess.Agent.Model, cwd); err != nil {
+		sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, appendProjectEnvContext(envCtx, proj), s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode, sourceRuleDirs(cwd, proj)...)
+		if err := sess.Store.SetComposedSystem(sess.Agent.System, sess.Agent.LeanSystem, sess.Agent.Model, cwd, srcHash); err != nil {
 			slog.Warn("freeze composed system prompt", "session", string(sess.Key), "err", err)
 		}
 	}
@@ -3499,9 +3531,9 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// L2 memory hooks + shell hooks, same engine buildAgent gives web turns,
 	// rebuilt per IM turn. The injector is session-sticky (recall latch) and
 	// dropped on /unbind; a fresh engine each turn just re-registers it.
-	imEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd))
+	imEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd), sourceHookDirs(cwd, proj)...)
 	imEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
-	if memDir := s.sessionMemDir(projectDir); memDir != "" {
+	if memDir := s.sessionMemDir(proj); memDir != "" {
 		s.injectorFor("im:"+string(sess.Key), memDir).RegisterHooks(imEngine)
 	}
 	// Workflow save-nudge — memory-independent, wired for every IM session.

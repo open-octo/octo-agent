@@ -14,7 +14,7 @@ import (
 // working directory where a project directory belongs. A test that supplies the
 // argument itself cannot catch that — it asserts the function, not the wiring.
 //
-// What they cover is the pairing of sessionProjectDir and sessionMemDir: that a
+// What they cover is the pairing of projectForSession and sessionMemDir: that a
 // session's project, not its own directory, is what selects its memory. They do
 // NOT drive buildAgent or an IM turn, so they would not catch a regression
 // confined to one of those call sites. In practice the compiler covers that
@@ -52,14 +52,14 @@ func TestSessionMemDir_WiredThroughTheRegistry(t *testing.T) {
 	}
 
 	srv := &Server{cwd: t.TempDir(), homeMemDir: homeMem}
-	got := srv.sessionMemDir(srv.sessionProjectDir(sess.ID))
+	got := srv.sessionMemDir(projectForSession(sess.ID))
 
-	want, err := memory.Dir(projectDir)
+	want, err := memory.DirForProjectID(g.ID, filepath.Base(g.WorkingDir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != want {
-		t.Errorf("memory dir = %q, want the project's %q", got, want)
+		t.Errorf("memory dir = %q, want the project's ID-keyed %q", got, want)
 	}
 	if own, err := memory.Dir(ownDir); err == nil && got == own {
 		t.Error("memory dir followed the session's own working dir, not its project")
@@ -84,7 +84,7 @@ func TestSessionMemDir_UngroupedSessionReadsSharedTier(t *testing.T) {
 	}
 
 	srv := &Server{cwd: t.TempDir(), homeMemDir: homeMem}
-	if got := srv.sessionMemDir(srv.sessionProjectDir(sess.ID)); got != homeMem {
+	if got := srv.sessionMemDir(projectForSession(sess.ID)); got != homeMem {
 		t.Errorf("memory dir = %q, want the shared tier %q", got, homeMem)
 	}
 }
@@ -112,13 +112,13 @@ func TestCronTask_RunsGetProjectMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := srv.sessionMemDir(srv.sessionProjectDir(sessionID))
-	want, err := memory.Dir(dir)
+	got := srv.sessionMemDir(projectForSession(sessionID))
+	want, err := memory.DirForProjectID(g.ID, filepath.Base(g.WorkingDir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != want {
-		t.Errorf("cron run memory dir = %q, want the task's own %q", got, want)
+		t.Errorf("cron run memory dir = %q, want the task's own ID-keyed %q", got, want)
 	}
 	if got == homeMem {
 		t.Error("a cron run's notes went to the shared tier")
@@ -146,7 +146,7 @@ func TestCronTask_WithoutDirectoryStaysAPlainGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := srv.sessionMemDir(srv.sessionProjectDir(sessionID)); got != homeMem {
+	if got := srv.sessionMemDir(projectForSession(sessionID)); got != homeMem {
 		t.Errorf("memory dir = %q, want the shared tier %q", got, homeMem)
 	}
 }
