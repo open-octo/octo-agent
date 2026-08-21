@@ -7,29 +7,46 @@
   //  - Questions from other sessions surface as a compact toast with a "View"
   //    action — tapping it navigates to that session, where the card then
   //    appears.
+  //
+  // Same model as the desktop picker (tabs + review/submit tab + the two
+  // layouts), laid out for one narrow column: the tabs become a pager and a
+  // preview goes in a disclosure under the option rather than a second column.
   import { onMount, onDestroy } from 'svelte'
   import { questionModals, activeSessionId, setActiveSession } from '../lib/stores'
   import { ws } from '../lib/ws'
   import { t } from '../lib/i18n'
+  import {
+    advanceIndex, allAnswered, answerSummary, answersPayload, anyAnswered,
+    emptyDraft, emptyDrafts, hasReviewTab, isAnswered, isReviewTab,
+    toggleChoice, usesPreviewLayout,
+    type AskDraft, type AskOutcome,
+  } from '../lib/askStepper'
 
   // Track WS event cleanups so we can remove them on unmount.
   const cleanups: Array<() => void> = []
 
-  // Per-question draft state, keyed by sessionId.
-  const drafts = $state<Record<string, { selected: string[]; custom: string; expanded: boolean }>>({})
+  // Per-session state: which tab is open and one draft per question.
+  const state = $state<Record<string, { qIdx: number; drafts: AskDraft[] }>>({})
 
-  function getDraft(sid: string) {
-    if (!drafts[sid]) drafts[sid] = { selected: [], custom: '', expanded: false }
-    return drafts[sid]
+  function slot(sid: string) {
+    if (!state[sid]) {
+      state[sid] = { qIdx: 0, drafts: emptyDrafts($questionModals[sid]?.questions ?? []) }
+    }
+    return state[sid]
   }
 
-  // Reset a draft when its question changes.
+  function draftAt(sid: string, i: number): AskDraft {
+    const s = slot(sid)
+    return s.drafts[i] ?? emptyDraft()
+  }
+
+  // Reset when the question set changes.
   const lastIds: Record<string, string> = {}
   $effect(() => {
     for (const [sid, e] of Object.entries($questionModals)) {
       if (lastIds[sid] !== e.questionId) {
         lastIds[sid] = e.questionId
-        drafts[sid] = { selected: [], custom: '', expanded: false }
+        state[sid] = { qIdx: 0, drafts: emptyDrafts(e.questions ?? []) }
       }
     }
   })
@@ -46,10 +63,7 @@
         [sid]: {
           questionId: ev.question_id,
           sessionId: sid,
-          question: ev.question,
-          options: ev.options,
-          multiSelect: ev.multi_select,
-          header: ev.header,
+          questions: ev.questions ?? [],
           secret: ev.secret === true,
           dismissed: false,
         },
@@ -70,13 +84,22 @@
     cleanups.forEach(fn => fn())
   })
 
-  function toggle(sid: string, opt: string, multi: boolean) {
-    const d = getDraft(sid)
-    if (multi) {
-      d.selected = d.selected.includes(opt) ? d.selected.filter(o => o !== opt) : [...d.selected, opt]
-    } else {
-      d.selected = d.selected[0] === opt ? [] : [opt]
-    }
+  function setDraft(sid: string, i: number, next: AskDraft) {
+    const s = slot(sid)
+    s.drafts = s.drafts.map((d, j) => (j === i ? next : d))
+  }
+
+  function pick(sid: string, label: string) {
+    const entry = $questionModals[sid]
+    const s = slot(sid)
+    const q = entry?.questions?.[s.qIdx]
+    if (!q) return
+    const next = toggleChoice(draftAt(sid, s.qIdx), q, label)
+    setDraft(sid, s.qIdx, next)
+    if (q.multi_select) return
+    const to = advanceIndex(entry.questions, s.qIdx)
+    if (to === -1) finish(sid, 'submitted')
+    else s.qIdx = to
   }
 
   function clear(sid: string) {
@@ -87,18 +110,10 @@
     })
   }
 
-  function submit(sid: string) {
-    const e = $questionModals[sid]
-    const d = getDraft(sid)
-    if (!e || (d.selected.length === 0 && !d.custom.trim())) return
-    ws.answerQuestion(e.questionId, [...d.selected], d.custom)
-    clear(sid)
-  }
-
-  function cancel(sid: string) {
+  function finish(sid: string, outcome: AskOutcome) {
     const e = $questionModals[sid]
     if (!e) return
-    ws.answerQuestion(e.questionId, [], '', true)
+    ws.answerQuestion(e.questionId, outcome, outcome === 'rejected' ? [] : answersPayload(slot(sid).drafts))
     clear(sid)
   }
 </script>
@@ -109,7 +124,9 @@
     {#each others as [sid, e] (sid)}
       <button class="qo-toast" onclick={() => setActiveSession(sid)}>
         <span class="qo-toast-icon">◆</span>
-        <span class="qo-toast-q">{e.question}</span>
+        <span class="qo-toast-q">
+          {e.questions?.[0]?.question ?? ''}{(e.questions?.length ?? 0) > 1 ? ` +${e.questions.length - 1}` : ''}
+        </span>
         <span class="qo-toast-go">{$t('m.view')} ›</span>
       </button>
     {/each}
@@ -118,51 +135,116 @@
 
 <!-- Active session's own question: full card. -->
 {#if activeQ}
+  {@const sid = activeQ.sessionId}
+  {@const s = slot(sid)}
+  {@const questions = activeQ.questions ?? []}
+  {@const onReview = isReviewTab(questions, s.qIdx)}
+  {@const q = questions[s.qIdx]}
+  {@const d = draftAt(sid, s.qIdx)}
   <div class="qo-overlay">
-    <div class="qo-card" class:expanded={getDraft(activeQ.sessionId).expanded}>
+    <div class="qo-card">
       <div class="qo-head">
         <span class="qo-icon">◆</span>
-        <span class="qo-title">{activeQ.header || $t('question.title')}</span>
+        <span class="qo-title">{onReview ? $t('question.submit_tab') : (q?.header || $t('question.title'))}</span>
+        {#if questions.length > 1}
+          <span class="qo-progress">{Math.min(s.qIdx + 1, questions.length)}/{questions.length}</span>
+        {/if}
       </div>
 
-      <p class="qo-body">{activeQ.question}</p>
-
-      {#if activeQ.options?.length}
-        <div class="qo-options">
-          {#each activeQ.options as opt}
-            <button
-              class="qo-opt"
-              class:on={getDraft(activeQ.sessionId).selected.includes(opt)}
-              onclick={() => toggle(activeQ.sessionId, opt, activeQ.multiSelect ?? false)}
-            >
-              <span class="qo-dot"></span>{opt}
+      {#if questions.length > 1 || hasReviewTab(questions)}
+        <div class="qo-pager">
+          {#each questions as pq, i}
+            <button class="qo-pill" class:on={i === s.qIdx} onclick={() => (s.qIdx = i)}>
+              {#if isAnswered(s.drafts[i])}✓{/if} {pq.header}
             </button>
           {/each}
+          {#if hasReviewTab(questions)}
+            <button class="qo-pill" class:on={onReview} onclick={() => (s.qIdx = questions.length)}>
+              {$t('question.submit_tab')}
+            </button>
+          {/if}
         </div>
       {/if}
 
-      {#if getDraft(activeQ.sessionId).expanded}
-        <textarea
-          class="qo-free"
-          rows="2"
-          placeholder={$t('question.custom_placeholder')}
-          value={getDraft(activeQ.sessionId).custom}
-          oninput={(e) => { getDraft(activeQ.sessionId).custom = (e.target as HTMLTextAreaElement).value }}
-        ></textarea>
+      {#if onReview}
+        <div class="qo-review">
+          {#each questions as rq, i}
+            {#if isAnswered(s.drafts[i])}
+              <div class="qo-review-item">
+                <div class="qo-review-q">{rq.question}</div>
+                <div class="qo-review-a">→ {answerSummary(s.drafts[i])}</div>
+              </div>
+            {/if}
+          {/each}
+          {#if !allAnswered(questions, s.drafts)}
+            <div class="qo-review-warn">{$t('question.not_all_answered')}</div>
+          {/if}
+        </div>
+      {:else}
+        <p class="qo-body">{q?.question}</p>
+
+        <div class="qo-options">
+          {#each q?.options ?? [] as o}
+            <div class="qo-opt-wrap">
+              <button class="qo-opt" class:on={d.choices.includes(o.label)} onclick={() => pick(sid, o.label)}>
+                <span class="qo-dot"></span>
+                <span class="qo-opt-body">
+                  <span class="qo-opt-label">{o.label}</span>
+                  <!-- The preview layout drops descriptions, as on the desktop. -->
+                  {#if o.description && !usesPreviewLayout(q)}
+                    <span class="qo-opt-desc">{o.description}</span>
+                  {/if}
+                </span>
+              </button>
+              {#if o.preview && usesPreviewLayout(q)}
+                <details class="qo-preview">
+                  <summary>{o.label}</summary>
+                  <pre>{o.preview}</pre>
+                </details>
+              {/if}
+            </div>
+          {/each}
+
+          <!-- Notes replace the free-text slot in the preview layout. -->
+          {#if usesPreviewLayout(q)}
+            <textarea
+              class="qo-free"
+              rows="2"
+              placeholder={$t('question.add_note')}
+              value={d.notes}
+              oninput={(e) => setDraft(sid, s.qIdx, { ...d, notes: (e.target as HTMLTextAreaElement).value })}
+            ></textarea>
+          {:else}
+            <textarea
+              class="qo-free"
+              rows="2"
+              placeholder={$t('question.custom_placeholder')}
+              value={d.custom}
+              oninput={(e) => setDraft(sid, s.qIdx, { ...d, custom: (e.target as HTMLTextAreaElement).value })}
+            ></textarea>
+          {/if}
+
+          <button class="qo-opt qo-clarify" onclick={() => finish(sid, 'clarify')}>
+            <span class="qo-opt-body"><span class="qo-opt-label">{$t('question.chat_about_this')}</span></span>
+          </button>
+        </div>
       {/if}
 
       <div class="qo-actions">
-        <button class="qo-cancel" onclick={() => cancel(activeQ.sessionId)}>{$t('common.cancel')}</button>
-        {#if !getDraft(activeQ.sessionId).expanded}
-          <button class="qo-expand" onclick={() => (getDraft(activeQ.sessionId).expanded = true)}>展开</button>
+        <button class="qo-cancel" onclick={() => finish(sid, 'rejected')}>{$t('common.cancel')}</button>
+        {#if onReview}
+          <button class="qo-submit" onclick={() => finish(sid, 'submitted')} disabled={!anyAnswered(s.drafts)}>
+            {$t('question.submit_answers')}
+          </button>
+        {:else}
+          <button
+            class="qo-submit"
+            onclick={() => { const to = advanceIndex(questions, s.qIdx); if (to === -1) finish(sid, 'submitted'); else s.qIdx = to }}
+            disabled={!isAnswered(d) && !d.notes.trim()}
+          >
+            {hasReviewTab(questions) ? $t('question.next') : $t('common.submit')}
+          </button>
         {/if}
-        <button
-          class="qo-submit"
-          onclick={() => submit(activeQ.sessionId)}
-          disabled={getDraft(activeQ.sessionId).selected.length === 0 && !getDraft(activeQ.sessionId).custom.trim()}
-        >
-          {$t('common.submit')}
-        </button>
       </div>
     </div>
   </div>
@@ -242,7 +324,31 @@
   }
   .qo-head { display: flex; align-items: center; gap: 8px; }
   .qo-icon { color: var(--m-accent); font-size: 12px; }
-  .qo-title { font-size: 14px; font-weight: 600; color: var(--m-text); }
+  .qo-title { font-size: 14px; font-weight: 600; color: var(--m-text); flex: 1; }
+  .qo-progress { font-size: 12px; color: var(--m-text-2); }
+
+  .qo-pager { display: flex; flex-wrap: wrap; gap: 6px; }
+  .qo-pill {
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid var(--m-border);
+    border-radius: 999px;
+    background: var(--m-surface-2);
+    color: var(--m-text-2);
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    max-width: 45%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .qo-pill.on { border-color: var(--m-accent); background: var(--m-accent-soft); color: var(--m-accent); }
+
+  .qo-review { display: flex; flex-direction: column; gap: 8px; }
+  .qo-review-item { display: flex; flex-direction: column; gap: 2px; }
+  .qo-review-q { font-size: 14px; color: var(--m-text); }
+  .qo-review-a { font-size: 14px; color: var(--m-accent); padding-left: 10px; }
+  .qo-review-warn { font-size: 12px; color: var(--m-text-2); }
+
   .qo-body {
     margin: 0;
     font-size: 15px;
@@ -252,9 +358,10 @@
     word-break: break-word;
   }
   .qo-options { display: flex; flex-direction: column; gap: 8px; }
+  .qo-opt-wrap { display: flex; flex-direction: column; gap: 4px; }
   .qo-opt {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 10px;
     width: 100%;
     text-align: left;
@@ -269,6 +376,11 @@
     transition: border-color 0.15s, background 0.15s;
   }
   .qo-opt.on { border-color: var(--m-accent); background: var(--m-accent-soft); color: var(--m-accent); }
+  .qo-opt-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .qo-opt-label { font-weight: 600; word-break: break-word; }
+  .qo-opt-desc { font-size: 12px; color: var(--m-text-2); line-height: 1.45; }
+  .qo-clarify { border-style: dashed; }
+  .qo-clarify .qo-opt-label { font-weight: 500; color: var(--m-text-2); }
   .qo-dot {
     width: 18px; height: 18px;
     border-radius: 50%;
@@ -280,6 +392,19 @@
   }
   .qo-opt.on .qo-dot { border-color: var(--m-accent); background: var(--m-accent); }
   .qo-opt.on .qo-dot::after { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #fff; }
+
+  .qo-preview { font-size: 12px; color: var(--m-text-2); padding-left: 14px; }
+  .qo-preview pre {
+    margin: 6px 0 0;
+    padding: 10px;
+    background: var(--m-bg);
+    border: 1px solid var(--m-border);
+    border-radius: 10px;
+    overflow-x: auto;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
   .qo-free {
     border: 1px solid var(--m-border);
     border-radius: 10px;
@@ -300,16 +425,6 @@
     border-radius: 10px;
     background: var(--m-surface-2);
     color: var(--m-text-2);
-    font-size: 14px;
-    cursor: pointer;
-    font-family: inherit;
-  }
-  .qo-expand {
-    height: 38px;
-    padding: 0 12px;
-    border: none;
-    background: transparent;
-    color: var(--m-accent);
     font-size: 14px;
     cursor: pointer;
     font-family: inherit;
