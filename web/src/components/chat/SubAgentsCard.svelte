@@ -13,23 +13,30 @@
   let runningCount = $derived(agents.filter(a => a.status === 'running').length)
   let hasError = $derived(agents.some(a => a.status === 'error' || a.status === 'cancelled'))
 
-  // Track expanded state per agent. Done agents start expanded.
+  // Per-agent fold override on top of the status default (running rows start
+  // collapsed, finished rows open). Same policy as toolFold: the row is driven
+  // ONLY by the native <details> toggle event, never by a summary onclick —
+  // an onclick that flips state alongside the native toggle double-fires and
+  // leaves the chevron/state inverted against the DOM (the old two-clicks-to-
+  // expand bug). An override is recorded only while it diverges from the
+  // default and dropped when it realigns, so the reactive `open` binding
+  // re-asserting during streaming re-renders stays idempotent.
   let expanded = $state<Record<string, boolean>>({})
-  $effect(() => {
-    // Initialize expanded state for new agents
-    const newExpanded: Record<string, boolean> = { ...expanded }
-    let changed = false
-    for (const a of agents) {
-      if (!(a.id in newExpanded)) {
-        newExpanded[a.id] = a.status !== 'running'
-        changed = true
-      }
-    }
-    if (changed) expanded = newExpanded
-  })
 
-  function toggleExpand(id: string) {
-    expanded = { ...expanded, [id]: !expanded[id] }
+  function isOpen(a: SubAgentState): boolean {
+    return expanded[a.id] ?? (a.status !== 'running')
+  }
+
+  function onToggle(a: SubAgentState, open: boolean) {
+    if (open === (a.status !== 'running')) {
+      if (a.id in expanded) {
+        const next = { ...expanded }
+        delete next[a.id]
+        expanded = next
+      }
+    } else if (expanded[a.id] !== open) {
+      expanded = { ...expanded, [a.id]: open }
+    }
   }
 
   // Avatar initials: first letters of the description words, capped at 2 chars.
@@ -73,8 +80,9 @@
   </div>
 
   {#each agents as a (a.id)}
-    <details class="agent-row" open={expanded[a.id] ?? (a.status !== 'running')}>
-      <summary class="agent-summary" onclick={() => toggleExpand(a.id)}>
+    <details class="agent-row" open={isOpen(a)}
+      ontoggle={(e) => onToggle(a, (e.currentTarget as HTMLDetailsElement).open)}>
+      <summary class="agent-summary">
         <span class="agent-avatar"
           class:blue={a.status === 'running'}
           class:green-av={a.status === 'done'}
@@ -105,7 +113,7 @@
             {$t('agent.done_n_tools').replace('{n}', String(toolCount(a)))}
           </span>
         {/if}
-        <iconify-icon icon={(expanded[a.id] ?? (a.status !== 'running')) ? 'lucide:chevron-down' : 'lucide:chevron-right'} width="13" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
+        <iconify-icon icon={isOpen(a) ? 'lucide:chevron-down' : 'lucide:chevron-right'} width="13" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
       </summary>
       <div class="agent-body">
         <AgentTrail steps={a.steps} running={a.status === 'running'} result={a.result ?? ''} />
