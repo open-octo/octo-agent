@@ -308,7 +308,7 @@ flowchart TD
 
 - **两个内置二进制**：ripgrep 编译进二进制（`go:embed`），用户不需要装；Python 的 openpyxl 依赖通过捆绑 uv 解决。
 - **二十个内置技能，主厨精选**：不是"装完才用"的插件市场，而是打开就能端上桌的招牌套件。
-  - **编码链**：`grill-me` → `tech-design` → `implement` → `code-review` 构成从方案拷问到代码落地的完整管线，`worktree-isolate` 提供隔离沙盒，`workflow-creator` 把单个 skill 拼成可保存的工作流，`artifact-design` 和 `dataviz` 负责架构图和可视化。
+  - **编码链**：`grill-me` → `tech-design` → `implement` → `code-review` 构成从方案拷问到代码落地的完整管线，`worktree-isolate` 提供隔离沙盒，`workflow-creator` 把单个 skill 拼成可保存的工作流，`artifact-design` 负责架构图和可视化。
   - **内容线**：`ppt-master`（多角色协作做 PPT）、`image-gen`（AI 生图）、`office-xlsx`（编程操作 Excel）、`deep-research`（多来源深度调研）、`web-access`（反爬网页抓取）——日常写报告、做演示、搞调研一站式覆盖。
   - 触发零门槛：每个 skill 的 description 内嵌了中英文触发词——用户说"帮我审下代码"自动命中 `code-review`，"把调研结果做成 PPT"自动命中 `ppt-master`，不需要知道任何一个 skill 名字。
 - **六个元技能**（`skill-creator`、`mcp-creator`、`channel-manager`、`cron-task-creator`、`workflow-creator`、`expert-agent-manager`）专门处理 octo 自己的配置——引导用户走完本需要手写 YAML 的流程。它们依赖文件工具（`write_file`、`edit_file`、`terminal`）加上 octo 专属知识，而不是为每段 YAML 都造专用工具——"工具可组合"这个原则既用在用户的 workflow 里，也用在 octo 自己的入门引导上。

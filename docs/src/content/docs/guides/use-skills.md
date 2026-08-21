@@ -54,7 +54,7 @@ for the task in plain language instead and the model loads the matching skill it
 
 ## Built-in skills
 
-octo ships 22 skills out of the box. Every one triggers automatically when the model judges a task
+octo ships 21 skills out of the box. Every one triggers automatically when the model judges a task
 matches its description — you rarely need to invoke them by name.
 
 **Get started**
@@ -96,8 +96,7 @@ matches its description — you rarely need to invoke them by name.
 | Skill | What it does |
 |---|---|
 | `web-access` | Methodology + a cross-session experience library for hard web targets: login-gated or anti-bot sites, unknown page structure, cross-source verification |
-| `artifact-design` | Design guidance for any self-contained HTML/Markdown page shown in the Artifacts panel — reports, dashboards, diagrams, generated UIs |
-| `dataviz` | Chart/graph/dashboard rules — chart-type selection, categorical/sequential/diverging color systems, legend/axis/tooltip conventions |
+| `artifact-design` | Design guidance for any self-contained HTML/Markdown page shown in the Artifacts panel — reports, dashboards, diagrams, generated UIs — including chart-type selection and color-system rules for any charts on the page |
 | `genui` | Renders a reply as real components in the chat — dashboards, filterable tables, charts, mermaid diagrams, forms — instead of prose, with most interaction resolving in the browser. See [Interactive panels](/docs/guides/genui/) |
 | `office-xlsx` | Creates/reads/edits `.xlsx` spreadsheets — formulas, styling, merged cells, multiple sheets, charts, validation |
 | `ppt-master` | Turns a document (PDF/DOCX/URL/Markdown) into an editable PowerPoint deck — SVG-authored slides with native charts/tables and speaker notes, exported to `.pptx` |

@@ -86,7 +86,7 @@ func (ShowArtifactTool) Definition() agent.ToolDefinition {
 			"web UI the file opens in the Artifacts panel (HTML renders in a sandboxed preview); in " +
 			"the TUI the path renders as a click-to-open link; elsewhere the path is simply " +
 			"reported. The file must already exist. Before authoring an HTML artifact's content, " +
-			"check the artifact-design skill (and dataviz for any chart/graph) for the panel's " +
+			"check the artifact-design skill for the panel's " +
 			"constraints — self-contained only, sandboxed iframe, narrow default width.",
 		Parameters: map[string]any{
 			"type": "object",

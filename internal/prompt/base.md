@@ -189,4 +189,4 @@ Create both files with `write_file`. No special tools needed.
 - Inline all CSS (`<style>`) and JS (`<script>`)
 - Use `FileReader` + `<input type="file">` for file processing
 - Use emoji or inline SVG for icons
-- Follow `artifact-design` and `dataviz` skill conventions for layout and colors
+- Follow `artifact-design` skill conventions for layout and colors

@@ -1,7 +1,7 @@
 # Default palette
 
 A validated starting palette for the three color systems described in
-`dataviz`'s SKILL.md. Swap these hex values for a brand palette when one
+`charts.md`. Swap these hex values for a brand palette when one
 exists; keep the lightness/spacing relationships between stops when you do —
 that's what keeps the ramp readable, not the specific hues.
 

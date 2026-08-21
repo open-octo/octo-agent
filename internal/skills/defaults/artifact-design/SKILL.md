@@ -1,6 +1,6 @@
 ---
 name: artifact-design
-description: Design guidance for any self-contained HTML/Markdown file shown in octo's Artifacts panel — reports, dashboards, architecture/system diagrams, generated UIs, slide-style pages. Read this BEFORE writing the file, not after — it calibrates how much design effort the request warrants and covers the panel's real constraints (sandboxed iframe, no external resources, narrow default width, no live theme push). Use when the user asks to "画架构图" / "generate a diagram" / "make a dashboard" / "produce a report page" / "visualize this as a page" / build any artifact meant to be looked at rather than edited. For chart/graph/plot-specific color and mark rules, also read the dataviz skill.
+description: Design guidance for any self-contained HTML/Markdown file shown in octo's Artifacts panel — reports, dashboards, architecture/system diagrams, generated UIs, slide-style pages. Read this BEFORE writing the file, not after — it calibrates how much design effort the request warrants and covers the panel's real constraints (sandboxed iframe, no external resources, narrow default width, no live theme push). Use when the user asks to "画架构图" / "generate a diagram" / "make a dashboard" / "produce a report page" / "visualize this as a page" / build any artifact meant to be looked at rather than edited. If the page contains a chart, graph, plot, heatmap, or stat tile, also read references/charts.md — chart-type selection, color systems, legend/axis/tooltip conventions.
 ---
 
 # Artifact design
@@ -11,6 +11,12 @@ automatically in the web UI's Artifacts panel; a file built some other way (a
 script, a build step, a download) needs one `show_artifact` call with its
 absolute path. This skill is about what to put *inside* the HTML — read it
 before writing the first line.
+
+If the page contains any chart, graph, plot, heatmap, sparkline, or stat
+tile, read `references/charts.md` before writing the chart — chart-type
+selection, the color system (with a validated default palette in
+`references/palette.md`), legend/axis/tooltip conventions, and chart
+legibility at the panel's docked width.
 
 ## How the panel actually works — design within these constraints
 
