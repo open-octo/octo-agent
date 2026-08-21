@@ -619,14 +619,16 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, verr.Error())
 		return
 	}
+	groupMu.LockWrite()
+	defer groupMu.Unlock()
+	// Workspace generation sits inside the write lock: its exists-check plus
+	// mkdir is what keeps two same-named projects off one directory, and only
+	// the cross-process lock makes that check-then-create atomic.
 	workspace, err := workspaceDirForProject(s.curWorkspaceDir(), name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	groupMu.LockWrite()
-	defer groupMu.Unlock()
 	groups, err := loadSessionGroups()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

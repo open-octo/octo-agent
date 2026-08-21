@@ -41,8 +41,11 @@ func TestAdoptTaskWorkingDirs_ChosenDirectoryBecomesAProject(t *testing.T) {
 	if p == nil {
 		t.Fatal("session was not adopted into a project")
 	}
-	if memory.NormalizeDir(p.WorkingDir) != memory.NormalizeDir(dir) {
-		t.Errorf("project working dir = %q, want %q", p.WorkingDir, dir)
+	if len(p.SourceDirs) != 1 || memory.NormalizeDir(p.SourceDirs[0]) != memory.NormalizeDir(dir) {
+		t.Errorf("project source dirs = %v, want the session's %q mounted", p.SourceDirs, dir)
+	}
+	if p.WorkingDir == "" || memory.NormalizeDir(p.WorkingDir) == memory.NormalizeDir(dir) {
+		t.Errorf("project working dir = %q, want a generated workspace distinct from %q", p.WorkingDir, dir)
 	}
 	if p.Name != filepath.Base(memory.NormalizeDir(dir)) {
 		t.Errorf("project name = %q, want the directory's basename %q", p.Name, filepath.Base(dir))
@@ -169,8 +172,10 @@ func TestAdoptTaskWorkingDirs_Idempotent(t *testing.T) {
 	}
 	n := 0
 	for i := range groups {
-		if groups[i].WorkingDir != "" && memory.NormalizeDir(groups[i].WorkingDir) == memory.NormalizeDir(dir) {
-			n++
+		for _, sd := range groups[i].SourceDirs {
+			if memory.NormalizeDir(sd) == memory.NormalizeDir(dir) {
+				n++
+			}
 		}
 	}
 	if n != 1 {

@@ -96,8 +96,8 @@ func TestEnsureProject_CrossProcessLockKeepsEveryGroup(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for i := range groups {
-		if wd := groups[i].WorkingDir; wd != "" {
-			seen[memory.NormalizeDir(wd)] = true
+		for _, sd := range groups[i].SourceDirs {
+			seen[memory.NormalizeDir(sd)] = true
 		}
 	}
 

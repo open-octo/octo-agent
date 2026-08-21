@@ -14,21 +14,34 @@ import (
 // for the directory it was started in. Both come through here so the
 // find-or-create and the filing happen under one lock and one save.
 
-// findOrCreateProject returns the id of the project working in dir, appending
-// one named after the directory when none exists. In-memory: the caller holds
+// findOrCreateProject returns the id of the project owning dir, appending one
+// named after the directory when none exists. In-memory: the caller holds
 // groupMu.LockWrite and owns the save, which is what lets a create and a filing
 // land as one write.
 //
-// The match is on the directory rather than the name, since names are not
-// unique and the directory is what governs where sessions run. A directory that
-// no longer validates (gone, unreadable) is an error rather than a group
-// without one: a plain group would file sessions somewhere that answers none of
-// the questions the directory did.
+// A directory is owned two ways: as a project's workspace (the session was
+// already running in the project's own ground — also how pre-workspace
+// registries, whose WorkingDir is still a user directory, keep matching), or
+// as a mounted source folder. A source folder may be mounted by several
+// projects; this returns the first, which is the right call for the startup
+// adoption pass — the interactive CLI disambiguates with a picker before ever
+// reaching here.
+//
+// Creating mounts the directory rather than adopting it as the project
+// directory: the project's own directory is always a generated workspace. A
+// directory that no longer validates (gone, unreadable) is an error rather
+// than a group without one: a plain group would file sessions somewhere that
+// answers none of the questions the directory did.
 func findOrCreateProject(gf *groupFile, dir string) (string, error) {
 	target := memory.NormalizeDir(dir)
 	for i := range gf.Groups {
 		if wd := gf.Groups[i].WorkingDir; wd != "" && memory.NormalizeDir(wd) == target {
 			return gf.Groups[i].ID, nil
+		}
+		for _, sd := range gf.Groups[i].SourceDirs {
+			if memory.NormalizeDir(sd) == target {
+				return gf.Groups[i].ID, nil
+			}
 		}
 	}
 
@@ -40,7 +53,11 @@ func findOrCreateProject(gf *groupFile, dir string) (string, error) {
 	if name == "" || name == "." || name == string(filepath.Separator) {
 		name = validated
 	}
-	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: validated}
+	workspace, err := workspaceDirForProject(resolveWorkspaceBase(), name)
+	if err != nil {
+		return "", err
+	}
+	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workspace, SourceDirs: []string{validated}}
 	gf.Groups = append(gf.Groups, g)
 	return g.ID, nil
 }
