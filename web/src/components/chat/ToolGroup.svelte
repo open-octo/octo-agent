@@ -47,6 +47,29 @@
     return id ? sessionTrails?.workflows?.[id] : undefined
   }
 
+  // Fold overrides for the nested workflow-agent rows, keyed
+  // "runId/agentId" — driven only by the native <details> toggle, with the
+  // override dropped when it realigns with the status default, so re-renders
+  // re-asserting `open` can't swallow or invert a user's fold (same policy
+  // as toolFold / SubAgentsCard / WorkflowsCard).
+  let wfAgentFolds = $state<Record<string, boolean>>({})
+
+  function wfAgentOpen(key: string, dflt: boolean): boolean {
+    return wfAgentFolds[key] ?? dflt
+  }
+
+  function onWfAgentToggle(key: string, dflt: boolean, open: boolean) {
+    if (open === dflt) {
+      if (key in wfAgentFolds) {
+        const next = { ...wfAgentFolds }
+        delete next[key]
+        wfAgentFolds = next
+      }
+    } else if (wfAgentFolds[key] !== open) {
+      wfAgentFolds = { ...wfAgentFolds, [key]: open }
+    }
+  }
+
   function promoteTerminal() {
     const sid = $activeSessionId
     if (sid) ws.promoteSyncTerminal(sid)
@@ -517,7 +540,8 @@
               <div class="wf-log mono">{line}</div>
             {/each}
             {#each wt.agents as a (a.id)}
-              <details class="wf-agent" open={a.status === 'running'}>
+              <details class="wf-agent" open={wfAgentOpen(wt.id + '/' + a.id, a.status === 'running')}
+                ontoggle={(e) => onWfAgentToggle(wt.id + '/' + a.id, a.status === 'running', (e.currentTarget as HTMLDetailsElement).open)}>
                 <summary class="wf-agent-summary">
                   {#if a.status === 'running'}
                     <iconify-icon icon="ant-design:loading-outlined" width="12" style="color:var(--blue-6);animation:octo-spin 0.8s linear infinite"></iconify-icon>
