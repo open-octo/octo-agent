@@ -376,7 +376,7 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 		if werr != nil {
 			return agent.ToolResult{}, fmt.Errorf("workflow: run interrupted: %w", werr)
 		}
-		return agent.ToolResult{Text: formatRunDetail(snap)}, nil
+		return agent.ToolResult{Text: formatRunDetail(snap), UI: workflowResultUI(runID)}, nil
 	}
 
 	return agent.ToolResult{Text: fmt.Sprintf(
@@ -386,7 +386,16 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 			"the result. While it runs, you may continue with other independent tasks. If you have "+
 			"no other task to do, report the launch to the user and stop — do not spin in a "+
 			"polling loop. (workflow_status(%q) exists for on-demand progress checks, e.g. when "+
-			"the user asks.)</system-reminder>", runID, runID)}, nil
+			"the user asks.)</system-reminder>", runID, runID),
+		UI: workflowResultUI(runID)}, nil
+}
+
+// workflowResultUI is the structured payload on a workflow tool result that
+// lets the web transcript's tool card claim the run's event trail (see
+// dev-docs/agent-run-panel-design.md). It persists with the session on the
+// tool_result block and never reaches the model.
+func workflowResultUI(runID string) map[string]any {
+	return map[string]any{"run_id": runID}
 }
 
 // encodeWorkflowArgs serializes the tool's `args` input to the JSON string the
