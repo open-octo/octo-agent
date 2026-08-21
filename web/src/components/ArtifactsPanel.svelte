@@ -376,6 +376,7 @@
     {#if !cur}
       <div class="topbar" class:native-lift={liftForTrafficLights}>
         {@render modeSwitcher()}
+        <span class="file-name">{$t('panel.mode_artifacts')}</span>
         <span style="flex:1"></span>
         {@render topbarControls()}
       </div>
