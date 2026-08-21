@@ -164,15 +164,7 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 			if s.wsHub == nil {
 				return
 			}
-			s.wsHub.broadcast(sid, map[string]any{
-				"type":        "workflow_event",
-				"session_id":  sid,
-				"run_id":      ev.RunID,
-				"description": ev.Description,
-				"kind":        ev.Kind,
-				"line":        ev.Line,
-				"status":      ev.Status,
-			})
+			s.wsHub.broadcast(sid, workflowEventPayload(sid, ev))
 		},
 		WorkflowOnDone: func(ev tools.WorkflowNotification) {
 			s.deliverModelNote(sid, tools.FormatWorkflowNote(ev))
@@ -180,6 +172,30 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	})
 
 	return ctx, executor, mgr, cleanup, nil
+}
+
+// workflowEventPayload is the single WS wire shape for one workflow runtime
+// event — shared by the live broadcast above and the late-join replay in
+// replayLiveState so the two can never drift.
+func workflowEventPayload(sessionID string, ev tools.WorkflowEvent) map[string]any {
+	return map[string]any{
+		"type":        "workflow_event",
+		"session_id":  sessionID,
+		"run_id":      ev.RunID,
+		"description": ev.Description,
+		"kind":        ev.Kind,
+		"line":        ev.Line,
+		"status":      ev.Status,
+		"agent_id":    ev.AgentID,
+		"agent_label": ev.AgentLabel,
+		"tool_id":     ev.ToolID,
+		"tool_name":   ev.ToolName,
+		"tool_input":  ev.ToolInput,
+		"tool_output": ev.ToolOutput,
+		"text":        ev.Text,
+		"reply":       ev.Reply,
+		"error":       ev.Error,
+	}
 }
 
 // subAgentEventPayload is the single WS wire shape for one sub-agent runtime

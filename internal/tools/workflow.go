@@ -155,6 +155,43 @@ func (WorkflowTool) Definition() agent.ToolDefinition {
 	}
 }
 
+// instrumentWorkflowAgent wires one agent()/skill() call into the owning
+// run's structured event stream: it emits "agent_started", stamps a sub-agent
+// event sink into ctx that translates the child's tool/text activity (see
+// Spawner.runChild) onto the corresponding agent_* workflow kinds, and returns
+// a done func that emits "agent_done" with the capped reply or the error.
+// Outside a managed run (no emitter in ctx) it is a no-op. seq is the run's
+// shared agent counter; safe for concurrent agent() calls under parallel().
+func instrumentWorkflowAgent(ctx context.Context, seq *int32, label string) (context.Context, func(reply string, err error)) {
+	emit := workflowEmitFrom(ctx)
+	if emit == nil {
+		return ctx, func(string, error) {}
+	}
+	agentID := fmt.Sprintf("a%d", atomic.AddInt32(seq, 1))
+	emit(WorkflowEvent{Kind: "agent_started", AgentID: agentID, AgentLabel: label})
+	ctx = WithSubAgentEventSink(ctx, func(se SubAgentEvent) {
+		switch se.Kind {
+		case "tool":
+			emit(WorkflowEvent{Kind: "agent_tool", AgentID: agentID, ToolID: se.ToolID, ToolName: se.ToolName, ToolInput: se.ToolInput})
+		case "tool_done":
+			emit(WorkflowEvent{Kind: "agent_tool_done", AgentID: agentID, ToolID: se.ToolID, ToolName: se.ToolName, ToolOutput: se.ToolOutput})
+		case "tool_error":
+			emit(WorkflowEvent{Kind: "agent_tool_error", AgentID: agentID, ToolID: se.ToolID, ToolName: se.ToolName, ToolOutput: se.ToolOutput})
+		case "text":
+			emit(WorkflowEvent{Kind: "agent_text", AgentID: agentID, Text: se.Text})
+		}
+	})
+	return ctx, func(reply string, err error) {
+		ev := WorkflowEvent{Kind: "agent_done", AgentID: agentID, AgentLabel: label}
+		if err != nil {
+			ev.Error = err.Error()
+		} else {
+			ev.Reply = ClipForEvent(reply, SubAgentEventResultCap)
+		}
+		emit(ev)
+	}
+}
+
 // savedWorkflowsParamDesc builds the `name` parameter description, listing the
 // saved workflows currently in the registry (~/.octo/workflows) so the model
 // knows what it can run by name.
@@ -266,8 +303,12 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 	}
 
 	// agent() delegates to the same Spawner that backs sub_agent. The Spawner
-	// marks children as sub-agents, so a workflow agent can't recurse.
+	// marks children as sub-agents, so a workflow agent can't recurse. Each
+	// call is instrumented onto the run's structured event stream (agent_*
+	// kinds) so panels can show its tool trail and reply, not just log lines.
+	var agentSeq int32
 	af := func(c context.Context, prompt string, opts workflow.AgentOptions) workflow.AgentResult {
+		c, done := instrumentWorkflowAgent(c, &agentSeq, firstLine(prompt))
 		res, err := spawner.Spawn(c, SpawnRequest{
 			Description: firstLine(prompt),
 			Prompt:      prompt,
@@ -278,8 +319,10 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 			Isolation:   opts.Isolation,
 		})
 		if err != nil {
+			done("", err)
 			return workflow.AgentResult{Err: err}
 		}
+		done(res.Reply, nil)
 		return workflow.AgentResult{
 			Reply:        res.Reply,
 			InputTokens:  res.InputTokens,
@@ -291,7 +334,10 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 	// recording() replays a browser recording deterministically. Both arrive
 	// through this one channel — see dispatchWorkflowSkill for the routing.
 	sf := func(c context.Context, name, paramsJSON, schema string) workflow.AgentResult {
-		return dispatchWorkflowSkill(c, spawner, name, paramsJSON, schema)
+		c, done := instrumentWorkflowAgent(c, &agentSeq, "skill: "+name)
+		r := dispatchWorkflowSkill(c, spawner, name, paramsJSON, schema)
+		done(r.Reply, r.Err)
+		return r
 	}
 
 	argsJSON, err := encodeWorkflowArgs(input["args"])

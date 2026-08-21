@@ -27,13 +27,31 @@ const maxWorkflowLogLines = 500
 const workflowPollStopThreshold = 3
 
 // WorkflowEvent is emitted as a background run progresses, for live display
-// (the web panel). Kind is "started" | "progress" | "done".
+// (the web panel). Kind is one of:
+//
+//   - "started" / "progress" / "done" — the run's own lifecycle, as before.
+//   - "agent_started" / "agent_tool" / "agent_tool_done" / "agent_tool_error" /
+//     "agent_text" / "agent_done" — one agent()/skill() call's structured
+//     activity, translated from the child's SubAgentEvents (see
+//     instrumentWorkflowAgent). AgentID scopes these to one call within the
+//     run; the free-text payloads arrive already capped by the sub-agent
+//     event layer (Reply is capped here, at emission).
 type WorkflowEvent struct {
 	RunID       string
 	Description string
 	Kind        string
 	Line        string // the progress/log line for Kind=="progress"
 	Status      string // "running" | "done" | "error" for Kind=="done"
+
+	AgentID    string // per-run agent() handle, e.g. "a1" (agent_* kinds)
+	AgentLabel string // first line of the agent's prompt, or "skill: <name>"
+	ToolID     string
+	ToolName   string
+	ToolInput  map[string]any
+	ToolOutput string
+	Text       string
+	Reply      string // "agent_done": the agent's reply, capped
+	Error      string // "agent_done": non-empty when the agent() call failed
 }
 
 // WorkflowNotification is delivered to the onDone hook when a background run
@@ -89,6 +107,7 @@ type WorkflowRunSnapshot struct {
 	Output       string
 	ErrMsg       string
 	Logs         []string
+	AgentEvents  []WorkflowEvent // retained structured agent_* events
 	JournalRunID string
 	Start        time.Time
 	End          time.Time
@@ -112,10 +131,29 @@ type workflowRun struct {
 	errMsg       string
 	output       string
 	logs         []string
+	agentEvents  []WorkflowEvent // retained agent_* events for late-joining clients
 	journalRunID string
 	end          time.Time
 	lastActivity time.Time
 	killed       bool
+}
+
+// maxWorkflowAgentEvents caps how many structured agent events are retained
+// per run. Old events drop in FIFO order — late-joining panels care most
+// about recent activity, same policy as the sub-agent event buffer.
+const maxWorkflowAgentEvents = 500
+
+// recordAgentEvent retains one agent_* event for late-join replay and marks
+// the run live (agent activity is a liveness signal, like a log line).
+func (r *workflowRun) recordAgentEvent(ev WorkflowEvent, now time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.agentEvents) >= maxWorkflowAgentEvents {
+		copy(r.agentEvents, r.agentEvents[1:])
+		r.agentEvents = r.agentEvents[:len(r.agentEvents)-1]
+	}
+	r.agentEvents = append(r.agentEvents, ev)
+	r.lastActivity = now
 }
 
 // appendLog records a progress line and marks the run live (updates
@@ -173,6 +211,8 @@ func (r *workflowRun) snapshot() WorkflowRunSnapshot {
 	}
 	logs := make([]string, len(r.logs))
 	copy(logs, r.logs)
+	agentEvents := make([]WorkflowEvent, len(r.agentEvents))
+	copy(agentEvents, r.agentEvents)
 	return WorkflowRunSnapshot{
 		ID:           r.id,
 		Description:  r.description,
@@ -180,6 +220,7 @@ func (r *workflowRun) snapshot() WorkflowRunSnapshot {
 		Output:       r.output,
 		ErrMsg:       r.errMsg,
 		Logs:         logs,
+		AgentEvents:  agentEvents,
 		JournalRunID: r.journalRunID,
 		Start:        r.start,
 		End:          r.end,
@@ -226,6 +267,23 @@ func (m *WorkflowManager) SetOnDone(fn func(WorkflowNotification)) {
 	m.mu.Unlock()
 }
 
+// workflowEmitKey carries the per-run structured event emitter stamped by
+// WorkflowManager.Start, so the agent()/skill() host closures can attach
+// their activity to the owning run without threading the run id (or the
+// manager) through the workflow engine.
+type workflowEmitKey struct{}
+
+func withWorkflowEmit(ctx context.Context, emit func(WorkflowEvent)) context.Context {
+	return context.WithValue(ctx, workflowEmitKey{}, emit)
+}
+
+// workflowEmitFrom returns the run's emitter, or nil outside a managed run
+// (tests driving workflow.Run directly).
+func workflowEmitFrom(ctx context.Context) func(WorkflowEvent) {
+	emit, _ := ctx.Value(workflowEmitKey{}).(func(WorkflowEvent))
+	return emit
+}
+
 func (m *WorkflowManager) emit(ev WorkflowEvent) {
 	m.mu.Lock()
 	fn := m.onEvent
@@ -267,6 +325,19 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 	}
 	m.runs[id] = run
 	m.mu.Unlock()
+
+	// Stamp the per-run structured event emitter so the script's agent()/skill()
+	// host closures can attach their activity to this run (see
+	// instrumentWorkflowAgent) without the engine learning about run ids.
+	// Events are retained on the run for late-join replay and forwarded live.
+	ctx = withWorkflowEmit(ctx, func(ev WorkflowEvent) {
+		ev.RunID = id
+		if ev.Description == "" {
+			ev.Description = req.Description
+		}
+		run.recordAgentEvent(ev, time.Now())
+		m.emit(ev)
+	})
 
 	m.emit(WorkflowEvent{RunID: id, Description: req.Description, Kind: "started"})
 

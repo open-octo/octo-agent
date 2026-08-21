@@ -243,28 +243,26 @@ func (s *Server) replayLiveState(sessionID string, conn *wsConn) {
 		if run.Status != "running" {
 			continue
 		}
-		if b, err := json.Marshal(map[string]any{
-			"type":        "workflow_event",
-			"session_id":  sessionID,
-			"run_id":      run.ID,
-			"description": run.Description,
-			"kind":        "started",
-			"line":        "",
-			"status":      run.Status,
-		}); err == nil {
+		if b, err := json.Marshal(workflowEventPayload(sessionID, tools.WorkflowEvent{
+			RunID: run.ID, Description: run.Description, Kind: "started", Status: run.Status,
+		})); err == nil {
 			conn.send <- b
 		}
 		for _, line := range run.Logs {
-			if b, err := json.Marshal(map[string]any{
-				"type":        "workflow_event",
-				"session_id":  sessionID,
-				"run_id":      run.ID,
-				"description": run.Description,
-				"kind":        "progress",
-				"line":        line,
-				"status":      run.Status,
-			}); err == nil {
+			if b, err := json.Marshal(workflowEventPayload(sessionID, tools.WorkflowEvent{
+				RunID: run.ID, Description: run.Description, Kind: "progress", Line: line, Status: run.Status,
+			})); err == nil {
 				conn.send <- b
+			}
+		}
+		// Replay the retained structured agent_* events too, so a late-joining
+		// tab rebuilds each agent()'s trail, not just the log tail.
+		for _, ev := range run.AgentEvents {
+			if b, err := json.Marshal(workflowEventPayload(sessionID, ev)); err == nil {
+				select {
+				case conn.send <- b:
+				default:
+				}
 			}
 		}
 	}
