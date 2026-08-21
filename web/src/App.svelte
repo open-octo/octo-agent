@@ -110,6 +110,20 @@
     }
   }
 
+  // Navigating to a different view closes the artifacts panel — expanded, it
+  // would otherwise keep covering the content area the new view just took
+  // over (the main column stays display:none while the panel is expanded).
+  // Guarded on an actual change: view.set re-fires subscribers on same-value
+  // sets, and flows that open the panel without navigating (a Light App
+  // opening over its own view, the header/palette toggles) must not be undone.
+  let prevView = get(view)
+  view.subscribe(v => {
+    if (v === prevView) return
+    prevView = v
+    panelExpanded.set(false)
+    panelContent.set(null)
+  })
+
   onMount(() => {
     // Access-key gate, BEFORE any gated call. Loopback visits pass instantly
     // (the server exempts them); a networked server without a valid key prompts
