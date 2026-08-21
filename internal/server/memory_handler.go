@@ -126,9 +126,12 @@ func (s *Server) resolveMemoryPath(fname, source string) (string, bool) {
 		}
 		// Base can still yield "." or ".." (Base("../..") == ".."), which
 		// would resolve to the root itself or its parent — reject those so a
-		// slug is always exactly one component below the root.
+		// slug is always exactly one component below the root. Same IsLocal
+		// idiom as the fname check above: for a single component it rejects
+		// exactly ".." (and absolute paths), and CodeQL recognizes it as a
+		// path-injection barrier where a plain ".." comparison is not.
 		slug := filepath.Base(source)
-		if slug == "." || slug == ".." {
+		if slug == "." || !filepath.IsLocal(slug) {
 			return "", false
 		}
 		d := filepath.Join(root, slug)
