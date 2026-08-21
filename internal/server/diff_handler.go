@@ -65,10 +65,16 @@ func (s *Server) handleGetSessionFileDiff(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// First whitelist: the repository must be one this session actually
-	// resolves to, decided here and not by the caller.
-	root := filepath.Clean(repo)
-	if !containsString(s.diffRepoRootsForSession(id), root) {
+	// Both query parameters are matched against server-derived values and then
+	// discarded: root below comes from diffRepoRootsForSession (git's own
+	// rev-parse output) and entry.path from git status, so nothing the caller
+	// wrote reaches a subprocess or a file operation. Same model as
+	// handleGetArtifact, which opens the transcript's copy of a path rather
+	// than the request's.
+	//
+	// First whitelist: the repository must be one this session resolves to.
+	root, ok := matchedRoot(s.diffRepoRootsForSession(id), repo)
+	if !ok {
 		writeError(w, http.StatusForbidden, "repository not in this session's scope")
 		return
 	}
@@ -97,7 +103,7 @@ func (s *Server) handleGetSessionFileDiff(w http.ResponseWriter, r *http.Request
 	if !entry.untracked() {
 		// Scope the diff to this file. A rename needs both sides on the
 		// pathspec, otherwise git reports it as an unrelated add.
-		paths := []string{rel}
+		paths := []string{entry.path}
 		if entry.origPath != "" {
 			paths = append(paths, entry.origPath)
 		}
@@ -106,7 +112,7 @@ func (s *Server) handleGetSessionFileDiff(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		patch = indexPatches(parseUnifiedDiff(out))[rel]
+		patch = indexPatches(parseUnifiedDiff(out))[entry.path]
 	}
 
 	file := buildDiffFile(root, *entry, patch, diffFileNoLimit)
@@ -282,11 +288,16 @@ func countPatchLines(p *diffPatch) int {
 	return n
 }
 
-func containsString(list []string, want string) bool {
-	for _, v := range list {
-		if v == want {
-			return true
+// matchedRoot finds the session-resolved repository root the caller named and
+// returns the server's own string for it, not the caller's. Handing the
+// resolved copy onward is what keeps request data out of the git subprocess —
+// the comparison authorises, the returned value is what gets used.
+func matchedRoot(roots []string, want string) (string, bool) {
+	want = filepath.Clean(want)
+	for _, root := range roots {
+		if root == want {
+			return root, true
 		}
 	}
-	return false
+	return "", false
 }
