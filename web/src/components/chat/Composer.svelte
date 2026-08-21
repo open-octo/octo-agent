@@ -5,7 +5,7 @@
     running, activeSessionId, chatStreaming, sessions, sessionGroups,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
     globalPermissionMode, nativeShell, localAccess, activeAgent, pendingModel, view, settingsModalOpen,
-    pendingAgent, pendingWorkingDir, pendingGroupId, normalizeDir,
+    pendingAgent, pendingWorkingDir, pendingGroupId, normalizeDir, projectsClaimingDir,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
@@ -13,7 +13,8 @@
   import { submitIntent } from '../../lib/composerKeys'
   import { composeSlashCommand } from '../../lib/slashCompose'
   import FolderPickerModal from '../overlays/FolderPickerModal.svelte'
-  import type { McpServerDetail, McpTool } from '../../lib/types'
+  import ProjectModal from '../overlays/ProjectModal.svelte'
+  import type { McpServerDetail, McpTool, SessionGroup } from '../../lib/types'
   import { getMcpServer } from '../../lib/api'
 
   let { onSend }: { onSend?: (text: string, files?: any[], queued?: boolean) => void } = $props()
@@ -651,9 +652,11 @@
     if (docked) return $sessionGroups.find(g => g.id === docked && !!g.working_dir) ?? null
     const dir = $pendingWorkingDir
     if (!dir) return null
-    // Excluding a scheduled task's cluster: it can carry a directory and is
-    // still not a project to file a new session under.
-    return $sessionGroups.find(g => !g.task_id && !!g.working_dir && normalizeDir(g.working_dir!) === normalizeDir(dir)) ?? null
+    // A parked folder pick belongs to whichever project references it — as a
+    // mounted source folder now, not only as the directory itself.
+    const norm = normalizeDir(dir)
+    return $sessionGroups.find(g => !g.task_id && !!g.working_dir &&
+      (normalizeDir(g.working_dir!) === norm || (g.source_dirs ?? []).some(sd => normalizeDir(sd) === norm))) ?? null
   })
   // A docked group's own directory governs the session, exactly as it does for
   // a session already inside a project. A plain group has no directory to show,
@@ -702,6 +705,14 @@
   let defaultModelId = $state('')
   let modelMenu = $state(false)
   let reasonMenu = $state(false)
+  // The landing page's project picker: search + list + create + open-folder.
+  let projMenu = $state(false)
+  let projQuery = $state('')
+  // When an opened folder is referenced by several projects, the menu narrows
+  // to those claimants so the user picks explicitly instead of us guessing.
+  let claimChoices = $state<SessionGroup[] | null>(null)
+  let projectModalOpen = $state(false)
+  let projectModalGroup = $state<SessionGroup | null>(null)
   let agentMenu = $state(false)
   let permMenu = $state(false)
 
@@ -891,16 +902,43 @@
     }
   }
 
-  function closeMenus() { modelMenu = false; reasonMenu = false; agentMenu = false; permMenu = false }
+  function closeMenus() { modelMenu = false; reasonMenu = false; agentMenu = false; permMenu = false; projMenu = false; claimChoices = null }
+
+  // The landing page's project list: claimants-only while an ambiguous folder
+  // pick is being resolved, otherwise every project, filtered by the query.
+  let projChoices = $derived.by(() => {
+    const base = claimChoices ?? $sessionGroups.filter(g => !!g.working_dir)
+    const q = projQuery.trim().toLowerCase()
+    return q ? base.filter(g => g.name.toLowerCase().includes(q)) : base
+  })
+
+  function pickProject(g: SessionGroup) {
+    pendingGroupId.set(g.id)
+    pendingWorkingDir.set('')
+    closeMenus()
+  }
 
   // Shared by the typed input and the folder picker: PATCH the session working
   // dir and store the canonical path the server resolved (~ expanded, absolute).
   // Returns whether it succeeded so callers can close their own UI.
   async function applyWorkingDir(dir: string): Promise<boolean> {
-    // Landing page: park the pick instead. ensureActiveSession consumes it to
-    // decide which project the session is born in, and the server canonicalises
-    // the path there (the pickers already hand back an absolute one).
+    // Landing page: the opened folder resolves to a project by the same
+    // three-state rule the CLI applies — a unique claimant is joined, several
+    // narrow the picker to an explicit choice, none parks the folder and the
+    // first send creates a project mounting it (resolveProjectForDir).
     if (!sid) {
+      const claims = projectsClaimingDir(dir)
+      if (claims.length === 1) {
+        pickProject(claims[0])
+        return true
+      }
+      if (claims.length > 1) {
+        claimChoices = claims
+        projQuery = ''
+        projMenu = true
+        return true
+      }
+      pendingGroupId.set('')
       pendingWorkingDir.set(dir)
       return true
     }
@@ -1144,28 +1182,61 @@
          bar of its own above the input instead of hiding among the toolbar
          chips. Docked sessions inherit the directory and never see this. -->
     {#if !sid && !dockedGroup}
-      <button
-        class="dir-bar"
-        class:empty={!workingDir}
-        title={workingDir ? $t('chat.dir_change') + ` — ${workingDir}` : undefined}
-        onclick={(e) => { e.stopPropagation(); openPicker() }}
-      >
-        <iconify-icon icon="ant-design:folder-outlined" width="15"></iconify-icon>
-        {#if workingDir}
-          <!-- Two spans, not one elided string: the last segment is the
-               directory the user recognises, so it stays at its natural width
-               and only the parent path collapses when the bar runs out of
-               room. Full path is in the tooltip. -->
-          <span class="mono dir-bar-path">
-            <span class="dir-head">{dirHead(workingDir)}</span><span class="dir-tail">{dirTail(workingDir)}</span>
-          </span>
-          {#if project}
-            <span class="dir-owner">{project.name}</span>
+      <div class="picker dir-bar-wrap">
+        <button
+          class="dir-bar"
+          class:empty={!workingDir}
+          title={workingDir ? $t('chat.dir_change') + ` — ${workingDir}` : undefined}
+          onclick={(e) => { e.stopPropagation(); const open = projMenu; closeMenus(); projMenu = !open; if (!open) projQuery = '' }}
+        >
+          <iconify-icon icon="ant-design:folder-outlined" width="15"></iconify-icon>
+          {#if workingDir}
+            <!-- Two spans, not one elided string: the last segment is the
+                 directory the user recognises, so it stays at its natural width
+                 and only the parent path collapses when the bar runs out of
+                 room. Full path is in the tooltip. -->
+            <span class="mono dir-bar-path">
+              <span class="dir-head">{dirHead(workingDir)}</span><span class="dir-tail">{dirTail(workingDir)}</span>
+            </span>
+            {#if project}
+              <span class="dir-owner">{project.name}</span>
+            {/if}
+          {:else}
+            <span class="dir-bar-path">{$t('chat.project_pick')}</span>
           {/if}
-        {:else}
-          <span class="dir-bar-path">{$t('chat.dir_pick')}</span>
+        </button>
+        {#if projMenu}
+          <div class="menu proj-menu" onclick={(e) => e.stopPropagation()}>
+            {#if claimChoices}
+              <div class="menu-label">{$t('chat.project_ambiguous')}</div>
+            {:else}
+              <input
+                class="proj-search mono"
+                placeholder={$t('chat.project_search')}
+                bind:value={projQuery}
+              />
+            {/if}
+            {#if projChoices.length === 0}
+              <div class="menu-empty">{$t('chat.project_none')}</div>
+            {/if}
+            {#each projChoices as g (g.id)}
+              <button class="menu-item" onclick={() => pickProject(g)}>
+                <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
+                <span class="mi-name">{g.name}</span>
+              </button>
+            {/each}
+            <div class="menu-divider"></div>
+            <button class="menu-item" onclick={() => { closeMenus(); projectModalGroup = null; projectModalOpen = true }}>
+              <iconify-icon icon="lucide:plus" width="13"></iconify-icon>
+              <span class="mi-name">{$t('chat.project_new')}</span>
+            </button>
+            <button class="menu-item" onclick={() => { openPicker() }}>
+              <iconify-icon icon="ant-design:folder-open-outlined" width="13"></iconify-icon>
+              <span class="mi-name">{$t('chat.project_open_folder')}</span>
+            </button>
+          </div>
         {/if}
-      </button>
+      </div>
     {/if}
     <div
       class="input-card"
@@ -1428,6 +1499,14 @@
   />
 {/if}
 
+{#if projectModalOpen}
+  <ProjectModal
+    group={projectModalGroup}
+    onClose={() => (projectModalOpen = false)}
+    onSaved={(g) => { projectModalOpen = false; if (!sid) pickProject(g) }}
+  />
+{/if}
+
 <style>
 .composer {
   flex: 0 0 auto;
@@ -1492,6 +1571,16 @@
 .dir-bar-path { flex: 1; min-width: 0; display: flex; overflow: hidden; white-space: nowrap; }
 .dir-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .dir-tail { flex: 0 0 auto; }
+/* The project picker anchors its menu to the bar; .picker/.menu are the same
+   primitives the model/reasoning pickers use, widened to the bar. */
+.dir-bar-wrap { position: relative; display: block; }
+.proj-menu { left: 0; right: 0; min-width: 0; max-height: 320px; overflow-y: auto; }
+.proj-search {
+  width: calc(100% - 16px); margin: 6px 8px; padding: 6px 8px;
+  background: var(--bg-layout); border: 1px solid var(--border-secondary);
+  border-radius: 8px; font-size: 12px; color: var(--text);
+}
+.proj-search:focus { outline: none; border-color: var(--blue-6); }
 .input-card {
   /* A quiet block rather than a bordered card: a hairline edge, no shadow. The
      rounder corner (18 vs the old 14) reads more like a single soft shape. */

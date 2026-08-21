@@ -341,16 +341,30 @@ export function normalizeDir(p: string): string {
 // file the new session under. Matching is by directory, not by name: two
 // projects can share a name, but the directory is what actually governs where
 // a session's tools run.
-export async function resolveProjectForDir(dir: string): Promise<string> {
+// projectsClaimingDir lists every project that owns dir — as its workspace or
+// as a mounted source folder. Several claimants is a legitimate state (a
+// folder may be mounted by several projects); callers with a UI let the user
+// pick, everything else takes the unique claim or creates.
+export function projectsClaimingDir(dir: string): SessionGroup[] {
   const target = normalizeDir(dir)
-  // A scheduled task's run cluster can carry a directory too, and it is not a
-  // project: filing a session there would drop it into that task's run history.
-  const existing = get(sessionGroups).find(g => !g.task_id && !!g.working_dir && normalizeDir(g.working_dir!) === target)
-  if (existing) return existing.id
+  return get(sessionGroups).filter(g =>
+    !!g.working_dir && (
+      normalizeDir(g.working_dir!) === target ||
+      (g.source_dirs ?? []).some(sd => normalizeDir(sd) === target)
+    ),
+  )
+}
+
+export async function resolveProjectForDir(dir: string): Promise<string> {
+  const claims = projectsClaimingDir(dir)
+  // First claim on ambiguity — the composer's picker resolves that case
+  // interactively before ever calling this.
+  if (claims.length > 0) return claims[0].id
   // Split on either separator: on Windows a path has no '/' at all, and the
   // project would otherwise be named after the whole path.
+  const target = normalizeDir(dir)
   const name = target.split(/[\\/]/).filter(Boolean).pop() || target
-  const g = await api.createSessionGroup(name, { working_dir: dir })
+  const g = await api.createSessionGroup(name, { source_dirs: [dir] })
   sessionGroups.update(gs => [...gs, g])
   return g.id
 }

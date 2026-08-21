@@ -56,9 +56,13 @@ export interface SessionGroup {
   name: string
   session_ids: string[]
   collapsed?: boolean
-  /** Set on a project — the directory its sessions run in. */
+  /** Set on a project — its generated workspace, where its sessions run. */
   working_dir?: string
-  /** Set on a scheduled task's run cluster, which the user cannot edit. */
+  /** External folders the project references (repos and plain folders alike). */
+  source_dirs?: string[]
+  /** One of source_dirs, marked as where deliverables go. */
+  output_dir?: string
+  /** Set on a scheduled task's run cluster. */
   task_id?: string
 }
 
