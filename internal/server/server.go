@@ -1352,7 +1352,8 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// working directory is baked into the prompt and can change under a live
 	// session.
 	proj := projectForSession(sess.ID)
-	if sess.IsComposedFor(model, cwd) {
+	srcHash := sourceDirsHash(proj)
+	if sess.IsComposedFor(model, cwd, srcHash) {
 		a.System, a.LeanSystem = sess.ComposedSystem, sess.ComposedLeanSystem
 	} else {
 		// L1: project memory embedded in the system prompt, snapshotted once.
@@ -1381,8 +1382,8 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 			base = profile.SystemPrompt
 			expertMode = true
 		}
-		a.System, a.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
-		if err := sess.SetComposedSystem(a.System, a.LeanSystem, model, cwd); err != nil {
+		a.System, a.LeanSystem = prompt.ComposePair(base, cwd, appendProjectEnvContext(envCtx, proj), s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
+		if err := sess.SetComposedSystem(a.System, a.LeanSystem, model, cwd, srcHash); err != nil {
 			slog.Warn("freeze composed system prompt", "session", sess.ID, "err", err)
 		}
 	}
@@ -3492,7 +3493,8 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// into a project in the Web UI picks the change up on its next turn, the
 	// same as a web one.
 	proj := projectForSession(sess.Store.ID)
-	if sess.Store.IsComposedFor(sess.Agent.Model, cwd) {
+	srcHash := sourceDirsHash(proj)
+	if sess.Store.IsComposedFor(sess.Agent.Model, cwd, srcHash) {
 		sess.Agent.System, sess.Agent.LeanSystem = sess.Store.ComposedSystem, sess.Store.ComposedLeanSystem
 	} else {
 		// Per-project memory dir, same as buildAgent gives web turns — an IM
@@ -3513,8 +3515,8 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 			base = profile.SystemPrompt
 			expertMode = true
 		}
-		sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, envCtx, s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
-		if err := sess.Store.SetComposedSystem(sess.Agent.System, sess.Agent.LeanSystem, sess.Agent.Model, cwd); err != nil {
+		sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, appendProjectEnvContext(envCtx, proj), s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
+		if err := sess.Store.SetComposedSystem(sess.Agent.System, sess.Agent.LeanSystem, sess.Agent.Model, cwd, srcHash); err != nil {
 			slog.Warn("freeze composed system prompt", "session", string(sess.Key), "err", err)
 		}
 	}

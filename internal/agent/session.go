@@ -54,12 +54,20 @@ type Session struct {
 	// re-freeze or the model keeps reading a path its tools no longer run in.
 	// Empty for sessions frozen before the field existed, which simply
 	// re-freezes them once on their next turn.
-	ComposedSystem     string `json:"composed_system,omitempty"`
-	ComposedLeanSystem string `json:"composed_lean_system,omitempty"`
-	ComposedForModel   string `json:"composed_for_model,omitempty"`
-	ComposedForCWD     string `json:"composed_for_cwd,omitempty"`
-	Title              string `json:"title,omitempty"`
-	Source             string `json:"source,omitempty"` // how the session was created: "" (manual) | "cron" | "channel" | "setup"
+	//
+	// ComposedForSourceDirs is the third such input: a hash of the owning
+	// project's mounted source folders (and output-dir marker), which the env
+	// context bakes into the prompt. Mounting or unmounting a folder must
+	// re-freeze on the next turn. Empty for task sessions (no project) AND for
+	// sessions written before the field existed — deliberately the same value,
+	// so pre-existing sessions do not re-freeze once for nothing.
+	ComposedSystem        string `json:"composed_system,omitempty"`
+	ComposedLeanSystem    string `json:"composed_lean_system,omitempty"`
+	ComposedForModel      string `json:"composed_for_model,omitempty"`
+	ComposedForCWD        string `json:"composed_for_cwd,omitempty"`
+	ComposedForSourceDirs string `json:"composed_for_source_dirs,omitempty"`
+	Title                 string `json:"title,omitempty"`
+	Source                string `json:"source,omitempty"` // how the session was created: "" (manual) | "cron" | "channel" | "setup"
 	// AgentID is the ID of the agent profile (agentprofile.Profile) that owns
 	// this session. Empty means the default agent — also the value for every
 	// session predating multi-agent, so legacy files need no migration.
@@ -548,30 +556,31 @@ func (s *Session) ChunkDir() (string, error) {
 // type as authoritative; rewriteAll folds them back into the meta header when
 // compacting.
 type sessionRecord struct {
-	Type               string    `json:"type"` // "meta" | "message" | "title" | "model_config" | "agent_id" | "working_dir" | "permission_mode" | "context_tokens" | "composed_system" | "lease" | "goal"
-	ID                 string    `json:"id,omitempty"`
-	CreatedAt          time.Time `json:"created_at,omitempty"`
-	Model              string    `json:"model,omitempty"`
-	System             string    `json:"system,omitempty"`
-	ComposedSystem     string    `json:"composed_system,omitempty"`
-	ComposedLeanSystem string    `json:"composed_lean_system,omitempty"`
-	ComposedForModel   string    `json:"composed_for_model,omitempty"`
-	ComposedForCWD     string    `json:"composed_for_cwd,omitempty"`
-	Title              string    `json:"title,omitempty"`
-	Source             string    `json:"source,omitempty"`
-	ModelConfig        string    `json:"model_config,omitempty"`
-	AgentID            string    `json:"agent_id,omitempty"`
-	WorkingDir         string    `json:"working_dir,omitempty"`
-	PermissionMode     string    `json:"permission_mode,omitempty"`
-	BoundEntry         string    `json:"bound_entry,omitempty"`
-	BoundAt            time.Time `json:"bound_at,omitempty"`
-	LeaseEntry         string    `json:"lease_entry,omitempty"`
-	LeaseExpires       time.Time `json:"lease_expires,omitempty"`
-	HookStarted        bool      `json:"hook_started,omitempty"`
-	BranchedFrom       string    `json:"branched_from,omitempty"`
-	LastContextTokens  int       `json:"last_context_tokens,omitempty"`
-	Message            *Message  `json:"message,omitempty"`
-	Goal               *Goal     `json:"goal,omitempty"`
+	Type                  string    `json:"type"` // "meta" | "message" | "title" | "model_config" | "agent_id" | "working_dir" | "permission_mode" | "context_tokens" | "composed_system" | "lease" | "goal"
+	ID                    string    `json:"id,omitempty"`
+	CreatedAt             time.Time `json:"created_at,omitempty"`
+	Model                 string    `json:"model,omitempty"`
+	System                string    `json:"system,omitempty"`
+	ComposedSystem        string    `json:"composed_system,omitempty"`
+	ComposedLeanSystem    string    `json:"composed_lean_system,omitempty"`
+	ComposedForModel      string    `json:"composed_for_model,omitempty"`
+	ComposedForCWD        string    `json:"composed_for_cwd,omitempty"`
+	ComposedForSourceDirs string    `json:"composed_for_source_dirs,omitempty"`
+	Title                 string    `json:"title,omitempty"`
+	Source                string    `json:"source,omitempty"`
+	ModelConfig           string    `json:"model_config,omitempty"`
+	AgentID               string    `json:"agent_id,omitempty"`
+	WorkingDir            string    `json:"working_dir,omitempty"`
+	PermissionMode        string    `json:"permission_mode,omitempty"`
+	BoundEntry            string    `json:"bound_entry,omitempty"`
+	BoundAt               time.Time `json:"bound_at,omitempty"`
+	LeaseEntry            string    `json:"lease_entry,omitempty"`
+	LeaseExpires          time.Time `json:"lease_expires,omitempty"`
+	HookStarted           bool      `json:"hook_started,omitempty"`
+	BranchedFrom          string    `json:"branched_from,omitempty"`
+	LastContextTokens     int       `json:"last_context_tokens,omitempty"`
+	Message               *Message  `json:"message,omitempty"`
+	Goal                  *Goal     `json:"goal,omitempty"`
 }
 
 func (s *Session) metaRecord() sessionRecord {
@@ -586,7 +595,7 @@ func (s *Session) metaRecord() sessionRecord {
 		goal = &g
 	}
 	s.mu.Unlock()
-	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, ComposedSystem: s.ComposedSystem, ComposedLeanSystem: s.ComposedLeanSystem, ComposedForModel: s.ComposedForModel, ComposedForCWD: s.ComposedForCWD, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, AgentID: s.AgentID, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, LastContextTokens: s.LastContextTokens, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, BranchedFrom: s.BranchedFrom, Goal: goal}
+	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, ComposedSystem: s.ComposedSystem, ComposedLeanSystem: s.ComposedLeanSystem, ComposedForModel: s.ComposedForModel, ComposedForCWD: s.ComposedForCWD, ComposedForSourceDirs: s.ComposedForSourceDirs, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, AgentID: s.AgentID, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, LastContextTokens: s.LastContextTokens, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, BranchedFrom: s.BranchedFrom, Goal: goal}
 }
 
 // MarkHookStarted records that SessionStart has fired for this session, so a
@@ -932,12 +941,12 @@ func (s *Session) SetPermissionMode(mode string) error {
 // baked into the prompt while the per-turn tools array and tool cwd are always
 // computed fresh — a stale freeze would silently drift out of sync with them.
 // Same append-or-rewrite persistence mechanics as SetPermissionMode.
-func (s *Session) SetComposedSystem(system, lean, model, cwd string) error {
-	if s.IsComposedFor(model, cwd) {
+func (s *Session) SetComposedSystem(system, lean, model, cwd, sourceDirs string) error {
+	if s.IsComposedFor(model, cwd, sourceDirs) {
 		return nil
 	}
 	s.ComposedSystem, s.ComposedLeanSystem, s.ComposedForModel = system, lean, model
-	s.ComposedForCWD = cwd
+	s.ComposedForCWD, s.ComposedForSourceDirs = cwd, sourceDirs
 	if s.persisted == 0 {
 		// See SetWorkingDir: a meta-only transcript must be rewritten now, since
 		// the load-modify-discard handler won't get a "next Save"; a session with
@@ -962,7 +971,7 @@ func (s *Session) SetComposedSystem(system, lean, model, cwd string) error {
 		return fmt.Errorf("session: open %s: %w", path, err)
 	}
 	defer f.Close()
-	if err := json.NewEncoder(f).Encode(sessionRecord{Type: "composed_system", ComposedSystem: system, ComposedLeanSystem: lean, ComposedForModel: model, ComposedForCWD: cwd}); err != nil {
+	if err := json.NewEncoder(f).Encode(sessionRecord{Type: "composed_system", ComposedSystem: system, ComposedLeanSystem: lean, ComposedForModel: model, ComposedForCWD: cwd, ComposedForSourceDirs: sourceDirs}); err != nil {
 		return fmt.Errorf("session: append composed_system: %w", err)
 	}
 	return nil
@@ -973,10 +982,11 @@ func (s *Session) SetComposedSystem(system, lean, model, cwd string) error {
 // itself uses to decide overwrite-vs-no-op, exposed so callers (buildAgent,
 // runChannelTurns) can skip the memory/skills/MCP recompute entirely when the
 // freeze would just be reused rather than replaced.
-func (s *Session) IsComposedFor(model, cwd string) bool {
+func (s *Session) IsComposedFor(model, cwd, sourceDirs string) bool {
 	return s.ComposedSystem != "" &&
 		s.ComposedForModel == model &&
-		s.ComposedForCWD == cwd
+		s.ComposedForCWD == cwd &&
+		s.ComposedForSourceDirs == sourceDirs
 }
 
 // ClearComposedSystem un-freezes the composed system prompt so the next turn
@@ -992,7 +1002,7 @@ func (s *Session) ClearComposedSystem() error {
 		return nil
 	}
 	s.ComposedSystem, s.ComposedLeanSystem, s.ComposedForModel = "", "", ""
-	s.ComposedForCWD = ""
+	s.ComposedForCWD, s.ComposedForSourceDirs = "", ""
 	if s.persisted == 0 {
 		if path, perr := s.SavePath(); perr == nil {
 			if _, statErr := os.Stat(path); statErr == nil {
@@ -1357,7 +1367,7 @@ func LoadSession(id string) (*Session, error) {
 		case "meta":
 			s.ID, s.CreatedAt, s.Model, s.System = rec.ID, rec.CreatedAt, rec.Model, rec.System
 			s.ComposedSystem, s.ComposedLeanSystem, s.ComposedForModel = rec.ComposedSystem, rec.ComposedLeanSystem, rec.ComposedForModel // a rewritten file carries it in its meta header
-			s.ComposedForCWD = rec.ComposedForCWD
+			s.ComposedForCWD, s.ComposedForSourceDirs = rec.ComposedForCWD, rec.ComposedForSourceDirs
 			s.Title = rec.Title // a compacted file carries the title in its meta header
 			s.Source = rec.Source
 			s.ModelConfig = rec.ModelConfig
@@ -1390,7 +1400,7 @@ func LoadSession(id string) (*Session, error) {
 			// Last one wins — a mid-session model switch or a retargeted
 			// working directory each append a new record.
 			s.ComposedSystem, s.ComposedLeanSystem, s.ComposedForModel = rec.ComposedSystem, rec.ComposedLeanSystem, rec.ComposedForModel
-			s.ComposedForCWD = rec.ComposedForCWD
+			s.ComposedForCWD, s.ComposedForSourceDirs = rec.ComposedForCWD, rec.ComposedForSourceDirs
 		case "message":
 			if rec.Message != nil {
 				s.Messages = append(s.Messages, *rec.Message)
