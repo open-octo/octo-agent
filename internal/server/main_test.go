@@ -15,6 +15,14 @@ import (
 // tests that t.Setenv their own HOME still work — they restore to this temp
 // dir, not the real one.
 func TestMain(m *testing.M) {
+	// A test that re-execs this binary to exercise cross-process behaviour
+	// hands its children the HOME they must share (sharedHomeEnv). Pinning a
+	// fresh one here would give every child its own ~/.octo and quietly turn
+	// the test into a single-process one.
+	if os.Getenv(sharedHomeEnv) != "" {
+		os.Exit(m.Run())
+	}
+
 	tmp, err := os.MkdirTemp("", "octo-server-test-home-")
 	if err == nil {
 		os.Setenv("HOME", tmp)

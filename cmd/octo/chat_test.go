@@ -452,14 +452,14 @@ func TestRunChat_TakeOverFlagUsage(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		code := runChat([]string{"--take-over", "-c", "nonexistent-id"}, strings.NewReader(""), &stdout, &stderr)
 		// --take-over is accepted with -c; resolve runs before the TUI gate, so
-		// we expect a "no session matches" error rather than flag validation.
+		// we expect a no-such-session error rather than flag validation.
 		if code != 2 {
 			t.Errorf("exit code = %d, want 2 (session resolve failure)", code)
 		}
 		if strings.Contains(stderr.String(), "--take-over requires -c") {
 			t.Errorf("flag should be accepted with -c, got: %q", stderr.String())
 		}
-		if !strings.Contains(stderr.String(), "no session matches") {
+		if !strings.Contains(stderr.String(), "matches \"nonexistent-id\"") {
 			t.Errorf("expected session resolve error, got: %q", stderr.String())
 		}
 	})
@@ -757,9 +757,9 @@ func TestRunChat_OpenAI_MissingAPIKey(t *testing.T) {
 }
 
 // TestRunChat_UnknownResumeID exercises the UX-3 hint that follows a failed
-// session resume: the resolver itself reports "no session matches", and the
-// chat wrapper adds a pointer to `octo sessions` so the user knows where to
-// look for valid IDs.
+// session resume: the resolver reports that nothing in this directory matches,
+// and the chat wrapper adds a pointer to `octo sessions` so the user knows
+// where to look for valid IDs.
 func TestRunChat_UnknownResumeID(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -771,7 +771,7 @@ func TestRunChat_UnknownResumeID(t *testing.T) {
 		t.Errorf("exit = %d, want 2", code)
 	}
 	out := stderr.String()
-	if !strings.Contains(out, "no session matches") {
+	if !strings.Contains(out, `matches "no-such-thing"`) {
 		t.Errorf("stderr should report no match; got:\n%s", out)
 	}
 	if !strings.Contains(out, "octo sessions") {
@@ -877,6 +877,13 @@ func TestRunChat_ResumedToolSession_DefaultOnNoWarning(t *testing.T) {
 			agent.NewToolUseBlock("call_1", "terminal", map[string]any{"command": "ls"}),
 		}},
 	}
+	// -c only resolves sessions belonging to the current directory, so the
+	// seeded session has to record this one (see session_scope.go).
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := sess.SetWorkingDir(dir); err != nil {
+		t.Fatalf("seed working dir: %v", err)
+	}
 	if err := sess.Save(); err != nil {
 		t.Fatalf("seed save: %v", err)
 	}
@@ -910,6 +917,13 @@ func TestRunChat_ResumedToolSession_NoToolsWarns(t *testing.T) {
 			agent.NewToolUseBlock("call_1", "terminal", map[string]any{"command": "ls"}),
 		}},
 	}
+	// -c only resolves sessions belonging to the current directory, so the
+	// seeded session has to record this one (see session_scope.go).
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := sess.SetWorkingDir(dir); err != nil {
+		t.Fatalf("seed working dir: %v", err)
+	}
 	if err := sess.Save(); err != nil {
 		t.Fatalf("seed save: %v", err)
 	}
@@ -938,6 +952,13 @@ func TestRunChat_ResumedPlainSession_NoWarning(t *testing.T) {
 	sess.Messages = []agent.Message{
 		{Role: agent.RoleUser, Content: "hi"},
 		{Role: agent.RoleAssistant, Content: "hello"},
+	}
+	// -c only resolves sessions belonging to the current directory, so the
+	// seeded session has to record this one (see session_scope.go).
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := sess.SetWorkingDir(dir); err != nil {
+		t.Fatalf("seed working dir: %v", err)
 	}
 	if err := sess.Save(); err != nil {
 		t.Fatalf("seed save: %v", err)

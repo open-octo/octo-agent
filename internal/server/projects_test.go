@@ -45,7 +45,12 @@ func saveSessionWithDir(t *testing.T, own string) *agent.Session {
 }
 
 // TestProject_DirPrecedence covers the three-way resolution: a project wins
-// over the session's own dir, which wins over the server default.
+// over the session's own dir, which wins over the configured workspace.
+//
+// The last resort is the workspace and NOT the server's launch directory: where
+// `octo serve` was started from is nobody's choice, and letting it decide meant
+// a session with no directory of its own ran its tools somewhere that changed
+// with how the server was invoked.
 func TestProject_DirPrecedence(t *testing.T) {
 	srv := groupTestServer(t)
 	projectDir := t.TempDir()
@@ -64,8 +69,40 @@ func TestProject_DirPrecedence(t *testing.T) {
 	if got := srv.sessionCwd(standalone); got != ownDir {
 		t.Errorf("session outside project: cwd = %q, want own dir %q", got, ownDir)
 	}
-	if got := srv.sessionCwd(bare); got != srv.curCwd() {
-		t.Errorf("session with no dir: cwd = %q, want server default %q", got, srv.curCwd())
+	if want := srv.curWorkspaceDir(); want == "" {
+		t.Fatal("test server resolved no workspace dir; the fallback under test cannot be observed")
+	} else if got := srv.sessionCwd(bare); got != want {
+		t.Errorf("session with no dir: cwd = %q, want the workspace %q (not the launch dir %q)",
+			got, want, srv.curCwd())
+	}
+}
+
+// TestProject_WorkspaceFallbackCreatesTheDirectory: a session that falls back to
+// the workspace may be the first thing to need it, and tools cannot run in a
+// directory that does not exist. Created on the turn path rather than at
+// startup, so this checks the turn path (sessionCwdEnv) and not just resolution.
+func TestProject_WorkspaceFallbackCreatesTheDirectory(t *testing.T) {
+	srv := groupTestServer(t)
+	workspace := srv.curWorkspaceDir()
+	if workspace == "" {
+		t.Skip("test server resolved no workspace dir")
+	}
+	if err := os.RemoveAll(workspace); err != nil {
+		t.Fatalf("clear the workspace: %v", err)
+	}
+
+	bare := saveSessionWithDir(t, "")
+	dir, envCtx := srv.sessionCwdEnv(bare)
+	if dir != workspace {
+		t.Fatalf("turn cwd = %q, want the workspace %q", dir, workspace)
+	}
+	if info, err := os.Stat(workspace); err != nil {
+		t.Errorf("workspace was not created for the turn: %v", err)
+	} else if !info.IsDir() {
+		t.Errorf("%s exists but is not a directory", workspace)
+	}
+	if !strings.Contains(envCtx, workspace) {
+		t.Errorf("env context does not name the directory the turn runs in:\n%s", envCtx)
 	}
 }
 

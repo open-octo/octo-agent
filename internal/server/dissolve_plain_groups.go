@@ -44,7 +44,7 @@ func (s *Server) dissolvePlainGroups() {
 		}
 	}
 
-	groupMu.Lock()
+	groupMu.LockWrite()
 	defer groupMu.Unlock()
 	groups, err := loadSessionGroups()
 	if err != nil {

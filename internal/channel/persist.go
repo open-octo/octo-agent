@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/permission"
+	"github.com/open-octo/octo-agent/internal/tools"
 )
 
 // IM sessions persist their conversation history to the same store web
@@ -60,7 +61,36 @@ func newChannelStore(id, model, agentID string) *agent.Session {
 	st.BoundEntry = agent.EntryChannel
 	st.BoundAt = time.Now()
 	_ = st.SetPermissionMode(string(permission.ResolveDefaultMode()))
+	applyWorkspaceDir(st)
 	return st
+}
+
+// applyWorkspaceDir records the workspace as the session's working directory,
+// the way a fresh web session gets it seeded.
+//
+// A chat message carries no "directory the user is standing in" — there is no
+// cwd behind it — so without this an IM session had no directory at all and its
+// tools fell back to whatever directory `octo serve` was launched from, which
+// is nobody's choice and changes with how the server was started. The workspace
+// is a configured answer, and it is the same one every other transport gives a
+// session that named no directory of its own.
+//
+// Created here because a session about to run tools in it needs it to exist —
+// the same lazy creation the web path does. Best-effort throughout: an
+// unresolvable or uncreatable workspace leaves the session without a directory,
+// which is exactly where it was before.
+func applyWorkspaceDir(st *agent.Session) {
+	if st.WorkingDir != "" {
+		return
+	}
+	dir := tools.ConfiguredWorkspaceDir()
+	if dir == "" {
+		return
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	_ = st.SetWorkingDir(dir)
 }
 
 // restoreOrInitStore attaches the persistent store to a freshly built

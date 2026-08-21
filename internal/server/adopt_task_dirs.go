@@ -2,8 +2,6 @@ package server
 
 import (
 	"log/slog"
-	"os"
-	"path/filepath"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/memory"
@@ -74,53 +72,11 @@ func (s *Server) adoptTaskWorkingDirs() {
 	}
 
 	for dir, ids := range byDir {
-		gid, gerr := s.projectForDirectory(dir)
-		if gerr != nil {
-			slog.Warn("adopt task working dirs: project for directory", "dir", dir, "err", gerr)
+		if err := ensureProjectForDir(dir, ids...); err != nil {
+			slog.Warn("adopt task working dirs: project for directory", "dir", dir, "err", err)
 			continue
-		}
-		for _, id := range ids {
-			if aerr := addSessionToGroup(gid, id); aerr != nil {
-				slog.Warn("adopt task working dirs: file session", "session", id, "dir", dir, "err", aerr)
-			}
 		}
 		slog.Info("adopted sessions into a project for the directory they were working in",
 			"dir", dir, "sessions", len(ids))
 	}
-}
-
-// projectForDirectory returns the id of the project whose working directory is
-// dir, creating one named after the directory if none exists. The match is on
-// the directory rather than the name, since names are not unique and the
-// directory is what governs where sessions run.
-func (s *Server) projectForDirectory(dir string) (string, error) {
-	target := memory.NormalizeDir(dir)
-
-	groupMu.Lock()
-	groups, err := loadSessionGroups()
-	groupMu.Unlock()
-	if err != nil {
-		return "", err
-	}
-	for i := range groups {
-		if wd := groups[i].WorkingDir; wd != "" && memory.NormalizeDir(wd) == target {
-			return groups[i].ID, nil
-		}
-	}
-
-	name := filepath.Base(target)
-	if name == "" || name == "." || name == string(filepath.Separator) {
-		name = target
-	}
-	g, cerr := createSessionGroupNamed(name, dir, "")
-	if cerr != nil {
-		return "", cerr
-	}
-	if g.WorkingDir == "" {
-		// createSessionGroupNamed drops a directory it cannot validate (gone,
-		// unreadable). A plain group would file these sessions somewhere that
-		// answers none of the questions the directory did, so leave them alone.
-		return "", os.ErrNotExist
-	}
-	return g.ID, nil
 }

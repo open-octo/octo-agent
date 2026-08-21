@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/memory"
@@ -28,10 +27,13 @@ import (
 // dissolvePlainGroups retires the ones already on disk.
 //
 // The registry lives entirely in one file
-// (~/.octo/session-groups.json) and never touch the session transcript format
-// — group membership is stored here as group→session-ID lists, so the CLI/TUI
-// session listing is unaffected and no session field is added. A session
-// belongs to at most one group; a session ID that no longer resolves to a real
+// (~/.octo/session-groups.json) and never touches the session transcript format
+// — group membership is stored here as group→session-ID lists, and no session
+// field is added. The CLI reads it (a session in a project belongs to the
+// project's directory, which is what `octo -c` scopes its listing by) and
+// writes it (EnsureProjectForDir), so the file is shared between processes
+// rather than owned by the server — see registryLock. A session belongs to at
+// most one group; a session ID that no longer resolves to a real
 // transcript is simply not rendered (the frontend cross-references the live
 // session list), so stale IDs left by a deleted session are harmless. There is
 // no GC pass for them — a stale ID is only dropped when its group is next
@@ -114,15 +116,11 @@ type groupFile struct {
 // (tests that never construct a Server).
 var notifyGroupsChanged func()
 
-// groupMu serialises read-modify-write cycles on the registry within this
-// process — the common case, since a given ~/.octo is normally served by one
-// process. It does NOT coordinate across processes: if `octo serve` and the
-// desktop shell run against the same ~/.octo at once, the atomic temp-file +
-// rename in saveSessionGroups keeps the file from being corrupted, but two
-// interleaved read-modify-write cycles can still lose one side's update
-// (last writer wins). Acceptable for a single-user local tool; a cross-process
-// lock would be overkill here.
-var groupMu sync.Mutex
+// groupMu serialises access to the registry (regCache included). Lock for a
+// read; LockWrite for a read-modify-write cycle, which additionally takes a
+// cross-process lock now that the CLI writes the registry too. Both pair with
+// a plain Unlock. See registryLock for why reads stay out of the file lock.
+var groupMu = &registryLock{}
 
 // sessionGroupsPath returns ~/.octo/session-groups.json, creating ~/.octo.
 func sessionGroupsPath() (string, error) {
@@ -283,6 +281,13 @@ func cachedRegistry() (groupFile, map[string]*sessionGroup, error) {
 		}
 		return groupFile{}, nil, fmt.Errorf("session groups: stat %s: %w", path, statErr)
 	}
+	// modTime+size is how a write by ANOTHER process is noticed — the CLI writes
+	// this file too, and its saveRegistry cannot invalidate a cache in this
+	// process. The pair can theoretically miss one: a same-size rewrite landing
+	// inside the filesystem's mtime granularity would read as unchanged. It
+	// needs a same-byte-count edit within the same tick, and the window closes
+	// on the next write; a coarser identity (hashing the file) would pay a read
+	// on every lookup to close a gap nothing has hit.
 	if regCache != nil && regCache.path == path && regCache.modTime.Equal(info.ModTime()) && regCache.size == info.Size() {
 		return regCache.file, regCache.projects, nil
 	}
@@ -430,7 +435,7 @@ func createSessionGroupNamed(name, workingDir, taskID string) (sessionGroup, err
 			workingDir = dir
 		}
 	}
-	groupMu.Lock()
+	groupMu.LockWrite()
 	defer groupMu.Unlock()
 	groups, err := loadSessionGroups()
 	if err != nil {
@@ -453,12 +458,25 @@ func createSessionGroupNamed(name, workingDir, taskID string) (sessionGroup, err
 // scheduler. There is no move-between-projects path (see
 // handleSetSessionGroup).
 func addSessionToGroup(groupID, sessionID string) error {
-	groupMu.Lock()
+	groupMu.LockWrite()
 	defer groupMu.Unlock()
 	gf, err := loadRegistryFile()
 	if err != nil {
 		return err
 	}
+	if err := fileSessionInGroup(&gf, groupID, sessionID); err != nil {
+		return err
+	}
+	return saveRegistry(gf)
+}
+
+// fileSessionInGroup is addSessionToGroup's in-memory half: it moves sessionID
+// into groupID within an already-loaded registry, leaving the write to the
+// caller. Split out so a caller that must find-or-create a project AND file a
+// session into it can do both under one lock and one save — two separate
+// locked calls would let another process slip a second project for the same
+// directory in between.
+func fileSessionInGroup(gf *groupFile, groupID, sessionID string) error {
 	groups := gf.Groups
 	found := false
 	for i := range groups {
@@ -483,13 +501,13 @@ func addSessionToGroup(groupID, sessionID string) error {
 	// for that guard to hold from both directions.
 	gf.Groups = groups
 	gf.CollapsedSessionIDs = removeID(gf.CollapsedSessionIDs, sessionID)
-	return saveRegistry(gf)
+	return nil
 }
 
 // renameSessionGroup renames a group by ID. A no-op (nil) if the group is gone
 // — a task's group may have been deleted manually in the UI.
 func renameSessionGroup(groupID, name string) error {
-	groupMu.Lock()
+	groupMu.LockWrite()
 	defer groupMu.Unlock()
 	groups, err := loadSessionGroups()
 	if err != nil {
@@ -507,7 +525,7 @@ func renameSessionGroup(groupID, name string) error {
 // deleteSessionGroup removes a group by ID, leaving its member sessions intact
 // (they fall back to ungrouped). A no-op if the group is already gone.
 func deleteSessionGroup(groupID string) error {
-	groupMu.Lock()
+	groupMu.LockWrite()
 	defer groupMu.Unlock()
 	groups, err := loadSessionGroups()
 	if err != nil {
@@ -585,7 +603,7 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	groupMu.Lock()
+	groupMu.LockWrite()
 	defer groupMu.Unlock()
 	groups, err := loadSessionGroups()
 	if err != nil {
@@ -655,7 +673,7 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 		workingDir = dir
 	}
 
-	groupMu.Lock()
+	groupMu.LockWrite()
 	defer groupMu.Unlock()
 	groups, err := loadSessionGroups()
 	if err != nil {
@@ -734,7 +752,7 @@ func (s *Server) handleDeleteSessionGroup(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	groupMu.Lock()
+	groupMu.LockWrite()
 	defer groupMu.Unlock()
 	groups, err := loadSessionGroups()
 	if err != nil {
@@ -781,7 +799,7 @@ func (s *Server) handleReorderSessionGroups(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	groupMu.Lock()
+	groupMu.LockWrite()
 	defer groupMu.Unlock()
 	groups, err := loadSessionGroups()
 	if err != nil {
@@ -857,7 +875,7 @@ func (s *Server) handleSetSessionPin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	groupMu.Lock()
+	groupMu.LockWrite()
 	defer groupMu.Unlock()
 	gf, err := loadRegistryFile()
 	if err != nil {
@@ -925,7 +943,7 @@ func (s *Server) handleSetSessionCollapsed(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	groupMu.Lock()
+	groupMu.LockWrite()
 	defer groupMu.Unlock()
 	gf, err := loadRegistryFile()
 	if err != nil {

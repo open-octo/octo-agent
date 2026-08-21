@@ -17,7 +17,7 @@ headless 单发：完整的 agentic 工具循环，然后退出。
 
 | Flag | 默认值 | 说明 |
 |---|---|---|
-| `-c`, `--continue [id]` | — | 恢复一个会话——`last`、一个短 ID，或 ID 的一段子串；不带值时从列表里选 |
+| `-c`, `--continue [id]` | — | 恢复一个属于当前目录的会话——`last`、一个短 ID，或 ID 的一段子串；不带值时从列表里选 |
 | `--take-over` | `false` | 恢复时，接管一个已经绑定在别处的会话 |
 | `--no-save` | `false` | 关闭 TUI 里的会话自动保存（单发模式本来就不会持久化） |
 | `--provider` | 来自配置 | `anthropic` \| `openai` |
@@ -54,7 +54,7 @@ headless 单发：完整的 agentic 工具循环，然后退出。
 | `octo memory list`\|`path` | 列出或定位项目的和继承来的记忆文件 |
 | `octo skills list`\|`add`\|`update`\|`path` | 管理已发现的 skill |
 | `octo hooks list` | 列出已配置的生命周期 hook |
-| `octo sessions` | 列出已保存的会话 |
+| `octo sessions` [`--all`] | 列出当前目录的会话；`--all` 按目录分组列出本机所有会话 |
 | `octo trash list`\|`restore`\|`rm`\|`empty` | 找回被 agent 删除或覆盖的文件（[回收站](/docs/zh/guides/sandbox-the-agent/)） |
 | `octo workflows list`\|`path`\|`update` | 列出已保存的 workflow |
 | `octo doctor` | 只读的环境健康检查 |

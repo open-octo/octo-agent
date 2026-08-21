@@ -1,12 +1,16 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 // projectRunDir decides where a CLI/TUI run works when the resumed session
 // belongs to a project. The cases below pin the two halves of that rule: a
 // project relocates the run, and nothing else does — in particular NOT the
-// session's own working dir, which is seeded to ~/Octo on every web session
-// and would otherwise pull `octo -c` out of the user's current repo.
+// session's own working dir, which the project's value shadows on every
+// surface (Server.resolveSessionDir).
 func TestProjectRunDir(t *testing.T) {
 	const here = "/repos/octo"
 
@@ -51,8 +55,25 @@ func TestProjectRunDir(t *testing.T) {
 	}
 }
 
+// A project's directory is stored ~-expanded and absolute but NOT
+// symlink-resolved (validateWorkingDir), while membership is matched on the
+// symlink-resolved form — so the project and cwd can spell one directory two
+// ways. The run then keeps the spelling the user typed: adopting the project's
+// would announce a relocation that did not happen.
+func TestProjectRunDir_SameDirTwoSpellings(t *testing.T) {
+	target := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable here: %v", err)
+	}
+
+	if got := projectRunDir(link, "sess-1", func(string) string { return target }); got != link {
+		t.Errorf("projectRunDir() = %q, want the spelling the caller passed (%q)", got, link)
+	}
+}
+
 // The lookup receives the resolved session id, not whatever the user typed —
-// chat.go runs agent.ResolveSessionID before this point.
+// chat.go resolves it before this point.
 func TestProjectRunDir_PassesSessionID(t *testing.T) {
 	var seen string
 	projectRunDir("/repos/octo", "20260807-abcd1234", func(id string) string {

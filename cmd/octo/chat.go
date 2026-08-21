@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -137,19 +138,29 @@ func wireSessionHooks(a *agent.Agent, sess *agent.Session, transport string) {
 // directory when resuming a session that belongs to one, otherwise cwd
 // unchanged. lookup is server.ProjectDirForSession (injected for testing).
 //
-// Only the project directory, never the session's own WorkingDir. Every web
-// session is seeded with the default workspace dir (~/Octo), so honouring that
-// would drag `octo -c` out of whatever repo the user is standing in; a project
-// directory, by contrast, is something the user set explicitly for a group of
-// sessions.
+// Since -c only resolves sessions belonging to this directory
+// (resolveSessionInDir), a resumed session's project directory and cwd already
+// name the same place, so today this returns cwd in every reachable case. It
+// stays as the one place that decides where a resumed run works, keeping that
+// decision aligned with the precedence the listing filters by (sessionDir) and
+// the server resolves tool cwd by (Server.resolveSessionDir), rather than
+// leaving the CLI with no such point at all.
+//
+// The two values can be the same directory under different spellings — a
+// project's directory is stored `~`-expanded and absolute but NOT
+// symlink-resolved (validateWorkingDir), while membership is matched on the
+// symlink-resolved form. Then the path the user typed is the one to keep:
+// switching them to the project's spelling changes nothing except to print a
+// relocation notice about a move that did not happen.
 func projectRunDir(cwd, resumeID string, lookup func(string) string) string {
 	if resumeID == "" {
 		return cwd
 	}
-	if dir := lookup(resumeID); dir != "" {
-		return dir
+	dir := lookup(resumeID)
+	if dir == "" || memory.NormalizeDir(dir) == memory.NormalizeDir(cwd) {
+		return cwd
 	}
-	return cwd
+	return dir
 }
 
 // resolveProjectHooksTrust decides whether the project-level <cwd>/.octo/hooks.yml
@@ -485,8 +496,8 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	maxTokens := fs.Int("max-tokens", 0, "max_tokens for the response (0 = provider default)")
 	maxTokensEscalate := fs.Int("max-tokens-escalate", -1, "Per-response cap retried once when a reply is truncated by the output cap (-1 = provider-aware default, 0 = disable). Also OCTO_MAX_TOKENS_ESCALATE.")
 	stream := fs.Bool("stream", true, "Stream the reply (chunks printed as they arrive); --stream=false buffers")
-	continueID := fs.String("c", "", "Resume a session — accepts 'last', a short ID, or a substring of an ID; omit the value to pick from a list")
-	continueIDLong := fs.String("continue", "", "Resume a session — accepts 'last', a short ID, or a substring of an ID; omit the value to pick from a list")
+	continueID := fs.String("c", "", "Resume a session from this directory — accepts 'last', a short ID, or a substring of an ID; omit the value to pick from a list")
+	continueIDLong := fs.String("continue", "", "Resume a session from this directory — accepts 'last', a short ID, or a substring of an ID; omit the value to pick from a list")
 	takeOver := fs.Bool("take-over", false, "When resuming (-c), take over a session currently bound to another entry")
 	noSave := fs.Bool("no-save", false, "Disable session auto-save in the interactive TUI (headless one-shots never persist)")
 	enableTools := fs.Bool("tools", true, "Built-in tools (terminal, edit_file, …) for the agentic loop. On by default; use --no-tools to disable.")
@@ -634,21 +645,37 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	// Every -c form resolves against the sessions belonging to THIS directory
+	// (see session_scope.go): the picker lists them, "last" means the most
+	// recent one here, and an explicit id has to be one of them. The directory
+	// is the one the user is standing in — a session's own project directory
+	// only takes over once it has been resolved, below.
+	//
+	// Without a current directory there is no way to tell which sessions belong
+	// here, and silently resolving against none of them would read as "your
+	// session is gone". Only -c needs it; a fresh session does not.
+	resumeScope, scopeErr := os.Getwd()
+	if resumeID != "" && scopeErr != nil {
+		fmt.Fprintf(stderr, "octo: -c resumes the sessions belonging to the current directory, which could not be determined: %v\n", scopeErr)
+		return 1
+	}
+
 	// A bare -c / --continue (no ID) pops an arrow-key picker over the recent
 	// sessions — nobody remembers session IDs. Interactive by nature: headless
 	// callers must pass an ID.
+	pickedFromList := false
 	if resumeID == pickSessionSentinel {
 		if !stdinIsTTY(stdin) {
 			fmt.Fprintln(stderr, "octo: -c without an ID picks from a list, which needs a terminal — pass an ID (see `octo sessions`)")
 			return 2
 		}
-		sessions, err := agent.ListSessions(10)
+		sessions, err := sessionsForDir(resumeScope, 10)
 		if err != nil {
 			fmt.Fprintf(stderr, "octo: %v\n", err)
 			return 1
 		}
 		if len(sessions) == 0 {
-			fmt.Fprintln(stderr, "No saved sessions to resume.")
+			fmt.Fprintf(stderr, "No sessions to resume in %s — run `octo` to start one, or `octo sessions --all` to see other directories'.\n", resumeScope)
 			return 1
 		}
 		picked, ok := runSelect(stdin, stdout, "Resume which session?", sessionSelectItems(sessions), "")
@@ -656,14 +683,18 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			return 0 // cancelled — nothing to do
 		}
 		resumeID = picked.value
+		pickedFromList = true
 	}
 
-	// Resolve -c shortcuts ("last", short ID, prefix/substring) against the
-	// on-disk session store. The legacy full-ID path still works because
-	// ResolveSessionID short-circuits on an exact filename match before
-	// falling back to substring matching.
-	if resumeID != "" {
-		resolved, err := agent.ResolveSessionID(resumeID)
+	// Resolve -c shortcuts ("last", short ID, prefix/substring) against this
+	// directory's sessions. A full ID still works, and one naming a session
+	// that lives in another directory is refused with that directory named.
+	//
+	// Skipped for a picked session: the picker chose from this directory's
+	// sessions and hands back a full id, so resolving it again would re-read
+	// and re-parse every transcript on the machine to reach the same answer.
+	if resumeID != "" && !pickedFromList {
+		resolved, err := resolveSessionInDir(resumeID, resumeScope)
 		if err != nil {
 			fmt.Fprintf(stderr, "octo: %v\n", err)
 			fmt.Fprintln(stderr, "Run `octo sessions` to see what's available.")
@@ -746,18 +777,20 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// and freeze it for the session — recomputing mid-session would bust the
 	// provider's system+tools prompt cache. The session stores only the raw
 	// user layer; base/project are recomposed fresh each run.
-	cwd, _ := os.Getwd()
+	// The same directory -c resolved against above, not a second Getwd: one
+	// value means the sessions offered, the session's recorded directory, and
+	// the directory this run works in can never disagree.
+	cwd := resumeScope
 	// Resuming a session that belongs to a project relocates this whole run to
 	// the project's directory: tools, sandbox roots, project hooks, project
 	// memory, and the env context all key off cwd, and letting them disagree
 	// (tools in one directory, hooks discovered from another) would be worse
 	// than either choice on its own.
 	//
-	// Deliberately only the PROJECT directory, not the session's own
-	// WorkingDir: every web session gets the default workspace dir seeded onto
-	// it (~/Octo), so honouring that would drag `octo -c` out of whatever repo
-	// the user is standing in. A project directory is something the user set
-	// explicitly for a group of sessions.
+	// In practice this now names the directory the user is already standing in
+	// — -c only offers sessions belonging to it — so the relocation below no
+	// longer fires (see projectRunDir). It stays because the CLI still has to
+	// answer "where does a resumed run work" somewhere.
 	//
 	// Resolved once here, like everything else in this block — switching
 	// sessions inside the REPL does not recompute it, matching the
@@ -765,8 +798,8 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// prompt. The CLI has no way to CHANGE a working directory; a project's
 	// setting is editable only where it was made (the Web UI / desktop).
 	if dir := projectRunDir(cwd, resumeID, server.ProjectDirForSession); dir != cwd {
-		// Announce it — silently running tools somewhere other than the
-		// directory the user is standing in would be baffling.
+		// Announce it — silently running tools on a path other than the one
+		// the user typed would be baffling.
 		fmt.Fprintf(stderr, "Session belongs to a project — working in %s\n", dir)
 		cwd = dir
 	}
@@ -1208,6 +1241,20 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		} else {
 			sess = agent.NewSession(resolvedModel, *system)
 			sess.Bind(agent.EntryTUI, false)
+			// The directory a TUI session was started in is part of its
+			// identity: `octo -c` only offers sessions belonging to the
+			// current directory (see sessionsForDir), and every other surface
+			// resolves the session's tool cwd from this field
+			// (Server.resolveSessionDir) instead of falling back to wherever
+			// `octo serve` happened to be launched. Without it, continuing
+			// this session on the web ran its tools somewhere else entirely.
+			//
+			// Only on a fresh session: a resumed one already carries whatever
+			// identity it was created with, and the resume path above has
+			// already relocated cwd to its project's directory if it has one.
+			if err := sess.SetWorkingDir(cwd); err != nil {
+				slog.Debug("could not record the session's working directory", "err", err)
+			}
 			if agentProfileID != "" {
 				sess.AgentID = agentProfileID
 				// An expert agent profile with its own system prompt
@@ -1255,6 +1302,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			stderr:          stderr,
 			skillReg:        skillReg,
 			memDir:          memDir,
+			cwd:             cwd,
 			reader:          replReader, // shared with the asker / permission gate
 			view:            replView,   // same surface for turn render + Ask prompts
 			permEngine:      permEngine,
@@ -1266,6 +1314,21 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			showReasoning:   resolvedShowReasoning,
 			notify:          cfg.NotifyEnabled(),
 			terminalTitle:   cfg.TerminalTitleEnabled(),
+		}
+		// A fresh TUI session joins a project for the directory it works in,
+		// which is what scopes its memory to that directory on every surface
+		// (Server.sessionMemDir) rather than only in this process. Waits for
+		// the first save so no project is created for a session that never
+		// said anything; a failure here is left to the reconciliation pass the
+		// next `octo serve` start runs (adoptTaskWorkingDirs), which is why it
+		// only whispers into the debug log — the TUI owns the screen.
+		if !*noSave && resumeID == "" {
+			sid, projectDir := sess.ID, cwd
+			cfg.afterFirstSave = func() {
+				if err := server.EnsureProjectForDir(projectDir, sid); err != nil {
+					slog.Debug("could not file the session under a project", "dir", projectDir, "err", err)
+				}
+			}
 		}
 		// Redo the "# Available MCP tools" system-prompt layer once the
 		// background MCP connect (mcpBoot, see mcpReadyMsg in tuirepl.go)
