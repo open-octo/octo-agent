@@ -665,6 +665,13 @@ type updateSessionGroupRequest struct {
 	// handler can answer an old client with a real explanation instead of
 	// silently ignoring the field.
 	WorkingDir *string `json:"working_dir,omitempty"`
+	// SourceDirs replaces the mount set wholesale (same validation as
+	// creation). OutputDir marks one of the mounts as where deliverables go —
+	// it must name a member of the (possibly just-updated) set, or "" to
+	// clear the marker. Both changes reach running sessions on their next
+	// turn through the freeze identity's source-dirs hash.
+	SourceDirs *[]string `json:"source_dirs,omitempty"`
+	OutputDir  *string   `json:"output_dir,omitempty"`
 }
 
 func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request) {
@@ -678,8 +685,8 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeInvalidJSONBody(w, err)
 		return
 	}
-	if req.Name == nil && req.Collapsed == nil && req.WorkingDir == nil {
-		writeError(w, http.StatusBadRequest, "name, collapsed or working_dir is required")
+	if req.Name == nil && req.Collapsed == nil && req.WorkingDir == nil && req.SourceDirs == nil && req.OutputDir == nil {
+		writeError(w, http.StatusBadRequest, "name, collapsed, source_dirs or output_dir is required")
 		return
 	}
 	var name string
@@ -693,6 +700,17 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 	if req.WorkingDir != nil {
 		writeError(w, http.StatusBadRequest, "working_dir is fixed at creation: the project's workspace cannot be retargeted or cleared")
 		return
+	}
+	// Validate the mounts before touching the registry, so a bad path leaves
+	// the group untouched.
+	var newSourceDirs []string
+	if req.SourceDirs != nil {
+		dirs, verr := validateSourceDirs(s.curWorkspaceDir(), *req.SourceDirs)
+		if verr != nil {
+			writeError(w, http.StatusBadRequest, verr.Error())
+			return
+		}
+		newSourceDirs = dirs
 	}
 
 	groupMu.LockWrite()
@@ -719,11 +737,49 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 	if req.Collapsed != nil {
 		groups[idx].Collapsed = *req.Collapsed
 	}
+	if req.SourceDirs != nil {
+		groups[idx].SourceDirs = newSourceDirs
+		// A marker whose mount was just removed points at nothing — drop it
+		// rather than persist a lie (the explicit output_dir field below can
+		// re-establish it in the same request).
+		if groups[idx].OutputDir != "" && !dirInSet(groups[idx].OutputDir, newSourceDirs) {
+			groups[idx].OutputDir = ""
+		}
+	}
+	if req.OutputDir != nil {
+		out := strings.TrimSpace(*req.OutputDir)
+		if out != "" && !dirInSet(out, groups[idx].SourceDirs) {
+			writeError(w, http.StatusBadRequest, "output_dir must be one of the project's source folders")
+			return
+		}
+		if out != "" {
+			// Store the mount's own spelling so env-context marker matching
+			// is an exact comparison.
+			for _, sd := range groups[idx].SourceDirs {
+				if memory.NormalizeDir(sd) == memory.NormalizeDir(out) {
+					out = sd
+					break
+				}
+			}
+		}
+		groups[idx].OutputDir = out
+	}
 	if err := saveSessionGroups(groups); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"group": groups[idx]})
+}
+
+// dirInSet reports whether dir names one of dirs, however spelled.
+func dirInSet(dir string, dirs []string) bool {
+	norm := memory.NormalizeDir(dir)
+	for _, d := range dirs {
+		if memory.NormalizeDir(d) == norm {
+			return true
+		}
+	}
+	return false
 }
 
 // ─── DELETE /api/session-groups/{id} ────────────────────────────────────────

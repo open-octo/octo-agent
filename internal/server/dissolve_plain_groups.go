@@ -64,27 +64,25 @@ func (s *Server) dissolvePlainGroups() {
 			}
 			if g.WorkingDir == "" {
 				// Written before a scheduled task was a project. Its runs have
-				// been falling through to the server's launch directory, so give
-				// it the directory it should have had. Not s.cronTaskDir: that
-				// re-reads the registry under groupMu, which this pass already
-				// holds — the snapshot in hand serves the claim check instead.
-				dir := strings.TrimSpace(task.Directory)
-				if dir == "" {
-					if d, derr := workspaceDirForTask(groups, s.curWorkspaceDir(), task.Name, task.ID); derr == nil {
-						dir = d
-					} else {
-						slog.Warn("scheduled task's directory", "task", task.Name, "err", derr)
+				// been falling through to the server's launch directory, so
+				// give it the workspace it should have had — generated, like
+				// every project's; an explicit task directory becomes the
+				// output mount, not the directory itself. Registry reads use
+				// the snapshot in hand: this pass already holds groupMu.
+				if d, derr := workspaceDirForTask(groups, s.curWorkspaceDir(), task.Name, task.ID); derr == nil {
+					g.WorkingDir = d
+					changed = true
+					if dir := strings.TrimSpace(task.Directory); dir != "" {
+						if mounted, verr := validateSourceDirs(s.curWorkspaceDir(), []string{dir}); verr == nil && len(mounted) == 1 {
+							g.SourceDirs, g.OutputDir = mounted, mounted[0]
+						} else {
+							slog.Warn("scheduled task's directory unusable", "task", task.Name, "dir", dir, "err", verr)
+						}
 					}
-				}
-				if dir != "" {
-					if validated, verr := validateWorkingDir(dir); verr == nil {
-						g.WorkingDir = validated
-						changed = true
-						slog.Info("gave a scheduled task's cluster its own directory",
-							"task", task.Name, "dir", validated)
-					} else {
-						slog.Warn("scheduled task's directory unusable", "task", task.Name, "dir", dir, "err", verr)
-					}
+					slog.Info("gave a scheduled task's cluster its own workspace",
+						"task", task.Name, "dir", d)
+				} else {
+					slog.Warn("scheduled task's workspace", "task", task.Name, "err", derr)
 				}
 			}
 		}

@@ -75,14 +75,39 @@ func (s *Server) initScheduler() {
 	s.scheduler = sch
 }
 
-// cronTaskDir is the working directory for a task's run cluster: whatever the
-// task explicitly asks for, else one under the workspace named after the task
-// (see cronProjectDir).
-func (s *Server) cronTaskDir(task scheduler.Task) string {
-	if strings.TrimSpace(task.Directory) != "" {
-		return task.Directory
+// createCronProject creates the project a task's runs cluster under. The
+// workspace is generated like every other project's (cronProjectDir) — cron
+// and regular projects share one shape — and an explicit task directory is
+// mounted as the output folder rather than adopted as the directory itself:
+// the runs' deliverables land there, their scratch stays in the workspace.
+// An unusable explicit directory is dropped with a log, not fatal: a task
+// must run regardless.
+func (s *Server) createCronProject(task scheduler.Task) (sessionGroup, error) {
+	var sourceDirs []string
+	outputDir := ""
+	if dir := strings.TrimSpace(task.Directory); dir != "" {
+		mounted, verr := validateSourceDirs(s.curWorkspaceDir(), []string{dir})
+		if verr != nil || len(mounted) == 0 {
+			slog.Warn("cron: explicit directory unusable; dropping it", "task", task.Name, "dir", dir, "err", verr)
+		} else {
+			sourceDirs = mounted
+			outputDir = mounted[0]
+		}
 	}
-	return s.cronProjectDir(task.Name, task.ID)
+	workspace := s.cronProjectDir(task.Name, task.ID)
+
+	groupMu.LockWrite()
+	defer groupMu.Unlock()
+	groups, err := loadSessionGroups()
+	if err != nil {
+		return sessionGroup{}, err
+	}
+	g := sessionGroup{ID: newGroupID(), Name: task.Name, SessionIDs: []string{}, WorkingDir: workspace, SourceDirs: sourceDirs, OutputDir: outputDir, TaskID: task.ID}
+	groups = append(groups, g)
+	if err := saveSessionGroups(groups); err != nil {
+		return sessionGroup{}, err
+	}
+	return g, nil
 }
 
 // CreateSession implements scheduler.Runner. Every run creates a brand-new,
@@ -104,7 +129,7 @@ func (s *Server) CreateSession(task scheduler.Task) (string, error) {
 		// A task predating grouping (or whose group creation failed at create
 		// time): create the group now and persist its ID back on the task so
 		// later runs reuse it.
-		g, gerr := createSessionGroupNamed(task.Name, s.cronTaskDir(task), task.ID)
+		g, gerr := s.createCronProject(task)
 		if gerr != nil {
 			slog.Warn("cron: create session group", "task", task.Name, "err", gerr)
 		} else {
@@ -551,7 +576,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	// Created after Add (which validates the cron and assigns the ID) so an
 	// invalid task never leaves an orphan group; best-effort, since a run can
 	// still create the group lazily if this fails.
-	if g, gerr := createSessionGroupNamed(task.Name, s.cronTaskDir(task), task.ID); gerr != nil {
+	if g, gerr := s.createCronProject(task); gerr != nil {
 		slog.Warn("cron: create session group", "task", task.Name, "err", gerr)
 	} else if serr := s.scheduler.SetSessionGroup(task.ID, g.ID); serr != nil {
 		slog.Warn("cron: persist session group", "task", task.Name, "err", serr)
