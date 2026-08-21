@@ -112,11 +112,13 @@ func (s *Server) resolveMemoryPath(fname, source string) (string, bool) {
 	if fname == "." || !filepath.IsLocal(fname) {
 		return "", false
 	}
+	var dir string
 	switch source {
 	case "", "inherited", "project":
-		if s.homeMemDir != "" {
-			return filepath.Join(s.homeMemDir, fname), true
+		if s.homeMemDir == "" {
+			return "", false
 		}
+		dir = s.homeMemDir
 	default:
 		root, err := memory.RootDir()
 		if err != nil {
@@ -129,10 +131,19 @@ func (s *Server) resolveMemoryPath(fname, source string) (string, bool) {
 		if slug == "." || slug == ".." {
 			return "", false
 		}
-		dir := filepath.Join(root, slug)
-		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
-			return filepath.Join(dir, fname), true
+		d := filepath.Join(root, slug)
+		fi, err := os.Stat(d)
+		if err != nil || !fi.IsDir() {
+			return "", false
 		}
+		dir = d
 	}
-	return "", false
+	// Belt and braces on top of the checks above: the resolved path must stay
+	// strictly inside the memory directory. Also the containment proof static
+	// analysis (CodeQL go/path-injection) recognizes at the read/remove sinks.
+	p := filepath.Join(dir, fname)
+	if !strings.HasPrefix(p, dir+string(os.PathSeparator)) {
+		return "", false
+	}
+	return p, true
 }
