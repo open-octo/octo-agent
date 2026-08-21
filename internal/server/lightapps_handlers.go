@@ -28,6 +28,10 @@ type lightAppManifest struct {
 	Description string `json:"description"`
 	Icon        string `json:"icon,omitempty"`
 	CreatedAt   string `json:"created_at"`
+	// SourcePath is the absolute path of the session artifact this app was
+	// saved from, when it was. The web UI matches it against the artifact on
+	// display to hide the redundant "Save to Light App" action.
+	SourcePath string `json:"source_path,omitempty"`
 }
 
 // handleListLightApps lists all Light Apps by scanning ~/.octo/light-apps/ for
@@ -140,6 +144,7 @@ func (s *Server) handleCreateLightApp(w http.ResponseWriter, r *http.Request) {
 		Description string `json:"description"`
 		Icon        string `json:"icon"`
 		HTML        string `json:"html"`
+		SourcePath  string `json:"source_path"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		if strings.Contains(err.Error(), "http: request body too large") {
@@ -190,6 +195,7 @@ func (s *Server) handleCreateLightApp(w http.ResponseWriter, r *http.Request) {
 		Description: in.Description,
 		Icon:        in.Icon,
 		CreatedAt:   now,
+		SourcePath:  in.SourcePath,
 	}
 
 	mData, err := json.MarshalIndent(m, "", "  ")
