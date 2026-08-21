@@ -294,16 +294,12 @@ func (s *Server) replayLiveState(sessionID string, conn *wsConn) {
 				if ev.Kind == "done" {
 					continue
 				}
-				if b, err := json.Marshal(map[string]any{
-					"type":        "sub_agent_event",
-					"session_id":  sessionID,
-					"agent_id":    sa.ID,
-					"description": ev.Description,
-					"agent_type":  ev.AgentType,
-					"kind":        ev.Kind,
-					"tool_name":   ev.ToolName,
-					"tool_input":  ev.ToolInput,
-				}); err == nil {
+				// Retained events already carry the agent id stamped by the
+				// manager's eventSink; fall back to the listing id for safety.
+				if ev.AgentID == "" {
+					ev.AgentID = sa.ID
+				}
+				if b, err := json.Marshal(subAgentEventPayload(sessionID, ev)); err == nil {
 					select {
 					case conn.send <- b:
 					default:

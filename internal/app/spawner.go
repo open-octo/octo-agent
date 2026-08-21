@@ -298,20 +298,43 @@ func (s *Spawner) runChild(ctx context.Context, lc *liveChild, prompt string) (r
 
 	childCtx := tools.WithSubAgentMarker(ctx)
 
-	// When the manager stamped an event sink into ctx (TUI live panel), stream
-	// the child's tool-level activity to it. Only tool_started/tool_error are
-	// forwarded — not per-token text — to keep event volume sane with several
-	// sub-agents running at once. No sink (headless) => nil handler => no
-	// events; unlike Run, a nil-handler RunStream still keeps a streamed
-	// partial reply in history when a round dies on an error.
+	// When the manager stamped an event sink into ctx (live panels), stream
+	// the child's activity to it: tool dispatches with their (capped) outputs,
+	// and the assistant's text as whole blocks — deltas are aggregated locally
+	// and flushed on the next tool dispatch or at turn end, never per token, to
+	// keep event volume sane with several sub-agents running at once. No sink
+	// (headless) => nil handler => no events; unlike Run, a nil-handler
+	// RunStream still keeps a streamed partial reply in history when a round
+	// dies on an error.
 	var handler agent.EventHandler
 	if sink := tools.SubAgentEventSink(ctx); sink != nil {
+		var textBuf strings.Builder
+		flushText := func() {
+			if textBuf.Len() == 0 {
+				return
+			}
+			sink(tools.SubAgentEvent{Kind: "text", Text: tools.ClipForEvent(textBuf.String(), tools.SubAgentEventTextCap)})
+			textBuf.Reset()
+		}
 		handler = func(ev agent.AgentEvent) {
 			switch ev.Kind {
+			case agent.EventTextDelta:
+				textBuf.WriteString(ev.Text)
 			case agent.EventToolStarted:
-				sink(tools.SubAgentEvent{Kind: "tool", ToolName: ev.ToolName, ToolInput: ev.Input})
+				flushText()
+				sink(tools.SubAgentEvent{Kind: "tool", ToolID: ev.ToolID, ToolName: ev.ToolName, ToolInput: ev.Input})
+			case agent.EventToolDone:
+				sink(tools.SubAgentEvent{Kind: "tool_done", ToolID: ev.ToolID, ToolName: ev.ToolName,
+					ToolOutput: tools.ClipForEvent(ev.Output, tools.SubAgentEventOutputCap)})
 			case agent.EventToolError:
-				sink(tools.SubAgentEvent{Kind: "tool_error", ToolName: ev.ToolName})
+				out := ev.Err
+				if ev.Output != "" {
+					out += "\n" + ev.Output
+				}
+				sink(tools.SubAgentEvent{Kind: "tool_error", ToolID: ev.ToolID, ToolName: ev.ToolName,
+					ToolOutput: tools.ClipForEvent(out, tools.SubAgentEventOutputCap)})
+			case agent.EventTurnDone:
+				flushText()
 			}
 		}
 	}

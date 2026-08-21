@@ -489,14 +489,17 @@ func toolNames(defs []agent.ToolDefinition) []string {
 	return names
 }
 
-// toolInputSpawner emits a "tool" SubAgentEvent carrying ToolInput, the way
+// toolInputSpawner emits the trail of SubAgentEvents the way
 // internal/app/spawner.go's real spawner does when a sub-agent dispatches a
-// tool call.
+// tool call: the tool with its input, its completion with the output, and an
+// assistant text block.
 type toolInputSpawner struct{}
 
 func (toolInputSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.SpawnResult, error) {
 	if sink := tools.SubAgentEventSink(ctx); sink != nil {
-		sink(tools.SubAgentEvent{Kind: "tool", ToolName: "read_file", ToolInput: map[string]any{"path": "go.mod"}})
+		sink(tools.SubAgentEvent{Kind: "tool", ToolID: "t1", ToolName: "read_file", ToolInput: map[string]any{"path": "go.mod"}})
+		sink(tools.SubAgentEvent{Kind: "tool_done", ToolID: "t1", ToolName: "read_file", ToolOutput: "module contents"})
+		sink(tools.SubAgentEvent{Kind: "text", Text: "found it"})
 	}
 	return tools.SpawnResult{Reply: "ok"}, nil
 }
@@ -574,10 +577,24 @@ func TestPrepareToolTurn_SubAgentToolEventCarriesToolInput(t *testing.T) {
 				if !ok || input["path"] != "go.mod" {
 					t.Fatalf("tool_input = %v, want {path: go.mod}", ev["tool_input"])
 				}
+				if ev["tool_id"] != "t1" {
+					t.Fatalf("tool_id = %v, want t1", ev["tool_id"])
+				}
 				gotToolEvent = true
+			case "tool_done":
+				if ev["tool_id"] != "t1" || ev["tool_output"] != "module contents" {
+					t.Fatalf("tool_done payload = %v", ev)
+				}
+			case "text":
+				if ev["text"] != "found it" {
+					t.Fatalf("text payload = %v", ev)
+				}
 			case "done":
 				if !gotToolEvent {
 					t.Fatal("got the done event before the tool event")
+				}
+				if ev["result"] != "ok" {
+					t.Fatalf("done result = %v, want the final reply", ev["result"])
 				}
 				return
 			}

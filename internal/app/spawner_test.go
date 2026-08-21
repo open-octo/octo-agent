@@ -736,3 +736,91 @@ func TestAgentSpawner_SessionDirPersistsTranscript(t *testing.T) {
 		t.Error("Continue should have appended more records to the session file")
 	}
 }
+
+// trailSender scripts a two-round child for the event-trail test: round 1
+// streams a text delta then returns a tool_use block; round 2 streams the
+// final answer. Implementing ToolStreamingSender makes the child loop emit
+// real EventTextDelta events (the buffered fallback wouldn't).
+type trailSender struct{ calls int32 }
+
+func (s *trailSender) SendMessages(_ context.Context, _, _ string, _ []agent.Message, _ int) (agent.Reply, error) {
+	return agent.Reply{Content: "unused"}, nil
+}
+
+func (s *trailSender) SendMessagesWithTools(_ context.Context, _, _ string, _ []agent.Message, _ int, _ []agent.ToolDefinition) (agent.Reply, error) {
+	return agent.Reply{Content: "unused"}, nil
+}
+
+func (s *trailSender) StreamMessagesWithTools(
+	_ context.Context, _, _ string, _ []agent.Message, _ int, _ []agent.ToolDefinition,
+	onChunk func(string), _ agent.ToolInputDeltaFunc, _ agent.ThinkingDeltaFunc,
+) (agent.Reply, error) {
+	if atomic.AddInt32(&s.calls, 1) == 1 {
+		onChunk("Let me look. ")
+		return agent.Reply{
+			Blocks: []agent.ContentBlock{
+				agent.NewTextBlock("Let me look. "),
+				agent.NewToolUseBlock("t1", "echo_tool", map[string]any{"q": "x"}),
+			},
+			StopReason: "tool_use",
+		}, nil
+	}
+	onChunk("All done.")
+	return agent.Reply{Content: "All done.", StopReason: "end_turn"}, nil
+}
+
+// echoExecutor returns a fixed payload for any tool call.
+type echoExecutor struct{}
+
+func (echoExecutor) Execute(_ context.Context, _ string, _ map[string]any) (agent.ToolResult, error) {
+	return agent.ToolResult{Text: "TOOL-OUTPUT-PAYLOAD"}, nil
+}
+
+func TestAgentSpawner_EventTrailCarriesOutputsAndText(t *testing.T) {
+	parent := agent.New(&trailSender{}, "parent-model")
+	childTools := []agent.ToolDefinition{{Name: "echo_tool"}}
+	sp := NewSpawner(parent, echoExecutor{}, func(context.Context) []agent.ToolDefinition { return childTools })
+
+	var events []tools.SubAgentEvent
+	ctx := tools.WithSubAgentEventSink(context.Background(), func(ev tools.SubAgentEvent) {
+		events = append(events, ev)
+	})
+
+	res, err := sp.Spawn(ctx, tools.SpawnRequest{Description: "trail", Prompt: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Reply != "All done." {
+		t.Fatalf("Reply = %q", res.Reply)
+	}
+
+	var kinds []string
+	for _, ev := range events {
+		kinds = append(kinds, ev.Kind)
+	}
+	want := []string{"text", "tool", "tool_done", "text"}
+	if len(kinds) != len(want) {
+		t.Fatalf("event kinds = %v, want %v", kinds, want)
+	}
+	for i := range want {
+		if kinds[i] != want[i] {
+			t.Fatalf("event kinds = %v, want %v", kinds, want)
+		}
+	}
+
+	if events[0].Text != "Let me look. " {
+		t.Errorf("first text = %q", events[0].Text)
+	}
+	if events[1].ToolID != "t1" || events[1].ToolName != "echo_tool" {
+		t.Errorf("tool event = %+v", events[1])
+	}
+	if q, _ := events[1].ToolInput["q"].(string); q != "x" {
+		t.Errorf("tool input = %v", events[1].ToolInput)
+	}
+	if events[2].ToolID != "t1" || events[2].ToolOutput != "TOOL-OUTPUT-PAYLOAD" {
+		t.Errorf("tool_done event = %+v", events[2])
+	}
+	if events[3].Text != "All done." {
+		t.Errorf("final text = %q", events[3].Text)
+	}
+}
