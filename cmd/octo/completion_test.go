@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/app"
 )
 
@@ -75,10 +74,11 @@ func TestCompletionCandidates_DefaultChatMode_SessionIDs(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
-	s1 := agent.NewSession("test-model", "")
-	if err := s1.Save(); err != nil {
-		t.Fatalf("save: %v", err)
-	}
+	// Completion is scoped like -c itself, so the seeded session has to belong
+	// to the directory the shell is completing in.
+	dir := t.TempDir()
+	t.Chdir(dir)
+	s1 := sessionIn(t, dir)
 
 	got := completionCandidates([]string{"octo", "-c", ""})
 	if len(got) < 1 || got[0] != "last" {
@@ -113,15 +113,13 @@ func TestCompletionCandidates_SessionIDsAfterDashC(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
-	// Seed two sessions so the candidate list is meaningful.
-	s1 := agent.NewSession("test-model", "")
-	if err := s1.Save(); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-	s2 := agent.NewSession("test-model", "")
-	if err := s2.Save(); err != nil {
-		t.Fatalf("save: %v", err)
-	}
+	// Seed two sessions in the completing directory so the candidate list is
+	// meaningful — one elsewhere to confirm the scoping holds here too.
+	dir := t.TempDir()
+	t.Chdir(dir)
+	s1 := sessionIn(t, dir)
+	s2 := sessionIn(t, dir)
+	other := sessionIn(t, t.TempDir())
 
 	got := completionCandidates([]string{"octo", "fix the bug", "-c", ""})
 	// "last" is always first, then short + full for each session.
@@ -132,6 +130,9 @@ func TestCompletionCandidates_SessionIDsAfterDashC(t *testing.T) {
 		if !sliceContains(got, want) {
 			t.Errorf("expected %q in candidates; got %v", want, got)
 		}
+	}
+	if sliceContains(got, other.ID) {
+		t.Errorf("candidates offer another directory's session %q; got %v", other.ID, got)
 	}
 }
 

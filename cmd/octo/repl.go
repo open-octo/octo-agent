@@ -39,6 +39,11 @@ type replConfig struct {
 	subAgentMgr *tools.SubAgentManager // nil → sub-agent tools disabled
 	skillReg    *skills.Registry       // discovered skills; backs /skills and /<name>
 	memDir      string                 // per-repo memory directory; backs /memory ("" → disabled)
+	// cwd is the directory this session works in: the process's launch
+	// directory, or the resumed session's project directory when it has one.
+	// Backs /sessions, which lists the sessions belonging to it — the same set
+	// `octo -c` offers from there.
+	cwd string
 	// reader, when non-nil, is the line reader to use instead of building
 	// one fresh inside runREPL. Set by cmd/octo so the same instance is
 	// shared with the permission gate and the ask_user_question asker.
@@ -75,6 +80,14 @@ type replConfig struct {
 	// for the headless one-shot, which has no slash-command REPL to call it
 	// from.
 	recomposeSystemPrompt func()
+	// afterFirstSave, when non-nil, is called once after the session first
+	// lands on disk. It files the session under a project for the directory it
+	// works in (server.EnsureProjectForDir), which is deferred to here rather
+	// than done at session creation because a session that never received a
+	// message never gets a transcript — and a project pointing at no session
+	// would still take a row in the sidebar. nil when saving is off, on a
+	// resumed session, or for the headless one-shot.
+	afterFirstSave func()
 	// modelName is the resolved model displayed in the TUI status bar.
 	modelName string
 	// reasoningEffort is the resolved reasoning level ("low" | "medium" | "high" | "xhigh" | "max" | "")
@@ -470,16 +483,20 @@ func saveSession(w io.Writer, sess *agent.Session, a *agent.Agent) error {
 	return nil
 }
 
-func printSessions(w io.Writer) error {
-	sessions, err := agent.ListSessions(10)
+// printSessions lists the sessions belonging to dir — the directory this
+// session works in, not the process cwd, which resuming a project's session
+// leaves behind. Scoped like `octo -c` so the ids on offer are the ones that
+// can actually be resumed from here.
+func printSessions(w io.Writer, dir string) error {
+	sessions, err := sessionsForDir(dir, 10)
 	if err != nil {
 		return err
 	}
 	if len(sessions) == 0 {
-		fmt.Fprintln(w, "No saved sessions.")
+		fmt.Fprintf(w, "No sessions in %s yet.\n", dir)
 		return nil
 	}
-	fmt.Fprintln(w, "Recent sessions (newest first):")
+	fmt.Fprintf(w, "Recent sessions in %s (newest first):\n", dir)
 	fmt.Fprintln(w, formatSessionList(sessions))
 	return nil
 }

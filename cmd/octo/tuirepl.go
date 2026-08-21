@@ -733,7 +733,7 @@ func newTUIModel(cfg replConfig) *tuiModel {
 	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
 		width, height = w, h
 	}
-	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(workingDir()), ta: ta, inputHistory: loadInputHistory(historyFile), inputHistoryIdx: -1, historyFile: historyFile, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}, subAgentFocus: -1, workflows: map[string]*workflowUI{}, width: width, height: height}
+	m := &tuiModel{cfg: cfg, a: cfg.a, cwd: abbreviateHome(cfg.cwd), ta: ta, inputHistory: loadInputHistory(historyFile), inputHistoryIdx: -1, historyFile: historyFile, md: markdownRenderer{style: style}, subAgents: map[string]*subAgentUI{}, subAgentFocus: -1, workflows: map[string]*workflowUI{}, width: width, height: height}
 	// Seed the last-seen goal status so a resumed session's first transition
 	// (e.g. the budget crossing) prints its notice instead of being treated
 	// as the baseline.
@@ -2225,10 +2225,20 @@ func (m *tuiModel) handleTurnFinished(err error) (tea.Model, tea.Cmd) {
 	// Auto-save (history is well-formed even after an interrupt).
 	if !m.cfg.noSave {
 		m.cfg.session.SyncFrom(m.a.History)
-		_ = m.cfg.session.Save()
+		saveErr := m.cfg.session.Save()
 		// Record the real context-token count so this session shows accurate
 		// usage when later opened in the Web UI (parity with web/desktop turns).
 		_ = m.a.PersistContextUsage(m.cfg.session)
+		// The session exists on disk now, so it can be filed under a project
+		// for its working directory. Gated on the save actually landing — a
+		// project entry for a session with no transcript is tolerated by the
+		// registry but points at nothing. Once per process; the hook is cleared
+		// rather than guarded by a flag, and a failed save leaves it in place
+		// for the next turn to retry.
+		if saveErr == nil && m.cfg.afterFirstSave != nil {
+			m.cfg.afterFirstSave()
+			m.cfg.afterFirstSave = nil
+		}
 	}
 
 	// An aborted or errored turn parks the goal-continuation loop: an

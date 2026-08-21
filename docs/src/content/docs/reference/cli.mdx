@@ -17,7 +17,7 @@ stdin, runs a headless one-shot: full agentic tool loop, then exit.
 
 | Flag | Default | Description |
 |---|---|---|
-| `-c`, `--continue [id]` | — | Resume a session — `last`, a short ID, or a substring; omit the value to pick from a list |
+| `-c`, `--continue [id]` | — | Resume a session belonging to the current directory — `last`, a short ID, or a substring; omit the value to pick from a list |
 | `--take-over` | `false` | When resuming, take over a session bound to another entry |
 | `--no-save` | `false` | Disable session auto-save in the TUI (one-shots never persist) |
 | `--provider` | from config | `anthropic` \| `openai` |
@@ -54,7 +54,7 @@ stdin, runs a headless one-shot: full agentic tool loop, then exit.
 | `octo memory list`\|`path` | List or locate the project's and inherited memory files |
 | `octo skills list`\|`add`\|`update`\|`path` | Manage discovered skills |
 | `octo hooks list` | List configured lifecycle hooks |
-| `octo sessions` | List saved sessions |
+| `octo sessions` [`--all`] | List this directory's sessions; `--all` lists every session on the machine, grouped by directory |
 | `octo trash list`\|`restore`\|`rm`\|`empty` | Recover files the agent deleted or overwrote (the [recycle bin](/docs/guides/sandbox-the-agent/)) |
 | `octo workflows list`\|`path`\|`update` | List saved workflows |
 | `octo doctor` | Read-only health check of your setup |

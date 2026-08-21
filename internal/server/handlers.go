@@ -271,8 +271,10 @@ func validateWorkingDir(raw string) (string, error) {
 // composes with the PATCH /api/sessions/{id}/working_dir override without
 // special-casing. The directory is created lazily here, the first time a
 // session actually needs it, rather than at server startup. A failure here
-// is logged and otherwise a no-op: the session just falls back to the
-// server's launch directory, exactly like before workspace_dir existed.
+// is logged and otherwise a no-op: the session keeps no directory of its own
+// and resolveSessionDir falls back to the workspace anyway — seeding it just
+// makes the value visible on the session (in the composer, and to the CLI's
+// per-directory listing).
 //
 // A session created inside a project gets NO seeded dir: the project's
 // directory already governs where its tools run, and a seeded value would only

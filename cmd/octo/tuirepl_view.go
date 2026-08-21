@@ -953,7 +953,7 @@ func (m *tuiModel) dispatchSlash(text string) (tea.Model, tea.Cmd) {
 				fmt.Fprintf(&b, "save: %v\n", err)
 			}
 		case "/sessions":
-			if err := printSessions(&b); err != nil {
+			if err := printSessions(&b, cfg.cwd); err != nil {
 				fmt.Fprintf(&b, "sessions: %v\n", err)
 			}
 		case "/skills":
@@ -1945,15 +1945,6 @@ func shellCountLabel(n int) string {
 		return "1 shell still running"
 	}
 	return fmt.Sprintf("%d shells still running", n)
-}
-
-// workingDir returns the current directory, or "" if it can't be determined.
-func workingDir() string {
-	d, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	return d
 }
 
 // abbreviateHome replaces the user's home-dir prefix with "~".

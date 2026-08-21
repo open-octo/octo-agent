@@ -79,7 +79,9 @@ func TestRun_TopLevelFlags_RouteToChat(t *testing.T) {
 
 func TestRun_Sessions_Empty(t *testing.T) {
 	// `octo sessions` replaced --list-sessions. With an isolated HOME there's
-	// nothing saved, so it reports that and exits 0 — no provider needed.
+	// nothing saved, so it reports that and exits 0 — no provider needed. The
+	// listing is scoped to the current directory, so the empty message is the
+	// scoped one and has to point at the flag that shows the rest.
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
@@ -88,8 +90,16 @@ func TestRun_Sessions_Empty(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
 	}
+	if !strings.Contains(stdout.String(), "--all") {
+		t.Errorf("stdout should report no sessions here and point at --all; got: %q", stdout.String())
+	}
+
+	stdout.Reset()
+	if code := run([]string{"sessions", "--all"}, strings.NewReader(""), &stdout, &stderr); code != 0 {
+		t.Fatalf("sessions --all exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
 	if !strings.Contains(stdout.String(), "No saved sessions.") {
-		t.Errorf("stdout should report no sessions; got: %q", stdout.String())
+		t.Errorf("--all on an empty store should report no sessions; got: %q", stdout.String())
 	}
 }
 

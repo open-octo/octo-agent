@@ -620,6 +620,10 @@ func (m *Manager) cmdNew(ev InboundEvent, agentID string) string {
 	st.AgentID = agentID
 	st.Bind(agent.EntryChannel, false)
 	_ = st.SetPermissionMode(string(permission.ResolveDefaultMode()))
+	// Same working directory a channel session gets anywhere else — see
+	// applyWorkspaceDir. /new must not produce a session shaped differently
+	// from the one restoreOrInitStore builds.
+	applyWorkspaceDir(st)
 	if err := st.Save(); err != nil {
 		return fmt.Sprintf("Could not create new session: %v", err)
 	}

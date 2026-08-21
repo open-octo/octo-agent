@@ -1780,12 +1780,29 @@ func (s *Server) curCwdEnv() (string, string) {
 
 // resolveSessionDir is the single arbiter of where a session's tools run:
 //
-//	project working dir  >  the session's own WorkingDir  >  server default
+//	project working dir  >  the session's own WorkingDir  >  workspace dir
 //
 // The project wins over the session's own value — that is what makes a project
 // directory a shared setting rather than a default. The session's own value is
 // left on disk untouched, merely shadowed, so moving a session out of a project
 // restores it.
+//
+// The last resort is the configured workspace (~/Octo unless overridden), NOT
+// the directory this process was launched from. Where `octo serve` happened to
+// be started is nobody's choice — the same reason adoptTaskWorkingDirs refuses
+// to turn a workspace directory into a project — and letting it decide meant a
+// session with no directory of its own ran its tools somewhere that changed
+// with how the server was invoked. New web sessions are seeded with the
+// workspace up front (applyDefaultWorkspaceDir) and IM sessions record it at
+// creation, so this fallback covers what remains: sessions written before
+// either did.
+//
+// The launch directory below is unreachable in practice, kept only because
+// returning "" would be worse: an empty cwd is inherited by exec, so tools
+// would silently run in the launch directory anyway, with nothing saying so.
+// Reaching it needs an unresolvable workspace, which (with workspace_dir unset)
+// means os.UserHomeDir failed — and then ~/.octo is unusable too, so there was
+// no session to resolve a directory for in the first place.
 //
 // Every surface that reports or uses a session's directory goes through here.
 // Keeping display and execution on one code path is the point: when they were
@@ -1797,6 +1814,9 @@ func (s *Server) resolveSessionDir(sessionID, own string) string {
 	}
 	if own != "" {
 		return own
+	}
+	if ws := s.curWorkspaceDir(); ws != "" {
+		return ws
 	}
 	return s.curCwd()
 }
@@ -1813,9 +1833,18 @@ func (s *Server) sessionCwdEnv(sess *agent.Session) (string, string) {
 	}
 	dir := s.resolveSessionDir(sess.ID, sess.WorkingDir)
 	if dir == s.curCwd() {
-		// Unchanged from the server default — reuse the cached env context
+		// Unchanged from the launch directory — reuse the cached env context
 		// instead of rebuilding an identical one.
 		return s.curCwdEnv()
+	}
+	// A session that fell back to the workspace may be the first to need it.
+	// Created here rather than at startup for the same reason
+	// applyDefaultWorkspaceDir does it lazily; a failure leaves the turn to
+	// report the missing directory itself, which is clearer than failing here.
+	if dir == s.curWorkspaceDir() {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			slog.Warn("could not create the workspace directory a session fell back to", "dir", dir, "err", err)
+		}
 	}
 	return dir, buildEnvContext(dir)
 }

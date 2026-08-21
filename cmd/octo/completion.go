@@ -3,9 +3,9 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
-	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/app"
 )
 
@@ -87,7 +87,9 @@ func completionCandidates(words []string) []string {
 	case "memory":
 		return memoryCandidates(words)
 	case "sessions":
-		// Takes no arguments; suggest nothing rather than chat flags.
+		if len(words) == 3 {
+			return []string{"--all"}
+		}
 		return nil
 	case "skills":
 		if len(words) == 3 {
@@ -169,13 +171,19 @@ func initCandidates(prev string) []string {
 	return initFlags
 }
 
-// sessionIDCandidates returns "last" plus the short + full IDs of every
-// saved session (up to 50, newest first — beyond that the user can paste
-// the full ID directly). Errors are swallowed: completion never fails the
-// command line, it just offers fewer suggestions.
+// sessionIDCandidates returns "last" plus the short + full IDs of the sessions
+// belonging to the current directory (up to 50, newest first — beyond that the
+// user can paste the full ID directly). Scoped the same way `octo -c` is, so
+// completion never offers an id that -c would then refuse. Errors are
+// swallowed: completion never fails the command line, it just offers fewer
+// suggestions.
 func sessionIDCandidates() []string {
 	out := []string{"last"}
-	sessions, err := agent.ListSessions(50)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return out
+	}
+	sessions, err := sessionsForDir(cwd, 50)
 	if err != nil {
 		return out
 	}
