@@ -61,12 +61,10 @@ func (s *Server) stashTaskWorkspace(workingDir string) {
 	if _, err := os.Stat(workingDir); err != nil {
 		return // never created, or already gone
 	}
-	if _, err := trash.Backup(workingDir, s.tasksRoot()); err != nil {
+	// Move, not copy-then-delete: same-filesystem rename is atomic, costs no
+	// extra space, and cannot leave a half-copied twin behind.
+	if err := trash.Move(workingDir, s.tasksRoot()); err != nil {
 		slog.Warn("task workspace: trash", "dir", workingDir, "err", err)
-		return // keep the directory rather than deleting without a copy
-	}
-	if err := os.RemoveAll(workingDir); err != nil {
-		slog.Warn("task workspace: remove after trash", "dir", workingDir, "err", err)
 	}
 }
 
@@ -86,7 +84,9 @@ func (s *Server) sweepOrphanTaskWorkspaces() {
 		if !e.IsDir() {
 			continue
 		}
-		if _, err := agent.LoadSession(e.Name()); err == nil {
+		// A stat, not a full transcript parse — this runs on every start over
+		// every live task.
+		if _, err := agent.SessionMTime(e.Name()); err == nil {
 			continue // its session is alive
 		}
 		s.stashTaskWorkspace(filepath.Join(root, e.Name()))

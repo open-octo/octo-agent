@@ -789,7 +789,6 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.stashTaskWorkspace(taskDir)
 	s.forgetTurnLock(id)
 	tools.CloseSessionBackgroundManager(id) // reap the session's background daemons
 	tools.CloseSessionSubAgentManager(id)   // and its sub-agents
@@ -797,6 +796,9 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	tools.CloseSessionReadTracker(id)       // and its read-before-write tracker
 	tools.CloseSessionTaskStore(id)         // and its task/plan checklist
 	tools.CloseSessionReplaySecrets(id)     // and any cached replay secrets
+	// After the teardown above: a background daemon still writing into the
+	// directory while it moves would race the rename.
+	s.stashTaskWorkspace(taskDir)
 	s.wsHub.broadcast("", wsEventSessionDeleted{Type: "session_deleted", SessionID: id})
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": []string{id}})
 }
@@ -825,7 +827,6 @@ func (s *Server) deleteSessionsByID(ids []string) (deleted []string, failed map[
 			failed[id] = err.Error()
 			continue
 		}
-		s.stashTaskWorkspace(taskDir)
 		s.forgetTurnLock(id)
 		tools.CloseSessionBackgroundManager(id) // reap the session's background daemons
 		tools.CloseSessionSubAgentManager(id)   // and its sub-agents
@@ -833,6 +834,8 @@ func (s *Server) deleteSessionsByID(ids []string) (deleted []string, failed map[
 		tools.CloseSessionReadTracker(id)       // and its read-before-write tracker
 		tools.CloseSessionTaskStore(id)         // and its task/plan checklist
 		tools.CloseSessionReplaySecrets(id)     // and any cached replay secrets
+		// After the teardown above — see handleDeleteSession.
+		s.stashTaskWorkspace(taskDir)
 		s.wsHub.broadcast("", wsEventSessionDeleted{Type: "session_deleted", SessionID: id})
 		deleted = append(deleted, id)
 	}

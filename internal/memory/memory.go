@@ -298,8 +298,8 @@ func RenderInjection(dir string, inheritedDirs ...string) string {
 	// "created on first write" rests on write_file's MkdirAll
 	// (internal/tools/write_file.go) — if that tool ever stops creating
 	// parent dirs, this guidance silently breaks.
-	crossProject := "- A durable fact about a DIFFERENT project than the one above — you were asked to work on another repo — belongs in THAT repo's memory. " +
-		"Get its directory with `octo memory path <repo path>` (terminal), then write to it directly: the whole memories tree is writable, and the directory is created on first write. "
+	crossProject := "- A durable fact about a DIFFERENT project than the one above — you were asked to work on another repo — belongs in THAT project's memory. " +
+		"Get its directory with `octo memory path <repo path>` (terminal): it prints the memory directory of the project referencing that path (the shared tier when no project does — save there in that case), and the whole memories tree is writable. "
 	if shared {
 		crossProject += "If you can't resolve it, keep it here — these notes are read by every session, so it will still surface; a note filed under the wrong project surfaces nowhere.\n"
 	} else {

@@ -155,7 +155,7 @@ func TestDissolvePlainGroups_Idempotent(t *testing.T) {
 // at it and never gets its project.
 func TestReconcileRegistry_DissolvedSessionIsThenAdopted(t *testing.T) {
 	setTestHome(t)
-	dir := t.TempDir()
+	dir := gitMark(t, t.TempDir())
 	sess := saveSessionIn(t, dir)
 	writeGroups(t, sessionGroup{ID: "g-plain", Name: "Group 1", SessionIDs: []string{sess.ID}})
 

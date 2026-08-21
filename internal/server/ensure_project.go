@@ -177,7 +177,16 @@ func isDefaultWorkspaceDir(dir string) bool {
 		builtin = ""
 	}
 	for _, candidate := range []string{configured, builtin} {
-		if candidate != "" && memory.NormalizeDir(candidate) == target {
+		if candidate == "" {
+			continue
+		}
+		norm := memory.NormalizeDir(candidate)
+		if norm == target {
+			return true
+		}
+		// Per-session task workspaces (<workspace>/tasks/<id>) are stamped,
+		// not chosen — the same "nobody chose this" rule as the root itself.
+		if strings.HasPrefix(target, filepath.Join(norm, "tasks")+string(filepath.Separator)) {
 			return true
 		}
 	}

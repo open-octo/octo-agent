@@ -594,8 +594,8 @@ func New(cfg Config) (*Server, error) {
 func (s *Server) reconcileRegistry() {
 	s.dissolvePlainGroups()
 	s.adoptTaskWorkingDirs()
-	// After adoption so a directory the passes above still care about is
-	// settled; only ever touches <workspace>/tasks/ (see underTasksRoot).
+	// After adoption, so the passes above see directories in their settled
+	// state; only ever touches <workspace>/tasks/ (see underTasksRoot).
 	s.sweepOrphanTaskWorkspaces()
 }
 
@@ -1863,6 +1863,14 @@ func (s *Server) resolveSessionDir(sessionID, own string) string {
 // the intermediate value, which neither comparison recognises — those read as
 // chosen. Accepted there, accepted here.
 func (s *Server) isSeededWorkspaceValue(own string) bool {
+	// A per-session task workspace (<workspace>/tasks/<id>) is seeded too —
+	// applyDefaultWorkspaceDir stamps it on every dirless task, so it means
+	// "nobody chose" exactly like the root used to. Without this a task filed
+	// into a project keeps running in its throwaway directory while the
+	// re-frozen prompt claims the cwd is the project's workspace.
+	if s.underTasksRoot(own) {
+		return true
+	}
 	norm := memory.NormalizeDir(own)
 	if ws := s.curWorkspaceDir(); ws != "" && memory.NormalizeDir(ws) == norm {
 		return true

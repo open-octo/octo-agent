@@ -57,6 +57,25 @@ func TestTaskWorkspace_SeedSkipsOwnedAndProjectSessions(t *testing.T) {
 	}
 }
 
+// A task workspace is a SEEDED value: a task later filed into a project must
+// run in the project's workspace, not keep running in its throwaway directory
+// while the re-frozen prompt claims otherwise.
+func TestTaskWorkspace_ProjectShadowsSeededTaskDir(t *testing.T) {
+	srv := groupTestServer(t)
+	sess := agent.NewSession("m", "")
+	if err := sess.Save(); err != nil {
+		t.Fatal(err)
+	}
+	srv.applyDefaultWorkspaceDir(sess)
+
+	gid, ws := newProjectGroupWS(t, srv, "Work", t.TempDir())
+	fileInProject(t, gid, sess.ID)
+
+	if got := srv.sessionCwd(sess); got != ws {
+		t.Errorf("task filed into a project: cwd = %q, want the project workspace %q", got, ws)
+	}
+}
+
 // Task workspaces are never adopted into projects: the adoption pass skips
 // everything under the workspace root, not just the root itself.
 func TestAdoptTaskWorkingDirs_SkipsTaskWorkspaces(t *testing.T) {

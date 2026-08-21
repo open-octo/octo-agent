@@ -18,8 +18,8 @@ func TestSourceDirsHash_Stability(t *testing.T) {
 	if sourceDirsHash(p1) == "" {
 		t.Error("a project with mounts must hash to a non-empty identity")
 	}
-	if got := sourceDirsHash(&sessionGroup{ID: "g-3"}); got != "" {
-		t.Errorf("a zero-folder project must hash to the empty identity, got %q", got)
+	if got := sourceDirsHash(&sessionGroup{ID: "g-3"}); got == "" {
+		t.Error("a zero-folder project must still hash to a non-empty identity — being in a project changes the prompt")
 	}
 	if got := sourceDirsHash(nil); got != "" {
 		t.Errorf("no project must hash to the empty identity, got %q", got)

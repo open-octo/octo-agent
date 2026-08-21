@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 
 	"github.com/open-octo/octo-agent/internal/server"
 )
@@ -61,8 +59,13 @@ func decideProjectForCwd(cwd string, interactive bool, stdin io.Reader, stdout i
 		return projectDecision{}
 	case insideGitRepo(cwd):
 		ref, err := server.EnsureProjectForDirOnly(cwd)
-		if err != nil || ref.ID == "" {
+		if err != nil {
 			return projectDecision{Note: fmt.Sprintf("could not create a project for this repository: %v", err)}
+		}
+		if ref.ID == "" {
+			// The workspace default itself — never adopted, and nothing worth
+			// a note: the session simply stays a task.
+			return projectDecision{}
 		}
 		return decisionFor(ref)
 	default:
@@ -78,19 +81,8 @@ func decisionFor(ref server.ProjectRef) projectDecision {
 	return d
 }
 
-// insideGitRepo reports whether dir or any ancestor holds a .git entry — a
-// directory OR a file, since linked worktrees carry a .git file. No git
-// subprocess: this runs on every CLI start.
-func insideGitRepo(dir string) bool {
-	dir = filepath.Clean(dir)
-	for {
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			return true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return false
-		}
-		dir = parent
-	}
-}
+// insideGitRepo is the server's gate (server.DirInsideGitRepo) under the local
+// name the decision logic reads naturally — ONE implementation, because the
+// CLI's three-state rule and the server's adoption pass must judge "worth a
+// project row" identically or one will overturn the other on the next start.
+func insideGitRepo(dir string) bool { return server.DirInsideGitRepo(dir) }

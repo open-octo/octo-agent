@@ -15,6 +15,15 @@ func projectFor(t *testing.T, sessionID string) *sessionGroup {
 	return projectForSession(sessionID)
 }
 
+// gitMark makes dir count as a git repository for the adoption gate.
+func gitMark(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 // saveSessionIn persists a session whose own working directory is dir.
 func saveSessionIn(t *testing.T, dir string) *agent.Session {
 	t.Helper()
@@ -31,7 +40,7 @@ func saveSessionIn(t *testing.T, dir string) *agent.Session {
 // scopes its memory.
 func TestAdoptTaskWorkingDirs_ChosenDirectoryBecomesAProject(t *testing.T) {
 	setTestHome(t)
-	dir := t.TempDir()
+	dir := gitMark(t, t.TempDir())
 	sess := saveSessionIn(t, dir)
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
@@ -92,7 +101,7 @@ func TestAdoptTaskWorkingDirs_ExcludesTheBuiltinDefaultUnconditionally(t *testin
 	if err := os.MkdirAll(builtin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	elsewhere := t.TempDir()
+	elsewhere := gitMark(t, t.TempDir())
 
 	inBuiltin := saveSessionIn(t, builtin)
 	inChosen := saveSessionIn(t, elsewhere)
@@ -111,28 +120,34 @@ func TestAdoptTaskWorkingDirs_ExcludesTheBuiltinDefaultUnconditionally(t *testin
 	}
 }
 
-// Everything that is not the workspace counts as a choice — including the home
-// directory, which some sessions were pointed at deliberately.
-func TestAdoptTaskWorkingDirs_AdoptsAnythingElse(t *testing.T) {
+// Only a git repository is worth a project row — the same gate the CLI's
+// three-state adoption applies, or the next serve start would overturn the
+// CLI's decision to leave a plain directory a loose task. The home directory
+// is the canonical plain directory.
+func TestAdoptTaskWorkingDirs_SkipsPlainDirectories(t *testing.T) {
 	setTestHome(t)
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	sess := saveSessionIn(t, home)
+	inHome := saveSessionIn(t, home)
+	plain := saveSessionIn(t, t.TempDir())
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	srv.adoptTaskWorkingDirs()
 
-	if p := projectFor(t, sess.ID); p == nil {
-		t.Error("home was not adopted; only the workspace is excluded")
+	if p := projectFor(t, inHome.ID); p != nil {
+		t.Errorf("home was adopted into %+v; a plain directory is not a project", p)
+	}
+	if p := projectFor(t, plain.ID); p != nil {
+		t.Errorf("a plain directory was adopted into %+v", p)
 	}
 }
 
 // Several sessions in one directory share one project, not one each.
 func TestAdoptTaskWorkingDirs_OneProjectPerDirectory(t *testing.T) {
 	setTestHome(t)
-	dir := t.TempDir()
+	dir := gitMark(t, t.TempDir())
 	a := saveSessionIn(t, dir)
 	b := saveSessionIn(t, dir)
 
@@ -152,7 +167,7 @@ func TestAdoptTaskWorkingDirs_OneProjectPerDirectory(t *testing.T) {
 // one made, which is what lets this run on every start.
 func TestAdoptTaskWorkingDirs_Idempotent(t *testing.T) {
 	setTestHome(t)
-	dir := t.TempDir()
+	dir := gitMark(t, t.TempDir())
 	sess := saveSessionIn(t, dir)
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})

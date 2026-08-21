@@ -55,6 +55,17 @@ func runMemory(args []string, stdout, stderr io.Writer) int {
 	// reads anymore would send notes into a black hole.
 	claims := server.ProjectsClaimingDir(cwd)
 	if len(claims) > 1 {
+		if sub == "path" {
+			// Scripts and agents consume this: one path per line on stdout,
+			// the explanation on stderr.
+			for _, c := range claims {
+				if d, derr := c.MemoryDir(); derr == nil {
+					fmt.Fprintln(stdout, d)
+				}
+			}
+			fmt.Fprintf(stderr, "%d projects reference this directory — one memory directory per line.\n", len(claims))
+			return 0
+		}
 		fmt.Fprintf(stdout, "%d projects reference this directory — each keeps its own memory:\n", len(claims))
 		for _, c := range claims {
 			if d, derr := c.MemoryDir(); derr == nil {

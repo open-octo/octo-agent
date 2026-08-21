@@ -83,6 +83,13 @@ func (s *Server) adoptTaskWorkingDirs() {
 			// other octo-owned ground. Never a choice, never a project.
 			continue
 		}
+		if !dirInsideGitRepo(sess.WorkingDir) {
+			// The same gate the CLI's three-state adoption applies: a plain
+			// directory is not worth a project row. Without it, a task the CLI
+			// deliberately left loose (cd ~/Downloads && octo) would be swept
+			// into a Downloads project on the next serve start.
+			continue
+		}
 		byDir[sess.WorkingDir] = append(byDir[sess.WorkingDir], sess.ID)
 	}
 	if len(byDir) == 0 {

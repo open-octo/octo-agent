@@ -827,9 +827,22 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// else is a task on the shared tier. Falling back to the shared tier for
 	// a task keeps RenderInjection's two arguments collapsing into one, the
 	// same shape the server gives task turns.
+	// Adoption is about FILING, not memory, so it runs whether or not memory
+	// is on — but not for a session that will never be saved: creating a
+	// project row for it would leave the sidebar pointing at nothing. The
+	// picker may only pop for the interactive REPL/TUI: a one-shot's stdin
+	// can be a TTY while its stdout is a captured pipe, where a menu would
+	// hang the command invisibly.
+	var adoption projectDecision
+	if resumeID == "" && !*noSave {
+		adoption = decideProjectForCwd(cwd, isREPL && stdinIsTTY(stdin), stdin, stdout)
+		if adoption.Note != "" {
+			fmt.Fprintln(stderr, "octo: "+adoption.Note)
+		}
+	}
+
 	var memDir, homeMemDir string
 	var memWriteRoots []string
-	var adoption projectDecision
 	if !*noMemory {
 		if d, err := memory.HomeDir(); err == nil {
 			if memory.EnsureDir(d) == nil {
@@ -839,10 +852,6 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if resumeID != "" {
 			memDir = server.ProjectMemoryDirForSession(resumeID)
 		} else {
-			adoption = decideProjectForCwd(cwd, stdinIsTTY(stdin), stdin, stdout)
-			if adoption.Note != "" {
-				fmt.Fprintln(stderr, "octo: "+adoption.Note)
-			}
 			memDir = adoption.MemDir
 		}
 		if memDir == "" {
