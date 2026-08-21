@@ -114,7 +114,7 @@ func TestDissolvePlainGroups_BackfillsTheCronDirectory(t *testing.T) {
 		t.Errorf("working dir = %q, want %q", got.WorkingDir, want)
 	}
 	// And the run now resolves to it, which is the point.
-	if dir := srv.sessionProjectDir(run.ID); dir != want {
-		t.Errorf("run resolves to %q, want %q", dir, want)
+	if p := projectForSession(run.ID); p == nil || p.WorkingDir != want {
+		t.Errorf("run resolves to %+v, want working dir %q", p, want)
 	}
 }

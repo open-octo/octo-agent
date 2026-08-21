@@ -1351,7 +1351,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// The freeze is keyed on cwd as well as the model: the env context's
 	// working directory is baked into the prompt and can change under a live
 	// session.
-	projectDir := ProjectDirForSession(sess.ID)
+	proj := projectForSession(sess.ID)
 	if sess.IsComposedFor(model, cwd) {
 		a.System, a.LeanSystem = sess.ComposedSystem, sess.ComposedLeanSystem
 	} else {
@@ -1366,7 +1366,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 		// identity to cover that would miss the cache for every session,
 		// which is the worse trade.
 		var memInjection string
-		if memDir := s.sessionMemDir(projectDir); memDir != "" {
+		if memDir := s.sessionMemDir(proj); memDir != "" {
 			memInjection = memory.RenderInjection(memDir, s.homeMemDir)
 		}
 		if g := tools.MemoryBackendGuidance(); g != "" {
@@ -1393,7 +1393,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// per OS process across the serve process's many sessions.
 	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd))
 	hookEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
-	if memDir := s.sessionMemDir(projectDir); memDir != "" {
+	if memDir := s.sessionMemDir(proj); memDir != "" {
 		s.injectorFor(sess.ID, memDir).RegisterHooks(hookEngine)
 	}
 	// Workflow save-nudge — memory-independent, wired for every session.
@@ -1897,35 +1897,34 @@ func (s *Server) sessionCwdEnv(sess *agent.Session) (string, string) {
 	return dir, buildEnvContext(dir)
 }
 
-// sessionMemDir returns the memory directory for a turn belonging to the
-// project rooted at projectDir — "" for a session in no project, which is the
-// shared home tier every session reads. Callers get projectDir from
-// sessionProjectDir, i.e. from the session-group registry.
+// sessionMemDir returns the memory directory for a turn belonging to proj —
+// nil for a session in no project, which is the shared home tier every
+// session reads. Callers get proj from projectForSession, i.e. from the
+// session-group registry.
 //
 // What makes a project a project is that the user filed sessions under it, so
-// that is what scopes memory. Neither the server's launch directory nor a
-// session's own working directory takes part: a serve process started from a
-// checkout is not thereby working on it, and a session pointed at a directory
-// without being filed under a project is a task — its notes belong in the tier
-// every session reads, not buried under a slug nothing else opens.
+// that is what scopes memory. The directory is keyed on the project's ID
+// (memory.DirForProjectID), not on any path: the workspace is pure scratch
+// and carries no memory identity, and nothing that happens to directories on
+// disk — a rename, a remount — can orphan a project's notes.
 //
 // Resolution (and directory creation) happens on first use per project and is
 // cached for the process lifetime. Falls back to the home tier when resolution
 // fails; empty when memory is disabled.
-func (s *Server) sessionMemDir(projectDir string) string {
+func (s *Server) sessionMemDir(proj *sessionGroup) string {
 	if s.cfg.NoMemory {
 		return ""
 	}
-	if projectDir == "" {
+	if proj == nil || proj.ID == "" {
 		return s.homeMemDir
 	}
 	s.memDirCacheMu.Lock()
 	defer s.memDirCacheMu.Unlock()
-	if d, ok := s.memDirCache[projectDir]; ok {
+	if d, ok := s.memDirCache[proj.ID]; ok {
 		return d
 	}
 	dir := s.homeMemDir
-	d, err := memory.DirForProject(projectDir)
+	d, err := memory.DirForProjectID(proj.ID, filepath.Base(memory.NormalizeDir(proj.WorkingDir)))
 	if err != nil || memory.EnsureDir(d) != nil {
 		// Don't cache a failure: a full disk or a transient permission problem
 		// would otherwise pin this project to the shared tier for the rest of
@@ -1935,18 +1934,8 @@ func (s *Server) sessionMemDir(projectDir string) string {
 	if s.memDirCache == nil {
 		s.memDirCache = make(map[string]string)
 	}
-	s.memDirCache[projectDir] = d
+	s.memDirCache[proj.ID] = d
 	return d
-}
-
-// sessionProjectDir returns the working directory of the project owning
-// sessionID, or "" when the session belongs to none. The single place the
-// server asks "which project scopes this session's memory?".
-func (s *Server) sessionProjectDir(sessionID string) string {
-	if p := projectForSession(sessionID); p != nil {
-		return p.WorkingDir
-	}
-	return ""
 }
 
 // memoryWriteRoots returns the write-allowlist roots handed to the permission
@@ -3502,7 +3491,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// cwd joins the model in the freeze identity — a channel session dragged
 	// into a project in the Web UI picks the change up on its next turn, the
 	// same as a web one.
-	projectDir := ProjectDirForSession(sess.Store.ID)
+	proj := projectForSession(sess.Store.ID)
 	if sess.Store.IsComposedFor(sess.Agent.Model, cwd) {
 		sess.Agent.System, sess.Agent.LeanSystem = sess.Store.ComposedSystem, sess.Store.ComposedLeanSystem
 	} else {
@@ -3510,7 +3499,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		// session dragged into a project in the Web UI picks it up on its next
 		// turn (see buildAgent for the one freeze gap).
 		var memInjection string
-		if memDir := s.sessionMemDir(projectDir); memDir != "" {
+		if memDir := s.sessionMemDir(proj); memDir != "" {
 			memInjection = memory.RenderInjection(memDir, s.homeMemDir)
 		}
 		if g := tools.MemoryBackendGuidance(); g != "" {
@@ -3535,7 +3524,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// dropped on /unbind; a fresh engine each turn just re-registers it.
 	imEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd))
 	imEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
-	if memDir := s.sessionMemDir(projectDir); memDir != "" {
+	if memDir := s.sessionMemDir(proj); memDir != "" {
 		s.injectorFor("im:"+string(sess.Key), memDir).RegisterHooks(imEngine)
 	}
 	// Workflow save-nudge — memory-independent, wired for every IM session.
