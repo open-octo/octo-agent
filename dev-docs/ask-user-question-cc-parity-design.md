@@ -2,16 +2,18 @@
 
 ## Goal
 
-Make `ask_user_question` behave exactly like Claude Code's `AskUserQuestion`:
-up to four questions per call, options that keep `label` / `description` /
-`preview` as separate fields, a picker whose tail rows are **Other** and
-**Chat about this**, per-question notes, and Claude Code's tool-result
-wording. Every surface that can prompt a human — plain stdin, the TUI modal,
-the web modal/banner, the mobile card, and IM channels — renders the same
-payload at the fidelity its medium allows.
+Make `ask_user_question` behave like Claude Code's `AskUserQuestion`: up to
+four questions per call navigated as tabs, options that keep `label` /
+`description` / `preview` as separate fields, two mutually exclusive picker
+layouts, per-question notes, three distinct outcomes (submit / clarify /
+reject), and Claude Code's tool-result wording. Every surface that can prompt
+a human — plain stdin, the TUI modal, the web modal/banner, the mobile card,
+and IM channels — renders the same payload at the fidelity its medium allows.
 
-The reference behavior below is Claude Code 2.1.238's question picker and its
-tool-result mapper, not a paraphrase of the tool's public schema.
+The reference behavior below is read out of the shipped Claude Code 2.1.238
+binary (picker components, `validationErrorSteer`, and
+`mapToolResultToToolResultBlockParam`), not paraphrased from the tool's public
+schema.
 
 ## Where we stand
 
@@ -20,20 +22,20 @@ collapses it before anything else sees it (`internal/tools/ask_user_question.go`
 
 | Aspect | Claude Code | octo today |
 | --- | --- | --- |
-| Questions per call | 1–4, navigated as tabs, with a final review/submit tab | `maxItems: 1`; extra entries dropped by `normalizeAskInput` |
+| Questions per call | 1–4, navigated as tabs, with a review/submit tab | `maxItems: 1`; extra entries dropped by `normalizeAskInput` |
 | Option shape | `{label, description, preview}` | `optionLabels` folds them into one string `"label — description"` |
-| `preview` | Markdown in a monospace column beside the list; single-select only; the chosen preview is echoed back to the model | not in the schema |
-| Notes | `n` attaches a free-text note to the current question; the note is echoed back to the model | absent |
-| Option tail | `Other` (inline text input row) and `Chat about this` (single-select only) | TUI/stdin append an `Other (free text)` row; web/mobile always show a bare text box |
-| Selection | Enter, arrows, or the option's number | Enter/arrows (TUI), click (web), number (stdin, IM) |
-| `header` | ≤12-char chip beside the question | used as the modal's title |
-| Result | four distinct phrasings (below), with previews and notes inlined | `User chose: <label>` |
+| Layout | two mutually exclusive ones: a flat list, or a two-column preview layout | one flat list |
+| Notes | `n` attaches a note, in the preview layout only | absent |
+| Outcomes | submit / clarify (`Chat about this`) / reject (Escape) | answer / cancel |
+| `header` | required; the tab's label, not a chip | optional; used as the modal title |
+| Result | four phrasings for submit, plus separate clarify and reject texts | `User chose: <label>` / `(user cancelled)` |
 
-`AskRequest` has exactly one producer (`AskUserQuestionTool.Execute`) and three
-implementations (`replAsker` in `cmd/octo/asker.go`, `wsAsker` in
-`internal/server/server.go`, `chatAsker` in `internal/server/channel_ask.go`),
-plus the `SecretAsker` side door used by replay-secret collection
-(`internal/tools/replay_secrets.go`). That keeps the contract change contained.
+`AskRequest` has two producers — `AskUserQuestionTool.Execute` and
+`wsAsker.AskSecret` (`internal/server/server.go:2131`) — and three
+implementations: `replAsker` (`cmd/octo/asker.go`), `wsAsker`
+(`internal/server/server.go`), `chatAsker` (`internal/server/channel_ask.go`).
+`replAsker.AskSecret` bypasses `AskRequest` entirely and builds a
+`UserPrompt{Kind: KindSecret}` directly.
 
 ## Contract
 
@@ -46,105 +48,167 @@ type AskRequest struct {
 
 type AskQuestion struct {
     Question    string
-    Header      string // ≤12 chars, rendered as a chip
+    Header      string      // required from the model; the tab's label
     MultiSelect bool
-    Options     []AskOption // 2..4 from the model; empty only on the internal secret path
+    Options     []AskOption // 2..4 from the model; empty only on the secret path
 }
 
 type AskOption struct {
     Label       string
     Description string
-    Preview     string // multi-line; ignored when MultiSelect
+    Preview     string // multi-line; only meaningful when !MultiSelect
 }
 
+type AskOutcome int
+
+const (
+    // AskSubmitted: the user submitted the answer set (possibly partial).
+    AskSubmitted AskOutcome = iota
+    // AskClarify: the user chose "Chat about this" — they want to talk
+    // instead of picking. Answers given so far ride along.
+    AskClarify
+    // AskRejected: the user dismissed the picker (Escape / Cancel).
+    // Answers are discarded.
+    AskRejected
+)
+
 type AskResponse struct {
+    Outcome AskOutcome
     // Answers is parallel to Questions. A zero-valued entry means the user
-    // moved past that question without answering it.
+    // submitted without answering that question.
     Answers []AskAnswer
-
-    // Response is the free-form message the user typed after choosing
-    // "Chat about this" instead of picking. When set, Answers is ignored.
-    Response string
-
-    Cancelled bool // dismissed with nothing answered and nothing typed
 }
 
 type AskAnswer struct {
-    Choices []string // selected labels (no description folded in)
-    Custom  string   // "Other" free text
-    Preview string   // the selected option's preview, echoed back to the model
-    Notes   string   // note the user attached to this question
+    Choices []string // selected labels
+    Custom  string   // "Other" free text (flat layout)
+    Notes   string   // note attached to the question (preview layout)
+    Preview string   // the chosen option's preview, echoed back to the model
 }
 ```
 
-Cancellation is per call, not per question: dismissing the prompt after
-answering question 1 of 3 returns `Cancelled: false` with answers 2 and 3
-zero-valued, so partial work is not thrown away. `Cancelled: true` only when
-nothing was answered.
+Three outcomes, not two, is the substantive shape change. `AskRejected`
+discards answers — a user who answers one question and then dismisses the
+picker has *withdrawn*, and reporting the one answer as a success is how a
+model ends up acting on a decision the user backed out of.
 
-`SecretAsker` is unchanged — `AskSecret(ctx, question)` still takes a bare
-string, and internally builds a one-question `AskRequest`.
+`Preview` is filled in `Execute`, never by an asker: `Execute` holds the
+`AskRequest`, so it can match each answered label back to its option and copy
+the preview across. Askers return only what the user did. Consequently
+`formatAskResponse` takes both the request and the response — the result text
+needs each question's text and its declared label set, neither of which lives
+in `AskResponse`.
 
-### "Chat about this"
+`SecretAsker` keeps its signature (`AskSecret(ctx, question) (string, bool,
+error)`), but `wsAsker.AskSecret` now reads `res.Answers[0].Custom` instead of
+`res.Custom`. `replAsker.AskSecret` is unaffected — it never built an
+`AskRequest`.
 
-The last row of a single-select picker is `Chat about this`. Choosing it
-dismisses the picker and puts the user back in the composer; **the next
-message they submit becomes the tool result**, not a new conversation turn.
-That is what makes it distinct from `Other`: `Other` answers *this question*
-with custom text, while `Chat about this` abandons the question set and
-replies to the model in prose.
+### The three outcomes
 
-So each surface needs a short-lived *response-capture* mode: while an ask is
-in this state, the surface's normal message-submit path resolves the pending
-ask (`Response`) instead of starting a turn. Concretely — the TUI input box,
-the web/mobile composer, and the IM reply slot each already have a submit
-path; response-capture is a flag on the pending-ask state that reroutes one
-submission. `Chat about this` is absent from multi-select questions, matching
-Claude Code.
+**Submit** resolves the call with the answer set.
+
+**Clarify** (`Chat about this`) resolves it *immediately* with a
+clarification instruction that carries the answers given so far as prose. The
+turn is not blocked and no state survives the call: the model reads the
+instruction, asks the user what they want to clarify, and the user's next
+message is an ordinary turn. This is Claude Code's mechanism, and it is worth
+being explicit that it is *not* "capture the user's next message as the tool
+result" — nothing anywhere waits for a follow-up.
+
+**Reject** (Escape / Cancel) resolves it with Claude Code's tool-rejection
+text, telling the model to stop and wait. In Claude Code this also aborts the
+turn; here it does not — the asker has no handle on the turn, and octo's
+interrupt is a separate user action (Ctrl-C, `/stop`). The model is told to
+stop; killing the turn stays the user's move.
 
 ### Result text
 
-`formatAskResponse` reproduces Claude Code's mapper. Per-question segments,
-joined with `, `:
+`formatAskResponse(req AskRequest, res AskResponse) string`.
+
+**Clarify** — Claude Code's wording, with every question listed:
+
+```
+The user wants to clarify these questions.
+This means they may have additional information, context or questions for you.
+Take their response into account and then reformulate the questions if appropriate.
+Start by asking them what they would like to clarify.
+
+Questions asked:
+- "<question>"
+  Answer: <answer>
+  User notes: <notes>
+- "<question>"
+  (No answer provided)
+```
+
+`Answer:` and `(No answer provided)` are mutually exclusive; `User notes:` is
+appended only when present.
+
+**Reject** — `The user doesn't want to proceed with this tool use. The tool
+use was rejected. STOP what you are doing and wait for the user to tell you
+how to proceed.`
+
+**Submit** — per-question segments, joined with `, `. A segment is:
 
 ```
 "<question>"="<answer>"                     // answered
 "<question>"=(no option selected)           // unanswered but annotated
 ```
 
-with, appended to a segment when present:
+with ` selected preview:\n<preview>` and ` notes: <notes>` appended when
+present — space-joined onto the segment, not placed on their own lines. A
+question with neither an answer nor a note is omitted entirely. A question
+answered with notes but no selection carries the sentinel answer
+`(notes only)`, which counts as "no answer" for the segment shape.
 
-```
- selected preview:
-<preview>
- notes: <notes>
-```
-
-A question with neither an answer nor a note is omitted from the list.
-Multi-select answers join their labels with `, `. Then, in order:
+Then one of three phrasings:
 
 | Condition | Result text |
 | --- | --- |
-| `Response` non-empty | `The user responded: <response>` |
-| every answer is exactly one of that question's declared labels, and no notes | `Your questions have been answered: <segments>. You can now continue with these answers in mind.` |
-| any answer is free text, or any note is present | `The user answered: <segments>. Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say.` |
-| nothing answered | `The user did not answer the questions.` |
+| every answer *passes the label check* (below) and no question has notes | `Your questions have been answered: <segments>. You can now continue with these answers in mind.` |
+| otherwise | `The user answered: <segments>. Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say.` |
+| no segments at all | `The user did not answer the questions.` |
 
-The distinction in row 3 is load-bearing: a user who typed rather than picked
-often typed a *correction*, and the caution sentence is what stops the model
-from pattern-matching it back onto the option it expected. The current
-`(user cancelled)` / `User chose: …` strings go away; only
+The label check, per question — this is the part most likely to be
+implemented differently by two people, so it is spelled out:
+
+- no answer, or the `(notes only)` sentinel → **passes** (an unanswered
+  question does not push the whole result into the "user answered" phrasing)
+- a multi-select answer (a list) → passes only if the question is
+  multi-select, the list is non-empty, and every entry is a declared label
+- a single-select answer that is a declared label → passes
+- a single-select answer that is not a declared label → fails
+- a multi-select question whose answer arrived as one string → passes only if
+  splitting it on `", "` round-trips exactly and every part is a declared
+  label
+- any question carrying notes → fails (notes mean the user wrote prose)
+
+The distinction is load-bearing: a user who typed rather than picked often
+typed a *correction*, and the caution sentence is what stops the model from
+pattern-matching it back onto the option it expected.
+
+The current `(user cancelled)` / `User chose: …` strings go away; only
 `internal/tools/ask_user_question_test.go` asserts on them.
 
-Claude Code's fifth branch — an AFK timeout producing `Before going idle the
-user had selected: …` — is deliberately not adopted: octo's askers have no
-timeout and wait for a real answer, which is a settled decision, not a gap.
+Two Claude Code result paths are deliberately not adopted. Its AFK-timeout
+branch (`Before going idle the user had selected: …`, with a visible countdown
+and `CLAUDE_AFK_TIMEOUT_MS`) has no octo counterpart: octo's askers wait
+indefinitely by design. And its `The user responded: <text>` branch is
+unreachable from the CLI — `response` is not in the declared input schema and
+only a non-CLI host (the SDK's `canUseTool`, an IDE) can inject it — so octo
+has no such field.
 
-### Schema
+### Schema and validation
 
-`questions` goes to `maxItems: 4`. Each option object gains `preview`.
-`header` gains `maxLength: 12`. The description picks up Claude Code's
-authoring guidance, because it materially changes what the model emits:
+`questions` becomes `minItems: 1, maxItems: 4`. Each option object gains
+`preview`. `header` becomes **required** (Claude Code declares it
+non-optional; its "max 12 chars" lives in the description text, not as a
+`maxLength`, and the renderer simply truncates) and is the tab's label,
+falling back to `Q1` / `Q2` when a model sends it empty anyway.
+
+The description picks up Claude Code's authoring guidance, because it
+materially changes what the model emits:
 
 - ask only when blocked on a decision that is genuinely the user's — not for
   facts discoverable in the repo, and not for choices with an obvious default
@@ -154,32 +218,49 @@ authoring guidance, because it materially changes what the model emits:
   mockups, code snippets, config or diagram variants) — not for simple
   preference questions; it is single-select only
 
-Both of the tolerances octo grew are removed, so the surface is exactly
-Claude Code's:
+Both tolerances octo grew are removed, and `Execute` performs the validation
+Claude Code's host does, since octo has no schema-validation layer between the
+model and the executor:
 
-- `options` becomes **required, 2–4 entries** (`minItems: 2`, `maxItems: 4`).
-  There is no free-text-only question: `Other` is always the tail row, and
-  that is how an open-ended answer is given. `Execute` rejects a question
-  with fewer than two or more than four options instead of trimming.
-- `normalizeAskInput` and its flat-shape fallback (top-level
-  `question`/`options`/`multi_select`) are deleted. `questions` is the only
-  accepted shape; anything else is an error.
+- **`normalizeAskInput` and its flat-shape fallback are deleted.**
+  `questions` is the only accepted shape. This carries a real risk worth
+  naming: the fallback was added because models *reverted* to the nested shape
+  when the declared schema was flat, and octo is multi-provider — DeepSeek,
+  Kimi, and DashScope models have no `AskUserQuestion` prior and may well
+  reach for a flat `{question, options}`. The failure mode is a validation
+  error the model must recover from, on providers that never saw Claude Code's
+  shape. Accepted: one wire shape is the point of this change.
+- **A question with fewer than two options is rejected, and the model is told
+  not to retry.** This is the wording Claude Code uses, and it matters that it
+  is *not* a retryable field error: a model that genuinely has one path cannot
+  invent a second option, so "options must have 2-4 entries" would push it
+  into inventing filler or looping. The message says: this call included a
+  question with fewer than 2 options, so it was rejected and the person never
+  saw it; a question with a single option has no decision in it; do not retry
+  this call and do not invent a filler second option; state the one path you
+  were going to offer as the approach you are taking and continue; if the call
+  also contained questions with 2–4 options, those may be re-asked alone.
+- **More than four options, or more than four questions, is rejected** with
+  the same shape of message — re-ask with 2–4 options rather than retry
+  verbatim.
+- **Uniqueness is enforced**: question texts must be unique across the call,
+  and option labels must be unique within a question. Claude Code needs this
+  because its `answers` map is keyed by question text; octo's parallel arrays
+  make key collision impossible, but duplicate labels still break the label
+  check above.
+- **Control characters in labels are replaced** (U+FFFD) before rendering, so
+  a label can't corrupt a TUI frame.
 
-octo has no schema-validation layer between the model and the executor, so
-`Execute` performs the validation the Claude Code host does, returning a
-descriptive error (`ask_user_question: options must have 2-4 entries, got 1`)
-rather than a `ToolResult`. A tool error is retryable — the model sees it and
-re-emits a well-formed call — which is the same recovery loop a host-side
-schema rejection produces. This is safe now in a way it wasn't before: the
-reason the flat fallback existed was that the *declared* schema was flat
-snake_case and fought the model's prior; with the declared schema being
-Claude Code's own, the shape the model reaches for is the shape we accept.
+`preview` gets Claude Code's 2000-character ceiling: a longer preview is
+replaced, for display *and* for the echo-back, with `(preview cannot be shown
+in full — compare the option labels and descriptions instead)`. Without this
+a 20 KB preview would ride the WS frame, wreck the TUI frame, and land
+verbatim in the tool result.
 
 Claude Code's `answers` / `annotations` / `metadata` input properties stay
-out. They exist because its host writes the user's selections, chosen
-preview, and notes back into the recorded call; octo's askers return those
-directly in `AskResponse`, so the same information reaches the model without
-a round-trip through the tool input.
+out: they exist because its host writes the user's selections, chosen preview,
+and notes back into the recorded call, and octo's askers return that
+information directly.
 
 Executor and schema must read the same keys: `questions[].options[].preview`
 is parsed by `optionLabels`' replacement (`parseAskOptions`), so a schema-only
@@ -199,7 +280,7 @@ type wsAskOption struct {
 
 type wsAskQuestion struct {
     Question    string        `json:"question"`
-    Header      string        `json:"header,omitempty"`
+    Header      string        `json:"header"`
     MultiSelect bool          `json:"multi_select"`
     Options     []wsAskOption `json:"options,omitempty"`
 }
@@ -213,34 +294,48 @@ type wsEventRequestUserQuestion struct {
 }
 ```
 
-The flat `question`/`options`/`multi_select`/`header` fields are removed rather
-than kept as a shim: `webdist` is `go:embed`-ed into the binary and the desktop
-build embeds the same tree, so client and server never skew. A secret prompt is
-a one-question set with `secret: true`.
+The flat `question`/`options`/`multi_select`/`header` fields are removed, with
+no compatibility shim. For the CLI, `serve`, and the desktop build that costs
+nothing — `webdist` is `go:embed`-ed, so the frontend ships with the server
+that talks to it. The packaged mobile app is the exception: `npm run
+bundle-web` copies `webdist` into the Capacitor bundle
+(`mobile/capacitor.config.ts`), so its frontend is frozen at app-build time
+while the `octo serve` it tunnels to is upgraded independently. An app built
+before this change reads `undefined` where it expects `question`, and its
+question card breaks until the app is rebuilt. That is accepted: the wire
+format stays single-shaped, and the mobile bundle is refreshed with the
+server.
 
-The answer frame carries the parallel array plus the chat-response field:
+A secret prompt is a one-question set with `secret: true`.
+
+The answer frame carries the outcome and the parallel answer array:
 
 ```json
-{"type":"user_question_answer","question_id":"q_…",
- "answers":[{"choices":["OAuth with PKCE"],"custom":"","preview":"","notes":"needs the refresh path too"},
-            {"choices":[],"custom":"only the schema part","preview":"","notes":""}],
- "response":"", "cancelled":false}
+{"type":"user_question_answer","question_id":"q_…","outcome":"submitted",
+ "answers":[{"choices":["OAuth with PKCE"],"custom":"","notes":""},
+            {"choices":[],"custom":"only the schema part","notes":""}]}
 ```
 
-`handleWSUserQuestionAnswer` takes `(qid string, answers []tools.AskAnswer,
-response string, cancelled bool)`. `ws.answerQuestion` in `web/src/lib/ws.ts`
-matches. One `user_question_answer` closes the whole set — the frontend
-accumulates per-question drafts locally and submits once, so the single ask
-slot (`acquireAskSlot`) and the single `questionChans[qid]` entry stay as they
-are, and so does global-broadcast delivery plus `pendingQuestions` replay.
+`outcome` is `submitted` | `clarify` | `rejected`. The client never sends
+`preview` — `Execute` fills it from the request, so a large preview never
+travels back over the socket.
 
-`selected preview` is filled server-side, not sent by the client: the option's
-preview text is already in the request, so the client sends only which option
-was chosen and `wsAsker` copies the preview into the answer. That keeps a
-large preview off the answer frame.
+`handleWSUserQuestionAnswer` takes `(qid string, outcome string, answers
+[]tools.AskAnswer)`. `wsMsgUserQuestionAnswer`
+(`internal/server/ws_types.go`) and its dispatch in
+`internal/server/ws_hub.go` change with it, as does `ws.answerQuestion`
+(`web/src/lib/ws.ts`).
 
-`WsEventRequestUserQuestion` and `QuestionModalEntry`
-(`web/src/lib/types.ts`, `web/src/lib/stores.ts`) mirror the new shape:
+One frame closes the whole set, so the single ask slot (`acquireAskSlot`) and
+the single `questionChans[qid]` entry are unchanged, as are global-broadcast
+delivery and `pendingQuestions` replay. The cost of accumulating drafts
+client-side is that a refresh mid-set loses the answers given so far and the
+replayed question set starts empty; with one question that was invisible, with
+four it is real, and it is accepted rather than solved with per-question
+round-trips.
+
+`WsEventRequestUserQuestion` and `QuestionModalEntry` (`web/src/lib/types.ts`,
+`web/src/lib/stores.ts`) mirror the new shape:
 `QuestionModalEntry.questions: AskQuestion[]` replaces
 `question`/`options`/`multiSelect`/`header`.
 
@@ -248,25 +343,42 @@ large preview off the answer frame.
 
 Shared model, matching Claude Code:
 
-- questions are **tabs**, not a forced sequence — the user can move between
-  them freely, with a final **review/submit** tab that lists each question and
-  its answer and warns `You have not answered all questions` when some are
-  blank
-- one question renders at a time: its header chip, its text, then the option
-  rows, then `Other` (an inline text input), then `Chat about this`
-- an option row shows the bold `label` with its `description` beneath
-- options are numbered and the number selects: `N+1` is `Other`, `N+2` is
-  `Chat about this`
-- when the current question is single-select and any of its options has a
-  preview, the picker gains a second column showing the focused option's
-  preview (`No preview available` when that option has none), and `n` opens a
-  note field for the question
-- Escape cancels the whole set; partial answers are still returned
+- questions are **tabs**, not a forced sequence. The tab row always renders
+  (each tab labelled by its `header`, with an answered marker); left/right
+  arrows appear only when there is more than one question. A **review/submit
+  tab** is appended unless there is exactly one single-select question — a
+  single *multi-select* question still needs one, because multi-select does
+  not auto-advance.
+- picking an option on a single-select question advances to the **next index**
+  (not the next unanswered one). A lone single-select question submits the
+  whole call on pick.
+- the review tab lists the questions that *were* answered (notes are not
+  shown), warns `You have not answered all questions` when some are blank, and
+  offers `Submit answers` / `Cancel`; `Cancel` is the reject path.
+- **two mutually exclusive layouts.** A question is rendered in the preview
+  layout when it is single-select and at least one option has a preview;
+  otherwise in the flat layout. They are not additive:
 
-### Plain stdin — `plainView.askQuestion` / `printQuestion` (`cmd/octo/turncore.go`)
+| | flat layout | preview layout |
+| --- | --- | --- |
+| option rows | label + description | label only, in a fixed-width left column |
+| `Other` | present, an inline text input at N+1 | **absent** |
+| notes | absent | present — the text slot holds notes, `n` opens it |
+| `Chat about this` | numbered, at N+2 | unnumbered, below a divider, reached by arrowing past the last option |
+| digit keys | select that row | move focus only |
+| second column | — | the focused option's preview, or `No preview available` |
 
-A line reader can't do tabs, so this surface degrades to sequential questions —
-one card and one `ReadLine` each, `n/N` in the header:
+  Following Claude Code here means a question with previews shows no
+  descriptions and offers no `Other`. That is a real fidelity call, not an
+  oversight: `Other` is what the notes field replaces, and the descriptions
+  are what the preview replaces.
+
+- Escape rejects the whole set; the review tab's `Cancel` does the same.
+
+### Plain stdin — `plainView.askQuestion` / `printQuestion` (`cmd/octo/turncore.go`), `parseSelection` (`cmd/octo/prompt.go`)
+
+A line reader can't do tabs, so this surface degrades to sequential
+questions — one card and one `ReadLine` each, `n/N` in the header:
 
 ```
 [ask_user_question · scope 2/3]
@@ -281,79 +393,73 @@ one card and one `ReadLine` each, `n/N` in the header:
 ```
 
 `description` is an indented dim line under its label. `preview` prints as an
-indented block under the option, capped (reuse the rune-safe truncation budget
-already used by `askInputSummary`, 600 runes) so a long mockup can't push the
-prompt off-screen. Notes are not offered here — there is no second column to
-annotate and no spare key in a line reader. `parseSelection` gains the extra
-tail index. An empty line skips that question; EOF cancels the rest; picking
-`Chat about this` reads one more line and returns it as `Response`.
+indented block under the option, capped at 600 runes with the same rune-safe
+truncation `askInputSummary` uses (that helper is unexported in
+`internal/server`, so this is the same budget re-implemented, not a shared
+call). Notes are not offered: there is no second column to annotate and no
+spare key in a line reader, so a preview question here keeps its `Other` row.
+`parseSelection` gains the two tail indices. An empty line skips the question;
+EOF rejects the set; `Chat about this` returns `AskClarify` immediately.
 
 ### TUI modal — `modalState`, `newModalState`, `confirmQuestion`, `modalView` (`cmd/octo/tuirepl.go`, `cmd/octo/tuirepl_view.go`)
 
-Full parity; this is the surface Claude Code's own picker maps onto directly.
+Full parity; this is the surface Claude Code's picker maps onto directly.
 `UserPrompt` carries `Questions []UserQuestion`; `UserResponse` carries
-`Answers []UserAnswer` plus `Response string`. `modalState` gains `qIdx`,
-`answers []UserAnswer`, `notes` (a `textinput.Model` per question), and
-`noteActive`; `options` is rebuilt per question with the `Other` and
-`Chat about this` tail rows.
+`Outcome` plus `Answers []UserAnswer`. `modalState` gains `qIdx`,
+`answers []UserAnswer`, a per-question `notes textinput.Model`, and
+`noteActive`; `options` is rebuilt per question and per layout.
 
-- header row: the question tabs — `[scope] [auth] [surfaces] [submit]` with the
-  current one highlighted and answered ones marked; `Tab`/`Shift-Tab` move
-  between them. With a single question the tab row is omitted and the hint
-  reads `↑/↓ navigate`.
-- `Enter` on an option records the answer and moves to the next unanswered
-  question, or to the submit tab when none are left
-- number keys select directly; `n` opens the note field; `Esc` cancels the set
-- multi-select keeps `Space` to toggle and `Enter` to confirm the question
-- preview: when the current question is single-select and any option has a
-  preview, the highlighted option's preview renders in a bordered pane —
+- header row: the question tabs — `[scope] [auth] [surfaces] [submit]` — with
+  the current one highlighted and answered ones marked; `Tab`/`Shift-Tab`
+  move between them
+- flat layout: digit keys select, `Enter` records and advances, `Other` opens
+  the inline input, `Chat about this` at N+2 resolves as `AskClarify`
+- preview layout: the highlighted option's preview renders in a bordered pane —
   right of the list when `m.width >= 100`, below it otherwise, height-capped
   to keep the modal inside the terminal (bubbletea's inline renderer truncates
-  over-wide lines with no marker)
-- `Chat about this` closes the modal, leaves the turn blocked, and puts the
-  input box into response-capture: the next submitted line resolves the ask as
-  `Response`
+  over-wide lines with no marker); digits move focus; `n` opens the note field
+- multi-select keeps `Space` to toggle and `Enter` to confirm the question
+- `Esc` resolves as `AskRejected`
 
-The existing modal queue (`m.modalQueue`) is untouched: it serializes
-*concurrent* asks from different sub-agents, which is orthogonal to multiple
-questions inside one ask.
+Because every outcome resolves the modal the same way it does today, the
+existing modal queue (`m.modalQueue`) and `answerModal`'s hand-off to the next
+queued prompt need no change — there is no state that outlives the modal.
 
-### Web — `web/src/components/overlays/QuestionModal.svelte`
+### Web — `web/src/components/overlays/QuestionModal.svelte`, plus the WS→store mapping in `web/src/views/ChatView.svelte`
 
 Both forms (bottom banner and expanded modal) render the current question:
 
-- `header` becomes a chip left of the question text; the question tabs sit
-  above it, with the review/submit tab last
-- options become rows, not pills: bold `label`, muted `description` beneath,
-  check/radio affordance on the left, the number on the right
-- the tail rows are `Other` (revealing its input inline, so today's
-  always-present text box goes away) and `Chat about this`
-- when the current question is single-select and any option has a preview, the
-  modal switches to two columns — option list left, preview right in a
-  monospace, scrollable, `overflow-x: auto` pane; below ~640px the preview
-  moves under the list. An `add note` affordance sits under the preview column.
+- the tab row sits above the question, with the review/submit tab last
+- flat layout: option rows, not pills — bold `label`, muted `description`
+  beneath, radio/check affordance left, digit right; then the `Other` row,
+  whose input reveals inline (today's always-present text box goes away); then
+  `Chat about this`
+- preview layout: two columns — labels left, the focused option's preview
+  right in a monospace, scrollable, `overflow-x: auto` pane; below ~640px the
+  preview moves under the list. The note field sits under the preview column;
+  no `Other` row.
 - footer: `Cancel` · `Back` · `Next` / `Submit`; the submit tab shows the
   review list and the unanswered warning
-- `Chat about this` closes the overlay and marks the composer as capturing:
-  the composer keeps the pending `questionId`, and its next submit calls
-  `ws.answerQuestion(qid, [], "", text)` instead of `ws.send` of a user
-  message. The chat shows the text as the user's message and the ask card
-  resolves to `You responded: …`.
+- `Chat about this` submits the frame with `outcome: "clarify"` and closes the
+  overlay — nothing is captured afterwards, so no composer changes are needed
+  in `ChatView.svelte`'s `send()` or in the mobile `sendMobile()`
+  (`web/src/mobile/chatWiring.ts`)
 
-Draft state moves from the current flat `selected`/`customText` pair to an
-array indexed by question, reset when `questionId` changes. The
-`others`-sessions notification rows and the no-interruption rule from
-`dev-docs/cross-client-ask-question.md` are unchanged; the row's preview text
+Draft state moves from the flat `selected`/`customText` pair to an array
+indexed by question, reset when `questionId` changes. The `others`-sessions
+notification rows and the no-interruption rule from
+`dev-docs/cross-client-ask-question.md` are unchanged; a row's preview text
 uses `questions[0].question` plus `+N more` when the set is larger.
 
 ### Mobile — `web/src/mobile/QuestionOverlay.svelte`
 
-Same model, phone layout: the tabs become a segmented pager, option rows are
-tappable cards (label + description), and the preview renders in a collapsed
-`<details>` under the option rather than a second column — with the note field
-inside that same disclosure. Per-session drafts become per-session,
-per-question drafts. `Chat about this` closes the card and captures the next
-composer submit, as on the desktop. The toast + "View" path for non-active
+Same model, phone layout: the tab row becomes a segmented pager, option rows
+are tappable cards, and the preview layout renders the preview in a collapsed
+`<details>` under the option — with the note field inside that disclosure —
+rather than a second column. The current overlay hides its free-text box
+behind an expand toggle; that box becomes the `Other` row in the flat layout
+and disappears from preview-layout questions. Per-session drafts become
+per-session, per-question drafts. The toast + "View" path for non-active
 sessions is unchanged.
 
 ### IM — `chatAsker.Ask` (`internal/server/channel_ask.go`)
@@ -370,86 +476,131 @@ Reply with a number — or free text for something else.
 ```
 
 `description` rides on the same line after an em dash. `Other` is not listed:
-free text already *is* the reply, which is exactly what `Other` means here, so
-listing it would be a row that says "do what you were going to do anyway".
-`Chat about this` is listed, and picking it sends `Go ahead — what would you
-like to say?` and takes the following message as `Response`; that extra round
-is what the medium costs, and it preserves the distinction between answering
-the question and talking past it.
+free text already *is* the reply, which is exactly what `Other` means here.
+`Chat about this` is listed and returns `AskClarify` immediately — no extra
+round-trip, because clarify resolves the call rather than waiting for a
+follow-up. Previews and notes are omitted: previews exist to be compared side
+by side, which a chat timeline can't do, and notes annotate that comparison.
 
-**Previews are omitted over IM**, and so are notes. Previews exist to be
-compared side by side, which a chat timeline can't do, and four multi-line
-blocks per question would flood the conversation; notes are an annotation on
-that comparison. This is a rendering decision only — the model still sends
-previews, and every other surface shows them.
+An empty reply rejects the whole set (`AskRejected`) rather than skipping one
+question — over chat there is no other way to say "stop asking", and skipping
+silently would leave the user answering a set they've already abandoned. No
+timeout, per the existing rationale.
 
-Cancellation over chat stays as it is (empty reply → cancelled); a cancel on
-question 2 stops the loop and returns what was answered so far. No timeout, per
-the existing rationale.
+### Secret prompts
+
+The secret path (`wsAsker.AskSecret`, and `replAsker.AskSecret` via
+`UserPrompt{Kind: KindSecret}`) is a one-question set with zero options, so it
+renders as a bare masked input: no tab row, no option rows, no `Other` row,
+no notes, and **no `Chat about this`** — routing a password into a
+"talk to the model" channel would put the value in the conversation, which
+`internal/tools/replay_secrets.go` explicitly forbids (the question text and
+the fact a secret was provided may enter history; the value must not). The
+TUI's existing `KindSecret` branch in `newModalState` (masked `textinput`,
+`EchoPassword`, straight to text entry) survives unchanged.
+
+## Callers in this repo that must change
+
+The strict validation invalidates the examples octo itself ships, so these
+move with the tool or the first call fails:
+
+- `internal/prompt/base.md` — the base system prompt teaches a **string
+  array** (`Example options: ["Proceed with the fix", …]`), which the
+  object-only `options` schema rejects. Rewrite as `{label, description}`
+  objects.
+- `internal/skills/defaults/onboard/SKILL.md` — one question lists **seven**
+  options; today `options[:4]` silently trims it. Cut to four or split the
+  question.
+- `internal/skills/defaults/channel-manager/SKILL.md` — one question lists
+  **six** options (same trim), and another collects Discord token / app_id as
+  pure free text with no options at all. The first needs cutting; the second
+  needs a different mechanism (the secret path, or plain prose).
+- `web/src/lib/i18n.ts` — every new string (tab labels, `Other`,
+  `Chat about this`, `No preview available`, the note affordance,
+  `You have not answered all questions`, `Submit answers`, Back/Next) needs
+  an `en` and a `zh` entry, or `web/src/lib/i18n.coverage.test.ts` fails: it
+  scans the whole tree for `$t('…')` literals.
 
 ## Divergences from Claude Code
 
-All three are forced by a medium, not chosen:
-
-- IM omits `preview` and notes, and drops the `Other` row as redundant
-  (above); plain stdin omits notes and renders questions sequentially instead
-  of as tabs.
-- No AFK-timeout result branch — octo's askers wait indefinitely by design.
-- `answers` / `annotations` / `metadata` are not declared as tool inputs,
-  because octo's askers return that information directly rather than through a
-  host write-back.
+- **Reject does not abort the turn.** Claude Code's Escape aborts; octo's
+  asker has no turn handle, so it returns the rejection text and leaves
+  interrupting to the user.
+- **IM and plain stdin degrade.** IM omits previews and notes and drops the
+  redundant `Other` row; plain stdin omits notes (and therefore keeps `Other`
+  on preview questions) and asks sequentially instead of as tabs.
+- **`Custom` and `Notes` are separate fields.** Claude Code stores both in one
+  `textInputValue` slot, so a question there can never carry both. Splitting
+  them is harmless but widens the label check's input space, which is why that
+  check is specified above rather than left to "whatever CC does".
+- **Not adopted:** the AFK timeout (and its countdown, `CLAUDE_AFK_TIMEOUT_MS`
+  / `CLAUDE_AFK_COUNTDOWN_MS`); the `The user responded:` result branch, which
+  no CLI path can reach; the separate screen-reader layout; image paste into
+  the answer inputs; `ctrl+g` external-editor editing of `Other`/notes; and
+  the `html` preview format with its input validation (previews are Markdown
+  in a monospace pane).
 
 ## Tests
 
 - `internal/tools/ask_user_question_test.go` — 1..4 questions parsed;
-  `preview` retained; `label`/`description` no longer folded. Result text for
-  each of the four branches, including the label-vs-free-text distinction that
-  picks between `Your questions have been answered:` and `The user answered:`,
-  a `(no option selected)` segment carrying only notes, and preview/notes
-  inlining. Rejection cases, each returning an error and not reaching the
-  asker: the flat shape, zero questions, five questions, and a question with
-  one or five options.
-- `internal/server/server_test.go`, `pending_prompt_test.go` — the new event
-  shape broadcasts globally, replays on resubscribe, one `answers` frame
-  resolves a multi-question ask, and a `response` frame resolves it as chat.
+  `preview` retained; `label`/`description` no longer folded; `Preview`
+  back-filled from the request by label. All three outcomes' result text,
+  including: the clarify block with an answered, an unanswered, and a noted
+  question; the reject text; each label-check branch (unanswered passes,
+  `(notes only)` passes, multi-select list, single-select given a list,
+  comma-round-trip, notes force the caution phrasing); segment shapes with
+  preview and notes space-joined; a `(no option selected)` segment. Rejections
+  that never reach the asker: the flat shape, zero/five questions, a
+  one-option question (asserting the do-not-retry wording, not a field error),
+  a five-option question, duplicate question texts, duplicate labels within a
+  question, and an over-long preview replaced by the withheld placeholder.
+- `internal/server/server_test.go`, `pending_prompt_test.go`,
+  `live_replay_test.go` — the new event shape broadcasts globally and replays
+  on resubscribe; one frame per outcome resolves a multi-question ask;
+  `wsMsgUserQuestionAnswer` dispatch in `ws_hub.go` carries `outcome`.
 - `internal/server/channel_ask_test.go` — three questions produce three
-  messages and three reply slots; `Chat about this` consumes one extra message
-  as `Response`; mid-set cancel returns partial answers; previews and notes
+  messages and three reply slots; `Chat about this` resolves as clarify with
+  the answers so far; an empty reply rejects the set; previews and notes are
   absent from the sent text.
-- `cmd/octo/asker_test.go` — `AskRequest` ↔ `UserPrompt` round-trips the
-  question set, per-question answers, notes, and `Response`.
+- `internal/tools/ask_user_question_ctx_test.go`,
+  `internal/tools/browser_test.go`, `internal/tools/workflow_test.go`,
+  `internal/tools/replay_secrets_test.go` — these construct `AskResponse` (and
+  embed `stubAsker`), so they move with the contract.
+- `cmd/octo/asker_test.go`, `cmd/octo/tuirepl_p5_test.go` — `AskRequest` ↔
+  `UserPrompt` round-trips the question set, per-question answers, notes, and
+  the outcome.
 - `cmd/octo/tuirepl_test.go` — `Tab` moves between questions and lands on the
-  submit tab; number keys select; `n` attaches a note; `Esc` mid-set returns
-  partial answers; preview pane placement flips at width 100;
-  `Chat about this` leaves the input box in response-capture and the next line
-  resolves the ask.
-- `web/src/lib/askStepper.ts` + `askStepper.test.ts` — the draft/tab logic
-  (move between questions, per-question drafts keyed by `questionId`, whether
-  the preview column applies, all-answered detection for the submit tab, and
-  the `answers`/`response` payload the submit builds) lives outside the
-  components so it is unit-testable the way the rest of `web/src/lib` is; the
-  components stay presentational. Vitest runs from `web/`. The visual layers
-  (two-column preview, narrow-window fallback, dark mode) are covered by the
-  CDP walkthrough below.
+  submit tab; digits select in the flat layout and only move focus in the
+  preview layout; `n` attaches a note; `Esc` rejects; a lone single-select
+  question submits on pick; preview pane placement flips at width 100.
+- `web/src/lib/askStepper.ts` + `askStepper.test.ts` — tab/draft logic (move
+  between questions, per-question drafts keyed by `questionId`, which layout
+  a question gets, whether the submit tab exists, all-answered detection, and
+  the frame each outcome builds) lives outside the components so it is
+  unit-testable the way the rest of `web/src/lib` is; the components stay
+  presentational. Vitest runs from `web/`. Visual layers (two-column preview,
+  narrow-window fallback, dark mode) are covered by the CDP walkthrough.
 
 ## Verification
 
-1. `make test`, `make vet`, `make fmt-check`.
+1. `make test`, `make vet`, `make fmt-check`; `npm test` and
+   `npx svelte-check` from `web/`.
 2. TUI: a scripted 3-question ask (one with previews, one multi-select, one
-   plain) — tab between questions, select by number, attach a note, take
-   `Other` on one, land on the submit tab; then repeat and `Esc` mid-set;
-   then repeat and take `Chat about this`, confirming the typed line comes
-   back as `The user responded: …`.
+   flat) — tab between questions, select by digit, attach a note in the
+   preview question, take `Other` in the flat one, land on the submit tab;
+   then repeat and `Esc`; then repeat and take `Chat about this`, confirming
+   the clarify block lists the answers already given and the turn continues.
 3. Web: isolated `serve` on a scratch `HOME`, driven over CDP against that
    port (never the user's live session — see
-   `reference_worktree_isolated_web_walkthrough`). Check the tab row, the
-   two-column preview in the expanded modal, the review tab's warning, the
-   composer's response-capture, dark mode, and a narrow window.
+   `reference_worktree_isolated_web_walkthrough`). Check the tab row, both
+   layouts, the review tab's warning, dark mode, and a narrow window.
 4. Mobile: the same server with `?mobile=1` — pager, collapsed preview, note
-   field, response-capture.
+   field.
 5. IM: one channel (Telegram or Feishu), three-question ask, answer `2`, free
    text, `Chat about this`, then an empty reply.
-6. Cross-client: ask from session B while viewing session A → notification row
+6. Secret: a replay-secret prompt still renders masked, with no `Other`,
+   notes, or `Chat about this` row.
+7. Cross-client: ask from session B while viewing session A → notification row
    only; click through, answer on mobile, confirm the desktop banner clears.
 
 `docs/src/content/docs/reference/tools.md` (and its `zh` mirror) list
