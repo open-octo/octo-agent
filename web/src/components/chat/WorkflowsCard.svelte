@@ -28,6 +28,29 @@
   function agentToolCount(a: WorkflowAgentState): number {
     return a.steps.filter(s => s.kind === 'tool').length
   }
+
+  // Fold overrides on top of the status default (running rows open), keyed by
+  // run id / "runId/agentId". Driven only by the native <details> toggle —
+  // never a summary onclick — with the override dropped when it realigns with
+  // the default, so streaming re-renders re-asserting `open` can't swallow or
+  // invert a user's fold (same policy as toolFold / SubAgentsCard).
+  let folds = $state<Record<string, boolean>>({})
+
+  function foldOpen(key: string, dflt: boolean): boolean {
+    return folds[key] ?? dflt
+  }
+
+  function onFoldToggle(key: string, dflt: boolean, open: boolean) {
+    if (open === dflt) {
+      if (key in folds) {
+        const next = { ...folds }
+        delete next[key]
+        folds = next
+      }
+    } else if (folds[key] !== open) {
+      folds = { ...folds, [key]: open }
+    }
+  }
 </script>
 
 <div class="workflows">
@@ -49,7 +72,8 @@
   </div>
 
   {#each runs as r (r.id)}
-    <details class="run-row" open={r.status === 'running'}>
+    <details class="run-row" open={foldOpen(r.id, r.status === 'running')}
+      ontoggle={(e) => onFoldToggle(r.id, r.status === 'running', (e.currentTarget as HTMLDetailsElement).open)}>
       <summary class="run-summary">
         <span class="run-icon" class:blue={r.status === 'running'} class:green-av={r.status === 'done'} class:red-av={r.status === 'error'}>
           {#if r.status === 'running'}
@@ -70,7 +94,7 @@
           class:s-err={r.status === 'error'}>
           {r.status === 'running' ? $t('workflow.running') : r.status} · {fmtElapsed(r.startedAt)}
         </span>
-        <iconify-icon icon="lucide:chevron-right" width="13" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
+        <iconify-icon icon={foldOpen(r.id, r.status === 'running') ? 'lucide:chevron-down' : 'lucide:chevron-right'} width="13" style="color:var(--text-tertiary);flex:0 0 auto"></iconify-icon>
       </summary>
       <div class="run-body">
         {#if tail(r).length === 0 && r.agents.length === 0}
@@ -80,7 +104,8 @@
             <div class="step mono">{line}</div>
           {/each}
           {#each r.agents as a (a.id)}
-            <details class="wf-agent" open={a.status === 'running'}>
+            <details class="wf-agent" open={foldOpen(r.id + '/' + a.id, a.status === 'running')}
+              ontoggle={(e) => onFoldToggle(r.id + '/' + a.id, a.status === 'running', (e.currentTarget as HTMLDetailsElement).open)}>
               <summary class="wf-agent-summary">
                 {#if a.status === 'running'}
                   <iconify-icon icon="ant-design:loading-outlined" width="12" style="color:var(--blue-6);animation:octo-spin 0.8s linear infinite"></iconify-icon>
