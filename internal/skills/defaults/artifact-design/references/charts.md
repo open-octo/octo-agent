@@ -1,15 +1,10 @@
----
-name: dataviz
-description: Use whenever you are about to create a chart, graph, plot, heatmap, sparkline, stat tile, or dashboard — whether as an HTML artifact, inline SVG, or plotting code in any library (matplotlib, plotly, Chart.js, D3, …). Covers chart-type selection, the color system for categorical/sequential/diverging data, legend/axis/tooltip conventions, and legibility at the Artifacts panel's narrow default width. Triggers on "chart", "graph", "plot", "visualize this data", "dashboard", "heatmap", "颜色", "配色", "画个图表". Read artifact-design first if the chart is going inside a full HTML artifact page — this skill is only about the chart itself, not the page it lives in.
----
+# Charts and graphs
 
-# Data visualization
-
-This skill is scoped to the chart/graph, not the page around it. If you're
-building a full HTML artifact (a dashboard, a report page) that happens to
-contain a chart, read `artifact-design` for the page mechanics (self-contained
-HTML, theme handling, the panel's narrow default width) and come back here for
-the chart itself.
+Rules for any chart, graph, plot, heatmap, sparkline, stat tile, or dashboard
+inside an artifact page — chart-type selection, the color system, legend/axis/
+tooltip conventions, and legibility at the panel's docked width. `palette.md`
+in this directory holds a validated default palette for the color systems
+described below.
 
 ## Pick the chart type from the data shape, not habit
 
@@ -44,8 +39,8 @@ for more than a handful of categories — angle comparison degrades fast past
 
 Use one accent color to mean "the thing being highlighted" and everything
 else in a muted neutral — don't give every bar its own loud color when only
-one of them is the point. `references/palette.md` has a validated default
-palette (light/dark aware, colorblind-checked) for all three systems — use it
+one of them is the point. `palette.md` has a validated default palette
+(light/dark aware, colorblind-checked) for all three systems — use it
 unless the artifact needs to match an existing brand palette, in which case
 swap the hex values but keep the lightness/spacing relationships.
 
@@ -65,8 +60,8 @@ swap the hex values but keep the lightness/spacing relationships.
 
 ## Legibility at the panel's default width
 
-octo's Artifacts panel docks at **420px wide by default** — see
-`artifact-design` for the full constraint. For a chart specifically:
+The Artifacts panel docks at **420px wide by default** — see SKILL.md for the
+full constraint. For a chart specifically:
 
 - Avoid grouped/clustered bar charts with more than ~4 categories × 3 series
   at that width — bars become too thin to read; switch to a small-multiple
@@ -81,10 +76,10 @@ octo's Artifacts panel docks at **420px wide by default** — see
 
 ## Accessibility
 
-- Every categorical palette in `references/palette.md` is checked against
-  common color-vision deficiencies — don't hand-pick replacement hues
-  without re-checking, since two colors that look distinct to you may not
-  be distinguishable to a colorblind reader.
+- Every categorical palette in `palette.md` is checked against common
+  color-vision deficiencies — don't hand-pick replacement hues without
+  re-checking, since two colors that look distinct to you may not be
+  distinguishable to a colorblind reader.
 - Never encode meaning in color alone when the chart might be printed,
   screenshotted in grayscale, or read by someone colorblind — pair color
   with a position, a label, or a pattern (dashed vs solid line, filled vs

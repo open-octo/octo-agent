@@ -155,15 +155,15 @@ evaluate whether the task is REPEATABLE — if yes, proactively suggest saving.
 - Inline all CSS and JS
 - Use FileReader + <input type="file"> for file processing
 - Use emoji or inline SVG for icons
-- Follow artifact-design and dataviz skill conventions for layout and colors
+- Follow artifact-design skill conventions for layout and colors
 ```
 
 ## 生成质量保障
 
-Agent 生成 Light App HTML 时，已有 `artifact-design` 和 `dataviz` 技能自动生效，确保：
+Agent 生成 Light App HTML 时，已有 `artifact-design` 技能自动生效，确保：
 
 - **窄屏适配**：Artifacts panel 默认宽度 ~720px，不用宽屏布局
-- **配色规范**：走 dataviz skill 的分类/顺序/发散色板
+- **配色规范**：走 artifact-design 的 `references/charts.md` 分类/顺序/发散色板
 - **自包含**：artifact-design skill 已经要求无外链
 - **中文友好**：系统默认字体覆盖 CJK
 
