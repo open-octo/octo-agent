@@ -144,17 +144,7 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 			if s.wsHub == nil {
 				return
 			}
-			s.wsHub.broadcast(sid, map[string]any{
-				"type":        "sub_agent_event",
-				"session_id":  sid,
-				"agent_id":    ev.AgentID,
-				"description": ev.Description,
-				"agent_type":  ev.AgentType,
-				"kind":        ev.Kind,
-				"tool_name":   ev.ToolName,
-				"tool_input":  ev.ToolInput,
-				"stop_reason": ev.StopReason,
-			})
+			s.wsHub.broadcast(sid, subAgentEventPayload(sid, ev))
 		},
 		SubAgentOnExit: func(ev tools.SubAgentNotification) {
 			if s.wsHub == nil {
@@ -190,4 +180,25 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	})
 
 	return ctx, executor, mgr, cleanup, nil
+}
+
+// subAgentEventPayload is the single WS wire shape for one sub-agent runtime
+// event — shared by the live broadcast above and the late-join replay in
+// replayLiveState so the two can never drift.
+func subAgentEventPayload(sessionID string, ev tools.SubAgentEvent) map[string]any {
+	return map[string]any{
+		"type":        "sub_agent_event",
+		"session_id":  sessionID,
+		"agent_id":    ev.AgentID,
+		"description": ev.Description,
+		"agent_type":  ev.AgentType,
+		"kind":        ev.Kind,
+		"tool_id":     ev.ToolID,
+		"tool_name":   ev.ToolName,
+		"tool_input":  ev.ToolInput,
+		"tool_output": ev.ToolOutput,
+		"text":        ev.Text,
+		"stop_reason": ev.StopReason,
+		"result":      ev.Result,
+	}
 }

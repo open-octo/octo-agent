@@ -563,9 +563,14 @@ func (m *SubAgentManager) eventSink(id, description, agentType string) func(SubA
 			ev.AgentType = agentType
 		}
 		// Surface the agent's final disposition on "done" so live panels can
-		// distinguish a clean completion from an error or a user kill.
+		// distinguish a clean completion from an error or a user kill, and
+		// carry the (capped) final reply so panels can render the result
+		// without a follow-up fetch.
 		if ev.Kind == "done" {
-			_, status, _, _, stopReason := agent.readState()
+			result, status, _, _, stopReason := agent.readState()
+			if ev.Result == "" && result != "" {
+				ev.Result = ClipForEvent(result, SubAgentEventResultCap)
+			}
 			if stopReason != "" {
 				ev.StopReason = stopReason
 			} else if strings.HasPrefix(status, "exited: ") {

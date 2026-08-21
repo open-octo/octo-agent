@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -589,5 +590,60 @@ func TestKillAfterAgentExited(t *testing.T) {
 	}
 	if killEvent.StopReason != "killed" {
 		t.Errorf("kill done StopReason = %q, want killed", killEvent.StopReason)
+	}
+}
+
+func TestEventSinkDoneCarriesResult(t *testing.T) {
+	m := NewSubAgentManager(&fixedSpawner{result: SpawnResult{Reply: "the final answer", AgentID: "child-1", StopReason: "end_turn"}})
+
+	var mu sync.Mutex
+	var events []SubAgentEvent
+	m.SetOnEvent(func(ev SubAgentEvent) { mu.Lock(); events = append(events, ev); mu.Unlock() })
+
+	exited := make(chan struct{})
+	m.SetOnExit(func(SubAgentNotification) { close(exited) })
+
+	if _, err := m.Start(SpawnRequest{Description: "d", Prompt: "p"}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("onExit never fired")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		var last SubAgentEvent
+		n := len(events)
+		if n > 0 {
+			last = events[n-1]
+		}
+		mu.Unlock()
+		if n > 0 && last.Kind == "done" {
+			if last.Result != "the final answer" {
+				t.Fatalf("done Result = %q, want the final reply", last.Result)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no done event observed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestClipForEventCaps(t *testing.T) {
+	long := strings.Repeat("x", SubAgentEventOutputCap+100)
+	got := ClipForEvent(long, SubAgentEventOutputCap)
+	if len(got) >= len(long) {
+		t.Fatalf("ClipForEvent did not truncate: len=%d", len(got))
+	}
+	if !strings.HasSuffix(got, "…[truncated]") {
+		t.Fatalf("ClipForEvent output missing truncation marker: %q", got[len(got)-30:])
+	}
+	if short := ClipForEvent("short", SubAgentEventOutputCap); short != "short" {
+		t.Fatalf("ClipForEvent mangled short input: %q", short)
 	}
 }
