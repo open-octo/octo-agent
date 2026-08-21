@@ -755,16 +755,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       const kind = (ev as any).kind ?? ''
       const agentId = (ev as any).agent_id ?? ''
-      applySubAgentEvent(
-        sid,
-        agentId,
-        (ev as any).description ?? '',
-        (ev as any).agent_type ?? '',
-        kind,
-        (ev as any).tool_name ?? '',
-        (ev as any).tool_input,
-        (ev as any).stop_reason ?? '',
-      )
+      applySubAgentEvent(sid, ev as any)
       // A background sub-agent that finishes while no turn is streaming has no
       // `complete` to clean it up — it would linger until an unrelated event
       // (next send / reconnect). Show its done state briefly, then auto-dismiss.
@@ -824,7 +815,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       const runId = (ev as any).run_id ?? ''
       const description = (ev as any).description ?? ''
       const status = (ev as any).status ?? ''
-      applyWorkflowEvent(sid, runId, description, kind, (ev as any).line ?? '', status)
+      applyWorkflowEvent(sid, ev as any)
       // When a background workflow finishes, mirror the TUI scrollback notice
       // so the completion is visible in the message stream.
       if (kind === 'done') {
