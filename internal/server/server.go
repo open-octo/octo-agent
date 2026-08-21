@@ -1385,7 +1385,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 			base = profile.SystemPrompt
 			expertMode = true
 		}
-		a.System, a.LeanSystem = prompt.ComposePair(base, cwd, appendProjectEnvContext(envCtx, proj), s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
+		a.System, a.LeanSystem = prompt.ComposePair(base, cwd, appendProjectEnvContext(envCtx, proj), s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode, projSourceDirs(proj)...)
 		if err := sess.SetComposedSystem(a.System, a.LeanSystem, model, cwd, srcHash); err != nil {
 			slog.Warn("freeze composed system prompt", "session", sess.ID, "err", err)
 		}
@@ -1395,7 +1395,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	// tool results, plus any shell hooks (env/hooks.yml), unified on the agent's
 	// hook engine. Shares the process seen-set so SessionStart resume fires once
 	// per OS process across the serve process's many sessions.
-	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd))
+	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd), projSourceDirs(proj)...)
 	hookEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
 	if memDir := s.sessionMemDir(proj); memDir != "" {
 		s.injectorFor(sess.ID, memDir).RegisterHooks(hookEngine)
@@ -3526,7 +3526,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 			base = profile.SystemPrompt
 			expertMode = true
 		}
-		sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, appendProjectEnvContext(envCtx, proj), s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode)
+		sess.Agent.System, sess.Agent.LeanSystem = prompt.ComposePair(base, cwd, appendProjectEnvContext(envCtx, proj), s.curSkillsManifestForProfile(profile), tools.MCPManifestFor(sess.Agent.Model, profile), memInjection, s.effectiveCoauthor(cfg), expertMode, projSourceDirs(proj)...)
 		if err := sess.Store.SetComposedSystem(sess.Agent.System, sess.Agent.LeanSystem, sess.Agent.Model, cwd, srcHash); err != nil {
 			slog.Warn("freeze composed system prompt", "session", string(sess.Key), "err", err)
 		}
@@ -3535,7 +3535,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// L2 memory hooks + shell hooks, same engine buildAgent gives web turns,
 	// rebuilt per IM turn. The injector is session-sticky (recall latch) and
 	// dropped on /unbind; a fresh engine each turn just re-registers it.
-	imEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd))
+	imEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd), projSourceDirs(proj)...)
 	imEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
 	if memDir := s.sessionMemDir(proj); memDir != "" {
 		s.injectorFor("im:"+string(sess.Key), memDir).RegisterHooks(imEngine)

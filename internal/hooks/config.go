@@ -109,11 +109,19 @@ func parseTimeout(s string) time.Duration {
 // server auto-trusts its operator-chosen cwd. A missing file is fine; a
 // malformed file or bad entry surfaces via Notify and is otherwise ignored, so
 // one broken hook never blocks the session.
-func EngineFromEnvAndFiles(seen *SeenSet, cwd string, loadProject bool) *Engine {
+//
+// sourceDirs are a project's mounted folders, whose .octo/hooks.yml files load
+// after the cwd's, in mount order — deterministic, never map-ordered. No trust
+// flag per folder: mounting a folder into a project is itself the trust grant,
+// made by the person who added it.
+func EngineFromEnvAndFiles(seen *SeenSet, cwd string, loadProject bool, sourceDirs ...string) *Engine {
 	e := EngineFromEnv(seen)
 	e.loadFile(UserConfigPath())
 	if loadProject {
 		e.loadFile(ProjectConfigPath(cwd))
+	}
+	for _, d := range sourceDirs {
+		e.loadFile(ProjectConfigPath(d))
 	}
 	return e
 }

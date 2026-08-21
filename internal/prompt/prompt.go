@@ -117,7 +117,7 @@ var userRulesPath = func() string {
 // expertMode, when true, skips identity/persona layers (soul.md, user.md,
 // octorules.md, and project conventions) — these belong to the Default Agent
 // and would collide with an Expert Agent's custom system prompt.
-func Compose(userSystem, cwd, env, skills, mcpTools, memory string, coauthor, expertMode bool) string {
+func Compose(userSystem, cwd, env, skills, mcpTools, memory string, coauthor, expertMode bool, extraRuleDirs ...string) string {
 	layers := []string{strings.TrimSpace(base)}
 
 	if coauthor {
@@ -151,6 +151,15 @@ func Compose(userSystem, cwd, env, skills, mcpTools, memory string, coauthor, ex
 		if proj := readProjectContext(cwd); proj != "" {
 			layers = append(layers, "# Project conventions ("+ProjectContextFile+")\n\n"+proj)
 		}
+		// A project's mounted source folders contribute their conventions
+		// too, in mount order after the cwd's own — mounting the folder was
+		// the trust grant. Headed by the folder so the model can tell whose
+		// rules it is reading when several repos are mounted.
+		for _, d := range extraRuleDirs {
+			if r := readProjectContext(d); r != "" {
+				layers = append(layers, "# Project conventions ("+filepath.Join(d, ProjectContextFile)+")\n\n"+r)
+			}
+		}
 	}
 	if u := strings.TrimSpace(userSystem); u != "" {
 		if expertMode {
@@ -168,9 +177,9 @@ func Compose(userSystem, cwd, env, skills, mcpTools, memory string, coauthor, ex
 // heaviest, most optional layers). The lean variant seeds cheap read-only
 // sub-agents (explore) that don't need the full harness context. Other
 // layers — soul, env, user/project conventions — are kept in both (except in expertMode, where soul/user/project are dropped from both).
-func ComposePair(userSystem, cwd, env, skills, mcpTools, memory string, coauthor, expertMode bool) (full, lean string) {
-	full = Compose(userSystem, cwd, env, skills, mcpTools, memory, coauthor, expertMode)
-	lean = Compose(userSystem, cwd, env, "", "", "", coauthor, expertMode)
+func ComposePair(userSystem, cwd, env, skills, mcpTools, memory string, coauthor, expertMode bool, extraRuleDirs ...string) (full, lean string) {
+	full = Compose(userSystem, cwd, env, skills, mcpTools, memory, coauthor, expertMode, extraRuleDirs...)
+	lean = Compose(userSystem, cwd, env, "", "", "", coauthor, expertMode, extraRuleDirs...)
 	return full, lean
 }
 

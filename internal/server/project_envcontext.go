@@ -48,6 +48,15 @@ func sourceDirsHash(proj *sessionGroup) string {
 	return fmt.Sprintf("%016x", h.Sum64())
 }
 
+// projSourceDirs is the nil-safe accessor the compose and hook-engine sites
+// use — a task (nil project) contributes no mounts anywhere.
+func projSourceDirs(p *sessionGroup) []string {
+	if p == nil {
+		return nil
+	}
+	return p.SourceDirs
+}
+
 // appendProjectEnvContext extends a turn's env context for a project session:
 // the working directory is declared to be the project's own scratch/output
 // ground, and each mounted source folder is listed with its git branch (when
@@ -73,6 +82,7 @@ func appendProjectEnvContext(envCtx string, proj *sessionGroup) string {
 		dirs := append([]string(nil), proj.SourceDirs...)
 		sort.Strings(dirs)
 		b.WriteString("- Source folders this project works on (cd into them or address them by absolute path):\n")
+		loadsAnything := false
 		for _, d := range dirs {
 			line := "  - " + d
 			if branch, ok := folderGitBranch(d); ok {
@@ -81,7 +91,21 @@ func appendProjectEnvContext(envCtx string, proj *sessionGroup) string {
 			if proj.OutputDir != "" && memory.NormalizeDir(d) == memory.NormalizeDir(proj.OutputDir) {
 				line += " [output folder]"
 			}
+			// Mounted folders' conventions and hooks load into this session
+			// (mounting was the trust grant) — say WHERE behaviour comes
+			// from, or a multi-repo pile of hooks becomes untraceable.
+			if _, err := os.Stat(filepath.Join(d, ".octorules")); err == nil {
+				line += " [loads .octorules]"
+				loadsAnything = true
+			}
+			if _, err := os.Stat(filepath.Join(d, ".octo", "hooks.yml")); err == nil {
+				line += " [loads hooks]"
+				loadsAnything = true
+			}
 			b.WriteString(line + "\n")
+		}
+		if loadsAnything {
+			b.WriteString("- Folders marked [loads …] contribute their conventions/hooks to this session, in the order listed.\n")
 		}
 	}
 	if proj.OutputDir != "" {
