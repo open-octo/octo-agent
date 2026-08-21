@@ -813,6 +813,8 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/sessions/{id}/messages", s.handleGetSessionMessages)
 	s.api("GET /api/sessions/{id}/confirmation", s.handleGetSessionConfirmation)
 	s.api("GET /api/sessions/{id}/artifacts", s.handleGetArtifact)
+	s.api("GET /api/sessions/{id}/diff", s.handleGetSessionDiff)
+	s.api("GET /api/sessions/{id}/diff/file", s.handleGetSessionFileDiff)
 	s.api("DELETE /api/sessions/{id}", s.handleDeleteSession)
 	s.api("PATCH /api/sessions/{id}", s.handleUpdateSession)
 	s.api("PATCH /api/sessions/{id}/model", s.handleUpdateSessionModel)
