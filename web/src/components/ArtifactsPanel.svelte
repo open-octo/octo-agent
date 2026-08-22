@@ -376,7 +376,7 @@
     {#if !cur}
       <div class="topbar" class:native-lift={liftForTrafficLights}>
         {@render modeSwitcher()}
-        <span class="file-name">{$t('panel.mode_artifacts')}</span>
+        <span class="file-name mode-label">{$t('panel.mode_artifacts')}</span>
         <span style="flex:1"></span>
         {@render topbarControls()}
       </div>
@@ -387,6 +387,7 @@
     {:else}
       <div class="topbar" class:native-lift={liftForTrafficLights}>
         {@render modeSwitcher()}
+        <span class="file-name mode-label">{$t('panel.mode_artifacts')}</span>
         <span class="file-name mono">{cur.name}</span>
         <span class="file-meta">{cur.type}</span>
         <span style="flex:1"></span>
@@ -494,6 +495,9 @@
    for why the height has to be pinned for the padding to move anything. */
 .topbar.native-lift { box-sizing: border-box; max-height: 44px; padding-bottom: 8px; }
 .file-name { min-width: 0; font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The mode label ("制品"/"Artifacts") names the panel, not a file: keep it
+   unshrinkable and muted so the artifact name beside it stays primary. */
+.file-name.mode-label { flex: 0 0 auto; color: var(--text-tertiary); }
 .file-meta { font-size: 11px; color: var(--text-tertiary); flex: 0 0 auto; }
 .mono { font-family: var(--font-mono); }
 .icon-btn {
