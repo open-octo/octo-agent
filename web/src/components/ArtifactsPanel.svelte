@@ -277,6 +277,10 @@
       onclick={() => modeMenu = !modeMenu}
     >
       <iconify-icon icon={curModeIcon} width="14"></iconify-icon>
+      <!-- Always-on caret: without it the trigger reads as a static mode
+           indicator, and the dropdown is only discoverable by hovering for
+           the tooltip. -->
+      <iconify-icon class="caret" icon="ant-design:down-outlined" width="8"></iconify-icon>
       {#if badgeCount > 0 && curMode !== 'diff'}<span class="dot"></span>{/if}
     </button>
     {#if modeMenu}
@@ -513,9 +517,13 @@
 .icon-btn.on:hover:not(:disabled) { color: var(--text); }
 /* ── Panel mode switcher ─────────────────────────────────────────────── */
 .mode-wrap { position: relative; flex: 0 0 auto; display: flex; }
-.mode-trigger { position: relative; }
+/* Wider than a plain .icon-btn (which pins 28px square): the trigger carries
+   the mode icon plus a dropdown caret, so it sizes to its content. */
+.mode-trigger { position: relative; width: auto; flex: 0 0 auto; padding: 0 7px; gap: 3px; }
+.mode-trigger .caret { transition: transform 0.15s ease; }
+.mode-trigger.on .caret { transform: rotate(180deg); }
 /* Same "there is something here" dot the sidebar's unread marker uses, sized
-   for a 28px control rather than a list row. */
+   for a compact control rather than a list row. */
 .mode-trigger .dot {
   position: absolute; top: 4px; right: 4px; width: 6px; height: 6px;
   border-radius: 50%; background: var(--blue-6);
