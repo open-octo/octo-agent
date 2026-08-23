@@ -116,7 +116,7 @@
   async function openAttach() {
     if (get(nativeShell)) {
       try {
-        const res = await api.nativePickFile(workingDir)
+        const res = await api.nativePickFile(attachStartDir)
         if (!res.cancelled && res.path) attachLocalFile(res.path)
       } catch (e: any) {
         showToast(e.message ?? 'Failed to open file dialog', 'error')
@@ -673,6 +673,28 @@
       ? (project?.working_dir || $chatWorkingDir[sid] || currentSession?.working_dir || '')
       : (project?.working_dir || $pendingWorkingDir),
   )
+  // Where the attach dialog can jump to: the project's workspace plus every
+  // folder it mounts. Both pickers open cold at one directory, and for a
+  // project that directory is the workspace — scratch ground, which is by
+  // construction not where the material you want to attach lives. Offer every
+  // place the project has and privilege none: source_dirs is a mount order,
+  // not a ranking. Empty for a session in no project (nothing to offer).
+  let attachShortcuts = $derived(
+    project && (project.source_dirs ?? []).length > 0
+      ? [
+          { label: $t('folder.shortcut_workspace'), path: project.working_dir ?? '' },
+          ...(project.source_dirs ?? []).map(d => ({ label: dirLeaf(d), path: d })),
+        ].filter(s => s.path)
+      : [],
+  )
+  // The OS file dialog takes one starting directory and no shortcut list, so
+  // seeding it with the workspace does not merely start in the wrong place —
+  // SetDirectory overrides the panel's own memory of where the user last was.
+  // For a project with mounts, seed nothing: the panel restores that memory,
+  // which after the first attach is a better answer than any directory we
+  // could name. A project with no mounts keeps the workspace, which is then
+  // genuinely the only place its work happens.
+  let attachStartDir = $derived(attachShortcuts.length > 0 ? '' : workingDir)
   let permMode = $derived($chatPermMode[sid] || currentSession?.permission_mode || $globalPermissionMode)
   // Effective show-reasoning for this session: live store > session record > default true.
   let showReasoning = $derived($chatShowReasoning[sid] ?? currentSession?.show_reasoning ?? true)
@@ -1017,6 +1039,14 @@
   function dirTail(p: string): string {
     const cut = p.lastIndexOf('/')
     return cut < 0 ? p : p.slice(cut)
+  }
+
+  // Last path segment, for naming a folder on an attach shortcut. Unlike
+  // dirTail this drops the separator and tolerates a trailing one — the chip
+  // is a name, and the full path rides along as its tooltip.
+  function dirLeaf(p: string): string {
+    const norm = p.replace(/\\/g, '/').replace(/\/+$/, '')
+    return norm.slice(norm.lastIndexOf('/') + 1) || norm
   }
 
   // queued=true parks the message as its own follow-up turn instead of steering
@@ -1502,6 +1532,7 @@
   <FolderPickerModal
     initialPath={workingDir}
     mode={pickerMode}
+    shortcuts={pickerMode === 'file' ? attachShortcuts : []}
     onSelect={onPickerSelect}
     onClose={closePicker}
   />

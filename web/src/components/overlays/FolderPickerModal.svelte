@@ -10,9 +10,18 @@
   // mode 'folder' (default): navigate dirs, confirm the current dir with "Use
   // this folder"; files are shown greyed for context. mode 'file': click a file
   // to select it (onSelect gets the file path); dirs still navigate.
-  let { initialPath = '', mode = 'folder', onSelect, onClose }: {
+  //
+  // shortcuts are one-click jumps shown above the listing — for a project
+  // session, its workspace and every folder it mounts. They exist because this
+  // dialog always opens cold at one directory, and the one it opens at is
+  // rarely where the file lives: a project's material is in the folders it
+  // mounts, while the workspace it starts in is scratch. Jumps, not a ranking:
+  // every place the project has is offered and none is privileged. Empty for
+  // callers with nowhere particular to offer, which hides the row.
+  let { initialPath = '', mode = 'folder', shortcuts = [], onSelect, onClose }: {
     initialPath?: string
     mode?: 'folder' | 'file'
+    shortcuts?: { label: string; path: string }[]
     onSelect: (path: string) => void
     onClose: () => void
   } = $props()
@@ -191,6 +200,23 @@
       {/if}
     </div>
 
+    {#if shortcuts.length > 0}
+      <div class="shortcuts">
+        {#each shortcuts as s (s.path)}
+          <button
+            class="shortcut"
+            class:here={listing?.path === s.path}
+            title={s.path}
+            disabled={loading}
+            onclick={() => load(s.path)}
+          >
+            <iconify-icon icon="ant-design:folder-outlined" width="12"></iconify-icon>
+            <span class="shortcut-label">{s.label}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+
     <div class="modal-body">
       {#if error}
         <p class="error-msg">{error}</p>
@@ -312,6 +338,27 @@ input.cur-path {
   color: var(--text);
 }
 input.cur-path:focus { outline: none; border-color: var(--blue-5); }
+/* Wraps rather than scrolls: a project with several mounts must show all of
+   them at once — a hidden shortcut is no shortcut. */
+.shortcuts {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-layout);
+}
+.shortcut {
+  display: flex; align-items: center; gap: 5px;
+  max-width: 100%; min-width: 0;
+  height: 24px; padding: 0 9px;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--bg-container); color: var(--text-secondary);
+  font-size: 12px; cursor: pointer;
+}
+.shortcut:hover:not(:disabled) { border-color: var(--blue-5); color: var(--blue-5); }
+.shortcut:disabled { opacity: 0.5; cursor: default; }
+/* The one you are already in — so the row doubles as "where am I". */
+.shortcut.here { border-color: var(--blue-5); color: var(--blue-6); background: var(--blue-1); }
+.shortcut-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .modal-body {
   padding: 8px 10px;
   overflow-y: auto;
