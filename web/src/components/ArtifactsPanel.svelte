@@ -503,6 +503,15 @@
    unshrinkable and muted so the artifact name beside it stays primary. */
 .file-name.mode-label { flex: 0 0 auto; color: var(--text-tertiary); }
 .file-meta { font-size: 11px; color: var(--text-tertiary); flex: 0 0 auto; }
+/* Small screens (a phone browser gets the desktop layout squeezed into a few
+   hundred px): the topbar's text — mode label, file/repo name, type badge,
+   branch, file count — crowds the icon controls past each other. The mode
+   switcher's icon still names the mode and tooltips carry the rest, so the
+   text is what gives. Same breakpoint as ChatView's narrow-screen rules. */
+@media (max-width: 620px) {
+  .topbar .file-name,
+  .topbar .file-meta { display: none; }
+}
 .mono { font-family: var(--font-mono); }
 .icon-btn {
   width: 28px; height: 28px; flex: 0 0 28px; border: none; background: transparent;
