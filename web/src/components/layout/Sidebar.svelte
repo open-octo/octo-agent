@@ -242,12 +242,20 @@
   // actually run). Desktop shell only: a browser tab has no file manager to
   // open, so the menu entry is gated on nativeShell and this is never reached
   // from one.
-  async function openFolder(target: { sessionId?: string; groupId?: string }) {
+  async function openFolder(target: { sessionId?: string; groupId?: string; sourceDir?: string }) {
     try {
       await api.openFolder(target)
     } catch (e: any) {
       showToast(e?.message || tr('sidebar.open_folder_failed'), 'error')
     }
+  }
+
+  // Last path segment, for naming a mounted folder in the menu. The full path
+  // is the row's title attribute, which is where two same-named folders from
+  // different parents get told apart.
+  function dirLabel(path: string): string {
+    const norm = path.replace(/\\/g, '/').replace(/\/+$/, '')
+    return norm.slice(norm.lastIndexOf('/') + 1) || norm
   }
 
   $effect(() => {
@@ -801,10 +809,32 @@
             </div>
             <div class="row-menu-sep"></div>
             {#if $nativeShell && g.working_dir}
-            <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; openFolder({ groupId: g.id }) }}>
+            {#if (g.source_dirs ?? []).length > 0}
+            <!-- One entry per place this project has: the workspace plus every
+                 mounted folder. Listing them beats picking one, because there
+                 is no defensible pick — source_dirs is a mount order, not a
+                 ranking, so treating the first as "the" folder would give a
+                 list the user reorders in settings a meaning nothing states. -->
+            <div class="row-menu-label">{$t('sidebar.open_folder')}</div>
+            <div class="row-menu-item sub" title={g.working_dir} onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; openFolder({ groupId: g.id }) }}>
+              <iconify-icon icon="ant-design:folder-open-outlined" width="13"></iconify-icon>
+              <span class="menu-text">{$t('sidebar.open_folder_workspace')}</span>
+            </div>
+            {#each g.source_dirs ?? [] as sd (sd)}
+            <div class="row-menu-item sub" title={sd} onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; openFolder({ groupId: g.id, sourceDir: sd }) }}>
+              <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
+              <span class="menu-text">{dirLabel(sd)}</span>
+            </div>
+            {/each}
+            <!-- The label opens the group; this closes it. Without it the last
+                 folder and "Rename project" read as one list. -->
+            <div class="row-menu-sep"></div>
+            {:else}
+            <div class="row-menu-item" title={g.working_dir} onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; openFolder({ groupId: g.id }) }}>
               <iconify-icon icon="ant-design:folder-open-outlined" width="13"></iconify-icon>
               <span>{$t('sidebar.open_folder')}</span>
             </div>
+            {/if}
             {/if}
             <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; editGroupId.set(g.id); editGroupDraft.set(g.name) }}>
               <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
@@ -1230,6 +1260,16 @@
 }
 .row-menu-item:hover { background: var(--hover-neutral); }
 .row-menu-item.del { color: var(--error); }
+/* Heading for the open-folder targets — a label, not a row: no hover, no
+   pointer, nothing that invites a click that would do nothing. */
+.row-menu-label {
+  padding: 6px 9px 2px; font-size: 11px; color: var(--text-tertiary);
+  user-select: none;
+}
+.row-menu-item.sub { padding-left: 18px; }
+/* A deep mount can out-measure the menu; the title attribute carries the full
+   path, so the row itself may ellipsize rather than widen the menu. */
+.menu-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Sits where the footer does, so entering batch mode does not shift the list
    above it — the rows must stay under the cursor that is selecting them. */
 .batch-bar {
