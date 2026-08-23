@@ -792,17 +792,20 @@
           </span>
           {#if projectMenuFor === g.id}
           <div class="row-menu" use:rowMenuPortal={rowMenuPos.anchorTop} style="top:{rowMenuPos.top}px;right:{rowMenuPos.right}px" onclick={(e) => e.stopPropagation()}>
+            <!-- Settings leads, on its own above the rule: it is what this menu
+                 is opened for most, and it used to sit behind an entry that only
+                 exists on desktop. -->
+            <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; settingsGroup = g }}>
+              <iconify-icon icon="ant-design:setting-outlined" width="13"></iconify-icon>
+              <span>{$t('sidebar.project_settings')}</span>
+            </div>
+            <div class="row-menu-sep"></div>
             {#if $nativeShell && g.working_dir}
             <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; openFolder({ groupId: g.id }) }}>
               <iconify-icon icon="ant-design:folder-open-outlined" width="13"></iconify-icon>
               <span>{$t('sidebar.open_folder')}</span>
             </div>
-            <div class="row-menu-sep"></div>
             {/if}
-            <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; settingsGroup = g }}>
-              <iconify-icon icon="ant-design:setting-outlined" width="13"></iconify-icon>
-              <span>{$t('sidebar.project_settings')}</span>
-            </div>
             <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; editGroupId.set(g.id); editGroupDraft.set(g.name) }}>
               <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
               <span>{$t('sidebar.rename_group')}</span>
