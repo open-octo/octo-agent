@@ -43,6 +43,9 @@ This is the same file the systemd/launchd packaging templates already point at v
 `EnvironmentFile=%h/.octo/serve.env` (`packaging/systemd/octo.service`). Now `octo serve`,
 the desktop app, and the TUI all resolve the same file — pick once, work everywhere.
 
+Proxy variables (`HTTPS_PROXY` and friends) go in this same file — see
+[Choose a provider · Reaching endpoints through a proxy](/docs/getting-started/choose-a-provider/#reaching-endpoints-through-a-proxy).
+
 ## Access control
 
 `127.0.0.1` is loopback and trusted implicitly — no key needed, and that's the default bind. The

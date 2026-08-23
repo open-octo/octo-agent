@@ -58,6 +58,25 @@ octo config path   # 打印配置文件路径
 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` 读取；向导可以把 key 存进文件（权限 `0600`），但更推荐用环境变量。
 </Aside>
 
+## 通过代理访问
+
+访问 OpenAI、Anthropic 等境外端点需要代理时，octo 沿用 Go 的标准代理环境变量——`HTTPS_PROXY`、`HTTP_PROXY`、`NO_PROXY`（支持 `http://` 和 `socks5://` 地址，大小写写法都认）：
+
+```bash
+HTTPS_PROXY=http://127.0.0.1:7890 octo --provider openai "..."
+```
+
+从终端启动时在 shell 里 export 就够了。但**桌面应用和后台运行的 `octo serve` 不会继承 shell 环境**——在 `~/.zshrc` 里 export 对它们无效。统一的办法是写进 `~/.octo/serve.env`，所有启动方式（CLI、桌面版、`octo serve`）都会在启动时加载它：
+
+```bash
+cat >> ~/.octo/serve.env << 'EOF'
+HTTPS_PROXY=http://127.0.0.1:7890
+EOF
+chmod 600 ~/.octo/serve.env
+```
+
+改完重启应用生效。代理对进程的所有出网流量生效（模型 API、搜索、更新检查等）；如果只想让部分域名走代理，请在代理软件（Clash 等）的分流规则里配置，或用 `NO_PROXY=api.moonshot.cn` 逐个排除——octo 不提供按 provider 分开的代理设置。
+
 ## 扩展推理
 
 推理模型可以在回答前先思考。两个开关控制这个行为，同时支持 CLI flag 和 `octo config` 默认值：

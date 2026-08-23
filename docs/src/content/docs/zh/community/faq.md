@@ -40,6 +40,12 @@ fail closed（拒绝运行），而不是假装限制了什么。那边靠交互
 非回环绑定要求每个请求都带访问密钥。启动时会打印一个带 key 的、可以直接打开的 URL；见
 [自托管 octo serve](/docs/zh/guides/self-host/)和[安全模型](/docs/zh/reference/security/)。
 
+### 连不上 OpenAI / Anthropic 怎么办？
+
+如果你的网络访问这些端点需要代理，给 octo 设 `HTTPS_PROXY`：终端启动时直接在 shell 里
+export；桌面版和 `octo serve` 要写进 `~/.octo/serve.env`（GUI 进程不继承 shell 环境）。
+详见[选择 Provider · 通过代理访问](/docs/zh/getting-started/choose-a-provider/#通过代理访问)。
+
 ### 在哪里报 bug 或者提功能需求？
 
 去 GitHub [提交 issue](https://github.com/open-octo/octo-agent/issues)。如果是安全漏洞，
