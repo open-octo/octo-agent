@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import { get } from 'svelte/store'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen, cmdkOpen, nativeShell } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen, cmdkOpen, nativeShell, dirLeaf } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
@@ -248,14 +248,6 @@
     } catch (e: any) {
       showToast(e?.message || tr('sidebar.open_folder_failed'), 'error')
     }
-  }
-
-  // Last path segment, for naming a mounted folder in the menu. The full path
-  // is the row's title attribute, which is where two same-named folders from
-  // different parents get told apart.
-  function dirLabel(path: string): string {
-    const norm = path.replace(/\\/g, '/').replace(/\/+$/, '')
-    return norm.slice(norm.lastIndexOf('/') + 1) || norm
   }
 
   $effect(() => {
@@ -799,7 +791,7 @@
             <iconify-icon icon="ant-design:plus-outlined" width="13"></iconify-icon>
           </span>
           {#if projectMenuFor === g.id}
-          <div class="row-menu" use:rowMenuPortal={rowMenuPos.anchorTop} style="top:{rowMenuPos.top}px;right:{rowMenuPos.right}px" onclick={(e) => e.stopPropagation()}>
+          <div class="row-menu" use:rowMenuPortal={rowMenuPos.anchorTop} style="top:{rowMenuPos.top}px;right:{rowMenuPos.right}px;--menu-right:{rowMenuPos.right}px" onclick={(e) => e.stopPropagation()}>
             <!-- Settings leads, on its own above the rule: it is what this menu
                  is opened for most, and it used to sit behind an entry that only
                  exists on desktop. -->
@@ -823,7 +815,7 @@
             {#each g.source_dirs ?? [] as sd (sd)}
             <div class="row-menu-item sub" title={sd} onclick={(e) => { e.stopPropagation(); projectMenuFor = ''; openFolder({ groupId: g.id, sourceDir: sd }) }}>
               <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
-              <span class="menu-text">{dirLabel(sd)}</span>
+              <span class="menu-text">{dirLeaf(sd)}</span>
             </div>
             {/each}
             <!-- The label opens the group; this closes it. Without it the last
@@ -964,7 +956,7 @@
               <iconify-icon icon={pinned ? 'ant-design:pushpin-filled' : 'ant-design:pushpin-outlined'} width="13"></iconify-icon>
             </span>
             {#if menuOpen}
-            <div class="row-menu" use:rowMenuPortal={rowMenuPos.anchorTop} style="top:{rowMenuPos.top}px;right:{rowMenuPos.right}px" onclick={(e) => e.stopPropagation()}>
+            <div class="row-menu" use:rowMenuPortal={rowMenuPos.anchorTop} style="top:{rowMenuPos.top}px;right:{rowMenuPos.right}px;--menu-right:{rowMenuPos.right}px" onclick={(e) => e.stopPropagation()}>
               {#if !pinned}
               <!-- First entry: acting on many sessions starts from one of them,
                    which is also why this one is pre-selected. Not offered on a
@@ -1249,7 +1241,16 @@
 .nav-row.menu-open .on-rest { display: none; }
 .row-menu {
   position: fixed; z-index: 30;
-  min-width: 132px; padding: 4px;
+  /* The menu is anchored by its RIGHT edge just inside the sidebar, so anything
+     that widens it grows LEFTWARD — off the screen, taking every row's icon and
+     first characters with it. A mounted folder's name is caller data and can be
+     arbitrarily long, so the width needs a ceiling. --menu-right is the very
+     offset the inline style positions by, which makes the second term exactly
+     the room that exists to the left of the anchor; rowMenuPortal already does
+     the vertical counterpart of this clamp. The ceiling is also what lets
+     .menu-text below ellipsize at all — a flex item only shrinks once its
+     container is bounded. */
+  min-width: 132px; max-width: min(280px, calc(100vw - var(--menu-right, 8px) - 8px)); padding: 4px;
   background: var(--bg-container); border: 1px solid var(--border-secondary);
   border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.18);
 }
@@ -1267,8 +1268,8 @@
   user-select: none;
 }
 .row-menu-item.sub { padding-left: 18px; }
-/* A deep mount can out-measure the menu; the title attribute carries the full
-   path, so the row itself may ellipsize rather than widen the menu. */
+/* Trims a long folder name to the menu's ceiling (set on .row-menu). The full
+   path is on the row's title attribute, so nothing is lost by cutting here. */
 .menu-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Sits where the footer does, so entering batch mode does not shift the list
    above it — the rows must stay under the cursor that is selecting them. */

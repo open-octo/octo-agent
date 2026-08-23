@@ -5,7 +5,7 @@
     running, activeSessionId, chatStreaming, sessions, sessionGroups,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
     globalPermissionMode, nativeShell, localAccess, activeAgent, pendingModel, view, settingsModalOpen,
-    pendingAgent, pendingWorkingDir, pendingGroupId, normalizeDir, projectsClaimingDir,
+    pendingAgent, pendingWorkingDir, pendingGroupId, normalizeDir, dirLeaf, projectsClaimingDir,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
@@ -1039,14 +1039,6 @@
   function dirTail(p: string): string {
     const cut = p.lastIndexOf('/')
     return cut < 0 ? p : p.slice(cut)
-  }
-
-  // Last path segment, for naming a folder on an attach shortcut. Unlike
-  // dirTail this drops the separator and tolerates a trailing one — the chip
-  // is a name, and the full path rides along as its tooltip.
-  function dirLeaf(p: string): string {
-    const norm = p.replace(/\\/g, '/').replace(/\/+$/, '')
-    return norm.slice(norm.lastIndexOf('/') + 1) || norm
   }
 
   // queued=true parks the message as its own follow-up turn instead of steering

@@ -359,6 +359,18 @@ export function normalizeDir(p: string): string {
   return p.replace(/[\\/]+$/, '')
 }
 
+// Last path segment — the name to show when a directory has to fit somewhere a
+// full path would not (a menu row, a chip). Always pair it with the full path
+// as a title: two mounts can share a leaf name and differ only in their parent.
+// Tolerates a trailing separator and Windows separators; a bare name passes
+// through. The last fallback is the filesystem root, which normalises to the
+// empty string and would otherwise render a nameless row — mounting "/" is
+// unusual but nothing rejects it.
+export function dirLeaf(p: string): string {
+  const norm = normalizeDir(p.replace(/\\/g, '/'))
+  return norm.slice(norm.lastIndexOf('/') + 1) || norm || p
+}
+
 // Resolve a working directory picked on the landing page to the project that
 // owns it, creating that project if none exists yet. Returns the group id to
 // file the new session under. Matching is by directory, not by name: two
