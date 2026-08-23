@@ -617,10 +617,15 @@
   // Session meta chips — pull live values from per-session stores, fall back
   // to the session record, then to sensible defaults.
   // No session yet → show the pending pick (composite "<endpoint>::<model>"
-  // id; display just the model half) that ensureActiveSession will apply.
+  // id; display just the model half) that ensureActiveSession will apply, or,
+  // absent a pick, the configured default — which is the model the session
+  // ensureActiveSession creates will actually run on, so the blank new-chat
+  // view names it instead of showing a dash.
+  let defaultModelName = $state('')
   let modelName = $derived(
     $chatModel[sid] || currentSession?.model || currentSession?.model_id
-    || ($pendingModel ? $pendingModel.split('::').pop() : '') || '—',
+    || ($pendingModel ? $pendingModel.split('::').pop() : '')
+    || defaultModelName || '—',
   )
   // A pending pick belongs to the blank new-chat view only. Once a session is
   // active (auto-created — which consumed it — or picked/created any other
@@ -819,6 +824,9 @@
       // carry a bare model name, which no menu row's composite id can ever
       // equal. Treat that as identity-unknown so name matching still applies.
       defaultModelId = ep.default?.includes('::') ? ep.default : ''
+      // Display name, unlike defaultModelId: a bare-model default is unusable
+      // as an identity but still names the model the chip should show.
+      defaultModelName = ep.default?.split('::').pop() ?? ''
     } catch { /* keep the previous list */ }
   }
 
