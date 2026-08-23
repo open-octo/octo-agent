@@ -16,9 +16,9 @@ import (
 )
 
 // sourceDirsHash is the freeze-identity component for a project's mounted
-// folders: the env context bakes the mount list and the output-dir marker
-// into the prompt, so either changing must re-freeze the composed system on
-// the session's next turn (Session.IsComposedFor's third dimension).
+// folders: the env context bakes the mount list into the prompt, so changing
+// it must re-freeze the composed system on the session's next turn
+// (Session.IsComposedFor's third dimension).
 //
 // The set hashes in MOUNT order, which is also the order the env context
 // lists folders and the order their .octorules layer into the prompt — so any
@@ -45,7 +45,6 @@ func sourceDirsHash(proj *sessionGroup) string {
 		_, _ = h.Write([]byte(d))
 		_, _ = h.Write([]byte{0})
 	}
-	_, _ = h.Write([]byte("out:" + memory.NormalizeDir(proj.OutputDir)))
 	return fmt.Sprintf("%016x", h.Sum64())
 }
 
@@ -176,9 +175,6 @@ func appendProjectEnvContext(envCtx string, proj *sessionGroup) string {
 			if branch, ok := folderGitBranch(d); ok {
 				line += fmt.Sprintf(" (git branch: %s)", branch)
 			}
-			if proj.OutputDir != "" && memory.NormalizeDir(d) == memory.NormalizeDir(proj.OutputDir) {
-				line += " [output folder]"
-			}
 			// Mounted folders' conventions and hooks load into this session
 			// (mounting was the trust grant) — say WHERE behaviour comes
 			// from, or a multi-repo pile of hooks becomes untraceable.
@@ -195,9 +191,6 @@ func appendProjectEnvContext(envCtx string, proj *sessionGroup) string {
 		if loadsAnything {
 			b.WriteString("- Folders marked [loads …] contribute their conventions/hooks to this session, in the order listed.\n")
 		}
-	}
-	if proj.OutputDir != "" {
-		fmt.Fprintf(&b, "- Finished deliverables go to the output folder %s; keep drafts and intermediates in the working directory.\n", proj.OutputDir)
 	}
 	return b.String()
 }

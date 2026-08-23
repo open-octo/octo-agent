@@ -107,17 +107,16 @@ export async function listSessionGroups(): Promise<{ groups: SessionGroup[]; pin
 
 // Every created group is a project: the server generates its workspace, and
 // source_dirs are the external folders it references (0..N is fine).
-export async function createSessionGroup(name: string, project?: { source_dirs?: string[]; output_dir?: string }): Promise<SessionGroup> {
+export async function createSessionGroup(name: string, project?: { source_dirs?: string[] }): Promise<SessionGroup> {
   const d = await request<{ group: SessionGroup }>('/api/session-groups', { method: 'POST', ...json({ name, ...project }) })
   return d.group
 }
 
 // The workspace (working_dir) is fixed at creation and not patchable;
-// source_dirs replaces the mount set wholesale, output_dir marks one of them
-// ('' clears the marker).
+// source_dirs replaces the mount set wholesale.
 export async function updateSessionGroup(
   id: string,
-  patch: { name?: string; collapsed?: boolean; source_dirs?: string[]; output_dir?: string },
+  patch: { name?: string; collapsed?: boolean; source_dirs?: string[] },
 ): Promise<SessionGroup> {
   const d = await request<{ group: SessionGroup }>(`/api/session-groups/${id}`, { method: 'PATCH', ...json(patch) })
   return d.group

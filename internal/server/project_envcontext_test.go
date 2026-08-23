@@ -27,27 +27,18 @@ func TestSourceDirsHash_Stability(t *testing.T) {
 	if got := sourceDirsHash(nil); got != "" {
 		t.Errorf("no project must hash to the empty identity, got %q", got)
 	}
-	withOut := &sessionGroup{ID: "g-1", SourceDirs: []string{a, b}, OutputDir: a}
-	if sourceDirsHash(withOut) == sourceDirsHash(p1) {
-		t.Error("marking an output dir changes the env context and must change the hash")
-	}
 }
 
-func TestAppendProjectEnvContext_ListsFoldersAndOutputDir(t *testing.T) {
+func TestAppendProjectEnvContext_ListsFolders(t *testing.T) {
 	src := t.TempDir()
-	out := t.TempDir()
-	proj := &sessionGroup{ID: "g-1", Name: "订单", WorkingDir: t.TempDir(), SourceDirs: []string{src, out}, OutputDir: out}
+	other := t.TempDir()
+	proj := &sessionGroup{ID: "g-1", Name: "订单", WorkingDir: t.TempDir(), SourceDirs: []string{src, other}}
 
 	got := appendProjectEnvContext("# Environment\n\n- Working directory: /w\n", proj)
-	for _, want := range []string{src, out, "scratch"} {
+	for _, want := range []string{src, other, "scratch"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("project env context missing %q:\n%s", want, got)
 		}
-	}
-	// The output marker must single out the output dir, and the instruction
-	// must tell the model deliverables go there.
-	if !strings.Contains(got, "output") && !strings.Contains(got, "Output") {
-		t.Errorf("no output-dir instruction in:\n%s", got)
 	}
 }
 

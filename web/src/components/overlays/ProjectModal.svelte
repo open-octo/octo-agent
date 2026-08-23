@@ -8,8 +8,8 @@
 
   // One modal, two modes: group == null creates a project (name + source
   // folders, zero folders is a legitimate shape), otherwise it edits one
-  // (rename, mount/unmount folders, mark the output folder). The workspace is
-  // the server's business — it never appears as an input here.
+  // (rename, mount/unmount folders). The workspace is the server's business —
+  // it never appears as an input here.
   let { group = null, onClose, onSaved }: {
     group?: SessionGroup | null
     onClose: () => void
@@ -23,8 +23,6 @@
   let name = $state(group?.name ?? '')
   // svelte-ignore state_referenced_locally
   let sourceDirs = $state<string[]>([...(group?.source_dirs ?? [])])
-  // svelte-ignore state_referenced_locally
-  let outputDir = $state(group?.output_dir ?? '')
   let saving = $state(false)
   let pickerOpen = $state(false)
   let modalEl = $state<HTMLDivElement | null>(null)
@@ -52,11 +50,6 @@
 
   function removeFolder(dir: string) {
     sourceDirs = sourceDirs.filter(d => d !== dir)
-    if (outputDir === dir) outputDir = ''
-  }
-
-  function toggleOutput(dir: string) {
-    outputDir = outputDir === dir ? '' : dir
   }
 
   async function save() {
@@ -66,12 +59,10 @@
     try {
       let g: SessionGroup
       if (group) {
-        g = await api.updateSessionGroup(group.id, { name: trimmed, source_dirs: sourceDirs, output_dir: outputDir })
+        g = await api.updateSessionGroup(group.id, { name: trimmed, source_dirs: sourceDirs })
         sessionGroups.update(gs => gs.map(x => (x.id === g.id ? g : x)))
       } else {
-        // One request: the server accepts output_dir at creation, so there is
-        // no created-but-unmarked window for a failure to strand us in.
-        g = await api.createSessionGroup(trimmed, { source_dirs: sourceDirs, ...(outputDir ? { output_dir: outputDir } : {}) })
+        g = await api.createSessionGroup(trimmed, { source_dirs: sourceDirs })
         sessionGroups.update(gs => [...gs, g])
       }
       onSaved?.(g)
@@ -108,14 +99,6 @@
         <div class="folder-row">
           <iconify-icon icon="ant-design:folder-outlined" width="14"></iconify-icon>
           <span class="mono folder-path" title={dir}>{dir}</span>
-          <button
-            class="row-btn"
-            class:active={outputDir === dir}
-            title={$t('project.output_mark')}
-            onclick={() => toggleOutput(dir)}
-          >
-            <iconify-icon icon={outputDir === dir ? 'ant-design:star-filled' : 'ant-design:star-outlined'} width="14"></iconify-icon>
-          </button>
           <button class="row-btn" title={$t('project.remove_folder')} onclick={() => removeFolder(dir)}>
             <iconify-icon icon="lucide:x" width="14"></iconify-icon>
           </button>
@@ -125,9 +108,6 @@
         <iconify-icon icon="ant-design:folder-add-outlined" width="18"></iconify-icon>
         <span>{$t('project.add_folder')}</span>
       </button>
-      {#if outputDir}
-        <div class="hint">{$t('project.output_hint')}</div>
-      {/if}
     </div>
 
     <div class="modal-footer">
@@ -176,14 +156,13 @@
 }
 .folder-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .row-btn { background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 2px; }
-.row-btn:hover, .row-btn.active { color: var(--blue-6); }
+.row-btn:hover { color: var(--blue-6); }
 .add-folder {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   padding: 18px; border: 1px dashed var(--border-secondary); border-radius: 10px;
   background: none; color: var(--text-tertiary); font-size: 12px; cursor: pointer;
 }
 .add-folder:hover { border-color: var(--blue-6); color: var(--text); }
-.hint { font-size: 11px; color: var(--text-tertiary); }
 .modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px 14px; }
 .btn {
   padding: 7px 16px; border-radius: 10px; font-size: 13px; cursor: pointer;
