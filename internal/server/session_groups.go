@@ -367,6 +367,41 @@ func projectDirByGroupID(id string) string {
 	return ""
 }
 
+// projectSourceDirByGroupID returns the project's OWN recorded spelling of the
+// mounted folder the caller named, or "" when the group is unknown or does not
+// mount it. Matching is by membership, not by index, so a concurrent reorder of
+// the mount list can only fail to match — never resolve to a different folder
+// than the one the caller pointed at.
+//
+// Returning the registry's copy rather than the caller's string is the whole
+// point: it is what keeps a caller-supplied path away from anything that
+// consumes a path downstream (see handleNativeOpenFolder).
+func projectSourceDirByGroupID(id, dir string) string {
+	if id == "" || dir == "" {
+		return ""
+	}
+	groupMu.Lock()
+	defer groupMu.Unlock()
+	groups, err := loadSessionGroups()
+	if err != nil {
+		slog.Warn("resolve project source dir by group", "group", id, "err", err)
+		return ""
+	}
+	norm := memory.NormalizeDir(dir)
+	for _, g := range groups {
+		if g.ID != id {
+			continue
+		}
+		for _, sd := range g.SourceDirs {
+			if memory.NormalizeDir(sd) == norm {
+				return sd
+			}
+		}
+		return ""
+	}
+	return ""
+}
+
 // ProjectDirForSession returns the working directory of the project owning
 // sessionID, or "" when the session is not in one. Exported for the CLI/TUI,
 // which have no server to ask: a session filed under a project should run in

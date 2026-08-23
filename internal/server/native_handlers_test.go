@@ -863,6 +863,83 @@ func TestNativeOpenFolderRefusesWhatItCannotResolve(t *testing.T) {
 	}
 }
 
+// source_dir picks one of the project's mounted folders instead of its
+// workspace. It is a selector over the project's own records, not a path: a
+// directory that exists but is not mounted is a 404, so the endpoint stays
+// unable to open an arbitrary folder on the host.
+func TestNativeOpenFolderSourceDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	repoA := filepath.Join(tmp, "repo-a")
+	repoB := filepath.Join(tmp, "repo-b")
+	unmounted := filepath.Join(tmp, "somewhere-else")
+	for _, d := range []string{repoA, repoB, unmounted} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fake := &fakeNative{}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: fake})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/session-groups",
+		strings.NewReader(`{"name":"multi","source_dirs":["`+jsonPath(repoA)+`","`+jsonPath(repoB)+`"]}`))
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create group: %d (%s)", w.Code, w.Body.String())
+	}
+	var created map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	g, _ := created["group"].(map[string]any)
+	groupID, _ := g["id"].(string)
+	workspace, _ := g["working_dir"].(string)
+	if groupID == "" || workspace == "" {
+		t.Fatalf("fixture: id=%q workspace=%q", groupID, workspace)
+	}
+
+	for _, tc := range []struct {
+		name, body string
+		want       int
+		wantDir    string // "" when nothing must be opened
+	}{
+		// No source_dir still means the workspace: the existing entry keeps
+		// working, the mounted folders are additions to it.
+		{"no source_dir opens the workspace", `{"group_id":"` + groupID + `"}`, http.StatusOK, workspace},
+		{"second mount", `{"group_id":"` + groupID + `","source_dir":"` + jsonPath(repoB) + `"}`, http.StatusOK, repoB},
+		// Matching normalises, and what opens is the registry's spelling — not
+		// the caller's, which is what keeps the caller's string out of the
+		// opener.
+		{"trailing separator still matches", `{"group_id":"` + groupID + `","source_dir":"` + jsonPath(repoA) + `/"}`, http.StatusOK, repoA},
+		{"an existing but unmounted dir", `{"group_id":"` + groupID + `","source_dir":"` + jsonPath(unmounted) + `"}`, http.StatusNotFound, ""},
+		{"the workspace is not a source dir", `{"group_id":"` + groupID + `","source_dir":"` + jsonPath(workspace) + `"}`, http.StatusNotFound, ""},
+		{"source_dir without a group", `{"source_dir":"` + jsonPath(repoA) + `"}`, http.StatusBadRequest, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := fake.openDirCalls
+			req := httptest.NewRequest(http.MethodPost, "/api/native/open-folder", strings.NewReader(tc.body))
+			w := httptest.NewRecorder()
+			serveLoopback(srv.mux, w, req)
+			if w.Code != tc.want {
+				t.Fatalf("got %d, want %d (%s)", w.Code, tc.want, w.Body.String())
+			}
+			if tc.wantDir == "" {
+				if fake.openDirCalls != before {
+					t.Errorf("bridge.OpenFolder called for a target it must not resolve: %q", fake.gotOpenDir)
+				}
+				return
+			}
+			if fake.openDirCalls != before+1 || fake.gotOpenDir != tc.wantDir {
+				t.Errorf("bridge.OpenFolder calls=%d dir=%q, want %d/%s", fake.openDirCalls, fake.gotOpenDir, before+1, tc.wantDir)
+			}
+		})
+	}
+}
+
 // jsonPath escapes a filesystem path for embedding in a JSON string literal —
 // Windows separators would otherwise read as escape sequences.
 func jsonPath(p string) string {

@@ -406,19 +406,28 @@ func (s *Server) handleNativeOpenExternal(w http.ResponseWriter, r *http.Request
 type nativeOpenFolderRequest struct {
 	SessionID string `json:"session_id"`
 	GroupID   string `json:"group_id"`
+	// SourceDir, with GroupID, asks for one of that project's mounted source
+	// folders instead of its workspace. It selects among the project's own
+	// records — see the note below on why that is not the same as accepting a
+	// path.
+	SourceDir string `json:"source_dir,omitempty"`
 }
 
-// POST /api/native/open-folder — reveal a session's or a project's working
-// directory in the OS file manager (desktop only). Backs the sidebar's "Open
-// folder" action.
+// POST /api/native/open-folder — reveal a session's or a project's directory in
+// the OS file manager (desktop only). Backs the sidebar's "Open folder" action.
 //
-// The caller names a session or a group, never a path: the directory is looked
-// up here, from the same resolution every other surface uses (sessionCwdByID
-// for a session, the group registry for a project). A path in the request body
-// would make this endpoint an "open any directory on this machine" primitive
-// and put a caller-controlled string on its way to the platform opener — the
-// action means "take me to where this row's work happens", and that is a
-// question only the server can answer anyway.
+// The caller names a row, never a path. For a session that is sessionCwdByID —
+// the same resolution every other surface uses. For a project it is the
+// workspace, or, when source_dir names one of that project's mounted folders,
+// that folder: a project's work lives in the folders it mounts, and a menu
+// entry that could only ever reach the (usually empty) workspace was taking
+// people somewhere they had no reason to go.
+//
+// source_dir is a selector, not a path. It must match a folder already in this
+// project's source_dirs, and what gets opened is the registry's own spelling of
+// it, never the caller's string — so this stays "take me to where this row's
+// work happens" and does not become an "open any directory on this machine"
+// primitive with a caller-controlled string on its way to the platform opener.
 //
 // Loopback-gated like the other native routes: opening a window on the desktop
 // host is never something a remote peer gets to do.
@@ -440,7 +449,16 @@ func (s *Server) handleNativeOpenFolder(w http.ResponseWriter, r *http.Request) 
 	var dir string
 	switch {
 	case strings.TrimSpace(req.GroupID) != "":
-		dir = projectDirByGroupID(strings.TrimSpace(req.GroupID))
+		gid := strings.TrimSpace(req.GroupID)
+		if src := strings.TrimSpace(req.SourceDir); src != "" {
+			dir = projectSourceDirByGroupID(gid, src)
+			if dir == "" {
+				writeError(w, http.StatusNotFound, "that project does not mount that source folder")
+				return
+			}
+			break
+		}
+		dir = projectDirByGroupID(gid)
 		if dir == "" {
 			writeError(w, http.StatusNotFound, "no project with that id, or it has no working directory")
 			return
