@@ -62,8 +62,6 @@ export interface SessionGroup {
   working_dir?: string
   /** External folders the project references (repos and plain folders alike). */
   source_dirs?: string[]
-  /** One of source_dirs, marked as where deliverables go. */
-  output_dir?: string
   /** Set on a scheduled task's run cluster. */
   task_id?: string
 }

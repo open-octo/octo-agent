@@ -28,10 +28,8 @@ import (
 //     session's own dir, this keeps every existing session running exactly
 //     where it ran before the migration, byte for byte. Workspace semantics
 //     apply only to sessions created after it.
-//  3. the group itself: WorkingDir becomes a generated workspace, the old
-//     directory becomes SourceDirs[0] (and the output folder for a cron
-//     project — an explicit cron directory always meant "deliverables go
-//     here").
+//  3. the group itself: WorkingDir becomes a generated workspace and the old
+//     directory becomes SourceDirs[0].
 //
 // Idempotent: a migrated project's WorkingDir lies under the workspace root
 // and is skipped on the next start. Runs under one LockWrite with one save.
@@ -77,9 +75,6 @@ func (s *Server) migrateProjectWorkspaces() {
 		g.WorkingDir = workspace
 		if !dirInSet(old, g.SourceDirs) {
 			g.SourceDirs = append([]string{old}, g.SourceDirs...)
-		}
-		if g.TaskID != "" && g.OutputDir == "" {
-			g.OutputDir = old
 		}
 		changed = true
 		slog.Info("migrated project to a generated workspace",

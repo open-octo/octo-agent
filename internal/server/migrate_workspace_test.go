@@ -168,8 +168,8 @@ func TestMigrateWorkspaces_NeverMovesTheSharedTier(t *testing.T) {
 }
 
 // A cron project written before the workspace model, with an explicit user
-// directory, keeps that directory as its output mount.
-func TestMigrateWorkspaces_LegacyCronDirBecomesOutputMount(t *testing.T) {
+// directory, keeps that directory as a source mount.
+func TestMigrateWorkspaces_LegacyCronDirBecomesSourceMount(t *testing.T) {
 	srv := groupTestServer(t)
 	dir := t.TempDir()
 	groupMu.LockWrite()
@@ -186,8 +186,8 @@ func TestMigrateWorkspaces_LegacyCronDirBecomesOutputMount(t *testing.T) {
 		t.Fatal("group lost")
 	}
 	g := groups[0]
-	if g.OutputDir != dir || len(g.SourceDirs) != 1 || g.SourceDirs[0] != dir {
-		t.Errorf("legacy cron dir not an output mount: %+v", g)
+	if len(g.SourceDirs) != 1 || g.SourceDirs[0] != dir {
+		t.Errorf("legacy cron dir not a source mount: %+v", g)
 	}
 	if g.WorkingDir == dir {
 		t.Errorf("legacy cron dir adopted as workspace itself")

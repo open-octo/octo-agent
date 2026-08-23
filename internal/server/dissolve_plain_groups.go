@@ -66,15 +66,15 @@ func (s *Server) dissolvePlainGroups() {
 				// Written before a scheduled task was a project. Its runs have
 				// been falling through to the server's launch directory, so
 				// give it the workspace it should have had — generated, like
-				// every project's; an explicit task directory becomes the
-				// output mount, not the directory itself. Registry reads use
+				// every project's; an explicit task directory becomes a
+				// source mount, not the directory itself. Registry reads use
 				// the snapshot in hand: this pass already holds groupMu.
 				if d, derr := workspaceDirForTask(groups, s.curWorkspaceDir(), task.Name, task.ID); derr == nil {
 					g.WorkingDir = d
 					changed = true
 					if dir := strings.TrimSpace(task.Directory); dir != "" {
 						if mounted, verr := validateSourceDirs(s.curWorkspaceDir(), []string{dir}); verr == nil && len(mounted) == 1 {
-							g.SourceDirs, g.OutputDir = mounted, mounted[0]
+							g.SourceDirs = mounted
 						} else {
 							slog.Warn("scheduled task's directory unusable", "task", task.Name, "dir", dir, "err", verr)
 						}

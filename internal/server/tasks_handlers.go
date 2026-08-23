@@ -78,20 +78,18 @@ func (s *Server) initScheduler() {
 // createCronProject creates the project a task's runs cluster under. The
 // workspace is generated like every other project's (workspaceDirForTask) —
 // cron and regular projects share one shape — and an explicit task directory
-// is mounted as the output folder rather than adopted as the directory itself:
-// the runs' deliverables land there, their scratch stays in the workspace.
+// is mounted as a source folder rather than adopted as the directory itself:
+// the runs work on it, their scratch stays in the workspace.
 // An unusable explicit directory is dropped with a log, not fatal: a task
 // must run regardless.
 func (s *Server) createCronProject(task scheduler.Task) (sessionGroup, error) {
 	var sourceDirs []string
-	outputDir := ""
 	if dir := strings.TrimSpace(task.Directory); dir != "" {
 		mounted, verr := validateSourceDirs(s.curWorkspaceDir(), []string{dir})
 		if verr != nil || len(mounted) == 0 {
 			slog.Warn("cron: explicit directory unusable; dropping it", "task", task.Name, "dir", dir, "err", verr)
 		} else {
 			sourceDirs = mounted
-			outputDir = mounted[0]
 		}
 	}
 	groupMu.LockWrite()
@@ -108,7 +106,7 @@ func (s *Server) createCronProject(task scheduler.Task) (sessionGroup, error) {
 	if werr != nil {
 		return sessionGroup{}, werr
 	}
-	g := sessionGroup{ID: newGroupID(), Name: task.Name, SessionIDs: []string{}, WorkingDir: workspace, SourceDirs: sourceDirs, OutputDir: outputDir, TaskID: task.ID}
+	g := sessionGroup{ID: newGroupID(), Name: task.Name, SessionIDs: []string{}, WorkingDir: workspace, SourceDirs: sourceDirs, TaskID: task.ID}
 	groups = append(groups, g)
 	if err := saveSessionGroups(groups); err != nil {
 		return sessionGroup{}, err

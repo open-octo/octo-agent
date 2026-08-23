@@ -94,10 +94,10 @@ func TestWorkspaceDirForTask_FallsBackToTheTaskID(t *testing.T) {
 }
 
 // An explicit directory on the task still means what its author meant — the
-// deliverables land there — but as the output mount of a generated workspace,
-// the same shape every project has (see createCronProject's test for the full
+// runs work on it — but as a source mount of a generated workspace, the same
+// shape every project has (see createCronProject's test for the full
 // contract).
-func TestCronTaskDir_ExplicitDirectoryBecomesOutputMount(t *testing.T) {
+func TestCronTaskDir_ExplicitDirectoryBecomesSourceMount(t *testing.T) {
 	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	srv.setWorkspaceDir(t.TempDir())
@@ -107,8 +107,8 @@ func TestCronTaskDir_ExplicitDirectoryBecomesOutputMount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g.OutputDir != explicit || len(g.SourceDirs) != 1 || g.SourceDirs[0] != explicit {
-		t.Errorf("explicit directory not the output mount: %+v", g)
+	if len(g.SourceDirs) != 1 || g.SourceDirs[0] != explicit {
+		t.Errorf("explicit directory not a source mount: %+v", g)
 	}
 	if g.WorkingDir == explicit {
 		t.Errorf("explicit directory was adopted as the workspace itself")

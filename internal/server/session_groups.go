@@ -77,10 +77,6 @@ type sessionGroup struct {
 	// the tools. A directory may appear in several projects' SourceDirs; it
 	// may never lie under the workspace root (the write paths reject that).
 	SourceDirs []string `json:"source_dirs,omitempty"`
-	// OutputDir, when set, is one of SourceDirs marked as where deliverables
-	// go — the env context tells the model to write finished work there and
-	// keep scratch in the workspace.
-	OutputDir string `json:"output_dir,omitempty"`
 	// TaskID, when set, is the scheduled task this project was created for. It
 	// is what lets the startup pass repair such a project (backfilling the
 	// directory a task written before this had none) rather than dissolving it.
@@ -592,9 +588,6 @@ type createSessionGroupRequest struct {
 	// project needs none (writing projects, cron projects). The project's own
 	// directory is always generated; it is never one of these.
 	SourceDirs []string `json:"source_dirs,omitempty"`
-	// OutputDir optionally marks one of SourceDirs as where deliverables go —
-	// accepted at creation so the whole shape lands in one write.
-	OutputDir string `json:"output_dir,omitempty"`
 	// WorkingDir is the legacy field: it used to BE the project directory.
 	// A client still sending it gets that directory mounted as one more
 	// source folder, which preserves the intent ("this project works on that
@@ -622,19 +615,6 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, verr.Error())
 		return
 	}
-	outputDir := strings.TrimSpace(req.OutputDir)
-	if outputDir != "" {
-		if !dirInSet(outputDir, sourceDirs) {
-			writeError(w, http.StatusBadRequest, "output_dir must be one of the project's source folders")
-			return
-		}
-		for _, sd := range sourceDirs {
-			if memory.NormalizeDir(sd) == memory.NormalizeDir(outputDir) {
-				outputDir = sd
-				break
-			}
-		}
-	}
 	if dirNameFor(name) == "" {
 		// A name with no character a path can carry is the client's problem,
 		// not a server failure.
@@ -658,7 +638,7 @@ func (s *Server) handleCreateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workspace, SourceDirs: sourceDirs, OutputDir: outputDir}
+	g := sessionGroup{ID: newGroupID(), Name: name, SessionIDs: []string{}, WorkingDir: workspace, SourceDirs: sourceDirs}
 	groups = append(groups, g)
 	if err := saveSessionGroups(groups); err != nil {
 		dropWorkspaceDir(workspace)
@@ -685,12 +665,9 @@ type updateSessionGroupRequest struct {
 	// silently ignoring the field.
 	WorkingDir *string `json:"working_dir,omitempty"`
 	// SourceDirs replaces the mount set wholesale (same validation as
-	// creation). OutputDir marks one of the mounts as where deliverables go —
-	// it must name a member of the (possibly just-updated) set, or "" to
-	// clear the marker. Both changes reach running sessions on their next
-	// turn through the freeze identity's source-dirs hash.
+	// creation). The change reaches running sessions on their next turn
+	// through the freeze identity's source-dirs hash.
 	SourceDirs *[]string `json:"source_dirs,omitempty"`
-	OutputDir  *string   `json:"output_dir,omitempty"`
 }
 
 func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request) {
@@ -704,8 +681,8 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 		writeInvalidJSONBody(w, err)
 		return
 	}
-	if req.Name == nil && req.Collapsed == nil && req.WorkingDir == nil && req.SourceDirs == nil && req.OutputDir == nil {
-		writeError(w, http.StatusBadRequest, "name, collapsed, source_dirs or output_dir is required")
+	if req.Name == nil && req.Collapsed == nil && req.WorkingDir == nil && req.SourceDirs == nil {
+		writeError(w, http.StatusBadRequest, "name, collapsed or source_dirs is required")
 		return
 	}
 	var name string
@@ -758,30 +735,6 @@ func (s *Server) handleUpdateSessionGroup(w http.ResponseWriter, r *http.Request
 	}
 	if req.SourceDirs != nil {
 		groups[idx].SourceDirs = newSourceDirs
-		// A marker whose mount was just removed points at nothing — drop it
-		// rather than persist a lie (the explicit output_dir field below can
-		// re-establish it in the same request).
-		if groups[idx].OutputDir != "" && !dirInSet(groups[idx].OutputDir, newSourceDirs) {
-			groups[idx].OutputDir = ""
-		}
-	}
-	if req.OutputDir != nil {
-		out := strings.TrimSpace(*req.OutputDir)
-		if out != "" && !dirInSet(out, groups[idx].SourceDirs) {
-			writeError(w, http.StatusBadRequest, "output_dir must be one of the project's source folders")
-			return
-		}
-		if out != "" {
-			// Store the mount's own spelling so env-context marker matching
-			// is an exact comparison.
-			for _, sd := range groups[idx].SourceDirs {
-				if memory.NormalizeDir(sd) == memory.NormalizeDir(out) {
-					out = sd
-					break
-				}
-			}
-		}
-		groups[idx].OutputDir = out
 	}
 	if err := saveSessionGroups(groups); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
