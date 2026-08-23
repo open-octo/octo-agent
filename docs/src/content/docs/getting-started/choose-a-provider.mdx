@@ -60,6 +60,25 @@ octo config path   # print the file location
 but the env var is recommended.
 </Aside>
 
+## Reaching endpoints through a proxy
+
+If reaching OpenAI, Anthropic, or other endpoints requires a proxy, octo honors Go's standard proxy environment variables — `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` (both `http://` and `socks5://` addresses work, either case):
+
+```bash
+HTTPS_PROXY=http://127.0.0.1:7890 octo --provider openai "..."
+```
+
+A shell export is enough when you launch from a terminal. But **the desktop app and a background `octo serve` don't inherit your shell environment** — an export in `~/.zshrc` never reaches them. The uniform fix is `~/.octo/serve.env`, which every launch mode (CLI, desktop, `octo serve`) loads at startup:
+
+```bash
+cat >> ~/.octo/serve.env << 'EOF'
+HTTPS_PROXY=http://127.0.0.1:7890
+EOF
+chmod 600 ~/.octo/serve.env
+```
+
+Restart the app after editing. The proxy applies to all of the process's outbound traffic (model APIs, search, update checks); to route only some domains through it, use your proxy software's rules (Clash & co.) or exclude hosts with `NO_PROXY=api.moonshot.cn` — octo has no per-provider proxy setting.
+
 ## Extended reasoning
 
 Reasoning models can deliberate before answering. Two knobs control it, both available as CLI flags

@@ -35,6 +35,8 @@ octo 在启动时（早于任何工具或 channel 读取环境）加载它：
 
 这也是 systemd/launchd 打包模板里已经通过 `EnvironmentFile=%h/.octo/serve.env`（`packaging/systemd/octo.service`）指向的同一个文件。现在 `octo serve`、桌面版、TUI 都能解析同一份文件 ——配一次，到处生效。
 
+代理环境变量（`HTTPS_PROXY` 等）也走这同一个文件——用法见[选择 Provider · 通过代理访问](/docs/zh/getting-started/choose-a-provider/#通过代理访问)。
+
 ## 访问控制
 
 `127.0.0.1` 是回环地址，默认就被信任——不需要 key，这也是默认的绑定方式。一旦绑定得更宽

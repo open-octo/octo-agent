@@ -42,6 +42,13 @@ Non-loopback binds require the access key on every request. Startup prints a rea
 the key embedded; see [Self-host octo serve](/docs/guides/self-host/) and the
 [security model](/docs/reference/security/).
 
+### I can't reach OpenAI / Anthropic
+
+If your network needs a proxy to reach these endpoints, set `HTTPS_PROXY` for octo: export it in
+your shell for terminal launches; for the desktop app and `octo serve`, put it in
+`~/.octo/serve.env` (GUI processes don't inherit the shell environment). See
+[Choose a provider · Reaching endpoints through a proxy](/docs/getting-started/choose-a-provider/#reaching-endpoints-through-a-proxy).
+
 ### Where do I report a bug or request a feature?
 
 [Open an issue](https://github.com/open-octo/octo-agent/issues) on GitHub. For a security
