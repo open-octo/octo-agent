@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sessions, sessionGroups, pinnedSessions, collapsedSessions, activeSessionId, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, globalReasoningEffort, nativeShell, mobileShell, panelContent, panelExpanded, cmdkOpen, settingsModalOpen, createNewSession, clearPendingSessionOpts, isDesktopShell } from './lib/stores'
+  import { view, sessions, sessionGroups, pinnedSessions, collapsedSessions, activeSessionId, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, globalReasoningEffort, nativeShell, mobileShell, panelContent, panelExpanded, cmdkOpen, settingsModalOpen, createNewSession, clearPendingSessionOpts, isDesktopShell, readLastRoute, writeLastRoute } from './lib/stores'
   import MobileApp from './mobile/MobileApp.svelte'
   import { ws, wsState } from './lib/ws'
   import { notificationsEnabled } from './lib/notifications'
@@ -70,13 +70,13 @@
   // Reflect the current view (and active chat session) in the hash so a refresh
   // lands back where the user was instead of the default chat view.
   let routeReady = false
-  // The "open the most recent session" fallback below fires at most once, on
-  // the first session list of the boot — and not at all when the URL already
-  // names the chat target. After that the active session belongs to the user:
-  // a later list (another tab creating a session, a WS reconnect) must not
-  // yank them off the new-session landing page, nor out of the empty state a
-  // delete leaves behind. Read synchronously at module init, before any list
-  // can arrive.
+  // The "restore where the user left off" fallback below fires at most once,
+  // on the first session list of the boot — and not at all when the URL
+  // already names the chat target. After that the active session belongs to
+  // the user: a later list (another tab creating a session, a WS reconnect)
+  // must not yank them off the new-session landing page, nor out of the empty
+  // state a delete leaves behind. Read synchronously at module init, before
+  // any list can arrive.
   let autoSelectDone = typeof location !== 'undefined' && hashPicksChatTarget(location.hash)
   const VALID_VIEWS = ['chat', 'agents', 'skills', 'workflows', 'browser', 'tasks', 'mcp', 'channels', 'lightapps']
 
@@ -183,12 +183,16 @@
   })
 
   // Write the current view/session to the hash on navigation (once the initial
-  // hash has been restored, and only while the main UI is showing).
+  // hash has been restored, and only while the main UI is showing). Also
+  // remember it in localStorage — the hash itself doesn't survive the tab or
+  // window closing, but a later cold start's fallback (below) reads this to
+  // put the user back where they left off.
   $effect(() => {
     const v = $view, sid = $activeSessionId, phase = $onboardPhase
     if (!routeReady || phase === 'unknown' || phase === 'key_setup') return
     const hash = normalizeHash(v, sid)
     if (location.hash !== hash) location.hash = hash
+    writeLastRoute(v, sid)
   })
 
   function bootMain() {
@@ -361,7 +365,21 @@
         })
         if (!autoSelectDone) {
           autoSelectDone = true
-          if (!get(activeSessionId)) activeSessionId.set(list[0].id)
+          if (!get(activeSessionId)) {
+            // Restore the page the user was last on, not "whichever session
+            // is most recently touched" — that ranking can change from
+            // background activity the user never looked at. If the
+            // remembered session was deleted since, or nothing was ever
+            // remembered, stay on the landing page (view/activeSessionId
+            // already default there) rather than guessing a replacement.
+            const last = readLastRoute()
+            if (last?.sid && list.some((s: any) => s.id === last.sid)) {
+              if (VALID_VIEWS.includes(last.view) && get(view) !== last.view) view.set(last.view)
+              activeSessionId.set(last.sid)
+            } else if (last?.view && last.view !== 'chat' && VALID_VIEWS.includes(last.view) && get(view) === 'chat') {
+              view.set(last.view)
+            }
+          }
         }
       }
     }).catch(() => { /* non-critical: an empty sidebar, not a broken page */ })
