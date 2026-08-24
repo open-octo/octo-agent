@@ -1032,7 +1032,7 @@
 
   {#if $sidebar === 'rail'}
   <div class="rail">
-    <div style="padding:16px 0 8px 0;">
+    <div class="rail-new" class:native-inset={$nativeShell && isMac}>
       <button class="rail-btn primary" title={$t('nav.new_session')} onclick={() => createNewSession()}>
         <iconify-icon icon="ant-design:plus-outlined" width="16"></iconify-icon>
       </button>
@@ -1381,6 +1381,12 @@
   width: 64px; height: 100%; display: flex; flex-direction: column;
   align-items: center; min-height: 0;
 }
+.rail-new { padding: 16px 0 8px 0; }
+/* Mac's traffic lights float over this rail's top-left corner too (rail mode
+   only ever shows in a narrow window, right where the lights sit) — push the
+   new-session button below them instead of letting it collide. 44px matches
+   the header row height used the same way elsewhere (side-header, Header). */
+.rail-new.native-inset { padding-top: 44px; }
 .rail-scroll { flex: 1; overflow-y: auto; padding: 4px 0; display: flex; flex-direction: column; gap: 4px; align-items: center; }
 .rail-footer { flex: 0 0 auto; border-top: 1px solid var(--border-secondary); padding: 8px 0; width: 100%; display: flex; justify-content: center; }
 .rail-btn {
