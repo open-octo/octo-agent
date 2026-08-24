@@ -1508,7 +1508,7 @@ export const zh: Record<string, string> = {
   "artifacts.light_apps": "轻应用",
   "panel.switch_mode": "切换面板",
   "panel.mode_artifacts": "制品",
-  "panel.mode_diff": "Git Diff",
+  "panel.mode_diff": "差异",
   "diff.refresh": "刷新",
   "diff.no_repo": "该会话没有关联的 git 仓库",
   "diff.clean": "工作区干净，没有未提交改动",

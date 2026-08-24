@@ -197,6 +197,7 @@
   ]
   const curMode = $derived<PanelMode>($panelContent === 'diff' ? 'diff' : 'session')
   const curModeIcon = $derived(MODES.find(m => m.id === curMode)?.icon ?? MODES[0].icon)
+  const curModeLabel = $derived(MODES.find(m => m.id === curMode)?.label ?? MODES[0].label)
 
   function pickMode(mode: PanelMode) {
     modeMenu = false
@@ -231,6 +232,17 @@
     panelExpanded.update(v => !v)
   }
 
+  // The preview is a sandboxed iframe: its own document, in its own renderer
+  // process. Writing a new panel width on every mousemove made the divider
+  // feel towed behind the cursor — each width change is a cross-document
+  // resize the compositor waits on before it can present the new edge, and a
+  // 125Hz mouse asks for two of them per frame. So the drag coalesces its
+  // writes to one per animation frame, and pins the iframe's own width for the
+  // duration: the panel edge tracks the cursor, and the preview inside
+  // re-wraps once, on release.
+  let resizing = $state(false)
+  let frozenPreviewW = $state(0)
+
   function startResize(e: MouseEvent) {
     e.preventDefault()
     const row = panelEl?.parentElement
@@ -242,14 +254,27 @@
     const rowW = row.getBoundingClientRect().width
     const sideW = rowW - startW - (panelEl!.previousElementSibling as HTMLElement)?.getBoundingClientRect().width
     const maxW = Math.max(PANEL_MIN, rowW - sideW - CENTER_MIN)
+    frozenPreviewW = panelEl!.querySelector('iframe')?.getBoundingClientRect().width ?? 0
+    resizing = true
+    let raf = 0
+    let pointerX = startX
+    const apply = () => {
+      raf = 0
+      panelWidth = Math.max(PANEL_MIN, Math.min(maxW, startW + (startX - pointerX)))
+    }
     const move = (ev: MouseEvent) => {
-      panelWidth = Math.max(PANEL_MIN, Math.min(maxW, startW + (startX - ev.clientX)))
+      pointerX = ev.clientX
+      if (!raf) raf = requestAnimationFrame(apply)
     }
     const up = () => {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
+      // A move already queued for the next frame still counts: without this the
+      // last few pixels of the drag would be dropped on release.
+      if (raf) { cancelAnimationFrame(raf); apply() }
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
+      resizing = false
       localStorage.setItem(PANEL_WIDTH_KEY, String(Math.round(panelWidth)))
     }
     window.addEventListener('mousemove', move)
@@ -277,6 +302,10 @@
       onclick={() => modeMenu = !modeMenu}
     >
       <iconify-icon icon={curModeIcon} width="14"></iconify-icon>
+      <!-- The mode's name belongs to the switcher, not to the row: standing on
+           its own beside the trigger it read as a heading, and whatever came
+           next (a filename, a type badge) looked like part of the same group. -->
+      <span class="mode-name">{$t(curModeLabel)}</span>
       <!-- Always-on caret: without it the trigger reads as a static mode
            indicator, and the dropdown is only discoverable by hovering for
            the tooltip. -->
@@ -330,7 +359,7 @@
       {@render topbarControls()}
     </div>
 
-    <div class="body">
+    <div class="body" class:frozen={resizing} style={resizing ? `--frozen-w:${frozenPreviewW}px` : ''}>
       {#if laLoading}
         <div class="empty"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon><span>{$t('common.loading')}</span></div>
       {:else if laCurHTML}
@@ -349,13 +378,14 @@
     <!-- ── Git Diff mode ──────────────────────────────────────────────────── -->
     <div class="topbar" class:native-lift={liftForTrafficLights}>
       {@render modeSwitcher()}
-      {#if diffSoleRepo}
-        <span class="file-name mono">{diffSoleRepo.name}</span>
-        {#if diffSoleRepo.branch}<span class="file-meta">{diffSoleRepo.commit || diffSoleRepo.branch}</span>{/if}
-      {:else}
-        <span class="file-name">{$t('panel.mode_diff')}</span>
-        {#if diffFileCount > 0}<span class="file-meta">{$t('files.count_files').replace('{n}', String(diffFileCount))}</span>{/if}
-      {/if}
+      <span class="file-id">
+        {#if diffSoleRepo}
+          <span class="file-name mono">{diffSoleRepo.name}</span>
+          {#if diffSoleRepo.branch}<span class="file-meta">{diffSoleRepo.commit || diffSoleRepo.branch}</span>{/if}
+        {:else if diffFileCount > 0}
+          <span class="file-meta">{$t('files.count_files').replace('{n}', String(diffFileCount))}</span>
+        {/if}
+      </span>
       <span style="flex:1"></span>
       <button
         class="icon-btn"
@@ -380,7 +410,6 @@
     {#if !cur}
       <div class="topbar" class:native-lift={liftForTrafficLights}>
         {@render modeSwitcher()}
-        <span class="file-name mode-label">{$t('panel.mode_artifacts')}</span>
         <span style="flex:1"></span>
         {@render topbarControls()}
       </div>
@@ -391,9 +420,10 @@
     {:else}
       <div class="topbar" class:native-lift={liftForTrafficLights}>
         {@render modeSwitcher()}
-        <span class="file-name mode-label">{$t('panel.mode_artifacts')}</span>
-        <span class="file-name mono">{cur.name}</span>
-        <span class="file-meta">{cur.type}</span>
+        <span class="file-id">
+          <span class="file-name mono">{cur.name}</span>
+          <span class="file-meta">{cur.type}</span>
+        </span>
         <span style="flex:1"></span>
         {#if !curIsImage}
           <div class="seg">
@@ -420,7 +450,7 @@
         </div>
       {/if}
 
-      <div class="body">
+      <div class="body" class:frozen={resizing} style={resizing ? `--frozen-w:${frozenPreviewW}px` : ''}>
         {#if curIsImage}
           <div class="img-wrap">
             {#if imgFailed}
@@ -474,6 +504,9 @@
 <style>
 .panel {
   flex: 0 0 auto;
+  /* Lets the topbar rules below query this column's width rather than the
+     window's — see the @container blocks. */
+  container-type: inline-size;
   /* Without this, a code view's long unwrapped lines set the flex item's
      automatic minimum width and push the topbar controls past the viewport
      edge (worst when expanded: the panel is then the row's only item). */
@@ -499,18 +532,32 @@
    for why the height has to be pinned for the padding to move anything. */
 .topbar.native-lift { box-sizing: border-box; max-height: 44px; padding-bottom: 8px; }
 .file-name { min-width: 0; font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The mode label ("制品"/"Artifacts") names the panel, not a file: keep it
-   unshrinkable and muted so the artifact name beside it stays primary. */
-.file-name.mode-label { flex: 0 0 auto; color: var(--text-tertiary); }
 .file-meta { font-size: 11px; color: var(--text-tertiary); flex: 0 0 auto; }
+/* A name and the badge beside it are one identity, so they shrink and vanish as
+   one. Left to themselves the name (which is what gives) ellipsised away to
+   nothing while the unshrinkable badge stayed — and a lone "HTML" sitting next
+   to the mode switcher reads as a label for the switcher rather than the
+   remains of a filename. */
+.file-id { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
+/* Driven by the panel's own width, not the window's: the panel is dragged
+   narrow inside a wide window, which is precisely when the topbar runs out of
+   room and the trailing controls get pushed under the panel's edge. Below 400px
+   the name has too few pixels left to say anything, and below 340px even the
+   mode's name has to go so the controls keep their place. */
+@container (max-width: 400px) {
+  .topbar .file-id { display: none; }
+}
+@container (max-width: 340px) {
+  .topbar .mode-name { display: none; }
+}
 /* Small screens (a phone browser gets the desktop layout squeezed into a few
-   hundred px): the topbar's text — mode label, file/repo name, type badge,
+   hundred px): the topbar's text — mode name, file/repo name, type badge,
    branch, file count — crowds the icon controls past each other. The mode
    switcher's icon still names the mode and tooltips carry the rest, so the
    text is what gives. Same breakpoint as ChatView's narrow-screen rules. */
 @media (max-width: 620px) {
-  .topbar .file-name,
-  .topbar .file-meta { display: none; }
+  .topbar .file-id,
+  .topbar .mode-name { display: none; }
 }
 .mono { font-family: var(--font-mono); }
 .icon-btn {
@@ -527,8 +574,12 @@
 /* ── Panel mode switcher ─────────────────────────────────────────────── */
 .mode-wrap { position: relative; flex: 0 0 auto; display: flex; }
 /* Wider than a plain .icon-btn (which pins 28px square): the trigger carries
-   the mode icon plus a dropdown caret, so it sizes to its content. */
-.mode-trigger { position: relative; width: auto; flex: 0 0 auto; padding: 0 7px; gap: 3px; }
+   the mode icon, the mode's name and a dropdown caret, so it sizes to its
+   content. */
+.mode-trigger { position: relative; width: auto; flex: 0 0 auto; padding: 0 7px; gap: 4px; }
+/* Sits inside the trigger, so it takes the trigger's colour rather than the
+   muted tone a standalone label wanted. */
+.mode-name { font-size: 12px; color: var(--text); white-space: nowrap; }
 .mode-trigger .caret { transition: transform 0.15s ease; }
 .mode-trigger.on .caret { transform: rotate(180deg); }
 /* Same "there is something here" dot the sidebar's unread marker uses, sized
@@ -573,6 +624,11 @@
   gap: 12px; padding: 32px; text-align: center; color: var(--text-tertiary); font-size: 13px;
 }
 iframe { border: 0; width: 100%; height: 100%; display: block; }
+/* Held for the length of a divider drag (see startResize): the preview keeps
+   the width it had when the drag began and is clipped by its container rather
+   than reflowing its document on every frame. */
+.body.frozen { overflow: hidden; }
+.body.frozen iframe { width: var(--frozen-w, 100%); }
 .img-wrap {
   width: 100%; height: 100%; box-sizing: border-box; padding: 8px;
   display: flex; align-items: center; justify-content: center;
