@@ -14,8 +14,11 @@ export const SIDEBAR_DEFAULT = 256
 
 // The narrowest the conversation column may become. Both resizable columns
 // squeeze it, so the number lives in one place: the sidebar's grip and the
-// artifacts panel's grip each cap themselves against it.
-export const CENTER_MIN = 460
+// artifacts panel's grip each cap themselves against it, and App.svelte's
+// own min-width falls back on it too. 640, not some smaller round number —
+// below that the composer's bottom toolbar (model/reasoning/context chips)
+// runs out of room and wraps to a second line.
+export const CENTER_MIN = 640
 
 const SIDEBAR_WIDTH_KEY = 'octo.sidebarWidth'
 
