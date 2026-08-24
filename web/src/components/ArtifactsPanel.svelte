@@ -225,6 +225,27 @@
     return Number.isFinite(v) && v >= PANEL_MIN ? v : 420
   }
 
+  // The same bound startResize enforces mid-drag, applied on mount and on
+  // every window resize too — otherwise a saved width from a wider window (or
+  // one that fit before the OS window itself got dragged smaller) can outgrow
+  // the room actually available. flex:0 0 auto below means this column never
+  // shrinks on its own to make way; left unclamped, the excess just overflows
+  // past the window edge instead of appearing anywhere.
+  $effect(() => {
+    function clamp() {
+      const row = panelEl?.parentElement
+      const side = panelEl?.previousElementSibling as HTMLElement | null
+      if (!row || !side) return
+      const rowW = row.getBoundingClientRect().width
+      const sideW = side.getBoundingClientRect().width
+      const maxW = Math.max(PANEL_MIN, rowW - sideW - CENTER_MIN)
+      if (panelWidth > maxW) panelWidth = maxW
+    }
+    clamp()
+    window.addEventListener('resize', clamp)
+    return () => window.removeEventListener('resize', clamp)
+  })
+
   // Take over the content area, leaving the sidebar in place: the main column
   // yields its width (App.svelte hides it) and this panel grows into it. No
   // pixel maths — flex fills whatever is left, so it stays right through a
