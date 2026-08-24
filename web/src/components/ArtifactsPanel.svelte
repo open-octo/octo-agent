@@ -1,5 +1,6 @@
 <script lang="ts">
   import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightapps, lightappHTML, showToast, nativeShell, activeSessionId, savePanelMode, type PanelMode } from '../lib/stores'
+  import { titlebarDblClick } from '../lib/nativeWindow'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
   import { hydrateArtifact, lightAppSource, pathIsInside } from '../lib/artifacts'
@@ -317,7 +318,11 @@
   {/if}
   {#if $panelContent === 'lightapps'}
     <!-- ── Light Apps mode ───────────────────────────────────────────────── -->
-    <div class="topbar" class:native-lift={liftForTrafficLights}>
+    <!-- Every mode's topbar takes the double-click-to-zoom the other two columns
+         have. Unlike theirs it is not a window drag region — the controls packed
+         into it leave too little blank width to grab — but it is still the top
+         edge of the window, and that is where the gesture is expected. -->
+    <div class="topbar" class:native-lift={liftForTrafficLights} ondblclick={titlebarDblClick}>
       <div class="la-chips">
         <span class="footer-lbl">{$t('artifacts.light_apps')}</span>
         {#each $lightapps as a}
@@ -347,7 +352,7 @@
 
   {:else if $panelContent === 'diff'}
     <!-- ── Git Diff mode ──────────────────────────────────────────────────── -->
-    <div class="topbar" class:native-lift={liftForTrafficLights}>
+    <div class="topbar" class:native-lift={liftForTrafficLights} ondblclick={titlebarDblClick}>
       {@render modeSwitcher()}
       {#if diffSoleRepo}
         <span class="file-name mono">{diffSoleRepo.name}</span>
@@ -378,7 +383,7 @@
   {:else if $panelContent === 'session'}
     <!-- ── Session mode (existing behavior) ────────────────────────────────── -->
     {#if !cur}
-      <div class="topbar" class:native-lift={liftForTrafficLights}>
+      <div class="topbar" class:native-lift={liftForTrafficLights} ondblclick={titlebarDblClick}>
         {@render modeSwitcher()}
         <span class="file-name mode-label">{$t('panel.mode_artifacts')}</span>
         <span style="flex:1"></span>
@@ -389,7 +394,7 @@
         <span>{$t('artifacts.empty')}</span>
       </div>
     {:else}
-      <div class="topbar" class:native-lift={liftForTrafficLights}>
+      <div class="topbar" class:native-lift={liftForTrafficLights} ondblclick={titlebarDblClick}>
         {@render modeSwitcher()}
         <span class="file-name mode-label">{$t('panel.mode_artifacts')}</span>
         <span class="file-name mono">{cur.name}</span>
