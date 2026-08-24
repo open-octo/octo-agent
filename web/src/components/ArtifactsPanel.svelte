@@ -238,12 +238,7 @@
   // feel towed behind the cursor — each width change is a cross-document
   // resize the compositor waits on before it can present the new edge, and a
   // 125Hz mouse asks for two of them per frame. So the drag coalesces its
-  // writes to one per animation frame, and pins the iframe's own width for the
-  // duration: the panel edge tracks the cursor, and the preview inside
-  // re-wraps once, on release.
-  let resizing = $state(false)
-  let frozenPreviewW = $state(0)
-
+  // writes to one per animation frame.
   function startResize(e: PointerEvent) {
     e.preventDefault()
     const row = panelEl?.parentElement
@@ -256,8 +251,6 @@
     const rowW = row.getBoundingClientRect().width
     const sideW = rowW - startW - (panelEl!.previousElementSibling as HTMLElement)?.getBoundingClientRect().width
     const maxW = Math.max(PANEL_MIN, rowW - sideW - CENTER_MIN)
-    frozenPreviewW = panelEl!.querySelector('iframe')?.getBoundingClientRect().width ?? 0
-    resizing = true
     let raf = 0
     let pointerX = startX
     const apply = () => {
@@ -278,7 +271,6 @@
       if (raf) { cancelAnimationFrame(raf); apply() }
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      resizing = false
       localStorage.setItem(PANEL_WIDTH_KEY, String(Math.round(panelWidth)))
     }
     // Narrowing drags the handle toward the window's edge, where a fast flick
@@ -377,7 +369,7 @@
       {@render topbarControls()}
     </div>
 
-    <div class="body" class:frozen={resizing} style={resizing ? `--frozen-w:${frozenPreviewW}px` : ''}>
+    <div class="body">
       {#if laLoading}
         <div class="empty"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon><span>{$t('common.loading')}</span></div>
       {:else if laCurHTML}
@@ -468,7 +460,7 @@
         </div>
       {/if}
 
-      <div class="body" class:frozen={resizing} style={resizing ? `--frozen-w:${frozenPreviewW}px` : ''}>
+      <div class="body">
         {#if curIsImage}
           <div class="img-wrap">
             {#if imgFailed}
@@ -650,11 +642,6 @@
   gap: 12px; padding: 32px; text-align: center; color: var(--text-tertiary); font-size: 13px;
 }
 iframe { border: 0; width: 100%; height: 100%; display: block; }
-/* Held for the length of a divider drag (see startResize): the preview keeps
-   the width it had when the drag began and is clipped by its container rather
-   than reflowing its document on every frame. */
-.body.frozen { overflow: hidden; }
-.body.frozen iframe { width: var(--frozen-w, 100%); }
 .img-wrap {
   width: 100%; height: 100%; box-sizing: border-box; padding: 8px;
   display: flex; align-items: center; justify-content: center;
