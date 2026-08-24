@@ -14,6 +14,7 @@
   import { pruneSessions } from './lib/genui/panel-state'
   import { onTurnEnded as onDiffTurnEnded, resetDiff } from './lib/diff'
   import { globalKeyIntent } from './lib/globalKeys'
+  import { CENTER_MIN } from './lib/sidebarWidth'
   import AuthGate from './components/overlays/AuthGate.svelte'
   import FirstRunSetup from './components/overlays/FirstRunSetup.svelte'
   import Header from './components/layout/Header.svelte'
@@ -478,7 +479,7 @@
     <!-- Yield the width only while the panel is actually there to take it:
          an expanded flag left over from a closed panel would hide the main
          column with nothing rendered beside it, i.e. a blank page. -->
-    <main class="main" class:yielded={$panelExpanded && !!$panelContent}>
+    <main class="main" class:yielded={$panelExpanded && !!$panelContent} style="min-width:{CENTER_MIN}px">
       <Header />
       {#if $view === 'chat'}
         <ChatView />
@@ -535,9 +536,14 @@
   display: flex;
   min-height: 0;
 }
+/* min-width comes from the inline style (CENTER_MIN) rather than a fixed
+   value here: the sidebar's and artifacts panel's own resize grips already
+   stop short of squeezing this column past it, but only while dragging —
+   without this, shrinking the OS window itself (or the panel's fixed pixel
+   width outliving a narrower window) had nothing stopping the column from
+   being crushed to nothing. */
 .main {
   flex: 1;
-  min-width: 0;
   display: flex;
   flex-direction: column;
   min-height: 0;
