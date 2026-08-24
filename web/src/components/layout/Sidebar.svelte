@@ -286,7 +286,17 @@
     const rowW = row.getBoundingClientRect().width
     // Whatever sits beyond the center column — the artifacts panel, or nothing.
     const beyondCenter = rowW - startW - main.getBoundingClientRect().width
-    return Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, rowW - beyondCenter - CENTER_MIN))
+    const centerProtectingCeiling = rowW - beyondCenter - CENTER_MIN
+    // Below this, protecting CENTER_MIN is impossible even at SIDEBAR_MIN — the
+    // window itself is just too narrow, not something dragging the sidebar can
+    // fix. Falling through to Math.max(SIDEBAR_MIN, centerProtectingCeiling)
+    // would floor the CEILING at SIDEBAR_MIN, collapsing the whole draggable
+    // range to that single point (the drag would visibly do nothing). Fall
+    // back to the sidebar's own normal range instead — the trade-off elsewhere
+    // (main dropping below CENTER_MIN) already accepts this window size can't
+    // have both.
+    if (centerProtectingCeiling < SIDEBAR_MIN) return SIDEBAR_MAX
+    return Math.min(SIDEBAR_MAX, centerProtectingCeiling)
   }
 
   function startResize(e: MouseEvent) {
