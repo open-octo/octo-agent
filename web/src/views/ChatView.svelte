@@ -2505,7 +2505,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         <iconify-icon icon="ant-design:compress-outlined" width="13"></iconify-icon>
         <span class="btn-label">{$t('chat.compact')}</span>
       </button>
-      <button class="hdr-btn" title={$t('chat.export')} onclick={enterExportMode}>
+      <button class="hdr-btn" title={$t('chat.export')} disabled={!id} onclick={enterExportMode}>
         <iconify-icon icon="ant-design:export-outlined" width="13"></iconify-icon>
         <span class="btn-label">{$t('chat.export')}</span>
       </button>
