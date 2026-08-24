@@ -9,6 +9,8 @@
     pendingAgent,
     pendingWorkingDir,
     pendingGroupId,
+    pendingReasoningEffort,
+    globalReasoningEffort,
     resolveProjectForDir,
     prependSession,
     sessions,
@@ -2238,6 +2240,8 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       pendingAgent.set('')
       pendingGroupId.set('')
       pendingWorkingDir.set('')
+      const reasoningPick = get(pendingReasoningEffort)
+      pendingReasoningEffort.set('')
       const newSess = created.session ?? created
       prependSession(newSess)
       // The server filed it under the group; mirror that locally so the
@@ -2249,6 +2253,24 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           : g))
       }
       activeSessionId.set(newSess.id)
+      // Reasoning effort has no create-time field of its own (it's a global
+      // setting every session inherits — see the PATCH endpoint's own PR5
+      // note), so a landing-page pick can only take effect as a follow-up
+      // call once the session is real. Best-effort: the session already
+      // exists at this point, so a failure here shouldn't undo it — just
+      // leave the global default in place and tell the user.
+      if (reasoningPick) {
+        try {
+          await api.updateSessionReasoningEffort(newSess.id, reasoningPick)
+          chatReasoningEffort.update(r => ({ ...r, [newSess.id]: reasoningPick }))
+          globalReasoningEffort.set(reasoningPick)
+          if (reasoningPick === 'off') {
+            chatShowReasoning.update(r => ({ ...r, [newSess.id]: false }))
+          }
+        } catch (e: any) {
+          showToast(e.message ?? 'Failed to apply reasoning effort', 'error')
+        }
+      }
       return { id: newSess.id, created: true }
     } catch (e: any) {
       showToast(e.message, 'error')

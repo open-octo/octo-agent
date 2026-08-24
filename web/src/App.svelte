@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { view, sessions, sessionGroups, pinnedSessions, collapsedSessions, activeSessionId, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, nativeShell, mobileShell, panelContent, panelExpanded, cmdkOpen, settingsModalOpen, createNewSession, clearPendingSessionOpts, isDesktopShell } from './lib/stores'
+  import { view, sessions, sessionGroups, pinnedSessions, collapsedSessions, activeSessionId, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, globalReasoningEffort, nativeShell, mobileShell, panelContent, panelExpanded, cmdkOpen, settingsModalOpen, createNewSession, clearPendingSessionOpts, isDesktopShell } from './lib/stores'
   import MobileApp from './mobile/MobileApp.svelte'
   import { ws, wsState } from './lib/ws'
   import { notificationsEnabled } from './lib/notifications'
@@ -194,14 +194,17 @@
     ws.connect()
 
     // Restore the persisted UI language from server config so a refresh
-    // keeps the user's locale choice. Also seed globalPermissionMode from the
-    // default model entry, so the Composer's no-active-session fallback
-    // shows the real configured default instead of a hardcoded guess.
+    // keeps the user's locale choice. Also seed globalPermissionMode and
+    // globalReasoningEffort, so the Composer's no-active-session fallback
+    // shows the real configured defaults instead of a hardcoded guess.
     api.getConfig().then(cfg => {
       if (cfg.language) setLocale(cfg.language)
       // PR5: permission_mode is global (was per-default-entry before). The
       // Composer reads this to seed its no-active-session fallback.
       if (cfg.permission_mode) globalPermissionMode.set(cfg.permission_mode)
+      // reasoning_effort is likewise global; the server normalizes an unset
+      // value to the literal "off" in this response (see handleGetConfig).
+      if (cfg.reasoning_effort) globalReasoningEffort.set(cfg.reasoning_effort)
     }).catch(() => { /* non-critical */ })
 
     ws.on('session_update', (ev: any) => {

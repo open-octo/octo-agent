@@ -29,6 +29,7 @@ import {
   pendingGroupId,
   pendingWorkingDir,
   pendingModel,
+  pendingReasoningEffort,
 } from './stores'
 
 const group = (id: string, working_dir?: string): SessionGroup =>
@@ -43,6 +44,7 @@ beforeEach(() => {
   pendingGroupId.set('')
   pendingWorkingDir.set('')
   pendingModel.set('')
+  pendingReasoningEffort.set('')
 })
 
 describe('createNewSession', () => {
@@ -69,12 +71,14 @@ describe('createNewSession', () => {
     createNewSession('expert-7')
     pendingWorkingDir.set('/work/app')
     pendingModel.set('ep::gpt')
+    pendingReasoningEffort.set('high')
 
     createNewSession()
     expect(get(pendingAgent)).toBe('')
     expect(get(pendingWorkingDir)).toBe('')
     expect(get(pendingModel)).toBe('')
     expect(get(pendingGroupId)).toBe('')
+    expect(get(pendingReasoningEffort)).toBe('')
   })
 })
 
@@ -143,6 +147,7 @@ describe('clearPendingSessionOpts', () => {
     pendingWorkingDir.set('/work/app')
     pendingAgent.set('expert-7')
     pendingModel.set('ep::gpt')
+    pendingReasoningEffort.set('high')
 
     clearPendingSessionOpts()
 
@@ -150,5 +155,6 @@ describe('clearPendingSessionOpts', () => {
     expect(get(pendingWorkingDir)).toBe('')
     expect(get(pendingAgent)).toBe('')
     expect(get(pendingModel)).toBe('')
+    expect(get(pendingReasoningEffort)).toBe('')
   })
 })
