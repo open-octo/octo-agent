@@ -244,10 +244,11 @@
   let resizing = $state(false)
   let frozenPreviewW = $state(0)
 
-  function startResize(e: MouseEvent) {
+  function startResize(e: PointerEvent) {
     e.preventDefault()
     const row = panelEl?.parentElement
     if (!row) return
+    const handle = e.currentTarget as HTMLElement
     const startX = e.clientX
     const startW = panelEl!.getBoundingClientRect().width
     // Everything left of the panel (sidebar + center) must keep CENTER_MIN for
@@ -263,13 +264,15 @@
       raf = 0
       panelWidth = Math.max(PANEL_MIN, Math.min(maxW, startW + (startX - pointerX)))
     }
-    const move = (ev: MouseEvent) => {
+    const move = (ev: PointerEvent) => {
       pointerX = ev.clientX
       if (!raf) raf = requestAnimationFrame(apply)
     }
     const up = () => {
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
+      handle.removeEventListener('pointermove', move)
+      handle.removeEventListener('pointerup', up)
+      handle.removeEventListener('pointercancel', up)
+      handle.removeEventListener('lostpointercapture', up)
       // A move already queued for the next frame still counts: without this the
       // last few pixels of the drag would be dropped on release.
       if (raf) { cancelAnimationFrame(raf); apply() }
@@ -278,8 +281,19 @@
       resizing = false
       localStorage.setItem(PANEL_WIDTH_KEY, String(Math.round(panelWidth)))
     }
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
+    // Narrowing drags the handle toward the window's edge, where a fast flick
+    // can carry the cursor past the webview bounds. Plain window mousemove/up
+    // listeners never see the release when that happens — the browser has
+    // nowhere in this page to deliver it — so the drag reads as "stuck" until
+    // an unrelated later move is mistaken for more dragging. Pointer capture
+    // routes every subsequent event for this pointer to the handle regardless
+    // of where the cursor physically is, and lostpointercapture/pointercancel
+    // guarantee up() still runs if capture is yanked away (e.g. focus loss).
+    handle.setPointerCapture(e.pointerId)
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', up)
+    handle.addEventListener('pointercancel', up)
+    handle.addEventListener('lostpointercapture', up)
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
   }
@@ -343,7 +357,7 @@
   <!-- Expanded, there is no neighbour left to drag against, so the handle goes
        with it rather than sitting there inert against the sidebar. -->
   {#if !$panelExpanded}
-    <div class="resize-handle" role="separator" aria-orientation="vertical" onmousedown={startResize}></div>
+    <div class="resize-handle" role="separator" aria-orientation="vertical" onpointerdown={startResize}></div>
   {/if}
   {#if $panelContent === 'lightapps'}
     <!-- ── Light Apps mode ───────────────────────────────────────────────── -->
