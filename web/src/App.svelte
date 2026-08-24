@@ -460,6 +460,27 @@
       createNewSession()
     }
   }
+
+  // The center column's floor is CENTER_MIN, but only up to whatever room the
+  // sidebar actually leaves — a plain constant would force overflow on a
+  // screen narrower than sidebar-width + CENTER_MIN (a phone browser, or a
+  // desktop window between the 'full'-sidebar breakpoint and CENTER_MIN's own
+  // width). Sidebar's <aside> is `.content`'s first child regardless of its
+  // mode (full/rail/hidden), so measuring it live covers all three without
+  // duplicating their width constants here.
+  let contentEl = $state<HTMLElement | null>(null)
+  let mainMinWidth = $state(CENTER_MIN)
+  $effect(() => {
+    function recompute() {
+      const sideEl = contentEl?.firstElementChild as HTMLElement | null
+      const sideW = sideEl?.getBoundingClientRect().width ?? 0
+      const rowW = contentEl?.getBoundingClientRect().width ?? window.innerWidth
+      mainMinWidth = Math.max(0, Math.min(CENTER_MIN, rowW - sideW))
+    }
+    recompute()
+    window.addEventListener('resize', recompute)
+    return () => window.removeEventListener('resize', recompute)
+  })
 </script>
 
 <svelte:window onkeydown={onGlobalKeydown} />
@@ -474,12 +495,12 @@
 <MobileApp />
 {:else}
 <div class="app">
-  <div class="content">
+  <div class="content" bind:this={contentEl}>
     <Sidebar />
     <!-- Yield the width only while the panel is actually there to take it:
          an expanded flag left over from a closed panel would hide the main
          column with nothing rendered beside it, i.e. a blank page. -->
-    <main class="main" class:yielded={$panelExpanded && !!$panelContent} style="min-width:{CENTER_MIN}px">
+    <main class="main" class:yielded={$panelExpanded && !!$panelContent} style="min-width:{$panelContent ? 0 : mainMinWidth}px">
       <Header />
       {#if $view === 'chat'}
         <ChatView />
@@ -536,12 +557,19 @@
   display: flex;
   min-height: 0;
 }
-/* min-width comes from the inline style (CENTER_MIN) rather than a fixed
-   value here: the sidebar's and artifacts panel's own resize grips already
-   stop short of squeezing this column past it, but only while dragging —
-   without this, shrinking the OS window itself (or the panel's fixed pixel
-   width outliving a narrower window) had nothing stopping the column from
-   being crushed to nothing. */
+/* min-width comes from the inline style (mainMinWidth) rather than a fixed
+   value here, and only applies while the panel is closed: with the panel
+   open, its own resize clamp (ArtifactsPanel.svelte) already keeps this
+   column at CENTER_MIN whenever there's room, and — in the rare case there
+   isn't room for both minimums — shrinks itself to PANEL_MIN rather than
+   this column giving up its floor, which would just push the panel
+   off-screen instead. A hard floor here would fight that trade-off.
+   With the panel closed this is the only flexible column, so a floor
+   applies — but capped at whatever the sidebar actually leaves (see
+   mainMinWidth above), not a blind CENTER_MIN: on a screen narrower than
+   sidebar + CENTER_MIN (a phone browser, mainly), a plain constant would
+   force the same overflow this was meant to prevent, just from the other
+   side. */
 .main {
   flex: 1;
   display: flex;
