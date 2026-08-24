@@ -4,8 +4,8 @@
   import {
     running, activeSessionId, chatStreaming, sessions, sessionGroups,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
-    globalPermissionMode, nativeShell, localAccess, activeAgent, pendingModel, view, settingsModalOpen,
-    pendingAgent, pendingWorkingDir, pendingGroupId, normalizeDir, dirLeaf, projectsClaimingDir,
+    globalPermissionMode, globalReasoningEffort, nativeShell, localAccess, activeAgent, pendingModel, view, settingsModalOpen,
+    pendingAgent, pendingWorkingDir, pendingGroupId, pendingReasoningEffort, normalizeDir, dirLeaf, projectsClaimingDir,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
@@ -630,15 +630,19 @@
   // A pending pick belongs to the blank new-chat view only. Once a session is
   // active (auto-created — which consumed it — or picked/created any other
   // way), drop any leftover so it can't leak into a later blank view.
-  $effect(() => { if (sid) pendingModel.set('') })
+  $effect(() => { if (sid) { pendingModel.set(''); pendingReasoningEffort.set('') } })
   // "" (off) is a legitimate resolved value, not "no data yet" — only fall
-  // back to the bootstrap default when neither source has reported anything
-  // at all (?? only skips null/undefined, not ""). That default is 'off':
-  // an absent reasoning_effort in config means reasoning disabled, so
-  // claiming 'medium' before data arrives misreports the real state.
+  // back to a default (?? only skips null/undefined, not "") when neither
+  // source has reported anything at all. On the landing page (no sid) that
+  // default is whatever the user already picked there (pendingReasoningEffort,
+  // consumed by ChatView.ensureActiveSession at session creation — mirrors
+  // pendingModel), or else the configured global default; a loaded session
+  // always has real data by the time it's active, so the global default is
+  // the fallback there too.
   let reasoning = $derived.by(() => {
     const v = $chatReasoningEffort[sid] ?? currentSession?.reasoning_effort
-    return v === undefined ? 'off' : (v || 'off')
+    if (v !== undefined) return v || 'off'
+    return (sid ? '' : $pendingReasoningEffort) || $globalReasoningEffort || 'off'
   })
   // The project (a session group carrying a working dir) this session belongs
   // to, if any. A project's directory governs every session in it, so the dir
@@ -888,10 +892,19 @@
   }
 
   async function pickReasoning(level: string) {
-    if (!sid) return
+    // No active session yet (landing page): just park the pick, exactly like
+    // pickModel does with pendingModel. Nothing is sent to the server until
+    // ChatView.ensureActiveSession actually creates a session — this menu is
+    // freely reversible up to that point, so it must not write global state
+    // (or broadcast to every other session) on every click.
+    if (!sid) {
+      pendingReasoningEffort.set(level)
+      return
+    }
     try {
       await api.updateSessionReasoningEffort(sid, level)
       chatReasoningEffort.update(r => ({ ...r, [sid]: level }))
+      globalReasoningEffort.set(level)
       // Off has no trace to show — the server forces show_reasoning off too
       // (see handleUpdateSessionReasoningEffort); mirror it locally so the
       // toggle doesn't flash "on" until the session_update broadcast lands.

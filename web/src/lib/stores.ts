@@ -30,6 +30,13 @@ export const pendingWorkingDir = writable<string>('')
 // Set by the sidebar's per-group "+": the group the not-yet-created session
 // belongs to. An explicit group wins over pendingWorkingDir's inference.
 export const pendingGroupId = writable<string>('')
+// Reasoning effort picked on the landing page before any session exists.
+// '' means "no override" (the Composer falls back to globalReasoningEffort
+// for display). Consumed once by the same ensureActiveSession flow that
+// consumes pendingModel — picking it must not touch the global config until
+// a session is actually created, since every keystroke on the landing page
+// is reversible right up to that point.
+export const pendingReasoningEffort = writable<string>('')
 export const sidebar = writable('full')
 export const cmdkOpen = writable(false)
 // Drives the MCP import-JSON modal. Adding a single server and editing an
@@ -164,6 +171,10 @@ export const editGroupDraft = writable('')
 // fallback when no session is active (e.g. right after deleting one) —
 // 'ask' alone would ignore whatever the user actually configured.
 export const globalPermissionMode = writable<string>('ask')
+// The configured default reasoning effort (~/.octo/config.yml), seeded once
+// from GET /api/config on app start. Used as the Composer's landing-page
+// (no active session) fallback, mirroring globalPermissionMode above.
+export const globalReasoningEffort = writable<string>('off')
 // Sidebar session UI state
 export const selMode = writable(false)
 export const sel = writable<Record<string, boolean>>({})
@@ -320,6 +331,7 @@ export function clearPendingSessionOpts() {
   pendingGroupId.set('')
   pendingWorkingDir.set('')
   pendingModel.set('')
+  pendingReasoningEffort.set('')
 }
 
 // Plain "new session" entry point shared by the sidebar button and the
