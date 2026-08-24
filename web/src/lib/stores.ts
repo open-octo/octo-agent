@@ -154,6 +154,33 @@ export const lightappHTML = writable<Record<string, string>>({})
 // Sessions
 export const sessions = writable<Session[]>([])
 export const activeSessionId = writable<string | null>(null)
+
+// Last view/session on screen before the tab or window closed, so a cold
+// start (no hash naming a target) can put the user back where they left off
+// instead of guessing "whichever session was most recently touched" —
+// another tab or a background reply can update that ranking without the
+// user ever having looked at it. Session existence is re-checked against the
+// session list on boot (App.svelte) since the remembered id may since have
+// been deleted; when it's gone this is worth nothing and the landing page
+// opens instead.
+export interface LastRoute { view: string; sid: string | null }
+const LAST_ROUTE_KEY = 'octo.lastRoute'
+
+export function readLastRoute(): LastRoute | null {
+  try {
+    const raw = localStorage.getItem(LAST_ROUTE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (typeof parsed?.view !== 'string') return null
+    return { view: parsed.view, sid: typeof parsed.sid === 'string' ? parsed.sid : null }
+  } catch {
+    return null
+  }
+}
+
+export function writeLastRoute(view: string, sid: string | null): void {
+  try { localStorage.setItem(LAST_ROUTE_KEY, JSON.stringify({ view, sid })) } catch { /* private mode: this visit only */ }
+}
 // Web-UI sidebar groups. Membership lives here (server registry), not on the
 // session; the sidebar clusters the session list by these.
 export const sessionGroups = writable<SessionGroup[]>([])
