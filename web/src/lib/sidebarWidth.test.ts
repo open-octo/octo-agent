@@ -45,8 +45,8 @@ describe('parseSidebarWidth', () => {
 
 describe('readSidebarWidth', () => {
   it('reads a persisted width', () => {
-    stubStorage({ 'octo.sidebarWidth': '312' })
-    expect(readSidebarWidth()).toBe(312)
+    stubStorage({ 'octo.sidebarWidth': '340' })
+    expect(readSidebarWidth()).toBe(340)
   })
 
   it('defaults when nothing is stored', () => {
