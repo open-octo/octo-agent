@@ -318,10 +318,9 @@
   {/if}
   {#if $panelContent === 'lightapps'}
     <!-- ── Light Apps mode ───────────────────────────────────────────────── -->
-    <!-- Every mode's topbar takes the double-click-to-zoom the other two columns
-         have. Unlike theirs it is not a window drag region — the controls packed
-         into it leave too little blank width to grab — but it is still the top
-         edge of the window, and that is where the gesture is expected. -->
+    <!-- Every mode's topbar is the window's top edge like the other two columns'
+         rows, so it drags the window (see .topbar's --wails-draggable) and takes
+         the double-click that zooms it. -->
     <div class="topbar" class:native-lift={liftForTrafficLights} ondblclick={titlebarDblClick}>
       <div class="la-chips">
         <span class="footer-lbl">{$t('artifacts.light_apps')}</span>
@@ -499,7 +498,15 @@
 .topbar {
   flex: 0 0 auto; min-height: 44px; padding: 0 8px 0 10px;
   display: flex; align-items: center; gap: 8px;
+  --wails-draggable: drag;
 }
+/* Every control in here opts back out, leaving the labels and the flex spacer
+   to drag the window. Matched by element rather than by class the way Header
+   and Sidebar do it: the controls are spread across four mode branches and two
+   snippets, and a class this rule missed would become a button that drags the
+   window instead of clicking. That includes the mode menu's full-bleed
+   backdrop, which is a button too. */
+.topbar button { --wails-draggable: no-drag; }
 /* The same axis lift Header and Sidebar apply on mac — see Header.native-lift
    for why the height has to be pinned for the padding to move anything. */
 .topbar.native-lift { box-sizing: border-box; max-height: 44px; padding-bottom: 8px; }
