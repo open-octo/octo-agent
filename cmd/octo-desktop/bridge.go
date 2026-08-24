@@ -133,6 +133,19 @@ const (
 	defaultWindowHeight = 860
 )
 
+// Floor on the native window itself. Below this the CSS-level minimums inside
+// the webview (sidebarWidth.ts's CENTER_MIN, PANEL_MIN) can't do their job —
+// they only stop the resizable columns from squeezing the conversation
+// column, not the OS window from shrinking out from under all of them. 704 =
+// the rail-mode sidebar (64px, the width the sidebar collapses to below the
+// 860px breakpoint) plus CENTER_MIN (640px, see sidebarWidth.ts) with the
+// artifacts panel closed — the narrowest state the layout is ever meant to
+// reach.
+const (
+	minWindowWidth  = 704
+	minWindowHeight = 480
+)
+
 // desktopShellQuery marks the window's URL so the frontend can tell it is
 // running inside the desktop-shell webview rather than an external browser
 // pointed at the same hub. The hub reports native=true to every client (the
@@ -515,6 +528,8 @@ func (b *nativeBridge) showWindowAt(hash string) {
 			Title:      "Octo",
 			Width:      width,
 			Height:     height,
+			MinWidth:   minWindowWidth,
+			MinHeight:  minWindowHeight,
 			StartState: startState,
 			URL:        target,
 			// Mac keeps its native title bar (hidden, inset traffic lights)
