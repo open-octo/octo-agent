@@ -2,7 +2,13 @@
 // Sidebar.svelte so the parsing rules can be tested directly (same reason
 // sidebarSections.ts sits here).
 
-export const SIDEBAR_MIN = 200
+// Matches the artifacts panel's own PANEL_MIN (ArtifactsPanel.svelte) — the
+// two resizable columns share one minimum so neither reads as more
+// squeezable than the other. 200 used to clip the top-bar search button in
+// the desktop shell, where .side-header's fixed-width children (toolbar
+// buttons, logo, brand name, traffic-light padding) already add up to more
+// than 200px before the flexible spacer even collapses.
+export const SIDEBAR_MIN = 320
 export const SIDEBAR_MAX = 480
 export const SIDEBAR_DEFAULT = 256
 
