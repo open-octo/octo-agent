@@ -1,5 +1,6 @@
 <script lang="ts">
   import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightapps, lightappHTML, showToast, nativeShell, activeSessionId, savePanelMode, type PanelMode } from '../lib/stores'
+  import { titlebarDblClick } from '../lib/nativeWindow'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
   import { hydrateArtifact, lightAppSource, pathIsInside } from '../lib/artifacts'
@@ -346,7 +347,10 @@
   {/if}
   {#if $panelContent === 'lightapps'}
     <!-- ── Light Apps mode ───────────────────────────────────────────────── -->
-    <div class="topbar" class:native-lift={liftForTrafficLights}>
+    <!-- Every mode's topbar is the window's top edge like the other two columns'
+         rows, so it drags the window (see .topbar's --wails-draggable) and takes
+         the double-click that zooms it. -->
+    <div class="topbar" class:native-lift={liftForTrafficLights} ondblclick={titlebarDblClick}>
       <div class="la-chips">
         <span class="footer-lbl">{$t('artifacts.light_apps')}</span>
         {#each $lightapps as a}
@@ -376,7 +380,7 @@
 
   {:else if $panelContent === 'diff'}
     <!-- ── Git Diff mode ──────────────────────────────────────────────────── -->
-    <div class="topbar" class:native-lift={liftForTrafficLights}>
+    <div class="topbar" class:native-lift={liftForTrafficLights} ondblclick={titlebarDblClick}>
       {@render modeSwitcher()}
       <span class="file-id">
         {#if diffSoleRepo}
@@ -408,7 +412,7 @@
   {:else if $panelContent === 'session'}
     <!-- ── Session mode (existing behavior) ────────────────────────────────── -->
     {#if !cur}
-      <div class="topbar" class:native-lift={liftForTrafficLights}>
+      <div class="topbar" class:native-lift={liftForTrafficLights} ondblclick={titlebarDblClick}>
         {@render modeSwitcher()}
         <span style="flex:1"></span>
         {@render topbarControls()}
@@ -418,7 +422,7 @@
         <span>{$t('artifacts.empty')}</span>
       </div>
     {:else}
-      <div class="topbar" class:native-lift={liftForTrafficLights}>
+      <div class="topbar" class:native-lift={liftForTrafficLights} ondblclick={titlebarDblClick}>
         {@render modeSwitcher()}
         <span class="file-id">
           <span class="file-name mono">{cur.name}</span>
@@ -527,7 +531,15 @@
 .topbar {
   flex: 0 0 auto; min-height: 44px; padding: 0 8px 0 10px;
   display: flex; align-items: center; gap: 8px;
+  --wails-draggable: drag;
 }
+/* Every control in here opts back out, leaving the labels and the flex spacer
+   to drag the window. Matched by element rather than by class the way Header
+   and Sidebar do it: the controls are spread across four mode branches and two
+   snippets, and a class this rule missed would become a button that drags the
+   window instead of clicking. That includes the mode menu's full-bleed
+   backdrop, which is a button too. */
+.topbar button { --wails-draggable: no-drag; }
 /* The same axis lift Header and Sidebar apply on mac — see Header.native-lift
    for why the height has to be pinned for the padding to move anything. */
 .topbar.native-lift { box-sizing: border-box; max-height: 44px; padding-bottom: 8px; }

@@ -3,6 +3,7 @@
   import { get } from 'svelte/store'
   import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen, cmdkOpen, nativeShell, dirLeaf } from '../../lib/stores'
   import * as api from '../../lib/api'
+  import { titlebarDblClick } from '../../lib/nativeWindow'
   import { t, tr } from '../../lib/i18n'
   import { confirmDialog } from '../../lib/confirm'
   import { splitSections, swapWithinSection, parseSectionFold, type SectionFold } from '../../lib/sidebarSections'
@@ -602,7 +603,9 @@
        it stays flush with the divider rather than straddling it. -->
   <div class="resize-grip" role="separator" aria-orientation="vertical" onmousedown={startResize}></div>
   <div class="full" style="width:{fullWidth}px">
-    <div class="side-header" class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag">
+    <!-- Draggable like the main column's top row, and so it takes the same
+         double-click-to-zoom a native title bar would give it. -->
+    <div class="side-header" class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag" ondblclick={titlebarDblClick}>
       <button class="icon-btn" title={$t('header.toggle_left')} aria-pressed={true} onclick={() => sidebar.set('hidden')}>
         <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
       </button>
