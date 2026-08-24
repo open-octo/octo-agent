@@ -1121,7 +1121,7 @@
    padding has to shorten the content box, not grow the row. */
 .side-header.native-inset {
   box-sizing: border-box; max-height: 44px;
-  padding-left: 82px; padding-bottom: 8px;
+  padding-left: 82px; padding-bottom: 4px;
 }
 .side-header .icon-btn { --wails-draggable: no-drag; }
 .side-header :global(.logo) { color: var(--blue-6); flex: 0 0 auto; }

@@ -125,9 +125,11 @@ header.native-inset { padding-left: 82px; }
    it. Padding-bottom alone only moves the axis while min-height still decides the
    row height; .chat-header-slot is taller than the 36px that would leave, so the
    row grew to 52px instead and the axis never moved. Pinning the height makes the
-   padding actually shorten the content box. */
+   padding actually shorten the content box.
+   The lights' centre sits 20px below the window's top edge, so 4px of padding is
+   the whole lift: (44 - 4) / 2 lands the row's axis exactly there. */
 header.native-lift {
-  box-sizing: border-box; max-height: 44px; padding-bottom: 8px;
+  box-sizing: border-box; max-height: 44px; padding-bottom: 4px;
 }
 /* The row is a window drag handle; every control opts back out so it stays
    clickable, leaving the blank stretches to drag the window. */

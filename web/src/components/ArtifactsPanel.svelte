@@ -542,7 +542,7 @@
 .topbar button { --wails-draggable: no-drag; }
 /* The same axis lift Header and Sidebar apply on mac — see Header.native-lift
    for why the height has to be pinned for the padding to move anything. */
-.topbar.native-lift { box-sizing: border-box; max-height: 44px; padding-bottom: 8px; }
+.topbar.native-lift { box-sizing: border-box; max-height: 44px; padding-bottom: 4px; }
 .file-name { min-width: 0; font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-meta { font-size: 11px; color: var(--text-tertiary); flex: 0 0 auto; }
 /* A name and the badge beside it are one identity, so they shrink and vanish as
