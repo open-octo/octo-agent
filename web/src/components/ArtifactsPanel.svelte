@@ -225,6 +225,33 @@
     return Number.isFinite(v) && v >= PANEL_MIN ? v : 420
   }
 
+  // The sidebar's width isn't queried directly — main (this panel's previous
+  // sibling) sits between it and the panel. rowW - currentPanelW - main's
+  // rendered width isolates it instead: main's width already reflects
+  // "whatever's left after the sidebar and the panel", so subtracting both
+  // out algebraically cancels back to just the sidebar, independent of
+  // currentPanelW's actual value (the term appears on both sides). Reading
+  // previousElementSibling's width directly as "the sidebar" — an earlier
+  // version of this function did — is wrong: that element IS main, so it
+  // silently measured main's width as the sidebar's, inflating the room the
+  // math thought main already had and starving the ceiling it computed for
+  // the panel.
+  function maxPanelWidth(rowW: number, currentPanelW: number): number {
+    const main = panelEl?.previousElementSibling as HTMLElement | null
+    const mainW = main?.getBoundingClientRect().width ?? 0
+    const sideW = rowW - currentPanelW - mainW
+    const centerProtectingCeiling = rowW - sideW - CENTER_MIN
+    // Below PANEL_MIN, protecting CENTER_MIN is impossible regardless of the
+    // panel's width — the window itself is too narrow, not something this
+    // drag can fix. Falling through to Math.max(PANEL_MIN, ...) would floor
+    // the ceiling at PANEL_MIN, freezing the handle at that single point
+    // instead of just giving up on the trade-off (main already degrades
+    // gracefully below CENTER_MIN when there's no room to spare — see
+    // App.svelte's mainMinWidth).
+    if (centerProtectingCeiling < PANEL_MIN) return Math.max(PANEL_MIN, rowW - sideW)
+    return centerProtectingCeiling
+  }
+
   // The same bound startResize enforces mid-drag, applied on mount and on
   // every window resize too — otherwise a saved width from a wider window (or
   // one that fit before the OS window itself got dragged smaller) can outgrow
@@ -234,11 +261,9 @@
   $effect(() => {
     function clamp() {
       const row = panelEl?.parentElement
-      const side = panelEl?.previousElementSibling as HTMLElement | null
-      if (!row || !side) return
+      if (!row || !panelEl) return
       const rowW = row.getBoundingClientRect().width
-      const sideW = side.getBoundingClientRect().width
-      const maxW = Math.max(PANEL_MIN, rowW - sideW - CENTER_MIN)
+      const maxW = maxPanelWidth(rowW, panelWidth)
       if (panelWidth > maxW) panelWidth = maxW
     }
     clamp()
@@ -267,11 +292,8 @@
     const handle = e.currentTarget as HTMLElement
     const startX = e.clientX
     const startW = panelEl!.getBoundingClientRect().width
-    // Everything left of the panel (sidebar + center) must keep CENTER_MIN for
-    // the center column; the sidebar's share is whatever it currently occupies.
     const rowW = row.getBoundingClientRect().width
-    const sideW = rowW - startW - (panelEl!.previousElementSibling as HTMLElement)?.getBoundingClientRect().width
-    const maxW = Math.max(PANEL_MIN, rowW - sideW - CENTER_MIN)
+    const maxW = maxPanelWidth(rowW, startW)
     let raf = 0
     let pointerX = startX
     const apply = () => {
