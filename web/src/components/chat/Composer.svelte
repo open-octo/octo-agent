@@ -1693,6 +1693,7 @@ textarea {
 }
 .menu-item.manage { flex-direction: row; align-items: center; gap: 6px; }
 .menu-item.manage .mi-name { color: var(--blue-6); }
+.perm-menu { left: auto; right: 0; min-width: 140px; }
 .perm-menu .menu-item { flex-direction: row; align-items: center; gap: 8px; }
 .perm-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: var(--text-quaternary); }
 .perm-dot[data-mode="auto"] { background: var(--success); }
