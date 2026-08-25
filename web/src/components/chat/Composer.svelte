@@ -5,7 +5,8 @@
     running, activeSessionId, chatStreaming, sessions, sessionGroups,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
     globalPermissionMode, globalReasoningEffort, nativeShell, localAccess, activeAgent, pendingModel, view, settingsModalOpen,
-    pendingAgent, pendingWorkingDir, pendingGroupId, pendingReasoningEffort, normalizeDir, dirLeaf, projectsClaimingDir,
+    pendingAgent, pendingWorkingDir, pendingGroupId, pendingReasoningEffort, pendingPermissionMode, pendingShowReasoning,
+    normalizeDir, dirLeaf, projectsClaimingDir,
   } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
@@ -699,9 +700,14 @@
   // could name. A project with no mounts keeps the workspace, which is then
   // genuinely the only place its work happens.
   let attachStartDir = $derived(attachShortcuts.length > 0 ? '' : workingDir)
-  let permMode = $derived($chatPermMode[sid] || currentSession?.permission_mode || $globalPermissionMode)
-  // Effective show-reasoning for this session: live store > session record > default true.
-  let showReasoning = $derived($chatShowReasoning[sid] ?? currentSession?.show_reasoning ?? true)
+  // On the landing page (no sid) the fallback is whatever was picked there
+  // (pendingPermissionMode, consumed by ChatView.ensureActiveSession at
+  // session creation — mirrors pendingReasoningEffort), else the configured
+  // global default.
+  let permMode = $derived($chatPermMode[sid] || currentSession?.permission_mode || (sid ? '' : $pendingPermissionMode) || $globalPermissionMode)
+  // Effective show-reasoning for this session: live store > session record >
+  // (landing page only) pendingShowReasoning > default true.
+  let showReasoning = $derived($chatShowReasoning[sid] ?? currentSession?.show_reasoning ?? (sid ? true : ($pendingShowReasoning ?? true)))
   let ctxUsage = $derived(Number($chatContextUsage[sid] ?? currentSession?.context_usage ?? 0))
   // Session goal chip: usage while active, status label otherwise. null/absent
   // hides the chip entirely.
@@ -892,6 +898,7 @@
   }
 
   async function pickReasoning(level: string) {
+    reasonMenu = false
     // No active session yet (landing page): just park the pick, exactly like
     // pickModel does with pendingModel. Nothing is sent to the server until
     // ChatView.ensureActiveSession actually creates a session — this menu is
@@ -917,8 +924,14 @@
   }
 
   async function toggleShowReasoning() {
-    if (!sid || reasoning === 'off') return
+    if (reasoning === 'off') return
     const next = !showReasoning
+    if (!sid) {
+      // Landing page: park the flip, exactly like pickReasoning does with
+      // pendingReasoningEffort — nothing to PATCH until a session exists.
+      pendingShowReasoning.set(next)
+      return
+    }
     try {
       await api.updateSessionShowReasoning(sid, next)
       chatShowReasoning.update(r => ({ ...r, [sid]: next }))
@@ -936,7 +949,14 @@
   }
   async function pickPermMode(next: string) {
     permMenu = false
-    if (!sid || next === permMode) return
+    if (next === permMode) return
+    if (!sid) {
+      // Landing page: park the pick, exactly like pickReasoning does with
+      // pendingReasoningEffort — consumed once ChatView.ensureActiveSession
+      // actually creates a session.
+      pendingPermissionMode.set(next)
+      return
+    }
     try {
       await api.updateSessionPermissionMode(sid, next)
       chatPermMode.update(m => ({ ...m, [sid]: next }))

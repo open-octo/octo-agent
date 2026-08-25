@@ -37,6 +37,18 @@ export const pendingGroupId = writable<string>('')
 // a session is actually created, since every keystroke on the landing page
 // is reversible right up to that point.
 export const pendingReasoningEffort = writable<string>('')
+// Permission mode picked on the landing page before any session exists. ''
+// means "no override" (the Composer falls back to globalPermissionMode for
+// display). Consumed once by the same ensureActiveSession flow that consumes
+// pendingModel — without this, picking a mode on the blank new-chat view was
+// a silent no-op, same failure shape as pendingModel's #2066.
+export const pendingPermissionMode = writable<string>('')
+// Show-reasoning toggle flipped on the landing page before any session
+// exists. null means "no override" (falls back to true, same as the
+// Composer's post-session default). Same failure shape as the two stores
+// above: without this, toggleShowReasoning's `!sid` guard made the switch a
+// silent no-op until a session existed.
+export const pendingShowReasoning = writable<boolean | null>(null)
 export const sidebar = writable('full')
 export const cmdkOpen = writable(false)
 // Drives the MCP import-JSON modal. Adding a single server and editing an
@@ -359,6 +371,8 @@ export function clearPendingSessionOpts() {
   pendingWorkingDir.set('')
   pendingModel.set('')
   pendingReasoningEffort.set('')
+  pendingPermissionMode.set('')
+  pendingShowReasoning.set(null)
 }
 
 // Plain "new session" entry point shared by the sidebar button and the
