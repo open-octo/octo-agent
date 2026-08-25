@@ -10,6 +10,8 @@
     pendingWorkingDir,
     pendingGroupId,
     pendingReasoningEffort,
+    pendingPermissionMode,
+    pendingShowReasoning,
     globalReasoningEffort,
     resolveProjectForDir,
     prependSession,
@@ -2242,6 +2244,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       pendingWorkingDir.set('')
       const reasoningPick = get(pendingReasoningEffort)
       pendingReasoningEffort.set('')
+      const permPick = get(pendingPermissionMode)
+      pendingPermissionMode.set('')
+      const showReasoningPick = get(pendingShowReasoning)
+      pendingShowReasoning.set(null)
       const newSess = created.session ?? created
       prependSession(newSess)
       // The server filed it under the group; mirror that locally so the
@@ -2269,6 +2275,28 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           }
         } catch (e: any) {
           showToast(e.message ?? 'Failed to apply reasoning effort', 'error')
+        }
+      }
+      // Same story as reasoning effort above: permission mode and the
+      // show-reasoning toggle have no create-time field either, so a
+      // landing-page pick only takes effect as a follow-up PATCH once the
+      // session is real.
+      if (permPick) {
+        try {
+          await api.updateSessionPermissionMode(newSess.id, permPick)
+          chatPermMode.update(m => ({ ...m, [newSess.id]: permPick }))
+        } catch (e: any) {
+          showToast(e.message ?? 'Failed to apply permission mode', 'error')
+        }
+      }
+      // Reasoning effort 'off' already forced show_reasoning off locally
+      // above; skip so a stale pending toggle doesn't fight that.
+      if (showReasoningPick !== null && reasoningPick !== 'off') {
+        try {
+          await api.updateSessionShowReasoning(newSess.id, showReasoningPick)
+          chatShowReasoning.update(r => ({ ...r, [newSess.id]: showReasoningPick }))
+        } catch (e: any) {
+          showToast(e.message ?? 'Failed to apply reasoning visibility', 'error')
         }
       }
       return { id: newSess.id, created: true }
