@@ -102,6 +102,120 @@ func TestAddRejectsInvalidCron(t *testing.T) {
 	}
 }
 
+func TestAddRejectsSubHourlyCron(t *testing.T) {
+	for _, expr := range []string{"0 */5 * * * *", "0,30 * * * * *", "@every 10m"} {
+		s, _ := newTestScheduler(t)
+		err := s.Add(&Task{ID: "t1", Name: "n", Cron: expr, Prompt: "p", Enabled: true})
+		if err == nil || !strings.Contains(err.Error(), "minimum allowed interval") {
+			t.Fatalf("Add(%q): got %v, want minimum-interval error", expr, err)
+		}
+		if got := len(s.tasks); got != 0 {
+			t.Fatalf("Add(%q): tasks stored = %d, want 0", expr, got)
+		}
+	}
+}
+
+func TestAddAcceptsExactlyOneHourInterval(t *testing.T) {
+	s, _ := newTestScheduler(t)
+	if err := s.Add(&Task{ID: "t1", Name: "n", Cron: "0 0 * * * *", Prompt: "p", Enabled: true}); err != nil {
+		t.Fatalf("Add with hourly cron: %v", err)
+	}
+	if got := s.entryCount(); got != 1 {
+		t.Fatalf("tracked entries = %d, want 1", got)
+	}
+}
+
+func TestUpdateRejectsNewSubHourlyCron(t *testing.T) {
+	s, _ := newTestScheduler(t)
+	task := Task{ID: "t1", Name: "n", Cron: "0 0 9 * * *", Prompt: "p", Enabled: true}
+	if err := s.Add(&task); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	task.Cron = "0 */5 * * * *"
+	if err := s.Update(task); err == nil || !strings.Contains(err.Error(), "minimum allowed interval") {
+		t.Fatalf("Update with sub-hourly cron: got %v, want minimum-interval error", err)
+	}
+	// The original schedule must survive a rejected update.
+	got, _ := s.Get("t1")
+	if got.Cron != "0 0 9 * * *" {
+		t.Fatalf("stored cron = %q, want original expression", got.Cron)
+	}
+}
+
+// TestUpdateAllowsEditingLegacySubHourlyTask covers a task whose cron predates
+// minCronInterval — the only way to get one into the store, since Add now
+// rejects it, is loading it straight off disk (see loadAll). Update must
+// still accept edits that leave Cron untouched (e.g. disabling it), or such a
+// task becomes stuck: un-runnable by the new floor and un-patchable to fix.
+func TestUpdateAllowsEditingLegacySubHourlyTask(t *testing.T) {
+	dir := t.TempDir()
+	legacy := Task{ID: "t1", Name: "n", Cron: "0 */5 * * * *", Prompt: "p", Enabled: true}
+	b, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "t1.json"), b, 0600); err != nil {
+		t.Fatalf("write legacy task file: %v", err)
+	}
+
+	r := &recordRunner{}
+	s, err := New(dir, r)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	got, err := s.Get("t1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Cron != legacy.Cron {
+		t.Fatalf("loaded cron = %q, want %q", got.Cron, legacy.Cron)
+	}
+
+	got.Enabled = false
+	if err := s.Update(*got); err != nil {
+		t.Fatalf("Update (disable, cron unchanged): %v", err)
+	}
+	disabled, err := s.Get("t1")
+	if err != nil {
+		t.Fatalf("Get after disable: %v", err)
+	}
+	if disabled.Enabled {
+		t.Fatal("task still enabled after Update")
+	}
+}
+
+// TestLoadAllSkipsSubHourlyLegacyTask: a task file written directly to disk
+// (bypassing Add's validation, e.g. hand-written while octo serve wasn't
+// running) with a sub-hourly cron loads without error but never gets a live
+// cron entry — mirroring how a syntactically invalid cron is already handled
+// at load time.
+func TestLoadAllSkipsSubHourlyLegacyTask(t *testing.T) {
+	dir := t.TempDir()
+	legacy := Task{ID: "t1", Name: "n", Cron: "0 */5 * * * *", Prompt: "p", Enabled: true}
+	b, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "t1.json"), b, 0600); err != nil {
+		t.Fatalf("write legacy task file: %v", err)
+	}
+
+	r := &recordRunner{}
+	s, err := New(dir, r)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got := len(s.List()); got != 1 {
+		t.Fatalf("loaded tasks = %d, want 1", got)
+	}
+	if got := len(s.cron.Entries()); got != 0 {
+		t.Fatalf("cron entries = %d, want 0 (sub-hourly legacy task must stay unscheduled)", got)
+	}
+	if got := s.NextRun("t1"); !got.IsZero() {
+		t.Fatalf("NextRun = %v, want zero time for an unscheduled task", got)
+	}
+}
+
 func TestNextRun(t *testing.T) {
 	s, _ := newTestScheduler(t)
 	// cron.Entry.Next is computed by the running scheduler loop, not at

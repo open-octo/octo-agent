@@ -47,12 +47,18 @@ seconds minutes hours day-of-month month day-of-week
 | Want | Expression |
 |------|------------|
 | Every day at 09:00 | `0 0 9 * * *` |
-| Every 30 minutes | `0 */30 * * * *` |
+| Every hour | `0 0 * * * *` |
 | Weekdays at 18:30 | `0 30 18 * * 1-5` |
 | 1st of each month at 08:00 | `0 0 8 1 * *` |
 
 Descriptors also work: `@hourly`, `@daily`, `@weekly`, `@every 90m`. Times are
 in the server's local timezone.
+
+**Minimum interval is 1 hour.** The scheduler rejects any expression whose
+consecutive fires are closer together than that (e.g. `0 */30 * * * *` or
+`@every 10m`) — the seconds/minutes fields exist for picking a precise time of
+day, not for sub-hourly polling. If the user wants faster iteration, use
+`/loop` in a live session instead of a cron task.
 
 ## Workflow
 
@@ -127,9 +133,11 @@ Write `~/.octo/tasks/<id>.json` with `write_file` (`id` format
 ```
 
 The file is picked up the next time `octo serve` starts. A hand-written file
-with a bad cron expression fails silently at load (logged to stderr only) —
-double-check the 6-field format. **File edits to an already-running server are
-ignored until restart** — when the server is up, always go through the API.
+with a bad cron expression — invalid syntax, or faster than the 1-hour floor —
+fails silently at load (logged to stderr only, task stays listed but never
+fires): double-check the 6-field format and the interval. **File edits to an
+already-running server are ignored until restart** — when the server is up,
+always go through the API.
 
 ## Caveats — mention when relevant
 

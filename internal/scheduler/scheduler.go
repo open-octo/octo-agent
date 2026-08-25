@@ -92,6 +92,29 @@ var exprParser = cron.NewParser(
 	cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
 )
 
+// minCronInterval is the shortest gap allowed between two consecutive fires.
+// The seconds field lets an expression fire sub-minute, which turns a single
+// scheduled task into a runaway loop of agent sessions — so Add/Update reject
+// anything finer than this floor up front.
+const minCronInterval = time.Hour
+
+// enforceMinInterval rejects an expression whose next two fires are closer
+// together than minCronInterval. Sampled from "now" rather than derived from
+// the expression's fields, so it needs no special-casing for @every or the
+// other descriptors on top of fixed-field expressions — the realistic abuse
+// case (a uniform */N seconds-or-minutes field, or @every) is always caught.
+// It only samples one gap, so a deliberately clustered expression (e.g. two
+// seconds-field values a second apart, once a day) could in theory dodge it;
+// that shape has no legitimate use case and isn't worth guarding against.
+func enforceMinInterval(expr string, sched cron.Schedule) error {
+	t1 := sched.Next(time.Now())
+	t2 := sched.Next(t1)
+	if gap := t2.Sub(t1); gap < minCronInterval {
+		return fmt.Errorf("cron expression %q fires every %s, minimum allowed interval is %s", expr, gap, minCronInterval)
+	}
+	return nil
+}
+
 // Scheduler manages cron-based task execution.
 type Scheduler struct {
 	dir    string
@@ -140,8 +163,12 @@ func (s *Scheduler) Stop() {
 // written back into task so the caller can report them (e.g. in the create
 // API response).
 func (s *Scheduler) Add(task *Task) error {
-	if _, err := exprParser.Parse(task.Cron); err != nil {
+	sched, err := exprParser.Parse(task.Cron)
+	if err != nil {
 		return fmt.Errorf("invalid cron expression %q: %w", task.Cron, err)
+	}
+	if err := enforceMinInterval(task.Cron, sched); err != nil {
+		return err
 	}
 	if task.ID == "" {
 		task.ID = fmt.Sprintf("task_%d", time.Now().UnixMilli())
@@ -165,9 +192,25 @@ func (s *Scheduler) Add(task *Task) error {
 // Update modifies an existing task and reschedules its live cron entry so the
 // change (new expression, enable/disable) takes effect immediately, not at the
 // next process restart.
+//
+// The cron expression is only re-validated when it's actually changing. A
+// task whose Cron predates minCronInterval (e.g. loaded from a hand-written
+// file — see loadAll) must otherwise stay editable, since re-validating an
+// unchanged expression on every unrelated field edit (rename, disable, ...)
+// would make such a task un-patchable except by deleting and recreating it.
 func (s *Scheduler) Update(task Task) error {
-	if _, err := exprParser.Parse(task.Cron); err != nil {
-		return fmt.Errorf("invalid cron expression %q: %w", task.Cron, err)
+	prev, err := s.Get(task.ID)
+	if err != nil {
+		return err
+	}
+	if task.Cron != prev.Cron {
+		sched, err := exprParser.Parse(task.Cron)
+		if err != nil {
+			return fmt.Errorf("invalid cron expression %q: %w", task.Cron, err)
+		}
+		if err := enforceMinInterval(task.Cron, sched); err != nil {
+			return err
+		}
 	}
 	s.mu.Lock()
 	existing, ok := s.tasks[task.ID]
@@ -283,12 +326,20 @@ func (s *Scheduler) SetSessionGroup(id, groupID string) error {
 // ─── Private methods ─────────────────────────────────────────────────────
 
 // schedule registers a cron entry for the task and records its EntryID so a
-// later Update/Delete can remove it. The expression is pre-validated by the
-// callers, so a parse failure here is a programming error worth logging.
+// later Update/Delete can remove it. Add/Update pre-validate the expression
+// (syntax and minCronInterval), so a rejection here only happens for a task
+// loaded straight off disk by loadAll — e.g. hand-written while octo serve
+// wasn't running — and is handled the same way as a syntax error: logged and
+// left unscheduled rather than failing the whole load.
 func (s *Scheduler) schedule(id, expr string) {
 	eid, err := s.cron.AddFunc(expr, s.wrap(id))
 	if err != nil {
 		log.Printf("[scheduler] cron add %q: %v", id, err)
+		return
+	}
+	if err := enforceMinInterval(expr, s.cron.Entry(eid).Schedule); err != nil {
+		log.Printf("[scheduler] task %q not scheduled: %v", id, err)
+		s.cron.Remove(eid)
 		return
 	}
 	s.mu.Lock()

@@ -332,7 +332,7 @@ func TestTaskToResponse_NextRunIsTheSchedulerInstant(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 	srv.initScheduler()
 
-	task := scheduler.Task{Name: "next-run", Cron: "0 */5 * * * *", Prompt: "p", Enabled: true}
+	task := scheduler.Task{Name: "next-run", Cron: "0 0 * * * *", Prompt: "p", Enabled: true}
 	if err := srv.scheduler.Add(&task); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
