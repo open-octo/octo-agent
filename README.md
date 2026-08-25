@@ -49,7 +49,7 @@ If you already have reliable access to a Codex or Claude subscription, keep usin
 - **No cache degradation**: prompt caching is tuned per provider; measured hit rates for Kimi, DeepSeek, and Qwen are all **95%+**, keeping your token bill predictable.
 - **Eight interfaces**: CLI / TUI, Web UI, desktop app, IM bridge, VS Code, Obsidian, Go SDK, and mobile — few other agent projects cover this many entry points at once.
 - **Zero telemetry**: no IP, device model, model choice, or usage behavior is collected — no telemetry hooks at all.
-- **Desktop installer around 100 MB**: compare that to Codex desktop and WorkBuddy, which often weigh in around **1 GB**. A thin agent harness shouldn't need that much space.
+- **Desktop installer around 100 MB**: the Codex desktop DMG is about **650 MB**. A thin agent harness shouldn't need that much space.
 - **Stable and safe**: self-protection, graceful restarts, and a recycle-bin safety net (see [Core Features](#core-features)).
 
 Any one of these points might be covered by some other product. But only octo combines out-of-the-box usability, native multi-model support, eight interfaces, a single binary, zero telemetry, a small footprint, high stability, and strong safety.
