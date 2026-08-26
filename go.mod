@@ -12,7 +12,7 @@ require (
 	github.com/flynn/noise v1.1.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/mattn/go-isatty v0.0.24
-	github.com/mattn/go-runewidth v0.0.27
+	github.com/mattn/go-runewidth v0.0.28
 	github.com/muesli/reflow v0.3.0
 	github.com/muesli/termenv v0.16.0
 	github.com/rivo/uniseg v0.4.7
