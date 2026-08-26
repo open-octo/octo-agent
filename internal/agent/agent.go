@@ -1086,6 +1086,17 @@ func (a *Agent) runLoop(
 		// error tool_results prevents Anthropic HTTP 400 errors.
 		a.ensureToolPairing()
 
+		// Pre-send checkpoint. Everything appended since the last provider call
+		// converges here — the previous batch's tool results, a steer message
+		// injected above, a background-completion notice — so this is where
+		// mid-turn growth becomes visible. The steer path in particular reaches
+		// this line without passing through a tool batch, so a check hung off
+		// the batch alone never saw it. Skipped on the first round: the
+		// between-turns check ran moments ago, just above the loop.
+		if i > 0 && a.shouldCompactMidTurn() {
+			_ = a.maybeCompact(ctx, handler)
+		}
+
 		// Images a text-only model can't read become text before they go on
 		// the wire. No-op when no describer is wired or the model has vision.
 		msgs := a.History.Snapshot()
@@ -1239,6 +1250,15 @@ func (a *Agent) runLoop(
 		}
 
 		if reply.StopReason == "tool_use" {
+			// Pre-dispatch checkpoint. accrueUsage above just learned what the
+			// prompt really cost, and this batch may run for many minutes —
+			// leaving the next checkpoint (the pre-send one, a full batch away)
+			// to park the context over the threshold for that whole stretch.
+			// History still ends on a tool_result or a plain user turn here, the
+			// same safe boundary.
+			if a.shouldCompactMidTurn() {
+				_ = a.maybeCompact(ctx, handler)
+			}
 			a.History.Append(NewToolUseMessage(reply.Blocks))
 			// A tool call ends the current stretch of assistant speech (every
 			// UI starts a new block after it), so a carried pre-reminder answer
@@ -1298,13 +1318,6 @@ func (a *Agent) runLoop(
 			a.applyPostToolUse(ctx, reply.Blocks, resultBlocks)
 
 			a.History.Append(NewToolResultMessage(resultBlocks))
-
-			// Turn-in compaction check: after a tool batch, history may have
-			// grown significantly. If the estimated size is near the window,
-			// compact before the next LLM call to avoid a 400.
-			if a.shouldCompactBetweenBatches() {
-				_ = a.maybeCompact(ctx, handler)
-			}
 			continue
 		}
 
