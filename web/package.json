@@ -10,10 +10,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "dompurify": "^3.4.13",
+    "dompurify": "^3.4.14",
     "highlight.js": "^11.12.0",
     "html2canvas": "^1.4.1",
-    "marked": "^18.0.9",
+    "marked": "^18.0.10",
     "mermaid": "^11.17.0",
     "qrcode": "^1.5.4"
   },
@@ -23,10 +23,10 @@
     "@testing-library/svelte": "^5.4.2",
     "@types/qrcode": "^1.5.5",
     "jsdom": "^30.0.1",
-    "svelte": "^5.56.9",
+    "svelte": "^5.56.10",
     "svelte-check": "^4.7.6",
     "typescript": "^6.0.3",
-    "vite": "^8.2.1",
-    "vitest": "^4.1.10"
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   }
 }
