@@ -305,7 +305,7 @@ p  { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 
 
 .agent-desc {
   font-size: 12.5px; color: var(--text-secondary); line-height: 1.5;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 
 .card-bottom { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; padding-top: 4px; }

@@ -3062,12 +3062,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           <div class="pending-steer-bar fadein">
             {#each pendingSteerList as s}
               <div class="pending-steer-line">
-                <!-- A queued message waits for the turn AFTER this one, so say so:
-                     otherwise it is indistinguishable from a steer that is about
-                     to be folded into the reply now being written. -->
-                <span class="steer-kind" class:queued={s.queued}>
-                  {s.queued ? $t('chat.pending_queued') : $t('chat.pending_steer')}
-                </span>
+                <!-- Only a queued message is labelled: it waits for the turn AFTER
+                     this one, so without the badge it would be indistinguishable
+                     from a steer about to be folded into the reply being written. -->
+                {#if s.queued}
+                  <span class="steer-kind queued">{$t('chat.pending_queued')}</span>
+                {/if}
                 <span class="steer-text">
                   {#if s.files && s.files.length > 0}
                     <span class="steer-attachments">
