@@ -21,7 +21,7 @@
         <span class="dot"></span>
         <span class="lbl">{$t(tasks.length === 1 ? 'bgtask.n_process' : 'bgtask.n_processes').replace('{n}', String(tasks.length))}</span>
         <span style="margin-left:auto"></span>
-        <iconify-icon icon="lucide:chevron-up" width="14" style="color:var(--text-tertiary)"></iconify-icon>
+        <iconify-icon class="chev" icon="lucide:chevron-up" width="14" style="color:var(--text-tertiary)"></iconify-icon>
       </summary>
       <div class="proc-list">
         {#each tasks as p (p.handle_id)}
@@ -46,6 +46,8 @@
   font-size: 13px;
 }
 .tray-summary:hover { color: var(--blue-6); }
+.chev { transition: transform 0.15s ease; }
+details[open] .chev { transform: rotate(180deg); }
 .dot {
   width: 7px; height: 7px; border-radius: 9999px; background: var(--success);
   animation: octo-dot 1.4s infinite; flex: 0 0 auto;
