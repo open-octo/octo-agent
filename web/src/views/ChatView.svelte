@@ -75,6 +75,7 @@
   import { inlineSlashCommand } from '../lib/inlineSlash'
   import { exportModeStore, selectedMessagesStore } from '../lib/exportStore'
   import { filenameStem } from '../lib/filename'
+  import { anchorBgTasks } from '../lib/bgTaskAnchor'
   import DOMPurify from 'dompurify'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
   import SubAgentsCard from '../components/chat/SubAgentsCard.svelte'
@@ -1193,7 +1194,8 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
     cleanups.push(ws.on('background_tasks_update', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      chatBgTasks.update(b => ({ ...b, [sid]: (ev as any).tasks ?? [] }))
+      const at = Date.now()
+      chatBgTasks.update(b => ({ ...b, [sid]: anchorBgTasks(b[sid] ?? [], (ev as any).tasks ?? [], at) }))
     }))
 
     cleanups.push(ws.on('request_confirmation', (ev) => {
@@ -3126,9 +3128,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         </div>
       {/if}
 
-      <!-- Background processes tray -->
+      <!-- Background processes: a text trigger opening a popover list -->
       {#if bgTasks && bgTasks.length > 0}
-        <BackgroundProcesses tasks={bgTasks} />
+        <BackgroundProcesses tasks={bgTasks} {now} />
       {/if}
 
       <!-- Question banner (aligned with composer) -->

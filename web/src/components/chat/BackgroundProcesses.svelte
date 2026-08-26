@@ -1,58 +1,99 @@
 <script lang="ts">
   import { t } from '../../lib/i18n'
 
-  // Real background tasks come from the background_task_update WS event.
-  // Each task: { handle_id, command, elapsed } (elapsed in seconds).
-  let { tasks = [] }: { tasks?: any[] } = $props()
+  // Real background tasks come from the background_tasks_update WS event.
+  // Each task: { handle_id, command, startedAt } — ChatView anchors the
+  // server's one-shot `elapsed` to a local timestamp, since the server only
+  // re-broadcasts on tool calls and process exits.
+  let { tasks = [], now = 0 }: { tasks?: any[]; now?: number } = $props()
 
-  function fmtElapsed(sec: number): string {
+  let open = $state(false)
+  let rootEl: HTMLElement | undefined = $state()
+  let triggerEl: HTMLButtonElement | undefined = $state()
+
+  function fmtElapsed(startedAt: number): string {
+    const sec = now > 0 && startedAt > 0 ? (now - startedAt) / 1000 : 0
     if (!sec || sec < 0) return '0s'
     if (sec < 60) return `${Math.floor(sec)}s`
     const m = Math.floor(sec / 60)
     const s = Math.floor(sec % 60)
     return `${m}m ${s.toString().padStart(2, '0')}s`
   }
+
+  // rootEl wraps only the trigger and the popover — not the empty width of the
+  // row — so clicking anywhere else, that blank space included, closes it. The
+  // trigger being inside means its own click never counts as "outside".
+  //
+  // Listened for during capture: the composer's menu chips stopPropagation on
+  // their own clicks (that's how their menus survive the composer's own
+  // window-level close), and a bubble-phase listener would never see those —
+  // leaving this popover open underneath a freshly opened menu.
+  function onDocClick(e: MouseEvent) {
+    if (open && rootEl && !rootEl.contains(e.target as Node)) open = false
+  }
+  function onKeydown(e: KeyboardEvent) {
+    if (!open || e.key !== 'Escape') return
+    open = false
+    triggerEl?.focus()
+  }
 </script>
 
-<div class="bg-tray">
-  <div style="max-width:800px;margin:0 auto;padding:4px 24px;">
-    <details>
-      <summary class="tray-summary">
+<svelte:window onclickcapture={onDocClick} onkeydown={onKeydown} />
+
+<div class="bg-line">
+  <div class="bg-line-inner">
+    <div class="bg-anchor" bind:this={rootEl}>
+      <button
+        class="bg-trigger"
+        class:open
+        bind:this={triggerEl}
+        aria-expanded={open}
+        aria-haspopup="true"
+        aria-controls={open ? 'bg-proc-list' : undefined}
+        onclick={() => (open = !open)}
+      >
         <span class="dot"></span>
         <span class="lbl">{$t(tasks.length === 1 ? 'bgtask.n_process' : 'bgtask.n_processes').replace('{n}', String(tasks.length))}</span>
-        <span style="margin-left:auto"></span>
-        <iconify-icon class="chev" icon="lucide:chevron-up" width="14" style="color:var(--text-tertiary)"></iconify-icon>
-      </summary>
-      <div class="proc-list">
-        {#each tasks as p (p.handle_id)}
-        <div class="proc-row">
-          <span class="proc-dot"></span>
-          <div class="proc-info">
-            <span class="proc-cmd mono">{p.command}</span>
+      </button>
+      {#if open}
+        <div class="bg-pop" id="bg-proc-list">
+          {#each tasks as p (p.handle_id)}
+          <div class="proc-row">
+            <span class="proc-dot"></span>
+            <div class="proc-info">
+              <span class="proc-cmd mono">{p.command}</span>
+            </div>
+            <span class="proc-time">{$t('bgtask.running_elapsed').replace('{elapsed}', fmtElapsed(p.startedAt))}</span>
           </div>
-          <span class="proc-time">{$t('bgtask.running_elapsed').replace('{elapsed}', fmtElapsed(p.elapsed))}</span>
+          {/each}
         </div>
-        {/each}
-      </div>
-    </details>
+      {/if}
+    </div>
   </div>
 </div>
 
 <style>
-.bg-tray { flex: 0 0 auto; background: var(--bg-container); border-top: 1px solid var(--border-secondary); }
-.tray-summary {
-  list-style: none; display: flex; align-items: center; gap: 8px;
-  padding: 7px 4px; cursor: pointer; user-select: none; color: var(--text-secondary);
-  font-size: 13px;
+.bg-line { flex: 0 0 auto; }
+.bg-line-inner { max-width: var(--chat-content-max-width, 1080px); width: 100%; margin: 0 auto; padding: 2px 24px; }
+.bg-anchor { position: relative; display: inline-block; }
+.bg-trigger {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 4px 0; border: none; background: transparent;
+  font-family: inherit; font-size: 13px; color: var(--text-secondary);
+  cursor: pointer;
 }
-.tray-summary:hover { color: var(--blue-6); }
-.chev { transition: transform 0.15s ease; }
-details[open] .chev { transform: rotate(180deg); }
+.bg-trigger:hover, .bg-trigger.open { color: var(--blue-6); }
 .dot {
   width: 7px; height: 7px; border-radius: 9999px; background: var(--success);
   animation: octo-dot 1.4s infinite; flex: 0 0 auto;
 }
-.proc-list { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 8px; }
+.bg-pop {
+  position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 50;
+  min-width: 260px; max-width: 420px; max-height: 280px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--bg-container); border: 1px solid var(--border-secondary); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15,23,42,0.14); padding: 6px;
+}
 .proc-row {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 12px; border: 1px solid var(--border-table); border-radius: 8px; background: var(--bg-table-header);
