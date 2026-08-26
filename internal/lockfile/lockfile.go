@@ -25,7 +25,6 @@
 package lockfile
 
 import (
-	"errors"
 	"log/slog"
 	"os"
 	"time"
@@ -41,11 +40,6 @@ type Handle struct {
 // than this means the holder is not making progress — stopped, or stuck on a
 // network filesystem — rather than merely busy.
 const Timeout = 5 * time.Second
-
-// pollInterval is how often a contended lock is retried. Short enough that the
-// common case (a holder mid-write) is indistinguishable from waiting on the
-// kernel, long enough not to spin.
-const pollInterval = 2 * time.Millisecond
 
 // Acquire takes an exclusive lock for path, creating the sibling lock file if
 // needed, and waits up to Timeout for it.
@@ -67,30 +61,48 @@ func Acquire(path string) *Handle {
 
 // acquire is Acquire with the wait made explicit, so the give-up path can be
 // tested without a test that waits Timeout.
+//
+// The wait for a holder happens in the kernel, on its own goroutine, with the
+// timeout enforced here. Waiting in the kernel is what makes contention fair:
+// it queues waiters, where retrying a non-blocking lock on a timer let one
+// caller lose the race arbitrarily many times in a row and give up — writing
+// unlocked — while its turn never came. Under eight waiters holding for 5ms
+// each, polling stretched a 40ms queue into a 390ms wait; queued, the wait
+// tracks the queue.
 func acquire(path string, timeout time.Duration) *Handle {
 	f, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		slog.Debug("lockfile: open failed, proceeding unlocked", "path", path, "err", err)
+		// Warn, not Debug: proceeding unlocked is how an update gets lost, and
+		// it is the kind of thing only visible in a log after the fact.
+		slog.Warn("lockfile: open failed, proceeding unlocked — a concurrent write may be lost", "path", path, "err", err)
 		return nil
 	}
-	deadline := time.Now().Add(timeout)
-	for {
-		err = tryLockFD(f)
-		if err == nil {
-			return &Handle{f: f}
-		}
-		if !errors.Is(err, errLocked) {
-			slog.Debug("lockfile: lock failed, proceeding unlocked", "path", path, "err", err)
+	locked := make(chan error, 1)
+	go func() { locked <- lockFD(f) }()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-locked:
+		if err != nil {
+			slog.Warn("lockfile: lock failed, proceeding unlocked — a concurrent write may be lost", "path", path, "err", err)
 			f.Close()
 			return nil
 		}
-		if time.Now().After(deadline) {
-			slog.Warn("lockfile: still held after waiting, proceeding unlocked — a concurrent write may be lost",
-				"path", path, "waited", timeout)
+		return &Handle{f: f}
+	case <-timer.C:
+		// The kernel may still grant the lock after this: the waiting
+		// goroutine owns the file from here, and hands it straight back so a
+		// lock nobody is using cannot outlive the caller that wanted it.
+		go func() {
+			if err := <-locked; err == nil {
+				unlockFD(f)
+			}
 			f.Close()
-			return nil
-		}
-		time.Sleep(pollInterval)
+		}()
+		slog.Warn("lockfile: still held after waiting, proceeding unlocked — a concurrent write may be lost",
+			"path", path, "waited", timeout)
+		return nil
 	}
 }
 

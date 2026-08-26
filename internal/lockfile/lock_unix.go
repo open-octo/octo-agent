@@ -9,19 +9,20 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// errLocked reports that someone else holds the lock — the one failure Acquire
-// retries rather than giving up on.
-var errLocked = errors.New("lockfile: held by another process")
-
-// tryLockFD attempts an exclusive advisory lock without blocking. A contended
-// lock comes back as EWOULDBLOCK (== EAGAIN on every platform Go supports),
-// which is reported as errLocked so the caller can retry until its deadline.
-func tryLockFD(f *os.File) error {
-	err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
-	if errors.Is(err, unix.EWOULDBLOCK) {
-		return errLocked
+// lockFD takes an exclusive advisory lock, waiting for any current holder. The
+// wait is in the kernel, which queues waiters — a non-blocking poll would let
+// one caller lose the race arbitrarily many times in a row.
+//
+// EINTR is retried rather than reported: Go's scheduler preempts with signals,
+// so an interrupted flock says nothing about the lock.
+func lockFD(f *os.File) error {
+	for {
+		err := unix.Flock(int(f.Fd()), unix.LOCK_EX)
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		return err
 	}
-	return err
 }
 
 // unlockFD releases it. Closing the descriptor would release it too; doing it

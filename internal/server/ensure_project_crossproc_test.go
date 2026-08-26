@@ -117,6 +117,13 @@ func TestEnsureProject_CrossProcessLockKeepsEveryGroup(t *testing.T) {
 	if missing > 0 {
 		t.Errorf("%d of %d projects were lost to concurrent writes by other processes (e.g. %s)",
 			missing, children*writesPerChild, firstMissing)
+		// A lost write means some child proceeded without the file lock, and
+		// the only record of that is the warning it logged. Children that exit
+		// cleanly have their output discarded, which left past failures with no
+		// evidence of which step gave way.
+		for i, out := range outs {
+			t.Logf("child %d output:\n%s", i, out.String())
+		}
 	}
 }
 

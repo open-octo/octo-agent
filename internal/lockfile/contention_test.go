@@ -1,0 +1,81 @@
+package lockfile
+
+import (
+	"path/filepath"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// Contention must queue, not race. This is what stops a lost update in
+// practice: a caller that waits out its budget proceeds unlocked, so an
+// acquire that keeps losing the race is how the registry silently drops
+// another process's write — the failure this package exists to prevent.
+//
+// The shape: one waiter asks first and then blocks, a second caller hammers
+// the lock behind it, and the count of times the latecomer gets in ahead is
+// the measurement. Queued, it cannot get in at all — it asked later, so it
+// waits later. Retrying a non-blocking lock on a timer has no queue, so every
+// release is a fresh coin flip and the latecomer wins its share of them.
+//
+// Counting who gets in, rather than timing how long a wait took, is what keeps
+// this honest on a loaded CI machine: the verdict does not move when every
+// sleep in it runs long.
+func TestAcquire_ContentionQueuesRatherThanRacing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.json")
+	held := Acquire(path)
+	if held == nil {
+		t.Skip("file locking unavailable here")
+	}
+
+	// The first waiter. It asks while the lock is held, so it is at the head of
+	// the queue before anyone else asks.
+	var firstIn atomic.Bool
+	asked := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		close(asked)
+		h := acquire(path, 10*time.Second)
+		firstIn.Store(true)
+		if h == nil {
+			return
+		}
+		h.Release()
+	}()
+	<-asked
+	time.Sleep(50 * time.Millisecond) // let it reach the wait
+
+	// The latecomer, asking over and over from behind.
+	var jumpedAhead atomic.Int64
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		deadline := time.Now().Add(5 * time.Second)
+		for !firstIn.Load() && time.Now().Before(deadline) {
+			h := acquire(path, 50*time.Millisecond)
+			if h == nil {
+				continue
+			}
+			if !firstIn.Load() {
+				jumpedAhead.Add(1)
+			}
+			h.Release()
+		}
+	}()
+
+	held.Release()
+	wg.Wait()
+
+	if !firstIn.Load() {
+		t.Fatal("the first waiter never got the lock")
+	}
+	// One is the benign race: the latecomer can slip in during the window
+	// between the release and the queued waiter being scheduled. Repeatedly is
+	// the bug — it means asking first bought nothing.
+	if n := jumpedAhead.Load(); n > 1 {
+		t.Errorf("the latecomer got the lock %d times ahead of the waiter that asked first — waiters are racing, not queueing", n)
+	}
+}
