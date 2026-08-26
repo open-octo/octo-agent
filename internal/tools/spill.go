@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 )
 
 // TerminalSpillBytes is the size past which terminal output is written to a
@@ -22,6 +23,13 @@ const (
 	spillHeadLines = 50
 	spillTailLines = 50
 )
+
+// spillPreviewMaxBytes bounds the inline preview in bytes, on top of the line
+// bounds above. Lines alone can't bound it: a progress bar rewritten with \r
+// arrives as one multi-hundred-KB line, so fifty "lines" can still be a
+// quarter of a megabyte. ~8 KB (~2k tokens) leaves the preview useful while
+// keeping a single notice from dominating the context window.
+const spillPreviewMaxBytes = 8 * 1024
 
 // spillMaxAge is how long a spill file lives before a later spill sweeps it.
 // Files from a clean shutdown are removed immediately (CleanSpillFiles); this
@@ -58,39 +66,84 @@ func isSweepable(name string) bool {
 }
 
 // MaybeSpillOutput returns body unchanged when it is small enough to give the
-// LLM directly. When body exceeds TerminalSpillBytes — and has more lines than
-// the preview would show — it writes the full body to a temp file and returns
-// a head+tail preview plus the file path and a one-line read hint, so the
-// agent decides how to read the rest (read_file with offset/limit, or grep)
-// instead of having the whole blob flood its context.
+// LLM directly. When body exceeds TerminalSpillBytes it writes the full body to
+// a temp file and returns a bounded preview plus the file path and a one-line
+// read hint, so the agent decides how to read the rest (read_file with
+// offset/limit, or grep) instead of having the whole blob flood its context.
+//
+// The preview is bounded twice: by lines (head+tail) and by bytes
+// (spillPreviewMaxBytes). Both are needed — output can be enormous in few lines
+// as easily as in many, and one caller (the background-completion notice) has
+// no tool_result backstop behind it, so whatever this returns is what reaches
+// history.
 //
 // id names the source (e.g. a background process id) and is woven into the
-// temp filename. On any write failure it degrades to returning body unchanged:
-// losing context is worse than a missing file.
+// temp filename. A write failure still returns a capped preview: a missing file
+// is survivable, an unbounded body is not.
 func MaybeSpillOutput(id, body string) string {
 	if len(body) <= TerminalSpillBytes {
-		return body
-	}
-	lines := strings.Split(body, "\n")
-	if len(lines) <= spillHeadLines+spillTailLines {
-		// A few very long lines — a line-based preview would hide nothing,
-		// so a temp file buys us no context savings. Return as-is (bounded
-		// by the 1 MiB per-line scanner cap upstream).
 		return body
 	}
 
 	path, err := writeSpillFile(id, body)
 	if err != nil {
-		return body
+		return capSpillSegment(body, spillPreviewMaxBytes)
 	}
 
-	head := strings.Join(lines[:spillHeadLines], "\n")
-	tail := strings.Join(lines[len(lines)-spillTailLines:], "\n")
+	lines := strings.Split(body, "\n")
+	head, tail := body, ""
+	if len(lines) > spillHeadLines+spillTailLines {
+		head = strings.Join(lines[:spillHeadLines], "\n")
+		tail = strings.Join(lines[len(lines)-spillTailLines:], "\n")
+	}
+	if tail == "" {
+		head = capSpillSegment(head, spillPreviewMaxBytes)
+	} else {
+		half := spillPreviewMaxBytes / 2
+		head, tail = capSpillSegment(head, half), capSpillSegment(tail, half)
+	}
+
 	marker := fmt.Sprintf(
-		"[output too long: %d lines / %s written to\n %s\n showing first %d + last %d lines. read_file (offset/limit) or grep that path for the rest.]",
-		len(lines), formatBytes(int64(len(body))), path, spillHeadLines, spillTailLines,
+		"[output too long: %d lines / %s written to\n %s\n showing at most %s of it. read_file (offset/limit) or grep that path for the rest.]",
+		len(lines), formatBytes(int64(len(body))), path, formatBytes(spillPreviewMaxBytes),
 	)
+	if tail == "" {
+		return head + "\n\n" + marker
+	}
 	return head + "\n\n" + marker + "\n\n" + tail
+}
+
+// capSpillSegment bounds one end of the preview to max bytes, keeping both
+// sides of the segment so a trailing error or exit code survives, and saying
+// how much it dropped. Cuts are trimmed to rune boundaries: the result rides
+// the JSON wire format, which requires valid UTF-8.
+func capSpillSegment(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	marker := fmt.Sprintf("\n… [%s elided to fit context] …\n", formatBytes(int64(len(s)-max)))
+	budget := max - len(marker)
+	if budget < 0 {
+		budget = 0
+	}
+	head := budget / 2
+	return trimPartialRuneTail(s[:head]) + marker + trimPartialRuneHead(s[len(s)-(budget-head):])
+}
+
+// trimPartialRuneTail drops a trailing partial rune left by a byte slice.
+func trimPartialRuneTail(s string) string {
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// trimPartialRuneHead drops a leading partial rune left by a byte slice.
+func trimPartialRuneHead(s string) string {
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[1:]
+	}
+	return s
 }
 
 // writeSpillFile persists body under ~/.octo/tmp and returns the absolute path.

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // spillHome points ~/.octo at a temp dir so spill files don't touch the real
@@ -69,13 +70,77 @@ func TestMaybeSpillOutput_LargeSpillsToFile(t *testing.T) {
 	}
 }
 
-func TestMaybeSpillOutput_FewLongLinesPassThrough(t *testing.T) {
+func TestMaybeSpillOutput_FewLongLinesAreCapped(t *testing.T) {
 	spillHome(t)
-	// Over the byte threshold but only a handful of (very long) lines — a
-	// line-based preview would hide nothing, so we return as-is.
-	body := strings.Repeat("x", TerminalSpillBytes+100) + "\n" + strings.Repeat("y", 100)
-	if got := MaybeSpillOutput("bg_7", body); got != body {
-		t.Errorf("few long lines should pass through unchanged")
+	// Over the byte threshold in only a handful of (very long) lines — the
+	// shape a \r-rewritten progress bar arrives in. The line bounds can't touch
+	// it, so the byte cap has to: this used to pass through whole, and one such
+	// notice took ~250 KB of the context window.
+	body := strings.Repeat("x", 300*1024) + "\n" + strings.Repeat("y", 100)
+
+	out := MaybeSpillOutput("bg_7", body)
+
+	if len(out) > spillPreviewMaxBytes+512 {
+		t.Errorf("preview should be capped near %d bytes, got %d", spillPreviewMaxBytes, len(out))
+	}
+	if !strings.Contains(out, "elided to fit context") {
+		t.Errorf("expected an elision marker, got:\n%s", out[:min(len(out), 300)])
+	}
+	// The full body is still recoverable from the file the preview names.
+	data, err := os.ReadFile(extractSpillPath(t, out))
+	if err != nil {
+		t.Fatalf("spill file unreadable: %v", err)
+	}
+	if string(data) != body {
+		t.Errorf("spill file should hold the full body (%d vs %d bytes)", len(data), len(body))
+	}
+}
+
+func TestMaybeSpillOutput_LongLinesInsideLinePreviewAreCapped(t *testing.T) {
+	spillHome(t)
+	// Enough lines to trigger the head+tail split, but with enormous lines
+	// inside the kept head — the case that let a spilled background notice
+	// still reach history at 316 KB.
+	var b strings.Builder
+	for i := 0; i < spillHeadLines+spillTailLines+10; i++ {
+		b.WriteString(strings.Repeat("z", 4*1024))
+		b.WriteByte('\n')
+	}
+	body := b.String()
+
+	out := MaybeSpillOutput("bg_8", body)
+
+	if len(out) > spillPreviewMaxBytes+512 {
+		t.Errorf("preview should stay near %d bytes, got %d", spillPreviewMaxBytes, len(out))
+	}
+	if !strings.Contains(out, "output too long") {
+		t.Errorf("expected spill marker, got:\n%s", out[:min(len(out), 300)])
+	}
+}
+
+func TestCapSpillSegment_KeepsValidUTF8(t *testing.T) {
+	// Cutting mid-rune would put invalid UTF-8 on the JSON wire. CJK makes
+	// every cut land inside a 3-byte rune unless the trims do their job.
+	body := strings.Repeat("云识别测试", 4096)
+	got := capSpillSegment(body, 1024)
+	if !utf8.ValidString(got) {
+		t.Errorf("capped segment must be valid UTF-8")
+	}
+	if len(got) > 1024 {
+		t.Errorf("capped segment = %d bytes, want <= 1024", len(got))
+	}
+	if !strings.HasPrefix(got, "云") {
+		t.Errorf("head should survive, got %q", got[:12])
+	}
+	if !strings.HasSuffix(got, "试") {
+		t.Errorf("tail should survive, got %q", got[len(got)-12:])
+	}
+}
+
+func TestCapSpillSegment_ShortInputUntouched(t *testing.T) {
+	body := "exit status 1\n"
+	if got := capSpillSegment(body, 1024); got != body {
+		t.Errorf("segment within budget should be returned unchanged, got %q", got)
 	}
 }
 
