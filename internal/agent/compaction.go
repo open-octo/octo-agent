@@ -274,19 +274,35 @@ func (a *Agent) compactTriggerTokens() int {
 	}
 }
 
-// historyTokens returns the best available token count for the given messages.
-// When the provider has reported a real input token count (lastInputTokens > 0),
-// it returns that value; otherwise it falls back to the heuristic estimate.
-// The real count is more accurate because it reflects exactly how the provider's
-// tokenizer counted the prompt, including any format overhead the estimate misses.
+// historyTokens returns the best available token count for msgs: the larger of
+// what the provider counted and what the estimate sees.
+//
+// Neither number is sufficient alone. The provider's count is exact but measures
+// the prompt we last SENT — it knows nothing of what has been appended since: a
+// whole tool batch's results, a steer message, an injected background notice.
+// The estimate covers history as it stands now but runs low, since CJK text and
+// JSON tool input both under-count against a real tokenizer. Preferring the
+// provider count outright (what this did) let mid-turn growth hide behind a
+// stale number until the next provider call re-measured it — a turn could append
+// 100k of tool output and still look like whatever the last prompt cost.
+//
+// The estimate side must count what the reported side counts, or the comparison
+// is between two different things: the reported figure is the WHOLE prompt, and
+// the system prompt plus tool schemas ride every call for 10k+ tokens. Leaving
+// them out would mean mid-turn growth had to exceed that overhead before it
+// could ever win the max — which is most of the blind spot, still blind. Same
+// arithmetic as ContextUsage's estimate fallback.
+//
+// msgs must be the full history; every caller passes a complete snapshot.
 func (a *Agent) historyTokens(msgs []Message) int {
 	a.usageMu.Lock()
-	real := a.lastInputTokens
+	reported := a.lastInputTokens
+	overhead := a.toolDefTokens
 	a.usageMu.Unlock()
-	if real > 0 {
-		return real
+	if est := estimateMessages(msgs) + estimateText(a.System) + overhead; est > reported {
+		return est
 	}
-	return estimateMessages(msgs)
+	return reported
 }
 
 // summarizeMaxTokens caps the summary length. A summary is meant to be a
@@ -713,14 +729,16 @@ func hasToolResult(m Message) bool {
 	return false
 }
 
-// shouldCompactBetweenBatches reports whether compaction should run after a
-// tool batch, before the next LLM call. This catches history growth within a
-// turn that lastInputTokens (from the previous provider call) doesn't reflect.
+// shouldCompactMidTurn reports whether compaction should run at one of the
+// turn's interior boundaries: before a provider call (where the previous
+// batch's results and any injected steer have landed) or before dispatching a
+// tool batch (where the reply just told us what the prompt really cost). Both
+// are points where history ends on a complete message.
 //
 // It uses the one and only compaction trigger (compactTriggerTokens) — the same
 // point between-turns compaction fires — so a single threshold governs the whole
 // session and context can't quietly climb past it mid-turn and sit there.
-func (a *Agent) shouldCompactBetweenBatches() bool {
+func (a *Agent) shouldCompactMidTurn() bool {
 	trigger := a.compactTriggerTokens()
 	if trigger <= 0 {
 		return false

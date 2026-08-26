@@ -77,7 +77,7 @@ single-giant-turn case Part 1 alone can't fold.
   block content with a placeholder `[elided N bytes — <tool> result; re-run to
   view]`. IDs are preserved so tool_use/tool_result pairing stays valid. No model
   call.
-- Wire into `maybeCompact` / between-batch path: when over trigger, run
+- Wire into `maybeCompact` / mid-turn path: when over trigger, run
   reclamation **first**; recompute tokens; if now under `trigger − margin`, skip
   the LLM summarize entirely. Otherwise fall through to Part 1's summarize.
 - Cache: rewriting old blocks invalidates the prompt-cache prefix from the first

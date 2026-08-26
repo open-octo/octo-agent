@@ -202,7 +202,7 @@ func TestCompactTriggerTokens(t *testing.T) {
 // Between-batches (mid-turn) compaction uses the one and only compaction
 // trigger — the same point between-turns fires — so a single threshold governs
 // the whole session and honors CompactAutoFraction.
-func TestShouldCompactBetweenBatches_UsesSingleTrigger(t *testing.T) {
+func TestShouldCompactMidTurn_UsesSingleTrigger(t *testing.T) {
 	a := New(&summarizeFake{}, "unknown-model-xyz") // unknown model → default window
 
 	trigger := a.compactTriggerTokens() // auto: 75% of the default window
@@ -210,20 +210,20 @@ func TestShouldCompactBetweenBatches_UsesSingleTrigger(t *testing.T) {
 	a.usageMu.Lock()
 	a.lastInputTokens = trigger - 1
 	a.usageMu.Unlock()
-	if a.shouldCompactBetweenBatches() {
+	if a.shouldCompactMidTurn() {
 		t.Errorf("should not compact between batches below the trigger (%d)", trigger)
 	}
 	// Just over: it fires, at the very same threshold between-turns uses.
 	a.usageMu.Lock()
 	a.lastInputTokens = trigger + 1
 	a.usageMu.Unlock()
-	if !a.shouldCompactBetweenBatches() {
+	if !a.shouldCompactMidTurn() {
 		t.Errorf("should compact between batches above the trigger (%d)", trigger)
 	}
 
 	// Disabling compaction entirely (CompactThreshold < 0) disables it here too.
 	a.CompactThreshold = -1
-	if a.shouldCompactBetweenBatches() {
+	if a.shouldCompactMidTurn() {
 		t.Error("should not compact between batches when compaction is disabled")
 	}
 }
@@ -604,6 +604,296 @@ func TestRun_CompactsBetweenTurns(t *testing.T) {
 	snap := a.History.Snapshot()
 	if !strings.Contains(snap[0].Content, "earlier work summary") {
 		t.Errorf("compaction summary should lead the history, got %+v", snap[0])
+	}
+}
+
+// dispatchObservingExecutor records what the history looked like at the moment
+// a tool ran, so a test can tell whether compaction happened before the batch
+// was dispatched or only after its results landed.
+type dispatchObservingExecutor struct {
+	a         *Agent
+	headAtRun string
+}
+
+func (e *dispatchObservingExecutor) Execute(_ context.Context, _ string, _ map[string]any) (ToolResult, error) {
+	if snap := e.a.History.Snapshot(); len(snap) > 0 {
+		e.headAtRun = snap[0].Content
+	}
+	return ToolResult{Text: "ok"}, nil
+}
+
+// usageReportingFake drives one tool_use round whose reply reports a prompt far
+// over the trigger — the shape of a turn that crosses the threshold mid-flight,
+// where the between-turns check has already run and passed.
+type usageReportingFake struct {
+	summary        string
+	loopReplies    []Reply
+	loopCalls      int
+	summarizeCalls int
+}
+
+func (f *usageReportingFake) SendMessages(_ context.Context, _, _ string, _ []Message, _ int) (Reply, error) {
+	f.summarizeCalls++
+	return Reply{Content: f.summary}, nil
+}
+
+func (f *usageReportingFake) SendMessagesWithTools(_ context.Context, _, _ string, _ []Message, _ int, _ []ToolDefinition) (Reply, error) {
+	f.loopCalls++
+	if f.loopCalls > len(f.loopReplies) {
+		// An extra round means the loop did something the test didn't script.
+		// Ending the turn surfaces that as a failed assertion rather than an
+		// index panic in a stack trace nobody can read.
+		return Reply{Content: "unscripted round", StopReason: "end_turn"}, nil
+	}
+	return f.loopReplies[f.loopCalls-1], nil
+}
+
+// TestRun_CompactsBeforeDispatchingToolBatch pins the pre-dispatch checkpoint.
+// A batch can run for many minutes; if compaction only ran after the results
+// landed, the context would sit over the threshold for that entire stretch.
+func TestRun_CompactsBeforeDispatchingToolBatch(t *testing.T) {
+	f := &usageReportingFake{
+		summary: "earlier work summary",
+		loopReplies: []Reply{
+			// Round 1 asks for a tool AND reports a prompt over the trigger.
+			{
+				StopReason:  "tool_use",
+				Blocks:      []ContentBlock{NewToolUseBlock("t1", "terminal", map[string]any{"command": "true"})},
+				InputTokens: 5000,
+			},
+			{Content: "done", StopReason: "end_turn"},
+		},
+	}
+	a := New(f, "m")
+	a.CompactThreshold = 3000
+
+	// Prior history stays UNDER the trigger by estimate, so the between-turns
+	// check at turn start passes and only the reported usage can trip it.
+	longMsg := strings.Repeat("x ", 500) // ~250 tokens each
+	for i := 0; i < 4; i++ {
+		a.History.Append(NewUserMessage(longMsg))
+		a.History.Append(NewAssistantMessage(longMsg))
+	}
+	if est := estimateMessages(a.History.Snapshot()); est >= 3000 {
+		t.Fatalf("test setup: seeded history (%d) must start under the trigger", est)
+	}
+
+	exec := &dispatchObservingExecutor{a: a}
+	if _, err := a.Run(context.Background(), "next request", []ToolDefinition{{Name: "terminal"}}, exec); err != nil {
+		t.Fatal(err)
+	}
+
+	if f.summarizeCalls != 1 {
+		t.Fatalf("expected exactly one summarization, got %d", f.summarizeCalls)
+	}
+	if !strings.Contains(exec.headAtRun, "earlier work summary") {
+		t.Errorf("compaction must run BEFORE the batch is dispatched; history head at dispatch = %q",
+			truncateForMsg(exec.headAtRun))
+	}
+}
+
+func truncateForMsg(s string) string {
+	if len(s) > 80 {
+		return s[:80] + "…"
+	}
+	return s
+}
+
+// steerInjectingFake drops a large message on the Inbox during the first round,
+// the way a background-completion notice arrives mid-turn, and records the size
+// of every prompt it is sent.
+type steerInjectingFake struct {
+	a              *Agent
+	steer          string
+	prompts        [][]Message
+	summarizeCalls int
+	loopCalls      int
+}
+
+func (f *steerInjectingFake) SendMessages(_ context.Context, _, _ string, _ []Message, _ int) (Reply, error) {
+	f.summarizeCalls++
+	return Reply{Content: "earlier work summary"}, nil
+}
+
+func (f *steerInjectingFake) SendMessagesWithTools(_ context.Context, _, _ string, msgs []Message, _ int, _ []ToolDefinition) (Reply, error) {
+	f.loopCalls++
+	f.prompts = append(f.prompts, msgs)
+	if f.loopCalls == 1 {
+		f.a.Inbox.Enqueue(f.steer)
+		// InputTokens stays small: the crossing must be found in what was
+		// appended after this reply, not in what this prompt cost.
+		return Reply{Content: "working on it", StopReason: "end_turn", InputTokens: 100}, nil
+	}
+	return Reply{Content: "done", StopReason: "end_turn"}, nil
+}
+
+// TestRun_CompactsAfterSteerInjection covers the path that reaches a provider
+// call without passing through a tool batch: a steer message (a background
+// notice, a mid-turn user message) injected into history mid-turn. A checkpoint
+// hung off tool batches alone never sees it.
+func TestRun_CompactsAfterSteerInjection(t *testing.T) {
+	f := &steerInjectingFake{
+		// One notice big enough to cross the trigger on its own — the shape a
+		// chatty background process produces.
+		steer: strings.Repeat("training log line ", 900),
+	}
+	a := New(f, "m")
+	f.a = a
+	a.CompactThreshold = 3000
+
+	longMsg := strings.Repeat("x ", 500) // ~250 tokens each
+	for i := 0; i < 4; i++ {
+		a.History.Append(NewUserMessage(longMsg))
+		a.History.Append(NewAssistantMessage(longMsg))
+	}
+	if est := estimateMessages(a.History.Snapshot()); est >= 3000 {
+		t.Fatalf("test setup: seeded history (%d) must start under the trigger", est)
+	}
+
+	if _, err := a.Run(context.Background(), "run it", []ToolDefinition{{Name: "terminal"}}, &fakeExecutor{}); err != nil {
+		t.Fatal(err)
+	}
+
+	if f.loopCalls != 2 {
+		t.Fatalf("expected two rounds (the steer keeps the turn going), got %d", f.loopCalls)
+	}
+	if f.summarizeCalls != 1 {
+		t.Fatalf("expected exactly one summarization, got %d", f.summarizeCalls)
+	}
+	second := f.prompts[1]
+	if len(second) == 0 || !strings.Contains(second[0].Content, "earlier work summary") {
+		t.Errorf("the round after the steer should be sent a compacted history; head = %q",
+			truncateForMsg(second[0].Content))
+	}
+}
+
+// TestHistoryTokens_TakesLargerOfReportedAndEstimate pins the fix for the
+// blind spot behind all of this: the provider's count measures the prompt last
+// SENT, so on its own it cannot see a tool batch's results or an injected
+// notice appended after it, and mid-turn growth stayed invisible until the next
+// provider call re-measured it.
+func TestHistoryTokens_TakesLargerOfReportedAndEstimate(t *testing.T) {
+	a := New(&compactingFake{}, "m")
+	msgs := []Message{NewUserMessage(strings.Repeat("x ", 4000))} // ~2000 tokens
+	est := estimateMessages(msgs)
+
+	// Stale small report (what the last prompt cost) — the estimate must win.
+	a.usageMu.Lock()
+	a.lastInputTokens = 50
+	a.usageMu.Unlock()
+	if got := a.historyTokens(msgs); got != est {
+		t.Errorf("with a stale report, historyTokens = %d, want the estimate %d", got, est)
+	}
+
+	// Report above the estimate (a cached prefix the estimate under-counts) —
+	// the report must win, since the estimate runs low.
+	a.usageMu.Lock()
+	a.lastInputTokens = est * 2
+	a.usageMu.Unlock()
+	if got := a.historyTokens(msgs); got != est*2 {
+		t.Errorf("with a report above the estimate, historyTokens = %d, want %d", got, est*2)
+	}
+}
+
+// toolOutputFake runs one tool round and records every prompt it is sent, so a
+// test can check what the round AFTER the batch was given.
+type toolOutputFake struct {
+	prompts        [][]Message
+	summarizeCalls int
+	loopCalls      int
+}
+
+func (f *toolOutputFake) SendMessages(_ context.Context, _, _ string, _ []Message, _ int) (Reply, error) {
+	f.summarizeCalls++
+	return Reply{Content: "earlier work summary"}, nil
+}
+
+func (f *toolOutputFake) SendMessagesWithTools(_ context.Context, _, _ string, msgs []Message, _ int, _ []ToolDefinition) (Reply, error) {
+	f.loopCalls++
+	f.prompts = append(f.prompts, msgs)
+	if f.loopCalls == 1 {
+		// A small reported prompt: the crossing has to be found in the tool
+		// result appended after this reply, not in what this prompt cost.
+		return Reply{
+			StopReason:  "tool_use",
+			Blocks:      []ContentBlock{NewToolUseBlock("t1", "terminal", map[string]any{"command": "true"})},
+			InputTokens: 100,
+		}, nil
+	}
+	return Reply{Content: "done", StopReason: "end_turn"}, nil
+}
+
+// bigOutputExecutor returns more output than the trigger allows.
+type bigOutputExecutor struct{ out string }
+
+func (e *bigOutputExecutor) Execute(_ context.Context, _ string, _ map[string]any) (ToolResult, error) {
+	return ToolResult{Text: e.out}, nil
+}
+
+// TestRun_CompactsAfterToolResultsPushPastTrigger covers the case a tool batch's
+// own output is what crosses the trigger. The batch's results land in history
+// after the reply that requested it, so neither the between-turns check nor the
+// pre-dispatch one can see them — only the checkpoint before the next provider
+// call.
+func TestRun_CompactsAfterToolResultsPushPastTrigger(t *testing.T) {
+	f := &toolOutputFake{}
+	a := New(f, "m")
+	a.CompactThreshold = 3000
+
+	longMsg := strings.Repeat("x ", 500) // ~250 tokens each
+	for i := 0; i < 4; i++ {
+		a.History.Append(NewUserMessage(longMsg))
+		a.History.Append(NewAssistantMessage(longMsg))
+	}
+	if est := estimateMessages(a.History.Snapshot()); est >= 3000 {
+		t.Fatalf("test setup: seeded history (%d) must start under the trigger", est)
+	}
+
+	exec := &bigOutputExecutor{out: strings.Repeat("build output line ", 900)}
+	if _, err := a.Run(context.Background(), "run it", []ToolDefinition{{Name: "terminal"}}, exec); err != nil {
+		t.Fatal(err)
+	}
+
+	if f.loopCalls != 2 {
+		t.Fatalf("expected two rounds (tool round, then the answer), got %d", f.loopCalls)
+	}
+	if f.summarizeCalls != 1 {
+		t.Fatalf("expected exactly one summarization, got %d", f.summarizeCalls)
+	}
+	second := f.prompts[1]
+	if len(second) == 0 || !strings.Contains(second[0].Content, "earlier work summary") {
+		t.Errorf("the round after the batch should be sent a compacted history; head = %q",
+			truncateForMsg(second[0].Content))
+	}
+	// The tool_use/tool_result pair must have survived compaction intact —
+	// splitting it is an immediate provider 400.
+	assertToolPairing(t, second)
+}
+
+// assertToolPairing fails when any tool_use in msgs lacks a matching
+// tool_result, or vice versa.
+func assertToolPairing(t *testing.T, msgs []Message) {
+	t.Helper()
+	uses, results := map[string]bool{}, map[string]bool{}
+	for _, m := range msgs {
+		for _, b := range m.Blocks {
+			switch b.Type {
+			case "tool_use":
+				uses[b.ID] = true
+			case "tool_result":
+				results[b.ToolUseID] = true
+			}
+		}
+	}
+	for id := range uses {
+		if !results[id] {
+			t.Errorf("tool_use %q has no tool_result", id)
+		}
+	}
+	for id := range results {
+		if !uses[id] {
+			t.Errorf("tool_result for %q has no tool_use", id)
+		}
 	}
 }
 
