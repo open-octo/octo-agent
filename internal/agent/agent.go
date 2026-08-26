@@ -1091,8 +1091,17 @@ func (a *Agent) runLoop(
 		// injected above, a background-completion notice — so this is where
 		// mid-turn growth becomes visible. The steer path in particular reaches
 		// this line without passing through a tool batch, so a check hung off
-		// the batch alone never saw it. Skipped on the first round: the
-		// between-turns check ran moments ago, just above the loop.
+		// the batch alone never saw it. A summarization failure is non-fatal for
+		// the same reason it is above the loop: proceed with the full history and
+		// let the provider's own limit be the backstop.
+		//
+		// Round 0 is left to the between-turns check above the loop, which — like
+		// this one — cannot see what appendUserInput and a round-0 Inbox drain
+		// add after it. Closing that gap by checking here instead would compact
+		// after baseHistoryLen was taken, and a first-round send failure would
+		// then set inputRolledBack while TruncateTo silently no-ops on the now
+		// shorter history: the composer gets a message that is still in the
+		// transcript. That is a rollback-semantics change, not a checkpoint one.
 		if i > 0 && a.shouldCompactMidTurn() {
 			_ = a.maybeCompact(ctx, handler)
 		}

@@ -274,8 +274,8 @@ func (a *Agent) compactTriggerTokens() int {
 	}
 }
 
-// historyTokens returns the best available token count for the given messages:
-// the larger of what the provider counted and what the estimate sees.
+// historyTokens returns the best available token count for msgs: the larger of
+// what the provider counted and what the estimate sees.
 //
 // Neither number is sufficient alone. The provider's count is exact but measures
 // the prompt we last SENT — it knows nothing of what has been appended since: a
@@ -285,11 +285,21 @@ func (a *Agent) compactTriggerTokens() int {
 // provider count outright (what this did) let mid-turn growth hide behind a
 // stale number until the next provider call re-measured it — a turn could append
 // 100k of tool output and still look like whatever the last prompt cost.
+//
+// The estimate side must count what the reported side counts, or the comparison
+// is between two different things: the reported figure is the WHOLE prompt, and
+// the system prompt plus tool schemas ride every call for 10k+ tokens. Leaving
+// them out would mean mid-turn growth had to exceed that overhead before it
+// could ever win the max — which is most of the blind spot, still blind. Same
+// arithmetic as ContextUsage's estimate fallback.
+//
+// msgs must be the full history; every caller passes a complete snapshot.
 func (a *Agent) historyTokens(msgs []Message) int {
 	a.usageMu.Lock()
 	reported := a.lastInputTokens
+	overhead := a.toolDefTokens
 	a.usageMu.Unlock()
-	if est := estimateMessages(msgs); est > reported {
+	if est := estimateMessages(msgs) + estimateText(a.System) + overhead; est > reported {
 		return est
 	}
 	return reported
