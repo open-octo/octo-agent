@@ -38,6 +38,7 @@
   let drafts = $state<AskDraft[]>([])
   let focusedLabel = $state('')
   let inputEl = $state<HTMLInputElement | null>(null)
+  let rowListEl = $state<HTMLDivElement | null>(null)
   let expanded = $state(false)
   let lastQuestionId = $state<string | null>(null)
 
@@ -66,6 +67,15 @@
     qIdx = i
     focusedLabel = questions[i]?.options?.[0]?.label ?? ''
   }
+
+  // The banner caps the option list and scrolls it. A new tab — or a whole new
+  // question, which reuses the same DOM node — must start at the top rather
+  // than inherit the previous list's scroll offset.
+  $effect(() => {
+    qIdx
+    current?.questionId
+    rowListEl?.scrollTo({ top: 0 })
+  })
 
   function pick(label: string) {
     if (!question) return
@@ -162,12 +172,13 @@
 
 {#snippet rows()}
   <div class="rows" class:with-preview={preview}>
-    <div class="row-list">
+    <div class="row-list" bind:this={rowListEl}>
       {#each question?.options ?? [] as o, i}
         <button
           class="row"
           class:selected={draft.choices.includes(o.label)}
           class:focused={preview && focusedLabel === o.label}
+          title={o.description || o.label}
           onclick={() => (preview ? (focusedLabel = o.label) : pick(o.label))}
           ondblclick={() => pick(o.label)}
         >
@@ -473,6 +484,23 @@
   }
   .banner-expand:hover { background: var(--hover-neutral); color: var(--blue-6); }
   .banner-actions { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+
+  /* The banner shares the chat column with the transcript, so its option list
+     is capped and scrolls instead of pushing the messages off-screen. Rows are
+     tightened and descriptions clamped to one line; the full text stays
+     reachable through the row's title. The expanded modal keeps the roomy
+     layout — it already owns the whole viewport. */
+  .banner-inner .row-list {
+    max-height: calc(30vh / var(--font-zoom));
+    overflow-y: auto;
+    gap: 4px;
+  }
+  .banner-inner .row { padding: 6px 10px; }
+  .banner-inner .row-desc {
+    display: -webkit-box; -webkit-line-clamp: 1; line-clamp: 1;
+    -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .banner-inner .preview-body { max-height: calc(26vh / var(--font-zoom)); }
 
   /* ─── Full modal (expanded) ──────────────────────────────────── */
   .backdrop {
