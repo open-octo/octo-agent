@@ -9,6 +9,7 @@
 
   let open = $state(false)
   let rootEl: HTMLElement | undefined = $state()
+  let triggerEl: HTMLButtonElement | undefined = $state()
 
   function fmtElapsed(startedAt: number): string {
     const sec = now > 0 && startedAt > 0 ? (now - startedAt) / 1000 : 0
@@ -19,26 +20,38 @@
     return `${m}m ${s.toString().padStart(2, '0')}s`
   }
 
-  // The trigger lives inside rootEl, so its own click never closes the popover.
+  // rootEl wraps only the trigger and the popover — not the empty width of the
+  // row — so clicking anywhere else, that blank space included, closes it. The
+  // trigger being inside means its own click never counts as "outside".
   function onDocClick(e: MouseEvent) {
     if (open && rootEl && !rootEl.contains(e.target as Node)) open = false
   }
   function onKeydown(e: KeyboardEvent) {
-    if (open && e.key === 'Escape') open = false
+    if (!open || e.key !== 'Escape') return
+    open = false
+    triggerEl?.focus()
   }
 </script>
 
 <svelte:window onclick={onDocClick} onkeydown={onKeydown} />
 
-<div class="bg-line" bind:this={rootEl}>
+<div class="bg-line">
   <div class="bg-line-inner">
-    <div class="bg-anchor">
-      <button class="bg-trigger" class:open aria-expanded={open} onclick={() => (open = !open)}>
+    <div class="bg-anchor" bind:this={rootEl}>
+      <button
+        class="bg-trigger"
+        class:open
+        bind:this={triggerEl}
+        aria-expanded={open}
+        aria-haspopup="true"
+        aria-controls={open ? 'bg-proc-list' : undefined}
+        onclick={() => (open = !open)}
+      >
         <span class="dot"></span>
         <span class="lbl">{$t(tasks.length === 1 ? 'bgtask.n_process' : 'bgtask.n_processes').replace('{n}', String(tasks.length))}</span>
       </button>
       {#if open}
-        <div class="bg-pop">
+        <div class="bg-pop" id="bg-proc-list">
           {#each tasks as p (p.handle_id)}
           <div class="proc-row">
             <span class="proc-dot"></span>
@@ -56,7 +69,7 @@
 
 <style>
 .bg-line { flex: 0 0 auto; }
-.bg-line-inner { max-width: 800px; margin: 0 auto; padding: 2px 24px; }
+.bg-line-inner { max-width: var(--chat-content-max-width, 1080px); width: 100%; margin: 0 auto; padding: 2px 24px; }
 .bg-anchor { position: relative; display: inline-block; }
 .bg-trigger {
   display: inline-flex; align-items: center; gap: 8px;
