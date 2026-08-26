@@ -1,14 +1,17 @@
 <script lang="ts">
   import { t } from '../../lib/i18n'
 
-  // Real background tasks come from the background_task_update WS event.
-  // Each task: { handle_id, command, elapsed } (elapsed in seconds).
-  let { tasks = [] }: { tasks?: any[] } = $props()
+  // Real background tasks come from the background_tasks_update WS event.
+  // Each task: { handle_id, command, startedAt } — ChatView anchors the
+  // server's one-shot `elapsed` to a local timestamp, since the server only
+  // re-broadcasts on tool calls and process exits.
+  let { tasks = [], now = 0 }: { tasks?: any[]; now?: number } = $props()
 
   let open = $state(false)
   let rootEl: HTMLElement | undefined = $state()
 
-  function fmtElapsed(sec: number): string {
+  function fmtElapsed(startedAt: number): string {
+    const sec = now > 0 && startedAt > 0 ? (now - startedAt) / 1000 : 0
     if (!sec || sec < 0) return '0s'
     if (sec < 60) return `${Math.floor(sec)}s`
     const m = Math.floor(sec / 60)
@@ -42,7 +45,7 @@
             <div class="proc-info">
               <span class="proc-cmd mono">{p.command}</span>
             </div>
-            <span class="proc-time">{$t('bgtask.running_elapsed').replace('{elapsed}', fmtElapsed(p.elapsed))}</span>
+            <span class="proc-time">{$t('bgtask.running_elapsed').replace('{elapsed}', fmtElapsed(p.startedAt))}</span>
           </div>
           {/each}
         </div>

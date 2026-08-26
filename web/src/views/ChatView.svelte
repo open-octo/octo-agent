@@ -1193,7 +1193,22 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
     cleanups.push(ws.on('background_tasks_update', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      chatBgTasks.update(b => ({ ...b, [sid]: (ev as any).tasks ?? [] }))
+      // The server stamps `elapsed` when it broadcasts, and it only broadcasts
+      // on tool calls and process exits — so the number sits frozen between
+      // them, under-reporting a process that outlives the turn. Anchor each
+      // task to a local start timestamp instead and let the UI tick off `now`.
+      // A task already on screen keeps its original anchor, so re-broadcasts
+      // can't make its clock jump.
+      const at = Date.now()
+      chatBgTasks.update(b => {
+        const prev = b[sid] ?? []
+        const tasks = ((ev as any).tasks ?? []).map((t: any) => {
+          const seen = prev.find((p: any) => p.handle_id === t.handle_id)
+          const elapsed = Math.max(0, Number(t.elapsed) || 0)
+          return { ...t, startedAt: seen?.startedAt ?? at - elapsed * 1000 }
+        })
+        return { ...b, [sid]: tasks }
+      })
     }))
 
     cleanups.push(ws.on('request_confirmation', (ev) => {
@@ -3128,7 +3143,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
       <!-- Background processes tray -->
       {#if bgTasks && bgTasks.length > 0}
-        <BackgroundProcesses tasks={bgTasks} />
+        <BackgroundProcesses tasks={bgTasks} {now} />
       {/if}
 
       <!-- Question banner (aligned with composer) -->
