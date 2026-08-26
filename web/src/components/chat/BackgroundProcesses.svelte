@@ -23,6 +23,11 @@
   // rootEl wraps only the trigger and the popover — not the empty width of the
   // row — so clicking anywhere else, that blank space included, closes it. The
   // trigger being inside means its own click never counts as "outside".
+  //
+  // Listened for during capture: the composer's menu chips stopPropagation on
+  // their own clicks (that's how their menus survive the composer's own
+  // window-level close), and a bubble-phase listener would never see those —
+  // leaving this popover open underneath a freshly opened menu.
   function onDocClick(e: MouseEvent) {
     if (open && rootEl && !rootEl.contains(e.target as Node)) open = false
   }
@@ -33,7 +38,7 @@
   }
 </script>
 
-<svelte:window onclick={onDocClick} onkeydown={onKeydown} />
+<svelte:window onclickcapture={onDocClick} onkeydown={onKeydown} />
 
 <div class="bg-line">
   <div class="bg-line-inner">
