@@ -168,7 +168,7 @@ p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 6
 .card-desc {
   font-size: 13px; color: var(--text-tertiary);
   overflow: hidden; display: -webkit-box;
-  -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical;
 }
 .card-actions {
   display: flex; gap: 6px; flex-wrap: wrap;
