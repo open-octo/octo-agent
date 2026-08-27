@@ -28,7 +28,7 @@
   // The button follows the view: it is only here when the current page has
   // something for the panel to show, so it can never reopen the last chat's
   // artifacts beside an unrelated page.
-  const panelTarget = $derived(panelForView($view, $lightappOpen))
+  const panelTarget = $derived(panelForView($view, $lightappOpen, $activeSessionId))
   function openPanel() {
     if (panelTarget) panelContent.set(panelTarget)
   }

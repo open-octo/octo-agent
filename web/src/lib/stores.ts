@@ -143,17 +143,19 @@ export function savePanelMode(mode: PanelMode): void {
 // when that view has nothing for it. 'session' and 'diff' are the active
 // chat's own output, so they belong to the chat view alone — opened from
 // anywhere else they park the previous session's artifacts beside a page that
-// has nothing to do with them. Light Apps answers for its own view, and only
-// once a tab is open in it: an empty strip is not worth a column.
-export function panelForView(v: string, openApps: string[]): PanelContent | null {
-  if (v === 'chat') return readPanelMode()
+// has nothing to do with them. The blank chat landing counts as 'anywhere
+// else': there is no session yet, so neither mode has anything to read.
+// Light Apps answers for its own view, and only once a tab is open in it: an
+// empty strip is not worth a column.
+export function panelForView(v: string, openApps: string[], sessionId: string | null): PanelContent | null {
+  if (v === 'chat') return sessionId ? readPanelMode() : null
   if (v === 'lightapps') return openApps.length > 0 ? 'lightapps' : null
   return null
 }
 
 /** Open the panel in whatever the current view offers, or close it if open. */
 export function togglePanel(): void {
-  panelContent.update(v => v ? null : panelForView(get(view), get(lightappOpen)))
+  panelContent.update(v => v ? null : panelForView(get(view), get(lightappOpen), get(activeSessionId)))
 }
 
 // Artifacts panel taking over the whole content area except the sidebar, so a

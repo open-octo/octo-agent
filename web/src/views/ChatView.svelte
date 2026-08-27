@@ -483,6 +483,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // does not leave the chat view showing "Session is bound to another entry."
       bindRequiredFor = null
       turnError = null
+      // The landing is not a session, so it inherits none of one's artifacts.
+      // Leaving them would keep the panel open over a blank chat, still
+      // showing whichever session the user just left — the same stale-panel
+      // problem switching between two sessions already resets away. The empty
+      // marker matches no in-flight fetch, so nothing lands here afterwards.
+      resetArtifacts('')
       return
     }
 
