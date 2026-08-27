@@ -8,6 +8,7 @@
   import { diffData, diffLoading, diffBadge, loadDiff } from '../lib/diff'
   import DiffView from './diff/DiffView.svelte'
   import * as api from '../lib/api'
+  import { installLaStorageBridge, registerLaIframe, unregisterLaIframe, withLaBridge } from '../lib/laStorage'
 
   // This column never holds the traffic lights, but its top row has to sit on
   // the same axis as the chat title beside it, which Header lifts on mac.
@@ -210,6 +211,22 @@
   const laCurSlug = $derived($lightappSel || $lightapps[0]?.slug || '')
   const laCurHTML = $derived($lightappHTML[laCurSlug] ?? '')
   const laCurName = $derived($lightapps.find(a => a.slug === laCurSlug)?.name ?? laCurSlug)
+
+  // ── Light App storage bridge ─────────────────────────────────────────────
+  // The sandboxed srcdoc iframe has an opaque origin, so it can't touch any
+  // persistent storage. We host an IndexedDB here and the injected bridge
+  // script (withLaBridge) shims the app's own localStorage calls onto it over
+  // postMessage. Register the iframe so the handler only serves OUR frame,
+  // under the slug whose script we injected — the element is reused when the
+  // user switches apps, so the namespace has to be re-pinned every time.
+  let laFrameEl = $state<HTMLIFrameElement | null>(null)
+  $effect(() => {
+    installLaStorageBridge()
+    const el = laFrameEl
+    if (!el) return
+    registerLaIframe(el.contentWindow, laCurSlug)
+    return () => unregisterLaIframe(el.contentWindow)
+  })
 
   // ── Resizable width ────────────────────────────────────────────────────────
   // Drag the left-edge handle to resize; the width persists across sessions.
@@ -416,7 +433,7 @@
       {#if laLoading}
         <div class="empty"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon><span>{$t('common.loading')}</span></div>
       {:else if laCurHTML}
-        <iframe srcdoc={laCurHTML} sandbox="allow-scripts" allow="clipboard-write" title={laCurName}></iframe>
+        <iframe bind:this={laFrameEl} srcdoc={withLaBridge(laCurHTML, laCurSlug)} sandbox="allow-scripts" allow="clipboard-write" title={laCurName}></iframe>
       {:else if $lightapps.length === 0}
         <div class="empty">
           <iconify-icon icon="ant-design:appstore-outlined" width="28"></iconify-icon>
