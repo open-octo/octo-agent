@@ -1,6 +1,6 @@
 <script lang="ts">
   import { get } from 'svelte/store'
-  import { onMount, untrack, tick } from 'svelte'
+  import { onDestroy, onMount, untrack, tick } from 'svelte'
   import {
     running, activeSessionId, chatStreaming, sessions, sessionGroups,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
@@ -13,24 +13,13 @@
   import { t } from '../../lib/i18n'
   import { submitIntent } from '../../lib/composerKeys'
   import { composeSlashCommand } from '../../lib/slashCompose'
+  import { parkDraft, takeDraft, patchParkedAttachments, type Attachment } from '../../lib/composerDrafts'
   import FolderPickerModal from '../overlays/FolderPickerModal.svelte'
   import ProjectModal from '../overlays/ProjectModal.svelte'
   import type { McpServerDetail, McpTool, SessionGroup } from '../../lib/types'
   import { getMcpServer } from '../../lib/api'
 
   let { onSend }: { onSend?: (text: string, files?: any[], queued?: boolean) => void } = $props()
-
-  // A staged attachment. Images carry inline as a base64 data URL (the model
-  // gets an image block); every other type is uploaded to the server and
-  // referenced by `path` (an /api/uploads/<name> URL) so the agent opens it
-  // with read_file/terminal — mirroring how it works against the CLI's
-  // filesystem. Exactly one of data_url / path is set once ready. `uploading`
-  // marks a placeholder whose upload is still in flight; `id` keys that
-  // placeholder so its async result lands on the right entry (see addAttachment).
-  // local_path is a real local path (native dialog on desktop, or the in-app
-  // file picker on localhost web) — the agent reads it in place, no upload
-  // (mirrors the folder picker). Set instead of data_url/path when same-machine.
-  type Attachment = { id?: string; name: string; mime_type?: string; data_url?: string; path?: string; local_path?: string; uploading?: boolean }
 
   // Reject oversized attachments client-side with a clear message rather than
   // letting them fail late. Images keep a conservative cap: they are canvas-
@@ -41,19 +30,17 @@
   const MAX_IMAGE_BYTES = 32 * 1024 * 1024
   const MAX_FILE_BYTES = 512 * 1024 * 1024
 
-  let text = $state('')
-  // Per-session composer draft: keyed by session id so switching sessions
-  // doesn't carry a half-typed message (or its staged attachments) into — or
-  // send them to — the wrong conversation. Plain objects, not $state —
-  // nothing renders them directly, they are only read/written from the
-  // session-switch effect below.
-  let draftsBySession: Record<string, string> = {}
-  let attachmentsBySession: Record<string, Attachment[]> = {}
-  let draftSid = ''
+  // Mounting claims the draft parked for this session — a trip through another
+  // view and back picks the box up exactly where it was left. The
+  // session-switch effect below owns it from there.
+  const initialSid = get(activeSessionId) ?? ''
+  const initialDraft = takeDraft(initialSid)
+  let text = $state(initialDraft.text)
+  let draftSid = initialSid
   let textareaEl = $state<HTMLTextAreaElement | null>(null)
   let fileInputEl = $state<HTMLInputElement | null>(null)
   let skillMenuEl = $state<HTMLDivElement | null>(null)
-  let attachments = $state<Attachment[]>([])
+  let attachments = $state<Attachment[]>(initialDraft.attachments)
   let dragOver = $state(false)
 
   // Called by ChatView when the user clicks "edit" on a prior message — loads
@@ -150,20 +137,28 @@
   // These helpers land the result on the session that STARTED the read, not
   // whatever session is active when it finishes — otherwise switching sessions
   // (or sending) mid-upload leaks the file into the wrong conversation.
+  // `destroyed` splits the same way for time rather than session: once the
+  // composer is gone its `attachments` is a dead end, so the result has to go
+  // to the parked draft — the placeholder is already sitting in there waiting
+  // for it (see patchParkedAttachments).
   let uploadSeq = 0
+  let destroyed = false
+  function live(originSid: string): boolean {
+    return !destroyed && originSid === sid
+  }
   function attachTo(originSid: string, att: Attachment) {
-    if (originSid === sid) attachments = [...attachments, att]
-    else attachmentsBySession[originSid] = [...(attachmentsBySession[originSid] ?? []), att]
+    if (live(originSid)) attachments = [...attachments, att]
+    else patchParkedAttachments(originSid, list => [...list, att])
   }
   function patchAttachment(originSid: string, id: string, patch: Partial<Attachment>) {
     const apply = (list: Attachment[]) => list.map(a => a.id === id ? { ...a, ...patch } : a)
-    if (originSid === sid) attachments = apply(attachments)
-    else if (attachmentsBySession[originSid]) attachmentsBySession[originSid] = apply(attachmentsBySession[originSid])
+    if (live(originSid)) attachments = apply(attachments)
+    else patchParkedAttachments(originSid, apply)
   }
   function dropAttachment(originSid: string, id: string) {
     const drop = (list: Attachment[]) => list.filter(a => a.id !== id)
-    if (originSid === sid) attachments = drop(attachments)
-    else if (attachmentsBySession[originSid]) attachmentsBySession[originSid] = drop(attachmentsBySession[originSid])
+    if (live(originSid)) attachments = drop(attachments)
+    else patchParkedAttachments(originSid, drop)
   }
 
   // Images ride inline as base64 data URLs inside the WebSocket chat message,
@@ -598,18 +593,26 @@
     const nextSid = sid
     if (nextSid === draftSid) return
     untrack(() => {
-      if (draftSid) {
-        draftsBySession[draftSid] = text
-        attachmentsBySession[draftSid] = attachments
-      }
-      text = draftsBySession[nextSid] ?? ''
-      attachments = attachmentsBySession[nextSid] ?? []
+      if (draftSid) parkDraft(draftSid, text, attachments)
+      const draft = takeDraft(nextSid)
+      text = draft.text
+      attachments = draft.attachments
       draftSid = nextSid
       historyIndex = null
       // The menu describes the departing session's text. Keyboard switches
       // (⌘K) never fire the outside-click that would otherwise close it.
       hideSlashMenu()
     })
+  })
+
+  // Leaving the chat view destroys the composer. Park what's in the box under
+  // the session it belongs to (including the empty-string key of a not-yet-
+  // created chat) so coming back restores it instead of starting blank. Park
+  // before flipping `destroyed`: an upload resolving after this point patches
+  // the entry left here.
+  onDestroy(() => {
+    parkDraft(draftSid, text, attachments)
+    destroyed = true
   })
 
   let isStreaming = $derived($chatStreaming[sid] ?? false)
