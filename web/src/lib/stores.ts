@@ -159,6 +159,13 @@ export const panelExpanded = writable(false)
 export const chatHeaderSnippet = writable<Snippet | null>(null)
 
 // Light Apps state for the sidebar (loaded on demand).
+// lightappOpen is the tab strip: the apps the user actually opened, in the
+// order they opened them. `lightapps` stays the full installed list (the cards
+// on the Light Apps page) — the strip must not show apps nobody opened.
+// Not persisted, and it doesn't need to be: 'lightapps' is deliberately absent
+// from PanelMode, so the panel never comes back in this mode on a cold load —
+// the only way in is opening an app, which fills the strip on the way.
+export const lightappOpen = writable<string[]>([])
 export const lightappSel = writable<string>('')
 export const lightapps = writable<import('./api').LightApp[]>([])
 export const lightappHTML = writable<Record<string, string>>({})
