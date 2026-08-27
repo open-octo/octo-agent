@@ -72,7 +72,7 @@
     { id: 'files', icon: 'ant-design:folder-open-outlined', label: () => $t('nav.file_recall'), shortcut: '', run: () => openDataSettings('trash') },
     { id: 'memory', icon: 'ant-design:user-outlined', label: () => $t('nav.memory'), shortcut: '', run: () => openDataSettings('memory') },
     { id: 'lightapps', icon: 'ant-design:appstore-outlined', label: () => $t('nav.light_apps'), shortcut: '', run: () => goTo('lightapps') },
-    { id: 'artifacts', icon: 'ant-design:file-text-outlined', label: () => $t('artifacts.toggle'), shortcut: '', run: () => togglePanel(), available: () => !!panelForView($view, $lightappOpen) },
+    { id: 'artifacts', icon: 'ant-design:file-text-outlined', label: () => $t('artifacts.toggle'), shortcut: '', run: () => togglePanel(), available: () => !!panelForView($view, $lightappOpen, $activeSessionId) },
     { id: 'settings', icon: 'ant-design:setting-outlined', label: () => $t('nav.settings'), shortcut: '', run: () => { close(); settingsModalOpen.set(true) } },
   ]
 
