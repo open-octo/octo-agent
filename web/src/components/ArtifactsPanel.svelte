@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightapps, lightappHTML, showToast, nativeShell, activeSessionId, savePanelMode, type PanelMode } from '../lib/stores'
+  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightappOpen, lightapps, lightappHTML, showToast, nativeShell, activeSessionId, savePanelMode, type PanelMode } from '../lib/stores'
   import { titlebarDblClick } from '../lib/nativeWindow'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
@@ -160,6 +160,21 @@
     finally { laLoading = false }
   }
 
+  function closeLightApp(slug: string) {
+    const list = $lightappOpen
+    const idx = list.indexOf(slug)
+    if (idx < 0) return
+    const rest = list.filter(s => s !== slug)
+    lightappOpen.set(rest)
+    // Closing the last tab closes the panel — an empty Light Apps panel has
+    // nothing to offer, and stopping looking is what the click meant. The
+    // cached HTML is kept, so reopening is instant.
+    if (rest.length === 0) { lightappSel.set(''); closePanel(); return }
+    // Closing the active tab hands over to its neighbour on the right, or the
+    // left one at the end of the strip — the way a browser tab strip behaves.
+    if ($lightappSel === slug) lightappSel.set(rest[Math.min(idx, rest.length - 1)])
+  }
+
   // Load light apps list once when the panel opens in lightapps mode.
   $effect(() => {
     if ($panelContent === 'lightapps' && $lightapps.length === 0 && !laAttempted) loadLightApps()
@@ -208,7 +223,15 @@
   }
 
   // Derive the current light app's HTML preview.
-  const laCurSlug = $derived($lightappSel || $lightapps[0]?.slug || '')
+  // The tab strip is the apps the user opened, in open order. Selection falls
+  // back to the first tab so closing the active one never leaves a blank panel.
+  const laOpenApps = $derived(
+    $lightappOpen.map(slug => {
+      const a = $lightapps.find(x => x.slug === slug)
+      return { slug, name: a?.name ?? slug, icon: a?.icon ?? '' }
+    }),
+  )
+  const laCurSlug = $derived($lightappOpen.includes($lightappSel) ? $lightappSel : ($lightappOpen[0] ?? ''))
   const laCurHTML = $derived($lightappHTML[laCurSlug] ?? '')
   const laCurName = $derived($lightapps.find(a => a.slug === laCurSlug)?.name ?? laCurSlug)
 
@@ -419,28 +442,32 @@
     <div class="topbar" class:native-lift={liftForTrafficLights} ondblclick={titlebarDblClick}>
       <div class="la-chips">
         <span class="footer-lbl">{$t('artifacts.light_apps')}</span>
-        {#each $lightapps as a}
-        <button class="chip" class:active={a.slug === laCurSlug} title={a.name} onclick={() => selectLightApp(a.slug)}>
-          <span>{a.icon || '📦'}</span>
-          {a.name}
-        </button>
+        {#each laOpenApps as a (a.slug)}
+        <span class="chip" class:active={a.slug === laCurSlug}>
+          <button class="chip-main" title={a.name} onclick={() => selectLightApp(a.slug)}>
+            <span>{a.icon || '📦'}</span>
+            {a.name}
+          </button>
+          <button class="chip-close" title={$t('artifacts.close_tab')} aria-label={$t('artifacts.close_tab')} onclick={() => closeLightApp(a.slug)}>
+            <iconify-icon icon="ant-design:close-outlined" width="10"></iconify-icon>
+          </button>
+        </span>
         {/each}
       </div>
       {@render topbarControls()}
     </div>
 
     <div class="body">
-      {#if laLoading}
-        <div class="empty"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon><span>{$t('common.loading')}</span></div>
-      {:else if laCurHTML}
+      {#if laCurHTML}
         <iframe bind:this={laFrameEl} srcdoc={withLaBridge(laCurHTML, laCurSlug)} sandbox="allow-scripts" allow="clipboard-write" title={laCurName}></iframe>
-      {:else if $lightapps.length === 0}
+      {:else if laCurSlug || laLoading}
+        <!-- A tab opens before its HTML arrives, so this covers the fetch. -->
+        <div class="empty"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon><span>{$t('common.loading')}</span></div>
+      {:else}
         <div class="empty">
           <iconify-icon icon="ant-design:appstore-outlined" width="28"></iconify-icon>
           <span>{$t('lightapps.empty')}</span>
         </div>
-      {:else}
-        <div class="empty"><span>Select a Light App above</span></div>
       {/if}
     </div>
 
@@ -740,12 +767,27 @@ iframe { border: 0; width: 100%; height: 100%; display: block; }
 }
 .wbtn:hover:not(:disabled) { background: var(--bg-table-header); }
 .wbtn:disabled { opacity: 0.5; cursor: default; }
+/* A tab, not a button: the label selects and the × closes, so the chip itself
+   is the shell and each half is its own control. */
 .chip {
-  height: 30px; padding: 0 10px; border: 1px solid var(--border-secondary); background: var(--bg-container);
+  height: 30px; padding: 0 4px 0 10px; border: 1px solid var(--border-secondary); background: var(--bg-container);
   color: var(--text-secondary); border-radius: 6px; display: flex; align-items: center;
-  gap: 6px; font-size: 12px; cursor: pointer; flex: 0 0 auto; font-family: inherit;
+  gap: 2px; font-size: 12px; flex: 0 0 auto; font-family: inherit;
 }
 .chip.active { border-color: var(--blue-6); background: var(--active-blue-bg); color: var(--blue-6); }
+.chip-main {
+  display: flex; align-items: center; gap: 6px; max-width: 180px;
+  background: none; border: none; padding: 0; margin: 0;
+  color: inherit; font: inherit; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.chip-close {
+  display: flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; flex: 0 0 auto;
+  background: none; border: none; padding: 0; border-radius: 4px;
+  color: var(--text-tertiary); cursor: pointer; opacity: 0.65;
+}
+.chip-close:hover { opacity: 1; background: var(--hover-neutral); color: var(--text); }
 .spin { animation: octo-spin 0.8s linear infinite; }
 
 /* ── Save-to-Light-App inline form ──────────────────────────────────── */

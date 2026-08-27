@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { showToast, openAgentSession, panelContent, lightapps, lightappSel, lightappHTML } from '../lib/stores'
+  import { showToast, openAgentSession, panelContent, lightapps, lightappSel, lightappOpen, lightappHTML } from '../lib/stores'
   import * as api from '../lib/api'
   import type { LightApp } from '../lib/api'
   import { t, tr } from '../lib/i18n'
@@ -24,17 +24,22 @@
   }
 
   async function handleOpen(slug: string) {
+    // Switch first, fetch second. Fetching the HTML before selecting left the
+    // panel showing whatever was open before for the whole round trip, so a
+    // click on Open looked like it did nothing — and on a heavier app, like it
+    // had opened the wrong one. The tab appears and activates immediately; the
+    // panel renders its own loading state until the HTML lands.
+    lightappOpen.update(list => list.includes(slug) ? list : [...list, slug])
+    lightappSel.set(slug)
+    // Open it in the side panel at its regular width — many light apps are
+    // laid out for a narrow column, and the panel's own maximize button is
+    // there for the ones that want the full content area.
+    panelContent.set('lightapps')
+    if ($lightapps.length === 0) lightapps.set(apps)
+    if ($lightappHTML[slug]) return
     try {
-      // Load Light App data into global stores, then open it in the side
-      // panel at its regular width — many light apps are laid out for a
-      // narrow column, and the panel's own maximize button is there for
-      // the ones that want the full content area.
       const detail = await api.getLightApp(slug)
       lightappHTML.update(m => ({ ...m, [slug]: detail.html }))
-      // If not already loaded, populate the list.
-      if ($lightapps.length === 0) lightapps.set(apps)
-      lightappSel.set(slug)
-      panelContent.set('lightapps')
     } catch (e: any) {
       showToast(`Failed to open: ${e.message}`, 'error')
     }
