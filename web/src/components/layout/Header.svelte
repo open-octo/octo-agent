@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { sidebar, nativeShell, panelContent, view, chatHeaderSnippet, activeSessionId, readPanelMode } from '../../lib/stores'
+  import { sidebar, nativeShell, panelContent, view, chatHeaderSnippet, activeSessionId, lightappOpen, panelForView } from '../../lib/stores'
   import { diffBadge } from '../../lib/diff'
   import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
@@ -24,8 +24,13 @@
   // open/close toggle: choosing the mode is the panel's own job, from its
   // topbar. What this button does gain is a badge — with the panel closed,
   // nothing else can say the agent left changes to review.
+  //
+  // The button follows the view: it is only here when the current page has
+  // something for the panel to show, so it can never reopen the last chat's
+  // artifacts beside an unrelated page.
+  const panelTarget = $derived(panelForView($view, $lightappOpen))
   function openPanel() {
-    panelContent.set(readPanelMode())
+    if (panelTarget) panelContent.set(panelTarget)
   }
 
   const diffCount = $derived($diffBadge[$activeSessionId ?? ''] ?? 0)
@@ -85,10 +90,10 @@
     </button>
   {/if}
 
-  {#if !$panelContent}
+  {#if !$panelContent && panelTarget}
     <button class="icon-btn panel-btn" title={$t('header.toggle_right')} onclick={openPanel}>
       <iconify-icon icon="lucide:panel-right" width="16"></iconify-icon>
-      {#if diffCount > 0}<span class="dot"></span>{/if}
+      {#if diffCount > 0 && panelTarget !== 'lightapps'}<span class="dot"></span>{/if}
     </button>
   {/if}
 

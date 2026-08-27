@@ -117,7 +117,8 @@ export const artifactModalOpen = writable(false)
 
 // Artifacts panel sidebar mode. null = closed, 'session' = session artifacts,
 // 'lightapps' = Light Apps list + rendering, 'diff' = git diff review.
-export const panelContent = writable<'session' | 'lightapps' | 'diff' | null>(null)
+export type PanelContent = 'session' | 'lightapps' | 'diff'
+export const panelContent = writable<PanelContent | null>(null)
 
 // The two modes the panel's own switcher offers, and the one it comes back to.
 // Light Apps is not among them: it has its own entry point and is never a
@@ -138,9 +139,21 @@ export function savePanelMode(mode: PanelMode): void {
   try { localStorage.setItem(PANEL_MODE_KEY, mode) } catch { /* private mode: this visit only */ }
 }
 
-/** Open the panel in its remembered mode, or close it if it is already open. */
+// What the panel can show next to the view the user is actually on, or null
+// when that view has nothing for it. 'session' and 'diff' are the active
+// chat's own output, so they belong to the chat view alone — opened from
+// anywhere else they park the previous session's artifacts beside a page that
+// has nothing to do with them. Light Apps answers for its own view, and only
+// once a tab is open in it: an empty strip is not worth a column.
+export function panelForView(v: string, openApps: string[]): PanelContent | null {
+  if (v === 'chat') return readPanelMode()
+  if (v === 'lightapps') return openApps.length > 0 ? 'lightapps' : null
+  return null
+}
+
+/** Open the panel in whatever the current view offers, or close it if open. */
 export function togglePanel(): void {
-  panelContent.update(v => v ? null : readPanelMode())
+  panelContent.update(v => v ? null : panelForView(get(view), get(lightappOpen)))
 }
 
 // Artifacts panel taking over the whole content area except the sidebar, so a

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { cmdkOpen, view, sessions, activeSessionId, skills, openAgentSession, createNewSession, togglePanel, settingsModalOpen, openSettingsAt, isDesktopShell } from '../../lib/stores'
+  import { cmdkOpen, view, sessions, activeSessionId, skills, openAgentSession, createNewSession, togglePanel, panelForView, lightappOpen, settingsModalOpen, openSettingsAt, isDesktopShell } from '../../lib/stores'
   import { t } from '../../lib/i18n'
 
   let query = $state('')
@@ -49,8 +49,17 @@
     createNewSession()
   }
 
-  // Static actions (always available)
-  const actions = [
+  // Static actions. `available` narrows one to the views it makes sense on;
+  // omitted means always.
+  type PaletteAction = {
+    id: string
+    icon: string
+    label: () => string
+    shortcut: string
+    run: () => void
+    available?: () => boolean
+  }
+  const actions: PaletteAction[] = [
     { id: 'new', icon: 'ant-design:plus-outlined', label: () => $t('nav.new_session'), shortcut: isDesktopShell ? '⌘N' : '', run: () => newSession() },
     { id: 'agents', icon: 'ant-design:robot-outlined', label: () => $t('nav.agents'), shortcut: '', run: () => goTo('agents') },
     { id: 'skills', icon: 'ant-design:thunderbolt-outlined', label: () => $t('nav.skills'), shortcut: '', run: () => goTo('skills') },
@@ -63,7 +72,7 @@
     { id: 'files', icon: 'ant-design:folder-open-outlined', label: () => $t('nav.file_recall'), shortcut: '', run: () => openDataSettings('trash') },
     { id: 'memory', icon: 'ant-design:user-outlined', label: () => $t('nav.memory'), shortcut: '', run: () => openDataSettings('memory') },
     { id: 'lightapps', icon: 'ant-design:appstore-outlined', label: () => $t('nav.light_apps'), shortcut: '', run: () => goTo('lightapps') },
-    { id: 'artifacts', icon: 'ant-design:file-text-outlined', label: () => $t('artifacts.toggle'), shortcut: '', run: () => togglePanel() },
+    { id: 'artifacts', icon: 'ant-design:file-text-outlined', label: () => $t('artifacts.toggle'), shortcut: '', run: () => togglePanel(), available: () => !!panelForView($view, $lightappOpen) },
     { id: 'settings', icon: 'ant-design:setting-outlined', label: () => $t('nav.settings'), shortcut: '', run: () => { close(); settingsModalOpen.set(true) } },
   ]
 
@@ -79,7 +88,7 @@
   )
 
   let matchedActions = $derived(
-    actions.filter((a) => !q || a.label().toLowerCase().includes(q))
+    actions.filter((a) => (a.available?.() ?? true) && (!q || a.label().toLowerCase().includes(q)))
   )
 
   // Flat list for keyboard navigation
