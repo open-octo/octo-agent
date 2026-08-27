@@ -150,11 +150,27 @@
     if (locked) return
     open = false
   }
+
+  // Dismiss on any click outside the badge or its popover. A fixed full-bleed
+  // scrim can't do this job here: the <aside>'s backdrop-filter makes it the
+  // containing block for position:fixed, so the scrim only ever covered the
+  // sidebar and a click anywhere else left the popover open. Same approach the
+  // sidebar's other popovers use (dismissPicker in Sidebar.svelte), except this
+  // listens on the capture phase: sidebar rows stopPropagation on click, so a
+  // bubbling listener would miss a click on a kebab and leave two popovers open
+  // at once. Capture runs before the badge's own onclick, which still sits
+  // inside wrapEl, so clicking the badge closes rather than reopening.
+  let wrapEl = $state<HTMLElement | null>(null)
+  function dismiss(e: MouseEvent) {
+    if (!open || locked) return
+    if (wrapEl && !wrapEl.contains(e.target as Node)) open = false
+  }
 </script>
 
-<div class="vb-wrap">
+<svelte:window onclickcapture={dismiss} />
+
+<div class="vb-wrap" bind:this={wrapEl}>
   {#if open}
-    <button class="vb-scrim" onclick={close} aria-label="close" tabindex="-1"></button>
     <div class="vb-pop" role="dialog" aria-modal="false">
       {#if phase === 'restart_failed'}
         <p class="vb-title warn">⚠ {$t('upgrade.restart.timeout.title')}</p>
@@ -250,7 +266,6 @@
 @keyframes vb-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 @keyframes vb-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
 
-.vb-scrim { position: fixed; inset: 0; z-index: 60; background: none; border: none; cursor: default; }
 .vb-pop {
   position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 61;
   width: 232px; padding: 14px;
