@@ -69,6 +69,30 @@ octo-agent 已经有一套完整的生成 + 展示循环：Agent 生成 HTML →
 - **JS 内联**：`<script>` 直接写在 HTML 内
 - **文件处理**：`<input type="file">` + `FileReader` API，浏览器端搞定
 - **无服务端依赖**：不能发 fetch 到外部 API（Artifacts panel sandboxed iframe 限制）
+- **持久化存储可用**：直接用标准 `localStorage`，见下节
+
+### 运行时存储
+
+轻应用跑在 `sandbox="allow-scripts"` 的 srcdoc iframe 里（刻意不给
+`allow-same-origin`），origin 是 opaque，浏览器会拒掉所有持久化存储 API —
+localStorage / sessionStorage / Cookie / IndexedDB 在里面一律抛 SecurityError。
+
+沙箱不动，改由宿主页面代管：`web/src/lib/laStorage.ts` 在宿主开一个 IndexedDB
+（库 `octo-la-storage`、store `kv`，键 `{slug}:{key}` 按应用隔离），并往轻应用文档里注入
+一段桥脚本，把 iframe 内的 `window.localStorage` 换成一个同步 shim —— 读走内存
+缓存，写同步更新缓存再经 postMessage 落到宿主。文档加载时先 dump 预取该应用的
+全部历史数据，`window.__laStorageReady` 在预取落地后 resolve。
+
+对轻应用来说这是**零改动**的：继续写标准 `localStorage`，没有任何特殊接口。
+localStorage 原生可用时（非沙箱上下文）桥脚本什么都不做。
+
+与原生 localStorage 的差异，都是刻意的：
+
+- 单键上限 1MB、单应用总量上限 5MB，超限同步抛 `QuotaExceededError`；键名上限
+  512 字符，超限同样抛。宿主侧独立复核同一组上限，绕过 shim 也灌不进去。
+- 落盘是异步的，崩溃或提前关闭可能丢最后一次写。同页内读写全同步一致，跨页重启
+  的读一致性由启动预取保证。
+- sessionStorage 仍然不可用 —— 只存活一次访问的状态放普通变量就够了。
 
 ## Agent 交互流程
 
@@ -251,7 +275,7 @@ GET /api/light-apps/{slug}    →  {"manifest": {...}, "html": "<index.html cont
 - **不做 Python/Node 运行时 Light App**。保持零外部依赖，只用浏览器沙箱。如果未来真有需求（如需要 pandas 处理大 CSV），再评估是否引入 `pyodide`（WASM Python）而不是起系统进程。
 - **不做 Light App 间的数据共享**。每个 App 独立，不引入跨 App 的消息机制。
 - **不做 Light App 的版本管理**。覆盖即更新，不保留历史版本。用户要回滚可以自己在对话里让 Agent 重新生成。
-- **不做「从 Light App 回调 Agent」**。纯前端闭环，避免 sandboxed iframe 里的 postMessage 跨域复杂度。用户想用 AI 能力时回到对话。
+- **不做「从 Light App 回调 Agent」**。纯前端闭环。宿主与轻应用之间只有存储桥这一条 postMessage 通道，协议就四个操作（dump/set/remove/clear），不扩成通用 RPC。用户想用 AI 能力时回到对话。
 
 ## 实现分阶段
 
