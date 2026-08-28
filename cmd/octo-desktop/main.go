@@ -223,27 +223,19 @@ func main() {
 		// thanks to the option below and handles real quits (Cmd-Q) itself, so
 		// it always allows the quit.
 		ShouldQuit: func() bool {
-			allow := func() bool {
-				if runtime.GOOS == "darwin" {
-					return true
-				}
-				// A confirmed update restart quits so the updater's helper (which
-				// waits for this process to exit) can swap the binary. Vetoing
-				// that quit (keep-running-in-background) would deadlock the
-				// update. Keyed on the user's restart action, not on updater
-				// state: a staged-but-deferred update ("remind me later") must
-				// not quietly disable keep-running-in-background.
-				if bridge.updateRestart.Load() {
-					return true
-				}
-				return bridge.allowQuit.Load()
-			}()
-			// The shutdown that follows closes the window; the close hook must
-			// let that destroy it rather than hide it (see closeShouldHide).
-			if allow {
-				bridge.quitting.Store(true)
+			if runtime.GOOS == "darwin" {
+				return true
 			}
-			return allow
+			// A confirmed update restart quits so the updater's helper (which
+			// waits for this process to exit) can swap the binary. Vetoing
+			// that quit (keep-running-in-background) would deadlock the
+			// update. Keyed on the user's restart action, not on updater
+			// state: a staged-but-deferred update ("remind me later") must
+			// not quietly disable keep-running-in-background.
+			if bridge.updateRestart.Load() {
+				return true
+			}
+			return bridge.allowQuit.Load()
 		},
 		Mac: application.MacOptions{
 			// Closing the window must not quit the hub when the user wants it to

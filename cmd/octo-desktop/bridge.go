@@ -44,9 +44,10 @@ type nativeBridge struct {
 	// option (ShouldQuit there always allows the quit), but the flag still tells
 	// the close hook whether the app is staying alive — see closeShouldHide.
 	allowQuit atomic.Bool
-	// quitting is set once ShouldQuit has allowed a termination, so the window
-	// close the shutdown performs is a real destroy rather than a hide.
-	quitting atomic.Bool
+	// hidden is set when a close was turned into a hide and cleared by the next
+	// show. The liveness probe consults it: a window the user just put away
+	// must not be replaced — and popped back up — because its page went quiet.
+	hidden atomic.Bool
 
 	// Webview liveness, fed by POST /api/native/heartbeat from the page in
 	// nativeShell mode (see startNativeHeartbeat in the frontend). All unix
@@ -564,15 +565,23 @@ func (b *nativeBridge) showWindowAt(hash string) {
 		// including ours below — whereas listeners run concurrently and could
 		// not reliably veto the destroy. Every reason the window must really
 		// go away passes straight through: a quit in progress (allowQuit,
-		// updateRestart, quitting) and a revive discarding a detached corpse
-		// (b.window no longer points here). Liveness is unaffected — a hidden
-		// window that lost its renderer is reloaded by the terminate handler
-		// below, and the next show still runs probeAfterShow.
+		// updateRestart) and a revive discarding a detached corpse (b.window
+		// no longer points here). A fullscreen window also takes the old
+		// destroy path: ordering out a fullscreen NSWindow is a known AppKit
+		// trap (an empty Space left behind, a confused re-show) — exactly the
+		// blank-window class this shell has fought before. Liveness is
+		// otherwise unaffected — a hidden window that lost its renderer is
+		// reloaded by the terminate handler below, and the next show still
+		// runs probeAfterShow.
 		w.RegisterHook(events.Common.WindowClosing, func(ev *application.WindowEvent) {
-			if !closeShouldHide(b.currentWindow() == w, b.allowQuit.Load(), b.updateRestart.Load(), b.quitting.Load()) {
+			if !closeShouldHide(b.currentWindow() == w, b.allowQuit.Load(), b.updateRestart.Load()) {
+				return
+			}
+			if w.IsFullscreen() {
 				return
 			}
 			ev.Cancel()
+			b.hidden.Store(true)
 			w.Hide()
 		})
 		// Forget the window when it really closes so a later Show re-creates one;
@@ -650,6 +659,8 @@ func (b *nativeBridge) showWindowAt(hash string) {
 			win.SetURL(target)
 		}
 	}
+	// Cleared before Show so the probe below judges a window the user asked for.
+	b.hidden.Store(false)
 	win.Show()
 	// Only un-minimise here. Wails' Restore() also un-maximises (and exits
 	// fullscreen), so calling it unconditionally on every show/reopen — e.g.
@@ -698,10 +709,12 @@ func closeShouldQuit(goos string, allowQuit bool) bool {
 // Only the live window (current) qualifies — a detached corpse a revive is
 // discarding must really close — and only while the app is staying alive:
 // allowQuit means the close is meant to end the app (or requestQuit already
-// decided so), updateRestart and quitting mean a termination is under way and
-// the shutdown's window close must destroy for real.
-func closeShouldHide(current, allowQuit, updateRestart, quitting bool) bool {
-	return current && !allowQuit && !updateRestart && !quitting
+// decided so), updateRestart means the updater's restart is under way and its
+// window close must destroy for real. No flag is needed for an ordinary quit:
+// Wails' shutdown nils its window map before the closes it issues are
+// dispatched, so those never reach the hook.
+func closeShouldHide(current, allowQuit, updateRestart bool) bool {
+	return current && !allowQuit && !updateRestart
 }
 
 // reviveAllowed rate-limits automatic window re-creation so a page that is
@@ -792,6 +805,13 @@ func (b *nativeBridge) probeAfterShow(shown *application.WebviewWindow) {
 			if b.judgePage(shownAt) == pageHealthy {
 				return
 			}
+		}
+		// The user closed (hid) the window while the probe slept. Replacing it
+		// now would pop a fresh window onto their screen for a page they had
+		// already put away — and a healthy hidden page can legitimately go
+		// quiet. Nothing is lost: the next show probes again from scratch.
+		if b.hidden.Load() {
+			return
 		}
 		old := b.detachStalled(shown, time.Now())
 		if old == nil {
