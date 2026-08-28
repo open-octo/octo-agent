@@ -101,6 +101,40 @@ export function touchSession(id: string) {
 }
 
 /**
+ * Mark the on-screen session seen when the page goes away — window/tab close
+ * (pagehide) or minimize/OS-suspension of the webview (visibilitychange →
+ * hidden).
+ *
+ * A turn's end-of-turn file writes (context-usage persist, title adoption)
+ * land AFTER the reply is fully rendered, and the only event that re-marks
+ * the session afterwards is the fire-and-forget turn_ended broadcast: a
+ * window gone before that broadcast arrives — or a webview the OS suspended
+ * mid-turn — keeps a seen mark older than the file's new mtime, and the next
+ * open shows an unread dot on a session the user finished reading. Stamping
+ * on the way out closes that gap for the session on screen, the only one the
+ * user could have read through.
+ *
+ * `activeId` returns the session whose transcript is on screen, or null when
+ * chat isn't the visible view — the same contract as the marking effect in
+ * App.svelte. Returns an unsubscribe.
+ */
+export function markActiveSessionSeenOnLeave(activeId: () => string | null): () => void {
+  const mark = () => {
+    const sid = activeId()
+    if (sid) markSessionSeen(sid)
+  }
+  const onVisibility = () => {
+    if (document.visibilityState === 'hidden') mark()
+  }
+  window.addEventListener('pagehide', mark)
+  document.addEventListener('visibilitychange', onVisibility)
+  return () => {
+    window.removeEventListener('pagehide', mark)
+    document.removeEventListener('visibilitychange', onVisibility)
+  }
+}
+
+/**
  * Baseline newly-seen sessions and forget vanished ones.
  *
  * Baselining is what keeps a first visit (or a new browser) from opening onto

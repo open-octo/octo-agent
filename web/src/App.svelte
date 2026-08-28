@@ -37,7 +37,7 @@
   import ArtifactsPanel from './components/ArtifactsPanel.svelte'
   import FeedbackModal from './components/overlays/FeedbackModal.svelte'
   import Toast from './components/overlays/Toast.svelte'
-  import { touchSession, markSessionSeen, sessionTouchedAt } from './lib/unread'
+  import { touchSession, markSessionSeen, markActiveSessionSeenOnLeave, sessionTouchedAt } from './lib/unread'
 
   // The session on screen is read by definition — this is the only place the
   // sidebar's unread dot gets cleared. It re-marks on every list change and
@@ -53,6 +53,14 @@
     if ($view !== 'chat' || !sid) return
     markSessionSeen(sid)
   })
+
+  // The effect above only runs on store changes, and a turn's end-of-turn file
+  // writes produce none the client can see — the fire-and-forget turn_ended is
+  // the sole re-mark, and a window closed (or a webview suspended) before it
+  // arrives leaves the seen mark behind the file's mtime: a phantom unread dot
+  // on next open for a session the user finished reading. Stamp the on-screen
+  // session seen as the page goes away.
+  onMount(() => markActiveSessionSeenOnLeave(() => get(view) === 'chat' ? get(activeSessionId) : null))
 
   // Switching chats must never leave the previous session's diff on screen: the
   // panel is per-session, and a stale patch list reads as this session's work.
@@ -291,6 +299,14 @@
       refreshSessionsFromServer()
       api.listSessionGroups().then(org => sessionGroups.set(org.groups)).catch(() => { /* non-critical */ })
     })
+
+    // Synthesized by the WS manager on every reconnect (ws.ts): the socket
+    // has no backlog, so session_activity events broadcast while this tab was
+    // disconnected are gone for good, and with them the turn_ended that would
+    // have refreshed a row's unread state. Refetching the list lands the
+    // server's real updated_at, and the unread effect re-marks the session on
+    // screen — healing both missed dots and phantom ones.
+    ws.on('session_list_reload', refreshSessionsFromServer)
 
     // The group registry changed — in this tab or another (a group edit, a
     // membership move, a pin, a project's working directory or notes). The
