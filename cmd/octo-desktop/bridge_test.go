@@ -440,3 +440,28 @@ func TestCloseShouldQuit(t *testing.T) {
 		}
 	}
 }
+
+// Closing the window while the hub keeps running in the tray hides it instead
+// of destroying it, so the next show skips the webview cold start. Every reason
+// the window must really go must win over that: a detached corpse a revive is
+// discarding (not current), a close meant to end the app (allowQuit), and a
+// termination already under way (updateRestart, quitting) whose shutdown-time
+// window close has to destroy for real.
+func TestCloseShouldHide(t *testing.T) {
+	cases := []struct {
+		name                                        string
+		current, allowQuit, updateRestart, quitting bool
+		want                                        bool
+	}{
+		{"live window, app stays alive", true, false, false, false, true},
+		{"detached corpse from a revive", false, false, false, false, false},
+		{"close is meant to quit", true, true, false, false, false},
+		{"update restart in progress", true, false, true, false, false},
+		{"termination already allowed", true, false, false, true, false},
+	}
+	for _, tc := range cases {
+		if got := closeShouldHide(tc.current, tc.allowQuit, tc.updateRestart, tc.quitting); got != tc.want {
+			t.Errorf("%s: closeShouldHide = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

@@ -39,10 +39,14 @@ type nativeBridge struct {
 	// allowQuit gates the app's ShouldQuit on Windows/Linux, where closing the
 	// last window would otherwise terminate the app (and the hub with it). It
 	// starts false when KeepRunningInBackground is on, so a window close hides
-	// to the tray; requestQuit flips it true for a real quit. Unused on macOS
-	// (its close behavior is the ApplicationShouldTerminateAfterLastWindowClosed
-	// option; ShouldQuit there always allows the quit).
+	// to the tray; requestQuit flips it true for a real quit. On macOS the
+	// close behavior itself is the ApplicationShouldTerminateAfterLastWindowClosed
+	// option (ShouldQuit there always allows the quit), but the flag still tells
+	// the close hook whether the app is staying alive — see closeShouldHide.
 	allowQuit atomic.Bool
+	// quitting is set once ShouldQuit has allowed a termination, so the window
+	// close the shutdown performs is a real destroy rather than a hide.
+	quitting atomic.Bool
 
 	// Webview liveness, fed by POST /api/native/heartbeat from the page in
 	// nativeShell mode (see startNativeHeartbeat in the frontend). All unix
@@ -449,9 +453,10 @@ func (b *nativeBridge) Minimise() {
 	}
 }
 
-// Close closes the window (sends WindowClosing, after which the app's ShouldQuit
-// decides whether the hub actually terminates or keeps running in the tray).
-// No-op before the window exists.
+// Close closes the window (sends WindowClosing; the close hook then hides the
+// window when the hub keeps running in the tray, otherwise it is destroyed and
+// the app's ShouldQuit decides whether the process terminates). No-op before
+// the window exists.
 func (b *nativeBridge) Close() {
 	if win := b.currentWindow(); win != nil {
 		win.Close()
@@ -481,11 +486,12 @@ func (b *nativeBridge) openSettings() { b.showWindowAt("settings") }
 // "New Session" button and Cmd/Ctrl+N trigger.
 func (b *nativeBridge) openNewSession() { b.showWindowAt("new") }
 
-// showWindowAt brings the hub window to the foreground, re-creating it if it was
-// closed to the tray (KeepRunningInBackground), and navigates to the given
-// frontend hash route (empty = leave it where it is). The frontend routes on
-// location.hash, so a fresh window loads straight into the view and an existing
-// one navigates via a hashchange — no full reload.
+// showWindowAt brings the hub window to the foreground — un-hiding the one a
+// close put in the tray (KeepRunningInBackground) or re-creating it if it was
+// destroyed — and navigates to the given frontend hash route (empty = leave it
+// where it is). The frontend routes on location.hash, so a fresh window loads
+// straight into the view and an existing one navigates via a hashchange — no
+// full reload.
 func (b *nativeBridge) showWindowAt(hash string) {
 	// The marker rides on every navigation the shell performs (fresh window and
 	// SetURL alike) so nativeShell stays true across reloads and route changes.
@@ -548,8 +554,29 @@ func (b *nativeBridge) showWindowAt(hash string) {
 				TitleBar: application.MacTitleBarHiddenInset,
 			},
 		})
-		// Forget the window when it closes so a later Show re-creates one; the
-		// app itself stays alive via ApplicationShouldTerminateAfterLastWindowClosed.
+		// Closing while the hub keeps running in the tray hides the window
+		// instead of destroying it, so the next show is instant: destroying
+		// meant every reopen paid for a new WebContent process, a cold parse of
+		// the bundle and the full boot sequence (auth, config, session list,
+		// route restore). A hook, not a listener: Wails runs hooks synchronously
+		// before its own WindowClosing listener (the one that destroys the
+		// window) and skips every listener once the event is cancelled —
+		// including ours below — whereas listeners run concurrently and could
+		// not reliably veto the destroy. Every reason the window must really
+		// go away passes straight through: a quit in progress (allowQuit,
+		// updateRestart, quitting) and a revive discarding a detached corpse
+		// (b.window no longer points here). Liveness is unaffected — a hidden
+		// window that lost its renderer is reloaded by the terminate handler
+		// below, and the next show still runs probeAfterShow.
+		w.RegisterHook(events.Common.WindowClosing, func(ev *application.WindowEvent) {
+			if !closeShouldHide(b.currentWindow() == w, b.allowQuit.Load(), b.updateRestart.Load(), b.quitting.Load()) {
+				return
+			}
+			ev.Cancel()
+			w.Hide()
+		})
+		// Forget the window when it really closes so a later Show re-creates one;
+		// the app itself stays alive via ApplicationShouldTerminateAfterLastWindowClosed.
 		// Cancel any pending debounce and flush the last captured geometry — this
 		// only persists already-captured settings, so unlike reading the window
 		// here it can't race the window's destruction.
@@ -665,6 +692,16 @@ const (
 // the user has KeepRunningInBackground on, so closing hides to the tray.
 func closeShouldQuit(goos string, allowQuit bool) bool {
 	return goos == "windows" && allowQuit
+}
+
+// closeShouldHide reports whether a WindowClosing should be turned into a hide.
+// Only the live window (current) qualifies — a detached corpse a revive is
+// discarding must really close — and only while the app is staying alive:
+// allowQuit means the close is meant to end the app (or requestQuit already
+// decided so), updateRestart and quitting mean a termination is under way and
+// the shutdown's window close must destroy for real.
+func closeShouldHide(current, allowQuit, updateRestart, quitting bool) bool {
+	return current && !allowQuit && !updateRestart && !quitting
 }
 
 // reviveAllowed rate-limits automatic window re-creation so a page that is
