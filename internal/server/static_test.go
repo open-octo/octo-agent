@@ -176,10 +176,10 @@ func TestStaticFileHandler_HeadHasNoBody(t *testing.T) {
 	}
 }
 
-// A non-200 from the inner handler passes through untouched. "/index.html" is
-// the one such case this handler produces (ServeFileFS canonicalises it to a
-// 301 → "./"); the redirect must keep its headers and an empty body — no gzip
-// header or trailer appended by a writer that never compressed anything.
+// "/index.html" is answered by ServeFileFS with a canonicalising 301 → "./"
+// rather than the file, so it must never enter the compressed path: the
+// redirect keeps its headers and an empty body, with no gzip header or
+// trailer.
 func TestStaticFileHandler_RedirectPassesThrough(t *testing.T) {
 	w := getStatic(t, staticFileHandler(testDist()), "/index.html", map[string]string{"Accept-Encoding": "gzip"})
 
@@ -206,5 +206,23 @@ func TestStaticFileHandler_GzipDropsAcceptRanges(t *testing.T) {
 	}
 	if ar := w.Header().Get("Accept-Ranges"); ar != "" {
 		t.Errorf("Accept-Ranges = %q, want unset on a gzipped response", ar)
+	}
+}
+
+// A dist without an entrypoint reaches ServeFileFS's own 404 — the compressed
+// path only ever writes a file it could read, never an inner handler's error.
+func TestStaticFileHandler_MissingIndexIsPlain404(t *testing.T) {
+	dist := testDist()
+	delete(dist, "index.html")
+	w := getStatic(t, staticFileHandler(dist), "/some/spa/route", map[string]string{"Accept-Encoding": "gzip"})
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+	if ce := w.Header().Get("Content-Encoding"); ce != "" {
+		t.Errorf("Content-Encoding = %q, want none on a 404", ce)
+	}
+	if !strings.Contains(w.Body.String(), "404") {
+		t.Errorf("body = %q, want the stdlib 404 text", w.Body.String())
 	}
 }
