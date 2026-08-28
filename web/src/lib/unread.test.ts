@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { get } from 'svelte/store'
 import { sessions } from './stores'
-import { isUnread, markSessionSeen, touchSession, reconcileSeen, sessionSeenAt, sessionTouchedAt } from './unread'
+import { isUnread, markSessionSeen, markActiveSessionSeenOnLeave, touchSession, reconcileSeen, sessionSeenAt, sessionTouchedAt } from './unread'
 
 // jsdom under Node 26 exposes no localStorage (the built-in one needs
 // --localstorage-file, and jsdom's own doesn't get installed over it), so the
@@ -123,6 +123,47 @@ describe('markSessionSeen', () => {
     sessionSeenAt.set({ a: far })
     markSessionSeen('a')
     expect(get(sessionSeenAt).a).toBe(far)
+  })
+})
+
+describe('markActiveSessionSeenOnLeave', () => {
+  function setVisibility(state: string) {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+  }
+
+  it('marks the on-screen session seen when the window closes (pagehide)', () => {
+    sessionSeenAt.set({ a: T0 })
+    const off = markActiveSessionSeenOnLeave(() => 'a')
+    window.dispatchEvent(new Event('pagehide'))
+    expect(get(sessionSeenAt).a).toBeGreaterThan(T0)
+    off()
+  })
+
+  it('marks on visibilitychange to hidden, not on a return to visible', () => {
+    sessionSeenAt.set({ a: T0 })
+    const off = markActiveSessionSeenOnLeave(() => 'a')
+    setVisibility('visible')
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(get(sessionSeenAt).a).toBe(T0)
+    setVisibility('hidden')
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(get(sessionSeenAt).a).toBeGreaterThan(T0)
+    off()
+    setVisibility('visible')
+  })
+
+  it('does nothing when no session transcript is on screen', () => {
+    const off = markActiveSessionSeenOnLeave(() => null)
+    window.dispatchEvent(new Event('pagehide'))
+    expect(get(sessionSeenAt)).toEqual({})
+    off()
+  })
+
+  it('stops marking after unsubscribe', () => {
+    const off = markActiveSessionSeenOnLeave(() => 'a')
+    off()
+    window.dispatchEvent(new Event('pagehide'))
+    expect(get(sessionSeenAt)).toEqual({})
   })
 })
 

@@ -69,6 +69,13 @@ export class WsManager {
         for (const sessionId of this.subscriptions) {
           this.dispatch({ type: "history_reload", session_id: sessionId });
         }
+        // The sidebar is a hole too: session_activity events are
+        // fire-and-forget, so a turn_ended broadcast during the disconnect
+        // never arrived. Its session's updated_at moved on the server while
+        // this tab's copy — and its unread-dot watermark — stayed stale:
+        // the row either misses a dot it should have, or keeps a phantom one
+        // the user already read through. Refetch the list so both reconcile.
+        this.dispatch({ type: "session_list_reload" });
       }
     };
 
