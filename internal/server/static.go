@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"embed"
 	"io/fs"
+	"mime"
 	"net/http"
 	"path"
 	"strings"
@@ -62,7 +63,7 @@ func staticFileHandler(dist fs.FS) http.Handler {
 			if f, err := dist.Open(name); err == nil {
 				_ = f.Close()
 				setStaticCacheControl(w.Header(), name)
-				serveCompressed(w, r, name, fileServer)
+				serveCompressed(w, r, dist, name, fileServer)
 				return
 			}
 		}
@@ -74,7 +75,7 @@ func staticFileHandler(dist fs.FS) http.Handler {
 		// keys its redirect off r.URL.Path (here "/" or an SPA route), so it
 		// serves the file without redirecting.
 		setStaticCacheControl(w.Header(), "index.html")
-		serveCompressed(w, r, "index.html", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serveCompressed(w, r, dist, "index.html", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.ServeFileFS(w, r, dist, "index.html")
 		}))
 	})
@@ -106,71 +107,53 @@ func compressible(name string) bool {
 	return false
 }
 
-// serveCompressed runs next with the response gzipped when the client accepts
-// it and the file is worth it. http.FileServer sends the embedded FS as-is, so
-// a cold load was moving the whole ~600 KB entry bundle uncompressed on every
-// window open. Range and non-GET requests pass through untouched: a byte range
-// of gzipped output is meaningless, and a HEAD must not grow a body.
-func serveCompressed(w http.ResponseWriter, r *http.Request, name string, next http.Handler) {
+// serveCompressed serves name from dist gzipped when the client accepts it and
+// the file is worth it; every other request goes to next (http.FileServer /
+// ServeFileFS) untouched. FileServer sends the embedded FS as-is, so a cold
+// load was moving the whole ~600 KB entry bundle uncompressed on every window
+// open. Range and non-GET requests pass through: a byte range of gzipped
+// output is meaningless, and a HEAD must not grow a body. So does a path
+// FileServer answers with something other than the file — its ".../index.html"
+// → "./" canonicalising 301 — and a name that fails to read, which FileServer
+// turns into its own 404.
+//
+// The compressed body is produced here, from bytes read out of dist, rather
+// than by wrapping the ResponseWriter handed to next. A wrapper must forward
+// whatever the inner handler writes when the status is not 200, and that
+// forwarding is indistinguishable, to a static analyser, from reflecting
+// request data into the response (CodeQL go/reflected-xss, alert 203). Writing
+// only what was read from the embedded FS leaves nothing to misread.
+func serveCompressed(w http.ResponseWriter, r *http.Request, dist fs.FS, name string, next http.Handler) {
 	if r.Method != http.MethodGet || r.Header.Get("Range") != "" || !compressible(name) ||
-		!strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		!strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") ||
+		strings.HasSuffix(r.URL.Path, "/index.html") {
 		next.ServeHTTP(w, r)
 		return
 	}
-	gw := &gzipResponseWriter{ResponseWriter: w, gz: gzip.NewWriter(w)}
-	next.ServeHTTP(gw, r)
-	gw.close()
-}
-
-// gzipResponseWriter compresses a 200 body. Any other status (a redirect, an
-// error, a 304) is passed through untouched so its body and headers stay what
-// the inner handler meant.
-type gzipResponseWriter struct {
-	http.ResponseWriter
-	gz          *gzip.Writer
-	wroteHeader bool
-	passthrough bool
-}
-
-func (g *gzipResponseWriter) WriteHeader(code int) {
-	if g.wroteHeader {
+	data, err := fs.ReadFile(dist, name)
+	if err != nil {
+		next.ServeHTTP(w, r)
 		return
 	}
-	g.wroteHeader = true
-	if code != http.StatusOK {
-		g.passthrough = true
-		g.ResponseWriter.WriteHeader(code)
-		return
-	}
-	h := g.Header()
-	// The inner handler's length describes the uncompressed body; the
-	// compressed one is chunked instead. Likewise its Accept-Ranges offer
-	// refers to identity bytes — a Range against this gzip representation is
-	// not served (see serveCompressed), so don't advertise it.
-	h.Del("Content-Length")
-	h.Del("Accept-Ranges")
+	h := w.Header()
+	h.Set("Content-Type", staticContentType(name, data))
 	h.Set("Content-Encoding", "gzip")
 	h.Add("Vary", "Accept-Encoding")
-	g.ResponseWriter.WriteHeader(code)
+	// No Content-Length: the compressed size is only known after the fact, and
+	// no Accept-Ranges: a Range against this representation is not served.
+	w.WriteHeader(http.StatusOK)
+	gz := gzip.NewWriter(w)
+	_, _ = gz.Write(data)
+	_ = gz.Close()
 }
 
-func (g *gzipResponseWriter) Write(p []byte) (int, error) {
-	if !g.wroteHeader {
-		g.WriteHeader(http.StatusOK)
+// staticContentType mirrors http.FileServer's choice: the extension's MIME
+// type, else sniffed from the leading bytes.
+func staticContentType(name string, data []byte) string {
+	if ctype := mime.TypeByExtension(path.Ext(name)); ctype != "" {
+		return ctype
 	}
-	if g.passthrough {
-		return g.ResponseWriter.Write(p)
-	}
-	return g.gz.Write(p)
-}
-
-// close flushes the gzip trailer. Only a compressed body has one — closing an
-// untouched writer would append a gzip header to a response that carries no
-// Content-Encoding.
-func (g *gzipResponseWriter) close() {
-	if g.wroteHeader && !g.passthrough {
-		_ = g.gz.Close()
-	}
+	return http.DetectContentType(data)
 }
 
 // indexHTMLFallback is a minimal placeholder served when the embedded static/
