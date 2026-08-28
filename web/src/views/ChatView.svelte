@@ -1349,6 +1349,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     let lastScrollTop = scroller.scrollTop
     const onScroll = () => {
       const top = scroller.scrollTop
+      // Browsers only fire 'scroll' when the position changed, so an event that
+      // lands on the baseline is a coalesced no-op (or one arriving right after
+      // onVisibility resynced it) — not a gesture. Re-deriving stick from the
+      // resting position here is exactly what latched auto-scroll off when
+      // content had grown without a pin in between.
+      if (top === lastScrollTop) return
       const nearBottom = scroller.scrollHeight - top - scroller.clientHeight < 80
       if (top < lastScrollTop) {
         if (!nearBottom) stick = false
@@ -1399,16 +1405,15 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     }
     scroller.addEventListener('wheel', onWheel, { passive: true })
 
-    // Releasing the pointer used to re-run onScroll() to re-derive stick from
-    // the resting position. But the RO is blocked for the whole press while the
-    // stream keeps appending, so by release the view can sit well below the
-    // 80px band without the user having scrolled anywhere — and that re-derive
-    // latched stick off for the rest of the turn. Clicking back into the chat
-    // after a window switch (content grew while the tab was hidden, the
-    // activating click lands before the first RO frame) hit this every time.
-    // A gesture that moved the scroller already updated stick through its
-    // 'scroll' events; a press that didn't scroll is not a gesture. So on
-    // release only lift the block and catch up on whatever growth it held back.
+    // Release never re-derives stick from the resting position: the RO is
+    // blocked for the whole press while the stream keeps appending, so by
+    // release the view can sit well below the 80px band without the user
+    // having scrolled anywhere (clicking back into the chat after a window
+    // switch is the common case — content grew while the tab was hidden and
+    // the activating click lands before the first RO frame). A gesture that
+    // moved the scroller already updated stick through its 'scroll' events; a
+    // press that didn't scroll is not a gesture. So on release only lift the
+    // block and catch up on whatever growth it held back.
     let interacting = false
     const onPointerDown = () => { interacting = true }
     const onPointerUp = () => {
