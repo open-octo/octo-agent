@@ -440,3 +440,58 @@ func TestCloseShouldQuit(t *testing.T) {
 		}
 	}
 }
+
+// Closing the window while the hub keeps running in the tray hides it instead
+// of destroying it, so the next show skips the webview cold start. Every reason
+// the window must really go must win over that: a detached corpse a revive is
+// discarding (not current), a close meant to end the app (allowQuit), and an
+// update restart whose window close has to destroy for real.
+func TestCloseShouldHide(t *testing.T) {
+	cases := []struct {
+		name                              string
+		current, allowQuit, updateRestart bool
+		want                              bool
+	}{
+		{"live window, app stays alive", true, false, false, true},
+		{"detached corpse from a revive", false, false, false, false},
+		{"close is meant to quit", true, true, false, false},
+		{"update restart in progress", true, false, true, false},
+	}
+	for _, tc := range cases {
+		if got := closeShouldHide(tc.current, tc.allowQuit, tc.updateRestart); got != tc.want {
+			t.Errorf("%s: closeShouldHide = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestProbeAfterShowLeavesHiddenWindowAlone pins the interaction between
+// hide-on-close and the liveness probe. Before hide-on-close a close cleared
+// b.window, so a probe waking up after one found nothing to replace. A hidden
+// window is still b.window, so without this guard a probe that judged the page
+// black or silent would build a fresh window and pop it onto the user's screen
+// seconds after they closed it — a healthy hidden page can go quiet, and a dead
+// one the user already dismissed is nobody's problem until the next show.
+func TestProbeAfterShowLeavesHiddenWindowAlone(t *testing.T) {
+	win := &application.WebviewWindow{}
+	revived := make(chan struct{}, 1)
+
+	b := &nativeBridge{window: win, testProbeDelay: 10 * time.Millisecond}
+	b.reviveFn = func(*application.WebviewWindow) { revived <- struct{}{} }
+
+	// Black-window evidence, then the user closes (hides) before the verdict.
+	b.Heartbeat(-1, false)
+	b.probeAfterShow(win)
+	b.hidden.Store(true)
+
+	select {
+	case <-revived:
+		t.Fatal("a window the user just hid was revived")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if b.currentWindow() != win {
+		t.Error("the hidden window must stay attached so the next show reuses it")
+	}
+	if b.lastRevive.Load() != 0 {
+		t.Error("a skipped revive must not consume the revive budget")
+	}
+}

@@ -50,8 +50,9 @@ type NativeBridge interface {
 	// Minimise minimises the window to the taskbar/dock.
 	Minimise()
 
-	// Close closes the window (the app's ShouldQuit hook decides whether the hub
-	// actually terminates or keeps running in the tray).
+	// Close closes the window. While the hub keeps running in the tray the shell
+	// hides the window instead of destroying it; otherwise the app's ShouldQuit
+	// hook decides whether the process terminates.
 	Close()
 
 	// WindowState reports whether the window is currently maximised. Used by the
