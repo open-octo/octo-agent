@@ -1726,42 +1726,15 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		sw.sendRaw(b)
 	}
 
-	completeEvent := map[string]any{
-		"type":       "complete",
-		"session_id": sess.ID,
-		"iterations": a.TurnIterations(),
-	}
-	// Tells the browser the persisted index of the reply it just streamed, so
-	// the Branch action lights up on the live bubble too — omitted (not -1)
-	// when the turn didn't end on a branchable reply.
-	if idx := lastBranchableIndex(sess); idx >= 0 {
-		completeEvent["message_index"] = idx
-	}
-	if err == nil {
-		// a is freshly built per turn (buildAgent), so its usage counters start
-		// at zero — no before/after diff needed, unlike the CLI/IM persistent-
-		// Agent call sites. Omitted on error/interrupt, matching the CLI's
-		// summary line which only prints on a clean completion.
-		inTok, outTok := a.SessionTokens()
-		completeEvent["duration_ms"] = time.Since(turnCallStart).Milliseconds()
-		completeEvent["tokens"] = inTok + outTok
-		// Cache utilization for the turn's prompt side; omitted (not 0) when
-		// the backend reported no cache activity, so the UI hides the readout.
-		cr, cw := a.SessionCacheTokens()
-		if pct, ok := agent.CacheUtilizationPct(inTok, cr, cw); ok {
-			completeEvent["cache_pct"] = pct
-		}
-	}
-	s.wsHub.broadcast(sess.ID, completeEvent)
-	// completeEvent above only reaches tabs subscribed to this session; a tab
-	// looking at a different session needs this global companion to drive
-	// the "agent finished replying" desktop notification.
-	s.wsHub.broadcast("", wsEventSessionActivity{
-		Type:      "session_activity",
-		SessionID: sess.ID,
-		Kind:      "turn_complete",
-	})
-
+	// The turn's remaining file writes ALL land before the `complete` broadcast
+	// below. complete carries the reply's persisted message_index — it already
+	// claims the turn's content is settled on disk — and the sidebar's unread
+	// watermark compares the file's mtime against the last moment the user
+	// could have read the reply. Running these writes after complete pushed
+	// the mtime past the turn's visible completion, so a client whose window
+	// closed (or whose webview was suspended) between the reply rendering and
+	// the fire-and-forget turn_ended kept a stale watermark and showed a
+	// phantom unread dot on next open.
 	used, window := a.ContextUsage()
 	ctxPct := 0
 	if window > 0 {
@@ -1801,6 +1774,43 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			})
 		}
 	}
+
+	completeEvent := map[string]any{
+		"type":       "complete",
+		"session_id": sess.ID,
+		"iterations": a.TurnIterations(),
+	}
+	// Tells the browser the persisted index of the reply it just streamed, so
+	// the Branch action lights up on the live bubble too — omitted (not -1)
+	// when the turn didn't end on a branchable reply.
+	if idx := lastBranchableIndex(sess); idx >= 0 {
+		completeEvent["message_index"] = idx
+	}
+	if err == nil {
+		// a is freshly built per turn (buildAgent), so its usage counters start
+		// at zero — no before/after diff needed, unlike the CLI/IM persistent-
+		// Agent call sites. Omitted on error/interrupt, matching the CLI's
+		// summary line which only prints on a clean completion.
+		inTok, outTok := a.SessionTokens()
+		completeEvent["duration_ms"] = time.Since(turnCallStart).Milliseconds()
+		completeEvent["tokens"] = inTok + outTok
+		// Cache utilization for the turn's prompt side; omitted (not 0) when
+		// the backend reported no cache activity, so the UI hides the readout.
+		cr, cw := a.SessionCacheTokens()
+		if pct, ok := agent.CacheUtilizationPct(inTok, cr, cw); ok {
+			completeEvent["cache_pct"] = pct
+		}
+	}
+	s.wsHub.broadcast(sess.ID, completeEvent)
+	// completeEvent above only reaches tabs subscribed to this session; a tab
+	// looking at a different session needs this global companion to drive
+	// the "agent finished replying" desktop notification.
+	s.wsHub.broadcast("", wsEventSessionActivity{
+		Type:      "session_activity",
+		SessionID: sess.ID,
+		Kind:      "turn_complete",
+	})
+
 	_, pm, re, _, _ := s.sessionStatusFields(sess)
 	s.wsHub.broadcast(sess.ID, map[string]any{
 		"type":             "session_update",
