@@ -161,6 +161,12 @@
     // for exactly that reason — see the comment there.
     const stopPanelGC = sessions.subscribe(list => pruneSessions(list.map(s => s.id)))
     const cleanup = () => { cancelled = true; uninstallLinks(); stopHeartbeat(); stopPanelGC(); ws.disconnect() }
+    // The onboard-status read is issued alongside the auth probe rather than
+    // after it, taking one serial round trip out of every cold start. On
+    // loopback both pass at once. A networked server rejects the early read
+    // until the key prompt has completed, so a failed early read is retried
+    // once auth is settled — same outcome, one fewer hop on the common path.
+    const earlyStatus = api.getOnboardStatus().catch(() => null)
     checkAuth().then(async ok => {
       if (cancelled) return
       if (!ok) {
@@ -170,12 +176,15 @@
       // First-run gate: decide the onboard phase BEFORE booting the main UI so it
       // never flashes behind the setup panel. Default to '' on error so a status
       // hiccup doesn't trap a configured user behind a blank splash.
-      try {
-        const status = await api.getOnboardStatus()
-        onboardPhase.set(status.phase ?? '')
-      } catch {
-        onboardPhase.set('')
+      let status = await earlyStatus
+      if (!status) {
+        try {
+          status = await api.getOnboardStatus()
+        } catch {
+          status = null
+        }
       }
+      onboardPhase.set(status?.phase ?? '')
     })
     return cleanup
   })
