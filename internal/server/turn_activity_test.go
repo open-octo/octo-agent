@@ -178,7 +178,6 @@ func TestDoAgentTurn_WritesPrecedeComplete(t *testing.T) {
 		t.Fatalf("title adoption (event #%d) landed after complete (#%d): end-of-turn writes must precede the complete broadcast", renamedAt, completeAt)
 	}
 
-
 	// And the write itself must be on disk, not just broadcast.
 	p, err := sess.SavePath()
 	if err != nil {
