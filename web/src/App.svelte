@@ -162,12 +162,16 @@
     const stopPanelGC = sessions.subscribe(list => pruneSessions(list.map(s => s.id)))
     const cleanup = () => { cancelled = true; uninstallLinks(); stopHeartbeat(); stopPanelGC(); ws.disconnect() }
     // The onboard-status read is issued alongside the auth probe rather than
-    // after it, taking one serial round trip out of every cold start. On
-    // loopback both pass at once. A networked server rejects the early read
-    // until the key prompt has completed, so a failed early read is retried
-    // once auth is settled — same outcome, one fewer hop on the common path.
+    // after it, taking one serial round trip out of every cold start. checkAuth
+    // goes first: it runs synchronously up to its first await, which is where a
+    // stored or ?access_key= key is seeded into the cookie — so the early read
+    // already carries it. On loopback both pass at once. A networked server
+    // with no key yet rejects the early read until the prompt has completed,
+    // so a failed early read is retried once auth is settled — same outcome,
+    // one fewer hop on the common path.
+    const auth = checkAuth()
     const earlyStatus = api.getOnboardStatus().catch(() => null)
-    checkAuth().then(async ok => {
+    auth.then(async ok => {
       if (cancelled) return
       if (!ok) {
         authDenied = true

@@ -175,3 +175,36 @@ func TestStaticFileHandler_HeadHasNoBody(t *testing.T) {
 		t.Errorf("Content-Encoding = %q, want none on HEAD", ce)
 	}
 }
+
+// A non-200 from the inner handler passes through untouched. "/index.html" is
+// the one such case this handler produces (ServeFileFS canonicalises it to a
+// 301 → "./"); the redirect must keep its headers and an empty body — no gzip
+// header or trailer appended by a writer that never compressed anything.
+func TestStaticFileHandler_RedirectPassesThrough(t *testing.T) {
+	w := getStatic(t, staticFileHandler(testDist()), "/index.html", map[string]string{"Accept-Encoding": "gzip"})
+
+	if w.Code != http.StatusMovedPermanently {
+		t.Fatalf("status = %d, want 301", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != "./" {
+		t.Errorf("Location = %q, want ./", loc)
+	}
+	if ce := w.Header().Get("Content-Encoding"); ce != "" {
+		t.Errorf("Content-Encoding = %q, want none on a redirect", ce)
+	}
+	if w.Body.Len() != 0 {
+		t.Errorf("redirect body = %q, want empty", w.Body.String())
+	}
+}
+
+// The gzip path must not re-advertise byte ranges it will not honour.
+func TestStaticFileHandler_GzipDropsAcceptRanges(t *testing.T) {
+	w := getStatic(t, staticFileHandler(testDist()), "/assets/index-abc123.js", map[string]string{"Accept-Encoding": "gzip"})
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if ar := w.Header().Get("Accept-Ranges"); ar != "" {
+		t.Errorf("Accept-Ranges = %q, want unset on a gzipped response", ar)
+	}
+}

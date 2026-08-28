@@ -144,8 +144,11 @@ func (g *gzipResponseWriter) WriteHeader(code int) {
 	}
 	h := g.Header()
 	// The inner handler's length describes the uncompressed body; the
-	// compressed one is chunked instead.
+	// compressed one is chunked instead. Likewise its Accept-Ranges offer
+	// refers to identity bytes — a Range against this gzip representation is
+	// not served (see serveCompressed), so don't advertise it.
 	h.Del("Content-Length")
+	h.Del("Accept-Ranges")
 	h.Set("Content-Encoding", "gzip")
 	h.Add("Vary", "Accept-Encoding")
 	g.ResponseWriter.WriteHeader(code)
