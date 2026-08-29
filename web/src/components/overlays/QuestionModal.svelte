@@ -130,6 +130,13 @@
   function softClose() { expanded = false }
   function onKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') { e.preventDefault(); softClose() }
+    // Preview layout: a click only focuses (so previews can be browsed without
+    // committing), so Enter is the confirm key — Claude Code's own binding.
+    // Also reached from the note input, submitting the note with the choice.
+    if (e.key === 'Enter' && preview && !onReview && focusedLabel) {
+      e.preventDefault()
+      pick(focusedLabel)
+    }
   }
 </script>
 
@@ -297,6 +304,14 @@
           >
             {hasReviewTab(questions) ? $t('question.next') : $t('common.submit')}
           </button>
+        {:else if preview}
+          <!-- Preview layout: a single click only focuses a row so its preview
+               can be inspected without committing, which leaves no visible way
+               to answer (double-click and Enter both work, but nothing says
+               so). This commits the focused option, note included. -->
+          <button class="btn-primary" onclick={() => pick(focusedLabel)} disabled={!focusedLabel}>
+            {hasReviewTab(questions) ? $t('question.next') : $t('common.submit')}
+          </button>
         {/if}
       </div>
     </div>
@@ -334,6 +349,11 @@
             onclick={() => { const to = advanceIndex(questions, qIdx); if (to === -1) finish('submitted'); else goTab(to) }}
             disabled={draft.choices.length === 0}
           >
+            {hasReviewTab(questions) ? $t('question.next') : $t('common.submit')}
+          </button>
+        {:else if preview}
+          <!-- Same confirm affordance as the modal footer above. -->
+          <button class="btn-primary btn-primary-sm" onclick={() => pick(focusedLabel)} disabled={!focusedLabel}>
             {hasReviewTab(questions) ? $t('question.next') : $t('common.submit')}
           </button>
         {/if}
