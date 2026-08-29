@@ -70,6 +70,7 @@ octo-agent 已经有一套完整的生成 + 展示循环：Agent 生成 HTML →
 - **文件处理**：`<input type="file">` + `FileReader` API，浏览器端搞定
 - **无服务端依赖**：不能发 fetch 到外部 API（Artifacts panel sandboxed iframe 限制）
 - **持久化存储可用**：直接用标准 `localStorage`，见下节
+- **文件导出可用**：直接用标准 `<a download>` 写法，见「运行时下载」
 
 ### 运行时存储
 
@@ -93,6 +94,28 @@ localStorage 原生可用时（非沙箱上下文）桥脚本什么都不做。
 - 落盘是异步的，崩溃或提前关闭可能丢最后一次写。同页内读写全同步一致，跨页重启
   的读一致性由启动预取保证。
 - sessionStorage 仍然不可用 —— 只存活一次访问的状态放普通变量就够了。
+
+### 运行时下载
+
+同一个沙箱也拦掉了轻应用自己发起的下载：iframe 没给 `allow-downloads`，浏览器直接丢弃；
+桌面端 webview 更是没有 download delegate，连非沙箱的下载都是静默空操作。
+
+沿存储桥的路子处理：`web/src/lib/laDownload.ts` 往文档里注入一段脚本，拦截标准的下载写法 ——
+带 `download` 属性的锚点指向 blob:/data: URL —— 把目标 `fetch` 成 Blob，经同一条 postMessage
+通道（`op: 'download'`，携带 `name` 和 `blob`，Blob 走结构化克隆）交给宿主。宿主按 `nativeShell`
+分流：桌面端 base64 后走 `/api/native/save-file` 的系统保存对话框，浏览器里在顶层文档挂一个
+`<a download>` 触发正常下载。这和 Artifacts 面板「下载」按钮走的是同一条落盘路径。
+
+两种触发形态都覆盖：用户点击文档内的锚点（document 级 click 监听）、以及最常见的
+`a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = '...'; a.click()`
+—— 游离锚点的事件到不了 document，所以补一层 `HTMLAnchorElement.prototype.click` 拦截。
+应用自己已经 `preventDefault()` 的点击不动。
+
+对轻应用同样是**零改动**：继续写标准的 `<a download>`，没有专用接口。刻意的边界：
+
+- 单文件上限 100MB，超限宿主直接丢弃。文件名剥掉路径分隔符和控制字符，空则回退 `download`。
+- 下载是 fire-and-forget，宿主不回包（保存对话框可能开着几分钟），结果以宿主 toast 呈现。
+- 不拦 `window.open(blobUrl)` 和 `location.href = dataUrl` —— 这两种在非沙箱页面里也不是下载。
 
 ## Agent 交互流程
 
@@ -281,7 +304,7 @@ Agent 改轻应用走的是普通文件工具，服务端没有任何"文件变�
 - **不做 Python/Node 运行时 Light App**。保持零外部依赖，只用浏览器沙箱。如果未来真有需求（如需要 pandas 处理大 CSV），再评估是否引入 `pyodide`（WASM Python）而不是起系统进程。
 - **不做 Light App 间的数据共享**。每个 App 独立，不引入跨 App 的消息机制。
 - **不做 Light App 的版本管理**。覆盖即更新，不保留历史版本。用户要回滚可以自己在对话里让 Agent 重新生成。
-- **不做「从 Light App 回调 Agent」**。纯前端闭环。宿主与轻应用之间只有存储桥这一条 postMessage 通道，协议就四个操作（dump/set/remove/clear），不扩成通用 RPC。用户想用 AI 能力时回到对话。
+- **不做「从 Light App 回调 Agent」**。纯前端闭环。宿主与轻应用之间只有一条 postMessage 通道，协议就五个操作（dump/set/remove/clear/download），每个都只是把一个被沙箱拦掉的浏览器标准能力代管回来，不扩成通用 RPC。用户想用 AI 能力时回到对话。
 
 ## 实现分阶段
 

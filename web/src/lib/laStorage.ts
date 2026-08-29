@@ -23,6 +23,10 @@
 // Only sessionStorage is deliberately left broken: a Light App that wants
 // per-visit state can keep it in a plain variable.
 //
+// The same postMessage channel carries the download bridge (laDownload.ts):
+// this module owns the iframe registry and the message router, that one owns
+// the download op and its injected script.
+//
 // Security model:
 //   - Only iframes the host registered (registerLaIframe) can read/write; the
 //     message handler checks event.source against the registry and ignores
@@ -46,6 +50,8 @@ const MAX_KEY = 512
 // write from eating the whole budget in a single message.
 const MAX_VALUE = 1_000_000
 const MAX_TOTAL = 5_000_000
+
+import { MAX_DOWNLOAD_BYTES, buildLaDownloadScript, deliverLaDownload, sanitizeDownloadName } from './laDownload'
 
 const laFrames = new Map<Window, string>() // iframe window -> namespace
 let bridgeInstalled = false
@@ -154,10 +160,12 @@ async function laClear(ns: string): Promise<void> {
 // ── Bridge protocol ─────────────────────────────────────────────────────────
 //
 // iframe -> parent:  { __laBridge: 1, id, ns, op: 'dump'|'set'|'remove'|'clear', key?, value? }
+//                    { __laBridge: 1, id: 0, ns, op: 'download', name, blob }
 // parent -> iframe:  { __laBridge: 1, id, res: true, ok, value?, err? }
 //
 // `res: true` marks the direction, so a nested iframe's request reaching this
-// window is never mistaken for a reply to one of our own calls.
+// window is never mistaken for a reply to one of our own calls. `download` is
+// fire-and-forget — no reply, the outcome surfaces as a host toast.
 
 function validKey(key: unknown): key is string {
   return typeof key === 'string' && key.length > 0 && key.length <= MAX_KEY
@@ -195,6 +203,12 @@ function onLaMessage(ev: MessageEvent): void {
       break
     case 'clear':
       laClear(ns).then(() => reply(true)).catch(fail)
+      break
+    case 'download':
+      // No reply: the shim doesn't wait for one. A payload that isn't a Blob
+      // or is over the cap is dropped outright rather than reported back.
+      if (!(d.blob instanceof Blob) || d.blob.size > MAX_DOWNLOAD_BYTES) return
+      void deliverLaDownload(sanitizeDownloadName(d.name), d.blob)
       break
     default:
       reply(false, undefined, 'unknown op')
@@ -304,9 +318,16 @@ export function buildLaBridgeScript(ns: string): string {
 })();`
 }
 
-/** Inject the bridge script into a Light App document before </body>. */
+/**
+ * Inject the bridge scripts (storage + download) into a Light App document
+ * before </body>. The close tag must be a literal `</script>`: this string is
+ * parsed as the srcdoc document itself, not embedded inside another script, so
+ * a `<\/script>` here never closes the element and the whole bridge dies as a
+ * syntax error. Neither script body contains `</script>`, so nothing needs
+ * escaping.
+ */
 export function withLaBridge(html: string, ns: string): string {
-  const script = `<script>${buildLaBridgeScript(ns)}<\\/script>`
+  const script = `<script>${buildLaBridgeScript(ns)}\n${buildLaDownloadScript(ns)}</script>`
   if (/\<\/body\s*>/i.test(html)) return html.replace(/\<\/body\s*>/i, script + '</body>')
   return html + script
 }

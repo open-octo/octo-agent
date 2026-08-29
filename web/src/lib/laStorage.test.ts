@@ -119,7 +119,11 @@ describe('laStorage bridge', () => {
     const html = '<html><body><p>hi</p></body></html>'
     const out = withLaBridge(html, 'app-x')
     expect(out).toContain('localStorage')
-    expect(out).toContain('<\\/script>') // escaped close tag
+    // A real close tag: the string IS the srcdoc document, and `<\/script>`
+    // doesn't close a script element there (verified in Chrome — the shim
+    // never ran while this said `<\\/script>`).
+    expect(out).toContain('</script></body>')
+    expect(out).not.toContain('<\\/script>')
     expect(out.indexOf('localStorage')).toBeGreaterThan(out.indexOf('<p>hi</p>'))
     expect(out.endsWith('</body></html>')).toBe(true)
   })
