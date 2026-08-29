@@ -35,6 +35,11 @@ func TestShowArtifact_Errors(t *testing.T) {
 	if err := os.WriteFile(binFile, []byte{0x4d, 0x5a}, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// A source file: readable text, but not an artifact kind the panel lists.
+	srcFile := filepath.Join(dir, "script.py")
+	if err := os.WriteFile(srcFile, []byte("print('hi')\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	cases := []struct {
 		name  string
@@ -43,6 +48,7 @@ func TestShowArtifact_Errors(t *testing.T) {
 		{"missing path", map[string]any{}},
 		{"nonexistent file", map[string]any{"path": filepath.Join(dir, "nope.html")}},
 		{"non-previewable extension", map[string]any{"path": binFile}},
+		{"source file", map[string]any{"path": srcFile}},
 		{"directory", map[string]any{"path": dir + string(filepath.Separator) + "sub.html"}},
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "sub.html"), 0o755); err != nil {
@@ -62,11 +68,11 @@ func TestArtifactContentType(t *testing.T) {
 	if _, ok := ArtifactContentType("/x/y/binary.exe"); ok {
 		t.Error("exe should not be previewable")
 	}
-	// Code/text kinds are previewable but always plain text, never their native
-	// type (#1895).
-	for _, p := range []string{"/x/script.py", "/x/main.go", "/x/app.js", "/x/data.csv", "/x/notes.TXT"} {
-		if ct, ok := ArtifactContentType(p); !ok || ct != "text/plain; charset=utf-8" {
-			t.Errorf("%s: ct=%q ok=%v, want text/plain", p, ct, ok)
+	// Source, config, and data files are not artifacts: the panel only lists
+	// what it can render, and code changes belong to its Git Diff mode.
+	for _, p := range []string{"/x/script.py", "/x/main.go", "/x/app.js", "/x/data.csv", "/x/notes.TXT", "/x/config.json"} {
+		if ct, ok := ArtifactContentType(p); ok {
+			t.Errorf("%s: ct=%q, want not previewable", p, ct)
 		}
 	}
 }

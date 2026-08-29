@@ -190,37 +190,25 @@ describe('observeArtifact — markdown copy button', () => {
   })
 })
 
-// Code-kind artifacts hydrate their body like markdown does and preview as
-// escaped monospace text. The server serves these extensions as text/plain
-// (#1895) — before that, the fetch 404ed and the artifact silently vanished.
-describe('observeArtifact — code artifacts', () => {
-  it('previews a code file as escaped monospace text', async () => {
-    const source = 'if x < 1 && y > 2:\n    print("ok")\n'
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(source)))
+// Source, config, and data files are not artifacts: the panel lists only what
+// it can render, and the Git Diff mode is where code changes are shown.
+describe('observeArtifact — source files', () => {
+  it('ignores source, config, and data file writes', () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
 
-    await observeHydrated('/tmp/script.py')
+    for (const p of ['/tmp/script.py', '/tmp/main.go', '/tmp/app.js', '/tmp/config.json', '/tmp/data.csv', '/tmp/notes.txt']) {
+      observeArtifact(SID, { type: 'write', path: p }, true)
+    }
 
-    const [entry] = get(artifacts)
-    expect(entry.type).toBe('PY')
-    expect(entry.code).toBe(source)
-    // The source lands inside a <pre>, so its markup-significant characters
-    // must arrive escaped.
-    expect(entry.preview).toContain('<pre')
-    expect(entry.preview).toContain('x &lt; 1 &amp;&amp; y &gt; 2')
-    expect(entry.preview).not.toContain('x < 1')
-  })
-
-  it('never auto-opens the panel for a live code write', () => {
-    vi.stubGlobal('fetch', vi.fn())
-
-    observeArtifact(SID, { type: 'write', path: '/tmp/script.py' }, true)
-
-    // Source-file writes are the routine bulk of a coding session; the panel
-    // must not pop open on them.
+    // Nothing lands in the list, nothing is fetched, and the panel must not
+    // pop open on a source-file write.
+    expect(get(artifacts)).toEqual([])
+    expect(fetchMock).not.toHaveBeenCalled()
     expect(get(panelContent)).toBe(null)
 
-    // And the code write must not consume the once-per-session flag: a later
-    // rich-kind artifact still auto-opens.
+    // And an ignored write must not consume the once-per-session flag: a
+    // later rich-kind artifact still auto-opens.
     observeArtifact(SID, { type: 'write', path: '/tmp/report.md' }, true)
     expect(get(panelContent)).toBe('session')
   })
