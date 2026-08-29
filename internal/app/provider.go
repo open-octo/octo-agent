@@ -168,11 +168,15 @@ var Registry = []Vendor{
 		API:            "openai-completions",
 		DefaultBaseURL: "https://api.deepseek.com",
 		DefaultModel:   "deepseek-v4-pro",
-		// DeepSeek V4 has vision in the chat app but not over the API — image
-		// content isn't accepted on the endpoint, so treat as text-only here.
+		// deepseek-v4-flash / -pro have vision in the chat app but not over the
+		// API — image content isn't accepted on those endpoints, so they stay
+		// text-only here. deepseek-v4-flash-vision-exp is the API-facing vision
+		// variant: 1M context, images billed as input tokens by dimension, tool
+		// calls supported (api-docs.deepseek.com/quick_start/pricing, 2026-08-29).
 		Models: []VendorModel{
 			{ID: "deepseek-v4-flash", Vision: false},
 			{ID: "deepseek-v4-pro", Vision: false},
+			{ID: "deepseek-v4-flash-vision-exp", Vision: true},
 		},
 		LiteModel:    "deepseek-v4-flash",
 		APIKeyEnvVar: "DEEPSEEK_API_KEY",
