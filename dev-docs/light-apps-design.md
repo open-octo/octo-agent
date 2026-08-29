@@ -69,12 +69,30 @@ octo-agent 已经有一套完整的生成 + 展示循环：Agent 生成 HTML →
 - **JS 内联**：`<script>` 直接写在 HTML 内
 - **文件处理**：`<input type="file">` + `FileReader` API，浏览器端搞定
 - **无服务端依赖**：不能发 fetch 到外部 API（Artifacts panel sandboxed iframe 限制）
-- **持久化存储可用**：直接用标准 `localStorage`，见下节
+- **持久化存储可用**：直接用标准 `localStorage`，见「运行时存储」
+- **表单 submit 处理器必须 `event.preventDefault()`**：沙箱里的表单无处可导航，不拦的话 frame 会被重载、应用内存态全丢
+
+### 运行沙箱
+
+轻应用和 Artifact 预览都跑在 `sandbox="allow-scripts allow-forms allow-modals"` 的 srcdoc iframe 里
+（常量 `ARTIFACT_SANDBOX`，`web/src/lib/artifacts.ts`，四处 iframe 共用——应用在保存前就是在预览里试用的，
+保存前后必须行为一致）。
+
+刻意不给 `allow-same-origin`：origin 是 opaque，文档碰不到任何存储、Cookie 和宿主状态，这是下面两条桥
+存在的前提。也不给 `allow-popups`、`allow-top-navigation`。
+
+`allow-forms` 是因为没有它表单的 submit 事件根本不触发（规范在派发事件之前就检查 sandboxed forms flag），
+`<form onsubmit>` + 回车提交全废；`allow-modals` 是因为没有它 `confirm()` 恒 false、`prompt()` 恒 null、
+`alert()` 静默——生成的应用常拿 `confirm` 做删除确认，等于永远删不掉。
+
+代价要说实话：`allow-modals` 交给应用的是浏览器原生对话框——alert/confirm/prompt、`window.print()`、
+`beforeunload` 提示——它们是 tab 级 modal，开着的时候会挡住宿主 UI，一个 `while(true) alert()` 的坏应用
+能把整个页面卡住直到用户勾"阻止此页再弹对话框"。接受这个取舍：轻应用是用户让自己的 agent 写的，
+origin 边界本身没动。
 
 ### 运行时存储
 
-轻应用跑在 `sandbox="allow-scripts"` 的 srcdoc iframe 里（刻意不给
-`allow-same-origin`），origin 是 opaque，浏览器会拒掉所有持久化存储 API —
+沙箱里 origin 是 opaque，浏览器会拒掉所有持久化存储 API —
 localStorage / sessionStorage / Cookie / IndexedDB 在里面一律抛 SecurityError。
 
 沙箱不动，改由宿主页面代管：`web/src/lib/laStorage.ts` 在宿主开一个 IndexedDB

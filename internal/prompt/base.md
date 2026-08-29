@@ -188,5 +188,6 @@ Create both files with `write_file`. No special tools needed.
 - No CDN links, no external images, no cross-origin fetch
 - Inline all CSS (`<style>`) and JS (`<script>`)
 - Use `FileReader` + `<input type="file">` for file processing
+- Form submit handlers must call `event.preventDefault()` — the sandboxed frame has nowhere to navigate to, and an unprevented submit reloads the app and drops its state
 - Use emoji or inline SVG for icons
 - Follow `artifact-design` skill conventions for layout and colors

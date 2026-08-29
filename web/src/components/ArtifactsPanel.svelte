@@ -3,7 +3,7 @@
   import { titlebarDblClick } from '../lib/nativeWindow'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
-  import { hydrateArtifact, lightAppSource, pathIsInside } from '../lib/artifacts'
+  import { ARTIFACT_SANDBOX, hydrateArtifact, lightAppSource, pathIsInside } from '../lib/artifacts'
   import { CENTER_MIN } from '../lib/sidebarWidth'
   import { diffData, diffLoading, diffBadge, loadDiff } from '../lib/diff'
   import DiffView from './diff/DiffView.svelte'
@@ -521,7 +521,7 @@
       {/if}
       {#if laCurHTML}
         {#key laReloadGen}
-        <iframe bind:this={laFrameEl} srcdoc={withLaBridge(laCurHTML, laCurSlug)} sandbox="allow-scripts" allow="clipboard-write" title={laCurName}></iframe>
+        <iframe bind:this={laFrameEl} srcdoc={withLaBridge(laCurHTML, laCurSlug)} sandbox={ARTIFACT_SANDBOX} allow="clipboard-write" title={laCurName}></iframe>
         {/key}
       {:else if laCurSlug || laLoading}
         <!-- A tab opens before its HTML arrives, so this covers the fetch. -->
@@ -624,7 +624,7 @@
         {:else if !cur.loaded}
           <div class="body-loading"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon></div>
         {:else if $artifactView === 'preview'}
-          <iframe srcdoc={cur.preview} sandbox="allow-scripts" allow="clipboard-write" title={cur.name}></iframe>
+          <iframe srcdoc={cur.preview} sandbox={ARTIFACT_SANDBOX} allow="clipboard-write" title={cur.name}></iframe>
         {:else}
           <pre class="code-view">{cur.code}</pre>
         {/if}
