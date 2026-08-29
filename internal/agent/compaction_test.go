@@ -127,6 +127,9 @@ func TestContextWindow(t *testing.T) {
 	if got := contextWindow("glm-5.2"); got != 1_000_000 {
 		t.Errorf("glm-5.2 window = %d, want 1000000", got)
 	}
+	if got := contextWindow("glm-5.3-flash"); got != 1_000_000 {
+		t.Errorf("glm-5.3-flash window = %d, want 1000000", got)
+	}
 	if got := contextWindow("x-ai/grok-4.5"); got != 500_000 {
 		t.Errorf("grok-4.5 window = %d, want 500000", got)
 	}
