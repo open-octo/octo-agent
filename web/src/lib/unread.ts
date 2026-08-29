@@ -50,7 +50,7 @@ export const sessionTouchedAt = writable<Record<string, number>>({})
 // Parse rather than compare the ISO strings directly: the list mixes the
 // server's zone-offset format with the UTC "Z" stamps App.svelte writes on
 // turn_ended, and those don't order lexicographically. Exported for the
-// sidebar/mobile recency sorts, which face the same mix.
+// mobile feed's recency sort, which faces the same mix.
 export function updatedAtMs(s: Pick<Session, 'updated_at'>): number {
   const t = Date.parse(s.updated_at ?? '')
   return Number.isNaN(t) ? 0 : t
