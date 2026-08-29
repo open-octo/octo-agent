@@ -7,6 +7,7 @@
 // Within each section, pinned sessions float to the top.
 import { derived } from 'svelte/store'
 import { sessions } from '../lib/stores'
+import { updatedAtMs } from '../lib/unread'
 import type { Session } from '../lib/types'
 
 export type FeedKind = 'approval' | 'reply' | 'running' | 'done'
@@ -25,7 +26,9 @@ const RECENT_CAP = 8
 
 function byPinThenRecent(a: FeedItem, b: FeedItem): number {
   if (!!a.session.pinned !== !!b.session.pinned) return a.session.pinned ? -1 : 1
-  return (b.session.updated_at || '').localeCompare(a.session.updated_at || '')
+  // Numeric, not lexicographic: updated_at mixes the server's zone-offset
+  // format with the UTC "Z" stamps App.svelte writes on turn_ended.
+  return updatedAtMs(b.session) - updatedAtMs(a.session)
 }
 
 export const feedGroups = derived(
