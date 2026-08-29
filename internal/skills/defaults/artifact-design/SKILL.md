@@ -25,12 +25,15 @@ legibility at the panel's docked width.
   `allow-same-origin`: no cookies, no `localStorage`, no reach into the host
   app. This is a hard boundary, not a suggestion — design as if the page runs
   on an isolated blank origin, because it does.
-- **Self-contained is enforced, not just recommended.** The panel detects
-  `<script src=…>` / `<link href=…>` pointing anywhere but `data:`, `blob:`,
-  or `#`, and if it finds one it refuses to render the page at all — showing a
-  warning plus the raw source instead of your design. Inline every `<style>`
-  and `<script>`; embed images as `data:` URIs; never reference a CDN, a
-  Google Font, or any other network resource.
+- **Self-contained is enforced, not just recommended.** The panel strips
+  every `<script src=…>` / `<link rel="stylesheet" href=…>` pointing anywhere
+  but `data:`, `blob:`, or `#` before rendering, and shows a banner saying
+  how many it removed — so a page that leans on a CDN library or a web font
+  renders unstyled and inert, not as you designed it. This is a policy, not
+  a browser limit: the file has to work with no network at all (offline, LAN,
+  tunnel) and years later as a saved Light App. Inline every `<style>` and
+  `<script>`; embed images as `data:` URIs; never reference a CDN, a Google
+  Font, or any other network resource.
 - **The default viewport is narrow.** The panel is a **420px-wide docked
   sidebar** by default; the user can maximize it to `min(900px, 75vw)`, but
   don't design for that as the common case. Build the layout to read cleanly
