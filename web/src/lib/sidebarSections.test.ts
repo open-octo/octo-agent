@@ -89,6 +89,28 @@ describe('splitSections', () => {
     expect(s.projects[0].items).toEqual([])
     expect(s.ungrouped.map(x => x.id)).toEqual(['a'])
   })
+
+  // Tasks is the recency list, ordered by updated_at rather than fetch order:
+  // a turn ending in an open tab re-stamps only that row (App.svelte), and the
+  // sort is what floats it to the top. The stamp is UTC "Z" while the server
+  // sends zone-offset strings, so the comparison must parse, not localeCompare.
+  it('orders ungrouped by updated_at descending across mixed formats', () => {
+    const at = (id: string, updated_at: string): Session => ({ id, updated_at }) as Session
+    const s = splitSections(
+      [
+        at('old', '2026-08-29T10:00:00+08:00'),
+        at('stamped', '2026-08-29T05:30:00.000Z'), // = 13:30+08:00, the newest
+        at('mid', '2026-08-29T11:00:00+08:00'),
+      ],
+      [], [], [],
+    )
+    expect(s.ungrouped.map(x => x.id)).toEqual(['stamped', 'mid', 'old'])
+  })
+
+  it('keeps fetch order for sessions without a parseable updated_at', () => {
+    const s = splitSections([sess('a'), sess('b'), sess('c')], [], [], [])
+    expect(s.ungrouped.map(x => x.id)).toEqual(['a', 'b', 'c'])
+  })
 })
 
 describe('swapWithinSection', () => {

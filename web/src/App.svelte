@@ -357,19 +357,27 @@
           s.id === sid ? { ...s, pending_confirmation: ev.kind === 'confirm_pending' } : s
         ))
       }
+      // A finished turn left something in that session to read. Stamped
+      // unconditionally: the effect at the top of this file immediately
+      // un-marks it again if it's the session on screen. Must run BEFORE the
+      // sessions.update below — that update synchronously triggers
+      // reconcileSeen, and a fresh browser's seen baseline has to cover this
+      // touch or the row flashes a phantom unread dot.
+      if (ev.kind === 'turn_ended') touchSession(sid)
       // Running-state pair — keeps the sidebar's activity spinner live for
       // sessions this tab isn't subscribed to (session_update carries status
       // only to subscribers).
       if (ev.kind === 'turn_started' || ev.kind === 'turn_ended') {
-        sessions.update(list => list.map(s =>
-          s.id === sid ? { ...s, status: ev.kind === 'turn_started' ? 'running' : 'idle' } : s
-        ))
+        sessions.update(list => list.map(s => {
+          if (s.id !== sid) return s
+          if (ev.kind === 'turn_started') return { ...s, status: 'running' }
+          // Also stamp updated_at: no broadcast carries the server's value, so
+          // without this the sidebar's relative timestamp keeps aging from the
+          // last REST fetch even as the user chats. The local clock stands in
+          // until the next list refetch reconciles with the server's mtime.
+          return { ...s, status: 'idle', updated_at: new Date().toISOString() }
+        }))
       }
-      // A finished turn left something in that session to read. Stamped
-      // unconditionally: the effect at the top of this file immediately
-      // un-marks it again if it's the session on screen, and nothing else
-      // refreshes updated_at for an open tab.
-      if (ev.kind === 'turn_ended') touchSession(sid)
       // The agent just finished changing files. Re-render the Git Diff panel if
       // it's open on this session, or move its badge if it isn't — that pair is
       // the whole refresh story, no polling anywhere.
