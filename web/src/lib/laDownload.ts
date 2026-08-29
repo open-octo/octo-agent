@@ -24,7 +24,11 @@
 // preventDefault() on the click keeps its own handling.
 //
 // Not intercepted: window.open(blobUrl) and location.href = dataUrl. Neither is
-// a download in an unsandboxed page either.
+// a download in an unsandboxed page either. Also missed: a click the app
+// stops with stopPropagation() before it reaches the document (without
+// preventDefault) — the browser's default then runs and the sandbox drops it
+// silently. Catching that would mean fetching in the capture phase for every
+// download click, including ones the app is about to cancel; not worth it.
 
 import { get } from 'svelte/store'
 import { nativeShell, showToast } from './stores'
@@ -40,7 +44,6 @@ export const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
 // still must not carry path separators or control characters into either.
 export function sanitizeDownloadName(name: unknown): string {
   if (typeof name !== 'string') return 'download'
-  // eslint-disable-next-line no-control-regex
   const cleaned = name.replace(/[/\\\u0000-\u001f\u007f]+/g, '_').trim()
   if (!cleaned || cleaned === '.' || cleaned === '..') return 'download'
   return cleaned.length > 255 ? cleaned.slice(0, 255) : cleaned
@@ -58,12 +61,21 @@ function blobToBase64(blob: Blob): Promise<string> {
   })
 }
 
+// One native save dialog at a time: the browser prompts before letting a page
+// download several files in a row, the desktop shell has no such gate and
+// would stack a sheet per file. Requests that arrive while one is open are
+// dropped, not queued — a loop firing downloads is a bug in the app, not a
+// batch the user wants to click through.
+let nativeSaveInFlight = false
+
 // Saves a blob the Light App handed over. Resolves to whether a file was
-// written (false on a cancelled or failed native save). The browser path
-// mirrors artifact-actions.ts: an in-document anchor, since a detached
+// written (false on a cancelled, failed or dropped native save). The browser
+// path mirrors artifact-actions.ts: an in-document anchor, since a detached
 // anchor's click() has never been reliable in Firefox.
 export async function deliverLaDownload(name: string, blob: Blob): Promise<boolean> {
   if (get(nativeShell)) {
+    if (nativeSaveInFlight) return false
+    nativeSaveInFlight = true
     try {
       const r = await api.nativeSaveBinary(name, await blobToBase64(blob))
       if (!r.cancelled) showToast(tr('artifacts.saved'))
@@ -71,6 +83,8 @@ export async function deliverLaDownload(name: string, blob: Blob): Promise<boole
     } catch {
       showToast(tr('artifacts.save_failed'), 'error')
       return false
+    } finally {
+      nativeSaveInFlight = false
     }
   }
   const url = URL.createObjectURL(blob)
@@ -92,7 +106,8 @@ export async function deliverLaDownload(name: string, blob: Blob): Promise<boole
 // the storage shim's reply listener has no pending entry to confuse it with.
 
 // Embed a string as a JS literal that is also inert inside <script> in HTML.
-function jsLiteral(s: string): string {
+// Shared with the storage shim in laStorage.ts.
+export function jsLiteral(s: string): string {
   return JSON.stringify(s).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')
 }
 
@@ -117,7 +132,9 @@ export function buildLaDownloadScript(ns: string): string {
   }
   document.addEventListener('click', function(ev){
     if (ev.defaultPrevented) return;
-    var t = ev.target;
+    // composedPath so an anchor inside a shadow root is found; target alone
+    // is retargeted to the shadow host.
+    var t = ev.composedPath ? ev.composedPath()[0] : ev.target;
     var a = t && t.closest ? t.closest('a[download]') : null;
     if (a && save(a)) ev.preventDefault();
   });

@@ -101,7 +101,8 @@ localStorage 原生可用时（非沙箱上下文）桥脚本什么都不做。
 桌面端 webview 更是没有 download delegate，连非沙箱的下载都是静默空操作。
 
 沿存储桥的路子处理：`web/src/lib/laDownload.ts` 往文档里注入一段脚本，拦截标准的下载写法 ——
-带 `download` 属性的锚点指向 blob:/data: URL —— 把目标 `fetch` 成 Blob，经同一条 postMessage
+任何带 `download` 属性且有 href 的锚点，不看 scheme（实际都是 blob:/data:；相对或 http 链接在沙箱里
+`fetch` 会失败，只 `console.warn`）—— 把目标 `fetch` 成 Blob，经同一条 postMessage
 通道（`op: 'download'`，携带 `name` 和 `blob`，Blob 走结构化克隆）交给宿主。宿主按 `nativeShell`
 分流：桌面端 base64 后走 `/api/native/save-file` 的系统保存对话框，浏览器里在顶层文档挂一个
 `<a download>` 触发正常下载。这和 Artifacts 面板「下载」按钮走的是同一条落盘路径。
@@ -115,7 +116,12 @@ localStorage 原生可用时（非沙箱上下文）桥脚本什么都不做。
 
 - 单文件上限 100MB，超限宿主直接丢弃。文件名剥掉路径分隔符和控制字符，空则回退 `download`。
 - 下载是 fire-and-forget，宿主不回包（保存对话框可能开着几分钟），结果以宿主 toast 呈现。
+- 桌面端同一时刻只开一个保存对话框，对话框开着时到达的请求直接丢弃不排队（浏览器自带"多文件下载"
+  拦截，桌面 shell 没有，不闸会叠出一摞 sheet）。
+- `fetch` 在 click 同步链路内发出，blob URL 在那一刻就解析完，所以教科书写法 `a.click(); URL.revokeObjectURL(url)`
+  不构成竞态（Chrome 实测）。
 - 不拦 `window.open(blobUrl)` 和 `location.href = dataUrl` —— 这两种在非沙箱页面里也不是下载。
+  应用在锚点上 `stopPropagation()`（不 `preventDefault`）的点击到不了 document，同样漏过，会被沙箱静默丢掉。
 
 ## Agent 交互流程
 

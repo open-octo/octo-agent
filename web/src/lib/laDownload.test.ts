@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import 'fake-indexeddb/auto'
 import { registerLaIframe, installLaStorageBridge, withLaBridge } from './laStorage'
 import { buildLaDownloadScript, sanitizeDownloadName, MAX_DOWNLOAD_BYTES } from './laDownload'
-import { nativeShell } from './stores'
+import { nativeShell, toasts } from './stores'
+import { tr } from './i18n'
+import { get } from 'svelte/store'
 import * as api from './api'
 
 installLaStorageBridge()
@@ -20,13 +22,8 @@ function fromApp(data: Record<string, unknown>): void {
 const tick = () => new Promise((r) => setTimeout(r, 15))
 
 // jsdom has no object URLs; the browser path only needs them to be callable.
-let clicked: HTMLAnchorElement[] = []
 beforeEach(() => {
-  clicked = []
   vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:host/x', revokeObjectURL: () => {} }))
-  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
-    clicked.push(this)
-  })
   nativeShell.set(false)
 })
 afterEach(() => {
@@ -47,6 +44,17 @@ describe('sanitizeDownloadName', () => {
 })
 
 describe('host download handler', () => {
+  // Record the host's anchor clicks instead of letting jsdom act on them.
+  // Scoped to this block: the injected-script tests below need the real
+  // click() so an in-document anchor's event actually reaches the document.
+  let clicked: HTMLAnchorElement[] = []
+  beforeEach(() => {
+    clicked = []
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push(this)
+    })
+  })
+
   it('browser: saves through a top-level anchor named after the request', async () => {
     fromApp({ op: 'download', name: 'out/report.csv', blob: new Blob(['a,b']) })
     await tick()
@@ -85,6 +93,37 @@ describe('host download handler', () => {
     )
     await tick()
     expect(clicked).toHaveLength(0)
+  })
+
+  it('desktop: a failed native save toasts an error, a cancelled one toasts nothing', async () => {
+    nativeShell.set(true)
+    toasts.set([])
+    vi.spyOn(api, 'nativeSaveBinary').mockRejectedValueOnce(new Error('boom'))
+    fromApp({ op: 'download', name: 'a.txt', blob: new Blob(['x']) })
+    await tick()
+    expect(get(toasts).map((t) => [t.msg, t.type])).toEqual([[tr('artifacts.save_failed'), 'error']])
+
+    toasts.set([])
+    vi.spyOn(api, 'nativeSaveBinary').mockResolvedValueOnce({ path: '', cancelled: true })
+    fromApp({ op: 'download', name: 'a.txt', blob: new Blob(['x']) })
+    await tick()
+    expect(get(toasts)).toEqual([])
+  })
+
+  it('desktop: one save dialog at a time — requests during an open one are dropped', async () => {
+    nativeShell.set(true)
+    const save = vi
+      .spyOn(api, 'nativeSaveBinary')
+      .mockImplementation(() => new Promise((r) => setTimeout(() => r({ path: '/tmp/a', cancelled: false }), 40)))
+    fromApp({ op: 'download', name: 'a.txt', blob: new Blob(['1']) })
+    fromApp({ op: 'download', name: 'b.txt', blob: new Blob(['2']) })
+    await new Promise((r) => setTimeout(r, 80))
+    expect(save).toHaveBeenCalledTimes(1)
+    expect(save.mock.calls[0][0]).toBe('a.txt')
+    // Once it settles the next one goes through.
+    fromApp({ op: 'download', name: 'c.txt', blob: new Blob(['3']) })
+    await new Promise((r) => setTimeout(r, 80))
+    expect(save).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -167,7 +206,7 @@ describe('injected download script', () => {
   it('leaves plain links and already-handled clicks alone', async () => {
     const sent = bootShim('app-d')
     const plain = document.createElement('a')
-    plain.href = 'blob:null/plain'
+    plain.href = '#plain' // in-page, so jsdom's default action is a no-op rather than a navigation
     document.body.appendChild(plain)
     const ev1 = new MouseEvent('click', { bubbles: true, cancelable: true })
     plain.dispatchEvent(ev1)
@@ -180,6 +219,60 @@ describe('injected download script', () => {
     document.body.appendChild(handled)
     handled.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
 
+    await tick()
+    expect(sent).toHaveLength(0)
+  })
+
+  it('programmatic click() on an in-document anchor posts exactly once (patch defers, listener handles)', async () => {
+    const sent = bootShim('app-f')
+    const a = document.createElement('a')
+    a.href = 'blob:null/attached'
+    a.download = 'once.txt'
+    document.body.appendChild(a)
+    a.click()
+    await tick()
+    expect(sent).toHaveLength(1)
+  })
+
+  it('fetches the href synchronously inside click(), so revoking the blob URL right after is safe', () => {
+    const fetched: string[] = []
+    vi.stubGlobal('fetch', (url: string) => {
+      fetched.push(url)
+      return new Promise(() => {}) // never settles; only the call timing matters here
+    })
+    bootShim('app-g')
+    const a = document.createElement('a')
+    a.href = 'blob:null/sync'
+    a.download = 'x.bin'
+    a.click()
+    // Nothing awaited yet: the textbook `a.click(); URL.revokeObjectURL(url)`
+    // must find the fetch already issued.
+    expect(fetched).toEqual(['blob:null/sync'])
+  })
+
+  it('a failed fetch posts nothing and throws nothing', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch')
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const sent = bootShim('app-h')
+    const a = document.createElement('a')
+    a.href = 'blob:null/gone'
+    a.download = 'x.bin'
+    expect(() => a.click()).not.toThrow()
+    await tick()
+    expect(sent).toHaveLength(0)
+    expect(warn).toHaveBeenCalled()
+  })
+
+  it('an <a download> without href is not intercepted', async () => {
+    const sent = bootShim('app-i')
+    const a = document.createElement('a')
+    a.download = 'nothing.txt'
+    document.body.appendChild(a)
+    const ev = new MouseEvent('click', { bubbles: true, cancelable: true })
+    a.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(false)
     await tick()
     expect(sent).toHaveLength(0)
   })

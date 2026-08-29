@@ -42,6 +42,8 @@
 //     capped at MAX_VALUE. The shim enforces the same limits synchronously so
 //     a rejected write can never leave the cache disagreeing with the store.
 
+import { MAX_DOWNLOAD_BYTES, buildLaDownloadScript, deliverLaDownload, jsLiteral, sanitizeDownloadName } from './laDownload'
+
 const DB_NAME = 'octo-la-storage'
 const STORE = 'kv'
 const MAX_KEY = 512
@@ -50,8 +52,6 @@ const MAX_KEY = 512
 // write from eating the whole budget in a single message.
 const MAX_VALUE = 1_000_000
 const MAX_TOTAL = 5_000_000
-
-import { MAX_DOWNLOAD_BYTES, buildLaDownloadScript, deliverLaDownload, sanitizeDownloadName } from './laDownload'
 
 const laFrames = new Map<Window, string>() // iframe window -> namespace
 let bridgeInstalled = false
@@ -237,11 +237,6 @@ export function installLaStorageBridge(): void {
 // The limits the host enforces are re-checked here synchronously, and a
 // violation throws QuotaExceededError like real localStorage does — a write
 // the host would reject must not silently sit in the cache.
-
-// Embed a string as a JS literal that is also inert inside <script> in HTML.
-function jsLiteral(s: string): string {
-  return JSON.stringify(s).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')
-}
 
 export function buildLaBridgeScript(ns: string): string {
   return `(function(){
