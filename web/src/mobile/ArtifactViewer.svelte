@@ -8,7 +8,7 @@
   import type { Artifact } from '../lib/types'
   import { t } from '../lib/i18n'
   import { imagePreviewError } from '../lib/artifact-actions'
-  import { hydrateArtifact } from '../lib/artifacts'
+  import { ARTIFACT_SANDBOX, hydrateArtifact } from '../lib/artifacts'
 
   let { artifact, onClose }: { artifact: Artifact; onClose: () => void } = $props()
 
@@ -88,8 +88,7 @@
     {:else if !artifact.loaded}
       <div class="body-loading"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon></div>
     {:else if view === 'preview'}
-      <!-- Sandbox flags mirror ArtifactsPanel's frames (see the comment there). -->
-      <iframe srcdoc={artifact.preview} sandbox="allow-scripts allow-forms allow-modals" allow="clipboard-write" title={artifact.name}></iframe>
+      <iframe srcdoc={artifact.preview} sandbox={ARTIFACT_SANDBOX} allow="clipboard-write" title={artifact.name}></iframe>
     {:else}
       <pre class="code-view">{artifact.code}</pre>
     {/if}

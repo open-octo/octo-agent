@@ -29,6 +29,24 @@ import { artifacts, panelContent, panelExpanded, artifactSel } from './stores'
 import { renderMarkdown } from './markdown'
 import type { Artifact } from './types'
 
+// The sandbox every srcdoc preview frame runs with — artifact previews (panel,
+// modal, mobile) and saved Light Apps alike, since an app is exercised in the
+// preview before it is saved and must behave the same afterwards.
+//
+// No allow-same-origin: the origin stays opaque, so the document reaches no
+// storage, cookies or host state (the bridges in laStorage.ts / laDownload.ts
+// exist because of this). No allow-popups, no allow-top-navigation.
+//
+// allow-forms: without it the submit event never fires at all — the sandboxed
+// forms check runs before the event is dispatched — so <form onsubmit> plus
+// Enter is silently dead. allow-modals: without it confirm() returns false,
+// prompt() null and alert() no-ops, so a "sure?" before delete can never be
+// answered yes. What allow-modals hands the document in return: native
+// dialogs (alert/confirm/prompt, print(), the beforeunload prompt), which are
+// tab-level and can block the host UI while open. Accepted: the app is one the
+// user asked their own agent to write.
+export const ARTIFACT_SANDBOX = 'allow-scripts allow-forms allow-modals'
+
 // Tracks which session the current artifacts belong to, so an async fetch that
 // resolves after a session switch is discarded instead of polluting the new view.
 export const artifactSelSession = writable<string | null>(null)
