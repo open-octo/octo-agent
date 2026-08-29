@@ -102,26 +102,104 @@ function typeLabel(kind: Kind): string {
   }
 }
 
-// Detects HTML that references external scripts or stylesheets — these fail to
-// load inside a sandboxed srcdoc iframe that has no same-origin access. Only
-// <link> rel values whose target the document needs in order to render count:
-// a favicon, manifest, preconnect, or canonical link loads nothing the preview
-// depends on, so it must not force the warning page (#1896). preload rides
-// along with stylesheet because the rel="preload" onload="this.rel='stylesheet'"
-// idiom makes it one.
-const SCRIPT_SRC_RE = /<script[^>]+src=["'](?!data:|blob:|#)[^"']/i
+// External scripts and stylesheets — <script src> / <link rel=stylesheet href>
+// pointing anywhere but data:, blob:, or # — are stripped before a sandboxed
+// frame renders the page, and the page renders without them under a banner
+// saying so. Both frames that show agent-written HTML go through this
+// (selfContainedDocument): the artifact preview and the Light App view, so a
+// page's external references are treated the same wherever it is opened.
+// (Known gap, deliberately left: such a page saved as a Light App keeps its
+// raw source — see lightAppSource — so its local images are not inlined
+// there the way the preview inlines them.)
+//
+// Artifacts are required to be self-contained (the artifact-design skill says
+// so, and the panel enforces it). The reason is not the sandbox: a sandboxed
+// iframe with allow-scripts can fetch a cross-origin https:// script just
+// fine. It is that the same file must render on a machine with no route to
+// that CDN — offline, on a LAN, over a tunnel, or behind a national firewall —
+// and must still render years later once saved as a Light App. A local
+// reference (`./style.css`, `app.js` beside the page) really can't load: the
+// srcdoc frame resolves it against the host page, and the /api/ path it would
+// need can't authenticate from an opaque origin (see the file-header note).
+//
+// Stripping beats refusing to render: a page with one Google Font link still
+// shows its content, and the user can judge at a glance whether the design
+// survived. Only <link> rel values the document needs in order to render
+// count: a favicon, manifest, preconnect, or canonical link loads nothing the
+// preview depends on and stays (#1896). preload rides along with stylesheet
+// because the rel="preload" onload="this.rel='stylesheet'" idiom makes it one.
+//
+// SCRIPT_TAG_RE takes the closing tag when there is one so an external
+// script's (normally empty) body goes with it; a lone unclosed opening tag is
+// still matched, so detection is not fooled by malformed markup.
+//
+// The src/href matchers accept quoted and unquoted values alike (an unquoted
+// `src=https://…` loads just the same), and anchor the attribute name on the
+// whitespace before it so `data-href="…"` or a `src=` inside another
+// attribute's value doesn't get an inline script or a harmless <link> removed.
+const SCRIPT_TAG_RE = /<script\b[^>]*>(?:[\s\S]*?<\/script\s*>)?/gi
+const SCRIPT_SRC_RE = /<script\b[^>]*\ssrc\s*=\s*["']?\s*(?!data:|blob:|#)[^\s"'>]/i
 const LINK_TAG_RE = /<link\b[^>]*>/gi
-const LINK_HREF_RE = /\bhref\s*=\s*["'](?!data:|blob:|#)[^"']/i
+const LINK_HREF_RE = /\shref\s*=\s*["']?\s*(?!data:|blob:|#)[^\s"'>]/i
 const LINK_REL_RE = /\brel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
 const RENDER_REL_RE = /(?:^|\s)(?:stylesheet|preload|modulepreload)(?:\s|$)/i
+
+function isRenderLink(tag: string): boolean {
+  if (!LINK_HREF_RE.test(tag)) return false
+  const m = LINK_REL_RE.exec(tag)
+  return RENDER_REL_RE.test(m?.[1] ?? m?.[2] ?? m?.[3] ?? '')
+}
+
+// Returns the document with its external scripts and stylesheets removed and
+// how many were removed; 0 means the input came back untouched.
+function stripExternalRefs(html: string): { html: string; removed: number } {
+  let removed = 0
+  const out = html
+    .replace(SCRIPT_TAG_RE, tag => (SCRIPT_SRC_RE.test(tag) ? (removed++, '') : tag))
+    .replace(LINK_TAG_RE, tag => (isRenderLink(tag) ? (removed++, '') : tag))
+  return { html: out, removed }
+}
+
 function hasExternalRefs(html: string): boolean {
-  if (SCRIPT_SRC_RE.test(html)) return true
-  for (const tag of html.match(LINK_TAG_RE) ?? []) {
-    if (!LINK_HREF_RE.test(tag)) continue
-    const m = LINK_REL_RE.exec(tag)
-    if (RENDER_REL_RE.test(m?.[1] ?? m?.[2] ?? m?.[3] ?? '')) return true
+  return stripExternalRefs(html).removed > 0
+}
+
+// The banner a stripped page renders under. It goes right after the <body>
+// start tag when there is one (so the page's own layout still applies to the
+// content below it). Without one it must still land after the DOCTYPE, or
+// the parser leaves initial mode on the <div>, ignores the DOCTYPE when it
+// then arrives, and drops the whole page into quirks mode — so the fallbacks
+// are, in order, after </head>, after <html …>, after <!DOCTYPE …>, and only
+// for a bare fragment the very top. Normal flow, not fixed: a fixed bar would
+// sit on top of whatever the page puts at y=0.
+const BANNER_ANCHORS = [/<body\b[^>]*>/i, /<\/head\s*>/i, /<html\b[^>]*>/i, /<!doctype\b[^>]*>/i]
+function withStrippedBanner(html: string, removed: number, isDark: boolean): string {
+  const bg = isDark ? '#2b2111' : '#fff8e1'
+  const border = isDark ? '#594214' : '#f0c040'
+  const color = isDark ? '#e8b339' : '#7a5c00'
+  const what = removed === 1 ? '1 external script/stylesheet was' : `${removed} external scripts/stylesheets were`
+  const banner = `<div style="padding:8px 12px;font:12px/1.5 system-ui,sans-serif;color:${color};background:${bg};border-bottom:1px solid ${border}">` +
+    `⚠️ ${what} removed — artifacts must be self-contained, so external resources never load here. ` +
+    `The page may look or behave differently; the file itself is unchanged.</div>`
+  for (const re of BANNER_ANCHORS) {
+    const m = re.exec(html)
+    if (!m) continue
+    const at = m.index + m[0].length
+    return html.slice(0, at) + banner + html.slice(at)
   }
-  return false
+  return banner + html
+}
+
+// The document a sandboxed frame actually renders for agent-written HTML:
+// external references stripped, banner added when any were, the input handed
+// back untouched otherwise. Theme is read at call time; callers re-run on a
+// theme switch — artifact previews via installArtifactThemeRefresh dropping
+// them to unloaded, the Light App view by depending on themeRev.
+export function selfContainedDocument(html: string): string {
+  const { html: stripped, removed } = stripExternalRefs(html)
+  if (removed === 0) return html
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+  return withStrippedBanner(stripped, removed, isDark)
 }
 
 // The HTML to persist when an artifact is saved as a Light App. A Light App
@@ -129,8 +207,8 @@ function hasExternalRefs(html: string): boolean {
 // preview, and its relative image references have nothing to resolve against
 // at all — so the inlined preview (local images as data: URIs, see
 // inlineLocalRefs) is the version that survives the copy, not the raw source
-// (#1890). The exception is a document whose preview is a placeholder rather
-// than the document itself — the external-refs warning page, or the
+// (#1890). The exceptions are a document whose preview is not the document
+// itself — one rendered with its external references stripped, or the
 // load-failure note (loadFailed) — where the raw source stays the faithful
 // copy. (A load-failed entry has no source either; the save button is
 // disabled for it, this just keeps the placeholder out on every path.)
@@ -157,9 +235,8 @@ function artifactURL(sessionId: string, path: string): string {
 // those in), and the session itself must have written it, since the endpoint
 // serves nothing else. That covers the case that matters: a report the agent
 // wrote beside the screenshots it took. Everything else is left exactly as
-// written and simply doesn't render, same as today — which is also the fallback
-// for a local .css or .js, already routed to the warning page by
-// hasExternalRefs.
+// written and simply doesn't render, same as today. (A local .css or .js never
+// gets this far: stripExternalRefs has already removed it.)
 //
 // The budget counts raw file bytes, not what they cost once resident: a data:
 // URI carries base64's ~1.37x, doubled again by UTF-16, and the srcdoc
@@ -582,6 +659,12 @@ export async function hydrateArtifact(a: Artifact | null | undefined): Promise<v
 // its identity-matched write-back instead of resurrecting the old theme.
 // Image artifacts stay untouched: they carry src, never a themed preview,
 // and hydrateArtifact would refuse to re-load them.
+//
+// themeRev ticks on the same event for documents built outside the store —
+// the Light App frame derives its srcdoc from it so a banner baked with the
+// old theme's colours is rebuilt too.
+export const themeRev = writable(0)
+
 export function installArtifactThemeRefresh(): void {
   if (typeof MutationObserver === 'undefined' || typeof document === 'undefined') return
   let last = document.documentElement.getAttribute('data-theme')
@@ -589,6 +672,7 @@ export function installArtifactThemeRefresh(): void {
     const cur = document.documentElement.getAttribute('data-theme')
     if (cur === last) return
     last = cur
+    themeRev.update(n => n + 1)
     artifacts.update(list => list.map(e =>
       e.loaded && !e.src ? { ...e, loaded: false, loadFailed: false, preview: '', code: '' } : e))
   })
@@ -608,28 +692,12 @@ async function buildTextBody(
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
   let preview = ''
   if (kind === 'html') {
-    if (hasExternalRefs(code)) {
-      // External scripts/stylesheets can't load inside a sandboxed srcdoc
-      // iframe without same-origin access. Show a warning + the raw source.
-      const escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      const warnBodyBg = isDark ? '#0d1117' : '#fafafa'
-      const warnBodyColor = isDark ? '#8b949e' : '#555'
-      const warnCardBg = isDark ? '#2b2111' : '#fff8e1'
-      const warnCardBorder = isDark ? '#594214' : '#f0c040'
-      const warnCardColor = isDark ? '#e8b339' : '#7a5c00'
-      const warnPreBg = isDark ? '#161b22' : '#f5f5f5'
-      const warnPreColor = isDark ? '#c9d1d9' : '#333'
-      preview = `<body style="margin:0;padding:16px;font:13px/1.5 system-ui,sans-serif;color:${warnBodyColor};background:${warnBodyBg}">
-<div style="padding:10px 14px;background:${warnCardBg};border:1px solid ${warnCardBorder};border-radius:6px;margin-bottom:14px;font-size:13px;color:${warnCardColor}">
-⚠️ This file references external resources and cannot be previewed here. Use <b>Open in new tab</b> or switch to <b>Code</b> view.
-</div>
-<pre style="margin:0;padding:12px;background:${warnPreBg};border-radius:6px;overflow:auto;font:12px/1.6 'SFMono-Regular',Menlo,monospace;color:${warnPreColor};white-space:pre-wrap">${escaped}</pre>
-</body>`
-    } else {
-      // No unreachable scripts or stylesheets, but the file's own images
-      // still need inlining to survive the iframe.
-      preview = await inlineLocalRefs(code, sessionId, path, 'document')
-    }
+    // External scripts and stylesheets come out (see stripExternalRefs); the
+    // rest of the page renders, under a banner when anything was removed.
+    // The file's own images still need inlining to survive the iframe —
+    // and a page that lost its CDN stylesheet is exactly the one whose
+    // remaining content the user wants to see.
+    preview = await inlineLocalRefs(selfContainedDocument(code), sessionId, path, 'document')
   } else {
     // Only markdown reaches this branch: hydrateArtifact never calls in for an
     // image, and html was handled above.

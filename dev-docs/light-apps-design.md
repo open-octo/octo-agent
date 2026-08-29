@@ -223,6 +223,7 @@ evaluate whether the task is REPEATABLE — if yes, proactively suggest saving.
 ### Constraints
 - index.html must be fully self-contained (sandboxed iframe environment)
 - No CDN, no external images, no cross-origin fetch
+- Enforced at render time, not just documented: the Light App view strips external `<script src>` / `<link rel="stylesheet">` tags and shows a banner saying how many it removed — the same `selfContainedDocument` rule the artifact preview applies (`web/src/lib/artifacts.ts`), so a page cannot render one way in the panel and another once saved
 - Inline all CSS and JS
 - Use FileReader + <input type="file"> for file processing
 - Use emoji or inline SVG for icons

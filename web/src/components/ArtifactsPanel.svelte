@@ -3,7 +3,7 @@
   import { titlebarDblClick } from '../lib/nativeWindow'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
-  import { ARTIFACT_SANDBOX, hydrateArtifact, lightAppSource, pathIsInside } from '../lib/artifacts'
+  import { ARTIFACT_SANDBOX, hydrateArtifact, lightAppSource, pathIsInside, selfContainedDocument, themeRev } from '../lib/artifacts'
   import { CENTER_MIN } from '../lib/sidebarWidth'
   import { diffData, diffLoading, diffBadge, loadDiff } from '../lib/diff'
   import DiffView from './diff/DiffView.svelte'
@@ -278,7 +278,15 @@
     }),
   )
   const laCurSlug = $derived($lightappOpen.includes($lightappSel) ? $lightappSel : ($lightappOpen[0] ?? ''))
-  const laCurHTML = $derived($lightappHTML[laCurSlug] ?? '')
+  // Same self-contained rule as the artifact preview: a Light App that leans
+  // on a CDN renders with those references stripped and a banner, here and in
+  // the panel alike — otherwise the very page the preview refused to run
+  // scripts for would come alive the moment it is saved. The banner bakes the
+  // theme in, so this re-derives on themeRev.
+  const laCurHTML = $derived.by(() => {
+    void $themeRev
+    return selfContainedDocument($lightappHTML[laCurSlug] ?? '')
+  })
   const laCurName = $derived($lightapps.find(a => a.slug === laCurSlug)?.name ?? laCurSlug)
 
   // ── Light App storage bridge ─────────────────────────────────────────────
