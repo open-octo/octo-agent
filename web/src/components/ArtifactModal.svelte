@@ -100,7 +100,8 @@
       {:else if !cur.loaded}
         <div class="body-loading"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon></div>
       {:else}
-        <iframe srcdoc={cur.preview} sandbox="allow-scripts" allow="clipboard-write" title={cur.name}></iframe>
+        <!-- Sandbox flags mirror ArtifactsPanel's frames (see the comment there). -->
+        <iframe srcdoc={cur.preview} sandbox="allow-scripts allow-forms allow-modals" allow="clipboard-write" title={cur.name}></iframe>
       {/if}
     </div>
   </div>

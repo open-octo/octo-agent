@@ -73,8 +73,12 @@ octo-agent 已经有一套完整的生成 + 展示循环：Agent 生成 HTML →
 
 ### 运行时存储
 
-轻应用跑在 `sandbox="allow-scripts"` 的 srcdoc iframe 里（刻意不给
-`allow-same-origin`），origin 是 opaque，浏览器会拒掉所有持久化存储 API —
+轻应用跑在 `sandbox="allow-scripts allow-forms allow-modals"` 的 srcdoc iframe 里（刻意不给
+`allow-same-origin`；`allow-forms` 是因为没有它表单的 submit 事件根本不触发，`<form onsubmit>` + 回车
+提交全废；`allow-modals` 是因为没有它 `confirm()` 恒 false、`prompt()` 恒 null、`alert()` 静默——
+生成的应用常拿 `confirm` 做删除确认，等于永远删不掉。两者都不放宽安全边界：origin 仍是 opaque、
+不能开弹窗、不能导航顶层。Artifact 预览 iframe 用同一组 flag，保存前后行为一致）。
+origin 是 opaque，浏览器会拒掉所有持久化存储 API —
 localStorage / sessionStorage / Cookie / IndexedDB 在里面一律抛 SecurityError。
 
 沙箱不动，改由宿主页面代管：`web/src/lib/laStorage.ts` 在宿主开一个 IndexedDB

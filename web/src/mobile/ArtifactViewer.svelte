@@ -88,7 +88,8 @@
     {:else if !artifact.loaded}
       <div class="body-loading"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon></div>
     {:else if view === 'preview'}
-      <iframe srcdoc={artifact.preview} sandbox="allow-scripts" allow="clipboard-write" title={artifact.name}></iframe>
+      <!-- Sandbox flags mirror ArtifactsPanel's frames (see the comment there). -->
+      <iframe srcdoc={artifact.preview} sandbox="allow-scripts allow-forms allow-modals" allow="clipboard-write" title={artifact.name}></iframe>
     {:else}
       <pre class="code-view">{artifact.code}</pre>
     {/if}

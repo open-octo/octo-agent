@@ -521,7 +521,14 @@
       {/if}
       {#if laCurHTML}
         {#key laReloadGen}
-        <iframe bind:this={laFrameEl} srcdoc={withLaBridge(laCurHTML, laCurSlug)} sandbox="allow-scripts" allow="clipboard-write" title={laCurName}></iframe>
+        <!-- allow-forms / allow-modals: without them the sandbox silently
+             breaks two things generated apps lean on — the submit event never
+             fires (so <form onsubmit> + Enter is dead), and confirm() returns
+             false / prompt() null / alert() no-ops (so a "sure?" before delete
+             never deletes). Neither flag widens the security boundary: the
+             origin stays opaque (no allow-same-origin), no popups, no
+             top-level navigation. -->
+        <iframe bind:this={laFrameEl} srcdoc={withLaBridge(laCurHTML, laCurSlug)} sandbox="allow-scripts allow-forms allow-modals" allow="clipboard-write" title={laCurName}></iframe>
         {/key}
       {:else if laCurSlug || laLoading}
         <!-- A tab opens before its HTML arrives, so this covers the fetch. -->
@@ -624,7 +631,9 @@
         {:else if !cur.loaded}
           <div class="body-loading"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon></div>
         {:else if $artifactView === 'preview'}
-          <iframe srcdoc={cur.preview} sandbox="allow-scripts" allow="clipboard-write" title={cur.name}></iframe>
+          <!-- Same sandbox as the Light App frame above: this is where an app
+               is previewed before it is saved, so it must behave identically. -->
+          <iframe srcdoc={cur.preview} sandbox="allow-scripts allow-forms allow-modals" allow="clipboard-write" title={cur.name}></iframe>
         {:else}
           <pre class="code-view">{cur.code}</pre>
         {/if}
