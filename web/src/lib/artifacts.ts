@@ -631,6 +631,8 @@ async function buildTextBody(
       preview = await inlineLocalRefs(code, sessionId, path, 'document')
     }
   } else {
+    // Only markdown reaches this branch: hydrateArtifact never calls in for an
+    // image, and html was handled above.
     // Markdown is rendered inside a sandboxed srcdoc iframe which has no
     // access to the host app's CSS or JS.  Inline the highlight.js theme
     // CSS, code-block layout, and a copy-button handler so syntax

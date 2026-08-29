@@ -35,6 +35,11 @@ func TestShowArtifact_Errors(t *testing.T) {
 	if err := os.WriteFile(binFile, []byte{0x4d, 0x5a}, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// A source file: readable text, but not an artifact kind the panel lists.
+	srcFile := filepath.Join(dir, "script.py")
+	if err := os.WriteFile(srcFile, []byte("print('hi')\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	cases := []struct {
 		name  string
@@ -43,6 +48,7 @@ func TestShowArtifact_Errors(t *testing.T) {
 		{"missing path", map[string]any{}},
 		{"nonexistent file", map[string]any{"path": filepath.Join(dir, "nope.html")}},
 		{"non-previewable extension", map[string]any{"path": binFile}},
+		{"source file", map[string]any{"path": srcFile}},
 		{"directory", map[string]any{"path": dir + string(filepath.Separator) + "sub.html"}},
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "sub.html"), 0o755); err != nil {

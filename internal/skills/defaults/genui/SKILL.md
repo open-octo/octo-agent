@@ -256,8 +256,8 @@ that won't error, it'll just look wrong:
 
 - **Use `write_file`/`edit_file`/`show_artifact`** when the output is a
   deliverable that should survive this reply: a document, a standalone
-  interactive page, an image, a code file — something the user might reopen,
-  export, or refer back to later, independent of this conversation turn.
+  interactive page, an image — something the user might reopen, export, or
+  refer back to later, independent of this conversation turn.
 - **Use `render_ui`/`octo-ui`** for disposable structure inside this one
   reply that the user might act on right now — a quick comparison, a status
   summary, a small form — that has no reason to exist as a file.

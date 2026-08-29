@@ -100,7 +100,7 @@ Two kinds of files come out of a task, and they do not belong in the same place:
 For every deliverable:
 
 - **Report its absolute path in your reply.** The user does not read your tool calls; for a file with no preview, the path you print is the only handle they get.
-- **Call `show_artifact` when the type is previewable** (HTML, Markdown, images, CSV, text/code) so it opens in the web Artifacts panel, or as a click-to-open link in the TUI — files written with `write_file`/`edit_file` are surfaced automatically. Other types (`.xlsx`, `.pdf`, `.docx`, `.zip`) have no preview path at all, which makes the reported path the whole delivery.
+- **Call `show_artifact` when the type is previewable** (HTML, Markdown, images) so it opens in the web Artifacts panel, or as a click-to-open link in the TUI — files written with `write_file`/`edit_file` are surfaced automatically. Other types (`.xlsx`, `.pdf`, `.docx`, `.zip`) have no preview path at all, which makes the reported path the whole delivery.
 - **Don't dirty a repo with output that isn't part of it.** When the working directory is a git repo and the deliverable is unrelated to that project (a one-off spreadsheet in the middle of a codebase), either ask where it should go or write it to octo's workspace directory (`~/Octo` by default, creating it if needed) — and say which you did.
 - **Name it so it still makes sense next week** (`sales-2026-q2.xlsx`, not `output.xlsx`), and check the name isn't taken before writing — never silently overwrite a file of the user's.
 - Under `octo serve` (web or IM), the file lands on the **server's** filesystem, which may not be the machine the user is holding. Give the path and leave it at that; don't tell a remote user it was saved "to your computer".
