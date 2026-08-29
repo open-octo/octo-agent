@@ -62,11 +62,11 @@ func TestArtifactContentType(t *testing.T) {
 	if _, ok := ArtifactContentType("/x/y/binary.exe"); ok {
 		t.Error("exe should not be previewable")
 	}
-	// Code/text kinds are previewable but always plain text, never their native
-	// type (#1895).
-	for _, p := range []string{"/x/script.py", "/x/main.go", "/x/app.js", "/x/data.csv", "/x/notes.TXT"} {
-		if ct, ok := ArtifactContentType(p); !ok || ct != "text/plain; charset=utf-8" {
-			t.Errorf("%s: ct=%q ok=%v, want text/plain", p, ct, ok)
+	// Source, config, and data files are not artifacts: the panel only lists
+	// what it can render, and code changes belong to its Git Diff mode.
+	for _, p := range []string{"/x/script.py", "/x/main.go", "/x/app.js", "/x/data.csv", "/x/notes.TXT", "/x/config.json"} {
+		if ct, ok := ArtifactContentType(p); ok {
+			t.Errorf("%s: ct=%q, want not previewable", p, ct)
 		}
 	}
 }

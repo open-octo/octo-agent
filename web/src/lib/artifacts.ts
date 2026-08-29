@@ -51,17 +51,19 @@ export const ARTIFACT_SANDBOX = 'allow-scripts allow-forms allow-modals'
 // resolves after a session switch is discarded instead of polluting the new view.
 export const artifactSelSession = writable<string | null>(null)
 
-type Kind = 'html' | 'markdown' | 'image' | 'code'
+type Kind = 'html' | 'markdown' | 'image'
 
+// Only kinds the panel can render are artifacts. Source, config, and data
+// files are deliberately absent: they are the routine bulk of a coding
+// session, would bury the reports and pages the panel exists for, and the
+// panel's Git Diff mode already shows code changes with context. Must match
+// artifactContentTypes in internal/tools/artifact.go — a kind the client knows
+// but the endpoint refuses makes the fetch 404 and the artifact silently
+// vanish (#1895).
 const EXT_KIND: Record<string, Kind> = {
   html: 'html', htm: 'html',
   md: 'markdown', markdown: 'markdown',
   png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', svg: 'image', webp: 'image',
-  js: 'code', ts: 'code', jsx: 'code', tsx: 'code', mjs: 'code', cjs: 'code',
-  css: 'code', scss: 'code', less: 'code',
-  json: 'code', yaml: 'code', yml: 'code', toml: 'code',
-  py: 'code', go: 'code', rs: 'code', sh: 'code', bash: 'code', zsh: 'code',
-  txt: 'code', xml: 'code', csv: 'code',
 }
 
 // Once-per-session guard so a live write auto-opens the panel only the first time.
@@ -87,16 +89,11 @@ function iconFor(kind: Kind): string {
     case 'html':     return 'ant-design:html5-outlined'
     case 'markdown': return 'ant-design:file-markdown-outlined'
     case 'image':    return 'ant-design:file-image-outlined'
-    case 'code':     return 'ant-design:file-text-outlined'
     default:         return 'ant-design:file-text-outlined'
   }
 }
 
-function typeLabel(kind: Kind, path: string): string {
-  if (kind === 'code') {
-    const dot = path.lastIndexOf('.')
-    return dot >= 0 ? path.slice(dot + 1).toUpperCase() : 'Code'
-  }
+function typeLabel(kind: Kind): string {
   switch (kind) {
     case 'html':     return 'HTML'
     case 'markdown': return 'Markdown'
@@ -156,9 +153,8 @@ function artifactURL(sessionId: string, path: string): string {
 // iframe can read.
 //
 // Two gates on what gets inlined: the reference must resolve to an image (the
-// endpoint also serves .html, .md, and the plain-text code kinds, and an
-// artifact must not be able to pull those in), and the session itself must have
-// written it, since the endpoint
+// endpoint also serves .html and .md, and an artifact must not be able to pull
+// those in), and the session itself must have written it, since the endpoint
 // serves nothing else. That covers the case that matters: a report the agent
 // wrote beside the screenshots it took. Everything else is left exactly as
 // written and simply doesn't render, same as today — which is also the fallback
@@ -226,11 +222,11 @@ async function inlineLocalRefs(
   const inline = async (raw: string): Promise<string | null> => {
     const abs = localFilePath(raw, basePath)
     if (!abs) return null
-    // Images only, enforced rather than assumed. The endpoint also serves .html,
-    // .md, and the plain-text code kinds, so without this an artifact could name
-    // a sibling document here and have the host page — which is authenticated —
-    // fetch it and hand the bytes to a preview iframe that runs scripts and can
-    // reach the network. The artifact would be reading files it was never granted.
+    // Images only, enforced rather than assumed. The endpoint also serves .html
+    // and .md, so without this an artifact could name a sibling document here
+    // and have the host page — which is authenticated — fetch it and hand the
+    // bytes to a preview iframe that runs scripts and can reach the network.
+    // The artifact would be reading files it was never granted.
     if (kindOf(abs) !== 'image') return null
     const cached = seen.get(abs)
     if (cached !== undefined) return cached
@@ -506,7 +502,7 @@ export function observeArtifact(
   const name = basename(path)
   const entry: Artifact = {
     name,
-    type: typeLabel(kind, path),
+    type: typeLabel(kind),
     ver: '',
     short: name.length > 22 ? name.slice(0, 21) + '…' : name,
     icon: iconFor(kind),
@@ -524,12 +520,7 @@ export function observeArtifact(
   })
   artifactSel.set(get(artifacts).length - 1)
 
-  // Code kinds enter the list but never auto-open the panel: source-file
-  // writes are the routine bulk of a coding session, and popping the sidebar
-  // on the first one would make every such session open with it. They also
-  // don't consume the once-per-session flag, so a later HTML report or chart
-  // still auto-opens.
-  if (live && !autoOpened && kind !== 'code') {
+  if (live && !autoOpened) {
     autoOpened = true
     panelContent.set('session')
   }
@@ -639,7 +630,7 @@ async function buildTextBody(
       // still need inlining to survive the iframe.
       preview = await inlineLocalRefs(code, sessionId, path, 'document')
     }
-  } else if (kind === 'markdown') {
+  } else {
     // Markdown is rendered inside a sandboxed srcdoc iframe which has no
     // access to the host app's CSS or JS.  Inline the highlight.js theme
     // CSS, code-block layout, and a copy-button handler so syntax
@@ -689,12 +680,6 @@ async function buildTextBody(
     // The chat's own bubbles get the escaping default instead (markdown.ts).
     const body = await inlineLocalRefs(renderMarkdown(code, true, { rawHtml: true }), sessionId, path, 'fragment')
     preview = `<style>${MD_STYLES}</style><body style="${bodyStyle}">${body}${COPY_SCRIPT}</body>`
-  } else {
-    // code kind: show with theme-aware monospace style
-    const escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    const codeBg = isDark ? '#1e1e1e' : '#ffffff'
-    const codeColor = isDark ? '#d4d4d4' : 'rgba(0,0,0,0.88)'
-    preview = `<body style="margin:0;background:${codeBg}"><pre style="margin:0;padding:16px;color:${codeColor};font:13px/1.6 'SFMono-Regular',Menlo,monospace;white-space:pre-wrap;word-break:break-all">${escaped}</pre></body>`
   }
   return { code, preview }
 }
