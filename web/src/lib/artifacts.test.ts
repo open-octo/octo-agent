@@ -243,6 +243,40 @@ describe('selfContainedDocument', () => {
     expect(out).toContain('1 external script/stylesheet was removed')
     expect(out).toContain('<h1>hi</h1>')
   })
+
+  it('keeps the DOCTYPE first when the page has no <body> tag', () => {
+    // A <div> ahead of the DOCTYPE would drop the page into quirks mode.
+    const out = selfContainedDocument(
+      '<!DOCTYPE html><html><head><link rel="stylesheet" href="https://cdn/x.css"></head><main>hi</main></html>',
+    )
+    expect(out.startsWith('<!DOCTYPE html>')).toBe(true)
+    expect(out.indexOf('</head>')).toBeLessThan(out.indexOf('removed'))
+    expect(out.indexOf('removed')).toBeLessThan(out.indexOf('<main>'))
+  })
+
+  it('lands the banner inside a <body> that carries attributes', () => {
+    const out = selfContainedDocument(
+      '<html><head><link rel="stylesheet" href="https://cdn/x.css"></head><body class="dark" data-x="1"><p>hi</p></body></html>',
+    )
+    expect(out.indexOf('<body class="dark" data-x="1">')).toBeLessThan(out.indexOf('removed'))
+    expect(out.indexOf('removed')).toBeLessThan(out.indexOf('<p>hi</p>'))
+  })
+
+  it('catches unquoted src/href and uppercase tags', () => {
+    const out = selfContainedDocument(
+      '<HTML><HEAD><SCRIPT SRC=https://cdn/x.js></SCRIPT><LINK REL=stylesheet HREF=https://cdn/x.css></HEAD><BODY></BODY></HTML>',
+    )
+    expect(out).not.toContain('cdn/x.js')
+    expect(out).not.toContain('cdn/x.css')
+    expect(out).toContain('2 external scripts/stylesheets were removed')
+  })
+
+  it('does not mistake a src/href inside another attribute value for a reference', () => {
+    const html =
+      '<html><head><script data-cfg="src=\'https://c/x\'">inline()</script>' +
+      '<link rel="stylesheet" data-href="https://c/x.css"></head><body></body></html>'
+    expect(selfContainedDocument(html)).toBe(html)
+  })
 })
 
 describe('observeArtifact — preview documents', () => {

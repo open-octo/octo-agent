@@ -109,8 +109,11 @@ function typeLabel(kind: Kind, path: string): string {
 // pointing anywhere but data:, blob:, or # — are stripped before a sandboxed
 // frame renders the page, and the page renders without them under a banner
 // saying so. Both frames that show agent-written HTML go through this
-// (selfContainedDocument): the artifact preview and the Light App view, so the
-// same file cannot render two different ways depending on where it is opened.
+// (selfContainedDocument): the artifact preview and the Light App view, so a
+// page's external references are treated the same wherever it is opened.
+// (Known gap, deliberately left: such a page saved as a Light App keeps its
+// raw source — see lightAppSource — so its local images are not inlined
+// there the way the preview inlines them.)
 //
 // Artifacts are required to be self-contained (the artifact-design skill says
 // so, and the panel enforces it). The reason is not the sandbox: a sandboxed
@@ -132,10 +135,15 @@ function typeLabel(kind: Kind, path: string): string {
 // SCRIPT_TAG_RE takes the closing tag when there is one so an external
 // script's (normally empty) body goes with it; a lone unclosed opening tag is
 // still matched, so detection is not fooled by malformed markup.
+//
+// The src/href matchers accept quoted and unquoted values alike (an unquoted
+// `src=https://…` loads just the same), and anchor the attribute name on the
+// whitespace before it so `data-href="…"` or a `src=` inside another
+// attribute's value doesn't get an inline script or a harmless <link> removed.
 const SCRIPT_TAG_RE = /<script\b[^>]*>(?:[\s\S]*?<\/script\s*>)?/gi
-const SCRIPT_SRC_RE = /<script[^>]+src=["'](?!data:|blob:|#)[^"']/i
+const SCRIPT_SRC_RE = /<script\b[^>]*\ssrc\s*=\s*["']?\s*(?!data:|blob:|#)[^\s"'>]/i
 const LINK_TAG_RE = /<link\b[^>]*>/gi
-const LINK_HREF_RE = /\bhref\s*=\s*["'](?!data:|blob:|#)[^"']/i
+const LINK_HREF_RE = /\shref\s*=\s*["']?\s*(?!data:|blob:|#)[^\s"'>]/i
 const LINK_REL_RE = /\brel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
 const RENDER_REL_RE = /(?:^|\s)(?:stylesheet|preload|modulepreload)(?:\s|$)/i
 
@@ -161,8 +169,13 @@ function hasExternalRefs(html: string): boolean {
 
 // The banner a stripped page renders under. It goes right after the <body>
 // start tag when there is one (so the page's own layout still applies to the
-// content below it), else at the very top. Normal flow, not fixed: a fixed bar
-// would sit on top of whatever the page puts at y=0.
+// content below it). Without one it must still land after the DOCTYPE, or
+// the parser leaves initial mode on the <div>, ignores the DOCTYPE when it
+// then arrives, and drops the whole page into quirks mode — so the fallbacks
+// are, in order, after </head>, after <html …>, after <!DOCTYPE …>, and only
+// for a bare fragment the very top. Normal flow, not fixed: a fixed bar would
+// sit on top of whatever the page puts at y=0.
+const BANNER_ANCHORS = [/<body\b[^>]*>/i, /<\/head\s*>/i, /<html\b[^>]*>/i, /<!doctype\b[^>]*>/i]
 function withStrippedBanner(html: string, removed: number, isDark: boolean): string {
   const bg = isDark ? '#2b2111' : '#fff8e1'
   const border = isDark ? '#594214' : '#f0c040'
@@ -170,17 +183,21 @@ function withStrippedBanner(html: string, removed: number, isDark: boolean): str
   const what = removed === 1 ? '1 external script/stylesheet was' : `${removed} external scripts/stylesheets were`
   const banner = `<div style="padding:8px 12px;font:12px/1.5 system-ui,sans-serif;color:${color};background:${bg};border-bottom:1px solid ${border}">` +
     `⚠️ ${what} removed — artifacts must be self-contained, so external resources never load here. ` +
-    `The page may look or behave differently; the <b>Code</b> view has the original.</div>`
-  const m = /<body\b[^>]*>/i.exec(html)
-  if (!m) return banner + html
-  const at = m.index + m[0].length
-  return html.slice(0, at) + banner + html.slice(at)
+    `The page may look or behave differently; the file itself is unchanged.</div>`
+  for (const re of BANNER_ANCHORS) {
+    const m = re.exec(html)
+    if (!m) continue
+    const at = m.index + m[0].length
+    return html.slice(0, at) + banner + html.slice(at)
+  }
+  return banner + html
 }
 
 // The document a sandboxed frame actually renders for agent-written HTML:
 // external references stripped, banner added when any were, the input handed
-// back untouched otherwise. Theme is read at call time — the frame gets no
-// live theme push, same as every preview document built here.
+// back untouched otherwise. Theme is read at call time; callers re-run on a
+// theme switch — artifact previews via installArtifactThemeRefresh dropping
+// them to unloaded, the Light App view by depending on themeRev.
 export function selfContainedDocument(html: string): string {
   const { html: stripped, removed } = stripExternalRefs(html)
   if (removed === 0) return html
@@ -651,6 +668,12 @@ export async function hydrateArtifact(a: Artifact | null | undefined): Promise<v
 // its identity-matched write-back instead of resurrecting the old theme.
 // Image artifacts stay untouched: they carry src, never a themed preview,
 // and hydrateArtifact would refuse to re-load them.
+//
+// themeRev ticks on the same event for documents built outside the store —
+// the Light App frame derives its srcdoc from it so a banner baked with the
+// old theme's colours is rebuilt too.
+export const themeRev = writable(0)
+
 export function installArtifactThemeRefresh(): void {
   if (typeof MutationObserver === 'undefined' || typeof document === 'undefined') return
   let last = document.documentElement.getAttribute('data-theme')
@@ -658,6 +681,7 @@ export function installArtifactThemeRefresh(): void {
     const cur = document.documentElement.getAttribute('data-theme')
     if (cur === last) return
     last = cur
+    themeRev.update(n => n + 1)
     artifacts.update(list => list.map(e =>
       e.loaded && !e.src ? { ...e, loaded: false, loadFailed: false, preview: '', code: '' } : e))
   })
