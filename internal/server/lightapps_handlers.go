@@ -32,6 +32,20 @@ type lightAppManifest struct {
 	// saved from, when it was. The web UI matches it against the artifact on
 	// display to hide the redundant "Save to Light App" action.
 	SourcePath string `json:"source_path,omitempty"`
+	// UpdatedAt is index.html's mtime, stamped at read time so the web UI can
+	// tell that an app it has open was rewritten on disk. Derived, never
+	// persisted: the writers leave it empty and omitempty keeps it out of
+	// manifest.json.
+	UpdatedAt string `json:"updated_at,omitempty"`
+}
+
+// stampLightApp fills m.UpdatedAt from the app's index.html. A missing file
+// leaves it empty rather than failing the read — the manifest still describes
+// the app, and the detail handler reports the missing HTML on its own.
+func stampLightApp(m *lightAppManifest, htmlPath string) {
+	if fi, err := os.Stat(htmlPath); err == nil {
+		m.UpdatedAt = fi.ModTime().UTC().Format(time.RFC3339Nano)
+	}
 }
 
 // handleListLightApps lists all Light Apps by scanning ~/.octo/light-apps/ for
@@ -68,6 +82,7 @@ func (s *Server) handleListLightApps(w http.ResponseWriter, r *http.Request) {
 		if m.Slug == "" {
 			m.Slug = slug
 		}
+		stampLightApp(&m, filepath.Join(dir, slug, "index.html"))
 		apps = append(apps, m)
 	}
 
@@ -109,6 +124,7 @@ func (s *Server) handleGetLightApp(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "lightapp_index_missing")
 		return
 	}
+	stampLightApp(&manifest, htmlPath)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"manifest": manifest,

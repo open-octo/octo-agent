@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightappOpen, lightapps, lightappHTML, showToast, nativeShell, activeSessionId, savePanelMode, type PanelMode } from '../lib/stores'
+  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightappOpen, lightapps, lightappHTML, lightappStamp, cacheLightApp, dropLightApp, showToast, nativeShell, activeSessionId, savePanelMode, type PanelMode } from '../lib/stores'
   import { titlebarDblClick } from '../lib/nativeWindow'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
@@ -154,14 +154,9 @@
     if ($lightappHTML[slug]) return
     laLoading = true
     try {
-      const detail = await api.getLightApp(slug)
-      lightappHTML.update(m => ({ ...m, [slug]: detail.html }))
+      cacheLightApp(slug, await api.getLightApp(slug))
     } catch { /* ignore */ }
     finally { laLoading = false }
-  }
-
-  function dropLightAppHTML(slug: string) {
-    lightappHTML.update(m => { const { [slug]: _, ...rest } = m; return rest })
   }
 
   // The HTML is cached per slug for the life of the page, and nothing tells
@@ -174,8 +169,7 @@
     if (!slug || laLoading) return
     laLoading = true
     try {
-      const detail = await api.getLightApp(slug)
-      lightappHTML.update(m => ({ ...m, [slug]: detail.html }))
+      cacheLightApp(slug, await api.getLightApp(slug))
       // An unchanged document leaves srcdoc identical and the iframe untouched;
       // the {#key} remounts it either way, so a reload always restarts the app.
       laReloadGen++
@@ -195,7 +189,7 @@
     // Drop the cached HTML too: nothing invalidates it while the tab is open,
     // so close-and-reopen is the one gesture that must pick up an edit the
     // agent made on disk. The re-fetch is a local round trip.
-    dropLightAppHTML(slug)
+    dropLightApp(slug)
     // Closing the last tab closes the panel — an empty Light Apps panel has
     // nothing to offer, and stopping looking is what the click meant.
     if (rest.length === 0) { lightappSel.set(''); closePanel(); return }
@@ -208,6 +202,29 @@
   $effect(() => {
     if ($panelContent === 'lightapps' && $lightapps.length === 0 && !laAttempted) loadLightApps()
     if ($panelContent !== 'lightapps') laAttempted = false
+  })
+
+  // Change detection. Nothing announces a Light App rewrite — the agent edits
+  // index.html with an ordinary file tool, and there is no fsnotify in the
+  // tree (store_watch.go makes the same trade for the sidebar) — so while the
+  // panel shows apps the list is sampled every few seconds and each tab's
+  // on-disk stamp is compared with the copy it renders. Only the prompt is
+  // automatic: reloading would throw away whatever the running app has on
+  // screen, so that stays a click. The sample is a directory scan of a
+  // handful of manifests, and it pauses while the tab is hidden.
+  const LA_POLL_MS = 5000
+  $effect(() => {
+    if ($panelContent !== 'lightapps' || $lightappOpen.length === 0) return
+    const id = setInterval(async () => {
+      if (document.hidden) return
+      try { lightapps.set(await api.listLightApps()) } catch { /* next tick */ }
+    }, LA_POLL_MS)
+    return () => clearInterval(id)
+  })
+  const laCurStale = $derived.by(() => {
+    const loaded = $lightappStamp[laCurSlug]
+    const disk = $lightapps.find(a => a.slug === laCurSlug)?.updated_at
+    return !!loaded && !!disk && loaded !== disk
   })
 
   // Closing drops the expanded state too, so re-opening comes back at its own
@@ -495,7 +512,13 @@
       {@render topbarControls()}
     </div>
 
-    <div class="body">
+    <div class="body la-body">
+      {#if laCurStale}
+        <div class="la-update" role="status">
+          <span>{$t('lightapps.updated').replace('{name}', laCurName)}</span>
+          <button onclick={() => reloadLightApp(laCurSlug)} disabled={laLoading}>{$t('lightapps.reload')}</button>
+        </div>
+      {/if}
       {#if laCurHTML}
         {#key laReloadGen}
         <iframe bind:this={laFrameEl} srcdoc={withLaBridge(laCurHTML, laCurSlug)} sandbox="allow-scripts" allow="clipboard-write" title={laCurName}></iframe>
@@ -829,6 +852,22 @@ iframe { border: 0; width: 100%; height: 100%; display: block; }
 }
 .chip-close:hover { opacity: 1; background: var(--hover-neutral); color: var(--text); }
 .spin { animation: octo-spin 0.8s linear infinite; }
+/* Floats over the app rather than pushing it down: the iframe keeps its size,
+   so the running app doesn't relayout just because a newer copy exists. */
+.la-body { position: relative; }
+.la-update {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1;
+  display: flex; align-items: center; gap: 10px; padding: 5px 5px 5px 12px;
+  max-width: calc(100% - 24px); background: var(--bg-container); border: 1px solid var(--border);
+  border-radius: 999px; box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  font-size: 12px; color: var(--text);
+}
+.la-update span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.la-update button {
+  flex: 0 0 auto; height: 24px; padding: 0 10px; border: none; border-radius: 999px;
+  background: var(--blue-6); color: #fff; font: inherit; font-weight: 500; cursor: pointer;
+}
+.la-update button:disabled { opacity: 0.5; cursor: default; }
 
 /* ── Save-to-Light-App inline form ──────────────────────────────────── */
 .save-to-la-bar {

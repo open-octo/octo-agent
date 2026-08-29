@@ -241,7 +241,7 @@ Agent 生成 Light App HTML 时，已有 `artifact-design` 技能自动生效，
 
 | 按钮 | 行为 |
 |---|---|
-| **打开** | 在 Artifacts panel 渲染 `index.html` |
+| **打开** | 在 Artifacts panel 渲染 `index.html`。面板按 slug 缓存 HTML；tab 条上有刷新按钮，关闭 tab 会清掉缓存 |
 | **编辑** | 打开新会话，自动填入上下文：「请帮我修改轻应用「{name}」，当前内容：{index.html 摘要}」 |
 | **删除** | 弹出二次确认：「确定删除轻应用「{name}」吗？」，确认后删除对应目录 |
 
@@ -254,11 +254,17 @@ Agent 生成 Light App HTML 时，已有 `artifact-design` 技能自动生效，
 前端可以直接通过 octo-agent 的文件读取能力访问 `~/.octo/light-apps/`，或者通过一个轻量 API 端点：
 
 ```
-GET /api/light-apps           →  {"apps": [{slug, name, description, icon, created_at}]}
+GET /api/light-apps           →  {"apps": [{slug, name, description, icon, created_at, updated_at}], "dir"}
 GET /api/light-apps/{slug}    →  {"manifest": {...}, "html": "<index.html content>"}
 ```
 
 推荐走 API 而不是让前端直接读文件系统——路径解析、安全边界更清晰。实现只是读目录 + 解析 manifest.json + 读 index.html，几十行 Go。
+
+`updated_at` 是 `index.html` 的 mtime，服务端读取时临时打上，不写进 manifest.json。
+
+### 变更检测
+
+Agent 改轻应用走的是普通文件工具，服务端没有任何"文件变了"的广播（仓库里没有 fsnotify，侧栏的 store_watch 也是同样的取舍）。面板里有打开的轻应用时，前端每 5 秒拉一次列表，把当前 tab 的 `updated_at` 和它渲染那份的 stamp 比对，不一致就在应用上方浮一条「{name} 已更新 · 刷新」；页面切到后台时暂停。只提示不自动重载——运行中的应用有自己的状态，刷掉它得由用户决定。
 
 ## 和现有功能的关系
 
