@@ -134,6 +134,12 @@
     // committing), so Enter is the confirm key — Claude Code's own binding.
     // Also reached from the note input, submitting the note with the choice.
     if (e.key === 'Enter' && preview && !onReview && focusedLabel) {
+      // An IME committing composed text also arrives as Enter (same guard as
+      // Composer.svelte) — that keystroke is typing, not confirmation. And a
+      // focused button's own activation must win: without this, Enter on a
+      // tabbed-to Cancel (or any row) would submit the focused option instead.
+      if (e.isComposing || e.keyCode === 229) return
+      if (e.target instanceof HTMLElement && e.target.tagName === 'BUTTON') return
       e.preventDefault()
       pick(focusedLabel)
     }
@@ -218,7 +224,7 @@
               placeholder={$t('question.custom_placeholder')}
               value={draft.custom}
               oninput={(e) => setDraft({ ...draft, custom: e.currentTarget.value })}
-              onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitOther() } }}
+              onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); commitOther() } }}
             />
             <button class="btn-primary btn-primary-sm" onclick={commitOther}>{$t('common.submit')}</button>
           </div>
