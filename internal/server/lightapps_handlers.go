@@ -39,11 +39,6 @@ type lightAppManifest struct {
 // the directory itself, so the web UI can tell whether a session artifact
 // already lives inside it (and skip the redundant "Save to Light App" action).
 func (s *Server) handleListLightApps(w http.ResponseWriter, r *http.Request) {
-	// no-store: the desktop webview (WKWebView) heuristically caches GET 200s,
-	// so without it an updated or newly saved app keeps serving the stale list
-	// from cache. Mirrors /api/onboard/status (#1660); the client also passes
-	// cache:'no-store'.
-	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 	dir := lightAppsDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -85,10 +80,6 @@ func (s *Server) handleListLightApps(w http.ResponseWriter, r *http.Request) {
 // handleGetLightApp returns the full manifest and index.html content for a
 // single Light App identified by its slug.
 func (s *Server) handleGetLightApp(w http.ResponseWriter, r *http.Request) {
-	// no-store for the same reason as the list above: this response carries the
-	// app's whole index.html, so a cached copy IS the stale app the user just
-	// replaced.
-	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 	slug := r.PathValue("slug")
 	if slug == "" || strings.Contains(slug, "..") || strings.ContainsAny(slug, "/\\") {
 		writeError(w, http.StatusBadRequest, "invalid_lightapp_slug")

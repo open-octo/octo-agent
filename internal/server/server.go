@@ -802,9 +802,20 @@ func (s *Server) doShutdown(ctx context.Context) error {
 // /api/version, the MCP OAuth callback, and static files are the only
 // handlers registered directly on the mux — the OAuth callback bypasses
 // auth deliberately (see handleMCPOAuthCallback's doc comment).
+//
+// Every API response is also stamped no-store here, for the same reason the
+// auth wrapper lives here: the desktop webview (WKWebView) heuristically
+// caches GET 200s that carry no cache policy, and every stale-data incident of
+// that class — the onboard phase replayed after setup (#1660), a stale
+// /api/version, a Light App reopening as its pre-update self, an artifact
+// preview showing an old revision — was one endpoint forgetting the header. A
+// handler that ever needs a different policy can overwrite it before writing.
 func (s *Server) api(pattern string, h http.HandlerFunc) {
 	s.apiRoutes = append(s.apiRoutes, pattern)
-	s.mux.HandleFunc(pattern, s.requireAuth(h))
+	s.mux.HandleFunc(pattern, s.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		h(w, r)
+	}))
 }
 
 // registerRoutes wires all handlers. API and WS routes require auth.
