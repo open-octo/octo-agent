@@ -310,6 +310,8 @@ func TestVendorModelVision(t *testing.T) {
 		{"bailian", "qwen3.7-plus", true, true},
 		{"bailian", "qwen3.7-max", false, true}, // text-only flagship
 		{"kimi", "kimi-k2.6", true, true},       // MoonViT multimodal
+		{"glm", "glm-5.3", false, true},         // text-only
+		{"glm", "glm-5.3-flash", true, true},    // image/video/file input
 		{"openai", "o3-mini", false, true},      // no image input
 		{"openai", "o4-mini", true, true},
 		{"xai", "grok-4.5", true, true},

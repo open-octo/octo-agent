@@ -241,15 +241,19 @@ var Registry = []Vendor{
 		Protocol:       "openai",
 		API:            "openai-completions",
 		DefaultBaseURL: "https://open.bigmodel.cn/api/paas/v4",
-		DefaultModel:   "glm-4.5",
-		// GLM-4.5/5.2 line is text-only; the vision variant (GLM-4.5V) isn't offered here.
+		DefaultModel:   "glm-5.3",
+		// glm-5.3-flash is the one multimodal entry (image/video/file input, 1M
+		// context — docs.z.ai/guides/vlm/glm-5.3-flash, 2026-08-29). The rest of
+		// the GLM-4.5/5.x line is text-only; GLM-4.5V isn't offered here.
 		Models: []VendorModel{
+			{ID: "glm-5.3", Vision: false},
+			{ID: "glm-5.3-flash", Vision: true},
 			{ID: "glm-5.2", Vision: false},
 			{ID: "glm-4.5", Vision: false},
 			{ID: "glm-4.5-air", Vision: false},
 			{ID: "glm-4.5-flash", Vision: false},
 		},
-		LiteModel:    "glm-4.5-flash",
+		LiteModel:    "glm-5.3-flash",
 		APIKeyEnvVar: "ZHIPU_API_KEY",
 		WebsiteURL:   "https://open.bigmodel.cn/usercenter/apikey",
 		EndpointVariants: []EndpointVariant{
