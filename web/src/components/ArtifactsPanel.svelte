@@ -160,15 +160,44 @@
     finally { laLoading = false }
   }
 
+  function dropLightAppHTML(slug: string) {
+    lightappHTML.update(m => { const { [slug]: _, ...rest } = m; return rest })
+  }
+
+  // The HTML is cached per slug for the life of the page, and nothing tells
+  // the panel when the agent rewrites the file on disk — so an edited app kept
+  // showing its old version until a full page reload, which the desktop shell
+  // has no way to trigger. Fetch first and swap on success so a failed reload
+  // leaves the running app in place rather than an empty tab.
+  let laReloadGen = $state(0)
+  async function reloadLightApp(slug: string) {
+    if (!slug || laLoading) return
+    laLoading = true
+    try {
+      const detail = await api.getLightApp(slug)
+      lightappHTML.update(m => ({ ...m, [slug]: detail.html }))
+      // An unchanged document leaves srcdoc identical and the iframe untouched;
+      // the {#key} remounts it either way, so a reload always restarts the app.
+      laReloadGen++
+    } catch (e: any) {
+      showToast(`Failed to reload: ${e.message}`, 'error')
+    } finally {
+      laLoading = false
+    }
+  }
+
   function closeLightApp(slug: string) {
     const list = $lightappOpen
     const idx = list.indexOf(slug)
     if (idx < 0) return
     const rest = list.filter(s => s !== slug)
     lightappOpen.set(rest)
+    // Drop the cached HTML too: nothing invalidates it while the tab is open,
+    // so close-and-reopen is the one gesture that must pick up an edit the
+    // agent made on disk. The re-fetch is a local round trip.
+    dropLightAppHTML(slug)
     // Closing the last tab closes the panel — an empty Light Apps panel has
-    // nothing to offer, and stopping looking is what the click meant. The
-    // cached HTML is kept, so reopening is instant.
+    // nothing to offer, and stopping looking is what the click meant.
     if (rest.length === 0) { lightappSel.set(''); closePanel(); return }
     // Closing the active tab hands over to its neighbour on the right, or the
     // left one at the end of the strip — the way a browser tab strip behaves.
@@ -454,12 +483,23 @@
         </span>
         {/each}
       </div>
+      <button
+        class="icon-btn"
+        title={$t('lightapps.reload')}
+        aria-label={$t('lightapps.reload')}
+        disabled={laLoading || !laCurSlug}
+        onclick={() => reloadLightApp(laCurSlug)}
+      >
+        <iconify-icon icon="ant-design:reload-outlined" width="14" class={laLoading ? 'spin' : ''}></iconify-icon>
+      </button>
       {@render topbarControls()}
     </div>
 
     <div class="body">
       {#if laCurHTML}
+        {#key laReloadGen}
         <iframe bind:this={laFrameEl} srcdoc={withLaBridge(laCurHTML, laCurSlug)} sandbox="allow-scripts" allow="clipboard-write" title={laCurName}></iframe>
+        {/key}
       {:else if laCurSlug || laLoading}
         <!-- A tab opens before its HTML arrives, so this covers the fetch. -->
         <div class="empty"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon><span>{$t('common.loading')}</span></div>
