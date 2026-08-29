@@ -106,8 +106,11 @@ function typeLabel(kind: Kind, path: string): string {
 }
 
 // External scripts and stylesheets — <script src> / <link rel=stylesheet href>
-// pointing anywhere but data:, blob:, or # — are stripped from a preview, and
-// the page renders without them under a banner saying so.
+// pointing anywhere but data:, blob:, or # — are stripped before a sandboxed
+// frame renders the page, and the page renders without them under a banner
+// saying so. Both frames that show agent-written HTML go through this
+// (selfContainedDocument): the artifact preview and the Light App view, so the
+// same file cannot render two different ways depending on where it is opened.
 //
 // Artifacts are required to be self-contained (the artifact-design skill says
 // so, and the panel enforces it). The reason is not the sandbox: a sandboxed
@@ -172,6 +175,17 @@ function withStrippedBanner(html: string, removed: number, isDark: boolean): str
   if (!m) return banner + html
   const at = m.index + m[0].length
   return html.slice(0, at) + banner + html.slice(at)
+}
+
+// The document a sandboxed frame actually renders for agent-written HTML:
+// external references stripped, banner added when any were, the input handed
+// back untouched otherwise. Theme is read at call time — the frame gets no
+// live theme push, same as every preview document built here.
+export function selfContainedDocument(html: string): string {
+  const { html: stripped, removed } = stripExternalRefs(html)
+  if (removed === 0) return html
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+  return withStrippedBanner(stripped, removed, isDark)
 }
 
 // The HTML to persist when an artifact is saved as a Light App. A Light App
@@ -668,9 +682,7 @@ async function buildTextBody(
     // The file's own images still need inlining to survive the iframe —
     // and a page that lost its CDN stylesheet is exactly the one whose
     // remaining content the user wants to see.
-    const { html, removed } = stripExternalRefs(code)
-    const doc = removed > 0 ? withStrippedBanner(html, removed, isDark) : code
-    preview = await inlineLocalRefs(doc, sessionId, path, 'document')
+    preview = await inlineLocalRefs(selfContainedDocument(code), sessionId, path, 'document')
   } else if (kind === 'markdown') {
     // Markdown is rendered inside a sandboxed srcdoc iframe which has no
     // access to the host app's CSS or JS.  Inline the highlight.js theme

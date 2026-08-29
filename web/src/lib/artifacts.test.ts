@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { get } from 'svelte/store'
 import { artifacts, artifactSel, panelContent, panelExpanded } from './stores'
-import { lightAppSource, observeArtifact, hydrateArtifact, resetArtifacts, pathIsInside } from './artifacts'
+import { lightAppSource, observeArtifact, hydrateArtifact, resetArtifacts, pathIsInside, selfContainedDocument } from './artifacts'
 
 // Nothing a preview document references can authenticate: the srcdoc iframe has
 // no allow-same-origin, so its subresource requests are cross-site and the
@@ -223,6 +223,25 @@ describe('observeArtifact — code artifacts', () => {
     // rich-kind artifact still auto-opens.
     observeArtifact(SID, { type: 'write', path: '/tmp/report.md' }, true)
     expect(get(panelContent)).toBe('session')
+  })
+})
+
+// The Light App view renders through the same rule as the artifact preview,
+// via this one helper — a page the preview strips must not come alive once it
+// is saved and opened as a Light App.
+describe('selfContainedDocument', () => {
+  it('hands back a self-contained page untouched, by identity', () => {
+    const html = '<html><head><style>h1{color:red}</style><script>window.ok=1</script></head><body><h1>hi</h1></body></html>'
+    expect(selfContainedDocument(html)).toBe(html)
+  })
+
+  it('strips external references and adds the banner', () => {
+    const out = selfContainedDocument(
+      '<html><head><script src="https://cdn.example.com/lib.js"></script></head><body><h1>hi</h1></body></html>',
+    )
+    expect(out).not.toContain('lib.js')
+    expect(out).toContain('1 external script/stylesheet was removed')
+    expect(out).toContain('<h1>hi</h1>')
   })
 })
 
