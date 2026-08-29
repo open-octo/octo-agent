@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func seedLightApp(t *testing.T, home, slug, name, desc string) {
@@ -109,6 +110,9 @@ func TestGetLightApp_Success(t *testing.T) {
 	if out.HTML != "<html>ok</html>" {
 		t.Errorf("wrong html: %q", out.HTML)
 	}
+	if out.Manifest.UpdatedAt == "" {
+		t.Error("detail manifest lacks updated_at; the panel's change poll compares against it")
+	}
 	// The response carries the app's index.html; a heuristically cached copy is
 	// exactly the stale app an update was meant to replace (desktop WKWebView
 	// caches GET 200s without an explicit policy).
@@ -168,6 +172,59 @@ func TestCreateLightApp_SourcePathRoundTrip(t *testing.T) {
 	}
 	if len(out.Apps) != 1 || out.Apps[0].SourcePath != "/work/quicksort-visualizer.html" {
 		t.Errorf("listing source_path round-trip failed: %+v", out.Apps)
+	}
+}
+
+// TestListLightApps_UpdatedAtTracksHTML: updated_at follows index.html's mtime
+// (so an edit moves it) and is never written into manifest.json.
+func TestListLightApps_UpdatedAtTracksHTML(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	w := doJSON(t, srv, "POST", "/api/light-apps", `{"name":"Clock","html":"<html>v1</html>"}`)
+	if w.Code != 201 {
+		t.Fatalf("create: expected 201, got %d (body: %s)", w.Code, w.Body.String())
+	}
+	appDir := filepath.Join(home, ".octo", "light-apps", "clock")
+	if raw, err := os.ReadFile(filepath.Join(appDir, "manifest.json")); err != nil {
+		t.Fatal(err)
+	} else if strings.Contains(string(raw), "updated_at") {
+		t.Errorf("manifest.json must not persist the derived updated_at: %s", raw)
+	}
+
+	list := func() string {
+		w := doJSON(t, srv, "GET", "/api/light-apps", "")
+		if w.Code != 200 {
+			t.Fatalf("list: expected 200, got %d", w.Code)
+		}
+		var out struct{ Apps []lightAppManifest }
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if len(out.Apps) != 1 {
+			t.Fatalf("expected 1 app, got %+v", out.Apps)
+		}
+		return out.Apps[0].UpdatedAt
+	}
+	before := list()
+	if before == "" {
+		t.Fatal("list entry lacks updated_at")
+	}
+
+	// Rewrite the HTML the way an agent edit does, and push the mtime forward
+	// explicitly so the check doesn't depend on filesystem timestamp granularity.
+	htmlPath := filepath.Join(appDir, "index.html")
+	if err := os.WriteFile(htmlPath, []byte("<html>v2</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	later := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(htmlPath, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if after := list(); after == before {
+		t.Errorf("updated_at did not move after index.html was rewritten: %q", after)
 	}
 }
 

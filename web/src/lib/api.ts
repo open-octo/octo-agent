@@ -834,6 +834,9 @@ export interface LightApp {
   // Absolute path of the session artifact the app was saved from, if any —
   // used to hide "Save to Light App" for artifacts that already were.
   source_path?: string
+  // index.html's mtime, stamped by the server on every read. Opaque to the
+  // client — it's only ever compared for equality against the copy on screen.
+  updated_at?: string
 }
 
 export interface LightAppDetail {
