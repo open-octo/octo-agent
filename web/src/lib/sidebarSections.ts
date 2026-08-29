@@ -14,7 +14,6 @@
 // kind of row.
 
 import type { Session, SessionGroup } from './types'
-import { updatedAtMs } from './unread'
 
 export interface GroupView {
   group: SessionGroup
@@ -79,15 +78,12 @@ export function splitSections(
   // group is gone from the registry the moment the server has run, and until
   // then showing its sessions twice would be worse than showing them nowhere.
   //
-  // Tasks is the flat recency list, so sort it here rather than trusting the
-  // input order: the REST list arrives newest-first, but a turn ending in an
-  // open tab only re-stamps that row's updated_at (App.svelte) — without this
-  // sort the just-finished session would stay wherever the last fetch left it.
-  // The sort is stable, so rows without a parseable timestamp keep their
-  // fetched order at the bottom rather than shuffling.
-  const ungrouped = [...byId.values()]
-    .filter(s => !claimed.has(s.id))
-    .sort((a, b) => updatedAtMs(b) - updatedAtMs(a))
+  // Deliberately NOT sorted by updated_at: rows must not jump around while the
+  // user is looking at the list (a turn ending re-stamps its row's updated_at
+  // in App.svelte, which would float it mid-session). Fetch order IS recency
+  // order at fetch time, so the list reorders exactly when it is next synced
+  // from the server — reload, reconnect, session_created.
+  const ungrouped = [...byId.values()].filter(s => !claimed.has(s.id))
 
   return {
     pinned,
