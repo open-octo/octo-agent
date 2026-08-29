@@ -189,5 +189,6 @@ Create both files with `write_file`. No special tools needed.
 - Inline all CSS (`<style>`) and JS (`<script>`)
 - Use `FileReader` + `<input type="file">` for file processing
 - To let the user save a result (an image, a converted file, a CSV), use the standard download idiom: build a `Blob` (or `canvas.toDataURL()`), point an `<a download="name.ext">` at it and call `.click()`. The host saves the file — no special API
+- Form submit handlers must call `event.preventDefault()` — the sandboxed frame has nowhere to navigate to, and an unprevented submit reloads the app and drops its state
 - Use emoji or inline SVG for icons
 - Follow `artifact-design` skill conventions for layout and colors

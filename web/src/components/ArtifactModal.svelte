@@ -2,7 +2,7 @@
   import { artifacts, panelContent, artifactSel, artifactModalOpen, showToast } from '../lib/stores'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
-  import { hydrateArtifact } from '../lib/artifacts'
+  import { ARTIFACT_SANDBOX, hydrateArtifact } from '../lib/artifacts'
 
   const cur = $derived($artifacts[$artifactSel] ?? $artifacts[0])
   let modalEl = $state<HTMLDivElement | null>(null)
@@ -100,7 +100,7 @@
       {:else if !cur.loaded}
         <div class="body-loading"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon></div>
       {:else}
-        <iframe srcdoc={cur.preview} sandbox="allow-scripts" allow="clipboard-write" title={cur.name}></iframe>
+        <iframe srcdoc={cur.preview} sandbox={ARTIFACT_SANDBOX} allow="clipboard-write" title={cur.name}></iframe>
       {/if}
     </div>
   </div>

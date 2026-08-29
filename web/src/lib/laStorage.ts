@@ -1,7 +1,7 @@
 // Light App storage bridge — makes `localStorage` WORK inside Light Apps.
 //
-// Light Apps render in a sandboxed srcdoc iframe (`sandbox="allow-scripts"`,
-// deliberately without `allow-same-origin`), so their origin is opaque and the
+// Light Apps render in a sandboxed srcdoc iframe (`allow-scripts allow-forms
+// allow-modals`, deliberately without `allow-same-origin`), so their origin is opaque and the
 // browser refuses every persistent storage API: localStorage, sessionStorage,
 // Cookie, IndexedDB all throw SecurityError in there. Persistent state
 // (scores, collections, settings) was impossible for Light Apps.
