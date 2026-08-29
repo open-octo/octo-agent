@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -78,6 +79,9 @@ func TestListLightApps_WithApps(t *testing.T) {
 	if want := filepath.Join(home, ".octo", "light-apps"); out.Dir != want {
 		t.Errorf("expected dir %q, got %q", want, out.Dir)
 	}
+	if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "no-store") {
+		t.Errorf("Cache-Control = %q, want it to contain no-store", cc)
+	}
 }
 
 // TestGetLightApp_Success: validates manifest + HTML round-trip.
@@ -104,6 +108,12 @@ func TestGetLightApp_Success(t *testing.T) {
 	}
 	if out.HTML != "<html>ok</html>" {
 		t.Errorf("wrong html: %q", out.HTML)
+	}
+	// The response carries the app's index.html; a heuristically cached copy is
+	// exactly the stale app an update was meant to replace (desktop WKWebView
+	// caches GET 200s without an explicit policy).
+	if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "no-store") {
+		t.Errorf("Cache-Control = %q, want it to contain no-store", cc)
 	}
 }
 

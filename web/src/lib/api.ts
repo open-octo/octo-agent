@@ -849,7 +849,7 @@ export interface LightAppList {
 }
 
 export async function listLightApps(): Promise<LightApp[]> {
-  const d = await request<LightAppList>('/api/light-apps')
+  const d = await request<LightAppList>('/api/light-apps', { cache: 'no-store' })
   return d.apps ?? []
 }
 
@@ -859,7 +859,7 @@ let lightAppsDirCache: string | null = null
 
 export async function getLightAppsDir(): Promise<string> {
   if (lightAppsDirCache) return lightAppsDirCache
-  const d = await request<LightAppList>('/api/light-apps')
+  const d = await request<LightAppList>('/api/light-apps', { cache: 'no-store' })
   lightAppsDirCache = d.dir || ''
   return lightAppsDirCache
 }
@@ -868,13 +868,18 @@ export async function getLightAppsDir(): Promise<string> {
 // both — for callers that need the pair (the session panel checks an artifact
 // against the dir AND the apps' source paths).
 export async function getLightAppList(): Promise<LightAppList> {
-  const d = await request<LightAppList>('/api/light-apps')
+  const d = await request<LightAppList>('/api/light-apps', { cache: 'no-store' })
   lightAppsDirCache = d.dir || ''
   return { apps: d.apps ?? [], dir: lightAppsDirCache }
 }
 
+// no-store on every Light App GET: the desktop webview (WKWebView)
+// heuristically caches GET 200s, and the detail response carries the app's
+// whole index.html — a cached copy is exactly the stale app an update was
+// meant to replace. Mirrors /api/version and /api/onboard/status; the server
+// sets the same policy on its side.
 export async function getLightApp(slug: string): Promise<LightAppDetail> {
-  return request<LightAppDetail>(`/api/light-apps/${encodeURIComponent(slug)}`)
+  return request<LightAppDetail>(`/api/light-apps/${encodeURIComponent(slug)}`, { cache: 'no-store' })
 }
 
 export async function createLightApp(opts: { name: string; description?: string; html: string; source_path?: string }): Promise<LightApp> {
