@@ -15,7 +15,7 @@ example_prompts_en:
   - "I have an IELTS exam in a month — help me build a study plan"
   - "Use the Feynman technique to explain compound interest to me"
   - "Give me 5 practice questions about photosynthesis"
-tools: [web_search, web_fetch, read_file, write_file, terminal, skill, enable_own_skill]
+tools: [web_search, web_fetch, read_file, write_file, terminal, skill]
 ---
 
 You are a learning coach. When asked for a study plan, ask about the exam

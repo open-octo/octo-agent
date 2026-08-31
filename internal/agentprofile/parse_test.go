@@ -73,6 +73,35 @@ func TestParseFileModelInherit(t *testing.T) {
 	}
 }
 
+func TestParseFileStripsRetiredTools(t *testing.T) {
+	dir := t.TempDir()
+	writeMD(t, dir, "x.md", "---\ndescription: d\ntools: [skill, enable_own_skill, terminal]\n---\nbody\n")
+	p, err := parseFile(filepath.Join(dir, "x.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"skill", "terminal"}
+	if len(p.Tools) != len(want) {
+		t.Fatalf("Tools = %v, want %v", p.Tools, want)
+	}
+	for i := range want {
+		if p.Tools[i] != want[i] {
+			t.Fatalf("Tools = %v, want %v", p.Tools, want)
+		}
+	}
+
+	// A profile that never listed tools keeps nil — for a builtin that means
+	// "all tools", and stripping must not turn it into "no tools".
+	writeMD(t, dir, "y.md", "---\ndescription: d\n---\nbody\n")
+	p, err = parseFile(filepath.Join(dir, "y.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Tools != nil {
+		t.Fatalf("Tools = %v, want nil", p.Tools)
+	}
+}
+
 func TestParseFileErrors(t *testing.T) {
 	dir := t.TempDir()
 	cases := map[string]string{

@@ -15,7 +15,7 @@ example_prompts_en:
   - "I have eggs, tomatoes, and noodles in the fridge — suggest a recipe"
   - "What's a good birthday gift idea for my mom"
   - "How do I quickly remove an oil stain from clothing"
-tools: [web_search, web_fetch, read_file, write_file, terminal, skill, enable_own_skill]
+tools: [web_search, web_fetch, read_file, write_file, terminal, skill]
 ---
 
 You are a friendly everyday-life helper. Keep answers practical and quick to

@@ -41,7 +41,6 @@ var allTools = []tool{
 	WebFetchTool{},
 	WebSearchTool{},
 	SkillTool{},
-	EnableOwnSkillTool{},
 	AgentTool{},
 	AgentSendTool{},
 	AgentStatusTool{},
@@ -623,20 +622,6 @@ func KnownToolNames() []string {
 	return names
 }
 
-// enableOwnSkillOn reports whether this turn runs as a non-builtin expert
-// profile. Only experts need to opt skills into their profile; builtin
-// profiles already see every installed skill, and CLI/TUI sessions carry no
-// profile context at all — for both the tool would be a dead slot.
-func enableOwnSkillOn(ctx context.Context) bool {
-	store := profileStoreFromContext(ctx)
-	agentID := sessionAgentIDFromContext(ctx)
-	if store == nil || agentID == "" {
-		return false
-	}
-	p, ok := store.Get(agentID)
-	return ok && p.Source != agentprofile.SourceBuiltin
-}
-
 func defaultToolsFor(ctx context.Context, model string) []agent.ToolDefinition {
 	skillsOn := skillsEnabled()
 	mgrOn := subAgentManagerEnabled()
@@ -667,9 +652,6 @@ func defaultToolsFor(ctx context.Context, model string) []agent.ToolDefinition {
 			continue
 		}
 		if _, isSkill := t.(SkillTool); isSkill && !skillsOn {
-			continue
-		}
-		if _, isEnableOwn := t.(EnableOwnSkillTool); isEnableOwn && !enableOwnSkillOn(ctx) {
 			continue
 		}
 		if at, isAgent := t.(AgentTool); isAgent {
