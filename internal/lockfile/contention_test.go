@@ -40,11 +40,13 @@ func TestAcquire_ContentionQueuesRatherThanRacing(t *testing.T) {
 		defer wg.Done()
 		close(asked)
 		h := acquire(path, 10*time.Second)
-		firstIn.Store(true)
-		if h == nil {
-			return
+		// firstIn records a real acquisition, not just "acquire returned". A
+		// waiter that gives up (proceed-unlocked, h == nil) is the failure this
+		// package exists to prevent, and must be caught regardless of platform.
+		if h != nil {
+			firstIn.Store(true)
+			h.Release()
 		}
-		h.Release()
 	}()
 	<-asked
 	// The first waiter is only queued once its goroutine is scheduled, runs
@@ -88,7 +90,17 @@ func TestAcquire_ContentionQueuesRatherThanRacing(t *testing.T) {
 	// One is the benign race: the latecomer can slip in during the window
 	// between the release and the queued waiter being scheduled. Repeatedly is
 	// the bug — it means asking first bought nothing.
-	if n := jumpedAhead.Load(); n > 1 {
-		t.Errorf("the latecomer got the lock %d times ahead of the waiter that asked first — waiters are racing, not queueing", n)
+	//
+	// That "at most one" bound only holds where flock() wakes waiters in FIFO
+	// order (Linux, Windows). macOS's flock does not guarantee FIFO wakeup: a
+	// later requester can barge in front of an already-queued waiter, so the
+	// count climbs even when acquire blocks correctly (observed repeatedly on
+	// the macOS CI runner). Assert the strict ordering only where it is
+	// guaranteed; on macOS the non-starvation check above (firstIn) is the
+	// property that actually keeps a waiter from giving up and losing a write.
+	if runtime.GOOS != "darwin" {
+		if n := jumpedAhead.Load(); n > 1 {
+			t.Errorf("the latecomer got the lock %d times ahead of the waiter that asked first — waiters are racing, not queueing", n)
+		}
 	}
 }
