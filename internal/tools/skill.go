@@ -91,13 +91,8 @@ func (SkillTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 		return agent.ToolResult{Text: ""}, fmt.Errorf("skill: unknown skill %q", name)
 	}
 	if s.System {
-		// A system skill can't reach a non-builtin manifest, but the load path
-		// must hold the same line — an injected or guessed name is the whole
-		// reason to check here rather than trust the manifest.
-		if store, agentID := profileStoreFromContext(ctx), sessionAgentIDFromContext(ctx); store != nil && agentID != "" {
-			if p, ok := store.Get(agentID); ok && p.Source != agentprofile.SourceBuiltin {
-				return agent.ToolResult{Text: ""}, fmt.Errorf("skill: %q is a system skill reserved for the Default agent", name)
-			}
+		if err := systemSkillDeniedForProfile(ctx, name); err != nil {
+			return agent.ToolResult{Text: ""}, err
 		}
 	}
 	// RenderSkill prefixes the skill's directory so the model can read any
@@ -128,4 +123,21 @@ func skillAllowedForProfile(ctx context.Context, name string) error {
 		}
 	}
 	return fmt.Errorf("skill: %q is not enabled for this agent — an expert's skills are configured by the user (Web UI → Experts) or the Default agent, not from inside the session", name)
+}
+
+// systemSkillDeniedForProfile refuses a system skill for a non-builtin
+// profile. A system skill can't reach a non-builtin manifest, but every load
+// path must hold the same line — an injected or guessed name is the whole
+// reason to check at load rather than trust the manifest. Shared by the skill
+// tool and the workflow prelude's skill().
+func systemSkillDeniedForProfile(ctx context.Context, name string) error {
+	store := profileStoreFromContext(ctx)
+	agentID := sessionAgentIDFromContext(ctx)
+	if store == nil || agentID == "" {
+		return nil
+	}
+	if p, ok := store.Get(agentID); ok && p.Source != agentprofile.SourceBuiltin {
+		return fmt.Errorf("skill: %q is a system skill reserved for the Default agent", name)
+	}
+	return nil
 }

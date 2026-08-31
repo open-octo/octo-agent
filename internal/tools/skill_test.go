@@ -150,3 +150,26 @@ func TestSkillTool_ExpertCannotLoadSystemSkill(t *testing.T) {
 		t.Errorf("expected 'system skill' error, got %v", err)
 	}
 }
+
+// The workflow prelude's skill() holds the same line as the skill tool: an
+// expert granted the workflow tool doesn't thereby gain every skill.
+func TestWorkflowSkill_ExpertRestrictedToToolSkills(t *testing.T) {
+	setSkillsFor(t, "greet", "---\ndescription: say hi\n---\nStep 1: be nice.")
+	spawner := &resultSpawnerSync{reply: "done"}
+
+	res := runMDWorkflowSkill(expertCtx(t, nil), spawner, "greet", nil, "")
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "not enabled for this agent") {
+		t.Errorf("expected 'not enabled' error, got %v", res.Err)
+	}
+
+	res = runMDWorkflowSkill(expertCtx(t, []string{"greet"}), spawner, "greet", nil, "")
+	if res.Err != nil {
+		t.Fatalf("enabled skill should run: %v", res.Err)
+	}
+
+	setSkillsFor(t, "mgmt", "---\ndescription: manage\nsystem: true\n---\nbody")
+	res = runMDWorkflowSkill(expertCtx(t, []string{"mgmt"}), spawner, "mgmt", nil, "")
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "system skill") {
+		t.Errorf("expected 'system skill' error, got %v", res.Err)
+	}
+}

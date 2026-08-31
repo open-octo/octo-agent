@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,6 +80,55 @@ func TestRenderManifest_OnlyExpertSkillsIsEmpty(t *testing.T) {
 
 	if got := RenderManifest(Discover()); got != "" {
 		t.Fatalf("expected empty manifest, got:\n%s", got)
+	}
+}
+
+// Expert skills are octo-managed like the defaults and refuse deletion — with
+// a worse failure mode: the version stamp still matches after a delete, so
+// the root would not re-materialize until the next version bump, leaving the
+// experts naming the skill silently crippled.
+func TestRegistryDelete_RefusesExpertSkill(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	expRoot := filepath.Join(t.TempDir(), "skills-expert")
+	useDefaultRoot(t, filepath.Join(t.TempDir(), "none"))
+	useExpertRoot(t, expRoot)
+	writeSkillDir(t, expRoot, "legal-lookup", "for the legal expert")
+
+	r := Discover()
+	if err := r.Delete("legal-lookup"); err == nil {
+		t.Fatal("deleting an expert skill should be refused")
+	}
+	if _, err := os.Stat(filepath.Join(expRoot, "legal-lookup", SkillFile)); err != nil {
+		t.Fatalf("expert skill directory should be untouched: %v", err)
+	}
+	if _, ok := r.Get("legal-lookup"); !ok {
+		t.Fatal("expert skill should still be in the registry")
+	}
+}
+
+// The expert root scans after the defaults, so a same-named expert skill
+// would shadow the default one and silently drop it from every global
+// manifest. Keep the embedded sets disjoint.
+func TestEmbeddedExpertSkills_NoNameCollisionWithDefaults(t *testing.T) {
+	names := func(fsys fs.FS, prefix string) map[string]bool {
+		entries, err := fs.ReadDir(fsys, prefix)
+		if err != nil {
+			t.Fatalf("read embedded %s: %v", prefix, err)
+		}
+		out := make(map[string]bool, len(entries))
+		for _, e := range entries {
+			if e.IsDir() {
+				out[e.Name()] = true
+			}
+		}
+		return out
+	}
+	defaults := names(defaultsFS, "defaults")
+	for name := range names(expertsFS, "experts") {
+		if defaults[name] {
+			t.Errorf("expert skill %q shares a name with a default skill — it would shadow it", name)
+		}
 	}
 }
 

@@ -226,9 +226,9 @@ func (r *Registry) List() []Skill {
 		}
 	}
 	r.mu.RUnlock()
-	// Source priority: user overrides default. Must use a total order (strict
-	// weak ordering) for sort.Slice to stay deterministic.
-	sourceOrder := map[string]int{"user": 0, "default": 1}
+	// Source priority: user overrides expert overrides default. Must use a
+	// total order (strict weak ordering) for sort.Slice to stay deterministic.
+	sourceOrder := map[string]int{"user": 0, "expert": 1, "default": 2}
 	sort.Slice(out, func(i, j int) bool {
 		si, sj := sourceOrder[out[i].Source], sourceOrder[out[j].Source]
 		if si != sj {
@@ -252,7 +252,7 @@ func (r *Registry) All() []Skill {
 		out = append(out, s)
 	}
 	r.mu.RUnlock()
-	sourceOrder := map[string]int{"user": 0, "default": 1}
+	sourceOrder := map[string]int{"user": 0, "expert": 1, "default": 2}
 	sort.Slice(out, func(i, j int) bool {
 		si, sj := sourceOrder[out[i].Source], sourceOrder[out[j].Source]
 		if si != sj {
@@ -306,6 +306,13 @@ func (r *Registry) Delete(name string) error {
 	}
 	if s.Source == "default" {
 		return fmt.Errorf("cannot delete system skill %q", name)
+	}
+	if s.Source == "expert" {
+		// Octo-managed like the defaults, but with a nastier failure mode:
+		// the version stamp still matches after a delete, so the root would
+		// NOT re-materialize on next start — the experts naming this skill
+		// stay silently crippled until the next version bump.
+		return fmt.Errorf("cannot delete expert skill %q — it ships with the built-in experts", name)
 	}
 
 	// Remove from registry first
@@ -433,7 +440,10 @@ func RenderSkill(s Skill, args string) string {
 		fmt.Fprintf(&b, "[skill %q — bundled files live in: %s\n", s.Name, s.Dir)
 		b.WriteString("Resolve any paths this skill references (scripts, templates, reference docs) " +
 			"against that directory and read them with your file tools.")
-		if s.Source != "default" {
+		// Skills octo ships (default and expert roots) are written for octo's
+		// toolbelt already; the Claude Code bridging note is for outside
+		// content — installed or hand-dropped user skills.
+		if s.Source != "default" && s.Source != "expert" {
 			b.WriteString("\n" + ccCompatNote)
 		}
 		b.WriteString("]\n\n")
