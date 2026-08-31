@@ -16,6 +16,7 @@ func discoverWithDefaults(t *testing.T) *Registry {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "skills-default")
 	useDefaultRoot(t, root)
+	useExpertRoot(t, t.TempDir())
 	if err := MaterializeDefaults("test"); err != nil {
 		t.Fatal(err)
 	}
@@ -67,13 +68,21 @@ func TestManifestForProfile_FiltersByToolSkills(t *testing.T) {
 		t.Fatalf("manifest missing target skill %q:\n%s", target, profiled)
 	}
 	// Count skill entries: profiled should have exactly 1, full should have all.
+	// RenderManifest deliberately drops expert-scoped skills (they ship for
+	// specific built-in experts), so the full count must exclude those too.
 	fullLines := countSkillLines(full)
 	profiledLines := countSkillLines(profiled)
 	if profiledLines != 1 {
 		t.Fatalf("expected exactly 1 skill in profiled manifest, got %d:\n%s", profiledLines, profiled)
 	}
-	if fullLines != len(allSkills) {
-		t.Fatalf("expected %d skills in full manifest, got %d", len(allSkills), fullLines)
+	nonExpert := 0
+	for _, s := range allSkills {
+		if s.Source != "expert" {
+			nonExpert++
+		}
+	}
+	if fullLines != nonExpert {
+		t.Fatalf("expected %d skills in full manifest, got %d", nonExpert, fullLines)
 	}
 }
 

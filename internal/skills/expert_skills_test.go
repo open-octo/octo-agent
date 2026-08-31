@@ -132,9 +132,8 @@ func TestEmbeddedExpertSkills_NoNameCollisionWithDefaults(t *testing.T) {
 	}
 }
 
-// MaterializeDefaults writes the expert root too (currently just its stamp
-// and the embedded README placeholder — content lands here as experts gain
-// bundled skills).
+// MaterializeDefaults writes the expert root too — the stamp alongside any
+// embedded expert skills (e.g. the copywriter expert's bundled skills).
 func TestMaterializeDefaults_WritesExpertRoot(t *testing.T) {
 	useDefaultRoot(t, filepath.Join(t.TempDir(), "skills-default"))
 	expRoot := filepath.Join(t.TempDir(), "skills-expert")
@@ -145,5 +144,52 @@ func TestMaterializeDefaults_WritesExpertRoot(t *testing.T) {
 	}
 	if b, err := os.ReadFile(filepath.Join(expRoot, defaultStampFile)); err != nil || strings.TrimSpace(string(b)) != "v1" {
 		t.Fatalf("expert root stamp missing or wrong: %q err=%v", b, err)
+	}
+}
+
+// The copywriter (文案助手) expert ships four bundled skills. A regression
+// guard that they materialize from the embedding and parse cleanly — a
+// malformed SKILL.md would be silently skipped by discovery, leaving the
+// expert that names it crippled. Also asserts the scoping invariant: the
+// expert sees them, the global manifest never lists them.
+func TestCopywriterExpertSkills_ShipAndScope(t *testing.T) {
+	useDefaultRoot(t, filepath.Join(t.TempDir(), "skills-default"))
+	expRoot := filepath.Join(t.TempDir(), "skills-expert")
+	useExpertRoot(t, expRoot)
+	if err := MaterializeDefaults("v1"); err != nil {
+		t.Fatal(err)
+	}
+
+	names := []string{"brand-voice", "copywriting", "copy-editing", "social-copy"}
+	r := Discover()
+	for _, name := range names {
+		s, ok := r.Get(name)
+		if !ok {
+			t.Errorf("copywriter expert skill %q not discovered (malformed or unembedded?)", name)
+			continue
+		}
+		if s.Source != "expert" {
+			t.Errorf("%s source = %q, want expert", name, s.Source)
+		}
+	}
+
+	// The copywriter profile, naming them in tool_skills, sees all four.
+	profiled := ManifestForProfile(r, &agentprofile.Profile{
+		ID:          "copywriter",
+		Description: "d",
+		CapabilitySpec: agentprofile.CapabilitySpec{
+			ToolSkills: names,
+		},
+	})
+	for _, name := range names {
+		if !strings.Contains(profiled, name) {
+			t.Errorf("copywriter manifest missing %s:\n%s", name, profiled)
+		}
+	}
+	// The global manifest never lists an expert skill.
+	for _, name := range names {
+		if strings.Contains(RenderManifest(r), name) {
+			t.Errorf("global manifest must not list expert skill %s", name)
+		}
 	}
 }
