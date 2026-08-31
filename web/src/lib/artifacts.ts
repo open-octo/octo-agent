@@ -158,52 +158,46 @@ function isAllowedRef(url: string): boolean {
 // preview depends on and stays (#1896). preload rides along with stylesheet
 // because the rel="preload" onload="this.rel='stylesheet'" idiom makes it one.
 //
-// SCRIPT_TAG_RE takes the closing tag when there is one so an external
-// script's (normally empty) body goes with it; a lone unclosed opening tag is
-// still matched, so detection is not fooled by malformed markup.
+// The judgment runs on a parsed DOM, not on tag regexes: the reference that
+// matters is the one the iframe's own HTML parser will fetch, and only a
+// parser agrees with it on what that is. A string scan does not — a decoy
+// `src=` inside another attribute's quoted value, a `>` inside a quoted
+// value truncating the apparent tag, `<script/src=…>` with no whitespace —
+// each would make a regex judge one URL while the browser fetches another,
+// turning the allowlist fail-open. Parsing costs one DOMParser pass, which
+// inlineLocalRefs already spends on image-bearing documents anyway.
 //
-// The src/href matchers accept quoted and unquoted values alike (an unquoted
-// `src=https://…` loads just the same), and anchor the attribute name on the
-// whitespace before it so `data-href="…"` or a `src=` inside another
-// attribute's value doesn't get an inline script or a harmless <link> removed.
-const SCRIPT_TAG_RE = /<script\b[^>]*>(?:[\s\S]*?<\/script\s*>)?/gi
-const SCRIPT_SRC_RE = /<script\b[^>]*\ssrc\s*=\s*["']?\s*(?!data:|blob:|#)[^\s"'>]/i
-const SCRIPT_SRC_VAL_RE = /\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i
-const LINK_TAG_RE = /<link\b[^>]*>/gi
-const LINK_HREF_RE = /\shref\s*=\s*["']?\s*(?!data:|blob:|#)[^\s"'>]/i
-const LINK_HREF_VAL_RE = /\shref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i
-const LINK_REL_RE = /\brel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
+// A src/href of data:, blob:, or # stays: it loads nothing external. So does
+// an empty one. Everything else — absolute http(s), protocol-relative, and
+// local/relative paths (which cannot load from the srcdoc frame at all, see
+// the file-header note) — must pass the allowlist or go.
+const KEEP_SRC_RE = /^(?:data:|blob:|#|$)/i
 const RENDER_REL_RE = /(?:^|\s)(?:stylesheet|preload|modulepreload)(?:\s|$)/i
 
-function attrValue(tag: string, re: RegExp): string {
-  const m = re.exec(tag)
-  return m?.[1] ?? m?.[2] ?? m?.[3] ?? ''
-}
-
-function isRenderLink(tag: string): boolean {
-  if (!LINK_HREF_RE.test(tag)) return false
-  const m = LINK_REL_RE.exec(tag)
-  return RENDER_REL_RE.test(m?.[1] ?? m?.[2] ?? m?.[3] ?? '')
-}
-
 // Returns the document with its disallowed external scripts and stylesheets
-// removed and how many were removed; 0 means the input came back untouched.
+// removed and how many were removed; 0 means the input came back untouched —
+// the identity return is what lets selfContainedDocument skip the banner and
+// the serialize round-trip for the common self-contained page.
 function stripExternalRefs(html: string): { html: string; removed: number } {
+  if (!/<script|<link/i.test(html)) return { html, removed: 0 }
+  const doc = new DOMParser().parseFromString(html, 'text/html')
   let removed = 0
-  const out = html
-    .replace(SCRIPT_TAG_RE, tag => {
-      if (!SCRIPT_SRC_RE.test(tag)) return tag
-      if (isAllowedRef(attrValue(tag, SCRIPT_SRC_VAL_RE))) return tag
-      removed++
-      return ''
-    })
-    .replace(LINK_TAG_RE, tag => {
-      if (!isRenderLink(tag)) return tag
-      if (isAllowedRef(attrValue(tag, LINK_HREF_VAL_RE))) return tag
-      removed++
-      return ''
-    })
-  return { html: out, removed }
+  for (const el of Array.from(doc.querySelectorAll('script[src]'))) {
+    const src = (el.getAttribute('src') ?? '').trim()
+    if (KEEP_SRC_RE.test(src) || isAllowedRef(src)) continue
+    el.remove()
+    removed++
+  }
+  for (const el of Array.from(doc.querySelectorAll('link[href]'))) {
+    if (!RENDER_REL_RE.test(el.getAttribute('rel') ?? '')) continue
+    const href = (el.getAttribute('href') ?? '').trim()
+    if (KEEP_SRC_RE.test(href) || isAllowedRef(href)) continue
+    el.remove()
+    removed++
+  }
+  if (removed === 0) return { html, removed: 0 }
+  const doctype = doc.doctype ? `<!DOCTYPE ${doc.doctype.name}>` : ''
+  return { html: doctype + doc.documentElement.outerHTML, removed }
 }
 
 function hasExternalRefs(html: string): boolean {
