@@ -41,7 +41,11 @@ const (
 	// the binary and materialized to ~/.octo/agents-default (mirrors
 	// internal/skills' "default" source). Unlike SourceBuiltin they ARE
 	// surfaced through Store.List()/the REST API — they're user-facing
-	// content, not internal capability tiers.
+	// content, not internal capability tiers. Like SourceBuiltin they are
+	// read-only: a user file cannot shadow one and the write paths refuse to
+	// modify one, so an official expert is identical on every machine and
+	// keeps receiving content updates. The user-facing knob is hiding it
+	// (SetDisabledDefaults), not editing it.
 	SourceDefault Source = "default"
 	// SourceUser profiles live in ~/.octo/agents/*.md and support both
 	// conversation and delegation modes.

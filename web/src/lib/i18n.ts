@@ -55,6 +55,7 @@ export const en: Record<string, string> = {
   "agents.chat_id_placeholder": "Chat ID (e.g. group_xxx)",
   "agents.add_binding": "Add binding",
   "agents.tools": "Tools",
+  "agents.skills": "skills",
   "agents.session_new": "New agent",
   "agents.session_edit": "Edit agent: {name}",
 
@@ -1005,6 +1006,7 @@ export const zh: Record<string, string> = {
   "agents.chat_id_placeholder": "聊天 ID（如 group_xxx）",
   "agents.add_binding": "添加绑定",
   "agents.tools": "工具",
+  "agents.skills": "技能",
   "agents.session_new": "新建专家",
   "agents.session_edit": "编辑专家：{name}",
 
