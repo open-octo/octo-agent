@@ -84,11 +84,13 @@
     closeRowMenus()
     try {
       await api.setSessionGroup(sessionId, groupId)
-      const org = await api.listSessionGroups()
-      sessionGroups.set(org.groups)
     } catch {
       showToast(tr('sidebar.move_failed'))
+      return
     }
+    // A refetch failure after a successful move must not toast "move failed"
+    // — the session_groups_changed broadcast reconciles the UI regardless.
+    api.listSessionGroups().then(org => sessionGroups.set(org.groups)).catch(() => {})
   }
   function rowMenuPortal(node: HTMLElement, anchorTop: number) {
     document.body.appendChild(node)
@@ -362,8 +364,7 @@
     function onDocClick(e: MouseEvent) {
       const el = e.target as HTMLElement | null
       if (el?.closest('.rename-input')) return
-      menuFor.set(null)
-      projectMenuFor = ''
+      closeRowMenus()
       commitRename()
       commitGroupRename()
     }

@@ -264,7 +264,18 @@ func TestSessionGroups_MoveBadTargets(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("blank group_id: status %d, want 400", rec.Code)
 	}
+	// A group without a working dir is not a project (only legacy registries
+	// still carry one) and can't receive a session.
+	plain, err := createSessionGroupNamed("plain", "", "")
+	if err != nil {
+		t.Fatalf("create plain group: %v", err)
+	}
+	rec, _ = doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/group", map[string]any{"group_id": plain.ID})
+	if rec.Code != http.StatusConflict {
+		t.Errorf("non-project target: status %d, want 409", rec.Code)
+	}
 	assertGroupOrder(t, gid, []string{})
+	assertGroupOrder(t, plain.ID, []string{})
 }
 
 func TestAddSessionToGroup_PrependsNewest(t *testing.T) {

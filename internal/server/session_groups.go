@@ -965,15 +965,17 @@ func (s *Server) handleSetSessionGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "group_id is required")
 		return
 	}
+	groupMu.LockWrite()
+	defer groupMu.Unlock()
 	// Unlike pin/collapse (display state, harmless on a stale ID), filing a
-	// nonexistent session would show a ghost row under the project.
-	if _, err := agent.LoadSession(sid); err != nil {
+	// nonexistent session would show a ghost row under the project. A stat,
+	// not a load — proving the file exists doesn't require parsing a
+	// possibly-huge transcript — and inside the lock, so a concurrent delete
+	// can't slip between the check and the filing.
+	if _, err := agent.SessionMTime(sid); err != nil {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
-
-	groupMu.LockWrite()
-	defer groupMu.Unlock()
 	gf, err := loadRegistryFile()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -985,6 +987,10 @@ func (s *Server) handleSetSessionGroup(w http.ResponseWriter, r *http.Request) {
 		if g.ID == gid {
 			target = g
 		}
+		// Membership in a non-project group doesn't block the move: only
+		// legacy/hand-edited registries still carry one (dissolvePlainGroups
+		// retires them at startup), and fileSessionInGroup pulls the session
+		// out of it as part of filing — which is the right outcome.
 		if !g.isProject() {
 			continue
 		}
