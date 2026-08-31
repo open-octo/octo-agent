@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 // groupTestServer builds a loopback server with an isolated HOME so the
@@ -159,32 +161,121 @@ func TestSessionGroups_SingleMembership(t *testing.T) {
 	}
 }
 
-// Where a session lives is decided when it is created; there is no move. The
-// endpoint that used to move one refuses every request, so a stale client (or
-// another tab left open across an upgrade) gets a reason rather than silently
-// splitting a session's directory from its memory.
-func TestSessionGroups_MoveIsRefused(t *testing.T) {
+// newDiskSession creates a real session file under the test HOME and returns
+// its ID — handleSetSessionGroup refuses to file a session that doesn't exist.
+func newDiskSession(t *testing.T) string {
+	t.Helper()
+	sess := agent.NewSession("stub-model", "")
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+	return sess.ID
+}
+
+// A loose session can be filed into a project after creation; that is the only
+// move there is.
+func TestSessionGroups_MoveLooseSessionIntoProject(t *testing.T) {
 	srv := groupTestServer(t)
 	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "A"))
 	gid := o["group"].(map[string]any)["id"].(string)
-	const sid = "20260101-000000-deadbeef"
-	if err := addSessionToGroup(gid, sid); err != nil {
+	sid := newDiskSession(t)
+
+	rec, out := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/group", map[string]any{"group_id": gid})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("move: status %d body %s", rec.Code, rec.Body.String())
+	}
+	if g, _ := out["group"].(map[string]any); g["id"] != gid {
+		t.Fatalf("response group = %v, want %s", out["group"], gid)
+	}
+	assertGroupOrder(t, gid, []string{sid})
+	if p := projectForSession(sid); p == nil || p.ID != gid {
+		t.Fatalf("projectForSession = %v, want group %s", p, gid)
+	}
+}
+
+// Filing clears a stale collapsed entry, the same as the creation path —
+// group membership and collapsing are mutually exclusive.
+func TestSessionGroups_MoveDropsCollapsed(t *testing.T) {
+	srv := groupTestServer(t)
+	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "A"))
+	gid := o["group"].(map[string]any)["id"].(string)
+	sid := newDiskSession(t)
+
+	rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/collapse", map[string]any{"collapsed": true})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("collapse: status %d", rec.Code)
+	}
+	rec, _ = doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/group", map[string]any{"group_id": gid})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("move: status %d body %s", rec.Code, rec.Body.String())
+	}
+	gf, err := loadRegistryFile()
+	if err != nil {
+		t.Fatalf("loadRegistryFile: %v", err)
+	}
+	for _, id := range gf.CollapsedSessionIDs {
+		if id == sid {
+			t.Fatal("session stayed collapsed after being filed into a project")
+		}
+	}
+}
+
+// A session already in a project stays there: moving between projects (or
+// re-filing into the same one) is refused, so a session's directory, memory
+// tier, and mounts keep one consistent history.
+func TestSessionGroups_MoveOutOfProjectIsRefused(t *testing.T) {
+	srv := groupTestServer(t)
+	_, o1 := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "A"))
+	g1 := o1["group"].(map[string]any)["id"].(string)
+	_, o2 := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "B"))
+	g2 := o2["group"].(map[string]any)["id"].(string)
+	sid := newDiskSession(t)
+	if err := addSessionToGroup(g1, sid); err != nil {
 		t.Fatalf("file in: %v", err)
 	}
 
-	for _, target := range []string{gid, "", "g-nope"} {
+	for _, target := range []string{g1, g2} {
 		rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/group", map[string]any{"group_id": target})
 		if rec.Code != http.StatusConflict {
 			t.Errorf("move to %q: status %d, want 409", target, rec.Code)
 		}
 	}
 	// Membership is untouched by the refused requests.
-	groups, _ := loadSessionGroups()
-	for _, g := range groups {
-		if g.ID == gid && (len(g.SessionIDs) != 1 || g.SessionIDs[0] != sid) {
-			t.Errorf("membership changed: %v", g.SessionIDs)
-		}
+	assertGroupOrder(t, g1, []string{sid})
+}
+
+// Bad targets: a missing group is 404, a missing session is 404, an empty
+// group_id is 400 — and none of them touch the registry.
+func TestSessionGroups_MoveBadTargets(t *testing.T) {
+	srv := groupTestServer(t)
+	_, o := doGroupReq(t, srv, http.MethodPost, "/api/session-groups", newGroupBody(t, "A"))
+	gid := o["group"].(map[string]any)["id"].(string)
+	sid := newDiskSession(t)
+
+	rec, _ := doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/group", map[string]any{"group_id": "g-nope"})
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("missing group: status %d, want 404", rec.Code)
 	}
+	rec, _ = doGroupReq(t, srv, http.MethodPut, "/api/sessions/no-such-session/group", map[string]any{"group_id": gid})
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("missing session: status %d, want 404", rec.Code)
+	}
+	rec, _ = doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/group", map[string]any{"group_id": " "})
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("blank group_id: status %d, want 400", rec.Code)
+	}
+	// A group without a working dir is not a project (only legacy registries
+	// still carry one) and can't receive a session.
+	plain, err := createSessionGroupNamed("plain", "", "")
+	if err != nil {
+		t.Fatalf("create plain group: %v", err)
+	}
+	rec, _ = doGroupReq(t, srv, http.MethodPut, "/api/sessions/"+sid+"/group", map[string]any{"group_id": plain.ID})
+	if rec.Code != http.StatusConflict {
+		t.Errorf("non-project target: status %d, want 409", rec.Code)
+	}
+	assertGroupOrder(t, gid, []string{})
+	assertGroupOrder(t, plain.ID, []string{})
 }
 
 func TestAddSessionToGroup_PrependsNewest(t *testing.T) {

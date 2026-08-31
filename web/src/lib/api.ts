@@ -146,6 +146,12 @@ export async function setSessionCollapsed(sessionId: string, collapsed: boolean)
   await request<unknown>(`/api/sessions/${sessionId}/collapse`, { method: 'PUT', ...json({ collapsed }) })
 }
 
+// File a loose session into a project. The server refuses a session already
+// in one (409) — a session's project is decided once.
+export async function setSessionGroup(sessionId: string, groupId: string): Promise<void> {
+  await request<unknown>(`/api/sessions/${sessionId}/group`, { method: 'PUT', ...json({ group_id: groupId }) })
+}
+
 // Copy a session's history into a new session. messageIndex is an exclusive
 // count of messages to keep, so it must land on a turn boundary (right after a
 // completed assistant reply) or the server rejects it. Returns the new session.
