@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/agentprofile"
 	"github.com/open-octo/octo-agent/internal/skills"
 )
 
@@ -65,13 +66,16 @@ func (SkillTool) Definition() agent.ToolDefinition {
 	}
 }
 
-func (SkillTool) Execute(_ context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
+func (SkillTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
 	name, _ := input["name"].(string)
 	if name == "" {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("skill: name is required")
 	}
 	if !skillsEnabled() {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("skill: no skills are available")
+	}
+	if err := skillAllowedForProfile(ctx, name); err != nil {
+		return agent.ToolResult{Text: ""}, err
 	}
 	s, ok := activeSkills.Get(name)
 	if !ok {
@@ -86,7 +90,42 @@ func (SkillTool) Execute(_ context.Context, _ string, input map[string]any) (age
 	if !ok {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("skill: unknown skill %q", name)
 	}
+	if s.System {
+		// A system skill can't reach a non-builtin manifest, but the load path
+		// must hold the same line — an injected or guessed name is the whole
+		// reason to check here rather than trust the manifest.
+		if store, agentID := profileStoreFromContext(ctx), sessionAgentIDFromContext(ctx); store != nil && agentID != "" {
+			if p, ok := store.Get(agentID); ok && p.Source != agentprofile.SourceBuiltin {
+				return agent.ToolResult{Text: ""}, fmt.Errorf("skill: %q is a system skill reserved for the Default agent", name)
+			}
+		}
+	}
 	// RenderSkill prefixes the skill's directory so the model can read any
 	// files the body references (scripts, templates, reference docs).
 	return agent.ToolResult{Text: skills.RenderSkill(s, "")}, nil
+}
+
+// skillAllowedForProfile enforces the manifest rule at load time: a
+// non-builtin expert may only load skills its profile's tool_skills names.
+// The manifest already hides everything else, but the manifest is advisory —
+// a prompt-injected or guessed name must fail here, not succeed quietly. An
+// expert's capabilities are configured from the outside (the Default agent or
+// the Web UI), never widened from inside the session. Builtin profiles and
+// context-less sessions (CLI/TUI, no profile store) stay unrestricted.
+func skillAllowedForProfile(ctx context.Context, name string) error {
+	store := profileStoreFromContext(ctx)
+	agentID := sessionAgentIDFromContext(ctx)
+	if store == nil || agentID == "" {
+		return nil
+	}
+	p, ok := store.Get(agentID)
+	if !ok || p.Source == agentprofile.SourceBuiltin {
+		return nil
+	}
+	for _, s := range p.ToolSkills {
+		if s == name {
+			return nil
+		}
+	}
+	return fmt.Errorf("skill: %q is not enabled for this agent — an expert's skills are configured by the user (Web UI → Experts) or the Default agent, not from inside the session", name)
 }

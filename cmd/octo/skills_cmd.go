@@ -88,8 +88,8 @@ func skillsList(stdout io.Writer) int {
 		fmt.Fprintln(stdout, "Defaults ship with the binary; add your own under ~/.octo/skills.")
 		return 0
 	}
-	// Group by source for a readable overview: default → user.
-	order := map[string]int{"default": 0, "user": 1}
+	// Group by source for a readable overview: default → expert → user.
+	order := map[string]int{"default": 0, "expert": 1, "user": 2}
 	sort.SliceStable(all, func(i, j int) bool {
 		if order[all[i].Source] != order[all[j].Source] {
 			return order[all[i].Source] < order[all[j].Source]
@@ -115,6 +115,7 @@ func skillsUpdate(stdout, stderr io.Writer) int {
 func skillsPath(stdout io.Writer) int {
 	fmt.Fprintln(stdout, "Skill roots (lowest → highest precedence):")
 	fmt.Fprintf(stdout, "  default  %s\n", skills.DefaultRoot())
+	fmt.Fprintf(stdout, "  expert   %s\n", skills.ExpertRoot())
 	fmt.Fprintf(stdout, "  user     %s\n", skills.UserRoot())
 	return 0
 }

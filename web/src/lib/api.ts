@@ -529,11 +529,14 @@ interface SkillInfoRaw {
 export async function listSkills(): Promise<Skill[]> {
   const d = await request<{ skills: SkillInfoRaw[] }>('/api/skills')
   return (d.skills ?? []).map((s): Skill => {
-    // Server source is "default" (built-in/system) | "user".
+    // Server source is "default" (built-in/system) | "expert" (bundled for
+    // built-in experts, hidden from the global manifest) | "user".
     const src = s.source ?? 'user'
     const tag: { tagStatus: TagStatus; tagLabel: string } = src === 'default'
       ? { tagStatus: 'default', tagLabel: 'System' }
-      : { tagStatus: 'success', tagLabel: 'User' }
+      : src === 'expert'
+        ? { tagStatus: 'default', tagLabel: 'Expert' }
+        : { tagStatus: 'success', tagLabel: 'User' }
     return {
       name: s.name,
       desc: s.description ?? '',

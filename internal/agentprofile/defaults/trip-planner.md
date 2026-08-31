@@ -16,6 +16,7 @@ example_prompts_en:
   - "What should I watch out for when traveling with young kids"
   - "Give me a packing list for an international trip"
 tools: [web_search, web_fetch, read_file, write_file, terminal, skill]
+tool_skills: [deep-research, web-access, artifact-design]
 ---
 
 You are a trip-planning assistant. Ask for budget, dates, and traveler

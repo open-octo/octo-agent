@@ -16,6 +16,7 @@ example_prompts_en:
   - "I keep procrastinating — what methods can help"
   - "Use the SMART framework to help me set this month's goals"
 tools: [web_search, web_fetch, read_file, write_file, terminal, skill]
+tool_skills: [cron-task-creator, artifact-design]
 ---
 
 You are a productivity coach. When asked to break down a task, produce a

@@ -37,7 +37,7 @@ type Skill struct {
 	Description string // frontmatter description; the L1 manifest + trigger cue
 	Body        string // SKILL.md body after frontmatter
 	Dir         string // absolute path of the skill directory
-	Source      string // "user" | "default" (display only, for --list-skills)
+	Source      string // "user" | "default" | "expert" — see Discover for the semantics
 	System      bool   // frontmatter system: true → hidden from expert agent manifests
 }
 
@@ -60,18 +60,23 @@ var userSkillsRoot = func() string {
 	return filepath.Join(home, ".octo", "skills")
 }
 
-// Discover scans the default then user-level skill roots and returns a
-// Registry. User skills override default skills of the same name (the user
-// root is scanned last, overwriting the map entry). A missing root is not an
-// error — most environments won't have both.
+// Discover scans the default, expert, and user-level skill roots and returns
+// a Registry. User skills override default and expert skills of the same name
+// (the user root is scanned last, overwriting the map entry). A missing root
+// is not an error — most environments won't have all of them.
 func Discover() *Registry {
 	r := &Registry{skills: make(map[string]Skill)}
 	// Lowest precedence first; scanRoot overwrites by name, so user wins.
 	// Default skills (shipped with the binary, materialized to
 	// ~/.octo/skills-default) are the floor — a user overrides one by dropping
-	// a same-named skill in ~/.octo/skills.
+	// a same-named skill in ~/.octo/skills. Expert skills sit between: shipped
+	// too, but scoped to the experts whose tool_skills name them (see
+	// RenderManifest and the skill tool's profile check).
 	if root := defaultSkillsRoot(); root != "" {
 		r.scanRoot(root, "default")
+	}
+	if root := expertSkillsRoot(); root != "" {
+		r.scanRoot(root, "expert")
 	}
 	if userRoot := userSkillsRoot(); userRoot != "" {
 		r.scanRoot(userRoot, "user")
@@ -318,7 +323,10 @@ func (r *Registry) Delete(name string) error {
 
 // RenderManifest builds the L1 manifest injected into the system prompt: each
 // skill's name and description, plus a note on how to load the full body.
-// Returns "" for a nil/empty registry so the caller can skip the prompt layer.
+// Expert skills are left out — they ship for specific built-in experts and
+// would be noise in every other session's prompt; an expert sees its own via
+// ManifestForProfile's tool_skills path. Returns "" for a nil/empty registry
+// so the caller can skip the prompt layer.
 func RenderManifest(r *Registry) string {
 	if r.Len() == 0 {
 		return ""
@@ -328,8 +336,16 @@ func RenderManifest(r *Registry) string {
 	b.WriteString("When a task matches a skill's description, call the `skill` tool with its " +
 		"name to load the full instructions before acting. Don't guess the instructions " +
 		"from the one-line description. The user can also trigger one directly by typing /<name>.\n\n")
+	n := 0
 	for _, s := range r.List() {
+		if s.Source == "expert" {
+			continue
+		}
 		fmt.Fprintf(&b, "- %s: %s\n", s.Name, s.Description)
+		n++
+	}
+	if n == 0 {
+		return ""
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
