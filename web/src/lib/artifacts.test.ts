@@ -265,6 +265,91 @@ describe('selfContainedDocument', () => {
       '<link rel="stylesheet" data-href="https://c/x.css"></head><body></body></html>'
     expect(selfContainedDocument(html)).toBe(html)
   })
+
+  // The allowlist: scripts and stylesheets from well-known CDN hosts render
+  // rather than being stripped, so artifacts can lean on real libraries.
+  it('keeps allowlisted CDN scripts and stylesheets, by identity', () => {
+    const html =
+      '<html><head>' +
+      '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>' +
+      '<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>' +
+      '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">' +
+      '<link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/antd/5.0.0/reset.css">' +
+      '</head><body><h1>hi</h1></body></html>'
+    expect(selfContainedDocument(html)).toBe(html)
+  })
+
+  it('strips the disallowed reference but keeps the allowlisted one beside it', () => {
+    const out = selfContainedDocument(
+      '<html><head>' +
+        '<script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>' +
+        '<script src="https://evil.example.com/x.js"></script>' +
+        '</head><body></body></html>',
+    )
+    expect(out).toContain('cdn.jsdelivr.net')
+    expect(out).not.toContain('evil.example.com')
+    expect(out).toContain('1 external script/stylesheet was removed')
+  })
+
+  it('requires https — a plain-http reference to an allowlisted host is stripped', () => {
+    const out = selfContainedDocument(
+      '<html><head><script src="http://cdn.jsdelivr.net/npm/x.js"></script></head><body></body></html>',
+    )
+    expect(out).not.toContain('cdn.jsdelivr.net')
+    expect(out).toContain('removed')
+  })
+
+  it('judges the real hostname, not a lookalike prefix or userinfo trick', () => {
+    const out = selfContainedDocument(
+      '<html><head>' +
+        '<script src="https://cdn.jsdelivr.net.evil.com/x.js"></script>' +
+        '<script src="https://cdn.jsdelivr.net@evil.com/x.js"></script>' +
+        '<link rel="stylesheet" href="https://evilcdn.jsdelivr.net/x.css">' +
+        '</head><body></body></html>',
+    )
+    expect(out).not.toContain('evil')
+    expect(out).toContain('3 external scripts/stylesheets were removed')
+  })
+
+  // The judgment must land on the attribute the browser will actually fetch —
+  // string-scanning for ` src=` once judged a decoy inside another attribute's
+  // quoted value while the real src loaded from anywhere.
+  it('judges the attribute the browser will use, not a decoy inside another attribute value', () => {
+    const out = selfContainedDocument(
+      '<html><head>' +
+        '<script foo="x src=https://cdn.jsdelivr.net/ok.js" src="https://evil.com/x.js"></script>' +
+        '<link title="href=https://cdn.jsdelivr.net/a.css" rel="stylesheet" href="https://evil.com/x.css">' +
+        '</head><body></body></html>',
+    )
+    expect(out).not.toContain('evil.com')
+    expect(out).toContain('2 external scripts/stylesheets were removed')
+  })
+
+  it('is not fooled by a quoted ">" truncating the tag, or a solidus standing in for whitespace', () => {
+    const out = selfContainedDocument(
+      '<html><head>' +
+        '<script data-x="a>b" src="https://evil.com/x.js"></script>' +
+        '<script/src="https://evil.com/y.js"></script>' +
+        '</head><body></body></html>',
+    )
+    expect(out).not.toContain('evil.com')
+  })
+
+  it('judges the first of duplicate src attributes, the one the browser keeps', () => {
+    const out = selfContainedDocument(
+      '<html><head><script src="https://evil.com/x.js" src="https://cdn.jsdelivr.net/ok.js"></script></head><body></body></html>',
+    )
+    expect(out).not.toContain('evil.com')
+    expect(out).toContain('1 external script/stylesheet was removed')
+  })
+
+  it('strips a protocol-relative reference — only an explicit https URL passes', () => {
+    const out = selfContainedDocument(
+      '<html><head><script src="//cdn.jsdelivr.net/npm/x.js"></script></head><body></body></html>',
+    )
+    expect(out).not.toContain('cdn.jsdelivr.net/npm')
+    expect(out).toContain('removed')
+  })
 })
 
 describe('observeArtifact — preview documents', () => {
@@ -566,14 +651,17 @@ describe('observeArtifact — link rel discrimination', () => {
     expect(get(artifacts)[0].preview).toContain('data:image/png;base64,')
   })
 
-  it('puts the banner at the top when the page has no <body> tag', async () => {
+  it('still puts the banner before the content when the page is a bare fragment', async () => {
     stubFetch('<link rel="stylesheet" href="https://cdn.example.com/x.css"><h1>hi</h1>')
 
     await observeHydrated('/tmp/page.html')
 
+    // The DOM round-trip normalizes the fragment into a full document, so the
+    // banner lands inside the generated <body> rather than at the very top.
     const { preview } = get(artifacts)[0]
-    expect(preview.startsWith('<div')).toBe(true)
+    expect(preview).not.toContain('cdn.example.com')
     expect(preview).toContain('<h1>hi</h1>')
+    expect(preview.indexOf('removed')).toBeLessThan(preview.indexOf('<h1>hi</h1>'))
   })
 
   it('leaves a data: stylesheet alone, same as before', async () => {
