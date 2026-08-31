@@ -265,6 +265,51 @@ describe('selfContainedDocument', () => {
       '<link rel="stylesheet" data-href="https://c/x.css"></head><body></body></html>'
     expect(selfContainedDocument(html)).toBe(html)
   })
+
+  // The allowlist: scripts and stylesheets from well-known CDN hosts render
+  // rather than being stripped, so artifacts can lean on real libraries.
+  it('keeps allowlisted CDN scripts and stylesheets, by identity', () => {
+    const html =
+      '<html><head>' +
+      '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>' +
+      '<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>' +
+      '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">' +
+      '<link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/antd/5.0.0/reset.css">' +
+      '</head><body><h1>hi</h1></body></html>'
+    expect(selfContainedDocument(html)).toBe(html)
+  })
+
+  it('strips the disallowed reference but keeps the allowlisted one beside it', () => {
+    const out = selfContainedDocument(
+      '<html><head>' +
+        '<script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>' +
+        '<script src="https://evil.example.com/x.js"></script>' +
+        '</head><body></body></html>',
+    )
+    expect(out).toContain('cdn.jsdelivr.net')
+    expect(out).not.toContain('evil.example.com')
+    expect(out).toContain('1 external script/stylesheet was removed')
+  })
+
+  it('requires https — a plain-http reference to an allowlisted host is stripped', () => {
+    const out = selfContainedDocument(
+      '<html><head><script src="http://cdn.jsdelivr.net/npm/x.js"></script></head><body></body></html>',
+    )
+    expect(out).not.toContain('cdn.jsdelivr.net')
+    expect(out).toContain('removed')
+  })
+
+  it('judges the real hostname, not a lookalike prefix or userinfo trick', () => {
+    const out = selfContainedDocument(
+      '<html><head>' +
+        '<script src="https://cdn.jsdelivr.net.evil.com/x.js"></script>' +
+        '<script src="https://cdn.jsdelivr.net@evil.com/x.js"></script>' +
+        '<link rel="stylesheet" href="https://evilcdn.jsdelivr.net/x.css">' +
+        '</head><body></body></html>',
+    )
+    expect(out).not.toContain('evil')
+    expect(out).toContain('3 external scripts/stylesheets were removed')
+  })
 })
 
 describe('observeArtifact — preview documents', () => {

@@ -161,7 +161,7 @@ Light Apps live under `~/.octo/light-apps/<slug>/` with two files:
   ```json
   {"slug":"<slug>","name":"<display name>","description":"<one-line>","icon":"<emoji>","created_at":"<ISO-8601>"}
   ```
-- `index.html` — the application, fully self-contained (no CDN, no external resources, inline CSS/JS)
+- `index.html` — the application, self-contained (inline CSS/JS; external scripts/styles only from the approved CDN hosts listed under "Constraints on index.html")
 
 Create both files with `write_file`. No special tools needed.
 
@@ -184,9 +184,9 @@ Create both files with `write_file`. No special tools needed.
 
 ### Constraints on index.html
 
-- Must be fully self-contained (sandboxed iframe environment)
-- No CDN links, no external images, no cross-origin fetch
-- Inline all CSS (`<style>`) and JS (`<script>`)
+- Runs in a sandboxed iframe with no same-origin access: no cookies, no host APIs, no cross-origin fetch from scripts
+- External `<script src>` / `<link rel="stylesheet" href>` may ONLY reference these CDN hosts — anything else is stripped at render time: `cdnjs.cloudflare.com`, `cdn.jsdelivr.net`, `unpkg.com`, `fonts.googleapis.com`, `fonts.gstatic.com`, and the mainland-China mirrors `cdn.bootcdn.net`, `cdn.staticfile.org`, `cdn.staticfile.net`, `registry.npmmirror.com`. Pin exact versions. If the user is in mainland China, prefer the CN mirrors
+- Prefer inlining CSS (`<style>`) and JS (`<script>`); reach for a CDN only when a real library (React, ECharts, Chart.js, …) is needed — a CDN page shows nothing when that host is unreachable (offline, LAN, restricted networks)
 - Use `FileReader` + `<input type="file">` for file processing
 - To let the user save a result (an image, a converted file, a CSV), use the standard download idiom: build a `Blob` (or `canvas.toDataURL()`), point an `<a download="name.ext">` at it and call `.click()`. The host saves the file — no special API
 - Form submit handlers must call `event.preventDefault()` — the sandboxed frame has nowhere to navigate to, and an unprevented submit reloads the app and drops its state

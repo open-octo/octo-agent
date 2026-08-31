@@ -103,26 +103,55 @@ function typeLabel(kind: Kind): string {
 }
 
 // External scripts and stylesheets — <script src> / <link rel=stylesheet href>
-// pointing anywhere but data:, blob:, or # — are stripped before a sandboxed
-// frame renders the page, and the page renders without them under a banner
-// saying so. Both frames that show agent-written HTML go through this
-// (selfContainedDocument): the artifact preview and the Light App view, so a
-// page's external references are treated the same wherever it is opened.
-// (Known gap, deliberately left: such a page saved as a Light App keeps its
-// raw source — see lightAppSource — so its local images are not inlined
-// there the way the preview inlines them.)
+// — are allowed only from the CDN allowlist below; a reference to any other
+// host is stripped before a sandboxed frame renders the page, and the page
+// renders without it under a banner saying so. Both frames that show
+// agent-written HTML go through this (selfContainedDocument): the artifact
+// preview and the Light App view, so a page's external references are treated
+// the same wherever it is opened.
 //
-// Artifacts are required to be self-contained (the artifact-design skill says
-// so, and the panel enforces it). The reason is not the sandbox: a sandboxed
-// iframe with allow-scripts can fetch a cross-origin https:// script just
-// fine. It is that the same file must render on a machine with no route to
-// that CDN — offline, on a LAN, over a tunnel, or behind a national firewall —
-// and must still render years later once saved as a Light App. A local
-// reference (`./style.css`, `app.js` beside the page) really can't load: the
-// srcdoc frame resolves it against the host page, and the /api/ path it would
-// need can't authenticate from an opaque origin (see the file-header note).
+// Why an allowlist rather than fully open or fully closed: the sandbox itself
+// could load any cross-origin https:// script, but an artifact must also
+// render on a machine with a poor route to the wider internet — offline, on a
+// LAN, over a tunnel, behind a national firewall — and must still render
+// years later once saved as a Light App. Well-known CDNs (with mainland-China
+// mirrors included) are the pragmatic middle: they unlock real libraries
+// (React, ECharts, …) that can never be inlined by a model, while keeping the
+// page's fate out of arbitrary hosts' hands. A local reference (`./style.css`,
+// `app.js` beside the page) really can't load: the srcdoc frame resolves it
+// against the host page, and the /api/ path it would need can't authenticate
+// from an opaque origin (see the file-header note).
 //
-// Stripping beats refusing to render: a page with one Google Font link still
+// The list must stay in sync with the guidance the model reads:
+// internal/prompt/base.md (Light Apps constraints) and
+// internal/skills/defaults/artifact-design/SKILL.md.
+const CDN_ALLOWLIST = new Set([
+  'cdnjs.cloudflare.com',
+  'cdn.jsdelivr.net',
+  'unpkg.com',
+  'fonts.googleapis.com',
+  'fonts.gstatic.com',
+  // Mainland-China mirrors — the global CDNs above are flaky or blocked there.
+  'cdn.bootcdn.net',
+  'cdn.staticfile.org',
+  'cdn.staticfile.net',
+  'registry.npmmirror.com',
+])
+
+// Only an explicit https:// URL on an allowlisted host passes. URL parsing —
+// not string prefixing — decides the host, so `https://cdn.jsdelivr.net@evil`
+// and friends resolve to their real hostname and fail the lookup.
+function isAllowedRef(url: string): boolean {
+  let u: URL
+  try {
+    u = new URL(url.trim())
+  } catch {
+    return false
+  }
+  return u.protocol === 'https:' && CDN_ALLOWLIST.has(u.hostname.toLowerCase())
+}
+
+// Stripping beats refusing to render: a page with one disallowed link still
 // shows its content, and the user can judge at a glance whether the design
 // survived. Only <link> rel values the document needs in order to render
 // count: a favicon, manifest, preconnect, or canonical link loads nothing the
@@ -139,10 +168,17 @@ function typeLabel(kind: Kind): string {
 // attribute's value doesn't get an inline script or a harmless <link> removed.
 const SCRIPT_TAG_RE = /<script\b[^>]*>(?:[\s\S]*?<\/script\s*>)?/gi
 const SCRIPT_SRC_RE = /<script\b[^>]*\ssrc\s*=\s*["']?\s*(?!data:|blob:|#)[^\s"'>]/i
+const SCRIPT_SRC_VAL_RE = /\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i
 const LINK_TAG_RE = /<link\b[^>]*>/gi
 const LINK_HREF_RE = /\shref\s*=\s*["']?\s*(?!data:|blob:|#)[^\s"'>]/i
+const LINK_HREF_VAL_RE = /\shref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i
 const LINK_REL_RE = /\brel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
 const RENDER_REL_RE = /(?:^|\s)(?:stylesheet|preload|modulepreload)(?:\s|$)/i
+
+function attrValue(tag: string, re: RegExp): string {
+  const m = re.exec(tag)
+  return m?.[1] ?? m?.[2] ?? m?.[3] ?? ''
+}
 
 function isRenderLink(tag: string): boolean {
   if (!LINK_HREF_RE.test(tag)) return false
@@ -150,13 +186,23 @@ function isRenderLink(tag: string): boolean {
   return RENDER_REL_RE.test(m?.[1] ?? m?.[2] ?? m?.[3] ?? '')
 }
 
-// Returns the document with its external scripts and stylesheets removed and
-// how many were removed; 0 means the input came back untouched.
+// Returns the document with its disallowed external scripts and stylesheets
+// removed and how many were removed; 0 means the input came back untouched.
 function stripExternalRefs(html: string): { html: string; removed: number } {
   let removed = 0
   const out = html
-    .replace(SCRIPT_TAG_RE, tag => (SCRIPT_SRC_RE.test(tag) ? (removed++, '') : tag))
-    .replace(LINK_TAG_RE, tag => (isRenderLink(tag) ? (removed++, '') : tag))
+    .replace(SCRIPT_TAG_RE, tag => {
+      if (!SCRIPT_SRC_RE.test(tag)) return tag
+      if (isAllowedRef(attrValue(tag, SCRIPT_SRC_VAL_RE))) return tag
+      removed++
+      return ''
+    })
+    .replace(LINK_TAG_RE, tag => {
+      if (!isRenderLink(tag)) return tag
+      if (isAllowedRef(attrValue(tag, LINK_HREF_VAL_RE))) return tag
+      removed++
+      return ''
+    })
   return { html: out, removed }
 }
 
@@ -179,7 +225,7 @@ function withStrippedBanner(html: string, removed: number, isDark: boolean): str
   const color = isDark ? '#e8b339' : '#7a5c00'
   const what = removed === 1 ? '1 external script/stylesheet was' : `${removed} external scripts/stylesheets were`
   const banner = `<div style="padding:8px 12px;font:12px/1.5 system-ui,sans-serif;color:${color};background:${bg};border-bottom:1px solid ${border}">` +
-    `⚠️ ${what} removed — artifacts must be self-contained, so external resources never load here. ` +
+    `⚠️ ${what} removed — only well-known CDNs (cdnjs, jsdelivr, unpkg, bootcdn, …) load here. ` +
     `The page may look or behave differently; the file itself is unchanged.</div>`
   for (const re of BANNER_ANCHORS) {
     const m = re.exec(html)

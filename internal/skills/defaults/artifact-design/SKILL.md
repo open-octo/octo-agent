@@ -25,15 +25,19 @@ legibility at the panel's docked width.
   `allow-same-origin`: no cookies, no `localStorage`, no reach into the host
   app. This is a hard boundary, not a suggestion — design as if the page runs
   on an isolated blank origin, because it does.
-- **Self-contained is enforced, not just recommended.** The panel strips
-  every `<script src=…>` / `<link rel="stylesheet" href=…>` pointing anywhere
-  but `data:`, `blob:`, or `#` before rendering, and shows a banner saying
-  how many it removed — so a page that leans on a CDN library or a web font
-  renders unstyled and inert, not as you designed it. This is a policy, not
-  a browser limit: the file has to work with no network at all (offline, LAN,
-  tunnel) and years later as a saved Light App. Inline every `<style>` and
-  `<script>`; embed images as `data:` URIs; never reference a CDN, a Google
-  Font, or any other network resource.
+- **External references are allowlist-gated, and the allowlist is enforced.**
+  A `<script src=…>` / `<link rel="stylesheet" href=…>` may only point at
+  these CDN hosts; anything else is stripped before rendering, under a banner
+  saying how many were removed: `cdnjs.cloudflare.com`, `cdn.jsdelivr.net`,
+  `unpkg.com`, `fonts.googleapis.com`, `fonts.gstatic.com`, and the
+  mainland-China mirrors `cdn.bootcdn.net`, `cdn.staticfile.org`,
+  `cdn.staticfile.net`, `registry.npmmirror.com`. Pin exact versions; if the
+  user is in mainland China, prefer the CN mirrors. Still default to inlining:
+  a CDN page renders broken with no route to that host (offline, LAN, tunnel),
+  so reach for one only when the page needs a real library (React, ECharts,
+  Chart.js, …) that cannot be inlined. Embed images as `data:` URIs — a local
+  `./img.png` beside the file works in the preview, but a network image is at
+  the network's mercy.
 - **The default viewport is narrow.** The panel is a **420px-wide docked
   sidebar** by default; the user can maximize it to `min(900px, 75vw)`, but
   don't design for that as the common case. Build the layout to read cleanly
@@ -79,10 +83,12 @@ and share. Match investment to what's being requested:
 
 Before calling `write_file`/`show_artifact`, confirm:
 
-- [ ] No `<link rel="stylesheet" href="https://…">`, no CDN `<script src>` —
-      everything needed is inlined in one `<style>`/`<script>` block
-- [ ] No web fonts — use the system stack:
-      `-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`
+- [ ] Every `<script src>` / `<link rel="stylesheet" href>` points at an
+      allowlisted CDN host (see above) with a pinned version — everything
+      else is inlined in one `<style>`/`<script>` block
+- [ ] Web fonts only from `fonts.googleapis.com`, always with a system-stack
+      fallback: `-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+      sans-serif` — or skip the web font and use the stack alone
 - [ ] Any image is a `data:` URI or omitted, never a network URL
 - [ ] `@media (prefers-color-scheme: dark)` covers every color used, and every
       color has a light-mode default that isn't just "assume light"
