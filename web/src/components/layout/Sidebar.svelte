@@ -68,6 +68,27 @@
   function closeRowMenus() {
     menuFor.set(null)
     projectMenuFor = ''
+    moveMenuFor = ''
+  }
+
+  // Session whose kebab menu is showing the move-to-project target list
+  // instead of its actions ('' = none). Lives alongside the menu rather than
+  // as a second popover so dismissal stays one rule: closing the menu closes
+  // this too.
+  let moveMenuFor = $state('')
+
+  // File a loose session into a project. The groups snapshot is refetched
+  // directly on success — the session_groups_changed broadcast covers other
+  // tabs, but this one shouldn't wait on its own websocket round-trip.
+  async function moveToProject(sessionId: string, groupId: string) {
+    closeRowMenus()
+    try {
+      await api.setSessionGroup(sessionId, groupId)
+      const org = await api.listSessionGroups()
+      sessionGroups.set(org.groups)
+    } catch {
+      showToast(tr('sidebar.move_failed'))
+    }
   }
   function rowMenuPortal(node: HTMLElement, anchorTop: number) {
     document.body.appendChild(node)
@@ -969,7 +990,23 @@
               <iconify-icon icon={pinned ? 'ant-design:pushpin-filled' : 'ant-design:pushpin-outlined'} width="13"></iconify-icon>
             </span>
             {#if menuOpen}
+            {@const inProject = $sessionGroups.some(g => g.working_dir && (g.session_ids ?? []).includes(s.id))}
             <div class="row-menu" use:rowMenuPortal={rowMenuPos.anchorTop} style="top:{rowMenuPos.top}px;right:{rowMenuPos.right}px;--menu-right:{rowMenuPos.right}px" onclick={(e) => e.stopPropagation()}>
+              {#if moveMenuFor === s.id}
+                {@const targets = $sessionGroups.filter(g => g.working_dir)}
+                <div class="row-menu-label">{$t('sidebar.move_to_project')}</div>
+                {#if targets.length === 0}
+                  <div class="row-menu-item sub" style="color:var(--text-tertiary);cursor:default">
+                    <span class="menu-text">{$t('sidebar.move_no_projects')}</span>
+                  </div>
+                {/if}
+                {#each targets as g (g.id)}
+                  <div class="row-menu-item sub" onclick={(e) => { e.stopPropagation(); moveToProject(s.id, g.id) }}>
+                    <iconify-icon icon="ant-design:folder-outlined" width="13"></iconify-icon>
+                    <span class="menu-text">{g.name}</span>
+                  </div>
+                {/each}
+              {:else}
               {#if !pinned}
               <!-- First entry: acting on many sessions starts from one of them,
                    which is also why this one is pre-selected. Not offered on a
@@ -987,6 +1024,14 @@
                 <span>{$t('sidebar.open_folder')}</span>
               </div>
               {/if}
+              {#if !inProject}
+              <!-- Only a loose session can be filed into a project; membership
+                   is decided once, so the entry disappears rather than 409s. -->
+              <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); moveMenuFor = s.id }}>
+                <iconify-icon icon="ant-design:folder-add-outlined" width="13"></iconify-icon>
+                <span>{$t('sidebar.move_to_project')}</span>
+              </div>
+              {/if}
               <div class="row-menu-item" onclick={(e) => { e.stopPropagation(); menuFor.set(null); editId.set(s.id); editDraft.set((s as any).name || (s as any).title || s.id) }}>
                 <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
                 <span>{$t('sidebar.rename')}</span>
@@ -995,6 +1040,7 @@
                 <iconify-icon icon="ant-design:delete-outlined" width="13"></iconify-icon>
                 <span>{$t('common.delete')}</span>
               </div>
+              {/if}
             </div>
             {/if}
           {/if}

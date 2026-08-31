@@ -402,8 +402,8 @@ func TestProject_ExportedDirLookup(t *testing.T) {
 // createSessionInGroupViaAPI POSTs /api/sessions with a group_id and returns
 // the new session's id.
 // fileInProject puts an existing session in a project the way the server does
-// it internally at creation time. There is no HTTP move endpoint — where a
-// session lives is decided when it is created — so tests that need a session
+// it internally at creation time. Quicker than the HTTP move endpoint (which
+// also insists the session exists on disk), so tests that need a session
 // already in a project reach for this rather than a request.
 func fileInProject(t *testing.T, groupID, sessionID string) {
 	t.Helper()

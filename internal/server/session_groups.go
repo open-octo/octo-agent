@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/memory"
 )
 
@@ -497,9 +498,10 @@ func createSessionGroupNamed(name, workingDir, taskID string) (sessionGroup, err
 // list — enforcing single membership (the session is first removed from every
 // other group). Returns an error if the target group no longer exists.
 //
-// This is a creation-time path only: the session-creation handler and the
-// scheduler. There is no move-between-projects path (see
-// handleSetSessionGroup).
+// This is a creation-time path: the session-creation handler and the
+// scheduler. A loose session can also be filed into a project after creation
+// (handleSetSessionGroup, which shares fileSessionInGroup); moving between
+// projects stays impossible (see that handler for why).
 func addSessionToGroup(groupID, sessionID string) error {
 	groupMu.LockWrite()
 	defer groupMu.Unlock()
@@ -921,22 +923,96 @@ func (s *Server) handleReorderSessionGroups(w http.ResponseWriter, r *http.Reque
 
 // ─── PUT /api/sessions/{id}/group ───────────────────────────────────────────
 
-// handleSetSessionGroup refuses every attempt to move a session between
-// projects. Where a session lives is decided when it is created — by picking a
-// directory on the landing page, or by the "+" on a project — and is fixed after
-// that.
+type setSessionGroupRequest struct {
+	GroupID string `json:"group_id"`
+}
+
+// handleSetSessionGroup files a loose session into a project — the one
+// direction of "move" that works, and the only one offered. This endpoint
+// used to refuse every move: back then the facts a project decides (the
+// tools' directory, the memory tier, the hooks/sandbox mounts) were treated
+// as fixed at creation, and the frozen system prompt had no way to notice a
+// membership change. Neither is true anymore: every one of those facts is
+// re-derived from projectForSession on each turn, and the freeze identity's
+// source-dirs hash (empty for a loose session, never empty for a project —
+// see sourceDirsHash) is guaranteed to change when a loose session gains a
+// project, so the next turn recomposes the prompt with the project's
+// directory, memory tier, and mounts. The transcript's earlier turns keep
+// reading as run where they ran — the same accepted inconsistency as a
+// session whose working directory is retargeted mid-life, which has always
+// been allowed.
 //
-// It is fixed because moving is not one change but three, and they cannot be
-// made to agree after the fact: the tools' directory, the memory tier, and the
-// hooks/sandbox root all derive from the project. A moved session would keep a
-// transcript half of which ran somewhere else, and the freeze that keeps the
-// prompt cache warm cannot tell that apart from an ordinary turn (it is keyed on
-// cwd, so a session whose own directory already equals the project's would not
-// even re-compose). Deciding at creation makes the three facts true for the
-// whole life of the session.
+// Moving OUT of a project, or between projects, stays refused. Those
+// directions have no guaranteed re-freeze (two projects with identical
+// mounts hash alike), and a session that has absorbed one project's memory
+// tier and directory into its transcript doesn't become another project's
+// history by re-filing it. One direction covers the actual need — "this
+// loose chat turned out to belong to that project" — without reopening the
+// rest.
 func (s *Server) handleSetSessionGroup(w http.ResponseWriter, r *http.Request) {
-	writeError(w, http.StatusConflict,
-		"a session's project is decided when it is created — start a new session in the project instead")
+	sid := r.PathValue("id")
+	if sid == "" {
+		writeError(w, http.StatusBadRequest, "missing session id")
+		return
+	}
+	var req setSessionGroupRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeInvalidJSONBody(w, err)
+		return
+	}
+	gid := strings.TrimSpace(req.GroupID)
+	if gid == "" {
+		writeError(w, http.StatusBadRequest, "group_id is required")
+		return
+	}
+	// Unlike pin/collapse (display state, harmless on a stale ID), filing a
+	// nonexistent session would show a ghost row under the project.
+	if _, err := agent.LoadSession(sid); err != nil {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	groupMu.LockWrite()
+	defer groupMu.Unlock()
+	gf, err := loadRegistryFile()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var target *sessionGroup
+	for i := range gf.Groups {
+		g := &gf.Groups[i]
+		if g.ID == gid {
+			target = g
+		}
+		if !g.isProject() {
+			continue
+		}
+		for _, id := range g.SessionIDs {
+			if id == sid {
+				writeError(w, http.StatusConflict,
+					"the session is already in a project — that is decided once; start a new session in the target project instead")
+				return
+			}
+		}
+	}
+	if target == nil {
+		writeError(w, http.StatusNotFound, "group not found")
+		return
+	}
+	if !target.isProject() {
+		writeError(w, http.StatusConflict, "the target group is not a project")
+		return
+	}
+	if err := fileSessionInGroup(&gf, gid, sid); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := saveRegistry(gf); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "group": *target})
 }
 
 // ─── PUT /api/sessions/{id}/pin ─────────────────────────────────────────────
