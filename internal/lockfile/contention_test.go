@@ -2,6 +2,7 @@ package lockfile
 
 import (
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -46,7 +47,19 @@ func TestAcquire_ContentionQueuesRatherThanRacing(t *testing.T) {
 		h.Release()
 	}()
 	<-asked
-	time.Sleep(50 * time.Millisecond) // let it reach the wait
+	// The first waiter is only queued once its goroutine is scheduled, runs
+	// acquire, and blocks in the kernel's flock wait. A single short sleep is
+	// wall-clock and clamps badly when the runner is loaded — the flake this
+	// test has hit on macOS CI, where a 50ms sleep let the hammering latecomer
+	// barge in front of a waiter that had not actually queued yet. Yielding
+	// repeatedly for a generous window is robust to that: the waiter's goroutine
+	// gets scheduled and blocks long before we release, so it is at the head of
+	// the queue when the lock frees.
+	waitDeadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(waitDeadline) {
+		runtime.Gosched()
+		time.Sleep(time.Millisecond)
+	}
 
 	// The latecomer, asking over and over from behind.
 	var jumpedAhead atomic.Int64
