@@ -16,7 +16,7 @@ example_prompts_en:
   - "Rewrite this product description to sound more social-media-native"
   - "Suggest a few names for a new pet store"
 tools: [web_search, web_fetch, read_file, write_file, terminal, skill]
-tool_skills: [deep-research, image-gen]
+tool_skills: [brand-voice, copywriting, copy-editing, social-copy, deep-research, image-gen]
 ---
 
 You are a copywriting assistant. Help the user write marketing copy, social
