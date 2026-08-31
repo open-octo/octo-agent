@@ -51,16 +51,33 @@ func (s *Store) isDisabledDefault(p *Profile) bool {
 }
 
 // load scans default (curated) and user profiles and returns the id →
-// profile map, with builtins as the base layer and user files taking highest
-// precedence. Files that fail to parse are skipped.
+// profile map, with builtins as the base layer. Files that fail to parse are
+// skipped.
+//
+// A user file may NOT shadow a curated expert: an official expert is what it
+// ships as, on every machine, and stays that way across content updates. A
+// leftover ~/.octo/agents/<curated-id>.md (written back when editing one
+// forked it into an override) is ignored rather than obeyed — the write paths
+// refuse to create new ones, so the set can only shrink. Builtins are
+// deliberately still shadowable: they are the sub-agent capability tiers
+// (explore/general/code-review), not user-facing content, and overriding one
+// by hand is a supported way to retune delegation.
 func (s *Store) load() map[string]*Profile {
 	profiles := make(map[string]*Profile)
 	for _, p := range builtinProfiles() {
 		profiles[p.ID] = p
 	}
 	s.scanDir(defaultAgentsRoot(), SourceDefault, profiles)
-	s.scanDir(s.userDir, SourceUser, profiles)
+	s.scanDirFiltered(s.userDir, SourceUser, profiles, func(id string) bool {
+		return !isCuratedExpert(profiles[id])
+	})
 	return profiles
+}
+
+// isCuratedExpert reports whether an already-loaded profile at this ID is an
+// official curated expert — the read-only tier a user file must not replace.
+func isCuratedExpert(p *Profile) bool {
+	return p != nil && p.Source == SourceDefault
 }
 
 // scanDir merges *.md profiles from dir into dst, overwriting same-named
@@ -172,10 +189,15 @@ func (s *Store) IsEnabled(p *Profile) bool {
 	return !s.isDisabledDefault(p)
 }
 
-// Create validates p and writes it as <userDir>/<id>.md.
+// Create validates p and writes it as <userDir>/<id>.md. An ID already taken
+// by a builtin or curated expert is refused: load ignores a user file at such
+// an ID, so writing one would only leave a file that never takes effect.
 func (s *Store) Create(p *Profile) error {
 	if err := s.validateForStoreWrite(p); err != nil {
 		return err
+	}
+	if existing, ok := s.LookupAny(p.ID); ok && isCuratedExpert(existing) {
+		return fmt.Errorf("id %q is taken by a curated expert — pick another id", p.ID)
 	}
 	path := filepath.Join(s.userDir, p.ID+".md")
 	if _, err := os.Stat(path); err == nil {
@@ -184,12 +206,11 @@ func (s *Store) Create(p *Profile) error {
 	return s.writeFile(path, p)
 }
 
-// Update rewrites a profile. For a user profile this rewrites its existing
-// file; for a curated (SourceDefault) expert with no user-dir file yet, this
-// forks it into a permanent ~/.octo/agents/<id>.md override — same semantics
-// as a skill override, and the intended way "edit this expert" works from the
-// gallery UI. Once forked, that ID stops receiving future curated-content
-// refreshes (accepted trade-off, mirrors skill overrides).
+// Update rewrites a user profile's file. Curated (SourceDefault) experts are
+// read-only: editing one used to fork it into a permanent
+// ~/.octo/agents/<id>.md override, which silently detached that machine from
+// every future content update to the expert. An official expert is now the
+// same everywhere; to get a customized one, create your own agent.
 func (s *Store) Update(p *Profile) error {
 	if err := s.validateForStoreWrite(p); err != nil {
 		return err
@@ -198,8 +219,8 @@ func (s *Store) Update(p *Profile) error {
 	if !ok {
 		return fmt.Errorf("profile %q not found", p.ID)
 	}
-	if existing.Source == SourceBuiltin {
-		return fmt.Errorf("profile %q is builtin and cannot be modified", p.ID)
+	if existing.Source == SourceBuiltin || existing.Source == SourceDefault {
+		return fmt.Errorf("profile %q is a %s agent and cannot be modified — create your own agent to customize it", p.ID, existing.Source)
 	}
 	path := filepath.Join(s.userDir, p.ID+".md")
 	return s.writeFile(path, p)
@@ -218,9 +239,7 @@ func (s *Store) validateForStoreWrite(p *Profile) error {
 // Delete removes a profile. Builtin and curated-default profiles are
 // protected (curated experts can only be hidden via SetDisabledDefaults, not
 // deleted — same as skills.Registry refusing to delete Source=="default"). A
-// profile with channel bindings must be unbound first. Deleting a user
-// override of a curated expert works as usual and correctly falls back to the
-// shipped default on the next load.
+// profile with channel bindings must be unbound first.
 func (s *Store) Delete(id string) error {
 	p, ok := s.LookupAny(id)
 	if !ok {
@@ -266,10 +285,17 @@ func (s *Store) writeFile(path string, p *Profile) error {
 	return os.Rename(tmpName, path)
 }
 
-// userProfiles scans only the user-level directory for IM routing.
+// userProfiles returns the user-level profiles, for IM routing. Derived from
+// the same load() every other read goes through rather than scanning the user
+// directory directly: a file shadowing a curated expert is ignored there, and
+// IM must not be the one path that still honors it.
 func (s *Store) userProfiles() map[string]*Profile {
 	m := make(map[string]*Profile)
-	s.scanDirFiltered(s.userDir, SourceUser, m, IsValidID)
+	for id, p := range s.load() {
+		if p.Source == SourceUser && IsValidID(id) {
+			m[id] = p
+		}
+	}
 	return m
 }
 

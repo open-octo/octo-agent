@@ -200,9 +200,21 @@ func runBrowserRecording(ctx context.Context, name string, params map[string]any
 // structured object the schema produced; without one the free-text reply is
 // JSON-encoded to a string.
 func runMDWorkflowSkill(ctx context.Context, spawner Spawner, name string, params map[string]any, schema string) workflow.AgentResult {
+	// The workflow prelude's skill() must hold the same line as the skill
+	// tool: a non-builtin expert granted the workflow tool doesn't thereby
+	// gain every skill. Checked before the registry lookup, like there, so an
+	// unknown and an un-enabled name are indistinguishable to the expert.
+	if err := skillAllowedForProfile(ctx, name); err != nil {
+		return workflow.AgentResult{Err: err}
+	}
 	sk, ok := skillRegistryGet(name)
 	if !ok {
 		return workflow.AgentResult{Err: fmt.Errorf("skill %q not found", name)}
+	}
+	if sk.System {
+		if err := systemSkillDeniedForProfile(ctx, name); err != nil {
+			return workflow.AgentResult{Err: err}
+		}
 	}
 	// Hand the sub-agent structured inputs: an array/object param stays JSON, not
 	// a flattened string, so a file[] arrives usable.

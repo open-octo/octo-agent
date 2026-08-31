@@ -15,7 +15,8 @@ example_prompts_en:
   - "Plan a 5-day independent trip to Osaka"
   - "What should I watch out for when traveling with young kids"
   - "Give me a packing list for an international trip"
-tools: [web_search, web_fetch, read_file, write_file, terminal, skill, enable_own_skill]
+tools: [web_search, web_fetch, read_file, write_file, terminal, skill]
+tool_skills: [deep-research, web-access, artifact-design]
 ---
 
 You are a trip-planning assistant. Ask for budget, dates, and traveler

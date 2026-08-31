@@ -68,7 +68,7 @@ func parseFile(path string) (*Profile, error) {
 		CapabilitySpec: CapabilitySpec{
 			Model:           model,
 			SystemPrompt:    strings.TrimSpace(body),
-			Tools:           fm.Tools,
+			Tools:           stripRetiredTools(fm.Tools),
 			ToolSkills:      fm.ToolSkills,
 			ReadOnly:        fm.ReadOnly,
 			DisallowedTools: fm.DisallowedTools,
@@ -91,6 +91,34 @@ func parseFile(path string) (*Profile, error) {
 		p.UpdatedAt = info.ModTime()
 	}
 	return p, nil
+}
+
+// retiredTools are tool names that no longer exist but may linger in profile
+// files written when they did. Parsing strips them so an old profile keeps
+// loading — and, crucially, keeps SAVING: the API layer rejects unknown tool
+// names, so a name left in place would 400 the next edit of an otherwise
+// valid expert.
+//
+//   - enable_own_skill let an expert add skills to its own profile; removed
+//     when experts became configurable only by the Default agent. Its own
+//     forks (~/.octo/agents overrides) are exactly the files that carry it.
+var retiredTools = map[string]bool{
+	"enable_own_skill": true,
+}
+
+// stripRetiredTools returns tools without any retired names, preserving order.
+// Nil in, nil out — an absent list keeps meaning "builtin: all, expert: none".
+// (A list that held ONLY retired names comes back empty but non-nil; runtime
+// filtering treats both as "no tools" for an expert, so nothing changes for
+// the author beyond losing the retired grant.)
+func stripRetiredTools(tools []string) []string {
+	kept := tools[:0:0]
+	for _, t := range tools {
+		if !retiredTools[t] {
+			kept = append(kept, t)
+		}
+	}
+	return kept
 }
 
 // serialize renders p as a .md file: YAML frontmatter between --- fences,

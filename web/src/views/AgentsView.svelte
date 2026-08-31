@@ -53,8 +53,8 @@
   }
 
   // Agentic-first: create and edit through conversation with the
-  // expert-agent-manager skill. Works for curated experts too — the Store
-  // forks a SourceDefault profile into a user override on first edit.
+  // expert-agent-manager skill. Curated experts are read-only, so only the
+  // user's own agents offer this.
   function handleCreateWithAgent() {
     openAgentSession('/expert-agent-manager', tr('agents.session_new'))
   }
@@ -179,11 +179,12 @@
               {/if}
               <div class="card-actions">
                 {#if agent.source === 'default'}
+                  <!-- A curated expert is read-only: it is the same on every
+                       machine and keeps receiving content updates. Hiding it
+                       is the only knob, so editing isn't offered rather than
+                       offered-and-refused. -->
                   <button class="act-btn" title={isHidden(agent) ? $t('agents.show') : $t('agents.hide')} onclick={(e) => { e.stopPropagation(); handleToggle(agent) }}>
                     <iconify-icon icon={isHidden(agent) ? 'ant-design:eye-outlined' : 'ant-design:eye-invisible-outlined'} width="13"></iconify-icon>
-                  </button>
-                  <button class="act-btn" title={$t('agents.edit_with_agent')} onclick={(e) => handleEditWithAgent(agent, e)}>
-                    <iconify-icon icon="ant-design:message-outlined" width="13"></iconify-icon>
                   </button>
                 {:else}
                   <button class="act-btn" title={$t('agents.edit_with_agent')} onclick={(e) => handleEditWithAgent(agent, e)}>
@@ -208,6 +209,14 @@
                 <span class="transport-badge">{agent.tools.length} {$t('agents.tools')}</span>
               {:else if agent.source !== 'default'}
                 <span class="transport-badge muted">{$t('agents.all_tools')}</span>
+              {/if}
+              {#if agent.tool_skills && agent.tool_skills.length > 0}
+                <!-- An expert's skills are as much a part of what it can do as
+                     its tools, and they are configured the same way — the card
+                     said nothing about them before. -->
+                <span class="transport-badge" title={agent.tool_skills.join(', ')}>
+                  {agent.tool_skills.length} {$t('agents.skills')}
+                </span>
               {/if}
               {#if agent.channel_bindings && agent.channel_bindings.length > 0}
                 <span class="transport-badge">{agent.channel_bindings.length} {$t('agents.bound_chats')}</span>

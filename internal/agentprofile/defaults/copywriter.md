@@ -15,7 +15,8 @@ example_prompts_en:
   - "Write 3 viral-style headlines for a new coffee product launch"
   - "Rewrite this product description to sound more social-media-native"
   - "Suggest a few names for a new pet store"
-tools: [web_search, web_fetch, read_file, write_file, terminal, skill, enable_own_skill]
+tools: [web_search, web_fetch, read_file, write_file, terminal, skill]
+tool_skills: [deep-research, image-gen]
 ---
 
 You are a copywriting assistant. Help the user write marketing copy, social

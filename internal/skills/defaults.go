@@ -23,6 +23,15 @@ import (
 //go:embed all:defaults
 var defaultsFS embed.FS
 
+// expertsFS holds the skills bundled for the built-in experts. Same shipping
+// mechanics as defaultsFS, different audience: these are materialized to their
+// own root and discovered with Source "expert", which keeps them OUT of the
+// global skills manifest — an expert skill is visible only to a profile whose
+// tool_skills names it. See experts/README.md.
+//
+//go:embed all:experts
+var expertsFS embed.FS
+
 // defaultStampFile records which binary version last materialized the default
 // skills, so MaterializeDefaults can no-op until the version changes.
 const defaultStampFile = ".octo-version"
@@ -38,29 +47,53 @@ var defaultSkillsRoot = func() string {
 	return filepath.Join(home, ".octo", "skills-default")
 }
 
+// expertSkillsRoot returns ~/.octo/skills-expert — the materialized expert
+// skills, octo-managed like the default root and equally safe to wipe and
+// rewrite. A var so tests can redirect it.
+var expertSkillsRoot = func() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".octo", "skills-expert")
+}
+
 // DefaultRoot is the on-disk location of the materialized default skills
 // (~/.octo/skills-default), exported for `octo skills path`.
 func DefaultRoot() string { return defaultSkillsRoot() }
+
+// ExpertRoot is the on-disk location of the materialized expert skills
+// (~/.octo/skills-expert), exported for `octo skills path`.
+func ExpertRoot() string { return expertSkillsRoot() }
 
 // UserRoot is the user-level skills directory (~/.octo/skills), exported for
 // `octo skills path`.
 func UserRoot() string { return userSkillsRoot() }
 
-// MaterializeDefaults writes the embedded default skills to the default root
-// when the on-disk version stamp doesn't match version. It's a fast no-op once
-// the install is current (a single stamp read). Best-effort: the caller should
-// ignore the error so a read-only HOME never blocks a session.
+// MaterializeDefaults writes the embedded default and expert skills to their
+// roots when the on-disk version stamp doesn't match version. It's a fast
+// no-op once the install is current (a single stamp read per root).
+// Best-effort: the caller should ignore the error so a read-only HOME never
+// blocks a session.
 func MaterializeDefaults(version string) error {
-	return materializeDefaults(defaultSkillsRoot(), version, false)
+	err := materializeEmbedded(defaultsFS, "defaults", defaultSkillsRoot(), version, false)
+	if eerr := materializeEmbedded(expertsFS, "experts", expertSkillsRoot(), version, false); err == nil {
+		err = eerr
+	}
+	return err
 }
 
-// UpdateDefaults forces a rewrite regardless of the stamp — backs
+// UpdateDefaults forces a rewrite regardless of the stamps — backs
 // `octo skills update`.
 func UpdateDefaults(version string) error {
-	return materializeDefaults(defaultSkillsRoot(), version, true)
+	err := materializeEmbedded(defaultsFS, "defaults", defaultSkillsRoot(), version, true)
+	if eerr := materializeEmbedded(expertsFS, "experts", expertSkillsRoot(), version, true); err == nil {
+		err = eerr
+	}
+	return err
 }
 
-func materializeDefaults(root, version string, force bool) error {
+func materializeEmbedded(src embed.FS, prefix, root, version string, force bool) error {
 	if root == "" {
 		return nil
 	}
@@ -81,19 +114,19 @@ func materializeDefaults(root, version string, force bool) error {
 	if err := os.RemoveAll(root); err != nil {
 		return err
 	}
-	if err := fs.WalkDir(defaultsFS, "defaults", func(p string, d fs.DirEntry, err error) error {
+	if err := fs.WalkDir(src, prefix, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
 			return nil
 		}
-		rel := strings.TrimPrefix(p, "defaults/") // e.g. worktree-isolate/SKILL.md
+		rel := strings.TrimPrefix(p, prefix+"/") // e.g. worktree-isolate/SKILL.md
 		target := filepath.Join(root, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
-		data, err := defaultsFS.ReadFile(p)
+		data, err := src.ReadFile(p)
 		if err != nil {
 			return err
 		}

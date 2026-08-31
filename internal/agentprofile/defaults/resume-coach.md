@@ -15,7 +15,8 @@ example_prompts_en:
   - "Review my resume and tell me what needs improvement"
   - "Simulate a few interview questions for a product manager role"
   - "I want to switch careers into data analytics — how should I plan for it"
-tools: [web_search, web_fetch, read_file, write_file, terminal, skill, enable_own_skill]
+tools: [web_search, web_fetch, read_file, write_file, terminal, skill]
+tool_skills: [deep-research, artifact-design]
 ---
 
 You are a resume and career coach. Give specific, actionable feedback on

@@ -70,7 +70,7 @@ func TestMaterializeDefaults_NoOpWhenCurrent(t *testing.T) {
 	}
 }
 
-func TestStore_DefaultLayerSurfacesAndIsOverridable(t *testing.T) {
+func TestStore_DefaultLayerSurfacesAndIsNotOverridable(t *testing.T) {
 	defaultRoot := filepath.Join(t.TempDir(), "agents-default")
 	useDefaultAgentsRoot(t, defaultRoot)
 	writeMD(t, defaultRoot, "copywriter.md", "---\ndescription: curated copywriter\ntools: [read_file]\ncategory: content-creation\ntags: [writing]\n---\npersona body\n")
@@ -87,16 +87,24 @@ func TestStore_DefaultLayerSurfacesAndIsOverridable(t *testing.T) {
 		t.Fatalf("gallery metadata not threaded through: %+v", got[0])
 	}
 
-	// A user file of the same ID overrides the curated default (same
-	// precedence rule as builtin overriding, one layer up).
+	// A user file of the same ID does NOT override the curated expert: an
+	// official expert is identical on every machine and keeps receiving
+	// content updates. A leftover file (older octo forked one on first edit)
+	// is ignored, not obeyed.
 	writeMD(t, userDir, "copywriter.md", "---\ndescription: my override\n---\nuser body\n")
 	p, ok := s.Get("copywriter")
-	if !ok || p.Source != SourceUser || p.Description != "my override" {
-		t.Fatalf("user file should override curated default: %+v, %v", p, ok)
+	if !ok || p.Source != SourceDefault || p.Description != "curated copywriter" {
+		t.Fatalf("user file must not shadow a curated expert: %+v, %v", p, ok)
+	}
+	// The ignored file must not leak through the IM-routing path either.
+	if _, found := s.userProfiles()["copywriter"]; found {
+		t.Error("shadowed file still visible to IM routing")
 	}
 }
 
-func TestStore_UpdateForksDefaultIntoUserOverride(t *testing.T) {
+// A curated expert is read-only: Update refuses it rather than forking it
+// into a user override, and Create refuses to take its id.
+func TestStore_CuratedExpertIsReadOnly(t *testing.T) {
 	defaultRoot := filepath.Join(t.TempDir(), "agents-default")
 	useDefaultAgentsRoot(t, defaultRoot)
 	writeMD(t, defaultRoot, "copywriter.md", "---\ndescription: curated copywriter\ntools: [read_file]\ncategory: content-creation\n---\npersona body\n")
@@ -108,22 +116,19 @@ func TestStore_UpdateForksDefaultIntoUserOverride(t *testing.T) {
 		t.Fatal("copywriter not found")
 	}
 	existing.Description = "edited copywriter"
-	if err := s.Update(existing); err != nil {
-		t.Fatalf("Update() on a curated default should fork it, got: %v", err)
+	if err := s.Update(existing); err == nil {
+		t.Error("Update() on a curated expert should be refused")
 	}
-	if _, err := os.Stat(filepath.Join(userDir, "copywriter.md")); err != nil {
-		t.Fatalf("expected fork written to user dir: %v", err)
+	if _, err := os.Stat(filepath.Join(userDir, "copywriter.md")); !os.IsNotExist(err) {
+		t.Errorf("refused Update must not write a user file: %v", err)
 	}
+	if err := s.Create(&Profile{ID: "copywriter", Description: "mine", CapabilitySpec: CapabilitySpec{SystemPrompt: "body"}}); err == nil {
+		t.Error("Create() at a curated expert's id should be refused")
+	}
+	// Unchanged, still the shipped copy.
 	p, ok := s.Get("copywriter")
-	if !ok || p.Source != SourceUser || p.Description != "edited copywriter" {
-		t.Fatalf("after fork: %+v, %v", p, ok)
-	}
-	// The fork must keep the persona's gallery metadata (category etc.), not
-	// silently drop it — the plan requires the API layer preserve unspecified
-	// fields, but the Store itself must simply persist whatever Profile it's
-	// handed.
-	if p.Category != "content-creation" {
-		t.Fatalf("fork lost gallery metadata: %+v", p)
+	if !ok || p.Source != SourceDefault || p.Description != "curated copywriter" {
+		t.Fatalf("curated expert changed: %+v, %v", p, ok)
 	}
 }
 
