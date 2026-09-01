@@ -7,7 +7,7 @@ import (
 
 func TestBuildEnvContext_IncludesCoreFields(t *testing.T) {
 	out := buildEnvContext("/some/dir")
-	for _, want := range []string{"# Environment", "/some/dir", "Today's date:", "OS/arch:"} {
+	for _, want := range []string{"# Environment", "/some/dir", "Today's date:", "Timezone:", "OS/arch:"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("env context missing %q:\n%s", want, out)
 		}

@@ -2026,7 +2026,17 @@ func buildEnvContext(cwd string) string {
 	if cwd != "" {
 		fmt.Fprintf(&b, "- Working directory: %s\n", cwd)
 	}
-	fmt.Fprintf(&b, "- Today's date: %s\n", time.Now().Format("2006-01-02"))
+	now := time.Now()
+	fmt.Fprintf(&b, "- Today's date: %s\n", now.Format("2006-01-02"))
+	// Mirrors cmd/octo: report the local timezone so the model can convert
+	// UTC timestamps from the API (e.g. cron next_run/last_run) to local time.
+	_, offset := now.Zone()
+	sign := "+"
+	if offset < 0 {
+		sign = "-"
+		offset = -offset
+	}
+	fmt.Fprintf(&b, "- Timezone: %s (UTC%s%02d:%02d)\n", now.Format("MST"), sign, offset/3600, (offset%3600)/60)
 	// Platform-shell guidance (dialect + install/PATH traps), shared with the
 	// CLI builder so web sessions get the same orientation.
 	b.WriteString(tools.ShellEnvNote())

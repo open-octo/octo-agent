@@ -72,3 +72,10 @@ func TestAppendProjectEnvContext_GitBranchForRepoFolder(t *testing.T) {
 		t.Errorf("repo folder's branch missing from:\n%s", got)
 	}
 }
+
+func TestBuildEnvContext_IncludesTimezone(t *testing.T) {
+	out := buildEnvContext("/some/dir")
+	if !strings.Contains(out, "Timezone:") {
+		t.Errorf("env context missing timezone line:\n%s", out)
+	}
+}

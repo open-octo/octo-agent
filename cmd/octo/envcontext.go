@@ -32,7 +32,18 @@ func buildEnvContext(cwd string) string {
 		}
 		fmt.Fprintf(&b, "- Git branch: %s (%s)\n", branch, state)
 	}
-	fmt.Fprintf(&b, "- Today's date: %s\n", time.Now().Format("2006-01-02"))
+	now := time.Now()
+	fmt.Fprintf(&b, "- Today's date: %s\n", now.Format("2006-01-02"))
+	// Report the local timezone (abbreviation + UTC offset) so the model can
+	// convert API timestamps (e.g. cron next_run/last_run, which come back as
+	// ISO-8601 UTC with a trailing "Z") to local time instead of guessing.
+	_, offset := now.Zone()
+	sign := "+"
+	if offset < 0 {
+		sign = "-"
+		offset = -offset
+	}
+	fmt.Fprintf(&b, "- Timezone: %s (UTC%s%02d:%02d)\n", now.Format("MST"), sign, offset/3600, (offset%3600)/60)
 	fmt.Fprintf(&b, "- OS/arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	// Platform-shell guidance (PowerShell dialect + the install/PATH/UAC traps
 	// on Windows, sudo/PATH/CLT traps on macOS) lives in internal/tools next
