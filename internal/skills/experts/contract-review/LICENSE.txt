@@ -1,0 +1,29 @@
+This skill is adapted from "contract-review-skill"
+(https://github.com/claude-office-skills/contract-review-skill, commit
+b7697d31e1fa281fcd95b2246eda83623bd6fdaf), © 2025 Contract Review Skill
+Contributors, licensed under MIT. The risk-pattern checklist (15 patterns)
+and per-contract-type key-clause list documented in SKILL.md are translated
+and reorganized from that project's src/knowledge/risk_patterns.json.
+Modifications for octo (prose-only methodology, removal of the Python
+CLI/analyze.py/Claude Vision pipeline, Chinese-market framing, workflow
+restructuring, report template) © the octo-agent contributors, MIT.
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
