@@ -408,15 +408,16 @@
         .filter(({ score }) => score > 0)
         .sort((a, b) => b.score - a.score || a.cmd.name.localeCompare(b.cmd.name))
         .map(({ cmd }) => ({ kind: 'builtin', name: cmd.name, descKey: cmd.descKey, takesArgs: cmd.takesArgs }))
-      // Skills tagged source "expert" ship bundled for a specific curated
-      // expert (see internal/skills/experts/) and are noise outside it —
-      // mirrors RenderManifest/ManifestForProfile on the server, which never
-      // shows one expert's skills to another. General ("default"/"user")
-      // skills stay visible regardless of the picked expert.
-      const visibleSkills = skills.filter(s => {
-        if (s.source !== 'expert') return true
-        return currentExpertToolSkills != null && currentExpertToolSkills.includes(s.name)
-      })
+      // Mirrors RenderManifest/ManifestForProfile on the server: with no
+      // expert picked, every skill except one bundled for a specific curated
+      // expert (source "expert") is fair game — same as the Default Agent's
+      // own manifest. Once an expert is picked, only its own tool_skills
+      // show, general ("default"/"user") skills included — an expert with no
+      // tool_skills configured sees none at all, same as the server showing
+      // it an empty manifest rather than falling back to "everything".
+      const visibleSkills = currentExpertToolSkills != null
+        ? skills.filter(s => currentExpertToolSkills!.includes(s.name))
+        : skills.filter(s => s.source !== 'expert')
       let scored = visibleSkills
         .map(s => ({ skill: s, score: scoreSkillMatch(s, q) }))
         .filter(({ score }) => score > 0)
@@ -819,11 +820,13 @@
     if (!effectiveAgentId || effectiveAgentId === 'default') return ''
     return agents.find(a => a.id === effectiveAgentId)?.name ?? effectiveAgentId
   })
-  // null (no expert, or an expert with no tool_skills configured) means the
-  // "/" menu shows no expert-scoped skills at all — see filteredItems.
+  // null means "no expert" — the "/" menu falls back to every general skill.
+  // A non-null array (empty or not) means an expert IS picked, so the menu
+  // shows only its own tool_skills, however few — including while `agents`
+  // hasn't loaded yet, which must not read as "no expert" (see filteredItems).
   let currentExpertToolSkills = $derived.by((): string[] | null => {
     if (!effectiveAgentId || effectiveAgentId === 'default') return null
-    return agents.find(a => a.id === effectiveAgentId)?.tool_skills ?? null
+    return agents.find(a => a.id === effectiveAgentId)?.tool_skills ?? []
   })
   async function pickAgent(id: string) {
     agentMenu = false
