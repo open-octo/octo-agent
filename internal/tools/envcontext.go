@@ -32,7 +32,11 @@ func BuildEnvContext(cwd, branch string, dirty, ok bool) string {
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		fmt.Fprintf(&b, "- Home directory: %s\n", home)
 	}
-	if ok {
+	// The git line is meaningful only with a name; because this helper is
+	// exported, a future caller passing ok=true with an empty branch should not
+	// render "Git branch:  ()". branch is still supplied by the caller (the CLI
+	// probes its cwd's repo; the server passes ok=false).
+	if ok && branch != "" {
 		state := "clean"
 		if dirty {
 			state = "uncommitted changes"
@@ -45,12 +49,7 @@ func BuildEnvContext(cwd, branch string, dirty, ok bool) string {
 	// convert API timestamps (e.g. cron next_run/last_run, which come back as
 	// ISO-8601 UTC with a trailing "Z") to local time instead of guessing.
 	_, offset := now.Zone()
-	sign := "+"
-	if offset < 0 {
-		sign = "-"
-		offset = -offset
-	}
-	fmt.Fprintf(&b, "- Timezone: %s (UTC%s%02d:%02d)\n", now.Format("MST"), sign, offset/3600, (offset%3600)/60)
+	fmt.Fprintf(&b, "- Timezone: %s (%s)\n", now.Format("MST"), formatUTCOffset(offset))
 	fmt.Fprintf(&b, "- OS/arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	// Locale (LANG/LC_ALL) tells the model the default encoding and sort order,
 	// so it can anticipate e.g. a GBK Windows console or a non-UTF-8 locale.
@@ -62,4 +61,15 @@ func BuildEnvContext(cwd, branch string, dirty, ok bool) string {
 	b.WriteString(ShellEnvNote())
 	b.WriteString(ToolchainNote())
 	return b.String()
+}
+
+// formatUTCOffset renders a UTC offset in seconds as "UTC±hh:mm", sign-safe for
+// negative offsets that include minutes (e.g. -34200 -> "UTC-09:30").
+func formatUTCOffset(offset int) string {
+	sign := "+"
+	if offset < 0 {
+		sign = "-"
+		offset = -offset
+	}
+	return fmt.Sprintf("UTC%s%02d:%02d", sign, offset/3600, (offset%3600)/60)
 }
