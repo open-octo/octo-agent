@@ -2019,21 +2019,12 @@ func (s *Server) sessionCwdByID(sessionID string) string {
 	return s.resolveSessionDir(sessionID, own)
 }
 
-// buildEnvContext mirrors cmd/octo's env context builder.
+// buildEnvContext mirrors cmd/octo's env context builder (delegating the shared
+// machine lines to tools.BuildEnvContext). The server's cwd is a workspace, not
+// a repository, so it passes ok=false and repo branches are shown per mounted
+// source folder by appendProjectEnvContext instead.
 func buildEnvContext(cwd string) string {
-	var b strings.Builder
-	b.WriteString("# Environment\n\n")
-	if cwd != "" {
-		fmt.Fprintf(&b, "- Working directory: %s\n", cwd)
-	}
-	fmt.Fprintf(&b, "- Today's date: %s\n", time.Now().Format("2006-01-02"))
-	// Platform-shell guidance (dialect + install/PATH traps), shared with the
-	// CLI builder so web sessions get the same orientation.
-	b.WriteString(tools.ShellEnvNote())
-	// Detected toolchain — same as the CLI builder, so web sessions know which
-	// runtimes are present without probing by trial and error.
-	b.WriteString(tools.ToolchainNote())
-	return b.String()
+	return tools.BuildEnvContext(cwd, "", false, false)
 }
 
 // ensureSender lazily initialises the sender when the server started in

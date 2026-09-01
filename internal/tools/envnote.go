@@ -1,6 +1,20 @@
 package tools
 
-import "runtime"
+import (
+	"os"
+	"runtime"
+)
+
+// Locale returns the session's effective locale (LC_ALL with precedence over
+// LANG), or "" when neither is set. Reported in the env context so the model
+// can anticipate the default encoding and sort order (e.g. a GBK Windows
+// console, a non-UTF-8 locale).
+func Locale() string {
+	if lc := os.Getenv("LC_ALL"); lc != "" {
+		return lc
+	}
+	return os.Getenv("LANG")
+}
 
 // shellEnvNoteWindows is the Windows shell guidance injected into the session
 // environment context. It lives next to shellCommand (sandbox.go) — the code
