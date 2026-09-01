@@ -74,8 +74,13 @@ func TestAppendProjectEnvContext_GitBranchForRepoFolder(t *testing.T) {
 }
 
 func TestBuildEnvContext_IncludesTimezone(t *testing.T) {
+	t.Setenv("HOME", "/home/test")
+	t.Setenv("LC_ALL", "")
+	t.Setenv("LANG", "zh_CN.UTF-8")
 	out := buildEnvContext("/some/dir")
-	if !strings.Contains(out, "Timezone:") {
-		t.Errorf("env context missing timezone line:\n%s", out)
+	for _, want := range []string{"# Environment", "/some/dir", "Home directory:", "Timezone:", "OS/arch:", "Locale:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("env context missing %q:\n%s", want, out)
+		}
 	}
 }

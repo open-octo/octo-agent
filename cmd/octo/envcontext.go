@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -25,6 +26,9 @@ func buildEnvContext(cwd string) string {
 	if cwd != "" {
 		fmt.Fprintf(&b, "- Working directory: %s\n", cwd)
 	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		fmt.Fprintf(&b, "- Home directory: %s\n", home)
+	}
 	if branch, dirty, ok := gitState(cwd); ok {
 		state := "clean"
 		if dirty {
@@ -45,6 +49,11 @@ func buildEnvContext(cwd string) string {
 	}
 	fmt.Fprintf(&b, "- Timezone: %s (UTC%s%02d:%02d)\n", now.Format("MST"), sign, offset/3600, (offset%3600)/60)
 	fmt.Fprintf(&b, "- OS/arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
+	// Locale (LANG/LC_ALL) tells the model the default encoding and sort order,
+	// so it can anticipate e.g. a GBK Windows console or a non-UTF-8 locale.
+	if lang := tools.Locale(); lang != "" {
+		fmt.Fprintf(&b, "- Locale: %s\n", lang)
+	}
 	// Platform-shell guidance (PowerShell dialect + the install/PATH/UAC traps
 	// on Windows, sudo/PATH/CLT traps on macOS) lives in internal/tools next
 	// to the shell selection itself, shared with the server's context builder.

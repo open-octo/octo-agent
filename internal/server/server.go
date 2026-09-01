@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -2026,6 +2027,9 @@ func buildEnvContext(cwd string) string {
 	if cwd != "" {
 		fmt.Fprintf(&b, "- Working directory: %s\n", cwd)
 	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		fmt.Fprintf(&b, "- Home directory: %s\n", home)
+	}
 	now := time.Now()
 	fmt.Fprintf(&b, "- Today's date: %s\n", now.Format("2006-01-02"))
 	// Mirrors cmd/octo: report the local timezone so the model can convert
@@ -2037,6 +2041,13 @@ func buildEnvContext(cwd string) string {
 		offset = -offset
 	}
 	fmt.Fprintf(&b, "- Timezone: %s (UTC%s%02d:%02d)\n", now.Format("MST"), sign, offset/3600, (offset%3600)/60)
+	// Match cmd/octo's builder, which reports OS/arch.
+	fmt.Fprintf(&b, "- OS/arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
+	// Locale (LANG/LC_ALL) — same as cmd/octo, so web sessions anticipate the
+	// default encoding and sort order too.
+	if lang := tools.Locale(); lang != "" {
+		fmt.Fprintf(&b, "- Locale: %s\n", lang)
+	}
 	// Platform-shell guidance (dialect + install/PATH traps), shared with the
 	// CLI builder so web sessions get the same orientation.
 	b.WriteString(tools.ShellEnvNote())
