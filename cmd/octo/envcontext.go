@@ -2,67 +2,21 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
-// buildEnvContext renders a snapshot of the working environment for the
-// system prompt: working directory, git branch + dirty/clean state, today's
-// date, and the OS/arch. The model otherwise has no idea where it's running.
-//
-// Taken once at session start (the composed prompt is frozen for the
-// session), so git state is a snapshot — fresh enough to orient the model
-// without re-rendering per turn and busting the prompt cache.
+// buildEnvContext renders the session's "# Environment" block. The shared
+// machine lines live in tools.BuildEnvContext; here the CLI contributes its
+// cwd's git state (its cwd is a repository), which the server builder omits
+// because its cwd is a workspace.
 func buildEnvContext(cwd string) string {
-	var b strings.Builder
-	b.WriteString("# Environment\n\n")
-	if cwd != "" {
-		fmt.Fprintf(&b, "- Working directory: %s\n", cwd)
-	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		fmt.Fprintf(&b, "- Home directory: %s\n", home)
-	}
-	if branch, dirty, ok := gitState(cwd); ok {
-		state := "clean"
-		if dirty {
-			state = "uncommitted changes"
-		}
-		fmt.Fprintf(&b, "- Git branch: %s (%s)\n", branch, state)
-	}
-	now := time.Now()
-	fmt.Fprintf(&b, "- Today's date: %s\n", now.Format("2006-01-02"))
-	// Report the local timezone (abbreviation + UTC offset) so the model can
-	// convert API timestamps (e.g. cron next_run/last_run, which come back as
-	// ISO-8601 UTC with a trailing "Z") to local time instead of guessing.
-	_, offset := now.Zone()
-	sign := "+"
-	if offset < 0 {
-		sign = "-"
-		offset = -offset
-	}
-	fmt.Fprintf(&b, "- Timezone: %s (UTC%s%02d:%02d)\n", now.Format("MST"), sign, offset/3600, (offset%3600)/60)
-	fmt.Fprintf(&b, "- OS/arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
-	// Locale (LANG/LC_ALL) tells the model the default encoding and sort order,
-	// so it can anticipate e.g. a GBK Windows console or a non-UTF-8 locale.
-	if lang := tools.Locale(); lang != "" {
-		fmt.Fprintf(&b, "- Locale: %s\n", lang)
-	}
-	// Platform-shell guidance (PowerShell dialect + the install/PATH/UAC traps
-	// on Windows, sudo/PATH/CLT traps on macOS) lives in internal/tools next
-	// to the shell selection itself, shared with the server's context builder.
-	b.WriteString(tools.ShellEnvNote())
-	// Which common developer tools are actually on PATH — so the agent doesn't
-	// discover python/node is missing by failing a command. Pairs with the
-	// install guidance above.
-	b.WriteString(tools.ToolchainNote())
-	return b.String()
+	branch, dirty, ok := gitState(cwd)
+	return tools.BuildEnvContext(cwd, branch, dirty, ok)
 }
 
 // gitState returns the current branch and whether the working tree has

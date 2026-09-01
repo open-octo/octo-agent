@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -2020,41 +2019,12 @@ func (s *Server) sessionCwdByID(sessionID string) string {
 	return s.resolveSessionDir(sessionID, own)
 }
 
-// buildEnvContext mirrors cmd/octo's env context builder.
+// buildEnvContext mirrors cmd/octo's env context builder (delegating the shared
+// machine lines to tools.BuildEnvContext). The server's cwd is a workspace, not
+// a repository, so it passes ok=false and repo branches are shown per mounted
+// source folder by appendProjectEnvContext instead.
 func buildEnvContext(cwd string) string {
-	var b strings.Builder
-	b.WriteString("# Environment\n\n")
-	if cwd != "" {
-		fmt.Fprintf(&b, "- Working directory: %s\n", cwd)
-	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		fmt.Fprintf(&b, "- Home directory: %s\n", home)
-	}
-	now := time.Now()
-	fmt.Fprintf(&b, "- Today's date: %s\n", now.Format("2006-01-02"))
-	// Mirrors cmd/octo: report the local timezone so the model can convert
-	// UTC timestamps from the API (e.g. cron next_run/last_run) to local time.
-	_, offset := now.Zone()
-	sign := "+"
-	if offset < 0 {
-		sign = "-"
-		offset = -offset
-	}
-	fmt.Fprintf(&b, "- Timezone: %s (UTC%s%02d:%02d)\n", now.Format("MST"), sign, offset/3600, (offset%3600)/60)
-	// Match cmd/octo's builder, which reports OS/arch.
-	fmt.Fprintf(&b, "- OS/arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
-	// Locale (LANG/LC_ALL) — same as cmd/octo, so web sessions anticipate the
-	// default encoding and sort order too.
-	if lang := tools.Locale(); lang != "" {
-		fmt.Fprintf(&b, "- Locale: %s\n", lang)
-	}
-	// Platform-shell guidance (dialect + install/PATH traps), shared with the
-	// CLI builder so web sessions get the same orientation.
-	b.WriteString(tools.ShellEnvNote())
-	// Detected toolchain — same as the CLI builder, so web sessions know which
-	// runtimes are present without probing by trial and error.
-	b.WriteString(tools.ToolchainNote())
-	return b.String()
+	return tools.BuildEnvContext(cwd, "", false, false)
 }
 
 // ensureSender lazily initialises the sender when the server started in
