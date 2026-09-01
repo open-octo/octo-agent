@@ -1,0 +1,47 @@
+This skill is adapted from "legal-assistant-pro" in
+lawyerwangbo/legal-assistant-pro
+(https://github.com/lawyerwangbo/legal-assistant-pro, commit
+0a9ae7b926bfa080cb65201126e2a4953d50b967), MIT License (root LICENSE file).
+Sources within that repository:
+
+- SKILL.md: the 案由匹配方法论 summary, the stage/party-role → document-type
+  table, the general formatting convention, and the per-document drafting
+  rules and "不作为" prohibitions (from the "诉讼文书起草规范" and "非诉分支"
+  sections).
+- docs/cause-of-action-reference.md: the cause-of-action category list and
+  the four-step matching methodology, and its "常见错误" examples.
+- templates/civil-complaint.md, templates/civil-answer.md,
+  templates/appeal.md (反诉状/上诉状/再审申请书/强制执行申请书/代理词/财产
+  保全申请书), templates/demand-letter.md (律师函/法律意见书/商事仲裁申请书),
+  and the contract-drafting template found in this repository's templates
+  directory (合同起草16项标准结构 and core-clause drafting points): the
+  document skeletons, field placeholders, and drafting-point commentary.
+
+Modifications for octo: consolidated the above files into a single skill,
+added cross-references to octo's own `contract-review`, `legal-search`, and
+`legal-reasoning` skills, added an explicit instruction to verify any cited
+statute article number via `legal-search` before relying on it (the source
+states several article numbers as bare facts without a verification
+caveat), and removed the source's litigation-intake, evidence, labor-law,
+and IP practice modules (out of scope for a drafting-only skill).
+© the octo-agent contributors for the modifications, MIT.
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -1,0 +1,54 @@
+This skill is adapted from two MIT-licensed sources:
+
+1. "legal-research" in Golden2002/legal-research-skill
+   (https://github.com/Golden2002/legal-research-skill, commit
+   f2f99327708f095acc4a84bbe69158e85577f93b, path
+   legal-research/SKILL.md), MIT License (root LICENSE file). The source-of
+   -law hierarchy and search scope, the six-element citation requirement
+   for statutes, the case-citation requirements and authenticity rules
+   (never fabricate a case), the cross-reference annotation format, the
+   limitation-period reference table, and the common-mistakes checklist
+   are carried over and reorganized.
+
+2. "legal-assistant-pro" in lawyerwangbo/legal-assistant-pro
+   (https://github.com/lawyerwangbo/legal-assistant-pro, commit
+   0a9ae7b926bfa080cb65201126e2a4953d50b967, path SKILL.md), MIT License
+   (root LICENSE file). Its "法律检索（RAG优先）" section and "核心原则"
+   ("引用验证：严禁编造法条案例") independently corroborate the same
+   official-source list and no-fabrication principle, cross-checked
+   against source 1.
+
+Modifications for octo: removed source 1's paid commercial database
+integration (Wolters Kluwer / 威科先行 API credential collection and
+config.json write flow, an entire "威科先行 API 确认与配置" workflow
+section), its bundled Python modules (mcp_server.py, legal_validator.py,
+case_retriever.py, legal_reasoning.py, the web/ panel, the use_database_by_
+api/ adapter) — none of it is used, referenced, or ported; this skill is
+prose-only per octo's skill convention. Also removed the source's
+identity-branching flow built around a specific "AskUserQuestion" tool
+call and its docx-export option, both of which assume tooling this
+profile does not have. The identity-based report differentiation (普通人/
+法学生/律师/法官检察官/企业法务) was not ported — legal-helper's own system
+prompt already handles audience adaptation without a forced multi-step
+tool-driven intake flow.
+© the octo-agent contributors for the modifications, MIT.
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
