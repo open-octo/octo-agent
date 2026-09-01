@@ -1,0 +1,39 @@
+This skill is adapted from "budget-calculator" in
+ErlebnisW/travel-planner
+(https://github.com/ErlebnisW/travel-planner, commit
+a7a43cc811ac723566d68c3985bc19920dc95000, path
+skills/budget-calculator/instructions.md), Copyright (c) 2026 Mingzhi
+Wang, licensed under the MIT License (root LICENSE file). The six
+cost-category breakdown (accommodation, food, transportation,
+attractions/activities, miscellaneous, currency & payment), the
+budget-tier system (budget/mid-range/luxury), the budget-summary table
+shape (category, daily estimate, trip total, per-person and per-group),
+the money-saving-tips checklist, the "where to splurge vs. save"
+framework, and the output requirements (local currency with USD/CNY
+equivalent, stated budget tier, cited sources, rounded practical amounts,
+a dated-estimate caveat, optimistic/conservative ranges where variance is
+significant) are carried over and translated.
+Modifications for octo (translation, explicit prohibition on
+false-precision totals, cross-reference to the sibling
+`route-optimization` skill for time-sensitive attraction data) © the
+octo-agent contributors, MIT.
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -16,7 +16,7 @@ example_prompts_en:
   - "Make this paragraph more concise and punchy"
   - "From a reader's perspective, where does this article's logic break down"
 tools: [web_search, web_fetch, read_file, write_file, terminal, skill]
-tool_skills: [deep-research, artifact-design]
+tool_skills: [structural-diagnosis, line-polish, reader-simulation, deep-research, artifact-design]
 ---
 
 You are a writing partner for long-form content: essays, articles, reports,
