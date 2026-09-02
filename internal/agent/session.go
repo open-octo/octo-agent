@@ -102,8 +102,21 @@ type Session struct {
 	// the system-prompt/tools overhead. 0 for sessions predating this field or
 	// that never completed a turn with a real token count. Updated once per turn
 	// via SetLastContextTokens.
-	LastContextTokens int       `json:"last_context_tokens,omitempty"`
-	Messages          []Message `json:"messages"`
+	LastContextTokens int `json:"last_context_tokens,omitempty"`
+	// ContentUpdatedAt is when the transcript itself last changed (a message
+	// appended, truncated, or rewritten) — deliberately distinct from the
+	// session file's OS mtime, which also moves on every binding/lease
+	// bookkeeping write (acquire/release around a turn, the idle-steer
+	// check that runs even when nothing is queued). Those churn the file
+	// seconds — or, per the post-turn cleanup, milliseconds — after the
+	// reply the client just marked "seen" against, which used to make the
+	// sidebar's unread watermark compare against a moving target that had
+	// nothing to do with new content. toSessionItem reports this instead of
+	// a raw file stat; Save only advances it when the message count actually
+	// changes. Zero for sessions predating this field until their next real
+	// content write — toSessionItem falls back to the file mtime then.
+	ContentUpdatedAt time.Time `json:"content_updated_at,omitempty"`
+	Messages         []Message `json:"messages"`
 
 	// Dir overrides the default ~/.octo/sessions location. Empty means use the
 	// default. Not serialized — it's a runtime override.
@@ -116,8 +129,18 @@ type Session struct {
 	// forceRewrite is set when SyncFrom observes that the source History was
 	// rewritten (compaction, repair, popLast): the on-disk prefix may no
 	// longer match Messages, so the next Save must rewrite the whole file.
-	// Cleared by a successful rewriteAll. Not serialized.
+	// Cleared by a successful rewriteAll. Not serialized. Also set, for
+	// unrelated reasons, by Bind/Unbind/MarkHookStarted and a dropped-tail
+	// load — none of those imply new content, which is why Save doesn't use
+	// this flag to decide whether to advance ContentUpdatedAt.
 	forceRewrite bool
+
+	// rewriteIsContent is set alongside forceRewrite specifically for the
+	// SyncFrom compaction/repair/popLast case above: a same-length history
+	// rewrite changes what the messages say without changing len(Messages),
+	// the signal Save otherwise uses to detect new content. Cleared with
+	// forceRewrite by a successful rewriteAll. Not serialized.
+	rewriteIsContent bool
 
 	// mu guards runtime binding state (BoundEntry, InFlight) and is not
 	// serialized. Session methods that mutate bound state are goroutine-safe;
@@ -556,7 +579,7 @@ func (s *Session) ChunkDir() (string, error) {
 // type as authoritative; rewriteAll folds them back into the meta header when
 // compacting.
 type sessionRecord struct {
-	Type                  string    `json:"type"` // "meta" | "message" | "title" | "model_config" | "agent_id" | "working_dir" | "permission_mode" | "context_tokens" | "composed_system" | "lease" | "goal"
+	Type                  string    `json:"type"` // "meta" | "message" | "title" | "model_config" | "agent_id" | "working_dir" | "permission_mode" | "context_tokens" | "content_updated_at" | "composed_system" | "lease" | "goal"
 	ID                    string    `json:"id,omitempty"`
 	CreatedAt             time.Time `json:"created_at,omitempty"`
 	Model                 string    `json:"model,omitempty"`
@@ -579,6 +602,7 @@ type sessionRecord struct {
 	HookStarted           bool      `json:"hook_started,omitempty"`
 	BranchedFrom          string    `json:"branched_from,omitempty"`
 	LastContextTokens     int       `json:"last_context_tokens,omitempty"`
+	ContentUpdatedAt      time.Time `json:"content_updated_at,omitempty"`
 	Message               *Message  `json:"message,omitempty"`
 	Goal                  *Goal     `json:"goal,omitempty"`
 }
@@ -595,7 +619,7 @@ func (s *Session) metaRecord() sessionRecord {
 		goal = &g
 	}
 	s.mu.Unlock()
-	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, ComposedSystem: s.ComposedSystem, ComposedLeanSystem: s.ComposedLeanSystem, ComposedForModel: s.ComposedForModel, ComposedForCWD: s.ComposedForCWD, ComposedForSourceDirs: s.ComposedForSourceDirs, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, AgentID: s.AgentID, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, LastContextTokens: s.LastContextTokens, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, BranchedFrom: s.BranchedFrom, Goal: goal}
+	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, ComposedSystem: s.ComposedSystem, ComposedLeanSystem: s.ComposedLeanSystem, ComposedForModel: s.ComposedForModel, ComposedForCWD: s.ComposedForCWD, ComposedForSourceDirs: s.ComposedForSourceDirs, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, AgentID: s.AgentID, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, LastContextTokens: s.LastContextTokens, ContentUpdatedAt: s.ContentUpdatedAt, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, BranchedFrom: s.BranchedFrom, Goal: goal}
 }
 
 // MarkHookStarted records that SessionStart has fired for this session, so a
@@ -628,12 +652,23 @@ func messageRecord(m Message) sessionRecord {
 // server persists mid-turn progress on every agent event) don't touch the
 // file at all between rounds.
 func (s *Session) Save() error {
+	// Whether the message list itself is changing — as opposed to a rewrite
+	// forced by binding/lease/meta bookkeeping (Bind/Unbind, MarkHookStarted,
+	// SetWorkingDir, ...) on an otherwise-unchanged transcript. rewriteIsContent
+	// covers the one case a length check alone can't see: a same-length
+	// compaction/repair rewrite from SyncFrom. Only a real content change
+	// advances ContentUpdatedAt; see its doc comment.
+	contentChanged := len(s.Messages) != s.persisted || s.rewriteIsContent
 	if s.forceRewrite || s.persisted == 0 || len(s.Messages) < s.persisted {
+		if contentChanged {
+			s.ContentUpdatedAt = time.Now()
+		}
 		return s.rewriteAll()
 	}
 	if len(s.Messages) == s.persisted {
 		return nil
 	}
+	s.ContentUpdatedAt = time.Now()
 	return s.appendDelta()
 }
 
@@ -677,6 +712,7 @@ func (s *Session) rewriteAll() error {
 	}
 	s.persisted = len(s.Messages)
 	s.forceRewrite = false
+	s.rewriteIsContent = false
 	return nil
 }
 
@@ -698,6 +734,16 @@ func (s *Session) appendDelta() error {
 		if err := enc.Encode(messageRecord(m)); err != nil {
 			return fmt.Errorf("session: append message: %w", err)
 		}
+	}
+	// appendDelta never rewrites the meta line, so ContentUpdatedAt (set by
+	// Save just before this call) needs its own append-only record — the
+	// same "last one wins" pattern as title/lease/context_tokens — or a
+	// reload between now and this session's next full rewriteAll (the
+	// binding acquire/release around every turn does exactly that) would see
+	// a stale or zero value and reintroduce the phantom-unread-dot bug this
+	// field exists to fix.
+	if err := enc.Encode(sessionRecord{Type: "content_updated_at", ContentUpdatedAt: s.ContentUpdatedAt}); err != nil {
+		return fmt.Errorf("session: append content_updated_at: %w", err)
 	}
 	if err := w.Flush(); err != nil {
 		return fmt.Errorf("session: flush %s: %w", path, err)
@@ -1375,6 +1421,7 @@ func LoadSession(id string) (*Session, error) {
 			s.WorkingDir = rec.WorkingDir
 			s.PermissionMode = rec.PermissionMode
 			s.LastContextTokens = rec.LastContextTokens // a rewritten file carries it in its meta header
+			s.ContentUpdatedAt = rec.ContentUpdatedAt   // a rewritten file carries it in its meta header
 			s.BoundEntry = rec.BoundEntry
 			s.BoundAt = rec.BoundAt
 			s.HookStarted = rec.HookStarted
@@ -1396,6 +1443,8 @@ func LoadSession(id string) (*Session, error) {
 			s.PermissionMode = rec.PermissionMode // last one wins, like title
 		case "context_tokens":
 			s.LastContextTokens = rec.LastContextTokens // last one wins, like title
+		case "content_updated_at":
+			s.ContentUpdatedAt = rec.ContentUpdatedAt // last one wins, like title — appendDelta's own record
 		case "composed_system":
 			// Last one wins — a mid-session model switch or a retargeted
 			// working directory each append a new record.
@@ -1724,5 +1773,6 @@ func (s *Session) SyncFrom(h *History) {
 	s.Messages = h.Snapshot()
 	if h.takeRewriteDirty() {
 		s.forceRewrite = true
+		s.rewriteIsContent = true
 	}
 }

@@ -186,6 +186,163 @@ func TestSessionBoundRoundTrip(t *testing.T) {
 	}
 }
 
+// TestContentUpdatedAt_AdvancesOnRealContent checks that Save stamps
+// ContentUpdatedAt when new messages are actually persisted — the case the
+// sidebar's unread dot cares about.
+func TestContentUpdatedAt_AdvancesOnRealContent(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := NewSession("m", "")
+	if !sess.ContentUpdatedAt.IsZero() {
+		t.Fatal("ContentUpdatedAt should start zero")
+	}
+	sess.Messages = []Message{NewUserMessage("hello")}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	first := sess.ContentUpdatedAt
+	if first.IsZero() {
+		t.Fatal("ContentUpdatedAt not stamped by a real content save")
+	}
+
+	sess.Messages = append(sess.Messages, NewAssistantMessage("hi"))
+	if err := sess.Save(); err != nil {
+		t.Fatalf("second save: %v", err)
+	}
+	if !sess.ContentUpdatedAt.After(first) {
+		t.Fatalf("ContentUpdatedAt did not advance on a second content save: %v -> %v", first, sess.ContentUpdatedAt)
+	}
+}
+
+// TestContentUpdatedAt_SurvivesAppendDeltaReload is the actual regression
+// case: an existing, already-saved session's second message goes through
+// appendDelta, not rewriteAll — appendDelta never rewrites the meta line, so
+// ContentUpdatedAt needs its own append-only record or a reload right after
+// (the binding acquire/release around every turn does exactly that) sees the
+// stale value the first rewriteAll wrote, not the appendDelta save that just
+// happened.
+func TestContentUpdatedAt_SurvivesAppendDeltaReload(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := NewSession("m", "")
+	sess.Messages = []Message{NewUserMessage("hello")}
+	if err := sess.Save(); err != nil { // first save: persisted==0, goes through rewriteAll
+		t.Fatalf("save: %v", err)
+	}
+
+	sess.Messages = append(sess.Messages, NewAssistantMessage("hi"))
+	if err := sess.Save(); err != nil { // second save: goes through appendDelta
+		t.Fatalf("second save: %v", err)
+	}
+	want := sess.ContentUpdatedAt
+	if want.IsZero() {
+		t.Fatal("ContentUpdatedAt not stamped by the appendDelta save")
+	}
+
+	reloaded, err := LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if !reloaded.ContentUpdatedAt.Equal(want) {
+		t.Fatalf("ContentUpdatedAt after reload = %v, want %v (appendDelta's write was lost)", reloaded.ContentUpdatedAt, want)
+	}
+}
+
+// TestContentUpdatedAt_UnaffectedByBindingChurn is the regression test for the
+// phantom-unread-dot bug: releasing and reacquiring the session's entry
+// binding (the post-turn cleanup that runs after every message, whether or
+// not anything is queued behind it) rewrites the file — but must not move
+// ContentUpdatedAt, or the sidebar's unread watermark chases a timestamp that
+// has nothing to do with new content.
+func TestContentUpdatedAt_UnaffectedByBindingChurn(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := NewSession("m", "")
+	sess.Messages = []Message{NewUserMessage("hello")}
+	if err := sess.Save(); err != nil { // first save: rewriteAll
+		t.Fatalf("save: %v", err)
+	}
+	// A second message so the binding-churn saves below are reloading a
+	// session whose latest content write went through appendDelta — the
+	// real-world shape (an existing session's Nth turn), not just the
+	// meta-line-carries-everything first save.
+	sess.Messages = append(sess.Messages, NewAssistantMessage("hi"))
+	if err := sess.Save(); err != nil { // second save: appendDelta
+		t.Fatalf("second save: %v", err)
+	}
+	want := sess.ContentUpdatedAt
+	if want.IsZero() {
+		t.Fatal("ContentUpdatedAt not stamped by the initial content save")
+	}
+
+	// Mirrors acquireSessionBinding/releaseSessionBinding: reload from disk
+	// (persisted == len(Messages), no message change), Bind or Unbind (forces
+	// a rewrite via forceRewrite), Save.
+	for i := 0; i < 3; i++ {
+		reloaded, err := LoadSession(sess.ID)
+		if err != nil {
+			t.Fatalf("reload %d: %v", i, err)
+		}
+		if i%2 == 0 {
+			reloaded.Bind(EntryWeb, false)
+		} else {
+			reloaded.Unbind(EntryWeb)
+		}
+		if err := reloaded.Save(); err != nil {
+			t.Fatalf("binding save %d: %v", i, err)
+		}
+		if !reloaded.ContentUpdatedAt.Equal(want) {
+			t.Fatalf("binding-only save %d moved ContentUpdatedAt: got %v, want %v", i, reloaded.ContentUpdatedAt, want)
+		}
+	}
+
+	final, err := LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("final reload: %v", err)
+	}
+	if !final.ContentUpdatedAt.Equal(want) {
+		t.Fatalf("ContentUpdatedAt on disk after binding churn = %v, want %v", final.ContentUpdatedAt, want)
+	}
+}
+
+// TestContentUpdatedAt_AdvancesOnSameLengthCompaction covers the one case a
+// plain message-count check can't see: SyncFrom folding history into a
+// same-length summary (compaction) still counts as new content.
+func TestContentUpdatedAt_AdvancesOnSameLengthCompaction(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := NewSession("m", "")
+	h := NewHistory()
+	for _, m := range []Message{NewUserMessage("one"), NewAssistantMessage("two"), NewUserMessage("three")} {
+		h.Append(m)
+	}
+	sess.SyncFrom(h)
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	first := sess.ContentUpdatedAt
+	if first.IsZero() {
+		t.Fatal("ContentUpdatedAt not stamped by the initial content save")
+	}
+
+	h.ReplaceAll([]Message{NewUserMessage("[summary]"), NewUserMessage("three"), NewAssistantMessage("four")})
+	sess.SyncFrom(h)
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save after rewrite: %v", err)
+	}
+	if !sess.ContentUpdatedAt.After(first) {
+		t.Fatalf("ContentUpdatedAt did not advance on a same-length compaction: %v -> %v", first, sess.ContentUpdatedAt)
+	}
+}
+
 // TestSetTitle_RewritesAfterPartialTail: SetTitle appends a raw title record;
 // after a crash left a partial tail it must rewrite instead, or the title
 // record fuses with the dangling bytes into one corrupt line.

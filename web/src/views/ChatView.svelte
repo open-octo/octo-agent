@@ -74,7 +74,6 @@
   import { insertPendingSend, takeConfirmedSend } from '../lib/pendingSendOrder'
   import { inlineSlashCommand } from '../lib/inlineSlash'
   import { exportModeStore, selectedMessagesStore } from '../lib/exportStore'
-  import { touchSession } from '../lib/unread'
   import { filenameStem } from '../lib/filename'
   import { anchorBgTasks } from '../lib/bgTaskAnchor'
   import DOMPurify from 'dompurify'
@@ -1070,15 +1069,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
     cleanups.push(ws.on('complete', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      // Mark the turn touched right here rather than waiting on the separate
-      // session_activity turn_ended broadcast App.svelte listens for: that
-      // broadcast is fire-and-forget and can still be in flight — or, on a
-      // desktop quit (Cmd+Q / tray exit bypasses the WindowClosing hook the
-      // pagehide/visibilitychange safety net in unread.ts relies on), never
-      // arrive at all — when the user closes the window moments after the
-      // reply they're already looking at finishes rendering. This event IS
-      // that rendering, so there's no gap left to race.
-      touchSession(sid)
       // Belt-and-braces: the describing line normally clears on its own
       // done/failed event, but a WS reconnect between started and done would
       // otherwise leave it hanging forever.
