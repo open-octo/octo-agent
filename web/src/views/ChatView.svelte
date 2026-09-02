@@ -3588,7 +3588,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
 /* ── Agent message ───────────────────────────────────────────────────────── */
 .msg-agent { display: flex; flex-direction: column; gap: 12px; }
-.agent-content { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.agent-content { min-width: 0; display: flex; flex-direction: column; gap: 12px; word-wrap: break-word; }
 
 /* ── Plan card ───────────────────────────────────────────────────────────── */
 .plan-card { border: 1px solid var(--blue-2); border-radius: 10px; background: var(--surface-info); overflow: hidden; }
@@ -3618,7 +3618,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 :global(.rich-answer :not(pre) > code), :global(.think-body :not(pre) > code) {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; font-style: normal;
   background: var(--bg-table-header); border: 1px solid var(--border-table); border-radius: 4px; padding: 1px 5px;
-}
+  }
 :global(.rich-answer .code-block), :global(.think-body .code-block) {
   border: 1px solid var(--border-table); border-radius: 8px; overflow: hidden;
   background: var(--bg-sidebar); font-style: normal;
