@@ -282,8 +282,11 @@
   // When the window widens again the panel should grow back toward the user's
   // saved preference (or the maximum the room allows), not stay pinned at the
   // narrow-window clamp — otherwise a brief squeeze permanently shrinks the
-  // panel until the user drags it manually.
-  const savedWidth = readSavedWidth()
+  // panel until the user drags it manually. Kept as state and refreshed on
+  // every drag release (below) rather than read once at mount: a mid-session
+  // drag changes the saved preference, and a stale mount-time snapshot would
+  // silently discard it on the next resize.
+  let savedWidth = $state(readSavedWidth())
   $effect(() => {
     function clamp() {
       const row = panelEl?.parentElement
@@ -344,7 +347,9 @@
       if (raf) { cancelAnimationFrame(raf); apply() }
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      localStorage.setItem(PANEL_WIDTH_KEY, String(Math.round(panelWidth)))
+      const rounded = Math.round(panelWidth)
+      localStorage.setItem(PANEL_WIDTH_KEY, String(rounded))
+      savedWidth = rounded
     }
     // Narrowing drags the handle toward the window's edge, where a fast flick
     // can carry the cursor past the webview bounds. Plain window mousemove/up
