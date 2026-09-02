@@ -217,7 +217,7 @@ func ImageDescriberActive(ctx context.Context) bool
 
 放宽后 web composer 走的是 `attachments.go:138-142` 的图片块分支，它同时填 `att.images`，UI 缩略图照常显示。
 
-`pkg/octoagent` 外部用户不设置 `ImageDescriberActive`：text-only 模型下工具降级行为与现状逐字节一致。
+不调用 `SetImageDescriberActive` 的路径：text-only 模型下工具降级行为与现状逐字节一致。
 
 ### 6.6 事件
 
@@ -351,7 +351,7 @@ Web 端（`ChatView.svelte`）渲染为一条状态行（"🔍 正在用看图�
 逐项核对：
 
 - **未配置 vision_helper 的用户**：四处降级分支的条件在未配置时等价于原条件（`!Vision && !DescriberActive` ≡ `!Vision`），transform 空转，事件不产生，块无新字段——行为与现状逐字节一致。
-- **`pkg/octoagent` 外部使用者**：不设置 `ImageDescriberActive`（默认 false），降级路径不变；`Describer` 缺省 nil，agent 公共行为无变化。
+- **不调用 `SetImageDescriberActive` 的路径**：默认 false，降级路径不变；`Describer` 缺省 nil，agent 公共行为无变化。
 - **vision 模型用户**：`Active()` 为 false，转换整体跳过，图片块原样发送，与现状一致。
 - **已有会话文件**：新字段 `omitempty`，旧记录加载缺省零值，语义=未描述，无需迁移。`rehydrateImageBlocks` 的新逻辑对旧块是 no-op（描述为空 → 走原占位路径）。
 - **provider wire 格式**：图片块对 provider 的序列化不变（Anthropic base64 source / OpenAI data URL，见 `content.go:126-158` 注释）；描述替换只发生在 agent → provider 的文本组装层。

@@ -41,8 +41,8 @@ func ModelVisionEnabled(ctx context.Context) bool {
 
 // imageDescriber gates whether a configured vision helper stands behind the
 // active model, using the same global/ctx pair as modelVision. Defaults to
-// false: embedders (pkg/octoagent) that never set it keep the historical
-// refusal, and so does anyone who hasn't configured vision_helper.
+// false: callers that never set it keep the historical refusal, and so does
+// anyone who hasn't configured vision_helper.
 var imageDescriber = &atomic.Bool{}
 
 // SetImageDescriberActive records whether a usable vision helper is configured,

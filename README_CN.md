@@ -38,7 +38,7 @@ octo 围绕这个定位构建：
 - **开箱即用**：shell、文件读写改、搜索、MCP、skills、子代理等能力默认全部打开，装完一条消息就能真正干活。
 - **模型选择权在你手里**：任何 OpenAI / Anthropic 协议兼容的端点都是原生支持，不绑定任何一家厂商。
 - **数据留在你的机器上**：自托管、零遥测，除了你自己配置的模型 API 调用，octo 自身不向外发送任何请求。
-- **随处可用**：同一个二进制同时提供 CLI、Web、桌面、IM、编辑器插件、SDK、移动端八种入口。
+- **随处可用**：同一个二进制同时提供 TUI、CLI、Web、桌面、IM、编辑器插件、移动端八种入口。
 - **安全默认值**：毁灭性命令硬编码拒绝、删除和覆盖先进回收站，agent 不会把自己改挂，也不会发疯删数据。
 
 如果你能合规稳定地使用 Codex / Claude 订阅，请继续用它们——它们依旧是这个星球上最顶级的 agent harness。否则，octo 值得你认真看一看。
@@ -47,7 +47,7 @@ octo 围绕这个定位构建：
 
 - **单个 ~40 MB 的 Go 二进制**：一条命令下载，拷到任何服务器都能立即运行。没有 Node / Python / Ruby 依赖树，没有 npm 镜像、node-gyp 编译失败、依赖版本冲突的烦恼。
 - **缓存不劣化**：针对国产模型逐家做了提示词缓存优化，Kimi、DeepSeek、Qwen 的缓存命中率都能到 **95% 以上**，token 账单可预期。
-- **八种界面**：CLI / TUI、Web UI、桌面应用、IM 桥接、VS Code、Obsidian、Go SDK、移动端——很少有其他 agent 项目能同时覆盖这么多入口。
+- **八种界面**：TUI、CLI、Web UI、桌面应用、IM 桥接、VS Code、Obsidian、移动端——很少有其他 agent 项目能同时覆盖这么多入口。
 - **零遥测**：不收集 IP、机型、模型选择、使用行为，没有任何遥测埋点。
 - **桌面安装包约 100 MB**：相比之下 Codex 桌面版和 WorkBuddy 动辄 **1 GB 上下**。一个薄薄的 agent harness，没必要占用那么大的空间。
 - **稳定且安全**：自我保护、优雅重启、回收站兜底（详见[核心特性](#核心特性)）。
@@ -58,17 +58,17 @@ octo 围绕这个定位构建：
 
 ```text
 octo（单二进制）
-  -> CLI / TUI            终端交互与 headless 单发
+  -> TUI                  终端交互式会话
+  -> CLI                  octo "提示词" 或管道 stdin：headless 跑完一轮 agent 循环后退出，可从 cron、CI 或你自己的程序里调用
   -> Web UI               octo serve 本地仪表盘
   -> 桌面应用              macOS / Windows / Linux 原生窗口 + 托盘
   -> IM 桥接               微信 iLink、飞书、钉钉、企业微信、Discord、Telegram
   -> VS Code 插件          open-octo/octo-vscode
   -> Obsidian 插件         open-octo/octo-obsidian
-  -> Go SDK               pkg/octoagent，把 agent 循环嵌进你自己的程序
   -> 移动端                iOS + Android 开发者预览
 ```
 
-**稳定版（1.0）** 已覆盖 CLI、Web UI、桌面端、IM 桥接、[VS Code](https://github.com/open-octo/octo-vscode) / [Obsidian](https://github.com/open-octo/octo-obsidian) 插件、[Go SDK](pkg/octoagent)；第八个界面——移动端 App（iOS + Android）——已实现，目前是**开发者预览**：现在即可从源码自建、配合自托管 relay 使用（见 [`mobile/`](mobile/)），托管 relay 与应用商店版本在路上。
+**稳定版（1.0）** 已覆盖 TUI、CLI、Web UI、桌面端、IM 桥接、[VS Code](https://github.com/open-octo/octo-vscode) / [Obsidian](https://github.com/open-octo/octo-obsidian) 插件；第八个界面——移动端 App（iOS + Android）——已实现，目前是**开发者预览**：现在即可从源码自建、配合自托管 relay 使用（见 [`mobile/`](mobile/)），托管 relay 与应用商店版本在路上。
 
 ## 核心特性
 
@@ -147,8 +147,9 @@ octo serve -d              # Web UI + IM 桥接，http://127.0.0.1:8088
 ```text
 ┌────────────────────────────────┐
 │           八种界面              │
-│  CLI/TUI · Web · 桌面 · IM     │
-│ VS Code · Obsidian · SDK · 移动 │
+│    TUI · CLI · Web UI · IM     │
+│  桌面 · VS Code · Obsidian     │
+│              移动              │
 └───────────────┬────────────────┘
                 │
 ┌───────────────▼────────────────┐
@@ -209,7 +210,7 @@ make test          # go test -race ./...
 
 ## 当前状态
 
-octo 已发布 **1.0 稳定版**，CLI、Web UI、桌面端、IM 桥接、编辑器插件、Go SDK 均可放心使用；移动端处于开发者预览。哪些接口可以放心依赖见 [COMPATIBILITY.md](COMPATIBILITY.md)；安全边界见 [SECURITY.md](SECURITY.md)。
+octo 已发布 **1.0 稳定版**，TUI、CLI、Web UI、桌面端、IM 桥接、编辑器插件均可放心使用；移动端处于开发者预览。哪些接口可以放心依赖见 [COMPATIBILITY.md](COMPATIBILITY.md)；安全边界见 [SECURITY.md](SECURITY.md)。
 
 ## 致谢与前人工作
 
