@@ -288,8 +288,12 @@
     // instead of just giving up on the trade-off (main already degrades
     // gracefully below CENTER_MIN when there's no room to spare — see
     // App.svelte's mainMinWidth).
-    if (centerProtectingCeiling < PANEL_MIN) return Math.max(PANEL_MIN, rowW - sideW)
-    return centerProtectingCeiling
+    // The outer Math.min(rowW, ...) is a hard cap: on a phone browser the
+    // viewport can be narrower than PANEL_MIN (or the saved desktop width),
+    // in which case the panel must shrink to fit or its right edge — and the
+    // close button on it — overflows past the screen and becomes unreachable.
+    if (centerProtectingCeiling < PANEL_MIN) return Math.min(rowW, Math.max(PANEL_MIN, rowW - sideW))
+    return Math.min(rowW, centerProtectingCeiling)
   }
 
   // The same bound startResize enforces mid-drag, applied on mount and on
@@ -298,13 +302,22 @@
   // the room actually available. flex:0 0 auto below means this column never
   // shrinks on its own to make way; left unclamped, the excess just overflows
   // past the window edge instead of appearing anywhere.
+  // When the window widens again the panel should grow back toward the user's
+  // saved preference (or the maximum the room allows), not stay pinned at the
+  // narrow-window clamp — otherwise a brief squeeze permanently shrinks the
+  // panel until the user drags it manually.
+  const savedWidth = readSavedWidth()
   $effect(() => {
     function clamp() {
       const row = panelEl?.parentElement
       if (!row || !panelEl) return
       const rowW = row.getBoundingClientRect().width
       const maxW = maxPanelWidth(rowW, panelWidth)
-      if (panelWidth > maxW) panelWidth = maxW
+      if (panelWidth > maxW) {
+        panelWidth = maxW
+      } else if (panelWidth < Math.min(savedWidth, maxW)) {
+        panelWidth = Math.min(savedWidth, maxW)
+      }
     }
     clamp()
     window.addEventListener('resize', clamp)
@@ -613,6 +626,11 @@
   -webkit-backdrop-filter: blur(var(--frost-blur));
   border-left: 1px solid var(--border-secondary); display: flex; flex-direction: column; min-height: 0;
   position: relative;
+  /* On a phone browser the panel can be clamped to the viewport width; without
+     overflow:hidden the topbar's flex children (mode trigger, close button)
+     can still push past the panel's own edge and become unreachable. */
+  overflow: hidden;
+  max-width: 100%;
 }
 .resize-handle {
   position: absolute; left: -3px; top: 0; bottom: 0; width: 8px;
