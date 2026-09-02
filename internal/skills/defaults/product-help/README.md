@@ -9,12 +9,12 @@ data staying on the user's own machine. No Node / Python / Ruby runtime.
 
 **Stable (1.0).** Eight interfaces are planned (one per arm of the octopus); seven are live:
 
-- **CLI** — interactive TUI in a terminal, headless one-shot everywhere else
+- **CLI / TUI** — interactive session in a terminal
+- **Headless one-shot** — `octo "prompt"` or piped stdin runs one full agentic turn and exits; script it from cron, CI, or your own programs
 - **Web UI** — `octo serve`, a local dashboard over REST + WebSocket
 - **Desktop app** — native window + system tray (macOS / Windows / Linux)
 - **IM bridge** — WeChat iLink, Feishu, DingTalk, WeCom, Discord, Telegram, inside `octo serve`
 - **VS Code extension** and **Obsidian plugin** — connect to `octo serve` over the same HTTP/WS API
-- **Go SDK** (`pkg/octoagent`) — embed the agent loop in your own programs
 
 The eighth, a mobile app, is next. On top of the agent loop: skills, MCP clients,
 OS-level sandboxing, persistent memory, sub-agents, expert agents, background workflows,

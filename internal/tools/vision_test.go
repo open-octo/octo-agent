@@ -58,8 +58,8 @@ func TestImageDescriberActive_CtxOverridesGlobal(t *testing.T) {
 	}
 }
 
-// TestImageDescriberActive_DefaultsOff pins that embedders who never call the
-// setter (pkg/octoagent) keep the historical refusal behaviour. ModelVision
+// TestImageDescriberActive_DefaultsOff pins that callers who never call the
+// setter keep the historical refusal behaviour. ModelVision
 // defaults to true for the same reason in reverse — together they mean "refuse
 // only when the model can't see AND nothing will describe".
 func TestImageDescriberActive_DefaultsOff(t *testing.T) {

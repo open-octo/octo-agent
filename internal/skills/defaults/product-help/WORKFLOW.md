@@ -23,7 +23,6 @@ internal/workflow/   Named multi-step workflow execution
 internal/browser/    Browser automation (CDP) backend
 internal/memory/     Cross-session memory
 internal/version/    Version constants overridable via -ldflags
-pkg/octoagent/       Public Go SDK re-exporting core agent types for embedding octo in other programs
 ```
 
 Dependency direction is one-way: `provider → agent`, `tools → agent`, never the other way. `cmd/octo` is the only package allowed to import `provider` directly; everything else talks through `agent.Sender` / `StreamingSender` / `ToolSender` / `ToolStreamingSender`.

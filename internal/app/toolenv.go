@@ -32,7 +32,7 @@ type ToolEnvCallbacks struct {
 //   - It does NOT call config.Load() or permission.New(). It performs no local
 //     file I/O.
 //   - It does NOT handle process-global browser state (SetBrowserVision etc.) or
-//     workflow-discovery-cwd state. See dev-docs/octoagent-pkg-design.md.
+//     workflow-discovery-cwd state.
 //   - It does NOT register or use an MCP registry.
 //
 // The returned cleanup function clears Agent.TurnEndReminder and is otherwise
