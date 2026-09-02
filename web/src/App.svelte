@@ -609,6 +609,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 /* Gives its width to an expanded artifacts panel. display:none rather than
    unmounting the view: the conversation keeps its scroll position, its
