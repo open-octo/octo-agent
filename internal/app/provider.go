@@ -168,11 +168,15 @@ var Registry = []Vendor{
 		API:            "openai-completions",
 		DefaultBaseURL: "https://api.deepseek.com",
 		DefaultModel:   "deepseek-v4-pro",
-		// DeepSeek V4 has vision in the chat app but not over the API — image
-		// content isn't accepted on the endpoint, so treat as text-only here.
+		// deepseek-v4-flash / -pro have vision in the chat app but not over the
+		// API — image content isn't accepted on those endpoints, so they stay
+		// text-only here. deepseek-v4-flash-vision-exp is the API-facing vision
+		// variant: 1M context, images billed as input tokens by dimension, tool
+		// calls supported (api-docs.deepseek.com/quick_start/pricing, 2026-08-29).
 		Models: []VendorModel{
 			{ID: "deepseek-v4-flash", Vision: false},
 			{ID: "deepseek-v4-pro", Vision: false},
+			{ID: "deepseek-v4-flash-vision-exp", Vision: true},
 		},
 		LiteModel:    "deepseek-v4-flash",
 		APIKeyEnvVar: "DEEPSEEK_API_KEY",
@@ -241,15 +245,19 @@ var Registry = []Vendor{
 		Protocol:       "openai",
 		API:            "openai-completions",
 		DefaultBaseURL: "https://open.bigmodel.cn/api/paas/v4",
-		DefaultModel:   "glm-4.5",
-		// GLM-4.5/5.2 line is text-only; the vision variant (GLM-4.5V) isn't offered here.
+		DefaultModel:   "glm-5.3",
+		// glm-5.3-flash is the one multimodal entry (image/video/file input, 1M
+		// context — docs.z.ai/guides/vlm/glm-5.3-flash, 2026-08-29). The rest of
+		// the GLM-4.5/5.x line is text-only; GLM-4.5V isn't offered here.
 		Models: []VendorModel{
+			{ID: "glm-5.3", Vision: false},
+			{ID: "glm-5.3-flash", Vision: true},
 			{ID: "glm-5.2", Vision: false},
 			{ID: "glm-4.5", Vision: false},
 			{ID: "glm-4.5-air", Vision: false},
 			{ID: "glm-4.5-flash", Vision: false},
 		},
-		LiteModel:    "glm-4.5-flash",
+		LiteModel:    "glm-5.3-flash",
 		APIKeyEnvVar: "ZHIPU_API_KEY",
 		WebsiteURL:   "https://open.bigmodel.cn/usercenter/apikey",
 		EndpointVariants: []EndpointVariant{

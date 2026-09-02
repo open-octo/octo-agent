@@ -12,9 +12,16 @@ import (
 func TestMain(m *testing.M) {
 	tmp, _ := os.MkdirTemp("", "octo-skills-default-empty")
 	defaultSkillsRoot = func() string { return tmp }
+	// Redirected for the same reason: MaterializeDefaults writes both roots,
+	// and a test must never touch the real ~/.octo.
+	tmpExpert, _ := os.MkdirTemp("", "octo-skills-expert-empty")
+	expertSkillsRoot = func() string { return tmpExpert }
 	code := m.Run()
 	if tmp != "" {
 		_ = os.RemoveAll(tmp)
+	}
+	if tmpExpert != "" {
+		_ = os.RemoveAll(tmpExpert)
 	}
 	os.Exit(code)
 }
@@ -27,9 +34,18 @@ func useDefaultRoot(t *testing.T, dir string) {
 	t.Cleanup(func() { defaultSkillsRoot = orig })
 }
 
+// useExpertRoot points expertSkillsRoot at dir for the test's duration.
+func useExpertRoot(t *testing.T, dir string) {
+	t.Helper()
+	orig := expertSkillsRoot
+	expertSkillsRoot = func() string { return dir }
+	t.Cleanup(func() { expertSkillsRoot = orig })
+}
+
 func TestMaterializeDefaults_WritesEmbeddedAndStamps(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "skills-default")
 	useDefaultRoot(t, root)
+	useExpertRoot(t, t.TempDir())
 
 	if err := MaterializeDefaults("v1"); err != nil {
 		t.Fatalf("MaterializeDefaults: %v", err)
@@ -80,6 +96,7 @@ func TestMaterializeDefaults_WritesEmbeddedAndStamps(t *testing.T) {
 func TestMaterializeDefaults_NoOpWhenCurrent(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "skills-default")
 	useDefaultRoot(t, root)
+	useExpertRoot(t, t.TempDir())
 	if err := MaterializeDefaults("v1"); err != nil {
 		t.Fatal(err)
 	}
@@ -113,6 +130,7 @@ func TestMaterializeDefaults_UnderscorePrefixedFilesShip(t *testing.T) {
 	// in the repo tree. The all: prefix must include them.
 	root := filepath.Join(t.TempDir(), "skills-default")
 	useDefaultRoot(t, root)
+	useExpertRoot(t, t.TempDir())
 	if err := MaterializeDefaults("v1"); err != nil {
 		t.Fatalf("MaterializeDefaults: %v", err)
 	}
@@ -142,6 +160,7 @@ func TestMaterializeDefaults_RescuesLegacySitePatterns(t *testing.T) {
 	octoDir := t.TempDir()
 	root := filepath.Join(octoDir, "skills-default")
 	useDefaultRoot(t, root)
+	useExpertRoot(t, t.TempDir())
 	if err := MaterializeDefaults("v1"); err != nil {
 		t.Fatal(err)
 	}
@@ -178,6 +197,7 @@ func TestMaterializeDefaults_RescuesLegacySitePatterns(t *testing.T) {
 func TestDiscover_DefaultSkillSurfacesAndIsOverridable(t *testing.T) {
 	defaultRoot := filepath.Join(t.TempDir(), "skills-default")
 	useDefaultRoot(t, defaultRoot)
+	useExpertRoot(t, t.TempDir())
 	if err := MaterializeDefaults("v1"); err != nil {
 		t.Fatal(err)
 	}

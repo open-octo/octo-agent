@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightappOpen, lightapps, lightappHTML, showToast, nativeShell, activeSessionId, savePanelMode, type PanelMode } from '../lib/stores'
+  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightappOpen, lightapps, lightappHTML, lightappStamp, cacheLightApp, dropLightApp, showToast, nativeShell, activeSessionId, savePanelMode, type PanelMode } from '../lib/stores'
   import { titlebarDblClick } from '../lib/nativeWindow'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
-  import { hydrateArtifact, lightAppSource, pathIsInside } from '../lib/artifacts'
+  import { ARTIFACT_SANDBOX, hydrateArtifact, selfContainedDocument, themeRev } from '../lib/artifacts'
   import { CENTER_MIN } from '../lib/sidebarWidth'
   import { diffData, diffLoading, diffBadge, loadDiff } from '../lib/diff'
   import DiffView from './diff/DiffView.svelte'
@@ -55,83 +55,6 @@
   function onCopy() { copyArtifact(cur?.code ?? '', showToast) }
   function onDownload() { downloadArtifact(cur, showToast) }
 
-  // ── Save to Light App (HTML artifacts only) ─────────────────────────────
-  let saveToLAName = $state('')
-  let saveToLADialog = $state(false)
-  let saveToLALoading = $state(false)
-
-  function openSaveToLA() {
-    saveToLAName = cur?.name?.replace(/\.[^.]+$/, '') ?? ''
-    saveToLADialog = true
-  }
-
-  async function doSaveToLA() {
-    const name = saveToLAName.trim()
-    if (!name || !cur) return
-    saveToLALoading = true
-    try {
-      // Save what the panel previews, not the raw source: a Light App renders
-      // in the same kind of sandboxed iframe, where relative image paths
-      // resolve against nothing (#1890).
-      // source_path marks the app as saved from this artifact, which is what
-      // hides the Save button for it from here on (curSavedAsLA).
-      const app = await api.createLightApp({ name, html: lightAppSource(cur), source_path: cur.path })
-      showToast(`Light App "${app.name}" saved`, 'success')
-      saveToLADialog = false
-      lightapps.update(list => [...list.filter(a => a.slug !== app.slug), app])
-    } catch (e: any) {
-      showToast(`Save failed: ${e.message}`, 'error')
-    } finally {
-      saveToLALoading = false
-    }
-  }
-
-  const curIsHTML = $derived(cur?.type === 'HTML')
-
-  // ── Already-a-Light-App detection ──────────────────────────────────────────
-  // "Save to Light App" is pointless for a file that already lives inside the
-  // Light Apps directory (a Light App's own index.html, or a file beside it).
-  // The directory itself is server-side knowledge (~/.octo/light-apps), so it
-  // is fetched once, lazily, while the session panel shows an HTML artifact.
-  // A failed lookup must not hide a working action, so the button stays
-  // visible until the directory is actually known — and the attempt resets,
-  // so a transient failure is retried on the next artifact switch instead of
-  // disabling the feature for the rest of the session.
-  let laDir = $state<string | null>(null)
-  let laDirAttempted = $state(false)
-
-  async function ensureLaDir() {
-    if (laDir !== null || laDirAttempted) return
-    laDirAttempted = true
-    try {
-      // One request answers with both the directory and the apps; the apps
-      // land in the store so curSavedAsLA below can match source paths.
-      const { apps, dir } = await api.getLightAppList()
-      laDir = dir
-      lightapps.set(apps)
-    } catch {
-      laDir = ''
-      laDirAttempted = false
-    }
-  }
-
-  const curIsLightApp = $derived(curIsHTML && pathIsInside(cur?.path ?? '', laDir ?? ''))
-
-  // Already saved as a Light App: some app records this artifact's path as
-  // its source (manifest source_path). Equally redundant to save again — the
-  // slug exists, so the server would 409 anyway.
-  const curSavedAsLA = $derived(curIsHTML && !!cur?.path && $lightapps.some(a => a.source_path === cur.path))
-
-  $effect(() => {
-    if ($panelContent === 'session' && curIsHTML) void ensureLaDir()
-  })
-
-  // The Save dialog must not outlive the button: once the lookup settles and
-  // the artifact turns out to be inside the Light Apps directory, close it.
-  $effect(() => {
-    if (curIsLightApp || curSavedAsLA) saveToLADialog = false
-  })
-
   // ── Light Apps (new) ──────────────────────────────────────────────────────
   let laLoading = $state(false)
   let laAttempted = $state(false)
@@ -154,10 +77,30 @@
     if ($lightappHTML[slug]) return
     laLoading = true
     try {
-      const detail = await api.getLightApp(slug)
-      lightappHTML.update(m => ({ ...m, [slug]: detail.html }))
+      cacheLightApp(slug, await api.getLightApp(slug))
     } catch { /* ignore */ }
     finally { laLoading = false }
+  }
+
+  // The HTML is cached per slug for the life of the page, and nothing tells
+  // the panel when the agent rewrites the file on disk — so an edited app kept
+  // showing its old version until a full page reload, which the desktop shell
+  // has no way to trigger. Fetch first and swap on success so a failed reload
+  // leaves the running app in place rather than an empty tab.
+  let laReloadGen = $state(0)
+  async function reloadLightApp(slug: string) {
+    if (!slug || laLoading) return
+    laLoading = true
+    try {
+      cacheLightApp(slug, await api.getLightApp(slug))
+      // An unchanged document leaves srcdoc identical and the iframe untouched;
+      // the {#key} remounts it either way, so a reload always restarts the app.
+      laReloadGen++
+    } catch (e: any) {
+      showToast(`Failed to reload: ${e.message}`, 'error')
+    } finally {
+      laLoading = false
+    }
   }
 
   function closeLightApp(slug: string) {
@@ -166,9 +109,12 @@
     if (idx < 0) return
     const rest = list.filter(s => s !== slug)
     lightappOpen.set(rest)
+    // Drop the cached HTML too: nothing invalidates it while the tab is open,
+    // so close-and-reopen is the one gesture that must pick up an edit the
+    // agent made on disk. The re-fetch is a local round trip.
+    dropLightApp(slug)
     // Closing the last tab closes the panel — an empty Light Apps panel has
-    // nothing to offer, and stopping looking is what the click meant. The
-    // cached HTML is kept, so reopening is instant.
+    // nothing to offer, and stopping looking is what the click meant.
     if (rest.length === 0) { lightappSel.set(''); closePanel(); return }
     // Closing the active tab hands over to its neighbour on the right, or the
     // left one at the end of the strip — the way a browser tab strip behaves.
@@ -179,6 +125,29 @@
   $effect(() => {
     if ($panelContent === 'lightapps' && $lightapps.length === 0 && !laAttempted) loadLightApps()
     if ($panelContent !== 'lightapps') laAttempted = false
+  })
+
+  // Change detection. Nothing announces a Light App rewrite — the agent edits
+  // index.html with an ordinary file tool, and there is no fsnotify in the
+  // tree (store_watch.go makes the same trade for the sidebar) — so while the
+  // panel shows apps the list is sampled every few seconds and each tab's
+  // on-disk stamp is compared with the copy it renders. Only the prompt is
+  // automatic: reloading would throw away whatever the running app has on
+  // screen, so that stays a click. The sample is a directory scan of a
+  // handful of manifests, and it pauses while the tab is hidden.
+  const LA_POLL_MS = 5000
+  $effect(() => {
+    if ($panelContent !== 'lightapps' || $lightappOpen.length === 0) return
+    const id = setInterval(async () => {
+      if (document.hidden) return
+      try { lightapps.set(await api.listLightApps()) } catch { /* next tick */ }
+    }, LA_POLL_MS)
+    return () => clearInterval(id)
+  })
+  const laCurStale = $derived.by(() => {
+    const loaded = $lightappStamp[laCurSlug]
+    const disk = $lightapps.find(a => a.slug === laCurSlug)?.updated_at
+    return !!loaded && !!disk && loaded !== disk
   })
 
   // Closing drops the expanded state too, so re-opening comes back at its own
@@ -232,7 +201,15 @@
     }),
   )
   const laCurSlug = $derived($lightappOpen.includes($lightappSel) ? $lightappSel : ($lightappOpen[0] ?? ''))
-  const laCurHTML = $derived($lightappHTML[laCurSlug] ?? '')
+  // Same self-contained rule as the artifact preview: a Light App that leans
+  // on a CDN renders with those references stripped and a banner, here and in
+  // the panel alike — otherwise the very page the preview refused to run
+  // scripts for would come alive the moment it is saved. The banner bakes the
+  // theme in, so this re-derives on themeRev.
+  const laCurHTML = $derived.by(() => {
+    void $themeRev
+    return selfContainedDocument($lightappHTML[laCurSlug] ?? '')
+  })
   const laCurName = $derived($lightapps.find(a => a.slug === laCurSlug)?.name ?? laCurSlug)
 
   // ── Light App storage bridge ─────────────────────────────────────────────
@@ -467,12 +444,29 @@
         </span>
         {/each}
       </div>
+      <button
+        class="icon-btn"
+        title={$t('lightapps.reload')}
+        aria-label={$t('lightapps.reload')}
+        disabled={laLoading || !laCurSlug}
+        onclick={() => reloadLightApp(laCurSlug)}
+      >
+        <iconify-icon icon="ant-design:reload-outlined" width="14" class={laLoading ? 'spin' : ''}></iconify-icon>
+      </button>
       {@render topbarControls()}
     </div>
 
-    <div class="body">
+    <div class="body la-body">
+      {#if laCurStale}
+        <div class="la-update" role="status">
+          <span>{$t('lightapps.updated').replace('{name}', laCurName)}</span>
+          <button onclick={() => reloadLightApp(laCurSlug)} disabled={laLoading}>{$t('lightapps.reload')}</button>
+        </div>
+      {/if}
       {#if laCurHTML}
-        <iframe bind:this={laFrameEl} srcdoc={withLaBridge(laCurHTML, laCurSlug)} sandbox="allow-scripts" allow="clipboard-write" title={laCurName}></iframe>
+        {#key laReloadGen}
+        <iframe bind:this={laFrameEl} srcdoc={withLaBridge(laCurHTML, laCurSlug)} sandbox={ARTIFACT_SANDBOX} allow="clipboard-write" title={laCurName}></iframe>
+        {/key}
       {:else if laCurSlug || laLoading}
         <!-- A tab opens before its HTML arrives, so this covers the fetch. -->
         <div class="empty"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon><span>{$t('common.loading')}</span></div>
@@ -544,22 +538,6 @@
         {@render topbarControls()}
       </div>
 
-      {#if saveToLADialog}
-        <div class="save-to-la-bar">
-          <input
-            class="save-to-la-input"
-            type="text"
-            bind:value={saveToLAName}
-            placeholder={$t('artifacts.save_to_lightapp_placeholder')}
-            onkeydown={(e) => { if (e.key === 'Enter') doSaveToLA(); if (e.key === 'Escape') saveToLADialog = false }}
-          />
-          <button class="btn-action" disabled={saveToLALoading || !saveToLAName.trim()} onclick={doSaveToLA}>
-            {saveToLALoading ? '…' : $t('common.save')}
-          </button>
-          <button class="btn-action" onclick={() => saveToLADialog = false}>{$t('common.cancel')}</button>
-        </div>
-      {/if}
-
       <div class="body">
         {#if curIsImage}
           <div class="img-wrap">
@@ -574,7 +552,7 @@
         {:else if !cur.loaded}
           <div class="body-loading"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon></div>
         {:else if $artifactView === 'preview'}
-          <iframe srcdoc={cur.preview} sandbox="allow-scripts" allow="clipboard-write" title={cur.name}></iframe>
+          <iframe srcdoc={cur.preview} sandbox={ARTIFACT_SANDBOX} allow="clipboard-write" title={cur.name}></iframe>
         {:else}
           <pre class="code-view">{cur.code}</pre>
         {/if}
@@ -600,12 +578,6 @@
           <iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon>
           {$t('artifacts.download')}
         </button>
-        {#if curIsHTML && !curIsLightApp && !curSavedAsLA}
-          <button class="wbtn" disabled={!cur.loaded || cur.loadFailed} onclick={openSaveToLA}>
-            <iconify-icon icon="ant-design:save-outlined" width="14"></iconify-icon>
-            {$t('artifacts.save_to_lightapp')}
-          </button>
-        {/if}
       </div>
     {/if}
   {/if}
@@ -807,26 +779,21 @@ iframe { border: 0; width: 100%; height: 100%; display: block; }
 }
 .chip-close:hover { opacity: 1; background: var(--hover-neutral); color: var(--text); }
 .spin { animation: octo-spin 0.8s linear infinite; }
+/* Floats over the app rather than pushing it down: the iframe keeps its size,
+   so the running app doesn't relayout just because a newer copy exists. */
+.la-body { position: relative; }
+.la-update {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1;
+  display: flex; align-items: center; gap: 10px; padding: 5px 5px 5px 12px;
+  max-width: calc(100% - 24px); background: var(--bg-container); border: 1px solid var(--border);
+  border-radius: 999px; box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  font-size: 12px; color: var(--text);
+}
+.la-update span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.la-update button {
+  flex: 0 0 auto; height: 24px; padding: 0 10px; border: none; border-radius: 999px;
+  background: var(--blue-6); color: #fff; font: inherit; font-weight: 500; cursor: pointer;
+}
+.la-update button:disabled { opacity: 0.5; cursor: default; }
 
-/* ── Save-to-Light-App inline form ──────────────────────────────────── */
-.save-to-la-bar {
-  flex: 0 0 auto; padding: 6px 10px;
-  border-bottom: 1px solid var(--border-secondary);
-  display: flex; align-items: center; gap: 6px;
-}
-.save-to-la-input {
-  flex: 1; height: 28px; padding: 0 8px;
-  border: 1px solid var(--border-secondary);
-  border-radius: 6px; font-size: 12px; font-family: inherit;
-  background: var(--bg-container); color: var(--text);
-  outline: none;
-}
-.save-to-la-input:focus { border-color: var(--blue-5); }
-.btn-action {
-  height: 28px; padding: 0 12px; border: none;
-  border-radius: 6px; font-size: 12px; cursor: pointer;
-  background: var(--blue-6); color: #fff; font-family: inherit;
-}
-.btn-action:hover:not(:disabled) { background: var(--blue-5); }
-.btn-action:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

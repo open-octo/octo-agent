@@ -1,8 +1,10 @@
 package server
 
 import (
+	"compress/gzip"
 	"embed"
 	"io/fs"
+	"mime"
 	"net/http"
 	"path"
 	"strings"
@@ -38,7 +40,13 @@ func (s *Server) staticHandler() http.Handler {
 		})
 	}
 
-	fileServer := http.FileServer(http.FS(sub))
+	return staticFileHandler(sub)
+}
+
+// staticFileHandler serves a built Web UI from dist. Split from staticHandler
+// so tests can drive it over an in-memory FS — webdist/ is empty in a checkout.
+func staticFileHandler(dist fs.FS) http.Handler {
+	fileServer := http.FileServer(http.FS(dist))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// API routes should never reach here (mux routes them first), but
 		// guard defensively so a missing API route doesn't fall through to
@@ -52,9 +60,10 @@ func (s *Server) staticHandler() http.Handler {
 		// to an embedded file are served the SPA entrypoint.
 		name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 		if name != "" {
-			if f, err := sub.Open(name); err == nil {
+			if f, err := dist.Open(name); err == nil {
 				_ = f.Close()
-				fileServer.ServeHTTP(w, r)
+				setStaticCacheControl(w.Header(), name)
+				serveCompressed(w, r, dist, name, fileServer)
 				return
 			}
 		}
@@ -65,8 +74,86 @@ func (s *Server) staticHandler() http.Handler {
 		// "./", which resolves back to "/" and loops forever. ServeFileFS
 		// keys its redirect off r.URL.Path (here "/" or an SPA route), so it
 		// serves the file without redirecting.
-		http.ServeFileFS(w, r, sub, "index.html")
+		setStaticCacheControl(w.Header(), "index.html")
+		serveCompressed(w, r, dist, "index.html", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFileFS(w, r, dist, "index.html")
+		}))
 	})
+}
+
+// setStaticCacheControl picks the cache policy for a Web UI file. Vite names
+// everything under assets/ by content hash, so those may be cached forever: a
+// rebuild changes the name, never the bytes behind an existing one. The
+// entrypoint and anything else unhashed must be revalidated on every load —
+// left without a policy, WKWebView caches heuristically, and a stale index.html
+// pointing at hashes the upgraded binary no longer embeds is a blank window.
+// Embedded files carry no modtime, so there is no validator to offer and
+// no-cache means a (small) full fetch each time, exactly as before.
+func setStaticCacheControl(h http.Header, name string) {
+	if strings.HasPrefix(name, "assets/") {
+		h.Set("Cache-Control", "public, max-age=31536000, immutable")
+		return
+	}
+	h.Set("Cache-Control", "no-cache")
+}
+
+// compressible reports whether a Web UI file is worth gzipping on the fly.
+// Images and fonts are already compressed; text-like assets shrink 3-5×.
+func compressible(name string) bool {
+	switch path.Ext(name) {
+	case ".js", ".mjs", ".css", ".html", ".svg", ".json", ".map", ".txt", ".wasm":
+		return true
+	}
+	return false
+}
+
+// serveCompressed serves name from dist gzipped when the client accepts it and
+// the file is worth it; every other request goes to next (http.FileServer /
+// ServeFileFS) untouched. FileServer sends the embedded FS as-is, so a cold
+// load was moving the whole ~600 KB entry bundle uncompressed on every window
+// open. Range and non-GET requests pass through: a byte range of gzipped
+// output is meaningless, and a HEAD must not grow a body. So does a path
+// FileServer answers with something other than the file — its ".../index.html"
+// → "./" canonicalising 301 — and a name that fails to read, which FileServer
+// turns into its own 404.
+//
+// The compressed body is produced here, from bytes read out of dist, rather
+// than by wrapping the ResponseWriter handed to next. A wrapper must forward
+// whatever the inner handler writes when the status is not 200, and that
+// forwarding is indistinguishable, to a static analyser, from reflecting
+// request data into the response (CodeQL go/reflected-xss, alert 203). Writing
+// only what was read from the embedded FS leaves nothing to misread.
+func serveCompressed(w http.ResponseWriter, r *http.Request, dist fs.FS, name string, next http.Handler) {
+	if r.Method != http.MethodGet || r.Header.Get("Range") != "" || !compressible(name) ||
+		!strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") ||
+		strings.HasSuffix(r.URL.Path, "/index.html") {
+		next.ServeHTTP(w, r)
+		return
+	}
+	data, err := fs.ReadFile(dist, name)
+	if err != nil {
+		next.ServeHTTP(w, r)
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", staticContentType(name, data))
+	h.Set("Content-Encoding", "gzip")
+	h.Add("Vary", "Accept-Encoding")
+	// No Content-Length: the compressed size is only known after the fact, and
+	// no Accept-Ranges: a Range against this representation is not served.
+	w.WriteHeader(http.StatusOK)
+	gz := gzip.NewWriter(w)
+	_, _ = gz.Write(data)
+	_ = gz.Close()
+}
+
+// staticContentType mirrors http.FileServer's choice: the extension's MIME
+// type, else sniffed from the leading bytes.
+func staticContentType(name string, data []byte) string {
+	if ctype := mime.TypeByExtension(path.Ext(name)); ctype != "" {
+		return ctype
+	}
+	return http.DetectContentType(data)
 }
 
 // indexHTMLFallback is a minimal placeholder served when the embedded static/

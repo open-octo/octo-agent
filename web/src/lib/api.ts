@@ -146,6 +146,12 @@ export async function setSessionCollapsed(sessionId: string, collapsed: boolean)
   await request<unknown>(`/api/sessions/${sessionId}/collapse`, { method: 'PUT', ...json({ collapsed }) })
 }
 
+// File a loose session into a project. The server refuses a session already
+// in one (409) — a session's project is decided once.
+export async function setSessionGroup(sessionId: string, groupId: string): Promise<void> {
+  await request<unknown>(`/api/sessions/${sessionId}/group`, { method: 'PUT', ...json({ group_id: groupId }) })
+}
+
 // Copy a session's history into a new session. messageIndex is an exclusive
 // count of messages to keep, so it must land on a turn boundary (right after a
 // completed assistant reply) or the server rejects it. Returns the new session.
@@ -523,11 +529,14 @@ interface SkillInfoRaw {
 export async function listSkills(): Promise<Skill[]> {
   const d = await request<{ skills: SkillInfoRaw[] }>('/api/skills')
   return (d.skills ?? []).map((s): Skill => {
-    // Server source is "default" (built-in/system) | "user".
+    // Server source is "default" (built-in/system) | "expert" (bundled for
+    // built-in experts, hidden from the global manifest) | "user".
     const src = s.source ?? 'user'
     const tag: { tagStatus: TagStatus; tagLabel: string } = src === 'default'
       ? { tagStatus: 'default', tagLabel: 'System' }
-      : { tagStatus: 'success', tagLabel: 'User' }
+      : src === 'expert'
+        ? { tagStatus: 'default', tagLabel: 'Expert' }
+        : { tagStatus: 'success', tagLabel: 'User' }
     return {
       name: s.name,
       desc: s.description ?? '',
@@ -831,9 +840,9 @@ export interface LightApp {
   description: string
   icon: string
   created_at: string
-  // Absolute path of the session artifact the app was saved from, if any —
-  // used to hide "Save to Light App" for artifacts that already were.
-  source_path?: string
+  // index.html's mtime, stamped by the server on every read. Opaque to the
+  // client — it's only ever compared for equality against the copy on screen.
+  updated_at?: string
 }
 
 export interface LightAppDetail {
@@ -849,7 +858,7 @@ export interface LightAppList {
 }
 
 export async function listLightApps(): Promise<LightApp[]> {
-  const d = await request<LightAppList>('/api/light-apps')
+  const d = await request<LightAppList>('/api/light-apps', { cache: 'no-store' })
   return d.apps ?? []
 }
 
@@ -859,26 +868,18 @@ let lightAppsDirCache: string | null = null
 
 export async function getLightAppsDir(): Promise<string> {
   if (lightAppsDirCache) return lightAppsDirCache
-  const d = await request<LightAppList>('/api/light-apps')
+  const d = await request<LightAppList>('/api/light-apps', { cache: 'no-store' })
   lightAppsDirCache = d.dir || ''
   return lightAppsDirCache
 }
 
-// Apps and directory from the one request the endpoint already answers with
-// both — for callers that need the pair (the session panel checks an artifact
-// against the dir AND the apps' source paths).
-export async function getLightAppList(): Promise<LightAppList> {
-  const d = await request<LightAppList>('/api/light-apps')
-  lightAppsDirCache = d.dir || ''
-  return { apps: d.apps ?? [], dir: lightAppsDirCache }
-}
-
+// no-store on every Light App GET: the desktop webview (WKWebView)
+// heuristically caches GET 200s, and the detail response carries the app's
+// whole index.html — a cached copy is exactly the stale app an update was
+// meant to replace. Mirrors /api/version and /api/onboard/status; the server
+// sets the same policy on its side.
 export async function getLightApp(slug: string): Promise<LightAppDetail> {
-  return request<LightAppDetail>(`/api/light-apps/${encodeURIComponent(slug)}`)
-}
-
-export async function createLightApp(opts: { name: string; description?: string; html: string; source_path?: string }): Promise<LightApp> {
-  return request<LightApp>('/api/light-apps', { method: 'POST', ...json({ ...opts, icon: '📄' }) })
+  return request<LightAppDetail>(`/api/light-apps/${encodeURIComponent(slug)}`, { cache: 'no-store' })
 }
 
 export async function deleteLightApp(slug: string): Promise<void> {

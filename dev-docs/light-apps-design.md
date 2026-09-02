@@ -69,12 +69,31 @@ octo-agent 已经有一套完整的生成 + 展示循环：Agent 生成 HTML →
 - **JS 内联**：`<script>` 直接写在 HTML 内
 - **文件处理**：`<input type="file">` + `FileReader` API，浏览器端搞定
 - **无服务端依赖**：不能发 fetch 到外部 API（Artifacts panel sandboxed iframe 限制）
-- **持久化存储可用**：直接用标准 `localStorage`，见下节
+- **持久化存储可用**：直接用标准 `localStorage`，见「运行时存储」
+- **文件导出可用**：直接用标准 `<a download>` 写法，见「运行时下载」
+- **表单 submit 处理器必须 `event.preventDefault()`**：沙箱里的表单无处可导航，不拦的话 frame 会被重载、应用内存态全丢
+
+### 运行沙箱
+
+轻应用和 Artifact 预览都跑在 `sandbox="allow-scripts allow-forms allow-modals"` 的 srcdoc iframe 里
+（常量 `ARTIFACT_SANDBOX`，`web/src/lib/artifacts.ts`，四处 iframe 共用——应用在保存前就是在预览里试用的，
+保存前后必须行为一致）。
+
+刻意不给 `allow-same-origin`：origin 是 opaque，文档碰不到任何存储、Cookie 和宿主状态，这是下面两条桥
+存在的前提。也不给 `allow-popups`、`allow-top-navigation`。
+
+`allow-forms` 是因为没有它表单的 submit 事件根本不触发（规范在派发事件之前就检查 sandboxed forms flag），
+`<form onsubmit>` + 回车提交全废；`allow-modals` 是因为没有它 `confirm()` 恒 false、`prompt()` 恒 null、
+`alert()` 静默——生成的应用常拿 `confirm` 做删除确认，等于永远删不掉。
+
+代价要说实话：`allow-modals` 交给应用的是浏览器原生对话框——alert/confirm/prompt、`window.print()`、
+`beforeunload` 提示——它们是 tab 级 modal，开着的时候会挡住宿主 UI，一个 `while(true) alert()` 的坏应用
+能把整个页面卡住直到用户勾"阻止此页再弹对话框"。接受这个取舍：轻应用是用户让自己的 agent 写的，
+origin 边界本身没动。
 
 ### 运行时存储
 
-轻应用跑在 `sandbox="allow-scripts"` 的 srcdoc iframe 里（刻意不给
-`allow-same-origin`），origin 是 opaque，浏览器会拒掉所有持久化存储 API —
+沙箱里 origin 是 opaque，浏览器会拒掉所有持久化存储 API —
 localStorage / sessionStorage / Cookie / IndexedDB 在里面一律抛 SecurityError。
 
 沙箱不动，改由宿主页面代管：`web/src/lib/laStorage.ts` 在宿主开一个 IndexedDB
@@ -93,6 +112,34 @@ localStorage 原生可用时（非沙箱上下文）桥脚本什么都不做。
 - 落盘是异步的，崩溃或提前关闭可能丢最后一次写。同页内读写全同步一致，跨页重启
   的读一致性由启动预取保证。
 - sessionStorage 仍然不可用 —— 只存活一次访问的状态放普通变量就够了。
+
+### 运行时下载
+
+同一个沙箱也拦掉了轻应用自己发起的下载：iframe 没给 `allow-downloads`，浏览器直接丢弃；
+桌面端 webview 更是没有 download delegate，连非沙箱的下载都是静默空操作。
+
+沿存储桥的路子处理：`web/src/lib/laDownload.ts` 往文档里注入一段脚本，拦截标准的下载写法 ——
+任何带 `download` 属性且有 href 的锚点，不看 scheme（实际都是 blob:/data:；相对或 http 链接在沙箱里
+`fetch` 会失败，只 `console.warn`）—— 把目标 `fetch` 成 Blob，经同一条 postMessage
+通道（`op: 'download'`，携带 `name` 和 `blob`，Blob 走结构化克隆）交给宿主。宿主按 `nativeShell`
+分流：桌面端 base64 后走 `/api/native/save-file` 的系统保存对话框，浏览器里在顶层文档挂一个
+`<a download>` 触发正常下载。这和 Artifacts 面板「下载」按钮走的是同一条落盘路径。
+
+两种触发形态都覆盖：用户点击文档内的锚点（document 级 click 监听）、以及最常见的
+`a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = '...'; a.click()`
+—— 游离锚点的事件到不了 document，所以补一层 `HTMLAnchorElement.prototype.click` 拦截。
+应用自己已经 `preventDefault()` 的点击不动。
+
+对轻应用同样是**零改动**：继续写标准的 `<a download>`，没有专用接口。刻意的边界：
+
+- 单文件上限 100MB，超限宿主直接丢弃。文件名剥掉路径分隔符和控制字符，空则回退 `download`。
+- 下载是 fire-and-forget，宿主不回包（保存对话框可能开着几分钟），结果以宿主 toast 呈现。
+- 桌面端同一时刻只开一个保存对话框，对话框开着时到达的请求直接丢弃不排队（浏览器自带"多文件下载"
+  拦截，桌面 shell 没有，不闸会叠出一摞 sheet）。
+- `fetch` 在 click 同步链路内发出，blob URL 在那一刻就解析完，所以教科书写法 `a.click(); URL.revokeObjectURL(url)`
+  不构成竞态（Chrome 实测）。
+- 不拦 `window.open(blobUrl)` 和 `location.href = dataUrl` —— 这两种在非沙箱页面里也不是下载。
+  应用在锚点上 `stopPropagation()`（不 `preventDefault`）的点击到不了 document，同样漏过，会被沙箱静默丢掉。
 
 ## Agent 交互流程
 
@@ -176,6 +223,7 @@ evaluate whether the task is REPEATABLE — if yes, proactively suggest saving.
 ### Constraints
 - index.html must be fully self-contained (sandboxed iframe environment)
 - No CDN, no external images, no cross-origin fetch
+- Enforced at render time, not just documented: the Light App view strips external `<script src>` / `<link rel="stylesheet">` tags and shows a banner saying how many it removed — the same `selfContainedDocument` rule the artifact preview applies (`web/src/lib/artifacts.ts`), so a page cannot render one way in the panel and another once saved
 - Inline all CSS and JS
 - Use FileReader + <input type="file"> for file processing
 - Use emoji or inline SVG for icons
@@ -241,7 +289,7 @@ Agent 生成 Light App HTML 时，已有 `artifact-design` 技能自动生效，
 
 | 按钮 | 行为 |
 |---|---|
-| **打开** | 在 Artifacts panel 渲染 `index.html` |
+| **打开** | 在 Artifacts panel 渲染 `index.html`。面板按 slug 缓存 HTML；tab 条上有刷新按钮，关闭 tab 会清掉缓存 |
 | **编辑** | 打开新会话，自动填入上下文：「请帮我修改轻应用「{name}」，当前内容：{index.html 摘要}」 |
 | **删除** | 弹出二次确认：「确定删除轻应用「{name}」吗？」，确认后删除对应目录 |
 
@@ -254,11 +302,17 @@ Agent 生成 Light App HTML 时，已有 `artifact-design` 技能自动生效，
 前端可以直接通过 octo-agent 的文件读取能力访问 `~/.octo/light-apps/`，或者通过一个轻量 API 端点：
 
 ```
-GET /api/light-apps           →  {"apps": [{slug, name, description, icon, created_at}]}
+GET /api/light-apps           →  {"apps": [{slug, name, description, icon, created_at, updated_at}], "dir"}
 GET /api/light-apps/{slug}    →  {"manifest": {...}, "html": "<index.html content>"}
 ```
 
 推荐走 API 而不是让前端直接读文件系统——路径解析、安全边界更清晰。实现只是读目录 + 解析 manifest.json + 读 index.html，几十行 Go。
+
+`updated_at` 是 `index.html` 的 mtime，服务端读取时临时打上，不写进 manifest.json。
+
+### 变更检测
+
+Agent 改轻应用走的是普通文件工具，服务端没有任何"文件变了"的广播（仓库里没有 fsnotify，侧栏的 store_watch 也是同样的取舍）。面板里有打开的轻应用时，前端每 5 秒拉一次列表，把当前 tab 的 `updated_at` 和它渲染那份的 stamp 比对，不一致就在应用上方浮一条「{name} 已更新 · 刷新」；页面切到后台时暂停。只提示不自动重载——运行中的应用有自己的状态，刷掉它得由用户决定。
 
 ## 和现有功能的关系
 
@@ -275,7 +329,7 @@ GET /api/light-apps/{slug}    →  {"manifest": {...}, "html": "<index.html cont
 - **不做 Python/Node 运行时 Light App**。保持零外部依赖，只用浏览器沙箱。如果未来真有需求（如需要 pandas 处理大 CSV），再评估是否引入 `pyodide`（WASM Python）而不是起系统进程。
 - **不做 Light App 间的数据共享**。每个 App 独立，不引入跨 App 的消息机制。
 - **不做 Light App 的版本管理**。覆盖即更新，不保留历史版本。用户要回滚可以自己在对话里让 Agent 重新生成。
-- **不做「从 Light App 回调 Agent」**。纯前端闭环。宿主与轻应用之间只有存储桥这一条 postMessage 通道，协议就四个操作（dump/set/remove/clear），不扩成通用 RPC。用户想用 AI 能力时回到对话。
+- **不做「从 Light App 回调 Agent」**。纯前端闭环。宿主与轻应用之间只有一条 postMessage 通道，协议就五个操作（dump/set/remove/clear/download），每个都只是把一个被沙箱拦掉的浏览器标准能力代管回来，不扩成通用 RPC。用户想用 AI 能力时回到对话。
 
 ## 实现分阶段
 

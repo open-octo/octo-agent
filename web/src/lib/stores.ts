@@ -184,6 +184,19 @@ export const lightappOpen = writable<string[]>([])
 export const lightappSel = writable<string>('')
 export const lightapps = writable<import('./api').LightApp[]>([])
 export const lightappHTML = writable<Record<string, string>>({})
+// updated_at of the copy in lightappHTML, per slug. The panel's change poll
+// compares it with the list's fresh stamp to tell an open app was rewritten.
+export const lightappStamp = writable<Record<string, string>>({})
+
+// Every loader goes through these so the HTML and its stamp never drift apart.
+export function cacheLightApp(slug: string, detail: api.LightAppDetail) {
+  lightappHTML.update(m => ({ ...m, [slug]: detail.html }))
+  lightappStamp.update(m => ({ ...m, [slug]: detail.manifest.updated_at ?? '' }))
+}
+export function dropLightApp(slug: string) {
+  lightappHTML.update(({ [slug]: _, ...rest }) => rest)
+  lightappStamp.update(({ [slug]: _, ...rest }) => rest)
+}
 
 // Sessions
 export const sessions = writable<Session[]>([])

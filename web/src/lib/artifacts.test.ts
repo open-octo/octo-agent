@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { get } from 'svelte/store'
 import { artifacts, artifactSel, panelContent, panelExpanded } from './stores'
-import { lightAppSource, observeArtifact, hydrateArtifact, resetArtifacts, pathIsInside } from './artifacts'
+import { observeArtifact, hydrateArtifact, resetArtifacts, selfContainedDocument } from './artifacts'
 
 // Nothing a preview document references can authenticate: the srcdoc iframe has
 // no allow-same-origin, so its subresource requests are cross-site and the
@@ -165,7 +165,7 @@ describe('hydrateArtifact — lazy body build', () => {
     const [entry] = get(artifacts)
     // loaded, or the panel would spin forever; a re-write replaces the entry
     // and retries. loadFailed disables the actions that would persist the
-    // empty body (copy, download, Save to Light App).
+    // empty body (copy, download).
     expect(entry.loaded).toBe(true)
     expect(entry.loadFailed).toBe(true)
     expect(entry.preview).toContain('could not be loaded')
@@ -190,39 +190,165 @@ describe('observeArtifact — markdown copy button', () => {
   })
 })
 
-// Code-kind artifacts hydrate their body like markdown does and preview as
-// escaped monospace text. The server serves these extensions as text/plain
-// (#1895) — before that, the fetch 404ed and the artifact silently vanished.
-describe('observeArtifact — code artifacts', () => {
-  it('previews a code file as escaped monospace text', async () => {
-    const source = 'if x < 1 && y > 2:\n    print("ok")\n'
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(source)))
+// Source, config, and data files are not artifacts: the panel lists only what
+// it can render, and the Git Diff mode is where code changes are shown.
+describe('observeArtifact — source files', () => {
+  it('ignores source, config, and data file writes', () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
 
-    await observeHydrated('/tmp/script.py')
+    for (const p of ['/tmp/script.py', '/tmp/main.go', '/tmp/app.js', '/tmp/config.json', '/tmp/data.csv', '/tmp/notes.txt']) {
+      observeArtifact(SID, { type: 'write', path: p }, true)
+    }
 
-    const [entry] = get(artifacts)
-    expect(entry.type).toBe('PY')
-    expect(entry.code).toBe(source)
-    // The source lands inside a <pre>, so its markup-significant characters
-    // must arrive escaped.
-    expect(entry.preview).toContain('<pre')
-    expect(entry.preview).toContain('x &lt; 1 &amp;&amp; y &gt; 2')
-    expect(entry.preview).not.toContain('x < 1')
-  })
-
-  it('never auto-opens the panel for a live code write', () => {
-    vi.stubGlobal('fetch', vi.fn())
-
-    observeArtifact(SID, { type: 'write', path: '/tmp/script.py' }, true)
-
-    // Source-file writes are the routine bulk of a coding session; the panel
-    // must not pop open on them.
+    // Nothing lands in the list, nothing is fetched, and the panel must not
+    // pop open on a source-file write.
+    expect(get(artifacts)).toEqual([])
+    expect(fetchMock).not.toHaveBeenCalled()
     expect(get(panelContent)).toBe(null)
 
-    // And the code write must not consume the once-per-session flag: a later
-    // rich-kind artifact still auto-opens.
+    // And an ignored write must not consume the once-per-session flag: a
+    // later rich-kind artifact still auto-opens.
     observeArtifact(SID, { type: 'write', path: '/tmp/report.md' }, true)
     expect(get(panelContent)).toBe('session')
+  })
+})
+
+// The Light App view renders through the same rule as the artifact preview,
+// via this one helper — a page the preview strips must not come alive once it
+// is saved and opened as a Light App.
+describe('selfContainedDocument', () => {
+  it('hands back a self-contained page untouched, by identity', () => {
+    const html = '<html><head><style>h1{color:red}</style><script>window.ok=1</script></head><body><h1>hi</h1></body></html>'
+    expect(selfContainedDocument(html)).toBe(html)
+  })
+
+  it('strips external references and adds the banner', () => {
+    const out = selfContainedDocument(
+      '<html><head><script src="https://cdn.example.com/lib.js"></script></head><body><h1>hi</h1></body></html>',
+    )
+    expect(out).not.toContain('lib.js')
+    expect(out).toContain('1 external script/stylesheet was removed')
+    expect(out).toContain('<h1>hi</h1>')
+  })
+
+  it('keeps the DOCTYPE first when the page has no <body> tag', () => {
+    // A <div> ahead of the DOCTYPE would drop the page into quirks mode.
+    const out = selfContainedDocument(
+      '<!DOCTYPE html><html><head><link rel="stylesheet" href="https://cdn/x.css"></head><main>hi</main></html>',
+    )
+    expect(out.startsWith('<!DOCTYPE html>')).toBe(true)
+    expect(out.indexOf('</head>')).toBeLessThan(out.indexOf('removed'))
+    expect(out.indexOf('removed')).toBeLessThan(out.indexOf('<main>'))
+  })
+
+  it('lands the banner inside a <body> that carries attributes', () => {
+    const out = selfContainedDocument(
+      '<html><head><link rel="stylesheet" href="https://cdn/x.css"></head><body class="dark" data-x="1"><p>hi</p></body></html>',
+    )
+    expect(out.indexOf('<body class="dark" data-x="1">')).toBeLessThan(out.indexOf('removed'))
+    expect(out.indexOf('removed')).toBeLessThan(out.indexOf('<p>hi</p>'))
+  })
+
+  it('catches unquoted src/href and uppercase tags', () => {
+    const out = selfContainedDocument(
+      '<HTML><HEAD><SCRIPT SRC=https://cdn/x.js></SCRIPT><LINK REL=stylesheet HREF=https://cdn/x.css></HEAD><BODY></BODY></HTML>',
+    )
+    expect(out).not.toContain('cdn/x.js')
+    expect(out).not.toContain('cdn/x.css')
+    expect(out).toContain('2 external scripts/stylesheets were removed')
+  })
+
+  it('does not mistake a src/href inside another attribute value for a reference', () => {
+    const html =
+      '<html><head><script data-cfg="src=\'https://c/x\'">inline()</script>' +
+      '<link rel="stylesheet" data-href="https://c/x.css"></head><body></body></html>'
+    expect(selfContainedDocument(html)).toBe(html)
+  })
+
+  // The allowlist: scripts and stylesheets from well-known CDN hosts render
+  // rather than being stripped, so artifacts can lean on real libraries.
+  it('keeps allowlisted CDN scripts and stylesheets, by identity', () => {
+    const html =
+      '<html><head>' +
+      '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>' +
+      '<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>' +
+      '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">' +
+      '<link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/antd/5.0.0/reset.css">' +
+      '</head><body><h1>hi</h1></body></html>'
+    expect(selfContainedDocument(html)).toBe(html)
+  })
+
+  it('strips the disallowed reference but keeps the allowlisted one beside it', () => {
+    const out = selfContainedDocument(
+      '<html><head>' +
+        '<script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>' +
+        '<script src="https://evil.example.com/x.js"></script>' +
+        '</head><body></body></html>',
+    )
+    expect(out).toContain('cdn.jsdelivr.net')
+    expect(out).not.toContain('evil.example.com')
+    expect(out).toContain('1 external script/stylesheet was removed')
+  })
+
+  it('requires https — a plain-http reference to an allowlisted host is stripped', () => {
+    const out = selfContainedDocument(
+      '<html><head><script src="http://cdn.jsdelivr.net/npm/x.js"></script></head><body></body></html>',
+    )
+    expect(out).not.toContain('cdn.jsdelivr.net')
+    expect(out).toContain('removed')
+  })
+
+  it('judges the real hostname, not a lookalike prefix or userinfo trick', () => {
+    const out = selfContainedDocument(
+      '<html><head>' +
+        '<script src="https://cdn.jsdelivr.net.evil.com/x.js"></script>' +
+        '<script src="https://cdn.jsdelivr.net@evil.com/x.js"></script>' +
+        '<link rel="stylesheet" href="https://evilcdn.jsdelivr.net/x.css">' +
+        '</head><body></body></html>',
+    )
+    expect(out).not.toContain('evil')
+    expect(out).toContain('3 external scripts/stylesheets were removed')
+  })
+
+  // The judgment must land on the attribute the browser will actually fetch —
+  // string-scanning for ` src=` once judged a decoy inside another attribute's
+  // quoted value while the real src loaded from anywhere.
+  it('judges the attribute the browser will use, not a decoy inside another attribute value', () => {
+    const out = selfContainedDocument(
+      '<html><head>' +
+        '<script foo="x src=https://cdn.jsdelivr.net/ok.js" src="https://evil.com/x.js"></script>' +
+        '<link title="href=https://cdn.jsdelivr.net/a.css" rel="stylesheet" href="https://evil.com/x.css">' +
+        '</head><body></body></html>',
+    )
+    expect(out).not.toContain('evil.com')
+    expect(out).toContain('2 external scripts/stylesheets were removed')
+  })
+
+  it('is not fooled by a quoted ">" truncating the tag, or a solidus standing in for whitespace', () => {
+    const out = selfContainedDocument(
+      '<html><head>' +
+        '<script data-x="a>b" src="https://evil.com/x.js"></script>' +
+        '<script/src="https://evil.com/y.js"></script>' +
+        '</head><body></body></html>',
+    )
+    expect(out).not.toContain('evil.com')
+  })
+
+  it('judges the first of duplicate src attributes, the one the browser keeps', () => {
+    const out = selfContainedDocument(
+      '<html><head><script src="https://evil.com/x.js" src="https://cdn.jsdelivr.net/ok.js"></script></head><body></body></html>',
+    )
+    expect(out).not.toContain('evil.com')
+    expect(out).toContain('1 external script/stylesheet was removed')
+  })
+
+  it('strips a protocol-relative reference — only an explicit https URL passes', () => {
+    const out = selfContainedDocument(
+      '<html><head><script src="//cdn.jsdelivr.net/npm/x.js"></script></head><body></body></html>',
+    )
+    expect(out).not.toContain('cdn.jsdelivr.net/npm')
+    expect(out).toContain('removed')
   })
 })
 
@@ -331,8 +457,7 @@ describe('observeArtifact — markdown image references', () => {
 })
 
 // An HTML artifact previews as its own document, so the same references need the
-// same treatment — but only when hasExternalRefs hasn't already routed the file
-// to the warning page.
+// same treatment.
 describe('observeArtifact — html local references', () => {
   const png = new Uint8Array([137, 80, 78, 71])
 
@@ -410,21 +535,22 @@ describe('observeArtifact — html local references', () => {
     expect(get(artifacts)[0].preview).toBe(html)
   })
 
-  it('leaves the warning page alone when a script is unreachable', async () => {
+  it('strips an unreachable local script and still inlines the image', async () => {
     stubFetch('<html><head><script src="app.js"></script></head><body><img src="chart.png"></body></html>')
 
     await observeHydrated('/tmp/page.html')
 
     const [entry] = get(artifacts)
-    expect(entry.preview).toContain('cannot be previewed here')
-    expect(entry.preview).not.toContain('data:image/png')
+    expect(entry.preview).not.toContain('app.js')
+    expect(entry.preview).toContain('removed')
+    expect(entry.preview).toContain('data:image/png')
   })
 })
 
-// Only a <link> whose rel the document needs in order to render may force the
-// warning page. A favicon or manifest failing to load changes nothing, and
-// routing those files to the warning page also kept them from the image
-// inliner entirely (#1896).
+// Only a <link> whose rel the document needs in order to render gets stripped.
+// A favicon or manifest failing to load changes nothing, and treating those as
+// external references once kept the whole file from rendering and from the
+// image inliner entirely (#1896).
 describe('observeArtifact — link rel discrimination', () => {
   const png = new Uint8Array([137, 80, 78, 71])
 
@@ -444,7 +570,7 @@ describe('observeArtifact — link rel discrimination', () => {
     await observeHydrated('/tmp/page.html')
 
     const [entry] = get(artifacts)
-    expect(entry.preview).not.toContain('cannot be previewed here')
+    expect(entry.preview).not.toContain('removed')
     // The whole point: this file used to skip the inliner along with the preview.
     expect(entry.preview).toContain('data:image/png;base64,')
   })
@@ -462,20 +588,27 @@ describe('observeArtifact — link rel discrimination', () => {
     expect(get(artifacts)[0].preview).toBe(html)
   })
 
-  it('still warns for an external stylesheet', async () => {
-    stubFetch('<html><head><link rel="stylesheet" href="https://cdn.example.com/x.css"></head><body></body></html>')
+  it('strips an external stylesheet and renders the rest under a banner', async () => {
+    stubFetch('<html><head><link rel="stylesheet" href="https://cdn.example.com/x.css"></head><body><h1>hi</h1></body></html>')
 
     await observeHydrated('/tmp/page.html')
 
-    expect(get(artifacts)[0].preview).toContain('cannot be previewed here')
+    const { preview } = get(artifacts)[0]
+    expect(preview).not.toContain('cdn.example.com')
+    expect(preview).toContain('<h1>hi</h1>')
+    expect(preview).toContain('1 external script/stylesheet was removed')
+    // The banner sits inside the body, before the page's own content.
+    expect(preview.indexOf('removed')).toBeLessThan(preview.indexOf('<h1>hi</h1>'))
   })
 
-  it('still warns when the rel attribute is unquoted or trails the href', async () => {
+  it('strips a link whose rel attribute is unquoted or trails the href', async () => {
     stubFetch('<html><head><link href="style.css" rel=stylesheet></head><body></body></html>')
 
     await observeHydrated('/tmp/page.html')
 
-    expect(get(artifacts)[0].preview).toContain('cannot be previewed here')
+    const { preview } = get(artifacts)[0]
+    expect(preview).not.toContain('style.css')
+    expect(preview).toContain('removed')
   })
 
   it('treats rel="preload" as render-affecting', async () => {
@@ -484,7 +617,51 @@ describe('observeArtifact — link rel discrimination', () => {
 
     await observeHydrated('/tmp/page.html')
 
-    expect(get(artifacts)[0].preview).toContain('cannot be previewed here')
+    const { preview } = get(artifacts)[0]
+    expect(preview).not.toContain('x.css')
+    expect(preview).toContain('removed')
+  })
+
+  it('strips external scripts but keeps inline ones, and counts what it removed', async () => {
+    stubFetch(
+      '<html><head><script src="https://cdn.example.com/lib.js"></script>' +
+        '<script>window.ok = 1</script>' +
+        '<link rel="stylesheet" href="https://cdn.example.com/x.css"></head>' +
+        '<body><p>content</p><script src="app.js"></script></body></html>',
+    )
+
+    await observeHydrated('/tmp/page.html')
+
+    const { preview } = get(artifacts)[0]
+    expect(preview).not.toContain('lib.js')
+    expect(preview).not.toContain('app.js')
+    expect(preview).not.toContain('x.css')
+    expect(preview).toContain('<script>window.ok = 1</script>')
+    expect(preview).toContain('<p>content</p>')
+    expect(preview).toContain('3 external scripts/stylesheets were removed')
+  })
+
+  it('still inlines the local images of a page that lost its stylesheet', async () => {
+    // Before, an external reference routed the whole file to a warning page
+    // and the inliner never ran; now the surviving content gets its images.
+    stubFetch('<html><head><link rel="stylesheet" href="https://cdn.example.com/x.css"></head><body><img src="chart.png"></body></html>')
+
+    await observeHydrated('/tmp/page.html')
+
+    expect(get(artifacts)[0].preview).toContain('data:image/png;base64,')
+  })
+
+  it('still puts the banner before the content when the page is a bare fragment', async () => {
+    stubFetch('<link rel="stylesheet" href="https://cdn.example.com/x.css"><h1>hi</h1>')
+
+    await observeHydrated('/tmp/page.html')
+
+    // The DOM round-trip normalizes the fragment into a full document, so the
+    // banner lands inside the generated <body> rather than at the very top.
+    const { preview } = get(artifacts)[0]
+    expect(preview).not.toContain('cdn.example.com')
+    expect(preview).toContain('<h1>hi</h1>')
+    expect(preview.indexOf('removed')).toBeLessThan(preview.indexOf('<h1>hi</h1>'))
   })
 
   it('leaves a data: stylesheet alone, same as before', async () => {
@@ -646,72 +823,6 @@ describe('observeArtifact — transcript ordering', () => {
   })
 })
 
-// "Save to Light App" persists a copy that renders through the same kind of
-// sandboxed iframe as the panel preview, so it must save the inlined preview —
-// the raw source's relative image paths resolve against nothing there (#1890).
-describe('lightAppSource — what Save to Light App persists', () => {
-  const png = new Uint8Array([137, 80, 78, 71])
-
-  function stubFetch(html: string) {
-    vi.stubGlobal('fetch', vi.fn(async (u: string) => {
-      if (u.includes('page.html')) return new Response(html)
-      return imageResponse(png)
-    }))
-  }
-
-  it('hands over the inlined preview when the document has local images', async () => {
-    stubFetch('<!DOCTYPE html><html><body><img src="chart.png"></body></html>')
-
-    await observeHydrated('/tmp/page.html')
-
-    const saved = lightAppSource(get(artifacts)[0])
-    expect(saved).toContain('data:image/png;base64,')
-    expect(saved).not.toContain('chart.png')
-  })
-
-  it('hands over the exact source when there was nothing to inline', async () => {
-    const html = '<!DOCTYPE html><html><body><h1>hi</h1></body></html>'
-    stubFetch(html)
-
-    await observeHydrated('/tmp/page.html')
-
-    expect(lightAppSource(get(artifacts)[0])).toBe(html)
-  })
-
-  it('never persists the external-refs warning page — the source is the faithful copy', async () => {
-    const html = '<html><head><script src="app.js"></script></head><body><img src="chart.png"></body></html>'
-    stubFetch(html)
-
-    await observeHydrated('/tmp/page.html')
-
-    const entry = get(artifacts)[0]
-    expect(entry.preview).toContain('cannot be previewed here')
-    expect(lightAppSource(entry)).toBe(html)
-  })
-
-  it('never persists the load-failure placeholder either', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })))
-
-    await observeHydrated('/tmp/page.html')
-
-    const entry = get(artifacts)[0]
-    expect(entry.loadFailed).toBe(true)
-    // The save button is disabled for a failed entry; if a save fires anyway,
-    // the placeholder note must not become a Light App.
-    expect(lightAppSource(entry)).not.toContain('could not be loaded')
-  })
-
-  it('hands over the source for a non-HTML artifact', () => {
-    const a = { type: 'Markdown', code: '# hi', preview: '<h1>hi</h1>' }
-    expect(lightAppSource(a as any)).toBe('# hi')
-  })
-
-  it('falls back to the source when the preview is empty', () => {
-    const a = { type: 'HTML', code: '<html><body>hi</body></html>', preview: '' }
-    expect(lightAppSource(a as any)).toBe(a.code)
-  })
-})
-
 describe('installArtifactThemeRefresh — theme switch busts baked previews', () => {
   it('drops loaded text previews and leaves image artifacts alone', async () => {
     const { installArtifactThemeRefresh } = await import('./artifacts')
@@ -734,45 +845,5 @@ describe('installArtifactThemeRefresh — theme switch busts baked previews', ()
     // to rebuild it, so resetting it would strand a permanent spinner.
     expect(get(artifacts)[1].loaded).toBe(true)
     expect(get(artifacts)[1].src).toBe('/api/x.png')
-  })
-})
-
-describe('pathIsInside — Light Apps directory detection', () => {
-  const LA_DIR = '/Users/qiao/.octo/light-apps'
-
-  it('matches files inside the directory, including nested ones', () => {
-    expect(pathIsInside(`${LA_DIR}/my-app/index.html`, LA_DIR)).toBe(true)
-    expect(pathIsInside(`${LA_DIR}/my-app/sub/asset.js`, LA_DIR)).toBe(true)
-  })
-
-  it('rejects siblings that merely share a prefix', () => {
-    expect(pathIsInside('/Users/qiao/.octo/light-apps2/x.html', LA_DIR)).toBe(false)
-    expect(pathIsInside('/Users/qiao/.octo/light-apps.js', LA_DIR)).toBe(false)
-    expect(pathIsInside('/Users/qiao/.octo/light-apps-other/x.html', LA_DIR)).toBe(false)
-  })
-
-  it('rejects unrelated paths and relative paths', () => {
-    expect(pathIsInside('/Users/qiao/Downloads/report.html', LA_DIR)).toBe(false)
-    expect(pathIsInside('my-app/index.html', LA_DIR)).toBe(false)
-    expect(pathIsInside('', LA_DIR)).toBe(false)
-  })
-
-  it('normalizes backslashes (Windows)', () => {
-    expect(pathIsInside('C:\\Users\\qiao\\.octo\\light-apps\\my-app\\index.html', 'C:\\Users\\qiao\\.octo\\light-apps')).toBe(true)
-    expect(pathIsInside('C:\\Users\\qiao\\.octo\\light-apps2\\x.html', 'C:\\Users\\qiao\\.octo\\light-apps')).toBe(false)
-  })
-
-  it('folds case so Windows drive letters and spelling differences match', () => {
-    expect(pathIsInside('/Users/QIAO/.OCTO/Light-Apps/my-app/index.html', LA_DIR)).toBe(true)
-    expect(pathIsInside('C:/Users/Qiao/.octo/light-apps/my-app/index.html', 'c:\\users\\qiao\\.octo\\light-apps')).toBe(true)
-  })
-
-  it('tolerates a trailing slash on either side', () => {
-    expect(pathIsInside(`${LA_DIR}/my-app/index.html`, `${LA_DIR}/`)).toBe(true)
-    expect(pathIsInside(`${LA_DIR}/my-app/index.html/`, LA_DIR)).toBe(true)
-  })
-
-  it('matches nothing when the directory is unknown', () => {
-    expect(pathIsInside(`${LA_DIR}/my-app/index.html`, '')).toBe(false)
   })
 })

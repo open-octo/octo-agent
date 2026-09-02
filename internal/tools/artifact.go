@@ -14,7 +14,16 @@ import (
 // artifactContentTypes maps previewable extensions to the explicit
 // Content-Type served for them. Shared by ShowArtifactTool (early validation
 // with a useful error) and the server's artifact endpoint (response headers
-// and final gate) so the two can't drift apart.
+// and final gate) so the two can't drift apart. It must also match the web
+// client's EXT_KIND table (web/src/lib/artifacts.ts): a kind the client knows
+// but the endpoint refuses makes the fetch 404 and the artifact silently
+// vanish from the panel (#1895).
+//
+// Only kinds the panel can actually render belong here — a source or config
+// file is not a deliverable, and the panel's Git Diff mode already shows the
+// session's code changes with context. Listing them here would flood the
+// artifact list with the routine bulk of a coding session and bury the
+// reports, pages, and charts the panel exists for.
 var artifactContentTypes = map[string]string{
 	".html":     "text/html; charset=utf-8",
 	".htm":      "text/html; charset=utf-8",
@@ -26,27 +35,6 @@ var artifactContentTypes = map[string]string{
 	".gif":      "image/gif",
 	".svg":      "image/svg+xml",
 	".webp":     "image/webp",
-}
-
-// artifactTextExts are the source/config/data kinds the web panel renders in
-// its monospace code view. They must stay in sync with the web client's
-// EXT_KIND table (web/src/lib/artifacts.ts) — a kind the client knows but the
-// endpoint refuses silently drops the artifact (#1895). All of them are served
-// as text/plain — never their native type — so a URL opened directly in a tab
-// can only ever be a plain-text document, not a script, stylesheet, or XML
-// rendering context.
-var artifactTextExts = []string{
-	".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs",
-	".css", ".scss", ".less",
-	".json", ".yaml", ".yml", ".toml",
-	".py", ".go", ".rs", ".sh", ".bash", ".zsh",
-	".txt", ".xml", ".csv",
-}
-
-func init() {
-	for _, ext := range artifactTextExts {
-		artifactContentTypes[ext] = "text/plain; charset=utf-8"
-	}
 }
 
 // ArtifactContentType returns the Content-Type for a previewable artifact
@@ -76,10 +64,10 @@ type ShowArtifactTool struct{}
 func (ShowArtifactTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "show_artifact",
-		Description: "Present a previewable file (HTML page, Markdown document, image, or a " +
-			"plain-text/code file) to the user as an artifact. ALWAYS call this right after you " +
+		Description: "Present a previewable file (HTML page, Markdown document, or image) " +
+			"to the user as an artifact. ALWAYS call this right after you " +
 			"produce a previewable file the user would want to look at — a generated HTML page or " +
-			"slide deck, a Markdown report, a chart or image, a script or config file — whenever " +
+			"slide deck, a Markdown report, a chart or image — whenever " +
 			"it was created by some means other than write_file (a terminal " +
 			"heredoc/redirect like `cat > x.html`, a script, a build step, or a download). Files you " +
 			"create with write_file/edit_file are surfaced automatically and do NOT need this. In the " +

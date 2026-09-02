@@ -65,6 +65,7 @@ Agent 生成的 HTML artifact 也可以在 Artifacts 面板中一键「保存到
 - 完全自包含：不能引用 CDN、不能请求外部图片、不能跨域 fetch
 - CSS 和 JS 都内联（`<style>` + `<script>`）
 - 文件处理用 `FileReader` + `<input type="file">`
+- 导出文件（生成的图片、转换后的文件等）用标准的 `<a download>` 写法，宿主负责落盘：浏览器里走正常下载，桌面端弹出系统保存对话框
 - 图标用 emoji 或内联 SVG
 - 遵循 `artifact-design` skill 的布局与配色规范
 

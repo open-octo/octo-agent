@@ -2,47 +2,21 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
-// buildEnvContext renders a snapshot of the working environment for the
-// system prompt: working directory, git branch + dirty/clean state, today's
-// date, and the OS/arch. The model otherwise has no idea where it's running.
-//
-// Taken once at session start (the composed prompt is frozen for the
-// session), so git state is a snapshot — fresh enough to orient the model
-// without re-rendering per turn and busting the prompt cache.
+// buildEnvContext renders the session's "# Environment" block. The shared
+// machine lines live in tools.BuildEnvContext; here the CLI contributes its
+// cwd's git state (its cwd is a repository), which the server builder omits
+// because its cwd is a workspace.
 func buildEnvContext(cwd string) string {
-	var b strings.Builder
-	b.WriteString("# Environment\n\n")
-	if cwd != "" {
-		fmt.Fprintf(&b, "- Working directory: %s\n", cwd)
-	}
-	if branch, dirty, ok := gitState(cwd); ok {
-		state := "clean"
-		if dirty {
-			state = "uncommitted changes"
-		}
-		fmt.Fprintf(&b, "- Git branch: %s (%s)\n", branch, state)
-	}
-	fmt.Fprintf(&b, "- Today's date: %s\n", time.Now().Format("2006-01-02"))
-	fmt.Fprintf(&b, "- OS/arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
-	// Platform-shell guidance (PowerShell dialect + the install/PATH/UAC traps
-	// on Windows, sudo/PATH/CLT traps on macOS) lives in internal/tools next
-	// to the shell selection itself, shared with the server's context builder.
-	b.WriteString(tools.ShellEnvNote())
-	// Which common developer tools are actually on PATH — so the agent doesn't
-	// discover python/node is missing by failing a command. Pairs with the
-	// install guidance above.
-	b.WriteString(tools.ToolchainNote())
-	return b.String()
+	branch, dirty, ok := gitState(cwd)
+	return tools.BuildEnvContext(cwd, branch, dirty, ok)
 }
 
 // gitState returns the current branch and whether the working tree has

@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func seedLightApp(t *testing.T, home, slug, name, desc string) {
@@ -78,6 +80,9 @@ func TestListLightApps_WithApps(t *testing.T) {
 	if want := filepath.Join(home, ".octo", "light-apps"); out.Dir != want {
 		t.Errorf("expected dir %q, got %q", want, out.Dir)
 	}
+	if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "no-store") {
+		t.Errorf("Cache-Control = %q, want it to contain no-store", cc)
+	}
 }
 
 // TestGetLightApp_Success: validates manifest + HTML round-trip.
@@ -105,6 +110,15 @@ func TestGetLightApp_Success(t *testing.T) {
 	if out.HTML != "<html>ok</html>" {
 		t.Errorf("wrong html: %q", out.HTML)
 	}
+	if out.Manifest.UpdatedAt == "" {
+		t.Error("detail manifest lacks updated_at; the panel's change poll compares against it")
+	}
+	// The response carries the app's index.html; a heuristically cached copy is
+	// exactly the stale app an update was meant to replace (desktop WKWebView
+	// caches GET 200s without an explicit policy).
+	if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "no-store") {
+		t.Errorf("Cache-Control = %q, want it to contain no-store", cc)
+	}
 }
 
 // TestGetLightApp_PathTraversal: rejects slash and backslash in slugs.
@@ -126,38 +140,53 @@ func TestGetLightApp_PathTraversal(t *testing.T) {
 	}
 }
 
-// TestCreateLightApp_SourcePathRoundTrip: source_path persists into the
-// manifest and comes back through the create response and the listing — the
-// web UI relies on it to hide "Save to Light App" for already-saved artifacts.
-func TestCreateLightApp_SourcePathRoundTrip(t *testing.T) {
+// TestListLightApps_UpdatedAtTracksHTML: updated_at follows index.html's mtime
+// (so an edit moves it) and is never written into manifest.json.
+func TestListLightApps_UpdatedAtTracksHTML(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	seedLightApp(t, home, "clock", "Clock", "")
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	body := `{"name":"Quicksort Viz","html":"<html>ok</html>","source_path":"/work/quicksort-visualizer.html"}`
-	w := doJSON(t, srv, "POST", "/api/light-apps", body)
-	if w.Code != 201 {
-		t.Fatalf("create: expected 201, got %d (body: %s)", w.Code, w.Body.String())
-	}
-	var created lightAppManifest
-	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+	appDir := filepath.Join(home, ".octo", "light-apps", "clock")
+	if raw, err := os.ReadFile(filepath.Join(appDir, "manifest.json")); err != nil {
 		t.Fatal(err)
-	}
-	if created.SourcePath != "/work/quicksort-visualizer.html" {
-		t.Errorf("create response source_path: got %q", created.SourcePath)
+	} else if strings.Contains(string(raw), "updated_at") {
+		t.Errorf("manifest.json must not persist the derived updated_at: %s", raw)
 	}
 
-	w = doJSON(t, srv, "GET", "/api/light-apps", "")
-	if w.Code != 200 {
-		t.Fatalf("list: expected 200, got %d", w.Code)
+	list := func() string {
+		w := doJSON(t, srv, "GET", "/api/light-apps", "")
+		if w.Code != 200 {
+			t.Fatalf("list: expected 200, got %d", w.Code)
+		}
+		var out struct{ Apps []lightAppManifest }
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if len(out.Apps) != 1 {
+			t.Fatalf("expected 1 app, got %+v", out.Apps)
+		}
+		return out.Apps[0].UpdatedAt
 	}
-	var out struct{ Apps []lightAppManifest }
-	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+	before := list()
+	if before == "" {
+		t.Fatal("list entry lacks updated_at")
+	}
+
+	// Rewrite the HTML the way an agent edit does, and push the mtime forward
+	// explicitly so the check doesn't depend on filesystem timestamp granularity.
+	htmlPath := filepath.Join(appDir, "index.html")
+	if err := os.WriteFile(htmlPath, []byte("<html>v2</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Apps) != 1 || out.Apps[0].SourcePath != "/work/quicksort-visualizer.html" {
-		t.Errorf("listing source_path round-trip failed: %+v", out.Apps)
+	later := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(htmlPath, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if after := list(); after == before {
+		t.Errorf("updated_at did not move after index.html was rewritten: %q", after)
 	}
 }
 

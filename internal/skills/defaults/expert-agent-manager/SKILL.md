@@ -33,11 +33,18 @@ distinguished by a `source` field on every response:
   in `~/.octo/agents/`. Freely editable and deletable.
 - **`"source": "default"`** — an **officially curated expert** shipped in the
   binary (the ones shown in the Web UI's expert gallery, e.g. copywriter,
-  resume-coach, trip-planner). These can be hidden or edited, but **never
-  deleted** — `DELETE` on one 409s. Editing one **forks** it into a
-  `~/.octo/agents/<id>.md` user override; the forked copy then stops receiving
-  future content updates when octo ships a new curated-persona revision (same
-  trade-off as editing a default skill).
+  resume-coach, trip-planner). These are **read-only**: `PUT` and `DELETE` on
+  one both refuse. They can only be **hidden**. An official expert is
+  identical on every machine and keeps receiving content updates when octo
+  ships a new curated-persona revision — editing one used to fork it into a
+  `~/.octo/agents/<id>.md` override and silently forfeit those updates, which
+  is why it no longer does.
+
+  **When the user asks to change a curated expert**, don't try to edit it:
+  create a NEW user agent (a different id) with the persona they want, and
+  say plainly that the official one stays as shipped and can be hidden if
+  they'd rather not see both. A user file at a curated expert's id is ignored
+  on load, so writing one by hand achieves nothing either.
 
   A curated expert can be **hidden** from the gallery by the user (or by this
   skill). While hidden, `GET /api/agents/:id` (and `PUT`/`DELETE` on that id)
@@ -58,9 +65,9 @@ localhost is blocked by SSRF protection.) All requests return JSON.
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/agents` | List all profiles (excludes the default agent; includes hidden curated experts, tagged `enabled: false`) |
-| `POST` | `/api/agents` | Create a new user profile |
+| `POST` | `/api/agents` | Create a new user profile (refuses an id taken by a curated expert) |
 | `GET` | `/api/agents/:id` | Get a single profile (404 if hidden — see "Curated vs. user-created experts" above) |
-| `PUT` | `/api/agents/:id` | Update a profile (editing a curated one forks it into a user override) |
+| `PUT` | `/api/agents/:id` | Update a **user** profile (refuses a curated one — create your own instead) |
 | `DELETE` | `/api/agents/:id` | Delete a user profile (409 for a curated one — hide it instead, see toggle below) |
 | `PATCH` | `/api/agents/:id/toggle` | Hide/show a **curated** expert; returns `{"id", "enabled"}` (400 on a user profile — those aren't hideable, just delete them) |
 | `POST` | `/api/agents/:id/bind` | Bind a profile to an IM chat |
@@ -127,18 +134,14 @@ the API normally does for you:
      configured — nothing validates this at all, on the API path either;
      an unresolvable model just fails at the next turn, not at save time.
 
-**Editing a curated (`source: "default"`) expert this same way**: write
-`~/.octo/agents/<id>.md` using the *same id* as an existing
-`~/.octo/agents-default/<id>.md`. User-level files take precedence over the
-curated directory on every read, so this achieves exactly the same fork
-the API's `PUT` does — no server involved, just file precedence.
+**You cannot edit a curated (`source: "default"`) expert this way either.** A
+user file whose id matches one under `~/.octo/agents-default/` is ignored on
+load, so writing one leaves a file that never takes effect. Give the new
+persona its own id instead (check `ls ~/.octo/agents-default/` for the ids
+that are taken).
 
-**Deleting a user override created this way**: `rm ~/.octo/agents/<id>.md`
-after confirming with the user (same destructive-operation rule as always).
-If that id also exists under `~/.octo/agents-default/`, removing the override
-reverts the persona to its official curated version rather than erasing it
-entirely — tell the user this is what will happen; it's the same reason the
-API refuses to hard-delete a curated expert.
+**Deleting a user agent created this way**: `rm ~/.octo/agents/<id>.md` after
+confirming with the user (same destructive-operation rule as always).
 
 ### Hiding a curated expert without a server
 

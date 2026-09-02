@@ -12,7 +12,9 @@
   let fileInput: HTMLInputElement
 
   let filtered = $derived(
-    $skills.filter((sk) => showSystem || sk.source !== 'default')
+    // "Show system skills" covers everything octo manages: the default set
+    // and the expert-scoped set. Only user skills show by default.
+    $skills.filter((sk) => showSystem || (sk.source !== 'default' && sk.source !== 'expert'))
   )
 
   $effect(() => {

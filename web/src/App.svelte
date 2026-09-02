@@ -161,7 +161,17 @@
     // for exactly that reason — see the comment there.
     const stopPanelGC = sessions.subscribe(list => pruneSessions(list.map(s => s.id)))
     const cleanup = () => { cancelled = true; uninstallLinks(); stopHeartbeat(); stopPanelGC(); ws.disconnect() }
-    checkAuth().then(async ok => {
+    // The onboard-status read is issued alongside the auth probe rather than
+    // after it, taking one serial round trip out of every cold start. checkAuth
+    // goes first: it runs synchronously up to its first await, which is where a
+    // stored or ?access_key= key is seeded into the cookie — so the early read
+    // already carries it. On loopback both pass at once. A networked server
+    // with no key yet rejects the early read until the prompt has completed,
+    // so a failed early read is retried once auth is settled — same outcome,
+    // one fewer hop on the common path.
+    const auth = checkAuth()
+    const earlyStatus = api.getOnboardStatus().catch(() => null)
+    auth.then(async ok => {
       if (cancelled) return
       if (!ok) {
         authDenied = true
@@ -170,12 +180,15 @@
       // First-run gate: decide the onboard phase BEFORE booting the main UI so it
       // never flashes behind the setup panel. Default to '' on error so a status
       // hiccup doesn't trap a configured user behind a blank splash.
-      try {
-        const status = await api.getOnboardStatus()
-        onboardPhase.set(status.phase ?? '')
-      } catch {
-        onboardPhase.set('')
+      let status = await earlyStatus
+      if (!status) {
+        try {
+          status = await api.getOnboardStatus()
+        } catch {
+          status = null
+        }
       }
+      onboardPhase.set(status?.phase ?? '')
     })
     return cleanup
   })
@@ -344,19 +357,27 @@
           s.id === sid ? { ...s, pending_confirmation: ev.kind === 'confirm_pending' } : s
         ))
       }
+      // A finished turn left something in that session to read. Stamped
+      // unconditionally: the effect at the top of this file immediately
+      // un-marks it again if it's the session on screen. Must run BEFORE the
+      // sessions.update below — that update synchronously triggers
+      // reconcileSeen, and a fresh browser's seen baseline has to cover this
+      // touch or the row flashes a phantom unread dot.
+      if (ev.kind === 'turn_ended') touchSession(sid)
       // Running-state pair — keeps the sidebar's activity spinner live for
       // sessions this tab isn't subscribed to (session_update carries status
       // only to subscribers).
       if (ev.kind === 'turn_started' || ev.kind === 'turn_ended') {
-        sessions.update(list => list.map(s =>
-          s.id === sid ? { ...s, status: ev.kind === 'turn_started' ? 'running' : 'idle' } : s
-        ))
+        sessions.update(list => list.map(s => {
+          if (s.id !== sid) return s
+          if (ev.kind === 'turn_started') return { ...s, status: 'running' }
+          // Also stamp updated_at: no broadcast carries the server's value, so
+          // without this the sidebar's relative timestamp keeps aging from the
+          // last REST fetch even as the user chats. The local clock stands in
+          // until the next list refetch reconciles with the server's mtime.
+          return { ...s, status: 'idle', updated_at: new Date().toISOString() }
+        }))
       }
-      // A finished turn left something in that session to read. Stamped
-      // unconditionally: the effect at the top of this file immediately
-      // un-marks it again if it's the session on screen, and nothing else
-      // refreshes updated_at for an open tab.
-      if (ev.kind === 'turn_ended') touchSession(sid)
       // The agent just finished changing files. Re-render the Git Diff panel if
       // it's open on this session, or move its badge if it isn't — that pair is
       // the whole refresh story, no polling anywhere.

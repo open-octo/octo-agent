@@ -37,7 +37,7 @@ type Skill struct {
 	Description string // frontmatter description; the L1 manifest + trigger cue
 	Body        string // SKILL.md body after frontmatter
 	Dir         string // absolute path of the skill directory
-	Source      string // "user" | "default" (display only, for --list-skills)
+	Source      string // "user" | "default" | "expert" — see Discover for the semantics
 	System      bool   // frontmatter system: true → hidden from expert agent manifests
 }
 
@@ -60,18 +60,23 @@ var userSkillsRoot = func() string {
 	return filepath.Join(home, ".octo", "skills")
 }
 
-// Discover scans the default then user-level skill roots and returns a
-// Registry. User skills override default skills of the same name (the user
-// root is scanned last, overwriting the map entry). A missing root is not an
-// error — most environments won't have both.
+// Discover scans the default, expert, and user-level skill roots and returns
+// a Registry. User skills override default and expert skills of the same name
+// (the user root is scanned last, overwriting the map entry). A missing root
+// is not an error — most environments won't have all of them.
 func Discover() *Registry {
 	r := &Registry{skills: make(map[string]Skill)}
 	// Lowest precedence first; scanRoot overwrites by name, so user wins.
 	// Default skills (shipped with the binary, materialized to
 	// ~/.octo/skills-default) are the floor — a user overrides one by dropping
-	// a same-named skill in ~/.octo/skills.
+	// a same-named skill in ~/.octo/skills. Expert skills sit between: shipped
+	// too, but scoped to the experts whose tool_skills name them (see
+	// RenderManifest and the skill tool's profile check).
 	if root := defaultSkillsRoot(); root != "" {
 		r.scanRoot(root, "default")
+	}
+	if root := expertSkillsRoot(); root != "" {
+		r.scanRoot(root, "expert")
 	}
 	if userRoot := userSkillsRoot(); userRoot != "" {
 		r.scanRoot(userRoot, "user")
@@ -221,9 +226,9 @@ func (r *Registry) List() []Skill {
 		}
 	}
 	r.mu.RUnlock()
-	// Source priority: user overrides default. Must use a total order (strict
-	// weak ordering) for sort.Slice to stay deterministic.
-	sourceOrder := map[string]int{"user": 0, "default": 1}
+	// Source priority: user overrides expert overrides default. Must use a
+	// total order (strict weak ordering) for sort.Slice to stay deterministic.
+	sourceOrder := map[string]int{"user": 0, "expert": 1, "default": 2}
 	sort.Slice(out, func(i, j int) bool {
 		si, sj := sourceOrder[out[i].Source], sourceOrder[out[j].Source]
 		if si != sj {
@@ -247,7 +252,7 @@ func (r *Registry) All() []Skill {
 		out = append(out, s)
 	}
 	r.mu.RUnlock()
-	sourceOrder := map[string]int{"user": 0, "default": 1}
+	sourceOrder := map[string]int{"user": 0, "expert": 1, "default": 2}
 	sort.Slice(out, func(i, j int) bool {
 		si, sj := sourceOrder[out[i].Source], sourceOrder[out[j].Source]
 		if si != sj {
@@ -302,6 +307,13 @@ func (r *Registry) Delete(name string) error {
 	if s.Source == "default" {
 		return fmt.Errorf("cannot delete system skill %q", name)
 	}
+	if s.Source == "expert" {
+		// Octo-managed like the defaults, but with a nastier failure mode:
+		// the version stamp still matches after a delete, so the root would
+		// NOT re-materialize on next start — the experts naming this skill
+		// stay silently crippled until the next version bump.
+		return fmt.Errorf("cannot delete expert skill %q — it ships with the built-in experts", name)
+	}
 
 	// Remove from registry first
 	delete(r.skills, name)
@@ -318,7 +330,10 @@ func (r *Registry) Delete(name string) error {
 
 // RenderManifest builds the L1 manifest injected into the system prompt: each
 // skill's name and description, plus a note on how to load the full body.
-// Returns "" for a nil/empty registry so the caller can skip the prompt layer.
+// Expert skills are left out — they ship for specific built-in experts and
+// would be noise in every other session's prompt; an expert sees its own via
+// ManifestForProfile's tool_skills path. Returns "" for a nil/empty registry
+// so the caller can skip the prompt layer.
 func RenderManifest(r *Registry) string {
 	if r.Len() == 0 {
 		return ""
@@ -328,8 +343,16 @@ func RenderManifest(r *Registry) string {
 	b.WriteString("When a task matches a skill's description, call the `skill` tool with its " +
 		"name to load the full instructions before acting. Don't guess the instructions " +
 		"from the one-line description. The user can also trigger one directly by typing /<name>.\n\n")
+	n := 0
 	for _, s := range r.List() {
+		if s.Source == "expert" {
+			continue
+		}
 		fmt.Fprintf(&b, "- %s: %s\n", s.Name, s.Description)
+		n++
+	}
+	if n == 0 {
+		return ""
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -417,7 +440,10 @@ func RenderSkill(s Skill, args string) string {
 		fmt.Fprintf(&b, "[skill %q — bundled files live in: %s\n", s.Name, s.Dir)
 		b.WriteString("Resolve any paths this skill references (scripts, templates, reference docs) " +
 			"against that directory and read them with your file tools.")
-		if s.Source != "default" {
+		// Skills octo ships (default and expert roots) are written for octo's
+		// toolbelt already; the Claude Code bridging note is for outside
+		// content — installed or hand-dropped user skills.
+		if s.Source != "default" && s.Source != "expert" {
 			b.WriteString("\n" + ccCompatNote)
 		}
 		b.WriteString("]\n\n")

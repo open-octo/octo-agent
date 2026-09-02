@@ -29,21 +29,41 @@ import { artifacts, panelContent, panelExpanded, artifactSel } from './stores'
 import { renderMarkdown } from './markdown'
 import type { Artifact } from './types'
 
+// The sandbox every srcdoc preview frame runs with — artifact previews (panel,
+// modal, mobile) and saved Light Apps alike, since an app is exercised in the
+// preview before it is saved and must behave the same afterwards.
+//
+// No allow-same-origin: the origin stays opaque, so the document reaches no
+// storage, cookies or host state (the bridges in laStorage.ts / laDownload.ts
+// exist because of this). No allow-popups, no allow-top-navigation.
+//
+// allow-forms: without it the submit event never fires at all — the sandboxed
+// forms check runs before the event is dispatched — so <form onsubmit> plus
+// Enter is silently dead. allow-modals: without it confirm() returns false,
+// prompt() null and alert() no-ops, so a "sure?" before delete can never be
+// answered yes. What allow-modals hands the document in return: native
+// dialogs (alert/confirm/prompt, print(), the beforeunload prompt), which are
+// tab-level and can block the host UI while open. Accepted: the app is one the
+// user asked their own agent to write.
+export const ARTIFACT_SANDBOX = 'allow-scripts allow-forms allow-modals'
+
 // Tracks which session the current artifacts belong to, so an async fetch that
 // resolves after a session switch is discarded instead of polluting the new view.
 export const artifactSelSession = writable<string | null>(null)
 
-type Kind = 'html' | 'markdown' | 'image' | 'code'
+type Kind = 'html' | 'markdown' | 'image'
 
+// Only kinds the panel can render are artifacts. Source, config, and data
+// files are deliberately absent: they are the routine bulk of a coding
+// session, would bury the reports and pages the panel exists for, and the
+// panel's Git Diff mode already shows code changes with context. Must match
+// artifactContentTypes in internal/tools/artifact.go — a kind the client knows
+// but the endpoint refuses makes the fetch 404 and the artifact silently
+// vanish (#1895).
 const EXT_KIND: Record<string, Kind> = {
   html: 'html', htm: 'html',
   md: 'markdown', markdown: 'markdown',
   png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', svg: 'image', webp: 'image',
-  js: 'code', ts: 'code', jsx: 'code', tsx: 'code', mjs: 'code', cjs: 'code',
-  css: 'code', scss: 'code', less: 'code',
-  json: 'code', yaml: 'code', yml: 'code', toml: 'code',
-  py: 'code', go: 'code', rs: 'code', sh: 'code', bash: 'code', zsh: 'code',
-  txt: 'code', xml: 'code', csv: 'code',
 }
 
 // Once-per-session guard so a live write auto-opens the panel only the first time.
@@ -69,16 +89,11 @@ function iconFor(kind: Kind): string {
     case 'html':     return 'ant-design:html5-outlined'
     case 'markdown': return 'ant-design:file-markdown-outlined'
     case 'image':    return 'ant-design:file-image-outlined'
-    case 'code':     return 'ant-design:file-text-outlined'
     default:         return 'ant-design:file-text-outlined'
   }
 }
 
-function typeLabel(kind: Kind, path: string): string {
-  if (kind === 'code') {
-    const dot = path.lastIndexOf('.')
-    return dot >= 0 ? path.slice(dot + 1).toUpperCase() : 'Code'
-  }
+function typeLabel(kind: Kind): string {
   switch (kind) {
     case 'html':     return 'HTML'
     case 'markdown': return 'Markdown'
@@ -87,41 +102,140 @@ function typeLabel(kind: Kind, path: string): string {
   }
 }
 
-// Detects HTML that references external scripts or stylesheets — these fail to
-// load inside a sandboxed srcdoc iframe that has no same-origin access. Only
-// <link> rel values whose target the document needs in order to render count:
-// a favicon, manifest, preconnect, or canonical link loads nothing the preview
-// depends on, so it must not force the warning page (#1896). preload rides
-// along with stylesheet because the rel="preload" onload="this.rel='stylesheet'"
-// idiom makes it one.
-const SCRIPT_SRC_RE = /<script[^>]+src=["'](?!data:|blob:|#)[^"']/i
-const LINK_TAG_RE = /<link\b[^>]*>/gi
-const LINK_HREF_RE = /\bhref\s*=\s*["'](?!data:|blob:|#)[^"']/i
-const LINK_REL_RE = /\brel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
-const RENDER_REL_RE = /(?:^|\s)(?:stylesheet|preload|modulepreload)(?:\s|$)/i
-function hasExternalRefs(html: string): boolean {
-  if (SCRIPT_SRC_RE.test(html)) return true
-  for (const tag of html.match(LINK_TAG_RE) ?? []) {
-    if (!LINK_HREF_RE.test(tag)) continue
-    const m = LINK_REL_RE.exec(tag)
-    if (RENDER_REL_RE.test(m?.[1] ?? m?.[2] ?? m?.[3] ?? '')) return true
+// External scripts and stylesheets — <script src> / <link rel=stylesheet href>
+// — are allowed only from the CDN allowlist below; a reference to any other
+// host is stripped before a sandboxed frame renders the page, and the page
+// renders without it under a banner saying so. Both frames that show
+// agent-written HTML go through this (selfContainedDocument): the artifact
+// preview and the Light App view, so a page's external references are treated
+// the same wherever it is opened.
+//
+// Why an allowlist rather than fully open or fully closed: the sandbox itself
+// could load any cross-origin https:// script, but an artifact must also
+// render on a machine with a poor route to the wider internet — offline, on a
+// LAN, over a tunnel, behind a national firewall — and must still render
+// years later once saved as a Light App. Well-known CDNs (with mainland-China
+// mirrors included) are the pragmatic middle: they unlock real libraries
+// (React, ECharts, …) that can never be inlined by a model, while keeping the
+// page's fate out of arbitrary hosts' hands. A local reference (`./style.css`,
+// `app.js` beside the page) really can't load: the srcdoc frame resolves it
+// against the host page, and the /api/ path it would need can't authenticate
+// from an opaque origin (see the file-header note).
+//
+// The list must stay in sync with the guidance the model reads:
+// internal/prompt/base.md (Light Apps constraints) and
+// internal/skills/defaults/artifact-design/SKILL.md.
+const CDN_ALLOWLIST = new Set([
+  'cdnjs.cloudflare.com',
+  'cdn.jsdelivr.net',
+  'unpkg.com',
+  'fonts.googleapis.com',
+  'fonts.gstatic.com',
+  // Mainland-China mirrors — the global CDNs above are flaky or blocked there.
+  'cdn.bootcdn.net',
+  'cdn.staticfile.org',
+  'cdn.staticfile.net',
+  'registry.npmmirror.com',
+])
+
+// Only an explicit https:// URL on an allowlisted host passes. URL parsing —
+// not string prefixing — decides the host, so `https://cdn.jsdelivr.net@evil`
+// and friends resolve to their real hostname and fail the lookup.
+function isAllowedRef(url: string): boolean {
+  let u: URL
+  try {
+    u = new URL(url.trim())
+  } catch {
+    return false
   }
-  return false
+  return u.protocol === 'https:' && CDN_ALLOWLIST.has(u.hostname.toLowerCase())
 }
 
-// The HTML to persist when an artifact is saved as a Light App. A Light App
-// renders through the same kind of sandboxed srcdoc iframe as the panel
-// preview, and its relative image references have nothing to resolve against
-// at all — so the inlined preview (local images as data: URIs, see
-// inlineLocalRefs) is the version that survives the copy, not the raw source
-// (#1890). The exception is a document whose preview is a placeholder rather
-// than the document itself — the external-refs warning page, or the
-// load-failure note (loadFailed) — where the raw source stays the faithful
-// copy. (A load-failed entry has no source either; the save button is
-// disabled for it, this just keeps the placeholder out on every path.)
-export function lightAppSource(a: Artifact): string {
-  if (a.type !== 'HTML' || a.loadFailed || hasExternalRefs(a.code)) return a.code
-  return a.preview || a.code
+// Stripping beats refusing to render: a page with one disallowed link still
+// shows its content, and the user can judge at a glance whether the design
+// survived. Only <link> rel values the document needs in order to render
+// count: a favicon, manifest, preconnect, or canonical link loads nothing the
+// preview depends on and stays (#1896). preload rides along with stylesheet
+// because the rel="preload" onload="this.rel='stylesheet'" idiom makes it one.
+//
+// The judgment runs on a parsed DOM, not on tag regexes: the reference that
+// matters is the one the iframe's own HTML parser will fetch, and only a
+// parser agrees with it on what that is. A string scan does not — a decoy
+// `src=` inside another attribute's quoted value, a `>` inside a quoted
+// value truncating the apparent tag, `<script/src=…>` with no whitespace —
+// each would make a regex judge one URL while the browser fetches another,
+// turning the allowlist fail-open. Parsing costs one DOMParser pass, which
+// inlineLocalRefs already spends on image-bearing documents anyway.
+//
+// A src/href of data:, blob:, or # stays: it loads nothing external. So does
+// an empty one. Everything else — absolute http(s), protocol-relative, and
+// local/relative paths (which cannot load from the srcdoc frame at all, see
+// the file-header note) — must pass the allowlist or go.
+const KEEP_SRC_RE = /^(?:data:|blob:|#|$)/i
+const RENDER_REL_RE = /(?:^|\s)(?:stylesheet|preload|modulepreload)(?:\s|$)/i
+
+// Returns the document with its disallowed external scripts and stylesheets
+// removed and how many were removed; 0 means the input came back untouched —
+// the identity return is what lets selfContainedDocument skip the banner and
+// the serialize round-trip for the common self-contained page.
+function stripExternalRefs(html: string): { html: string; removed: number } {
+  if (!/<script|<link/i.test(html)) return { html, removed: 0 }
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  let removed = 0
+  for (const el of Array.from(doc.querySelectorAll('script[src]'))) {
+    const src = (el.getAttribute('src') ?? '').trim()
+    if (KEEP_SRC_RE.test(src) || isAllowedRef(src)) continue
+    el.remove()
+    removed++
+  }
+  for (const el of Array.from(doc.querySelectorAll('link[href]'))) {
+    if (!RENDER_REL_RE.test(el.getAttribute('rel') ?? '')) continue
+    const href = (el.getAttribute('href') ?? '').trim()
+    if (KEEP_SRC_RE.test(href) || isAllowedRef(href)) continue
+    el.remove()
+    removed++
+  }
+  if (removed === 0) return { html, removed: 0 }
+  const doctype = doc.doctype ? `<!DOCTYPE ${doc.doctype.name}>` : ''
+  return { html: doctype + doc.documentElement.outerHTML, removed }
+}
+
+// The banner a stripped page renders under. It goes right after the <body>
+// start tag when there is one (so the page's own layout still applies to the
+// content below it). Without one it must still land after the DOCTYPE, or
+// the parser leaves initial mode on the <div>, ignores the DOCTYPE when it
+// then arrives, and drops the whole page into quirks mode — so the fallbacks
+// are, in order, after </head>, after <html …>, after <!DOCTYPE …>, and only
+// for a bare fragment the very top. Normal flow, not fixed: a fixed bar would
+// sit on top of whatever the page puts at y=0.
+const BANNER_ANCHORS = [/<body\b[^>]*>/i, /<\/head\s*>/i, /<html\b[^>]*>/i, /<!doctype\b[^>]*>/i]
+function withStrippedBanner(html: string, removed: number, isDark: boolean): string {
+  const bg = isDark ? '#2b2111' : '#fff8e1'
+  const border = isDark ? '#594214' : '#f0c040'
+  const color = isDark ? '#e8b339' : '#7a5c00'
+  const what = removed === 1 ? '1 external script/stylesheet was' : `${removed} external scripts/stylesheets were`
+  const banner = `<div style="padding:8px 12px;font:12px/1.5 system-ui,sans-serif;color:${color};background:${bg};border-bottom:1px solid ${border}">` +
+    `⚠️ ${what} removed — only well-known CDNs (cdnjs, jsdelivr, unpkg, bootcdn, …) load here. ` +
+    `The page may look or behave differently; the file itself is unchanged.</div>`
+  for (const re of BANNER_ANCHORS) {
+    const m = re.exec(html)
+    if (!m) continue
+    const at = m.index + m[0].length
+    return html.slice(0, at) + banner + html.slice(at)
+  }
+  return banner + html
+}
+
+// The document a sandboxed frame actually renders for agent-written HTML:
+// external references stripped, banner added when any were, the input handed
+// back untouched otherwise. Theme is read at call time; callers re-run on a
+// theme switch — artifact previews via installArtifactThemeRefresh dropping
+// them to unloaded, the Light App view by depending on themeRev.
+export function selfContainedDocument(html: string): string {
+  const { html: stripped, removed } = stripExternalRefs(html)
+  if (removed === 0) return html
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+  return withStrippedBanner(stripped, removed, isDark)
 }
 
 function artifactURL(sessionId: string, path: string): string {
@@ -138,29 +252,18 @@ function artifactURL(sessionId: string, path: string): string {
 // iframe can read.
 //
 // Two gates on what gets inlined: the reference must resolve to an image (the
-// endpoint also serves .html, .md, and the plain-text code kinds, and an
-// artifact must not be able to pull those in), and the session itself must have
-// written it, since the endpoint
+// endpoint also serves .html and .md, and an artifact must not be able to pull
+// those in), and the session itself must have written it, since the endpoint
 // serves nothing else. That covers the case that matters: a report the agent
 // wrote beside the screenshots it took. Everything else is left exactly as
-// written and simply doesn't render, same as today — which is also the fallback
-// for a local .css or .js, already routed to the warning page by
-// hasExternalRefs.
+// written and simply doesn't render, same as today. (A local .css or .js never
+// gets this far: stripExternalRefs has already removed it.)
 //
 // The budget counts raw file bytes, not what they cost once resident: a data:
 // URI carries base64's ~1.37x, doubled again by UTF-16, and the srcdoc
 // attribute holds a second copy — so a full budget is several times its own
 // size in memory for as long as the artifact stays in the store. It is also
 // per-artifact, so a session with many image-bearing documents accumulates.
-//
-// The byte budget also matters beyond memory: the inlined document is what
-// "Save to Light App" persists (lightAppSource), and POST /api/light-apps caps
-// its body at 10 MiB. 6 MiB of raw bytes is 8 MiB as base64, leaving room for
-// the document itself — but the budget is only checked before each fetch and
-// spent afterwards, so the final image can overshoot it, and a page that lands
-// past the server cap fails its save with an explicit 413 toast. Raising the
-// budget further narrows that headroom; past ~7 MiB even in-budget pages
-// couldn't save without a matching server-side change.
 const inlineRefBudget = 6 << 20
 const inlineRefMax = 40
 
@@ -208,11 +311,11 @@ async function inlineLocalRefs(
   const inline = async (raw: string): Promise<string | null> => {
     const abs = localFilePath(raw, basePath)
     if (!abs) return null
-    // Images only, enforced rather than assumed. The endpoint also serves .html,
-    // .md, and the plain-text code kinds, so without this an artifact could name
-    // a sibling document here and have the host page — which is authenticated —
-    // fetch it and hand the bytes to a preview iframe that runs scripts and can
-    // reach the network. The artifact would be reading files it was never granted.
+    // Images only, enforced rather than assumed. The endpoint also serves .html
+    // and .md, so without this an artifact could name a sibling document here
+    // and have the host page — which is authenticated — fetch it and hand the
+    // bytes to a preview iframe that runs scripts and can reach the network.
+    // The artifact would be reading files it was never granted.
     if (kindOf(abs) !== 'image') return null
     const cached = seen.get(abs)
     if (cached !== undefined) return cached
@@ -392,19 +495,6 @@ function cleanPath(p: string): string {
   return (norm.startsWith('/') ? '/' : '') + out.join('/')
 }
 
-// True when `path` lives inside `dir` — used to detect artifacts that already
-// sit in the Light Apps directory, where "Save to Light App" is pointless.
-// Both sides are normalized before comparing: separators unified, trailing
-// slashes stripped, case folded. Windows paths are case-insensitive, and the
-// server's filepath.Join and a transcript path may spell the same directory
-// differently (C:\Users vs c:/users). An empty `dir` (unknown) matches
-// nothing, so callers keep showing the action when the lookup failed.
-export function pathIsInside(path: string, dir: string): boolean {
-  if (!dir) return false
-  const norm = (s: string) => s.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
-  return norm(path).startsWith(norm(dir) + '/')
-}
-
 function blobToDataURL(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -488,7 +578,7 @@ export function observeArtifact(
   const name = basename(path)
   const entry: Artifact = {
     name,
-    type: typeLabel(kind, path),
+    type: typeLabel(kind),
     ver: '',
     short: name.length > 22 ? name.slice(0, 21) + '…' : name,
     icon: iconFor(kind),
@@ -506,12 +596,7 @@ export function observeArtifact(
   })
   artifactSel.set(get(artifacts).length - 1)
 
-  // Code kinds enter the list but never auto-open the panel: source-file
-  // writes are the routine bulk of a coding session, and popping the sidebar
-  // on the first one would make every such session open with it. They also
-  // don't consume the once-per-session flag, so a later HTML report or chart
-  // still auto-opens.
-  if (live && !autoOpened && kind !== 'code') {
+  if (live && !autoOpened) {
     autoOpened = true
     panelContent.set('session')
   }
@@ -573,6 +658,12 @@ export async function hydrateArtifact(a: Artifact | null | undefined): Promise<v
 // its identity-matched write-back instead of resurrecting the old theme.
 // Image artifacts stay untouched: they carry src, never a themed preview,
 // and hydrateArtifact would refuse to re-load them.
+//
+// themeRev ticks on the same event for documents built outside the store —
+// the Light App frame derives its srcdoc from it so a banner baked with the
+// old theme's colours is rebuilt too.
+export const themeRev = writable(0)
+
 export function installArtifactThemeRefresh(): void {
   if (typeof MutationObserver === 'undefined' || typeof document === 'undefined') return
   let last = document.documentElement.getAttribute('data-theme')
@@ -580,6 +671,7 @@ export function installArtifactThemeRefresh(): void {
     const cur = document.documentElement.getAttribute('data-theme')
     if (cur === last) return
     last = cur
+    themeRev.update(n => n + 1)
     artifacts.update(list => list.map(e =>
       e.loaded && !e.src ? { ...e, loaded: false, loadFailed: false, preview: '', code: '' } : e))
   })
@@ -599,29 +691,15 @@ async function buildTextBody(
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
   let preview = ''
   if (kind === 'html') {
-    if (hasExternalRefs(code)) {
-      // External scripts/stylesheets can't load inside a sandboxed srcdoc
-      // iframe without same-origin access. Show a warning + the raw source.
-      const escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      const warnBodyBg = isDark ? '#0d1117' : '#fafafa'
-      const warnBodyColor = isDark ? '#8b949e' : '#555'
-      const warnCardBg = isDark ? '#2b2111' : '#fff8e1'
-      const warnCardBorder = isDark ? '#594214' : '#f0c040'
-      const warnCardColor = isDark ? '#e8b339' : '#7a5c00'
-      const warnPreBg = isDark ? '#161b22' : '#f5f5f5'
-      const warnPreColor = isDark ? '#c9d1d9' : '#333'
-      preview = `<body style="margin:0;padding:16px;font:13px/1.5 system-ui,sans-serif;color:${warnBodyColor};background:${warnBodyBg}">
-<div style="padding:10px 14px;background:${warnCardBg};border:1px solid ${warnCardBorder};border-radius:6px;margin-bottom:14px;font-size:13px;color:${warnCardColor}">
-⚠️ This file references external resources and cannot be previewed here. Use <b>Open in new tab</b> or switch to <b>Code</b> view.
-</div>
-<pre style="margin:0;padding:12px;background:${warnPreBg};border-radius:6px;overflow:auto;font:12px/1.6 'SFMono-Regular',Menlo,monospace;color:${warnPreColor};white-space:pre-wrap">${escaped}</pre>
-</body>`
-    } else {
-      // No unreachable scripts or stylesheets, but the file's own images
-      // still need inlining to survive the iframe.
-      preview = await inlineLocalRefs(code, sessionId, path, 'document')
-    }
-  } else if (kind === 'markdown') {
+    // External scripts and stylesheets come out (see stripExternalRefs); the
+    // rest of the page renders, under a banner when anything was removed.
+    // The file's own images still need inlining to survive the iframe —
+    // and a page that lost its CDN stylesheet is exactly the one whose
+    // remaining content the user wants to see.
+    preview = await inlineLocalRefs(selfContainedDocument(code), sessionId, path, 'document')
+  } else {
+    // Only markdown reaches this branch: hydrateArtifact never calls in for an
+    // image, and html was handled above.
     // Markdown is rendered inside a sandboxed srcdoc iframe which has no
     // access to the host app's CSS or JS.  Inline the highlight.js theme
     // CSS, code-block layout, and a copy-button handler so syntax
@@ -671,12 +749,6 @@ async function buildTextBody(
     // The chat's own bubbles get the escaping default instead (markdown.ts).
     const body = await inlineLocalRefs(renderMarkdown(code, true, { rawHtml: true }), sessionId, path, 'fragment')
     preview = `<style>${MD_STYLES}</style><body style="${bodyStyle}">${body}${COPY_SCRIPT}</body>`
-  } else {
-    // code kind: show with theme-aware monospace style
-    const escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    const codeBg = isDark ? '#1e1e1e' : '#ffffff'
-    const codeColor = isDark ? '#d4d4d4' : 'rgba(0,0,0,0.88)'
-    preview = `<body style="margin:0;background:${codeBg}"><pre style="margin:0;padding:16px;color:${codeColor};font:13px/1.6 'SFMono-Regular',Menlo,monospace;white-space:pre-wrap;word-break:break-all">${escaped}</pre></body>`
   }
   return { code, preview }
 }

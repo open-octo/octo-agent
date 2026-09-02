@@ -282,7 +282,7 @@ func TestImplicitLiteModel(t *testing.T) {
 func TestVendorModels_ReturnsIDs(t *testing.T) {
 	// VendorModels flattens the catalogue to plain ids for the UI dropdown.
 	ids := VendorModels("deepseek")
-	want := []string{"deepseek-v4-flash", "deepseek-v4-pro"}
+	want := []string{"deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"}
 	if len(ids) != len(want) {
 		t.Fatalf("VendorModels(deepseek) = %v, want %v", ids, want)
 	}
@@ -307,9 +307,12 @@ func TestVendorModelVision(t *testing.T) {
 	}{
 		{"anthropic", "claude-opus-4-8", true, true},
 		{"deepseek", "deepseek-v4-pro", false, true}, // vision not on the API
+		{"deepseek", "deepseek-v4-flash-vision-exp", true, true},
 		{"bailian", "qwen3.7-plus", true, true},
 		{"bailian", "qwen3.7-max", false, true}, // text-only flagship
 		{"kimi", "kimi-k2.6", true, true},       // MoonViT multimodal
+		{"glm", "glm-5.3", false, true},         // text-only
+		{"glm", "glm-5.3-flash", true, true},    // image/video/file input
 		{"openai", "o3-mini", false, true},      // no image input
 		{"openai", "o4-mini", true, true},
 		{"xai", "grok-4.5", true, true},

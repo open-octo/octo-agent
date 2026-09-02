@@ -77,6 +77,12 @@ export function splitSections(
   // plain group was claimed by it above and so does NOT resurface here — that
   // group is gone from the registry the moment the server has run, and until
   // then showing its sessions twice would be worse than showing them nowhere.
+  //
+  // Deliberately NOT sorted by updated_at: rows must not jump around while the
+  // user is looking at the list (a turn ending re-stamps its row's updated_at
+  // in App.svelte, which would float it mid-session). Fetch order IS recency
+  // order at fetch time, so the list reorders exactly when it is next synced
+  // from the server — reload, reconnect, session_created.
   const ungrouped = [...byId.values()].filter(s => !claimed.has(s.id))
 
   return {

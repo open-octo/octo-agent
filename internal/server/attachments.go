@@ -287,6 +287,12 @@ func (s *Server) handleGetUpload(w http.ResponseWriter, r *http.Request) {
 	// Uploads are user-supplied bytes served from our origin; without nosniff
 	// a no-Origin <script src> include could read one as JS (XSSI).
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// Overrides the api wrapper's blanket no-store: an upload's name carries a
+	// UnixNano prefix (see handleUpload), so the bytes behind a name never
+	// change — and these are the images chat transcripts re-request on every
+	// open, which a tunneled mobile client should not re-download each time.
+	// private: user attachments have no business in a shared cache.
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	// Force download for HTML/JS content so it cannot execute in the Octo UI
 	// origin (stored XSS). Browsers still render images/pdf normally.
 	lower := strings.ToLower(name)

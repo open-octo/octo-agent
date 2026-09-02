@@ -85,7 +85,7 @@ func TestHandleGetArtifact(t *testing.T) {
 	if err := os.WriteFile(secretPath, []byte("<h1>secret</h1>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Written by the session; a code kind, served as plain text (#1895).
+	// Written by the session, but a source file — not an artifact kind.
 	goPath := filepath.Join(artDir, "main.go")
 	if err := os.WriteFile(goPath, []byte("package main"), 0o644); err != nil {
 		t.Fatal(err)
@@ -127,20 +127,10 @@ func TestHandleGetArtifact(t *testing.T) {
 	if w := getArtifact(t, srv, otherID, htmlPath); w.Code != http.StatusNotFound {
 		t.Errorf("other session: status = %d, want 404", w.Code)
 	}
-	// A written code file serves as plain text — never its native type — with
-	// the same defensive headers (#1895).
-	w = getArtifact(t, srv, id, goPath)
-	if w.Code != http.StatusOK {
-		t.Fatalf("code kind: status = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-	if ct := w.Header().Get("Content-Type"); ct != "text/plain; charset=utf-8" {
-		t.Errorf("code kind Content-Type = %q, want text/plain", ct)
-	}
-	if w.Header().Get("X-Content-Type-Options") != "nosniff" {
-		t.Error("code kind: missing nosniff header")
-	}
-	if !strings.Contains(w.Header().Get("Content-Security-Policy"), "sandbox") {
-		t.Error("code kind: missing CSP sandbox header")
+	// A written source file is not previewable either → 404, even though the
+	// session wrote it.
+	if w := getArtifact(t, srv, id, goPath); w.Code != http.StatusNotFound {
+		t.Errorf("source file: status = %d, want 404", w.Code)
 	}
 	// Written but not a previewable extension → 404.
 	if w := getArtifact(t, srv, id, binPath); w.Code != http.StatusNotFound {
@@ -186,15 +176,15 @@ func TestHandleGetArtifact_SizeCap(t *testing.T) {
 // tools resolve them against the session working dir and record the absolute
 // result in the ui payload, which is also what the panel lists. The whitelist
 // must serve from that resolved path — matching only the raw tool_use input
-// 404s every relative-path write in the panel, which is most code edits.
+// 404s every relative-path write in the panel.
 func TestHandleGetArtifact_RelativeInputPath(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 
 	artDir := t.TempDir()
-	abs := filepath.Join(artDir, "main.go")
-	if err := os.WriteFile(abs, []byte("package main"), 0o644); err != nil {
+	abs := filepath.Join(artDir, "report.md")
+	if err := os.WriteFile(abs, []byte("# report"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -206,11 +196,11 @@ func TestHandleGetArtifact_RelativeInputPath(t *testing.T) {
 		Role: agent.RoleAssistant,
 		Blocks: []agent.ContentBlock{{
 			Type: "tool_use", ID: "t1", Name: "write_file",
-			Input: map[string]any{"path": "main.go", "content": "package main"},
+			Input: map[string]any{"path": "report.md", "content": "# report"},
 		}},
 	})
-	res := agent.NewToolResultBlock("t1", "wrote main.go", false)
-	res.UI = map[string]any{"type": "write", "path": abs, "size_bytes": 12}
+	res := agent.NewToolResultBlock("t1", "wrote report.md", false)
+	res.UI = map[string]any{"type": "write", "path": abs, "size_bytes": 8}
 	sess.Messages = append(sess.Messages, agent.Message{
 		Role:   agent.RoleUser,
 		Blocks: []agent.ContentBlock{res},
@@ -224,7 +214,7 @@ func TestHandleGetArtifact_RelativeInputPath(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("relative-input write: status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
-	if w.Body.String() != "package main" {
+	if w.Body.String() != "# report" {
 		t.Errorf("body = %q", w.Body.String())
 	}
 
@@ -235,7 +225,7 @@ func TestHandleGetArtifact_RelativeInputPath(t *testing.T) {
 		Role: agent.RoleAssistant,
 		Blocks: []agent.ContentBlock{{
 			Type: "tool_use", ID: "t1", Name: "write_file",
-			Input: map[string]any{"path": "main.go", "content": "x"},
+			Input: map[string]any{"path": "report.md", "content": "x"},
 		}},
 	})
 	deniedRes := agent.NewToolResultBlock("t1", "permission_denied: user declined to run write_file", true)

@@ -1,7 +1,7 @@
 // Light App storage bridge — makes `localStorage` WORK inside Light Apps.
 //
-// Light Apps render in a sandboxed srcdoc iframe (`sandbox="allow-scripts"`,
-// deliberately without `allow-same-origin`), so their origin is opaque and the
+// Light Apps render in a sandboxed srcdoc iframe (`allow-scripts allow-forms
+// allow-modals`, deliberately without `allow-same-origin`), so their origin is opaque and the
 // browser refuses every persistent storage API: localStorage, sessionStorage,
 // Cookie, IndexedDB all throw SecurityError in there. Persistent state
 // (scores, collections, settings) was impossible for Light Apps.
@@ -23,6 +23,10 @@
 // Only sessionStorage is deliberately left broken: a Light App that wants
 // per-visit state can keep it in a plain variable.
 //
+// The same postMessage channel carries the download bridge (laDownload.ts):
+// this module owns the iframe registry and the message router, that one owns
+// the download op and its injected script.
+//
 // Security model:
 //   - Only iframes the host registered (registerLaIframe) can read/write; the
 //     message handler checks event.source against the registry and ignores
@@ -37,6 +41,8 @@
 //   - Keys are validated strings (<=512 chars, non-empty); values are strings
 //     capped at MAX_VALUE. The shim enforces the same limits synchronously so
 //     a rejected write can never leave the cache disagreeing with the store.
+
+import { MAX_DOWNLOAD_BYTES, buildLaDownloadScript, deliverLaDownload, jsLiteral, sanitizeDownloadName } from './laDownload'
 
 const DB_NAME = 'octo-la-storage'
 const STORE = 'kv'
@@ -154,10 +160,12 @@ async function laClear(ns: string): Promise<void> {
 // ── Bridge protocol ─────────────────────────────────────────────────────────
 //
 // iframe -> parent:  { __laBridge: 1, id, ns, op: 'dump'|'set'|'remove'|'clear', key?, value? }
+//                    { __laBridge: 1, id: 0, ns, op: 'download', name, blob }
 // parent -> iframe:  { __laBridge: 1, id, res: true, ok, value?, err? }
 //
 // `res: true` marks the direction, so a nested iframe's request reaching this
-// window is never mistaken for a reply to one of our own calls.
+// window is never mistaken for a reply to one of our own calls. `download` is
+// fire-and-forget — no reply, the outcome surfaces as a host toast.
 
 function validKey(key: unknown): key is string {
   return typeof key === 'string' && key.length > 0 && key.length <= MAX_KEY
@@ -196,6 +204,12 @@ function onLaMessage(ev: MessageEvent): void {
     case 'clear':
       laClear(ns).then(() => reply(true)).catch(fail)
       break
+    case 'download':
+      // No reply: the shim doesn't wait for one. A payload that isn't a Blob
+      // or is over the cap is dropped outright rather than reported back.
+      if (!(d.blob instanceof Blob) || d.blob.size > MAX_DOWNLOAD_BYTES) return
+      void deliverLaDownload(sanitizeDownloadName(d.name), d.blob)
+      break
     default:
       reply(false, undefined, 'unknown op')
   }
@@ -223,11 +237,6 @@ export function installLaStorageBridge(): void {
 // The limits the host enforces are re-checked here synchronously, and a
 // violation throws QuotaExceededError like real localStorage does — a write
 // the host would reject must not silently sit in the cache.
-
-// Embed a string as a JS literal that is also inert inside <script> in HTML.
-function jsLiteral(s: string): string {
-  return JSON.stringify(s).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')
-}
 
 export function buildLaBridgeScript(ns: string): string {
   return `(function(){
@@ -304,9 +313,16 @@ export function buildLaBridgeScript(ns: string): string {
 })();`
 }
 
-/** Inject the bridge script into a Light App document before </body>. */
+/**
+ * Inject the bridge scripts (storage + download) into a Light App document
+ * before </body>. The close tag must be a literal `</script>`: this string is
+ * parsed as the srcdoc document itself, not embedded inside another script, so
+ * a `<\/script>` here never closes the element and the whole bridge dies as a
+ * syntax error. Neither script body contains `</script>`, so nothing needs
+ * escaping.
+ */
 export function withLaBridge(html: string, ns: string): string {
-  const script = `<script>${buildLaBridgeScript(ns)}<\\/script>`
+  const script = `<script>${buildLaBridgeScript(ns)}\n${buildLaDownloadScript(ns)}</script>`
   if (/\<\/body\s*>/i.test(html)) return html.replace(/\<\/body\s*>/i, script + '</body>')
   return html + script
 }

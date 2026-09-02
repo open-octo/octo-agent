@@ -1,6 +1,6 @@
 ---
 name: artifact-design
-description: Design guidance for any self-contained HTML/Markdown file shown in octo's Artifacts panel — reports, dashboards, architecture/system diagrams, generated UIs, slide-style pages. Read this BEFORE writing the file, not after — it calibrates how much design effort the request warrants and covers the panel's real constraints (sandboxed iframe, no external resources, narrow default width, no live theme push). Use when the user asks to "画架构图" / "generate a diagram" / "make a dashboard" / "produce a report page" / "visualize this as a page" / build any artifact meant to be looked at rather than edited. If the page contains a chart, graph, plot, heatmap, or stat tile, also read references/charts.md — chart-type selection, color systems, legend/axis/tooltip conventions.
+description: Design guidance for any self-contained HTML/Markdown file shown in octo's Artifacts panel — reports, dashboards, architecture/system diagrams, generated UIs, slide-style pages. Read this BEFORE writing the file, not after — it calibrates how much design effort the request warrants and covers the panel's real constraints (sandboxed iframe, external resources gated to an allowlist of CDN hosts, narrow default width, no live theme push). Use when the user asks to "画架构图" / "generate a diagram" / "make a dashboard" / "produce a report page" / "visualize this as a page" / build any artifact meant to be looked at rather than edited. If the page contains a chart, graph, plot, heatmap, or stat tile, also read references/charts.md — chart-type selection, color systems, legend/axis/tooltip conventions.
 ---
 
 # Artifact design
@@ -25,12 +25,19 @@ legibility at the panel's docked width.
   `allow-same-origin`: no cookies, no `localStorage`, no reach into the host
   app. This is a hard boundary, not a suggestion — design as if the page runs
   on an isolated blank origin, because it does.
-- **Self-contained is enforced, not just recommended.** The panel detects
-  `<script src=…>` / `<link href=…>` pointing anywhere but `data:`, `blob:`,
-  or `#`, and if it finds one it refuses to render the page at all — showing a
-  warning plus the raw source instead of your design. Inline every `<style>`
-  and `<script>`; embed images as `data:` URIs; never reference a CDN, a
-  Google Font, or any other network resource.
+- **External references are allowlist-gated, and the allowlist is enforced.**
+  A `<script src=…>` / `<link rel="stylesheet" href=…>` may only point at
+  these CDN hosts; anything else is stripped before rendering, under a banner
+  saying how many were removed: `cdnjs.cloudflare.com`, `cdn.jsdelivr.net`,
+  `unpkg.com`, `fonts.googleapis.com`, `fonts.gstatic.com`, and the
+  mainland-China mirrors `cdn.bootcdn.net`, `cdn.staticfile.org`,
+  `cdn.staticfile.net`, `registry.npmmirror.com`. Pin exact versions; if the
+  user is in mainland China, prefer the CN mirrors. Still default to inlining:
+  a CDN page renders broken with no route to that host (offline, LAN, tunnel),
+  so reach for one only when the page needs a real library (React, ECharts,
+  Chart.js, …) that cannot be inlined. Embed images as `data:` URIs — a local
+  `./img.png` beside the file works in the preview, but a network image is at
+  the network's mercy.
 - **The default viewport is narrow.** The panel is a **420px-wide docked
   sidebar** by default; the user can maximize it to `min(900px, 75vw)`, but
   don't design for that as the common case. Build the layout to read cleanly
@@ -76,10 +83,12 @@ and share. Match investment to what's being requested:
 
 Before calling `write_file`/`show_artifact`, confirm:
 
-- [ ] No `<link rel="stylesheet" href="https://…">`, no CDN `<script src>` —
-      everything needed is inlined in one `<style>`/`<script>` block
-- [ ] No web fonts — use the system stack:
-      `-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`
+- [ ] Every `<script src>` / `<link rel="stylesheet" href>` points at an
+      allowlisted CDN host (see above) with a pinned version — everything
+      else is inlined in one `<style>`/`<script>` block
+- [ ] Web fonts only from `fonts.googleapis.com`, always with a system-stack
+      fallback: `-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+      sans-serif` — or skip the web font and use the stack alone
 - [ ] Any image is a `data:` URI or omitted, never a network URL
 - [ ] `@media (prefers-color-scheme: dark)` covers every color used, and every
       color has a light-mode default that isn't just "assume light"

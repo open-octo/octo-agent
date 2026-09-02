@@ -1349,6 +1349,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     let lastScrollTop = scroller.scrollTop
     const onScroll = () => {
       const top = scroller.scrollTop
+      // Browsers only fire 'scroll' when the position changed, so an event that
+      // lands on the baseline is a coalesced no-op (or one arriving right after
+      // onVisibility resynced it) — not a gesture. Re-deriving stick from the
+      // resting position here is exactly what latched auto-scroll off when
+      // content had grown without a pin in between.
+      if (top === lastScrollTop) return
       const nearBottom = scroller.scrollHeight - top - scroller.clientHeight < 80
       if (top < lastScrollTop) {
         if (!nearBottom) stick = false
@@ -1399,17 +1405,45 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     }
     scroller.addEventListener('wheel', onWheel, { passive: true })
 
+    // Release never re-derives stick from the resting position: the RO is
+    // blocked for the whole press while the stream keeps appending, so by
+    // release the view can sit well below the 80px band without the user
+    // having scrolled anywhere (clicking back into the chat after a window
+    // switch is the common case — content grew while the tab was hidden and
+    // the activating click lands before the first RO frame). A gesture that
+    // moved the scroller already updated stick through its 'scroll' events; a
+    // press that didn't scroll is not a gesture. So on release only lift the
+    // block and catch up on whatever growth it held back.
     let interacting = false
     const onPointerDown = () => { interacting = true }
-    const onPointerUp = () => { interacting = false; onScroll() }
+    const onPointerUp = () => {
+      interacting = false
+      if (stick) scroller.scrollTop = scroller.scrollHeight
+    }
     scroller.addEventListener('pointerdown', onPointerDown)
     window.addEventListener('pointerup', onPointerUp)
     window.addEventListener('pointercancel', onPointerUp)
     // A drag released outside the window (e.g. the pointer is still down when
     // focus is stolen by alt-tabbing) never fires 'pointerup' on this
     // document, which would otherwise leave `interacting` stuck true and
-    // silently disable auto-scroll for the rest of the tab's life.
+    // silently disable auto-scroll for the rest of the tab's life. (Blur is
+    // also the leaving half of a window switch, and it lands at an arbitrary
+    // point between a DOM append and the next RO pin — the same stale-position
+    // hazard onPointerUp no longer re-derives stick from.)
     window.addEventListener('blur', onPointerUp)
+    // Browsers skip rendering updates for a hidden document, so nothing pins
+    // while the tab is backgrounded and the scroll events from that period
+    // (scroll anchoring, clamping after a block collapses) arrive coalesced
+    // once it is shown again — measured against the by-then much taller
+    // content, a small upward adjustment reads as the user scrolling away.
+    // Nobody scrolls a hidden tab: on wake, re-pin if we were following and
+    // resync the baseline so that coalesced event is a no-op.
+    const onVisibility = () => {
+      if (document.hidden) return
+      if (stick && !interacting) scroller.scrollTop = scroller.scrollHeight
+      lastScrollTop = scroller.scrollTop
+    }
+    document.addEventListener('visibilitychange', onVisibility)
     // Belt-and-braces for the same stuck-true hazard: a pointerup swallowed
     // by the OS (context menu dismissed with Esc, an HTML5 drag) never
     // reaches the window either. Any pointer motion with no buttons held
@@ -1439,6 +1473,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       window.removeEventListener('pointerup', onPointerUp)
       window.removeEventListener('pointercancel', onPointerUp)
       window.removeEventListener('blur', onPointerUp)
+      document.removeEventListener('visibilitychange', onVisibility)
       if (unstickTimer) clearTimeout(unstickTimer)
       ro.disconnect()
     }

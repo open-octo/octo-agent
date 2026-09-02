@@ -89,6 +89,22 @@ describe('splitSections', () => {
     expect(s.projects[0].items).toEqual([])
     expect(s.ungrouped.map(x => x.id)).toEqual(['a'])
   })
+
+  // Rows must not jump around while the user is looking at the list: a turn
+  // ending re-stamps its row's updated_at (App.svelte) for the timestamp
+  // display, but the ORDER stays as fetched until the next server sync.
+  it('keeps fetch order even when updated_at says otherwise', () => {
+    const at = (id: string, updated_at: string): Session => ({ id, updated_at }) as Session
+    const s = splitSections(
+      [
+        at('old', '2026-08-29T10:00:00+08:00'),
+        at('stamped', '2026-08-29T05:30:00.000Z'), // = 13:30+08:00, the newest
+        at('mid', '2026-08-29T11:00:00+08:00'),
+      ],
+      [], [], [],
+    )
+    expect(s.ungrouped.map(x => x.id)).toEqual(['old', 'stamped', 'mid'])
+  })
 })
 
 describe('swapWithinSection', () => {

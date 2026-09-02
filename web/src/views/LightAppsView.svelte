@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { showToast, openAgentSession, panelContent, lightapps, lightappSel, lightappOpen, lightappHTML } from '../lib/stores'
+  import { showToast, openAgentSession, panelContent, lightapps, lightappSel, lightappOpen, lightappHTML, cacheLightApp } from '../lib/stores'
   import * as api from '../lib/api'
   import type { LightApp } from '../lib/api'
   import { t, tr } from '../lib/i18n'
@@ -38,8 +38,7 @@
     if ($lightapps.length === 0) lightapps.set(apps)
     if ($lightappHTML[slug]) return
     try {
-      const detail = await api.getLightApp(slug)
-      lightappHTML.update(m => ({ ...m, [slug]: detail.html }))
+      cacheLightApp(slug, await api.getLightApp(slug))
     } catch (e: any) {
       showToast(`Failed to open: ${e.message}`, 'error')
     }
