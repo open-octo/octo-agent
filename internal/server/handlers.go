@@ -95,8 +95,18 @@ type sessionCreateRequest struct {
 
 // toSessionItem builds a frontend-friendly session descriptor.
 func (srv *Server) toSessionItem(s *agent.Session, source, agentProfile string) sessionItem {
+	// ContentUpdatedAt (set by Save only when the message count actually
+	// changes — see its doc comment) is preferred over the file's raw mtime:
+	// the same file also absorbs binding/lease bookkeeping writes (a turn's
+	// post-completion release, the idle-steer check that runs even with
+	// nothing queued) that land moments after the reply the sidebar's unread
+	// dot is comparing against, which used to make that comparison chase a
+	// timestamp that had nothing to do with new content. Sessions predating
+	// this field fall back to the file mtime until their next real save.
 	updated := s.CreatedAt
-	if p, err := s.SavePath(); err == nil {
+	if !s.ContentUpdatedAt.IsZero() {
+		updated = s.ContentUpdatedAt
+	} else if p, err := s.SavePath(); err == nil {
 		if st, err := os.Stat(p); err == nil {
 			updated = st.ModTime()
 		}
