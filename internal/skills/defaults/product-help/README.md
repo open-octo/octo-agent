@@ -9,8 +9,8 @@ data staying on the user's own machine. No Node / Python / Ruby runtime.
 
 **Stable (1.0).** Eight interfaces are planned (one per arm of the octopus); seven are live:
 
-- **CLI / TUI** — interactive session in a terminal
-- **Headless one-shot** — `octo "prompt"` or piped stdin runs one full agentic turn and exits; script it from cron, CI, or your own programs
+- **TUI** — interactive session in a terminal
+- **CLI** — `octo "prompt"` or piped stdin runs one headless agentic turn and exits; script it from cron, CI, or your own programs
 - **Web UI** — `octo serve`, a local dashboard over REST + WebSocket
 - **Desktop app** — native window + system tray (macOS / Windows / Linux)
 - **IM bridge** — WeChat iLink, Feishu, DingTalk, WeCom, Discord, Telegram, inside `octo serve`

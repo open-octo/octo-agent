@@ -38,7 +38,7 @@ octo is built around that positioning:
 - **Works out of the box**: shell, file read/write/edit, search, MCP servers, skills, and sub-agents are all on by default — one message after install is enough for it to actually do work.
 - **Model choice stays yours**: any OpenAI / Anthropic protocol-compatible endpoint is supported natively; no vendor lock-in.
 - **Data stays on your machine**: self-hosted, zero telemetry — except for the model API calls you configure, octo sends no outbound traffic on its own.
-- **Everywhere you are**: the same binary serves eight entry points — interactive CLI, headless one-shot, web, desktop, IM, editor extensions, and mobile.
+- **Everywhere you are**: the same binary serves eight entry points — TUI, CLI, web, desktop, IM, editor extensions, and mobile.
 - **Safe defaults**: catastrophic commands are hard-coded denies, and deletes and overwrites are backed up to a recycle bin first — the agent won't edit itself dead and won't go rogue on your data.
 
 If you already have reliable access to a Codex or Claude subscription, keep using it — they remain the best agent harnesses on the planet. Otherwise, octo is worth a serious look.
@@ -47,7 +47,7 @@ If you already have reliable access to a Codex or Claude subscription, keep usin
 
 - **A single ~40 MB Go binary**: one command to download, copy to any server, and run. No Node / Python / Ruby dependency tree; no npm mirror, node-gyp build failure, or version conflict headaches.
 - **No cache degradation**: prompt caching is tuned per provider; measured hit rates for Kimi, DeepSeek, and Qwen are all **95%+**, keeping your token bill predictable.
-- **Eight interfaces**: CLI / TUI, headless one-shot, Web UI, desktop app, IM bridge, VS Code, Obsidian, and mobile — few other agent projects cover this many entry points at once.
+- **Eight interfaces**: TUI, CLI, Web UI, desktop app, IM bridge, VS Code, Obsidian, and mobile — few other agent projects cover this many entry points at once.
 - **Zero telemetry**: no IP, device model, model choice, or usage behavior is collected — no telemetry hooks at all.
 - **Desktop installer around 100 MB**: compare that to Codex desktop and WorkBuddy, which often weigh in around **1 GB**. A thin agent harness shouldn't need that much space.
 - **Stable and safe**: self-protection, graceful restarts, and a recycle-bin safety net (see [Core Features](#core-features)).
@@ -58,8 +58,8 @@ Any one of these points might be covered by some other product. But only octo co
 
 ```text
 octo (single binary)
-  -> CLI / TUI            interactive terminal session
-  -> Headless one-shot    octo "prompt" or piped stdin: one full agentic turn, then exit — script it from cron, CI, or your own programs
+  -> TUI                  interactive terminal session
+  -> CLI                  octo "prompt" or piped stdin: one headless agentic turn, then exit — script it from cron, CI, or your own programs
   -> Web UI               octo serve local dashboard
   -> Desktop app          native window + system tray on macOS / Windows / Linux
   -> IM bridge            WeChat iLink, Feishu, DingTalk, WeCom, Discord, Telegram
@@ -68,7 +68,7 @@ octo (single binary)
   -> Mobile               iOS + Android developer preview
 ```
 
-**Stable (1.0)** already covers the CLI (interactive TUI and headless one-shot), Web UI, Desktop, IM bridge, and the [VS Code](https://github.com/open-octo/octo-vscode) / [Obsidian](https://github.com/open-octo/octo-obsidian) extensions. The eighth — a mobile app (iOS + Android) — is implemented and in **developer preview**: buildable from source today against a self-hosted relay (see [`mobile/`](mobile/)), with a hosted relay and app-store builds next.
+**Stable (1.0)** already covers TUI, CLI, Web UI, Desktop, IM bridge, and the [VS Code](https://github.com/open-octo/octo-vscode) / [Obsidian](https://github.com/open-octo/octo-obsidian) extensions. The eighth — a mobile app (iOS + Android) — is implemented and in **developer preview**: buildable from source today against a self-hosted relay (see [`mobile/`](mobile/)), with a hosted relay and app-store builds next.
 
 ## Core Features
 
@@ -147,9 +147,9 @@ Next steps: [quickstart](https://octo-agent.dev/docs/getting-started/quickstart/
 ```text
 ┌────────────────────────────────┐
 │        Eight interfaces        │
-│  CLI/TUI · One-shot · Web UI   │
-│     Desktop · IM · VS Code     │
-│       Obsidian · Mobile        │
+│    TUI · CLI · Web UI · IM     │
+│  Desktop · VS Code · Obsidian  │
+│             Mobile             │
 └───────────────┬────────────────┘
                 │
 ┌───────────────▼────────────────┐
@@ -213,7 +213,7 @@ Project conventions live in [`CLAUDE.md`](CLAUDE.md) and [`.octorules`](.octorul
 
 ## Current Status
 
-octo has shipped **1.0 stable** — the CLI (interactive and headless one-shot), Web UI, desktop, IM bridge, and editor extensions are all safe to rely on; mobile is in developer preview. What you can build on is declared in [COMPATIBILITY.md](COMPATIBILITY.md); the security boundary in [SECURITY.md](SECURITY.md).
+octo has shipped **1.0 stable** — TUI, CLI, Web UI, desktop, IM bridge, and editor extensions are all safe to rely on; mobile is in developer preview. What you can build on is declared in [COMPATIBILITY.md](COMPATIBILITY.md); the security boundary in [SECURITY.md](SECURITY.md).
 
 ## Prior Art & Acknowledgements
 
