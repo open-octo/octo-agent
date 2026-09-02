@@ -140,53 +140,15 @@ func TestGetLightApp_PathTraversal(t *testing.T) {
 	}
 }
 
-// TestCreateLightApp_SourcePathRoundTrip: source_path persists into the
-// manifest and comes back through the create response and the listing — the
-// web UI relies on it to hide "Save to Light App" for already-saved artifacts.
-func TestCreateLightApp_SourcePathRoundTrip(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
-
-	body := `{"name":"Quicksort Viz","html":"<html>ok</html>","source_path":"/work/quicksort-visualizer.html"}`
-	w := doJSON(t, srv, "POST", "/api/light-apps", body)
-	if w.Code != 201 {
-		t.Fatalf("create: expected 201, got %d (body: %s)", w.Code, w.Body.String())
-	}
-	var created lightAppManifest
-	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
-		t.Fatal(err)
-	}
-	if created.SourcePath != "/work/quicksort-visualizer.html" {
-		t.Errorf("create response source_path: got %q", created.SourcePath)
-	}
-
-	w = doJSON(t, srv, "GET", "/api/light-apps", "")
-	if w.Code != 200 {
-		t.Fatalf("list: expected 200, got %d", w.Code)
-	}
-	var out struct{ Apps []lightAppManifest }
-	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
-		t.Fatal(err)
-	}
-	if len(out.Apps) != 1 || out.Apps[0].SourcePath != "/work/quicksort-visualizer.html" {
-		t.Errorf("listing source_path round-trip failed: %+v", out.Apps)
-	}
-}
-
 // TestListLightApps_UpdatedAtTracksHTML: updated_at follows index.html's mtime
 // (so an edit moves it) and is never written into manifest.json.
 func TestListLightApps_UpdatedAtTracksHTML(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	seedLightApp(t, home, "clock", "Clock", "")
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	w := doJSON(t, srv, "POST", "/api/light-apps", `{"name":"Clock","html":"<html>v1</html>"}`)
-	if w.Code != 201 {
-		t.Fatalf("create: expected 201, got %d (body: %s)", w.Code, w.Body.String())
-	}
 	appDir := filepath.Join(home, ".octo", "light-apps", "clock")
 	if raw, err := os.ReadFile(filepath.Join(appDir, "manifest.json")); err != nil {
 		t.Fatal(err)

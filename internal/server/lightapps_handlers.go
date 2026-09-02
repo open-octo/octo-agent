@@ -1,13 +1,10 @@
 package server
 
 import (
-	"crypto/sha256"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -28,10 +25,6 @@ type lightAppManifest struct {
 	Description string `json:"description"`
 	Icon        string `json:"icon,omitempty"`
 	CreatedAt   string `json:"created_at"`
-	// SourcePath is the absolute path of the session artifact this app was
-	// saved from, when it was. The web UI matches it against the artifact on
-	// display to hide the redundant "Save to Light App" action.
-	SourcePath string `json:"source_path,omitempty"`
 	// UpdatedAt is index.html's mtime, stamped at read time so the web UI can
 	// tell that an app it has open was rewritten on disk. Derived, never
 	// persisted: the writers leave it empty and omitempty keeps it out of
@@ -50,8 +43,7 @@ func stampLightApp(m *lightAppManifest, htmlPath string) {
 
 // handleListLightApps lists all Light Apps by scanning ~/.octo/light-apps/ for
 // subdirectories containing a valid manifest.json. The response also carries
-// the directory itself, so the web UI can tell whether a session artifact
-// already lives inside it (and skip the redundant "Save to Light App" action).
+// the directory itself.
 func (s *Server) handleListLightApps(w http.ResponseWriter, r *http.Request) {
 	dir := lightAppsDir()
 	entries, err := os.ReadDir(dir)
@@ -146,103 +138,4 @@ func (s *Server) handleDeleteLightApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
-}
-
-// handleCreateLightApp creates a new Light App from the provided manifest and
-// HTML content. Slug is auto-derived from name if not supplied.
-func (s *Server) handleCreateLightApp(w http.ResponseWriter, r *http.Request) {
-	// Cap body at 10 MB — more than enough for any self-contained HTML page.
-	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
-
-	var in struct {
-		Slug        string `json:"slug"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Icon        string `json:"icon"`
-		HTML        string `json:"html"`
-		SourcePath  string `json:"source_path"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		if strings.Contains(err.Error(), "http: request body too large") {
-			writeError(w, http.StatusRequestEntityTooLarge, "lightapp_body_too_large")
-			return
-		}
-		writeError(w, http.StatusBadRequest, "invalid_lightapp_payload")
-		return
-	}
-	if in.Name == "" {
-		writeError(w, http.StatusBadRequest, "lightapp_name_required")
-		return
-	}
-	if in.HTML == "" {
-		writeError(w, http.StatusBadRequest, "lightapp_html_required")
-		return
-	}
-
-	slug := in.Slug
-	if slug == "" {
-		slug = slugFromName(in.Name)
-	}
-	if slug == "" || strings.Contains(slug, "..") || strings.ContainsAny(slug, "/\\") {
-		writeError(w, http.StatusBadRequest, "invalid_lightapp_slug")
-		return
-	}
-
-	appDir := filepath.Join(lightAppsDir(), slug)
-
-	// Reject if the app already exists — users should delete first or rename.
-	if _, err := os.Stat(appDir); err == nil {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "slug_exists", "slug": slug})
-		return
-	}
-
-	if err := os.MkdirAll(appDir, 0o755); err != nil {
-		writeError(w, http.StatusInternalServerError, "create_lightapp_failed")
-		return
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	if in.Icon == "" {
-		in.Icon = "📄"
-	}
-	m := lightAppManifest{
-		Slug:        slug,
-		Name:        in.Name,
-		Description: in.Description,
-		Icon:        in.Icon,
-		CreatedAt:   now,
-		SourcePath:  in.SourcePath,
-	}
-
-	mData, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "create_lightapp_failed")
-		return
-	}
-	if err := os.WriteFile(filepath.Join(appDir, "manifest.json"), mData, 0o644); err != nil {
-		writeError(w, http.StatusInternalServerError, "create_lightapp_failed")
-		return
-	}
-	if err := os.WriteFile(filepath.Join(appDir, "index.html"), []byte(in.HTML), 0o644); err != nil {
-		writeError(w, http.StatusInternalServerError, "create_lightapp_failed")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, m)
-}
-
-// slugFromName derives a URL-safe slug from a display name.
-var slugNonAlpha = regexp.MustCompile(`[^a-z0-9]+`)
-
-func slugFromName(name string) string {
-	s := strings.ToLower(strings.TrimSpace(name))
-	s = slugNonAlpha.ReplaceAllString(s, "-")
-	s = strings.Trim(s, "-")
-	if s == "" {
-		// Derive a stable slug from the original name so repeated calls with
-		// the same input always produce the same fallback.
-		h := sha256.Sum256([]byte(name))
-		s = fmt.Sprintf("app-%x", h[:4])
-	}
-	return s
 }
