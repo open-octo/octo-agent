@@ -3623,7 +3623,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
 /* ── Agent message ───────────────────────────────────────────────────────── */
 .msg-agent { display: flex; flex-direction: column; gap: 12px; }
-.agent-content { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.agent-content { min-width: 0; display: flex; flex-direction: column; gap: 12px; word-wrap: break-word; }
 
 /* ── Plan card ───────────────────────────────────────────────────────────── */
 .plan-card { border: 1px solid var(--blue-2); border-radius: 10px; background: var(--surface-info); overflow: hidden; }
