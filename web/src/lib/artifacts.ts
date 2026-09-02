@@ -200,10 +200,6 @@ function stripExternalRefs(html: string): { html: string; removed: number } {
   return { html: doctype + doc.documentElement.outerHTML, removed }
 }
 
-function hasExternalRefs(html: string): boolean {
-  return stripExternalRefs(html).removed > 0
-}
-
 // The banner a stripped page renders under. It goes right after the <body>
 // start tag when there is one (so the page's own layout still applies to the
 // content below it). Without one it must still land after the DOCTYPE, or
@@ -242,21 +238,6 @@ export function selfContainedDocument(html: string): string {
   return withStrippedBanner(stripped, removed, isDark)
 }
 
-// The HTML to persist when an artifact is saved as a Light App. A Light App
-// renders through the same kind of sandboxed srcdoc iframe as the panel
-// preview, and its relative image references have nothing to resolve against
-// at all — so the inlined preview (local images as data: URIs, see
-// inlineLocalRefs) is the version that survives the copy, not the raw source
-// (#1890). The exceptions are a document whose preview is not the document
-// itself — one rendered with its external references stripped, or the
-// load-failure note (loadFailed) — where the raw source stays the faithful
-// copy. (A load-failed entry has no source either; the save button is
-// disabled for it, this just keeps the placeholder out on every path.)
-export function lightAppSource(a: Artifact): string {
-  if (a.type !== 'HTML' || a.loadFailed || hasExternalRefs(a.code)) return a.code
-  return a.preview || a.code
-}
-
 function artifactURL(sessionId: string, path: string): string {
   return `/api/sessions/${encodeURIComponent(sessionId)}/artifacts?path=${encodeURIComponent(path)}`
 }
@@ -283,15 +264,6 @@ function artifactURL(sessionId: string, path: string): string {
 // attribute holds a second copy — so a full budget is several times its own
 // size in memory for as long as the artifact stays in the store. It is also
 // per-artifact, so a session with many image-bearing documents accumulates.
-//
-// The byte budget also matters beyond memory: the inlined document is what
-// "Save to Light App" persists (lightAppSource), and POST /api/light-apps caps
-// its body at 10 MiB. 6 MiB of raw bytes is 8 MiB as base64, leaving room for
-// the document itself — but the budget is only checked before each fetch and
-// spent afterwards, so the final image can overshoot it, and a page that lands
-// past the server cap fails its save with an explicit 413 toast. Raising the
-// budget further narrows that headroom; past ~7 MiB even in-budget pages
-// couldn't save without a matching server-side change.
 const inlineRefBudget = 6 << 20
 const inlineRefMax = 40
 
@@ -521,19 +493,6 @@ function cleanPath(p: string): string {
     out.push(seg)
   }
   return (norm.startsWith('/') ? '/' : '') + out.join('/')
-}
-
-// True when `path` lives inside `dir` — used to detect artifacts that already
-// sit in the Light Apps directory, where "Save to Light App" is pointless.
-// Both sides are normalized before comparing: separators unified, trailing
-// slashes stripped, case folded. Windows paths are case-insensitive, and the
-// server's filepath.Join and a transcript path may spell the same directory
-// differently (C:\Users vs c:/users). An empty `dir` (unknown) matches
-// nothing, so callers keep showing the action when the lookup failed.
-export function pathIsInside(path: string, dir: string): boolean {
-  if (!dir) return false
-  const norm = (s: string) => s.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
-  return norm(path).startsWith(norm(dir) + '/')
 }
 
 function blobToDataURL(blob: Blob): Promise<string> {

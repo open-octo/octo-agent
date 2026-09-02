@@ -3,7 +3,7 @@
   import { titlebarDblClick } from '../lib/nativeWindow'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
-  import { ARTIFACT_SANDBOX, hydrateArtifact, lightAppSource, pathIsInside, selfContainedDocument, themeRev } from '../lib/artifacts'
+  import { ARTIFACT_SANDBOX, hydrateArtifact, selfContainedDocument, themeRev } from '../lib/artifacts'
   import { CENTER_MIN } from '../lib/sidebarWidth'
   import { diffData, diffLoading, diffBadge, loadDiff } from '../lib/diff'
   import DiffView from './diff/DiffView.svelte'
@@ -54,83 +54,6 @@
 
   function onCopy() { copyArtifact(cur?.code ?? '', showToast) }
   function onDownload() { downloadArtifact(cur, showToast) }
-
-  // ── Save to Light App (HTML artifacts only) ─────────────────────────────
-  let saveToLAName = $state('')
-  let saveToLADialog = $state(false)
-  let saveToLALoading = $state(false)
-
-  function openSaveToLA() {
-    saveToLAName = cur?.name?.replace(/\.[^.]+$/, '') ?? ''
-    saveToLADialog = true
-  }
-
-  async function doSaveToLA() {
-    const name = saveToLAName.trim()
-    if (!name || !cur) return
-    saveToLALoading = true
-    try {
-      // Save what the panel previews, not the raw source: a Light App renders
-      // in the same kind of sandboxed iframe, where relative image paths
-      // resolve against nothing (#1890).
-      // source_path marks the app as saved from this artifact, which is what
-      // hides the Save button for it from here on (curSavedAsLA).
-      const app = await api.createLightApp({ name, html: lightAppSource(cur), source_path: cur.path })
-      showToast(`Light App "${app.name}" saved`, 'success')
-      saveToLADialog = false
-      lightapps.update(list => [...list.filter(a => a.slug !== app.slug), app])
-    } catch (e: any) {
-      showToast(`Save failed: ${e.message}`, 'error')
-    } finally {
-      saveToLALoading = false
-    }
-  }
-
-  const curIsHTML = $derived(cur?.type === 'HTML')
-
-  // ── Already-a-Light-App detection ──────────────────────────────────────────
-  // "Save to Light App" is pointless for a file that already lives inside the
-  // Light Apps directory (a Light App's own index.html, or a file beside it).
-  // The directory itself is server-side knowledge (~/.octo/light-apps), so it
-  // is fetched once, lazily, while the session panel shows an HTML artifact.
-  // A failed lookup must not hide a working action, so the button stays
-  // visible until the directory is actually known — and the attempt resets,
-  // so a transient failure is retried on the next artifact switch instead of
-  // disabling the feature for the rest of the session.
-  let laDir = $state<string | null>(null)
-  let laDirAttempted = $state(false)
-
-  async function ensureLaDir() {
-    if (laDir !== null || laDirAttempted) return
-    laDirAttempted = true
-    try {
-      // One request answers with both the directory and the apps; the apps
-      // land in the store so curSavedAsLA below can match source paths.
-      const { apps, dir } = await api.getLightAppList()
-      laDir = dir
-      lightapps.set(apps)
-    } catch {
-      laDir = ''
-      laDirAttempted = false
-    }
-  }
-
-  const curIsLightApp = $derived(curIsHTML && pathIsInside(cur?.path ?? '', laDir ?? ''))
-
-  // Already saved as a Light App: some app records this artifact's path as
-  // its source (manifest source_path). Equally redundant to save again — the
-  // slug exists, so the server would 409 anyway.
-  const curSavedAsLA = $derived(curIsHTML && !!cur?.path && $lightapps.some(a => a.source_path === cur.path))
-
-  $effect(() => {
-    if ($panelContent === 'session' && curIsHTML) void ensureLaDir()
-  })
-
-  // The Save dialog must not outlive the button: once the lookup settles and
-  // the artifact turns out to be inside the Light Apps directory, close it.
-  $effect(() => {
-    if (curIsLightApp || curSavedAsLA) saveToLADialog = false
-  })
 
   // ── Light Apps (new) ──────────────────────────────────────────────────────
   let laLoading = $state(false)
@@ -602,22 +525,6 @@
         {@render topbarControls()}
       </div>
 
-      {#if saveToLADialog}
-        <div class="save-to-la-bar">
-          <input
-            class="save-to-la-input"
-            type="text"
-            bind:value={saveToLAName}
-            placeholder={$t('artifacts.save_to_lightapp_placeholder')}
-            onkeydown={(e) => { if (e.key === 'Enter') doSaveToLA(); if (e.key === 'Escape') saveToLADialog = false }}
-          />
-          <button class="btn-action" disabled={saveToLALoading || !saveToLAName.trim()} onclick={doSaveToLA}>
-            {saveToLALoading ? '…' : $t('common.save')}
-          </button>
-          <button class="btn-action" onclick={() => saveToLADialog = false}>{$t('common.cancel')}</button>
-        </div>
-      {/if}
-
       <div class="body">
         {#if curIsImage}
           <div class="img-wrap">
@@ -658,12 +565,6 @@
           <iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon>
           {$t('artifacts.download')}
         </button>
-        {#if curIsHTML && !curIsLightApp && !curSavedAsLA}
-          <button class="wbtn" disabled={!cur.loaded || cur.loadFailed} onclick={openSaveToLA}>
-            <iconify-icon icon="ant-design:save-outlined" width="14"></iconify-icon>
-            {$t('artifacts.save_to_lightapp')}
-          </button>
-        {/if}
       </div>
     {/if}
   {/if}
@@ -877,25 +778,4 @@ iframe { border: 0; width: 100%; height: 100%; display: block; }
 }
 .la-update button:disabled { opacity: 0.5; cursor: default; }
 
-/* ── Save-to-Light-App inline form ──────────────────────────────────── */
-.save-to-la-bar {
-  flex: 0 0 auto; padding: 6px 10px;
-  border-bottom: 1px solid var(--border-secondary);
-  display: flex; align-items: center; gap: 6px;
-}
-.save-to-la-input {
-  flex: 1; height: 28px; padding: 0 8px;
-  border: 1px solid var(--border-secondary);
-  border-radius: 6px; font-size: 12px; font-family: inherit;
-  background: var(--bg-container); color: var(--text);
-  outline: none;
-}
-.save-to-la-input:focus { border-color: var(--blue-5); }
-.btn-action {
-  height: 28px; padding: 0 12px; border: none;
-  border-radius: 6px; font-size: 12px; cursor: pointer;
-  background: var(--blue-6); color: #fff; font-family: inherit;
-}
-.btn-action:hover:not(:disabled) { background: var(--blue-5); }
-.btn-action:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

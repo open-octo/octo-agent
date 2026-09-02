@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { get } from 'svelte/store'
 import { artifacts, artifactSel, panelContent, panelExpanded } from './stores'
-import { lightAppSource, observeArtifact, hydrateArtifact, resetArtifacts, pathIsInside, selfContainedDocument } from './artifacts'
+import { observeArtifact, hydrateArtifact, resetArtifacts, selfContainedDocument } from './artifacts'
 
 // Nothing a preview document references can authenticate: the srcdoc iframe has
 // no allow-same-origin, so its subresource requests are cross-site and the
@@ -165,7 +165,7 @@ describe('hydrateArtifact — lazy body build', () => {
     const [entry] = get(artifacts)
     // loaded, or the panel would spin forever; a re-write replaces the entry
     // and retries. loadFailed disables the actions that would persist the
-    // empty body (copy, download, Save to Light App).
+    // empty body (copy, download).
     expect(entry.loaded).toBe(true)
     expect(entry.loadFailed).toBe(true)
     expect(entry.preview).toContain('could not be loaded')
@@ -823,72 +823,6 @@ describe('observeArtifact — transcript ordering', () => {
   })
 })
 
-// "Save to Light App" persists a copy that renders through the same kind of
-// sandboxed iframe as the panel preview, so it must save the inlined preview —
-// the raw source's relative image paths resolve against nothing there (#1890).
-describe('lightAppSource — what Save to Light App persists', () => {
-  const png = new Uint8Array([137, 80, 78, 71])
-
-  function stubFetch(html: string) {
-    vi.stubGlobal('fetch', vi.fn(async (u: string) => {
-      if (u.includes('page.html')) return new Response(html)
-      return imageResponse(png)
-    }))
-  }
-
-  it('hands over the inlined preview when the document has local images', async () => {
-    stubFetch('<!DOCTYPE html><html><body><img src="chart.png"></body></html>')
-
-    await observeHydrated('/tmp/page.html')
-
-    const saved = lightAppSource(get(artifacts)[0])
-    expect(saved).toContain('data:image/png;base64,')
-    expect(saved).not.toContain('chart.png')
-  })
-
-  it('hands over the exact source when there was nothing to inline', async () => {
-    const html = '<!DOCTYPE html><html><body><h1>hi</h1></body></html>'
-    stubFetch(html)
-
-    await observeHydrated('/tmp/page.html')
-
-    expect(lightAppSource(get(artifacts)[0])).toBe(html)
-  })
-
-  it('never persists the stripped rendering — the source is the faithful copy', async () => {
-    const html = '<html><head><script src="app.js"></script></head><body><img src="chart.png"></body></html>'
-    stubFetch(html)
-
-    await observeHydrated('/tmp/page.html')
-
-    const entry = get(artifacts)[0]
-    expect(entry.preview).toContain('removed')
-    expect(lightAppSource(entry)).toBe(html)
-  })
-
-  it('never persists the load-failure placeholder either', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })))
-
-    await observeHydrated('/tmp/page.html')
-
-    const entry = get(artifacts)[0]
-    expect(entry.loadFailed).toBe(true)
-    // The save button is disabled for a failed entry; if a save fires anyway,
-    // the placeholder note must not become a Light App.
-    expect(lightAppSource(entry)).not.toContain('could not be loaded')
-  })
-
-  it('hands over the source for a non-HTML artifact', () => {
-    const a = { type: 'Markdown', code: '# hi', preview: '<h1>hi</h1>' }
-    expect(lightAppSource(a as any)).toBe('# hi')
-  })
-
-  it('falls back to the source when the preview is empty', () => {
-    const a = { type: 'HTML', code: '<html><body>hi</body></html>', preview: '' }
-    expect(lightAppSource(a as any)).toBe(a.code)
-  })
-})
-
 describe('installArtifactThemeRefresh — theme switch busts baked previews', () => {
   it('drops loaded text previews and leaves image artifacts alone', async () => {
     const { installArtifactThemeRefresh } = await import('./artifacts')
@@ -911,45 +845,5 @@ describe('installArtifactThemeRefresh — theme switch busts baked previews', ()
     // to rebuild it, so resetting it would strand a permanent spinner.
     expect(get(artifacts)[1].loaded).toBe(true)
     expect(get(artifacts)[1].src).toBe('/api/x.png')
-  })
-})
-
-describe('pathIsInside — Light Apps directory detection', () => {
-  const LA_DIR = '/Users/qiao/.octo/light-apps'
-
-  it('matches files inside the directory, including nested ones', () => {
-    expect(pathIsInside(`${LA_DIR}/my-app/index.html`, LA_DIR)).toBe(true)
-    expect(pathIsInside(`${LA_DIR}/my-app/sub/asset.js`, LA_DIR)).toBe(true)
-  })
-
-  it('rejects siblings that merely share a prefix', () => {
-    expect(pathIsInside('/Users/qiao/.octo/light-apps2/x.html', LA_DIR)).toBe(false)
-    expect(pathIsInside('/Users/qiao/.octo/light-apps.js', LA_DIR)).toBe(false)
-    expect(pathIsInside('/Users/qiao/.octo/light-apps-other/x.html', LA_DIR)).toBe(false)
-  })
-
-  it('rejects unrelated paths and relative paths', () => {
-    expect(pathIsInside('/Users/qiao/Downloads/report.html', LA_DIR)).toBe(false)
-    expect(pathIsInside('my-app/index.html', LA_DIR)).toBe(false)
-    expect(pathIsInside('', LA_DIR)).toBe(false)
-  })
-
-  it('normalizes backslashes (Windows)', () => {
-    expect(pathIsInside('C:\\Users\\qiao\\.octo\\light-apps\\my-app\\index.html', 'C:\\Users\\qiao\\.octo\\light-apps')).toBe(true)
-    expect(pathIsInside('C:\\Users\\qiao\\.octo\\light-apps2\\x.html', 'C:\\Users\\qiao\\.octo\\light-apps')).toBe(false)
-  })
-
-  it('folds case so Windows drive letters and spelling differences match', () => {
-    expect(pathIsInside('/Users/QIAO/.OCTO/Light-Apps/my-app/index.html', LA_DIR)).toBe(true)
-    expect(pathIsInside('C:/Users/Qiao/.octo/light-apps/my-app/index.html', 'c:\\users\\qiao\\.octo\\light-apps')).toBe(true)
-  })
-
-  it('tolerates a trailing slash on either side', () => {
-    expect(pathIsInside(`${LA_DIR}/my-app/index.html`, `${LA_DIR}/`)).toBe(true)
-    expect(pathIsInside(`${LA_DIR}/my-app/index.html/`, LA_DIR)).toBe(true)
-  })
-
-  it('matches nothing when the directory is unknown', () => {
-    expect(pathIsInside(`${LA_DIR}/my-app/index.html`, '')).toBe(false)
   })
 })

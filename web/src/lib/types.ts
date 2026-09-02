@@ -152,7 +152,7 @@ export interface Artifact {
   loaded: boolean
   // Set when the lazy build could not fetch the body: preview holds a
   // placeholder note rather than the document, and code is empty. Actions
-  // that persist the body (copy, download, Save to Light App) are disabled.
+  // that persist the body (copy, download) are disabled.
   loadFailed?: boolean
 }
 
