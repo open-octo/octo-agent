@@ -42,6 +42,38 @@ CUSTOM_API_KEY=sk-... \
 </TabItem>
 </Tabs>
 
+## 本地模型（Ollama、vLLM）
+
+本地推理服务都提供 OpenAI 兼容接口，所以按 `custom` 端点配置，`protocol: openai`。有两个地方容易踩坑：
+
+- **`base_url` 填 OpenAI 兼容接口的根路径，不是服务自己的原生 API。** Ollama 是
+  `http://localhost:11434/v1`，不是 `/api`（那是 Ollama 自己的 API）。octo 对以 `/v1` 结尾的 URL
+  追加 `/chat/completions`，否则追加完整的 `/v1/chat/completions`，所以填 `http://localhost:11434/api`
+  会变成 `…/api/v1/chat/completions`，Ollama 直接返回 404。vLLM 默认是 `http://localhost:8000/v1`。
+- **API key 不能为空。** 本地服务会忽略 key，但 octo 把空 key 当作"还没配置"，会拉起配置向导。
+  在 `api_key` 里随便填一个占位值即可。
+
+```yaml
+endpoints:
+  - id: ollama
+    provider: custom
+    protocol: openai
+    base_url: http://localhost:11434/v1
+    api_key: ollama              # Ollama 会忽略，但不能留空
+    models:
+      - model: qwen3-coder:30b
+        vision: false            # 纯文本模型，别把图片发给它
+default: ollama::qwen3-coder:30b
+```
+
+不改配置文件、只用环境变量也可以：
+
+```bash
+CUSTOM_BASE_URL=http://localhost:11434/v1 \
+CUSTOM_API_KEY=ollama \
+  octo --model qwen3-coder:30b "..."
+```
+
 ## 存成默认值
 
 ```bash
