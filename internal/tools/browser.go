@@ -425,7 +425,7 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 				"action": map[string]any{
 					"type":        "string",
 					"enum":        browserActions,
-					"description": "The browser action to perform. type inserts at the caret and does not replace existing content — use clear first to empty an input/textarea/contenteditable. eval runs JavaScript (parameter js). observe lists the page's URL/title and interactable elements with selectors (text only) — the cheap way to look at an unfamiliar page before acting; works on any model. screenshot returns an image of the page to actually see (use when content is visual); it needs either a vision-capable model or a configured vision_helper, and otherwise returns just the file path. ax returns an accessibility-tree digest (roles and names) — a semantic text view of the page, an alternative to observe when document structure matters more than selectors. pages lists open tabs; select_page switches between them. cookies returns the current page's cookies (HttpOnly included) for session reuse / token extraction. record_start/record_stop capture the USER's own demonstration into an editable recording — record_start only installs listeners, so after it you MUST hand control to the user: tell them to perform the actions themselves in their browser and to say when they're done, then call record_stop (or record_cancel to discard the demo without saving). Do NOT drive the page yourself (navigate/click/type) while recording — your tool actions are not the demonstration and a click that navigates is easily lost; only the user's real gestures are captured. replay replays a recording (deterministic, self-healing; run_skill is a deprecated alias of replay).",
+					"description": "The browser action to perform. type inserts at the caret and does not replace existing content — a field the browser autofilled (login forms) would end up holding old+new; observe marks such fields (prefilled: …), and clear empties an input/textarea/contenteditable before you type. type's result reports what the field holds afterwards — if it differs from what you sent, clear and retype. eval runs JavaScript (parameter js). observe lists the page's URL/title and interactable elements with selectors (text only) — the cheap way to look at an unfamiliar page before acting; works on any model. screenshot returns an image of the page to actually see (use when content is visual); it needs either a vision-capable model or a configured vision_helper, and otherwise returns just the file path. ax returns an accessibility-tree digest (roles and names) — a semantic text view of the page, an alternative to observe when document structure matters more than selectors. pages lists open tabs; select_page switches between them. cookies returns the current page's cookies (HttpOnly included) for session reuse / token extraction. record_start/record_stop capture the USER's own demonstration into an editable recording — record_start only installs listeners, so after it you MUST hand control to the user: tell them to perform the actions themselves in their browser and to say when they're done, then call record_stop (or record_cancel to discard the demo without saving). Do NOT drive the page yourself (navigate/click/type) while recording — your tool actions are not the demonstration and a click that navigates is easily lost; only the user's real gestures are captured. replay replays a recording (deterministic, self-healing; run_skill is a deprecated alias of replay).",
 				},
 				"name":         map[string]any{"type": "string", "description": "Recording name (record_stop / replay)."},
 				"params":       map[string]any{"type": "object", "description": "Param values for {{...}} placeholders (replay). Params declared secret:true in the recording are collected by the runtime OUTSIDE the conversation (session cache → OCTO_BROWSER_SECRET_<NAME> env → masked user prompt) — never pass a secret value here, just omit it. Omitting a required NON-secret param fails with a missing-param error; then decide whether to supply a value or ask the user."},
@@ -433,7 +433,7 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 				"selector":     map[string]any{"type": "string", "description": "Target element selector (click/hover/type/select/scroll/wait/upload/download). Plain CSS, or a Playwright-style form: :has-text(\"…\")/:text(\"…\")/:contains(\"…\"), text=…, :visible, xpath=…, css=…. Use observe to see real selectors."},
 				"network_idle": map[string]any{"type": "boolean", "description": "wait with no selector: settle until fetch/XHR activity stops (bounded by timeout_ms) instead of a fixed delay — the robust way to wait for an SPA's data to finish loading."},
 				"frame":        map[string]any{"type": "string", "description": "Optional CSS selector of a same-origin iframe to scope the selector into (e.g. iframe#app)."},
-				"text":         map[string]any{"type": "string", "description": "Text to type (type)."},
+				"text":         map[string]any{"type": "string", "description": "Text to type (type). Inserted at the caret, appended to any existing content — clear the field first if it may be prefilled."},
 				"value":        map[string]any{"type": "string", "description": "Option value, text, or label to pick in a <select> (select)."},
 				"keys":         map[string]any{"type": "string", "description": "Key or combo, e.g. enter, escape, ctrl+a (key)."},
 				"js":           map[string]any{"type": "string", "description": "JavaScript expression to evaluate (eval). Runs with full page access — use it to recursively traverse shadow roots or read DOM state that CSS selectors can't reach (click/type don't pierce shadow DOM)."},
@@ -481,6 +481,65 @@ var browserActions = []string{"navigate", "back", "click", "hover", "type", "cle
 
 func unknownBrowserAction(action string) error {
 	return fmt.Errorf("browser: unknown action %q (valid: %s)", action, strings.Join(browserActions, ", "))
+}
+
+// typeResultText is what the model reads after a type: not just what was sent
+// but what the field holds now. type inserts at the caret, so a field the
+// browser had autofilled (login forms, classically) ends up as old+new and the
+// login fails — with only "typed X" to go on, the model has no way to see why
+// and burns attempts. When the readback differs from the text, say so and
+// point at clear. A password field is reported by length only. A failed
+// readback (element gone) falls back to the plain confirmation.
+func typeResultText(text, sel string, st browser.FieldState) string {
+	if !st.Found {
+		return fmt.Sprintf("typed %q into %s", text, sel)
+	}
+	if st.Password {
+		s := fmt.Sprintf("typed %d chars into %s; field now holds %d chars", len([]rune(text)), sel, st.ValueLen)
+		if st.ValueLen != len([]rune(text)) {
+			s += " — the field already had content before typing (browser autofill?); use clear, then type again"
+		}
+		return s
+	}
+	s := fmt.Sprintf("typed %q into %s; field now holds %q", text, sel, uiHead(st.Value, 1, 200))
+	if st.Value != text {
+		s += " — differs from what was typed: the field already had content (browser autofill?) or the page reformats input; if it was prefilled, use clear, then type again"
+	}
+	return s
+}
+
+// renderObserve formats the observe result: page identity, then one line per
+// interactable element. A text-entry field that already holds a value gets it
+// spelled out as (prefilled: …) — that is the fact the model most often
+// misses before typing. Password fields show only a length.
+func renderObserve(title, url string, digest []browser.DigestElement, derr error) string {
+	var sb strings.Builder
+	if url != "" {
+		fmt.Fprintf(&sb, "page: %s — %s\n\n", title, url)
+	}
+	sb.WriteString("interactable elements:\n")
+	switch {
+	case derr != nil:
+		fmt.Fprintf(&sb, "(could not read elements: %v)\n", derr)
+	case len(digest) == 0:
+		sb.WriteString("(none found)\n")
+	default:
+		for _, e := range digest {
+			if e.Text != "" {
+				fmt.Fprintf(&sb, "- %s  →  %s", e.Text, e.Selector)
+			} else {
+				fmt.Fprintf(&sb, "- %s", e.Selector)
+			}
+			switch {
+			case e.Password && e.ValueLen > 0:
+				fmt.Fprintf(&sb, "  (prefilled password, %d chars)", e.ValueLen)
+			case e.Value != "":
+				fmt.Fprintf(&sb, "  (prefilled: %q)", e.Value)
+			}
+			sb.WriteString("\n")
+		}
+	}
+	return sb.String()
 }
 
 func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
@@ -578,7 +637,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		if err := page.TypeText(ctx, sel, text); err != nil {
 			return agent.ToolResult{}, err
 		}
-		return agent.ToolResult{Text: fmt.Sprintf("typed %q into %s", text, sel)}, nil
+		return agent.ToolResult{Text: typeResultText(text, sel, page.FieldState(ctx, sel))}, nil
 
 	case "clear":
 		sel := targetSelector(input)
@@ -665,25 +724,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		}
 		_ = page.Eval(ctx, `({url: location.href, title: document.title})`, &meta)
 		digest, derr := browser.InteractiveDigest(ctx, page, frame, 60)
-		var sb strings.Builder
-		if meta.URL != "" {
-			fmt.Fprintf(&sb, "page: %s — %s\n\n", meta.Title, meta.URL)
-		}
-		sb.WriteString("interactable elements:\n")
-		if derr != nil {
-			fmt.Fprintf(&sb, "(could not read elements: %v)\n", derr)
-		} else if len(digest) == 0 {
-			sb.WriteString("(none found)\n")
-		} else {
-			for _, e := range digest {
-				if e.Text != "" {
-					fmt.Fprintf(&sb, "- %s  →  %s\n", e.Text, e.Selector)
-				} else {
-					fmt.Fprintf(&sb, "- %s\n", e.Selector)
-				}
-			}
-		}
-		return agent.ToolResult{Text: sb.String()}, nil
+		return agent.ToolResult{Text: renderObserve(meta.Title, meta.URL, digest, derr)}, nil
 
 	case "ax":
 		raw, err := page.AXTree(ctx)

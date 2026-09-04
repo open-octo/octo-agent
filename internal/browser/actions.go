@@ -813,6 +813,41 @@ func (p *Page) Clear(ctx context.Context, selector string) error {
 	return nil
 }
 
+// FieldState is what a text-entry field holds right now, read back after an
+// action so the caller can tell the model what actually happened — TypeText
+// inserts at the caret, so a prefilled field (browser autofill on a login
+// form) ends up holding old+new, which the insert itself never reveals.
+type FieldState struct {
+	Found    bool   // selector matched an element
+	Value    string // current value (textContent for contenteditable); empty for a password field
+	ValueLen int    // length of the current value, reported even when Value is withheld
+	Password bool   // input type=password: Value is withheld so it never enters the transcript
+}
+
+// FieldState reads the current content of the field selector points at. A
+// read failure (page navigated away, element gone) reports Found=false rather
+// than an error: the readback is advisory, the action it follows already
+// succeeded or failed on its own terms.
+func (p *Page) FieldState(ctx context.Context, selector string) FieldState {
+	frame, elem := splitFrame(selector)
+	if frame != "" {
+		if cp, ok := p.oopifPage(ctx, frame); ok {
+			return cp.FieldState(ctx, elem)
+		}
+	}
+	expr := fmt.Sprintf(`(()=>{const el=%s; if(!el) return null; const v=(('value' in el)?el.value:el.textContent)||''; const pw=(el.type||'')==='password'; return {found:true, value: pw?'':(''+v), value_len:(''+v).length, password:pw};})()`, elemRefJS(frame, elem))
+	var st struct {
+		Found    bool   `json:"found"`
+		Value    string `json:"value"`
+		ValueLen int    `json:"value_len"`
+		Password bool   `json:"password"`
+	}
+	if err := p.Eval(ctx, expr, &st); err != nil || !st.Found {
+		return FieldState{}
+	}
+	return FieldState{Found: true, Value: st.Value, ValueLen: st.ValueLen, Password: st.Password}
+}
+
 // fieldNonEmpty reports whether a form field currently holds any value/text —
 // the post-type sanity check, since programmatic input can be silently swallowed
 // by a disabled, re-rendering, or framework-controlled input. It checks
