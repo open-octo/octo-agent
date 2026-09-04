@@ -492,7 +492,9 @@ func (a *Adapter) getBotOpenID() string {
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		log.Printf("[feishu] bot info: decode response: %v", err)
+		// Include the status so an HTML error page from a proxy is
+		// distinguishable from a malformed Feishu reply.
+		log.Printf("[feishu] bot info: decode response (HTTP %d): %v", resp.StatusCode, err)
 		return ""
 	}
 	if r.Code != 0 {

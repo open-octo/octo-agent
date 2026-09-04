@@ -439,5 +439,10 @@ func TestHandleEvent_GroupMentionGate(t *testing.T) {
 		if delivered {
 			t.Fatal("group message that does not mention the bot must be dropped")
 		}
+		// The drop must come from the mention gate, not from an unresolved
+		// identity — otherwise this subtest would also pass on the old decoder.
+		if a.botOpenID != fakeBotOpenID {
+			t.Fatalf("botOpenID = %q, want %q (dropped for the wrong reason)", a.botOpenID, fakeBotOpenID)
+		}
 	})
 }
