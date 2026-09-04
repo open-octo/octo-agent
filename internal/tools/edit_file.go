@@ -428,9 +428,9 @@ func lineEndingAt(body string, origStart, origEnd int) string {
 }
 
 func (EditFileTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
-	path, _ := input["path"].(string)
-	if strings.TrimSpace(path) == "" {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("edit_file: path is required")
+	path, err := requiredPath("edit_file", input)
+	if err != nil {
+		return agent.ToolResult{Text: ""}, err
 	}
 	oldStr, ok1 := input["old_string"].(string)
 	newStr, ok2 := input["new_string"].(string)

@@ -40,9 +40,9 @@ func (WriteFileTool) Definition() agent.ToolDefinition {
 }
 
 func (WriteFileTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
-	path, _ := input["path"].(string)
-	if strings.TrimSpace(path) == "" {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("write_file: path is required")
+	path, err := requiredPath("write_file", input)
+	if err != nil {
+		return agent.ToolResult{Text: ""}, err
 	}
 	content, ok := input["content"].(string)
 	if !ok {

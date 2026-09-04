@@ -85,9 +85,9 @@ func (ReadFileTool) Definition() agent.ToolDefinition {
 }
 
 func (ReadFileTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
-	path, _ := input["path"].(string)
-	if strings.TrimSpace(path) == "" {
-		return agent.ToolResult{}, fmt.Errorf("read_file: path is required")
+	path, err := requiredPath("read_file", input)
+	if err != nil {
+		return agent.ToolResult{}, err
 	}
 	// Refuse UNC / network paths (\\server\share, //server/share) before
 	// resolving. On Windows these trigger an SMB connection that can leak
