@@ -195,7 +195,7 @@ func saveRegistry(gf groupFile) error {
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := renameWithRetry(tmp, path); err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("session groups: write %s: %w", path, err)
 	}
@@ -204,6 +204,26 @@ func saveRegistry(gf groupFile) error {
 		notifyGroupsChanged()
 	}
 	return nil
+}
+
+// renameWithRetry replaces newpath with oldpath, retrying briefly when the
+// destination is momentarily open elsewhere. Reads of the registry deliberately
+// stay outside the cross-process file lock (see registryLock), so another
+// process can be mid-ReadFile on session-groups.json while this one renames
+// over it. That is harmless on POSIX, but Go opens files on Windows without
+// FILE_SHARE_DELETE, so MoveFileEx onto an open file fails with
+// ERROR_ACCESS_DENIED until the reader closes — microseconds later. Seen as
+// "rename ...: Access is denied." from TestEnsureProject_CrossProcessLock…
+// on windows-latest. Same shape as the scheduler's helper of the same name.
+func renameWithRetry(oldpath, newpath string) error {
+	var err error
+	for i := 0; i < 50; i++ {
+		if err = os.Rename(oldpath, newpath); err == nil {
+			return nil
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return err
 }
 
 // saveSessionGroups persists the group list while preserving every other list
