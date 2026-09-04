@@ -93,4 +93,24 @@ jobs:
       # testWaitTimeout) a bad-weather run must fail those tests cleanly
       # instead of hitting the go-test default 10m panic.
       - name: go test
+        if: matrix.os != 'windows-latest'
         run: go test -timeout 20m ${{ matrix.os == 'ubuntu-latest' && '-race' || '' }} ./...
+
+      # Windows runs internal/browser on its own. `go test ./...` runs up to
+      # GOMAXPROCS package test binaries at once, and on the 4-core
+      # windows-latest runner the browser tests' headless Chrome shared the
+      # machine with internal/tools (~3-5min) and internal/server. Under that
+      # load, three different browser tests failed in one day (2026-09-04) on
+      # ceilings that are already 60-90s — a first fixture page not rendering in
+      # 60s, a local download not starting in 30s — while the same commit passed
+      # on rerun once the neighbours had thinned out (browser package 528s in
+      # the failing run vs 314s in the passing one). Giving Chrome the whole
+      # runner removes the contention instead of chasing each ceiling upward.
+      - name: go test (all but internal/browser)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: go test -timeout 20m $(go list ./... | grep -v '/internal/browser$')
+
+      - name: go test (internal/browser, alone)
+        if: matrix.os == 'windows-latest'
+        run: go test -timeout 20m ./internal/browser/
