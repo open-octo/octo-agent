@@ -108,8 +108,13 @@
   // stored key (see FirstRunSetup's re-run path) — leaving this blank keeps
   // that key unchanged (saveModel's "empty api_key = unchanged" rule), so the
   // hint should say that rather than implying a fresh key is expected.
+  // The Custom vendor may run keyless (local Ollama/vLLM), mirroring the
+  // server's app.VendorKeyOptional; the hint says so instead of "sk-…".
   let keyPlaceholder = $derived(
-    initial?.api_key_masked || (!requireKey ? $t('models.apikey.placeholder_keep') : $t('models.apikey.placeholder'))
+    initial?.api_key_masked
+      || (!requireKey ? $t('models.apikey.placeholder_keep')
+        : isCustom ? $t('models.apikey.placeholder_optional')
+        : $t('models.apikey.placeholder'))
   )
 
   // Selecting a preset fills model + base_url.
@@ -161,7 +166,7 @@
   }
 
   function valid(): boolean {
-    return !!model.trim() && !!baseUrl.trim() && (!requireKey || !!apiKey.trim())
+    return !!model.trim() && !!baseUrl.trim() && (!requireKey || isCustom || !!apiKey.trim())
   }
 
   async function handleTest() {

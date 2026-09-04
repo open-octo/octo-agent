@@ -357,6 +357,18 @@ func VendorNeedsProtocol(id string) bool {
 	return false
 }
 
+// VendorKeyOptional reports whether an endpoint on this vendor may run
+// without an API key. Only the Custom vendor qualifies: local servers behind
+// it (Ollama, vLLM, LM Studio) have no key at all, and a self-hosted gateway
+// that wants one answers 401 clearly enough. Named cloud vendors always need
+// a key, so a missing one keeps its setup guidance. Unknown ids return false.
+func VendorKeyOptional(id string) bool {
+	if v := vendorByID(id); v != nil {
+		return v.CustomEndpoint
+	}
+	return false
+}
+
 // vendorByID returns the vendor with the given ID, or nil if unknown.
 func vendorByID(id string) *Vendor {
 	for i := range Registry {

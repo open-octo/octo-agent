@@ -218,14 +218,12 @@ func (c *Client) streamIdleTimeout() time.Duration {
 }
 
 // New constructs a Client with the given API key and the standard defaults.
-// Returns an error when apiKey is empty so misconfiguration is caught at
-// startup rather than at the first request.
+// An empty key is accepted: OpenAI-compatible local servers (Ollama, vLLM)
+// take none, and requests then carry no Authorization header. Whether a key
+// is mandatory for a given endpoint is the caller's policy (app.buildClient).
 func New(apiKey string) (*Client, error) {
-	if strings.TrimSpace(apiKey) == "" {
-		return nil, errors.New("openai: API key is required")
-	}
 	return &Client{
-		APIKey:     apiKey,
+		APIKey:     strings.TrimSpace(apiKey),
 		BaseURL:    DefaultBaseURL,
 		HTTPClient: &http.Client{Timeout: 60 * time.Second},
 	}, nil
@@ -282,7 +280,9 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("User-Agent", version.UserAgent())
-		httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
+		if c.APIKey != "" {
+			httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
+		}
 		for k, v := range c.Headers {
 			httpReq.Header.Set(k, v)
 		}

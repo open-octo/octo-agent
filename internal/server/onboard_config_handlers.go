@@ -127,10 +127,11 @@ func (s *Server) handleOnboardStatus(w http.ResponseWriter, r *http.Request) {
 func detectOnboardPhase() string {
 	cfg, _ := config.Load()
 
-	// Check if any provider key is available.
+	// Check if any provider key is available. A keyless Custom endpoint
+	// (local Ollama/vLLM) counts as configured — there is no key to set up.
 	hasKey := false
 	for _, ep := range cfg.Endpoints {
-		if ep.APIKey != "" {
+		if ep.APIKey != "" || app.VendorKeyOptional(ep.Provider) {
 			hasKey = true
 			break
 		}
@@ -711,7 +712,7 @@ func (s *Server) handleTestConfig(w http.ResponseWriter, r *http.Request) {
 	if key == "" {
 		key = os.Getenv(app.VendorAPIKeyEnvVar(providerName))
 	}
-	if key == "" {
+	if key == "" && !app.VendorKeyOptional(providerName) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "no API key provided"})
 		return
 	}

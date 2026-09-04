@@ -90,7 +90,9 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("User-Agent", version.UserAgent())
 		httpReq.Header.Set("Accept", "text/event-stream")
-		httpReq.Header.Set("x-api-key", c.APIKey)
+		if c.APIKey != "" {
+			httpReq.Header.Set("x-api-key", c.APIKey)
+		}
 		apiVer := c.APIVersion
 		if apiVer == "" {
 			apiVer = DefaultAPIVersion

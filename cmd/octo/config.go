@@ -696,7 +696,7 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 	path, _ := config.Path()
 	fmt.Fprintln(stdout)
 	fmt.Fprintf(stdout, "Saved %s\n", path)
-	if outEntry.APIKey == "" && os.Getenv(apiKeyEnvVar(provider)) == "" {
+	if outEntry.APIKey == "" && os.Getenv(apiKeyEnvVar(provider)) == "" && !app.VendorKeyOptional(provider) {
 		fmt.Fprintf(stdout, "Next: export %s=... (or re-run `octo config` to store it), then `octo`.\n", apiKeyEnvVar(provider))
 	} else {
 		fmt.Fprintln(stdout, "Run `octo` to start.")
