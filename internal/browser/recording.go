@@ -1039,6 +1039,15 @@ func ListRecordings(dir string) []Recording {
 type DigestElement struct {
 	Text     string `json:"text"`
 	Selector string `json:"selector"`
+	// Value is the current content of a text-entry field (input/textarea),
+	// reported separately from Text so a prefilled value — browser autofill on
+	// a login form is the classic case — is not mistaken for a label or
+	// placeholder. Empty for non-fields. For a password field the content is
+	// withheld and only ValueLen is set, so a stored password never lands in
+	// the transcript.
+	Value    string `json:"value,omitempty"`
+	ValueLen int    `json:"value_len,omitempty"`
+	Password bool   `json:"password,omitempty"`
 }
 
 // InteractiveDigest lists interactive elements (with generated selectors) in the
@@ -1077,7 +1086,18 @@ func InteractiveDigest(ctx context.Context, page *Page, frame string, max int) (
 	  // offsetParent===null check also dropped position:fixed controls, which are
 	  // null-offsetParent in Chrome but very much clickable — fixed nav bars and
 	  // floating buttons were invisible to the healer.)
-	  for(var i=0;i<els.length && out.length<%d;i++){var el=els[i]; if(el.getClientRects().length===0 || getComputedStyle(el).visibility==='hidden') continue; var t=(el.textContent||el.value||el.getAttribute('aria-label')||el.getAttribute('placeholder')||'').trim().slice(0,50); out.push({text:t, selector:sel(el)});}
+	  // A text-entry field reports its label-ish text (aria-label / placeholder /
+	  // name) and its current value as separate things: folding value into text
+	  // made an autofilled login field read like a placeholder, so the model
+	  // typed on top of it. Button-like inputs keep value as their text — that
+	  // IS their label. Password content is withheld, only its length reported.
+	  var fieldTypes=/^(button|submit|reset|checkbox|radio|image|file|hidden|range|color)$/i;
+	  for(var i=0;i<els.length && out.length<%d;i++){var el=els[i]; if(el.getClientRects().length===0 || getComputedStyle(el).visibility==='hidden') continue;
+	    var tag=el.tagName.toLowerCase(); var isField=tag==='textarea'||(tag==='input'&&!fieldTypes.test(el.type||'text'));
+	    var t, e;
+	    if(isField){ t=(el.getAttribute('aria-label')||el.getAttribute('placeholder')||el.getAttribute('name')||'').trim().slice(0,50); var v=el.value||''; e={text:t, selector:sel(el)}; if(v){ if(el.type==='password'){e.password=true; e.value_len=v.length;} else {e.value=v.slice(0,50); e.value_len=v.length;} } }
+	    else { t=(el.textContent||el.value||el.getAttribute('aria-label')||el.getAttribute('placeholder')||'').trim().slice(0,50); e={text:t, selector:sel(el)}; }
+	    out.push(e);}
 	  return out;
 	})()`, doc, max)
 	var digest []DigestElement
