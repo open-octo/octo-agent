@@ -16,16 +16,20 @@ import (
 
 func TestBgNoticeStatus(t *testing.T) {
 	cases := []struct {
-		in, want string
+		in   tools.BgExit
+		want string
 	}{
-		{"exited: 0", "success"},
-		{"exited: exit status 1", "failed"},
-		{"exited: signal: killed", "cancelled"},
-		{"exited: something else", "failed"},
+		{tools.BgExit{Status: "exited: 0"}, "success"},
+		{tools.BgExit{Status: "exited: exit status 1"}, "failed"},
+		{tools.BgExit{Status: "exited: signal: killed"}, "cancelled"},
+		{tools.BgExit{Status: "exited: something else"}, "failed"},
+		// Windows: a taskkill'd process exits with a plain non-zero status and no
+		// signal in the string — only the Killed flag says it was deliberate.
+		{tools.BgExit{Status: "exited: exit status 1", Killed: true}, "cancelled"},
 	}
 	for _, c := range cases {
 		if got := bgNoticeStatus(c.in); got != c.want {
-			t.Errorf("bgNoticeStatus(%q) = %q, want %q", c.in, got, c.want)
+			t.Errorf("bgNoticeStatus(%+v) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }

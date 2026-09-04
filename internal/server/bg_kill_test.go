@@ -11,9 +11,14 @@ import (
 )
 
 // Killing a running background process from the popover must take the
-// process down and let the existing exit hook do the rest: a "cancelled"
-// notice (not "success" — the model is told it was killed, not finished) and
-// a badge refresh with the row gone.
+// process down and let the exit hook do the rest: a "cancelled" notice (not
+// "success" — the model is told it was killed, not finished) and a badge
+// refresh with the row gone.
+//
+// Deliberately does NOT call wireBackgroundTaskNotices first: a process
+// launched from a REST-driven turn (runTurn) lives in the same per-session
+// manager but that path never installs the hook, so the handler must wire it
+// itself or the kill lands silently.
 func TestHandleWSKillBackground_KillsAndBroadcastsCancelled(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("spawns a real shell; PowerShell startup is slow and flaky on CI")
@@ -24,7 +29,6 @@ func TestHandleWSKillBackground_KillsAndBroadcastsCancelled(t *testing.T) {
 	const sid = "bg-kill-test-session"
 	defer tools.CloseSessionBackgroundManager(sid)
 	conn := subscribedConn(t, srv, sid)
-	srv.wireBackgroundTaskNotices(sid)
 
 	mgr := tools.SessionBackgroundManager(sid)
 	id, err := mgr.Start(context.Background(), "sleep 60", tools.BgModeAsync)
@@ -93,6 +97,31 @@ func TestHandleWSKillBackground_UnknownIDResyncsBadge(t *testing.T) {
 	case b := <-conn.send:
 		t.Fatalf("unexpected second event: %s", b)
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// The raw WS frame the browser sends (ws.ts killBackground) must reach the
+// handler through dispatch with both JSON tags decoded — the wire contract is
+// only visible from this end.
+func TestHandleWSKillBackground_DispatchFromRawJSON(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+
+	const sid = "bg-kill-dispatch-session"
+	defer tools.CloseSessionBackgroundManager(sid)
+	conn := subscribedConn(t, srv, sid)
+
+	raw := []byte(`{"type":"kill_background","session_id":"bg-kill-dispatch-session","handle_id":"bg_404"}`)
+	conn.dispatch("kill_background", raw)
+
+	// Unknown id → the resync broadcast, proving session_id was decoded (the
+	// broadcast is per-session) and the handler ran at all.
+	ev := nextEvent(t, conn)
+	if ev["type"] != "background_tasks_update" {
+		t.Fatalf("type = %v, want background_tasks_update", ev["type"])
+	}
+	if ev["session_id"] != sid {
+		t.Errorf("session_id = %v, want %s", ev["session_id"], sid)
 	}
 }
 

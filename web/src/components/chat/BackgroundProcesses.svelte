@@ -89,7 +89,7 @@
               class:armed={armedId === p.handle_id}
               title={armedId === p.handle_id ? $t('bgtask.kill_confirm') : $t('bgtask.kill')}
               aria-label={armedId === p.handle_id ? $t('bgtask.kill_confirm') : $t('bgtask.kill')}
-              onclick={(e) => { e.stopPropagation(); onKillClick(p.handle_id) }}
+              onclick={() => onKillClick(p.handle_id)}
             >
               {#if armedId === p.handle_id}
                 <span class="proc-kill-lbl">{$t('bgtask.kill_confirm')}</span>
@@ -145,8 +145,8 @@
   font-family: inherit; font-size: 12px; color: var(--text-secondary);
   cursor: pointer;
 }
-.proc-kill:hover { color: var(--error, #ff4d4f); background: var(--bg-table-header); }
-.proc-kill.armed { color: #fff; background: var(--error, #ff4d4f); }
+.proc-kill:hover { color: var(--error); background: var(--bg-table-header); }
+.proc-kill.armed { color: #fff; background: var(--error); }
 .proc-kill.armed:hover { filter: brightness(0.92); }
 .proc-kill-lbl { white-space: nowrap; line-height: 1; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
