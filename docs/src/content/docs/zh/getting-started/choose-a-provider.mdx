@@ -50,8 +50,8 @@ CUSTOM_API_KEY=sk-... \
   `http://localhost:11434/v1`，不是 `/api`（那是 Ollama 自己的 API）。octo 对以 `/v1` 结尾的 URL
   追加 `/chat/completions`，否则追加完整的 `/v1/chat/completions`，所以填 `http://localhost:11434/api`
   会变成 `…/api/v1/chat/completions`，Ollama 直接返回 404。vLLM 默认是 `http://localhost:8000/v1`。
-- **API key 不能为空。** 本地服务会忽略 key，但 octo 把空 key 当作"还没配置"，会拉起配置向导。
-  在 `api_key` 里随便填一个占位值即可。
+- **不需要 API key。** `api_key` 不写或留空即可，octo 不会发 `Authorization` 头。只有 `custom`
+  vendor 允许无 key；`openai` 这类命名厂商仍然强制要 key，所以本地服务请配成 `custom`。
 
 ```yaml
 endpoints:
@@ -59,7 +59,6 @@ endpoints:
     provider: custom
     protocol: openai
     base_url: http://localhost:11434/v1
-    api_key: ollama              # Ollama 会忽略，但不能留空
     models:
       - model: qwen3-coder:30b
         vision: false            # 纯文本模型，别把图片发给它
@@ -70,7 +69,6 @@ default: ollama::qwen3-coder:30b
 
 ```bash
 CUSTOM_BASE_URL=http://localhost:11434/v1 \
-CUSTOM_API_KEY=ollama \
   octo --model qwen3-coder:30b "..."
 ```
 
