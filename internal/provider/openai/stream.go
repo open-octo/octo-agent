@@ -277,11 +277,7 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 	}
 	for _, idx := range toolOrder {
 		st := toolStates[idx]
-		var input map[string]any
-		if s := st.args.String(); s != "" {
-			_ = json.Unmarshal([]byte(s), &input)
-		}
-		blocks = append(blocks, agent.NewToolUseBlock(st.id, st.name, input))
+		blocks = append(blocks, agent.NewToolUseBlockFromJSON(st.id, st.name, st.args.String()))
 	}
 	// Accumulated tool calls make this a tool-use turn — dispatch them
 	// regardless of finish_reason. Some OpenAI-compatible backends (e.g. a

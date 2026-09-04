@@ -341,11 +341,7 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 	}
 	if len(first.Message.ToolCalls) > 0 {
 		for _, tc := range first.Message.ToolCalls {
-			var input map[string]any
-			if tc.Function.Arguments != "" {
-				_ = json.Unmarshal([]byte(tc.Function.Arguments), &input)
-			}
-			blocks = append(blocks, agent.NewToolUseBlock(tc.ID, tc.Function.Name, input))
+			blocks = append(blocks, agent.NewToolUseBlockFromJSON(tc.ID, tc.Function.Name, tc.Function.Arguments))
 		}
 		// A response carrying tool calls is a tool-use turn — dispatch them
 		// regardless of finish_reason. The expected signal is "tool_calls", but

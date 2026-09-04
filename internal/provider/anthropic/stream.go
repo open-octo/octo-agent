@@ -306,11 +306,7 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 			// tool-call round-trip.
 			blocks = append(blocks, agent.NewThinkingBlock(acc.text.String(), acc.signature.String()))
 		case "tool_use":
-			var input map[string]any
-			if s := acc.inputJSON.String(); s != "" {
-				_ = json.Unmarshal([]byte(s), &input)
-			}
-			blocks = append(blocks, agent.NewToolUseBlock(acc.id, acc.name, input))
+			blocks = append(blocks, agent.NewToolUseBlockFromJSON(acc.id, acc.name, acc.inputJSON.String()))
 			hasToolUse = true
 		}
 	}

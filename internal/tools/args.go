@@ -1,8 +1,32 @@
 package tools
 
 import (
+	"fmt"
+	"sort"
 	"strings"
 )
+
+// requiredPath reads the file-path argument of a file tool, and when it is
+// missing says what WAS received. A model that sends `file_path` (another
+// agent's convention) or drops the key otherwise sees only "path is required"
+// and retries the same call; naming the keys it actually sent makes the
+// second attempt right. The path is returned untrimmed so callers keep the
+// exact string the model gave.
+func requiredPath(tool string, input map[string]any) (string, error) {
+	p := stringArg(input, "path")
+	if strings.TrimSpace(p) != "" {
+		return p, nil
+	}
+	if len(input) == 0 {
+		return "", fmt.Errorf("%s: path is required (no arguments were received)", tool)
+	}
+	keys := make([]string, 0, len(input))
+	for k := range input {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return "", fmt.Errorf(`%s: path is required — the file parameter is named "path"; received keys: %s`, tool, strings.Join(keys, ", "))
+}
 
 // stringArg reads a string argument from a tool-call input map, defaulting to
 // "" when absent or not a string.

@@ -1937,6 +1937,17 @@ func dispatchTools(ctx context.Context, executor ToolExecutor, blocks []ContentB
 			continue
 		}
 		c := toolCall{block: b}
+		// Malformed arguments never reach the gate or the tool: the call is
+		// answered with the parse failure so the model fixes its JSON instead
+		// of re-sending the same broken call against a "missing parameter"
+		// error. Rides the denyReason path — same shape as a permission denial,
+		// an error tool_result with nothing executed.
+		if b.InputError != "" {
+			c.denyReason = "tool call not run: its arguments were not valid JSON — " + b.InputError +
+				". Resend the call as one JSON object with strings properly escaped (newlines as \\n, quotes as \\\")."
+			calls = append(calls, c)
+			continue
+		}
 		if gate != nil {
 			if allowed, reason := gate.Check(ctx, b.Name, b.Input); !allowed {
 				if reason == "" {
