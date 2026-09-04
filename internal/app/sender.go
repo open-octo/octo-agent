@@ -134,7 +134,8 @@ func EntryConnectionOverrides(resolvedProvider string, entry config.ModelEntry) 
 }
 
 // buildClient constructs the vendor client and applies an optional base-URL
-// override. The caller is responsible for having resolved a non-empty key.
+// override. An empty key is accepted only for CustomEndpoint vendors (keyless
+// local servers); every other vendor fails here with its env var named.
 // protocol is used only for vendors with no registry-pinned wire format (the
 // Custom catch-all); named vendors ignore it and use their own protocol.
 func buildClient(name, apiKey, baseURL, protocol string, headers map[string]string) (provider.Provider, error) {

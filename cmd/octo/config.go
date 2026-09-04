@@ -770,7 +770,11 @@ func collectAPIKey(outEntry *config.ModelEntry, existing config.ModelEntry, prov
 	}
 	outEntry.APIKey = ""
 	if firstRun {
-		key := strings.TrimSpace(promptDefault(reader, stdout, "Paste your "+app.VendorDisplayName(provider)+" API key", ""))
+		label := "Paste your " + app.VendorDisplayName(provider) + " API key"
+		if app.VendorKeyOptional(provider) {
+			label += " (optional — press Enter to skip for a keyless local server)"
+		}
+		key := strings.TrimSpace(promptDefault(reader, stdout, label, ""))
 		outEntry.APIKey = key
 		return key != ""
 	}

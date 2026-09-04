@@ -495,6 +495,7 @@
             {#if ep.protocol}<span> · {ep.protocol}</span>{/if}
             <span> · {$t('settings.endpoints.api_key')}:
               {#if ep.has_api_key}<span class="key-set">{$t('settings.endpoints.api_key.set')}</span>
+              {:else if presetFor(ep.provider)?.custom_endpoint}<span class="key-optional">{$t('settings.endpoints.api_key.optional')}</span>
               {:else}<span class="key-missing">{$t('settings.endpoints.api_key.missing')}</span>{/if}
             </span>
           </div>
@@ -642,6 +643,8 @@
 .ep-meta { font-size: 12px; color: var(--text-tertiary); display: flex; flex-wrap: wrap; word-break: break-all; }
 .key-set { color: var(--success-text); }
 .key-missing { color: var(--error); }
+/* A keyless Custom endpoint (local Ollama/vLLM) is complete, not missing. */
+.key-optional { color: var(--text-tertiary); }
 
 /* ── model chips ── */
 .ep-chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 2px 0; }
