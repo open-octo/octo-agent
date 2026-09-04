@@ -24,7 +24,9 @@ import (
 // block on the CLI's writes and back, with no fairness guarantee between them.
 // Nothing is lost by leaving it out: cachedRegistry re-stats the file and
 // re-reads it when another process has changed it, which is what that cache is
-// for.
+// for. The one cost is on Windows, where a reader holding the file open makes
+// a concurrent writer's rename fail transiently; saveRegistry retries through
+// renameWithRetry to absorb that.
 //
 // That spares reads from waiting on another PROCESS directly, not from waiting
 // on this one: a local writer holds mu across its file-lock wait, so reads queue
