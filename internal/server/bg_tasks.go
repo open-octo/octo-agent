@@ -41,6 +41,24 @@ func (s *Server) broadcastBackgroundTasks(sessionID string) {
 	s.wsHub.broadcast(sessionID, backgroundTasksUpdate(sessionID, infos, time.Now()))
 }
 
+// handleWSKillBackground kills one background process on the user's behalf —
+// the recourse when the model can't (turn dead on a provider error, or idle
+// with no one to ask). SIGKILL only: a graceful-signal choice is the model's
+// business via kill_shell, the user just wants it gone. On success nothing
+// else needs doing here — the manager's exit hook (wireBackgroundTaskNotices)
+// already broadcasts the cancelled notice, refreshes the badge and tells the
+// model the process was killed rather than finished. An unknown id means the
+// badge is stale (the process exited between broadcasts), so re-broadcast the
+// live list to clear the ghost row.
+func (s *Server) handleWSKillBackground(sessionID, handleID string) {
+	if handleID == "" {
+		return
+	}
+	if !tools.SessionBackgroundManager(sessionID).Kill(handleID) {
+		s.broadcastBackgroundTasks(sessionID)
+	}
+}
+
 // wireBackgroundTaskNotices registers the session manager's exit hook so a
 // finished background process surfaces as a chat notice, the badge count
 // drops, and the model is notified. Re-registered (idempotently) at each turn

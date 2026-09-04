@@ -5,11 +5,31 @@
   // Each task: { handle_id, command, startedAt } — ChatView anchors the
   // server's one-shot `elapsed` to a local timestamp, since the server only
   // re-broadcasts on tool calls and process exits.
-  let { tasks = [], now = 0 }: { tasks?: any[]; now?: number } = $props()
+  // onkill fires with the handle_id once the user has confirmed; the parent
+  // owns the session id and the socket.
+  let { tasks = [], now = 0, onkill }: { tasks?: any[]; now?: number; onkill?: (handleId: string) => void } = $props()
 
   let open = $state(false)
   let rootEl: HTMLElement | undefined = $state()
   let triggerEl: HTMLButtonElement | undefined = $state()
+
+  // Two-step kill without a modal: the first click on a row's × turns it into a
+  // "confirm" button, the second click kills. Only one row can be armed at a
+  // time, and the arm is dropped when the popover closes or the row vanishes
+  // (process exited on its own), so a stale arm can't fire on the wrong row.
+  let armedId = $state<string | null>(null)
+  $effect(() => {
+    if (!open) armedId = null
+    else if (armedId && !tasks.some(p => p.handle_id === armedId)) armedId = null
+  })
+  function onKillClick(handleId: string) {
+    if (armedId !== handleId) {
+      armedId = handleId
+      return
+    }
+    armedId = null
+    onkill?.(handleId)
+  }
 
   function fmtElapsed(startedAt: number): string {
     const sec = now > 0 && startedAt > 0 ? (now - startedAt) / 1000 : 0
@@ -64,6 +84,19 @@
               <span class="proc-cmd mono">{p.command}</span>
             </div>
             <span class="proc-time">{$t('bgtask.running_elapsed').replace('{elapsed}', fmtElapsed(p.startedAt))}</span>
+            <button
+              class="proc-kill"
+              class:armed={armedId === p.handle_id}
+              title={armedId === p.handle_id ? $t('bgtask.kill_confirm') : $t('bgtask.kill')}
+              aria-label={armedId === p.handle_id ? $t('bgtask.kill_confirm') : $t('bgtask.kill')}
+              onclick={(e) => { e.stopPropagation(); onKillClick(p.handle_id) }}
+            >
+              {#if armedId === p.handle_id}
+                <span class="proc-kill-lbl">{$t('bgtask.kill_confirm')}</span>
+              {:else}
+                <iconify-icon icon="ant-design:close-outlined" width="12"></iconify-icon>
+              {/if}
+            </button>
           </div>
           {/each}
         </div>
@@ -105,5 +138,16 @@
 .proc-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .proc-cmd { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .proc-time { font-size: 12px; color: var(--success); flex: 0 0 auto; }
+.proc-kill {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 4px; margin-left: 2px; flex: 0 0 auto;
+  border: none; border-radius: 4px; background: transparent;
+  font-family: inherit; font-size: 12px; color: var(--text-secondary);
+  cursor: pointer;
+}
+.proc-kill:hover { color: var(--error, #ff4d4f); background: var(--bg-table-header); }
+.proc-kill.armed { color: #fff; background: var(--error, #ff4d4f); }
+.proc-kill.armed:hover { filter: brightness(0.92); }
+.proc-kill-lbl { white-space: nowrap; line-height: 1; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 </style>

@@ -3171,7 +3171,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
       <!-- Background processes: a text trigger opening a popover list -->
       {#if bgTasks && bgTasks.length > 0}
-        <BackgroundProcesses tasks={bgTasks} {now} />
+        <BackgroundProcesses tasks={bgTasks} {now} onkill={(handleId) => { if (id) ws.killBackground(id, handleId) }} />
       {/if}
 
       <!-- Question banner (aligned with composer) -->

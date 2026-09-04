@@ -413,3 +413,11 @@ type wsInPromoteSyncTerminal struct {
 type wsInPromoteSyncSubAgent struct {
 	SessionID string `json:"session_id"`
 }
+
+// wsInKillBackground is sent by the browser when the user kills a process from
+// the background-process popover. HandleID is the BackgroundManager id shown
+// in background_tasks_update (e.g. "bg_1").
+type wsInKillBackground struct {
+	SessionID string `json:"session_id"`
+	HandleID  string `json:"handle_id"`
+}
