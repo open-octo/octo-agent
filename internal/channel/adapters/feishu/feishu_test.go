@@ -22,6 +22,8 @@ type fakeFeishu struct {
 	srv         *httptest.Server
 }
 
+const fakeBotOpenID = "ou_bot"
+
 func newFakeFeishu(t *testing.T) *fakeFeishu {
 	f := &fakeFeishu{}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -29,6 +31,12 @@ func newFakeFeishu(t *testing.T) *fakeFeishu {
 		case "/open-apis/auth/v3/tenant_access_token/internal":
 			json.NewEncoder(w).Encode(map[string]any{
 				"code": 0, "tenant_access_token": "tok", "expire": 7200,
+			})
+		case "/open-apis/bot/v3/info":
+			// Real wire shape: `bot` sits at the top level, not under `data`.
+			json.NewEncoder(w).Encode(map[string]any{
+				"code": 0, "msg": "ok",
+				"bot": map[string]any{"open_id": fakeBotOpenID, "app_name": "octo"},
 			})
 		case "/open-apis/im/v1/images":
 			f.mu.Lock()
@@ -344,4 +352,97 @@ func TestBuildMsgPayload_CodeFenceTriggersCardMode(t *testing.T) {
 	if msgType != "interactive" {
 		t.Fatalf("expected interactive (card) rendering for a code fence, got %q", msgType)
 	}
+}
+
+// #2346: the bot info response was decoded as `data.bot.open_id`, but the v3
+// endpoint returns `bot` at the top level. The decode "succeeded" with an
+// empty open_id, so every group message was dropped as un-mentioned.
+func TestGetBotOpenID_ResponseShapes(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"top-level bot (real wire shape)", `{"code":0,"msg":"ok","bot":{"open_id":"ou_top","app_name":"x"}}`, "ou_top"},
+		{"data-wrapped bot (tolerated)", `{"code":0,"data":{"bot":{"open_id":"ou_data"}}}`, "ou_data"},
+		{"non-zero code", `{"code":99991663,"msg":"permission denied","bot":{"open_id":"ou_x"}}`, ""},
+		{"no open_id", `{"code":0,"bot":{}}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/open-apis/auth/v3/tenant_access_token/internal":
+					json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "tok", "expire": 7200})
+				case "/open-apis/bot/v3/info":
+					w.Write([]byte(tc.body))
+				default:
+					w.WriteHeader(404)
+				}
+			}))
+			defer srv.Close()
+			a, err := New(channel.PlatformConfig{cfgAppID: "app", cfgAppSecret: "secret", cfgDomain: srv.URL})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			if got := a.(*Adapter).getBotOpenID(); got != tc.want {
+				t.Fatalf("getBotOpenID() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// #2346: end-to-end through handleEvent — a group message that @-mentions the
+// bot must be admitted once the bot's open_id resolves from the real response
+// shape, and one that does not mention it must still be dropped.
+func TestHandleEvent_GroupMentionGate(t *testing.T) {
+	groupMsg := func(mentionOpenID string) []byte {
+		mentions := "[]"
+		if mentionOpenID != "" {
+			mentions = `[{"key":"@_user_1","id":{"open_id":"` + mentionOpenID + `"},"name":"octo"}]`
+		}
+		return []byte(`{
+			"schema": "2.0",
+			"header": {"event_type": "im.message.receive_v1"},
+			"event": {
+				"message": {
+					"message_id": "m-1",
+					"chat_id": "chat-g",
+					"chat_type": "group",
+					"message_type": "text",
+					"content": "{\"text\":\"@_user_1 hello\"}",
+					"mentions": ` + mentions + `
+				},
+				"sender": {"sender_id": {"open_id": "user-1"}}
+			}
+		}`)
+	}
+
+	t.Run("mentioned bot is admitted", func(t *testing.T) {
+		f := newFakeFeishu(t)
+		a := newTestAdapter(t, f)
+		var got *channel.InboundEvent
+		a.handleEvent(groupMsg(fakeBotOpenID), func(ev channel.InboundEvent) { got = &ev })
+		if got == nil {
+			t.Fatal("expected the @-mentioned group message to produce an InboundEvent")
+		}
+		if a.botOpenID != fakeBotOpenID {
+			t.Fatalf("botOpenID = %q, want %q", a.botOpenID, fakeBotOpenID)
+		}
+	})
+
+	t.Run("unmentioned message is dropped", func(t *testing.T) {
+		f := newFakeFeishu(t)
+		a := newTestAdapter(t, f)
+		delivered := false
+		a.handleEvent(groupMsg("ou_someone_else"), func(channel.InboundEvent) { delivered = true })
+		if delivered {
+			t.Fatal("group message that does not mention the bot must be dropped")
+		}
+		// The drop must come from the mention gate, not from an unresolved
+		// identity — otherwise this subtest would also pass on the old decoder.
+		if a.botOpenID != fakeBotOpenID {
+			t.Fatalf("botOpenID = %q, want %q (dropped for the wrong reason)", a.botOpenID, fakeBotOpenID)
+		}
+	})
 }

@@ -463,27 +463,54 @@ func (a *Adapter) readEvents(ctx context.Context, conn *websocket.Conn, onMessag
 
 // ─── Bot info ──────────────────────────────────────────────────────────────
 
+type botInfo struct {
+	OpenID string `json:"open_id"`
+}
+
+// getBotOpenID resolves the bot's own open_id via GET /open-apis/bot/v3/info.
+// Unlike most Feishu endpoints, this legacy v3 API returns `bot` at the top
+// level of the response rather than under `data`. The official larksuite SDKs
+// read the top level and fall back to `data.bot`, so we accept both shapes.
+// Every failure is logged: an empty result silently disables all group chats
+// because handleEvent fails closed without it (#2346).
 func (a *Adapter) getBotOpenID() string {
 	req, _ := http.NewRequest("GET", a.domain+"/open-apis/bot/v3/info", nil)
 	req.Header.Set("Authorization", "Bearer "+a.getToken())
 	resp, err := a.http.Do(req)
 	if err != nil {
+		log.Printf("[feishu] bot info: %v", err)
 		return ""
 	}
 	defer resp.Body.Close()
 
 	var r struct {
-		Code int `json:"code"`
+		Code int     `json:"code"`
+		Msg  string  `json:"msg"`
+		Bot  botInfo `json:"bot"`
 		Data struct {
-			Bot struct {
-				OpenID string `json:"open_id"`
-			} `json:"bot"`
+			Bot botInfo `json:"bot"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		// Include the status so an HTML error page from a proxy is
+		// distinguishable from a malformed Feishu reply.
+		log.Printf("[feishu] bot info: decode response (HTTP %d): %v", resp.StatusCode, err)
 		return ""
 	}
-	return r.Data.Bot.OpenID
+	if r.Code != 0 {
+		log.Printf("[feishu] bot info: code %d: %s", r.Code, r.Msg)
+		return ""
+	}
+	id := r.Bot.OpenID
+	if id == "" {
+		id = r.Data.Bot.OpenID
+	}
+	if id == "" {
+		log.Printf("[feishu] bot info: response carried no open_id")
+		return ""
+	}
+	log.Printf("[feishu] bot open_id: %s", id)
+	return id
 }
 
 // ─── Message handling ──────────────────────────────────────────────────────
