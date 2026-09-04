@@ -748,6 +748,51 @@ func (p *Page) TypeText(ctx context.Context, selector, text string) error {
 	return err
 }
 
+// Clear empties a text field — input, textarea, or contenteditable — so the
+// next TypeText starts from nothing; TypeText inserts at the caret and has no
+// way to replace what is already there. The primary path is a real select-all
+// followed by a Backspace key press, so framework-controlled inputs (React,
+// Vue) see exactly the input events a user would produce. If the field still
+// holds content afterwards (a widget that swallows synthetic keys, a masked
+// input), fall back to writing the empty value directly and firing input so
+// bound state resets anyway.
+func (p *Page) Clear(ctx context.Context, selector string) error {
+	frame, elem := splitFrame(selector)
+	if frame != "" {
+		if cp, ok := p.oopifPage(ctx, frame); ok {
+			return cp.Clear(ctx, elem)
+		}
+	}
+	// execCommand runs against the element's own document so a field inside a
+	// same-origin iframe selects its own content, not the top document's.
+	selectAll := fmt.Sprintf(`(() => {
+		const el = %s;
+		if (!el) return false;
+		el.focus();
+		if (typeof el.select === 'function') el.select();
+		else if (el.isContentEditable) el.ownerDocument.execCommand('selectAll', false, null);
+		return true;
+	})()`, elemRefJS(frame, elem))
+	var ok bool
+	if err := p.Eval(ctx, selectAll, &ok); err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("clear: selector %q matched nothing", selector)
+	}
+	if err := p.Key(ctx, "backspace"); err != nil {
+		return err
+	}
+	if !p.fieldNonEmpty(ctx, selector) {
+		return nil
+	}
+	p.clearField(ctx, selector)
+	if p.fieldNonEmpty(ctx, selector) {
+		return fmt.Errorf("clear: %q still has content after select-all+Backspace and a direct reset", selector)
+	}
+	return nil
+}
+
 // fieldNonEmpty reports whether a form field currently holds any value/text —
 // the post-type sanity check, since programmatic input can be silently swallowed
 // by a disabled, re-rendering, or framework-controlled input. It checks

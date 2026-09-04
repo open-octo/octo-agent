@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -423,8 +424,8 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
-					"enum":        []string{"navigate", "back", "click", "hover", "type", "select", "key", "scroll", "wait", "screenshot", "observe", "ax", "cookies", "upload", "download", "pages", "select_page", "close", "eval", "record_start", "record_stop", "record_cancel", "replay", "run_skill"},
-					"description": "The browser action to perform. observe lists the page's URL/title and interactable elements with selectors (text only) — the cheap way to look at an unfamiliar page before acting; works on any model. screenshot returns an image of the page to actually see (use when content is visual); it needs either a vision-capable model or a configured vision_helper, and otherwise returns just the file path. ax returns an accessibility-tree digest (roles and names) — a semantic text view of the page, an alternative to observe when document structure matters more than selectors. pages lists open tabs; select_page switches between them. cookies returns the current page's cookies (HttpOnly included) for session reuse / token extraction. record_start/record_stop capture the USER's own demonstration into an editable recording — record_start only installs listeners, so after it you MUST hand control to the user: tell them to perform the actions themselves in their browser and to say when they're done, then call record_stop (or record_cancel to discard the demo without saving). Do NOT drive the page yourself (navigate/click/type) while recording — your tool actions are not the demonstration and a click that navigates is easily lost; only the user's real gestures are captured. replay replays a recording (deterministic, self-healing; run_skill is a deprecated alias of replay).",
+					"enum":        browserActions,
+					"description": "The browser action to perform. type inserts at the caret and does not replace existing content — use clear first to empty an input/textarea/contenteditable. eval runs JavaScript (parameter js). observe lists the page's URL/title and interactable elements with selectors (text only) — the cheap way to look at an unfamiliar page before acting; works on any model. screenshot returns an image of the page to actually see (use when content is visual); it needs either a vision-capable model or a configured vision_helper, and otherwise returns just the file path. ax returns an accessibility-tree digest (roles and names) — a semantic text view of the page, an alternative to observe when document structure matters more than selectors. pages lists open tabs; select_page switches between them. cookies returns the current page's cookies (HttpOnly included) for session reuse / token extraction. record_start/record_stop capture the USER's own demonstration into an editable recording — record_start only installs listeners, so after it you MUST hand control to the user: tell them to perform the actions themselves in their browser and to say when they're done, then call record_stop (or record_cancel to discard the demo without saving). Do NOT drive the page yourself (navigate/click/type) while recording — your tool actions are not the demonstration and a click that navigates is easily lost; only the user's real gestures are captured. replay replays a recording (deterministic, self-healing; run_skill is a deprecated alias of replay).",
 				},
 				"name":         map[string]any{"type": "string", "description": "Recording name (record_stop / replay)."},
 				"params":       map[string]any{"type": "object", "description": "Param values for {{...}} placeholders (replay). Params declared secret:true in the recording are collected by the runtime OUTSIDE the conversation (session cache → OCTO_BROWSER_SECRET_<NAME> env → masked user prompt) — never pass a secret value here, just omit it. Omitting a required NON-secret param fails with a missing-param error; then decide whether to supply a value or ask the user."},
@@ -472,10 +473,25 @@ func resolveBrowserProgress(ctx context.Context) func(string) {
 	return p
 }
 
+// browserActions is the single source of truth for the action enum the model
+// sees and for the "unknown action" error. Models routinely guess synonyms
+// (clear/evaluate/exec) — echoing the real list back turns three blind retries
+// into one corrected call.
+var browserActions = []string{"navigate", "back", "click", "hover", "type", "clear", "select", "key", "scroll", "wait", "screenshot", "observe", "ax", "cookies", "upload", "download", "pages", "select_page", "close", "eval", "record_start", "record_stop", "record_cancel", "replay", "run_skill"}
+
+func unknownBrowserAction(action string) error {
+	return fmt.Errorf("browser: unknown action %q (valid: %s)", action, strings.Join(browserActions, ", "))
+}
+
 func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
 	action, _ := input["action"].(string)
 	if action == "" {
 		return agent.ToolResult{}, fmt.Errorf("browser: action is required")
+	}
+	// Reject a bad action before touching the browser: a typo should cost one
+	// round-trip with the valid list, not a CDP connection attempt first.
+	if !slices.Contains(browserActions, action) {
+		return agent.ToolResult{}, unknownBrowserAction(action)
 	}
 
 	// Bound every action so a CDP call a janky/loading page never acks (e.g. a
@@ -563,6 +579,16 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 			return agent.ToolResult{}, err
 		}
 		return agent.ToolResult{Text: fmt.Sprintf("typed %q into %s", text, sel)}, nil
+
+	case "clear":
+		sel := targetSelector(input)
+		if sel == "" {
+			return agent.ToolResult{}, fmt.Errorf("browser: clear requires selector")
+		}
+		if err := page.Clear(ctx, sel); err != nil {
+			return agent.ToolResult{}, err
+		}
+		return agent.ToolResult{Text: "cleared " + sel}, nil
 
 	case "key":
 		combo := getStr(input, "keys")
@@ -944,7 +970,9 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		return agent.ToolResult{Text: string(j)}, nil
 
 	default:
-		return agent.ToolResult{}, fmt.Errorf("browser: unknown action %q", action)
+		// Unreachable after the up-front check; kept so a case added to
+		// browserActions without a branch here still fails loudly.
+		return agent.ToolResult{}, unknownBrowserAction(action)
 	}
 }
 
