@@ -43,6 +43,40 @@ CUSTOM_API_KEY=sk-... \
 </TabItem>
 </Tabs>
 
+## Local models (Ollama, vLLM)
+
+Local servers expose an OpenAI-compatible API, so they are a `custom` endpoint with
+`protocol: openai`. Two details trip people up:
+
+- **`base_url` is the OpenAI-compatible root, not the server's native API.** For Ollama that is
+  `http://localhost:11434/v1` — not `/api`, which is Ollama's own API. octo appends
+  `/chat/completions` to a URL ending in `/v1` (and the full `/v1/chat/completions` otherwise), so
+  `http://localhost:11434/api` turns into `…/api/v1/chat/completions` and Ollama answers 404.
+  vLLM's default is `http://localhost:8000/v1`.
+- **The API key must be non-empty.** Local servers ignore it, but octo treats an empty key as
+  "not configured yet" and opens the setup wizard. Put any placeholder in `api_key`.
+
+```yaml
+endpoints:
+  - id: ollama
+    provider: custom
+    protocol: openai
+    base_url: http://localhost:11434/v1
+    api_key: ollama              # ignored by Ollama, but must not be empty
+    models:
+      - model: qwen3-coder:30b
+        vision: false            # text-only model: keep images away from it
+default: ollama::qwen3-coder:30b
+```
+
+The same via env vars, without touching the config file:
+
+```bash
+CUSTOM_BASE_URL=http://localhost:11434/v1 \
+CUSTOM_API_KEY=ollama \
+  octo --model qwen3-coder:30b "..."
+```
+
 ## Save it as your default
 
 ```bash
