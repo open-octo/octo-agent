@@ -81,9 +81,13 @@ is dead (Chrome closed/restarted).
 ## The `browser` tool
 
 One action-multiplexed tool. Actions: `navigate`, `back`, `click`, `hover`,
-`type`, `select`, `key`, `scroll`, `wait`, `screenshot`, `observe`, `ax`,
-`cookies`, `upload`, `download`, `pages`, `select_page`, `close`, `eval`,
-`record_start`, `record_stop`, `replay`.
+`type`, `clear`, `select`, `key`, `scroll`, `wait`, `screenshot`, `observe`,
+`ax`, `cookies`, `upload`, `download`, `pages`, `select_page`, `close`, `eval`,
+`record_start`, `record_stop`, `record_cancel`, `replay` (`run_skill` is a
+deprecated alias). The list lives in one place (`browserActions`), feeding both
+the schema enum and the unknown-action error, which echoes the valid names.
+`clear` exists because `type` inserts at the caret and cannot replace existing
+content; it is live-only and has no recording step.
 
 Notable behaviours:
 - **`observe`** returns a text digest of the page's interactable elements

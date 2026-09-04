@@ -154,7 +154,7 @@
         let detail = ''
         switch (act) {
           case 'navigate': detail = pick('url'); break
-          case 'click': case 'hover': case 'scroll': case 'download':
+          case 'click': case 'hover': case 'clear': case 'scroll': case 'download':
             detail = sel; break
           case 'wait':
             detail = sel || (a.network_idle ? 'network idle' : (a.timeout_ms ? `${a.timeout_ms}ms` : '')); break

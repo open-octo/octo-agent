@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -368,6 +369,46 @@ func TestBrowserTool_RequiresAction(t *testing.T) {
 	_, err := BrowserTool{}.Execute(context.Background(), "browser", map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing action")
+	}
+}
+
+// A guessed action name (models try clear-alikes and eval synonyms) must fail
+// before any browser connection is attempted, and the error must carry the
+// valid list so the next call can be right. No Chrome is needed for this test
+// precisely because the check runs up front.
+func TestBrowserTool_UnknownActionListsValidOnes(t *testing.T) {
+	for _, bad := range []string{"evaluate", "exec", "clearx"} {
+		_, err := BrowserTool{}.Execute(context.Background(), "browser", map[string]any{"action": bad})
+		if err == nil {
+			t.Fatalf("action %q: expected error", bad)
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, `unknown action "`+bad+`"`) {
+			t.Errorf("action %q: error %q does not name the bad action", bad, msg)
+		}
+		for _, want := range []string{"clear", "eval", "navigate", "replay"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("action %q: error %q does not list valid action %q", bad, msg, want)
+			}
+		}
+	}
+}
+
+// The enum the model sees must be fed from browserActions — the same list the
+// unknown-action error echoes — so the two can never drift back into a
+// hand-maintained literal that forgets a new action.
+func TestBrowserTool_EnumMatchesActions(t *testing.T) {
+	def := BrowserTool{}.Definition()
+	props := def.Parameters["properties"].(map[string]any)
+	enum, ok := props["action"].(map[string]any)["enum"].([]string)
+	if !ok {
+		t.Fatalf("action enum is %T, want []string", props["action"].(map[string]any)["enum"])
+	}
+	if !slices.Equal(enum, browserActions) {
+		t.Fatalf("enum = %v\nbrowserActions = %v", enum, browserActions)
+	}
+	if !slices.Contains(enum, "clear") {
+		t.Error("enum missing clear")
 	}
 }
 
