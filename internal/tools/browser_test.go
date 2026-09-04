@@ -394,19 +394,21 @@ func TestBrowserTool_UnknownActionListsValidOnes(t *testing.T) {
 	}
 }
 
-// The enum the model sees and the dispatch switch must agree: every listed
-// action has a branch, so none can fall through to the unknown-action error.
+// The enum the model sees must be fed from browserActions — the same list the
+// unknown-action error echoes — so the two can never drift back into a
+// hand-maintained literal that forgets a new action.
 func TestBrowserTool_EnumMatchesActions(t *testing.T) {
 	def := BrowserTool{}.Definition()
 	props := def.Parameters["properties"].(map[string]any)
-	enum := props["action"].(map[string]any)["enum"].([]string)
-	if len(enum) != len(browserActions) {
-		t.Fatalf("enum has %d actions, browserActions has %d", len(enum), len(browserActions))
+	enum, ok := props["action"].(map[string]any)["enum"].([]string)
+	if !ok {
+		t.Fatalf("action enum is %T, want []string", props["action"].(map[string]any)["enum"])
 	}
-	for _, want := range []string{"clear", "eval", "type"} {
-		if !slices.Contains(enum, want) {
-			t.Errorf("enum missing %q", want)
-		}
+	if !slices.Equal(enum, browserActions) {
+		t.Fatalf("enum = %v\nbrowserActions = %v", enum, browserActions)
+	}
+	if !slices.Contains(enum, "clear") {
+		t.Error("enum missing clear")
 	}
 }
 

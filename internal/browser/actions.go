@@ -756,6 +756,18 @@ func (p *Page) TypeText(ctx context.Context, selector, text string) error {
 // holds content afterwards (a widget that swallows synthetic keys, a masked
 // input), fall back to writing the empty value directly and firing input so
 // bound state resets anyway.
+//
+// The key press is only sent when focus verifiably landed on the target.
+// focus() is a silent no-op on a hidden or disabled element, and a Backspace
+// dispatched then would go to whatever was focused before — typically the
+// field the model just typed into — and delete from it with no trace. Such a
+// target goes straight to the value reset instead. A read-only field is an
+// error rather than a reset: the page said it must not change, and a direct
+// write would defeat that.
+//
+// An element that disappears between steps (a framework re-render swapping
+// the node) reads as empty and counts as cleared; the replacement starts
+// fresh, which is what the caller wanted.
 func (p *Page) Clear(ctx context.Context, selector string) error {
 	frame, elem := splitFrame(selector)
 	if frame != "" {
@@ -763,28 +775,36 @@ func (p *Page) Clear(ctx context.Context, selector string) error {
 			return cp.Clear(ctx, elem)
 		}
 	}
-	// execCommand runs against the element's own document so a field inside a
-	// same-origin iframe selects its own content, not the top document's.
+	// execCommand and activeElement are read off the element's own document so
+	// a field inside a same-origin iframe is handled in its own frame, not the
+	// top document.
 	selectAll := fmt.Sprintf(`(() => {
 		const el = %s;
-		if (!el) return false;
+		if (!el) return 'missing';
+		if (el.readOnly) return 'readonly';
 		el.focus();
+		const active = el.ownerDocument.activeElement;
+		if (active !== el && !el.contains(active)) return 'unfocused';
 		if (typeof el.select === 'function') el.select();
 		else if (el.isContentEditable) el.ownerDocument.execCommand('selectAll', false, null);
-		return true;
+		return 'ok';
 	})()`, elemRefJS(frame, elem))
-	var ok bool
-	if err := p.Eval(ctx, selectAll, &ok); err != nil {
+	var state string
+	if err := p.Eval(ctx, selectAll, &state); err != nil {
 		return err
 	}
-	if !ok {
+	switch state {
+	case "missing":
 		return fmt.Errorf("clear: selector %q matched nothing", selector)
-	}
-	if err := p.Key(ctx, "backspace"); err != nil {
-		return err
-	}
-	if !p.fieldNonEmpty(ctx, selector) {
-		return nil
+	case "readonly":
+		return fmt.Errorf("clear: %q is read-only", selector)
+	case "ok":
+		if err := p.Key(ctx, "backspace"); err != nil {
+			return err
+		}
+		if !p.fieldNonEmpty(ctx, selector) {
+			return nil
+		}
 	}
 	p.clearField(ctx, selector)
 	if p.fieldNonEmpty(ctx, selector) {
