@@ -91,7 +91,7 @@ the official Anthropic endpoint and a relay — which the old flat list couldn't
 | `name` | string | Optional display name shown in the UI; may differ from `id` |
 | `provider` | string | `anthropic` \| `openai` \| `custom` |
 | `base_url` | string | Endpoint URL; empty uses the vendor default. Required for the `custom` vendor |
-| `api_key` | string | Plaintext fallback used only if the provider's env var is empty (mode `0600`) |
+| `api_key` | string | Plaintext fallback used only if the provider's env var is empty (mode `0600`). Optional for the `custom` vendor — local servers such as Ollama take none, and no auth header is sent |
 | `protocol` | string | Wire format for the `custom` vendor only: `anthropic` \| `openai` |
 | `lite_model` | string | Optional: name a model in this endpoint's `models` to serve as its compaction lite model |
 | `models` | list of [model](#model) | The models offered through this endpoint |

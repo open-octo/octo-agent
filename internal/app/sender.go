@@ -134,7 +134,8 @@ func EntryConnectionOverrides(resolvedProvider string, entry config.ModelEntry) 
 }
 
 // buildClient constructs the vendor client and applies an optional base-URL
-// override. The caller is responsible for having resolved a non-empty key.
+// override. An empty key is accepted only for CustomEndpoint vendors (keyless
+// local servers); every other vendor fails here with its env var named.
 // protocol is used only for vendors with no registry-pinned wire format (the
 // Custom catch-all); named vendors ignore it and use their own protocol.
 func buildClient(name, apiKey, baseURL, protocol string, headers map[string]string) (provider.Provider, error) {
@@ -162,6 +163,13 @@ func buildClient(name, apiKey, baseURL, protocol string, headers map[string]stri
 	}
 	if proto == "" {
 		return nil, fmt.Errorf("provider %q requires a protocol (\"anthropic\" or \"openai\")", name)
+	}
+	// The key-required policy lives here, not in the wire clients: the same
+	// openai client serves api.openai.com (key mandatory) and a keyless local
+	// Ollama behind the Custom vendor. A client built with an empty key sends
+	// no auth header at all.
+	if strings.TrimSpace(apiKey) == "" && !v.CustomEndpoint {
+		return nil, fmt.Errorf("provider %q requires an API key (set %s or api_key in config)", name, v.APIKeyEnvVar)
 	}
 
 	switch proto {

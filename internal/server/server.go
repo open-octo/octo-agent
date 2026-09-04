@@ -1519,10 +1519,11 @@ func resolveProviderAndModel(flagProvider, flagModel string) (agent.Sender, stri
 	if err != nil {
 		return nil, "", "", err
 	}
-	if apiKey == "" {
+	if apiKey == "" && !app.VendorKeyOptional(provName) {
 		// No API key configured yet — server starts in onboarding mode.
 		// Chat endpoints will retry on every request until the user completes
-		// setup via the Web UI.
+		// setup via the Web UI. A keyless Custom endpoint is fully configured
+		// and builds its sender below.
 		return nil, model, provName, nil
 	}
 	// Protocol and Headers are meaningful only for the Custom vendor, and only
@@ -1731,7 +1732,7 @@ func senderForEntry(entry config.ModelEntry) (agent.Sender, error) {
 	if apiKey == "" {
 		apiKey = entry.APIKey
 	}
-	if apiKey == "" {
+	if apiKey == "" && !app.VendorKeyOptional(entry.Provider) {
 		return nil, fmt.Errorf("no API key for model %q (provider %q)", entry.Model, entry.Provider)
 	}
 	cfg, _ := config.LoadCached()

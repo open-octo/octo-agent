@@ -66,8 +66,10 @@ func TestNewVisionDescriber_NilWhenUnusable(t *testing.T) {
 // image blocks through to a text-only endpoint (HTTP 400 every turn). Instead
 // Describe fails with the reason, which becomes the per-image fallback text.
 func TestNewVisionDescriber_NoKeyDescribesWithClearError(t *testing.T) {
-	t.Setenv("CUSTOM_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
 	cfg := visionCfg("http://x")
+	// A named vendor: the Custom vendor may run keyless (see the test below).
+	cfg.Endpoints[0].Provider = "openai"
 	cfg.Endpoints[0].APIKey = ""
 
 	d := NewVisionDescriber(agent.New(nil, "blind"), cfg)
@@ -83,6 +85,35 @@ func TestNewVisionDescriber_NoKeyDescribesWithClearError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no API key") {
 		t.Errorf("error should name the fix, got: %v", err)
+	}
+}
+
+// A keyless Custom endpoint (a local Ollama vision model) is a valid helper:
+// the describer builds, calls the server, and sends no Authorization header.
+func TestNewVisionDescriber_KeylessCustomBuilds(t *testing.T) {
+	t.Setenv("CUSTOM_API_KEY", "")
+	var sawAuth bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, sawAuth = r.Header["Authorization"]
+		chatCompletion(w, "a cat")
+	}))
+	defer srv.Close()
+	cfg := visionCfg(srv.URL)
+	cfg.Endpoints[0].APIKey = ""
+
+	d := NewVisionDescriber(agent.New(nil, "blind"), cfg)
+	if d == nil {
+		t.Fatal("NewVisionDescriber() = nil, want a describer")
+	}
+	got, err := d.Describe(context.Background(), agent.ImageData{MIMEType: "image/png", Data: pngBytes})
+	if err != nil {
+		t.Fatalf("Describe on a keyless custom helper: %v", err)
+	}
+	if got != "a cat" {
+		t.Errorf("Describe = %q, want %q", got, "a cat")
+	}
+	if sawAuth {
+		t.Error("Authorization header sent for a keyless custom vision helper")
 	}
 }
 

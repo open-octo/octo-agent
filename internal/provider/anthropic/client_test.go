@@ -88,14 +88,6 @@ func TestSend_CustomHeaderOverridesBuiltin(t *testing.T) {
 	}
 }
 
-func TestNew_EmptyKeyRejected(t *testing.T) {
-	for _, k := range []string{"", "   ", "\t\n"} {
-		if _, err := New(k); err == nil {
-			t.Errorf("New(%q) expected error, got nil", k)
-		}
-	}
-}
-
 func TestSend_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Headers

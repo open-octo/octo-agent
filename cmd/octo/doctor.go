@@ -195,5 +195,8 @@ func endpointKeyStatus(ep config.Endpoint) (ok bool, status string) {
 	if ep.APIKey != "" {
 		return true, "found in endpoint.api_key"
 	}
+	if app.VendorKeyOptional(ep.Provider) {
+		return true, "none (optional for a custom endpoint)"
+	}
 	return false, "missing (set $" + envVar + " or add api_key to the endpoint)"
 }

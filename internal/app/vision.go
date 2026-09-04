@@ -62,7 +62,9 @@ func NewVisionDescriber(a *agent.Agent, cfg config.Config) agent.ImageDescriber 
 	if apiKey == "" {
 		apiKey = entry.APIKey
 	}
-	if apiKey == "" {
+	// Same rule as buildClient: only a named vendor needs a key. A keyless
+	// Custom endpoint (a local Ollama vision model) builds its sender below.
+	if apiKey == "" && !VendorKeyOptional(entry.Provider) {
 		d.buildErr = fmt.Errorf("vision helper %q has no API key — set %s or the endpoint's api_key", cfg.VisionHelper, VendorAPIKeyEnvVar(entry.Provider))
 		return d
 	}

@@ -80,7 +80,7 @@ octo 按不同界面分别追踪工作目录,而不是一个全局 cwd:
 | `name` | string | 可选：UI 里显示的名字，可以和 `id` 不同 |
 | `provider` | string | `anthropic` \| `openai` \| `custom` |
 | `base_url` | string | 端点 URL；留空使用该 vendor 的默认端点。`custom` vendor 必填 |
-| `api_key` | string | 明文兜底，仅当对应环境变量为空时使用（权限 `0600`） |
+| `api_key` | string | 明文兜底，仅当对应环境变量为空时使用（权限 `0600`）。`custom` vendor 可以不填——Ollama 等本地服务不需要密钥，此时不发认证头 |
 | `protocol` | string | 仅 `custom` vendor 使用的协议：`anthropic` \| `openai` |
 | `lite_model` | string | 可选：指定本端点 `models` 里的某个模型作为它的压缩 lite 模型 |
 | `models` | [模型](#模型) 列表 | 通过这个端点提供的模型 |

@@ -1518,6 +1518,11 @@ func resolveAPIKey(name string, entry config.ModelEntry, stderr io.Writer) (stri
 	if apiKey == "" && entry.Provider == name {
 		apiKey = entry.APIKey
 	}
+	// A keyless Custom endpoint (local Ollama/vLLM) is a complete config, not
+	// a missing key — don't send the user into the setup wizard.
+	if apiKey == "" && app.VendorKeyOptional(name) {
+		return "", nil
+	}
 	if apiKey == "" {
 		fmt.Fprintf(stderr, "octo: %s is not set.\n", envVar)
 		fmt.Fprintln(stderr, "")

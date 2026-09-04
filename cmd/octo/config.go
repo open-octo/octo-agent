@@ -696,7 +696,7 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 	path, _ := config.Path()
 	fmt.Fprintln(stdout)
 	fmt.Fprintf(stdout, "Saved %s\n", path)
-	if outEntry.APIKey == "" && os.Getenv(apiKeyEnvVar(provider)) == "" {
+	if outEntry.APIKey == "" && os.Getenv(apiKeyEnvVar(provider)) == "" && !app.VendorKeyOptional(provider) {
 		fmt.Fprintf(stdout, "Next: export %s=... (or re-run `octo config` to store it), then `octo`.\n", apiKeyEnvVar(provider))
 	} else {
 		fmt.Fprintln(stdout, "Run `octo` to start.")
@@ -770,7 +770,11 @@ func collectAPIKey(outEntry *config.ModelEntry, existing config.ModelEntry, prov
 	}
 	outEntry.APIKey = ""
 	if firstRun {
-		key := strings.TrimSpace(promptDefault(reader, stdout, "Paste your "+app.VendorDisplayName(provider)+" API key", ""))
+		label := "Paste your " + app.VendorDisplayName(provider) + " API key"
+		if app.VendorKeyOptional(provider) {
+			label += " (optional — press Enter to skip for a keyless local server)"
+		}
+		key := strings.TrimSpace(promptDefault(reader, stdout, label, ""))
 		outEntry.APIKey = key
 		return key != ""
 	}

@@ -98,14 +98,12 @@ func (c *Client) streamIdleTimeout() time.Duration {
 }
 
 // New constructs a Client with the given API key and the standard defaults.
-// Returns an error when apiKey is empty so misconfiguration is caught at
-// startup rather than at the first request.
+// An empty key is accepted: a self-hosted Anthropic-protocol gateway may take
+// none, and requests then carry no x-api-key header. Whether a key is
+// mandatory for a given endpoint is the caller's policy (app.buildClient).
 func New(apiKey string) (*Client, error) {
-	if strings.TrimSpace(apiKey) == "" {
-		return nil, errors.New("anthropic: API key is required")
-	}
 	return &Client{
-		APIKey:     apiKey,
+		APIKey:     strings.TrimSpace(apiKey),
 		BaseURL:    DefaultBaseURL,
 		APIVersion: DefaultAPIVersion,
 		HTTPClient: &http.Client{Timeout: 60 * time.Second},
@@ -162,7 +160,9 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("User-Agent", version.UserAgent())
-		httpReq.Header.Set("x-api-key", c.APIKey)
+		if c.APIKey != "" {
+			httpReq.Header.Set("x-api-key", c.APIKey)
+		}
 		apiVer := c.APIVersion
 		if apiVer == "" {
 			apiVer = DefaultAPIVersion
