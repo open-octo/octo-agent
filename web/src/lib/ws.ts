@@ -236,6 +236,17 @@ export class WsManager {
     this.send({ type: "promote_sync_sub_agent", session_id: sessionId });
   }
 
+  // Kill one background process from the popover. The server answers through
+  // the normal exit path: a "cancelled" background_task_notice plus a refreshed
+  // background_tasks_update — there is no dedicated ack.
+  killBackground(sessionId: string, handleId: string): void {
+    this.send({
+      type: "kill_background",
+      session_id: sessionId,
+      handle_id: handleId,
+    });
+  }
+
   rollback(sessionId: string): void {
     this.send({ type: "rollback", session_id: sessionId });
   }

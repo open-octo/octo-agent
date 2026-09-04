@@ -365,6 +365,13 @@ func (c *wsConn) dispatch(msgType string, raw []byte) {
 			mgr.PromoteSync()
 		}
 
+	case "kill_background":
+		var msg wsInKillBackground
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			return
+		}
+		c.hub.s.handleWSKillBackground(msg.SessionID, msg.HandleID)
+
 	default:
 		log.Printf("[ws] unknown message type: %q", msgType)
 	}
@@ -381,6 +388,7 @@ type wsHubOwner interface {
 	handleWSRollback(conn *wsConn, sessionID string)
 	handleWSRunTask(conn *wsConn, sessionID string)
 	handleWSRetractSteer(sessionID, pendingID, text string)
+	handleWSKillBackground(sessionID, handleID string)
 	handleWSConfirmation(confID, result string)
 	handleWSUserQuestionAnswer(qid, outcome string, answers []wsMsgAskAnswer)
 	replayLiveState(sessionID string, conn *wsConn)

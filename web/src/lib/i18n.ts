@@ -307,6 +307,8 @@ export const en: Record<string, string> = {
   "bgtask.n_processes": "{n} background processes",
   "bgtask.n_process": "{n} background process",
   "bgtask.running_elapsed": "running · {elapsed}",
+  "bgtask.kill": "Kill process",
+  "bgtask.kill_confirm": "Kill?",
   // Artifacts panel
   "artifacts.copied": "Copied to clipboard",
   "artifacts.copy_failed": "Copy failed — clipboard access denied",
@@ -1257,6 +1259,8 @@ export const zh: Record<string, string> = {
   "bgtask.n_processes": "{n} 个后台进程",
   "bgtask.n_process": "{n} 个后台进程",
   "bgtask.running_elapsed": "运行中 · {elapsed}",
+  "bgtask.kill": "终止进程",
+  "bgtask.kill_confirm": "确认终止？",
   // 制品面板
   "artifacts.copied": "已复制到剪贴板",
   "artifacts.copy_failed": "复制失败 — 剪贴板访问被拒绝",

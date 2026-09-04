@@ -41,6 +41,30 @@ func (s *Server) broadcastBackgroundTasks(sessionID string) {
 	s.wsHub.broadcast(sessionID, backgroundTasksUpdate(sessionID, infos, time.Now()))
 }
 
+// handleWSKillBackground kills one background process on the user's behalf —
+// the recourse when the model can't (turn dead on a provider error, or idle
+// with no one to ask). SIGKILL only: a graceful-signal choice is the model's
+// business via kill_shell, the user just wants it gone. On success nothing
+// else needs doing here — the manager's exit hook (wireBackgroundTaskNotices)
+// broadcasts the cancelled notice, refreshes the badge and tells the model the
+// process was killed rather than finished. The hook is (re)wired first because
+// not every turn path installs it: a process launched from a REST-driven turn
+// (runTurn) shares this session's manager but never had the hook set, and
+// without it the kill would land silently — no notice, row stuck in the badge.
+// SetOnExit is idempotent, so re-wiring on a session that already has it is
+// free. An unknown id means the manager has never heard of it (a fabricated id,
+// or a session whose manager was already closed); re-broadcast the live list so
+// whatever the popover was showing gets corrected.
+func (s *Server) handleWSKillBackground(sessionID, handleID string) {
+	if handleID == "" {
+		return
+	}
+	s.wireBackgroundTaskNotices(sessionID)
+	if !tools.SessionBackgroundManager(sessionID).Kill(handleID) {
+		s.broadcastBackgroundTasks(sessionID)
+	}
+}
+
 // wireBackgroundTaskNotices registers the session manager's exit hook so a
 // finished background process surfaces as a chat notice, the badge count
 // drops, and the model is notified. Re-registered (idempotently) at each turn
@@ -54,7 +78,7 @@ func (s *Server) wireBackgroundTaskNotices(sessionID string) {
 			SessionID: sessionID,
 			Command:   e.Command,
 			HandleID:  e.ID,
-			Status:    bgNoticeStatus(e.Status),
+			Status:    bgNoticeStatus(e),
 		})
 		s.broadcastBackgroundTasks(sessionID)
 		s.notifyAgentBgExit(sessionID, e)
@@ -187,14 +211,18 @@ func (s *Server) kickIdleTurn(sessionID string, next func(*agent.Session) (strin
 	return true
 }
 
-// bgNoticeStatus maps a BackgroundManager exit status ("exited: 0",
-// "exited: signal: killed", …) onto the frontend notice levels
-// (success / cancelled / failed).
-func bgNoticeStatus(status string) string {
+// bgNoticeStatus maps a BackgroundManager exit onto the frontend notice levels
+// (success / cancelled / failed). A deliberate kill is cancelled regardless of
+// the status string: on Windows a taskkill'd process reports a plain non-zero
+// exit with no signal in it, so the "killed" substring check alone would show
+// a user- or model-initiated kill as a red failure.
+func bgNoticeStatus(e tools.BgExit) string {
 	switch {
-	case status == "exited: 0":
+	case e.Killed:
+		return "cancelled"
+	case e.Status == "exited: 0":
 		return "success"
-	case strings.Contains(status, "killed"):
+	case strings.Contains(e.Status, "killed"):
 		return "cancelled"
 	default:
 		return "failed"
