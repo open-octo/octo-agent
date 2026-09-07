@@ -4,16 +4,18 @@
 
 - Agent 写的 HTML 制品和轻应用在一个**真实但独立的 origin** 里运行，浏览器原生能力（localStorage / IndexedDB、下载、全屏、指针锁定、权限类 API、相对路径读同目录资源）全部可用，不再靠宿主页逐个 API 造桥。
 - 隔离交给浏览器的同源策略而不是 sandbox 标志：制品 JS 永远碰不到应用 origin 的 cookie、`/api`、`/ws` 和宿主 DOM。
-- 制品同目录的资产文件（模型、字体、音视频、脚本、样式）能被页面直接引用，`./duck.glb` 这种相对路径直接工作。
-- 拿不到第二个 origin 的环境（tunnel、LAN、`ssh -L`）退回现有的 opaque srcdoc 沙箱，功能降级但不失效。
+- 制品同目录的资产文件（模型、字体、音视频、脚本、样式）能被页面直接引用，`./duck.glb`、`./app.js`、`./chart.png` 这种相对路径直接工作，宿主不再做任何内联和序列化。
+- 只有一条渲染路径。HTML 制品和轻应用要么在独立源里完整运行，要么明确告知"仅本机可用"，没有降级形态。
 
 ## 非目标
 
+- 不保留 opaque srcdoc 沙箱作为 HTML 的回退路径。`selfContainedDocument`、`stripExternalRefs`、`inlineLocalRefs` 的 document 模式、`withStrippedBanner` 以及 `withLaBridge` 随本方案删除。
 - 不给 srcdoc iframe 加 `allow-same-origin`。srcdoc 继承父页面 origin，加了等于把访问密钥交给制品脚本。
+- **Mobile 不做制品和轻应用。** 手机端（含经 tunnel 访问的场景）没有第二个 origin 可用，`web/src/mobile/` 下的制品入口整体移除，不做替代形态。
 - 不做 CDN 服务端缓存代理（外链策略里挂起的 C 案维持挂起）。
 - 不支持多页面 HTML bundle：一个 grant 只服务一个入口 HTML，同目录里的其他 `.html` 不在资产表内。
 - 不做写权限。制品源只有 GET。
-- Markdown 制品不迁移：它的预览是宿主自己渲染的，没有 agent 脚本，留在 srcdoc 沙箱即可。
+- Markdown 制品不迁移：它的预览是宿主自己渲染的，没有 agent 脚本，留在 srcdoc 沙箱即可，图片继续走 `inlineLocalRefs` 的 fragment 模式。
 
 ## 威胁模型
 
@@ -27,7 +29,7 @@
 现有防线是 opaque origin：制品"谁也不是"，所以什么都碰不到，代价是浏览器把所有有归属的能力也一起收走。本方案换成独立 origin 后，防线由两条互相独立的规则构成，任一条单独失效都不会开口子：
 
 1. **制品源上没有 API。** Host 分流在最外层 handler 上做，`*.artifacts.localhost` 和 `*.apps.localhost` 只会进制品源 handler，`/api/*`、`/ws`、静态 UI 在这些 Host 上一律 404。
-2. **制品源的 Origin 在应用源上是外人。** `isLocalName`（`internal/server/auth.go`）只认 `localhost` 和回环 IP 字面量，`x.artifacts.localhost` 天然不匹配。制品脚本跨源打 `http://127.0.0.1:8088/api/...`，请求带 `Origin: http://x.artifacts.localhost:8088`，`requireAuth` 走回环豁免时被 `originAllowed` 拒掉，返回 403 forbidden origin。这正是现有的 CSRF 门，不新增判定，只加测试钉死它。
+2. **制品源的 Origin 在应用源上是外人。** `isLocalName`（`internal/server/auth.go`）只认 `localhost` 和回环 IP 字面量，`x.artifacts.localhost` 天然不匹配。制品脚本跨源打 `http://127.0.0.1:8088/api/...`，请求带 `Origin: http://x.artifacts.localhost:8088`，`requireAuth` 走回环豁免时被 `originAllowed` 拒掉，返回 403 forbidden origin。这正是现有的 CSRF 门，不新增判定，只加测试钉死。
 3. cookie 是 host-only 的。`auth.ts` 写 cookie 不带 `Domain` 属性，浏览器不会把它发给 `*.localhost` 子域。
 
 Token 泄漏为什么不构成风险：制品源的主机名只在**本机**解析到回环，CDN 运营者从 `Origin` / `Referer` 头里拿到 token 也无处可用；本机进程本来就在信任边界之内（`SECURITY.md` "Loopback is trusted"）。LAN 绑定（`--addr :8088`）下，攻击者伪造 `Host: <token>.artifacts.localhost` 直连 LAN IP 这条路，由制品源 handler 要求 `isLocalRequest` 关掉。
@@ -50,9 +52,11 @@ Token 泄漏为什么不构成风险：制品源的主机名只在**本机**解�
 
 没有选 `localhost` 与 `127.0.0.1` 互为第二源：两者都是 `isLocalName`，要改回环豁免的语义才能把它们分开，而且只得到一个所有制品共用的 origin，制品之间不隔离。
 
+因为没有回退路径，**三个桌面平台的 webview 都能解析 `*.localhost` 是阶段 2 的前置条件**，不是验收里可以打叉的一项。macOS 已实测通过系统解析器；WebView2（Windows）和 webkitgtk + systemd-resolved（Linux）在动手前先用一个空 Wails 窗口各验一次。若某平台不通，应急方案是该平台的应用加载 `127.0.0.1` 而制品统一走 `localhost`（单一共享 origin，制品之间不隔离，`isLocalName` 需要按平台收窄），这是退而求其次，不是默认。
+
 ### 可用性判定
 
-判定在服务端：grant 接口只对 `isLocalRequest(r)` 为真的客户端发 token（回环 peer、无转发头、本地 Host）。tunnel 走 `X-Octo-Forwarded`，ngrok / cloudflared 带 `X-Forwarded-*`，LAN 客户端不是回环 peer，三种情况都拿不到 grant，前端收到 409 后走 srcdoc 回退。`ssh -L` 这种字节级等同本地的转发会拿到 grant，但制品源主机名在远端浏览器上仍然解析到远端自己的回环，页面打不开，iframe 报错后前端同样回退（见「前端」节）。
+判定在服务端：grant 接口只对 `isLocalRequest(r)` 为真的客户端发 token（回环 peer、无转发头、本地 Host）。tunnel 走 `X-Octo-Forwarded`，ngrok / cloudflared 带 `X-Forwarded-*`，LAN 客户端不是回环 peer，三种情况都拿不到 grant，前端把该制品显示为"预览仅在本机可用"，代码视图照常。`ssh -L` 这种字节级等同本地的转发会拿到 grant，但制品源主机名在远端浏览器上解析到远端自己的回环，iframe 加载失败，前端探测到后显示同一条提示。
 
 ## 服务端
 
@@ -83,7 +87,7 @@ body: { "path": "<abs path of the html artifact>" }
 - token 未知或已过期 → 404，不区分原因。
 - `rel` 经 `path.Clean` 后不得以 `..` 开头；拼出的绝对路径 `filepath.EvalSymlinks` 之后必须仍在 `root` 之内（符号链接不能把目录带出去）。
 - 扩展名必须在资产表内（下节）；`.html` / `.htm` 不在表内，因此只有入口那一份 HTML 会被服务。
-- 入口 HTML 上限沿用 `artifactMaxBytes`（10 MB）；资产单文件上限 64 MB，流式 `io.Copy`，不再有 base64 膨胀。
+- 入口 HTML 上限沿用 `artifactMaxBytes`（10 MB）；资产单文件上限 64 MB，流式 `io.Copy`。
 - 响应头：按扩展名的 `Content-Type`、`X-Content-Type-Options: nosniff`、`Cache-Control: no-store`、`Referrer-Policy: no-referrer`、`Origin-Agent-Cluster: ?1`、`Content-Security-Policy: frame-ancestors http://localhost:* http://127.0.0.1:* http://[::1]:*`。**不发** `Content-Security-Policy: sandbox`，这一头留给旧的 `/api/sessions/{id}/artifacts` 直开端点。
 
 `frame-ancestors` 限制只有本机的应用页能嵌它，防止外部网页把轻应用套进自己的 iframe 做 clickjacking；直接在新标签页里打开 `url` 是顶层导航，不受影响，而且 JS 全跑。这顺带修掉了"open in new tab 什么都不动"的老问题。
@@ -102,12 +106,12 @@ body: { "path": "<abs path of the html artifact>" }
 
 ### Go 侧 CDN 白名单
 
-入口 HTML 由服务端直接发出，`web/src/lib/artifacts.ts` 里的 `stripExternalRefs` 管不到它，白名单剥离要在 Go 里再做一份：
+入口 HTML 由服务端直接发出，白名单剥离从前端挪到 Go，成为唯一实现：
 
-- 用 `golang.org/x/net/html`（已在 `go.mod`）解析后判定，与前端"DOMParser 解析后判定"同一原则：`<script src>`、`<link rel>` 含 `stylesheet` / `preload` / `modulepreload` 的 `href`，`https:` 且 hostname 在白名单内才保留；`data:` / `blob:` / `#` / 空值原样保留，相对路径**保留**（这正是本方案要打开的能力）。
-- 剥了才重新序列化，没剥就原字节透传，保持与前端一致的"未改动恒等返回"性质。
-- 横幅样式与 `withStrippedBanner` 相同，主题由 iframe `src` 上的 `?theme=dark|light` 决定，前端在主题切换时更新 `src`。
-- 白名单单一来源在 Go（`internal/server/artifact_gate.go`），前端 `CDN_ALLOWLIST` 保留给 srcdoc 回退路径；一条 Go 测试解析 `web/src/lib/artifacts.ts` 里的 `CDN_ALLOWLIST` 字面量与 Go 表比对，两边漂移时 CI 报红。`internal/prompt/base.md` 和 `artifact-design` SKILL.md 里的名单仍按现状手工同步。<!--lint:new-->
+- 用 `golang.org/x/net/html`（已在 `go.mod`）解析后判定，与被删除的 `stripExternalRefs` 同一原则：`<script src>`、`<link rel>` 含 `stylesheet` / `preload` / `modulepreload` 的 `href`，`https:` 且 hostname 在白名单内才保留；`data:` / `blob:` / `#` / 空值原样保留，相对路径**保留**（这正是本方案要打开的能力）。
+- 剥了才重新序列化，没剥就原字节透传。
+- 横幅样式沿用今天的 `withStrippedBanner`，主题由 iframe `src` 上的 `?theme=dark|light` 决定，前端在主题切换时更新 `src`。
+- 白名单常量只在 Go 里（`internal/server/artifact_gate.go`），前端 `CDN_ALLOWLIST` 随 `stripExternalRefs` 删除。`internal/prompt/base.md` 和 `artifact-design` SKILL.md 里的名单仍按现状手工同步。<!--lint:new-->
 
 ### 轻应用源
 
@@ -121,24 +125,16 @@ body: { "path": "<abs path of the html artifact>" }
 
 ### 渲染路径
 
-`Artifact` 类型新增 `originURL?: string`。`hydrateArtifact` 对 html 类型先调 `POST .../artifacts/grant`：
+`Artifact` 类型新增 `originURL?: string`。`hydrateArtifact` 对 html 类型只做一件事：调 `POST .../artifacts/grant`。成功则记录 `originURL`；409 或网络失败则标记 `originUnavailable`。不再构建 srcdoc 预览。`code` 视图仍从旧端点取文本。
 
-- 成功：记录 `originURL`，不再构建 srcdoc 预览（`selfContainedDocument` 和 `inlineLocalRefs` 都不跑），`code` 视图仍从旧端点取文本。
-- 409 / 网络失败：走现有 srcdoc 管线，行为与今天完全一致。
-
-四处 iframe（`ArtifactsPanel.svelte` 的制品与轻应用两处、`ArtifactModal.svelte`、`mobile/ArtifactViewer.svelte`）收进一个 `ArtifactFrame.svelte`，二选一：
+面板、Modal 两处 iframe 收进一个 `ArtifactFrame.svelte`：
 
 ```
-有 originURL：
-  <iframe src={originURL + '?theme=' + theme + '&v=' + rev}
-          sandbox={ARTIFACT_ORIGIN_SANDBOX} allow="fullscreen; clipboard-write">
-否则：
-  <iframe srcdoc={preview}
-          sandbox={ARTIFACT_SANDBOX} allow="fullscreen; clipboard-write">
+<iframe src={originURL + '?theme=' + theme + '&v=' + rev}
+        sandbox={ARTIFACT_ORIGIN_SANDBOX} allow="fullscreen; clipboard-write">
 ```
 
 ```ts
-export const ARTIFACT_SANDBOX        = 'allow-scripts allow-forms allow-modals allow-pointer-lock'
 export const ARTIFACT_ORIGIN_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-modals allow-downloads allow-pointer-lock'
 ```
 
@@ -146,50 +142,55 @@ export const ARTIFACT_ORIGIN_SANDBOX = 'allow-scripts allow-same-origin allow-fo
 
 `v` 参数在 agent 重写同一路径时递增，强制 iframe 重新加载；origin 不变，存储保留。
 
-### 加载失败回退
+Markdown 预览继续用 srcdoc iframe，sandbox 常量沿用 `ARTIFACT_SANDBOX`（阶段 1 补上 `allow-pointer-lock`，与 `allow="fullscreen"` 一起，四处 iframe 统一）。
 
-`ssh -L` 一类字节级本地的转发拿得到 grant 但主机名在远端解析不通。`ArtifactFrame` 监听 iframe `load` 事件后做一次跨源可达性探测（`fetch(originURL, {mode:'no-cors'})` 出错即视为不可达），失败则把该制品标记为 `originUnavailable`，回到 srcdoc 路径并在当前页面生命周期内不再申请 grant。
+### 不可用时的表现
+
+`originUnavailable` 的制品在预览区显示一条固定提示"预览仅在本机可用"，`code` 视图和下载按钮不受影响。`ArtifactFrame` 监听 iframe `load` 后做一次跨源可达性探测（`fetch(originURL, {mode:'no-cors'})` 出错即视为不可达），覆盖 `ssh -L` 一类拿到 grant 但主机名解析不通的情况，命中后同样标记 `originUnavailable`，当前页面生命周期内不再申请 grant。
 
 ### 轻应用
 
-`localAccess` 为真时（`/api/version` 的 `local` 标志），轻应用 iframe 用 `http://<slug>.apps.localhost:<port>/`，`port` 取 `location.port`；否则沿用 `withLaBridge(selfContainedDocument(html))` 的 srcdoc 路径。
+轻应用 iframe 用 `http://<slug>.apps.localhost:<port>/`，`port` 取 `location.port`。`localAccess`（`/api/version` 的 `local` 标志）为假时，轻应用面板显示同一条"仅在本机可用"提示，不渲染。
+
+### Mobile
+
+移除 `web/src/mobile/ArtifactViewer.svelte`，`web/src/mobile/ChatDetail.svelte` 里的制品列表区块和 `viewArtifact` 状态，以及 `web/src/mobile/chatWiring.ts` 里对制品 store 的接线。手机端消息流里制品仍作为工具调用结果出现（文件路径），只是没有预览。
 
 ## 对内联管线的影响
 
-独立源路径上，宿主不再对入口 HTML 做任何"自包含化"处理，页面按原样从服务端加载：
+宿主不再对入口 HTML 做任何"自包含化"处理，页面按原样从服务端加载：
 
-- **本地 JS / CSS 不再被剥、不再需要内联。** 今天 `stripExternalRefs` 把 `<script src="./app.js">` 和 `<link href="./style.css">` 当作外链一并剥掉（`inlineLocalRefs` 的注释就写着"a local .css or .js never gets this far"），agent 只能把脚本和样式全部写进一个 HTML。独立源上它们是同目录资产，浏览器直接请求。
-- **图片不再序列化成 data: URI。** `<img src="chart.png">`、`background-image: url(bg.png)`、`<img srcset>` 全部按普通 URL 加载，`inlineLocalRefs` 不运行。随之消失的还有它的两条上限（`inlineRefBudget` 6 MB、`inlineRefMax` 40 个文件）和内存开销（base64 的 1.37 倍、UTF-16 再翻倍、srcdoc 属性再存一份）。图片按资产上限 64 MB 单文件流式服务。
-- **白名单外链的剥离仍然存在**，只是从前端 `stripExternalRefs` 挪到 Go gate，规则不变。
+- **本地 JS / CSS 不再被剥、不再需要内联。** 今天 `stripExternalRefs` 把 `<script src="./app.js">` 和 `<link href="./style.css">` 当作外链一并剥掉，agent 只能把脚本和样式全部写进一个 HTML。独立源上它们是同目录资产，浏览器直接请求。
+- **图片不再序列化成 data: URI。** `<img src="chart.png">`、`background-image: url(bg.png)`、`<img srcset>` 全部按普通 URL 加载。随之消失的还有 `inlineRefBudget`（6 MB）、`inlineRefMax`（40 个文件）和内存开销（base64 的 1.37 倍、UTF-16 再翻倍、srcdoc 属性再存一份）。图片按资产上限 64 MB 单文件流式服务。
+- **白名单外链的剥离仍然存在**，只是唯一实现在 Go gate，规则不变。
 
-回退路径（tunnel、LAN、`ssh -L`、不解析 `*.localhost` 的 webview）上，`selfContainedDocument` 和 `inlineLocalRefs` 原样运行：本地 JS / CSS 被剥，图片内联，预算照旧。Markdown 制品不在本方案范围内，它的图片继续走 `inlineLocalRefs`。
-
-由此带来一个可移植性差异：一份依赖同目录文件的制品在本机完整、在手机或 tunnel 上残缺。`internal/prompt/base.md` 的指导相应调整为：单文件内联是最可移植的形态，当用户明确在本机使用、或页面的资产（模型、字体、媒体）本来就不可能内联时，再拆成同目录文件。轻应用同理，`~/.octo/light-apps/<slug>/` 下的资产只在本机可用。
+`web/src/lib/artifacts.ts` 里随之删除：`ARTIFACT_SANDBOX` 之外的 HTML 专用部分，即 `CDN_ALLOWLIST`、`isAllowedRef`、`stripExternalRefs`、`withStrippedBanner`、`selfContainedDocument`、`inlineLocalRefs` 的 `'document'` 模式及其 CSS `url()` 改写。fragment 模式（Markdown 图片）保留。
 
 ## 桥的退役
 
-独立源上 `localStorage` 和下载都是原生的，两座桥只在 srcdoc 回退路径注入。
+独立源上 `localStorage` 和下载都是原生的。
 
-- **存储迁移。** 现有数据在宿主 origin 的 IndexedDB `octo-la-storage` 里按 slug 分命名空间。某 slug 第一次以独立源打开时，宿主把该命名空间的全部键值 `postMessage` 给 iframe，服务端注入在 `index.html` 末尾的一段一次性脚本收到后写入真 `localStorage`，回执后宿主在 IndexedDB 里记一条"已迁移"元数据。原数据不删，回退环境仍能读到旧快照。迁移是单向的：之后在独立源写的数据不回流到桥。
-- **下载桥保留于桌面端。** 桌面 webview 没有下载委托（`laDownload.ts` 头注释与 `native_handlers.go` 的 `SaveFile`），`allow-downloads` 在那里仍是静默无效，所以 `nativeShell` 为真时下载桥继续注入到独立源页面（服务端注入脚本的位置同上）。浏览器里的独立源页面不注入任何桥。
-- `laStorage.ts` 的 iframe 注册与命名空间校验逻辑原样保留，只是调用点减少。
+- **存储桥整个删除，数据做一次迁移。** 现有数据在宿主 origin 的 IndexedDB `octo-la-storage` 里按 slug 分命名空间。某 slug 第一次以独立源打开时，宿主把该命名空间的全部键值 `postMessage` 给 iframe，服务端注入在 `index.html` 末尾的一段一次性脚本收到后写入真 `localStorage`，回执后宿主在 IndexedDB 里记一条"已迁移"元数据。迁移完成后 `laStorage.ts` 只剩迁移发送端，桥的 shim、注册表与命名空间校验一并删除。原 IndexedDB 数据保留一个版本周期后再清。
+- **下载桥保留于桌面端。** 桌面 webview 没有下载委托（`laDownload.ts` 头注释与 `native_handlers.go` 的 `SaveFile`），`allow-downloads` 在那里仍是静默无效，所以 `nativeShell` 为真时下载桥脚本由服务端注入到独立源页面（与迁移脚本同一注入点）。浏览器里的独立源页面不注入任何脚本。
 
 ## 文档与提示词同步
 
-- `internal/prompt/base.md` "Constraints on index.html"：删掉"no cross-origin fetch from scripts"（实测带 CORS 头的外站 fetch 本来就通），改为说明相对路径资源可用、`.html` 之外的同目录文件可被引用、白名单外链规则不变；"Prefer inlining CSS and JS" 改成上一节描述的可移植性取舍。
+- `internal/prompt/base.md` "Constraints on index.html"：删掉"Runs in a sandboxed iframe with no same-origin access ... no cross-origin fetch from scripts"和"Prefer inlining CSS and JS"两条，换成一句：页面可以用相对路径引用同目录下的文件（脚本、样式、图片、字体、模型、媒体），`.html` 除外；白名单外链规则不变。不再让模型判断使用环境。
 - `SECURITY.md` "What is defended" 表加一行：agent 生成的 HTML（prompt injection 可写出）在独立源 `*.artifacts.localhost` / `*.apps.localhost` 上运行，制品源上没有 API，其 Origin 被 CSRF 门拒绝。
-- `dev-docs/web-artifacts-panel-design.md` "Rendering security" 与 `dev-docs/light-apps-design.md` "运行沙箱 / 运行时存储 / 运行时下载" 改写为本文档描述的状态。
+- `dev-docs/web-artifacts-panel-design.md` "Rendering security" 与 `dev-docs/light-apps-design.md` "运行沙箱 / 运行时存储 / 运行时下载" 改写为本文档描述的状态；两处关于 mobile 制品预览的描述删除。
 - `dev-docs/serve-auth-design.md` 威胁模型表加"制品源脚本跨源调 API"一行，防线是 `originAllowed`。
 
 ## 分阶段
 
 ### 阶段 1：沙箱标志补齐（独立 PR，零安全成本）
 
-四处 iframe 的 `sandbox` 加 `allow-pointer-lock`，`allow` 加 `fullscreen`。验收：探针页在 srcdoc 沙箱里 `canvas.requestPointerLock()` 和 `documentElement.requestFullscreen()` 不抛 SecurityError。
+现有四处 iframe 的 `sandbox` 加 `allow-pointer-lock`，`allow` 加 `fullscreen`。验收：探针页在 srcdoc 沙箱里 `canvas.requestPointerLock()` 和 `documentElement.requestFullscreen()` 不抛 SecurityError。这一步先于独立源落地，让 3D 制品立刻可用全屏和指针锁定；阶段 2 删除 HTML 的 srcdoc 路径后，标志留在 Markdown 预览的 iframe 上。
 
-### 阶段 2：制品独立源
+### 阶段 2：制品独立源 + 删除 srcdoc HTML 路径 + Mobile 移除
 
-服务端 `hostRouter`、grant 接口、制品源 handler、资产表、Go 白名单 gate；前端 `ArtifactFrame`、grant 调用与回退。
+前置：WebView2 与 webkitgtk 对 `*.localhost` 的解析各用空 Wails 窗口验一次通过。
+
+服务端 `hostRouter`、grant 接口、制品源 handler、资产表、Go 白名单 gate；前端 `ArtifactFrame`、grant 调用与不可用提示、TS 自包含管线删除、mobile 制品入口删除。
 
 验收（安全部分是硬门，缺一不合）：
 
@@ -198,24 +199,31 @@ export const ARTIFACT_ORIGIN_SANDBOX = 'allow-scripts allow-same-origin allow-fo
 - 非回环 peer 或带转发头的请求打制品源 → 403；grant 接口对这类客户端 → 409。
 - `rel` 含 `..`、符号链接指向 root 之外、扩展名不在表内、超过上限 → 404 / 413。
 - 会话未写过的 html、被拒绝的写入、伪造成功的 tool_result 申请 grant → 404（复用 `artifact_handler_test.go` 的四组 fixture）。
-- Go gate 与 `stripExternalRefs` 对同一组 fixture（含诱饵属性、引号内 `>`、`<script/src=…>`）判定一致；`CDN_ALLOWLIST` 同步测试通过。
-- 端到端：three.js 探针（importmap 走 CDN、`GLTFLoader.load('./duck.glb')`、`localStorage.setItem`、`<a download>`、`requestFullscreen`）在制品源 iframe 里九项全过；同一页在 tunnel 模拟（带 `X-Octo-Forwarded` 的 serve）下回退到 srcdoc 且不报错。
-- 待核实项在本阶段关闭：Wails WKWebView（macOS）、WebView2（Windows）、webkitgtk + systemd-resolved（Linux）对 `*.localhost` 的解析；任一平台不通则该平台的 `localAccess` 客户端也走回退（服务端按 `User-Agent` 无法可靠判定，由前端探测承担）。
+- Go gate 对现有 `artifacts.test.ts` 里 `stripExternalRefs` 的 fixture（含诱饵属性、引号内 `>`、`<script/src=…>`）判定一致，fixture 随实现移到 Go 测试。
+- 端到端：three.js 探针（importmap 走 CDN、`GLTFLoader.load('./duck.glb')`、`<script src="./app.js">`、`<img src="./chart.png">`、`localStorage.setItem`、`<a download>`、`requestFullscreen`）在制品源 iframe 里全过；带 `X-Octo-Forwarded` 的 serve 下同一制品显示"预览仅在本机可用"，代码视图正常。
+- `web/src/mobile/` 下不再引用 `artifacts` store 与 `ArtifactViewer`。
 
-### 阶段 3：轻应用独立源与桥收缩
+### 阶段 3：轻应用独立源与桥退役
 
-轻应用源 handler、存储迁移、下载桥收缩到桌面端。验收：已有轻应用的存量数据迁移后可读；同一应用刷新、重开、服务重启后 `localStorage` 仍在；两个应用互相读不到对方的键；tunnel 环境下旧桥路径不受影响。
+轻应用源 handler、存储迁移、存储桥删除、下载桥收缩到桌面端注入。验收：已有轻应用的存量数据迁移后可读；同一应用刷新、重开、服务重启后 `localStorage` 仍在；两个应用互相读不到对方的键；`localAccess` 为假时轻应用面板显示"仅在本机可用"。
 
 ## 涉及文件
 
 服务端：
 
 - `internal/server/server.go`：`hostRouter` 接入、grant 路由
-- `internal/server/artifact_origin.go`：新增，分流、grant、制品源与轻应用源 handler <!--lint:new-->
+- `internal/server/artifact_origin.go`：新增，分流、grant、制品源与轻应用源 handler、桌面端注入脚本 <!--lint:new-->
 - `internal/server/artifact_gate.go`：新增，Go 白名单剥离与横幅 <!--lint:new-->
 - `internal/tools/artifact.go`：资产表
 - `internal/server/auth.go`：不改逻辑，只加测试
 
-前端：`web/src/lib/artifacts.ts`（`originURL`、grant 调用、两组 sandbox 常量）、`web/src/lib/api.ts`（grant 请求）、`web/src/components/ArtifactFrame.svelte`（新）、`ArtifactsPanel.svelte` / `ArtifactModal.svelte` / `mobile/ArtifactViewer.svelte`（换用 `ArtifactFrame`）、`web/src/lib/laStorage.ts` / `laDownload.ts`（注入点收缩、迁移脚本）。
+前端：
+
+- `web/src/lib/artifacts.ts`：`originURL` / `originUnavailable`、grant 调用、`ARTIFACT_ORIGIN_SANDBOX`；删除 HTML 自包含管线
+- `web/src/lib/api.ts`：grant 请求
+- `web/src/components/ArtifactFrame.svelte`：新增
+- `web/src/components/ArtifactsPanel.svelte`、`web/src/components/ArtifactModal.svelte`：换用 `ArtifactFrame`，不可用提示
+- `web/src/mobile/ArtifactViewer.svelte`：删除；`web/src/mobile/ChatDetail.svelte`、`web/src/mobile/chatWiring.ts`：移除制品接线
+- `web/src/lib/laStorage.ts`：收缩为迁移发送端；`web/src/lib/laDownload.ts`：脚本改由服务端注入
 
 文档：`SECURITY.md`、`internal/prompt/base.md`、`dev-docs/web-artifacts-panel-design.md`、`dev-docs/light-apps-design.md`、`dev-docs/serve-auth-design.md`。
