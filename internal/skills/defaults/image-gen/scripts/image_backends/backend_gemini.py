@@ -38,11 +38,15 @@ from google.genai import types
 from image_backends.backend_common import (
     MAX_RETRIES,
     is_rate_limit_error,
+    load_reference_image,
     normalize_image_size,
     resolve_output_path,
     retry_delay,
     save_image_bytes,
 )
+
+# Reference images ride along as inline image Parts ahead of the prompt text.
+SUPPORTS_REFERENCE_IMAGES = True
 
 
 # ╔══════════════════════════════���═══════════════════════════════════╗
@@ -67,7 +71,8 @@ DEFAULT_MODEL = "gemini-3.1-flash-image-preview"
 def _generate_image(api_key: str, prompt: str,
                     aspect_ratio: str = "1:1", image_size: str = "1K",
                     output_dir: str = None, filename: str = None,
-                    model: str = DEFAULT_MODEL, base_url: str = None) -> str:
+                    model: str = DEFAULT_MODEL, base_url: str = None,
+                    reference_images: list[str] | None = None) -> str:
     """
     Image generation via Gemini API (streaming).
 
@@ -103,7 +108,15 @@ def _generate_image(api_key: str, prompt: str,
     print(f"  Prompt:       {prompt[:120]}{'...' if len(prompt) > 120 else ''}")
     print(f"  Aspect Ratio: {aspect_ratio}")
     print(f"  Image Size:   {image_size}")
+    if reference_images:
+        print(f"  References:   {len(reference_images)} image(s)")
     print()
+
+    contents = []
+    for ref in reference_images or []:
+        data, mime = load_reference_image(ref)
+        contents.append(types.Part.from_bytes(data=data, mime_type=mime))
+    contents.append(prompt)
 
     start_time = time.time()
     print(f"  [..] Generating...", end="", flush=True)
@@ -126,7 +139,7 @@ def _generate_image(api_key: str, prompt: str,
 
     for chunk in client.models.generate_content_stream(
         model=model,
-        contents=[prompt],
+        contents=contents,
         config=config,
     ):
         elapsed = time.time() - start_time
@@ -171,7 +184,8 @@ def _generate_image(api_key: str, prompt: str,
 def generate(prompt: str,
              aspect_ratio: str = "1:1", image_size: str = "1K",
              output_dir: str = None, filename: str = None,
-             model: str = None, max_retries: int = MAX_RETRIES) -> str:
+             model: str = None, max_retries: int = MAX_RETRIES,
+             reference_images: list[str] | None = None) -> str:
     """
     Gemini image generation with automatic retry.
 
@@ -216,7 +230,8 @@ def generate(prompt: str,
         try:
             return _generate_image(api_key, prompt,
                                    aspect_ratio, image_size, output_dir,
-                                   filename, model, base_url)
+                                   filename, model, base_url,
+                                   reference_images=reference_images)
         except Exception as e:
             last_error = e
             if attempt < max_retries and is_rate_limit_error(e):

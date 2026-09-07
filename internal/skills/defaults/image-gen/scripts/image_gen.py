@@ -399,6 +399,9 @@ STATUS_FAILED = "Failed"
 STATUS_NEEDS_MANUAL = "Needs-Manual"
 VALID_STATUSES = {STATUS_PENDING, STATUS_GENERATED, STATUS_FAILED, STATUS_NEEDS_MANUAL}
 RETRYABLE_STATUSES = {STATUS_PENDING, STATUS_FAILED}
+
+# Backends whose modules set SUPPORTS_REFERENCE_IMAGES = True (kept in sync by hand).
+REFERENCE_IMAGE_BACKENDS = ("openai", "gemini", "qwen")
 REQUIRED_ITEM_FIELDS = ("filename", "prompt", "aspect_ratio", "status")
 
 
@@ -410,6 +413,8 @@ def load_manifest(path: str) -> dict:
 
     Each item requires: `filename`, `prompt`, `aspect_ratio`, `status`.
     Optional: `image_size`, `model`, `alt_text`, `purpose`, `type`,
+    `reference_images` (list of local paths — relative to the manifest's
+    directory — or http(s) URLs fed to the model as image input),
     `last_error`.
     """
     try:
@@ -451,8 +456,42 @@ def load_manifest(path: str) -> dict:
         if fname in seen_filenames:
             raise ValueError(f"{prefix} duplicate filename '{fname}'")
         seen_filenames.add(fname)
+        refs = item.get("reference_images")
+        if refs is not None and (
+            not isinstance(refs, list)
+            or not all(isinstance(r, str) and r.strip() for r in refs)
+        ):
+            raise ValueError(
+                f"{prefix} field 'reference_images' must be an array of non-empty strings"
+            )
 
     return data
+
+
+def _reference_kwargs(backend_module, backend_name: str,
+                      reference_images: list[str] | None,
+                      base_dir: str | None = None) -> dict:
+    """Build the `reference_images=` kwarg for a backend, or `{}` when none.
+
+    Backends opt in with a module-level `SUPPORTS_REFERENCE_IMAGES = True`;
+    anything else gets a clear error instead of a silently ignored image.
+    Relative local paths are resolved against `base_dir` (the manifest's
+    directory) so a manifest can ship its references alongside it.
+    """
+    if not reference_images:
+        return {}
+    if not getattr(backend_module, "SUPPORTS_REFERENCE_IMAGES", False):
+        raise ValueError(
+            f"Backend '{backend_name}' does not support reference images. "
+            "Use one of: " + ", ".join(REFERENCE_IMAGE_BACKENDS) + "."
+        )
+    resolved = []
+    for ref in reference_images:
+        if ref.startswith(("http://", "https://")) or os.path.isabs(ref) or not base_dir:
+            resolved.append(ref)
+        else:
+            resolved.append(os.path.normpath(os.path.join(base_dir, ref)))
+    return {"reference_images": resolved}
 
 
 def save_manifest(path: str, data: dict) -> None:
@@ -480,7 +519,8 @@ def _run_manifest(manifest: dict, manifest_path: str, backend_module, *,
                   initial_concurrency: int,
                   image_size: str,
                   output_dir: str,
-                  model: str | None) -> tuple[int, int, int]:
+                  model: str | None,
+                  backend_name: str = "") -> tuple[int, int, int]:
     """Run Pending/Failed items through the backend with adaptive concurrency.
 
     Strategy:
@@ -524,6 +564,8 @@ def _run_manifest(manifest: dict, manifest_path: str, backend_module, *,
     current = max(1, initial_concurrency)
     state_lock = threading.Lock()
 
+    manifest_dir = str(Path(manifest_path).resolve().parent)
+
     def _one(idx: int):
         item = items[idx]
         try:
@@ -534,6 +576,8 @@ def _run_manifest(manifest: dict, manifest_path: str, backend_module, *,
                 output_dir=output_dir,
                 filename=Path(item["filename"]).stem,
                 model=item.get("model", model),
+                **_reference_kwargs(backend_module, backend_name,
+                                    item.get("reference_images"), manifest_dir),
             )
             return idx, saved_path, None
         except Exception as exc:  # noqa: BLE001 — backend raises arbitrary types
@@ -722,6 +766,15 @@ def main() -> None:
         help="Override IMAGE_BACKEND env var."
     )
     parser.add_argument(
+        "--ref", dest="reference_images", action="append", default=None,
+        metavar="PATH_OR_URL",
+        help=(
+            "Reference image fed to the model alongside the prompt (repeatable). "
+            "Use it to keep a character, product or style consistent. Supported by: "
+            + ", ".join(REFERENCE_IMAGE_BACKENDS) + "."
+        ),
+    )
+    parser.add_argument(
         "--list-backends", action="store_true",
         help="List available backends grouped by support tier and exit."
     )
@@ -802,6 +855,7 @@ def main() -> None:
                 image_size=args.image_size,
                 output_dir=args.output or str(Path(args.manifest).parent),
                 model=args.model,
+                backend_name=backend_name,
             )
         except KeyboardInterrupt:
             print("\n\nInterrupted by user. Partial progress preserved in manifest.")
@@ -818,6 +872,7 @@ def main() -> None:
             output_dir=args.output,
             filename=args.filename,
             model=args.model,
+            **_reference_kwargs(backend, backend_name, args.reference_images),
         )
     except (ValueError, FileNotFoundError) as e:
         print(f"Error: {e}")

@@ -49,11 +49,16 @@ from image_backends.backend_common import (
     download_image,
     http_error,
     is_rate_limit_error,
+    load_reference_image,
     normalize_image_size,
     resolve_output_path,
     retry_delay,
     save_image_bytes,
 )
+
+# With reference images the request goes to `/images/edits` (multipart, files
+# in the `image[]` field) instead of `/images/generations`.
+SUPPORTS_REFERENCE_IMAGES = True
 
 
 # ╔══════════════════════════════════════════════════════════════════╗
@@ -312,6 +317,14 @@ def _image_generations_url(base_url: str | None) -> str:
     return f"{base}/images/generations"
 
 
+def _image_edits_url(base_url: str | None) -> str:
+    base = (base_url or DEFAULT_BASE_URL).rstrip("/")
+    for suffix in ("/images/generations", "/images/edits"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+    return f"{base}/images/edits"
+
+
 def _read_size_preset() -> str | None:
     """Read the optional size mapping preset for OpenAI-compatible providers."""
     return _read_env_choice("OPENAI_SIZE_PRESET", OPENAI_SIZE_PRESETS)
@@ -363,6 +376,35 @@ def _post_image_generation(api_key: str, base_url: str | None, request: dict) ->
         raise RuntimeError("OpenAI image generation returned invalid JSON.") from exc
 
 
+def _post_image_edit(api_key: str, base_url: str | None, request: dict,
+                     reference_images: list[str]) -> dict:
+    """POST to `/images/edits` with the reference images as multipart files.
+
+    Field naming follows the official OpenAI SDK's multipart encoding: the
+    `image` array is sent as repeated `image[]` file parts. `requests` sets the
+    multipart Content-Type (with boundary) itself, so it is not set here.
+    """
+    files = []
+    for index, ref in enumerate(reference_images):
+        data, mime = load_reference_image(ref)
+        ext = ".png" if mime == "image/png" else ".jpg" if mime == "image/jpeg" else ".webp"
+        files.append(("image[]", (f"reference_{index + 1}{ext}", data, mime)))
+    fields = {key: str(value) for key, value in request.items()}
+    response = requests.post(
+        _image_edits_url(base_url),
+        headers={"Authorization": f"Bearer {api_key}"},
+        data=fields,
+        files=files,
+        timeout=300,
+    )
+    if not response.ok:
+        raise http_error(response, "OpenAI image edit")
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise RuntimeError("OpenAI image edit returned invalid JSON.") from exc
+
+
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  Image Generation                                               ║
 # ╚══════════════════════════════════════════════════════════════════╝
@@ -370,7 +412,8 @@ def _post_image_generation(api_key: str, base_url: str | None, request: dict) ->
 def _generate_image(api_key: str, prompt: str,
                     aspect_ratio: str = "1:1", image_size: str = "1K",
                     output_dir: str = None, filename: str = None,
-                    model: str = DEFAULT_MODEL, base_url: str = None) -> str:
+                    model: str = DEFAULT_MODEL, base_url: str = None,
+                    reference_images: list[str] | None = None) -> str:
     """
     Image generation via OpenAI-compatible API.
 
@@ -403,6 +446,8 @@ def _generate_image(api_key: str, prompt: str,
     mode_label = f"Proxy: {base_url}" if base_url else "OpenAI API"
     print(f"[OpenAI - {mode_label}]")
     print(f"  Model:        {model}")
+    if reference_images:
+        print(f"  Endpoint:     /images/edits with {len(reference_images)} reference image(s)")
     print(f"  Prompt:       {prompt[:120]}{'...' if len(prompt) > 120 else ''}")
     print(f"  Size:         {size} (from aspect_ratio={aspect_ratio})")
     if size_preset and size_preset != "auto":
@@ -442,7 +487,10 @@ def _generate_image(api_key: str, prompt: str,
     hb_thread.start()
 
     try:
-        resp = _post_image_generation(api_key, base_url, request)
+        if reference_images:
+            resp = _post_image_edit(api_key, base_url, request, reference_images)
+        else:
+            resp = _post_image_generation(api_key, base_url, request)
     finally:
         heartbeat_stop.set()
         hb_thread.join(timeout=1)
@@ -472,7 +520,8 @@ def _generate_image(api_key: str, prompt: str,
 def generate(prompt: str,
              aspect_ratio: str = "1:1", image_size: str = "1K",
              output_dir: str = None, filename: str = None,
-             model: str = None, max_retries: int = MAX_RETRIES) -> str:
+             model: str = None, max_retries: int = MAX_RETRIES,
+             reference_images: list[str] | None = None) -> str:
     """
     OpenAI-compatible image generation with automatic retry.
 
@@ -518,7 +567,8 @@ def generate(prompt: str,
         try:
             return _generate_image(api_key, prompt,
                                    aspect_ratio, image_size, output_dir,
-                                   filename, model, base_url)
+                                   filename, model, base_url,
+                                   reference_images=reference_images)
         except Exception as e:
             last_error = e
             if attempt < max_retries and is_rate_limit_error(e):

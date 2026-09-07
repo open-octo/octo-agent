@@ -64,6 +64,9 @@ CONTENT_TYPE_TO_EXT = {
     "image/tiff": ".tiff",
 }
 
+EXT_TO_MIME = {ext: mime for mime, ext in CONTENT_TYPE_TO_EXT.items() if ext != ".jpg"}
+EXT_TO_MIME[".jpg"] = "image/jpeg"
+
 EXT_TO_PIL_FORMAT = {
     ".png": "PNG",
     ".jpg": "JPEG",
@@ -256,3 +259,48 @@ def poll_json(
             )
 
         time.sleep(interval_seconds)
+
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  Reference images (image-to-image / identity anchoring)          ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+def is_http_url(ref: str) -> bool:
+    return ref.startswith("http://") or ref.startswith("https://")
+
+
+def load_reference_image(ref: str, timeout: int = 60) -> tuple[bytes, str]:
+    """Return ``(bytes, mime_type)`` for a reference image given as a local
+    path or an http(s) URL.
+
+    The MIME type comes from the real bytes (magic numbers), falling back to
+    the response Content-Type / file extension, so a mislabeled file does not
+    reach the provider with the wrong type.
+    """
+    if is_http_url(ref):
+        response = requests.get(ref, timeout=timeout)
+        if not response.ok:
+            raise RuntimeError(f"Failed to download reference image {ref}: HTTP {response.status_code}")
+        data = response.content
+        hint = response.headers.get("Content-Type")
+    else:
+        path = os.path.expanduser(ref)
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Reference image not found: {ref}")
+        with open(path, "rb") as fh:
+            data = fh.read()
+        hint = None
+    ext = detect_image_extension(data, hint) or _normalize_extension(os.path.splitext(ref)[1])
+    mime = EXT_TO_MIME.get(_normalize_extension(ext) if ext else "")
+    if not mime:
+        raise ValueError(f"Reference image is not a recognised image format: {ref}")
+    return data, mime
+
+
+def reference_image_data_uri(ref: str) -> str:
+    """URLs pass through untouched; local files become ``data:<mime>;base64,…``."""
+    if is_http_url(ref):
+        return ref
+    import base64
+    data, mime = load_reference_image(ref)
+    return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"

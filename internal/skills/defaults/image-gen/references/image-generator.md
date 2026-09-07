@@ -453,6 +453,7 @@ Write `project/images/image_prompts.json` with this shape:
 | `items[].prompt` | yes | §4 assembly | The full assembled paragraph |
 | `items[].image_size` | no | Container sizing | `512px` / `1K` / `2K` / `4K` |
 | `items[].alt_text` | no | Accessibility | Short caption |
+| `items[].reference_images` | no | Consistency anchor | Array of local paths (relative to the manifest file) or http(s) URLs passed to the model as image input, e.g. a mascot/character sheet reused across pages. Backends: `openai` (`/images/edits`), `gemini`, `qwen`; others fail the item with a clear error. Refer to them in the prompt as "image 1", "image 2" … |
 | `items[].slice_grid` | no | §4.3 sheet geometry | Illustration sheet only; exact `RxC` grid to pass to `slice_images.py --grid` |
 | `items[].slice_names` | no | §4.3 sheet geometry | Illustration sheet only; semantic filenames to pass to `slice_images.py --names` |
 | `items[].status` | yes | CLI manages | `Pending` initially; CLI updates to `Generated` / `Failed` / `Needs-Manual` |

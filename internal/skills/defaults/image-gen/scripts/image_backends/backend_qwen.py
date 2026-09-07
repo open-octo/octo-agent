@@ -41,10 +41,15 @@ from image_backends.backend_common import (
     http_error,
     is_rate_limit_error,
     normalize_image_size,
+    reference_image_data_uri,
     require_api_key,
     resolve_output_path,
     retry_delay,
 )
+
+# qwen-image-2.0 / 2.0-pro accept reference images as `{"image": …}` content
+# items placed before the text item (DashScope multimodal-generation API).
+SUPPORTS_REFERENCE_IMAGES = True
 
 
 DEFAULT_ENDPOINT = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
@@ -127,7 +132,8 @@ def _generate_image(api_key: str, prompt: str,
                     aspect_ratio: str = "1:1", image_size: str = "1K",
                     output_dir: str = None, filename: str = None,
                     model: str = DEFAULT_MODEL, base_url: str = DEFAULT_ENDPOINT,
-                    fallback: bool = True) -> str:
+                    fallback: bool = True,
+                    reference_images: list[str] | None = None) -> str:
     """Generate one image with the Qwen backend.
 
     When ``fallback`` is True (default) and the endpoint is one of the two
@@ -137,6 +143,8 @@ def _generate_image(api_key: str, prompt: str,
     """
     size = _resolve_size(aspect_ratio, image_size)
     url = _resolve_url(base_url)
+    content = [{"image": reference_image_data_uri(ref)} for ref in (reference_images or [])]
+    content.append({"text": prompt})
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -147,7 +155,7 @@ def _generate_image(api_key: str, prompt: str,
             "messages": [
                 {
                     "role": "user",
-                    "content": [{"text": prompt}],
+                    "content": content,
                 }
             ]
         },
@@ -163,6 +171,8 @@ def _generate_image(api_key: str, prompt: str,
     print(f"  Prompt:       {prompt[:120]}{'...' if len(prompt) > 120 else ''}")
     print(f"  Aspect Ratio: {aspect_ratio}")
     print(f"  Resolution:   {size}")
+    if reference_images:
+        print(f"  References:   {len(reference_images)} image(s)")
     print()
     print("  [..] Generating...", end="", flush=True)
     start = time.time()
@@ -208,7 +218,8 @@ def _fallback_endpoint(url: str) -> str:
 def generate(prompt: str,
              aspect_ratio: str = "1:1", image_size: str = "1K",
              output_dir: str = None, filename: str = None,
-             model: str = None, max_retries: int = MAX_RETRIES) -> str:
+             model: str = None, max_retries: int = MAX_RETRIES,
+             reference_images: list[str] | None = None) -> str:
     """Generate an image with retries using the Qwen backend."""
     api_key = require_api_key(
         "QWEN_API_KEY",
@@ -232,6 +243,7 @@ def generate(prompt: str,
                 model=resolved_model,
                 base_url=base_url,
                 fallback=(explicit_base_url is None),
+                reference_images=reference_images,
             )
         except Exception as exc:
             last_error = exc

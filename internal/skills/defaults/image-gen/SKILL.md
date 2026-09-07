@@ -90,7 +90,16 @@ uv run <skill-dir>/scripts/image_gen.py "a serene alpine lake at dawn, soft mist
 # Web search (openly-licensed, downloads one best match + records the source)
 uv run <skill-dir>/scripts/image_search.py "diverse engineering team in a modern office" \
   --orientation landscape --output /abs/out/team.jpg
+
+# AI generation anchored on reference image(s) — keep a character / product / style consistent
+uv run <skill-dir>/scripts/image_gen.py "the man in the reference image, now seated at a desk by a window, same face and outfit" \
+  --ref /abs/refs/character.png --aspect_ratio 1:1 --output /abs/out/dir --filename avatar
 ```
+
+`--ref` is repeatable (refer to them in the prompt as "image 1", "image 2" …) and
+accepts local paths or http(s) URLs. It is supported by the `openai` (routes to
+`/images/edits`), `gemini` and `qwen` backends; any other backend fails fast with a
+clear message rather than silently ignoring the image.
 
 The positional-prompt form skips the manifest and leaves no audit trail — reserve
 it for quick fixups and standalone requests. **After it finishes, present the file
@@ -112,6 +121,9 @@ into the same file as each completes.
   "items": [
     { "filename": "cover.png", "prompt": "...", "aspect_ratio": "16:9",
       "image_size": "2K", "page_role": "hero_page", "text_policy": "none",
+      "status": "Pending" },
+    { "filename": "mascot_p07.png", "prompt": "the mascot from image 1, waving ...",
+      "aspect_ratio": "1:1", "reference_images": ["refs/mascot.png"],   // paths relative to this file, or URLs
       "status": "Pending" }
   ]
 }
@@ -124,8 +136,8 @@ uv run <skill-dir>/scripts/image_gen.py --render-md /abs/images/image_prompts.js
 uv run <skill-dir>/scripts/image_gen.py --manifest /abs/images/image_prompts.json
 ```
 
-Full field reference (`page_role`, `text_policy`, `type`, `slice_grid`/
-`slice_names`, back-compat) is in `references/image-generator.md` §6.
+Full field reference (`page_role`, `text_policy`, `type`, `reference_images`,
+`slice_grid`/`slice_names`, back-compat) is in `references/image-generator.md` §6.
 
 ### Slice a generated sheet into elements
 

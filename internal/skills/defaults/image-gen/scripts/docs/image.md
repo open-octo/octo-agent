@@ -20,6 +20,9 @@ uv run scripts/image_gen.py "Abstract tech background" --aspect_ratio 16:9 --ima
 uv run scripts/image_gen.py "Concept car" -o projects/demo/images
 uv run scripts/image_gen.py "Beautiful landscape" -n "low quality, blurry, watermark"
 uv run scripts/image_gen.py --list-backends
+
+# Reference images (image-to-image): repeat --ref for several; openai / gemini / qwen only
+uv run scripts/image_gen.py "same character as image 1, now riding a bicycle" --ref refs/character.png
 ```
 
 Backends are grouped into Core / Extended / Experimental tiers. Run `uv run scripts/image_gen.py --list-backends` for the current list.

@@ -58,6 +58,18 @@ Moved verbatim out of `skills/ppt-master/`:
   `config.py` constants and the `.env` lookup-path examples — that shared
   config heritage (both skills carry the same `config.py`) is left as-is.
 
+## Reference images (added here, not upstream)
+
+`image_gen.py --ref <path-or-url>` (repeatable) and the manifest field
+`items[].reference_images` feed images to the model alongside the prompt, for
+character / product / style consistency. Backends opt in with a module-level
+`SUPPORTS_REFERENCE_IMAGES = True`; implemented for `qwen` (DashScope
+multimodal-generation `{"image": …}` content items, per the qwen-image-edit
+docs), `openai` (`/images/edits` multipart with `image[]` file parts, matching
+the official SDK's encoding) and `gemini` (`types.Part.from_bytes`). Other
+backends reject reference images with an explicit error. Local files are read
+from disk (Qwen receives them as `data:<mime>;base64,…`).
+
 ## Prompt-craft library (`references/prompt-craft/`)
 
 Vendored from [`wuyoscar/GPT-Image2-Skill`](https://github.com/wuyoscar/GPT-Image2-Skill)
