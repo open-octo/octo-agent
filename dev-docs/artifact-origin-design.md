@@ -154,6 +154,18 @@ export const ARTIFACT_ORIGIN_SANDBOX = 'allow-scripts allow-same-origin allow-fo
 
 `localAccess` 为真时（`/api/version` 的 `local` 标志），轻应用 iframe 用 `http://<slug>.apps.localhost:<port>/`，`port` 取 `location.port`；否则沿用 `withLaBridge(selfContainedDocument(html))` 的 srcdoc 路径。
 
+## 对内联管线的影响
+
+独立源路径上，宿主不再对入口 HTML 做任何"自包含化"处理，页面按原样从服务端加载：
+
+- **本地 JS / CSS 不再被剥、不再需要内联。** 今天 `stripExternalRefs` 把 `<script src="./app.js">` 和 `<link href="./style.css">` 当作外链一并剥掉（`inlineLocalRefs` 的注释就写着"a local .css or .js never gets this far"），agent 只能把脚本和样式全部写进一个 HTML。独立源上它们是同目录资产，浏览器直接请求。
+- **图片不再序列化成 data: URI。** `<img src="chart.png">`、`background-image: url(bg.png)`、`<img srcset>` 全部按普通 URL 加载，`inlineLocalRefs` 不运行。随之消失的还有它的两条上限（`inlineRefBudget` 6 MB、`inlineRefMax` 40 个文件）和内存开销（base64 的 1.37 倍、UTF-16 再翻倍、srcdoc 属性再存一份）。图片按资产上限 64 MB 单文件流式服务。
+- **白名单外链的剥离仍然存在**，只是从前端 `stripExternalRefs` 挪到 Go gate，规则不变。
+
+回退路径（tunnel、LAN、`ssh -L`、不解析 `*.localhost` 的 webview）上，`selfContainedDocument` 和 `inlineLocalRefs` 原样运行：本地 JS / CSS 被剥，图片内联，预算照旧。Markdown 制品不在本方案范围内，它的图片继续走 `inlineLocalRefs`。
+
+由此带来一个可移植性差异：一份依赖同目录文件的制品在本机完整、在手机或 tunnel 上残缺。`internal/prompt/base.md` 的指导相应调整为：单文件内联是最可移植的形态，当用户明确在本机使用、或页面的资产（模型、字体、媒体）本来就不可能内联时，再拆成同目录文件。轻应用同理，`~/.octo/light-apps/<slug>/` 下的资产只在本机可用。
+
 ## 桥的退役
 
 独立源上 `localStorage` 和下载都是原生的，两座桥只在 srcdoc 回退路径注入。
@@ -164,7 +176,7 @@ export const ARTIFACT_ORIGIN_SANDBOX = 'allow-scripts allow-same-origin allow-fo
 
 ## 文档与提示词同步
 
-- `internal/prompt/base.md` "Constraints on index.html"：删掉"no cross-origin fetch from scripts"（实测带 CORS 头的外站 fetch 本来就通），改为说明相对路径资源可用、`.html` 之外的同目录文件可被引用、白名单外链规则不变。
+- `internal/prompt/base.md` "Constraints on index.html"：删掉"no cross-origin fetch from scripts"（实测带 CORS 头的外站 fetch 本来就通），改为说明相对路径资源可用、`.html` 之外的同目录文件可被引用、白名单外链规则不变；"Prefer inlining CSS and JS" 改成上一节描述的可移植性取舍。
 - `SECURITY.md` "What is defended" 表加一行：agent 生成的 HTML（prompt injection 可写出）在独立源 `*.artifacts.localhost` / `*.apps.localhost` 上运行，制品源上没有 API，其 Origin 被 CSRF 门拒绝。
 - `dev-docs/web-artifacts-panel-design.md` "Rendering security" 与 `dev-docs/light-apps-design.md` "运行沙箱 / 运行时存储 / 运行时下载" 改写为本文档描述的状态。
 - `dev-docs/serve-auth-design.md` 威胁模型表加"制品源脚本跨源调 API"一行，防线是 `originAllowed`。
