@@ -3,26 +3,26 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Octo — private, self-hosted AI agent · one brain, eight legs</title>
-  <meta name="description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with eight legs, like an octopus, reaching your TUI, CLI, VS Code, Obsidian, web, desktop, IM, and mobile. Any model, zero telemetry; your data never leaves your machine.">
+  <title>Octo — the private, self-hosted AI agent that lives on your machine</title>
+  <meta name="description" content="A private, self-hosted AI agent: one fast Go binary that reaches your TUI, CLI, VS Code, Obsidian, web, desktop, IM, and mobile. Any model, zero telemetry; your data never leaves your machine.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%231677FF'/%3E%3Cpath fill='%23ffffff' d='M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z'/%3E%3Ccircle cx='40' cy='42' r='5' fill='%231677FF'/%3E%3Ccircle cx='60' cy='42' r='5' fill='%231677FF'/%3E%3C/svg%3E">
   <link rel="canonical" href="https://octo-agent.dev/">
-  <meta property="og:title" content="Octo — private, self-hosted AI agent · one brain, eight legs">
-  <meta property="og:description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with eight legs, like an octopus, reaching your TUI, CLI, VS Code, Obsidian, web, desktop, IM, and mobile. Any model, zero telemetry; your data never leaves your machine.">
+  <meta property="og:title" content="Octo — the private, self-hosted AI agent that lives on your machine">
+  <meta property="og:description" content="A private, self-hosted AI agent: one fast Go binary that reaches your TUI, CLI, VS Code, Obsidian, web, desktop, IM, and mobile. Any model, zero telemetry; your data never leaves your machine.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://octo-agent.dev/">
   <meta property="og:image" content="https://octo-agent.dev/og-image.png">
   <meta property="og:site_name" content="Octo">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Octo — private, self-hosted AI agent · one brain, eight legs">
-  <meta name="twitter:description" content="A private, self-hosted AI agent: one brain — a single fast Go binary — with eight legs, like an octopus, reaching your TUI, CLI, VS Code, Obsidian, web, desktop, IM, and mobile. Any model, zero telemetry; your data never leaves your machine.">
+  <meta name="twitter:title" content="Octo — the private, self-hosted AI agent that lives on your machine">
+  <meta name="twitter:description" content="A private, self-hosted AI agent: one fast Go binary that reaches your TUI, CLI, VS Code, Obsidian, web, desktop, IM, and mobile. Any model, zero telemetry; your data never leaves your machine.">
   <meta name="twitter:image" content="https://octo-agent.dev/og-image.png">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Octo",
-    "description": "A private, self-hosted AI agent: one brain — a single fast Go binary — with eight legs, like an octopus, reaching your TUI, CLI, VS Code, Obsidian, web, desktop, IM, and mobile. Any model; your data never leaves your machine.",
+    "description": "A private, self-hosted AI agent: one fast Go binary that reaches your TUI, CLI, VS Code, Obsidian, web, desktop, IM, and mobile. Any model; your data never leaves your machine.",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "macOS, Linux, Windows",
     "license": "https://github.com/open-octo/octo-agent/blob/main/LICENSE.txt",
@@ -31,289 +31,315 @@
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
   }
   </script>
-  <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Noto+Serif+SC:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap">
   <style>
     :root{
+      --paper:#F7F3EA; --paper-2:#FBF9F4; --paper-3:#EFE9DC;
+      --ink:#1C1A17; --ink-2:#4A453D; --ink-3:#6B655B; --ink-4:#9A9282;
+      --line:#E4DDCF; --line-2:#D9D1C1;
       --blue:#1677FF; --blue-hover:#4096FF; --blue-active:#0958D9;
-      --blue-soft:#E6F4FF; --blue-wash:#F0F7FF;
-      --ink:#1F1F1F; --t88:rgba(0,0,0,.88); --t65:rgba(0,0,0,.65); --t45:rgba(0,0,0,.45);
-      --line:#EEEFF1; --line2:#F0F0F0; --ctrl:#D9D9D9; --canvas:#FAFAFA;
-      --mono:"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+      --term:#1C1A17; --term-fg:#E9E4D8; --term-cm:#8B8578; --term-kw:#7DB4FF; --term-arg:#B8E7A0;
+      --serif:"Newsreader","Noto Serif SC","Source Han Serif SC","Songti SC","STSong","SimSun",Georgia,serif;
+      --sans:"Noto Sans SC",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
+      --mono:"JetBrains Mono","SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
     }
     *{box-sizing:border-box;}
     html{scroll-behavior:smooth;}
     body{
-      margin:0; background:#fff; color:var(--t88); line-height:1.65;
-      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif;
+      margin:0; background:var(--paper); color:var(--ink); line-height:1.65;
+      font-family:var(--sans);
       -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
     }
-    a{color:var(--blue); text-decoration:none;}
-    a:hover{color:var(--blue-hover);}
-    h1,h2,h3{margin:0;}
-    .wrap{max-width:1080px; margin:0 auto;}
-    section{padding:88px 32px;}
+    a{color:var(--ink); text-decoration:none;}
+    a:hover{color:var(--blue);}
+    h1,h2,h3,p{margin:0;}
+    .serif{font-family:var(--serif);}
+    .mono{font-family:var(--mono);}
+    .wrap{max-width:1248px; margin:0 auto; padding:0 32px;}
+    .label{font-family:var(--mono); font-size:12px; letter-spacing:.14em; color:var(--ink-3);}
+    .rule{height:1px; background:var(--line);}
 
     /* nav */
-    .nav{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;gap:24px;height:60px;padding:0 32px;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);}
-    .brand{display:flex;align-items:center;gap:10px;color:var(--t88);font-weight:600;font-size:17px;}
-    .navlinks{flex:1;display:flex;gap:24px;margin-left:16px;font-size:14px;}
-    .navlinks a{color:var(--t65);}
+    .nav{position:sticky; top:0; z-index:100; background:rgba(247,243,234,.92); backdrop-filter:blur(8px); border-bottom:1px solid transparent; transition:border-color .2s;}
+    .nav.scrolled{border-bottom-color:var(--line);}
+    .nav .wrap{display:flex; align-items:center; gap:24px; height:72px;}
+    .brand{display:flex; align-items:center; gap:12px; color:var(--ink);}
+    .brand .name{font-family:var(--serif); font-size:22px; font-weight:500; letter-spacing:-.01em;}
+    .brand .ver{font-family:var(--mono); font-size:11px; letter-spacing:.14em; color:var(--ink-3); margin-left:4px;}
+    .navlinks{flex:1; display:flex; justify-content:flex-end; gap:32px; font-size:15px; color:var(--ink-2);}
+    .navlinks a{color:var(--ink-2);}
     .navlinks a:hover{color:var(--blue);}
-    .ghost{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;border:1px solid var(--ctrl);border-radius:6px;font-size:13px;font-weight:600;color:var(--t88);}
-    .ghost:hover{border-color:var(--blue-hover);color:var(--blue);}
-    .lang{display:inline-flex;border:1px solid var(--ctrl);border-radius:9999px;padding:2px;font-size:12px;font-weight:600;}
-    .lang button{border:none;background:transparent;color:var(--t45);cursor:pointer;padding:3px 12px;border-radius:9999px;font:inherit;}
-    .lang button.active{background:var(--blue);color:#fff;}
-    .nav-cta{display:inline-flex;align-items:center;gap:8px;padding:6px 16px;background:var(--blue);border-radius:6px;color:#fff;font-size:14px;font-weight:600;}
-    .nav-cta:hover{background:var(--blue-hover);color:#fff;}
-    @media(max-width:860px){.navlinks{display:none;}}
+    .ghost{display:inline-flex; align-items:center; gap:8px; font-size:14px; color:var(--ink-2);}
+    .ghost:hover{color:var(--blue);}
+    .lang{display:inline-flex; gap:2px; font-family:var(--mono); font-size:12px; letter-spacing:.06em;}
+    .lang button{border:none; background:transparent; color:var(--ink-4); cursor:pointer; padding:4px 6px; font:inherit; letter-spacing:inherit;}
+    .lang button.active{color:var(--ink);}
+    .lang button + button::before{content:"/"; color:var(--line-2); margin-right:8px;}
+    .nav-cta{display:inline-flex; align-items:center; height:40px; padding:0 18px; background:var(--ink); color:var(--paper); border-radius:9999px; font-size:14px; font-weight:500;}
+    .nav-cta:hover{background:#000; color:var(--paper);}
 
     /* buttons */
-    .btn-primary{display:inline-flex;align-items:center;gap:8px;padding:11px 26px;background:var(--blue);border-radius:6px;color:#fff;font-size:16px;font-weight:600;}
-    .btn-primary:hover{background:var(--blue-hover);color:#fff;}
+    .btn-primary{display:inline-flex; align-items:center; gap:10px; height:56px; padding:0 28px; background:var(--blue); border-radius:9999px; color:#fff; font-size:16px; font-weight:500;}
+    .btn-primary:hover{background:var(--blue-hover); color:#fff;}
     .btn-primary:active{background:var(--blue-active);}
-    .btn-default{display:inline-flex;align-items:center;gap:8px;padding:11px 26px;background:#fff;border:1px solid var(--ctrl);border-radius:6px;color:var(--t88);font-size:16px;font-weight:600;}
-    .btn-default:hover{border-color:var(--blue-hover);color:var(--blue);}
+    .btn-link{font-family:var(--serif); font-style:italic; font-size:18px; color:var(--ink); border-bottom:1px solid var(--ink); padding-bottom:2px;}
+    .btn-link:hover{color:var(--blue); border-color:var(--blue);}
 
     /* hero */
-    .hero{padding:132px 32px 0;text-align:center;background:linear-gradient(180deg,var(--blue-wash) 0%,#fff 72%);}
-    .hero-inner{max-width:880px;margin:0 auto;}
-    .hero-logo{width:64px;height:64px;margin:0 auto 20px;display:block;}
-    .kicker{display:inline-flex;align-items:center;gap:8px;padding:4px 14px;border:1px solid rgba(22,119,255,.5);background:rgba(22,119,255,.06);border-radius:9999px;font-size:12.5px;font-weight:600;color:var(--blue);margin-bottom:22px;}
-    .hero h1{font-size:60px;line-height:1.08;letter-spacing:-.03em;font-weight:600;color:var(--ink);margin-bottom:18px;}
-    .hero h1 .accent{color:var(--blue);}
-    .tagline{margin:0 auto 28px;max-width:640px;font-size:19px;line-height:1.6;color:var(--t65);text-wrap:pretty;}
-    .cta-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:10px;}
-    .alt-row{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-bottom:18px;font-size:13px;color:var(--t45);}
-    .alt-row a{color:var(--t65);}.alt-row a:hover{color:var(--blue);}
-    .cli-row{display:inline-flex;align-items:center;gap:10px;margin-bottom:14px;}
-    .cli-row code{font-family:var(--mono);font-size:13.5px;background:#F5F5F5;border:1px solid var(--line);border-radius:6px;padding:8px 16px;color:var(--t88);}
-    .copy-btn{padding:8px 14px;font-size:12.5px;font-weight:600;background:#fff;border:1px solid var(--ctrl);border-radius:6px;color:var(--t65);cursor:pointer;font-family:inherit;}
-    .copy-btn:hover{border-color:var(--blue-hover);color:var(--blue);}
-    .proof{display:flex;gap:24px;justify-content:center;flex-wrap:wrap;font-size:13.5px;color:var(--t45);margin-bottom:56px;}
-    .proof span{display:inline-flex;align-items:center;gap:6px;}
-    .shot{max-width:960px;margin:0 auto;border:1px solid var(--line);border-radius:16px 16px 0 0;border-bottom:none;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.06);overflow:hidden;}
-    .shot-bar{display:flex;align-items:center;gap:6px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--canvas);}
-    .dot{width:10px;height:10px;border-radius:50%;}
-    .shot-title{margin-left:10px;font-size:12px;color:var(--t45);font-family:var(--mono);}
-    .shot-media{aspect-ratio:2/1;background:var(--canvas);display:flex;align-items:center;justify-content:center;position:relative;}
-    .shot-media img,.shot-media video{width:100%;height:100%;object-fit:cover;display:block;}
-    .shot-ph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--t45);font-size:14px;}
-    .carousel{position:absolute;inset:0;}
-    .carousel .slide{position:absolute;inset:0;opacity:0;transition:opacity .4s ease;pointer-events:none;}
-    .carousel .slide.active{opacity:1;pointer-events:auto;}
+    .hero{padding:112px 0 0;}
+    .hero-grid{display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:32px; align-items:end;}
+    .hero-copy{grid-column:span 7; display:flex; flex-direction:column; gap:32px;}
+    .hero h1{font-family:var(--serif); font-size:68px; line-height:1.1; font-weight:500; letter-spacing:-.02em;}
+    .tagline{max-width:620px; font-size:20px; line-height:1.65; color:var(--ink-2); text-wrap:pretty;}
+    .cta-row{display:flex; align-items:center; gap:28px; flex-wrap:wrap; padding-top:8px;}
+    .cli-row{display:flex; align-items:center; gap:14px; flex-wrap:wrap; padding-top:8px;}
+    .cli-row code{display:inline-flex; align-items:center; gap:12px; height:44px; padding:0 18px; border:1px solid var(--line-2); border-radius:6px; background:var(--paper-2); font-family:var(--mono); font-size:14px; color:var(--ink); white-space:nowrap;}
+    .cli-row code::before{content:"$"; color:var(--ink-4);}
+    .copy-btn{height:44px; padding:0 14px; font-family:var(--mono); font-size:12px; letter-spacing:.1em; background:transparent; border:1px solid var(--line-2); border-radius:6px; color:var(--ink-3); cursor:pointer;}
+    .copy-btn:hover{border-color:var(--ink); color:var(--ink);}
+    .alt-row{display:flex; gap:14px; flex-wrap:wrap; font-size:13px; color:var(--ink-4);}
+    .alt-row a{color:var(--ink-3);} .alt-row a:hover{color:var(--blue);}
+    .hero-side{grid-column:9 / span 4; display:flex; flex-direction:column; gap:40px;}
+    .hero-logo{width:112px; height:112px; display:block;}
+    .spec{display:flex; flex-direction:column;}
+    .spec .label{padding-bottom:12px;}
+    .spec-row{display:flex; justify-content:space-between; gap:16px; padding:12px 0; border-top:1px solid var(--line); font-size:14px;}
+    .spec-row:first-of-type{border-top-color:var(--ink);}
+    .spec-row:last-of-type{border-bottom:1px solid var(--ink);}
+    .spec-row .k{color:var(--ink-3);}
+    .spec-row .v{font-family:var(--mono); font-size:13px; text-align:right;}
+
+    /* demo shot */
+    .shot-wrap{padding:88px 0 0;}
+    .shot{border:1px solid var(--line-2); border-radius:10px; background:var(--paper-2); overflow:hidden;}
+    .shot-bar{display:flex; align-items:center; gap:6px; padding:12px 16px; border-bottom:1px solid var(--line);}
+    .dot{width:10px; height:10px; border-radius:50%; background:var(--line-2);}
+    .shot-title{margin-left:10px; font-size:11px; letter-spacing:.14em; color:var(--ink-4); font-family:var(--mono);}
+    .shot-media{aspect-ratio:2/1; background:var(--paper-3); display:flex; align-items:center; justify-content:center; position:relative;}
+    .shot-media img,.shot-media video{width:100%; height:100%; object-fit:cover; display:block;}
+    .shot-ph{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; color:var(--ink-4); font-size:14px;}
+    .carousel{position:absolute; inset:0;}
+    .carousel .slide{position:absolute; inset:0; opacity:0; transition:opacity .4s ease; pointer-events:none;}
+    .carousel .slide.active{opacity:1; pointer-events:auto;}
     .carousel .slide video{cursor:pointer;}
-    .carousel-playpause{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(.85);width:64px;height:64px;border-radius:50%;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:3;opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;}
-    .carousel.is-paused .carousel-playpause{opacity:1;transform:translate(-50%,-50%) scale(1);}
-    .carousel-playpause::before{content:"";border-style:solid;border-width:11px 0 11px 19px;border-color:transparent transparent transparent #fff;margin-left:4px;}
-    .carousel-arrow{position:absolute;top:50%;transform:translateY(-50%);z-index:3;width:52px;height:52px;border-radius:50%;border:none;background:rgba(15,23,42,.35);color:#fff;font-size:32px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s,background .2s;font-family:inherit;}
-    .carousel-arrow:hover{background:rgba(15,23,42,.6);}
+    .carousel-playpause{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%) scale(.85); width:64px; height:64px; border-radius:50%; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:3; opacity:0; transition:opacity .2s,transform .2s; pointer-events:none;}
+    .carousel.is-paused .carousel-playpause{opacity:1; transform:translate(-50%,-50%) scale(1);}
+    .carousel-playpause::before{content:""; border-style:solid; border-width:11px 0 11px 19px; border-color:transparent transparent transparent #fff; margin-left:4px;}
+    .carousel-arrow{position:absolute; top:50%; transform:translateY(-50%); z-index:3; width:52px; height:52px; border-radius:50%; border:none; background:rgba(28,26,23,.35); color:#fff; font-size:32px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity .2s,background .2s; font-family:inherit;}
+    .carousel-arrow:hover{background:rgba(28,26,23,.6);}
     .shot-media:hover .carousel-arrow{opacity:1;}
     .carousel-arrow.prev{left:16px;}
     .carousel-arrow.next{right:16px;}
-    .carousel-dots{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:4;}
-    .carousel-dots button{width:8px;height:8px;padding:0;border:none;border-radius:50%;background:rgba(255,255,255,.5);cursor:pointer;transition:background .2s,width .2s;}
-    .carousel-dots button.active{background:#fff;width:20px;border-radius:4px;}
-    .carousel-time{position:absolute;right:14px;bottom:11px;z-index:4;font-family:var(--mono);font-size:11px;color:rgba(255,255,255,.92);text-shadow:0 1px 2px rgba(0,0,0,.55);letter-spacing:.02em;pointer-events:none;}
-    .carousel-progress{position:absolute;left:0;right:0;bottom:0;height:34px;display:flex;align-items:flex-end;z-index:4;cursor:pointer;touch-action:none;background:linear-gradient(to top,rgba(0,0,0,.45),transparent);}
-    .carousel-track{position:relative;width:100%;height:4px;background:rgba(255,255,255,.35);transition:height .15s;}
+    .carousel-dots{position:absolute; bottom:22px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:4;}
+    .carousel-dots button{width:8px; height:8px; padding:0; border:none; border-radius:50%; background:rgba(255,255,255,.5); cursor:pointer; transition:background .2s,width .2s;}
+    .carousel-dots button.active{background:#fff; width:20px; border-radius:4px;}
+    .carousel-time{position:absolute; right:14px; bottom:11px; z-index:4; font-family:var(--mono); font-size:11px; color:rgba(255,255,255,.92); text-shadow:0 1px 2px rgba(0,0,0,.55); letter-spacing:.02em; pointer-events:none;}
+    .carousel-progress{position:absolute; left:0; right:0; bottom:0; height:34px; display:flex; align-items:flex-end; z-index:4; cursor:pointer; touch-action:none; background:linear-gradient(to top,rgba(0,0,0,.45),transparent);}
+    .carousel-track{position:relative; width:100%; height:4px; background:rgba(255,255,255,.35); transition:height .15s;}
     .carousel-progress:hover .carousel-track,.carousel-progress:focus-visible .carousel-track{height:6px;}
-    .carousel-fill{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--blue,#1677ff);}
-    .carousel-fill::after{content:"";position:absolute;right:-6px;top:50%;width:12px;height:12px;border-radius:50%;background:#fff;transform:translateY(-50%) scale(0);transition:transform .15s;box-shadow:0 1px 4px rgba(0,0,0,.4);}
+    .carousel-fill{position:absolute; left:0; top:0; bottom:0; width:0; background:var(--blue);}
+    .carousel-fill::after{content:""; position:absolute; right:-6px; top:50%; width:12px; height:12px; border-radius:50%; background:#fff; transform:translateY(-50%) scale(0); transition:transform .15s; box-shadow:0 1px 4px rgba(0,0,0,.4);}
     .carousel-progress:hover .carousel-fill::after,.carousel-progress:focus-visible .carousel-fill::after{transform:translateY(-50%) scale(1);}
 
     /* provider strip */
-    .providers{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--canvas);padding:20px 32px;}
-    .providers .wrap{display:flex;align-items:center;justify-content:center;gap:12px 28px;flex-wrap:wrap;}
-    .providers .lbl{font-size:12px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--t45);}
-    .providers .name{font-size:14px;font-weight:600;color:var(--t65);}
-    .providers .note{font-size:13px;color:var(--t45);}
+    .providers{padding:72px 0 0;}
+    .providers .row{display:flex; align-items:center; justify-content:space-between; gap:24px; flex-wrap:wrap; padding:22px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line);}
+    .providers .names{display:flex; gap:32px; flex-wrap:wrap; font-family:var(--serif); font-style:italic; font-size:20px; color:var(--ink-2);}
+    .providers .note{font-size:13px; color:var(--ink-4);}
 
-    .sec-head{text-align:center;margin-bottom:48px;}
-    .sec-head h2{font-size:32px;font-weight:600;letter-spacing:-.02em;color:var(--ink);margin-bottom:8px;}
-    .sec-head p{margin:0 auto;max-width:560px;font-size:16px;color:var(--t45);}
+    /* sections */
+    section{padding:144px 0 0;}
+    .sec{display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:32px;}
+    .sec-head{grid-column:span 4; display:flex; flex-direction:column; gap:24px; align-content:start;}
+    .sec-body{grid-column:span 8;}
+    .sec-head h2{font-family:var(--serif); font-size:44px; line-height:1.15; font-weight:500; letter-spacing:-.015em; text-wrap:balance;}
+    .sec-head p{font-size:17px; line-height:1.7; color:var(--ink-2);}
+    .item-t{font-family:var(--serif); font-size:22px; font-weight:500; line-height:1.3;}
+    .item-p{font-size:15px; line-height:1.65; color:var(--ink-3);}
 
     /* steps */
-    .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;}
-    .step{background:#fff;border:1px solid var(--line2);border-radius:12px;padding:24px;}
-    .step-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
-    .num{width:28px;height:28px;border-radius:50%;background:var(--blue-soft);color:var(--blue);font-size:14px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;}
-    .step h3{font-size:16px;font-weight:600;}
-    .step p{margin:0 0 14px;font-size:14px;color:var(--t65);}
-    .step code{display:block;font-family:var(--mono);font-size:12.5px;background:#F5F5F5;border-radius:6px;padding:10px 12px;color:var(--t88);white-space:pre;overflow-x:auto;}
-    .step .path{display:flex;align-items:flex-start;gap:8px;}
-    .step .path+.path{margin-top:10px;}
-    .step .path .tag{flex:none;margin-top:3px;font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--blue);background:var(--blue-soft);border-radius:4px;padding:1px 6px;}
-    .step .path .txt{font-size:13.5px;line-height:1.6;color:var(--t65);}
-    .step .path code{flex:1;min-width:0;}
+    .steps{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:32px;}
+    .step{display:flex; flex-direction:column; gap:14px; padding-top:20px; border-top:1px solid var(--ink);}
+    .step .n{font-family:var(--mono); font-size:12px; color:var(--ink-4);}
+    .step code{display:block; font-family:var(--mono); font-size:12px; line-height:1.6; color:var(--ink-2); padding:8px 10px; background:var(--paper-3); border-radius:4px; overflow-wrap:anywhere;}
+    .step code .c{color:var(--ink-4);}
 
-    /* arms */
-    .arms{background:var(--canvas);border-top:1px solid var(--line);border-bottom:1px solid var(--line);}
-    .octo{max-width:660px;margin:0 auto 48px;}
-    .octo svg{width:100%;height:auto;display:block;}
-    .grid4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;}
-    .arm{background:#fff;border:1px solid var(--line2);border-radius:12px;padding:20px;}
-    .arm:hover{background:rgba(22,119,255,.06);border-color:rgba(22,119,255,.5);}
-    .arm iconify-icon{color:var(--blue);margin-bottom:10px;}
-    .arm h3{font-size:15px;font-weight:600;margin-bottom:6px;}
-    .arm p{margin:0;font-size:13px;line-height:1.55;color:var(--t65);}
-    .arm.soon{background:var(--canvas);border:1px dashed var(--ctrl);}
-    .arm.soon iconify-icon{color:var(--t45);}
-    .arm.soon h3{color:var(--t65);}
-    .arm.soon p{color:var(--t45);}
-    .soon-tag{font-size:11px;font-weight:600;color:#D46B08;background:#FFF7E6;border:1px solid #FFD591;border-radius:4px;padding:0 6px;}
-    .arm-title{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
-    .arm-title h3{margin:0;}
-
-    /* why octo */
-    .why{background:#fff;border-top:1px solid var(--line);}
-    .why-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;}
-    .why-card{background:var(--canvas);border:1px solid var(--line2);border-radius:12px;padding:20px;}
-    .why-card h3{font-size:15px;font-weight:600;margin-bottom:8px;color:var(--ink);}
-    .why-card p{margin:0;font-size:13.5px;line-height:1.6;color:var(--t65);}
+    /* interfaces */
+    .ifaces{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 48px;}
+    .iface{display:flex; gap:20px; padding:22px 0; border-top:1px solid var(--line);}
+    .iface:nth-child(4),.iface:nth-child(8){border-bottom:1px solid var(--line);}
+    .iface .n{font-family:var(--mono); font-size:12px; color:var(--ink-4); padding-top:6px; width:24px; flex:none;}
+    .iface .body{display:flex; flex-direction:column; gap:6px;}
+    .iface .t{display:flex; align-items:baseline; gap:12px;}
+    .soon-tag{font-family:var(--mono); font-size:11px; letter-spacing:.1em; color:var(--ink-4);}
 
     /* features */
-    .feat-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;}
-    .feat{background:#fff;border:1px solid var(--line2);border-radius:16px;padding:28px;}
-    .feat.hero-feat{grid-column:span 2;background:var(--blue-wash);border:1px solid rgba(22,119,255,.25);}
-    .feat iconify-icon{color:var(--blue);margin-bottom:12px;}
-    .feat h3{font-size:16px;font-weight:600;margin-bottom:8px;}
-    .feat.hero-feat h3{font-size:18px;color:var(--ink);}
-    .feat p{margin:0;font-size:14px;line-height:1.6;color:var(--t65);}
-    .feat.hero-feat p{font-size:14.5px;max-width:560px;}
-    .chips{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:24px;}
-    .chip{font-size:13px;color:var(--t65);border:1px solid var(--line);border-radius:9999px;padding:5px 14px;background:var(--canvas);}
+    .feats{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:48px;}
+    .feat{display:flex; flex-direction:column; gap:10px; padding-top:18px; border-top:1px solid var(--line);}
+    .feat:nth-child(-n+2){border-top-color:var(--ink);}
+    .chips{grid-column:5 / span 8; display:flex; flex-wrap:wrap; gap:10px 28px; padding-top:8px;}
 
     /* demo */
-    .demo{background:var(--ink);}
-    .demo .sec-head h2{color:#fff;}
-    .demo .sec-head p{color:rgba(255,255,255,.55);}
-    .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;}
-    .term{background:#141414;border:1px solid #2a2a2a;border-radius:12px;overflow:hidden;}
-    .term-bar{display:flex;align-items:center;gap:6px;padding:10px 14px;border-bottom:1px solid #2a2a2a;font-size:12.5px;color:rgba(255,255,255,.45);}
-    .term-bar .d{width:8px;height:8px;border-radius:50%;}
-    .term pre{margin:0;padding:16px 20px;font-family:var(--mono);font-size:13px;line-height:1.7;color:#E5E7EB;overflow-x:auto;}
-    .cmt{color:rgba(255,255,255,.4);font-style:italic;}
-    .cmd{color:#69B1FF;font-weight:600;}
-    .arg{color:#95DE64;}
-    .spacer{height:1.7em;}
+    .terms{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px;}
+    .term{min-width:0; background:var(--term); border-radius:8px; padding:22px 24px; display:flex; flex-direction:column; gap:14px;}
+    .term .label{color:var(--term-cm);}
+    .term pre{margin:0; font-family:var(--mono); font-size:13px; line-height:1.8; color:var(--term-fg); overflow-x:auto; white-space:pre;}
+    .cmt{color:var(--term-cm);}
+    .cmd{color:var(--term-kw);}
+    .arg{color:var(--term-arg);}
+    .spacer{height:1.8em;}
+
+    /* why */
+    .why-grid{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); border-top:1px solid var(--ink); border-left:1px solid var(--line);}
+    .why-card{padding:28px 28px 32px; border-right:1px solid var(--line); border-bottom:1px solid var(--line); display:flex; flex-direction:column; gap:10px;}
 
     /* faq */
-    .faq{background:var(--canvas);border-top:1px solid var(--line);}
-    .faq .wrap{max-width:720px;}
-    .faq-list{display:flex;flex-direction:column;gap:12px;}
-    details{background:#fff;border:1px solid var(--line2);border-radius:12px;padding:16px 20px;}
-    summary{font-size:15px;font-weight:600;cursor:pointer;color:var(--t88);}
-    details p{margin:12px 0 0;font-size:14px;line-height:1.65;color:var(--t65);}
-    details code{font-family:var(--mono);font-size:13px;}
+    .faq-list{display:flex; flex-direction:column;}
+    .faq-row{display:grid; grid-template-columns:300px minmax(0,1fr); gap:32px; padding:24px 0; border-top:1px solid var(--line);}
+    .faq-row:first-child{border-top-color:var(--ink);}
+    .faq-row:last-child{border-bottom:1px solid var(--ink);}
+    .faq-row .item-p{color:var(--ink-2);}
+    .faq-row code{font-family:var(--mono); font-size:13px;}
 
     /* final cta */
-    .final{padding:96px 32px;text-align:center;background:var(--blue-wash);border-top:1px solid var(--line);}
-    .final h2{font-size:36px;font-weight:600;letter-spacing:-.02em;color:var(--ink);margin-bottom:10px;}
-    .final p{margin:0 0 28px;font-size:16px;color:var(--t65);}
-    .final .sub{margin:20px 0 0;font-size:13px;color:var(--t45);}
+    .final{margin-top:160px; padding:96px 0; border-top:1px solid var(--ink); display:flex; flex-direction:column; align-items:center; text-align:center; gap:28px;}
+    .final h2{font-family:var(--serif); font-size:60px; line-height:1.15; font-weight:500; letter-spacing:-.02em; text-wrap:balance;}
+    .final p{font-size:19px; color:var(--ink-2);}
+    .final .sub{font-size:13px; color:var(--ink-4);}
+    .final .sub a{color:var(--ink-3);} .final .sub a:hover{color:var(--blue);}
 
     /* footer */
-    footer{padding:56px 32px 40px;background:#fff;border-top:1px solid var(--line);}
-    .foot-grid{max-width:1080px;margin:0 auto;display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:32px;}
-    .foot-col{display:flex;flex-direction:column;gap:8px;font-size:13.5px;}
-    .foot-col a{color:var(--t65);}.foot-col a:hover{color:var(--blue);}
-    .foot-col .h{font-size:12px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--t45);margin-bottom:4px;}
-    .foot-about p{margin:0;font-size:13px;color:var(--t45);max-width:260px;}
-    .foot-legal{max-width:1080px;margin:32px auto 0;padding-top:20px;border-top:1px solid var(--line);font-size:12.5px;color:var(--t45);}
+    footer{padding:40px 0 56px; border-top:1px solid var(--line);}
+    .foot-grid{display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:32px;}
+    .foot-about{grid-column:span 5; display:flex; flex-direction:column; gap:14px;}
+    .foot-about p{font-size:15px; color:var(--ink-3);}
+    .foot-cols{grid-column:8 / span 5; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:24px;}
+    .foot-col{display:flex; flex-direction:column; gap:10px; font-size:14px;}
+    .foot-col a{color:var(--ink);} .foot-col a:hover{color:var(--blue);}
+    .foot-col .h{font-family:var(--mono); font-size:11px; letter-spacing:.14em; color:var(--ink-3);}
+    .foot-legal{font-family:var(--mono); font-size:11px; letter-spacing:.14em; color:var(--ink-3); padding-top:8px;}
 
-    .reveal{opacity:0;transform:translateY(16px);transition:opacity .5s ease,transform .5s ease;}
-    .reveal.visible{opacity:1;transform:none;}
+    .reveal{opacity:0; transform:translateY(16px); transition:opacity .5s ease,transform .5s ease;}
+    .reveal.visible{opacity:1; transform:none;}
 
+    @media(max-width:1080px){
+      .hero h1{font-size:56px;}
+      .hero-copy{grid-column:span 12;}
+      .hero-side{grid-column:span 12; flex-direction:row; align-items:flex-end; gap:48px;}
+      .hero-logo{width:80px; height:80px; flex:none;}
+      .spec{flex:1;}
+      .sec-head{grid-column:span 12;}
+      .sec-body{grid-column:span 12;}
+      .chips{grid-column:span 12;}
+    }
     @media(max-width:820px){
-      .nav{gap:12px;padding:0 16px;}
-      .nav-cta{white-space:nowrap;margin-left:auto;}
-      .lang{display:none;}
-      .hero h1{font-size:42px;} .grid3,.grid4,.feat-grid,.grid2,.foot-grid,.why-grid{grid-template-columns:1fr;}
-      .feat.hero-feat{grid-column:auto;} section{padding:56px 20px;} .hero{padding:100px 20px 0;}
+      .wrap{padding:0 20px;}
+      .nav .wrap{gap:14px; height:64px;}
+      .navlinks,.ghost,.brand .ver{display:none;}
+      .lang{margin-left:auto;}
+      .hero{padding-top:72px;}
+      .hero h1{font-size:40px;}
+      .tagline{font-size:17px;}
+      .hero-side{flex-direction:column; align-items:flex-start; gap:28px;}
+      .cli-row{width:100%;} .cli-row code{white-space:normal; overflow-wrap:anywhere; height:auto; padding:10px 14px; font-size:13px; width:100%;}
+      .providers .row{justify-content:flex-start;}
+      .providers .names{gap:20px; font-size:17px;}
+      section{padding-top:96px;}
+      .sec-head h2{font-size:34px;}
+      .steps,.ifaces,.feats,.terms,.why-grid{grid-template-columns:minmax(0,1fr);}
+      .iface:nth-child(4){border-bottom:none;}
+      .feat:nth-child(2){border-top-color:var(--line);}
+      .feats{gap:32px;}
+      .faq-row{grid-template-columns:minmax(0,1fr); gap:10px;}
+      .final{margin-top:96px; padding:64px 0;}
+      .final h2{font-size:36px;}
+      .foot-about,.foot-cols{grid-column:span 12;}
     }
   </style>
 </head>
 <body>
 
-  <nav class="nav">
-    <a class="brand" href="#top">
-      <svg width="28" height="28" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#1677FF"/><path fill="#fff" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/><circle cx="40" cy="42" r="5" fill="#1677FF"/><circle cx="60" cy="42" r="5" fill="#1677FF"/></svg>
-      Octo
-    </a>
-    <div class="navlinks">
-      <a href="#arms" data-en="Interfaces" data-zh="界面"></a>
-      <a href="#features" data-en="Features" data-zh="特性"></a>
-      <a href="#demo" data-en="Demo" data-zh="演示"></a>
-      <a href="#faq" data-en="FAQ" data-zh="常见问题"></a>
-      <a href="/docs/" data-href-en="/docs/" data-href-zh="/docs/zh/" data-en="Docs" data-zh="文档"></a>
-      <a href="/blog/" data-href-en="/blog/" data-href-zh="/blog/zh/" data-en="Blog" data-zh="博客"></a>
+  <nav class="nav" id="nav">
+    <div class="wrap">
+      <a class="brand" href="#top">
+        <svg width="28" height="28" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="#1C1A17"/><path fill="#F7F3EA" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/><circle cx="40" cy="42" r="5" fill="#1C1A17"/><circle cx="60" cy="42" r="5" fill="#1C1A17"/></svg>
+        <span class="name">Octo</span>
+        <span class="ver">MIT</span>
+      </a>
+      <div class="navlinks">
+        <a href="#interfaces" data-en="Interfaces" data-zh="界面"></a>
+        <a href="#features" data-en="Features" data-zh="特性"></a>
+        <a href="#demo" data-en="Demo" data-zh="演示"></a>
+        <a href="#faq" data-en="FAQ" data-zh="常见问题"></a>
+        <a href="/docs/" data-href-en="/docs/" data-href-zh="/docs/zh/" data-en="Docs" data-zh="文档"></a>
+        <a href="/blog/" data-href-en="/blog/" data-href-zh="/blog/zh/" data-en="Blog" data-zh="博客"></a>
+      </div>
+      <a class="ghost" href="https://github.com/open-octo/octo-agent">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span id="stars-label">Star</span>
+      </a>
+      <div class="lang" role="group" aria-label="Language">
+        <button type="button" data-lang="en">EN</button>
+        <button type="button" data-lang="zh">中文</button>
+      </div>
+      <a class="nav-cta" href="#get-started"><span data-en="Download" data-zh="下载"></span></a>
     </div>
-    <a class="ghost" href="https://github.com/open-octo/octo-agent">
-      <iconify-icon icon="ant-design:github-outlined" width="16"></iconify-icon>
-      <span id="stars-label">Star</span>
-    </a>
-    <div class="lang" role="group" aria-label="Language">
-      <button type="button" data-lang="en">EN</button>
-      <button type="button" data-lang="zh">中文</button>
-    </div>
-    <a class="nav-cta" href="#get-started">
-      <iconify-icon icon="ant-design:download-outlined" width="15"></iconify-icon>
-      <span data-en="Download" data-zh="下载"></span>
-    </a>
   </nav>
 
   <header id="top" class="hero">
-    <div class="hero-inner">
-      <svg class="hero-logo" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Octo logo">
-        <rect width="100" height="100" rx="22" fill="#1677FF"/>
-        <path fill="#ffffff" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/>
-        <circle cx="40" cy="42" r="5" fill="#1677FF"/>
-        <circle cx="60" cy="42" r="5" fill="#1677FF"/>
-      </svg>
-      <div class="kicker">
-        <iconify-icon icon="ant-design:safety-outlined" width="14"></iconify-icon>
-        <span data-en="Open source · MIT · Self-hosted · Zero telemetry" data-zh="开源 · MIT · 自托管 · 零遥测"></span>
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <div class="label" data-en="Open source · MIT · Self-hosted · Zero telemetry" data-zh="开源 · MIT · 自托管 · 零遥测"></div>
+        <h1><span data-en="Your AI agent," data-zh="你的 AI agent，"></span><br><span data-en="living on your own machine." data-zh="住在你自己的机器上。"></span></h1>
+        <p class="tagline"
+           data-en="One dependency-free Go binary, any model — in your terminal, editor, notes, browser, desktop, and chat apps. Your sessions, memory, and data never leave your disk."
+           data-zh="一个零依赖的 Go 二进制，接任意模型，从终端、编辑器、笔记软件、浏览器、桌面到聊天应用都能用。你的会话、记忆和数据不出你的硬盘。"></p>
+        <div class="cta-row">
+          <a id="get-started" class="btn-primary" href="https://github.com/open-octo/octo-agent/releases/latest">
+            <span id="dl-label" data-en="Download for free" data-zh="免费下载"></span>
+          </a>
+          <a class="btn-link" href="https://github.com/open-octo/octo-agent"><span data-en="View on GitHub →" data-zh="在 GitHub 查看 →"></span></a>
+        </div>
+        <div class="cli-row">
+          <code>curl -fsSL https://octo-agent.dev/install.sh | sh</code>
+          <button type="button" class="copy-btn" data-cmd="curl -fsSL https://octo-agent.dev/install.sh | sh" data-en="COPY" data-zh="复制"></button>
+        </div>
+        <div class="alt-row">
+          <span data-en="Also on" data-zh="其他平台"></span>
+          <!-- Direct asset links go through the dl mirror: same bytes (the
+               worker proxies GitHub releases), but reachable from networks
+               where github.com is blocked. Browse links stay on GitHub. -->
+          <a href="https://dl.octo-agent.dev/releases/latest/download/octo-setup.pkg">macOS .pkg</a>
+          <a href="https://dl.octo-agent.dev/releases/latest/download/octo-setup.exe">Windows .exe</a>
+          <a href="https://dl.octo-agent.dev/releases/latest/download/Octo-x86_64.AppImage">Linux AppImage</a>
+          <a href="https://github.com/open-octo/octo-agent/releases/latest" data-en="All builds &amp; checksums →" data-zh="全部版本与校验和 →"></a>
+        </div>
       </div>
-      <h1><span data-en="One brain, " data-zh="一个头，"></span><span class="accent" data-en="eight legs." data-zh="八条腿。"></span></h1>
-      <p class="tagline"
-         data-en="The self-hosted AI agent that just works. One Go binary, zero dependencies, any model — reaching your terminal, scripts, editor, notes, browser, desktop, chat apps, and phone. Your data never leaves your machine."
-         data-zh="开箱即用的自托管 AI Agent。一个零依赖的 Go 二进制，任意模型 —— 伸进终端、脚本、编辑器、笔记、浏览器、桌面、聊天应用和手机。你的数据从不离开你的机器。"></p>
-      <div class="cta-row">
-        <a id="get-started" class="btn-primary" href="https://github.com/open-octo/octo-agent/releases/latest">
-          <iconify-icon id="dl-icon" icon="ant-design:download-outlined" width="18"></iconify-icon>
-          <span id="dl-label" data-en="Download for free" data-zh="免费下载"></span>
-        </a>
-        <a class="btn-default" href="https://github.com/open-octo/octo-agent">
-          <iconify-icon icon="ant-design:github-outlined" width="17"></iconify-icon>
-          <span data-en="View on GitHub" data-zh="在 GitHub 查看"></span>
-        </a>
-      </div>
-      <div class="alt-row">
-        <span data-en="Also on" data-zh="其他平台"></span>
-        <!-- Direct asset links go through the dl mirror: same bytes (the
-             worker proxies GitHub releases), but reachable from networks
-             where github.com is blocked. Browse links stay on GitHub. -->
-        <a href="https://dl.octo-agent.dev/releases/latest/download/octo-setup.pkg">macOS .pkg</a>
-        <a href="https://dl.octo-agent.dev/releases/latest/download/octo-setup.exe">Windows .exe</a>
-        <a href="https://dl.octo-agent.dev/releases/latest/download/Octo-x86_64.AppImage">Linux AppImage</a>
-        <a href="https://github.com/open-octo/octo-agent/releases/latest" data-en="All builds &amp; checksums →" data-zh="全部版本与校验和 →"></a>
-      </div>
-      <div class="cli-row">
-        <code>curl -fsSL https://octo-agent.dev/install.sh | sh</code>
-        <button type="button" class="copy-btn" data-cmd="curl -fsSL https://octo-agent.dev/install.sh | sh" data-en="Copy" data-zh="复制"></button>
-      </div>
-      <div class="proof">
-        <span><iconify-icon icon="ant-design:thunderbolt-outlined" width="14"></iconify-icon> <span data-en="Starts in milliseconds" data-zh="毫秒级启动"></span></span>
-        <span><iconify-icon icon="ant-design:lock-outlined" width="14"></iconify-icon> <span data-en="No telemetry, ever" data-zh="永不遥测"></span></span>
-        <span><iconify-icon icon="ant-design:api-outlined" width="14"></iconify-icon> <span data-en="Any model, incl. local" data-zh="任意模型，含本地"></span></span>
-      </div>
+      <aside class="hero-side">
+        <svg class="hero-logo" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Octo logo">
+          <rect width="100" height="100" rx="22" fill="#1677FF"/>
+          <path fill="#ffffff" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/>
+          <circle cx="40" cy="42" r="5" fill="#1677FF"/>
+          <circle cx="60" cy="42" r="5" fill="#1677FF"/>
+        </svg>
+        <div class="spec">
+          <div class="label" data-en="Specs" data-zh="规格"></div>
+          <div class="spec-row"><span class="k" data-en="Executable" data-zh="可执行文件"></span><span class="v">~40 MB</span></div>
+          <div class="spec-row"><span class="k" data-en="Runtime dependencies" data-zh="运行时依赖"></span><span class="v">0</span></div>
+          <div class="spec-row"><span class="k" data-en="Telemetry / analytics" data-zh="遥测 / 埋点"></span><span class="v">0</span></div>
+          <div class="spec-row"><span class="k" data-en="Protocols" data-zh="协议"></span><span class="v">Anthropic Messages<br>OpenAI Chat</span></div>
+          <div class="spec-row"><span class="k" data-en="Platforms" data-zh="平台"></span><span class="v">macOS · Windows · Linux</span></div>
+          <div class="spec-row"><span class="k" data-en="License" data-zh="许可"></span><span class="v">MIT</span></div>
+        </div>
+      </aside>
+    </div>
+    <div class="wrap shot-wrap">
       <div class="shot">
         <div class="shot-bar">
-          <span class="dot" style="background:#FF5F57"></span>
-          <span class="dot" style="background:#FEBC2E"></span>
-          <span class="dot" style="background:#28C840"></span>
-          <span class="shot-title">Octo Desktop</span>
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="shot-title">OCTO DESKTOP</span>
         </div>
         <div class="shot-media">
           <div class="carousel" id="demo-carousel">
@@ -330,7 +356,6 @@
             <div class="carousel-progress" role="slider" aria-label="Seek" tabindex="0" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="carousel-track"><div class="carousel-fill"></div></div></div>
           </div>
           <div class="shot-ph" style="display:none">
-            <iconify-icon icon="ant-design:play-circle-outlined" width="40" style="color:var(--t45)"></iconify-icon>
             <span data-en="Desktop demo — drop octo-demo.mp4 here" data-zh="桌面版演示 —— 放入 octo-demo.mp4"></span>
           </div>
         </div>
@@ -340,328 +365,212 @@
 
   <div class="providers">
     <div class="wrap">
-      <span class="lbl" data-en="Works with" data-zh="兼容"></span>
-      <span class="name">Anthropic</span><span class="name">OpenAI</span><span class="name">DeepSeek</span>
-      <span class="name">Kimi</span><span class="name">OpenRouter</span><span class="name">vLLM</span><span class="name">Ollama</span>
-      <span class="note" data-en="— including models running entirely on your machine" data-zh="—— 包括完全跑在你机器上的本地模型"></span>
+      <div class="row">
+        <span class="label" data-en="Works with" data-zh="兼容"></span>
+        <div class="names">
+          <span>Anthropic</span><span>OpenAI</span><span>DeepSeek</span><span>Kimi</span><span>Qwen</span><span>OpenRouter</span><span>vLLM</span><span>Ollama</span>
+        </div>
+        <span class="note" data-en="including models running entirely on your machine" data-zh="包括完全跑在你机器上的本地模型"></span>
+      </div>
     </div>
   </div>
 
   <main>
-  <section>
-    <div class="wrap">
+  <section id="get-started-steps">
+    <div class="wrap sec">
       <div class="sec-head reveal">
-        <h2 data-en="Running in 60 seconds" data-zh="60 秒跑起来"></h2>
+        <div class="label" data-en="01 — Get started" data-zh="01 — 上手"></div>
+        <h2 data-en="Running in 60 seconds." data-zh="60 秒跑起来。"></h2>
         <p data-en="Install in seconds, configure in a minute, ship in an hour." data-zh="几秒安装，一分钟配置，一小时交付。"></p>
       </div>
-      <div class="grid3">
+      <div class="sec-body steps">
         <div class="step reveal">
-          <div class="step-head"><span class="num">1</span><h3 data-en="Install" data-zh="安装"></h3></div>
-          <p data-en="Grab the desktop app for macOS, Windows, or Linux — or install just the CLI binary." data-zh="下载 macOS / Windows / Linux 桌面应用 —— 或只装命令行二进制。"></p>
-          <div class="path"><span class="tag" data-en="Desktop" data-zh="桌面版"></span><span class="txt" data-en="Download the installer for your OS and open it." data-zh="下载对应系统的安装包，打开即用。"></span></div>
-          <div class="path"><span class="tag">CLI</span><code>curl -fsSL octo-agent.dev/install.sh | sh</code></div>
+          <span class="n">1</span>
+          <h3 class="item-t" data-en="Install" data-zh="安装"></h3>
+          <p class="item-p" data-en="Grab the desktop app for macOS, Windows, or Linux — or install just the CLI binary. Download the installer for your OS and open it." data-zh="下载 macOS / Windows / Linux 桌面应用，或只装命令行二进制。下载对应系统的安装包，打开即用。"></p>
+          <code>curl -fsSL octo-agent.dev/install.sh | sh</code>
         </div>
         <div class="step reveal">
-          <div class="step-head"><span class="num">2</span><h3 data-en="Connect a model" data-zh="连接模型"></h3></div>
-          <p data-en="Point Octo at any Anthropic- or OpenAI-compatible endpoint — cloud or fully local." data-zh="把 Octo 指向任意 Anthropic 或 OpenAI 兼容端点 —— 云端或完全本地。"></p>
-          <div class="path"><span class="tag" data-en="Desktop" data-zh="桌面版"></span><span class="txt" data-en="First launch opens a setup wizard — pick a provider, paste an API key, test the connection." data-zh="首次启动自动进入设置向导 —— 选择供应商、填入 API Key、测试连接。"></span></div>
-          <div class="path"><span class="tag">CLI</span><code data-en="octo config   # interactive setup" data-zh="octo config   # 交互式配置"></code></div>
+          <span class="n">2</span>
+          <h3 class="item-t" data-en="Connect a model" data-zh="连接模型"></h3>
+          <p class="item-p" data-en="Point Octo at any Anthropic- or OpenAI-compatible endpoint — cloud or fully local. On the desktop, first launch opens a setup wizard." data-zh="把 Octo 指向任意 Anthropic 或 OpenAI 兼容端点，云端或完全本地。桌面版首次启动自动进入设置向导。"></p>
+          <code>octo config   <span class="c" data-en="# interactive setup" data-zh="# 交互式配置"></span></code>
         </div>
         <div class="step reveal">
-          <div class="step-head"><span class="num">3</span><h3 data-en="Ship" data-zh="交付"></h3></div>
-          <p data-en="One prompt, full tool loop — in the TUI, headless in CI, or from any of the eight legs." data-zh="一句 prompt，完整工具循环 —— 在 TUI、CI 无界面运行，或从八条腿中任意一条发起。"></p>
-          <div class="path"><span class="tag" data-en="Desktop" data-zh="桌面版"></span><span class="txt" data-en="Type your first prompt in the workbench — sessions, skills, and MCP all in one window." data-zh="在 Workbench 里发出第一句 prompt —— 会话、skills、MCP 都在同一个窗口。"></span></div>
-          <div class="path"><span class="tag">CLI</span><code>octo "Add a --json flag to config show"</code></div>
+          <span class="n">3</span>
+          <h3 class="item-t" data-en="Ship" data-zh="交付"></h3>
+          <p class="item-p" data-en="One prompt, full tool loop — interactively in the TUI, headless in CI, or from any interface." data-zh="一句 prompt，完整工具循环。在 TUI 里交互，在 CI 里无界面运行，或从任意一个界面发起。"></p>
+          <code>octo "Add a --json flag to config show"</code>
         </div>
       </div>
     </div>
   </section>
 
-  <section id="arms" class="arms">
-    <div class="wrap">
+  <section id="interfaces">
+    <span id="arms"></span>
+    <div class="wrap sec">
       <div class="sec-head reveal">
-        <h2 data-en="Reach it from wherever you work" data-zh="你在哪干活，就从哪够到它"></h2>
-        <p data-en="One brain — the Go harness plus the model you chose — and eight legs. Same memory, same ~/.octo, from every interface." data-zh="一个大脑 —— Go harness 加上你选的模型 —— 和八条腿。同一份记忆、同一个 ~/.octo，来自每一个界面。"></p>
+        <div class="label" data-en="02 — Interfaces" data-zh="02 — 界面"></div>
+        <h2 data-en="Reach it from wherever you work." data-zh="你在哪干活，就从哪够到它。"></h2>
+        <p data-en="One Go core, one memory, one ~/.octo. Switch interfaces without switching brains." data-zh="同一个 Go 内核，同一份记忆，同一个 ~/.octo。换界面不用换脑子。"></p>
       </div>
-      <figure class="octo reveal">
-        <svg font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" xmlns="http://www.w3.org/2000/svg" viewBox="0 64 720 356" role="img" aria-label="One brain, eight legs — one local octopus agent whose eight legs reach eight interfaces: TUI, CLI, VS Code, Obsidian, web, desktop, IM, and mobile (coming soon)">
-          <g>
-          <path fill="#1677FF" d="M 330.11 206.96 L 324.02 202.37 L 317.87 197.81 L 311.65 193.27 L 305.37 188.75 L 299.02 184.26 L 292.61 179.80 L 286.13 175.35 L 279.58 170.93 L 272.97 166.54 L 266.29 162.17 L 259.54 157.82 L 252.73 153.49 L 245.85 149.19 L 238.91 144.90 L 231.90 140.64 L 224.83 136.41 L 217.69 132.19 L 210.48 127.99 L 203.21 123.82 L 195.88 119.66 L 188.47 115.52 L 181.01 111.40 L 173.48 107.29 L 165.88 103.20 L 158.23 99.12 L 150.52 95.03 L 149.48 96.97 L 157.08 101.21 L 164.60 105.51 L 172.04 109.84 L 179.40 114.21 L 186.67 118.61 L 193.88 123.04 L 201.00 127.50 L 208.05 131.98 L 215.02 136.50 L 221.92 141.04 L 228.74 145.60 L 235.48 150.20 L 242.15 154.81 L 248.74 159.46 L 255.25 164.12 L 261.69 168.82 L 268.05 173.53 L 274.34 178.27 L 280.55 183.04 L 286.68 187.83 L 292.74 192.64 L 298.72 197.47 L 304.63 202.33 L 310.46 207.21 L 316.21 212.11 L 321.89 217.04 Z"/>
-          <path fill="#1677FF" d="M 316.03 229.83 L 309.84 228.07 L 303.63 226.35 L 297.41 224.64 L 291.17 222.95 L 284.92 221.29 L 278.65 219.65 L 272.37 218.03 L 266.08 216.43 L 259.77 214.85 L 253.44 213.29 L 247.10 211.76 L 240.74 210.24 L 234.37 208.74 L 227.99 207.27 L 221.59 205.81 L 215.17 204.38 L 208.74 202.96 L 202.30 201.56 L 195.84 200.19 L 189.36 198.82 L 182.88 197.48 L 176.37 196.15 L 169.86 194.83 L 163.33 193.53 L 156.78 192.23 L 150.23 190.92 L 149.77 193.08 L 156.28 194.56 L 162.76 196.10 L 169.22 197.69 L 175.65 199.31 L 182.06 200.96 L 188.46 202.64 L 194.83 204.36 L 201.18 206.10 L 207.51 207.88 L 213.82 209.68 L 220.11 211.51 L 226.38 213.37 L 232.63 215.26 L 238.85 217.17 L 245.06 219.11 L 251.25 221.07 L 257.41 223.07 L 263.56 225.09 L 269.68 227.13 L 275.78 229.21 L 281.87 231.30 L 287.93 233.43 L 293.97 235.57 L 299.99 237.75 L 305.99 239.95 L 311.97 242.17 Z"/>
-          <path fill="#1677FF" d="M 316.12 255.78 L 309.65 257.97 L 303.18 260.08 L 296.72 262.12 L 290.27 264.08 L 283.82 265.96 L 277.38 267.76 L 270.95 269.48 L 264.52 271.13 L 258.10 272.69 L 251.69 274.18 L 245.28 275.59 L 238.88 276.92 L 232.48 278.17 L 226.10 279.34 L 219.72 280.43 L 213.34 281.44 L 206.98 282.37 L 200.62 283.21 L 194.26 283.98 L 187.92 284.66 L 181.58 285.25 L 175.25 285.77 L 168.92 286.19 L 162.61 286.53 L 156.30 286.77 L 150.00 286.90 L 150.00 289.10 L 156.33 289.15 L 162.67 289.16 L 169.03 289.12 L 175.40 289.00 L 181.79 288.82 L 188.20 288.57 L 194.62 288.26 L 201.06 287.87 L 207.52 287.40 L 213.99 286.87 L 220.48 286.26 L 226.99 285.58 L 233.52 284.83 L 240.06 284.00 L 246.62 283.10 L 253.19 282.13 L 259.78 281.08 L 266.39 279.95 L 273.02 278.75 L 279.66 277.47 L 286.32 276.12 L 293.00 274.69 L 299.70 273.19 L 306.41 271.61 L 313.14 269.95 L 319.88 268.22 Z"/>
-          <path fill="#1677FF" d="M 329.49 279.32 L 323.65 285.19 L 317.72 290.91 L 311.70 296.49 L 305.60 301.91 L 299.42 307.19 L 293.15 312.32 L 286.80 317.30 L 280.36 322.13 L 273.84 326.82 L 267.23 331.35 L 260.54 335.73 L 253.76 339.96 L 246.89 344.04 L 239.94 347.97 L 232.90 351.74 L 225.77 355.36 L 218.56 358.83 L 211.26 362.15 L 203.88 365.31 L 196.41 368.31 L 188.85 371.15 L 181.20 373.84 L 173.47 376.37 L 165.65 378.73 L 157.75 380.92 L 149.75 382.93 L 150.25 385.07 L 158.33 383.23 L 166.35 381.27 L 174.30 379.17 L 182.18 376.93 L 190.00 374.54 L 197.75 372.00 L 205.43 369.31 L 213.04 366.47 L 220.59 363.48 L 228.07 360.33 L 235.49 357.03 L 242.83 353.57 L 250.11 349.96 L 257.32 346.19 L 264.46 342.27 L 271.54 338.19 L 278.54 333.95 L 285.48 329.56 L 292.35 325.01 L 299.16 320.29 L 305.89 315.42 L 312.55 310.39 L 319.15 305.21 L 325.67 299.86 L 332.12 294.35 L 338.51 288.68 Z"/>
-          <path fill="#1677FF" d="M 398.11 217.04 L 403.79 212.11 L 409.54 207.21 L 415.37 202.33 L 421.28 197.47 L 427.26 192.64 L 433.32 187.83 L 439.45 183.04 L 445.66 178.27 L 451.95 173.53 L 458.31 168.82 L 464.75 164.12 L 471.26 159.46 L 477.85 154.81 L 484.52 150.20 L 491.26 145.60 L 498.08 141.04 L 504.98 136.50 L 511.95 131.98 L 519.00 127.50 L 526.12 123.04 L 533.33 118.61 L 540.60 114.21 L 547.96 109.84 L 555.40 105.51 L 562.92 101.21 L 570.52 96.97 L 569.48 95.03 L 561.77 99.12 L 554.12 103.20 L 546.52 107.29 L 538.99 111.40 L 531.53 115.52 L 524.12 119.66 L 516.79 123.82 L 509.52 127.99 L 502.31 132.19 L 495.17 136.41 L 488.10 140.64 L 481.09 144.90 L 474.15 149.19 L 467.27 153.49 L 460.46 157.82 L 453.71 162.17 L 447.03 166.54 L 440.42 170.93 L 433.87 175.35 L 427.39 179.80 L 420.98 184.26 L 414.63 188.75 L 408.35 193.27 L 402.13 197.81 L 395.98 202.37 L 389.89 206.96 Z"/>
-          <path fill="#1677FF" d="M 408.03 242.17 L 414.01 239.95 L 420.01 237.75 L 426.03 235.57 L 432.07 233.43 L 438.13 231.30 L 444.22 229.21 L 450.32 227.13 L 456.44 225.09 L 462.59 223.07 L 468.75 221.07 L 474.94 219.11 L 481.15 217.17 L 487.37 215.26 L 493.62 213.37 L 499.89 211.51 L 506.18 209.68 L 512.49 207.88 L 518.82 206.10 L 525.17 204.36 L 531.54 202.64 L 537.94 200.96 L 544.35 199.31 L 550.78 197.69 L 557.24 196.10 L 563.72 194.56 L 570.23 193.08 L 569.77 190.92 L 563.22 192.23 L 556.67 193.53 L 550.14 194.83 L 543.63 196.15 L 537.12 197.48 L 530.64 198.82 L 524.16 200.19 L 517.70 201.56 L 511.26 202.96 L 504.83 204.38 L 498.41 205.81 L 492.01 207.27 L 485.63 208.74 L 479.26 210.24 L 472.90 211.76 L 466.56 213.29 L 460.23 214.85 L 453.92 216.43 L 447.63 218.03 L 441.35 219.65 L 435.08 221.29 L 428.83 222.95 L 422.59 224.64 L 416.37 226.35 L 410.16 228.07 L 403.97 229.83 Z"/>
-          <path fill="#1677FF" d="M 400.12 268.22 L 406.86 269.95 L 413.59 271.61 L 420.30 273.19 L 427.00 274.69 L 433.68 276.12 L 440.34 277.47 L 446.98 278.75 L 453.61 279.95 L 460.22 281.08 L 466.81 282.13 L 473.38 283.10 L 479.94 284.00 L 486.48 284.83 L 493.01 285.58 L 499.52 286.26 L 506.01 286.87 L 512.48 287.40 L 518.94 287.87 L 525.38 288.26 L 531.80 288.57 L 538.21 288.82 L 544.60 289.00 L 550.97 289.12 L 557.33 289.16 L 563.67 289.15 L 570.00 289.10 L 570.00 286.90 L 563.70 286.77 L 557.39 286.53 L 551.08 286.19 L 544.75 285.77 L 538.42 285.25 L 532.08 284.66 L 525.74 283.98 L 519.38 283.21 L 513.02 282.37 L 506.66 281.44 L 500.28 280.43 L 493.90 279.34 L 487.52 278.17 L 481.12 276.92 L 474.72 275.59 L 468.31 274.18 L 461.90 272.69 L 455.48 271.13 L 449.05 269.48 L 442.62 267.76 L 436.18 265.96 L 429.73 264.08 L 423.28 262.12 L 416.82 260.08 L 410.35 257.97 L 403.88 255.78 Z"/>
-          <path fill="#6b7280" opacity="0.32" d="M 381.49 288.68 L 387.88 294.35 L 394.33 299.86 L 400.85 305.21 L 407.45 310.39 L 414.11 315.42 L 420.84 320.29 L 427.65 325.01 L 434.52 329.56 L 441.46 333.95 L 448.46 338.19 L 455.54 342.27 L 462.68 346.19 L 469.89 349.96 L 477.17 353.57 L 484.51 357.03 L 491.93 360.33 L 499.41 363.48 L 506.96 366.47 L 514.57 369.31 L 522.25 372.00 L 530.00 374.54 L 537.82 376.93 L 545.70 379.17 L 553.65 381.27 L 561.67 383.23 L 569.75 385.07 L 570.25 382.93 L 562.25 380.92 L 554.35 378.73 L 546.53 376.37 L 538.80 373.84 L 531.15 371.15 L 523.59 368.31 L 516.12 365.31 L 508.74 362.15 L 501.44 358.83 L 494.23 355.36 L 487.10 351.74 L 480.06 347.97 L 473.11 344.04 L 466.24 339.96 L 459.46 335.73 L 452.77 331.35 L 446.16 326.82 L 439.64 322.13 L 433.20 317.30 L 426.85 312.32 L 420.58 307.19 L 414.40 301.91 L 408.30 296.49 L 402.28 290.91 L 396.35 285.19 L 390.51 279.32 Z"/>
-            <ellipse fill="#E6F4FF" opacity="0.55" cx="360" cy="248" rx="64" ry="58"/>
-            <g transform="translate(360,250) scale(1.35) translate(-53,-53)">
-              <path fill="#1677FF" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C42 74 64 74 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/>
-              <circle fill="#ffffff" cx="40" cy="42" r="5"/>
-              <circle fill="#ffffff" cx="60" cy="42" r="5"/>
-            </g>
-          </g>
-          <rect fill="#ffffff" stroke="#e5e7eb" stroke-width="1.4" x="96" y="76" width="40" height="40" rx="11"/>
-          <g fill="none" stroke="#1677FF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" transform="translate(104,84)"><polyline points="5 7 10 12 5 17"/><line x1="12" y1="17" x2="19" y2="17"/></g>
-          <text fill="#374151" font-size="14" font-weight="600" x="88" y="101" text-anchor="end">TUI</text>
-          <rect fill="#ffffff" stroke="#e5e7eb" stroke-width="1.4" x="96" y="172" width="40" height="40" rx="11"/>
-          <g fill="none" stroke="#1677FF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" transform="translate(104,180)"><polyline points="9 8 5 12 9 16"/><polyline points="15 8 19 12 15 16"/></g>
-          <text fill="#374151" font-size="14" font-weight="600" x="88" y="197" text-anchor="end">VS Code</text>
-          <rect fill="#ffffff" stroke="#e5e7eb" stroke-width="1.4" x="96" y="268" width="40" height="40" rx="11"/>
-          <g fill="none" stroke="#1677FF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" transform="translate(104,276)"><path d="M12 2 4 9l8 13 8-13-8-7z"/><path d="M4 9h16"/></g>
-          <text fill="#374151" font-size="14" font-weight="600" x="88" y="293" text-anchor="end">Obsidian</text>
-          <rect fill="#ffffff" stroke="#e5e7eb" stroke-width="1.4" x="96" y="364" width="40" height="40" rx="11"/>
-          <g fill="none" stroke="#1677FF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" transform="translate(104,372)"><path d="M8 4c-2 0-2 2-2 4s0 4-2 4c2 0 2 2 2 4s0 4 2 4"/><path d="M16 4c2 0 2 2 2 4s0 4 2 4c-2 0-2 2-2 4s0 4-2 4"/></g>
-          <text fill="#374151" font-size="14" font-weight="600" x="88" y="389" text-anchor="end">CLI</text>
-          <rect fill="#ffffff" stroke="#e5e7eb" stroke-width="1.4" x="584" y="76" width="40" height="40" rx="11"/>
-          <g fill="none" stroke="#1677FF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" transform="translate(592,84)"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3c3.5 3 3.5 15 0 18M12 3c-3.5 3-3.5 15 0 18"/></g>
-          <text fill="#374151" font-size="14" font-weight="600" x="632" y="101" text-anchor="start">Web</text>
-          <rect fill="#ffffff" stroke="#e5e7eb" stroke-width="1.4" x="584" y="172" width="40" height="40" rx="11"/>
-          <g fill="none" stroke="#1677FF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" transform="translate(592,180)"><rect x="3" y="4" width="18" height="12" rx="1.5"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="16" x2="12" y2="20"/></g>
-          <text fill="#374151" font-size="14" font-weight="600" x="632" y="197" text-anchor="start">Desktop</text>
-          <rect fill="#ffffff" stroke="#e5e7eb" stroke-width="1.4" x="584" y="268" width="40" height="40" rx="11"/>
-          <g fill="none" stroke="#1677FF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" transform="translate(592,276)"><path d="M20 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/></g>
-          <text fill="#374151" font-size="14" font-weight="600" x="632" y="293" text-anchor="start">IM</text>
-          <rect fill="#ffffff" stroke="#e5e7eb" stroke-width="1.4" stroke-dasharray="4 3" opacity="0.65" x="584" y="364" width="40" height="40" rx="11"/>
-          <g fill="none" stroke="#6b7280" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" opacity="0.7" transform="translate(592,372)"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></g>
-          <text fill="#6b7280" font-size="14" font-weight="600" x="632" y="381" text-anchor="start">Mobile</text>
-          <text fill="#6b7280" font-size="10" font-weight="600" letter-spacing="0.02em" x="632" y="396" text-anchor="start" data-en="dev preview" data-zh="开发者预览"></text>
-        </svg>
-      </figure>
-      <div class="grid4">
-        <div class="arm reveal">
-          <iconify-icon icon="ant-design:code-outlined" width="22"></iconify-icon>
-          <h3 data-en="TUI" data-zh="TUI"></h3>
-          <p data-en="Rich interactive terminal with streaming, tool cards, and session history." data-zh="富交互终端：流式输出、工具卡片、会话历史。"></p>
-        </div>
-        <div class="arm reveal">
-          <iconify-icon icon="ant-design:appstore-add-outlined" width="22"></iconify-icon>
-          <h3 data-en="VS Code" data-zh="VS Code"></h3>
-          <p data-en="Selection, open files, and diagnostics flow into chat; edits render as native diffs." data-zh="选区、打开的文件、诊断信息自动进入对话；改动以原生 diff 呈现。"></p>
-        </div>
-        <div class="arm reveal">
-          <iconify-icon icon="ant-design:sketch-outlined" width="22"></iconify-icon>
-          <h3 data-en="Obsidian" data-zh="Obsidian"></h3>
-          <p data-en="Your vault becomes the working directory — sidebar chat, inline word-level diffs, @mentions." data-zh="你的 vault 变成工作目录 —— 侧边栏对话、行内 word-level diff、@mention。"></p>
-        </div>
-        <div class="arm reveal">
-          <iconify-icon icon="ant-design:build-outlined" width="22"></iconify-icon>
-          <h3 data-en="CLI" data-zh="CLI"></h3>
-          <p data-en="octo &quot;prompt&quot; or piped stdin runs one full agentic turn and exits — script it from cron, CI, or your own programs." data-zh="octo &quot;提示词&quot; 或管道 stdin 跑完一轮完整 agent 循环后退出 —— 可从 cron、CI 或你自己的程序里调用。"></p>
-        </div>
-        <div class="arm reveal">
-          <iconify-icon icon="ant-design:global-outlined" width="22"></iconify-icon>
-          <h3 data-en="Web UI" data-zh="Web 界面"></h3>
-          <p data-en="Local dashboard at :8088 — browse sessions, inspect tool output, manage skills." data-zh="本地仪表盘（:8088）—— 浏览会话、查看工具输出、管理 skills。"></p>
-        </div>
-        <div class="arm reveal">
-          <iconify-icon icon="ant-design:desktop-outlined" width="22"></iconify-icon>
-          <h3 data-en="Desktop" data-zh="桌面应用"></h3>
-          <p data-en="Native window on macOS, Windows, Linux — real OS file dialogs, tray, notifications." data-zh="macOS / Windows / Linux 原生窗口 —— 系统文件对话框、托盘、原生通知。"></p>
-        </div>
-        <div class="arm reveal">
-          <iconify-icon icon="ant-design:message-outlined" width="22"></iconify-icon>
-          <h3 data-en="IM Bridge" data-zh="IM 桥接"></h3>
-          <p data-en="WeChat iLink, Feishu, DingTalk, WeCom, Discord, Telegram — delegate from your phone." data-zh="微信 iLink、飞书、钉钉、企微、Discord、Telegram —— 从手机派活。"></p>
-        </div>
-        <div class="arm soon reveal">
-          <iconify-icon icon="ant-design:mobile-outlined" width="22"></iconify-icon>
-          <div class="arm-title">
-            <h3 data-en="Mobile" data-zh="移动端"></h3>
-            <span class="soon-tag" data-en="Developer preview" data-zh="开发者预览"></span>
-          </div>
-          <p data-en="A thin native client (iOS + Android) over an end-to-end encrypted link to your machine. The eighth leg — buildable today from source with a self-hosted relay; hosted relay and app-store builds are next." data-zh="通过端到端加密链路连回你机器的轻量原生客户端（iOS + Android）。第八条腿 —— 现在即可从源码自建并配合自托管 relay 使用；托管 relay 与应用商店版本在路上。"></p>
-        </div>
+      <div class="sec-body ifaces">
+        <div class="iface reveal"><span class="n">01</span><div class="body"><h3 class="item-t">TUI</h3><p class="item-p" data-en="Rich interactive terminal with streaming, tool cards, and session history." data-zh="富交互终端：流式输出、工具卡片、会话历史。"></p></div></div>
+        <div class="iface reveal"><span class="n">02</span><div class="body"><h3 class="item-t">CLI</h3><p class="item-p" data-en="octo &quot;prompt&quot; or piped stdin runs one full agentic turn and exits — script it from cron, CI, or your own programs." data-zh="一句提示词或管道 stdin，跑完整 agent 循环后退出。可从 cron、CI 或你自己的程序里调用。"></p></div></div>
+        <div class="iface reveal"><span class="n">03</span><div class="body"><h3 class="item-t">VS Code</h3><p class="item-p" data-en="Selection, open files, and diagnostics flow into chat; edits render as native diffs." data-zh="选区、打开的文件、诊断信息自动进入对话；改动以原生 diff 呈现。"></p></div></div>
+        <div class="iface reveal"><span class="n">04</span><div class="body"><h3 class="item-t">Obsidian</h3><p class="item-p" data-en="Your vault becomes the working directory — sidebar chat, inline word-level diffs, @mentions." data-zh="你的 vault 变成工作目录：侧边栏对话、行内 word-level diff、@mention。"></p></div></div>
+        <div class="iface reveal"><span class="n">05</span><div class="body"><h3 class="item-t" data-en="Web UI" data-zh="Web 界面"></h3><p class="item-p" data-en="Local dashboard at :8088 — browse sessions, inspect tool output, manage skills." data-zh="本地仪表盘（:8088），浏览会话、查看工具输出、管理 skills。"></p></div></div>
+        <div class="iface reveal"><span class="n">06</span><div class="body"><h3 class="item-t" data-en="Desktop" data-zh="桌面应用"></h3><p class="item-p" data-en="Native window on macOS, Windows, Linux — real OS file dialogs, tray, notifications." data-zh="macOS / Windows / Linux 原生窗口，系统文件对话框、托盘、原生通知。"></p></div></div>
+        <div class="iface reveal"><span class="n">07</span><div class="body"><h3 class="item-t" data-en="IM Bridge" data-zh="IM 桥接"></h3><p class="item-p" data-en="WeChat iLink, Feishu, DingTalk, WeCom, Discord, Telegram — delegate from your phone." data-zh="微信 iLink、飞书、钉钉、企微、Discord、Telegram，从手机派活。"></p></div></div>
+        <div class="iface reveal"><span class="n">08</span><div class="body"><div class="t"><h3 class="item-t" data-en="Mobile" data-zh="移动端"></h3><span class="soon-tag" data-en="DEVELOPER PREVIEW" data-zh="开发者预览"></span></div><p class="item-p" data-en="A thin native client (iOS + Android) over an end-to-end encrypted link to your machine. Buildable today from source with a self-hosted relay; hosted relay and app-store builds are next." data-zh="通过端到端加密链路连回你机器的轻量原生客户端（iOS + Android）。现在即可从源码自建并配合自托管 relay 使用；托管 relay 与应用商店版本在路上。"></p></div></div>
       </div>
     </div>
   </section>
 
   <section id="features">
-    <div class="wrap">
+    <div class="wrap sec">
       <div class="sec-head reveal">
-        <h2 data-en="Built for people who ship" data-zh="为真正交付的人打造"></h2>
-        <p data-en="A full agent loop with tools, memory, and autonomy — packaged as one fast, private binary you fully control." data-zh="带工具、记忆与自主能力的完整 agent 循环 —— 打包成一个够快、够私密、完全由你掌控的二进制。"></p>
+        <div class="label" data-en="03 — Features" data-zh="03 — 特性"></div>
+        <h2 data-en="Built for people who ship." data-zh="为真正交付的人打造。"></h2>
+        <p data-en="A full agent loop with tools, memory, and autonomy — packaged as one fast, private binary you fully control." data-zh="带工具、记忆与自主能力的完整 agent 循环，打包成一个够快、够私密、完全由你掌控的二进制。"></p>
       </div>
-      <div class="feat-grid">
-        <div class="feat hero-feat reveal">
-          <iconify-icon icon="ant-design:lock-outlined" width="26"></iconify-icon>
-          <h3 data-en="No telemetry, ever" data-zh="零遥测，无埋点"></h3>
-          <p data-en="No analytics SDKs, no crash reporters, no usage pings baked in. Nothing leaves your machine except the requests you explicitly send to the model provider you configured — audit the source to check." data-zh="没有埋点 SDK、没有崩溃上报、没有内置用量回传。除了你主动配置、显式发出的模型请求，没有任何东西离开你的机器 —— 源码开放，可自行审计。"></p>
-        </div>
-        <div class="feat reveal">
-          <iconify-icon icon="ant-design:inbox-outlined" width="26"></iconify-icon>
-          <h3 data-en="Single binary, zero deps" data-zh="单一二进制，零依赖"></h3>
-          <p data-en="One Go executable. No Python, no Node, no Docker. Starts in milliseconds, stays fast under load." data-zh="一个 Go 可执行文件。无需 Python、Node、Docker。毫秒级启动，负载下依旧够快。"></p>
-        </div>
-        <div class="feat reveal">
-          <iconify-icon icon="ant-design:rest-outlined" width="26"></iconify-icon>
-          <h3 data-en="A recycle bin for your files" data-zh="给文件留一个回收站"></h3>
-          <p data-en="Agent deletes are intercepted and overwrites backed up before they happen. Restore from the Web UI or one-click Undo." data-zh="Agent 的删除会被拦截、覆盖会被提前备份。从 Web UI 还原，或一键撤销。"></p>
-        </div>
-        <div class="feat reveal">
-          <iconify-icon icon="ant-design:search-outlined" width="26"></iconify-icon>
-          <h3 data-en="MCP Tool Search" data-zh="MCP Tool Search"></h3>
-          <p data-en="Connect dozens of MCP tools without blowing the context window — full schemas load only when the model needs them." data-zh="连接几十个 MCP 工具也不撑爆上下文 —— 完整 schema 只在模型需要时才加载。"></p>
-        </div>
-        <div class="feat reveal">
-          <iconify-icon icon="ant-design:cluster-outlined" width="26"></iconify-icon>
-          <h3 data-en="Workflows &amp; sub-agents" data-zh="工作流 &amp; 子代理"></h3>
-          <p data-en="Parallel sub-agents with git worktree isolation, detached background runs, progress reported to every interface." data-zh="并行子代理，带 git worktree 隔离，可后台分离运行，并向每个界面回报进度。"></p>
-        </div>
-        <div class="feat reveal">
-          <iconify-icon icon="ant-design:global-outlined" width="26"></iconify-icon>
-          <h3 data-en="Any model, tuned caching" data-zh="任意模型，缓存逐家优化"></h3>
-          <p data-en="DeepSeek, Kimi, Qwen, Anthropic, OpenAI, or any compatible endpoint. Caching is tuned per provider, with 95%+ measured hit rates on major domestic models." data-zh="DeepSeek、Kimi、Qwen、Anthropic、OpenAI，或任何兼容端点。缓存按供应商逐家优化，主流国产模型实测命中率 95%+。"></p>
-        </div>
-        <div class="feat reveal">
-          <iconify-icon icon="ant-design:security-scan-outlined" width="26"></iconify-icon>
-          <h3 data-en="Won't kill itself, won't nuke your data" data-zh="不自杀，不删库"></h3>
-          <p data-en="Refuses kill commands aimed at its own process, requires explicit permission for restart, and hard-codes deny for catastrophic deletes like rm -rf / or ~." data-zh="拒绝任何指向自身进程的 kill 命令，重启必须显式授权，rm -rf / 或 ~ 这类毁灭性删除被硬编码拒绝。"></p>
-        </div>
-        <div class="feat reveal">
-          <iconify-icon icon="ant-design:layout-outlined" width="26"></iconify-icon>
-          <h3 data-en="Clean, uncluttered UI" data-zh="清爽的界面设计"></h3>
-          <p data-en="Terminal, web, desktop, and chat — every surface shares one restrained visual language. Right information density, zero clutter, nothing competing for your attention." data-zh="终端、Web、桌面、IM —— 每个界面共享同一套克制的视觉语言。信息密度刚刚好，没有多余的元素争抢你的注意力。"></p>
-        </div>
+      <div class="sec-body feats">
+        <div class="feat reveal"><h3 class="item-t" data-en="No telemetry, ever" data-zh="零遥测，无埋点"></h3><p class="item-p" data-en="No analytics SDKs, no crash reporters, no usage pings baked in. Nothing leaves your machine except the requests you explicitly send to the model provider you configured — audit the source to check." data-zh="没有埋点 SDK、没有崩溃上报、没有内置用量回传。除了你主动配置、显式发出的模型请求，没有任何东西离开你的机器。源码开放，可自行审计。"></p></div>
+        <div class="feat reveal"><h3 class="item-t" data-en="Single binary, zero deps" data-zh="单一二进制，零依赖"></h3><p class="item-p" data-en="One Go executable. No Python, no Node, no Docker. Starts in milliseconds, stays fast under load." data-zh="一个 Go 可执行文件。无需 Python、Node、Docker。毫秒级启动，负载下依旧够快。"></p></div>
+        <div class="feat reveal"><h3 class="item-t" data-en="A recycle bin for your files" data-zh="给文件留一个回收站"></h3><p class="item-p" data-en="Agent deletes are intercepted and overwrites backed up before they happen. Restore from the Web UI or one-click Undo." data-zh="Agent 的删除会被拦截、覆盖会被提前备份。从 Web UI 还原，或一键撤销。"></p></div>
+        <div class="feat reveal"><h3 class="item-t" data-en="Won't kill itself, won't nuke your data" data-zh="不自杀，不删库"></h3><p class="item-p" data-en="Refuses kill commands aimed at its own process, requires explicit permission for restart, and hard-codes deny for catastrophic deletes like rm -rf / or ~." data-zh="拒绝任何指向自身进程的 kill 命令，重启必须显式授权，rm -rf / 或 ~ 这类毁灭性删除被硬编码拒绝。"></p></div>
+        <div class="feat reveal"><h3 class="item-t" data-en="Any model, tuned caching" data-zh="任意模型，缓存逐家优化"></h3><p class="item-p" data-en="DeepSeek, Kimi, Qwen, Anthropic, OpenAI, or any compatible endpoint. Caching is tuned per provider, with 95%+ measured hit rates on major domestic models." data-zh="DeepSeek、Kimi、Qwen、Anthropic、OpenAI，或任何兼容端点。缓存按供应商逐家优化，主流国产模型实测命中率 95%+。"></p></div>
+        <div class="feat reveal"><h3 class="item-t">MCP Tool Search</h3><p class="item-p" data-en="Connect dozens of MCP tools without blowing the context window — full schemas load only when the model needs them." data-zh="连接几十个 MCP 工具也不撑爆上下文。完整 schema 只在模型需要时才加载。"></p></div>
+        <div class="feat reveal"><h3 class="item-t" data-en="Workflows &amp; sub-agents" data-zh="工作流与子代理"></h3><p class="item-p" data-en="Parallel sub-agents with git worktree isolation, detached background runs, progress reported to every interface." data-zh="并行子代理，带 git worktree 隔离，可后台分离运行，并向每个界面回报进度。"></p></div>
+        <div class="feat reveal"><h3 class="item-t" data-en="Clean, uncluttered UI" data-zh="清爽的界面"></h3><p class="item-p" data-en="Terminal, web, desktop, and chat — every surface shares one restrained visual language. Right information density, zero clutter, nothing competing for your attention." data-zh="终端、Web、桌面、IM 共享同一套克制的视觉语言。信息密度刚刚好，没有多余的元素争抢你的注意力。"></p></div>
       </div>
-      <div class="chips reveal">
-        <span class="chip" data-en="Browser automation via CDP" data-zh="通过 CDP 的浏览器自动化"></span>
-        <span class="chip" data-en="20 bundled skills, ready to use" data-zh="内置 20 个精选 skill，开箱即用"></span>
-        <span class="chip" data-en="Built for prompt caching — savings tracked per protocol" data-zh="为 prompt 缓存而设计 —— 按协议追踪节省"></span>
-        <span class="chip" data-en="Anthropic &amp; OpenAI protocols, natively" data-zh="原生支持 Anthropic 与 OpenAI 协议"></span>
+      <div class="chips label reveal">
+        <span data-en="Browser automation via CDP" data-zh="通过 CDP 的浏览器自动化"></span>
+        <span data-en="20 bundled skills, ready to use" data-zh="内置 20 个精选 skill"></span>
+        <span data-en="Built for prompt caching — savings tracked per protocol" data-zh="为 prompt 缓存而设计"></span>
+        <span data-en="Anthropic &amp; OpenAI protocols, natively" data-zh="原生支持 Anthropic 与 OpenAI 协议"></span>
       </div>
     </div>
   </section>
 
-  <section id="demo" class="demo">
-    <div class="wrap">
+  <section id="demo">
+    <div class="wrap sec">
       <div class="sec-head reveal">
-        <h2 data-en="See it in action" data-zh="看它怎么干活"></h2>
+        <div class="label" data-en="04 — Demo" data-zh="04 — 演示"></div>
+        <h2 data-en="See it in action." data-zh="看它怎么干活。"></h2>
         <p data-en="A few commands to get a feel for what Octo can do." data-zh="几条命令，感受一下 Octo 能做什么。"></p>
       </div>
-      <div class="grid2">
+      <div class="sec-body terms">
         <div class="term reveal">
-          <div class="term-bar"><span class="d" style="background:#FF5F57"></span><span class="d" style="background:#FEBC2E"></span><span class="d" style="background:#28C840"></span><span data-en="One-shot agentic task" data-zh="单发 agentic 任务"></span></div>
+          <span class="label" data-en="One-shot agentic task" data-zh="单发 agentic 任务"></span>
           <pre><div class="cmt" data-en="# Headless: one prompt → full tool loop → exit" data-zh="# Headless：一个 prompt → 完整工具循环 → 退出"></div><div><span class="cmd">octo</span> <span class="arg">"Add a --json flag to octo config show"</span></div><div class="spacer"></div><div class="cmt" data-en="# Pipe-friendly for scripts" data-zh="# 对脚本友好，支持管道"></div><div>echo <span class="arg">"Summarise the last commit"</span> | <span class="cmd">octo</span></div></pre>
         </div>
         <div class="term reveal">
-          <div class="term-bar"><span class="d" style="background:#FF5F57"></span><span class="d" style="background:#FEBC2E"></span><span class="d" style="background:#28C840"></span><span data-en="Interactive session" data-zh="交互式会话"></span></div>
+          <span class="label" data-en="Interactive session" data-zh="交互式会话"></span>
           <pre><div class="cmt" data-en="# TUI with history, tool cards, and /commands" data-zh="# TUI：历史、工具卡片、/ 命令"></div><div><span class="cmd">octo</span></div><div><span class="cmd">octo sessions</span></div><div><span class="cmd">octo</span> -c   <span class="cmt" data-en="# resume a session" data-zh="# 恢复一个会话"></span></div><div class="spacer"></div><div class="cmt" data-en="# With extended reasoning" data-zh="# 带扩展推理"></div><div><span class="cmd">octo</span> --reasoning-effort high</div></pre>
         </div>
         <div class="term reveal">
-          <div class="term-bar"><span class="d" style="background:#FF5F57"></span><span class="d" style="background:#FEBC2E"></span><span class="d" style="background:#28C840"></span><span data-en="Web, IM, and MCP" data-zh="Web、IM 与 MCP"></span></div>
+          <span class="label" data-en="Web, IM, and MCP" data-zh="Web、IM 与 MCP"></span>
           <pre><div class="cmt" data-en="# Local web dashboard + IM bridges (one process)" data-zh="# 本地 Web 仪表盘 + IM 桥接（同一进程）"></div><div><span class="cmd">octo serve</span></div><div><span class="cmd">octo serve</span> --addr :8088  <span class="cmt" data-en="# on the LAN" data-zh="# 暴露到局域网"></span></div><div class="spacer"></div><div class="cmt" data-en="# Connect MCP servers; manage skills" data-zh="# 连接 MCP 服务；管理 skills"></div><div><span class="cmd">octo mcp</span></div><div><span class="cmd">octo skills</span> list</div></pre>
         </div>
         <div class="term reveal">
-          <div class="term-bar"><span class="d" style="background:#FF5F57"></span><span class="d" style="background:#FEBC2E"></span><span class="d" style="background:#28C840"></span><span data-en="Configuration layers" data-zh="配置分层"></span></div>
+          <span class="label" data-en="Configuration layers" data-zh="配置分层"></span>
           <pre><div class="cmt" data-en="# Octo learns who you are and how you work" data-zh="# Octo 学习你是谁、你怎么工作"></div><div>~/.octo/soul.md      <span class="cmt" data-en="# agent persona" data-zh="# agent 人格"></span></div><div>~/.octo/user.md      <span class="cmt" data-en="# your profile" data-zh="# 你的个人画像"></span></div><div>~/.octo/octorules.md <span class="cmt" data-en="# global rules" data-zh="# 全局规则"></span></div><div>.octorules           <span class="cmt" data-en="# project conventions" data-zh="# 项目约定"></span></div></pre>
         </div>
       </div>
     </div>
   </section>
 
-  <section id="why" class="why">
-    <div class="wrap">
+  <section id="why">
+    <div class="wrap sec">
       <div class="sec-head reveal">
-        <h2 data-en="Why Octo" data-zh="为什么用 Octo"></h2>
-        <p data-en="Everything that matters, without the gates." data-zh="重要的事一件不落，门槛一点不加。"></p>
+        <div class="label" data-en="05 — Why Octo" data-zh="05 — 为什么用 Octo"></div>
+        <h2 data-en="Everything that matters, without the gates." data-zh="重要的事一件不落，门槛一点不加。"></h2>
       </div>
-      <div class="why-grid">
-        <div class="why-card reveal">
-          <h3 data-en="Works out of the box" data-zh="开箱即用"></h3>
-          <p data-en="No tuning, no custom rules, no &quot;raising&quot; required. Shell, files, search, MCP, skills, and sub-agents are enabled by default." data-zh="无需调环境、写规则、精心“喂养”。shell、文件、搜索、MCP、skills、子代理全部默认开启。"></p>
-        </div>
-        <div class="why-card reveal">
-          <h3 data-en="Model choice, no lock-in" data-zh="模型任选，不被绑定"></h3>
-          <p data-en="Use DeepSeek, Kimi, Qwen, Anthropic, OpenAI, or any compatible endpoint. Tuned caching keeps hit rates high and bills low." data-zh="DeepSeek、Kimi、Qwen、Anthropic、OpenAI 或任意兼容端点。逐家优化的缓存保证高命中率、低账单。"></p>
-        </div>
-        <div class="why-card reveal">
-          <h3 data-en="One binary, eight legs" data-zh="一个二进制，八条腿"></h3>
-          <p data-en="A single ~40 MB Go executable with zero telemetry. The desktop installer is ~100 MB, not 1 GB." data-zh="单个约 40 MB 的 Go 可执行文件，零遥测。桌面安装包约 100 MB，而非 1 GB。"></p>
-        </div>
-        <div class="why-card reveal">
-          <h3 data-en="Stable and safe" data-zh="稳定且安全"></h3>
-          <p data-en="Won't kill itself, won't restart without permission, and won't nuke your files. Deletes go through a recycle bin first." data-zh="不会自杀、不会擅自重启、不会删除你的文件。删除先过回收站，误删可恢复。"></p>
-        </div>
+      <div class="sec-body why-grid reveal">
+        <div class="why-card"><h3 class="item-t" data-en="Works out of the box" data-zh="开箱即用"></h3><p class="item-p" data-en="No tuning, no custom rules, no &quot;raising&quot; required. Shell, files, search, MCP, skills, and sub-agents are enabled by default." data-zh="无需调环境、写规则、精心“喂养”。shell、文件、搜索、MCP、skills、子代理全部默认开启。"></p></div>
+        <div class="why-card"><h3 class="item-t" data-en="Model choice, no lock-in" data-zh="模型任选，不被绑定"></h3><p class="item-p" data-en="Use DeepSeek, Kimi, Qwen, Anthropic, OpenAI, or any compatible endpoint. Tuned caching keeps hit rates high and bills low." data-zh="DeepSeek、Kimi、Qwen、Anthropic、OpenAI 或任意兼容端点。逐家优化的缓存保证高命中率、低账单。"></p></div>
+        <div class="why-card"><h3 class="item-t" data-en="One binary, every interface" data-zh="一个二进制，所有入口"></h3><p class="item-p" data-en="A single ~40 MB Go executable with zero telemetry. The desktop installer is ~100 MB, not 1 GB." data-zh="单个约 40 MB 的 Go 可执行文件，零遥测。桌面安装包约 100 MB，而非 1 GB。"></p></div>
+        <div class="why-card"><h3 class="item-t" data-en="Stable and safe" data-zh="稳定且安全"></h3><p class="item-p" data-en="Won't kill itself, won't restart without permission, and won't nuke your files. Deletes go through a recycle bin first." data-zh="不会自杀、不会擅自重启、不会删除你的文件。删除先过回收站，误删可恢复。"></p></div>
       </div>
     </div>
   </section>
 
-  <section id="faq" class="faq">
-    <div class="wrap">
+  <section id="faq">
+    <div class="wrap sec">
       <div class="sec-head reveal">
-        <h2 data-en="Questions, answered" data-zh="常见问题"></h2>
+        <div class="label" data-en="06 — FAQ" data-zh="06 — 常见问题"></div>
+        <h2 data-en="Questions, answered." data-zh="先把疑问说清楚。"></h2>
       </div>
-      <div class="faq-list">
-        <details class="reveal">
-          <summary data-en="Is it really private?" data-zh="真的私密吗？"></summary>
-          <p data-en="Yes. Octo ships with no analytics SDKs, no crash reporters, and no usage pings. The only network traffic is the requests you explicitly send to the model provider you configured — which can be a model running entirely on your own machine. The source is open; audit it." data-zh="是的。Octo 不含任何埋点 SDK、崩溃上报或用量回传。唯一的网络流量就是你主动发给所配置模型供应商的请求 —— 而它可以是完全跑在你自己机器上的本地模型。源码开放，可自行审计。"></p>
-        </details>
-        <details class="reveal">
-          <summary data-en="Which models can I use?" data-zh="能用哪些模型？"></summary>
-          <p data-en="Anything speaking the Anthropic Messages or OpenAI Chat Completions protocol: Claude, GPT, DeepSeek, Kimi, Bailian, OpenRouter — or local models via vLLM and Ollama. Run octo config for interactive setup." data-zh="任何支持 Anthropic Messages 或 OpenAI Chat Completions 协议的模型：Claude、GPT、DeepSeek、Kimi、百炼、OpenRouter —— 或通过 vLLM、Ollama 运行的本地模型。运行 octo config 进行交互式配置。"></p>
-        </details>
-        <details class="reveal">
-          <summary data-en="Desktop app or CLI — which do I install?" data-zh="桌面应用还是命令行，装哪个？"></summary>
-          <p data-en="The desktop app is a native window that also acts as the local backend your browser, VS Code, and Obsidian connect to. The install script gives you just the octo CLI plus headless octo serve. Same agent, same ~/.octo — pick either, or run both." data-zh="桌面应用是原生窗口，同时也是浏览器、VS Code、Obsidian 连接的本机后端。安装脚本只给你 octo 命令行加无界面的 octo serve。同一个 agent、同一份 ~/.octo —— 任选其一，或两者兼用。"></p>
-        </details>
-        <details class="reveal">
-          <summary data-en="Is it free?" data-zh="免费吗？"></summary>
-          <p data-en="Octo is MIT-licensed and free forever. You only pay your model provider — or nothing at all if you run a local model." data-zh="Octo 采用 MIT 许可，永久免费。你只需为模型供应商付费 —— 若使用本地模型则完全免费。"></p>
-        </details>
-        <details class="reveal">
-          <summary data-en="How is it different from other coding agents?" data-zh="和其他编程 agent 有何不同？"></summary>
-          <p data-en="Three things: it's one Go binary with zero runtime dependencies; it's radically private (self-hosted, zero telemetry, any model including local); and one brain serves eight interfaces — so your terminal, editor, notes, chat apps, and phone all share the same agent, memory, and permissions." data-zh="三点：它是零运行时依赖的单一 Go 二进制；它彻底私密（自托管、零遥测、任意模型含本地）；一个大脑服务八个界面 —— 你的终端、编辑器、笔记、聊天应用和手机共享同一个 agent、记忆与权限。"></p>
-        </details>
+      <div class="sec-body faq-list">
+        <div class="faq-row reveal">
+          <h3 class="item-t" data-en="Is it really private?" data-zh="真的私密吗？"></h3>
+          <p class="item-p" data-en="Yes. Octo ships with no analytics SDKs, no crash reporters, and no usage pings. The only network traffic is the requests you explicitly send to the model provider you configured — which can be a model running entirely on your own machine. The source is open; audit it." data-zh="是的。Octo 不含任何埋点 SDK、崩溃上报或用量回传。唯一的网络流量就是你主动发给所配置模型供应商的请求，而它可以是完全跑在你自己机器上的本地模型。源码开放，可自行审计。"></p>
+        </div>
+        <div class="faq-row reveal">
+          <h3 class="item-t" data-en="Which models can I use?" data-zh="能用哪些模型？"></h3>
+          <p class="item-p" data-en="Anything speaking the Anthropic Messages or OpenAI Chat Completions protocol: Claude, GPT, DeepSeek, Kimi, Bailian, OpenRouter — or local models via vLLM and Ollama. Run octo config for interactive setup." data-zh="任何支持 Anthropic Messages 或 OpenAI Chat Completions 协议的模型：Claude、GPT、DeepSeek、Kimi、百炼、OpenRouter，或通过 vLLM、Ollama 运行的本地模型。运行 octo config 进行交互式配置。"></p>
+        </div>
+        <div class="faq-row reveal">
+          <h3 class="item-t" data-en="Desktop app or CLI — which do I install?" data-zh="桌面应用还是命令行，装哪个？"></h3>
+          <p class="item-p" data-en="The desktop app is a native window that also acts as the local backend your browser, VS Code, and Obsidian connect to. The install script gives you just the octo CLI plus headless octo serve. Same agent, same ~/.octo — pick either, or run both." data-zh="桌面应用是原生窗口，同时也是浏览器、VS Code、Obsidian 连接的本机后端。安装脚本只给你 octo 命令行加无界面的 octo serve。同一个 agent、同一份 ~/.octo，任选其一，或两者兼用。"></p>
+        </div>
+        <div class="faq-row reveal">
+          <h3 class="item-t" data-en="Is it free?" data-zh="免费吗？"></h3>
+          <p class="item-p" data-en="Octo is MIT-licensed and free forever. You only pay your model provider — or nothing at all if you run a local model." data-zh="Octo 采用 MIT 许可，永久免费。你只需为模型供应商付费，若使用本地模型则完全免费。"></p>
+        </div>
+        <div class="faq-row reveal">
+          <h3 class="item-t" data-en="How is it different from other coding agents?" data-zh="和其他编程 agent 有何不同？"></h3>
+          <p class="item-p" data-en="Three things: it's one Go binary with zero runtime dependencies; it's radically private (self-hosted, zero telemetry, any model including local); and one agent serves every interface — so your terminal, editor, notes, chat apps, and phone all share the same agent, memory, and permissions." data-zh="三点：它是零运行时依赖的单一 Go 二进制；它彻底私密（自托管、零遥测、任意模型含本地）；一个 agent 服务所有入口，你的终端、编辑器、笔记、聊天应用和手机共享同一个 agent、记忆与权限。"></p>
+        </div>
       </div>
     </div>
   </section>
+  </main>
 
-  <section class="final">
-    <h2 data-en="Your agent. Your machine. Your data." data-zh="你的 agent。你的机器。你的数据。"></h2>
-    <p data-en="Install in seconds, configure in a minute, ship in an hour." data-zh="几秒安装，一分钟配置，一小时交付。"></p>
-    <div class="cta-row" style="margin-bottom:0">
-      <a class="btn-primary" href="#get-started">
-        <iconify-icon icon="ant-design:download-outlined" width="17"></iconify-icon>
-        <span data-en="Download for free" data-zh="免费下载"></span>
-      </a>
-      <a class="btn-default" href="https://github.com/open-octo/octo-agent">
-        <iconify-icon icon="ant-design:github-outlined" width="17"></iconify-icon>
-        <span data-en="Star on GitHub" data-zh="在 GitHub Star"></span>
-      </a>
+  <div class="wrap">
+    <div class="final">
+      <h2 data-en="Your agent. Your machine. Your data." data-zh="你的 agent。你的机器。你的数据。"></h2>
+      <p data-en="Install in seconds, configure in a minute, ship in an hour." data-zh="几秒安装，一分钟配置，一小时交付。"></p>
+      <div class="cta-row" style="justify-content:center">
+        <a class="btn-primary" href="#get-started"><span data-en="Download for free" data-zh="免费下载"></span></a>
+        <a class="btn-link" href="https://github.com/open-octo/octo-agent"><span data-en="Star on GitHub →" data-zh="在 GitHub Star →"></span></a>
+      </div>
+      <p class="sub"><span data-en="macOS · Windows · Linux · " data-zh="macOS · Windows · Linux · "></span><a href="https://github.com/open-octo/octo-agent/releases/latest" data-en="other architectures &amp; checksums" data-zh="其他架构与校验和"></a></p>
     </div>
-    <p class="sub"><span data-en="macOS · Windows · Linux — " data-zh="macOS · Windows · Linux —— "></span><a href="https://github.com/open-octo/octo-agent/releases/latest" data-en="other architectures &amp; checksums" data-zh="其他架构与校验和"></a></p>
-  </section>
+  </div>
 
   <footer>
-    <div class="foot-grid">
+    <div class="wrap foot-grid">
       <div class="foot-about">
-        <div class="brand" style="margin-bottom:10px">
-          <svg width="24" height="24" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#1677FF"/><path fill="#fff" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/><circle cx="40" cy="42" r="5" fill="#1677FF"/><circle cx="60" cy="42" r="5" fill="#1677FF"/></svg>
-          Octo
+        <a class="brand" href="#top">
+          <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="#1C1A17"/><path fill="#F7F3EA" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/><circle cx="40" cy="42" r="5" fill="#1C1A17"/><circle cx="60" cy="42" r="5" fill="#1C1A17"/></svg>
+          <span class="name" style="font-size:18px">Octo</span>
+        </a>
+        <p data-en="A private, self-hosted AI agent. MIT licensed." data-zh="私密、自托管的 AI Agent。MIT 许可。"></p>
+        <p class="foot-legal" data-en="MIT LICENSED · BUILT WITH CURIOSITY · OCTO-AGENT.DEV" data-zh="MIT 许可 · 用好奇心打造 · octo-agent.dev"></p>
+      </div>
+      <div class="foot-cols">
+        <div class="foot-col">
+          <span class="h" data-en="PRODUCT" data-zh="产品"></span>
+          <a href="https://github.com/open-octo/octo-agent/releases/latest" data-en="Download" data-zh="下载"></a>
+          <a href="https://github.com/open-octo/octo-agent/releases" data-en="Changelog" data-zh="更新日志"></a>
+          <a href="https://github.com/open-octo/octo-agent/blob/main/LICENSE.txt" data-en="License" data-zh="许可"></a>
         </div>
-        <p data-en="A private, self-hosted AI agent. One brain, eight legs. MIT licensed." data-zh="私密、自托管的 AI Agent。一个脑，八条腿。MIT 许可。"></p>
-      </div>
-      <div class="foot-col">
-        <span class="h" data-en="Product" data-zh="产品"></span>
-        <a href="https://github.com/open-octo/octo-agent/releases/latest" data-en="Download" data-zh="下载"></a>
-        <a href="https://github.com/open-octo/octo-agent/releases" data-en="Changelog" data-zh="更新日志"></a>
-        <a href="https://github.com/open-octo/octo-agent/blob/main/LICENSE.txt" data-en="License" data-zh="许可"></a>
-      </div>
-      <div class="foot-col">
-        <span class="h" data-en="Resources" data-zh="资源"></span>
-        <a href="/docs/" data-href-en="/docs/" data-href-zh="/docs/zh/" data-en="Docs" data-zh="文档"></a>
-        <a href="/blog/" data-href-en="/blog/" data-href-zh="/blog/zh/" data-en="Blog" data-zh="博客"></a>
-        <a href="https://github.com/open-octo/octo-agent/blob/main/README_EN.md" data-href-en="https://github.com/open-octo/octo-agent/blob/main/README_EN.md" data-href-zh="https://github.com/open-octo/octo-agent/blob/main/README.md">README</a>
-      </div>
-      <div class="foot-col">
-        <span class="h" data-en="Community" data-zh="社区"></span>
-        <a href="https://github.com/open-octo/octo-agent">GitHub</a>
-        <a href="https://github.com/open-octo/octo-agent/issues" data-en="Issues" data-zh="Issues"></a>
-        <a href="https://github.com/open-octo/octo-agent/discussions" data-en="Discussions" data-zh="讨论"></a>
+        <div class="foot-col">
+          <span class="h" data-en="RESOURCES" data-zh="资源"></span>
+          <a href="/docs/" data-href-en="/docs/" data-href-zh="/docs/zh/" data-en="Docs" data-zh="文档"></a>
+          <a href="/blog/" data-href-en="/blog/" data-href-zh="/blog/zh/" data-en="Blog" data-zh="博客"></a>
+          <a href="https://github.com/open-octo/octo-agent/blob/main/README_EN.md" data-href-en="https://github.com/open-octo/octo-agent/blob/main/README_EN.md" data-href-zh="https://github.com/open-octo/octo-agent/blob/main/README.md">README</a>
+        </div>
+        <div class="foot-col">
+          <span class="h" data-en="COMMUNITY" data-zh="社区"></span>
+          <a href="https://github.com/open-octo/octo-agent">GitHub</a>
+          <a href="https://github.com/open-octo/octo-agent/issues">Issues</a>
+          <a href="https://github.com/open-octo/octo-agent/discussions" data-en="Discussions" data-zh="讨论"></a>
+        </div>
       </div>
     </div>
-    <p class="foot-legal" data-en="MIT licensed · Built with curiosity · octo-agent.dev" data-zh="MIT 许可 · 用好奇心打造 · octo-agent.dev"></p>
   </footer>
 
   <script>
@@ -683,26 +592,28 @@
     }
     applyLang(initial);
     document.querySelectorAll('.lang button').forEach(b=>b.addEventListener('click',()=>applyLang(b.dataset.lang)));
-
+    // ----- Sticky nav hairline once the page scrolls -----
+    (function(){
+      const nav=document.getElementById('nav');
+      const update=()=>nav.classList.toggle('scrolled', window.scrollY>8);
+      window.addEventListener('scroll',update,{passive:true}); update();
+    })();
     // ----- OS-aware primary download -----
     (function(){
       const base='https://dl.octo-agent.dev/releases/latest/download/';
       const ua=(navigator.userAgent||'')+' '+(navigator.platform||'');
       const main=document.getElementById('get-started');
-      const icon=document.getElementById('dl-icon');
       const label=document.getElementById('dl-label');
       let cfg=null;
-      if(/Mac|iPhone|iPad|iPod/i.test(ua)) cfg={en:'Download for macOS',zh:'下载 macOS 版',icon:'ant-design:apple-outlined',href:base+'octo-setup.pkg'};
-      else if(/Win/i.test(ua)) cfg={en:'Download for Windows',zh:'下载 Windows 版',icon:'ant-design:windows-outlined',href:base+'octo-setup.exe'};
-      else if(/Linux|X11/i.test(ua)) cfg={en:'Download for Linux',zh:'下载 Linux 版',icon:'ant-design:linux-outlined',href:base+'Octo-x86_64.AppImage'};
+      if(/Mac|iPhone|iPad|iPod/i.test(ua)) cfg={en:'Download for macOS',zh:'下载 macOS 版',href:base+'octo-setup.pkg'};
+      else if(/Win/i.test(ua)) cfg={en:'Download for Windows',zh:'下载 Windows 版',href:base+'octo-setup.exe'};
+      else if(/Linux|X11/i.test(ua)) cfg={en:'Download for Linux',zh:'下载 Linux 版',href:base+'Octo-x86_64.AppImage'};
       if(cfg){
         main.setAttribute('href',cfg.href);
-        icon.setAttribute('icon',cfg.icon);
         label.dataset.en=cfg.en; label.dataset.zh=cfg.zh;
         label.textContent = (document.documentElement.lang==='zh-CN') ? cfg.zh : cfg.en;
       }
     })();
-
     // ----- GitHub stars (>=500 shows count, else "Star") -----
     fetch('https://api.github.com/repos/open-octo/octo-agent')
       .then(r=>r.ok?r.json():null)
@@ -714,7 +625,6 @@
             s>=1000 ? (s/1000).toFixed(1).replace(/\.0$/,'')+'k' : String(s);
         }
       }).catch(()=>{});
-
     // ----- Copy buttons -----
     document.querySelectorAll('.copy-btn').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
@@ -722,16 +632,14 @@
         try{ await navigator.clipboard.writeText(cmd); }
         catch(e){ const ta=document.createElement('textarea'); ta.value=cmd; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(_){} document.body.removeChild(ta); }
         const lang=document.documentElement.lang==='zh-CN'?'zh':'en';
-        btn.textContent = lang==='zh'?'已复制':'Copied';
+        btn.textContent = lang==='zh'?'已复制':'COPIED';
         clearTimeout(btn._t);
-        btn._t=setTimeout(()=>{ btn.textContent = btn.dataset[lang]||'Copy'; },1400);
+        btn._t=setTimeout(()=>{ btn.textContent = btn.dataset[lang]||'COPY'; },1400);
       });
     });
-
     // ----- Scroll reveal -----
     const io=new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting) e.target.classList.add('visible'); }),{threshold:.1});
     document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
-
     // ----- Demo carousel (auto-advance when a clip ends; dots + arrows) -----
     (function(){
       const root=document.getElementById('demo-carousel');
