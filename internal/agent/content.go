@@ -39,8 +39,9 @@ type ContentBlock struct {
 	Input map[string]any `json:"input,omitempty"`
 
 	// InputError is set on a tool_use block whose arguments arrived as
-	// malformed JSON — an unescaped newline or quote inside a string, or a
-	// call truncated at max_tokens. Input is then an empty map (never nil, so
+	// malformed JSON — an unescaped newline or quote inside a string, or an
+	// endpoint that reported the turn complete but delivered half the
+	// arguments. Input is then an empty map (never nil, so
 	// the block still round-trips to the provider as `"input": {}`), and the
 	// agent loop answers the call with this message instead of running the
 	// tool: the model must learn its JSON was broken, not go hunting for a
@@ -158,21 +159,27 @@ func NewToolUseBlockFromJSON(id, name, raw string) ContentBlock {
 	return b
 }
 
-// describeInputError turns a json error into something the model can act on:
-// the decoder's message, the bytes around the failure, and a truncation hint
-// when the text simply stops before the closing brace.
+// describeInputError turns a json error into something the model can act on.
+// A syntax error quotes the bytes around the failure; one whose offset is at
+// the very end of the text means the decoder ran out of input, i.e. the
+// arguments arrived incomplete — said explicitly so the model resends the whole
+// call rather than hunting for a typo. Valid JSON of the wrong shape (an array,
+// a bare string) gets a plain-language message instead of Go's type names.
 func describeInputError(raw string, err error) string {
-	msg := err.Error()
 	var se *json.SyntaxError
 	if errors.As(err, &se) {
 		off := int(se.Offset)
+		if off >= len(raw) {
+			return fmt.Sprintf("%s — the arguments end before the closing brace, so the call arrived incomplete", se.Error())
+		}
 		lo, hi := max(0, off-40), min(len(raw), off+20)
-		msg = fmt.Sprintf("%s near byte %d: …%s…", se.Error(), off, strings.ToValidUTF8(raw[lo:hi], "?"))
+		return fmt.Sprintf("%s near byte %d: …%s…", se.Error(), off, strings.ToValidUTF8(raw[lo:hi], "?"))
 	}
-	if !strings.HasSuffix(raw, "}") {
-		msg += " (the arguments end without a closing brace — the call may have been truncated by the output token limit)"
+	var te *json.UnmarshalTypeError
+	if errors.As(err, &te) {
+		return fmt.Sprintf("arguments must be a single JSON object, got %s", te.Value)
 	}
-	return msg
+	return err.Error()
 }
 
 // NewThinkingBlock creates a ContentBlock with Type=="thinking". The signature

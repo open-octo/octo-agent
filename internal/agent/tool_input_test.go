@@ -41,22 +41,44 @@ func TestNewToolUseBlockFromJSON(t *testing.T) {
 		if !strings.Contains(b.InputError, "near byte") || !strings.Contains(b.InputError, "line one") {
 			t.Errorf("InputError should quote the failing spot: %q", b.InputError)
 		}
-		if strings.Contains(b.InputError, "truncated") {
-			t.Errorf("complete-but-invalid JSON must not be called truncated: %q", b.InputError)
+		if strings.Contains(b.InputError, "incomplete") {
+			t.Errorf("complete-but-invalid JSON must not be called incomplete: %q", b.InputError)
 		}
 	})
 
-	t.Run("truncated at the token limit", func(t *testing.T) {
+	t.Run("arguments cut off mid-way", func(t *testing.T) {
 		b := NewToolUseBlockFromJSON("c1", "edit_file", `{"path":"a.go","old_string":"func main() {`)
-		if b.InputError == "" || !strings.Contains(b.InputError, "truncated") {
-			t.Errorf("expected a truncation hint, got %q", b.InputError)
+		if b.InputError == "" || !strings.Contains(b.InputError, "incomplete") {
+			t.Errorf("expected an incomplete-arguments message, got %q", b.InputError)
 		}
 	})
 
-	t.Run("valid JSON but not an object", func(t *testing.T) {
-		b := NewToolUseBlockFromJSON("c1", "t", `["a.go"]`)
-		if b.InputError == "" {
-			t.Error("an array is not a valid argument object")
+	// Complete text that is simply the wrong shape must not be mistaken for a
+	// cut-off call — that would send the model shortening a call it needs to
+	// restructure.
+	t.Run("wrong shape is not called incomplete", func(t *testing.T) {
+		cases := map[string]string{
+			"array":          `["a.go"]`,
+			"string":         `"a.go"`,
+			"number":         `42`,
+			"markdown fence": "```json\n{\"path\":\"a.go\"}\n```",
+			"trailing text":  `{"path":"a.go"} and more`,
+		}
+		for name, raw := range cases {
+			b := NewToolUseBlockFromJSON("c1", "t", raw)
+			if b.InputError == "" {
+				t.Errorf("%s: expected InputError", name)
+				continue
+			}
+			if strings.Contains(b.InputError, "incomplete") {
+				t.Errorf("%s: must not claim the call was incomplete: %q", name, b.InputError)
+			}
+			if strings.Contains(b.InputError, "Go value") || strings.Contains(b.InputError, "interface {}") {
+				t.Errorf("%s: Go type names leak into the model-facing message: %q", name, b.InputError)
+			}
+		}
+		if b := NewToolUseBlockFromJSON("c1", "t", `["a.go"]`); !strings.Contains(b.InputError, "single JSON object, got array") {
+			t.Errorf("array message = %q", b.InputError)
 		}
 	})
 }
@@ -103,7 +125,7 @@ func TestAgent_Run_MalformedToolInput_AnsweredNotExecuted(t *testing.T) {
 	if !result.IsError {
 		t.Error("tool_result should be flagged as an error")
 	}
-	for _, want := range []string{"not valid JSON", "truncated", "Resend"} {
+	for _, want := range []string{"not valid JSON", "incomplete", "Resend"} {
 		if !strings.Contains(result.Result, want) {
 			t.Errorf("tool_result %q lacks %q", result.Result, want)
 		}
