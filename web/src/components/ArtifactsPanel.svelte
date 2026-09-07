@@ -7,6 +7,7 @@
   import { CENTER_MIN } from '../lib/sidebarWidth'
   import { diffData, diffLoading, diffBadge, loadDiff } from '../lib/diff'
   import DiffView from './diff/DiffView.svelte'
+  import ArtifactFrame from './ArtifactFrame.svelte'
   import * as api from '../lib/api'
   import { installLaStorageBridge, registerLaIframe, unregisterLaIframe, withLaBridge } from '../lib/laStorage'
 
@@ -557,7 +558,7 @@
         {:else if !cur.loaded}
           <div class="body-loading"><iconify-icon icon="ant-design:loading-outlined" width="28" class="spin"></iconify-icon></div>
         {:else if $artifactView === 'preview'}
-          <iframe srcdoc={cur.preview} sandbox={ARTIFACT_SANDBOX} allow="clipboard-write" title={cur.name}></iframe>
+          <ArtifactFrame artifact={cur} />
         {:else}
           <pre class="code-view">{cur.code}</pre>
         {/if}

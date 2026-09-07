@@ -55,15 +55,15 @@ Response headers:
 
 - `Content-Type` from the extension (`text/html`, `text/markdown`, `image/*`)
 - `X-Content-Type-Options: nosniff`
-- `Content-Security-Policy: sandbox` — defense in depth should anyone open the URL directly in a tab; the primary isolation is the iframe sandbox below
+- `Content-Security-Policy: sandbox` — defense in depth should anyone open the URL directly in a tab; this endpoint feeds the code view and the image `<img>`, never a frame that runs the HTML (that is the artifact origin below)
 - Size cap 10 MB (artifact HTML bundles run 200 KB–2 MB); larger files return 413 and the panel shows a download-only entry
 
 ## Rendering security
 
 Agent-generated HTML is untrusted by definition (prompt injection can author it). It must never execute in the app origin, where it could read the access key and drive the session API.
 
-- **HTML**: fetched as text, injected into `<iframe sandbox="allow-scripts" srcdoc=…>`. No `allow-same-origin` — scripts run, but in an opaque origin with no cookies, no `localStorage`, no reach back into the app. This is the same model claude.ai artifacts use.
-- **Markdown**: rendered with the existing `marked` pipeline used for assistant chat messages — the same trust class (model-authored content) with the same posture.
+- **HTML**: rendered from its own origin. The panel asks `POST /api/sessions/{id}/artifacts/grant` (same transcript whitelist as the content endpoint, html only, local clients only) and loads `http://<token>.artifacts.localhost:<port>/` by `src` into `<iframe sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-downloads allow-pointer-lock">`. The page is a separate site: it has its own `localStorage`, downloads, fullscreen and pointer lock, and it resolves relative references (`./app.js`, `./chart.png`, `./model.glb`) against its own directory, which the origin serves from an allowlisted asset-extension table. What keeps it out of the app is the same-origin policy plus two server rules — the artifact host serves nothing but artifact files (no `/api`, `/ws`, or UI), and `*.localhost` is not a local name, so a request the page makes to the app origin fails the CSRF gate. `allow-same-origin` here only lets the page be itself; the sandbox stays for `allow-popups` and `allow-top-navigation`, which protect the host tab. External `<script src>` / render-affecting `<link href>` are still gated to the CDN allowlist, now server-side (`internal/server/artifact_gate.go`). A client the server does not consider local (tunnel, LAN) gets 409 and the panel shows "preview available only on this machine" with the code view intact; there is no srcdoc fallback for HTML, and the mobile UI has no artifact preview at all. Full account: `artifact-origin-design.md`.
+- **Markdown**: rendered with the existing `marked` pipeline used for assistant chat messages — the same trust class (model-authored content) with the same posture — into `<iframe sandbox="allow-scripts allow-forms allow-modals allow-pointer-lock" srcdoc=…>`. No `allow-same-origin`: the document is the host's own rendering, and it stays in an opaque origin. Its local images are inlined as `data:` URIs because nothing inside that frame can authenticate.
 - **Images**: fetched as a blob, shown via object URL; never interpreted as HTML (nosniff + explicit Content-Type).
 
 ## UI

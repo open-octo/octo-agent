@@ -37,6 +37,62 @@ var artifactContentTypes = map[string]string{
 	".webp":     "image/webp",
 }
 
+// artifactAssetContentTypes is the second table: files an HTML artifact may
+// reference from its own directory when it renders on the artifact origin
+// (internal/server/artifact_origin.go). Kept apart from artifactContentTypes
+// so a page's .bin or .wasm never shows up as an entry in the Artifacts panel.
+// Deliberately absent: .html/.htm (one entry document per grant), and anything
+// that is not a page asset — .env, .pem, .key, source files — so a grant for
+// a report in a directory never turns into a read of its neighbours.
+var artifactAssetContentTypes = map[string]string{
+	// styles, scripts, data
+	".css":  "text/css; charset=utf-8",
+	".js":   "text/javascript; charset=utf-8",
+	".mjs":  "text/javascript; charset=utf-8",
+	".json": "application/json",
+	".wasm": "application/wasm",
+	".csv":  "text/csv; charset=utf-8",
+	".txt":  "text/plain; charset=utf-8",
+	".xml":  "application/xml",
+	// 3D
+	".glb":  "model/gltf-binary",
+	".gltf": "model/gltf+json",
+	".bin":  "application/octet-stream",
+	".obj":  "text/plain; charset=utf-8",
+	".mtl":  "text/plain; charset=utf-8",
+	".hdr":  "image/vnd.radiance",
+	// fonts
+	".woff":  "font/woff",
+	".woff2": "font/woff2",
+	".ttf":   "font/ttf",
+	".otf":   "font/otf",
+	// media
+	".mp3":  "audio/mpeg",
+	".wav":  "audio/wav",
+	".ogg":  "audio/ogg",
+	".mp4":  "video/mp4",
+	".webm": "video/webm",
+}
+
+// ArtifactAssetContentType returns the Content-Type for a file an HTML
+// artifact may load from its own directory — the images of the previewable
+// table plus the asset table above — or ok=false when the extension is
+// neither. HTML is not an asset: a grant serves exactly one entry document.
+func ArtifactAssetContentType(path string) (ctype string, ok bool) {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ctype, ok = artifactAssetContentTypes[ext]; ok {
+		return ctype, true
+	}
+	ctype, ok = artifactContentTypes[ext]
+	if ok && strings.HasPrefix(ctype, "text/html") {
+		return "", false
+	}
+	if ok && strings.HasPrefix(ctype, "text/markdown") {
+		return "", false
+	}
+	return ctype, ok
+}
+
 // ArtifactContentType returns the Content-Type for a previewable artifact
 // path, or ok=false when the extension isn't previewable.
 func ArtifactContentType(path string) (ctype string, ok bool) {

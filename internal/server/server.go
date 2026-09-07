@@ -122,6 +122,12 @@ type Server struct {
 	mux  *http.ServeMux
 	http *http.Server
 
+	// artifactGrants maps a `<token>.artifacts.localhost` label to the HTML
+	// artifact it serves (artifact_origin.go). In-memory only: a restart
+	// invalidates every grant and the panel simply asks for a new one.
+	artifactGrantsMu sync.Mutex
+	artifactGrants   map[string]*artifactGrant
+
 	// tunnelPairing holds the managed-tunnel pairing material the web UI renders
 	// as a QR, published by `octo serve --tunnel` via SetTunnelPairing. Nil when
 	// the tunnel is off. The server otherwise knows nothing about the tunnel.
@@ -579,7 +585,7 @@ func New(cfg Config) (*Server, error) {
 
 	s.http = &http.Server{
 		Addr:         cfg.Addr,
-		Handler:      s.corsMiddleware(s.mux),
+		Handler:      s.hostRouter(s.corsMiddleware(s.mux)),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 0, // WS connections are long-lived
 		IdleTimeout:  120 * time.Second,
@@ -830,6 +836,7 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/sessions/{id}/agent-runs", s.handleGetSessionAgentRuns)
 	s.api("GET /api/sessions/{id}/confirmation", s.handleGetSessionConfirmation)
 	s.api("GET /api/sessions/{id}/artifacts", s.handleGetArtifact)
+	s.api("POST /api/sessions/{id}/artifacts/grant", s.handleGrantArtifactOrigin)
 	s.api("GET /api/sessions/{id}/diff", s.handleGetSessionDiff)
 	s.api("GET /api/sessions/{id}/diff/file", s.handleGetSessionFileDiff)
 	s.api("DELETE /api/sessions/{id}", s.handleDeleteSession)

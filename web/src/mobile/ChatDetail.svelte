@@ -5,12 +5,10 @@
   // hint (the detailed tool/progress view is batch 2), and the composer is a
   // lightweight mobile input rather than the desktop Composer.
   import { tick } from 'svelte'
-  import { activeSessionId, chatMessages, chatStreaming, sessions, clearMsgs, artifacts } from '../lib/stores'
-  import { resetArtifacts } from '../lib/artifacts'
+  import { activeSessionId, chatMessages, chatStreaming, sessions, clearMsgs } from '../lib/stores'
   import { ws } from '../lib/ws'
   import { wireMobileSession, loadMobileHistory, sendMobile } from './chatWiring'
   import { renderMarkdown } from '../lib/markdown'
-  import ArtifactViewer from './ArtifactViewer.svelte'
   import { t } from '../lib/i18n'
 
   let { onBack, onViewApproval, initial = null, onInitialSent }: {
@@ -43,19 +41,12 @@
   let draft = $state('')
   let scroller: HTMLElement | undefined
   let composing = $state(false)
-  // The artifact opened full-screen, tracked by path and derived from the
-  // store so a live re-write of the same file refreshes the open viewer
-  // (observeArtifact replaces the entry object on re-write).
-  let viewPath = $state<string | null>(null)
-  const viewArtifact = $derived(viewPath ? ($artifacts.find(a => a.path === viewPath) ?? null) : null)
 
   // Subscribe + wire while this session is open; tear down on switch/unmount.
   $effect(() => {
     const s = sid
     if (!s) return
-    viewPath = null
     clearMsgs(s)
-    resetArtifacts(s)
     let cancelled = false
     // Subscribe only after history renders (same ordering the desktop relies on).
     loadMobileHistory(s).then(() => {
@@ -145,18 +136,6 @@
       <div class="notice" class:err={msg.level === 'error'}>{msg.content}</div>
     {/if}
   {/each}
-  {#if $artifacts.length}
-    <div class="artifacts">
-      <div class="alabel">{$t('m.artifacts')}</div>
-      {#each $artifacts as a (a.path)}
-        <button class="acard" onclick={() => (viewPath = a.path)}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--m-accent)" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
-          <span class="aname">{a.name}</span>
-          <span class="atype">{a.type}</span>
-        </button>
-      {/each}
-    </div>
-  {/if}
 </div>
 
 {#if streaming}
@@ -181,10 +160,6 @@
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>
   </button>
 </div>
-
-{#if viewArtifact}
-  <ArtifactViewer artifact={viewArtifact} onClose={() => (viewPath = null)} />
-{/if}
 
 <style>
   .dhead {
@@ -364,26 +339,6 @@
     cursor: pointer;
     box-shadow: var(--m-shadow-card);
   }
-  .artifacts { align-self: stretch; margin-top: 4px; }
-  .alabel { font-size: 12px; color: var(--m-text-3); margin: 0 2px 8px; }
-  .acard {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    border: none;
-    font-family: inherit;
-    text-align: left;
-    cursor: pointer;
-    background: var(--m-surface);
-    border-radius: 12px;
-    padding: 12px 14px;
-    margin-bottom: 8px;
-    box-shadow: var(--m-shadow-card);
-  }
-  .acard .aname { flex: 1; font-size: 14px; color: var(--m-text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .acard .atype { flex: none; font-size: 11px; color: var(--m-text-3); font-family: ui-monospace, Menlo, monospace; }
-
   /* ── Markdown rendering (adapted from desktop for mobile) ─────────────────── */
   .bubble.agent .body :global(p) { margin: 0; }
   .bubble.agent .body :global(p:not(:last-child)) { margin: 0 0 8px; }

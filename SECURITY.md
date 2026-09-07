@@ -28,6 +28,7 @@ boundary sits, what protects it, and what is deliberately out of scope.
 | DNS rebinding (attacker domain resolving to 127.0.0.1) | The loopback exemption requires a local `Host` header |
 | Spoofed client IPs | `X-Forwarded-For` is never consulted for the loopback exemption |
 | XSSI reads of uploaded files | `X-Content-Type-Options: nosniff` on served uploads |
+| Agent-written HTML (which a prompt injection can author) reaching the app from the Artifacts panel | It renders from a separate origin, `<token>.artifacts.localhost`, that serves artifact files only — no API, no UI — and whose `Origin` the CSRF gate rejects; the auth cookie is host-only and never sent there |
 
 IM channels (Feishu, DingTalk, Discord, …) authenticate separately via each
 platform's bot credentials plus octo's chat/user binding; the adapters hold

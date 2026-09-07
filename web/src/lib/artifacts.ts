@@ -10,6 +10,14 @@
 // (hydrateArtifact), so history replay costs no network and a session's
 // unopened artifacts hold no data: URIs.
 //
+// HTML artifacts do not get a preview document at all: they render from the
+// artifact origin — `http://<token>.artifacts.localhost:<port>/`, granted by
+// the server per artifact (internal/server/artifact_origin.go) — where the
+// page is its own site, with its own storage and its own relative references,
+// and the same-origin policy keeps it out of the app. Only Markdown still
+// renders through a srcdoc frame, and everything below about inlining is
+// about Markdown.
+//
 // Constraint on every preview document built here: it must not reference
 // /api/* — nothing inside the sandboxed srcdoc iframe can authenticate. The
 // iframe has no allow-same-origin, so its subresource requests carry an opaque
@@ -27,15 +35,18 @@
 import { get, writable } from 'svelte/store'
 import { artifacts, panelContent, panelExpanded, artifactSel } from './stores'
 import { renderMarkdown } from './markdown'
+import { grantArtifactOrigin } from './api'
 import type { Artifact } from './types'
 
-// The sandbox every srcdoc preview frame runs with — artifact previews (panel,
-// modal, mobile) and saved Light Apps alike, since an app is exercised in the
-// preview before it is saved and must behave the same afterwards.
+// The sandbox every srcdoc preview frame runs with — Markdown previews and
+// saved Light Apps alike.
 //
 // No allow-same-origin: the origin stays opaque, so the document reaches no
 // storage, cookies or host state (the bridges in laStorage.ts / laDownload.ts
 // exist because of this). No allow-popups, no allow-top-navigation.
+//
+// allow-pointer-lock costs nothing here and lets a Light App with a 3D scene
+// capture the mouse.
 //
 // allow-forms: without it the submit event never fires at all — the sandboxed
 // forms check runs before the event is dispatched — so <form onsubmit> plus
@@ -45,7 +56,15 @@ import type { Artifact } from './types'
 // dialogs (alert/confirm/prompt, print(), the beforeunload prompt), which are
 // tab-level and can block the host UI while open. Accepted: the app is one the
 // user asked their own agent to write.
-export const ARTIFACT_SANDBOX = 'allow-scripts allow-forms allow-modals'
+export const ARTIFACT_SANDBOX = 'allow-scripts allow-forms allow-modals allow-pointer-lock'
+
+// The sandbox for a frame whose src is the artifact origin. allow-same-origin
+// here means "let the page be itself": it is a cross-origin document, so the
+// same-origin policy — not this attribute — is what separates it from the app,
+// and with a real origin it gets storage, downloads, fullscreen and pointer
+// lock natively. The sandbox stays for the two flags it still withholds:
+// allow-popups and allow-top-navigation protect the host tab from the page.
+export const ARTIFACT_ORIGIN_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-modals allow-downloads allow-pointer-lock'
 
 // Tracks which session the current artifacts belong to, so an async fetch that
 // resolves after a session switch is discarded instead of polluting the new view.
@@ -69,9 +88,16 @@ const EXT_KIND: Record<string, Kind> = {
 // Once-per-session guard so a live write auto-opens the panel only the first time.
 let autoOpened = false
 
-// How many times each image path has been observed this session, used as the
-// cache-busting revision in its src. Cleared with the artifacts themselves.
-const imageRevisions = new Map<string, number>()
+// How many times each path has been observed this session: the cache-busting
+// revision in an image's src, and the `v` the artifact frame appends to an
+// HTML entry's origin URL. Cleared with the artifacts themselves.
+const revisions = new Map<string, number>()
+
+// Set once a frame found the artifact origin unreachable from this browser
+// (the hostname did not resolve here — an `ssh -L` forward, a webview that
+// cannot resolve *.localhost). Every later HTML artifact then skips the grant
+// and shows the local-only notice straight away rather than failing again.
+let originProbeFailed = false
 
 function kindOf(path: string): Kind | null {
   const dot = path.lastIndexOf('.')
@@ -105,10 +131,11 @@ function typeLabel(kind: Kind): string {
 // External scripts and stylesheets — <script src> / <link rel=stylesheet href>
 // — are allowed only from the CDN allowlist below; a reference to any other
 // host is stripped before a sandboxed frame renders the page, and the page
-// renders without it under a banner saying so. Both frames that show
-// agent-written HTML go through this (selfContainedDocument): the artifact
-// preview and the Light App view, so a page's external references are treated
-// the same wherever it is opened.
+// renders without it under a banner saying so. The Light App view goes
+// through this (selfContainedDocument); HTML artifacts render from the
+// artifact origin, where internal/server/artifact_gate.go applies the same
+// list server-side, so a page's external references are treated the same
+// wherever it is opened.
 //
 // Why an allowlist rather than fully open or fully closed: the sandbox itself
 // could load any cross-origin https:// script, but an artifact must also
@@ -122,7 +149,8 @@ function typeLabel(kind: Kind): string {
 // against the host page, and the /api/ path it would need can't authenticate
 // from an opaque origin (see the file-header note).
 //
-// The list must stay in sync with the guidance the model reads:
+// The list must stay in sync with the server-side copy
+// (internal/server/artifact_gate.go) and the guidance the model reads:
 // internal/prompt/base.md (Light Apps constraints) and
 // internal/skills/defaults/artifact-design/SKILL.md.
 const CDN_ALLOWLIST = new Set([
@@ -276,13 +304,12 @@ const LOCAL_REF_HINT = /<img\b|<image\b|url\(/i
 // best-effort pass doesn't attempt.
 const CSS_URL_RE = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^'")]*?))\s*\)/gi
 
-// mode picks how the result is serialized: an HTML artifact is a whole document
-// (doctype and <head> must survive), markdown output is a body fragment.
+// The input is a rendered Markdown body; the result is the same fragment with
+// its local image references rewritten.
 async function inlineLocalRefs(
   html: string,
   sessionId: string,
   basePath: string,
-  mode: 'document' | 'fragment',
 ): Promise<string> {
   if (!LOCAL_REF_HINT.test(html)) return html
   const doc = new DOMParser().parseFromString(html, 'text/html')
@@ -385,8 +412,7 @@ async function inlineLocalRefs(
   // Hand back the original text when nothing was rewritten, so a document with
   // no local references is never reshaped by the round-trip.
   if (!changed) return html
-  if (mode === 'fragment') return doc.body.innerHTML
-  return serializeDocument(doc)
+  return doc.body.innerHTML
 }
 
 // First URL in a srcset, parsed just far enough to promote it to src. Split
@@ -399,33 +425,6 @@ function firstSrcsetCandidate(srcset: string | null): string {
     if (url) return url
   }
   return ''
-}
-
-// documentElement.outerHTML alone drops everything at document level: the
-// doctype and any comments beside it (a build stamp above <html>, say).
-// Serialize the document's own children instead (#1892) — the parser keeps no
-// document-level whitespace, so the pieces butt against each other, same as
-// the old doctype + <html> pair did.
-function serializeDocument(doc: Document): string {
-  let out = ''
-  for (const node of Array.from(doc.childNodes)) {
-    if (node.nodeType === Node.DOCUMENT_TYPE_NODE) out += serializeDoctype(node as DocumentType)
-    else if (node.nodeType === Node.COMMENT_NODE) out += `<!--${(node as Comment).data}-->`
-    else if (node.nodeType === Node.ELEMENT_NODE) out += (node as Element).outerHTML
-  }
-  return out
-}
-
-// The doctype is rebuilt with its public/system identifiers, since those are
-// what decide the rendering mode and a name-only `<!DOCTYPE html>` would
-// silently switch a legacy file to standards mode.
-function serializeDoctype(dt: DocumentType | null): string {
-  if (!dt) return ''
-  let out = `<!DOCTYPE ${dt.name}`
-  if (dt.publicId) out += ` PUBLIC "${dt.publicId}"`
-  else if (dt.systemId) out += ' SYSTEM'
-  if (dt.systemId) out += ` "${dt.systemId}"`
-  return out + '>'
 }
 
 async function inlineCSSURLs(
@@ -516,7 +515,7 @@ export function resetArtifacts(sessionId: string): void {
   // switching to a chat resets the panel, and the layout paints blank.
   panelExpanded.set(false)
   autoOpened = false
-  imageRevisions.clear()
+  revisions.clear()
   artifactSelSession.set(sessionId)
 }
 
@@ -545,6 +544,8 @@ export function observeArtifact(
   let code = ''
   let src = ''
   let loaded = false
+  const rev = (revisions.get(path) ?? 0) + 1
+  revisions.set(path, rev)
   if (kind === 'image') {
     // Images render as a plain <img> in the host document — see the
     // file-header note on why an <img src="/api/…"> inside the sandboxed
@@ -565,8 +566,6 @@ export function observeArtifact(
     // Dropping the iframe costs no isolation here. The endpoint pins
     // Content-Type and sends X-Content-Type-Options: nosniff, and an SVG
     // loaded through <img> runs no script and fetches no external resource.
-    const rev = (imageRevisions.get(path) ?? 0) + 1
-    imageRevisions.set(path, rev)
     src = `${artifactURL(sessionId, path)}&rev=${rev}`
     // A binary artifact has no source view, so `code` carries the on-disk
     // path instead: it is the one text form worth copying. Download saves
@@ -587,6 +586,7 @@ export function observeArtifact(
     path,
     src: src || undefined,
     loaded,
+    rev,
   }
 
   artifacts.update(list => {
@@ -625,9 +625,9 @@ export async function hydrateArtifact(a: Artifact | null | undefined): Promise<v
   const kind = kindOf(a.path)
   if (!sessionId || !kind || kind === 'image') return
   hydrating.add(a)
-  let body: { code: string; preview: string } | null = null
+  let body: HydratedBody | null = null
   try {
-    body = await buildTextBody(sessionId, a.path, kind)
+    body = kind === 'html' ? await buildHTMLEntry(sessionId, a.path) : await buildTextBody(sessionId, a.path)
   } catch {
     body = null
   } finally {
@@ -646,6 +646,40 @@ export async function hydrateArtifact(a: Artifact | null | undefined): Promise<v
   artifacts.update(list => list.map(e => (e === a ? next : e)))
 }
 
+// What hydration produces for a text-kind artifact. Markdown fills preview;
+// HTML fills originURL (or originUnavailable) and leaves preview empty.
+type HydratedBody = {
+  code: string
+  preview: string
+  originURL?: string
+  originUnavailable?: boolean
+}
+
+// The frame found the artifact origin unreachable: swap the entry to the
+// local-only notice and stop asking for grants for the rest of this page's
+// life. Identity-matched like every other write-back, so a re-write that
+// already replaced the entry is left alone.
+export function markArtifactOriginUnavailable(a: Artifact): void {
+  originProbeFailed = true
+  artifacts.update(list => list.map(e => (e === a ? { ...e, originURL: undefined, originUnavailable: true } : e)))
+}
+
+// An HTML artifact: the source text for the code view comes from the
+// artifacts endpoint as before; the preview is the origin URL the server
+// grants for it. A refused grant (409: this client is not local) or a failed
+// request is not a load failure — the code view still works — so the entry
+// records originUnavailable and the frame shows the local-only notice.
+async function buildHTMLEntry(sessionId: string, path: string): Promise<HydratedBody | null> {
+  const [res, grant] = await Promise.all([
+    fetch(artifactURL(sessionId, path)),
+    originProbeFailed ? Promise.resolve(null) : grantArtifactOrigin(sessionId, path).catch(() => null),
+  ])
+  if (!res.ok) return null
+  const code = await res.text()
+  if (grant?.url) return { code, preview: '', originURL: grant.url }
+  return { code, preview: '', originUnavailable: true }
+}
+
 // Preview documents bake the resolved theme into their inline styles at build
 // time (buildTextBody reads data-theme once), so a live theme switch left
 // stale-themed previews in the panel until the artifact happened to be
@@ -657,7 +691,9 @@ export async function hydrateArtifact(a: Artifact | null | undefined): Promise<v
 // visible artifact rebuilds immediately, and a stale in-flight build fails
 // its identity-matched write-back instead of resurrecting the old theme.
 // Image artifacts stay untouched: they carry src, never a themed preview,
-// and hydrateArtifact would refuse to re-load them.
+// and hydrateArtifact would refuse to re-load them. So do HTML artifacts on
+// the artifact origin: the frame passes the theme in the page URL and
+// reloads on its own.
 //
 // themeRev ticks on the same event for documents built outside the store —
 // the Light App frame derives its srcdoc from it so a banner baked with the
@@ -673,54 +709,42 @@ export function installArtifactThemeRefresh(): void {
     last = cur
     themeRev.update(n => n + 1)
     artifacts.update(list => list.map(e =>
-      e.loaded && !e.src ? { ...e, loaded: false, loadFailed: false, preview: '', code: '' } : e))
+      e.loaded && !e.src && !e.originURL ? { ...e, loaded: false, loadFailed: false, preview: '', code: '' } : e))
   })
   obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 }
 
-// The fetch + preview build for a text-kind artifact, extracted verbatim from
-// the old eager observeArtifact. null means the body wasn't fetchable.
+// The fetch + preview build for a Markdown artifact: the rendered body inside
+// a self-styled document. null means the body was not fetchable.
 async function buildTextBody(
   sessionId: string,
   path: string,
-  kind: Kind,
-): Promise<{ code: string; preview: string } | null> {
+): Promise<HydratedBody | null> {
   const res = await fetch(artifactURL(sessionId, path))
   if (!res.ok) return null
   const code = await res.text()
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
-  let preview = ''
-  if (kind === 'html') {
-    // External scripts and stylesheets come out (see stripExternalRefs); the
-    // rest of the page renders, under a banner when anything was removed.
-    // The file's own images still need inlining to survive the iframe —
-    // and a page that lost its CDN stylesheet is exactly the one whose
-    // remaining content the user wants to see.
-    preview = await inlineLocalRefs(selfContainedDocument(code), sessionId, path, 'document')
-  } else {
-    // Only markdown reaches this branch: hydrateArtifact never calls in for an
-    // image, and html was handled above.
-    // Markdown is rendered inside a sandboxed srcdoc iframe which has no
-    // access to the host app's CSS or JS.  Inline the highlight.js theme
-    // CSS, code-block layout, and a copy-button handler so syntax
-    // highlighting and the "Copy" button actually work in preview mode.
-    const MD_STYLES = isDark ? darkMDStyles() : lightMDStyles()
-    const bodyStyle = isDark
-      ? 'margin:0;padding:16px;font:14px/1.6 system-ui,-apple-system,sans-serif;color:#d4d4d4;background:#1e1e1e'
-      : 'margin:0;padding:16px;font:14px/1.6 system-ui,-apple-system,sans-serif;color:rgba(0,0,0,0.88);background:#ffffff'
-    // Bound to document.body, not '.body': this is a hand-inlined copy of
-    // setupCopyButtons(), whose caller passes the host app's container, and
-    // that selector matched nothing here — querySelector returned null and
-    // the whole handler died on load, so the button never worked at all.
-    //
-    // The clipboard call has a fallback because this document's origin is
-    // opaque; whether the async Clipboard API is available to it varies by
-    // browser even with clipboard-write delegated on the iframe. execCommand
-    // is deprecated but needs no permission, only the click's activation.
-    //
-    // The .code-block lookup is null-guarded like setupCopyButtons' is; the
-    // old unguarded form would throw if the wrapper ever went missing.
-    const COPY_SCRIPT = `<script>
+  // Markdown is rendered inside a sandboxed srcdoc iframe which has no
+  // access to the host app's CSS or JS.  Inline the highlight.js theme
+  // CSS, code-block layout, and a copy-button handler so syntax
+  // highlighting and the "Copy" button actually work in preview mode.
+  const MD_STYLES = isDark ? darkMDStyles() : lightMDStyles()
+  const bodyStyle = isDark
+    ? 'margin:0;padding:16px;font:14px/1.6 system-ui,-apple-system,sans-serif;color:#d4d4d4;background:#1e1e1e'
+    : 'margin:0;padding:16px;font:14px/1.6 system-ui,-apple-system,sans-serif;color:rgba(0,0,0,0.88);background:#ffffff'
+  // Bound to document.body, not '.body': this is a hand-inlined copy of
+  // setupCopyButtons(), whose caller passes the host app's container, and
+  // that selector matched nothing here — querySelector returned null and
+  // the whole handler died on load, so the button never worked at all.
+  //
+  // The clipboard call has a fallback because this document's origin is
+  // opaque; whether the async Clipboard API is available to it varies by
+  // browser even with clipboard-write delegated on the iframe. execCommand
+  // is deprecated but needs no permission, only the click's activation.
+  //
+  // The .code-block lookup is null-guarded like setupCopyButtons' is; the
+  // old unguarded form would throw if the wrapper ever went missing.
+  const COPY_SCRIPT = `<script>
 	document.body.addEventListener('click',function(e){
 	  var b=e.target.closest('.copy-btn');if(!b)return;
 	  var k=b.closest('.code-block');
@@ -743,13 +767,12 @@ async function buildTextBody(
 	  }else{legacy()}
 	});
 	<\/script>`
-    // rawHtml: the document's own tags are content here, not injection — this
-    // iframe is sandboxed and styled by MD_STYLES alone, and inlineLocalRefs
-    // below has to see an <img src="chart.png"> to rewrite it to a data: URI.
-    // The chat's own bubbles get the escaping default instead (markdown.ts).
-    const body = await inlineLocalRefs(renderMarkdown(code, true, { rawHtml: true }), sessionId, path, 'fragment')
-    preview = `<style>${MD_STYLES}</style><body style="${bodyStyle}">${body}${COPY_SCRIPT}</body>`
-  }
+  // rawHtml: the document's own tags are content here, not injection — this
+  // iframe is sandboxed and styled by MD_STYLES alone, and inlineLocalRefs
+  // below has to see an <img src="chart.png"> to rewrite it to a data: URI.
+  // The chat's own bubbles get the escaping default instead (markdown.ts).
+  const body = await inlineLocalRefs(renderMarkdown(code, true, { rawHtml: true }), sessionId, path)
+  const preview = `<style>${MD_STYLES}</style><body style="${bodyStyle}">${body}${COPY_SCRIPT}</body>`
   return { code, preview }
 }
 

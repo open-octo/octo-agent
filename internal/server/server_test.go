@@ -840,8 +840,9 @@ func mustServer(t *testing.T, cfg Config) *Server {
 		watchStop: make(chan struct{}),
 	}
 	srv.registerRoutes()
-	// Wrap with CORS middleware so tests that exercise CORS hit the right layer.
-	srv.http = &http.Server{Handler: srv.corsMiddleware(srv.mux)}
+	// Same chain as New: host routing outside, CORS inside, so tests that
+	// exercise either hit the right layer.
+	srv.http = &http.Server{Handler: srv.hostRouter(srv.corsMiddleware(srv.mux))}
 
 	// Drain in-flight turn goroutines before the test's t.TempDir()/t.Setenv()
 	// cleanups run. A WS turn (runAgentTurnLoop) persists the session and its

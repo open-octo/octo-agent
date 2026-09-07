@@ -54,6 +54,23 @@ function json(body: unknown): RequestInit {
   }
 }
 
+// Artifacts
+
+export interface ArtifactGrant {
+  url: string
+  expires_at: string
+}
+
+// Ask for the origin URL an HTML artifact renders from. 409 means the server
+// does not consider this client local — the origin's hostname would not
+// resolve to it — and the caller falls back to a local-only notice.
+export async function grantArtifactOrigin(sessionId: string, path: string): Promise<ArtifactGrant> {
+  return request<ArtifactGrant>(`/api/sessions/${encodeURIComponent(sessionId)}/artifacts/grant`, {
+    method: 'POST',
+    ...json({ path }),
+  })
+}
+
 // Sessions
 
 export interface SessionsResponse {

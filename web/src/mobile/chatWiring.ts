@@ -8,14 +8,15 @@
 // mobile-only handler set that calls those same shared store functions.
 //
 // Deliberately omitted (desktop-only or a later batch): optimistic-send
-// bookkeeping / steer queues / rollback, sub-agent & workflow panels, artifact
-// auto-open, turn-error banner, next-message suggestions. Mobile chat is a
-// simplified view; the detailed tool/progress rendering is batch 2.
+// bookkeeping / steer queues / rollback, sub-agent & workflow panels,
+// turn-error banner, next-message suggestions. Mobile chat is a simplified
+// view; the detailed tool/progress rendering is batch 2. Artifacts are not
+// observed at all: they render from an origin only a browser on the octo
+// machine can reach (lib/artifacts.ts), so the phone has nothing to show.
 import { get } from 'svelte/store'
 import { ws } from '../lib/ws'
 import { tr } from '../lib/i18n'
 import * as api from '../lib/api'
-import { observeArtifact, resetArtifacts } from '../lib/artifacts'
 import { inlineSlashCommand } from '../lib/inlineSlash'
 import {
   chatMessages,
@@ -64,7 +65,6 @@ function applyHistoryEvent(sid: string, ev: Record<string, any>, showReasoning: 
     })
   } else if (ev.type === 'tool_result') {
     updateToolResult(sid, ev.tool_id, ev.result, ev.ui_payload)
-    observeArtifact(sid, ev.ui_payload, false) // populate the artifacts store (silent)
   }
 }
 
@@ -185,7 +185,6 @@ export function wireMobileSession(sid: string): () => void {
   cleanups.push(ws.on('tool_result', (ev: any) => {
     if (!forSid(ev)) return
     updateToolResult(sid, ev.tool_id, ev.result, ev.ui_payload)
-    observeArtifact(sid, ev.ui_payload, false)
   }))
 
   cleanups.push(ws.on('tool_error', (ev: any) => {
@@ -281,7 +280,6 @@ export function wireMobileSession(sid: string): () => void {
   cleanups.push(ws.on('history_reload', (ev: any) => {
     if (!forSid(ev)) return
     clearMsgs(sid)
-    resetArtifacts(sid) // mirror desktop: /clear or /compact must drop stale artifacts
     loadMobileHistory(sid)
   }))
 
