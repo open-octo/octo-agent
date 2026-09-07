@@ -45,6 +45,24 @@ func TestTypeResultText(t *testing.T) {
 			absent: []string{"clear", "hunter2"},
 		},
 		{
+			// JS reports code points, Go counts runes: an emoji is one on both
+			// sides, so a clean type into an empty password field must not warn.
+			name:   "emoji password counts code points on both sides",
+			text:   "pw🔑",
+			st:     browser.FieldState{Found: true, Password: true, ValueLen: 3},
+			want:   []string{"typed 3 chars into #u", "field now holds 3 chars"},
+			absent: []string{"clear"},
+		},
+		{
+			// A textarea's later lines are where the typed text lands; the
+			// readback must show them, not just the first line.
+			name:   "multi-line value is shown whole",
+			text:   "new",
+			st:     browser.FieldState{Found: true, Value: "old line\nnew", ValueLen: 12},
+			want:   []string{`field now holds "old line\nnew"`, "use clear"},
+			absent: []string{`holds "old line"` + " —"},
+		},
+		{
 			name:   "element gone falls back to the plain confirmation",
 			text:   "alice",
 			st:     browser.FieldState{},
@@ -66,6 +84,26 @@ func TestTypeResultText(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A long CJK value is capped by rune with an explicit marker — never cut
+// inside a code point (which %q would render as \x escapes the model reads as
+// real content).
+func TestQuoteFieldValue_CapsByRune(t *testing.T) {
+	long := strings.Repeat("中", 260)
+	got := quoteFieldValue(long)
+	if strings.Contains(got, `\x`) {
+		t.Errorf("value cut inside a code point: %s", got)
+	}
+	if !strings.Contains(got, "… (260 chars total)") {
+		t.Errorf("missing truncation marker: %s", got)
+	}
+	if strings.Count(got, "中") != 200 {
+		t.Errorf("want exactly 200 runes kept, got %d", strings.Count(got, "中"))
+	}
+	if short := quoteFieldValue("ok"); short != `"ok"` {
+		t.Errorf("short value = %s", short)
 	}
 }
 

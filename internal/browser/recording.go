@@ -1043,8 +1043,14 @@ type DigestElement struct {
 	// reported separately from Text so a prefilled value — browser autofill on
 	// a login form is the classic case — is not mistaken for a label or
 	// placeholder. Empty for non-fields. For a password field the content is
-	// withheld and only ValueLen is set, so a stored password never lands in
-	// the transcript.
+	// withheld and only ValueLen (in code points) is set, so a stored password
+	// never lands in the transcript.
+	//
+	// Text for such a field is therefore its label-ish text (aria-label /
+	// placeholder / name), never its value. Both observe and the replay healer
+	// (which puts each element's Text into its prompt) see this: the healer
+	// now matches fields by label rather than by whatever the user had typed —
+	// and no longer receives an autofilled password as element text.
 	Value    string `json:"value,omitempty"`
 	ValueLen int    `json:"value_len,omitempty"`
 	Password bool   `json:"password,omitempty"`
@@ -1095,7 +1101,7 @@ func InteractiveDigest(ctx context.Context, page *Page, frame string, max int) (
 	  for(var i=0;i<els.length && out.length<%d;i++){var el=els[i]; if(el.getClientRects().length===0 || getComputedStyle(el).visibility==='hidden') continue;
 	    var tag=el.tagName.toLowerCase(); var isField=tag==='textarea'||(tag==='input'&&!fieldTypes.test(el.type||'text'));
 	    var t, e;
-	    if(isField){ t=(el.getAttribute('aria-label')||el.getAttribute('placeholder')||el.getAttribute('name')||'').trim().slice(0,50); var v=el.value||''; e={text:t, selector:sel(el)}; if(v){ if(el.type==='password'){e.password=true; e.value_len=v.length;} else {e.value=v.slice(0,50); e.value_len=v.length;} } }
+	    if(isField){ t=(el.getAttribute('aria-label')||el.getAttribute('placeholder')||el.getAttribute('name')||'').trim().slice(0,50); var v=el.value||''; var vr=Array.from(v); e={text:t, selector:sel(el)}; if(v){ if(el.type==='password'){e.password=true; e.value_len=vr.length;} else {e.value=vr.slice(0,50).join(''); e.value_len=vr.length;} } }
 	    else { t=(el.textContent||el.value||el.getAttribute('aria-label')||el.getAttribute('placeholder')||'').trim().slice(0,50); e={text:t, selector:sel(el)}; }
 	    out.push(e);}
 	  return out;

@@ -501,11 +501,25 @@ func typeResultText(text, sel string, st browser.FieldState) string {
 		}
 		return s
 	}
-	s := fmt.Sprintf("typed %q into %s; field now holds %q", text, sel, uiHead(st.Value, 1, 200))
+	s := fmt.Sprintf("typed %q into %s; field now holds %s", text, sel, quoteFieldValue(st.Value))
 	if st.Value != text {
-		s += " — differs from what was typed: the field already had content (browser autofill?) or the page reformats input; if it was prefilled, use clear, then type again"
+		s += " — differs from what was typed: either the field already had content (browser autofill?) or the page reformats input (phone/card grouping, stripped newlines). If it was prefilled, use clear, then type again; if the page reformatted it, this is expected"
 	}
 	return s
+}
+
+// quoteFieldValue renders a field's content for the type readback: the whole
+// value with newlines escaped by %q — a textarea's later lines must stay
+// visible, since that is where the just-typed text lands — capped by rune so a
+// long CJK value neither costs the whole transcript nor gets cut inside a
+// code point, with an explicit marker when capped.
+func quoteFieldValue(v string) string {
+	const maxRunes = 200
+	r := []rune(v)
+	if len(r) <= maxRunes {
+		return fmt.Sprintf("%q", v)
+	}
+	return fmt.Sprintf("%q… (%d chars total)", string(r[:maxRunes]), len(r))
 }
 
 // renderObserve formats the observe result: page identity, then one line per

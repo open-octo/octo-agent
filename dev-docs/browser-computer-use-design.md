@@ -91,8 +91,14 @@ content; it is live-only and has no recording step.
 
 Notable behaviours:
 - **`observe`** returns a text digest of the page's interactable elements
-  (URL/title + element → selector). Model-agnostic, the cheap way to look at an
-  unfamiliar page; works on any model with no vision.
+  (URL/title + element → selector). A text-entry field that already holds a
+  value is marked `(prefilled: "…")`, a password field `(prefilled password,
+  N chars)` — the value itself is withheld. Model-agnostic, the cheap way to
+  look at an unfamiliar page; works on any model with no vision.
+- **`type`** inserts at the caret and reads the field back afterwards; the
+  result reports what the field now holds and, when that differs from the text
+  sent, says so and points at `clear`. Password fields are reported by length
+  only.
 - **`screenshot`** returns an image for a vision-capable model. It is gated on
   the active model's vision capability (`tools.SetBrowserVision`, set from the
   model config); a text-only model gets a text note instead of an image block

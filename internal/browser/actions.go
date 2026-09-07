@@ -819,8 +819,8 @@ func (p *Page) Clear(ctx context.Context, selector string) error {
 // form) ends up holding old+new, which the insert itself never reveals.
 type FieldState struct {
 	Found    bool   // selector matched an element
-	Value    string // current value (textContent for contenteditable); empty for a password field
-	ValueLen int    // length of the current value, reported even when Value is withheld
+	Value    string // the element's value when it has one, else its textContent (contenteditable); empty for a password field
+	ValueLen int    // length of the current value in code points (matches Go's rune count), reported even when Value is withheld
 	Password bool   // input type=password: Value is withheld so it never enters the transcript
 }
 
@@ -835,7 +835,11 @@ func (p *Page) FieldState(ctx context.Context, selector string) FieldState {
 			return cp.FieldState(ctx, elem)
 		}
 	}
-	expr := fmt.Sprintf(`(()=>{const el=%s; if(!el) return null; const v=(('value' in el)?el.value:el.textContent)||''; const pw=(el.type||'')==='password'; return {found:true, value: pw?'':(''+v), value_len:(''+v).length, password:pw};})()`, elemRefJS(frame, elem))
+	// Length is counted in code points (Array.from), not UTF-16 units, so it
+	// agrees with the rune count the caller compares against — otherwise an
+	// emoji in a password reads as two chars and triggers a false "field was
+	// prefilled" warning.
+	expr := fmt.Sprintf(`(()=>{const el=%s; if(!el) return null; const v=''+((('value' in el)?el.value:el.textContent)||''); const pw=(el.type||'')==='password'; return {found:true, value: pw?'':v, value_len:Array.from(v).length, password:pw};})()`, elemRefJS(frame, elem))
 	var st struct {
 		Found    bool   `json:"found"`
 		Value    string `json:"value"`

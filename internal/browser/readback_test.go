@@ -12,7 +12,7 @@ import (
 // TypeText appending rather than replacing.
 const readbackFixture = `<!doctype html><html><body>
 	<input name="user" placeholder="Username" value="alice">
-	<input name="pw" type="password" placeholder="Password" value="correct horse">
+	<input name="pw" type="password" placeholder="Password" value="correct🔑horse">
 	<input name="empty" placeholder="Nickname">
 	<textarea name="bio">hello</textarea>
 	<input type="submit" value="Sign in">
@@ -20,10 +20,17 @@ const readbackFixture = `<!doctype html><html><body>
 	<div id="rich" contenteditable="true">rich</div>
 </body></html>`
 
+// pwLen is the fixture password's length in code points. The emoji is one
+// char to Array.from and to Go's rune count, two to JS .length — the readback
+// must agree with the former or a clean type warns about phantom content.
+const pwLen = 13 // len([]rune("correct🔑horse"))
+
 func TestFieldStateAndDigest_PrefilledLogin(t *testing.T) {
 	ctx := context.Background()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
+		// charset matters here: without it Chrome decodes the emoji's four
+		// UTF-8 bytes as four Latin-1 characters and every length is off.
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(readbackFixture))
 	}))
 	defer srv.Close()
@@ -56,8 +63,8 @@ func TestFieldStateAndDigest_PrefilledLogin(t *testing.T) {
 		t.Errorf("user field = %+v, want text Username / value alice", user)
 	}
 	pw := bySel[`input[name="pw"]`]
-	if pw.Text != "Password" || pw.Value != "" || pw.ValueLen != len("correct horse") || !pw.Password {
-		t.Errorf("password field = %+v, want value withheld with length %d", pw, len("correct horse"))
+	if pw.Text != "Password" || pw.Value != "" || pw.ValueLen != pwLen || !pw.Password {
+		t.Errorf("password field = %+v, want value withheld with length %d", pw, pwLen)
 	}
 	empty := bySel[`input[name="empty"]`]
 	if empty.Text != "Nickname" || empty.Value != "" || empty.ValueLen != 0 {
@@ -86,7 +93,7 @@ func TestFieldStateAndDigest_PrefilledLogin(t *testing.T) {
 		t.Errorf("FieldState after type = %+v, want alicealice", st)
 	}
 	st = page.FieldState(ctx, `input[name="pw"]`)
-	if !st.Found || !st.Password || st.Value != "" || st.ValueLen != len("correct horse") {
+	if !st.Found || !st.Password || st.Value != "" || st.ValueLen != pwLen {
 		t.Errorf("FieldState password = %+v, want withheld value with length", st)
 	}
 	st = page.FieldState(ctx, "#rich")
