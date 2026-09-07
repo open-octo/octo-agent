@@ -176,9 +176,11 @@ Markdown 预览继续用 srcdoc iframe，sandbox 常量沿用 `ARTIFACT_SANDBOX`
 ## 文档与提示词同步
 
 - `internal/prompt/base.md` "Constraints on index.html"：删掉"Runs in a sandboxed iframe with no same-origin access ... no cross-origin fetch from scripts"和"Prefer inlining CSS and JS"两条，换成一句：页面可以用相对路径引用同目录下的文件（脚本、样式、图片、字体、模型、媒体），`.html` 除外；白名单外链规则不变。不再让模型判断使用环境。
+- `internal/skills/defaults/artifact-design/SKILL.md` 与 base.md 同步改，涉及四处：frontmatter description 里的"sandboxed iframe"改为"separate origin"；"How the panel actually works" 的第一条 **Sandboxed, not sandboxed-privileged** 整条重写为：页面跑在自己的独立 origin 上，`localStorage` / IndexedDB / 下载 / 全屏 / 指针锁定原生可用，但它是应用之外的另一个源，碰不到宿主 cookie 和 `/api`；第二条 **External references are allowlist-gated** 删掉"Still default to inlining ... Embed images as `data:` URIs"那段，改为同目录文件直接用相对路径引用，`data:` URI 不再是默认；"Self-contained checklist" 改名为 "Before you write"，删掉"everything else is inlined in one `<style>`/`<script>` block"和"Any image is a `data:` URI or omitted"两项，换成"本地资源用相对路径且文件确实在入口 HTML 同目录下"。**Theme support is one-directional** 一条不动：`?theme=` 只喂给 Go gate 的横幅，不承诺给页面。`references/charts.md` 与 `references/palette.md` 不涉及沙箱，不动。
 - `SECURITY.md` "What is defended" 表加一行：agent 生成的 HTML（prompt injection 可写出）在独立源 `*.artifacts.localhost` / `*.apps.localhost` 上运行，制品源上没有 API，其 Origin 被 CSRF 门拒绝。
 - `dev-docs/web-artifacts-panel-design.md` "Rendering security" 与 `dev-docs/light-apps-design.md` "运行沙箱 / 运行时存储 / 运行时下载" 改写为本文档描述的状态；两处关于 mobile 制品预览的描述删除。
 - `dev-docs/serve-auth-design.md` 威胁模型表加"制品源脚本跨源调 API"一行，防线是 `originAllowed`。
+- 用户文档 `docs/src/content/docs/guides/light-apps.mdx` 与 `docs/src/content/docs/zh/guides/light-apps.mdx`：目录树注释"自包含页面（不依赖 CDN、不请求外部资源）"、"运行在浏览器的 sandboxed iframe 里"、生成规则里的"完全自包含：不能引用 CDN、不能请求外部图片、不能跨域 fetch"和"CSS 和 JS 都内联"四处改写为独立源的描述（可引用白名单 CDN、可用相对路径引用同目录文件、`localStorage` 原生持久），并加一句"仅在本机可用，手机端不提供"。这两页在 CDN 白名单落地时就已经过时，本次一并修。
 
 ## 分阶段
 
