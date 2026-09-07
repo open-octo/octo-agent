@@ -109,7 +109,6 @@
     .alt-row{display:flex; gap:14px; flex-wrap:wrap; font-size:13px; color:var(--ink-4);}
     .alt-row a{color:var(--ink-3);} .alt-row a:hover{color:var(--blue);}
     .hero-side{grid-column:9 / span 4; display:flex; flex-direction:column; gap:40px;}
-    .hero-logo{width:112px; height:112px; display:block;}
     .spec{display:flex; flex-direction:column;}
     .spec .label{padding-bottom:12px;}
     .spec-row{display:flex; justify-content:space-between; gap:16px; padding:12px 0; border-top:1px solid var(--line); font-size:14px;}
@@ -234,9 +233,7 @@
     @media(max-width:1080px){
       .hero h1{font-size:56px;}
       .hero-copy{grid-column:span 12;}
-      .hero-side{grid-column:span 12; flex-direction:row; align-items:flex-end; gap:48px;}
-      .hero-logo{width:80px; height:80px; flex:none;}
-      .spec{flex:1;}
+      .hero-side{grid-column:span 12;}
       .sec-head{grid-column:span 12;}
       .sec-body{grid-column:span 12;}
       .chips{grid-column:span 12;}
@@ -249,7 +246,6 @@
       .hero{padding-top:72px;}
       .hero h1{font-size:40px;}
       .tagline{font-size:17px;}
-      .hero-side{flex-direction:column; align-items:flex-start; gap:28px;}
       .cli-row{width:100%;} .cli-row code{white-space:normal; overflow-wrap:anywhere; height:auto; padding:10px 14px; font-size:13px; width:100%;}
       .providers .row{justify-content:flex-start;}
       .providers .names{gap:20px; font-size:17px;}
@@ -271,7 +267,7 @@
   <nav class="nav" id="nav">
     <div class="wrap">
       <a class="brand" href="#top">
-        <svg width="28" height="28" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="#1C1A17"/><path fill="#F7F3EA" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/><circle cx="40" cy="42" r="5" fill="#1C1A17"/><circle cx="60" cy="42" r="5" fill="#1C1A17"/></svg>
+        <svg width="28" height="28" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="#1677FF"/><path fill="#fff" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/><circle cx="40" cy="42" r="5" fill="#1677FF"/><circle cx="60" cy="42" r="5" fill="#1677FF"/></svg>
         <span class="name">Octo</span>
         <span class="ver">MIT</span>
       </a>
@@ -325,12 +321,6 @@
         </div>
       </div>
       <aside class="hero-side">
-        <svg class="hero-logo" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Octo logo">
-          <rect width="100" height="100" rx="22" fill="#1677FF"/>
-          <path fill="#ffffff" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/>
-          <circle cx="40" cy="42" r="5" fill="#1677FF"/>
-          <circle cx="60" cy="42" r="5" fill="#1677FF"/>
-        </svg>
         <div class="spec">
           <div class="label" data-en="Specs" data-zh="规格"></div>
           <div class="spec-row"><span class="k" data-en="Executable" data-zh="可执行文件"></span><span class="v">~40 MB</span></div>
@@ -551,7 +541,7 @@
     <div class="wrap foot-grid">
       <div class="foot-about">
         <a class="brand" href="#top">
-          <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="#1C1A17"/><path fill="#F7F3EA" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/><circle cx="40" cy="42" r="5" fill="#1C1A17"/><circle cx="60" cy="42" r="5" fill="#1C1A17"/></svg>
+          <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="#1677FF"/><path fill="#fff" d="M50 18 C34 18 26 30 26 44 C26 54 32 60 36 62 C34 70 28 78 20 82 C18 83 18 86 20 88 C22 89 25 89 27 87 C33 83 39 76 42 68 C44 69 47 70 50 70 L50 82 C50 85 53 87 56 86 C58 85 59 83 58 81 L56 70 C59 70 62 69 64 68 C67 76 73 83 79 87 C81 89 84 89 86 88 C88 86 88 83 86 82 C78 78 72 70 70 62 C74 60 80 54 80 44 C80 30 72 18 56 18 Z"/><circle cx="40" cy="42" r="5" fill="#1677FF"/><circle cx="60" cy="42" r="5" fill="#1677FF"/></svg>
           <span class="name" style="font-size:18px">Octo</span>
         </a>
         <p data-en="A private, self-hosted AI agent. MIT licensed." data-zh="私密、自托管的 AI Agent。MIT 许可。"></p>
