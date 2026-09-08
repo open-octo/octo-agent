@@ -22,11 +22,27 @@
 	<string>11.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
-	<!-- Loopback-only HTTP to the in-process server; no arbitrary loads. -->
+	<!-- Loopback-only HTTP to the in-process server; no arbitrary loads.
+	     NSAllowsLocalNetworking covers "localhost" and IP literals but not
+	     its subdomains, and artifacts / Light Apps render from
+	     <token>.artifacts.localhost and <slug>.apps.localhost
+	     (internal/server/artifact_origin.go) — without the explicit
+	     exception the webview refuses those frames with "App Transport
+	     Security policy requires the use of a secure connection". -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>localhost</key>
+			<dict>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+		</dict>
 	</dict>
 </dict>
 </plist>
