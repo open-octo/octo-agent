@@ -12,17 +12,19 @@ Agent 会主动提醒你把它保存为一个**轻应用**。保存后，你可�
 
 ## 它是什么
 
-轻应用是 Agent 用纯前端技术（HTML + CSS + JS）写的自包含页面，存储在本机 `~/.octo/light-apps/`
-目录下。每个轻应用由两个文件组成：
+轻应用是 Agent 用纯前端技术（HTML + CSS + JS）写的页面，存储在本机 `~/.octo/light-apps/`
+目录下：
 
 ```
 ~/.octo/light-apps/<slug>/
 ├── manifest.json   # 元数据：名称、描述、图标、创建时间
-└── index.html      # 自包含页面（不依赖 CDN、不请求外部资源）
+├── index.html      # 页面本体
+└── …               # 可选：页面用相对路径引用的脚本、样式、图片、字体、模型、音视频
 ```
 
-轻应用运行在浏览器的 sandboxed iframe 里，只能使用浏览器端能力——`FileReader`、`<input type="file">`、
-`localStorage` 等。它不能访问后端服务，也不需要后端。
+每个轻应用运行在自己的独立源（`<slug>.apps.localhost`）上，行为和普通网页一致：`localStorage`
+跨访问持久、下载和全屏可用、同目录文件用相对路径直接加载。它碰不到 octo 自己的 API，也不需要后端。
+轻应用只能在运行 octo 的本机浏览器中打开，手机端（tunnel）不提供。
 
 ## 适用场景
 
@@ -60,10 +62,10 @@ Agent 生成的 HTML artifact 也可以在 Artifacts 面板中一键「保存到
 
 ## 技术约束
 
-因为轻应用跑在 sandboxed iframe 里，Agent 在生成时必须遵守以下规则：
+Agent 在生成轻应用时遵守以下规则：
 
-- 完全自包含：不能引用 CDN、不能请求外部图片、不能跨域 fetch
-- CSS 和 JS 都内联（`<style>` + `<script>`）
+- 页面需要的文件放在应用目录里，用相对路径引用；外部脚本和样式只允许来自知名 CDN（cdnjs、jsdelivr、unpkg、Google Fonts 及其国内镜像），其余会在渲染时被剥离
+- 页面内不调用 octo 的 API
 - 文件处理用 `FileReader` + `<input type="file">`
 - 导出文件（生成的图片、转换后的文件等）用标准的 `<a download>` 写法，宿主负责落盘：浏览器里走正常下载，桌面端弹出系统保存对话框
 - 图标用 emoji 或内联 SVG

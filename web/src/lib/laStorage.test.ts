@@ -1,310 +1,113 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import 'fake-indexeddb/auto'
-import {
-  registerLaIframe,
-  unregisterLaIframe,
-  installLaStorageBridge,
-  withLaBridge,
-  buildLaBridgeScript,
-} from './laStorage'
+import { registerLaIframe, unregisterLaIframe, installLaStorageBridge, LA_DB_NAME, LA_STORE } from './laStorage'
 
 installLaStorageBridge()
 
-type Reply = { ok: boolean; value?: unknown; err?: string } | null
+type Sent = Record<string, unknown> | null
 
 let nsCounter = 0
 function makeWin() {
   // unique namespace per test — the module caches its IndexedDB connection,
   // so a fresh IDBFactory alone doesn't reset data between tests
   const ns = 'app-' + nsCounter++
-  const w = { __reply: null as Reply, __ns: ns } as unknown as Window & { __reply: Reply; __ns: string }
+  const w = { __sent: [] as Sent[], __ns: ns } as unknown as Window & { __sent: Sent[]; __ns: string }
   ;(w as { postMessage: (m: unknown) => void }).postMessage = (m: unknown) => {
-    w.__reply = m as Reply
+    w.__sent.push(m as Sent)
   }
   return w
 }
 
-// Dispatch a request as if from the iframe, wait for the async IDB roundtrip,
-// and return the reply the host posted back.
-async function bridgeCall(
-  w: Window & { __reply: Reply; __ns: string },
-  op: string,
-  key?: string,
-  value?: string,
-  autoRegister = true,
-): Promise<Reply> {
-  w.__reply = null
-  if (autoRegister) registerLaIframe(w, w.__ns)
-  const ev = new MessageEvent('message', {
-    data: { __laBridge: 1, id: 1, ns: w.__ns, op, key, value },
+// What the old srcdoc shim left behind: rows keyed `{ns}:{key}` in the host's
+// IndexedDB. Written straight into the store, as the shim's host half did.
+function seedLegacy(ns: string, entries: Record<string, string>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(LA_DB_NAME, 1)
+    req.onupgradeneeded = () => {
+      const db = req.result
+      if (!db.objectStoreNames.contains(LA_STORE)) db.createObjectStore(LA_STORE)
+    }
+    req.onerror = () => reject(req.error)
+    req.onsuccess = () => {
+      const db = req.result
+      const t = db.transaction(LA_STORE, 'readwrite')
+      const s = t.objectStore(LA_STORE)
+      for (const [k, v] of Object.entries(entries)) s.put(v, `${ns}:${k}`)
+      t.oncomplete = () => { db.close(); resolve() }
+      t.onerror = () => reject(t.error)
+    }
+  })
+}
+
+// Dispatch a message as if from the app's frame and wait for the async IDB
+// roundtrip.
+async function fromFrame(w: Window & { __sent: Sent[]; __ns: string }, op: string, extra: Record<string, unknown> = {}, ns = w.__ns): Promise<void> {
+  window.dispatchEvent(new MessageEvent('message', {
+    data: { __laBridge: 1, id: 0, ns, op, ...extra },
     source: w,
-    origin: 'null',
-  })
-  window.dispatchEvent(ev)
-  await new Promise((r) => setTimeout(r, 15))
-  return w.__reply
+    origin: 'http://' + ns + '.apps.localhost:8088',
+  }))
+  await new Promise((r) => setTimeout(r, 20))
 }
 
-beforeEach(() => {
-  indexedDB = new IDBFactory()
-})
-
-describe('laStorage bridge', () => {
-  it('set then dump returns the namespace payload', async () => {
+// No fresh IDBFactory per test: the module caches its connection, so a new
+// factory would leave the seeds and the reads in different databases. The
+// unique namespace per test is the isolation.
+describe('Light App storage migration', () => {
+  it('answers the first migrate-ready with the legacy entries, once', async () => {
     const w = makeWin()
-    // registered inside bridgeCall
-    await bridgeCall(w, 'set', 'k1', 'v1')
-    await bridgeCall(w, 'set', 'k2', 'v2')
-    const r = await bridgeCall(w, 'dump')
-    expect(r?.ok).toBe(true)
-    expect(r?.value).toEqual({ k1: 'v1', k2: 'v2' })
+    await seedLegacy(w.__ns, { score: '10', name: 'x' })
+    registerLaIframe(w, w.__ns)
+
+    await fromFrame(w, 'migrate-ready')
+    expect(w.__sent).toEqual([{ __laBridge: 1, id: 0, res: true, ok: true, op: 'migrate', value: { score: '10', name: 'x' } }])
+
+    // The frame took the data and said so; the next load must get nothing.
+    await fromFrame(w, 'migrated', { count: 2 })
+    w.__sent = []
+    await fromFrame(w, 'migrate-ready')
+    expect(w.__sent).toEqual([])
   })
 
-  it('dump of an empty namespace returns {}', async () => {
+  it('says nothing for an app that never had legacy data', async () => {
     const w = makeWin()
-    // registered inside bridgeCall
-    const r = await bridgeCall(w, 'dump')
-    expect(r?.ok).toBe(true)
-    expect(r?.value).toEqual({})
+    registerLaIframe(w, w.__ns)
+    await fromFrame(w, 'migrate-ready')
+    expect(w.__sent).toEqual([])
   })
 
-  it('namespaces isolate same keys', async () => {
-    const wa = makeWin()
-    const wb = makeWin()
-    // registered inside bridgeCall
-    // registered inside bridgeCall
-    await bridgeCall(wa, 'set', 'score', '10')
-    await bridgeCall(wb, 'set', 'score', '99')
-    const ra = await bridgeCall(wa, 'dump')
-    const rb = await bridgeCall(wb, 'dump')
-    expect(ra?.value).toEqual({ score: '10' })
-    expect(rb?.value).toEqual({ score: '99' })
+  it('only hands out the registered namespace, whatever the message claims', async () => {
+    const a = makeWin()
+    const b = makeWin()
+    await seedLegacy(a.__ns, { secret: 'a' })
+    await seedLegacy(b.__ns, { secret: 'b' })
+    registerLaIframe(b, b.__ns)
+
+    // b's frame claiming to be a is a stale-document (or hostile) message: ignored.
+    await fromFrame(b, 'migrate-ready', {}, a.__ns)
+    expect(b.__sent).toEqual([])
+    await fromFrame(b, 'migrate-ready')
+    expect(b.__sent).toEqual([{ __laBridge: 1, id: 0, res: true, ok: true, op: 'migrate', value: { secret: 'b' } }])
   })
 
-  it('remove deletes a key; clear only clears the caller namespace', async () => {
-    const wa = makeWin()
-    const wb = makeWin()
-    // registered inside bridgeCall
-    // registered inside bridgeCall
-    await bridgeCall(wa, 'set', 'k', 'a')
-    await bridgeCall(wa, 'set', 'junk', 'x')
-    await bridgeCall(wb, 'set', 'k', 'b')
-    await bridgeCall(wa, 'remove', 'junk')
-    await bridgeCall(wa, 'clear')
-    expect((await bridgeCall(wa, 'dump'))?.value).toEqual({})
-    expect((await bridgeCall(wb, 'dump'))?.value).toEqual({ k: 'b' })
-  })
-
-  it('rejects unregistered iframes', async () => {
+  it('ignores windows the panel never registered, and ones it unregistered', async () => {
     const w = makeWin()
-    expect(await bridgeCall(w, 'set', 'k', 'v', false)).toBe(null) // no reply at all
-  })
+    await seedLegacy(w.__ns, { k: 'v' })
+    await fromFrame(w, 'migrate-ready')
+    expect(w.__sent).toEqual([])
 
-  it('rejects bad keys', async () => {
-    const w = makeWin()
-    // registered inside bridgeCall
-    const tooLong = 'x'.repeat(600)
-    expect((await bridgeCall(w, 'set', tooLong, 'v'))?.ok).toBe(false)
-    expect((await bridgeCall(w, 'remove', ''))?.ok).toBe(false)
-  })
-
-  it('unregister stops the bridge', async () => {
-    const w = makeWin()
-    await bridgeCall(w, 'set', 'k', 'v') // registers
+    registerLaIframe(w, w.__ns)
     unregisterLaIframe(w)
-    expect(await bridgeCall(w, 'dump', undefined, undefined, false)).toBe(null)
+    await fromFrame(w, 'migrate-ready')
+    expect(w.__sent).toEqual([])
   })
 
-  it('withLaBridge injects the script before </body>', () => {
-    const html = '<html><body><p>hi</p></body></html>'
-    const out = withLaBridge(html, 'app-x')
-    expect(out).toContain('localStorage')
-    // A real close tag: the string IS the srcdoc document, and `<\/script>`
-    // doesn't close a script element there (verified in Chrome — the shim
-    // never ran while this said `<\\/script>`).
-    expect(out).toContain('</script></body>')
-    expect(out).not.toContain('<\\/script>')
-    expect(out.indexOf('localStorage')).toBeGreaterThan(out.indexOf('<p>hi</p>'))
-    expect(out.endsWith('</body></html>')).toBe(true)
-  })
-
-  it('bridge script shims window.localStorage (synchronous, cache-backed)', () => {
-    const script = buildLaBridgeScript('app-x')
-    // The shim replaces window.localStorage with a synchronous API
-    expect(script).toContain("Object.defineProperty(window, 'localStorage'")
-    expect(script).toContain('window.parent.postMessage')
-    expect(script).toContain('__laStorageReady')
-    // Prefetch via dump
-    expect(script).toContain("call('dump')")
-    // No special app-facing API — plain localStorage calls work
-    expect(script).not.toContain('window.__laStorage =')
-  })
-})
-
-// ── End-to-end: run the real injected script against the real host handler ──
-//
-// The string assertions above can't see a protocol mismatch between the two
-// sides — a reply shape the shim drops still contains all the right substrings.
-// These tests execute buildLaBridgeScript's output in a fake iframe window
-// whose `parent` posts into the actual host listener, so the whole roundtrip
-// (shim -> postMessage -> IndexedDB -> reply -> cache) has to work.
-
-type ShimWin = {
-  __ns: string
-  localStorage: Storage
-  __laStorageReady: Promise<void>
-  parent: { postMessage: (data: unknown) => void }
-}
-
-function makeShimWin(ns: string): ShimWin {
-  const listeners: ((ev: { data: unknown }) => void)[] = []
-  const fake = {
-    __ns: ns,
-    addEventListener: (t: string, fn: (ev: { data: unknown }) => void) => {
-      if (t === 'message') listeners.push(fn)
-    },
-    // The host replies through ev.source.postMessage.
-    postMessage: (data: unknown) => listeners.forEach((fn) => fn({ data })),
-    parent: {
-      postMessage: (data: unknown) => {
-        window.dispatchEvent(new MessageEvent('message', { data, source: fake as never, origin: 'null' }))
-      },
-    },
-  }
-  return fake as unknown as ShimWin
-}
-
-// Boot a Light App document: register the frame, then run the bridge script
-// with a `localStorage` that throws like a sandboxed origin's does.
-function boot(ns: string): ShimWin {
-  const win = makeShimWin(ns)
-  registerLaIframe(win as unknown as Window, ns)
-  const opaque = new Proxy(
-    {},
-    {
-      get() {
-        throw new Error('SecurityError: opaque origin')
-      },
-    },
-  )
-  new Function('window', 'localStorage', buildLaBridgeScript(ns))(win, opaque)
-  return win
-}
-
-describe('injected bridge script (end-to-end)', () => {
-  it('persists across reloads: write, reboot, read it back', async () => {
-    const ns = 'e2e-' + nsCounter++
-    const first = boot(ns)
-    await first.__laStorageReady
-    first.localStorage.setItem('score', '42')
-    await new Promise((r) => setTimeout(r, 15))
-
-    // Fresh document, same app — the prefetch must warm the cache.
-    const second = boot(ns)
-    await second.__laStorageReady
-    expect(second.localStorage.getItem('score')).toBe('42')
-    expect(second.localStorage.length).toBe(1)
-    expect(second.localStorage.key(0)).toBe('score')
-  })
-
-  it('getItem returns null for keys never written', async () => {
-    const win = boot('e2e-' + nsCounter++)
-    await win.__laStorageReady
-    expect(win.localStorage.getItem('nope')).toBe(null)
-    expect(win.localStorage.length).toBe(0)
-  })
-
-  it('a startup write survives the prefetch that lands after it', async () => {
-    const ns = 'e2e-' + nsCounter++
-    const seed = boot(ns)
-    await seed.__laStorageReady
-    seed.localStorage.setItem('score', '42')
-    await new Promise((r) => setTimeout(r, 15))
-
-    // Apps commonly write a default synchronously at startup, which always
-    // happens before the async dump lands. The dump must not revert it.
-    const win = boot(ns)
-    win.localStorage.setItem('score', 'DEFAULT-0')
-    await win.__laStorageReady
-    expect(win.localStorage.getItem('score')).toBe('DEFAULT-0')
-
-    // ...and the cache agrees with what actually got persisted.
-    const reload = boot(ns)
-    await reload.__laStorageReady
-    expect(reload.localStorage.getItem('score')).toBe('DEFAULT-0')
-  })
-
-  it('clear() before the prefetch lands is not undone by it', async () => {
-    const ns = 'e2e-' + nsCounter++
-    const seed = boot(ns)
-    await seed.__laStorageReady
-    seed.localStorage.setItem('a', '1')
-    seed.localStorage.setItem('b', '2')
-    await new Promise((r) => setTimeout(r, 15))
-
-    const win = boot(ns)
-    win.localStorage.clear()
-    await win.__laStorageReady
-    expect(win.localStorage.length).toBe(0)
-    expect(win.localStorage.getItem('a')).toBe(null)
-  })
-
-  it('removeItem is not resurrected by the prefetch', async () => {
-    const ns = 'e2e-' + nsCounter++
-    const seed = boot(ns)
-    await seed.__laStorageReady
-    seed.localStorage.setItem('a', '1')
-    seed.localStorage.setItem('b', '2')
-    await new Promise((r) => setTimeout(r, 15))
-
-    const win = boot(ns)
-    win.localStorage.removeItem('a')
-    await win.__laStorageReady
-    expect(win.localStorage.getItem('a')).toBe(null)
-    expect(win.localStorage.getItem('b')).toBe('2')
-  })
-
-  it('throws QuotaExceededError instead of caching a write the host would reject', async () => {
-    const win = boot('e2e-' + nsCounter++)
-    await win.__laStorageReady
-    expect(() => win.localStorage.setItem('x', 'v'.repeat(1_000_001))).toThrow(
-      expect.objectContaining({ name: 'QuotaExceededError' }),
-    )
-    expect(() => win.localStorage.setItem('k'.repeat(600), 'v')).toThrow(
-      expect.objectContaining({ name: 'QuotaExceededError' }),
-    )
-    // Nothing was cached, so the cache still matches the store.
-    expect(win.localStorage.getItem('x')).toBe(null)
-    expect(win.localStorage.length).toBe(0)
-  })
-
-  it('a stale document cannot write into the app that replaced it', async () => {
-    const ns = 'e2e-' + nsCounter++
-    const stale = boot(ns)
-    await stale.__laStorageReady
-
-    // The iframe element is reused across app switches: same window, new slug.
-    const next = 'e2e-' + nsCounter++
-    registerLaIframe(stale as unknown as Window, next)
-    stale.localStorage.setItem('leak', 'from-old-app')
-    await new Promise((r) => setTimeout(r, 15))
-
-    const victim = boot(next)
-    await victim.__laStorageReady
-    expect(victim.localStorage.getItem('leak')).toBe(null)
-  })
-
-  it('does nothing when localStorage natively works', () => {
-    const win = makeShimWin('e2e-native')
-    const native = { getItem: () => null } as unknown as Storage
-    new Function('window', 'localStorage', buildLaBridgeScript('e2e-native'))(win, native)
-    expect(win.localStorage).toBe(undefined) // no shim installed
-    expect(win.__laStorageReady).toBe(undefined)
-  })
-
-  it('embeds the namespace inertly, even a hostile slug', () => {
-    const script = buildLaBridgeScript('a</script><script>alert(1)//')
-    expect(script).not.toContain('</script>')
-    expect(script).toContain('\\u003c/script\\u003e')
+  it('no longer answers the storage ops the old shim sent', async () => {
+    const w = makeWin()
+    registerLaIframe(w, w.__ns)
+    for (const op of ['dump', 'set', 'remove', 'clear']) {
+      await fromFrame(w, op, { key: 'k', value: 'v' })
+    }
+    expect(w.__sent).toEqual([])
   })
 })

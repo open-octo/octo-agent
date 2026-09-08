@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightappOpen, lightapps, lightappHTML, lightappStamp, cacheLightApp, dropLightApp, showToast, nativeShell, activeSessionId, savePanelMode, type PanelMode } from '../lib/stores'
+  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightappOpen, lightapps, lightappHTML, lightappStamp, cacheLightApp, dropLightApp, showToast, nativeShell, localAccess, activeSessionId, savePanelMode, type PanelMode } from '../lib/stores'
   import { titlebarDblClick } from '../lib/nativeWindow'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
-  import { ARTIFACT_SANDBOX, hydrateArtifact, selfContainedDocument, themeRev } from '../lib/artifacts'
+  import { ARTIFACT_ORIGIN_SANDBOX, hydrateArtifact, themeRev } from '../lib/artifacts'
   import { CENTER_MIN } from '../lib/sidebarWidth'
   import { diffData, diffLoading, diffBadge, loadDiff } from '../lib/diff'
   import DiffView from './diff/DiffView.svelte'
   import ArtifactFrame from './ArtifactFrame.svelte'
   import * as api from '../lib/api'
-  import { installLaStorageBridge, registerLaIframe, unregisterLaIframe, withLaBridge } from '../lib/laStorage'
+  import { installLaStorageBridge, registerLaIframe, unregisterLaIframe } from '../lib/laStorage'
 
   // This column never holds the traffic lights, but its top row has to sit on
   // the same axis as the chat title beside it, which Header lifts on mac.
@@ -94,8 +94,8 @@
     laLoading = true
     try {
       cacheLightApp(slug, await api.getLightApp(slug))
-      // An unchanged document leaves srcdoc identical and the iframe untouched;
-      // the {#key} remounts it either way, so a reload always restarts the app.
+      // The generation rides in the frame's URL and keys the element, so a
+      // reload always restarts the app even when nothing on disk changed.
       laReloadGen++
     } catch (e: any) {
       showToast(`Failed to reload: ${e.message}`, 'error')
@@ -202,24 +202,30 @@
     }),
   )
   const laCurSlug = $derived($lightappOpen.includes($lightappSel) ? $lightappSel : ($lightappOpen[0] ?? ''))
-  // Same self-contained rule as the artifact preview: a Light App that leans
-  // on a CDN renders with those references stripped and a banner, here and in
-  // the panel alike — otherwise the very page the preview refused to run
-  // scripts for would come alive the moment it is saved. The banner bakes the
-  // theme in, so this re-derives on themeRev.
-  const laCurHTML = $derived.by(() => {
+  // A Light App renders from its own origin, `<slug>.apps.localhost` on the
+  // port this page came from (internal/server/lightapp_origin.go) — a real
+  // origin, so its localStorage persists and its relative references load.
+  // The theme rides in the URL for the gate's banner; laReloadGen makes the
+  // reload button produce a fresh URL even when nothing else changed. Only a
+  // browser on this machine resolves that hostname, so a remote client (the
+  // server reports `local: false`) sees a notice instead of a frame.
+  const laCurURL = $derived.by(() => {
     void $themeRev
-    return selfContainedDocument($lightappHTML[laCurSlug] ?? '')
+    if (!laCurSlug || !$localAccess) return ''
+    const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
+    const port = location.port ? `:${location.port}` : ''
+    return `http://${laCurSlug}.apps.localhost${port}/?theme=${theme}&v=${laReloadGen}`
   })
   const laCurName = $derived($lightapps.find(a => a.slug === laCurSlug)?.name ?? laCurSlug)
 
-  // ── Light App storage bridge ─────────────────────────────────────────────
-  // The sandboxed srcdoc iframe has an opaque origin, so it can't touch any
-  // persistent storage. We host an IndexedDB here and the injected bridge
-  // script (withLaBridge) shims the app's own localStorage calls onto it over
-  // postMessage. Register the iframe so the handler only serves OUR frame,
-  // under the slug whose script we injected — the element is reused when the
-  // user switches apps, so the namespace has to be re-pinned every time.
+  // ── Light App bridge ─────────────────────────────────────────────────────
+  // The server appends a small script to every Light App it serves; it asks
+  // this page once for the storage the old srcdoc shim kept for the app
+  // (one-time migration into the app's own localStorage) and, in the desktop
+  // shell, hands downloads over because the webview cannot save files. Both
+  // arrive as messages; register the iframe so the handler only serves OUR
+  // frame, under the slug it shows — the element is reused when the user
+  // switches apps, so the namespace has to be re-pinned every time.
   let laFrameEl = $state<HTMLIFrameElement | null>(null)
   $effect(() => {
     installLaStorageBridge()
@@ -469,9 +475,11 @@
           <button onclick={() => reloadLightApp(laCurSlug)} disabled={laLoading}>{$t('lightapps.reload')}</button>
         </div>
       {/if}
-      {#if laCurHTML}
+      {#if laCurSlug && !$localAccess}
+        <div class="empty"><iconify-icon icon="ant-design:desktop-outlined" width="28"></iconify-icon><span>{$t('lightapps.local_only')}</span></div>
+      {:else if laCurURL}
         {#key laReloadGen}
-        <iframe bind:this={laFrameEl} srcdoc={withLaBridge(laCurHTML, laCurSlug)} sandbox={ARTIFACT_SANDBOX} allow="clipboard-write" title={laCurName}></iframe>
+        <iframe bind:this={laFrameEl} src={laCurURL} sandbox={ARTIFACT_ORIGIN_SANDBOX} allow="fullscreen; clipboard-write" title={laCurName}></iframe>
         {/key}
       {:else if laCurSlug || laLoading}
         <!-- A tab opens before its HTML arrives, so this covers the fetch. -->

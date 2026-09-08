@@ -91,6 +91,10 @@ func (s *Server) hostRouter(next http.Handler) http.Handler {
 			s.serveArtifactOrigin(w, r)
 			return
 		}
+		if _, ok := lightAppHostLabel(r.Host); ok {
+			s.serveLightAppOrigin(w, r)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -281,16 +285,23 @@ func (s *Server) serveArtifactOrigin(w http.ResponseWriter, r *http.Request) {
 
 	p := path.Clean("/" + r.URL.Path)
 	if p == "/" || p == "/index.html" || p == "/"+filepath.Base(g.entry) {
-		s.serveArtifactEntry(w, r, g)
+		serveArtifactEntry(w, r, g.entry, nil)
 		return
 	}
-	rel := strings.TrimPrefix(p, "/")
+	serveArtifactAsset(w, r, g.root, strings.TrimPrefix(p, "/"))
+}
+
+// serveArtifactAsset serves one file from under root by its cleaned relative
+// path: asset types only, no escaping the root through `..` or a symlink, a
+// size cap, and the type set explicitly so nothing is sniffed. Shared by the
+// artifact origin and the Light App origin.
+func serveArtifactAsset(w http.ResponseWriter, r *http.Request, root, rel string) {
 	ctype, ok := tools.ArtifactAssetContentType(rel)
 	if !ok {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	abs, ok := resolveWithinRoot(g.root, filepath.Join(g.root, filepath.FromSlash(rel)))
+	abs, ok := resolveWithinRoot(root, filepath.Join(root, filepath.FromSlash(rel)))
 	if !ok {
 		writeError(w, http.StatusNotFound, "not found")
 		return
@@ -316,12 +327,13 @@ func (s *Server) serveArtifactOrigin(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "", fi.ModTime(), f)
 }
 
-// serveArtifactEntry sends the entry document through the external-reference
-// gate. Theme comes from the frame's own URL (?theme=dark) because the banner
-// bakes its colours in and the origin has no other way to learn the app's
-// theme.
-func (s *Server) serveArtifactEntry(w http.ResponseWriter, r *http.Request, g *artifactGrant) {
-	fi, err := os.Stat(g.entry)
+// serveArtifactEntry sends an entry document through the external-reference
+// gate, with an optional script appended before </body> (the Light App
+// bridge; nil for session artifacts). Theme comes from the frame's own URL
+// (?theme=dark) because the banner bakes its colours in and the origin has no
+// other way to learn the app's theme.
+func serveArtifactEntry(w http.ResponseWriter, r *http.Request, entry string, inject []byte) {
+	fi, err := os.Stat(entry)
 	if err != nil || fi.IsDir() {
 		writeError(w, http.StatusNotFound, "not found")
 		return
@@ -330,13 +342,13 @@ func (s *Server) serveArtifactEntry(w http.ResponseWriter, r *http.Request, g *a
 		writeError(w, http.StatusRequestEntityTooLarge, "artifact exceeds the 10 MB preview cap")
 		return
 	}
-	src, err := os.ReadFile(g.entry)
+	src, err := os.ReadFile(entry)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
 	dark := r.URL.Query().Get("theme") == "dark"
-	out := gateArtifactHTML(src, dark)
+	out := injectBeforeBody(gateArtifactHTML(src, dark), inject)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	if r.Method == http.MethodHead {

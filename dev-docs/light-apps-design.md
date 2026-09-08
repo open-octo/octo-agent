@@ -12,7 +12,7 @@ octo-agent 已经有一套完整的生成 + 展示循环：Agent 生成 HTML →
 
 > **不做新工具。** Agent 用已有的 `write_file` / `read_file` / `edit_file` 操作 Light App 文件，`show_artifact` 做预览。Web UI 从文件系统直接读目录列表渲染。全链路零新 tool。
 
-> **够用就好。** 只做纯前端 HTML Light App。不做 Python 进程、不做 TCP 端口分配、不做后端沙箱。octo-agent 的 Artifacts panel（sandboxed iframe）已经是完美的运行容器。
+> **够用就好。** 只做纯前端 HTML Light App。不做 Python 进程、不做 TCP 端口分配、不做后端沙箱。octo-agent 已有的制品独立源（`<slug>.apps.localhost`）就是运行容器。
 
 ## 设计概览
 
@@ -62,84 +62,76 @@ octo-agent 已经有一套完整的生成 + 展示循环：Agent 生成 HTML →
 
 ### index.html
 
-自包含的 HTML 文件。硬约束（继承自 Artifacts panel）：
+入口 HTML。硬约束（与会话制品相同）：
 
-- **无外部资源**：不引 CDN、不链外部 CSS/JS/图片。如需图标用 emoji 或内联 SVG
-- **CSS 内联**：`<style>` 或行内 style
-- **JS 内联**：`<script>` 直接写在 HTML 内
+- **同目录资产用相对路径**：脚本、样式、图片、字体、模型、音视频放在应用目录里，`./app.js`、`./style.css` 直接引用；只服务资产类型，第二个 `.html` 不服务
+- **外链只认 CDN 白名单**：白名单外的 `<script src>` / `<link rel="stylesheet">` 渲染时被剥离并加横幅（Go 侧 gate，见「运行环境」）。如需图标用 emoji 或内联 SVG
 - **文件处理**：`<input type="file">` + `FileReader` API，浏览器端搞定
-- **无服务端依赖**：不能发 fetch 到外部 API（Artifacts panel sandboxed iframe 限制）
-- **持久化存储可用**：直接用标准 `localStorage`，见「运行时存储」
-- **文件导出可用**：直接用标准 `<a download>` 写法，见「运行时下载」
-- **表单 submit 处理器必须 `event.preventDefault()`**：沙箱里的表单无处可导航，不拦的话 frame 会被重载、应用内存态全丢
+- **不调 octo 的 API**：页面对 `/api` 的请求会被 Origin 门拒掉
+- **持久化存储可用**：直接用标准 `localStorage`，是应用自己 origin 的真存储
+- **文件导出可用**：直接用标准 `<a download>` 写法，见「服务端注入的桥脚本」
+- **表单 submit 处理器必须 `event.preventDefault()`**：不拦的话 frame 会被重载、应用内存态全丢
 
-### 运行沙箱
+### 运行环境：独立源
 
-轻应用和 Artifact 预览都跑在 `sandbox="allow-scripts allow-forms allow-modals"` 的 srcdoc iframe 里
-（常量 `ARTIFACT_SANDBOX`，`web/src/lib/artifacts.ts`，四处 iframe 共用——应用在保存前就是在预览里试用的，
-保存前后必须行为一致）。
+轻应用从自己的 origin 渲染：`http://<slug>.apps.localhost:<port>/`，由 `internal/server/lightapp_origin.go`
+服务，和会话制品的 `<token>.artifacts.localhost` 同一套机制（`dev-docs/artifact-origin-design.md`）。
+面板里的 iframe 用 `src` 加载它，sandbox 为 `ARTIFACT_ORIGIN_SANDBOX`
+（`allow-scripts allow-same-origin allow-forms allow-modals allow-downloads allow-pointer-lock`，
+`web/src/lib/artifacts.ts`），`allow="fullscreen; clipboard-write"`。
 
-刻意不给 `allow-same-origin`：origin 是 opaque，文档碰不到任何存储、Cookie 和宿主状态，这是下面两条桥
-存在的前提。也不给 `allow-popups`、`allow-top-navigation`。
+`allow-same-origin` 在这里只是"让页面做自己"：它是一个跨源文档，把它和应用隔开的是浏览器的同源策略，
+不是 sandbox 标志。保留 sandbox 只为继续禁 `allow-popups` 和 `allow-top-navigation`，这两条保护的是
+宿主标签页不被应用劫持。
 
-`allow-forms` 是因为没有它表单的 submit 事件根本不触发（规范在派发事件之前就检查 sandboxed forms flag），
-`<form onsubmit>` + 回车提交全废；`allow-modals` 是因为没有它 `confirm()` 恒 false、`prompt()` 恒 null、
-`alert()` 静默——生成的应用常拿 `confirm` 做删除确认，等于永远删不掉。
+这个 origin 是真实的，所以普通网页能做的它都能做：`localStorage` / IndexedDB 原生持久、`<a download>`
+直接下载、全屏和指针锁定可用、WebGL 可用、相对路径引用同目录文件（`./app.js`、`./style.css`、
+`./model.glb`）由服务端按资产扩展名表直接服务。它碰不到 octo：没有应用的 cookie，`*.apps.localhost`
+不是本地名，页面对 `/api` 的请求过不了回环豁免的 Origin 门（403），而制品/轻应用 Host 上根本没有
+`/api`、`/ws` 和 UI（`hostRouter` 在 mux 之前分流）。
 
-代价要说实话：`allow-modals` 交给应用的是浏览器原生对话框——alert/confirm/prompt、`window.print()`、
-`beforeunload` 提示——它们是 tab 级 modal，开着的时候会挡住宿主 UI，一个 `while(true) alert()` 的坏应用
-能把整个页面卡住直到用户勾"阻止此页再弹对话框"。接受这个取舍：轻应用是用户让自己的 agent 写的，
-origin 边界本身没动。
+入口 `index.html` 经过 Go 侧的 CDN 白名单 gate（`internal/server/artifact_gate.go`）：白名单外的
+`<script src>` / 渲染相关 `<link href>` 被剥离并加横幅，相对路径不算外链、原样保留。同目录里只服务
+资产类型（`tools.ArtifactAssetContentType`），第二个 `.html` 不服务——一个应用一个入口。
 
-### 运行时存储
+不需要 token：轻应用是用户明确保存的内容，目录对本机进程本来可读；稳定的主机名正是它的价值，
+应用的存储跨会话、跨版本、跨服务重启持久，且与其他应用天然隔离。slug 经 `canonicalHost` 后是小写，
+所以 slug 必须小写（提示词已如此要求）。
 
-沙箱里 origin 是 opaque，浏览器会拒掉所有持久化存储 API —
-localStorage / sessionStorage / Cookie / IndexedDB 在里面一律抛 SecurityError。
+只有本机浏览器能解析 `*.localhost`。`localAccess`（`/api/version` 的 `local` 标志）为假的客户端
+（tunnel、LAN）在轻应用面板看到"轻应用仅在运行 octo 的本机浏览器中可用"，没有降级渲染；手机端 UI
+不提供制品和轻应用。
 
-沙箱不动，改由宿主页面代管：`web/src/lib/laStorage.ts` 在宿主开一个 IndexedDB
-（库 `octo-la-storage`、store `kv`，键 `{slug}:{key}` 按应用隔离），并往轻应用文档里注入
-一段桥脚本，把 iframe 内的 `window.localStorage` 换成一个同步 shim —— 读走内存
-缓存，写同步更新缓存再经 postMessage 落到宿主。文档加载时先 dump 预取该应用的
-全部历史数据，`window.__laStorageReady` 在预取落地后 resolve。
+`allow-modals` 的代价照旧：alert/confirm/prompt、`window.print()`、`beforeunload` 是 tab 级 modal，
+一个 `while(true) alert()` 的坏应用能卡住整个页面直到用户勾"阻止此页再弹对话框"。接受这个取舍：
+轻应用是用户让自己的 agent 写的。
 
-对轻应用来说这是**零改动**的：继续写标准 `localStorage`，没有任何特殊接口。
-localStorage 原生可用时（非沙箱上下文）桥脚本什么都不做。
+### 服务端注入的桥脚本
 
-与原生 localStorage 的差异，都是刻意的：
+服务端在入口 `</body>` 前追加两段 `<script>`：一行配置
+`window.__octoLightApp={"download":<bool>,"ns":"<slug>"}`（`json.Marshal` 会转义 `<>&`，slug 无法提前
+闭合脚本），以及嵌入二进制的 `internal/server/lightapp_bridge.js`。它和宿主之间沿用 `__laBridge`
+信封，宿主侧的路由在 `web/src/lib/laStorage.ts`：只听面板用 `registerLaIframe` 登记过的窗口，
+且消息里的 `ns` 必须等于登记的 slug（iframe 元素在切换应用时复用，旧文档的迟到消息不能落进新应用）。
 
-- 单键上限 1MB、单应用总量上限 5MB，超限同步抛 `QuotaExceededError`；键名上限
-  512 字符，超限同样抛。宿主侧独立复核同一组上限，绕过 shim 也灌不进去。
-- 落盘是异步的，崩溃或提前关闭可能丢最后一次写。同页内读写全同步一致，跨页重启
-  的读一致性由启动预取保证。
-- sessionStorage 仍然不可用 —— 只存活一次访问的状态放普通变量就够了。
+桥脚本做两件事：
 
-### 运行时下载
+- **存储迁移（一次性）。** 独立源之前，应用的 `localStorage` 由宿主页面的 IndexedDB
+  （库 `octo-la-storage`、store `kv`、键 `{slug}:{key}`）经 shim 代管。现在真 `localStorage` 是唯一存储，
+  宿主只负责把旧数据交出去一次：脚本加载时发 `migrate-ready`，宿主若该命名空间未标记迁移且有数据，
+  回 `{op:'migrate', value:{k:v}}`；脚本把**应用尚未写过的键**写入 `localStorage`，回 `migrated`，
+  宿主在 IndexedDB 里记 `__octo_migrated__:<slug>`。写入了任何键时脚本 `location.reload()`，
+  让已经按空存储启动的应用从迁移后的状态重启；重启后的 `migrate-ready` 因已标记而得不到回复。
+  旧行暂不删除。
+- **下载桥（仅桌面端）。** 桌面 webview 没有 download delegate，即使有真 origin，`<a download>` 也是
+  静默空操作。服务端在 `cfg.Native != nil` 时把 `download` 置真，脚本拦截标准写法——document 级 click
+  监听 + `HTMLAnchorElement.prototype.click` 补丁覆盖游离锚点——把目标 `fetch` 成 Blob，
+  经 `{op:'download', name, blob}` 交给宿主，宿主 `deliverLaDownload`（`web/src/lib/laDownload.ts`）
+  走 `/api/native/save-file` 的系统保存对话框。浏览器客户端不注入下载半边，下载由 origin 自己完成。
+  上限 100MB、文件名剥路径分隔符和控制字符、桌面端同一时刻只开一个保存对话框、fire-and-forget 以
+  toast 呈现结果，这些约束不变。
 
-同一个沙箱也拦掉了轻应用自己发起的下载：iframe 没给 `allow-downloads`，浏览器直接丢弃；
-桌面端 webview 更是没有 download delegate，连非沙箱的下载都是静默空操作。
-
-沿存储桥的路子处理：`web/src/lib/laDownload.ts` 往文档里注入一段脚本，拦截标准的下载写法 ——
-任何带 `download` 属性且有 href 的锚点，不看 scheme（实际都是 blob:/data:；相对或 http 链接在沙箱里
-`fetch` 会失败，只 `console.warn`）—— 把目标 `fetch` 成 Blob，经同一条 postMessage
-通道（`op: 'download'`，携带 `name` 和 `blob`，Blob 走结构化克隆）交给宿主。宿主按 `nativeShell`
-分流：桌面端 base64 后走 `/api/native/save-file` 的系统保存对话框，浏览器里在顶层文档挂一个
-`<a download>` 触发正常下载。这和 Artifacts 面板「下载」按钮走的是同一条落盘路径。
-
-两种触发形态都覆盖：用户点击文档内的锚点（document 级 click 监听）、以及最常见的
-`a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = '...'; a.click()`
-—— 游离锚点的事件到不了 document，所以补一层 `HTMLAnchorElement.prototype.click` 拦截。
-应用自己已经 `preventDefault()` 的点击不动。
-
-对轻应用同样是**零改动**：继续写标准的 `<a download>`，没有专用接口。刻意的边界：
-
-- 单文件上限 100MB，超限宿主直接丢弃。文件名剥掉路径分隔符和控制字符，空则回退 `download`。
-- 下载是 fire-and-forget，宿主不回包（保存对话框可能开着几分钟），结果以宿主 toast 呈现。
-- 桌面端同一时刻只开一个保存对话框，对话框开着时到达的请求直接丢弃不排队（浏览器自带"多文件下载"
-  拦截，桌面 shell 没有，不闸会叠出一摞 sheet）。
-- `fetch` 在 click 同步链路内发出，blob URL 在那一刻就解析完，所以教科书写法 `a.click(); URL.revokeObjectURL(url)`
-  不构成竞态（Chrome 实测）。
-- 不拦 `window.open(blobUrl)` 和 `location.href = dataUrl` —— 这两种在非沙箱页面里也不是下载。
-  应用在锚点上 `stopPropagation()`（不 `preventDefault`）的点击到不了 document，同样漏过，会被沙箱静默丢掉。
+对轻应用来说两件事都是**零改动**：继续写标准的 `localStorage` 和 `<a download>`，没有专用接口。
 
 ## Agent 交互流程
 
@@ -221,10 +213,9 @@ evaluate whether the task is REPEATABLE — if yes, proactively suggest saving.
 4. Use existing write_file — no special tools needed
 
 ### Constraints
-- index.html must be fully self-contained (sandboxed iframe environment)
-- No CDN, no external images, no cross-origin fetch
-- Enforced at render time, not just documented: the Light App view strips external `<script src>` / `<link rel="stylesheet">` tags and shows a banner saying how many it removed — the same `selfContainedDocument` rule the artifact preview applies (`web/src/lib/artifacts.ts`), so a page cannot render one way in the panel and another once saved
-- Inline all CSS and JS
+- index.html runs on its own origin (`<slug>.apps.localhost`); files beside it load by relative path
+- External scripts/stylesheets only from the CDN allowlist; enforced at render time, not just documented: the origin strips anything else and shows a banner saying how many it removed — the same Go gate (`internal/server/artifact_gate.go`) that session artifacts pass through, so a page cannot render one way as an artifact and another once saved
+- No calls to octo's API from inside the page
 - Use FileReader + <input type="file"> for file processing
 - Use emoji or inline SVG for icons
 - Follow artifact-design skill conventions for layout and colors
@@ -236,7 +227,7 @@ Agent 生成 Light App HTML 时，已有 `artifact-design` 技能自动生效，
 
 - **窄屏适配**：Artifacts panel 默认宽度 ~720px，不用宽屏布局
 - **配色规范**：走 artifact-design 的 `references/charts.md` 分类/顺序/发散色板
-- **自包含**：artifact-design skill 已经要求无外链
+- **外链克制**：artifact-design skill 只允许白名单 CDN，同目录文件走相对路径
 - **中文友好**：系统默认字体覆盖 CJK
 
 不需要为 Light App 单独写新的 skill——现有技能已经覆盖了 HTML 生成的全部约束。

@@ -152,7 +152,7 @@ For every deliverable:
 
 ## Light Apps
 
-You can turn HTML artifacts into reusable **Light Apps** — self-contained HTML pages that users open anytime without consuming LLM tokens. When you generate an HTML page for the user, evaluate whether the task is REPEATABLE. If it is, proactively suggest saving it as a Light App.
+You can turn HTML artifacts into reusable **Light Apps** — HTML pages that users open anytime without consuming LLM tokens. When you generate an HTML page for the user, evaluate whether the task is REPEATABLE. If it is, proactively suggest saving it as a Light App.
 
 ### Storage convention
 
@@ -162,7 +162,7 @@ Light Apps live under `~/.octo/light-apps/<slug>/` with two files:
   ```json
   {"slug":"<slug>","name":"<display name>","description":"<one-line>","icon":"<emoji>","created_at":"<ISO-8601>"}
   ```
-- `index.html` — the application, self-contained (inline CSS/JS; external scripts/styles only from the approved CDN hosts listed under "Constraints on index.html")
+- `index.html` — the application. Other files it needs (scripts, styles, images, fonts, models, media) go in the same directory and are referenced by relative path
 
 Create both files with `write_file`. No special tools needed.
 
@@ -185,11 +185,11 @@ Create both files with `write_file`. No special tools needed.
 
 ### Constraints on index.html
 
-- Runs in a sandboxed iframe with no same-origin access: no cookies, no host APIs, no cross-origin fetch from scripts
-- External `<script src>` / `<link rel="stylesheet" href>` may ONLY reference these CDN hosts — anything else is stripped at render time: `cdnjs.cloudflare.com`, `cdn.jsdelivr.net`, `unpkg.com`, `fonts.googleapis.com`, `fonts.gstatic.com`, and the mainland-China mirrors `cdn.bootcdn.net`, `cdn.staticfile.org`, `cdn.staticfile.net`, `registry.npmmirror.com`. Pin exact versions. If the user is in mainland China, prefer the CN mirrors
-- Prefer inlining CSS (`<style>`) and JS (`<script>`); reach for a CDN only when a real library (React, ECharts, Chart.js, …) is needed — a CDN page shows nothing when that host is unreachable (offline, LAN, restricted networks)
+- The page runs on its own origin (`<slug>.apps.localhost`), so ordinary browser features work: `localStorage` persists, `<a download>` saves, fullscreen and WebGL work. It has no access to octo's API — never call `/api` from inside the page
+- Files in the app's directory load by relative path: `<script src="./app.js">`, `<link href="./style.css">`, `<img src="./chart.png">`, `./model.glb`, fonts, audio, video. Only page-asset types are served (images, css/js/json/wasm/csv/txt/xml, glb/gltf/bin/obj/mtl/hdr, woff/woff2/ttf/otf, mp3/wav/ogg/mp4/webm); a second `.html` is not — one page per app
+- External `<script src>` / `<link rel="stylesheet" href>` pointing at another host may ONLY use these CDN hosts — anything else is stripped at render time: `cdnjs.cloudflare.com`, `cdn.jsdelivr.net`, `unpkg.com`, `fonts.googleapis.com`, `fonts.gstatic.com`, and the mainland-China mirrors `cdn.bootcdn.net`, `cdn.staticfile.org`, `cdn.staticfile.net`, `registry.npmmirror.com`. Pin exact versions. If the user is in mainland China, prefer the CN mirrors. Reach for a CDN only when a real library (React, ECharts, Chart.js, three.js, …) is needed — a page that depends on one shows nothing when that host is unreachable
 - Use `FileReader` + `<input type="file">` for file processing
-- To let the user save a result (an image, a converted file, a CSV), use the standard download idiom: build a `Blob` (or `canvas.toDataURL()`), point an `<a download="name.ext">` at it and call `.click()`. The host saves the file — no special API
-- Form submit handlers must call `event.preventDefault()` — the sandboxed frame has nowhere to navigate to, and an unprevented submit reloads the app and drops its state
+- To let the user save a result (an image, a converted file, a CSV), use the standard download idiom: build a `Blob` (or `canvas.toDataURL()`), point an `<a download="name.ext">` at it and call `.click()` — no special API
+- Form submit handlers must call `event.preventDefault()` — an unprevented submit reloads the app and drops its state
 - Use emoji or inline SVG for icons
 - Follow `artifact-design` skill conventions for layout and colors
