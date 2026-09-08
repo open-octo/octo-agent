@@ -118,9 +118,7 @@ func injectBeforeBody(doc, script []byte) []byte {
 		return append(append([]byte{}, doc...), script...)
 	}
 	loc := all[len(all)-1]
-	out := make([]byte, 0, len(doc)+len(script))
-	out = append(out, doc[:loc[0]]...)
+	out := append([]byte{}, doc[:loc[0]]...)
 	out = append(out, script...)
-	out = append(out, doc[loc[0]:]...)
-	return out
+	return append(out, doc[loc[0]:]...)
 }

@@ -315,7 +315,7 @@ func serveArtifactAsset(w http.ResponseWriter, r *http.Request, root, rel string
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	abs, ok := resolveWithinRoot(root, filepath.Join(root, filepath.FromSlash(rel)))
+	abs, ok := resolveAssetPath(root, rel)
 	if !ok {
 		writeError(w, http.StatusNotFound, "not found")
 		return
@@ -369,6 +369,46 @@ func serveArtifactEntry(w http.ResponseWriter, r *http.Request, entry string, in
 		return
 	}
 	_, _ = w.Write(out)
+}
+
+// resolveAssetPath turns a cleaned, slash-separated relative path into the
+// on-disk path of that file under root, or reports that no such file is
+// served. It walks the request one segment at a time and, at each step, takes
+// the directory entry whose name matches — so the path it returns is assembled
+// from names the filesystem reported, never from request bytes, and a segment
+// that is not a real entry (`..`, `.`, an empty one, a name with a separator
+// inside) simply matches nothing. The walked path is then checked against the
+// root through symlinks like everything else (resolveWithinRoot).
+func resolveAssetPath(root, rel string) (string, bool) {
+	cur := root
+	segs := strings.Split(rel, "/")
+	for i, seg := range segs {
+		if seg == "" || seg == "." || seg == ".." {
+			return "", false
+		}
+		entries, err := os.ReadDir(cur)
+		if err != nil {
+			return "", false
+		}
+		found := ""
+		for _, e := range entries {
+			if e.Name() == seg {
+				found = e.Name()
+				break
+			}
+		}
+		if found == "" {
+			return "", false
+		}
+		cur = filepath.Join(cur, found)
+		if i < len(segs)-1 {
+			// An intermediate segment has to be a directory (or a link to one).
+			if fi, err := os.Stat(cur); err != nil || !fi.IsDir() {
+				return "", false
+			}
+		}
+	}
+	return resolveWithinRoot(root, cur)
 }
 
 // resolveWithinRoot follows symlinks on both sides and reports the real path

@@ -218,11 +218,9 @@ func withStrippedBanner(doc []byte, removed int, dark bool) []byte {
 		if loc == nil {
 			continue
 		}
-		out := make([]byte, 0, len(doc)+len(banner))
-		out = append(out, doc[:loc[1]]...)
+		out := append([]byte{}, doc[:loc[1]]...)
 		out = append(out, banner...)
-		out = append(out, doc[loc[1]:]...)
-		return out
+		return append(out, doc[loc[1]:]...)
 	}
 	return append([]byte(banner), doc...)
 }

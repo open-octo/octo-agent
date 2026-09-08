@@ -315,6 +315,49 @@ func TestArtifactOrigin_RefusesWhatIsNotAnAsset(t *testing.T) {
 	}
 }
 
+// The asset path is assembled from directory entries, so it can only ever
+// name something that exists under the root by exact name.
+func TestResolveAssetPath(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"a.js", "sub/x.css"} {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(p)), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outside := filepath.Join(filepath.Dir(root), "outside-"+filepath.Base(root)+".js")
+	if err := os.WriteFile(outside, []byte("o"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(outside)
+
+	for rel, want := range map[string]string{
+		"a.js":      filepath.Join(root, "a.js"),
+		"sub/x.css": filepath.Join(root, "sub", "x.css"),
+	} {
+		got, ok := resolveAssetPath(root, rel)
+		if !ok {
+			t.Errorf("%q: not resolved", rel)
+			continue
+		}
+		wantReal, _ := filepath.EvalSymlinks(want)
+		if got != wantReal {
+			t.Errorf("%q: got %q, want %q", rel, got, wantReal)
+		}
+	}
+	// A directory resolves (the caller's Stat refuses it); everything that is
+	// not an exact entry name along the way does not.
+	for _, rel := range []string{
+		"", ".", "..", "../" + filepath.Base(outside), "sub/../a.js", "sub//x.css", "A.js", "a.js/x", "missing.js",
+	} {
+		if got, ok := resolveAssetPath(root, rel); ok {
+			t.Errorf("%q: resolved to %q, want refusal", rel, got)
+		}
+	}
+}
+
 func TestArtifactOrigin_SymlinkOutOfRootIsRefused(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlinks need privileges on Windows")
