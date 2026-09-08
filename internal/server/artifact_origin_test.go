@@ -429,22 +429,41 @@ func TestArtifactOrigin_OnlyLocalPeersOnlyGET(t *testing.T) {
 	}
 }
 
-func TestArtifactOrigin_AssetSizeCap(t *testing.T) {
+// Assets have no size ceiling: a 3D model or a recording is streamed as-is,
+// with Range support for players that seek.
+func TestArtifactOrigin_LargeAssetsStream(t *testing.T) {
 	f := newOriginFixture(t, "<h1>hi</h1>")
 	big := filepath.Join(f.root, "big.bin")
 	fh, err := os.Create(big)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Sparse: no 65 MB actually hit the disk.
-	if err := fh.Truncate(artifactAssetMaxBytes + 1); err != nil {
+	// Sparse: nothing near 200 MB actually hits the disk.
+	const size = 200 << 20
+	if err := fh.Truncate(size); err != nil {
 		fh.Close()
 		t.Skip("cannot create sparse file:", err)
 	}
 	fh.Close()
 	tok := f.token(t)
-	if w := f.originGet(t, tok, "/big.bin"); w.Code != http.StatusRequestEntityTooLarge {
-		t.Errorf("oversized asset: status = %d, want 413", w.Code)
+
+	req := httptest.NewRequest(http.MethodHead, "/big.bin", nil)
+	req.RemoteAddr = "127.0.0.1:1"
+	req.Host = tok + ".artifacts.localhost:8080"
+	w := httptest.NewRecorder()
+	f.srv.http.Handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || w.Header().Get("Content-Length") != "209715200" {
+		t.Errorf("HEAD 200 MB asset: status = %d, Content-Length = %q", w.Code, w.Header().Get("Content-Length"))
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/big.bin", nil)
+	req.RemoteAddr = "127.0.0.1:1"
+	req.Host = tok + ".artifacts.localhost:8080"
+	req.Header.Set("Range", "bytes=0-15")
+	w = httptest.NewRecorder()
+	f.srv.http.Handler.ServeHTTP(w, req)
+	if w.Code != http.StatusPartialContent || w.Body.Len() != 16 {
+		t.Errorf("ranged GET: status = %d, body = %d bytes, want 206 / 16", w.Code, w.Body.Len())
 	}
 }
 

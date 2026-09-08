@@ -44,10 +44,13 @@ import (
 // dev-docs/artifact-origin-design.md is the full account.
 
 const (
-	artifactHostSuffix    = ".artifacts.localhost"
-	artifactHostBare      = "artifacts.localhost"
-	artifactGrantTTL      = 24 * time.Hour
-	artifactAssetMaxBytes = 64 << 20
+	artifactHostSuffix = ".artifacts.localhost"
+	artifactHostBare   = "artifacts.localhost"
+	artifactGrantTTL   = 24 * time.Hour
+	// The entry document is read whole so the gate can parse it; assets are
+	// streamed and carry no cap — a 3D scene's model or a recording is the
+	// user's own file going to the user's own browser over loopback.
+	artifactEntryMaxBytes = 64 << 20
 )
 
 // artifactGrant ties a hostname label to the one entry document it serves and
@@ -306,9 +309,10 @@ func (s *Server) serveArtifactOrigin(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveArtifactAsset serves one file from under root by its cleaned relative
-// path: asset types only, no escaping the root through `..` or a symlink, a
-// size cap, and the type set explicitly so nothing is sniffed. Shared by the
-// artifact origin and the Light App origin.
+// path: asset types only, no escaping the root through `..` or a symlink, and
+// the type set explicitly so nothing is sniffed. No size cap — the bytes are
+// streamed, and a model or a recording can legitimately run to hundreds of
+// megabytes. Shared by the artifact origin and the Light App origin.
 func serveArtifactAsset(w http.ResponseWriter, r *http.Request, root, rel string) {
 	ctype, ok := tools.ArtifactAssetContentType(rel)
 	if !ok {
@@ -323,10 +327,6 @@ func serveArtifactAsset(w http.ResponseWriter, r *http.Request, root, rel string
 	fi, err := os.Stat(abs)
 	if err != nil || fi.IsDir() {
 		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
-	if fi.Size() > artifactAssetMaxBytes {
-		writeError(w, http.StatusRequestEntityTooLarge, "asset exceeds the 64 MB cap")
 		return
 	}
 	f, err := os.Open(abs)
@@ -352,13 +352,13 @@ func serveArtifactEntry(w http.ResponseWriter, r *http.Request, entry string, in
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	// The same ceiling as an asset, not the 10 MB of the srcdoc-era preview
-	// endpoint: that cap paid for base64 inflation and a copy in the srcdoc
-	// attribute, neither of which applies here, and a Light App that embeds
-	// its data or a model inline (12 MB in the wild) used to load fine from
-	// the old JSON endpoint, which had no cap at all. The file is still read
-	// whole, since the gate parses it.
-	if fi.Size() > artifactAssetMaxBytes {
+	// Not the 10 MB of the srcdoc-era preview endpoint: that cap paid for
+	// base64 inflation and a copy in the srcdoc attribute, neither of which
+	// applies here, and a Light App that embeds its data or a model inline
+	// (12 MB in the wild) used to load fine from the old JSON endpoint, which
+	// had no cap at all. A ceiling remains only because the file is read
+	// whole for the gate to parse; anything larger belongs beside the page.
+	if fi.Size() > artifactEntryMaxBytes {
 		writeError(w, http.StatusRequestEntityTooLarge, "page exceeds the 64 MB cap")
 		return
 	}

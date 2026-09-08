@@ -114,7 +114,7 @@ func TestLightAppOrigin_LargeEntryIsServed(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "<h1>big</h1>") || !strings.Contains(w.Body.String(), "__octoLightApp") {
 		t.Errorf("large entry lost content or bridge")
 	}
-	over := strings.Repeat(" ", artifactAssetMaxBytes+1)
+	over := strings.Repeat(" ", artifactEntryMaxBytes+1)
 	srv2 := newLightAppFixture(t, Config{Addr: "127.0.0.1:0", Tools: false}, over)
 	if w := lightAppGet(srv2, "demo.apps.localhost:8080", "/"); w.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("over-cap entry: status = %d, want 413", w.Code)

@@ -87,7 +87,7 @@ body: { "path": "<abs path of the html artifact>" }
 - token 未知或已过期 → 404，不区分原因。
 - `rel` 经 `path.Clean` 后不得以 `..` 开头；拼出的绝对路径 `filepath.EvalSymlinks` 之后必须仍在 `root` 之内（符号链接不能把目录带出去）。
 - 扩展名必须在资产表内（下节）；`.html` / `.htm` 不在表内，因此只有入口那一份 HTML 会被服务。
-- 入口 HTML 与资产同一上限 64 MB（`artifactAssetMaxBytes`）：旧的 10 MB 是为 srcdoc 时代的 base64 膨胀和属性副本付的账，独立源上不存在；把数据或模型内联进页面的轻应用现实中已有 12 MB 的，旧 JSON 端点本来就不限。入口整文件读入（gate 要解析），资产流式 `io.Copy`。
+- 入口 HTML 上限 64 MB（`artifactEntryMaxBytes`），上限只因为 gate 要把整文件读进内存解析；旧的 10 MB 是为 srcdoc 时代的 base64 膨胀和属性副本付的账，独立源上不存在，而把数据内联进页面的轻应用现实中已有 12 MB 的，旧 JSON 端点本来就不限。**资产没有上限**：`http.ServeContent` 流式发出并支持 Range，一个几百 MB 的模型或录像是用户自己磁盘上的文件经回环发给用户自己的浏览器，限它没有理由。
 - 响应头：按扩展名的 `Content-Type`、`X-Content-Type-Options: nosniff`、`Cache-Control: no-store`、`Referrer-Policy: no-referrer`、`Origin-Agent-Cluster: ?1`、以及下一节的 `Content-Security-Policy`。**不发** `Content-Security-Policy: sandbox`，这一头留给旧的 `/api/sessions/{id}/artifacts` 直开端点。
 
 ### 出网边界：CSP
@@ -180,7 +180,7 @@ Markdown 预览继续用 srcdoc iframe，sandbox 常量沿用 `ARTIFACT_SANDBOX`
 宿主不再对入口 HTML 做任何"自包含化"处理，页面按原样从服务端加载：
 
 - **本地 JS / CSS 不再被剥、不再需要内联。** 今天 `stripExternalRefs` 把 `<script src="./app.js">` 和 `<link href="./style.css">` 当作外链一并剥掉，agent 只能把脚本和样式全部写进一个 HTML。独立源上它们是同目录资产，浏览器直接请求。
-- **图片不再序列化成 data: URI。** `<img src="chart.png">`、`background-image: url(bg.png)`、`<img srcset>` 全部按普通 URL 加载。随之消失的还有 `inlineRefBudget`（6 MB）、`inlineRefMax`（40 个文件）和内存开销（base64 的 1.37 倍、UTF-16 再翻倍、srcdoc 属性再存一份）。图片按资产上限 64 MB 单文件流式服务。
+- **图片不再序列化成 data: URI。** `<img src="chart.png">`、`background-image: url(bg.png)`、`<img srcset>` 全部按普通 URL 加载。随之消失的还有 `inlineRefBudget`（6 MB）、`inlineRefMax`（40 个文件）和内存开销（base64 的 1.37 倍、UTF-16 再翻倍、srcdoc 属性再存一份）。图片和其他资产流式服务，不设上限。
 - **白名单外链的剥离仍然存在**，只是唯一实现在 Go gate，规则不变。
 
 `web/src/lib/artifacts.ts` 里随之删除：`ARTIFACT_SANDBOX` 之外的 HTML 专用部分，即 `CDN_ALLOWLIST`、`isAllowedRef`、`stripExternalRefs`、`withStrippedBanner`、`selfContainedDocument`、`inlineLocalRefs` 的 `'document'` 模式及其 CSS `url()` 改写。fragment 模式（Markdown 图片）保留。
