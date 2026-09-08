@@ -32,7 +32,7 @@
 2. **制品源的 Origin 在应用源上是外人。** `isLocalName`（`internal/server/auth.go`）只认 `localhost` 和回环 IP 字面量，`x.artifacts.localhost` 天然不匹配。制品脚本跨源打 `http://127.0.0.1:8088/api/...`，请求带 `Origin: http://x.artifacts.localhost:8088`，`requireAuth` 走回环豁免时被 `originAllowed` 拒掉，返回 403 forbidden origin。这正是现有的 CSRF 门，不新增判定，只加测试钉死。
 3. cookie 是 host-only 的。`auth.ts` 写 cookie 不带 `Domain` 属性，浏览器不会把它发给 `*.localhost` 子域。
 
-Token 泄漏为什么不构成风险：制品源的主机名只在**本机**解析到回环，CDN 运营者从 `Origin` / `Referer` 头里拿到 token 也无处可用；本机进程本来就在信任边界之内（`SECURITY.md` "Loopback is trusted"）。LAN 绑定（`--addr :8088`）下，攻击者伪造 `Host: <token>.artifacts.localhost` 直连 LAN IP 这条路，由制品源 handler 要求 `isLocalRequest` 关掉。
+Token 泄漏为什么不构成风险：制品源的主机名只在**本机**解析到回环，CDN 运营者从 `Origin` / `Referer` 头里拿到 token 也无处可用；本机进程本来就在信任边界之内（`SECURITY.md` "Loopback is trusted"）。LAN 绑定（`--addr :8088`）下，攻击者伪造 `Host: <token>.artifacts.localhost` 直连 LAN IP 这条路，由制品源 handler 要求 `isLocalPeer`（回环 peer 且无转发头）关掉。
 
 残余风险（接受）：
 
@@ -83,12 +83,14 @@ body: { "path": "<abs path of the html artifact>" }
 
 `GET /` 和 `GET /index.html` 返回入口 HTML；其他 `GET /<rel>` 返回 `root` 下的资产。
 
-- 只接受 GET / HEAD；必须 `isLocalRequest(r)`，否则 403。
+- 只接受 GET / HEAD；必须 `isLocalPeer(r)`，否则 403。`isLocalPeer` 是 `isLocalRequest` 去掉 Host 检查：制品源的 Host 按定义不是本地名，照 `isLocalRequest` 判会恒 403，剩下的两个信号（回环 peer、无转发头）就是判据。
 - token 未知或已过期 → 404，不区分原因。
 - `rel` 经 `path.Clean` 后不得以 `..` 开头；拼出的绝对路径 `filepath.EvalSymlinks` 之后必须仍在 `root` 之内（符号链接不能把目录带出去）。
 - 扩展名必须在资产表内（下节）；`.html` / `.htm` 不在表内，因此只有入口那一份 HTML 会被服务。
 - 入口 HTML 上限沿用 `artifactMaxBytes`（10 MB）；资产单文件上限 64 MB，流式 `io.Copy`。
-- 响应头：按扩展名的 `Content-Type`、`X-Content-Type-Options: nosniff`、`Cache-Control: no-store`、`Referrer-Policy: no-referrer`、`Origin-Agent-Cluster: ?1`、`Content-Security-Policy: frame-ancestors http://localhost:* http://127.0.0.1:* http://[::1]:*`。**不发** `Content-Security-Policy: sandbox`，这一头留给旧的 `/api/sessions/{id}/artifacts` 直开端点。
+- 响应头：按扩展名的 `Content-Type`、`X-Content-Type-Options: nosniff`、`Cache-Control: no-store`、`Referrer-Policy: no-referrer`、`Origin-Agent-Cluster: ?1`、`Content-Security-Policy: frame-ancestors http://localhost:* http://127.0.0.1:*`。**不发** `Content-Security-Policy: sandbox`，这一头留给旧的 `/api/sessions/{id}/artifacts` 直开端点。
+
+`frame-ancestors` 里没有 `[::1]`：CSP 的 host-source 语法没有 IPv6 字面量形式，写进去整条指令会被浏览器丢弃。后果是从 `http://[::1]:8088` 打开的 UI 嵌不了这个 frame，所以 grant 接口对 IPv6 字面量 Host 的请求直接回 409，轻应用面板对 `location.hostname` 含冒号的情况同样显示"仅在本机可用"，而不是让浏览器静默拦掉一个空白 frame。
 
 `frame-ancestors` 限制只有本机的应用页能嵌它，防止外部网页把轻应用套进自己的 iframe 做 clickjacking；直接在新标签页里打开 `url` 是顶层导航，不受影响，而且 JS 全跑。这顺带修掉了"open in new tab 什么都不动"的老问题。
 
@@ -115,7 +117,7 @@ body: { "path": "<abs path of the html artifact>" }
 
 ### 轻应用源
 
-`GET http://<slug>.apps.localhost:<port>/` 服务 `~/.octo/light-apps/<slug>/index.html`，`GET /<rel>` 服务同目录资产，规则与制品源相同（`isLocalRequest`、扩展名表、大小上限、符号链接检查、同一组响应头、同一份 Go 白名单 gate）。slug 校验沿用 `handleGetLightApp` 的规则（非空、不含 `..` 和路径分隔符）。
+`GET http://<slug>.apps.localhost:<port>/` 服务 `~/.octo/light-apps/<slug>/index.html`，`GET /<rel>` 服务同目录资产，规则与制品源相同（`isLocalPeer`、扩展名表、大小上限、符号链接检查、同一组响应头、同一份 Go 白名单 gate）。slug 校验沿用 `handleGetLightApp` 的规则（非空、不含 `..` 和路径分隔符）。
 
 不需要 token：轻应用是用户明确保存的内容，目录对本机进程本来可读；而稳定的主机名正是它的价值，应用的 localStorage 跨会话、跨版本持久，且与其他应用天然隔离。
 
@@ -142,7 +144,7 @@ export const ARTIFACT_ORIGIN_SANDBOX = 'allow-scripts allow-same-origin allow-fo
 
 `v` 参数在 agent 重写同一路径时递增，强制 iframe 重新加载；origin 不变，存储保留。
 
-Markdown 预览继续用 srcdoc iframe，sandbox 常量沿用 `ARTIFACT_SANDBOX`（阶段 1 补上 `allow-pointer-lock`，与 `allow="fullscreen"` 一起，四处 iframe 统一）。
+Markdown 预览继续用 srcdoc iframe，sandbox 常量沿用 `ARTIFACT_SANDBOX`（含 `allow-pointer-lock`），`allow="fullscreen; clipboard-write"` 与独立源 frame 一致。
 
 ### 不可用时的表现
 
@@ -184,9 +186,9 @@ Markdown 预览继续用 srcdoc iframe，sandbox 常量沿用 `ARTIFACT_SANDBOX`
 
 ## 分阶段
 
-### 阶段 1：沙箱标志补齐（独立 PR，零安全成本）
+### 阶段 1：沙箱标志补齐
 
-现有四处 iframe 的 `sandbox` 加 `allow-pointer-lock`，`allow` 加 `fullscreen`。验收：探针页在 srcdoc 沙箱里 `canvas.requestPointerLock()` 和 `documentElement.requestFullscreen()` 不抛 SecurityError。这一步先于独立源落地，让 3D 制品立刻可用全屏和指针锁定；阶段 2 删除 HTML 的 srcdoc 路径后，标志留在 Markdown 预览的 iframe 上。
+`allow-pointer-lock` 与 `allow="fullscreen"` 并入阶段 2 的 `ARTIFACT_ORIGIN_SANDBOX` 和 Markdown 预览的 `ARTIFACT_SANDBOX`，不单独发 PR：阶段 2 同时删除 HTML 的 srcdoc 路径，单独给它打标志只能活几天。
 
 ### 阶段 2：制品独立源 + 删除 srcdoc HTML 路径 + Mobile 移除
 
