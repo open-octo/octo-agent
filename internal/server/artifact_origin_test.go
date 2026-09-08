@@ -142,6 +142,23 @@ func TestArtifactGrant_RefusedForNonLocalClients(t *testing.T) {
 	}
 }
 
+// frame-ancestors cannot name an IPv6 literal, so a UI reached over [::1] is
+// told the origin is unavailable rather than handed a frame the browser will
+// refuse to show.
+func TestArtifactGrant_RefusedForIPv6LiteralHost(t *testing.T) {
+	f := newOriginFixture(t, "<h1>hi</h1>")
+	body, _ := json.Marshal(map[string]string{"path": f.entry})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+f.sessionID+"/artifacts/grant", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "[::1]:50000"
+	req.Host = "[::1]:8080"
+	w := httptest.NewRecorder()
+	f.srv.http.Handler.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict {
+		t.Errorf("IPv6 literal host: status = %d, want 409; body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestArtifactGrant_OnlyForHTMLTheSessionWrote(t *testing.T) {
 	f := newOriginFixture(t, "<h1>hi</h1>")
 	// Exists beside the entry but was never written by the session.
@@ -238,6 +255,18 @@ func TestArtifactOrigin_ServesEntryAndAssets(t *testing.T) {
 	}
 	if w := f.originGet(t, tok, "/app.js"); w.Body.String() != "console.log('app')" {
 		t.Errorf("asset body = %q", w.Body.String())
+	}
+
+	// Host header shapes the router must canonicalise: case, a trailing dot.
+	for _, host := range []string{strings.ToUpper(tok) + ".Artifacts.LOCALHOST:8080", tok + ".artifacts.localhost.:8080"} {
+		req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+		req.RemoteAddr = "127.0.0.1:1"
+		req.Host = host
+		w := httptest.NewRecorder()
+		f.srv.http.Handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("Host %s: status = %d, want 200", host, w.Code)
+		}
 	}
 
 	// HEAD works for the entry and for assets.
@@ -407,6 +436,36 @@ func TestArtifactOrigin_OriginIsForeignToTheAppAPI(t *testing.T) {
 	f.srv.http.Handler.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("with the key: status = %d, want 200 (key precedence unchanged)", w.Code)
+	}
+}
+
+// The WebSocket route sits behind the same gate as the JSON API, and a
+// `--cors '*'` configuration must not widen it: the wildcard is never honoured
+// by the auth predicates, only reflected as a CORS header.
+func TestArtifactOrigin_OriginIsForeignToWSAndUnderWildcardCORS(t *testing.T) {
+	f := newOriginFixture(t, "<h1>hi</h1>")
+	tok := f.token(t)
+	origin := "http://" + tok + ".artifacts.localhost:8080"
+
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	req.RemoteAddr = "127.0.0.1:50000"
+	req.Host = "127.0.0.1:8080"
+	req.Header.Set("Origin", origin)
+	w := httptest.NewRecorder()
+	f.srv.http.Handler.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("artifact-origin page reaching /ws: status = %d, want 403", w.Code)
+	}
+
+	wild := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, CORSOrigins: []string{"*"}})
+	req = httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	req.RemoteAddr = "127.0.0.1:50000"
+	req.Host = "127.0.0.1:8080"
+	req.Header.Set("Origin", origin)
+	w = httptest.NewRecorder()
+	wild.http.Handler.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("--cors '*': artifact-origin page calling /api: status = %d, want 403", w.Code)
 	}
 }
 

@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { get } from 'svelte/store'
 import { artifacts, artifactSel, panelContent, panelExpanded } from './stores'
-import { observeArtifact, hydrateArtifact, resetArtifacts, markArtifactOriginUnavailable } from './artifacts'
+import { observeArtifact, hydrateArtifact, resetArtifacts, markArtifactOriginUnavailable, probeArtifactOrigin } from './artifacts'
+import type { Artifact } from './types'
 
 // Nothing a preview document references can authenticate: the srcdoc iframe has
 // no allow-same-origin, so its subresource requests are cross-site and the
@@ -388,9 +389,7 @@ describe('hydrateArtifact — html artifacts on the artifact origin', () => {
     expect(get(artifacts)[0].rev).toBe(2)
   })
 
-  // Last in this file's grant-dependent cases on purpose: the probe flag is
-  // page-lifetime state, so once set no later test in this module is granted.
-  it('a frame that finds the origin unreachable flips the entry and stops later grants', async () => {
+  it('a frame that finds the origin unreachable flips only that entry; later artifacts still ask', async () => {
     const fetchMock = stubFetch()
     await observeHydrated('/tmp/page.html')
 
@@ -400,9 +399,30 @@ describe('hydrateArtifact — html artifacts on the artifact origin', () => {
     expect(get(artifacts)[0].originURL).toBeUndefined()
     const before = grantCalls(fetchMock).length
     await observeHydrated('/tmp/other.html')
-    expect(grantCalls(fetchMock).length).toBe(before)
-    expect(get(artifacts).at(-1)!.originUnavailable).toBe(true)
-    expect(get(artifacts).at(-1)!.code).toBe(html)
+    // A transient failure must not lock the whole page into the notice.
+    expect(grantCalls(fetchMock).length).toBe(before + 1)
+    expect(get(artifacts).at(-1)!.originURL).toBe('http://tok.artifacts.localhost:8088/')
+  })
+
+  it('probes an origin URL once, and marks the entry when the host does not resolve', async () => {
+    const probe = vi.fn(async (url: string) => {
+      if (url.startsWith('http://dead.')) throw new TypeError('Failed to fetch')
+      return new Response(null, { status: 200 })
+    })
+    vi.stubGlobal('fetch', probe)
+    const live = { path: '/tmp/a.html', originURL: 'http://live.artifacts.localhost:8088/' } as Artifact
+    const dead = { path: '/tmp/b.html', originURL: 'http://dead.artifacts.localhost:8088/' } as Artifact
+    artifacts.set([live, dead])
+
+    probeArtifactOrigin(live)
+    probeArtifactOrigin(live) // a theme switch or re-render: no second fetch
+    probeArtifactOrigin(dead)
+    await new Promise(r => setTimeout(r, 0))
+
+    expect(probe.mock.calls.filter(c => String(c[0]).startsWith('http://live.')).length).toBe(1)
+    expect(get(artifacts)[0].originUnavailable).toBeFalsy()
+    expect(get(artifacts)[1].originUnavailable).toBe(true)
+    expect(get(artifacts)[1].originURL).toBeUndefined()
   })
 })
 

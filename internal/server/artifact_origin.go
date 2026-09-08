@@ -129,6 +129,15 @@ func (s *Server) handleGrantArtifactOrigin(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusConflict, "artifact origin unavailable")
 		return
 	}
+	// CSP's host-source grammar has no bracket form, so frame-ancestors
+	// (setArtifactOriginHeaders) cannot name an IPv6 literal: a UI opened at
+	// http://[::1]:8088 would obtain a grant whose frame the browser then
+	// refuses to display, silently. Treat that host as one the origin is
+	// unavailable to, and the panel shows the local-only notice instead.
+	if ip := net.ParseIP(canonicalHost(r.Host)); ip != nil && ip.To4() == nil {
+		writeError(w, http.StatusConflict, "artifact origin unavailable")
+		return
+	}
 	id := r.PathValue("id")
 	var req artifactGrantRequest
 	if err := readBodyJSON(r, &req); err != nil {
@@ -160,14 +169,14 @@ func (s *Server) handleGrantArtifactOrigin(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "path was not written by this session")
 		return
 	}
-	g, err := s.grantArtifact(id, served)
+	g, expires, err := s.grantArtifact(id, served)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url":        artifactOriginURL(g.token, r.Host),
-		"expires_at": g.lastUsed.Add(artifactGrantTTL).UTC().Format(time.RFC3339),
+		"expires_at": expires.UTC().Format(time.RFC3339),
 	})
 }
 
@@ -183,11 +192,15 @@ func artifactOriginURL(token, reqHost string) string {
 }
 
 // grantArtifact returns the live grant for (session, entry), minting one when
-// none exists. Reusing the token across re-issues is what lets a page keep its
-// origin — and its localStorage — while the agent keeps rewriting the file.
-// Expired grants are swept here rather than by a timer: the map only grows
-// while someone is asking for grants.
-func (s *Server) grantArtifact(sessionID, entry string) (*artifactGrant, error) {
+// none exists, together with its current expiry. Reusing the token across
+// re-issues is what lets a page keep its origin — and its localStorage — while
+// the agent keeps rewriting the file. Expired grants are swept here rather than
+// by a timer: the map only grows while someone is asking for grants.
+//
+// The expiry is computed under the lock: lastUsed is also written by
+// lookupGrant on the request goroutines of the frame, so a caller must not read
+// it once the lock is released. The other fields never change after minting.
+func (s *Server) grantArtifact(sessionID, entry string) (*artifactGrant, time.Time, error) {
 	s.artifactGrantsMu.Lock()
 	defer s.artifactGrantsMu.Unlock()
 	now := time.Now()
@@ -201,12 +214,12 @@ func (s *Server) grantArtifact(sessionID, entry string) (*artifactGrant, error) 
 		}
 		if g.sessionID == sessionID && g.entry == entry {
 			g.lastUsed = now
-			return g, nil
+			return g, now.Add(artifactGrantTTL), nil
 		}
 	}
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	g := &artifactGrant{
 		token:     hex.EncodeToString(b),
@@ -216,7 +229,7 @@ func (s *Server) grantArtifact(sessionID, entry string) (*artifactGrant, error) 
 		lastUsed:  now,
 	}
 	s.artifactGrants[g.token] = g
-	return g, nil
+	return g, now.Add(artifactGrantTTL), nil
 }
 
 // lookupGrant resolves a hostname label to its grant, touching the TTL. An

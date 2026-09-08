@@ -60,6 +60,12 @@ export const ARTIFACT_SANDBOX = 'allow-scripts allow-forms allow-modals allow-po
 // and with a real origin it gets storage, downloads, fullscreen and pointer
 // lock natively. The sandbox stays for the two flags it still withholds:
 // allow-popups and allow-top-navigation protect the host tab from the page.
+//
+// What this does leave open: the frame may navigate *itself* anywhere,
+// including to the app origin. That is harmless only as long as the app
+// origin has no endpoint that reflects attacker-controlled HTML — the day one
+// appears, a page navigating its frame there would run in the app origin
+// with these same flags. Keep the app's HTML responses static.
 export const ARTIFACT_ORIGIN_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-modals allow-downloads allow-pointer-lock'
 
 // Tracks which session the current artifacts belong to, so an async fetch that
@@ -89,11 +95,10 @@ let autoOpened = false
 // HTML entry's origin URL. Cleared with the artifacts themselves.
 const revisions = new Map<string, number>()
 
-// Set once a frame found the artifact origin unreachable from this browser
-// (the hostname did not resolve here — an `ssh -L` forward, a webview that
-// cannot resolve *.localhost). Every later HTML artifact then skips the grant
-// and shows the local-only notice straight away rather than failing again.
-let originProbeFailed = false
+// Origin URLs a frame has already reached once. The probe (probeArtifactOrigin)
+// runs per URL, not per render, so a theme switch or a re-write of the same
+// page does not fetch the entry again.
+const probedOrigins = new Set<string>()
 
 function kindOf(path: string): Kind | null {
   const dot = path.lastIndexOf('.')
@@ -513,12 +518,29 @@ type HydratedBody = {
 }
 
 // The frame found the artifact origin unreachable: swap the entry to the
-// local-only notice and stop asking for grants for the rest of this page's
-// life. Identity-matched like every other write-back, so a re-write that
-// already replaced the entry is left alone.
+// local-only notice. Identity-matched like every other write-back, so a
+// re-write that already replaced the entry is left alone. Only this entry is
+// touched — the next artifact asks for its own grant and probes again, so a
+// transient failure never locks the whole page into the notice.
 export function markArtifactOriginUnavailable(a: Artifact): void {
-  originProbeFailed = true
   artifacts.update(list => list.map(e => (e === a ? { ...e, originURL: undefined, originUnavailable: true } : e)))
+}
+
+// The server grants an origin to any client it considers local, but only the
+// browser knows whether `<token>.artifacts.localhost` resolves here: an
+// `ssh -L` forward is byte-for-byte a local request and still fails. A no-cors
+// fetch of the page settles that — an opaque response means a server answered
+// on that hostname (any status counts, including a 404 from some other octo on
+// the same port, which is the one shape this cannot tell apart), a rejection
+// means the host does not exist from this machine. Once per URL.
+export function probeArtifactOrigin(a: Artifact): void {
+  const url = a.originURL
+  if (!url || probedOrigins.has(url)) return
+  probedOrigins.add(url)
+  fetch(url, { mode: 'no-cors', cache: 'no-store' }).catch(() => {
+    probedOrigins.delete(url)
+    markArtifactOriginUnavailable(a)
+  })
 }
 
 // An HTML artifact: the source text for the code view comes from the
@@ -529,7 +551,7 @@ export function markArtifactOriginUnavailable(a: Artifact): void {
 async function buildHTMLEntry(sessionId: string, path: string): Promise<HydratedBody | null> {
   const [res, grant] = await Promise.all([
     fetch(artifactURL(sessionId, path)),
-    originProbeFailed ? Promise.resolve(null) : grantArtifactOrigin(sessionId, path).catch(() => null),
+    grantArtifactOrigin(sessionId, path).catch(() => null),
   ])
   if (!res.ok) return null
   const code = await res.text()

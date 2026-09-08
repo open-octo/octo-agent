@@ -106,6 +106,9 @@ func (s *Server) lightAppBridge(slug string) []byte {
 // script element into the middle of that script would break the page. This is
 // a byte scan rather than a parse on purpose — the gate hands back the file's
 // own bytes when it stripped nothing, and re-serialising here would undo that.
+// The one shape it gets wrong: a page with no closing tag at all whose only
+// `</body>` is such text — the browser implies the tag, and the bridge lands in
+// the string. Accepted as a corner the parse-free approach pays for.
 func injectBeforeBody(doc, script []byte) []byte {
 	if len(script) == 0 {
 		return doc

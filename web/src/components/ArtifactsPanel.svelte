@@ -208,10 +208,14 @@
   // The theme rides in the URL for the gate's banner; laReloadGen makes the
   // reload button produce a fresh URL even when nothing else changed. Only a
   // browser on this machine resolves that hostname, so a remote client (the
-  // server reports `local: false`) sees a notice instead of a frame.
+  // server reports `local: false`) sees a notice instead of a frame — and so
+  // does a UI opened at an IPv6 literal such as http://[::1]:8088, which the
+  // origin's frame-ancestors policy cannot name (CSP has no bracket form).
+  const laHostIsIPv6 = typeof location !== 'undefined' && location.hostname.includes(':')
+  const laAvailable = $derived($localAccess && !laHostIsIPv6)
   const laCurURL = $derived.by(() => {
     void $themeRev
-    if (!laCurSlug || !$localAccess) return ''
+    if (!laCurSlug || !laAvailable) return ''
     const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
     const port = location.port ? `:${location.port}` : ''
     return `http://${laCurSlug}.apps.localhost${port}/?theme=${theme}&v=${laReloadGen}`
@@ -475,7 +479,7 @@
           <button onclick={() => reloadLightApp(laCurSlug)} disabled={laLoading}>{$t('lightapps.reload')}</button>
         </div>
       {/if}
-      {#if laCurSlug && !$localAccess}
+      {#if laCurSlug && !laAvailable}
         <div class="empty"><iconify-icon icon="ant-design:desktop-outlined" width="28"></iconify-icon><span>{$t('lightapps.local_only')}</span></div>
       {:else if laCurURL}
         {#key laReloadGen}

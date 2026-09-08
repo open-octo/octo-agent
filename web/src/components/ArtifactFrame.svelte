@@ -8,7 +8,7 @@
   //   - a Markdown preview renders by srcdoc, as before.
   import type { Artifact } from '../lib/types'
   import { t } from '../lib/i18n'
-  import { ARTIFACT_SANDBOX, ARTIFACT_ORIGIN_SANDBOX, markArtifactOriginUnavailable, themeRev } from '../lib/artifacts'
+  import { ARTIFACT_SANDBOX, ARTIFACT_ORIGIN_SANDBOX, probeArtifactOrigin, themeRev } from '../lib/artifacts'
 
   let { artifact }: { artifact: Artifact } = $props()
 
@@ -24,16 +24,11 @@
   // different URL, so the frame reloads even though the origin did not change.
   const src = $derived(artifact.originURL ? `${artifact.originURL}?theme=${theme}&v=${artifact.rev ?? 0}` : '')
 
-  // The server grants an origin to any client it considers local, but only
-  // the browser knows whether `<token>.artifacts.localhost` resolves here: an
-  // `ssh -L` forward is byte-for-byte a local request and still fails. A
-  // no-cors fetch of the page settles that — an opaque response means the
-  // host answered, a rejection means it does not exist from this machine.
+  // Only the browser knows whether the origin's hostname resolves here; the
+  // probe (once per URL) flips the entry to the local-only notice when it
+  // does not. See probeArtifactOrigin.
   $effect(() => {
-    const a = artifact
-    const url = a.originURL
-    if (!url) return
-    fetch(url, { mode: 'no-cors', cache: 'no-store' }).catch(() => markArtifactOriginUnavailable(a))
+    probeArtifactOrigin(artifact)
   })
 </script>
 
