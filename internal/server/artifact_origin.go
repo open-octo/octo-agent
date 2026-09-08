@@ -263,20 +263,21 @@ func (s *Server) lookupGrant(token string) *artifactGrant {
 //   - Origin-Agent-Cluster: asks the browser to key the agent cluster on the
 //     full origin, so document.domain can never fold a subdomain back into
 //     the site.
-//   - frame-ancestors: only the app on this machine may embed the page —
-//     keeps a hostile site from framing a Light App for clickjacking. A
+//   - Content-Security-Policy (artifactCSP): the page may load from and talk
+//     to its own origin and the allowlisted CDNs, nothing else — the run-time
+//     half of the allowlist the gate applies to static references. Its
+//     frame-ancestors clause lets only the app on this machine embed the page,
+//     which keeps a hostile site from framing a Light App for clickjacking; a
 //     top-level open in a new tab is a navigation, not an embedding, and is
-//     unaffected. No IPv6 literal: CSP's host-source grammar has no bracket
-//     form, and one malformed source would void the whole directive.
-//   - Deliberately no `sandbox` directive: this is the page's own origin, and
-//     scripts are the point. The `/api/…/artifacts` direct-open endpoint keeps
-//     its CSP sandbox.
+//     unaffected. Deliberately no `sandbox` directive: this is the page's own
+//     origin, and scripts are the point. The `/api/…/artifacts` direct-open
+//     endpoint keeps its CSP sandbox.
 func setArtifactOriginHeaders(h http.Header) {
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("Origin-Agent-Cluster", "?1")
-	h.Set("Content-Security-Policy", "frame-ancestors http://localhost:* http://127.0.0.1:*")
+	h.Set("Content-Security-Policy", artifactCSP)
 }
 
 func (s *Server) serveArtifactOrigin(w http.ResponseWriter, r *http.Request) {

@@ -68,7 +68,7 @@ Agent-generated HTML artifacts can also be saved to Light Apps with one click fr
 The agent follows these rules when generating a Light App:
 
 - Files the page needs live in the app's directory and are referenced by relative path; external scripts and stylesheets are allowed only from well-known CDNs (cdnjs, jsdelivr, unpkg, Google Fonts and their mainland-China mirrors) and are otherwise stripped
-- No calls to octo's API from inside the page
+- The page's network is limited to its own files and those CDNs — no calls to other APIs, no images from other hosts, no access to octo's API
 - File processing via `FileReader` + `<input type="file">`
 - Saving results (a generated image, a converted file) via the standard `<a download>` idiom — the host writes the file: a regular download in the browser, the OS save dialog in the desktop app
 - Icons via emoji or inline SVG

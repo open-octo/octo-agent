@@ -65,7 +65,7 @@ Agent 生成的 HTML artifact 也可以在 Artifacts 面板中一键「保存到
 Agent 在生成轻应用时遵守以下规则：
 
 - 页面需要的文件放在应用目录里，用相对路径引用；外部脚本和样式只允许来自知名 CDN（cdnjs、jsdelivr、unpkg、Google Fonts 及其国内镜像），其余会在渲染时被剥离
-- 页面内不调用 octo 的 API
+- 页面的网络访问只限于自己的文件和这些 CDN：不能调用其他 API、不能加载其他站点的图片、不能访问 octo 的 API
 - 文件处理用 `FileReader` + `<input type="file">`
 - 导出文件（生成的图片、转换后的文件等）用标准的 `<a download>` 写法，宿主负责落盘：浏览器里走正常下载，桌面端弹出系统保存对话框
 - 图标用 emoji 或内联 SVG

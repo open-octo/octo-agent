@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -39,6 +40,45 @@ var artifactCDNAllowlist = map[string]bool{
 	"cdn.staticfile.org":     true,
 	"cdn.staticfile.net":     true,
 	"registry.npmmirror.com": true,
+}
+
+// artifactCSP is the Content-Security-Policy every response from an artifact
+// or Light App origin carries. The gate above removes the *static* external
+// scripts and stylesheets a page declares; this makes the same allowlist hold
+// for everything the page does at run time — fetch, XHR, WebSocket, beacons,
+// images, fonts, media, workers, frames, dynamically inserted scripts — so a
+// page that can read the files beside it cannot ship them anywhere but its own
+// origin and the allowlisted CDNs. `'unsafe-inline'` and `'unsafe-eval'` are
+// granted for scripts and styles: the page's own code is inline by nature and
+// libraries compile templates or WebAssembly; the policy is an egress boundary,
+// not an XSS defence (the same-origin boundary does that job).
+//
+// What it cannot close: the frame navigating itself to another site with data
+// in the URL — CSP has no directive for navigation, and the sandbox only
+// withholds top-level navigation. `form-action 'self'` closes the form-submit
+// shape of that; the `location` shape stays open and is documented as such in
+// dev-docs/artifact-origin-design.md.
+//
+// frame-ancestors has no IPv6 literal: CSP's host-source grammar has no
+// bracket form, and one malformed source would void the whole directive. A UI
+// reached over [::1] is therefore told the origin is unavailable instead.
+var artifactCSP = buildArtifactCSP()
+
+func buildArtifactCSP() string {
+	hosts := make([]string, 0, len(artifactCDNAllowlist))
+	for h := range artifactCDNAllowlist {
+		hosts = append(hosts, "https://"+h)
+	}
+	sort.Strings(hosts)
+	cdn := strings.Join(hosts, " ")
+	return strings.Join([]string{
+		"default-src 'self' data: blob: " + cdn,
+		"script-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: " + cdn,
+		"style-src 'self' 'unsafe-inline' data: blob: " + cdn,
+		"form-action 'self'",
+		"base-uri 'self'",
+		"frame-ancestors http://localhost:* http://127.0.0.1:*",
+	}, "; ")
 }
 
 // artifactRefAllowed reports whether an absolute reference may stay: only an

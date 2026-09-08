@@ -22,12 +22,14 @@ legibility at the panel's docked width.
 
 - **The page runs on its own origin — a real one, not the app's.** HTML
   renders from `http://<token>.artifacts.localhost:<port>/` inside a frame, so
-  everything a normal web page can do works: `localStorage` and IndexedDB
-  persist, `<a download>` saves a file, `requestFullscreen()` and pointer lock
-  work, WebGL and Web Audio work, `fetch` to CORS-enabled hosts works. What it
-  cannot do is reach octo: it has no cookies for the app, and any request to
-  the app's `/api` is refused. Do not write code that talks to octo's API from
-  inside the page.
+  everything a normal web page can do locally works: `localStorage` and
+  IndexedDB persist, `<a download>` saves a file, `requestFullscreen()` and
+  pointer lock work, WebGL and Web Audio work. Its network is fenced by a
+  Content-Security-Policy: the page may load from and talk to its own origin
+  and the allowlisted CDN hosts below, and nothing else — no `fetch` to other
+  APIs, no images or media from other hosts, no reaching octo's `/api`. Data
+  the page needs must be in the page or in a file beside it; do not write code
+  that calls external services or octo's API from inside the page.
 - **Files beside the page load by relative path.** `<script src="./app.js">`,
   `<link href="./style.css">`, `<img src="./chart.png">`,
   `loader.load('./model.glb')`, fonts, audio and video in the same directory

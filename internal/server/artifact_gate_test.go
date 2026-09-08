@@ -186,6 +186,63 @@ func TestGateArtifactHTML_OnlyRenderAffectingRelsCount(t *testing.T) {
 	}
 }
 
+// The policy is the run-time half of the allowlist: every host the gate
+// accepts is a permitted source, nothing else is, and the page's own inline
+// code keeps running.
+func TestArtifactCSP(t *testing.T) {
+	csp := artifactCSP
+	directives := map[string]string{}
+	for _, d := range strings.Split(csp, "; ") {
+		name, rest, _ := strings.Cut(d, " ")
+		directives[name] = rest
+	}
+	for _, name := range []string{"default-src", "script-src", "style-src", "form-action", "base-uri", "frame-ancestors"} {
+		if _, ok := directives[name]; !ok {
+			t.Errorf("missing directive %s in %q", name, csp)
+		}
+	}
+	for host := range artifactCDNAllowlist {
+		for _, name := range []string{"default-src", "script-src", "style-src"} {
+			if !strings.Contains(" "+directives[name]+" ", " https://"+host+" ") {
+				t.Errorf("%s lacks allowlisted host %s: %q", name, host, directives[name])
+			}
+		}
+	}
+	if strings.Contains(csp, "*") && !strings.Contains(csp, "http://localhost:* http://127.0.0.1:*") {
+		t.Errorf("unexpected wildcard in %q", csp)
+	}
+	if strings.Contains(strings.Replace(csp, "frame-ancestors http://localhost:* http://127.0.0.1:*", "", 1), "*") {
+		t.Errorf("a wildcard source outside frame-ancestors would void the egress boundary: %q", csp)
+	}
+	if strings.Contains(directives["default-src"], "'unsafe-inline'") || strings.Contains(directives["default-src"], "'unsafe-eval'") {
+		t.Errorf("default-src must not carry the script exemptions: %q", directives["default-src"])
+	}
+	if !strings.Contains(directives["script-src"], "'unsafe-inline'") || !strings.Contains(directives["script-src"], "'unsafe-eval'") {
+		t.Errorf("inline and eval must stay allowed for the page's own scripts: %q", directives["script-src"])
+	}
+	if !strings.Contains(directives["style-src"], "'unsafe-inline'") {
+		t.Errorf("inline styles must stay allowed: %q", directives["style-src"])
+	}
+	for _, name := range []string{"default-src", "script-src", "style-src"} {
+		if !strings.Contains(directives[name], "'self'") || !strings.Contains(directives[name], "data:") || !strings.Contains(directives[name], "blob:") {
+			t.Errorf("%s must allow self, data: and blob:: %q", name, directives[name])
+		}
+	}
+	if directives["form-action"] != "'self'" || directives["base-uri"] != "'self'" {
+		t.Errorf("form-action/base-uri must be 'self': %q", csp)
+	}
+	if strings.Contains(csp, "[::1]") {
+		t.Errorf("an IPv6 literal would void frame-ancestors: %q", csp)
+	}
+	// The gate and the policy must agree: a host the gate keeps is one the
+	// browser will load from.
+	for host := range artifactCDNAllowlist {
+		if !artifactRefAllowed("https://" + host + "/x.js") {
+			t.Errorf("gate rejects allowlisted host %s", host)
+		}
+	}
+}
+
 func TestGateArtifactHTML_DarkBanner(t *testing.T) {
 	out := string(gateArtifactHTML([]byte(`<html><head><script src="https://evil.com/x.js"></script></head><body></body></html>`), true))
 	if !strings.Contains(out, "#2b2111") {

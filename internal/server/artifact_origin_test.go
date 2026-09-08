@@ -231,7 +231,7 @@ func TestArtifactOrigin_ServesEntryAndAssets(t *testing.T) {
 			"X-Content-Type-Options":  "nosniff",
 			"Referrer-Policy":         "no-referrer",
 			"Origin-Agent-Cluster":    "?1",
-			"Content-Security-Policy": "frame-ancestors http://localhost:* http://127.0.0.1:*",
+			"Content-Security-Policy": artifactCSP,
 		} {
 			if got := w.Header().Get(h); got != want {
 				t.Errorf("GET %s: %s = %q, want %q", target, h, got, want)

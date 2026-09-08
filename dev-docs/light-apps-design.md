@@ -91,7 +91,10 @@ octo-agent 已经有一套完整的生成 + 展示循环：Agent 生成 HTML →
 `/api`、`/ws` 和 UI（`hostRouter` 在 mux 之前分流）。
 
 入口 `index.html` 经过 Go 侧的 CDN 白名单 gate（`internal/server/artifact_gate.go`）：白名单外的
-`<script src>` / 渲染相关 `<link href>` 被剥离并加横幅，相对路径不算外链、原样保留。同目录里只服务
+`<script src>` / 渲染相关 `<link href>` 被剥离并加横幅，相对路径不算外链、原样保留。同一份白名单在
+运行时由响应头 `Content-Security-Policy` 执行（`default-src 'self' data: blob:` + 白名单 CDN，
+`form-action 'self'`）：页面能读同目录文件，但 fetch / 图片 / 媒体 / worker / 动态插入的脚本只能指向
+自己的 origin 和白名单 CDN，数据带不出去。CSP 关不掉的只有 frame 自导航到别处并把数据挂在 URL 上这一条。同目录里只服务
 资产类型（`tools.ArtifactAssetContentType`），第二个 `.html` 不服务——一个应用一个入口。
 
 不需要 token：轻应用是用户明确保存的内容，目录对本机进程本来可读；稳定的主机名正是它的价值，
