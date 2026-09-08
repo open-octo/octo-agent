@@ -352,8 +352,14 @@ func serveArtifactEntry(w http.ResponseWriter, r *http.Request, entry string, in
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	if fi.Size() > artifactMaxBytes {
-		writeError(w, http.StatusRequestEntityTooLarge, "artifact exceeds the 10 MB preview cap")
+	// The same ceiling as an asset, not the 10 MB of the srcdoc-era preview
+	// endpoint: that cap paid for base64 inflation and a copy in the srcdoc
+	// attribute, neither of which applies here, and a Light App that embeds
+	// its data or a model inline (12 MB in the wild) used to load fine from
+	// the old JSON endpoint, which had no cap at all. The file is still read
+	// whole, since the gate parses it.
+	if fi.Size() > artifactAssetMaxBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, "page exceeds the 64 MB cap")
 		return
 	}
 	src, err := os.ReadFile(entry)

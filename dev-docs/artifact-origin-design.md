@@ -87,7 +87,7 @@ body: { "path": "<abs path of the html artifact>" }
 - token 未知或已过期 → 404，不区分原因。
 - `rel` 经 `path.Clean` 后不得以 `..` 开头；拼出的绝对路径 `filepath.EvalSymlinks` 之后必须仍在 `root` 之内（符号链接不能把目录带出去）。
 - 扩展名必须在资产表内（下节）；`.html` / `.htm` 不在表内，因此只有入口那一份 HTML 会被服务。
-- 入口 HTML 上限沿用 `artifactMaxBytes`（10 MB）；资产单文件上限 64 MB，流式 `io.Copy`。
+- 入口 HTML 与资产同一上限 64 MB（`artifactAssetMaxBytes`）：旧的 10 MB 是为 srcdoc 时代的 base64 膨胀和属性副本付的账，独立源上不存在；把数据或模型内联进页面的轻应用现实中已有 12 MB 的，旧 JSON 端点本来就不限。入口整文件读入（gate 要解析），资产流式 `io.Copy`。
 - 响应头：按扩展名的 `Content-Type`、`X-Content-Type-Options: nosniff`、`Cache-Control: no-store`、`Referrer-Policy: no-referrer`、`Origin-Agent-Cluster: ?1`、以及下一节的 `Content-Security-Policy`。**不发** `Content-Security-Policy: sandbox`，这一头留给旧的 `/api/sessions/{id}/artifacts` 直开端点。
 
 ### 出网边界：CSP

@@ -102,6 +102,25 @@ func TestLightAppOrigin_DesktopInjectsTheDownloadBridge(t *testing.T) {
 	}
 }
 
+// A Light App that inlines its data can run well past 10 MB; the old JSON
+// endpoint served it without a cap and the origin must not regress that.
+func TestLightAppOrigin_LargeEntryIsServed(t *testing.T) {
+	big := strings.Repeat(" ", 12<<20) + "<h1>big</h1>"
+	srv := newLightAppFixture(t, Config{Addr: "127.0.0.1:0", Tools: false}, big)
+	w := lightAppGet(srv, "demo.apps.localhost:8080", "/")
+	if w.Code != http.StatusOK {
+		t.Fatalf("12 MB entry: status = %d, body=%s", w.Code, w.Body.String()[:min(200, w.Body.Len())])
+	}
+	if !strings.Contains(w.Body.String(), "<h1>big</h1>") || !strings.Contains(w.Body.String(), "__octoLightApp") {
+		t.Errorf("large entry lost content or bridge")
+	}
+	over := strings.Repeat(" ", artifactAssetMaxBytes+1)
+	srv2 := newLightAppFixture(t, Config{Addr: "127.0.0.1:0", Tools: false}, over)
+	if w := lightAppGet(srv2, "demo.apps.localhost:8080", "/"); w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("over-cap entry: status = %d, want 413", w.Code)
+	}
+}
+
 func TestLightAppOrigin_EntryGoesThroughTheGate(t *testing.T) {
 	srv := newLightAppFixture(t, Config{Addr: "127.0.0.1:0", Tools: false},
 		`<html><head><script src="https://evil.example.com/x.js"></script></head><body><h1>demo</h1></body></html>`)
