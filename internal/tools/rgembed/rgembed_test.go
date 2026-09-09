@@ -1,11 +1,13 @@
 package rgembed
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 func TestPath_SystemRG(t *testing.T) {
@@ -26,9 +28,14 @@ func TestPath_ExtractEmbedded(t *testing.T) {
 		t.Skip("embeddedRG is nil — build with -tags=embedrg to run this test")
 	}
 
-	origPath := os.Getenv("PATH")
-	os.Setenv("PATH", "/nonexistent")
-	defer os.Setenv("PATH", origPath)
+	// Extract into a throwaway home. A bare `go test` leaves version at
+	// "unknown" (it is only injected via -ldflags), so without this the test
+	// drops a multi-megabyte rg-unknown into the developer's real ~/.octo/bin
+	// — a directory internal/tools/sandbox.go puts on the child PATH.
+	home := t.TempDir()
+	t.Setenv("HOME", home)        // os.UserHomeDir on unix
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on windows
+	t.Setenv("PATH", "/nonexistent")
 
 	p, err := Path()
 	if err != nil {
@@ -49,11 +56,14 @@ func TestPath_ExtractEmbedded(t *testing.T) {
 	}
 
 	// A second call must reuse the extracted copy instead of rewriting it;
-	// on Windows rewriting means renaming over an .exe that a concurrent
-	// grep/glob may still be running, which fails with "Access is denied".
-	before, err := os.Stat(p)
-	if err != nil {
-		t.Fatalf("stat(%q): %v", p, err)
+	// rewriting is what lands on a live .exe on Windows. Backdating the file
+	// first means a rewrite is visible regardless of filesystem timestamp
+	// granularity. This only separates the two implementations on Windows —
+	// on unix the executable bit already cached correctly — and it needs
+	// -tags=embedrg, so TestExtracted is what CI relies on.
+	past := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(p, past, past); err != nil {
+		t.Fatalf("chtimes(%q): %v", p, err)
 	}
 	p2, err := Path()
 	if err != nil {
@@ -66,9 +76,9 @@ func TestPath_ExtractEmbedded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat(%q): %v", p2, err)
 	}
-	if !after.ModTime().Equal(before.ModTime()) {
-		t.Errorf("second Path() re-extracted the binary (mtime %v -> %v)",
-			before.ModTime(), after.ModTime())
+	if !after.ModTime().Equal(past) {
+		t.Errorf("second Path() re-extracted the binary (mtime %v, want %v)",
+			after.ModTime(), past)
 	}
 
 	out, err := exec.Command(p, "--version").Output()
@@ -139,5 +149,50 @@ func TestExtracted(t *testing.T) {
 		if extracted(noexec) {
 			t.Error("extracted() = true for a non-executable copy")
 		}
+	}
+}
+
+// TestExtract_RenameFallback covers the branch where the rename loses a race
+// with another process: the failure may be swallowed only when a complete
+// binary is actually in place.
+func TestExtract_RenameFallback(t *testing.T) {
+	origEmbedded := embeddedRG
+	defer func() { embeddedRG = origEmbedded }()
+	embeddedRG = []byte("0123456789")
+
+	origRename := renameFile
+	defer func() { renameFile = origRename }()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	dir, err := octoBinDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, rgBinName())
+
+	renameFile = func(string, string) error {
+		return errors.New("Access is denied.")
+	}
+	if _, err := extract(); err == nil {
+		t.Error("extract() error = nil when the rename failed with no binary in place")
+	}
+
+	// Now the loser of the race finds the complete copy the winner just put
+	// there, which is exactly what it was about to write itself.
+	renameFile = func(_, newpath string) error {
+		if err := os.WriteFile(newpath, embeddedRG, 0755); err != nil {
+			t.Fatal(err)
+		}
+		return errors.New("Access is denied.")
+	}
+	got, err := extract()
+	if err != nil {
+		t.Fatalf("extract() error = %v, want nil (complete binary in place)", err)
+	}
+	if got != bin {
+		t.Errorf("extract() = %q, want %q", got, bin)
 	}
 }

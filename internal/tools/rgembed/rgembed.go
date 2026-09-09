@@ -14,6 +14,10 @@ import (
 	"runtime"
 )
 
+// renameFile is os.Rename, indirected so tests can exercise the race
+// fallback in extract() without holding a real Windows file lock.
+var renameFile = os.Rename
+
 // version is the ripgrep release version embedded at build time.
 // Overridden via -ldflags in the Makefile.
 var version = "unknown"
@@ -76,13 +80,14 @@ func extract() (string, error) {
 		return "", fmt.Errorf("rgembed: chmod: %w", err)
 	}
 
-	if err := os.Rename(tmp.Name(), bin); err != nil {
+	if err := renameFile(tmp.Name(), bin); err != nil {
 		os.Remove(tmp.Name())
-		// Windows refuses to replace an .exe that any process is currently
-		// running, so a concurrent grep/glob whose rg is still alive makes
-		// this rename fail with "Access is denied". A complete copy already
-		// sitting at bin is precisely what we were trying to write, so treat
-		// the race as success rather than failing the tool call.
+		// Windows refuses to replace an .exe while any process still holds a
+		// handle to it — another octo extracting concurrently, an rg that has
+		// not fully exited, or a virus scanner or search indexer sweeping the
+		// freshly written file — and reports "Access is denied". A complete
+		// copy already sitting at bin is precisely what we were about to
+		// write, so treat that as success rather than failing the tool call.
 		if extracted(bin) {
 			return bin, nil
 		}
@@ -97,6 +102,10 @@ func extract() (string, error) {
 // from file attributes and only ever sets 0111 for directories, so an
 // executable-bit check there never matches a cached copy and every call
 // re-extracts. Unix keeps the bit check as an extra guard.
+//
+// Matching size is taken as proof the copy is ours. Anyone able to plant a
+// same-sized file in the user's own ~/.octo/bin can already do worse, so the
+// cheaper check wins over hashing 5 MB on every grep and glob.
 func extracted(bin string) bool {
 	info, err := os.Stat(bin)
 	if err != nil || info.IsDir() || info.Size() != int64(len(embeddedRG)) {
