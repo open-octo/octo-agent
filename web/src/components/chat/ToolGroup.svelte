@@ -14,15 +14,21 @@
 
   // Tool ids whose command was just copied, so the button can acknowledge it.
   let copied = $state<Record<string, boolean>>({})
+  // Live acknowledgement timers, keyed by tool id: a second click has to cancel
+  // the first one's timer, or it clears the checkmark the second click just set.
+  const copyTimers: Record<string, ReturnType<typeof setTimeout>> = {}
 
   async function copyCommand(cmd: string, toolId: string) {
     try {
       await navigator.clipboard.writeText(cmd)
-      copied = { ...copied, [toolId]: true }
-      setTimeout(() => { copied = { ...copied, [toolId]: false } }, 1500)
     } catch {
+      // Undefined outside a secure context (plain-HTTP LAN serve), or denied.
       showToast(tr('tools.copy_failed'), 'error')
+      return
     }
+    copied = { ...copied, [toolId]: true }
+    clearTimeout(copyTimers[toolId])
+    copyTimers[toolId] = setTimeout(() => { copied = { ...copied, [toolId]: false } }, 1500)
   }
 
   // Undo an overwrite: restore the pre-write version from the trash, moving the
@@ -317,9 +323,13 @@
   // ellipsized to one 11px line, and terminal commands carry their meaning at
   // the END (`cd <long path> && the-thing-that-matters`), so expanding a card
   // used to lose the command entirely — output with no idea what produced it.
+  //
+  // Read from args rather than the header's `tool.summary || …`: summary is a
+  // label slot no producer fills today, and if one ever does it will be a
+  // shortened label — the body wants the command as run.
   function terminalCommand(tool: any): string {
     if (tool.name !== 'terminal' && tool.name !== 'bash') return ''
-    return tool.args ? argSummary(tool.name, tool.args) : (tool.summary ?? '')
+    return tool.args ? argSummary(tool.name, tool.args) : ''
   }
 
   // A non-zero exit is not a tool error either — terminal reports it via the
@@ -534,13 +544,19 @@
           <!-- The command, in full, above whichever body follows: wrapped
                rather than ellipsized, selectable, and copyable. Rendered for
                every terminal outcome (output, no output, error) so expanding
-               a card always answers "what ran?". -->
+               a card always answers "what ran?".
+               The copy label is built as two whole $t() calls rather than
+               $t(cond ? a : b) so i18n.coverage.test.ts's literal-argument
+               sweep can see both keys. -->
+          {@const copyLabel = copied[tool.id] ? $t('tools.copied') : $t('tools.copy_command')}
           <div class="cmd-block">
             <span class="term-prompt">$</span>
             <code class="cmd-text">{cmdText}</code>
             <button
+              type="button"
               class="cmd-copy"
-              title={$t(copied[tool.id] ? 'tools.copied' : 'tools.copy_command')}
+              title={copyLabel}
+              aria-label={copyLabel}
               onclick={() => copyCommand(cmdText, tool.id)}
             >
               <iconify-icon icon={copied[tool.id] ? 'lucide:check' : 'lucide:copy'} width="13"></iconify-icon>
@@ -671,6 +687,16 @@
           {:else if tool.result}
             <pre class="tool-output">{prettyResult(tool.result)}</pre>
           {/if}
+        {:else if cmdText && tool.result}
+          <!-- Same card, reloaded: a replayed turn carries no stdout (history
+               sends tool_call + tool_result only, and tool_stdout replays just
+               the in-flight tool), so a finished terminal card lands here
+               instead of the streaming branch above. Keep it on the terminal
+               surface — otherwise the same command's output is dark while it
+               runs and light after a refresh. -->
+          <div class="term-wrap">
+            <pre class="terminal-output" use:pinBottom>{prettyResult(tool.result)}</pre>
+          </div>
         {:else if tool.result}
           <pre class="tool-output">{prettyResult(tool.result)}</pre>
         {/if}
