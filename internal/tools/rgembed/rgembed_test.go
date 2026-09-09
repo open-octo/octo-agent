@@ -42,8 +42,33 @@ func TestPath_ExtractEmbedded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat(%q): %v", p, err)
 	}
-	if info.Mode()&0111 == 0 {
+	// Windows synthesises the mode from file attributes and never sets 0111
+	// for regular files, so the bit only carries meaning elsewhere.
+	if runtime.GOOS != "windows" && info.Mode()&0111 == 0 {
 		t.Errorf("%q is not executable", p)
+	}
+
+	// A second call must reuse the extracted copy instead of rewriting it;
+	// on Windows rewriting means renaming over an .exe that a concurrent
+	// grep/glob may still be running, which fails with "Access is denied".
+	before, err := os.Stat(p)
+	if err != nil {
+		t.Fatalf("stat(%q): %v", p, err)
+	}
+	p2, err := Path()
+	if err != nil {
+		t.Fatalf("second Path() error: %v", err)
+	}
+	if p2 != p {
+		t.Errorf("second Path() = %q, want %q", p2, p)
+	}
+	after, err := os.Stat(p2)
+	if err != nil {
+		t.Fatalf("stat(%q): %v", p2, err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Errorf("second Path() re-extracted the binary (mtime %v -> %v)",
+			before.ModTime(), after.ModTime())
 	}
 
 	out, err := exec.Command(p, "--version").Output()
@@ -73,4 +98,46 @@ func TestRgBinName(t *testing.T) {
 
 func hasSuffix(s, suffix string) bool {
 	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
+}
+
+func TestExtracted(t *testing.T) {
+	orig := embeddedRG
+	defer func() { embeddedRG = orig }()
+	embeddedRG = []byte("0123456789")
+
+	dir := t.TempDir()
+
+	if extracted(filepath.Join(dir, "absent")) {
+		t.Error("extracted() = true for a missing file")
+	}
+
+	short := filepath.Join(dir, "short")
+	if err := os.WriteFile(short, embeddedRG[:5], 0755); err != nil {
+		t.Fatal(err)
+	}
+	if extracted(short) {
+		t.Error("extracted() = true for a truncated copy")
+	}
+
+	full := filepath.Join(dir, "full")
+	if err := os.WriteFile(full, embeddedRG, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if !extracted(full) {
+		t.Error("extracted() = false for a complete copy")
+	}
+
+	if extracted(dir) {
+		t.Error("extracted() = true for a directory")
+	}
+
+	if runtime.GOOS != "windows" {
+		noexec := filepath.Join(dir, "noexec")
+		if err := os.WriteFile(noexec, embeddedRG, 0644); err != nil {
+			t.Fatal(err)
+		}
+		if extracted(noexec) {
+			t.Error("extracted() = true for a non-executable copy")
+		}
+	}
 }

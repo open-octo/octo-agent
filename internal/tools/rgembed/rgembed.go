@@ -51,7 +51,7 @@ func extract() (string, error) {
 	bin := filepath.Join(dir, rgBinName())
 
 	// Already extracted and valid — nothing to do.
-	if info, err := os.Stat(bin); err == nil && info.Mode()&0111 != 0 {
+	if extracted(bin) {
 		return bin, nil
 	}
 
@@ -78,10 +78,31 @@ func extract() (string, error) {
 
 	if err := os.Rename(tmp.Name(), bin); err != nil {
 		os.Remove(tmp.Name())
+		// Windows refuses to replace an .exe that any process is currently
+		// running, so a concurrent grep/glob whose rg is still alive makes
+		// this rename fail with "Access is denied". A complete copy already
+		// sitting at bin is precisely what we were trying to write, so treat
+		// the race as success rather than failing the tool call.
+		if extracted(bin) {
+			return bin, nil
+		}
 		return "", fmt.Errorf("rgembed: rename: %w", err)
 	}
 
 	return bin, nil
+}
+
+// extracted reports whether bin already holds a complete copy of the embedded
+// binary. Size is the portable signal: on Windows os.Stat synthesises the mode
+// from file attributes and only ever sets 0111 for directories, so an
+// executable-bit check there never matches a cached copy and every call
+// re-extracts. Unix keeps the bit check as an extra guard.
+func extracted(bin string) bool {
+	info, err := os.Stat(bin)
+	if err != nil || info.IsDir() || info.Size() != int64(len(embeddedRG)) {
+		return false
+	}
+	return runtime.GOOS == "windows" || info.Mode()&0111 != 0
 }
 
 // octoBinDir returns ~/.octo/bin, creating it if necessary.
