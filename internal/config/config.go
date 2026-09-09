@@ -133,8 +133,11 @@ type Endpoint struct {
 	// that requires a non-standard auth header take over from the client
 	// default. Values are static plaintext; no env-var interpolation.
 	Headers map[string]string `yaml:"headers,omitempty"`
-	// RPM caps how many requests octo starts against this endpoint per rolling
-	// 60-second window; MaxConcurrency caps how many may be in flight at once.
+	// RPM caps how many provider calls octo starts against this endpoint per
+	// rolling 60-second window; MaxConcurrency caps how many may be in flight
+	// at once. Retries within one call don't spend a second permit, so a call
+	// that keeps failing can put up to retry.Default().MaxAttempts requests on
+	// the wire against one permit.
 	// Zero (the default) means unlimited. Both gate every caller sharing the
 	// endpoint — main loop, sub-agents, workflows, title generation, the
 	// vision helper — so a free-tier quota holds no matter how many of them
@@ -561,6 +564,11 @@ func projectToModelEntry(ep Endpoint, m EndpointModel) ModelEntry {
 	}
 }
 
+// maxRateLimitValue bounds Endpoint.RPM / Endpoint.MaxConcurrency. Far above
+// any real provider quota, low enough that a mistyped extra digit is caught
+// before it sizes an allocation.
+const maxRateLimitValue = 100000
+
 // EntryFor projects an endpoint + one of its models into a ModelEntry. It is
 // the exported face of projectToModelEntry, for callers outside this package
 // that resolved the pair themselves (ParseModelFlag) and would otherwise
@@ -656,13 +664,15 @@ func (c Config) Validate() []string {
 		if len(ep.Models) == 0 {
 			problems = append(problems, fmt.Sprintf("endpoint %q has no models", ep.ID))
 		}
-		// The rate-limit knobs have no UI and no CLI write path — a hand edit
-		// is the only way in, so a negative value has nothing else to catch it.
-		if ep.RPM < 0 {
-			problems = append(problems, fmt.Sprintf("endpoint %q has a negative rpm (%d; 0 means unlimited)", ep.ID, ep.RPM))
+		// The rate-limit knobs have no UI — a hand edit is the only way in, so
+		// a bad value has nothing else to catch it. The upper bound matters
+		// because rpm sizes an allocation in the limiter: a stray extra digit
+		// shouldn't ask for gigabytes.
+		if ep.RPM < 0 || ep.RPM > maxRateLimitValue {
+			problems = append(problems, fmt.Sprintf("endpoint %q has an out-of-range rpm (%d; 0–%d, where 0 means unlimited)", ep.ID, ep.RPM, maxRateLimitValue))
 		}
-		if ep.MaxConcurrency < 0 {
-			problems = append(problems, fmt.Sprintf("endpoint %q has a negative max_concurrency (%d; 0 means unlimited)", ep.ID, ep.MaxConcurrency))
+		if ep.MaxConcurrency < 0 || ep.MaxConcurrency > maxRateLimitValue {
+			problems = append(problems, fmt.Sprintf("endpoint %q has an out-of-range max_concurrency (%d; 0–%d, where 0 means unlimited)", ep.ID, ep.MaxConcurrency, maxRateLimitValue))
 		}
 		seenModel := make(map[string]bool, len(ep.Models))
 		for j, m := range ep.Models {

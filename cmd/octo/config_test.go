@@ -287,6 +287,62 @@ func TestRunConfig_Wizard_PreservesOtherEntriesAndGlobals(t *testing.T) {
 	}
 }
 
+// TestRunConfig_Wizard_PreservesHandEditedEndpointFields: re-running the
+// wizard against a provider it already has an endpoint for overwrites that
+// endpoint in place. Headers and the rate limits are hand-edited in
+// config.yml and the wizard never asks about them, so overwriting must carry
+// them across — otherwise `octo config` silently undoes a hand edit.
+func TestRunConfig_Wizard_PreservesHandEditedEndpointFields(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("ANTHROPIC_API_KEY", "set-so-wizard-skips-key-prompt")
+
+	seed := config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "anthropic", Provider: "anthropic",
+				Headers:        map[string]string{"X-Tenant-Id": "abc"},
+				RPM:            8,
+				MaxConcurrency: 1,
+				Models:         []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+		Default: "anthropic::claude-sonnet-4-6",
+	}
+	if err := seed.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// provider=anthropic, then blank answers all the way down so every
+	// remaining question takes its default — what those questions are doesn't
+	// matter here, only that the endpoint survives the overwrite intact.
+	in := strings.NewReader("anthropic\n\n\n\n\n\n\n\n")
+	var stdout, stderr bytes.Buffer
+	if code := runConfig(nil, in, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+	}
+
+	got, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load after wizard: %v", err)
+	}
+	var ep config.Endpoint
+	for _, e := range got.Endpoints {
+		if e.ID == "anthropic" {
+			ep = e
+			break
+		}
+	}
+	if ep.ID == "" {
+		t.Fatalf("anthropic endpoint gone after wizard: %+v", got.Endpoints)
+	}
+	if ep.RPM != 8 || ep.MaxConcurrency != 1 {
+		t.Errorf("rpm/max_concurrency after wizard = %d/%d, want 8/1", ep.RPM, ep.MaxConcurrency)
+	}
+	if ep.Headers["X-Tenant-Id"] != "abc" {
+		t.Errorf("headers after wizard = %+v, want X-Tenant-Id=abc", ep.Headers)
+	}
+}
+
 func TestRunConfig_Show_ReportsSourcesNotKey(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

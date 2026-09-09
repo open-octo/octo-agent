@@ -1,44 +1,49 @@
 package ratelimit
 
-import "sync"
+import (
+	"strconv"
+	"sync"
+)
 
-// Registry hands out one shared Limiter per key. Provider clients are built
-// per session (and per sub-agent, per workflow step, per background title
-// call), so a limiter owned by a client would gate nothing; the registry is
-// what makes one endpoint's limits hold across every client pointed at it.
+// Registry hands out one shared Limiter per endpoint + limits pair. Provider
+// clients are built per session (and per sub-agent, per workflow step, per
+// background title call), so a limiter owned by a client would gate nothing;
+// the registry is what makes one endpoint's limits hold across every client
+// pointed at it.
 //
 // The zero value is ready to use. It is safe for concurrent use.
 type Registry struct {
 	mu sync.Mutex
-	m  map[string]*entry
+	m  map[string]*Limiter
 }
 
-type entry struct {
-	limiter        *Limiter
-	rpm            int
-	maxConcurrency int
-}
-
-// For returns the shared limiter for key, creating it on first use. Passing
-// limits that differ from the ones the key was created with replaces the
-// limiter, so an edited config.yml takes effect on the next client build
-// instead of at the next restart; calls already gated by the old limiter run
-// to completion under it.
+// For returns the shared limiter for key under these limits, creating it on
+// first use.
+//
+// The limits are part of the identity, not just of the value: two endpoints
+// may legitimately share a provider and base URL while publishing different
+// quotas (a free key and a paid one on one gateway). Keying on the endpoint
+// alone would make each build for one of them evict the other's limiter, and
+// the senders cached either side would then hold different limiters — no
+// shared gate at all. Editing limits in config.yml therefore strands the old
+// limiter in the map rather than replacing it; that is one small entry per
+// hand edit, and calls still running under it finish gated.
 //
 // It returns nil when both limits are off — Limiter's methods are nil-safe.
 func (r *Registry) For(key string, rpm, maxConcurrency int) *Limiter {
 	if rpm <= 0 && maxConcurrency <= 0 {
 		return nil
 	}
+	key = key + "|" + strconv.Itoa(rpm) + "|" + strconv.Itoa(maxConcurrency)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if e, ok := r.m[key]; ok && e.rpm == rpm && e.maxConcurrency == maxConcurrency {
-		return e.limiter
+	if l, ok := r.m[key]; ok {
+		return l
 	}
 	if r.m == nil {
-		r.m = make(map[string]*entry)
+		r.m = make(map[string]*Limiter)
 	}
-	e := &entry{limiter: New(rpm, maxConcurrency), rpm: rpm, maxConcurrency: maxConcurrency}
-	r.m[key] = e
-	return e.limiter
+	l := New(rpm, maxConcurrency)
+	r.m[key] = l
+	return l
 }

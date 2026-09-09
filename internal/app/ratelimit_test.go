@@ -3,6 +3,7 @@ package app
 import (
 	"testing"
 
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/provider/anthropic"
 )
 
@@ -62,5 +63,39 @@ func TestNewSender_NoLimitsLeavesClientUngated(t *testing.T) {
 	c := clientFor(t, SenderOptions{Provider: "anthropic", APIKey: "sk-test", BaseURL: "https://nolimits.example"})
 	if c.Limiter != nil {
 		t.Errorf("Limiter = %v, want nil when neither rpm nor max_concurrency is set", c.Limiter)
+	}
+}
+
+// TestVisionDescriber_SharesTheEndpointsLimiter: the vision helper is one of
+// the callers that made a shared limiter necessary in the first place — a
+// text-only primary model hands it every image, and it usually sits on the
+// same endpoint as the conversation.
+func TestVisionDescriber_SharesTheEndpointsLimiter(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	cfg := config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep", Provider: "anthropic", BaseURL: "https://vision.example",
+				RPM: 8, MaxConcurrency: 1,
+				Models: []config.EndpointModel{{Model: "claude-sonnet-5", Vision: true}}},
+		},
+		VisionHelper: "ep::claude-sonnet-5",
+	}
+	d, ok := NewVisionDescriber(nil, cfg).(*visionDescriber)
+	if !ok || d == nil {
+		t.Fatal("NewVisionDescriber returned no describer")
+	}
+	if d.buildErr != nil {
+		t.Fatalf("describer build error: %v", d.buildErr)
+	}
+	c, ok := d.sender.(sender).p.(*anthropic.Client)
+	if !ok {
+		t.Fatalf("vision client type = %T, want *anthropic.Client", d.sender)
+	}
+	want := clientFor(t, SenderOptions{
+		Provider: "anthropic", APIKey: "sk-test",
+		BaseURL: "https://vision.example", RPM: 8, MaxConcurrency: 1,
+	}).Limiter
+	if c.Limiter != want {
+		t.Error("vision helper got a different limiter than the conversation on the same endpoint — it would carry its own quota")
 	}
 }

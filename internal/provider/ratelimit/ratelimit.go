@@ -40,9 +40,6 @@ type Limiter struct {
 	// the way out) keeps concurrent Acquires from over-issuing.
 	starts []time.Time
 	idx    int
-
-	now   func() time.Time
-	sleep func(context.Context, time.Duration) error
 }
 
 // New returns a Limiter enforcing rpm requests per minute and maxConcurrency
@@ -58,7 +55,7 @@ func newWithWindow(rpm, maxConcurrency int, window time.Duration) *Limiter {
 	if rpm <= 0 && maxConcurrency <= 0 {
 		return nil
 	}
-	l := &Limiter{window: window, now: time.Now, sleep: sleepCtx}
+	l := &Limiter{window: window}
 	if maxConcurrency > 0 {
 		l.sem = make(chan struct{}, maxConcurrency)
 	}
@@ -93,8 +90,14 @@ func (l *Limiter) Acquire(ctx context.Context) (release func(), err error) {
 	release = l.releaser()
 	// The RPM wait happens while holding the concurrency slot: the slot bounds
 	// what is in flight, and a call queued on the window is on its way in.
-	if wait := l.reserve(); wait > 0 {
-		if err := l.sleep(ctx, wait); err != nil {
+	wait, cancelPermit := l.reserve()
+	if wait > 0 {
+		if err := sleepCtx(ctx, wait); err != nil {
+			// Hand back both halves. Keeping the permit would charge the
+			// window for a request that was never sent — and since the permit
+			// it holds is usually a *future* time, the next real call would
+			// wait out a whole window for nothing.
+			cancelPermit()
 			release()
 			return func() {}, err
 		}
@@ -115,27 +118,50 @@ func (l *Limiter) releaser() func() {
 	}
 }
 
-// reserve claims the next RPM permit and reports how long the caller must
-// wait before using it. It returns 0 when RPM is unlimited or the window has
-// room right now.
-func (l *Limiter) reserve() time.Duration {
+// reserve claims the next RPM permit, reporting how long the caller must wait
+// before using it and a function that hands the permit back. wait is 0 when
+// RPM is unlimited or the window has room right now; cancelPermit is never
+// nil, and calling it after the permit has been used is harmless (the slot
+// has moved on by then only if the window has already recycled it, which
+// cancel detects).
+func (l *Limiter) reserve() (wait time.Duration, cancelPermit func()) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if len(l.starts) == 0 {
-		return 0
+		return 0, func() {}
 	}
-	now := l.now()
+	now := time.Now()
 	at := now
 	// The permit being reused is the oldest of the last len(starts) — the
 	// window may not hold another until it expires.
-	if oldest := l.starts[l.idx]; !oldest.IsZero() {
-		if earliest := oldest.Add(l.window); earliest.After(at) {
+	slot := l.idx
+	prev := l.starts[slot]
+	if !prev.IsZero() {
+		if earliest := prev.Add(l.window); earliest.After(at) {
 			at = earliest
 		}
 	}
-	l.starts[l.idx] = at
+	l.starts[slot] = at
 	l.idx = (l.idx + 1) % len(l.starts)
-	return at.Sub(now)
+	return at.Sub(now), func() { l.returnPermit(slot, at, prev) }
+}
+
+// returnPermit undoes a reservation, restoring the permit this slot held
+// before it — not clearing the slot, which would forget a still-current start
+// time and let the next call straight through a window that is genuinely
+// full. The write is skipped when the ring has already recycled the slot for
+// a later call, whose permit isn't ours to touch.
+//
+// l.idx deliberately doesn't rewind: another caller may have taken the next
+// slot already, and a rewind would hand it out twice. The cost is that a
+// later call may line up behind a newer start time than strictly necessary —
+// too conservative by less than one window, never too permissive.
+func (l *Limiter) returnPermit(slot int, at, prev time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.starts[slot].Equal(at) {
+		l.starts[slot] = prev
+	}
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {

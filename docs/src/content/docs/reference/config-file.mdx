@@ -94,8 +94,8 @@ the official Anthropic endpoint and a relay — which the old flat list couldn't
 | `api_key` | string | Plaintext fallback used only if the provider's env var is empty (mode `0600`). Optional for the `custom` vendor — local servers such as Ollama take none, and no auth header is sent |
 | `protocol` | string | Wire format for the `custom` vendor only: `anthropic` \| `openai` |
 | `lite_model` | string | Optional: name a model in this endpoint's `models` to serve as its compaction lite model |
-| `rpm` | int | Optional: cap on requests started against this endpoint per rolling 60-second window. `0`/absent = unlimited |
-| `max_concurrency` | int | Optional: cap on requests in flight against this endpoint at once. `0`/absent = unlimited |
+| `rpm` | int | Optional: cap on provider calls started against this endpoint per rolling 60-second window. `0`/absent = unlimited |
+| `max_concurrency` | int | Optional: cap on provider calls in flight against this endpoint at once. `0`/absent = unlimited |
 | `models` | list of [model](#model) | The models offered through this endpoint |
 
 `rpm` and `max_concurrency` exist for endpoints that publish a quota — free tiers typically allow
@@ -105,6 +105,14 @@ background title generation, the vision helper), which is what makes the cap hol
 at once; a request over the limit waits for room rather than failing. Set them from the provider's
 published numbers. Neither has a UI — hand-edit `config.yml`; editing the endpoint in the Web UI
 leaves them untouched.
+
+Two details worth knowing before you tighten them. Retries inside one call don't spend a second
+`rpm` permit, so a call that keeps failing can put up to four requests on the wire against one
+permit — set `rpm` slightly under the published quota if the endpoint counts rejected requests.
+And `max_concurrency` gates background work too: session titles come from a throwaway call with a
+five-second budget fired when your message arrives, so at `max_concurrency: 1` it queues behind
+the turn itself and the session falls back to a snippet of your first message. Cap `rpm` alone to
+keep model-written titles.
 
 ## Model
 

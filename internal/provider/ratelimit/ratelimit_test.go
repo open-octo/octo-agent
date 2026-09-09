@@ -9,8 +9,9 @@ import (
 )
 
 // testWindow keeps the RPM tests in the millisecond range instead of waiting
-// out a real minute.
-const testWindow = 60 * time.Millisecond
+// out a real minute. Kept well clear of Windows' timer granularity: one test
+// races a window wait against a context deadline.
+const testWindow = 250 * time.Millisecond
 
 func TestNilLimiterIsNoOp(t *testing.T) {
 	var l *Limiter
@@ -140,6 +141,63 @@ func TestRPMDoesNotOverIssueUnderConcurrency(t *testing.T) {
 	}
 }
 
+// TestCancelledWindowWaitReturnsThePermit works on reserve/returnPermit
+// directly with an hour-long window, so the arithmetic is exact and nothing
+// races a timer. It pins both halves of the contract at once:
+//
+//   - the permit is given back (the third call waits one window, not two —
+//     a caller that walked off with it would have charged the window for a
+//     request it never sent, silently stalling the next real call)
+//   - giving it back doesn't widen the window (the third call still waits,
+//     rather than sailing through on a slot wrongly cleared to zero)
+func TestCancelledWindowWaitReturnsThePermit(t *testing.T) {
+	const window = time.Hour
+	l := newWithWindow(1, 0, window)
+
+	if wait, _ := l.reserve(); wait != 0 {
+		t.Fatalf("first reserve wait = %v, want 0", wait)
+	}
+	wait, cancelPermit := l.reserve()
+	if wait < window-time.Minute {
+		t.Fatalf("second reserve wait = %v, want about a window", wait)
+	}
+	cancelPermit()
+
+	wait, _ = l.reserve()
+	if wait < window-time.Minute {
+		t.Errorf("after a cancelled reservation the next wait = %v — the window was widened, letting a call through a full window", wait)
+	}
+	if wait > window {
+		t.Errorf("after a cancelled reservation the next wait = %v, want about one window — the cancelled call kept its permit", wait)
+	}
+}
+
+// The same property end-to-end through Acquire, on a real (short) window:
+// a call interrupted while queued must not leave the next one waiting out a
+// second window.
+func TestAcquireAfterACancelledWaitCostsOneWindow(t *testing.T) {
+	l := newWithWindow(1, 0, testWindow)
+	if _, err := l.Acquire(context.Background()); err != nil {
+		t.Fatalf("first Acquire: %v", err)
+	}
+	start := time.Now()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testWindow/4)
+	defer cancel()
+	if _, err := l.Acquire(ctx); err == nil {
+		t.Fatal("queued Acquire succeeded, want the cancelled wait to fail")
+	}
+
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 4*testWindow)
+	defer cancel2()
+	if _, err := l.Acquire(ctx2); err != nil {
+		t.Fatalf("Acquire after a cancelled wait: %v — the permit was never given back", err)
+	}
+	if elapsed := time.Since(start); elapsed < testWindow-testWindow/4 {
+		t.Errorf("next call went through after %v, want it to still wait out the window", elapsed)
+	}
+}
+
 // TestAcquireReleasesSlotWhenTheWindowWaitIsCancelled: a caller interrupted
 // while queued on the RPM window must not walk off with a concurrency slot.
 func TestAcquireReleasesSlotWhenTheWindowWaitIsCancelled(t *testing.T) {
@@ -159,7 +217,7 @@ func TestAcquireReleasesSlotWhenTheWindowWaitIsCancelled(t *testing.T) {
 	}
 
 	// If the cancelled call had kept its slot, this would block forever.
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*testWindow)
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*testWindow)
 	defer cancel2()
 	if _, err := l.Acquire(ctx2); err != nil {
 		t.Errorf("Acquire after a cancelled wait: %v — the slot was never given back", err)
@@ -191,6 +249,14 @@ func TestRegistrySharesOneLimiterPerKey(t *testing.T) {
 	}
 	if d := r.For("anthropic|https://api.example", 4, 1); d == a {
 		t.Error("changed limits reused the old limiter — an edited config would not take effect")
+	}
+	// Two endpoints may share a provider and base URL while publishing
+	// different quotas (a free key and a paid one on one gateway). Building a
+	// sender for one must not evict the other's limiter, or the senders
+	// cached either side end up holding different limiters and neither gate
+	// is shared.
+	if a2 := r.For("anthropic|https://api.example", 8, 1); a2 != a {
+		t.Error("a build under the other endpoint's limits evicted this one's limiter")
 	}
 	if n := r.For("anthropic|https://api.example", 0, 0); n != nil {
 		t.Errorf("For with both limits off = %v, want nil", n)

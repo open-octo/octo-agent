@@ -648,12 +648,18 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 		APIKey:   outEntry.APIKey,
 		Protocol: outEntry.Protocol,
 	}
-	// Carry over any existing models if we're overwriting the same endpoint
-	// id, so a user re-running the wizard doesn't lose their other models.
+	// Carry over the existing endpoint's other settings if we're overwriting
+	// the same endpoint id, so a user re-running the wizard doesn't lose their
+	// other models — nor any field the wizard never asks about. Headers and
+	// the rate limits are hand-edited in config.yml and have no prompt here,
+	// so dropping them would silently undo a hand edit.
 	for _, existingEp := range full.Endpoints {
 		if existingEp.ID == endpointID {
 			ep.Name = existingEp.Name
 			ep.LiteModel = existingEp.LiteModel
+			ep.Headers = existingEp.Headers
+			ep.RPM = existingEp.RPM
+			ep.MaxConcurrency = existingEp.MaxConcurrency
 			// Only keep models that aren't the one we're about to add/replace.
 			for _, m := range existingEp.Models {
 				if m.Model != outEntry.Model {
