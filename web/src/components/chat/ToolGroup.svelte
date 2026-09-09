@@ -12,6 +12,19 @@
   // Tracks which overwrite-undo buttons have already fired, keyed by tool id.
   let undone = $state<Record<string, boolean>>({})
 
+  // Tool ids whose command was just copied, so the button can acknowledge it.
+  let copied = $state<Record<string, boolean>>({})
+
+  async function copyCommand(cmd: string, toolId: string) {
+    try {
+      await navigator.clipboard.writeText(cmd)
+      copied = { ...copied, [toolId]: true }
+      setTimeout(() => { copied = { ...copied, [toolId]: false } }, 1500)
+    } catch {
+      showToast(tr('tools.copy_failed'), 'error')
+    }
+  }
+
   // Undo an overwrite: restore the pre-write version from the trash, moving the
   // just-written file into the trash first so the undo itself is reversible.
   async function undoOverwrite(undoId: string, toolId: string) {
@@ -300,6 +313,15 @@
     return m ? m[1].trim() : null
   }
 
+  // The command a terminal/bash call ran. The header line only ever shows it
+  // ellipsized to one 11px line, and terminal commands carry their meaning at
+  // the END (`cd <long path> && the-thing-that-matters`), so expanding a card
+  // used to lose the command entirely — output with no idea what produced it.
+  function terminalCommand(tool: any): string {
+    if (tool.name !== 'terminal' && tool.name !== 'bash') return ''
+    return tool.args ? argSummary(tool.name, tool.args) : (tool.summary ?? '')
+  }
+
   // A non-zero exit is not a tool error either — terminal reports it via the
   // structured ui_payload.status rather than tool.error, and appends a
   // trailing "[exit: …]" marker to the output (internal/tools/terminal.go).
@@ -444,6 +466,7 @@
       {@const todos = todoItems(tool)}
       {@const fErr = fetchError(tool)}
       {@const tErr = terminalFailure(tool)}
+      {@const cmdText = terminalCommand(tool)}
       <!-- Full arg text lives in the DOM either way — the CSS only visually
            ellipsizes it. Surfacing it via `title` + selectable text lets the
            user read/copy the whole thing despite the truncation. -->
@@ -507,6 +530,23 @@
         </summary>
 
         <div class="tool-body"><div class="tool-body-inner">
+        {#if cmdText}
+          <!-- The command, in full, above whichever body follows: wrapped
+               rather than ellipsized, selectable, and copyable. Rendered for
+               every terminal outcome (output, no output, error) so expanding
+               a card always answers "what ran?". -->
+          <div class="cmd-block">
+            <span class="term-prompt">$</span>
+            <code class="cmd-text">{cmdText}</code>
+            <button
+              class="cmd-copy"
+              title={$t(copied[tool.id] ? 'tools.copied' : 'tools.copy_command')}
+              onclick={() => copyCommand(cmdText, tool.id)}
+            >
+              <iconify-icon icon={copied[tool.id] ? 'lucide:check' : 'lucide:copy'} width="13"></iconify-icon>
+            </button>
+          </div>
+        {/if}
         {#if tool.error}
           <div class="error-output mono">{tool.error}</div>
         {:else if fErr}
@@ -582,7 +622,7 @@
         {:else if tool.stdout && tool.stdout.length > 0}
           {@const full = tool.stdout.join('\n')}
           <div class="term-wrap">
-            <pre class="terminal-output" use:pinBottom>{#each full.split('\n') as line, i}{#if i === 0 && (line.startsWith('$ ') || line === '$')}<span class="term-prompt">$</span>{line.slice(1)}{:else}{line}{/if}
+            <pre class="terminal-output" use:pinBottom>{#each full.split('\n') as line}{line}
 {/each}{#if !tool.done}<span class="blink-caret"></span>{/if}</pre>
           </div>
         {:else if tool.name === 'web_search' && searchResults(tool)}
@@ -710,7 +750,33 @@ details[open] > summary .chev { transform: rotate(90deg); }
   background: var(--bg-table-header); display: flex; align-items: center; justify-content: center;
   gap: 6px; font-size: 12px; color: var(--text-tertiary); font-family: inherit;
 }
-.term-prompt { color: var(--success); }
+.term-prompt { color: var(--success); flex: 0 0 auto; user-select: none; }
+/* The command that produced the body below. Shares the terminal surface with
+   the output pre so the two read as one shell transcript. */
+.cmd-block {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 14px; border-top: 1px solid var(--border-table);
+  background: var(--terminal-bg); color: var(--terminal-text);
+  font-size: 12px; line-height: 1.6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.cmd-text {
+  flex: 1 1 auto; min-width: 0; font: inherit;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  user-select: text; cursor: text;
+  max-height: 120px; overflow-y: auto;
+}
+/* Always visible rather than hover-only — the narrow-viewport layout this
+   block exists for is exactly the one with no hover. */
+.cmd-copy {
+  flex: 0 0 auto; display: flex; align-items: center; padding: 2px;
+  border: none; background: none; cursor: pointer;
+  color: var(--terminal-text); opacity: 0.5;
+}
+.cmd-copy:hover { opacity: 1; }
+/* One continuous surface: drop the divider the output pre would otherwise
+   draw between itself and the command above it. */
+.cmd-block + .term-wrap .terminal-output { border-top: none; padding-top: 2px; }
 .genui-card-wrap {
   border-top: 1px solid var(--border-table); padding: 10px 14px;
 }
