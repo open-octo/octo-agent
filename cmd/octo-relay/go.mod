@@ -11,13 +11,13 @@
 // protocol, so it needs nothing from internal/agent or internal/server.
 module github.com/open-octo/octo-agent/cmd/octo-relay
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/flynn/noise v1.1.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/sideshow/apns2 v0.25.0
-	golang.org/x/oauth2 v0.36.0
+	golang.org/x/oauth2 v0.37.0
 )
 
 require (
@@ -25,6 +25,6 @@ require (
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 )
