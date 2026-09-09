@@ -75,6 +75,58 @@ func TestDo_ContextCancellationAbortsWait(t *testing.T) {
 	}
 }
 
+// TestDo_RetryAfterIsNotClampedToMaxDelay is the 429 case: a free tier that
+// answers "Retry-After: 60" needs the full wait. Clamping it to MaxDelay
+// retries inside the same window and burns the remaining attempts on
+// guaranteed 429s.
+func TestDo_RetryAfterIsNotClampedToMaxDelay(t *testing.T) {
+	p := Policy{MaxAttempts: 2, BaseDelay: time.Millisecond, MaxDelay: 5 * time.Millisecond, MaxRetryAfter: time.Minute}
+	start := time.Now()
+	calls := 0
+	_, _ = Do(context.Background(), p, func(context.Context) (int, Decision, error) {
+		calls++
+		return 0, Decision{Retry: true, RetryAfter: 40 * time.Millisecond}, errors.New("429")
+	})
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2", calls)
+	}
+	if elapsed := time.Since(start); elapsed < 40*time.Millisecond {
+		t.Errorf("waited %v before retrying, want the server's 40ms Retry-After", elapsed)
+	}
+}
+
+// A Retry-After beyond MaxRetryAfter is still capped — an endpoint answering
+// "Retry-After: 3600" must not park the turn for an hour.
+func TestDo_RetryAfterIsCappedByMaxRetryAfter(t *testing.T) {
+	p := Policy{MaxAttempts: 2, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond, MaxRetryAfter: 20 * time.Millisecond}
+	start := time.Now()
+	_, _ = Do(context.Background(), p, func(context.Context) (int, Decision, error) {
+		return 0, Decision{Retry: true, RetryAfter: time.Hour}, errors.New("429")
+	})
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("waited %v, want the wait capped at MaxRetryAfter", elapsed)
+	}
+}
+
+// A zero MaxRetryAfter (any Policy built before the field existed) keeps the
+// old behaviour: MaxDelay caps the server-supplied wait too.
+func TestDo_ZeroMaxRetryAfterFallsBackToMaxDelay(t *testing.T) {
+	p := Policy{MaxAttempts: 2, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}
+	start := time.Now()
+	_, _ = Do(context.Background(), p, func(context.Context) (int, Decision, error) {
+		return 0, Decision{Retry: true, RetryAfter: time.Hour}, errors.New("429")
+	})
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("waited %v, want the wait capped at MaxDelay", elapsed)
+	}
+}
+
+func TestDefaultPolicyWaitsOutATypicalRetryAfter(t *testing.T) {
+	if got := Default().maxRetryAfter(); got < time.Minute {
+		t.Errorf("Default().maxRetryAfter() = %v, want at least the 60s free tiers ask for", got)
+	}
+}
+
 func TestRetryableStatus(t *testing.T) {
 	for _, c := range []int{408, 429, 500, 502, 503, 504, 529} {
 		if !RetryableStatus(c) {

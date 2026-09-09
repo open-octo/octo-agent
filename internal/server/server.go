@@ -1533,16 +1533,18 @@ func resolveProviderAndModel(flagProvider, flagModel string) (agent.Sender, stri
 		// and builds its sender below.
 		return nil, model, provName, nil
 	}
-	// Protocol and Headers are meaningful only for the Custom vendor, and only
-	// when the resolved provider actually matches the config entry (same rule
-	// as key/model) — see app.EntryConnectionOverrides.
-	protocol, headers := app.EntryConnectionOverrides(provName, entry)
+	// The entry's connection settings (protocol, headers, rate limits) apply
+	// only when the resolved provider actually matches the config entry (same
+	// rule as key/model) — see app.EntryConnectionOverrides.
+	conn := app.EntryConnectionOverrides(provName, entry)
 	sender, err := app.NewSender(app.SenderOptions{
 		Provider:        provName,
 		APIKey:          apiKey,
 		BaseURL:         resolveBaseURL(provName, cfg),
-		Protocol:        protocol,
-		Headers:         headers,
+		Protocol:        conn.Protocol,
+		Headers:         conn.Headers,
+		RPM:             conn.RPM,
+		MaxConcurrency:  conn.MaxConcurrency,
 		ReasoningEffort: cfg.ReasoningEffort,
 		ShowReasoning:   cfg.EffectiveShowReasoning(nil),
 	})
@@ -1749,6 +1751,8 @@ func senderForEntry(entry config.ModelEntry) (agent.Sender, error) {
 		BaseURL:         entry.BaseURL,
 		Protocol:        entry.Protocol,
 		Headers:         entry.Headers,
+		RPM:             entry.RPM,
+		MaxConcurrency:  entry.MaxConcurrency,
 		ReasoningEffort: cfg.ReasoningEffort,
 		ShowReasoning:   cfg.EffectiveShowReasoning(nil),
 	})
@@ -2666,14 +2670,7 @@ func (s *Server) channelModelOps() *channel.ModelOps {
 			if perr != nil {
 				return channel.ModelResolution{}, perr
 			}
-			entry := config.ModelEntry{
-				Provider: ep.Provider,
-				Model:    m.Model,
-				BaseURL:  ep.BaseURL,
-				APIKey:   ep.APIKey,
-				Protocol: ep.Protocol,
-				Vision:   m.Vision,
-			}
+			entry := config.EntryFor(ep, m)
 			cid := ep.CompositeID(m.Model)
 			sender, err := s.cachedSenderForEntry(cid, entry)
 			if err != nil {

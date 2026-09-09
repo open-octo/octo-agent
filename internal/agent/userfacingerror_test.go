@@ -75,8 +75,9 @@ func TestUserFacingError(t *testing.T) {
 // knownProviderPrefixes (and vice versa), or user-facing errors leak a raw
 // "provider: " prefix again.
 func TestKnownProviderPrefixesInSync(t *testing.T) {
-	// retry is a shared retry helper, not a protocol implementation.
-	nonProtocol := map[string]bool{"retry": true}
+	// retry and ratelimit are shared call-path helpers, not protocol
+	// implementations — neither prefixes its errors with its own name.
+	nonProtocol := map[string]bool{"retry": true, "ratelimit": true}
 
 	entries, err := os.ReadDir(filepath.Join("..", "provider"))
 	if err != nil {

@@ -24,13 +24,33 @@ import (
 type Policy struct {
 	MaxAttempts int           // total attempts including the first
 	BaseDelay   time.Duration // first backoff step
-	MaxDelay    time.Duration // cap on any single wait (also caps Retry-After)
+	MaxDelay    time.Duration // cap on any computed backoff wait
+	// MaxRetryAfter caps a *server-supplied* Retry-After instead of MaxDelay.
+	// Rate-limited free tiers routinely answer a 429 with "Retry-After: 60" —
+	// clamping that to a 30s MaxDelay just retries inside the same window and
+	// burns the remaining attempts on guaranteed 429s. Zero falls back to
+	// MaxDelay.
+	MaxRetryAfter time.Duration
 }
 
 // Default is the standard provider policy: 4 attempts with ~0.5s→1s→2s of
-// jittered backoff between them, no single wait longer than 30s.
+// jittered backoff between them, no computed wait longer than 30s, and up to
+// 2 minutes of waiting when the server names a Retry-After itself.
 func Default() Policy {
-	return Policy{MaxAttempts: 4, BaseDelay: 500 * time.Millisecond, MaxDelay: 30 * time.Second}
+	return Policy{
+		MaxAttempts:   4,
+		BaseDelay:     500 * time.Millisecond,
+		MaxDelay:      30 * time.Second,
+		MaxRetryAfter: 2 * time.Minute,
+	}
+}
+
+// maxRetryAfter is the cap to apply to a server-supplied Retry-After.
+func (p Policy) maxRetryAfter() time.Duration {
+	if p.MaxRetryAfter > 0 {
+		return p.MaxRetryAfter
+	}
+	return p.MaxDelay
 }
 
 // Decision tells Do whether the just-returned error is worth retrying and, if
@@ -44,7 +64,8 @@ type Decision struct {
 // Do runs attempt up to p.MaxAttempts times. It retries only while attempt
 // returns a non-nil error AND Decision.Retry is true AND attempts remain AND
 // ctx is still live. Between tries it waits Decision.RetryAfter (capped at
-// MaxDelay) or, when that's zero, an exponential backoff with full jitter.
+// MaxRetryAfter) or, when that's zero, an exponential backoff with full
+// jitter (capped at MaxDelay).
 // Returns the final attempt's (result, error) regardless of outcome.
 func Do[T any](ctx context.Context, p Policy, attempt func(context.Context) (T, Decision, error)) (T, error) {
 	if p.MaxAttempts < 1 {
@@ -60,12 +81,12 @@ func Do[T any](ctx context.Context, p Policy, attempt func(context.Context) (T, 
 		if err == nil || !dec.Retry || i >= p.MaxAttempts {
 			return result, err
 		}
-		wait := dec.RetryAfter
+		wait, limit := dec.RetryAfter, p.maxRetryAfter()
 		if wait <= 0 {
-			wait = backoff(p, i)
+			wait, limit = backoff(p, i), p.MaxDelay
 		}
-		if wait > p.MaxDelay {
-			wait = p.MaxDelay
+		if wait > limit {
+			wait = limit
 		}
 		if serr := sleep(ctx, wait); serr != nil {
 			return result, err // ctx cancelled mid-wait: surface the attempt's error

@@ -37,6 +37,27 @@ Precedence (highest first): CLI flag > env var > config file > built-in default.
 
 Also remember that a session is **bound to a model at creation time**. Changing the global default (`octo config`, the web UI Settings panel, or `POST /api/config/endpoints/{id}/default`) only affects **new** sessions. Existing sessions keep their current model until you explicitly switch them via the TUI `/model` command, the web UI Composer's model chip, the IM `/model` command, or `PATCH /api/sessions/{id}/model`.
 
+### `HTTP 429` / "rate limit exceeded" mid-turn
+
+The endpoint refused a request for exceeding its quota. octo already retries a transient 429 with
+backoff (4 attempts, honouring `Retry-After` for up to 2 minutes) — an error that still surfaced
+means the quota is being exceeded steadily, not by a blip.
+
+Free-tier endpoints are the usual case: they cap requests per minute and simultaneous requests, and
+octo's own fan-out (sub-agents, workflow steps, background title generation, the vision helper) adds
+up fast on top of a turn's tool-call rounds. Cap octo's side to match the provider's published
+quota by hand-editing the endpoint in `~/.octo/config.yml`:
+
+```yaml
+endpoints:
+  - id: free-tier
+    rpm: 8              # requests per rolling minute
+    max_concurrency: 1  # requests in flight at once
+```
+
+Requests then queue instead of failing. See `CONFIG.md` → "Rate-limiting an endpoint" for the full
+rules. There is no UI for these keys.
+
 ## TUI
 
 ### TUI doesn't start (falls back to plain REPL)

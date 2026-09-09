@@ -930,6 +930,40 @@ func TestUpdateEndpoint_HeadersExplicitEmpty_ClearsAll(t *testing.T) {
 	}
 }
 
+// TestUpdateEndpoint_PreservesRateLimits: rpm / max_concurrency are
+// hand-edited in config.yml and deliberately have no UI, so every write path
+// the UI does have must leave them alone — including a rename, which rewrites
+// the endpoint's composite-id references.
+func TestUpdateEndpoint_PreservesRateLimits(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "custom", BaseURL: "https://api.example.com", APIKey: "sk-test",
+				Protocol: "openai", RPM: 8, MaxConcurrency: 1,
+				Models: []config.EndpointModel{{Model: "m1"}}},
+		},
+		Default: "ep-a::m1",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	// The rename lands last, so every earlier PATCH still addresses ep-a.
+	for _, body := range []string{
+		`{"name": "renamed"}`,
+		`{"api_key": "sk-new"}`,
+		`{"headers": {"X-New": "1"}}`,
+		`{"new_id": "ep-b"}`,
+	} {
+		w := doJSON(t, srv, http.MethodPatch, "/api/config/endpoints/ep-a", body)
+		if w.Code != http.StatusOK {
+			t.Fatalf("PATCH %s = %d: %s", body, w.Code, w.Body.String())
+		}
+		cfg, _ := config.Load()
+		if got := cfg.Endpoints[0]; got.RPM != 8 || got.MaxConcurrency != 1 {
+			t.Fatalf("after PATCH %s rpm/max_concurrency = %d/%d, want 8/1", body, got.RPM, got.MaxConcurrency)
+		}
+	}
+}
+
 // TestUpdateEndpoint_ReloadsDefaultSender is the regression test for the
 // missing reloadDefaultSender call in handleUpdateEndpoint: editing an
 // endpoint's connection params (base_url, api_key, headers, …) used to reach

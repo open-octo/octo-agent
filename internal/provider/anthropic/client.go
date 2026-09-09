@@ -14,6 +14,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/provider"
+	"github.com/open-octo/octo-agent/internal/provider/ratelimit"
 	"github.com/open-octo/octo-agent/internal/provider/retry"
 	"github.com/open-octo/octo-agent/internal/version"
 )
@@ -67,6 +68,12 @@ type Client struct {
 	APIVersion string       // optional override; defaults to DefaultAPIVersion
 	HTTPClient *http.Client // optional; defaults to http.Client with a 60s timeout
 	Retry      retry.Policy // optional; zero value falls back to retry.Default()
+
+	// Limiter throttles calls to this endpoint (requests per minute, calls in
+	// flight). Nil — the default — means no throttling. Endpoints are shared
+	// between clients, so the limiter comes from a process-wide registry
+	// rather than being owned here; see internal/app.
+	Limiter *ratelimit.Limiter
 
 	// StreamIdleTimeout overrides DefaultStreamIdleTimeout for SendStream. Zero
 	// uses the default; a negative value disables the idle guard entirely.
@@ -150,6 +157,15 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 60 * time.Second}
 	}
+
+	// Hold the endpoint's rate-limit slot for the whole call, retries
+	// included. A cancelled wait surfaces ctx.Err() unwrapped, so an
+	// interrupt stays recognisable as context.Canceled upstream.
+	release, err := c.Limiter.Acquire(ctx)
+	if err != nil {
+		return provider.Response{}, err
+	}
+	defer release()
 
 	// Retry the request on transient failures (429/5xx/529/network). The
 	// payload is fixed across attempts; each attempt gets a fresh body reader.

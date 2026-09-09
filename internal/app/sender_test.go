@@ -301,7 +301,7 @@ func TestSender_StreamingFallback_NonStreamingProvider(t *testing.T) {
 func TestBuildClient_PassesHeadersThrough(t *testing.T) {
 	headers := map[string]string{"X-Tenant-Id": "tenant-42"}
 
-	p, err := buildClient(ProviderAnthropic, "test-key", "", "", headers)
+	p, err := buildClient(ProviderAnthropic, "test-key", "", "", headers, nil)
 	if err != nil {
 		t.Fatalf("buildClient(anthropic): %v", err)
 	}
@@ -313,7 +313,7 @@ func TestBuildClient_PassesHeadersThrough(t *testing.T) {
 		t.Errorf("anthropic client Headers = %+v, want X-Tenant-Id=tenant-42", ac.Headers)
 	}
 
-	p, err = buildClient(ProviderOpenAI, "test-key", "", "", headers)
+	p, err = buildClient(ProviderOpenAI, "test-key", "", "", headers, nil)
 	if err != nil {
 		t.Fatalf("buildClient(openai): %v", err)
 	}
@@ -327,20 +327,25 @@ func TestBuildClient_PassesHeadersThrough(t *testing.T) {
 }
 
 // TestEntryConnectionOverrides_MatchingProviderAppliesBoth verifies that when
-// the resolved provider matches the config entry's own provider, both
-// Protocol and Headers are carried through.
+// the resolved provider matches the config entry's own provider, every
+// connection setting is carried through.
 func TestEntryConnectionOverrides_MatchingProviderAppliesBoth(t *testing.T) {
 	entry := config.ModelEntry{
-		Provider: "custom",
-		Protocol: "anthropic",
-		Headers:  map[string]string{"X-Tenant-Id": "abc"},
+		Provider:       "custom",
+		Protocol:       "anthropic",
+		Headers:        map[string]string{"X-Tenant-Id": "abc"},
+		RPM:            8,
+		MaxConcurrency: 2,
 	}
-	protocol, headers := EntryConnectionOverrides("custom", entry)
-	if protocol != "anthropic" {
-		t.Errorf("protocol = %q, want anthropic", protocol)
+	conn := EntryConnectionOverrides("custom", entry)
+	if conn.Protocol != "anthropic" {
+		t.Errorf("protocol = %q, want anthropic", conn.Protocol)
 	}
-	if headers["X-Tenant-Id"] != "abc" {
-		t.Errorf("headers = %+v, want X-Tenant-Id=abc", headers)
+	if conn.Headers["X-Tenant-Id"] != "abc" {
+		t.Errorf("headers = %+v, want X-Tenant-Id=abc", conn.Headers)
+	}
+	if conn.RPM != 8 || conn.MaxConcurrency != 2 {
+		t.Errorf("rpm/max_concurrency = %d/%d, want 8/2", conn.RPM, conn.MaxConcurrency)
 	}
 }
 
@@ -351,19 +356,25 @@ func TestEntryConnectionOverrides_MatchingProviderAppliesBoth(t *testing.T) {
 // still reusing that entry's API key) must NOT carry the entry's Protocol or
 // Headers through — those belong to a different endpoint, and Headers in
 // particular may override Authorization/x-api-key, so leaking it would send
-// that value to the wrong provider's API.
+// that value to the wrong provider's API. The rate limits go the same way:
+// they bound a quota the mismatched vendor doesn't share.
 func TestEntryConnectionOverrides_MismatchedProviderClearsBoth(t *testing.T) {
 	entry := config.ModelEntry{
-		Provider: "custom",
-		Protocol: "anthropic",
-		Headers:  map[string]string{"Authorization": "should-not-leak"},
+		Provider:       "custom",
+		Protocol:       "anthropic",
+		Headers:        map[string]string{"Authorization": "should-not-leak"},
+		RPM:            8,
+		MaxConcurrency: 2,
 	}
-	protocol, headers := EntryConnectionOverrides("openai", entry)
-	if protocol != "" {
-		t.Errorf("protocol = %q, want empty (provider mismatch)", protocol)
+	conn := EntryConnectionOverrides("openai", entry)
+	if conn.Protocol != "" {
+		t.Errorf("protocol = %q, want empty (provider mismatch)", conn.Protocol)
 	}
-	if headers != nil {
-		t.Errorf("headers = %+v, want nil (provider mismatch must not leak entry's headers)", headers)
+	if conn.Headers != nil {
+		t.Errorf("headers = %+v, want nil (provider mismatch must not leak entry's headers)", conn.Headers)
+	}
+	if conn.RPM != 0 || conn.MaxConcurrency != 0 {
+		t.Errorf("rpm/max_concurrency = %d/%d, want 0/0 (provider mismatch)", conn.RPM, conn.MaxConcurrency)
 	}
 }
 

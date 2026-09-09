@@ -75,6 +75,11 @@ func NewVisionDescriber(a *agent.Agent, cfg config.Config) agent.ImageDescriber 
 		Protocol: entry.Protocol,
 		Headers:  entry.Headers,
 		CacheKey: "vision-helper:" + entry.Model,
+
+		// The helper shares its endpoint's quota with the primary model when
+		// both point at the same one — that's the shared limiter's job.
+		RPM:            entry.RPM,
+		MaxConcurrency: entry.MaxConcurrency,
 	})
 	if err != nil {
 		d.buildErr = fmt.Errorf("vision helper %q: %w", cfg.VisionHelper, err)

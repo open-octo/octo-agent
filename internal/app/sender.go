@@ -19,6 +19,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/provider"
 	"github.com/open-octo/octo-agent/internal/provider/anthropic"
 	"github.com/open-octo/octo-agent/internal/provider/openai"
+	"github.com/open-octo/octo-agent/internal/provider/ratelimit"
 )
 
 // Provider name constants (legacy).  New code should use vendor IDs directly.
@@ -40,6 +41,12 @@ type SenderOptions struct {
 	// Headers are extra HTTP headers sent with every request to this
 	// endpoint's BaseURL, forwarded from config.Endpoint/ModelEntry.Headers.
 	Headers map[string]string
+	// RPM and MaxConcurrency are the endpoint's rate limits, forwarded from
+	// config.Endpoint/ModelEntry. Zero means unlimited. Senders built for the
+	// same endpoint share one limiter, so the caps hold across every caller —
+	// see endpointLimiters.
+	RPM            int
+	MaxConcurrency int
 
 	// CacheKey is forwarded as the provider's prompt-cache key, stable across a
 	// conversation's turns so the backend routes them to the same cache.
@@ -81,7 +88,8 @@ func AnthropicThinkingBudget(effort string) int {
 // NewSender builds the provider client for opts and wraps it as an agent.Sender.
 // It is the single entry point through which every transport obtains a sender.
 func NewSender(opts SenderOptions) (agent.Sender, error) {
-	p, err := buildClient(opts.Provider, opts.APIKey, opts.BaseURL, opts.Protocol, opts.Headers)
+	limiter := endpointLimiters.For(limiterKey(opts.Provider, opts.BaseURL), opts.RPM, opts.MaxConcurrency)
+	p, err := buildClient(opts.Provider, opts.APIKey, opts.BaseURL, opts.Protocol, opts.Headers, limiter)
 	if err != nil {
 		return nil, err
 	}
@@ -114,23 +122,55 @@ func DefaultBaseURL(providerName string) string {
 	return VendorBaseURL(providerName)
 }
 
-// EntryConnectionOverrides returns the Protocol and Headers to apply when
+// ConnectionOverrides bundles the endpoint-specific settings that only apply
+// when the resolved vendor is the config entry's own vendor.
+type ConnectionOverrides struct {
+	Protocol       string
+	Headers        map[string]string
+	RPM            int
+	MaxConcurrency int
+}
+
+// EntryConnectionOverrides returns the endpoint settings to apply when
 // building a sender for resolvedProvider, given the config entry that
-// supplied the API key. Both fields are only meaningful for the entry's own
+// supplied the API key. They are only meaningful for the entry's own
 // provider: a caller may resolve a DIFFERENT vendor than the config's default
 // entry (e.g. a --provider flag, OCTO_PROVIDER, or a <PROVIDER>_MODEL env var
 // picking a vendor other than entry.Provider) while still reusing that
-// entry's API key. In that mismatch case, entry.Protocol/entry.Headers
-// belong to a different endpoint and must not be applied to the mismatched
-// vendor's requests — Headers in particular may carry a value that
-// overrides Authorization/x-api-key for a completely different gateway, so
-// leaking it onto the wrong provider's API would send that secret to the
-// wrong place.
-func EntryConnectionOverrides(resolvedProvider string, entry config.ModelEntry) (protocol string, headers map[string]string) {
+// entry's API key. In that mismatch case, the entry describes a different
+// endpoint and none of its settings may be applied to the mismatched vendor's
+// requests — Headers in particular may carry a value that overrides
+// Authorization/x-api-key for a completely different gateway, so leaking it
+// onto the wrong provider's API would send that secret to the wrong place,
+// and the rate limits belong to a quota the mismatched vendor doesn't share.
+func EntryConnectionOverrides(resolvedProvider string, entry config.ModelEntry) ConnectionOverrides {
 	if resolvedProvider != entry.Provider {
-		return "", nil
+		return ConnectionOverrides{}
 	}
-	return entry.Protocol, entry.Headers
+	return ConnectionOverrides{
+		Protocol:       entry.Protocol,
+		Headers:        entry.Headers,
+		RPM:            entry.RPM,
+		MaxConcurrency: entry.MaxConcurrency,
+	}
+}
+
+// endpointLimiters hands out the shared rate limiter for an endpoint. A
+// provider client is built per session — and again per sub-agent, per
+// workflow step, per background title call — so a limiter owned by one client
+// would gate nothing; keying them here by endpoint is what makes a
+// free-tier quota hold across all of them.
+var endpointLimiters ratelimit.Registry
+
+// limiterKey identifies the endpoint a sender talks to. An empty BaseURL
+// resolves to the vendor default first, so an endpoint that spells out the
+// official URL and one that leaves it blank share a limiter instead of
+// getting one quota each.
+func limiterKey(providerName, baseURL string) string {
+	if baseURL == "" {
+		baseURL = VendorBaseURL(providerName)
+	}
+	return providerName + "|" + baseURL
 }
 
 // buildClient constructs the vendor client and applies an optional base-URL
@@ -138,7 +178,7 @@ func EntryConnectionOverrides(resolvedProvider string, entry config.ModelEntry) 
 // local servers); every other vendor fails here with its env var named.
 // protocol is used only for vendors with no registry-pinned wire format (the
 // Custom catch-all); named vendors ignore it and use their own protocol.
-func buildClient(name, apiKey, baseURL, protocol string, headers map[string]string) (provider.Provider, error) {
+func buildClient(name, apiKey, baseURL, protocol string, headers map[string]string, limiter *ratelimit.Limiter) (provider.Provider, error) {
 	v := vendorByID(name)
 	if v == nil {
 		return nil, fmt.Errorf("unknown provider %q", name)
@@ -182,6 +222,7 @@ func buildClient(name, apiKey, baseURL, protocol string, headers map[string]stri
 			client.BaseURL = baseURL
 		}
 		client.Headers = headers
+		client.Limiter = limiter
 		return client, nil
 	case "openai":
 		client, err := openai.New(apiKey)
@@ -196,6 +237,7 @@ func buildClient(name, apiKey, baseURL, protocol string, headers map[string]stri
 		// client doesn't recognise leave the request in its generic shape.
 		client.Dialect = name
 		client.Headers = headers
+		client.Limiter = limiter
 		return client, nil
 	default:
 		return nil, fmt.Errorf("unknown protocol %q for provider %q", proto, name)
@@ -402,7 +444,9 @@ func replyFromResponse(resp provider.Response) agent.Reply {
 // the API key, base URL, and model all work. It returns a descriptive error
 // on failure (auth, model not found, network, etc.).
 func TestConnection(ctx context.Context, providerName, apiKey, baseURL, model, protocol string) error {
-	p, err := buildClient(providerName, apiKey, baseURL, protocol, nil)
+	// No limiter: this is a single user-initiated ping, and making it queue
+	// behind a busy endpoint's window would look like a hung "Test" button.
+	p, err := buildClient(providerName, apiKey, baseURL, protocol, nil, nil)
 	if err != nil {
 		return err
 	}

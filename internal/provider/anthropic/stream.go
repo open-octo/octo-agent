@@ -72,6 +72,15 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 		return provider.Response{}, fmt.Errorf("anthropic: marshal stream request: %w", err)
 	}
 
+	// The rate-limit slot covers the whole stream — request establishment and
+	// the body read — so a concurrency cap of 1 really does mean one live
+	// call at a time.
+	release, err := c.Limiter.Acquire(ctx)
+	if err != nil {
+		return provider.Response{}, err
+	}
+	defer release()
+
 	// streamCtx lets the idle watchdog (retry.IdleTimeoutReader, below) abort a
 	// stalled stream by cancelling the request: the HTTP request is built with
 	// streamCtx inside the attempt, so cancelling it tears the connection down
