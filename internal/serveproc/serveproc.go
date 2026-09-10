@@ -47,6 +47,19 @@ func LogPath() (string, error) {
 	return filepath.Join(dir, "serve.log"), nil
 }
 
+// CLILogPath returns the path of the interactive CLI's log
+// (~/.octo/cli.log), creating ~/.octo if needed. Separate from serve.log
+// because the two can run at once — a desktop or daemon backend serving while
+// the user also has a terminal session open — and interleaving them would
+// make both harder to read.
+func CLILogPath() (string, error) {
+	dir, err := octoDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "cli.log"), nil
+}
+
 // CrashLogPath returns the path of the crash log (~/.octo/crash.log), creating
 // ~/.octo if needed. Kept separate from serve.log: this file holds only the
 // output of a process dying, so it stays short enough to paste into a bug

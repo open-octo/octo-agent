@@ -934,6 +934,18 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// OCTO_TUI=0 all take the one-shot path (tests, octo-eval, CI included).
 	useTUI := isREPL && stdinIsTTY(stdin) && !*noTUI && !tuiDisabledByEnv() && seedPrompt == ""
 
+	// The TUI owns the terminal: bubbletea redraws in place, and a log line
+	// arriving on stderr tears the frame it is mid-way through painting. Route
+	// slog to a file for the TUI's lifetime rather than silencing it — the
+	// per-turn diagnostics the agent writes are exactly what a bug report
+	// needs, and until now they had nowhere to go on this path. The one-shot
+	// path keeps stderr, where logs belong and stdout stays clean.
+	if useTUI {
+		if closeLog := setupCLILog(); closeLog != nil {
+			defer closeLog()
+		}
+	}
+
 	// Resuming a session (-c) is an interactive affordance — it only makes sense
 	// in the TUI. A headless one-shot starts fresh.
 	if resumeID != "" && !useTUI {
