@@ -70,6 +70,7 @@
   import * as api from '../lib/api'
   import { observeArtifact, resetArtifacts } from '../lib/artifacts'
   import { renderMarkdown, escapeHtml, setupCopyButtons } from '../lib/markdown'
+  import { applyToolToggle, buildExportConversation, exportConversationStyles } from '../lib/exportTranscript'
   import { t, tr, pickLocalized } from '../lib/i18n'
   import { insertPendingSend, takeConfirmedSend } from '../lib/pendingSendOrder'
   import { inlineSlashCommand } from '../lib/inlineSlash'
@@ -1863,6 +1864,19 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     return result
   }
 
+  // The one place an export decides what it carries: the checkbox selection,
+  // then the export bar's "include tool calls" toggle. Every format that
+  // builds from the server transcript runs through this, so MD, JSON, PNG and
+  // HTML can't drift apart on what the toggle means (PDF prints the live DOM
+  // and honours the same toggle through .print-omit-tools in app.css).
+  //
+  // Tool events ride the toggle alone — filterEventsBySelection passes them
+  // through untouched, since an event carries no back-reference to the message
+  // whose checkbox would own it.
+  function exportEvents(events: any[]): { events: any[]; omittedTools: boolean } {
+    return applyToolToggle(filterEventsBySelection(events), exportIncludeTools)
+  }
+
   async function fetchEvents(): Promise<{ events: any[]; sid: string } | null> {
     const sid = get(activeSessionId)
     if (!sid) return null
@@ -1913,15 +1927,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
   // Returns whether the export actually completed, so the caller only exits
   // export mode (and drops the user's checkbox selection) on success — not on
-  // "nothing selected" or a cancelled/failed native save.
+  // a cancelled or failed native save. Events arrive already filtered by
+  // exportEvents.
   async function exportAsMarkdown(events: any[], title: string): Promise<boolean> {
-    const filtered = filterEventsBySelection(events)
-    if (!filtered.length) { showToast(tr('chat.nothing_to_export'), 'error'); return false }
-
     const lines: string[] = [`# ${title}`, '']
-    let omittedToolEvents = false
 
-    for (const ev of filtered) {
+    for (const ev of events) {
       const type = ev.type ?? ''
       if (type === 'history_user_message') {
         lines.push('## You', '')
@@ -1934,27 +1945,16 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         lines.push(ev.content ?? '', '')
       } else if (type === 'thinking' && ev.text) {
         lines.push('<!-- Thinking -->', ev.text, '')
-      } else if (type === 'tool_call' || type === 'tool_result') {
-        if (exportIncludeTools) {
-          if (type === 'tool_call') {
-            lines.push(`- **Tool call**: ${ev.tool_name ?? ev.name ?? 'unknown'}`, '')
-          } else {
-            lines.push(`- **Tool result**: ${typeof ev.result === 'string' ? ev.result.slice(0, 500) : '(non-text result)'}`, '')
-          }
-        } else {
-          omittedToolEvents = true
-        }
+      } else if (type === 'tool_call') {
+        lines.push(`- **Tool call**: ${ev.tool_name ?? ev.name ?? 'unknown'}`, '')
+      } else if (type === 'tool_result') {
+        lines.push(`- **Tool result**: ${typeof ev.result === 'string' ? ev.result.slice(0, 500) : '(non-text result)'}`, '')
       }
     }
 
     const title_safe = filenameStem(title)
     const content = lines.join('\n')
-    if (!(await deliverExport(content, `${title_safe}.md`, 'text/markdown'))) return false
-
-    if (omittedToolEvents) {
-      showToast(tr('chat.export_tools_omitted'), 'info')
-    }
-    return true
+    return deliverExport(content, `${title_safe}.md`, 'text/markdown')
   }
 
   async function exportAsJSON(events: any[], title: string): Promise<boolean> {
@@ -1985,9 +1985,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // image (html2canvas, dynamically imported so it never touches the main
   // bundle). HTML builds the same self-contained document and hands it to
   // deliverExport, so it rides the native save dialog in the desktop webview
-  // just like MD and JSON. Both honour the checkbox selection via
-  // filterEventsBySelection, and only carry user/assistant turns — tool calls
-  // stay in MD/JSON where they belong.
+  // just like MD and JSON. Both receive events already filtered by
+  // exportEvents, so they carry tool calls exactly when the toggle asks for
+  // them.
   const EXPORT_CAPTURE_WIDTH = 960
 
   function getExportLocale(): string {
@@ -2001,86 +2001,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     a.download = filename
     a.click()
     URL.revokeObjectURL(url)
-  }
-
-  function exportConversationStyles(): string {
-    return `
-      :root { color-scheme: light; }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0; padding: 32px 20px 40px;
-        background: #f8fafc; color: #111827;
-        font: 14px/1.6 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
-      .export-shell { width: min(960px, 100%); margin: 0 auto; }
-      .export-header {
-        margin-bottom: 20px; padding: 20px 24px;
-        border: 1px solid #e5e7eb; border-radius: 18px;
-        background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-      }
-      .export-title { margin: 0; font-size: 24px; line-height: 1.25; }
-      .export-meta { margin-top: 8px; color: #64748b; font-size: 13px; }
-      .conversation { display: flex; flex-direction: column; gap: 14px; }
-      .msg {
-        display: flex; flex-direction: column; gap: 8px;
-        padding: 16px 18px; border: 1px solid #e5e7eb; border-radius: 18px;
-        background: #f9fafb; box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-      }
-      .msg.user { background: #eff6ff; }
-      .msg.assistant { background: #f8fafc; }
-      .msg-head {
-        display: flex; align-items: center; gap: 12px;
-        color: #64748b; font-size: 12px;
-        text-transform: uppercase; letter-spacing: 0.08em;
-      }
-      .msg-label { font-weight: 700; }
-      .msg-body { min-width: 0; overflow-wrap: anywhere; }
-      .msg-body > :first-child, .msg-thinking > :first-child { margin-top: 0; }
-      .msg-body > :last-child, .msg-thinking > :last-child { margin-bottom: 0; }
-      .msg-thinking-wrap { border-top: 1px solid #e5e7eb; padding-top: 10px; }
-      .msg-thinking-label {
-        margin-bottom: 8px; color: #64748b; font-size: 12px; font-weight: 700;
-        text-transform: uppercase; letter-spacing: 0.08em;
-      }
-      .msg-thinking {
-        padding: 12px 14px; border: 1px solid #e5e7eb; border-radius: 14px;
-        background: #f1f5f9;
-      }
-      p, ul, ol, pre, blockquote { margin: 0 0 12px; }
-      pre {
-        overflow: auto; padding: 14px; border-radius: 14px;
-        background: #f1f5f9; border: 1px solid #e5e7eb;
-        white-space: pre-wrap; word-break: break-word;
-      }
-      code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
-      a { color: #2563eb; text-decoration: none; }
-      blockquote {
-        margin-left: 0; padding-left: 14px;
-        border-left: 3px solid rgba(37,99,235,0.45); color: #475569;
-      }
-    `
-  }
-
-  // Build the inner conversation markup from filtered server events. Only
-  // user/assistant turns are rendered — tool calls are intentionally absent
-  // (MD is the lossless format; PNG/HTML are for sharing a readable snapshot).
-  function buildExportConversation(events: any[]): string {
-    return events
-      .map((ev) => {
-        const type = ev.type ?? ''
-        if (type === 'history_user_message') {
-          return `<article class="msg user"><div class="msg-head"><span class="msg-label">You</span></div><div class="msg-body">${escapeHtml(ev.content ?? '').replace(/\n/g, '<br>')}</div></article>`
-        }
-        if (type === 'assistant_message') {
-          const thinking = ev.thinking
-            ? `<div class="msg-thinking-wrap"><div class="msg-thinking-label">Thoughts</div><div class="msg-thinking">${renderMarkdown(ev.thinking, true)}</div></div>`
-            : ''
-          return `<article class="msg assistant"><div class="msg-head"><span class="msg-label">Octo</span></div><div class="msg-body">${renderMarkdown(ev.content ?? '', true)}</div>${thinking}</article>`
-        }
-        return ''
-      })
-      .filter(Boolean)
-      .join('\n')
   }
 
   // Self-contained HTML document shared by the HTML export and the PNG render
@@ -2135,10 +2055,8 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   }
 
   async function exportAsPNG(events: any[], title: string): Promise<boolean> {
-    const filtered = filterEventsBySelection(events)
-    if (!filtered.length) { showToast(tr('chat.nothing_to_export'), 'error'); return false }
     const { default: html2canvas } = await import('html2canvas')
-    const { root, cleanup } = createExportRenderRoot(filtered, title, getExportLocale())
+    const { root, cleanup } = createExportRenderRoot(events, title, getExportLocale())
     try {
       const canvas = await html2canvas(root, {
         scale: 2, useCORS: true, backgroundColor: '#ffffff',
@@ -2170,9 +2088,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   }
 
   async function exportAsHTML(events: any[], title: string): Promise<boolean> {
-    const filtered = filterEventsBySelection(events)
-    if (!filtered.length) { showToast(tr('chat.nothing_to_export'), 'error'); return false }
-    const content = buildExportHTMLDocument(filtered, title, getExportLocale())
+    const content = buildExportHTMLDocument(events, title, getExportLocale())
     return deliverExport(content, `${filenameStem(title)}.html`, 'text/html')
   }
 
@@ -2187,27 +2103,29 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         return
       }
       const title = currentSession?.title ?? currentSession?.name ?? 'session'
-      // Both MD and JSON fetch the full server transcript. MD filters by
-      // selection internally (filterEventsBySelection); JSON is always
-      // lossless and ignores the checkbox selection. PNG and HTML ride the
-      // same fetch+filter path so they honour the checkboxes too.
+      // Every transcript-backed format fetches the same server events and
+      // narrows them once here, so the checkbox selection and the "include
+      // tool calls" toggle mean the same thing in all four.
       const result = await fetchEvents()
-      if (!result) { exportBusy = false; return }
+      if (!result) return
+      const { events, omittedTools } = exportEvents(result.events)
+      if (!events.length) { showToast(tr('chat.nothing_to_export'), 'error'); return }
       let ok = true
       switch (format) {
         case 'md':
-          ok = await exportAsMarkdown(result.events, title)
+          ok = await exportAsMarkdown(events, title)
           break
         case 'json':
-          ok = await exportAsJSON(result.events, title)
+          ok = await exportAsJSON(events, title)
           break
         case 'png':
-          ok = await exportAsPNG(result.events, title)
+          ok = await exportAsPNG(events, title)
           break
         case 'html':
-          ok = await exportAsHTML(result.events, title)
+          ok = await exportAsHTML(events, title)
           break
       }
+      if (ok && omittedTools) showToast(tr('chat.export_tools_omitted'), 'info')
       if (ok) exitExportMode()
     } catch (e: any) {
       console.error('Export error:', e)
@@ -2615,7 +2533,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           <iconify-icon icon="ant-design:file-markdown-outlined" width="16"></iconify-icon>
           <span>MD</span>
         </button>
-        <button class="export-fmt-btn" title="{$t('chat.export_json')} — {$t('chat.export_json_full')}" disabled={exportBusy} onclick={() => exportByFormat('json')}>
+        <button class="export-fmt-btn" title="{$t('chat.export_json')} — {$t('chat.export_json_hint')}" disabled={exportBusy} onclick={() => exportByFormat('json')}>
           <iconify-icon icon="ant-design:file-text-outlined" width="16"></iconify-icon>
           <span>JSON</span>
         </button>
