@@ -50,10 +50,23 @@ func TestLimiterSerialisesCalls(t *testing.T) {
 						break
 					}
 				}
-				defer inFlight.Add(-1)
 				// Hold the request open long enough that an ungated caller
 				// would overlap with it.
 				time.Sleep(10 * time.Millisecond)
+
+				// Leave the in-flight window before writing the response rather
+				// than in a defer. A streaming client is finished the moment it
+				// has read the end-of-stream sentinel — it never waits for the
+				// body to reach EOF — so it releases its rate-limit slot, and
+				// the next caller arrives here, while a deferred decrement is
+				// still pending in this handler. That ordering made the peak
+				// read 2 with the gate working perfectly, which is what this
+				// test used to fail on intermittently in CI.
+				//
+				// Nothing is lost by moving it: two callers overlapping because
+				// the gate is missing do so during the sleep above, which is
+				// inside the window either way.
+				inFlight.Add(-1)
 
 				if r.Header.Get("Accept") == "text/event-stream" {
 					w.Header().Set("Content-Type", "text/event-stream")
