@@ -931,6 +931,7 @@
             value={$editDraft}
             oninput={(e) => editDraft.set((e.target as HTMLInputElement).value)}
             onclick={(e) => e.stopPropagation()}
+            onkeydown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') editId.set(null) }}
           />
           <span class="row-action" onclick={(e) => { e.stopPropagation(); commitRename() }} style="color:var(--success)">
             <iconify-icon icon="ant-design:check-outlined" width="13"></iconify-icon>
