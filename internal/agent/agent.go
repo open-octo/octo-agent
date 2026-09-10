@@ -2187,11 +2187,43 @@ func assistantReplyMessage(reply Reply) Message {
 	if content == "" {
 		content = textFromBlocks(reply.Blocks)
 	}
+	if content == "" {
+		logEmptyReply(reply)
+	}
 	msg := NewAssistantMessage(content)
 	if hasThinkingBlock(reply.Blocks) {
 		msg.Blocks = reply.Blocks
 	}
 	return msg
+}
+
+// logEmptyReply records a turn whose assistant reply carried no text at all.
+//
+// NewAssistantMessage substitutes a "[no content]" placeholder so the history
+// stays valid for providers that reject empty assistant content, but that
+// placeholder is the only trace such a turn leaves: nothing in the session
+// file or the logs says which model produced it or why. Endpoints reach this
+// state when a content filter or rate limiter returns an empty choice with a
+// "stop" finish reason, or when a stream drops after the role-only first
+// chunk, so the stop reason and the token counts are what a bug report needs.
+//
+// A round that called tools is not this case — a tool_use reply legitimately
+// carries no text, and the agent loop keeps going.
+func logEmptyReply(reply Reply) {
+	for _, b := range reply.Blocks {
+		if b.Type == "tool_use" {
+			return
+		}
+	}
+	slog.Warn("assistant reply carried no text",
+		"model", reply.Model,
+		"stop_reason", reply.StopReason,
+		"blocks", len(reply.Blocks),
+		"has_thinking", hasThinkingBlock(reply.Blocks),
+		"input_tokens", reply.InputTokens,
+		"output_tokens", reply.OutputTokens,
+		"cache_read_tokens", reply.CacheReadTokens,
+	)
 }
 
 // hasThinkingBlock reports whether blocks carries a reasoning trace worth
