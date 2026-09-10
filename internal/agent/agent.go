@@ -1258,7 +1258,29 @@ func (a *Agent) runLoop(
 					"Raise --max-tokens / --max-tokens-escalate, or ask me to continue in smaller steps.")
 		}
 
-		if reply.StopReason == "tool_use" {
+		// A "tool_use" stop reason with no tool_use block is a reply that
+		// promised a tool call and delivered none. Taking the dispatch branch
+		// anyway appends an assistant message with neither content nor blocks
+		// — which providers reject on the next request — dispatches an empty
+		// batch, appends an empty tool_result message, and loops. Nothing
+		// stops that loop either: the duplicate-batch detector fingerprints
+		// the batch and returns early on an empty one, so it never trips, and
+		// the turn runs to its iteration cap burning a provider call each
+		// time.
+		//
+		// Falling through to the end-of-turn path below ends the turn on
+		// whatever the reply did carry — text blocks included — and logs the
+		// empty case like any other empty reply.
+		toolUseRound := reply.StopReason == "tool_use" && hasToolUseBlock(reply.Blocks)
+		if reply.StopReason == "tool_use" && !toolUseRound {
+			slog.Warn("agent: stop reason is tool_use but the reply has no tool call",
+				"model", reply.Model,
+				"blocks", len(reply.Blocks),
+				"has_text", textFromBlocks(reply.Blocks) != "" || reply.Content != "",
+			)
+		}
+
+		if toolUseRound {
 			// Pre-dispatch checkpoint. accrueUsage above just learned what the
 			// prompt really cost, and this batch may run for many minutes —
 			// leaving the next checkpoint (the pre-send one, a full batch away)
@@ -2197,6 +2219,16 @@ func assistantReplyMessage(reply Reply, carriedText bool) Message {
 	return msg
 }
 
+// hasToolUseBlock reports whether blocks carries anything to dispatch.
+func hasToolUseBlock(blocks []ContentBlock) bool {
+	for _, b := range blocks {
+		if b.Type == "tool_use" {
+			return true
+		}
+	}
+	return false
+}
+
 // logEmptyReply records a turn whose assistant reply carried no text at all.
 //
 // NewAssistantMessage substitutes a "[no content]" placeholder so the history
@@ -2218,10 +2250,8 @@ func assistantReplyMessage(reply Reply, carriedText bool) Message {
 // branch never reaches here, so this guard is for a provider that returns
 // tool_use blocks under some other stop reason.
 func logEmptyReply(reply Reply, carriedText bool) {
-	for _, b := range reply.Blocks {
-		if b.Type == "tool_use" {
-			return
-		}
+	if hasToolUseBlock(reply.Blocks) {
+		return
 	}
 	slog.Warn("agent: assistant reply carried no text",
 		"model", reply.Model,
