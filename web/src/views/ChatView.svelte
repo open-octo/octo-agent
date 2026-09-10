@@ -70,7 +70,7 @@
   import * as api from '../lib/api'
   import { observeArtifact, resetArtifacts } from '../lib/artifacts'
   import { renderMarkdown, escapeHtml, setupCopyButtons } from '../lib/markdown'
-  import { applyToolToggle, buildExportConversation, exportConversationStyles } from '../lib/exportTranscript'
+  import { applyToolToggle, buildExportConversation, exportConversationStyles, hasRenderableTurn, TOOL_RESULT_CHARS } from '../lib/exportTranscript'
   import { t, tr, pickLocalized } from '../lib/i18n'
   import { insertPendingSend, takeConfirmedSend } from '../lib/pendingSendOrder'
   import { inlineSlashCommand } from '../lib/inlineSlash'
@@ -1948,7 +1948,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       } else if (type === 'tool_call') {
         lines.push(`- **Tool call**: ${ev.tool_name ?? ev.name ?? 'unknown'}`, '')
       } else if (type === 'tool_result') {
-        lines.push(`- **Tool result**: ${typeof ev.result === 'string' ? ev.result.slice(0, 500) : '(non-text result)'}`, '')
+        lines.push(`- **Tool result**: ${typeof ev.result === 'string' ? ev.result.slice(0, TOOL_RESULT_CHARS) : '(non-text result)'}`, '')
       }
     }
 
@@ -2063,7 +2063,14 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         windowWidth: EXPORT_CAPTURE_WIDTH,
       })
       const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'))
-      if (!blob) throw new Error('png_blob_failed')
+      if (!blob) {
+        // A canvas past the browser's maximum height (~32767px, and this one
+        // renders at scale 2) produces no blob at all. Long transcripts reach
+        // that on their own and tool cards make it likelier, so name the way
+        // out instead of letting the generic failure toast swallow it.
+        showToast(tr('chat.export_png_too_long'), 'error')
+        return false
+      }
       const filename = `${filenameStem(title)}.png`
       if (get(nativeShell)) {
         // Desktop webview has no <a download> delegate — base64-encode the
@@ -2109,7 +2116,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       const result = await fetchEvents()
       if (!result) return
       const { events, omittedTools } = exportEvents(result.events)
-      if (!events.length) { showToast(tr('chat.nothing_to_export'), 'error'); return }
+      if (!hasRenderableTurn(events)) { showToast(tr('chat.nothing_to_export'), 'error'); return }
       let ok = true
       switch (format) {
         case 'md':

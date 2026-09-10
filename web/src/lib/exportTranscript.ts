@@ -24,10 +24,28 @@ export function applyToolToggle(
   return { events: kept, omittedTools: kept.length !== events.length }
 }
 
-// A tool result can be a whole terminal dump. Both the Markdown export and
-// this one cut it at the same point: PNG renders every line of it as pixels,
-// and neither document has anywhere to scroll.
+// A tool result can be a whole terminal dump. Every format cuts it at the same
+// point: PNG renders every line of it as pixels, and no export has anywhere to
+// scroll.
 export const TOOL_RESULT_CHARS = 500
+
+// Whether an export would carry any actual conversation.
+//
+// Counting events is not the same question: filterEventsBySelection passes
+// tool and thinking events through regardless of the checkboxes, so a
+// selection with every message unticked still leaves a non-empty array. An
+// export built from that is a page of tool cards with nothing they belong to.
+//
+// The empty-assistant test mirrors filterEventsBySelection's own: a turn with
+// neither text nor reasoning is bookkeeping, and never pairs with a checkbox.
+export function hasRenderableTurn(events: any[]): boolean {
+  return events.some((ev) => {
+    const type = ev?.type ?? ''
+    if (type === 'history_user_message') return true
+    if (type !== 'assistant_message') return false
+    return Boolean((ev.content ?? '').trim() || (ev.thinking ?? '').trim())
+  })
+}
 
 // Inner conversation markup for the HTML and PNG exports. Tool events arrive
 // here only when the toggle is on — applyToolToggle has dropped them

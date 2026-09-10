@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { applyToolToggle, buildExportConversation, isToolEvent } from './exportTranscript'
+import {
+  applyToolToggle, buildExportConversation, hasRenderableTurn, isToolEvent,
+} from './exportTranscript'
 
 const transcript = [
   { type: 'history_user_message', content: 'build it' },
@@ -74,6 +76,15 @@ describe('buildExportConversation', () => {
     expect(html).not.toContain('x'.repeat(501))
   })
 
+  it('renders an empty tool result as an empty block, not as a missing one', () => {
+    const html = buildExportConversation([{ type: 'tool_result', result: '' }])
+    expect(html).toContain('Tool result')
+    expect(html).toContain('<pre class="tool-result"></pre>')
+  })
+
+  // Defensive only — the server sends a string for every tool_result — but the
+  // branch exists, so pin what it does rather than stringifying an object into
+  // the document.
   it('labels a non-text tool result instead of stringifying it', () => {
     const html = buildExportConversation([{ type: 'tool_result', result: { rows: 3 } }])
     expect(html).toContain('(non-text result)')
@@ -81,5 +92,39 @@ describe('buildExportConversation', () => {
 
   it('skips event types it has no card for', () => {
     expect(buildExportConversation([{ type: 'thinking', text: 'hmm' }])).toBe('')
+  })
+})
+
+describe('hasRenderableTurn', () => {
+  it('sees a conversation', () => {
+    expect(hasRenderableTurn(transcript)).toBe(true)
+    expect(hasRenderableTurn([{ type: 'history_user_message', content: 'hi' }])).toBe(true)
+  })
+
+  // The case the export guard exists for: every message unticked still leaves
+  // the tool events behind, and exporting those alone yields a page of cards
+  // belonging to nothing.
+  it('does not count tool events as a conversation', () => {
+    expect(hasRenderableTurn(transcript.filter(isToolEvent))).toBe(false)
+  })
+
+  it('does not count a standalone thinking event', () => {
+    expect(hasRenderableTurn([{ type: 'thinking', text: 'hmm' }])).toBe(false)
+  })
+
+  // Matches filterEventsBySelection's own empty-assistant test: a turn with
+  // neither text nor reasoning is bookkeeping and never pairs with a checkbox,
+  // so it must not keep the guard open on its own.
+  it('does not count an assistant turn with neither text nor reasoning', () => {
+    expect(hasRenderableTurn([{ type: 'assistant_message', content: '  ', thinking: '' }])).toBe(false)
+    expect(hasRenderableTurn([{ type: 'assistant_message' }])).toBe(false)
+  })
+
+  it('counts an assistant turn carrying only reasoning', () => {
+    expect(hasRenderableTurn([{ type: 'assistant_message', content: '', thinking: 'why' }])).toBe(true)
+  })
+
+  it('is false for an empty transcript', () => {
+    expect(hasRenderableTurn([])).toBe(false)
   })
 })
