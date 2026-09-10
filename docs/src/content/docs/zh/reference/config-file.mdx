@@ -22,7 +22,7 @@ flag。所有字段都是可选的——文件不存在，或者字段缺失，�
 |---|---|---|
 | `endpoints` | [端点](#端点) 列表 | 配置好的 provider，每个端点打包共享的连接参数和一组模型 |
 | `default` | string | 复合 id `<端点id>::<model>`，没有其他选择时使用；留空则回退到第一个端点的第一个模型 |
-| `lite` | string | 用于低成本内部调用（[历史压缩](/docs/zh/concepts/compaction/)的总结步骤和会话标题生成）的复合 id `<端点id>::<model>`；留空则从端点的 `lite_model` 或 vendor 默认推断 |
+| `lite` | string | 用于低成本内部调用（[历史压缩](/docs/zh/concepts/compaction/)的总结步骤和会话标题生成）的复合 id `<端点id>::<model>`；留空则没有 lite 模型，这些调用直接走会话的主模型 |
 | `vision_helper` | string | 复合 id `<端点id>::<model>`，指定一个有视觉能力的模型替纯文本模型描述图片。留空（默认）则图片仍按原样拒绝。指向的模型必须是 `vision: true` |
 | `permission_mode` | string | `interactive` \| `strict` \| `auto` |
 | `coauthor` | bool | 在 agent 写的 git commit 里追加 `Co-authored-by`（默认 `true`） |
@@ -82,7 +82,6 @@ octo 按不同界面分别追踪工作目录,而不是一个全局 cwd:
 | `base_url` | string | 端点 URL；留空使用该 vendor 的默认端点。`custom` vendor 必填 |
 | `api_key` | string | 明文兜底，仅当对应环境变量为空时使用（权限 `0600`）。`custom` vendor 可以不填——Ollama 等本地服务不需要密钥，此时不发认证头 |
 | `protocol` | string | 仅 `custom` vendor 使用的协议：`anthropic` \| `openai` |
-| `lite_model` | string | 可选：指定本端点 `models` 里的某个模型作为它的压缩 lite 模型 |
 | `rpm` | int | 可选：每滚动 60 秒内针对该端点发起的模型调用次数上限。`0`/不填 = 不限 |
 | `max_concurrency` | int | 可选：针对该端点同时在途的模型调用数上限。`0`/不填 = 不限 |
 | `models` | [模型](#模型) 列表 | 通过这个端点提供的模型 |

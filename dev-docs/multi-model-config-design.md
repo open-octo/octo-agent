@@ -178,19 +178,12 @@ Each transport that constructs an `Agent` resolves `lite_model` to an entry,
 builds its sender through the same cache / `app.NewSender` path, and sets the
 pair.
 
-**Implicit lite.** With no `lite_model` configured, the vendor's registry
-`LiteModel` (e.g. deepseek → `deepseek-v4-flash`, anthropic →
-`claude-haiku-4-5`) serves as the lite model, riding the session's **own
-sender** — same endpoint, key, and prompt-cache routing, so no extra
-credentials and, where the backend caches by shared prefix, the summarisation
-call can reuse the cache the conversation already built.
-`app.ImplicitLiteModel(provider, model, baseURL)` resolves it and returns
-nothing when the vendor is unknown or has no `LiteModel`, when the primary model
-already is the lite model, or when the base URL points off the vendor's own
-endpoints (a custom endpoint is a different backend behind a compatible
-protocol; its catalogue won't include the vendor's lite model). An explicit
-`lite_model` entry always wins. For a session bound to a config entry, the
-implicit lookup uses that entry's vendor and endpoint.
+The lite model is always explicit. With no `lite` configured there is no
+lite pair at all and compaction runs on the primary sender: the registry
+carries no per-vendor lite model, and nothing is inferred from the vendor or
+the endpoint's base URL. A model guessed from the vendor is reachable only on
+that vendor's own endpoint and absent from every relay's catalogue, so the
+lite model is named by the user or there is none.
 
 ## Frontend
 

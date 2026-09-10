@@ -37,7 +37,6 @@ type providerPreset struct {
 	DefaultModel     string            `json:"default_model"`
 	Models           []string          `json:"models,omitempty"`
 	ModelVision      map[string]bool   `json:"model_vision,omitempty"` // model id → accepts image input; lets the form pre-fill the vision toggle
-	LiteModel        string            `json:"lite_model,omitempty"`
 	EndpointVariants []endpointVariant `json:"endpoint_variants,omitempty"`
 	WebsiteURL       string            `json:"website_url,omitempty"`
 	CustomEndpoint   bool              `json:"custom_endpoint,omitempty"`
@@ -66,7 +65,6 @@ func buildProviderPresets() []providerPreset {
 			DefaultModel:     v.DefaultModel,
 			Models:           app.VendorModels(v.ID),
 			ModelVision:      app.VendorModelVisionMap(v.ID),
-			LiteModel:        v.LiteModel,
 			EndpointVariants: variants,
 			WebsiteURL:       v.WebsiteURL,
 			CustomEndpoint:   v.CustomEndpoint,
@@ -279,7 +277,6 @@ type endpointConfigJSON struct {
 	BaseURL   string              `json:"base_url,omitempty"`
 	Protocol  string              `json:"protocol,omitempty"`
 	HasAPIKey bool                `json:"has_api_key"`
-	LiteModel string              `json:"lite_model,omitempty"`
 	Models    []endpointModelJSON `json:"models"`
 	Headers   map[string]string   `json:"headers,omitempty"`
 }
@@ -313,7 +310,6 @@ func (s *Server) handleGetEndpoints(w http.ResponseWriter, r *http.Request) {
 			BaseURL:   ep.BaseURL,
 			Protocol:  ep.Protocol,
 			HasAPIKey: ep.APIKey != "",
-			LiteModel: ep.LiteModel,
 			Models:    make([]endpointModelJSON, 0, len(ep.Models)),
 			Headers:   ep.Headers,
 		}
@@ -779,7 +775,6 @@ type endpointJSONOut struct {
 	BaseURL   string              `json:"base_url,omitempty"`
 	Protocol  string              `json:"protocol,omitempty"`
 	HasAPIKey bool                `json:"has_api_key"`
-	LiteModel string              `json:"lite_model,omitempty"`
 	Models    []endpointModelJSON `json:"models"`
 	Headers   map[string]string   `json:"headers,omitempty"`
 }
@@ -792,7 +787,6 @@ func endpointToJSON(ep config.Endpoint) endpointJSONOut {
 		BaseURL:   ep.BaseURL,
 		Protocol:  ep.Protocol,
 		HasAPIKey: ep.APIKey != "",
-		LiteModel: ep.LiteModel,
 		Models:    make([]endpointModelJSON, 0, len(ep.Models)),
 		Headers:   ep.Headers,
 	}

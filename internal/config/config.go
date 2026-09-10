@@ -122,10 +122,6 @@ type Endpoint struct {
 	// Protocol is the wire format ("anthropic" | "openai"). Only the
 	// "custom" vendor needs it set explicitly; named vendors pin it.
 	Protocol string `yaml:"protocol,omitempty"`
-	// LiteModel optionally names a model in Models used as the lite model
-	// for compaction. Empty falls back to vendor inference (see
-	// ImplicitLiteModel).
-	LiteModel string `yaml:"lite_model,omitempty"`
 	// Headers are extra HTTP headers sent with every request to this
 	// endpoint's BaseURL. Applied after the client's built-in headers
 	// (Content-Type/User-Agent/Authorization/x-api-key/anthropic-version), so
@@ -182,8 +178,8 @@ type Config struct {
 	// the first endpoint's first model (see ResolveDefault).
 	Default string `yaml:"default,omitempty"`
 	// Lite is the composite id for the compaction lite model. Empty means
-	// fall back to ImplicitLiteModel inference (endpoint.lite_model, else
-	// the vendor registry's LiteModel for official endpoints).
+	// there is no lite model: compaction and title generation run on the
+	// session's primary model. Nothing is inferred from the vendor.
 	Lite string `yaml:"lite,omitempty"`
 	// VisionHelper is the composite id (or bare model name) of a vision-capable
 	// model that describes images on behalf of a text-only primary model. Empty

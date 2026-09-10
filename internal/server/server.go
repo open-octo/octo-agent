@@ -1326,19 +1326,6 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 		// configured. Nil (unconfigured) leaves every image path unchanged.
 		a.SetImageDescriber(app.NewVisionDescriber(a, cfg))
 		a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
-		if a.LiteSender == nil {
-			// No explicit lite entry — fall back to the vendor's registry
-			// lite model on the session's OWN sender, keeping compaction on
-			// the endpoint, key, and prompt cache the conversation uses.
-			prov, baseURL := s.getProvider(), resolveBaseURL(s.getProvider(), cfg)
-			if entry, ok := cfg.EntryByModel(sess.ModelConfig); ok {
-				prov, baseURL = entry.Provider, entry.BaseURL
-			}
-			if lm := app.ImplicitLiteModel(prov, a.Model, baseURL); lm != "" {
-				a.LiteSender = sender
-				a.LiteModel = lm
-			}
-		}
 		// Honor the configured auto-compaction threshold, the same way the CLI
 		// does (cmd/octo/chat.go). Without this the server left CompactAutoFraction
 		// at zero, so every web/desktop/IM turn fell back to the built-in 75%
@@ -2531,12 +2518,6 @@ func (s *Server) buildChannelAgent(profile *agentprofile.Profile) *agent.Agent {
 		// agent needs the describer as much as a Web session does.
 		a.SetImageDescriber(app.NewVisionDescriber(a, cfg))
 		a.LiteSender, a.LiteModel = s.liteSenderFromConfig(cfg)
-		if a.LiteSender == nil {
-			if lm := app.ImplicitLiteModel(s.getProvider(), model, resolveBaseURL(s.getProvider(), cfg)); lm != "" {
-				a.LiteSender = defaultSender
-				a.LiteModel = lm
-			}
-		}
 	}
 	return a
 }

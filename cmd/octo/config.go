@@ -656,7 +656,6 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 	for _, existingEp := range full.Endpoints {
 		if existingEp.ID == endpointID {
 			ep.Name = existingEp.Name
-			ep.LiteModel = existingEp.LiteModel
 			ep.Headers = existingEp.Headers
 			ep.RPM = existingEp.RPM
 			ep.MaxConcurrency = existingEp.MaxConcurrency

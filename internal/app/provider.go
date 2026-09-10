@@ -11,8 +11,6 @@ package app
 
 import (
 	"strings"
-
-	"github.com/open-octo/octo-agent/internal/config"
 )
 
 // EndpointVariant is a regional endpoint alternative for a vendor.
@@ -41,7 +39,6 @@ type Vendor struct {
 	DefaultBaseURL   string            // vendor's official endpoint (host only; the client appends the protocol path)
 	DefaultModel     string            // cheapest/reasoning-capable default
 	Models           []VendorModel     // available models (for UI dropdown), each with its vision capability
-	LiteModel        string            // lightweight/cheaper model variant
 	APIKeyEnvVar     string            // environment variable name for the key
 	WebsiteURL       string            // link to the key-management page
 	EndpointVariants []EndpointVariant // regional endpoint alternatives
@@ -62,6 +59,7 @@ var Registry = []Vendor{
 		DefaultBaseURL: "https://api.openai.com",
 		DefaultModel:   "gpt-5.4",
 		Models: []VendorModel{
+			{ID: "gpt-6-astra", Vision: true},
 			{ID: "gpt-5.6-sol", Vision: true},
 			{ID: "gpt-5.6-terra", Vision: true},
 			{ID: "gpt-5.6-luna", Vision: true},
@@ -76,7 +74,6 @@ var Registry = []Vendor{
 			{ID: "o3-mini", Vision: false}, // o3-mini has no image input (unlike o3 / o4-mini)
 			{ID: "o4-mini", Vision: true},
 		},
-		LiteModel:    "gpt-5.4-mini",
 		APIKeyEnvVar: "OPENAI_API_KEY",
 		WebsiteURL:   "https://platform.openai.com/api-keys",
 	},
@@ -88,6 +85,7 @@ var Registry = []Vendor{
 		DefaultBaseURL: "https://api.anthropic.com",
 		DefaultModel:   "claude-sonnet-4-6",
 		Models: []VendorModel{
+			{ID: "claude-fable-5-1", Vision: true},
 			{ID: "claude-fable-5", Vision: true},
 			{ID: "claude-opus-4-8", Vision: true},
 			{ID: "claude-opus-4-7", Vision: true},
@@ -97,7 +95,6 @@ var Registry = []Vendor{
 			{ID: "claude-sonnet-4-5", Vision: true},
 			{ID: "claude-haiku-4-5", Vision: true},
 		},
-		LiteModel:    "claude-haiku-4-5",
 		APIKeyEnvVar: "ANTHROPIC_API_KEY",
 		WebsiteURL:   "https://console.anthropic.com/settings/keys",
 	},
@@ -157,7 +154,6 @@ var Registry = []Vendor{
 			{ID: "grok-4.3", Vision: true},
 			{ID: "grok-build-0.1", Vision: true},
 		},
-		LiteModel:    "grok-4.20-non-reasoning",
 		APIKeyEnvVar: "XAI_API_KEY",
 		WebsiteURL:   "https://console.x.ai/",
 	},
@@ -167,18 +163,10 @@ var Registry = []Vendor{
 		Protocol:       "openai",
 		API:            "openai-completions",
 		DefaultBaseURL: "https://api.deepseek.com",
-		DefaultModel:   "deepseek-v4-pro",
-		// deepseek-v4-flash / -pro have vision in the chat app but not over the
-		// API — image content isn't accepted on those endpoints, so they stay
-		// text-only here. deepseek-v4-flash-vision-exp is the API-facing vision
-		// variant: 1M context, images billed as input tokens by dimension, tool
-		// calls supported (api-docs.deepseek.com/quick_start/pricing, 2026-08-29).
+		DefaultModel:   "deepseek-flash",
 		Models: []VendorModel{
-			{ID: "deepseek-v4-flash", Vision: false},
-			{ID: "deepseek-v4-pro", Vision: false},
-			{ID: "deepseek-v4-flash-vision-exp", Vision: true},
+			{ID: "deepseek-flash", Vision: true},
 		},
-		LiteModel:    "deepseek-v4-flash",
 		APIKeyEnvVar: "DEEPSEEK_API_KEY",
 		WebsiteURL:   "https://platform.deepseek.com/api_keys",
 	},
@@ -257,7 +245,6 @@ var Registry = []Vendor{
 			{ID: "glm-4.5-air", Vision: false},
 			{ID: "glm-4.5-flash", Vision: false},
 		},
-		LiteModel:    "glm-5.3-flash",
 		APIKeyEnvVar: "ZHIPU_API_KEY",
 		WebsiteURL:   "https://open.bigmodel.cn/usercenter/apikey",
 		EndpointVariants: []EndpointVariant{
@@ -272,16 +259,16 @@ var Registry = []Vendor{
 		API:            "openai-completions",
 		DefaultBaseURL: "https://dashscope.aliyuncs.com/compatible-mode",
 		DefaultModel:   "qwen3.7-plus",
-		// qwen3.7-plus and the flash generations accept image input; qwen3.7-max
-		// and the legacy qwen-plus alias are text-only.
+		// qwen3.8-max, qwen3.7-plus and the flash generations accept image
+		// input; qwen3.7-max and the legacy qwen-plus alias are text-only.
 		Models: []VendorModel{
+			{ID: "qwen3.8-max", Vision: true},
 			{ID: "qwen3.7-max", Vision: false},
 			{ID: "qwen3.7-plus", Vision: true},
 			{ID: "qwen3.6-flash", Vision: true},
 			{ID: "qwen3.5-flash", Vision: true},
 			{ID: "qwen-plus", Vision: false},
 		},
-		LiteModel:    "qwen3.5-flash",
 		APIKeyEnvVar: "DASHSCOPE_API_KEY",
 		WebsiteURL:   "https://bailian.console.aliyun.com",
 		EndpointVariants: []EndpointVariant{
@@ -485,103 +472,6 @@ func VendorWebsiteURL(id string) string {
 // IsKnownVendor reports whether id is a registered vendor ID.
 func IsKnownVendor(id string) bool {
 	return vendorByID(id) != nil
-}
-
-// ImplicitLiteModel returns the lite model a session should compact on when
-// the user configured none explicitly: the vendor's registry LiteModel,
-// served over the SAME sender as the primary model — same endpoint, key, and
-// prompt-cache routing. It returns "" (no implicit lite) when:
-//   - the vendor is unknown or has no LiteModel,
-//   - the primary model already IS the lite model, or
-//   - baseURL points off the vendor's own endpoints — a custom endpoint is a
-//     different backend wearing a compatible protocol, and its catalogue
-//     won't include the vendor's lite model.
-//
-// Deprecated: prefer ImplicitLiteModelForEndpoint, which takes a config.Endpoint
-// and consults endpoint.LiteModel first. This form is kept for callers that
-// haven't migrated yet (they pass the provider/model/baseURL they already
-// have); it's equivalent to ImplicitLiteModelForEndpoint with an endpoint
-// whose LiteModel is empty.
-func ImplicitLiteModel(provider, model, baseURL string) string {
-	v := vendorByID(provider)
-	if v == nil || v.LiteModel == "" || v.LiteModel == model {
-		return ""
-	}
-	if baseURL != "" && VendorByBaseURL(baseURL) != provider {
-		return ""
-	}
-	return v.LiteModel
-}
-
-// ImplicitLiteModelForEndpoint returns the lite model a session should compact
-// on when the user configured none explicitly (design §5.5). The precedence:
-//
-//  1. endpoint.LiteModel non-empty and != model → endpoint.LiteModel. The
-//     user explicitly marked this endpoint's lite model (e.g. a custom relay
-//     endpoint carrying both claude-sonnet and gpt-5.4-mini, with mini marked
-//     as lite) — that wins over any vendor inference.
-//  2. Otherwise, if the endpoint points at an official vendor (via
-//     VendorByBaseURL) and that vendor has a LiteModel != model → vendor
-//     LiteModel. An official endpoint (e.g. anthropic's api.anthropic.com)
-//     can safely serve the vendor's lite model over the same sender, sharing
-//     key and prompt-cache routing.
-//  3. Otherwise "" — a custom endpoint without an explicit LiteModel has no
-//     implicit lite. Custom relays carry arbitrary catalogues the registry
-//     doesn't know about, so guessing a vendor LiteModel would serve a model
-//     the relay doesn't expose. The user must set endpoint.LiteModel.
-//
-// Step 2's vendor inference uses the endpoint's effective base URL — when
-// the user omits base_url (legal for named vendors, design §3.1: "命名 vendor
-// 可空, 用 vendor 默认"), we fall back to the vendor's DefaultBaseURL so the
-// inference still fires. Without this fallback, a named-vendor endpoint
-// configured without base_url would silently lose its compaction lite model,
-// which is a regression from the legacy ImplicitLiteModel (which treated
-// baseURL=="" as "trust the provider field").
-//
-// Migrating from the old ImplicitLiteModel(provider, model, baseURL): the old
-// form is equivalent to ImplicitLiteModelForEndpoint with an endpoint whose
-// LiteModel is empty, Provider = provider, and BaseURL = baseURL. Callers
-// that haven't migrated yet (cmd/octo/chat.go, internal/server/server.go) stay
-// on the old form because the ModelEntry they hold has no LiteModel field;
-// they'll migrate in PR4 when the entry becomes a config.Endpoint.
-func ImplicitLiteModelForEndpoint(endpoint config.Endpoint, model string) string {
-	// Step 1: explicit endpoint LiteModel wins when it differs from the
-	// primary model. If they're equal, the lite would be a no-op — fall
-	// through to vendor inference so an official endpoint still gets its
-	// vendor's lite (e.g. endpoint.LiteModel="claude-sonnet-4-6" on the
-	// anthropic endpoint, primary is also claude-sonnet-4-6 → infer
-	// claude-haiku-4-5 rather than returning a useless self-reference).
-	if endpoint.LiteModel != "" && endpoint.LiteModel != model {
-		return endpoint.LiteModel
-	}
-
-	// Step 2: official vendor endpoint → vendor LiteModel. The provider field
-	// alone isn't enough — a user can set provider="anthropic" on an endpoint
-	// whose base_url points elsewhere (a relay wearing the anthropic
-	// protocol). VendorByBaseURL confirms the endpoint actually points at the
-	// named vendor's host before inferring its LiteModel.
-	//
-	// When base_url is empty (legal for named vendors per §3.1), fall back to
-	// the vendor's DefaultBaseURL so the inference still fires. This matches
-	// the legacy ImplicitLiteModel's treatment of baseURL=="" as "trust the
-	// provider field".
-	baseURL := endpoint.BaseURL
-	if baseURL == "" {
-		baseURL = VendorBaseURL(endpoint.Provider)
-	}
-	if baseURL != "" {
-		inferredProvider := VendorByBaseURL(baseURL)
-		if inferredProvider != "" && inferredProvider == endpoint.Provider {
-			if v := vendorByID(inferredProvider); v != nil && v.LiteModel != "" && v.LiteModel != model {
-				return v.LiteModel
-			}
-		}
-	}
-
-	// Step 3: no inference. Either a custom endpoint (no vendor match) or a
-	// vendor with no LiteModel in the registry, or the primary model already
-	// is the vendor LiteModel.
-	return ""
 }
 
 // VendorByBaseURL returns the vendor whose default endpoint or one of whose

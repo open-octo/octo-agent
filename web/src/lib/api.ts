@@ -990,7 +990,6 @@ export interface EndpointConfig {
   base_url?: string
   protocol?: string
   has_api_key: boolean
-  lite_model?: string
   headers?: Record<string, string>
   models: EndpointModel[]
 }
@@ -1026,7 +1025,6 @@ export interface EndpointConfigInput {
   base_url?: string
   api_key?: string
   protocol?: string
-  lite_model?: string
   headers?: Record<string, string>
   models?: EndpointModelInput[]
 }
@@ -1039,7 +1037,6 @@ export interface EndpointMutationResult {
   base_url?: string
   protocol?: string
   has_api_key: boolean
-  lite_model?: string
   headers?: Record<string, string>
   models: EndpointModel[]
 }
@@ -1264,7 +1261,6 @@ export interface ProviderPreset {
   default_model: string
   models?: string[]
   model_vision?: Record<string, boolean>  // model id → accepts image input, for pre-filling the vision toggle
-  lite_model?: string
   endpoint_variants?: EndpointVariant[]
   website_url?: string
   custom_endpoint?: boolean

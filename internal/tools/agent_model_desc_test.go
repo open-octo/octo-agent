@@ -8,13 +8,13 @@ import (
 )
 
 // The model-override description must list only the sibling models of the
-// endpoint serving the session model, marking the endpoint's lite model.
+// endpoint serving the session model, marking the configured lite model.
 func TestSubAgentModelParamDescFor_ListsSiblingModels(t *testing.T) {
 	cfg := config.Config{
+		Lite: "main::cheap-model",
 		Endpoints: []config.Endpoint{
 			{
-				ID:        "main",
-				LiteModel: "cheap-model",
+				ID: "main",
 				Models: []config.EndpointModel{
 					{Model: "big-model"},
 					{Model: "cheap-model"},

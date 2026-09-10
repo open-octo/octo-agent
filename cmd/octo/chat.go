@@ -463,25 +463,6 @@ func resumeModelRef(sess *agent.Session) string {
 	return sess.Model
 }
 
-// resumeLite re-infers the session's implicit lite model after a resume
-// changed the active model. The startup lite inference ran against the config
-// default; after resume the conversation runs on the session's own model, so
-// compaction should follow the session's endpoint, key, and prompt cache.
-// Only a lite that came from the startup sender (implicit inference) or was
-// absent is touched — an explicit cfg.Lite entry built from its own sender is
-// left alone.
-func resumeLite(a *agent.Agent, prevSender agent.Sender, provider, model string, entry config.ModelEntry) {
-	if a.LiteSender != prevSender && a.LiteSender != nil {
-		return
-	}
-	if lm := app.ImplicitLiteModel(provider, model, resolveBaseURL(provider, entry)); lm != "" {
-		a.LiteSender = a.GetSender()
-		a.LiteModel = lm
-	} else {
-		a.LiteSender, a.LiteModel = nil, ""
-	}
-}
-
 // runChat handles `octo [flags] [message]` — every invocation that isn't a
 // named subcommand.
 //
@@ -898,15 +879,6 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// Images become text for a text-only model when a vision helper is
 	// configured. Nil (unconfigured) leaves every image path unchanged.
 	a.SetImageDescriber(app.NewVisionDescriber(a, cfg))
-	if a.LiteSender == nil {
-		// No explicit lite entry — fall back to the vendor's registry lite
-		// model on the SAME sender, so compaction stays on the endpoint, key,
-		// and prompt cache the conversation is already using.
-		if lm := app.ImplicitLiteModel(provName, resolvedModel, resolveBaseURL(provName, entry)); lm != "" {
-			a.LiteSender = llmSender
-			a.LiteModel = lm
-		}
-	}
 
 	// Build the tool executor up-front (REPL mode only — single-turn mode
 	// doesn't dispatch tools) and register the sub-agent dispatcher BEFORE the
@@ -1213,7 +1185,6 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 					a.Model = resolvedModel
 				} else {
 					prevProvider, prevModel, prevEntry := provName, resolvedModel, entry
-					prevSender := llmSender
 					provName, resolvedModel, entry = p, m, e
 					if rebuild {
 						newSender, serr := buildSender(p, e, stderr, senderTuning{
@@ -1232,15 +1203,9 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 							llmSender = newSender
 							a.SetSender(llmSender)
 							a.Model = m
-							// Compaction's lite model was inferred for the
-							// config default above; re-infer it on the session's
-							// own sender (resumeLite no-ops when the lite is an
-							// explicit cfg.Lite entry).
-							resumeLite(a, prevSender, p, m, e)
 						}
 					} else {
 						a.Model = m
-						resumeLite(a, prevSender, p, m, e)
 					}
 				}
 				// The startup banner (above) printed the config-default

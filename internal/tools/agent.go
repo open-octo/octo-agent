@@ -126,9 +126,9 @@ func (AgentTool) DefinitionFor(sessionModel string) agent.ToolDefinition {
 // subAgentModelParamBase documents the model-override parameter without any
 // endpoint context: the plain default plus the "lite" keyword.
 const subAgentModelParamBase = "Optional model override. Defaults to the parent's model. " +
-	"Pass \"lite\" to run the sub-agent on the session's lite model (the endpoint's configured " +
-	"or vendor-inferred lite model) — right for mechanical subtasks where speed/cost beats " +
-	"quality; it falls back to the parent's model when the session has no lite model."
+	"Pass \"lite\" to run the sub-agent on the session's configured lite model — right for " +
+	"mechanical subtasks where speed/cost beats quality; it falls back to the parent's model " +
+	"when the session has no lite model."
 
 // subAgentModelParamDesc returns the model-override parameter description,
 // appending the sibling models of the session model's endpoint when the
@@ -152,9 +152,9 @@ func subAgentModelParamDesc(sessionModel string) string {
 // Known ambiguity: the flat session-model string is the only endpoint handle
 // this seam has, so when two endpoints serve the same model id the first match
 // wins and may list the wrong endpoint's siblings — cosmetic only, since an
-// unreachable override fails loudly at the provider. The "(lite)" marker covers
-// only an explicit endpoint lite_model; a vendor-inferred lite (see
-// app.ImplicitLiteModelForEndpoint) may not appear in Models at all.
+// unreachable override fails loudly at the provider. The "(lite)" marker
+// tracks cfg.Lite, the only lite the transports resolve, so it appears only
+// when the configured lite model happens to live on this endpoint.
 func subAgentModelParamDescFor(cfg config.Config, sessionModel string) string {
 	for _, ep := range cfg.Endpoints {
 		for _, m := range ep.Models {
@@ -164,7 +164,7 @@ func subAgentModelParamDescFor(cfg config.Config, sessionModel string) string {
 			names := make([]string, 0, len(ep.Models))
 			for _, mm := range ep.Models {
 				name := mm.Model
-				if name == ep.LiteModel {
+				if cfg.Lite != "" && ep.CompositeID(mm.Model) == cfg.Lite {
 					name += " (lite)"
 				}
 				names = append(names, name)

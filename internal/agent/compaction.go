@@ -35,6 +35,25 @@ const defaultContextWindow = 128_000
 // Tool Search threshold) without duplicating the model→window table.
 func ContextWindow(model string) int { return contextWindow(model) }
 
+// ContextWindowKnown is ContextWindow plus whether the model matched an entry
+// in the table at all. The registry-coverage test uses it to catch a model
+// added to app.Registry without a window here — a miss is silent otherwise,
+// since the fallback is a plausible-looking 128k.
+func ContextWindowKnown(model string) (int, bool) {
+	if w := lookupContextWindow(model); w > 0 {
+		return w, true
+	}
+	return defaultContextWindow, false
+}
+
+// contextWindow is lookupContextWindow with the fallback applied.
+func contextWindow(model string) int {
+	if w := lookupContextWindow(model); w > 0 {
+		return w
+	}
+	return defaultContextWindow
+}
+
 // EstimateTokens exposes estimateMessages to other packages (e.g. the web
 // server's cold-start context-percent estimate for a resumed session with no
 // live Agent yet) so they share the exact same heuristic as compaction and
@@ -46,11 +65,12 @@ func EstimateTokens(msgs []Message) int { return estimateMessages(msgs) }
 // context-percent estimate, which the transcript-only count omits.
 func EstimateTextTokens(s string) int { return estimateText(s) }
 
-// contextWindow returns the approximate context-window size (in tokens) for a
-// model. Values are deliberately conservative; matched case-insensitively by
-// substring so dated/aliased names ("claude-haiku-4-5-2025…") still resolve.
-// Raise a model's entry when a larger window is confirmed.
-func contextWindow(model string) int {
+// lookupContextWindow returns the approximate context-window size (in tokens)
+// for a model, or 0 when the model matches no entry. Values are deliberately
+// conservative; matched case-insensitively by substring so dated/aliased names
+// ("claude-haiku-4-5-2025…") still resolve. Raise a model's entry when a larger
+// window is confirmed.
+func lookupContextWindow(model string) int {
 	m := strings.ToLower(model)
 	switch {
 	// ── Anthropic Claude ──
@@ -74,6 +94,8 @@ func contextWindow(model string) int {
 		return 256_000
 
 	// ── OpenAI GPT / O-series ──
+	case strings.Contains(m, "gpt-6") || strings.Contains(m, "gpt6"):
+		return 1_000_000
 	case strings.Contains(m, "gpt-5.6") || strings.Contains(m, "gpt5.6"):
 		return 1_000_000
 	case strings.Contains(m, "gpt-5.5") || strings.Contains(m, "gpt5.5"):
@@ -106,6 +128,8 @@ func contextWindow(model string) int {
 		return 1_000_000
 
 	// ── DeepSeek ──
+	case strings.Contains(m, "deepseek-flash") || strings.Contains(m, "deepseekflash"):
+		return 1_000_000
 	case strings.Contains(m, "deepseek-v4-pro") || strings.Contains(m, "deepseekv4-pro"):
 		return 1_000_000
 	case strings.Contains(m, "deepseek-v4-flash") || strings.Contains(m, "deepseekv4-flash"):
@@ -136,6 +160,8 @@ func contextWindow(model string) int {
 		return 200_000
 
 	// ── Alibaba Qwen ──
+	case strings.Contains(m, "qwen3.8") || strings.Contains(m, "qwen-3.8"):
+		return 1_000_000
 	case strings.Contains(m, "qwen3.7") || strings.Contains(m, "qwen-3.7"):
 		return 1_000_000
 	case strings.Contains(m, "qwen3-max") || strings.Contains(m, "qwen-3-max"):
@@ -247,7 +273,7 @@ func contextWindow(model string) int {
 		return 16_000
 
 	default:
-		return defaultContextWindow
+		return 0
 	}
 }
 

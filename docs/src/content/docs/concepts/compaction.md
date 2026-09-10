@@ -84,9 +84,10 @@ every transport, so the TUI, Web UI, and IM channels show identical behavior:
 
 ## Controlling the cost
 
-Set `lite_model` in [`config.yml`](/docs/reference/config-file/) and the summarize call runs on that
+Set `lite` in [`config.yml`](/docs/reference/config-file/) and the summarize call runs on that
 cheaper model first, falling back to your primary model only if the lite call fails — the main lever
-for keeping compaction's own token cost down on a long-running session.
+for keeping compaction's own token cost down on a long-running session. Leave it empty and the
+summarize call runs on your primary model; nothing cheaper is picked for you.
 
 Next: an error mid-turn from an over-length *reply* (not the input) is a different mechanism — see
 [The agent loop](/docs/concepts/agent-loop/#recovering-from-a-truncated-reply).

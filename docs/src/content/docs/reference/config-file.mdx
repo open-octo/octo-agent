@@ -24,7 +24,7 @@ anything friendly.
 |---|---|---|
 | `endpoints` | list of [endpoint](#endpoint) | Configured providers, each bundling shared connection params and a list of models |
 | `default` | string | Composite id `<endpoint-id>::<model>` used when nothing else selects one; empty falls back to the first endpoint's first model |
-| `lite` | string | Composite id `<endpoint-id>::<model>` for cheap internal calls ([history compaction](/docs/concepts/compaction/)'s summarize step and session-title generation); empty infers from the endpoint's `lite_model` or the vendor default |
+| `lite` | string | Composite id `<endpoint-id>::<model>` for cheap internal calls ([history compaction](/docs/concepts/compaction/)'s summarize step and session-title generation); empty means no lite model — those calls run on the session's primary model |
 | `vision_helper` | string | Composite id `<endpoint-id>::<model>` of a vision-capable model that describes images for text-only models. Empty (the default) leaves images refused as before. The model it names must have `vision: true` |
 | `permission_mode` | string | `interactive` \| `strict` \| `auto` |
 | `coauthor` | bool | Append `Co-authored-by` to git commits the agent writes (default `true`) |
@@ -93,7 +93,6 @@ the official Anthropic endpoint and a relay — which the old flat list couldn't
 | `base_url` | string | Endpoint URL; empty uses the vendor default. Required for the `custom` vendor |
 | `api_key` | string | Plaintext fallback used only if the provider's env var is empty (mode `0600`). Optional for the `custom` vendor — local servers such as Ollama take none, and no auth header is sent |
 | `protocol` | string | Wire format for the `custom` vendor only: `anthropic` \| `openai` |
-| `lite_model` | string | Optional: name a model in this endpoint's `models` to serve as its compaction lite model |
 | `rpm` | int | Optional: cap on provider calls started against this endpoint per rolling 60-second window. `0`/absent = unlimited |
 | `max_concurrency` | int | Optional: cap on provider calls in flight against this endpoint at once. `0`/absent = unlimited |
 | `models` | list of [model](#model) | The models offered through this endpoint |

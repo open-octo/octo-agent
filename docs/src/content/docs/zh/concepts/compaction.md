@@ -73,8 +73,9 @@ Web UI、IM 渠道看到的表现完全一致：
 
 ## 控制成本
 
-在 [`config.yml`](/docs/zh/reference/config-file/) 里设置 `lite_model`，总结调用会先跑在这个更便宜
+在 [`config.yml`](/docs/zh/reference/config-file/) 里设置 `lite`，总结调用会先跑在这个更便宜
 的模型上，只有 lite 调用失败才回退到你的主模型——这是在一个长会话里控制压缩本身开销的主要手段。
+留空则总结直接跑主模型，octo 不会替你挑一个更便宜的。
 
 下一步：一次回复本身（不是输入）超长导致的中途错误是另一套机制——见
 [Agent 循环](/docs/zh/concepts/agent-loop/)里"从截断的回复里恢复"一节。

@@ -138,13 +138,14 @@ Endpoint "anthropic"                  Endpoint "relay-a"
   api_key: sk-ant-…                     api_key: sk-…
   models:                               models:
     - claude-sonnet-5                     - gpt-4o
-    - claude-haiku-4-5                    - deepseek-v3
-  default_model: claude-sonnet-5        default_model: gpt-4o
-  lite_model: claude-haiku-4-5          lite_model: deepseek-v3
+    - claude-haiku-4-5                    - deepseek-flash
 ```
 
-The **default model** is what the agent uses for normal turns.
-The **lite model** is used for lightweight tasks (title generation, quick lookups).
+Two top-level composite ids pick across endpoints: `default` (e.g.
+`anthropic::claude-sonnet-5`) is what the agent uses for normal turns, and `lite`
+(e.g. `anthropic::claude-haiku-4-5`) is used for lightweight tasks (title
+generation, compaction summaries). An empty `lite` means those run on the
+primary model — nothing cheaper is inferred.
 
 ### List Endpoints
 
