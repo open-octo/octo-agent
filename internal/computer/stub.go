@@ -1,4 +1,4 @@
-//go:build !darwin || !cgo
+//go:build (!darwin && !windows) || (darwin && !cgo)
 
 package computer
 
@@ -21,7 +21,7 @@ func scroll(dx, dy float64) error { return ErrUnsupported }
 
 func typeText(s string) error { return ErrUnsupported }
 
-func press(keycode uint16, flags uint64) error { return ErrUnsupported }
+func press(key string, flags uint64) error { return ErrUnsupported }
 
 func findWindow(owner string) (Window, error) { return Window{}, ErrUnsupported }
 

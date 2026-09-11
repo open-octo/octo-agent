@@ -392,11 +392,12 @@ type putComputerRequest struct {
 }
 
 // handlePutComputer flips the experimental computer-use tool
-// (tools.computer.enabled). macOS-only feature — refuse the write elsewhere so
-// the Settings toggle can never persist a no-op switch on Linux/Windows.
+// (tools.computer.enabled). The substrate exists on macOS and Windows only —
+// refuse the write elsewhere so the Settings toggle can never persist a no-op
+// switch on Linux.
 func (s *Server) handlePutComputer(w http.ResponseWriter, r *http.Request) {
-	if runtime.GOOS != "darwin" {
-		writeError(w, http.StatusBadRequest, "computer-use is only available on macOS")
+	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
+		writeError(w, http.StatusBadRequest, "computer-use is only available on macOS and Windows")
 		return
 	}
 	var req putComputerRequest
