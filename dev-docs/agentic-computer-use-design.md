@@ -183,24 +183,36 @@ also false on every OS other than macOS and Windows regardless of the yaml
 value: the API already refuses the write there, and a hand-edited config must
 not advertise a tool whose every call fails. A darwin build without CGO still
 advertises it, because its `ErrUnsupported` names the missing CGO — the
-actionable message in that case. Graduate the default once the security
+actionable message in that case. That message only reaches the user because
+every action checks `computer.Supported()` **before** the permission gates: a
+stub reports `Trusted()` and `ScreenCaptureAllowed()` false, so the permission
+errors used to fire first and told the user to grant Accessibility or Screen
+Recording in System Settings — a dead end, since no grant can help a build with
+no implementation behind it. Graduate the default once the security
 model has real mileage.
 
 ## Release & build (settled: ships in release binaries)
 
-Constraint: goreleaser cross-compiles every target from `ubuntu-latest` with
-`CGO_ENABLED=0` (its build `env`), which would silently ship the stub on
-macOS. Since the feature must ride releases:
+The darwin target must be built with **CGO on**: with it off, `internal/computer`
+compiles its stub and every computer action fails. goreleaser's Linux
+cross-build was `CGO_ENABLED=0` for every target, so that stub is what macOS
+releases contained. Since the feature must ride releases:
 
-- The **darwin CLI legs move out of goreleaser** into a `macos-latest`
-  GitHub Actions job building `darwin/arm64` and `darwin/amd64` with
-  `CGO_ENABLED=1`. clang on the runner targets both architectures (`-arch`),
-  so a single arm64 runner produces both; the existing `darwin_all` lipo
-  artifact (the universal-binary entry in `.goreleaser.yaml`) is recreated
-  from those two binaries so
-  `install.sh` and the pkg installer keep working unchanged.
-- `linux/*` and `windows/*` stay in goreleaser with `CGO_ENABLED=0`: Linux
-  gets the stub, Windows gets the real substrate because it is pure Go.
+- **goreleaser runs on `macos-latest`** (`.github/workflows/release.yml`) and
+  the config carries a per-architecture `overrides` entry turning
+  `CGO_ENABLED=1` on for `darwin/amd64` and `darwin/arm64`. Go passes clang the
+  matching `-arch` per GOARCH, so one runner still produces both natively — no
+  `CC` override is needed.
+- `linux/*` and `windows/*` stay `CGO_ENABLED=0`: pure Go, so they
+  cross-compile from macOS exactly as they did from Linux. Linux gets the stub,
+  Windows the real substrate.
+- Every target still comes out of that **single** goreleaser run, so the
+  published asset set is unchanged: the per-arch darwin archives, the
+  `darwin_all` universal binary and `checksums.txt` are produced exactly as
+  before. `landing/install.sh` verifies the per-arch archive against
+  `checksums.txt` and errors out when the entry is missing, so a split — darwin
+  built by a separate job — was rejected: it would leave `checksums.txt`
+  incomplete and break every macOS install.
 - The macOS desktop app is unaffected: it already builds with `CGO_ENABLED=1`
   on `macos-latest` (the desktop target in the `Makefile`).
 - Local dev is unaffected: `make build` on macOS has CGO on by default.

@@ -1,8 +1,18 @@
 # goreleaser config — builds the `octo` binary for every supported platform
 # and publishes a GitHub Release on every `v*` tag push (.github/workflows/release.yml).
 #
-# octo is pure Go (no cgo: the sandbox uses build-tagged syscalls, not C), so a
-# single Linux runner cross-compiles every target with CGO_ENABLED=0.
+# This runs on a macOS runner rather than Linux for one reason: the darwin
+# target needs CGO. The computer-use substrate is Quartz CGEvent / AXUIElement
+# behind cgo (internal/computer), so a CGO_ENABLED=0 darwin build links the stub
+# and every computer action fails — the darwin override below is what turns CGO
+# on. Go's toolchain passes clang the matching -arch per GOARCH, so a single
+# runner still produces both darwin/arm64 and darwin/amd64 natively.
+#
+# Linux and Windows stay CGO_ENABLED=0: they are pure Go, so they cross-compile
+# from macOS exactly as they used to from Linux. Because all targets still come
+# out of this one goreleaser run, so do the archives, the darwin universal
+# binary and checksums.txt — nothing about the published asset set changes, so
+# install.sh, the in-place updater and the macOS .pkg keep working as-is.
 #
 # Validate locally without releasing:
 #   goreleaser check
@@ -27,6 +37,19 @@ builds:
     binary: octo
     env:
       - CGO_ENABLED=0
+    # macOS is the one target that needs a native toolchain: without CGO its
+    # computer-use actions all return ErrUnsupported (internal/computer's stub).
+    # goreleaser's override schema requires goos AND goarch, so it is spelled per
+    # architecture; the override's env replaces the build's, flipping CGO on.
+    overrides:
+      - goos: darwin
+        goarch: amd64
+        env:
+          - CGO_ENABLED=1
+      - goos: darwin
+        goarch: arm64
+        env:
+          - CGO_ENABLED=1
     # Each target downloads the matching ripgrep before building so the grep
     # tool works out of the box without rg on PATH. The hook writes a single
     # shared file (internal/tools/rgembed/binaries/rg), so builds MUST run
