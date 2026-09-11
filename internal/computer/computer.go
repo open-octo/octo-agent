@@ -1,0 +1,157 @@
+// Package computer is the desktop computer-use substrate: screen capture plus
+// input synthesis, so a vision-capable model can see the screen and act on it
+// (screenshot → decide → click/type/key/scroll).
+//
+// The real implementation is macOS-only and lives behind CGO (Quartz
+// CGEvent / CGWindowList); every other platform — including release builds,
+// which compile with CGO_ENABLED=0 — gets a stub that reports
+// ErrUnsupported, so the package always compiles and the tool degrades to a
+// clear error instead of a build failure.
+//
+// Coordinates are in logical points of the main display, origin top-left —
+// the same space CGEvent posts in and the space Screenshot's returned image
+// is scaled to, so model coordinates can be used unconverted.
+package computer
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
+
+// ErrUnsupported marks every substrate call on a platform without a native
+// implementation (non-macOS, or CGO disabled).
+var ErrUnsupported = errors.New("computer-use is only supported on macOS builds with CGO enabled")
+
+// Trusted reports whether the process may post input events to other apps
+// (macOS Accessibility permission).
+func Trusted() bool { return trusted() }
+
+// ScreenCaptureAllowed reports whether the process may capture window
+// contents (macOS Screen Recording permission).
+func ScreenCaptureAllowed() bool { return screenCaptureAllowed() }
+
+// RequestScreenCapture pops the macOS grant dialog for Screen Recording.
+func RequestScreenCapture() { requestScreenCapture() }
+
+// RequestAccessibility pops the macOS grant dialog for Accessibility.
+func RequestAccessibility() { requestAccessibility() }
+
+// ScreenSize returns the main display size in logical points — the coordinate
+// space CGEvent posts in. Model coordinates (in sent-image pixels) map into it
+// via ScreenSize/sentImageWidth.
+func ScreenSize() (w, h float64, err error) { return screenSize() }
+
+// Screenshot captures the main display and returns full-resolution PNG bytes
+// (Retina displays are 2 logical points per pixel — do NOT assume image
+// pixels equal ScreenSize).
+func Screenshot() (png []byte, err error) { return screenshot() }
+
+// MoveTo moves the cursor without clicking.
+func MoveTo(x, y float64) error { return moveTo(x, y) }
+
+// Click posts a click of button ("left" or "right") at (x, y); clicks=2 is a
+// double click.
+func Click(button string, x, y float64, clicks int) error {
+	if button != "left" && button != "right" {
+		return fmt.Errorf("computer: unknown button %q (left|right)", button)
+	}
+	if clicks < 1 || clicks > 2 {
+		return fmt.Errorf("computer: clicks must be 1 or 2")
+	}
+	return click(button, x, y, clicks)
+}
+
+// Scroll posts a scroll-wheel event at the current cursor position. Positive
+// dy scrolls down, positive dx scrolls right (natural units are lines).
+func Scroll(dx, dy float64) error { return scroll(dx, dy) }
+
+// TypeText types arbitrary Unicode text as keystrokes.
+func TypeText(s string) error {
+	if s == "" {
+		return fmt.Errorf("computer: nothing to type")
+	}
+	return typeText(s)
+}
+
+// Press posts a key combination like "enter", "cmd+c", "ctrl+shift+tab".
+func Press(keys string) error {
+	kc, flags, err := parseCombo(keys)
+	if err != nil {
+		return err
+	}
+	return press(kc, flags)
+}
+
+// modifier flag bits, mirroring CGEventFlags so parseCombo stays
+// platform-neutral and testable.
+const (
+	flagShift uint64 = 1 << iota
+	flagControl
+	flagOption
+	flagCommand
+)
+
+// keyName aliases to macOS virtual keycodes.
+var keyCodes = map[string]uint16{
+	"return": 36, "enter": 36,
+	"tab": 48, "space": 49,
+	"backspace": 51, "delete": 51, "forwarddelete": 117,
+	"escape": 53, "esc": 53,
+	"left": 123, "right": 124, "down": 125, "up": 126,
+	"home": 115, "end": 119, "pageup": 116, "pagedown": 121,
+	"f1": 122, "f2": 120, "f3": 99, "f4": 118, "f5": 96, "f6": 97,
+	"f7": 98, "f8": 100, "f9": 101, "f10": 109, "f11": 103, "f12": 111,
+}
+
+var modifierNames = map[string]uint64{
+	"shift": flagShift, "ctrl": flagControl, "control": flagControl,
+	"alt": flagOption, "option": flagOption, "opt": flagOption,
+	"cmd": flagCommand, "command": flagCommand, "meta": flagCommand, "super": flagCommand,
+}
+
+// parseCombo splits "cmd+shift+enter" into a keycode plus modifier flags.
+// A single printable character ("a", "5") is mapped to its keycode so
+// key and type overlap for the simple cases.
+func parseCombo(combo string) (keycode uint16, flags uint64, err error) {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(combo)), "+")
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return 0, 0, fmt.Errorf("computer: malformed key combo %q", combo)
+		}
+		if f, ok := modifierNames[p]; ok {
+			flags |= f
+			continue
+		}
+		if kc, ok := keyCodes[p]; ok {
+			keycode = kc
+			continue
+		}
+		if kc, ok := charKeyCode(p); ok {
+			keycode = kc
+			continue
+		}
+		return 0, 0, fmt.Errorf("computer: unknown key %q in combo %q", p, combo)
+	}
+	return keycode, flags, nil
+}
+
+// charKeyCode maps a single printable ASCII character to the macOS keycode
+// that produces it (unshifted).
+func charKeyCode(s string) (uint16, bool) {
+	if len(s) != 1 {
+		return 0, false
+	}
+	letters := map[byte]uint16{
+		'a': 0, 's': 1, 'd': 2, 'f': 3, 'h': 4, 'g': 5, 'z': 6, 'x': 7,
+		'c': 8, 'v': 9, 'b': 11, 'q': 12, 'w': 13, 'e': 14, 'r': 15,
+		'y': 16, 't': 17, '1': 18, '2': 19, '3': 20, '4': 21, '6': 22,
+		'5': 23, '=': 24, '9': 25, '7': 26, '-': 27, '8': 28, '0': 29,
+		']': 30, 'o': 31, 'u': 32, '[': 33, 'i': 34, 'p': 35, 'l': 37,
+		'j': 38, '\'': 39, 'k': 40, ';': 41, '\\': 42, ',': 43, '/': 44,
+		'n': 45, 'm': 46, '.': 47, '`': 50,
+	}
+	kc, ok := letters[s[0]]
+	return kc, ok
+}

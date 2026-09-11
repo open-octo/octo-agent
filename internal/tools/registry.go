@@ -59,6 +59,7 @@ var allTools = []tool{
 	RestartServerTool{},
 	ScheduleWakeupTool{},
 	BrowserTool{},
+	ComputerTool{},
 	MemoryRecallTool{},
 }
 
