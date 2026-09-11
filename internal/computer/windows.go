@@ -163,6 +163,7 @@ func ensureDPIAware() {
 // capture are available to any interactive process. (UIPI still blocks input
 // into windows of a higher integrity level — an elevated app cannot be
 // driven unless octo runs elevated too; that surfaces as SendInput failing.)
+func supported() bool            { return true }
 func trusted() bool              { return true }
 func screenCaptureAllowed() bool { return true }
 func requestScreenCapture()      {}

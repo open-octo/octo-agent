@@ -16,8 +16,14 @@ import (
 	"github.com/open-octo/octo-agent/internal/config"
 )
 
-// computerPlatform reports whether this OS has a computer-use substrate
-// (macOS and Windows; see internal/computer).
+// computerPlatform reports whether this OS has a computer-use substrate at all
+// (macOS and Windows; see internal/computer). It is deliberately weaker than
+// computer.Supported(): a macOS build without CGO still counts here, because
+// the tool keeps advertising there and its ErrUnsupported names the missing
+// CGO, which is the actionable message in that case. Only platforms with no
+// implementation whatsoever are excluded (the Settings API refuses the write
+// there, and a hand-edited yaml must not advertise a tool whose every call
+// fails).
 func computerPlatform() bool {
 	return runtime.GOOS == "darwin" || runtime.GOOS == "windows"
 }
@@ -25,11 +31,6 @@ func computerPlatform() bool {
 // computerEnabled gates advertising of the tool: the experimental
 // tools.computer.enabled switch (default off). Follows browserEnabled's
 // pattern — hidden from the model's tool list when off, still dispatchable.
-// The switch is also ignored on platforms without a substrate: the Settings
-// API already refuses the write there, and a hand-edited yaml must not
-// advertise a tool whose every call fails with ErrUnsupported. (A darwin
-// build without CGO still advertises it — its ErrUnsupported names the
-// missing CGO, which is the actionable message in that case.)
 func computerEnabled() bool {
 	if !computerPlatform() {
 		return false
@@ -224,6 +225,9 @@ var shotScale = struct {
 }{x: 1, y: 1}
 
 func computerScreenshot(ctx context.Context) (agent.ToolResult, error) {
+	if err := requireSubstrate(); err != nil {
+		return agent.ToolResult{}, err
+	}
 	if !computer.ScreenCaptureAllowed() {
 		computer.RequestScreenCapture() // pop the system grant dialog
 		return agent.ToolResult{}, fmt.Errorf("computer: Screen Recording permission not granted — a system dialog may have appeared; grant it to the app running octo in System Settings → Privacy & Security → Screen Recording, then retry (the app may need a restart for the grant to take effect)")
@@ -289,9 +293,24 @@ func computerClick(button string, clicks int, input map[string]any) (agent.ToolR
 	return agent.ToolResult{Text: fmt.Sprintf("%s (%.0f, %.0f) — screenshot to verify the result", verb, x, y)}, nil
 }
 
+// requireSubstrate rejects an action in a build with no native implementation
+// before any permission gate can misreport the cause. A stub has no grant to
+// fetch, so "Screen Recording / Accessibility not granted" would send the user
+// to System Settings for a switch that cannot help — every action of such a
+// build would fail there, forever.
+func requireSubstrate() error {
+	if !computer.Supported() {
+		return computer.ErrUnsupported
+	}
+	return nil
+}
+
 // requireTrusted gates every input-synthesis action on the macOS Accessibility
 // grant, with an actionable error instead of silently dropping events.
 func requireTrusted() error {
+	if err := requireSubstrate(); err != nil {
+		return err
+	}
 	if !computer.Trusted() {
 		computer.RequestAccessibility() // pop the system grant dialog
 		return fmt.Errorf("computer: Accessibility permission not granted — input would be dropped silently. A system dialog may have appeared; grant it to the app running octo in System Settings → Privacy & Security → Accessibility, then retry")

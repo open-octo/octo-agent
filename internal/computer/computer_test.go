@@ -1,6 +1,9 @@
 package computer
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestParseCombo(t *testing.T) {
 	cases := []struct {
@@ -59,6 +62,45 @@ func TestClickValidation(t *testing.T) {
 	}
 	if err := Click("left", 0, 0, 3); err == nil {
 		t.Error("clicks > 2 should error before touching the substrate")
+	}
+}
+
+// Supported() must agree with the stub: a build reporting no substrate returns
+// ErrUnsupported from every action. Callers (internal/tools) gate on this so a
+// stub build blames the build, not a missing permission grant.
+func TestSupportedMatchesSubstrate(t *testing.T) {
+	if Supported() {
+		// A real substrate may still refuse a specific call (a missing macOS
+		// grant, no on-screen window), so only the stub direction is asserted.
+		return
+	}
+	png, shotErr := Screenshot()
+	_, _, sizeErr := ScreenSize()
+	tree, treeErr := AXTree(0, 1)
+	_, winErr := FindWindow("Finder")
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"screenshot", shotErr},
+		{"screenSize", sizeErr},
+		{"moveTo", MoveTo(0, 0)},
+		{"click", Click("left", 0, 0, 1)},
+		{"scroll", Scroll(0, 1)},
+		{"typeText", TypeText("x")},
+		{"press", Press("enter")},
+		{"axTree", treeErr},
+		{"axPress", AXPress(0, "", "x")},
+		{"axSetValue", AXSetValue(0, "", "x", "1")},
+		{"findWindow", winErr},
+	}
+	if png != nil || tree != nil {
+		t.Error("stub build returned data for screenshot/axTree")
+	}
+	for _, tc := range cases {
+		if !errors.Is(tc.err, ErrUnsupported) {
+			t.Errorf("%s on an unsupported build: err = %v, want ErrUnsupported", tc.name, tc.err)
+		}
 	}
 }
 

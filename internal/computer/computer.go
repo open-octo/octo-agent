@@ -3,11 +3,14 @@
 // (screenshot → decide → click/type/key/scroll).
 //
 // Two real implementations exist. macOS lives behind CGO (Quartz CGEvent /
-// CGWindowList / AXUIElement). Windows is pure Go over Win32 (SendInput, GDI
-// capture) and UI Automation COM, so it ships in the CGO_ENABLED=0 release
-// cross-builds unchanged. Every other target — and a macOS build without
-// CGO — gets a stub that reports ErrUnsupported, so the package always
-// compiles and the tool degrades to a clear error instead of a build failure.
+// CGWindowList / AXUIElement) — which is why the darwin release target is
+// built natively on a macOS runner with CGO_ENABLED=1 rather than
+// cross-compiled from Linux with CGO off. Windows is pure Go over Win32
+// (SendInput, GDI capture) and UI Automation COM, so it ships in the
+// CGO_ENABLED=0 release cross-builds unchanged. Every other target — and a
+// macOS build without CGO — gets a stub that reports ErrUnsupported, so the
+// package always compiles and the tool degrades to a clear error instead of a
+// build failure.
 //
 // Coordinates are in the main display's native input space, origin top-left:
 // logical points on macOS (what CGEvent posts in), physical pixels on Windows
@@ -22,9 +25,18 @@ import (
 	"strings"
 )
 
-// ErrUnsupported marks every substrate call on a platform without a native
-// implementation (neither macOS-with-CGO nor Windows).
-var ErrUnsupported = errors.New("computer-use is only supported on macOS builds with CGO enabled and on Windows")
+// ErrUnsupported marks every substrate call in a build with no native
+// implementation: neither macOS-with-CGO nor Windows. It names the CGO build
+// because that is the actionable cause on macOS — a `CGO_ENABLED=0` CLI build
+// (how goreleaser's Linux runner used to cross-compile darwin) ships the stub.
+var ErrUnsupported = errors.New("computer-use is unavailable in this build: it needs macOS with CGO enabled (the desktop app, or a CLI built with CGO_ENABLED=1) or Windows")
+
+// Supported reports whether this build has a real substrate. False for the
+// stub — a platform with no implementation, or a macOS build with CGO
+// disabled. Callers must check this BEFORE the permission gates: a stub has no
+// grant to fetch, so reporting "Screen Recording / Accessibility not granted"
+// would send the user to System Settings for a switch that cannot help.
+func Supported() bool { return supported() }
 
 // Trusted reports whether the process may post input events to other apps
 // (macOS Accessibility permission; Windows has no such grant and reports true).
