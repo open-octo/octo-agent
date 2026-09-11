@@ -216,9 +216,14 @@ func TestKimiDialect_ModelDependentShape(t *testing.T) {
 				t.Errorf("stream=%v: thinking = %+v, want omitted (k3 uses reasoning_effort)", stream, got.Thinking)
 			}
 
+			// Off must be explicit: k3 reasons by default when both fields
+			// are omitted, and it accepts the nested toggle for turning off.
 			off := captureRequestModel(t, DialectKimi, "k3", "", stream)
 			if off.ReasoningEffort != "" {
 				t.Errorf("stream=%v: off reasoning_effort = %q, want empty", stream, off.ReasoningEffort)
+			}
+			if off.Thinking == nil || off.Thinking.Type != "disabled" {
+				t.Errorf("stream=%v: off thinking = %+v, want {type: disabled}", stream, off.Thinking)
 			}
 		}
 	})
