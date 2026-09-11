@@ -49,11 +49,12 @@ for arch in amd64 arm64; do
 	# the CI runner's live OS version into the binary's LC_VERSION_MIN load
 	# command — on a runner newer than a user's Mac, launching failed with
 	# "You can't use this version of the application... with this version of
-	# macOS", unrelated to the LSMinimumSystemVersion=11.0 in Info.plist).
-	# 11.0 matches that Info.plist value and Go's own linker default, so it
-	# also fully eliminates the SDK-vs-link-target warning this flag was
-	# added for in the first place.
-	macos_ver="11.0"
+	# macOS", unrelated to the LSMinimumSystemVersion=12.0 in Info.plist).
+	# 12.0 matches that Info.plist value, Go 1.25's own linker default and the
+	# CLI's DARWIN_MIN_MACOS in .goreleaser.yaml, so it also fully eliminates
+	# the SDK-vs-link-target warning this flag was added for in the first
+	# place.
+	macos_ver="12.0"
 	( cd "$MOD_DIR" && \
 		GOOS=darwin GOARCH="$arch" CGO_ENABLED=1 CC="clang -arch $cc_arch" \
 		CGO_CFLAGS="-mmacosx-version-min=$macos_ver" \
