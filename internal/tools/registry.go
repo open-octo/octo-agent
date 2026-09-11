@@ -159,8 +159,8 @@ func (r DefaultRegistry) ExecuteStream(ctx context.Context, name string, input m
 					r.recordGrepReads(ctx, input, out.Text)
 				case "terminal":
 					if cmd, ok := input["command"].(string); ok {
-						r.recordTerminalReads(cmd)
-						r.recordTerminalWrites(cmd)
+						r.recordTerminalReads(ctx, cmd)
+						r.recordTerminalWrites(ctx, cmd)
 					}
 				}
 			}
@@ -187,12 +187,17 @@ func callTool(ctx context.Context, t tool, name string, input map[string]any, pr
 // paths in the read tracker. This closes the gap where `cat file` followed by
 // `write_file file` would wrongly fail with "File has not been read yet".
 //
-// The parser is intentionally lightweight: it tokenises the command string,
-// skips flags and shell metacharacters, and treats any remaining token that
+// The command line is split into its simple commands first (`&&`, `||`, `|`,
+// `;`, newline) so a read behind a `cd … &&` prefix is still seen, and a
+// relative path is resolved against the directory that `cd` established —
+// the same directory the shell resolved it in.
+//
+// The parser is intentionally lightweight: it tokenises each segment, skips
+// flags and shell metacharacters, and treats any remaining token that
 // resolves to an existing file as a read. It does NOT understand subshells,
 // variable expansion, or complex pipelines — those still require an explicit
 // read_file if the model wants to edit afterwards.
-func (r DefaultRegistry) recordTerminalReads(command string) {
+func (r DefaultRegistry) recordTerminalReads(ctx context.Context, command string) {
 	// Commands that are known to read files as positional arguments.
 	readCmds := map[string]bool{
 		"cat": true, "head": true, "tail": true, "less": true, "more": true,
@@ -202,28 +207,25 @@ func (r DefaultRegistry) recordTerminalReads(command string) {
 		"stat": true, "ls": true, "find": true, "readlink": true,
 	}
 
-	tokens := tokenizeCommand(command)
-	if len(tokens) == 0 {
-		return
-	}
-	if !readCmds[tokens[0]] {
-		return
-	}
-
-	for _, tok := range tokens[1:] {
-		if strings.HasPrefix(tok, "-") || strings.HasPrefix(tok, ">") || strings.HasPrefix(tok, "<") {
-			continue // skip flags and redirection operators
-		}
-		if strings.ContainsAny(tok, "|;&$()`") {
-			continue // skip tokens with shell metacharacters
-		}
-		// Try to resolve as a path.  If the file exists, record it.
-		abs, err := resolvePath(tok)
-		if err != nil {
+	for _, seg := range shellSegments(command, WorkingDir(ctx)) {
+		if !readCmds[seg.tokens[0]] {
 			continue
 		}
-		if _, err := os.Stat(abs); err == nil {
-			r.tracker.RecordRead(abs)
+		for _, tok := range seg.tokens[1:] {
+			if strings.HasPrefix(tok, "-") || strings.HasPrefix(tok, ">") || strings.HasPrefix(tok, "<") {
+				continue // skip flags and redirection operators
+			}
+			if strings.ContainsAny(tok, "|;&$()`") {
+				continue // skip tokens with shell metacharacters
+			}
+			// Try to resolve as a path.  If the file exists, record it.
+			abs, ok := seg.resolve(tok)
+			if !ok {
+				continue
+			}
+			if _, err := os.Stat(abs); err == nil {
+				r.tracker.RecordRead(abs)
+			}
 		}
 	}
 }
@@ -302,22 +304,238 @@ func (r DefaultRegistry) recordGrepReads(ctx context.Context, input map[string]a
 // It refreshes the recorded mtime of every tracked file the command names as an
 // exact write target, leaving the guard intact for changes that did NOT come
 // through the terminal tool (a human editing in their IDE never lands here) and
-// for files the command never named. Detection is deliberately conservative —
-// RefreshTarget only ever touches an exact path the tracker already knows.
-// Writers that name a directory or the whole tree rather than specific files
-// (`gofmt -w .`, `go fmt ./...`, `make fmt`) are intentionally not followed
-// inside: attributing a subtree's mtime bumps to the command would let an
-// unrelated out-of-band edit slip through. The model re-reads in that case.
-func (r DefaultRegistry) recordTerminalWrites(command string) {
-	tokens := tokenizeCommand(command)
-	if len(tokens) == 0 {
-		return
-	}
-	for _, target := range writeTargets(tokens) {
-		if abs, err := resolvePath(target); err == nil {
-			r.tracker.RefreshTarget(abs)
+// for files the command never named. The command line is split into its simple
+// commands so a writer behind a `cd … &&` prefix is found, and a relative
+// target resolves against the directory that `cd` established — otherwise the
+// refresh would look up a path the tracker never recorded and silently no-op.
+// Detection is deliberately conservative — RefreshTarget only ever touches an
+// exact path the tracker already knows. Writers that name a directory or the
+// whole tree rather than specific files (`gofmt -w .`, `go fmt ./...`, `make
+// fmt`) are intentionally not followed inside: attributing a subtree's mtime
+// bumps to the command would let an unrelated out-of-band edit slip through.
+// The model re-reads in that case.
+//
+// Known gap, accepted: attribution is static. A writer behind a failed `&&`
+// (`go build ./... && gofmt -w f` with the build broken) never ran, yet f is
+// refreshed as if it had. Gating on the command's exit status would close it
+// but would also un-attribute `gofmt -w f && go test` every time the tests
+// fail — the most common shape this tracking exists for. The gap needs an
+// out-of-band edit AND a writer conditional on a failing command at once, so
+// it stays open in favour of the common case.
+func (r DefaultRegistry) recordTerminalWrites(ctx context.Context, command string) {
+	for _, seg := range shellSegments(command, WorkingDir(ctx)) {
+		for _, target := range writeTargets(seg.tokens) {
+			if abs, ok := seg.resolve(target); ok {
+				r.tracker.RefreshTarget(abs)
+			}
 		}
 	}
+}
+
+// shellSegment is one simple command of a command line together with the
+// directory it ran in, as established by any `cd` segment before it.
+type shellSegment struct {
+	tokens []string
+	// dir is the working directory for this segment: the session's working
+	// directory (or the process CWD when that is empty) until a `cd` changes
+	// it. lost is set once a `cd` went somewhere we can't follow (`cd -`,
+	// `cd "$X"`), after which relative paths are unresolvable — the guard
+	// then errs towards a re-read rather than guessing a directory.
+	dir  string
+	lost bool
+}
+
+// resolve turns a path named by this segment into an absolute path, or
+// reports false when the segment's directory is unknown and the path is
+// relative.
+func (seg shellSegment) resolve(path string) (string, bool) {
+	if seg.lost && !filepath.IsAbs(path) && !isHomeRelative(path) {
+		return "", false
+	}
+	abs, err := resolvePathIn(seg.dir, path)
+	if err != nil {
+		return "", false
+	}
+	return abs, true
+}
+
+// shellSegments splits a command line into its simple commands and threads
+// the working directory through them: a segment that is a plain `cd <dir>`
+// changes the directory for every segment after it. base is the directory
+// the command line started in ("" ⇒ process CWD). Segments with no tokens
+// are dropped, so every returned segment has a command head at tokens[0].
+//
+// `cd` is followed only in its plain forms — `cd`, `cd <literal>`, `cd ~/x`
+// — and only as the head of a segment. Anything else (`cd -`, an unexpanded
+// variable, extra flags) marks the directory as lost for the remainder of the
+// line. So does any directory change we can see but not follow: a `cd` that
+// isn't the head (`{ cd x; …`, `do cd x`, `$(cd x …`), a builtin that runs
+// another command (`eval "cd x"`, `command cd x`), the directory stack
+// (`pushd`/`popd`), PowerShell's equivalents, and a bare `(` subshell whose
+// end we can't see.
+//
+// A shell-wrapped command (`bash -c "cd x && sed -i … f"`) is expanded into
+// its inner segments with the current directory as their base; the inner
+// `cd` is followed there and cannot change the outer directory.
+func shellSegments(command, base string) []shellSegment {
+	return appendShellSegments(nil, command, base, false)
+}
+
+func appendShellSegments(segs []shellSegment, command, dir string, lost bool) []shellSegment {
+	for _, raw := range splitShellSegments(command) {
+		tokens := tokenizeCommand(raw)
+		if len(tokens) == 0 {
+			continue
+		}
+		if hasBareSubshell(raw) || hidesDirectoryChange(tokens) {
+			lost = true
+		}
+		if tokens[0] == "cd" {
+			dir, lost = followCd(dir, lost, tokens[1:])
+			continue
+		}
+		if payload := wrappedCommand(filepath.Base(tokens[0]), tokens[1:]); payload != "" {
+			segs = appendShellSegments(segs, payload, dir, lost)
+			continue
+		}
+		segs = append(segs, shellSegment{tokens: tokens, dir: dir, lost: lost})
+	}
+	return segs
+}
+
+// cdNames are the commands that change the shell's directory, in the Unix
+// and PowerShell spellings the terminal tool may run. Compared
+// case-insensitively because PowerShell is.
+var cdNames = map[string]bool{
+	"cd": true, "chdir": true, "pushd": true, "popd": true,
+	"set-location": true, "sl": true, "push-location": true, "pop-location": true,
+}
+
+// opaqueHeads are builtins that run whatever follows them, so a directory
+// change can hide in their arguments (`eval "cd x"`, `command cd x`, `. env.sh`).
+var opaqueHeads = map[string]bool{
+	"eval": true, "source": true, ".": true, "command": true, "builtin": true, "exec": true,
+}
+
+// hidesDirectoryChange reports whether a segment may change the directory in
+// a way followCd can't reproduce — every case here is resolved by marking the
+// directory lost rather than guessing. A plain `cd` at the head is excluded:
+// followCd handles that one.
+func hidesDirectoryChange(tokens []string) bool {
+	if opaqueHeads[strings.ToLower(tokens[0])] {
+		return true
+	}
+	for i, tok := range tokens {
+		if i == 0 && tok == "cd" {
+			continue
+		}
+		// `{cd`, `(cd`, `$(cd` and `\cd` all run cd; strip the prefix that
+		// glued to it.
+		if cdNames[strings.ToLower(strings.TrimLeft(tok, `({$\`))] {
+			return true
+		}
+	}
+	return false
+}
+
+// hasBareSubshell reports whether raw opens a `( … )` subshell outside
+// quotes. `$(…)` substitution is not treated as one: its exit is where its
+// directory change ends, and a `cd` inside it is caught by
+// hidesDirectoryChange instead.
+func hasBareSubshell(raw string) bool {
+	var inSingle, inDouble bool
+	for i := 0; i < len(raw); i++ {
+		switch c := raw[i]; {
+		case c == '\'' && !inDouble:
+			inSingle = !inSingle
+		case c == '"' && !inSingle:
+			inDouble = !inDouble
+		case inSingle || inDouble:
+		case c == '(' && (i == 0 || raw[i-1] != '$'):
+			return true
+		}
+	}
+	return false
+}
+
+// isHomeRelative reports whether path is one resolvePathIn expands from the
+// home directory (`~` or `~/…`), so it stays resolvable after a lost cd.
+func isHomeRelative(path string) bool {
+	return path == "~" || strings.HasPrefix(path, "~/")
+}
+
+// followCd returns the directory after `cd args...` runs in dir.
+func followCd(dir string, lost bool, args []string) (string, bool) {
+	switch {
+	case len(args) == 0:
+		if home, err := os.UserHomeDir(); err == nil {
+			return home, false
+		}
+		return "", true
+	case len(args) > 1, strings.HasPrefix(args[0], "-"), strings.ContainsAny(args[0], "$`"):
+		return "", true
+	case strings.HasPrefix(args[0], "~") && !isHomeRelative(args[0]):
+		return "", true // `cd ~user`: resolvePathIn would join it as a relative path
+	}
+	if lost && !filepath.IsAbs(args[0]) && !isHomeRelative(args[0]) {
+		return "", true
+	}
+	abs, err := resolvePathIn(dir, args[0])
+	if err != nil {
+		return "", true
+	}
+	return abs, false
+}
+
+// splitShellSegments splits a command line on the shell's command separators
+// — `&&`, `||`, `|`, `;` and newline — outside single/double quotes. A lone
+// `&` is NOT a separator so `2>&1` stays inside its segment. Redirection
+// operators are left for the tokenizer; only the boundaries between simple
+// commands are cut here.
+//
+// A heredoc (`<<`) ends the split at the next newline: everything after it is
+// the document body, which the shell writes as data rather than runs. Treating
+// those lines as commands would credit a script's `gofmt -w f` line as a write
+// of f that never happened. Commands after the terminator are dropped too —
+// under-attribution costs a re-read, over-attribution defeats the guard.
+func splitShellSegments(s string) []string {
+	var segs []string
+	var cur strings.Builder
+	var inSingle, inDouble, heredoc bool
+	flush := func() {
+		if cur.Len() > 0 {
+			segs = append(segs, cur.String())
+			cur.Reset()
+		}
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '\'' && !inDouble:
+			inSingle = !inSingle
+			cur.WriteByte(c)
+		case c == '"' && !inSingle:
+			inDouble = !inDouble
+			cur.WriteByte(c)
+		case inSingle || inDouble:
+			cur.WriteByte(c)
+		case c == '\n' && heredoc:
+			flush()
+			return segs
+		case c == '<' && i+1 < len(s) && s[i+1] == '<':
+			heredoc = true
+			cur.WriteByte(c)
+		case (c == '&' || c == '|') && i+1 < len(s) && s[i+1] == c:
+			flush()
+			i++ // consume the second character of && / ||
+		case c == '|' || c == ';' || c == '\n':
+			flush()
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	flush()
+	return segs
 }
 
 // writeTargets returns the file paths a terminal command writes to, derived
@@ -326,6 +544,9 @@ func (r DefaultRegistry) recordTerminalWrites(command string) {
 // yields its literal token, which won't match any tracked file, so a
 // whole-subtree format falls through to a re-read rather than over-attributing.
 func writeTargets(tokens []string) []string {
+	if len(tokens) == 0 {
+		return nil
+	}
 	var targets []string
 
 	// Pass 1: redirections (`> f`, `>>f`, `2>f`, `&>f`) and `tee`, which can
@@ -356,22 +577,16 @@ func writeTargets(tokens []string) []string {
 		targets = append(targets, positionals(tokens[1:])...)
 	}
 
-	// Pass 3: shell-wrapped commands (`bash -c "sed -i ... f"`, `sh -c "…"`).
-	// The wrapped payload is a single quoted token the parser can't see into,
-	// so re-parse it as its own command and collect its write targets. Without
-	// this, `bash -c "sed -i 's/x/y/' file.go"` bumps the file's mtime without
-	// refreshing the tracker and trips the guard on the next edit_file.
-	if payload := wrappedCommand(head, tokens[1:]); payload != "" {
-		targets = append(targets, writeTargets(tokenizeCommand(payload))...)
-	}
-
+	// Shell-wrapped commands (`bash -c "sed -i ... f"`) are expanded by
+	// shellSegments before they reach here, so the payload's own `cd` is
+	// followed like any other segment's.
 	return targets
 }
 
 // wrappedCommand returns the inner payload of a shell-wrapped invocation, or
 // "" if the command isn't one. Recognizes `bash|sh|zsh -c "..."` (and
 // `--posix -c`). The payload is the single string argument to `-c`, verbatim —
-// it's re-parsed by tokenizeCommand in the caller as its own command line.
+// shellSegments re-parses it as its own command line.
 func wrappedCommand(head string, args []string) string {
 	switch head {
 	case "bash", "sh", "zsh":
