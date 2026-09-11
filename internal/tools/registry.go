@@ -341,7 +341,7 @@ type shellSegment struct {
 // reports false when the segment's directory is unknown and the path is
 // relative.
 func (seg shellSegment) resolve(path string) (string, bool) {
-	if seg.lost && !filepath.IsAbs(path) && !strings.HasPrefix(path, "~") {
+	if seg.lost && !filepath.IsAbs(path) && !isHomeRelative(path) {
 		return "", false
 	}
 	abs, err := resolvePathIn(seg.dir, path)
@@ -359,22 +359,62 @@ func (seg shellSegment) resolve(path string) (string, bool) {
 //
 // `cd` is followed only in its plain forms — `cd`, `cd <literal>`, `cd ~/x`.
 // Anything else (`cd -`, an unexpanded variable, extra flags) marks the
-// directory as lost for the remainder of the line.
+// directory as lost for the remainder of the line. A bare `(` outside quotes
+// opens a subshell whose `cd` must not leak out, and we can't see where the
+// subshell ends, so it also marks the directory lost.
+//
+// A shell-wrapped command (`bash -c "cd x && sed -i … f"`) is expanded into
+// its inner segments with the current directory as their base; the inner
+// `cd` is followed there and cannot change the outer directory.
 func shellSegments(command, base string) []shellSegment {
-	var segs []shellSegment
-	dir, lost := base, false
+	return appendShellSegments(nil, command, base, false)
+}
+
+func appendShellSegments(segs []shellSegment, command, dir string, lost bool) []shellSegment {
 	for _, raw := range splitShellSegments(command) {
 		tokens := tokenizeCommand(raw)
 		if len(tokens) == 0 {
 			continue
 		}
+		if hasBareSubshell(raw) {
+			lost = true
+		}
 		if tokens[0] == "cd" {
 			dir, lost = followCd(dir, lost, tokens[1:])
+			continue
+		}
+		if payload := wrappedCommand(filepath.Base(tokens[0]), tokens[1:]); payload != "" {
+			segs = appendShellSegments(segs, payload, dir, lost)
 			continue
 		}
 		segs = append(segs, shellSegment{tokens: tokens, dir: dir, lost: lost})
 	}
 	return segs
+}
+
+// hasBareSubshell reports whether raw opens a `( … )` subshell outside
+// quotes. `$(…)` substitution is not a subshell for our purposes — its
+// output becomes a token, and tokens carrying `$` are already discarded.
+func hasBareSubshell(raw string) bool {
+	var inSingle, inDouble bool
+	for i := 0; i < len(raw); i++ {
+		switch c := raw[i]; {
+		case c == '\'' && !inDouble:
+			inSingle = !inSingle
+		case c == '"' && !inSingle:
+			inDouble = !inDouble
+		case inSingle || inDouble:
+		case c == '(' && (i == 0 || raw[i-1] != '$'):
+			return true
+		}
+	}
+	return false
+}
+
+// isHomeRelative reports whether path is one resolvePathIn expands from the
+// home directory (`~` or `~/…`), so it stays resolvable after a lost cd.
+func isHomeRelative(path string) bool {
+	return path == "~" || strings.HasPrefix(path, "~/")
 }
 
 // followCd returns the directory after `cd args...` runs in dir.
@@ -388,7 +428,7 @@ func followCd(dir string, lost bool, args []string) (string, bool) {
 	case len(args) > 1, strings.HasPrefix(args[0], "-"), strings.ContainsAny(args[0], "$`"):
 		return "", true
 	}
-	if lost && !filepath.IsAbs(args[0]) && !strings.HasPrefix(args[0], "~") {
+	if lost && !filepath.IsAbs(args[0]) && !isHomeRelative(args[0]) {
 		return "", true
 	}
 	abs, err := resolvePathIn(dir, args[0])
@@ -403,10 +443,16 @@ func followCd(dir string, lost bool, args []string) (string, bool) {
 // `&` is NOT a separator so `2>&1` stays inside its segment. Redirection
 // operators are left for the tokenizer; only the boundaries between simple
 // commands are cut here.
+//
+// A heredoc (`<<`) ends the split at the next newline: everything after it is
+// the document body, which the shell writes as data rather than runs. Treating
+// those lines as commands would credit a script's `gofmt -w f` line as a write
+// of f that never happened. Commands after the terminator are dropped too —
+// under-attribution costs a re-read, over-attribution defeats the guard.
 func splitShellSegments(s string) []string {
 	var segs []string
 	var cur strings.Builder
-	var inSingle, inDouble bool
+	var inSingle, inDouble, heredoc bool
 	flush := func() {
 		if cur.Len() > 0 {
 			segs = append(segs, cur.String())
@@ -423,6 +469,12 @@ func splitShellSegments(s string) []string {
 			inDouble = !inDouble
 			cur.WriteByte(c)
 		case inSingle || inDouble:
+			cur.WriteByte(c)
+		case c == '\n' && heredoc:
+			flush()
+			return segs
+		case c == '<' && i+1 < len(s) && s[i+1] == '<':
+			heredoc = true
 			cur.WriteByte(c)
 		case (c == '&' || c == '|') && i+1 < len(s) && s[i+1] == c:
 			flush()
@@ -443,6 +495,9 @@ func splitShellSegments(s string) []string {
 // yields its literal token, which won't match any tracked file, so a
 // whole-subtree format falls through to a re-read rather than over-attributing.
 func writeTargets(tokens []string) []string {
+	if len(tokens) == 0 {
+		return nil
+	}
 	var targets []string
 
 	// Pass 1: redirections (`> f`, `>>f`, `2>f`, `&>f`) and `tee`, which can
@@ -473,24 +528,16 @@ func writeTargets(tokens []string) []string {
 		targets = append(targets, positionals(tokens[1:])...)
 	}
 
-	// Pass 3: shell-wrapped commands (`bash -c "sed -i ... f"`, `sh -c "…"`).
-	// The wrapped payload is a single quoted token the parser can't see into,
-	// so re-parse it as its own command and collect its write targets. Without
-	// this, `bash -c "sed -i 's/x/y/' file.go"` bumps the file's mtime without
-	// refreshing the tracker and trips the guard on the next edit_file.
-	if payload := wrappedCommand(head, tokens[1:]); payload != "" {
-		for _, inner := range splitShellSegments(payload) {
-			targets = append(targets, writeTargets(tokenizeCommand(inner))...)
-		}
-	}
-
+	// Shell-wrapped commands (`bash -c "sed -i ... f"`) are expanded by
+	// shellSegments before they reach here, so the payload's own `cd` is
+	// followed like any other segment's.
 	return targets
 }
 
 // wrappedCommand returns the inner payload of a shell-wrapped invocation, or
 // "" if the command isn't one. Recognizes `bash|sh|zsh -c "..."` (and
 // `--posix -c`). The payload is the single string argument to `-c`, verbatim —
-// it's re-parsed by tokenizeCommand in the caller as its own command line.
+// shellSegments re-parses it as its own command line.
 func wrappedCommand(head string, args []string) string {
 	switch head {
 	case "bash", "sh", "zsh":
