@@ -68,7 +68,7 @@ type apiRequest struct {
 // protocol-compatible backends (e.g. Kimi for coding). BudgetTokens is omitted
 // on the adaptive path.
 type apiThinking struct {
-	Type         string `json:"type"` // "adaptive" | "enabled"
+	Type         string `json:"type"` // "adaptive" | "enabled" | "disabled"
 	BudgetTokens int    `json:"budget_tokens,omitempty"`
 }
 

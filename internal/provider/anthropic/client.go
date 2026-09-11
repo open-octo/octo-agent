@@ -399,12 +399,30 @@ func applyReasoning(body *apiRequest, model, effort string, budget int) {
 	// Legacy budget_tokens path (older Claude, Kimi-for-coding): triggered by a
 	// positive budget, independent of the effort string.
 	if budget <= 0 {
+		if thinksWhenUnspecified(model) {
+			body.Thinking = &apiThinking{Type: "disabled"}
+		}
 		return
 	}
 	body.Thinking = &apiThinking{Type: "enabled", BudgetTokens: budget}
 	if body.MaxTokens <= budget {
 		body.MaxTokens = budget + DefaultMaxTokens
 	}
+}
+
+// thinksWhenUnspecified reports whether a backend turns thinking ON when the
+// request omits the thinking field. Claude defaults to off, so omitting is
+// enough. Every non-Claude Anthropic-protocol backend probed so far defaults
+// to on and only stays quiet when told `thinking: {type: "disabled"}`
+// outright: Kimi k3 returned thinking tokens on an omitted field, and
+// DeepSeek's /anthropic endpoint (deepseek-flash) went further — its thinking
+// consumed the whole max_tokens budget and the reply carried no text block at
+// all, so a title call came back empty. "disabled" is a documented value of
+// the Anthropic API, so sending it is safe for any backend claiming
+// compatibility; the model name is the only signal this layer has for
+// telling Claude from the rest.
+func thinksWhenUnspecified(model string) bool {
+	return !strings.Contains(strings.ToLower(model), "claude")
 }
 
 // usesAdaptiveEffort reports whether a model takes adaptive thinking +

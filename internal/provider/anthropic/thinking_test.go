@@ -150,3 +150,54 @@ func TestSend_ThinkingBlock_RoundTrips(t *testing.T) {
 		t.Fatalf("no assistant message in wire body: %s", capturedBody)
 	}
 }
+
+// TestSendStream_ReasoningOff_WireBody pins the on-the-wire shape of "no
+// reasoning" (ThinkingBudget 0) per backend family: a non-Claude model gets an
+// explicit `"thinking":{"type":"disabled"}` with no budget_tokens key (the
+// omitempty must actually drop it), a legacy Claude model gets no thinking key
+// at all, and an adaptive Claude model likewise — it would 400 on "disabled".
+func TestSendStream_ReasoningOff_WireBody(t *testing.T) {
+	cases := []struct {
+		model        string
+		wantDisabled bool
+	}{
+		{"k3", true},
+		{"deepseek-flash", true},
+		{"claude-haiku-4-5", false},
+		{"claude-fable-5", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			var raw string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				b, _ := io.ReadAll(r.Body)
+				raw = string(b)
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				_, _ = io.WriteString(w, canonicalStream)
+			}))
+			defer srv.Close()
+
+			c, _ := New("test-key")
+			c.BaseURL = srv.URL
+			if _, err := c.SendStream(context.Background(), provider.Request{
+				Model:     tc.model,
+				Messages:  []agent.Message{agent.NewUserMessage("title me")},
+				MaxTokens: 250,
+			}, provider.StreamCallbacks{}); err != nil {
+				t.Fatalf("SendStream: %v", err)
+			}
+
+			hasDisabled := strings.Contains(raw, `"thinking":{"type":"disabled"}`)
+			if hasDisabled != tc.wantDisabled {
+				t.Errorf("thinking disabled on wire = %v, want %v; body: %s", hasDisabled, tc.wantDisabled, raw)
+			}
+			if !tc.wantDisabled && strings.Contains(raw, `"thinking"`) {
+				t.Errorf("Claude model must not carry a thinking key; body: %s", raw)
+			}
+			if strings.Contains(raw, "budget_tokens") {
+				t.Errorf("budget_tokens must be omitted when reasoning is off; body: %s", raw)
+			}
+		})
+	}
+}

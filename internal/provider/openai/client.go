@@ -69,7 +69,9 @@ const DialectBailian = "bailian"
 //     the toggle is always {type: "enabled"}.
 //   - k3: a top-level reasoning_effort field, but the only value it currently
 //     accepts is "max" — the generic fallback's clamp-to-"high" would send an
-//     unsupported value.
+//     unsupported value. Reasoning is on by default, so "off" must be sent
+//     as the nested {type: "disabled"} toggle (which k3 also accepts) —
+//     omitting both fields leaves it reasoning.
 //
 // Assign it to Client.Dialect for the "kimi" vendor (kimi-coding-plan speaks
 // the Anthropic protocol and never reaches this client). See
@@ -146,7 +148,8 @@ type Client struct {
 //   - Kimi: model-dependent (see DialectKimi) — k2.6/k2.5 get the same
 //     nested toggle as DeepSeek with no reasoning_effort; k2.7-code always
 //     gets the toggle forced to "enabled"; k3 gets a top-level
-//     reasoning_effort clamped to its only supported value, "max".
+//     reasoning_effort clamped to its only supported value, "max", or the
+//     nested toggle set to "disabled" when effort is "".
 //   - Generic OpenAI-compatible: top out at "high" and reject unknown enums, so
 //     both "xhigh" and "max" clamp to "high"; "thinking" is never sent.
 func (c *Client) applyReasoning(body *apiRequest, effort string) {
@@ -179,6 +182,8 @@ func (c *Client) applyReasoning(body *apiRequest, effort string) {
 		case strings.Contains(m, "k3"):
 			if effort != "" {
 				body.ReasoningEffort = "max"
+			} else {
+				body.Thinking = &apiThinking{Type: "disabled"}
 			}
 		case strings.Contains(m, "k2.7-code") || strings.Contains(m, "k2-7-code"):
 			body.Thinking = &apiThinking{Type: "enabled"}

@@ -1661,8 +1661,11 @@ const titleMaxTokens = 250
 // TitleGenerationTimeout bounds a throwaway session-title call. The TUI and
 // the server share one title mechanism: within this budget the model produces
 // a title, otherwise GenerateTitleOrSnippet falls back to a message snippet,
-// so a title always lands ~5s after the first user message.
-const TitleGenerationTimeout = 5 * time.Second
+// so a title always lands within this budget of the first user message. It
+// was 5s; a 2026-09 probe of the Kimi coding endpoint (k3) measured 8.5–9.5s
+// end to end for a ~15-token title reply, so 5s fell back to the snippet on
+// every session there.
+const TitleGenerationTimeout = 10 * time.Second
 
 // titleContextMaxRunes caps how much of the first user message feeds the
 // title prompt. A title only needs the topic; an unbounded paste (a dumped
@@ -1751,7 +1754,8 @@ func (a *Agent) GenerateTitleFrom(ctx context.Context, snap []Message) (string, 
 // of the first user message in snap. This is THE session-title mechanism —
 // the TUI and the server both call it (wrapped in TitleGenerationTimeout) so
 // every frontend gets the same behaviour: an LLM title when the call works, a
-// snippet otherwise, always within ~5s of the first user message. Returns ""
+// snippet otherwise, always within TitleGenerationTimeout of the first user
+// message. Returns ""
 // only when snap carries no user text at all.
 func (a *Agent) GenerateTitleOrSnippet(ctx context.Context, snap []Message) (string, error) {
 	t, err := a.GenerateTitleFrom(ctx, snap)
