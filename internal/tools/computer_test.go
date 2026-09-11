@@ -7,9 +7,10 @@ import (
 )
 
 // The tool ships dark behind tools.computer.enabled: unset must hide it from
-// the model's tool list.
+// the model's tool list. setHome (overwrite_backup_test.go) redirects
+// os.UserHomeDir — on Windows that's USERPROFILE, not HOME, so both are set.
 func TestComputerTool_GatedOffByDefault(t *testing.T) {
-	t.Setenv("HOME", t.TempDir()) // no config file → default off
+	setHome(t) // no config file → default off
 	for _, d := range DefaultTools() {
 		if d.Name == "computer" {
 			t.Fatal("computer tool must not be advertised when tools.computer.enabled is unset")
@@ -19,8 +20,7 @@ func TestComputerTool_GatedOffByDefault(t *testing.T) {
 
 // With the switch on, the tool is advertised.
 func TestComputerTool_AdvertisedWhenEnabled(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := setHome(t)
 	if err := os.MkdirAll(filepath.Join(home, ".octo"), 0o755); err != nil {
 		t.Fatal(err)
 	}

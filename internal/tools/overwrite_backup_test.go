@@ -10,11 +10,12 @@ import (
 	"github.com/open-octo/octo-agent/internal/trash"
 )
 
-func setHome(t *testing.T) {
+func setHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	return home
 }
 
 func countBackups(t *testing.T, orig string) int {
