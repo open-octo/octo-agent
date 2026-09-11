@@ -75,7 +75,46 @@ func scroll(dx, dy float64) error {
 	return nil
 }
 
-func press(keycode uint16, flags uint64) error {
+// macKeyCodes maps canonical key names (see keyAliases) to macOS virtual
+// keycodes.
+var macKeyCodes = map[string]uint16{
+	"enter": 36, "tab": 48, "space": 49,
+	"backspace": 51, "delete": 117, "escape": 53,
+	"left": 123, "right": 124, "down": 125, "up": 126,
+	"home": 115, "end": 119, "pageup": 116, "pagedown": 121,
+	"f1": 122, "f2": 120, "f3": 99, "f4": 118, "f5": 96, "f6": 97,
+	"f7": 98, "f8": 100, "f9": 101, "f10": 109, "f11": 103, "f12": 111,
+}
+
+// macCharKeyCodes maps a single printable ASCII character to the US-layout
+// macOS keycode that produces it (unshifted).
+var macCharKeyCodes = map[byte]uint16{
+	'a': 0, 's': 1, 'd': 2, 'f': 3, 'h': 4, 'g': 5, 'z': 6, 'x': 7,
+	'c': 8, 'v': 9, 'b': 11, 'q': 12, 'w': 13, 'e': 14, 'r': 15,
+	'y': 16, 't': 17, '1': 18, '2': 19, '3': 20, '4': 21, '6': 22,
+	'5': 23, '=': 24, '9': 25, '7': 26, '-': 27, '8': 28, '0': 29,
+	']': 30, 'o': 31, 'u': 32, '[': 33, 'i': 34, 'p': 35, 'l': 37,
+	'j': 38, '\'': 39, 'k': 40, ';': 41, '\\': 42, ',': 43, '/': 44,
+	'n': 45, 'm': 46, '.': 47, '`': 50,
+}
+
+// macKeyCode resolves a canonical key name to a macOS virtual keycode.
+func macKeyCode(key string) (uint16, bool) {
+	if kc, ok := macKeyCodes[key]; ok {
+		return kc, true
+	}
+	if len(key) == 1 {
+		kc, ok := macCharKeyCodes[key[0]]
+		return kc, ok
+	}
+	return 0, false
+}
+
+func press(key string, flags uint64) error {
+	keycode, ok := macKeyCode(key)
+	if !ok {
+		return fmt.Errorf("computer: key %q has no macOS keycode", key)
+	}
 	var cgFlags uint64
 	if flags&flagShift != 0 {
 		cgFlags |= uint64(C.kCGEventFlagMaskShift)

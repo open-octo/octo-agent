@@ -14,14 +14,6 @@ import (
 	"unsafe"
 )
 
-const (
-	// axMaxChildren caps fan-out per node, axMaxTotal caps the whole digest —
-	// a runaway tree (browsers, Electron) must not turn one dump into a
-	// minute of mach IPC.
-	axMaxChildren = 200
-	axMaxTotal    = 2000
-)
-
 func axString(el C.AXUIElementRef, attr C.CFStringRef) string {
 	cs := C.octoAXCopyString(el, attr)
 	if cs == nil {

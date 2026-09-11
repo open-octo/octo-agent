@@ -1118,9 +1118,9 @@ export async function updateCoauthor(coauthor: boolean): Promise<{ ok: boolean; 
   })
 }
 
-// Experimental desktop computer-use (tools.computer.enabled). macOS-only —
-// the server refuses the write elsewhere; the toggle itself is only rendered
-// on the macOS desktop shell (SettingsModal experimental tab).
+// Experimental desktop computer-use (tools.computer.enabled). macOS and
+// Windows only — the server refuses the write elsewhere; the toggle itself is
+// only rendered on those desktop shells (SettingsModal experimental tab).
 export async function updateComputerEnabled(enabled: boolean): Promise<{ ok: boolean; computer_enabled?: string }> {
   return request<{ ok: boolean; computer_enabled?: string }>('/api/config/computer', {
     method: 'PUT',

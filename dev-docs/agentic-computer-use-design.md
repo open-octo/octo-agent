@@ -1,8 +1,8 @@
 # Agentic Computer-Use (live desktop operation for the model)
 
-A design for giving the model live control of the macOS desktop: see the
-screen, decide, act — click, type, scroll — inside native apps that have no
-CLI and no API (CAD, game engines, legacy GUIs). This is the
+A design for giving the model live control of the desktop — macOS and
+Windows: see the screen, decide, act — click, type, scroll — inside native
+apps that have no CLI and no API (CAD, game engines, legacy GUIs). This is the
 screenshot→decide→act loop, **not** record→replay→self-heal.
 
 Relationship to the other two computer-use docs:
@@ -19,8 +19,9 @@ Relationship to the other two computer-use docs:
 
 ## Thesis: two channels, AX preferred, pixels as fallback
 
-Desktop operation has two viable channels on macOS, and every claim below is
-**measured on macOS 15 (2026-09-11), not assumed**:
+Desktop operation has two viable channels. The macOS rows below are
+**measured on macOS 15 (2026-09-11), not assumed**; Windows maps onto the
+same two channels (UI Automation and SendInput, see the Windows section):
 
 | Channel | Mechanism | Background-safe? | Precision | Coverage |
 |---|---|---|---|---|
@@ -71,9 +72,9 @@ Actions:
 | `ax_tree` | AX | Indented digest of windows + menu bar: role, label, frame. Depth-capped (default 12), fan-out ≤ 200/node, total ≤ 2000 elements — a browser/Electron tree must not turn one call into a minute of mach IPC |
 | `ax_press` | AX | Press first element matching `role` + `label` (exact label beats substring; `role` optional but recommended) |
 | `ax_set` | AX | Set value: number for `AXSlider`/`AXStepper`, string for text fields |
-| `screenshot` | Pixel | Main display only, via `screencapture -x -D 1` (display 1 is the main display); returned as a vision image block (gated on `tools.ImagesAllowed`) |
+| `screenshot` | Pixel | Main display only: `screencapture -x -D 1` on macOS (display 1 is the main display), GDI `BitBlt` + `GetDIBits` on Windows; returned as a vision image block (gated on `tools.ImagesAllowed`) |
 | `left_click` / `right_click` / `double_click` / `mouse_move` | Pixel | Global `CGEvent` at logical-point coordinates |
-| `type` / `key` | Pixel | Unicode typing; combos like `cmd+shift+s` (`parseCombo`, which requires exactly one non-modifier key — keycode 0 is `a`, so a modifier-only combo would otherwise post ⌘A) |
+| `type` / `key` | Pixel | Unicode typing; combos like `cmd+shift+s`. `parseCombo` yields a platform-neutral key name and requires exactly one non-modifier key (keycode 0 is `a` on macOS, so a modifier-only combo would otherwise post ⌘A); each platform maps the name to its keycode. `cmd` is Command on macOS and the Windows key on Windows; `delete` is forward delete on both, `backspace` erases backwards |
 | `scroll` | Pixel | Line-unit scroll wheel |
 
 Coordinate contract: the model works in the pixel space of the screenshot **as
@@ -93,7 +94,8 @@ out). The pixel channel needs a vision-capable model or a configured
   - `computer.go` — shared API (`Screenshot`, `Click`, `TypeText`, `Press`,
     `FindWindow`, `ClickPid`, `TypeTextPid`, `AXTree`, `AXPress`,
     `AXSetValue`, permission preflights) + `ErrUnsupported` +
-    platform-neutral logic (`parseCombo`, `MatchAX`/`MatchAXExact`).
+    platform-neutral logic (`parseCombo`, `MatchAX`/`MatchAXExact`, which
+    treat `AXButton` and UIA's `Button` as the same role).
   - `helpers.h` — all C code as `static inline`, shared by both CGO
     translation units (cgo preambles don't share declarations).
   - `darwin_cgo.go` (`//go:build darwin && cgo`) — CGEvent input, CGWindowList
@@ -103,16 +105,27 @@ out). The pixel channel needs a vision-capable model or a configured
   - `ax_darwin.go` (`//go:build darwin && cgo`) — AX traversal, matching,
     actions. Matching runs two passes (exact label, then substring), each
     with its own traversal budget so the fallback still runs on large trees.
-  - `stub.go` (`//go:build !darwin || !cgo`) — every entry point returns
-    `ErrUnsupported`, so **all existing builds compile unchanged**, including
-    `CGO_ENABLED=0`.
+  - `windows.go` (`//go:build windows`) — pixel channel over Win32 through
+    `golang.org/x/sys/windows` lazy procs: `SendInput` mouse/keyboard/wheel,
+    `SetCursorPos`, GDI capture, `EnumWindows` app lookup, and a one-time
+    `SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)` so every API speaks
+    physical pixels. No cgo.
+  - `uia_windows.go` (`//go:build windows`) — UI Automation over raw COM
+    vtables (`CoCreateInstance(CUIAutomation)`, `ElementFromHandle`,
+    `ControlViewWalker`, Invoke / Toggle / Value / LegacyIAccessible
+    patterns). GUIDs, ids and slot numbers are taken from
+    `uiautomationclient.h`; the calls are pinned to one OS thread with COM
+    initialised per call.
+  - `stub.go` (`//go:build (!darwin && !windows) || (darwin && !cgo)`) —
+    every entry point returns `ErrUnsupported`, so **all other builds compile
+    unchanged**, including a macOS build with `CGO_ENABLED=0`.
 - `internal/tools/computer.go` — the tool: action dispatch, permission
   preflight with actionable errors, coordinate mapping, AX digest rendering.
 
 ## Permissions and onboarding
 
-Two macOS grants, both preflighted before use with the system prompt dialog
-triggered on miss, and errors that say exactly what to grant:
+macOS needs two grants, both preflighted before use with the system prompt
+dialog triggered on miss, and errors that say exactly what to grant:
 
 - **Accessibility** (`AXIsProcessTrusted` / `AXIsProcessTrustedWithOptions`)
   — required for all input synthesis and all AX actions.
@@ -121,6 +134,13 @@ triggered on miss, and errors that say exactly what to grant:
 
 On macOS the grant is attributed to the responsible application (the desktop
 app, or the terminal hosting the CLI), which the error messages name.
+
+Windows has no equivalent grant: `Trusted` and `ScreenCaptureAllowed` report
+true and the request calls are no-ops. What replaces the grant is User
+Interface Privilege Isolation — a process cannot inject input into a window
+of a higher integrity level, so an app running as administrator ignores a
+non-elevated octo. `SendInput` reports the shortfall and the tool error says
+so; the Settings hint under the toggle carries the same warning.
 
 ## Security model (settled)
 
@@ -148,22 +168,23 @@ tools:
 ```
 
 Surfaced to the user as a toggle in **Settings → Experimental**, visible only
-on the **macOS desktop app** (the substrate's only platform, and the only
-shell that can hold the Screen Recording / Accessibility grants). The tab is
-gated on `/api/version`'s `native` flag plus its `os` field (`runtime.GOOS`);
-the write goes through `PUT /api/config/computer`, which additionally refuses
-non-darwin servers so a remote/mac-less peer can never persist a no-op
-switch. `GET /api/config` reports the raw value as `computer_enabled`.
+on the **macOS or Windows desktop app** (the substrate's platforms; on macOS
+the desktop shell is also the only one that can hold the Screen Recording /
+Accessibility grants). The tab is gated on `/api/version`'s `native` flag
+plus its `os` field (`runtime.GOOS`); the write goes through
+`PUT /api/config/computer`, which additionally refuses servers on any other
+OS so a remote Linux peer can never persist a no-op switch. `GET /api/config`
+reports the raw value as `computer_enabled`.
 
 `ComputerTool` stays in `allTools` (so dispatch works) but is filtered out of
 the model's tool list in `defaultToolsFor` when the gate is off — the same
 advertising-gate pattern as `BrowserTool`. The gate (`computerEnabled`) is
-also false on every non-darwin OS regardless of the yaml value: the API
-already refuses the write there, and a hand-edited config must not advertise
-a tool whose every call fails. A darwin build without CGO still advertises
-it, because its `ErrUnsupported` names the missing CGO — the actionable
-message in that case. Graduate the default once the security model has real
-mileage.
+also false on every OS other than macOS and Windows regardless of the yaml
+value: the API already refuses the write there, and a hand-edited config must
+not advertise a tool whose every call fails. A darwin build without CGO still
+advertises it, because its `ErrUnsupported` names the missing CGO — the
+actionable message in that case. Graduate the default once the security
+model has real mileage.
 
 ## Release & build (settled: ships in release binaries)
 
@@ -178,16 +199,50 @@ macOS. Since the feature must ride releases:
   artifact (the universal-binary entry in `.goreleaser.yaml`) is recreated
   from those two binaries so
   `install.sh` and the pkg installer keep working unchanged.
-- `linux/*` and `windows/*` stay in goreleaser with `CGO_ENABLED=0` (stub).
+- `linux/*` and `windows/*` stay in goreleaser with `CGO_ENABLED=0`: Linux
+  gets the stub, Windows gets the real substrate because it is pure Go.
 - The macOS desktop app is unaffected: it already builds with `CGO_ENABLED=1`
   on `macos-latest` (the desktop target in the `Makefile`).
 - Local dev is unaffected: `make build` on macOS has CGO on by default.
 
+## Windows
+
+The same two channels behind the same `internal/computer` API, implemented
+without cgo so the existing `CGO_ENABLED=0` release cross-build ships it:
+
+| macOS | Windows | Notes |
+|---|---|---|
+| `AXUIElement` tree, roles `AXButton`… | UI Automation `IUIAutomationElement` control view, roles `Button`, `MenuItem`, `Edit`… | `MatchAX` strips the `AX` prefix so the model may use either spelling; `ax_tree` prints the platform's own names. macOS roots every window plus the menu bar; Windows roots the pid's top-most window (its menus are children of that window in UIA) |
+| `AXPress` | `InvokePattern.Invoke`, else `TogglePattern.Toggle`, else `LegacyIAccessiblePattern.DoDefaultAction` | |
+| `AXSetValue` (string or number) | `ValuePattern.SetValue(BSTR)`, else `LegacyIAccessiblePattern.SetValue(LPCWSTR)` | `RangeValuePattern.SetValue(double)` is unreachable without cgo — the x64/arm64 ABIs pass the double in a floating-point register `syscall.SyscallN` cannot load. Range-only controls report a clear error; the fallback is to focus them and use arrow keys |
+| Label = title / description / value | Label = `Name`; description = `HelpText` | |
+| `FindWindow(owner)` by menu-bar process name | Two `EnumWindows` passes: first the top-most visible non-minimized window whose executable name (without `.exe`) equals `owner`; only if none, the top-most whose title contains it | Separate passes so a browser tab titled "… notepad …" above Notepad cannot win. UWP apps are hosted by `ApplicationFrameHost.exe`; the title pass is what reaches them |
+| CGEvent at logical points | `SetCursorPos` + `SendInput` at physical pixels | The process opts into per-monitor-v2 DPI awareness once, so `GetSystemMetrics`, `GetWindowRect`, the capture and input all agree and `shotScale` stays correct |
+| `screencapture -D 1` | GDI `BitBlt(SRCCOPY|CAPTUREBLT)` → top-down 32-bit DIB → PNG | Primary display only, like macOS |
+| `CGEventKeyboardSetUnicodeString` | `KEYEVENTF_UNICODE` per UTF-16 unit, line breaks as `VK_RETURN` presses | Layout-independent typing (Win32 edit controls act on Return, not on a bare U+000A); single-character `key` presses go through `VkKeyScanW` so the live layout decides |
+| `CGEventPostToPid` | none | `ClickPid` / `TypeTextPid` return `ErrUnsupported`; the tool never calls them |
+
+COM discipline: each AX call locks its goroutine to an OS thread,
+`CoInitializeEx(MULTITHREADED)`, does the work, `CoUninitialize`. `S_FALSE`
+(already initialised) is balanced normally; `RPC_E_CHANGED_MODE` (the thread
+already lives in an STA, e.g. the desktop shell's main thread) is used as is.
+
+Verification status: the Windows substrate is compile-checked from macOS
+(`GOOS=windows go vet`, amd64 and arm64) and unit-tested on the
+`windows-latest` CI runner — struct layouts (`sizeof(INPUT)` = 40),
+virtual-key resolution, control-type names, `GetSystemMetrics`, a real GDI
+capture decoded back as PNG at screen size, both `EnumWindows` passes on a
+miss, and COM smoke tests that create `CUIAutomation`, take
+`ElementFromHandle(GetDesktopWindow())`, walk its first children, and fetch a
+pattern through `GetCurrentPattern` + `QueryInterface` — every vtable slot
+used by the read path, exercised against the real interfaces. **No interactive real-machine UAT
+has been run yet**: driving an actual app (Notepad, Calculator) end to end,
+UIPI behaviour against an elevated window, and multi-monitor coordinates
+remain to be confirmed on hardware before the gate default changes.
+
 ## Out of scope
 
-- **Windows / Linux** — no substrate. AutoCAD-class targets are mostly
-  Windows; that is a future port behind the same `internal/computer` API
-  (UIA + SendInput), not this design.
+- **Linux** — no substrate; the stub reports `ErrUnsupported`.
 - **Private SkyLight/CGS event injection** (the suspected mechanism behind
   Codex's background mouse) — rejected: private API surface, maintenance and
   review burden, and the AX channel already covers the background need for
@@ -210,13 +265,22 @@ macOS. Since the feature must ride releases:
   conversation driving the screen at a time.
 - SwiftUI apps may expose only window chrome over AX (new Calculator); the
   pixel channel is the only route there.
+- Windows: numeric-only controls (`RangeValuePattern` without a string
+  `ValuePattern`) cannot be set; elevated apps ignore input from a
+  non-elevated octo; the primary display is the only capture/input target.
 
 ## Test plan
 
 - Unit: `parseCombo` table test (including modifier-only and two-key
-  rejections), `MatchAX`/`MatchAXExact` table test, `Click` validation, gate
-  on/off/off-darwin, stub compile under `CGO_ENABLED=0` (CI's existing
-  `go test ./...` covers this on all three platforms).
+  rejections), `MatchAX`/`MatchAXExact` table test (both role spellings),
+  `Click` validation, gate on/off/off-platform, macOS keycode table, Windows
+  layout / virtual-key / control-type / COM smoke tests (`windows_test.go`),
+  stub compile under `CGO_ENABLED=0` (CI's existing `go test ./...` covers
+  this on all three platforms).
+- Manual UAT on Windows (not yet run — see the Windows section): open
+  Notepad, `ax_tree` it, `ax_set` the `Edit` document text, `key`
+  `ctrl+s`; pixel: screenshot, click into the text area, `type`, verify with
+  a second screenshot; elevated target: confirm the UIPI error message.
 - Manual UAT (all passed on macOS 15; repeat before flipping the default):
   1. Pixel: drive Calculator in the foreground to compute 6×7=42.
   2. AX background: play ≥4 Chess moves with Chess occluded.

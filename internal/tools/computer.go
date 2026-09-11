@@ -16,16 +16,22 @@ import (
 	"github.com/open-octo/octo-agent/internal/config"
 )
 
+// computerPlatform reports whether this OS has a computer-use substrate
+// (macOS and Windows; see internal/computer).
+func computerPlatform() bool {
+	return runtime.GOOS == "darwin" || runtime.GOOS == "windows"
+}
+
 // computerEnabled gates advertising of the tool: the experimental
 // tools.computer.enabled switch (default off). Follows browserEnabled's
 // pattern — hidden from the model's tool list when off, still dispatchable.
-// The substrate is macOS-only, so the switch is also ignored off-darwin: the
-// Settings API already refuses the write there, and a hand-edited yaml must
-// not advertise a tool whose every call fails with ErrUnsupported. (A darwin
+// The switch is also ignored on platforms without a substrate: the Settings
+// API already refuses the write there, and a hand-edited yaml must not
+// advertise a tool whose every call fails with ErrUnsupported. (A darwin
 // build without CGO still advertises it — its ErrUnsupported names the
 // missing CGO, which is the actionable message in that case.)
 func computerEnabled() bool {
-	if runtime.GOOS != "darwin" {
+	if !computerPlatform() {
 		return false
 	}
 	cfg, _ := config.LoadCached()
@@ -33,10 +39,11 @@ func computerEnabled() bool {
 }
 
 // ComputerTool is agentic desktop computer-use: the model sees the screen via
-// screenshot and acts on it with synthesized mouse/keyboard input. This is the
-// live screenshot→decide→act loop (not record/replay) — the substrate is
-// macOS-only behind CGO (see internal/computer); elsewhere every action
-// returns computer.ErrUnsupported.
+// screenshot and acts on it with synthesized mouse/keyboard input, or reads
+// and drives the app's accessibility tree. This is the live
+// screenshot→decide→act loop (not record/replay). Substrates exist for macOS
+// (CGO) and Windows (pure Win32 / UI Automation) — see internal/computer;
+// elsewhere every action returns computer.ErrUnsupported.
 type ComputerTool struct{}
 
 var computerActions = []string{
@@ -47,17 +54,19 @@ var computerActions = []string{
 func (ComputerTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "computer",
-		Description: "See and operate the macOS desktop directly, two channels: " +
+		Description: "See and operate the desktop (macOS or Windows) directly, two channels: " +
 			"(1) accessibility (PREFERRED when the app exposes elements): ax_tree reads an app's UI " +
-			"as a semantic list (role + label + frame), ax_press/ax_set act by label — these work on " +
-			"BACKGROUNDED apps with no cursor move and no focus change, and are far more precise than " +
-			"pixel guessing. (2) pixels: screenshot the main display, then click/move/type/key/scroll by " +
-			"coordinate — needed for custom-drawn UIs (games, CAD) with no accessibility tree; this " +
-			"channel shares the user's cursor and focus. Use for tasks in native apps with no CLI/API " +
-			"(the browser tool covers anything web). Pixel workflow: screenshot FIRST, act, screenshot " +
-			"again to verify. Requires macOS Accessibility (input) and Screen Recording (capture) " +
-			"permissions granted to the app running octo — an action failing with a permission error " +
-			"means the grant is missing, not that the action was wrong.",
+			"as a semantic list (role + label + frame) — macOS Accessibility or Windows UI Automation — " +
+			"and ax_press/ax_set act by label; these work on BACKGROUNDED apps with no cursor move and " +
+			"no focus change, and are far more precise than pixel guessing. (2) pixels: screenshot the " +
+			"main display, then click/move/type/key/scroll by coordinate — needed for custom-drawn UIs " +
+			"(games, CAD) with no accessibility tree; this channel shares the user's cursor and focus. " +
+			"Use for tasks in native apps with no CLI/API (the browser tool covers anything web). Pixel " +
+			"workflow: screenshot FIRST, act, screenshot again to verify. On macOS this requires the " +
+			"Accessibility (input) and Screen Recording (capture) permissions granted to the app running " +
+			"octo — an action failing with a permission error means the grant is missing, not that the " +
+			"action was wrong. On Windows there is no permission dialog, but apps running as " +
+			"administrator ignore input from a non-elevated octo.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -71,15 +80,15 @@ func (ComputerTool) Definition() agent.ToolDefinition {
 						"type: type text at the current focus. key: press a key or combo like \"enter\", \"cmd+c\". " +
 						"scroll: scroll at the cursor by (dx, dy) lines, positive dy = down.",
 				},
-				"app":       map[string]any{"type": "string", "description": "Target app name for ax_* actions — the process name as shown in its menu bar, e.g. \"国际象棋\", \"Safari\". The app must have at least one on-screen (non-minimized) window."},
-				"role":      map[string]any{"type": "string", "description": "Accessibility role filter for ax_press/ax_set, e.g. \"AXButton\", \"AXMenuItem\", \"AXSlider\", \"AXTextField\". Optional but strongly recommended — pass what ax_tree shows to disambiguate."},
+				"app":       map[string]any{"type": "string", "description": "Target app name for ax_* actions. macOS: the process name as shown in its menu bar, e.g. \"国际象棋\", \"Safari\". Windows: the executable name without .exe (e.g. \"notepad\") or a substring of the window title. The app must have at least one on-screen (non-minimized) window."},
+				"role":      map[string]any{"type": "string", "description": "Accessibility role filter for ax_press/ax_set — pass what ax_tree shows, e.g. \"AXButton\", \"AXMenuItem\", \"AXSlider\" on macOS or \"Button\", \"MenuItem\", \"Edit\" on Windows (the AX prefix is optional on both). Optional but strongly recommended to disambiguate."},
 				"label":     map[string]any{"type": "string", "description": "Element label to match for ax_press/ax_set: exact label wins, otherwise case-insensitive substring of title/description/value. Copy labels verbatim from ax_tree output."},
 				"value":     map[string]any{"type": "string", "description": "Value to set (ax_set): a number for sliders/steppers, a string for text fields."},
 				"max_depth": map[string]any{"type": "number", "description": "Tree depth limit for ax_tree (default 12; smaller = shorter output)."},
 				"x":         map[string]any{"type": "number", "description": "X coordinate in screenshot pixels (click/move)."},
 				"y":         map[string]any{"type": "number", "description": "Y coordinate in screenshot pixels (click/move)."},
 				"text":      map[string]any{"type": "string", "description": "Text to type (type action)."},
-				"key":       map[string]any{"type": "string", "description": "Key or combo, e.g. \"enter\", \"tab\", \"escape\", \"cmd+c\", \"cmd+shift+s\" (key action)."},
+				"key":       map[string]any{"type": "string", "description": "Key or combo, e.g. \"enter\", \"tab\", \"escape\", \"backspace\", \"delete\", \"cmd+c\", \"ctrl+shift+s\" (key action). cmd is the Command key on macOS and the Windows key on Windows — use ctrl for Windows shortcuts."},
 				"dx":        map[string]any{"type": "number", "description": "Horizontal scroll lines, positive = right (scroll)."},
 				"dy":        map[string]any{"type": "number", "description": "Vertical scroll lines, positive = down (scroll)."},
 			},
@@ -192,7 +201,7 @@ func computerAXTree(input map[string]any) (agent.ToolResult, error) {
 	var b strings.Builder
 	for _, e := range els {
 		label := e.Label()
-		if label == "" && e.Role != "AXWindow" {
+		if label == "" && !computer.SameRole(e.Role, "AXWindow") {
 			continue // anonymous spacer groups are noise to the model
 		}
 		for i := 0; i < e.Depth; i++ {

@@ -39,6 +39,12 @@
   let autostart     = $state(false) // desktop shell only
   let serverOs      = $state('')    // /api/version's os — gates the experimental tab
   let computerUse   = $state(false) // tools.computer.enabled toggle (experimental tab)
+  const computerPlatform = $derived(serverOs === 'darwin' || serverOs === 'windows')
+  // macOS prompts for two system grants; Windows has none but blocks input
+  // into elevated apps — the hint under the toggle says which applies.
+  const computerHintKey = $derived(serverOs === 'windows'
+    ? 'settings.experimental.computer_use_hint_windows'
+    : 'settings.experimental.computer_use_hint')
   let versionStr    = $state('')
   let latestStr     = $state('')
   let updateAvail   = $state(false)
@@ -237,10 +243,11 @@
     { key: 'endpoints', icon: 'ant-design:api-outlined',           label: 'settings.endpoints.title' },
     { key: 'agent',     icon: 'ant-design:robot-outlined',         label: 'settings.agent' },
     { key: 'mobile',    icon: 'ant-design:mobile-outlined',        label: 'settings.mobile' },
-    // Experimental features (computer-use) need the desktop shell AND macOS —
-    // the substrate is macOS-only (AX/CGEvent) and only the desktop app can
-    // hold the Screen Recording / Accessibility grants.
-    ...($nativeShell && serverOs === 'darwin'
+    // Experimental features (computer-use) need the desktop shell AND a
+    // platform with a substrate — macOS (AX/CGEvent) or Windows (UI
+    // Automation/SendInput). On macOS only the desktop app can hold the
+    // Screen Recording / Accessibility grants.
+    ...($nativeShell && computerPlatform
       ? [{ key: 'experimental' as const, icon: 'ant-design:experiment-outlined', label: 'settings.experimental' }]
       : []),
     { key: 'data',      icon: 'ant-design:database-outlined',       label: 'settings.data' },
@@ -607,7 +614,7 @@
           </div>
           <div class="setrow">
             <div class="seti">
-              <span class="setd">{$t('settings.experimental.computer_use_hint')}</span>
+              <span class="setd">{$t(computerHintKey)}</span>
             </div>
           </div>
 
