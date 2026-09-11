@@ -161,8 +161,8 @@ func (ComputerTool) Execute(ctx context.Context, name string, input map[string]a
 }
 
 // computerAppPid resolves the ax_* actions' app argument to a pid. Going
-// through the window list means the app needs one on-screen window — an
-// acceptable spike constraint, called out in the error.
+// through the window list means the app needs one on-screen window — a
+// known limitation, called out in the error.
 func computerAppPid(input map[string]any) (int, error) {
 	if err := requireTrusted(); err != nil {
 		return 0, err
@@ -207,8 +207,8 @@ func computerAXTree(input map[string]any) (agent.ToolResult, error) {
 // shotScale converts model coordinates — pixels of the last screenshot as
 // actually sent to the provider, which compressImageData may have downscaled
 // from the raw capture — into the logical-point space CGEvent posts in.
-// Spike simplification: process-global, assumes one display and one
-// conversation driving the screen at a time.
+// Process-global by design: assumes one display and one conversation
+// driving the screen at a time.
 var shotScale = struct {
 	sync.Mutex
 	x, y float64
