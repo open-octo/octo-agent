@@ -20,6 +20,13 @@ func TestParseCombo(t *testing.T) {
 		{"", 0, 0, true},
 		{"cmd+", 0, 0, true},
 		{"cmd+banana", 0, 0, true},
+		// Modifier-only combos must fail: the zero keycode is "a", so these
+		// would otherwise post ⌘A / shift+A.
+		{"cmd", 0, 0, true},
+		{"shift", 0, 0, true},
+		{"ctrl+shift", 0, 0, true},
+		// Two keys in one combo is text, not a chord.
+		{"a+b", 0, 0, true},
 	}
 	for _, tc := range cases {
 		kc, flags, err := parseCombo(tc.in)

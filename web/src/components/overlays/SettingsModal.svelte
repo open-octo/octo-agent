@@ -612,7 +612,8 @@
           </div>
 
         {:else if cat === 'mobile'}
-          {#if tunnelPairing?.enabled && tunnelPairing.pair_url}            <div class="mobile-pair">
+          {#if tunnelPairing?.enabled && tunnelPairing.pair_url}
+            <div class="mobile-pair">
               <QrCode text={tunnelPairing.pair_url} />
               <div class="mobile-info">
                 <p class="mobile-scan">{$t('settings.mobile.scan')}</p>

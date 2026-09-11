@@ -122,6 +122,9 @@ func axFindDo(pid int, role, contains string, action func(C.AXUIElementRef) erro
 	visited := 0
 
 	search := func(pred func(AXElement) bool) bool {
+		// Each pass gets the full budget: the exact pass exhausting it must
+		// not silently skip the substring fallback on a large tree.
+		visited = 0
 		var walk func(el C.AXUIElementRef, depth int) bool // true = stop
 		walk = func(el C.AXUIElementRef, depth int) bool {
 			if matched || visited >= axMaxTotal {

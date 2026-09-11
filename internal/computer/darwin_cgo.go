@@ -36,13 +36,16 @@ func screenSize() (float64, float64, error) {
 
 // screenshot captures the main display via the screencapture CLI — the
 // CGWindowList capture API was obsoleted in the macOS 15 SDK (ScreenCaptureKit
-// is the sanctioned path but ObjC/async; the CLI keeps the spike pure-CGo-free
-// for capture). The returned PNG is full-resolution (Retina 2x); the caller
-// maps coordinates into logical points via ScreenSize.
+// is the sanctioned path but ObjC/async; the CLI keeps capture CGo-free). The
+// returned PNG is full-resolution (Retina 2x); the caller maps coordinates
+// into logical points via ScreenSize.
+//
+// -D 1 pins the capture to the main display (screencapture(1): "1 is main"),
+// the only display ScreenSize's coordinate space describes.
 func screenshot() ([]byte, error) {
 	path := filepath.Join(os.TempDir(), fmt.Sprintf("octo-computer-shot-%d.png", time.Now().UnixNano()))
 	defer os.Remove(path)
-	cmd := exec.Command("screencapture", "-x", "-t", "png", path)
+	cmd := exec.Command("screencapture", "-x", "-D", "1", "-t", "png", path)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("computer: screencapture failed: %v (%s)", err, out)
 	}

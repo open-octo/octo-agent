@@ -1,8 +1,5 @@
 # Agentic Computer-Use (live desktop operation for the model)
 
-Status: validated spike (branch `wt/computer-use`, commits `8b94e58e`,
-`43e21392`, `d1d7b867`), design settled, not yet merged.
-
 A design for giving the model live control of the macOS desktop: see the
 screen, decide, act — click, type, scroll — inside native apps that have no
 CLI and no API (CAD, game engines, legacy GUIs). This is the
@@ -39,7 +36,7 @@ acquired with Sky Applications), which independently validates the choice.
 
 ## Measured evidence (macOS 15, 2026-09-11)
 
-Every row was reproduced with the spike's probe binary:
+Every row was reproduced with a standalone probe binary against the real apps:
 
 | Experiment | Result |
 |---|---|
@@ -74,14 +71,14 @@ Actions:
 | `ax_tree` | AX | Indented digest of windows + menu bar: role, label, frame. Depth-capped (default 12), fan-out ≤ 200/node, total ≤ 2000 elements — a browser/Electron tree must not turn one call into a minute of mach IPC |
 | `ax_press` | AX | Press first element matching `role` + `label` (exact label beats substring; `role` optional but recommended) |
 | `ax_set` | AX | Set value: number for `AXSlider`/`AXStepper`, string for text fields |
-| `screenshot` | Pixel | Full main display via `screencapture -x`; returned as a vision image block (gated on `ImagesAllowed`, `internal/tools/vision.go:79`) |
+| `screenshot` | Pixel | Main display only, via `screencapture -x -D 1` (display 1 is the main display); returned as a vision image block (gated on `tools.ImagesAllowed`) |
 | `left_click` / `right_click` / `double_click` / `mouse_move` | Pixel | Global `CGEvent` at logical-point coordinates |
-| `type` / `key` | Pixel | Unicode typing; combos like `cmd+shift+s` (`parseCombo`) |
+| `type` / `key` | Pixel | Unicode typing; combos like `cmd+shift+s` (`parseCombo`, which requires exactly one non-modifier key — keycode 0 is `a`, so a modifier-only combo would otherwise post ⌘A) |
 | `scroll` | Pixel | Line-unit scroll wheel |
 
 Coordinate contract: the model works in the pixel space of the screenshot **as
 actually sent to the provider**. `agent.NewImageBlock` may downscale to
-`imageCompressMaxEdge = 1568` (`internal/agent/image_compress.go:28`), so the
+`imageCompressMaxEdge` (1568 px on the long edge), so the
 tool decodes the final block bytes, reports their dimensions in the result
 text, and maps model coordinates back to logical points via
 `ScreenSize()/sentWidth`. Retina and edge-capped screenshots stay accurate.
@@ -90,7 +87,7 @@ Model requirements: the AX channel works with **any** model (text in, text
 out). The pixel channel needs a vision-capable model or a configured
 `vision_helper`; `screenshot` degrades to a saved-path result otherwise.
 
-## Package layout (as built in the spike)
+## Package layout
 
 - `internal/computer/` — substrate, platform-split:
   - `computer.go` — shared API (`Screenshot`, `Click`, `TypeText`, `Press`,
@@ -104,7 +101,8 @@ out). The pixel channel needs a vision-capable model or a configured
     API is `unavailable` in the macOS 15 SDK; ScreenCaptureKit is ObjC/async
     and buys nothing the CLI doesn't for a single full-screen frame).
   - `ax_darwin.go` (`//go:build darwin && cgo`) — AX traversal, matching,
-    actions.
+    actions. Matching runs two passes (exact label, then substring), each
+    with its own traversal budget so the fallback still runs on large trees.
   - `stub.go` (`//go:build !darwin || !cgo`) — every entry point returns
     `ErrUnsupported`, so **all existing builds compile unchanged**, including
     `CGO_ENABLED=0`.
@@ -140,8 +138,8 @@ before acting, re-verify after every action, never blind-chain.
 ## Exposure: experimental, opt-in (settled)
 
 The tool ships dark behind a config gate following the existing
-`tools.tool_search.enabled` pattern (`internal/config/config.go:193-195`,
-validated at `config.go:596`):
+`tools.tool_search.enabled` pattern (`config.ToolSearchConfig`, validated in
+`Config.Validate`):
 
 ```yaml
 tools:
@@ -159,24 +157,30 @@ switch. `GET /api/config` reports the raw value as `computer_enabled`.
 
 `ComputerTool` stays in `allTools` (so dispatch works) but is filtered out of
 the model's tool list in `defaultToolsFor` when the gate is off — the same
-advertising-gate pattern as `BrowserTool`. Graduate the default once the
-security model has real mileage.
+advertising-gate pattern as `BrowserTool`. The gate (`computerEnabled`) is
+also false on every non-darwin OS regardless of the yaml value: the API
+already refuses the write there, and a hand-edited config must not advertise
+a tool whose every call fails. A darwin build without CGO still advertises
+it, because its `ErrUnsupported` names the missing CGO — the actionable
+message in that case. Graduate the default once the security model has real
+mileage.
 
 ## Release & build (settled: ships in release binaries)
 
 Constraint: goreleaser cross-compiles every target from `ubuntu-latest` with
-`CGO_ENABLED=0` (`.goreleaser.yaml:29`), which would silently ship the stub
-on macOS. Since the feature must ride releases:
+`CGO_ENABLED=0` (its build `env`), which would silently ship the stub on
+macOS. Since the feature must ride releases:
 
 - The **darwin CLI legs move out of goreleaser** into a `macos-latest`
   GitHub Actions job building `darwin/arm64` and `darwin/amd64` with
   `CGO_ENABLED=1`. clang on the runner targets both architectures (`-arch`),
   so a single arm64 runner produces both; the existing `darwin_all` lipo
-  artifact (`.goreleaser.yaml:64-67`) is recreated from those two binaries so
+  artifact (the universal-binary entry in `.goreleaser.yaml`) is recreated
+  from those two binaries so
   `install.sh` and the pkg installer keep working unchanged.
 - `linux/*` and `windows/*` stay in goreleaser with `CGO_ENABLED=0` (stub).
 - The macOS desktop app is unaffected: it already builds with `CGO_ENABLED=1`
-  on `macos-latest` (`Makefile:104`).
+  on `macos-latest` (the desktop target in the `Makefile`).
 - Local dev is unaffected: `make build` on macOS has CGO on by default.
 
 ## Out of scope
@@ -201,7 +205,7 @@ on macOS. Since the feature must ride releases:
 
 - Menu-bar `AXPress` only fires with the target app frontmost.
 - `FindWindow` requires one on-screen, non-minimized window (menu-bar-only
-  apps are unreachable in the spike).
+  apps are unreachable).
 - Pixel-channel state (`shotScale`) is process-global — one display, one
   conversation driving the screen at a time.
 - SwiftUI apps may expose only window chrome over AX (new Calculator); the
@@ -209,16 +213,15 @@ on macOS. Since the feature must ride releases:
 
 ## Test plan
 
-- Unit (already in spike): `parseCombo` table test, `MatchAX`/`MatchAXExact`
-  table test, `Click` validation, stub compile under `CGO_ENABLED=0` (CI's
-  existing `go test ./...` covers this on all three platforms).
-- Manual UAT before merging the gate flip:
-  1. Pixel: drive Calculator in the foreground to compute 6×7=42 (done in
-     spike, first-try).
-  2. AX background: play ≥4 Chess moves with Chess occluded (done in spike,
-     16 moves).
+- Unit: `parseCombo` table test (including modifier-only and two-key
+  rejections), `MatchAX`/`MatchAXExact` table test, `Click` validation, gate
+  on/off/off-darwin, stub compile under `CGO_ENABLED=0` (CI's existing
+  `go test ./...` covers this on all three platforms).
+- Manual UAT (all passed on macOS 15; repeat before flipping the default):
+  1. Pixel: drive Calculator in the foreground to compute 6×7=42.
+  2. AX background: play ≥4 Chess moves with Chess occluded.
   3. AX foreground: open Chess 设置… via menu bar, set difficulty slider to
-     minimum via `AXSetValue` (done in spike).
+     minimum via `AXSetValue`.
   4. Permission-less run: revoke grants, confirm both preflight errors are
      actionable and the system dialogs appear.
 

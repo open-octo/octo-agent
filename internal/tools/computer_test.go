@@ -3,6 +3,7 @@ package tools
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -18,7 +19,8 @@ func TestComputerTool_GatedOffByDefault(t *testing.T) {
 	}
 }
 
-// With the switch on, the tool is advertised.
+// With the switch on, the tool is advertised — on macOS only; elsewhere the
+// switch is ignored because the substrate does not exist.
 func TestComputerTool_AdvertisedWhenEnabled(t *testing.T) {
 	home := setHome(t)
 	if err := os.MkdirAll(filepath.Join(home, ".octo"), 0o755); err != nil {
@@ -33,6 +35,12 @@ func TestComputerTool_AdvertisedWhenEnabled(t *testing.T) {
 		if d.Name == "computer" {
 			found = true
 		}
+	}
+	if runtime.GOOS != "darwin" {
+		if found {
+			t.Fatal("computer tool must not be advertised off-darwin even when tools.computer.enabled is on")
+		}
+		return
 	}
 	if !found {
 		t.Fatal("computer tool should be advertised when tools.computer.enabled is on")

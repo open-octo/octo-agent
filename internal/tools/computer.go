@@ -7,6 +7,7 @@ import (
 	"image"
 	_ "image/jpeg" // DecodeConfig on the JPEG re-encode NewImageBlock produces
 	_ "image/png"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -18,7 +19,15 @@ import (
 // computerEnabled gates advertising of the tool: the experimental
 // tools.computer.enabled switch (default off). Follows browserEnabled's
 // pattern — hidden from the model's tool list when off, still dispatchable.
+// The substrate is macOS-only, so the switch is also ignored off-darwin: the
+// Settings API already refuses the write there, and a hand-edited yaml must
+// not advertise a tool whose every call fails with ErrUnsupported. (A darwin
+// build without CGO still advertises it — its ErrUnsupported names the
+// missing CGO, which is the actionable message in that case.)
 func computerEnabled() bool {
+	if runtime.GOOS != "darwin" {
+		return false
+	}
 	cfg, _ := config.LoadCached()
 	return strings.EqualFold(strings.TrimSpace(cfg.Tools.Computer.Enabled), "on")
 }

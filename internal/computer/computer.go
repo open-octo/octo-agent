@@ -219,9 +219,12 @@ var modifierNames = map[string]uint64{
 
 // parseCombo splits "cmd+shift+enter" into a keycode plus modifier flags.
 // A single printable character ("a", "5") is mapped to its keycode so
-// key and type overlap for the simple cases.
+// key and type overlap for the simple cases. Exactly one non-modifier key is
+// required: keycode 0 is the letter "a", so a modifier-only combo like "cmd"
+// would otherwise silently post ⌘A (select all) instead of failing.
 func parseCombo(combo string) (keycode uint16, flags uint64, err error) {
 	parts := strings.Split(strings.ToLower(strings.TrimSpace(combo)), "+")
+	keys := 0
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
 		if p == "" {
@@ -233,13 +236,21 @@ func parseCombo(combo string) (keycode uint16, flags uint64, err error) {
 		}
 		if kc, ok := keyCodes[p]; ok {
 			keycode = kc
+			keys++
 			continue
 		}
 		if kc, ok := charKeyCode(p); ok {
 			keycode = kc
+			keys++
 			continue
 		}
 		return 0, 0, fmt.Errorf("computer: unknown key %q in combo %q", p, combo)
+	}
+	switch {
+	case keys == 0:
+		return 0, 0, fmt.Errorf("computer: key combo %q has no key, only modifiers", combo)
+	case keys > 1:
+		return 0, 0, fmt.Errorf("computer: key combo %q names more than one key (use type for text)", combo)
 	}
 	return keycode, flags, nil
 }
