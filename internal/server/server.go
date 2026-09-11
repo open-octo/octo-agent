@@ -926,6 +926,7 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/config", s.handleGetConfig)
 	s.api("GET /api/config/endpoints", s.handleGetEndpoints)
 	s.api("PUT /api/config/show_reasoning", s.handlePutShowReasoning)
+	s.api("PUT /api/config/computer", s.handlePutComputer)
 	s.api("PUT /api/config/coauthor", s.handlePutCoauthor)
 	s.api("PUT /api/config/language", s.handlePutLanguage)
 	s.api("PUT /api/config/workspace_dir", s.handlePutWorkspaceDir)
