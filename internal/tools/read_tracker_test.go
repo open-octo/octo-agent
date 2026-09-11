@@ -143,6 +143,21 @@ func TestRegistry_TerminalWriteThenEdit_Allowed(t *testing.T) {
 		{"bash-c-sed", func(p string) string { return "bash -c \"sed -i 's/const a = 1/const a = 2/' " + p + "\"" }},
 		{"sh-c-sed", func(p string) string { return "sh -c \"sed -i 's/const a = 1/const a = 2/' " + p + "\"" }},
 		{"gofmt-w-file", func(p string) string { return "gofmt -w " + p }},
+		{"cd-and-gofmt-relative", func(p string) string {
+			return "cd " + filepath.Dir(p) + " && gofmt -w " + filepath.Base(p) + " && echo BUILD_OK"
+		}},
+		{"cd-and-sed-relative", func(p string) string {
+			return "cd " + filepath.Dir(p) + " && sed -i '' 's/const a = 1/const a = 2/' " + filepath.Base(p) + " && echo done"
+		}},
+		{"cd-semicolon-gofmt-relative", func(p string) string {
+			return "cd " + filepath.Dir(p) + "; gofmt -w " + filepath.Base(p) + " 2>&1 | tail -5"
+		}},
+		{"cd-and-redirect-relative", func(p string) string {
+			return "cd " + filepath.Dir(p) + " && printf 'package x\\nconst c = 3\\n' > " + filepath.Base(p)
+		}},
+		{"bash-c-cd-and-gofmt", func(p string) string {
+			return "bash -c \"cd " + filepath.Dir(p) + " && gofmt -w " + p + "\""
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -539,5 +554,197 @@ func TestRegistry_GrepNumericDashFilename_Allowed(t *testing.T) {
 		"path": p, "old_string": "const a = 1", "new_string": "const a = 2",
 	}); err != nil {
 		t.Errorf("edit after grep on a numeric-dash filename should succeed: %v", err)
+	}
+}
+
+// A relative write target resolves against the directory `cd` moved to, not
+// the process CWD: `cd elsewhere && gofmt -w code.go` names a DIFFERENT file
+// from the tracked one, so the tracked file's stale stamp must survive and a
+// genuine out-of-band edit to it stays blocked.
+func TestRegistry_CdElsewhereThenWriteSameName_StillBlocked(t *testing.T) {
+	reg := NewDefaultRegistry()
+	dir := t.TempDir()
+	other := t.TempDir()
+	p := filepath.Join(dir, "code.go")
+	if err := os.WriteFile(p, []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "code.go"), []byte("package y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(context.Background(), "read_file", map[string]any{"path": p}); err != nil {
+		t.Fatalf("read_file: %v", err)
+	}
+	future := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(p, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(context.Background(), "terminal", map[string]any{
+		"command": "cd " + other + " && gofmt -w code.go",
+	}); err != nil {
+		t.Fatalf("terminal: %v", err)
+	}
+	_, err := reg.Execute(context.Background(), "edit_file", map[string]any{
+		"path": p, "old_string": "package x", "new_string": "package y",
+	})
+	if err == nil || !strings.Contains(err.Error(), "modified since") {
+		t.Errorf("a same-named file in another directory must not refresh this one, got %v", err)
+	}
+}
+
+// Following `cd` does not loosen the directory rule: `cd dir && gofmt -w .`
+// still names a directory, and a tracked file beneath it keeps its stale
+// stamp exactly as it does without the cd prefix.
+func TestRegistry_CdThenWriteDir_DoesNotRefreshSiblings(t *testing.T) {
+	reg := NewDefaultRegistry()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "notes.md")
+	if err := os.WriteFile(p, []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(context.Background(), "read_file", map[string]any{"path": p}); err != nil {
+		t.Fatalf("read_file: %v", err)
+	}
+	future := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(p, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(context.Background(), "terminal", map[string]any{
+		"command": "cd " + dir + " && gofmt -w . && echo OK",
+	}); err != nil {
+		t.Fatalf("terminal: %v", err)
+	}
+	_, err := reg.Execute(context.Background(), "edit_file", map[string]any{
+		"path": p, "old_string": "hello", "new_string": "goodbye",
+	})
+	if err == nil || !strings.Contains(err.Error(), "modified since") {
+		t.Errorf("directory-level write behind cd must not refresh files beneath it, got %v", err)
+	}
+}
+
+// `cd -` goes somewhere the parser can't know, so a relative target after it
+// is not attributed to any file — the tracked file stays blocked rather than
+// being refreshed against a guessed directory.
+func TestRegistry_CdDashThenWrite_StillBlocked(t *testing.T) {
+	reg := NewDefaultRegistry()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "code.go")
+	if err := os.WriteFile(p, []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(context.Background(), "read_file", map[string]any{"path": p}); err != nil {
+		t.Fatalf("read_file: %v", err)
+	}
+	future := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(p, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(context.Background(), "terminal", map[string]any{
+		"command": "cd " + dir + " && cd - >/dev/null; gofmt -w code.go",
+	}); err != nil {
+		t.Fatalf("terminal: %v", err)
+	}
+	_, err := reg.Execute(context.Background(), "edit_file", map[string]any{
+		"path": p, "old_string": "package x", "new_string": "package y",
+	})
+	if err == nil || !strings.Contains(err.Error(), "modified since") {
+		t.Errorf("relative write after cd - must not be attributed, got %v", err)
+	}
+}
+
+// A read-style command behind `cd … &&` with a relative path counts as a
+// read of the file the shell actually opened, so the follow-up edit is not
+// refused with "not been read yet".
+func TestRegistry_CdThenTerminalReadThenEdit_Allowed(t *testing.T) {
+	reg := NewDefaultRegistry()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "code.go")
+	if err := os.WriteFile(p, []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(context.Background(), "terminal", map[string]any{
+		"command": "cd " + dir + " && cat code.go",
+	}); err != nil {
+		t.Fatalf("terminal: %v", err)
+	}
+	if _, err := reg.Execute(context.Background(), "edit_file", map[string]any{
+		"path": p, "old_string": "package x", "new_string": "package y",
+	}); err != nil {
+		t.Errorf("edit after cd && cat should succeed: %v", err)
+	}
+}
+
+// Without any cd, a relative target resolves against the session's working
+// directory (where the terminal actually ran), not the process CWD.
+func TestRegistry_TerminalWriteRelativeToWorkingDir_Allowed(t *testing.T) {
+	reg := NewDefaultRegistry()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "code.go")
+	if err := os.WriteFile(p, []byte("package x\nconst a = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithWorkingDir(context.Background(), dir)
+	if _, err := reg.Execute(ctx, "read_file", map[string]any{"path": p}); err != nil {
+		t.Fatalf("read_file: %v", err)
+	}
+	future := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(p, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Execute(ctx, "terminal", map[string]any{"command": "gofmt -w code.go"}); err != nil {
+		t.Fatalf("terminal: %v", err)
+	}
+	if _, err := reg.Execute(ctx, "edit_file", map[string]any{
+		"path": p, "old_string": "package x", "new_string": "package y",
+	}); err != nil {
+		t.Errorf("edit after a working-dir-relative terminal write should succeed: %v", err)
+	}
+}
+
+func TestSplitShellSegments(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"gofmt -w a.go", []string{"gofmt -w a.go"}},
+		{"cd /x && gofmt -w a.go && go build ./...", []string{"cd /x ", " gofmt -w a.go ", " go build ./..."}},
+		{"a; b || c | d", []string{"a", " b ", " c ", " d"}},
+		{"go test ./... 2>&1 | tail -5", []string{"go test ./... 2>&1 ", " tail -5"}},
+		// Separators inside quotes belong to the token, not the shell.
+		{"sed -i 's/a;b/c|d/' f.go && echo \"x && y\"", []string{"sed -i 's/a;b/c|d/' f.go ", " echo \"x && y\""}},
+		{"echo one\necho two", []string{"echo one", "echo two"}},
+	}
+	for _, tc := range cases {
+		got := splitShellSegments(tc.in)
+		if strings.Join(got, "\x00") != strings.Join(tc.want, "\x00") {
+			t.Errorf("splitShellSegments(%q)\n got %q\nwant %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestShellSegments_FollowsCd(t *testing.T) {
+	segs := shellSegments("cd /w && gofmt -w a.go; cd sub && sed -i '' 's/x/y/' b.go && cd - && cat c.go", "/base")
+	if len(segs) != 3 {
+		t.Fatalf("want 3 segments, got %d: %+v", len(segs), segs)
+	}
+	if segs[0].dir != "/w" || segs[0].lost {
+		t.Errorf("segment 0: want dir /w, got %+v", segs[0])
+	}
+	if want := filepath.Join("/w", "sub"); segs[1].dir != want || segs[1].lost {
+		t.Errorf("segment 1: want dir %s, got %+v", want, segs[1])
+	}
+	if !segs[2].lost {
+		t.Errorf("segment 2: cd - must mark the directory lost, got %+v", segs[2])
+	}
+	if abs, ok := segs[2].resolve("c.go"); ok {
+		t.Errorf("relative path after cd - must not resolve, got %q", abs)
+	}
+	if abs, ok := segs[2].resolve("/abs/c.go"); !ok || abs != "/abs/c.go" {
+		t.Errorf("absolute path after cd - must still resolve, got %q %v", abs, ok)
+	}
+
+	base := shellSegments("gofmt -w a.go", "/base")
+	if len(base) != 1 || base[0].dir != "/base" {
+		t.Errorf("no cd: want base dir kept, got %+v", base)
 	}
 }
