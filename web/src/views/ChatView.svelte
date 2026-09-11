@@ -2849,7 +2849,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                       <summary class="think-summary">
                         <iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>
                         <span>{$t('chat.thoughts')}</span>
-                        <iconify-icon icon="lucide:chevron-right" width="13"></iconify-icon>
+                        <iconify-icon icon="lucide:chevron-right" width="13" class="think-chev"></iconify-icon>
                       </summary>
                       <div class="think-body" use:setupAssistantEl>{@html renderMarkdown(msg.thinking)}</div>
                     </details>
@@ -2927,7 +2927,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                     <summary class="think-summary">
                       <iconify-icon icon="ant-design:bulb-outlined" width="13"></iconify-icon>
                       <span>{$t('chat.thoughts')}</span>
-                      <iconify-icon icon="lucide:chevron-right" width="13"></iconify-icon>
+                      <iconify-icon icon="lucide:chevron-right" width="13" class="think-chev"></iconify-icon>
                     </summary>
                     <div class="think-body" use:setupAssistantEl>{@html renderMarkdown(msg.thinking)}</div>
                   </details>
@@ -3636,6 +3636,8 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 :global(.think-summary > span:first-of-type) { font-weight: 600; color: var(--text); font-size: 13px; }
 :global(.think-summary::-webkit-details-marker) { display: none; }
 :global(.think-summary:hover) { background: var(--hover-neutral); border-radius: 10px; }
+:global(.think-chev) { transition: transform 0.15s ease; flex: 0 0 auto; }
+:global(.think-block[open] > .think-summary .think-chev) { transform: rotate(90deg); }
 :global(.think-body) {
   margin: 0 12px 10px; padding-left: 12px; border-left: 2px solid var(--border-secondary);
   font-size: 13px; line-height: 1.7; color: var(--text-tertiary); font-style: italic;
