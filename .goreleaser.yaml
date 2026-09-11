@@ -1,8 +1,18 @@
 # goreleaser config — builds the `octo` binary for every supported platform
 # and publishes a GitHub Release on every `v*` tag push (.github/workflows/release.yml).
 #
-# octo is pure Go (no cgo: the sandbox uses build-tagged syscalls, not C), so a
-# single Linux runner cross-compiles every target with CGO_ENABLED=0.
+# This runs on a macOS runner rather than Linux for one reason: the darwin
+# target needs CGO. The computer-use substrate is Quartz CGEvent / AXUIElement
+# behind cgo (internal/computer), so a CGO_ENABLED=0 darwin build links the stub
+# and every computer action fails — the darwin override below is what turns CGO
+# on. Go's toolchain passes clang the matching -arch per GOARCH, so a single
+# runner still produces both darwin/arm64 and darwin/amd64 natively.
+#
+# Linux and Windows stay CGO_ENABLED=0: they are pure Go, so they cross-compile
+# from macOS exactly as they used to from Linux. Because all targets still come
+# out of this one goreleaser run, so do the archives, the darwin universal
+# binary and checksums.txt — nothing about the published asset set changes, so
+# install.sh, the in-place updater and the macOS .pkg keep working as-is.
 #
 # Validate locally without releasing:
 #   goreleaser check
@@ -16,6 +26,10 @@ project_name: octo
 # download hook below and the rgembed.version ldflag.
 env:
   - RG_VERSION=15.1.0
+  # Minimum macOS the darwin CLI runs on. 12.0 is what Go 1.25's internal
+  # linker stamps into a CGO_ENABLED=0 build, i.e. what the darwin archives
+  # carried before CGO was turned on — see the darwin override below.
+  - DARWIN_MIN_MACOS=12.0
 
 before:
   hooks:
@@ -27,6 +41,36 @@ builds:
     binary: octo
     env:
       - CGO_ENABLED=0
+    # macOS is the one target that needs a native toolchain: without CGO its
+    # computer-use actions all return ErrUnsupported (internal/computer's stub).
+    # goreleaser's override schema requires goos AND goarch, so it is spelled per
+    # architecture. The override's env is appended after the build's and the
+    # last value of a variable wins, so CGO_ENABLED=1 here beats the 0 above.
+    #
+    # The deployment target must be pinned. A CGO build is linked by clang,
+    # which — unlike Go's internal linker — defaults the binary's
+    # LC_BUILD_VERSION minos to the *build machine's* macOS version, and dyld
+    # refuses to launch a binary whose minos is newer than the running OS. Left
+    # unpinned, every release would silently require whatever macOS the
+    # macos-latest runner happens to run. The Makefile's desktop target pins the
+    # same way (DESKTOP_MACOS_VERSION). The link flag is the clang-driver
+    # spelling (-mmacosx-version-min), not -Wl,-macos_version_min: the driver
+    # otherwise derives its own platform version from the host and ld warns
+    # about being passed two min versions. Verify on a snapshot build with:
+    #   otool -l dist/octo_darwin_arm64*/octo | grep -A3 LC_BUILD_VERSION
+    overrides:
+      - goos: darwin
+        goarch: amd64
+        env:
+          - CGO_ENABLED=1
+          - CGO_CFLAGS=-mmacosx-version-min={{ .Env.DARWIN_MIN_MACOS }}
+          - CGO_LDFLAGS=-mmacosx-version-min={{ .Env.DARWIN_MIN_MACOS }}
+      - goos: darwin
+        goarch: arm64
+        env:
+          - CGO_ENABLED=1
+          - CGO_CFLAGS=-mmacosx-version-min={{ .Env.DARWIN_MIN_MACOS }}
+          - CGO_LDFLAGS=-mmacosx-version-min={{ .Env.DARWIN_MIN_MACOS }}
     # Each target downloads the matching ripgrep before building so the grep
     # tool works out of the box without rg on PATH. The hook writes a single
     # shared file (internal/tools/rgembed/binaries/rg), so builds MUST run
