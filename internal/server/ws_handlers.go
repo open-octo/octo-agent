@@ -1674,6 +1674,18 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			// so turn_done + assistant_message were broadcast by the handler.
 			// Nothing more for the reply itself.
 		} else {
+			// The turn_error broadcast below is the only other trace of this
+			// failure, and it lives in browser memory: switching sessions or
+			// reloading rebuilds the transcript from history, which stops at
+			// the last persisted round with no hint of why. Log it so
+			// serve.log can answer "why did my session just stop".
+			slog.Warn("agent turn failed",
+				"session_id", sess.ID,
+				"model", a.Model,
+				"history_len", a.History.Len(),
+				"input_rolled_back", inputRolledBack,
+				"duration_ms", time.Since(turnCallStart).Milliseconds(),
+				"err", err)
 			// A goal-continuation turn failing on provider rate limits parks
 			// the goal harder: usage_limited persists and stops continuation
 			// until /goal resume. goalContWasPending was captured before the
