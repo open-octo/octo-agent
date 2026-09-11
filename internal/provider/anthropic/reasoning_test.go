@@ -63,7 +63,7 @@ func TestApplyReasoning_BudgetPath(t *testing.T) {
 // Effort off (empty) sends no thinking or effort on Claude, adaptive or
 // legacy: Claude defaults to no thinking when the field is absent.
 func TestApplyReasoning_Off(t *testing.T) {
-	for _, model := range []string{"claude-opus-4-7", "claude-haiku-4-5"} {
+	for _, model := range []string{"claude-opus-4-7", "claude-haiku-4-5", "claude-fable-5"} {
 		b := apiRequest{MaxTokens: 4096}
 		applyReasoning(&b, model, "", 0)
 		if b.Thinking != nil || b.OutputConfig != nil {
@@ -72,10 +72,11 @@ func TestApplyReasoning_Off(t *testing.T) {
 	}
 }
 
-// Effort off on Kimi must say so explicitly: the Kimi coding endpoint turns
-// thinking on when the field is omitted, so an absent field is not "off".
-func TestApplyReasoning_OffKimiSendsDisabled(t *testing.T) {
-	for _, model := range []string{"kimi-for-coding", "k3", "kimi-k2.7"} {
+// Effort off on a non-Claude backend must say so explicitly: Kimi and
+// DeepSeek's Anthropic-protocol endpoints turn thinking on when the field is
+// omitted, so an absent field is not "off" there.
+func TestApplyReasoning_OffNonClaudeSendsDisabled(t *testing.T) {
+	for _, model := range []string{"kimi-for-coding", "k3", "kimi-k2.7", "deepseek-flash", "deepseek-reasoner"} {
 		b := apiRequest{MaxTokens: 4096}
 		applyReasoning(&b, model, "", 0)
 		if b.Thinking == nil || b.Thinking.Type != "disabled" || b.Thinking.BudgetTokens != 0 {
