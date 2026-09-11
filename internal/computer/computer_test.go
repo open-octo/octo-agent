@@ -47,3 +47,27 @@ func TestClickValidation(t *testing.T) {
 		t.Error("clicks > 2 should error before touching the substrate")
 	}
 }
+
+func TestMatchAX(t *testing.T) {
+	el := AXElement{Role: "AXButton", Title: "存储", Description: "保存文档"}
+	cases := []struct {
+		name           string
+		el             AXElement
+		role, contains string
+		want           bool
+	}{
+		{"title match", el, "AXButton", "存", true},
+		{"title match any role", el, "", "存储", true},
+		{"case-insensitive role", el, "axbutton", "存", true},
+		{"wrong role", el, "AXMenuItem", "存", false},
+		{"description match", el, "", "保存", true},
+		{"no match", el, "", "删除", false},
+		{"empty contains never matches", el, "", "  ", false},
+		{"value used as label", AXElement{Role: "AXStaticText", Value: "42"}, "", "42", true},
+	}
+	for _, tc := range cases {
+		if got := MatchAX(tc.el, tc.role, tc.contains); got != tc.want {
+			t.Errorf("%s: MatchAX(%+v, %q, %q) = %v, want %v", tc.name, tc.el, tc.role, tc.contains, got, tc.want)
+		}
+	}
+}

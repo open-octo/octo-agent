@@ -7,6 +7,7 @@ import (
 	"image"
 	_ "image/jpeg" // DecodeConfig on the JPEG re-encode NewImageBlock produces
 	_ "image/png"
+	"strings"
 	"sync"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -22,37 +23,47 @@ type ComputerTool struct{}
 
 var computerActions = []string{
 	"screenshot", "left_click", "right_click", "double_click", "mouse_move",
-	"type", "key", "scroll",
+	"type", "key", "scroll", "ax_tree", "ax_press", "ax_set",
 }
 
 func (ComputerTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "computer",
-		Description: "See and operate the macOS desktop directly: screenshot the main display, then " +
-			"click, move, type, press keys, and scroll by pixel coordinate. Use for tasks in native apps " +
-			"with no CLI/API (the browser tool covers anything web). Workflow: screenshot FIRST to see " +
-			"the current state, act, then screenshot again to verify — never chain actions blind. " +
-			"Coordinates are in the screenshot's own pixel space (logical points, origin top-left of the " +
-			"main display); the screenshot result states the width×height. Requires macOS Accessibility " +
-			"(input) and Screen Recording (capture) permissions granted to the app running octo — an " +
-			"action failing with a permission error means the grant is missing, not that the action was wrong.",
+		Description: "See and operate the macOS desktop directly, two channels: " +
+			"(1) accessibility (PREFERRED when the app exposes elements): ax_tree reads an app's UI " +
+			"as a semantic list (role + label + frame), ax_press/ax_set act by label — these work on " +
+			"BACKGROUNDED apps with no cursor move and no focus change, and are far more precise than " +
+			"pixel guessing. (2) pixels: screenshot the main display, then click/move/type/key/scroll by " +
+			"coordinate — needed for custom-drawn UIs (games, CAD) with no accessibility tree; this " +
+			"channel shares the user's cursor and focus. Use for tasks in native apps with no CLI/API " +
+			"(the browser tool covers anything web). Pixel workflow: screenshot FIRST, act, screenshot " +
+			"again to verify. Requires macOS Accessibility (input) and Screen Recording (capture) " +
+			"permissions granted to the app running octo — an action failing with a permission error " +
+			"means the grant is missing, not that the action was wrong.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type": "string",
 					"enum": computerActions,
-					"description": "screenshot: capture the screen (always start here and re-verify after acting). " +
-						"left_click/right_click/double_click: click at (x, y). mouse_move: hover at (x, y). " +
-						"type: type text at the current focus. key: press a key or combo like \"enter\", \"cmd+c\", \"ctrl+shift+tab\". " +
+					"description": "ax_tree: dump the target app's accessibility tree (start here for AX-rich apps). " +
+						"ax_press: press the element whose label matches (button/menu item/square...). " +
+						"ax_set: set a text field's string or a slider's number. " +
+						"screenshot: capture the screen. left_click/right_click/double_click/mouse_move at (x, y). " +
+						"type: type text at the current focus. key: press a key or combo like \"enter\", \"cmd+c\". " +
 						"scroll: scroll at the cursor by (dx, dy) lines, positive dy = down.",
 				},
-				"x":    map[string]any{"type": "number", "description": "X coordinate in screenshot pixels (click/move)."},
-				"y":    map[string]any{"type": "number", "description": "Y coordinate in screenshot pixels (click/move)."},
-				"text": map[string]any{"type": "string", "description": "Text to type (type action)."},
-				"key":  map[string]any{"type": "string", "description": "Key or combo, e.g. \"enter\", \"tab\", \"escape\", \"cmd+c\", \"cmd+shift+s\" (key action)."},
-				"dx":   map[string]any{"type": "number", "description": "Horizontal scroll lines, positive = right (scroll)."},
-				"dy":   map[string]any{"type": "number", "description": "Vertical scroll lines, positive = down (scroll)."},
+				"app":       map[string]any{"type": "string", "description": "Target app name for ax_* actions — the process name as shown in its menu bar, e.g. \"国际象棋\", \"Safari\". The app must have at least one on-screen (non-minimized) window."},
+				"role":      map[string]any{"type": "string", "description": "Accessibility role filter for ax_press/ax_set, e.g. \"AXButton\", \"AXMenuItem\", \"AXSlider\", \"AXTextField\". Optional but strongly recommended — pass what ax_tree shows to disambiguate."},
+				"label":     map[string]any{"type": "string", "description": "Element label to match for ax_press/ax_set: exact label wins, otherwise case-insensitive substring of title/description/value. Copy labels verbatim from ax_tree output."},
+				"value":     map[string]any{"type": "string", "description": "Value to set (ax_set): a number for sliders/steppers, a string for text fields."},
+				"max_depth": map[string]any{"type": "number", "description": "Tree depth limit for ax_tree (default 12; smaller = shorter output)."},
+				"x":         map[string]any{"type": "number", "description": "X coordinate in screenshot pixels (click/move)."},
+				"y":         map[string]any{"type": "number", "description": "Y coordinate in screenshot pixels (click/move)."},
+				"text":      map[string]any{"type": "string", "description": "Text to type (type action)."},
+				"key":       map[string]any{"type": "string", "description": "Key or combo, e.g. \"enter\", \"tab\", \"escape\", \"cmd+c\", \"cmd+shift+s\" (key action)."},
+				"dx":        map[string]any{"type": "number", "description": "Horizontal scroll lines, positive = right (scroll)."},
+				"dy":        map[string]any{"type": "number", "description": "Vertical scroll lines, positive = down (scroll)."},
 			},
 			"required": []string{"action"},
 		},
@@ -104,9 +115,75 @@ func (ComputerTool) Execute(ctx context.Context, name string, input map[string]a
 			return agent.ToolResult{}, err
 		}
 		return agent.ToolResult{Text: fmt.Sprintf("scrolled (%.0f, %.0f)", numArg(input, "dx"), numArg(input, "dy"))}, nil
+	case "ax_tree":
+		return computerAXTree(input)
+	case "ax_press":
+		pid, err := computerAppPid(input)
+		if err != nil {
+			return agent.ToolResult{}, err
+		}
+		label := stringArg(input, "label")
+		if err := computer.AXPress(pid, stringArg(input, "role"), label); err != nil {
+			return agent.ToolResult{}, err
+		}
+		return agent.ToolResult{Text: "pressed element matching " + label + " — re-dump ax_tree (or screenshot) to verify the result"}, nil
+	case "ax_set":
+		pid, err := computerAppPid(input)
+		if err != nil {
+			return agent.ToolResult{}, err
+		}
+		label := stringArg(input, "label")
+		if err := computer.AXSetValue(pid, stringArg(input, "role"), label, stringArg(input, "value")); err != nil {
+			return agent.ToolResult{}, err
+		}
+		return agent.ToolResult{Text: "set element matching " + label + " to " + stringArg(input, "value") + " — re-dump ax_tree to verify"}, nil
 	default:
 		return agent.ToolResult{}, fmt.Errorf("computer: unknown action %q (valid: %v)", action, computerActions)
 	}
+}
+
+// computerAppPid resolves the ax_* actions' app argument to a pid. Going
+// through the window list means the app needs one on-screen window — an
+// acceptable spike constraint, called out in the error.
+func computerAppPid(input map[string]any) (int, error) {
+	if err := requireTrusted(); err != nil {
+		return 0, err
+	}
+	app := stringArg(input, "app")
+	if app == "" {
+		return 0, fmt.Errorf(`computer: ax_* actions need the "app" parameter (target app's process name)`)
+	}
+	w, err := computer.FindWindow(app)
+	if err != nil {
+		return 0, err
+	}
+	return w.PID, nil
+}
+
+// computerAXTree renders the app's accessibility tree as an indented digest.
+func computerAXTree(input map[string]any) (agent.ToolResult, error) {
+	pid, err := computerAppPid(input)
+	if err != nil {
+		return agent.ToolResult{}, err
+	}
+	depth := int(numArg(input, "max_depth"))
+	els, err := computer.AXTree(pid, depth)
+	if err != nil {
+		return agent.ToolResult{}, err
+	}
+	var b strings.Builder
+	for _, e := range els {
+		label := e.Label()
+		if label == "" && e.Role != "AXWindow" {
+			continue // anonymous spacer groups are noise to the model
+		}
+		for i := 0; i < e.Depth; i++ {
+			b.WriteString("  ")
+		}
+		fmt.Fprintf(&b, "%s %q [%.0f,%.0f %.0fx%.0f]\n", e.Role, label, e.X, e.Y, e.W, e.H)
+	}
+	fmt.Fprintf(&b, "(%d elements; pass role+label verbatim to ax_press/ax_set)", len(els))
+	return agent.ToolResult{Text: b.String()}, nil
 }
 
 // shotScale converts model coordinates — pixels of the last screenshot as

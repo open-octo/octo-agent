@@ -30,3 +30,9 @@ func clickPid(pid, winID int, button string, x, y float64, clicks int) error {
 }
 
 func typeTextPid(pid int, s string) error { return ErrUnsupported }
+
+func axTree(pid, maxDepth int) ([]AXElement, error) { return nil, ErrUnsupported }
+
+func axPress(pid int, role, contains string) error { return ErrUnsupported }
+
+func axSetValue(pid int, role, contains, value string) error { return ErrUnsupported }

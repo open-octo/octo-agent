@@ -119,6 +119,77 @@ func TypeTextPid(pid int, s string) error {
 	return typeTextPid(pid, s)
 }
 
+// AXElement is one node of an app's accessibility-tree digest.
+type AXElement struct {
+	Role, Subrole, Title, Description, Value string
+	X, Y, W, H                               float64
+	Depth                                    int
+}
+
+// Label is the element's human-facing name: the first non-empty of title,
+// description, value.
+func (e AXElement) Label() string {
+	for _, s := range []string{e.Title, e.Description, e.Value} {
+		if strings.TrimSpace(s) != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// MatchAX reports whether e matches a semantic target: role must equal when
+// given (empty = any), and contains must appear (case-insensitive) in the
+// label or description.
+func MatchAX(e AXElement, role, contains string) bool {
+	if role != "" && !strings.EqualFold(e.Role, role) {
+		return false
+	}
+	c := strings.ToLower(strings.TrimSpace(contains))
+	if c == "" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(e.Label()), c) ||
+		strings.Contains(strings.ToLower(e.Description), c)
+}
+
+// MatchAXExact is the exact-label variant: wins over substring matches when
+// both exist (an app menu's own "设置…" should beat the Apple menu's
+// "系统设置…").
+func MatchAXExact(e AXElement, role, label string) bool {
+	if role != "" && !strings.EqualFold(e.Role, role) {
+		return false
+	}
+	l := strings.TrimSpace(label)
+	if l == "" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(e.Label()), l)
+}
+
+// AXTree returns a depth-limited digest of the app's accessibility tree —
+// windows plus the menu bar. Works on backgrounded apps.
+func AXTree(pid, maxDepth int) ([]AXElement, error) { return axTree(pid, maxDepth) }
+
+// AXPress finds the first element matching role+label (see MatchAX) and
+// performs its press action. Works on backgrounded apps — no cursor, no
+// focus change — which makes it the preferred operation channel wherever the
+// target exposes a real AX tree.
+func AXPress(pid int, role, contains string) error {
+	if strings.TrimSpace(contains) == "" {
+		return fmt.Errorf("computer: AXPress needs a label to match")
+	}
+	return axPress(pid, role, contains)
+}
+
+// AXSetValue sets the value of the first matching element: numeric for
+// sliders/steppers, string for text fields.
+func AXSetValue(pid int, role, contains, value string) error {
+	if strings.TrimSpace(contains) == "" {
+		return fmt.Errorf("computer: AXSetValue needs a label to match")
+	}
+	return axSetValue(pid, role, contains, value)
+}
+
 // modifier flag bits, mirroring CGEventFlags so parseCombo stays
 // platform-neutral and testable.
 const (
