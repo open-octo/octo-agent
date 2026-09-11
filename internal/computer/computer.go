@@ -83,6 +83,42 @@ func Press(keys string) error {
 	return press(kc, flags)
 }
 
+// Window describes one on-screen window of a target app: its process, the
+// window server id (for window-scoped capture), and its bounds in global
+// logical points.
+type Window struct {
+	PID, ID    int
+	X, Y, W, H float64
+}
+
+// FindWindow locates the front-most normal window of the app named owner
+// (the process name as shown in the menu bar, e.g. "国际象棋" for Chess).
+func FindWindow(owner string) (Window, error) { return findWindow(owner) }
+
+// ClickPid delivers a click straight into the process's event queue at global
+// logical coordinates — no cursor move, no focus change, so it can drive an
+// app the user is not looking at. winID tags the owning window (AppKit drops
+// untagged background mouse events). Whether a given app honours synthetic
+// events while backgrounded is app-dependent (custom-drawn UIs may not).
+func ClickPid(pid, winID int, button string, x, y float64, clicks int) error {
+	if button != "left" && button != "right" {
+		return fmt.Errorf("computer: unknown button %q (left|right)", button)
+	}
+	if clicks < 1 || clicks > 2 {
+		return fmt.Errorf("computer: clicks must be 1 or 2")
+	}
+	return clickPid(pid, winID, button, x, y, clicks)
+}
+
+// TypeTextPid delivers keystrokes straight into one process. Text input is
+// the one channel background apps commonly accept via PostToPid.
+func TypeTextPid(pid int, s string) error {
+	if s == "" {
+		return fmt.Errorf("computer: nothing to type")
+	}
+	return typeTextPid(pid, s)
+}
+
 // modifier flag bits, mirroring CGEventFlags so parseCombo stays
 // platform-neutral and testable.
 const (

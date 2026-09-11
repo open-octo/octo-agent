@@ -22,3 +22,11 @@ func scroll(dx, dy float64) error { return ErrUnsupported }
 func typeText(s string) error { return ErrUnsupported }
 
 func press(keycode uint16, flags uint64) error { return ErrUnsupported }
+
+func findWindow(owner string) (Window, error) { return Window{}, ErrUnsupported }
+
+func clickPid(pid, winID int, button string, x, y float64, clicks int) error {
+	return ErrUnsupported
+}
+
+func typeTextPid(pid int, s string) error { return ErrUnsupported }
