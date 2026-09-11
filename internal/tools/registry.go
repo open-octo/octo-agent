@@ -314,6 +314,14 @@ func (r DefaultRegistry) recordGrepReads(ctx context.Context, input map[string]a
 // fmt`) are intentionally not followed inside: attributing a subtree's mtime
 // bumps to the command would let an unrelated out-of-band edit slip through.
 // The model re-reads in that case.
+//
+// Known gap, accepted: attribution is static. A writer behind a failed `&&`
+// (`go build ./... && gofmt -w f` with the build broken) never ran, yet f is
+// refreshed as if it had. Gating on the command's exit status would close it
+// but would also un-attribute `gofmt -w f && go test` every time the tests
+// fail — the most common shape this tracking exists for. The gap needs an
+// out-of-band edit AND a writer conditional on a failing command at once, so
+// it stays open in favour of the common case.
 func (r DefaultRegistry) recordTerminalWrites(ctx context.Context, command string) {
 	for _, seg := range shellSegments(command, WorkingDir(ctx)) {
 		for _, target := range writeTargets(seg.tokens) {
