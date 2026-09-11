@@ -12,7 +12,6 @@ coding agent 能力对标 Claude Code；作为个人助手，它比 OpenClaw 更
 
 [![Go CI](https://img.shields.io/github/actions/workflow/status/open-octo/octo-agent/go.yml?label=ci&style=flat-square)](https://github.com/open-octo/octo-agent/actions)
 [![Stars](https://img.shields.io/github/stars/open-octo/octo-agent?style=flat-square)](https://github.com/open-octo/octo-agent/stargazers)
-[![Discussions](https://img.shields.io/github/discussions/open-octo/octo-agent?style=flat-square&label=discussions)](https://github.com/open-octo/octo-agent/discussions)
 [![Website](https://img.shields.io/badge/website-octo--agent.dev-4f46e5?style=flat-square)](https://octo-agent.dev)
 [![Go](https://img.shields.io/badge/go-%3E%3D%201.25-00ADD8?style=flat-square)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE.txt)
@@ -192,7 +191,6 @@ octo serve -d              # Web UI + IM 桥接，http://127.0.0.1:8088
 ## 社区与交流
 
 - **Bug / 功能建议** —— [GitHub Issues](https://github.com/open-octo/octo-agent/issues)
-- **使用问题 / 讨论** —— [GitHub Discussions](https://github.com/open-octo/octo-agent/discussions)，公开可沉淀，后来的同学能搜到答案
 - **微信交流群** —— 扫码添加个人微信，备注 `octo` 拉你进群，聊使用心得、提需求、围观 roadmap：
 
 <p align="left">
