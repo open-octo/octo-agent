@@ -357,11 +357,14 @@ func (seg shellSegment) resolve(path string) (string, bool) {
 // the command line started in ("" ⇒ process CWD). Segments with no tokens
 // are dropped, so every returned segment has a command head at tokens[0].
 //
-// `cd` is followed only in its plain forms — `cd`, `cd <literal>`, `cd ~/x`.
-// Anything else (`cd -`, an unexpanded variable, extra flags) marks the
-// directory as lost for the remainder of the line. A bare `(` outside quotes
-// opens a subshell whose `cd` must not leak out, and we can't see where the
-// subshell ends, so it also marks the directory lost.
+// `cd` is followed only in its plain forms — `cd`, `cd <literal>`, `cd ~/x`
+// — and only as the head of a segment. Anything else (`cd -`, an unexpanded
+// variable, extra flags) marks the directory as lost for the remainder of the
+// line. So does any directory change we can see but not follow: a `cd` that
+// isn't the head (`{ cd x; …`, `do cd x`, `$(cd x …`), a builtin that runs
+// another command (`eval "cd x"`, `command cd x`), the directory stack
+// (`pushd`/`popd`), PowerShell's equivalents, and a bare `(` subshell whose
+// end we can't see.
 //
 // A shell-wrapped command (`bash -c "cd x && sed -i … f"`) is expanded into
 // its inner segments with the current directory as their base; the inner
@@ -376,7 +379,7 @@ func appendShellSegments(segs []shellSegment, command, dir string, lost bool) []
 		if len(tokens) == 0 {
 			continue
 		}
-		if hasBareSubshell(raw) {
+		if hasBareSubshell(raw) || hidesDirectoryChange(tokens) {
 			lost = true
 		}
 		if tokens[0] == "cd" {
@@ -392,9 +395,45 @@ func appendShellSegments(segs []shellSegment, command, dir string, lost bool) []
 	return segs
 }
 
+// cdNames are the commands that change the shell's directory, in the Unix
+// and PowerShell spellings the terminal tool may run. Compared
+// case-insensitively because PowerShell is.
+var cdNames = map[string]bool{
+	"cd": true, "chdir": true, "pushd": true, "popd": true,
+	"set-location": true, "sl": true, "push-location": true, "pop-location": true,
+}
+
+// opaqueHeads are builtins that run whatever follows them, so a directory
+// change can hide in their arguments (`eval "cd x"`, `command cd x`, `. env.sh`).
+var opaqueHeads = map[string]bool{
+	"eval": true, "source": true, ".": true, "command": true, "builtin": true, "exec": true,
+}
+
+// hidesDirectoryChange reports whether a segment may change the directory in
+// a way followCd can't reproduce — every case here is resolved by marking the
+// directory lost rather than guessing. A plain `cd` at the head is excluded:
+// followCd handles that one.
+func hidesDirectoryChange(tokens []string) bool {
+	if opaqueHeads[strings.ToLower(tokens[0])] {
+		return true
+	}
+	for i, tok := range tokens {
+		if i == 0 && tok == "cd" {
+			continue
+		}
+		// `{cd`, `(cd`, `$(cd` and `\cd` all run cd; strip the prefix that
+		// glued to it.
+		if cdNames[strings.ToLower(strings.TrimLeft(tok, `({$\`))] {
+			return true
+		}
+	}
+	return false
+}
+
 // hasBareSubshell reports whether raw opens a `( … )` subshell outside
-// quotes. `$(…)` substitution is not a subshell for our purposes — its
-// output becomes a token, and tokens carrying `$` are already discarded.
+// quotes. `$(…)` substitution is not treated as one: its exit is where its
+// directory change ends, and a `cd` inside it is caught by
+// hidesDirectoryChange instead.
 func hasBareSubshell(raw string) bool {
 	var inSingle, inDouble bool
 	for i := 0; i < len(raw); i++ {
@@ -427,6 +466,8 @@ func followCd(dir string, lost bool, args []string) (string, bool) {
 		return "", true
 	case len(args) > 1, strings.HasPrefix(args[0], "-"), strings.ContainsAny(args[0], "$`"):
 		return "", true
+	case strings.HasPrefix(args[0], "~") && !isHomeRelative(args[0]):
+		return "", true // `cd ~user`: resolvePathIn would join it as a relative path
 	}
 	if lost && !filepath.IsAbs(args[0]) && !isHomeRelative(args[0]) {
 		return "", true

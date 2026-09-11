@@ -143,6 +143,10 @@ func TestRegistry_TerminalWriteThenEdit_Allowed(t *testing.T) {
 		{"bash-c-sed", func(p string) string { return "bash -c \"sed -i 's/const a = 1/const a = 2/' " + p + "\"" }},
 		{"sh-c-sed", func(p string) string { return "sh -c \"sed -i 's/const a = 1/const a = 2/' " + p + "\"" }},
 		{"gofmt-w-file", func(p string) string { return "gofmt -w " + p }},
+		// The cd-prefixed shapes below mirror how the agent works inside a
+		// worktree. On Windows CI the Unix writers don't exist; the terminal
+		// folds the failure into its text, so these cases verify the parser's
+		// attribution there rather than the shell's behaviour.
 		{"cd-and-gofmt-relative", func(p string) string {
 			return "cd " + filepath.Dir(p) + " && gofmt -w " + filepath.Base(p) + " && echo BUILD_OK"
 		}},
@@ -583,6 +587,29 @@ func TestRegistry_WriteNotOfTrackedFile_StillBlocked(t *testing.T) {
 		{"heredoc-body-mentions-file", func(other string) string {
 			return "cat > " + filepath.Join(other, "fmt.sh") + " <<'EOF'\n#!/bin/sh\ngofmt -w code.go\nsed -i '' 's/a/b/' code.go\nEOF"
 		}},
+		// A directory change the parser can see but not follow marks the
+		// directory lost, so the relative target is not attributed at all.
+		{"brace-group-cd", func(other string) string {
+			return "{ cd " + other + "; gofmt -w code.go; }"
+		}},
+		{"for-do-cd", func(other string) string {
+			return "for d in " + other + "; do cd " + other + "; gofmt -w code.go; done"
+		}},
+		{"command-cd", func(other string) string {
+			return "command cd " + other + " && gofmt -w code.go"
+		}},
+		{"backslash-cd", func(other string) string {
+			return "\\cd " + other + " && gofmt -w code.go"
+		}},
+		{"eval-cd", func(other string) string {
+			return "eval \"cd " + other + "\" && gofmt -w code.go"
+		}},
+		{"substitution-cd", func(other string) string {
+			return "echo $(cd " + other + " && gofmt -w code.go && echo ok)"
+		}},
+		{"pushd", func(other string) string {
+			return "pushd " + other + " >/dev/null && gofmt -w code.go"
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -805,5 +832,42 @@ func TestShellSegments_FollowsCd(t *testing.T) {
 	}
 	if subst := shellSegments("gofmt -w $(ls) && gofmt -w b.go", base); len(subst) != 2 || subst[1].lost {
 		t.Errorf("$(…) must not mark the line lost, got %+v", subst)
+	}
+
+	// Directory changes followCd can't reproduce all mark the rest of the
+	// line lost — including PowerShell's spellings, which only run on the
+	// Windows CI leg but must be recognised everywhere.
+	for _, cmd := range []string{
+		"Set-Location " + w + "; gofmt -w a.go",
+		"sl " + w + "; gofmt -w a.go",
+		"chdir " + w + " && gofmt -w a.go",
+		"Push-Location " + w + " && gofmt -w a.go",
+		"pushd " + w + " >/dev/null && gofmt -w a.go",
+		"popd && gofmt -w a.go",
+		"eval 'cd " + w + "' && gofmt -w a.go",
+		"{ cd " + w + "; gofmt -w a.go; }",
+		"echo $(cd " + w + " && gofmt -w a.go)",
+		"cd ~nobody && gofmt -w a.go",
+		"cd -- " + w + " && gofmt -w a.go",
+		"cd " + w + " 2>/dev/null && gofmt -w a.go",
+		"cd -P " + w + " && gofmt -w a.go",
+	} {
+		segs := shellSegments(cmd, base)
+		var gofmtSeg *shellSegment
+		for i := range segs {
+			if segs[i].tokens[0] == "gofmt" {
+				gofmtSeg = &segs[i]
+			}
+		}
+		if gofmtSeg == nil {
+			t.Errorf("%q: gofmt segment not found in %+v", cmd, segs)
+			continue
+		}
+		if !gofmtSeg.lost {
+			t.Errorf("%q: directory must be lost, got %+v", cmd, *gofmtSeg)
+		}
+		if abs, ok := gofmtSeg.resolve("a.go"); ok {
+			t.Errorf("%q: relative target must not resolve, got %q", cmd, abs)
+		}
 	}
 }
