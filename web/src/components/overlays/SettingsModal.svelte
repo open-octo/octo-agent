@@ -37,6 +37,8 @@
   let fontSize      = $state(storedFontSize())
   let theme         = $state(modeToThemeLabel[getMode()] ?? 'Light')
   let autostart     = $state(false) // desktop shell only
+  let serverOs      = $state('')    // /api/version's os — gates the experimental tab
+  let computerUse   = $state(false) // tools.computer.enabled toggle (experimental tab)
   let versionStr    = $state('')
   let latestStr     = $state('')
   let updateAvail   = $state(false)
@@ -50,7 +52,7 @@
   let upgradeMode   = $state<'cli' | 'installer'>('cli')
   let loading       = $state(true)
 
-  let cat = $state<'general' | 'endpoints' | 'agent' | 'mobile' | 'data' | 'about'>('general')
+  let cat = $state<'general' | 'endpoints' | 'agent' | 'mobile' | 'experimental' | 'data' | 'about'>('general')
   let modalEl = $state<HTMLDivElement | null>(null)
 
   // 数据管理 has its own two-level nav — a list of managed things, and one
@@ -230,14 +232,20 @@
     { value: 'zh', label: '简体中文' },
   ]
 
-  const categories: { key: typeof cat, icon: string, label: string }[] = [
+  const categories: { key: typeof cat, icon: string, label: string }[] = $derived([
     { key: 'general',   icon: 'ant-design:sliders-outlined',       label: 'settings.general' },
     { key: 'endpoints', icon: 'ant-design:api-outlined',           label: 'settings.endpoints.title' },
     { key: 'agent',     icon: 'ant-design:robot-outlined',         label: 'settings.agent' },
     { key: 'mobile',    icon: 'ant-design:mobile-outlined',        label: 'settings.mobile' },
+    // Experimental features (computer-use) need the desktop shell AND macOS —
+    // the substrate is macOS-only (AX/CGEvent) and only the desktop app can
+    // hold the Screen Recording / Accessibility grants.
+    ...($nativeShell && serverOs === 'darwin'
+      ? [{ key: 'experimental' as const, icon: 'ant-design:experiment-outlined', label: 'settings.experimental' }]
+      : []),
     { key: 'data',      icon: 'ant-design:database-outlined',       label: 'settings.data' },
     { key: 'about',     icon: 'ant-design:info-circle-outlined',   label: 'settings.about' },
-  ]
+  ])
 
   // Re-seed on every open, same as the other global modals — reflects
   // whatever config was saved elsewhere (agent chat, another window) since
@@ -270,6 +278,7 @@
       permissionMode   = cfg.permission_mode ?? 'interactive'
       showReasoningVal = cfg.show_reasoning ?? true
       coauthorVal      = cfg.coauthor ?? true
+      computerUse      = (cfg.computer_enabled ?? '') === 'on'
       // Legacy installer-seeded "auto" resolves to the same default as ""
       // (see tools.ResolveWorkspaceDir) — show it as the empty input with
       // the resolved-default placeholder, not as a literal "auto" the user
@@ -290,6 +299,7 @@
     try {
       const v = await api.getVersion() as any
       versionStr = v.current ?? v.version ?? ''
+      serverOs = v.os ?? ''
       latestStr = v.latest ?? ''
       updateAvail = !!v.needs_update
       downloadUrl = v.download_url ?? ''
@@ -387,6 +397,15 @@
       coauthorVal = v
     } catch (e: any) {
       showToast(e.message ?? 'Failed to update coauthor', 'error')
+    }
+  }
+
+  async function saveComputerUse(v: boolean) {
+    try {
+      await api.updateComputerEnabled(v)
+      computerUse = v
+    } catch (e: any) {
+      showToast(e.message ?? 'Failed to update computer-use', 'error')
     }
   }
 
@@ -578,9 +597,22 @@
             />
           </div>
 
+        {:else if cat === 'experimental'}
+          <div class="setrow">
+            <div class="seti">
+              <span class="setl">{$t('settings.experimental.computer_use')}</span>
+              <span class="setd">{$t('settings.experimental.computer_use_desc')}</span>
+            </div>
+            <Switch checked={computerUse} onchange={(v) => saveComputerUse(v)} />
+          </div>
+          <div class="setrow">
+            <div class="seti">
+              <span class="setd">{$t('settings.experimental.computer_use_hint')}</span>
+            </div>
+          </div>
+
         {:else if cat === 'mobile'}
-          {#if tunnelPairing?.enabled && tunnelPairing.pair_url}
-            <div class="mobile-pair">
+          {#if tunnelPairing?.enabled && tunnelPairing.pair_url}            <div class="mobile-pair">
               <QrCode text={tunnelPairing.pair_url} />
               <div class="mobile-info">
                 <p class="mobile-scan">{$t('settings.mobile.scan')}</p>

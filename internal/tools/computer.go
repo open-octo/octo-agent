@@ -12,7 +12,16 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/computer"
+	"github.com/open-octo/octo-agent/internal/config"
 )
+
+// computerEnabled gates advertising of the tool: the experimental
+// tools.computer.enabled switch (default off). Follows browserEnabled's
+// pattern — hidden from the model's tool list when off, still dispatchable.
+func computerEnabled() bool {
+	cfg, _ := config.LoadCached()
+	return strings.EqualFold(strings.TrimSpace(cfg.Tools.Computer.Enabled), "on")
+}
 
 // ComputerTool is agentic desktop computer-use: the model sees the screen via
 // screenshot and acts on it with synthesized mouse/keyboard input. This is the

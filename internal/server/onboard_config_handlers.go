@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -218,6 +219,9 @@ type configResponse struct {
 	// carried it). The Composer reads this to seed its no-active-session
 	// fallback.
 	PermissionMode string `json:"permission_mode,omitempty"`
+	// ComputerEnabled is the raw tools.computer.enabled value ("" = off). The
+	// experimental Settings tab renders it as a toggle; off is the default.
+	ComputerEnabled string `json:"computer_enabled,omitempty"`
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -245,6 +249,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		WorkspaceDirDefault: s.curWorkspaceDir(),
 		ReasoningEffort:     re,
 		PermissionMode:      cfg.PermissionMode,
+		ComputerEnabled:     cfg.Tools.Computer.Enabled,
 	})
 }
 
@@ -378,6 +383,46 @@ func (s *Server) handlePutShowReasoning(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "show_reasoning": req.ShowReasoning})
+}
+
+// ─── PUT /api/config/computer ───────────────────────────────────────────────
+
+type putComputerRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// handlePutComputer flips the experimental computer-use tool
+// (tools.computer.enabled). macOS-only feature — refuse the write elsewhere so
+// the Settings toggle can never persist a no-op switch on Linux/Windows.
+func (s *Server) handlePutComputer(w http.ResponseWriter, r *http.Request) {
+	if runtime.GOOS != "darwin" {
+		writeError(w, http.StatusBadRequest, "computer-use is only available on macOS")
+		return
+	}
+	var req putComputerRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeInvalidJSONBody(w, err)
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
+		return
+	}
+	if req.Enabled {
+		cfg.Tools.Computer.Enabled = "on"
+	} else {
+		cfg.Tools.Computer.Enabled = "off"
+	}
+	if err := cfg.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+		return
+	}
+	// No sender cache to invalidate: the tool list is rebuilt per turn via
+	// DefaultToolsForCtx → computerEnabled → config.LoadCached (a fresh read).
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "computer_enabled": cfg.Tools.Computer.Enabled})
 }
 
 // ─── PUT /api/config/coauthor ───────────────────────────────────────────────

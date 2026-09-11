@@ -848,6 +848,7 @@ func defaultToolsFor(ctx context.Context, model string) []agent.ToolDefinition {
 	messengerOn := messengerEnabled()
 	wakerOn := wakerEnabled()
 	browserOn := browserEnabled()
+	computerOn := computerEnabled()
 	spawnerOn := spawnerEnabled()
 	memoryBackendOn := memoryBackendEnabled()
 	// A ctx-scoped manager (per-turn, server/IM — see WithSubAgentManager)
@@ -913,6 +914,9 @@ func defaultToolsFor(ctx context.Context, model string) []agent.ToolDefinition {
 			continue
 		}
 		if _, isBrowser := t.(BrowserTool); isBrowser && !browserOn {
+			continue
+		}
+		if _, isComputer := t.(ComputerTool); isComputer && !computerOn {
 			continue
 		}
 		if _, isMemoryRecall := t.(MemoryRecallTool); isMemoryRecall && !memoryBackendOn {

@@ -149,10 +149,18 @@ tools:
     enabled: "on"   # "off" (default) | "on"
 ```
 
-`ComputerTool` is added to `allTools` in `internal/tools/registry.go` only
-when enabled; when off it is absent from both the registry and the tool list
-sent to the model. Graduate the default once the security model has real
-mileage.
+Surfaced to the user as a toggle in **Settings → Experimental**, visible only
+on the **macOS desktop app** (the substrate's only platform, and the only
+shell that can hold the Screen Recording / Accessibility grants). The tab is
+gated on `/api/version`'s `native` flag plus its `os` field (`runtime.GOOS`);
+the write goes through `PUT /api/config/computer`, which additionally refuses
+non-darwin servers so a remote/mac-less peer can never persist a no-op
+switch. `GET /api/config` reports the raw value as `computer_enabled`.
+
+`ComputerTool` stays in `allTools` (so dispatch works) but is filtered out of
+the model's tool list in `defaultToolsFor` when the gate is off — the same
+advertising-gate pattern as `BrowserTool`. Graduate the default once the
+security model has real mileage.
 
 ## Release & build (settled: ships in release binaries)
 

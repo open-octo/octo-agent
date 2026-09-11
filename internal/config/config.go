@@ -503,6 +503,8 @@ func ModelSupportsVision(model string) bool {
 type ToolsConfig struct {
 	// ToolSearch defers MCP tool schemas behind a search/describe/call bridge.
 	ToolSearch ToolSearchConfig `yaml:"tool_search,omitempty"`
+	// Computer gates the experimental desktop computer-use tool.
+	Computer ComputerConfig `yaml:"computer,omitempty"`
 	// DisabledSkills lists skill names the user has toggled off. Disabled skills
 	// are hidden from the model (not injected into the system prompt) and from
 	// the UI, but remain on disk.
@@ -517,6 +519,14 @@ type ToolSearchConfig struct {
 	// ThresholdPct is the auto-mode activation threshold as a percent of the
 	// model's context window.
 	ThresholdPct int `yaml:"threshold_pct,omitempty"`
+}
+
+// ComputerConfig mirrors the tools.computer block. The tool drives the real
+// desktop (mouse/keyboard/AX), so it ships dark: Enabled is "off" (default)
+// or "on". See dev-docs/agentic-computer-use-design.md.
+type ComputerConfig struct {
+	// Enabled is "off" (default) or "on".
+	Enabled string `yaml:"enabled,omitempty"`
 }
 
 // DefaultEntry returns the entry matching cfg.Default (composite id), falling
@@ -624,6 +634,9 @@ func (c Config) Validate() []string {
 	}
 	if ts := strings.ToLower(strings.TrimSpace(c.Tools.ToolSearch.Enabled)); ts != "" && ts != "auto" && ts != "on" && ts != "off" {
 		problems = append(problems, fmt.Sprintf("tools.tool_search.enabled %q is not one of auto, on, off", c.Tools.ToolSearch.Enabled))
+	}
+	if cu := strings.ToLower(strings.TrimSpace(c.Tools.Computer.Enabled)); cu != "" && cu != "on" && cu != "off" {
+		problems = append(problems, fmt.Sprintf("tools.computer.enabled %q is not one of on, off", c.Tools.Computer.Enabled))
 	}
 	if pct := c.Tools.ToolSearch.ThresholdPct; pct < 0 || pct > 100 {
 		problems = append(problems, fmt.Sprintf("tools.tool_search.threshold_pct %d is out of range (0–100; 0 means the built-in default)", pct))
