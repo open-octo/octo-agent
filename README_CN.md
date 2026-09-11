@@ -192,7 +192,6 @@ octo serve -d              # Web UI + IM 桥接，http://127.0.0.1:8088
 ## 社区与交流
 
 - **Bug / 功能建议** —— [GitHub Issues](https://github.com/open-octo/octo-agent/issues)
-- **使用问题 / 讨论** —— [GitHub Discussions](https://github.com/open-octo/octo-agent/discussions)，公开可沉淀，后来的同学能搜到答案
 - **微信交流群** —— 扫码添加个人微信，备注 `octo` 拉你进群，聊使用心得、提需求、围观 roadmap：
 
 <p align="left">

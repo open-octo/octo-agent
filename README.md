@@ -195,7 +195,6 @@ The full documentation lives at **[octo-agent.dev/docs](https://octo-agent.dev/d
 ## Community
 
 - **Bugs / feature requests** — [GitHub Issues](https://github.com/open-octo/octo-agent/issues)
-- **Questions / discussion** — [GitHub Discussions](https://github.com/open-octo/octo-agent/discussions), public and searchable so the next person finds the answer
 - **WeChat group** (Chinese-speaking users) — scan the QR code below, add the personal account, and mention `octo` to be invited into the group:
 
 <p align="left">
