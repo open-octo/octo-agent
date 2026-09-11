@@ -133,6 +133,11 @@ func (o comObj) queryInterface(iid *windows.GUID) comObj {
 func failed(hr uintptr) bool { return int32(hr) < 0 }
 
 func hresultErr(what string, hr uintptr) error {
+	if !failed(hr) {
+		// A success HRESULT with a null out-pointer — the API declined
+		// without saying why (no element for that window, no walker).
+		return fmt.Errorf("computer: %s returned nothing", what)
+	}
 	return fmt.Errorf("computer: %s failed (HRESULT 0x%08x)", what, uint32(hr))
 }
 
@@ -141,7 +146,8 @@ func bstrToString(b uintptr) string {
 	if b == 0 {
 		return ""
 	}
-	n, _, _ := procSysStringLen.Call(b)
+	r, _, _ := procSysStringLen.Call(b)
+	n := uint32(r) // UINT return: only the low 32 bits are defined
 	if n == 0 {
 		return ""
 	}

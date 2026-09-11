@@ -212,14 +212,14 @@ without cgo so the existing `CGO_ENABLED=0` release cross-build ships it:
 
 | macOS | Windows | Notes |
 |---|---|---|
-| `AXUIElement` tree, roles `AXButton`… | UI Automation `IUIAutomationElement` control view, roles `Button`, `MenuItem`, `Edit`… | `MatchAX` strips the `AX` prefix so the model may use either spelling; `ax_tree` prints the platform's own names |
+| `AXUIElement` tree, roles `AXButton`… | UI Automation `IUIAutomationElement` control view, roles `Button`, `MenuItem`, `Edit`… | `MatchAX` strips the `AX` prefix so the model may use either spelling; `ax_tree` prints the platform's own names. macOS roots every window plus the menu bar; Windows roots the pid's top-most window (its menus are children of that window in UIA) |
 | `AXPress` | `InvokePattern.Invoke`, else `TogglePattern.Toggle`, else `LegacyIAccessiblePattern.DoDefaultAction` | |
 | `AXSetValue` (string or number) | `ValuePattern.SetValue(BSTR)`, else `LegacyIAccessiblePattern.SetValue(LPCWSTR)` | `RangeValuePattern.SetValue(double)` is unreachable without cgo — the x64/arm64 ABIs pass the double in a floating-point register `syscall.SyscallN` cannot load. Range-only controls report a clear error; the fallback is to focus them and use arrow keys |
 | Label = title / description / value | Label = `Name`; description = `HelpText` | |
-| `FindWindow(owner)` by menu-bar process name | `EnumWindows`, first visible non-minimized window whose executable name (without `.exe`) equals `owner`, else whose title contains it | UWP apps are hosted by `ApplicationFrameHost.exe`; the title match is what reaches them |
+| `FindWindow(owner)` by menu-bar process name | Two `EnumWindows` passes: first the top-most visible non-minimized window whose executable name (without `.exe`) equals `owner`; only if none, the top-most whose title contains it | Separate passes so a browser tab titled "… notepad …" above Notepad cannot win. UWP apps are hosted by `ApplicationFrameHost.exe`; the title pass is what reaches them |
 | CGEvent at logical points | `SetCursorPos` + `SendInput` at physical pixels | The process opts into per-monitor-v2 DPI awareness once, so `GetSystemMetrics`, `GetWindowRect`, the capture and input all agree and `shotScale` stays correct |
 | `screencapture -D 1` | GDI `BitBlt(SRCCOPY|CAPTUREBLT)` → top-down 32-bit DIB → PNG | Primary display only, like macOS |
-| `CGEventKeyboardSetUnicodeString` | `KEYEVENTF_UNICODE` per UTF-16 unit | Layout-independent typing; single-character `key` presses go through `VkKeyScanW` so the live layout decides |
+| `CGEventKeyboardSetUnicodeString` | `KEYEVENTF_UNICODE` per UTF-16 unit, line breaks as `VK_RETURN` presses | Layout-independent typing (Win32 edit controls act on Return, not on a bare U+000A); single-character `key` presses go through `VkKeyScanW` so the live layout decides |
 | `CGEventPostToPid` | none | `ClickPid` / `TypeTextPid` return `ErrUnsupported`; the tool never calls them |
 
 COM discipline: each AX call locks its goroutine to an OS thread,
@@ -230,10 +230,12 @@ already lives in an STA, e.g. the desktop shell's main thread) is used as is.
 Verification status: the Windows substrate is compile-checked from macOS
 (`GOOS=windows go vet`, amd64 and arm64) and unit-tested on the
 `windows-latest` CI runner — struct layouts (`sizeof(INPUT)` = 40),
-virtual-key resolution, control-type names, `GetSystemMetrics`,
-`EnumWindows` miss handling, and a COM smoke test that creates
-`CUIAutomation`, takes `ElementFromHandle(GetDesktopWindow())` and walks its
-first children through the vtable slots. **No interactive real-machine UAT
+virtual-key resolution, control-type names, `GetSystemMetrics`, a real GDI
+capture decoded back as PNG at screen size, both `EnumWindows` passes on a
+miss, and COM smoke tests that create `CUIAutomation`, take
+`ElementFromHandle(GetDesktopWindow())`, walk its first children, and fetch a
+pattern through `GetCurrentPattern` + `QueryInterface` — every vtable slot
+used by the read path, exercised against the real interfaces. **No interactive real-machine UAT
 has been run yet**: driving an actual app (Notepad, Calculator) end to end,
 UIPI behaviour against an elevated window, and multi-monitor coordinates
 remain to be confirmed on hardware before the gate default changes.

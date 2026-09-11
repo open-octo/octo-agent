@@ -54,7 +54,7 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		"native": s.cfg.Native != nil,
 		"local":  isLocalRequest(r),
 		// os lets the frontend gate platform-specific UI (e.g. the experimental
-		// computer-use toggle is meaningful only on the macOS desktop).
+		// computer-use toggle is meaningful only on the macOS and Windows desktop).
 		"os": runtime.GOOS,
 		// upgrade_mode tells the badge which update mechanism this server offers:
 		// "cli" — the in-place binary swap of POST /api/version/upgrade (octo

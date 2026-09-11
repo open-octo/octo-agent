@@ -162,8 +162,12 @@ func normRole(role string) string {
 	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(role)), "ax")
 }
 
+// SameRole reports whether two role spellings name the same role across
+// platforms ("AXWindow" and "Window", any case).
+func SameRole(a, b string) bool { return normRole(a) == normRole(b) }
+
 func roleMatches(e AXElement, role string) bool {
-	return role == "" || normRole(e.Role) == normRole(role)
+	return role == "" || SameRole(e.Role, role)
 }
 
 // MatchAX reports whether e matches a semantic target: role must equal when

@@ -226,7 +226,7 @@ func screenshot() ([]byte, error) {
 	}}
 	buf := make([]byte, int(width)*int(height)*4)
 	lines, _, e := procGetDIBits.Call(mem, bmp, 0, uintptr(height), uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&bi)), dibRGBColors)
-	if lines == 0 {
+	if int32(lines) == 0 { // int return: only the low 32 bits are defined
 		return nil, fmt.Errorf("computer: GetDIBits failed: %v", e)
 	}
 
@@ -298,9 +298,26 @@ func scroll(dx, dy float64) error {
 }
 
 // typeText injects each UTF-16 unit as a KEYEVENTF_UNICODE press/release,
-// independent of keyboard layout. Batches stay small so one lost batch does
-// not drop a whole paragraph.
+// independent of keyboard layout. Line breaks become Enter presses: Win32
+// edit controls act on VK_RETURN, not on a bare U+000A character, so typing
+// "\n" literally would collapse lines that macOS keeps. Batches stay small so
+// one lost batch does not drop a whole paragraph.
 func typeText(s string) error {
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		if i > 0 {
+			if err := press("enter", 0); err != nil {
+				return err
+			}
+		}
+		if err := typeUnits(line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func typeUnits(s string) error {
 	units := utf16.Encode([]rune(s))
 	const batch = 64
 	for start := 0; start < len(units); start += batch {
@@ -414,7 +431,8 @@ var enumWin struct {
 	sync.Mutex
 	once    sync.Once
 	cb      uintptr
-	owner   string // match by executable / title when wantPid == 0
+	owner   string // match target when wantPid == 0
+	byTitle bool   // owner matches the window title (second pass) instead of the executable
 	wantPid uint32
 	found   bool
 	win     Window
@@ -445,7 +463,7 @@ func enumWindowsProc(hwnd uintptr, _ uintptr) uintptr {
 		if pid != enumWin.wantPid {
 			return next
 		}
-	} else if !ownerMatches(hwnd, pid, enumWin.owner) {
+	} else if !ownerMatches(hwnd, pid, enumWin.owner, enumWin.byTitle) {
 		return next
 	}
 	enumWin.found = true
@@ -453,19 +471,24 @@ func enumWindowsProc(hwnd uintptr, _ uintptr) uintptr {
 	return stop
 }
 
-// ownerMatches accepts the executable name (with or without ".exe",
-// case-insensitive) or a case-insensitive substring of the window title.
-func ownerMatches(hwnd uintptr, pid uint32, owner string) bool {
-	want := strings.ToLower(strings.TrimSuffix(strings.ToLower(strings.TrimSpace(owner)), ".exe"))
+// ownerMatches compares owner against the executable name (with or without
+// ".exe", case-insensitive) or, when byTitle is set, against the window title
+// as a case-insensitive substring. The two are separate passes so that an
+// exact executable match anywhere in Z order beats a title that merely
+// mentions the name (a browser tab titled "… notepad …" above Notepad).
+func ownerMatches(hwnd uintptr, pid uint32, owner string, byTitle bool) bool {
+	want := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(owner)), ".exe")
 	if want == "" {
 		return false
 	}
-	if exe := processBaseName(pid); exe != "" && strings.TrimSuffix(strings.ToLower(exe), ".exe") == want {
-		return true
+	if !byTitle {
+		exe := processBaseName(pid)
+		return exe != "" && strings.TrimSuffix(strings.ToLower(exe), ".exe") == want
 	}
 	title := make([]uint16, 512)
-	n, _, _ := procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&title[0])), uintptr(len(title)))
-	if n == 0 {
+	r, _, _ := procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&title[0])), uintptr(len(title)))
+	n := int(int32(r)) // int return: only the low 32 bits are defined
+	if n <= 0 {
 		return false
 	}
 	return strings.Contains(strings.ToLower(windows.UTF16ToString(title[:n])), want)
@@ -491,12 +514,13 @@ func processBaseName(pid uint32) string {
 
 // enumerate runs one EnumWindows pass with the given query and returns the
 // first (top-most in Z order) match.
-func enumerate(owner string, pid uint32) (Window, bool) {
+func enumerate(owner string, byTitle bool, pid uint32) (Window, bool) {
 	ensureDPIAware()
 	enumWin.Lock()
 	defer enumWin.Unlock()
 	enumWin.once.Do(func() { enumWin.cb = windows.NewCallback(enumWindowsProc) })
-	enumWin.owner, enumWin.wantPid, enumWin.found, enumWin.win = owner, pid, false, Window{}
+	enumWin.owner, enumWin.byTitle, enumWin.wantPid = owner, byTitle, pid
+	enumWin.found, enumWin.win = false, Window{}
 	// EnumWindows reports failure when the callback stops the enumeration
 	// early, which is exactly the found case — so the error is ignored and
 	// the found flag decides.
@@ -508,17 +532,21 @@ func findWindow(owner string) (Window, error) {
 	if strings.TrimSpace(owner) == "" {
 		return Window{}, fmt.Errorf("computer: empty app name")
 	}
-	w, ok := enumerate(owner, 0)
-	if !ok {
-		return Window{}, fmt.Errorf("computer: no on-screen window found for %q — is the app open and not minimized? (match by executable name without .exe, or by a window-title substring)", owner)
+	// Executable name first across the whole Z order, title substring only
+	// when no process is called that.
+	if w, ok := enumerate(owner, false, 0); ok {
+		return w, nil
 	}
-	return w, nil
+	if w, ok := enumerate(owner, true, 0); ok {
+		return w, nil
+	}
+	return Window{}, fmt.Errorf("computer: no on-screen window found for %q — is the app open and not minimized? (match by executable name without .exe, or by a window-title substring)", owner)
 }
 
 // windowForPid finds the top-most visible window owned by pid; the AX
 // channel needs a window handle where the shared API carries a pid.
 func windowForPid(pid int) (Window, error) {
-	w, ok := enumerate("", uint32(pid))
+	w, ok := enumerate("", false, uint32(pid))
 	if !ok {
 		return Window{}, fmt.Errorf("computer: pid %d has no on-screen window", pid)
 	}

@@ -201,7 +201,7 @@ func computerAXTree(input map[string]any) (agent.ToolResult, error) {
 	var b strings.Builder
 	for _, e := range els {
 		label := e.Label()
-		if label == "" && e.Role != "AXWindow" {
+		if label == "" && !computer.SameRole(e.Role, "AXWindow") {
 			continue // anonymous spacer groups are noise to the model
 		}
 		for i := 0; i < e.Depth; i++ {
