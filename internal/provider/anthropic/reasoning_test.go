@@ -60,13 +60,32 @@ func TestApplyReasoning_BudgetPath(t *testing.T) {
 	}
 }
 
-// Effort off (empty) sends no thinking or effort on any model.
+// Effort off (empty) sends no thinking or effort on Claude, adaptive or
+// legacy: Claude defaults to no thinking when the field is absent.
 func TestApplyReasoning_Off(t *testing.T) {
-	for _, model := range []string{"claude-opus-4-7", "kimi-for-coding"} {
+	for _, model := range []string{"claude-opus-4-7", "claude-haiku-4-5"} {
 		b := apiRequest{MaxTokens: 4096}
 		applyReasoning(&b, model, "", 0)
 		if b.Thinking != nil || b.OutputConfig != nil {
 			t.Errorf("%s off: Thinking=%+v OutputConfig=%+v, want both nil", model, b.Thinking, b.OutputConfig)
+		}
+	}
+}
+
+// Effort off on Kimi must say so explicitly: the Kimi coding endpoint turns
+// thinking on when the field is omitted, so an absent field is not "off".
+func TestApplyReasoning_OffKimiSendsDisabled(t *testing.T) {
+	for _, model := range []string{"kimi-for-coding", "k3", "kimi-k2.7"} {
+		b := apiRequest{MaxTokens: 4096}
+		applyReasoning(&b, model, "", 0)
+		if b.Thinking == nil || b.Thinking.Type != "disabled" || b.Thinking.BudgetTokens != 0 {
+			t.Errorf("%s off: Thinking=%+v, want type=disabled without budget_tokens", model, b.Thinking)
+		}
+		if b.OutputConfig != nil {
+			t.Errorf("%s off: OutputConfig=%+v, want nil", model, b.OutputConfig)
+		}
+		if b.MaxTokens != 4096 {
+			t.Errorf("%s off: MaxTokens = %d, want untouched 4096", model, b.MaxTokens)
 		}
 	}
 }

@@ -399,12 +399,32 @@ func applyReasoning(body *apiRequest, model, effort string, budget int) {
 	// Legacy budget_tokens path (older Claude, Kimi-for-coding): triggered by a
 	// positive budget, independent of the effort string.
 	if budget <= 0 {
+		if thinksWhenUnspecified(model) {
+			body.Thinking = &apiThinking{Type: "disabled"}
+		}
 		return
 	}
 	body.Thinking = &apiThinking{Type: "enabled", BudgetTokens: budget}
 	if body.MaxTokens <= budget {
 		body.MaxTokens = budget + DefaultMaxTokens
 	}
+}
+
+// thinksWhenUnspecified reports whether a backend turns thinking ON when the
+// request omits the thinking field. Claude defaults to off, so omitting is
+// enough; Kimi's coding endpoint (k3, kimi-for-coding, kimi-k2.x) defaults to
+// on and only stays quiet when told `thinking: {type: "disabled"}` outright
+// (verified live: an omitted field on k3 still produced thinking tokens).
+// Without this, NoReasoning callers such as title generation pay for
+// reasoning they asked not to have.
+func thinksWhenUnspecified(model string) bool {
+	m := strings.ToLower(model)
+	for _, s := range []string{"kimi", "k2", "k3"} {
+		if strings.Contains(m, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // usesAdaptiveEffort reports whether a model takes adaptive thinking +

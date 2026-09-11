@@ -1661,8 +1661,11 @@ const titleMaxTokens = 250
 // TitleGenerationTimeout bounds a throwaway session-title call. The TUI and
 // the server share one title mechanism: within this budget the model produces
 // a title, otherwise GenerateTitleOrSnippet falls back to a message snippet,
-// so a title always lands ~5s after the first user message.
-const TitleGenerationTimeout = 5 * time.Second
+// so a title always lands within ~10s of the first user message. 10s rather
+// than 5s because the Kimi coding endpoint (k3) has an ~9s first-token latency
+// even for a ten-token reply, so a 5s budget fell back to the snippet on
+// every session there.
+const TitleGenerationTimeout = 10 * time.Second
 
 // titleContextMaxRunes caps how much of the first user message feeds the
 // title prompt. A title only needs the topic; an unbounded paste (a dumped
