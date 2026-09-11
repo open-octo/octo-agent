@@ -99,12 +99,14 @@ build-full: build
 # the CLI) rather than derived from the build machine's live macOS version —
 # deriving it from `sw_vers` bakes whatever OS the builder happens to run into
 # the binary's LC_BUILD_VERSION, silently raising the real minimum macOS
-# required to launch it.
+# required to launch it. Passed to the link step as -mmacosx-version-min (the
+# clang-driver spelling) rather than -Wl,-macos_version_min, so the driver
+# does not also derive a host-based version and ld does not warn about two.
 DESKTOP_MACOS_VERSION ?= 12.0
 desktop: web-build
 	cd cmd/octo-desktop && CGO_ENABLED=1 \
 		CGO_CFLAGS="-mmacosx-version-min=$(DESKTOP_MACOS_VERSION)" \
-		CGO_LDFLAGS="-Wl,-macos_version_min,$(DESKTOP_MACOS_VERSION) -Wl,-no_warn_duplicate_libraries" \
+		CGO_LDFLAGS="-mmacosx-version-min=$(DESKTOP_MACOS_VERSION) -Wl,-no_warn_duplicate_libraries" \
 		go build -ldflags='$(DESKTOP_LDFLAGS)' -o ../../octo-desktop .
 
 # Package the desktop shell into a double-clickable macOS Octo.app bundle

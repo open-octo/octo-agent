@@ -53,7 +53,10 @@ builds:
     # refuses to launch a binary whose minos is newer than the running OS. Left
     # unpinned, every release would silently require whatever macOS the
     # macos-latest runner happens to run. The Makefile's desktop target pins the
-    # same way (DESKTOP_MACOS_VERSION). Verify on a snapshot build with:
+    # same way (DESKTOP_MACOS_VERSION). The link flag is the clang-driver
+    # spelling (-mmacosx-version-min), not -Wl,-macos_version_min: the driver
+    # otherwise derives its own platform version from the host and ld warns
+    # about being passed two min versions. Verify on a snapshot build with:
     #   otool -l dist/octo_darwin_arm64*/octo | grep -A3 LC_BUILD_VERSION
     overrides:
       - goos: darwin
@@ -61,13 +64,13 @@ builds:
         env:
           - CGO_ENABLED=1
           - CGO_CFLAGS=-mmacosx-version-min={{ .Env.DARWIN_MIN_MACOS }}
-          - CGO_LDFLAGS=-Wl,-macos_version_min,{{ .Env.DARWIN_MIN_MACOS }}
+          - CGO_LDFLAGS=-mmacosx-version-min={{ .Env.DARWIN_MIN_MACOS }}
       - goos: darwin
         goarch: arm64
         env:
           - CGO_ENABLED=1
           - CGO_CFLAGS=-mmacosx-version-min={{ .Env.DARWIN_MIN_MACOS }}
-          - CGO_LDFLAGS=-Wl,-macos_version_min,{{ .Env.DARWIN_MIN_MACOS }}
+          - CGO_LDFLAGS=-mmacosx-version-min={{ .Env.DARWIN_MIN_MACOS }}
     # Each target downloads the matching ripgrep before building so the grep
     # tool works out of the box without rg on PATH. The hook writes a single
     # shared file (internal/tools/rgembed/binaries/rg), so builds MUST run

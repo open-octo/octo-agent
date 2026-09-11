@@ -53,12 +53,14 @@ for arch in amd64 arm64; do
 	# 12.0 matches that Info.plist value, Go 1.25's own linker default and the
 	# CLI's DARWIN_MIN_MACOS in .goreleaser.yaml, so it also fully eliminates
 	# the SDK-vs-link-target warning this flag was added for in the first
-	# place.
+	# place. The link flag is the clang-driver spelling (-mmacosx-version-min),
+	# not -Wl,-macos_version_min, so the driver does not also derive a
+	# host-based version and ld does not warn about two min versions.
 	macos_ver="12.0"
 	( cd "$MOD_DIR" && \
 		GOOS=darwin GOARCH="$arch" CGO_ENABLED=1 CC="clang -arch $cc_arch" \
 		CGO_CFLAGS="-mmacosx-version-min=$macos_ver" \
-		CGO_LDFLAGS="-Wl,-macos_version_min,$macos_ver -Wl,-no_warn_duplicate_libraries" \
+		CGO_LDFLAGS="-mmacosx-version-min=$macos_ver -Wl,-no_warn_duplicate_libraries" \
 		go build -tags embedrg -ldflags "$LDFLAGS" -o "$out" . )
 	slices+=("$out")
 done
