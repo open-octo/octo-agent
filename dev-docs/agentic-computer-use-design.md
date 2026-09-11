@@ -203,6 +203,14 @@ releases contained. Since the feature must ride releases:
   `CGO_ENABLED=1` on for `darwin/amd64` and `darwin/arm64`. Go passes clang the
   matching `-arch` per GOARCH, so one runner still produces both natively — no
   `CC` override is needed.
+- The same override pins the deployment target (`CGO_CFLAGS=-mmacosx-version-min`
+  and `CGO_LDFLAGS=-Wl,-macos_version_min`, both from the config's
+  `DARWIN_MIN_MACOS`, 12.0). A CGO build is linked by clang, which defaults the
+  binary's `LC_BUILD_VERSION minos` to the build machine's macOS version, and
+  dyld refuses to launch a binary whose minos is newer than the running OS —
+  unpinned, the CLI would require whatever macOS the `macos-latest` runner runs.
+  12.0 is what Go 1.25's internal linker stamps into a `CGO_ENABLED=0` build,
+  so the CLI's minimum macOS is the same as the CGO-less archives carried.
 - `linux/*` and `windows/*` stay `CGO_ENABLED=0`: pure Go, so they
   cross-compile from macOS exactly as they did from Linux. Linux gets the stub,
   Windows the real substrate.
