@@ -51,7 +51,7 @@ type ComputerTool struct{}
 
 var computerActions = []string{
 	"screenshot", "left_click", "right_click", "double_click", "mouse_move",
-	"type", "key", "scroll", "ax_tree", "ax_press", "ax_set",
+	"drag", "type", "key", "scroll", "ax_tree", "ax_press", "ax_set",
 }
 
 func (ComputerTool) Definition() agent.ToolDefinition {
@@ -65,9 +65,11 @@ func (ComputerTool) Definition() agent.ToolDefinition {
 			"\"0\") or by role+label matching; these work on BACKGROUNDED apps with no cursor move and no " +
 			"focus change, and are far more precise than pixel guessing. (2) pixels: screenshot the main " +
 			"display, then click/move/type/key/scroll by coordinate — needed for custom-drawn UIs (games, " +
-			"CAD) with no accessibility tree; this channel shares the user's cursor and focus, so pass " +
-			"\"app\" on left_click/right_click/double_click/type/key to bring that app to the foreground " +
-			"first — otherwise Octo's own window can hold focus and the input silently lands nowhere. " +
+			"CAD) with no accessibility tree, or continuous pointer motion (drag: sliders, crop boxes, " +
+			"mask brushes) that a press-release pair at one point can't do; this channel shares the " +
+			"user's cursor and focus, so pass \"app\" on left_click/right_click/double_click/drag/type/key " +
+			"to bring that app to the foreground first — otherwise Octo's own window can hold focus and " +
+			"the input silently lands nowhere. " +
 			"Use for tasks in native apps with no CLI/API (the browser tool covers anything web). Pixel " +
 			"workflow: screenshot FIRST, act, screenshot again to verify. On macOS this requires the " +
 			"Accessibility (input) and Screen Recording (capture) permissions granted to the app running " +
@@ -81,24 +83,31 @@ func (ComputerTool) Definition() agent.ToolDefinition {
 					"type": "string",
 					"enum": computerActions,
 					"description": "ax_tree: dump the target app's accessibility tree, each line prefixed \"e<N>\" " +
-						"(start here for AX-rich apps). " +
+						"(start here for AX-rich apps; windows only by default, pass menu_bar=true to browse the " +
+						"menu bar instead). " +
 						"ax_press: press the element given by id (preferred) or whose label matches (button/menu " +
 						"item/square...). " +
 						"ax_set: set a text field's string or a slider's number, by id or label. " +
 						"screenshot: capture the screen. left_click/right_click/double_click/mouse_move at (x, y); " +
 						"pass \"app\" to focus that app first. " +
+						"drag: press-and-hold at (x, y), move to (x2, y2) with interpolated intermediate motion, " +
+						"then release — for sliders, crop boxes, and mask brushes that a click can't operate; " +
+						"pass \"app\" to focus that app first. " +
 						"type: type text at the current focus; pass \"app\" to focus it first. " +
 						"key: press a key or combo like \"enter\", \"cmd+c\"; pass \"app\" to focus it first. " +
 						"scroll: scroll at the cursor by (dx, dy) lines, positive dy = down.",
 				},
-				"app":       map[string]any{"type": "string", "description": "Target app name. Required for ax_* actions; optional for left_click/right_click/double_click/type/key to bring that app to the foreground before acting (its own window may otherwise steal focus and swallow the input silently — reported result includes the frontmost app afterward so a miss is visible). macOS: the process name as shown in its menu bar, e.g. \"国际象棋\", \"Safari\". Windows: the executable name without .exe (e.g. \"notepad\") or a substring of the window title. The app must have at least one on-screen (non-minimized) window."},
-				"id":        map[string]any{"type": "string", "description": "Element id for ax_press/ax_set, copied verbatim from ax_tree's \"e<N>\" prefix (e.g. \"e12\" or \"12\"). Preferred over role+label — the only way to address an element whose label is empty or shared with others. Only valid against a tree dumped with the same max_depth; re-dump ax_tree if the app's UI may have changed since."},
+				"app":       map[string]any{"type": "string", "description": "Target app name. Required for ax_* actions; optional for left_click/right_click/double_click/drag/type/key to bring that app to the foreground before acting (its own window may otherwise steal focus and swallow the input silently — reported result includes the frontmost app afterward so a miss is visible). macOS: the process name as shown in its menu bar, e.g. \"国际象棋\", \"Safari\". Windows: the executable name without .exe (e.g. \"notepad\") or a substring of the window title. The app must have at least one on-screen (non-minimized) window."},
+				"id":        map[string]any{"type": "string", "description": "Element id for ax_press/ax_set, copied verbatim from ax_tree's \"e<N>\" prefix (e.g. \"e12\" or \"12\"). Preferred over role+label — the only way to address an element whose label is empty or shared with others. Only valid against a tree dumped with the same max_depth AND menu_bar; re-dump ax_tree if the app's UI may have changed since."},
+				"menu_bar":  map[string]any{"type": "boolean", "description": "ax_tree: dump the app's menu bar INSTEAD of its windows (default false = windows only). A chatty app's global menu can be hundreds of AXMenuItem entries that would otherwise dominate the digest, so it's opt-in — pass true to browse menu items (e.g. before clicking \"File > Save As…\"), then dump again with menu_bar=false to go back to the windows. ax_press/ax_set: pass the same menu_bar the dump used when addressing by id."},
 				"role":      map[string]any{"type": "string", "description": "Accessibility role filter for ax_press/ax_set when matching by label (ignored when id is given) — pass what ax_tree shows, e.g. \"AXButton\", \"AXMenuItem\", \"AXSlider\" on macOS or \"Button\", \"MenuItem\", \"Edit\" on Windows (the AX prefix is optional on both). Optional but strongly recommended to disambiguate."},
 				"label":     map[string]any{"type": "string", "description": "Element label to match for ax_press/ax_set when id is not given: exact label wins, otherwise case-insensitive substring of title/description/value. Copy labels verbatim from ax_tree output."},
 				"value":     map[string]any{"type": "string", "description": "Value to set (ax_set): a number for sliders/steppers, a string for text fields."},
 				"max_depth": map[string]any{"type": "number", "description": "Tree depth limit for ax_tree (default 12; smaller = shorter output). Also pass the same value to ax_press/ax_set when addressing by id if a non-default depth was used for the dump — otherwise indices can shift."},
-				"x":         map[string]any{"type": "number", "description": "X coordinate in screenshot pixels (click/move)."},
-				"y":         map[string]any{"type": "number", "description": "Y coordinate in screenshot pixels (click/move)."},
+				"x":         map[string]any{"type": "number", "description": "X coordinate in screenshot pixels (click/move); drag's start point."},
+				"y":         map[string]any{"type": "number", "description": "Y coordinate in screenshot pixels (click/move); drag's start point."},
+				"x2":        map[string]any{"type": "number", "description": "X coordinate in screenshot pixels — drag's end point (required for drag, ignored otherwise)."},
+				"y2":        map[string]any{"type": "number", "description": "Y coordinate in screenshot pixels — drag's end point (required for drag, ignored otherwise)."},
 				"text":      map[string]any{"type": "string", "description": "Text to type (type action)."},
 				"key":       map[string]any{"type": "string", "description": "Key or combo, e.g. \"enter\", \"tab\", \"escape\", \"backspace\", \"delete\", \"cmd+c\", \"ctrl+shift+s\" (key action). cmd is the Command key on macOS and the Windows key on Windows — use ctrl for Windows shortcuts."},
 				"dx":        map[string]any{"type": "number", "description": "Horizontal scroll lines, positive = right (scroll)."},
@@ -138,6 +147,19 @@ func (ComputerTool) Execute(ctx context.Context, name string, input map[string]a
 			return agent.ToolResult{}, err
 		}
 		return agent.ToolResult{Text: fmt.Sprintf("cursor moved to (%.0f, %.0f)", x, y)}, nil
+	case "drag":
+		if err := requireTrusted(); err != nil {
+			return agent.ToolResult{}, err
+		}
+		if err := activateAppArg(input); err != nil {
+			return agent.ToolResult{}, err
+		}
+		x1, y1 := mapCoord(numArg(input, "x"), numArg(input, "y"))
+		x2, y2 := mapCoord(numArg(input, "x2"), numArg(input, "y2"))
+		if err := computer.Drag(x1, y1, x2, y2); err != nil {
+			return agent.ToolResult{}, err
+		}
+		return agent.ToolResult{Text: fmt.Sprintf("dragged (%.0f, %.0f) to (%.0f, %.0f) — screenshot to verify the result", x1, y1, x2, y2)}, nil
 	case "type":
 		if err := requireTrusted(); err != nil {
 			return agent.ToolResult{}, err
@@ -188,7 +210,7 @@ func (ComputerTool) Execute(ctx context.Context, name string, input map[string]a
 			return agent.ToolResult{}, err
 		} else if has {
 			maxDepth := int(numArg(input, "max_depth"))
-			e, err := computer.AXPressByID(pid, maxDepth, id)
+			e, err := computer.AXPressByID(pid, maxDepth, boolArg(input, "menu_bar"), id)
 			if err != nil {
 				return agent.ToolResult{}, err
 			}
@@ -209,7 +231,7 @@ func (ComputerTool) Execute(ctx context.Context, name string, input map[string]a
 			return agent.ToolResult{}, err
 		} else if has {
 			maxDepth := int(numArg(input, "max_depth"))
-			e, err := computer.AXSetValueByID(pid, maxDepth, id, value)
+			e, err := computer.AXSetValueByID(pid, maxDepth, boolArg(input, "menu_bar"), id, value)
 			if err != nil {
 				return agent.ToolResult{}, err
 			}
@@ -306,15 +328,20 @@ var axStructuralRoles = map[string]bool{
 
 // computerAXTree renders the app's accessibility tree as an indented digest.
 // Each line is prefixed with its e<N> id — N is the element's position in
-// AXTree's returned slice, stable for ax_press/ax_set(id=...) as long as the
-// same pid + max_depth is used and the app's UI hasn't changed since.
+// AXTree's returned slice, stable for ax_press/ax_set(id=..., menu_bar=...)
+// as long as the same pid + max_depth + menu_bar is used and the app's UI
+// hasn't changed since. menu_bar=false (default) dumps the app's windows;
+// menu_bar=true dumps the menu bar INSTEAD (not in addition to) — a chatty
+// app's global menu can be hundreds of items that would otherwise dominate
+// the digest for no benefit, since the model rarely needs it.
 func computerAXTree(input map[string]any) (agent.ToolResult, error) {
 	pid, err := computerAppPid(input)
 	if err != nil {
 		return agent.ToolResult{}, err
 	}
 	depth := int(numArg(input, "max_depth"))
-	els, err := computer.AXTree(pid, depth)
+	menuBar := boolArg(input, "menu_bar")
+	els, err := computer.AXTree(pid, depth, menuBar)
 	if err != nil {
 		return agent.ToolResult{}, err
 	}
@@ -340,10 +367,20 @@ func renderAXTree(els []computer.AXElement) string {
 		for d := 0; d < e.Depth; d++ {
 			b.WriteString("  ")
 		}
-		fmt.Fprintf(&b, "e%d %s %q [%.0f,%.0f %.0fx%.0f]\n", i, e.Role, label, e.X, e.Y, e.W, e.H)
+		// AXElement's frame is in the platform's native input space (points on
+		// macOS, physical pixels on Windows — see internal/computer's package
+		// doc); unmapCoord converts it into the same image-pixel space
+		// screenshot/click/move use, so a coordinate copied from here needs no
+		// manual scale-factor math before being passed to left_click/mouse_move.
+		x, y := unmapCoord(e.X, e.Y)
+		w, h := unmapCoord(e.W, e.H)
+		fmt.Fprintf(&b, "e%d %s %q [%.0f,%.0f %.0fx%.0f]\n", i, e.Role, label, x, y, w, h)
 		shown++
 	}
-	fmt.Fprintf(&b, "(%d of %d elements shown; pass id=e<N> — preferred — or role+label verbatim to ax_press/ax_set)", shown, len(els))
+	fmt.Fprintf(&b, "(%d of %d elements shown; pass id=e<N> — preferred — or role+label verbatim to ax_press/ax_set; coordinates are in screenshot image pixels)", shown, len(els))
+	if !shotScaleKnown() {
+		b.WriteString("\n⚠ no screenshot taken yet — these coordinates assume 1:1 scale and may be off; take a screenshot first for pixel-accurate values")
+	}
 	return b.String()
 }
 
@@ -360,12 +397,16 @@ func axDigestSuffix(e computer.AXElement) string {
 
 // shotScale converts model coordinates — pixels of the last screenshot as
 // actually sent to the provider, which compressImageData may have downscaled
-// from the raw capture — into the logical-point space CGEvent posts in.
-// Process-global by design: assumes one display and one conversation
-// driving the screen at a time.
+// from the raw capture — into the platform's native input space (logical
+// points on macOS, physical pixels on Windows). Process-global by design:
+// assumes one display and one conversation driving the screen at a time.
+// known is false until the first screenshot computes a real ratio; ax_tree
+// uses it to warn instead of silently assuming 1:1 when asked for pixel
+// coordinates before any screenshot has been taken.
 var shotScale = struct {
 	sync.Mutex
-	x, y float64
+	x, y  float64
+	known bool
 }{x: 1, y: 1}
 
 func computerScreenshot(ctx context.Context) (agent.ToolResult, error) {
@@ -401,6 +442,7 @@ func computerScreenshot(ctx context.Context) (agent.ToolResult, error) {
 	if pw, ph, serr := computer.ScreenSize(); serr == nil && aw > 0 && ah > 0 {
 		shotScale.Lock()
 		shotScale.x, shotScale.y = pw/float64(aw), ph/float64(ah)
+		shotScale.known = true
 		shotScale.Unlock()
 	}
 
@@ -415,11 +457,39 @@ func computerScreenshot(ctx context.Context) (agent.ToolResult, error) {
 	return res, nil
 }
 
-// mapCoord converts a model-supplied image pixel into logical points.
+// mapCoord converts a model-supplied image pixel into the platform's native
+// input space (logical points on macOS, physical pixels on Windows).
 func mapCoord(x, y float64) (float64, float64) {
 	shotScale.Lock()
 	defer shotScale.Unlock()
 	return x * shotScale.x, y * shotScale.y
+}
+
+// unmapCoord is mapCoord's inverse: native input space back into the image
+// pixels screenshot/click/move speak, so ax_tree can report frame coordinates
+// the model can paste straight into a click/move without the manual
+// scale-factor arithmetic the tool used to leave to it (screenshot's image
+// may be downscaled from the raw Retina/DPI capture — see shotScale).
+func unmapCoord(x, y float64) (float64, float64) {
+	shotScale.Lock()
+	defer shotScale.Unlock()
+	sx, sy := shotScale.x, shotScale.y
+	if sx == 0 {
+		sx = 1
+	}
+	if sy == 0 {
+		sy = 1
+	}
+	return x / sx, y / sy
+}
+
+// shotScaleKnown reports whether a screenshot has computed a real scale
+// factor yet — before that, unmapCoord silently assumes 1:1, which is wrong
+// on any Retina/DPI-scaled display.
+func shotScaleKnown() bool {
+	shotScale.Lock()
+	defer shotScale.Unlock()
+	return shotScale.known
 }
 
 func computerClick(button string, clicks int, input map[string]any) (agent.ToolResult, error) {

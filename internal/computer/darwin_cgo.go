@@ -99,6 +99,17 @@ func scroll(dx, dy float64) error {
 	return nil
 }
 
+// dragSteps is the number of interpolated CGEventLeftMouseDragged points
+// octoDrag posts between the start and end of a drag — a fixed default
+// rather than a model-exposed knob, matched to what a crop-box/slider drag
+// needs without adding another parameter to the tool surface.
+const dragSteps = 20
+
+func drag(x1, y1, x2, y2 float64) error {
+	C.octoDrag(C.double(x1), C.double(y1), C.double(x2), C.double(y2), C.int(dragSteps))
+	return nil
+}
+
 // macKeyCodes maps canonical key names (see keyAliases) to macOS virtual
 // keycodes.
 var macKeyCodes = map[string]uint16{

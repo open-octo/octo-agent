@@ -66,13 +66,13 @@ func TestClickValidation(t *testing.T) {
 }
 
 func TestAXPressByIDValidation(t *testing.T) {
-	if _, err := AXPressByID(999999, 12, -1); err == nil {
+	if _, err := AXPressByID(999999, 12, false, -1); err == nil {
 		t.Error("negative element id should error before touching the substrate")
 	}
 }
 
 func TestAXSetValueByIDValidation(t *testing.T) {
-	if _, err := AXSetValueByID(999999, 12, -1, "1"); err == nil {
+	if _, err := AXSetValueByID(999999, 12, false, -1, "1"); err == nil {
 		t.Error("negative element id should error before touching the substrate")
 	}
 }
@@ -88,10 +88,10 @@ func TestSupportedMatchesSubstrate(t *testing.T) {
 	}
 	png, shotErr := Screenshot()
 	_, _, sizeErr := ScreenSize()
-	tree, treeErr := AXTree(0, 1)
+	tree, treeErr := AXTree(0, 1, false)
 	_, winErr := FindWindow("Finder")
-	_, axPressIDErr := AXPressByID(0, 1, 0)
-	_, axSetValueIDErr := AXSetValueByID(0, 1, 0, "1")
+	_, axPressIDErr := AXPressByID(0, 1, false, 0)
+	_, axSetValueIDErr := AXSetValueByID(0, 1, false, 0, "1")
 	cases := []struct {
 		name string
 		err  error

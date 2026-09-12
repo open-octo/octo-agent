@@ -24,14 +24,18 @@ func axString(el C.AXUIElementRef, attr C.CFStringRef) string {
 	return s
 }
 
-// axRoots returns the app's windows plus its menu bar as traversal roots.
-// The returned slices share ownership: every array/element here is +1 and
-// released by the caller of axRoots.
-func axRoots(app C.AXUIElementRef, withMenuBar bool) (arrays []C.CFArrayRef, singles []C.AXUIElementRef) {
-	if wins := C.octoAXCopyArray(app, C.kAXWindowsAttribute); wins != 0 {
-		arrays = append(arrays, wins)
+// axRoots returns the app's traversal roots: windows, its menu bar, or both,
+// selected independently so a menu-bar dump doesn't also drag in the window
+// tree (and vice versa) — the two are unrelated in size and in what the
+// caller is looking for. The returned slices share ownership: every
+// array/element here is +1 and released by the caller of axRoots.
+func axRoots(app C.AXUIElementRef, includeWindows, includeMenuBar bool) (arrays []C.CFArrayRef, singles []C.AXUIElementRef) {
+	if includeWindows {
+		if wins := C.octoAXCopyArray(app, C.kAXWindowsAttribute); wins != 0 {
+			arrays = append(arrays, wins)
+		}
 	}
-	if withMenuBar {
+	if includeMenuBar {
 		if mb := C.octoAXCopyElement(app, C.kAXMenuBarAttribute); mb != 0 {
 			singles = append(singles, mb)
 		}
@@ -39,13 +43,18 @@ func axRoots(app C.AXUIElementRef, withMenuBar bool) (arrays []C.CFArrayRef, sin
 	return arrays, singles
 }
 
-// axWalk performs the same depth-first traversal axTree renders (windows +
-// menu bar, depth- and fan-out-capped) and calls visit for every element
-// with its 0-based traversal index while the raw element is still valid.
-// visit returning false stops the whole walk immediately — used by
-// axActByIndex to act on one element without paying for the rest of a
+// axWalk performs the same depth-first traversal axTree renders — either the
+// app's windows (menuBar=false, the default: the menu bar on a AX-chatty app
+// can be hundreds of AXMenuItem entries the model will never click, and
+// dumping it by default wastes most of a digest's context budget on noise)
+// or, when menuBar is true, the menu bar ALONE (not the windows — a caller
+// who wants "文件 > 另存为…" asks for the menu bar specifically instead of
+// paying for both trees at once). Depth- and fan-out-capped; calls visit for
+// every element with its 0-based traversal index while the raw element is
+// still valid. visit returning false stops the whole walk immediately — used
+// by axActByIndex to act on one element without paying for the rest of a
 // possibly-large tree.
-func axWalk(pid, maxDepth int, visit func(index int, el C.AXUIElementRef, e AXElement) bool) error {
+func axWalk(pid, maxDepth int, menuBar bool, visit func(index int, el C.AXUIElementRef, e AXElement) bool) error {
 	if maxDepth <= 0 {
 		maxDepth = 12
 	}
@@ -91,7 +100,7 @@ func axWalk(pid, maxDepth int, visit func(index int, el C.AXUIElementRef, e AXEl
 		}
 	}
 
-	arrays, singles := axRoots(app, true)
+	arrays, singles := axRoots(app, !menuBar, menuBar)
 	for _, arr := range arrays {
 		n := int(C.CFArrayGetCount(arr))
 		for i := 0; i < n && !stop; i++ {
@@ -108,9 +117,9 @@ func axWalk(pid, maxDepth int, visit func(index int, el C.AXUIElementRef, e AXEl
 	return nil
 }
 
-func axTree(pid, maxDepth int) ([]AXElement, error) {
+func axTree(pid, maxDepth int, menuBar bool) ([]AXElement, error) {
 	out := make([]AXElement, 0, 256)
-	err := axWalk(pid, maxDepth, func(_ int, _ C.AXUIElementRef, e AXElement) bool {
+	err := axWalk(pid, maxDepth, menuBar, func(_ int, _ C.AXUIElementRef, e AXElement) bool {
 		out = append(out, e)
 		return true
 	})
@@ -125,11 +134,11 @@ func axTree(pid, maxDepth int) ([]AXElement, error) {
 // Returns the matched element's digest (role/label/frame) alongside any
 // error so the caller can echo back what it actually hit — the one signal
 // that an index-addressed action landed on the right widget.
-func axActByIndex(pid, maxDepth, target int, action func(C.AXUIElementRef) error) (AXElement, error) {
+func axActByIndex(pid, maxDepth int, menuBar bool, target int, action func(C.AXUIElementRef) error) (AXElement, error) {
 	var found bool
 	var matched AXElement
 	var actErr error
-	err := axWalk(pid, maxDepth, func(i int, el C.AXUIElementRef, e AXElement) bool {
+	err := axWalk(pid, maxDepth, menuBar, func(i int, el C.AXUIElementRef, e AXElement) bool {
 		if i == target {
 			found = true
 			matched = e
@@ -203,7 +212,11 @@ func axFindDo(pid int, role, contains string, action func(C.AXUIElementRef) erro
 			return false
 		}
 
-		arrays, singles := axRoots(app, true)
+		// Label/role matching (ax_press/ax_set without an id) keeps searching
+		// windows AND the menu bar by default — unlike the dumped digest, this
+		// never reaches the model's context window, so there is no size
+		// pressure pushing the menu bar out of scope here.
+		arrays, singles := axRoots(app, true, true)
 		for _, arr := range arrays {
 			n := int(C.CFArrayGetCount(arr))
 			for i := 0; i < n; i++ {
@@ -246,8 +259,8 @@ func axPress(pid int, role, contains string) error {
 	return axFindDo(pid, role, contains, doAXPress)
 }
 
-func axPressByID(pid, maxDepth, id int) (AXElement, error) {
-	return axActByIndex(pid, maxDepth, id, doAXPress)
+func axPressByID(pid, maxDepth int, menuBar bool, id int) (AXElement, error) {
+	return axActByIndex(pid, maxDepth, menuBar, id, doAXPress)
 }
 
 // doAXSetValue is axSetValue/axSetValueByID's shared element-level action:
@@ -275,8 +288,8 @@ func axSetValue(pid int, role, contains, value string) error {
 	})
 }
 
-func axSetValueByID(pid, maxDepth, id int, value string) (AXElement, error) {
-	return axActByIndex(pid, maxDepth, id, func(el C.AXUIElementRef) error {
+func axSetValueByID(pid, maxDepth int, menuBar bool, id int, value string) (AXElement, error) {
+	return axActByIndex(pid, maxDepth, menuBar, id, func(el C.AXUIElementRef) error {
 		return doAXSetValue(el, value)
 	})
 }
