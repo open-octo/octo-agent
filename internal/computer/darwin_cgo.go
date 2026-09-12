@@ -31,6 +31,28 @@ func requestScreenCapture() { C.CGRequestScreenCaptureAccess() }
 
 func requestAccessibility() { C.octoRequestAccessibility() }
 
+// activateApp brings pid's app to the foreground (see octoAXSetFrontmost) —
+// the pixel channel's real fix for Octo's own window silently holding focus
+// and swallowing a click/type/key meant for a backgrounded app.
+func activateApp(pid int) error {
+	if rc := C.octoAXSetFrontmost(C.int(pid)); rc != 0 {
+		return fmt.Errorf("computer: activating app (pid %d) failed (AXError %d)", pid, int(rc))
+	}
+	return nil
+}
+
+// frontmostAppName reports the currently-frontmost app's name, "" if
+// undetermined, so a type/key action can sanity-check where it landed.
+func frontmostAppName() string {
+	cs := C.octoFrontmostAppName()
+	if cs == nil {
+		return ""
+	}
+	s := C.GoString(cs)
+	C.free(unsafe.Pointer(cs))
+	return s
+}
+
 func screenSize() (float64, float64, error) {
 	b := C.CGDisplayBounds(C.CGMainDisplayID())
 	return float64(b.size.width), float64(b.size.height), nil

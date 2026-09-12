@@ -10,6 +10,10 @@ func requestScreenCapture() {}
 
 func requestAccessibility() {}
 
+func activateApp(pid int) error { return ErrUnsupported }
+
+func frontmostAppName() string { return "" }
+
 func screenSize() (float64, float64, error) { return 0, 0, ErrUnsupported }
 
 func screenshot() ([]byte, error) { return nil, ErrUnsupported }
@@ -37,3 +41,9 @@ func axTree(pid, maxDepth int) ([]AXElement, error) { return nil, ErrUnsupported
 func axPress(pid int, role, contains string) error { return ErrUnsupported }
 
 func axSetValue(pid int, role, contains, value string) error { return ErrUnsupported }
+
+func axPressByID(pid, maxDepth, id int) (AXElement, error) { return AXElement{}, ErrUnsupported }
+
+func axSetValueByID(pid, maxDepth, id int, value string) (AXElement, error) {
+	return AXElement{}, ErrUnsupported
+}

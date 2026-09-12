@@ -110,6 +110,19 @@ type Window struct {
 	X, Y, W, H float64
 }
 
+// ActivateApp brings pid's app to the foreground without moving the cursor —
+// call it before a pixel-channel click/type/key targeting an app that might
+// not already have focus. Octo's own window can otherwise hold focus and
+// silently swallow the input; ClickPid/TypeTextPid's per-process delivery
+// (below) was tried first and measured unreliable (dropped by both SwiftUI
+// and custom-drawn views), so real focus is the fix that actually works.
+func ActivateApp(pid int) error { return activateApp(pid) }
+
+// FrontmostAppName reports the name of the app currently in the foreground,
+// "" if it could not be determined — used to sanity-check that a type/key
+// action actually landed in the intended app instead of Octo's own window.
+func FrontmostAppName() string { return frontmostAppName() }
+
 // FindWindow locates the front-most normal window of the app named owner:
 // on macOS the process name as shown in the menu bar (e.g. "国际象棋" for
 // Chess); on Windows the executable name without ".exe" or, failing that, a
@@ -212,7 +225,11 @@ func MatchAXExact(e AXElement, role, label string) bool {
 }
 
 // AXTree returns a depth-limited digest of the app's accessibility tree —
-// windows plus the menu bar. Works on backgrounded apps.
+// windows plus the menu bar. Works on backgrounded apps. Each element's
+// position in the returned slice is its addressable id: AXPressByID and
+// AXSetValueByID take that same 0-based index (under the same maxDepth) to
+// act on an element ax_tree shows with an empty or duplicate label, which
+// role+contains matching (AXPress/AXSetValue) cannot disambiguate.
 func AXTree(pid, maxDepth int) ([]AXElement, error) { return axTree(pid, maxDepth) }
 
 // AXPress finds the first element matching role+label (see MatchAX) and
@@ -226,6 +243,17 @@ func AXPress(pid int, role, contains string) error {
 	return axPress(pid, role, contains)
 }
 
+// AXPressByID is AXPress's id-addressed counterpart: it presses the element
+// at the given 0-based index into AXTree(pid, maxDepth)'s result, bypassing
+// role/label matching entirely. Returns the matched element's digest so the
+// caller can echo back what it actually pressed.
+func AXPressByID(pid, maxDepth, id int) (AXElement, error) {
+	if id < 0 {
+		return AXElement{}, fmt.Errorf("computer: element id must be >= 0")
+	}
+	return axPressByID(pid, maxDepth, id)
+}
+
 // AXSetValue sets the value of the first matching element: numeric for
 // sliders/steppers, string for text fields.
 func AXSetValue(pid int, role, contains, value string) error {
@@ -233,6 +261,14 @@ func AXSetValue(pid int, role, contains, value string) error {
 		return fmt.Errorf("computer: AXSetValue needs a label to match")
 	}
 	return axSetValue(pid, role, contains, value)
+}
+
+// AXSetValueByID is AXSetValue's id-addressed counterpart; see AXPressByID.
+func AXSetValueByID(pid, maxDepth, id int, value string) (AXElement, error) {
+	if id < 0 {
+		return AXElement{}, fmt.Errorf("computer: element id must be >= 0")
+	}
+	return axSetValueByID(pid, maxDepth, id, value)
 }
 
 // modifier flag bits, mirroring CGEventFlags so parseCombo stays

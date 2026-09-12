@@ -39,20 +39,27 @@ func axRoots(app C.AXUIElementRef, withMenuBar bool) (arrays []C.CFArrayRef, sin
 	return arrays, singles
 }
 
-func axTree(pid, maxDepth int) ([]AXElement, error) {
+// axWalk performs the same depth-first traversal axTree renders (windows +
+// menu bar, depth- and fan-out-capped) and calls visit for every element
+// with its 0-based traversal index while the raw element is still valid.
+// visit returning false stops the whole walk immediately — used by
+// axActByIndex to act on one element without paying for the rest of a
+// possibly-large tree.
+func axWalk(pid, maxDepth int, visit func(index int, el C.AXUIElementRef, e AXElement) bool) error {
 	if maxDepth <= 0 {
 		maxDepth = 12
 	}
 	app := C.octoAXApp(C.int(pid))
 	if app == 0 {
-		return nil, fmt.Errorf("computer: cannot create AX handle for pid %d", pid)
+		return fmt.Errorf("computer: cannot create AX handle for pid %d", pid)
 	}
 	defer C.CFRelease(C.CFTypeRef(app))
 
-	out := make([]AXElement, 0, 256)
+	index := 0
+	stop := false
 	var walk func(el C.AXUIElementRef, depth int)
 	walk = func(el C.AXUIElementRef, depth int) {
-		if depth > maxDepth || len(out) >= axMaxTotal {
+		if stop || depth > maxDepth || index >= axMaxTotal {
 			return
 		}
 		e := AXElement{Depth: depth}
@@ -65,7 +72,11 @@ func axTree(pid, maxDepth int) ([]AXElement, error) {
 		if C.octoAXFrame(el, &x, &y, &w, &h) == 0 {
 			e.X, e.Y, e.W, e.H = float64(x), float64(y), float64(w), float64(h)
 		}
-		out = append(out, e)
+		if !visit(index, el, e) {
+			stop = true
+			return
+		}
+		index++
 
 		kids := C.octoAXCopyArray(el, C.kAXChildrenAttribute)
 		if kids == 0 {
@@ -73,7 +84,7 @@ func axTree(pid, maxDepth int) ([]AXElement, error) {
 		}
 		defer C.CFRelease(C.CFTypeRef(kids))
 		n := int(C.CFArrayGetCount(kids))
-		for i := 0; i < n && i < axMaxChildren && len(out) < axMaxTotal; i++ {
+		for i := 0; i < n && i < axMaxChildren && !stop; i++ {
 			// Array-owned reference: valid until kids is released, no extra
 			// retain needed for the recursive call.
 			walk(C.AXUIElementRef(C.CFArrayGetValueAtIndex(kids, C.CFIndex(i))), depth+1)
@@ -83,16 +94,57 @@ func axTree(pid, maxDepth int) ([]AXElement, error) {
 	arrays, singles := axRoots(app, true)
 	for _, arr := range arrays {
 		n := int(C.CFArrayGetCount(arr))
-		for i := 0; i < n && len(out) < axMaxTotal; i++ {
+		for i := 0; i < n && !stop; i++ {
 			walk(C.AXUIElementRef(C.CFArrayGetValueAtIndex(arr, C.CFIndex(i))), 0)
 		}
 		C.CFRelease(C.CFTypeRef(arr))
 	}
 	for _, el := range singles {
-		walk(el, 0)
+		if !stop {
+			walk(el, 0)
+		}
 		C.CFRelease(C.CFTypeRef(el))
 	}
-	return out, nil
+	return nil
+}
+
+func axTree(pid, maxDepth int) ([]AXElement, error) {
+	out := make([]AXElement, 0, 256)
+	err := axWalk(pid, maxDepth, func(_ int, _ C.AXUIElementRef, e AXElement) bool {
+		out = append(out, e)
+		return true
+	})
+	return out, err
+}
+
+// axActByIndex performs action on the element at the given 0-based
+// traversal index — the same numbering axTree's returned slice uses, under
+// the same pid + maxDepth. This is the id-addressed counterpart to
+// axFindDo's role+label matching, for elements ax_tree shows with an empty
+// or duplicate label (axFindDo can't disambiguate those by contains/role).
+// Returns the matched element's digest (role/label/frame) alongside any
+// error so the caller can echo back what it actually hit — the one signal
+// that an index-addressed action landed on the right widget.
+func axActByIndex(pid, maxDepth, target int, action func(C.AXUIElementRef) error) (AXElement, error) {
+	var found bool
+	var matched AXElement
+	var actErr error
+	err := axWalk(pid, maxDepth, func(i int, el C.AXUIElementRef, e AXElement) bool {
+		if i == target {
+			found = true
+			matched = e
+			actErr = action(el)
+			return false
+		}
+		return true
+	})
+	if err != nil {
+		return AXElement{}, err
+	}
+	if !found {
+		return AXElement{}, fmt.Errorf("computer: no element with id e%d (re-dump ax_tree — the tree may have changed, or max_depth differs from the dump that produced this id)", target)
+	}
+	return matched, actErr
 }
 
 // axFind locates the first element matching role+contains (same rules as
@@ -181,32 +233,51 @@ func axFindDo(pid int, role, contains string, action func(C.AXUIElementRef) erro
 	return actErr
 }
 
+// doAXPress performs an already-located element's press action; shared by
+// the label-matched (axPress) and id-addressed (axPressByID) paths.
+func doAXPress(el C.AXUIElementRef) error {
+	if rc := C.octoAXPress(el); rc != 0 {
+		return fmt.Errorf("computer: AXPress failed (AXError %d)", int(rc))
+	}
+	return nil
+}
+
 func axPress(pid int, role, contains string) error {
-	return axFindDo(pid, role, contains, func(el C.AXUIElementRef) error {
-		if rc := C.octoAXPress(el); rc != 0 {
-			return fmt.Errorf("computer: AXPress failed (AXError %d)", int(rc))
+	return axFindDo(pid, role, contains, doAXPress)
+}
+
+func axPressByID(pid, maxDepth, id int) (AXElement, error) {
+	return axActByIndex(pid, maxDepth, id, doAXPress)
+}
+
+// doAXSetValue is axSetValue/axSetValueByID's shared element-level action:
+// sliders/steppers take a number, everything else takes a string.
+func doAXSetValue(el C.AXUIElementRef, value string) error {
+	if isAXValueRole(eRoleOf(el)) {
+		if f, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
+			if rc := C.octoAXSetDouble(el, C.double(f)); rc != 0 {
+				return fmt.Errorf("computer: AXSetValue(%g) failed (AXError %d)", f, int(rc))
+			}
+			return nil
 		}
-		return nil
-	})
+	}
+	cv := C.CString(value)
+	defer C.free(unsafe.Pointer(cv))
+	if rc := C.octoAXSetString(el, cv); rc != 0 {
+		return fmt.Errorf("computer: AXSetValue(%q) failed (AXError %d)", value, int(rc))
+	}
+	return nil
 }
 
 func axSetValue(pid int, role, contains, value string) error {
 	return axFindDo(pid, role, contains, func(el C.AXUIElementRef) error {
-		// Sliders/steppers take a number; everything else takes a string.
-		if isAXValueRole(eRoleOf(el)) {
-			if f, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
-				if rc := C.octoAXSetDouble(el, C.double(f)); rc != 0 {
-					return fmt.Errorf("computer: AXSetValue(%g) failed (AXError %d)", f, int(rc))
-				}
-				return nil
-			}
-		}
-		cv := C.CString(value)
-		defer C.free(unsafe.Pointer(cv))
-		if rc := C.octoAXSetString(el, cv); rc != 0 {
-			return fmt.Errorf("computer: AXSetValue(%q) failed (AXError %d)", value, int(rc))
-		}
-		return nil
+		return doAXSetValue(el, value)
+	})
+}
+
+func axSetValueByID(pid, maxDepth, id int, value string) (AXElement, error) {
+	return axActByIndex(pid, maxDepth, id, func(el C.AXUIElementRef) error {
+		return doAXSetValue(el, value)
 	})
 }
 

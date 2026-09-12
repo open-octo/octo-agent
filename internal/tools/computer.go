@@ -8,8 +8,10 @@ import (
 	_ "image/jpeg" // DecodeConfig on the JPEG re-encode NewImageBlock produces
 	_ "image/png"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/computer"
@@ -57,11 +59,15 @@ func (ComputerTool) Definition() agent.ToolDefinition {
 		Name: "computer",
 		Description: "See and operate the desktop (macOS or Windows) directly, two channels: " +
 			"(1) accessibility (PREFERRED when the app exposes elements): ax_tree reads an app's UI " +
-			"as a semantic list (role + label + frame) — macOS Accessibility or Windows UI Automation — " +
-			"and ax_press/ax_set act by label; these work on BACKGROUNDED apps with no cursor move and " +
-			"no focus change, and are far more precise than pixel guessing. (2) pixels: screenshot the " +
-			"main display, then click/move/type/key/scroll by coordinate — needed for custom-drawn UIs " +
-			"(games, CAD) with no accessibility tree; this channel shares the user's cursor and focus. " +
+			"as a semantic list (role + label + frame, each prefixed with an e<N> id) — macOS " +
+			"Accessibility or Windows UI Automation — and ax_press/ax_set act on an element by that id " +
+			"(reliable — works even when the label is empty or repeated, e.g. ten sliders all labelled " +
+			"\"0\") or by role+label matching; these work on BACKGROUNDED apps with no cursor move and no " +
+			"focus change, and are far more precise than pixel guessing. (2) pixels: screenshot the main " +
+			"display, then click/move/type/key/scroll by coordinate — needed for custom-drawn UIs (games, " +
+			"CAD) with no accessibility tree; this channel shares the user's cursor and focus, so pass " +
+			"\"app\" on left_click/right_click/double_click/type/key to bring that app to the foreground " +
+			"first — otherwise Octo's own window can hold focus and the input silently lands nowhere. " +
 			"Use for tasks in native apps with no CLI/API (the browser tool covers anything web). Pixel " +
 			"workflow: screenshot FIRST, act, screenshot again to verify. On macOS this requires the " +
 			"Accessibility (input) and Screen Recording (capture) permissions granted to the app running " +
@@ -74,18 +80,23 @@ func (ComputerTool) Definition() agent.ToolDefinition {
 				"action": map[string]any{
 					"type": "string",
 					"enum": computerActions,
-					"description": "ax_tree: dump the target app's accessibility tree (start here for AX-rich apps). " +
-						"ax_press: press the element whose label matches (button/menu item/square...). " +
-						"ax_set: set a text field's string or a slider's number. " +
-						"screenshot: capture the screen. left_click/right_click/double_click/mouse_move at (x, y). " +
-						"type: type text at the current focus. key: press a key or combo like \"enter\", \"cmd+c\". " +
+					"description": "ax_tree: dump the target app's accessibility tree, each line prefixed \"e<N>\" " +
+						"(start here for AX-rich apps). " +
+						"ax_press: press the element given by id (preferred) or whose label matches (button/menu " +
+						"item/square...). " +
+						"ax_set: set a text field's string or a slider's number, by id or label. " +
+						"screenshot: capture the screen. left_click/right_click/double_click/mouse_move at (x, y); " +
+						"pass \"app\" to focus that app first. " +
+						"type: type text at the current focus; pass \"app\" to focus it first. " +
+						"key: press a key or combo like \"enter\", \"cmd+c\"; pass \"app\" to focus it first. " +
 						"scroll: scroll at the cursor by (dx, dy) lines, positive dy = down.",
 				},
-				"app":       map[string]any{"type": "string", "description": "Target app name for ax_* actions. macOS: the process name as shown in its menu bar, e.g. \"国际象棋\", \"Safari\". Windows: the executable name without .exe (e.g. \"notepad\") or a substring of the window title. The app must have at least one on-screen (non-minimized) window."},
-				"role":      map[string]any{"type": "string", "description": "Accessibility role filter for ax_press/ax_set — pass what ax_tree shows, e.g. \"AXButton\", \"AXMenuItem\", \"AXSlider\" on macOS or \"Button\", \"MenuItem\", \"Edit\" on Windows (the AX prefix is optional on both). Optional but strongly recommended to disambiguate."},
-				"label":     map[string]any{"type": "string", "description": "Element label to match for ax_press/ax_set: exact label wins, otherwise case-insensitive substring of title/description/value. Copy labels verbatim from ax_tree output."},
+				"app":       map[string]any{"type": "string", "description": "Target app name. Required for ax_* actions; optional for left_click/right_click/double_click/type/key to bring that app to the foreground before acting (its own window may otherwise steal focus and swallow the input silently — reported result includes the frontmost app afterward so a miss is visible). macOS: the process name as shown in its menu bar, e.g. \"国际象棋\", \"Safari\". Windows: the executable name without .exe (e.g. \"notepad\") or a substring of the window title. The app must have at least one on-screen (non-minimized) window."},
+				"id":        map[string]any{"type": "string", "description": "Element id for ax_press/ax_set, copied verbatim from ax_tree's \"e<N>\" prefix (e.g. \"e12\" or \"12\"). Preferred over role+label — the only way to address an element whose label is empty or shared with others. Only valid against a tree dumped with the same max_depth; re-dump ax_tree if the app's UI may have changed since."},
+				"role":      map[string]any{"type": "string", "description": "Accessibility role filter for ax_press/ax_set when matching by label (ignored when id is given) — pass what ax_tree shows, e.g. \"AXButton\", \"AXMenuItem\", \"AXSlider\" on macOS or \"Button\", \"MenuItem\", \"Edit\" on Windows (the AX prefix is optional on both). Optional but strongly recommended to disambiguate."},
+				"label":     map[string]any{"type": "string", "description": "Element label to match for ax_press/ax_set when id is not given: exact label wins, otherwise case-insensitive substring of title/description/value. Copy labels verbatim from ax_tree output."},
 				"value":     map[string]any{"type": "string", "description": "Value to set (ax_set): a number for sliders/steppers, a string for text fields."},
-				"max_depth": map[string]any{"type": "number", "description": "Tree depth limit for ax_tree (default 12; smaller = shorter output)."},
+				"max_depth": map[string]any{"type": "number", "description": "Tree depth limit for ax_tree (default 12; smaller = shorter output). Also pass the same value to ax_press/ax_set when addressing by id if a non-default depth was used for the dump — otherwise indices can shift."},
 				"x":         map[string]any{"type": "number", "description": "X coordinate in screenshot pixels (click/move)."},
 				"y":         map[string]any{"type": "number", "description": "Y coordinate in screenshot pixels (click/move)."},
 				"text":      map[string]any{"type": "string", "description": "Text to type (type action)."},
@@ -104,10 +115,19 @@ func (ComputerTool) Execute(ctx context.Context, name string, input map[string]a
 	case "screenshot":
 		return computerScreenshot(ctx)
 	case "left_click":
+		if err := activateAppArg(input); err != nil {
+			return agent.ToolResult{}, err
+		}
 		return computerClick("left", 1, input)
 	case "right_click":
+		if err := activateAppArg(input); err != nil {
+			return agent.ToolResult{}, err
+		}
 		return computerClick("right", 1, input)
 	case "double_click":
+		if err := activateAppArg(input); err != nil {
+			return agent.ToolResult{}, err
+		}
 		return computerClick("left", 2, input)
 	case "mouse_move":
 		if err := requireTrusted(); err != nil {
@@ -122,19 +142,33 @@ func (ComputerTool) Execute(ctx context.Context, name string, input map[string]a
 		if err := requireTrusted(); err != nil {
 			return agent.ToolResult{}, err
 		}
+		if err := activateAppArg(input); err != nil {
+			return agent.ToolResult{}, err
+		}
 		text := stringArg(input, "text")
 		if err := computer.TypeText(text); err != nil {
 			return agent.ToolResult{}, err
 		}
-		return agent.ToolResult{Text: fmt.Sprintf("typed %d characters", len([]rune(text)))}, nil
+		msg := fmt.Sprintf("typed %d characters", len([]rune(text)))
+		if front := computer.FrontmostAppName(); front != "" {
+			msg += fmt.Sprintf(" — frontmost app is now %q (make sure that's the intended target)", front)
+		}
+		return agent.ToolResult{Text: msg}, nil
 	case "key":
 		if err := requireTrusted(); err != nil {
+			return agent.ToolResult{}, err
+		}
+		if err := activateAppArg(input); err != nil {
 			return agent.ToolResult{}, err
 		}
 		if err := computer.Press(stringArg(input, "key")); err != nil {
 			return agent.ToolResult{}, err
 		}
-		return agent.ToolResult{Text: "pressed " + stringArg(input, "key")}, nil
+		msg := "pressed " + stringArg(input, "key")
+		if front := computer.FrontmostAppName(); front != "" {
+			msg += fmt.Sprintf(" — frontmost app is now %q (make sure that's the intended target)", front)
+		}
+		return agent.ToolResult{Text: msg}, nil
 	case "scroll":
 		if err := requireTrusted(); err != nil {
 			return agent.ToolResult{}, err
@@ -150,6 +184,16 @@ func (ComputerTool) Execute(ctx context.Context, name string, input map[string]a
 		if err != nil {
 			return agent.ToolResult{}, err
 		}
+		if id, has, err := parseElementID(input); err != nil {
+			return agent.ToolResult{}, err
+		} else if has {
+			maxDepth := int(numArg(input, "max_depth"))
+			e, err := computer.AXPressByID(pid, maxDepth, id)
+			if err != nil {
+				return agent.ToolResult{}, err
+			}
+			return agent.ToolResult{Text: fmt.Sprintf("pressed element e%d%s — re-dump ax_tree (or screenshot) to verify the result", id, axDigestSuffix(e))}, nil
+		}
 		label := stringArg(input, "label")
 		if err := computer.AXPress(pid, stringArg(input, "role"), label); err != nil {
 			return agent.ToolResult{}, err
@@ -160,13 +204,72 @@ func (ComputerTool) Execute(ctx context.Context, name string, input map[string]a
 		if err != nil {
 			return agent.ToolResult{}, err
 		}
+		value := stringArg(input, "value")
+		if id, has, err := parseElementID(input); err != nil {
+			return agent.ToolResult{}, err
+		} else if has {
+			maxDepth := int(numArg(input, "max_depth"))
+			e, err := computer.AXSetValueByID(pid, maxDepth, id, value)
+			if err != nil {
+				return agent.ToolResult{}, err
+			}
+			return agent.ToolResult{Text: fmt.Sprintf("set element e%d%s to %s — re-dump ax_tree to verify", id, axDigestSuffix(e), value)}, nil
+		}
 		label := stringArg(input, "label")
-		if err := computer.AXSetValue(pid, stringArg(input, "role"), label, stringArg(input, "value")); err != nil {
+		if err := computer.AXSetValue(pid, stringArg(input, "role"), label, value); err != nil {
 			return agent.ToolResult{}, err
 		}
-		return agent.ToolResult{Text: "set element matching " + label + " to " + stringArg(input, "value") + " — re-dump ax_tree to verify"}, nil
+		return agent.ToolResult{Text: "set element matching " + label + " to " + value + " — re-dump ax_tree to verify"}, nil
 	default:
 		return agent.ToolResult{}, fmt.Errorf("computer: unknown action %q (valid: %v)", action, computerActions)
+	}
+}
+
+// activateAppArg brings the optional "app" argument's window to the
+// foreground before a pixel-channel click/type/key — Octo's own window can
+// otherwise hold focus and silently swallow the input (see
+// computer.ActivateApp). A no-op when "app" is omitted, so existing calls
+// without it behave exactly as before.
+func activateAppArg(input map[string]any) error {
+	app := stringArg(input, "app")
+	if app == "" {
+		return nil
+	}
+	if err := requireTrusted(); err != nil {
+		return err
+	}
+	w, err := computer.FindWindow(app)
+	if err != nil {
+		return err
+	}
+	if err := computer.ActivateApp(w.PID); err != nil {
+		return err
+	}
+	time.Sleep(100 * time.Millisecond) // let the window manager finish raising it before input follows
+	return nil
+}
+
+// parseElementID reads the optional "id" argument for ax_press/ax_set,
+// tolerating the "e12" string ax_tree prints, a bare "12", or a JSON number.
+func parseElementID(input map[string]any) (id int, has bool, err error) {
+	raw, ok := input["id"]
+	if !ok || raw == nil {
+		return 0, false, nil
+	}
+	switch v := raw.(type) {
+	case float64:
+		return int(v), true, nil
+	case int:
+		return v, true, nil
+	case string:
+		s := strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(v), "e"), "E")
+		n, perr := strconv.Atoi(s)
+		if perr != nil {
+			return 0, true, fmt.Errorf("computer: bad element id %q (want e.g. \"e12\" or 12)", v)
+		}
+		return n, true, nil
+	default:
+		return 0, true, fmt.Errorf("computer: bad element id %v", raw)
 	}
 }
 
@@ -188,7 +291,23 @@ func computerAppPid(input map[string]any) (int, error) {
 	return w.PID, nil
 }
 
+// axStructuralRoles are pure layout/grouping roles that carry no meaning of
+// their own when unlabeled — spacer groups, panes, split views. Interactive
+// controls (buttons, fields, sliders, menu items, static text...) are always
+// shown even unlabeled: their e<N> id is often the ONLY way to address them
+// (ten sliders all labelled "0", an empty-label text area), which is the
+// whole point of numbering every element.
+var axStructuralRoles = map[string]bool{
+	"AXGroup": true, "AXUnknown": true, "AXSplitGroup": true,
+	"AXScrollArea": true, "AXLayoutArea": true, "AXLayoutItem": true,
+	"AXGenericElement": true,
+	"Group":            true, "Pane": true, "Custom": true,
+}
+
 // computerAXTree renders the app's accessibility tree as an indented digest.
+// Each line is prefixed with its e<N> id — N is the element's position in
+// AXTree's returned slice, stable for ax_press/ax_set(id=...) as long as the
+// same pid + max_depth is used and the app's UI hasn't changed since.
 func computerAXTree(input map[string]any) (agent.ToolResult, error) {
 	pid, err := computerAppPid(input)
 	if err != nil {
@@ -199,19 +318,44 @@ func computerAXTree(input map[string]any) (agent.ToolResult, error) {
 	if err != nil {
 		return agent.ToolResult{}, err
 	}
+	return agent.ToolResult{Text: renderAXTree(els)}, nil
+}
+
+// renderAXTree formats an already-fetched digest — split out from
+// computerAXTree so the one invariant that matters (the printed e<N> is
+// always the element's true index into els, never a display-only counter,
+// even though some elements are hidden from the printed text by
+// axStructuralRoles) is unit-testable without the AX/UIA substrate. Silently
+// switching the "e%d" to the shown-so-far count instead of the loop index i
+// would make every id-addressed ax_press/ax_set land on the wrong element
+// with no error — this is the one line that must never regress.
+func renderAXTree(els []computer.AXElement) string {
 	var b strings.Builder
-	for _, e := range els {
+	shown := 0
+	for i, e := range els {
 		label := e.Label()
-		if label == "" && !computer.SameRole(e.Role, "AXWindow") {
-			continue // anonymous spacer groups are noise to the model
+		if label == "" && !computer.SameRole(e.Role, "AXWindow") && axStructuralRoles[e.Role] {
+			continue // anonymous layout groups are noise to the model
 		}
-		for i := 0; i < e.Depth; i++ {
+		for d := 0; d < e.Depth; d++ {
 			b.WriteString("  ")
 		}
-		fmt.Fprintf(&b, "%s %q [%.0f,%.0f %.0fx%.0f]\n", e.Role, label, e.X, e.Y, e.W, e.H)
+		fmt.Fprintf(&b, "e%d %s %q [%.0f,%.0f %.0fx%.0f]\n", i, e.Role, label, e.X, e.Y, e.W, e.H)
+		shown++
 	}
-	fmt.Fprintf(&b, "(%d elements; pass role+label verbatim to ax_press/ax_set)", len(els))
-	return agent.ToolResult{Text: b.String()}, nil
+	fmt.Fprintf(&b, "(%d of %d elements shown; pass id=e<N> — preferred — or role+label verbatim to ax_press/ax_set)", shown, len(els))
+	return b.String()
+}
+
+// axDigestSuffix renders a matched element's role+label for an id-addressed
+// ax_press/ax_set success message, e.g. " (AXButton \"Save\")" — "" when both
+// are empty (nothing informative to add).
+func axDigestSuffix(e computer.AXElement) string {
+	label := e.Label()
+	if e.Role == "" && label == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (%s %q)", e.Role, label)
 }
 
 // shotScale converts model coordinates — pixels of the last screenshot as

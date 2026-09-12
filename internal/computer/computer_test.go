@@ -65,6 +65,18 @@ func TestClickValidation(t *testing.T) {
 	}
 }
 
+func TestAXPressByIDValidation(t *testing.T) {
+	if _, err := AXPressByID(999999, 12, -1); err == nil {
+		t.Error("negative element id should error before touching the substrate")
+	}
+}
+
+func TestAXSetValueByIDValidation(t *testing.T) {
+	if _, err := AXSetValueByID(999999, 12, -1, "1"); err == nil {
+		t.Error("negative element id should error before touching the substrate")
+	}
+}
+
 // Supported() must agree with the stub: a build reporting no substrate returns
 // ErrUnsupported from every action. Callers (internal/tools) gate on this so a
 // stub build blames the build, not a missing permission grant.
@@ -78,6 +90,8 @@ func TestSupportedMatchesSubstrate(t *testing.T) {
 	_, _, sizeErr := ScreenSize()
 	tree, treeErr := AXTree(0, 1)
 	_, winErr := FindWindow("Finder")
+	_, axPressIDErr := AXPressByID(0, 1, 0)
+	_, axSetValueIDErr := AXSetValueByID(0, 1, 0, "1")
 	cases := []struct {
 		name string
 		err  error
@@ -92,6 +106,8 @@ func TestSupportedMatchesSubstrate(t *testing.T) {
 		{"axTree", treeErr},
 		{"axPress", AXPress(0, "", "x")},
 		{"axSetValue", AXSetValue(0, "", "x", "1")},
+		{"axPressByID", axPressIDErr},
+		{"axSetValueByID", axSetValueIDErr},
 		{"findWindow", winErr},
 	}
 	if png != nil || tree != nil {
