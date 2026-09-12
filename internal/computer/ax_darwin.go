@@ -122,24 +122,29 @@ func axTree(pid, maxDepth int) ([]AXElement, error) {
 // the same pid + maxDepth. This is the id-addressed counterpart to
 // axFindDo's role+label matching, for elements ax_tree shows with an empty
 // or duplicate label (axFindDo can't disambiguate those by contains/role).
-func axActByIndex(pid, maxDepth, target int, action func(C.AXUIElementRef) error) error {
+// Returns the matched element's digest (role/label/frame) alongside any
+// error so the caller can echo back what it actually hit — the one signal
+// that an index-addressed action landed on the right widget.
+func axActByIndex(pid, maxDepth, target int, action func(C.AXUIElementRef) error) (AXElement, error) {
 	var found bool
+	var matched AXElement
 	var actErr error
-	err := axWalk(pid, maxDepth, func(i int, el C.AXUIElementRef, _ AXElement) bool {
+	err := axWalk(pid, maxDepth, func(i int, el C.AXUIElementRef, e AXElement) bool {
 		if i == target {
 			found = true
+			matched = e
 			actErr = action(el)
 			return false
 		}
 		return true
 	})
 	if err != nil {
-		return err
+		return AXElement{}, err
 	}
 	if !found {
-		return fmt.Errorf("computer: no element with id e%d (re-dump ax_tree — the tree may have changed, or max_depth differs from the dump that produced this id)", target)
+		return AXElement{}, fmt.Errorf("computer: no element with id e%d (re-dump ax_tree — the tree may have changed, or max_depth differs from the dump that produced this id)", target)
 	}
-	return actErr
+	return matched, actErr
 }
 
 // axFind locates the first element matching role+contains (same rules as
@@ -241,7 +246,7 @@ func axPress(pid int, role, contains string) error {
 	return axFindDo(pid, role, contains, doAXPress)
 }
 
-func axPressByID(pid, maxDepth, id int) error {
+func axPressByID(pid, maxDepth, id int) (AXElement, error) {
 	return axActByIndex(pid, maxDepth, id, doAXPress)
 }
 
@@ -270,7 +275,7 @@ func axSetValue(pid int, role, contains, value string) error {
 	})
 }
 
-func axSetValueByID(pid, maxDepth, id int, value string) error {
+func axSetValueByID(pid, maxDepth, id int, value string) (AXElement, error) {
 	return axActByIndex(pid, maxDepth, id, func(el C.AXUIElementRef) error {
 		return doAXSetValue(el, value)
 	})

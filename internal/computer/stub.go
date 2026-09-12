@@ -41,6 +41,8 @@ func axPress(pid int, role, contains string) error { return ErrUnsupported }
 
 func axSetValue(pid int, role, contains, value string) error { return ErrUnsupported }
 
-func axPressByID(pid, maxDepth, id int) error { return ErrUnsupported }
+func axPressByID(pid, maxDepth, id int) (AXElement, error) { return AXElement{}, ErrUnsupported }
 
-func axSetValueByID(pid, maxDepth, id int, value string) error { return ErrUnsupported }
+func axSetValueByID(pid, maxDepth, id int, value string) (AXElement, error) {
+	return AXElement{}, ErrUnsupported
+}

@@ -187,10 +187,11 @@ func (ComputerTool) Execute(ctx context.Context, name string, input map[string]a
 			return agent.ToolResult{}, err
 		} else if has {
 			maxDepth := int(numArg(input, "max_depth"))
-			if err := computer.AXPressByID(pid, maxDepth, id); err != nil {
+			e, err := computer.AXPressByID(pid, maxDepth, id)
+			if err != nil {
 				return agent.ToolResult{}, err
 			}
-			return agent.ToolResult{Text: fmt.Sprintf("pressed element e%d — re-dump ax_tree (or screenshot) to verify the result", id)}, nil
+			return agent.ToolResult{Text: fmt.Sprintf("pressed element e%d%s — re-dump ax_tree (or screenshot) to verify the result", id, axDigestSuffix(e))}, nil
 		}
 		label := stringArg(input, "label")
 		if err := computer.AXPress(pid, stringArg(input, "role"), label); err != nil {
@@ -207,10 +208,11 @@ func (ComputerTool) Execute(ctx context.Context, name string, input map[string]a
 			return agent.ToolResult{}, err
 		} else if has {
 			maxDepth := int(numArg(input, "max_depth"))
-			if err := computer.AXSetValueByID(pid, maxDepth, id, value); err != nil {
+			e, err := computer.AXSetValueByID(pid, maxDepth, id, value)
+			if err != nil {
 				return agent.ToolResult{}, err
 			}
-			return agent.ToolResult{Text: fmt.Sprintf("set element e%d to %s — re-dump ax_tree to verify", id, value)}, nil
+			return agent.ToolResult{Text: fmt.Sprintf("set element e%d%s to %s — re-dump ax_tree to verify", id, axDigestSuffix(e), value)}, nil
 		}
 		label := stringArg(input, "label")
 		if err := computer.AXSetValue(pid, stringArg(input, "role"), label, value); err != nil {
@@ -315,6 +317,18 @@ func computerAXTree(input map[string]any) (agent.ToolResult, error) {
 	if err != nil {
 		return agent.ToolResult{}, err
 	}
+	return agent.ToolResult{Text: renderAXTree(els)}, nil
+}
+
+// renderAXTree formats an already-fetched digest — split out from
+// computerAXTree so the one invariant that matters (the printed e<N> is
+// always the element's true index into els, never a display-only counter,
+// even though some elements are hidden from the printed text by
+// axStructuralRoles) is unit-testable without the AX/UIA substrate. Silently
+// switching the "e%d" to the shown-so-far count instead of the loop index i
+// would make every id-addressed ax_press/ax_set land on the wrong element
+// with no error — this is the one line that must never regress.
+func renderAXTree(els []computer.AXElement) string {
 	var b strings.Builder
 	shown := 0
 	for i, e := range els {
@@ -329,7 +343,18 @@ func computerAXTree(input map[string]any) (agent.ToolResult, error) {
 		shown++
 	}
 	fmt.Fprintf(&b, "(%d of %d elements shown; pass id=e<N> — preferred — or role+label verbatim to ax_press/ax_set)", shown, len(els))
-	return agent.ToolResult{Text: b.String()}, nil
+	return b.String()
+}
+
+// axDigestSuffix renders a matched element's role+label for an id-addressed
+// ax_press/ax_set success message, e.g. " (AXButton \"Save\")" — "" when both
+// are empty (nothing informative to add).
+func axDigestSuffix(e computer.AXElement) string {
+	label := e.Label()
+	if e.Role == "" && label == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (%s %q)", e.Role, label)
 }
 
 // shotScale converts model coordinates — pixels of the last screenshot as

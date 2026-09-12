@@ -3,7 +3,10 @@ package tools
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/open-octo/octo-agent/internal/computer"
 )
 
 func TestParseElementID(t *testing.T) {
@@ -93,5 +96,45 @@ func TestComputerTool_AdvertisedWhenEnabled(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("computer tool should be advertised when tools.computer.enabled is on")
+	}
+}
+
+// TestRenderAXTree_IDsAreTrueIndexNotDisplayCounter locks the one invariant
+// an id-addressed ax_press/ax_set depends on: the printed "e<N>" must be the
+// element's real position in the slice AXTree returned (what axActByIndex
+// re-walks to), never a counter of how many lines were actually printed.
+// axStructuralRoles filters some elements out of the text, so a naive
+// "shown so far" counter would silently desync ids from real indices —
+// this test would catch that regression even though it needs no AX/UIA
+// substrate.
+func TestRenderAXTree_IDsAreTrueIndexNotDisplayCounter(t *testing.T) {
+	els := []computer.AXElement{
+		{Role: "AXWindow", Title: "Untitled"},       // e0 - window, always shown
+		{Role: "AXGroup", Title: ""},                // e1 - filtered: structural + unlabeled
+		{Role: "AXTextField", Title: "", Value: ""}, // e2 - shown: not a noise role, even unlabeled
+		{Role: "AXButton", Title: "Save"},           // e3 - shown
+		{Role: "AXSplitGroup", Title: ""},           // e4 - filtered: structural + unlabeled
+		{Role: "AXSlider", Title: "", Value: "0"},   // e5 - shown: Value counts as label
+	}
+	out := renderAXTree(els)
+
+	for _, want := range []string{"e0 AXWindow", "e2 AXTextField", "e3 AXButton", "e5 AXSlider"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("renderAXTree output missing %q; got:\n%s", want, out)
+		}
+	}
+	for _, mustNotAppearAsID := range []string{"e1 ", "e4 "} {
+		if strings.Contains(out, mustNotAppearAsID) {
+			t.Errorf("renderAXTree must not print a line for filtered element as %q; got:\n%s", mustNotAppearAsID, out)
+		}
+	}
+	// The filtered elements (e1, e4) must not cause the surviving ones to be
+	// renumbered — e.g. e2 must never print as "e1" just because one line
+	// was skipped before it.
+	if strings.Contains(out, "e1 AXTextField") || strings.Contains(out, "e2 AXButton") {
+		t.Fatalf("ids were renumbered after filtering instead of keeping the true slice index; got:\n%s", out)
+	}
+	if !strings.Contains(out, "(4 of 6 elements shown") {
+		t.Errorf("summary line should count 4 shown of 6 total; got:\n%s", out)
 	}
 }

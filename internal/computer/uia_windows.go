@@ -354,24 +354,28 @@ func axTree(pid, maxDepth int) ([]AXElement, error) {
 // traversal index — the same numbering axTree's returned slice uses, under
 // the same pid + maxDepth. Id-addressed counterpart to axFindDo's role+label
 // matching, for elements ax_tree shows with an empty or duplicate label.
-func axActByIndex(pid, maxDepth, target int, action func(el comObj) error) error {
+// Returns the matched element's digest alongside any error so the caller can
+// echo back what it actually hit.
+func axActByIndex(pid, maxDepth, target int, action func(el comObj) error) (AXElement, error) {
 	var found bool
+	var matched AXElement
 	var actErr error
-	err := axWalk(pid, maxDepth, func(i int, el comObj, _ AXElement) bool {
+	err := axWalk(pid, maxDepth, func(i int, el comObj, e AXElement) bool {
 		if i == target {
 			found = true
+			matched = e
 			actErr = action(el)
 			return false
 		}
 		return true
 	})
 	if err != nil {
-		return err
+		return AXElement{}, err
 	}
 	if !found {
-		return fmt.Errorf("computer: no element with id e%d (re-dump ax_tree — the tree may have changed, or max_depth differs from the dump that produced this id)", target)
+		return AXElement{}, fmt.Errorf("computer: no element with id e%d (re-dump ax_tree — the tree may have changed, or max_depth differs from the dump that produced this id)", target)
 	}
-	return actErr
+	return matched, actErr
 }
 
 // axFindDo mirrors the macOS search: an exact-label pass wins over a
@@ -466,7 +470,7 @@ func axPress(pid int, role, contains string) error {
 	return axFindDo(pid, role, contains, doAXPress)
 }
 
-func axPressByID(pid, maxDepth, id int) error {
+func axPressByID(pid, maxDepth, id int) (AXElement, error) {
 	return axActByIndex(pid, maxDepth, id, doAXPress)
 }
 
@@ -501,7 +505,7 @@ func axSetValue(pid int, role, contains, value string) error {
 	})
 }
 
-func axSetValueByID(pid, maxDepth, id int, value string) error {
+func axSetValueByID(pid, maxDepth, id int, value string) (AXElement, error) {
 	return axActByIndex(pid, maxDepth, id, func(el comObj) error {
 		return doAXSetValue(el, value)
 	})

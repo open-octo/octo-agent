@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"runtime"
 	"strings"
 	"sync"
 	"unicode/utf16"
@@ -184,6 +185,14 @@ func activateApp(pid int) error {
 		return err
 	}
 	hwnd := uintptr(w.ID)
+
+	// AttachThreadInput/SetForegroundWindow are thread-affine: GetCurrentThreadId
+	// must name the OS thread that actually makes those calls, or the input-queue
+	// attach targets a thread nobody is running on. Go's scheduler can otherwise
+	// migrate this goroutine between the ID read and the calls below (same reason
+	// withCOM in uia_windows.go pins its thread for COM's apartment model).
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 
 	curTid := windows.GetCurrentThreadId()
 	fg := windows.GetForegroundWindow()

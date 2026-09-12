@@ -233,10 +233,11 @@ func AXPress(pid int, role, contains string) error {
 
 // AXPressByID is AXPress's id-addressed counterpart: it presses the element
 // at the given 0-based index into AXTree(pid, maxDepth)'s result, bypassing
-// role/label matching entirely.
-func AXPressByID(pid, maxDepth, id int) error {
+// role/label matching entirely. Returns the matched element's digest so the
+// caller can echo back what it actually pressed.
+func AXPressByID(pid, maxDepth, id int) (AXElement, error) {
 	if id < 0 {
-		return fmt.Errorf("computer: element id must be >= 0")
+		return AXElement{}, fmt.Errorf("computer: element id must be >= 0")
 	}
 	return axPressByID(pid, maxDepth, id)
 }
@@ -251,9 +252,9 @@ func AXSetValue(pid int, role, contains, value string) error {
 }
 
 // AXSetValueByID is AXSetValue's id-addressed counterpart; see AXPressByID.
-func AXSetValueByID(pid, maxDepth, id int, value string) error {
+func AXSetValueByID(pid, maxDepth, id int, value string) (AXElement, error) {
 	if id < 0 {
-		return fmt.Errorf("computer: element id must be >= 0")
+		return AXElement{}, fmt.Errorf("computer: element id must be >= 0")
 	}
 	return axSetValueByID(pid, maxDepth, id, value)
 }

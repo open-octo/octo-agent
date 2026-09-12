@@ -63,13 +63,13 @@ func TestClickValidation(t *testing.T) {
 }
 
 func TestAXPressByIDValidation(t *testing.T) {
-	if err := AXPressByID(999999, 12, -1); err == nil {
+	if _, err := AXPressByID(999999, 12, -1); err == nil {
 		t.Error("negative element id should error before touching the substrate")
 	}
 }
 
 func TestAXSetValueByIDValidation(t *testing.T) {
-	if err := AXSetValueByID(999999, 12, -1, "1"); err == nil {
+	if _, err := AXSetValueByID(999999, 12, -1, "1"); err == nil {
 		t.Error("negative element id should error before touching the substrate")
 	}
 }
