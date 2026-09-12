@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf16"
 	"unsafe"
 
@@ -352,6 +353,37 @@ func scroll(dx, dy float64) error {
 		ins = append(ins, input{typ: inputMouse, mi: mouseInput{dwFlags: mouseeventfHWheel, mouseData: uint32(int32(dx * wheelDelta))}})
 	}
 	return sendInput(ins)
+}
+
+// dragSteps/dragStepDelay match the macOS substrate's octoDrag pacing (see
+// helpers.h): a fixed number of interpolated intermediate points rather than
+// a model-exposed knob.
+const (
+	dragSteps     = 20
+	dragStepDelay = 10 * time.Millisecond
+)
+
+// drag performs a left-button drag from (x1,y1) to (x2,y2): SendInput has no
+// primitive combining a held button with motion, so the cursor is moved via
+// SetCursorPos between a LEFTDOWN and a LEFTUP, one absolute move per
+// interpolated point along a straight line — mirroring octoDrag's approach
+// for apps (crop boxes, sliders, mask brushes) that distinguish a drag from
+// a click-teleport.
+func drag(x1, y1, x2, y2 float64) error {
+	if err := setCursor(x1, y1); err != nil {
+		return err
+	}
+	if err := sendInput([]input{{typ: inputMouse, mi: mouseInput{dwFlags: mouseeventfLeftDown}}}); err != nil {
+		return err
+	}
+	for i := 1; i <= dragSteps; i++ {
+		t := float64(i) / float64(dragSteps)
+		if err := setCursor(x1+(x2-x1)*t, y1+(y2-y1)*t); err != nil {
+			return err
+		}
+		time.Sleep(dragStepDelay)
+	}
+	return sendInput([]input{{typ: inputMouse, mi: mouseInput{dwFlags: mouseeventfLeftUp}}})
 }
 
 // typeText injects each UTF-16 unit as a KEYEVENTF_UNICODE press/release,

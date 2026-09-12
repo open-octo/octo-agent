@@ -24,6 +24,8 @@ func click(button string, x, y float64, clicks int) error { return ErrUnsupporte
 
 func scroll(dx, dy float64) error { return ErrUnsupported }
 
+func drag(x1, y1, x2, y2 float64) error { return ErrUnsupported }
+
 func typeText(s string) error { return ErrUnsupported }
 
 func press(key string, flags uint64) error { return ErrUnsupported }
@@ -36,14 +38,16 @@ func clickPid(pid, winID int, button string, x, y float64, clicks int) error {
 
 func typeTextPid(pid int, s string) error { return ErrUnsupported }
 
-func axTree(pid, maxDepth int) ([]AXElement, error) { return nil, ErrUnsupported }
+func axTree(pid, maxDepth int, menuBar bool) ([]AXElement, error) { return nil, ErrUnsupported }
 
 func axPress(pid int, role, contains string) error { return ErrUnsupported }
 
 func axSetValue(pid int, role, contains, value string) error { return ErrUnsupported }
 
-func axPressByID(pid, maxDepth, id int) (AXElement, error) { return AXElement{}, ErrUnsupported }
+func axPressByID(pid, maxDepth int, menuBar bool, id int) (AXElement, error) {
+	return AXElement{}, ErrUnsupported
+}
 
-func axSetValueByID(pid, maxDepth, id int, value string) (AXElement, error) {
+func axSetValueByID(pid, maxDepth int, menuBar bool, id int, value string) (AXElement, error) {
 	return AXElement{}, ErrUnsupported
 }

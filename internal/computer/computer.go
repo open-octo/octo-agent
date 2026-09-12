@@ -83,6 +83,12 @@ func Click(button string, x, y float64, clicks int) error {
 // dy scrolls down, positive dx scrolls right (natural units are lines).
 func Scroll(dx, dy float64) error { return scroll(dx, dy) }
 
+// Drag posts a left-button drag from (x1, y1) to (x2, y2) with interpolated
+// intermediate move events — the primitive Click lacks for sliders, crop
+// boxes, and mask brushes that need continuous pointer motion between press
+// and release, not just a press-release pair at one point.
+func Drag(x1, y1, x2, y2 float64) error { return drag(x1, y1, x2, y2) }
+
 // TypeText types arbitrary Unicode text as keystrokes.
 func TypeText(s string) error {
 	if s == "" {
@@ -224,13 +230,19 @@ func MatchAXExact(e AXElement, role, label string) bool {
 	return strings.EqualFold(strings.TrimSpace(e.Label()), l)
 }
 
-// AXTree returns a depth-limited digest of the app's accessibility tree —
-// windows plus the menu bar. Works on backgrounded apps. Each element's
-// position in the returned slice is its addressable id: AXPressByID and
-// AXSetValueByID take that same 0-based index (under the same maxDepth) to
-// act on an element ax_tree shows with an empty or duplicate label, which
-// role+contains matching (AXPress/AXSetValue) cannot disambiguate.
-func AXTree(pid, maxDepth int) ([]AXElement, error) { return axTree(pid, maxDepth) }
+// AXTree returns a depth-limited digest of the app's accessibility tree:
+// its windows (menuBar=false, the default — a chatty app's global menu bar
+// can be hundreds of AXMenuItem entries a model will never click, which is
+// why it is excluded by default rather than dumped alongside the windows) or,
+// with menuBar=true, the menu bar ALONE instead. Works on backgrounded apps.
+// Each element's position in the returned slice is its addressable id:
+// AXPressByID and AXSetValueByID take that same 0-based index (under the
+// same maxDepth AND menuBar) to act on an element ax_tree shows with an empty
+// or duplicate label, which role+contains matching (AXPress/AXSetValue)
+// cannot disambiguate.
+func AXTree(pid, maxDepth int, menuBar bool) ([]AXElement, error) {
+	return axTree(pid, maxDepth, menuBar)
+}
 
 // AXPress finds the first element matching role+label (see MatchAX) and
 // performs its press action. Works on backgrounded apps — no cursor, no
@@ -247,11 +259,11 @@ func AXPress(pid int, role, contains string) error {
 // at the given 0-based index into AXTree(pid, maxDepth)'s result, bypassing
 // role/label matching entirely. Returns the matched element's digest so the
 // caller can echo back what it actually pressed.
-func AXPressByID(pid, maxDepth, id int) (AXElement, error) {
+func AXPressByID(pid, maxDepth int, menuBar bool, id int) (AXElement, error) {
 	if id < 0 {
 		return AXElement{}, fmt.Errorf("computer: element id must be >= 0")
 	}
-	return axPressByID(pid, maxDepth, id)
+	return axPressByID(pid, maxDepth, menuBar, id)
 }
 
 // AXSetValue sets the value of the first matching element: numeric for
@@ -264,11 +276,11 @@ func AXSetValue(pid int, role, contains, value string) error {
 }
 
 // AXSetValueByID is AXSetValue's id-addressed counterpart; see AXPressByID.
-func AXSetValueByID(pid, maxDepth, id int, value string) (AXElement, error) {
+func AXSetValueByID(pid, maxDepth int, menuBar bool, id int, value string) (AXElement, error) {
 	if id < 0 {
 		return AXElement{}, fmt.Errorf("computer: element id must be >= 0")
 	}
-	return axSetValueByID(pid, maxDepth, id, value)
+	return axSetValueByID(pid, maxDepth, menuBar, id, value)
 }
 
 // modifier flag bits, mirroring CGEventFlags so parseCombo stays

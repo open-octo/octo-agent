@@ -49,6 +49,47 @@ func TestParseElementID(t *testing.T) {
 	}
 }
 
+// withShotScale temporarily overrides the package-global shotScale (the
+// screenshot->native-space ratio unmapCoord/renderAXTree read) and restores
+// it afterward, so tests don't leak scale state into each other or into the
+// real default (1:1, unknown) other tests assume.
+func withShotScale(t *testing.T, x, y float64, known bool, fn func()) {
+	t.Helper()
+	shotScale.Lock()
+	origX, origY, origKnown := shotScale.x, shotScale.y, shotScale.known
+	shotScale.x, shotScale.y, shotScale.known = x, y, known
+	shotScale.Unlock()
+	t.Cleanup(func() {
+		shotScale.Lock()
+		shotScale.x, shotScale.y, shotScale.known = origX, origY, origKnown
+		shotScale.Unlock()
+	})
+	fn()
+}
+
+func TestRenderAXTree_CoordinatesUnifiedWithScreenshotSpace(t *testing.T) {
+	els := []computer.AXElement{
+		{Role: "AXButton", Title: "Save", X: 100, Y: 200, W: 50, H: 60},
+	}
+
+	withShotScale(t, 2, 2, true, func() {
+		out := renderAXTree(els)
+		if !strings.Contains(out, "e0 AXButton \"Save\" [50,100 25x30]") {
+			t.Errorf("frame was not converted from native space (2x) into image-pixel space; got:\n%s", out)
+		}
+		if strings.Contains(out, "no screenshot taken yet") {
+			t.Errorf("must not warn once a screenshot has established a known scale; got:\n%s", out)
+		}
+	})
+
+	withShotScale(t, 1, 1, false, func() {
+		out := renderAXTree(els)
+		if !strings.Contains(out, "no screenshot taken yet") {
+			t.Errorf("must warn that coordinates assume 1:1 scale before any screenshot; got:\n%s", out)
+		}
+	})
+}
+
 func TestActivateAppArg_NoopWithoutApp(t *testing.T) {
 	// No "app" key at all must short-circuit before touching the substrate
 	// (no Accessibility/window-list calls), so this must not error even
@@ -154,12 +195,12 @@ func TestComputerTool_UnsupportedBuildBlamesNoPermission(t *testing.T) {
 	}
 	// Enough arguments that any action would get past its own operand checks.
 	input := map[string]any{
-		"action": "left_click", "x": 1.0, "y": 1.0, "text": "x",
+		"action": "left_click", "x": 1.0, "y": 1.0, "x2": 2.0, "y2": 2.0, "text": "x",
 		"key": "enter", "app": "Finder", "label": "OK", "role": "AXButton",
 	}
 	for _, action := range []string{
 		"screenshot", "left_click", "right_click", "double_click", "mouse_move",
-		"type", "key", "scroll", "ax_tree", "ax_press", "ax_set",
+		"drag", "type", "key", "scroll", "ax_tree", "ax_press", "ax_set",
 	} {
 		input["action"] = action
 		_, err := ComputerTool{}.Execute(context.Background(), "computer", input)

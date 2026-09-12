@@ -198,6 +198,28 @@ static inline char *octoFrontmostAppName(void) {
 	return out;
 }
 
+// octoDrag performs a left-button drag from (x1,y1) to (x2,y2): mouse-down at
+// the start point, `steps` interpolated CGEventLeftMouseDragged events along
+// a straight line to the end point (paced ~10ms apart — a crude but adequate
+// stand-in for a human drag trajectory, per apps that distinguish a drag
+// from a click-teleport, e.g. Lightroom Classic's crop box and mask brush),
+// then mouse-up at the end point. Distinct from octoClick: no primitive here
+// combines a held button with intermediate motion.
+static inline int octoDrag(double x1, double y1, double x2, double y2, int steps) {
+	CGPoint start = CGPointMake(x1, y1);
+	octoPost(CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDown, start, kCGMouseButtonLeft));
+	if (steps < 1) steps = 1;
+	for (int i = 1; i <= steps; i++) {
+		double t = (double)i / (double)steps;
+		CGPoint p = CGPointMake(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t);
+		octoPost(CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDragged, p, kCGMouseButtonLeft));
+		usleep(10000);
+	}
+	CGPoint end = CGPointMake(x2, y2);
+	octoPost(CGEventCreateMouseEvent(NULL, kCGEventLeftMouseUp, end, kCGMouseButtonLeft));
+	return 0;
+}
+
 // ── Accessibility (AX) layer ───────────────────────────────────────────────
 // AX actions (AXPress / AXSetValue) are served by the target app's own AX
 // server: they need no cursor, no focus, no foreground — the one true

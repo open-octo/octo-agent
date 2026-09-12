@@ -299,7 +299,14 @@ func walkChildren(walker, el comObj, visit func(child comObj) bool) {
 // alive. visit returning false stops the whole walk immediately — used by
 // axActByIndex to act on one element without paying for the rest of a
 // possibly-large tree.
-func axWalk(pid, maxDepth int, visit func(index int, el comObj, e AXElement) bool) error {
+//
+// menuBar is accepted only for signature parity with the macOS substrate
+// (ax_darwin.go), which has a genuinely separate, sometimes-huge global menu
+// bar attribute that needs its own opt-in. A classic Win32 menu bar is
+// already part of the window's own UI Automation tree (walked from here
+// regardless), so there is nothing extra to switch on or off on this
+// platform — the noise problem #3 exists to fix is macOS-specific.
+func axWalk(pid, maxDepth int, menuBar bool, visit func(index int, el comObj, e AXElement) bool) error {
 	if maxDepth <= 0 {
 		maxDepth = 12
 	}
@@ -341,9 +348,9 @@ func axWalk(pid, maxDepth int, visit func(index int, el comObj, e AXElement) boo
 	})
 }
 
-func axTree(pid, maxDepth int) ([]AXElement, error) {
+func axTree(pid, maxDepth int, menuBar bool) ([]AXElement, error) {
 	out := make([]AXElement, 0, 256)
-	err := axWalk(pid, maxDepth, func(_ int, _ comObj, e AXElement) bool {
+	err := axWalk(pid, maxDepth, menuBar, func(_ int, _ comObj, e AXElement) bool {
 		out = append(out, e)
 		return true
 	})
@@ -356,11 +363,11 @@ func axTree(pid, maxDepth int) ([]AXElement, error) {
 // matching, for elements ax_tree shows with an empty or duplicate label.
 // Returns the matched element's digest alongside any error so the caller can
 // echo back what it actually hit.
-func axActByIndex(pid, maxDepth, target int, action func(el comObj) error) (AXElement, error) {
+func axActByIndex(pid, maxDepth int, menuBar bool, target int, action func(el comObj) error) (AXElement, error) {
 	var found bool
 	var matched AXElement
 	var actErr error
-	err := axWalk(pid, maxDepth, func(i int, el comObj, e AXElement) bool {
+	err := axWalk(pid, maxDepth, menuBar, func(i int, el comObj, e AXElement) bool {
 		if i == target {
 			found = true
 			matched = e
@@ -470,8 +477,8 @@ func axPress(pid int, role, contains string) error {
 	return axFindDo(pid, role, contains, doAXPress)
 }
 
-func axPressByID(pid, maxDepth, id int) (AXElement, error) {
-	return axActByIndex(pid, maxDepth, id, doAXPress)
+func axPressByID(pid, maxDepth int, menuBar bool, id int) (AXElement, error) {
+	return axActByIndex(pid, maxDepth, menuBar, id, doAXPress)
 }
 
 // doAXSetValue is axSetValue/axSetValueByID's shared element-level action.
@@ -505,8 +512,8 @@ func axSetValue(pid int, role, contains, value string) error {
 	})
 }
 
-func axSetValueByID(pid, maxDepth, id int, value string) (AXElement, error) {
-	return axActByIndex(pid, maxDepth, id, func(el comObj) error {
+func axSetValueByID(pid, maxDepth int, menuBar bool, id int, value string) (AXElement, error) {
+	return axActByIndex(pid, maxDepth, menuBar, id, func(el comObj) error {
 		return doAXSetValue(el, value)
 	})
 }
