@@ -19,7 +19,7 @@
 	<key>CFBundleIconFile</key>
 	<string>icon.icns</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>11.0</string>
+	<string>12.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<!-- Loopback-only HTTP to the in-process server; no arbitrary loads.

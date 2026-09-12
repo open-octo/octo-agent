@@ -17,6 +17,8 @@ import (
 	"unsafe"
 )
 
+func supported() bool { return true }
+
 func trusted() bool {
 	return C.AXIsProcessTrusted() != 0
 }

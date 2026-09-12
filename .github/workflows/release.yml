@@ -2,7 +2,9 @@ name: Release
 
 # Cut a release by pushing a SemVer tag:
 #   git tag v0.5.0 && git push origin v0.5.0
-# goreleaser then cross-compiles every target and publishes the GitHub Release.
+# goreleaser then builds every target and publishes the GitHub Release. It runs
+# on a macOS runner because the darwin target needs CGO for the computer-use
+# substrate — see the header of .goreleaser.yaml.
 on:
   push:
     tags:
@@ -14,7 +16,10 @@ permissions:
 jobs:
   goreleaser:
     name: goreleaser
-    runs-on: ubuntu-latest
+    # macOS, not ubuntu: the darwin build needs CGO (see .goreleaser.yaml's
+    # darwin override). The Linux and Windows targets are CGO_ENABLED=0 pure Go,
+    # so they cross-compile from here unchanged.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
         with:

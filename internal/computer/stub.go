@@ -2,6 +2,7 @@
 
 package computer
 
+func supported() bool            { return false }
 func trusted() bool              { return false }
 func screenCaptureAllowed() bool { return false }
 

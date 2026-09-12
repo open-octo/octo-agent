@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,7 +74,9 @@ func TestComputerTool_GatedOffByDefault(t *testing.T) {
 }
 
 // With the switch on, the tool is advertised — on macOS and Windows only;
-// elsewhere the switch is ignored because the substrate does not exist.
+// elsewhere the switch is ignored because the substrate does not exist. A
+// macOS build without CGO still advertises (see computerPlatform): its actions
+// fail with an ErrUnsupported that names the missing CGO.
 func TestComputerTool_AdvertisedWhenEnabled(t *testing.T) {
 	home := setHome(t)
 	if err := os.MkdirAll(filepath.Join(home, ".octo"), 0o755); err != nil {
@@ -136,5 +140,31 @@ func TestRenderAXTree_IDsAreTrueIndexNotDisplayCounter(t *testing.T) {
 	}
 	if !strings.Contains(out, "(4 of 6 elements shown") {
 		t.Errorf("summary line should count 4 shown of 6 total; got:\n%s", out)
+	}
+}
+
+// A build with no substrate must say so rather than blame a missing permission
+// grant. The stub reports Trusted() and ScreenCaptureAllowed() false, so before
+// requireSubstrate the permission gates fired first and told the user to grant
+// Accessibility in System Settings — a switch that cannot help, because there
+// is no implementation behind it (the case CGO-less darwin CLI builds shipped).
+func TestComputerTool_UnsupportedBuildBlamesNoPermission(t *testing.T) {
+	if computer.Supported() {
+		t.Skip("build has a substrate; the stub path runs on the unsupported/CGO-less CI legs")
+	}
+	// Enough arguments that any action would get past its own operand checks.
+	input := map[string]any{
+		"action": "left_click", "x": 1.0, "y": 1.0, "text": "x",
+		"key": "enter", "app": "Finder", "label": "OK", "role": "AXButton",
+	}
+	for _, action := range []string{
+		"screenshot", "left_click", "right_click", "double_click", "mouse_move",
+		"type", "key", "scroll", "ax_tree", "ax_press", "ax_set",
+	} {
+		input["action"] = action
+		_, err := ComputerTool{}.Execute(context.Background(), "computer", input)
+		if !errors.Is(err, computer.ErrUnsupported) {
+			t.Errorf("%s: err = %v, want ErrUnsupported — a permission error here is the misleading case", action, err)
+		}
 	}
 }
