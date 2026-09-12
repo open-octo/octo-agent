@@ -33,6 +33,9 @@ var (
 	procReleaseDC                     = user32.NewProc("ReleaseDC")
 	procSetProcessDpiAwarenessContext = user32.NewProc("SetProcessDpiAwarenessContext")
 	procVkKeyScanW                    = user32.NewProc("VkKeyScanW")
+	procSetForegroundWindow           = user32.NewProc("SetForegroundWindow")
+	procAttachThreadInput             = user32.NewProc("AttachThreadInput")
+	procBringWindowToTop              = user32.NewProc("BringWindowToTop")
 
 	procBitBlt                 = gdi32.NewProc("BitBlt")
 	procCreateCompatibleDC     = gdi32.NewProc("CreateCompatibleDC")
@@ -167,6 +170,50 @@ func trusted() bool              { return true }
 func screenCaptureAllowed() bool { return true }
 func requestScreenCapture()      {}
 func requestAccessibility()      {}
+
+// activateApp brings pid's top-most window to the foreground. Windows
+// normally refuses SetForegroundWindow from a process that isn't itself
+// foreground (the "foreground lock" anti-focus-stealing rule); attaching our
+// thread's input queue to the current foreground window's thread while the
+// call is made is the standard workaround (same trick AutoHotkey / pywinauto
+// use), so a click/type/key aimed at a backgrounded app doesn't silently
+// land in Octo's own window instead.
+func activateApp(pid int) error {
+	w, err := windowForPid(pid)
+	if err != nil {
+		return err
+	}
+	hwnd := uintptr(w.ID)
+
+	curTid := windows.GetCurrentThreadId()
+	fg := windows.GetForegroundWindow()
+	var fgPid uint32
+	fgTid, _ := windows.GetWindowThreadProcessId(fg, &fgPid)
+
+	if fgTid != 0 && fgTid != curTid {
+		procAttachThreadInput.Call(uintptr(curTid), uintptr(fgTid), 1)
+		defer procAttachThreadInput.Call(uintptr(curTid), uintptr(fgTid), 0)
+	}
+	procBringWindowToTop.Call(hwnd)
+	if ok, _, e := procSetForegroundWindow.Call(hwnd); ok == 0 {
+		return fmt.Errorf("computer: SetForegroundWindow failed: %v (Windows may be blocking focus theft — click the target window once manually, then retry)", e)
+	}
+	return nil
+}
+
+// frontmostAppName reports the executable name of the currently-foreground
+// window's owning process, "" if undetermined.
+func frontmostAppName() string {
+	fg := windows.GetForegroundWindow()
+	if fg == 0 {
+		return ""
+	}
+	var pid uint32
+	if _, err := windows.GetWindowThreadProcessId(fg, &pid); err != nil {
+		return ""
+	}
+	return processBaseName(pid)
+}
 
 func screenSize() (float64, float64, error) {
 	ensureDPIAware()

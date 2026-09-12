@@ -293,16 +293,21 @@ func walkChildren(walker, el comObj, visit func(child comObj) bool) {
 	}
 }
 
-func axTree(pid, maxDepth int) ([]AXElement, error) {
+// axWalk performs the same depth-first traversal axTree renders (from pid's
+// top-most window, depth- and fan-out-capped) and calls visit for every
+// element with its 0-based traversal index while the COM element is still
+// alive. visit returning false stops the whole walk immediately — used by
+// axActByIndex to act on one element without paying for the rest of a
+// possibly-large tree.
+func axWalk(pid, maxDepth int, visit func(index int, el comObj, e AXElement) bool) error {
 	if maxDepth <= 0 {
 		maxDepth = 12
 	}
 	win, err := windowForPid(pid)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	out := make([]AXElement, 0, 256)
-	err = withCOM(func(auto comObj) error {
+	return withCOM(func(auto comObj) error {
 		root, err := elementFromHandle(auto, uintptr(win.ID))
 		if err != nil {
 			return err
@@ -314,21 +319,59 @@ func axTree(pid, maxDepth int) ([]AXElement, error) {
 		}
 		defer walker.release()
 
+		index := 0
+		stop := false
 		var walk func(el comObj, depth int)
 		walk = func(el comObj, depth int) {
-			if depth > maxDepth || len(out) >= axMaxTotal {
+			if stop || depth > maxDepth || index >= axMaxTotal {
 				return
 			}
-			out = append(out, uiaElement(el, depth))
+			if !visit(index, el, uiaElement(el, depth)) {
+				stop = true
+				return
+			}
+			index++
 			walkChildren(walker, el, func(child comObj) bool {
 				walk(child, depth+1)
-				return len(out) < axMaxTotal
+				return !stop
 			})
 		}
 		walk(root, 0)
 		return nil
 	})
+}
+
+func axTree(pid, maxDepth int) ([]AXElement, error) {
+	out := make([]AXElement, 0, 256)
+	err := axWalk(pid, maxDepth, func(_ int, _ comObj, e AXElement) bool {
+		out = append(out, e)
+		return true
+	})
 	return out, err
+}
+
+// axActByIndex performs action on the element at the given 0-based
+// traversal index — the same numbering axTree's returned slice uses, under
+// the same pid + maxDepth. Id-addressed counterpart to axFindDo's role+label
+// matching, for elements ax_tree shows with an empty or duplicate label.
+func axActByIndex(pid, maxDepth, target int, action func(el comObj) error) error {
+	var found bool
+	var actErr error
+	err := axWalk(pid, maxDepth, func(i int, el comObj, _ AXElement) bool {
+		if i == target {
+			found = true
+			actErr = action(el)
+			return false
+		}
+		return true
+	})
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("computer: no element with id e%d (re-dump ax_tree — the tree may have changed, or max_depth differs from the dump that produced this id)", target)
+	}
+	return actErr
 }
 
 // axFindDo mirrors the macOS search: an exact-label pass wins over a
@@ -391,55 +434,75 @@ func axFindDo(pid int, role, contains string, action func(el comObj) error) erro
 	})
 }
 
+// doAXPress performs an already-located element's Invoke/Toggle/default
+// action; shared by the label-matched (axPress) and id-addressed
+// (axPressByID) paths.
+func doAXPress(el comObj) error {
+	if p := elementPattern(el, uiaInvokePatternId, &iidIUIAutomationInvokePattern); p != 0 {
+		defer p.release()
+		if hr := p.call(slotInvokePatternInvoke); failed(hr) {
+			return hresultErr("IUIAutomationInvokePattern::Invoke", hr)
+		}
+		return nil
+	}
+	if p := elementPattern(el, uiaTogglePatternId, &iidIUIAutomationTogglePattern); p != 0 {
+		defer p.release()
+		if hr := p.call(slotTogglePatternToggle); failed(hr) {
+			return hresultErr("IUIAutomationTogglePattern::Toggle", hr)
+		}
+		return nil
+	}
+	if p := elementPattern(el, uiaLegacyIAccessiblePatternId, &iidIUIAutomationLegacyIAccessiblePattern); p != 0 {
+		defer p.release()
+		if hr := p.call(slotLegacyPatternDoDefaultAction); failed(hr) {
+			return hresultErr("IUIAutomationLegacyIAccessiblePattern::DoDefaultAction", hr)
+		}
+		return nil
+	}
+	return fmt.Errorf("computer: element supports neither Invoke, Toggle nor a default action — click it by coordinate instead")
+}
+
 func axPress(pid int, role, contains string) error {
-	return axFindDo(pid, role, contains, func(el comObj) error {
-		if p := elementPattern(el, uiaInvokePatternId, &iidIUIAutomationInvokePattern); p != 0 {
-			defer p.release()
-			if hr := p.call(slotInvokePatternInvoke); failed(hr) {
-				return hresultErr("IUIAutomationInvokePattern::Invoke", hr)
-			}
-			return nil
+	return axFindDo(pid, role, contains, doAXPress)
+}
+
+func axPressByID(pid, maxDepth, id int) error {
+	return axActByIndex(pid, maxDepth, id, doAXPress)
+}
+
+// doAXSetValue is axSetValue/axSetValueByID's shared element-level action.
+func doAXSetValue(el comObj, value string) error {
+	wide, err := windows.UTF16PtrFromString(value)
+	if err != nil {
+		return fmt.Errorf("computer: value %q: %w", value, err)
+	}
+	if p := elementPattern(el, uiaValuePatternId, &iidIUIAutomationValuePattern); p != 0 {
+		defer p.release()
+		b, _, _ := procSysAllocString.Call(uintptr(unsafe.Pointer(wide)))
+		defer freeBSTR(b)
+		if hr := p.call(slotValuePatternSetValue, b); failed(hr) {
+			return hresultErr(fmt.Sprintf("IUIAutomationValuePattern::SetValue(%q)", value), hr)
 		}
-		if p := elementPattern(el, uiaTogglePatternId, &iidIUIAutomationTogglePattern); p != 0 {
-			defer p.release()
-			if hr := p.call(slotTogglePatternToggle); failed(hr) {
-				return hresultErr("IUIAutomationTogglePattern::Toggle", hr)
-			}
-			return nil
+		return nil
+	}
+	if p := elementPattern(el, uiaLegacyIAccessiblePatternId, &iidIUIAutomationLegacyIAccessiblePattern); p != 0 {
+		defer p.release()
+		if hr := p.call(slotLegacyPatternSetValue, uintptr(unsafe.Pointer(wide))); failed(hr) {
+			return hresultErr(fmt.Sprintf("IUIAutomationLegacyIAccessiblePattern::SetValue(%q)", value), hr)
 		}
-		if p := elementPattern(el, uiaLegacyIAccessiblePatternId, &iidIUIAutomationLegacyIAccessiblePattern); p != 0 {
-			defer p.release()
-			if hr := p.call(slotLegacyPatternDoDefaultAction); failed(hr) {
-				return hresultErr("IUIAutomationLegacyIAccessiblePattern::DoDefaultAction", hr)
-			}
-			return nil
-		}
-		return fmt.Errorf("computer: element supports neither Invoke, Toggle nor a default action — click it by coordinate instead")
-	})
+		return nil
+	}
+	return fmt.Errorf("computer: element accepts no text value (RangeValue-only controls cannot be set from this build; focus it with ax_press and use key arrows instead)")
 }
 
 func axSetValue(pid int, role, contains, value string) error {
 	return axFindDo(pid, role, contains, func(el comObj) error {
-		wide, err := windows.UTF16PtrFromString(value)
-		if err != nil {
-			return fmt.Errorf("computer: value %q: %w", value, err)
-		}
-		if p := elementPattern(el, uiaValuePatternId, &iidIUIAutomationValuePattern); p != 0 {
-			defer p.release()
-			b, _, _ := procSysAllocString.Call(uintptr(unsafe.Pointer(wide)))
-			defer freeBSTR(b)
-			if hr := p.call(slotValuePatternSetValue, b); failed(hr) {
-				return hresultErr(fmt.Sprintf("IUIAutomationValuePattern::SetValue(%q)", value), hr)
-			}
-			return nil
-		}
-		if p := elementPattern(el, uiaLegacyIAccessiblePatternId, &iidIUIAutomationLegacyIAccessiblePattern); p != 0 {
-			defer p.release()
-			if hr := p.call(slotLegacyPatternSetValue, uintptr(unsafe.Pointer(wide))); failed(hr) {
-				return hresultErr(fmt.Sprintf("IUIAutomationLegacyIAccessiblePattern::SetValue(%q)", value), hr)
-			}
-			return nil
-		}
-		return fmt.Errorf("computer: element accepts no text value (RangeValue-only controls cannot be set from this build; focus it with ax_press and use key arrows instead)")
+		return doAXSetValue(el, value)
+	})
+}
+
+func axSetValueByID(pid, maxDepth, id int, value string) error {
+	return axActByIndex(pid, maxDepth, id, func(el comObj) error {
+		return doAXSetValue(el, value)
 	})
 }

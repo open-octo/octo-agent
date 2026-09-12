@@ -158,6 +158,46 @@ static inline int octoClickPid(int pid, int winID, int right, double x, double y
 	return 0;
 }
 
+// octoAXSetFrontmost brings pid's app forward — the standard third-party way
+// apps raise another app (Rectangle, Hammerspoon use the same attribute).
+// This is the real fix for pixel-channel input silently missing a
+// backgrounded app: octoClickPid/octoTypePid above were measured to be
+// dropped by both SwiftUI and custom-drawn views even while "delivered", so
+// genuine focus is the only reliable path.
+static inline int octoAXSetFrontmost(int pid) {
+	AXUIElementRef app = AXUIElementCreateApplication((pid_t)pid);
+	AXError rc = AXUIElementSetAttributeValue(app, kAXFrontmostAttribute, kCFBooleanTrue);
+	CFRelease(app);
+	return (int)rc;
+}
+
+// octoFrontmostAppName reads the owner name of the front-most normal-layer
+// on-screen window: CGWindowListCopyWindowInfo with
+// kCGWindowListOptionOnScreenOnly returns windows in front-to-back z-order,
+// so the first layer-0 entry belongs to the frontmost app. Caller frees with
+// free(); NULL if undetermined.
+static inline char *octoFrontmostAppName(void) {
+	CFArrayRef list = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
+	if (!list) return NULL;
+	char *out = NULL;
+	CFIndex n = CFArrayGetCount(list);
+	for (CFIndex i = 0; i < n; i++) {
+		CFDictionaryRef d = (CFDictionaryRef)CFArrayGetValueAtIndex(list, i);
+		CFNumberRef layerN = (CFNumberRef)CFDictionaryGetValue(d, kCGWindowLayer);
+		int layer = -1;
+		if (layerN) CFNumberGetValue(layerN, kCFNumberIntType, &layer);
+		if (layer != 0) continue;
+		CFStringRef o = (CFStringRef)CFDictionaryGetValue(d, kCGWindowOwnerName);
+		if (!o) break;
+		CFIndex max = CFStringGetMaximumSizeForEncoding(CFStringGetLength(o), kCFStringEncodingUTF8) + 1;
+		out = (char *)malloc(max);
+		if (!CFStringGetCString(o, out, max, kCFStringEncodingUTF8)) { free(out); out = NULL; }
+		break;
+	}
+	CFRelease(list);
+	return out;
+}
+
 // ── Accessibility (AX) layer ───────────────────────────────────────────────
 // AX actions (AXPress / AXSetValue) are served by the target app's own AX
 // server: they need no cursor, no focus, no foreground — the one true
