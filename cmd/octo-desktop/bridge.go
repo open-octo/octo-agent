@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -170,6 +171,19 @@ const desktopShellQuery = "shell=octo-desktop"
 // sync (TestShellURL pins the Go side).
 func shellURL(base, hash string) string {
 	u := base + "/?" + desktopShellQuery
+	// The shell webview aligns its titlebar rows to the traffic lights, whose
+	// position depends on the host's macOS version (26pt from the window top
+	// on macOS 26 for this window style, 20px through macOS 15) — and it
+	// needs that version at first paint: waiting for /api/version leaves the
+	// rows un-inset under the lights for a second or two at startup. So the
+	// version rides in the URL alongside the shell marker; the frontend seeds
+	// macosMajor from it (web/src/lib/stores.ts) and re-confirms from
+	// /api/version's os_version once that lands.
+	if runtime.GOOS == "darwin" {
+		if major, _, _ := strings.Cut(server.OSVersion(), "."); major != "" {
+			u += "&macos=" + major
+		}
+	}
 	if hash != "" {
 		u += "#" + hash
 	}

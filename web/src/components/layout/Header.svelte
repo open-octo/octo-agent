@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { sidebar, nativeShell, panelContent, view, chatHeaderSnippet, activeSessionId, lightappOpen, panelForView } from '../../lib/stores'
+  import { sidebar, nativeShell, isDesktopShell, panelContent, view, chatHeaderSnippet, activeSessionId, lightappOpen, panelForView } from '../../lib/stores'
   import { diffBadge } from '../../lib/diff'
   import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
@@ -38,14 +38,17 @@
   const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
   // Mac's traffic lights float over the window's top-left corner. That corner
   // is Sidebar's header while the sidebar is showing (it insets itself), and
-  // this row only once the sidebar is gone.
-  const insetForTrafficLights = $derived($nativeShell && isMac && $sidebar === 'hidden')
+  // this row only once the sidebar is gone. Gated on isDesktopShell rather
+  // than nativeShell: the marker is known from the URL at first paint, while
+  // nativeShell waits on /api/version and the row would flash un-inset under
+  // the lights at startup.
+  const insetForTrafficLights = $derived(isDesktopShell && isMac && $sidebar === 'hidden')
   // Making room for the lights is one thing; sitting on the same axis as them is
   // another, and this row needs the second one whether or not it holds the first.
   // While the sidebar shows, the lights are over ITS header — but if only that
   // column lifted its content, the brand row and this row's chat title would sit
   // 4px apart.
-  const liftForTrafficLights = $derived($nativeShell && isMac)
+  const liftForTrafficLights = isDesktopShell && isMac
 
   // The □/❐ icon reflects maximise state the frontend owns — there's no native
   // title bar reading it. This row holds the only copy of that icon, so it is
@@ -127,14 +130,20 @@ header {
    for the lights, nothing more. */
 header.native-inset { padding-left: 82px; }
 /* Lifting the axis is the other half, and max-height is the load-bearing part of
-   it. Padding-bottom alone only moves the axis while min-height still decides the
+   it. Padding alone only moves the axis while min-height still decides the
    row height; .chat-header-slot is taller than the 36px that would leave, so the
    row grew to 52px instead and the axis never moved. Pinning the height makes the
    padding actually shorten the content box.
-   The lights' centre sits 20px below the window's top edge, so 4px of padding is
-   the whole lift: (44 - 4) / 2 lands the row's axis exactly there. */
+   The padding itself comes from --titlebar-pad-top/--titlebar-pad-bottom (set
+   by applyTitlebarLift once /api/version reports the host's macOS version):
+   4px bottom puts the axis at 20px, the lights' centre up through macOS 15;
+   macOS 26 moved that centre to 26pt for windows stamped with the macOS 26
+   SDK (measured for this window style), so there 8px of top padding puts the
+   axis at 26 instead. The 4px-bottom fallback covers web mode and the
+   not-yet-answered fetch. */
 header.native-lift {
-  box-sizing: border-box; max-height: 44px; padding-bottom: 4px;
+  box-sizing: border-box; max-height: 44px;
+  padding-top: var(--titlebar-pad-top, 0px); padding-bottom: var(--titlebar-pad-bottom, 4px);
 }
 /* The row is a window drag handle; every control opts back out so it stays
    clickable, leaving the blank stretches to drag the window. */
