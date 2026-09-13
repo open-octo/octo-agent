@@ -1,11 +1,13 @@
 package main
 
 import (
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/server"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -14,18 +16,29 @@ import (
 // web/src/components/layout/VersionBadge.svelte); renaming one side without the
 // other silently downgrades the desktop shell to a plain-web client — the OS
 // file dialog and native header quietly stop working. This test locks the Go
-// side of that contract.
+// side of that contract. On darwin the URL also carries the host's macOS major
+// version (the titlebar rows need it at first paint — see shellURL), which the
+// frontend reads as the macos query param in web/src/lib/stores.ts.
 func TestShellURL(t *testing.T) {
 	const base = "http://127.0.0.1:8088"
+
+	query := "shell=octo-desktop"
+	if runtime.GOOS == "darwin" {
+		major, _, _ := strings.Cut(server.OSVersion(), ".")
+		if major == "" {
+			t.Fatal("OSVersion() empty on darwin — the shell URL would drop the macos param")
+		}
+		query += "&macos=" + major
+	}
 
 	tests := []struct {
 		name string
 		hash string
 		want string
 	}{
-		{"no hash", "", base + "/?shell=octo-desktop"},
-		{"with hash", "settings", base + "/?shell=octo-desktop#settings"},
-		{"nested route", "chat/abc123", base + "/?shell=octo-desktop#chat/abc123"},
+		{"no hash", "", base + "/?" + query},
+		{"with hash", "settings", base + "/?" + query + "#settings"},
+		{"nested route", "chat/abc123", base + "/?" + query + "#chat/abc123"},
 	}
 	for _, tt := range tests {
 		if got := shellURL(base, tt.hash); got != tt.want {

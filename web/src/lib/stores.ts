@@ -83,6 +83,18 @@ export const wsDown = writable(false)
 export const isDesktopShell =
   typeof location !== 'undefined' && new URLSearchParams(location.search).get('shell') === 'octo-desktop'
 
+// Major macOS version of the desktop shell's host (e.g. 26), handed over in
+// the shell URL next to the marker (cmd/octo-desktop/bridge.go shellURL); 0
+// outside the mac desktop shell. The window-chrome code needs it at first
+// paint — waiting for /api/version leaves the titlebar rows un-inset under
+// the traffic lights for a second or two at startup — so like isDesktopShell
+// it comes from the URL, no round-trip. VersionBadge re-confirms it into
+// macosMajor from /api/version's os_version once that lands.
+export const shellMacosMajor =
+  typeof location !== 'undefined'
+    ? parseInt(new URLSearchParams(location.search).get('macos') ?? '', 10) || 0
+    : 0
+
 // True when the page runs inside the octo-mobile Capacitor webview. Capacitor
 // injects a global `Capacitor` object with isNativePlatform(); a plain browser
 // has none. Fixed for the page's lifetime, like isDesktopShell. Mobile's
@@ -100,11 +112,13 @@ export const mobileShell =
 // dialog instead of the in-app directory tree. False under `octo serve`.
 export const nativeShell = writable(false)
 
-// Major macOS version of the desktop shell's host (e.g. 26), parsed from
+// Major macOS version of the desktop shell's host (e.g. 26). Seeded
+// synchronously from the shell URL (shellMacosMajor above) so window chrome
+// is right at first paint, then re-confirmed by VersionBadge from
 // /api/version's os_version; 0 when the host isn't macOS or isn't known yet.
 // The titlebar rows read it to sit on the traffic lights' axis, which macOS 26
-// moved for windows stamped with the macOS 26 SDK (see titlebarLiftPx).
-export const macosMajor = writable(0)
+// moved for windows stamped with the macOS 26 SDK (see titlebarPaddingPx).
+export const macosMajor = writable(shellMacosMajor)
 
 // True when the browser is on the same machine as the server (loopback),
 // reported by /api/version's `local` flag — desktop shell OR localhost web.

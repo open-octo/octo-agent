@@ -4,7 +4,7 @@ import { get } from 'svelte/store'
 const mocks = vi.hoisted(() => ({ toggle: vi.fn(), state: vi.fn() }))
 vi.mock('./stores', async () => {
   const { writable } = await import('svelte/store')
-  return { nativeShell: writable(false), macosMajor: writable(0) }
+  return { nativeShell: writable(false), macosMajor: writable(0), isDesktopShell: true }
 })
 vi.mock('./api', () => ({
   nativeToggleMaximise: mocks.toggle,
@@ -112,7 +112,6 @@ describe('nativeWindow', () => {
 
     it('publishes 8px top / 0px bottom on a macOS 26 desktop shell', () => {
       onMacPlatform('MacIntel')
-      nativeShell.set(true)
       macosMajor.set(26)
       applyTitlebarLift()
       expect(document.documentElement.style.getPropertyValue('--titlebar-pad-top')).toBe('8px')
@@ -121,20 +120,18 @@ describe('nativeWindow', () => {
 
     it('publishes 0px top / 4px bottom on a pre-26 macOS desktop shell', () => {
       onMacPlatform('MacIntel')
-      nativeShell.set(true)
       macosMajor.set(15)
       applyTitlebarLift()
       expect(document.documentElement.style.getPropertyValue('--titlebar-pad-top')).toBe('0px')
       expect(document.documentElement.style.getPropertyValue('--titlebar-pad-bottom')).toBe('4px')
     })
 
-    it('publishes 0px both ways outside the desktop shell (vars unread there)', () => {
+    it('publishes the legacy values when the host version is unknown', () => {
       onMacPlatform('MacIntel')
-      nativeShell.set(false)
-      macosMajor.set(15)
+      macosMajor.set(0)
       applyTitlebarLift()
       expect(document.documentElement.style.getPropertyValue('--titlebar-pad-top')).toBe('0px')
-      expect(document.documentElement.style.getPropertyValue('--titlebar-pad-bottom')).toBe('0px')
+      expect(document.documentElement.style.getPropertyValue('--titlebar-pad-bottom')).toBe('4px')
     })
   })
 })

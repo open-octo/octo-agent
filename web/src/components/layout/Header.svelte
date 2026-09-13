@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { sidebar, nativeShell, panelContent, view, chatHeaderSnippet, activeSessionId, lightappOpen, panelForView } from '../../lib/stores'
+  import { sidebar, nativeShell, isDesktopShell, panelContent, view, chatHeaderSnippet, activeSessionId, lightappOpen, panelForView } from '../../lib/stores'
   import { diffBadge } from '../../lib/diff'
   import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
@@ -38,14 +38,17 @@
   const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
   // Mac's traffic lights float over the window's top-left corner. That corner
   // is Sidebar's header while the sidebar is showing (it insets itself), and
-  // this row only once the sidebar is gone.
-  const insetForTrafficLights = $derived($nativeShell && isMac && $sidebar === 'hidden')
+  // this row only once the sidebar is gone. Gated on isDesktopShell rather
+  // than nativeShell: the marker is known from the URL at first paint, while
+  // nativeShell waits on /api/version and the row would flash un-inset under
+  // the lights at startup.
+  const insetForTrafficLights = $derived(isDesktopShell && isMac && $sidebar === 'hidden')
   // Making room for the lights is one thing; sitting on the same axis as them is
   // another, and this row needs the second one whether or not it holds the first.
   // While the sidebar shows, the lights are over ITS header — but if only that
   // column lifted its content, the brand row and this row's chat title would sit
   // 4px apart.
-  const liftForTrafficLights = $derived($nativeShell && isMac)
+  const liftForTrafficLights = isDesktopShell && isMac
 
   // The □/❐ icon reflects maximise state the frontend owns — there's no native
   // title bar reading it. This row holds the only copy of that icon, so it is

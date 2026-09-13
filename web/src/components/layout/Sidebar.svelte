@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import { get } from 'svelte/store'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen, cmdkOpen, nativeShell, dirLeaf } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen, cmdkOpen, nativeShell, isDesktopShell, dirLeaf } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { titlebarDblClick } from '../../lib/nativeWindow'
   import { t, tr } from '../../lib/i18n'
@@ -637,7 +637,10 @@
   <div class="full" style="width:{fullWidth}px">
     <!-- Draggable like the main column's top row, and so it takes the same
          double-click-to-zoom a native title bar would give it. -->
-    <div class="side-header" class:native-inset={$nativeShell && isMac} style="--wails-draggable:drag" ondblclick={titlebarDblClick}>
+    <!-- isDesktopShell, not nativeShell: the URL marker is known at first
+         paint, while nativeShell waits on /api/version and the row would
+         flash un-inset under the traffic lights at startup. -->
+    <div class="side-header" class:native-inset={isDesktopShell && isMac} style="--wails-draggable:drag" ondblclick={titlebarDblClick}>
       <button class="icon-btn" title={$t('header.toggle_left')} aria-pressed={true} onclick={() => sidebar.set('hidden')}>
         <iconify-icon icon="lucide:panel-left" width="16"></iconify-icon>
       </button>
@@ -1090,7 +1093,7 @@
 
   {#if $sidebar === 'rail'}
   <div class="rail">
-    <div class="rail-new" class:native-inset={$nativeShell && isMac}>
+    <div class="rail-new" class:native-inset={isDesktopShell && isMac}>
       <button class="rail-btn primary" title={$t('nav.new_session')} onclick={() => createNewSession()}>
         <iconify-icon icon="ant-design:plus-outlined" width="16"></iconify-icon>
       </button>

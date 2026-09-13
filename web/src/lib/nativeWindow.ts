@@ -1,5 +1,5 @@
 import { get, writable } from 'svelte/store'
-import { nativeShell, macosMajor } from './stores'
+import { nativeShell, macosMajor, isDesktopShell } from './stores'
 import { nativeToggleMaximise, nativeWindowState } from './api'
 
 // Desktop shell only. Maximise state has to be shared rather than owned by one
@@ -64,14 +64,16 @@ export function titlebarPaddingPx(
 
 // Publishes the padding to every titlebar row at once: the CSS reads
 // var(--titlebar-pad-top, 0px) and var(--titlebar-pad-bottom, 4px), whose
-// defaults are also the pre-fetch legacy values. Called by VersionBadge once
-// /api/version has answered what nativeShell and macosMajor actually are.
+// defaults are also the pre-fetch legacy values. main.ts calls this before
+// first paint (isDesktopShell and the URL-seeded macosMajor make every input
+// synchronous — waiting for /api/version flashed the rows un-inset under the
+// lights at startup), and VersionBadge re-runs it once /api/version lands.
 // Runs against document rather than a component so the single value reaches
 // Header, Sidebar's brand row and the ArtifactsPanel topbars without
 // threading a store through each of them.
 export function applyTitlebarLift(): void {
   const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
-  const pad = titlebarPaddingPx(get(nativeShell), isMac, get(macosMajor))
+  const pad = titlebarPaddingPx(isDesktopShell, isMac, get(macosMajor))
   document.documentElement.style.setProperty('--titlebar-pad-top', `${pad.top}px`)
   document.documentElement.style.setProperty('--titlebar-pad-bottom', `${pad.bottom}px`)
 }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightappOpen, lightapps, lightappHTML, lightappStamp, cacheLightApp, dropLightApp, showToast, nativeShell, localAccess, activeSessionId, savePanelMode, type PanelMode } from '../lib/stores'
+  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightappOpen, lightapps, lightappHTML, lightappStamp, cacheLightApp, dropLightApp, showToast, isDesktopShell, localAccess, activeSessionId, savePanelMode, type PanelMode } from '../lib/stores'
   import { titlebarDblClick } from '../lib/nativeWindow'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
@@ -13,8 +13,9 @@
 
   // This column never holds the traffic lights, but its top row has to sit on
   // the same axis as the chat title beside it, which Header lifts on mac.
+  // isDesktopShell, not nativeShell — see Header.
   const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
-  const liftForTrafficLights = $derived($nativeShell && isMac)
+  const liftForTrafficLights = isDesktopShell && isMac
 
   // ── Session artifacts (existing) ──────────────────────────────────────────
   const cur = $derived($artifacts[$artifactSel] ?? $artifacts[0])
