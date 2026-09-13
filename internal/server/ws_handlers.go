@@ -62,6 +62,17 @@ const maxLiveTurnEvents = 200
 // what a page refresh mid-command can catch up on.
 const maxLiveStdoutLines = 200
 
+// stdoutCoalesceWindow batches EventToolProgress chunks arriving faster than
+// this into a single tool_stdout broadcast, rather than one WS message (and
+// one frontend re-render) per line. A verbose build can emit output far
+// faster than this — without coalescing, that hammers the desktop shell's
+// webview render thread with one DOM update per line, which can pin it long
+// enough to trip Windows' "not responding" hang detector on the whole window.
+// Terminal is the only tool that streams EventToolProgress and it never runs
+// concurrently with another tool call (see concurrencySafe in agent.go), so a
+// single pending buffer on wsStreamWriter (not keyed by tool_id) is safe.
+const stdoutCoalesceWindow = 80 * time.Millisecond
+
 // appendEvent adds an already-broadcast turn event to the replay buffer.
 // Caller holds liveStateMu.
 func (ls *sessionLiveState) appendEvent(ev map[string]any) {
@@ -1962,6 +1973,13 @@ type wsStreamWriter struct {
 	// broadcastContextUsage, so parallel tool calls in one round (same count)
 	// broadcast once. Guarded by mu (handleEvent holds it).
 	lastCtxTokens int
+
+	// stdoutPending/stdoutPendingTool buffer EventToolProgress chunks between
+	// flushes (see stdoutCoalesceWindow); stdoutFlushAt is when the buffer was
+	// last flushed. All three guarded by mu (handleEvent holds it).
+	stdoutPending     []string
+	stdoutPendingTool string
+	stdoutFlushAt     time.Time
 }
 
 func (s *Server) newWSStreamWriter(sessionID string) *wsStreamWriter {
@@ -2091,6 +2109,26 @@ func (w *wsStreamWriter) broadcastContextUsage() {
 
 // handleEvent converts agent.AgentEvent to WS JSON events and broadcasts them.
 // It also updates the server's live state for late-subscriber replay.
+// flushStdout broadcasts any buffered EventToolProgress chunks as one
+// tool_stdout message and resets the coalescing window. No-op when nothing is
+// pending, so it's safe to call defensively from every event that could end a
+// tool's output (EventToolDone, EventToolError, EventTurnDone) in addition to
+// the coalescing check in EventToolProgress itself. Caller holds w.mu.
+func (w *wsStreamWriter) flushStdout() {
+	if len(w.stdoutPending) == 0 {
+		return
+	}
+	evt := map[string]any{
+		"type":       "tool_stdout",
+		"session_id": w.sessionID,
+		"tool_id":    w.stdoutPendingTool,
+		"lines":      w.stdoutPending,
+	}
+	w.hub.broadcast(w.sessionID, evt)
+	w.stdoutPending = nil
+	w.stdoutFlushAt = time.Now()
+}
+
 func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -2149,13 +2187,6 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 		// StreamingToolExecutor tools (currently just terminal) emit this;
 		// most tools never reach here. tool_id lets the frontend attribute the
 		// chunk to the right card (see #1193's pickToolIndex).
-		evt := map[string]any{
-			"type":       "tool_stdout",
-			"session_id": w.sessionID,
-			"tool_id":    ev.ToolID,
-			"lines":      []string{ev.Chunk},
-		}
-		w.hub.broadcast(w.sessionID, evt)
 		w.server.liveStateMu.Lock()
 		if ls, ok := w.server.liveStates[w.sessionID]; ok {
 			ls.stdoutToolID = ev.ToolID
@@ -2166,7 +2197,24 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 		}
 		w.server.liveStateMu.Unlock()
 
+		// Coalesce rather than broadcast this single chunk immediately — see
+		// stdoutCoalesceWindow. A tool_id change can only mean the previous
+		// tool's buffer was somehow left unflushed (EventToolDone/Error below
+		// already flush it); flush defensively so a chunk is never attributed
+		// to the wrong card.
+		if w.stdoutPendingTool != "" && w.stdoutPendingTool != ev.ToolID {
+			w.flushStdout()
+		}
+		w.stdoutPendingTool = ev.ToolID
+		w.stdoutPending = append(w.stdoutPending, ev.Chunk)
+		if time.Since(w.stdoutFlushAt) >= stdoutCoalesceWindow {
+			w.flushStdout()
+		}
+
 	case agent.EventToolDone:
+		// Flush any buffered progress lines before the result, so the last
+		// coalesced chunk isn't left waiting for a next line that never comes.
+		w.flushStdout()
 		toolResult := map[string]any{
 			"type":       "tool_result",
 			"session_id": w.sessionID,
@@ -2203,6 +2251,8 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 		w.server.broadcastBackgroundTasks(w.sessionID)
 
 	case agent.EventToolError:
+		// Same reasoning as EventToolDone: don't leave the last chunk stranded.
+		w.flushStdout()
 		evt := map[string]any{
 			"type":       "tool_error",
 			"session_id": w.sessionID,
@@ -2314,6 +2364,9 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 		}
 
 	case agent.EventTurnDone:
+		// Defensive: a turn interrupted mid-stream could in principle reach
+		// here without an EventToolDone/Error for the in-flight tool.
+		w.flushStdout()
 		if ev.Reply != nil {
 			w.hub.broadcast(w.sessionID, map[string]any{
 				"type":       "turn_done",

@@ -253,10 +253,20 @@ func TestSessionLiveState_EventBufferCap(t *testing.T) {
 	}
 }
 
-// EventToolProgress must reach subscribed tabs immediately as tool_stdout
-// (issue #1094) — before this, the agent loop never even called
-// ExecuteStream (see DefaultRegistry.ExecuteStream), so this event never
-// fired in production regardless of what handleEvent did with it.
+// EventToolProgress must reach subscribed tabs as tool_stdout (issue #1094) —
+// before this, the agent loop never even called ExecuteStream (see
+// DefaultRegistry.ExecuteStream), so this event never fired in production
+// regardless of what handleEvent did with it.
+//
+// Chunks arriving within stdoutCoalesceWindow of the last flush are coalesced
+// into one broadcast rather than one WS message (and one frontend re-render)
+// per line — a verbose command can otherwise force enough per-line DOM
+// updates to pin the desktop shell's webview render thread long enough for
+// Windows to mark the whole window "not responding". The very first chunk
+// still flushes on its own immediately (stdoutFlushAt's zero value reads as
+// long-elapsed) so the user sees output start without an extra delay;
+// EventToolDone flushes whatever is still buffered afterward so the last
+// chunk is never left stranded waiting for a next line that never comes.
 func TestHandleEvent_ToolProgress_BroadcastsToolStdout(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
 	srv.initWS()
@@ -273,12 +283,19 @@ func TestHandleEvent_ToolProgress_BroadcastsToolStdout(t *testing.T) {
 		Kind: agent.EventToolStarted, ToolName: "terminal", ToolID: "t1",
 		Input: map[string]any{"command": "make test"},
 	})
+	// "compiling..." is the very first chunk since sw was created, so it
+	// flushes alone immediately. "building" and "ok" follow fast enough
+	// behind it to land in the same coalescing window and must merge into a
+	// single later broadcast rather than one each.
 	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "t1", Chunk: "compiling..."})
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "t1", Chunk: "building"})
 	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "t1", Chunk: "ok"})
+	// Forces the flush of "building"/"ok", still buffered at this point.
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolDone, ToolID: "t1", Output: "done"})
 
 	// hub.broadcast is delivered by the hub's async dispatch goroutine, not
 	// inline in handleEvent — wait for it instead of draining immediately.
-	waitFor(t, func() bool { return len(conn.send) >= 3 }) // tool_call + 2 tool_stdout
+	waitFor(t, func() bool { return len(conn.send) >= 4 }) // tool_call + 2 tool_stdout + tool_result (+ more)
 
 	var stdoutEvents []map[string]any
 	for _, ev := range drainConn(t, conn) {
@@ -287,13 +304,66 @@ func TestHandleEvent_ToolProgress_BroadcastsToolStdout(t *testing.T) {
 		}
 	}
 	if len(stdoutEvents) != 2 {
-		t.Fatalf("got %d tool_stdout broadcasts, want 2", len(stdoutEvents))
+		t.Fatalf("got %d tool_stdout broadcasts, want 2 (first chunk alone, then the coalesced rest)", len(stdoutEvents))
 	}
-	if stdoutEvents[0]["tool_id"] != "t1" {
-		t.Errorf("tool_stdout missing tool_id, got %v", stdoutEvents[0])
+	if stdoutEvents[0]["tool_id"] != "t1" || stdoutEvents[1]["tool_id"] != "t1" {
+		t.Errorf("tool_stdout missing tool_id, got %v / %v", stdoutEvents[0], stdoutEvents[1])
 	}
-	if lines, ok := stdoutEvents[1]["lines"].([]any); !ok || len(lines) != 1 || lines[0] != "ok" {
-		t.Errorf("second tool_stdout lines = %v, want [\"ok\"]", stdoutEvents[1]["lines"])
+	if lines, ok := stdoutEvents[0]["lines"].([]any); !ok || len(lines) != 1 || lines[0] != "compiling..." {
+		t.Errorf("first tool_stdout lines = %v, want [\"compiling...\"]", stdoutEvents[0]["lines"])
+	}
+	lines, ok := stdoutEvents[1]["lines"].([]any)
+	if !ok || len(lines) != 2 || lines[0] != "building" || lines[1] != "ok" {
+		t.Errorf("second tool_stdout lines = %v, want [\"building\", \"ok\"] (coalesced)", stdoutEvents[1]["lines"])
+	}
+}
+
+// Two commands run back to back (sequentially — terminal never streams
+// concurrently with itself, see concurrencySafe in agent.go) must not have
+// their output cross-contaminate: a still-buffered chunk from the first tool
+// must flush under its own tool_id before the second tool's first chunk is
+// buffered.
+func TestHandleEvent_ToolProgress_FlushesOnToolIDChange(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+
+	const sid = "progress-toolid-change-session"
+	defer tools.CloseSessionBackgroundManager(sid)
+	seedLiveTurn(srv, sid)
+	sw := srv.newWSStreamWriter(sid)
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.wsHub.subscribe(conn, sid)
+
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolStarted, ToolName: "terminal", ToolID: "t1"})
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "t1", Chunk: "first"})
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolDone, ToolID: "t1", Output: "done"})
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolStarted, ToolName: "terminal", ToolID: "t2"})
+	// Simulates a chunk arriving for the new tool before ToolDone's flush of
+	// t1 would otherwise have run — the tool-id-change guard in
+	// EventToolProgress must still keep the two tools' lines apart.
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolProgress, ToolID: "t2", Chunk: "second"})
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolDone, ToolID: "t2", Output: "done"})
+
+	waitFor(t, func() bool { return len(conn.send) >= 6 })
+
+	var stdoutEvents []map[string]any
+	for _, ev := range drainConn(t, conn) {
+		if ev["type"] == "tool_stdout" {
+			stdoutEvents = append(stdoutEvents, ev)
+		}
+	}
+	if len(stdoutEvents) != 2 {
+		t.Fatalf("got %d tool_stdout broadcasts, want 2 (one per tool)", len(stdoutEvents))
+	}
+	if stdoutEvents[0]["tool_id"] != "t1" || stdoutEvents[1]["tool_id"] != "t2" {
+		t.Errorf("tool_stdout tool_ids = %v, %v, want t1, t2", stdoutEvents[0]["tool_id"], stdoutEvents[1]["tool_id"])
+	}
+	if lines, ok := stdoutEvents[0]["lines"].([]any); !ok || len(lines) != 1 || lines[0] != "first" {
+		t.Errorf("t1 tool_stdout lines = %v, want [\"first\"]", stdoutEvents[0]["lines"])
+	}
+	if lines, ok := stdoutEvents[1]["lines"].([]any); !ok || len(lines) != 1 || lines[0] != "second" {
+		t.Errorf("t2 tool_stdout lines = %v, want [\"second\"]", stdoutEvents[1]["lines"])
 	}
 }
 
