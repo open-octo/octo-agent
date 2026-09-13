@@ -636,9 +636,15 @@
             </button>
           {/if}
         {:else if tool.stdout && tool.stdout.length > 0}
-          {@const full = tool.stdout.join('\n')}
+          <!-- tool.stdout is already one line per array entry (see
+               appendToolStdout in stores.ts) — joining it into a string and
+               immediately re-splitting it on every streamed chunk was pure
+               waste, and on a chatty command re-ran that join/split on the
+               whole buffer for every incoming line. Iterate the array
+               directly, keyed by index so Svelte only patches the new tail
+               instead of re-diffing every line each time. -->
           <div class="term-wrap">
-            <pre class="terminal-output" use:pinBottom>{#each full.split('\n') as line}{line}
+            <pre class="terminal-output" use:pinBottom>{#each tool.stdout as line, i (i)}{line}
 {/each}{#if !tool.done}<span class="blink-caret"></span>{/if}</pre>
           </div>
         {:else if tool.name === 'web_search' && searchResults(tool)}
