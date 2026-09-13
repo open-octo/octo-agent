@@ -127,14 +127,20 @@ header {
    for the lights, nothing more. */
 header.native-inset { padding-left: 82px; }
 /* Lifting the axis is the other half, and max-height is the load-bearing part of
-   it. Padding-bottom alone only moves the axis while min-height still decides the
+   it. Padding alone only moves the axis while min-height still decides the
    row height; .chat-header-slot is taller than the 36px that would leave, so the
    row grew to 52px instead and the axis never moved. Pinning the height makes the
    padding actually shorten the content box.
-   The lights' centre sits 20px below the window's top edge, so 4px of padding is
-   the whole lift: (44 - 4) / 2 lands the row's axis exactly there. */
+   The padding itself comes from --titlebar-pad-top/--titlebar-pad-bottom (set
+   by applyTitlebarLift once /api/version reports the host's macOS version):
+   4px bottom puts the axis at 20px, the lights' centre up through macOS 15;
+   macOS 26 moved that centre to 26pt for windows stamped with the macOS 26
+   SDK (measured for this window style), so there 8px of top padding puts the
+   axis at 26 instead. The 4px-bottom fallback covers web mode and the
+   not-yet-answered fetch. */
 header.native-lift {
-  box-sizing: border-box; max-height: 44px; padding-bottom: 4px;
+  box-sizing: border-box; max-height: 44px;
+  padding-top: var(--titlebar-pad-top, 0px); padding-bottom: var(--titlebar-pad-bottom, 4px);
 }
 /* The row is a window drag handle; every control opts back out so it stays
    clickable, leaving the blank stretches to drag the window. */

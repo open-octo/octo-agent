@@ -14,7 +14,8 @@
   import * as api from '../../lib/api'
   import { ws } from '../../lib/ws'
   import { t } from '../../lib/i18n'
-  import { nativeShell, localAccess, isDesktopShell } from '../../lib/stores'
+  import { nativeShell, localAccess, isDesktopShell, macosMajor } from '../../lib/stores'
+  import { applyTitlebarLift } from '../../lib/nativeWindow'
 
   type Phase = 'idle' | 'upgrading' | 'needs_restart' | 'reconnecting' | 'restart_failed' | 'done'
 
@@ -58,6 +59,8 @@
       selfUpdateAvail = d.self_update === true
       nativeShell.set(d.native === true && isDesktopShell)
       localAccess.set(d.local === true)
+      macosMajor.set(d.os === 'darwin' ? parseInt(d.os_version, 10) || 0 : 0)
+      applyTitlebarLift()
     } catch { /* badge stays minimal */ }
   }
 

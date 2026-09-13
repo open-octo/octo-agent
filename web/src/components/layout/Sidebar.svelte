@@ -1176,10 +1176,13 @@
    row whenever the sidebar is showing: horizontal room for them, then the same
    axis lift Header applies to the main column, so the brand row and the chat
    title stay on one line. Height pinned for the same reason as there — the
-   padding has to shorten the content box, not grow the row. */
+   padding has to shorten the content box, not grow the row. The padding values
+   are --titlebar-pad-top/--titlebar-pad-bottom for the same reason as there
+   (macOS 26 moved the lights). */
 .side-header.native-inset {
   box-sizing: border-box; max-height: 44px;
-  padding-left: 82px; padding-bottom: 4px;
+  padding-left: 82px;
+  padding-top: var(--titlebar-pad-top, 0px); padding-bottom: var(--titlebar-pad-bottom, 4px);
 }
 .side-header .icon-btn { --wails-draggable: no-drag; }
 .side-header :global(.logo) { color: var(--blue-6); flex: 0 0 auto; }

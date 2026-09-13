@@ -100,6 +100,12 @@ export const mobileShell =
 // dialog instead of the in-app directory tree. False under `octo serve`.
 export const nativeShell = writable(false)
 
+// Major macOS version of the desktop shell's host (e.g. 26), parsed from
+// /api/version's os_version; 0 when the host isn't macOS or isn't known yet.
+// The titlebar rows read it to sit on the traffic lights' axis, which macOS 26
+// moved for windows stamped with the macOS 26 SDK (see titlebarLiftPx).
+export const macosMajor = writable(0)
+
 // True when the browser is on the same machine as the server (loopback),
 // reported by /api/version's `local` flag — desktop shell OR localhost web.
 // When true, files/folders are chosen by real path (native dialog or the

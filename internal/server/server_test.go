@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -1497,6 +1498,19 @@ func TestHandleVersion_NoUpdateCheck(t *testing.T) {
 	}
 	if body["cli_command"] != "octo" {
 		t.Errorf("cli_command = %v, want the constant octo", body["cli_command"])
+	}
+	// os_version is always present; it carries a value only on darwin, where the
+	// frontend aligns the titlebar rows to the traffic lights' axis. On the CI
+	// mac this is a real version ("26.5.2"-shaped), elsewhere empty.
+	v, ok := body["os_version"].(string)
+	if !ok {
+		t.Fatalf("os_version missing or not a string: %v", body)
+	}
+	if runtime.GOOS == "darwin" && v == "" {
+		t.Errorf("os_version empty on darwin, want the kern.osproductversion value")
+	}
+	if runtime.GOOS != "darwin" && v != "" {
+		t.Errorf("os_version = %q on %s, want empty", v, runtime.GOOS)
 	}
 }
 

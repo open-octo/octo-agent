@@ -56,6 +56,10 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		// os lets the frontend gate platform-specific UI (e.g. the experimental
 		// computer-use toggle is meaningful only on the macOS and Windows desktop).
 		"os": runtime.GOOS,
+		// os_version is the host's macOS product version (e.g. "26.5.2"; empty
+		// elsewhere). The titlebar rows read it to sit on the traffic lights'
+		// axis, which macOS 26 moved for windows stamped with the macOS 26 SDK.
+		"os_version": osVersion(),
 		// upgrade_mode tells the badge which update mechanism this server offers:
 		// "cli" — the in-place binary swap of POST /api/version/upgrade (octo
 		// serve); "installer" — the desktop build, whose binary can't be swapped
