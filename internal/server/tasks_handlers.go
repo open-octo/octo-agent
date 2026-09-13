@@ -283,19 +283,25 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID st
 	// task is doing while it runs. message_index mirrors doAgentTurn: without
 	// it an edit/branch on this bubble would send index 0 and clobber the
 	// session's first message.
-	s.wsHub.broadcast(sessionID, map[string]any{
+	userEvent := map[string]any{
 		"type":          "history_user_message",
 		"session_id":    sessionID,
 		"content":       task.Prompt,
 		"created_at":    userMsg.CreatedAt.UnixMilli(),
 		"message_index": len(sess.Messages),
-	})
+	}
+	s.wsHub.broadcast(sessionID, userEvent)
 
 	// Seed the live state with a "thinking" progress indicator so late
-	// subscribers and the initial tab see the turn as running.
+	// subscribers and the initial tab see the turn as running. The user event
+	// above is buffered into it too (mirrors doAgentTurn) — otherwise a
+	// reconnect between the broadcast and here would permanently lose the
+	// task's own prompt bubble from replay, while the tool_call the turn goes
+	// on to emit IS buffered (EventToolStarted's ls.appendEvent), leaving a
+	// late/reconnecting subscriber with a tool card and no prompt above it.
 	startedAt := time.Now().UnixMilli()
 	s.liveStateMu.Lock()
-	s.liveStates[sessionID] = &sessionLiveState{
+	ls := &sessionLiveState{
 		progress: &wsEventProgress{
 			Type:         "progress",
 			ProgressType: "thinking",
@@ -304,6 +310,8 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID st
 		},
 		historyWatermark: historyWatermark,
 	}
+	ls.appendEvent(userEvent)
+	s.liveStates[sessionID] = ls
 	s.liveStateMu.Unlock()
 	s.wsHub.broadcast(sessionID, map[string]any{
 		"type":          "progress",

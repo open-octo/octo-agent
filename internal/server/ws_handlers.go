@@ -1398,8 +1398,16 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	// background — consistent and stops a note-only message from vanishing.
 	visible, docRefs := docChipRefs(strings.TrimSpace(agent.StripSystemReminders(content)))
 	images = append(images, docRefs...)
+	// Hoisted so it can also be buffered into the live-state replay events once
+	// that state exists below — see the liveStates assignment a few lines down.
+	// A reconnect landing between this broadcast and that point would otherwise
+	// permanently lose the user's own bubble from replay, while the tool_call
+	// this turn goes on to emit IS buffered (EventToolStarted's ls.appendEvent),
+	// so a late/reconnecting subscriber would see the tool card with no user
+	// message above it — exactly the ordering bug this fixes.
+	var userEvent map[string]any
 	if visible != "" || len(images) > 0 {
-		userEvent := map[string]any{
+		userEvent = map[string]any{
 			"type":          "history_user_message",
 			"session_id":    sess.ID,
 			"content":       visible,
@@ -1441,7 +1449,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 	// replays it via replayLiveState.
 	startedAt := time.Now().UnixMilli()
 	s.liveStateMu.Lock()
-	s.liveStates[sess.ID] = &sessionLiveState{
+	ls := &sessionLiveState{
 		progress: &wsEventProgress{
 			Type:         "progress",
 			ProgressType: "thinking",
@@ -1450,6 +1458,14 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		},
 		historyWatermark: historyWatermark,
 	}
+	if userEvent != nil {
+		// Buffer the user's own message now that the replay buffer exists, so a
+		// tab that (re)subscribes from here on — including one that raced the
+		// broadcast above and missed it outright — replays it ahead of any
+		// tool_call/tool_result the turn goes on to emit.
+		ls.appendEvent(userEvent)
+	}
+	s.liveStates[sess.ID] = ls
 	s.liveStateMu.Unlock()
 	s.wsHub.broadcast(sess.ID, map[string]any{
 		"type":          "progress",
