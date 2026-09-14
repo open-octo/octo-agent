@@ -47,19 +47,21 @@ export function titlebarDblClick(e: MouseEvent): void {
 // the macOS version AND the window's SDK stamp (AppKit gates window chrome on
 // linked-on-or-after), and the desktop build has carried the macOS 26 SDK in
 // LC_BUILD_VERSION since v1.16.18. Measured on macOS 26 for this window style
-// (hidden titlebar + wails' toolbar): the centre sits 26pt below the window's
-// top edge; through macOS 15 it was 20px. The row is pinned at 44px
-// border-box, so 4px of bottom padding lands the axis at (44 - 4) / 2 = 20,
-// and 8px of top padding lands it at 8 + (44 - 8) / 2 = 26. Unknown host
-// version keeps the legacy padding: the fetch that feeds macosMajor failing
-// must not misalign every older mac.
+// (hidden titlebar + wails' toolbar): the centre sits 27pt below the window's
+// top edge — a probe window put the frame at 26pt, but the rendered lights
+// read ~0.75pt lower than a 26pt axis on a retina display, so the rows aim at
+// 27; through macOS 15 it was 20px. The row is pinned at 44px border-box, so
+// 4px of bottom padding lands the axis at (44 - 4) / 2 = 20, and 10px of top
+// padding lands it at 10 + (44 - 10) / 2 = 27. Unknown host version keeps the
+// legacy padding: the fetch that feeds macosMajor failing must not misalign
+// every older mac.
 export function titlebarPaddingPx(
   native: boolean,
   isMac: boolean,
   macosMajorVersion: number,
 ): { top: number; bottom: number } {
   if (!native || !isMac) return { top: 0, bottom: 0 }
-  return macosMajorVersion >= 26 ? { top: 8, bottom: 0 } : { top: 0, bottom: 4 }
+  return macosMajorVersion >= 26 ? { top: 10, bottom: 0 } : { top: 0, bottom: 4 }
 }
 
 // Publishes the padding to every titlebar row at once: the CSS reads

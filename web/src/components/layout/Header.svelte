@@ -137,9 +137,9 @@ header.native-inset { padding-left: 82px; }
    The padding itself comes from --titlebar-pad-top/--titlebar-pad-bottom (set
    by applyTitlebarLift once /api/version reports the host's macOS version):
    4px bottom puts the axis at 20px, the lights' centre up through macOS 15;
-   macOS 26 moved that centre to 26pt for windows stamped with the macOS 26
-   SDK (measured for this window style), so there 8px of top padding puts the
-   axis at 26 instead. The 4px-bottom fallback covers web mode and the
+   macOS 26 moved that centre to 27pt for windows stamped with the macOS 26
+   SDK (measured for this window style), so there 10px of top padding puts the
+   axis at 27 instead. The 4px-bottom fallback covers web mode and the
    not-yet-answered fetch. */
 header.native-lift {
   box-sizing: border-box; max-height: 44px;
