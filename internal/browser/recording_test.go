@@ -508,6 +508,66 @@ func TestGenerateRecordingPromptCarriesGoal(t *testing.T) {
 	}
 }
 
+// TestRenderTraceEffects: the distill trace carries each gesture's URL, its
+// effects summary and the likely_noop marker — the evidence rule (2) judges by.
+func TestRenderTraceEffects(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "click", Selector: "#go", Tag: "A", Text: "笔记管理", URL: "https://x/home", Effects: &Effects{URLAfter: "https://x/notes", Requests: map[string]int{"GET": 1}}},
+		{Type: "click", Selector: "#cancel", Tag: "BUTTON", Text: "取消", URL: "https://x/notes", Effects: &Effects{}, LikelyNoop: true},
+		{Type: "click", Selector: "#legacy", Tag: "A", Text: "old"},
+	}
+	tr := renderTrace(events)
+	for _, want := range []string{
+		`url="https://x/home"  effects: url→https://x/notes GET×1`,
+		`text="取消" value="" url="https://x/notes"  effects: none  [likely_noop]`,
+	} {
+		if !strings.Contains(tr, want) {
+			t.Fatalf("trace missing %q:\n%s", want, tr)
+		}
+	}
+	if strings.Contains(strings.SplitN(tr, "\n", 3)[2], "effects:") {
+		t.Fatalf("an event without Effects (older recorder) must render no effects column:\n%s", tr)
+	}
+}
+
+// TestLikelyNoopReachesPlan: the marker rides from the events onto the compiled
+// steps, survives distillation onto refined steps with the same target, and
+// SummarizeRecording asks about exactly those steps — while a distiller that
+// dropped them leaves no question to ask.
+func TestLikelyNoopReachesPlan(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "click", Selector: "#notes", Tag: "SPAN", Text: "笔记管理", Effects: &Effects{URLAfter: "https://x/notes"}},
+		{Type: "click", Selector: "#reply", Tag: "SPAN", Text: "说点什么...", Effects: &Effects{}, LikelyNoop: true},
+		{Type: "click", Selector: "#cancel", Tag: "BUTTON", Text: "取消", Effects: &Effects{}, LikelyNoop: true},
+	}
+	base := CompileRecording("x", "", "https://x/", events)
+	if !base.Steps[2].likelyNoop || !base.Steps[3].likelyNoop || base.Steps[1].likelyNoop {
+		t.Fatalf("compile must carry the marker onto the flagged clicks only: %+v", base.Steps)
+	}
+	plan := SummarizeRecording(base)
+	if !strings.Contains(plan, "要保留吗") || !strings.Contains(plan, "3. 点击「说点什么...」") || !strings.Contains(plan, "4. 点击「取消」") || strings.Contains(plan, "2. 点击「笔记管理」\n  ") {
+		t.Fatalf("plan must list the flagged steps as a question:\n%s", plan)
+	}
+	if y, _ := MarshalRecording(base); strings.Contains(string(y), "noop") {
+		t.Fatalf("the marker must never reach the YAML:\n%s", y)
+	}
+
+	keep := func(_ context.Context, _, _ string) (string, error) {
+		return "name: x\nsteps:\n  - {action: navigate, url: 'https://x/'}\n  - {action: click, selector: '#notes'}\n  - {action: click, selector: '#reply'}\n  - {action: click, selector: '#cancel'}\n", nil
+	}
+	refined, fb := GenerateRecording(context.Background(), "x", "https://x/", "", events, keep)
+	if fb != "" || len(refined.Steps) != 4 || !refined.Steps[2].likelyNoop || !refined.Steps[3].likelyNoop || refined.Steps[1].likelyNoop {
+		t.Fatalf("marker must be re-attached onto kept refined steps: fb=%q %+v", fb, refined.Steps)
+	}
+	drop := func(_ context.Context, _, _ string) (string, error) {
+		return "name: x\nsteps:\n  - {action: navigate, url: 'https://x/'}\n  - {action: click, selector: '#notes'}\n", nil
+	}
+	refined, fb = GenerateRecording(context.Background(), "x", "https://x/", "", events, drop)
+	if fb != "" || strings.Contains(SummarizeRecording(refined), "要保留吗") {
+		t.Fatalf("nothing to ask when the distiller dropped the no-ops: fb=%q\n%s", fb, SummarizeRecording(refined))
+	}
+}
+
 // TestParseRecordingAcceptsEmptyMapLists (#2406): `params: {}` / `outputs: {}`
 // decode as empty lists, like the null / bare-key spellings always did — a
 // model writes any of these for "none". A populated mapping is still a shape

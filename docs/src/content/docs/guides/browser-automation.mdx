@@ -80,8 +80,10 @@ A model pass then distills the raw capture — dropping dead-end detours, turnin
 values into `{{param}}` placeholders, and writing a description. The agent hands it what you said
 you wanted to record (the `goal` on `record_start`, in your own words), which is how it tells a
 step your goal needs from a mis-click you cancelled a moment later — so state the objective before
-you start demonstrating. It can only reorder or rename real captured steps, never invent a new
-target: any refined step whose selector isn't in the
+you start demonstrating. It also sees what each click actually did — whether the URL moved, a tab or
+download opened, and which requests it fired, counted by HTTP method — and trailing clicks that did
+none of that (no write, no navigation) are flagged as likely no-ops for it to drop unless your goal
+needs them. It can only reorder or rename real captured steps, never invent a new target: any refined step whose selector isn't in the
 original capture is rejected in favor of the raw version (fingerprints are re-attached
 deterministically after the pass). When the pass doesn't apply — the model's output can't be
 parsed, uses selectors it wasn't given, or no model is configured — `record_stop` says so and why,
@@ -89,8 +91,9 @@ so you know the steps are the raw capture and can remove any stray clicks yourse
 
 `record_stop` replies with a numbered run-plan — each step with what it does and what its check
 is — and the agent is told to hold there: it presents the plan and waits for you to confirm it or
-name steps to remove or change before the recording is replayed or relied on. That review is where
-a stray click the cleanup pass kept gets dropped.
+name steps to remove or change before the recording is replayed or relied on. Steps flagged as
+likely no-ops that survived the cleanup are listed separately under the plan with the question
+"要保留吗？" — nothing is removed for you; that review is where a stray click gets dropped.
 
 Each recording is a directory, `~/.octo/browser-recordings/<name>/`, holding `recording.yaml` — the
 editable steps: readable, hand-editable, diffable in git — and `events.json`, the raw captured events

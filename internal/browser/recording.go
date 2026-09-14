@@ -84,8 +84,14 @@ type Step struct {
 	// URL put; replay then retries the click, waiting between attempts, until
 	// the URL advances or the attempts run out.
 	expectEndURL string
-	Value        string `yaml:"value,omitempty"`
-	Label        string `yaml:"label,omitempty"`
+	// likelyNoop is a plan-time hint (never serialized): the recorder found
+	// this trailing gesture changed nothing observable (RecordedEvent.LikelyNoop).
+	// SummarizeRecording lists such steps for the user to keep or drop; the
+	// distiller sees the same fact in the trace. Re-attached onto refined steps
+	// by backfillNoopHints, like anchors.
+	likelyNoop bool
+	Value      string `yaml:"value,omitempty"`
+	Label      string `yaml:"label,omitempty"`
 	// Hint is a form field's accessible name (placeholder/name/aria-label/id or
 	// its <label> text). It's the deterministic fallback for type/select/upload:
 	// when the positional Selector drifts, replay re-locates the field by Hint
@@ -287,7 +293,7 @@ func CompileRecording(name, description, startURL string, events []RecordedEvent
 		if e.Selector == "" {
 			continue
 		}
-		st := Step{Frame: e.Frame, Selector: e.Selector, Label: e.Text, Hint: e.Field, Anchors: eventAnchors(e)}
+		st := Step{Frame: e.Frame, Selector: e.Selector, Label: e.Text, Hint: e.Field, Anchors: eventAnchors(e), likelyNoop: e.LikelyNoop}
 		switch {
 		case e.Type == "click":
 			st.Action = "click"
@@ -563,6 +569,19 @@ func SummarizeRecording(r Recording) string {
 		b.WriteString("\n")
 		b.WriteString(stepSummaryLine(i, s))
 	}
+	// Steps the recorder found changed nothing observable are the user's call,
+	// not the engine's: list them as a question. The recording on disk matches
+	// the plan shown — the user removes, nothing is pre-deleted.
+	var noops []string
+	for i, s := range r.Steps {
+		if s.likelyNoop {
+			noops = append(noops, fmt.Sprintf("  %d. 点击「%s」", i+1, lineLabel(s)))
+		}
+	}
+	if len(noops) > 0 {
+		b.WriteString("\n\n以下步骤没有改变页面状态（没有跳转、没有写入请求、没有下载），可能是误点。要保留吗？\n")
+		b.WriteString(strings.Join(noops, "\n"))
+	}
 	b.WriteString("\n\n请确认以上步骤是否正确、检验环节是否充分，或告诉我哪里需要修改。")
 	return b.String()
 }
@@ -710,7 +729,7 @@ func GenerateRecording(ctx context.Context, name, startURL, goal string, events 
 	}
 	const system = "You clean a recorded browser workflow into a minimal, correct, replayable recording. " +
 		"RULES: (1) Use ONLY CSS selectors that appear in the provided baseline — never invent or alter a selector. " +
-		"(2) Drop redundant back-and-forth and retries; keep the intended linear path — the steps the stated goal needs. A step that opens, expands or focuses something the goal does not need, and a later step that closes, cancels or dismisses it, are a detour: drop both. " +
+		"(2) Drop redundant back-and-forth and retries; keep the intended linear path — the steps the stated goal needs. A step that opens, expands or focuses something the goal does not need, and a later step that closes, cancels or dismisses it, are a detour: drop both. Each raw event lists its effects (URL change, new tab, download, requests by HTTP method); events marked [likely_noop] changed nothing observable and contributed nothing to the end state — drop them unless the Goal needs them. " +
 		"(3) Replace user-specific input values with {{param}} and declare each in params (keep upload's {{file}}, every declared param name, and any secret: true marker unchanged). " +
 		"(4) Preserve step order and all navigate steps. " +
 		"(5) Preserve every download step and its bind (keep every declared output name and its type: file[] unchanged — do not drop or rename outputs). " +
@@ -791,8 +810,29 @@ func GenerateRecording(ctx context.Context, name, startURL, goal string, events 
 			return withDescription(base, refined.Description), "the model used selectors that are not in the recording: " + strings.Join(bad, " | ")
 		}
 		backfillTargetFacts(&refined, base)
+		backfillNoopHints(&refined, base)
 		refined.EndURL = base.EndURL
 		return refined, ""
+	}
+}
+
+// backfillNoopHints re-attaches the likely-no-op hint onto refined steps from
+// the baseline step with the same frame+selector — the hint is not serialized,
+// so it is lost when the distiller's YAML is parsed back. A refined step the
+// distiller kept despite the marker is exactly the one the user must be asked
+// about.
+func backfillNoopHints(refined *Recording, base Recording) {
+	flagged := map[string]bool{}
+	for _, st := range base.Steps {
+		if st.likelyNoop && st.Selector != "" {
+			flagged[st.Frame+"\x00"+st.Selector] = true
+		}
+	}
+	for i := range refined.Steps {
+		st := &refined.Steps[i]
+		if st.Selector != "" && flagged[st.Frame+"\x00"+st.Selector] {
+			st.likelyNoop = true
+		}
 	}
 }
 
@@ -881,7 +921,19 @@ func renderTrace(events []RecordedEvent) string {
 		if e.Secret {
 			val = "[secret]"
 		}
-		fmt.Fprintf(&sb, "%d. %s selector=%q frame=%q tag=%s text=%q value=%q\n", i+1, e.Type, e.Selector, e.Frame, e.Tag, e.Text, val)
+		fmt.Fprintf(&sb, "%d. %s selector=%q frame=%q tag=%s text=%q value=%q", i+1, e.Type, e.Selector, e.Frame, e.Tag, e.Text, val)
+		if e.URL != "" {
+			fmt.Fprintf(&sb, " url=%q", e.URL)
+		}
+		// The gesture's observable effects are the evidence rule (2) needs:
+		// without them "open the reply box → cancel" reads as part of the flow.
+		if e.Effects != nil {
+			sb.WriteString("  effects: " + e.Effects.String())
+		}
+		if e.LikelyNoop {
+			sb.WriteString("  [likely_noop]")
+		}
+		sb.WriteByte('\n')
 	}
 	return sb.String()
 }

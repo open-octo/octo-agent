@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -42,6 +43,18 @@ type RecordedEvent struct {
 	SameDoc      bool     `json:"same_doc,omitempty"`      // navigate: same-document (pushState/replaceState) — a page-initiated effect, not a user action
 	ClickX       float64  `json:"click_x,omitempty"`       // click: fraction of the element's width where the user pressed (0 = unknown → center)
 	ClickY       float64  `json:"click_y,omitempty"`       // click: fraction of the element's height where the user pressed
+	// At is when the recorder received the event (unix ms) — the clock that
+	// attributes requests to the gesture that caused them (attachEffects).
+	At int64 `json:"at_ms,omitempty"`
+	// Effects is what observably happened because of this gesture — see
+	// Effects. Set for click/enter/change/upload/download events by Events();
+	// nil for navigate/wait events and for events captured by an older recorder.
+	Effects *Effects `json:"effects,omitempty"`
+	// LikelyNoop marks a trailing gesture whose Effects show nothing: no
+	// request other than GET, no URL change, no new tab, no download. Derived
+	// by markLikelyNoop; a question for the user and the distiller, never a
+	// deletion on its own.
+	LikelyNoop bool `json:"likely_noop,omitempty"`
 }
 
 // Recorder captures a user's actions on a page by injecting a DOM listener that
@@ -73,6 +86,19 @@ type Recorder struct {
 	// watchDownloads). Removed in Stop() — recording-time downloads are only
 	// used to detect the event, not kept.
 	dlDir string
+
+	// requests is every XHR/Fetch/Document request Chrome reported on an
+	// instrumented session while recording, with its method and arrival time.
+	// attachEffects assigns each to the gesture it followed within
+	// effectsAttributionWindow, so a click's Effects can say "GET×2" or
+	// "POST×1" — the fact that tells a read-only stray click from a write.
+	requests []recordedRequest
+}
+
+// recordedRequest is one request seen on the wire during recording.
+type recordedRequest struct {
+	Method string
+	At     time.Time
 }
 
 // NewRecorder creates a recorder bound to a page.
@@ -108,6 +134,9 @@ func (r *Recorder) releaseSession(session string) {
 func (r *Recorder) addEvent(re RecordedEvent, frameSel string) {
 	if frameSel != "" {
 		re.Frame = frameSel
+	}
+	if re.At == 0 {
+		re.At = time.Now().UnixMilli()
 	}
 	r.mu.Lock()
 	if re.Type == "click" {
@@ -223,7 +252,50 @@ func (r *Recorder) instrumentSession(ctx context.Context, session, frameSel stri
 		return release(err)
 	}
 	r.watchBindingEvents(session, frameSel)
+	// Best-effort: a session that refuses Network.enable still records gestures,
+	// its clicks just carry no request counts.
+	_, _ = r.page.cli.call(ctx, session, "Network.enable", nil)
+	r.watchRequests(session)
 	return nil
+}
+
+// watchRequests subscribes to Network.requestWillBeSent on one session and logs
+// the method and arrival time of every XHR / Fetch / Document request — the
+// three kinds a user gesture causes on purpose. Images, fonts, scripts and
+// pings are dropped: they say nothing about whether the gesture changed
+// anything, and they are most of the traffic. Method only — no URL: request
+// URLs carry tokens and identifiers, and events.json is a file users paste
+// into bug reports.
+//
+// CDP rather than the in-page fetch/XHR hook (window.__octoNet): the hook is
+// lost on every cross-document navigation, misses sendBeacon and form
+// submissions, and is per frame; requestWillBeSent sees all of them.
+func (r *Recorder) watchRequests(session string) {
+	events, unsub := r.page.cli.subscribe("Network.requestWillBeSent", session)
+	r.mu.Lock()
+	r.unsubs = append(r.unsubs, unsub)
+	r.mu.Unlock()
+	go func() {
+		for ev := range events {
+			var b struct {
+				Type    string `json:"type"`
+				Request struct {
+					Method string `json:"method"`
+				} `json:"request"`
+			}
+			if json.Unmarshal(ev.Params, &b) != nil {
+				continue
+			}
+			switch b.Type {
+			case "XHR", "Fetch", "Document":
+			default:
+				continue
+			}
+			r.mu.Lock()
+			r.requests = append(r.requests, recordedRequest{Method: strings.ToUpper(b.Request.Method), At: time.Now()})
+			r.mu.Unlock()
+		}
+	}()
 }
 
 // watchBindingEvents subscribes to the capture binding's calls on one session
@@ -683,12 +755,13 @@ func (r *Recorder) instrumentPageSession(ctx context.Context, session, targetID 
 	var waits []func(context.Context) (json.RawMessage, error)
 	// Enable the domains ourselves rather than depend on the browser watcher's
 	// async registration having run first — same reasoning as instrumentOOPIF.
-	for _, d := range []string{"Page.enable", "Runtime.enable", "DOM.enable"} {
+	for _, d := range []string{"Page.enable", "Runtime.enable", "DOM.enable", "Network.enable"} {
 		waits = append(waits, cli.callAsync(session, d, nil))
 	}
 	waits = append(waits, cli.callAsync(session, "Runtime.addBinding", map[string]any{"name": "__octoRecord"}))
 	waits = append(waits, cli.callAsync(session, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": captureScript}))
 	r.watchBindingEvents(session, "")
+	r.watchRequests(session)
 	// hasOpener distinguishes a tab the PAGE spawned (its first navigation is
 	// tagged NewTab so CompileRecording can collapse the click detour that
 	// opened it) from a tab the USER opened by hand (Cmd+T + typed URL — the
@@ -768,7 +841,7 @@ func (r *Recorder) watchNavigations(ctx context.Context, session string, markFir
 			}
 			break
 		}
-		ev := RecordedEvent{Type: "navigate", URL: u, SameDoc: sameDoc}
+		ev := RecordedEvent{Type: "navigate", URL: u, SameDoc: sameDoc, At: time.Now().UnixMilli()}
 		if firstNav && !sameDoc {
 			ev.NewTab = true
 			firstNav = false
@@ -818,12 +891,19 @@ func (r *Recorder) watchNavigations(ctx context.Context, session string, markFir
 	}()
 }
 
-// Events returns the captured actions so far.
+// Events returns the captured actions so far, each gesture carrying its
+// Effects (attachEffects) and the trailing no-op marker (markLikelyNoop).
+// Both are derived from the raw log on every call, so the log itself stays
+// exactly what was captured.
 func (r *Recorder) Events() []RecordedEvent {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	out := make([]RecordedEvent, len(r.events))
 	copy(out, r.events)
+	reqs := make([]recordedRequest, len(r.requests))
+	copy(reqs, r.requests)
+	r.mu.Unlock()
+	attachEffects(out, reqs)
+	markLikelyNoop(out)
 	return out
 }
 
