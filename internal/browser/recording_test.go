@@ -568,6 +568,39 @@ func TestLikelyNoopReachesPlan(t *testing.T) {
 	}
 }
 
+// TestBackfillNoopHintsStaysTailOnly: the same element clicked legitimately
+// mid-flow and again by mistake at the end shares a selector, so the lookup
+// alone would flag both refined steps. The marker is a tail property; the
+// mid-flow click must come out unflagged, and a key step reads as a key press.
+func TestBackfillNoopHintsStaysTailOnly(t *testing.T) {
+	base := Recording{Steps: []Step{
+		{Action: "click", Selector: "#tab", Label: "评论"},
+		{Action: "click", Selector: "#note", Label: "最新笔记"},
+		{Action: "wait", Network: true},
+		{Action: "click", Selector: "#tab", Label: "评论", likelyNoop: true},
+		{Action: "key", Selector: "#q", Label: "搜索框", Value: "enter", likelyNoop: true},
+	}}
+	refined := Recording{Steps: []Step{
+		{Action: "click", Selector: "#tab", Label: "评论"},
+		{Action: "click", Selector: "#note", Label: "最新笔记"},
+		{Action: "wait", Network: true},
+		{Action: "click", Selector: "#tab", Label: "评论"},
+		{Action: "key", Selector: "#q", Label: "搜索框", Value: "enter"},
+	}}
+	backfillNoopHints(&refined, base)
+	got := []bool{}
+	for _, st := range refined.Steps {
+		got = append(got, st.likelyNoop)
+	}
+	if want := []bool{false, false, false, true, true}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("likelyNoop per step = %v, want %v", got, want)
+	}
+	plan := SummarizeRecording(refined)
+	if !strings.Contains(plan, "4. 点击「评论」") || !strings.Contains(plan, "5. 在「搜索框」中按 enter") || strings.Contains(plan, "1. 点击「评论」\n  ") {
+		t.Fatalf("plan must list only the tail, with action-aware wording:\n%s", plan)
+	}
+}
+
 // TestParseRecordingAcceptsEmptyMapLists (#2406): `params: {}` / `outputs: {}`
 // decode as empty lists, like the null / bare-key spellings always did — a
 // model writes any of these for "none". A populated mapping is still a shape

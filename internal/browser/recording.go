@@ -574,7 +574,13 @@ func SummarizeRecording(r Recording) string {
 	// the plan shown — the user removes, nothing is pre-deleted.
 	var noops []string
 	for i, s := range r.Steps {
-		if s.likelyNoop {
+		if !s.likelyNoop {
+			continue
+		}
+		switch s.Action {
+		case "key":
+			noops = append(noops, fmt.Sprintf("  %d. 在「%s」中按 %s", i+1, lineLabel(s), s.Value))
+		default:
 			noops = append(noops, fmt.Sprintf("  %d. 点击「%s」", i+1, lineLabel(s)))
 		}
 	}
@@ -729,7 +735,7 @@ func GenerateRecording(ctx context.Context, name, startURL, goal string, events 
 	}
 	const system = "You clean a recorded browser workflow into a minimal, correct, replayable recording. " +
 		"RULES: (1) Use ONLY CSS selectors that appear in the provided baseline — never invent or alter a selector. " +
-		"(2) Drop redundant back-and-forth and retries; keep the intended linear path — the steps the stated goal needs. A step that opens, expands or focuses something the goal does not need, and a later step that closes, cancels or dismisses it, are a detour: drop both. Each raw event lists its effects (URL change, new tab, download, requests by HTTP method); events marked [likely_noop] changed nothing observable and contributed nothing to the end state — drop them unless the Goal needs them. " +
+		"(2) Drop redundant back-and-forth and retries; keep the intended linear path — the steps the stated goal needs. A step that opens, expands or focuses something the goal does not need, and a later step that closes, cancels or dismisses it, are a detour: drop both. Each raw event lists its effects (URL change, new tab, download, requests by HTTP method); events marked [likely_noop] changed nothing observable and contributed nothing to the end state — they are CANDIDATES to drop: drop one when the Goal clearly does not need it, keep it when the Goal names it or when the Goal is missing or too vague to tell. " +
 		"(3) Replace user-specific input values with {{param}} and declare each in params (keep upload's {{file}}, every declared param name, and any secret: true marker unchanged). " +
 		"(4) Preserve step order and all navigate steps. " +
 		"(5) Preserve every download step and its bind (keep every declared output name and its type: file[] unchanged — do not drop or rename outputs). " +
@@ -832,6 +838,25 @@ func backfillNoopHints(refined *Recording, base Recording) {
 		st := &refined.Steps[i]
 		if st.Selector != "" && flagged[st.Frame+"\x00"+st.Selector] {
 			st.likelyNoop = true
+		}
+	}
+	// The marker is a TAIL property (markLikelyNoop), but the selector lookup
+	// also hits an earlier, legitimate click on the same element (a tab
+	// clicked mid-flow and again by mistake at the end). Re-impose the
+	// invariant on the refined steps: walking back past waits, the first
+	// unflagged step ends the tail and everything before it is unflagged.
+	tail := true
+	for i := len(refined.Steps) - 1; i >= 0; i-- {
+		st := &refined.Steps[i]
+		if st.Action == "wait" {
+			continue
+		}
+		if !st.likelyNoop {
+			tail = false
+			continue
+		}
+		if !tail {
+			st.likelyNoop = false
 		}
 	}
 }

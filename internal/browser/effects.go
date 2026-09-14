@@ -33,6 +33,16 @@ type Effects struct {
 // seconds to begin. A var so tests on starved runners can widen it.
 var effectsAttributionWindow = 1500 * time.Millisecond
 
+// requestLeadTolerance covers the clocks being on different goroutines: a
+// gesture's At is stamped when its binding event is consumed, a request's when
+// its network event is consumed, and the two consumers schedule independently,
+// so the request a click caused can carry a timestamp a few ms EARLIER than
+// the click. A request no preceding gesture claims is given to the next
+// gesture if it follows within this tolerance — the same race the download
+// path covers with pendingDLName. Losing the request would read a write as a
+// no-op, the one direction the marker must not err in.
+const requestLeadTolerance = 300 * time.Millisecond
+
 // isGesture reports whether an event is something the user did (as opposed to
 // a navigation or wait the recorder synthesized from what the page did).
 func isGesture(e RecordedEvent) bool {
@@ -86,15 +96,22 @@ func attachEffects(events []RecordedEvent, reqs []recordedRequest) {
 	sort.SliceStable(gestures, func(a, b int) bool { return events[gestures[a]].At < events[gestures[b]].At })
 	for _, rq := range reqs {
 		at := rq.At.UnixMilli()
-		owner := -1
+		owner, next := -1, -1
 		for _, gi := range gestures {
 			if events[gi].At <= at {
 				owner = gi
 			} else {
+				next = gi
 				break
 			}
 		}
-		if owner < 0 || at-events[owner].At > effectsAttributionWindow.Milliseconds() {
+		if owner >= 0 && at-events[owner].At > effectsAttributionWindow.Milliseconds() {
+			owner = -1
+		}
+		if owner < 0 && next >= 0 && events[next].At-at <= requestLeadTolerance.Milliseconds() {
+			owner = next
+		}
+		if owner < 0 {
 			continue
 		}
 		fx := events[owner].Effects
@@ -113,7 +130,8 @@ func attachEffects(events []RecordedEvent, reqs []recordedRequest) {
 // walking back from the last event, a click or enter with no request other
 // than GET, no URL change, no new tab and no download is marked; recorder-
 // synthesized waits are skipped; the walk stops at the first event that fails
-// the test (a typed value, a write, a navigation, a gesture without Effects).
+// the test (a typed value — a change, or an Enter that carries what was typed
+// —, a write, a navigation, a gesture without Effects).
 //
 // Tail only, by construction: a click that changed nothing and was followed by
 // nothing cannot have contributed to the recording's end state, so dropping it
@@ -132,6 +150,11 @@ func markLikelyNoop(events []RecordedEvent) {
 			continue
 		}
 		if (e.Type != "click" && e.Type != "enter") || e.Effects == nil || !e.Effects.isNoop() {
+			return
+		}
+		// An Enter that carries a typed value compiles to a type step plus a
+		// key step; the pair is a submission the user made, not a stray press.
+		if e.Type == "enter" && (e.Value != "" || e.Secret) {
 			return
 		}
 		e.LikelyNoop = true

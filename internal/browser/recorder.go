@@ -93,6 +93,11 @@ type Recorder struct {
 	// effectsAttributionWindow, so a click's Effects can say "GET×2" or
 	// "POST×1" — the fact that tells a read-only stray click from a write.
 	requests []recordedRequest
+	// netSessions are the sessions this recorder enabled the Network domain
+	// on, so Stop can disable it again: left on, Chrome keeps streaming every
+	// request/response event over the connection and caching response bodies
+	// for the rest of the session.
+	netSessions []string
 }
 
 // recordedRequest is one request seen on the wire during recording.
@@ -259,6 +264,11 @@ func (r *Recorder) instrumentSession(ctx context.Context, session, frameSel stri
 	return nil
 }
 
+// requestSubscriptionDepth is the channel depth for Network.requestWillBeSent.
+// The reader drops on overflow; a page load's burst of image/script/font
+// requests must not push out the one POST that tells a write from a no-op.
+const requestSubscriptionDepth = 1024
+
 // watchRequests subscribes to Network.requestWillBeSent on one session and logs
 // the method and arrival time of every XHR / Fetch / Document request — the
 // three kinds a user gesture causes on purpose. Images, fonts, scripts and
@@ -271,9 +281,10 @@ func (r *Recorder) instrumentSession(ctx context.Context, session, frameSel stri
 // lost on every cross-document navigation, misses sendBeacon and form
 // submissions, and is per frame; requestWillBeSent sees all of them.
 func (r *Recorder) watchRequests(session string) {
-	events, unsub := r.page.cli.subscribe("Network.requestWillBeSent", session)
+	events, unsub := r.page.cli.subscribeBuffered("Network.requestWillBeSent", session, requestSubscriptionDepth)
 	r.mu.Lock()
 	r.unsubs = append(r.unsubs, unsub)
+	r.netSessions = append(r.netSessions, session)
 	r.mu.Unlock()
 	go func() {
 		for ev := range events {
@@ -923,6 +934,8 @@ func (r *Recorder) Stop() {
 	r.unsubs = nil
 	dlDir := r.dlDir
 	r.dlDir = ""
+	netSessions := r.netSessions
+	r.netSessions = nil
 	r.mu.Unlock()
 	for _, u := range unsubs {
 		if u != nil {
@@ -936,6 +949,12 @@ func (r *Recorder) Stop() {
 	// new tabs pause until instrumented). Best-effort: the page may be gone.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	// Turn the Network domain back off where the recorder turned it on (a
+	// closed tab's session just errors). Cookies re-enables it per call, so
+	// this cannot break that path.
+	for _, s := range netSessions {
+		_, _ = r.page.cli.call(ctx, s, "Network.disable", nil)
+	}
 	_, _ = r.page.cli.call(ctx, r.page.sessionID, "Target.setAutoAttach", map[string]any{
 		"autoAttach": true, "waitForDebuggerOnStart": false, "flatten": true,
 	})

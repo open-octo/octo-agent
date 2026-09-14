@@ -98,6 +98,10 @@ func TestDistillE2E_RealModels(t *testing.T) {
 	}
 
 	const goal = "进笔记管理，找到最新一篇笔记，点开它的评论"
+	// A goal that names no step: the marker then has nothing to defer to, and
+	// the intended GET-only tail (查看评论) is flagged like the strays. Measures
+	// whether the marker makes the model over-delete when the goal is vague.
+	const vagueGoal = "帮我录一下这个操作"
 	stripEffects := func(in []browser.RecordedEvent) []browser.RecordedEvent {
 		out := make([]browser.RecordedEvent, len(in))
 		copy(out, in)
@@ -116,6 +120,8 @@ func TestDistillE2E_RealModels(t *testing.T) {
 		{"goal only", goal, stripEffects(events)},
 		{"effects only", "", events},
 		{"neither", "", stripEffects(events)},
+		{"vague+effects", vagueGoal, events},
+		{"vague only", vagueGoal, stripEffects(events)},
 	}
 
 	type cell struct {
@@ -124,16 +130,28 @@ func TestDistillE2E_RealModels(t *testing.T) {
 	}
 	results := map[string]map[string]cell{}
 	for _, tg := range targets {
-		sender, err := senderForE2E(tg.entry)
+		sender, err := senderForE2E(cfg, tg.entry)
 		if err != nil {
 			t.Logf("%s: skipped (%v)", tg.id, err)
 			continue
 		}
-		gen := MakeRecordingGenerator(sender, tg.entry.Model)
+		inner := MakeRecordingGenerator(sender, tg.entry.Model)
+		// Keep the model's raw reply so a fallback ("output had no steps") can
+		// be diagnosed from the log instead of guessed at.
+		var lastRaw string
+		gen := func(ctx context.Context, system, user string) (string, error) {
+			out, err := inner(ctx, system, user)
+			lastRaw = out
+			return out, err
+		}
 		results[tg.id] = map[string]cell{}
 		for _, v := range variants {
 			started := time.Now()
+			lastRaw = ""
 			rec, fallback := browser.GenerateRecording(ctx, "查最新评论", startURL, v.goal, v.events, gen)
+			if fallback != "" && lastRaw != "" {
+				t.Logf("%s %s raw model output:\n%s", tg.id, v.name, lastRaw)
+			}
 			// Judge by selector, not by the label the model may have dropped
 			// from its YAML: the selector is the constrained ground truth.
 			var kept []string
@@ -158,18 +176,18 @@ func TestDistillE2E_RealModels(t *testing.T) {
 	}
 	sort.Strings(ids)
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "\n%-28s", "model")
+	fmt.Fprintf(&sb, "\n%-26s", "model")
 	for _, v := range variants {
-		fmt.Fprintf(&sb, " %-13s", v.name)
+		fmt.Fprintf(&sb, " %-14s", v.name)
 	}
 	for _, id := range ids {
-		fmt.Fprintf(&sb, "\n%-28s", id)
+		fmt.Fprintf(&sb, "\n%-26s", id)
 		for _, v := range variants {
 			mark := "FAIL"
 			if results[id][v.name].ok {
 				mark = "pass"
 			}
-			fmt.Fprintf(&sb, " %-13s", mark)
+			fmt.Fprintf(&sb, " %-14s", mark)
 		}
 	}
 	t.Log(sb.String())
@@ -210,9 +228,11 @@ func judgeDistill(kept []string, fallback string) (bool, string) {
 	return true, "clean"
 }
 
-// senderForE2E mirrors the server's per-entry sender construction: env key
-// first, then the entry's stored key.
-func senderForE2E(entry config.ModelEntry) (agent.Sender, error) {
+// senderForE2E mirrors the server's per-entry sender construction
+// (internal/server senderForEntry): env key first, then the entry's stored
+// key; the config's reasoning settings, so a reasoning model distils here the
+// way it does in production.
+func senderForE2E(cfg config.Config, entry config.ModelEntry) (agent.Sender, error) {
 	apiKey := os.Getenv(VendorAPIKeyEnvVar(entry.Provider))
 	if apiKey == "" {
 		apiKey = entry.APIKey
@@ -221,13 +241,15 @@ func senderForE2E(entry config.ModelEntry) (agent.Sender, error) {
 		return nil, fmt.Errorf("no API key for model %q (provider %q)", entry.Model, entry.Provider)
 	}
 	return NewSender(SenderOptions{
-		Provider:       entry.Provider,
-		APIKey:         apiKey,
-		BaseURL:        entry.BaseURL,
-		Protocol:       entry.Protocol,
-		Headers:        entry.Headers,
-		RPM:            entry.RPM,
-		MaxConcurrency: entry.MaxConcurrency,
+		Provider:        entry.Provider,
+		APIKey:          apiKey,
+		BaseURL:         entry.BaseURL,
+		Protocol:        entry.Protocol,
+		Headers:         entry.Headers,
+		RPM:             entry.RPM,
+		MaxConcurrency:  entry.MaxConcurrency,
+		ReasoningEffort: cfg.ReasoningEffort,
+		ShowReasoning:   cfg.EffectiveShowReasoning(nil),
 	})
 }
 

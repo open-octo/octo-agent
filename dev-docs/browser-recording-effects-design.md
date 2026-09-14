@@ -66,10 +66,11 @@ type Effects struct {
 ```
 
 `RecordedEvent` carries `Effects *Effects json:"effects,omitempty"`,
-`LikelyNoop bool json:"likely_noop,omitempty"` and `At int64 json:"at_ms"` (the
-arrival time that attributes requests). All optional: old `events.json` files
-parse unchanged, and an event without `Effects` is treated as unjudgeable —
-never marked.
+`LikelyNoop bool json:"likely_noop,omitempty"` and `At int64 json:"at_ms,omitempty"`
+(the arrival time that attributes requests). All optional: old `events.json`
+files parse unchanged, and an event without `Effects` is treated as
+unjudgeable — never marked. Gestures are click / enter / change / upload /
+download; navigate and wait events carry no `Effects`.
 
 Only **method counts** are recorded for requests — no URLs, no bodies. Request
 URLs routinely carry tokens and identifiers; `events.json` is `0600` but is also
@@ -89,14 +90,22 @@ exact and free, and the raw log stays exactly what was captured.
 **Requests — one subscription.** `watchRequests` subscribes to
 `Network.requestWillBeSent` on each instrumented session (the same sessions the
 capture binding is installed on: top document, cross-origin iframes, tabs
-opened during the demonstration), after `Network.enable`. It keeps only
-`type ∈ {XHR, Fetch, Document}` — images, fonts, scripts, stylesheets and pings
-are dropped — and logs method and arrival time. `attachEffects` assigns each
-request to the most recent gesture at or before it, if within
-**`effectsAttributionWindow` = 1.5 s** — the same shape as the download
-attribution, with a shorter window because a request the gesture caused starts
-promptly while a download can take seconds to begin. A request outside every
-window (polling, an analytics heartbeat) attaches to nothing.
+opened during the demonstration), after `Network.enable`. Every event is
+decoded, then only `type ∈ {XHR, Fetch, Document}` is kept — images, fonts,
+scripts, stylesheets and pings are dropped — with method and arrival time.
+The subscription uses a 1024-deep channel (`requestSubscriptionDepth`): the
+CDP reader drops on overflow, and a page load's burst of asset requests must
+not push out the one POST that separates a write from a no-op.
+
+`attachEffects` assigns each request to the most recent gesture at or before
+it, if within **`effectsAttributionWindow` = 1.5 s** — the same shape as the
+download attribution, with a shorter window because a request the gesture
+caused starts promptly while a download can take seconds to begin. Gesture and
+request timestamps are stamped by different consumer goroutines, so a request
+can carry a time a few ms before the click that caused it; a request no
+preceding gesture claims goes to the next gesture if it follows within
+`requestLeadTolerance` (300 ms). A request outside every window (polling, an
+analytics heartbeat) attaches to nothing.
 
 Why CDP and not the in-page hook: the hook lives in the document and is lost on
 every cross-document navigation, misses `navigator.sendBeacon` and form
@@ -106,9 +115,10 @@ monitor stays as it is — it still drives `wait network` insertion and replay's
 `WaitForNetworkIdle`.
 
 Cost: `Network.enable` makes Chrome stream request/response events for the
-session for the duration of the recording only (`Recorder.Stop` unsubscribes
-and disables). Filtering by `type` keeps the handler's work per request to a
-map increment.
+session for the duration of the recording only — `Recorder.Stop` unsubscribes
+and calls `Network.disable` on every session the recorder enabled it on
+(`netSessions`). The handler's work per request is one decode plus, for the
+kept types, a map increment.
 
 ### 3. Deterministic rule: `likely_noop`
 
@@ -116,10 +126,12 @@ map increment.
 gestures only:
 
 > Walk backwards from the last event, skipping recorder-synthesized waits. A
-> click/enter event is `likely_noop` when its effects show **no request other
-> than GET, no URL change, no new tab, no download**. Stop at the first event
-> that fails the test — a typed value, a write, a navigation, a gesture with no
-> effects (older recorder); everything before it is left unmarked.
+> click, or an Enter that carries no typed value, is `likely_noop` when its
+> effects show **no request other than GET, no URL change, no new tab, no
+> download**. Stop at the first event that fails the test — a typed value (a
+> change, or an Enter carrying what was typed: that is a submission), a write,
+> a navigation, a gesture with no effects (older recorder); everything before
+> it is left unmarked.
 
 Why tail only: a stray click that changed nothing and was followed by nothing
 cannot have contributed to the recording's end state, so removing it is safe
@@ -149,10 +161,15 @@ not a deletion.
 and a navigating or downloading gesture renders `effects: url→https://…`,
 `new_tab`, `download`. Each event also carries its `url=`. Rule 2 of the system
 prompt says: *events marked [likely_noop] changed nothing observable and
-contributed nothing to the end state — drop them unless the Goal needs them.*
-Together with the `goal` line (#2406 part 2) the model has intent **and**
-evidence for the judgement rule 2 asks of it — and needs both: a GET-only tab
-the goal asks for (点开评论) is marked too, and only the goal says to keep it.
+contributed nothing to the end state — they are candidates to drop: drop one
+when the Goal clearly does not need it, keep it when the Goal names it or when
+the Goal is missing or too vague to tell.* The wording errs toward keeping on
+purpose: in the live-model runs a marked step the user wanted (a GET-only
+点开评论 at the tail) was deleted once when no goal was given, and a stray the
+user must remove by hand is the cheaper mistake. Together with the `goal` line
+(#2406 part 2) the model has intent **and** evidence for the judgement rule 2
+asks of it — and needs both: the marker alone flags that wanted tab too, and
+only the goal says to keep it.
 
 ### 5. Confirmation plan
 
@@ -168,10 +185,13 @@ numbered steps when any marked step survived the distiller:
 
 The marker reaches the *refined* steps through `backfillNoopHints`: the
 distiller re-parses its own YAML, so the flag is re-attached by frame+selector
-from the baseline exactly as `backfillAnchors` re-attaches anchors. On `Step`
-it is the unexported `likelyNoop` hint (like `expectNetwork`), never written to
-`recording.yaml`. After the user answers, the agent edits the YAML; nothing
-about the marker persists.
+from the baseline exactly as anchors are, and then the tail-only invariant is
+re-imposed on the refined list — the same element clicked legitimately
+mid-flow and again by mistake at the end shares a selector, and only the tail
+occurrence may stay flagged. On `Step` it is the unexported `likelyNoop` hint
+(like `expectNetwork`), never written to `recording.yaml`. The block words a
+`key` step as a key press, not a click. After the user answers, the agent
+edits the YAML; nothing about the marker persists.
 
 ### 6. Replay
 
@@ -208,11 +228,13 @@ for the compile stage and for a human reading the sidecar, not replay input.
   GET button and a button that touches nothing, clicked in that order — method
   counts per click, `url_after` on the navigation only, and exactly the two
   trailing clicks marked.
-- `TestAttachEffectsAttribution`, `TestMarkLikelyNoopTailOnly`,
+- `TestAttachEffectsAttribution` (incl. the lead tolerance and the window
+  edge), `TestMarkLikelyNoopTailOnly` (incl. the Enter-with-value stopper),
   `TestEffectsString`: the pure functions over synthetic events.
-- `TestRenderTraceEffects`, `TestLikelyNoopReachesPlan`: the trace and the
-  plan carry the evidence; the marker survives distillation onto kept steps and
-  never reaches the YAML.
+- `TestRenderTraceEffects`, `TestLikelyNoopReachesPlan`,
+  `TestBackfillNoopHintsStaysTailOnly`: the trace and the plan carry the
+  evidence; the marker survives distillation onto kept steps, stays tail-only
+  across a shared selector, and never reaches the YAML.
 - `TestDistillE2E_RealModels` (`internal/app`, opt-in via `OCTO_E2E_DISTILL=1`,
   live keys): records the #2406 demonstration in headless Chrome and distils it
   with every model in the user's config, four ways — goal + effects, goal only,

@@ -27,12 +27,14 @@ func TestAttachEffectsAttribution(t *testing.T) {
 	}
 	ms := func(v int64) time.Time { return time.UnixMilli(v) }
 	reqs := []recordedRequest{
-		{Method: "GET", At: ms(900)},   // before any gesture
+		{Method: "GET", At: ms(600)},   // 400ms before any gesture: past the lead tolerance, nobody's
 		{Method: "POST", At: ms(1200)}, // → #a
 		{Method: "GET", At: ms(3400)},  // → #b
 		{Method: "GET", At: ms(3500)},  // → #b
 		{Method: "", At: ms(3600)},     // → #b, method defaults to GET
 		{Method: "GET", At: ms(9000)},  // 4s after #c: outside the window
+		{Method: "POST", At: ms(4900)}, // 100ms BEFORE #c: the cross-goroutine stamp race → still #c's
+		{Method: "PUT", At: ms(4600)},  // 400ms before #c (past the lead tolerance), 1.6s after #b (past the window): nobody's
 	}
 	attachEffects(events, reqs)
 
@@ -45,8 +47,8 @@ func TestAttachEffectsAttribution(t *testing.T) {
 		t.Fatalf("#b effects = %+v", b)
 	}
 	c := events[6].Effects
-	if c == nil || c.URLAfter != "" || len(c.Requests) != 0 {
-		t.Fatalf("#c effects = %+v", c)
+	if c == nil || c.URLAfter != "" || c.Requests["POST"] != 1 || len(c.Requests) != 1 {
+		t.Fatalf("#c effects = %+v (want only the POST stamped just before it)", c)
 	}
 	for _, i := range []int{1, 2, 4, 5} {
 		if events[i].Effects != nil {
@@ -69,10 +71,11 @@ func TestMarkLikelyNoopTailOnly(t *testing.T) {
 		{Type: "click", Selector: "#read", Effects: fx(map[string]int{"GET": 1}, "")},
 		{Type: "wait", WaitKind: "network"},
 		{Type: "click", Selector: "#nothing", Effects: fx(nil, "")},
+		{Type: "enter", Selector: "#q", Effects: fx(nil, "")}, // a bare Enter (nothing typed) that did nothing
 		{Type: "wait", WaitKind: "network"},
 	}
 	markLikelyNoop(events)
-	want := map[string]bool{"#read": true, "#nothing": true}
+	want := map[string]bool{"#read": true, "#nothing": true, "#q": true}
 	for _, e := range events {
 		if e.LikelyNoop != want[e.Selector] {
 			t.Fatalf("%s likely_noop=%v, want %v (%+v)", e.Selector, e.LikelyNoop, want[e.Selector], events)
@@ -80,12 +83,14 @@ func TestMarkLikelyNoopTailOnly(t *testing.T) {
 	}
 
 	stoppers := map[string][]RecordedEvent{
-		"url change": {{Type: "click", Effects: fx(nil, "https://x/next")}},
-		"new tab":    {{Type: "click", Effects: &Effects{NewTab: true}}},
-		"download":   {{Type: "download", Effects: &Effects{Download: true}}},
-		"typed":      {{Type: "change", Effects: fx(nil, "")}},
-		"navigate":   {{Type: "navigate", URL: "https://x/n"}},
-		"legacy":     {{Type: "click"}}, // no Effects: an older recorder, nothing to judge by
+		"url change":   {{Type: "click", Effects: fx(nil, "https://x/next")}},
+		"new tab":      {{Type: "click", Effects: &Effects{NewTab: true}}},
+		"download":     {{Type: "download", Effects: &Effects{Download: true}}},
+		"typed":        {{Type: "change", Effects: fx(nil, "")}},
+		"typed+enter":  {{Type: "enter", Value: "octo", Effects: fx(nil, "")}}, // Enter carrying what was typed: a submission
+		"secret+enter": {{Type: "enter", Secret: true, Effects: fx(nil, "")}},
+		"navigate":     {{Type: "navigate", URL: "https://x/n"}},
+		"legacy":       {{Type: "click"}}, // no Effects: an older recorder, nothing to judge by
 	}
 	for name, tail := range stoppers {
 		evs := append([]RecordedEvent{{Type: "click", Selector: "#before", Effects: fx(nil, "")}}, tail...)

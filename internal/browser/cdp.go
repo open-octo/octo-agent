@@ -200,11 +200,20 @@ func (c *cdpClient) callAsync(sessionID, method string, params any) func(ctx con
 // generous; the reader drops on overflow rather than blocking, so callers must
 // subscribe before triggering the action that emits the event.
 func (c *cdpClient) subscribe(method, sessionID string) (<-chan rpcResponse, func()) {
+	return c.subscribeBuffered(method, sessionID, 32)
+}
+
+// subscribeBuffered is subscribe with a caller-chosen channel depth, for the
+// few event streams that arrive in bursts larger than the default 32 — a page
+// load emits Network.requestWillBeSent for every image, script and font at
+// once, and the reader drops on overflow, so a consumer that only wants the
+// handful of XHR/Fetch requests in that burst must not lose them to it.
+func (c *cdpClient) subscribeBuffered(method, sessionID string, depth int) (<-chan rpcResponse, func()) {
 	c.subsMu.Lock()
 	defer c.subsMu.Unlock()
 	id := c.nextSub
 	c.nextSub++
-	s := &subscription{method: method, sessionID: sessionID, ch: make(chan rpcResponse, 32)}
+	s := &subscription{method: method, sessionID: sessionID, ch: make(chan rpcResponse, depth)}
 	c.subs[id] = s
 	var once sync.Once
 	return s.ch, func() {
