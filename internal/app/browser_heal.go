@@ -37,7 +37,7 @@ func MakeBrowserHealer(sender agent.Sender, model string) browser.Healer {
 		}
 		reply, err := sender.SendMessages(ctx, model, healSystemPrompt, []agent.Message{
 			{Role: agent.RoleUser, Content: healPrompt(step, digest)},
-		}, 256)
+		}, healMaxTokens)
 		if err != nil {
 			return fmt.Errorf("heal: model: %w", err)
 		}
@@ -137,6 +137,13 @@ func MakeRecordingGenerator(sender agent.Sender, model string) browser.Recording
 		return reply.Content, nil
 	}
 }
+
+// healMaxTokens caps the healer's reply. The answer is one selector line, but
+// on a reasoning model the thinking is charged against the same cap, and the
+// former 256 left a reasoning model nothing to answer with — an empty reply
+// reads as "model could not identify a replacement selector" and the heal is
+// given up on the wrong grounds. acceptHealReply keeps only the first line.
+const healMaxTokens = 4096
 
 // distillMaxTokens caps the distiller's reply. The reply is a whole recording
 // YAML — one block per step with selector, label, hint, click coordinates and
