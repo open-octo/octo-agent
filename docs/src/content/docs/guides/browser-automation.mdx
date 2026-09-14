@@ -85,9 +85,12 @@ deterministically after the pass).
 `record_stop` replies with a numbered run-plan — each step with what it does and what its check
 is — for you to confirm or correct before the recording is used.
 
-Recordings are saved as plain YAML at `~/.octo/browser-recordings/<name>.yaml` — readable, editable by
-hand, and diffable in git. (Before the recording rename this was `~/.octo/browser-skills/`; an existing
-directory is migrated automatically.)
+Each recording is a directory, `~/.octo/browser-recordings/<name>/`, holding `recording.yaml` — the
+editable steps: readable, hand-editable, diffable in git — and `events.json`, the raw captured events
+the steps were compiled from (diagnostic ground truth when a replay misbehaves; never edited by hand).
+`OCTO_BROWSER_RECORDINGS_DIR` relocates the whole tree. (A flat `<name>.yaml` from an older version is
+still read, and rewritten into the directory layout the next time it is saved; the pre-rename
+`~/.octo/browser-skills/` directory is migrated automatically.)
 
 ## Replay
 

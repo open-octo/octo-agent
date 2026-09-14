@@ -75,8 +75,10 @@ octo browser setup
 `record_stop` 会回复一份带编号的执行计划——每一步做什么、检查什么——供你确认或修改之后，这段
 录制才算定稿。
 
-录制会以纯 YAML 的形式存在 `~/.octo/browser-recordings/<name>.yaml`——可读、可手改、可以用 git 追踪
-差异。（改名前位于 `~/.octo/browser-skills/`，已有目录会自动迁移。）
+每段录制是一个目录 `~/.octo/browser-recordings/<name>/`，里面有两个文件：`recording.yaml` 是可编辑的
+步骤——可读、可手改、可以用 git 追踪差异；`events.json` 是编译出这些步骤的原始事件（回放出问题时用来
+定位的依据，不要手改）。`OCTO_BROWSER_RECORDINGS_DIR` 可以整体挪走这棵目录树。（老版本留下的平铺
+`<name>.yaml` 仍然能读，下一次保存时会改写成目录布局；改名前的 `~/.octo/browser-skills/` 会自动迁移。）
 
 ## 回放
 
