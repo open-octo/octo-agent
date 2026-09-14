@@ -1079,15 +1079,13 @@ func InteractiveDigest(ctx context.Context, page *Page, frame string, max int) (
 	// []DigestElement.
 	expr := fmt.Sprintf(`(function(){
 	  var d = %s; if(!d) return [];
-	  function sel(el){
-	    if(el.id) return '#'+CSS.escape(el.id);
-	    for(var i=0;i<4;i++){var a=['data-testid','data-test','name','aria-label'][i];var v=el.getAttribute&&el.getAttribute(a);if(v)return el.tagName.toLowerCase()+'['+a+'="'+CSS.escape(v)+'"]';}
-	    var parts=[],node=el,depth=0;
-	    while(node&&node.nodeType===1&&node.tagName!=='BODY'&&depth<5){var part=node.tagName.toLowerCase();var p=node.parentElement;if(p){var same=[].slice.call(p.children).filter(function(c){return c.tagName===node.tagName;});if(same.length>1)part+=':nth-of-type('+(same.indexOf(node)+1)+')';}parts.unshift(part);node=p;depth++;}
-	    return parts.join(' > ');
-	  }
+	  %s
 	  var out=[];
-	  var els=d.querySelectorAll('a,button,input,select,textarea,[role=button],[role=menuitem],[role=tab],label');
+	  // Beyond the conventional controls: anything with an inline click handler
+	  // or made focusable on purpose. A menu built from click-handled div/span
+	  // (common in Chinese admin UIs) is otherwise invisible here, and a healer
+	  // working from this list alone then faces one without the right answer.
+	  var els=d.querySelectorAll('a,button,input,select,textarea,[role=button],[role=menuitem],[role=tab],label,[onclick],[tabindex]:not([tabindex="-1"])');
 	  // Visible = has layout boxes and not visibility:hidden. (The old
 	  // offsetParent===null check also dropped position:fixed controls, which are
 	  // null-offsetParent in Chrome but very much clickable — fixed nav bars and
@@ -1105,7 +1103,67 @@ func InteractiveDigest(ctx context.Context, page *Page, frame string, max int) (
 	    else { t=(el.textContent||el.value||el.getAttribute('aria-label')||el.getAttribute('placeholder')||'').trim().slice(0,50); e={text:t, selector:sel(el)}; }
 	    out.push(e);}
 	  return out;
-	})()`, doc, max)
+	})()`, doc, digestSelJS, max)
+	var digest []DigestElement
+	if err := page.Eval(ctx, expr, &digest); err != nil {
+		return nil, err
+	}
+	return digest, nil
+}
+
+// digestSelJS builds the selector a digest line carries for an element: id →
+// data-testid/name/aria-label attribute → short positional path. Shared by
+// InteractiveDigest and LabelDigest so a healer's candidates all speak the same
+// selector dialect whichever list they came from.
+const digestSelJS = `function sel(el){
+	    if(el.id) return '#'+CSS.escape(el.id);
+	    for(var i=0;i<4;i++){var a=['data-testid','data-test','name','aria-label'][i];var v=el.getAttribute&&el.getAttribute(a);if(v)return el.tagName.toLowerCase()+'['+a+'="'+CSS.escape(v)+'"]';}
+	    var parts=[],node=el,depth=0;
+	    while(node&&node.nodeType===1&&node.tagName!=='BODY'&&depth<5){var part=node.tagName.toLowerCase();var p=node.parentElement;if(p){var same=[].slice.call(p.children).filter(function(c){return c.tagName===node.tagName;});if(same.length>1)part+=':nth-of-type('+(same.indexOf(node)+1)+')';}parts.unshift(part);node=p;depth++;}
+	    return parts.join(' > ');
+	  }`
+
+// LabelDigest lists the visible elements whose own text contains label,
+// whatever their tag — the innermost ones, found through the text nodes that
+// carry the label (an ancestor's textContent contains everything below it, so
+// walking elements would report the whole chain). It complements
+// InteractiveDigest for the healer: the step's recorded text is the strongest
+// clue to the intended element, and the element carrying it is often a
+// click-handled span or div no interactive-control query enumerates. Capped
+// to max (default 8).
+func LabelDigest(ctx context.Context, page *Page, frame, label string, max int) ([]DigestElement, error) {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return nil, nil
+	}
+	if max <= 0 {
+		max = 8
+	}
+	if frame != "" {
+		if cp, ok := page.oopifPage(ctx, frame); ok {
+			return LabelDigest(ctx, cp, "", label, max)
+		}
+	}
+	doc := "document"
+	if frame != "" {
+		doc = fmt.Sprintf("(document.querySelector(%s)||{}).contentDocument", jsString(frame))
+	}
+	expr := fmt.Sprintf(`(function(){
+	  var d = %s; if(!d||!d.body) return [];
+	  %s
+	  var label=%s, out=[], seen=[];
+	  var w=d.createTreeWalker(d.body, NodeFilter.SHOW_TEXT);
+	  var n;
+	  while((n=w.nextNode()) && out.length<%d){
+	    if((n.data||'').indexOf(label)<0) continue;
+	    var el=n.parentElement;
+	    if(!el||seen.indexOf(el)>=0||/^(SCRIPT|STYLE|TEMPLATE|NOSCRIPT)$/.test(el.tagName)) continue;
+	    seen.push(el);
+	    if(el.getClientRects().length===0 || getComputedStyle(el).visibility==='hidden') continue;
+	    out.push({text:(el.textContent||'').trim().slice(0,50), selector:sel(el)});
+	  }
+	  return out;
+	})()`, doc, digestSelJS, jsString(label), max)
 	var digest []DigestElement
 	if err := page.Eval(ctx, expr, &digest); err != nil {
 		return nil, err
@@ -1404,6 +1462,7 @@ func recoverStep(ctx context.Context, opts ReplayOptions, page *Page, step *Step
 	// 2. LLM healer, multi-round. Every exit path names the heal outcome —
 	// returning the bare cause made a failed heal indistinguishable from no
 	// heal ever running.
+	rootCause := cause
 	for round := 0; round < maxHealRounds; round++ {
 		opts.emitProgress(fmt.Sprintf("step failed — self-heal round %d/%d", round+1, maxHealRounds))
 		before := *step
@@ -1411,17 +1470,28 @@ func recoverStep(ctx context.Context, opts ReplayOptions, page *Page, step *Step
 			return page, false, fmt.Errorf("%w (self-heal gave up: %v)", cause, herr)
 		}
 		if step.Selector != before.Selector {
-			opts.emitProgress("self-heal proposed " + step.Selector + " — retrying")
-		}
-		if step.Selector != before.Selector {
-			// The healer's replacement selector is authoritative for this
-			// retry: the recorded fingerprint is exactly what just failed to
-			// match the page, so re-gating the healed selector through
-			// resolveAnchoredTarget would reject every repair — an anchored
-			// step could never heal. Dropping the stale anchors also reaches
-			// the YAML via the caller's write-back, so the healed step stays
-			// replayable next time instead of deadlocking again.
-			step.Anchors = nil
+			// A proposal is only as good as the model behind it, so it earns
+			// the retry — and the YAML — by resolving on the live page to an
+			// element carrying the step's recorded text. Skipping this let an
+			// unverified selector (a fragment of the dead one the model
+			// echoed) reach the retry, where the label fallback clicked the
+			// right element on its own; the step passed and the write-back
+			// persisted a selector nothing on the page matched (#2404).
+			//
+			// The verified element is re-fingerprinted rather than the stale
+			// anchors kept or dropped: kept, they are exactly what just failed
+			// to match, so re-gating the healed selector through them would
+			// reject every repair; dropped, the healed step loses the
+			// alternates and neighbor text that let it survive the next drift.
+			fresh, verr := page.verifyHealedSelector(ctx, step.Frame, step.Selector, step.Label, healVerifyTimeout)
+			if verr != nil {
+				opts.emitProgress("self-heal proposed " + step.Selector + " — rejected: " + verr.Error())
+				cause = fmt.Errorf("%w (self-heal proposed %q, rejected: %v)", rootCause, step.Selector, verr)
+				*step = before
+				continue
+			}
+			opts.emitProgress("self-heal proposed " + step.Selector + " — verified, retrying")
+			step.Anchors = fresh
 		}
 		np, retryErr := runStep(ctx, opts.Browser, page, step, params, opts.StepTimeout, opts.DownloadDir, binds)
 		if retryErr == nil {

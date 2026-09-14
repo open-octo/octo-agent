@@ -164,14 +164,22 @@ recording and the param — never the value.
 
 If a step's selector no longer matches anything — and only if a model is configured for this
 purpose — octo takes a **text digest** of the page's currently interactable elements (selector +
-visible text, no screenshot, model-agnostic), and asks the model for a single corrected CSS
-selector given the intended action, the dead selector, and (when the step carries one) the
-recorded fingerprint — role, tag and neighbor text — turning the request from an open guess into
-constrained matching. The fix is retried once and, if it works,
-written back into the recording's YAML — so a heal is durable, not a one-off patch you'd have to
-redo on every future replay. (The write-back re-marshals the YAML, so any hand-written comments in
-the file are dropped on the next healed replay; field values are kept. Version your recordings in
-git if you annotate them.)
+visible text, no screenshot, model-agnostic), puts the elements carrying the step's recorded text
+at the top of it whatever their tag (a menu built from click-handled `span`s is not a control by
+any query), and asks the model for a single corrected CSS selector given the intended action, the
+dead selector, and (when the step carries one) the recorded fingerprint — role, tag and neighbor
+text — turning the request from an open guess into constrained matching. The answer must be a
+selector from that list; anything else is refused. Before it is trusted, the proposal is **verified
+against the live page**: it must resolve to an element whose text contains the step's recorded
+label. A proposal that fails this is rejected — the step stays exactly as recorded and the reason
+feeds the next heal round (up to three) — so a selector nothing on the page matched can never be
+acted on, let alone saved. A verified element is **fingerprinted afresh** (alternate selectors, tag,
+role, the neighbor text beside it now) in place of the stale anchors; then the step is retried and,
+if it works, written back into the recording's YAML — so a heal is durable, not a one-off patch
+you'd have to redo on every future replay, and the healed step keeps the redundancy that lets it
+survive the next drift. (The write-back re-marshals the YAML, so any hand-written comments in the
+file are dropped on the next healed replay; field values are kept. Version your recordings in git
+if you annotate them.)
 
 ## Permissions and vision
 

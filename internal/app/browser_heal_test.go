@@ -21,3 +21,48 @@ func TestHealPromptIncludesFieldHint(t *testing.T) {
 		}
 	}
 }
+
+// TestAcceptHealReply: the model's answer is taken only when it is a selector
+// the prompt offered — cleaned of the usual wrapping (backticks, a trailing
+// text column copied from the digest line) — and anything else is refused
+// rather than acted on: NONE/empty as "no match", an off-list selector (the
+// tail of the dead selector echoed back, #2404) as an invented one.
+func TestAcceptHealReply(t *testing.T) {
+	cands := []browser.DigestElement{{Selector: "#q", Text: "Search"}, {Selector: "div > span:nth-of-type(2)", Text: "笔记管理"}}
+	cases := []struct {
+		reply   string
+		want    string
+		wantErr string
+	}{
+		{reply: "#q", want: "#q"},
+		{reply: "`#q`\n", want: "#q"},
+		{reply: "div > span:nth-of-type(2)\t笔记管理", want: "div > span:nth-of-type(2)"},
+		{reply: "NONE", wantErr: "could not identify"},
+		{reply: "", wantErr: "could not identify"},
+		{reply: "span.title-wrapper", wantErr: "not one of the page's current elements"},
+		{reply: "#q, #other", wantErr: "not one of the page's current elements"},
+	}
+	for _, c := range cases {
+		got, err := acceptHealReply(c.reply, cands)
+		if c.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Errorf("reply %q: want error containing %q, got %v (sel %q)", c.reply, c.wantErr, err, got)
+			}
+			continue
+		}
+		if err != nil || got != c.want {
+			t.Errorf("reply %q: want %q, got %q (err %v)", c.reply, c.want, got, err)
+		}
+	}
+}
+
+// TestHealCandidatesLabelFirst: label-matched elements lead the list and an
+// element present in both lists appears once, at its label-matched position.
+func TestHealCandidatesLabelFirst(t *testing.T) {
+	byText := []browser.DigestElement{{Selector: "div > span", Text: "笔记管理"}}
+	digest := []browser.DigestElement{{Selector: "#a", Text: "A"}, {Selector: "div > span", Text: "笔记管理"}, {Selector: "", Text: "no selector"}}
+	got := healCandidates(byText, digest)
+	if len(got) != 2 || got[0].Selector != "div > span" || got[1].Selector != "#a" {
+		t.Fatalf("want [div > span, #a], got %+v", got)
+	}
+}

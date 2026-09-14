@@ -211,17 +211,28 @@ for each step:
     resolve target (text-anchored for clicks), waiting for it to appear
     execute via the CDP backend (deterministic, no LLM); follow any new tab
     verify (implicit target presence + any explicit verify)
-    if it fails AND a healer is wired:
-        healer inspects the page and repairs the step, then retry once
-        if the repair changed the step, write the corrected skill back
+    if it fails AND a healer is wired (up to 3 rounds):
+        healer inspects the page and proposes a repaired selector
+        verify the proposal on the live page: resolves, text contains the label
+            rejected -> step restored as recorded; the reason is the next round's cause
+        re-fingerprint the verified element (fresh anchors), retry
+        if the retry passes, write the corrected skill back
 ```
 
 **Self-heal** (`app.MakeBrowserHealer`) is the only LLM call in replay and only
 on a hard failure: it shows the model the page's current interactable elements (a
-text digest — model-agnostic, no vision) plus the intended action + label, and
-asks for the corrected selector, which is written into the step for retry and
-persisted (`replay` saves the healed skill back). This self-heal is the
-difference between this and a brittle RPA macro.
+text digest — model-agnostic, no vision), led by the elements carrying the step's
+recorded label whatever their tag (`LabelDigest` — click-handled span/div menus
+are not controls by any query), plus the intended action + label + fingerprint,
+and asks for the corrected selector. The reply is accepted only if it is one of
+the listed selectors (`acceptHealReply`). The engine then verifies the proposal
+against the page before trusting it (`verifyHealedSelector`: it must resolve to
+an element whose text contains the label) and re-fingerprints that element with
+the recorder's own strategies (`fingerprintJS`, shared with the capture script),
+so the healed step is re-anchored rather than left without anchors. Only a step
+that passed with a verified selector reaches the write-back (`replay` saves the
+healed skill back). This self-heal is the difference between this and a brittle
+RPA macro.
 
 ## Managing recordings (web Browser view)
 

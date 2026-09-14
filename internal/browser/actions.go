@@ -1157,3 +1157,99 @@ func (p *Page) Cookies(ctx context.Context) ([]Cookie, error) {
 	}
 	return r.Cookies, nil
 }
+
+// healVerifyTimeout bounds how long verifyHealedSelector polls for the proposed
+// element. The healer chose it from a digest of the page as it stands, so it
+// should already be there; the allowance only absorbs a re-render in flight.
+const healVerifyTimeout = 2 * time.Second
+
+// healedElement is what the page reports about the element a healed selector
+// resolves to: the facts verifyHealedSelector checks (Found, Text) plus the
+// fresh fingerprint it hands back (the rest), built with the recorder's own
+// strategies (fingerprintJS).
+type healedElement struct {
+	Found    bool     `json:"found"`
+	Text     string   `json:"text"`
+	Alts     []string `json:"alts"`
+	Role     string   `json:"role"`
+	Tag      string   `json:"tag"`
+	Neighbor string   `json:"neighbor"`
+}
+
+// verifyHealedSelector checks a healer-proposed selector against the live page
+// before replay trusts it: it must resolve to an element and, when the step
+// recorded the element's visible text (label), that element's text must contain
+// it. Without this gate an unverified proposal — a fragment of the dead selector
+// the model echoed, an invented class — reaches the retry, where the label/hint
+// fallbacks can make the step pass on their own, and the write-back then
+// persists a selector nothing on the page ever matched.
+//
+// On success it returns a fresh fingerprint of the verified element (nil when
+// the element offers no anchor signals, matching eventAnchors), so the healed
+// step is re-anchored rather than left fingerprint-less. The alternates are the
+// recorder's primary and alternate strategies applied to the element, minus the
+// healed selector itself.
+func (p *Page) verifyHealedSelector(ctx context.Context, frame, sel, label string, timeout time.Duration) (*Anchors, error) {
+	if frame != "" {
+		if cp, ok := p.oopifPage(ctx, frame); ok {
+			return cp.verifyHealedSelector(ctx, "", sel, label, timeout)
+		}
+	}
+	label = strings.TrimSpace(label)
+	expr := fmt.Sprintf(`(function(){
+	  %s
+	  var el=null; try{ el=%s; }catch(e){}
+	  if(!el||el.nodeType!==1) return {found:false};
+	  var role=''; try{ role=el.getAttribute('role')||''; }catch(_){}
+	  return {found:true, text:(el.textContent||'').trim().slice(0,200), alts:[sel(el)].concat(altSels(el)), role:role, tag:el.tagName.toLowerCase(), neighbor:neighborText(el)};
+	})()`, fingerprintJS, elemRefJS(frame, sel))
+
+	deadline := time.Now().Add(timeout)
+	var last healedElement
+	for {
+		var el healedElement
+		if err := p.Eval(ctx, expr, &el); err == nil {
+			last = el
+			if el.Found && (label == "" || strings.Contains(el.Text, label)) {
+				return healedAnchors(sel, el), nil
+			}
+		}
+		if ctx.Err() != nil || !time.Now().Before(deadline) {
+			if last.Found {
+				return nil, fmt.Errorf("matches an element whose text %q does not contain the recorded label %q", last.Text, label)
+			}
+			return nil, fmt.Errorf("matches no element on the page")
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
+}
+
+// healedAnchors turns a verified element's facts into the step's new Anchors —
+// nil when it carries no signal beyond its tag, the same rule eventAnchors
+// applies at record time.
+func healedAnchors(sel string, el healedElement) *Anchors {
+	var alts []string
+	for _, a := range el.Alts {
+		if a == "" || a == sel {
+			continue
+		}
+		dup := false
+		for _, seen := range alts {
+			if seen == a {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			alts = append(alts, a)
+		}
+	}
+	if len(alts) == 0 && el.Role == "" && el.Neighbor == "" {
+		return nil
+	}
+	return &Anchors{Selectors: alts, Role: el.Role, Tag: strings.ToLower(el.Tag), NeighborText: el.Neighbor}
+}

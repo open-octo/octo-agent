@@ -285,25 +285,14 @@ func (r *Recorder) instrumentOOPIF(ctx context.Context, session string) {
 	_ = r.instrumentSession(ctx, session, frameSel)
 }
 
-// captureScript installs capture-phase click/change/keydown listeners that report
-// each action (with a stable-ish selector) through the __octoRecord binding.
-//
-// It also auto-inserts wait events: after each click, it checks whether the click
-// triggered network activity (SPA data loading) and emits a "network" wait, and a
-// MutationObserver detects significant new DOM elements (modals, popups,
-// calendars, overlays) and emits an "element" wait for the first such element.
-// These waits make the compiled recording replayable without the next step
-// racing ahead of a page that hasn't settled.
-const captureScript = `(function(){
-  if (window.__octoRec) return; window.__octoRec = true;
-  /* ---- network monitor: track in-flight fetch/XHR (reused by WaitForNetworkIdle) ---- */
-  if (!window.__octoNet){
-    var s=window.__octoNet={n:0, gen:0, idleSince:Date.now()};
-    function inc(){ s.n++; s.gen++; s.idleSince=0; }
-    function dec(){ s.n=Math.max(0,s.n-1); if(s.n===0) s.idleSince=Date.now(); }
-    try{ var of=window.fetch; if(of){ window.fetch=function(){ inc(); return of.apply(this,arguments).then(function(r){dec();return r;},function(e){dec();throw e;}); }; } }catch(_){}
-    try{ var send=XMLHttpRequest.prototype.send; XMLHttpRequest.prototype.send=function(){ inc(); try{ this.addEventListener('loadend',function(){dec();},{once:true}); }catch(_){ dec(); } return send.apply(this,arguments); }; }catch(_){}
-  }
+// fingerprintJS is the element-identification toolkit shared by the capture
+// script and replay: the selector strategies (sel / altSels and their helpers)
+// and neighborText. Replay evaluates it too — when self-heal verifies a repaired
+// selector, the element it resolves to is re-fingerprinted with these same
+// functions (fingerprintElement), so a healed step carries anchors of the same
+// quality as a freshly recorded one instead of losing them. Every function here
+// is a pure element→string helper: no capture state, no bindings.
+const fingerprintJS = `
   // volatileId flags auto-generated ids that change per mount/session —
   // react-aria/radix/headlessui counters, "Popover12"-style numbered
   // components, ":r3:"-style useId output, long numeric runs. Anchoring a
@@ -422,6 +411,28 @@ const captureScript = `(function(){
     });
     return cls[0];
   }
+`
+
+// captureScript installs capture-phase click/change/keydown listeners that report
+// each action (with a stable-ish selector) through the __octoRecord binding.
+//
+// It also auto-inserts wait events: after each click, it checks whether the click
+// triggered network activity (SPA data loading) and emits a "network" wait, and a
+// MutationObserver detects significant new DOM elements (modals, popups,
+// calendars, overlays) and emits an "element" wait for the first such element.
+// These waits make the compiled recording replayable without the next step
+// racing ahead of a page that hasn't settled.
+const captureScript = `(function(){
+  if (window.__octoRec) return; window.__octoRec = true;
+  /* ---- network monitor: track in-flight fetch/XHR (reused by WaitForNetworkIdle) ---- */
+  if (!window.__octoNet){
+    var s=window.__octoNet={n:0, gen:0, idleSince:Date.now()};
+    function inc(){ s.n++; s.gen++; s.idleSince=0; }
+    function dec(){ s.n=Math.max(0,s.n-1); if(s.n===0) s.idleSince=Date.now(); }
+    try{ var of=window.fetch; if(of){ window.fetch=function(){ inc(); return of.apply(this,arguments).then(function(r){dec();return r;},function(e){dec();throw e;}); }; } }catch(_){}
+    try{ var send=XMLHttpRequest.prototype.send; XMLHttpRequest.prototype.send=function(){ inc(); try{ this.addEventListener('loadend',function(){dec();},{once:true}); }catch(_){ dec(); } return send.apply(this,arguments); }; }catch(_){}
+  }
+` + fingerprintJS + `
   /* ---- wait-event reporting (debounced) ---- */
   var _lastWaitAt=0;
   var WAIT_COOLDOWN=200;

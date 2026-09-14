@@ -736,12 +736,12 @@ func TestReplayDismissesOverlayDeterministically(t *testing.T) {
 
 // TestReplayHealBypassesStaleAnchors: a step whose recorded fingerprint no
 // longer matches the page (garbage neighbor text) fails anchored resolution;
-// the healer supplies the correct selector. The retry must TRUST the healed
-// selector instead of re-gating it through the same dead fingerprint —
-// otherwise an anchored step can never heal (observed on Zhihu: every heal
-// round was rejected by the drifted fingerprint and replay failed). The stale
-// anchors must also be dropped from the step so the write-back persists a
-// replayable repair.
+// the healer supplies the correct selector. The retry must not re-gate the
+// healed selector through the same dead fingerprint — otherwise an anchored
+// step can never heal (observed on Zhihu: every heal round was rejected by the
+// drifted fingerprint and replay failed). The stale anchors must be replaced
+// (here the bare button offers no anchor signal, so by none) and the written-
+// back step must replay on its own.
 func TestReplayHealBypassesStaleAnchors(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
@@ -781,12 +781,184 @@ func TestReplayHealBypassesStaleAnchors(t *testing.T) {
 	if recording.Steps[0].Selector != "#real" {
 		t.Fatalf("step not corrected: %q", recording.Steps[0].Selector)
 	}
-	if recording.Steps[0].Anchors != nil {
-		t.Fatal("stale anchors must be dropped with the healed selector — keeping them re-deadlocks the next replay")
+	if a := recording.Steps[0].Anchors; a != nil && a.NeighborText == "text that exists nowhere on this page" {
+		t.Fatal("stale anchors must not survive the heal — keeping them re-deadlocks the next replay")
 	}
 	var clicks int
 	if err := page.Eval(ctx, "window.clicks", &clicks); err != nil || clicks < 1 {
 		t.Fatalf("healed step did not actually click (clicks=%d, err=%v)", clicks, err)
+	}
+	// The written-back step must stand on its own: replay it again with no
+	// healer wired.
+	if _, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 2 * time.Second, Browser: b}); err != nil {
+		t.Fatalf("healed recording must replay without a healer, got: %v", err)
+	}
+	if err := page.Eval(ctx, "window.clicks", &clicks); err != nil || clicks < 2 {
+		t.Fatalf("second replay did not click (clicks=%d, err=%v)", clicks, err)
+	}
+}
+
+// healVerifyFixture is the page shape from #2404: a menu whose entries are
+// click-handled spans (no interactive tag or role), a second element with the
+// same visible text elsewhere, and a recorded fingerprint whose selector and
+// neighbor text are both stale — so anchored resolution ties on the label
+// alone and fails into the healer.
+const healVerifyFixture = `<!doctype html><title>t</title>
+<div class="nav"><div class="item"><span class="section">首页</span><span class="menu-title-wrapper">笔记管理</span></div></div>
+<div class="tabs"><div class="item"><span class="tab-title">笔记管理</span></div></div>
+<script>window.hits=[];
+document.querySelector('.menu-title-wrapper').addEventListener('click',function(){window.hits.push('nav')});
+document.querySelector('.tab-title').addEventListener('click',function(){window.hits.push('tab')});</script>`
+
+func healVerifyStep() Step {
+	return Step{
+		Action:   "click",
+		Selector: "div.list > div.nav-v2 > div.nav-item:nth-of-type(2) > span.nav-title > span.title-wrapper",
+		Label:    "笔记管理",
+		Anchors:  &Anchors{Selectors: []string{"div > div.nav-v2 > div > span > span"}, Tag: "span", NeighborText: "旧栏目"},
+	}
+}
+
+// TestReplayHealRejectsUnverifiedSelector (#2404): the healer proposes a
+// selector that matches nothing on the page — the tail of the dead selector,
+// echoed back. Before, that proposal reached the retry with the anchors
+// dropped, the label fallback clicked the right element on its own, and the
+// write-back persisted the phantom selector minus the fingerprint. Now the
+// proposal must be verified against the page first: rejected, the step is left
+// exactly as recorded (selector AND anchors), nothing is clicked, the
+// rejection reason feeds the next heal round, and replay fails honestly once
+// the rounds run out.
+func TestReplayHealRejectsUnverifiedSelector(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(healVerifyFixture))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, ".tab-title", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+
+	recording := &Recording{Name: "x", Steps: []Step{healVerifyStep()}}
+	want := healVerifyStep()
+	var causes []string
+	heal := func(_ context.Context, _ *Page, step *Step, cause error) error {
+		causes = append(causes, cause.Error())
+		step.Selector = "span.title-wrapper"
+		return nil
+	}
+	modified, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal, Browser: b})
+	if err == nil {
+		t.Fatal("replay must fail: every proposal matched nothing, and the label fallback must not rescue an unverified heal")
+	}
+	if !strings.Contains(err.Error(), "self-heal") || !strings.Contains(err.Error(), `"span.title-wrapper"`) || !strings.Contains(err.Error(), "matches no element") {
+		t.Fatalf("error must name the rejected proposal and why, got: %v", err)
+	}
+	if modified {
+		t.Fatal("a rejected heal must not mark the recording modified — nothing verified may reach the YAML")
+	}
+	got := recording.Steps[0]
+	if got.Selector != want.Selector {
+		t.Fatalf("selector must stay as recorded, got %q", got.Selector)
+	}
+	if got.Anchors == nil || got.Anchors.NeighborText != want.Anchors.NeighborText || len(got.Anchors.Selectors) != 1 || got.Anchors.Selectors[0] != want.Anchors.Selectors[0] {
+		t.Fatalf("anchors must survive a rejected heal untouched, got %+v", got.Anchors)
+	}
+	if len(causes) != maxHealRounds {
+		t.Fatalf("expected %d heal rounds, got %d", maxHealRounds, len(causes))
+	}
+	if !strings.Contains(causes[1], "rejected") || !strings.Contains(causes[1], "span.title-wrapper") {
+		t.Fatalf("the rejection must feed the next round as its cause, got: %s", causes[1])
+	}
+	var hits []string
+	if err := page.Eval(ctx, "window.hits", &hits); err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 0 {
+		t.Fatalf("nothing may be clicked on an unverified proposal, got %v", hits)
+	}
+}
+
+// TestReplayHealRefingerprintsVerifiedElement (#2404): a proposal that does
+// resolve to an element carrying the recorded label is accepted — and instead
+// of the stale anchors being dropped, the verified element is fingerprinted
+// afresh with the recorder's own strategies (alternate selectors, tag, the
+// neighbor text actually beside it now). The retry clicks the intended element
+// even though a second one shares its text, and the written-back step replays
+// with no healer at all.
+func TestReplayHealRefingerprintsVerifiedElement(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(healVerifyFixture))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, ".tab-title", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+
+	recording := &Recording{Name: "x", Steps: []Step{healVerifyStep()}}
+	const proposed = "div.nav > div.item > span:nth-of-type(2)" // digest-style: what the healer's list would carry
+	heal := func(_ context.Context, _ *Page, step *Step, _ error) error {
+		step.Selector = proposed
+		return nil
+	}
+	modified, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal, Browser: b})
+	if err != nil {
+		t.Fatalf("replay should succeed via the verified selector, got: %v", err)
+	}
+	if !modified {
+		t.Fatal("expected modified=true after a verified heal")
+	}
+	got := recording.Steps[0]
+	if got.Selector != proposed {
+		t.Fatalf("step not corrected: %q", got.Selector)
+	}
+	a := got.Anchors
+	if a == nil {
+		t.Fatal("verified heal must re-fingerprint the element, not drop the anchors")
+	}
+	if a.Tag != "span" || a.NeighborText != "首页" {
+		t.Fatalf("fresh fingerprint must describe the element as it is now (tag span, neighbor 首页), got %+v", a)
+	}
+	if len(a.Selectors) == 0 {
+		t.Fatalf("fresh fingerprint must carry alternate selectors, got %+v", a)
+	}
+	for _, s := range a.Selectors {
+		if s == proposed || s == "div > div.nav-v2 > div > span > span" {
+			t.Fatalf("alternates must be fresh strategies, not the primary or the stale alternate: %+v", a.Selectors)
+		}
+	}
+	var hits []string
+	if err := page.Eval(ctx, "window.hits", &hits); err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0] != "nav" {
+		t.Fatalf("the healed step must click the intended menu entry, got %v", hits)
+	}
+	// The written-back step must stand on its own — replay again, no healer.
+	if _, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 2 * time.Second, Browser: b}); err != nil {
+		t.Fatalf("healed recording must replay without a healer, got: %v", err)
+	}
+	if err := page.Eval(ctx, "window.hits", &hits); err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 2 || hits[1] != "nav" {
+		t.Fatalf("second replay must click the same entry via the fresh fingerprint, got %v", hits)
 	}
 }
 
