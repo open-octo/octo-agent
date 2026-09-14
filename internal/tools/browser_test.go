@@ -184,9 +184,22 @@ func TestBrowserTool_RecordRunRoundTrip(t *testing.T) {
 		skipOnBrowserFlake(t, "click", err)
 	}
 	time.Sleep(300 * time.Millisecond) // let the capture event arrive
-	stopOut, err := run(map[string]any{"action": "record_stop", "name": "demo"})
+	// A distiller that only captures its prompt and then fails, so the steps
+	// stay the deterministic baseline (and the reply must say so) while the
+	// prompt shows what record_stop handed the model.
+	var distillPrompt string
+	capture := func(_ context.Context, _, user string) (string, error) {
+		distillPrompt = user
+		return "", fmt.Errorf("stop")
+	}
+	stopRes, err := tool.Execute(WithBrowserRecordingGenerator(ctx, capture), "browser", map[string]any{"action": "record_stop", "name": "demo"})
+	stopOut := stopRes.Text
 	if err != nil {
 		skipOnBrowserFlake(t, "record_stop", err)
+	}
+	// The goal given to record_start must reach the distiller verbatim (#2406).
+	if !strings.Contains(distillPrompt, "Goal (what the user set out to do, in their own words): press Go\n") {
+		t.Fatalf("record_stop must hand the record_start goal to the distiller, prompt was:\n%s", distillPrompt)
 	}
 	// record_stop must still tell the agent how to trigger a replay and that
 	// recordings are never auto-triggered — dropping this from the response
@@ -194,8 +207,8 @@ func TestBrowserTool_RecordRunRoundTrip(t *testing.T) {
 	if !strings.Contains(stopOut, "action=replay") || !strings.Contains(stopOut, "NOT keyword-triggerable") {
 		t.Fatalf("record_stop response missing replay guidance: %s", stopOut)
 	}
-	// No distiller is wired here, so the steps are the raw baseline — the
-	// result must say the cleanup pass did not apply (#2406).
+	// The distiller failed, so the steps are the raw baseline — the result
+	// must say the cleanup pass did not apply (#2406).
 	if !strings.Contains(stopOut, "cleanup pass did NOT apply") {
 		t.Fatalf("record_stop response must report that the steps were not distilled: %s", stopOut)
 	}
@@ -203,6 +216,29 @@ func TestBrowserTool_RecordRunRoundTrip(t *testing.T) {
 	// any further use of the recording on their confirmation.
 	if !strings.Contains(stopOut, "PENDING USER CONFIRMATION") {
 		t.Fatalf("record_stop response must ask for the user's confirmation of the plan: %s", stopOut)
+	}
+
+	// A goal belongs to ONE demonstration: a cancelled recording's goal must
+	// not leak into the next one started without a goal.
+	if _, err := run(map[string]any{"action": "record_start", "goal": "stale goal"}); err != nil {
+		skipOnBrowserFlake(t, "record_start (to cancel)", err)
+	}
+	if _, err := run(map[string]any{"action": "record_cancel"}); err != nil {
+		t.Fatalf("record_cancel: %v", err)
+	}
+	if _, err := run(map[string]any{"action": "record_start"}); err != nil {
+		skipOnBrowserFlake(t, "record_start (no goal)", err)
+	}
+	if _, err := run(map[string]any{"action": "click", "selector": "#b"}); err != nil {
+		skipOnBrowserFlake(t, "click", err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	distillPrompt = ""
+	if _, err := tool.Execute(WithBrowserRecordingGenerator(ctx, capture), "browser", map[string]any{"action": "record_stop", "name": "demo2"}); err != nil {
+		skipOnBrowserFlake(t, "record_stop (no goal)", err)
+	}
+	if strings.Contains(distillPrompt, "Goal (") || distillPrompt == "" {
+		t.Fatalf("a cancelled recording's goal leaked into the next prompt (or no prompt captured):\n%s", distillPrompt)
 	}
 
 	// Replay: navigates back to the start URL (reset clicks) and re-clicks.
