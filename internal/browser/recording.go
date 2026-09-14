@@ -723,7 +723,9 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 			slog.Warn("browser: recording distill output unusable, keeping deterministic baseline steps", "recording", name, "err", err, "steps", len(refined.Steps))
 			reason := "the model's output had no steps"
 			if err != nil {
-				reason = "the model's output was not a valid recording: " + err.Error()
+				// yaml's unmarshal errors span lines; the reason lands inside a
+				// sentence in the tool result.
+				reason = "the model's output was not a valid recording: " + strings.Join(strings.Fields(err.Error()), " ")
 			}
 			return withDescription(base, refined.Description), reason
 		}
@@ -923,11 +925,12 @@ func truncRunes(s string, n int) string {
 func MarshalRecording(s Recording) ([]byte, error) { return yaml.Marshal(s) }
 
 // ParseRecording parses a recording from YAML. The list-valued top-level
-// fields (params, outputs) also accept an empty mapping or null: a model asked
-// for "keys: name, description, params, outputs, steps" writes `params: {}`
-// for "no params" about as readily as `params: []`, and rejecting the former
-// threw the whole distilled recording away (#2406). Only the EMPTY mapping is
+// fields (params, outputs) also accept an empty mapping: a model asked for
+// "keys: name, description, params, outputs, steps" writes `params: {}` for
+// "no params" about as readily as `params: []`, and rejecting the former threw
+// the whole distilled recording away (#2406). Only the EMPTY mapping is
 // accepted — a populated one is still a shape error, not something to guess at.
+// (null / a bare key already decode to an empty slice; nothing to do there.)
 func ParseRecording(data []byte) (Recording, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
@@ -943,8 +946,8 @@ func ParseRecording(data []byte) (Recording, error) {
 }
 
 // normalizeEmptyLists rewrites, in the document's top-level mapping, each named
-// key whose value is `{}` or null into an empty sequence, so it decodes into a
-// nil slice instead of failing with "cannot unmarshal !!map into []T".
+// key whose value is `{}` into an empty sequence, so it decodes into a nil
+// slice instead of failing with "cannot unmarshal !!map into []T".
 func normalizeEmptyLists(doc *yaml.Node, keys ...string) {
 	root := doc
 	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
@@ -962,9 +965,7 @@ func normalizeEmptyLists(doc *yaml.Node, keys ...string) {
 		if !want[key.Value] {
 			continue
 		}
-		emptyMap := val.Kind == yaml.MappingNode && len(val.Content) == 0
-		null := val.Kind == yaml.ScalarNode && val.Tag == "!!null"
-		if emptyMap || null {
+		if val.Kind == yaml.MappingNode && len(val.Content) == 0 {
 			root.Content[i+1] = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 		}
 	}

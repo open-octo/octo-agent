@@ -474,9 +474,11 @@ func TestGenerateRecordingDistill(t *testing.T) {
 
 	// Output that does not parse at all: baseline steps, and a reason that
 	// carries the parse error. No generator at all is a fallback too.
-	broken := func(_ context.Context, _, _ string) (string, error) { return "steps: [\n", nil }
-	if s4, fallback := GenerateRecording(ctx, "demo", "https://x/start", events, broken); len(s4.Steps) == 0 || !strings.Contains(fallback, "not a valid recording") {
-		t.Fatalf("unparseable output: steps=%d fallback=%q", len(s4.Steps), fallback)
+	broken := func(_ context.Context, _, _ string) (string, error) {
+		return "name: x\nparams: {a: 1}\noutputs: {b: 2}\nsteps: []\n", nil
+	}
+	if s4, fallback := GenerateRecording(ctx, "demo", "https://x/start", events, broken); len(s4.Steps) == 0 || !strings.Contains(fallback, "not a valid recording") || strings.Contains(fallback, "\n") {
+		t.Fatalf("unparseable output: steps=%d fallback=%q (must name the parse error on one line)", len(s4.Steps), fallback)
 	}
 	if _, fallback := GenerateRecording(ctx, "demo", "https://x/start", events, nil); !strings.Contains(fallback, "no model") {
 		t.Fatalf("nil generator must report why the baseline was kept, got %q", fallback)
@@ -484,8 +486,10 @@ func TestGenerateRecordingDistill(t *testing.T) {
 }
 
 // TestParseRecordingAcceptsEmptyMapLists (#2406): `params: {}` / `outputs: {}`
-// and null decode as empty lists — a model writes either shape for "none".
-// A populated mapping is still a shape error, and a real list still parses.
+// decode as empty lists, like the null / bare-key spellings always did — a
+// model writes any of these for "none". A populated mapping is still a shape
+// error, `steps: {}` is still rejected (steps are deliberately not relaxed),
+// a null inside a Param is untouched, and a real list still parses.
 func TestParseRecordingAcceptsEmptyMapLists(t *testing.T) {
 	for _, src := range []string{
 		"name: x\nparams: {}\noutputs: {}\nsteps:\n  - {action: click, selector: '#a'}\n",
@@ -506,6 +510,12 @@ func TestParseRecordingAcceptsEmptyMapLists(t *testing.T) {
 	}
 	if _, err := ParseRecording([]byte("name: x\nparams: {order: {default: '1'}}\nsteps: []\n")); err == nil {
 		t.Fatal("a populated mapping is not a list and must still be rejected")
+	}
+	if _, err := ParseRecording([]byte("name: x\nparams: []\nsteps: {}\n")); err == nil {
+		t.Fatal("steps: {} must still be rejected — only params/outputs are relaxed")
+	}
+	if s, err := ParseRecording([]byte("name: x\nparams:\n  - {name: order, default: ~}\nsteps: []\n")); err != nil || len(s.Params) != 1 || s.Params[0].Name != "order" || s.Params[0].Default != "" {
+		t.Fatalf("a null inside a Param must decode as before: %+v (err %v)", s, err)
 	}
 	if s, err := ParseRecording(nil); err != nil || s.Name != "" {
 		t.Fatalf("empty input: %+v (err %v)", s, err)
