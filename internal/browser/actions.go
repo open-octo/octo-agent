@@ -1169,6 +1169,8 @@ const healVerifyTimeout = 2 * time.Second
 // strategies (fingerprintJS).
 type healedElement struct {
 	Found    bool     `json:"found"`
+	Visible  bool     `json:"visible"`
+	HasLabel bool     `json:"has_label"` // textContent contains the recorded label (checked in-page: the text is not truncated there)
 	Text     string   `json:"text"`
 	Alts     []string `json:"alts"`
 	Role     string   `json:"role"`
@@ -1177,9 +1179,9 @@ type healedElement struct {
 }
 
 // verifyHealedSelector checks a healer-proposed selector against the live page
-// before replay trusts it: it must resolve to an element and, when the step
-// recorded the element's visible text (label), that element's text must contain
-// it. Without this gate an unverified proposal — a fragment of the dead selector
+// before replay trusts it: it must resolve to a visible element and, when the
+// step recorded the element's visible text (label), that element's text must
+// contain it. Without this gate an unverified proposal — a fragment of the dead selector
 // the model echoed, an invented class — reaches the retry, where the label/hint
 // fallbacks can make the step pass on their own, and the write-back then
 // persists a selector nothing on the page ever matched.
@@ -1200,23 +1202,35 @@ func (p *Page) verifyHealedSelector(ctx context.Context, frame, sel, label strin
 	  %s
 	  var el=null; try{ el=%s; }catch(e){}
 	  if(!el||el.nodeType!==1) return {found:false};
+	  var label=%s, text=(el.textContent||'');
 	  var role=''; try{ role=el.getAttribute('role')||''; }catch(_){}
-	  return {found:true, text:(el.textContent||'').trim().slice(0,200), alts:[sel(el)].concat(altSels(el)), role:role, tag:el.tagName.toLowerCase(), neighbor:neighborText(el)};
-	})()`, fingerprintJS, elemRefJS(frame, sel))
+	  var visible=el.getClientRects().length>0 && getComputedStyle(el).visibility!=='hidden';
+	  return {found:true, visible:visible, has_label:!label||text.indexOf(label)>=0, text:text.trim().slice(0,200), alts:[sel(el)].concat(altSels(el)), role:role, tag:el.tagName.toLowerCase(), neighbor:neighborText(el)};
+	})()`, fingerprintJS, elemRefJS(frame, sel), jsString(label))
 
 	deadline := time.Now().Add(timeout)
 	var last healedElement
+	var lastErr error
 	for {
 		var el healedElement
-		if err := p.Eval(ctx, expr, &el); err == nil {
-			last = el
-			if el.Found && (label == "" || strings.Contains(el.Text, label)) {
+		if err := p.Eval(ctx, expr, &el); err != nil {
+			lastErr = err
+		} else {
+			last, lastErr = el, nil
+			if el.Found && el.Visible && el.HasLabel {
 				return healedAnchors(sel, el), nil
 			}
 		}
 		if ctx.Err() != nil || !time.Now().Before(deadline) {
-			if last.Found {
+			switch {
+			case lastErr != nil:
+				// A broken script would otherwise read as "no element" and
+				// reject every heal for the wrong reason.
+				return nil, fmt.Errorf("could not be verified: %v", lastErr)
+			case last.Found && !last.HasLabel:
 				return nil, fmt.Errorf("matches an element whose text %q does not contain the recorded label %q", last.Text, label)
+			case last.Found:
+				return nil, fmt.Errorf("matches only a hidden element")
 			}
 			return nil, fmt.Errorf("matches no element on the page")
 		}

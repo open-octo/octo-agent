@@ -289,7 +289,7 @@ func (r *Recorder) instrumentOOPIF(ctx context.Context, session string) {
 // script and replay: the selector strategies (sel / altSels and their helpers)
 // and neighborText. Replay evaluates it too — when self-heal verifies a repaired
 // selector, the element it resolves to is re-fingerprinted with these same
-// functions (fingerprintElement), so a healed step carries anchors of the same
+// functions (verifyHealedSelector), so a healed step carries anchors of the same
 // quality as a freshly recorded one instead of losing them. Every function here
 // is a pure element→string helper: no capture state, no bindings.
 const fingerprintJS = `
@@ -358,7 +358,12 @@ const fingerprintJS = `
       var node=el;
       // Stop at <body>: walking past it reaches <head>, whose <title> text is
       // not something the user sees NEXT TO the element — a garbage anchor.
-      for(var up=0; node && node!==document.body && up<3; up++){
+      // The element's OWN document's body: at capture time this script runs
+      // inside each frame, but replay evaluates it from the top document
+      // against a same-origin iframe's element, where document.body would be
+      // the wrong body and the guard would never fire.
+      var body=(el.ownerDocument||document).body;
+      for(var up=0; node && node!==body && up<3; up++){
         var sib=node.previousElementSibling, k=0;
         while(sib && k<2){
           if(!/^(SCRIPT|STYLE|TEMPLATE)$/.test(sib.tagName)){

@@ -128,8 +128,10 @@ type Verify struct {
 }
 
 // Healer is called when a step fails. It may inspect the page and mutate *step
-// to repair it (e.g. fix a drifted selector); returning nil means "retry now".
-// A non-nil return aborts replay. Provided by the caller (the tool layer wires
+// to repair it (e.g. fix a drifted selector); returning nil means "retry" — a
+// changed selector is first verified against the live page (recoverStep) and
+// only retried if it resolves to the intended element. A non-nil return aborts
+// replay. Provided by the caller (the tool layer wires
 // an LLM-backed healer); the engine itself stays LLM-free.
 type Healer func(ctx context.Context, page *Page, step *Step, cause error) error
 
@@ -1130,7 +1132,10 @@ const digestSelJS = `function sel(el){
 // InteractiveDigest for the healer: the step's recorded text is the strongest
 // clue to the intended element, and the element carrying it is often a
 // click-handled span or div no interactive-control query enumerates. Capped
-// to max (default 8).
+// to max (default 8). A label split across text nodes ("笔记<b>管理</b>") is
+// not found — the match is per text node by design (that is what makes the
+// result the innermost carrier); the interactive digest still lists such an
+// element when it is a control.
 func LabelDigest(ctx context.Context, page *Page, frame, label string, max int) ([]DigestElement, error) {
 	label = strings.TrimSpace(label)
 	if label == "" {

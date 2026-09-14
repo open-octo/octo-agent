@@ -886,6 +886,49 @@ func TestReplayHealRejectsUnverifiedSelector(t *testing.T) {
 	}
 }
 
+// TestReplayHealRejectsWrongElement: a proposal that resolves — but to an
+// element whose text is not the step's recorded label (the neighbouring menu
+// entry) — is rejected on that ground, named as such, and nothing is clicked.
+// The existence check alone would have let a wrong-element heal through.
+func TestReplayHealRejectsWrongElement(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(healVerifyFixture))
+	}))
+	defer srv.Close()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, ".tab-title", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+
+	recording := &Recording{Name: "x", Steps: []Step{healVerifyStep()}}
+	heal := func(_ context.Context, _ *Page, step *Step, _ error) error {
+		step.Selector = "span.section" // exists, reads 首页 — not the intended entry
+		return nil
+	}
+	modified, _, _, err := ReplayRecording(ctx, page, recording, nil, ReplayOptions{StepTimeout: 2 * time.Second, Healer: heal, Browser: b})
+	if err == nil {
+		t.Fatal("replay must fail: the proposal resolves to the wrong element")
+	}
+	if !strings.Contains(err.Error(), "does not contain the recorded label") || !strings.Contains(err.Error(), "首页") {
+		t.Fatalf("error must say the element's text does not carry the label, got: %v", err)
+	}
+	if modified || recording.Steps[0].Selector != healVerifyStep().Selector {
+		t.Fatalf("a rejected heal must leave the step untouched (modified=%v, selector=%q)", modified, recording.Steps[0].Selector)
+	}
+	var hits []string
+	if err := page.Eval(ctx, "window.hits", &hits); err != nil || len(hits) != 0 {
+		t.Fatalf("nothing may be clicked, got %v (err %v)", hits, err)
+	}
+}
+
 // TestReplayHealRefingerprintsVerifiedElement (#2404): a proposal that does
 // resolve to an element carrying the recorded label is accepted — and instead
 // of the stale anchors being dropped, the verified element is fingerprinted
