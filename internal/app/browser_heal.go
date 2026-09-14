@@ -130,10 +130,19 @@ func MakeRecordingGenerator(sender agent.Sender, model string) browser.Recording
 	return func(ctx context.Context, system, user string) (string, error) {
 		reply, err := sender.SendMessages(ctx, model, system, []agent.Message{
 			{Role: agent.RoleUser, Content: user},
-		}, 2048)
+		}, distillMaxTokens)
 		if err != nil {
 			return "", err
 		}
 		return reply.Content, nil
 	}
 }
+
+// distillMaxTokens caps the distiller's reply. The reply is a whole recording
+// YAML — one block per step with selector, label, hint, click coordinates and
+// verify — and on a reasoning model the thinking counts against the same cap.
+// At the former 2048, deepseek-flash returned YAML cut off mid-selector
+// ("found unexpected end of stream") or an empty content (all budget spent
+// thinking), and GenerateRecording fell back to the raw baseline with the
+// stray clicks in it. Sized like a normal turn rather than a one-liner.
+const distillMaxTokens = 16384
