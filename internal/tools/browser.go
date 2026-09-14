@@ -51,6 +51,7 @@ var (
 	recorderMu          sync.Mutex
 	activeRecorder      *browser.Recorder
 	recorderStartURL    string
+	recorderGoal        string // the user's stated objective for the demonstration, handed to the distiller
 	browserHealer       browser.Healer
 	browserRecordingGen browser.RecordingGenerator
 )
@@ -425,9 +426,10 @@ func (BrowserTool) Definition() agent.ToolDefinition {
 				"action": map[string]any{
 					"type":        "string",
 					"enum":        browserActions,
-					"description": "The browser action to perform. type inserts at the caret and does not replace existing content — a field the browser autofilled (login forms) would end up holding old+new; observe marks such fields (prefilled: …), and clear empties an input/textarea/contenteditable before you type. type's result reports what the field holds afterwards — if it differs from what you sent, clear and retype. eval runs JavaScript (parameter js). observe lists the page's URL/title and interactable elements with selectors (text only) — the cheap way to look at an unfamiliar page before acting; works on any model. screenshot returns an image of the page to actually see (use when content is visual); it needs either a vision-capable model or a configured vision_helper, and otherwise returns just the file path. ax returns an accessibility-tree digest (roles and names) — a semantic text view of the page, an alternative to observe when document structure matters more than selectors. pages lists open tabs; select_page switches between them. cookies returns the current page's cookies (HttpOnly included) for session reuse / token extraction. record_start/record_stop capture the USER's own demonstration into an editable recording — record_start only installs listeners, so after it you MUST hand control to the user: tell them to perform the actions themselves in their browser and to say when they're done, then call record_stop (or record_cancel to discard the demo without saving). Do NOT drive the page yourself (navigate/click/type) while recording — your tool actions are not the demonstration and a click that navigates is easily lost; only the user's real gestures are captured. replay replays a recording (deterministic, self-healing; run_skill is a deprecated alias of replay).",
+					"description": "The browser action to perform. type inserts at the caret and does not replace existing content — a field the browser autofilled (login forms) would end up holding old+new; observe marks such fields (prefilled: …), and clear empties an input/textarea/contenteditable before you type. type's result reports what the field holds afterwards — if it differs from what you sent, clear and retype. eval runs JavaScript (parameter js). observe lists the page's URL/title and interactable elements with selectors (text only) — the cheap way to look at an unfamiliar page before acting; works on any model. screenshot returns an image of the page to actually see (use when content is visual); it needs either a vision-capable model or a configured vision_helper, and otherwise returns just the file path. ax returns an accessibility-tree digest (roles and names) — a semantic text view of the page, an alternative to observe when document structure matters more than selectors. pages lists open tabs; select_page switches between them. cookies returns the current page's cookies (HttpOnly included) for session reuse / token extraction. record_start/record_stop capture the USER's own demonstration into an editable recording — pass the user's stated objective as goal on record_start; record_start only installs listeners, so after it you MUST hand control to the user: tell them to perform the actions themselves in their browser and to say when they're done, then call record_stop (or record_cancel to discard the demo without saving). record_stop returns a numbered plan that is PENDING the user's confirmation: present it and let them remove or change steps before the recording is replayed or relied on. Do NOT drive the page yourself (navigate/click/type) while recording — your tool actions are not the demonstration and a click that navigates is easily lost; only the user's real gestures are captured. replay replays a recording (deterministic, self-healing; run_skill is a deprecated alias of replay).",
 				},
 				"name":         map[string]any{"type": "string", "description": "Recording name (record_stop / replay)."},
+				"goal":         map[string]any{"type": "string", "description": "record_start: what the user said they want to record, in THEIR OWN WORDS (e.g. \"进笔记管理，找到最新一篇笔记，点开它的评论\"). The cleanup pass after record_stop uses it to tell the intended steps from stray clicks — without it a mis-click that was later cancelled looks like part of the flow. Always pass it when the user has stated their objective."},
 				"params":       map[string]any{"type": "object", "description": "Param values for {{...}} placeholders (replay). Params declared secret:true in the recording are collected by the runtime OUTSIDE the conversation (session cache → OCTO_BROWSER_SECRET_<NAME> env → masked user prompt) — never pass a secret value here, just omit it. Omitting a required NON-secret param fails with a missing-param error; then decide whether to supply a value or ask the user."},
 				"url":          map[string]any{"type": "string", "description": "Target URL (navigate)."},
 				"selector":     map[string]any{"type": "string", "description": "Target element selector (click/hover/type/select/scroll/wait/upload/download). Plain CSS, or a Playwright-style form: :has-text(\"…\")/:text(\"…\")/:contains(\"…\"), text=…, :visible, xpath=…, css=…. Use observe to see real selectors."},
@@ -843,8 +845,13 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		}
 		var u string
 		_ = page.Eval(ctx, "location.href", &u)
-		activeRecorder, recorderStartURL = rec, u
-		return agent.ToolResult{Text: "recording started on " + u}, nil
+		goal := strings.TrimSpace(getStr(input, "goal"))
+		activeRecorder, recorderStartURL, recorderGoal = rec, u, goal
+		text := "recording started on " + u
+		if goal != "" {
+			text += "\ngoal: " + goal
+		}
+		return agent.ToolResult{Text: text}, nil
 
 	case "record_cancel":
 		// Discard an abandoned demonstration without saving it — previously the
@@ -852,7 +859,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		// record_start stayed wedged until then.
 		recorderMu.Lock()
 		rec := activeRecorder
-		activeRecorder = nil
+		activeRecorder, recorderGoal = nil, ""
 		recorderMu.Unlock()
 		if rec == nil {
 			return agent.ToolResult{}, fmt.Errorf("browser: no recording in progress")
@@ -867,15 +874,15 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		}
 		gen := resolveBrowserRecordingGenerator(ctx)
 		recorderMu.Lock()
-		rec, startURL := activeRecorder, recorderStartURL
-		activeRecorder = nil
+		rec, startURL, goal := activeRecorder, recorderStartURL, recorderGoal
+		activeRecorder, recorderGoal = nil, ""
 		recorderMu.Unlock()
 		if rec == nil {
 			return agent.ToolResult{}, fmt.Errorf("browser: no recording in progress")
 		}
 		rec.Stop()
 		events := rec.Events()
-		recording, fallback := browser.GenerateRecording(ctx, name, startURL, events, gen)
+		recording, fallback := browser.GenerateRecording(ctx, name, startURL, goal, events, gen)
 		dir := BrowserRecordingsDir()
 		// A recording is a directory (<name>/recording.yaml + events.json) so
 		// its artifacts live and die together. Saving always writes the
@@ -901,7 +908,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		// request changes before the recording is used. The agent surfaces this
 		// text and asks the user to confirm.
 		summary := browser.SummarizeRecording(recording)
-		msg := fmt.Sprintf("recorded %d step(s) → %s\n\n%s\n\nReview/edit it there (set params, fix selectors). Replay it with the Replay button in the Browser view, or action=replay name=%q. (Recordings are NOT keyword-triggerable — they only run when explicitly replayed.)", len(recording.Steps), path, summary, name)
+		msg := fmt.Sprintf("recorded %d step(s) → %s\n\n%s\n\nPENDING USER CONFIRMATION: show this plan to the user step by step and ask them to confirm it or point out steps to remove or change — do NOT replay or otherwise use the recording until they have. This is their chance to drop clicks that were not part of what they meant to record. Apply their edits to the YAML. Review/edit it there (set params, fix selectors). Replay it with the Replay button in the Browser view, or action=replay name=%q. (Recordings are NOT keyword-triggerable — they only run when explicitly replayed.)", len(recording.Steps), path, summary, name)
 		if len(recording.Params) > 0 {
 			// Spell the declared param names out in the result. Without this
 			// the model paraphrases them from memory when reciting the plan

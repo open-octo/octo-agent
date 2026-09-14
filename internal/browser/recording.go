@@ -686,11 +686,18 @@ type RecordingGenerator func(ctx context.Context, system, user string) (string, 
 // that fails to parse or invents a selector falls back to the baseline. So the
 // LLM only ever cleans up real events, never hallucinates targets.
 //
+// goal is what the user said they set out to do, in their words (may be
+// empty). Without it rule (2) — "keep the intended linear path" — has nothing
+// to judge intent by: a stray "open the reply box → cancel" reads as part of
+// the flow when the recording is named "check comments" and the model only
+// sees the event list (#2406). With it, the model can tell a detour from a
+// step the goal needs.
+//
 // fallback is non-empty when the returned steps are the deterministic baseline
 // rather than the model's refinement, and says why. record_stop surfaces it:
 // the log line alone left both the model and the user believing a recording
 // had been cleaned when its stray clicks were all still there (#2406).
-func GenerateRecording(ctx context.Context, name, startURL string, events []RecordedEvent, gen RecordingGenerator) (rec Recording, fallback string) {
+func GenerateRecording(ctx context.Context, name, startURL, goal string, events []RecordedEvent, gen RecordingGenerator) (rec Recording, fallback string) {
 	base := CompileRecording(name, "", startURL, events)
 	if gen == nil {
 		return base, "no model is available for the cleanup pass"
@@ -701,7 +708,7 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 	}
 	const system = "You clean a recorded browser workflow into a minimal, correct, replayable recording. " +
 		"RULES: (1) Use ONLY CSS selectors that appear in the provided baseline — never invent or alter a selector. " +
-		"(2) Drop redundant back-and-forth and retries; keep the intended linear path. " +
+		"(2) Drop redundant back-and-forth and retries; keep the intended linear path — the steps the stated goal needs. A step that opens, expands or focuses something the goal does not need, and a later step that closes, cancels or dismisses it, are a detour: drop both. " +
 		"(3) Replace user-specific input values with {{param}} and declare each in params (keep upload's {{file}}, every declared param name, and any secret: true marker unchanged). " +
 		"(4) Preserve step order and all navigate steps. " +
 		"(5) Preserve every download step and its bind (keep every declared output name and its type: file[] unchanged — do not drop or rename outputs). " +
@@ -709,7 +716,11 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 		"(7) You may omit each step's anchors block — it is re-attached automatically; never invent one. " +
 		"Output ONLY the recording as YAML (keys: name, description, params, outputs, steps), no prose, no code fences. " +
 		"params and outputs are LISTS: when there are none, write `params: []` / `outputs: []` — never `{}`."
-	user := fmt.Sprintf("Baseline (the only valid selectors are those here):\n%s\n\nRaw events in order:\n%s\n\nReturn the cleaned recording YAML.", baseYAML, renderTrace(events))
+	intent := ""
+	if g := strings.TrimSpace(goal); g != "" {
+		intent = fmt.Sprintf("Goal (what the user set out to do, in their own words): %s\n\n", g)
+	}
+	user := fmt.Sprintf("%sBaseline (the only valid selectors are those here):\n%s\n\nRaw events in order:\n%s\n\nReturn the cleaned recording YAML.", intent, baseYAML, renderTrace(events))
 
 	prompt := user
 	for attempt := 0; ; attempt++ {
