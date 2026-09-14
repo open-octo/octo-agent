@@ -2039,37 +2039,76 @@ func TestGenerateRecordingBackfillsAnchors(t *testing.T) {
 }
 
 // TestGenerateRecordingBackfillsLabelAndHint: the distiller returned steps
-// with no label / hint (observed live on qwen: every step bare). Both are
-// restored from the baseline step with the same selector — they drive the
-// text-anchored replay fallbacks, the healer prompt and the plan wording. A
-// label the distiller reworded on purpose is kept, not overwritten.
+// with no label / hint (observed live on qwen: every step bare) and one with
+// a reworded label. Both fields are restored from the baseline step with the
+// same selector — they are matched literally by the fingerprint scorer, the
+// drifted-click fallback and the heal verifier, so the recorded text wins
+// over the model's rewording; a model label survives only where the baseline
+// has none. Anchors ride along on the same step.
 func TestGenerateRecordingBackfillsLabelAndHint(t *testing.T) {
 	events := []RecordedEvent{
-		{Type: "click", Selector: "#notes", Tag: "SPAN", Text: "笔记管理"},
+		{Type: "click", Selector: "#notes", Tag: "SPAN", Text: "笔记管理", Role: "menuitem"},
 		{Type: "change", Selector: "#q", Tag: "INPUT", Field: "搜索关键词", Value: "octo"},
 		{Type: "click", Selector: "#go", Tag: "BUTTON", Text: "搜索"},
+		{Type: "click", Selector: "#icon", Tag: "I"}, // no visible text
 	}
 	gen := func(_ context.Context, _, _ string) (string, error) {
 		return "name: demo\nsteps:\n" +
 			"  - {action: click, selector: '#notes'}\n" +
-			"  - {action: type, selector: '#q', value: '{{搜索关键词}}'}\n" +
-			"  - {action: click, selector: '#go', label: 搜索按钮}\n", nil
+			"  - {action: type, selector: '#q', value: '{{搜索关键词}}', hint: 关键词}\n" +
+			"  - {action: click, selector: '#go', label: 搜索按钮}\n" +
+			"  - {action: click, selector: '#icon', label: 设置图标}\n", nil
 	}
 	out, fb := GenerateRecording(context.Background(), "demo", "", "", events, gen)
-	if fb != "" || len(out.Steps) != 3 {
+	if fb != "" || len(out.Steps) != 4 {
 		t.Fatalf("refinement not applied: fb=%q steps=%+v", fb, out.Steps)
 	}
-	if out.Steps[0].Label != "笔记管理" {
-		t.Fatalf("click label not backfilled: %+v", out.Steps[0])
+	if out.Steps[0].Label != "笔记管理" || out.Steps[0].Anchors == nil || out.Steps[0].Anchors.Role != "menuitem" {
+		t.Fatalf("bare click must get label and anchors back: %+v", out.Steps[0])
 	}
 	if out.Steps[1].Hint != "搜索关键词" {
-		t.Fatalf("field hint not backfilled: %+v", out.Steps[1])
+		t.Fatalf("recorded hint must win over the model's rewording: %+v", out.Steps[1])
 	}
-	if out.Steps[2].Label != "搜索按钮" {
-		t.Fatalf("a label the distiller rewrote must be kept: %+v", out.Steps[2])
+	if out.Steps[2].Label != "搜索" {
+		t.Fatalf("recorded label must win over the model's rewording: %+v", out.Steps[2])
+	}
+	if out.Steps[3].Label != "设置图标" {
+		t.Fatalf("with no recorded text the model's label may stand: %+v", out.Steps[3])
 	}
 	if !strings.Contains(SummarizeRecording(out), "点击「笔记管理」") {
 		t.Fatalf("plan must name the step by its restored label:\n%s", SummarizeRecording(out))
+	}
+}
+
+// TestBackfillTargetFactsMergesSharedTargets: several baseline steps can share
+// a selector — a wait-for-element on the button just clicked (no facts at
+// all), or the type + key pair an Enter produces (hint on one, not the other).
+// Each fact comes from the last baseline step that HAS it, so a fact-less
+// later step cannot blank out an earlier one; navigate steps are untouched.
+func TestBackfillTargetFactsMergesSharedTargets(t *testing.T) {
+	base := Recording{Steps: []Step{
+		{Action: "navigate", URL: "https://x/"},
+		{Action: "click", Selector: "#save", Label: "保存", Anchors: &Anchors{Tag: "button"}},
+		{Action: "wait", Selector: "#save"}, // element-wait: selector, no facts
+		{Action: "type", Selector: "#q", Hint: "q", Value: "{{q}}"},
+		{Action: "key", Selector: "#q", Value: "enter"}, // Enter's key step: no hint
+	}}
+	refined := Recording{Steps: []Step{
+		{Action: "navigate", URL: "https://x/"},
+		{Action: "click", Selector: "#save"},
+		{Action: "type", Selector: "#q", Value: "{{q}}"},
+		{Action: "key", Selector: "#q", Value: "enter"},
+		{Action: "click", Selector: "#unknown", Label: "?"}, // not in the baseline: left alone
+	}}
+	backfillTargetFacts(&refined, base)
+	if s := refined.Steps[1]; s.Label != "保存" || s.Anchors == nil || s.Anchors.Tag != "button" {
+		t.Fatalf("the fact-less wait must not blank the click's facts: %+v", s)
+	}
+	if refined.Steps[2].Hint != "q" || refined.Steps[3].Hint != "q" {
+		t.Fatalf("hint must reach both steps on the shared input: %+v", refined.Steps[2:4])
+	}
+	if refined.Steps[0].Label != "" || refined.Steps[4].Label != "?" {
+		t.Fatalf("navigate and unknown-target steps must be untouched: %+v", refined.Steps)
 	}
 }
 

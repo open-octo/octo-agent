@@ -57,8 +57,10 @@ type Output struct {
 }
 
 // Step is one action. Selector is within its document; Frame (a same-origin
-// iframe selector) scopes it via the " >>> " convention. Label is a human note;
-// replay ignores it.
+// iframe selector) scopes it via the " >>> " convention. Label is the target's
+// visible text as recorded — replay re-locates a drifted click by it, the
+// fingerprint scorer and the self-heal verifier match it literally, and the
+// plan names the step by it — so it must stay the element's real text.
 type Step struct {
 	Action   string `yaml:"action"` // navigate | click | type | select | upload | wait | download | extract | key
 	URL      string `yaml:"url,omitempty"`
@@ -795,25 +797,50 @@ func GenerateRecording(ctx context.Context, name, startURL, goal string, events 
 }
 
 // backfillTargetFacts re-attaches, onto each refined step, what the baseline
-// step with the same frame+selector knew about the target and the distiller
-// routinely drops when rewriting steps: the Anchors block, and the Label /
-// Hint text. Since selectorsSubset already guarantees every refined selector
-// came from the baseline, the lookup is deterministic — no reliance on the LLM
-// echoing the fields through.
+// knew about its target and the distiller routinely drops or rewrites: the
+// Anchors block, the Label and the Hint. Since selectorsSubset already
+// guarantees every refined selector came from the baseline, the lookup by
+// frame+selector is deterministic — no reliance on the LLM echoing the fields
+// through.
 //
-// Label and Hint are not decoration: a click with no anchors is re-located by
-// its Label text when the selector drifts (resolveClickTarget), a field by its
-// Hint (resolveFieldTarget), the healer's prompt and LabelDigest lean on both,
-// and the confirmation plan names steps by them. Observed live: one model
-// returned every step without a label, leaving the recording replayable only
-// by bare positional selectors. Only EMPTY fields are filled — a label the
-// distiller deliberately reworded stays as it wrote it.
+// These are facts about the element, not prose, so the baseline WINS whenever
+// it has a value: Label is matched literally against the element's text by
+// the fingerprint scorer, the drifted-click fallback and the self-heal
+// verifier, and Hint against a field's accessible name — a "clearer" label the
+// model wrote ("搜索按钮" for a button reading "搜索") scores zero, fails a
+// primary selector that still matches, and then defeats every heal. Observed
+// live: one model returned every step without a label, leaving the recording
+// replayable only by bare positional selectors; others reword. A model value
+// survives only where the baseline has none (an input has no visible text).
+//
+// Several baseline steps can share a target (a wait-for-element on the button
+// just clicked, the type + key pair an Enter produces), so each fact is taken
+// from the last baseline step that carries it rather than the last step.
 func backfillTargetFacts(refined *Recording, base Recording) {
-	byTarget := map[string]*Step{}
+	type facts struct {
+		anchors     *Anchors
+		label, hint string
+	}
+	byTarget := map[string]*facts{}
 	for i := range base.Steps {
 		st := &base.Steps[i]
-		if st.Selector != "" {
-			byTarget[st.Frame+"\x00"+st.Selector] = st
+		if st.Selector == "" {
+			continue
+		}
+		key := st.Frame + "\x00" + st.Selector
+		f := byTarget[key]
+		if f == nil {
+			f = &facts{}
+			byTarget[key] = f
+		}
+		if st.Anchors != nil {
+			f.anchors = st.Anchors
+		}
+		if st.Label != "" {
+			f.label = st.Label
+		}
+		if st.Hint != "" {
+			f.hint = st.Hint
 		}
 	}
 	for i := range refined.Steps {
@@ -821,18 +848,18 @@ func backfillTargetFacts(refined *Recording, base Recording) {
 		if st.Selector == "" {
 			continue
 		}
-		src := byTarget[st.Frame+"\x00"+st.Selector]
-		if src == nil {
+		f := byTarget[st.Frame+"\x00"+st.Selector]
+		if f == nil {
 			continue
 		}
 		if st.Anchors == nil {
-			st.Anchors = src.Anchors
+			st.Anchors = f.anchors
 		}
-		if st.Label == "" {
-			st.Label = src.Label
+		if f.label != "" {
+			st.Label = f.label
 		}
-		if st.Hint == "" {
-			st.Hint = src.Hint
+		if f.hint != "" {
+			st.Hint = f.hint
 		}
 	}
 }
