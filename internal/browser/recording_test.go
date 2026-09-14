@@ -426,7 +426,7 @@ func TestGenerateRecordingDistill(t *testing.T) {
 			"  - {action: click, selector: '#search'}\n" +
 			"  - {action: type, selector: '#q', value: '{{order}}'}\n", nil
 	}
-	s, fallback := GenerateRecording(ctx, "demo", "https://x/start", events, clean)
+	s, fallback := GenerateRecording(ctx, "demo", "https://x/start", "", events, clean)
 	if fallback != "" {
 		t.Fatalf("a usable refinement must not report a fallback, got %q", fallback)
 	}
@@ -443,7 +443,7 @@ func TestGenerateRecordingDistill(t *testing.T) {
 	cheat := func(_ context.Context, _, _ string) (string, error) {
 		return "name: x\ndescription: open the search page\nsteps:\n  - {action: click, selector: '#invented'}\n", nil
 	}
-	s2, fallback := GenerateRecording(ctx, "demo", "https://x/start", events, cheat)
+	s2, fallback := GenerateRecording(ctx, "demo", "https://x/start", "", events, cheat)
 	for _, st := range s2.Steps {
 		if st.Selector == "#invented" {
 			t.Fatal("precision guard failed: accepted an invented selector")
@@ -461,7 +461,7 @@ func TestGenerateRecordingDistill(t *testing.T) {
 	descOnly := func(_ context.Context, _, _ string) (string, error) {
 		return "name: x\ndescription: search for an order\n", nil
 	}
-	s3, fallback := GenerateRecording(ctx, "demo", "https://x/start", events, descOnly)
+	s3, fallback := GenerateRecording(ctx, "demo", "https://x/start", "", events, descOnly)
 	if len(s3.Steps) == 0 {
 		t.Fatal("steps-empty fallback should keep the baseline steps")
 	}
@@ -477,11 +477,34 @@ func TestGenerateRecordingDistill(t *testing.T) {
 	broken := func(_ context.Context, _, _ string) (string, error) {
 		return "name: x\nparams: {a: 1}\noutputs: {b: 2}\nsteps: []\n", nil
 	}
-	if s4, fallback := GenerateRecording(ctx, "demo", "https://x/start", events, broken); len(s4.Steps) == 0 || !strings.Contains(fallback, "not a valid recording") || strings.Contains(fallback, "\n") {
+	if s4, fallback := GenerateRecording(ctx, "demo", "https://x/start", "", events, broken); len(s4.Steps) == 0 || !strings.Contains(fallback, "not a valid recording") || strings.Contains(fallback, "\n") {
 		t.Fatalf("unparseable output: steps=%d fallback=%q (must name the parse error on one line)", len(s4.Steps), fallback)
 	}
-	if _, fallback := GenerateRecording(ctx, "demo", "https://x/start", events, nil); !strings.Contains(fallback, "no model") {
+	if _, fallback := GenerateRecording(ctx, "demo", "https://x/start", "", events, nil); !strings.Contains(fallback, "no model") {
 		t.Fatalf("nil generator must report why the baseline was kept, got %q", fallback)
+	}
+}
+
+// TestGenerateRecordingPromptCarriesGoal (#2406): the user's stated goal is
+// the only intent signal the distiller has — it must lead the user prompt,
+// verbatim; an empty goal adds no Goal line.
+func TestGenerateRecordingPromptCarriesGoal(t *testing.T) {
+	events := []RecordedEvent{{Type: "click", Selector: "#a", Tag: "A", Text: "Go"}}
+	var system, captured string
+	gen := func(_ context.Context, sys, user string) (string, error) {
+		system, captured = sys, user
+		return "", fmt.Errorf("stop")
+	}
+	_, _ = GenerateRecording(context.Background(), "demo", "https://x/start", "  进笔记管理，找到最新一篇，点开它的评论  ", events, gen)
+	if !strings.HasPrefix(captured, "Goal (what the user set out to do, in their own words): 进笔记管理，找到最新一篇，点开它的评论\n") {
+		t.Fatalf("goal must lead the prompt verbatim:\n%s", captured)
+	}
+	if !strings.Contains(system, "stated goal") || !strings.Contains(system, "detour") {
+		t.Fatalf("system prompt must tie rule (2) to the goal:\n%s", system)
+	}
+	_, _ = GenerateRecording(context.Background(), "demo", "https://x/start", "", events, gen)
+	if strings.Contains(captured, "Goal (") {
+		t.Fatalf("no goal given, no Goal line:\n%s", captured)
 	}
 }
 
@@ -1682,7 +1705,7 @@ func TestGenerateRecordingDistillKeepsSecretFlag(t *testing.T) {
 			"  - {action: type, selector: '#pw', value: '{{password}}'}\n" +
 			"  - {action: click, selector: '#go'}\n", nil
 	}
-	s, _ := GenerateRecording(ctx, "demo", "", events, dropSecret)
+	s, _ := GenerateRecording(ctx, "demo", "", "", events, dropSecret)
 	var user, pw *Param
 	for i := range s.Params {
 		switch s.Params[i].Name {
@@ -1722,7 +1745,7 @@ func TestGenerateRecordingDistillRestoresDroppedSecretParam(t *testing.T) {
 			"  - {action: type, selector: '#pw', value: '{{password}}'}\n" +
 			"  - {action: click, selector: '#go'}\n", nil
 	}
-	s, _ := GenerateRecording(ctx, "demo", "", events, dropDecl)
+	s, _ := GenerateRecording(ctx, "demo", "", "", events, dropDecl)
 	var pw *Param
 	for i := range s.Params {
 		if s.Params[i].Name == "password" {
@@ -2005,7 +2028,7 @@ func TestGenerateRecordingBackfillsAnchors(t *testing.T) {
 		// A refined recording using only baseline selectors but WITHOUT anchors.
 		return "name: demo\ndescription: picks a date\nsteps:\n  - action: click\n    selector: td.cell\n    label: \"20\"\n", nil
 	}
-	out, _ := GenerateRecording(context.Background(), "demo", "", events, gen)
+	out, _ := GenerateRecording(context.Background(), "demo", "", "", events, gen)
 	if out.Description != "picks a date" {
 		t.Fatalf("distilled description lost: %+v", out)
 	}
@@ -2116,7 +2139,7 @@ func TestGenerateRecordingDistillRetriesOnInvalidSelector(t *testing.T) {
 		secondPrompt = user
 		return "name: x\nsteps:\n  - {action: click, selector: '#search'}\n", nil
 	}
-	s, _ := GenerateRecording(ctx, "demo", "", events, gen)
+	s, _ := GenerateRecording(ctx, "demo", "", "", events, gen)
 	if calls != 2 {
 		t.Fatalf("expected exactly one retry (2 calls), got %d", calls)
 	}

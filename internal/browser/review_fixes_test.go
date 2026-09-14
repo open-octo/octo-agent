@@ -77,7 +77,7 @@ func TestRenderTraceRedactsSecret(t *testing.T) {
 		captured = user
 		return "", fmt.Errorf("stop") // force fallback to the deterministic baseline
 	}
-	_, _ = GenerateRecording(context.Background(), "demo", "https://x/start", events, gen)
+	_, _ = GenerateRecording(context.Background(), "demo", "https://x/start", "", events, gen)
 	if strings.Contains(captured, "hunter2") {
 		t.Fatalf("secret value reached the LLM distiller prompt:\n%s", captured)
 	}

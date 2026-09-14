@@ -173,8 +173,12 @@ func TestBrowserTool_RecordRunRoundTrip(t *testing.T) {
 	if _, err := run(map[string]any{"action": "wait", "selector": "#b"}); err != nil {
 		skipOnBrowserFlake(t, "wait", err)
 	}
-	if _, err := run(map[string]any{"action": "record_start"}); err != nil {
+	startOut, err := run(map[string]any{"action": "record_start", "goal": "press Go"})
+	if err != nil {
 		skipOnBrowserFlake(t, "record_start", err)
+	}
+	if !strings.Contains(startOut, "goal: press Go") {
+		t.Fatalf("record_start must echo the goal it will hand to the distiller: %s", startOut)
 	}
 	if _, err := run(map[string]any{"action": "click", "selector": "#b"}); err != nil {
 		skipOnBrowserFlake(t, "click", err)
@@ -194,6 +198,11 @@ func TestBrowserTool_RecordRunRoundTrip(t *testing.T) {
 	// result must say the cleanup pass did not apply (#2406).
 	if !strings.Contains(stopOut, "cleanup pass did NOT apply") {
 		t.Fatalf("record_stop response must report that the steps were not distilled: %s", stopOut)
+	}
+	// The plan is the user's chance to drop stray steps — the result must gate
+	// any further use of the recording on their confirmation.
+	if !strings.Contains(stopOut, "PENDING USER CONFIRMATION") {
+		t.Fatalf("record_stop response must ask for the user's confirmation of the plan: %s", stopOut)
 	}
 
 	// Replay: navigates back to the start URL (reset clicks) and re-clicks.
