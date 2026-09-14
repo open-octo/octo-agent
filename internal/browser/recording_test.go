@@ -2038,6 +2038,41 @@ func TestGenerateRecordingBackfillsAnchors(t *testing.T) {
 	}
 }
 
+// TestGenerateRecordingBackfillsLabelAndHint: the distiller returned steps
+// with no label / hint (observed live on qwen: every step bare). Both are
+// restored from the baseline step with the same selector — they drive the
+// text-anchored replay fallbacks, the healer prompt and the plan wording. A
+// label the distiller reworded on purpose is kept, not overwritten.
+func TestGenerateRecordingBackfillsLabelAndHint(t *testing.T) {
+	events := []RecordedEvent{
+		{Type: "click", Selector: "#notes", Tag: "SPAN", Text: "笔记管理"},
+		{Type: "change", Selector: "#q", Tag: "INPUT", Field: "搜索关键词", Value: "octo"},
+		{Type: "click", Selector: "#go", Tag: "BUTTON", Text: "搜索"},
+	}
+	gen := func(_ context.Context, _, _ string) (string, error) {
+		return "name: demo\nsteps:\n" +
+			"  - {action: click, selector: '#notes'}\n" +
+			"  - {action: type, selector: '#q', value: '{{搜索关键词}}'}\n" +
+			"  - {action: click, selector: '#go', label: 搜索按钮}\n", nil
+	}
+	out, fb := GenerateRecording(context.Background(), "demo", "", "", events, gen)
+	if fb != "" || len(out.Steps) != 3 {
+		t.Fatalf("refinement not applied: fb=%q steps=%+v", fb, out.Steps)
+	}
+	if out.Steps[0].Label != "笔记管理" {
+		t.Fatalf("click label not backfilled: %+v", out.Steps[0])
+	}
+	if out.Steps[1].Hint != "搜索关键词" {
+		t.Fatalf("field hint not backfilled: %+v", out.Steps[1])
+	}
+	if out.Steps[2].Label != "搜索按钮" {
+		t.Fatalf("a label the distiller rewrote must be kept: %+v", out.Steps[2])
+	}
+	if !strings.Contains(SummarizeRecording(out), "点击「笔记管理」") {
+		t.Fatalf("plan must name the step by its restored label:\n%s", SummarizeRecording(out))
+	}
+}
+
 // TestReplayAnchorsSurviveClassDrift: the recording was made against build A
 // (hashed CSS-in-JS classes, buttons in one order); the live page is build B —
 // every class hash changed AND the buttons swapped order, so both the primary

@@ -788,30 +788,51 @@ func GenerateRecording(ctx context.Context, name, startURL, goal string, events 
 			slog.Warn("browser: recording distill used a selector not in the recording, keeping deterministic baseline steps", "recording", name)
 			return withDescription(base, refined.Description), "the model used selectors that are not in the recording: " + strings.Join(bad, " | ")
 		}
-		backfillAnchors(&refined, base)
+		backfillTargetFacts(&refined, base)
 		refined.EndURL = base.EndURL
 		return refined, ""
 	}
 }
 
-// backfillAnchors re-attaches each refined step's Anchors from the baseline step
-// with the same frame+selector. The distiller routinely drops the anchors block
-// when rewriting steps; since selectorsSubset already guarantees every refined
-// selector came from the baseline, the lookup is deterministic — no reliance on
-// the LLM echoing anchors through. Refined steps that already carry anchors are
-// left alone.
-func backfillAnchors(refined *Recording, base Recording) {
-	byTarget := map[string]*Anchors{}
+// backfillTargetFacts re-attaches, onto each refined step, what the baseline
+// step with the same frame+selector knew about the target and the distiller
+// routinely drops when rewriting steps: the Anchors block, and the Label /
+// Hint text. Since selectorsSubset already guarantees every refined selector
+// came from the baseline, the lookup is deterministic — no reliance on the LLM
+// echoing the fields through.
+//
+// Label and Hint are not decoration: a click with no anchors is re-located by
+// its Label text when the selector drifts (resolveClickTarget), a field by its
+// Hint (resolveFieldTarget), the healer's prompt and LabelDigest lean on both,
+// and the confirmation plan names steps by them. Observed live: one model
+// returned every step without a label, leaving the recording replayable only
+// by bare positional selectors. Only EMPTY fields are filled — a label the
+// distiller deliberately reworded stays as it wrote it.
+func backfillTargetFacts(refined *Recording, base Recording) {
+	byTarget := map[string]*Step{}
 	for i := range base.Steps {
 		st := &base.Steps[i]
-		if st.Anchors != nil && st.Selector != "" {
-			byTarget[st.Frame+"\x00"+st.Selector] = st.Anchors
+		if st.Selector != "" {
+			byTarget[st.Frame+"\x00"+st.Selector] = st
 		}
 	}
 	for i := range refined.Steps {
 		st := &refined.Steps[i]
-		if st.Anchors == nil && st.Selector != "" {
-			st.Anchors = byTarget[st.Frame+"\x00"+st.Selector]
+		if st.Selector == "" {
+			continue
+		}
+		src := byTarget[st.Frame+"\x00"+st.Selector]
+		if src == nil {
+			continue
+		}
+		if st.Anchors == nil {
+			st.Anchors = src.Anchors
+		}
+		if st.Label == "" {
+			st.Label = src.Label
+		}
+		if st.Hint == "" {
+			st.Hint = src.Hint
 		}
 	}
 }
