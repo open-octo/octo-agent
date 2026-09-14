@@ -80,7 +80,9 @@ A model pass then distills the raw capture — dropping dead-end detours, turnin
 values into `{{param}}` placeholders, and writing a description — but it can only reorder or rename
 real captured steps, never invent a new target: any refined step whose selector isn't in the
 original capture is rejected in favor of the raw version (fingerprints are re-attached
-deterministically after the pass).
+deterministically after the pass). When the pass doesn't apply — the model's output can't be
+parsed, uses selectors it wasn't given, or no model is configured — `record_stop` says so and why,
+so you know the steps are the raw capture and can remove any stray clicks yourself.
 
 `record_stop` replies with a numbered run-plan — each step with what it does and what its check
 is — for you to confirm or correct before the recording is used.

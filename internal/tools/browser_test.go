@@ -190,6 +190,11 @@ func TestBrowserTool_RecordRunRoundTrip(t *testing.T) {
 	if !strings.Contains(stopOut, "action=replay") || !strings.Contains(stopOut, "NOT keyword-triggerable") {
 		t.Fatalf("record_stop response missing replay guidance: %s", stopOut)
 	}
+	// No distiller is wired here, so the steps are the raw baseline — the
+	// result must say the cleanup pass did not apply (#2406).
+	if !strings.Contains(stopOut, "cleanup pass did NOT apply") {
+		t.Fatalf("record_stop response must report that the steps were not distilled: %s", stopOut)
+	}
 
 	// Replay: navigates back to the start URL (reset clicks) and re-clicks.
 	if _, err := run(map[string]any{"action": "replay", "name": "demo"}); err != nil {

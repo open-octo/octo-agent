@@ -685,14 +685,19 @@ type RecordingGenerator func(ctx context.Context, system, user string) (string, 
 // inputs, labeling — but is constrained to the captured selectors; any output
 // that fails to parse or invents a selector falls back to the baseline. So the
 // LLM only ever cleans up real events, never hallucinates targets.
-func GenerateRecording(ctx context.Context, name, startURL string, events []RecordedEvent, gen RecordingGenerator) Recording {
+//
+// fallback is non-empty when the returned steps are the deterministic baseline
+// rather than the model's refinement, and says why. record_stop surfaces it:
+// the log line alone left both the model and the user believing a recording
+// had been cleaned when its stray clicks were all still there (#2406).
+func GenerateRecording(ctx context.Context, name, startURL string, events []RecordedEvent, gen RecordingGenerator) (rec Recording, fallback string) {
 	base := CompileRecording(name, "", startURL, events)
 	if gen == nil {
-		return base
+		return base, "no model is available for the cleanup pass"
 	}
 	baseYAML, err := MarshalRecording(base)
 	if err != nil {
-		return base
+		return base, "the baseline could not be rendered for the model: " + err.Error()
 	}
 	const system = "You clean a recorded browser workflow into a minimal, correct, replayable recording. " +
 		"RULES: (1) Use ONLY CSS selectors that appear in the provided baseline — never invent or alter a selector. " +
@@ -702,7 +707,8 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 		"(5) Preserve every download step and its bind (keep every declared output name and its type: file[] unchanged — do not drop or rename outputs). " +
 		"(6) Write description as a short statement of what the workflow does. " +
 		"(7) You may omit each step's anchors block — it is re-attached automatically; never invent one. " +
-		"Output ONLY the recording as YAML (keys: name, description, params, outputs, steps), no prose, no code fences."
+		"Output ONLY the recording as YAML (keys: name, description, params, outputs, steps), no prose, no code fences. " +
+		"params and outputs are LISTS: when there are none, write `params: []` / `outputs: []` — never `{}`."
 	user := fmt.Sprintf("Baseline (the only valid selectors are those here):\n%s\n\nRaw events in order:\n%s\n\nReturn the cleaned recording YAML.", baseYAML, renderTrace(events))
 
 	prompt := user
@@ -710,12 +716,16 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 		out, err := gen(ctx, system, prompt)
 		if err != nil {
 			slog.Warn("browser: recording distill failed, keeping deterministic baseline", "recording", name, "err", err)
-			return base
+			return base, "the model call failed: " + err.Error()
 		}
 		refined, err := ParseRecording([]byte(stripFences(out)))
 		if err != nil || len(refined.Steps) == 0 {
 			slog.Warn("browser: recording distill output unusable, keeping deterministic baseline steps", "recording", name, "err", err, "steps", len(refined.Steps))
-			return withDescription(base, refined.Description)
+			reason := "the model's output had no steps"
+			if err != nil {
+				reason = "the model's output was not a valid recording: " + err.Error()
+			}
+			return withDescription(base, refined.Description), reason
 		}
 		refined.Name = name
 		// The distiller rewrites the param list from prose and can drop the secret
@@ -763,11 +773,11 @@ func GenerateRecording(ctx context.Context, name, startURL string, events []Reco
 				continue
 			}
 			slog.Warn("browser: recording distill used a selector not in the recording, keeping deterministic baseline steps", "recording", name)
-			return withDescription(base, refined.Description)
+			return withDescription(base, refined.Description), "the model used selectors that are not in the recording: " + strings.Join(bad, " | ")
 		}
 		backfillAnchors(&refined, base)
 		refined.EndURL = base.EndURL
-		return refined
+		return refined, ""
 	}
 }
 
@@ -912,11 +922,52 @@ func truncRunes(s string, n int) string {
 // MarshalRecording renders the recording to YAML.
 func MarshalRecording(s Recording) ([]byte, error) { return yaml.Marshal(s) }
 
-// ParseRecording parses a recording from YAML.
+// ParseRecording parses a recording from YAML. The list-valued top-level
+// fields (params, outputs) also accept an empty mapping or null: a model asked
+// for "keys: name, description, params, outputs, steps" writes `params: {}`
+// for "no params" about as readily as `params: []`, and rejecting the former
+// threw the whole distilled recording away (#2406). Only the EMPTY mapping is
+// accepted — a populated one is still a shape error, not something to guess at.
 func ParseRecording(data []byte) (Recording, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return Recording{}, err
+	}
 	var s Recording
-	err := yaml.Unmarshal(data, &s)
+	if doc.Kind == 0 {
+		return s, nil // empty document, as yaml.Unmarshal into the struct would yield
+	}
+	normalizeEmptyLists(&doc, "params", "outputs")
+	err := doc.Decode(&s)
 	return s, err
+}
+
+// normalizeEmptyLists rewrites, in the document's top-level mapping, each named
+// key whose value is `{}` or null into an empty sequence, so it decodes into a
+// nil slice instead of failing with "cannot unmarshal !!map into []T".
+func normalizeEmptyLists(doc *yaml.Node, keys ...string) {
+	root := doc
+	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
+		root = root.Content[0]
+	}
+	if root.Kind != yaml.MappingNode {
+		return
+	}
+	want := map[string]bool{}
+	for _, k := range keys {
+		want[k] = true
+	}
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		key, val := root.Content[i], root.Content[i+1]
+		if !want[key.Value] {
+			continue
+		}
+		emptyMap := val.Kind == yaml.MappingNode && len(val.Content) == 0
+		null := val.Kind == yaml.ScalarNode && val.Tag == "!!null"
+		if emptyMap || null {
+			root.Content[i+1] = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		}
+	}
 }
 
 // SaveRecording writes a recording to a YAML file.

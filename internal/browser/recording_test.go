@@ -417,14 +417,19 @@ func TestGenerateRecordingDistill(t *testing.T) {
 		{Type: "change", Selector: "#q", Tag: "INPUT", Value: "ORDER-123"},
 	}
 
-	// A generator that returns a cleaned recording (drops the detour, params the value).
+	// A generator that returns a cleaned recording (drops the detour, params the
+	// value). It writes the empty list fields as `{}` — the shape that used to
+	// fail parsing and discard the whole refinement (#2406).
 	clean := func(_ context.Context, _, _ string) (string, error) {
-		return "name: x\nsteps:\n" +
+		return "name: x\nparams: {}\noutputs: {}\nsteps:\n" +
 			"  - {action: navigate, url: 'https://x/start'}\n" +
 			"  - {action: click, selector: '#search'}\n" +
 			"  - {action: type, selector: '#q', value: '{{order}}'}\n", nil
 	}
-	s := GenerateRecording(ctx, "demo", "https://x/start", events, clean)
+	s, fallback := GenerateRecording(ctx, "demo", "https://x/start", events, clean)
+	if fallback != "" {
+		t.Fatalf("a usable refinement must not report a fallback, got %q", fallback)
+	}
 	if len(s.Steps) != 3 { // navigate + search + type (detour dropped)
 		t.Fatalf("distill should drop the detour; got %d steps: %+v", len(s.Steps), s.Steps)
 	}
@@ -438,7 +443,7 @@ func TestGenerateRecordingDistill(t *testing.T) {
 	cheat := func(_ context.Context, _, _ string) (string, error) {
 		return "name: x\ndescription: open the search page\nsteps:\n  - {action: click, selector: '#invented'}\n", nil
 	}
-	s2 := GenerateRecording(ctx, "demo", "https://x/start", events, cheat)
+	s2, fallback := GenerateRecording(ctx, "demo", "https://x/start", events, cheat)
 	for _, st := range s2.Steps {
 		if st.Selector == "#invented" {
 			t.Fatal("precision guard failed: accepted an invented selector")
@@ -447,18 +452,63 @@ func TestGenerateRecordingDistill(t *testing.T) {
 	if s2.Description != "open the search page" {
 		t.Fatalf("guard fallback should keep the distilled description, got %q", s2.Description)
 	}
+	if !strings.Contains(fallback, "#invented") {
+		t.Fatalf("the fallback reason must name the rejected selector, got %q", fallback)
+	}
 
 	// A generator whose output has a description but no usable steps -> baseline
 	// steps, distilled description.
 	descOnly := func(_ context.Context, _, _ string) (string, error) {
 		return "name: x\ndescription: search for an order\n", nil
 	}
-	s3 := GenerateRecording(ctx, "demo", "https://x/start", events, descOnly)
+	s3, fallback := GenerateRecording(ctx, "demo", "https://x/start", events, descOnly)
 	if len(s3.Steps) == 0 {
 		t.Fatal("steps-empty fallback should keep the baseline steps")
 	}
 	if s3.Description != "search for an order" {
 		t.Fatalf("steps-empty fallback should keep the distilled description, got %q", s3.Description)
+	}
+	if !strings.Contains(fallback, "no steps") {
+		t.Fatalf("the fallback reason must say the output had no steps, got %q", fallback)
+	}
+
+	// Output that does not parse at all: baseline steps, and a reason that
+	// carries the parse error. No generator at all is a fallback too.
+	broken := func(_ context.Context, _, _ string) (string, error) { return "steps: [\n", nil }
+	if s4, fallback := GenerateRecording(ctx, "demo", "https://x/start", events, broken); len(s4.Steps) == 0 || !strings.Contains(fallback, "not a valid recording") {
+		t.Fatalf("unparseable output: steps=%d fallback=%q", len(s4.Steps), fallback)
+	}
+	if _, fallback := GenerateRecording(ctx, "demo", "https://x/start", events, nil); !strings.Contains(fallback, "no model") {
+		t.Fatalf("nil generator must report why the baseline was kept, got %q", fallback)
+	}
+}
+
+// TestParseRecordingAcceptsEmptyMapLists (#2406): `params: {}` / `outputs: {}`
+// and null decode as empty lists — a model writes either shape for "none".
+// A populated mapping is still a shape error, and a real list still parses.
+func TestParseRecordingAcceptsEmptyMapLists(t *testing.T) {
+	for _, src := range []string{
+		"name: x\nparams: {}\noutputs: {}\nsteps:\n  - {action: click, selector: '#a'}\n",
+		"name: x\nparams: null\noutputs: ~\nsteps:\n  - {action: click, selector: '#a'}\n",
+		"name: x\nparams:\noutputs:\nsteps:\n  - {action: click, selector: '#a'}\n",
+	} {
+		s, err := ParseRecording([]byte(src))
+		if err != nil {
+			t.Fatalf("parse %q: %v", src, err)
+		}
+		if len(s.Params) != 0 || len(s.Outputs) != 0 || len(s.Steps) != 1 || s.Steps[0].Selector != "#a" {
+			t.Fatalf("parse %q: %+v", src, s)
+		}
+	}
+	s, err := ParseRecording([]byte("name: x\nparams:\n  - {name: order, default: '1'}\noutputs:\n  - {name: files, type: 'file[]'}\nsteps: []\n"))
+	if err != nil || len(s.Params) != 1 || s.Params[0].Name != "order" || len(s.Outputs) != 1 || s.Outputs[0].Type != "file[]" {
+		t.Fatalf("real lists must still parse: %+v (err %v)", s, err)
+	}
+	if _, err := ParseRecording([]byte("name: x\nparams: {order: {default: '1'}}\nsteps: []\n")); err == nil {
+		t.Fatal("a populated mapping is not a list and must still be rejected")
+	}
+	if s, err := ParseRecording(nil); err != nil || s.Name != "" {
+		t.Fatalf("empty input: %+v (err %v)", s, err)
 	}
 }
 
@@ -1622,7 +1672,7 @@ func TestGenerateRecordingDistillKeepsSecretFlag(t *testing.T) {
 			"  - {action: type, selector: '#pw', value: '{{password}}'}\n" +
 			"  - {action: click, selector: '#go'}\n", nil
 	}
-	s := GenerateRecording(ctx, "demo", "", events, dropSecret)
+	s, _ := GenerateRecording(ctx, "demo", "", events, dropSecret)
 	var user, pw *Param
 	for i := range s.Params {
 		switch s.Params[i].Name {
@@ -1662,7 +1712,7 @@ func TestGenerateRecordingDistillRestoresDroppedSecretParam(t *testing.T) {
 			"  - {action: type, selector: '#pw', value: '{{password}}'}\n" +
 			"  - {action: click, selector: '#go'}\n", nil
 	}
-	s := GenerateRecording(ctx, "demo", "", events, dropDecl)
+	s, _ := GenerateRecording(ctx, "demo", "", events, dropDecl)
 	var pw *Param
 	for i := range s.Params {
 		if s.Params[i].Name == "password" {
@@ -1945,7 +1995,7 @@ func TestGenerateRecordingBackfillsAnchors(t *testing.T) {
 		// A refined recording using only baseline selectors but WITHOUT anchors.
 		return "name: demo\ndescription: picks a date\nsteps:\n  - action: click\n    selector: td.cell\n    label: \"20\"\n", nil
 	}
-	out := GenerateRecording(context.Background(), "demo", "", events, gen)
+	out, _ := GenerateRecording(context.Background(), "demo", "", events, gen)
 	if out.Description != "picks a date" {
 		t.Fatalf("distilled description lost: %+v", out)
 	}
@@ -2056,7 +2106,7 @@ func TestGenerateRecordingDistillRetriesOnInvalidSelector(t *testing.T) {
 		secondPrompt = user
 		return "name: x\nsteps:\n  - {action: click, selector: '#search'}\n", nil
 	}
-	s := GenerateRecording(ctx, "demo", "", events, gen)
+	s, _ := GenerateRecording(ctx, "demo", "", events, gen)
 	if calls != 2 {
 		t.Fatalf("expected exactly one retry (2 calls), got %d", calls)
 	}

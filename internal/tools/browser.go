@@ -875,7 +875,7 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 		}
 		rec.Stop()
 		events := rec.Events()
-		recording := browser.GenerateRecording(ctx, name, startURL, events, gen)
+		recording, fallback := browser.GenerateRecording(ctx, name, startURL, events, gen)
 		dir := BrowserRecordingsDir()
 		// A recording is a directory (<name>/recording.yaml + events.json) so
 		// its artifacts live and die together. Saving always writes the
@@ -923,6 +923,12 @@ func (BrowserTool) Execute(ctx context.Context, _ string, input map[string]any) 
 			msg += "\n\nDeclared replay params — use EXACTLY these names:" + pb.String()
 		}
 		msg += fmt.Sprintf("\nRaw captured events (diagnostic ground truth for this recording): %s — when a future replay misbehaves, compare the failing step against its source events before editing.", filepath.Join(filepath.Dir(path), "events.json"))
+		if fallback != "" {
+			// The cleanup pass did not apply. Say so here — the log line never
+			// reaches the model — or a recording still holding the user's stray
+			// clicks passes for a cleaned one and fails on them at replay.
+			msg += "\nThe model's cleanup pass did NOT apply (" + fallback + "): the steps above are the raw captured steps, compiled deterministically, so any stray or backtracking clicks from the demonstration are still in them. Go through the plan with the user and remove such steps from the YAML before relying on this recording."
+		}
 		if recording.Description == "" {
 			// The LLM distill fell back (or omitted a description). Surface it here
 			// — the stderr warning never reaches the model — so the recording doesn't
