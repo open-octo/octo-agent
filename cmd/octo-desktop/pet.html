@@ -281,6 +281,19 @@
 
   // The Go side drives the pet through this; ?state= is for eyeballing it in a browser.
   window.octoPet = { setState };
+
+  // Unlock ExecJS from the Go side. Wails queues every ExecJS call until the
+  // window reports its runtime loaded, and the real Wails JS runtime never
+  // loads in this page — so without this announcement the Go side's setState
+  // calls pile up in pendingJS and the pet is frozen on idle forever. The
+  // injected stub arrives only after navigation completes, hence the retry.
+  (function announceReady() {
+    if (window._wails?.invoke) {
+      window._wails.invoke('wails:runtime:ready');
+      return;
+    }
+    setTimeout(announceReady, 50);
+  })();
   const q = new URLSearchParams(location.search).get('state');
   if (q) setState(q);
 </script>

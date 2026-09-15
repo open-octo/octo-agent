@@ -3,9 +3,16 @@ package main
 import (
 	_ "embed"
 	"strconv"
+	"time"
 
+	"github.com/open-octo/octo-agent/internal/server"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+// petStateSleep is the one pet state with no matching server activity — the pet
+// dozes off on its own after the hub has been idle for petSleepAfter. The other
+// three are server.Activity* values, passed through as-is.
+const petStateSleep = "sleep"
 
 // petHTML is self-contained (inline CSS/SVG/JS) and is handed to the webview
 // as a literal page rather than served: the pet must not depend on the hub
@@ -21,6 +28,12 @@ const (
 	petSize = 200
 	// petMargin is the gap left between the pet and the work area's corner.
 	petMargin = 28
+	// petPollInterval is how often the pet re-reads the hub's activity. The
+	// pet is decorative, so a poll on a timer buys the same result as pushing
+	// activity changes through the turn's hot path, for none of the coupling.
+	petPollInterval = 500 * time.Millisecond
+	// petSleepAfter is how long the hub stays idle before the pet dozes off.
+	petSleepAfter = 5 * time.Minute
 )
 
 // togglePet shows the pet, or dismisses it if it is already up.
@@ -92,11 +105,56 @@ func (b *nativeBridge) showPet() {
 		w.SetPosition(s.WorkArea.X+s.WorkArea.Width-petSize-petMargin,
 			s.WorkArea.Y+s.WorkArea.Height-petSize-petMargin)
 	}
+	go b.watchPetActivity(w)
+}
+
+// watchPetActivity drives the pet from the hub's aggregate activity until this
+// pet window goes away. Identity, not a flag, ends it: comparing against the
+// window this loop was started for means a toggle-off — or a fast off/on that
+// starts a second loop — retires the older one instead of leaving two loops
+// writing to the same pet.
+func (b *nativeBridge) watchPetActivity(w *application.WebviewWindow) {
+	t := time.NewTicker(petPollInterval)
+	defer t.Stop()
+
+	// The page renders idle on load, so that is the state to diff against —
+	// otherwise the first tick would push a redundant setState.
+	last := server.ActivityIdle
+	var idleSince time.Time
+
+	for range t.C {
+		if b.pet.Load() != w {
+			return
+		}
+		srv := b.srv.Load()
+		if srv == nil {
+			continue
+		}
+
+		state := srv.Activity()
+		// Doze off after a long enough quiet spell. Tracked here rather than in
+		// the server because it is a property of the pet, not of the hub: the
+		// hub is merely idle, the pet is the thing that gets bored.
+		if state == server.ActivityIdle {
+			if idleSince.IsZero() {
+				idleSince = time.Now()
+			}
+			if time.Since(idleSince) >= petSleepAfter {
+				state = petStateSleep
+			}
+		} else {
+			idleSince = time.Time{}
+		}
+
+		if state != last {
+			last = state
+			b.setPetState(state)
+		}
+	}
 }
 
 // setPetState drives the pet's animation: "idle", "busy", "ask" or "sleep".
-// This is the seam the session events (a turn running, a question waiting, a
-// background task finishing) get wired to; it no-ops while the pet is down.
+// No-ops while the pet is down.
 func (b *nativeBridge) setPetState(state string) {
 	w := b.pet.Load()
 	if w == nil {
