@@ -1,0 +1,164 @@
+package main
+
+import (
+	_ "embed"
+	"strconv"
+	"time"
+
+	"github.com/open-octo/octo-agent/internal/server"
+	"github.com/wailsapp/wails/v3/pkg/application"
+)
+
+// petStateSleep is the one pet state with no matching server activity — the pet
+// dozes off on its own after the hub has been idle for petSleepAfter. The other
+// three are server.Activity* values, passed through as-is.
+const petStateSleep = "sleep"
+
+// petHTML is self-contained (inline CSS/SVG/JS) and is handed to the webview
+// as a literal page rather than served: the pet must not depend on the hub
+// being up, and it has nothing to do with the web UI's vite bundle.
+//
+//go:embed pet.html
+var petHTML string
+
+const (
+	// petSize is the pet window's edge in points. The SVG fits its own viewBox
+	// to whatever size the window ends up, so this is a framing choice, not a
+	// constraint the artwork depends on.
+	petSize = 200
+	// petMargin is the gap left between the pet and the work area's corner.
+	petMargin = 28
+	// petPollInterval is how often the pet re-reads the hub's activity. The
+	// pet is decorative, so a poll on a timer buys the same result as pushing
+	// activity changes through the turn's hot path, for none of the coupling.
+	petPollInterval = 500 * time.Millisecond
+	// petSleepAfter is how long the hub stays idle before the pet dozes off.
+	petSleepAfter = 5 * time.Minute
+)
+
+// togglePet shows the pet, or dismisses it if it is already up.
+func (b *nativeBridge) togglePet() {
+	if w := b.pet.Swap(nil); w != nil {
+		w.Close()
+		return
+	}
+	b.showPet()
+}
+
+// showPet creates the pet window at the bottom-right of the primary screen's
+// work area.
+//
+// Deliberately outside the main window's hide/probe/revive machinery: nothing
+// depends on the pet being alive, so a pet that dies just goes away rather than
+// being resurrected. On macOS it is an NSPanel — floating, joining every Space,
+// and non-activating, so showing or clicking it leaves whatever app the user is
+// working in still active.
+func (b *nativeBridge) showPet() {
+	opts := application.WebviewWindowOptions{
+		Title:            "Octo",
+		Width:            petSize,
+		Height:           petSize,
+		Frameless:        true,
+		AlwaysOnTop:      true,
+		DisableResize:    true,
+		BackgroundType:   application.BackgroundTypeTransparent,
+		BackgroundColour: application.RGBA{},
+		HTML:             petHTML,
+		Mac: application.MacWindow{
+			// Backdrop is what actually makes the window transparent on macOS:
+			// the cross-platform BackgroundType above is never read by the
+			// darwin backend, so without this the pet sits on an opaque white
+			// card (invisible only while it happens to overlap a white window).
+			Backdrop: application.MacBackdropTransparent,
+			// The SVG draws its own soft shadow; AppKit's would outline the
+			// square window around a transparent page.
+			DisableShadow:      true,
+			WindowLevel:        application.MacWindowLevelFloating,
+			CollectionBehavior: application.MacWindowCollectionBehaviorCanJoinAllSpaces,
+			WindowClass:        application.MacWindowClassPanel,
+			PanelPreferences: application.MacPanelPreferences{
+				FloatingPanel: true,
+				NonActivating: true,
+			},
+		},
+	}
+	// Bottom-right of the work area (so it clears the dock/taskbar). X/Y alone
+	// are ignored — InitialPosition defaults to WindowCentered, which is what
+	// put the first pet in the middle of the screen — so the placement mode and
+	// the target screen have to be set with them. With Screen set, X/Y are
+	// relative to that screen's work area. Without a screen, the OS default
+	// placement is kept rather than a guessed coordinate that could land the
+	// pet off-screen.
+	s := b.app.Screen.GetPrimary()
+	if s != nil {
+		opts.Screen = s
+		opts.InitialPosition = application.WindowXY
+		opts.X = s.WorkArea.Width - petSize - petMargin
+		opts.Y = s.WorkArea.Height - petSize - petMargin
+	}
+	w := b.app.Window.NewWithOptions(opts)
+	b.pet.Store(w)
+	w.Show()
+	// The options above are not enough on their own: the NSPanel path ignores
+	// InitialPosition and opens centred anyway, so place it again once it is up.
+	if s != nil {
+		w.SetPosition(s.WorkArea.X+s.WorkArea.Width-petSize-petMargin,
+			s.WorkArea.Y+s.WorkArea.Height-petSize-petMargin)
+	}
+	go b.watchPetActivity(w)
+}
+
+// watchPetActivity drives the pet from the hub's aggregate activity until this
+// pet window goes away. Identity, not a flag, ends it: comparing against the
+// window this loop was started for means a toggle-off — or a fast off/on that
+// starts a second loop — retires the older one instead of leaving two loops
+// writing to the same pet.
+func (b *nativeBridge) watchPetActivity(w *application.WebviewWindow) {
+	t := time.NewTicker(petPollInterval)
+	defer t.Stop()
+
+	// The page renders idle on load, so that is the state to diff against —
+	// otherwise the first tick would push a redundant setState.
+	last := server.ActivityIdle
+	var idleSince time.Time
+
+	for range t.C {
+		if b.pet.Load() != w {
+			return
+		}
+		srv := b.srv.Load()
+		if srv == nil {
+			continue
+		}
+
+		state := srv.Activity()
+		// Doze off after a long enough quiet spell. Tracked here rather than in
+		// the server because it is a property of the pet, not of the hub: the
+		// hub is merely idle, the pet is the thing that gets bored.
+		if state == server.ActivityIdle {
+			if idleSince.IsZero() {
+				idleSince = time.Now()
+			}
+			if time.Since(idleSince) >= petSleepAfter {
+				state = petStateSleep
+			}
+		} else {
+			idleSince = time.Time{}
+		}
+
+		if state != last {
+			last = state
+			b.setPetState(state)
+		}
+	}
+}
+
+// setPetState drives the pet's animation: "idle", "busy", "ask" or "sleep".
+// No-ops while the pet is down.
+func (b *nativeBridge) setPetState(state string) {
+	w := b.pet.Load()
+	if w == nil {
+		return
+	}
+	w.ExecJS("window.octoPet && window.octoPet.setState(" + strconv.Quote(state) + ")")
+}

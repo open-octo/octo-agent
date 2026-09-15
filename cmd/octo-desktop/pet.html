@@ -1,0 +1,299 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Octo</title>
+<style>
+  :root {
+    --ink: #0B3F80;
+    --arm-lo: #2E8BF5;
+    --arm-hi: #6FBBFF;
+  }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+    /* The pet window is frameless: the whole surface drags it. */
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .stage { cursor: grab; }
+  .stage:active { cursor: grabbing; }
+  /* Sized against the viewport directly rather than through a containing-block
+     chain, so the viewBox fits whatever size the pet window is given. */
+  svg {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    overflow: visible;
+  }
+
+  /* ---- idle: the whole body breathes, and bobs as if suspended in water ---- */
+  .body { animation: bob 3.4s ease-in-out infinite; transform-origin: 100px 110px; }
+  @keyframes bob {
+    0%, 100% { transform: translateY(0) scale(1, 1); }
+    50%      { transform: translateY(-5px) scale(1.03, 0.97); }
+  }
+
+  /* ---- arms: eight of them, each a beat behind the last ---- */
+  .arm {
+    transform-box: fill-box;
+    transform-origin: top center;
+    animation: sway 2.6s ease-in-out infinite;
+    animation-delay: calc(var(--i) * -0.32s);
+  }
+  @keyframes sway {
+    0%, 100% { transform: rotate(-7deg) skewX(3deg); }
+    50%      { transform: rotate(7deg) skewX(-3deg); }
+  }
+
+  /* ---- eyes ---- */
+  .lid { transform-box: fill-box; transform-origin: center; transform: scaleY(0); }
+  .eye-group { animation: blink 5.2s infinite; transform-box: fill-box; transform-origin: center; }
+  @keyframes blink {
+    0%, 92%, 100% { transform: scaleY(1); }
+    95%           { transform: scaleY(0.08); }
+  }
+  .pupil { animation: glance 7s ease-in-out infinite; }
+  @keyframes glance {
+    0%, 40%, 100% { transform: translateX(0); }
+    50%, 70%      { transform: translateX(3px); }
+  }
+
+  .shadow { animation: shadow 3.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+  @keyframes shadow {
+    0%, 100% { transform: scale(1); opacity: .16; }
+    50%      { transform: scale(.88); opacity: .10; }
+  }
+
+  /* ---- transient props, hidden until a state turns them on ---- */
+  .bubbles, .bang, .zzz { opacity: 0; pointer-events: none; }
+
+  /* ---- state: busy ---- */
+  .busy .arm    { animation-duration: 1.1s; }
+  .busy .body   { animation-duration: 1.6s; }
+  .busy .bubbles { opacity: 1; }
+  .busy .bubble {
+    animation: rise 2.2s ease-in infinite;
+    animation-delay: calc(var(--i) * -0.7s);
+    transform-box: fill-box;
+  }
+  @keyframes rise {
+    0%   { transform: translate(0, 0) scale(.5); opacity: 0; }
+    25%  { opacity: .85; }
+    100% { transform: translate(6px, -46px) scale(1.15); opacity: 0; }
+  }
+
+  /* ---- state: ask - it wants your attention ---- */
+  .ask .body { animation: hop .62s cubic-bezier(.3,-0.4,.5,1.5) infinite; }
+  @keyframes hop {
+    0%, 100% { transform: translateY(0) scale(1, 1); }
+    35%      { transform: translateY(-13px) scale(0.95, 1.06); }
+    70%      { transform: translateY(0) scale(1.07, 0.93); }
+  }
+  .ask .bang { opacity: 1; animation: pop .62s ease-in-out infinite; transform-box: fill-box; transform-origin: bottom center; }
+  @keyframes pop {
+    0%, 100% { transform: scale(1) rotate(-4deg); }
+    50%      { transform: scale(1.14) rotate(4deg); }
+  }
+
+  /* ---- state: sleep ---- */
+  .sleep .body  { animation-duration: 5.5s; }
+  .sleep .arm   { animation-duration: 5s; }
+  .sleep .eye-group { animation: none; }
+  .sleep .lid   { transform: scaleY(1); }
+  .sleep .pupil, .sleep .sparkle, .sleep .eye-white { opacity: 0; }
+  .sleep .zzz   { opacity: 1; }
+  .sleep .z {
+    animation: drift 2.8s ease-out infinite;
+    animation-delay: calc(var(--i) * -0.9s);
+    transform-box: fill-box;
+  }
+  @keyframes drift {
+    0%   { transform: translate(0, 0) scale(.6) rotate(-8deg); opacity: 0; }
+    20%  { opacity: .9; }
+    100% { transform: translate(16px, -40px) scale(1.2) rotate(10deg); opacity: 0; }
+  }
+
+  /* ---- click feedback: squash, then overshoot back ---- */
+  .poke .body { animation: squash .42s cubic-bezier(.34,1.56,.64,1); }
+  @keyframes squash {
+    0%   { transform: scale(1, 1); }
+    28%  { transform: scale(1.16, 0.82) translateY(6px); }
+    60%  { transform: scale(0.94, 1.08) translateY(-4px); }
+    100% { transform: scale(1, 1); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .body, .arm, .eye-group, .pupil, .shadow, .bubble, .z, .bang { animation: none !important; }
+  }
+</style>
+
+<div class="stage" id="stage">
+  <svg viewBox="0 0 200 200" aria-label="Octo">
+    <defs>
+      <radialGradient id="g-head" cx="38%" cy="28%" r="78%">
+        <stop offset="0%"  stop-color="#8FCBFF" />
+        <stop offset="52%" stop-color="#2E8BF5" />
+        <stop offset="100%" stop-color="#0A63D6" />
+      </radialGradient>
+      <!-- Two arm gradients, alternated front-to-back: eight arms in one flat
+           colour read as a single skirt, which is what made it look jellyfish. -->
+      <linearGradient id="g-arm" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="#2E8BF5" />
+        <stop offset="100%" stop-color="#57AAF9" />
+      </linearGradient>
+      <linearGradient id="g-arm-b" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="#1F70D8" />
+        <stop offset="100%" stop-color="#3D93EE" />
+      </linearGradient>
+      <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+        <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0A63D6" flood-opacity="0.34" />
+      </filter>
+    </defs>
+
+    <ellipse class="shadow" cx="100" cy="171" rx="40" ry="7" fill="#0A63D6" opacity=".16" />
+
+    <g class="body" filter="url(#soft)">
+      <!-- arms first: they tuck in behind the head -->
+      <!-- Each arm is anchored by an outer <g> and swayed by an inner one: a CSS
+           transform animation REPLACES the element's own transform attribute, so
+           an arm that carried both would sway around the viewBox origin. -->
+      <g class="arms">
+        <g transform="translate(62,104) rotate(36)"><g class="arm" style="--i:7"><path fill="url(#g-arm-b)" d="M -8 0 C -10 12 -8.4 22 -5 29 C -2.6 33.4 2.6 33.4 5 29 C 8.4 22 10 12 8 0 Z" /></g></g>
+        <g transform="translate(73,112) rotate(24)"><g class="arm" style="--i:0"><path fill="url(#g-arm)" d="M -8 0 C -10 14 -8.4 26 -5 34 C -2.6 38.6 2.6 38.6 5 34 C 8.4 26 10 14 8 0 Z" /></g></g>
+        <g transform="translate(85,118) rotate(14)"><g class="arm" style="--i:1"><path fill="url(#g-arm-b)" d="M -8 0 C -10 16 -8.4 30 -5 39 C -2.6 44 2.6 44 5 39 C 8.4 30 10 16 8 0 Z" /></g></g>
+        <g transform="translate(96,117) rotate(5)"><g class="arm" style="--i:2"><path fill="url(#g-arm)" d="M -8 0 C -10 18 -8.4 34 -5 44 C -2.6 49.4 2.6 49.4 5 44 C 8.4 34 10 18 8 0 Z" /></g></g>
+        <g transform="translate(104,117) rotate(-5)"><g class="arm" style="--i:3"><path fill="url(#g-arm-b)" d="M -8 0 C -10 18 -8.4 34 -5 44 C -2.6 49.4 2.6 49.4 5 44 C 8.4 34 10 18 8 0 Z" /></g></g>
+        <g transform="translate(115,118) rotate(-14)"><g class="arm" style="--i:4"><path fill="url(#g-arm)" d="M -8 0 C -10 16 -8.4 30 -5 39 C -2.6 44 2.6 44 5 39 C 8.4 30 10 16 8 0 Z" /></g></g>
+        <g transform="translate(127,112) rotate(-24)"><g class="arm" style="--i:5"><path fill="url(#g-arm-b)" d="M -8 0 C -10 14 -8.4 26 -5 34 C -2.6 38.6 2.6 38.6 5 34 C 8.4 26 10 14 8 0 Z" /></g></g>
+        <g transform="translate(138,104) rotate(-36)"><g class="arm" style="--i:6"><path fill="url(#g-arm)" d="M -8 0 C -10 12 -8.4 22 -5 29 C -2.6 33.4 2.6 33.4 5 29 C 8.4 22 10 12 8 0 Z" /></g></g>
+      </g>
+
+      <!-- head -->
+      <path d="M 100 32 C 132 32 152 56 152 84 C 152 106 138 120 100 120 C 62 120 48 106 48 84 C 48 56 68 32 100 32 Z" fill="url(#g-head)" />
+      <!-- wet highlight -->
+      <ellipse cx="78" cy="56" rx="15" ry="10" fill="#FFFFFF" opacity=".30" transform="rotate(-22 78 56)" />
+      <ellipse class="sparkle" cx="122" cy="50" rx="4" ry="3" fill="#FFFFFF" opacity=".55" transform="rotate(18 122 50)" />
+
+      <g class="face">
+        <g class="eye-group">
+          <ellipse class="eye-white" cx="84" cy="82" rx="11" ry="12.5" fill="#FFFFFF" />
+          <ellipse class="eye-white" cx="116" cy="82" rx="11" ry="12.5" fill="#FFFFFF" />
+          <g class="pupil">
+            <circle cx="85" cy="84" r="5.4" fill="var(--ink)" />
+            <circle cx="117" cy="84" r="5.4" fill="var(--ink)" />
+            <circle cx="87" cy="81" r="1.9" fill="#FFFFFF" />
+            <circle cx="119" cy="81" r="1.9" fill="#FFFFFF" />
+          </g>
+          <!-- closed lids, scaled flat until the sleep state opens them -->
+          <path class="lid" d="M 74 82 q 10 8 20 0" fill="none" stroke="var(--ink)" stroke-width="2.6" stroke-linecap="round" />
+          <path class="lid" d="M 106 82 q 10 8 20 0" fill="none" stroke="var(--ink)" stroke-width="2.6" stroke-linecap="round" />
+        </g>
+        <ellipse cx="66" cy="95" rx="7" ry="4.4" fill="#FF7BA8" opacity=".38" />
+        <ellipse cx="134" cy="95" rx="7" ry="4.4" fill="#FF7BA8" opacity=".38" />
+        <path class="mouth" d="M 92 101 q 8 7 16 0" fill="none" stroke="var(--ink)" stroke-width="2.6" stroke-linecap="round" />
+      </g>
+    </g>
+
+    <!-- busy: thought bubbles drifting off the head -->
+    <g class="bubbles" fill="#7FC0FF">
+      <circle class="bubble" style="--i:0" cx="148" cy="60" r="4" />
+      <circle class="bubble" style="--i:1" cx="156" cy="66" r="3" />
+      <circle class="bubble" style="--i:2" cx="143" cy="54" r="2.4" />
+    </g>
+
+    <!-- ask: it needs an answer -->
+    <g class="bang">
+      <circle cx="150" cy="44" r="16" fill="#FF9500" />
+      <rect x="147.2" y="34" width="5.6" height="14" rx="2.8" fill="#FFFFFF" />
+      <circle cx="150" cy="53" r="3" fill="#FFFFFF" />
+    </g>
+
+    <!-- sleep -->
+    <g class="zzz" fill="var(--ink)" opacity=".7" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-weight="700">
+      <text class="z" style="--i:0" x="140" y="52" font-size="15">z</text>
+      <text class="z" style="--i:1" x="150" y="40" font-size="12">z</text>
+      <text class="z" style="--i:2" x="132" y="62" font-size="10">z</text>
+    </g>
+  </svg>
+</div>
+
+<script>
+  const stage = document.getElementById('stage');
+  const STATES = ['idle', 'busy', 'ask', 'sleep'];
+
+  function setState(next) {
+    if (!STATES.includes(next)) return;
+    stage.classList.remove(...STATES);
+    if (next !== 'idle') stage.classList.add(next);
+  }
+
+  // ---- dragging ----
+  //
+  // A frameless Wails window has no native drag of its own, on any platform,
+  // and the Wails JS runtime that would detect the gesture never loads in this
+  // page. What IS injected into the webview is a stub, window._wails.invoke,
+  // and the Go side handles a "wails:drag" message from it natively. So this
+  // replicates the runtime's gesture detection, minus the edge-resize half the
+  // pet doesn't want: the whole body drags, and nothing resizes.
+  //
+  // The press only ARMS the drag; the move starts it. That is what keeps a
+  // plain click (press and release without moving) available as a poke.
+  let armed = false;
+  let dragging = false;
+
+  addEventListener('mousedown', (e) => {
+    if (e.button === 0) {
+      armed = true;
+      dragging = false;
+    }
+  }, true);
+
+  addEventListener('mousemove', (e) => {
+    // A native drag swallows the matching mouseup, so the release can't be
+    // observed directly — watch the button bitmask instead.
+    if (!(e.buttons & 1)) {
+      armed = false;
+      return;
+    }
+    if (armed && !dragging) {
+      dragging = true;
+      armed = false;
+      window._wails?.invoke?.('wails:drag');
+    }
+  }, true);
+
+  addEventListener('mouseup', () => { armed = false; }, true);
+
+  // Poke feedback: restart the squash animation on every click — but a click
+  // that ends a drag is the gesture's tail, not a poke.
+  addEventListener('click', (e) => {
+    if (dragging) {
+      dragging = false;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      return;
+    }
+    stage.classList.remove('poke');
+    void stage.offsetWidth;
+    stage.classList.add('poke');
+  }, true);
+
+  // The Go side drives the pet through this; ?state= is for eyeballing it in a browser.
+  window.octoPet = { setState };
+
+  // Unlock ExecJS from the Go side. Wails queues every ExecJS call until the
+  // window reports its runtime loaded, and the real Wails JS runtime never
+  // loads in this page — so without this announcement the Go side's setState
+  // calls pile up in pendingJS and the pet is frozen on idle forever. The
+  // injected stub arrives only after navigation completes, hence the retry.
+  (function announceReady() {
+    if (window._wails?.invoke) {
+      window._wails.invoke('wails:runtime:ready');
+      return;
+    }
+    setTimeout(announceReady, 50);
+  })();
+  const q = new URLSearchParams(location.search).get('state');
+  if (q) setState(q);
+</script>

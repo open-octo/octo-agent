@@ -16,6 +16,7 @@ type uiStrings struct {
 	trayShow, trayQuit string
 	traySettings       string
 	trayNewSession     string
+	trayPet            string
 	trayCheckUpdates   string
 	trayUpdateAvailFmt string // "↑ Update to v%s"
 	trayStarting       string
@@ -52,6 +53,7 @@ var enStrings = uiStrings{
 	trayShow:           "Show Octo",
 	trayQuit:           "Quit Octo",
 	trayNewSession:     "New Session",
+	trayPet:            "Show Pet",
 	traySettings:       "Settings…",
 	trayCheckUpdates:   "Check for Updates…",
 	trayUpdateAvailFmt: "↑ Update to v%s",
@@ -89,6 +91,7 @@ var zhStrings = uiStrings{
 	trayShow:           "显示 Octo",
 	trayQuit:           "退出 Octo",
 	trayNewSession:     "新建会话",
+	trayPet:            "显示桌宠",
 	traySettings:       "设置…",
 	trayCheckUpdates:   "检查更新…",
 	trayUpdateAvailFmt: "↑ 更新到 v%s",
