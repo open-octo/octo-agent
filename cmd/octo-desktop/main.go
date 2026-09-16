@@ -603,7 +603,13 @@ func buildTrayMenu(app *application.App, bridge *nativeBridge) *application.Menu
 	m.AddSeparator()
 	m.Add(L().trayShow).OnClick(func(*application.Context) { bridge.showWindow() })
 	m.Add(L().trayNewSession).OnClick(func(*application.Context) { bridge.openNewSession() })
-	m.Add(L().trayPet).OnClick(func(*application.Context) { bridge.togglePet() })
+	// The pet item is a toggle, so it names what the click will do — the menu is
+	// rebuilt on every toggle (see togglePet), not only on refreshTrayLoop's tick.
+	petLabel := L().trayPet
+	if bridge.petShown() {
+		petLabel = L().trayPetHide
+	}
+	m.Add(petLabel).OnClick(func(*application.Context) { bridge.togglePet() })
 	m.Add(L().traySettings).OnClick(func(*application.Context) { bridge.openSettings() })
 	// A known-newer release replaces the "check" item with a one-click update
 	// (in-place when this build supports it, else the download page) — the

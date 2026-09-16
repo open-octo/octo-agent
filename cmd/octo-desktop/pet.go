@@ -36,13 +36,21 @@ const (
 	petSleepAfter = 5 * time.Minute
 )
 
-// togglePet shows the pet, or dismisses it if it is already up.
+// petShown reports whether the pet is currently up — the tray item is a toggle
+// and names what the next click will do.
+func (b *nativeBridge) petShown() bool { return b.pet.Load() != nil }
+
+// togglePet shows the pet, or dismisses it if it is already up. Either way the
+// tray menu is rebuilt, so its label follows the pet instead of going stale
+// until refreshTrayLoop's next tick.
 func (b *nativeBridge) togglePet() {
 	if w := b.pet.Swap(nil); w != nil {
 		w.Close()
+		b.refreshTray()
 		return
 	}
 	b.showPet()
+	b.refreshTray()
 }
 
 // showPet creates the pet window at the bottom-right of the primary screen's
