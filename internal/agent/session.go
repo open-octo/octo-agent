@@ -661,15 +661,34 @@ func (s *Session) Save() error {
 	contentChanged := len(s.Messages) != s.persisted || s.rewriteIsContent
 	if s.forceRewrite || s.persisted == 0 || len(s.Messages) < s.persisted {
 		if contentChanged {
-			s.ContentUpdatedAt = time.Now()
+			s.stampContentUpdated()
 		}
 		return s.rewriteAll()
 	}
 	if len(s.Messages) == s.persisted {
 		return nil
 	}
-	s.ContentUpdatedAt = time.Now()
+	s.stampContentUpdated()
 	return s.appendDelta()
+}
+
+// stampContentUpdated moves ContentUpdatedAt to now, but never to an instant an
+// earlier save already used.
+//
+// Readers compare these stamps to answer "has the transcript changed since I
+// last looked" — the sidebar's ordering, the unread dot — so two saves must
+// never carry the same one. time.Now() does not guarantee that: its resolution
+// is the platform's, and on Windows it is coarse enough (tens of milliseconds)
+// that two saves within one turn read the same instant, leaving the second
+// looking like nothing had happened. A clock stepping backwards would be worse.
+// One nanosecond past the last stamp restores the ordering without claiming
+// time passed that didn't.
+func (s *Session) stampContentUpdated() {
+	now := time.Now()
+	if !now.After(s.ContentUpdatedAt) {
+		now = s.ContentUpdatedAt.Add(time.Nanosecond)
+	}
+	s.ContentUpdatedAt = now
 }
 
 // rewriteAll truncates the file and writes the meta record followed by every

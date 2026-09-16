@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestHistoryRewriteDirty checks that every non-append mutation marks the
@@ -213,6 +214,37 @@ func TestContentUpdatedAt_AdvancesOnRealContent(t *testing.T) {
 	}
 	if !sess.ContentUpdatedAt.After(first) {
 		t.Fatalf("ContentUpdatedAt did not advance on a second content save: %v -> %v", first, sess.ContentUpdatedAt)
+	}
+}
+
+// TestContentUpdatedAt_AdvancesOnACoarseClock covers what made the test above
+// flaky on Windows: two saves in one turn can read the same instant there,
+// because the platform clock's resolution is tens of milliseconds rather than
+// nanoseconds. Waiting it out would only trade a flake for a slow test, so the
+// stamp is monotonic instead — and this exercises that directly, by putting
+// ContentUpdatedAt where no clock reading can beat it.
+func TestContentUpdatedAt_AdvancesOnACoarseClock(t *testing.T) {
+	// A stamp no clock reading can beat stands in for the coarse-clock case.
+	// Asking for the same instant twice would be the faithful reproduction, but
+	// it is not reproducible here: this platform's clock is fine-grained enough
+	// that the second reading always differs, which is exactly why the failure
+	// only ever showed up on Windows. What both situations have in common is
+	// that time.Now() comes back no later than the stamp already held, and that
+	// is what this pins.
+	sess := NewSession("m", "")
+	ahead := time.Now().Add(time.Hour)
+	sess.ContentUpdatedAt = ahead
+
+	sess.stampContentUpdated()
+	if !sess.ContentUpdatedAt.After(ahead) {
+		t.Fatalf("stamp must advance even when now is not past it: %v -> %v", ahead, sess.ContentUpdatedAt)
+	}
+
+	// Twice over: each save must land after the one before it.
+	second := sess.ContentUpdatedAt
+	sess.stampContentUpdated()
+	if !sess.ContentUpdatedAt.After(second) {
+		t.Fatalf("consecutive stamps must keep advancing: %v -> %v", second, sess.ContentUpdatedAt)
 	}
 }
 
