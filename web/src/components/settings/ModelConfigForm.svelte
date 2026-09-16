@@ -342,7 +342,7 @@
 .field-input[readonly], .field-input:disabled { background: var(--bg-table-header); cursor: not-allowed; }
 .field-link { font-size: 12px; color: var(--blue-6); text-decoration: none; align-self: flex-start; }
 .field-link:hover { text-decoration: underline; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: var(--font-mono); }
 .prefs { display: flex; gap: 12px; }
 .field.half { flex: 1; min-width: 0; }
 .toggles { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }

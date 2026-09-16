@@ -36,7 +36,7 @@
   flex: 1; min-width: 0; height: 36px; padding: 0 12px;
   border: 1px solid var(--border); border-radius: 8px; font-size: 13px;
   color: var(--text); background: var(--bg-container); outline: none;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .key-input:focus { border-color: var(--blue-6); box-shadow: 0 0 0 3px var(--active-blue-bg); }

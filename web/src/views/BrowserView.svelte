@@ -211,7 +211,7 @@
   .conn-desc { font-size: 12px; color: var(--text-secondary); }
   .conn-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
   .conn-note { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 12px; color: var(--warning); background: var(--warning-bg); }
-  .mono { font-family: ui-monospace, monospace; }
+  .mono { font-family: var(--font-mono); }
   .hint { color: var(--text-secondary); font-size: 12px; margin: 0 0 14px; }
   .muted { color: var(--text-secondary); font-size: 13px; }
   .rec-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }

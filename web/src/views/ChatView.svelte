@@ -3298,6 +3298,19 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
      with no way to recover it. This lets the conversation column itself
      scroll into view when that happens. */
   overflow-y: auto;
+
+  /* The themed conversation surface (see --chat-bg in app.css). The color is
+     the real background; the two image layers are `none` under the default
+     pack, so this reduces to the plain --bg-layout the column had before.
+     `fixed` keeps the gradient and any wallpaper still while .messages scrolls
+     inside — attached to the scroll box they would slide with the transcript
+     and read as a moving backdrop. */
+  background-color: var(--bg-layout);
+  background-image: var(--chat-bg-image), var(--chat-bg);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
 }
 .workflows-bar {
   flex: 0 0 auto;
@@ -3524,7 +3537,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 .genui-action-json {
   margin: 6px 0 0; padding: 8px 10px; border-radius: var(--radius-xs, 6px);
   background: var(--bg-layout); border: 1px solid var(--border);
-  font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px; font-family: var(--font-mono);
   white-space: pre-wrap; word-break: break-word; color: var(--text-secondary);
 }
 .pending-spinner {
@@ -3583,7 +3596,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 .rich-answer { font-size: 14px; line-height: 1.6; color: var(--text); display: flex; flex-direction: column; gap: 12px; }
 :global(.rich-answer p) { margin: 0; }
 :global(.rich-answer :not(pre) > code), :global(.think-body :not(pre) > code) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; font-style: normal;
+  font-family: var(--font-mono); font-size: 13px; font-style: normal;
   background: var(--bg-table-header); border: 1px solid var(--border-table); border-radius: 4px; padding: 1px 5px;
 }
 :global(.rich-answer .code-block), :global(.think-body .code-block) {
@@ -3594,7 +3607,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px;
   background: var(--bg-table-header); border-bottom: 1px solid var(--border-table);
 }
-:global(.rich-answer .code-lang), :global(.think-body .code-lang) { font-size: 11px; color: var(--text-tertiary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+:global(.rich-answer .code-lang), :global(.think-body .code-lang) { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); }
 :global(.rich-answer .copy-btn), :global(.think-body .copy-btn) {
   margin-left: auto; height: 24px; padding: 0 8px; border: none; background: transparent;
   border-radius: 5px; display: flex; align-items: center; gap: 5px;
@@ -3603,7 +3616,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 :global(.rich-answer .copy-btn:hover), :global(.think-body .copy-btn:hover) { background: var(--hover-neutral); color: var(--blue-6); }
 :global(.rich-answer pre), :global(.think-body pre) {
   margin: 0; padding: 12px 14px; overflow-x: auto; font-size: 12.5px; line-height: 1.75;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); font-style: normal;
+  font-family: var(--font-mono); color: var(--text); font-style: normal;
 }
 :global(.rich-answer .md-bq), :global(.think-body .md-bq) {
   margin: 0; padding: 8px 14px; border-left: 3px solid var(--blue-2);
@@ -3680,7 +3693,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   width: 4px; height: 4px; border-radius: 9999px;
   background: var(--text-tertiary); animation: octo-dot 1.2s infinite;
 }
-.think-meta { font-size: 12px; color: var(--text-tertiary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.think-meta { font-size: 12px; color: var(--text-tertiary); font-family: var(--font-mono); }
 
 /* ── Suggestion ──────────────────────────────────────────────────────────── */
 .suggestion-row { display: flex; justify-content: flex-end; }
@@ -3715,7 +3728,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 .notice-line[data-level="info"] { color: var(--text-secondary); }
 .notice-line :global(p) { margin: 0; }
 .notice-line :global(code) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 12px; background: var(--bg-table-header); border: 1px solid var(--border-table);
   border-radius: 4px; padding: 1px 4px;
 }
@@ -3766,7 +3779,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
 /* ── Fade-in ─────────────────────────────────────────────────────────────── */
 .fadein { animation: octo-fadein 0.25s ease; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: var(--font-mono); }
 
 /* ── Inline message edit ───────────────────────────────────────────────── */
 .inline-edit-input {

@@ -254,5 +254,5 @@ p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 6
 .btn-primary-sm { height: 28px; padding: 0 12px; border: none; background: var(--blue-6); border-radius: 8px; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer; font-family: inherit; box-shadow: 0 1px 2px rgba(0,122,255,0.35); }
 .btn-primary-sm:hover { background: var(--blue-5); }
 .empty-state { padding: 40px; text-align: center; color: var(--text-tertiary); font-size: 14px; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: var(--font-mono); }
 </style>

@@ -147,7 +147,7 @@
 }
 .running-badge { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--blue-6); }
 .running-badge.done { color: var(--success); }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: var(--font-mono); }
 .run-row { border-bottom: 1px solid var(--border-table); }
 .run-row:last-child { border-bottom: none; }
 .run-summary {

@@ -284,7 +284,7 @@
 .vb-arrow { color: var(--text-tertiary); margin: 0 4px; }
 .vb-list { margin: 0 0 12px; padding-left: 18px; font-size: 12px; line-height: 1.7; color: var(--text-secondary); }
 .vb-cmd {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 11px; padding: 1px 5px; border-radius: 4px;
   background: var(--hover-neutral); color: var(--text);
 }
@@ -304,7 +304,7 @@
   margin: 0; max-height: 160px; overflow-y: auto;
   padding: 8px 10px; background: var(--terminal-bg); color: var(--terminal-text);
   border-radius: 6px; font-size: 11px; line-height: 1.5;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   white-space: pre-wrap; word-break: break-all;
 }
 .vb-center { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 6px 0; }

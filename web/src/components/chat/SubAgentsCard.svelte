@@ -139,7 +139,7 @@
 .running-badge.done { color: var(--success); }
 .running-badge.error { color: var(--error); }
 .elapsed { font-size: 12px; color: var(--text-tertiary); margin-left: 10px; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: var(--font-mono); }
 .agent-row { border-bottom: 1px solid var(--border-table); }
 .agent-row:last-child { border-bottom: none; }
 .agent-summary {
@@ -165,7 +165,7 @@
 .dot.pulse { animation: octo-dot 1.4s infinite; }
 .agent-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .agent-name { font-size: 13px; font-weight: 600; color: var(--text-heading); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent-type { font-weight: 600; color: var(--blue-6); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.agent-type { font-weight: 600; color: var(--blue-6); font-family: var(--font-mono); font-size: 12px; }
 .status-running { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--blue-6); flex: 0 0 auto; }
 .status-done { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--success); flex: 0 0 auto; }
 .status-error { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--error); flex: 0 0 auto; }

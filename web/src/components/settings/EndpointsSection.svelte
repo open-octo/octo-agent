@@ -761,5 +761,5 @@ textarea.headers-textarea { height: auto; min-height: 90px; padding: 8px 12px; r
 .btns:hover:not(:disabled) { background: var(--hover-neutral); border-color: var(--text-quaternary); }
 .btns:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: var(--font-mono); }
 </style>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import Segment from '../ui/Segment.svelte'
+  import ThemePackPicker from '../ui/ThemePackPicker.svelte'
   import Switch from '../ui/Switch.svelte'
   import EndpointsSection from '../settings/EndpointsSection.svelte'
   import QrCode from '../ui/QrCode.svelte'
@@ -526,6 +527,13 @@
             </div>
             <Segment options={['Light', 'Dark', 'System']} labels={{ Light: $t('settings.theme_light'), Dark: $t('settings.theme_dark'), System: $t('settings.theme_system') }} bind:value={theme} />
           </div>
+          <div class="setrow">
+            <div class="seti">
+              <span class="setl">{$t('settings.pack')}</span>
+              <span class="setd">{$t('settings.pack_desc')}</span>
+            </div>
+            <ThemePackPicker />
+          </div>
           {#if $nativeShell}
             <div class="setrow">
               <div class="seti">
@@ -884,7 +892,7 @@ select.sinput { cursor: pointer; }
 .mobile-meta > div { min-width: 0; }
 .mobile-info .btns { align-self: flex-start; }
 .mobile-disabled { padding: 28px 16px; text-align: center; font-size: 13px; color: var(--text-tertiary); }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: var(--font-mono); }
 
 /* ── data management ─────────────────────────────────────────────────────── */
 .data-row {

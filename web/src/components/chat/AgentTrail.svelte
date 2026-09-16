@@ -112,7 +112,7 @@
 <style>
 .trail { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .empty { font-size: 12px; color: var(--text-tertiary); }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: var(--font-mono); }
 
 .step { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); min-width: 0; }
 .step.bare { cursor: default; }

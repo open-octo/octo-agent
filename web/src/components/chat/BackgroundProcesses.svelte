@@ -149,5 +149,5 @@
 .proc-kill.armed { color: #fff; background: var(--error); }
 .proc-kill.armed:hover { filter: brightness(0.92); }
 .proc-kill-lbl { white-space: nowrap; line-height: 1; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: var(--font-mono); }
 </style>

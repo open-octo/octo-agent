@@ -237,7 +237,7 @@
 }
 .search-input::placeholder { color: var(--text-tertiary); }
 kbd {
-  font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; font-family: var(--font-mono);
   background: var(--bg-table-header); border: 1px solid var(--border-secondary); border-radius: 4px;
   padding: 1px 6px; color: var(--text-tertiary);
 }
@@ -252,5 +252,5 @@ kbd {
 .result-title { font-size: 13px; color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .result-title.dim { color: var(--text-secondary); }
 .shortcut { font-size: 11px; color: var(--text-tertiary); }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: var(--font-mono); }
 </style>

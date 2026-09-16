@@ -340,5 +340,5 @@ p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 6
 }
 .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .icon-btn.del:hover:not(:disabled) { background: var(--error-bg); color: var(--error); }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: var(--font-mono); }
 </style>

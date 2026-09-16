@@ -356,7 +356,7 @@ p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 6
   width: 28px; height: 28px; flex: 0 0 28px; border-radius: 9999px;
   background: var(--blue-1); color: var(--blue-6); display: flex; align-items: center; justify-content: center;
 }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: var(--font-mono); }
 .name { font-size: 14px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desc { font-size: 13px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 16px; }
 .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }

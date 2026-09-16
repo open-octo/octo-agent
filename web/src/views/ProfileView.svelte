@@ -293,7 +293,7 @@ p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 6
 :global(.md-content ul), :global(.md-content ol) { margin: 8px 0; padding-left: 20px; }
 :global(.md-content li) { margin: 3px 0; }
 :global(.md-content code) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+  font-family: var(--font-mono); font-size: 12.5px;
   background: var(--bg-table-header); border: 1px solid var(--border-table); border-radius: 4px; padding: 1px 5px;
 }
 :global(.md-content pre) {
@@ -350,5 +350,5 @@ p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 6
   color: var(--text-secondary); cursor: pointer; font-family: inherit;
 }
 .forget-btn:hover { background: var(--error-bg); color: var(--error); }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: var(--font-mono); }
 </style>

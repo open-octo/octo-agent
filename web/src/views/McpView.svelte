@@ -518,7 +518,7 @@ p  { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 
 }
 
 /* ── utilities ───────────────────────────────────────────────────────────── */
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mono { font-family: var(--font-mono); }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 .spin { animation: spin 1s linear infinite; display: inline-block; }

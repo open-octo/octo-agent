@@ -136,7 +136,7 @@
 label { font-size: 12px; color: var(--text-secondary); }
 .json-area {
   width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
-  font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px; font-family: var(--font-mono);
   color: var(--text); outline: none; background: var(--bg-container); box-sizing: border-box;
   resize: vertical; line-height: 1.6;
 }

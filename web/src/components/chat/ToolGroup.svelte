@@ -749,7 +749,7 @@
 .tool-output {
   margin: 0; padding: 10px 14px; border-top: 1px solid var(--border-table);
   background: var(--bg-sidebar); font-size: 12px; line-height: 1.7;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   color: var(--text-secondary); overflow-x: auto; white-space: pre-wrap; word-break: break-word;
   max-height: 224px; overflow-y: auto;
 }
@@ -784,7 +784,7 @@ details[open] > summary .chev { transform: rotate(90deg); }
   padding: 10px 14px; border-top: 1px solid var(--border-table);
   background: var(--terminal-bg); color: var(--terminal-text);
   font-size: 12px; line-height: 1.6;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 .cmd-text {
   flex: 1 1 auto; min-width: 0; font: inherit;
@@ -827,7 +827,7 @@ details[open] > summary .chev { transform: rotate(90deg); }
 .terminal-output {
   margin: 0; padding: 12px 14px; border-top: 1px solid var(--border-table);
   background: var(--terminal-bg); color: var(--terminal-text); font-size: 12px; line-height: 1.6;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-x: auto;
+  font-family: var(--font-mono); overflow-x: auto;
   max-height: 216px; overflow-y: auto;
 }
 .blink-caret {
@@ -860,7 +860,7 @@ details[open] > summary .chev { transform: rotate(90deg); }
 .trail-wrap { display: flex; flex-direction: column; gap: 6px; padding: 2px 0; }
 .wf-log {
   font-size: 12px; color: var(--text-secondary); word-break: break-word;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 .wf-agent { border: 1px solid var(--border-table); border-radius: 8px; background: var(--bg-container); }
 .wf-agent-summary {
@@ -869,7 +869,7 @@ details[open] > summary .chev { transform: rotate(90deg); }
 }
 .wf-agent-summary::-webkit-details-marker { display: none; }
 .wf-agent-summary:hover { background: var(--hover-neutral); border-radius: 8px; }
-.wf-agent-id { color: var(--blue-6); font-weight: 600; font-size: 11px; flex: 0 0 auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.wf-agent-id { color: var(--blue-6); font-weight: 600; font-size: 11px; flex: 0 0 auto; font-family: var(--font-mono); }
 .wf-agent-label {
   color: var(--text-heading); font-weight: 500; flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

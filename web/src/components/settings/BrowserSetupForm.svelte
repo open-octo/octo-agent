@@ -93,7 +93,7 @@
 <style>
 .bs-intro { margin: 0 0 12px; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
 .bs-steps { margin: 0 0 16px; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text); line-height: 1.5; }
-.bs-steps code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--bg-table-header); padding: 1px 5px; border-radius: 4px; }
+.bs-steps code { font-family: var(--font-mono); font-size: 12px; background: var(--bg-table-header); padding: 1px 5px; border-radius: 4px; }
 .bs-note { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; padding: 10px 12px; border-radius: 8px; font-size: 12px; color: var(--warning); background: var(--warning-bg); }
 .bs-step-highlight { display: inline-block; font-weight: 600; color: var(--blue-6); background: var(--blue-1); padding: 2px 6px; border-radius: 4px; }
 .bs-hint { margin-top: 12px; font-size: 12px; color: var(--blue-6); display: flex; align-items: center; gap: 6px; }

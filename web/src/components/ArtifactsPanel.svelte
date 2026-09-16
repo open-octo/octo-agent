@@ -756,7 +756,7 @@ iframe { border: 0; width: 100%; height: 100%; display: block; }
 .code-view {
   margin: 0; height: 100%; box-sizing: border-box; overflow: auto;
   padding: 14px 16px; background: var(--bg-sidebar); font-size: 12px; line-height: 1.7;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); white-space: pre;
+  font-family: var(--font-mono); color: var(--text); white-space: pre;
 }
 .switcher {
   flex: 0 0 auto; border-top: 1px solid var(--border-secondary);
