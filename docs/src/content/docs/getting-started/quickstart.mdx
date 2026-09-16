@@ -7,8 +7,9 @@ import { Tabs, TabItem, Steps, Aside } from '@astrojs/starlight/components';
 
 octo runs as a local server with a web UI in front of it. You start the server once, open it in a
 browser, and everything after that — connecting a model, personalising the assistant, doing actual
-work — happens on the page. Nothing leaves your machine except the calls to whichever model provider
-you pick.
+work — happens on the page. Your conversations and files stay on your machine; what goes out is the
+calls to whichever model provider you pick, plus the release check behind the update badge and
+anything you ask the agent to fetch from the web.
 
 This walkthrough takes about five minutes, most of it spent talking to the assistant.
 
@@ -24,8 +25,10 @@ octo serve -d
 `-d` runs it in the background. It binds `127.0.0.1:8088` and prints the URL to open:
 
 ```
-octo server listening on http://127.0.0.1:8088
+octo serve daemon started (pid 51234), ready at http://127.0.0.1:8088
 ```
+
+Drop the `-d` to keep it in the foreground instead, where it logs to your terminal.
 
 Two more you'll want eventually:
 
@@ -86,9 +89,9 @@ chat.
 
 ## 4 · Meet your assistant
 
-Finishing setup drops you into a session called **✨ Onboard** with one message already sent:
-`/onboard`. This is a real conversation, not a form — answer in your own words, and edit anything
-later.
+Finishing setup drops you into a session called **✨ Onboard** with one message already sent —
+`/onboard lang:en`, carrying the language you just picked. This is a real conversation, not a form:
+answer in your own words, and edit anything later.
 
 It asks, in order:
 
@@ -100,12 +103,13 @@ It asks, in order:
 - **Three preferences.** Permission mode (ask before sensitive tool calls, or auto-approve),
   reasoning effort, and whether to show the reasoning trace.
 
-Out of that it writes two files:
+Out of that it writes two files, and saves the three preferences into `config.yml` alongside them:
 
 | File | Holds |
 |---|---|
 | `~/.octo/soul.md` | Who the assistant is — its name, personality, how it works |
 | `~/.octo/user.md` | Who you are — the profile it carries into every session |
+| `~/.octo/config.yml` | Permission mode, reasoning effort, reasoning trace — they apply to every session |
 
 Both are plain Markdown you can edit by hand. To redo any part of it later, just ask — "change your
 personality", "update my profile" — and the same flow runs for that one piece.
@@ -134,13 +138,14 @@ permission mode is interactive it asks before anything sensitive.
 
 A few things worth knowing about the screen you're on:
 
-- **Left rail** — **New Session** starts a fresh one; **Recent** lists saved sessions; **Scheduled
-  Tasks** and **Light Apps** are covered in the guides; **Settings** sits at the bottom.
+- **Left rail** — **New Session** starts a fresh one; below it are your saved sessions; **Scheduled
+  Tasks** and **Light Apps** are covered in the guides; **More** holds Agents, Skills, MCP Servers,
+  Workflows, Browser and Channels; **Settings** sits at the bottom.
 - **Composer bar** — the model picker, reasoning toggle, a **Context** percentage showing how full
   the window is, and the permission mode.
-- **Session header** — **Compact** summarises a long conversation to reclaim context; **Export**
-  writes it out as MD, JSON, PDF, PNG or HTML (pick more than one, and choose whether tool calls
-  come along).
+- **Session header** — **Compact** summarises a long conversation to reclaim context. **Export**
+  turns the transcript into MD, JSON, PDF, PNG or HTML: tick the messages you want, decide whether
+  tool calls come along, then click a format.
 
 ## Where things live
 
