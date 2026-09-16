@@ -11,8 +11,12 @@ import (
 
 // petStateSleep is the one pet state with no matching server activity — the pet
 // dozes off on its own after the hub has been idle for petSleepAfter. The other
-// three are server.Activity* values, passed through as-is.
-const petStateSleep = "sleep"
+// three are server.Activity* values, passed through as-is; petStateBusy is
+// spelled out here because the hit test needs to name it too.
+const (
+	petStateSleep = "sleep"
+	petStateBusy  = server.ActivityBusy
+)
 
 // petHTML is self-contained (inline CSS/SVG/JS) and is handed to the webview
 // as a literal page rather than served: the pet must not depend on the hub
@@ -34,7 +38,95 @@ const (
 	petPollInterval = 500 * time.Millisecond
 	// petSleepAfter is how long the hub stays idle before the pet dozes off.
 	petSleepAfter = 5 * time.Minute
+	// petPointerInterval is how often the cursor is checked against the pet's
+	// silhouette. Fast enough that crossing onto the octopus feels immediate,
+	// slow enough to stay invisible in a process that is mostly idle.
+	petPointerInterval = 40 * time.Millisecond
 )
+
+// petHit reports whether a point, in window-local points, lands on the pet's
+// artwork rather than the transparent space around it.
+//
+// Deliberately a couple of coarse shapes rather than the real silhouette: the
+// window is only 200pt, the cost of being a few points generous is that a
+// click near the edge still reaches the octopus, and the cost of being exact
+// would be re-deriving every arm's swept path on each tick. What matters is
+// that the corners — which is where a 200pt square overlaps things the user
+// actually wanted to click — fall outside.
+func petHit(state string, lx, ly float64) bool {
+	// The body sits at a different height per state; .busy lifts the rig by 20
+	// and .sleep drops it by 10 (see pet.html).
+	headCY := 80.0
+	switch state {
+	case petStateBusy:
+		headCY = 60
+	case petStateSleep:
+		headCY = 90
+	}
+	if dx, dy := lx-100, ly-headCY; dx*dx+dy*dy <= 54*54 {
+		return true
+	}
+	// The skirt of arms hanging below the head.
+	if lx >= 52 && lx <= 148 && ly >= headCY && ly <= headCY+88 {
+		return true
+	}
+	// The keyboard, which is wider than the octopus and only exists while busy.
+	if state == petStateBusy && lx >= 44 && lx <= 162 && ly >= 116 && ly <= 158 {
+		return true
+	}
+	return false
+}
+
+// watchPetPointer gives the window shape-aware mouse pass-through, until this
+// pet goes away.
+//
+// The window is a 200pt square and the octopus fills maybe half of it, so its
+// empty corners were swallowing clicks meant for whatever sits behind them.
+// IgnoreMouseEvents is a whole-window switch — turning it on makes the octopus
+// itself unclickable — so the only way to get pass-through by shape is to flip
+// it as the cursor crosses the artwork's edge. That in turn needs the cursor
+// position from OUTSIDE the window: once a window ignores the mouse it never
+// sees the cursor come back, so it cannot un-ignore itself from a DOM event.
+func (b *nativeBridge) watchPetPointer(w *application.WebviewWindow) {
+	if _, _, ok := petCursor(); !ok {
+		return // no cursor source here; leave the window solid
+	}
+	t := time.NewTicker(petPointerInterval)
+	defer t.Stop()
+
+	// Mirrors the window's initial state (IgnoreMouseEvents is unset in the
+	// options), so the first flip is only sent when it actually differs.
+	ignoring := false
+
+	for range t.C {
+		if b.pet.Load() != w {
+			return
+		}
+		cx, cy, ok := petCursor()
+		if !ok {
+			continue
+		}
+		r := w.Bounds()
+		if r.Width <= 0 || r.Height <= 0 {
+			continue
+		}
+		// The SVG maps its 200-unit viewBox onto the window, so scaling the
+		// local point by the same factor keeps the hit shapes in viewBox units
+		// whatever size the window ends up.
+		lx := float64(cx-r.X) * (petSize / float64(r.Width))
+		ly := float64(cy-r.Y) * (petSize / float64(r.Height))
+
+		var state string
+		if s := b.petState.Load(); s != nil {
+			state = *s
+		}
+		want := !petHit(state, lx, ly)
+		if want != ignoring {
+			ignoring = want
+			w.SetIgnoreMouseEvents(want)
+		}
+	}
+}
 
 // petShown reports whether the pet is currently up — the tray item is a toggle
 // and names what the next click will do.
@@ -114,6 +206,7 @@ func (b *nativeBridge) showPet() {
 			s.WorkArea.Y+s.WorkArea.Height-petSize-petMargin)
 	}
 	go b.watchPetActivity(w)
+	go b.watchPetPointer(w)
 }
 
 // watchPetActivity drives the pet from the hub's aggregate activity until this
@@ -162,8 +255,10 @@ func (b *nativeBridge) watchPetActivity(w *application.WebviewWindow) {
 }
 
 // setPetState drives the pet's animation: "idle", "busy", "ask" or "sleep".
-// No-ops while the pet is down.
+// No-ops while the pet is down. The state is also published for the pointer
+// loop, whose hit shapes depend on the pose.
 func (b *nativeBridge) setPetState(state string) {
+	b.petState.Store(&state)
 	w := b.pet.Load()
 	if w == nil {
 		return
