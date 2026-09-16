@@ -152,6 +152,10 @@ func (b *nativeBridge) petShown() bool { return b.pet.Load() != nil }
 // until refreshTrayLoop's next tick.
 func (b *nativeBridge) togglePet() {
 	if w := b.pet.Swap(nil); w != nil {
+		// Before the close, not after: the panel is released the moment it
+		// closes, so the first-mouse hook must stop recognising that address
+		// while it still belongs to the pet.
+		petForgetFirstMouseWindow()
 		w.Close()
 		b.refreshTray()
 		return
