@@ -3302,15 +3302,17 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   /* The themed conversation surface (see --chat-bg in app.css). The color is
      the real background; the two image layers are `none` under the default
      pack, so this reduces to the plain --bg-layout the column had before.
-     `fixed` keeps the gradient and any wallpaper still while .messages scrolls
-     inside — attached to the scroll box they would slide with the transcript
-     and read as a moving backdrop. */
+     The background stays put on its own without background-attachment: the
+     element that scrolls is .messages, a descendant, and a descendant's
+     scrolling never moves an ancestor's background. Leaving it at the default
+     also keeps the painting area this column rather than the viewport, so
+     `cover` frames the wallpaper to the chat column and the sidebar does not
+     crop it. */
   background-color: var(--bg-layout);
   background-image: var(--chat-bg-image), var(--chat-bg);
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  background-attachment: fixed;
 }
 .workflows-bar {
   flex: 0 0 auto;

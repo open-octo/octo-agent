@@ -251,10 +251,17 @@
   --radius-sm: 12px;
   --radius-xs: 8px;
 
-  /* ui-rounded resolves to SF Pro Rounded on Apple platforms; the named
-     families cover Windows and CJK, and the stack ends at the default sans. */
-  --font-sans: ui-rounded, 'SF Pro Rounded', 'Arial Rounded MT Bold', 'PingFang SC',
-               'Hiragino Sans GB', 'Microsoft YaHei', system-ui, 'Segoe UI', Roboto, sans-serif;
+  /* ui-rounded resolves to SF Pro Rounded under WebKit, which is what the
+     desktop shell runs on; elsewhere the stack falls to system-ui and the pack
+     simply loses its rounding. Two deliberate omissions: 'Arial Rounded MT
+     Bold' would satisfy the rounded look on Chrome/macOS but ships only a Bold
+     weight, so every font-weight in the app would collapse to one — a worse
+     trade than losing the roundness. And the CJK families sit AFTER system-ui
+     because font fallback is per-character: PingFang SC carries full Latin
+     glyphs, so ahead of system-ui it would quietly render English body text
+     too. Here they only fill in the glyphs nothing before them has. */
+  --font-sans: ui-rounded, 'SF Pro Rounded', system-ui, 'Segoe UI', Roboto,
+               'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
 
   --chat-bg: linear-gradient(170deg, #FFF7FA 0%, #FDF0F6 45%, #F8EDFA 100%);
   --chat-bg-image: url('/wallpapers/blossom-light.webp');
