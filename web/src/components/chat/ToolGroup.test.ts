@@ -172,3 +172,50 @@ describe('terminal command copy button', () => {
     expect(get(toasts)[0].type).toBe('error')
   })
 })
+
+// The header's argument text is selectable (user-select: text), but it sits
+// inside the <summary> that folds the card — so selecting or copying it used to
+// fold the card out from under the user.
+describe('header argument text', () => {
+  function card(el: HTMLElement) {
+    return {
+      details: el.querySelector('details.tool-item') as HTMLDetailsElement,
+      arg: el.querySelector('.tool-arg') as HTMLElement,
+      chev: el.querySelector('.chev') as HTMLElement,
+    }
+  }
+
+  // detail > 0 marks a real pointer click; a keyboard Enter on the summary
+  // fires one with detail 0.
+  function mouseClick(el: HTMLElement) {
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }))
+  }
+
+  it('does not fold the card when the argument text is clicked', () => {
+    const { details, arg, chev } = card(render([tool()]))
+    expect(arg.textContent).toContain('git commit')
+
+    mouseClick(arg)
+    expect(details.open).toBe(false)
+
+    // The rest of the header still folds.
+    mouseClick(chev)
+    expect(details.open).toBe(true)
+  })
+
+  it('does not fold when a drag-selection in the header ends off the argument text', () => {
+    const { details, arg, chev } = card(render([tool()]))
+    document.getSelection()!.selectAllChildren(arg)
+
+    mouseClick(chev)
+    expect(details.open).toBe(false)
+  })
+
+  it('still folds on keyboard activation with a live selection', () => {
+    const { details, arg, chev } = card(render([tool()]))
+    document.getSelection()!.selectAllChildren(arg)
+
+    chev.click() // detail 0, as Enter/Space on the focused summary fires
+    expect(details.open).toBe(true)
+  })
+})

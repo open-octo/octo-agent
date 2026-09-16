@@ -4,7 +4,7 @@
   import type { SubAgentState, WorkflowTrailState } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
-  import { toolOpenState, applyToolToggle, keepOpenAction } from '../../lib/toolFold'
+  import { toolOpenState, applyToolToggle, keepOpenAction, foldSuppressed } from '../../lib/toolFold'
   import { sanitizeSpec, READ_ONLY_NODE_TYPES } from '../../lib/genui/guard'
   import GenuiBlock from '../genui/GenuiBlock.svelte'
   import AgentTrail from './AgentTrail.svelte'
@@ -482,7 +482,7 @@
            user read/copy the whole thing despite the truncation. -->
       {@const argText = tool.summary || (tool.args ? argSummary(tool.name, tool.args) : '')}
       <details open={toolOpenState(toolOpen, tool, lastId, anyRunning) || !!pinnedIds[tool.id]} ontoggle={(e) => onToggle(tool, lastId, anyRunning, (e.currentTarget as HTMLDetailsElement).open)} class="tool-item">
-        <summary class="tool-summary">
+        <summary class="tool-summary" onclick={(e) => { if (foldSuppressed(e.target, document.getSelection(), e.detail)) e.preventDefault() }}>
           <iconify-icon icon="lucide:chevron-right" width="13" class="chev" style="color:var(--text-tertiary)"></iconify-icon>
           <span class="tool-well" class:accent={tool.name === 'edit_file' || tool.name === 'write_file'}>
             <iconify-icon icon={toolIcon(tool.name)} width="16"></iconify-icon>
@@ -495,7 +495,7 @@
                 <span class="tool-title mono">{tool.name}</span>
               {/if}
               {#if argText}
-                <span class="tool-arg mono" title={argText} onclick={(e) => e.stopPropagation()}>{argText}</span>
+                <span class="tool-arg mono" title={argText}>{argText}</span>
               {/if}
             </div>
             {#if meta && !fErr && !tErr}<div class="tool-submeta">{meta}</div>{/if}
