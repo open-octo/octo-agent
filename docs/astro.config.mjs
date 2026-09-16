@@ -86,6 +86,7 @@ export default defineConfig({
 						{ label: 'Interactive panels (GenUI)', slug: 'guides/genui', translations: { 'zh-CN': '交互面板（GenUI）' } },
 						{ label: 'Light Apps', slug: 'guides/light-apps', translations: { 'zh-CN': '轻应用' } },
 						{ label: 'Self-host octo serve', slug: 'guides/self-host', translations: { 'zh-CN': '自托管 octo serve' } },
+						{ label: 'Air-gapped deployment', slug: 'guides/air-gapped', translations: { 'zh-CN': '内网离线部署' } },
 					],
 				},
 				{

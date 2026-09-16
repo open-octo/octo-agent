@@ -1,0 +1,235 @@
+---
+title: 内网离线部署
+description: 在不能连外网的隔离环境里安装 octo，并指向内部自建的大模型。
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+octo 是一个 Go 编译出来的单文件二进制。Linux 构建是 `CGO_ENABLED=0` 的纯静态程序，不链接
+glibc；Web 控制台、ripgrep 和内置技能全部 `go:embed` 在二进制里。所以离线安装不需要包管理器、
+不需要 Node、不需要容器运行时——把一个文件拷进去就能跑。
+
+再加上 `custom` vendor 可以指向任意 base URL、甚至完全不带密钥，整套东西可以跑在一个从头到尾
+不碰公网的环境里。
+
+## 你需要准备
+
+- **一台能上网的机器**，用来下载发布包（下完就不需要它了）
+- **目标机器**：任意 x86_64 或 aarch64 的 Linux，内核 3.2 以上
+- **一个内部模型端点**，暴露 OpenAI 兼容或 Anthropic Messages 协议的 HTTP 接口
+
+## 1. 在联网机器上取包
+
+发布包在 [GitHub Releases](https://github.com/open-octo/octo-agent/releases/latest)。按目标机器的
+架构选一个，另外把 `checksums.txt` 一起下了：
+
+```
+octo_<版本>_linux_amd64.tar.gz     # x86_64（含海光、兆芯）
+octo_<版本>_linux_arm64.tar.gz     # aarch64（含飞腾、鲲鹏）
+checksums.txt
+```
+
+`uname -m` 拿不准的话先在目标机器上跑一下：`x86_64` → amd64，`aarch64` → arm64。
+
+<Aside type="note">
+不能用 `curl … | sh` 那个安装脚本——它要访问 GitHub 解析最新版本号再下载。离线场景走手工拷贝。
+</Aside>
+
+## 2. 拷进内网并安装
+
+<Steps>
+1. 用你们批准的介质（U 盘、跳板机、单向文件闸）把两个文件送进去。
+
+2. 校验完整性，确认传输过程没有损坏：
+
+   ```bash
+   sha256sum -c checksums.txt --ignore-missing
+   ```
+
+3. 解压并安装到 `PATH`：
+
+   ```bash
+   tar -xzf octo_<版本>_linux_amd64.tar.gz
+   sudo install -m755 octo /usr/local/bin/octo
+   octo version
+   ```
+</Steps>
+
+`octo version` 打印出版本号和 commit，就说明二进制在这台机器上能正常运行——这一步已经排除了
+架构和内核不兼容。
+
+## 3. 指向内部模型
+
+自建端点一律用 `custom` vendor：它是唯一接受自由 `base_url` 的 provider，也是唯一允许
+**不填 `api_key`** 的——本地推理服务通常没有鉴权，此时 octo 不发认证头。
+
+建立 `~/.octo/config.yml`：
+
+```yaml
+endpoints:
+  - id: intranet
+    name: 内部推理服务
+    provider: custom
+    protocol: openai              # 或 anthropic
+    base_url: http://10.0.0.20:8000/v1
+    # api_key: <有鉴权才填；没有就整行删掉>
+    models:
+      - model: Qwen3-32B
+        vision: false
+default: intranet::Qwen3-32B
+```
+
+**`protocol` 怎么选**：vLLM、Ollama、Xinference、LMDeploy 以及绝大多数国产推理框架暴露的都是
+OpenAI Chat Completions 兼容接口 → 填 `openai`。只有明确实现了 Anthropic Messages API 的网关
+才填 `anthropic`。填错的表现是第一次对话就报协议解析错误，改回来即可，没有别的副作用。
+
+**`base_url` 写到哪一级**：填你们服务的根地址，`/chat/completions` 由 octo 自己拼。OpenAI 兼容
+服务通常要带上 `/v1`。
+
+**密钥也可以走环境变量**：`CUSTOM_API_KEY` 优先于文件里的 `api_key`，多人共用的机器上更合适。
+
+<Aside type="caution" title="自签 HTTPS 证书">
+如果内部端点是 HTTPS 且用了自建 CA，Go 读的是**系统信任库**——octo 没有提供跳过证书校验的开关。
+把你们的根证书装进系统（麒麟/openEuler 等 RHEL 系：放进 `/etc/pki/ca-trust/source/anchors/`
+后执行 `update-ca-trust`；Debian 系：`/usr/local/share/ca-certificates/` 后
+`update-ca-certificates`），或者直接用 `http://`。
+</Aside>
+
+### 验证
+
+```bash
+octo config show           # 打印生效的 provider/model 及各自来自哪一层
+octo "用一句话自我介绍"      # 一次性提问，验证链路通
+```
+
+配置文件里存在一个 keyless 的 `custom` 端点，等于告诉 octo「已配置完成」——Web 控制台的首次
+运行向导不会再拦你要云厂商的密钥。
+
+## 4. 起服务
+
+```bash
+octo                       # 终端里直接对话
+octo serve -d              # 后台跑 Web 控制台，默认 127.0.0.1:8088
+```
+
+要给同事共用，绑到非回环地址。这时每个非本机请求都必须带访问密钥：
+
+```bash
+octo serve -addr :8088 -d
+```
+
+不传 `--access-key` 时，octo 依次读 `OCTO_ACCESS_KEY`、`config.yml`，都没有就自动生成并持久化；
+启动日志里会打印一条带 `?access_key=…` 的可直接打开的 URL。完整边界见
+[安全模型](/docs/zh/reference/security/)。
+
+跑成系统服务、日志排查和 `~/.octo/serve.env` 的用法，与联网环境完全一致，见
+[自托管 octo serve](/docs/zh/guides/self-host/)。
+
+## 断网后哪些能力会变
+
+| 能力 | 在隔离网络里的表现 |
+|---|---|
+| `web_search` | 不可用。后端是 Tavily / Bing 等公网服务，调用会超时报错。模型收到错误后会自行放弃并改走别的路 |
+| `web_fetch` | 只能抓到内网可达的 URL |
+| `octo upgrade`、Web 端的版本徽标 | 会尝试连 GitHub 并失败。不影响任何其他功能，升级走下面的离线流程 |
+| 手机隧道（`-tunnel`） | 默认关闭，不会主动连任何中继 |
+| MCP 服务 | 本地 stdio 进程没问题。但 `npx @modelcontextprotocol/...` 这类要先把 npm 包离线装好；配置在 `~/.octo/mcp.json` |
+| `computer` 工具（控制桌面） | Linux 上本来就是空实现，只有 macOS 和 Windows 有——与是否联网无关 |
+| 桌面 AppImage | 需要宿主机自带 GTK4 + WebKitGTK 6.0，国产桌面发行版上常常没有。**推荐直接用 CLI 加 `octo serve`，浏览器访问，功能等价** |
+| 图片理解 | 取决于你们内部模型自身是否支持。端点条目里如实填 `vision: true/false` |
+
+### 自建模型的上下文窗口要自己校准
+
+octo 靠模型名的**子串匹配**查上下文窗口大小，用来决定何时自动压缩历史（默认到达窗口的 75%
+时触发）。自建部署有两种偏离真实值的情况，方向都是**高估**：
+
+- **名字匹配不上任何条目**——内部改过名的模型很常见，此时回退到 128k。
+- **名字匹配上了，但值对不上你的部署**。这个更隐蔽：`Qwen3-32B` 会命中 `qwen3` 条目拿到
+  128k，那是 Qwen3 系列经 YaRN 扩展后的上限；而 vLLM 起服务时 `--max-model-len` 默认给的是
+  32k。表命中不等于值对。
+
+**以你实际启动推理服务时的 `--max-model-len`（或等价参数）为准**，不要以模型卡宣称的上限为准。
+
+真实窗口比 octo 认定的小时，用 `compact_auto_pct` 按比例补偿。这个百分比是相对 octo 认定的
+窗口算的，所以：
+
+```
+compact_auto_pct ≈ 真实窗口 ÷ octo 认定窗口 × 75      （向下取整）
+```
+
+真实 32k、octo 认定 128k，就是 `32 ÷ 128 × 75 ≈ 18`，往下取留点余量：
+
+```yaml
+compact_auto_pct: 15      # 取值 0–100；0 表示用内置默认（75）
+```
+
+<Aside type="note" title="配错了也不会硬失败">
+真超出了窗口，octo 会识别端点返回的上下文溢出错误（覆盖 vLLM 那类 `maximum context length is
+…` 的标准报错），自动压缩历史后重试一次，还会从错误信息里解析出真实上限来决定释放多少。代价
+是这一轮多一次往返、明显变慢。所以**偶发的卡顿往往就是这个阈值没调对**，而不是模型慢——每个
+轮次只重试一次，压缩后仍然超限才会真正失败。
+</Aside>
+
+### 彻底关掉出网工具
+
+不做任何处理也能用——公网工具只是调用失败。要更干净，可以建一个工具白名单的 agent profile，
+放在 `~/.octo/agents/<id>.md`，`tools:` 里列出允许的工具，不列 `web_search` 和 `web_fetch`：
+
+```markdown
+---
+name: 内网助手
+description: 只使用本地工具的助手。
+tools:
+  - terminal
+  - read_file
+  - write_file
+  - edit_file
+  - grep
+  - glob
+---
+
+你在一个隔离网络中工作，没有公网访问。
+```
+
+只是想临时验证一下裸模型，`octo --no-tools` 会关掉全部内置工具、MCP 和技能。
+
+## 离线升级
+
+在联网机器上下新版本的 tar.gz 和 `checksums.txt`，重复第 1、2 步覆盖二进制即可——`~/.octo/`
+下的配置、会话和技能都不会被动到：
+
+```bash
+sha256sum -c checksums.txt --ignore-missing
+tar -xzf octo_<新版本>_linux_amd64.tar.gz
+octo serve --stop                          # 有后台实例的话先停
+sudo install -m755 octo /usr/local/bin/octo
+octo serve -d
+```
+
+## 数据都在哪
+
+一切都在 `~/.octo/` 下，没有任何东西写到用户目录之外：配置 `config.yml`、会话记录
+`sessions/`、技能 `skills/`、agent profile `agents/`、MCP 配置 `mcp.json`、服务日志
+`serve.log`。备份或迁移整个目录拷走就行。
+
+## 从源码构建的注意事项
+
+内网里如果一定要自己编译（比如安全审计要求），注意 Web 控制台的产物
+`internal/server/webdist` **不在版本库里**——它是 gitignore 的构建产物。所以完整构建需要：
+
+- 一个内网 Go module 代理（`GOPROXY`），或者预先 vendor 好依赖
+- Node 22 加一个内网 npm registry，先在 `web/` 下 `npm ci && npm run build` 生成前端产物
+
+跳过前端构建也能 `make build` 出可用的二进制，只是 `octo serve` 打开会是空白页——CLI 和 TUI
+不受影响。
+
+**大多数情况下拷贝官方发布包更省事**，它已经包含了构建好的前端和 ripgrep。
+
+## 国产化平台说明
+
+Linux 目标是纯静态、零系统库依赖的构建，因此在麒麟、统信 UOS、openEuler 这类发行版上，以及
+飞腾/鲲鹏（aarch64）、海光/兆芯（x86_64）平台上，理论上都能直接运行。
+
+不过要说清楚：**我们的 CI 只覆盖 Ubuntu**，这些国产平台没有做过实测。建议先在一台机器上跑通
+`octo version` 和一次完整对话，再在更大范围铺开。遇到问题欢迎提
+[issue](https://github.com/open-octo/octo-agent/issues)，附上 `uname -a` 和发行版版本。

@@ -1,0 +1,252 @@
+---
+title: Air-gapped deployment
+description: Install octo in an isolated network with no internet access, pointed at a self-hosted model.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+octo is a single Go binary. The Linux build is `CGO_ENABLED=0` — fully static, no glibc linkage —
+and the web console, ripgrep and the bundled skills are all `go:embed`ed into it. Offline install
+needs no package manager, no Node, no container runtime: copy one file in and run it.
+
+Pair that with the `custom` vendor, which accepts any base URL and works with no API key at all,
+and the whole stack runs in an environment that never touches the public internet.
+
+## What you need
+
+- **One machine with internet access**, to download the release (you're done with it after that)
+- **The target machine**: any x86_64 or aarch64 Linux, kernel 3.2 or newer
+- **An internal model endpoint** speaking either the OpenAI-compatible or the Anthropic Messages
+  wire protocol over HTTP
+
+## 1. Fetch the release
+
+Grab the archive for your target architecture plus `checksums.txt` from the
+[latest release](https://github.com/open-octo/octo-agent/releases/latest):
+
+```
+octo_<version>_linux_amd64.tar.gz     # x86_64
+octo_<version>_linux_arm64.tar.gz     # aarch64
+checksums.txt
+```
+
+Run `uname -m` on the target if you're unsure: `x86_64` → amd64, `aarch64` → arm64.
+
+<Aside type="note">
+The `curl … | sh` install script won't work here — it resolves the latest version from GitHub
+before downloading. Air-gapped installs go through manual copy.
+</Aside>
+
+## 2. Transfer and install
+
+<Steps>
+1. Move both files across using whatever transfer path your policy approves.
+
+2. Verify integrity so a corrupted transfer surfaces now rather than at runtime:
+
+   ```bash
+   sha256sum -c checksums.txt --ignore-missing
+   ```
+
+3. Unpack and install onto `PATH`:
+
+   ```bash
+   tar -xzf octo_<version>_linux_amd64.tar.gz
+   sudo install -m755 octo /usr/local/bin/octo
+   octo version
+   ```
+</Steps>
+
+`octo version` printing a version and commit means the binary runs on this host — that single
+command already rules out architecture and kernel mismatches.
+
+## 3. Point it at your model
+
+Self-hosted endpoints use the `custom` vendor: the only provider that takes a free-form `base_url`,
+and the only one where **`api_key` may be omitted** — local inference servers usually have no auth,
+and octo then sends no authorization header.
+
+Create `~/.octo/config.yml`:
+
+```yaml
+endpoints:
+  - id: intranet
+    name: Internal inference
+    provider: custom
+    protocol: openai              # or anthropic
+    base_url: http://10.0.0.20:8000/v1
+    # api_key: <only if your gateway requires one; otherwise drop this line>
+    models:
+      - model: Qwen3-32B
+        vision: false
+default: intranet::Qwen3-32B
+```
+
+**Choosing `protocol`**: vLLM, Ollama, Xinference, LMDeploy and most self-hosted serving stacks
+expose an OpenAI Chat Completions-compatible API → `openai`. Only pick `anthropic` for a gateway
+that explicitly implements the Anthropic Messages API. Getting it wrong shows up as a wire-format
+error on the very first turn; switch it and move on — nothing else is affected.
+
+**Where `base_url` stops**: give the root; octo appends the path itself. OpenAI-compatible servers
+usually want the `/v1` suffix included.
+
+**The key can come from the environment too**: `CUSTOM_API_KEY` takes precedence over the file's
+`api_key`, which suits a shared machine better.
+
+<Aside type="caution" title="Self-signed HTTPS">
+If the internal endpoint is HTTPS behind a private CA, Go reads the **system trust store** — octo
+offers no flag to skip certificate verification. Install your root certificate system-wide (RHEL
+family: drop it in `/etc/pki/ca-trust/source/anchors/` then run `update-ca-trust`; Debian family:
+`/usr/local/share/ca-certificates/` then `update-ca-certificates`), or just use `http://`.
+</Aside>
+
+### Verify
+
+```bash
+octo config show              # prints the effective provider/model and where each came from
+octo "introduce yourself in one sentence"
+```
+
+A keyless `custom` endpoint in the config counts as fully configured — the web console's first-run
+wizard won't block you asking for a cloud provider key.
+
+## 4. Run the server
+
+```bash
+octo                          # chat straight from the terminal
+octo serve -d                 # web console in the background, 127.0.0.1:8088 by default
+```
+
+To share it with colleagues, bind wider. Every non-loopback request then has to present an access
+key:
+
+```bash
+octo serve -addr :8088 -d
+```
+
+Without `--access-key`, octo reads `OCTO_ACCESS_KEY`, then `config.yml`, then generates and
+persists one — startup prints a ready-to-open URL with `?access_key=…` embedded. The full boundary
+is in the [security model](/docs/reference/security/).
+
+Running it under an init system, log locations and `~/.octo/serve.env` all work exactly as they do
+online — see [Self-host octo serve](/docs/guides/self-host/).
+
+## What changes without internet
+
+| Capability | Behavior in an isolated network |
+|---|---|
+| `web_search` | Unavailable. The backends are Tavily / Bing and friends, so calls time out and error. The model sees the error and routes around it |
+| `web_fetch` | Limited to URLs reachable inside your network |
+| `octo upgrade`, the web version badge | Try GitHub and fail. Nothing else breaks; upgrade via the offline flow below |
+| Phone tunnel (`-tunnel`) | Off by default — nothing dials a relay unless you ask |
+| MCP servers | Local stdio processes are fine. `npx @modelcontextprotocol/...` entries need their npm packages staged offline first; config lives in `~/.octo/mcp.json` |
+| `computer` tool (desktop control) | A no-op stub on Linux regardless of connectivity — only macOS and Windows have real implementations |
+| Desktop AppImage | Needs GTK4 + WebKitGTK 6.0 on the host, often missing on hardened or older distros. **Prefer the CLI plus `octo serve` in a browser** — same feature set |
+| Image understanding | Depends on whether your internal model supports it. Set `vision: true/false` on the model entry honestly |
+
+### Calibrate the context window for a self-hosted model
+
+octo resolves a model's context window by **substring-matching its name**, and uses that to decide
+when to auto-compact history (at 75% of the window by default). Self-hosted deployments drift from
+the true value in two ways, both of them **over**-estimates:
+
+- **The name matches no entry** — common for internally renamed models, which then fall back
+  to 128k.
+- **The name matches, but the value doesn't fit your deployment.** This one is subtler:
+  `Qwen3-32B` matches the `qwen3` entry and gets 128k, which is the YaRN-extended ceiling for the
+  Qwen3 family — while vLLM's `--max-model-len` defaults to 32k. A match is not a correct value.
+
+**Go by the `--max-model-len` (or equivalent) you actually started the server with**, not by the
+ceiling on the model card.
+
+When the real window is smaller than what octo assumes, compensate with `compact_auto_pct`. The
+percentage is relative to the window octo assumes, so:
+
+```
+compact_auto_pct ≈ real window ÷ assumed window × 75      (round down)
+```
+
+A real 32k against an assumed 128k gives `32 ÷ 128 × 75 ≈ 18` — round down for headroom:
+
+```yaml
+compact_auto_pct: 15      # 0–100; 0 means the built-in default (75)
+```
+
+<Aside type="note" title="Getting it wrong is not a hard failure">
+If a turn does overflow, octo recognizes the endpoint's context-overflow error (including the
+standard `maximum context length is …` shape vLLM emits), compacts history and retries once,
+parsing the real ceiling out of the error message to decide how much to free. The cost is an extra
+round trip and a visibly slower turn — so **an occasional stall usually means this threshold needs
+tuning**, not that the model is slow. Each turn retries only once; if it still overflows after
+compaction, it fails for real.
+</Aside>
+
+### Turning off the outbound tools
+
+You don't have to do anything — the internet-facing tools simply fail. For a cleaner setup, define
+an agent profile with a tool allowlist at `~/.octo/agents/<id>.md` that omits `web_search` and
+`web_fetch`:
+
+```markdown
+---
+name: Intranet assistant
+description: Assistant restricted to local tools.
+tools:
+  - terminal
+  - read_file
+  - write_file
+  - edit_file
+  - grep
+  - glob
+---
+
+You work in an isolated network with no internet access.
+```
+
+To sanity-check the bare model instead, `octo --no-tools` disables every built-in tool, MCP surface
+and skill.
+
+## Offline upgrades
+
+Download the new tar.gz and `checksums.txt` on the connected machine and repeat steps 1 and 2 over
+the existing binary. Nothing under `~/.octo/` — config, sessions, skills — is touched:
+
+```bash
+sha256sum -c checksums.txt --ignore-missing
+tar -xzf octo_<new-version>_linux_amd64.tar.gz
+octo serve --stop                          # if a daemon is running
+sudo install -m755 octo /usr/local/bin/octo
+octo serve -d
+```
+
+## Where the data lives
+
+Everything sits under `~/.octo/` — nothing is written outside the user's home: `config.yml`,
+`sessions/`, `skills/`, agent profiles in `agents/`, `mcp.json`, and `serve.log`. Back it up or
+migrate it by copying that one directory.
+
+## Building from source instead
+
+If policy requires you to compile in-network, note that the web console's build output
+`internal/server/webdist` is **not in the repository** — it's a gitignored artifact. A complete
+build therefore needs:
+
+- An internal Go module proxy (`GOPROXY`), or dependencies vendored ahead of time
+- Node 22 and an internal npm registry, to run `npm ci && npm run build` in `web/` first
+
+`make build` still produces a working binary without the frontend step; `octo serve` just serves a
+blank page. The CLI and TUI are unaffected.
+
+**For most teams, copying the official release is less work** — it already carries the built
+frontend and ripgrep.
+
+## Notes on hardened and domestic Linux distributions
+
+Because the Linux target is a static build with no system-library dependencies, it should run
+as-is on Kylin, UOS, openEuler and similar distributions, on both aarch64 (Phytium, Kunpeng) and
+x86_64 (Hygon, Zhaoxin) hardware.
+
+To be straight about it: **our CI only covers Ubuntu** — none of those platforms have been tested
+in practice. Prove out `octo version` and one full conversation on a single machine before rolling
+out broadly, and please [open an issue](https://github.com/open-octo/octo-agent/issues) with your
+`uname -a` and distribution version if something breaks.
