@@ -82,28 +82,3 @@ export function keepOpenAction(
   if (!last || last.error || overrides[last.id] !== undefined) return null
   return { kind: 'pin', id: last.id }
 }
-
-// Whether a click inside a tool card's <summary> is a text interaction rather
-// than a fold, in which case the caller cancels it so the card stays put.
-//
-// Two cases: the click landed on the selectable argument text, or it ended a
-// drag that selected something in this header (the mouseup can land anywhere in
-// the summary, so the click target alone doesn't tell us). Note stopPropagation
-// on the argument span cannot do this job — a summary's activation behaviour
-// runs unless the click is *cancelled*, propagation stopped or not.
-//
-// `detail` is the click's MouseEvent.detail: 0 for the synthetic click a
-// keyboard Enter/Space on the focused summary fires. Selecting the argument
-// text leaves both the selection and the focus in place, so without that guard
-// a leftover selection would silently swallow every keyboard fold afterwards.
-export function foldSuppressed(target: EventTarget | null, selection: Selection | null, detail: number): boolean {
-  const el = target instanceof Element ? target : null
-  if (!el) return false
-  if (el.closest('.tool-arg')) return true
-  if (detail === 0 || !selection || selection.isCollapsed) return false
-  const summary = el.closest('summary')
-  if (!summary) return false
-  // Either end, since a drag that started above the card and ended in the
-  // header anchors outside it.
-  return summary.contains(selection.anchorNode) || summary.contains(selection.focusNode)
-}

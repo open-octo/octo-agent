@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { defaultToolOpen, toolOpenState, applyToolToggle, keepOpenAction, foldSuppressed, type ToolLike } from './toolFold'
+import { describe, it, expect } from 'vitest'
+import { defaultToolOpen, toolOpenState, applyToolToggle, keepOpenAction, type ToolLike } from './toolFold'
 
 const tool = (id: string, error?: unknown): ToolLike => ({ id, error })
 
@@ -107,85 +107,5 @@ describe('keepOpenAction', () => {
 
   it('handles an empty tool list', () => {
     expect(keepOpenAction(true, false, [], {}, 0)).toBeNull()
-  })
-})
-
-describe('foldSuppressed', () => {
-  // <details><summary>[chev] <span.tool-arg>/some/path</span></summary></details>
-  function header() {
-    const details = document.createElement('details')
-    details.innerHTML = '<summary><span class="chev"></span><span class="tool-arg">/some/path</span></summary>'
-    document.body.append(details)
-    const summary = details.querySelector('summary')!
-    return { summary, arg: summary.querySelector('.tool-arg') as HTMLElement, chev: summary.querySelector('.chev') as HTMLElement }
-  }
-
-  beforeEach(() => { document.body.replaceChildren() })
-
-  it('suppresses a click on the argument text', () => {
-    const { arg } = header()
-    expect(foldSuppressed(arg, null, 1)).toBe(true)
-    // Keyboard activation never targets the argument span, but the branch must
-    // not depend on detail either.
-    expect(foldSuppressed(arg, null, 0)).toBe(true)
-  })
-
-  it('suppresses a click that ended a drag-selection started in the header', () => {
-    const { summary, arg, chev } = header()
-    const sel = document.getSelection()!
-    sel.selectAllChildren(arg)
-    // The mouseup can land anywhere in the summary, not just on the arg span.
-    expect(foldSuppressed(chev, sel, 1)).toBe(true)
-    expect(foldSuppressed(summary, sel, 1)).toBe(true)
-  })
-
-  // Dragging upwards out of the header leaves the anchor outside it.
-  it('suppresses a backwards drag whose focus end is in the header', () => {
-    const { summary, arg, chev } = header()
-    const outside = document.createElement('p')
-    outside.textContent = 'above the card'
-    document.body.prepend(outside)
-    const sel = document.getSelection()!
-    const range = document.createRange()
-    range.setStart(outside.firstChild!, 0)
-    range.setEnd(arg.firstChild!, 3)
-    sel.removeAllRanges()
-    sel.addRange(range)
-    expect(summary.contains(sel.anchorNode)).toBe(false)
-    expect(foldSuppressed(chev, sel, 1)).toBe(true)
-  })
-
-  // A leftover selection must not swallow Enter/Space on the focused summary,
-  // which fires a click with detail 0.
-  it('lets keyboard activation fold the card despite a live selection', () => {
-    const { summary, arg } = header()
-    const sel = document.getSelection()!
-    sel.selectAllChildren(arg)
-    expect(foldSuppressed(summary, sel, 0)).toBe(false)
-  })
-
-  it('lets a plain click elsewhere in the header fold the card', () => {
-    const { summary, chev } = header()
-    const sel = document.getSelection()!
-    sel.removeAllRanges()
-    expect(foldSuppressed(chev, sel, 1)).toBe(false)
-    expect(foldSuppressed(summary, sel, 1)).toBe(false)
-  })
-
-  it('ignores a selection living in another card header', () => {
-    const { chev } = header()
-    const other = header()
-    const sel = document.getSelection()!
-    sel.selectAllChildren(other.arg)
-    expect(foldSuppressed(chev, sel, 1)).toBe(false)
-  })
-
-  it('ignores a collapsed caret and a non-element target', () => {
-    const { chev, arg } = header()
-    const sel = document.getSelection()!
-    sel.collapse(arg.firstChild!, 1)
-    expect(foldSuppressed(chev, sel, 1)).toBe(false)
-    expect(foldSuppressed(document, sel, 1)).toBe(false)
-    expect(foldSuppressed(null, sel, 1)).toBe(false)
   })
 })

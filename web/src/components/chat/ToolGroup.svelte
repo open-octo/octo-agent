@@ -4,7 +4,7 @@
   import type { SubAgentState, WorkflowTrailState } from '../../lib/stores'
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
-  import { toolOpenState, applyToolToggle, keepOpenAction, foldSuppressed } from '../../lib/toolFold'
+  import { toolOpenState, applyToolToggle, keepOpenAction } from '../../lib/toolFold'
   import { sanitizeSpec, READ_ONLY_NODE_TYPES } from '../../lib/genui/guard'
   import GenuiBlock from '../genui/GenuiBlock.svelte'
   import AgentTrail from './AgentTrail.svelte'
@@ -478,11 +478,11 @@
       {@const tErr = terminalFailure(tool)}
       {@const cmdText = terminalCommand(tool)}
       <!-- Full arg text lives in the DOM either way — the CSS only visually
-           ellipsizes it. Surfacing it via `title` + selectable text lets the
-           user read/copy the whole thing despite the truncation. -->
+           ellipsizes it. `title` surfaces the whole thing despite the
+           truncation; the header itself is click-to-fold, not selectable. -->
       {@const argText = tool.summary || (tool.args ? argSummary(tool.name, tool.args) : '')}
       <details open={toolOpenState(toolOpen, tool, lastId, anyRunning) || !!pinnedIds[tool.id]} ontoggle={(e) => onToggle(tool, lastId, anyRunning, (e.currentTarget as HTMLDetailsElement).open)} class="tool-item">
-        <summary class="tool-summary" onclick={(e) => { if (foldSuppressed(e.target, document.getSelection(), e.detail)) e.preventDefault() }}>
+        <summary class="tool-summary">
           <iconify-icon icon="lucide:chevron-right" width="13" class="chev" style="color:var(--text-tertiary)"></iconify-icon>
           <span class="tool-well" class:accent={tool.name === 'edit_file' || tool.name === 'write_file'}>
             <iconify-icon icon={toolIcon(tool.name)} width="16"></iconify-icon>
@@ -743,7 +743,7 @@
 .tool-head { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .tool-title-row { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .tool-title { font-size: 13px; font-weight: 600; color: var(--text); flex: 0 0 auto; }
-.tool-arg { font-size: 11px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; cursor: text; min-width: 0; }
+.tool-arg { font-size: 11px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .tool-submeta { font-size: 11px; color: var(--text-secondary); }
 .tool-status { margin-left: auto; flex: 0 0 auto; display: flex; align-items: center; }
 .st { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; }
