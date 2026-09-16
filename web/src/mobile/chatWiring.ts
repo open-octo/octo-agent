@@ -61,10 +61,12 @@ function applyHistoryEvent(sid: string, ev: Record<string, any>, showReasoning: 
   } else if (ev.type === 'tool_call') {
     addToolCallToGroup(sid, {
       id: uid('t'), toolId: ev.tool_id ?? '', name: ev.name ?? '', args: ev.args ?? '',
-      summary: ev.summary ?? '', done: false, error: null, result: null, stdout: [], diff: null,
+      // Persisted message timestamp (absent on pre-CreatedAt sessions) — lets
+      // a reloaded transcript show real durations.
+      summary: ev.summary ?? '', startedAt: ev.created_at, done: false, error: null, result: null, stdout: [], diff: null,
     })
   } else if (ev.type === 'tool_result') {
-    updateToolResult(sid, ev.tool_id, ev.result, ev.ui_payload)
+    updateToolResult(sid, ev.tool_id, ev.result, ev.ui_payload, ev.created_at)
   }
 }
 
@@ -178,18 +180,21 @@ export function wireMobileSession(sid: string): () => void {
     chatThinking.update(tt => ({ ...tt, [sid]: '' }))
     addToolCallToGroup(sid, {
       id: uid('t'), toolId: ev.tool_id ?? '', name: ev.name ?? '', args: ev.args ?? '',
-      summary: ev.summary ?? '', startedAt: Date.now(), done: false, error: null, result: null, stdout: [], diff: null,
+      // Prefer the server-stamped start time — a mid-turn resubscribe
+      // redelivers this event from the replay buffer, and stamping "now"
+      // would reset every finished tool's clock to the replay moment.
+      summary: ev.summary ?? '', startedAt: ev.ts ?? Date.now(), done: false, error: null, result: null, stdout: [], diff: null,
     })
   }))
 
   cleanups.push(ws.on('tool_result', (ev: any) => {
     if (!forSid(ev)) return
-    updateToolResult(sid, ev.tool_id, ev.result, ev.ui_payload)
+    updateToolResult(sid, ev.tool_id, ev.result, ev.ui_payload, ev.ts)
   }))
 
   cleanups.push(ws.on('tool_error', (ev: any) => {
     if (!forSid(ev)) return
-    setToolError(sid, ev.tool_id, ev.error ?? 'error')
+    setToolError(sid, ev.tool_id, ev.error ?? 'error', ev.ts)
   }))
 
   cleanups.push(ws.on('tool_stdout', (ev: any) => {

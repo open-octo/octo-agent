@@ -245,22 +245,29 @@ export interface WsEventAssistantMessage {
   thinking: string
 }
 
+// Timing note: live tool events carry a server-stamped `ts` (ms) so a
+// mid-turn replay keeps true start/end times; history-replayed tool events
+// carry `created_at` instead, following the history_user_message convention.
+// Same concept, two names — one per event family.
 export interface WsEventToolCall {
   type: 'tool_call'
   name: string
   args: string
   summary: string
+  ts?: number
 }
 
 export interface WsEventToolResult {
   type: 'tool_result'
   result: string
   ui_payload: any
+  ts?: number
 }
 
 export interface WsEventToolError {
   type: 'tool_error'
   error: string
+  ts?: number
 }
 
 export interface WsEventToolStdout {

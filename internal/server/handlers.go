@@ -614,6 +614,13 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 					if b.UI != nil {
 						ev["ui_payload"] = b.UI
 					}
+					// The bookkeeping message's timestamp approximates when the
+					// tool finished; pairs with the tool_call created_at so a
+					// reloaded transcript can show real durations. Omitted for
+					// pre-CreatedAt session files.
+					if !m.CreatedAt.IsZero() {
+						ev["created_at"] = m.CreatedAt.UnixMilli()
+					}
 					events = append(events, ev)
 				}
 			}
@@ -720,12 +727,20 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 				}
 				for _, b := range m.Blocks {
 					if b.Type == "tool_use" {
-						events = append(events, map[string]any{
+						ev := map[string]any{
 							"type":    "tool_call",
 							"name":    b.Name,
 							"args":    b.Input,
 							"tool_id": b.ID,
-						})
+						}
+						// The assistant round's timestamp approximates when the
+						// tool started; omit it for older sessions whose messages
+						// predate per-message CreatedAt rather than sending the
+						// index fallback (a bogus 1970 timestamp).
+						if !m.CreatedAt.IsZero() {
+							ev["created_at"] = m.CreatedAt.UnixMilli()
+						}
+						events = append(events, ev)
 					}
 				}
 			} else {

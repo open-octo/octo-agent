@@ -401,6 +401,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         name: ev.name ?? '',
         args: ev.args ?? '',
         summary: ev.summary ?? '',
+        // Replayed history carries the persisted message timestamp, so a
+        // reloaded transcript can show real durations; absent on sessions
+        // that predate per-message CreatedAt.
+        startedAt: ev.created_at,
         done: false,
         error: null,
         result: null,
@@ -408,7 +412,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         diff: null,
       })
     } else if (ev.type === 'tool_result') {
-      updateToolResult(sid, ev.tool_id, ev.result, ev.ui_payload)
+      updateToolResult(sid, ev.tool_id, ev.result, ev.ui_payload, ev.created_at)
       observeArtifact(sid, ev.ui_payload, false)   // history replay — silent
     }
   }
@@ -967,7 +971,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         name: (ev as any).name ?? '',
         args: (ev as any).args ?? '',
         summary: (ev as any).summary ?? '',
-        startedAt: Date.now(),
+        // Prefer the server-stamped start time: on a mid-turn resubscribe the
+        // replay buffer redelivers this event, and stamping "now" would reset
+        // every finished tool's clock to the replay moment.
+        startedAt: (ev as any).ts ?? Date.now(),
         done: false,
         error: null,
         result: null,
@@ -978,13 +985,13 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
     cleanups.push(ws.on('tool_result', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      updateToolResult(sid, (ev as any).tool_id, (ev as any).result, (ev as any).ui_payload)
+      updateToolResult(sid, (ev as any).tool_id, (ev as any).result, (ev as any).ui_payload, (ev as any).ts)
       observeArtifact(sid, (ev as any).ui_payload, true)   // live turn — may auto-open
     }))
 
     cleanups.push(ws.on('tool_error', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
-      setToolError(sid, (ev as any).tool_id, (ev as any).error ?? 'error')
+      setToolError(sid, (ev as any).tool_id, (ev as any).error ?? 'error', (ev as any).ts)
     }))
 
     // A text-only model is having an image described for it. "started" shows

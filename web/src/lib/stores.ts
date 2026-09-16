@@ -665,7 +665,7 @@ function pickToolIndex(tools: any[], toolId: string | undefined): number {
   return tools.length - 1
 }
 
-export function updateToolResult(sessionId: string, toolId: string | undefined, result: any, uiPayload: any) {
+export function updateToolResult(sessionId: string, toolId: string | undefined, result: any, uiPayload: any, endedAt?: number) {
   chatMessages.update(m => {
     const msgs = [...(m[sessionId] || [])]
     const lastGroup = msgs.findLastIndex((x: any) => x.type === 'tool_group')
@@ -674,7 +674,10 @@ export function updateToolResult(sessionId: string, toolId: string | undefined, 
       const idx = pickToolIndex(tools, toolId)
       if (idx >= 0) {
         const started = tools[idx].startedAt
-        const elapsed = started ? (Date.now() - started) / 1000 : tools[idx].elapsed
+        // endedAt is the server-stamped event time when present (matching a
+        // server-stamped startedAt); Date.now() only when an older server
+        // sent neither, so both ends stay on one clock.
+        const elapsed = started ? Math.max(0, ((endedAt ?? Date.now()) - started) / 1000) : tools[idx].elapsed
         tools[idx] = { ...tools[idx], result, ui_payload: uiPayload, done: true, elapsed }
       }
       msgs[lastGroup] = { ...msgs[lastGroup], tools }
@@ -713,7 +716,7 @@ export function appendToolStdout(sessionId: string, toolId: string | undefined, 
   })
 }
 
-export function setToolError(sessionId: string, toolId: string | undefined, error: string) {
+export function setToolError(sessionId: string, toolId: string | undefined, error: string, endedAt?: number) {
   chatMessages.update(m => {
     const msgs = [...(m[sessionId] || [])]
     const lastGroup = msgs.findLastIndex((x: any) => x.type === 'tool_group')
@@ -722,7 +725,8 @@ export function setToolError(sessionId: string, toolId: string | undefined, erro
       const idx = pickToolIndex(tools, toolId)
       if (idx >= 0) {
         const started = tools[idx].startedAt
-        const elapsed = started ? (Date.now() - started) / 1000 : tools[idx].elapsed
+        // See updateToolResult: prefer the server-stamped end time.
+        const elapsed = started ? Math.max(0, ((endedAt ?? Date.now()) - started) / 1000) : tools[idx].elapsed
         tools[idx] = { ...tools[idx], error, done: true, elapsed }
       }
       msgs[lastGroup] = { ...msgs[lastGroup], tools }

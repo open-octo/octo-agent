@@ -2005,6 +2005,88 @@ func TestHandleGetSessionMessages_IncludesToolCalls(t *testing.T) {
 	}
 }
 
+// TestHandleGetSessionMessages_ToolEventTimestamps verifies the created_at
+// stamps that let a reloaded transcript show real tool durations: taken from
+// the message's CreatedAt when set, and omitted entirely for pre-CreatedAt
+// session files (rather than reusing the index fallback, which would be a
+// bogus near-1970 timestamp).
+func TestHandleGetSessionMessages_ToolEventTimestamps(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	stampedCall := agent.NewToolUseMessage([]agent.ContentBlock{
+		agent.NewToolUseBlock("call_1", "terminal", map[string]any{"command": "ls"}),
+	})
+	stampedResult := agent.NewToolResultMessage([]agent.ContentBlock{
+		agent.NewToolResultBlock("call_1", "file.txt\n", false),
+	})
+	sess := agent.NewSession("stub-model", "")
+	sess.Messages = []agent.Message{
+		{Role: agent.RoleUser, Content: "list files"},
+		stampedCall,
+		stampedResult,
+		// Pre-CreatedAt shape: literal messages carrying no timestamp.
+		{Role: agent.RoleAssistant, Blocks: []agent.ContentBlock{
+			agent.NewToolUseBlock("call_2", "read_file", map[string]any{"path": "go.mod"}),
+		}},
+		{Role: agent.RoleUser, Blocks: []agent.ContentBlock{
+			agent.NewToolResultBlock("call_2", "module x\n", false),
+		}},
+	}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		Events []map[string]any `json:"events"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+
+	seen := map[string]bool{}
+	for _, ev := range body.Events {
+		typ, _ := ev["type"].(string)
+		id, _ := ev["tool_id"].(string)
+		if typ != "tool_call" && typ != "tool_result" {
+			continue
+		}
+		key := typ + ":" + id
+		seen[key] = true
+		ca, has := ev["created_at"].(float64)
+		switch id {
+		case "call_1":
+			want := stampedCall.CreatedAt.UnixMilli()
+			if typ == "tool_result" {
+				want = stampedResult.CreatedAt.UnixMilli()
+			}
+			if !has || int64(ca) != want {
+				t.Errorf("%s created_at = %v, want %d", key, ev["created_at"], want)
+			}
+		case "call_2":
+			if has {
+				t.Errorf("%s must omit created_at for a zero-CreatedAt message, got %v", key, ca)
+			}
+		}
+	}
+	for _, key := range []string{"tool_call:call_1", "tool_result:call_1", "tool_call:call_2", "tool_result:call_2"} {
+		if !seen[key] {
+			t.Errorf("missing %s event in history replay", key)
+		}
+	}
+}
+
 // History replay must never render <system-reminder> spans (background
 // completion notes, recalled memories) as user bubbles — the TUI skips them
 // and the web transcript must match.

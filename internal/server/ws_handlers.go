@@ -2169,6 +2169,10 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 			"name":       ev.ToolName,
 			"args":       ev.Input,
 			"tool_id":    ev.ToolID,
+			// Server-side start time; the replay buffer resends this map
+			// verbatim, so a mid-turn resubscribe keeps the tool's true start
+			// instead of stamping every replayed call "now".
+			"ts": time.Now().UnixMilli(),
 		}
 		w.hub.broadcast(w.sessionID, evt)
 
@@ -2236,6 +2240,9 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 			"session_id": w.sessionID,
 			"result":     ev.Output,
 			"tool_id":    ev.ToolID,
+			// Pair with the tool_call ts so a replayed result keeps the tool's
+			// true duration rather than "time since the replay arrived".
+			"ts": time.Now().UnixMilli(),
 		}
 		if ev.UI != nil {
 			toolResult["ui_payload"] = ev.UI
@@ -2274,6 +2281,8 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 			"session_id": w.sessionID,
 			"error":      ev.Err,
 			"tool_id":    ev.ToolID,
+			// Same as tool_result: keep the tool's true end time across replay.
+			"ts": time.Now().UnixMilli(),
 		}
 		w.hub.broadcast(w.sessionID, evt)
 		w.bufferTurnEvent(evt)

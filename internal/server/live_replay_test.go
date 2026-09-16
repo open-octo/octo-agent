@@ -132,6 +132,79 @@ func TestReplayLiveState_ReplaysBufferedTurnEvents(t *testing.T) {
 	}
 }
 
+// TestReplayLiveState_ToolEventsKeepServerTimestamps guards the tool-group
+// elapsed fix: the web client derives per-tool start/end from each event's
+// server-stamped ts, so a mid-turn resubscribe must resend the ORIGINAL ts
+// verbatim — re-stamping at replay time would collapse every finished tool's
+// duration to the replay moment.
+func TestReplayLiveState_ToolEventsKeepServerTimestamps(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+	srv.pendingQuestions = map[string]wsEventRequestUserQuestion{}
+	srv.pendingConfirms = map[string]wsEventRequestConfirmation{}
+
+	const sid = "replay-ts-session"
+	defer tools.CloseSessionBackgroundManager(sid)
+
+	seedLiveTurn(srv, sid)
+	sw := srv.newWSStreamWriter(sid)
+
+	sw.handleEvent(agent.AgentEvent{
+		Kind: agent.EventToolStarted, ToolName: "terminal", ToolID: "call_1",
+		Input: map[string]any{"command": "ls"},
+	})
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolDone, ToolID: "call_1", Output: "file.txt"})
+	sw.handleEvent(agent.AgentEvent{
+		Kind: agent.EventToolStarted, ToolName: "read_file", ToolID: "call_2",
+		Input: map[string]any{"path": "go.mod"},
+	})
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventToolError, ToolID: "call_2", Err: "no such file"})
+
+	// Snapshot the buffered timestamps keyed by tool_id — the replay must
+	// resend exactly these.
+	srv.liveStateMu.RLock()
+	buffered := map[string]int64{}
+	for _, ev := range srv.liveStates[sid].events {
+		switch ev["type"] {
+		case "tool_call", "tool_result", "tool_error":
+			ts, ok := ev["ts"].(int64)
+			if !ok || ts <= 0 {
+				t.Errorf("buffered %s lost its ts: %v", ev["type"], ev)
+				continue
+			}
+			id, _ := ev["tool_id"].(string)
+			buffered[ev["type"].(string)+":"+id] = ts
+		}
+	}
+	srv.liveStateMu.RUnlock()
+	if len(buffered) != 4 {
+		t.Fatalf("buffered tool events with ts = %d, want 4", len(buffered))
+	}
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.replayLiveState(sid, conn)
+
+	seen := 0
+	for _, ev := range drainConn(t, conn) {
+		switch ev["type"] {
+		case "tool_call", "tool_result", "tool_error":
+			key := ev["type"].(string) + ":" + ev["tool_id"].(string)
+			ts, ok := ev["ts"].(float64)
+			if !ok {
+				t.Errorf("replayed %s missing ts: %v", key, ev)
+				continue
+			}
+			if want := buffered[key]; int64(ts) != want {
+				t.Errorf("replayed %s ts = %d, buffered = %d", key, int64(ts), want)
+			}
+			seen++
+		}
+	}
+	if seen != 4 {
+		t.Fatalf("replayed tool events = %d, want 4", seen)
+	}
+}
+
 // TestReplayLiveState_NothingAfterTurnPersists checks that once the live
 // state is dropped (doAgentTurn after Save), a subscribing tab gets no
 // buffered transcript events — history is the source from then on, and

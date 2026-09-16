@@ -5,6 +5,7 @@
   import { ws } from '../../lib/ws'
   import * as api from '../../lib/api'
   import { toolOpenState, applyToolToggle, keepOpenAction } from '../../lib/toolFold'
+  import { groupElapsed } from '../../lib/groupElapsed'
   import { sanitizeSpec, READ_ONLY_NODE_TYPES } from '../../lib/genui/guard'
   import GenuiBlock from '../genui/GenuiBlock.svelte'
   import AgentTrail from './AgentTrail.svelte'
@@ -299,13 +300,6 @@
       }
       default: return ''
     }
-  }
-
-  // Group elapsed = sum of per-tool durations (only known for live calls; a
-  // replayed history transcript has no timing so this stays empty there).
-  function groupElapsed(ts: any[]): string {
-    const total = ts.reduce((s, t) => s + (typeof t.elapsed === 'number' ? t.elapsed : 0), 0)
-    return total > 0 ? `${total.toFixed(1)}s` : ''
   }
 
   // web_fetch returns the page body as a normal result even when the target
