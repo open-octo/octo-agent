@@ -770,7 +770,6 @@ func TestRunChat_UnknownResumeID(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
-	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 	var stdout, stderr bytes.Buffer
 	code := runChat([]string{"-c", "no-such-thing"}, strings.NewReader(""), &stdout, &stderr)
 	if code != 2 {
@@ -874,7 +873,6 @@ func TestRunChat_ResumedToolSession_DefaultOnNoWarning(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
-	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 
 	// Seed a session whose history includes a tool_use block (mirrors what
 	// a real tool-enabled session looks like on disk).
@@ -917,7 +915,6 @@ func TestRunChat_ResumedToolSession_NoToolsWarns(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
-	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 
 	sess := agent.NewSession("test-model", "")
 	sess.Messages = []agent.Message{
@@ -956,7 +953,6 @@ func TestRunChat_ResumedPlainSession_NoWarning(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
-	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 
 	sess := agent.NewSession("test-model", "")
 	sess.Messages = []agent.Message{
@@ -1042,5 +1038,63 @@ func TestResolveFallbackContextWindow(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "not a number") {
 		t.Errorf("warning %q does not name the problem", buf.String())
+	}
+}
+
+// TestRunChat_UnconfiguredProvider_DoesNotMaskOtherErrors pins the ordering the
+// removed anthropic fallback used to provide for free. Resolution now fails on
+// a blank install, and that failure is reported where a sender is built — after
+// the checks that can say something more useful. Without the deferral, every
+// one of these would answer "no provider configured" instead.
+func TestRunChat_UnconfiguredProvider_DoesNotMaskOtherErrors(t *testing.T) {
+	// Only the checks that run BEFORE the sender is built can take precedence —
+	// building it is what needs the provider. "no prompt" and session resolution
+	// come after, so on a blank install those still report the provider first,
+	// which is fair: it is the more fundamental thing to fix.
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"unknown agent", []string{"--agent", "nonexistent", "hello"}, "not found"},
+		{"-c with no TTY to pick from", []string{"-c"}, "needs a terminal"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			t.Setenv("HOME", tmp)
+			t.Setenv("USERPROFILE", tmp)
+			// Deliberately unconfigured: no provider named anywhere.
+			t.Setenv("OCTO_PROVIDER", "")
+			t.Setenv("ANTHROPIC_API_KEY", "")
+
+			var stdout, stderr bytes.Buffer
+			runChat(tc.args, strings.NewReader(""), &stdout, &stderr)
+			if got := stderr.String(); !strings.Contains(got, tc.want) {
+				t.Errorf("stderr should mention %q, got: %q", tc.want, got)
+			}
+		})
+	}
+}
+
+// A blank install with no terminal to run the wizard on gets the setup hint,
+// not "unknown provider \"\"".
+func TestRunChat_UnconfiguredProvider_NonTTYHint(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("OCTO_PROVIDER", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	var stdout, stderr bytes.Buffer
+	code := runChat([]string{"hello"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2; stderr=%q", code, stderr.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "no provider configured") {
+		t.Errorf("stderr should point at setup, got: %q", got)
+	}
+	if got := stderr.String(); strings.Contains(got, `unknown provider`) {
+		t.Errorf("a blank install is not a typo'd provider, got: %q", got)
 	}
 }

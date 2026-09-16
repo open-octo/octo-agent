@@ -34,7 +34,7 @@ Then write ` + "`.octorules`" + ` with concise, factual content — short sectio
 func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	providerName := fs.String("provider", "", "Provider: anthropic | openai (default from `octo config`, else anthropic)")
+	providerName := fs.String("provider", "", "Provider: anthropic | openai | … (default from `octo config` or OCTO_PROVIDER)")
 	model := fs.String("model", "", "Model name (defaults to the provider's cheapest reasoning model)")
 	plain := fs.Bool("plain", false, "Render tool events as one-line ↳ status lines instead of rich diff cards")
 	permMode := fs.String("permission-mode", "strict", "Tool permission handling: interactive | strict | auto")

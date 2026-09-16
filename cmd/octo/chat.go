@@ -498,7 +498,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	args = normalizeBareContinue(args)
 	fs := flag.NewFlagSet("octo", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	providerName := fs.String("provider", "", "Provider: anthropic | openai (default from `octo config`, else anthropic)")
+	providerName := fs.String("provider", "", "Provider: anthropic | openai | … (default from `octo config` or OCTO_PROVIDER)")
 	model := fs.String("model", "", "Model name (else ANTHROPIC_MODEL/OPENAI_MODEL env, then `octo config`, then the provider's cheapest reasoning model)")
 	system := fs.String("system", "", "System prompt (optional)")
 	maxTokens := fs.Int("max-tokens", 0, "max_tokens for the response (0 = provider default)")
@@ -744,9 +744,30 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// the config wizard below, the manual export-a-key walkthrough would only
 	// duplicate (and contradict) the wizard — it's shown solely when the
 	// wizard can't run.
+	// No provider anywhere is the blank-install case, and on a terminal that
+	// deserves the same wizard a missing key gets below — printing one line and
+	// leaving is a worse first run than octo used to give. Re-resolve after the
+	// wizard writes config.yml.
 	if providerErr != "" {
-		fmt.Fprintln(stderr, providerErr)
-		return 2
+		if !stdinIsTTY(stdin) {
+			fmt.Fprintln(stderr, providerErr)
+			return 2
+		}
+		fmt.Fprintln(stderr, "No provider configured — let's set up octo first.")
+		fmt.Fprintln(stderr, "")
+		if runConfigWizard(stdin, stdout, stderr, true) != 0 {
+			return 1
+		}
+		cfg, err = config.Load()
+		if err != nil {
+			fmt.Fprintf(stderr, "octo: %v\n", err)
+			return 1
+		}
+		provName, resolvedModel, entry, ok = resolveProviderModel(*providerName, *model, cfg)
+		if !ok {
+			fmt.Fprintln(stderr, providerSetupError(provName))
+			return 2
+		}
 	}
 
 	var senderDiag bytes.Buffer

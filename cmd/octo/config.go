@@ -50,7 +50,10 @@ func resolveProviderModel(flagProvider, flagModel string, cfg config.Config) (pr
 	if e, found := cfg.EntryByModel(flagModel); found {
 		provider = e.Provider
 		model = firstNonEmpty(e.Model, defaultModels[provider])
-		return provider, model, e, model != ""
+		// A hand-edited entry can omit provider entirely; that resolves to
+		// nothing usable, and saying so here gets the setup hint rather than
+		// buildSender's "unknown provider \"\"".
+		return provider, model, e, model != "" && provider != ""
 	}
 
 	entry = cfg.DefaultEntry()

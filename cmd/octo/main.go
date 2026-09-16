@@ -152,7 +152,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  --take-over              When resuming, take over a session bound to another entry")
 	fmt.Fprintln(w, "  --agent <id>             Start the session bound to a specific agent (from ~/.octo/agents)")
 	fmt.Fprintln(w, "  --no-tools               Disable built-in tools (terminal, edit_file, …) + MCP/skills")
-	fmt.Fprintln(w, "  --provider <name>        anthropic (default) | openai")
+	fmt.Fprintln(w, "  --provider <name>        anthropic | openai | … (else `octo config` / OCTO_PROVIDER)")
 	fmt.Fprintln(w, "  --model <name>           Override the default model for the provider")
 	fmt.Fprintln(w, "  --no-save                Don't auto-save the session to ~/.octo/sessions")
 	fmt.Fprintln(w, "  --no-memory              Disable cross-session memory injection")

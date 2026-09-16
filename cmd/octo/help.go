@@ -130,7 +130,7 @@ Examples:
   octo init --sandbox                Confine the analysis to repo + tmp, no network
 
 Common flags:
-  --provider <name>        anthropic (default) | openai
+  --provider <name>        anthropic | openai | … (else octo config / OCTO_PROVIDER)
   --model <name>           Override the default model
   --plain                  Terse ↳ status lines instead of rich diff cards
   --sandbox                OS-enforced command confinement (macOS/Linux)
@@ -156,7 +156,7 @@ Examples:
 
 Common flags:
   --addr <host:port>       Bind address (default :8088)
-  --provider <name>        anthropic (default) | openai
+  --provider <name>        anthropic | openai | … (else octo config / OCTO_PROVIDER)
   --model <name>           Override the default model
   --system <text>          Custom system prompt
   --max-tokens <n>         Per-response token cap

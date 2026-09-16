@@ -155,6 +155,41 @@ not a supported surface: octo is distributed as a binary, and
 - Auto-migration is one-way; where a file is rewritten, the original is
   preserved with a `.bak` suffix when practical.
 
+## Breaking changes
+
+### A key alone no longer selects a vendor (1.17)
+
+Provider resolution used to end in a built-in `anthropic` default, so an
+install that had named no vendor anywhere still called Anthropic — and an
+`ANTHROPIC_API_KEY` exported for some other tool decided that on the user's
+behalf, down to sending their key to a vendor they never chose.
+
+The vendor now comes only from `--provider`, `OCTO_PROVIDER`, or
+`config.yml`. A per-vendor key keeps its meaning — it authenticates to that
+vendor — but it no longer *selects* one, which is the semantic change: it
+says which vendors you can reach, never which you meant.
+
+Affects installs configured purely through the environment, including the
+`serve.env` shape the [self-host guide](https://octo-agent.dev/docs/guides/self-host/)
+and `packaging/systemd/octo.service` used to show:
+
+```bash
+# before
+ANTHROPIC_API_KEY=sk-ant-…
+# after
+OCTO_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-…
+```
+
+Anything passing `--provider`, or with a `config.yml` written by
+`octo config` or the web setup, is unaffected. An install that names no
+vendor is treated as unconfigured: `octo serve` starts and asks for setup,
+`octo` on a terminal opens the setup wizard.
+
+This lands in a minor rather than a major, which the tiers above otherwise
+reserve for it — a deliberate exception, made because the old behaviour
+could send a user's key to a vendor they had not chosen.
+
 ## Reporting
 
 A Stable surface that broke without a major version, or without a

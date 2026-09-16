@@ -190,7 +190,6 @@ func TestRunConfig_Wizard_WritesFile(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("ANTHROPIC_API_KEY", "set-so-wizard-skips-key-prompt")
-	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 
 	// Answers: provider=openai, model=(default). openai is pinned to its
 	// default endpoint, so the wizard no longer asks for a base URL.
@@ -226,7 +225,6 @@ func TestRunConfig_Wizard_PreservesOtherEntriesAndGlobals(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("ANTHROPIC_API_KEY", "set-so-wizard-skips-key-prompt")
-	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 
 	seed := config.Config{
 		Endpoints: []config.Endpoint{
@@ -301,7 +299,6 @@ func TestRunConfig_Wizard_PreservesHandEditedEndpointFields(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("ANTHROPIC_API_KEY", "set-so-wizard-skips-key-prompt")
-	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 
 	seed := config.Config{
 		Endpoints: []config.Endpoint{
@@ -353,7 +350,6 @@ func TestRunConfig_Show_ReportsSourcesNotKey(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("ANTHROPIC_API_KEY", "secret-value-should-not-print")
-	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 
 	if err := oneEntryConfig(config.ModelEntry{Provider: "anthropic", Model: "m1"}).Save(); err != nil {
 		t.Fatal(err)
@@ -384,7 +380,6 @@ func TestRunConfig_Wizard_SwitchesProviderAndPromptsForKey(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 	t.Setenv("OPENAI_API_KEY", "")
 
 	// Start with an anthropic config that has a stored key.
@@ -425,7 +420,6 @@ func TestRunConfig_Wizard_AddModel_DeclineKeepsDefault(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 	t.Setenv("OPENAI_API_KEY", "")
 
 	// Seed an anthropic default with a stored key.
@@ -472,7 +466,6 @@ func TestRunConfigWizard_FirstRun_MinimalAndKeyDirect(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 	t.Setenv("OPENAI_API_KEY", "")
 
 	// Answers: provider=openai, model=(default), key=sk-first-run. That's all a

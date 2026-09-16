@@ -72,7 +72,7 @@ func TestDetectOnboardPhase_CustomKeylessIsConfigured(t *testing.T) {
 		},
 		Default: "ollama::qwen3-coder:30b",
 	})
-	if got := detectOnboardPhase(); got == "key_setup" {
+	if got := detectOnboardPhase(""); got == "key_setup" {
 		t.Fatalf("detectOnboardPhase = %q; a keyless custom endpoint has no key to set up", got)
 	}
 }

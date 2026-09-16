@@ -34,7 +34,7 @@ Frequently-used flags: `-c`/`--continue [id]` (resume), `--provider anthropic|op
 
 | Variable | Purpose |
 |----------|---------|
-| `OCTO_PROVIDER` | Default provider (`anthropic`\|`openai`\|`custom`) |
+| `OCTO_PROVIDER` | Which vendor to use (`anthropic`\|`openai`\|`deepseek`\|…). Required when config.yml names none — octo never picks one from a key alone |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Required for the chosen provider |
 | `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` | Override the endpoint |
 | `ANTHROPIC_MODEL` / `OPENAI_MODEL` | Default model override |
