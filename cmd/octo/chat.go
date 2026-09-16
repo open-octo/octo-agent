@@ -283,41 +283,28 @@ func resolveMaxTokensEscalate(flagVal int, provName string) int {
 }
 
 // resolveFallbackContextWindow picks the window assumed for models the built-in
-// table doesn't know: an explicit flag wins, then OCTO_FALLBACK_CONTEXT_WINDOW,
-// then config.yml. 0 at every layer leaves agent's built-in default in place.
+// table doesn't know: an explicit flag wins, then whatever
+// Config.EffectiveFallbackContextWindow resolves from the environment and the
+// config file. 0 at every layer leaves agent's built-in default in place.
 //
-// A value below config.MinFallbackContextWindow is the unit mistake (32 for
-// 32k) and is ignored rather than honored — honoring it would drive the
-// compaction trigger below a single message. config.Validate reports the same
-// thing for the config-file layer; this guards the flag and env layers, which
-// never pass through Validate.
+// Only the flag layer lives here. The env and file layers belong to config so
+// `octo serve` — a separate subcommand that never reaches this function —
+// resolves them the same way.
 func resolveFallbackContextWindow(flagVal int, cfg config.Config, stderr io.Writer) int {
-	pick := func(n int, src string) (int, bool) {
-		if n <= 0 {
-			return 0, false
-		}
-		if n < config.MinFallbackContextWindow {
-			fmt.Fprintf(stderr, "octo: ignoring %s %d — the value is in tokens, so 32k is 32000, not 32\n", src, n)
-			return 0, false
-		}
-		return n, true
+	switch {
+	case flagVal < 0:
+		fmt.Fprintf(stderr, "octo: ignoring --fallback-context-window %d — negative\n", flagVal)
+	case flagVal == 0: // unset; fall through to env + config
+	case flagVal < config.MinFallbackContextWindow:
+		fmt.Fprintf(stderr, "octo: ignoring --fallback-context-window %d — the value is in tokens, so 32k is 32000, not 32\n", flagVal)
+	default:
+		return flagVal
 	}
-	if n, ok := pick(flagVal, "--fallback-context-window"); ok {
-		return n
+	n, problems := cfg.EffectiveFallbackContextWindow()
+	for _, p := range problems {
+		fmt.Fprintf(stderr, "octo: %s\n", p)
 	}
-	if env := strings.TrimSpace(os.Getenv("OCTO_FALLBACK_CONTEXT_WINDOW")); env != "" {
-		if n, err := strconv.Atoi(env); err == nil {
-			if n, ok := pick(n, "OCTO_FALLBACK_CONTEXT_WINDOW"); ok {
-				return n
-			}
-		} else {
-			fmt.Fprintf(stderr, "octo: ignoring OCTO_FALLBACK_CONTEXT_WINDOW %q — not a number\n", env)
-		}
-	}
-	if n, ok := pick(cfg.FallbackContextWindow, "fallback_context_window"); ok {
-		return n
-	}
-	return 0
+	return n
 }
 
 // openMCPLogFile opens ~/.octo/logs/mcp.log (append) to receive stdio MCP
@@ -535,7 +522,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	maxTurns := fs.Int("max-turns", 0, "Max provider round-trips per message in the agentic loop (0 = auto: 1000 interactive, unlimited unattended/--prompt-file)")
 	compactThreshold := fs.Int("compact-threshold", 0, "Compact older history once a turn's input crosses this many tokens; 0 = auto (percentage of the model's context window, settable via --compact-auto-pct or config), <0 = disabled")
 	compactAutoPct := fs.Int("compact-auto-pct", 0, "Auto-compaction threshold as a percentage of the model's context window (0 = use `octo config` or built-in default 75). Only used when --compact-threshold=0.")
-	fallbackContextWindow := fs.Int("fallback-context-window", 0, "Context window in tokens to assume for a model whose name matches no built-in entry — a self-hosted or renamed model (0 = use `octo config`, OCTO_FALLBACK_CONTEXT_WINDOW, else the built-in 128000). Never overrides a model the built-in table knows.")
+	fallbackContextWindow := fs.Int("fallback-context-window", 0, "Context window in tokens to assume for a model whose name matches no built-in entry — a self-hosted or renamed model (0 = use OCTO_FALLBACK_CONTEXT_WINDOW, then `octo config`, else the built-in 128000). Never overrides a model the built-in table knows.")
 	reasoningEffort := fs.String("reasoning-effort", "", "Reasoning intensity: off | low | medium | high | xhigh | max (empty = use `octo config`/default; 'off' forces it off for this run). OpenAI → reasoning_effort; Anthropic → adaptive thinking + effort.")
 	showReasoning := fs.Bool("show-reasoning", false, "Surface the reasoning/thinking trace for the Web UI (octo serve) to display. The terminal never renders it. Default off; also from `octo config`.")
 	useSandbox := fs.Bool("sandbox", false, "Confine terminal commands to the project dir + tmp with no network (OS-enforced; macOS/Linux). Fails closed if unavailable.")
