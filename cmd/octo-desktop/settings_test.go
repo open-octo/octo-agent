@@ -2,7 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // TestDesktopSettings_WindowGeometryRoundTrip guards the on-disk contract for
@@ -38,5 +41,31 @@ func TestDefaultDesktopSettings_NoGeometry(t *testing.T) {
 	s := defaultDesktopSettings()
 	if s.WindowWidth != 0 || s.WindowHeight != 0 || s.WindowMaximised {
 		t.Errorf("defaults should carry no saved geometry, got %+v", s)
+	}
+}
+
+func TestDesktopSettingsPathUsesProfileDataHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	for _, tc := range []struct {
+		name    string
+		profile string
+		root    string
+	}{
+		{"default profile", "", ".octo"},
+		{"work profile", "work", ".octo-work"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(datahome.ProfileEnv, tc.profile)
+			got, err := desktopSettingsPath()
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := filepath.Join(home, tc.root, "desktop.json")
+			if got != want {
+				t.Errorf("desktop settings path = %q, want %q", got, want)
+			}
+		})
 	}
 }

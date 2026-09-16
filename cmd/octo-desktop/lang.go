@@ -142,7 +142,7 @@ func L() *uiStrings {
 
 // applyLang re-resolves the UI language and swaps the active string set. Called
 // at startup and on each tray tick, so switching language in onboarding or
-// Settings (which writes ~/.octo/config.yml) is reflected in the tray/dialogs
+// Settings (which writes profile-scoped config.yml) is reflected in the tray/dialogs
 // within a few seconds — the desktop shell follows the in-app language choice,
 // not the OS.
 func applyLang() {

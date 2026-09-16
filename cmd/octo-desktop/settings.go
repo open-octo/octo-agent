@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // desktopSettings holds the desktop app's per-machine preferences — the ones
-// the server itself has no opinion about. Persisted to ~/.octo/desktop.json so
-// they survive a relaunch.
+// the server itself has no opinion about. Persisted to the profile-scoped Octo
+// data root's desktop.json so they survive a relaunch.
 type desktopSettings struct {
 	// window is closed, hiding to the tray instead of quitting. Default true —
 	// closing the window shouldn't drop a VS Code / phone client's backend.
@@ -35,18 +37,17 @@ func defaultDesktopSettings() desktopSettings {
 }
 
 func desktopSettingsPath() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := datahome.Dir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, ".octo")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, "desktop.json"), nil
 }
 
-// loadDesktopSettings reads ~/.octo/desktop.json, falling back to defaults for
+// loadDesktopSettings reads the profile-scoped desktop.json, falling back to defaults for
 // a missing or unreadable file (a fresh install, or a hand-corrupted one — the
 // defaults are safe either way).
 func loadDesktopSettings() desktopSettings {
@@ -63,7 +64,7 @@ func loadDesktopSettings() desktopSettings {
 	return s
 }
 
-// saveDesktopSettings writes the settings back to ~/.octo/desktop.json.
+// saveDesktopSettings writes the settings back to the profile-scoped desktop.json.
 func saveDesktopSettings(s desktopSettings) error {
 	path, err := desktopSettingsPath()
 	if err != nil {

@@ -129,6 +129,24 @@ describe('VersionBadge re-check', () => {
   })
 })
 
+describe('VersionBadge profile badge', () => {
+  it('renders the named profile', async () => {
+    await render({ profile: 'work' })
+
+    const badge = target.querySelector('.vb-profile') as HTMLElement
+    expect(badge).toBeTruthy()
+    expect(badge.textContent).toBe('work')
+    expect(badge.getAttribute('title')).toBe('Profile: work')
+    expect(badge.getAttribute('aria-label')).toBe('Profile: work')
+  })
+
+  it('omits the profile badge by default', async () => {
+    await render()
+
+    expect(target.querySelector('.vb-profile')).toBe(null)
+  })
+})
+
 describe('VersionBadge popover dismissal', () => {
   it('opens on the badge and closes on a click anywhere outside', async () => {
     const badge = await render()

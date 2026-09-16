@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"github.com/open-octo/octo-agent/internal/upgrade"
 	"github.com/open-octo/octo-agent/internal/version"
 )
@@ -54,7 +56,7 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"version":      version.Version,
 		"current":      current,
 		"latest":       latest,
@@ -91,7 +93,11 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		// instead of only the download link. Remote peers still get the link —
 		// the native route refuses them regardless.
 		"self_update": s.cfg.Native != nil && s.cfg.Native.CanSelfUpdate(),
-	})
+	}
+	if profile := strings.TrimSpace(os.Getenv(datahome.ProfileEnv)); profile != "" {
+		response["profile"] = profile
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // upgradeMode reports how this server updates: "installer" for the desktop

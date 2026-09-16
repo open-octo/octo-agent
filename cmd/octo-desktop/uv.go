@@ -6,28 +6,26 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
-// ensureBundledUv copies the uv binary shipped with the app into ~/.octo/bin on
-// first launch, so skills that need Python work out of the box even for a
-// standalone download that never went through the installer. uv is agent-level
-// infrastructure the toolchain looks for on PATH or in ~/.octo/bin
-// (internal/tools/toolchain.go); this just seeds that fallback. Best-effort and
-// idempotent: a no-op once uv is present, or if no bundled copy is found.
+// ensureBundledUv copies the uv binary shipped with the app into the
+// profile-scoped Octo data root's bin directory on first launch, so skills that
+// need Python work out of the box even for a standalone download that never went
+// through the installer. uv is agent-level infrastructure the toolchain looks
+// for on PATH or in that directory (internal/tools/toolchain.go); this just
+// seeds that fallback. Best-effort and idempotent: a no-op once uv is present,
+// or if no bundled copy is found.
 func ensureBundledUv() {
-	home, err := os.UserHomeDir()
+	target, err := bundledUvTarget()
 	if err != nil {
 		return
 	}
-	name := "uv"
-	if runtime.GOOS == "windows" {
-		name = "uv.exe"
-	}
-	target := filepath.Join(home, ".octo", "bin", name)
 	if _, err := os.Stat(target); err == nil {
 		return // already seeded (by us or the installer)
 	}
-	src := bundledBinaryPath(name)
+	src := bundledBinaryPath(filepath.Base(target))
 	if src == "" {
 		return // this build doesn't ship uv
 	}
@@ -35,6 +33,15 @@ func ensureBundledUv() {
 		return
 	}
 	_ = copyExecutable(src, target)
+}
+
+// bundledUvTarget returns the profile-scoped destination for the bundled uv binary.
+func bundledUvTarget() (string, error) {
+	name := "uv"
+	if runtime.GOOS == "windows" {
+		name = "uv.exe"
+	}
+	return datahome.Path("bin", name)
 }
 
 // bundledBinaryPath locates a binary shipped alongside the app (uv, or the octo

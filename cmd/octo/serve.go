@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"github.com/open-octo/octo-agent/internal/server"
 )
 
@@ -148,6 +149,14 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		host = "localhost" + host
 	}
 	fmt.Fprintf(stdout, "octo server listening on http://%s\n", host)
+	if profile := strings.TrimSpace(os.Getenv(datahome.ProfileEnv)); profile != "" {
+		fmt.Fprintf(stdout, "profile: %s\n", profile)
+	}
+	if dir, err := datahome.Dir(); err != nil {
+		fmt.Fprintf(stderr, "octo serve: warning: data directory: %v\n", err)
+	} else {
+		fmt.Fprintf(stdout, "data directory: %s\n", dir)
+	}
 	if !bindIsLoopback(*addr) {
 		// Exposed bind: non-loopback clients must present the access key.
 		// The bootstrap URL is the distribution channel — the web UI adopts

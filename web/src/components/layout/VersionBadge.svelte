@@ -23,6 +23,7 @@
   let latest = $state('')
   let needsUpdate = $state(false)
   let cliCommand = $state('octo')
+  let profile = $state('')
   // upgradeMode is 'cli' (octo serve — the in-place swap below is valid) or
   // 'installer' (desktop build — a swap would clobber the running binary, so we
   // link to the download page instead). downloadUrl is that download page.
@@ -69,6 +70,7 @@
       }
       current = d.current ?? (d.version ?? '').replace(/^v/, '')
       if (d.cli_command) cliCommand = d.cli_command
+      profile = d.profile ?? ''
       upgradeMode = d.upgrade_mode === 'installer' ? 'installer' : 'cli'
       downloadUrl = d.download_url ?? ''
       selfUpdateAvail = d.self_update === true
@@ -250,6 +252,9 @@
         : $t('upgrade.tooltip.ok')}
     >
       <span class="vb-text">{versionLabel}</span>
+      {#if profile}
+        <span class="vb-profile" title={`Profile: ${profile}`} aria-label={`Profile: ${profile}`}>{profile}</span>
+      {/if}
       {#if phase === 'upgrading'}
         <span class="vb-dot upgrading"></span>
       {:else if phase === 'needs_restart'}
@@ -273,6 +278,10 @@
 }
 .vb-badge:hover { color: var(--text-secondary); background: var(--hover-neutral); }
 .vb-text { font-variant-numeric: tabular-nums; }
+.vb-profile {
+  padding: 1px 4px; border: 1px solid var(--border); border-radius: 3px;
+  color: var(--text-secondary); font-size: 10px; line-height: 1.2;
+}
 .vb-dot {
   width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
 }

@@ -17,6 +17,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"github.com/open-octo/octo-agent/internal/skills"
 	"github.com/open-octo/octo-agent/internal/tools"
 	"github.com/open-octo/octo-agent/internal/upgrade"
@@ -1511,6 +1512,43 @@ func TestHandleVersion_NoUpdateCheck(t *testing.T) {
 	}
 	if runtime.GOOS != "darwin" && v != "" {
 		t.Errorf("os_version = %q on %s, want empty", v, runtime.GOOS)
+	}
+}
+
+func TestHandleVersion_ProfileContract(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		profile     string
+		wantPresent bool
+	}{
+		{name: "named profile", profile: "work", wantPresent: true},
+		{name: "default profile", profile: "", wantPresent: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			t.Setenv("HOME", tmp)
+			t.Setenv("USERPROFILE", tmp)
+			t.Setenv(datahome.ProfileEnv, tt.profile)
+
+			srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+			req := httptest.NewRequest(http.MethodGet, "/api/version", nil)
+			w := httptest.NewRecorder()
+			serveLoopback(srv.mux, w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", w.Code)
+			}
+			var body map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			profile, present := body["profile"]
+			if present != tt.wantPresent {
+				t.Fatalf("profile present = %v, want %v; body=%v", present, tt.wantPresent, body)
+			}
+			if tt.wantPresent && profile != tt.profile {
+				t.Errorf("profile = %v, want %q", profile, tt.profile)
+			}
+		})
 	}
 }
 

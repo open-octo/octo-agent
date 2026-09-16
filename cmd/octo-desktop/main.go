@@ -7,8 +7,8 @@
 // browser can't reach — OS folder dialog, tray, launch-at-login, notifications —
 // wired in through server.NativeBridge.
 //
-// Only one backend owns the port at a time: the app joins the ~/.octo/serve.pid
-// protocol (internal/serveproc) that `octo serve -d` uses, offering to take over
+// Only one backend owns the port at a time: the app joins the profile-scoped
+// serve.pid protocol (internal/serveproc) that `octo serve -d` uses, offering to take over
 // a running daemon rather than fighting for the port.
 //
 // See dev-docs/desktop-hub-design.md and dev-docs/wails-desktop-design.md.
@@ -31,6 +31,7 @@ import (
 
 	"github.com/mattn/go-isatty"
 	"github.com/open-octo/octo-agent/internal/crashlog"
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"github.com/open-octo/octo-agent/internal/logfile"
 	"github.com/open-octo/octo-agent/internal/serveenv"
 	"github.com/open-octo/octo-agent/internal/serveproc"
@@ -131,6 +132,11 @@ func ensureValidTempDir() {
 }
 
 func main() {
+	if _, err := datahome.ConfigureFromArgs(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "octo-desktop: invalid --profile: %v\n", err)
+		os.Exit(2)
+	}
+
 	// macOS's postinstall script launches the app with `open` from inside
 	// installd's ephemeral PKInstallSandbox.*; the launched process can inherit
 	// that sandbox's $TMPDIR. The desktop app then runs for days as a tray
@@ -140,7 +146,7 @@ func main() {
 	// the updater helper below) can use it.
 	ensureValidTempDir()
 
-	// Point stderr at ~/.octo/crash.log before anything that can die runs. This
+	// Point stderr at the profile-scoped crash.log before anything that can die runs. This
 	// process has no usable stderr of its own (Windows: built with -H windowsgui,
 	// so no console; macOS: launched from Finder), and the runtime writes panic
 	// traces straight to the descriptor — below the slog/log redirection
@@ -169,7 +175,7 @@ func main() {
 	// shell's before server.New below, mirroring the `octo serve` binary.
 	shellpath.SyncToLoginShell()
 
-	// Load ~/.octo/serve.env for variables a GUI launch can't inherit from a
+	// Load the profile-scoped serve.env for variables a GUI launch can't inherit from a
 	// login shell (e.g. TAVILY_API_KEY, provider keys). Best-effort — missing
 	// file is a no-op, explicit env always wins. Mirrors the `octo serve` CLI
 	// path so both backends resolve the same set of environment variables.
@@ -182,7 +188,7 @@ func main() {
 
 	settings := loadDesktopSettings()
 
-	// Seed ~/.octo/bin/uv from the app's bundled copy on first run so skills
+	// Seed the profile-scoped bin/uv from the app's bundled copy on first run so skills
 	// that need Python work even for a standalone download (no installer).
 	ensureBundledUv()
 
@@ -369,7 +375,7 @@ func main() {
 	}
 }
 
-// setupCrashLog redirects the process's stderr to ~/.octo/crash.log so a panic
+// setupCrashLog redirects the process's stderr to the profile-scoped crash.log so a panic
 // that kills the app leaves a trace behind. Best-effort: if it fails there is
 // nowhere to report that failure to (that being the whole problem), so the app
 // starts anyway.
@@ -391,7 +397,7 @@ func setupCrashLog() {
 }
 
 // setupHubLog routes slog and the stdlib logger to a self-rotating
-// ~/.octo/serve.log and returns a close func (nil if setup failed, leaving the
+// profile-scoped serve.log and returns a close func (nil if setup failed, leaving the
 // default stderr in place). The stdlib logger is redirected too so the channel
 // adapters' error/retry lines — still on `log` — land in the same file.
 func setupHubLog() func() {
@@ -460,7 +466,7 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 	}
 
 	// Only now, having taken over any prior daemon and bound the port, are we the
-	// sole backend — so it's safe to open the shared ~/.octo/serve.log. A prior
+	// sole backend — so it's safe to open the shared profile-scoped serve.log. A prior
 	// `octo serve -d` that was stopped above has since exited (listenHub only
 	// succeeds once the port is free), releasing the fd it held on the file;
 	// opening/rotating earlier (e.g. in main, before the takeover) could rotate a
