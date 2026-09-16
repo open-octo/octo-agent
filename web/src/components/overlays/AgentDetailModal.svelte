@@ -166,7 +166,7 @@ h4 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--text-terti
 .modal-footer { padding: 14px 20px; border-top: 1px solid var(--border-table); }
 .btn-summon {
   width: 100%; height: 38px; border: none; background: var(--blue-6);
-  border-radius: 8px; font-size: 14px; font-weight: 600; color: #fff; cursor: pointer;
+  border-radius: 8px; font-size: 14px; font-weight: 600; color: var(--on-accent); cursor: pointer;
   font-family: inherit;
 }
 .btn-summon:hover { background: var(--blue-5); }

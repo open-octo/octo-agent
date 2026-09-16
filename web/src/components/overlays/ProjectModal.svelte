@@ -168,6 +168,6 @@
   padding: 7px 16px; border-radius: 10px; font-size: 13px; cursor: pointer;
   background: var(--bg-container); border: 1px solid var(--border-secondary); color: var(--text);
 }
-.btn.primary { background: var(--blue-6); border-color: var(--blue-6); color: #fff; }
+.btn.primary { background: var(--blue-6); border-color: var(--blue-6); color: var(--on-accent); }
 .btn:disabled { opacity: 0.5; cursor: default; }
 </style>

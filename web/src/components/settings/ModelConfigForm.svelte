@@ -355,7 +355,7 @@
 .actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .btn-primary {
   height: 34px; padding: 0 16px; border: none; background: var(--blue-6); border-radius: 6px;
-  font-size: 14px; color: #fff; cursor: pointer; font-family: inherit;
+  font-size: 14px; color: var(--on-accent); cursor: pointer; font-family: inherit;
 }
 .btn-primary:hover:not(:disabled) { background: var(--blue-5); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }

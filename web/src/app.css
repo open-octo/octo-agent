@@ -215,6 +215,14 @@
   --blue-6: #FF6FA5;
   --blue-7: #E85990;
 
+  /* Text and icons ON an accent fill. White reaches only 2.6:1 over this rose
+     — a pack whose accent is lighter than azure's blue has to darken the
+     foreground instead of the fill, or the accent stops being the accent.
+     Deep berry, 4.98:1 light / 5.33:1 dark. Set in the light block only: the
+     default dark block does not touch --on-accent, so this carries into dark
+     mode on its own. */
+  --on-accent: #5C1730;
+
   --text: #3D2B33;
   --text-secondary: #8A7078;
   --text-tertiary: #B09AA2;
@@ -318,6 +326,9 @@
   --blue-6: #2BB3FF;
   --blue-7: #0E8FDD;
 
+  /* White reaches only 2.3:1 over this sky blue. Deep ocean, 5.07:1 / 5.44:1. */
+  --on-accent: #0B3A5C;
+
   --text: #172233;
   --text-secondary: #5B7591;
   --text-tertiary: #8FA8C0;
@@ -412,6 +423,10 @@
   --blue-5: #B08F4E;
   --blue-6: #C0A062;
   --blue-7: #9A7C3F;
+
+  /* The worst case of the three: white on champagne gold is 1.9:1 in dark
+     mode, which is roughly illegible. Dark bronze, 5.36:1 / 6.94:1. */
+  --on-accent: #3A2E0C;
 
   --text: #17171A;
   --text-secondary: #737378;

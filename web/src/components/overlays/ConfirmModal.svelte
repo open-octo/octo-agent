@@ -233,7 +233,7 @@
   border: none; background: var(--blue-6);
   border-radius: 6px;
   display: flex; align-items: center; gap: 6px;
-  font-size: 13px; color: #fff;
+  font-size: 13px; color: var(--on-accent);
   cursor: pointer; font-family: inherit;
 }
 .btn-primary:hover { background: var(--blue-5); }

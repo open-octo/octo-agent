@@ -10,14 +10,17 @@
   }
 </script>
 
-<div class="packs" role="radiogroup" aria-label={$t('settings.pack')}>
+<!-- Plain buttons with aria-pressed rather than a radiogroup. role="radio"
+     promises assistive tech arrow-key navigation and a single tab stop, which
+     these do not implement, and it also erases the button's own role. The
+     neighbouring Segment control is likewise a plain row of buttons, so this
+     keeps the two consistent while still announcing which pack is active. -->
+<div class="packs" aria-label={$t('settings.pack')}>
   {#each PACKS as pack}
     <button
       class="pack"
       class:active={selected === pack.id}
-      role="radio"
-      aria-checked={selected === pack.id}
-      title={$t(pack.labelKey)}
+      aria-pressed={selected === pack.id}
       onclick={() => pick(pack.id)}
     >
       <span
@@ -30,19 +33,20 @@
 </div>
 
 <style>
-/* A fixed 2x2 grid rather than a wrapping row: the settings rows leave the
-   control about 280px, which fits three pills and drops the fourth onto a
-   ragged second line. Two even columns read as one block at any width. */
+/* One unbroken row. The pills are sized down enough that even the longer
+   English names fit; `nowrap` then keeps them on one line and lets the
+   description beside them take the extra lines instead, which is the better
+   place to spend the height. */
 .packs {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 5px;
   flex: 0 0 auto;
 }
 
 .pack {
-  display: flex; align-items: center; gap: 7px;
-  padding: 5px 11px 5px 6px;
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 9px 4px 4px;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   background: var(--bg-container);
@@ -60,9 +64,9 @@
 }
 
 /* Accent over surface, split on the diagonal — enough of each pack's palette
-   to tell them apart at 18px without applying one to find out. */
+   to tell them apart at this size without applying one to find out. */
 .swatch {
-  width: 18px; height: 18px; flex: 0 0 auto;
+  width: 16px; height: 16px; flex: 0 0 auto;
   border-radius: 50%;
   border: 1px solid var(--border);
   background: linear-gradient(135deg, var(--sw-accent) 0 50%, var(--sw-surface) 50% 100%);

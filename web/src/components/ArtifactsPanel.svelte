@@ -815,7 +815,7 @@ iframe { border: 0; width: 100%; height: 100%; display: block; }
 .la-update span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .la-update button {
   flex: 0 0 auto; height: 24px; padding: 0 10px; border: none; border-radius: 999px;
-  background: var(--blue-6); color: #fff; font: inherit; font-weight: 500; cursor: pointer;
+  background: var(--blue-6); color: var(--on-accent); font: inherit; font-weight: 500; cursor: pointer;
 }
 .la-update button:disabled { opacity: 0.5; cursor: default; }
 

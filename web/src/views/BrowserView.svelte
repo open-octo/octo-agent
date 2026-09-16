@@ -225,7 +225,7 @@
   .ghost-btn.danger { color: var(--error); }
   .ghost-btn.danger:hover { background: var(--error-bg); border-color: var(--error-border); }
   .rec-head-actions { display: flex; align-items: center; gap: 8px; }
-  .primary-btn { display: inline-flex; align-items: center; gap: 5px; background: var(--blue-6); color: #fff; border: none; border-radius: 8px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 1px 2px rgba(0,122,255,0.35); }
+  .primary-btn { display: inline-flex; align-items: center; gap: 5px; background: var(--blue-6); color: var(--on-accent); border: none; border-radius: 8px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 1px 2px rgba(0,122,255,0.35); }
   .primary-btn:hover:not(:disabled) { background: var(--blue-5); }
   .primary-btn:disabled { opacity: 0.6; cursor: default; }
   .modal-overlay {

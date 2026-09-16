@@ -245,7 +245,7 @@ p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 6
 /* ── buttons ─────────────────────────────────────────────────────────────────── */
 .btn-primary {
   height: 32px; padding: 0 14px; border: none; background: var(--blue-6);
-  border-radius: 8px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer;
+  border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--on-accent); cursor: pointer;
   font-family: inherit; display: inline-flex; align-items: center; gap: 6px;
   box-shadow: 0 1px 2px rgba(0,122,255,0.35);
 }

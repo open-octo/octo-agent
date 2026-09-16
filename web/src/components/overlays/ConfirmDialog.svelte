@@ -87,7 +87,7 @@
 .btn-primary {
   height: 32px; padding: 0 16px;
   border: none; background: var(--blue-6);
-  border-radius: 6px; font-size: 13px; color: #fff;
+  border-radius: 6px; font-size: 13px; color: var(--on-accent);
   cursor: pointer; font-family: inherit;
 }
 .btn-primary:hover { background: var(--blue-5); }

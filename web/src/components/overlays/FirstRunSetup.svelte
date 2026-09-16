@@ -159,7 +159,7 @@
 .brand { display: flex; align-items: center; gap: 14px; }
 .logo {
   width: 44px; height: 44px; flex: 0 0 44px; border-radius: 12px;
-  background: var(--blue-6); color: #fff; display: flex; align-items: center; justify-content: center;
+  background: var(--blue-6); color: var(--on-accent); display: flex; align-items: center; justify-content: center;
   overflow: hidden;
 }
 .brand-text h1 { margin: 0; font-size: 20px; font-weight: 600; color: var(--text-heading); }
@@ -169,7 +169,7 @@
   font-size: 12px; color: var(--text-secondary); padding: 3px 11px;
   border-radius: 999px; background: var(--hover-neutral); white-space: nowrap;
 }
-.ostep.on { background: var(--blue-6); color: #fff; font-weight: 600; }
+.ostep.on { background: var(--blue-6); color: var(--on-accent); font-weight: 600; }
 .ostep.done { background: var(--success-bg); color: var(--success-text); }
 .step-sep { flex: 1; height: 1px; background: var(--border); max-width: 60px; }
 .prompt { margin: 0; font-size: 14px; font-weight: 500; color: var(--text); }
@@ -187,7 +187,7 @@
 .actions { display: flex; justify-content: flex-end; }
 .btn-primary {
   height: 36px; padding: 0 18px; border: none; background: var(--blue-6); border-radius: 8px;
-  font-size: 14px; font-weight: 600; color: #fff; cursor: pointer; font-family: inherit;
+  font-size: 14px; font-weight: 600; color: var(--on-accent); cursor: pointer; font-family: inherit;
   box-shadow: 0 1px 2px rgba(0,122,255,0.35);
 }
 .btn-primary:hover { background: var(--blue-5); }

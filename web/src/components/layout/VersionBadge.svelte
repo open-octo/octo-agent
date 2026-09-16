@@ -291,7 +291,7 @@
 .vb-actions { display: flex; gap: 8px; }
 .vb-btn-primary {
   height: 30px; padding: 0 14px; border: none; background: var(--blue-6);
-  border-radius: 6px; font-size: 12px; color: #fff; cursor: pointer; font-family: inherit;
+  border-radius: 6px; font-size: 12px; color: var(--on-accent); cursor: pointer; font-family: inherit;
 }
 .vb-btn-primary:hover { background: var(--blue-5); }
 .vb-btn-cancel {

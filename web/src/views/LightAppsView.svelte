@@ -143,7 +143,7 @@ h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; colo
 p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 60ch; }
 .btn-primary {
   height: 32px; padding: 0 14px; border: none; border-radius: 8px;
-  background: var(--blue-6); color: #fff; font-size: 13px; font-weight: 600;
+  background: var(--blue-6); color: var(--on-accent); font-size: 13px; font-weight: 600;
   display: flex; align-items: center; gap: 6px;
   cursor: pointer; font-family: inherit; flex-shrink: 0;
   box-shadow: 0 1px 2px rgba(0,122,255,0.35);

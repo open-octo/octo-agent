@@ -1460,6 +1460,6 @@
 }
 .rail-btn:hover { background: var(--hover-neutral); }
 .rail-btn.active { background: var(--active-blue-bg); color: var(--blue-6); }
-.rail-btn.primary { background: var(--blue-6); color: #fff; }
+.rail-btn.primary { background: var(--blue-6); color: var(--on-accent); }
 .rail-btn.primary:hover { background: var(--blue-5); }
 </style>
