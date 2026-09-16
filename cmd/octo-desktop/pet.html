@@ -2,17 +2,12 @@
 <meta charset="utf-8" />
 <title>Octo</title>
 <style>
-  :root {
-    --ink: #0B3F80;
-    --arm-lo: #2E8BF5;
-    --arm-hi: #6FBBFF;
-  }
+  :root { --ink: #0B3F80; }
   html, body {
     margin: 0;
     height: 100%;
     background: transparent;
     overflow: hidden;
-    /* The pet window is frameless: the whole surface drags it. */
     -webkit-user-select: none;
     user-select: none;
   }
@@ -27,12 +22,16 @@
     overflow: visible;
   }
 
-  /* ---- idle: the whole body breathes, and bobs as if suspended in water ---- */
+  /* ---- idle: suspended in water, breathing ---- */
   .body { animation: bob 3.4s ease-in-out infinite; transform-origin: 100px 110px; }
   @keyframes bob {
     0%, 100% { transform: translateY(0) scale(1, 1); }
     50%      { transform: translateY(-5px) scale(1.03, 0.97); }
   }
+
+  /* rig carries per-state repositioning, so a state can move the whole octopus
+     without fighting the transform the bob animation owns on .body. */
+  .rig { transition: transform .35s ease; }
 
   /* ---- arms: eight of them, each a beat behind the last ---- */
   .arm {
@@ -65,30 +64,87 @@
     50%      { transform: scale(.88); opacity: .10; }
   }
 
-  /* ---- transient props, hidden until a state turns them on ---- */
-  .bubbles, .bang, .zzz { opacity: 0; pointer-events: none; }
+  /* Props stay out of the way until a state calls for them. */
+  .desk, .bang, .zzz, .yawn, .waver { opacity: 0; pointer-events: none; }
+  .desk, .waver { visibility: hidden; }
 
-  /* ---- state: busy ---- */
-  .busy .arm    { animation-duration: 1.1s; }
-  .busy .body   { animation-duration: 1.6s; }
-  .busy .bubbles { opacity: 1; }
-  .busy .bubble {
-    animation: rise 2.2s ease-in infinite;
-    animation-delay: calc(var(--i) * -0.7s);
+  /* ---- idle: a yawn every so often, eyes squeezing shut with it ---- */
+  .idle .yawn  { animation: yawn 9s ease-in-out infinite; }
+  .idle .mouth { animation: mouth-hide 9s ease-in-out infinite; }
+  .idle .eye-group { animation: blink 5.2s infinite, squint 9s ease-in-out infinite; }
+  @keyframes yawn {
+    0%, 72%, 88%, 100% { opacity: 0; transform: scale(.4); }
+    78%, 84%           { opacity: 1; transform: scale(1); }
+  }
+  @keyframes mouth-hide {
+    0%, 71%, 89%, 100% { opacity: 1; }
+    74%, 86%           { opacity: 0; }
+  }
+  @keyframes squint {
+    0%, 72%, 88%, 100% { transform: scaleY(1); }
+    78%, 84%           { transform: scaleY(.35); }
+  }
+  .yawn { transform-box: fill-box; transform-origin: center; }
+
+  /* ---- busy: at the keyboard, hammering ---- */
+  .busy .rig  { transform: translateY(-20px); }
+  .busy .desk { opacity: 1; visibility: visible; }
+  .busy .arm  { animation-duration: 1.1s; }
+  .busy .body { animation: bob 1.5s ease-in-out infinite; }
+  /* The keyboard is what it is resting on now, so the floating shadow under it
+     would read as a second, contradictory ground. */
+  .busy .shadow { animation: none; opacity: 0; }
+  /* Head tipped down at the keys. */
+  .busy .head-tilt { transform: rotate(4deg); }
+  .head-tilt { transform-box: fill-box; transform-origin: center bottom; transition: transform .35s ease; }
+  /* The middle four arms get out of the way at the keyboard — left hanging,
+     they drape over the keys and bury the two arms doing the actual typing. */
+  .arm-mid { transition: opacity .25s ease; }
+  .busy .arm-mid { opacity: 0; }
+  /* Two arms hammering out of phase — the whole point of the pose. */
+  .tap {
     transform-box: fill-box;
+    transform-origin: top center;
+    animation: tap .14s ease-in-out infinite;
   }
-  @keyframes rise {
-    0%   { transform: translate(0, 0) scale(.5); opacity: 0; }
-    25%  { opacity: .85; }
-    100% { transform: translate(6px, -46px) scale(1.15); opacity: 0; }
+  .tap-r { animation-delay: -.07s; }
+  @keyframes tap {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    50%      { transform: translateY(-7px) rotate(-4deg); }
+  }
+  .key-flash { animation: key-flash .32s steps(1) infinite; }
+  .key-flash-b { animation-delay: -.16s; }
+  @keyframes key-flash {
+    0%, 49%   { opacity: .9; }
+    50%, 100% { opacity: 0; }
+  }
+  .spark {
+    transform-box: fill-box;
+    animation: spark 1.1s ease-out infinite;
+    animation-delay: calc(var(--i) * -0.36s);
+  }
+  @keyframes spark {
+    0%   { transform: translate(0, 0) scale(.4) rotate(0deg); opacity: 0; }
+    20%  { opacity: 1; }
+    100% { transform: translate(var(--dx, 8px), -34px) scale(1.1) rotate(22deg); opacity: 0; }
   }
 
-  /* ---- state: ask - it wants your attention ---- */
-  .ask .body { animation: hop .62s cubic-bezier(.3,-0.4,.5,1.5) infinite; }
+  /* ---- ask: waving an arm to get your attention ---- */
+  .ask .body  { animation: hop .62s cubic-bezier(.3,-0.4,.5,1.5) infinite; }
   @keyframes hop {
     0%, 100% { transform: translateY(0) scale(1, 1); }
     35%      { transform: translateY(-13px) scale(0.95, 1.06); }
     70%      { transform: translateY(0) scale(1.07, 0.93); }
+  }
+  .ask .waver { opacity: 1; visibility: visible; }
+  .waver {
+    transform-box: fill-box;
+    transform-origin: bottom center;
+    animation: wave .44s ease-in-out infinite;
+  }
+  @keyframes wave {
+    0%, 100% { transform: rotate(-16deg); }
+    50%      { transform: rotate(16deg); }
   }
   .ask .bang { opacity: 1; animation: pop .62s ease-in-out infinite; transform-box: fill-box; transform-origin: bottom center; }
   @keyframes pop {
@@ -96,9 +152,16 @@
     50%      { transform: scale(1.14) rotate(4deg); }
   }
 
-  /* ---- state: sleep ---- */
-  .sleep .body  { animation-duration: 5.5s; }
-  .sleep .arm   { animation-duration: 5s; }
+  /* ---- sleep: sunk down, arms gone limp ---- */
+  .sleep .rig   { transform: translateY(10px); }
+  .sleep .body  { animation: snore 5.5s ease-in-out infinite; }
+  @keyframes snore {
+    0%, 100% { transform: translateY(0) scale(1, 1); }
+    50%      { transform: translateY(2px) scale(1.05, 0.95); }
+  }
+  /* Limp: barely swaying, and drooping inward. */
+  .sleep .arms  { transform: translateY(3px) scaleY(1.12); transition: transform .4s ease; }
+  .sleep .arm   { animation-duration: 6s; }
   .sleep .eye-group { animation: none; }
   .sleep .lid   { transform: scaleY(1); }
   .sleep .pupil, .sleep .sparkle, .sleep .eye-white { opacity: 0; }
@@ -124,96 +187,145 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .body, .arm, .eye-group, .pupil, .shadow, .bubble, .z, .bang { animation: none !important; }
+    .body, .arm, .eye-group, .pupil, .shadow, .z, .bang,
+    .tap, .spark, .key-flash, .waver, .yawn, .mouth { animation: none !important; }
   }
 </style>
 
-<div class="stage" id="stage">
+<div class="stage idle" id="stage">
   <svg viewBox="0 0 200 200" aria-label="Octo">
     <defs>
-      <radialGradient id="g-head" cx="38%" cy="28%" r="78%">
-        <stop offset="0%"  stop-color="#8FCBFF" />
-        <stop offset="52%" stop-color="#2E8BF5" />
-        <stop offset="100%" stop-color="#0A63D6" />
-      </radialGradient>
-      <!-- Two arm gradients, alternated front-to-back: eight arms in one flat
-           colour read as a single skirt, which is what made it look jellyfish. -->
+      <linearGradient id="g-head" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="#8ECFEC" />
+        <stop offset="100%" stop-color="#4F9FD4" />
+      </linearGradient>
       <linearGradient id="g-arm" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#2E8BF5" />
-        <stop offset="100%" stop-color="#57AAF9" />
+        <stop offset="0%"   stop-color="#6EB9E0" />
+        <stop offset="100%" stop-color="#4B9AD0" />
       </linearGradient>
       <linearGradient id="g-arm-b" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#1F70D8" />
-        <stop offset="100%" stop-color="#3D93EE" />
+        <stop offset="0%"   stop-color="#5AA8D6" />
+        <stop offset="100%" stop-color="#3E8CC4" />
       </linearGradient>
-      <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
-        <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0A63D6" flood-opacity="0.34" />
-      </filter>
     </defs>
 
-    <ellipse class="shadow" cx="100" cy="171" rx="40" ry="7" fill="#0A63D6" opacity=".16" />
+    <ellipse class="shadow" cx="100" cy="176" rx="42" ry="7" fill="#1E3A6B" opacity=".16" />
 
-    <g class="body" filter="url(#soft)">
-      <!-- arms first: they tuck in behind the head -->
-      <!-- Each arm is anchored by an outer <g> and swayed by an inner one: a CSS
-           transform animation REPLACES the element's own transform attribute, so
-           an arm that carried both would sway around the viewBox origin. -->
-      <g class="arms">
-        <g transform="translate(62,104) rotate(36)"><g class="arm" style="--i:7"><path fill="url(#g-arm-b)" d="M -8 0 C -10 12 -8.4 22 -5 29 C -2.6 33.4 2.6 33.4 5 29 C 8.4 22 10 12 8 0 Z" /></g></g>
-        <g transform="translate(73,112) rotate(24)"><g class="arm" style="--i:0"><path fill="url(#g-arm)" d="M -8 0 C -10 14 -8.4 26 -5 34 C -2.6 38.6 2.6 38.6 5 34 C 8.4 26 10 14 8 0 Z" /></g></g>
-        <g transform="translate(85,118) rotate(14)"><g class="arm" style="--i:1"><path fill="url(#g-arm-b)" d="M -8 0 C -10 16 -8.4 30 -5 39 C -2.6 44 2.6 44 5 39 C 8.4 30 10 16 8 0 Z" /></g></g>
-        <g transform="translate(96,117) rotate(5)"><g class="arm" style="--i:2"><path fill="url(#g-arm)" d="M -8 0 C -10 18 -8.4 34 -5 44 C -2.6 49.4 2.6 49.4 5 44 C 8.4 34 10 18 8 0 Z" /></g></g>
-        <g transform="translate(104,117) rotate(-5)"><g class="arm" style="--i:3"><path fill="url(#g-arm-b)" d="M -8 0 C -10 18 -8.4 34 -5 44 C -2.6 49.4 2.6 49.4 5 44 C 8.4 34 10 18 8 0 Z" /></g></g>
-        <g transform="translate(115,118) rotate(-14)"><g class="arm" style="--i:4"><path fill="url(#g-arm)" d="M -8 0 C -10 16 -8.4 30 -5 39 C -2.6 44 2.6 44 5 39 C 8.4 30 10 16 8 0 Z" /></g></g>
-        <g transform="translate(127,112) rotate(-24)"><g class="arm" style="--i:5"><path fill="url(#g-arm-b)" d="M -8 0 C -10 14 -8.4 26 -5 34 C -2.6 38.6 2.6 38.6 5 34 C 8.4 26 10 14 8 0 Z" /></g></g>
-        <g transform="translate(138,104) rotate(-36)"><g class="arm" style="--i:6"><path fill="url(#g-arm)" d="M -8 0 C -10 12 -8.4 22 -5 29 C -2.6 33.4 2.6 33.4 5 29 C 8.4 22 10 12 8 0 Z" /></g></g>
-      </g>
-
-      <!-- head -->
-      <path d="M 100 32 C 132 32 152 56 152 84 C 152 106 138 120 100 120 C 62 120 48 106 48 84 C 48 56 68 32 100 32 Z" fill="url(#g-head)" />
-      <!-- wet highlight -->
-      <ellipse cx="78" cy="56" rx="15" ry="10" fill="#FFFFFF" opacity=".30" transform="rotate(-22 78 56)" />
-      <ellipse class="sparkle" cx="122" cy="50" rx="4" ry="3" fill="#FFFFFF" opacity=".55" transform="rotate(18 122 50)" />
-
-      <g class="face">
-        <g class="eye-group">
-          <ellipse class="eye-white" cx="84" cy="82" rx="11" ry="12.5" fill="#FFFFFF" />
-          <ellipse class="eye-white" cx="116" cy="82" rx="11" ry="12.5" fill="#FFFFFF" />
-          <g class="pupil">
-            <circle cx="85" cy="84" r="5.4" fill="var(--ink)" />
-            <circle cx="117" cy="84" r="5.4" fill="var(--ink)" />
-            <circle cx="87" cy="81" r="1.9" fill="#FFFFFF" />
-            <circle cx="119" cy="81" r="1.9" fill="#FFFFFF" />
-          </g>
-          <!-- closed lids, scaled flat until the sleep state opens them -->
-          <path class="lid" d="M 74 82 q 10 8 20 0" fill="none" stroke="var(--ink)" stroke-width="2.6" stroke-linecap="round" />
-          <path class="lid" d="M 106 82 q 10 8 20 0" fill="none" stroke="var(--ink)" stroke-width="2.6" stroke-linecap="round" />
+    <!-- Everything in the character shares one dark outline: that contour is
+         what reads as "sticker", and it is the single biggest difference
+         between this and a flat gradient blob. -->
+    <g class="rig" stroke="#1E3A6B" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round">
+      <g class="body">
+        <!-- Arms are anchored by an outer <g> and swayed by an inner one: a CSS
+             transform animation REPLACES the element's own transform attribute,
+             so an arm carrying both would sway around the viewBox origin. -->
+        <g class="arms">
+          <g transform="translate(58,112) rotate(40)"><g class="arm" style="--i:7"><path fill="url(#g-arm-b)" d="M -8 -4 C -10 10 -8 22 -4 28 C -1 32 4 31 5 26 C 6 20 3 18 2 22 C 5 14 8 6 8 -4 Z" /></g></g>
+          <g transform="translate(72,120) rotate(26)"><g class="arm" style="--i:0"><path fill="url(#g-arm)" d="M -8 -4 C -10 12 -8 26 -4 32 C -1 36 4 35 5 30 C 6 24 3 22 2 26 C 5 16 8 8 8 -4 Z" /></g></g>
+          <g class="arm-mid" transform="translate(86,125) rotate(13)"><g class="arm" style="--i:1"><path fill="url(#g-arm-b)" d="M -8 -4 C -10 14 -8 28 -4 35 C -1 39 4 38 5 33 C 6 27 3 25 2 29 C 5 18 8 8 8 -4 Z" /></g></g>
+          <g class="arm-mid" transform="translate(97,127) rotate(4)"><g class="arm" style="--i:2"><path fill="url(#g-arm)" d="M -8 -4 C -10 15 -8 30 -4 37 C -1 41 4 40 5 35 C 6 29 3 27 2 31 C 5 19 8 8 8 -4 Z" /></g></g>
+          <g class="arm-mid" transform="translate(107,127) rotate(-4)"><g class="arm" style="--i:3"><path fill="url(#g-arm-b)" d="M -8 -4 C -10 15 -8 30 -4 37 C -1 41 4 40 5 35 C 6 29 3 27 2 31 C 5 19 8 8 8 -4 Z" /></g></g>
+          <g class="arm-mid" transform="translate(118,125) rotate(-13)"><g class="arm" style="--i:4"><path fill="url(#g-arm)" d="M -8 -4 C -10 14 -8 28 -4 35 C -1 39 4 38 5 33 C 6 27 3 25 2 29 C 5 18 8 8 8 -4 Z" /></g></g>
+          <g transform="translate(128,120) rotate(-26)"><g class="arm" style="--i:5"><path fill="url(#g-arm-b)" d="M -8 -4 C -10 12 -8 26 -4 32 C -1 36 4 35 5 30 C 6 24 3 22 2 26 C 5 16 8 8 8 -4 Z" /></g></g>
+          <g transform="translate(142,112) rotate(-40)"><g class="arm" style="--i:6"><path fill="url(#g-arm)" d="M -8 -4 C -10 10 -8 22 -4 28 C -1 32 4 31 5 26 C 6 20 3 18 2 22 C 5 14 8 6 8 -4 Z" /></g></g>
         </g>
-        <ellipse cx="66" cy="95" rx="7" ry="4.4" fill="#FF7BA8" opacity=".38" />
-        <ellipse cx="134" cy="95" rx="7" ry="4.4" fill="#FF7BA8" opacity=".38" />
-        <path class="mouth" d="M 92 101 q 8 7 16 0" fill="none" stroke="var(--ink)" stroke-width="2.6" stroke-linecap="round" />
+
+        <g class="head-tilt">
+          <!-- A near-circle, not the wide dome it was: the rounder the head, the
+               younger and softer the character reads. -->
+          <circle cx="100" cy="80" r="52" fill="url(#g-head)" />
+          <!-- wet highlights, no outline of their own -->
+          <ellipse cx="78" cy="52" rx="15" ry="11" fill="#FFFFFF" opacity=".42" stroke="none" transform="rotate(-24 78 52)" />
+          <ellipse class="sparkle" cx="63" cy="70" rx="5" ry="4" fill="#FFFFFF" opacity=".42" stroke="none" transform="rotate(-24 63 70)" />
+
+          <g class="face">
+            <g class="eye-group">
+              <!-- Big, outlined eyes carrying their own rim — the feature that
+                   does most of the work in making the thing likeable. -->
+              <ellipse class="eye-white" cx="83" cy="90" rx="15" ry="16.5" fill="#FFFFFF" />
+              <ellipse class="eye-white" cx="117" cy="90" rx="15" ry="16.5" fill="#FFFFFF" />
+              <g class="pupil" stroke="none">
+                <circle cx="85" cy="92" r="8" fill="#16305C" />
+                <circle cx="119" cy="92" r="8" fill="#16305C" />
+                <circle cx="88" cy="88" r="2.8" fill="#FFFFFF" />
+                <circle cx="122" cy="88" r="2.8" fill="#FFFFFF" />
+                <circle cx="83" cy="96" r="1.5" fill="#FFFFFF" opacity=".8" />
+                <circle cx="117" cy="96" r="1.5" fill="#FFFFFF" opacity=".8" />
+              </g>
+              <!-- closed lids, scaled flat until sleep opens them -->
+              <path class="lid" d="M 71 90 q 12 9 24 0" fill="none" stroke="#16305C" stroke-width="3.4" />
+              <path class="lid" d="M 105 90 q 12 9 24 0" fill="none" stroke="#16305C" stroke-width="3.4" />
+            </g>
+            <ellipse cx="64" cy="103" rx="8" ry="5" fill="#F4A0B4" opacity=".75" stroke="none" />
+            <ellipse cx="136" cy="103" rx="8" ry="5" fill="#F4A0B4" opacity=".75" stroke="none" />
+            <path class="mouth" d="M 94 108 q 6 6 12 0" fill="none" stroke="#16305C" stroke-width="3" />
+            <ellipse class="yawn" cx="100" cy="111" rx="6.5" ry="8.5" fill="#16305C" opacity="0" stroke="none" />
+          </g>
+
+          <!-- Waving arm, ask only. Drawn after the face on purpose: SVG has no
+               z-index, and placed with the other arms it was painted before the
+               head and therefore hidden behind it. -->
+          <g class="waver" stroke-width="0">
+            <path d="M 64 114 C 48 104 38 86 41 66" fill="none" stroke="#1E3A6B" stroke-width="15" stroke-linecap="round" />
+            <path d="M 64 114 C 48 104 38 86 41 66" fill="none" stroke="url(#g-arm)" stroke-width="9.5" stroke-linecap="round" />
+          </g>
+        </g>
       </g>
     </g>
 
-    <!-- busy: thought bubbles drifting off the head -->
-    <g class="bubbles" fill="#7FC0FF">
-      <circle class="bubble" style="--i:0" cx="148" cy="60" r="4" />
-      <circle class="bubble" style="--i:1" cx="156" cy="66" r="3" />
-      <circle class="bubble" style="--i:2" cx="143" cy="54" r="2.4" />
+    <!-- busy: the desk. Drawn after the body so the octopus sits behind it. -->
+    <g class="desk" stroke="#1E3A6B" stroke-width="3.4" stroke-linejoin="round">
+      <!-- Keyboard with real thickness, tilted toward the viewer — a flat slab
+           read as a strip of paper the octopus was floating over. -->
+      <path d="M 44 138 L 56 120 L 150 120 L 162 138 Z" fill="#E7F0FA" />
+      <path d="M 44 138 L 162 138 L 162 146 L 44 146 Z" fill="#C3D5EA" />
+      <g fill="#FFFFFF" stroke-width="2">
+        <path d="M 62 129 l 2 -6 h 11 l -2 6 Z" />
+        <path class="key-flash" d="M 78 129 l 2 -6 h 11 l -2 6 Z" fill="#8FD3F4" />
+        <path d="M 94 129 l 2 -6 h 11 l -2 6 Z" />
+        <path class="key-flash key-flash-b" d="M 110 129 l 2 -6 h 11 l -2 6 Z" fill="#8FD3F4" />
+        <path d="M 126 129 l 2 -6 h 11 l -2 6 Z" />
+        <path d="M 66 136 l 1.6 -5 h 64 l 1.6 5 Z" />
+      </g>
+
+      <!-- The two arms doing the typing, resting their tips on the keys.
+           Stroked twice — a fat dark line under a thinner coloured one — which
+           gives a round-tipped arm its outline for free. Drawn as a filled
+           shape instead, the tip curled into a hook floating above the keys. -->
+      <!-- Anchored just below the lifted body's shoulder, not at its original
+           coordinates: .busy lifts .rig by 20 and the desk does not move with
+           it, so an arm drawn at the resting shoulder starts inside the face. -->
+      <g class="tap tap-l" stroke-width="0">
+        <path d="M 78 104 C 72 114 74 122 84 128" fill="none" stroke="#1E3A6B" stroke-width="15" stroke-linecap="round" />
+        <path d="M 78 104 C 72 114 74 122 84 128" fill="none" stroke="url(#g-arm)" stroke-width="9.5" stroke-linecap="round" />
+      </g>
+      <g class="tap tap-r" stroke-width="0">
+        <path d="M 122 104 C 128 114 126 122 116 128" fill="none" stroke="#1E3A6B" stroke-width="15" stroke-linecap="round" />
+        <path d="M 122 104 C 128 114 126 122 116 128" fill="none" stroke="url(#g-arm-b)" stroke-width="9.5" stroke-linecap="round" />
+      </g>
+
+      <!-- Sparks off the keys: four-point stars plus a lightning bolt, the
+           shapes the reference used to sell "hammering". Positioned by an outer
+           <g> so the CSS animation's transform has the element to itself. -->
+      <g stroke="none">
+        <g transform="translate(64,130)"><path class="spark" style="--i:0; --dx:-10px" fill="#FFC53D" d="M 0 -9 C 1.4 -3 3 -1.4 9 0 C 3 1.4 1.4 3 0 9 C -1.4 3 -3 1.4 -9 0 C -3 -1.4 -1.4 -3 0 -9 Z" /></g>
+        <g transform="translate(136,128)"><path class="spark" style="--i:1; --dx:10px" fill="#FFC53D" d="M 0 -7 C 1.1 -2.3 2.3 -1.1 7 0 C 2.3 1.1 1.1 2.3 0 7 C -1.1 2.3 -2.3 1.1 -7 0 C -2.3 -1.1 -1.1 -2.3 0 -7 Z" /></g>
+        <g transform="translate(100,126)"><path class="spark" style="--i:2; --dx:2px" fill="#FFA726" d="M 1 -8 L -4 1 L 0 1 L -1 8 L 4 -1 L 0 -1 Z" /></g>
+      </g>
     </g>
 
     <!-- ask: it needs an answer -->
     <g class="bang">
-      <circle cx="150" cy="44" r="16" fill="#FF9500" />
-      <rect x="147.2" y="34" width="5.6" height="14" rx="2.8" fill="#FFFFFF" />
-      <circle cx="150" cy="53" r="3" fill="#FFFFFF" />
+      <circle cx="152" cy="42" r="17" fill="#FF9500" stroke="#1E3A6B" stroke-width="3.4" />
+      <rect x="149" y="31" width="6" height="15" rx="3" fill="#FFFFFF" />
+      <circle cx="152" cy="52" r="3.2" fill="#FFFFFF" />
     </g>
 
     <!-- sleep -->
-    <g class="zzz" fill="var(--ink)" opacity=".7" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-weight="700">
-      <text class="z" style="--i:0" x="140" y="52" font-size="15">z</text>
-      <text class="z" style="--i:1" x="150" y="40" font-size="12">z</text>
-      <text class="z" style="--i:2" x="132" y="62" font-size="10">z</text>
+    <g class="zzz" fill="#1E3A6B" opacity=".8" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-weight="800">
+      <text class="z" style="--i:0" x="144" y="50" x-comment="drifts up-right" font-size="16">z</text>
+      <text class="z" style="--i:1" x="154" y="36" font-size="13">z</text>
+      <text class="z" style="--i:2" x="136" y="62" font-size="11">z</text>
     </g>
   </svg>
 </div>
@@ -225,7 +337,7 @@
   function setState(next) {
     if (!STATES.includes(next)) return;
     stage.classList.remove(...STATES);
-    if (next !== 'idle') stage.classList.add(next);
+    stage.classList.add(next);
   }
 
   // ---- dragging ----
