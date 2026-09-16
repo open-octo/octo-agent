@@ -28,7 +28,6 @@ octo 不是又一个需要"养"的 agent 框架。OpenClaw、Hermes 这类项目
 
 ```bash
 curl -fsSL https://octo-agent.dev/install.sh | sh     # 单二进制，无需 Node / Ruby / Python 环境
-octo config                                            # 选 provider，填 key（DeepSeek / Kimi / 百炼 …）
 octo "给 octo config show 加一个 --json 参数并跑测试"   # 一句话 → 完整 agentic 工具循环
 ```
 
@@ -123,10 +122,19 @@ Go 原生 CDP [录制 / 回放 / 自愈](https://octo-agent.dev/docs/zh/guides/b
 ### 首次运行
 
 ```bash
-octo config                # 一次性设置：选 provider/model，填 API key
+octo serve -d              # 启动本机服务（Web UI + IM 桥接）
+```
+
+浏览器打开 **http://127.0.0.1:8088**，配置面板会带着你走完：选语言、接模型，然后是一段简短的对话——
+它会问清楚你叫什么、希望助手是什么性格、怎么做事。本机回环访问不需要密钥。桌面应用就是同一个服务加一个
+原生窗口，直接启动它，然后从浏览器那一步接着往下看即可。
+
+更喜欢终端？同一个助手，接好 provider 之后不需要额外配置：
+
+```bash
 octo "介绍一下这个仓库"      # headless 单发：prompt → agentic 工具循环 → 退出
 octo                       # 终端交互式 TUI；octo -c 恢复历史 session
-octo serve -d              # Web UI + IM 桥接，http://127.0.0.1:8088
+octo config                # 不碰浏览器，在终端里配 provider
 ```
 
 下一步：[快速上手](https://octo-agent.dev/docs/zh/getting-started/quickstart/) · [选择 provider](https://octo-agent.dev/docs/zh/getting-started/choose-a-provider/) · [CLI 参考](https://octo-agent.dev/docs/zh/reference/cli/)。
@@ -134,10 +142,10 @@ octo serve -d              # Web UI + IM 桥接，http://127.0.0.1:8088
 ## 上手路径
 
 1. 一条命令安装：`curl -fsSL https://octo-agent.dev/install.sh | sh`。
-2. `octo config` 选 provider、填 API key。
-3. `octo "介绍一下这个仓库"` 单发验证一切正常。
-4. `octo` 进入终端 TUI，日常交互。
-5. `octo serve -d` 打开 Web UI（`http://127.0.0.1:8088`），或直接用桌面应用。
+2. 启动服务：`octo serve -d`，或者直接用桌面应用——它就是同一个服务。
+3. 打开 `http://127.0.0.1:8088`，跟着配置走：选语言、接模型，再完成那段引导对话——它会写下助手是谁、你是谁。
+4. 在输入框里交给它一件真事：需要动 shell、动文件或者上网的那种，而不只是问个答案。
+5. 想用终端就 `octo "介绍一下这个仓库"` 单发，或者 `octo` 进 TUI——同一个助手，同一套配置。
 6. 配置 [IM 渠道](https://octo-agent.dev/docs/zh/guides/channels/)，在微信 / 飞书 / Telegram 里继续对话。
 7. 按需加 [skills](https://octo-agent.dev/docs/zh/guides/use-skills/)、[MCP 服务](https://octo-agent.dev/docs/zh/guides/connect-mcp-servers/)、[子代理](https://octo-agent.dev/docs/zh/guides/sub-agents/)。
 

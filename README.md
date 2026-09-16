@@ -28,7 +28,6 @@ octo isn't another agent framework you have to "raise." Projects like OpenClaw o
 
 ```bash
 curl -fsSL https://octo-agent.dev/install.sh | sh     # single binary — no Node / Ruby / Python
-octo config                                            # pick a provider, paste a key (DeepSeek / Kimi / …)
 octo "Add a --json flag to 'octo config show' and run the tests"   # one prompt → full agentic loop
 ```
 
@@ -123,10 +122,20 @@ Upgrade any time with `octo upgrade`. Platform details — Gatekeeper / SmartScr
 ### First run
 
 ```bash
-octo config                # one-time: pick provider/model, paste an API key
+octo serve -d              # start the local server (Web UI + IM bridge)
+```
+
+Open **http://127.0.0.1:8088** and the setup panel walks you through it: pick a language, connect a
+model, then a short chat that learns your name, the assistant's personality, and how you want it to
+behave. Loopback needs no access key. The desktop app is the same server with a native window — run
+it instead and skip straight to the browser step.
+
+Prefer the terminal? Same agent, no extra setup once a provider is connected:
+
+```bash
 octo "explain this repo"   # headless one-shot: prompt → agentic tool loop → exit
 octo                       # interactive TUI in a terminal; octo -c resumes a session
-octo serve -d              # Web UI + IM bridge at http://127.0.0.1:8088
+octo config                # provider setup without touching the browser
 ```
 
 Next steps: [quickstart](https://octo-agent.dev/docs/getting-started/quickstart/) · [choose a provider](https://octo-agent.dev/docs/getting-started/choose-a-provider/) · [CLI reference](https://octo-agent.dev/docs/reference/cli/).
@@ -134,10 +143,12 @@ Next steps: [quickstart](https://octo-agent.dev/docs/getting-started/quickstart/
 ## First Journey
 
 1. Install with one command: `curl -fsSL https://octo-agent.dev/install.sh | sh`.
-2. Run `octo config` to pick a provider and paste an API key.
-3. Verify everything works with a one-shot: `octo "explain this repo"`.
-4. Run `octo` for the interactive terminal TUI.
-5. Run `octo serve -d` for the Web UI (`http://127.0.0.1:8088`), or use the desktop app.
+2. Start the server — `octo serve -d` — or launch the desktop app, which is the same server.
+3. Open `http://127.0.0.1:8088` and follow the setup: language, model, then the onboarding chat that
+   writes who the assistant is and who you are.
+4. Give it a real task from the composer — one that needs shell, files or the web, not just an answer.
+5. Run `octo "explain this repo"` for a headless one-shot, or `octo` for the terminal TUI — same
+   agent, same config.
 6. Configure an [IM channel](https://octo-agent.dev/docs/guides/channels/) and keep the conversation going from WeChat / Feishu / Telegram.
 7. Add [skills](https://octo-agent.dev/docs/guides/use-skills/), [MCP servers](https://octo-agent.dev/docs/guides/connect-mcp-servers/), and [sub-agents](https://octo-agent.dev/docs/guides/sub-agents/) as you need them.
 
