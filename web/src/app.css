@@ -257,6 +257,7 @@
                'Hiragino Sans GB', 'Microsoft YaHei', system-ui, 'Segoe UI', Roboto, sans-serif;
 
   --chat-bg: linear-gradient(170deg, #FFF7FA 0%, #FDF0F6 45%, #F8EDFA 100%);
+  --chat-bg-image: url('/wallpapers/blossom-light.webp');
 }
 
 :root[data-theme-pack="blossom"][data-theme="dark"] {
@@ -299,6 +300,7 @@
   --terminal-bg: #1C1319;
 
   --chat-bg: linear-gradient(170deg, #241A20 0%, #2A1B26 50%, #2B1D2E 100%);
+  --chat-bg-image: url('/wallpapers/blossom-dark.webp');
 }
 
 /* ── celestia — high-key sky blue with a magenta accent ───────────────────── */
@@ -345,6 +347,7 @@
   /* The magenta half of the palette only ever appears as light, in the chat
      column's far corner — as a flat accent it fights the blue. */
   --chat-bg: linear-gradient(180deg, #F7FCFF 0%, #ECF7FF 58%, #F7F1FF 100%);
+  --chat-bg-image: url('/wallpapers/celestia-light.webp');
 }
 
 :root[data-theme-pack="celestia"][data-theme="dark"] {
@@ -392,6 +395,7 @@
   --chat-bg:
     radial-gradient(ellipse 120% 70% at 50% 0%, rgba(59,186,255,0.13) 0%, transparent 62%),
     radial-gradient(ellipse 85% 50% at 86% 78%, rgba(255,92,168,0.13) 0%, transparent 62%);
+  --chat-bg-image: url('/wallpapers/celestia-dark.webp');
 }
 
 /* ── vogue — monochrome with champagne gold, serif type, tight radii ──────── */
@@ -443,6 +447,7 @@
   --font-mono: 'Courier New', Courier, ui-monospace, Menlo, monospace;
 
   --chat-bg: linear-gradient(180deg, #FFFFFF 0%, #FAFAF8 100%);
+  --chat-bg-image: url('/wallpapers/vogue-light.webp');
 }
 
 :root[data-theme-pack="vogue"][data-theme="dark"] {
@@ -485,6 +490,7 @@
   --terminal-bg: #0A0A0B;
 
   --chat-bg: linear-gradient(180deg, #111112 0%, #0C0C0D 100%);
+  --chat-bg-image: url('/wallpapers/vogue-dark.webp');
 }
 
 *, *::before, *::after { box-sizing: border-box; }
