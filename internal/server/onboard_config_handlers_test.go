@@ -1521,16 +1521,62 @@ func TestListEndpoints_ExposesVisionHelper(t *testing.T) {
 	}
 }
 
-// A machine that exports some provider's API key for another tool (Claude Code,
-// a DeepSeek CLI, …) must still get first-run setup on a fresh install: the key
-// alone configures nothing, there is no endpoint and no model to run, and
-// skipping the panel drops the user on a chat that fails at the first message.
-func TestDetectOnboardPhase_EnvKeyWithoutEndpointStillNeedsSetup(t *testing.T) {
+// A machine that exports some OTHER provider's API key — DeepSeek's, left by a
+// CLI, while nothing points octo at DeepSeek — must still get first-run setup.
+// The key configures nothing: with no endpoint the server falls back to
+// anthropic, whose key is absent, so the first message would fail. Scanning
+// every vendor for any key at all is what used to hide the panel here.
+func TestDetectOnboardPhase_UnrelatedEnvKeyStillNeedsSetup(t *testing.T) {
 	setTestHome(t)
-	t.Setenv("ANTHROPIC_API_KEY", "sk-from-some-other-tool")
+	t.Setenv("OCTO_PROVIDER", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("DEEPSEEK_API_KEY", "sk-from-some-other-tool")
 	if got := detectOnboardPhase(); got != "key_setup" {
-		t.Fatalf("detectOnboardPhase = %q on an install with no endpoint, want key_setup", got)
+		t.Fatalf("detectOnboardPhase = %q with only an unrelated vendor key, want key_setup", got)
+	}
+}
+
+// The same rule one level in: an endpoint exists, but its own key is nowhere —
+// not stored, not in ITS vendor's env var — while an unrelated vendor's key is
+// exported. Still unconfigured; the old whole-registry scan called this ready.
+func TestDetectOnboardPhase_EndpointWithoutItsOwnKeyNeedsSetup(t *testing.T) {
+	setTestHome(t)
+	t.Setenv("OCTO_PROVIDER", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("DEEPSEEK_API_KEY", "sk-from-some-other-tool")
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "anthropic", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+		Default: "ep-a::claude-sonnet-4-6",
+	})
+	if got := detectOnboardPhase(); got != "key_setup" {
+		t.Fatalf("detectOnboardPhase = %q; the endpoint's own vendor has no key anywhere, want key_setup", got)
+	}
+}
+
+// The deployment packaging/systemd/octo.service and the self-host guide
+// recommend: a key in the environment, nothing in config.yml. It runs —
+// resolveProviderAndModel falls back to anthropic and its default model — so it
+// must not be pushed through the setup panel.
+func TestDetectOnboardPhase_EnvOnlyInstallIsConfigured(t *testing.T) {
+	setTestHome(t)
+	t.Setenv("OCTO_PROVIDER", "")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-env-only-deployment")
+	if got := detectOnboardPhase(); got == "key_setup" {
+		t.Fatalf("detectOnboardPhase = %q; an env-only install reaches a model, want anything but key_setup", got)
+	}
+}
+
+// Same, but pointed at another vendor through OCTO_PROVIDER — the key that
+// counts is that vendor's, and anthropic's absence is irrelevant.
+func TestDetectOnboardPhase_EnvOnlyHonoursOctoProvider(t *testing.T) {
+	setTestHome(t)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OCTO_PROVIDER", "deepseek")
+	t.Setenv("DEEPSEEK_API_KEY", "sk-env-only-deployment")
+	if got := detectOnboardPhase(); got == "key_setup" {
+		t.Fatalf("detectOnboardPhase = %q; OCTO_PROVIDER picks the vendor whose key counts", got)
 	}
 }
 

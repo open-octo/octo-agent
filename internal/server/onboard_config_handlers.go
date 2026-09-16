@@ -146,6 +146,9 @@ func detectOnboardPhase() string {
 		}
 	}
 	if !configured {
+		configured = envOnlyProviderConfigured(cfg)
+	}
+	if !configured {
 		return "key_setup"
 	}
 
@@ -162,6 +165,30 @@ func detectOnboardPhase() string {
 	}
 
 	return ""
+}
+
+// envOnlyProviderConfigured reports whether the server can reach a model with
+// no endpoint configured at all. That install really does run — it is the shape
+// packaging/systemd/octo.service and the self-host guide recommend, a key in
+// the environment and nothing in config.yml — so it must not be sent to the
+// setup panel.
+//
+// It resolves exactly what resolveProviderAndModel would: the provider from
+// OCTO_PROVIDER or the anthropic default, a model from that vendor, and the key
+// from that ONE vendor's environment variable. Asking each vendor about its own
+// key is the whole point — scanning every vendor, which is what this used to do,
+// let an ANTHROPIC_API_KEY left behind by another tool stand in for a DeepSeek
+// setup that was never made, and hid the panel from installs that could not run.
+func envOnlyProviderConfigured(cfg config.Config) bool {
+	provName := firstNonEmpty(os.Getenv("OCTO_PROVIDER"), "anthropic")
+	if modelFromEnv(provName) == "" && defaultModelFor(provName) == "" {
+		return false
+	}
+	if app.VendorKeyOptional(provName) {
+		return true
+	}
+	key, err := resolveAPIKey(provName, cfg)
+	return err == nil && key != ""
 }
 
 // identityMissing reports whether dir has neither soul.md nor user.md (nor
