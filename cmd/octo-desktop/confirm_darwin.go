@@ -12,10 +12,12 @@ package main
 // thread. Returns true when the user picked okLabel.
 //
 // Setting them is the whole reason this does not go through Wails: its dialog
-// is created and run inside one main-thread block, so the window only exists
-// while the modal loop already owns the thread — and a block dispatched to
-// reach it then is not delivered until the loop ends (NSModalPanelRunLoopMode
-// is not one of the common modes), which is far too late.
+// is created and run inside one main-thread block, so the window exists only
+// once the modal loop already owns the thread. Reaching it from outside that
+// block was tried and does not work — a loop that polled [NSApp modalWindow]
+// every 50ms from another goroutine came back empty for the whole time the
+// alert was up, and only ran to completion after it closed. Whatever the
+// mechanism, there is no window to configure until it is too late to matter.
 //
 // Raising the app instead would be the obvious fix and cannot be relied on.
 // macOS lets an app activate itself only while the user has recently been in
