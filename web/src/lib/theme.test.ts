@@ -57,6 +57,19 @@ describe('setPack', () => {
     expect(document.documentElement.getAttribute('data-theme-pack')).toBeNull()
     expect(getPack()).toBe('azure')
   })
+
+  it('normalizes an id the app does not ship instead of persisting it', () => {
+    setPack('not-a-pack')
+    expect(document.documentElement.getAttribute('data-theme-pack')).toBeNull()
+    expect(localStorage.getItem('octo.themePack')).toBe('azure')
+    expect(getPack()).toBe('azure')
+  })
+
+  it('stores the current id when handed a renamed one', () => {
+    setPack('klook')
+    expect(localStorage.getItem('octo.themePack')).toBe('azure')
+    expect(getPack()).toBe('azure')
+  })
 })
 
 describe('PACKS', () => {
@@ -98,6 +111,33 @@ function block(css: string, selector: string): Record<string, string> {
   for (const m of body.matchAll(/(--[\w-]+):\s*([^;]+);/g)) vars[m[1]] = m[2].trim()
   return vars
 }
+
+// A pack's light block does not outrank the default dark block on specificity
+// — both are (0,2,0) — it only wins by coming later in app.css. So in dark
+// mode a var set only in a pack's light block overrides the default DARK
+// value. For --radius-* and --font-* that is intended (the default dark block
+// never sets them, so a pack states them once and gets both modes); for a
+// color it means the pack's light value leaks into dark mode. CSS reports
+// nothing when it happens, so this is the guard.
+describe('pack light/dark blocks stay paired', () => {
+  const css = readFileSync(join(process.cwd(), 'src', 'app.css'), 'utf8')
+  const defaultDark = block(css, ':root[data-theme="dark"]')
+
+  for (const pack of PACKS.filter((p) => p.id !== 'azure')) {
+    it(`${pack.id} restates in dark every var the default dark block sets`, () => {
+      const light = block(css, `:root[data-theme-pack="${pack.id}"]`)
+      const dark = block(css, `:root[data-theme-pack="${pack.id}"][data-theme="dark"]`)
+
+      const leaked = Object.keys(light).filter((v) => v in defaultDark && !(v in dark))
+      expect(
+        leaked,
+        `${pack.id} sets these in its light block and the default dark block sets `
+          + `them too, but its dark block does not — they would keep their light `
+          + `values in dark mode: ${leaked.join(', ')}`,
+      ).toEqual([])
+    })
+  }
+})
 
 // Every pack states an accent fill and the foreground that sits on it. White
 // is only legible over azure's blue; a pack that keeps it while lightening the

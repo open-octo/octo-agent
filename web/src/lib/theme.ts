@@ -49,11 +49,14 @@ export function getMode(): ThemeMode {
 // falls back to the default rather than writing an attribute no CSS matches,
 // which would otherwise leave the app on the default palette with the picker
 // showing nothing selected.
-export function getPack(): string {
-  const stored = localStorage.getItem(PACK_KEY)
-  if (!stored) return DEFAULT_PACK
-  const current = RENAMED_PACKS[stored] ?? stored
+function normalizePack(id: string | null): string {
+  if (!id) return DEFAULT_PACK
+  const current = RENAMED_PACKS[id] ?? id
   return PACK_IDS.has(current) ? current : DEFAULT_PACK
+}
+
+export function getPack(): string {
+  return normalizePack(localStorage.getItem(PACK_KEY))
 }
 
 function prefersDark(): boolean {
@@ -93,9 +96,13 @@ export function setMode(mode: ThemeMode): void {
   apply(mode, getPack())
 }
 
+// Normalizes the same way getPack does, so the two can never disagree: an id
+// the app does not ship would otherwise be persisted and written as an
+// attribute no CSS matches, while getPack went on reporting the default.
 export function setPack(pack: string): void {
-  localStorage.setItem(PACK_KEY, pack)
-  apply(getMode(), pack)
+  const id = normalizePack(pack)
+  localStorage.setItem(PACK_KEY, id)
+  apply(getMode(), id)
 }
 
 // initTheme applies the persisted choice on boot. Call once at app start.

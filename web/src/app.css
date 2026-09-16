@@ -7,12 +7,27 @@
    theme is just a set of var values — no per-component rules.
 
    The default pack ("azure") lives in :root (light) and :root[data-theme="dark"]
-   (dark). To add a pack, add TWO blocks with higher specificity:
+   (dark). To add a pack, add TWO blocks:
 
      :root[data-theme-pack="ocean"]                    { --…: …; }  // ocean light
      :root[data-theme-pack="ocean"][data-theme="dark"] { --…: …; }  // ocean dark
 
-   Any var a pack omits falls back to the default pack, so packs can be partial.
+   A pack may set only the vars it wants to move; the rest fall through to the
+   default pack. But mind WHICH default it falls through to, because a pack's
+   light block does NOT outrank the default dark block on specificity — both are
+   (0,2,0) — it only wins by sitting later in this file. So in dark mode a var
+   set in a pack's light block beats the default dark value:
+
+     • For --radius-* and --font-*, that is the point: the default dark block
+       never sets them, so a pack states them once and gets both modes.
+     • For any var the default dark block DOES set — every color — it is a bug
+       waiting to happen. A pack that colors --bg-container in its light block
+       and forgets it in its dark block renders a white surface in dark mode,
+       silently.
+
+   So: a pack's dark block must restate every color its light block sets. The
+   "pack light/dark blocks stay paired" test in lib/theme.test.ts enforces this,
+   because nothing in CSS will.
    ────────────────────────────────────────────────────────────────────────── */
 :root {
   /* Written by the font-size setting alongside the root CSS zoom. Viewport
@@ -223,6 +238,13 @@
      mode on its own. */
   --on-accent: #5C1730;
 
+  /* --info-* is the accent family, not the status family: its default values
+     are azure's blue spelled out. Left alone, GenUI callouts and badges stay
+     Apple blue in a rose palette. */
+  --info-bg: rgba(255,111,165,0.12);
+  --info-border: rgba(255,111,165,0.38);
+  --info-text: #C7407A;
+
   --text: #3D2B33;
   --text-secondary: #8A7078;
   --text-tertiary: #B09AA2;
@@ -314,6 +336,10 @@
 
   --terminal-bg: #1C1319;
 
+  --info-bg: rgba(255,122,172,0.14);
+  --info-border: rgba(255,122,172,0.40);
+  --info-text: #FF9CC0;
+
   --chat-bg: linear-gradient(170deg, #241A20 0%, #2A1B26 50%, #2B1D2E 100%);
   --chat-bg-image: url('/wallpapers/blossom-dark.webp');
 }
@@ -328,6 +354,10 @@
 
   /* White reaches only 2.3:1 over this sky blue. Deep ocean, 5.07:1 / 5.44:1. */
   --on-accent: #0B3A5C;
+
+  --info-bg: rgba(43,179,255,0.12);
+  --info-border: rgba(43,179,255,0.38);
+  --info-text: #0E7FB8;
 
   --text: #172233;
   --text-secondary: #5B7591;
@@ -407,6 +437,10 @@
 
   --terminal-bg: #0C1018;
 
+  --info-bg: rgba(59,186,255,0.14);
+  --info-border: rgba(59,186,255,0.40);
+  --info-text: #6CCBFF;
+
   /* Two soft lights — cyan overhead, magenta low and to the right — rather
      than a linear ramp, so the column reads as depth. They are transparent
      over --bg-layout, which ChatView paints as the background-color. */
@@ -427,6 +461,10 @@
   /* The worst case of the three: white on champagne gold is 1.9:1 in dark
      mode, which is roughly illegible. Dark bronze, 5.36:1 / 6.94:1. */
   --on-accent: #3A2E0C;
+
+  --info-bg: rgba(192,160,98,0.14);
+  --info-border: rgba(192,160,98,0.40);
+  --info-text: #7A6224;
 
   --text: #17171A;
   --text-secondary: #737378;
@@ -510,6 +548,10 @@
   --placeholder: #6B6A66;
 
   --terminal-bg: #0A0A0B;
+
+  --info-bg: rgba(212,184,122,0.12);
+  --info-border: rgba(212,184,122,0.38);
+  --info-text: #E0C88C;
 
   --chat-bg: linear-gradient(180deg, #111112 0%, #0C0C0D 100%);
   --chat-bg-image: url('/wallpapers/vogue-dark.webp');
