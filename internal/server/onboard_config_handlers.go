@@ -168,19 +168,19 @@ func detectOnboardPhase() string {
 }
 
 // envOnlyProviderConfigured reports whether the server can reach a model with
-// no endpoint configured at all. That install really does run — it is the shape
-// packaging/systemd/octo.service and the self-host guide recommend, a key in
-// the environment and nothing in config.yml — so it must not be sent to the
-// setup panel.
+// no endpoint in config.yml — the env-only deployment packaging/systemd and the
+// self-host guide describe, where OCTO_PROVIDER names the vendor and that
+// vendor's key sits in the environment.
 //
-// It resolves exactly what resolveProviderAndModel would: the provider from
-// OCTO_PROVIDER or the anthropic default, a model from that vendor, and the key
-// from that ONE vendor's environment variable. Asking each vendor about its own
-// key is the whole point — scanning every vendor, which is what this used to do,
-// let an ANTHROPIC_API_KEY left behind by another tool stand in for a DeepSeek
-// setup that was never made, and hid the panel from installs that could not run.
+// It resolves exactly what resolveProviderAndModel does, including refusing to
+// pick a vendor nobody named: a key in the environment says which vendors are
+// reachable, never which one the user meant. Without OCTO_PROVIDER there is no
+// provider, so there is nothing configured to run.
 func envOnlyProviderConfigured(cfg config.Config) bool {
-	provName := firstNonEmpty(os.Getenv("OCTO_PROVIDER"), "anthropic")
+	provName := os.Getenv("OCTO_PROVIDER")
+	if provName == "" {
+		return false
+	}
 	if modelFromEnv(provName) == "" && defaultModelFor(provName) == "" {
 		return false
 	}

@@ -23,6 +23,7 @@ import (
 // that path can't be unit-tested without a pty.)
 func TestRunChat_NoArgs_NoStdin_Errors(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp) // Windows compat
@@ -170,6 +171,7 @@ func TestResolveResumedModel(t *testing.T) {
 
 func TestRunChat_MissingAPIKey(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 	t.Setenv("OPENAI_API_KEY", "")
 	// Isolate config so a persisted key doesn't make the test falsely pass.
 	tmp := t.TempDir()
@@ -223,6 +225,7 @@ func TestRunChat_HonoursAnthropicBaseURL(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("ANTHROPIC_API_KEY", "k")
+	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 	t.Setenv("ANTHROPIC_BASE_URL", srv.URL)
 
 	var stdout, stderr bytes.Buffer
@@ -300,6 +303,7 @@ func TestRunChat_OneShot_BackgroundSubAgentForcedSync(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("ANTHROPIC_API_KEY", "k")
+	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 	t.Setenv("ANTHROPIC_BASE_URL", srv.URL)
 
 	var stdout, stderr bytes.Buffer
@@ -403,6 +407,7 @@ func TestRunChat_PromptFile_SingleTurn(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("ANTHROPIC_API_KEY", "k")
+	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 	t.Setenv("ANTHROPIC_BASE_URL", srv.URL)
 
 	prompt := "Fix the bug.\n\n--- ISSUE ---\nStep 1\nStep 2\nStep 3"
@@ -765,6 +770,7 @@ func TestRunChat_UnknownResumeID(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 	var stdout, stderr bytes.Buffer
 	code := runChat([]string{"-c", "no-such-thing"}, strings.NewReader(""), &stdout, &stderr)
 	if code != 2 {
@@ -812,6 +818,7 @@ func TestRunChat_Anthropic_StreamingEndToEnd(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("ANTHROPIC_API_KEY", "k")
+	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 	t.Setenv("ANTHROPIC_BASE_URL", srv.URL)
 
 	var stdout, stderr bytes.Buffer
@@ -867,6 +874,7 @@ func TestRunChat_ResumedToolSession_DefaultOnNoWarning(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 
 	// Seed a session whose history includes a tool_use block (mirrors what
 	// a real tool-enabled session looks like on disk).
@@ -909,6 +917,7 @@ func TestRunChat_ResumedToolSession_NoToolsWarns(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 
 	sess := agent.NewSession("test-model", "")
 	sess.Messages = []agent.Message{
@@ -947,6 +956,7 @@ func TestRunChat_ResumedPlainSession_NoWarning(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 
 	sess := agent.NewSession("test-model", "")
 	sess.Messages = []agent.Message{

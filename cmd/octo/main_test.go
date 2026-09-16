@@ -47,6 +47,7 @@ func TestRun_PositionalMessage_RoutesToChat(t *testing.T) {
 	// "unknown command" error. With no API key configured the chat path fails
 	// with the missing-key message — proof routing reached runChat, offline.
 	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OCTO_PROVIDER", "anthropic") // the anthropic default is gone; say so
 	t.Setenv("OPENAI_API_KEY", "")
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)

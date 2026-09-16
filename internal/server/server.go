@@ -1520,7 +1520,19 @@ func resolveProviderAndModel(flagProvider, flagModel string) (agent.Sender, stri
 	}
 
 	entry := cfg.DefaultEntry()
-	provName := firstNonEmpty(flagProvider, os.Getenv("OCTO_PROVIDER"), entry.Provider, "anthropic")
+	provName := firstNonEmpty(flagProvider, os.Getenv("OCTO_PROVIDER"), entry.Provider)
+	if provName == "" {
+		// Nothing chose a vendor: no flag, no OCTO_PROVIDER, no config entry.
+		// That is an unconfigured install, not an error — start in onboarding
+		// mode (nil sender) and let setup collect one.
+		//
+		// This used to fall back to "anthropic", which decided on the user's
+		// behalf: an ANTHROPIC_API_KEY left in the environment by some other
+		// tool made octo call Anthropic, and someone who never chose Anthropic
+		// got Anthropic's 401 back. A key says which vendors you can reach, not
+		// which one you meant to use.
+		return nil, "", "", nil
+	}
 	model := flagModel
 	if model == "" {
 		model = modelFromEnv(provName)

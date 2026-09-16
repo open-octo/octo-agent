@@ -27,6 +27,16 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
+// providerSetupError is what to tell the user when provider/model resolution
+// fails. An empty provider means nothing chose one — a fresh install rather
+// than a typo — so point at setup instead of reporting an unknown vendor.
+func providerSetupError(provName string) string {
+	if provName == "" {
+		return "octo: no provider configured — run 'octo config', or set OCTO_PROVIDER together with that vendor's API key"
+	}
+	return fmt.Sprintf("octo: unknown provider %q", provName)
+}
+
 // resolveProviderModel applies precedence flag > env > config file > built-in
 // default to the provider and model. An empty flagProvider/flagModel means "not
 // set on the CLI". A --model value that names a config entry selects the whole
@@ -38,13 +48,13 @@ func firstNonEmpty(vals ...string) string {
 // with no explicit model) — the caller prints an error and exits.
 func resolveProviderModel(flagProvider, flagModel string, cfg config.Config) (provider, model string, entry config.ModelEntry, ok bool) {
 	if e, found := cfg.EntryByModel(flagModel); found {
-		provider = firstNonEmpty(e.Provider, app.ProviderAnthropic)
+		provider = e.Provider
 		model = firstNonEmpty(e.Model, defaultModels[provider])
 		return provider, model, e, model != ""
 	}
 
 	entry = cfg.DefaultEntry()
-	provider = firstNonEmpty(flagProvider, os.Getenv("OCTO_PROVIDER"), entry.Provider, app.ProviderAnthropic)
+	provider = firstNonEmpty(flagProvider, os.Getenv("OCTO_PROVIDER"), entry.Provider)
 	// Precedence: --model flag > env (ANTHROPIC_MODEL / OPENAI_MODEL) > config
 	// (same-provider only) > built-in default. The env tier mirrors how the
 	// base URL and key resolve env-first, so a third-party Claude-/OpenAI-

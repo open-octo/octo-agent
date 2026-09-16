@@ -88,7 +88,10 @@ octo config path   # print the file location
 `~/.octo/config.yml`, so a bare `octo` works without re-typing `--provider`/`--model` every time.
 
 <Aside type="note" title="Precedence">
-`CLI flag > env var > ~/.octo/config.yml > built-in default`. API keys are read from
+`CLI flag > env var > ~/.octo/config.yml`. The **model** falls back to a per-vendor default; the
+**vendor itself has none** — name it with `--provider`, `OCTO_PROVIDER`, or `octo config`. A key in
+the environment doesn't name one: it says which vendors you can reach, not which you meant, so an
+install that never names a vendor counts as unconfigured. API keys are read from
 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` first; the wizard can store one in the file (mode `0600`),
 but the env var is recommended.
 </Aside>

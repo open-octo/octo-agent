@@ -84,8 +84,10 @@ octo config path   # 打印配置文件路径
 这样裸跑 `octo` 就不用每次重敲 `--provider`/`--model` 了。
 
 <Aside type="note" title="优先级">
-**命令行 flag > 环境变量 > `~/.octo/config.yml` > 内置默认**。API key 优先从
-`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` 读取；向导可以把 key 存进文件（权限 `0600`），但更推荐用环境变量。
+**命令行 flag > 环境变量 > `~/.octo/config.yml`**。**模型**有各家的内置默认值，**用哪家没有默认值**——
+必须用 `--provider`、`OCTO_PROVIDER` 或 `octo config` 指明。环境变量里的 key 不算指明：它只说明你能连到哪些家，
+不代表你想用哪家，所以从没指明过用哪家的安装会被当作未配置。API key 优先从 `ANTHROPIC_API_KEY` /
+`OPENAI_API_KEY` 读取；向导可以把 key 存进文件（权限 `0600`），但更推荐用环境变量。
 </Aside>
 
 ## 通过代理访问

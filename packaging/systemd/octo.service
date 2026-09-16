@@ -22,7 +22,9 @@ Restart=always
 RestartSec=2
 # Secrets (API key, access key) live in an env file, not this unit. chmod 600 it.
 #   OCTO_ACCESS_KEY=...
-#   ANTHROPIC_API_KEY=...   (or OPENAI_API_KEY=..., etc.)
+#   OCTO_PROVIDER=anthropic (which vendor to use — required when config.yml is
+#                            empty; octo never picks one for you)
+#   ANTHROPIC_API_KEY=...   (that vendor's key; OPENAI_API_KEY=... etc.)
 #   OCTO_LOG_LEVEL=info
 EnvironmentFile=-%h/.octo/serve.env
 WorkingDirectory=%h

@@ -12,6 +12,8 @@ octo serve -addr :8088          # 暴露到局域网
 
 ## 环境变量
 
+完全用环境变量配置 octo（`config.yml` 里什么都不写）需要**两个**变量，不是一个：`OCTO_PROVIDER` 指定用哪家，那家的 key 负责鉴权。光有 key 只说明你**能**连到哪些家，不代表你想用哪家，所以 octo 不替你猜——没有 `OCTO_PROVIDER` 就当作没配置，照常要求你走配置流程。
+
 部分环境变量（`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`OCTO_ACCESS_KEY`、`OCTO_LOG_LEVEL`，以及 `TAVILY_API_KEY` 等搜索 key）在运行时控制 octo 的行为。通常由 shell profile export —— 但 **GUI 启动的进程不会继承这些变量**：桌面应用、launchd agent、`.desktop` session 启动时只拿到最小环境，不读 `~/.bashrc` / `~/.zprofile`。
 
 放一份 `~/.octo/serve.env` 即可统一覆盖所有启动方式：
@@ -19,6 +21,7 @@ octo serve -addr :8088          # 暴露到局域网
 ```bash
 cat > ~/.octo/serve.env << 'EOF'
 TAVILY_API_KEY=tvly-xxxxx
+OCTO_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-xxxxx
 OCTO_LOG_LEVEL=debug
 EOF

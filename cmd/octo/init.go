@@ -61,7 +61,7 @@ func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	provName, resolvedModel, entry, ok := resolveProviderModel(*providerName, *model, cfg)
 	if !ok {
-		fmt.Fprintf(stderr, "octo init: unknown provider %q (use 'anthropic' or 'openai')\n", provName)
+		fmt.Fprintln(stderr, providerSetupError(provName))
 		return 2
 	}
 

@@ -590,10 +590,15 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	// An unresolvable provider is reported where a sender is actually needed,
+	// not here. The checks between this line and that one — an unknown --agent,
+	// `-c` with no TTY, a session id matching nothing — describe what the user
+	// actually got wrong, and they only ran because provider resolution used to
+	// fall back to anthropic and therefore always succeeded.
 	provName, resolvedModel, entry, ok := resolveProviderModel(*providerName, *model, cfg)
+	providerErr := ""
 	if !ok {
-		fmt.Fprintf(stderr, "octo: unknown provider %q\n", provName)
-		return 2
+		providerErr = providerSetupError(provName)
 	}
 
 	// Install the Tool Search config so DefaultToolsFor can decide whether to
@@ -739,6 +744,11 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// the config wizard below, the manual export-a-key walkthrough would only
 	// duplicate (and contradict) the wizard — it's shown solely when the
 	// wizard can't run.
+	if providerErr != "" {
+		fmt.Fprintln(stderr, providerErr)
+		return 2
+	}
+
 	var senderDiag bytes.Buffer
 	llmSender, err := buildSender(provName, entry, &senderDiag, senderTuning{
 		thinkingBudget:  anthropicThinkingBudget(resolvedEffort),
@@ -759,7 +769,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			cfg, _ = config.Load()
 			provName, resolvedModel, entry, ok = resolveProviderModel(*providerName, *model, cfg)
 			if !ok {
-				fmt.Fprintf(stderr, "octo: unknown provider %q\n", provName)
+				fmt.Fprintln(stderr, providerSetupError(provName))
 				return 2
 			}
 			llmSender, err = buildSender(provName, entry, stderr, senderTuning{

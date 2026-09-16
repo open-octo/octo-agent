@@ -28,7 +28,9 @@
     <key>OCTO_LOG_LEVEL</key>
     <string>info</string>
     <!-- Set secrets here, or keep them in the user keychain / a sourced file.
-         ANTHROPIC_API_KEY / OPENAI_API_KEY / OCTO_ACCESS_KEY -->
+         OCTO_PROVIDER (which vendor — required when config.yml is empty; octo
+         never picks one for you) / ANTHROPIC_API_KEY / OPENAI_API_KEY /
+         OCTO_ACCESS_KEY -->
   </dict>
   <key>RunAtLoad</key>
   <true/>

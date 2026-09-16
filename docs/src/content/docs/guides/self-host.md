@@ -12,6 +12,11 @@ octo serve -addr :8088          # expose on the LAN
 
 ## Environment variables
 
+Configuring octo entirely through the environment — nothing in `config.yml` — takes **two**
+variables, not one: `OCTO_PROVIDER` names the vendor and that vendor's key authenticates to it. A
+key on its own says which vendors you *can* reach, never which one you meant, so octo does not
+guess; without `OCTO_PROVIDER` it treats the install as unconfigured and asks for setup.
+
 Some environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OCTO_ACCESS_KEY`,
 `OCTO_LOG_LEVEL`, search keys like `TAVILY_API_KEY`, …) control how octo behaves at runtime.
 Normally your shell profile exports them — but **GUI-launched processes don't inherit those**:
@@ -23,6 +28,7 @@ Drop a `~/.octo/serve.env` file to cover every launch mode uniformly:
 ```bash
 cat > ~/.octo/serve.env << 'EOF'
 TAVILY_API_KEY=tvly-xxxxx
+OCTO_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-xxxxx
 OCTO_LOG_LEVEL=debug
 EOF
