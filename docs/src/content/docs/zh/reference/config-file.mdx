@@ -28,6 +28,7 @@ flag。所有字段都是可选的——文件不存在，或者字段缺失，�
 | `coauthor` | bool | 在 agent 写的 git commit 里追加 `Co-authored-by`（默认 `true`） |
 | `access_key` | string | 暴露到回环之外时,Web UI / API 认证用的共享密钥 |
 | `compact_auto_pct` | int | 自动压缩阈值,按上下文窗口的百分比（默认 `75`）；同一个阈值在轮次之间和每个工具调用批次后都会检查 |
+| `fallback_context_window` | int | 模型名匹配不上任何内置条目时假定的上下文窗口，单位是 token（默认 `128000`）。只作用于兜底——内置表认识的模型仍用它自己的窗口。小于 1000 的值会被当成单位写错（把 32k 写成 32）拒绝 |
 | `reasoning_effort` | string | 全局推理强度：`low` \| `medium` \| `high` \| `xhigh` \| `max`；留空表示关闭 |
 | `show_reasoning` | bool | 是否把推理轨迹提供给 Web UI 的全局默认值 |
 | `workspace_dir` | string | 新建 Web 会话的默认工作目录；留空 → `~/Octo`，也可填写具体路径覆盖 |

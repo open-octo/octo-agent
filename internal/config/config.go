@@ -162,6 +162,11 @@ func (e Endpoint) CompositeID(model string) string {
 	return e.ID + "::" + model
 }
 
+// MinFallbackContextWindow is the floor for fallback_context_window. It exists
+// to catch the unit mistake (writing 32 to mean 32k), which would otherwise put
+// the compaction trigger below a single message. Not a claim about real models.
+const MinFallbackContextWindow = 1000
+
 // Config is the persisted set of CLI defaults. Every field is optional; a
 // missing file (or a missing field) leaves the zero value, and the caller
 // substitutes its built-in default.
@@ -202,6 +207,13 @@ type Config struct {
 	// compacts once the context exceeds this share of the window. Zero means
 	// the built-in default (75%).
 	CompactAutoPct int `yaml:"compact_auto_pct,omitempty"`
+	// FallbackContextWindow is the context window (in tokens) assumed for a
+	// model whose name matches no entry in the built-in table — a self-hosted
+	// or renamed model, where the built-in 128k guess may be far larger than
+	// what the serving process was actually started with. Zero means the
+	// built-in default. A model that DOES match the table keeps the table's
+	// value; this never overrides a known model.
+	FallbackContextWindow int `yaml:"fallback_context_window,omitempty"`
 	// Tools holds opt-in tooling behaviour (Tool Search for MCP, etc.). A
 	// missing block leaves the built-in defaults.
 	Tools ToolsConfig `yaml:"tools,omitempty"`
@@ -628,6 +640,14 @@ func (c Config) Validate() []string {
 	}
 	if c.CompactAutoPct < 0 || c.CompactAutoPct > 100 {
 		problems = append(problems, fmt.Sprintf("compact_auto_pct %d is out of range (0–100; 0 means the built-in default)", c.CompactAutoPct))
+	}
+	// No upper bound: million-token windows are real. The floor rejects the
+	// mistake that actually happens — writing "32" for 32k, which would put the
+	// compaction trigger below a single message.
+	if c.FallbackContextWindow < 0 {
+		problems = append(problems, fmt.Sprintf("fallback_context_window %d is negative (0 means the built-in default)", c.FallbackContextWindow))
+	} else if c.FallbackContextWindow > 0 && c.FallbackContextWindow < MinFallbackContextWindow {
+		problems = append(problems, fmt.Sprintf("fallback_context_window %d is below the %d-token floor — the value is in tokens, so 32k is 32000, not 32", c.FallbackContextWindow, MinFallbackContextWindow))
 	}
 	if lang := strings.ToLower(strings.TrimSpace(c.Language)); lang != "" && lang != "en" && lang != "zh" {
 		problems = append(problems, fmt.Sprintf("language %q is not one of en, zh", c.Language))

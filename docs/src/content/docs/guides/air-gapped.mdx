@@ -150,22 +150,28 @@ octo resolves a model's context window by **substring-matching its name**, and u
 when to auto-compact history (at 75% of the window by default). An internal model's name usually
 matches no entry, in which case octo treats it as **128k**.
 
-That is an assumption, unrelated to what your server will actually accept. The same holds when a
-name does happen to match a built-in entry — the table records that model's published ceiling, not
-the size your deployment was started with.
-
-When the real window is smaller than 128k, lower the trigger point proportionally with
-`compact_auto_pct`. The percentage is relative to the window octo assumes:
-
-```
-compact_auto_pct ≈ real window ÷ 128000 × 75      (round down)
-```
-
-For a real window of 32k, `32000 ÷ 128000 × 75 ≈ 18` — round down for headroom:
+That is an assumption, unrelated to what your server will actually accept. Tell it the real number
+instead:
 
 ```yaml
-compact_auto_pct: 15      # 0–100; 0 means the built-in default (75)
+fallback_context_window: 32000      # tokens — 32k is 32000, not 32
 ```
+
+The flag and environment variable work too, in the order flag > env > config file:
+
+```bash
+octo --fallback-context-window 32000
+OCTO_FALLBACK_CONTEXT_WINDOW=32000 octo serve -d
+```
+
+Values below 1000 are rejected with a note about the units — that is almost always 32k written as
+`32`, and honoring it literally would put the compaction trigger below a single message.
+
+**It applies to the fallback only.** A model whose name does match a built-in entry keeps the
+table's window, so setting this can never mask a known model's real size. The trade-off is that the
+table records a model's *published* ceiling, which need not be what your deployment was started
+with; when those disagree, lower the trigger globally with `compact_auto_pct` (a percentage of the
+context window, default 75).
 
 <Aside type="note" title="Getting it wrong is not a hard failure">
 If a turn does overflow, octo recognizes the endpoint's context-overflow error, compacts history

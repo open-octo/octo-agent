@@ -74,6 +74,12 @@ func TestConfigValidate_GlobalScalars(t *testing.T) {
 		{"in-range compact_auto_pct", Config{CompactAutoPct: 75}, ""},
 		{"negative compact_auto_pct", Config{CompactAutoPct: -1}, "compact_auto_pct"},
 		{"over-100 compact_auto_pct", Config{CompactAutoPct: 150}, "compact_auto_pct"},
+		{"zero fallback_context_window is the default", Config{FallbackContextWindow: 0}, ""},
+		{"plausible fallback_context_window", Config{FallbackContextWindow: 32000}, ""},
+		{"negative fallback_context_window", Config{FallbackContextWindow: -1}, "fallback_context_window"},
+		// The unit mistake: 32 meaning 32k. Honoring it would put the
+		// compaction trigger below a single message.
+		{"fallback_context_window written in k", Config{FallbackContextWindow: 32}, "fallback_context_window"},
 		{"empty language is fine", Config{}, ""},
 		{"valid language zh", Config{Language: "zh"}, ""},
 		{"bad language", Config{Language: "fr"}, "language"},

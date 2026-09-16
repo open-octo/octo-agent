@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -26,10 +27,46 @@ const minFoldPercent = 15
 // kept tail, the summary side-call, and the next turn's output.
 const compactThresholdFraction = 0.75
 
-// defaultContextWindow is the conservative fallback window (in tokens) for
-// models not named in contextWindow. Under-estimating only makes us compact
-// slightly earlier — never overflow — so unknown models stay safe.
+// defaultContextWindow is the built-in fallback window (in tokens) for models
+// not named in lookupContextWindow, used when no fallback has been configured.
+// Conservative for a cloud model, but a self-hosted server is often started
+// with far less than this — see SetFallbackContextWindow.
 const defaultContextWindow = 128_000
+
+var (
+	fallbackWindowMu sync.RWMutex
+	fallbackWindow   int // 0 = use defaultContextWindow
+)
+
+// SetFallbackContextWindow installs the context window assumed for models whose
+// name matches no entry in the built-in table — a self-hosted or renamed model,
+// where the built-in 128k is a guess that the serving process may not honor.
+// n <= 0 restores the built-in default.
+//
+// Deliberately scoped to the fallback: a model that DOES match keeps the
+// table's value, so configuring this can never mask a known model's real
+// window. Installed at startup from --fallback-context-window /
+// OCTO_FALLBACK_CONTEXT_WINDOW / config.yml, and re-installed when the config
+// changes — mirroring tools.SetToolSearchConfig.
+func SetFallbackContextWindow(n int) {
+	if n < 0 {
+		n = 0
+	}
+	fallbackWindowMu.Lock()
+	fallbackWindow = n
+	fallbackWindowMu.Unlock()
+}
+
+// FallbackContextWindow reports the window currently assumed for unknown
+// models — the configured value, else the built-in default.
+func FallbackContextWindow() int {
+	fallbackWindowMu.RLock()
+	defer fallbackWindowMu.RUnlock()
+	if fallbackWindow > 0 {
+		return fallbackWindow
+	}
+	return defaultContextWindow
+}
 
 // ContextWindow exposes contextWindow to other packages (e.g. the tools layer's
 // Tool Search threshold) without duplicating the model→window table.
@@ -43,7 +80,7 @@ func ContextWindowKnown(model string) (int, bool) {
 	if w := lookupContextWindow(model); w > 0 {
 		return w, true
 	}
-	return defaultContextWindow, false
+	return FallbackContextWindow(), false
 }
 
 // contextWindow is lookupContextWindow with the fallback applied.
@@ -51,7 +88,7 @@ func contextWindow(model string) int {
 	if w := lookupContextWindow(model); w > 0 {
 		return w
 	}
-	return defaultContextWindow
+	return FallbackContextWindow()
 }
 
 // EstimateTokens exposes estimateMessages to other packages (e.g. the web

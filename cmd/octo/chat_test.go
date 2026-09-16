@@ -990,3 +990,47 @@ func TestResumeModelRef(t *testing.T) {
 		t.Errorf("bound session ref = %q, want ep-b::deepseek-v4-flash", got)
 	}
 }
+
+// The documented precedence — flag > env > config — plus the guard on the unit
+// mistake. A rejected layer falls through to the next one rather than
+// disabling the feature: an operator who fat-fingers the flag still gets the
+// window their config file asks for.
+func TestResolveFallbackContextWindow(t *testing.T) {
+	cfg := config.Config{FallbackContextWindow: 40_000}
+	var buf bytes.Buffer
+
+	t.Setenv("OCTO_FALLBACK_CONTEXT_WINDOW", "32000")
+	if got := resolveFallbackContextWindow(24_000, cfg, &buf); got != 24_000 {
+		t.Errorf("flag = %d, want 24000 (flag beats env and config)", got)
+	}
+	if got := resolveFallbackContextWindow(0, cfg, &buf); got != 32_000 {
+		t.Errorf("env = %d, want 32000 (env beats config)", got)
+	}
+
+	t.Setenv("OCTO_FALLBACK_CONTEXT_WINDOW", "")
+	if got := resolveFallbackContextWindow(0, cfg, &buf); got != 40_000 {
+		t.Errorf("config = %d, want 40000", got)
+	}
+	if got := resolveFallbackContextWindow(0, config.Config{}, &buf); got != 0 {
+		t.Errorf("nothing configured = %d, want 0 (leaves the built-in default)", got)
+	}
+
+	// 32 means 32k to a human and 32 tokens to the code. Rejected, with the
+	// units spelled out, and the next layer still applies.
+	buf.Reset()
+	if got := resolveFallbackContextWindow(32, cfg, &buf); got != 40_000 {
+		t.Errorf("flag in k = %d, want 40000 (falls through to config)", got)
+	}
+	if !strings.Contains(buf.String(), "32000, not 32") {
+		t.Errorf("warning %q does not explain the units", buf.String())
+	}
+
+	t.Setenv("OCTO_FALLBACK_CONTEXT_WINDOW", "lots")
+	buf.Reset()
+	if got := resolveFallbackContextWindow(0, cfg, &buf); got != 40_000 {
+		t.Errorf("non-numeric env = %d, want 40000 (falls through to config)", got)
+	}
+	if !strings.Contains(buf.String(), "not a number") {
+		t.Errorf("warning %q does not name the problem", buf.String())
+	}
+}

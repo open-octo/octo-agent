@@ -1036,3 +1036,76 @@ func TestIsPlainUserMessage(t *testing.T) {
 		}
 	}
 }
+
+// The configured fallback applies to models the table doesn't know, and to
+// nothing else. Scoping it this way is the whole design: a self-hosted server
+// started with a small window needs a smaller assumption, but a model the table
+// DOES know must keep its real window rather than being flattened to whatever
+// the operator guessed for the unknown case.
+//
+// Not parallel, and always restored: the fallback is process-wide state, and
+// TestCompactTriggerTokens asserts against defaultContextWindow.
+func TestFallbackContextWindow(t *testing.T) {
+	t.Cleanup(func() { SetFallbackContextWindow(0) })
+
+	if got := contextWindow("some-internal-llm"); got != defaultContextWindow {
+		t.Fatalf("unconfigured fallback = %d, want the built-in %d", got, defaultContextWindow)
+	}
+
+	SetFallbackContextWindow(24_000)
+
+	if got := contextWindow("some-internal-llm"); got != 24_000 {
+		t.Errorf("unknown model window = %d, want the configured 24000", got)
+	}
+	// A known model keeps the table's value — including one whose window is
+	// far LARGER than the fallback...
+	if got := contextWindow("claude-sonnet-5"); got != 1_000_000 {
+		t.Errorf("known large model window = %d, want 1000000 (fallback must not apply)", got)
+	}
+	// ...and one whose window is far SMALLER, which the fallback must not
+	// inflate.
+	if got := contextWindow("llama-3"); got != 8_000 {
+		t.Errorf("known small model window = %d, want 8000 (fallback must not apply)", got)
+	}
+
+	// The reported value follows the configuration, but the model is still
+	// reported as unknown — app's registry-coverage test depends on that flag
+	// meaning "matched an entry", not "has a plausible number".
+	if w, known := ContextWindowKnown("some-internal-llm"); known || w != 24_000 {
+		t.Errorf("ContextWindowKnown = (%d, %v), want (24000, false)", w, known)
+	}
+
+	// Zero and negative both mean "unset".
+	SetFallbackContextWindow(0)
+	if got := contextWindow("some-internal-llm"); got != defaultContextWindow {
+		t.Errorf("after reset, window = %d, want the built-in %d", got, defaultContextWindow)
+	}
+	SetFallbackContextWindow(-5)
+	if got := contextWindow("some-internal-llm"); got != defaultContextWindow {
+		t.Errorf("negative fallback = %d, want the built-in %d", got, defaultContextWindow)
+	}
+}
+
+// The fallback has to reach the thing it exists for: when to compact. A
+// self-hosted 24k model should start compacting at 18k, not at the 96k that the
+// built-in 128k assumption implies — by which point the server has long since
+// rejected the turn.
+func TestFallbackContextWindowDrivesCompactionTrigger(t *testing.T) {
+	t.Cleanup(func() { SetFallbackContextWindow(0) })
+
+	a := New(&summarizeFake{}, "some-internal-llm")
+
+	builtIn := a.compactTriggerTokens()
+	if want := int(float64(defaultContextWindow) * compactThresholdFraction); builtIn != want {
+		t.Fatalf("unconfigured trigger = %d, want %d", builtIn, want)
+	}
+
+	SetFallbackContextWindow(24_000)
+	got := a.compactTriggerTokens()
+	if want := int(float64(24_000) * compactThresholdFraction); got != want {
+		t.Errorf("configured trigger = %d, want %d (75%% of 24000)", got, want)
+	}
+	if got >= builtIn {
+		t.Errorf("trigger %d did not drop below the built-in %d", got, builtIn)
+	}
+}

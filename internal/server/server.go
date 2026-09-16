@@ -468,6 +468,11 @@ func New(cfg Config) (*Server, error) {
 	skillReg.SetDisabled(fileCfg.Tools.DisabledSkills)
 	skillsManifest := tools.SkillsManifest(skillReg)
 	tools.SetSkills(skillReg)
+	// Process-wide, like SetSkills above: the Tool Search budget and the web
+	// UI's context gauge resolve a window from the model name with no Config in
+	// hand. Re-installed per turn below so a config edit lands without a
+	// restart.
+	agent.SetFallbackContextWindow(fileCfg.FallbackContextWindow)
 
 	// Resolve the default workspace dir new web sessions get. cfg.WorkspaceDir
 	// (no `octo serve` flag sets it today) takes precedence so tests can inject
@@ -1334,6 +1339,10 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 		if cfg.CompactAutoPct > 0 {
 			a.CompactAutoFraction = float64(cfg.CompactAutoPct) / 100.0
 		}
+		// Same reason, for the window assumed for models the built-in table
+		// doesn't know. Process-wide rather than per-Agent: the readers that
+		// need it (Tool Search, the context gauge) never see this Agent.
+		agent.SetFallbackContextWindow(cfg.FallbackContextWindow)
 	}
 
 	// Refresh the external memory backend from config before reading
@@ -3520,6 +3529,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	if cfg.CompactAutoPct > 0 {
 		sess.Agent.CompactAutoFraction = float64(cfg.CompactAutoPct) / 100.0
 	}
+	agent.SetFallbackContextWindow(cfg.FallbackContextWindow)
 	// The composed system prompt is frozen the first time a turn builds this
 	// channel session (see Session.SetComposedSystem) — every later turn
 	// reuses the identical string instead of recomposing it, matching the web

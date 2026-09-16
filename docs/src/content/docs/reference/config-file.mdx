@@ -30,6 +30,7 @@ anything friendly.
 | `coauthor` | bool | Append `Co-authored-by` to git commits the agent writes (default `true`) |
 | `access_key` | string | Shared secret for Web UI / API auth when exposed beyond loopback |
 | `compact_auto_pct` | int | Auto-compaction threshold as % of the context window (default `75`); the same threshold is checked both between turns and after each tool-call batch |
+| `fallback_context_window` | int | Context window in tokens assumed for a model whose name matches no built-in entry (default `128000`). Applies only to the fallback — a model the table knows keeps its own window. Values below 1000 are rejected as the unit mistake (32 meaning 32k) |
 | `reasoning_effort` | string | Global reasoning intensity: `low` \| `medium` \| `high` \| `xhigh` \| `max`; empty means off |
 | `show_reasoning` | bool | Global default for surfacing the reasoning trace to the Web UI |
 | `workspace_dir` | string | Default working dir for new web sessions; empty → `~/Octo`, or set a literal path to override |

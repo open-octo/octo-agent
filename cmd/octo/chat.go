@@ -282,6 +282,44 @@ func resolveMaxTokensEscalate(flagVal int, provName string) int {
 	return escalateMaxTokensAnthropic
 }
 
+// resolveFallbackContextWindow picks the window assumed for models the built-in
+// table doesn't know: an explicit flag wins, then OCTO_FALLBACK_CONTEXT_WINDOW,
+// then config.yml. 0 at every layer leaves agent's built-in default in place.
+//
+// A value below config.MinFallbackContextWindow is the unit mistake (32 for
+// 32k) and is ignored rather than honored — honoring it would drive the
+// compaction trigger below a single message. config.Validate reports the same
+// thing for the config-file layer; this guards the flag and env layers, which
+// never pass through Validate.
+func resolveFallbackContextWindow(flagVal int, cfg config.Config, stderr io.Writer) int {
+	pick := func(n int, src string) (int, bool) {
+		if n <= 0 {
+			return 0, false
+		}
+		if n < config.MinFallbackContextWindow {
+			fmt.Fprintf(stderr, "octo: ignoring %s %d — the value is in tokens, so 32k is 32000, not 32\n", src, n)
+			return 0, false
+		}
+		return n, true
+	}
+	if n, ok := pick(flagVal, "--fallback-context-window"); ok {
+		return n
+	}
+	if env := strings.TrimSpace(os.Getenv("OCTO_FALLBACK_CONTEXT_WINDOW")); env != "" {
+		if n, err := strconv.Atoi(env); err == nil {
+			if n, ok := pick(n, "OCTO_FALLBACK_CONTEXT_WINDOW"); ok {
+				return n
+			}
+		} else {
+			fmt.Fprintf(stderr, "octo: ignoring OCTO_FALLBACK_CONTEXT_WINDOW %q — not a number\n", env)
+		}
+	}
+	if n, ok := pick(cfg.FallbackContextWindow, "fallback_context_window"); ok {
+		return n
+	}
+	return 0
+}
+
 // openMCPLogFile opens ~/.octo/logs/mcp.log (append) to receive stdio MCP
 // servers' child stderr while the TUI owns the screen, so their diagnostics are
 // recoverable rather than corrupting the frame. Returns nil on any failure; the
@@ -497,6 +535,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	maxTurns := fs.Int("max-turns", 0, "Max provider round-trips per message in the agentic loop (0 = auto: 1000 interactive, unlimited unattended/--prompt-file)")
 	compactThreshold := fs.Int("compact-threshold", 0, "Compact older history once a turn's input crosses this many tokens; 0 = auto (percentage of the model's context window, settable via --compact-auto-pct or config), <0 = disabled")
 	compactAutoPct := fs.Int("compact-auto-pct", 0, "Auto-compaction threshold as a percentage of the model's context window (0 = use `octo config` or built-in default 75). Only used when --compact-threshold=0.")
+	fallbackContextWindow := fs.Int("fallback-context-window", 0, "Context window in tokens to assume for a model whose name matches no built-in entry — a self-hosted or renamed model (0 = use `octo config`, OCTO_FALLBACK_CONTEXT_WINDOW, else the built-in 128000). Never overrides a model the built-in table knows.")
 	reasoningEffort := fs.String("reasoning-effort", "", "Reasoning intensity: off | low | medium | high | xhigh | max (empty = use `octo config`/default; 'off' forces it off for this run). OpenAI → reasoning_effort; Anthropic → adaptive thinking + effort.")
 	showReasoning := fs.Bool("show-reasoning", false, "Surface the reasoning/thinking trace for the Web UI (octo serve) to display. The terminal never renders it. Default off; also from `octo config`.")
 	useSandbox := fs.Bool("sandbox", false, "Confine terminal commands to the project dir + tmp with no network (OS-enforced; macOS/Linux). Fails closed if unavailable.")
@@ -573,6 +612,12 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// Install the Tool Search config so DefaultToolsFor can decide whether to
 	// defer MCP schemas behind the search/describe/call bridge for this model.
 	tools.SetToolSearchConfig(toolSearchConfigFrom(cfg.Tools.ToolSearch))
+
+	// Install the assumed window for models the built-in table doesn't know.
+	// Process-wide like the Tool Search config: the compaction threshold, the
+	// Tool Search budget and the TUI's ctx gauge all resolve it from the model
+	// name alone, with no Config in hand.
+	agent.SetFallbackContextWindow(resolveFallbackContextWindow(*fallbackContextWindow, cfg, stderr))
 
 	// Resolve reasoning controls: --reasoning-effort sets the intensity (OpenAI
 	// reasoning_effort / mapped Anthropic budget); --show-reasoning gates whether
