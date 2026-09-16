@@ -10,10 +10,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "dompurify": "^3.4.14",
+    "dompurify": "^3.4.15",
     "highlight.js": "^11.12.0",
     "html2canvas": "^1.4.1",
-    "marked": "^18.0.11",
+    "marked": "^18.0.13",
     "mermaid": "^11.17.2",
     "qrcode": "^1.5.4"
   },
@@ -27,7 +27,7 @@
     "svelte": "^5.57.0",
     "svelte-check": "^4.7.6",
     "typescript": "^6.0.3",
-    "vite": "^8.2.2",
+    "vite": "^8.3.0",
     "vitest": "^4.1.11"
   }
 }
