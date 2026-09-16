@@ -1,0 +1,172 @@
+---
+title: Quickstart
+description: From a running server to a personalised assistant, in your browser.
+---
+
+import { Tabs, TabItem, Steps, Aside } from '@astrojs/starlight/components';
+
+octo runs as a local server with a web UI in front of it. You start the server once, open it in a
+browser, and everything after that — connecting a model, personalising the assistant, doing actual
+work — happens on the page. Nothing leaves your machine except the calls to whichever model provider
+you pick.
+
+This walkthrough takes about five minutes, most of it spent talking to the assistant.
+
+## 1 · Start the server
+
+<Tabs syncKey="entry">
+<TabItem label="Command line">
+
+```bash
+octo serve -d
+```
+
+`-d` runs it in the background. It binds `127.0.0.1:8088` and prints the URL to open:
+
+```
+octo server listening on http://127.0.0.1:8088
+```
+
+Two more you'll want eventually:
+
+```bash
+octo serve --status   # is it running, and on what
+octo serve --stop     # shut it down
+```
+
+</TabItem>
+<TabItem label="Desktop app">
+
+The desktop app **is** the server — it starts the same thing on `127.0.0.1:8088`, wraps it in a
+native window, and keeps it alive in the tray/menu bar after you close the window. Editors,
+browsers and phones on your network talk to that one instance.
+
+Launch it and skip to step 3; the window opens on the same UI this page describes.
+
+</TabItem>
+</Tabs>
+
+## 2 · Open the dashboard
+
+Go to **http://127.0.0.1:8088**.
+
+<Aside type="tip" title="No key needed on your own machine">
+`127.0.0.1` is loopback, which octo trusts implicitly. An access key only comes into play once you
+bind wider (`-addr :8088`) so other machines can reach it — see [Self-host](/docs/guides/self-host/).
+</Aside>
+
+## 3 · First-run setup
+
+A fresh install opens a setup panel — **Welcome to Octo** — that blocks the rest of the UI until a
+model is connected. The agent can't do anything without one, so this part is a form rather than a
+chat.
+
+<Steps>
+
+1. **Language.** English or 简体中文. This sets the interface language and the language the
+   assistant will talk to you in. **Continue →**
+
+2. **Connect model.** Pick a **Provider** from the dropdown — OpenAI, Anthropic, OpenRouter, xAI,
+   DeepSeek, Minimax, Kimi, Kimi Coding Plan, GLM, Bailian, MiMo, LongCat — or **Custom** for
+   anything else. A preset fills in its own base URL and protocol, so you only supply the **Model**
+   and **API Key**.
+
+   **Custom** adds a **Protocol** selector (OpenAI Chat Completions or Anthropic Messages) and lets
+   you point **Base URL** anywhere. For a local server such as Ollama or vLLM, leave the API key
+   empty — the field says so.
+
+   **Test & Continue →** sends one real request before saving, so a wrong key or an unreachable
+   base URL fails here rather than on your first message.
+
+3. **Browser automation (optional).** octo can drive your real, logged-in browser — clicking,
+   typing, replaying workflows. It needs remote debugging switched on in that browser, and the
+   panel walks you through it. **Skip for now** is fine; Settings has the same setup later.
+
+</Steps>
+
+## 4 · Meet your assistant
+
+Finishing setup drops you into a session called **✨ Onboard** with one message already sent:
+`/onboard`. This is a real conversation, not a form — answer in your own words, and edit anything
+later.
+
+It asks, in order:
+
+- **What to call it.** It suggests a few names; type whatever you like. Blank keeps "Octo".
+- **What personality it should have** — Professional, Friendly, Creative or Concise. These arrive as
+  clickable cards.
+- **Who you are.** Name, occupation, what you want to use it for, and any links (GitHub, a personal
+  site). All optional. Given a link, it reads the public page to learn about you.
+- **Three preferences.** Permission mode (ask before sensitive tool calls, or auto-approve),
+  reasoning effort, and whether to show the reasoning trace.
+
+Out of that it writes two files:
+
+| File | Holds |
+|---|---|
+| `~/.octo/soul.md` | Who the assistant is — its name, personality, how it works |
+| `~/.octo/user.md` | Who you are — the profile it carries into every session |
+
+Both are plain Markdown you can edit by hand. To redo any part of it later, just ask — "change your
+personality", "update my profile" — and the same flow runs for that one piece.
+
+<Aside>
+Interrupting onboarding is fine — it won't nag you on every restart. Everything it writes lives
+under **Settings → Data Management → Assistant Memory → Manage**, which shows **Soul**, **User** and
+**Memories** side by side with a **Have the Assistant Update This** button on each.
+</Aside>
+
+## 5 · Your first real task
+
+The composer at the bottom is where everything happens. Enter sends, Shift+Enter makes a newline,
+and `/` opens the skill list.
+
+Ask for something that requires doing rather than answering:
+
+```text
+Look at the files in ~/Downloads, tell me what's taking the most space,
+and move anything older than a year into an Archive folder.
+```
+
+Tools — shell, file read/write/edit, search, web fetch — are on by default, so it will actually go
+and do that. What each run touches is visible in the transcript as tool cards, and if your
+permission mode is interactive it asks before anything sensitive.
+
+A few things worth knowing about the screen you're on:
+
+- **Left rail** — **New Session** starts a fresh one; **Recent** lists saved sessions; **Scheduled
+  Tasks** and **Light Apps** are covered in the guides; **Settings** sits at the bottom.
+- **Composer bar** — the model picker, reasoning toggle, a **Context** percentage showing how full
+  the window is, and the permission mode.
+- **Session header** — **Compact** summarises a long conversation to reclaim context; **Export**
+  writes it out as MD, JSON, PDF, PNG or HTML (pick more than one, and choose whether tool calls
+  come along).
+
+## Where things live
+
+Everything octo keeps is under `~/.octo/` (`%USERPROFILE%\.octo\` on Windows): `config.yml` for
+endpoints and preferences, `sessions/` for transcripts, `soul.md` and `user.md` for identity,
+`skills/` for anything you add. Plain files, yours to read, edit, version or delete.
+
+## Next
+
+- [Choose a provider](/docs/getting-started/choose-a-provider/) — what to connect, and what it costs
+- [Use skills](/docs/guides/use-skills/) — teach it a repeatable procedure
+- [Connect MCP servers](/docs/guides/connect-mcp-servers/) — give it your own tools
+- [Self-host](/docs/guides/self-host/) — reach this server from your phone or another machine
+
+## Prefer the terminal?
+
+The same agent runs headless. With a provider already configured through the steps above, no extra
+setup is needed:
+
+```bash
+octo "Add a --json flag to 'octo config show' and run the tests"
+
+echo "Summarise what changed in the last commit" | octo   # from a pipe
+octo --prompt-file ./task.md                              # or a file
+```
+
+Run `octo` with no message for the interactive terminal UI, `octo sessions` to list saved sessions,
+and `octo -c` to resume one. `octo config` walks through provider setup without touching the
+browser.
