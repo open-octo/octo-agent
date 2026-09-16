@@ -97,6 +97,13 @@ func (b *nativeBridge) watchPetPointer(w *application.WebviewWindow) {
 	// Mirrors the window's initial state (IgnoreMouseEvents is unset in the
 	// options), so the first flip is only sent when it actually differs.
 	ignoring := false
+	// The webview builds its view tree as the page loads, so the first patch
+	// has to wait for it; it is re-applied whenever the window becomes solid
+	// again, since a view created later would still eat the first click.
+	patchFirstMouse := func() {
+		application.InvokeSync(func() { petAcceptFirstMouse(w.NativeWindow()) })
+	}
+	patched := false
 
 	for range t.C {
 		if b.pet.Load() != w {
@@ -124,6 +131,14 @@ func (b *nativeBridge) watchPetPointer(w *application.WebviewWindow) {
 		if want != ignoring {
 			ignoring = want
 			w.SetIgnoreMouseEvents(want)
+		}
+		if !ignoring && !patched {
+			patched = true
+			patchFirstMouse()
+		} else if ignoring {
+			// Re-patch next time it goes solid: the cursor leaving and coming
+			// back is exactly when a first click would be lost.
+			patched = false
 		}
 	}
 }
@@ -179,6 +194,11 @@ func (b *nativeBridge) showPet() {
 			PanelPreferences: application.MacPanelPreferences{
 				FloatingPanel: true,
 				NonActivating: true,
+				// The pet never wants the keyboard, so it should not take key
+				// status away from whatever the user is typing into. (This is
+				// NOT what makes a first click land — that needs
+				// acceptsFirstMouse, see petAcceptFirstMouse.)
+				BecomesKeyOnlyIfNeeded: true,
 			},
 		},
 	}
