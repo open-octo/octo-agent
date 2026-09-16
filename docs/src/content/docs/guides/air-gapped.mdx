@@ -153,11 +153,14 @@ the true value in two ways, both of them **over**-estimates:
 - **The name matches no entry** — common for internally renamed models, which then fall back
   to 128k.
 - **The name matches, but the value doesn't fit your deployment.** This one is subtler:
-  `Qwen3-32B` matches the `qwen3` entry and gets 128k, which is the YaRN-extended ceiling for the
-  Qwen3 family — while vLLM's `--max-model-len` defaults to 32k. A match is not a correct value.
+  `Qwen3-32B` matches the `qwen3` entry and gets 128k — the YaRN-extended (factor 4.0) ceiling —
+  while a server started without an explicit length derives it from the model's `config.json`
+  `max_position_embeddings`, which for Qwen3-32B is **40960**. Same model: octo assumes 128k, the
+  server serves 40960. A match is not a correct value.
 
-**Go by the `--max-model-len` (or equivalent) you actually started the server with**, not by the
-ceiling on the model card.
+**Go by the context length the server actually started with**, not by the ceiling on the model
+card. In vLLM that's `--max-model-len` — the total budget **shared** by prompt and output, with no
+fixed default of its own (unset, it derives as above); SGLang spells it `--context-length`.
 
 When the real window is smaller than what octo assumes, compensate with `compact_auto_pct`. The
 percentage is relative to the window octo assumes, so:
@@ -166,10 +169,10 @@ percentage is relative to the window octo assumes, so:
 compact_auto_pct ≈ real window ÷ assumed window × 75      (round down)
 ```
 
-A real 32k against an assumed 128k gives `32 ÷ 128 × 75 ≈ 18` — round down for headroom:
+A real 40960 against an assumed 128k gives `40960 ÷ 128000 × 75 = 24` — round down for headroom:
 
 ```yaml
-compact_auto_pct: 15      # 0–100; 0 means the built-in default (75)
+compact_auto_pct: 20      # 0–100; 0 means the built-in default (75)
 ```
 
 <Aside type="note" title="Getting it wrong is not a hard failure">
