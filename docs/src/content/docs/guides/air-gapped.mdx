@@ -77,9 +77,9 @@ endpoints:
     base_url: http://10.0.0.20:8000/v1
     # api_key: <only if your gateway requires one; otherwise drop this line>
     models:
-      - model: Qwen3-32B
+      - model: your-model-name
         vision: false
-default: intranet::Qwen3-32B
+default: intranet::your-model-name
 ```
 
 **Choosing `protocol`**: vLLM, Ollama, Xinference, LMDeploy and most self-hosted serving stacks
@@ -144,44 +144,35 @@ online — see [Self-host octo serve](/docs/guides/self-host/).
 | Desktop AppImage | Needs GTK4 + WebKitGTK 6.0 on the host, often missing on hardened or older distros. **Prefer the CLI plus `octo serve` in a browser** — same feature set |
 | Image understanding | Depends on whether your internal model supports it. Set `vision: true/false` on the model entry honestly |
 
-### Calibrate the context window for a self-hosted model
+### Context windows and auto-compaction
 
 octo resolves a model's context window by **substring-matching its name**, and uses that to decide
-when to auto-compact history (at 75% of the window by default). Self-hosted deployments drift from
-the true value in two ways, both of them **over**-estimates:
+when to auto-compact history (at 75% of the window by default). An internal model's name usually
+matches no entry, in which case octo treats it as **128k**.
 
-- **The name matches no entry** — common for internally renamed models, which then fall back
-  to 128k.
-- **The name matches, but the value doesn't fit your deployment.** This one is subtler:
-  `Qwen3-32B` matches the `qwen3` entry and gets 128k — the YaRN-extended (factor 4.0) ceiling —
-  while a server started without an explicit length derives it from the model's `config.json`
-  `max_position_embeddings`, which for Qwen3-32B is **40960**. Same model: octo assumes 128k, the
-  server serves 40960. A match is not a correct value.
+That is an assumption, unrelated to what your server will actually accept. The same holds when a
+name does happen to match a built-in entry — the table records that model's published ceiling, not
+the size your deployment was started with.
 
-**Go by the context length the server actually started with**, not by the ceiling on the model
-card. In vLLM that's `--max-model-len` — the total budget **shared** by prompt and output, with no
-fixed default of its own (unset, it derives as above); SGLang spells it `--context-length`.
-
-When the real window is smaller than what octo assumes, compensate with `compact_auto_pct`. The
-percentage is relative to the window octo assumes, so:
+When the real window is smaller than 128k, lower the trigger point proportionally with
+`compact_auto_pct`. The percentage is relative to the window octo assumes:
 
 ```
-compact_auto_pct ≈ real window ÷ assumed window × 75      (round down)
+compact_auto_pct ≈ real window ÷ 128000 × 75      (round down)
 ```
 
-A real 40960 against an assumed 128k gives `40960 ÷ 128000 × 75 = 24` — round down for headroom:
+For a real window of 32k, `32000 ÷ 128000 × 75 ≈ 18` — round down for headroom:
 
 ```yaml
-compact_auto_pct: 20      # 0–100; 0 means the built-in default (75)
+compact_auto_pct: 15      # 0–100; 0 means the built-in default (75)
 ```
 
 <Aside type="note" title="Getting it wrong is not a hard failure">
-If a turn does overflow, octo recognizes the endpoint's context-overflow error (including the
-standard `maximum context length is …` shape vLLM emits), compacts history and retries once,
-parsing the real ceiling out of the error message to decide how much to free. The cost is an extra
-round trip and a visibly slower turn — so **an occasional stall usually means this threshold needs
-tuning**, not that the model is slow. Each turn retries only once; if it still overflows after
-compaction, it fails for real.
+If a turn does overflow, octo recognizes the endpoint's context-overflow error, compacts history
+and retries once, parsing the real ceiling out of the error message to decide how much to free. The
+cost is an extra round trip and a visibly slower turn — so **an occasional stall usually means this
+threshold needs tuning**, not that the model is slow. Each turn retries only once; if it still
+overflows after compaction, it fails for real.
 </Aside>
 
 ### Turning off the outbound tools
