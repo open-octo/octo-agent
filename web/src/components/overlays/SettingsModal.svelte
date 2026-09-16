@@ -520,19 +520,21 @@
             </div>
             <Segment options={['Small', 'Medium', 'Large']} labels={{ Small: $t('settings.fs_small'), Medium: $t('settings.fs_medium'), Large: $t('settings.fs_large') }} bind:value={fontSize} />
           </div>
-          <div class="setrow">
-            <div class="seti">
-              <span class="setl">{$t('settings.theme')}</span>
-              <span class="setd">{$t('settings.theme_desc')}</span>
-            </div>
-            <Segment options={['Light', 'Dark', 'System']} labels={{ Light: $t('settings.theme_light'), Dark: $t('settings.theme_dark'), System: $t('settings.theme_system') }} bind:value={theme} />
-          </div>
+          <!-- Theme before Appearance: the pack is the bigger choice, and
+               appearance reads as a modifier of it rather than the reverse. -->
           <div class="setrow">
             <div class="seti">
               <span class="setl">{$t('settings.pack')}</span>
               <span class="setd">{$t('settings.pack_desc')}</span>
             </div>
             <ThemePackPicker />
+          </div>
+          <div class="setrow">
+            <div class="seti">
+              <span class="setl">{$t('settings.theme')}</span>
+              <span class="setd">{$t('settings.theme_desc')}</span>
+            </div>
+            <Segment options={['Light', 'Dark', 'System']} labels={{ Light: $t('settings.theme_light'), Dark: $t('settings.theme_dark'), System: $t('settings.theme_system') }} bind:value={theme} />
           </div>
           {#if $nativeShell}
             <div class="setrow">
