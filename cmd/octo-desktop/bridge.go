@@ -902,17 +902,14 @@ func (b *nativeBridge) Heartbeat(frameAgeMS int64, hidden bool) {
 
 // confirm shows a modal question dialog and reports whether the user chose the
 // affirmative button. The cancel button is the safe default.
+//
+// Both askers reach it while the app may well not be the active one — the
+// tray's "Quit Octo", clicked from whatever the user was in, and the
+// launch-time takeover prompt — and a dialog that comes up behind the active
+// app looks like the click did nothing. Keeping it in sight is a per-platform
+// problem, so the dialog itself lives in platformConfirm.
 func (b *nativeBridge) confirm(title, message, okLabel, cancelLabel string) bool {
-	var ok bool
-	dlg := b.app.Dialog.Question().SetTitle(title).SetMessage(message)
-	yes := dlg.AddButton(okLabel)
-	yes.OnClick(func() { ok = true })
-	no := dlg.AddButton(cancelLabel)
-	no.OnClick(func() { ok = false })
-	dlg.SetDefaultButton(no)
-	dlg.SetCancelButton(no)
-	dlg.Show()
-	return ok
+	return platformConfirm(b.app, title, message, okLabel, cancelLabel)
 }
 
 // showError shows a modal error dialog with a single OK button.
