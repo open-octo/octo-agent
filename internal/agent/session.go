@@ -675,16 +675,24 @@ func (s *Session) Save() error {
 // stampContentUpdated moves ContentUpdatedAt to now, but never to an instant an
 // earlier save already used.
 //
-// Readers compare these stamps to answer "has the transcript changed since I
-// last looked" — the sidebar's ordering, the unread dot — so two saves must
-// never carry the same one. time.Now() does not guarantee that: its resolution
-// is the platform's, and on Windows it is coarse enough (tens of milliseconds)
-// that two saves within one turn read the same instant, leaving the second
-// looking like nothing had happened. A clock stepping backwards would be worse.
-// One nanosecond past the last stamp restores the ordering without claiming
-// time passed that didn't.
+// The field answers "has the transcript changed since I last looked", so two
+// saves must never carry the same instant. time.Now() does not guarantee that:
+// its resolution is the platform's, and on Windows it is coarse enough (tens of
+// milliseconds) that two saves within one turn read the same one — which is how
+// TestContentUpdatedAt_AdvancesOnRealContent came to flake there.
+//
+// Round(0) strips the monotonic reading so the comparison runs against the wall
+// clock, which is the value actually persisted and read back. Without it two
+// stamps taken in one process compare monotonically, and a wall clock stepped
+// backwards (NTP, a VM resuming) would still write a stamp smaller than the
+// save before it.
+//
+// A nanosecond is enough for Go's own ordering. It is deliberately not enough
+// to be visible in the web UI, which parses these through Date.parse and sees
+// milliseconds — the compensation exists to keep the invariant true in here,
+// not to move anything on screen.
 func (s *Session) stampContentUpdated() {
-	now := time.Now()
+	now := time.Now().Round(0)
 	if !now.After(s.ContentUpdatedAt) {
 		now = s.ContentUpdatedAt.Add(time.Nanosecond)
 	}

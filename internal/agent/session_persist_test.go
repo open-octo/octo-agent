@@ -246,6 +246,17 @@ func TestContentUpdatedAt_AdvancesOnACoarseClock(t *testing.T) {
 	if !sess.ContentUpdatedAt.After(second) {
 		t.Fatalf("consecutive stamps must keep advancing: %v -> %v", second, sess.ContentUpdatedAt)
 	}
+
+	// And the same for a stamp that came back from disk. Those carry no
+	// monotonic reading (JSON has only the wall clock), which is the comparison
+	// the stamp is stripped down to — this is the shape production hits after
+	// every reload.
+	loaded := time.Now().Add(time.Hour).Round(0)
+	sess.ContentUpdatedAt = loaded
+	sess.stampContentUpdated()
+	if !sess.ContentUpdatedAt.After(loaded) {
+		t.Fatalf("stamp must advance past a wall-clock-only value loaded from disk: %v -> %v", loaded, sess.ContentUpdatedAt)
+	}
 }
 
 // TestContentUpdatedAt_SurvivesAppendDeltaReload is the actual regression
