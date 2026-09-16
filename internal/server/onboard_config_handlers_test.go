@@ -1520,3 +1520,33 @@ func TestListEndpoints_ExposesVisionHelper(t *testing.T) {
 		t.Errorf("response should carry vision_helper so the UI can mark the chip: %s", w.Body.String())
 	}
 }
+
+// A machine that exports some provider's API key for another tool (Claude Code,
+// a DeepSeek CLI, …) must still get first-run setup on a fresh install: the key
+// alone configures nothing, there is no endpoint and no model to run, and
+// skipping the panel drops the user on a chat that fails at the first message.
+func TestDetectOnboardPhase_EnvKeyWithoutEndpointStillNeedsSetup(t *testing.T) {
+	setTestHome(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-from-some-other-tool")
+	t.Setenv("DEEPSEEK_API_KEY", "sk-from-some-other-tool")
+	if got := detectOnboardPhase(); got != "key_setup" {
+		t.Fatalf("detectOnboardPhase = %q on an install with no endpoint, want key_setup", got)
+	}
+}
+
+// The other half of that rule: an endpoint whose key is deliberately left to
+// the environment is a working setup (senderForEntry reads the environment
+// first), so it must not be sent back through the panel.
+func TestDetectOnboardPhase_EndpointKeyFromEnvIsConfigured(t *testing.T) {
+	setTestHome(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "anthropic", Models: []config.EndpointModel{{Model: "claude-sonnet-4-6"}}},
+		},
+		Default: "ep-a::claude-sonnet-4-6",
+	})
+	if got := detectOnboardPhase(); got == "key_setup" {
+		t.Fatalf("detectOnboardPhase = %q; an endpoint keyed from the environment is configured", got)
+	}
+}

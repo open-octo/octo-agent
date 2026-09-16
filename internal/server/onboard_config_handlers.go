@@ -126,24 +126,26 @@ func (s *Server) handleOnboardStatus(w http.ResponseWriter, r *http.Request) {
 func detectOnboardPhase() string {
 	cfg, _ := config.Load()
 
-	// Check if any provider key is available. A keyless Custom endpoint
-	// (local Ollama/vLLM) counts as configured — there is no key to set up.
-	hasKey := false
+	// Look for an endpoint that could actually run. Its key may be stored in
+	// config, may live in the provider's environment variable (senderForEntry
+	// and resolveAPIKey both read the environment first), or may not exist at
+	// all for a keyless Custom endpoint (local Ollama/vLLM).
+	//
+	// The environment is only ever consulted per endpoint, never on its own. A
+	// machine that exports ANTHROPIC_API_KEY or DEEPSEEK_API_KEY for some other
+	// tool — common enough — used to be read as "this install is configured"
+	// and skipped setup entirely, on an install with no endpoint and no model
+	// to run. The user landed on a chat that fails at the first message rather
+	// than on the panel that would have fixed it. A key on its own configures
+	// nothing.
+	configured := false
 	for _, ep := range cfg.Endpoints {
-		if ep.APIKey != "" || app.VendorKeyOptional(ep.Provider) {
-			hasKey = true
+		if ep.APIKey != "" || app.VendorKeyOptional(ep.Provider) || os.Getenv(app.VendorAPIKeyEnvVar(ep.Provider)) != "" {
+			configured = true
 			break
 		}
 	}
-	if !hasKey {
-		for _, v := range app.Registry {
-			if os.Getenv(v.APIKeyEnvVar) != "" {
-				hasKey = true
-				break
-			}
-		}
-	}
-	if !hasKey {
+	if !configured {
 		return "key_setup"
 	}
 
