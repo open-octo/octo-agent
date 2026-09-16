@@ -197,26 +197,26 @@
       <!-- The brand indigo sits in the middle stop, so it is the colour the
            head actually reads as; the other two only shade it. -->
       <linearGradient id="g-head" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#6C87F7" />
-        <stop offset="45%"  stop-color="#2F54EB" />
-        <stop offset="100%" stop-color="#2847D8" />
+        <stop offset="0%"   stop-color="#8FA5FA" />
+        <stop offset="45%"  stop-color="#5C7BF2" />
+        <stop offset="100%" stop-color="#3A5EEC" />
       </linearGradient>
       <linearGradient id="g-arm" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#4A6BEF" />
-        <stop offset="100%" stop-color="#2F54EB" />
+        <stop offset="0%"   stop-color="#7B93F8" />
+        <stop offset="100%" stop-color="#4E6FF0" />
       </linearGradient>
       <linearGradient id="g-arm-b" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#3A5EEC" />
-        <stop offset="100%" stop-color="#2847D8" />
+        <stop offset="0%"   stop-color="#6884F5" />
+        <stop offset="100%" stop-color="#3F62EE" />
       </linearGradient>
     </defs>
 
-    <ellipse class="shadow" cx="100" cy="176" rx="42" ry="7" fill="#1C2E96" opacity=".16" />
+    <ellipse class="shadow" cx="100" cy="176" rx="42" ry="7" fill="#2337A8" opacity=".16" />
 
     <!-- Everything in the character shares one dark outline: that contour is
          what reads as "sticker", and it is the single biggest difference
          between this and a flat gradient blob. -->
-    <g class="rig" stroke="#1C2E96" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round">
+    <g class="rig" stroke="#2337A8" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round">
       <g class="body">
         <!-- Arms are anchored by an outer <g> and swayed by an inner one: a CSS
              transform animation REPLACES the element's own transform attribute,
@@ -247,28 +247,28 @@
               <ellipse class="eye-white" cx="83" cy="90" rx="15" ry="16.5" fill="#FFFFFF" />
               <ellipse class="eye-white" cx="117" cy="90" rx="15" ry="16.5" fill="#FFFFFF" />
               <g class="pupil" stroke="none">
-                <circle cx="85" cy="92" r="8" fill="#1C2E96" />
-                <circle cx="119" cy="92" r="8" fill="#1C2E96" />
+                <circle cx="85" cy="92" r="8" fill="#2337A8" />
+                <circle cx="119" cy="92" r="8" fill="#2337A8" />
                 <circle cx="88" cy="88" r="2.8" fill="#FFFFFF" />
                 <circle cx="122" cy="88" r="2.8" fill="#FFFFFF" />
                 <circle cx="83" cy="96" r="1.5" fill="#FFFFFF" opacity=".8" />
                 <circle cx="117" cy="96" r="1.5" fill="#FFFFFF" opacity=".8" />
               </g>
               <!-- closed lids, scaled flat until sleep opens them -->
-              <path class="lid" d="M 71 90 q 12 9 24 0" fill="none" stroke="#1C2E96" stroke-width="3.4" />
-              <path class="lid" d="M 105 90 q 12 9 24 0" fill="none" stroke="#1C2E96" stroke-width="3.4" />
+              <path class="lid" d="M 71 90 q 12 9 24 0" fill="none" stroke="#2337A8" stroke-width="3.4" />
+              <path class="lid" d="M 105 90 q 12 9 24 0" fill="none" stroke="#2337A8" stroke-width="3.4" />
             </g>
             <ellipse cx="64" cy="103" rx="8" ry="5" fill="#F4A0B4" opacity=".75" stroke="none" />
             <ellipse cx="136" cy="103" rx="8" ry="5" fill="#F4A0B4" opacity=".75" stroke="none" />
-            <path class="mouth" d="M 94 108 q 6 6 12 0" fill="none" stroke="#1C2E96" stroke-width="3" />
-            <ellipse class="yawn" cx="100" cy="111" rx="6.5" ry="8.5" fill="#1C2E96" opacity="0" stroke="none" />
+            <path class="mouth" d="M 94 108 q 6 6 12 0" fill="none" stroke="#2337A8" stroke-width="3" />
+            <ellipse class="yawn" cx="100" cy="111" rx="6.5" ry="8.5" fill="#2337A8" opacity="0" stroke="none" />
           </g>
 
           <!-- Waving arm, ask only. Drawn after the face on purpose: SVG has no
                z-index, and placed with the other arms it was painted before the
                head and therefore hidden behind it. -->
           <g class="waver" stroke-width="0">
-            <path d="M 64 114 C 48 104 38 86 41 66" fill="none" stroke="#1C2E96" stroke-width="15" stroke-linecap="round" />
+            <path d="M 64 114 C 48 104 38 86 41 66" fill="none" stroke="#2337A8" stroke-width="15" stroke-linecap="round" />
             <path d="M 64 114 C 48 104 38 86 41 66" fill="none" stroke="url(#g-arm)" stroke-width="9.5" stroke-linecap="round" />
           </g>
         </g>
@@ -276,7 +276,7 @@
     </g>
 
     <!-- busy: the desk. Drawn after the body so the octopus sits behind it. -->
-    <g class="desk" stroke="#1C2E96" stroke-width="3.4" stroke-linejoin="round">
+    <g class="desk" stroke="#2337A8" stroke-width="3.4" stroke-linejoin="round">
       <!-- Keyboard with real thickness, tilted toward the viewer — a flat slab
            read as a strip of paper the octopus was floating over. -->
       <path d="M 44 138 L 56 120 L 150 120 L 162 138 Z" fill="#E9ECFB" />
@@ -298,11 +298,11 @@
            coordinates: .busy lifts .rig by 20 and the desk does not move with
            it, so an arm drawn at the resting shoulder starts inside the face. -->
       <g class="tap tap-l" stroke-width="0">
-        <path d="M 78 104 C 72 114 74 122 84 128" fill="none" stroke="#1C2E96" stroke-width="15" stroke-linecap="round" />
+        <path d="M 78 104 C 72 114 74 122 84 128" fill="none" stroke="#2337A8" stroke-width="15" stroke-linecap="round" />
         <path d="M 78 104 C 72 114 74 122 84 128" fill="none" stroke="url(#g-arm)" stroke-width="9.5" stroke-linecap="round" />
       </g>
       <g class="tap tap-r" stroke-width="0">
-        <path d="M 122 104 C 128 114 126 122 116 128" fill="none" stroke="#1C2E96" stroke-width="15" stroke-linecap="round" />
+        <path d="M 122 104 C 128 114 126 122 116 128" fill="none" stroke="#2337A8" stroke-width="15" stroke-linecap="round" />
         <path d="M 122 104 C 128 114 126 122 116 128" fill="none" stroke="url(#g-arm-b)" stroke-width="9.5" stroke-linecap="round" />
       </g>
 
@@ -318,13 +318,13 @@
 
     <!-- ask: it needs an answer -->
     <g class="bang">
-      <circle cx="152" cy="42" r="17" fill="#FF9500" stroke="#1C2E96" stroke-width="3.4" />
+      <circle cx="152" cy="42" r="17" fill="#FF9500" stroke="#2337A8" stroke-width="3.4" />
       <rect x="149" y="31" width="6" height="15" rx="3" fill="#FFFFFF" />
       <circle cx="152" cy="52" r="3.2" fill="#FFFFFF" />
     </g>
 
     <!-- sleep -->
-    <g class="zzz" fill="#1C2E96" opacity=".8" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-weight="800">
+    <g class="zzz" fill="#2337A8" opacity=".8" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-weight="800">
       <text class="z" style="--i:0" x="144" y="50" x-comment="drifts up-right" font-size="16">z</text>
       <text class="z" style="--i:1" x="154" y="36" font-size="13">z</text>
       <text class="z" style="--i:2" x="136" y="62" font-size="11">z</text>
