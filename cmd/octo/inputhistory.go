@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // inputHistoryCap bounds how many entries the TUI's persisted input history
@@ -23,11 +25,11 @@ func defaultInputHistoryFile() string {
 	if env := os.Getenv("OCTO_INPUT_HISTORY_FILE"); env != "" {
 		return env
 	}
-	home, err := os.UserHomeDir()
+	path, err := datahome.Path("input_history")
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".octo", "input_history")
+	return path
 }
 
 // loadInputHistory reads the persisted history, oldest first, capped to the

@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // ErrUnsupported is returned by Command when sandboxing was requested but the
@@ -63,8 +65,8 @@ func DefaultPolicy(cwd string) Policy {
 	// injection. Read+execute only, not a write root, and distinct from the
 	// rest of $HOME (which stays unreadable here to protect secrets like
 	// ~/.ssh, ~/.aws).
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		add(filepath.Join(home, ".octo", "bin"))
+	if bin, err := datahome.Path("bin"); err == nil {
+		add(bin)
 	}
 
 	write := []string{}

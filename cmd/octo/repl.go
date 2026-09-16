@@ -370,7 +370,7 @@ func printMCP(w io.Writer) {
 	reg := tools.ActiveMCPRegistry()
 	if reg == nil || reg.Len() == 0 {
 		fmt.Fprintln(w, "No MCP servers connected.")
-		fmt.Fprintln(w, "Configure one at ~/.octo/mcp.json (run `octo help mcp` for the format).")
+		fmt.Fprintln(w, "Configure one in the selected profile's mcp.json (run `octo help mcp` for the format).")
 		return
 	}
 	conns := reg.Connections()
@@ -445,7 +445,7 @@ func skillTrigger(reg *skills.Registry, line string) (skills.Skill, string, bool
 // printSkills lists the discovered skills, or a hint when there are none.
 func printSkills(w io.Writer, reg *skills.Registry) {
 	if reg == nil || reg.Len() == 0 {
-		fmt.Fprintln(w, "No skills found (looked in ~/.octo/skills and ./.octo/skills).")
+		fmt.Fprintln(w, "No skills found (looked in the selected profile's skills directory and ./.octo/skills).")
 		return
 	}
 	fmt.Fprintln(w, "Available skills (trigger with /<name>):")
@@ -460,7 +460,7 @@ func printSkills(w io.Writer, reg *skills.Registry) {
 func printWorkflows(w io.Writer) {
 	wfs := tools.ListNamedWorkflows()
 	if len(wfs) == 0 {
-		fmt.Fprintln(w, "No workflows found (looked in ~/.octo/workflows and ./.octo/workflows).")
+		fmt.Fprintln(w, "No workflows found (looked in the selected profile's workflows directory and ./.octo/workflows).")
 		return
 	}
 	fmt.Fprintln(w, "Available workflows (run by asking, e.g. \"run <name>\"):")

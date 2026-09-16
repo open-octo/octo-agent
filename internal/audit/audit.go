@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"github.com/open-octo/octo-agent/internal/logfile"
 )
 
@@ -61,11 +62,11 @@ func NewAt(path string) *Logger {
 // defaultPath returns ~/.octo/audit.log, or the empty string if the home
 // directory cannot be resolved.
 func defaultPath() string {
-	home, err := os.UserHomeDir()
+	path, err := datahome.Path("audit.log")
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".octo", "audit.log")
+	return path
 }
 
 // Log appends a single event to the audit log. It is safe for concurrent use.

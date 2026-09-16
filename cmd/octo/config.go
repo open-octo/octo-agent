@@ -362,7 +362,7 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 	}
 	defer reader.Close()
 
-	fmt.Fprintln(stdout, "octo config — set your default provider and model (~/.octo/config.yml).")
+	fmt.Fprintln(stdout, "octo config — set your default provider and model in the selected profile.")
 	if tty {
 		fmt.Fprintln(stdout, "Use ↑/↓ to choose, Enter to confirm. CLI flags and env vars still override per run.")
 	} else {

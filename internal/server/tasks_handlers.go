@@ -8,13 +8,13 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"github.com/open-octo/octo-agent/internal/permission"
 	"github.com/open-octo/octo-agent/internal/scheduler"
 	"github.com/open-octo/octo-agent/internal/tools"
@@ -61,11 +61,10 @@ func (s *Server) initScheduler() {
 	if s.scheduler != nil {
 		return
 	}
-	home, err := os.UserHomeDir()
+	dir, err := datahome.Path("tasks")
 	if err != nil {
 		return
 	}
-	dir := filepath.Join(home, ".octo", "tasks")
 	sch, err := scheduler.New(dir, s)
 	if err != nil {
 		slog.Error("scheduler", "err", err)

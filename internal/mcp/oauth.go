@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"time"
 )
 
@@ -147,11 +149,10 @@ func NewOAuthClient(resourceURL, serverName, clientName string, prompt OAuthProm
 	if resourceURL == "" {
 		return nil, errors.New("oauth: empty resourceURL")
 	}
-	home, err := os.UserHomeDir()
+	storeDir, err := datahome.Path("mcp-tokens")
 	if err != nil {
-		return nil, fmt.Errorf("oauth: resolve home: %w", err)
+		return nil, err
 	}
-	storeDir := filepath.Join(home, ".octo", "mcp-tokens")
 	if err := os.MkdirAll(storeDir, 0o700); err != nil {
 		return nil, fmt.Errorf("oauth: mkdir %s: %w", storeDir, err)
 	}

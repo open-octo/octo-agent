@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"github.com/open-octo/octo-agent/internal/memory"
 	"github.com/open-octo/octo-agent/internal/prompt"
 	"github.com/open-octo/octo-agent/internal/trash"
@@ -216,9 +217,9 @@ func (s *Server) handleDeleteTrash(w http.ResponseWriter, r *http.Request) {
 }
 
 func octoDir() string {
-	home, err := os.UserHomeDir()
+	dir, err := datahome.Dir()
 	if err != nil {
 		return filepath.Join(".octo")
 	}
-	return filepath.Join(home, ".octo")
+	return dir
 }

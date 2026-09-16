@@ -2,12 +2,11 @@ package main
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/app"
 	"github.com/open-octo/octo-agent/internal/audit"
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"github.com/open-octo/octo-agent/internal/permission"
 )
 
@@ -39,11 +38,11 @@ func permissionAskFrom(ask userPrompter) app.PermissionAsk {
 // returned (and the engine falls back to embedded defaults) when the home
 // directory can't be resolved.
 func permissionConfigPath() string {
-	home, err := os.UserHomeDir()
+	path, err := datahome.Path("permissions.yml")
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".octo", "permissions.yml")
+	return path
 }
 
 // resolvePermissionMode maps the --permission-mode flag string onto a

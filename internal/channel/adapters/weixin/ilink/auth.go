@@ -8,12 +8,17 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // DefaultCredPath returns ~/.octo/weixin-credentials.json
 func DefaultCredPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".octo", "weixin-credentials.json")
+	path, err := datahome.Path("weixin-credentials.json")
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 // LoadCredentials loads stored credentials from disk.

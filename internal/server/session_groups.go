@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"github.com/open-octo/octo-agent/internal/memory"
 )
 
@@ -133,11 +134,10 @@ var groupMu = &registryLock{}
 
 // sessionGroupsPath returns ~/.octo/session-groups.json, creating ~/.octo.
 func sessionGroupsPath() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := datahome.Dir()
 	if err != nil {
 		return "", fmt.Errorf("session groups: home dir: %w", err)
 	}
-	dir := filepath.Join(home, ".octo")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("session groups: mkdir %s: %w", dir, err)
 	}

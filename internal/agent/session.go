@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // Session is a named conversation that persists to disk as a JSONL transcript
@@ -533,11 +535,10 @@ func SessionsDir() (string, error) { return sessionsDir() }
 
 // sessionsDir returns (and creates if needed) ~/.octo/sessions.
 func sessionsDir() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := datahome.Path("sessions")
 	if err != nil {
 		return "", fmt.Errorf("session: home dir: %w", err)
 	}
-	dir := filepath.Join(home, ".octo", "sessions")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("session: mkdir %s: %w", dir, err)
 	}

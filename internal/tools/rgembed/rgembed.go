@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // renameFile is os.Rename, indirected so tests can exercise the race
@@ -116,11 +118,10 @@ func extracted(bin string) bool {
 
 // octoBinDir returns ~/.octo/bin, creating it if necessary.
 func octoBinDir() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := datahome.Path("bin")
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, ".octo", "bin")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}

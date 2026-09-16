@@ -2,8 +2,12 @@ package main
 
 import (
 	"bytes"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 func TestRun_Version(t *testing.T) {
@@ -18,6 +22,51 @@ func TestRun_Version(t *testing.T) {
 				t.Errorf("stdout should start with 'octo '; got: %q", stdout.String())
 			}
 		})
+	}
+}
+
+func TestRun_ProfileIsGlobalAndSelectsDataHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv(datahome.ProfileEnv, "")
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"version", "--profile", "work"}, strings.NewReader(""), &stdout, &stderr); code != 0 {
+		t.Fatalf("version exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if got := datahome.ProfileEnv; got == "" {
+		t.Fatal("profile environment variable name is empty")
+	}
+	path, err := config.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, ".octo-work", "config.yml"); path != want {
+		t.Errorf("config path = %q, want %q", path, want)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"--profile=personal", "version"}, strings.NewReader(""), &stdout, &stderr); code != 0 {
+		t.Fatalf("version exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	path, err = config.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, ".octo-personal", "config.yml"); path != want {
+		t.Errorf("config path = %q, want %q", path, want)
+	}
+}
+
+func TestRun_ProfileErrorsExit2(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"version", "--profile=../unsafe"}, strings.NewReader(""), &stdout, &stderr); code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "invalid --profile") {
+		t.Errorf("stderr should explain invalid profile; got %q", stderr.String())
 	}
 }
 

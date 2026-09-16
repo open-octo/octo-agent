@@ -16,6 +16,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/browser"
 	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"github.com/open-octo/octo-agent/internal/panics"
 )
 
@@ -167,9 +168,14 @@ func BrowserRecordingsDir() string {
 	if d := os.Getenv("OCTO_BROWSER_SKILLS_DIR"); d != "" { // pre-rename name
 		return d
 	}
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".octo", "browser-recordings")
-	old := filepath.Join(home, ".octo", "browser-skills")
+	dir, err := datahome.Path("browser-recordings")
+	if err != nil {
+		return ""
+	}
+	old, err := datahome.Path("browser-skills")
+	if err != nil {
+		return ""
+	}
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if _, err := os.Stat(old); err == nil {
 			if err := os.Rename(old, dir); err != nil {

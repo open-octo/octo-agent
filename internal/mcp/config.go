@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // Config is the parsed view of one mcp.json file. The wire format mirrors
@@ -125,8 +126,7 @@ func isAllowedURLScheme(rawURL string) bool {
 func LoadConfig() (*Config, error) {
 	merged := &Config{Servers: map[string]ServerEntry{}}
 
-	if home, err := os.UserHomeDir(); err == nil {
-		userPath := filepath.Join(home, ".octo", "mcp.json")
+	if userPath, err := datahome.Path("mcp.json"); err == nil {
 		if cfg, err := readConfigFile(userPath); err != nil {
 			return nil, err
 		} else if cfg != nil {

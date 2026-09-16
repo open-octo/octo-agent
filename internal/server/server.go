@@ -25,6 +25,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/agentprofile"
 	"github.com/open-octo/octo-agent/internal/app"
 	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"github.com/open-octo/octo-agent/internal/hooks"
 
 	// The IM adapters self-register into the channel registry at init time.
@@ -2632,11 +2633,11 @@ func (s *Server) validateAgentID(agentID string) error {
 
 // agentUserDir is the user-level profile directory (~/.octo/agents).
 func agentUserDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	dir, err := datahome.Path("agents")
+	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".octo", "agents")
+	return dir
 }
 
 // channelModelOps builds the ModelOps the channel manager's /model command

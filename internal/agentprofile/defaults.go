@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // defaultsFS holds the curated expert profiles shipped with the binary — the
@@ -26,11 +28,11 @@ const defaultStampFile = ".octo-version"
 // experts never touches a user's own saved agents. A var so tests can
 // redirect it.
 var defaultAgentsRoot = func() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	root, err := datahome.Path("agents-default")
+	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".octo", "agents-default")
+	return root
 }
 
 // DefaultRoot is the on-disk location of the materialized curated experts

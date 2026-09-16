@@ -36,7 +36,7 @@ func workflowsList(stdout io.Writer) int {
 	all := tools.ListNamedWorkflows()
 	if len(all) == 0 {
 		fmt.Fprintln(stdout, "No workflows found.")
-		fmt.Fprintln(stdout, "Defaults ship with the binary; add your own under ~/.octo/workflows, or ask the agent to build one (the workflow-creator skill).")
+		fmt.Fprintln(stdout, "Defaults ship with the binary; add your own under the selected profile's workflows directory, or ask the agent to build one (the workflow-creator skill).")
 		return 0
 	}
 	// Group by source for a readable overview: default → user.

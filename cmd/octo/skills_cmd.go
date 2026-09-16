@@ -85,7 +85,7 @@ func skillsList(stdout io.Writer) int {
 	all := reg.List()
 	if len(all) == 0 {
 		fmt.Fprintln(stdout, "No skills found.")
-		fmt.Fprintln(stdout, "Defaults ship with the binary; add your own under ~/.octo/skills.")
+		fmt.Fprintln(stdout, "Defaults ship with the binary; add your own under the selected profile's skills directory.")
 		return 0
 	}
 	// Group by source for a readable overview: default → expert → user.

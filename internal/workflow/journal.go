@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // scriptHash returns a hex SHA-256 of the user script. Used to validate that a
@@ -49,11 +51,10 @@ func NewRunID() string {
 
 // journalsDir returns (and creates if needed) ~/.octo/workflow-journals.
 func journalsDir() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := datahome.Path("workflow-journals")
 	if err != nil {
 		return "", fmt.Errorf("workflow: home dir: %w", err)
 	}
-	dir := filepath.Join(home, ".octo", "workflow-journals")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("workflow: mkdir %s: %w", dir, err)
 	}

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // Project-level hooks.yml is loaded from a repo the user may have just cloned,
@@ -42,11 +44,11 @@ var trustStoreMu sync.Mutex
 // trustStorePath returns ~/.octo/hooks-trust.json, or "" when home is
 // unavailable.
 func trustStorePath() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	path, err := datahome.Path("hooks-trust.json")
+	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".octo", "hooks-trust.json")
+	return path
 }
 
 func loadTrustStore() map[string]string {

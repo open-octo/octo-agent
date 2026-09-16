@@ -12,15 +12,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // octoDir returns ~/.octo, creating it if needed.
 func octoDir() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := datahome.Dir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, ".octo")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}

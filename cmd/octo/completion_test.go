@@ -40,7 +40,7 @@ func TestCompletionCandidates_TopLevel(t *testing.T) {
 func TestCompletionCandidates_ChatFlags(t *testing.T) {
 	// A positional message followed by a new word still completes session flags.
 	got := completionCandidates([]string{"octo", "fix the bug", ""})
-	for _, want := range []string{"-c", "--continue", "--tools", "--provider", "--quiet", "--verbose"} {
+	for _, want := range []string{"-c", "--continue", "--tools", "--provider", "--profile", "--quiet", "--verbose"} {
 		if !sliceContains(got, want) {
 			t.Errorf("chat flag completion missing %q; got %v", want, got)
 		}

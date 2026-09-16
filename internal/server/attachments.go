@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/channel"
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // inboundFileNotes persists an inbound IM event's file attachments and
@@ -95,11 +96,10 @@ type userAttachments struct {
 
 // ensureUploadsDir returns ~/.octo/uploads, creating it if needed.
 func ensureUploadsDir() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := datahome.Path(uploadsDirName)
 	if err != nil {
 		return "", fmt.Errorf("uploads: home dir: %w", err)
 	}
-	dir := filepath.Join(home, ".octo", uploadsDirName)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("uploads: mkdir: %w", err)
 	}

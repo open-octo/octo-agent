@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"github.com/open-octo/octo-agent/internal/sandbox"
 	"github.com/open-octo/octo-agent/internal/serveenv"
 	"github.com/open-octo/octo-agent/internal/shellpath"
@@ -30,6 +31,13 @@ func main() {
 // run is the testable entry point. Splitting it out keeps main thin and
 // lets the test harness drive the CLI without spawning a subprocess.
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	var err error
+	args, err = datahome.ConfigureFromArgs(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "octo: invalid --profile: %v\n", err)
+		return 2
+	}
+
 	// GUI-/service-launched processes (macOS GUI/launchd, Linux .desktop/systemd)
 	// inherit a minimal PATH that misses common user directories (e.g.
 	// ~/.local/bin, /opt/homebrew/bin). Sync once at startup so stdio MCP servers
@@ -150,11 +158,12 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Common flags:")
 	fmt.Fprintln(w, "  -c, --continue [id]      Resume a session — 'last', short ID, or substring; no ID = pick from a list")
 	fmt.Fprintln(w, "  --take-over              When resuming, take over a session bound to another entry")
-	fmt.Fprintln(w, "  --agent <id>             Start the session bound to a specific agent (from ~/.octo/agents)")
+	fmt.Fprintln(w, "  --profile <name>         Use an isolated user-data profile (~/.octo-<name>)")
+	fmt.Fprintln(w, "  --agent <id>             Start the session bound to a specific agent (from the profile's agents directory)")
 	fmt.Fprintln(w, "  --no-tools               Disable built-in tools (terminal, edit_file, …) + MCP/skills")
 	fmt.Fprintln(w, "  --provider <name>        anthropic | openai | … (else `octo config` / OCTO_PROVIDER)")
 	fmt.Fprintln(w, "  --model <name>           Override the default model for the provider")
-	fmt.Fprintln(w, "  --no-save                Don't auto-save the session to ~/.octo/sessions")
+	fmt.Fprintln(w, "  --no-save                Don't auto-save the session to the profile's sessions directory")
 	fmt.Fprintln(w, "  --no-memory              Disable cross-session memory injection")
 	fmt.Fprintln(w, "  --sandbox                OS-enforced confinement for terminal commands (macOS/Linux)")
 	fmt.Fprintln(w, "  --permission-mode <m>    interactive (default; prompts on ask) | strict | auto")

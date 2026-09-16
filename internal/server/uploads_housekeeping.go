@@ -2,10 +2,9 @@ package server
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"github.com/open-octo/octo-agent/internal/uploads"
 )
 
@@ -48,9 +47,9 @@ func StartUploadsHousekeeping() {
 // sweep has no reason to spin the directory into existence for an install
 // that has never received an upload.
 func uploadsDirPath() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := datahome.Path(uploadsDirName)
 	if err != nil {
 		return "", fmt.Errorf("uploads: home dir: %w", err)
 	}
-	return filepath.Join(home, ".octo", uploadsDirName), nil
+	return dir, nil
 }

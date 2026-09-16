@@ -21,18 +21,19 @@ package serveenv
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // envPath returns the absolute path to the serve.env file. Kept as a var so
 // tests can redirect it.
 var envPath = func() string {
-	home, err := os.UserHomeDir()
+	path, err := datahome.Path("serve.env")
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".octo", "serve.env")
+	return path
 }
 
 // Load reads ~/.octo/serve.env and sets any KEY=VALUE pair whose key is not

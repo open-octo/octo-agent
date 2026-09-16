@@ -17,6 +17,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/agentprofile"
 	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"github.com/open-octo/octo-agent/internal/executil"
 	"github.com/open-octo/octo-agent/internal/permission"
 	"github.com/open-octo/octo-agent/internal/tools"
@@ -1177,11 +1178,11 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 }
 
 func permissionConfigPath() string {
-	home, err := os.UserHomeDir()
+	path, err := datahome.Path("permissions.yml")
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".octo", "permissions.yml")
+	return path
 }
 
 // resolvePermissionMode reads the persisted config and returns the configured

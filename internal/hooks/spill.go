@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // Async hooks (Stop / PostToolUse / SubagentStop / PreCompact marked async in
@@ -185,11 +187,11 @@ func (q *spillQueue) Drain(deadline time.Duration) {
 func DrainSpill(deadline time.Duration) { sharedSpill.Drain(deadline) }
 
 func pendingDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	dir, err := datahome.Path("hooks-pending")
+	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".octo", "hooks-pending")
+	return dir
 }
 
 // spillToDisk writes item to a uniquely-named pending file (temp + atomic

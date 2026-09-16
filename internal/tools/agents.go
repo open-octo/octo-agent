@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,11 +24,11 @@ type agentFrontmatter struct {
 // userAgentsRoot returns ~/.octo/agents, or "" when the home dir can't be
 // resolved. It's a var so tests can point discovery at a temp directory.
 var userAgentsRoot = func() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	root, err := datahome.Path("agents")
+	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".octo", "agents")
+	return root
 }
 
 // discoveredAgents holds the last scanned user-defined agents.

@@ -8,9 +8,8 @@ import (
 	"io"
 	"net"
 	"net/url"
-	"os"
-	"path/filepath"
 
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"github.com/open-octo/octo-agent/internal/server"
 	"github.com/open-octo/octo-agent/internal/tunnel"
 )
@@ -86,11 +85,7 @@ func pairingURL(relayURL string, id *tunnel.Identity, token string) string {
 
 // tunnelIdentityPath is ~/.octo/tunnel.json, alongside the other serve state.
 func tunnelIdentityPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".octo", "tunnel.json"), nil
+	return datahome.Path("tunnel.json")
 }
 
 // newPairToken returns a one-time, single-use pairing token (128 bits of hex).

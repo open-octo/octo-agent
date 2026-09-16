@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // TerminalSpillBytes is the size past which terminal output is written to a
@@ -165,11 +167,10 @@ func writeSpillFile(id, body string) (string, error) {
 
 // spillDir returns (creating if needed) ~/.octo/tmp.
 func spillDir() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := datahome.Path("tmp")
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, ".octo", "tmp")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}

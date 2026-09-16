@@ -129,7 +129,7 @@ func chatCandidates(words []string, prev string) []string {
 		return []string{"interactive", "strict", "auto"}
 	case "--reasoning-effort":
 		return []string{"off", "low", "medium", "high", "xhigh", "max"}
-	case "--model", "--system", "--max-tokens", "--max-tokens-escalate", "--max-turns",
+	case "--model", "--system", "--profile", "--max-tokens", "--max-tokens-escalate", "--max-turns",
 		"--compact-threshold", "--compact-auto-pct", "--fallback-context-window",
 		"--sandbox-write", "--sandbox-read":
 		// These take freeform values; nothing useful to suggest.
@@ -232,7 +232,7 @@ var topLevelCommands = []string{
 // --max-tokens-escalate) still work; users just type them in full. Keeping the
 // list focused avoids drowning the completion popup with rarely-used flags.
 var chatFlags = []string{
-	"-c", "--continue", "--tools", "--no-tools", "--provider", "--model",
+	"-c", "--continue", "--tools", "--no-tools", "--provider", "--model", "--profile",
 	"--no-save", "--no-memory", "--no-suggest", "--sandbox", "--sandbox-allow-net",
 	"--permission-mode",
 	"--quiet", "--verbose", "--plain", "--stream", "--system",

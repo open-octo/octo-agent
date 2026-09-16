@@ -13,6 +13,7 @@ import (
 
 	"github.com/chzyer/readline"
 	"github.com/mattn/go-isatty"
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // syncWriter wraps an io.Writer with a mutex so concurrent writes are safe.
@@ -171,11 +172,11 @@ func defaultHistoryFile() string {
 	if env := os.Getenv("OCTO_HISTORY_FILE"); env != "" {
 		return env
 	}
-	home, err := os.UserHomeDir()
+	path, err := datahome.Path("history")
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".octo", "history")
+	return path
 }
 
 // readPromptLine reads one user-facing input line, expanding `\` line

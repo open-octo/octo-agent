@@ -22,6 +22,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/app"
 	"github.com/open-octo/octo-agent/internal/channel"
 	"github.com/open-octo/octo-agent/internal/config"
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"github.com/open-octo/octo-agent/internal/hooks"
 	"github.com/open-octo/octo-agent/internal/mcp"
 	"github.com/open-octo/octo-agent/internal/memory"
@@ -43,11 +44,11 @@ const (
 // soulMissing reports whether the user has no identity profile yet
 // (~/.octo/soul.md) — the signal that onboarding hasn't run.
 func soulMissing() bool {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	dir, err := datahome.Dir()
+	if err != nil {
 		return false
 	}
-	_, statErr := os.Stat(prompt.IdentityPath(filepath.Join(home, ".octo"), "soul.md"))
+	_, statErr := os.Stat(prompt.IdentityPath(dir, "soul.md"))
 	return os.IsNotExist(statErr)
 }
 
@@ -56,11 +57,10 @@ func soulMissing() bool {
 // identity at all. Onboarding nudges only in that case; if either file exists
 // the user has some identity set up.
 func identityMissing() bool {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	dir, err := datahome.Dir()
+	if err != nil {
 		return false
 	}
-	dir := filepath.Join(home, ".octo")
 	for _, name := range []string{"soul.md", "user.md"} {
 		if _, err := os.Stat(prompt.IdentityPath(dir, name)); err == nil {
 			return false
@@ -312,11 +312,10 @@ func resolveFallbackContextWindow(flagVal int, cfg config.Config, stderr io.Writ
 // recoverable rather than corrupting the frame. Returns nil on any failure; the
 // caller then discards child stderr — never the terminal.
 func openMCPLogFile() *os.File {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	dir, err := datahome.Path("logs")
+	if err != nil {
 		return nil
 	}
-	dir := filepath.Join(home, ".octo", "logs")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil
 	}
@@ -1596,11 +1595,11 @@ func newCacheKey() string {
 
 // agentUserDir is the user-level profile directory (~/.octo/agents).
 func agentUserDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	dir, err := datahome.Path("agents")
+	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".octo", "agents")
+	return dir
 }
 
 // profileIDs returns the IDs of all non-builtin profiles in the store.

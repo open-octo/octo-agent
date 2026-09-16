@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/open-octo/octo-agent/internal/agentprofile"
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"gopkg.in/yaml.v3"
 )
 
@@ -53,11 +54,11 @@ type Registry struct {
 // userSkillsRoot returns ~/.octo/skills, or "" when the home dir can't be
 // resolved. It's a var so tests can point discovery at a temp directory.
 var userSkillsRoot = func() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	root, err := datahome.Path("skills")
+	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".octo", "skills")
+	return root
 }
 
 // Discover scans the default, expert, and user-level skill roots and returns

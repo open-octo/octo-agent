@@ -3,9 +3,9 @@ package hooks
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/datahome"
 	"gopkg.in/yaml.v3"
 )
 
@@ -41,11 +41,11 @@ type HookSpec struct {
 // UserConfigPath returns ~/.octo/hooks.yml, or "" when the home dir is
 // unavailable.
 func UserConfigPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	path, err := datahome.Path("hooks.yml")
+	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".octo", "hooks.yml")
+	return path
 }
 
 // LoadFileConfig reads and parses a hooks.yml. A missing file returns an error

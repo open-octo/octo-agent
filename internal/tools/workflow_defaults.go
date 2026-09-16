@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // defaultWorkflowsRoot returns ~/.octo/workflows-default — a dedicated,
@@ -11,11 +13,11 @@ import (
 // the defaults never touches a user's own saved workflows. A var so tests can
 // redirect it. Mirrors internal/skills/defaults.go's defaultSkillsRoot.
 var defaultWorkflowsRoot = func() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	root, err := datahome.Path("workflows-default")
+	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".octo", "workflows-default")
+	return root
 }
 
 // DefaultWorkflowsRoot is the on-disk location of the materialized default

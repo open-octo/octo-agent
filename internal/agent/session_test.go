@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // setTempHome redirects both HOME (Unix) and USERPROFILE (Windows) to tmp so
@@ -17,6 +19,19 @@ func setTempHome(t *testing.T) string {
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp) // Windows: os.UserHomeDir() reads USERPROFILE
 	return tmp
+}
+
+func TestSessionsDirUsesProfile(t *testing.T) {
+	home := setTempHome(t)
+	t.Setenv(datahome.ProfileEnv, "work")
+
+	dir, err := SessionsDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, ".octo-work", "sessions"); dir != want {
+		t.Errorf("sessions dir = %q, want %q", dir, want)
+	}
 }
 
 func TestNewSession(t *testing.T) {

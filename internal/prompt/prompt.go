@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // base is the built-in foundation prompt: octo's identity plus the
@@ -62,11 +64,11 @@ const maxIncludeDepth = 5
 // ProjectContextFile. It's a var so tests can point it at a temp file. Returns
 // "" when the home directory can't be resolved.
 var userRulesPath = func() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	path, err := datahome.Path("octorules.md")
+	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".octo", "octorules.md")
+	return path
 }
 
 // Compose assembles the session system prompt from up to ten layers (six
@@ -206,19 +208,19 @@ func IdentityPath(dir, lower string) string {
 // resolved. They're vars so tests can point them at temp files, mirroring
 // userRulesPath.
 var soulPath = func() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	dir, err := datahome.Dir()
+	if err != nil {
 		return ""
 	}
-	return IdentityPath(filepath.Join(home, ".octo"), "soul.md")
+	return IdentityPath(dir, "soul.md")
 }
 
 var userProfilePath = func() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	dir, err := datahome.Dir()
+	if err != nil {
 		return ""
 	}
-	return IdentityPath(filepath.Join(home, ".octo"), "user.md")
+	return IdentityPath(dir, "user.md")
 }
 
 // readSoul returns the trimmed, include-expanded contents of ~/.octo/soul.md
