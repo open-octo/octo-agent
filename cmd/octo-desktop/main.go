@@ -301,6 +301,13 @@ func main() {
 		})
 	}
 
+	// macOS only: take over the menu bar so its Quit reaches requestQuit too
+	// (see buildAppMenu). Elsewhere the framework's Quit already runs through
+	// ShouldQuit, which honours allowQuit.
+	if runtime.GOOS == "darwin" {
+		app.Menu.Set(buildAppMenu(app, bridge))
+	}
+
 	// System tray: reach the window or fully quit without hunting for the dock
 	// icon. Quit goes through requestQuit so it can warn when stopping the hub
 	// would disconnect other clients. An icon is required — a status item with
@@ -590,6 +597,37 @@ func trayStatusLines(bridge *nativeBridge) []string {
 		lines = append(lines, fmt.Sprintf(L().trayChannelsFmt, n))
 	}
 	return lines
+}
+
+// buildAppMenu is the macOS menu bar. It exists for one item: "Quit Octo" (and
+// its Cmd-Q) has to reach requestQuit like the tray's does, so both warn before
+// stopping a hub other clients are connected to. The framework's Quit carries
+// AppKit's terminate: selector, which never runs a Go callback, so the item has
+// to be an ordinary one. Everything else is the default menu, role for role.
+//
+// Doing it in ShouldQuit instead would also cover the Dock's Quit and a system
+// logout, and it can't: AppKit calls that hook on the main thread
+// (applicationShouldTerminate:), while the confirmation blocks waiting for the
+// main thread to show the dialog. Those two routes still quit unconfirmed.
+func buildAppMenu(app *application.App, bridge *nativeBridge) *application.Menu {
+	menu := app.NewMenu()
+	appMenu := menu.AddSubmenu("Octo")
+	appMenu.AddRole(application.About)
+	appMenu.AddSeparator()
+	appMenu.AddRole(application.ServicesMenu)
+	appMenu.AddSeparator()
+	appMenu.AddRole(application.Hide)
+	appMenu.AddRole(application.HideOthers)
+	appMenu.AddRole(application.UnHide)
+	appMenu.AddSeparator()
+	appMenu.Add(L().trayQuit).SetAccelerator("CmdOrCtrl+Q").
+		OnClick(func(*application.Context) { bridge.requestQuit() })
+	menu.AddRole(application.FileMenu)
+	menu.AddRole(application.EditMenu)
+	menu.AddRole(application.ViewMenu)
+	menu.AddRole(application.WindowMenu)
+	menu.AddRole(application.HelpMenu)
+	return menu
 }
 
 // buildTrayMenu assembles the tray menu: disabled status lines on top, then the
