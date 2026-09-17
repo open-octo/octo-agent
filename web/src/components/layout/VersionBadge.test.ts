@@ -75,11 +75,31 @@ describe('VersionBadge re-check', () => {
       getVersion.mockResolvedValue(
         versionPayload({ latest: '1.17.0', needs_update: true }) as never,
       )
-      await vi.advanceTimersByTimeAsync(15 * 60_000)
+      await vi.advanceTimersByTimeAsync(60_000)
       flushSync()
 
       expect(getVersion.mock.calls.length).toBeGreaterThan(1)
       expect(target.querySelector('.vb-dot.update')).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops re-reading once unmounted', async () => {
+    vi.useFakeTimers()
+    try {
+      const getVersion = vi.spyOn(api, 'getVersion')
+        .mockResolvedValue(versionPayload() as never)
+      app = mount(VersionBadge, { target }) as Record<string, unknown>
+      await vi.advanceTimersByTimeAsync(0)
+      flushSync()
+
+      unmount(app)
+      app = null
+      const afterUnmount = getVersion.mock.calls.length
+      await vi.advanceTimersByTimeAsync(5 * 60_000)
+
+      expect(getVersion.mock.calls.length).toBe(afterUnmount)
     } finally {
       vi.useRealTimers()
     }
@@ -99,7 +119,7 @@ describe('VersionBadge re-check', () => {
       // phase machine's feet.
       wsHandlers['upgrade_log']?.({ line: 'downloading...' })
       flushSync()
-      await vi.advanceTimersByTimeAsync(15 * 60_000)
+      await vi.advanceTimersByTimeAsync(60_000)
       flushSync()
 
       expect(getVersion.mock.calls.length).toBe(afterMount)

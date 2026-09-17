@@ -68,6 +68,17 @@ const maxArchiveSize = 512 << 20
 // run steals it (a crashed upgrade never removed its lock).
 const lockStaleAfter = 10 * time.Minute
 
+// NeedsUpdate reports whether `current` should be offered an upgrade to
+// `latest`. A dev or unbundled build never is — it would be offered an upgrade
+// that Run itself refuses. The single rule both the web badge and the desktop
+// tray apply; keeping a second copy anywhere is how the two started disagreeing.
+func NeedsUpdate(current, latest string) bool {
+	if Eligible() != nil {
+		return false
+	}
+	return CompareVersions(current, latest) < 0
+}
+
 // CheckAttemptWindow is how long one base URL attempt may take. Callers that
 // set their own Check budget use it to size that budget: a budget below this
 // window buys exactly one attempt, so the mirrors are unreachable.
@@ -102,7 +113,8 @@ func (o Options) log(format string, args ...any) {
 // own budget is below this value gets exactly one attempt and never reaches a
 // mirror. Callers must budget for this window times the number of bases they
 // want reachable. A var so tests can shrink it instead of spending real
-// seconds proving that relationship.
+// seconds proving that relationship — which also means no test in this
+// package may call t.Parallel() while it does so.
 var checkAttemptTimeout = 5 * time.Second
 
 // checkBodyCap limits how much of a 200 (non-redirect) response body gets

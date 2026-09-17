@@ -13,10 +13,37 @@ import (
 	"github.com/open-octo/octo-agent/internal/version"
 )
 
+// awaitVersion polls the cache-only read until it reports want (or the
+// deadline passes). LatestVersion never blocks on the network any more — a
+// stale cache kicks a background refresh — so a test that wants the looked-up
+// value has to let that goroutine land.
+func awaitVersion(t *testing.T, srv *Server, want string) (string, bool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		latest, needs := srv.LatestVersion()
+		if latest == want || time.Now().After(deadline) {
+			return latest, needs
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// settleVersionRefresh waits for any in-flight background lookup to finish, so
+// a test can assert on upstream hit counts without racing the goroutine.
+func settleVersionRefresh(t *testing.T, srv *Server) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for srv.versionChecking.Load() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // TestLatestVersion_ChecksAndCaches points the upgrade base URL at a fake
-// release origin: with UpdateCheck on, the first lookup goes upstream, the
-// second is served from cache (one upstream hit total), and needs_update
-// reflects a release build behind latest.
+// release origin. The read itself never goes upstream — a stale cache kicks a
+// background refresh and the read answers from what it has — so the first call
+// reports the cold answer, the refresh lands, and every later call is served
+// from cache with no further upstream traffic.
 func TestLatestVersion_ChecksAndCaches(t *testing.T) {
 	var hits int32
 	mux := http.NewServeMux()
@@ -28,11 +55,11 @@ func TestLatestVersion_ChecksAndCaches(t *testing.T) {
 	fake = httptest.NewServer(mux)
 	t.Cleanup(fake.Close)
 
-	origURL := upgrade.BaseURL
-	upgrade.BaseURL = fake.URL
-	t.Cleanup(func() { upgrade.BaseURL = origURL })
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
 
-	// Pin a release-like build so needsUpdate can fire (the test binary is
+	// Pin a release-like build so NeedsUpdate can fire (the test binary is
 	// otherwise a dev build with no commit).
 	origV, origC := version.Version, version.Commit
 	version.Version, version.Commit = "0.18.0", "abc1234"
@@ -40,15 +67,25 @@ func TestLatestVersion_ChecksAndCaches(t *testing.T) {
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
 
-	latest, needs := srv.latestVersion()
+	// Cold: answers immediately with what it knows (nothing), having started
+	// the refresh. This is the property that keeps the network off the request
+	// path.
+	if latest, needs := srv.LatestVersion(); latest != "0.18.0" || needs {
+		t.Fatalf("cold read = (%q, %v), want (0.18.0, false) — it must not block on the lookup", latest, needs)
+	}
+
+	latest, needs := awaitVersion(t, srv, "9.9.9")
 	if latest != "9.9.9" || !needs {
-		t.Fatalf("latestVersion = (%q, %v), want (9.9.9, true)", latest, needs)
+		t.Fatalf("after refresh = (%q, %v), want (9.9.9, true)", latest, needs)
 	}
-	if latest2, _ := srv.latestVersion(); latest2 != "9.9.9" {
-		t.Fatalf("second lookup = %q, want cached 9.9.9", latest2)
+	for i := 0; i < 5; i++ {
+		if l, _ := srv.LatestVersion(); l != "9.9.9" {
+			t.Fatalf("cached read = %q, want 9.9.9", l)
+		}
 	}
+	settleVersionRefresh(t, srv)
 	if got := atomic.LoadInt32(&hits); got != 1 {
-		t.Errorf("upstream hits = %d, want 1 (second lookup must be cached)", got)
+		t.Errorf("upstream hits = %d, want 1 (everything after the refresh is cached)", got)
 	}
 }
 
@@ -64,16 +101,18 @@ func TestLatestVersion_DevBuildNeverNags(t *testing.T) {
 	fake = httptest.NewServer(mux)
 	t.Cleanup(fake.Close)
 
-	origURL := upgrade.BaseURL
-	upgrade.BaseURL = fake.URL
-	t.Cleanup(func() { upgrade.BaseURL = origURL })
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
 
 	origV, origC := version.Version, version.Commit
 	version.Version, version.Commit = "0.18.0-dev", "abc1234"
 	t.Cleanup(func() { version.Version, version.Commit = origV, origC })
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
-	if latest, needs := srv.latestVersion(); needs {
+	srv.LatestVersion()
+	settleVersionRefresh(t, srv)
+	if latest, needs := srv.LatestVersion(); needs {
 		t.Errorf("dev build reported needs_update for latest %q", latest)
 	}
 }
@@ -194,22 +233,51 @@ func TestLatestVersion_FailureKeepsLastKnown(t *testing.T) {
 	t.Cleanup(func() { version.Version, version.Commit = origV, origC })
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
-	if latest, needs := srv.latestVersion(); latest != "9.9.9" || !needs {
-		t.Fatalf("priming lookup = (%q, %v), want (9.9.9, true)", latest, needs)
+	srv.LatestVersion()
+	if latest, needs := awaitVersion(t, srv, "9.9.9"); latest != "9.9.9" || !needs {
+		t.Fatalf("priming read = (%q, %v), want (9.9.9, true)", latest, needs)
 	}
 
-	// Age the cache past its TTL and start failing.
+	// Force a failing lookup through the same path the tray's manual check
+	// uses, so the failure is recorded rather than merely scheduled.
 	fail.Store(true)
-	srv.versionCheckMu.Lock()
-	srv.versionCheckedAt = time.Now().Add(-2 * versionCheckTTL)
-	srv.versionCheckMu.Unlock()
-
-	if latest, needs := srv.latestVersion(); latest != "9.9.9" || !needs {
-		t.Errorf("after a failed re-check = (%q, %v), want the last known (9.9.9, true)", latest, needs)
+	latest, needs, err := srv.RefreshLatestVersion(context.Background())
+	if err == nil {
+		t.Fatal("forced refresh succeeded against a failing origin")
 	}
-	// And again, now inside the failure backoff window.
-	if latest, needs := srv.latestVersion(); latest != "9.9.9" || !needs {
+	if latest != "9.9.9" || !needs {
+		t.Errorf("failed refresh = (%q, %v), want the last known (9.9.9, true)", latest, needs)
+	}
+	// And the cache-only read, now inside the failure backoff window.
+	if latest, needs := srv.LatestVersion(); latest != "9.9.9" || !needs {
 		t.Errorf("during backoff = (%q, %v), want the last known (9.9.9, true)", latest, needs)
+	}
+}
+
+// TestLatestVersion_NeverSucceededFallsBackToCurrent is the other half of
+// lastKnown: with nothing ever looked up, a failure reports current-is-latest
+// rather than inventing a release.
+func TestLatestVersion_NeverSucceededFallsBackToCurrent(t *testing.T) {
+	fakeFail := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "nope", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(fakeFail.Close)
+
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fakeFail.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
+
+	origV, origC := version.Version, version.Commit
+	version.Version, version.Commit = "0.18.0", "abc1234"
+	t.Cleanup(func() { version.Version, version.Commit = origV, origC })
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
+	latest, needs, err := srv.RefreshLatestVersion(context.Background())
+	if err == nil {
+		t.Fatal("forced refresh succeeded against a failing origin")
+	}
+	if latest != "0.18.0" || needs {
+		t.Errorf("never-succeeded failure = (%q, %v), want (0.18.0, false)", latest, needs)
 	}
 }
 
@@ -228,9 +296,9 @@ func TestRefreshLatestVersion_BypassesCacheAndSeedsIt(t *testing.T) {
 	fake = httptest.NewServer(mux)
 	t.Cleanup(fake.Close)
 
-	origURL := upgrade.BaseURL
-	upgrade.BaseURL = fake.URL
-	t.Cleanup(func() { upgrade.BaseURL = origURL })
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
 
 	origV, origC := version.Version, version.Commit
 	version.Version, version.Commit = "0.18.0", "abc1234"
@@ -239,16 +307,17 @@ func TestRefreshLatestVersion_BypassesCacheAndSeedsIt(t *testing.T) {
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
 
 	// Warm the cache, then publish a newer release. A cached read still sees
-	// the old one — that is the cache doing its job.
-	if latest, _ := srv.latestVersion(); latest != "9.9.9" {
-		t.Fatalf("priming lookup = %q, want 9.9.9", latest)
+	// the old one — that is the refresh interval doing its job.
+	srv.LatestVersion()
+	if latest, _ := awaitVersion(t, srv, "9.9.9"); latest != "9.9.9" {
+		t.Fatalf("priming read = %q, want 9.9.9", latest)
 	}
 	tag = "10.0.0"
-	if latest, _ := srv.latestVersion(); latest != "9.9.9" {
+	if latest, _ := srv.LatestVersion(); latest != "9.9.9" {
 		t.Fatalf("cached read = %q, want the cached 9.9.9", latest)
 	}
 
-	// The manual check ignores the TTL...
+	// The manual check ignores the refresh interval...
 	latest, needs, err := srv.RefreshLatestVersion(context.Background())
 	if err != nil {
 		t.Fatalf("RefreshLatestVersion: %v", err)
@@ -257,11 +326,22 @@ func TestRefreshLatestVersion_BypassesCacheAndSeedsIt(t *testing.T) {
 		t.Fatalf("RefreshLatestVersion = (%q, %v), want (10.0.0, true)", latest, needs)
 	}
 	// ...and seeds the cache, so the badge's next read matches the tray.
-	if latest, needs := srv.latestVersion(); latest != "10.0.0" || !needs {
+	if latest, needs := srv.LatestVersion(); latest != "10.0.0" || !needs {
 		t.Errorf("badge read after refresh = (%q, %v), want (10.0.0, true)", latest, needs)
 	}
+	settleVersionRefresh(t, srv)
 	if got := atomic.LoadInt32(&hits); got != 2 {
-		t.Errorf("upstream hits = %d, want 2 (prime + forced refresh; the rest cached)", got)
+		t.Errorf("upstream hits = %d, want 2 (one background refresh + one forced; the rest cached)", got)
+	}
+}
+
+// TestRefreshLatestVersion_DisabledReportsError: a server that performs no
+// lookups hands back an error rather than a confident "you're up to date" the
+// tray would happily toast.
+func TestRefreshLatestVersion_DisabledReportsError(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: false})
+	if _, _, err := srv.RefreshLatestVersion(context.Background()); err == nil {
+		t.Error("RefreshLatestVersion on a no-lookup build returned no error")
 	}
 }
 
@@ -276,15 +356,19 @@ func TestLatestVersion_ExportedMatchesBadge(t *testing.T) {
 	fake = httptest.NewServer(mux)
 	t.Cleanup(fake.Close)
 
-	origURL := upgrade.BaseURL
-	upgrade.BaseURL = fake.URL
-	t.Cleanup(func() { upgrade.BaseURL = origURL })
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
 
 	origV, origC := version.Version, version.Commit
 	version.Version, version.Commit = "0.18.0", "abc1234"
 	t.Cleanup(func() { version.Version, version.Commit = origV, origC })
 
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
+	srv.LatestVersion()
+	if _, _ = awaitVersion(t, srv, "9.9.9"); true {
+		settleVersionRefresh(t, srv)
+	}
 
 	trayLatest, trayNeeds := srv.LatestVersion()
 
@@ -299,5 +383,8 @@ func TestLatestVersion_ExportedMatchesBadge(t *testing.T) {
 	if badge.Latest != trayLatest || badge.NeedsUpdate != trayNeeds {
 		t.Errorf("badge = (%q, %v), tray = (%q, %v) — must match",
 			badge.Latest, badge.NeedsUpdate, trayLatest, trayNeeds)
+	}
+	if badge.Latest != "9.9.9" || !badge.NeedsUpdate {
+		t.Errorf("both surfaces = (%q, %v), want the looked-up (9.9.9, true)", badge.Latest, badge.NeedsUpdate)
 	}
 }

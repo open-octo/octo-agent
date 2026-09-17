@@ -387,8 +387,14 @@ type Server struct {
 	// requests.
 	apiRoutes []string
 
-	// Latest-release cache behind GET /api/version (see latestVersion).
-	versionCheckMu   sync.Mutex
+	// Latest-release cache behind GET /api/version and Server.LatestVersion
+	// (see version_upgrade_handlers.go). Reads take versionCacheMu.RLock and
+	// never touch the network; versionChecking single-flights the lookup,
+	// which runs WITHOUT the cache lock held so a slow GitHub can't stall
+	// readers.
+	versionCacheMu   sync.RWMutex
+	versionChecking  atomic.Bool
+	versionRefreshWG sync.WaitGroup
 	versionLatest    string
 	versionCheckedAt time.Time
 	versionFailedAt  time.Time
@@ -804,6 +810,7 @@ func (s *Server) doShutdown(ctx context.Context) error {
 	if s.watchStop != nil {
 		close(s.watchStop)
 	}
+	s.awaitVersionRefresh(ctx)
 	s.stopChannels()
 	// Kill background processes started via web/IM sessions so they don't
 	// outlive the daemon — the same orphan-prevention the CLI/TUI do on exit.

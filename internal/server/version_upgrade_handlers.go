@@ -12,24 +12,29 @@ import (
 	"github.com/open-octo/octo-agent/internal/version"
 )
 
-// Latest-version cache TTLs: successes are fresh for 15 minutes, failures
-// back off for ten minutes. The /api/version endpoint is unauthenticated,
-// so the cache is also what keeps a request flood from becoming an
-// outbound-request flood.
+// Version-cache timings.
+//
+// versionRefreshInterval is how often a lookup may actually leave the machine.
+// It is deliberately far longer than how often the UI reads the answer: reads
+// are served from cache and cost nothing, so the tray and the web badge can
+// both re-read every minute (which is what keeps them showing the same thing)
+// while the network is touched four times a day.
+//
+// versionCheckBackoff holds off retrying after a failure.
 //
 // versionCheckTimeout budgets the WHOLE upgrade.Check call, not one attempt.
-// Check walks GitHub plus four mirrors, giving each a 5s sub-context bounded
-// by this parent — so a budget under ~5s means a slow primary eats it all and
-// every mirror gets an already-expired context, i.e. the mirrors may as well
-// not exist. It used to be 3s, which is exactly why the web badge could insist
-// "up to date" on a network where the desktop tray (10s, so it reached
-// dl.octo-agent.dev) had already found the release. One cold call can now take
-// up to 10s; it is single-flighted and cached, so at most one client pays it
-// per TTL and nothing but the badge waits on it.
+// Check walks GitHub plus the mirrors, giving each a sub-context bounded by
+// this parent, so a budget below one attempt window means a slow primary eats
+// it all and every mirror gets an already-expired context — the mirrors may as
+// well not exist. It used to be 3s, which is exactly why the web badge could
+// insist "up to date" on a network where the desktop tray (10s, so it reached
+// dl.octo-agent.dev) had already found the release. 10s buys GitHub plus the
+// project's own mirror; the remaining public proxies are best-effort and not
+// budgeted for. Nothing waits on this: the lookup runs on its own goroutine.
 const (
-	versionCheckTTL     = 15 * time.Minute
-	versionCheckBackoff = 10 * time.Minute
-	versionCheckTimeout = 10 * time.Second
+	versionRefreshInterval = 6 * time.Hour
+	versionCheckBackoff    = 10 * time.Minute
+	versionCheckTimeout    = 10 * time.Second
 )
 
 // ─── GET /api/version ────────────────────────────────────────────────────────
@@ -41,7 +46,7 @@ const (
 // must not leak here.
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	current := strings.TrimPrefix(version.Version, "v")
-	latest, needs := s.latestVersion()
+	latest, needs := s.LatestVersion()
 	// The response includes the running binary version, which changes after an
 	// upgrade/restart. Tell browsers and intermediaries not to cache it so the
 	// badge reflects the currently running server immediately.
@@ -99,96 +104,150 @@ func (s *Server) upgradeMode() string {
 }
 
 // LatestVersion reports the latest known release and whether this build is
-// behind it, through the same cache GET /api/version serves. It is the single
-// source of truth for "is there an update": the desktop tray reads it too, so
-// the tray item and the web badge can no longer disagree (they used to keep
-// separate caches on separate cadences and drift apart).
-func (s *Server) LatestVersion() (string, bool) { return s.latestVersion() }
-
-// RefreshLatestVersion forces a lookup that ignores the cache TTL and the
-// failure backoff, then seeds the shared cache with the result so the web
-// badge immediately agrees with whoever asked. The desktop tray's explicit
-// "Check for updates…" calls this: the user asking is not a request to be
-// served a cached answer. Config.UpdateCheck still gates it — a build that
-// never looks (the test suite, every non-serve constructor) must not be
-// talked into looking.
-func (s *Server) RefreshLatestVersion(ctx context.Context) (string, bool, error) {
-	current := strings.TrimPrefix(version.Version, "v")
-	if !s.cfg.UpdateCheck {
-		return current, false, nil
-	}
-
-	s.versionCheckMu.Lock()
-	defer s.versionCheckMu.Unlock()
-	return s.checkLocked(ctx, current, time.Now())
-}
-
-// latestVersion resolves the latest released version through the cache.
-// The update check is opt-in via Config.UpdateCheck (set only by `octo
-// serve`), so every other Server constructor — the test suite included —
-// performs no outbound calls and degrades to "current is latest".
-func (s *Server) latestVersion() (string, bool) {
+// behind it. It reads the shared cache and never performs the lookup on the
+// caller's goroutine — a stale cache instead kicks off one background refresh
+// and this call answers with what is already known.
+//
+// It is the single source of truth for "is there an update": GET /api/version
+// serves exactly this, and the desktop tray reads it too. Because a read is
+// free, both surfaces can re-read often enough to display the same answer at
+// all times, which is the whole point — they used to keep private caches on
+// different cadences and drift apart.
+func (s *Server) LatestVersion() (string, bool) {
 	current := strings.TrimPrefix(version.Version, "v")
 	if !s.cfg.UpdateCheck {
 		return current, false
 	}
-
-	// The mutex doubles as single-flight: under a flood, one caller does
-	// the network round-trip and the rest line up to read its cache entry.
-	s.versionCheckMu.Lock()
-	defer s.versionCheckMu.Unlock()
-
-	now := time.Now()
-	if s.versionLatest != "" && now.Sub(s.versionCheckedAt) < versionCheckTTL {
-		return s.versionLatest, needsUpdate(current, s.versionLatest)
+	latest, needs, stale := s.versionSnapshot(current)
+	if stale {
+		s.startVersionRefresh()
 	}
-	if !s.versionFailedAt.IsZero() && now.Sub(s.versionFailedAt) < versionCheckBackoff {
-		return s.lastKnownLocked(current)
-	}
-
-	// Background-derived, not the request context: a client navigating
-	// away mid-check would otherwise record a failure and degrade the
-	// badge for every client for the whole backoff window.
-	cctx, cancel := context.WithTimeout(context.Background(), versionCheckTimeout)
-	defer cancel()
-	latest, needs, _ := s.checkLocked(cctx, current, now)
 	return latest, needs
 }
 
-// checkLocked performs the lookup and records the outcome. Caller holds
-// versionCheckMu.
-func (s *Server) checkLocked(ctx context.Context, current string, now time.Time) (string, bool, error) {
+// RefreshLatestVersion performs the lookup on THIS goroutine, ignoring the
+// refresh interval and the failure backoff, and seeds the shared cache with
+// the result so every other surface agrees on its next read. The desktop
+// tray's explicit "Check for updates…" calls this: the user asking is not a
+// request to be served a cached answer, and the tray can afford to block
+// where an HTTP handler cannot.
+//
+// Config.UpdateCheck still gates it — a build that never looks (the test
+// suite, every non-serve constructor) must not be talked into looking.
+func (s *Server) RefreshLatestVersion(ctx context.Context) (string, bool, error) {
+	current := strings.TrimPrefix(version.Version, "v")
+	if !s.cfg.UpdateCheck {
+		return current, false, errUpdateCheckDisabled
+	}
+	return s.runVersionCheck(ctx, current)
+}
+
+// errUpdateCheckDisabled reports that this build performs no lookups at all,
+// so the caller was handed no answer rather than a stale one. Returning a nil
+// error with current-is-latest would have the tray cheerfully toast "you're on
+// the newest version" on a server that never looked.
+var errUpdateCheckDisabled = errors.New("update check is disabled for this server")
+
+// versionSnapshot reads the cache without touching the network. stale reports
+// that a refresh is due — the cache has aged out (or was never filled) and no
+// failure backoff is in effect.
+func (s *Server) versionSnapshot(current string) (latest string, needs bool, stale bool) {
+	s.versionCacheMu.RLock()
+	defer s.versionCacheMu.RUnlock()
+
+	now := time.Now()
+	fresh := s.versionLatest != "" && now.Sub(s.versionCheckedAt) < versionRefreshInterval
+	backedOff := !s.versionFailedAt.IsZero() && now.Sub(s.versionFailedAt) < versionCheckBackoff
+
+	// What a failed or not-yet-due read reports is the last release we
+	// actually saw, not "current". A lookup failing does not un-release a
+	// version — reporting current-is-latest is how the badge ended up claiming
+	// "up to date" while the tray, which keeps its own last answer, still
+	// offered the download. Only a server that has never once succeeded falls
+	// back to current.
+	if s.versionLatest == "" {
+		return current, false, !backedOff
+	}
+	return s.versionLatest, upgrade.NeedsUpdate(current, s.versionLatest), !fresh && !backedOff
+}
+
+// startVersionRefresh runs one lookup in the background, at most one at a
+// time. The caller does not wait: GET /api/version also carries
+// native/local/os_version, which the frontend needs promptly, and a cold
+// upgrade.Check can take the full versionCheckTimeout on a network where
+// GitHub is slow. Whoever reads next picks the result up.
+func (s *Server) startVersionRefresh() {
+	if !s.versionChecking.CompareAndSwap(false, true) {
+		return // one already in flight
+	}
+	current := strings.TrimPrefix(version.Version, "v")
+	s.versionRefreshWG.Add(1)
+	go func() {
+		defer s.versionRefreshWG.Done()
+		defer s.versionChecking.Store(false)
+		ctx, cancel := context.WithTimeout(context.Background(), versionCheckTimeout)
+		defer cancel()
+		// Background-derived, not a request context: a client navigating away
+		// mid-check would otherwise record a failure and degrade the answer
+		// for every other reader for the whole backoff window.
+		_, _, _ = s.checkAndStore(ctx, current)
+	}()
+}
+
+// awaitVersionRefresh waits for an in-flight background lookup to finish, so
+// the goroutine does not outlive the server. Bounded by ctx: the lookup has
+// its own versionCheckTimeout, and a shutdown must not wait out a slow GitHub.
+func (s *Server) awaitVersionRefresh(ctx context.Context) {
+	done := make(chan struct{})
+	go func() {
+		s.versionRefreshWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+}
+
+// runVersionCheck is the forced path: it waits for an in-flight background
+// refresh rather than racing it, then performs its own lookup.
+func (s *Server) runVersionCheck(ctx context.Context, current string) (string, bool, error) {
+	for !s.versionChecking.CompareAndSwap(false, true) {
+		select {
+		case <-ctx.Done():
+			latest, needs, _ := s.versionSnapshot(current)
+			return latest, needs, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	defer s.versionChecking.Store(false)
+	return s.checkAndStore(ctx, current)
+}
+
+// checkAndStore performs the lookup and records the outcome. The network call
+// happens with NO lock held — the cache lock is taken only to publish the
+// result, so a slow GitHub never blocks a reader. Callers hold the
+// versionChecking token.
+func (s *Server) checkAndStore(ctx context.Context, current string) (string, bool, error) {
 	latest, err := upgrade.Check(ctx)
+	now := time.Now()
+
+	s.versionCacheMu.Lock()
 	if err != nil {
 		s.versionFailedAt = now
-		l, needs := s.lastKnownLocked(current)
-		return l, needs, err
+	} else {
+		s.versionLatest, s.versionCheckedAt, s.versionFailedAt = latest, now, time.Time{}
 	}
-	s.versionLatest, s.versionCheckedAt, s.versionFailedAt = latest, now, time.Time{}
-	return latest, needsUpdate(current, latest), nil
-}
+	known := s.versionLatest
+	s.versionCacheMu.Unlock()
 
-// lastKnownLocked is what a failed or backed-off check reports: the last
-// release we actually saw, not "current". A lookup failing does not un-release
-// a version — reporting current-is-latest is how the badge ended up claiming
-// "up to date" while the tray, which keeps its own last answer, still offered
-// the download. Only a server that has never once succeeded falls back to
-// current. Caller holds versionCheckMu.
-func (s *Server) lastKnownLocked(current string) (string, bool) {
-	if s.versionLatest == "" {
-		return current, false
+	if err != nil {
+		if known == "" {
+			return current, false, err
+		}
+		return known, upgrade.NeedsUpdate(current, known), err
 	}
-	return s.versionLatest, needsUpdate(current, s.versionLatest)
-}
-
-// needsUpdate is true only for an upgradeable build that is actually
-// behind — dev builds never grow the badge, matching upgrade.Run's own
-// eligibility refusal.
-func needsUpdate(current, latest string) bool {
-	if upgrade.Eligible() != nil {
-		return false
-	}
-	return upgrade.CompareVersions(current, latest) < 0
+	return latest, upgrade.NeedsUpdate(current, latest), nil
 }
 
 // ─── POST /api/version/upgrade ──────────────────────────────────────────────

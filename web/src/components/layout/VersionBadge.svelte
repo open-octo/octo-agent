@@ -37,12 +37,15 @@
   let logEl = $state<HTMLElement | null>(null)
 
   const RECONNECT_TIMEOUT_MS = 30_000
-  // Re-check on a timer, not just on mount. A desktop window stays open for
+  // Re-read on a timer, not just on mount. A desktop window stays open for
   // days, so a mount-only check froze the badge at whatever was true when the
   // window loaded while the tray kept checking — that is what made the two
-  // disagree. Matched to the server's 15-minute cache TTL: a tick inside the
-  // window is served from cache and costs no outbound request.
-  const RECHECK_MS = 15 * 60_000
+  // disagree. /api/version answers from the server's cache and never performs
+  // the upstream lookup on the request, so a tick is a local round-trip; the
+  // tray re-reads that same cache on the same sort of cadence, which is what
+  // keeps the two showing one answer. How often a lookup actually leaves the
+  // machine is the server's versionRefreshInterval, not this.
+  const RECHECK_MS = 60_000
 
   // The hub reports native=true to every client, but only the desktop-shell
   // webview should behave as native (OS file dialog, OS notifications, header
@@ -53,12 +56,18 @@
   // server is restarting (the flow would keep running with no surface).
   let locked = $derived(phase === 'upgrading' || phase === 'reconnecting')
 
-  async function checkVersion() {
+  async function checkVersion(background = false) {
     try {
       const d = await api.getVersion() as any
+      // The phase machine owns latest/needsUpdate once an upgrade starts. A
+      // background tick already in flight when it started must not overwrite
+      // them on the way back — the tick's own idle guard fired before the
+      // await, not after it.
+      if (!background || phase === 'idle') {
+        latest = d.latest ?? ''
+        needsUpdate = !!d.needs_update
+      }
       current = d.current ?? (d.version ?? '').replace(/^v/, '')
-      latest = d.latest ?? ''
-      needsUpdate = !!d.needs_update
       if (d.cli_command) cliCommand = d.cli_command
       upgradeMode = d.upgrade_mode === 'installer' ? 'installer' : 'cli'
       downloadUrl = d.download_url ?? ''
@@ -95,7 +104,7 @@
     checkVersion()
     // Only while idle: a tick landing mid-upgrade would overwrite needsUpdate
     // under the phase machine's feet.
-    const recheck = setInterval(() => { if (phase === 'idle') checkVersion() }, RECHECK_MS)
+    const recheck = setInterval(() => { if (phase === 'idle') checkVersion(true) }, RECHECK_MS)
     // upgrade_log / upgrade_complete are global broadcasts (no session_id); the
     // WS dispatch is by type, so these fire regardless of the active session.
     const offLog = ws.on('upgrade_log', (ev: any) => {
