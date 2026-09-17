@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -97,8 +98,12 @@ func Path(elem ...string) (string, error) {
 	return filepath.Join(append([]string{dir}, elem...)...), nil
 }
 
-// BinDir returns the machine-scoped directory for Octo-managed helper binaries.
-func BinDir() (string, error) {
+// SharedPath joins elements below ~/.octo regardless of the selected profile —
+// the home for things that belong to the machine rather than to one profile's
+// user data. Helper binaries the installers stage live here, and so does the
+// desktop shell's record of which profile to open, which by definition cannot
+// live inside a profile.
+func SharedPath(elem ...string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve home directory: %w", err)
@@ -106,5 +111,39 @@ func BinDir() (string, error) {
 	if home == "" {
 		return "", fmt.Errorf("resolve home directory: empty path")
 	}
-	return filepath.Join(home, ".octo", "bin"), nil
+	return filepath.Join(append([]string{home, ".octo"}, elem...)...), nil
+}
+
+// BinDir returns the machine-scoped directory for Octo-managed helper binaries.
+func BinDir() (string, error) { return SharedPath("bin") }
+
+// List returns the profiles that exist on disk: "" for the default ~/.octo when
+// it is there, then each named ~/.octo-<name>, sorted. It reports what has been
+// used, not what is allowed — any valid name works whether or not it is listed.
+func List() ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve home directory: %w", err)
+	}
+	entries, err := os.ReadDir(home)
+	if err != nil {
+		return nil, fmt.Errorf("read home directory: %w", err)
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		switch name := e.Name(); {
+		case name == ".octo":
+			out = append(out, "")
+		case strings.HasPrefix(name, ".octo-"):
+			profile := strings.TrimPrefix(name, ".octo-")
+			if profileName.MatchString(profile) {
+				out = append(out, profile)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }

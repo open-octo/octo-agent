@@ -9,11 +9,11 @@ import (
 	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
-// TestPrepareDesktopArgs covers the desktop shell's only CLI option. The
+// TestSelectDesktopProfile covers the desktop shell's only CLI option. The
 // "unknown argument" case is the interesting one: it must NOT fail, because
 // this runs before setupCrashLog and a GUI launch has no stderr to explain
 // itself on.
-func TestPrepareDesktopArgs(t *testing.T) {
+func TestSelectDesktopProfile(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		args    []string
@@ -28,9 +28,12 @@ func TestPrepareDesktopArgs(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(datahome.ProfileEnv, "")
-			err := prepareDesktopArgs(tc.args)
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			err := selectDesktopProfile(tc.args)
 			if (err != nil) != tc.wantErr {
-				t.Fatalf("prepareDesktopArgs(%q) error = %v, want error %v", tc.args, err, tc.wantErr)
+				t.Fatalf("selectDesktopProfile(%q) error = %v, want error %v", tc.args, err, tc.wantErr)
 			}
 			if got := os.Getenv(datahome.ProfileEnv); got != tc.profile {
 				t.Errorf("profile = %q, want %q", got, tc.profile)

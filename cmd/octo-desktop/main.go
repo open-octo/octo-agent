@@ -59,7 +59,13 @@ var trayColorIcon []byte
 // hubAddr is the fixed loopback address the hub owns — the same default
 // `octo serve` binds, so every existing client (Web, VS Code, Obsidian, CLI)
 // finds it without configuration. LAN exposure stays a CLI concern.
-const hubAddr = "127.0.0.1:8088"
+const defaultHubAddr = "127.0.0.1:8088"
+
+// hubAddr is the address this launch's profile answers on: the fixed default
+// for the default profile, and the profile's own remembered port otherwise —
+// the same answer `octo serve` reaches, via the same resolver, so a profile is
+// at one address no matter which backend is up. Resolved once at startup.
+var hubAddr = defaultHubAddr
 
 // isBundled reports whether we're running inside a .app. The Wails
 // notifications service needs a bundle identifier and hard-fails startup
@@ -131,22 +137,17 @@ func ensureValidTempDir() {
 	}
 }
 
-// prepareDesktopArgs adopts the global --profile flag and ignores everything
-// else. Unrecognised arguments are deliberately not an error: this runs before
-// setupCrashLog, and the GUI launch has no stderr to report one on (see the
-// comment there), so rejecting them would leave the app silently refusing to
-// start with nothing written down. An invalid profile still stops us, because
-// that can only come from a terminal launch where the message is readable.
-func prepareDesktopArgs(args []string) error {
-	_, err := datahome.ConfigureFromArgs(args)
-	return err
-}
-
 func main() {
-	if err := prepareDesktopArgs(os.Args[1:]); err != nil {
+	if err := selectDesktopProfile(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "octo-desktop: invalid --profile: %v\n", err)
 		os.Exit(2)
 	}
+
+	// A profile switch starts us while the process we replace is still winding
+	// down. Wait it out before anything observable happens — ahead of
+	// application.New (which would hand us to the old instance as a second
+	// launch) and ahead of any log file the old backend still holds open.
+	awaitPredecessor()
 
 	// macOS's postinstall script launches the app with `open` from inside
 	// installd's ephemeral PKInstallSandbox.*; the launched process can inherit
@@ -444,6 +445,19 @@ func hubLogLevel() slog.Level {
 // daemon), starts the in-process server, and opens the window. It runs inside
 // the ApplicationStarted hook so its dialogs have a live event loop.
 func startHub(app *application.App, bridge *nativeBridge, settings desktopSettings) {
+	// Which port this profile answers on. The default profile keeps 8088; a
+	// named one gets its own remembered port, resolved the same way `octo
+	// serve` resolves it, so a profile is at one address either way. A busy
+	// pinned port is reported rather than worked around — see ResolveAddr.
+	addr, err := serveproc.ResolveAddr(os.Getenv(datahome.ProfileEnv), false, defaultHubAddr)
+	if err != nil {
+		bridge.showError(L().errTitle, err.Error())
+		app.Quit()
+		return
+	}
+	hubAddr = addr
+	bridge.url = "http://" + addr
+
 	// If another backend already owns the port, ask before displacing it.
 	tookOver := false
 	if pid, ok := serveproc.Running(); ok {
@@ -673,6 +687,9 @@ func trayStatusLines(bridge *nativeBridge) []string {
 		return []string{L().trayStarting}
 	}
 	lines := []string{fmt.Sprintf(L().trayBackendFmt, hubAddr)}
+	if p := os.Getenv(datahome.ProfileEnv); p != "" {
+		lines = append(lines, fmt.Sprintf(L().trayProfileFmt, p))
+	}
 	lines = append(lines, fmt.Sprintf(L().trayClientsFmt, srv.ConnectedClients()))
 	// Only when > 0 — keeps the menu clean before any channel is configured.
 	if n := srv.ConfiguredChannelCount(); n > 0 {
@@ -731,6 +748,7 @@ func buildTrayMenu(app *application.App, bridge *nativeBridge) *application.Menu
 	}
 	m.Add(petLabel).OnClick(func(*application.Context) { bridge.togglePet() })
 	m.Add(L().traySettings).OnClick(func(*application.Context) { bridge.openSettings() })
+	addProfileMenu(m, bridge)
 	// A known-newer release replaces the "check" item with a one-click update
 	// (in-place when this build supports it, else the download page) — the
 	// durable prompt when the toast was suppressed. Otherwise the manual check.

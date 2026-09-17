@@ -34,6 +34,19 @@ type uiStrings struct {
 	quitOK     string
 	quitCancel string
 
+	// Profile switching. The two switch messages differ because a turn in
+	// flight and a turn waiting on the user are different reasons to stop.
+	trayProfileMenu       string
+	trayProfileFmt        string // "Profile · %s"
+	profileDefault        string
+	profileSwitchTitle    string
+	profileSwitchBusyFmt  string
+	profileSwitchAskFmt   string
+	profileSwitchOK       string
+	profileSwitchCancel   string
+	profileSaveErrFmt     string
+	profileRelaunchErrFmt string
+
 	errTitle     string
 	errBindFmt   string // "...%s...%v"
 	errStopFmt   string // "...%v"
@@ -67,6 +80,17 @@ var enStrings = uiStrings{
 	takeoverMsgFmt: "A background Octo backend is already running (pid %d).\n\nStop it and run Octo as the hub for this machine?",
 	takeoverOK:     "Stop and Continue",
 	takeoverCancel: "Quit",
+
+	trayProfileMenu:       "Profile",
+	trayProfileFmt:        "Profile · %s",
+	profileDefault:        "Default",
+	profileSwitchTitle:    "Switch profile",
+	profileSwitchBusyFmt:  "Octo is working on something right now. Switching to \u201c%s\u201d restarts the app, and that work is lost.\n\nSwitch anyway?",
+	profileSwitchAskFmt:   "Octo is waiting for an answer from you. Switching to \u201c%s\u201d restarts the app, and the question goes with it.\n\nSwitch anyway?",
+	profileSwitchOK:       "Switch",
+	profileSwitchCancel:   "Cancel",
+	profileSaveErrFmt:     "Couldn't record the profile choice: %v",
+	profileRelaunchErrFmt: "Couldn't restart Octo: %v",
 
 	quitTitle:  "Quit Octo",
 	quitMsg:    "Quitting stops the Octo backend on this machine. Connected editors, browsers, and IM channels will disconnect.\n\nQuit anyway?",
@@ -106,6 +130,17 @@ var zhStrings = uiStrings{
 	takeoverMsgFmt: "已有一个 Octo 后端在后台运行（pid %d）。\n\n停止它，并让 Octo 作为本机的后端中枢？",
 	takeoverOK:     "停止并继续",
 	takeoverCancel: "退出",
+
+	trayProfileMenu:       "配置",
+	trayProfileFmt:        "配置 · %s",
+	profileDefault:        "默认",
+	profileSwitchTitle:    "切换配置",
+	profileSwitchBusyFmt:  "Octo 正在处理一个任务。切换到「%s」会重启应用，这个任务会丢失。\n\n仍要切换吗？",
+	profileSwitchAskFmt:   "Octo 正在等你回答。切换到「%s」会重启应用，这个问题也会一并丢掉。\n\n仍要切换吗？",
+	profileSwitchOK:       "切换",
+	profileSwitchCancel:   "取消",
+	profileSaveErrFmt:     "无法保存配置选择：%v",
+	profileRelaunchErrFmt: "无法重启 Octo：%v",
 
 	quitTitle:  "退出 Octo",
 	quitMsg:    "退出会停止本机的 Octo 后端，已连接的编辑器、浏览器和 IM channel 都会断开。\n\n仍要退出？",
