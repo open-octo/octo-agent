@@ -136,10 +136,21 @@ date"), 1 failure, 2 flag errors.
   running version.
 
   The update check is **opt-in via `server.Config.UpdateCheck`**, set only
-  by `octo serve`. Everything else that constructs a `Server` — the whole
-  test suite included — gets no outbound calls, which is what keeps the
-  "no live network in `go test`" rule intact for every existing test that
-  hits `/api/version`. Disabled means the degraded response.
+  by `octo serve` and the desktop hub. Everything else that constructs a
+  `Server` — the whole test suite included — gets no outbound calls, which
+  is what keeps the "no live network in `go test`" rule intact for every
+  existing test that hits `/api/version`. Disabled means the degraded
+  response.
+
+  Above that build-level gate sits the user's `update_check` preference in
+  `~/.octo/config.yml` (default true, editable from Web Settings via
+  `PUT /api/config/update_check`). `latestVersion` consults it **after** the
+  TTL/backoff gate, so a cache hit costs no disk read on this unauthenticated
+  endpoint; the guarantee the switch makes is that no request is *sent*, not
+  that a cached `latest` disappears the instant it is flipped. It reads
+  through `config.LoadCached` so an unparseable hand-edit cannot silently
+  re-enable the check. Explicit `octo upgrade` never consults it — running
+  the command is the consent.
 - **`POST /api/version/upgrade`** (auth required, like restart) replaces
   the stub: it 202s and runs `upgrade.Prepare` + `Install` in a goroutine,
   single-flight — a second POST while one runs gets 409. The download

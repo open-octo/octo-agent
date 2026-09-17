@@ -131,6 +131,7 @@ octo serve -addr :8088 -d
 |---|---|
 | `web_search` | 不可用。后端是 Tavily / Bing 等公网服务，调用会超时报错。模型收到错误后会自行放弃并改走别的路 |
 | `web_fetch` | 只能抓到内网可达的 URL |
+| Web UI 图标 | 图标 web component 和图标数据都从 Iconify CDN 加载，隔离网络下图标会是空白。功能不受影响——文字、布局、键盘操作都正常，只是少了图标 |
 | `octo upgrade`、Web 端的版本徽标 | 会尝试连 GitHub 并失败。不影响任何其他功能，升级走下面的离线流程。在 `~/.octo/config.yml` 里设 `update_check: false`（或在设置里关掉开关），徽标就不再尝试 |
 | 手机隧道（`-tunnel`） | 默认关闭，不会主动连任何中继 |
 | MCP 服务 | 本地 stdio 进程没问题。但 `npx @modelcontextprotocol/...` 这类要先把 npm 包离线装好；配置在 `~/.octo/mcp.json` |

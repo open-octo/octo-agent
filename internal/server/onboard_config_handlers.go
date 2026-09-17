@@ -516,14 +516,13 @@ func (s *Server) handlePutUpdateCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := config.Load()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
-		return
-	}
-
-	cfg.UpdateCheck = &req.UpdateCheck
-	if err := cfg.Save(); err != nil {
+	// Mutate, not Load+Save: it holds the file lock across the read-modify-write
+	// so a concurrent settings change (or the agent editing config.yml) can't be
+	// clobbered. Config.Save's own doc points read-modify-write callers here.
+	if err := config.Mutate(func(c *config.Config) error {
+		c.UpdateCheck = &req.UpdateCheck
+		return nil
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
 		return
 	}

@@ -532,6 +532,19 @@ func autoUpdateLoop(bridge *nativeBridge) {
 	}
 }
 
+// autoCheckAllowed reports whether the unattended cadence may reach out:
+// `update_check: false` silences it, the whole point being that an idle
+// install makes no outbound request of its own.
+//
+// A config that won't load counts as "not allowed" rather than falling
+// through to the built-in default. Failing open would let a stray YAML typo
+// silently re-enable the very request the user switched off; failing closed
+// costs one missed check on a cadence that repeats daily.
+func autoCheckAllowed() bool {
+	cfg, err := config.Load()
+	return err == nil && cfg.UpdateCheckEnabled()
+}
+
 // runUpdateCheck performs one update lookup and records the outcome on the
 // bridge so the tray can show a persistent, clickable "download" item — the
 // durable signal, since macOS suppresses the toast while the app is foreground
@@ -545,13 +558,10 @@ func autoUpdateLoop(bridge *nativeBridge) {
 // on a build without the notification service (an unbundled macOS binary) they
 // no-op, matching the version badge's own silence there.
 func runUpdateCheck(bridge *nativeBridge, manual bool) {
-	// `update_check: false` silences the automatic cadence — the whole point
-	// being that an idle install makes no outbound request of its own. A
-	// manual check is the user asking, so it always runs.
-	if !manual {
-		if cfg, err := config.Load(); err == nil && !cfg.UpdateCheckEnabled() {
-			return
-		}
+	// A manual check is the user asking, so it always runs; only the automatic
+	// cadence answers to the preference.
+	if !manual && !autoCheckAllowed() {
+		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

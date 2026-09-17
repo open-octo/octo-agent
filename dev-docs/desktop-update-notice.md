@@ -143,6 +143,13 @@ actually resolves `latest`/`needs_update`. `UpdateCheck` now means only "perform
 the outbound latest-release check"; whether an in-place swap is allowed is
 governed by `upgrade_mode`, not by `UpdateCheck`.
 
+The tray's own daily cadence (`autoUpdateLoop`) honours the user's
+`update_check` preference from `~/.octo/config.yml`, checked per tick so
+switching it back on needs no restart. A config that fails to load skips the
+tick rather than falling back to the default — failing open would let a YAML
+typo re-enable the request the user switched off. The tray's manual "Check for
+updates…" ignores the preference entirely: the user asking is the consent.
+
 ### `POST /api/version/upgrade` (handleVersionUpgrade)
 
 Add a guard at the top: when `s.cfg.Native != nil`, refuse the in-place swap.

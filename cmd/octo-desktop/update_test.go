@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -121,4 +123,56 @@ func TestDesktopAssetName_MatchesReleaseAssets(t *testing.T) {
 			t.Fatalf("desktopAssetName() = %q on %s, want \"\" (no in-place update)", name, runtime.GOOS)
 		}
 	}
+}
+
+// TestAutoCheckAllowed covers the gate the tray's daily cadence sits behind.
+// The manual "Check for updates…" path deliberately bypasses it (running the
+// command is the consent), so only the automatic side is asserted here.
+func TestAutoCheckAllowed(t *testing.T) {
+	write := func(t *testing.T, body string) {
+		t.Helper()
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home) // Windows
+		if body == "" {
+			return
+		}
+		dir := filepath.Join(home, ".octo")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "config.yml"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("absent config defaults to allowed", func(t *testing.T) {
+		write(t, "")
+		if !autoCheckAllowed() {
+			t.Error("autoCheckAllowed = false with no config, want true (opt-out, not opt-in)")
+		}
+	})
+
+	t.Run("update_check false blocks it", func(t *testing.T) {
+		write(t, "update_check: false\n")
+		if autoCheckAllowed() {
+			t.Error("autoCheckAllowed = true with update_check: false")
+		}
+	})
+
+	t.Run("update_check true allows it", func(t *testing.T) {
+		write(t, "update_check: true\n")
+		if !autoCheckAllowed() {
+			t.Error("autoCheckAllowed = false with update_check: true")
+		}
+	})
+
+	t.Run("unparseable config fails closed", func(t *testing.T) {
+		// Failing open here would let a YAML typo re-enable the request the
+		// user switched off, with no signal that it happened.
+		write(t, "update_check: false\n  bogus indent: [\n")
+		if autoCheckAllowed() {
+			t.Error("autoCheckAllowed = true on a broken config, want false (fail closed)")
+		}
+	})
 }

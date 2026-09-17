@@ -137,6 +137,7 @@ online — see [Self-host octo serve](/docs/guides/self-host/).
 |---|---|
 | `web_search` | Unavailable. The backends are Tavily / Bing and friends, so calls time out and error. The model sees the error and routes around it |
 | `web_fetch` | Limited to URLs reachable inside your network |
+| Web UI icons | The web component and its icon data load from the Iconify CDN, so icons render blank on an isolated network. Everything remains clickable — labels, layout and keyboard flow are unaffected |
 | `octo upgrade`, the web version badge | Try GitHub and fail. Nothing else breaks; upgrade via the offline flow below. Set `update_check: false` in `~/.octo/config.yml` (or flip the Settings toggle) to stop the badge trying at all |
 | Phone tunnel (`-tunnel`) | Off by default — nothing dials a relay unless you ask |
 | MCP servers | Local stdio processes are fine. `npx @modelcontextprotocol/...` entries need their npm packages staged offline first; config lives in `~/.octo/mcp.json` |

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync/atomic"
 	"testing"
 
@@ -27,9 +28,9 @@ func TestLatestVersion_ChecksAndCaches(t *testing.T) {
 	fake = httptest.NewServer(mux)
 	t.Cleanup(fake.Close)
 
-	origURL := upgrade.BaseURL
-	upgrade.BaseURL = fake.URL
-	t.Cleanup(func() { upgrade.BaseURL = origURL })
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
 
 	// Pin a release-like build so needsUpdate can fire (the test binary is
 	// otherwise a dev build with no commit).
@@ -63,9 +64,9 @@ func TestLatestVersion_DevBuildNeverNags(t *testing.T) {
 	fake = httptest.NewServer(mux)
 	t.Cleanup(fake.Close)
 
-	origURL := upgrade.BaseURL
-	upgrade.BaseURL = fake.URL
-	t.Cleanup(func() { upgrade.BaseURL = origURL })
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
 
 	origV, origC := version.Version, version.Commit
 	version.Version, version.Commit = "0.18.0-dev", "abc1234"
@@ -170,9 +171,9 @@ func TestLatestVersion_ConfigOptOut(t *testing.T) {
 	fake = httptest.NewServer(mux)
 	t.Cleanup(fake.Close)
 
-	origURL := upgrade.BaseURL
-	upgrade.BaseURL = fake.URL
-	t.Cleanup(func() { upgrade.BaseURL = origURL })
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
 
 	origV, origC := version.Version, version.Commit
 	version.Version, version.Commit = "0.18.0", "abc1234"
@@ -212,9 +213,9 @@ func TestPutUpdateCheck_PersistsAndSilences(t *testing.T) {
 	fake = httptest.NewServer(mux)
 	t.Cleanup(fake.Close)
 
-	origURL := upgrade.BaseURL
-	upgrade.BaseURL = fake.URL
-	t.Cleanup(func() { upgrade.BaseURL = origURL })
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -251,5 +252,58 @@ func TestPutUpdateCheck_PersistsAndSilences(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&hits); got != 0 {
 		t.Errorf("upstream hits after opting out = %d, want 0", got)
+	}
+}
+
+// TestLatestVersion_BrokenConfigKeepsOptOut: a hand-edit that leaves
+// config.yml unparseable must not silently re-enable the check. Reading
+// through config.LoadCached keeps the last config that parsed, so the
+// switch survives a typo instead of failing open.
+func TestLatestVersion_BrokenConfigKeepsOptOut(t *testing.T) {
+	var hits int32
+	mux := http.NewServeMux()
+	var fake *httptest.Server
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		http.Redirect(w, r, fake.URL+"/releases/tag/v9.9.9", http.StatusFound)
+	})
+	fake = httptest.NewServer(mux)
+	t.Cleanup(fake.Close)
+
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
+
+	origV, origC := version.Version, version.Commit
+	version.Version, version.Commit = "0.18.0", "abc1234"
+	t.Cleanup(func() { version.Version, version.Commit = origV, origC })
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	off := false
+	if err := (config.Config{UpdateCheck: &off}).Save(); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
+	// One good read seeds LoadCached's last-known-good.
+	if _, needs := srv.latestVersion(); needs {
+		t.Fatal("needs_update with update_check off")
+	}
+
+	path, err := config.Path()
+	if err != nil {
+		t.Fatalf("config.Path: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("update_check: false\n  bogus indent: [\n"), 0o600); err != nil {
+		t.Fatalf("corrupt config: %v", err)
+	}
+
+	if _, needs := srv.latestVersion(); needs {
+		t.Error("needs_update after breaking config.yml — the switch failed open")
+	}
+	if got := atomic.LoadInt32(&hits); got != 0 {
+		t.Errorf("upstream hits = %d, want 0 — a broken config must not re-enable the check", got)
 	}
 }

@@ -35,7 +35,7 @@ octo is built around that positioning:
 
 - **Works out of the box**: shell, file read/write/edit, search, MCP servers, skills, and sub-agents are all on by default — one message after install is enough for it to actually do work.
 - **Model choice stays yours**: any OpenAI / Anthropic protocol-compatible endpoint is supported natively; no vendor lock-in.
-- **Data stays on your machine**: self-hosted, zero telemetry. The only request octo makes on its own — not a tool call, not something you asked for — is a version check against GitHub, and one switch (`update_check: false`) turns it off — after which nothing but your own model API calls leaves the machine.
+- **Data stays on your machine**: self-hosted, zero telemetry — no analytics, no crash reporting, no usage pings. Two things reach the network without you asking: a version check against GitHub, which `update_check: false` turns off, and the Web UI's icons, which load from the Iconify CDN. Neither carries your data. Everything else is the model API calls you configure.
 - **Everywhere you are**: the same binary serves eight entry points — TUI, CLI, web, desktop, IM, editor extensions, and mobile.
 - **Safe defaults**: catastrophic commands are hard-coded denies, and deletes and overwrites are backed up to a recycle bin first — the agent won't edit itself dead and won't go rogue on your data.
 
@@ -46,7 +46,7 @@ If you already have reliable access to a Codex or Claude subscription, keep usin
 - **A single ~40 MB Go binary**: one command to download, copy to any server, and run. No Node / Python / Ruby dependency tree; no npm mirror, node-gyp build failure, or version conflict headaches.
 - **No cache degradation**: prompt caching is tuned per provider; measured hit rates for Kimi, DeepSeek, and Qwen are all **95%+**, keeping your token bill predictable.
 - **Eight interfaces**: TUI, CLI, Web UI, desktop app, IM bridge, VS Code, Obsidian, and mobile — few other agent projects cover this many entry points at once.
-- **Zero telemetry**: no IP, device model, model choice, or usage behavior is collected — no telemetry hooks at all. The one thing octo does call home about is whether a newer release exists (no payload, just the lookup), and that is a single config switch away from silent.
+- **Zero telemetry**: no IP, device model, model choice, or usage behavior is collected — no telemetry hooks at all. The only thing octo asks the network about itself is whether a newer release exists (no payload, just the lookup), and that is a single config switch away from silent. The Web UI additionally pulls its icons from the Iconify CDN — see [Data stays on your machine](#why-octo).
 - **Desktop installer around 100 MB**: compare that to Codex desktop and WorkBuddy, which often weigh in around **1 GB**. A thin agent harness shouldn't need that much space.
 - **Stable and safe**: self-protection, graceful restarts, and a recycle-bin safety net (see [Core Features](#core-features)).
 
