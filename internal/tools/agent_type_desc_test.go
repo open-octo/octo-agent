@@ -34,6 +34,21 @@ func TestSubAgentTypeParamDescFor_NamesUserAgents(t *testing.T) {
 	}
 }
 
+// Shadowing a built-in tier is a supported way to retune delegation, and the
+// shadowing file is SourceUser — so it gets named alongside the base sentence
+// that already mentions the tier. The repetition is deliberate: the tier name
+// now means the user's definition, and the model should see its description.
+func TestSubAgentTypeParamDescFor_NamesAShadowedBuiltinTier(t *testing.T) {
+	profiles := []*agentprofile.Profile{
+		{ID: "general", Description: "Executes on the lite model", Source: agentprofile.SourceUser},
+	}
+
+	desc := subAgentTypeParamDescFor(profiles)
+	if !strings.Contains(desc, "general (Executes on the lite model)") {
+		t.Errorf("shadowed tier not named: %q", desc)
+	}
+}
+
 func TestSubAgentTypeParamDescFor_NoUserAgentsKeepsBase(t *testing.T) {
 	profiles := []*agentprofile.Profile{
 		{ID: "copywriter", Description: "Curated", Source: agentprofile.SourceDefault},
