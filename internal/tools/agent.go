@@ -70,6 +70,20 @@ func (t AgentTool) Definition() agent.ToolDefinition { return t.DefinitionFor(""
 // sibling models reachable on that model's endpoint (the child reuses the
 // parent's endpoint connection, so only those are valid overrides).
 func (AgentTool) DefinitionFor(sessionModel string) agent.ToolDefinition {
+	return definitionFor(sessionModel, nil)
+}
+
+// DefinitionForCtx is DefinitionFor plus the turn's profile store, so the
+// subagent_type parameter can name the user-defined agents this session can
+// actually delegate to. Without it the schema names only the built-in tiers
+// and a user agent is undiscoverable: its name appears nowhere the model can
+// see — not in the schema, not in the system prompt — so the model can only
+// pick it by guessing the file name.
+func (AgentTool) DefinitionForCtx(ctx context.Context, sessionModel string) agent.ToolDefinition {
+	return definitionFor(sessionModel, profileStoreFromContext(ctx))
+}
+
+func definitionFor(sessionModel string, store *agentprofile.Store) agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "sub_agent",
 		Description: "Launch an autonomous sub-agent to handle a focused sub-task. " +
@@ -103,7 +117,7 @@ func (AgentTool) DefinitionFor(sessionModel string) agent.ToolDefinition {
 				},
 				"subagent_type": map[string]any{
 					"type":        "string",
-					"description": "Required agent type: 'explore' (read-only research), 'general' (full toolbelt), 'code-review' (read-only review), or a user-defined agent from ~/.octo/agents.",
+					"description": subAgentTypeParamDesc(store),
 				},
 				"run_in_background": map[string]any{
 					"type":        "boolean",
@@ -122,6 +136,61 @@ func (AgentTool) DefinitionFor(sessionModel string) agent.ToolDefinition {
 			"required": []string{"description", "prompt", "subagent_type"},
 		},
 	}
+}
+
+// subAgentTypeParamBase documents the subagent_type parameter with the
+// built-in capability tiers alone — the set every session has.
+const subAgentTypeParamBase = "Required agent type: 'explore' (read-only research), " +
+	"'general' (full toolbelt), 'code-review' (read-only review)."
+
+// maxAgentDescRunes caps how much of a user agent's description reaches the
+// schema. Descriptions are free text from the agent's frontmatter, so one
+// long entry would otherwise crowd out the rest of the tool schema.
+const maxAgentDescRunes = 120
+
+// subAgentTypeParamDesc names the session's user-defined agents alongside the
+// built-in tiers, so a model can delegate to one without already knowing its
+// file name.
+//
+// Only SourceUser profiles are listed. Curated experts (~/.octo/agents-default)
+// are gallery content the user picks for a conversation — personas written to
+// talk to a person, not to return a self-contained deliverable — so naming all
+// of them here would crowd the parameter with roles that make poor delegation
+// targets. They stay resolvable by name for anyone who asks for one.
+func subAgentTypeParamDesc(store *agentprofile.Store) string {
+	if store == nil {
+		return subAgentTypeParamBase
+	}
+	return subAgentTypeParamDescFor(store.List())
+}
+
+// subAgentTypeParamDescFor is subAgentTypeParamDesc over an explicit profile
+// list, split out so tests don't depend on which profiles the machine has
+// installed.
+func subAgentTypeParamDescFor(profiles []*agentprofile.Profile) string {
+	entries := make([]string, 0, 4)
+	for _, p := range profiles {
+		if p.Source != agentprofile.SourceUser {
+			continue
+		}
+		entries = append(entries, p.ID+" ("+clipRunes(p.Description, maxAgentDescRunes)+")")
+	}
+	if len(entries) == 0 {
+		return subAgentTypeParamBase
+	}
+	return subAgentTypeParamBase + " User-defined agents from ~/.octo/agents: " +
+		strings.Join(entries, "; ") + "."
+}
+
+// clipRunes truncates on a rune boundary — descriptions are commonly CJK, and
+// a byte-wise cut would emit a broken code point into the schema.
+func clipRunes(s string, max int) string {
+	s = strings.TrimSpace(s)
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return strings.TrimSpace(string(r[:max])) + "…"
 }
 
 // subAgentModelParamBase documents the model-override parameter without any

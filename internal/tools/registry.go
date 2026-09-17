@@ -902,9 +902,11 @@ func defaultToolsFor(ctx context.Context, model string, contextWindow int) []age
 			if !mgrOn {
 				continue
 			}
-			// Model-aware schema: the model-override parameter lists the
-			// sibling models reachable on the session model's endpoint.
-			defs = append(defs, at.DefinitionFor(model))
+			// Model- and profile-aware schema: the model-override parameter
+			// lists the sibling models reachable on the session model's
+			// endpoint, and subagent_type names this session's user-defined
+			// agents (ctx carries the profile store, see WithProfileStore).
+			defs = append(defs, at.DefinitionForCtx(ctx, model))
 			continue
 		}
 		if _, isSend := t.(AgentSendTool); isSend && !mgrOn {
