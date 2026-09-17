@@ -131,22 +131,20 @@ func ensureValidTempDir() {
 	}
 }
 
-// prepareDesktopArgs configures the global profile and rejects every argument
-// not consumed by that global option because the desktop shell has no other CLI flags.
+// prepareDesktopArgs adopts the global --profile flag and ignores everything
+// else. Unrecognised arguments are deliberately not an error: this runs before
+// setupCrashLog, and the GUI launch has no stderr to report one on (see the
+// comment there), so rejecting them would leave the app silently refusing to
+// start with nothing written down. An invalid profile still stops us, because
+// that can only come from a terminal launch where the message is readable.
 func prepareDesktopArgs(args []string) error {
-	remaining, err := datahome.ConfigureFromArgs(args)
-	if err != nil {
-		return err
-	}
-	if len(remaining) != 0 {
-		return fmt.Errorf("unsupported argument: %s", remaining[0])
-	}
-	return nil
+	_, err := datahome.ConfigureFromArgs(args)
+	return err
 }
 
 func main() {
 	if err := prepareDesktopArgs(os.Args[1:]); err != nil {
-		fmt.Fprintf(os.Stderr, "octo-desktop: invalid arguments: %v\n", err)
+		fmt.Fprintf(os.Stderr, "octo-desktop: invalid --profile: %v\n", err)
 		os.Exit(2)
 	}
 

@@ -266,6 +266,28 @@ func TestRun_CompleteViaMain(t *testing.T) {
 	}
 }
 
+// TestRun_CompleteAdoptsProfile checks that a complete --profile on the line
+// being completed selects that data root, so `octo --profile work -c <TAB>`
+// offers the work profile's sessions rather than the default one's — while the
+// words themselves still reach the candidate routing in their original
+// positions.
+func TestRun_CompleteAdoptsProfile(t *testing.T) {
+	t.Setenv("OCTO_PROFILE", "")
+	var stdout, stderr bytes.Buffer
+	args := []string{"__complete", "octo", "--profile", "work", "--permission-mode", ""}
+	if code := run(args, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(%q) exit = %d, stderr=%q", args, code, stderr.String())
+	}
+	if got := os.Getenv("OCTO_PROFILE"); got != "work" {
+		t.Errorf("OCTO_PROFILE = %q, want %q", got, "work")
+	}
+	// Positions survived: --permission-mode is still the previous word, so its
+	// fixed value set is what gets offered.
+	if got := stdout.String(); !strings.Contains(got, "interactive") {
+		t.Errorf("candidates should be the --permission-mode values; got %q", got)
+	}
+}
+
 func TestRun_CompletePreservesPartialProfileWords(t *testing.T) {
 	for _, words := range [][]string{
 		{"octo", "--profile", ""},

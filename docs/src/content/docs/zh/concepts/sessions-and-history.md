@@ -3,7 +3,7 @@ title: 会话与历史
 description: 持久化、恢复，以及崩溃时的可靠性。
 ---
 
-每一次交互式对话都是一个会话，每一轮结束后都会以 JSONL 形式（一行一条记录，首行是 meta 头）持久化到 `~/.octo/sessions/` 下面。使用 `--profile NAME` 时，会话存放在 `~/.octo-NAME/sessions/`；机器管理的辅助工具始终共享在 `~/.octo/bin`。
+每一次交互式对话都是一个会话，每一轮结束后都会以 JSONL 形式（一行一条记录，首行是 meta 头）持久化到 `~/.octo/sessions/` 下面。使用 `--profile NAME` 时改为存放在 `~/.octo-NAME/sessions/`。
 
 ```bash
 octo sessions        # 列出当前目录的会话

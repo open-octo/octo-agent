@@ -9,10 +9,10 @@ import (
 	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
-// TestDesktopSettings_WindowGeometryRoundTrip guards the on-disk contract for
-// the remembered window geometry. A typo'd json tag would silently reset the
-// window to its default size on every launch — the exact kind of quiet
-// regression this test exists to catch.
+// TestPrepareDesktopArgs covers the desktop shell's only CLI option. The
+// "unknown argument" case is the interesting one: it must NOT fail, because
+// this runs before setupCrashLog and a GUI launch has no stderr to explain
+// itself on.
 func TestPrepareDesktopArgs(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -23,7 +23,8 @@ func TestPrepareDesktopArgs(t *testing.T) {
 		{"profile only", []string{"--profile", "work"}, "work", false},
 		{"equals profile", []string{"--profile=work"}, "work", false},
 		{"missing profile", []string{"--profile="}, "", true},
-		{"unsupported argument", []string{"--debug"}, "", true},
+		{"invalid profile", []string{"--profile", "../escape"}, "", true},
+		{"unknown argument is ignored", []string{"-psn_0_12345"}, "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(datahome.ProfileEnv, "")
@@ -38,6 +39,10 @@ func TestPrepareDesktopArgs(t *testing.T) {
 	}
 }
 
+// TestDesktopSettings_WindowGeometryRoundTrip guards the on-disk contract for
+// the remembered window geometry. A typo'd json tag would silently reset the
+// window to its default size on every launch — the exact kind of quiet
+// regression this test exists to catch.
 func TestDesktopSettings_WindowGeometryRoundTrip(t *testing.T) {
 	in := desktopSettings{
 		WindowWidth:     1600,

@@ -3,17 +3,17 @@ title: Configuration layers
 description: How octo composes its system prompt from identity, profile, and rule files.
 ---
 
-octo stores default-profile data under `~/.octo`; `--profile NAME` instead uses `~/.octo-NAME` for profile data. Machine-managed helper tooling remains shared in `~/.octo/bin` for every profile.
-
 octo composes its system prompt from several optional layers — later overrides/extends earlier:
 
 | Layer | Scope | Purpose |
 |---|---|---|
-| `<profile data root>/soul.md` | global | agent identity & behavior, an openclaw/hermes-style persona |
-| `<profile data root>/user.md` | global | who you are — a profile injected into every session |
-| `<profile data root>/octorules.md` | global | your cross-project rules and preferences |
+| `~/.octo/soul.md` | global | agent identity & behavior, an openclaw/hermes-style persona |
+| `~/.octo/user.md` | global | who you are — a profile injected into every session |
+| `~/.octo/octorules.md` | global | your cross-project rules and preferences |
 | `.octorules` | per-repo | project conventions, committed with the repo |
 | `--system "..."` | one-off | override for a single run |
+
+Running with `--profile NAME` reads all of these from `~/.octo-NAME` instead, keeping a second set of identity, rules, sessions and config side by side with the default one. Octo-managed helper binaries stay shared in `~/.octo/bin` either way.
 
 Generate a starting `.octorules` for the current repo with `octo init` (or `/init` in the TUI) —
 it inspects the codebase and drafts conventions rather than leaving you with a blank file.

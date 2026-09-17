@@ -32,6 +32,13 @@ func main() {
 // lets the test harness drive the CLI without spawning a subprocess.
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "__complete" {
+		// The words after __complete are the user's command line, not ours, so
+		// they must reach runComplete untouched — stripping --profile out of
+		// them shifts every position the candidate routing depends on. Adopt
+		// the profile they name anyway, best-effort, so session and agent
+		// candidates come from the right data root; a half-typed profile is
+		// not worth turning a TAB into a diagnostic.
+		_, _ = datahome.ConfigureFromArgs(args[1:])
 		return runComplete(args[1:], stdout)
 	}
 
@@ -67,7 +74,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// fast no-op/pass once current; skipped for the internal fast-path commands.
 	// Done before the len(args)==0 REPL early-return so a bare `octo` (the common
 	// launch on Linux) still populates the defaults before Discover() runs.
-	if len(args) == 0 || (args[0] != "__sandboxed-exec" && args[0] != "__complete") {
+	if len(args) == 0 || args[0] != "__sandboxed-exec" {
 		_ = skills.MaterializeDefaults(version.Version)
 		_ = tools.MaterializeDefaultWorkflows(version.Version)
 		_ = workflow.PruneJournals()
