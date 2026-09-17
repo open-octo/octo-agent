@@ -1,11 +1,13 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/open-octo/octo-agent/internal/upgrade"
 	"github.com/open-octo/octo-agent/internal/version"
@@ -151,5 +153,151 @@ func TestVersionUpgradeRefusedInInstallerMode(t *testing.T) {
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("installer-mode upgrade: got %d, want 409", w.Code)
+	}
+}
+
+// TestVersionCheckBudgetCoversMoreThanOneAttempt: the server's budget must
+// exceed one upgrade.Check attempt window, or a slow GitHub consumes it whole
+// and the mirrors are never tried — the badge then reports "up to date" on a
+// network where the desktop tray (which budgets more) finds the release.
+func TestVersionCheckBudgetCoversMoreThanOneAttempt(t *testing.T) {
+	if versionCheckTimeout <= upgrade.CheckAttemptWindow() {
+		t.Errorf("versionCheckTimeout = %v, must exceed one attempt window (%v) so mirrors are reachable",
+			versionCheckTimeout, upgrade.CheckAttemptWindow())
+	}
+}
+
+// TestLatestVersion_FailureKeepsLastKnown: once a release has been seen, a
+// later failed lookup must not downgrade the answer to "current is latest" —
+// that is what let the badge claim up-to-date while the tray, which keeps its
+// last answer, still offered the download.
+func TestLatestVersion_FailureKeepsLastKnown(t *testing.T) {
+	var fail atomic.Bool
+	mux := http.NewServeMux()
+	var fake *httptest.Server
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		if fail.Load() {
+			http.Error(w, "nope", http.StatusServiceUnavailable)
+			return
+		}
+		http.Redirect(w, r, fake.URL+"/releases/tag/v9.9.9", http.StatusFound)
+	})
+	fake = httptest.NewServer(mux)
+	t.Cleanup(fake.Close)
+
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
+
+	origV, origC := version.Version, version.Commit
+	version.Version, version.Commit = "0.18.0", "abc1234"
+	t.Cleanup(func() { version.Version, version.Commit = origV, origC })
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
+	if latest, needs := srv.latestVersion(); latest != "9.9.9" || !needs {
+		t.Fatalf("priming lookup = (%q, %v), want (9.9.9, true)", latest, needs)
+	}
+
+	// Age the cache past its TTL and start failing.
+	fail.Store(true)
+	srv.versionCheckMu.Lock()
+	srv.versionCheckedAt = time.Now().Add(-2 * versionCheckTTL)
+	srv.versionCheckMu.Unlock()
+
+	if latest, needs := srv.latestVersion(); latest != "9.9.9" || !needs {
+		t.Errorf("after a failed re-check = (%q, %v), want the last known (9.9.9, true)", latest, needs)
+	}
+	// And again, now inside the failure backoff window.
+	if latest, needs := srv.latestVersion(); latest != "9.9.9" || !needs {
+		t.Errorf("during backoff = (%q, %v), want the last known (9.9.9, true)", latest, needs)
+	}
+}
+
+// TestRefreshLatestVersion_BypassesCacheAndSeedsIt: the tray's manual check
+// must not be served a stale answer, and its result must land in the shared
+// cache so the web badge agrees on its very next read.
+func TestRefreshLatestVersion_BypassesCacheAndSeedsIt(t *testing.T) {
+	tag := "9.9.9"
+	var hits int32
+	mux := http.NewServeMux()
+	var fake *httptest.Server
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		http.Redirect(w, r, fake.URL+"/releases/tag/v"+tag, http.StatusFound)
+	})
+	fake = httptest.NewServer(mux)
+	t.Cleanup(fake.Close)
+
+	origURL := upgrade.BaseURL
+	upgrade.BaseURL = fake.URL
+	t.Cleanup(func() { upgrade.BaseURL = origURL })
+
+	origV, origC := version.Version, version.Commit
+	version.Version, version.Commit = "0.18.0", "abc1234"
+	t.Cleanup(func() { version.Version, version.Commit = origV, origC })
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
+
+	// Warm the cache, then publish a newer release. A cached read still sees
+	// the old one — that is the cache doing its job.
+	if latest, _ := srv.latestVersion(); latest != "9.9.9" {
+		t.Fatalf("priming lookup = %q, want 9.9.9", latest)
+	}
+	tag = "10.0.0"
+	if latest, _ := srv.latestVersion(); latest != "9.9.9" {
+		t.Fatalf("cached read = %q, want the cached 9.9.9", latest)
+	}
+
+	// The manual check ignores the TTL...
+	latest, needs, err := srv.RefreshLatestVersion(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshLatestVersion: %v", err)
+	}
+	if latest != "10.0.0" || !needs {
+		t.Fatalf("RefreshLatestVersion = (%q, %v), want (10.0.0, true)", latest, needs)
+	}
+	// ...and seeds the cache, so the badge's next read matches the tray.
+	if latest, needs := srv.latestVersion(); latest != "10.0.0" || !needs {
+		t.Errorf("badge read after refresh = (%q, %v), want (10.0.0, true)", latest, needs)
+	}
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Errorf("upstream hits = %d, want 2 (prime + forced refresh; the rest cached)", got)
+	}
+}
+
+// TestLatestVersion_ExportedMatchesBadge: the tray reads LatestVersion, the
+// badge reads the same cache through /api/version. They must never disagree.
+func TestLatestVersion_ExportedMatchesBadge(t *testing.T) {
+	mux := http.NewServeMux()
+	var fake *httptest.Server
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, fake.URL+"/releases/tag/v9.9.9", http.StatusFound)
+	})
+	fake = httptest.NewServer(mux)
+	t.Cleanup(fake.Close)
+
+	origURL := upgrade.BaseURL
+	upgrade.BaseURL = fake.URL
+	t.Cleanup(func() { upgrade.BaseURL = origURL })
+
+	origV, origC := version.Version, version.Commit
+	version.Version, version.Commit = "0.18.0", "abc1234"
+	t.Cleanup(func() { version.Version, version.Commit = origV, origC })
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
+
+	trayLatest, trayNeeds := srv.LatestVersion()
+
+	w := doJSON(t, srv, http.MethodGet, "/api/version", "")
+	var badge struct {
+		Latest      string `json:"latest"`
+		NeedsUpdate bool   `json:"needs_update"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &badge); err != nil {
+		t.Fatalf("decode /api/version: %v", err)
+	}
+	if badge.Latest != trayLatest || badge.NeedsUpdate != trayNeeds {
+		t.Errorf("badge = (%q, %v), tray = (%q, %v) — must match",
+			badge.Latest, badge.NeedsUpdate, trayLatest, trayNeeds)
 	}
 }

@@ -58,6 +58,57 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+describe('VersionBadge re-check', () => {
+  // A mount-only check froze the badge at whatever was true when the window
+  // loaded. On desktop the window stays open for days while the tray keeps
+  // checking, so the two ended up showing different answers.
+  it('picks up a release published after the page loaded', async () => {
+    vi.useFakeTimers()
+    try {
+      const getVersion = vi.spyOn(api, 'getVersion')
+        .mockResolvedValue(versionPayload() as never)
+      app = mount(VersionBadge, { target }) as Record<string, unknown>
+      await vi.advanceTimersByTimeAsync(0)
+      flushSync()
+      expect(target.querySelector('.vb-dot.update')).toBe(null)
+
+      getVersion.mockResolvedValue(
+        versionPayload({ latest: '1.17.0', needs_update: true }) as never,
+      )
+      await vi.advanceTimersByTimeAsync(15 * 60_000)
+      flushSync()
+
+      expect(getVersion.mock.calls.length).toBeGreaterThan(1)
+      expect(target.querySelector('.vb-dot.update')).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not re-check while an upgrade is in flight', async () => {
+    vi.useFakeTimers()
+    try {
+      const getVersion = vi.spyOn(api, 'getVersion')
+        .mockResolvedValue(versionPayload() as never)
+      app = mount(VersionBadge, { target }) as Record<string, unknown>
+      await vi.advanceTimersByTimeAsync(0)
+      flushSync()
+      const afterMount = getVersion.mock.calls.length
+
+      // A tick landing mid-upgrade would overwrite needsUpdate under the
+      // phase machine's feet.
+      wsHandlers['upgrade_log']?.({ line: 'downloading...' })
+      flushSync()
+      await vi.advanceTimersByTimeAsync(15 * 60_000)
+      flushSync()
+
+      expect(getVersion.mock.calls.length).toBe(afterMount)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('VersionBadge popover dismissal', () => {
   it('opens on the badge and closes on a click anywhere outside', async () => {
     const badge = await render()

@@ -16,10 +16,20 @@ import (
 // back off for ten minutes. The /api/version endpoint is unauthenticated,
 // so the cache is also what keeps a request flood from becoming an
 // outbound-request flood.
+//
+// versionCheckTimeout budgets the WHOLE upgrade.Check call, not one attempt.
+// Check walks GitHub plus four mirrors, giving each a 5s sub-context bounded
+// by this parent — so a budget under ~5s means a slow primary eats it all and
+// every mirror gets an already-expired context, i.e. the mirrors may as well
+// not exist. It used to be 3s, which is exactly why the web badge could insist
+// "up to date" on a network where the desktop tray (10s, so it reached
+// dl.octo-agent.dev) had already found the release. One cold call can now take
+// up to 10s; it is single-flighted and cached, so at most one client pays it
+// per TTL and nothing but the badge waits on it.
 const (
 	versionCheckTTL     = 15 * time.Minute
 	versionCheckBackoff = 10 * time.Minute
-	versionCheckTimeout = 3 * time.Second
+	versionCheckTimeout = 10 * time.Second
 )
 
 // ─── GET /api/version ────────────────────────────────────────────────────────
@@ -88,6 +98,31 @@ func (s *Server) upgradeMode() string {
 	return "cli"
 }
 
+// LatestVersion reports the latest known release and whether this build is
+// behind it, through the same cache GET /api/version serves. It is the single
+// source of truth for "is there an update": the desktop tray reads it too, so
+// the tray item and the web badge can no longer disagree (they used to keep
+// separate caches on separate cadences and drift apart).
+func (s *Server) LatestVersion() (string, bool) { return s.latestVersion() }
+
+// RefreshLatestVersion forces a lookup that ignores the cache TTL and the
+// failure backoff, then seeds the shared cache with the result so the web
+// badge immediately agrees with whoever asked. The desktop tray's explicit
+// "Check for updates…" calls this: the user asking is not a request to be
+// served a cached answer. Config.UpdateCheck still gates it — a build that
+// never looks (the test suite, every non-serve constructor) must not be
+// talked into looking.
+func (s *Server) RefreshLatestVersion(ctx context.Context) (string, bool, error) {
+	current := strings.TrimPrefix(version.Version, "v")
+	if !s.cfg.UpdateCheck {
+		return current, false, nil
+	}
+
+	s.versionCheckMu.Lock()
+	defer s.versionCheckMu.Unlock()
+	return s.checkLocked(ctx, current, time.Now())
+}
+
 // latestVersion resolves the latest released version through the cache.
 // The update check is opt-in via Config.UpdateCheck (set only by `octo
 // serve`), so every other Server constructor — the test suite included —
@@ -108,7 +143,7 @@ func (s *Server) latestVersion() (string, bool) {
 		return s.versionLatest, needsUpdate(current, s.versionLatest)
 	}
 	if !s.versionFailedAt.IsZero() && now.Sub(s.versionFailedAt) < versionCheckBackoff {
-		return current, false
+		return s.lastKnownLocked(current)
 	}
 
 	// Background-derived, not the request context: a client navigating
@@ -116,13 +151,34 @@ func (s *Server) latestVersion() (string, bool) {
 	// badge for every client for the whole backoff window.
 	cctx, cancel := context.WithTimeout(context.Background(), versionCheckTimeout)
 	defer cancel()
-	latest, err := upgrade.Check(cctx)
+	latest, needs, _ := s.checkLocked(cctx, current, now)
+	return latest, needs
+}
+
+// checkLocked performs the lookup and records the outcome. Caller holds
+// versionCheckMu.
+func (s *Server) checkLocked(ctx context.Context, current string, now time.Time) (string, bool, error) {
+	latest, err := upgrade.Check(ctx)
 	if err != nil {
 		s.versionFailedAt = now
-		return current, false
+		l, needs := s.lastKnownLocked(current)
+		return l, needs, err
 	}
 	s.versionLatest, s.versionCheckedAt, s.versionFailedAt = latest, now, time.Time{}
-	return latest, needsUpdate(current, latest)
+	return latest, needsUpdate(current, latest), nil
+}
+
+// lastKnownLocked is what a failed or backed-off check reports: the last
+// release we actually saw, not "current". A lookup failing does not un-release
+// a version — reporting current-is-latest is how the badge ended up claiming
+// "up to date" while the tray, which keeps its own last answer, still offered
+// the download. Only a server that has never once succeeded falls back to
+// current. Caller holds versionCheckMu.
+func (s *Server) lastKnownLocked(current string) (string, bool) {
+	if s.versionLatest == "" {
+		return current, false
+	}
+	return s.versionLatest, needsUpdate(current, s.versionLatest)
 }
 
 // needsUpdate is true only for an upgradeable build that is actually

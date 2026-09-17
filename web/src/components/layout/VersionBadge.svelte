@@ -37,6 +37,12 @@
   let logEl = $state<HTMLElement | null>(null)
 
   const RECONNECT_TIMEOUT_MS = 30_000
+  // Re-check on a timer, not just on mount. A desktop window stays open for
+  // days, so a mount-only check froze the badge at whatever was true when the
+  // window loaded while the tray kept checking — that is what made the two
+  // disagree. Matched to the server's 15-minute cache TTL: a tick inside the
+  // window is served from cache and costs no outbound request.
+  const RECHECK_MS = 15 * 60_000
 
   // The hub reports native=true to every client, but only the desktop-shell
   // webview should behave as native (OS file dialog, OS notifications, header
@@ -87,6 +93,9 @@
 
   onMount(() => {
     checkVersion()
+    // Only while idle: a tick landing mid-upgrade would overwrite needsUpdate
+    // under the phase machine's feet.
+    const recheck = setInterval(() => { if (phase === 'idle') checkVersion() }, RECHECK_MS)
     // upgrade_log / upgrade_complete are global broadcasts (no session_id); the
     // WS dispatch is by type, so these fire regardless of the active session.
     const offLog = ws.on('upgrade_log', (ev: any) => {
@@ -105,7 +114,7 @@
       if (ev.success) { needsUpdate = false; phase = 'needs_restart' }
       else { phase = 'idle' } // failure: badge stays update-available
     })
-    return () => { offLog(); offDone() }
+    return () => { clearInterval(recheck); offLog(); offDone() }
   })
 
   async function startUpgrade() {

@@ -525,6 +525,11 @@ func autoUpdateLoop(bridge *nativeBridge) {
 	}
 }
 
+// trayCheckTimeout budgets one tray-initiated lookup. It matches the server's
+// own versionCheckTimeout: upgrade.Check walks GitHub plus four mirrors on a
+// parent-bounded budget, and anything much shorter never reaches a mirror.
+const trayCheckTimeout = 10 * time.Second
+
 // runUpdateCheck performs one update lookup and records the outcome on the
 // bridge so the tray can show a persistent, clickable "download" item — the
 // durable signal, since macOS suppresses the toast while the app is foreground
@@ -537,24 +542,25 @@ func autoUpdateLoop(bridge *nativeBridge) {
 // not already shown, so the daily cadence doesn't nag. Toasts are best-effort —
 // on a build without the notification service (an unbundled macOS binary) they
 // no-op, matching the version badge's own silence there.
+//
+// The answer comes from the hub's shared cache (see trayLookup), not a private
+// one — the tray and the web badge are two views of one fact and must not be
+// able to disagree about it.
 func runUpdateCheck(bridge *nativeBridge, manual bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	latest, err := upgrade.Check(ctx)
+	latest, needs, err := trayLookup(bridge, manual)
 	if err != nil {
 		if manual {
 			bridge.Notify(L().updTitle, L().updFailed)
 		}
 		return
 	}
-	current := strings.TrimPrefix(version.Version, "v")
-	// Eligible() != nil means a dev/unbundled build that never claims to be
-	// behind (matching the badge); report status without offering a download.
-	if upgrade.Eligible() != nil || upgrade.CompareVersions(current, latest) >= 0 {
+	// needs already folds in upgrade.Eligible() — a dev/unbundled build never
+	// claims to be behind — so the tray and the badge apply one rule, not two.
+	if !needs {
 		bridge.updateAvailable.Store(nil)
 		bridge.refreshTray()
 		if manual {
-			bridge.Notify(L().updTitle, fmt.Sprintf(L().updLatestFmt, current))
+			bridge.Notify(L().updTitle, fmt.Sprintf(L().updLatestFmt, strings.TrimPrefix(version.Version, "v")))
 		}
 		return
 	}
@@ -564,6 +570,37 @@ func runUpdateCheck(bridge *nativeBridge, manual bool) {
 	if manual || prev == nil || *prev != latest {
 		bridge.NotifyUpdateAvailable(L().updTitle, fmt.Sprintf(L().updAvailableFmt, latest))
 	}
+}
+
+// trayLookup answers "is there a newer release" from the hub's version cache,
+// the same one GET /api/version serves, so the tray item and the web badge are
+// always reporting the same lookup. A manual check forces a fresh one (and
+// seeds the cache with it, so the badge catches up too); an auto check is
+// happy with a cached answer and performs a real lookup only once the cache
+// has aged out — which, on the daily cadence, it always has.
+//
+// Before the hub is bound (the 30s startup delay, or a takeover that failed)
+// there is no shared cache and no badge to disagree with, so fall back to a
+// direct check rather than leaving the tray blind.
+func trayLookup(bridge *nativeBridge, manual bool) (string, bool, error) {
+	srv := bridge.srv.Load()
+	if srv == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), trayCheckTimeout)
+		defer cancel()
+		latest, err := upgrade.Check(ctx)
+		if err != nil {
+			return "", false, err
+		}
+		current := strings.TrimPrefix(version.Version, "v")
+		return latest, upgrade.Eligible() == nil && upgrade.CompareVersions(current, latest) < 0, nil
+	}
+	if manual {
+		ctx, cancel := context.WithTimeout(context.Background(), trayCheckTimeout)
+		defer cancel()
+		return srv.RefreshLatestVersion(ctx)
+	}
+	latest, needs := srv.LatestVersion()
+	return latest, needs, nil
 }
 
 // listenHub binds addr, retrying for up to grace so a just-stopped daemon has

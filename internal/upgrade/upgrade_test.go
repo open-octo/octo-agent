@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -515,5 +516,83 @@ func TestSweepStale(t *testing.T) {
 	stagedLeft, _ := filepath.Glob(filepath.Join(dir, ".octo.new.*"))
 	if len(left)+len(stagedLeft) != 0 {
 		t.Errorf("sweep left %v %v", left, stagedLeft)
+	}
+}
+
+// TestCheck_SlowPrimaryStillReachesMirror is the regression guard for the
+// budget that made the web badge and the desktop tray disagree: each attempt
+// gets a 5s sub-context BOUNDED BY THE PARENT, so a parent shorter than one
+// attempt is consumed whole by a slow (not refused) primary and every mirror
+// then receives an already-expired context. The server used to pass 3s here
+// and consequently never reached a mirror, while the tray's 10s did.
+func TestCheck_SlowPrimaryStillReachesMirror(t *testing.T) {
+	// Hangs until its own attempt context expires — a slow primary, not a
+	// refused one, which is the case a short budget cannot survive.
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	t.Cleanup(primary.Close)
+
+	mirror := fakeRelease(t, "0.19.0", "bin", "")
+
+	origBase, origMirrors := BaseURL, MirrorBaseURLs
+	BaseURL = primary.URL
+	MirrorBaseURLs = []string{mirror.URL}
+	t.Cleanup(func() { BaseURL, MirrorBaseURLs = origBase, origMirrors })
+
+	// Shrunk from the real 5s so the test proves the relationship (parent
+	// budget > one attempt ⇒ mirrors reachable) without spending it.
+	origAttempt := checkAttemptTimeout
+	checkAttemptTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { checkAttemptTimeout = origAttempt })
+
+	// Mirrors the production ratio: the budget leaves room for the primary's
+	// full attempt plus a mirror.
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+
+	got, err := Check(ctx)
+	if err != nil {
+		t.Fatalf("Check with a slow primary = %v, want the mirror's answer", err)
+	}
+	if got != "0.19.0" {
+		t.Errorf("Check = %q, want 0.19.0 from the mirror", got)
+	}
+}
+
+// TestCheck_BudgetShorterThanOneAttemptSkipsMirrors documents the failure mode
+// the constant guards against, so nobody lowers the budget back without
+// noticing what it costs.
+func TestCheck_BudgetShorterThanOneAttemptSkipsMirrors(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	t.Cleanup(primary.Close)
+
+	var mirrorHits int32
+	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&mirrorHits, 1)
+		http.Redirect(w, r, "/releases/tag/v0.19.0", http.StatusFound)
+	}))
+	t.Cleanup(mirror.Close)
+
+	origBase, origMirrors := BaseURL, MirrorBaseURLs
+	BaseURL = primary.URL
+	MirrorBaseURLs = []string{mirror.URL}
+	t.Cleanup(func() { BaseURL, MirrorBaseURLs = origBase, origMirrors })
+
+	origAttempt := checkAttemptTimeout
+	checkAttemptTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { checkAttemptTimeout = origAttempt })
+
+	// Below one attempt window — the primary consumes the lot.
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	if _, err := Check(ctx); err == nil {
+		t.Fatal("Check succeeded on a budget shorter than one attempt, want failure")
+	}
+	if got := atomic.LoadInt32(&mirrorHits); got != 0 {
+		t.Errorf("mirror hits = %d, want 0 — the parent budget was already spent", got)
 	}
 }
