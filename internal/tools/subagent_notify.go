@@ -26,9 +26,10 @@ func FormatSubAgentNote(ev SubAgentNotification) string {
 		b.WriteString("\nResult:\n")
 		b.WriteString(ev.Result)
 	}
-	if ev.StopReason == "max_turns" {
-		b.WriteString("\n[INCOMPLETE: this sub-agent hit its turn limit — the result above is partial, not a finished answer.]")
-	}
+	// Same annotation the synchronous sub_agent result carries: a background
+	// child cut short by a loop budget must not read as a finished answer just
+	// because its result arrived by notification.
+	b.WriteString(incompleteNote(ev.StopReason, ev.AgentID))
 	if ev.InputTokens > 0 || ev.OutputTokens > 0 {
 		fmt.Fprintf(&b, "\n[usage] in %d / out %d", ev.InputTokens, ev.OutputTokens)
 	}

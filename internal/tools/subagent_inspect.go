@@ -19,9 +19,17 @@ type ChildSnapshot struct {
 	// sentinel, or a budget sentinel such as "max_turns"/"stuck"). Empty when
 	// the child hasn't completed a round.
 	StopReason string
-	// Reply is the child's most recent reply, uncapped — callers rendering it
-	// for the model are responsible for clipping.
+	// Err is why the child's most recent round failed outright, when it did.
+	// A round that failed leaves StopReason and Reply empty.
+	Err string
+	// Reply is the child's most recent reply, capped by the spawner at the same
+	// size the manager retains per async sub-agent. Callers rendering it for the
+	// model still clip it to something a tool result can carry. Listings leave
+	// it empty — they render only the header fields.
 	Reply string
+	// Busy reports that a round is running right now. Such a child is not
+	// resumable: a follow-up would queue behind the round in flight.
+	Busy bool
 	// Turns is how many provider round-trips the last round took.
 	Turns int
 	// Idle is how long since the child last ran. It expires from the registry

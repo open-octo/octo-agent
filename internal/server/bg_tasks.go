@@ -231,16 +231,16 @@ func bgNoticeStatus(e tools.BgExit) string {
 
 // subAgentNoticeStatus maps a SubAgentNotification onto the frontend notice
 // levels (success / warning / failed). An empty StopReason means the sub-agent
-// exited with an error; "max_turns" or "max_tokens" mean it returned partial
-// work after hitting a budget; any other non-empty StopReason is a normal
-// completion (end_turn, tool_use, etc.).
+// exited with an error; "max_turns", "max_tokens" and "stuck" mean the loop cut
+// it short and it returned partial work; any other non-empty StopReason is a
+// normal completion (end_turn, tool_use, etc.).
 func subAgentNoticeStatus(ev tools.SubAgentNotification) string {
 	switch ev.StopReason {
 	case "":
 		return "failed"
 	case "killed":
 		return "cancelled"
-	case "max_turns", "max_tokens":
+	case "max_turns", "max_tokens", "stuck":
 		return "warning"
 	default:
 		return "success"

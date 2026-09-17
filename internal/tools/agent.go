@@ -313,6 +313,9 @@ func incompleteNote(stopReason, agentID string) string {
 	case agent.StopReasonStuck:
 		what = "was stopped after repeating the same tool calls without progress — the result above is only what it had produced by then"
 		next = "continue it with a DIFFERENT approach rather than the same instruction, or re-launch with a narrower task"
+	case agent.StopReasonMaxTokens:
+		what = "was truncated at the output-token cap — the result above stops mid-answer"
+		next = "ask it to continue in smaller steps, or re-launch asking for a shorter deliverable"
 	default:
 		return ""
 	}

@@ -320,6 +320,14 @@ func (s *Spawner) runChild(ctx context.Context, lc *liveChild, prompt string) (r
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
 
+	// A round in flight must not be advertised as a finished, resumable child:
+	// the registry holds the child from before its first round (Spawn registers
+	// it, then runs), so without this a running sub-agent would be listed as
+	// idle — and a follow-up addressed to it would block on lc.mu for the rest
+	// of the round.
+	lc.setBusy(true)
+	defer lc.setBusy(false)
+
 	childCtx := tools.WithSubAgentMarker(ctx)
 
 	// When the manager stamped an event sink into ctx (live panels), stream
@@ -378,6 +386,10 @@ func (s *Spawner) runChild(ctx context.Context, lc *liveChild, prompt string) (r
 	lc.accruedCacheRead, lc.accruedCacheWrite = totCR, totCW
 
 	if err != nil {
+		// Record the failure too. The child stays resumable, so a status query
+		// that reported the previous round as the latest one would describe a
+		// round that has since been superseded by a failure.
+		lc.setSnapErr(err, turns)
 		return "", in, out, "", turns, err
 	}
 
@@ -397,35 +409,75 @@ func (s *Spawner) runChild(ctx context.Context, lc *liveChild, prompt string) (r
 	return reply, in, out, r.StopReason, turns, nil
 }
 
+// maxChildSnapshotReply caps the retained reply, matching what the manager
+// keeps per async sub-agent (tools.maxSubAgentResultBytes). A child's reply is
+// bounded by the model's output cap in practice, but the registry holds several
+// children for the life of the session, so the bound is explicit.
+const maxChildSnapshotReply = 1 << 20
+
 // setSnap records the outcome of the round that just finished, for
 // sub_agent_status to read off a child the manager no longer tracks.
 func (lc *liveChild) setSnap(reply, stopReason string, turns int) {
+	if len(reply) > maxChildSnapshotReply {
+		reply = reply[:maxChildSnapshotReply] + "\n...[truncated]"
+	}
 	lc.snapMu.Lock()
 	defer lc.snapMu.Unlock()
 	lc.lastReply = reply
 	lc.lastStop = stopReason
+	lc.lastErr = ""
 	lc.lastTurns = turns
 }
 
-// snapshot renders the child's last-round state for the tools layer.
-func (lc *liveChild) snapshot(id string, idle time.Duration) tools.ChildSnapshot {
+// setSnapErr records a round that failed outright. It clears the previous
+// round's reply: keeping it would let a status query present stale text as the
+// child's latest word.
+func (lc *liveChild) setSnapErr(err error, turns int) {
 	lc.snapMu.Lock()
 	defer lc.snapMu.Unlock()
-	return tools.ChildSnapshot{
+	lc.lastReply = ""
+	lc.lastStop = ""
+	lc.lastErr = err.Error()
+	lc.lastTurns = turns
+}
+
+func (lc *liveChild) setBusy(v bool) {
+	lc.snapMu.Lock()
+	defer lc.snapMu.Unlock()
+	lc.busy = v
+}
+
+// snapshot renders the child's last-round state for the tools layer. withReply
+// is false for listings, which render only the header fields — copying every
+// child's full reply to discard it is pure waste, and it happens under the
+// registry lock.
+func (lc *liveChild) snapshot(id string, idle time.Duration, withReply bool) tools.ChildSnapshot {
+	lc.snapMu.Lock()
+	defer lc.snapMu.Unlock()
+	snap := tools.ChildSnapshot{
 		ID:         id,
 		StopReason: lc.lastStop,
-		Reply:      lc.lastReply,
+		Err:        lc.lastErr,
 		Turns:      lc.lastTurns,
 		Idle:       idle,
+		Busy:       lc.busy,
 	}
+	if withReply {
+		snap.Reply = lc.lastReply
+	}
+	return snap
 }
 
 // budgetNoticeOnly reports whether the agent loop ended the round with a
-// synthetic explanation in place of model text. budgetStop does that for the
-// turn cap and for the stuck-loop detector, which is exactly when the caller
-// most needs to see how far the child got.
+// synthetic explanation in place of model text. budgetStop does that at all
+// three of its call sites — the turn cap, the output-token cap, and the
+// stuck-loop detector — which is exactly when the caller most needs to see how
+// far the child got. An interrupted round doesn't reach here: it comes back as
+// a context error.
 func budgetNoticeOnly(stopReason string) bool {
-	return stopReason == agent.StopReasonMaxTurns || stopReason == agent.StopReasonStuck
+	return stopReason == agent.StopReasonMaxTurns ||
+		stopReason == agent.StopReasonStuck ||
+		stopReason == agent.StopReasonMaxTokens
 }
 
 // carriedWorkLabel marks text that carryPartialWork recovered. It says where
@@ -443,6 +495,12 @@ func carryPartialWork(h *agent.History, notice string) string {
 	msgs := h.Snapshot()
 	// The notice is the message budgetStop just appended; start above it.
 	for i := len(msgs) - 2; i >= 0; i-- {
+		if roundStart(msgs[i]) {
+			// Walked back past this round's prompt. Anything earlier belongs to
+			// a previous round the caller already received — carrying it would
+			// label a delivered answer as this round's partial work.
+			return notice
+		}
 		if msgs[i].Role != agent.RoleAssistant {
 			continue
 		}
@@ -451,6 +509,23 @@ func carryPartialWork(h *agent.History, notice string) string {
 		}
 	}
 	return notice
+}
+
+// roundStart reports whether m opens a round: a plain user message, as opposed
+// to the tool_result messages that carry a round forward. Both are RoleUser, so
+// the blocks decide. A mid-round user message the loop injects itself (a
+// truncation resume, a compaction summary) reads as a boundary too, which only
+// makes the carry more conservative.
+func roundStart(m agent.Message) bool {
+	if m.Role != agent.RoleUser {
+		return false
+	}
+	for _, b := range m.Blocks {
+		if b.Type == "tool_result" {
+			return false
+		}
+	}
+	return true
 }
 
 // assistantText is the plain text of an assistant message: the joined text
@@ -566,8 +641,10 @@ type liveChild struct {
 	// held for the whole round, and sub_agent_status must be answerable while
 	// the child is mid-run rather than blocking behind it.
 	snapMu    sync.Mutex
+	busy      bool
 	lastReply string
 	lastStop  string
+	lastErr   string
 	lastTurns int
 
 	// accruedIn/accruedOut/accruedCacheRead/accruedCacheWrite track how much
@@ -639,7 +716,7 @@ func (r *childRegistry) snapshot(id string) (tools.ChildSnapshot, bool) {
 	if !ok {
 		return tools.ChildSnapshot{}, false
 	}
-	return lc.snapshot(id, r.now().Sub(lc.lastUsed)), true
+	return lc.snapshot(id, r.now().Sub(lc.lastUsed), true), true
 }
 
 // snapshots reports every live child, most recently used first.
@@ -650,7 +727,7 @@ func (r *childRegistry) snapshots() []tools.ChildSnapshot {
 	now := r.now()
 	out := make([]tools.ChildSnapshot, 0, len(r.m))
 	for id, lc := range r.m {
-		out = append(out, lc.snapshot(id, now.Sub(lc.lastUsed)))
+		out = append(out, lc.snapshot(id, now.Sub(lc.lastUsed), false))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Idle < out[j].Idle })
 	return out

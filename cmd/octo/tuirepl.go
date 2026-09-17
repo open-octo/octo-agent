@@ -180,13 +180,13 @@ type subAgentNoteMsg struct{ ev tools.SubAgentNotification } // a sub-agent comp
 
 // subAgentNoteStatus turns a sub-agent's StopReason into a user-facing status
 // word for the scrollback notice. A provider sentinel ("end_turn"/"tool_use"/…)
-// is a normal completion; "max_turns"/"max_tokens" mean it stopped on a budget
-// with partial work; an empty StopReason means the run errored out.
+// is a normal completion; "max_turns"/"max_tokens"/"stuck" mean the loop cut it
+// short with partial work; an empty StopReason means the run errored out.
 func subAgentNoteStatus(stopReason string) string {
 	switch stopReason {
 	case "":
 		return "failed"
-	case "max_turns", "max_tokens":
+	case "max_turns", "max_tokens", "stuck":
 		return "incomplete (" + stopReason + ")"
 	default:
 		return "completed"

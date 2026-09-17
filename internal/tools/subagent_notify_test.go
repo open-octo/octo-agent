@@ -28,3 +28,22 @@ func TestFormatSubAgentNote_MaxTurnsFlagged(t *testing.T) {
 		t.Errorf("a complete notice should not be flagged, got:\n%s", clean)
 	}
 }
+
+// A background sub-agent stopped by the loop detector must be flagged too —
+// the result arriving by notification rather than inline changes nothing about
+// how partial it is.
+func TestFormatSubAgentNote_StuckFlagged(t *testing.T) {
+	got := FormatSubAgentNote(SubAgentNotification{
+		AgentID:     "agent_3",
+		Description: "investigate",
+		Kind:        "spawn_done",
+		Result:      "got this far",
+		StopReason:  "stuck",
+	})
+	if !strings.Contains(got, "INCOMPLETE") {
+		t.Errorf("a stuck notice should be flagged INCOMPLETE, got:\n%s", got)
+	}
+	if !strings.Contains(got, "agent_3") {
+		t.Errorf("the note should name the resume handle, got:\n%s", got)
+	}
+}

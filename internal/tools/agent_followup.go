@@ -77,6 +77,16 @@ func (AgentSendTool) Execute(ctx context.Context, _ string, input map[string]any
 		// and continue it synchronously.
 		res, cerr := mgr.ContinueSync(ctx, id, msg)
 		if cerr != nil {
+			// Retry the de-prefixed spelling, the same mangling
+			// sub_agent_status tolerates. The first attempt found no child, so
+			// nothing has run yet and the message can't be delivered twice.
+			if bare := bareChildID(id); bare != "" {
+				if res2, cerr2 := mgr.ContinueSync(ctx, bare, msg); cerr2 == nil {
+					res, cerr = res2, nil
+				}
+			}
+		}
+		if cerr != nil {
 			return agent.ToolResult{}, fmt.Errorf("sub_agent_send: unknown sub-agent %q (and synchronous continue failed: %v)", id, cerr)
 		}
 		text := withAgentTag(res.AgentID, res.Reply) + incompleteNote(res.StopReason, res.AgentID)
@@ -181,10 +191,22 @@ func (AgentStatusTool) Execute(ctx context.Context, _ string, input map[string]a
 // that sub_agent call's tool result; this is a reminder, not a re-delivery.
 const childReplyCap = 4000
 
-// inspectChild looks id up in the spawner's live-child registry, tolerating
-// the "agent_" prefix a model tacks on when it reads a synchronous sub-agent's
-// "[agent dbb7aa4b]" tag as the async "agent_N" form. Returns false when the
-// spawner keeps no children or has none under that id.
+// bareChildID strips the "agent_" prefix a model tacks on when it reads a
+// synchronous sub-agent's "[agent dbb7aa4b]" tag as the async "agent_N" form.
+// Returns "" when there is nothing else to try. Spawner-side ids are 8 hex
+// characters, so this can't alias a real agent_N handle — "agent_1" would
+// retry as "1", which no child is ever called.
+func bareChildID(id string) string {
+	bare := strings.TrimPrefix(id, "agent_")
+	if bare == id || bare == "" {
+		return ""
+	}
+	return bare
+}
+
+// inspectChild looks id up in the spawner's live-child registry, retrying the
+// de-prefixed form. Returns false when the spawner keeps no children or has
+// none under that id.
 func inspectChild(mgr *SubAgentManager, id string) (ChildSnapshot, bool) {
 	insp, ok := mgr.Spawner().(ChildInspector)
 	if !ok {
@@ -193,14 +215,17 @@ func inspectChild(mgr *SubAgentManager, id string) (ChildSnapshot, bool) {
 	if snap, found := insp.InspectChild(id); found {
 		return snap, true
 	}
-	if bare := strings.TrimPrefix(id, "agent_"); bare != id && bare != "" {
+	if bare := bareChildID(id); bare != "" {
 		return insp.InspectChild(bare)
 	}
 	return ChildSnapshot{}, false
 }
 
-// resumableChildren lists the spawner's live children that the manager doesn't
-// already report under an agent_N handle.
+// resumableChildren lists the spawner's live children that the model can still
+// send to: the ones the manager doesn't already report under an agent_N handle,
+// and that aren't mid-round. A running child is excluded rather than listed as
+// idle — the manager's own listing covers it while it runs, and a follow-up
+// addressed to it would block until its round finishes.
 func resumableChildren(mgr *SubAgentManager) []ChildSnapshot {
 	insp, ok := mgr.Spawner().(ChildInspector)
 	if !ok {
@@ -209,7 +234,7 @@ func resumableChildren(mgr *SubAgentManager) []ChildSnapshot {
 	tracked := mgr.TrackedBackingIDs()
 	var out []ChildSnapshot
 	for _, snap := range insp.ListChildren() {
-		if !tracked[snap.ID] {
+		if !tracked[snap.ID] && !snap.Busy {
 			out = append(out, snap)
 		}
 	}
@@ -220,8 +245,12 @@ func renderResumableChildren(children []ChildSnapshot) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d finished sub-agent(s) not tracked as background agents, but still resumable via sub_agent_send:\n", len(children))
 	for _, c := range children {
+		outcome := stopReasonLabel(c.StopReason)
+		if c.Err != "" {
+			outcome = "last round failed: " + c.Err
+		}
 		fmt.Fprintf(&b, "- %s — %s, %d turn(s), last active %s ago\n",
-			c.ID, stopReasonLabel(c.StopReason), c.Turns, c.Idle.Round(time.Second))
+			c.ID, outcome, c.Turns, c.Idle.Round(time.Second))
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -231,9 +260,20 @@ func renderResumableChildren(children []ChildSnapshot) string {
 // sub-agent that stopped short.
 func renderChildSnapshot(s ChildSnapshot) string {
 	var b strings.Builder
+	if s.Busy {
+		// Saying "resumable" here would invite a follow-up that just blocks
+		// until the running round finishes.
+		fmt.Fprintf(&b, "Sub-agent %s: working right now — wait for it to finish before sending a follow-up.", s.ID)
+		fmt.Fprintf(&b, "\nStarted its current round; %d turn(s) recorded from earlier rounds.", s.Turns)
+		return b.String()
+	}
 	fmt.Fprintf(&b, "Sub-agent %s: idle, still resumable — send it a follow-up with sub_agent_send using agent_id %q.",
 		s.ID, s.ID)
 	b.WriteString("\nIt is not tracked as a background agent because it already returned its result inline, but its context is intact for a follow-up.")
+	if s.Err != "" {
+		fmt.Fprintf(&b, "\nLast round failed after %d turn(s), %s ago: %s", s.Turns, s.Idle.Round(time.Second), s.Err)
+		return b.String()
+	}
 	fmt.Fprintf(&b, "\nLast round: %s, %d turn(s), %s ago.", stopReasonLabel(s.StopReason), s.Turns, s.Idle.Round(time.Second))
 	if s.Reply != "" {
 		b.WriteString("\n\nLatest result:\n" + ClipForEvent(s.Reply, childReplyCap))

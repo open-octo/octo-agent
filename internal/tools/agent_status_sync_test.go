@@ -167,6 +167,10 @@ func TestIncompleteNote(t *testing.T) {
 			want: []string{"INCOMPLETE", "turn limit", "sub_agent_send", "dbb7aa4b"},
 		},
 		{
+			name: "max tokens", stopReason: agent.StopReasonMaxTokens, agentID: "dbb7aa4b",
+			want: []string{"INCOMPLETE", "output-token cap", "sub_agent_send", "dbb7aa4b"},
+		},
+		{
 			// No id means the spawner kept nothing to resume.
 			name: "stuck without an id", stopReason: agent.StopReasonStuck,
 			want: []string{"INCOMPLETE", "Re-launch"},
