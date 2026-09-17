@@ -195,12 +195,10 @@ var Registry = []Vendor{
 		Protocol:       "openai",
 		API:            "openai-completions",
 		DefaultBaseURL: "https://api.moonshot.cn",
-		DefaultModel:   "kimi-k2.6",
-		// Kimi K2 family is natively multimodal (image input via MoonViT).
+		DefaultModel:   "k3",
+		// Kimi's k3 is natively multimodal (image input via MoonViT).
 		Models: []VendorModel{
 			{ID: "k3", Vision: true},
-			{ID: "kimi-k2.6", Vision: true},
-			{ID: "kimi-k2.7-code", Vision: true},
 		},
 		APIKeyEnvVar: "MOONSHOT_API_KEY",
 		WebsiteURL:   "https://platform.moonshot.cn/console/api-keys",

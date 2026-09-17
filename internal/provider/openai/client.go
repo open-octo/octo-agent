@@ -63,15 +63,13 @@ const DialectBailian = "bailian"
 
 // DialectKimi selects Moonshot Kimi's reasoning shape, which is split by
 // model generation rather than uniform across the vendor:
-//   - k2.6 / k2.5: the same nested {type: "enabled"|"disabled"} toggle as
-//     DeepSeek — no reasoning_effort field.
-//   - k2.7-code: thinking is permanently on; sending "disabled" errors, so
-//     the toggle is always {type: "enabled"}.
 //   - k3: a top-level reasoning_effort field, but the only value it currently
 //     accepts is "max" — the generic fallback's clamp-to-"high" would send an
 //     unsupported value. Reasoning is on by default, so "off" must be sent
 //     as the nested {type: "disabled"} toggle (which k3 also accepts) —
 //     omitting both fields leaves it reasoning.
+//   - any other kimi model: the same nested {type: "enabled"|"disabled"}
+//     toggle as DeepSeek — no reasoning_effort field.
 //
 // Assign it to Client.Dialect for the "kimi" vendor (kimi-coding-plan speaks
 // the Anthropic protocol and never reaches this client). See
@@ -145,11 +143,10 @@ type Client struct {
 //   - Bailian (DashScope): no reasoning_effort field at all — only a plain
 //     enable_thinking boolean, sent explicitly either way (true/false) since
 //     per-model defaults vary.
-//   - Kimi: model-dependent (see DialectKimi) — k2.6/k2.5 get the same
-//     nested toggle as DeepSeek with no reasoning_effort; k2.7-code always
-//     gets the toggle forced to "enabled"; k3 gets a top-level
+//   - Kimi: model-dependent (see DialectKimi) — k3 gets a top-level
 //     reasoning_effort clamped to its only supported value, "max", or the
-//     nested toggle set to "disabled" when effort is "".
+//     nested toggle set to "disabled" when effort is ""; every other kimi
+//     model gets the same nested toggle as DeepSeek with no reasoning_effort.
 //   - Generic OpenAI-compatible: top out at "high" and reject unknown enums, so
 //     both "xhigh" and "max" clamp to "high"; "thinking" is never sent.
 func (c *Client) applyReasoning(body *apiRequest, effort string) {
@@ -185,9 +182,7 @@ func (c *Client) applyReasoning(body *apiRequest, effort string) {
 			} else {
 				body.Thinking = &apiThinking{Type: "disabled"}
 			}
-		case strings.Contains(m, "k2.7-code") || strings.Contains(m, "k2-7-code"):
-			body.Thinking = &apiThinking{Type: "enabled"}
-		default: // k2.6, k2.5, and any other kimi model
+		default: // any non-k3 kimi model
 			if effort == "" {
 				body.Thinking = &apiThinking{Type: "disabled"}
 			} else {

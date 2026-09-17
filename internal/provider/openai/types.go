@@ -53,7 +53,7 @@ type apiRequest struct {
 	// Client.applyReasoning and https://openrouter.ai/docs/use-cases/reasoning-tokens).
 	Reasoning *apiReasoning `json:"reasoning,omitempty"`
 	// Thinking is the nested on/off toggle for thinking mode used by DeepSeek
-	// and Kimi's k2.6/k2.5 models (see Client.applyReasoning). Both separate
+	// and Kimi's non-k3 models (see Client.applyReasoning). Both separate
 	// enabling thinking from tuning its effort, and leave thinking on by
 	// default — so reasoning_effort alone may not engage/disengage it, and
 	// "disabled" must be sent explicitly. nil (omitted) for every other

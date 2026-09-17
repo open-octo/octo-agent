@@ -265,11 +265,13 @@ func TestVendorModelVision(t *testing.T) {
 		{"deepseek", "deepseek-flash", true, true},
 		{"deepseek", "deepseek-v4-pro", false, false}, // dropped from the catalogue
 		{"bailian", "qwen3.7-plus", true, true},
-		{"bailian", "qwen3.7-max", false, true}, // text-only flagship
-		{"kimi", "kimi-k2.6", true, true},       // MoonViT multimodal
-		{"glm", "glm-5.3", false, true},         // text-only
-		{"glm", "glm-5.3-flash", true, true},    // image/video/file input
-		{"openai", "o3-mini", false, true},      // no image input
+		{"bailian", "qwen3.7-max", false, true},  // text-only flagship
+		{"kimi", "k3", true, true},               // MoonViT multimodal
+		{"kimi", "kimi-k2.6", false, false},      // dropped from the catalogue
+		{"kimi", "kimi-k2.7-code", false, false}, // dropped from the catalogue
+		{"glm", "glm-5.3", false, true},          // text-only
+		{"glm", "glm-5.3-flash", true, true},     // image/video/file input
+		{"openai", "o3-mini", false, true},       // no image input
 		{"openai", "o4-mini", true, true},
 		{"xai", "grok-4.5", true, true},
 		{"xai", "grok-4.20", true, true},

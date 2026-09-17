@@ -185,10 +185,6 @@ func lookupContextWindow(model string) int {
 		return 256_000
 	case strings.Contains(m, "k3"):
 		return 1_000_000
-	case strings.Contains(m, "kimi-k2.7") || strings.Contains(m, "kimik2.7") || strings.Contains(m, "k2.7"):
-		return 256_000
-	case strings.Contains(m, "kimi-k2.6") || strings.Contains(m, "kimik2.6") || strings.Contains(m, "k2.6"):
-		return 256_000
 	case strings.Contains(m, "kimi-k2") || strings.Contains(m, "kimik2") || strings.Contains(m, "k2"):
 		return 256_000
 	case strings.Contains(m, "kimi-math"):
