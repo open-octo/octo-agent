@@ -72,6 +72,23 @@ func TestStoreWatch_AnnouncesASessionFromAnotherProcess(t *testing.T) {
 	}
 }
 
+// TestSampleStore_IgnoresAgentEventsSidecar: the sub-agent event trail this
+// server writes beside a transcript ends in ".jsonl" too, so a bare extension
+// test counts it as a session of its own — the same miscount that listed it in
+// the sidebar as a titleless "*Octo Agent" row.
+func TestSampleStore_IgnoresAgentEventsSidecar(t *testing.T) {
+	srv := groupTestServer(t)
+	sess := saveSessionWithDir(t, t.TempDir())
+
+	before := sampleStore()
+	srv.appendAgentEvent(sess.ID, map[string]any{"kind": "tool", "agent_id": "agent_1"})
+	after := sampleStore()
+
+	if after.sessionCount != before.sessionCount {
+		t.Errorf("sessionCount %d -> %d; a sidecar is not a session", before.sessionCount, after.sessionCount)
+	}
+}
+
 // TestStoreWatch_AnnouncesAProjectFromAnotherProcess: same for the registry.
 // EnsureProjectForDir is the CLI's path and cannot reach this process's
 // broadcast hook (notifyGroupsChanged is installed per-process).

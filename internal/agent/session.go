@@ -533,6 +533,20 @@ func (s *Session) EndsMidTurn() bool {
 // wasteful way to learn.
 func SessionsDir() (string, error) { return sessionsDir() }
 
+// AgentEventsSuffix names the per-session sub-agent/workflow event sidecar the
+// server writes beside a transcript (<id>.agent-events.jsonl). It lives here
+// rather than in the server package because every scan of the sessions
+// directory has to tell the two apart: the sidecar ends in ".jsonl" too, so a
+// bare extension test lists it as a session of its own — one with no meta
+// record, hence no title, which surfaces as a ghost "*Octo Agent" row.
+const AgentEventsSuffix = ".agent-events.jsonl"
+
+// IsTranscriptName reports whether a sessions-directory entry is a session
+// transcript rather than a sidecar that merely shares the extension.
+func IsTranscriptName(name string) bool {
+	return strings.HasSuffix(name, ".jsonl") && !strings.HasSuffix(name, AgentEventsSuffix)
+}
+
 // sessionsDir returns (and creates if needed) ~/.octo/sessions.
 func sessionsDir() (string, error) {
 	dir, err := datahome.Path("sessions")
@@ -1634,7 +1648,7 @@ func ListSessions(n int) ([]*Session, error) {
 	}
 	var items []item
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+		if e.IsDir() || !IsTranscriptName(e.Name()) {
 			continue
 		}
 		s, err := LoadSession(strings.TrimSuffix(e.Name(), ".jsonl"))
@@ -1693,7 +1707,7 @@ func listSessionIDs() ([]string, error) {
 	var ids []string
 	for _, e := range ents {
 		n := e.Name()
-		if e.IsDir() || !strings.HasSuffix(n, ".jsonl") {
+		if e.IsDir() || !IsTranscriptName(n) {
 			continue
 		}
 		ids = append(ids, strings.TrimSuffix(n, ".jsonl"))

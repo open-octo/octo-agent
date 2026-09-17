@@ -24,7 +24,9 @@ import (
 	"github.com/open-octo/octo-agent/internal/agent"
 )
 
-const agentEventsSuffix = ".agent-events.jsonl"
+// agentEventsSuffix is defined in the agent package because the sessions
+// directory scans there must skip these sidecars (they end in ".jsonl" too).
+const agentEventsSuffix = agent.AgentEventsSuffix
 
 // agentEventsReadCap bounds how much of the sidecar the reducer reads: an
 // oversized file is read from its tail (aligned to the next full line), so

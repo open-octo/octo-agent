@@ -3,7 +3,6 @@ package server
 import (
 	"log/slog"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -75,7 +74,7 @@ func sampleStore() storeFingerprint {
 		}
 		if entries, err := os.ReadDir(dir); err == nil {
 			for _, e := range entries {
-				if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
+				if !e.IsDir() && agent.IsTranscriptName(e.Name()) {
 					fp.sessionCount++
 				}
 			}
