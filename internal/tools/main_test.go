@@ -37,8 +37,11 @@ func TestMain(m *testing.M) {
 	// the sandbox integration tests write a probe to $HOME and rely on it being
 	// a location the OS sandbox denies, and macOS's default policy allows
 	// TMPDIR — so a temp HOME there would let the probe through and break them.
+	// The name deliberately does NOT start with ".octo-": a crashed test run
+	// leaves the dir behind, and datahome.List would otherwise show every such
+	// leftover as a switchable profile in the desktop tray.
 	realHome, _ := os.UserHomeDir()
-	homeTmp, _ := os.MkdirTemp(realHome, ".octo-tools-test-home")
+	homeTmp, _ := os.MkdirTemp(realHome, ".octotools-test-home")
 	if homeTmp != "" {
 		os.Setenv("HOME", homeTmp)
 		os.Setenv("USERPROFILE", homeTmp)
