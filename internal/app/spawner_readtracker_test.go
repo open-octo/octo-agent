@@ -70,3 +70,23 @@ func TestAgentSpawner_ChildGetsIndependentReadTracker(t *testing.T) {
 		t.Errorf("a sibling's read must not carry over, got %v", err)
 	}
 }
+
+// The fork above only happens when the executor implements
+// tools.TrackerForking; anything wrapped around the registry that dropped the
+// method would put every sub-agent back on the session's tracker without a
+// word. Assert the executor the real CLI assembly hands the spawner.
+func TestWireTools_ExecutorForksReadTracker(t *testing.T) {
+	t.Cleanup(func() { tools.SetSpawner(nil); tools.SetTaskStore(nil) })
+
+	a := agent.New(sender{p: &mockProvider{}}, "claude-haiku-4-5")
+	env, cleanup := WireTools(a, false)
+	defer cleanup()
+
+	// Through the interface the spawner actually receives it as: ToolEnv.Executor
+	// is concrete today, so a wrapper would have to change that type — and this
+	// is what catches it when one does.
+	var exec agent.ToolExecutor = env.Executor
+	if _, ok := exec.(tools.TrackerForking); !ok {
+		t.Fatalf("WireTools executor is %T, which does not implement tools.TrackerForking — sub-agents would inherit the session's reads", exec)
+	}
+}

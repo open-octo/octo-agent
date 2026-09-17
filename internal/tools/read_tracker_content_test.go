@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+// The spawner forks a sub-agent's tracker off this interface; DefaultRegistry
+// dropping it would disable that isolation silently.
+var _ TrackerForking = DefaultRegistry{}
+
 // twoCheckouts lays out the shape this whole file is about: the same file
 // present at two paths, the way a linked worktree mirrors the main checkout.
 // It returns (main, worktree) and writes mainBody / treeBody into them.
@@ -105,13 +109,35 @@ func TestReadTracker_ContentMatchIgnoresStaleCandidate(t *testing.T) {
 	}
 }
 
+// An empty file matches every other empty file, and that is deliberate:
+// nothing the agent could have read is lost by overwriting zero bytes. Pinned
+// because it is the widest the content match ever gets.
+func TestReadTracker_EmptyFilesMatchEachOther(t *testing.T) {
+	mainFile, treeFile := twoCheckouts(t, "", "")
+
+	rt := NewReadTracker()
+	rt.RecordRead(mainFile)
+
+	if err := rt.CheckWritable(treeFile); err != nil {
+		t.Errorf("an empty file holds nothing to clobber, want writable: %v", err)
+	}
+}
+
 func TestReadTracker_ContentMatchSkipsOversizeFile(t *testing.T) {
 	root := t.TempDir()
 	mainFile := filepath.Join(root, "main.bin")
 	treeFile := filepath.Join(root, "tree.bin")
-	big := make([]byte, maxContentMatchBytes+1)
+	// Sparse: the cap is checked against the size, so these never need real
+	// bytes behind them — and the test doesn't write 20 MB per run.
 	for _, p := range []string{mainFile, treeFile} {
-		if err := os.WriteFile(p, big, 0o644); err != nil {
+		f, err := os.Create(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Truncate(maxContentMatchBytes + 1); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Close(); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -149,6 +175,15 @@ func TestRegistry_ReadInMainCheckoutThenEditInWorktree(t *testing.T) {
 	if !strings.Contains(string(got), "openai") {
 		t.Errorf("edit did not land, file is %q", got)
 	}
+
+	// The second edit is the one that would strand the model: that first edit
+	// made the worktree copy diverge, so the content match can no longer carry
+	// it. It has to be the write itself that recorded the path.
+	if _, err := reg.Execute(ctx, "edit_file", map[string]any{
+		"path": treeFile, "old_string": "openai", "new_string": "deepseek",
+	}); err != nil {
+		t.Errorf("a second edit of a file this session just wrote should be allowed: %v", err)
+	}
 }
 
 // WithFreshTracker is what keeps a sub-agent from inheriting reads it never
@@ -166,9 +201,10 @@ func TestDefaultRegistry_WithFreshTracker(t *testing.T) {
 		t.Fatalf("read_file: %v", err)
 	}
 
-	child, ok := parent.WithFreshTracker().(DefaultRegistry)
+	forked := parent.WithFreshTracker()
+	child, ok := forked.(DefaultRegistry)
 	if !ok {
-		t.Fatalf("WithFreshTracker returned %T, want DefaultRegistry", parent.WithFreshTracker())
+		t.Fatalf("WithFreshTracker returned %T, want DefaultRegistry", forked)
 	}
 	if _, err := child.Execute(ctx, "edit_file", map[string]any{
 		"path": p, "old_string": "package x", "new_string": "package y",
