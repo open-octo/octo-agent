@@ -68,7 +68,7 @@
               {#if selectedOption === opt}
                 <iconify-icon icon="ant-design:check-circle-filled" width="14" style="color:var(--blue-6)"></iconify-icon>
               {:else}
-                <iconify-icon icon="ant-design:circle-outlined" width="14" style="color:var(--border)"></iconify-icon>
+                <iconify-icon icon="lucide:circle" width="14" style="color:var(--border)"></iconify-icon>
               {/if}
               <span>{opt}</span>
             </button>

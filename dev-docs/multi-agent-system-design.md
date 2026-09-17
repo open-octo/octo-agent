@@ -202,6 +202,7 @@ type Profile struct {
     Tags, TagsEN     []string // "擅长领域"标签，中英各一份
     ExamplePrompts, ExamplePromptsEN []string // 详情卡片里可直接点击发送的示例问题
     Icon             string   // iconify 图标名；为空时前端退回首字母+哈希色头像
+                              // （图标数据随前端离线打包，不在包内的名字渲染为空白）
     NameEN, DescriptionEN string // 中英双语内容直接写在 frontmatter 里，不走 i18n 字典
                                   // （因为这是人设内容，不是 UI 文案）
 }

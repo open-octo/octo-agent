@@ -101,9 +101,15 @@ type Profile struct {
 	TagsEN           []string // en variant
 	ExamplePrompts   []string // 试试这样问我 (zh)
 	ExamplePromptsEN []string // en variant
-	Icon             string   // iconify icon name; empty → initials+hash-color fallback
-	NameEN           string   // en display name
-	DescriptionEN    string   // en description
+	// Icon is an iconify name; empty → initials+hash-color fallback. The web
+	// UI carries its icon data offline (web/scripts/gen-icons.mjs bundles every
+	// name this repo uses, including the defaults/ profiles below) and never
+	// calls the Iconify API, so a name outside that bundle renders as nothing.
+	// Curated profiles must stick to ant-design/lucide, which the generator
+	// picks up automatically.
+	Icon          string
+	NameEN        string // en display name
+	DescriptionEN string // en description
 
 	Source Source
 
