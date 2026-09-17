@@ -8,7 +8,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
-func TestBundledUvTargetUsesProfileDataHome(t *testing.T) {
+func TestBundledUvTargetUsesSharedBinDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -22,7 +22,7 @@ func TestBundledUvTargetUsesProfileDataHome(t *testing.T) {
 		root    string
 	}{
 		{"default profile", "", ".octo"},
-		{"work profile", "work", ".octo-work"},
+		{"work profile", "work", ".octo"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(datahome.ProfileEnv, tc.profile)

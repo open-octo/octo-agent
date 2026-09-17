@@ -10,13 +10,17 @@ octo serve --stop               # 停止后台实例
 octo serve -addr :8088          # 暴露到局域网
 ```
 
+## Profile
+
+下文路径均以默认 profile 为例，其服务数据存放在 `~/.octo`。使用 `octo serve --profile work` 启动时，隔离的 `work` profile 数据根目录为 `~/.octo-work`；机器管理的辅助工具始终共享在 `~/.octo/bin`，不随 profile 隔离。
+
 ## 环境变量
 
 完全用环境变量配置 octo（`config.yml` 里什么都不写）需要**两个**变量，不是一个：`OCTO_PROVIDER` 指定用哪家，那家的 key 负责鉴权。光有 key 只说明你**能**连到哪些家，不代表你想用哪家，所以 octo 不替你猜——没有 `OCTO_PROVIDER` 就当作没配置，照常要求你走配置流程。
 
 部分环境变量（`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`OCTO_ACCESS_KEY`、`OCTO_LOG_LEVEL`，以及 `TAVILY_API_KEY` 等搜索 key）在运行时控制 octo 的行为。通常由 shell profile export —— 但 **GUI 启动的进程不会继承这些变量**：桌面应用、launchd agent、`.desktop` session 启动时只拿到最小环境，不读 `~/.bashrc` / `~/.zprofile`。
 
-放一份 `~/.octo/serve.env` 即可统一覆盖所有启动方式：
+放一份 `~/.octo/serve.env` 即可统一覆盖默认 profile 的所有启动方式。具名 profile 则使用其数据根目录下的对应文件——例如 `octo serve --profile work` 会加载 `~/.octo-work/serve.env`：
 
 ```bash
 cat > ~/.octo/serve.env << 'EOF'
@@ -36,7 +40,7 @@ octo 在启动时（早于任何工具或 channel 读取环境）加载它：
 - Key 会**去空白**；value 内部可以含 `=`（`KEY=val=ue` 能用）。
 - **已在进程环境中设置的变量不会被覆盖** ——显式的 `FOO=bar octo serve`、systemd `Environment=`、launchd `SetEnvironmentVariable` 都优先于本文件。这让文件保持为安全的 fallback，不会意外覆盖你显式设的值。
 
-这也是 systemd/launchd 打包模板里已经通过 `EnvironmentFile=%h/.octo/serve.env`（`packaging/systemd/octo.service`）指向的同一个文件。现在 `octo serve`、桌面版、TUI 都能解析同一份文件 ——配一次，到处生效。
+systemd/launchd 打包模板通过 `EnvironmentFile=%h/.octo/serve.env`（`packaging/systemd/octo.service`）把默认 profile 服务指向此文件。要运行具名 profile，unit 必须调用 `octo serve --profile work` 并使用对应的 `EnvironmentFile=%h/.octo-work/serve.env`；现有 unit 不会自行选择 profile。桌面版和 TUI 也会解析所选 profile 对应的文件。
 
 代理环境变量（`HTTPS_PROXY` 等）也走这同一个文件——用法见[选择 Provider · 通过代理访问](/docs/zh/getting-started/choose-a-provider/#通过代理访问)。
 
@@ -88,6 +92,7 @@ supervisor 的 shell 命令（`kill <pid>`、`pkill octo`，包括 `kill $P` 这
 Description=octo serve
 
 [Service]
+EnvironmentFile=%h/.octo/serve.env
 ExecStart=/usr/local/bin/octo serve --no-supervisor
 Restart=on-failure
 
@@ -95,26 +100,29 @@ Restart=on-failure
 WantedBy=default.target
 ```
 
-`--no-supervisor` 让你的 init 系统自己管重启，不再让 octo 自带的自重启 supervisor 重复干这件事。
+`--no-supervisor` 让你的 init 系统自己管重启，不再让 octo 自带的自重启 supervisor 重复干这件事。上面的 unit 对应默认 profile；如需 `work`，设为 `EnvironmentFile=%h/.octo-work/serve.env`，并使用 `ExecStart=/usr/local/bin/octo serve --profile work --no-supervisor`。
 在 macOS 上，一份带等价 `ProgramArguments` 和 `KeepAlive` 的 `launchd` plist 效果一样——
 这正是 `.pkg` 安装器自动注册的东西。
 
 ## 日志与排障
 
 前台运行（`octo serve`）会把输出直接打到启动它的那个终端。后台模式（`-d`）没有终端可写，
-所以输出——包括 IM 桥接的连接错误，因为桥接和 API 服务是同一个进程——会写到 `~/.octo/serve.log`：
+所以输出——包括 IM 桥接的连接错误，因为桥接和 API 服务是同一个进程——会写到默认 profile 路径
+`~/.octo/serve.log`；具名 profile 则使用对应路径，例如 `~/.octo-work/serve.log`：
 
 ```bash
 octo serve --status   # 守护进程是否在跑，pid 是多少
 tail -f ~/.octo/serve.log
+# work：octo serve --profile work --status；tail -f ~/.octo-work/serve.log
 octo serve --stop
 ```
 
-守护进程的 pid 记录在 `~/.octo/serve.pid` 里；`--status`/`--stop` 直接读这个文件，不会去扫进程表。
-一个指向已经死掉的进程的过期 pid，会在下一次 `--status`、`--stop` 或启动时自动清掉。
+守护进程的 pid 记录在默认 profile 路径 `~/.octo/serve.pid`；具名 profile 使用对应路径，例如
+`~/.octo-work/serve.pid`。`--status`/`--stop` 直接读这个文件，不会去扫进程表。一个指向已经死掉的
+进程的过期 pid，会在下一次 `--status`、`--stop` 或启动时自动清掉。
 
-如果桌面端不是报错而是直接闪退，看 `~/.octo/crash.log`（Windows 上是
-`%USERPROFILE%\.octo\crash.log`）。GUI 进程没有终端可以把崩溃信息打出来，所以 app 启动时会把自己的
+如果桌面端不是报错而是直接闪退，看默认 profile 路径 `~/.octo/crash.log`（Windows 上是
+`%USERPROFILE%\.octo\crash.log`）；具名 profile 使用 `~/.octo-NAME` 下的对应路径。GUI 进程没有终端可以把崩溃信息打出来，所以 app 启动时会把自己的
 stderr 指向这个文件：每次启动都会追加一行带版本号和 pid 的标记，后面跟着崩溃时的调用栈（如果崩了的话）。
 报告崩溃时请把它一起附上——但贴之前先自己看一眼：MCP server 和它们的子进程也往 stderr 写诊断信息，
 所以这个文件里不只有调用栈。

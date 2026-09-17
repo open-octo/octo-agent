@@ -30,6 +30,14 @@ func TestDirUsesDefaultAndNamedProfiles(t *testing.T) {
 	if want := filepath.Join(home, ".octo-work"); got != want {
 		t.Errorf("profile data dir = %q, want %q", got, want)
 	}
+
+	got, err = BinDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, ".octo", "bin"); got != want {
+		t.Errorf("shared bin dir = %q, want %q", got, want)
+	}
 }
 
 func TestConfigureFromArgsStripsGlobalProfile(t *testing.T) {
@@ -53,6 +61,8 @@ func TestConfigureFromArgsRejectsMissingOrRepeatedProfile(t *testing.T) {
 	t.Setenv(ProfileEnv, "")
 	for _, args := range [][]string{
 		{"--profile"},
+		{"--profile", ""},
+		{"--profile="},
 		{"--profile", "one", "--profile=two"},
 	} {
 		if _, err := ConfigureFromArgs(args); err == nil {

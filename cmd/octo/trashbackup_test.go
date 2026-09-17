@@ -88,24 +88,29 @@ func TestRunTrashBackup_RecordsRmProvenance(t *testing.T) {
 	}
 }
 
-// TestRunTrashBackup_ProjectFallsBackToCWD: with OCTO_TRASH_PROJECT unset the
-// backup still happens, keyed to the working directory.
-func TestRunTrashBackup_ProjectFallsBackToCWD(t *testing.T) {
+// TestRunTrashBackup_SkipsBackupWithoutProject verifies that an absent project
+// root makes the best-effort backup a no-op.
+func TestRunTrashBackup_SkipsBackupWithoutProject(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("OCTO_TRASH_PROJECT", "")
 
-	project := t.TempDir()
-	f := filepath.Join(project, "keep.txt")
+	f := filepath.Join(t.TempDir(), "keep.txt")
 	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if code := runTrashBackup([]string{f}); code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
-	entries, _ := trash.List()
-	if len(entries) != 1 || entries[0].Original != f {
-		t.Fatalf("expected the file backed up under the cwd project, got %+v", entries)
+	if _, err := os.Stat(f); err != nil {
+		t.Fatalf("backup must NOT delete the original: %v", err)
+	}
+	entries, err := trash.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected no trash entries without a project, got %+v", entries)
 	}
 }

@@ -253,7 +253,7 @@
     >
       <span class="vb-text">{versionLabel}</span>
       {#if profile}
-        <span class="vb-profile" title={`Profile: ${profile}`} aria-label={`Profile: ${profile}`}>{profile}</span>
+        <span class="vb-profile" title={$t('version.profile').replace('{name}', profile)} aria-label={$t('version.profile').replace('{name}', profile)}>{profile}</span>
       {/if}
       {#if phase === 'upgrading'}
         <span class="vb-dot upgrading"></span>

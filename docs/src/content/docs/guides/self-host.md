@@ -10,6 +10,10 @@ octo serve --stop               # stop a background instance
 octo serve -addr :8088          # expose on the LAN
 ```
 
+## Profiles
+
+The paths below are for the default profile, whose service data is stored in `~/.octo`. Launch `octo serve --profile work` to use the isolated `work` profile-data root `~/.octo-work`; machine-managed helper tooling stays shared in `~/.octo/bin`.
+
 ## Environment variables
 
 Configuring octo entirely through the environment — nothing in `config.yml` — takes **two**
@@ -23,7 +27,7 @@ Normally your shell profile exports them — but **GUI-launched processes don't 
 the desktop app, a launchd agent, and a `.desktop` session all start with a minimal
 environment that skips `~/.bashrc` / `~/.zprofile`.
 
-Drop a `~/.octo/serve.env` file to cover every launch mode uniformly:
+Drop a `~/.octo/serve.env` file to cover every default-profile launch mode uniformly. A named profile uses the matching path below its data root — for example, `octo serve --profile work` loads `~/.octo-work/serve.env`:
 
 ```bash
 cat > ~/.octo/serve.env << 'EOF'
@@ -45,9 +49,11 @@ octo loads it at startup (before any tool or channel reads the environment):
   `FOO=bar octo serve`, systemd `Environment=`, and launchd `SetEnvironmentVariable`
   all win over the file. This keeps the file as a safe fallback, not a surprise override.
 
-This is the same file the systemd/launchd packaging templates already point at via
-`EnvironmentFile=%h/.octo/serve.env` (`packaging/systemd/octo.service`). Now `octo serve`,
-the desktop app, and the TUI all resolve the same file — pick once, work everywhere.
+The systemd/launchd packaging templates point the default-profile service at this file via
+`EnvironmentFile=%h/.octo/serve.env` (`packaging/systemd/octo.service`). To run a named profile,
+the unit must invoke `octo serve --profile work` and use the matching
+`EnvironmentFile=%h/.octo-work/serve.env`; the existing unit does not select a profile by itself.
+The desktop app and TUI resolve the selected profile's matching file too.
 
 Proxy variables (`HTTPS_PROXY` and friends) go in this same file — see
 [Choose a provider · Reaching endpoints through a proxy](/docs/getting-started/choose-a-provider/#reaching-endpoints-through-a-proxy).
@@ -109,6 +115,7 @@ rather than run it in a terminal:
 Description=octo serve
 
 [Service]
+EnvironmentFile=%h/.octo/serve.env
 ExecStart=/usr/local/bin/octo serve --no-supervisor
 Restart=on-failure
 
@@ -117,27 +124,33 @@ WantedBy=default.target
 ```
 
 `--no-supervisor` lets your init system own restarts instead of octo's own self-restart supervisor
-duplicating that job. On macOS, a `launchd` plist with the equivalent `ProgramArguments` and
-`KeepAlive` works the same way — and is exactly what the `.pkg` installer registers automatically.
+duplicating that job. The unit above is for the default profile; for `work`, set
+`EnvironmentFile=%h/.octo-work/serve.env` and use `ExecStart=/usr/local/bin/octo serve --profile work --no-supervisor`.
+On macOS, a `launchd` plist with the equivalent `ProgramArguments` and `KeepAlive` works the same
+way — and is exactly what the `.pkg` installer registers automatically.
 
 ## Logs and diagnostics
 
 Foreground (`octo serve`) writes straight to the terminal it was started in. Daemon mode (`-d`) has
 no terminal to write to, so output — including IM channel connection errors, since the bridge runs
-in the same process — goes to `~/.octo/serve.log` instead:
+in the same process — goes to the default-profile path `~/.octo/serve.log` instead; named profiles
+use the matching path, such as `~/.octo-work/serve.log`:
 
 ```bash
 octo serve --status   # is the daemon running, and what's its pid
 tail -f ~/.octo/serve.log
+# For work: octo serve --profile work --status; tail -f ~/.octo-work/serve.log
 octo serve --stop
 ```
 
-The daemon's pid is tracked in `~/.octo/serve.pid`; `--status`/`--stop` read it directly rather than
+The daemon's pid is tracked at the default-profile path `~/.octo/serve.pid`; named profiles use the
+matching path, such as `~/.octo-work/serve.pid`. `--status`/`--stop` read it directly rather than
 scanning the process table. A stale pid (pointing at a process that's already dead) is cleared
 automatically on the next `--status`, `--stop`, or start.
 
-If the desktop app disappears instead of reporting an error, look in `~/.octo/crash.log`
-(`%USERPROFILE%\.octo\crash.log` on Windows). A GUI process has no terminal to print a crash to, so
+If the desktop app disappears instead of reporting an error, look in the default-profile path
+`~/.octo/crash.log` (`%USERPROFILE%\.octo\crash.log` on Windows); named profiles use the matching
+path below `~/.octo-NAME`. A GUI process has no terminal to print a crash to, so
 the app points its stderr at that file at startup; each run appends a banner line with its version
 and pid, followed by the crash trace if there was one. Attach it when reporting the crash — but read
 it first: stderr is also where MCP servers and their child processes write their own diagnostics, so

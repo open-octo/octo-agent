@@ -3,13 +3,15 @@ title: 配置分层
 description: octo 是如何从身份、画像和规则文件里拼出系统提示的。
 ---
 
+默认 profile 的数据存放在 `~/.octo`；使用 `--profile NAME` 时，profile 数据根目录为 `~/.octo-NAME`。机器管理的辅助工具始终共享在 `~/.octo/bin`，不随 profile 隔离。
+
 octo 的系统提示由几个可选的层组成——后面的层会覆盖/扩展前面的：
 
 | 层 | 作用域 | 用途 |
 |---|---|---|
-| `~/.octo/soul.md` | 全局 | agent 的身份与行为方式，一种 openclaw/hermes 风格的人格设定 |
-| `~/.octo/user.md` | 全局 | 你是谁——每次会话都会注入的个人画像 |
-| `~/.octo/octorules.md` | 全局 | 你跨项目的规则和偏好 |
+| `<profile 数据根目录>/soul.md` | 全局 | agent 的身份与行为方式，一种 openclaw/hermes 风格的人格设定 |
+| `<profile 数据根目录>/user.md` | 全局 | 你是谁——每次会话都会注入的个人画像 |
+| `<profile 数据根目录>/octorules.md` | 全局 | 你跨项目的规则和偏好 |
 | `.octorules` | 单仓库 | 随仓库一起提交的项目约定 |
 | `--system "..."` | 单次 | 仅本次运行生效的覆盖 |
 

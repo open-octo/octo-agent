@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 
@@ -261,6 +262,23 @@ func TestRun_CompleteViaMain(t *testing.T) {
 	for _, want := range []string{"config", "memory"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestRun_CompletePreservesPartialProfileWords(t *testing.T) {
+	for _, words := range [][]string{
+		{"octo", "--profile", ""},
+		{"octo", "--profile="},
+	} {
+		t.Setenv("OCTO_PROFILE", "inherited")
+		var stdout, stderr bytes.Buffer
+		args := append([]string{"__complete"}, words...)
+		if code := run(args, nil, &stdout, &stderr); code != 0 {
+			t.Fatalf("run(%q) exit = %d, stderr=%q", args, code, stderr.String())
+		}
+		if got := os.Getenv("OCTO_PROFILE"); got != "inherited" {
+			t.Errorf("run(%q) changed OCTO_PROFILE to %q", args, got)
 		}
 	}
 }

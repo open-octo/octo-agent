@@ -11,7 +11,7 @@ import (
 )
 
 // ensureBundledUv copies the uv binary shipped with the app into the
-// profile-scoped Octo data root's bin directory on first launch, so skills that
+// machine-scoped Octo bin directory on first launch, so skills that
 // need Python work out of the box even for a standalone download that never went
 // through the installer. uv is agent-level infrastructure the toolchain looks
 // for on PATH or in that directory (internal/tools/toolchain.go); this just
@@ -35,13 +35,17 @@ func ensureBundledUv() {
 	_ = copyExecutable(src, target)
 }
 
-// bundledUvTarget returns the profile-scoped destination for the bundled uv binary.
+// bundledUvTarget returns the machine-scoped destination for the bundled uv binary.
 func bundledUvTarget() (string, error) {
 	name := "uv"
 	if runtime.GOOS == "windows" {
 		name = "uv.exe"
 	}
-	return datahome.Path("bin", name)
+	dir, err := datahome.BinDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, name), nil
 }
 
 // bundledBinaryPath locates a binary shipped alongside the app (uv, or the octo

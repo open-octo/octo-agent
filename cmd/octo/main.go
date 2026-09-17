@@ -31,6 +31,10 @@ func main() {
 // run is the testable entry point. Splitting it out keeps main thin and
 // lets the test harness drive the CLI without spawning a subprocess.
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "__complete" {
+		return runComplete(args[1:], stdout)
+	}
+
 	var err error
 	args, err = datahome.ConfigureFromArgs(args)
 	if err != nil {

@@ -10,7 +10,8 @@ import (
 )
 
 // ProfileEnv carries the selected profile into re-executed serve workers and
-// child processes. It is set only by the global --profile command-line flag.
+// child processes. The selected profile can come from the global --profile
+// command-line flag or an inherited environment.
 const ProfileEnv = "OCTO_PROFILE"
 
 var profileName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
@@ -39,7 +40,7 @@ func ConfigureFromArgs(args []string) ([]string, error) {
 			if seen {
 				return nil, fmt.Errorf("--profile may be specified only once")
 			}
-			if i+1 == len(args) {
+			if i+1 == len(args) || strings.TrimSpace(args[i+1]) == "" {
 				return nil, fmt.Errorf("--profile requires a name")
 			}
 			seen = true
@@ -49,8 +50,11 @@ func ConfigureFromArgs(args []string) ([]string, error) {
 			if seen {
 				return nil, fmt.Errorf("--profile may be specified only once")
 			}
-			seen = true
 			profile = strings.TrimPrefix(arg, "--profile=")
+			if strings.TrimSpace(profile) == "" {
+				return nil, fmt.Errorf("--profile requires a name")
+			}
+			seen = true
 		default:
 			filtered = append(filtered, arg)
 		}
@@ -91,4 +95,16 @@ func Path(elem ...string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(append([]string{dir}, elem...)...), nil
+}
+
+// BinDir returns the machine-scoped directory for Octo-managed helper binaries.
+func BinDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory: %w", err)
+	}
+	if home == "" {
+		return "", fmt.Errorf("resolve home directory: empty path")
+	}
+	return filepath.Join(home, ".octo", "bin"), nil
 }

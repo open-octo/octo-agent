@@ -15,9 +15,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/open-octo/octo-agent/internal/datahome"
-	"time"
 )
 
 // OAuth flow for MCP servers that protect their endpoint with RFC 9728

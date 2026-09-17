@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // isolateHome points the trash root (os.UserHomeDir) at a temp dir so tests
@@ -18,7 +20,11 @@ func isolateHome(t *testing.T) {
 
 func metaCount(t *testing.T, project string) int {
 	t.Helper()
-	entries, _ := os.ReadDir(ProjectDir(project))
+	dir, err := ProjectDir(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(dir)
 	n := 0
 	for _, e := range entries {
 		if strings.HasSuffix(e.Name(), ".meta.json") {
@@ -75,5 +81,22 @@ func TestBackup_MissingFile(t *testing.T) {
 	project := t.TempDir()
 	if _, err := Backup(filepath.Join(project, "nope"), project); err == nil {
 		t.Error("Backup of a missing path should error")
+	}
+}
+
+func TestDataHomeErrorDoesNotUseRelativeTrashPath(t *testing.T) {
+	t.Setenv(datahome.ProfileEnv, "../bad")
+	if dir, err := Dir(); err == nil || dir != "" {
+		t.Errorf("Dir() = %q, %v; want empty path and error", dir, err)
+	}
+	if dir, err := ProjectDir(t.TempDir()); err == nil || dir != "" {
+		t.Errorf("ProjectDir() = %q, %v; want empty path and error", dir, err)
+	}
+	file := filepath.Join(t.TempDir(), "file.txt")
+	if err := os.WriteFile(file, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Backup(file, t.TempDir()); err == nil {
+		t.Fatal("Backup succeeded with an invalid profile")
 	}
 }

@@ -11,9 +11,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ConfigDir is the user-level config directory.
-const ConfigDir = ".octo"
-
 // ConfigFile is the channel credentials file.
 const ConfigFile = "channels.yml"
 

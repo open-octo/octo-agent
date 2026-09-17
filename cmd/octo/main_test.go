@@ -61,12 +61,18 @@ func TestRun_ProfileIsGlobalAndSelectsDataHome(t *testing.T) {
 }
 
 func TestRun_ProfileErrorsExit2(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"version", "--profile=../unsafe"}, strings.NewReader(""), &stdout, &stderr); code != 2 {
-		t.Fatalf("exit code = %d, want 2", code)
-	}
-	if !strings.Contains(stderr.String(), "invalid --profile") {
-		t.Errorf("stderr should explain invalid profile; got %q", stderr.String())
+	for _, args := range [][]string{
+		{"version", "--profile=../unsafe"},
+		{"version", "--profile="},
+		{"version", "--profile", ""},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, strings.NewReader(""), &stdout, &stderr); code != 2 {
+			t.Fatalf("run(%q) exit code = %d, want 2", args, code)
+		}
+		if !strings.Contains(stderr.String(), "invalid --profile") {
+			t.Errorf("run(%q) stderr should explain invalid profile; got %q", args, stderr.String())
+		}
 	}
 }
 

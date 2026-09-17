@@ -102,17 +102,17 @@ func firstOpts(opts []Options) Options {
 }
 
 // Dir returns the trash root directory.
-func Dir() string {
-	dir, err := datahome.Path("trash")
-	if err != nil {
-		return ""
-	}
-	return dir
+func Dir() (string, error) {
+	return datahome.Path("trash")
 }
 
 // ProjectDir returns the per-project trash subdirectory for projectDir.
-func ProjectDir(projectDir string) string {
-	return filepath.Join(Dir(), hashProject(projectDir))
+func ProjectDir(projectDir string) (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, hashProject(projectDir)), nil
 }
 
 // Backup copies a file or directory into the trash with a .meta.json sidecar,
@@ -271,7 +271,10 @@ func List() ([]Entry, error) {
 // Empty, Enforce — pass false so they don't read every trashed session
 // transcript just to compute titles they never use.
 func list(withLabel bool) ([]Entry, error) {
-	root := Dir()
+	root, err := Dir()
+	if err != nil {
+		return nil, err
+	}
 	var entries []Entry
 
 	dirs, err := os.ReadDir(root)
@@ -456,7 +459,10 @@ func hashProject(dir string) string {
 // <timestamp>_<rand>_<basename>: the random token keeps two same-basename files
 // deleted in the same second from colliding.
 func stageName(originalPath, projectDir string) (string, error) {
-	targetDir := ProjectDir(projectDir)
+	targetDir, err := ProjectDir(projectDir)
+	if err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(targetDir, 0700); err != nil {
 		return "", err
 	}

@@ -69,6 +69,35 @@ func TestWithBundledBinPath_AppendsAfterExistingSystemPath(t *testing.T) {
 // TestWithBundledBinPath_NoOpWhenBundledDirMissing confirms non-installer
 // installs (go install, build-from-source, Linux without a packaged
 // installer) get an unmodified env, since ~/.octo/bin never exists for them.
+func TestWithBundledBinPathUsesSharedBinForNamedProfile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("OCTO_PROFILE", "work")
+	binDir := filepath.Join(home, ".octo", "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	env := withBundledBinPath([]string{"PATH=/usr/bin"})
+	if got := env[0]; got != "PATH=/usr/bin"+string(os.PathListSeparator)+binDir {
+		t.Errorf("PATH = %q, want shared bin directory", got)
+	}
+}
+
+func TestShellCommandOmitsTrashDirWhenProfileIsInvalid(t *testing.T) {
+	t.Setenv("OCTO_PROFILE", "../bad")
+	cmd, err := shellCommand(context.Background(), "echo hi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kv := range cmd.Env {
+		if strings.HasPrefix(kv, "OCTO_TRASH_DIR=") {
+			t.Errorf("shell command included unsafe trash directory %q", kv)
+		}
+	}
+}
+
 func TestWithBundledBinPath_NoOpWhenBundledDirMissing(t *testing.T) {
 	home := t.TempDir() // deliberately no .octo/bin under it
 	t.Setenv("HOME", home)

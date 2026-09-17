@@ -155,7 +155,9 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 		projectDir := WorkingDirOrCWD(ctx)
 		env := scrubGuardEnv(os.Environ())
 		if projectDir != "" {
-			env = append(env, "OCTO_TRASH_DIR="+trash.ProjectDir(projectDir))
+			if trashDir, err := trash.ProjectDir(projectDir); err == nil {
+				env = append(env, "OCTO_TRASH_DIR="+trashDir)
+			}
 		}
 		env = append(env, guardEnv()...)
 		wrapped := posixKillGuardWrapper + fmt.Sprintf(safeRmWrapper, command)
@@ -178,7 +180,7 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 // this directory, so the empty-string case is the normal, silent no-op path
 // for them — not an error.
 func bundledBinDir() string {
-	dir, err := datahome.Path("bin")
+	dir, err := datahome.BinDir()
 	if err != nil {
 		return ""
 	}

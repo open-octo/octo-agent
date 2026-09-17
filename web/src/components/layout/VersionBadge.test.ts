@@ -11,6 +11,7 @@ import { mount, unmount, flushSync } from 'svelte'
 import VersionBadge from './VersionBadge.svelte'
 import * as api from '../../lib/api'
 import { ws } from '../../lib/ws'
+import { setLocale } from '../../lib/i18n'
 
 let target: HTMLElement
 let app: Record<string, unknown> | null = null
@@ -42,10 +43,11 @@ async function render(over: Record<string, unknown> = {}) {
 const pop = () => target.querySelector('.vb-pop')
 
 beforeEach(() => {
+  setLocale('en')
   wsHandlers = {}
   vi.spyOn(ws, 'on').mockImplementation(((type: string, fn: (ev: unknown) => void) => {
     wsHandlers[type] = fn
-    return () => {}
+    return () => { }
   }) as never)
   target = document.createElement('div')
   document.body.appendChild(target)
@@ -140,6 +142,15 @@ describe('VersionBadge profile badge', () => {
     expect(badge.getAttribute('aria-label')).toBe('Profile: work')
   })
 
+  it('localizes the profile label', async () => {
+    setLocale('zh')
+    await render({ profile: 'work' })
+
+    const badge = target.querySelector('.vb-profile') as HTMLElement
+    expect(badge.getAttribute('title')).toBe('配置：work')
+    expect(badge.getAttribute('aria-label')).toBe('配置：work')
+  })
+
   it('omits the profile badge by default', async () => {
     await render()
 
@@ -170,7 +181,7 @@ describe('VersionBadge popover dismissal', () => {
     badge.click()
     flushSync()
 
-    ;(pop() as HTMLElement).click()
+      ; (pop() as HTMLElement).click()
     flushSync()
     expect(pop()).toBeTruthy()
   })

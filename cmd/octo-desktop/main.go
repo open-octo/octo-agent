@@ -131,9 +131,22 @@ func ensureValidTempDir() {
 	}
 }
 
+// prepareDesktopArgs configures the global profile and rejects every argument
+// not consumed by that global option because the desktop shell has no other CLI flags.
+func prepareDesktopArgs(args []string) error {
+	remaining, err := datahome.ConfigureFromArgs(args)
+	if err != nil {
+		return err
+	}
+	if len(remaining) != 0 {
+		return fmt.Errorf("unsupported argument: %s", remaining[0])
+	}
+	return nil
+}
+
 func main() {
-	if _, err := datahome.ConfigureFromArgs(os.Args[1:]); err != nil {
-		fmt.Fprintf(os.Stderr, "octo-desktop: invalid --profile: %v\n", err)
+	if err := prepareDesktopArgs(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "octo-desktop: invalid arguments: %v\n", err)
 		os.Exit(2)
 	}
 
@@ -188,7 +201,7 @@ func main() {
 
 	settings := loadDesktopSettings()
 
-	// Seed the profile-scoped bin/uv from the app's bundled copy on first run so skills
+	// Seed the shared bin/uv from the app's bundled copy on first run so skills
 	// that need Python work even for a standalone download (no installer).
 	ensureBundledUv()
 

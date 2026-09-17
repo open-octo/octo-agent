@@ -118,7 +118,7 @@ func extracted(bin string) bool {
 
 // octoBinDir returns ~/.octo/bin, creating it if necessary.
 func octoBinDir() (string, error) {
-	dir, err := datahome.Path("bin")
+	dir, err := datahome.BinDir()
 	if err != nil {
 		return "", err
 	}

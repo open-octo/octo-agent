@@ -65,7 +65,7 @@ func DefaultPolicy(cwd string) Policy {
 	// injection. Read+execute only, not a write root, and distinct from the
 	// rest of $HOME (which stays unreadable here to protect secrets like
 	// ~/.ssh, ~/.aws).
-	if bin, err := datahome.Path("bin"); err == nil {
+	if bin, err := datahome.BinDir(); err == nil {
 		add(bin)
 	}
 

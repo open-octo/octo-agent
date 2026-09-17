@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -12,6 +13,31 @@ import (
 // the remembered window geometry. A typo'd json tag would silently reset the
 // window to its default size on every launch — the exact kind of quiet
 // regression this test exists to catch.
+func TestPrepareDesktopArgs(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		profile string
+		wantErr bool
+	}{
+		{"profile only", []string{"--profile", "work"}, "work", false},
+		{"equals profile", []string{"--profile=work"}, "work", false},
+		{"missing profile", []string{"--profile="}, "", true},
+		{"unsupported argument", []string{"--debug"}, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(datahome.ProfileEnv, "")
+			err := prepareDesktopArgs(tc.args)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("prepareDesktopArgs(%q) error = %v, want error %v", tc.args, err, tc.wantErr)
+			}
+			if got := os.Getenv(datahome.ProfileEnv); got != tc.profile {
+				t.Errorf("profile = %q, want %q", got, tc.profile)
+			}
+		})
+	}
+}
+
 func TestDesktopSettings_WindowGeometryRoundTrip(t *testing.T) {
 	in := desktopSettings{
 		WindowWidth:     1600,
