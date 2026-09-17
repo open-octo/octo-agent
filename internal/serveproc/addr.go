@@ -1,6 +1,7 @@
 package serveproc
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -27,9 +28,10 @@ const autoPortHost = "127.0.0.1"
 // Test seams.
 var probeAddr = probeAddrListen
 
-// AddrPath returns the path of the pinned bind address (~/.octo/serve.addr),
-// creating ~/.octo if needed. Only named profiles use it: the default profile
-// keeps the fixed 127.0.0.1:8088 that every client already knows.
+// AddrPath returns the path of the pinned bind address (serve.addr in the
+// profile's data root, e.g. ~/.octo-work/serve.addr), creating the root if
+// needed. Only named profiles use it: the default profile keeps the fixed
+// 127.0.0.1:8088 that every client already knows.
 func AddrPath() (string, error) {
 	dir, err := octoDir()
 	if err != nil {
@@ -43,6 +45,20 @@ func AddrPath() (string, error) {
 // is a remembered choice, not state the backend depends on, so the caller is
 // free to pick again.
 func ReadAddr() (string, bool) {
+	addr, present := readAddrRaw()
+	if !present {
+		return "", false
+	}
+	if _, _, err := net.SplitHostPort(addr); err != nil {
+		return "", false
+	}
+	return addr, true
+}
+
+// readAddrRaw returns the pin file's content without validating it, so
+// ResolveAddr can tell "no pin yet" apart from "a pin we can't parse" — the
+// former picks a fresh port, the latter must not silently become one.
+func readAddrRaw() (string, bool) {
 	path, err := AddrPath()
 	if err != nil {
 		return "", false
@@ -52,13 +68,7 @@ func ReadAddr() (string, bool) {
 		return "", false
 	}
 	addr := strings.TrimSpace(string(data))
-	if addr == "" {
-		return "", false
-	}
-	if _, _, err := net.SplitHostPort(addr); err != nil {
-		return "", false
-	}
-	return addr, true
+	return addr, addr != ""
 }
 
 // WriteAddr pins this profile to addr so later starts reuse it.
@@ -84,7 +94,9 @@ func WriteAddr(addr string) error {
 // That is also why a pinned port that turns out to be busy is an error instead
 // of a slide to the next free one. Something else holding the port is exactly
 // the case where quietly landing somewhere else strands every client that knows
-// the old number, and does it silently. explicit says the user named the
+// the old number, and does it silently. A pin file that exists but doesn't
+// parse is an error for the same reason — guessing would overwrite it.
+// explicit says the user named the
 // address themselves, which wins and re-pins — both the escape hatch from a
 // busy pin and the way to move a profile on purpose.
 func ResolveAddr(profile string, explicit bool, addr string) (string, error) {
@@ -102,6 +114,9 @@ func ResolveAddr(profile string, explicit bool, addr string) (string, error) {
 			return "", pinnedAddrBusy(profile, pinned, err)
 		}
 		return pinned, nil
+	}
+	if raw, present := readAddrRaw(); present {
+		return "", malformedAddr(profile, raw)
 	}
 	for i := 0; i < autoPortSpan; i++ {
 		candidate := net.JoinHostPort(autoPortHost, strconv.Itoa(AutoPortBase+i))
@@ -129,7 +144,20 @@ func pinnedAddrBusy(profile, addr string, cause error) error {
 	}
 	fmt.Fprintf(&b, "\n  if this profile's own backend is already up: octo serve --profile %s status", profile)
 	fmt.Fprintf(&b, "\n  to move this profile somewhere else: octo serve --profile %s --addr %s:<port>", profile, autoPortHost)
-	return fmt.Errorf("%s", b.String())
+	return errors.New(b.String())
+}
+
+// malformedAddr refuses to start over a pin file we can't parse. Silently
+// treating it as "no pin" would pick a fresh port and overwrite the file —
+// the same silent relocation a busy pin is an error to avoid, just quieter.
+func malformedAddr(profile, raw string) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "profile %q: the pinned address %q is not a host:port", profile, raw)
+	if path, err := AddrPath(); err == nil {
+		fmt.Fprintf(&b, "\n  pinned by: %s", path)
+	}
+	fmt.Fprintf(&b, "\n  fix the address in that file, or delete it and a fresh port will be chosen")
+	return errors.New(b.String())
 }
 
 // probeAddrListen reports whether addr can be bound right now, by binding it
