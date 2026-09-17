@@ -80,14 +80,30 @@ func TestLatestVersion_ChecksAndCaches(t *testing.T) {
 	if latest != "9.9.9" || !needs {
 		t.Fatalf("after refresh = (%q, %v), want (9.9.9, true)", latest, needs)
 	}
+
+	// Baseline rather than a literal 1. The property under test is that a read
+	// costs nothing once the answer is known, and that is what the delta below
+	// measures. The absolute count is not ours alone to assert: this test owns
+	// the process-wide upgrade.BaseURL while it runs, and version.Version /
+	// version.Commit are pinned release-like here, which is exactly what lets
+	// upgrade.Eligible pass — so any other goroutine in the binary that reaches
+	// upgrade.Check lands on this fake and inflates the count. Requiring == 1
+	// made the whole test fail on an unrelated stray lookup (seen once on the
+	// macOS runner, never reproduced).
+	settleVersionRefresh(t, srv)
+	baseline := atomic.LoadInt32(&hits)
+	if baseline < 1 {
+		t.Fatalf("upstream hits = %d, want at least the one lookup that produced 9.9.9", baseline)
+	}
+
 	for i := 0; i < 5; i++ {
 		if l, _ := srv.LatestVersion(); l != "9.9.9" {
 			t.Fatalf("cached read = %q, want 9.9.9", l)
 		}
 	}
 	settleVersionRefresh(t, srv)
-	if got := atomic.LoadInt32(&hits); got != 1 {
-		t.Errorf("upstream hits = %d, want 1 (everything after the refresh is cached)", got)
+	if got := atomic.LoadInt32(&hits); got != baseline {
+		t.Errorf("upstream hits %d → %d across five reads, want no change (everything after the refresh is cached)", baseline, got)
 	}
 }
 

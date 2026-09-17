@@ -860,6 +860,18 @@ func mustServer(t *testing.T, cfg Config) *Server {
 	// milliseconds; the timeouts are just a backstop.
 	t.Cleanup(func() {
 		srv.drain.drain(10 * time.Second)
+
+		// Same reason, for the latest-release lookup. A read starts that
+		// refresh in the background and nothing here awaits it — the server's
+		// own awaitVersionRefresh runs on Shutdown, which a test-constructed
+		// server never gets. One that outlives its test reads the process-wide
+		// upgrade.BaseURL when it finally runs, by which point the next test
+		// may have pointed it at a fake release origin whose request count it
+		// then inflates.
+		versionCtx, cancelVersion := context.WithTimeout(context.Background(), 10*time.Second)
+		srv.awaitVersionRefresh(versionCtx)
+		cancelVersion()
+
 		deadline := time.Now().Add(10 * time.Second)
 		for time.Now().Before(deadline) {
 			srv.titleMu.Lock()
