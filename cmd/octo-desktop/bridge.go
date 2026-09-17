@@ -29,7 +29,10 @@ type nativeBridge struct {
 	// srv is the in-process hub, set once bound. Atomic because startHub (the
 	// ApplicationStarted goroutine) writes it while the tray-refresh loop reads it.
 	srv atomic.Pointer[server.Server]
-	url string // http://127.0.0.1:8088, set once bound
+	// url is the hub's base URL, "http://127.0.0.1:8088"-style. Written by main
+	// and by startHub (the ApplicationStarted goroutine) while notification and
+	// window goroutines read it, so it's atomic like srv.
+	url atomic.Value // string
 
 	// closeLog releases the rotating serve.log writer that startHub installs once
 	// this process owns the port. Written by startHub (the ApplicationStarted
@@ -169,8 +172,19 @@ const (
 // from location.search (see VersionBadge.svelte).
 const desktopShellQuery = "shell=octo-desktop"
 
+// setURL records the hub's base URL; baseURL reads it ("" until set). Both are
+// safe from any goroutine — see the url field.
+func (b *nativeBridge) setURL(u string) { b.url.Store(u) }
+
+func (b *nativeBridge) baseURL() string {
+	if v := b.url.Load(); v != nil {
+		return v.(string)
+	}
+	return ""
+}
+
 // shellURL builds the desktop-shell window URL for a frontend route hash,
-// always carrying the desktopShellQuery marker. base is b.url, e.g.
+// always carrying the desktopShellQuery marker. base is b.baseURL(), e.g.
 // "http://127.0.0.1:8088". Fresh-window loads and SetURL navigations share it,
 // so they produce the identical path+query and a route change stays a pure
 // hashchange (no reload). The exact query string is contracted with the
@@ -517,14 +531,14 @@ func (b *nativeBridge) openNewSession() { b.showWindowAt("new") }
 func (b *nativeBridge) showWindowAt(hash string) {
 	// The marker rides on every navigation the shell performs (fresh window and
 	// SetURL alike) so nativeShell stays true across reloads and route changes.
-	target := shellURL(b.url, hash)
+	target := shellURL(b.baseURL(), hash)
 	// Snapshot the pointer once: the frame probe's goroutine can clear it
 	// concurrently, and a lock-free re-read mid-function could see that nil and
 	// panic. Everything below works off win, then publishes it back.
 	win := b.currentWindow()
 	created := false
 	if win == nil {
-		if b.app == nil || b.url == "" {
+		if b.app == nil || b.baseURL() == "" {
 			return // not bound yet
 		}
 		// Only one goroutine builds the window. A loser re-reads the pointer:
@@ -652,7 +666,7 @@ func (b *nativeBridge) showWindowAt(hash string) {
 				if b.currentWindow() != w {
 					return
 				}
-				w.SetURL(shellURL(b.url, ""))
+				w.SetURL(shellURL(b.baseURL(), ""))
 			})
 		}
 		win = w

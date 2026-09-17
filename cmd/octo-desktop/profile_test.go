@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/datahome"
@@ -133,5 +134,23 @@ func TestRelaunchCommandCarriesOurPid(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("environment should carry %q", want)
+	}
+}
+
+// A process running under a named profile has OCTO_PROFILE set (Configure put
+// it there). If the replacement inherited it, selectDesktopProfile would take
+// it as an explicit choice and never read the recorded switch — restarting
+// into the profile it was asked to leave. Every switch away from a named
+// profile would silently no-op.
+func TestRelaunchCommandStripsTheInheritedProfile(t *testing.T) {
+	t.Setenv(datahome.ProfileEnv, "work")
+	cmd, err := relaunchCommand()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kv := range cmd.Env {
+		if strings.HasPrefix(kv, datahome.ProfileEnv+"=") {
+			t.Errorf("relaunch env must not carry %s, got %q", datahome.ProfileEnv, kv)
+		}
 	}
 }

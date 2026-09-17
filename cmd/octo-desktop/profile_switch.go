@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/open-octo/octo-agent/internal/datahome"
@@ -19,8 +20,11 @@ import (
 const awaitPidEnv = "OCTO_DESKTOP_AWAIT_PID"
 
 // awaitPredecessorTimeout bounds that wait. A hub that refuses to die is a
-// worse problem than a profile switch, and starting anyway produces a visible
-// bind error rather than an app that never appears.
+// worse problem than a profile switch. If the wait runs out we start anyway:
+// application.New then hands us to the still-living instance as a second
+// launch and we exit — the user sees the old profile's window pop up while
+// the choice file already points at the new one. Confusing, but the next cold
+// start lands on the new profile, which beats an app that never appears.
 const awaitPredecessorTimeout = 20 * time.Second
 
 // awaitPredecessor blocks until the process that asked us to replace it has
@@ -65,6 +69,10 @@ func (b *nativeBridge) switchProfile(profile string) {
 		return
 	}
 	if err := relaunchSelf(); err != nil {
+		// The choice is already recorded but this process is staying — put the
+		// record back to what's actually running, so the next cold start doesn't
+		// switch behind the user's back right after we said we couldn't.
+		_ = writeDesktopProfile(current)
 		b.showError(L().errTitle, fmt.Sprintf(L().profileRelaunchErrFmt, err))
 		return
 	}
@@ -115,7 +123,19 @@ func relaunchCommand() (*exec.Cmd, error) {
 		return nil, err
 	}
 	cmd := exec.Command(exe)
-	cmd.Env = append(os.Environ(), awaitPidEnv+"="+strconv.Itoa(os.Getpid()))
+	// A process running under a named profile has OCTO_PROFILE set — Configure
+	// put it there. The replacement must NOT inherit it: selectDesktopProfile
+	// treats a set OCTO_PROFILE as an explicit choice and returns before ever
+	// reading the recorded one, which would restart us into the profile we were
+	// asked to leave. (Passing --profile as argv instead doesn't work — the
+	// default profile is the empty string, which the flag parser rejects.)
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, datahome.ProfileEnv+"=") {
+			env = append(env, kv)
+		}
+	}
+	cmd.Env = append(env, awaitPidEnv+"="+strconv.Itoa(os.Getpid()))
 	// The replacement must not be tied to this process's lifetime or console.
 	detachRelaunch(cmd)
 	return cmd, nil

@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/mattn/go-isatty"
@@ -64,8 +65,15 @@ const defaultHubAddr = "127.0.0.1:8088"
 // hubAddr is the address this launch's profile answers on: the fixed default
 // for the default profile, and the profile's own remembered port otherwise —
 // the same answer `octo serve` reaches, via the same resolver, so a profile is
-// at one address no matter which backend is up. Resolved once at startup.
-var hubAddr = defaultHubAddr
+// at one address no matter which backend is up. Seeded from the pin in main,
+// then resolved for real in startHub — which runs after the tray-refresh loop
+// is already reading it, so it is atomic like the bridge's other
+// startHub-written fields.
+var hubAddr = func() atomic.Value {
+	v := atomic.Value{}
+	v.Store(defaultHubAddr)
+	return v
+}()
 
 // isBundled reports whether we're running inside a .app. The Wails
 // notifications service needs a bundle identifier and hard-fails startup
@@ -149,6 +157,16 @@ func main() {
 	// launch) and ahead of any log file the old backend still holds open.
 	awaitPredecessor()
 
+	// Seed the hub address from the profile's pin — without probing — so the
+	// bridge and tray built below carry the right address from the start. The
+	// authoritative resolution (first-run selection, busy-pin reporting) still
+	// happens in startHub, inside the event loop where its dialogs can run.
+	if p := os.Getenv(datahome.ProfileEnv); p != "" {
+		if pinned, ok := serveproc.ReadAddr(); ok {
+			hubAddr.Store(pinned)
+		}
+	}
+
 	// macOS's postinstall script launches the app with `open` from inside
 	// installd's ephemeral PKInstallSandbox.*; the launched process can inherit
 	// that sandbox's $TMPDIR. The desktop app then runs for days as a tray
@@ -209,7 +227,8 @@ func main() {
 	// it runs before the bridge takes its copy of settings below.
 	ensureBundledOcto(&settings)
 
-	bridge := &nativeBridge{settings: settings, url: "http://" + hubAddr}
+	bridge := &nativeBridge{settings: settings}
+	bridge.setURL("http://" + hubAddr.Load().(string))
 	// On Windows/Linux a window close would otherwise quit the app; start with
 	// quit allowed only when the user opted out of keep-running-in-background.
 	bridge.allowQuit.Store(!settings.KeepRunningInBackground)
@@ -445,20 +464,11 @@ func hubLogLevel() slog.Level {
 // daemon), starts the in-process server, and opens the window. It runs inside
 // the ApplicationStarted hook so its dialogs have a live event loop.
 func startHub(app *application.App, bridge *nativeBridge, settings desktopSettings) {
-	// Which port this profile answers on. The default profile keeps 8088; a
-	// named one gets its own remembered port, resolved the same way `octo
-	// serve` resolves it, so a profile is at one address either way. A busy
-	// pinned port is reported rather than worked around — see ResolveAddr.
-	addr, err := serveproc.ResolveAddr(os.Getenv(datahome.ProfileEnv), false, defaultHubAddr)
-	if err != nil {
-		bridge.showError(L().errTitle, err.Error())
-		app.Quit()
-		return
-	}
-	hubAddr = addr
-	bridge.url = "http://" + addr
-
-	// If another backend already owns the port, ask before displacing it.
+	// If another backend already owns this profile, ask before displacing it —
+	// first, because ResolveAddr probes the pinned port, and the backend we're
+	// about to replace is exactly what would be holding it. Resolving first
+	// would turn the takeover prompt into a hard "address in use" error for
+	// every named profile.
 	tookOver := false
 	if pid, ok := serveproc.Running(); ok {
 		if !bridge.confirmTakeover(pid) {
@@ -473,6 +483,30 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 		tookOver = true
 	}
 
+	// Which port this profile answers on. The default profile keeps 8088; a
+	// named one gets its own remembered port, resolved the same way `octo
+	// serve` resolves it, so a profile is at one address either way. A busy
+	// pinned port is reported rather than worked around — see ResolveAddr.
+	addr := defaultHubAddr
+	if profile := os.Getenv(datahome.ProfileEnv); profile != "" {
+		if pinned, ok := serveproc.ReadAddr(); ok && tookOver {
+			// The port we just freed may still be draining — trust the pin and
+			// let listenHub's grace period wait it out, rather than probing a
+			// port the outgoing backend might still hold and failing on ourselves.
+			addr = pinned
+		} else {
+			resolved, err := serveproc.ResolveAddr(profile, false, defaultHubAddr)
+			if err != nil {
+				bridge.showError(L().errTitle, err.Error())
+				app.Quit()
+				return
+			}
+			addr = resolved
+		}
+	}
+	hubAddr.Store(addr)
+	bridge.setURL("http://" + addr)
+
 	// After a takeover, the stopped daemon needs a moment to release the port —
 	// serveproc.Stop only signals it. Retry the bind for a few seconds so the
 	// handoff is seamless; a cold start with a genuine conflict fails at once.
@@ -480,9 +514,9 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 	if tookOver {
 		grace = 8 * time.Second
 	}
-	ln, err := listenHub(hubAddr, grace)
+	ln, err := listenHub(addr, grace)
 	if err != nil {
-		bridge.showError(L().errTitle, fmt.Sprintf(L().errBindFmt, hubAddr, err))
+		bridge.showError(L().errTitle, fmt.Sprintf(L().errBindFmt, addr, err))
 		app.Quit()
 		return
 	}
@@ -686,7 +720,7 @@ func trayStatusLines(bridge *nativeBridge) []string {
 	if srv == nil {
 		return []string{L().trayStarting}
 	}
-	lines := []string{fmt.Sprintf(L().trayBackendFmt, hubAddr)}
+	lines := []string{fmt.Sprintf(L().trayBackendFmt, hubAddr.Load().(string))}
 	if p := os.Getenv(datahome.ProfileEnv); p != "" {
 		lines = append(lines, fmt.Sprintf(L().trayProfileFmt, p))
 	}
