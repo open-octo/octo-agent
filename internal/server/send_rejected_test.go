@@ -361,6 +361,15 @@ drain:
 		t.Fatal("expected the turn to still complete: the takeover notice must not block it")
 	}
 
+	// The "complete" broadcast does not mean the turn goroutine is done writing:
+	// its deferred wind-down (releaseSessionBinding) still rewrites the session
+	// file afterwards, and a concurrent read can catch torn bytes ("invalid
+	// character ... after top-level value" on the Windows CI leg). Wait on the
+	// drain gate — held across the wind-down — before reloading.
+	if !srv.drain.drain(3 * time.Second) {
+		t.Fatal("turn wind-down did not finish")
+	}
+
 	// The notice is informational for connected clients only — the persisted
 	// transcript must not gain any record of it.
 	fresh, err := agent.LoadSession(sess.ID)
