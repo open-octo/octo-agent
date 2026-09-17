@@ -95,6 +95,20 @@ func NewDefaultRegistryWithTracker(tracker *ReadTracker) DefaultRegistry {
 	return DefaultRegistry{tracker: tracker}
 }
 
+// WithFreshTracker returns a copy of the registry whose read-before-write
+// state starts empty and is independent of this one's. The spawner calls it
+// per sub-agent: the gate's promise is "this context has seen these bytes",
+// and a child runs on its own history, so inheriting the parent's reads would
+// let it overwrite a file it never looked at.
+//
+// A registry with enforcement disabled (the zero value) stays disabled.
+func (r DefaultRegistry) WithFreshTracker() agent.ToolExecutor {
+	if r.tracker == nil {
+		return r
+	}
+	return DefaultRegistry{tracker: NewReadTracker()}
+}
+
 // Execute implements agent.ToolExecutor.
 func (r DefaultRegistry) Execute(ctx context.Context, name string, input map[string]any) (agent.ToolResult, error) {
 	return r.ExecuteStream(ctx, name, input, nil)

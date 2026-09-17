@@ -1,7 +1,10 @@
 package tools
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -71,6 +74,10 @@ func (rt *ReadTracker) RefreshTarget(target string) {
 //     writing blind → refuse.
 //   - An existing, previously-read path whose mtime advanced since the read
 //     was changed out-of-band → refuse and force a re-read.
+//   - An existing path never read under THIS name still passes when its bytes
+//     are identical to a file that was read (see matchesReadContent) — the
+//     same file reached through a second path, most often another git
+//     worktree of the same repository.
 //
 // The returned error text mirrors Claude Code's wording so the LLM reacts
 // the way it's been trained to (re-read, then retry).
@@ -88,10 +95,80 @@ func (rt *ReadTracker) CheckWritable(absPath string) error {
 	rt.mu.Unlock()
 
 	if !wasRead {
+		if rt.matchesReadContent(absPath, info) {
+			return nil
+		}
 		return fmt.Errorf("File has not been read yet. Read it first before writing to it.")
 	}
 	if info.ModTime().After(readMtime) {
 		return fmt.Errorf("File has been modified since it was last read. Read it again before writing to it.")
 	}
 	return nil
+}
+
+// maxContentMatchBytes caps the file size matchesReadContent will digest. The
+// fallback only runs on the refusal path, but a stray write to a huge binary
+// shouldn't turn into hashing it — past this size an unread path stays unread.
+const maxContentMatchBytes = 10 << 20
+
+// matchesReadContent reports whether absPath currently holds the very same
+// bytes as a file this tracker already recorded as read. That makes the read
+// gate track file identity by content rather than by name, which is what
+// unblocks the cross-worktree case: the agent reads internal/app/provider.go
+// in the main checkout and then edits the same file in a linked worktree — a
+// different absolute path, but byte-for-byte the content it just read.
+//
+// It is deliberately narrow. A candidate only counts while its own mtime still
+// matches what was stamped at read time, so a file changed since the read
+// can't launder unseen bytes onto another path; and the match is on the full
+// content, so the moment the worktree's copy diverges (a different branch, a
+// local edit) the guard fires again and forces a real read.
+func (rt *ReadTracker) matchesReadContent(absPath string, info os.FileInfo) bool {
+	if info.Size() > maxContentMatchBytes {
+		return false
+	}
+
+	rt.mu.Lock()
+	candidates := make(map[string]time.Time, len(rt.reads))
+	for path, mtime := range rt.reads {
+		candidates[path] = mtime
+	}
+	rt.mu.Unlock()
+
+	// Digested lazily: most calls find no same-size candidate and so never
+	// read the target at all.
+	var want string
+	for path, readMtime := range candidates {
+		if path == absPath {
+			continue
+		}
+		cand, err := os.Stat(path)
+		if err != nil || cand.IsDir() || cand.Size() != info.Size() || cand.ModTime().After(readMtime) {
+			continue
+		}
+		if want == "" {
+			if want, err = fileDigest(absPath); err != nil {
+				return false
+			}
+		}
+		if got, err := fileDigest(path); err == nil && got == want {
+			return true
+		}
+	}
+	return false
+}
+
+// fileDigest returns the hex SHA-256 of path's contents, streamed so a large
+// file never lands in memory whole.
+func fileDigest(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
