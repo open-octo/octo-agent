@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/upgrade"
 	"github.com/open-octo/octo-agent/internal/version"
 )
@@ -151,5 +152,104 @@ func TestVersionUpgradeRefusedInInstallerMode(t *testing.T) {
 	serveLoopback(srv.mux, w, req)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("installer-mode upgrade: got %d, want 409", w.Code)
+	}
+}
+
+// TestLatestVersion_ConfigOptOut: with `update_check: false` in config, the
+// server makes no outbound request at all and reports current-is-latest —
+// this is the switch that makes the "no traffic but your model calls" claim
+// literally true.
+func TestLatestVersion_ConfigOptOut(t *testing.T) {
+	var hits int32
+	mux := http.NewServeMux()
+	var fake *httptest.Server
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		http.Redirect(w, r, fake.URL+"/releases/tag/v9.9.9", http.StatusFound)
+	})
+	fake = httptest.NewServer(mux)
+	t.Cleanup(fake.Close)
+
+	origURL := upgrade.BaseURL
+	upgrade.BaseURL = fake.URL
+	t.Cleanup(func() { upgrade.BaseURL = origURL })
+
+	origV, origC := version.Version, version.Commit
+	version.Version, version.Commit = "0.18.0", "abc1234"
+	t.Cleanup(func() { version.Version, version.Commit = origV, origC })
+
+	// Own HOME so the saved preference can't leak into the package's other
+	// tests, which share the one TestMain pins.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	off := false
+	if err := (config.Config{UpdateCheck: &off}).Save(); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
+	latest, needs := srv.latestVersion()
+	if latest != "0.18.0" || needs {
+		t.Errorf("latestVersion with update_check off = (%q, %v), want (0.18.0, false)", latest, needs)
+	}
+	if got := atomic.LoadInt32(&hits); got != 0 {
+		t.Errorf("upstream hits = %d, want 0 — the whole point is that nothing is sent", got)
+	}
+}
+
+// TestPutUpdateCheck_PersistsAndSilences: the Settings toggle writes the
+// preference, GET /api/config reports it back, and the very next
+// /api/version honours it without a restart.
+func TestPutUpdateCheck_PersistsAndSilences(t *testing.T) {
+	var hits int32
+	mux := http.NewServeMux()
+	var fake *httptest.Server
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		http.Redirect(w, r, fake.URL+"/releases/tag/v9.9.9", http.StatusFound)
+	})
+	fake = httptest.NewServer(mux)
+	t.Cleanup(fake.Close)
+
+	origURL := upgrade.BaseURL
+	upgrade.BaseURL = fake.URL
+	t.Cleanup(func() { upgrade.BaseURL = origURL })
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
+
+	// Default on: the config endpoint says so before anything is written.
+	var cfgResp struct {
+		UpdateCheck *bool `json:"update_check"`
+	}
+	w := doJSON(t, srv, http.MethodGet, "/api/config", "")
+	if err := json.Unmarshal(w.Body.Bytes(), &cfgResp); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfgResp.UpdateCheck == nil || !*cfgResp.UpdateCheck {
+		t.Fatalf("initial update_check = %v, want true", cfgResp.UpdateCheck)
+	}
+
+	if w := doJSON(t, srv, http.MethodPut, "/api/config/update_check", `{"update_check":false}`); w.Code != http.StatusOK {
+		t.Fatalf("PUT update_check = %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+
+	w = doJSON(t, srv, http.MethodGet, "/api/config", "")
+	if err := json.Unmarshal(w.Body.Bytes(), &cfgResp); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfgResp.UpdateCheck == nil || *cfgResp.UpdateCheck {
+		t.Fatalf("update_check after PUT = %v, want false", cfgResp.UpdateCheck)
+	}
+
+	if w := doJSON(t, srv, http.MethodGet, "/api/version", ""); w.Code != http.StatusOK {
+		t.Fatalf("GET /api/version = %d", w.Code)
+	}
+	if got := atomic.LoadInt32(&hits); got != 0 {
+		t.Errorf("upstream hits after opting out = %d, want 0", got)
 	}
 }

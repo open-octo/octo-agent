@@ -131,6 +131,9 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		NoChannel:   *noChannel,
 		NoMemory:    *noMemory,
 		AccessKey:   *accessKey,
+		// Build-level gate only: the user's `update_check` preference is read
+		// fresh per request in latestVersion, so this being true means "this
+		// binary is allowed to look", not "it always will".
 		UpdateCheck: true,
 	}
 

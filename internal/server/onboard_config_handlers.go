@@ -252,6 +252,10 @@ type configResponse struct {
 	// ComputerEnabled is the raw tools.computer.enabled value ("" = off). The
 	// experimental Settings tab renders it as a toggle; off is the default.
 	ComputerEnabled string `json:"computer_enabled,omitempty"`
+	// UpdateCheck is the resolved update_check preference (default true), not
+	// the raw pointer — the Settings toggle shows whether octo will actually
+	// look for new releases.
+	UpdateCheck *bool `json:"update_check,omitempty"`
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -270,6 +274,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	if re == "" {
 		re = "off"
 	}
+	effUpdateCheck := cfg.UpdateCheckEnabled()
 	writeJSON(w, http.StatusOK, configResponse{
 		FontSize:            "medium",
 		Language:            cfg.Language,
@@ -280,6 +285,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		ReasoningEffort:     re,
 		PermissionMode:      cfg.PermissionMode,
 		ComputerEnabled:     cfg.Tools.Computer.Enabled,
+		UpdateCheck:         &effUpdateCheck,
 	})
 }
 
@@ -489,6 +495,40 @@ func (s *Server) handlePutCoauthor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "coauthor": req.Coauthor})
+}
+
+// ─── PUT /api/config/update_check ───────────────────────────────────────────
+
+type putUpdateCheckRequest struct {
+	UpdateCheck bool `json:"update_check"`
+}
+
+// handlePutUpdateCheck updates config.UpdateCheck — whether octo may make the
+// one outbound request that isn't a model call: the latest-release lookup that
+// feeds the version badge (and, on desktop, the tray's daily poll). Like
+// coauthor, nothing caches it: latestVersion reads config fresh on every
+// /api/version, so the next badge refresh honours the new value without a
+// restart or a WS broadcast.
+func (s *Server) handlePutUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	var req putUpdateCheckRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeInvalidJSONBody(w, err)
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load config: %v", err))
+		return
+	}
+
+	cfg.UpdateCheck = &req.UpdateCheck
+	if err := cfg.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save config: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "update_check": req.UpdateCheck})
 }
 
 // ─── PUT /api/config/language ────────────────────────────────────────────────

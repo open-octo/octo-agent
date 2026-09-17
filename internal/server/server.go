@@ -949,6 +949,7 @@ func (s *Server) registerRoutes() {
 	s.api("PUT /api/config/show_reasoning", s.handlePutShowReasoning)
 	s.api("PUT /api/config/computer", s.handlePutComputer)
 	s.api("PUT /api/config/coauthor", s.handlePutCoauthor)
+	s.api("PUT /api/config/update_check", s.handlePutUpdateCheck)
 	s.api("PUT /api/config/language", s.handlePutLanguage)
 	s.api("PUT /api/config/workspace_dir", s.handlePutWorkspaceDir)
 	s.api("PUT /api/config/reasoning_effort", s.handlePutReasoningEffort)

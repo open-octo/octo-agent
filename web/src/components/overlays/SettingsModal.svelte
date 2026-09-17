@@ -228,6 +228,7 @@
   let permissionMode   = $state('interactive')
   let showReasoningVal = $state(true)
   let coauthorVal      = $state(true)
+  let updateCheckVal   = $state(true)
   let workspaceDir        = $state('')
   // Resolved default new sessions get when workspaceDir is empty (~/Octo,
   // expanded server-side) — shown as the input's placeholder instead of a
@@ -286,6 +287,7 @@
       permissionMode   = cfg.permission_mode ?? 'interactive'
       showReasoningVal = cfg.show_reasoning ?? true
       coauthorVal      = cfg.coauthor ?? true
+      updateCheckVal   = cfg.update_check ?? true
       computerUse      = (cfg.computer_enabled ?? '') === 'on'
       // Legacy installer-seeded "auto" resolves to the same default as ""
       // (see tools.ResolveWorkspaceDir) — show it as the empty input with
@@ -405,6 +407,15 @@
       coauthorVal = v
     } catch (e: any) {
       showToast(e.message ?? 'Failed to update coauthor', 'error')
+    }
+  }
+
+  async function saveUpdateCheck(v: boolean) {
+    try {
+      await api.updateUpdateCheck(v)
+      updateCheckVal = v
+    } catch (e: any) {
+      showToast(e.message ?? 'Failed to update update-check', 'error')
     }
   }
 
@@ -599,6 +610,13 @@
               <span class="setd">{$t('settings.coauthor_desc')}</span>
             </div>
             <Switch checked={coauthorVal} onchange={(v) => saveCoauthor(v)} />
+          </div>
+          <div class="setrow">
+            <div class="seti">
+              <span class="setl">{$t('settings.update_check')}</span>
+              <span class="setd">{$t('settings.update_check_desc')}</span>
+            </div>
+            <Switch checked={updateCheckVal} onchange={(v) => saveUpdateCheck(v)} />
           </div>
           <div class="setrow">
             <div class="seti">

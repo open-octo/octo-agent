@@ -259,6 +259,14 @@ type Config struct {
 	// (via OSC 2) to the session name on startup. nil means the built-in default
 	// (enabled).
 	TerminalTitle *bool `yaml:"terminal_title,omitempty"`
+	// UpdateCheck controls octo's only outbound request that isn't a model
+	// call: the latest-release lookup against GitHub (see internal/upgrade).
+	// nil means the built-in default (enabled). Setting it false silences
+	// every automatic check — the web version badge and the desktop shell's
+	// daily poll — so an install makes no network request of its own. An
+	// explicitly invoked `octo upgrade` (or the tray's "Check for updates…")
+	// still reaches out: typing the command is the consent.
+	UpdateCheck *bool `yaml:"update_check,omitempty"`
 	// OnboardAttempted is the LEGACY location of the soul_setup nudge marker.
 	// It is only READ now (see the package-level OnboardAttempted /
 	// MarkOnboardAttempted, which use the standalone ~/.octo/.onboard_attempted
@@ -504,6 +512,17 @@ func (c Config) EffectiveFallbackContextWindow() (int, []string) {
 		return c.FallbackContextWindow, problems
 	}
 	return 0, problems
+}
+
+// UpdateCheckEnabled reports whether automatic latest-release lookups are
+// allowed. Missing config means the built-in default (true). There is no env
+// layer — unlike EffectiveCoauthor, this is a single stored preference, so
+// the config file is the only place it can be set.
+func (c Config) UpdateCheckEnabled() bool {
+	if c.UpdateCheck != nil {
+		return *c.UpdateCheck
+	}
+	return true
 }
 
 // ModelVision reports whether the named model accepts image content. When the

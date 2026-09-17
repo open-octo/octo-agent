@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/upgrade"
 	"github.com/open-octo/octo-agent/internal/version"
 )
@@ -90,11 +91,22 @@ func (s *Server) upgradeMode() string {
 
 // latestVersion resolves the latest released version through the cache.
 // The update check is opt-in via Config.UpdateCheck (set only by `octo
-// serve`), so every other Server constructor — the test suite included —
-// performs no outbound calls and degrades to "current is latest".
+// serve` and the desktop hub), so every other Server constructor — the test
+// suite included — performs no outbound calls and degrades to "current is
+// latest".
+//
+// On top of that build-level gate sits the user's `update_check` preference,
+// read fresh from config on every call rather than baked into s.cfg: turning
+// the toggle off in Settings must silence the outbound lookup immediately,
+// not at the next restart. A config that fails to load leaves the built-in
+// default (enabled) in place — the same fallback every other config reader
+// here uses.
 func (s *Server) latestVersion() (string, bool) {
 	current := strings.TrimPrefix(version.Version, "v")
 	if !s.cfg.UpdateCheck {
+		return current, false
+	}
+	if cfg, err := config.Load(); err == nil && !cfg.UpdateCheckEnabled() {
 		return current, false
 	}
 

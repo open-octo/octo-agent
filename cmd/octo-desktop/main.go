@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/mattn/go-isatty"
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/crashlog"
 	"github.com/open-octo/octo-agent/internal/logfile"
 	"github.com/open-octo/octo-agent/internal/serveenv"
@@ -482,6 +483,8 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 		// exists. It reports upgrade_mode "installer" (Native is set), so the web
 		// UI offers a download link; the desktop shell's own in-place update flow
 		// lives in the tray + update toast (see startUpdateFlow), not the badge.
+		// The user's `update_check` preference gates it per request inside the
+		// server, the same way it gates autoUpdateLoop here.
 		UpdateCheck: true,
 		Native:      bridge,
 		// The desktop server runs in-process — there is no supervisor to
@@ -515,6 +518,10 @@ func checkForUpdates(bridge *nativeBridge) { runUpdateCheck(bridge, true) }
 // a daily cadence. Auto checks are silent unless they turn up a new version, and
 // even then only when it differs from the one already surfaced — the tray item,
 // not a daily toast, is the standing reminder.
+//
+// The loop keeps ticking even when `update_check` is off: the preference is
+// consulted per tick (in runUpdateCheck), so switching it back on in Settings
+// takes effect without restarting the app.
 func autoUpdateLoop(bridge *nativeBridge) {
 	time.Sleep(30 * time.Second)
 	runUpdateCheck(bridge, false)
@@ -538,6 +545,14 @@ func autoUpdateLoop(bridge *nativeBridge) {
 // on a build without the notification service (an unbundled macOS binary) they
 // no-op, matching the version badge's own silence there.
 func runUpdateCheck(bridge *nativeBridge, manual bool) {
+	// `update_check: false` silences the automatic cadence — the whole point
+	// being that an idle install makes no outbound request of its own. A
+	// manual check is the user asking, so it always runs.
+	if !manual {
+		if cfg, err := config.Load(); err == nil && !cfg.UpdateCheckEnabled() {
+			return
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	latest, err := upgrade.Check(ctx)
