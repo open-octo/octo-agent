@@ -142,6 +142,25 @@ child.MaxTurns = childMaxTurns              // child 专属 loop 预算
 | `SessionTokens` 是累计值,多轮 accrue 会双计 | `liveChild.accruedIn/Out` 记上次累计,每轮只把增量 `AccrueChildUsage` 进父 |
 | 续话漏打递归 marker | `runChild` 统一 `WithSubAgentMarker(ctx)` |
 
+### 预算停机的收尾
+
+`max_turns` 和 stuck(重复 tool call)两种停机由 agent loop 的 `budgetStop` 收场,它**用一句合成提示
+替换掉模型文本**——直接透给父 agent 就只剩一个停机原因,子 agent 那一路干的活全丢。`runChild` 因此
+在这两种 stop reason 上回溯 child history,把最后一段有内容的 assistant 文本接在提示前面
+(`carryPartialWork`);child 全程只调工具、没出过文本时保持原样。
+
+`sub_agent` / `sub_agent_send` 再给这份结果加一条 `[INCOMPLETE: …]`(`incompleteNote`),说明它是
+半成品、还能用 `sub_agent_send` 带 id 续,并针对 stuck 明确要求换路子而不是重下同一条指令。
+
+### 状态查询(`ChildInspector`)
+
+同步 spawn 的 child 在 manager 里**不留痕**(`RunSync` 返回即刈掉那条 entry),但它在
+`childRegistry` 里仍然活着可续。`Spawner` 因此实现 `tools.ChildInspector`
+(`InspectChild` / `ListChildren`),把 registry 里的最后一轮状态(stop reason、回复、轮数、空闲时长)
+暴露给 `sub_agent_status`。registry 读取走 `snapshot` 而非 `get`——查询是读,不刷新 LRU 站位;
+last-round 字段另用 `snapMu` 守,不跟着 `liveChild.mu` 一起被整轮占住,否则查状态会阻塞在跑着的
+child 后面。
+
 ## 异步执行与通知(SubAgentManager)
 
 `SubAgentManager` 把执行层包成异步,对外句柄是顺序编号 `agent_1` / `agent_2` / …
@@ -159,12 +178,21 @@ child.MaxTurns = childMaxTurns              // child 专属 loop 预算
 - **`Read(id)` / `ListRunning()`**:供 UI(TUI 面板)、关停查询与 `sub_agent_status` 工具。完成但
   未 kill 的 async 子 agent 仍留在列表里(idle)——它是活的、可被 `sub_agent_send` 续话的句柄。
 
-### `sub_agent_send` 的双 ID 命名空间
+### 双 ID 命名空间
 
 模型实际见到两种句柄:async spawn 返回 manager 侧的 `agent_N`;sync spawn 的回复带 spawner 侧的
-`[agent <id>]` 标签。`sub_agent_send` 先试 `Send(agent_N)`(异步投递,回复走通知);manager 不识别
-的 id 退到 `ContinueSync`(同步续跑,回复随 tool_result 返回)。killed/pending 错误原样返回,不误判
-为路由失败。子 agent 自身不能调用 send/kill(与防递归同级的 `IsSubAgent` 守卫)。
+`[agent <id>]` 标签。两个 followup 工具都要吃下这两种:
+
+- `sub_agent_send` 先试 `Send(agent_N)`(异步投递,回复走通知);manager 不识别的 id 退到
+  `ContinueSync`(同步续跑,回复随 tool_result 返回)。killed/pending 错误原样返回,不误判为路由失败。
+- `sub_agent_status` 先试 `Read(agent_N)`;manager 不识别的 id 退到 `ChildInspector`,查到就报"仍可
+  续",查不到才判未知。模型常把 `[agent dbb7aa4b]` 回抄成 `agent_dbb7aa4b`(两种句柄形似),所以这条
+  回退路径会剥掉 `agent_` 前缀再试一次,并且回话里只给 `sub_agent_send` 真正认的那个裸 id。
+
+不传 id 的 `sub_agent_status` 列表把两边并起来:manager 的 `ListRunning()`,加上 registry 里
+manager 未跟踪的那些(按 `TrackedBackingIDs()` 去重,避免异步 child 在两处各列一遍)。
+
+子 agent 自身不能调用 send/kill(与防递归同级的 `IsSubAgent` 守卫)。
 
 ### 通知投递
 

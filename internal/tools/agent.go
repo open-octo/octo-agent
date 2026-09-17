@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -290,15 +291,38 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 		}, nil
 	}
 	text := withAgentTag(res.AgentID, res.Reply)
-	// Surface a truncated result rather than passing a partial reply off as
-	// complete: a sub-agent that hit its turn limit returns partial work.
-	if res.StopReason == "max_turns" {
-		text += "\n\n[INCOMPLETE: this sub-agent hit its turn limit — the result above is partial. Re-launch with a narrower task, or treat it as unfinished.]"
-	}
+	text += incompleteNote(res.StopReason, res.AgentID)
 	if forcedSync {
 		text += "\n\n[note: ran synchronously and returned its full result here — this transport doesn't support background sub-agents, so run_in_background was ignored.]"
 	}
 	return agent.ToolResult{Text: text, UI: subAgentResultUI(res.AgentID)}, nil
+}
+
+// incompleteNote annotates a sub-agent reply that a loop budget cut short, so
+// the parent doesn't read partial work as a finished answer. It names the
+// resume handle too: the child stays alive in the spawner's registry, and the
+// stop reason alone gives the model no reason to think so.
+//
+// Returns "" for a clean stop — a normal reply needs no annotation.
+func incompleteNote(stopReason, agentID string) string {
+	var what, next string
+	switch stopReason {
+	case agent.StopReasonMaxTurns:
+		what = "hit its turn limit — the result above is partial"
+		next = "pick up where it left off, re-launch with a narrower task, or treat it as unfinished"
+	case agent.StopReasonStuck:
+		what = "was stopped after repeating the same tool calls without progress — the result above is only what it had produced by then"
+		next = "continue it with a DIFFERENT approach rather than the same instruction, or re-launch with a narrower task"
+	default:
+		return ""
+	}
+	// No id means the spawner didn't keep the child; there is nothing to
+	// resume, so don't offer it.
+	if agentID == "" {
+		return "\n\n[INCOMPLETE: this sub-agent " + what + ". Re-launch it with a narrower task, or treat it as unfinished.]"
+	}
+	return "\n\n[INCOMPLETE: this sub-agent " + what +
+		". It is still resumable with sub_agent_send (agent_id " + strconv.Quote(agentID) + ") — " + next + ".]"
 }
 
 // subAgentResultUI is the structured payload on a sub_agent tool result that

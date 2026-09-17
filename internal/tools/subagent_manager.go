@@ -842,6 +842,30 @@ func (m *SubAgentManager) Read(id string) (result, status string, found bool) {
 	return result, status, true
 }
 
+// TrackedBackingIDs returns the spawner-side ids of the agents this manager
+// tracks. A caller listing the spawner's live children uses it to skip the
+// ones it already reports under their agent_N handle — the same child is
+// present in both places for an async spawn.
+func (m *SubAgentManager) TrackedBackingIDs() map[string]bool {
+	m.mu.Lock()
+	agents := make([]*asyncSubAgent, 0, len(m.agents))
+	for _, a := range m.agents {
+		agents = append(agents, a)
+	}
+	m.mu.Unlock()
+
+	out := make(map[string]bool, len(agents))
+	for _, a := range agents {
+		a.mu.Lock()
+		id := a.backingID
+		a.mu.Unlock()
+		if id != "" {
+			out[id] = true
+		}
+	}
+	return out
+}
+
 // Kill terminates the sub-agent for id. Returns false when id is unknown.
 func (m *SubAgentManager) Kill(id string) bool {
 	m.mu.Lock()

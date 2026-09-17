@@ -79,10 +79,7 @@ func (AgentSendTool) Execute(ctx context.Context, _ string, input map[string]any
 		if cerr != nil {
 			return agent.ToolResult{}, fmt.Errorf("sub_agent_send: unknown sub-agent %q (and synchronous continue failed: %v)", id, cerr)
 		}
-		text := withAgentTag(res.AgentID, res.Reply)
-		if res.StopReason == "max_turns" {
-			text += "\n\n[INCOMPLETE: this sub-agent hit its turn limit — the result above is partial.]"
-		}
+		text := withAgentTag(res.AgentID, res.Reply) + incompleteNote(res.StopReason, res.AgentID)
 		return agent.ToolResult{Text: text}, nil
 	default:
 		// Exited / pending-message errors are real answers, not routing misses.
@@ -100,14 +97,14 @@ func (AgentStatusTool) Definition() agent.ToolDefinition {
 			"background sub-agent to finish — wait for the completion notification instead. With agent_id, report " +
 			"that sub-agent's state (working/idle/exited) and its latest result; without agent_id, list all tracked " +
 			"sub-agents (working ones plus idle-but-resumable ones). Use this tool only when you suspect a sub-agent is stuck or when you need to know " +
-			"which agents are still running. Synchronous sub-agents return their result inline at spawn and are not " +
-			"tracked here unless the user promotes them to background while running.",
+			"which agents are still running. A synchronous sub-agent's id (the [agent …] tag on its reply) works here too: it reports " +
+			"that child's last round and whether it can still be resumed with sub_agent_send.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"agent_id": map[string]any{
 					"type":        "string",
-					"description": "Optional async sub-agent id (agent_N). Omit to list everything tracked (working or idle-but-resumable).",
+					"description": "Optional sub-agent id: agent_N for an async sub-agent, or the [agent …] tag id from a synchronous one. Omit to list everything reachable (working, or idle-but-resumable).",
 				},
 			},
 		},
@@ -123,8 +120,16 @@ func (AgentStatusTool) Execute(ctx context.Context, _ string, input map[string]a
 	id := strings.TrimSpace(stringArg(input, "agent_id"))
 	if id == "" {
 		infos := mgr.ListRunning()
-		if len(infos) == 0 {
+		// Synchronous sub-agents never appear in ListRunning — RunSync reaps
+		// the manager entry when the blocking call returns — so ask the
+		// spawner for the children that are still resumable, minus the async
+		// ones already listed above under their agent_N handle.
+		children := resumableChildren(mgr)
+		if len(infos) == 0 && len(children) == 0 {
 			return agent.ToolResult{Text: "No sub-agents are currently tracked."}, nil
+		}
+		if len(infos) == 0 {
+			return agent.ToolResult{Text: renderResumableChildren(children)}, nil
 		}
 		// ListRunning includes COMPLETED agents (idle — retained so
 		// sub_agent_send can still resume them), so don't call the whole list
@@ -146,12 +151,21 @@ func (AgentStatusTool) Execute(ctx context.Context, _ string, input map[string]a
 			fmt.Fprintf(&b, "- %s — %s (%s, started %s ago)\n",
 				in.ID, in.Description, state, time.Since(in.Start).Round(time.Second))
 		}
+		if len(children) > 0 {
+			b.WriteString("\n" + renderResumableChildren(children) + "\n")
+		}
 		return agent.ToolResult{Text: strings.TrimRight(b.String(), "\n")}, nil
 	}
 
 	result, status, found := mgr.Read(id)
 	if !found {
-		return agent.ToolResult{}, fmt.Errorf("sub_agent_status: unknown sub-agent %q (only async sub-agents are tracked)", id)
+		// Not manager-tracked. A synchronous sub-agent never is once its tool
+		// call has returned, yet the child stays resumable in the spawner's
+		// registry — so look there before calling the id unknown.
+		if snap, ok := inspectChild(mgr, id); ok {
+			return agent.ToolResult{Text: renderChildSnapshot(snap)}, nil
+		}
+		return agent.ToolResult{}, fmt.Errorf("sub_agent_status: unknown sub-agent %q — no async sub-agent has that id and no resumable child does either (an idle child is dropped after a while). Launch a fresh sub-agent instead.", id)
 	}
 	text := fmt.Sprintf("Sub-agent %s: %s", id, status)
 	if result != "" {
@@ -160,6 +174,87 @@ func (AgentStatusTool) Execute(ctx context.Context, _ string, input map[string]a
 		text += "\n\n(no result yet)"
 	}
 	return agent.ToolResult{Text: text}, nil
+}
+
+// childReplyCap bounds how much of a resumable child's last reply
+// sub_agent_status echoes back. The full text already reached the parent as
+// that sub_agent call's tool result; this is a reminder, not a re-delivery.
+const childReplyCap = 4000
+
+// inspectChild looks id up in the spawner's live-child registry, tolerating
+// the "agent_" prefix a model tacks on when it reads a synchronous sub-agent's
+// "[agent dbb7aa4b]" tag as the async "agent_N" form. Returns false when the
+// spawner keeps no children or has none under that id.
+func inspectChild(mgr *SubAgentManager, id string) (ChildSnapshot, bool) {
+	insp, ok := mgr.Spawner().(ChildInspector)
+	if !ok {
+		return ChildSnapshot{}, false
+	}
+	if snap, found := insp.InspectChild(id); found {
+		return snap, true
+	}
+	if bare := strings.TrimPrefix(id, "agent_"); bare != id && bare != "" {
+		return insp.InspectChild(bare)
+	}
+	return ChildSnapshot{}, false
+}
+
+// resumableChildren lists the spawner's live children that the manager doesn't
+// already report under an agent_N handle.
+func resumableChildren(mgr *SubAgentManager) []ChildSnapshot {
+	insp, ok := mgr.Spawner().(ChildInspector)
+	if !ok {
+		return nil
+	}
+	tracked := mgr.TrackedBackingIDs()
+	var out []ChildSnapshot
+	for _, snap := range insp.ListChildren() {
+		if !tracked[snap.ID] {
+			out = append(out, snap)
+		}
+	}
+	return out
+}
+
+func renderResumableChildren(children []ChildSnapshot) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d finished sub-agent(s) not tracked as background agents, but still resumable via sub_agent_send:\n", len(children))
+	for _, c := range children {
+		fmt.Fprintf(&b, "- %s — %s, %d turn(s), last active %s ago\n",
+			c.ID, stopReasonLabel(c.StopReason), c.Turns, c.Idle.Round(time.Second))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// renderChildSnapshot reports a child that only the spawner knows about. It
+// leads with the resume instruction because the common case for asking is a
+// sub-agent that stopped short.
+func renderChildSnapshot(s ChildSnapshot) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Sub-agent %s: idle, still resumable — send it a follow-up with sub_agent_send using agent_id %q.",
+		s.ID, s.ID)
+	b.WriteString("\nIt is not tracked as a background agent because it already returned its result inline, but its context is intact for a follow-up.")
+	fmt.Fprintf(&b, "\nLast round: %s, %d turn(s), %s ago.", stopReasonLabel(s.StopReason), s.Turns, s.Idle.Round(time.Second))
+	if s.Reply != "" {
+		b.WriteString("\n\nLatest result:\n" + ClipForEvent(s.Reply, childReplyCap))
+	}
+	return b.String()
+}
+
+// stopReasonLabel renders a child's stop reason for the model, spelling out
+// the two the agent loop synthesises — a bare "stuck" reads like an opinion
+// rather than the loop detector's verdict.
+func stopReasonLabel(reason string) string {
+	switch reason {
+	case "":
+		return "no completed round yet"
+	case agent.StopReasonStuck:
+		return "stopped by the loop detector (repeated the same tool calls without progress)"
+	case agent.StopReasonMaxTurns:
+		return "hit its turn limit (partial work)"
+	default:
+		return "stopped on " + reason
+	}
 }
 
 // AgentKillTool terminates an async sub-agent.
