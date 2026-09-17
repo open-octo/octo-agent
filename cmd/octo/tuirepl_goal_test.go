@@ -262,7 +262,7 @@ func TestGoalEdit_AsyncTurnStartCancelsPendingEdit(t *testing.T) {
 	if g, _ := sess.GoalSnapshot(); g.Objective != "keep me" {
 		t.Errorf("mid-auto-turn submit must not become the objective: %+v", g)
 	}
-	if len(m.pendingSteer) != 1 || m.pendingSteer[0] != "unrelated message" {
+	if len(m.pendingSteer) != 1 || m.pendingSteer[0].text != "unrelated message" {
 		t.Errorf("the text should have routed to the steer path, got %v", m.pendingSteer)
 	}
 }

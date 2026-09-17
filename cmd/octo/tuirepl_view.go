@@ -340,12 +340,14 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Retract the most recent pending steer (typed mid-turn, not yet drained)
 		// back into the empty input box for editing — and drop it from the queue
 		// so it won't also be sent. If it was already drained (Inbox.Remove
-		// fails) it's committed; fall through to ordinary history recall.
+		// fails) it's committed; fall through to ordinary history recall. An
+		// image-only steer has no text to edit and the attachment isn't
+		// recoverable once submitted — skip retraction for those.
 		if strings.TrimSpace(m.ta.Value()) == "" && len(m.pendingSteer) > 0 {
 			last := m.pendingSteer[len(m.pendingSteer)-1]
-			if m.a.Inbox.Remove(last) {
+			if last.text != "" && m.a.Inbox.Remove(last.text) {
 				m.pendingSteer = m.pendingSteer[:len(m.pendingSteer)-1]
-				m.ta.SetValue(last)
+				m.ta.SetValue(last.text)
 				m.ta.CursorEnd()
 				return m, m.updateTextAreaHeight()
 			}
@@ -729,6 +731,19 @@ func (m *tuiModel) attachmentChips() string {
 	return strings.Join(parts, "  ")
 }
 
+// imageBlockChips renders image content blocks the same way attachmentChips
+// renders pending ones, for paths that only have the blocks left — a drained
+// steer's scrollback echo (EventSteerInjected) is the one that matters.
+func imageBlockChips(blocks []agent.ContentBlock) string {
+	var parts []string
+	for _, b := range blocks {
+		if b.Type == "image" && b.Image != nil {
+			parts = append(parts, "📎 "+fmt.Sprintf("image (%s, %s)", shortMIME(b.Image.MIMEType), humanByteSize(len(b.Image.Data))))
+		}
+	}
+	return strings.Join(parts, "  ")
+}
+
 // shortMIME turns "image/png" into "PNG" for the chip.
 func shortMIME(mime string) string {
 	if i := strings.LastIndex(mime, "/"); i >= 0 {
@@ -870,17 +885,22 @@ func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 	}
 
 	// Mid-turn: enqueue the steer text, folding in any pending image
-	// attachments so they ride this message rather than being stranded.
+	// attachments so they ride this message rather than being stranded. The
+	// echo records the chips too — an image-only steer has no text, and
+	// without the chip it would render as an empty "> " line that looks like
+	// a failed send.
 	if text != "" || len(m.pendingAttachments) > 0 {
-		m.pendingSteer = append(m.pendingSteer, text)
 		var blocks []agent.ContentBlock
+		chips := ""
 		if len(m.pendingAttachments) > 0 {
 			blocks = make([]agent.ContentBlock, 0, len(m.pendingAttachments))
 			for _, a := range m.pendingAttachments {
 				blocks = append(blocks, a.block)
 			}
+			chips = m.attachmentChips()
 			m.pendingAttachments = nil
 		}
+		m.pendingSteer = append(m.pendingSteer, steerEcho{text: text, chips: chips})
 		m.a.Inbox.EnqueueWithBlocks(text, blocks)
 	}
 	return m, nil
@@ -1972,7 +1992,7 @@ func (m *tuiModel) View() string {
 	// regular user messages.
 	if len(m.pendingSteer) > 0 {
 		for _, s := range m.pendingSteer {
-			b.WriteString(pendingSteerStyle.Render("  > ") + pendingSteerStyle.Render(s))
+			b.WriteString(pendingSteerStyle.Render("  > ") + pendingSteerStyle.Render(s.line()))
 			b.WriteByte('\n')
 		}
 	}

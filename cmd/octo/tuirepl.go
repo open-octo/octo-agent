@@ -341,6 +341,21 @@ type pendingItem struct {
 	blocks []agent.ContentBlock
 }
 
+// steerEcho is the display record of a mid-turn steer: the typed text (also
+// the inbox retraction key) plus rendered chips for any images riding it, so
+// an image-only steer — no text at all — still leaves a visible echo instead
+// of looking like the send silently failed.
+type steerEcho struct {
+	text  string
+	chips string // e.g. "📎 image (PNG, 84 KB)"; "" for a text-only steer
+}
+
+// line renders the entry for the live pending area and the transcript flush:
+// "> text  📎 image (…)", or just "> 📎 image (…)" for an image-only steer.
+func (s steerEcho) line() string {
+	return strings.TrimSpace(s.text + "  " + s.chips)
+}
+
 // ── model ──
 
 // pendingAttachment is an image captured from the clipboard, waiting to be
@@ -460,7 +475,7 @@ type tuiModel struct {
 	// haven't been drained yet. Shown in the live View area (below the
 	// scrollback) so the user sees immediate feedback without breaking
 	// the chronological message order (Claude Code style).
-	pendingSteer []string
+	pendingSteer []steerEcho
 
 	// pendingAttachments holds images pasted with Ctrl+V, waiting to ride the
 	// next user turn. Shown as chips above the input; cleared on submit (sent)
@@ -1784,12 +1799,17 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 		if s, ok := m.flushTextString(); ok {
 			m.printlnBlock(s)
 		}
-		// Skip injected model-facing spans (<system-reminder>, <goal_context>)
-		// and empty text (an image-only steer carries its payload in blocks,
-		// not Messages).
-		for _, s := range ev.Messages {
-			if visible := strings.TrimSpace(agent.StripSystemReminders(s)); visible != "" {
-				m.printlnBlock(userEchoStyle.Render("> ") + visible)
+		// Skip injected model-facing spans (<system-reminder>, <goal_context>).
+		// An image-only steer has no text — its echo is the attachment chips,
+		// taken from the full items in Steer (Messages holds texts only).
+		for i, s := range ev.Messages {
+			visible := strings.TrimSpace(agent.StripSystemReminders(s))
+			chips := ""
+			if i < len(ev.Steer) {
+				chips = imageBlockChips(ev.Steer[i].Blocks)
+			}
+			if line := strings.TrimSpace(visible + "  " + chips); line != "" {
+				m.printlnBlock(userEchoStyle.Render("> ") + line)
 			}
 		}
 		// pendingSteer is FIFO and mirrors the inbox, so the drained messages
@@ -2248,7 +2268,7 @@ func (m *tuiModel) handleTurnFinished(err error) (tea.Model, tea.Cmd) {
 	// the turn (e.g. typed after the last loop iteration) are printed now so
 	// they don't vanish from the transcript.
 	for _, s := range m.pendingSteer {
-		m.printlnBlock(userEchoStyle.Render("> ") + s)
+		m.printlnBlock(userEchoStyle.Render("> ") + s.line())
 	}
 	m.pendingSteer = nil
 

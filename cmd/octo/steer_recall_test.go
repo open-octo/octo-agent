@@ -28,7 +28,7 @@ func TestSteerRecall_UpRetractsLastPending(t *testing.T) {
 		t.Fatalf("↑ recalled %q, want 'second steer'", m.ta.Value())
 	}
 	// It's removed from the pending display AND the inbox (won't be sent).
-	if len(m.pendingSteer) != 1 || m.pendingSteer[0] != "first steer" {
+	if len(m.pendingSteer) != 1 || m.pendingSteer[0].text != "first steer" {
 		t.Errorf("pendingSteer = %v, want [first steer]", m.pendingSteer)
 	}
 	if drained := m.a.Inbox.Drain(); len(drained) != 1 || drained[0].Text != "first steer" {
@@ -43,7 +43,7 @@ func TestSteerRecall_UpDoesNotRetractWhenInputPresent(t *testing.T) {
 	m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
 	// With text present, ↑ keeps its ordinary history-browse behaviour and must
 	// NOT retract the pending steer — it stays queued (display + inbox).
-	if len(m.pendingSteer) != 1 || m.pendingSteer[0] != "pending one" {
+	if len(m.pendingSteer) != 1 || m.pendingSteer[0].text != "pending one" {
 		t.Errorf("pending steer should stay queued, got %v", m.pendingSteer)
 	}
 	if !m.a.Inbox.HasPending() {
