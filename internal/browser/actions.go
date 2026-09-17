@@ -254,7 +254,7 @@ func (p *Page) resolveAnchoredTarget(ctx context.Context, frame, primary, label 
 	altsJS := "[" + strings.Join(altParts, ",") + "]"
 	collect := fmt.Sprintf(`(()=>{
 	  %s
-	  var d=%s; if(!d) return [];
+	  var d=%s; if(!d) return {rs:'no-document',cands:[]};
 	  var nb=%s, tag=%s, role=%s, label=%s;
 	  function nbHit(el){
 	    if(!nb) return false;
@@ -294,22 +294,43 @@ func (p *Page) resolveAnchoredTarget(ctx context.Context, frame, primary, label 
 	      for(var k2=0;k2<rs.length&&k2<8;k2++){ add(rs[k2],'scan'); }
 	    }catch(_){}
 	  }
-	  return out;
+	  return {rs:(d.readyState||'?'),cands:out};
 	})()`, anchorSelBuilderJS, doc, quote(a.NeighborText), quote(strings.ToLower(a.Tag)), quote(a.Role), quote(strings.TrimSpace(label)), quote(primary), altsJS)
 
+	// Poll diagnostics, surfaced in the timeout error: a flake that never saw a
+	// finished page (cold browser, loaded runner) reads differently from a
+	// genuinely drifted fingerprint, and a swallowed Eval error names itself.
+	var lastReady string
+	var lastCands []anchorCandidate
+	var lastErr error
 	deadline := time.Now().Add(timeout)
 	for {
-		var cands []anchorCandidate
-		if err := p.Eval(ctx, collect, &cands); err == nil {
-			if sel, ok := pickAnchorCandidate(cands, label, a); ok && sel != "" {
+		var res struct {
+			Ready string            `json:"rs"`
+			Cands []anchorCandidate `json:"cands"`
+		}
+		if err := p.Eval(ctx, collect, &res); err == nil {
+			lastErr = nil
+			lastReady = res.Ready
+			lastCands = res.Cands
+			if sel, ok := pickAnchorCandidate(res.Cands, label, a); ok && sel != "" {
 				if frame != "" {
 					return frame + frameDelim + sel, nil
 				}
 				return sel, nil
 			}
+		} else {
+			lastErr = err
 		}
 		if ctx.Err() != nil || !time.Now().Before(deadline) {
-			return "", fmt.Errorf("no element matches the recorded fingerprint (label=%q, role=%q, tag=%q, neighbor=%q) — the page changed or the target is ambiguous", label, a.Role, a.Tag, a.NeighborText)
+			best := 0
+			for _, c := range lastCands {
+				if s := scoreAnchorCandidate(c, label, a); s > best {
+					best = s
+				}
+			}
+			return "", fmt.Errorf("no element matches the recorded fingerprint (label=%q, role=%q, tag=%q, neighbor=%q; readyState=%q, candidates=%d, bestScore=%d/%d, lastEvalErr=%v) — the page changed or the target is ambiguous",
+				label, a.Role, a.Tag, a.NeighborText, lastReady, len(lastCands), best, anchorMaxScore(label, a), lastErr)
 		}
 		select {
 		case <-ctx.Done():
@@ -491,8 +512,16 @@ var clickStabilizeTimeout = 1500 * time.Millisecond
 
 // clickMoveSettle is the pause between moving the pointer onto a target and
 // pressing, so pointer-entry handlers (often rAF/layout-gated) can arm the
-// control first. A var so tests can zero it.
+// control first. It runs AFTER the frame-synced wait (settlePointerFrames)
+// and also serves as the whole settle when that wait can't run (rAF starved
+// on an occluded page, or Eval failed). A var so tests can tighten it.
 var clickMoveSettle = 60 * time.Millisecond
+
+// pointerFrameCap bounds the frame-synced settle (settlePointerFrames). rAF
+// never fires on an occluded/background page, so the wait must give up and
+// fall back to the fixed pause rather than stall the click. Generous enough
+// that a loaded machine producing frames slowly still gets its two frames.
+var pointerFrameCap = 250 * time.Millisecond
 
 // clickReadyTimeout bounds the pre-click readiness wait (page loaded, custom
 // element upgraded, not disabled). A var so tests can tighten it.
@@ -647,9 +676,15 @@ func (p *Page) ClickAt(ctx context.Context, selector string, fx, fy float64) err
 	// that arms on pointer entry often does so behind a requestAnimationFrame /
 	// layout tick (closed shadow-DOM web components are the common case), so a
 	// press fired in the same breath as the move — even across CDP round-trips,
-	// a few ms — still beats the arming and is swallowed. One frame-plus of gap
-	// is what separated a working move-first click from a dead one at identical
-	// coordinates. A var so tests can zero it.
+	// a few ms — still beats the arming and is swallowed. Wait frame-synced
+	// first: a fixed wall-clock pause loses the race on a loaded machine whose
+	// frame pipeline stalls past the pause (CI flake: press landed before the
+	// second rAF armed the control). The fixed pause still runs afterwards to
+	// cover macrotask-armed handlers (setTimeout-style).
+	p.settlePointerFrames(ctx)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -665,6 +700,24 @@ func (p *Page) ClickAt(ctx context.Context, selector string, fx, fy float64) err
 		}
 	}
 	return nil
+}
+
+// settlePointerFrames waits until the page has actually produced two
+// animation frames since the pointer move, so a pointer-entry handler that
+// arms its control behind a requestAnimationFrame tick has run before the
+// press. Frame-synced rather than wall-clock: under CPU contention a fixed
+// pause expires before the stalled frame pipeline delivers the arming frame,
+// which is exactly when the race bites. Chrome processes pending input before
+// a frame's rAF callbacks, so two frames after the dispatch provably bracket
+// "move handler ran" + "the rAF callback it scheduled ran".
+//
+// rAF never fires on an occluded/background page, so the wait is capped by
+// pointerFrameCap; on cap or eval failure the caller's fixed clickMoveSettle
+// pause is the settle of last resort.
+func (p *Page) settlePointerFrames(ctx context.Context) {
+	fctx, cancel := context.WithTimeout(ctx, pointerFrameCap)
+	defer cancel()
+	_ = p.Eval(fctx, `new Promise(r=>requestAnimationFrame(function(){requestAnimationFrame(function(){r(1)})}))`, nil)
 }
 
 // Hover moves the pointer over an element with a real (trusted) mouse move.
