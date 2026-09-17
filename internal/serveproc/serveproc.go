@@ -9,7 +9,6 @@ package serveproc
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,47 +148,4 @@ func Stop() (int, error) {
 	}
 	_ = os.Remove(path)
 	return pid, nil
-}
-
-// AddrPath returns the path of the pinned bind address (~/.octo/serve.addr),
-// creating ~/.octo if needed. Only named profiles use it: the default profile
-// keeps the fixed 127.0.0.1:8088 that every client already knows.
-func AddrPath() (string, error) {
-	dir, err := octoDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "serve.addr"), nil
-}
-
-// ReadAddr returns the bind address this profile is pinned to. A missing,
-// unreadable, or malformed file reports no pin rather than an error: the file
-// is a remembered choice, not state the backend depends on, so the caller is
-// free to pick again.
-func ReadAddr() (string, bool) {
-	path, err := AddrPath()
-	if err != nil {
-		return "", false
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", false
-	}
-	addr := strings.TrimSpace(string(data))
-	if addr == "" {
-		return "", false
-	}
-	if _, _, err := net.SplitHostPort(addr); err != nil {
-		return "", false
-	}
-	return addr, true
-}
-
-// WriteAddr pins this profile to addr so later starts reuse it.
-func WriteAddr(addr string) error {
-	path, err := AddrPath()
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, []byte(addr+"\n"), 0o644)
 }

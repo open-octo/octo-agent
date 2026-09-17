@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/open-octo/octo-agent/internal/datahome"
+	"github.com/open-octo/octo-agent/internal/serveproc"
 	"github.com/open-octo/octo-agent/internal/server"
 )
 
@@ -97,7 +98,7 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// what this process announced, not repeat the search and land elsewhere.
 	profile := strings.TrimSpace(os.Getenv(datahome.ProfileEnv))
 	if os.Getenv(serveWorkerEnv) != "1" {
-		resolved, err := resolveServeAddr(profile, flagWasSet(fs, "addr"), *addr)
+		resolved, err := serveproc.ResolveAddr(profile, flagWasSet(fs, "addr"), *addr)
 		if err != nil {
 			fmt.Fprintf(stderr, "octo serve: %v\n", err)
 			return 1

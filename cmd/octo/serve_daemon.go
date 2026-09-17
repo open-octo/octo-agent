@@ -231,7 +231,7 @@ func statusDaemon(stdout, _ io.Writer) int {
 	if isProcessAlive(pid) {
 		// Report where, not just whether. A named profile's port is chosen for
 		// the user, so this is the only place they can look it up.
-		if addr, ok := readPinnedAddr(); ok {
+		if addr, ok := serveproc.ReadAddr(); ok {
 			fmt.Fprintf(stdout, "octo serve daemon: running (pid %d) at http://%s\n", pid, addr)
 		} else {
 			fmt.Fprintf(stdout, "octo serve daemon: running (pid %d)\n", pid)
