@@ -169,7 +169,7 @@ child 后面。
 - **`Send(agentID, msg)`**:起 goroutine 跑 `Continue`,立即返回。
 - **busy / pending 队列**:一个子 agent 同时只处理一个请求。`Send` 时它 busy 则存进 `pending`(深度
   1);已有 pending 则报 `already has a pending message`;当前请求结束后自动发 pending。
-- **并发上限**:`maxConcurrentSubAgents`(8)限制同时在跑的 async spawn——模型一次发一大批
+- **并发上限**:`maxConcurrentSubAgents`(16)限制同时在跑的 async spawn——模型一次发一大批
   `run_in_background:true` 也不会起无界个并发 agent loop。超限的新 spawn 被明确拒绝(让模型等),
   续话(`Send`/`Continue`)轮不计入此上限(受 live-child 上限约束)。`activeAsync` 在 manager 锁下
   计数,每个 spawn goroutine 结束时递减。
