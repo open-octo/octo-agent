@@ -229,7 +229,13 @@ func statusDaemon(stdout, _ io.Writer) int {
 		return 0
 	}
 	if isProcessAlive(pid) {
-		fmt.Fprintf(stdout, "octo serve daemon: running (pid %d)\n", pid)
+		// Report where, not just whether. A named profile's port is chosen for
+		// the user, so this is the only place they can look it up.
+		if addr, ok := readPinnedAddr(); ok {
+			fmt.Fprintf(stdout, "octo serve daemon: running (pid %d) at http://%s\n", pid, addr)
+		} else {
+			fmt.Fprintf(stdout, "octo serve daemon: running (pid %d)\n", pid)
+		}
 	} else {
 		fmt.Fprintf(stdout, "octo serve daemon: dead (stale pid %d)\n", pid)
 		_ = os.Remove(pidFile)

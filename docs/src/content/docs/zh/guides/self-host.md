@@ -14,6 +14,22 @@ octo serve -addr :8088          # 暴露到局域网
 
 下文路径均以默认 profile 为例，其服务数据存放在 `~/.octo`。使用 `octo serve --profile work` 启动时，隔离的 `work` profile 数据根目录为 `~/.octo-work`；机器管理的辅助工具始终共享在 `~/.octo/bin`，不随 profile 隔离。
 
+默认 profile 固定绑 `127.0.0.1:8088`，这是所有客户端内置的端口。命名 profile 不能跟它抢，所以第一次 `octo serve --profile work` 会从 8089 往上取第一个空闲端口，并记到 `~/.octo-work/serve.addr`。之后每次启动都复用同一个地址，手机、Obsidian 插件、VS Code 只需要配一次：
+
+```bash
+octo serve --profile work -d
+# octo serve daemon started (pid 41288), ready at http://127.0.0.1:8089
+
+octo serve --profile work status
+# octo serve daemon: running (pid 41288) at http://127.0.0.1:8089
+```
+
+如果记下的端口被别的东西占了，`octo serve` 会直接报错停下，而不是换一个——后端悄悄换地方，等于所有客户端都找不到它。要么把端口腾出来，要么用 `--addr` 主动搬家，搬完会记下新地址：
+
+```bash
+octo serve --profile work --addr 127.0.0.1:9100
+```
+
 ## 环境变量
 
 完全用环境变量配置 octo（`config.yml` 里什么都不写）需要**两个**变量，不是一个：`OCTO_PROVIDER` 指定用哪家，那家的 key 负责鉴权。光有 key 只说明你**能**连到哪些家，不代表你想用哪家，所以 octo 不替你猜——没有 `OCTO_PROVIDER` 就当作没配置，照常要求你走配置流程。
