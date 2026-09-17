@@ -1795,3 +1795,41 @@ func TestEffectiveFallbackContextWindow(t *testing.T) {
 		t.Errorf("complaint %v does not name the config field", probs)
 	}
 }
+
+// TestUpdateCheckEnabled_DefaultsOn: an install that never touched the key
+// keeps checking for updates — the toggle is opt-out, not opt-in.
+func TestUpdateCheckEnabled_DefaultsOn(t *testing.T) {
+	setHome(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.UpdateCheckEnabled() {
+		t.Error("UpdateCheckEnabled with no config = false, want true")
+	}
+}
+
+// TestUpdateCheckEnabled_RoundTrip: update_check survives Save/Load in both
+// positions. False is the load-bearing one — yaml's omitempty drops a false
+// bool, so the field must stay a *bool or "off" silently reverts to "on".
+func TestUpdateCheckEnabled_RoundTrip(t *testing.T) {
+	for _, want := range []bool{false, true} {
+		t.Run(fmt.Sprintf("%v", want), func(t *testing.T) {
+			setHome(t)
+			cfg := Config{UpdateCheck: &want}
+			if err := cfg.Save(); err != nil {
+				t.Fatalf("Save: %v", err)
+			}
+			got, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got.UpdateCheck == nil {
+				t.Fatalf("update_check missing after round-trip, want %v", want)
+			}
+			if got.UpdateCheckEnabled() != want {
+				t.Errorf("UpdateCheckEnabled = %v, want %v", got.UpdateCheckEnabled(), want)
+			}
+		})
+	}
+}

@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/upgrade"
 	"github.com/open-octo/octo-agent/internal/version"
 )
@@ -386,5 +388,204 @@ func TestLatestVersion_ExportedMatchesBadge(t *testing.T) {
 	}
 	if badge.Latest != "9.9.9" || !badge.NeedsUpdate {
 		t.Errorf("both surfaces = (%q, %v), want the looked-up (9.9.9, true)", badge.Latest, badge.NeedsUpdate)
+	}
+}
+
+// TestLatestVersion_ConfigOptOut: with `update_check: false` in config, the
+// server starts no lookup at all and reports current-is-latest — this is the
+// switch that makes the "no traffic but your model calls" claim literally
+// true. Reading the cache is still allowed; it costs nothing.
+func TestLatestVersion_ConfigOptOut(t *testing.T) {
+	var hits int32
+	mux := http.NewServeMux()
+	var fake *httptest.Server
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		http.Redirect(w, r, fake.URL+"/releases/tag/v9.9.9", http.StatusFound)
+	})
+	fake = httptest.NewServer(mux)
+	t.Cleanup(fake.Close)
+
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
+
+	origV, origC := version.Version, version.Commit
+	version.Version, version.Commit = "0.18.0", "abc1234"
+	t.Cleanup(func() { version.Version, version.Commit = origV, origC })
+
+	// Own HOME so the saved preference can't leak into the package's other
+	// tests, which share the one TestMain pins.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	off := false
+	if err := (config.Config{UpdateCheck: &off}).Save(); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
+	latest, needs := srv.LatestVersion()
+	if latest != "0.18.0" || needs {
+		t.Errorf("LatestVersion with update_check off = (%q, %v), want (0.18.0, false)", latest, needs)
+	}
+	settleVersionRefresh(t, srv)
+	if got := atomic.LoadInt32(&hits); got != 0 {
+		t.Errorf("upstream hits = %d, want 0 — the whole point is that nothing is sent", got)
+	}
+}
+
+// TestLatestVersion_BrokenConfigKeepsOptOut: a hand-edit that leaves
+// config.yml unparseable must not silently re-enable the check. Reading
+// through config.LoadCached keeps the last config that parsed, so the switch
+// survives a typo instead of failing open.
+func TestLatestVersion_BrokenConfigKeepsOptOut(t *testing.T) {
+	var hits int32
+	mux := http.NewServeMux()
+	var fake *httptest.Server
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		http.Redirect(w, r, fake.URL+"/releases/tag/v9.9.9", http.StatusFound)
+	})
+	fake = httptest.NewServer(mux)
+	t.Cleanup(fake.Close)
+
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
+
+	origV, origC := version.Version, version.Commit
+	version.Version, version.Commit = "0.18.0", "abc1234"
+	t.Cleanup(func() { version.Version, version.Commit = origV, origC })
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	off := false
+	if err := (config.Config{UpdateCheck: &off}).Save(); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
+	// One good read seeds LoadCached's last-known-good.
+	if _, needs := srv.LatestVersion(); needs {
+		t.Fatal("needs_update with update_check off")
+	}
+
+	path, err := config.Path()
+	if err != nil {
+		t.Fatalf("config.Path: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("update_check: false\n  bogus indent: [\n"), 0o600); err != nil {
+		t.Fatalf("corrupt config: %v", err)
+	}
+
+	if _, needs := srv.LatestVersion(); needs {
+		t.Error("needs_update after breaking config.yml — the switch failed open")
+	}
+	settleVersionRefresh(t, srv)
+	if got := atomic.LoadInt32(&hits); got != 0 {
+		t.Errorf("upstream hits = %d, want 0 — a broken config must not re-enable the check", got)
+	}
+}
+
+// TestRefreshLatestVersion_IgnoresConfigOptOut: the switch silences the
+// automatic cadence, never an explicit request. The tray's "Check for
+// updates…" routes here, and the user clicking it is the consent — same
+// contract `octo upgrade --check` holds on the CLI side.
+func TestRefreshLatestVersion_IgnoresConfigOptOut(t *testing.T) {
+	var hits int32
+	mux := http.NewServeMux()
+	var fake *httptest.Server
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		http.Redirect(w, r, fake.URL+"/releases/tag/v9.9.9", http.StatusFound)
+	})
+	fake = httptest.NewServer(mux)
+	t.Cleanup(fake.Close)
+
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
+
+	origV, origC := version.Version, version.Commit
+	version.Version, version.Commit = "0.18.0", "abc1234"
+	t.Cleanup(func() { version.Version, version.Commit = origV, origC })
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	off := false
+	if err := (config.Config{UpdateCheck: &off}).Save(); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
+	latest, needs, err := srv.RefreshLatestVersion(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshLatestVersion: %v", err)
+	}
+	if latest != "9.9.9" || !needs {
+		t.Errorf("explicit refresh = (%q, %v), want (9.9.9, true) — the switch must not gag it", latest, needs)
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Errorf("upstream hits = %d, want 1", got)
+	}
+}
+
+// TestPutUpdateCheck_PersistsAndSilences: the Settings toggle writes the
+// preference, GET /api/config reports it back, and the very next
+// /api/version honours it without a restart.
+func TestPutUpdateCheck_PersistsAndSilences(t *testing.T) {
+	var hits int32
+	mux := http.NewServeMux()
+	var fake *httptest.Server
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		http.Redirect(w, r, fake.URL+"/releases/tag/v9.9.9", http.StatusFound)
+	})
+	fake = httptest.NewServer(mux)
+	t.Cleanup(fake.Close)
+
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
+
+	// Default on: the config endpoint says so before anything is written.
+	var cfgResp struct {
+		UpdateCheck *bool `json:"update_check"`
+	}
+	w := doJSON(t, srv, http.MethodGet, "/api/config", "")
+	if err := json.Unmarshal(w.Body.Bytes(), &cfgResp); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfgResp.UpdateCheck == nil || !*cfgResp.UpdateCheck {
+		t.Fatalf("initial update_check = %v, want true", cfgResp.UpdateCheck)
+	}
+
+	if w := doJSON(t, srv, http.MethodPut, "/api/config/update_check", `{"update_check":false}`); w.Code != http.StatusOK {
+		t.Fatalf("PUT update_check = %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+
+	w = doJSON(t, srv, http.MethodGet, "/api/config", "")
+	if err := json.Unmarshal(w.Body.Bytes(), &cfgResp); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfgResp.UpdateCheck == nil || *cfgResp.UpdateCheck {
+		t.Fatalf("update_check after PUT = %v, want false", cfgResp.UpdateCheck)
+	}
+
+	if w := doJSON(t, srv, http.MethodGet, "/api/version", ""); w.Code != http.StatusOK {
+		t.Fatalf("GET /api/version = %d", w.Code)
+	}
+	settleVersionRefresh(t, srv)
+	if got := atomic.LoadInt32(&hits); got != 0 {
+		t.Errorf("upstream hits after opting out = %d, want 0", got)
 	}
 }

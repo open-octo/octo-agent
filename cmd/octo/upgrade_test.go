@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/upgrade"
 	"github.com/open-octo/octo-agent/internal/version"
 )
@@ -144,5 +145,34 @@ func TestRunUpgrade_FailureHintsRunningServeDaemon(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "`octo serve stop`") {
 		t.Errorf("hint should mention `octo serve stop`, got:\n%s", stderr.String())
+	}
+}
+
+// TestRunUpgrade_CheckIgnoresUpdateCheckPreference pins the other half of the
+// `update_check` contract: the switch silences the AUTOMATIC checks (the web
+// badge, the desktop tray's cadence), never an explicitly typed command.
+// Running `octo upgrade --check` is the consent, so it must still reach the
+// network with the preference off — otherwise an air-gapped user who switched
+// it off would also lose the only way to find out a release exists.
+func TestRunUpgrade_CheckIgnoresUpdateCheckPreference(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows
+	off := false
+	if err := (config.Config{UpdateCheck: &off}).Save(); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	fakeLatest(t, "9.9.9")
+	origV := version.Version
+	version.Version = "0.18.0"
+	t.Cleanup(func() { version.Version = origV })
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpgrade([]string{"--check"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "latest:  9.9.9") {
+		t.Errorf("explicit --check was silenced by update_check: false:\n%s", stdout.String())
 	}
 }

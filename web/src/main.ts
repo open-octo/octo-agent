@@ -1,10 +1,16 @@
 import './app.css'
 import App from './App.svelte'
 import { mount } from 'svelte'
+import { initIcons } from './lib/icons'
 import { initTheme } from './lib/theme'
 import { initFramelessDrag } from './lib/framelessDrag'
 import { installArtifactThemeRefresh } from './lib/artifacts'
 import { applyTitlebarLift } from './lib/nativeWindow'
+
+// Register the <iconify-icon> element and its bundled icon data before first
+// paint — and shut the door on Iconify's API, which the CDN build used to call
+// per icon. Nothing about the UI reaches a third party any more.
+initIcons()
 
 // Apply the persisted theme before first paint so there's no light-mode flash.
 initTheme()

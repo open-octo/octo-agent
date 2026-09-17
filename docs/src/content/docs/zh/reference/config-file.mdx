@@ -41,6 +41,7 @@ flag。所有字段都是可选的——文件不存在，或者字段缺失，�
 | `language` | string | UI 语言偏好（`en` \| `zh`）；留空为英文 |
 | `notify` | bool | 仅 TUI：turn 完成等待输入时发送桌面通知。Ghostty / iTerm2 / Kitty 会转发到操作系统；其他终端回退到终端响铃（默认 `true`） |
 | `terminal_title` | bool | 仅 TUI：启动时将终端标签/窗口标题设为会话名（OSC 2，Ghostty、iTerm2、Kitty 及大多数现代终端支持；默认 `true`） |
+| `update_check` | bool | 是否允许自动向 GitHub 查询最新版本——版本徽标和桌面端托盘的每日轮询都走它。这是 octo 除模型调用之外唯一的外发请求，设为 `false` 后一个都不会发（默认 `true`）。你主动执行 `octo upgrade` 仍然联网 |
 
 当 agent 编辑这个文件时,octo 会在写入后立刻校验:如果不再能解析、或有语义问题(`default` 指向不存在的端点、id 重复或字段不全),会在当前这一轮里给出警告——否则坏改动会静默降级,因为 octo 会继续用最后一份能正常解析的配置。
 

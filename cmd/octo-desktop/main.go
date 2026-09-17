@@ -483,6 +483,8 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 		// exists. It reports upgrade_mode "installer" (Native is set), so the web
 		// UI offers a download link; the desktop shell's own in-place update flow
 		// lives in the tray + update toast (see startUpdateFlow), not the badge.
+		// The user's `update_check` preference gates it per request inside the
+		// server, the same way it gates autoUpdateLoop here.
 		UpdateCheck: true,
 		Native:      bridge,
 		// The desktop server runs in-process — there is no supervisor to

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/upgrade"
 	"github.com/open-octo/octo-agent/internal/version"
 )
@@ -119,10 +120,29 @@ func (s *Server) LatestVersion() (string, bool) {
 		return current, false
 	}
 	latest, needs, stale := s.versionSnapshot(current)
-	if stale {
+	if stale && s.updateCheckAllowed() {
 		s.startVersionRefresh()
 	}
 	return latest, needs
+}
+
+// updateCheckAllowed reports the user's `update_check` preference — the switch
+// that stops octo making the one request it makes without being asked.
+//
+// It is consulted only where a lookup would actually be started, never on the
+// way to a cached answer: both the badge and the tray now read every minute,
+// and a config.Load() on that path would be a disk read and a YAML parse per
+// read (on an unauthenticated endpoint, at that). The switch promises that no
+// request is sent, which this placement keeps exactly; the cost is that a
+// cached `latest` can linger up to one refresh interval after it is flipped.
+//
+// LoadCached, not Load: a hand-edit that leaves config.yml unparseable must
+// not silently re-enable the check. LoadCached keeps serving the last config
+// that parsed, so `update_check: false` survives a broken edit — only a config
+// that has never once loaded falls back to the built-in default (enabled).
+func (s *Server) updateCheckAllowed() bool {
+	cfg, err := config.LoadCached()
+	return err != nil || cfg.UpdateCheckEnabled()
 }
 
 // RefreshLatestVersion performs the lookup on THIS goroutine, ignoring the

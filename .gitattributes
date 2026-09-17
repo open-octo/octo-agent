@@ -1,0 +1,4 @@
+# Generated icon data: one long JSON line, produced by web/scripts/gen-icons.mjs.
+# Collapse it in diffs and keep it out of language stats — reviewing it by eye
+# is neither possible nor useful; icons.generated.test.ts is what checks it.
+web/src/lib/icons.generated.ts linguist-generated=true
