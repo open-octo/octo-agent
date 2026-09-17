@@ -342,7 +342,9 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// so it won't also be sent. If it was already drained (Inbox.Remove
 		// fails) it's committed; fall through to ordinary history recall. An
 		// image-only steer has no text to edit and the attachment isn't
-		// recoverable once submitted — skip retraction for those.
+		// recoverable once submitted — skip retraction for those. Retracting a
+		// text+image steer restores the text but silently drops the image (the
+		// whole inbox item goes); that's the same unrecoverable-attachment rule.
 		if strings.TrimSpace(m.ta.Value()) == "" && len(m.pendingSteer) > 0 {
 			last := m.pendingSteer[len(m.pendingSteer)-1]
 			if last.text != "" && m.a.Inbox.Remove(last.text) {

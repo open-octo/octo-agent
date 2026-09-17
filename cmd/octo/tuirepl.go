@@ -1808,7 +1808,7 @@ func (m *tuiModel) handleEvent(ev agent.AgentEvent) {
 			if i < len(ev.Steer) {
 				chips = imageBlockChips(ev.Steer[i].Blocks)
 			}
-			if line := strings.TrimSpace(visible + "  " + chips); line != "" {
+			if line := (steerEcho{text: visible, chips: chips}).line(); line != "" {
 				m.printlnBlock(userEchoStyle.Render("> ") + line)
 			}
 		}
