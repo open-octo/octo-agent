@@ -10,8 +10,8 @@ import (
 )
 
 // stubPins redirects the pin file and the port probe at in-memory fakes, so the
-// tests below never touch a real ~/.octo or a real socket. It returns a pointer
-// a reader for whatever the code under test pinned.
+// tests below never touch a real ~/.octo or a real socket. It returns a reader
+// for whatever the code under test pinned.
 func stubPins(t *testing.T, start string, busy ...string) func() string {
 	t.Helper()
 	pinned := start
@@ -139,4 +139,44 @@ func TestResolveServeAddr_ExhaustedRangeExplainsItself(t *testing.T) {
 	if !strings.Contains(err.Error(), "--addr") {
 		t.Errorf("error should point at --addr; got %v", err)
 	}
+}
+
+// A pin file that exists but doesn't parse must not silently become "no pin" —
+// picking a fresh port would overwrite someone's edit without a word, the same
+// silent relocation a busy pin is an error to avoid.
+func TestResolveServeAddr_MalformedPinIsAnError(t *testing.T) {
+	stubPins(t, "not-an-address")
+	_, err := ResolveAddr("work", false, "127.0.0.1:8088")
+	if err == nil {
+		t.Fatal("a malformed pin should fail rather than be discarded")
+	}
+	for _, want := range []string{"work", "not-an-address", "serve.addr", "delete"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q; got:\n%s", want, err)
+		}
+	}
+}
+
+// ReadAddr itself stays forgiving — it serves status displays too, where a
+// missing or malformed pin just means "nothing to report". The strictness
+// lives in ResolveAddr, which is about to act on the answer.
+func TestReadAddr(t *testing.T) {
+	t.Run("missing file", func(t *testing.T) {
+		stubPins(t, "")
+		if addr, ok := ReadAddr(); ok || addr != "" {
+			t.Errorf("ReadAddr = %q, %v, want no pin", addr, ok)
+		}
+	})
+	t.Run("malformed content", func(t *testing.T) {
+		stubPins(t, "not-an-address")
+		if addr, ok := ReadAddr(); ok || addr != "" {
+			t.Errorf("ReadAddr = %q, %v, want no pin", addr, ok)
+		}
+	})
+	t.Run("valid pin", func(t *testing.T) {
+		stubPins(t, "127.0.0.1:8093")
+		if addr, ok := ReadAddr(); !ok || addr != "127.0.0.1:8093" {
+			t.Errorf("ReadAddr = %q, %v, want the pin", addr, ok)
+		}
+	})
 }

@@ -146,6 +146,10 @@ WantedBy=default.target
 `--no-supervisor` lets your init system own restarts instead of octo's own self-restart supervisor
 duplicating that job. The unit above is for the default profile; for `work`, set
 `EnvironmentFile=%h/.octo-work/serve.env` and use `ExecStart=/usr/local/bin/octo serve --profile work --no-supervisor`.
+Port selection happens in that same top-level process, so a named-profile unit binds the port
+recorded in `~/.octo-work/serve.addr` with no extra flags — add `--addr` only to choose it yourself.
+(`OCTO_SERVE_WORKER` is internal to octo's own supervisor; setting it in a unit skips port
+resolution entirely and the profile would collide with the default on 8088.)
 On macOS, a `launchd` plist with the equivalent `ProgramArguments` and `KeepAlive` works the same
 way — and is exactly what the `.pkg` installer registers automatically.
 

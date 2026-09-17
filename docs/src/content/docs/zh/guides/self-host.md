@@ -121,6 +121,8 @@ WantedBy=default.target
 ```
 
 `--no-supervisor` 让你的 init 系统自己管重启，不再让 octo 自带的自重启 supervisor 重复干这件事。上面的 unit 对应默认 profile；如需 `work`，设为 `EnvironmentFile=%h/.octo-work/serve.env`，并使用 `ExecStart=/usr/local/bin/octo serve --profile work --no-supervisor`。
+端口选择同样发生在这个顶层进程里，所以具名 profile 的 unit 不需要额外参数就会绑定 `~/.octo-work/serve.addr` 里记下的端口——想自己选端口才加 `--addr`。
+（`OCTO_SERVE_WORKER` 是 octo 自带 supervisor 的内部变量；在 unit 里设置它会完全跳过端口解析，profile 会跟默认 profile 在 8088 上冲突。）
 在 macOS 上，一份带等价 `ProgramArguments` 和 `KeepAlive` 的 `launchd` plist 效果一样——
 这正是 `.pkg` 安装器自动注册的东西。
 

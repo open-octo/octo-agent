@@ -97,6 +97,16 @@ func runServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// --addr. The daemon child and the supervisor's worker must bind exactly
 	// what this process announced, not repeat the search and land elsewhere.
 	profile := strings.TrimSpace(os.Getenv(datahome.ProfileEnv))
+	if *daemon {
+		// Refuse a second daemon before resolving: an explicit --addr re-pins
+		// the profile, and a refusal after that would leave the pin pointing
+		// at an address nothing is listening on. startDaemon checks again as
+		// the authoritative gate; this one just keeps the pin truthful.
+		if pid, ok := serveproc.Running(); ok {
+			fmt.Fprintf(stderr, "octo serve: daemon already running (pid %d)\n", pid)
+			return 1
+		}
+	}
 	if os.Getenv(serveWorkerEnv) != "1" {
 		resolved, err := serveproc.ResolveAddr(profile, flagWasSet(fs, "addr"), *addr)
 		if err != nil {

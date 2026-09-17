@@ -1192,9 +1192,10 @@ b.addEventListener('click',function(){ if(window.armed) window.fired++; });
 
 // TestClickArmsRAFGatedControl: a control that arms itself one animation frame
 // AFTER pointer entry (the closed shadow-DOM web-component pattern) accepts a
-// click only if the press comes a frame after the move. The default settle
-// delay must bridge that; zeroing it must miss — proving the delay is
-// load-bearing, not decorative.
+// click only if the press comes a frame after the move. The frame-synced
+// settle (settlePointerFrames) must bridge that — on a loaded CI runner a
+// fixed wall-clock pause expires before the stalled frame pipeline delivers
+// the arming frame, which is how this test flaked (fired=0).
 func TestClickArmsRAFGatedControl(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
@@ -1228,6 +1229,62 @@ b.addEventListener('click',function(){ if(window.armed) window.fired++; });
 	}
 	if fired != 1 {
 		t.Fatalf("default settle delay must bridge the rAF-gated arm (fired=%d)", fired)
+	}
+}
+
+// TestClickSettleFallsBackWhenRAFStarved: rAF never fires on an occluded or
+// background page, so the frame-synced settle must give up within
+// pointerFrameCap instead of stalling the click, and the fixed clickMoveSettle
+// pause afterwards must still bridge a directly-armed (no rAF) control — the
+// pre-frame-sync behavior preserved as the fallback.
+func TestClickSettleFallsBackWhenRAFStarved(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<!doctype html><title>starved</title>
+<button id="b" style="width:120px;height:40px">Go</button>
+<script>
+window.fired=0; window.armed=false;
+var b=document.getElementById('b');
+// Arms directly on pointer entry — no rAF gate.
+b.addEventListener('mousemove',function(){window.armed=true;});
+b.addEventListener('click',function(){ if(window.armed) window.fired++; });
+// Simulate the occluded page: rAF callbacks never run.
+window.requestAnimationFrame=function(){return 0;};
+</script>`))
+	}))
+	defer srv.Close()
+
+	// Tighten the caps so the starved-rAF wait doesn't dominate the test's
+	// runtime; the fallback path is what matters, not the exact timings.
+	restoreCap, restoreSettle := pointerFrameCap, clickMoveSettle
+	pointerFrameCap, clickMoveSettle = 100*time.Millisecond, 20*time.Millisecond
+	defer func() { pointerFrameCap, clickMoveSettle = restoreCap, restoreSettle }()
+
+	b := newBrowser(t, ctx)
+	defer b.Close()
+	page, err := b.NewPage(ctx, srv.URL)
+	if err != nil {
+		t.Fatalf("new page: %v", err)
+	}
+	if err := page.WaitFor(ctx, "#b", testWaitTimeout); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	start := time.Now()
+	if err := page.Click(ctx, "#b"); err != nil {
+		t.Fatalf("click: %v", err)
+	}
+	var fired int
+	if err := page.Eval(ctx, "window.fired", &fired); err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if fired != 1 {
+		t.Fatalf("click must fall back to the fixed settle when rAF is starved (fired=%d)", fired)
+	}
+	// The frame-synced wait must be bounded: with the tightened cap, the whole
+	// settle is ~pointerFrameCap+clickMoveSettle, nowhere near a stall.
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("starved-rAF settle took %v — the cap is not bounding the wait", d)
 	}
 }
 

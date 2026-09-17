@@ -2278,6 +2278,12 @@ func TestReplayAnchorsRefuseWrongElement(t *testing.T) {
 	if !strings.Contains(err.Error(), "fingerprint") {
 		t.Fatalf("error should describe the fingerprint mismatch, got: %v", err)
 	}
+	// The timeout error must carry the poll diagnostics (page state, candidate
+	// count, best score) so a flake report distinguishes "page never loaded"
+	// from "loaded but genuinely drifted".
+	if !strings.Contains(err.Error(), "readyState=") || !strings.Contains(err.Error(), "candidates=") {
+		t.Fatalf("error should carry resolver diagnostics, got: %v", err)
+	}
 	var hit string
 	if err := page.Eval(ctx, "window.__hit||''", &hit); err != nil {
 		t.Fatalf("eval: %v", err)
