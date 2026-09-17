@@ -1,6 +1,7 @@
 package server
 
 import (
+	"os"
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/tools"
@@ -108,5 +109,30 @@ func TestAgentRunsRoundTrip(t *testing.T) {
 	}
 	if len(empty.SubAgents) != 0 || len(empty.Workflows) != 0 {
 		t.Errorf("missing sidecar reduced to %+v", empty)
+	}
+}
+
+// TestDeleteSessionsByIDRemovesSidecar: the batch path (POST /api/sessions/delete
+// and deleting a project, which takes its sessions with it) runs its own copy of
+// the teardown list. A sidecar left behind by it is now invisible — nothing
+// lists it any more — so it would just hold disk until the write cap.
+func TestDeleteSessionsByIDRemovesSidecar(t *testing.T) {
+	srv := groupTestServer(t)
+	sess := saveSessionWithDir(t, t.TempDir())
+
+	srv.appendAgentEvent(sess.ID, map[string]any{"kind": "tool", "agent_id": "agent_1"})
+	path, err := agentEventsPath(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("sidecar was not written: %v", err)
+	}
+
+	if _, failed := srv.deleteSessionsByID([]string{sess.ID}); len(failed) != 0 {
+		t.Fatalf("delete failed: %v", failed)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("sidecar outlived its session: err = %v", err)
 	}
 }

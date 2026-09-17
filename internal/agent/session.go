@@ -1606,6 +1606,13 @@ func resolveSessionPath(id string) (string, error) {
 	if filepath.IsAbs(id) || stem != filepath.Base(stem) || strings.Contains(stem, "..") {
 		return "", fmt.Errorf("invalid session id %q", id)
 	}
+	// A stem ending in ".agent-events" names a sidecar, not a transcript. The
+	// containment rules above let it through — it is a plain filename — so an
+	// id lifted from a listing that used to include sidecars could read, and
+	// DeleteSession could delete, another session's event trail.
+	if !IsTranscriptName(stem + ".jsonl") {
+		return "", fmt.Errorf("invalid session id %q", id)
+	}
 	dir, err := sessionsDir()
 	if err != nil {
 		return "", err
@@ -1783,8 +1790,10 @@ func DeleteSession(id string) error {
 		return fmt.Errorf("session %q: absolute paths not allowed", id)
 	}
 	stem := strings.TrimSuffix(strings.TrimSuffix(id, ".jsonl"), ".json")
-	// Reject anything that isn't a plain filename stem (no separators, no "..").
-	if stem != filepath.Base(stem) || strings.Contains(stem, "..") {
+	// Reject anything that isn't a plain filename stem (no separators, no "..")
+	// and anything naming a sidecar rather than a transcript — see
+	// resolveSessionPath.
+	if stem != filepath.Base(stem) || strings.Contains(stem, "..") || !IsTranscriptName(stem+".jsonl") {
 		return fmt.Errorf("invalid session id %q", id)
 	}
 	dir, err := sessionsDir()

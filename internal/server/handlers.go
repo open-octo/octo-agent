@@ -855,6 +855,7 @@ func (s *Server) deleteSessionsByID(ids []string) (deleted []string, failed map[
 			continue
 		}
 		s.forgetTurnLock(id)
+		s.removeAgentEvents(id)                 // and its persisted agent-event trails
 		tools.CloseSessionBackgroundManager(id) // reap the session's background daemons
 		tools.CloseSessionSubAgentManager(id)   // and its sub-agents
 		tools.CloseSessionWorkflowManager(id)   // and its background workflows
