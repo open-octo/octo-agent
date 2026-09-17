@@ -859,6 +859,17 @@ func mustServer(t *testing.T, cfg Config) *Server {
 	// this never blocks. With stub senders every goroutine finishes in
 	// milliseconds; the timeouts are just a backstop.
 	t.Cleanup(func() {
+		// First wait out any in-flight background version check. Its goroutine
+		// reads the package-global upgrade.BaseURL at call time, and this
+		// cleanup runs (LIFO) before the test's own cleanup restores that
+		// global — so awaiting here, bounded, means a refresh that outlived
+		// its settle still hits this test's fake, never the next test's.
+		// The lookup carries its own versionCheckTimeout; the bound is a
+		// backstop, not the normal path.
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		srv.awaitVersionRefresh(ctx)
+
 		srv.drain.drain(10 * time.Second)
 		deadline := time.Now().Add(10 * time.Second)
 		for time.Now().Before(deadline) {
