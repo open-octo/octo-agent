@@ -30,7 +30,7 @@ octo serve --profile work status
 octo serve --profile work --addr 127.0.0.1:9100
 ```
 
-桌面版一次只开一个 profile——数据根目录是进程级的，正因如此 octo 里每一处路径都能自己解析出来，不用一层层传。在托盘的 **配置** 子菜单里选，列出的是磁盘上已有的 root；选完会把选择记到 `~/.octo/desktop-profile` 并重启进去。只有存在一个以上 profile 时才会出现这个子菜单。如果 octo 正在跑任务或正在等你回答，重启前会先问一句，因为这些都会随重启丢掉。
+完整说明见[同时跑多个 octo](/docs/zh/guides/profiles/)。简单说：桌面版一次只开一个 profile——数据根目录是进程级的，正因如此 octo 里每一处路径都能自己解析出来，不用一层层传。在托盘的 **配置** 子菜单里选，列出的是磁盘上已有的 root；选完会把选择记到 `~/.octo/desktop-profile` 并重启进去。只有存在一个以上 profile 时才会出现这个子菜单。如果 octo 正在跑任务或正在等你回答，重启前会先问一句，因为这些都会随重启丢掉。
 
 从终端启动仍可以用 `octo-desktop --profile work`，而且不会改变双击图标打开的是哪个 profile。
 

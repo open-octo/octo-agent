@@ -17,6 +17,7 @@ stdin, runs a headless one-shot: full agentic tool loop, then exit.
 
 | Flag | Default | Description |
 |---|---|---|
+| `--profile <name>` | — | Use an isolated user-data root at `~/.octo-<name>` instead of `~/.octo`. Global: valid in any position on any subcommand. Also `OCTO_PROFILE`. See [Run more than one octo](/docs/guides/profiles/) |
 | `-c`, `--continue [id]` | — | Resume a session belonging to the current directory — `last`, a short ID, or a substring; omit the value to pick from a list |
 | `--take-over` | `false` | When resuming, take over a session bound to another entry |
 | `--no-save` | `false` | Disable session auto-save in the TUI (one-shots never persist) |

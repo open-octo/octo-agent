@@ -30,7 +30,7 @@ If something else has taken the recorded port, `octo serve` stops and says so ra
 octo serve --profile work --addr 127.0.0.1:9100
 ```
 
-The desktop app opens one profile at a time — the data root is process-global, which is what lets every path in octo resolve it without being handed one. Pick the profile from the tray's **Profile** submenu, which lists the roots that exist; the app records the choice in `~/.octo/desktop-profile` and restarts into it. The submenu appears once there is more than one profile to choose between. If octo is mid-turn or waiting on an answer, it says so before restarting, since that work goes with the restart.
+Profiles are covered in full in [Run more than one octo](/docs/guides/profiles/). In short: the desktop app opens one profile at a time — the data root is process-global, which is what lets every path in octo resolve it without being handed one. Pick the profile from the tray's **Profile** submenu, which lists the roots that exist; the app records the choice in `~/.octo/desktop-profile` and restarts into it. The submenu appears once there is more than one profile to choose between. If octo is mid-turn or waiting on an answer, it says so before restarting, since that work goes with the restart.
 
 `octo-desktop --profile work` still works for a launch from a terminal, and deliberately does not change what double-clicking the icon opens.
 
