@@ -959,15 +959,49 @@ func (c Config) EntryByModel(model string) (ModelEntry, bool) {
 		}
 	}
 	if matches > 1 {
-		slog.Warn("config: model reference matches multiple endpoints, using the first match",
-			"model", model,
-			"picked_endpoint", firstEndpoint,
-			"hint", fmt.Sprintf("use <endpoint>::%s to disambiguate", model))
+		warnAmbiguousModelOnce(model, firstEndpoint, matches)
 	}
 	if matches > 0 {
 		return first, true
 	}
 	return ModelEntry{}, false
+}
+
+// ambiguousModelWarned remembers which bare-model ambiguities have already
+// been logged. EntryByModel runs on every agent build and turn under serve,
+// so an unconditional warning would repeat the same line indefinitely for a
+// config the user has not touched. The key includes the picked endpoint and
+// match count so a changed ambiguity is reported afresh; saveLocked clears
+// the set so any config write re-arms the warning.
+var ambiguousModelWarned struct {
+	mu   sync.Mutex
+	seen map[string]bool
+}
+
+func warnAmbiguousModelOnce(model, pickedEndpoint string, matches int) {
+	key := fmt.Sprintf("%s\x00%s\x00%d", model, pickedEndpoint, matches)
+	ambiguousModelWarned.mu.Lock()
+	if ambiguousModelWarned.seen[key] {
+		ambiguousModelWarned.mu.Unlock()
+		return
+	}
+	if ambiguousModelWarned.seen == nil {
+		ambiguousModelWarned.seen = make(map[string]bool)
+	}
+	ambiguousModelWarned.seen[key] = true
+	ambiguousModelWarned.mu.Unlock()
+	slog.Warn("config: model reference matches multiple endpoints, using the first match",
+		"model", model,
+		"picked_endpoint", pickedEndpoint,
+		"hint", fmt.Sprintf("use <endpoint>::%s to disambiguate", model))
+}
+
+// resetAmbiguousModelWarnings forgets every logged ambiguity so the next
+// EntryByModel against a still-ambiguous config warns again.
+func resetAmbiguousModelWarnings() {
+	ambiguousModelWarned.mu.Lock()
+	ambiguousModelWarned.seen = nil
+	ambiguousModelWarned.mu.Unlock()
 }
 
 // ResolveVisionHelper resolves the vision_helper reference to the endpoint
@@ -1829,6 +1863,9 @@ func (c Config) saveLocked(path string) error {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return err
 	}
+	// The file changed, so a bare-model ambiguity that was already logged is
+	// worth logging once more if it survived the edit.
+	resetAmbiguousModelWarnings()
 	// Rolling backup of the last config we wrote (always valid, since it's a
 	// marshaled Config): `octo config --fix` restores from it when a later hand
 	// edit leaves config.yml unparseable. Best-effort — a backup failure must

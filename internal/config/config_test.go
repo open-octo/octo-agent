@@ -1850,3 +1850,68 @@ func TestUpdateCheckEnabled_RoundTrip(t *testing.T) {
 		})
 	}
 }
+
+// TestEntryByModel_AmbiguityWarnsOncePerShape pins the rate limit on the
+// duplicate-bare-model warning: EntryByModel runs per agent build and turn,
+// so the same unchanged ambiguity must log once, not once per call. A saved
+// config re-arms it, and a differently shaped ambiguity is its own warning.
+func TestEntryByModel_AmbiguityWarnsOncePerShape(t *testing.T) {
+	t.Cleanup(resetAmbiguousModelWarnings)
+	resetAmbiguousModelWarnings()
+	buf := captureSlog(t)
+	cfg := Config{Endpoints: []Endpoint{
+		{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-5"}, {Model: "kimi"}}},
+		{ID: "relay-b", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-5"}, {Model: "kimi"}}},
+	}}
+	const warn = "matches multiple endpoints"
+
+	for i := 0; i < 3; i++ {
+		if _, ok := cfg.EntryByModel("claude-sonnet-5"); !ok {
+			t.Fatal("EntryByModel(claude-sonnet-5) = false, want true")
+		}
+	}
+	if got := strings.Count(buf.String(), warn); got != 1 {
+		t.Fatalf("ambiguity warned %d times across 3 identical lookups, want 1:\n%s", got, buf.String())
+	}
+
+	cfg.EntryByModel("kimi")
+	if got := strings.Count(buf.String(), warn); got != 2 {
+		t.Fatalf("a second ambiguous model warned %d times total, want 2:\n%s", got, buf.String())
+	}
+
+	resetAmbiguousModelWarnings()
+	cfg.EntryByModel("claude-sonnet-5")
+	if got := strings.Count(buf.String(), warn); got != 3 {
+		t.Fatalf("after reset the warning fired %d times total, want 3:\n%s", got, buf.String())
+	}
+}
+
+// TestSave_ReArmsAmbiguityWarning pins the reset hook in saveLocked: a config
+// write is the moment the user may have fixed (or kept) a duplicate model, so
+// the next lookup on a still-ambiguous config must say so again.
+func TestSave_ReArmsAmbiguityWarning(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Cleanup(resetAmbiguousModelWarnings)
+	resetAmbiguousModelWarnings()
+	buf := captureSlog(t)
+	cfg := Config{Endpoints: []Endpoint{
+		{ID: "relay-a", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-5"}}},
+		{ID: "relay-b", Provider: "custom", Models: []EndpointModel{{Model: "claude-sonnet-5"}}},
+	}}
+	const warn = "matches multiple endpoints"
+
+	cfg.EntryByModel("claude-sonnet-5")
+	cfg.EntryByModel("claude-sonnet-5")
+	if got := strings.Count(buf.String(), warn); got != 1 {
+		t.Fatalf("before save: warned %d times, want 1", got)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	cfg.EntryByModel("claude-sonnet-5")
+	if got := strings.Count(buf.String(), warn); got != 2 {
+		t.Fatalf("after save: warned %d times total, want 2:\n%s", got, buf.String())
+	}
+}
