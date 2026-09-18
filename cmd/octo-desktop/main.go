@@ -715,9 +715,10 @@ func listenHub(addr string, grace time.Duration) (net.Listener, error) {
 
 // trayStatusLines is the (info-only) top of the tray menu: what the hub is
 // doing right now — where it's serving and how many clients are attached. The
-// profile row sits between the first two of these but is not one of them: it
-// is fixed for the life of the process and is a submenu, not a line (see
-// addProfileRow).
+// profile row goes under the first of these but is not one of them: it is a
+// submenu, not a line, and its title (the current profile) cannot change
+// while the process lives, so the refresh signature built from these lines
+// need not carry it (see addProfileRow).
 func trayStatusLines(bridge *nativeBridge) []string {
 	srv := bridge.srv.Load()
 	if srv == nil {

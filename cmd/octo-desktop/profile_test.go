@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wailsapp/wails/v3/pkg/application"
+
 	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
@@ -100,6 +102,82 @@ func TestDesktopProfileLabel(t *testing.T) {
 	if got := desktopProfileLabel("work"); got != "work" {
 		t.Errorf("label = %q, want work", got)
 	}
+}
+
+// The tray's profile row is the picker itself, so its shape follows what is on
+// disk: nothing for a lone default profile, a plain status line when there is
+// nothing to switch to, and a submenu titled with the current profile
+// otherwise. countItems returns how many items a menu holds, since the menu
+// type exposes items only by index.
+func countItems(m *application.Menu) int {
+	n := 0
+	for m.ItemAt(n) != nil {
+		n++
+	}
+	return n
+}
+
+func TestAddProfileRow(t *testing.T) {
+	bridge := &nativeBridge{}
+
+	t.Run("lone default profile adds nothing", func(t *testing.T) {
+		home := tempHome(t)
+		os.MkdirAll(filepath.Join(home, ".octo"), 0o755)
+		m := application.NewMenu()
+		addProfileRow(m, bridge)
+		if n := countItems(m); n != 0 {
+			t.Fatalf("menu has %d items, want none", n)
+		}
+	})
+
+	t.Run("named profile with nothing to switch to is a disabled line", func(t *testing.T) {
+		home := tempHome(t)
+		os.MkdirAll(filepath.Join(home, ".octo-work"), 0o755)
+		t.Setenv(datahome.ProfileEnv, "work")
+		m := application.NewMenu()
+		addProfileRow(m, bridge)
+		if n := countItems(m); n != 1 {
+			t.Fatalf("menu has %d items, want 1", n)
+		}
+		item := m.ItemAt(0)
+		if item.IsSubmenu() || item.Enabled() {
+			t.Errorf("want a disabled plain line, got submenu=%v enabled=%v", item.IsSubmenu(), item.Enabled())
+		}
+		if !strings.Contains(item.Label(), "work") {
+			t.Errorf("label %q should name the current profile", item.Label())
+		}
+	})
+
+	t.Run("two profiles make a submenu titled with the current one", func(t *testing.T) {
+		home := tempHome(t)
+		os.MkdirAll(filepath.Join(home, ".octo"), 0o755)
+		os.MkdirAll(filepath.Join(home, ".octo-work"), 0o755)
+		t.Setenv(datahome.ProfileEnv, "work")
+		m := application.NewMenu()
+		addProfileRow(m, bridge)
+		if n := countItems(m); n != 1 {
+			t.Fatalf("menu has %d items, want 1", n)
+		}
+		item := m.ItemAt(0)
+		if !item.IsSubmenu() {
+			t.Fatal("want a submenu")
+		}
+		if !strings.Contains(item.Label(), "work") {
+			t.Errorf("title %q should name the current profile", item.Label())
+		}
+		sub := item.GetSubmenu()
+		if n := countItems(sub); n != 2 {
+			t.Fatalf("submenu has %d items, want 2", n)
+		}
+		// datahome.List sorts, and "" (default) sorts first.
+		if got := sub.ItemAt(0).Label(); got != desktopProfileLabel("") {
+			t.Errorf("first entry = %q, want the default profile's label", got)
+		}
+		if sub.ItemAt(0).Checked() || !sub.ItemAt(1).Checked() {
+			t.Errorf("only the current profile should be checked: default=%v work=%v",
+				sub.ItemAt(0).Checked(), sub.ItemAt(1).Checked())
+		}
+	})
 }
 
 func TestAwaitPredecessor_ClearsTheVariable(t *testing.T) {
