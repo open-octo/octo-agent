@@ -58,28 +58,80 @@ func TestSubAgentTypeParamDescFor_NoUserAgentsKeepsBase(t *testing.T) {
 	}
 }
 
-func TestSubAgentTypeParamDesc_NilStoreKeepsBase(t *testing.T) {
-	if got := subAgentTypeParamDesc(nil); got != subAgentTypeParamBase {
-		t.Errorf("want the base description, got %q", got)
+// A store-less caller can't name what's installed, but it must not imply
+// nothing is — that would tell the model less than the old static text did.
+func TestSubAgentTypeParamDesc_NilStoreKeepsTheHint(t *testing.T) {
+	got := subAgentTypeParamDesc(nil)
+	if got != subAgentTypeParamUnknown {
+		t.Errorf("want the unknown-store description, got %q", got)
+	}
+	if got == subAgentTypeParamBase {
+		t.Error("nil store must not collapse to the bare tier list")
 	}
 }
 
 // Descriptions are commonly CJK; a byte-wise cut would emit a broken rune.
-func TestClipRunes_CJKBoundary(t *testing.T) {
-	got := clipRunes("你好世界你好世界", 4)
+func TestClipDesc_CJKBoundary(t *testing.T) {
+	got := clipDesc("你好世界你好世界", 4)
 	if got != "你好世界…" {
-		t.Errorf("clipRunes = %q, want %q", got, "你好世界…")
+		t.Errorf("clipDesc = %q, want %q", got, "你好世界…")
 	}
 	if !utf8.ValidString(got) {
-		t.Errorf("clipRunes produced invalid UTF-8: %q", got)
+		t.Errorf("clipDesc produced invalid UTF-8: %q", got)
 	}
-	if short := clipRunes("  短  ", 4); short != "短" {
-		t.Errorf("clipRunes should trim and pass through short input, got %q", short)
+	if short := clipDesc("  短  ", 4); short != "短" {
+		t.Errorf("clipDesc should trim and pass through short input, got %q", short)
+	}
+}
+
+// A multi-line frontmatter description must not break the single-line
+// parameter text.
+func TestClipDesc_FlattensWhitespace(t *testing.T) {
+	if got := clipDesc("first line\n\tsecond   line\n", 120); got != "first line second line" {
+		t.Errorf("clipDesc = %q, want the lines collapsed onto one", got)
+	}
+}
+
+// The clip has to survive the trip through the description builder, not just
+// the helper — that is what actually reaches the schema.
+func TestSubAgentTypeParamDescFor_ClipsLongDescription(t *testing.T) {
+	long := strings.Repeat("长", maxAgentDescRunes+50)
+	profiles := []*agentprofile.Profile{
+		{ID: "verbose", Description: long, Source: agentprofile.SourceUser},
+	}
+
+	desc := subAgentTypeParamDescFor(profiles)
+	if strings.Contains(desc, long) {
+		t.Error("builder emitted the full oversized description")
+	}
+	if !strings.Contains(desc, strings.Repeat("长", maxAgentDescRunes)+"…") {
+		t.Errorf("description not clipped to %d runes: %q", maxAgentDescRunes, desc)
+	}
+}
+
+// List() sorts by ID, and that ordering is the only thing keeping this string
+// stable across turns — an unstable one would needlessly bust the provider's
+// tools-prompt cache.
+func TestSubAgentTypeParamDescFor_JoinsMultipleInOrder(t *testing.T) {
+	profiles := []*agentprofile.Profile{
+		{ID: "alpha", Description: "First", Source: agentprofile.SourceUser},
+		{ID: "beta", Description: "Second", Source: agentprofile.SourceUser},
+	}
+
+	want := subAgentTypeParamBase + " User-defined agents: alpha (First); beta (Second)."
+	if got := subAgentTypeParamDescFor(profiles); got != want {
+		t.Errorf("description = %q, want %q", got, want)
 	}
 }
 
 // End to end: the profile store reaches the advertised schema through the
 // turn context.
+//
+// The store also scans the machine's real agents-default root, which this
+// package can't redirect (defaultAgentsRoot is a var inside agentprofile).
+// That's harmless here — everything it finds is SourceDefault and filtered
+// out — and it's why the filtering itself is tested through
+// subAgentTypeParamDescFor, which takes an explicit list.
 func TestAgentTool_DefinitionForCtx_NamesUserAgentFromStore(t *testing.T) {
 	dir := t.TempDir()
 	md := "---\nname: executor\ndescription: 执行已明确的机械任务\nmodel: lite\n---\n\nYou execute well-specified tasks.\n"
@@ -95,10 +147,10 @@ func TestAgentTool_DefinitionForCtx_NamesUserAgentFromStore(t *testing.T) {
 	}
 }
 
-// Definition() carries no store and must stay on the base sentence.
-func TestAgentTool_Definition_KeepsBaseTypeDesc(t *testing.T) {
-	if got := subagentTypeDescOf(t, AgentTool{}.Definition()); got != subAgentTypeParamBase {
-		t.Errorf("Definition() subagent_type desc = %q, want the base", got)
+// Definition() carries no store, so it keeps the store-less wording.
+func TestAgentTool_Definition_KeepsTheHint(t *testing.T) {
+	if got := subagentTypeDescOf(t, AgentTool{}.Definition()); got != subAgentTypeParamUnknown {
+		t.Errorf("Definition() subagent_type desc = %q, want the unknown-store wording", got)
 	}
 }
 

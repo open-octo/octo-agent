@@ -143,6 +143,14 @@ func definitionFor(sessionModel string, store *agentprofile.Store) agent.ToolDef
 const subAgentTypeParamBase = "Required agent type: 'explore' (read-only research), " +
 	"'general' (full toolbelt), 'code-review' (read-only review)."
 
+// subAgentTypeParamUnknown is the base plus the hint the old static
+// description carried. A caller without a profile store (the TUI, and
+// Definition()) can't name the installed agents, but it must not imply there
+// are none — dropping the hint there would leave those sessions knowing less
+// than before this parameter became dynamic.
+const subAgentTypeParamUnknown = subAgentTypeParamBase +
+	" A user-defined agent installed on this machine may also be named here."
+
 // maxAgentDescRunes caps how much of a user agent's description reaches the
 // schema. Descriptions are free text from the agent's frontmatter, so one
 // long entry would otherwise crowd out the rest of the tool schema.
@@ -159,7 +167,7 @@ const maxAgentDescRunes = 120
 // targets. They stay resolvable by name for anyone who asks for one.
 func subAgentTypeParamDesc(store *agentprofile.Store) string {
 	if store == nil {
-		return subAgentTypeParamBase
+		return subAgentTypeParamUnknown
 	}
 	return subAgentTypeParamDescFor(store.List())
 }
@@ -173,19 +181,26 @@ func subAgentTypeParamDescFor(profiles []*agentprofile.Profile) string {
 		if p.Source != agentprofile.SourceUser {
 			continue
 		}
-		entries = append(entries, p.ID+" ("+clipRunes(p.Description, maxAgentDescRunes)+")")
+		entries = append(entries, p.ID+" ("+clipDesc(p.Description, maxAgentDescRunes)+")")
 	}
 	if len(entries) == 0 {
 		return subAgentTypeParamBase
 	}
-	return subAgentTypeParamBase + " User-defined agents from ~/.octo/agents: " +
+	// No directory path here: the agents root is profile-scoped (see
+	// internal/datahome), so a literal "~/.octo/agents" would be wrong under
+	// --profile. The names are what the caller needs anyway.
+	return subAgentTypeParamBase + " User-defined agents: " +
 		strings.Join(entries, "; ") + "."
 }
 
-// clipRunes truncates on a rune boundary — descriptions are commonly CJK, and
-// a byte-wise cut would emit a broken code point into the schema.
-func clipRunes(s string, max int) string {
-	s = strings.TrimSpace(s)
+// clipDesc flattens a profile description into one bounded, single-line
+// fragment. Descriptions are free text from frontmatter: they may span lines,
+// which would break the single-line parameter text, and they have no length
+// limit of their own (only Name is validated). The cut is on a rune boundary
+// because these are commonly CJK and a byte-wise cut would emit a broken code
+// point into the schema.
+func clipDesc(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
 	r := []rune(s)
 	if len(r) <= max {
 		return s
