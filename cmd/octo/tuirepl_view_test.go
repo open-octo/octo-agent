@@ -62,3 +62,17 @@ func TestTUI_TextAreaWidthLeavesOneCellSlack(t *testing.T) {
 		t.Errorf("ta.Width = %d, want 77 (terminal width − 1 cell slack − 2 cell prompt)", got)
 	}
 }
+
+// End to end: the composed View — status-bar separator included — never lets a
+// line reach the terminal's last cell. This pins the cap at the View level so
+// a future return path can't silently bypass frame(). The status separator
+// alone ("─" × width) would fill the last cell without it.
+func TestTUI_ViewLinesNeverFillTheLastCell(t *testing.T) {
+	m := newTestModel()
+	m.width = 40
+	for _, line := range strings.Split(m.View(), "\n") {
+		if w := lipgloss.Width(line); w > m.width-1 {
+			t.Errorf("View line width = %d, want ≤ %d: %q", w, m.width-1, line)
+		}
+	}
+}
