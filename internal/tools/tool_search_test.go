@@ -269,16 +269,35 @@ func TestHasMCPBridgeAccess_DefaultProfile(t *testing.T) {
 	}
 }
 
-func TestHasMCPBridgeAccess_BuiltinEmptyTools(t *testing.T) {
+// The built-in tiers declare no allowlist at all (builtins.go leaves Tools
+// unset), which is what earns them every tool — not their source. This used to
+// assert an explicitly-empty list for a builtin, a shape no builtin actually
+// has and which now correctly reads as "no tools".
+func TestHasMCPBridgeAccess_BuiltinAbsentTools(t *testing.T) {
 	p := &agentprofile.Profile{
 		ID:     "explore",
 		Source: agentprofile.SourceBuiltin,
-		CapabilitySpec: agentprofile.CapabilitySpec{
-			Tools: []string{}, // empty = all for builtin
-		},
+	}
+	if p.Tools != nil {
+		t.Fatal("test setup: a builtin tier must carry no allowlist")
 	}
 	if !hasMCPBridgeAccess(p) {
-		t.Error("builtin agent with empty Tools must have MCP bridge access")
+		t.Error("a builtin tier with no declared allowlist must have MCP bridge access")
+	}
+}
+
+// Emptiness is read the same way regardless of source: a declared-but-empty
+// list is a restriction, even on a builtin.
+func TestHasMCPBridgeAccess_EmptyListDeniesAnySource(t *testing.T) {
+	for _, src := range []agentprofile.Source{agentprofile.SourceBuiltin, agentprofile.SourceDefault, agentprofile.SourceUser} {
+		p := &agentprofile.Profile{
+			ID:             "scoped",
+			Source:         src,
+			CapabilitySpec: agentprofile.CapabilitySpec{Tools: []string{}},
+		}
+		if hasMCPBridgeAccess(p) {
+			t.Errorf("source %q: an explicitly empty allowlist must deny the MCP bridge", src)
+		}
 	}
 }
 
@@ -287,11 +306,28 @@ func TestHasMCPBridgeAccess_UserEmptyTools(t *testing.T) {
 		ID:     "expert-no-tools",
 		Source: agentprofile.SourceUser,
 		CapabilitySpec: agentprofile.CapabilitySpec{
-			Tools: []string{}, // empty = none for user-created
+			Tools: []string{}, // present but empty = no tools
 		},
 	}
 	if hasMCPBridgeAccess(p) {
-		t.Error("user-created agent with empty Tools must NOT have MCP bridge access")
+		t.Error("an agent whose allowlist is explicitly empty must NOT have MCP bridge access")
+	}
+}
+
+// A user agent that never declared a list inherits every tool, bridge tools
+// included. If this check disagreed with DefaultToolsForProfile, the agent
+// would hold mcp_describe/mcp_call while the manifest naming what they reach
+// stayed hidden.
+func TestHasMCPBridgeAccess_UserAbsentToolsInherits(t *testing.T) {
+	p := &agentprofile.Profile{
+		ID:     "expert-unrestricted",
+		Source: agentprofile.SourceUser,
+	}
+	if p.Tools != nil {
+		t.Fatal("test setup: Tools must be nil to represent an absent list")
+	}
+	if !hasMCPBridgeAccess(p) {
+		t.Error("an agent with no declared allowlist must inherit MCP bridge access")
 	}
 }
 

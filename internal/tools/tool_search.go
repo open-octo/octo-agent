@@ -206,14 +206,20 @@ func MCPManifestFor(model string, profile *agentprofile.Profile, contextWindow i
 }
 
 // hasMCPBridgeAccess reports whether the profile can use the MCP bridge tools
-// (mcp_describe and mcp_call). Builtin agents with empty Tools get everything;
-// user agents with empty Tools get nothing.
+// (mcp_describe and mcp_call). It reads the allowlist the same way the tool
+// filters do: an absent list inherits every tool, so the bridge is in; an
+// explicit empty one grants nothing. Getting this out of step with
+// DefaultToolsForProfile means handing an agent the bridge tools while hiding
+// the manifest that says what they can reach — or the reverse.
 func hasMCPBridgeAccess(profile *agentprofile.Profile) bool {
 	if profile == nil || profile.IsDefault() {
 		return true
 	}
+	if profile.Tools == nil {
+		return true
+	}
 	if len(profile.Tools) == 0 {
-		return profile.Source == agentprofile.SourceBuiltin
+		return false
 	}
 	hasDescribe := false
 	hasCall := false

@@ -41,7 +41,7 @@ func TestFilterChildTools_NilInheritsEmptyDenies(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := filterChildTools(parent, tc.allowed, nil, false)
 			if len(got) != len(tc.want) {
-				t.Fatalf("got %d tools %v, want %d %v", len(got), names(got), len(tc.want), tc.want)
+				t.Fatalf("got %d tools %v, want %d %v", len(got), toolNames(got), len(tc.want), tc.want)
 			}
 			for i, n := range tc.want {
 				if got[i].Name != n {
@@ -52,7 +52,7 @@ func TestFilterChildTools_NilInheritsEmptyDenies(t *testing.T) {
 	}
 }
 
-func names(defs []agent.ToolDefinition) []string {
+func toolNames(defs []agent.ToolDefinition) []string {
 	out := make([]string, len(defs))
 	for i, d := range defs {
 		out[i] = d.Name

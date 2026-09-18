@@ -261,6 +261,22 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		bindings = req.ChannelBindings
 	}
 
+	// Tools falls back like the fields below, but the stakes are inverted:
+	// every other omitted field falls back to preserve information, this one
+	// falls back to preserve a RESTRICTION. Taking the request verbatim would
+	// mean a caller that merely didn't mention tools — the conversational
+	// edit flow is told to send the smallest possible edit — hands a
+	// locked-down agent the entire toolbelt.
+	//
+	// The cost is that clearing tools back to "inherit everything" can't be
+	// expressed here: an absent key and a null are the same pointer on the
+	// wire. Widening a profile that way means editing its .md, which is the
+	// right amount of friction for the one direction that grants capability.
+	toolsList := existing.Tools
+	if req.Tools != nil {
+		toolsList = *req.Tools
+	}
+
 	// Gallery metadata falls back to the existing profile's values when the
 	// request omits a field — same rule as bindings above. This matters most
 	// when forking a curated (SourceDefault) expert: the conversational edit
@@ -306,7 +322,7 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		Description: req.Description,
 		CapabilitySpec: agentprofile.CapabilitySpec{
 			Model:        req.Model,
-			Tools:        toolsIn(req.Tools),
+			Tools:        toolsList,
 			ToolSkills:   req.ToolSkills,
 			SystemPrompt: req.SystemPrompt,
 		},

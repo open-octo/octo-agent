@@ -179,7 +179,8 @@ to hide/show a curated expert and no server is reachable:
 - `description`: required; shown in listings.
 - `system_prompt`: the agent's system prompt (the Markdown body of `~/.octo/agents/<id>.md`); required for the agent to behave differently from the default agent.
 - `model`: optional model override (must be in `~/.octo/config.yml`'s models).
-- `tools`: tool allowlist; `[]` = no tools. User-created agents with empty `tools` get nothing (unlike the default agent which gets all tools with empty allowlist).
+- `tools`: tool allowlist, with three distinct states. **Omitting the key means the agent inherits every tool** — it is not the safe default. `[]` means no tools at all. A list is an allowlist. The same rule applies whether the agent is talked to or delegated to as a `subagent_type`.
+  - On PUT, omitting `tools` keeps whatever the agent already had. Clearing it back to "inherit everything" is deliberately not expressible through the API: that direction grants capability, so it requires editing `~/.octo/agents/<id>.md` by hand.
 - `tool_skills`: skills exposed as tools.
 - `source` (`"user"` or `"default"`) and `enabled` (bool): **response-only** —
   present on every `GET`, never sent in a `POST`/`PUT` body. See "Curated vs.

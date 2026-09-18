@@ -359,8 +359,14 @@ func RenderManifest(r *Registry) string {
 }
 
 // ManifestForProfile is RenderManifest filtered to the profile's ToolSkills.
-// Mirrors tools.DefaultToolsForProfile's per-source rule for an empty
-// allowlist: a builtin profile (explore/general/code-review/the Default
+//
+// Note this deliberately does NOT follow the nil-vs-empty rule that `tools`
+// now uses (see CapabilitySpec.Tools): skills stay per-source, so an absent
+// `tool_skills` still means NONE for anything but a builtin. Tools are a
+// capability an agent is assumed to need unless restricted; skills are
+// behaviour it has to opt into, and a persona silently inheriting every
+// installed skill would drown its own instructions. The asymmetry is
+// intended — a builtin profile (explore/general/code-review/the Default
 // agent) sees every skill when it declares no ToolSkills, matching its
 // general-purpose role; every other profile — curated experts and
 // user-created agents alike — sees NONE until it explicitly opts in via

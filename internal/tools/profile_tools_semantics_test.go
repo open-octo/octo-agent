@@ -36,8 +36,8 @@ func TestDefaultToolsForProfile_NilInheritsEmptyDenies(t *testing.T) {
 			ctx := WithProfileStore(context.Background(), store)
 			ctx = WithSessionAgentID(ctx, "scoped")
 
-			all := DefaultToolsFor("")
-			got := DefaultToolsForProfile(ctx, "")
+			all := DefaultToolsFor("", 0)
+			got := DefaultToolsForProfile(ctx, "", 0)
 
 			switch {
 			case tc.wantAll:

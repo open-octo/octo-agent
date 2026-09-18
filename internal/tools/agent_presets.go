@@ -9,9 +9,10 @@ type agentPreset struct {
 	description string
 	persona     string
 	readOnly    bool
-	// tools, when non-empty, is the agent's tool allowlist (frontmatter
-	// `tools`). disallowedTools (frontmatter `disallowed_tools`) is subtracted
-	// from the inherited set. model (frontmatter `model`, default "inherit")
+	// tools is the agent's tool allowlist (frontmatter `tools`): nil inherits
+	// every tool, an empty-but-present list grants none, a populated one is
+	// the allowlist. disallowedTools (frontmatter `disallowed_tools`) is
+	// subtracted from the resulting set. model (frontmatter `model`, default "inherit")
 	// pins the child's model; empty means inherit the parent's, and "lite"
 	// resolves to the parent's lite model at spawn time (parent's model when
 	// none is configured).
