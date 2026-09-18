@@ -167,3 +167,11 @@ release:
     name: octo-agent
   # Mark -dev / -rc / -beta tags as pre-releases automatically.
   prerelease: auto
+  # Re-cutting a version means force-moving an already-published tag onto a new
+  # commit (see the Release workflow header). The previous run's assets then
+  # still sit under the same names, and by default goreleaser does NOT touch
+  # them: every upload comes back 422 already_exists, goreleaser exits 1, and
+  # every downstream job (macOS pkg, Windows installers, AppImages) is skipped —
+  # leaving the release serving the OLD binaries under the new tag.
+  # With this on, a 422 deletes the same-named asset and retries the upload.
+  replace_existing_artifacts: true
