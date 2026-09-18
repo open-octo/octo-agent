@@ -114,9 +114,11 @@ that shape — the raw text as-is. Multiple hooks on the same event have their o
 blank line between them.
 
 Injected output is model-facing context, not part of the conversation: octo wraps it in a
-`<system-reminder>` span before folding it into the turn, and every surface that renders the
-transcript (Web UI, TUI, IM channels) hides those spans. A retrieval hook that prepends ten lines of
-recalled notes to each prompt is therefore invisible to the user, who sees only what they typed.
+`<system-reminder>` span before folding it into the turn, and the surfaces that render the
+transcript (Web UI, TUI) hide those spans. A retrieval hook that prepends ten lines of recalled
+notes to each prompt is therefore invisible to the user, who sees only what they typed. The model
+reads that span as guidance from the harness, so don't pass untrusted text (web content, third-party
+notes) through verbatim — label it as reference material the way the built-in recall hooks do.
 
 ## `octo hooks list`
 

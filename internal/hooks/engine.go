@@ -315,14 +315,17 @@ func (e *Engine) runShellHooks(ctx context.Context, hooks []shellHook, p Payload
 
 // asReminder frames shell-hook output as a <system-reminder> span. Injected
 // output is folded into the user turn (or a tool result) and persisted there,
-// and every display surface — web history replay, TUI, IM channels — hides
-// exactly those spans (agent.StripSystemReminders). Without the frame an
-// external retrieval hook's output rendered as though the user had typed it.
+// and the transcript surfaces (web history replay, TUI) hide exactly those
+// spans (agent.StripSystemReminders). Without the frame an external retrieval
+// hook's output rendered as though the user had typed it.
+//
 // The in-process hooks (memory reminder, auto-recall, workflow nudge) already
-// wrap themselves; a script that does the same is left alone rather than
-// double-wrapped, since nested spans would confuse the stripper.
+// wrap themselves; a script that emits a complete frame of its own is left
+// alone rather than double-wrapped. Only a balanced pair earns that: an
+// opening tag with no close would otherwise make the stripper swallow the
+// user's own words after it, so lone tags get framed like any other text.
 func asReminder(txt string) string {
-	if strings.Contains(txt, reminderOpen) {
+	if strings.Contains(txt, reminderOpen) && strings.Contains(txt, reminderClose) {
 		return txt
 	}
 	return reminderOpen + "\n" + txt + "\n" + reminderClose

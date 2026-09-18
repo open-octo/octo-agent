@@ -3,6 +3,9 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -51,6 +54,43 @@ func TestUserPromptSubmit_PrependsInjectionAsSingleMessage(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "deploy please") {
 		t.Errorf("original input not preserved at the end: %q", got)
+	}
+}
+
+// A shell hook's stdout rides the persisted user turn, so the display
+// surfaces must be able to strip it back to exactly what the user typed —
+// otherwise an external retrieval hook's notes render inside the user's own
+// bubble. This pins the cross-package contract between hooks (which frames
+// the output) and StripSystemReminders (which hides the frame).
+func TestUserPromptSubmit_ShellOutputStripsBackToUserInput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("hook scripts use sh -c; not portable to Windows")
+	}
+	script := filepath.Join(t.TempDir(), "hook.sh")
+	body := "#!/bin/sh\necho 'recalled note one'\necho 'recalled note two'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	e := hooks.NewEngine(nil)
+	e.RegisterShell(hooks.EventUserPromptSubmit, script, 0)
+
+	send := &fakeSender{reply: Reply{Content: "ok"}}
+	a := New(send, "m")
+	a.Hooks = e
+	if _, err := a.Turn(context.Background(), "print today's weather"); err != nil {
+		t.Fatalf("Turn: %v", err)
+	}
+
+	msgs := a.History.Snapshot()
+	if len(msgs) == 0 || msgs[0].Role != RoleUser {
+		t.Fatalf("history[0] should be the user turn, got %+v", msgs)
+	}
+	persisted := userText(msgs[0])
+	if !strings.Contains(persisted, "recalled note two") {
+		t.Fatalf("hook output must still reach the model: %q", persisted)
+	}
+	if got := strings.TrimSpace(StripSystemReminders(persisted)); got != "print today's weather" {
+		t.Errorf("display text after stripping = %q, want exactly the user's words", got)
 	}
 }
 

@@ -54,6 +54,19 @@ func TestEngine_InjectShellAlreadyFramedIsNotDoubleWrapped(t *testing.T) {
 	}
 }
 
+// A lone opening tag is not a frame: passed through, the display stripper
+// would treat everything after it — including the user's own prompt — as the
+// span body. It must be framed like ordinary text.
+func TestEngine_InjectShellLoneOpenTagIsStillFramed(t *testing.T) {
+	e := NewEngine(nil)
+	e.RegisterShell(EventUserPromptSubmit, makeScript(t, "echo 'mentions <system-reminder> in passing'"), 0)
+	got := e.Inject(context.Background(), Payload{Event: EventUserPromptSubmit})
+	want := "<system-reminder>\nmentions <system-reminder> in passing\n</system-reminder>"
+	if got != want {
+		t.Errorf("lone open tag must still be framed: got %q want %q", got, want)
+	}
+}
+
 func TestEngine_InjectShellStructuredEnvelope(t *testing.T) {
 	e := NewEngine(nil)
 	e.RegisterShell(EventUserPromptSubmit, makeScript(t, `echo '{"additional_context":"ctx"}'`), 0)
