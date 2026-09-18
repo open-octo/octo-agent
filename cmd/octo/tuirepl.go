@@ -1087,7 +1087,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.ta.SetWidth(msg.Width)
+		// One cell short of the terminal so the textarea's own soft-wrap
+		// matches the boundary View's frame cap enforces (see frame) — a
+		// full-width textarea would get its last cell visibly truncated.
+		m.ta.SetWidth(max(1, msg.Width-1))
 		_ = m.updateTextAreaHeight()
 		// Replay a resumed session's prior turns into the scrollback once, now
 		// that the real wrap width is known. No-op for a fresh session.

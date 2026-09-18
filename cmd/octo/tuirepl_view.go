@@ -2012,7 +2012,7 @@ func (m *tuiModel) View() string {
 	// still on screen instead of a bare full-screen dialog.
 	if m.modal != nil {
 		b.WriteString(m.modalView())
-		return b.String()
+		return m.frame(b.String())
 	}
 
 	// Quit confirmation: a first Ctrl+D or idle Ctrl+C arms the quit and shows
@@ -2035,8 +2035,26 @@ func (m *tuiModel) View() string {
 	b.WriteString(m.renderInputBox())
 	b.WriteByte('\n')
 	b.WriteString(m.renderStatusBar())
-	return b.String()
+	return m.frame(b.String())
 }
+
+// frameCaps truncates every line of the live frame one cell short of the
+// terminal width, so no rendered line can fill the last cell. A full-cell line
+// leaves the terminal in wrap-pending state, and a line whose width the
+// renderer and the terminal disagree on (CJK, emoji, ambiguous-width symbols)
+// physically wraps while counting as one — the next repaint then undershoots
+// its cursor-up and the old frame's top line is never overwritten, which is
+// how a duplicate input box ends up stuck on screen. The bubbletea renderer
+// already truncates at width; one cell of slack absorbs the disagreement.
+func (m *tuiModel) frame(s string) string {
+	if m.width < 2 {
+		return s
+	}
+	return frameLineCap.MaxWidth(m.width - 1).Render(s)
+}
+
+// frameLineCap is the zero-style used only for its per-line MaxWidth truncate.
+var frameLineCap = lipgloss.NewStyle()
 
 // updateTextAreaHeight sets the textarea height to match the number of lines
 // in the current value, capped at a maximum so it doesn't take over the screen.
