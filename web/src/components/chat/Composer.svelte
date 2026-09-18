@@ -749,7 +749,7 @@
   // the composite id "<endpoint>::<model>" so pickModel can pass it to
   // updateSessionModel, which resolves it via cfg.EntryByModel (composite-id
   // aware since PR2).
-  let models = $state<{ id: string; model: string; endpoint: string }[]>([])
+  let models = $state<{ id: string; model: string; endpoint: string; endpointName: string }[]>([])
   // Composite id of the configured default entry (EndpointsResponse.default),
   // refreshed together with the model list.
   let defaultModelId = $state('')
@@ -767,11 +767,14 @@
   let permMenu = $state(false)
 
   // The model menu groups rows under their endpoint, like the design mock.
+  // The heading shows the endpoint's display name when it has one — the id is
+  // only the fallback, since a named endpoint is named precisely so the user
+  // doesn't have to read its id here.
   let modelGroups = $derived.by(() => {
-    const out: { endpoint: string; items: { id: string; model: string }[] }[] = []
+    const out: { endpoint: string; endpointName: string; items: { id: string; model: string }[] }[] = []
     for (const m of models) {
       let g = out.find(x => x.endpoint === m.endpoint)
-      if (!g) { g = { endpoint: m.endpoint, items: [] }; out.push(g) }
+      if (!g) { g = { endpoint: m.endpoint, endpointName: m.endpointName, items: [] }; out.push(g) }
       g.items.push({ id: m.id, model: m.model })
     }
     return out
@@ -866,10 +869,10 @@
     try {
       const ep = await api.getEndpoints()
       if (seq !== modelsFetchSeq) return
-      const flat: { id: string; model: string; endpoint: string }[] = []
+      const flat: { id: string; model: string; endpoint: string; endpointName: string }[] = []
       for (const e of ep.endpoints) {
         for (const m of e.models) {
-          flat.push({ id: `${e.id}::${m.model}`, model: m.model, endpoint: e.id })
+          flat.push({ id: `${e.id}::${m.model}`, model: m.model, endpoint: e.id, endpointName: e.name ?? '' })
         }
       }
       models = flat
@@ -1477,7 +1480,7 @@
                 <div class="menu-empty">{$t('chat.no_models')}</div>
               {:else}
                 {#each modelGroups as g (g.endpoint)}
-                  <div class="menu-label mono">{g.endpoint}</div>
+                  <div class="menu-label" class:mono={!g.endpointName}>{g.endpointName || g.endpoint}</div>
                   {#each g.items as m (m.id)}
                     <button class="menu-item" class:active={activeModelId ? m.id === activeModelId : m.model === modelName} onclick={() => pickModel({ id: m.id, model: m.model, endpoint: g.endpoint })}>
                       <span class="mi-name mono">{m.model}</span>
