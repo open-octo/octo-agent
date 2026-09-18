@@ -85,7 +85,7 @@ func runTUI(cfg replConfig) int {
 	// cfg.tools BEFORE this SetAsker ran, so the tool was silently absent
 	// for the whole TUI session. Mirrors what mcpReadyMsg does below.
 	if cfg.executor != nil {
-		m.cfg.tools = tools.DefaultToolsFor(cfg.modelName, cfg.a.ContextWindow())
+		m.cfg.tools = tools.DefaultToolsForCtx(m.cfg.toolContext(), cfg.modelName, cfg.a.ContextWindow())
 	}
 
 	// Sub-agent manager: wire the onExit hook so completion notifications ride
@@ -1151,7 +1151,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.reg != nil && msg.reg.Len() > 0 {
 			tools.SetMCPRegistry(msg.reg)
 			if m.cfg.executor != nil {
-				m.cfg.tools = tools.DefaultToolsFor(m.cfg.a.Model, m.cfg.a.ContextWindow())
+				m.cfg.tools = tools.DefaultToolsForCtx(m.cfg.toolContext(), m.cfg.a.Model, m.cfg.a.ContextWindow())
 				// The tool array just picked up the bridge tools (or full MCP
 				// schemas); redo the system prompt's "# Available MCP tools"
 				// layer to match — it was necessarily empty at startup compose

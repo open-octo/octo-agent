@@ -24,17 +24,25 @@ import (
 
 // replConfig holds everything runREPL needs.
 type replConfig struct {
-	a           *agent.Agent
-	session     *agent.Session
-	noSave      bool
-	suggest     bool               // true → after each turn, offer an LLM follow-up suggestion (TUI ghost text)
-	plain       bool               // true → fall back to terse ↳ status lines for all tool events
-	verbosity   verbosity          // quiet | normal | verbose; controls spinner + chrome
-	permEngine  *permission.Engine // nil → no tool-permission gating
-	stdin       io.Reader
-	stdout      io.Writer
-	stderr      io.Writer
-	tools       []agent.ToolDefinition
+	a          *agent.Agent
+	session    *agent.Session
+	noSave     bool
+	suggest    bool               // true → after each turn, offer an LLM follow-up suggestion (TUI ghost text)
+	plain      bool               // true → fall back to terse ↳ status lines for all tool events
+	verbosity  verbosity          // quiet | normal | verbose; controls spinner + chrome
+	permEngine *permission.Engine // nil → no tool-permission gating
+	stdin      io.Reader
+	stdout     io.Writer
+	stderr     io.Writer
+	tools      []agent.ToolDefinition
+	// toolCtx is the context the tool-list builders read. It carries the
+	// agent-profile store so sub_agent's subagent_type parameter can name the
+	// agents installed on this machine — without it the CLI advertises only
+	// the built-in tiers, and a user agent stays undiscoverable even though
+	// it resolves fine. Every recompute of cfg.tools must go through it (see
+	// toolContext), or the tool list silently reverts to the store-less
+	// schema. nil in tests → toolContext falls back to context.Background.
+	toolCtx     context.Context
 	executor    agent.ToolExecutor
 	subAgentMgr *tools.SubAgentManager // nil → sub-agent tools disabled
 	skillReg    *skills.Registry       // discovered skills; backs /skills and /<name>
@@ -66,7 +74,7 @@ type replConfig struct {
 	// mcpBoot means the manifest is necessarily empty at first paint (no
 	// registry yet); mcpReadyMsg calls this once the background connect in
 	// runTUI's mcpConnectCmd finishes, mirroring how it already refreshes
-	// cfg.tools via tools.DefaultToolsFor. nil for the headless one-shot,
+	// cfg.tools via tools.DefaultToolsForCtx. nil for the headless one-shot,
 	// which connects synchronously before its system prompt is composed and
 	// so never needs a second pass.
 	recomposeMCPManifest func()
@@ -115,6 +123,16 @@ type replConfig struct {
 	// name on TUI startup (OSC 2). Defaults on; the global config's
 	// terminal_title field can disable it.
 	terminalTitle bool
+}
+
+// toolContext returns the context the tool-list builders should read, falling
+// back to a bare context when none was wired (tests, and any path that builds
+// a replConfig by hand).
+func (c *replConfig) toolContext() context.Context {
+	if c == nil || c.toolCtx == nil {
+		return context.Background()
+	}
+	return c.toolCtx
 }
 
 // ensureSender rebuilds cfg.a.Sender when targetModel resolves to a different

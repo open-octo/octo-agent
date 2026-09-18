@@ -147,6 +147,36 @@ func TestAgentTool_DefinitionForCtx_NamesUserAgentFromStore(t *testing.T) {
 	}
 }
 
+// The advertised tool list — not DefinitionForCtx directly — is what every
+// transport actually builds, so the store has to survive that trip too. This
+// is the path the TUI takes after its recomputes were given a context.
+func TestDefaultToolsForCtx_SubAgentNamesUserAgent(t *testing.T) {
+	store := agentprofile.New(t.TempDir())
+	if err := store.Create(&agentprofile.Profile{
+		ID:          "executor",
+		Description: "Runs well-specified changes",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := WithProfileStore(context.Background(), store)
+	ctx = WithSubAgentManager(ctx, NewSubAgentManager(&resultSpawnerSync{reply: "ok"}))
+
+	var def agent.ToolDefinition
+	for _, d := range DefaultToolsForCtx(ctx, "", 0) {
+		if d.Name == "sub_agent" {
+			def = d
+			break
+		}
+	}
+	if def.Name == "" {
+		t.Fatal("sub_agent was not advertised")
+	}
+	if got := subagentTypeDescOf(t, def); !strings.Contains(got, "executor") {
+		t.Errorf("subagent_type description missing the user agent: %q", got)
+	}
+}
+
 // Definition() carries no store, so it keeps the store-less wording.
 func TestAgentTool_Definition_KeepsTheHint(t *testing.T) {
 	if got := subagentTypeDescOf(t, AgentTool{}.Definition()); got != subAgentTypeParamUnknown {

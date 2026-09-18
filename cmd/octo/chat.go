@@ -638,9 +638,12 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// agent namespace and filters tools/skills per the profile's allowlist.
 	var agentProfileID string
 	var agentProfile *agentprofile.Profile
-	var agentStore *agentprofile.Store
+	// Built unconditionally: New only records the directory (the scan is
+	// lazy, per read), and every session needs it on the tool context so
+	// sub_agent can name the installed agents — not just the ones that passed
+	// --agent.
+	agentStore := agentprofile.New(agentUserDir())
 	if *agentName != "" {
-		agentStore = agentprofile.New(agentUserDir())
 		profile, ok := agentStore.Get(*agentName)
 		if !ok {
 			ids := append([]string{"default"}, profileIDs(agentStore)...)
@@ -1417,10 +1420,17 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			a.System, a.LeanSystem = prompt.ComposePair(sess.System, cwd, env, skillsManifest, tools.MCPManifestFor(a.Model, agentProfile, a.ContextWindow()), memInjection, coauthor, agentProfile != nil && agentProfile.SystemPrompt != "")
 		}
 		if toolsOn {
+			// The store rides the tool context so sub_agent's subagent_type
+			// names this machine's agents. Deliberately WITHOUT the session
+			// agent ID: that key also switches on DefaultToolsForProfile's
+			// per-profile allowlist, which the TUI has never applied — adding
+			// it here would silently strip tools from a --agent session whose
+			// profile declares none.
+			cfg.toolCtx = tools.WithProfileStore(context.Background(), agentStore)
 			// Built-ins only at first paint — the MCP registry is still nil
 			// (mcpBoot connects it in the background). mcpReadyMsg recomputes
 			// this list once the servers are live.
-			cfg.tools = tools.DefaultToolsFor(resolvedModel, a.ContextWindow())
+			cfg.tools = tools.DefaultToolsForCtx(cfg.toolContext(), resolvedModel, a.ContextWindow())
 			cfg.executor = toolExecutor
 			cfg.subAgentMgr = subAgentMgr
 		}
@@ -1477,14 +1487,16 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		configEntry:     entry,
 	}
 	if toolsOn {
-		// Build a context with the profile store + agent ID so
-		// DefaultToolsForProfile filters the tool allowlist. The CLI is
+		// The store always rides the context, so sub_agent's subagent_type can
+		// name the installed agents. The session agent ID goes on only when
+		// --agent pinned one, because that key is also what turns on
+		// DefaultToolsForProfile's per-profile tool allowlist. The CLI is
 		// single-session, so this static filtering at startup is sufficient.
-		toolCtx := context.Background()
-		if agentProfileID != "" && agentStore != nil {
+		toolCtx := tools.WithProfileStore(context.Background(), agentStore)
+		if agentProfileID != "" {
 			toolCtx = tools.WithSessionAgentID(toolCtx, agentProfileID)
-			toolCtx = tools.WithProfileStore(toolCtx, agentStore)
 		}
+		replCfg.toolCtx = toolCtx
 		replCfg.tools = tools.DefaultToolsForProfile(toolCtx, resolvedModel, a.ContextWindow())
 		replCfg.executor = toolExecutor
 		replCfg.subAgentMgr = subAgentMgr

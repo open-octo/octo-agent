@@ -1334,7 +1334,7 @@ func (m *tuiModel) dispatchModel(name string) (tea.Model, tea.Cmd) {
 	}
 	// Tool surface may differ per model (e.g. vision vs non-vision).
 	if m.cfg.tools != nil {
-		m.cfg.tools = tools.DefaultToolsFor(entry.Model, m.a.ContextWindow())
+		m.cfg.tools = tools.DefaultToolsForCtx(m.cfg.toolContext(), entry.Model, m.a.ContextWindow())
 	}
 
 	if setDefault {
