@@ -56,7 +56,6 @@
       drafts = emptyDrafts(current.questions ?? [])
       focusedLabel = current.questions?.[0]?.options?.[0]?.label ?? ''
       collapsed = false
-      inputEl?.focus()
     }
   })
 
@@ -278,7 +277,7 @@
 
 <!-- Active session's own question: the banner, folded or open. -->
 {#if current}
-  <div class="banner" role="dialog" aria-modal="false" tabindex="-1" onkeydown={onKeydown}>
+  <div class="banner" role="dialog" aria-modal="false" aria-label={$t('question.title')} onkeydown={onKeydown}>
     <div class="banner-inner" class:collapsed>
       <div class="banner-main">
         <iconify-icon icon="ant-design:form-outlined" width="16" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
@@ -288,7 +287,7 @@
         {/if}
         <button
           class="banner-toggle"
-          onclick={() => { if (collapsed) { collapsed = false; inputEl?.focus() } else softClose() }}
+          onclick={() => (collapsed ? (collapsed = false) : softClose())}
           aria-expanded={!collapsed}
           aria-label={collapsed ? $t('question.expand') : $t('question.collapse')}
         >
@@ -443,7 +442,6 @@
   .review-warn { font-size: 12px; color: var(--text-tertiary); }
 
   /* ─── Bottom banner (active session, non-blocking) ─────────────── */
-  .banner:focus { outline: none; }
   .banner {
     flex: 0 0 auto;
     max-width: var(--chat-content-max-width); margin: 0 auto; width: 100%;
@@ -477,7 +475,7 @@
   .banner-toggle:hover { background: var(--hover-neutral); color: var(--blue-6); }
   /* Folded: the question line alone, so the transcript stays readable while
      the question keeps its place above the composer. */
-  .banner-inner.collapsed { padding: 8px 16px; gap: 0; }
+  .banner-inner.collapsed { padding: 8px 16px; }
   .banner-actions { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
 
   /* The banner shares the chat column with the transcript, so its option list

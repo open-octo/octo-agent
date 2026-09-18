@@ -430,7 +430,8 @@ queued prompt need no change — there is no state that outlives the modal.
 
 ### Web — `web/src/components/overlays/QuestionModal.svelte`, plus the WS→store mapping in `web/src/views/ChatView.svelte`
 
-Both forms (bottom banner and expanded modal) render the current question:
+The banner sits above the composer and folds down to its question line;
+unfolded, it renders the current question:
 
 - the tab row sits above the question, with the review/submit tab last
 - flat layout: option rows, not pills — bold `label`, muted `description`
