@@ -91,6 +91,13 @@ func TestProfiles_CreateAndConflicts(t *testing.T) {
 	if w := doJSON(t, srv, http.MethodPost, "/api/profiles", `{"name": ""}`); w.Code != http.StatusBadRequest {
 		t.Errorf("empty = %d, want 400", w.Code)
 	}
+	if w := doJSON(t, srv, http.MethodPost, "/api/profiles", `{"name": "default"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("reserved = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	// The API and the CLI agree on what the word means: the default root.
+	if w := doJSON(t, srv, http.MethodDelete, "/api/profiles/default", ""); w.Code != http.StatusConflict {
+		t.Errorf("DELETE default = %d, want 409: %s", w.Code, w.Body.String())
+	}
 }
 
 func TestProfiles_DeleteGuardsAndSuccess(t *testing.T) {

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"text/tabwriter"
 
 	"github.com/open-octo/octo-agent/internal/datahome"
@@ -56,10 +55,11 @@ func printProfilesUsage(w io.Writer) {
 }
 
 // profileLabel is how a root is named in listings: the default root has no
-// name of its own, so it prints as "default".
+// name of its own, so it prints as "default" (reserved as a profile name for
+// that reason — see profiles.DefaultLabel).
 func profileLabel(name string) string {
 	if name == "" {
-		return "default"
+		return profiles.DefaultLabel
 	}
 	return name
 }
@@ -116,7 +116,7 @@ func profilesRm(args []string, stdout, stderr io.Writer) int {
 	yes := false
 	for _, a := range args {
 		switch a {
-		case "--yes", "-y", "--force", "-f":
+		case "--yes", "-y":
 			yes = true
 		default:
 			if name != "" {
@@ -130,36 +130,29 @@ func profilesRm(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "Usage: octo profiles rm <name> --yes")
 		return 2
 	}
-	if name == "default" {
-		// The listing shows the default root as "default"; say why it is
-		// refused instead of reporting a profile by that name as missing.
-		fmt.Fprintf(stderr, "octo profiles: %v\n", profiles.ErrDefault)
+	// Run the guards before asking for confirmation, so a refused root is
+	// refused on the first attempt instead of after the user re-ran with
+	// --yes. Remove re-checks; the window between the two is accepted.
+	if err := profiles.CheckRemovable(name); err != nil {
+		fmt.Fprintf(stderr, "octo profiles: %v\n", err)
+		if errors.Is(err, profiles.ErrCurrent) {
+			fmt.Fprintln(stderr, "Run this from another profile, e.g. without --profile.")
+		}
 		return 1
 	}
-	dir, err := datahome.DirFor(name)
-	if err != nil {
-		fmt.Fprintf(stderr, "octo profiles: %v\n", profiles.ErrInvalidName)
-		return 1
-	}
-	if _, err := os.Stat(dir); err != nil {
-		// Say "not found" before asking anyone to confirm deleting it.
-		fmt.Fprintf(stderr, "octo profiles: %v: %s\n", profiles.ErrNotFound, name)
-		return 1
-	}
+	dir, _ := datahome.DirFor(name)
 	if !yes {
 		// Deletion is final and there is no recycle bin for a whole root, so
 		// the confirmation is an explicit re-run rather than a prompt: it
 		// works the same in a script, a pipe and a terminal.
 		fmt.Fprintf(stdout, "This permanently deletes profile %q and everything under %s:\n", name, dir)
 		fmt.Fprintln(stdout, "its config and API keys, sessions, memory, skills, IM credentials and logs.")
+		fmt.Fprintf(stdout, "Close any `octo --profile %s` terminal sessions first; they are not detected.\n", name)
 		fmt.Fprintf(stdout, "Re-run with --yes to confirm: octo profiles rm %s --yes\n", name)
 		return 1
 	}
 	if err := profiles.Remove(name); err != nil {
 		fmt.Fprintf(stderr, "octo profiles: %v\n", err)
-		if errors.Is(err, profiles.ErrCurrent) {
-			fmt.Fprintln(stderr, "Run this from another profile, e.g. without --profile.")
-		}
 		return 1
 	}
 	fmt.Fprintf(stdout, "Deleted profile %q (%s)\n", name, dir)
@@ -172,7 +165,7 @@ func profilesPath(args []string, stdout, stderr io.Writer) int {
 	case 0:
 	case 1:
 		name = args[0]
-		if name == "default" {
+		if profiles.IsDefaultLabel(name) {
 			name = ""
 		}
 	default:

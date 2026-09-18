@@ -112,6 +112,11 @@ octo serve --profile home stop
 octo profiles rm home --yes
 ```
 
+What it cannot see is an interactive `octo --profile home` session in another terminal: a TUI
+records nothing under its root. Close those yourself before removing the profile. The name
+`default` is reserved — it is how listings label the unnamed `~/.octo` root, and `path` and `rm`
+accept it as an alias for that root.
+
 The Web UI has the same three operations under **Settings → Data → Profiles**: the list marks
 which root the backend you are looking at runs under and which ones have a live backend, and
 deleting asks you to type the profile's name. It cannot switch profiles — that is a restart of the

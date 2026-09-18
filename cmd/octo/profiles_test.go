@@ -81,6 +81,9 @@ func TestProfilesCLI_CreateThenPath(t *testing.T) {
 	if out, code := rp("create", "bad name"); code == 0 || !strings.Contains(out, "letters, digits") {
 		t.Errorf("invalid create: exit %d, %s", code, out)
 	}
+	if out, code := rp("create", "default"); code == 0 || !strings.Contains(out, "reserved") {
+		t.Errorf("reserved create: exit %d, %s", code, out)
+	}
 }
 
 func TestProfilesCLI_RmNeedsYesAndHonoursGuards(t *testing.T) {
@@ -104,6 +107,10 @@ func TestProfilesCLI_RmNeedsYesAndHonoursGuards(t *testing.T) {
 	t.Setenv(datahome.ProfileEnv, "work")
 	if out, code := rp("rm", "work", "--yes"); code == 0 || !strings.Contains(out, "currently in use") {
 		t.Errorf("rm current: exit %d, %s", code, out)
+	}
+	// Guards run before the confirmation: no "--yes" hint for a refused root.
+	if out, code := rp("rm", "work"); code == 0 || strings.Contains(out, "Re-run with --yes") {
+		t.Errorf("rm current without --yes should refuse outright: exit %d, %s", code, out)
 	}
 	out, code = rp("rm", "old", "--yes")
 	if code != 0 {

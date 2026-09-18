@@ -107,6 +107,10 @@ octo serve --profile home stop
 octo profiles rm home --yes
 ```
 
+它看不见的是另一个终端里交互式开着的 `octo --profile home`：TUI 不在目录下留任何记录。删之前自己把
+这些会话关掉。名字 `default` 是保留的——列表用它标注未命名的 `~/.octo`，`path` 和 `rm` 也把它当作
+那个目录的别名。
+
 Web 界面在 **设置 → 数据管理 → Profile** 里提供同样三件事：列表会标出你眼前这个后端运行在哪个
 目录下、哪些目录的后端正在跑，删除时要你把 profile 名字敲一遍。它不能切换 profile——切换意味着
 重启后端，那是桌面端托盘菜单的活（见下文），或者重新起一个 `octo serve --profile`。

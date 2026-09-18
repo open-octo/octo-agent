@@ -22,6 +22,10 @@ import (
 var (
 	// ErrInvalidName is returned for a name outside ^[A-Za-z0-9][A-Za-z0-9_-]*$.
 	ErrInvalidName = errors.New("profile name must contain only letters, digits, '-' or '_', and start with a letter or digit")
+	// ErrReserved is returned by Create for "default": that is how listings
+	// label the unnamed ~/.octo root, and the CLI accepts it as an alias for
+	// it, so a real profile by that name would be indistinguishable.
+	ErrReserved = errors.New(`"default" is reserved for the default profile`)
 	// ErrExists is returned by Create when the root already exists.
 	ErrExists = errors.New("profile already exists")
 	// ErrNotFound is returned by Remove when there is no such root.
@@ -80,11 +84,22 @@ func List() ([]Info, error) {
 	return out, nil
 }
 
+// DefaultLabel is how listings name the unnamed ~/.octo root. Create refuses
+// it as a profile name and Remove treats it as the default root.
+const DefaultLabel = "default"
+
+// IsDefaultLabel reports whether name is the listing label for the default
+// root (case-insensitively, so "Default" cannot sneak past the reservation).
+func IsDefaultLabel(name string) bool { return strings.EqualFold(name, DefaultLabel) }
+
 // Create makes an empty root for a new named profile. The default root is
 // created on first use like any other, so "" is rejected here as invalid.
 func Create(name string) (Info, error) {
 	if name == "" || !datahome.ValidName(name) {
 		return Info{}, ErrInvalidName
+	}
+	if IsDefaultLabel(name) {
+		return Info{}, ErrReserved
 	}
 	dir, err := datahome.DirFor(name)
 	if err != nil {
@@ -101,47 +116,78 @@ func Create(name string) (Info, error) {
 	return Info{Name: name, Path: dir, Current: name == datahome.Current()}, nil
 }
 
-// Remove deletes a named profile's root and everything in it. It refuses the
-// default root, the profile the caller runs under, and any profile whose
-// backend is still alive; the caller must stop that backend first.
-func Remove(name string) error {
-	if name == "" {
-		return ErrDefault
+// CheckRemovable reports why Remove would refuse name, or nil if it would
+// proceed. Callers that ask the user to confirm first use it so the refusal
+// comes before the confirmation rather than after it.
+func CheckRemovable(name string) error {
+	_, err := removable(name)
+	return err
+}
+
+// removable runs Remove's guards and returns the root they cleared.
+func removable(name string) (string, error) {
+	if name == "" || IsDefaultLabel(name) {
+		return "", ErrDefault
 	}
 	if !datahome.ValidName(name) {
-		return ErrInvalidName
+		return "", ErrInvalidName
 	}
 	if name == datahome.Current() {
-		return ErrCurrent
+		return "", ErrCurrent
 	}
 	dir, err := datahome.DirFor(name)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if _, err := os.Stat(dir); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("%w: %s", ErrNotFound, name)
+			return "", fmt.Errorf("%w: %s", ErrNotFound, name)
 		}
-		return err
+		return "", err
 	}
 	if pid, alive := running(dir); alive {
 		if pid == 0 {
-			return fmt.Errorf("%w (its address is answering); stop it first, e.g. octo serve --profile %s stop", ErrRunning, name)
+			return "", fmt.Errorf("%w (its address is answering); stop it first, e.g. octo serve --profile %s stop", ErrRunning, name)
 		}
-		return fmt.Errorf("%w (pid %d); stop it with: octo serve --profile %s stop", ErrRunning, pid, name)
+		return "", fmt.Errorf("%w (pid %d); stop it with: octo serve --profile %s stop", ErrRunning, pid, name)
+	}
+	return dir, nil
+}
+
+// Remove deletes a named profile's root and everything in it. It refuses the
+// default root, the profile the caller runs under, and any profile whose
+// backend is still alive; the caller must stop that backend first.
+//
+// Only backends are detected. An interactive `octo --profile <name>` session
+// records nothing under its root, so it is the caller's confirmation text
+// that has to tell the user to close those. The check-then-remove is also
+// not atomic: a backend starting in the same instant may have pinned its
+// address but not yet bound it, and would recreate an empty root on its next
+// write. There is no lock primitive shared with the backend to close that
+// window; it is accepted as the cost of `rm` staying a plain directory
+// removal.
+func Remove(name string) error {
+	dir, err := removable(name)
+	if err != nil {
+		return err
 	}
 	return os.RemoveAll(dir)
 }
 
 // DefaultAddr is where the default profile's backend listens; named profiles
-// pin theirs in serve.addr. It is the `octo serve -addr` default. A variable
-// so tests can point it at a closed port instead of whatever is on 8088 on
-// the developer's machine.
+// pin theirs in serve.addr. It is the `octo serve -addr` default, and the
+// only address probed for the default root: `ResolveAddr` never pins the
+// default profile, so a default backend moved with an explicit -addr lists
+// as not running. That only affects the status column — the default root is
+// never removable. A variable so tests can point it at a closed port instead
+// of whatever is on 8088 on the developer's machine.
 var DefaultAddr = "127.0.0.1:8088"
 
 // probeTimeout bounds the connect attempt to a profile's address. Loopback
 // either answers at once or refuses at once; the timeout only matters for a
-// pin pointing at a LAN interface that is down.
+// pin on a LAN interface that is down, which then reads as not running even
+// if the process still holds the socket. A pin hand-edited to a remote host
+// makes the listing dial that host once; the connection is closed unused.
 const probeTimeout = 300 * time.Millisecond
 
 // running reports whether dir's backend is up: first by the pid in serve.pid

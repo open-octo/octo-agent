@@ -60,7 +60,7 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 
 func profileErrStatus(err error) int {
 	switch {
-	case errors.Is(err, profiles.ErrInvalidName):
+	case errors.Is(err, profiles.ErrInvalidName), errors.Is(err, profiles.ErrReserved):
 		return http.StatusBadRequest
 	case errors.Is(err, profiles.ErrNotFound):
 		return http.StatusNotFound

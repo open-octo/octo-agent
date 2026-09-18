@@ -940,6 +940,8 @@ func (s *Server) registerRoutes() {
 	s.api("POST /api/tasks/{id}/run", s.handleRunTask)
 	s.api("PATCH /api/tasks/{id}", s.handlePatchTask)
 	s.api("PUT /api/tasks/{id}/transfer", s.handleTransferTask)
+	// /api/profile/* is the assistant's persona and memory; the user-data
+	// roots that --profile selects between are /api/profiles (plural) below.
 	s.api("GET /api/profile/soul", s.handleGetProfileSoul)
 	s.api("GET /api/profile/user", s.handleGetProfileUser)
 	s.api("GET /api/memories", s.handleGetMemories)

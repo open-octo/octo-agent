@@ -136,6 +136,70 @@ func TestCreate_MakesRootAndRejectsDuplicates(t *testing.T) {
 			t.Errorf("Create(%q) = %v, want ErrInvalidName", bad, err)
 		}
 	}
+	// "default" is the listing label for the unnamed root; a real profile by
+	// that name would show as a second "default" row and be unreachable from
+	// the CLI, which treats the word as an alias.
+	for _, reserved := range []string{"default", "Default", "DEFAULT"} {
+		if _, err := Create(reserved); !errors.Is(err, ErrReserved) {
+			t.Errorf("Create(%q) = %v, want ErrReserved", reserved, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".octo-default")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("reserved name created a root: %v", err)
+	}
+}
+
+func TestRemove_DefaultLabelIsTheDefaultRoot(t *testing.T) {
+	home := testHome(t)
+	mkRoot(t, home, ".octo", nil)
+	// Even if an older build left a literal ~/.octo-default behind, the word
+	// means the default root here and is refused rather than deleting it.
+	mkRoot(t, home, ".octo-default", nil)
+	for _, name := range []string{"default", "Default"} {
+		if err := Remove(name); !errors.Is(err, ErrDefault) {
+			t.Errorf("Remove(%q) = %v, want ErrDefault", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".octo-default")); err != nil {
+		t.Errorf(".octo-default touched: %v", err)
+	}
+}
+
+func TestCheckRemovable_MatchesRemoveWithoutDeleting(t *testing.T) {
+	home := testHome(t)
+	t.Setenv(datahome.ProfileEnv, "work")
+	mkRoot(t, home, ".octo-work", nil)
+	mkRoot(t, home, ".octo-old", nil)
+	if err := CheckRemovable("work"); !errors.Is(err, ErrCurrent) {
+		t.Errorf("CheckRemovable(current) = %v", err)
+	}
+	if err := CheckRemovable("nope"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("CheckRemovable(missing) = %v", err)
+	}
+	if err := CheckRemovable("old"); err != nil {
+		t.Errorf("CheckRemovable(idle) = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".octo-old")); err != nil {
+		t.Errorf("CheckRemovable deleted the root: %v", err)
+	}
+}
+
+func TestRunning_DefaultRootByDefaultAddr(t *testing.T) {
+	home := testHome(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	DefaultAddr = ln.Addr().String()
+	mkRoot(t, home, ".octo", nil)
+	got, err := List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !got[0].Running || got[0].Pid != 0 {
+		t.Errorf("default = %+v, want running without pid", got)
+	}
 }
 
 func TestRemove_Guards(t *testing.T) {
