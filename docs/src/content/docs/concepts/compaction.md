@@ -21,6 +21,11 @@ threshold is checked at two safe boundaries:
 Token counts prefer the provider's actual reported usage over octo's own
 estimate, so the trigger tracks reality once a real number is available.
 
+The window itself comes from the endpoint model entry when it sets `context_window`, otherwise
+from octo's built-in model table, then `fallback_context_window`, then 128k. Because the value
+lives on the endpoint's model entry, the same model id can compact at different sizes on two
+endpoints — see the [config file reference](/docs/reference/config-file/).
+
 ## What gets compacted first
 
 Two tiers, always in this order, whether triggered automatically or run manually via `/compact`:

@@ -39,7 +39,7 @@ stdin, runs a headless one-shot: full agentic tool loop, then exit.
 | `--max-turns` | `0` (auto) | Max provider round-trips per message (`0` = 200 interactive, unlimited headless) |
 | `--compact-threshold` | `0` (auto) | Compact once a turn's input crosses this many tokens; `<0` disables |
 | `--compact-auto-pct` | `0` (→75) | Auto-compaction threshold as % of the context window, used when `--compact-threshold=0`. The same threshold is checked both between turns and after each tool-call batch. |
-| `--fallback-context-window` | `0` (→128000) | Context window in tokens to assume for a model whose name matches no built-in entry — a self-hosted or renamed model. Never overrides a model the built-in table knows. Also `OCTO_FALLBACK_CONTEXT_WINDOW` and `fallback_context_window` in the config file. |
+| `--fallback-context-window` | `0` (→128000) | Context window in tokens to assume for a model whose name matches no built-in entry — a self-hosted or renamed model. Never overrides a model the built-in table knows; to size one known model's deployment, set `context_window` on its endpoint model entry instead. Also `OCTO_FALLBACK_CONTEXT_WINDOW` and `fallback_context_window` in the config file. |
 | `--reasoning-effort` | off | `low` \| `medium` \| `high` \| `xhigh` \| `max` |
 | `--show-reasoning` | `false` | Surface the reasoning trace for the **Web UI** to display (the terminal never renders it) |
 | `--sandbox` | `false` | OS-enforced confinement to the project dir + tmp, no network |

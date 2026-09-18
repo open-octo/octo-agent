@@ -18,6 +18,10 @@ description: octo 怎么在不丢关键信息的前提下，把一个长会话�
 
 token 计数优先用 provider 实际报告的用量，而不是 octo 自己的估算——一旦有真实数字就用真实数字。
 
+窗口本身的来源：端点模型条目设了 `context_window` 就用它，否则查 octo 内置模型表，再退到
+`fallback_context_window`，最后是 128k。这个值挂在端点的模型条目上，所以同一个 model id 在两个
+端点上可以按不同大小压缩——见[配置文件参考](/docs/zh/reference/config-file/)。
+
 ## 先压缩什么
 
 不管是自动触发还是手动跑 `/compact`，永远是这个顺序：

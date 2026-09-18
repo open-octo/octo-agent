@@ -224,9 +224,9 @@ POST   /api/config/endpoints/{id}/lite             handleSetEndpointLite
 
 **POST /api/config/endpoints/{id}/models**：
 ```json
-{"model": "gpt-5.4", "vision": true}
+{"model": "gpt-5.4", "vision": true, "context_window": 32000}
 ```
-响应：`200 OK` + 更新后的 endpoint。
+`context_window` 可选：省略 = 保留该模型条目已有的值（含 `config.yml` 手配的），显式 `0` = 清掉覆盖、回到自动解析，1 到 999 = `400`（单位写错）。响应：`200 OK` + 更新后的 endpoint。
 
 **DELETE /api/config/endpoints/{id}/models/{model}**：删 model。若 `cfg.Default` / `cfg.Lite` 指向该 model，走 Repair 兜底。响应：`200 OK` + `{"ok": true}`。
 

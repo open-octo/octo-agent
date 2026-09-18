@@ -74,22 +74,22 @@ case "mcp_call":     return execToolCall(ctx, input) // {name, arguments} → ex
 
 ## 激活:auto 阈值
 
-`tools.DefaultTools()` 本身 model-agnostic,而阈值判断需要 model 的上下文窗口。引入 `tools.DefaultToolsFor(model string)`:
+`tools.DefaultTools()` 本身 model-agnostic,而阈值判断需要 model 的上下文窗口。引入 `tools.DefaultToolsFor(model string, contextWindow int)`:
 
-- `DefaultTools()` == `DefaultToolsFor("")`,等价于关闭延迟(全量),保持所有现有调用点向后兼容。
-- 知道 model 的调用点(`cmd/octo/chat.go`、`cmd/octo/channel.go`、sub-agent spawner)改调 `DefaultToolsFor(a.Model)`。
+- `DefaultTools()` == `DefaultToolsFor("", 0)`,等价于关闭延迟(全量),保持所有现有调用点向后兼容。
+- 知道 model 的调用点(`cmd/octo`、`internal/app`(bootstrap 与子代理工具环境)、`internal/server`)改调 `DefaultToolsFor(a.Model, a.ContextWindow())`。`contextWindow` 是必填参数:Agent 构造时已按端点模型条目解析好部署窗口(`context_window` > 内置表 > `fallback_context_window`),传它而不是让 Tool Search 拿裸模型名再查一次——同名模型挂在多个端点下时裸名查表会拿到另一个端点的窗口。传 `0` 显式退回裸名查表。
 
 判定逻辑(`enabled: auto`):
 
 ```
 估算 MCP schema tokens ≈ Σ(每个延迟工具 schema 的字节数) / 4
-若  estTokens ≥ threshold_pct% × contextWindow(model)  →  启用桥(工具数组吐两个桥工具,system prompt 追加 MCP 清单)
-否则                                                    →  直接全量透传(零开销)
+若  estTokens ≥ threshold_pct% × contextWindow  →  启用桥(工具数组吐两个桥工具,system prompt 追加 MCP 清单)
+否则                                             →  直接全量透传(零开销)
 ```
 
-`contextWindow(model)` 已存在于 `internal/agent/compaction.go`,直接复用。阈值以下不引入任何桥、也不渲染清单,小工具集场景行为与现状一致。
+`contextWindow` 优先用调用方传入的 Agent 部署窗口;为 0 时退回 `agent.ContextWindow(model)`(`internal/agent/compaction.go` 的内置表 + fallback)。阈值以下不引入任何桥、也不渲染清单,小工具集场景行为与现状一致。
 
-同一个 `toolSearchActive(model, mcpDefs)` 判断同时驱动两处:`DefaultToolsFor` 决定工具数组吐桥还是吐全量定义,`MCPManifestFor` 决定 system prompt 要不要追加清单——两处必须用同一个判断结果,否则会出现"清单里有名字,但工具数组里既没有桥也没有全量 schema"的不一致。
+同一个 `toolSearchActive(model, mcpDefs, contextWindow)` 判断同时驱动两处:`DefaultToolsFor` 决定工具数组吐桥还是吐全量定义,`MCPManifestFor` 决定 system prompt 要不要追加清单——两处必须用同一个判断结果,否则会出现"清单里有名字,但工具数组里既没有桥也没有全量 schema"的不一致。
 
 ## 配置
 

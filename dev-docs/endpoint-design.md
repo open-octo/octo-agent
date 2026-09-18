@@ -75,8 +75,9 @@ type Endpoint struct {
 
 // EndpointModel 是 endpoint 下的一个模型条目。
 type EndpointModel struct {
-    Model  string `yaml:"model"`        // 模型 id，如 claude-sonnet-4-6
-    Vision bool   `yaml:"vision"`       // 是否接受图片输入（model 级能力）
+    Model         string `yaml:"model"`                    // 模型 id，如 claude-sonnet-4-6
+    ContextWindow int    `yaml:"context_window,omitempty"` // 该部署实际的上下文窗口（token）；0 = 内置表 / fallback_context_window
+    Vision        bool   `yaml:"vision"`                   // 是否接受图片输入（model 级能力）
 }
 
 type Config struct {
@@ -350,7 +351,7 @@ func resolveLegacyModelRef(model string, cfg config.Config) string {
 - channel store 写有并发风险（多 session 并发），不碰 store 文件最稳
 - 新 session/绑定天然都是复合 id，混格式问题随老 session 自然退役消失
 
-**歧义处理**：同 model 挂多 endpoint 时选第一个匹配，`slog.Info` 提示"该绑定可能不准、建议重新选"。
+**歧义处理**：同 model 挂多 endpoint 时，`EntryByModel` 优先取 default 端点上的那份，否则选第一个匹配，并 `slog.Warn` 提示改用 `<endpoint>::<model>`。同一形态的歧义（model + 选中端点 + 匹配数）只警告一次，避免 serve 下每轮重复；配置写盘后重新武装。
 
 ### 8.3 BoundEntry/LeaseEntry 不动
 
