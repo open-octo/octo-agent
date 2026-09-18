@@ -613,13 +613,6 @@
           </div>
           <div class="setrow">
             <div class="seti">
-              <span class="setl">{$t('settings.update_check')}</span>
-              <span class="setd">{$t('settings.update_check_desc')}</span>
-            </div>
-            <Switch checked={updateCheckVal} onchange={(v) => saveUpdateCheck(v)} />
-          </div>
-          <div class="setrow">
-            <div class="seti">
               <span class="setl">{$t('settings.workspace_dir')}</span>
               <span class="setd">{$t('settings.workspace_dir_desc')}</span>
             </div>
@@ -793,6 +786,13 @@
                 </div>
               </div>
             {/if}
+            <div class="setrow">
+              <div class="seti">
+                <span class="setl">{$t('settings.update_check')}</span>
+                <span class="setd">{$t('settings.update_check_desc')}</span>
+              </div>
+              <Switch checked={updateCheckVal} onchange={(v) => saveUpdateCheck(v)} />
+            </div>
             <div class="setrow">
               <div class="seti">
                 <span class="setl">{$t('settings.about.firstrun')}</span>
