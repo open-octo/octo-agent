@@ -12,10 +12,15 @@ import (
 // frontmatter is the YAML header of a profile .md file. Unmapped keys are
 // ignored, so files written for newer versions remain readable.
 type frontmatter struct {
-	Name            string           `yaml:"name,omitempty"`
-	Description     string           `yaml:"description"`
-	Model           string           `yaml:"model,omitempty"`
-	Tools           []string         `yaml:"tools,omitempty"`
+	Name        string `yaml:"name,omitempty"`
+	Description string `yaml:"description"`
+	Model       string `yaml:"model,omitempty"`
+	// Tools is a pointer so the file can say three different things: key
+	// absent (nil) means "inherit the caller's tools", `tools: []` means "no
+	// tools", and a list is an allowlist. A plain []string with omitempty
+	// would collapse the first two on write, silently turning an explicit
+	// restriction back into inheritance.
+	Tools           *[]string        `yaml:"tools,omitempty"`
 	ToolSkills      []string         `yaml:"tool_skills,omitempty"`
 	DisallowedTools []string         `yaml:"disallowed_tools,omitempty"`
 	ReadOnly        bool             `yaml:"read_only,omitempty"`
@@ -62,13 +67,20 @@ func parseFile(path string) (*Profile, error) {
 	if strings.EqualFold(model, "inherit") {
 		model = ""
 	}
+	// nil pointer → nil slice (inherit); a present list → itself, still
+	// non-nil when empty or when everything in it was retired, so an explicit
+	// `tools: []` survives as "no tools".
+	var toolsList []string
+	if fm.Tools != nil {
+		toolsList = stripRetiredTools(*fm.Tools)
+	}
 	p := &Profile{
 		Name:        fm.Name,
 		Description: fm.Description,
 		CapabilitySpec: CapabilitySpec{
 			Model:           model,
 			SystemPrompt:    strings.TrimSpace(body),
-			Tools:           stripRetiredTools(fm.Tools),
+			Tools:           toolsList,
 			ToolSkills:      fm.ToolSkills,
 			ReadOnly:        fm.ReadOnly,
 			DisallowedTools: fm.DisallowedTools,
@@ -107,10 +119,10 @@ var retiredTools = map[string]bool{
 }
 
 // stripRetiredTools returns tools without any retired names, preserving order.
-// Nil in, nil out — an absent list keeps meaning "builtin: all, expert: none".
-// (A list that held ONLY retired names comes back empty but non-nil; runtime
-// filtering treats both as "no tools" for an expert, so nothing changes for
-// the author beyond losing the retired grant.)
+// Nil in, nil out — an absent list keeps meaning "inherit every tool", and the
+// nil-ness is load-bearing, so the slice must never be rebuilt with make().
+// (A list that held ONLY retired names comes back empty but non-nil, i.e. "no
+// tools" — the author declared a list, and what survives of it is nothing.)
 func stripRetiredTools(tools []string) []string {
 	kept := tools[:0:0]
 	for _, t := range tools {
@@ -125,11 +137,18 @@ func stripRetiredTools(tools []string) []string {
 // then the system prompt as the markdown body. Field order follows the
 // frontmatter struct so output is stable for tests and reviews.
 func serialize(p *Profile) ([]byte, error) {
+	// Only take the address when the profile actually carries a list: a nil
+	// slice must stay an absent key, an empty one must round-trip as
+	// `tools: []`.
+	var tools *[]string
+	if p.Tools != nil {
+		tools = &p.Tools
+	}
 	fm := frontmatter{
 		Name:            p.Name,
 		Description:     p.Description,
 		Model:           p.Model,
-		Tools:           p.Tools,
+		Tools:           tools,
 		ToolSkills:      p.ToolSkills,
 		DisallowedTools: p.DisallowedTools,
 		ReadOnly:        p.ReadOnly,

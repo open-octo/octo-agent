@@ -1428,7 +1428,6 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			cfg.toolCtx = tools.WithProfileStore(context.Background(), agentStore)
 			if agentProfileID != "" {
 				cfg.toolCtx = tools.WithSessionAgentID(cfg.toolCtx, agentProfileID)
-				warnIfProfileHasNoTools(stderr, agentProfile)
 			}
 			// Built-ins only at first paint — the MCP registry is still nil
 			// (mcpBoot connects it in the background). mcpReadyMsg recomputes
@@ -1498,7 +1497,6 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		toolCtx := tools.WithProfileStore(context.Background(), agentStore)
 		if agentProfileID != "" {
 			toolCtx = tools.WithSessionAgentID(toolCtx, agentProfileID)
-			warnIfProfileHasNoTools(stderr, agentProfile)
 		}
 		replCfg.toolCtx = toolCtx
 		replCfg.tools = tools.DefaultToolsForProfile(toolCtx, resolvedModel, a.ContextWindow())
@@ -1611,18 +1609,6 @@ func newCacheKey() string {
 }
 
 // agentUserDir is the user-level profile directory (~/.octo/agents).
-// warnIfProfileHasNoTools flags a --agent profile that will run with an empty
-// toolbelt. For a user profile an absent `tools:` list means NO tools (for the
-// built-in tiers the same emptiness means "all"), which is easy to hit by
-// omission in a hand-written .md and otherwise surfaces only as an agent that
-// mysteriously can't do anything.
-func warnIfProfileHasNoTools(w io.Writer, p *agentprofile.Profile) {
-	if p == nil || p.Source != agentprofile.SourceUser || len(p.Tools) > 0 {
-		return
-	}
-	fmt.Fprintf(w, "octo: agent %q declares no `tools:`, so it runs without any tools — add a tools list to its frontmatter to give it a toolbelt\n", p.ID)
-}
-
 func agentUserDir() string {
 	dir, err := datahome.Path("agents")
 	if err != nil {

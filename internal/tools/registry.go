@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/open-octo/octo-agent/internal/agent"
-	"github.com/open-octo/octo-agent/internal/agentprofile"
 )
 
 // tool is the internal interface every built-in tool implements — both a
@@ -822,9 +821,10 @@ func sessionAgentIDFromContext(ctx context.Context) string {
 // that don't wire a store see unchanged behavior. Resolved fresh per turn so
 // profile edits land on the next message without rebuilding anything.
 //
-// Empty Tools means different things depending on the agent source:
-//   - builtin (default, explore, general, code-review): empty = all tools
-//   - user-created: empty = no tools (explicitly restricted)
+// An absent Tools list (nil) means "inherit every tool"; a present but empty
+// one (`tools: []`) means "no tools". The distinction is the file's, not the
+// source's — the same rule applies to delegation (see filterChildTools), so
+// one profile describes one capability surface wherever it runs.
 func DefaultToolsForProfile(ctx context.Context, model string, contextWindow int) []agent.ToolDefinition {
 	all := defaultToolsFor(ctx, model, contextWindow)
 	store := profileStoreFromContext(ctx)
@@ -836,10 +836,10 @@ func DefaultToolsForProfile(ctx context.Context, model string, contextWindow int
 	if !ok {
 		return all
 	}
+	if profile.Tools == nil {
+		return all
+	}
 	if len(profile.Tools) == 0 {
-		if profile.Source == agentprofile.SourceBuiltin {
-			return all
-		}
 		return nil
 	}
 	allowed := make(map[string]bool, len(profile.Tools))

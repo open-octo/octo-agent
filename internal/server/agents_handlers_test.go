@@ -39,7 +39,7 @@ func TestHandleAgents_CreateListGetDelete(t *testing.T) {
 	if created.ID == "" {
 		t.Fatal("expected non-empty id")
 	}
-	if created.Name != "Code Reviewer" || len(created.Tools) != 2 {
+	if created.Name != "Code Reviewer" || len(toolsIn(created.Tools)) != 2 {
 		t.Fatalf("unexpected profile: %+v", created)
 	}
 
@@ -68,7 +68,7 @@ func TestHandleAgents_CreateListGetDelete(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
 		t.Fatal(err)
 	}
-	if updated.Name != "Code Reviewer v2" || len(updated.Tools) != 1 {
+	if updated.Name != "Code Reviewer v2" || len(toolsIn(updated.Tools)) != 1 {
 		t.Fatalf("unexpected update: %+v", updated)
 	}
 

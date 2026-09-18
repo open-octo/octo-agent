@@ -331,7 +331,9 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 	req.ReadOnly = profile.ReadOnly
 	req.LeanSystem = profile.LeanContext
 	req.DisallowedTools = profile.DisallowedTools
-	if len(callTools) == 0 {
+	// nil, not len 0: the call passing `tools: []` is an explicit "no tools"
+	// and must not fall back to the profile's list.
+	if callTools == nil {
 		req.Tools = profile.Tools
 	}
 	if callModel == "" {

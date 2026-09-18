@@ -608,8 +608,12 @@ func (lc *liveChild) syncSession() {
 // terminal/MCP/codegraph but can't change files. The two filters compose: a
 // readOnly preset still honours allowed.
 func filterChildTools(parent []agent.ToolDefinition, allowed, disallowed []string, readOnly bool) []agent.ToolDefinition {
+	// nil means "no allowlist given, inherit everything"; a present but empty
+	// list means "no tools". Same rule the session path applies to a
+	// profile's frontmatter (see DefaultToolsForProfile), so `tools: []`
+	// reads the same whether the agent is talked to or delegated to.
 	var allowSet map[string]bool
-	if len(allowed) > 0 {
+	if allowed != nil {
 		allowSet = make(map[string]bool, len(allowed))
 		for _, a := range allowed {
 			allowSet[a] = true

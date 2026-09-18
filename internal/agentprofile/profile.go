@@ -59,10 +59,16 @@ const DefaultID = "default"
 // skills. It is shared by both run modes; the platform slice (MentionAs,
 // ChannelBindings) only applies to conversation mode.
 type CapabilitySpec struct {
-	Model        string   // frontmatter model; empty = inherit the caller's
-	SystemPrompt string   // .md body (never carried in frontmatter)
-	Tools        []string // frontmatter tools allowlist; empty → builtin: all, user: none
-	ToolSkills   []string // frontmatter tool_skills: skills exposed as tools
+	Model        string // frontmatter model; empty = inherit the caller's
+	SystemPrompt string // .md body (never carried in frontmatter)
+	// Tools is the frontmatter allowlist. Nil (key absent) means "inherit
+	// every tool"; non-nil and empty (`tools: []`) means "no tools". Both the
+	// session path (DefaultToolsForProfile) and the delegation path
+	// (filterChildTools) read it that way, so a profile describes one
+	// capability surface no matter how it is run. Keep the nil-ness intact
+	// when copying this field.
+	Tools      []string
+	ToolSkills []string // frontmatter tool_skills: skills exposed as tools
 
 	// Delegation refinements, parsed for zero-migration compatibility with
 	// the pre-existing .md agent format (internal/tools/agents.go).

@@ -64,6 +64,7 @@ export const en: Record<string, string> = {
 
   "agents.skills_loading": "Loading available skills…",
   "agents.all_tools": "All tools",
+  "agents.no_tools": "No tools",
   "agents.bound_chats": "bound",
   "agents.delete_title": "Delete Agent",
   "agents.delete_confirm": "Delete agent \"{name}\"? This cannot be undone.",
@@ -1036,6 +1037,7 @@ export const zh: Record<string, string> = {
 
   "agents.skills_loading": "正在加载可用技能…",
   "agents.all_tools": "全部工具",
+  "agents.no_tools": "无工具",
   "agents.bound_chats": "已绑定",
   "agents.delete_title": "删除专家",
   "agents.delete_confirm": "删除专家 \"{name}\"？此操作不可撤销。",

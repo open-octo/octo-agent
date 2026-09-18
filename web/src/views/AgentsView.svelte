@@ -207,6 +207,10 @@
               {/if}
               {#if agent.tools && agent.tools.length > 0}
                 <span class="transport-badge">{agent.tools.length} {$t('agents.tools')}</span>
+              {:else if agent.tools}
+                <!-- Present but empty is an explicit "no tools", which reads
+                     nothing like the absent list next door meaning "all". -->
+                <span class="transport-badge muted">{$t('agents.no_tools')}</span>
               {:else if agent.source !== 'default'}
                 <span class="transport-badge muted">{$t('agents.all_tools')}</span>
               {/if}
