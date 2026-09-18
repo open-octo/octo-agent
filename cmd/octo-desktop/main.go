@@ -714,16 +714,16 @@ func listenHub(addr string, grace time.Duration) (net.Listener, error) {
 }
 
 // trayStatusLines is the (info-only) top of the tray menu: what the hub is
-// doing right now — where it's serving and how many clients are attached.
+// doing right now — where it's serving and how many clients are attached. The
+// profile row sits between the first two of these but is not one of them: it
+// is fixed for the life of the process and is a submenu, not a line (see
+// addProfileRow).
 func trayStatusLines(bridge *nativeBridge) []string {
 	srv := bridge.srv.Load()
 	if srv == nil {
 		return []string{L().trayStarting}
 	}
 	lines := []string{fmt.Sprintf(L().trayBackendFmt, hubAddr.Load().(string))}
-	if p := os.Getenv(datahome.ProfileEnv); p != "" {
-		lines = append(lines, fmt.Sprintf(L().trayProfileFmt, p))
-	}
 	lines = append(lines, fmt.Sprintf(L().trayClientsFmt, srv.ConnectedClients()))
 	// Only when > 0 — keeps the menu clean before any channel is configured.
 	if n := srv.ConfiguredChannelCount(); n > 0 {
@@ -768,7 +768,10 @@ func buildAppMenu(app *application.App, bridge *nativeBridge) *application.Menu 
 // SetMenu call, which Wails marshals to the UI thread.
 func buildTrayMenu(app *application.App, bridge *nativeBridge) *application.Menu {
 	m := app.NewMenu()
-	for _, line := range trayStatusLines(bridge) {
+	lines := trayStatusLines(bridge)
+	m.Add(lines[0]).SetEnabled(false)
+	addProfileRow(m, bridge)
+	for _, line := range lines[1:] {
 		m.Add(line).SetEnabled(false)
 	}
 	m.AddSeparator()
@@ -782,7 +785,6 @@ func buildTrayMenu(app *application.App, bridge *nativeBridge) *application.Menu
 	}
 	m.Add(petLabel).OnClick(func(*application.Context) { bridge.togglePet() })
 	m.Add(L().traySettings).OnClick(func(*application.Context) { bridge.openSettings() })
-	addProfileMenu(m, bridge)
 	// A known-newer release replaces the "check" item with a one-click update
 	// (in-place when this build supports it, else the download page) — the
 	// durable prompt when the toast was suppressed. Otherwise the manual check.

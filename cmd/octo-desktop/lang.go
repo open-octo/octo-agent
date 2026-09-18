@@ -36,7 +36,6 @@ type uiStrings struct {
 
 	// Profile switching. The two switch messages differ because a turn in
 	// flight and a turn waiting on the user are different reasons to stop.
-	trayProfileMenu       string
 	trayProfileFmt        string // "Profile · %s"
 	profileDefault        string
 	profileSwitchTitle    string
@@ -81,7 +80,6 @@ var enStrings = uiStrings{
 	takeoverOK:     "Stop and Continue",
 	takeoverCancel: "Quit",
 
-	trayProfileMenu:       "Profile",
 	trayProfileFmt:        "Profile · %s",
 	profileDefault:        "Default",
 	profileSwitchTitle:    "Switch profile",
@@ -131,7 +129,6 @@ var zhStrings = uiStrings{
 	takeoverOK:     "停止并继续",
 	takeoverCancel: "退出",
 
-	trayProfileMenu:       "Profile",
 	trayProfileFmt:        "Profile · %s",
 	profileDefault:        "默认",
 	profileSwitchTitle:    "切换 Profile",

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -8,21 +9,28 @@ import (
 	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
-// addProfileMenu hangs a profile picker off the tray menu, listing the data
-// roots that exist on disk. It is also the only place a profile can be
-// discovered from the GUI — the CLI has no listing command either, and a shell
-// that only takes a name is no help to someone who has forgotten the names.
+// addProfileRow puts the profile into the tray's status block, right under the
+// backend address: which data root this backend runs under is the same kind of
+// fact as which port it answers on. The row is itself the picker — its title
+// carries the current name, and opening it lists the data roots that exist on
+// disk, so the menu never says "Profile" twice. It is the only place a profile
+// can be switched from the GUI.
 //
-// Omitted entirely when the default profile is the only one: a submenu with a
+// With the default profile alone there is no row at all: a submenu with a
 // single item is a menu that teaches nothing, and a user who has never made a
-// second profile cannot make one from here anyway.
-func addProfileMenu(m *application.Menu, bridge *nativeBridge) {
+// second profile cannot make one from here anyway. A named profile with
+// nothing to switch to still gets its (disabled) status line.
+func addProfileRow(m *application.Menu, bridge *nativeBridge) {
+	current := os.Getenv(datahome.ProfileEnv)
+	title := fmt.Sprintf(L().trayProfileFmt, desktopProfileLabel(current))
 	profiles, err := datahome.List()
 	if err != nil || len(profiles) < 2 {
+		if current != "" {
+			m.Add(title).SetEnabled(false)
+		}
 		return
 	}
-	current := os.Getenv(datahome.ProfileEnv)
-	sub := m.AddSubmenu(L().trayProfileMenu)
+	sub := m.AddSubmenu(title)
 	for _, p := range profiles {
 		profile := p // the click runs long after this loop
 		item := sub.AddRadio(desktopProfileLabel(profile), profile == current)
