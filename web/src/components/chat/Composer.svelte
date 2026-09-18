@@ -4,7 +4,7 @@
   import {
     running, activeSessionId, chatStreaming, sessions, sessionGroups,
     chatContextUsage, chatWorkingDir, chatPermMode, chatReasoningEffort, chatShowReasoning, showToast, chatGoal, chatModel,
-    globalPermissionMode, globalReasoningEffort, nativeShell, localAccess, activeAgent, pendingModel, view, settingsModalOpen,
+    globalPermissionMode, globalReasoningEffort, nativeShell, localAccess, activeAgent, pendingModel, view, openSettingsAt,
     pendingAgent, pendingWorkingDir, pendingGroupId, pendingReasoningEffort, pendingPermissionMode, pendingShowReasoning,
     normalizeDir, dirLeaf, projectsClaimingDir,
   } from '../../lib/stores'
@@ -1488,7 +1488,7 @@
                   {/each}
                 {/each}
                 <div class="menu-divider"></div>
-                <button class="menu-item manage" onclick={() => { modelMenu = false; settingsModalOpen.set(true) }}>
+                <button class="menu-item manage" onclick={() => { modelMenu = false; openSettingsAt('endpoints') }}>
                   <span class="mi-name">{$t('composer.manage_models')}</span>
                 </button>
               {/if}
