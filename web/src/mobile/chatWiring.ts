@@ -54,7 +54,7 @@ function applyHistoryEvent(sid: string, ev: Record<string, any>, showReasoning: 
     if (!(ev.content ?? '').trim() && !(ev.thinking ?? '').trim()) return
     addChatMsg(sid, {
       id: uid('a'), type: 'assistant', content: ev.content ?? '', thinking: ev.thinking ?? '',
-      createdAt: Date.now(), streaming: false, tools: [], todos: [],
+      createdAt: ev.created_at ?? Date.now(), streaming: false, tools: [], todos: [],
     })
   } else if (ev.type === 'thinking') {
     if (showReasoning) commitThinking(sid, ev.text ?? '')

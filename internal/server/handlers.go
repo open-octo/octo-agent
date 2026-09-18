@@ -742,11 +742,15 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 					}
 				}
 				if txt.Len() > 0 {
-					events = append(events, map[string]any{
+					ev := map[string]any{
 						"type":     "assistant_message",
 						"content":  txt.String(),
 						"thinking": "",
-					})
+					}
+					if !m.CreatedAt.IsZero() {
+						ev["created_at"] = m.CreatedAt.UnixMilli()
+					}
+					events = append(events, ev)
 				}
 				for _, b := range m.Blocks {
 					if b.Type == "tool_use" {
@@ -774,12 +778,20 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 				// closes a turn is a valid branch point, an intermediate
 				// (tool_use) round is not — the web UI shows the Branch action
 				// exactly where the index is present.
-				events = append(events, map[string]any{
+				ev := map[string]any{
 					"type":          "assistant_message",
 					"content":       m.Content,
 					"thinking":      thinking,
 					"message_index": i,
-				})
+				}
+				// Without this the Web UI stamps the replayed bubble with the
+				// reload time, so an answer from this morning reads as "now"
+				// after every refresh. Omitted for pre-CreatedAt session files
+				// (the UI then falls back to the reload time, as before).
+				if !m.CreatedAt.IsZero() {
+					ev["created_at"] = m.CreatedAt.UnixMilli()
+				}
+				events = append(events, ev)
 			}
 		}
 	}

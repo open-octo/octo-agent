@@ -640,3 +640,69 @@ func TestParseUserFilesLocalPath(t *testing.T) {
 		t.Errorf("local path must be ignored for a non-loopback client, got notes=%+v", att2.notes)
 	}
 }
+
+// A replayed assistant bubble must carry the persisted CreatedAt: the Web UI
+// stamps the bubble with whatever created_at it receives and falls back to the
+// reload time when it is absent — which made an answer from this morning read
+// as "now" after every refresh. Both replay shapes (final answer and the text
+// segment of a tool round) carry it; a pre-CreatedAt session file carries none.
+func TestHandleGetSessionMessages_AssistantMessageCarriesCreatedAt(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	at := time.Date(2026, 9, 18, 8, 2, 0, 0, time.UTC)
+	sess := agent.NewSession("deepseek-v4-pro", "")
+	sess.Title = "fixed"
+	sess.Messages = []agent.Message{
+		{Role: agent.RoleUser, Content: "weather?", CreatedAt: at},
+		{Role: agent.RoleAssistant, CreatedAt: at.Add(time.Second), Blocks: []agent.ContentBlock{
+			{Type: "text", Text: "checking"},
+			{Type: "tool_use", ID: "t1", Name: "terminal", Input: map[string]any{}},
+		}},
+		{Role: agent.RoleUser, Blocks: []agent.ContentBlock{{Type: "tool_result", ToolUseID: "t1", Result: "sunny"}}},
+		{Role: agent.RoleAssistant, Content: "sunny today", CreatedAt: at.Add(2 * time.Second)},
+		// Pre-CreatedAt session files have a zero timestamp: no created_at
+		// rather than a bogus 1970 value.
+		{Role: agent.RoleUser, Content: "and tomorrow?"},
+		{Role: agent.RoleAssistant, Content: "also sunny"},
+	}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
+	req.SetPathValue("id", sess.ID)
+	rec := httptest.NewRecorder()
+	srv.handleGetSessionMessages(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("messages endpoint = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		Events []map[string]any `json:"events"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	var got []map[string]any
+	for _, ev := range body.Events {
+		if ev["type"] == "assistant_message" {
+			got = append(got, ev)
+		}
+	}
+	if len(got) != 3 {
+		t.Fatalf("assistant_message events = %d, want 3: %+v", len(got), body.Events)
+	}
+	// JSON numbers decode as float64.
+	if want := float64(at.Add(time.Second).UnixMilli()); got[0]["created_at"] != want {
+		t.Errorf("tool-round text segment created_at = %v, want %v", got[0]["created_at"], want)
+	}
+	if want := float64(at.Add(2 * time.Second).UnixMilli()); got[1]["created_at"] != want {
+		t.Errorf("final answer created_at = %v, want %v", got[1]["created_at"], want)
+	}
+	if v, ok := got[2]["created_at"]; ok {
+		t.Errorf("pre-CreatedAt reply carried created_at = %v, want none", v)
+	}
+}

@@ -366,7 +366,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         type: 'assistant',
         content: ev.content ?? '',
         thinking: ev.thinking ?? '',
-        createdAt: Date.now(),
+        // Persisted message timestamp; absent on sessions that predate
+        // per-message CreatedAt, where the reload time is the best we have.
+        createdAt: ev.created_at ?? Date.now(),
         streaming: false,
         tools: [],
         todos: [],
