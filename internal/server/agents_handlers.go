@@ -103,6 +103,23 @@ func agentToResp(p *agentprofile.Profile) agentResponse {
 	}
 }
 
+// respondWithStored writes the profile as the store holds it, falling back to
+// the handler's own struct if the read somehow misses.
+//
+// Source and the timestamps are stamped by the read path — scanDir sets Source
+// from the directory a file was found in, parseFile takes the mtime — so a
+// handler that echoes the struct it just assembled reports source:"" and a
+// zero mtime. agentResponse.Source documents itself as always present, and
+// every read endpoint does return it; only create and update, which answer
+// from their own request-shaped value, did not.
+func (s *Server) respondWithStored(w http.ResponseWriter, code int, p *agentprofile.Profile) {
+	if saved, ok := s.agentStoreOrInit().Get(p.ID); ok {
+		writeJSON(w, code, agentToResp(saved))
+		return
+	}
+	writeJSON(w, code, agentToResp(p))
+}
+
 // ─── Handlers ───────────────────────────────────────────────────────────────
 
 // agentStoreOrInit returns the profile store, initializing it if needed.
@@ -205,7 +222,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, agentToResp(p))
+	s.respondWithStored(w, http.StatusCreated, p)
 	s.broadcastGlobal(map[string]any{"type": "agents_changed"})
 }
 
@@ -300,7 +317,7 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, agentToResp(p))
+	s.respondWithStored(w, http.StatusOK, p)
 	s.broadcastGlobal(map[string]any{"type": "agents_changed"})
 }
 
