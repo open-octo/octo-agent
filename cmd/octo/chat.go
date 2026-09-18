@@ -1420,13 +1420,16 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			a.System, a.LeanSystem = prompt.ComposePair(sess.System, cwd, env, skillsManifest, tools.MCPManifestFor(a.Model, agentProfile, a.ContextWindow()), memInjection, coauthor, agentProfile != nil && agentProfile.SystemPrompt != "")
 		}
 		if toolsOn {
-			// The store rides the tool context so sub_agent's subagent_type
-			// names this machine's agents. Deliberately WITHOUT the session
-			// agent ID: that key also switches on DefaultToolsForProfile's
-			// per-profile allowlist, which the TUI has never applied — adding
-			// it here would silently strip tools from a --agent session whose
-			// profile declares none.
+			// Same keys the server and the one-shot attach: the store so
+			// sub_agent's subagent_type names this machine's agents, and the
+			// agent ID so a --agent session gets its profile's tool allowlist.
+			// The TUI used to attach neither, which left one agent with two
+			// different toolbelts depending on where it ran.
 			cfg.toolCtx = tools.WithProfileStore(context.Background(), agentStore)
+			if agentProfileID != "" {
+				cfg.toolCtx = tools.WithSessionAgentID(cfg.toolCtx, agentProfileID)
+				warnIfProfileHasNoTools(stderr, agentProfile)
+			}
 			// Built-ins only at first paint — the MCP registry is still nil
 			// (mcpBoot connects it in the background). mcpReadyMsg recomputes
 			// this list once the servers are live.
@@ -1495,6 +1498,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		toolCtx := tools.WithProfileStore(context.Background(), agentStore)
 		if agentProfileID != "" {
 			toolCtx = tools.WithSessionAgentID(toolCtx, agentProfileID)
+			warnIfProfileHasNoTools(stderr, agentProfile)
 		}
 		replCfg.toolCtx = toolCtx
 		replCfg.tools = tools.DefaultToolsForProfile(toolCtx, resolvedModel, a.ContextWindow())
@@ -1607,6 +1611,18 @@ func newCacheKey() string {
 }
 
 // agentUserDir is the user-level profile directory (~/.octo/agents).
+// warnIfProfileHasNoTools flags a --agent profile that will run with an empty
+// toolbelt. For a user profile an absent `tools:` list means NO tools (for the
+// built-in tiers the same emptiness means "all"), which is easy to hit by
+// omission in a hand-written .md and otherwise surfaces only as an agent that
+// mysteriously can't do anything.
+func warnIfProfileHasNoTools(w io.Writer, p *agentprofile.Profile) {
+	if p == nil || p.Source != agentprofile.SourceUser || len(p.Tools) > 0 {
+		return
+	}
+	fmt.Fprintf(w, "octo: agent %q declares no `tools:`, so it runs without any tools — add a tools list to its frontmatter to give it a toolbelt\n", p.ID)
+}
+
 func agentUserDir() string {
 	dir, err := datahome.Path("agents")
 	if err != nil {
