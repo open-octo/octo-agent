@@ -2,10 +2,11 @@
   // Desktop question surface. With global broadcast, a question can originate
   // from ANY session. To avoid interrupting a conversation in progress:
   //
-  //  - The modal/banner appears ONLY for the question of the ACTIVE session.
+  //  - The banner appears ONLY for the question of the ACTIVE session, in the
+  //    chat column above the composer — never as a blocking modal.
   //  - Questions from other sessions surface as compact, clickable rows
   //    ("Session B needs your input") — tapping one switches to that session,
-  //    where the modal then appears.
+  //    where the banner then appears.
   //
   // A set is navigated as tabs with a review/submit tab, and each question
   // renders in one of two mutually exclusive layouts (see askStepper).
@@ -20,7 +21,7 @@
     type AskDraft, type AskOutcome,
   } from '../../lib/askStepper'
 
-  // Active session's own pending question → full modal/banner.
+  // Active session's own pending question → the banner.
   const current = $derived($activeSessionId ? $questionModals[$activeSessionId] : undefined)
 
   // All OTHER sessions' pending questions → compact notification rows.
@@ -39,7 +40,7 @@
   let focusedLabel = $state('')
   let inputEl = $state<HTMLInputElement | null>(null)
   let rowListEl = $state<HTMLDivElement | null>(null)
-  let expanded = $state(false)
+  let collapsed = $state(false)
   let lastQuestionId = $state<string | null>(null)
 
   const question = $derived(questions[qIdx])
@@ -54,7 +55,7 @@
       qIdx = 0
       drafts = emptyDrafts(current.questions ?? [])
       focusedLabel = current.questions?.[0]?.options?.[0]?.label ?? ''
-      expanded = false
+      collapsed = false
       inputEl?.focus()
     }
   })
@@ -127,7 +128,9 @@
   function clarify() { finish('clarify') }
   function reject() { finish('rejected') }
 
-  function softClose() { expanded = false }
+  // The banner sits in the chat column, so "closing" it only folds it down to
+  // its question line — the question stays pending and reachable.
+  function softClose() { collapsed = true }
   function onKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') { e.preventDefault(); softClose() }
     // Preview layout: a click only focuses (so previews can be browsed without
@@ -147,7 +150,7 @@
 </script>
 
 <!-- Non-active sessions' questions: compact, non-interrupting rows. Clicking
-     switches to that session, where the modal then appears. -->
+     switches to that session, where the banner then appears. -->
 {#if others.length}
   <div class="qnote-stack" role="status" aria-live="polite">
     {#each others as [sid, entry] (sid)}
@@ -273,97 +276,59 @@
   </div>
 {/snippet}
 
-<!-- Active session's own question: full modal/banner. -->
-{#if current && expanded}
-  <div class="backdrop" role="presentation">
-    <div class="modal" onkeydown={onKeydown} role="dialog" aria-modal="true" tabindex="-1">
-      <div class="modal-header">
+<!-- Active session's own question: the banner, folded or open. -->
+{#if current}
+  <div class="banner" role="dialog" aria-modal="false" tabindex="-1" onkeydown={onKeydown}>
+    <div class="banner-inner" class:collapsed>
+      <div class="banner-main">
         <iconify-icon icon="ant-design:form-outlined" width="16" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
-        <span class="modal-title">{$t('question.title')}</span>
-        <button class="close-btn" onclick={softClose} aria-label={$t('common.close')}>
-          <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
+        <span class="banner-question" title={question?.question}>{onReview ? $t('question.submit_tab') : question?.question}</span>
+        {#if questions.length > 1}
+          <span class="banner-progress">{Math.min(qIdx + 1, questions.length)}/{questions.length}</span>
+        {/if}
+        <button
+          class="banner-toggle"
+          onclick={() => { if (collapsed) { collapsed = false; inputEl?.focus() } else softClose() }}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? $t('question.expand') : $t('question.collapse')}
+        >
+          <iconify-icon icon={collapsed ? 'ant-design:down-outlined' : 'ant-design:up-outlined'} width="12"></iconify-icon>
         </button>
       </div>
 
-      <div class="modal-body">
+      {#if !collapsed}
         {@render tabs()}
         {#if onReview}
           {@render review()}
         {:else}
-          <p class="question-text">{question?.question}</p>
           {@render rows()}
         {/if}
-      </div>
 
-      <div class="modal-footer">
-        <button class="btn-cancel" onclick={reject}>{$t('common.cancel')}</button>
-        <span class="spacer"></span>
-        {#if onReview}
-          <button class="btn-primary" onclick={() => finish('submitted')} disabled={!anyAnswered(drafts)}>
-            {$t('question.submit_answers')}
-          </button>
-        {:else if question?.multi_select}
-          <button
-            class="btn-primary"
-            onclick={() => { const to = advanceIndex(questions, qIdx); if (to === -1) finish('submitted'); else goTab(to) }}
-            disabled={draft.choices.length === 0}
-          >
-            {hasReviewTab(questions) ? $t('question.next') : $t('common.submit')}
-          </button>
-        {:else if preview}
-          <!-- Preview layout: a single click only focuses a row so its preview
-               can be inspected without committing, which leaves no visible way
-               to answer (double-click and Enter both work, but nothing says
-               so). This commits the focused option, note included. -->
-          <button class="btn-primary" onclick={() => pick(focusedLabel)} disabled={!focusedLabel}>
-            {hasReviewTab(questions) ? $t('question.next') : $t('common.submit')}
-          </button>
-        {/if}
-      </div>
-    </div>
-  </div>
-{:else if current}
-  <div class="banner" role="dialog" aria-modal="false">
-    <div class="banner-inner">
-      <div class="banner-main">
-        <iconify-icon icon="ant-design:form-outlined" width="16" style="color:var(--blue-6);flex-shrink:0"></iconify-icon>
-        <span class="banner-question">{onReview ? $t('question.submit_tab') : question?.question}</span>
-        {#if questions.length > 1}
-          <span class="banner-progress">{Math.min(qIdx + 1, questions.length)}/{questions.length}</span>
-        {/if}
-        <button class="banner-expand" onclick={() => { expanded = true; inputEl?.focus() }}>
-          <iconify-icon icon="ant-design:arrows-alt-outlined" width="12"></iconify-icon>
-        </button>
-      </div>
-
-      {@render tabs()}
-      {#if onReview}
-        {@render review()}
-      {:else}
-        {@render rows()}
+        <div class="banner-actions">
+          <button class="btn-cancel btn-cancel-sm" onclick={reject}>{$t('common.cancel')}</button>
+          {#if onReview}
+            <button class="btn-primary btn-primary-sm" onclick={() => finish('submitted')} disabled={!anyAnswered(drafts)}>
+              {$t('question.submit_answers')}
+            </button>
+          {:else if question?.multi_select}
+            <button
+              class="btn-primary btn-primary-sm"
+              onclick={() => { const to = advanceIndex(questions, qIdx); if (to === -1) finish('submitted'); else goTab(to) }}
+              disabled={draft.choices.length === 0}
+            >
+              {hasReviewTab(questions) ? $t('question.next') : $t('common.submit')}
+            </button>
+          {:else if preview}
+            <!-- Preview layout: a single click only focuses a row so its preview
+                 can be inspected without committing, which leaves no visible way
+                 to answer (double-click and Enter both work, but nothing says
+                 so). This commits the focused option, note included. -->
+            <button class="btn-primary btn-primary-sm" onclick={() => pick(focusedLabel)} disabled={!focusedLabel}>
+              {hasReviewTab(questions) ? $t('question.next') : $t('common.submit')}
+            </button>
+          {/if}
+        </div>
       {/if}
-
-      <div class="banner-actions">
-        <button class="btn-cancel btn-cancel-sm" onclick={reject}>{$t('common.cancel')}</button>
-        {#if onReview}
-          <button class="btn-primary btn-primary-sm" onclick={() => finish('submitted')} disabled={!anyAnswered(drafts)}>
-            {$t('question.submit_answers')}
-          </button>
-        {:else if question?.multi_select}
-          <button
-            class="btn-primary btn-primary-sm"
-            onclick={() => { const to = advanceIndex(questions, qIdx); if (to === -1) finish('submitted'); else goTab(to) }}
-            disabled={draft.choices.length === 0}
-          >
-            {hasReviewTab(questions) ? $t('question.next') : $t('common.submit')}
-          </button>
-        {:else if preview}
-          <!-- Same confirm affordance as the modal footer above. -->
-          <button class="btn-primary btn-primary-sm" onclick={() => pick(focusedLabel)} disabled={!focusedLabel}>
-            {hasReviewTab(questions) ? $t('question.next') : $t('common.submit')}
-          </button>
-        {/if}
-      </div>
     </div>
   </div>
 {/if}
@@ -478,6 +443,7 @@
   .review-warn { font-size: 12px; color: var(--text-tertiary); }
 
   /* ─── Bottom banner (active session, non-blocking) ─────────────── */
+  .banner:focus { outline: none; }
   .banner {
     flex: 0 0 auto;
     max-width: var(--chat-content-max-width); margin: 0 auto; width: 100%;
@@ -503,19 +469,21 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .banner-progress { font-size: 12px; color: var(--text-tertiary); flex-shrink: 0; }
-  .banner-expand {
+  .banner-toggle {
     width: 24px; height: 24px; border: none; background: transparent;
     border-radius: 6px; cursor: pointer; color: var(--text-tertiary);
     display: flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
-  .banner-expand:hover { background: var(--hover-neutral); color: var(--blue-6); }
+  .banner-toggle:hover { background: var(--hover-neutral); color: var(--blue-6); }
+  /* Folded: the question line alone, so the transcript stays readable while
+     the question keeps its place above the composer. */
+  .banner-inner.collapsed { padding: 8px 16px; gap: 0; }
   .banner-actions { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
 
   /* The banner shares the chat column with the transcript, so its option list
      is capped and scrolls instead of pushing the messages off-screen. Rows are
      tightened and descriptions clamped to one line; the full text stays
-     reachable through the row's title. The expanded modal keeps the roomy
-     layout — it already owns the whole viewport. */
+     reachable through the row's title. */
   .banner-inner .row-list {
     max-height: calc(30vh / var(--font-zoom));
     overflow-y: auto;
@@ -527,45 +495,6 @@
     -webkit-box-orient: vertical; overflow: hidden;
   }
   .banner-inner .preview-body { max-height: calc(26vh / var(--font-zoom)); }
-
-  /* ─── Full modal (expanded) ──────────────────────────────────── */
-  .backdrop {
-    position: fixed; inset: 0; z-index: 1100;
-    background: var(--scrim);
-    display: flex; align-items: center; justify-content: center;
-    padding: 24px;
-  }
-  .modal {
-    width: 100%; max-width: 720px;
-    background: var(--bg-container);
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: 0 16px 48px rgba(0,0,0,0.18);
-    animation: octo-fadein 0.16s ease;
-  }
-  .modal:focus { outline: none; }
-  .modal-header { display: flex; align-items: center; gap: 8px; padding: 14px 24px; border-bottom: 1px solid var(--border-table); }
-  .modal-title {
-    font-size: 15px; font-weight: 600; color: var(--text-heading); flex: 1;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .close-btn {
-    width: 28px; height: 28px; border: none; background: transparent;
-    border-radius: 6px; display: flex; align-items: center; justify-content: center;
-    cursor: pointer; color: var(--text-tertiary); flex-shrink: 0;
-  }
-  .close-btn:hover { background: var(--hover-neutral); }
-
-  .modal-body { padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
-  .question-text {
-    margin: 0;
-    font-size: 14px; line-height: 1.6; color: var(--text-secondary);
-    white-space: pre-wrap; word-break: break-word;
-    max-height: calc(30vh / var(--font-zoom)); overflow-y: auto;
-  }
-
-  .modal-footer { padding: 14px 24px; border-top: 1px solid var(--border-table); display: flex; align-items: center; gap: 8px; }
-  .spacer { flex: 1; }
 
   .btn-cancel {
     height: 32px; padding: 0 14px;
