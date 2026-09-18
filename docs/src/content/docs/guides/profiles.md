@@ -82,6 +82,40 @@ from inside a `work` session reads `work`'s config, not your default one.
 The TUI shows no indication of which profile it is in. If you are unsure, `octo serve` prints it,
 or just look at the directory listing above.
 
+## Managing profiles
+
+A profile comes into being the first time something runs under its name, so `--profile scratch`
+alone is enough to make one. The management commands exist for everything after that: seeing what
+is on disk, making a root ahead of time, and getting rid of one.
+
+```bash
+$ octo profiles
+NAME     SIZE     STATUS                        PATH
+default  412.3MB  current, running (pid 96688)  /Users/you/.octo
+home     18.0MB   -                             /Users/you/.octo-home
+work     96.5MB   running (pid 96701)           /Users/you/.octo-work
+
+$ octo profiles create lab        # an empty ~/.octo-lab, ready for `octo --profile lab`
+$ octo profiles path work         # /Users/you/.octo-work
+$ octo profiles rm home --yes     # deletes ~/.octo-home and everything in it
+```
+
+`rm` is final — the root holds that profile's config and API keys, sessions, memory, skills, IM
+credentials and logs, and none of it goes through the recycle bin. Without `--yes` the command
+only prints what it would delete. Three roots are refused outright: the default `~/.octo` (it also
+holds machine-wide state such as `~/.octo/bin`), the profile the command itself runs under, and
+any profile whose backend is still up. Stop that one first:
+
+```bash
+octo serve --profile home stop
+octo profiles rm home --yes
+```
+
+The Web UI has the same three operations under **Settings → Data → Profiles**: the list marks
+which root the backend you are looking at runs under and which ones have a live backend, and
+deleting asks you to type the profile's name. It cannot switch profiles — that is a restart of the
+backend, which is the desktop tray menu's job (below) or a new `octo serve --profile` launch.
+
 ## Running a backend
 
 `octo serve` is where profiles stop being a private matter, because two backends can't share a
@@ -147,7 +181,7 @@ the way the CLI can. It remembers instead.
 
 Open the tray menu, pick from the **Profile** submenu, and the app records the choice and restarts
 into it. The submenu lists the profiles that exist on disk, and only appears once there is more
-than one — it is also the only place to see your profiles without a terminal.
+than one. To make that second profile without a terminal, use **Settings → Data → Profiles**.
 
 One app, one profile. Switching restarts, and a restart loses whatever octo was in the middle of,
 so it asks first — but only when there is something to lose. An idle backend switches without a

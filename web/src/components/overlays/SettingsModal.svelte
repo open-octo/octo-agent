@@ -3,6 +3,7 @@
   import ThemePackPicker from '../ui/ThemePackPicker.svelte'
   import Switch from '../ui/Switch.svelte'
   import EndpointsSection from '../settings/EndpointsSection.svelte'
+  import ProfilesSection from '../settings/ProfilesSection.svelte'
   import QrCode from '../ui/QrCode.svelte'
   import FileRecallView from '../../views/FileRecallView.svelte'
   import ProfileView from '../../views/ProfileView.svelte'
@@ -68,7 +69,7 @@
   // files). Reset whenever the category (or the whole modal) changes, so
   // leaving and returning to 数据管理 always lands on the list, not wherever
   // you left off.
-  let dataSubView = $state<'none' | 'archived' | 'trash' | 'memory'>('none')
+  let dataSubView = $state<'none' | 'archived' | 'trash' | 'memory' | 'profiles'>('none')
   let archiveSearch = $state('')
   // '' = every project, 'none' = no project, else a project's group id.
   let archiveProjectFilter = $state('')
@@ -683,13 +684,20 @@
               </div>
               <button class="link-btn" onclick={() => (dataSubView = 'trash')}>{$t('settings.data.manage')}</button>
             </div>
+            <div class="data-row">
+              <div class="data-row-main">
+                <iconify-icon icon="lucide:database" width="15"></iconify-icon>
+                <span class="setl">{$t('settings.profiles.title')}</span>
+              </div>
+              <button class="link-btn" onclick={() => (dataSubView = 'profiles')}>{$t('settings.data.manage')}</button>
+            </div>
           {:else}
             <div class="data-subhead">
               <button class="back-btn" onclick={resetDataView}>
                 <iconify-icon icon="ant-design:left-outlined" width="14"></iconify-icon>
               </button>
               <span class="data-subtitle">
-                {dataSubView === 'archived' ? $t('settings.data.archived') : dataSubView === 'memory' ? $t('nav.memory') : $t('nav.file_recall')}
+                {dataSubView === 'archived' ? $t('settings.data.archived') : dataSubView === 'memory' ? $t('nav.memory') : dataSubView === 'profiles' ? $t('settings.profiles.title') : $t('nav.file_recall')}
               </span>
             </div>
             {#if dataSubView === 'archived'}
@@ -753,6 +761,8 @@
               {/if}
             {:else if dataSubView === 'memory'}
               <ProfileView embedded />
+            {:else if dataSubView === 'profiles'}
+              <ProfilesSection />
             {:else}
               <FileRecallView embedded />
             {/if}

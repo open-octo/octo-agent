@@ -950,6 +950,9 @@ func (s *Server) registerRoutes() {
 	s.api("POST /api/trash/empty", s.handleEmptyTrash)
 	s.api("POST /api/trash/{id}/restore", s.handleRestoreTrash)
 	s.api("DELETE /api/trash/{id}", s.handleDeleteTrash)
+	s.api("GET /api/profiles", s.handleListProfiles)
+	s.api("POST /api/profiles", s.handleCreateProfile)
+	s.api("DELETE /api/profiles/{name}", s.handleDeleteProfile)
 
 	// Onboard & config
 	s.api("GET /api/onboard/status", s.handleOnboardStatus)

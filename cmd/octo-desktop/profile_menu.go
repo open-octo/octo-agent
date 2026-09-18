@@ -14,7 +14,8 @@ import (
 // fact as which port it answers on. The row is itself the picker — its title
 // carries the current name, and opening it lists the data roots that exist on
 // disk, so the menu never says "Profile" twice. It is the only place a profile
-// can be switched from the GUI.
+// can be switched from the GUI; listing, creating and removing them is
+// `octo profiles` and the Web UI's 设置 → 数据管理 panel.
 //
 // With the default profile alone there is no row at all: a submenu with a
 // single item is a menu that teaches nothing, and a user who has never made a

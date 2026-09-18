@@ -44,6 +44,17 @@ The Web UI recognizes a different command set than the TUI — `/goal edit <text
 here, while the TUI's `/skills`, `/mcp`, `/init` are terminal-only. For the per-surface command tables and
 availability matrix: **https://octo-agent.dev/docs/reference/slash-commands/** (`web_fetch`).
 
+## Settings → Data → Profiles
+
+Lists the user-data profiles on this machine (`~/.octo`, `~/.octo-<name>`) with path, size, a **current**
+tag on the one this backend runs under, and a **running** tag (with pid) on any whose backend is up.
+Create a new profile by name; delete one by typing its name into the confirmation — deletion is
+permanent and skips the recycle bin. The default profile, the current one, and a running one cannot
+be deleted from here (stop that backend first with `octo serve --profile <name> stop`). The panel does
+not switch profiles: that restarts the backend, so it lives in the desktop tray menu or a new
+`octo serve --profile <name>` launch. CLI twin: `octo profiles` (`CLI.md`); guide:
+**https://octo-agent.dev/docs/guides/profiles/**.
+
 ## Related docs
 
 - Serving it, remote access, and auth: **https://octo-agent.dev/docs/guides/self-host/**

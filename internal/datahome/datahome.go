@@ -75,6 +75,27 @@ func Dir() (string, error) {
 	if profile != "" && !profileName.MatchString(profile) {
 		return "", fmt.Errorf("invalid %s value %q", ProfileEnv, profile)
 	}
+	return DirFor(profile)
+}
+
+// Current returns the selected profile name: "" for the default ~/.octo root.
+func Current() string {
+	return strings.TrimSpace(os.Getenv(ProfileEnv))
+}
+
+// ValidName reports whether profile is an acceptable profile name. The empty
+// string is valid and names the default root.
+func ValidName(profile string) bool {
+	return profile == "" || profileName.MatchString(profile)
+}
+
+// DirFor returns the data root a given profile would use, whether or not it
+// exists on disk, without consulting the selected profile. Management commands
+// use it to look at roots other than the one they run under.
+func DirFor(profile string) (string, error) {
+	if !ValidName(profile) {
+		return "", fmt.Errorf("invalid profile name %q", profile)
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve home directory: %w", err)

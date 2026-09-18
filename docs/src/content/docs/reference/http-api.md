@@ -59,6 +59,7 @@ called out in the release notes — there's no versioned `/api/v1` yet.
 | `GET /api/profile/soul`, `/api/profile/user` | read `soul.md` / `user.md` |
 | `GET /api/memories` | read the memory index |
 | `GET /api/trash`, `POST .../empty`, `POST .../{id}/restore`, `DELETE /api/trash/{id}` | the recoverable-delete trash panel |
+| `GET /api/profiles`, `POST /api/profiles`, `DELETE /api/profiles/{name}` | list / create / delete [user-data profiles](/docs/guides/profiles/); `DELETE` answers 409 for the default root, the profile this backend runs under, or one with a live backend |
 
 ## Onboarding, config, providers
 

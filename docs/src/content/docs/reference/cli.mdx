@@ -58,6 +58,7 @@ stdin, runs a headless one-shot: full agentic tool loop, then exit.
 | `octo hooks list` | List configured lifecycle hooks |
 | `octo sessions` [`--all`] | List this directory's sessions; `--all` lists every session on the machine, grouped by directory |
 | `octo trash list`\|`restore`\|`rm`\|`empty` | Recover files the agent deleted or overwrote (the [recycle bin](/docs/guides/sandbox-the-agent/)) |
+| `octo profiles list`\|`create`\|`rm`\|`path` | Manage the user-data roots `--profile` selects between ([profiles](/docs/guides/profiles/)); `rm` needs `--yes` and refuses the default, current, or running profile |
 | `octo workflows list`\|`path`\|`update` | List saved workflows |
 | `octo doctor` | Read-only health check of your setup |
 | `octo serve` | Start the HTTP server (REST + WebSocket + Web UI + IM bridge) |

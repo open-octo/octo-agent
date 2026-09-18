@@ -939,6 +939,31 @@ export async function emptyTrash(opts?: EmptyTrashOpts): Promise<void> {
   await request<unknown>('/api/trash/empty', { method: 'POST', ...json(opts ?? {}) })
 }
 
+// Profiles: the ~/.octo-<name> data roots --profile selects between. name ''
+// is the default ~/.octo root. The backend serving this page runs under
+// exactly one (`current`); that one, the default, and any root with a live
+// backend (`running`) are refused by DELETE with 409.
+export interface ProfileInfo {
+  name: string
+  path: string
+  current: boolean
+  running: boolean
+  pid?: number
+  size_bytes: number
+}
+
+export async function listProfiles(): Promise<{ profiles: ProfileInfo[]; current: string }> {
+  return request<{ profiles: ProfileInfo[]; current: string }>('/api/profiles')
+}
+
+export async function createProfile(name: string): Promise<ProfileInfo> {
+  return request<ProfileInfo>('/api/profiles', { method: 'POST', ...json({ name }) })
+}
+
+export async function deleteProfile(name: string): Promise<void> {
+  await request<unknown>(`/api/profiles/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
 // Config & Version
 
 // Mirrors server modelConfig (onboard_config_handlers.go). api_key is returned

@@ -124,6 +124,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runSessions(args[1:], stdout, stderr)
 	case "trash":
 		return runTrash(args[1:], stdout, stderr)
+	case "profiles":
+		return runProfiles(args[1:], stdout, stderr)
 	case "skills":
 		return runSkills(args[1:], stdout, stderr)
 	case "workflows":
@@ -188,6 +190,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  memory     Manage cross-session memory (e.g. `octo memory list`)")
 	fmt.Fprintln(w, "  sessions   List this directory's recent sessions, --all for every one (resume with `octo -c <id>`)")
 	fmt.Fprintln(w, "  trash      Recover files the agent deleted or overwrote (list | restore | rm | empty)")
+	fmt.Fprintln(w, "  profiles   Manage user-data profiles selected by --profile (list | create | rm | path)")
 	fmt.Fprintln(w, "  skills     Manage skills (`octo skills list | add | update | path`)")
 	fmt.Fprintln(w, "  workflows  List saved workflows (`octo workflows list | path | update`)")
 	fmt.Fprintln(w, "  browser    Set up browser automation (attach to your logged-in Chrome)")

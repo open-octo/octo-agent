@@ -18,6 +18,7 @@ Frequently-used flags: `-c`/`--continue [id]` (resume), `--provider anthropic|op
 | `octo skills list`\|`add`\|`update`\|`path` | Manage discovered skills — see `SKILLS.md` |
 | `octo hooks list` | List configured lifecycle hooks (not shown in top-level `--help`, but real) — see `HOOKS.md` |
 | `octo sessions` | List saved sessions |
+| `octo profiles list`\|`create`\|`rm`\|`path` | Manage user-data profiles — see the section below |
 | `octo serve` | Start the HTTP server (REST + WebSocket + Web UI + IM bridge) |
 | `octo workflows list`\|`path`\|`update` | Manage named multi-step workflows the model runs by name |
 | `octo browser setup` | Configure Chrome DevTools Protocol automation |
@@ -25,6 +26,17 @@ Frequently-used flags: `-c`/`--continue [id]` (resume), `--provider anthropic|op
 | `octo completion bash`\|`zsh`\|`fish`\|`powershell` | Print a shell completion script |
 | `octo version` | Print version information |
 | `octo help [command]` | Top-level help, or a command's detailed help/examples |
+
+### Profiles (`--profile` and `octo profiles`)
+
+A profile is a separate user-data root: the default is `~/.octo`, a profile named `work` is `~/.octo-work`, with its own config, API keys, sessions, memory, skills, `channels.yml` and IM credentials, `permissions.yml`, logs and `serve.addr`. `~/.octo/bin` (helper binaries) is shared by all profiles. Select one for any command with the global `--profile <name>` flag (any position, `--profile=name` also works) or the `OCTO_PROFILE` env var, which octo passes to every child process it spawns. A named profile's first `octo serve` picks the first free port from 8089 and pins it in `serve.addr`; `octo serve --profile <name> status|stop` controls that profile's daemon.
+
+- `octo profiles` / `octo profiles list` — every root on disk with size, path, which one is current, and which has a running backend (pid)
+- `octo profiles create <name>` — make an empty `~/.octo-<name>` (a profile is also created implicitly the first time anything runs under its name)
+- `octo profiles rm <name> --yes` — permanently delete the root and everything in it; no recycle bin. Without `--yes` it only prints what would go. Refused for the default profile, the profile the command runs under, and any profile whose backend is alive (`octo serve --profile <name> stop` first)
+- `octo profiles path [name]` — print a profile's data root (no name = the current one)
+
+Names: letters, digits, `-`, `_`, starting with a letter or digit. The Web UI has the same list/create/delete under Settings → Data → Profiles (`WEB.md`). Switching the desktop app between profiles is the tray menu's **Profile** submenu (it restarts the app). Full guide: **https://octo-agent.dev/docs/guides/profiles/**.
 
 ### `octo serve` flags
 

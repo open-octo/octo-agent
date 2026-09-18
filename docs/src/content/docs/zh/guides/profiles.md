@@ -79,6 +79,37 @@ alias octop='OCTO_PROFILE=home octo'
 TUI 界面不会显示当前在哪个 profile。拿不准的话，`octo serve` 启动时会打印，或者直接用上面那条命令
 看目录。
 
+## 管理 profile
+
+profile 在第一次有东西以它的名字运行时就诞生了，所以单单一句 `--profile scratch` 就能造出一个。管理
+命令管的是之后的事：看看磁盘上有哪些、提前建好一个目录、以及把某一个删掉。
+
+```bash
+$ octo profiles
+NAME     SIZE     STATUS                        PATH
+default  412.3MB  current, running (pid 96688)  /Users/you/.octo
+home     18.0MB   -                             /Users/you/.octo-home
+work     96.5MB   running (pid 96701)           /Users/you/.octo-work
+
+$ octo profiles create lab        # 建一个空的 ~/.octo-lab，随后 `octo --profile lab` 就能用
+$ octo profiles path work         # /Users/you/.octo-work
+$ octo profiles rm home --yes     # 删掉 ~/.octo-home 及其中一切
+```
+
+`rm` 不可撤销——这个目录里装着该 profile 的配置和 API key、会话、记忆、技能、IM 凭证和日志，
+而且不走回收站。不带 `--yes` 只会打印将要删除的内容。三种目录一律拒删：默认的 `~/.octo`
+（它还存着 `~/.octo/bin` 这类机器级的东西）、命令自身所在的 profile、以及后端还在跑的 profile。
+后一种先把它停掉：
+
+```bash
+octo serve --profile home stop
+octo profiles rm home --yes
+```
+
+Web 界面在 **设置 → 数据管理 → Profile** 里提供同样三件事：列表会标出你眼前这个后端运行在哪个
+目录下、哪些目录的后端正在跑，删除时要你把 profile 名字敲一遍。它不能切换 profile——切换意味着
+重启后端，那是桌面端托盘菜单的活（见下文），或者重新起一个 `octo serve --profile`。
+
 ## 跑一个后端
 
 `octo serve` 是 profile 从私事变成公事的地方，因为两个后端不能共用一个端口。
@@ -138,8 +169,7 @@ Web 界面会在侧栏底部版本号旁边显示一个小徽章标出当前 pro
 双击图标不会传任何参数，所以桌面端没法像 CLI 那样被告知要开哪个 profile。它改成记住。
 
 打开托盘菜单，在 **Profile** 子菜单里选一个，应用会记下这个选择并重启进去。子菜单列出的是磁盘上已有
-的 profile，而且只有存在一个以上时才出现——它同时也是不开终端就能看到自己有哪些 profile 的唯一
-地方。
+的 profile，而且只有存在一个以上时才出现。不开终端就想造出第二个，去 **设置 → 数据管理 → Profile**。
 
 一个应用，一个 profile。切换要重启，而重启会丢掉 octo 手头正在做的事，所以它会先问一句——但只在
 确实有东西可丢的时候问。后端空闲时直接切，不弹框。如果 octo 正在处理任务，或者正在等你回答，它会

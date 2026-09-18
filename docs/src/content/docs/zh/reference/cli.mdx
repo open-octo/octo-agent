@@ -58,6 +58,7 @@ headless 单发：完整的 agentic 工具循环，然后退出。
 | `octo hooks list` | 列出已配置的生命周期 hook |
 | `octo sessions` [`--all`] | 列出当前目录的会话；`--all` 按目录分组列出本机所有会话 |
 | `octo trash list`\|`restore`\|`rm`\|`empty` | 找回被 agent 删除或覆盖的文件（[回收站](/docs/zh/guides/sandbox-the-agent/)） |
+| `octo profiles list`\|`create`\|`rm`\|`path` | 管理 `--profile` 选用的用户数据目录（[profile](/docs/zh/guides/profiles/)）；`rm` 需要 `--yes`，默认、当前、后端在跑的 profile 一律拒删 |
 | `octo workflows list`\|`path`\|`update` | 列出已保存的 workflow |
 | `octo doctor` | 只读的环境健康检查 |
 | `octo serve` | 启动 HTTP 服务（REST + WebSocket + Web UI + IM 桥接） |

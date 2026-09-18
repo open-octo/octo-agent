@@ -53,6 +53,7 @@ description: octo serve 背后的 REST 接口面——和内置 Web UI 用的是
 | `GET /api/profile/soul`, `/api/profile/user` | 读取 `soul.md` / `user.md` |
 | `GET /api/memories` | 读取记忆索引 |
 | `GET /api/trash`, `POST .../empty`, `POST .../{id}/restore`, `DELETE /api/trash/{id}` | 可恢复删除的回收站面板 |
+| `GET /api/profiles`, `POST /api/profiles`, `DELETE /api/profiles/{name}` | 列出 / 创建 / 删除[用户数据 profile](/docs/zh/guides/profiles/)；默认目录、本后端所在 profile、后端在跑的 profile 的 `DELETE` 返回 409 |
 
 ## 引导流程、配置、Provider
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/open-octo/octo-agent/internal/app"
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // `octo completion <shell>` and the hidden `octo __complete <words…>` work
@@ -96,6 +97,16 @@ func completionCandidates(words []string) []string {
 			return []string{"list", "add", "update", "path"}
 		}
 		return nil
+	case "profiles":
+		switch {
+		case len(words) == 3:
+			return []string{"list", "create", "rm", "path"}
+		case len(words) == 4 && (words[2] == "rm" || words[2] == "path"):
+			return profileCandidates()
+		case words[2] == "rm":
+			return []string{"--yes"}
+		}
+		return nil
 	case "init":
 		return initCandidates(prev)
 	case "config":
@@ -129,7 +140,9 @@ func chatCandidates(words []string, prev string) []string {
 		return []string{"interactive", "strict", "auto"}
 	case "--reasoning-effort":
 		return []string{"off", "low", "medium", "high", "xhigh", "max"}
-	case "--model", "--system", "--profile", "--max-tokens", "--max-tokens-escalate", "--max-turns",
+	case "--profile":
+		return profileCandidates()
+	case "--model", "--system", "--max-tokens", "--max-tokens-escalate", "--max-turns",
 		"--compact-threshold", "--compact-auto-pct", "--fallback-context-window",
 		"--sandbox-write", "--sandbox-read":
 		// These take freeform values; nothing useful to suggest.
@@ -138,6 +151,24 @@ func chatCandidates(words []string, prev string) []string {
 	// Default: offer the flag set for chat.
 	_ = words
 	return chatFlags
+}
+
+// profileCandidates lists the named profiles that exist on disk. Any valid
+// name is accepted by --profile, so this is a convenience for the ones the
+// user has already made, not a constraint; the default root has no name to
+// complete.
+func profileCandidates() []string {
+	names, err := datahome.List()
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // providerCandidates lists every registered vendor ID for --provider
@@ -223,7 +254,7 @@ new flags / subcommands are added.`))
 // ── Static lists ─────────────────────────────────────────────────────────
 
 var topLevelCommands = []string{
-	"config", "doctor", "init", "memory", "serve", "sessions", "skills", "trash", "upgrade",
+	"config", "doctor", "init", "memory", "serve", "sessions", "skills", "trash", "profiles", "upgrade",
 	"version", "help", "completion",
 }
 
