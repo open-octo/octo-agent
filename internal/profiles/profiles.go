@@ -9,8 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/open-octo/octo-agent/internal/datahome"
 	"github.com/open-octo/octo-agent/internal/serveproc"
@@ -42,7 +45,9 @@ type Info struct {
 	Path string `json:"path"`
 	// Current marks the profile this process runs under.
 	Current bool `json:"current"`
-	// Running reports a live backend recorded in the profile's serve.pid.
+	// Running reports a live backend: a live pid in the profile's serve.pid
+	// (daemon or desktop hub), or the profile's pinned address answering (a
+	// foreground `octo serve` records no pid). Pid is 0 in the latter case.
 	Running bool `json:"running"`
 	Pid     int  `json:"pid,omitempty"`
 	// SizeBytes is the total size of regular files under the root. Best
@@ -120,20 +125,65 @@ func Remove(name string) error {
 		return err
 	}
 	if pid, alive := running(dir); alive {
+		if pid == 0 {
+			return fmt.Errorf("%w (its address is answering); stop it first, e.g. octo serve --profile %s stop", ErrRunning, name)
+		}
 		return fmt.Errorf("%w (pid %d); stop it with: octo serve --profile %s stop", ErrRunning, pid, name)
 	}
 	return os.RemoveAll(dir)
 }
 
-// running reports the live backend recorded in dir's serve.pid, if any. The
-// file name is serveproc's contract; a stale file (dead pid) counts as not
-// running but is left alone — clearing it is the owner's business.
+// DefaultAddr is where the default profile's backend listens; named profiles
+// pin theirs in serve.addr. It is the `octo serve -addr` default. A variable
+// so tests can point it at a closed port instead of whatever is on 8088 on
+// the developer's machine.
+var DefaultAddr = "127.0.0.1:8088"
+
+// probeTimeout bounds the connect attempt to a profile's address. Loopback
+// either answers at once or refuses at once; the timeout only matters for a
+// pin pointing at a LAN interface that is down.
+const probeTimeout = 300 * time.Millisecond
+
+// running reports whether dir's backend is up: first by the pid in serve.pid
+// (written by `octo serve -d` and the desktop hub; a stale file with a dead
+// pid is left alone — clearing it is the owner's business), then by dialling
+// the profile's pinned address, because a foreground `octo serve` records no
+// pid at all. The second signal has no pid to report.
 func running(dir string) (int, bool) {
-	pid, err := serveproc.ReadPid(filepath.Join(dir, "serve.pid"))
-	if err != nil || !serveproc.IsAlive(pid) {
-		return 0, false
+	if pid, err := serveproc.ReadPid(filepath.Join(dir, "serve.pid")); err == nil && serveproc.IsAlive(pid) {
+		return pid, true
 	}
-	return pid, true
+	if addr, ok := pinnedAddr(dir); ok && listening(addr) {
+		return 0, true
+	}
+	return 0, false
+}
+
+// pinnedAddr returns the address a profile's backend binds: serve.addr when
+// present (serveproc's contract for named profiles), else the default
+// profile's fixed address for the default root.
+func pinnedAddr(dir string) (string, bool) {
+	data, err := os.ReadFile(filepath.Join(dir, "serve.addr"))
+	if err == nil {
+		addr := strings.TrimSpace(string(data))
+		if _, _, err := net.SplitHostPort(addr); err == nil {
+			return addr, true
+		}
+		return "", false
+	}
+	if filepath.Base(dir) == ".octo" {
+		return DefaultAddr, true
+	}
+	return "", false
+}
+
+func listening(addr string) bool {
+	conn, err := net.DialTimeout("tcp", addr, probeTimeout)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func dirSize(dir string) int64 {

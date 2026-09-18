@@ -33,7 +33,7 @@ A profile is a separate user-data root: the default is `~/.octo`, a profile name
 
 - `octo profiles` / `octo profiles list` — every root on disk with size, path, which one is current, and which has a running backend (pid)
 - `octo profiles create <name>` — make an empty `~/.octo-<name>` (a profile is also created implicitly the first time anything runs under its name)
-- `octo profiles rm <name> --yes` — permanently delete the root and everything in it; no recycle bin. Without `--yes` it only prints what would go. Refused for the default profile, the profile the command runs under, and any profile whose backend is alive (`octo serve --profile <name> stop` first)
+- `octo profiles rm <name> --yes` — permanently delete the root and everything in it; no recycle bin. Without `--yes` it only prints what would go. Refused for the default profile, the profile the command runs under, and any profile whose backend is alive — detected by a live pid in its `serve.pid` or by its pinned address (`serve.addr`) answering, so a foreground `octo serve` counts too (`octo serve --profile <name> stop` first)
 - `octo profiles path [name]` — print a profile's data root (no name = the current one)
 
 Names: letters, digits, `-`, `_`, starting with a letter or digit. The Web UI has the same list/create/delete under Settings → Data → Profiles (`WEB.md`). Switching the desktop app between profiles is the tray menu's **Profile** submenu (it restarts the app). Full guide: **https://octo-agent.dev/docs/guides/profiles/**.

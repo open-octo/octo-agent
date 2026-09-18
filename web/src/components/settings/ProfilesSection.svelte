@@ -107,7 +107,7 @@
             <div class="head">
               <span class="name" class:mono={p.name !== ''}>{label(p)}</span>
               {#if p.current}<span class="tag tag-current">{$t('settings.profiles.current')}</span>{/if}
-              {#if p.running}<span class="tag tag-running">{$t('settings.profiles.running').replace('{pid}', String(p.pid ?? ''))}</span>{/if}
+              {#if p.running}<span class="tag tag-running">{$t('settings.profiles.running')}{#if p.pid} · pid {p.pid}{/if}</span>{/if}
             </div>
             <span class="meta mono" title={p.path}>{p.path} · {fmtSize(p.size_bytes)}</span>
           </div>

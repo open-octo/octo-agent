@@ -78,11 +78,15 @@ func profilesList(stdout, stderr io.Writer) int {
 	fmt.Fprintln(tw, "NAME\tSIZE\tSTATUS\tPATH")
 	for _, in := range infos {
 		status := "-"
+		running := "running"
+		if in.Pid != 0 {
+			running = fmt.Sprintf("running (pid %d)", in.Pid)
+		}
 		switch {
 		case in.Running && in.Current:
-			status = fmt.Sprintf("current, running (pid %d)", in.Pid)
+			status = "current, " + running
 		case in.Running:
-			status = fmt.Sprintf("running (pid %d)", in.Pid)
+			status = running
 		case in.Current:
 			status = "current"
 		}

@@ -98,7 +98,8 @@ $ octo profiles rm home --yes     # 删掉 ~/.octo-home 及其中一切
 
 `rm` 不可撤销——这个目录里装着该 profile 的配置和 API key、会话、记忆、技能、IM 凭证和日志，
 而且不走回收站。不带 `--yes` 只会打印将要删除的内容。三种目录一律拒删：默认的 `~/.octo`
-（它还存着 `~/.octo/bin` 这类机器级的东西）、命令自身所在的 profile、以及后端还在跑的 profile。
+（它还存着 `~/.octo/bin` 这类机器级的东西）、命令自身所在的 profile、以及后端还在跑的 profile——
+`serve.pid` 里的进程还活着，或者它钉住的地址有人应答（前台跑的 `octo serve` 就是靠后者被发现的）。
 后一种先把它停掉：
 
 ```bash

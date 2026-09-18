@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/datahome"
+	"github.com/open-octo/octo-agent/internal/profiles"
 )
 
 func profilesTestHome(t *testing.T) string {
@@ -16,6 +18,15 @@ func profilesTestHome(t *testing.T) string {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv(datahome.ProfileEnv, "")
+	// Keep the default root's liveness probe off the developer's real 8088.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := profiles.DefaultAddr
+	profiles.DefaultAddr = ln.Addr().String()
+	ln.Close()
+	t.Cleanup(func() { profiles.DefaultAddr = prev })
 	return home
 }
 

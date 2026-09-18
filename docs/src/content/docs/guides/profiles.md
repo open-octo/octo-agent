@@ -104,7 +104,8 @@ $ octo profiles rm home --yes     # deletes ~/.octo-home and everything in it
 credentials and logs, and none of it goes through the recycle bin. Without `--yes` the command
 only prints what it would delete. Three roots are refused outright: the default `~/.octo` (it also
 holds machine-wide state such as `~/.octo/bin`), the profile the command itself runs under, and
-any profile whose backend is still up. Stop that one first:
+any profile whose backend is still up — a live pid in its `serve.pid`, or its pinned address
+answering, which is how a foreground `octo serve` shows up. Stop that one first:
 
 ```bash
 octo serve --profile home stop

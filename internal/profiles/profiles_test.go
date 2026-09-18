@@ -2,6 +2,7 @@ package profiles
 
 import (
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,7 +16,25 @@ func testHome(t *testing.T) string {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv(datahome.ProfileEnv, "")
+	// The default root is probed at DefaultAddr; the developer's real backend
+	// may well be on 8088, so aim at a port nothing listens on.
+	prev := DefaultAddr
+	DefaultAddr = closedAddr(t)
+	t.Cleanup(func() { DefaultAddr = prev })
 	return home
+}
+
+// closedAddr returns a loopback address that was just released, so a dial to
+// it is refused.
+func closedAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	return addr
 }
 
 func mkRoot(t *testing.T, home, dirName string, files map[string]string) {
@@ -59,6 +78,41 @@ func TestList_DescribesRootsWithSizeCurrentAndRunning(t *testing.T) {
 	}
 	if w := byName["work"]; !w.Current || w.Running || w.Pid != 0 {
 		t.Errorf("work = %+v, want current and not running", w)
+	}
+}
+
+// A foreground `octo serve` writes no pid, only its pinned address is live;
+// that root must still read as running and refuse removal.
+func TestRunning_DetectsForegroundBackendByPinnedAddress(t *testing.T) {
+	home := testHome(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	mkRoot(t, home, ".octo-fg", map[string]string{"serve.addr": ln.Addr().String() + "\n"})
+	// A pinned address nobody answers on is not a running backend.
+	mkRoot(t, home, ".octo-idle", map[string]string{"serve.addr": closedAddr(t) + "\n"})
+
+	got, err := List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]Info{}
+	for _, in := range got {
+		byName[in.Name] = in
+	}
+	if fg := byName["fg"]; !fg.Running || fg.Pid != 0 {
+		t.Errorf("fg = %+v, want running without pid", fg)
+	}
+	if idle := byName["idle"]; idle.Running {
+		t.Errorf("idle = %+v, want not running", idle)
+	}
+	if err := Remove("fg"); !errors.Is(err, ErrRunning) {
+		t.Errorf("Remove(fg) = %v, want ErrRunning", err)
+	}
+	if err := Remove("idle"); err != nil {
+		t.Errorf("Remove(idle) = %v", err)
 	}
 }
 
