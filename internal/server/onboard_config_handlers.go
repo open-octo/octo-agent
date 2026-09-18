@@ -875,8 +875,11 @@ type endpointModelIn struct {
 
 type updateEndpointRequest struct {
 	// NewID, when non-empty, triggers a rename (RenameEndpoint + cascade).
-	NewID    string            `json:"new_id,omitempty"`
-	Name     string            `json:"name,omitempty"`
+	NewID string `json:"new_id,omitempty"`
+	// Name is a pointer so an omitted field (preserve) is distinguishable from
+	// an explicit "" (clear the display name): the name is optional, so the
+	// user must be able to go back to showing just the id.
+	Name     *string           `json:"name,omitempty"`
 	Provider string            `json:"provider,omitempty"`
 	BaseURL  string            `json:"base_url,omitempty"`
 	APIKey   string            `json:"api_key,omitempty"`
@@ -1023,11 +1026,10 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 		// EXCEPT for Protocol/BaseURL where the user may legitimately want to
 		// clear them — but we can't distinguish "omitted" from "cleared" with
 		// the current JSON shape. PR5 errs on the side of "empty = unchanged"
-		// for all fields; clearing a field requires sending the previous
-		// value. (A follow-up could switch to *string / omitempty:true to
-		// distinguish, but the current web UI doesn't need it.)
-		if req.Name != "" {
-			ep.Name = req.Name
+		// for those fields; clearing one requires sending the previous value.
+		// Name is the exception: it is a pointer, so "" clears it.
+		if req.Name != nil {
+			ep.Name = strings.TrimSpace(*req.Name)
 		}
 		if req.Provider != "" {
 			ep.Provider = req.Provider

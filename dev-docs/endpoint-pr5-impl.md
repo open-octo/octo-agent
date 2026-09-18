@@ -209,7 +209,7 @@ POST   /api/config/endpoints/{id}/lite             handleSetEndpointLite
   "protocol": "openai"
 }
 ```
-`id` 字段不在 body 里（URL 里的 `{id}` 是当前 id）。响应：`200 OK` + 更新后的 endpoint。
+`id` 字段不在 body 里（URL 里的 `{id}` 是当前 id）。`name` 省略 = 保留，显式 `""` = 清空显示名；其余字符串字段空值一律视为未改动。响应：`200 OK` + 更新后的 endpoint。
 
 **PATCH /api/config/endpoints/{id}**（含改名）：
 ```json

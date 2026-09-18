@@ -1056,6 +1056,7 @@ export async function createEndpoint(req: EndpointConfigInput): Promise<Endpoint
 // invalidation on the old id).
 export interface EndpointUpdateInput {
   new_id?: string
+  // name: omit to keep the current display name, send '' to clear it.
   name?: string
   provider?: string
   base_url?: string

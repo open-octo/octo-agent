@@ -986,6 +986,39 @@ func TestUpdateEndpoint_HeadersOmitted_LeavesUnchanged(t *testing.T) {
 	}
 }
 
+// TestUpdateEndpoint_NameExplicitEmpty_Clears covers the display-name
+// analogue of the headers nil-vs-empty distinction: an explicit "" clears the
+// optional name, while a body that omits "name" leaves it alone. Before the
+// name field became a pointer, clearing was impossible from the web form —
+// the emptied field saved fine and came back on reopen.
+func TestUpdateEndpoint_NameExplicitEmpty_Clears(t *testing.T) {
+	setTestHome(t)
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Name: "Abc", Provider: "custom", BaseURL: "https://api.example.com", APIKey: "sk-test", Models: []config.EndpointModel{{Model: "m1"}}},
+		},
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodPatch, "/api/config/endpoints/ep-a", `{"base_url": "https://api2.example.com"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH (name omitted) = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ := config.Load()
+	if got := cfg.Endpoints[0].Name; got != "Abc" {
+		t.Fatalf("name after omitted-name PATCH = %q, want Abc unchanged", got)
+	}
+
+	w = doJSON(t, srv, http.MethodPatch, "/api/config/endpoints/ep-a", `{"name": ""}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH (name cleared) = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _ = config.Load()
+	if got := cfg.Endpoints[0].Name; got != "" {
+		t.Errorf("name after explicit-empty PATCH = %q, want cleared", got)
+	}
+}
+
 // TestUpdateEndpoint_HeadersReplace_WholesaleNotMerge covers that a PATCH
 // with a non-empty "headers" object wholesale replaces the existing map
 // rather than merging keys.

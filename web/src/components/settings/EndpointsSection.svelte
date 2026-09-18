@@ -308,7 +308,9 @@
       } else {
         const patch: api.EndpointUpdateInput = {}
         if (id !== editing.id) patch.new_id = id
-        if (fName.trim() && fName.trim() !== (editing.name ?? '')) patch.name = fName.trim()
+        // An emptied name is a real change: the server clears the display name
+        // on an explicit "" and only preserves it when the field is omitted.
+        if (fName.trim() !== (editing.name ?? '')) patch.name = fName.trim()
         if (fProvider !== editing.provider) patch.provider = fProvider
         if (fBaseUrl.trim() && fBaseUrl.trim() !== (editing.base_url ?? '')) patch.base_url = fBaseUrl.trim()
         if (fApiKey) patch.api_key = fApiKey
