@@ -64,7 +64,14 @@ func normalizeMessages(msgs []Message) ([]Message, bool) {
 			merged := make([]ContentBlock, 0, len(blocksOf(prev))+len(blocksOf(m)))
 			merged = append(merged, blocksOf(prev)...)
 			merged = append(merged, blocksOf(m)...)
-			coalesced[n-1] = Message{Role: RoleAssistant, Blocks: merged}
+			// Keep the round's timestamp: history replay stamps the
+			// assistant_message and tool_call events with it, and a zero
+			// value makes the Web UI fall back to the reload time.
+			createdAt := prev.CreatedAt
+			if createdAt.IsZero() {
+				createdAt = m.CreatedAt
+			}
+			coalesced[n-1] = Message{Role: RoleAssistant, Blocks: merged, CreatedAt: createdAt}
 			changed = true
 			continue
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestHasToolUse(t *testing.T) {
@@ -233,6 +234,26 @@ func TestNormalizeMessages(t *testing.T) {
 		}
 		if got[1].Blocks[0].ID != "a" || got[1].Blocks[1].ID != "b" {
 			t.Errorf("block order = %q,%q, want a,b", got[1].Blocks[0].ID, got[1].Blocks[1].ID)
+		}
+	})
+
+	t.Run("coalesced assistant keeps the first message's CreatedAt", func(t *testing.T) {
+		first := time.Date(2026, 9, 18, 8, 2, 0, 0, time.UTC)
+		msgs := []Message{
+			NewUserMessage("go"),
+			{Role: RoleAssistant, Blocks: []ContentBlock{NewToolUseBlock("a", "terminal", nil)}, CreatedAt: first},
+			{Role: RoleAssistant, Blocks: []ContentBlock{NewToolUseBlock("b", "terminal", nil)}, CreatedAt: first.Add(time.Second)},
+		}
+		got, _ := normalizeMessages(msgs)
+		if !got[1].CreatedAt.Equal(first) {
+			t.Errorf("merged CreatedAt = %v, want %v", got[1].CreatedAt, first)
+		}
+
+		// A pre-CreatedAt first message must not zero out a stamped second one.
+		msgs[1].CreatedAt = time.Time{}
+		got, _ = normalizeMessages(msgs)
+		if !got[1].CreatedAt.Equal(first.Add(time.Second)) {
+			t.Errorf("merged CreatedAt = %v, want the second message's %v", got[1].CreatedAt, first.Add(time.Second))
 		}
 	})
 
