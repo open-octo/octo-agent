@@ -19,7 +19,7 @@ func TestLoadConfig_RegistersMultipleHooksPerEvent(t *testing.T) {
 		t.Fatalf("LoadConfig: %v", err)
 	}
 	got := e.Inject(context.Background(), Payload{Event: EventUserPromptSubmit})
-	if got != "one\n\ntwo" {
+	if got != asReminder("one")+"\n\n"+asReminder("two") {
 		t.Errorf("both hooks should run in order: %q", got)
 	}
 }
@@ -69,7 +69,7 @@ func TestMatcher_GatesPostToolUseByToolName(t *testing.T) {
 	}
 
 	// Matching tool → hook runs.
-	if got := e.Inject(context.Background(), Payload{Event: EventPostToolUse, ToolName: "terminal"}); got != "matched" {
+	if got := e.Inject(context.Background(), Payload{Event: EventPostToolUse, ToolName: "terminal"}); got != asReminder("matched") {
 		t.Errorf("matcher should run for terminal; got %q", got)
 	}
 	// Non-matching tool → skipped.
@@ -87,7 +87,7 @@ func TestMatcher_IgnoredForNonToolEvents(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if got := e.Inject(context.Background(), Payload{Event: EventUserPromptSubmit}); got != "ran" {
+	if got := e.Inject(context.Background(), Payload{Event: EventUserPromptSubmit}); got != asReminder("ran") {
 		t.Errorf("matcher must be ignored for non-tool events; got %q", got)
 	}
 }

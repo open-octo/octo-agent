@@ -27,15 +27,37 @@ func TestEngine_InjectInProcThenShellOrder(t *testing.T) {
 	e.RegisterShell(EventUserPromptSubmit, makeScript(t, "echo from-shell"), 0)
 
 	got := e.Inject(context.Background(), Payload{Event: EventUserPromptSubmit, UserInput: "hi"})
-	if got != "from-inproc\n\nfrom-shell" {
+	if got != "from-inproc\n\n<system-reminder>\nfrom-shell\n</system-reminder>" {
 		t.Errorf("Inject order/join wrong: %q", got)
+	}
+}
+
+// Shell-hook output is persisted inside the user turn, so it must carry the
+// <system-reminder> frame every display surface strips — otherwise an
+// external retrieval hook's context renders as if the user had typed it.
+func TestEngine_InjectShellOutputIsFramedAsReminder(t *testing.T) {
+	e := NewEngine(nil)
+	e.RegisterShell(EventUserPromptSubmit, makeScript(t, "printf 'line one\\nline two'"), 0)
+	got := e.Inject(context.Background(), Payload{Event: EventUserPromptSubmit})
+	want := "<system-reminder>\nline one\nline two\n</system-reminder>"
+	if got != want {
+		t.Errorf("shell output not framed: got %q want %q", got, want)
+	}
+}
+
+func TestEngine_InjectShellAlreadyFramedIsNotDoubleWrapped(t *testing.T) {
+	e := NewEngine(nil)
+	e.RegisterShell(EventUserPromptSubmit, makeScript(t, "echo '<system-reminder>own frame</system-reminder>'"), 0)
+	got := e.Inject(context.Background(), Payload{Event: EventUserPromptSubmit})
+	if got != "<system-reminder>own frame</system-reminder>" {
+		t.Errorf("self-framed output must pass through untouched: %q", got)
 	}
 }
 
 func TestEngine_InjectShellStructuredEnvelope(t *testing.T) {
 	e := NewEngine(nil)
 	e.RegisterShell(EventUserPromptSubmit, makeScript(t, `echo '{"additional_context":"ctx"}'`), 0)
-	if got := e.Inject(context.Background(), Payload{Event: EventUserPromptSubmit}); got != "ctx" {
+	if got := e.Inject(context.Background(), Payload{Event: EventUserPromptSubmit}); got != "<system-reminder>\nctx\n</system-reminder>" {
 		t.Errorf("structured envelope not parsed: %q", got)
 	}
 }

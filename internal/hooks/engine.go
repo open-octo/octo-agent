@@ -306,12 +306,32 @@ func (e *Engine) runShellHooks(ctx context.Context, hooks []shellHook, p Payload
 		}
 		if p.Event.injects() {
 			if txt := parsePreOutput(out); txt != "" {
-				parts = append(parts, txt)
+				parts = append(parts, asReminder(txt))
 			}
 		}
 	}
 	return strings.Join(parts, "\n\n")
 }
+
+// asReminder frames shell-hook output as a <system-reminder> span. Injected
+// output is folded into the user turn (or a tool result) and persisted there,
+// and every display surface — web history replay, TUI, IM channels — hides
+// exactly those spans (agent.StripSystemReminders). Without the frame an
+// external retrieval hook's output rendered as though the user had typed it.
+// The in-process hooks (memory reminder, auto-recall, workflow nudge) already
+// wrap themselves; a script that does the same is left alone rather than
+// double-wrapped, since nested spans would confuse the stripper.
+func asReminder(txt string) string {
+	if strings.Contains(txt, reminderOpen) {
+		return txt
+	}
+	return reminderOpen + "\n" + txt + "\n" + reminderClose
+}
+
+const (
+	reminderOpen  = "<system-reminder>"
+	reminderClose = "</system-reminder>"
+)
 
 func (e *Engine) notify(msg string) {
 	if e != nil && e.Notify != nil {

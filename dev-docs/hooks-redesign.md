@@ -221,7 +221,7 @@ hooks:
 
 | 退出码 | 行为 |
 |---|---|
-| `0` | 成功。stdout 若解析为 `{"additional_context": "..."}` 用该字段,否则用 stdout 原文;在支持注入的事件(`SessionStart`/`UserPromptSubmit`/`PostToolUse`)注入,其余忽略 |
+| `0` | 成功。stdout 若解析为 `{"additional_context": "..."}` 用该字段,否则用 stdout 原文;在支持注入的事件(`SessionStart`/`UserPromptSubmit`/`PostToolUse`)包进 `<system-reminder>` 后注入(展示层据此隐藏),其余忽略 |
 | `2` | **阻断**。`PreToolUse`:拒绝该工具,stderr 作拒绝理由回灌模型(等价一次 tool_result error);`UserPromptSubmit`:中止本回合,stderr 作反馈注入。副作用型事件退出码 2 无阻断语义,降级为非阻断错误 |
 | 其余非零 | 非阻断错误,记 notice,事件继续(保持今天"忽略并继续"的行为,向后兼容) |
 

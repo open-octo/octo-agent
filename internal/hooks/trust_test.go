@@ -92,7 +92,7 @@ func TestEngineFromEnvAndFiles_ProjectHookRuns(t *testing.T) {
 	cwd := t.TempDir()
 	writeProjectHooks(t, cwd, "hooks:\n  UserPromptSubmit:\n    - command: \""+makeScript(t, "echo proj")+"\"\n")
 	e := EngineFromEnvAndFiles(NewSeenSet(), cwd, true)
-	if got := e.Inject(context.Background(), Payload{Event: EventUserPromptSubmit}); got != "proj" {
+	if got := e.Inject(context.Background(), Payload{Event: EventUserPromptSubmit}); got != asReminder("proj") {
 		t.Errorf("project UserPromptSubmit hook should run; got %q", got)
 	}
 }
