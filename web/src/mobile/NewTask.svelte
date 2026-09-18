@@ -24,15 +24,18 @@
   $effect(() => {
     api.getEndpoints()
       .then(d => {
-        const flat: { id: string; label: string }[] = []
+        const flat: { id: string; label: string; endpoint: string }[] = []
         for (const e of d.endpoints ?? []) {
-          for (const m of e.models ?? []) flat.push({ id: `${e.id}::${m.model}`, label: m.model })
+          // The endpoint's display name is what the user named it in Settings;
+          // its id is only the fallback for an unnamed one.
+          const ep = e.name || e.id
+          for (const m of e.models ?? []) flat.push({ id: `${e.id}::${m.model}`, label: m.model, endpoint: ep })
         }
         // The same model on two endpoints would render two identical options;
-        // qualify duplicates with their endpoint id.
+        // qualify duplicates with their endpoint.
         const seen = new Map<string, number>()
         for (const m of flat) seen.set(m.label, (seen.get(m.label) ?? 0) + 1)
-        models = flat.map(m => (seen.get(m.label)! > 1 ? { ...m, label: `${m.label} · ${m.id.split('::')[0]}` } : m))
+        models = flat.map(m => ({ id: m.id, label: seen.get(m.label)! > 1 ? `${m.label} · ${m.endpoint}` : m.label }))
       })
       .catch(() => {})
   })

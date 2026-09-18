@@ -231,6 +231,33 @@ func TestModelPickerView_Renders(t *testing.T) {
 	}
 }
 
+// TestModelPickerView_EndpointName pins the header text: a named endpoint is
+// headed by its display name, an unnamed one falls back to its id. The id
+// still reaches the user through each model's composite-id hint.
+func TestModelPickerView_EndpointName(t *testing.T) {
+	writeModelsConfig(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Name: "Work account", Provider: "openai", Models: []config.EndpointModel{{Model: "gpt-4o"}}},
+			{ID: "ep-b", Provider: "deepseek", Models: []config.EndpointModel{{Model: "deepseek-v4-flash"}}},
+		},
+		Default: "ep-a::gpt-4o",
+	})
+
+	m := newPickerTestModel("gpt-4o")
+	m.dispatchModel("")
+	out := m.modelPickerView()
+
+	if !strings.Contains(out, "Work account") {
+		t.Errorf("picker view does not head the named endpoint with its name:\n%s", out)
+	}
+	if !strings.Contains(out, "ep-b") {
+		t.Errorf("picker view does not fall back to the id for an unnamed endpoint:\n%s", out)
+	}
+	if !strings.Contains(out, "ep-a::gpt-4o") {
+		t.Errorf("picker view drops the composite id hint:\n%s", out)
+	}
+}
+
 // TestModelPicker_TwoLevelEndpointSwitch exercises the PR4b ←→ keys: with two
 // endpoints, ←/→ cycle the endpoint cursor and reset the model cursor to 0,
 // and Enter on the second endpoint's model dispatches a composite id that
