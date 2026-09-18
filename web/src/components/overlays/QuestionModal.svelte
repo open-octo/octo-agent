@@ -291,7 +291,12 @@
           aria-expanded={!collapsed}
           aria-label={collapsed ? $t('question.expand') : $t('question.collapse')}
         >
-          <iconify-icon icon={collapsed ? 'ant-design:down-outlined' : 'ant-design:up-outlined'} width="12"></iconify-icon>
+          <!-- The arrow points the way the banner moves: it is docked under the
+               transcript and above the composer, so folding pulls its header
+               row (and this button) DOWN, and unfolding lifts it back UP. Not
+               the accordion ▾-to-open convention — this reads as the bottom
+               panel's minimize/restore, which is what the button does. -->
+          <iconify-icon icon={collapsed ? 'ant-design:up-outlined' : 'ant-design:down-outlined'} width="12"></iconify-icon>
         </button>
       </div>
 
