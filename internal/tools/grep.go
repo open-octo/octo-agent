@@ -36,6 +36,11 @@ func (GrepTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "grep",
 		Description: "Search file contents with ripgrep (rg). Pattern is a regex. " +
+			"ALWAYS pass `path` explicitly — the absolute path of the project or directory " +
+			"you intend to search (from the Environment section). Omitting it searches " +
+			"the session's working directory, which is often NOT the project you mean " +
+			"(e.g. a scratch workspace under `octo serve`), producing misleading " +
+			"'No files were searched' or empty results. " +
 			"Use mode='files_with_matches' for path-only output, mode='count' for " +
 			"per-file counts, or the default mode='content' to see matching lines. " +
 			"Set context_lines (or before/after) to include surrounding lines. " +
@@ -52,8 +57,10 @@ func (GrepTool) Definition() agent.ToolDefinition {
 					"description": "Regex pattern (Rust regex syntax — same as ripgrep).",
 				},
 				"path": map[string]any{
-					"type":        "string",
-					"description": "Where to search. Defaults to the current working directory.",
+					"type": "string",
+					"description": "Where to search. Pass the absolute path of the project or directory " +
+						"you intend to search — do not omit it. Without it rg searches the session's " +
+						"working directory, which is often not the project you mean.",
 				},
 				"include": map[string]any{
 					"type":        "string",
@@ -170,7 +177,17 @@ func (GrepTool) Execute(ctx context.Context, _ string, input map[string]any) (ag
 			return agent.ToolResult{Text: "(no matches)", UI: grepUIEmpty(pattern)}, nil
 		}
 		if stderr.Len() > 0 {
-			return agent.ToolResult{Text: ""}, fmt.Errorf("grep: rg failed: %s", strings.TrimSpace(stderr.String()))
+			msg := strings.TrimSpace(stderr.String())
+			if strings.Contains(msg, "No files were searched") {
+				// rg only emits this when it was given NO explicit path and
+				// the implicit cwd search found zero searchable files — i.e.
+				// the model forgot `path` and the session working directory
+				// isn't the intended project. rg's raw message doesn't say
+				// that, so the model used to give up and fall back to
+				// terminal+grep. Point it at the fix instead.
+				return agent.ToolResult{Text: ""}, fmt.Errorf("grep: rg searched no files. This happens when `path` is omitted and the session's working directory has nothing searchable (empty, or everything filtered by ignore rules). Retry with an explicit absolute `path` pointing at the project/directory you intend to search. rg said: %s", msg)
+			}
+			return agent.ToolResult{Text: ""}, fmt.Errorf("grep: rg failed: %s", msg)
 		}
 		return agent.ToolResult{Text: ""}, fmt.Errorf("grep: rg failed: %w", err)
 	}

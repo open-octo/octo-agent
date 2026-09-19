@@ -256,6 +256,32 @@ func TestGrep_IncludesStderrOnError(t *testing.T) {
 // the daemon's launch dir (often $HOME) and hung. The sentinel pattern can
 // only match the file we planted under the stamped dir, never the process CWD
 // (the package source tree), so a match proves rg was rooted correctly.
+// TestGrep_NoFilesSearchedHint covers the "No files were searched" error
+// path. rg only emits that message when it is given NO explicit path — it
+// then searches the session working directory — and emptiness/filters leave
+// it zero files. That is exactly the failure mode when the model forgets
+// `path`. The wrapped error must tell the model how to recover instead of
+// forwarding rg's raw message, which models used to answer by giving up on
+// the grep tool and falling back to terminal+grep.
+func TestGrep_NoFilesSearchedHint(t *testing.T) {
+	requireRg(t)
+	dir := t.TempDir() // empty: rg finds zero files to search here
+
+	ctx := WithWorkingDir(context.Background(), dir)
+	_, err := GrepTool{}.Execute(ctx, "grep", map[string]any{
+		"pattern": "needle",
+	})
+	if err == nil {
+		t.Fatal("expected error when rg searches no files")
+	}
+	if !strings.Contains(err.Error(), "explicit absolute `path`") {
+		t.Errorf("error should hint at passing an explicit path, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "No files were searched") {
+		t.Errorf("error should retain rg's original message, got: %v", err)
+	}
+}
+
 func TestGrep_NoPathUsesWorkingDir(t *testing.T) {
 	requireRg(t)
 	dir := t.TempDir()
