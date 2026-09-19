@@ -716,9 +716,8 @@ func listenHub(addr string, grace time.Duration) (net.Listener, error) {
 // trayStatusLines is the (info-only) top of the tray menu: what the hub is
 // doing right now — where it's serving and how many clients are attached. The
 // profile row goes under the first of these but is not one of them: it is a
-// submenu, not a line, and its title (the current profile) cannot change
-// while the process lives, so the refresh signature built from these lines
-// need not carry it (see addProfileRow).
+// submenu, not a line (see addProfileRow), so the refresh signature carries
+// the on-disk profile list separately (see trayMenuSignature).
 func trayStatusLines(bridge *nativeBridge) []string {
 	srv := bridge.srv.Load()
 	if srv == nil {
@@ -801,26 +800,36 @@ func buildTrayMenu(app *application.App, bridge *nativeBridge) *application.Menu
 	return m
 }
 
+// trayMenuSignature is what refreshTrayLoop compares between ticks: the menu
+// is rebuilt only when this changes. It carries the status lines, the update
+// state (so a flip rebuilds even if the immediate refreshTray call raced with
+// a concurrent rebuild), and the on-disk profile list — the profile row's
+// title is fixed for the process, but its submenu lists data roots that the
+// Web UI's data-management panel or `octo profiles` can add/remove at any
+// time, so without this a deleted profile lingers in the menu until restart.
+// The status lines are language-dependent, so a language switch (re-applied
+// here) changes the signature and triggers a rebuild that re-reads L().
+func trayMenuSignature(bridge *nativeBridge) string {
+	applyLang() // follow a language switch made in onboarding / Settings
+	upd := ""
+	if v := bridge.updateAvailable.Load(); v != nil {
+		upd = *v
+	}
+	profiles, err := datahome.List()
+	if err != nil {
+		profiles = nil // an unreadable home must not wedge the refresh loop
+	}
+	return strings.Join(trayStatusLines(bridge), "|") + "\x00" + upd + "\x00" + strings.Join(profiles, "|")
+}
+
 // refreshTrayLoop re-publishes the tray menu whenever its status text changes,
 // so the counts stay live without rebuilding on every tick.
 func refreshTrayLoop(app *application.App, tray *application.SystemTray, bridge *nativeBridge) {
-	sigOf := func() string {
-		applyLang() // follow a language switch made in onboarding / Settings
-		// The status lines are language-dependent, so a language switch changes
-		// this signature and triggers a rebuild (which re-reads L() for labels).
-		// The update state is folded in too, so a flip rebuilds even if the
-		// immediate refreshTray call raced with a concurrent rebuild.
-		upd := ""
-		if v := bridge.updateAvailable.Load(); v != nil {
-			upd = *v
-		}
-		return strings.Join(trayStatusLines(bridge), "|") + "\x00" + upd
-	}
-	last := sigOf()
+	last := trayMenuSignature(bridge)
 	t := time.NewTicker(3 * time.Second)
 	defer t.Stop()
 	for range t.C {
-		sig := sigOf()
+		sig := trayMenuSignature(bridge)
 		if sig == last {
 			continue
 		}
