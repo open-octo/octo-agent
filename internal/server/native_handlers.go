@@ -37,6 +37,12 @@ type NativeBridge interface {
 	// the app and navigates to the given session. Best-effort like Notify.
 	NotifySession(title, body, sessionID string)
 
+	// DismissSessionNotification retracts the notification previously raised
+	// for the session — the user has opened the session in the app, so the OS
+	// notification has done its job. Best-effort like NotifySession; a no-op on
+	// platforms that can't retract delivered notifications (Windows).
+	DismissSessionNotification(sessionID string)
+
 	// AutostartEnabled reports whether the app is registered to launch at login.
 	AutostartEnabled() (bool, error)
 	// SetAutostart registers (enable) or unregisters the app from launch-at-login.
@@ -218,6 +224,31 @@ func (s *Server) handleNativeNotify(w http.ResponseWriter, r *http.Request) {
 		s.cfg.Native.NotifySession(req.Title, req.Body, req.SessionID)
 	} else {
 		s.cfg.Native.Notify(req.Title, req.Body)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// POST /api/native/notify/dismiss — retract the notification a session
+// previously raised, because the user is now looking at that session in the
+// app. Best-effort like the notify endpoint: always ok, and a no-op on
+// platforms that can't retract delivered notifications (Windows).
+// Registered only with a bridge.
+func (s *Server) handleNativeNotifyDismiss(w http.ResponseWriter, r *http.Request) {
+	if !isLocalRequest(r) {
+		writeError(w, http.StatusForbidden, "native notifications are available only from the local machine")
+		return
+	}
+	if s.cfg.Native == nil {
+		writeError(w, http.StatusNotFound, "native bridge not available")
+		return
+	}
+	var req nativeNotifyRequest
+	if err := readBodyJSON(r, &req); err != nil {
+		writeInvalidJSONBody(w, err)
+		return
+	}
+	if req.SessionID != "" {
+		s.cfg.Native.DismissSessionNotification(req.SessionID)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

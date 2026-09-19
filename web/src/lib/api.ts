@@ -342,6 +342,15 @@ export async function nativeNotify(title: string, body: string, sessionId?: stri
   })
 }
 
+// Desktop shell only: retract the notification a session raised, because the
+// user is now looking at that session. Best-effort like nativeNotify.
+export async function nativeDismissNotify(sessionId: string): Promise<void> {
+  await request<{ ok: boolean }>('/api/native/notify/dismiss', {
+    method: 'POST',
+    ...json({ session_id: sessionId }),
+  })
+}
+
 // Desktop shell only: maximise/restore the window — the double-click-titlebar
 // zoom, which the draggable header can't do itself (no Wails runtime on the
 // octo-served page). Best-effort.

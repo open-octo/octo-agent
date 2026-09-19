@@ -903,6 +903,7 @@ func (s *Server) registerRoutes() {
 		s.api("POST /api/native/pick-folder", s.handleNativePickFolder)
 		s.api("POST /api/native/pick-file", s.handleNativePickFile)
 		s.api("POST /api/native/notify", s.handleNativeNotify)
+		s.api("POST /api/native/notify/dismiss", s.handleNativeNotifyDismiss)
 		s.api("GET /api/native/autostart", s.handleNativeAutostartGet)
 		s.api("PUT /api/native/autostart", s.handleNativeAutostartSet)
 		s.api("POST /api/native/window/toggle-maximise", s.handleNativeToggleMaximise)

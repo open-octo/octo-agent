@@ -438,6 +438,38 @@
   const NOTIFY_COOLDOWN_MS = 5 * 60 * 1000
   const lastNotifiedAt: Record<string, number> = {}
 
+  // Browser notifications this page fired, keyed by session — the only handle
+  // we have for retracting one once the user is looking at that session.
+  const sessionNotifications = new Map<string, Notification>()
+
+  // A session's notification has served its purpose once the user is looking
+  // at that session in a focused window — retract it so it doesn't linger in
+  // the notification center. Idempotent and best-effort on both paths; on the
+  // native path the desktop shell maps the session to the notification ID.
+  function dismissSessionNotification(sid: string) {
+    sessionNotifications.get(sid)?.close()
+    sessionNotifications.delete(sid)
+    if (get(nativeShell)) api.nativeDismissNotify(sid).catch(() => {})
+  }
+
+  // Reading a session means having its transcript open in a focused window:
+  // switching to the chat while focused clears the notification, as does
+  // refocusing the window already parked on it. The effect only re-runs on
+  // store changes (document.hasFocus() is not reactive), hence the listener.
+  $effect(() => {
+    const sid = $activeSessionId
+    if ($view !== 'chat' || !sid || !document.hasFocus()) return
+    dismissSessionNotification(sid)
+  })
+  onMount(() => {
+    const onFocus = () => {
+      const sid = get(activeSessionId)
+      if (get(view) === 'chat' && sid) dismissSessionNotification(sid)
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  })
+
   // Desktop notification for a session_activity the user isn't already
   // looking at in a focused tab — if they are, they'd see it happen live and
   // a notification would just be noise. No-op unless the user has the
@@ -474,12 +506,19 @@
       api.nativeNotify(title, body, sid).catch(() => {})
       return
     }
-    const n = new Notification(title, { body })
+    const n = new Notification(title, { body, tag: `octo-session-${sid}` })
+    // Keep the live notification addressable per session so opening the chat
+    // (or refocusing the window on it) can retract a banner that's done its
+    // job — dismissSessionNotification above. The tag also makes a repeat
+    // notification for the same session replace rather than stack.
+    sessionNotifications.get(sid)?.close()
+    sessionNotifications.set(sid, n)
     n.onclick = () => {
       window.focus()
       activeSessionId.set(sid)
       view.set('chat')
       n.close()
+      sessionNotifications.delete(sid)
     }
   }
 

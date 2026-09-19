@@ -376,18 +376,41 @@ func (b *nativeBridge) Notify(title, body string) {
 // NotifySession raises an OS-native notification that, when clicked, brings the
 // user to the given session. The session ID travels in the notification's Data
 // payload and is echoed back as UserInfo in the platform response handler.
+//
+// The notification ID is deterministic per session, not the shared sequence:
+// a repeat notification for the same session replaces the previous one instead
+// of stacking in the notification center, and DismissSessionNotification can
+// address it later once the user has seen the session.
 func (b *nativeBridge) NotifySession(title, body, sessionID string) {
 	if b.notifier == nil {
 		return
 	}
 	_ = b.notifier.SendNotification(notifications.NotificationOptions{
-		ID:    fmt.Sprintf("octo-notify-%d", b.notifySeq.Add(1)),
+		ID:    sessionNotificationID(sessionID),
 		Title: title,
 		Body:  body,
 		Data: map[string]any{
 			"session_id": sessionID,
 		},
 	})
+}
+
+func sessionNotificationID(sessionID string) string {
+	return "octo-notify-session-" + sessionID
+}
+
+// DismissSessionNotification retracts the delivered (and any pending)
+// notification for a session — the user has opened the session in the app, so
+// the OS notification has done its job. Best-effort like NotifySession: on
+// Windows RemoveDeliveredNotification is a platform stub (wintoast cannot
+// retract from the Action Center), so dismissal is a no-op there.
+func (b *nativeBridge) DismissSessionNotification(sessionID string) {
+	if b.notifier == nil {
+		return
+	}
+	id := sessionNotificationID(sessionID)
+	_ = b.notifier.RemovePendingNotification(id)
+	_ = b.notifier.RemoveDeliveredNotification(id)
 }
 
 // requestNotificationAuthorization asks the OS for permission to post
