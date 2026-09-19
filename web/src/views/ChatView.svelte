@@ -73,6 +73,7 @@
   import { applyToolToggle, buildExportConversation, exportConversationStyles, hasRenderableTurn, TOOL_RESULT_CHARS } from '../lib/exportTranscript'
   import { t, tr, pickLocalized } from '../lib/i18n'
   import { insertPendingSend, takeConfirmedSend } from '../lib/pendingSendOrder'
+  import { isReplayedUserEcho } from '../lib/userEchoDedup'
   import { inlineSlashCommand } from '../lib/inlineSlash'
   import { exportModeStore, selectedMessagesStore } from '../lib/exportStore'
   import { filenameStem } from '../lib/filename'
@@ -931,12 +932,17 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           }
         } else {
           // If the last user bubble is a pending optimistic echo of the same
-          // text, replace it in place (de-dup). Otherwise append a fresh one.
+          // text, replace it in place (de-dup). Otherwise append a fresh one —
+          // unless this echo is a replay: a mid-turn (re)subscribe replays the
+          // turn's buffered events, including its user message, and this tab
+          // may already hold the confirmed bubble (pending long cleared, so
+          // the match above can't catch it). The replay carries the original
+          // broadcast verbatim, so (content, createdAt) identifies it.
           const lastPending = msgs.findLastIndex((x: any) => x.type === 'user' && x.pending)
           if (lastPending >= 0 && msgs[lastPending].content === content) {
             confirmedPendingId = msgs[lastPending].id
             msgs[lastPending] = { ...msgs[lastPending], id: uid('u'), createdAt, pending: false, images, messageIndex: (ev as any).message_index }
-          } else {
+          } else if (!isReplayedUserEcho(msgs, content, createdAt)) {
             msgs.push({ id: uid('u'), type: 'user', content, createdAt, streaming: false, pending: false, tools: [], todos: [], images, messageIndex: (ev as any).message_index })
           }
         }

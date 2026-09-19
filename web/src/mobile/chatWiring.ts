@@ -18,6 +18,7 @@ import { ws } from '../lib/ws'
 import { tr } from '../lib/i18n'
 import * as api from '../lib/api'
 import { inlineSlashCommand } from '../lib/inlineSlash'
+import { isReplayedUserEcho } from '../lib/userEchoDedup'
 import {
   chatMessages,
   chatStreaming,
@@ -167,7 +168,10 @@ export function wireMobileSession(sid: string): () => void {
       const lastPending = msgs.findLastIndex((x: any) => x.type === 'user' && x.pending)
       if (lastPending >= 0 && msgs[lastPending].content === content) {
         msgs[lastPending] = { ...msgs[lastPending], id: uid('u'), createdAt, pending: false, images, messageIndex: ev.message_index }
-      } else {
+      } else if (!isReplayedUserEcho(msgs, content, createdAt)) {
+        // Not a pending match: a fresh message — unless this echo is a replay
+        // from a mid-turn (re)subscribe and the confirmed bubble is already
+        // rendered (same (content, createdAt); see userEchoDedup).
         msgs.push({ id: uid('u'), type: 'user', content, createdAt, streaming: false, pending: false, tools: [], todos: [], images, messageIndex: ev.message_index })
       }
       return { ...m, [sid]: msgs }
