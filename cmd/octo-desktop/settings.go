@@ -29,6 +29,13 @@ type desktopSettings struct {
 	// WindowMaximised remembers whether the window was maximised at exit, so a
 	// relaunch reopens maximised instead of at the restore size.
 	WindowMaximised bool `json:"window_maximised,omitempty"`
+	// PetX/PetY remember the pet window's position across relaunches, in
+	// absolute screen points. PetPositionSet is the "user has placed the pet"
+	// flag: (0,0) is a legitimate on-screen position, so the coordinates alone
+	// can't distinguish a saved position from a fresh install's zero value.
+	PetX           int  `json:"pet_x,omitempty"`
+	PetY           int  `json:"pet_y,omitempty"`
+	PetPositionSet bool `json:"pet_position_set,omitempty"`
 }
 
 // defaultDesktopSettings is what a first launch (no file yet) uses.

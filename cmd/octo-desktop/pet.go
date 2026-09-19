@@ -224,13 +224,89 @@ func (b *nativeBridge) showPet() {
 	b.pet.Store(w)
 	w.Show()
 	// The options above are not enough on their own: the NSPanel path ignores
-	// InitialPosition and opens centred anyway, so place it again once it is up.
-	if s != nil {
+	// InitialPosition and opens centred anyway, so place it again once it is
+	// up. The user's last placement wins when it is still on a connected
+	// screen — the monitor it belonged to may be gone, in which case fall
+	// back to the bottom-right default. Settings are read before any window
+	// call: those marshal to the UI thread, which must never happen under
+	// settingsMu.
+	b.settingsMu.Lock()
+	px, py, placed := b.settings.PetX, b.settings.PetY, b.settings.PetPositionSet
+	b.settingsMu.Unlock()
+	if placed && petPositionOnScreen(px, py, b.app.Screen.GetAll()) {
+		w.SetPosition(px, py)
+	} else if s != nil {
 		w.SetPosition(s.WorkArea.X+s.WorkArea.Width-petSize-petMargin,
 			s.WorkArea.Y+s.WorkArea.Height-petSize-petMargin)
 	}
 	go b.watchPetActivity(w)
 	go b.watchPetPointer(w)
+	go b.watchPetPosition(w)
+}
+
+// petPositionOnScreen reports whether the point (x, y) lies inside any
+// connected screen's work area. A saved pet position that fails this — the
+// monitor it was on has been unplugged, or the settings file was hand-edited —
+// is ignored in favour of the default placement rather than leaving the pet
+// stranded off-screen.
+func petPositionOnScreen(x, y int, screens []*application.Screen) bool {
+	for _, s := range screens {
+		if s == nil {
+			continue
+		}
+		wa := s.WorkArea
+		if x >= wa.X && x < wa.X+wa.Width && y >= wa.Y && y < wa.Y+wa.Height {
+			return true
+		}
+	}
+	return false
+}
+
+// watchPetPosition persists the pet's placement until this pet window goes
+// away, so a relaunch restores it where the user left it. It runs even on
+// platforms without a cursor source (where the pass-through loop opts out):
+// the drag itself is handled natively, so the bounds move all the same and
+// are picked up here. Identity ends it, same contract as watchPetActivity.
+func (b *nativeBridge) watchPetPosition(w *application.WebviewWindow) {
+	t := time.NewTicker(petPollInterval)
+	defer t.Stop()
+
+	// The first bounds read is the placement showPet just chose, not a user
+	// gesture — record it as the baseline instead of persisting it.
+	havePos := false
+	var lastX, lastY int
+
+	for range t.C {
+		if b.pet.Load() != w {
+			return
+		}
+		r := w.Bounds()
+		if r.Width <= 0 || r.Height <= 0 {
+			continue
+		}
+		if !havePos {
+			lastX, lastY, havePos = r.X, r.Y, true
+			continue
+		}
+		if r.X != lastX || r.Y != lastY {
+			lastX, lastY = r.X, r.Y
+			b.rememberPetPosition(r.X, r.Y)
+		}
+	}
+}
+
+// rememberPetPosition captures the pet's position into settings and debounces
+// the disk write — rememberWindowGeometry's pattern, on its own timer. The
+// caller reads the bounds; no window method runs under settingsMu.
+func (b *nativeBridge) rememberPetPosition(x, y int) {
+	b.settingsMu.Lock()
+	defer b.settingsMu.Unlock()
+	b.settings.PetX, b.settings.PetY = x, y
+	b.settings.PetPositionSet = true
+	if b.petGeomTimer != nil {
+		b.petGeomTimer.Stop()
+	}
+	b.petGeomTimer = time.AfterFunc(400*time.Millisecond, b.persistSettings)
 }
 
 // watchPetActivity drives the pet from the hub's aggregate activity until this

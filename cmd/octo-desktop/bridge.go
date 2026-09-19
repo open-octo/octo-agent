@@ -141,6 +141,10 @@ type nativeBridge struct {
 	// fires WindowDidResize once per pixel, so we coalesce to a single write
 	// ~400ms after the gesture settles. Guarded by settingsMu.
 	geomTimer *time.Timer
+	// petGeomTimer debounces persistence of the pet's position the same way —
+	// a drag shows up in the position loop as one bounds change per poll, so
+	// coalesce to a single write once the gesture settles. Guarded by settingsMu.
+	petGeomTimer *time.Timer
 }
 
 // Built-in window size for a first launch (no saved geometry yet).

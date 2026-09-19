@@ -51,6 +51,9 @@ func TestDesktopSettings_WindowGeometryRoundTrip(t *testing.T) {
 		WindowWidth:     1600,
 		WindowHeight:    1000,
 		WindowMaximised: true,
+		PetX:            42,
+		PetY:            900,
+		PetPositionSet:  true,
 	}
 	data, err := json.Marshal(in)
 	if err != nil {
@@ -67,14 +70,22 @@ func TestDesktopSettings_WindowGeometryRoundTrip(t *testing.T) {
 	if out.WindowMaximised != in.WindowMaximised {
 		t.Errorf("maximised not preserved: got %v, want %v", out.WindowMaximised, in.WindowMaximised)
 	}
+	if !out.PetPositionSet || out.PetX != in.PetX || out.PetY != in.PetY {
+		t.Errorf("pet position not preserved: got (%d,%d,set=%v), want (%d,%d,set=true)",
+			out.PetX, out.PetY, out.PetPositionSet, in.PetX, in.PetY)
+	}
 }
 
 // TestDefaultDesktopSettings_NoGeometry documents that a fresh install carries
-// zero geometry, which showWindowAt reads as "use the built-in default size".
+// zero geometry, which showWindowAt reads as "use the built-in default size",
+// and no pet position, which showPet reads as "use the bottom-right default".
 func TestDefaultDesktopSettings_NoGeometry(t *testing.T) {
 	s := defaultDesktopSettings()
 	if s.WindowWidth != 0 || s.WindowHeight != 0 || s.WindowMaximised {
 		t.Errorf("defaults should carry no saved geometry, got %+v", s)
+	}
+	if s.PetPositionSet || s.PetX != 0 || s.PetY != 0 {
+		t.Errorf("defaults should carry no pet position, got %+v", s)
 	}
 }
 
