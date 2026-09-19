@@ -261,6 +261,25 @@ func TestNativeNotifyDismissWithoutSessionIDNoOps(t *testing.T) {
 	}
 }
 
+func TestNativeNotifyDismissRejectsNonLoopback(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Native: &fakeNative{}})
+	req := httptest.NewRequest(http.MethodPost, "/api/native/notify/dismiss", strings.NewReader(`{"session_id":"sess-123"}`))
+	req.RemoteAddr = "203.0.113.5:1000" // non-loopback
+	req.Host = "127.0.0.1:8080"
+	// Valid key clears requireAuth (which would otherwise 401 a non-loopback
+	// peer), so the request reaches the handler's own same-machine guard.
+	req.Header.Set("Authorization", "Bearer "+srv.AccessKey())
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("non-loopback peer: got %d, want 403", w.Code)
+	}
+}
+
 func TestNativeAutostartRoundTrip(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
