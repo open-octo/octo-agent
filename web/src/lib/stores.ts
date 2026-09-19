@@ -634,6 +634,17 @@ export function commitThinking(sessionId: string, text: string) {
 export function addToolCallToGroup(sessionId: string, toolCall: any) {
   chatMessages.update(m => {
     const msgs = [...(m[sessionId] || [])]
+    // Replay dedup: a mid-turn (re)subscribe redelivers the turn's buffered
+    // events — tool_call included — and this tab may already hold the card.
+    // tool_id is unique per call, so an existing tool with the same id means
+    // this event is a replay; skip it or the transcript shows the card twice
+    // until the next refresh. An empty toolId can't be trusted as a key, so
+    // those calls always append (the pre-dedup behaviour).
+    if (toolCall.toolId) {
+      const replayed = msgs.some((x: any) =>
+        x.type === 'tool_group' && x.tools?.some((t: any) => t.toolId === toolCall.toolId))
+      if (replayed) return m
+    }
     // Group consecutive tools only — append to the running group when it is the
     // LAST message. Any thinking/assistant message pushed since (a reasoning
     // step or LLM text between rounds) ends the group, so separated tools render
