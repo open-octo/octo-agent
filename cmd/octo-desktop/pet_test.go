@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -106,5 +107,45 @@ func TestPetPositionOnScreen(t *testing.T) {
 	// not crashed on.
 	if !petPositionOnScreen(10, 10, []*application.Screen{nil, primary}) {
 		t.Errorf("petPositionOnScreen with a nil screen entry = false, want true")
+	}
+}
+
+// rememberPetPosition is the write path the position loop feeds: it must set
+// the settings fields synchronously — the exit path snapshots settings without
+// waiting for the debounce — and land them in desktop.json once the debounce
+// settles. HOME and USERPROFILE both point at a temp dir because the save goes
+// through os.UserHomeDir, which ignores HOME on Windows.
+func TestRememberPetPositionPersists(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	b := &nativeBridge{}
+	b.rememberPetPosition(120, 340)
+	t.Cleanup(func() {
+		b.settingsMu.Lock()
+		if b.petGeomTimer != nil {
+			b.petGeomTimer.Stop()
+		}
+		b.settingsMu.Unlock()
+	})
+
+	// The fields are set synchronously, ahead of the debounced disk write.
+	if !b.settings.PetPositionSet || b.settings.PetX != 120 || b.settings.PetY != 340 {
+		t.Fatalf("settings after rememberPetPosition = %+v, want PetX=120 PetY=340 PetPositionSet=true",
+			b.settings)
+	}
+
+	// Once the debounce fires, the position is on disk.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		s := loadDesktopSettings()
+		if s.PetPositionSet && s.PetX == 120 && s.PetY == 340 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pet position not persisted to desktop.json, loaded %+v", s)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }

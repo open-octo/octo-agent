@@ -32,9 +32,10 @@ const (
 	petSize = 200
 	// petMargin is the gap left between the pet and the work area's corner.
 	petMargin = 28
-	// petPollInterval is how often the pet re-reads the hub's activity. The
-	// pet is decorative, so a poll on a timer buys the same result as pushing
-	// activity changes through the turn's hot path, for none of the coupling.
+	// petPollInterval is how often the pet re-reads the hub's activity, and how
+	// often its bounds are checked for position changes. The pet is decorative,
+	// so a poll on a timer buys the same result as pushing activity changes
+	// through the turn's hot path, for none of the coupling.
 	petPollInterval = 500 * time.Millisecond
 	// petSleepAfter is how long the hub stays idle before the pet dozes off.
 	petSleepAfter = 5 * time.Minute
@@ -164,8 +165,9 @@ func (b *nativeBridge) togglePet() {
 	b.refreshTray()
 }
 
-// showPet creates the pet window at the bottom-right of the primary screen's
-// work area.
+// showPet creates the pet window where the user last left it, falling back to
+// the bottom-right of the primary screen's work area when there is no saved
+// placement or it no longer lands on a connected screen.
 //
 // Deliberately outside the main window's hide/probe/revive machinery: nothing
 // depends on the pet being alive, so a pet that dies just goes away rather than
