@@ -19,6 +19,8 @@
   import * as api from '../../lib/api'
 
   const LICENSE_URL = 'https://github.com/open-octo/octo-agent/blob/main/LICENSE.txt'
+  const RELEASES_URL = 'https://github.com/open-octo/octo-agent/releases'
+  const WEBSITE_URL = 'https://octo-agent.dev/'
 
   const fontZoomMap: Record<string, string> = { Small: '0.9', Medium: '1', Large: '1.1' }
   const modeToThemeLabel: Record<string, string> = { light: 'Light', dark: 'Dark', system: 'System' }
@@ -776,7 +778,7 @@
                 <span class="setl">{$t('common.version')}</span>
                 <span class="setd">{$t('settings.about.version_desc')}</span>
               </div>
-              <span class="setver mono">v{versionStr}</span>
+              <a class="setver mono" href={RELEASES_URL} target="_blank" rel="noopener noreferrer">v{versionStr}</a>
             </div>
             <div class="setrow">
               <div class="seti">
@@ -819,9 +821,9 @@
               <button class="link-btn" onclick={() => openUrl(LICENSE_URL)}>{$t('settings.about.license_view')}</button>
             </div>
           </div>
-          <div class="about-footer">
+          <a class="about-footer" href={WEBSITE_URL} target="_blank" rel="noopener noreferrer">
             {$t('settings.about.footer').replace('{tagline}', $t('nav.workbench')).replace('{year}', String(new Date().getFullYear()))}
-          </div>
+          </a>
         {/if}
       </div>
     </div>
@@ -888,13 +890,15 @@
 .seti { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .setl { font-size: 13px; color: var(--text); }
 .setd { font-size: 12px; color: var(--text-secondary); margin-top: 2px; line-height: 1.45; max-width: 42ch; }
-.setver { font-size: 13px; color: var(--text-tertiary); flex: 0 0 auto; }
+.setver { font-size: 13px; color: var(--text-tertiary); flex: 0 0 auto; text-decoration: none; }
+.setver:hover { text-decoration: underline; }
 .link-btn {
   border: none; background: transparent; color: var(--blue-6); font-size: 13px;
   font-weight: 500; cursor: pointer; font-family: inherit; padding: 0; flex: 0 0 auto;
 }
 .link-btn:hover { text-decoration: underline; }
-.about-footer { padding: 28px 2px 4px; text-align: center; font-size: 12px; color: var(--text-tertiary); }
+.about-footer { display: block; padding: 28px 2px 4px; text-align: center; font-size: 12px; color: var(--text-tertiary); text-decoration: none; }
+.about-footer:hover { text-decoration: underline; }
 .sinput {
   width: 220px; flex: 0 0 auto; height: 32px; padding: 0 10px;
   border: 1px solid var(--border); border-radius: 8px; font-size: 13px;
