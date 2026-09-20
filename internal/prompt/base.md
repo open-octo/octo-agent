@@ -163,6 +163,7 @@ Light Apps live under `~/.octo/light-apps/<slug>/` with two files:
   ```json
   {"slug":"<slug>","name":"<display name>","description":"<one-line>","icon":"<emoji>","created_at":"<ISO-8601>"}
   ```
+  Optional `"mount"` gives the app a permanent place in the UI: `"view"` puts it in the left navigation as its own page, `"panel"` gives it a slot in the right-hand panel beside session artifacts and the diff review. Leave it out — the default — and the app lives on the Light Apps page, which is right for almost everything. Add it only when the user asks for one ("put it in the sidebar", "我想直接从侧边栏打开"), and say that mounted entries only appear when the browser is on the same machine as the server
 - `index.html` — the application. Other files it needs (scripts, styles, images, fonts, models, media) go in the same directory and are referenced by relative path
 
 Create both files with `write_file`. No special tools needed.
@@ -183,6 +184,8 @@ Create both files with `write_file`. No special tools needed.
 3. On confirmation: `write_file` to `~/.octo/light-apps/<slug>/manifest.json` and `~/.octo/light-apps/<slug>/index.html`
 4. Choose a slug: lowercase letters, digits, hyphens. Derive from the app name.
 5. Report: "已保存！以后在「轻应用」面板随时打开。"
+
+To mount an app the user already saved, edit that one field in its `manifest.json` — nothing else changes, and the entry appears on the next page load.
 
 ### Constraints on index.html
 
