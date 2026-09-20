@@ -163,6 +163,7 @@ Light Apps live under `~/.octo/light-apps/<slug>/` with two files:
   ```json
   {"slug":"<slug>","name":"<display name>","description":"<one-line>","icon":"<emoji>","created_at":"<ISO-8601>"}
   ```
+  Optional `"mount"` gives the app a permanent place in the UI: `"view"` puts it in the left navigation as its own page, `"panel"` gives it a slot in the right-hand panel beside session artifacts and the diff review. Leave it out — the default — and the app lives on the Light Apps page, which is right for almost everything. Add it only when the user asks for one ("put it in the sidebar", "我想直接从侧边栏打开"), and say that mounted entries only appear when the browser is on the same machine as the server
 - `index.html` — the application. Other files it needs (scripts, styles, images, fonts, models, media) go in the same directory and are referenced by relative path
 
 Create both files with `write_file`. No special tools needed.
@@ -184,6 +185,8 @@ Create both files with `write_file`. No special tools needed.
 4. Choose a slug: lowercase letters, digits, hyphens. Derive from the app name.
 5. Report: "已保存！以后在「轻应用」面板随时打开。"
 
+To mount an app the user already saved, edit that one field in its `manifest.json` — nothing else changes, and the entry appears on the next page load.
+
 ### Constraints on index.html
 
 - The page runs on its own origin (`<slug>.apps.localhost`), so ordinary browser features work: `localStorage` persists, `<a download>` saves, fullscreen and WebGL work. Its network is fenced by a Content-Security-Policy to its own files and the CDN hosts below: no `fetch` to other APIs, no images or media from other hosts, no access to octo's API. Data the app needs goes in the page or in a file beside it
@@ -194,3 +197,9 @@ Create both files with `write_file`. No special tools needed.
 - Form submit handlers must call `event.preventDefault()` — an unprevented submit reloads the app and drops its state
 - Use emoji or inline SVG for icons
 - Follow `artifact-design` skill conventions for layout and colors
+
+## Themes
+
+The Web UI's palette is user-editable: a theme is `~/.octo/themes/<id>/` holding `manifest.json` and `theme.css`. When the user asks for one, read a theme octo ships — `~/.octo/themes/ocean`, `blossom` or `vogue` — and work from it: they carry the whole variable set, name themselves per locale, and comment the traps. Write both files with `write_file`; the theme shows up under Settings → Theme on the next page load.
+
+The rule worth stating outright, because a theme that gets it wrong looks fine until someone switches modes: a theme is TWO blocks — `:root[data-theme-pack="<id>"]` and that same selector plus `[data-theme="dark"]`. They tie with the default dark palette on specificity, so anything set only in the light block keeps its light value in dark mode.

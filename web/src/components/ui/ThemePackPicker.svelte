@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { PACKS, getPack, setPack } from '../../lib/theme'
-  import { t } from '../../lib/i18n'
+  import { packs, getPack, setPack } from '../../lib/theme'
+  import { t, locale } from '../../lib/i18n'
 
   let selected = $state(getPack())
 
@@ -16,18 +16,19 @@
      neighbouring Segment control is likewise a plain row of buttons, so this
      keeps the two consistent while still announcing which pack is active. -->
 <div class="packs" aria-label={$t('settings.pack')}>
-  {#each PACKS as pack}
+  {#each $packs as pack}
     <button
       class="pack"
       class:active={selected === pack.id}
       aria-pressed={selected === pack.id}
+      title={pack.author ? `${pack.label} — ${pack.author}` : undefined}
       onclick={() => pick(pack.id)}
     >
       <span
         class="swatch"
         style="--sw-accent: {pack.swatch[0]}; --sw-surface: {pack.swatch[1]}"
       ></span>
-      <span class="name">{$t(pack.labelKey)}</span>
+      <span class="name">{pack.labelKey ? $t(pack.labelKey) : (pack.labels?.[$locale] ?? pack.label)}</span>
     </button>
   {/each}
 </div>
@@ -41,7 +42,12 @@
   display: flex;
   flex-wrap: nowrap;
   gap: 5px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  /* User themes make this row unbounded — it holds four names when octo ships
+     them all and any number once ~/.octo/themes is populated. Scrolling keeps
+     the setting row's height fixed instead of pushing the modal apart. */
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .pack {

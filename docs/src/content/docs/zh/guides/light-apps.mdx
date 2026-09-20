@@ -60,6 +60,130 @@ Agent 会自动判断一个 HTML 页面是否适合保存为轻应用。流程�
 
 Agent 生成的 HTML artifact 也可以在 Artifacts 面板中一键「保存到轻应用」。
 
+## 挂进界面
+
+轻应用默认住在「轻应用」页面，从 Artifacts 面板里打开。如果你做了一个天天都要用的——
+画板、计算器、看板——给它的 `manifest.json` 加一个 `mount` 字段，它就能在界面里有个固定位置。
+
+```json
+{
+  "slug": "sketch",
+  "name": "画板",
+  "description": "随手画图的画布",
+  "icon": "🎨",
+  "mount": "view"
+}
+```
+
+| `mount` | 出现在哪 |
+| --- | --- |
+| *不写* | 只在「轻应用」页面出现——默认行为，也是所有现有应用的行为。 |
+| `"view"` | 左侧导航多一项，点进去整页渲染。 |
+| `"panel"` | 右侧面板多一个槽位，和会话制品、diff 审阅并列。 |
+
+这个字段要你自己手写：Agent 不会主动加。一个应用值不值得在你的界面里占个固定位置，
+这是你的判断，不是它的。
+
+挂载的应用同样受轻应用的本机限制约束——它们从 `<slug>.apps.localhost` 渲染，
+而这个域名只在跑 `octo serve` 的那台机器上能解析。当你从别的设备打开 Web UI 时，
+挂载入口会被隐藏，而不是显示一个点不开的入口。「轻应用」页面本身的行为不变。
+
+### 一个完整的例子
+
+一个占一整页的画板。两个文件，不需要构建：
+
+```json
+// ~/.octo/light-apps/sketch/manifest.json
+{
+  "slug": "sketch",
+  "name": "画板",
+  "description": "随手画图的画布",
+  "icon": "🎨",
+  "created_at": "2026-09-20T00:00:00Z",
+  "mount": "view"
+}
+```
+
+```html
+<!-- ~/.octo/light-apps/sketch/index.html -->
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: light; --bg: #fff; --fg: #1d1d1f; --line: #0001; }
+  :root[data-theme="dark"] { color-scheme: dark; --bg: #16181c; --fg: #e8e8ea; --line: #fff2; }
+  body { margin: 0; height: 100vh; display: flex; flex-direction: column;
+         background: var(--bg); color: var(--fg); font: 13px system-ui, sans-serif; }
+  .bar { display: flex; gap: 10px; align-items: center; padding: 8px 12px;
+         border-bottom: 1px solid var(--line); }
+  canvas { flex: 1; touch-action: none; cursor: crosshair; }
+  button { font: inherit; color: inherit; background: none; cursor: pointer;
+           border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; }
+</style>
+
+<div class="bar">
+  <input id="colour" type="color" value="#0e7490">
+  <input id="size" type="range" min="1" max="24" value="3">
+  <button id="clear">Clear</button>
+  <button id="save">Save PNG</button>
+</div>
+<canvas id="c"></canvas>
+
+<script>
+  // The host passes the resolved theme on the URL, so the app can match the UI.
+  const theme = new URLSearchParams(location.search).get('theme')
+  if (theme === 'dark') document.documentElement.dataset.theme = 'dark'
+
+  const c = document.getElementById('c')
+  const ctx = c.getContext('2d')
+  let drawing = false
+
+  // Resizing clears the bitmap, so the strokes are re-drawn from the copy the
+  // canvas held before the resize.
+  function fit() {
+    const snap = document.createElement('canvas')
+    snap.width = c.width; snap.height = c.height
+    if (c.width) snap.getContext('2d').drawImage(c, 0, 0)
+    c.width = c.clientWidth * devicePixelRatio
+    c.height = c.clientHeight * devicePixelRatio
+    ctx.scale(devicePixelRatio, devicePixelRatio)
+    ctx.lineCap = ctx.lineJoin = 'round'
+    if (snap.width) ctx.drawImage(snap, 0, 0, snap.width / devicePixelRatio, snap.height / devicePixelRatio)
+  }
+  addEventListener('resize', fit)
+  fit()
+
+  c.addEventListener('pointerdown', e => {
+    drawing = true
+    c.setPointerCapture(e.pointerId)
+    ctx.beginPath()
+    ctx.moveTo(e.offsetX, e.offsetY)
+  })
+  c.addEventListener('pointermove', e => {
+    if (!drawing) return
+    ctx.strokeStyle = document.getElementById('colour').value
+    ctx.lineWidth = document.getElementById('size').value
+    ctx.lineTo(e.offsetX, e.offsetY)
+    ctx.stroke()
+  })
+  c.addEventListener('pointerup', () => { drawing = false })
+
+  document.getElementById('clear').onclick = () => ctx.clearRect(0, 0, c.width, c.height)
+
+  // The plain <a download> idiom: the host turns it into a browser download or
+  // the OS save dialog in the desktop app.
+  document.getElementById('save').onclick = () => {
+    const a = document.createElement('a')
+    a.download = 'sketch.png'
+    a.href = c.toDataURL('image/png')
+    a.click()
+  }
+</script>
+```
+
+刷新 Web UI，**画板**就出现在左侧导航里，图标就是 manifest 里那个 emoji。
+把 `mount` 改成 `"panel"`，它就转到右侧面板的切换器里，和会话制品、diff 审阅并列。
+
 ## 技术约束
 
 Agent 在生成轻应用时遵守以下规则：

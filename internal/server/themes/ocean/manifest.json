@@ -1,0 +1,7 @@
+{
+  "id": "ocean",
+  "name": "Ocean",
+  "names": { "zh": "深海" },
+  "author": "octo",
+  "swatch": ["#0E7490", "#F0F7F9"]
+}

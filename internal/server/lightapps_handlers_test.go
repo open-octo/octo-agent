@@ -215,3 +215,105 @@ func TestDeleteLightApp_Success(t *testing.T) {
 		t.Errorf("expected 0 apps after delete, got %d", len(out.Apps))
 	}
 }
+
+// seedLightAppRaw writes a Light App whose manifest.json is given verbatim, so
+// a test can put a field (or a bad value) in it that the struct would normalise
+// away on the way out.
+func seedLightAppRaw(t *testing.T, home, slug, manifest string) {
+	t.Helper()
+	dir := filepath.Join(home, ".octo", "light-apps", slug)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>ok</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestLightAppMount_ListNormalises: the two mount values the UI has slots for
+// survive the listing; anything else degrades to the default placement instead
+// of failing the app or the whole scan.
+func TestLightAppMount_ListNormalises(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	seedLightAppRaw(t, home, "as-view", `{"slug":"as-view","name":"V","mount":"view"}`)
+	seedLightAppRaw(t, home, "as-panel", `{"slug":"as-panel","name":"P","mount":"panel"}`)
+	seedLightAppRaw(t, home, "typo", `{"slug":"typo","name":"T","mount":"sidebar"}`)
+	seedLightAppRaw(t, home, "legacy", `{"slug":"legacy","name":"L"}`)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	w := doJSON(t, srv, "GET", "/api/light-apps", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var out struct {
+		Apps []lightAppManifest
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, a := range out.Apps {
+		got[a.Slug] = a.Mount
+	}
+	want := map[string]string{"as-view": "view", "as-panel": "panel", "typo": "", "legacy": ""}
+	for slug, mount := range want {
+		if got[slug] != mount {
+			t.Errorf("%s: expected mount %q, got %q", slug, mount, got[slug])
+		}
+	}
+}
+
+// TestLightAppMount_DetailNormalises: the single-app read applies the same
+// rule, so the UI never sees a mount value from one endpoint that the other
+// would have dropped.
+func TestLightAppMount_DetailNormalises(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	seedLightAppRaw(t, home, "typo", `{"slug":"typo","name":"T","mount":"nav"}`)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	w := doJSON(t, srv, "GET", "/api/light-apps/typo", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var out struct {
+		Manifest lightAppManifest
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Manifest.Mount != "" {
+		t.Errorf("expected unknown mount to be dropped, got %q", out.Manifest.Mount)
+	}
+}
+
+// TestLightAppMount_OmittedFromJSON: an app that claims no mount must not grow
+// a "mount" key, so manifests the agent rewrites stay byte-comparable.
+func TestLightAppMount_OmittedFromJSON(t *testing.T) {
+	b, err := json.Marshal(lightAppManifest{Slug: "x", Name: "X"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "mount") {
+		t.Errorf("expected no mount key, got %s", b)
+	}
+}
+
+func TestNormalizeMount(t *testing.T) {
+	for _, in := range []string{"view", "panel"} {
+		if got := normalizeMount(in); got != in {
+			t.Errorf("normalizeMount(%q) = %q, want %q", in, got, in)
+		}
+	}
+	for _, in := range []string{"", "sidebar", "View", "PANEL", "nav", "view "} {
+		if got := normalizeMount(in); got != "" {
+			t.Errorf("normalizeMount(%q) = %q, want empty", in, got)
+		}
+	}
+}

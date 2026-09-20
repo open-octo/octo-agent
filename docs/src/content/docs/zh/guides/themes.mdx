@@ -1,0 +1,275 @@
+---
+title: 制作主题
+description: 给 octo Web UI 做一套自己的配色——一个目录，两个文件，不需要构建。
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="新" variant="tip" /><br /><br />
+
+Web UI 的颜色全部是 CSS 自定义属性。一个主题就是一个目录，里面一份 manifest 和一份样式表，
+重新定义你在意的那些变量。不需要构建、不需要写 JavaScript、不需要重新编译 octo——
+把目录放进去，刷新页面，你的配色就出现在主题选择器里。
+
+## 主题放在哪
+
+```
+~/.octo/themes/<id>/
+├── manifest.json
+├── theme.css
+└── wallpaper-light.webp   （可选——你的 CSS 引用的任何资源）
+```
+
+目录名必须和 manifest 里的 `id` 一致，且不能叫 `azure`——那是住在应用里的默认包。
+
+**octo 自带的主题也在这个目录里。** 深海、少女、时尚在 octo 第一次运行时被写进来，
+之后和你自己写的主题没有任何区别——同样的格式、同样的接口。复制一份、改掉目录名和 `id`，
+你就有了一个能直接改的主题。删掉它就是删掉了，不会自己回来；改过它，升级也不会覆盖。
+
+### manifest.json
+
+```json
+{
+  "id": "ocean",
+  "name": "Ocean",
+  "author": "your-handle",
+  "homepage": "https://github.com/your-handle/octo-theme-ocean",
+  "names": { "zh": "深海" },
+  "swatch": ["#0E7490", "#F0F7F9"]
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `id` | ✅ | 小写字母、数字、连字符。必须等于目录名。 |
+| `name` | ✅ | 主题选择器里显示的名字。 |
+| `author` | | 显示在选择器的悬浮提示里。 |
+| `homepage` | | 方便别人找到你的仓库。 |
+| `names` | | 按界面语言覆盖 `name`，例如 `{"zh": "深海"}`。选择器优先用当前语言那条，没有就回到 `name`。 |
+| `swatch` | | 选择器画的那个小色块，依次是强调色和背景色，取你的亮色配色。只接受十六进制（`#rgb`、`#rgba`、`#rrggbb`、`#rrggbbaa`）：这个值会作为 CSS 自定义属性进入页面，其他写法一律丢弃。不写就画一个中性色块。 |
+
+## 主题是怎么生效的
+
+两个互相独立的 `<html>` 属性决定所有颜色：
+
+- `data-theme`——解析后的模式，`light` 或 `dark`。
+- `data-theme-pack`——配色家族。默认包不带这个属性。
+
+所以一个主题就是两块：亮色一块，暗色一块。
+
+```css
+:root[data-theme-pack="ocean"] {
+  /* 亮色值 */
+}
+
+:root[data-theme-pack="ocean"][data-theme="dark"] {
+  /* 暗色值 */
+}
+```
+
+### 两块都必须写
+
+这是所有人做第一个主题时都会踩的坑。默认暗色配色住在 `:root[data-theme="dark"]` 里，
+它和你的 `:root[data-theme-pack="ocean"]` **CSS 特异性完全相同**——而你的样式是后注入的，
+所以你赢。
+
+只写亮色块的后果是：你的亮色值会泄漏进暗色模式，界面变得没法看。**凡是你为亮色重定义的变量，
+暗色也要重定义一遍。**
+
+## 变量清单
+
+整套配色一共 63 个自定义属性。你不需要全部重定义——没动的会继承默认包——但真正让主题
+"像你的主题"的，是 *文字*、*背景*、*描边*、*主色* 这四组。
+
+### 主色
+
+强调色家族。`--blue-6` 是主强调色，其余是它的浅色和深色变体。
+
+```
+--blue-1  --blue-2  --blue-5  --blue-6  --blue-7
+```
+
+### 文字
+
+```
+--text  --text-secondary  --text-tertiary  --text-quaternary  --text-heading
+```
+
+### 背景
+
+```
+--bg-layout  --bg-container  --bg-sidebar  --bg-table-header  --bg-zebra
+```
+
+`--bg-zebra` 是 markdown 表格正文行的斑马纹填充。
+
+### 描边
+
+```
+--border  --border-secondary  --border-table
+```
+
+### 语义色
+
+状态色。每一族都有填充色、背景底色、描边和文字色。
+
+```
+--success  --success-bg  --success-border  --success-text
+--warning  --warning-bg  --warning-border  --warning-text
+--error    --error-bg    --error-border    --error-text    --error-dark
+--info-bg  --info-border --info-text
+```
+
+`--info-*` 要特别说一句：在 octo 自带的包里，它属于**强调色**家族而不是状态色家族。
+如果你把强调色从蓝色调走了，这三个要跟着一起调。
+
+### 交互
+
+```
+--hover-neutral  --row-hover  --active-blue-bg  --focus-ring  --scrim
+```
+
+`--focus-ring` 是输入框聚焦时的 box-shadow 光圈；`--scrim` 是弹窗和命令面板背后的遮罩。
+
+### 对话区背景
+
+```
+--chat-bg  --chat-bg-image
+```
+
+这两个都是 **background-image 图层**，不是颜色——写 `--chat-bg: #F5F5F7` 不会生效。
+要用渐变：
+
+```css
+--chat-bg: linear-gradient(170deg, #F7FCFF 0%, #ECF7FF 58%, #F7F1FF 100%);
+```
+
+`--chat-bg-image` 是画在渐变之上的可选壁纸，指向你主题目录里的图片，不用就留 `none`。
+
+### 强调色上的文字
+
+```
+--on-accent
+```
+
+**每个主题都要设这一个。** 它是压在强调色填充上的文字和图标颜色，默认白色——
+而白色只在强调色足够深时才成立。octo 自带的包全都得覆盖它：白字在 blossom 的玫瑰色上
+只有 2.6:1，在 celestia 的天蓝上 2.3:1，在 vogue 的香槟金上 1.9:1，
+全都低于 WCAG AA 对正文要求的 4.5:1。如果你的强调色偏亮或偏中间调，就得换成深色的 `--on-accent`。
+
+### 圆角
+
+```
+--radius-pill  --radius-card  --radius-modal  --radius-sm  --radius-xs
+```
+
+几何形状是给主题定性格最省力的一招——octo 自带的包里，柔和配色用更圆的圆角，
+偏编辑风的那套用接近直角的圆角。
+
+### 外壳表面
+
+```
+--sidebar-frost  --panel-frost  --titlebar-frost  --frost-blur
+```
+
+侧边栏、滑出面板和标题栏。默认是不透明、扁平的（`--frost-blur: 0px`）；
+把模糊值调高、frost 颜色调成半透明，就能做出毛玻璃外壳。
+
+### 其余
+
+```
+--card-shadow        卡片投影
+--terminal-bg  --terminal-text    命令块——明暗两种模式下都刻意保持深色
+--surface-info       计划卡片、建议、浅信息底色
+--control-track      分段控件的轨道
+--search-bg  --search-hover       顶栏搜索胶囊
+--scrollbar-thumb  --placeholder
+--font-mono  --font-sans          字体栈
+--font-zoom          由字号设置写入，不要自己设
+```
+
+## 一个最小主题
+
+```css
+/* ~/.octo/themes/ocean/theme.css */
+
+:root[data-theme-pack="ocean"] {
+  --blue-6: #0E7490;
+  --blue-5: #0891B2;
+  --blue-7: #155E75;
+
+  --text: #0F272E;
+  --text-secondary: #4A6C77;
+  --text-tertiary: #7E9BA4;
+
+  --bg-layout: #F0F7F9;
+  --bg-container: #FFFFFF;
+  --bg-sidebar: #F0F7F9;
+
+  --border: rgba(14,116,144,0.14);
+
+  --on-accent: #FFFFFF;
+  --chat-bg: linear-gradient(175deg, #F7FDFF 0%, #EDF7FA 100%);
+}
+
+:root[data-theme-pack="ocean"][data-theme="dark"] {
+  --blue-6: #22D3EE;
+  --blue-5: #67E8F9;
+  --blue-7: #0E7490;
+
+  --text: #E6F4F7;
+  --text-secondary: #9CB9C2;
+  --text-tertiary: #6B8892;
+
+  --bg-layout: #0B1A1F;
+  --bg-container: #10252B;
+  --bg-sidebar: #0B1A1F;
+
+  --border: rgba(34,211,238,0.16);
+
+  --on-accent: #06272E;
+  --chat-bg: linear-gradient(175deg, #0D1F25 0%, #0A171C 100%);
+}
+```
+
+## 资源文件
+
+主题可以带上样式表引用的文件——壁纸、字体。放进主题目录，用完整的接口路径引用：
+
+```css
+--chat-bg-image: url('/api/themes/ocean/wallpaper-light.webp');
+```
+
+**不要用相对 `url()`。** 自定义属性里的相对 URL，是在这个属性被**使用**的地方解析的，
+而不是在它被声明的地方——`--chat-bg-image` 是被应用自己打包的样式表消费的，
+所以 `url('wallpaper-light.webp')` 会被拿到 `/assets/` 底下去找，然后悄无声息地失败。
+你的主题 id 本来就写在每一条选择器里，把路径写全不花什么成本。
+`@font-face` 的字体源，以及你的 CSS 加载的任何其他资源，都是同样的规则。
+
+可以提供的类型：`.css`、`.webp`、`.png`、`.jpg`、`.jpeg`、`.gif`、`.avif`、`.woff`、
+`.woff2`、`.ttf`、`.otf`。SVG 被刻意排除在外——它能携带脚本，
+而这些文件是从应用自己的 origin 提供的。
+
+## 试一下
+
+1. 建好目录和两个文件。
+2. 刷新 Web UI。
+3. 打开**设置**，在**主题**那一行选中你的主题。
+4. 把**外观**那一行在亮色/暗色之间切一遍，两边都要看。
+
+这两行是互相独立的：*主题*选的是配色家族，*外观*选的是在这个家族里用亮色还是暗色。
+这也正是每个主题都必须写两块的原因。
+
+改 `theme.css` 然后刷新，就是全部的开发循环。如果主题没出现，检查目录名和 `id` 是否一致、
+`manifest.json` 能不能正常解析。
+
+删掉目录就是卸载：还停在这个主题上的人会回落到默认包。
+
+## 发布前自检
+
+- 亮色和暗色两块都写了。
+- 写了 `swatch`，这样你的主题在选择器里能被认出来。
+- `--on-accent` 在两种模式下对强调色都达到 4.5:1。
+- `--chat-bg` 是渐变，不是颜色。
+- 正文文字对 `--bg-container` 和 `--bg-layout` 都达到 4.5:1。
+- 亮暗切换不刷新页面也能正常显示。

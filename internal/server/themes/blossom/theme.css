@@ -1,0 +1,127 @@
+/* Blossom — soft rose, rounded type, generous radii.
+
+   The wallpaper URL is absolute on purpose. A relative url() inside a custom
+   property is resolved where the property is USED, not where it is declared —
+   and --chat-bg-image is consumed by ChatView's bundled stylesheet, so
+   'wallpaper-light.webp' would be looked for next to /assets/, not here. */
+
+:root[data-theme-pack="blossom"] {
+  --blue-1: #FFEAF2;
+  --blue-2: #FFC7DC;
+  --blue-5: #FF5C9A;
+  --blue-6: #FF6FA5;
+  --blue-7: #E85990;
+
+  /* Text and icons ON an accent fill. White reaches only 2.6:1 over this rose
+     — a pack whose accent is lighter than azure's blue has to darken the
+     foreground instead of the fill, or the accent stops being the accent.
+     Deep berry, 4.98:1 light / 5.33:1 dark. Set in the light block only: the
+     default dark block does not touch --on-accent, so this carries into dark
+     mode on its own. */
+  --on-accent: #5C1730;
+
+  /* --info-* is the accent family, not the status family: its default values
+     are azure's blue spelled out. Left alone, GenUI callouts and badges stay
+     Apple blue in a rose palette. */
+  --info-bg: rgba(255,111,165,0.12);
+  --info-border: rgba(255,111,165,0.38);
+  --info-text: #C7407A;
+
+  --text: #3D2B33;
+  --text-secondary: #8A7078;
+  --text-tertiary: #B09AA2;
+  --text-quaternary: #D4C3C9;
+  --text-heading: #2E1F26;
+
+  --bg-layout: #FFF5F8;
+  --bg-container: #FFFFFF;
+  --bg-sidebar: #FDEEF4;
+  --bg-table-header: #FFF7FA;
+  --bg-zebra: #FFF0F5;
+
+  --border: rgba(180,110,140,0.14);
+  --border-secondary: rgba(180,110,140,0.09);
+  --border-table: rgba(180,110,140,0.09);
+
+  --hover-neutral: rgba(255,111,165,0.07);
+  --row-hover: rgba(255,111,165,0.08);
+  --active-blue-bg: rgba(255,111,165,0.12);
+  --focus-ring: rgba(255,111,165,0.20);
+  --scrim: rgba(60,30,45,0.40);
+
+  --card-shadow: 0 1px 3px rgba(190,120,150,0.10);
+  --surface-info: #FFF3F8;
+  --control-track: rgba(180,110,140,0.10);
+  --search-bg: rgba(180,110,140,0.08);
+  --search-hover: rgba(180,110,140,0.13);
+  --scrollbar-thumb: rgba(180,110,140,0.25);
+  --placeholder: #C4AEB6;
+
+  /* Rounder than the default pack — the one geometric cue of the palette. */
+  --radius-card: 18px;
+  --radius-modal: 18px;
+  --radius-sm: 12px;
+  --radius-xs: 8px;
+
+  /* ui-rounded resolves to SF Pro Rounded under WebKit, which is what the
+     desktop shell runs on; elsewhere the stack falls to system-ui and the pack
+     simply loses its rounding. Two deliberate omissions: 'Arial Rounded MT
+     Bold' would satisfy the rounded look on Chrome/macOS but ships only a Bold
+     weight, so every font-weight in the app would collapse to one — a worse
+     trade than losing the roundness. And the CJK families sit AFTER system-ui
+     because font fallback is per-character: PingFang SC carries full Latin
+     glyphs, so ahead of system-ui it would quietly render English body text
+     too. Here they only fill in the glyphs nothing before them has. */
+  --font-sans: ui-rounded, 'SF Pro Rounded', system-ui, 'Segoe UI', Roboto,
+               'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+
+  --chat-bg: linear-gradient(170deg, #FFF7FA 0%, #FDF0F6 45%, #F8EDFA 100%);
+  --chat-bg-image: url('/api/themes/blossom/wallpaper-light.webp');
+}
+
+:root[data-theme-pack="blossom"][data-theme="dark"] {
+  --blue-1: rgba(255,122,172,0.18);
+  --blue-2: rgba(255,122,172,0.34);
+  --blue-5: #FF87B5;
+  --blue-6: #FF7AAC;
+  --blue-7: #E86A99;
+
+  --text: #F7EBF1;
+  --text-secondary: #B49AA6;
+  --text-tertiary: #7E6773;
+  --text-quaternary: #574752;
+  --text-heading: #FFF2F7;
+
+  --bg-layout: #241A20;
+  --bg-container: #322430;
+  --bg-sidebar: #2A1E26;
+  --bg-table-header: #3A2B37;
+  --bg-zebra: #402F3C;
+
+  --border: rgba(255,190,215,0.12);
+  --border-secondary: rgba(255,190,215,0.07);
+  --border-table: rgba(255,190,215,0.07);
+
+  --hover-neutral: rgba(255,190,215,0.08);
+  --row-hover: rgba(255,122,172,0.14);
+  --active-blue-bg: rgba(255,122,172,0.20);
+  --focus-ring: rgba(255,122,172,0.28);
+  --scrim: rgba(20,10,16,0.62);
+
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.32);
+  --surface-info: rgba(255,122,172,0.10);
+  --control-track: rgba(255,190,215,0.09);
+  --search-bg: rgba(255,190,215,0.08);
+  --search-hover: rgba(255,190,215,0.13);
+  --scrollbar-thumb: rgba(255,190,215,0.24);
+  --placeholder: #7E6773;
+
+  --terminal-bg: #1C1319;
+
+  --info-bg: rgba(255,122,172,0.14);
+  --info-border: rgba(255,122,172,0.40);
+  --info-text: #FF9CC0;
+
+  --chat-bg: linear-gradient(170deg, #241A20 0%, #2A1B26 50%, #2B1D2E 100%);
+  --chat-bg-image: url('/api/themes/blossom/wallpaper-dark.webp');
+}

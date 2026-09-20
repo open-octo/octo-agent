@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import { get } from 'svelte/store'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen, cmdkOpen, nativeShell, isDesktopShell, dirLeaf } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen, cmdkOpen, nativeShell, isDesktopShell, dirLeaf, mountedViews, loadLightApps } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { titlebarDblClick } from '../../lib/nativeWindow'
   import { t, tr } from '../../lib/i18n'
@@ -122,11 +122,21 @@
     { icon: 'ant-design:mobile-outlined', label: 'nav.channels', v: 'channels' },
   ]
 
-  // The nav group, in both widths: the destinations worth a row of their own.
-  const topNav = [
-    { icon: 'ant-design:clock-circle-outlined', label: 'nav.tasks', v: 'tasks' },
-    { icon: 'ant-design:appstore-outlined', label: 'nav.light_apps', v: 'lightapps' },
-  ]
+  // The nav group, in both widths: the destinations worth a row of their own,
+  // followed by the Light Apps that asked for one (manifest `mount: "view"`).
+  // A mounted app names itself — its label is the manifest's name, not an i18n
+  // key — and draws the manifest's emoji where the built-ins draw an icon.
+  const topNav = $derived([
+    { icon: 'ant-design:clock-circle-outlined', emoji: '', label: 'nav.tasks', raw: false, v: 'tasks' },
+    { icon: 'ant-design:appstore-outlined', emoji: '', label: 'nav.light_apps', raw: false, v: 'lightapps' },
+    ...$mountedViews.map(a => ({
+      icon: '',
+      emoji: a.icon || '\u{1F9E9}',
+      label: a.name || a.slug,
+      raw: true,
+      v: `app:${a.slug}`,
+    })),
+  ])
   function goToMore(v: string) {
     view.set(v as any)
     morePopoverOpen = false
@@ -144,6 +154,11 @@
   // Seed the shared MCP-server store before the user ever opens the MCP panel;
   // McpView keeps it in sync afterward. Also seed the sidebar session groups so
   // the list can cluster on first paint.
+  // The nav lists the apps claiming `mount`, so the installed list has to be
+  // read at boot rather than when the Light Apps page is first opened. The
+  // store shares one in-flight request with that page.
+  onMount(() => { void loadLightApps() })
+
   onMount(async () => {
     try {
       const d = await api.listMcpServers()
@@ -374,10 +389,10 @@
 
   // Same destinations as topNav, plus chat — the rail is the same sidebar with
   // the labels taken away, so the two must not drift apart.
-  const railNav = [
-    { icon: 'ant-design:message-outlined', title: 'sidebar.chat', v: 'chat' },
-    ...topNav.map(item => ({ icon: item.icon, title: item.label, v: item.v })),
-  ]
+  const railNav = $derived([
+    { icon: 'ant-design:message-outlined', emoji: '', title: 'sidebar.chat', raw: false, v: 'chat' },
+    ...topNav.map(item => ({ icon: item.icon, emoji: item.emoji, title: item.label, raw: item.raw, v: item.v })),
+  ])
 
   function navActive(v: string) { return $view === v }
   function moreActive() { return moreCategories.some(c => c.v === $view) }
@@ -666,8 +681,12 @@
         </div>
         {#each topNav as item (item.v)}
         <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>
-          <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
-          <span style="font-size:13px;color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive(item.v) ? '600' : '400'};">{$t(item.label)}</span>
+          {#if item.emoji}
+            <span class="nav-emoji">{item.emoji}</span>
+          {:else}
+            <iconify-icon icon={item.icon} width="14" style="color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
+          {/if}
+          <span style="font-size:13px;color:{navActive(item.v) ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{navActive(item.v) ? '600' : '400'};">{item.raw ? item.label : $t(item.label)}</span>
         </div>
         {/each}
         <div class="more-wrap" bind:this={morePopoverEl}>
@@ -1103,10 +1122,14 @@
       <button
         class="rail-btn"
         class:active={navActive(item.v)}
-        title={$t(item.title)}
+        title={item.raw ? item.title : $t(item.title)}
         onclick={() => view.set(item.v as any)}
       >
-        <iconify-icon icon={item.icon} width="16"></iconify-icon>
+        {#if item.emoji}
+          <span class="nav-emoji rail">{item.emoji}</span>
+        {:else}
+          <iconify-icon icon={item.icon} width="16"></iconify-icon>
+        {/if}
       </button>
       {/each}
       <div class="more-wrap" bind:this={morePopoverEl}>
@@ -1128,10 +1151,14 @@
       <button
         class="rail-btn"
         class:active={navActive(item.v)}
-        title={$t(item.title)}
+        title={item.raw ? item.title : $t(item.title)}
         onclick={() => view.set(item.v as any)}
       >
-        <iconify-icon icon={item.icon} width="16"></iconify-icon>
+        {#if item.emoji}
+          <span class="nav-emoji rail">{item.emoji}</span>
+        {:else}
+          <iconify-icon icon={item.icon} width="16"></iconify-icon>
+        {/if}
       </button>
       {/each}
     </div>
@@ -1150,6 +1177,20 @@
 
 
 <style>
+/* A mounted Light App draws its manifest emoji where a built-in destination
+   draws an iconify glyph; both sit on the same 14/16px optical line. */
+.nav-emoji {
+  width: 14px;
+  font-size: 12px;
+  line-height: 1;
+  text-align: center;
+  flex: 0 0 auto;
+}
+.nav-emoji.rail {
+  width: 16px;
+  font-size: 14px;
+}
+
 /* Width comes from the drag state inline, matching the <aside> around it, so
    the content keeps a fixed box the aside clips during the collapse animation
    instead of reflowing through it (same reason .rail pins its own width). */

@@ -860,6 +860,26 @@ export async function deleteMemory(name: string, source: string): Promise<void> 
 
 // ── Light Apps ─────────────────────────────────────────────────────────────
 
+// ─── User theme packs ───────────────────────────────────────────────────────
+
+export interface UserTheme {
+  id: string
+  name: string
+  // Per-locale overrides of `name`, keyed the way the locale store is ("zh").
+  names?: Record<string, string>
+  author?: string
+  homepage?: string
+  // Accent/surface pair for the picker's chip. The server only lets a hex pair
+  // through (validSwatchColor), because this reaches the page as a CSS custom
+  // property.
+  swatch?: string[]
+}
+
+export async function listThemes(): Promise<UserTheme[]> {
+  const d = await request<{ themes: UserTheme[]; dir: string }>('/api/themes', { cache: 'no-store' })
+  return d.themes ?? []
+}
+
 export interface LightApp {
   slug: string
   name: string
@@ -869,6 +889,10 @@ export interface LightApp {
   // index.html's mtime, stamped by the server on every read. Opaque to the
   // client — it's only ever compared for equality against the copy on screen.
   updated_at?: string
+  // Where the app claims a permanent place in the UI. Absent for every app
+  // that does not ask for one, which is the default. The server drops values
+  // outside this set, so the UI never has to defend against a third.
+  mount?: 'view' | 'panel'
 }
 
 export interface LightAppDetail {

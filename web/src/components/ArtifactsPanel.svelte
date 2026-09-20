@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightappOpen, lightapps, lightappHTML, lightappStamp, cacheLightApp, dropLightApp, showToast, isDesktopShell, localAccess, activeSessionId, savePanelMode, type PanelMode } from '../lib/stores'
+  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightappOpen, lightapps, lightappHTML, lightappStamp, cacheLightApp, dropLightApp, showToast, isDesktopShell, activeSessionId, savePanelMode, lightappsAvailable, lightappURL, mountedPanels, type PanelMode } from '../lib/stores'
   import { titlebarDblClick } from '../lib/nativeWindow'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
@@ -183,15 +183,45 @@
     { id: 'session', icon: 'ant-design:file-text-outlined', label: 'panel.mode_artifacts' },
     { id: 'diff', icon: 'ant-design:branches-outlined', label: 'panel.mode_diff' },
   ]
-  const curMode = $derived<PanelMode>($panelContent === 'diff' ? 'diff' : 'session')
-  const curModeIcon = $derived(MODES.find(m => m.id === curMode)?.icon ?? MODES[0].icon)
-  const curModeLabel = $derived(MODES.find(m => m.id === curMode)?.label ?? MODES[0].label)
+  // The switcher's entries: the two built-in modes, then the Light Apps whose
+  // manifest asked for a panel slot. A mounted app names itself and draws its
+  // emoji, so entries carry both shapes rather than assuming an i18n key.
+  type ModeItem = { id: string; icon: string; emoji: string; label: string; raw: boolean }
+  const modeItems = $derived<ModeItem[]>([
+    ...MODES.map(m => ({ id: m.id as string, icon: m.icon, emoji: '', label: m.label, raw: false })),
+    ...$mountedPanels.map(a => ({
+      id: `app:${a.slug}`,
+      icon: '',
+      emoji: a.icon || '\u{1F9E9}',
+      label: a.name || a.slug,
+      raw: true,
+    })),
+  ])
+  const curMode = $derived<string>(
+    $panelContent === 'diff' ? 'diff'
+      : typeof $panelContent === 'string' && $panelContent.startsWith('app:') ? $panelContent
+      : 'session',
+  )
+  const curModeItem = $derived(modeItems.find(m => m.id === curMode) ?? modeItems[0])
 
-  function pickMode(mode: PanelMode) {
+  function pickMode(mode: string) {
     modeMenu = false
-    savePanelMode(mode)
-    panelContent.set(mode)
+    // Only the built-in pair is a habit worth restoring on the next visit; a
+    // mounted app is somewhere you go, not the panel's resting state — and
+    // PanelMode is the type that persistence is defined on.
+    if (mode === 'session' || mode === 'diff') savePanelMode(mode as PanelMode)
+    panelContent.set(mode as typeof $panelContent)
   }
+
+  // The slug behind an `app:` panel, or '' for the built-in modes.
+  const panelAppSlug = $derived(
+    typeof $panelContent === 'string' && $panelContent.startsWith('app:') ? $panelContent.slice(4) : '',
+  )
+  const panelAppURL = $derived.by(() => {
+    void $themeRev
+    if (!panelAppSlug || !laAvailable) return ''
+    return lightappURL(panelAppSlug, laReloadGen)
+  })
 
   // Derive the current light app's HTML preview.
   // The tab strip is the apps the user opened, in open order. Selection falls
@@ -212,14 +242,11 @@
   // server reports `local: false`) sees a notice instead of a frame — and so
   // does a UI opened at an IPv6 literal such as http://[::1]:8088, which the
   // origin's frame-ancestors policy cannot name (CSP has no bracket form).
-  const laHostIsIPv6 = typeof location !== 'undefined' && location.hostname.includes(':')
-  const laAvailable = $derived($localAccess && !laHostIsIPv6)
+  const laAvailable = $derived($lightappsAvailable)
   const laCurURL = $derived.by(() => {
     void $themeRev
     if (!laCurSlug || !laAvailable) return ''
-    const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
-    const port = location.port ? `:${location.port}` : ''
-    return `http://${laCurSlug}.apps.localhost${port}/?theme=${theme}&v=${laReloadGen}`
+    return lightappURL(laCurSlug, laReloadGen)
   })
   const laCurName = $derived($lightapps.find(a => a.slug === laCurSlug)?.name ?? laCurSlug)
 
@@ -398,11 +425,15 @@
       title={$t('panel.switch_mode')}
       onclick={() => modeMenu = !modeMenu}
     >
-      <iconify-icon icon={curModeIcon} width="14"></iconify-icon>
+      {#if curModeItem.emoji}
+        <span class="mode-emoji">{curModeItem.emoji}</span>
+      {:else}
+        <iconify-icon icon={curModeItem.icon} width="14"></iconify-icon>
+      {/if}
       <!-- The mode's name belongs to the switcher, not to the row: standing on
            its own beside the trigger it read as a heading, and whatever came
            next (a filename, a type badge) looked like part of the same group. -->
-      <span class="mode-name">{$t(curModeLabel)}</span>
+      <span class="mode-name">{curModeItem.raw ? curModeItem.label : $t(curModeItem.label)}</span>
       <!-- Always-on caret: without it the trigger reads as a static mode
            indicator, and the dropdown is only discoverable by hovering for
            the tooltip. -->
@@ -414,10 +445,14 @@
            work without a document-level listener that outlives the menu. -->
       <button class="backdrop" aria-label={$t('common.cancel')} onclick={() => modeMenu = false}></button>
       <div class="mode-menu" role="menu">
-        {#each MODES as m}
+        {#each modeItems as m (m.id)}
           <button class="mode-item" class:active={m.id === curMode} role="menuitem" onclick={() => pickMode(m.id)}>
-            <iconify-icon icon={m.icon} width="14"></iconify-icon>
-            <span>{$t(m.label)}</span>
+            {#if m.emoji}
+              <span class="mode-emoji">{m.emoji}</span>
+            {:else}
+              <iconify-icon icon={m.icon} width="14"></iconify-icon>
+            {/if}
+            <span>{m.raw ? m.label : $t(m.label)}</span>
             {#if m.id === 'diff' && badgeCount > 0}<span class="mode-count">{badgeCount}</span>{/if}
           </button>
         {/each}
@@ -441,7 +476,15 @@
   {#if !$panelExpanded}
     <div class="resize-handle" role="separator" aria-orientation="vertical" onpointerdown={startResize}></div>
   {/if}
-  {#if $panelContent === 'lightapps'}
+  {#if panelAppSlug}
+    {#if panelAppURL}
+      {#key laReloadGen}
+      <iframe src={panelAppURL} sandbox={ARTIFACT_ORIGIN_SANDBOX} allow="fullscreen; clipboard-write" title={panelAppSlug}></iframe>
+      {/key}
+    {:else}
+      <div class="empty"><iconify-icon icon="ant-design:desktop-outlined" width="28"></iconify-icon><span>{$t('lightapps.local_only')}</span></div>
+    {/if}
+  {:else if $panelContent === 'lightapps'}
     <!-- ── Light Apps mode ───────────────────────────────────────────────── -->
     <!-- Every mode's topbar is the window's top edge like the other two columns'
          rows, so it drags the window (see .topbar's --wails-draggable) and takes
@@ -715,6 +758,14 @@
   padding: 4px; background: var(--bg-elevated, var(--bg-container));
   border: 1px solid var(--border-secondary); border-radius: 8px;
   box-shadow: 0 6px 20px rgba(0,0,0,0.14); display: flex; flex-direction: column; gap: 2px;
+}
+/* A mounted app's emoji stands where a built-in mode's glyph does. */
+.mode-emoji {
+  width: 14px;
+  font-size: 12px;
+  line-height: 1;
+  text-align: center;
+  flex: 0 0 auto;
 }
 .mode-item {
   display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px;

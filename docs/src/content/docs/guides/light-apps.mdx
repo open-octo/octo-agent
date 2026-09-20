@@ -63,6 +63,133 @@ Click "Light Apps" in the Web UI navigation bar to see a card grid of all saved 
 
 Agent-generated HTML artifacts can also be saved to Light Apps with one click from the Artifacts panel.
 
+## Mount it into the UI
+
+A Light App normally lives on the Light Apps page and opens in the Artifacts panel. If you built
+one you reach for constantly — a sketchpad, a calculator, a board — add a `mount` field to its
+`manifest.json` and give it a permanent place in the interface.
+
+```json
+{
+  "slug": "sketch",
+  "name": "Sketchpad",
+  "description": "A canvas for quick diagrams",
+  "icon": "🎨",
+  "mount": "view"
+}
+```
+
+| `mount` | Where it shows up |
+| --- | --- |
+| *omitted* | The Light Apps page only — the default, and what every existing app does. |
+| `"view"` | Its own entry in the left navigation, rendered full-page. |
+| `"panel"` | A slot in the right-hand panel, alongside session artifacts and the diff review. |
+
+This is a field you write by hand: the agent does not add it on its own, because whether an app
+deserves a permanent spot in your UI is your call, not its.
+
+Mounted apps are subject to the same locality rule as every Light App — they render from
+`<slug>.apps.localhost`, which only resolves on the machine running `octo serve`. When you open
+the Web UI from another device, mounted entries are hidden rather than shown broken. The Light
+Apps page itself behaves the same as always.
+
+### A complete example
+
+A sketchpad that claims a page of its own. Two files, no build step:
+
+```json
+// ~/.octo/light-apps/sketch/manifest.json
+{
+  "slug": "sketch",
+  "name": "Sketchpad",
+  "description": "A canvas for quick diagrams",
+  "icon": "🎨",
+  "created_at": "2026-09-20T00:00:00Z",
+  "mount": "view"
+}
+```
+
+```html
+<!-- ~/.octo/light-apps/sketch/index.html -->
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: light; --bg: #fff; --fg: #1d1d1f; --line: #0001; }
+  :root[data-theme="dark"] { color-scheme: dark; --bg: #16181c; --fg: #e8e8ea; --line: #fff2; }
+  body { margin: 0; height: 100vh; display: flex; flex-direction: column;
+         background: var(--bg); color: var(--fg); font: 13px system-ui, sans-serif; }
+  .bar { display: flex; gap: 10px; align-items: center; padding: 8px 12px;
+         border-bottom: 1px solid var(--line); }
+  canvas { flex: 1; touch-action: none; cursor: crosshair; }
+  button { font: inherit; color: inherit; background: none; cursor: pointer;
+           border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; }
+</style>
+
+<div class="bar">
+  <input id="colour" type="color" value="#0e7490">
+  <input id="size" type="range" min="1" max="24" value="3">
+  <button id="clear">Clear</button>
+  <button id="save">Save PNG</button>
+</div>
+<canvas id="c"></canvas>
+
+<script>
+  // The host passes the resolved theme on the URL, so the app can match the UI.
+  const theme = new URLSearchParams(location.search).get('theme')
+  if (theme === 'dark') document.documentElement.dataset.theme = 'dark'
+
+  const c = document.getElementById('c')
+  const ctx = c.getContext('2d')
+  let drawing = false
+
+  // Resizing clears the bitmap, so the strokes are re-drawn from the copy the
+  // canvas held before the resize.
+  function fit() {
+    const snap = document.createElement('canvas')
+    snap.width = c.width; snap.height = c.height
+    if (c.width) snap.getContext('2d').drawImage(c, 0, 0)
+    c.width = c.clientWidth * devicePixelRatio
+    c.height = c.clientHeight * devicePixelRatio
+    ctx.scale(devicePixelRatio, devicePixelRatio)
+    ctx.lineCap = ctx.lineJoin = 'round'
+    if (snap.width) ctx.drawImage(snap, 0, 0, snap.width / devicePixelRatio, snap.height / devicePixelRatio)
+  }
+  addEventListener('resize', fit)
+  fit()
+
+  c.addEventListener('pointerdown', e => {
+    drawing = true
+    c.setPointerCapture(e.pointerId)
+    ctx.beginPath()
+    ctx.moveTo(e.offsetX, e.offsetY)
+  })
+  c.addEventListener('pointermove', e => {
+    if (!drawing) return
+    ctx.strokeStyle = document.getElementById('colour').value
+    ctx.lineWidth = document.getElementById('size').value
+    ctx.lineTo(e.offsetX, e.offsetY)
+    ctx.stroke()
+  })
+  c.addEventListener('pointerup', () => { drawing = false })
+
+  document.getElementById('clear').onclick = () => ctx.clearRect(0, 0, c.width, c.height)
+
+  // The plain <a download> idiom: the host turns it into a browser download or
+  // the OS save dialog in the desktop app.
+  document.getElementById('save').onclick = () => {
+    const a = document.createElement('a')
+    a.download = 'sketch.png'
+    a.href = c.toDataURL('image/png')
+    a.click()
+  }
+</script>
+```
+
+Reload the Web UI and **Sketchpad** is in the left navigation, with its emoji for
+an icon. Change `mount` to `"panel"` and it moves into the right-hand panel's
+switcher instead, beside session artifacts and the diff review.
+
 ## Technical constraints
 
 The agent follows these rules when generating a Light App:

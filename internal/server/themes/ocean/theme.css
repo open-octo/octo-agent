@@ -1,0 +1,102 @@
+/* Ocean — a walkthrough theme for the user-themes feature.
+   Delete ~/.octo/themes/ocean/ to uninstall. */
+
+:root[data-theme-pack="ocean"] {
+  --blue-1: #E0F5FA;
+  --blue-2: #A8DEE9;
+  --blue-5: #0891B2;
+  --blue-6: #0E7490;
+  --blue-7: #155E75;
+
+  --text: #0F272E;
+  --text-secondary: #4A6C77;
+  --text-tertiary: #7E9BA4;
+  --text-quaternary: #A9C2C9;
+  --text-heading: #072029;
+
+  --bg-layout: #EDF6F8;
+  --bg-container: #FFFFFF;
+  --bg-sidebar: #E7F2F5;
+  --bg-table-header: #F2F9FB;
+  --bg-zebra: #F0F7F9;
+
+  --border: rgba(14,116,144,0.14);
+  --border-secondary: rgba(14,116,144,0.08);
+  --border-table: rgba(14,116,144,0.08);
+
+  --info-bg: rgba(14,116,144,0.10);
+  --info-border: rgba(14,116,144,0.35);
+  --info-text: #0E7490;
+
+  --hover-neutral: rgba(14,116,144,0.06);
+  --row-hover: rgba(14,116,144,0.07);
+  --active-blue-bg: rgba(14,116,144,0.12);
+  --focus-ring: rgba(14,116,144,0.20);
+
+  --surface-info: #F1FAFC;
+  --control-track: rgba(14,116,144,0.08);
+  --search-bg: rgba(14,116,144,0.07);
+  --search-hover: rgba(14,116,144,0.12);
+
+  --sidebar-frost: #E7F2F5;
+  --panel-frost: #FFFFFF;
+  --titlebar-frost: #EDF6F8;
+
+  --scrollbar-thumb: rgba(14,116,144,0.24);
+  --placeholder: #7E9BA4;
+
+  /* White over #0E7490 is 5.1:1 — it carries. */
+  --on-accent: #FFFFFF;
+
+  --chat-bg: linear-gradient(175deg, #F7FDFF 0%, #EDF7FA 55%, #E9F4F7 100%);
+}
+
+:root[data-theme-pack="ocean"][data-theme="dark"] {
+  --blue-1: #0B2F38;
+  --blue-2: #104855;
+  --blue-5: #67E8F9;
+  --blue-6: #22D3EE;
+  --blue-7: #0E7490;
+
+  --text: #E6F4F7;
+  --text-secondary: #9CB9C2;
+  --text-tertiary: #6B8892;
+  --text-quaternary: #4C6771;
+  --text-heading: #F2FBFD;
+
+  --bg-layout: #0B1A1F;
+  --bg-container: #10252B;
+  --bg-sidebar: #0A171C;
+  --bg-table-header: #122A31;
+  --bg-zebra: #12292F;
+
+  --border: rgba(34,211,238,0.16);
+  --border-secondary: rgba(34,211,238,0.10);
+  --border-table: rgba(34,211,238,0.10);
+
+  --info-bg: rgba(34,211,238,0.12);
+  --info-border: rgba(34,211,238,0.35);
+  --info-text: #22D3EE;
+
+  --hover-neutral: rgba(34,211,238,0.08);
+  --row-hover: rgba(34,211,238,0.09);
+  --active-blue-bg: rgba(34,211,238,0.16);
+  --focus-ring: rgba(34,211,238,0.24);
+
+  --surface-info: #112C33;
+  --control-track: rgba(34,211,238,0.10);
+  --search-bg: rgba(34,211,238,0.09);
+  --search-hover: rgba(34,211,238,0.15);
+
+  --sidebar-frost: #0A171C;
+  --panel-frost: #10252B;
+  --titlebar-frost: #0B1A1F;
+
+  --scrollbar-thumb: rgba(34,211,238,0.28);
+  --placeholder: #6B8892;
+
+  /* White over #22D3EE is 1.7:1 — nowhere near. Deep ocean instead: 9.4:1. */
+  --on-accent: #06272E;
+
+  --chat-bg: linear-gradient(175deg, #0E2229 0%, #0B1A1F 55%, #091518 100%);
+}
