@@ -154,6 +154,18 @@ func shellCommand(ctx context.Context, command string) (*exec.Cmd, error) {
 		// variables are scrubbed first so only guardEnv() ever arms a shadow.
 		projectDir := WorkingDirOrCWD(ctx)
 		env := scrubGuardEnv(os.Environ())
+		// An octo spawned from another octo's terminal inherits the parent's
+		// OCTO_TRASH_DIR; scrub it so the fresh value resolved below is the
+		// only source. Otherwise an unresolvable trash dir (e.g. invalid
+		// profile) would leave the rm wrapper armed with the parent project's
+		// trash instead of disarmed.
+		filtered := env[:0]
+		for _, kv := range env {
+			if !strings.HasPrefix(kv, "OCTO_TRASH_DIR=") {
+				filtered = append(filtered, kv)
+			}
+		}
+		env = filtered
 		if projectDir != "" {
 			if trashDir, err := trash.ProjectDir(projectDir); err == nil {
 				env = append(env, "OCTO_TRASH_DIR="+trashDir)
