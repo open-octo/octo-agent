@@ -12,12 +12,19 @@ feature, research a topic, write something. Two of those four are aimed at code,
 only for code — whoever is using it knows better than we do what their four things are. A
 lawyer's are not a writer's.
 
-`~/.octo/landing.json` replaces them.
+`~/.octo/landing/` replaces them:
+
+```
+~/.octo/landing/
+├── config.json
+└── hero.webp        (optional — anything config.json points at)
+```
 
 ```json
 {
   "title": "今天动哪块？",
   "subtitle": "Pick one, or just start typing.",
+  "hero": { "image": "hero.webp", "height": 200 },
   "cards": [
     {
       "icon": "🔍",
@@ -29,11 +36,12 @@ lawyer's are not a writer's.
       "title": "Review a contract",
       "prompt": "Read this contract and tell me what I should be worried about."
     }
-  ]
+  ],
+  "apps": ["sketch"]
 }
 ```
 
-Reload the Web UI and your cards are there. Delete the file and the built-in four come back.
+Reload the Web UI and it is there. Delete the directory and the built-in page comes back.
 
 | Field | Notes |
 | --- | --- |
@@ -43,6 +51,41 @@ Reload the Web UI and your cards are there. Delete the file and the built-in fou
 | `cards[].title` | The card's label. Required. |
 | `cards[].prompt` | What clicking it puts in the composer. Required. |
 | `cards[].icon` | An [iconify](https://icon-sets.iconify.design/) name like `ant-design:tool-outlined`, or an emoji — anything without a `:` is drawn as text. Optional. |
+| `hero` | Fills the space above the mark. See below. |
+| `apps` | Light App slugs, shown as shortcut chips under the cards. Up to 8. A slug you do not have installed is skipped. |
+
+## The hero
+
+The space above the octopus is the emptiest part of the page. `hero` fills it, from one of two
+sources — **one or the other, not both**:
+
+```json
+"hero": { "image": "hero.webp", "height": 200 }
+```
+
+An image file sitting next to `config.json`. **Animated GIF and WebP work**, which is usually
+what "put an animation there" means. Servable types: `.webp`, `.png`, `.jpg`, `.jpeg`, `.gif`,
+`.avif` — SVG is deliberately excluded, since it carries script and these files are served from
+the app's own origin.
+
+```json
+"hero": { "app": "sketch", "height": 240 }
+```
+
+A [Light App](/docs/guides/light-apps/) embedded as a frame — a clock, a board, a sketchpad you
+can draw on before you have even started a session. The whole of that machinery applies
+unchanged, including the state push, so the agent can see what is in it.
+
+`height` is in pixels, clamped to 80–420: the hero shares the screen with the cards and the
+composer.
+
+**Exactly one app.** A landing page with several embedded apps is a dashboard, and every frame is
+something your first screen has to wait for. If both `image` and `app` are given, the image wins
+— a page that silently started running an app would be the worse surprise.
+
+A hero app only appears when the browser is on the same machine as the server, the same rule
+mounted Light Apps follow. Over the network you get the plain landing page rather than a dead
+frame.
 
 ## What clicking a card does
 
@@ -60,7 +103,7 @@ implementing").
   half-replaced set would be nobody's.
 - **Whatever you write is what shows.** The built-in cards are translated through octo's i18n;
   yours are yours, in the language you wrote them in.
-- **A broken file costs you the overrides, not the page.** Malformed JSON, a card with no prompt,
+- **A broken config costs you the overrides, not the page.** Malformed JSON, a card with no prompt,
   a title of 400 characters — each is dropped or trimmed on its own, and you land on the built-in
   page rather than an error. It is a file you hand-edit; a stray comma is a likely state.
 

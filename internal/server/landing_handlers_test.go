@@ -4,17 +4,30 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
 
 func writeLanding(t *testing.T, home, body string) {
 	t.Helper()
-	dir := filepath.Join(home, ".octo")
+	dir := filepath.Join(home, ".octo", "landing")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "landing.json"), []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeLandingAsset drops a file beside the config, the way a user would.
+func writeLandingAsset(t *testing.T, home, name string, data []byte) {
+	t.Helper()
+	dir := filepath.Join(home, ".octo", "landing")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -142,3 +155,131 @@ func TestLanding_ClampsText(t *testing.T) {
 		t.Errorf("card title not clamped: %+v", got.Cards)
 	}
 }
+
+// TestLanding_HeroImage: the quiet half of filling the empty space above the
+// cards — a file beside the config, animated or not.
+func TestLanding_HeroImage(t *testing.T) {
+	home := themeHome(t)
+	writeLanding(t, home, `{"hero": {"image": "hero.webp", "height": 240}}`)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	got := getLanding(t, srv)
+	if got.Hero == nil || got.Hero.Image != "hero.webp" || got.Hero.Height != 240 {
+		t.Fatalf("hero not carried: %+v", got.Hero)
+	}
+	if got.Hero.App != "" {
+		t.Error("an image hero must not also name an app")
+	}
+}
+
+// TestLanding_HeroApp: the other half — a Light App embedded in that space.
+func TestLanding_HeroApp(t *testing.T) {
+	home := themeHome(t)
+	writeLanding(t, home, `{"hero": {"app": "clock"}}`)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	got := getLanding(t, srv)
+	if got.Hero == nil || got.Hero.App != "clock" {
+		t.Fatalf("hero app not carried: %+v", got.Hero)
+	}
+	if got.Hero.Height != defaultHeroHeight {
+		t.Errorf("expected the default height, got %d", got.Hero.Height)
+	}
+}
+
+// TestLanding_HeroImageWinsOverApp: a page that silently started running an app
+// would be the worse surprise of the two.
+func TestLanding_HeroImageWinsOverApp(t *testing.T) {
+	home := themeHome(t)
+	writeLanding(t, home, `{"hero": {"image": "hero.png", "app": "clock"}}`)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	got := getLanding(t, srv)
+	if got.Hero == nil || got.Hero.Image != "hero.png" || got.Hero.App != "" {
+		t.Fatalf("expected the image to win: %+v", got.Hero)
+	}
+}
+
+// TestLanding_HeroRejectsUnusable: the hero names a file beside the config, and
+// an SVG is a document that carries script — neither may turn into a path.
+func TestLanding_HeroRejectsUnusable(t *testing.T) {
+	home := themeHome(t)
+	for _, body := range []string{
+		`{"hero": {"image": "../../../etc/passwd"}}`,
+		`{"hero": {"image": "sub/dir/hero.png"}}`,
+		`{"hero": {"image": "evil.svg"}}`,
+		`{"hero": {"image": "notes.txt"}}`,
+		`{"hero": {"app": "../sketch"}}`,
+		`{"hero": {"app": "Sketch"}}`,
+		`{"hero": {"height": 200}}`,
+	} {
+		writeLanding(t, home, body)
+		srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+		if got := getLanding(t, srv); got.Hero != nil {
+			t.Errorf("%s: expected no hero, got %+v", body, got.Hero)
+		}
+	}
+}
+
+// TestLanding_HeroHeightClamped: the hero shares the screen with the cards and
+// the composer, so it cannot be told to take all of it.
+func TestLanding_HeroHeightClamped(t *testing.T) {
+	home := themeHome(t)
+	for _, tc := range []struct{ given, want int }{
+		{5000, maxHeroHeight},
+		{1, minHeroHeight},
+		{-40, minHeroHeight},
+	} {
+		writeLanding(t, home, `{"hero": {"image": "h.png", "height": `+itoa(tc.given)+`}}`)
+		srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+		got := getLanding(t, srv)
+		if got.Hero == nil || got.Hero.Height != tc.want {
+			t.Errorf("height %d: got %+v, want %d", tc.given, got.Hero, tc.want)
+		}
+	}
+}
+
+// TestLanding_PinnedApps: shortcuts, deduplicated and capped; a slug that could
+// not name a Light App directory never reaches the UI.
+func TestLanding_PinnedApps(t *testing.T) {
+	home := themeHome(t)
+	writeLanding(t, home, `{"apps": ["sketch", "sketch", "../evil", "Board", "board", ""]}`)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	got := getLanding(t, srv)
+	if len(got.Apps) != 2 || got.Apps[0] != "sketch" || got.Apps[1] != "board" {
+		t.Fatalf("unexpected apps: %v", got.Apps)
+	}
+}
+
+// TestLandingAsset_Serves: the hero's image comes back as an image, and only
+// the shapes the whitelist knows.
+func TestLandingAsset_Serves(t *testing.T) {
+	home := themeHome(t)
+	writeLandingAsset(t, home, "hero.png", []byte("PNGBYTES"))
+	writeLandingAsset(t, home, "evil.svg", []byte(`<svg><script>alert(1)</script></svg>`))
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	w := doJSON(t, srv, "GET", "/api/landing/assets/hero.png", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "image/png" {
+		t.Errorf("served as %q", ct)
+	}
+	if w.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Error("missing nosniff")
+	}
+
+	for _, path := range []string{
+		"/api/landing/assets/evil.svg",
+		"/api/landing/assets/missing.png",
+		"/api/landing/assets/..%2f..%2fconfig.json",
+	} {
+		if w := doJSON(t, srv, "GET", path, ""); w.Code == 200 {
+			t.Errorf("%s: expected a refusal, got 200", path)
+		}
+	}
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }

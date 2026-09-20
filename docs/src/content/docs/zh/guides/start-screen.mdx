@@ -11,12 +11,19 @@ import { Badge } from '@astrojs/starlight/components';
 四张里有两张是冲着代码去的，而 octo 不只是拿来写代码的——用它的人比我们更清楚自己的四件事
 是什么。做法务的那四张，和做内容的那四张，不会是同一批。
 
-`~/.octo/landing.json` 可以把它们整个换掉。
+`~/.octo/landing/` 可以把它们整个换掉：
+
+```
+~/.octo/landing/
+├── config.json
+└── hero.webp        （可选——config.json 指到的任何图片）
+```
 
 ```json
 {
   "title": "今天动哪块？",
   "subtitle": "挑一个，或者直接开始输入。",
+  "hero": { "image": "hero.webp", "height": 200 },
   "cards": [
     {
       "icon": "🔍",
@@ -28,11 +35,12 @@ import { Badge } from '@astrojs/starlight/components';
       "title": "审一份合同",
       "prompt": "帮我看这份合同，告诉我哪些地方需要注意。"
     }
-  ]
+  ],
+  "apps": ["sketch"]
 }
 ```
 
-刷新 Web UI 就能看到。删掉这个文件，内置那四张就回来了。
+刷新 Web UI 就能看到。删掉这个目录，内置那一屏就回来了。
 
 | 字段 | 说明 |
 | --- | --- |
@@ -42,6 +50,35 @@ import { Badge } from '@astrojs/starlight/components';
 | `cards[].title` | 卡片上的标题。必填。 |
 | `cards[].prompt` | 点它之后填进输入框的内容。必填。 |
 | `cards[].icon` | [iconify](https://icon-sets.iconify.design/) 图标名（如 `ant-design:tool-outlined`），或者一个 emoji——不含 `:` 的一律当文字画。可选。 |
+| `hero` | 填章鱼标记上方那块空白。见下。 |
+| `apps` | 轻应用的 slug，以快捷入口的形式显示在卡片下方。最多 8 个。没装的 slug 会被跳过。 |
+
+## hero 区
+
+章鱼上方是这一屏最空的地方。`hero` 用来填它，来源二选一——**只能选一个**：
+
+```json
+"hero": { "image": "hero.webp", "height": 200 }
+```
+
+一张放在 `config.json` 旁边的图片。**GIF 和 WebP 动图都能用**，「放个动画」通常指的就是这个。
+可用类型：`.webp`、`.png`、`.jpg`、`.jpeg`、`.gif`、`.avif`——SVG 被刻意排除，
+因为它能携带脚本，而这些文件是从应用自己的 origin 提供的。
+
+```json
+"hero": { "app": "sketch", "height": 240 }
+```
+
+嵌一个[轻应用](/docs/zh/guides/light-apps/)——一个时钟、一块看板，或者一个还没开始对话就能
+先画两笔的画板。轻应用那一整套机制原样适用，包括状态发布，所以 agent 能看见里面有什么。
+
+`height` 单位是像素，会被限制在 80–420 之间：这块区域要和卡片、输入框分这一屏。
+
+**只能嵌一个。** 嵌好几个的着陆页就是仪表盘了，而每一个 frame 都是你的第一屏要等的东西。
+`image` 和 `app` 同时给时 image 生效——一个页面自己悄悄跑起一个应用，是两者里更糟的那种意外。
+
+嵌入的应用只在浏览器和服务器同机时出现，和挂载的轻应用同一条规则。从网络上访问时
+你看到的是没有 hero 的那一屏，而不是一个打不开的框。
 
 ## 点一下卡片会发生什么
 
@@ -56,7 +93,7 @@ import { Badge } from '@astrojs/starlight/components';
 - **是替换，不是合并。** 你的四张不等于内置四张加上你的。替一半的结果谁都不认。
 - **你写什么就显示什么。** 内置卡片走 octo 的 i18n 有中英两版；你写的是你的，
   用什么语言写就用什么语言显示。
-- **文件写坏了，丢的是定制而不是这一屏。** JSON 格式错、某张卡没写 prompt、标题写了 400 字——
+- **配置写坏了，丢的是定制而不是这一屏。** JSON 格式错、某张卡没写 prompt、标题写了 400 字——
   各自被丢弃或截断，最后你落在内置那一屏，而不是一个报错页。这是个你手改的文件，
   写漏一个逗号是常态而不是意外。
 

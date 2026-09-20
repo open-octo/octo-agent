@@ -870,10 +870,24 @@ export interface LandingCard {
   prompt: string
 }
 
+export interface LandingHero {
+  // A file in the landing directory, served from /api/landing/assets/.
+  // Animated GIF and WebP work.
+  image?: string
+  // A Light App slug, embedded as a frame. Exactly one: several would make the
+  // first screen wait on several frames.
+  app?: string
+  height?: number
+}
+
 export interface LandingConfig {
   title?: string
   subtitle?: string
+  hero?: LandingHero
   cards?: LandingCard[]
+  // Light App slugs offered as shortcuts under the cards — entry points, not
+  // embeds.
+  apps?: string[]
 }
 
 // Always resolves: a missing or malformed ~/.octo/landing.json answers with an
