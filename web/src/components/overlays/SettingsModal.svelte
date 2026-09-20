@@ -246,11 +246,12 @@
     { key: 'endpoints', icon: 'ant-design:api-outlined',           label: 'settings.endpoints.title' },
     { key: 'agent',     icon: 'ant-design:robot-outlined',         label: 'settings.agent' },
     { key: 'mobile',    icon: 'ant-design:mobile-outlined',        label: 'settings.mobile' },
-    // Experimental features (computer-use) need the desktop shell AND a
-    // platform with a substrate — macOS (AX/CGEvent) or Windows (UI
-    // Automation/SendInput). On macOS only the desktop app can hold the
-    // Screen Recording / Accessibility grants.
-    ...($nativeShell && computerPlatform
+    // Experimental features (computer-use) need a platform with a substrate —
+    // macOS (AX/CGEvent) or Windows (UI Automation/SendInput) on the machine
+    // running octo. Shown on web too: a CLI/serve octo works the same, its
+    // macOS Screen Recording / Accessibility grants just go to the hosting
+    // terminal app instead of the desktop app.
+    ...(computerPlatform
       ? [{ key: 'experimental' as const, icon: 'ant-design:experiment-outlined', label: 'settings.experimental' }]
       : []),
     { key: 'data',      icon: 'ant-design:database-outlined',       label: 'settings.data' },
