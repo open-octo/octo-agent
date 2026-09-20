@@ -198,6 +198,27 @@ To mount an app the user already saved, edit that one field in its `manifest.jso
 - Use emoji or inline SVG for icons
 - Follow `artifact-design` skill conventions for layout and colors
 
+### Seeing inside a running Light App
+
+A Light App is sealed off from you: it runs on its own origin behind a policy that closes every network exit, so you cannot read it and it cannot reach you. What it can do is publish a snapshot of itself, and two tools read that:
+
+- **`lightapp_state`** — every open app's own one-line digest, plus whether it published a screenshot. Cheap. Call it whenever the user points at something they made rather than described: "my sketch", "the board", "这个图", "what I just drew".
+- **`view_lightapp`** — pulls that screenshot into the conversation as a real image, so you can look at a hand-drawn layout the way you look at any image the user sends.
+
+Nothing reporting state means no app is open (or the open one does not publish); ask the user to open it in the Web UI rather than guessing at what they drew.
+
+When you write an app whose contents the user will want to talk about, make it publish on change — one call, no setup:
+
+```js
+window.octo.pushState({
+  digest: 'A hand-drawn sketch, 3 strokes.',  // one line, written for you to read
+  summary: { strokes: 3 },                    // optional structured extras
+  image: canvasOrBlob,                        // optional screenshot
+})
+```
+
+octo coalesces pushes, so calling it on every change is fine. It is one-way: publishing tells you about the app, it gives the app nothing, and you cannot draw back onto their canvas.
+
 ## Themes
 
 The Web UI's palette is user-editable: a theme is `~/.octo/themes/<id>/` holding `manifest.json` and `theme.css`. When the user asks for one, read a theme octo ships — `~/.octo/themes/ocean`, `blossom` or `vogue` — and work from it: they carry the whole variable set, name themselves per locale, and comment the traps. Write both files with `write_file`; the theme shows up under Settings → Theme on the next page load.

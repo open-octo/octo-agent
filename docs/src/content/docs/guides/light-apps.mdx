@@ -171,9 +171,36 @@ A sketchpad that claims a page of its own. Two files, no build step:
     ctx.lineTo(e.offsetX, e.offsetY)
     ctx.stroke()
   })
-  c.addEventListener('pointerup', () => { drawing = false })
+  c.addEventListener('pointerup', () => {
+    if (drawing) { drawing = false; strokes++; publish() }
+  })
 
-  document.getElementById('clear').onclick = () => ctx.clearRect(0, 0, c.width, c.height)
+  // ── Let the agent see this canvas ────────────────────────────────────────
+  //
+  // octo mirrors whatever an app publishes; the model reads it through the
+  // lightapp_state / view_lightapp tools. One way: publishing describes the app
+  // to the model, it grants the app no access to the conversation.
+  let strokes = 0
+  let publishTimer = 0
+  function publish() {
+    clearTimeout(publishTimer)
+    publishTimer = setTimeout(() => {
+      window.octo?.pushState({
+        digest: strokes
+          ? `A hand-drawn sketch, ${strokes} stroke(s).`
+          : 'An empty sketch canvas — nothing drawn yet.',
+        summary: { strokes },
+        image: c,            // a canvas is accepted directly
+      })
+    }, 400)
+  }
+  publish()
+
+  document.getElementById('clear').onclick = () => {
+    ctx.clearRect(0, 0, c.width, c.height)
+    strokes = 0
+    publish()
+  }
 
   // The plain <a download> idiom: the host turns it into a browser download or
   // the OS save dialog in the desktop app.
@@ -189,6 +216,38 @@ A sketchpad that claims a page of its own. Two files, no build step:
 Reload the Web UI and **Sketchpad** is in the left navigation, with its emoji for
 an icon. Change `mount` to `"panel"` and it moves into the right-hand panel's
 switcher instead, beside session artifacts and the diff review.
+
+The `window.octo.pushState` call is what lets the agent see the drawing: ask it
+"what did I just draw?" and it reads the digest, then looks at the image. See
+[Let the agent see inside](#let-the-agent-see-inside) below.
+
+## Let the agent see inside
+
+A Light App is sealed: it runs on its own origin behind a policy that closes
+every network exit, so by default the agent has no idea it is open, let alone
+what is in it.
+
+An app can publish a snapshot of itself:
+
+```js
+window.octo.pushState({
+  digest: 'A hand-drawn sketch, 3 strokes.',   // one line, written for the model
+  summary: { strokes: 3 },                     // optional structured extras
+  image: canvasOrBlob,                         // optional screenshot
+})
+```
+
+The agent then has two tools: `lightapp_state` reads every open app's digest
+(cheap, so it can check whenever you mention "my sketch"), and `view_lightapp`
+pulls the screenshot into the conversation as a real image it can look at.
+
+**This is one-way.** Publishing tells the model about your app; it gives your
+app nothing — no conversation, no API, no credentials. The agent cannot draw on
+your canvas either. Call it whenever your state changes; octo coalesces pushes,
+so a canvas firing on every stroke is fine.
+
+The snapshot is held in memory only and disappears when octo stops or the app
+closes.
 
 ## Technical constraints
 

@@ -955,6 +955,8 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/light-apps", s.handleListLightApps)
 	s.api("GET /api/light-apps/{slug}", s.handleGetLightApp)
 	s.api("DELETE /api/light-apps/{slug}", s.handleDeleteLightApp)
+	s.api("PUT /api/light-apps/{slug}/state", s.handlePutLightAppState)
+	s.api("DELETE /api/light-apps/{slug}/state", s.handleDeleteLightAppState)
 	s.api("GET /api/trash", s.handleGetTrash)
 	s.api("POST /api/trash/empty", s.handleEmptyTrash)
 	s.api("POST /api/trash/{id}/restore", s.handleRestoreTrash)

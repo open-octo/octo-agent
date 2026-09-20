@@ -41,6 +41,37 @@
     post({ __laBridge: 1, id: 0, ns: NS, op: 'migrate-ready' });
   }
 
+  // ── State push (app → host, one way) ──────────────────────────────────────
+  //
+  // Lets an app describe itself to the model: octo mirrors the snapshot host
+  // side, where the lightapp_state / view_lightapp tools read it. There is no
+  // reply and no read path — the app never learns anything about the
+  // conversation from this.
+  //
+  //   octo.pushState({ digest: 'one line for the model',
+  //                    summary: { any: 'json' },
+  //                    image: blobOrCanvas })
+  //
+  // A canvas is accepted directly and converted; the host coalesces pushes, so
+  // calling this on every change is fine.
+  window.octo = window.octo || {};
+  window.octo.pushState = function (state) {
+    var s = state || {};
+    function send(blob) {
+      post({
+        __laBridge: 1, id: 0, ns: NS, op: 'state',
+        digest: typeof s.digest === 'string' ? s.digest : '',
+        summary: s.summary,
+        image: blob || null,
+      });
+    }
+    var img = s.image;
+    if (img && typeof img.toBlob === 'function') {
+      try { img.toBlob(function (b) { send(b); }, 'image/png'); return; } catch (e) {}
+    }
+    send(img && typeof Blob !== 'undefined' && img instanceof Blob ? img : null);
+  };
+
   // ── Download bridge (desktop shell only) ──────────────────────────────────
   //
   // The desktop webview has no download delegate, so an `<a download>` click
