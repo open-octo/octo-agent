@@ -93,7 +93,12 @@ func (ComputerTool) Definition() agent.ToolDefinition {
 						"drag: press-and-hold at (x, y), move to (x2, y2) with interpolated intermediate motion, " +
 						"then release — for sliders, crop boxes, and mask brushes that a click can't operate; " +
 						"pass \"app\" to focus that app first. " +
-						"type: type text at the current focus; pass \"app\" to focus it first. " +
+						"type: type text at the current focus; pass \"app\" to focus it first. Some rich-text " +
+						"editors (e.g. macOS Notes) silently drop injected keystrokes — if a screenshot shows " +
+						"the text didn't land, do NOT retry type; ax_tree the app, find the AXTextArea/Edit " +
+						"element, and write the full content with ax_set instead (ax_set replaces the " +
+						"element's whole value as plain text — include any existing text you want to keep, " +
+						"and expect any rich formatting in the field to be flattened). " +
 						"key: press a key or combo like \"enter\", \"cmd+c\"; pass \"app\" to focus it first. " +
 						"scroll: scroll at the cursor by (dx, dy) lines, positive dy = down.",
 				},
