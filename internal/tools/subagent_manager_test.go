@@ -129,9 +129,9 @@ func waitForCancel(t *testing.T, ctx context.Context, what string) {
 	}
 }
 
-// blockingPromoteSpawner blocks in Spawn until Unblock is called, and respects
+// gatedSpawner blocks in Spawn until Unblock is called, and respects
 // the caller's context cancellation so turn-cancel tests don't hang.
-type blockingPromoteSpawner struct {
+type gatedSpawner struct {
 	mu      sync.Mutex
 	unblock chan struct{}
 	result  SpawnResult
@@ -139,7 +139,7 @@ type blockingPromoteSpawner struct {
 	spawnCh chan SpawnRequest
 }
 
-func (s *blockingPromoteSpawner) Spawn(ctx context.Context, req SpawnRequest) (SpawnResult, error) {
+func (s *gatedSpawner) Spawn(ctx context.Context, req SpawnRequest) (SpawnResult, error) {
 	s.mu.Lock()
 	unblock := s.unblock
 	s.mu.Unlock()
@@ -160,11 +160,11 @@ func (s *blockingPromoteSpawner) Spawn(ctx context.Context, req SpawnRequest) (S
 	}
 }
 
-func (s *blockingPromoteSpawner) Continue(_ context.Context, _, _ string) (SpawnResult, error) {
+func (s *gatedSpawner) Continue(_ context.Context, _, _ string) (SpawnResult, error) {
 	return SpawnResult{}, nil
 }
 
-func (s *blockingPromoteSpawner) Unblock(res SpawnResult, err error) {
+func (s *gatedSpawner) Unblock(res SpawnResult, err error) {
 	s.mu.Lock()
 	s.result = res
 	s.err = err
@@ -172,94 +172,8 @@ func (s *blockingPromoteSpawner) Unblock(res SpawnResult, err error) {
 	s.mu.Unlock()
 }
 
-func TestRunSync_Promote(t *testing.T) {
-	sp := &blockingPromoteSpawner{unblock: make(chan struct{}), spawnCh: make(chan SpawnRequest, 1)}
-	m := NewSubAgentManager(sp)
-
-	resCh := make(chan SpawnResult, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		res, err := m.RunSync(context.Background(), SpawnRequest{Description: "d", Prompt: "p"})
-		resCh <- res
-		errCh <- err
-	}()
-
-	select {
-	case <-sp.spawnCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("spawn did not start")
-	}
-
-	if !m.HasSync() {
-		t.Error("HasSync() = false, want true before promote")
-	}
-
-	m.PromoteSync()
-
-	select {
-	case res := <-resCh:
-		if res.StopReason != "promoted" {
-			t.Errorf("StopReason = %q, want promoted", res.StopReason)
-		}
-		if res.AgentID == "" {
-			t.Error("AgentID is empty")
-		}
-		waitForStatus(t, m, res.AgentID, "running")
-
-		sp.Unblock(SpawnResult{Reply: "done", AgentID: "child-1"}, nil)
-		waitForStatus(t, m, res.AgentID, "idle")
-	case <-time.After(2 * time.Second):
-		t.Fatal("RunSync did not return after promote")
-	}
-
-	if err := <-errCh; err != nil {
-		t.Fatalf("RunSync error: %v", err)
-	}
-}
-
-func TestRunSync_Promote_Notifies(t *testing.T) {
-	sp := &blockingPromoteSpawner{unblock: make(chan struct{}), spawnCh: make(chan SpawnRequest, 1)}
-	m := NewSubAgentManager(sp)
-
-	notes := make(chan SubAgentNotification, 1)
-	m.SetOnExit(func(ev SubAgentNotification) { notes <- ev })
-
-	go func() {
-		m.RunSync(context.Background(), SpawnRequest{Description: "d", Prompt: "p"})
-	}()
-
-	select {
-	case <-sp.spawnCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("spawn did not start")
-	}
-	m.PromoteSync()
-
-	// Wait briefly for RunSync to hand off to the background goroutine.
-	select {
-	case <-time.After(100 * time.Millisecond):
-	}
-
-	sp.Unblock(SpawnResult{Reply: "final", AgentID: "child-1"}, nil)
-
-	select {
-	case n := <-notes:
-		if n.AgentID == "" {
-			t.Error("notification AgentID is empty")
-		}
-		if n.Result != "final" {
-			t.Errorf("notification Result = %q, want final", n.Result)
-		}
-		if n.Kind != "spawn_done" {
-			t.Errorf("notification Kind = %q, want spawn_done", n.Kind)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("onExit not fired after promoted agent completed")
-	}
-}
-
 func TestRunSync_Cancel(t *testing.T) {
-	sp := &blockingPromoteSpawner{unblock: make(chan struct{}), spawnCh: make(chan SpawnRequest, 1)}
+	sp := &gatedSpawner{unblock: make(chan struct{}), spawnCh: make(chan SpawnRequest, 1)}
 	m := NewSubAgentManager(sp)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -433,7 +347,7 @@ func TestEventSinkDoneCarriesStopReason(t *testing.T) {
 	}
 
 	// Kill a running agent: the done event should report killed.
-	sp := &blockingPromoteSpawner{unblock: make(chan struct{}), spawnCh: make(chan SpawnRequest, 1)}
+	sp := &gatedSpawner{unblock: make(chan struct{}), spawnCh: make(chan SpawnRequest, 1)}
 	m2 := NewSubAgentManager(sp)
 	var mu2 sync.Mutex
 	var events2 []SubAgentEvent

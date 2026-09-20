@@ -408,16 +408,6 @@ type wsInPromoteSyncTerminal struct {
 	SessionID string `json:"session_id"`
 }
 
-// wsInPromoteSyncSubAgent promotes a running inline sub-agent to the
-// background. No client sends it today: web sessions dispatch every sub-agent
-// in the background already (see tools.SetSynchronous), so there is no inline
-// run to promote and the tool card carries no "Background" button. Kept so the
-// protocol stays intact for a transport that dispatches inline and still wants
-// a promote affordance.
-type wsInPromoteSyncSubAgent struct {
-	SessionID string `json:"session_id"`
-}
-
 // wsInKillBackground is sent by the browser when the user kills a process from
 // the background-process popover. HandleID is the BackgroundManager id shown
 // in background_tasks_update (e.g. "bg_1").

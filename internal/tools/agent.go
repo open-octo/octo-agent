@@ -367,16 +367,6 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 	if err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: %w", err)
 	}
-	// User promoted the running synchronous sub-agent to background. Reaching
-	// this needs a transport that both dispatches inline and offers a promote
-	// affordance (TUI Ctrl+B, the Web button); no transport does both today,
-	// since inline dispatch is now the CLI one-shot's alone.
-	if res.StopReason == "promoted" {
-		return agent.ToolResult{
-			Text: fmt.Sprintf("Sub-agent %s was promoted to background. You will be notified when it completes.", res.AgentID),
-			UI:   subAgentResultUI(res.AgentID),
-		}, nil
-	}
 	text := withAgentTag(res.AgentID, res.Reply)
 	text += incompleteNote(res.StopReason, res.AgentID)
 	return agent.ToolResult{Text: text, UI: subAgentResultUI(res.AgentID)}, nil

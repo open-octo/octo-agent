@@ -208,11 +208,6 @@ type SubAgentManager struct {
 	// rejection. Buffered to maxConcurrentSubAgents; nil-safe is not required
 	// since NewSubAgentManager always sets it.
 	syncSem chan struct{}
-
-	// syncMu guards the sync session slot used to promote a synchronous
-	// sub-agent to background while it is running.
-	syncMu   sync.Mutex
-	syncSess *SyncSession
 }
 
 // NewSubAgentManager returns an empty manager.
@@ -268,71 +263,12 @@ func (m *SubAgentManager) Synchronous() bool {
 	return m.synchronous
 }
 
-// BeginSync registers a new SyncSession for the current synchronous sub-agent
-// run. Call EndSync with the returned session (via defer) when the run finishes
-// or is promoted. At most one synchronous sub-agent runs per manager at a time —
-// the agent loop is serial — so there is only one slot.
-func (m *SubAgentManager) BeginSync() *SyncSession {
-	s := &SyncSession{ch: make(chan struct{})}
-	m.syncMu.Lock()
-	m.syncSess = s
-	m.syncMu.Unlock()
-	return s
-}
-
-// EndSync clears the current SyncSession only if it is still the one returned
-// by BeginSync. This protects against a deferred EndSync racing with a later
-// synchronous run in tests or if the manager is ever used concurrently.
-func (m *SubAgentManager) EndSync(s *SyncSession) {
-	m.syncMu.Lock()
-	if m.syncSess == s {
-		m.syncSess = nil
-	}
-	m.syncMu.Unlock()
-}
-
-// HasSync reports whether a synchronous sub-agent is currently running.
-func (m *SubAgentManager) HasSync() bool {
-	m.syncMu.Lock()
-	defer m.syncMu.Unlock()
-	return m.syncSess != nil
-}
-
-// PromoteSync signals the current synchronous sub-agent to promote itself to
-// a background agent. No-op if no synchronous sub-agent is running.
-func (m *SubAgentManager) PromoteSync() {
-	m.syncMu.Lock()
-	s := m.syncSess
-	m.syncMu.Unlock()
-	if s != nil {
-		s.Signal()
-	}
-}
-
-// HasActiveSubAgentSync reports whether the default manager has a synchronous
-// sub-agent running. Used by the TUI to conditionally show the Ctrl+B hint.
-func HasActiveSubAgentSync() bool {
-	return defaultSubAgentMgr != nil && defaultSubAgentMgr.HasSync()
-}
-
-// PromoteCurrentSubAgentSync signals the default manager's synchronous
-// sub-agent to promote. Called by the TUI Ctrl+B handler.
-func PromoteCurrentSubAgentSync() {
-	if defaultSubAgentMgr != nil {
-		defaultSubAgentMgr.PromoteSync()
-	}
-}
-
 // RunSync spawns a sub-agent and blocks until it completes, returning its
 // reply. Used by the synchronous sub_agent path; the spawner stamps the
 // sub-agent marker and keeps the child resumable for a later ContinueSync.
 // When an onEvent hook is registered the child's tool-level activity is
-// streamed the same way async sub-agents are, so live panels work for both
-// sync and async modes.
-//
-// A synchronous run can be manually promoted to a background agent while it is
-// running (TUI Ctrl+B, Web "Background" button). The same agent_N id is kept,
-// the goroutine continues, and the result arrives via the onExit hook.
+// streamed the same way background sub-agents are, so live panels work for
+// both dispatch modes.
 func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnResult, error) {
 	if m.spawner == nil {
 		return SpawnResult{}, fmt.Errorf("subagent: no spawner configured")
@@ -340,9 +276,7 @@ func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnR
 
 	// Bound concurrent foreground sub-agents (see syncSem): a batch dispatched
 	// in one turn runs concurrently, so cap how many child agent loops run at
-	// once. Blocks until a slot frees; a cancelled turn stops waiting. Released
-	// on return — including the promote path, where the run is re-counted against
-	// the async budget (activeAsync) instead.
+	// once. Blocks until a slot frees; a cancelled turn stops waiting.
 	select {
 	case m.syncSem <- struct{}{}:
 		defer func() { <-m.syncSem }()
@@ -377,9 +311,6 @@ func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnR
 		spawnCtx = WithSubAgentEventSink(spawnCtx, sink)
 		sink(SubAgentEvent{Kind: "started"})
 	}
-
-	sess := m.BeginSync()
-	defer m.EndSync(sess)
 
 	type outcome struct {
 		res SpawnResult
@@ -426,59 +357,6 @@ func (m *SubAgentManager) RunSync(ctx context.Context, req SpawnRequest) (SpawnR
 		delete(m.agents, id)
 		m.mu.Unlock()
 		return o.res, o.err
-
-	case <-sess.C():
-		// Promoted to background: keep the agent entry alive, count it against
-		// the async concurrency cap, and let the goroutine finish on its own.
-		m.mu.Lock()
-		m.activeAsync++
-		m.mu.Unlock()
-
-		go func() {
-			// Registered first so it runs last: the async-budget release below
-			// still happens while the panic unwinds. The exit notification hook
-			// is caller-supplied, which is what makes this reachable.
-			defer func() { _ = panics.Error(recover(), "sub-agent background wait", "agent_id", id) }()
-			defer func() {
-				m.mu.Lock()
-				m.activeAsync--
-				m.mu.Unlock()
-			}()
-			o := <-done
-			// Spawn has finished; cancel its context to release resources.
-			a.mu.Lock()
-			a.cancel()
-			a.mu.Unlock()
-
-			m.mu.Lock()
-			hook := m.onExit
-			m.mu.Unlock()
-
-			if hook != nil {
-				result, _, _, _, sr := a.readState()
-				if o.err != nil {
-					result = o.err.Error()
-				}
-				a.mu.Lock()
-				inTok := a.inputTokens
-				outTok := a.outputTokens
-				a.mu.Unlock()
-				hook(SubAgentNotification{
-					AgentID:      id,
-					Description:  req.Description,
-					Kind:         "spawn_done",
-					Result:       result,
-					InputTokens:  inTok,
-					OutputTokens: outTok,
-					StopReason:   sr,
-				})
-			}
-			if sink != nil {
-				sink(SubAgentEvent{Kind: "done"})
-			}
-		}()
-
-		return SpawnResult{AgentID: id, StopReason: "promoted"}, nil
 
 	case <-ctx.Done():
 		// Turn cancelled: stop the spawn and clean up.

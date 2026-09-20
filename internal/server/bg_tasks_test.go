@@ -43,7 +43,6 @@ func TestSubAgentNoticeStatus(t *testing.T) {
 		{"tool_use", "success"},   // normal completion
 		{"max_turns", "warning"},  // partial completion
 		{"max_tokens", "warning"}, // partial completion
-		{"promoted", "success"},   // user-promoted sync run
 		{"killed", "cancelled"},   // user kill
 	}
 	for _, c := range cases {

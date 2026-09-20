@@ -34,7 +34,7 @@ type SubAgentEvent struct {
 	ToolOutput string         // "tool_done"/"tool_error": capped result / error text
 	Text       string         // "text": one completed assistant text block, capped
 	// StopReason is the agent's final stop reason on a "done" event (e.g.
-	// "end_turn", "tool_use", "max_turns", "max_tokens", "promoted"). Empty or
+	// "end_turn", "tool_use", "max_turns", "max_tokens"). Empty or
 	// sentinel values like "error" / "killed" indicate the agent exited
 	// abnormally so the live panel can render it differently from a clean
 	// completion.

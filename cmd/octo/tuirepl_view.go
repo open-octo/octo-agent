@@ -164,17 +164,12 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyCtrlB:
-		// Background the current inline terminal or sub-agent, if one is
-		// running. No-op when nothing inline is polling — which is always the
-		// case for the sub-agent branch now that the TUI dispatches every
-		// sub-agent in the background (see tools.SetSynchronous); the hint line
-		// below is gated on the same check, so it stays hidden.
-		if m.turnRunning {
-			if tools.HasActiveSync() {
-				tools.PromoteCurrentSync()
-			} else if tools.HasActiveSubAgentSync() {
-				tools.PromoteCurrentSubAgentSync()
-			}
+		// Background the current inline terminal command, if one is running.
+		// No-op otherwise. Sub-agents have no promote path: every transport
+		// with a follow-up-turn channel already dispatches them in the
+		// background (see tools.SetSynchronous).
+		if m.turnRunning && tools.HasActiveSync() {
+			tools.PromoteCurrentSync()
 		}
 		return m, nil
 
@@ -1876,7 +1871,7 @@ func (m *tuiModel) View() string {
 			b.WriteString(hintStyle.Render("  " + lastRunes(line, 100)))
 			b.WriteByte('\n')
 		}
-		if tools.HasActiveSync() || tools.HasActiveSubAgentSync() {
+		if tools.HasActiveSync() {
 			b.WriteString(hintStyle.Render("  [Ctrl+B] background  [Esc] interrupt"))
 			b.WriteByte('\n')
 		}

@@ -353,19 +353,6 @@ func (c *wsConn) dispatch(msgType string, raw []byte) {
 		}
 		tools.SessionBackgroundManager(msg.SessionID).PromoteSync()
 
-	case "promote_sync_sub_agent":
-		var msg wsInPromoteSyncSubAgent
-		if err := json.Unmarshal(raw, &msg); err != nil {
-			return
-		}
-		// Unreachable from today's web client (see wsInPromoteSyncSubAgent).
-		// The session's sub-agent manager is created on the first tool turn; if
-		// the session has never started a sub-agent, the message is a no-op —
-		// as it is whenever no inline sub-agent is running.
-		if mgr := tools.SessionSubAgentManager(msg.SessionID, nil); mgr != nil {
-			mgr.PromoteSync()
-		}
-
 	case "kill_background":
 		var msg wsInKillBackground
 		if err := json.Unmarshal(raw, &msg); err != nil {

@@ -232,13 +232,6 @@ export class WsManager {
     this.send({ type: "promote_sync_terminal", session_id: sessionId });
   }
 
-  // No caller: web sessions dispatch sub-agents in the background, so no
-  // inline run exists to promote. Kept alongside the server handler that still
-  // accepts the message.
-  promoteSyncSubAgent(sessionId: string): void {
-    this.send({ type: "promote_sync_sub_agent", session_id: sessionId });
-  }
-
   // Kill one background process from the popover. The server answers through
   // the normal exit path: a "cancelled" background_task_notice plus a refreshed
   // background_tasks_update — there is no dedicated ack.
