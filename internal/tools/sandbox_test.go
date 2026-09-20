@@ -86,7 +86,13 @@ func TestWithBundledBinPathUsesSharedBinForNamedProfile(t *testing.T) {
 }
 
 func TestShellCommandOmitsTrashDirWhenProfileIsInvalid(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("OCTO_TRASH_DIR is only consumed by the POSIX rm wrapper")
+	}
 	t.Setenv("OCTO_PROFILE", "../bad")
+	// Simulate running under a parent octo's terminal: the inherited stale
+	// value must be scrubbed, not leak into the child shell.
+	t.Setenv("OCTO_TRASH_DIR", "/stale/parent/trash")
 	cmd, err := shellCommand(context.Background(), "echo hi")
 	if err != nil {
 		t.Fatal(err)
@@ -95,6 +101,31 @@ func TestShellCommandOmitsTrashDirWhenProfileIsInvalid(t *testing.T) {
 		if strings.HasPrefix(kv, "OCTO_TRASH_DIR=") {
 			t.Errorf("shell command included unsafe trash directory %q", kv)
 		}
+	}
+}
+
+func TestShellCommandFreshTrashDirReplacesInherited(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("OCTO_TRASH_DIR is only consumed by the POSIX rm wrapper")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("OCTO_PROFILE", "")
+	t.Setenv("OCTO_TRASH_DIR", "/stale/parent/trash")
+	cmd, err := shellCommand(context.Background(), "echo hi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found []string
+	for _, kv := range cmd.Env {
+		if strings.HasPrefix(kv, "OCTO_TRASH_DIR=") {
+			found = append(found, kv)
+		}
+	}
+	want := "OCTO_TRASH_DIR=" + filepath.Join(home, ".octo", "trash")
+	if len(found) != 1 || !strings.HasPrefix(found[0], want) {
+		t.Errorf("OCTO_TRASH_DIR entries = %v, want exactly one fresh value under %s", found, want)
 	}
 }
 
