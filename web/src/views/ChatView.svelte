@@ -65,10 +65,16 @@
     chatGoal,
     nativeShell,
     chatHeaderSnippet,
+  landing,
+  view,
+  lightapps,
+  lightappsAvailable,
+  lightappURL,
   } from '../lib/stores'
   import { ws, wsState, wsReconnect } from '../lib/ws'
   import * as api from '../lib/api'
-  import { observeArtifact, resetArtifacts } from '../lib/artifacts'
+  import { observeArtifact, resetArtifacts, ARTIFACT_ORIGIN_SANDBOX, themeRev } from '../lib/artifacts'
+  import { registerLaIframe, unregisterLaIframe } from '../lib/laStorage'
   import { renderMarkdown, escapeHtml, setupCopyButtons } from '../lib/markdown'
   import { applyToolToggle, buildExportConversation, exportConversationStyles, hasRenderableTurn, TOOL_RESULT_CHARS } from '../lib/exportTranscript'
   import { t, tr, pickLocalized } from '../lib/i18n'
@@ -1827,6 +1833,77 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     { icon: 'ant-design:form-outlined',   key: 'write'    },
   ]
 
+  // ~/.octo/landing/config.json replaces the four above wholesale. Not merged: the
+  // point is that someone's own four are not these four plus theirs, and a
+  // half-replaced set would be nobody's. The built-ins stay translated; an
+  // override is shown exactly as written, in whatever language it was written.
+  const landingCards = $derived.by(() => {
+    const custom = $landing.cards
+    if (custom && custom.length > 0) {
+      return custom.map((c, i) => ({
+        key: `custom-${i}`,
+        icon: c.icon ?? '',
+        title: c.title,
+        prompt: c.prompt,
+      }))
+    }
+    return starters.map(s => ({
+      key: s.key,
+      icon: s.icon,
+      title: $t(`chat.starter_${s.key}_title`),
+      prompt: $t(`chat.starter_${s.key}_prompt`),
+    }))
+  })
+  // The hero fills the space above the mark. An app is only offered where a
+  // Light App can actually load, and only when it is actually installed —
+  // otherwise a stale slug would leave a 404 frame on the first screen of
+  // every new session.
+  const landingHero = $derived.by(() => {
+    const hero = $landing.hero
+    if (!hero) return null
+    if (hero.image) return { kind: 'image' as const, src: `/api/landing/assets/${encodeURIComponent(hero.image)}`, height: hero.height ?? 180 }
+    if (!hero.app || !$lightappsAvailable) return null
+    const app = $lightapps.find(a => a.slug === hero.app)
+    return app ? { kind: 'app' as const, slug: app.slug, height: hero.height ?? 180 } : null
+  })
+  // A config can outlive the file it points at. A broken-image glyph in a
+  // bordered box is worse than no hero at all.
+  let heroImageBroken = $state(false)
+  $effect(() => {
+    void (landingHero?.kind === 'image' ? landingHero.src : '')
+    heroImageBroken = false
+  })
+  const heroSrc = $derived.by(() => {
+    void $themeRev
+    return landingHero?.kind === 'app' ? lightappURL(landingHero.slug) : ''
+  })
+  // Pinned apps are shortcuts: they resolve against what is actually installed,
+  // so a slug for an app the user deleted simply does not appear.
+  const landingApps = $derived(
+    ($landing.apps ?? [])
+      .map(slug => $lightapps.find(a => a.slug === slug))
+      .filter((a): a is NonNullable<typeof a> => !!a && $lightappsAvailable),
+  )
+
+  const landingTitle = $derived($landing.title || $t('chat.landing_title'))
+  const landingSub = $derived($landing.subtitle || $t('chat.landing_sub'))
+  // An iconify name is the only shape that needs the custom element; anything
+  // else (an emoji, a letter) is drawn as text, the same split the sidebar
+  // makes for mounted Light Apps.
+  const isIconName = (icon: string) => icon.includes(':')
+
+  // A hero app is a Light App host like the panel and the mounted page, so it
+  // registers the same way — otherwise it would lose storage, downloads and
+  // the state push the model reads.
+  let heroFrameEl = $state<HTMLIFrameElement | null>(null)
+  $effect(() => {
+    const el = heroFrameEl
+    const slug = landingHero?.kind === 'app' ? landingHero.slug : ''
+    if (!el || !slug) return
+    registerLaIframe(el.contentWindow, slug)
+    return () => unregisterLaIframe(el.contentWindow)
+  })
+
   // ── export mode helpers ────────────────────────────────────────────────────
 
   function enterExportMode() {
@@ -2693,24 +2770,55 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                what actually creates the session (ensureActiveSession). -->
           {#if !id}
             <div class="landing">
+              {#if landingHero && !(landingHero.kind === 'image' && heroImageBroken)}
+                <div class="landing-hero" style="height: {landingHero.height}px">
+                  {#if landingHero.kind === 'image'}
+                    <img src={landingHero.src} alt="" onerror={() => (heroImageBroken = true)} />
+                  {:else}
+                    {#key heroSrc}
+                      <iframe
+                        bind:this={heroFrameEl}
+                        src={heroSrc}
+                        sandbox={ARTIFACT_ORIGIN_SANDBOX}
+                        allow="fullscreen"
+                        title={landingHero.slug}
+                      ></iframe>
+                    {/key}
+                  {/if}
+                </div>
+              {/if}
               <span class="landing-mark"><OctoLogo size={44} /></span>
-              <h1 class="landing-title">{$t('chat.landing_title')}</h1>
-              <p class="landing-sub">{$t('chat.landing_sub')}</p>
-              <div class="landing-cards">
-                {#each starters as card (card.key)}
+              <h1 class="landing-title">{landingTitle}</h1>
+              <p class="landing-sub">{landingSub}</p>
+              <div class="landing-cards" style="--landing-cols: {Math.min(landingCards.length, 4)}">
+                {#each landingCards as card (card.key)}
                   <button
                     type="button"
                     class="landing-card"
-                    onclick={() => composer?.setText($t(`chat.starter_${card.key}_prompt`))}
-                    title={$t(`chat.starter_${card.key}_prompt`)}
+                    onclick={() => composer?.setText(card.prompt)}
+                    title={card.prompt}
                   >
                     <span class="landing-card-icon" aria-hidden="true">
-                      <iconify-icon icon={card.icon} width="17"></iconify-icon>
+                      {#if isIconName(card.icon)}
+                        <iconify-icon icon={card.icon} width="17"></iconify-icon>
+                      {:else if card.icon}
+                        <span class="landing-card-emoji">{card.icon}</span>
+                      {/if}
                     </span>
-                    <span class="landing-card-title">{$t(`chat.starter_${card.key}_title`)}</span>
+                    <span class="landing-card-title">{card.title}</span>
                   </button>
                 {/each}
               </div>
+              {#if landingApps.length > 0}
+                <div class="landing-apps">
+                  {#each landingApps as app (app.slug)}
+                    <button type="button" class="landing-app" onclick={() => view.set(`app:${app.slug}`)}>
+                      {#if app.icon}<span class="landing-app-icon">{app.icon}</span>{/if}
+                      <span>{app.name || app.slug}</span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
             </div>
           {/if}
 
@@ -3490,9 +3598,40 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 /* Starter cards: a grid of ways in, so the blank page suggests what Octo is
    for instead of showing an empty column above the composer. */
 .landing-cards {
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* Column count follows how many cards there are, so two custom starters sit
+     side by side instead of leaving two holes. Past four they wrap. */
+  display: grid; grid-template-columns: repeat(var(--landing-cols, 4), minmax(0, 1fr));
   gap: 10px; width: 100%; margin-top: 14px;
 }
+.landing-card-emoji { font-size: 17px; line-height: 1; }
+
+/* The hero sits above the mark and fills what used to be empty space. Width
+   matches the card grid so the column reads as one block. */
+.landing-hero {
+  width: 100%; overflow: hidden;
+  border-radius: var(--radius-card);
+  background: var(--bg-container);
+  border: 1px solid var(--border);
+}
+.landing-hero img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.landing-hero iframe { width: 100%; height: 100%; border: 0; display: block; }
+
+/* Pinned Light Apps: shortcuts, so they read as chips rather than competing
+   with the starter cards above them. */
+.landing-apps {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 8px;
+  width: 100%; margin-top: 2px;
+}
+.landing-app {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius-pill);
+  background: var(--bg-container); color: var(--text-secondary);
+  font-family: inherit; font-size: 12px; cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.landing-app:hover { border-color: var(--blue-6); color: var(--text); }
+.landing-app-icon { font-size: 13px; line-height: 1; }
 .landing-card {
   display: flex; flex-direction: column; align-items: flex-start; gap: 12px;
   min-height: 92px; padding: 13px 14px;

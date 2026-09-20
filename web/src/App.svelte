@@ -11,6 +11,7 @@
   import { installExternalLinkInterceptor } from './lib/externalLinks'
   import { installLaDeliveryBridge } from './lib/laDelivery'
   import { installLaStorageBridge } from './lib/laStorage'
+  import { loadLanding } from './lib/stores'
   import { startNativeHeartbeat } from './lib/nativeHeartbeat'
   import { normalizeHash, hashPicksChatTarget } from './lib/hashRouting'
   import { pruneSessions } from './lib/genui/panel-state'
@@ -72,6 +73,7 @@
   // went nowhere. They belong here: one listener, for as long as the app runs.
   onMount(() => {
     installLaStorageBridge()
+    void loadLanding()
     return installLaDeliveryBridge(ws)
   })
 

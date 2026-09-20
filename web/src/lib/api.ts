@@ -860,6 +860,43 @@ export async function deleteMemory(name: string, source: string): Promise<void> 
 
 // ── Light Apps ─────────────────────────────────────────────────────────────
 
+// ─── Landing page overrides ─────────────────────────────────────────────────
+
+export interface LandingCard {
+  // An iconify name ("ant-design:code-outlined") or anything else — an emoji,
+  // a letter — which the UI draws as text.
+  icon?: string
+  title: string
+  prompt: string
+}
+
+export interface LandingHero {
+  // A file in the landing directory, served from /api/landing/assets/.
+  // Animated GIF and WebP work.
+  image?: string
+  // A Light App slug, embedded as a frame. Exactly one: several would make the
+  // first screen wait on several frames.
+  app?: string
+  height?: number
+}
+
+export interface LandingConfig {
+  title?: string
+  subtitle?: string
+  hero?: LandingHero
+  cards?: LandingCard[]
+  // Light App slugs offered as shortcuts under the cards — entry points, not
+  // embeds.
+  apps?: string[]
+}
+
+// Always resolves: a missing or malformed ~/.octo/landing/config.json answers
+// with an empty config, and the UI keeps its built-in cards.
+export async function getLanding(): Promise<LandingConfig> {
+  const d = await request<{ landing: LandingConfig; dir: string }>('/api/landing', { cache: 'no-store' })
+  return d.landing ?? {}
+}
+
 // ─── User theme packs ───────────────────────────────────────────────────────
 
 export interface UserTheme {
