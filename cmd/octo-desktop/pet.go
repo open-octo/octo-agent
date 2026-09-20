@@ -90,7 +90,7 @@ func petHit(state string, lx, ly float64) bool {
 // sees the cursor come back, so it cannot un-ignore itself from a DOM event.
 func (b *nativeBridge) watchPetPointer(w *application.WebviewWindow) {
 	if _, _, ok := petCursor(); !ok {
-		return // no cursor source here; leave the window solid
+		return // no shape-aware pass-through on this platform; leave the window solid
 	}
 	t := time.NewTicker(petPointerInterval)
 	defer t.Stop()
@@ -206,6 +206,13 @@ func (b *nativeBridge) showPet() {
 				// acceptsFirstMouse, see petAcceptFirstMouse.)
 				BecomesKeyOnlyIfNeeded: true,
 			},
+		},
+		Windows: application.WindowsWindow{
+			// Frameless decorations extend the DWM frame into the client area,
+			// which draws an aero shadow (and Windows 11 corner rounding)
+			// around the square window — an outline around a transparent page,
+			// the same thing DisableShadow prevents on macOS.
+			DisableFramelessWindowDecorations: true,
 		},
 	}
 	// Bottom-right of the work area (so it clears the dock/taskbar). X/Y alone
