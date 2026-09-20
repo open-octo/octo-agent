@@ -9,6 +9,21 @@ type Posted = { data: Record<string, unknown>; origin: string }
 let posted: Posted[]
 let fetched: string[]
 
+// Explicit stand-ins rather than `new Response(blob)`: only two members are
+// read here, and the real Response differs enough between Node majors that
+// building one made the suite pass locally and fail on CI.
+function okResponse(body: Blob): Response {
+  return { ok: true, status: 200, blob: () => Promise.resolve(body) } as unknown as Response
+}
+
+function errorResponse(status: number): Response {
+  return {
+    ok: false,
+    status,
+    blob: () => Promise.reject(new Error('no body')),
+  } as unknown as Response
+}
+
 function fakeFrame(): Window {
   return {
     postMessage: (data: Record<string, unknown>, origin: string) => {
@@ -23,7 +38,7 @@ beforeEach(() => {
   vi.mocked(laFrameFor).mockReset()
   vi.stubGlobal('fetch', (url: string) => {
     fetched.push(url)
-    return Promise.resolve(new Response(new Blob(['PNGBYTES']), { status: 200 }))
+    return Promise.resolve(okResponse(new Blob(['PNGBYTES'])))
   })
 })
 
@@ -65,7 +80,7 @@ describe('deliverToFrame', () => {
 
   it('does not post anything when the ticket is refused', async () => {
     vi.mocked(laFrameFor).mockReturnValue(fakeFrame())
-    vi.stubGlobal('fetch', () => Promise.resolve(new Response('', { status: 404 })))
+    vi.stubGlobal('fetch', () => Promise.resolve(errorResponse(404)))
 
     expect(await deliverToFrame({ slug: 'sketch', id: 'gone' })).toBe('failed')
     expect(posted.length).toBe(0)
