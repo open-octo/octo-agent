@@ -197,3 +197,9 @@ To mount an app the user already saved, edit that one field in its `manifest.jso
 - Form submit handlers must call `event.preventDefault()` — an unprevented submit reloads the app and drops its state
 - Use emoji or inline SVG for icons
 - Follow `artifact-design` skill conventions for layout and colors
+
+## Themes
+
+The Web UI's palette is user-editable: a theme is `~/.octo/themes/<id>/` holding `manifest.json` and `theme.css`. When the user asks for one, read a theme octo ships — `~/.octo/themes/ocean`, `blossom` or `vogue` — and work from it: they carry the whole variable set, name themselves per locale, and comment the traps. Write both files with `write_file`; the theme shows up under Settings → Theme on the next page load.
+
+The rule worth stating outright, because a theme that gets it wrong looks fine until someone switches modes: a theme is TWO blocks — `:root[data-theme-pack="<id>"]` and that same selector plus `[data-theme="dark"]`. They tie with the default dark palette on specificity, so anything set only in the light block keeps its light value in dark mode.
