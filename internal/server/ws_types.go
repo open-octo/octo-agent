@@ -408,8 +408,12 @@ type wsInPromoteSyncTerminal struct {
 	SessionID string `json:"session_id"`
 }
 
-// wsInPromoteSyncSubAgent is sent by the browser when the user clicks the
-// "Background" button on a running synchronous sub_agent tool card.
+// wsInPromoteSyncSubAgent promotes a running inline sub-agent to the
+// background. No client sends it today: web sessions dispatch every sub-agent
+// in the background already (see tools.SetSynchronous), so there is no inline
+// run to promote and the tool card carries no "Background" button. Kept so the
+// protocol stays intact for a transport that dispatches inline and still wants
+// a promote affordance.
 type wsInPromoteSyncSubAgent struct {
 	SessionID string `json:"session_id"`
 }

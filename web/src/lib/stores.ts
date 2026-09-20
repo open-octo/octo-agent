@@ -823,8 +823,8 @@ export function resetSubAgents(sessionId: string) {
 
 // Remove finished sub-agents from the live panel. Called on `complete` so a
 // done panel doesn't linger until the next page refresh. We filter by status
-// rather than clearing the entire array because async sub-agents (launched
-// with run_in_background=true) may outlive the turn that spawned them — they
+// rather than clearing the entire array because background sub-agents may
+// outlive the turn that spawned them — they
 // should remain visible in the panel until they finish. There is a brief race
 // window where `complete` can fire before the final `sub_agent_event` with
 // `kind: done` arrives, but the panel will clear on the next turn start via

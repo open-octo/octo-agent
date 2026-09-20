@@ -67,8 +67,9 @@ spawn 入口(`internal/tools/agent.go`),经 spawner 注册门控——未配置 
   但每条生产路径都会把会话级 manager 钉进 ctx(`resolveSubAgentManager` 优先取它),所以那是兜底
   不是活路径。
 
-模型只看到结果的两种形态:直接拿到回复,或者拿到 `Started sub-agent agent_N` 加一句"完成时会通知
-你"。工具 description 明说这两种都正常、不需要它选。
+模型只看到结果的形态,不看到派发方式:直接拿到回复(被 loop budget 切断时带 `incompleteNote` 的
+INCOMPLETE 后缀),或者拿到 `Started sub-agent agent_N` 加一句"完成时会通知你"。工具 description
+明说这两种都正常、不需要它选。
 
 **为什么不把这个选择交给模型**:那要求它预判任务耗时,而它几乎总是猜"短"。结果是一个跑几分钟的
 child 把父回合钉住,用户在它结束前插不上话——恰恰是异步本该解决的问题。耗时预判不可靠,由

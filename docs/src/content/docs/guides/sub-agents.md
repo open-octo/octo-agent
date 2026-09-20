@@ -64,9 +64,9 @@ immediately, no restart needed.
 Where octo is running decides whether a sub-agent works in the background or inline — the model
 doesn't pick. An interactive session (the TUI, the web UI, an IM chat) backgrounds every sub-agent:
 the parent turn ends as soon as the child is dispatched, so you can keep talking while it works,
-and its result arrives later as a completion notification. The headless one-shot (`octo -p …`) has
-no later turn for a notification to land in, so it runs the child inline and hands the reply
-straight back.
+and its result arrives later as a completion notification. The headless one-shot (a positional
+message, `--prompt-file`, or piped stdin) has no later turn for a notification to land in, so it
+runs the child inline and hands the reply straight back.
 
 When the model issues several `sub_agent` calls in one round, they fan out **concurrently** (capped
 at 16 in flight) instead of running one after another; past that cap a spawn is refused and the

@@ -79,8 +79,8 @@ errored, hit its quota, or returned nothing.
 
 | Tool | Purpose |
 |---|---|
-| `sub_agent` | spawn a sub-agent (sync or async) |
-| `sub_agent_send` / `sub_agent_status` / `sub_agent_kill` | follow up with, poll, or stop an async sub-agent |
+| `sub_agent` | spawn a sub-agent (inline or in the background — octo picks, not the model) |
+| `sub_agent_send` / `sub_agent_status` / `sub_agent_kill` | follow up with, poll, or stop a sub-agent |
 | `workflow` | run a deterministic multi-agent orchestration script |
 | `workflow_status` / `workflow_kill` | check on or stop a background workflow run (completion is pushed automatically — no polling) |
 | `workflow_save` | persist a script as a named, reusable workflow |

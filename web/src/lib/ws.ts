@@ -232,6 +232,9 @@ export class WsManager {
     this.send({ type: "promote_sync_terminal", session_id: sessionId });
   }
 
+  // No caller: web sessions dispatch sub-agents in the background, so no
+  // inline run exists to promote. Kept alongside the server handler that still
+  // accepts the message.
   promoteSyncSubAgent(sessionId: string): void {
     this.send({ type: "promote_sync_sub_agent", session_id: sessionId });
   }

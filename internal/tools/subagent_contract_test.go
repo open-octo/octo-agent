@@ -92,6 +92,31 @@ func TestAgentTool_SyncMaxTurnsSurfaced(t *testing.T) {
 	}
 }
 
+// TestAgentTool_FanOutPastCapIsRefused locks the overflow semantics of the
+// background path, which every interactive transport now takes: past the cap a
+// dispatch is refused outright rather than queued. That is the right trade
+// there — the parent turn is not blocked, so the model can do other work and
+// launch the rest once a completion notification frees a slot.
+func TestAgentTool_FanOutPastCapIsRefused(t *testing.T) {
+	sp := &blockingSpawner{release: make(chan struct{})}
+	defer close(sp.release)
+	mgr := NewSubAgentManager(sp) // background dispatch
+	ctx := WithSubAgentManager(context.Background(), mgr)
+	args := map[string]any{"description": "d", "prompt": "p", "subagent_type": "general"}
+
+	for i := 0; i < maxConcurrentSubAgents; i++ {
+		if _, err := (AgentTool{}).Execute(ctx, "sub_agent", args); err != nil {
+			t.Fatalf("dispatch %d is within the cap and should succeed: %v", i, err)
+		}
+	}
+
+	if _, err := (AgentTool{}).Execute(ctx, "sub_agent", args); err == nil {
+		t.Fatal("a dispatch past the cap should be refused, not queued")
+	} else if !strings.Contains(err.Error(), "too many") {
+		t.Errorf("the refusal should tell the model to wait, got: %v", err)
+	}
+}
+
 // TestAgentTool_RequiresSubagentType verifies omitting subagent_type is a
 // hard error that names the available presets — every sub-agent is a fresh,
 // typed agent; conversation branching is the session branch feature's job.

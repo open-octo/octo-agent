@@ -219,11 +219,12 @@ func (s *scriptedSender) StreamMessagesWithTools(_ context.Context, _, _ string,
 	return r, nil
 }
 
-// TestServerRunsSubAgentSynchronously drives a full turn whose first reply asks
-// for a sub-agent: the synchronous sub_agent path must run the child inline
-// (against the same scripted sender) and feed its reply back so the turn
-// finishes in one request. Three sender calls prove it: parent → child → parent.
-func TestServerRunsSubAgentSynchronously(t *testing.T) {
+// TestServerBackgroundsSubAgent drives a full turn whose first reply asks for
+// a sub-agent. A server turn can deliver a completion notification as a
+// follow-up turn, so the child is dispatched to the background: the
+// tool_result the parent sees is a handle, and the turn finishes without
+// waiting for the child's own reply.
+func TestServerBackgroundsSubAgent(t *testing.T) {
 	// Isolate HOME so the permission engine uses the embedded defaults (which
 	// allow sub_agent), not a developer's ~/.octo/permissions.yml.
 	t.Setenv("HOME", t.TempDir())
@@ -240,10 +241,10 @@ func TestServerRunsSubAgentSynchronously(t *testing.T) {
 			},
 			StopReason: "tool_use",
 		},
-		// 2. The sub-agent's own reply (no tools) — ends the child loop.
-		{Content: "child result"},
-		// 3. Parent's final answer after seeing the sub-agent result.
-		{Content: "parent final answer"},
+		// 2. The parent's answer once it holds the handle — it does not wait
+		// for the child. The background child draws from this same sender
+		// afterwards, so the turn under test must not depend on what it gets.
+		{Content: "dispatched, will report back"},
 	}}
 
 	srv := &Server{
@@ -264,10 +265,28 @@ func TestServerRunsSubAgentSynchronously(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runTurn: %v", err)
 	}
-	if reply != "parent final answer" {
-		t.Errorf("expected the parent's final answer, got %q", reply)
+	if reply != "dispatched, will report back" {
+		t.Errorf("expected the parent to finish without waiting, got %q", reply)
 	}
-	if sender.calls != 3 {
-		t.Errorf("expected 3 sender calls (parent, sub-agent, parent), got %d — sub-agent didn't run inline", sender.calls)
+
+	// The tool_result must be the background handle. Asserting on the text
+	// rather than counting sender calls keeps this deterministic: the child
+	// runs concurrently and draws from the same sender on its own schedule.
+	var toolResult string
+	for _, msg := range sess.Messages {
+		for _, b := range msg.Blocks {
+			if b.Type == "tool_result" {
+				toolResult = b.Result
+			}
+		}
+	}
+	if toolResult == "" {
+		t.Fatal("the turn recorded no tool_result for the sub_agent call")
+	}
+	if !strings.Contains(toolResult, "Started sub-agent") {
+		t.Errorf("server turns dispatch sub-agents in the background; tool_result = %q", toolResult)
+	}
+	if strings.Contains(toolResult, "child result") {
+		t.Errorf("the parent must not block for the child's reply; tool_result = %q", toolResult)
 	}
 }

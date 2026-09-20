@@ -164,8 +164,11 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyCtrlB:
-		// Background the current sync terminal or sub-agent, if one is running.
-		// No-op when no sync task is polling.
+		// Background the current inline terminal or sub-agent, if one is
+		// running. No-op when nothing inline is polling — which is always the
+		// case for the sub-agent branch now that the TUI dispatches every
+		// sub-agent in the background (see tools.SetSynchronous); the hint line
+		// below is gated on the same check, so it stays hidden.
 		if m.turnRunning {
 			if tools.HasActiveSync() {
 				tools.PromoteCurrentSync()

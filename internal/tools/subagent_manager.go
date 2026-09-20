@@ -180,8 +180,8 @@ func subAgentManagerEnabled() bool {
 }
 
 // maxConcurrentSubAgents caps how many async sub-agents may run at once, so a
-// model that fires off a large fan-out of run_in_background:true calls can't
-// spawn an unbounded number of concurrent agent loops (each making API calls).
+// model that fires off a large fan-out in one round can't spawn an unbounded
+// number of concurrent agent loops (each making API calls).
 // New spawns past the cap are rejected with a clear error so the model waits
 // for some to finish; it does not bound resumed (Send/Continue) rounds, which
 // are limited by the live-child cap.

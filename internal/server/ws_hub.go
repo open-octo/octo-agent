@@ -358,9 +358,10 @@ func (c *wsConn) dispatch(msgType string, raw []byte) {
 		if err := json.Unmarshal(raw, &msg); err != nil {
 			return
 		}
-		// The session's sub-agent manager is created on the first tool turn;
-		// by the time a sync sub-agent is running it must exist. If the session
-		// has never started a sub-agent, the message is a no-op.
+		// Unreachable from today's web client (see wsInPromoteSyncSubAgent).
+		// The session's sub-agent manager is created on the first tool turn; if
+		// the session has never started a sub-agent, the message is a no-op —
+		// as it is whenever no inline sub-agent is running.
 		if mgr := tools.SessionSubAgentManager(msg.SessionID, nil); mgr != nil {
 			mgr.PromoteSync()
 		}
