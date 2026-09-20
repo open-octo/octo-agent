@@ -96,8 +96,9 @@ func (ComputerTool) Definition() agent.ToolDefinition {
 						"type: type text at the current focus; pass \"app\" to focus it first. Some rich-text " +
 						"editors (e.g. macOS Notes) silently drop injected keystrokes — if a screenshot shows " +
 						"the text didn't land, do NOT retry type; ax_tree the app, find the AXTextArea/Edit " +
-						"element, and write the full content with ax_set instead (note ax_set replaces the " +
-						"element's whole value, so include any existing text you want to keep). " +
+						"element, and write the full content with ax_set instead (ax_set replaces the " +
+						"element's whole value as plain text — include any existing text you want to keep, " +
+						"and expect any rich formatting in the field to be flattened). " +
 						"key: press a key or combo like \"enter\", \"cmd+c\"; pass \"app\" to focus it first. " +
 						"scroll: scroll at the cursor by (dx, dy) lines, positive dy = down.",
 				},
