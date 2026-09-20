@@ -135,16 +135,28 @@ func TestNewImageBlock_Normalizes(t *testing.T) {
 // past the edge cap — PNG crushes flat colour, JPEG can't) is kept as-is:
 // the keep-whichever-is-smaller rule. This one actually reaches the branch —
 // the edge cap is what pushes it past the early pass-through.
+//
+// The fixture is paletted on purpose. png.Encode's DefaultCompression is a
+// speed/size heuristic the standard library retunes between releases, and a
+// flat RGBA image is exactly where that shows: the same 2000x1000 zero-value
+// RGBA encodes to 9,415 bytes under Go 1.25.1 and 54,237 under Go 1.27.1 —
+// past the ~20 KB the JPEG costs, losing the size comparison and failing this
+// test on the toolchain alone. Two palette entries land near 350 bytes on
+// both, so the margin no longer rides on how the encoder is tuned this
+// release.
 func TestCompressImageData_KeepsSmaller(t *testing.T) {
-	img := image.NewRGBA(image.Rect(0, 0, 2000, 1000))
-	// zero value is opaque black, uniformly — PNG paradise, JPEG nightmare.
+	img := image.NewPaletted(image.Rect(0, 0, 2000, 1000), color.Palette{color.Black, color.White})
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
 		t.Fatalf("png.Encode: %v", err)
 	}
 	data := buf.Bytes()
-	if len(data) > imageCompressMinBytes {
-		t.Fatalf("fixture too big (%d) to be a solid-colour PNG — test premise broken", len(data))
+	// Deliberately far tighter than imageCompressMinBytes: this asserts the
+	// fixture is still the flat, tiny PNG the case is about, so a future
+	// encoder change fails here — naming the cause — rather than down in the
+	// comparison, where it reads as a compressImageData bug.
+	if len(data) > 4096 {
+		t.Fatalf("fixture is %d bytes; a flat 2-colour PNG should be far smaller — the encoder changed, not compressImageData", len(data))
 	}
 	mime, out := compressImageData("image/png", data)
 	if mime != "image/png" || !bytes.Equal(out, data) {
