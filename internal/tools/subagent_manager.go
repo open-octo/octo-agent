@@ -233,15 +233,27 @@ func (m *SubAgentManager) Spawner() Spawner {
 	return m.spawner
 }
 
-// SetSynchronous selects the sub_agent dispatch model. The default (false)
-// is the async path: Start returns immediately and the reply arrives via
-// onExit, which the transport re-injects as a follow-up turn — the TUI
-// enqueues into the agent Inbox, and the web/IM servers kick an idle
-// follow-up turn on completion (deliverModelNote / runChannelIdleTurn).
-// Only the CLI one-shot sets this true: its single turn has no follow-up
-// channel, so sub_agent blocks the turn on RunSync and returns the child's
-// reply directly as the tool_result. Set once at startup, before any turn
-// runs.
+// SetSynchronous selects the sub_agent dispatch model. It is the only thing
+// that decides whether a child runs in the background or inline — the tool
+// does not offer the model that choice.
+//
+// The default (false) is the async path: Start returns immediately and the
+// reply arrives via onExit, which the transport re-injects as a follow-up
+// turn — the TUI enqueues into the agent Inbox, and the web/IM servers kick
+// an idle follow-up turn on completion (deliverModelNote /
+// runChannelIdleTurn). The parent turn ends as soon as the child is
+// dispatched, so the user can keep talking while it works.
+//
+// True is for a transport with no follow-up-turn channel — the CLI one-shot,
+// whose single turn is the whole process. A background completion would have
+// nowhere to land there, so sub_agent blocks the turn on RunSync and returns
+// the child's reply directly as the tool_result. The server marks its
+// process-global fallback manager synchronous too (enableSubAgentTools), but
+// every production server turn stamps a session-scoped manager into ctx and
+// resolveSubAgentManager prefers that one, so the fallback is a backstop
+// rather than a live path.
+//
+// Set once at startup, before any turn runs.
 func (m *SubAgentManager) SetSynchronous(v bool) {
 	m.mu.Lock()
 	m.synchronous = v

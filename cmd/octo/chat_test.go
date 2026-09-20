@@ -244,14 +244,14 @@ func TestRunChat_HonoursAnthropicBaseURL(t *testing.T) {
 	}
 }
 
-// TestRunChat_OneShot_BackgroundSubAgentForcedSync locks the one-shot
-// transport contract for sub-agents: the headless one-shot exits when its
-// single turn ends, so a sub-agent spawned with run_in_background=true has no
-// follow-up turn for its completion to land in — without forced-sync dispatch
-// the child is orphaned and its result silently lost. The one-shot must run
-// the child inline and hand its reply back in the tool_result, like the
-// server and IM transports do.
-func TestRunChat_OneShot_BackgroundSubAgentForcedSync(t *testing.T) {
+// TestRunChat_OneShot_SubAgentRunsInline locks the one-shot transport
+// contract for sub-agents: the headless one-shot exits when its single turn
+// ends, so a backgrounded child has no follow-up turn for its completion to
+// land in — it would be orphaned and its result silently lost. The model no
+// longer picks the dispatch mode, so the whole contract rests on the one-shot
+// marking its manager synchronous: the child runs inline and its reply comes
+// back in the tool_result.
+func TestRunChat_OneShot_SubAgentRunsInline(t *testing.T) {
 	var (
 		mu       sync.Mutex
 		requests []string
@@ -271,11 +271,11 @@ func TestRunChat_OneShot_BackgroundSubAgentForcedSync(t *testing.T) {
 				"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}
 			}`))
 		case n == 1:
-			// Parent turn 1: request a background sub-agent.
+			// Parent turn 1: dispatch a sub-agent.
 			_, _ = w.Write([]byte(`{
 				"id":"m","type":"message","role":"assistant","model":"x",
 				"content":[{"type":"tool_use","id":"tu_1","name":"sub_agent",
-					"input":{"description":"probe trash","prompt":"say done","subagent_type":"explore","run_in_background":true}}],
+					"input":{"description":"probe trash","prompt":"say done","subagent_type":"explore"}}],
 				"stop_reason":"tool_use","usage":{"input_tokens":1,"output_tokens":1}
 			}`))
 		default:
@@ -313,8 +313,8 @@ func TestRunChat_OneShot_BackgroundSubAgentForcedSync(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
 	}
 
-	// The tool_result the parent saw must carry the child's actual reply plus
-	// the forced-sync note — not an async "Started sub-agent" stub. Pull the
+	// The tool_result the parent saw must carry the child's actual reply, not
+	// an async "Started sub-agent" stub. Pull the
 	// tool_result content out of the captured request body rather than
 	// string-matching the whole request: the sub_agent tool's own description
 	// (always present in the tools catalog) contains async wording.
@@ -350,9 +350,6 @@ func TestRunChat_OneShot_BackgroundSubAgentForcedSync(t *testing.T) {
 	}
 	if !strings.Contains(toolResultContent, "CHILD DONE") {
 		t.Errorf("tool_result should contain the child's reply; got: %q", toolResultContent)
-	}
-	if !strings.Contains(toolResultContent, "ran synchronously") {
-		t.Errorf("tool_result should carry the forced-sync note; got: %q", toolResultContent)
 	}
 	if strings.Contains(toolResultContent, "Started sub-agent") {
 		t.Errorf("one-shot must not take the async path; got: %q", toolResultContent)
