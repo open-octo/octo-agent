@@ -50,6 +50,16 @@ export function registerLaIframe(win: Window | null | undefined, ns: string): vo
   laFrames.set(win, ns)
 }
 
+// Reverse lookup for the delivery path: which frame, if any, is currently
+// showing this app. Both hosts (the panel and the mounted full page) register
+// here, so either one can receive.
+export function laFrameFor(ns: string): Window | null {
+  for (const [win, n] of laFrames) {
+    if (n === ns) return win
+  }
+  return null
+}
+
 export function unregisterLaIframe(win: Window | null | undefined): void {
   if (!win) return
   const ns = laFrames.get(win)

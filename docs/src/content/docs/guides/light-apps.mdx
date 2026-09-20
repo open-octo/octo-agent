@@ -196,6 +196,27 @@ A sketchpad that claims a page of its own. Two files, no build step:
   }
   publish()
 
+  // ── Take what the agent sends ────────────────────────────────────────────
+  //
+  // The agent can hand this canvas an image (ask it to generate something from
+  // your sketch). Draw it in, then publish again so the agent can see the
+  // result of what it just sent.
+  window.octo?.onDelivery(({ blob, note }) => {
+    const img = new Image()
+    img.onload = () => {
+      // Fit inside the canvas, centred, without distorting the image.
+      const scale = Math.min(c.clientWidth / img.width, c.clientHeight / img.height, 1)
+      const w = img.width * scale
+      const h = img.height * scale
+      ctx.drawImage(img, (c.clientWidth - w) / 2, (c.clientHeight - h) / 2, w, h)
+      URL.revokeObjectURL(img.src)
+      strokes++
+      publish()
+      if (note) console.log('[octo]', note)
+    }
+    img.src = URL.createObjectURL(blob)
+  })
+
   document.getElementById('clear').onclick = () => {
     ctx.clearRect(0, 0, c.width, c.height)
     strokes = 0
@@ -241,10 +262,26 @@ The agent then has two tools: `lightapp_state` reads every open app's digest
 (cheap, so it can check whenever you mention "my sketch"), and `view_lightapp`
 pulls the screenshot into the conversation as a real image it can look at.
 
-**This is one-way.** Publishing tells the model about your app; it gives your
-app nothing — no conversation, no API, no credentials. The agent cannot draw on
-your canvas either. Call it whenever your state changes; octo coalesces pushes,
-so a canvas firing on every stroke is fine.
+**Publishing gives your app nothing** — no conversation, no API, no
+credentials. Call it whenever your state changes; octo coalesces pushes, so a
+canvas firing on every stroke is fine.
+
+### Taking what the agent sends
+
+The agent can hand your app a file — ask it to generate a picture from your
+sketch and it can put the result straight onto the canvas. Register a handler
+to accept one:
+
+```js
+window.octo.onDelivery(({ blob, name, note }) => {
+  // draw it in, display it, or ignore it — it is your app
+})
+```
+
+This is the only inbound direction, and it carries a file and a note, nothing
+else: no conversation, no instructions to execute. An app that registers no
+handler simply never receives anything, and the agent finds out the same way it
+finds out everything else about your app — by reading what you publish next.
 
 The snapshot is held in memory only and disappears when octo stops or the app
 closes.

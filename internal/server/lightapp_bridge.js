@@ -55,6 +55,30 @@
   // A canvas is accepted directly and converted; the host coalesces pushes, so
   // calling this on every change is fine.
   window.octo = window.octo || {};
+
+  // ── Delivery (host → app) ─────────────────────────────────────────────────
+  //
+  // The agent can hand this app a file — a generated image to drop onto a
+  // canvas. Register a callback to receive it; ignore it and nothing happens.
+  // This is the only inbound direction, it carries a file and a note, and it
+  // never carries anything about the conversation.
+  //
+  //   octo.onDelivery(function (d) { d.blob; d.name; d.note })
+  var deliveryHandlers = [];
+  window.octo.onDelivery = function (fn) {
+    if (typeof fn === 'function') deliveryHandlers.push(fn);
+  };
+  if (window.addEventListener) {
+    window.addEventListener('message', function (ev) {
+      var d = ev.data;
+      if (!d || d.__laBridge !== 1 || d.op !== 'delivery' || ev.source !== window.parent) return;
+      for (var i = 0; i < deliveryHandlers.length; i++) {
+        try { deliveryHandlers[i]({ blob: d.blob, name: d.name, note: d.note }); }
+        catch (e) { console.warn('[octo] delivery handler failed', e); }
+      }
+    });
+  }
+
   window.octo.pushState = function (state) {
     var s = state || {};
     function send(blob) {

@@ -191,6 +191,27 @@ Agent 生成的 HTML artifact 也可以在 Artifacts 面板中一键「保存到
   }
   publish()
 
+  // ── Take what the agent sends ────────────────────────────────────────────
+  //
+  // The agent can hand this canvas an image (ask it to generate something from
+  // your sketch). Draw it in, then publish again so the agent can see the
+  // result of what it just sent.
+  window.octo?.onDelivery(({ blob, note }) => {
+    const img = new Image()
+    img.onload = () => {
+      // Fit inside the canvas, centred, without distorting the image.
+      const scale = Math.min(c.clientWidth / img.width, c.clientHeight / img.height, 1)
+      const w = img.width * scale
+      const h = img.height * scale
+      ctx.drawImage(img, (c.clientWidth - w) / 2, (c.clientHeight - h) / 2, w, h)
+      URL.revokeObjectURL(img.src)
+      strokes++
+      publish()
+      if (note) console.log('[octo]', note)
+    }
+    img.src = URL.createObjectURL(blob)
+  })
+
   document.getElementById('clear').onclick = () => {
     ctx.clearRect(0, 0, c.width, c.height)
     strokes = 0
@@ -234,9 +255,23 @@ agent 这边有两个工具：`lightapp_state` 读取每个打开的应用的 di
 所以你一提「我画的那个」它就能去看一眼），`view_lightapp` 把截图作为一张真正的
 图片拉进对话里，它就能直接看着图说话。
 
-**这是单向的。** 发布只是把你的应用讲给模型听，不会给你的应用任何东西——
-拿不到对话、拿不到接口、拿不到凭据；agent 也不能反过来在你的画布上画。
+**发布不会给你的应用任何东西**——拿不到对话、拿不到接口、拿不到凭据。
 状态一变就可以调，octo 会合并连续的推送，所以画布每一笔都推也没问题。
+
+### 接收 agent 送过来的东西
+
+agent 可以往你的应用里递一个文件——让它照着你的草图生成一张图，
+它可以直接把结果放到画布上。注册一个处理函数来接收：
+
+```js
+window.octo.onDelivery(({ blob, name, note }) => {
+  // 画进去、显示出来，或者干脆不理 —— 这是你的应用
+})
+```
+
+这是唯一的入站方向，而且只带一个文件和一句备注，别的什么都没有：
+没有对话内容，也没有要执行的指令。不注册处理函数的应用就永远收不到东西，
+而 agent 会像了解你的应用的其他一切一样知道结果——读你接下来发布的状态。
 
 快照只存在内存里，octo 停掉或应用关闭后就没了。
 

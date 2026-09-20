@@ -111,6 +111,30 @@ func DropLightApp(slug string) {
 	delete(lightAppMirror.apps, slug)
 }
 
+// LightAppDeliverer hands a file to a running Light App. The tools package
+// cannot reach the browser — it cannot even import the server, which imports
+// it — so the server installs this on start. Unset (a CLI session, a test),
+// the insert tool says so rather than pretending it delivered.
+type LightAppDeliverer func(slug, path, note string) error
+
+var lightAppDeliver struct {
+	mu sync.Mutex
+	fn LightAppDeliverer
+}
+
+// SetLightAppDeliverer installs the delivery path. Called by the server.
+func SetLightAppDeliverer(fn LightAppDeliverer) {
+	lightAppDeliver.mu.Lock()
+	defer lightAppDeliver.mu.Unlock()
+	lightAppDeliver.fn = fn
+}
+
+func lightAppDelivererFn() LightAppDeliverer {
+	lightAppDeliver.mu.Lock()
+	defer lightAppDeliver.mu.Unlock()
+	return lightAppDeliver.fn
+}
+
 // lightAppSnapshot returns a copy of one app's snapshot, or nil.
 func lightAppSnapshot(slug string) *LightAppSnapshot {
 	lightAppMirror.mu.Lock()

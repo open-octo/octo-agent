@@ -9,6 +9,7 @@
   import { get } from 'svelte/store'
   import * as api from './lib/api'
   import { installExternalLinkInterceptor } from './lib/externalLinks'
+  import { installLaDeliveryBridge } from './lib/laDelivery'
   import { startNativeHeartbeat } from './lib/nativeHeartbeat'
   import { normalizeHash, hashPicksChatTarget } from './lib/hashRouting'
   import { pruneSessions } from './lib/genui/panel-state'
@@ -62,6 +63,11 @@
   // on next open for a session the user finished reading. Stamp the on-screen
   // session seen as the page goes away.
   onMount(() => markActiveSessionSeenOnLeave(() => get(view) === 'chat' ? get(activeSessionId) : null))
+
+  // A Light App can be open in either host (the panel or a mounted full page),
+  // and a delivery is addressed to the app rather than to a session — so the
+  // subscription lives here, once, rather than in either host.
+  onMount(() => installLaDeliveryBridge(ws))
 
   // Switching chats must never leave the previous session's diff on screen: the
   // panel is per-session, and a stale patch list reads as this session's work.

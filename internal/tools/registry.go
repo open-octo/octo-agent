@@ -62,6 +62,7 @@ var allTools = []tool{
 	MemoryRecallTool{},
 	LightAppStateTool{},
 	LightAppViewTool{},
+	LightAppInsertTool{},
 }
 
 // DefaultRegistry is the agent.ToolExecutor used when `octo --tools` is
