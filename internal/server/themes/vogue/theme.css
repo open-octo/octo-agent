@@ -1,0 +1,112 @@
+/* Vogue — monochrome with champagne gold, serif type, tight radii.
+
+   The wallpaper URL is absolute on purpose. A relative url() inside a custom
+   property is resolved where the property is USED, not where it is declared —
+   and --chat-bg-image is consumed by ChatView's bundled stylesheet, so
+   'wallpaper-light.webp' would be looked for next to /assets/, not here. */
+
+:root[data-theme-pack="vogue"] {
+  --blue-1: #F7F2E6;
+  --blue-2: #E8DCBF;
+  --blue-5: #B08F4E;
+  --blue-6: #C0A062;
+  --blue-7: #9A7C3F;
+
+  /* The worst case of the three: white on champagne gold is 1.9:1 in dark
+     mode, which is roughly illegible. Dark bronze, 5.36:1 / 6.94:1. */
+  --on-accent: #3A2E0C;
+
+  --info-bg: rgba(192,160,98,0.14);
+  --info-border: rgba(192,160,98,0.40);
+  --info-text: #7A6224;
+
+  --text: #17171A;
+  --text-secondary: #737378;
+  --text-tertiary: #9B9B9F;
+  --text-quaternary: #C4C4C7;
+  --text-heading: #000000;
+
+  --bg-layout: #FAFAFA;
+  --bg-container: #FFFFFF;
+  --bg-sidebar: #F2F2F1;
+  --bg-table-header: #F7F7F6;
+  --bg-zebra: #F4F4F3;
+
+  --border: rgba(0,0,0,0.11);
+  --border-secondary: rgba(0,0,0,0.06);
+  --border-table: rgba(0,0,0,0.06);
+
+  --hover-neutral: rgba(0,0,0,0.045);
+  --row-hover: rgba(192,160,98,0.09);
+  --active-blue-bg: rgba(192,160,98,0.14);
+  --focus-ring: rgba(192,160,98,0.22);
+  --scrim: rgba(0,0,0,0.50);
+
+  --card-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  --surface-info: #FBF8F0;
+  --control-track: rgba(0,0,0,0.055);
+  --search-bg: rgba(0,0,0,0.045);
+  --search-hover: rgba(0,0,0,0.08);
+  --scrollbar-thumb: rgba(0,0,0,0.20);
+  --placeholder: #A8A8AC;
+
+  /* Near-square: the editorial cue that carries most of this pack's character. */
+  --radius-card: 4px;
+  --radius-modal: 4px;
+  --radius-sm: 3px;
+  --radius-xs: 2px;
+
+  --font-sans: Didot, 'Bodoni 72', Georgia, 'Times New Roman',
+               'Songti SC', SimSun, serif;
+  --font-mono: 'Courier New', Courier, ui-monospace, Menlo, monospace;
+
+  --chat-bg: linear-gradient(180deg, #FFFFFF 0%, #FAFAF8 100%);
+  --chat-bg-image: url('/api/themes/vogue/wallpaper-light.webp');
+}
+
+:root[data-theme-pack="vogue"][data-theme="dark"] {
+  --blue-1: rgba(212,184,122,0.16);
+  --blue-2: rgba(212,184,122,0.32);
+  --blue-5: #E0C88C;
+  --blue-6: #D4B87A;
+  --blue-7: #B89A5E;
+
+  --text: #F0EFEC;
+  --text-secondary: #94938E;
+  --text-tertiary: #6B6A66;
+  --text-quaternary: #4A4946;
+  --text-heading: #FFFFFF;
+
+  --bg-layout: #0E0E0F;
+  --bg-container: #18181A;
+  --bg-sidebar: #121213;
+  --bg-table-header: #1F1F21;
+  --bg-zebra: #232325;
+
+  --border: rgba(255,255,255,0.10);
+  --border-secondary: rgba(255,255,255,0.055);
+  --border-table: rgba(255,255,255,0.055);
+
+  --hover-neutral: rgba(255,255,255,0.06);
+  --row-hover: rgba(212,184,122,0.12);
+  --active-blue-bg: rgba(212,184,122,0.18);
+  --focus-ring: rgba(212,184,122,0.26);
+  --scrim: rgba(0,0,0,0.68);
+
+  --card-shadow: 0 1px 2px rgba(0,0,0,0.42);
+  --surface-info: rgba(212,184,122,0.09);
+  --control-track: rgba(255,255,255,0.07);
+  --search-bg: rgba(255,255,255,0.06);
+  --search-hover: rgba(255,255,255,0.11);
+  --scrollbar-thumb: rgba(255,255,255,0.22);
+  --placeholder: #6B6A66;
+
+  --terminal-bg: #0A0A0B;
+
+  --info-bg: rgba(212,184,122,0.12);
+  --info-border: rgba(212,184,122,0.38);
+  --info-text: #E0C88C;
+
+  --chat-bg: linear-gradient(180deg, #111112 0%, #0C0C0D 100%);
+  --chat-bg-image: url('/api/themes/vogue/wallpaper-dark.webp');
+}

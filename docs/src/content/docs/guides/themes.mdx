@@ -16,11 +16,17 @@ octo — drop the folder in, reload the page, and your palette shows up in the t
 ```
 ~/.octo/themes/<id>/
 ├── manifest.json
-└── theme.css
+├── theme.css
+└── wallpaper-light.webp   (optional — any assets your CSS references)
 ```
 
-The folder name and the manifest's `id` must match, and `id` must be unique among the packs
-octo ships (`azure`, `blossom`, `celestia`, `vogue`).
+The folder name and the manifest's `id` must match, and `id` must not be `azure`, the default
+pack that lives in the app itself.
+
+**The themes octo ships live here too.** Ocean, Blossom and Vogue are written into this
+directory the first time octo runs, and nothing downstream tells them apart from yours — same
+format, same API. Copy one, rename the folder and its `id`, and you have a working theme to
+edit. Delete one and it stays deleted; edit one and an upgrade will not overwrite it.
 
 ### manifest.json
 
@@ -30,6 +36,7 @@ octo ships (`azure`, `blossom`, `celestia`, `vogue`).
   "name": "Ocean",
   "author": "your-handle",
   "homepage": "https://github.com/your-handle/octo-theme-ocean",
+  "names": { "zh": "深海" },
   "swatch": ["#0E7490", "#F0F7F9"]
 }
 ```
@@ -40,6 +47,7 @@ octo ships (`azure`, `blossom`, `celestia`, `vogue`).
 | `name` | yes | What the theme picker shows. |
 | `author` | no | Shown in the picker's tooltip. |
 | `homepage` | no | Where people can find your repo. |
+| `names` | no | Per-language overrides of `name`, e.g. `{"zh": "深海"}`. The picker uses the entry for the current UI language and falls back to `name`. |
 | `swatch` | no | Accent and surface, in that order, for the chip the picker draws — your light palette. Hex only (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`): the value reaches the page as a CSS custom property, so anything else is dropped. Without it the picker draws a neutral chip. |
 
 ## How theming works
@@ -229,6 +237,25 @@ raise the blur and make the frost colours translucent for a glassy shell.
   --chat-bg: linear-gradient(175deg, #0D1F25 0%, #0A171C 100%);
 }
 ```
+
+## Assets
+
+A theme can carry the files its stylesheet references — a wallpaper, a font. Put them in the
+theme's folder and reference them by their full API path:
+
+```css
+--chat-bg-image: url('/api/themes/ocean/wallpaper-light.webp');
+```
+
+**Not a relative `url()`.** A relative URL inside a custom property is resolved where the property
+is *used*, not where it is declared — and the app consumes `--chat-bg-image` from its own bundled
+stylesheet, so `url('wallpaper-light.webp')` would be looked for next to `/assets/` and quietly
+fail. Your theme's id is already in every selector it writes, so spelling the path out costs
+nothing. The same applies to `@font-face` sources and anything else your CSS loads.
+
+Servable types: `.css`, `.webp`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.avif`, `.woff`, `.woff2`,
+`.ttf`, `.otf`. SVG is deliberately not among them — it can carry script, and these files are
+served from the app's own origin.
 
 ## Try it
 

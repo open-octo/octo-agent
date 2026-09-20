@@ -465,6 +465,10 @@ func New(cfg Config) (*Server, error) {
 	_ = skills.MaterializeDefaults(version.Version)
 	_ = tools.MaterializeDefaultWorkflows(version.Version)
 	_ = agentprofile.MaterializeDefaults(version.Version)
+	// Unlike the materializers above, this one places each theme once and then
+	// leaves it alone: a theme is something the user edits, and a deleted one
+	// has to stay deleted. See themes_seed.go.
+	_ = seedThemes()
 	_ = workflow.PruneJournals()
 
 	cwd, _ := os.Getwd()
@@ -947,7 +951,7 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/profile/user", s.handleGetProfileUser)
 	s.api("GET /api/memories", s.handleGetMemories)
 	s.api("GET /api/themes", s.handleListThemes)
-	s.api("GET /api/themes/{id}/theme.css", s.handleGetThemeCSS)
+	s.api("GET /api/themes/{id}/{file}", s.handleGetThemeFile)
 	s.api("GET /api/light-apps", s.handleListLightApps)
 	s.api("GET /api/light-apps/{slug}", s.handleGetLightApp)
 	s.api("DELETE /api/light-apps/{slug}", s.handleDeleteLightApp)

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { packs, getPack, setPack } from '../../lib/theme'
-  import { t } from '../../lib/i18n'
+  import { t, locale } from '../../lib/i18n'
 
   let selected = $state(getPack())
 
@@ -28,7 +28,7 @@
         class="swatch"
         style="--sw-accent: {pack.swatch[0]}; --sw-surface: {pack.swatch[1]}"
       ></span>
-      <span class="name">{pack.labelKey ? $t(pack.labelKey) : pack.label}</span>
+      <span class="name">{pack.labelKey ? $t(pack.labelKey) : (pack.labels?.[$locale] ?? pack.label)}</span>
     </button>
   {/each}
 </div>

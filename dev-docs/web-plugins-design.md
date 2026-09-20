@@ -19,18 +19,22 @@ octo 的后端能力早就可以扩展——skills、MCP、hooks、workflows、s
 
 三块基础设施已经在生产里跑着，方案建立在它们之上。
 
-### 主题：已经是插件形状
+### 主题：应用里只剩默认包
 
-`web/src/lib/theme.ts` 用两个 `<html>` 属性驱动主题：`data-theme`（light/dark）与 `data-theme-pack`（调色板家族）。色值是 `web/src/app.css` 里的 63 个 CSS 变量（`:root` 块内；全文 343 处定义是这 63 个名字在 4 个包 × 明暗两块里的重复赋值），默认包 azure 在 `:root` 与 `:root[data-theme="dark"]`，其余包各占两块：
+`web/src/lib/theme.ts` 用两个 `<html>` 属性驱动主题：`data-theme`（light/dark）与 `data-theme-pack`（调色板家族）。色值是 `web/src/app.css` `:root` 块里的 63 个 CSS 变量——**这 63 个名字就是主题作者的全部契约**。
+
+`app.css` 现在只保留默认包 azure（`:root` 与 `:root[data-theme="dark"]`），因为总得有东西能在任何主题文件被读取之前先渲染出来。`PACKS` 相应只剩一项。
+
+octo 自带的其余主题（ocean / blossom / vogue）是 `internal/server/themes/` 下的目录，随二进制 `go:embed`，首次启动写进 `~/.octo/themes/`，此后就是普通用户主题——下游没有任何地方区分它们。这正是把它们搬出去的目的：可读、可改、可删，同时充当三份高质量范本。
+
+每个主题是两块，缺一不可：
 
 ```css
 :root[data-theme-pack="blossom"]                    { --…: …; }  /* light */
 :root[data-theme-pack="blossom"][data-theme="dark"] { --…: …; }  /* dark  */
 ```
 
-`PACKS` 是 theme.ts 里一个四项的硬编码数组（azure / blossom / celestia / vogue），带 `labelKey` 与 picker 用的 `swatch`。`normalizePack` 已经会把未知 id 回退到默认包。
-
-**缺口只有一个：包的来源是编译期常量。**
+两块特异性相同（0,2,0），主题的样式表后加载，所以只写 light 块会让亮色值泄漏进暗色模式。`web/src/lib/theme.test.ts` 直接对 `internal/server/themes/` 下的三个主题跑这条守卫和 AA 对比度检查——守卫跟着主题走，而不是跟着 app.css。
 
 ### Light Apps：面板插件的骨架已经存在
 
@@ -90,7 +94,15 @@ graph LR
 
 ### 一、主题包
 
-`~/.octo/themes/<id>/` 放 `manifest.json`（id / name / author / 可选 homepage）与 `theme.css`。服务端扫目录，`GET /api/themes` 返回清单，`GET /api/themes/<id>/theme.css` 返回样式。前端启动时把用户主题注入成一个 `<style>`，并把 id 并入 `PACKS`，picker 自然多出几项。
+`~/.octo/themes/<id>/` 放 `manifest.json`（id / name / 可选 names / author / homepage / swatch）、`theme.css`，以及样式表引用的资源（壁纸、字体）。服务端扫目录，`GET /api/themes` 返回清单，`GET /api/themes/<id>/<file>` 提供样式表与资源。前端为每个主题追加一个 `<link>`，并把 id 并入可选列表，picker 自然多出几项。
+
+资源走白名单扩展名并逐一固定 Content-Type。**SVG 被刻意排除**：这些文件来自用户可写的目录、从应用自身 origin 提供，而 SVG 能携带脚本。
+
+资源必须用完整接口路径引用（`url('/api/themes/<id>/x.webp')`），不能用相对路径：自定义属性里的相对 URL 在**使用处**而非声明处解析，而 `--chat-bg-image` 是被 `ChatView` 打包后的样式表消费的，相对路径会被解析到 `/assets/` 底下并静默失败。
+
+`names` 让主题按界面语言命名（深海 / 少女 / 时尚）。这三个名字原本是 i18n key，搬成文件后必须由 manifest 自己带，否则中文界面会退化成英文名——而按来源特判 UI 是不做的。
+
+seed 只投放一次：`~/.octo/themes/.seeded` 记录已投放的 id，所以用户删掉的主题不会在下次启动时回来，改过的也不会被升级覆盖；而新版本新增的主题仍然会被送达。
 
 主题作者的契约就是 app.css `:root` 里那 63 个变量名——已整理为 `docs/.../guides/themes.mdx`，不需要新概念。一个主题包就是：
 

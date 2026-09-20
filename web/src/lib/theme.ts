@@ -21,12 +21,20 @@ const DEFAULT_PACK = 'azure'
 // rename. Renaming the *default* pack would survive without this — an unknown
 // id already falls back to the default — but relying on that only works for
 // that one pack, and silently stops working the day a pack reuses the old id.
-const RENAMED_PACKS: Record<string, string> = { klook: 'azure' }
+// celestia was retired in favour of ocean, which now ships as a seed theme
+// (internal/server/themes). Mapping it keeps anyone who was using it on a
+// theme rather than dropping them back to the default.
+const RENAMED_PACKS: Record<string, string> = { klook: 'azure', celestia: 'ocean' }
 
-// Packs, in the order the settings picker lists them. `swatch` is the pair the
-// picker draws — accent over surface, in that pack's *light* palette — purely
-// so the control can show what a pack looks like without applying it; the real
-// values all live in app.css. `labelKey` is the i18n key for the display name.
+// The one pack compiled into the app: something has to render before any
+// theme file is read, and that is the default. Every other theme octo ships
+// (ocean, blossom, vogue) is seeded to ~/.octo/themes/ on first run and
+// arrives here through loadUserPacks like a theme anyone else wrote — which
+// is the point: they are editable, deletable, and worked examples.
+//
+// `swatch` is the pair the picker draws — accent over surface, in the pack's
+// *light* palette — so the control can show what it looks like without
+// applying it. `labelKey` is the i18n key for the display name.
 export type ThemePack = {
   id: string
   labelKey: string
@@ -35,9 +43,6 @@ export type ThemePack = {
 
 export const PACKS: ThemePack[] = [
   { id: 'azure', labelKey: 'settings.pack_azure', swatch: ['#007AFF', '#F5F5F7'] },
-  { id: 'blossom', labelKey: 'settings.pack_blossom', swatch: ['#FF6FA5', '#FFF5F8'] },
-  { id: 'celestia', labelKey: 'settings.pack_celestia', swatch: ['#2BB3FF', '#F0F9FF'] },
-  { id: 'vogue', labelKey: 'settings.pack_vogue', swatch: ['#C0A062', '#FAFAFA'] },
 ]
 
 const PACK_IDS = new Set(PACKS.map((p) => p.id))
@@ -59,6 +64,10 @@ export type PackChoice = {
   id: string
   labelKey?: string
   label?: string
+  // Per-locale names from the manifest; the picker prefers the current
+  // locale's and falls back to `label`. This is how the seeded themes keep
+  // the Chinese names they had as i18n keys (少女, 时尚, 深海).
+  labels?: Record<string, string>
   swatch: [accent: string, surface: string]
   author?: string
   homepage?: string
@@ -190,6 +199,7 @@ export async function loadUserPacks(): Promise<void> {
     choices.push({
       id: th.id,
       label: th.name || th.id,
+      labels: th.names,
       swatch:
         th.swatch && th.swatch.length === 2
           ? [th.swatch[0], th.swatch[1]]

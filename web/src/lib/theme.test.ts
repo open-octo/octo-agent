@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { getPack, setPack, PACKS, packs, loadUserPacks } from './theme'
@@ -20,19 +20,44 @@ vi.stubGlobal('localStorage', {
 
 const KEY = 'octo.themePack'
 
-beforeEach(() => {
+// The set of known pack ids is module state that loadUserPacks replaces, so
+// every case starts from "no user themes" — the state a fresh boot is in
+// before the themes request comes back.
+beforeEach(async () => {
   localStorage.clear()
   document.documentElement.removeAttribute('data-theme-pack')
+  vi.mocked(listThemes).mockReset()
+  vi.mocked(listThemes).mockResolvedValue([])
+  await loadUserPacks()
+  for (const el of document.querySelectorAll('link[data-octo-theme]')) el.remove()
 })
+
+// The themes octo ships are seeded to ~/.octo/themes and arrive as user
+// themes, so a non-default pack only exists once they have loaded.
+async function withOcean() {
+  vi.mocked(listThemes).mockResolvedValue([{ id: 'ocean', name: 'Ocean' }])
+  await loadUserPacks()
+}
 
 describe('getPack', () => {
   it('defaults to azure when nothing is stored', () => {
     expect(getPack()).toBe('azure')
   })
 
-  it('returns a stored pack that is still shipped', () => {
-    localStorage.setItem(KEY, 'blossom')
-    expect(getPack()).toBe('blossom')
+  it('returns a stored pack that is loaded', async () => {
+    await withOcean()
+    localStorage.setItem(KEY, 'ocean')
+    expect(getPack()).toBe('ocean')
+  })
+
+  // celestia was retired for ocean. Someone who was on it gets ocean, not a
+  // silent drop back to the default — but only once ocean itself has loaded.
+  it('reads the retired pack id as the theme that replaced it', async () => {
+    localStorage.setItem(KEY, 'celestia')
+    expect(getPack()).toBe('azure')
+
+    await withOcean()
+    expect(getPack()).toBe('ocean')
   })
 
   it('reads the pre-rename default id as its current name', () => {
@@ -47,16 +72,18 @@ describe('getPack', () => {
 })
 
 describe('setPack', () => {
-  it('writes the attribute for a non-default pack', () => {
-    setPack('vogue')
-    expect(document.documentElement.getAttribute('data-theme-pack')).toBe('vogue')
-    expect(getPack()).toBe('vogue')
+  it('writes the attribute for a non-default pack', async () => {
+    await withOcean()
+    setPack('ocean')
+    expect(document.documentElement.getAttribute('data-theme-pack')).toBe('ocean')
+    expect(getPack()).toBe('ocean')
   })
 
   // The default palette lives in bare :root, so it is addressed by the absence
   // of the attribute — writing data-theme-pack="azure" would match no rule.
-  it('removes the attribute for the default pack', () => {
-    setPack('vogue')
+  it('removes the attribute for the default pack', async () => {
+    await withOcean()
+    setPack('ocean')
     setPack('azure')
     expect(document.documentElement.getAttribute('data-theme-pack')).toBeNull()
     expect(getPack()).toBe('azure')
@@ -116,26 +143,52 @@ function block(css: string, selector: string): Record<string, string> {
   return vars
 }
 
-// A pack's light block does not outrank the default dark block on specificity
-// — both are (0,2,0) — it only wins by coming later in app.css. So in dark
-// mode a var set only in a pack's light block overrides the default DARK
-// value. For --radius-* and --font-* that is intended (the default dark block
-// never sets them, so a pack states them once and gets both modes); for a
-// color it means the pack's light value leaks into dark mode. CSS reports
-// nothing when it happens, so this is the guard.
-describe('pack light/dark blocks stay paired', () => {
-  const css = readFileSync(join(process.cwd(), 'src', 'app.css'), 'utf8')
-  const defaultDark = block(css, ':root[data-theme="dark"]')
+// The themes octo ships are files now (internal/server/themes, seeded to
+// ~/.octo/themes on first run), not blocks in app.css. These two guards move
+// with them: they check exactly what the docs tell a theme author to get
+// right, against the themes we ourselves ship.
+//
+// vitest runs with cwd = web/, and import.meta.url is not a file:// URL under
+// jsdom — same reason i18n.coverage.test.ts resolves from cwd.
+const SEED_ROOT = join(process.cwd(), '..', 'internal', 'server', 'themes')
+const SEED_IDS = readdirSync(SEED_ROOT, { withFileTypes: true })
+  .filter((e) => e.isDirectory())
+  .map((e) => e.name)
+  .sort()
 
-  for (const pack of PACKS.filter((p) => p.id !== 'azure')) {
-    it(`${pack.id} restates in dark every var the default dark block sets`, () => {
-      const light = block(css, `:root[data-theme-pack="${pack.id}"]`)
-      const dark = block(css, `:root[data-theme-pack="${pack.id}"][data-theme="dark"]`)
+function seedCSS(id: string): string {
+  return readFileSync(join(SEED_ROOT, id, 'theme.css'), 'utf8')
+}
+
+// Guard the guard: a rename or a move that empties this list would turn both
+// suites below into silent no-ops.
+describe('seed themes', () => {
+  it('ships the themes the picker is expected to offer', () => {
+    expect(SEED_IDS).toEqual(['blossom', 'ocean', 'vogue'])
+  })
+})
+
+// A pack's light block does not outrank the default dark block on specificity
+// — both are (0,2,0) — it only wins by being linked later. So in dark mode a
+// var set only in a theme's light block overrides the default DARK value. For
+// --radius-* and --font-* that is intended (the default dark block never sets
+// them, so a theme states them once and gets both modes); for a color it means
+// the theme's light value leaks into dark mode. CSS reports nothing when it
+// happens, so this is the guard.
+describe('theme light/dark blocks stay paired', () => {
+  const appCSS = readFileSync(join(process.cwd(), 'src', 'app.css'), 'utf8')
+  const defaultDark = block(appCSS, ':root[data-theme="dark"]')
+
+  for (const id of SEED_IDS) {
+    it(`${id} restates in dark every var the default dark block sets`, () => {
+      const css = seedCSS(id)
+      const light = block(css, `:root[data-theme-pack="${id}"]`)
+      const dark = block(css, `:root[data-theme-pack="${id}"][data-theme="dark"]`)
 
       const leaked = Object.keys(light).filter((v) => v in defaultDark && !(v in dark))
       expect(
         leaked,
-        `${pack.id} sets these in its light block and the default dark block sets `
+        `${id} sets these in its light block and the default dark block sets `
           + `them too, but its dark block does not — they would keep their light `
           + `values in dark mode: ${leaked.join(', ')}`,
       ).toEqual([])
@@ -143,28 +196,28 @@ describe('pack light/dark blocks stay paired', () => {
   }
 })
 
-// Every pack states an accent fill and the foreground that sits on it. White
-// is only legible over azure's blue; a pack that keeps it while lightening the
-// accent — which is exactly what the first cut of these packs did — lands
+// Every theme states an accent fill and the foreground that sits on it. White
+// is only legible over a dark accent; a theme that keeps it while lightening
+// the accent — which is exactly what the first cut of these packs did — lands
 // between 1.9:1 and 2.6:1. The pairing is plain data, so it can be checked.
-describe('pack accent contrast', () => {
-  // vitest runs with cwd = web/, and import.meta.url is not a file:// URL
-  // under jsdom — same reason i18n.coverage.test.ts resolves from cwd.
-  const css = readFileSync(join(process.cwd(), 'src', 'app.css'), 'utf8')
+describe('theme accent contrast', () => {
+  for (const id of SEED_IDS) {
+    it(`${id} reaches AA on its accent in both modes`, () => {
+      const css = seedCSS(id)
+      const light = block(css, `:root[data-theme-pack="${id}"]`)
+      const dark = block(css, `:root[data-theme-pack="${id}"][data-theme="dark"]`)
 
-  for (const pack of PACKS.filter((p) => p.id !== 'azure')) {
-    const light = block(css, `:root[data-theme-pack="${pack.id}"]`)
-    const dark = block(css, `:root[data-theme-pack="${pack.id}"][data-theme="dark"]`)
+      const lightFg = light['--on-accent']
+      expect(lightFg, `${id} must set --on-accent`).toBeTruthy()
+      // A theme whose accent keeps its lightness across modes states one
+      // foreground and inherits it into dark; one that flips a deep accent for
+      // a bright one (ocean) has to state a second, or white would sit on a
+      // near-white fill. Either shape is fine as long as both measure up.
+      const darkFg = dark['--on-accent'] ?? lightFg
+      const darkAccent = dark['--blue-6'] ?? light['--blue-6']
 
-    it(`${pack.id} reaches AA on its accent in both modes`, () => {
-      const fg = light['--on-accent']
-      expect(fg, `${pack.id} must set --on-accent`).toBeTruthy()
-      // The dark block deliberately omits --on-accent and inherits the light
-      // one, so both modes are measured against the same foreground.
-      expect(dark['--on-accent']).toBeUndefined()
-
-      expect(contrast(light['--blue-6'], fg)).toBeGreaterThanOrEqual(4.5)
-      expect(contrast(dark['--blue-6'], fg)).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(light['--blue-6'], lightFg)).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(darkAccent, darkFg)).toBeGreaterThanOrEqual(4.5)
     })
   }
 })

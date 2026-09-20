@@ -1,0 +1,7 @@
+{
+  "id": "vogue",
+  "name": "Vogue",
+  "names": { "zh": "时尚" },
+  "author": "octo",
+  "swatch": ["#C0A062", "#FAFAFA"]
+}

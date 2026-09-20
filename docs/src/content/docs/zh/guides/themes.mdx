@@ -16,11 +16,15 @@ Web UI 的颜色全部是 CSS 自定义属性。一个主题就是一个目录�
 ```
 ~/.octo/themes/<id>/
 ├── manifest.json
-└── theme.css
+├── theme.css
+└── wallpaper-light.webp   （可选——你的 CSS 引用的任何资源）
 ```
 
-目录名必须和 manifest 里的 `id` 一致，且不能和 octo 自带的包重名（`azure`、`blossom`、
-`celestia`、`vogue`）。
+目录名必须和 manifest 里的 `id` 一致，且不能叫 `azure`——那是住在应用里的默认包。
+
+**octo 自带的主题也在这个目录里。** 深海、少女、时尚在 octo 第一次运行时被写进来，
+之后和你自己写的主题没有任何区别——同样的格式、同样的接口。复制一份、改掉目录名和 `id`，
+你就有了一个能直接改的主题。删掉它就是删掉了，不会自己回来；改过它，升级也不会覆盖。
 
 ### manifest.json
 
@@ -30,6 +34,7 @@ Web UI 的颜色全部是 CSS 自定义属性。一个主题就是一个目录�
   "name": "Ocean",
   "author": "your-handle",
   "homepage": "https://github.com/your-handle/octo-theme-ocean",
+  "names": { "zh": "深海" },
   "swatch": ["#0E7490", "#F0F7F9"]
 }
 ```
@@ -40,6 +45,7 @@ Web UI 的颜色全部是 CSS 自定义属性。一个主题就是一个目录�
 | `name` | ✅ | 主题选择器里显示的名字。 |
 | `author` | | 显示在选择器的悬浮提示里。 |
 | `homepage` | | 方便别人找到你的仓库。 |
+| `names` | | 按界面语言覆盖 `name`，例如 `{"zh": "深海"}`。选择器优先用当前语言那条，没有就回到 `name`。 |
 | `swatch` | | 选择器画的那个小色块，依次是强调色和背景色，取你的亮色配色。只接受十六进制（`#rgb`、`#rgba`、`#rrggbb`、`#rrggbbaa`）：这个值会作为 CSS 自定义属性进入页面，其他写法一律丢弃。不写就画一个中性色块。 |
 
 ## 主题是怎么生效的
@@ -225,6 +231,24 @@ Web UI 的颜色全部是 CSS 自定义属性。一个主题就是一个目录�
   --chat-bg: linear-gradient(175deg, #0D1F25 0%, #0A171C 100%);
 }
 ```
+
+## 资源文件
+
+主题可以带上样式表引用的文件——壁纸、字体。放进主题目录，用完整的接口路径引用：
+
+```css
+--chat-bg-image: url('/api/themes/ocean/wallpaper-light.webp');
+```
+
+**不要用相对 `url()`。** 自定义属性里的相对 URL，是在这个属性被**使用**的地方解析的，
+而不是在它被声明的地方——`--chat-bg-image` 是被应用自己打包的样式表消费的，
+所以 `url('wallpaper-light.webp')` 会被拿到 `/assets/` 底下去找，然后悄无声息地失败。
+你的主题 id 本来就写在每一条选择器里，把路径写全不花什么成本。
+`@font-face` 的字体源，以及你的 CSS 加载的任何其他资源，都是同样的规则。
+
+可以提供的类型：`.css`、`.webp`、`.png`、`.jpg`、`.jpeg`、`.gif`、`.avif`、`.woff`、
+`.woff2`、`.ttf`、`.otf`。SVG 被刻意排除在外——它能携带脚本，
+而这些文件是从应用自己的 origin 提供的。
 
 ## 试一下
 

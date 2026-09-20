@@ -865,6 +865,8 @@ export async function deleteMemory(name: string, source: string): Promise<void> 
 export interface UserTheme {
   id: string
   name: string
+  // Per-locale overrides of `name`, keyed the way the locale store is ("zh").
+  names?: Record<string, string>
   author?: string
   homepage?: string
   // Accent/surface pair for the picker's chip. The server only lets a hex pair
