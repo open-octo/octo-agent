@@ -235,6 +235,8 @@ The new-session page comes from `~/.octo/landing/config.json` when it exists, an
 
 `hero` fills the space above the mark. It takes one source, not both: `"hero": {"image": "file.webp"}` for a file beside the config (animated GIF and WebP work), or `"hero": {"app": "<slug>"}` for one Light App embedded as a frame. An optional `"height"` is in pixels. `apps` is a list of Light App slugs shown as shortcuts under the cards.
 
+Both hero sources fail silently, so get them right the first time. The image must be `.webp`, `.png`, `.jpg`, `.jpeg`, `.gif` or `.avif` — **an SVG is refused**, because it can carry script, so reach for PNG or WebP when you generate one. A `hero.app` or an `apps` entry that is not an installed Light App is simply not shown. In both cases the page renders without the hero and nothing reports an error, so check the file is there and the slug is installed rather than telling the user it is done.
+
 When the user wants different starting points — "make the start page about my work", "put something in that empty space" — write that config, and put any image beside it in the same directory. It replaces all the cards rather than adding to them, up to 8, and whatever language it is written in is what shows. Deleting the directory restores the built-ins.
 
 ## Themes
