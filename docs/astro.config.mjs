@@ -85,11 +85,18 @@ export default defineConfig({
 						{ label: 'Schedule cron tasks', slug: 'guides/cron-tasks', translations: { 'zh-CN': '定时任务' } },
 						{ label: 'Interactive panels (GenUI)', slug: 'guides/genui', translations: { 'zh-CN': '交互面板（GenUI）' } },
 						{ label: 'Light Apps', slug: 'guides/light-apps', translations: { 'zh-CN': '轻应用' } },
-						{ label: 'Write a theme', slug: 'guides/themes', translations: { 'zh-CN': '制作主题' } },
-						{ label: 'Change the start screen', slug: 'guides/start-screen', translations: { 'zh-CN': '改起始页' } },
 						{ label: 'Run more than one octo', slug: 'guides/profiles', translations: { 'zh-CN': '同时跑多个 octo' } },
 						{ label: 'Self-host octo serve', slug: 'guides/self-host', translations: { 'zh-CN': '自托管 octo serve' } },
 						{ label: 'Air-gapped deployment', slug: 'guides/air-gapped', translations: { 'zh-CN': '内网离线部署' } },
+					],
+				},
+				{
+					label: 'Customize the Web UI',
+					translations: { 'zh-CN': '定制界面' },
+					items: [
+						{ label: 'Overview', slug: 'guides/customize', translations: { 'zh-CN': '总览' } },
+						{ label: 'Write a theme', slug: 'guides/themes', translations: { 'zh-CN': '制作主题' } },
+						{ label: 'Change the start screen', slug: 'guides/start-screen', translations: { 'zh-CN': '改起始页' } },
 					],
 				},
 				{

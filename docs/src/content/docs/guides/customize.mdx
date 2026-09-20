@@ -1,0 +1,67 @@
+---
+title: Customize the Web UI
+description: Three extension points — a theme, the start screen, and a mounted Light App — all plain files under ~/.octo/, no build step and no fork.
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="New" variant="tip" /><br /><br />
+
+The Web UI ships with one palette, one start screen and a fixed set of panels. Three of those
+are yours, and changing them means writing a file — not forking octo, not rebuilding it, not
+learning its component tree.
+
+| What you want to change | Use | It lives in |
+| --- | --- | --- |
+| Colours, wallpaper, typeface, corner radius | [A theme](/docs/guides/themes/) | `~/.octo/themes/<id>/` |
+| The cards, the title and the space above them on the new-session screen | [The start screen](/docs/guides/start-screen/) | `~/.octo/landing/config.json` |
+| A new page in the left navigation, or a tab in the right-hand panel | [A mounted Light App](/docs/guides/light-apps/#mount-it-into-the-ui) | `~/.octo/light-apps/<slug>/manifest.json` |
+
+## What the three have in common
+
+**They are files, not code.** No build step, no npm install, no recompiled binary. Write the
+file, reload the page.
+
+**You do not have to write them yourself.** The agent knows all three formats — "make me a
+dark green theme", "put the sketchpad in my sidebar", "make the start screen about the work I
+actually do" are things it can just do, and then you edit the file it wrote.
+
+**octo's own use the same format.** The Ocean, Blossom and Vogue themes are written into
+`~/.octo/themes/` the first time octo runs, and nothing downstream tells them apart from
+yours. Copying one is the fastest way to start.
+
+**Removing the file gives you the default back.** A missing `landing/config.json` is the
+built-in start screen; a `manifest.json` without `mount` is an app that lives on the Light Apps
+page like any other. The one asymmetry is a theme octo seeded for you: delete it and it stays
+deleted, because re-placing it would undo your decision on every upgrade.
+
+**They compose.** The theme decides what the start screen looks like; the start screen config
+decides what it says. Neither knows about the other.
+
+## What you cannot do, and why
+
+There is **no component API**. You cannot replace a part of the interface with your own
+component, run JavaScript inside the app's own page, or call octo's API from a panel you wrote.
+A mounted Light App renders on its own origin behind a policy that closes every network exit —
+it is a web page octo hosts, not a plugin loaded into octo.
+
+That line is deliberate, and it is what makes the three above safe to build on. A customization
+that reached into the interface would break the first time the interface moved, which is every
+release; an extension that could call the API would hold your whole session, every key and every
+conversation, on the strength of a folder you copied from somewhere. Data survives upgrades.
+Code that assumes our internals does not.
+
+The same reasoning sets one more limit worth knowing before you build: anything that renders a
+Light App — a mounted page, a mounted panel, a hero app on the start screen — appears only when
+the browser is on the machine running `octo serve`. Open the Web UI from your phone and those
+entries are hidden rather than shown broken.
+
+## Start here
+
+- **[Write a theme](/docs/guides/themes/)** — the full variable list, the two-block rule that
+  catches everyone, and a minimal theme you can paste.
+- **[Change the start screen](/docs/guides/start-screen/)** — starter cards in your own words,
+  an image or animation above them, and Light Apps pinned as shortcuts.
+- **[Light Apps](/docs/guides/light-apps/)** — what they are and how the agent builds them;
+  [Mount it into the UI](/docs/guides/light-apps/#mount-it-into-the-ui) is the one field that
+  gives one a permanent place.
