@@ -166,9 +166,57 @@ Agent 生成的 HTML artifact 也可以在 Artifacts 面板中一键「保存到
     ctx.lineTo(e.offsetX, e.offsetY)
     ctx.stroke()
   })
-  c.addEventListener('pointerup', () => { drawing = false })
+  c.addEventListener('pointerup', () => {
+    if (drawing) { drawing = false; strokes++; publish() }
+  })
 
-  document.getElementById('clear').onclick = () => ctx.clearRect(0, 0, c.width, c.height)
+  // ── Let the agent see this canvas ────────────────────────────────────────
+  //
+  // octo mirrors whatever an app publishes; the model reads it through the
+  // lightapp_state / view_lightapp tools. One way: publishing describes the app
+  // to the model, it grants the app no access to the conversation.
+  let strokes = 0
+  let publishTimer = 0
+  function publish() {
+    clearTimeout(publishTimer)
+    publishTimer = setTimeout(() => {
+      window.octo?.pushState({
+        digest: strokes
+          ? `A hand-drawn sketch, ${strokes} stroke(s).`
+          : 'An empty sketch canvas — nothing drawn yet.',
+        summary: { strokes },
+        image: c,            // a canvas is accepted directly
+      })
+    }, 400)
+  }
+  publish()
+
+  // ── Take what the agent sends ────────────────────────────────────────────
+  //
+  // The agent can hand this canvas an image (ask it to generate something from
+  // your sketch). Draw it in, then publish again so the agent can see the
+  // result of what it just sent.
+  window.octo?.onDelivery(({ blob, note }) => {
+    const img = new Image()
+    img.onload = () => {
+      // Fit inside the canvas, centred, without distorting the image.
+      const scale = Math.min(c.clientWidth / img.width, c.clientHeight / img.height, 1)
+      const w = img.width * scale
+      const h = img.height * scale
+      ctx.drawImage(img, (c.clientWidth - w) / 2, (c.clientHeight - h) / 2, w, h)
+      URL.revokeObjectURL(img.src)
+      strokes++
+      publish()
+      if (note) console.log('[octo]', note)
+    }
+    img.src = URL.createObjectURL(blob)
+  })
+
+  document.getElementById('clear').onclick = () => {
+    ctx.clearRect(0, 0, c.width, c.height)
+    strokes = 0
+    publish()
+  }
 
   // The plain <a download> idiom: the host turns it into a browser download or
   // the OS save dialog in the desktop app.
@@ -183,6 +231,53 @@ Agent 生成的 HTML artifact 也可以在 Artifacts 面板中一键「保存到
 
 刷新 Web UI，**画板**就出现在左侧导航里，图标就是 manifest 里那个 emoji。
 把 `mount` 改成 `"panel"`，它就转到右侧面板的切换器里，和会话制品、diff 审阅并列。
+
+那个 `window.octo.pushState` 调用就是让 agent 能看见你画的东西的关键：
+画完问它「我刚画的是什么」，它会先读 digest，再去看图。见下面的
+[让 agent 看见里面](#让-agent-看见里面)。
+
+## 让 agent 看见里面
+
+轻应用是封闭的：它跑在自己的 origin 上，外面罩着一层把所有网络出口都关死的策略。
+所以默认情况下 agent 根本不知道它开着，更不知道里面有什么。
+
+应用可以主动发布一份自己的快照：
+
+```js
+window.octo.pushState({
+  digest: '一张手绘草图，3 笔。',        // 一句话，写给模型看的
+  summary: { strokes: 3 },              // 可选的结构化信息
+  image: canvasOrBlob,                  // 可选的截图
+})
+```
+
+agent 这边有两个工具：`lightapp_state` 读取每个打开的应用的 digest（很便宜，
+所以你一提「我画的那个」它就能去看一眼），`view_lightapp` 把截图作为一张真正的
+图片拉进对话里，它就能直接看着图说话。
+
+**发布不会给你的应用任何东西**——拿不到对话、拿不到接口、拿不到凭据。
+状态一变就可以调，octo 会合并连续的推送，所以画布每一笔都推也没问题。
+
+### 接收 agent 送过来的东西
+
+agent 可以往你的应用里递一个文件——让它照着你的草图生成一张图，
+它可以直接把结果放到画布上。注册一个处理函数来接收：
+
+```js
+window.octo.onDelivery(({ blob, name, note }) => {
+  // 画进去、显示出来，或者干脆不理 —— 这是你的应用
+})
+```
+
+你的应用必须在**发布状态**才收得到东西：octo 是通过 `pushState` 送来的那份快照
+找到投递目标的，所以一个只注册了处理函数、从不发布的应用，在 agent 眼里就是没开。
+加载时先发布一次，就能被找到了。
+
+这是唯一的入站方向，而且只带一个文件和一句备注，别的什么都没有：
+没有对话内容，也没有要执行的指令。不注册处理函数的应用就永远收不到东西，
+而 agent 会像了解你的应用的其他一切一样知道结果——读你接下来发布的状态。
+
+快照只存在内存里，octo 停掉或应用关闭后就没了。
 
 ## 技术约束
 

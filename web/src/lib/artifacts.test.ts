@@ -3,6 +3,7 @@ import { get } from 'svelte/store'
 import { artifacts, artifactSel, panelContent, panelExpanded } from './stores'
 import { observeArtifact, hydrateArtifact, resetArtifacts, markArtifactOriginUnavailable, probeArtifactOrigin } from './artifacts'
 import type { Artifact } from './types'
+import { blobResponse as imageResponse } from '../test/fetchStub'
 
 // Nothing a preview document references can authenticate: the srcdoc iframe has
 // no allow-same-origin, so its subresource requests are cross-site and the
@@ -24,15 +25,6 @@ async function observeHydrated(path: string) {
   await hydrateArtifact(get(artifacts).at(-1))
 }
 
-// Image bytes must come back as the test environment's own Blob. Node's fetch
-// Response mints undici's Blob, which jsdom's FileReader brand-checks and
-// rejects on Node 22 (Node 26 unifies the classes, so it passes there) — the
-// inliner's catch would swallow that and the tests would assert on an
-// un-rewritten document. A real browser mints fetch blobs and FileReader in
-// the same realm, so this is also the truer stub.
-function imageResponse(bytes: Uint8Array<ArrayBuffer>): Response {
-  return { ok: true, blob: async () => new Blob([bytes], { type: 'image/png' }) } as Response
-}
 
 beforeEach(() => {
   resetArtifacts(SID)

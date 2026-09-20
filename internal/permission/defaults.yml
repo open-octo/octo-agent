@@ -155,6 +155,24 @@ read_file:
   - deny:  { path: ["**/.ssh/id_*", "**/id_rsa*", "**/id_ed25519*", "**/id_ecdsa*", "**/.env", "**/.env.*"] }
   - allow: { path: ["**"] }
 
+# lightapp_state and view_lightapp read a process-memory mirror of what the
+# user's own Light Apps published about themselves. No filesystem, no network,
+# no session data — and lightapp_state is meant to be called whenever the user
+# mentions something they drew, so a prompt per call would be unusable. Without
+# an explicit rule both fall to the implicit ask, which ModeStrict (IM, headless)
+# resolves as deny: the tools would go quiet exactly where nobody can approve.
+lightapp_state:
+  - allow: { pattern: "" }
+
+view_lightapp:
+  - allow: { pattern: "" }
+
+# insert_into_lightapp puts a file into something the user is looking at, so it
+# keeps the implicit ask. Stated rather than left implicit so nobody reads the
+# two allows above as covering the whole family.
+insert_into_lightapp:
+  - ask:   { pattern: "" }
+
 # terminal_output reads background processes started by this same session via
 # `terminal` run_in_background:"interactive". Async processes reject reads; only
 # interactive services/REPLs are observable. Low risk, so allow without prompting.

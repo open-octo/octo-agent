@@ -22,6 +22,7 @@
 //   { __laBridge: 1, id: 0, res: true, ok: true, op: 'migrate', value: {k: v} }
 //   { __laBridge: 1, id: 0, ns, op: 'migrated', count }
 //   { __laBridge: 1, id: 0, ns, op: 'download', name, blob }
+//   { __laBridge: 1, id: 0, ns, op: 'state', digest, summary?, image? }
 //
 // Security model:
 //   - Only registered windows are heard (event.source must be in the registry),
@@ -39,6 +40,8 @@ export const LA_STORE = 'kv'
 // namespace dump (which scans `{ns}:`) and can never collide with an app key.
 const MIGRATED_PREFIX = '__octo_migrated__:'
 
+import { acceptLaState, dropLaState } from './laState'
+
 const laFrames = new Map<Window, string>() // iframe window -> namespace
 let bridgeInstalled = false
 
@@ -47,8 +50,23 @@ export function registerLaIframe(win: Window | null | undefined, ns: string): vo
   laFrames.set(win, ns)
 }
 
+// Reverse lookup for the delivery path: which frame, if any, is currently
+// showing this app. Both hosts (the panel and the mounted full page) register
+// here, so either one can receive.
+export function laFrameFor(ns: string): Window | null {
+  for (const [win, n] of laFrames) {
+    if (n === ns) return win
+  }
+  return null
+}
+
 export function unregisterLaIframe(win: Window | null | undefined): void {
-  if (win) laFrames.delete(win)
+  if (!win) return
+  const ns = laFrames.get(win)
+  laFrames.delete(win)
+  // The app is gone from the screen, so it must go from the mirror too: the
+  // model should not describe a canvas nobody has open.
+  if (ns) dropLaState(ns)
 }
 
 // ── IndexedDB ───────────────────────────────────────────────────────────────
@@ -141,6 +159,11 @@ function onLaMessage(ev: MessageEvent): void {
       break
     case 'migrated':
       laMarkMigrated(ns).catch(() => {})
+      break
+    case 'state':
+      // One-way: the app describes itself, the host relays it. Nothing is
+      // sent back, and the app gains no read access by pushing.
+      acceptLaState(ns, d as { digest?: unknown; summary?: unknown; image?: unknown })
       break
     case 'download':
       // A payload that isn't a Blob or is over the cap is dropped outright

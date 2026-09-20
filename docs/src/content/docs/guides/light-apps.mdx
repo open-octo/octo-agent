@@ -171,9 +171,57 @@ A sketchpad that claims a page of its own. Two files, no build step:
     ctx.lineTo(e.offsetX, e.offsetY)
     ctx.stroke()
   })
-  c.addEventListener('pointerup', () => { drawing = false })
+  c.addEventListener('pointerup', () => {
+    if (drawing) { drawing = false; strokes++; publish() }
+  })
 
-  document.getElementById('clear').onclick = () => ctx.clearRect(0, 0, c.width, c.height)
+  // ── Let the agent see this canvas ────────────────────────────────────────
+  //
+  // octo mirrors whatever an app publishes; the model reads it through the
+  // lightapp_state / view_lightapp tools. One way: publishing describes the app
+  // to the model, it grants the app no access to the conversation.
+  let strokes = 0
+  let publishTimer = 0
+  function publish() {
+    clearTimeout(publishTimer)
+    publishTimer = setTimeout(() => {
+      window.octo?.pushState({
+        digest: strokes
+          ? `A hand-drawn sketch, ${strokes} stroke(s).`
+          : 'An empty sketch canvas — nothing drawn yet.',
+        summary: { strokes },
+        image: c,            // a canvas is accepted directly
+      })
+    }, 400)
+  }
+  publish()
+
+  // ── Take what the agent sends ────────────────────────────────────────────
+  //
+  // The agent can hand this canvas an image (ask it to generate something from
+  // your sketch). Draw it in, then publish again so the agent can see the
+  // result of what it just sent.
+  window.octo?.onDelivery(({ blob, note }) => {
+    const img = new Image()
+    img.onload = () => {
+      // Fit inside the canvas, centred, without distorting the image.
+      const scale = Math.min(c.clientWidth / img.width, c.clientHeight / img.height, 1)
+      const w = img.width * scale
+      const h = img.height * scale
+      ctx.drawImage(img, (c.clientWidth - w) / 2, (c.clientHeight - h) / 2, w, h)
+      URL.revokeObjectURL(img.src)
+      strokes++
+      publish()
+      if (note) console.log('[octo]', note)
+    }
+    img.src = URL.createObjectURL(blob)
+  })
+
+  document.getElementById('clear').onclick = () => {
+    ctx.clearRect(0, 0, c.width, c.height)
+    strokes = 0
+    publish()
+  }
 
   // The plain <a download> idiom: the host turns it into a browser download or
   // the OS save dialog in the desktop app.
@@ -189,6 +237,59 @@ A sketchpad that claims a page of its own. Two files, no build step:
 Reload the Web UI and **Sketchpad** is in the left navigation, with its emoji for
 an icon. Change `mount` to `"panel"` and it moves into the right-hand panel's
 switcher instead, beside session artifacts and the diff review.
+
+The `window.octo.pushState` call is what lets the agent see the drawing: ask it
+"what did I just draw?" and it reads the digest, then looks at the image. See
+[Let the agent see inside](#let-the-agent-see-inside) below.
+
+## Let the agent see inside
+
+A Light App is sealed: it runs on its own origin behind a policy that closes
+every network exit, so by default the agent has no idea it is open, let alone
+what is in it.
+
+An app can publish a snapshot of itself:
+
+```js
+window.octo.pushState({
+  digest: 'A hand-drawn sketch, 3 strokes.',   // one line, written for the model
+  summary: { strokes: 3 },                     // optional structured extras
+  image: canvasOrBlob,                         // optional screenshot
+})
+```
+
+The agent then has two tools: `lightapp_state` reads every open app's digest
+(cheap, so it can check whenever you mention "my sketch"), and `view_lightapp`
+pulls the screenshot into the conversation as a real image it can look at.
+
+**Publishing gives your app nothing** — no conversation, no API, no
+credentials. Call it whenever your state changes; octo coalesces pushes, so a
+canvas firing on every stroke is fine.
+
+### Taking what the agent sends
+
+The agent can hand your app a file — ask it to generate a picture from your
+sketch and it can put the result straight onto the canvas. Register a handler
+to accept one:
+
+```js
+window.octo.onDelivery(({ blob, name, note }) => {
+  // draw it in, display it, or ignore it — it is your app
+})
+```
+
+Your app has to be **publishing** to receive anything: octo finds the delivery's
+target through the same snapshots `pushState` sends, so an app that only
+registers a handler and never publishes looks closed to the agent. Publish once
+on load and you are reachable.
+
+This is the only inbound direction, and it carries a file and a note, nothing
+else: no conversation, no instructions to execute. An app that registers no
+handler simply never receives anything, and the agent finds out the same way it
+finds out everything else about your app — by reading what you publish next.
+
+The snapshot is held in memory only and disappears when octo stops or the app
+closes.
 
 ## Technical constraints
 
