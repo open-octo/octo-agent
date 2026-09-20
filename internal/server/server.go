@@ -956,6 +956,7 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/profile/soul", s.handleGetProfileSoul)
 	s.api("GET /api/profile/user", s.handleGetProfileUser)
 	s.api("GET /api/memories", s.handleGetMemories)
+	s.api("GET /api/landing", s.handleGetLanding)
 	s.api("GET /api/themes", s.handleListThemes)
 	s.api("GET /api/themes/{id}/{file}", s.handleGetThemeFile)
 	s.api("GET /api/light-apps", s.handleListLightApps)

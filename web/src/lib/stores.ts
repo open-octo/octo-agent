@@ -203,6 +203,27 @@ export const chatHeaderSnippet = writable<Snippet | null>(null)
 // the only way in is opening an app, which fills the strip on the way.
 export const lightappOpen = writable<string[]>([])
 export const lightappSel = writable<string>('')
+// The user's landing-page overrides (~/.octo/landing.json), empty until loaded
+// and empty for almost everyone — see loadLanding.
+export const landing = writable<import('./api').LandingConfig>({})
+
+// Read once per page load. The landing page is where a session starts, so this
+// has to be in hand before the first paint of it; it is one small request and
+// the answer cannot change without a file edit.
+let landingRequest: Promise<void> | null = null
+export function loadLanding(): Promise<void> {
+  if (landingRequest) return landingRequest
+  landingRequest = api
+    .getLanding()
+    .then((cfg) => {
+      landing.set(cfg ?? {})
+    })
+    .catch(() => {
+      // The built-in cards are the fallback, and they are already on screen.
+    })
+  return landingRequest
+}
+
 export const lightapps = writable<import('./api').LightApp[]>([])
 
 // The installed list is read in two places before the Light Apps panel is ever

@@ -65,6 +65,7 @@
     chatGoal,
     nativeShell,
     chatHeaderSnippet,
+  landing,
   } from '../lib/stores'
   import { ws, wsState, wsReconnect } from '../lib/ws'
   import * as api from '../lib/api'
@@ -1827,6 +1828,34 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     { icon: 'ant-design:form-outlined',   key: 'write'    },
   ]
 
+  // ~/.octo/landing.json replaces the four above wholesale. Not merged: the
+  // point is that someone's own four are not these four plus theirs, and a
+  // half-replaced set would be nobody's. The built-ins stay translated; an
+  // override is shown exactly as written, in whatever language it was written.
+  const landingCards = $derived.by(() => {
+    const custom = $landing.cards
+    if (custom && custom.length > 0) {
+      return custom.map((c, i) => ({
+        key: `custom-${i}`,
+        icon: c.icon ?? '',
+        title: c.title,
+        prompt: c.prompt,
+      }))
+    }
+    return starters.map(s => ({
+      key: s.key,
+      icon: s.icon,
+      title: $t(`chat.starter_${s.key}_title`),
+      prompt: $t(`chat.starter_${s.key}_prompt`),
+    }))
+  })
+  const landingTitle = $derived($landing.title || $t('chat.landing_title'))
+  const landingSub = $derived($landing.subtitle || $t('chat.landing_sub'))
+  // An iconify name is the only shape that needs the custom element; anything
+  // else (an emoji, a letter) is drawn as text, the same split the sidebar
+  // makes for mounted Light Apps.
+  const isIconName = (icon: string) => icon.includes(':')
+
   // ── export mode helpers ────────────────────────────────────────────────────
 
   function enterExportMode() {
@@ -2694,20 +2723,24 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           {#if !id}
             <div class="landing">
               <span class="landing-mark"><OctoLogo size={44} /></span>
-              <h1 class="landing-title">{$t('chat.landing_title')}</h1>
-              <p class="landing-sub">{$t('chat.landing_sub')}</p>
-              <div class="landing-cards">
-                {#each starters as card (card.key)}
+              <h1 class="landing-title">{landingTitle}</h1>
+              <p class="landing-sub">{landingSub}</p>
+              <div class="landing-cards" style="--landing-cols: {Math.min(landingCards.length, 4)}">
+                {#each landingCards as card (card.key)}
                   <button
                     type="button"
                     class="landing-card"
-                    onclick={() => composer?.setText($t(`chat.starter_${card.key}_prompt`))}
-                    title={$t(`chat.starter_${card.key}_prompt`)}
+                    onclick={() => composer?.setText(card.prompt)}
+                    title={card.prompt}
                   >
                     <span class="landing-card-icon" aria-hidden="true">
-                      <iconify-icon icon={card.icon} width="17"></iconify-icon>
+                      {#if isIconName(card.icon)}
+                        <iconify-icon icon={card.icon} width="17"></iconify-icon>
+                      {:else if card.icon}
+                        <span class="landing-card-emoji">{card.icon}</span>
+                      {/if}
                     </span>
-                    <span class="landing-card-title">{$t(`chat.starter_${card.key}_title`)}</span>
+                    <span class="landing-card-title">{card.title}</span>
                   </button>
                 {/each}
               </div>
@@ -3490,9 +3523,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 /* Starter cards: a grid of ways in, so the blank page suggests what Octo is
    for instead of showing an empty column above the composer. */
 .landing-cards {
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* Column count follows how many cards there are, so two custom starters sit
+     side by side instead of leaving two holes. Past four they wrap. */
+  display: grid; grid-template-columns: repeat(var(--landing-cols, 4), minmax(0, 1fr));
   gap: 10px; width: 100%; margin-top: 14px;
 }
+.landing-card-emoji { font-size: 17px; line-height: 1; }
 .landing-card {
   display: flex; flex-direction: column; align-items: flex-start; gap: 12px;
   min-height: 92px; padding: 13px 14px;

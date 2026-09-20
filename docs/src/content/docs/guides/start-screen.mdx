@@ -1,0 +1,70 @@
+---
+title: Change the start screen
+description: Replace the four starter cards on octo's new-session page with your own.
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="New" variant="tip" /><br /><br />
+
+The page you see when you start a session offers four ways in: understand a project, build a
+feature, research a topic, write something. Two of those four are aimed at code, and octo is not
+only for code — whoever is using it knows better than we do what their four things are. A
+lawyer's are not a writer's.
+
+`~/.octo/landing.json` replaces them.
+
+```json
+{
+  "title": "今天动哪块？",
+  "subtitle": "Pick one, or just start typing.",
+  "cards": [
+    {
+      "icon": "🔍",
+      "title": "Take apart a post",
+      "prompt": "Break down this post for me: the hook, the structure, why it worked."
+    },
+    {
+      "icon": "ant-design:file-text-outlined",
+      "title": "Review a contract",
+      "prompt": "Read this contract and tell me what I should be worried about."
+    }
+  ]
+}
+```
+
+Reload the Web UI and your cards are there. Delete the file and the built-in four come back.
+
+| Field | Notes |
+| --- | --- |
+| `title` | The heading. Omit it to keep the built-in one, which is translated. |
+| `subtitle` | The line under it. Same. |
+| `cards` | Replaces all four. Up to 8; the grid follows the count and wraps past four. |
+| `cards[].title` | The card's label. Required. |
+| `cards[].prompt` | What clicking it puts in the composer. Required. |
+| `cards[].icon` | An [iconify](https://icon-sets.iconify.design/) name like `ant-design:tool-outlined`, or an emoji — anything without a `:` is drawn as text. Optional. |
+
+## What clicking a card does
+
+It **loads the prompt into the composer without sending it**. That is deliberate: the working
+directory and model pickers below still apply, and you can edit the text before you send. A
+starter is a starting point, not a shortcut past the controls.
+
+So a good prompt reads like the first thing you would have typed — including the parts you would
+have had to say anyway ("ask me about the audience first", "check the approach with me before
+implementing").
+
+## Rules worth knowing
+
+- **It replaces, it does not merge.** Your four are not the built-in four plus yours. A
+  half-replaced set would be nobody's.
+- **Whatever you write is what shows.** The built-in cards are translated through octo's i18n;
+  yours are yours, in the language you wrote them in.
+- **A broken file costs you the overrides, not the page.** Malformed JSON, a card with no prompt,
+  a title of 400 characters — each is dropped or trimmed on its own, and you land on the built-in
+  page rather than an error. It is a file you hand-edit; a stray comma is a likely state.
+
+## Also worth knowing
+
+This changes the *content*. The *look* of the same page — background, accent, typeface — comes
+from your theme, so the two compose: see [Write a theme](/docs/guides/themes/).

@@ -229,6 +229,12 @@ To let an app accept what you send it, have it register a handler:
 window.octo.onDelivery(({ blob, name, note }) => { /* draw it in, show it, ignore it */ })
 ```
 
+## The start screen
+
+The four cards on the new-session page come from `~/.octo/landing.json` when it exists, and from octo's built-in set when it does not. Each card is `{icon, title, prompt}`; clicking one loads its prompt into the composer without sending, so a good prompt reads like the first thing the user would have typed. `icon` is an iconify name (`ant-design:tool-outlined`) or an emoji.
+
+When the user wants different starting points — "make the start page about my work" — write that file. It replaces all the cards rather than adding to them, up to 8, and whatever language it is written in is what shows. Deleting it restores the built-ins.
+
 ## Themes
 
 The Web UI's palette is user-editable: a theme is `~/.octo/themes/<id>/` holding `manifest.json` and `theme.css`. When the user asks for one, read a theme octo ships — `~/.octo/themes/ocean`, `blossom` or `vogue` — and work from it: they carry the whole variable set, name themselves per locale, and comment the traps. Write both files with `write_file`; the theme shows up under Settings → Theme on the next page load.
