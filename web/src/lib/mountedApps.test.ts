@@ -51,17 +51,21 @@ describe('mounted Light Apps', () => {
 })
 
 describe('lightappURL', () => {
+  // Parsed rather than matched as a string: a prefix check would also accept
+  // sketch.apps.localhost.example.com, and the host is the whole point of the
+  // app having an origin of its own.
   it('addresses the app on its own origin, carrying the resolved theme', () => {
     document.documentElement.setAttribute('data-theme', 'dark')
-    const url = lightappURL('sketch', 3)
+    const url = new URL(lightappURL('sketch', 3))
 
-    expect(url.startsWith('http://sketch.apps.localhost')).toBe(true)
-    expect(url).toContain('theme=dark')
-    expect(url).toContain('v=3')
+    expect(url.protocol).toBe('http:')
+    expect(url.hostname).toBe('sketch.apps.localhost')
+    expect(url.searchParams.get('theme')).toBe('dark')
+    expect(url.searchParams.get('v')).toBe('3')
   })
 
   it('reports light for any theme that is not dark', () => {
     document.documentElement.setAttribute('data-theme', 'light')
-    expect(lightappURL('sketch')).toContain('theme=light')
+    expect(new URL(lightappURL('sketch')).searchParams.get('theme')).toBe('light')
   })
 })
