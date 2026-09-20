@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { deliverToFrame } from './laDelivery'
 import { laFrameFor } from './laStorage'
+import { blobResponse, errorResponse } from '../test/fetchStub'
 
 vi.mock('./laStorage', () => ({ laFrameFor: vi.fn() }))
 
@@ -8,21 +9,6 @@ type Posted = { data: Record<string, unknown>; origin: string }
 
 let posted: Posted[]
 let fetched: string[]
-
-// Explicit stand-ins rather than `new Response(blob)`: only two members are
-// read here, and the real Response differs enough between Node majors that
-// building one made the suite pass locally and fail on CI.
-function okResponse(body: Blob): Response {
-  return { ok: true, status: 200, blob: () => Promise.resolve(body) } as unknown as Response
-}
-
-function errorResponse(status: number): Response {
-  return {
-    ok: false,
-    status,
-    blob: () => Promise.reject(new Error('no body')),
-  } as unknown as Response
-}
 
 function fakeFrame(): Window {
   return {
@@ -38,7 +24,7 @@ beforeEach(() => {
   vi.mocked(laFrameFor).mockReset()
   vi.stubGlobal('fetch', (url: string) => {
     fetched.push(url)
-    return Promise.resolve(okResponse(new Blob(['PNGBYTES'])))
+    return Promise.resolve(blobResponse('PNGBYTES'))
   })
 })
 
