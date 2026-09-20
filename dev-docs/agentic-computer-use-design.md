@@ -167,11 +167,12 @@ tools:
     enabled: "on"   # "off" (default) | "on"
 ```
 
-Surfaced to the user as a toggle in **Settings → Experimental**, visible only
-on the **macOS or Windows desktop app** (the substrate's platforms; on macOS
-the desktop shell is also the only one that can hold the Screen Recording /
-Accessibility grants). The tab is gated on `/api/version`'s `native` flag
-plus its `os` field (`runtime.GOOS`); the write goes through
+Surfaced to the user as a toggle in **Settings → Experimental**, visible
+whenever the **server** runs on macOS or Windows (the substrate's platforms) —
+in the desktop app and the web UI alike. On macOS the Screen Recording /
+Accessibility grants go to the responsible process: the desktop app, or the
+hosting terminal when running under `octo serve`. The tab is gated on
+`/api/version`'s `os` field (`runtime.GOOS`); the write goes through
 `PUT /api/config/computer`, which additionally refuses servers on any other
 OS so a remote Linux peer can never persist a no-op switch. `GET /api/config`
 reports the raw value as `computer_enabled`.
