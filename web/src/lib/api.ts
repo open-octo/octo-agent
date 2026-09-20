@@ -890,10 +890,10 @@ export interface LandingConfig {
   apps?: string[]
 }
 
-// Always resolves: a missing or malformed ~/.octo/landing.json answers with an
-// empty config, and the UI keeps its built-in cards.
+// Always resolves: a missing or malformed ~/.octo/landing/config.json answers
+// with an empty config, and the UI keeps its built-in cards.
 export async function getLanding(): Promise<LandingConfig> {
-  const d = await request<{ landing: LandingConfig; path: string }>('/api/landing', { cache: 'no-store' })
+  const d = await request<{ landing: LandingConfig; dir: string }>('/api/landing', { cache: 'no-store' })
   return d.landing ?? {}
 }
 

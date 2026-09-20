@@ -49,9 +49,17 @@ import { Badge } from '@astrojs/starlight/components';
 | `cards` | 整个替换四张卡。最多 8 张；列数跟着数量走，超过四张会换行。 |
 | `cards[].title` | 卡片上的标题。必填。 |
 | `cards[].prompt` | 点它之后填进输入框的内容。必填。 |
-| `cards[].icon` | [iconify](https://icon-sets.iconify.design/) 图标名（如 `ant-design:tool-outlined`），或者一个 emoji——不含 `:` 的一律当文字画。可选。 |
+| `cards[].icon` | 一个 emoji，或者图标名（如 `ant-design:tool-outlined`）——不含 `:` 的一律当文字画。可选，**建议用 emoji**，原因见下。 |
 | `hero` | 填章鱼标记上方那块空白。见下。 |
 | `apps` | 轻应用的 slug，以快捷入口的形式显示在卡片下方。最多 8 个。没装的 slug 会被跳过。 |
+
+### 关于图标
+
+**emoji 一定能用。** 不含 `:` 的一律当文字画，所以 `🔍`、`⚖️`、甚至一个字母都能显示。
+
+含 `:` 的当图标画——但 octo 的图标是离线打包的，从不请求 Iconify 的接口，
+所以只有 octo 自己用到的那些图标才存在。写一个它没带的名字，结果是一块空白，
+而且没有任何地方会告诉你原因。除非你抄的是 octo 界面里已经见过的名字，否则用 emoji。
 
 ## hero 区
 

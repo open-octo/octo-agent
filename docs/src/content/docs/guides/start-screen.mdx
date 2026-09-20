@@ -50,9 +50,19 @@ Reload the Web UI and it is there. Delete the directory and the built-in page co
 | `cards` | Replaces all four. Up to 8; the grid follows the count and wraps past four. |
 | `cards[].title` | The card's label. Required. |
 | `cards[].prompt` | What clicking it puts in the composer. Required. |
-| `cards[].icon` | An [iconify](https://icon-sets.iconify.design/) name like `ant-design:tool-outlined`, or an emoji — anything without a `:` is drawn as text. Optional. |
+| `cards[].icon` | An emoji, or an icon name like `ant-design:tool-outlined` — anything without a `:` is drawn as text. Optional; **prefer an emoji**, see below. |
 | `hero` | Fills the space above the mark. See below. |
 | `apps` | Light App slugs, shown as shortcut chips under the cards. Up to 8. A slug you do not have installed is skipped. |
+
+### About icons
+
+**An emoji always works.** Anything without a `:` is drawn as text, so `🔍`, `⚖️` or a
+single letter all render.
+
+A name with a `:` is drawn as an icon — but octo ships its icons offline and never calls
+the Iconify API, so only the icons octo itself already uses are available. A name it does
+not carry renders as an empty space, with nothing to tell you why. Unless you are copying
+a name you have already seen in octo's own UI, use an emoji.
 
 ## The hero
 

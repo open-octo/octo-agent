@@ -231,9 +231,9 @@ window.octo.onDelivery(({ blob, name, note }) => { /* draw it in, show it, ignor
 
 ## The start screen
 
-The new-session page comes from `~/.octo/landing/config.json` when it exists, and from octo's built-in set when it does not. Each card is `{icon, title, prompt}`; clicking one loads its prompt into the composer without sending, so a good prompt reads like the first thing the user would have typed. `icon` is an iconify name (`ant-design:tool-outlined`) or an emoji.
+The new-session page comes from `~/.octo/landing/config.json` when it exists, and from octo's built-in set when it does not. Each card is `{icon, title, prompt}`; clicking one loads its prompt into the composer without sending, so a good prompt reads like the first thing the user would have typed. `icon` is an emoji, or an icon name like `ant-design:tool-outlined` — prefer an emoji, since octo carries its icons offline and a name it does not already bundle renders blank.
 
-`hero` fills the space above the mark, from either `{"image": "file.webp"}` (a file beside the config — animated GIF and WebP work) or `{"image"` omitted and `"app": "<slug>"}` (one Light App, embedded). `apps` is a list of Light App slugs shown as shortcuts under the cards.
+`hero` fills the space above the mark. It takes one source, not both: `"hero": {"image": "file.webp"}` for a file beside the config (animated GIF and WebP work), or `"hero": {"app": "<slug>"}` for one Light App embedded as a frame. An optional `"height"` is in pixels. `apps` is a list of Light App slugs shown as shortcuts under the cards.
 
 When the user wants different starting points — "make the start page about my work", "put something in that empty space" — write that config, and put any image beside it in the same directory. It replaces all the cards rather than adding to them, up to 8, and whatever language it is written in is what shows. Deleting the directory restores the built-ins.
 

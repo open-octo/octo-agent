@@ -1833,7 +1833,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     { icon: 'ant-design:form-outlined',   key: 'write'    },
   ]
 
-  // ~/.octo/landing.json replaces the four above wholesale. Not merged: the
+  // ~/.octo/landing/config.json replaces the four above wholesale. Not merged: the
   // point is that someone's own four are not these four plus theirs, and a
   // half-replaced set would be nobody's. The built-ins stay translated; an
   // override is shown exactly as written, in whatever language it was written.
@@ -1855,14 +1855,23 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     }))
   })
   // The hero fills the space above the mark. An app is only offered where a
-  // Light App can actually load — same locality rule as a mounted app, so a
-  // remote browser gets the plain landing page rather than a dead frame.
+  // Light App can actually load, and only when it is actually installed —
+  // otherwise a stale slug would leave a 404 frame on the first screen of
+  // every new session.
   const landingHero = $derived.by(() => {
     const hero = $landing.hero
     if (!hero) return null
     if (hero.image) return { kind: 'image' as const, src: `/api/landing/assets/${encodeURIComponent(hero.image)}`, height: hero.height ?? 180 }
-    if (hero.app && $lightappsAvailable) return { kind: 'app' as const, slug: hero.app, height: hero.height ?? 180 }
-    return null
+    if (!hero.app || !$lightappsAvailable) return null
+    const app = $lightapps.find(a => a.slug === hero.app)
+    return app ? { kind: 'app' as const, slug: app.slug, height: hero.height ?? 180 } : null
+  })
+  // A config can outlive the file it points at. A broken-image glyph in a
+  // bordered box is worse than no hero at all.
+  let heroImageBroken = $state(false)
+  $effect(() => {
+    void (landingHero?.kind === 'image' ? landingHero.src : '')
+    heroImageBroken = false
   })
   const heroSrc = $derived.by(() => {
     void $themeRev
@@ -2761,10 +2770,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                what actually creates the session (ensureActiveSession). -->
           {#if !id}
             <div class="landing">
-              {#if landingHero}
+              {#if landingHero && !(landingHero.kind === 'image' && heroImageBroken)}
                 <div class="landing-hero" style="height: {landingHero.height}px">
                   {#if landingHero.kind === 'image'}
-                    <img src={landingHero.src} alt="" />
+                    <img src={landingHero.src} alt="" onerror={() => (heroImageBroken = true)} />
                   {:else}
                     {#key heroSrc}
                       <iframe

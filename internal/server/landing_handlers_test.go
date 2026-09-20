@@ -40,7 +40,7 @@ func getLanding(t *testing.T, srv *Server) landingConfig {
 	}
 	var out struct {
 		Landing landingConfig
-		Path    string
+		Dir     string
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
@@ -230,7 +230,7 @@ func TestLanding_HeroHeightClamped(t *testing.T) {
 		{1, minHeroHeight},
 		{-40, minHeroHeight},
 	} {
-		writeLanding(t, home, `{"hero": {"image": "h.png", "height": `+itoa(tc.given)+`}}`)
+		writeLanding(t, home, `{"hero": {"image": "h.png", "height": `+strconv.Itoa(tc.given)+`}}`)
 		srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 		got := getLanding(t, srv)
 		if got.Hero == nil || got.Hero.Height != tc.want {
@@ -282,4 +282,55 @@ func TestLandingAsset_Serves(t *testing.T) {
 	}
 }
 
-func itoa(n int) string { return strconv.Itoa(n) }
+// TestLanding_UnreadableConfig: the config is hand-placed, so it can be the
+// wrong kind of thing entirely, or far too big to be a landing page. Neither
+// may cost the user the page itself.
+func TestLanding_UnreadableConfig(t *testing.T) {
+	home := themeHome(t)
+	dir := filepath.Join(home, ".octo", "landing")
+	if err := os.MkdirAll(filepath.Join(dir, "config.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	if got := getLanding(t, srv); len(got.Cards) != 0 || got.Title != "" {
+		t.Fatalf("a directory named config.json overrode something: %+v", got)
+	}
+
+	if err := os.RemoveAll(filepath.Join(dir, "config.json")); err != nil {
+		t.Fatal(err)
+	}
+	writeLanding(t, home, `{"title": "`+strings.Repeat("x", maxLandingFileSize)+`"}`)
+	srv = mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	if got := getLanding(t, srv); got.Title != "" {
+		t.Fatalf("an oversized config was read anyway: %q", got.Title)
+	}
+}
+
+// TestLandingAsset_ExtensionCase: the whitelist lower-cases before matching, so
+// a file named the way a camera names it still serves.
+func TestLandingAsset_ExtensionCase(t *testing.T) {
+	home := themeHome(t)
+	writeLandingAsset(t, home, "HERO.JPG", []byte("JPEGBYTES"))
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	w := doJSON(t, srv, "GET", "/api/landing/assets/HERO.JPG", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "image/jpeg" {
+		t.Errorf("served as %q", ct)
+	}
+}
+
+// TestLandingAsset_RefusesDotNames: "." and ".." never name an image, and the
+// refusal should not rest on the extension check alone.
+func TestLandingAsset_RefusesDotNames(t *testing.T) {
+	themeHome(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	for _, name := range []string{".", "..", "...", ".png"} {
+		if w := doJSON(t, srv, "GET", "/api/landing/assets/"+name, ""); w.Code == 200 {
+			t.Errorf("%q: expected a refusal, got 200", name)
+		}
+	}
+}
