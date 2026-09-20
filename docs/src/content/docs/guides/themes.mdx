@@ -1,0 +1,255 @@
+---
+title: Write a theme
+description: Ship your own colour palette for the octo Web UI — a folder, two files, no build step.
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="New" variant="tip" /><br /><br />
+
+The Web UI's colours are CSS custom properties. A theme is a folder with a manifest and one
+stylesheet that redefines the ones you care about. No build step, no JavaScript, no rebuild of
+octo — drop the folder in, reload the page, and your palette shows up in the theme picker.
+
+## Where themes live
+
+```
+~/.octo/themes/<id>/
+├── manifest.json
+└── theme.css
+```
+
+The folder name and the manifest's `id` must match, and `id` must be unique among the packs
+octo ships (`azure`, `blossom`, `celestia`, `vogue`).
+
+### manifest.json
+
+```json
+{
+  "id": "ocean",
+  "name": "Ocean",
+  "author": "your-handle",
+  "homepage": "https://github.com/your-handle/octo-theme-ocean",
+  "swatch": ["#0E7490", "#F0F7F9"]
+}
+```
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `id` | yes | Lowercase letters, digits and hyphens. Must equal the folder name. |
+| `name` | yes | What the theme picker shows. |
+| `author` | no | Shown in the picker's tooltip. |
+| `homepage` | no | Where people can find your repo. |
+| `swatch` | no | Accent and surface, in that order, for the chip the picker draws — your light palette. Hex only (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`): the value reaches the page as a CSS custom property, so anything else is dropped. Without it the picker draws a neutral chip. |
+
+## How theming works
+
+Two independent `<html>` attributes drive every colour:
+
+- `data-theme` — the resolved mode, `light` or `dark`.
+- `data-theme-pack` — the palette family. Absent for the default pack.
+
+So a theme is two blocks: one for light, one for dark.
+
+```css
+:root[data-theme-pack="ocean"] {
+  /* light values */
+}
+
+:root[data-theme-pack="ocean"][data-theme="dark"] {
+  /* dark values */
+}
+```
+
+### Always write both blocks
+
+This is the one mistake every first theme makes. The default dark palette lives in
+`:root[data-theme="dark"]`, which has the **same CSS specificity** as your
+`:root[data-theme-pack="ocean"]` block — and yours is injected afterwards, so it wins.
+
+If you only write the light block, your light colours leak into dark mode and the UI comes out
+unreadable. Whatever you redefine for light, redefine for dark too.
+
+## The variables
+
+63 custom properties make up the palette. You do not have to redefine all of them — anything
+you leave alone inherits the default pack — but the ones under *Text*, *Backgrounds*, *Borders*
+and *Primary* are what actually make a theme look like yours.
+
+### Primary
+
+The accent family. `--blue-6` is the main accent; the rest are its tints and shades.
+
+```
+--blue-1  --blue-2  --blue-5  --blue-6  --blue-7
+```
+
+### Text
+
+```
+--text  --text-secondary  --text-tertiary  --text-quaternary  --text-heading
+```
+
+### Backgrounds
+
+```
+--bg-layout  --bg-container  --bg-sidebar  --bg-table-header  --bg-zebra
+```
+
+`--bg-zebra` fills alternating rows of rendered markdown tables.
+
+### Borders
+
+```
+--border  --border-secondary  --border-table
+```
+
+### Semantic
+
+Status colours. Each family has a fill, a background wash, a border and a text colour.
+
+```
+--success  --success-bg  --success-border  --success-text
+--warning  --warning-bg  --warning-border  --warning-text
+--error    --error-bg    --error-border    --error-text    --error-dark
+--info-bg  --info-border --info-text
+```
+
+`--info-*` is worth a note: in the packs that ship with octo it belongs to the *accent* family,
+not the status family. If you tint your accent away from blue, tint these with it.
+
+### Interaction
+
+```
+--hover-neutral  --row-hover  --active-blue-bg  --focus-ring  --scrim
+```
+
+`--focus-ring` is an input's focus box-shadow; `--scrim` is the backdrop behind modals and the
+command palette.
+
+### The conversation surface
+
+```
+--chat-bg  --chat-bg-image
+```
+
+Both are **background-image layers**, not colours — `--chat-bg: #F5F5F7` will not work. Use a
+gradient:
+
+```css
+--chat-bg: linear-gradient(170deg, #F7FCFF 0%, #ECF7FF 58%, #F7F1FF 100%);
+```
+
+`--chat-bg-image` is an optional wallpaper drawn over that gradient. Point it at a URL your
+theme folder serves, or leave it `none`.
+
+### Text on an accent fill
+
+```
+--on-accent
+```
+
+**Set this in every theme.** It is the foreground colour for text and icons sitting on an accent
+fill — white by default, which only works if your accent is dark enough to carry it. The packs
+that ship with octo all had to override it: white reaches 2.6:1 over blossom's rose, 2.3:1 over
+celestia's sky blue, and 1.9:1 over vogue's champagne gold — all below the 4.5:1 that WCAG AA
+asks for body text. If your accent is light or mid-tone, pick a dark `--on-accent` instead.
+
+### Radius
+
+```
+--radius-pill  --radius-card  --radius-modal  --radius-sm  --radius-xs
+```
+
+Geometry is a cheap way to give a theme character — the packs that ship with octo use rounder
+radii for a soft palette and near-square ones for an editorial look.
+
+### Chrome surfaces
+
+```
+--sidebar-frost  --panel-frost  --titlebar-frost  --frost-blur
+```
+
+The sidebar, slide-in panels and title bar. They default to opaque and flat (`--frost-blur: 0px`);
+raise the blur and make the frost colours translucent for a glassy shell.
+
+### Everything else
+
+```
+--card-shadow        card elevation
+--terminal-bg  --terminal-text    command blocks — intentionally dark in BOTH modes
+--surface-info       plan cards, suggestions, subtle info backgrounds
+--control-track      segmented-control track
+--search-bg  --search-hover       the header's search pill
+--scrollbar-thumb  --placeholder
+--font-mono  --font-sans          font stacks
+--font-zoom          written by the font-size setting; do not set it
+```
+
+## A minimal theme
+
+```css
+/* ~/.octo/themes/ocean/theme.css */
+
+:root[data-theme-pack="ocean"] {
+  --blue-6: #0E7490;
+  --blue-5: #0891B2;
+  --blue-7: #155E75;
+
+  --text: #0F272E;
+  --text-secondary: #4A6C77;
+  --text-tertiary: #7E9BA4;
+
+  --bg-layout: #F0F7F9;
+  --bg-container: #FFFFFF;
+  --bg-sidebar: #F0F7F9;
+
+  --border: rgba(14,116,144,0.14);
+
+  --on-accent: #FFFFFF;
+  --chat-bg: linear-gradient(175deg, #F7FDFF 0%, #EDF7FA 100%);
+}
+
+:root[data-theme-pack="ocean"][data-theme="dark"] {
+  --blue-6: #22D3EE;
+  --blue-5: #67E8F9;
+  --blue-7: #0E7490;
+
+  --text: #E6F4F7;
+  --text-secondary: #9CB9C2;
+  --text-tertiary: #6B8892;
+
+  --bg-layout: #0B1A1F;
+  --bg-container: #10252B;
+  --bg-sidebar: #0B1A1F;
+
+  --border: rgba(34,211,238,0.16);
+
+  --on-accent: #06272E;
+  --chat-bg: linear-gradient(175deg, #0D1F25 0%, #0A171C 100%);
+}
+```
+
+## Try it
+
+1. Create the folder and the two files.
+2. Reload the Web UI.
+3. Open **Settings** and pick your theme in the **Theme** row.
+4. Switch the **Appearance** row between light and dark, and check both.
+
+The two rows are independent: *Theme* chooses the palette family, *Appearance* chooses light or
+dark within it. That is why every theme needs both blocks.
+
+Editing `theme.css` and reloading is the whole development loop. If your theme does not show up,
+check that the folder name matches `id` and that `manifest.json` parses.
+
+Deleting the folder is uninstalling: anyone still on that theme falls back to the default pack.
+
+## Checklist before you publish
+
+- Both blocks written — light and dark.
+- `swatch` set, so your theme is recognisable in the picker.
+- `--on-accent` passes 4.5:1 against your accent, in both modes.
+- `--chat-bg` is a gradient, not a colour.
+- Body text passes 4.5:1 against `--bg-container` and `--bg-layout`.
+- The theme survives a light/dark toggle without a reload.

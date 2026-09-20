@@ -28,6 +28,7 @@
   import McpView from './views/McpView.svelte'
   import ChannelsView from './views/ChannelsView.svelte'
   import LightAppsView from './views/LightAppsView.svelte'
+  import MountedApp from './components/MountedApp.svelte'
   import CommandPalette from './components/overlays/CommandPalette.svelte'
   import McpModal from './components/overlays/McpModal.svelte'
   import SettingsModal from './components/overlays/SettingsModal.svelte'
@@ -119,7 +120,11 @@
       createNewSession()
       return
     }
-    if (!VALID_VIEWS.includes(v)) return
+    // A mounted Light App is a view named `app:<slug>`, which no fixed list can
+    // enumerate — the set changes with ~/.octo/light-apps. The prefix is what
+    // makes that safe: it cannot collide with a built-in view name, and the
+    // frame itself refuses a slug that is not installed.
+    if (!VALID_VIEWS.includes(v) && !v.startsWith('app:')) return
     if (get(view) !== v) view.set(v)
     if (v === 'chat' && rest[0]) {
       const sid = decodeURIComponent(rest[0])
@@ -614,6 +619,10 @@
         <ChannelsView />
       {:else if $view === 'lightapps'}
         <LightAppsView />
+      {:else if $view.startsWith('app:')}
+        <!-- A Light App mounted as its own page. The `app:` prefix keeps a
+             slug from ever colliding with a built-in view name. -->
+        <MountedApp slug={$view.slice(4)} />
       {/if}
     </main>
     {#if $panelContent}

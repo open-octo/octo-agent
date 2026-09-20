@@ -27,11 +27,28 @@ type lightAppManifest struct {
 	Description string `json:"description"`
 	Icon        string `json:"icon,omitempty"`
 	CreatedAt   string `json:"created_at"`
+	// Mount is where the app claims a permanent place in the UI: "view" (its
+	// own entry in the left navigation) or "panel" (a slot in the right-hand
+	// panel). Empty — the default, and what every app written before this
+	// field does — means the Light Apps page only.
+	Mount string `json:"mount,omitempty"`
 	// UpdatedAt is index.html's mtime, stamped at read time so the web UI can
 	// tell that an app it has open was rewritten on disk. Derived, never
 	// persisted: the writers leave it empty and omitempty keeps it out of
 	// manifest.json.
 	UpdatedAt string `json:"updated_at,omitempty"`
+}
+
+// normalizeMount drops a mount value the UI has no slot for, so a typo (or a
+// field written by a future version) degrades to the default placement rather
+// than failing the whole listing.
+func normalizeMount(mount string) string {
+	switch mount {
+	case "view", "panel":
+		return mount
+	default:
+		return ""
+	}
 }
 
 // stampLightApp fills m.UpdatedAt from the app's index.html. A missing file
@@ -76,6 +93,7 @@ func (s *Server) handleListLightApps(w http.ResponseWriter, r *http.Request) {
 		if m.Slug == "" {
 			m.Slug = slug
 		}
+		m.Mount = normalizeMount(m.Mount)
 		stampLightApp(&m, filepath.Join(dir, slug, "index.html"))
 		apps = append(apps, m)
 	}
@@ -112,6 +130,8 @@ func (s *Server) handleGetLightApp(w http.ResponseWriter, r *http.Request) {
 	if manifest.Slug == "" {
 		manifest.Slug = slug
 	}
+
+	manifest.Mount = normalizeMount(manifest.Mount)
 
 	htmlData, err := os.ReadFile(htmlPath)
 	if err != nil {

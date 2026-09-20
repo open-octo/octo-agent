@@ -136,8 +136,9 @@ export const artifactView = writable<ArtifactView>('preview')
 export const artifactModalOpen = writable(false)
 
 // Artifacts panel sidebar mode. null = closed, 'session' = session artifacts,
-// 'lightapps' = Light Apps list + rendering, 'diff' = git diff review.
-export type PanelContent = 'session' | 'lightapps' | 'diff'
+// 'lightapps' = Light Apps list + rendering, 'diff' = git diff review,
+// `app:<slug>` = a Light App that claimed a panel slot in its manifest.
+export type PanelContent = 'session' | 'lightapps' | 'diff' | `app:${string}`
 export const panelContent = writable<PanelContent | null>(null)
 
 // The two modes the panel's own switcher offers, and the one it comes back to.
@@ -203,6 +204,53 @@ export const chatHeaderSnippet = writable<Snippet | null>(null)
 export const lightappOpen = writable<string[]>([])
 export const lightappSel = writable<string>('')
 export const lightapps = writable<import('./api').LightApp[]>([])
+
+// The installed list is read in two places before the Light Apps panel is ever
+// opened: the sidebar needs it at boot to know which apps claim a mount. The
+// in-flight promise is shared so the callers cost one request between them.
+let lightappsRequest: Promise<void> | null = null
+export function loadLightApps(): Promise<void> {
+  if (lightappsRequest) return lightappsRequest
+  lightappsRequest = api
+    .listLightApps()
+    .then((list) => {
+      lightapps.set(list)
+    })
+    .catch(() => {
+      // Both callers degrade to showing nothing, which is also the answer when
+      // the user simply has no Light Apps.
+    })
+  return lightappsRequest
+}
+
+// A Light App renders from <slug>.apps.localhost, which only resolves on the
+// machine running octo serve — and which the origin's frame-ancestors policy
+// cannot name when the UI itself is on an IPv6 literal such as
+// http://[::1]:8088 (CSP's host-source grammar has no bracket form). The Light
+// Apps panel already gated itself on both halves; mounted entries share the
+// judgement, so a remote browser is shown no entry it could not open.
+const hostIsIPv6 = typeof location !== 'undefined' && location.hostname.includes(':')
+export const lightappsAvailable = derived(localAccess, ($local) => $local && !hostIsIPv6)
+
+// Apps claiming a permanent place in the UI, empty wherever they could not
+// render. `mount` is already normalised server-side, so these two cover it.
+export const mountedViews = derived(
+  [lightapps, lightappsAvailable],
+  ([$apps, $ok]) => ($ok ? $apps.filter((a) => a.mount === 'view') : []),
+)
+export const mountedPanels = derived(
+  [lightapps, lightappsAvailable],
+  ([$apps, $ok]) => ($ok ? $apps.filter((a) => a.mount === 'panel') : []),
+)
+
+// The URL a Light App frame loads, mounted or not: its own origin, on the port
+// this page is already talking to, with the resolved theme so the app can match
+// the UI. `gen` busts the frame's cache when the panel asks for a reload.
+export function lightappURL(slug: string, gen: number = 0): string {
+  const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
+  const port = location.port ? `:${location.port}` : ''
+  return `http://${slug}.apps.localhost${port}/?theme=${theme}&v=${gen}`
+}
 export const lightappHTML = writable<Record<string, string>>({})
 // updated_at of the copy in lightappHTML, per slug. The panel's change poll
 // compares it with the list's fresh stamp to tell an open app was rewritten.

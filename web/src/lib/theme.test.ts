@@ -1,7 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { getPack, setPack, PACKS } from './theme'
+import { getPack, setPack, PACKS, packs, loadUserPacks } from './theme'
+import { listThemes } from './api'
+import { get } from 'svelte/store'
+
+vi.mock('./api', () => ({ listThemes: vi.fn() }))
 import { en, zh } from './i18n'
 
 // jsdom exposes no localStorage under Node 26 (see unread.test.ts), and the
@@ -163,4 +167,96 @@ describe('pack accent contrast', () => {
       expect(contrast(dark['--blue-6'], fg)).toBeGreaterThanOrEqual(4.5)
     })
   }
+})
+
+describe('loadUserPacks', () => {
+  // The pack list and the set of known ids are module state, so each case
+  // starts by loading an empty set: that is also the path a user who deleted
+  // their themes takes, and it must leave the built-ins standing.
+  beforeEach(async () => {
+    vi.mocked(listThemes).mockReset()
+    vi.mocked(listThemes).mockResolvedValue([])
+    await loadUserPacks()
+    for (const el of document.querySelectorAll('link[data-octo-theme]')) el.remove()
+    localStorage.clear()
+    document.documentElement.removeAttribute('data-theme-pack')
+  })
+
+  it('links a user theme and lets its id pass normalization', async () => {
+    vi.mocked(listThemes).mockResolvedValue([{ id: 'ocean', name: 'Ocean' }])
+    localStorage.setItem(KEY, 'ocean')
+
+    // Before the themes are known the id cannot be honoured, but the stored
+    // choice must survive so it can be applied once they are.
+    expect(getPack()).toBe('azure')
+    expect(localStorage.getItem(KEY)).toBe('ocean')
+
+    await loadUserPacks()
+
+    expect(getPack()).toBe('ocean')
+    expect(document.documentElement.getAttribute('data-theme-pack')).toBe('ocean')
+    const link = document.querySelector('link[data-octo-theme="ocean"]')
+    expect(link?.getAttribute('href')).toBe('/api/themes/ocean/theme.css')
+  })
+
+  it('adds user themes to the picker list after the built-ins', async () => {
+    vi.mocked(listThemes).mockResolvedValue([
+      { id: 'ocean', name: 'Ocean', author: 'someone' },
+    ])
+    await loadUserPacks()
+
+    const list = get(packs)
+    expect(list.length).toBe(PACKS.length + 1)
+    const last = list[list.length - 1]
+    expect(last.id).toBe('ocean')
+    expect(last.label).toBe('Ocean')
+    expect(last.author).toBe('someone')
+    // A built-in names itself through i18n; a user theme never does.
+    expect(last.labelKey).toBeUndefined()
+  })
+
+  it('falls back to a neutral swatch when the manifest has none', async () => {
+    vi.mocked(listThemes).mockResolvedValue([{ id: 'ocean', name: 'Ocean' }])
+    await loadUserPacks()
+
+    const ocean = get(packs).find((p) => p.id === 'ocean')!
+    expect(ocean.swatch[0]).toBe('var(--text-tertiary)')
+    expect(ocean.swatch[1]).toBe('var(--bg-container)')
+  })
+
+  it('keeps a manifest swatch when it is a pair', async () => {
+    vi.mocked(listThemes).mockResolvedValue([
+      { id: 'ocean', name: 'Ocean', swatch: ['#0E7490', '#F0F7F9'] },
+    ])
+    await loadUserPacks()
+
+    const ocean = get(packs).find((p) => p.id === 'ocean')!
+    expect(ocean.swatch).toEqual(['#0E7490', '#F0F7F9'])
+  })
+
+  it('ignores a user theme that reuses a built-in id', async () => {
+    vi.mocked(listThemes).mockResolvedValue([{ id: 'azure', name: 'Not azure' }])
+    await loadUserPacks()
+
+    expect(get(packs).length).toBe(PACKS.length)
+    expect(document.querySelector('link[data-octo-theme="azure"]')).toBeNull()
+  })
+
+  it('leaves the app on the built-in packs when the request fails', async () => {
+    vi.mocked(listThemes).mockRejectedValue(new Error('offline'))
+    localStorage.setItem(KEY, 'ocean')
+
+    await expect(loadUserPacks()).resolves.toBeUndefined()
+
+    expect(get(packs).length).toBe(PACKS.length)
+    expect(getPack()).toBe('azure')
+  })
+
+  it('links each stylesheet once across repeated loads', async () => {
+    vi.mocked(listThemes).mockResolvedValue([{ id: 'ocean', name: 'Ocean' }])
+    await loadUserPacks()
+    await loadUserPacks()
+
+    expect(document.querySelectorAll('link[data-octo-theme="ocean"]').length).toBe(1)
+  })
 })

@@ -2,7 +2,7 @@ import './app.css'
 import App from './App.svelte'
 import { mount } from 'svelte'
 import { initIcons } from './lib/icons'
-import { initTheme } from './lib/theme'
+import { initTheme, loadUserPacks } from './lib/theme'
 import { initFramelessDrag } from './lib/framelessDrag'
 import { installArtifactThemeRefresh } from './lib/artifacts'
 import { applyTitlebarLift } from './lib/nativeWindow'
@@ -14,6 +14,12 @@ initIcons()
 
 // Apply the persisted theme before first paint so there's no light-mode flash.
 initTheme()
+
+// Discover the user's own themes (~/.octo/themes) in the background. A stored
+// id belonging to one of them cannot be honoured before its stylesheet exists,
+// so loadUserPacks re-applies the choice once it has linked them; a user on a
+// built-in pack never notices this ran.
+void loadUserPacks()
 
 // Desktop shell on macOS: pin the titlebar rows' axis to the traffic lights
 // before first paint — the inset and padding would otherwise wait on
