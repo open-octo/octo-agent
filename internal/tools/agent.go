@@ -54,11 +54,14 @@ func profileNames(store *agentprofile.Store) string {
 //     conversation context and can't see this conversation.
 //   - subagent_type: agent type (explore, general, code-review, or a
 //     user-defined agent from ~/.octo/agents). Required.
-//   - run_in_background: when true the agent runs async and you are notified
-//     on completion. When false (default) it blocks and returns the result.
 //   - model: optional model override ("lite" resolves to the endpoint's lite
 //     model, falling back to the parent's model when none is configured)
 //   - tools: optional tool-name allowlist for the child
+//
+// Whether a child runs inline or in the background is not the model's choice:
+// the transport decides, because only a transport with a follow-up-turn
+// channel can deliver a background result at all. See
+// SubAgentManager.SetSynchronous.
 //
 // The tool is advertised only when a SubAgentManager is registered.
 type AgentTool struct{}
@@ -97,10 +100,9 @@ func definitionFor(sessionModel string, store *agentprofile.Store) agent.ToolDef
 			"'general' for delegated work that modifies files, 'code-review' for an independent " +
 			"read of changes. To branch the conversation itself, use the session branch feature " +
 			"instead — a sub-agent is not a conversation fork.\n\n" +
-			"Set run_in_background=true when you are dispatching multiple independent sub-agents that can run in parallel, " +
-			"or when a sub-agent is expected to take a while. You will be notified when it completes. " +
-			"Leave it false (default) to block and receive the result directly when the task is short. " +
-			"(Some transports run every sub-agent synchronously; the result says so when it does.)\n\n" +
+			"How the result reaches you is handled for you: it either comes back in this tool call or " +
+			"arrives later as a completion notification. Both are normal and you do not choose between them. " +
+			"When you get the notification form, end your turn and wait — the notification will reach you.\n\n" +
 			"Follow up with sub_agent_send. Do not poll sub_agent_status while waiting for a background sub-agent; " +
 			"wait for the completion notification instead. Use sub_agent_status only to list running agents or when you " +
 			"suspect a sub-agent is stuck. Use sub_agent_kill to terminate a stuck or no-longer-needed agent.",
@@ -118,10 +120,6 @@ func definitionFor(sessionModel string, store *agentprofile.Store) agent.ToolDef
 				"subagent_type": map[string]any{
 					"type":        "string",
 					"description": subAgentTypeParamDesc(store),
-				},
-				"run_in_background": map[string]any{
-					"type":        "boolean",
-					"description": "When true, run asynchronously and receive a notification on completion. When false (default), block until the agent finishes and return its result directly.",
 				},
 				"model": map[string]any{
 					"type":        "string",
@@ -340,18 +338,18 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 		req.Model = profile.Model
 	}
 
-	// Determine sync vs async
-	runInBackground := boolArg(input, "run_in_background")
-	// A transport with no follow-up-turn channel (the CLI one-shot — the only
-	// synchronous mode) forces sync even if the model asked for background —
-	// and tells the model, rather than silently downgrading its choice. TUI,
-	// web session, and IM turns all stay async: they re-inject completions as
-	// idle follow-up turns (see SetSynchronous).
-	forcedSync := false
-	if runInBackground && mgr.Synchronous() {
-		runInBackground = false
-		forcedSync = true
-	}
+	// Dispatch is the transport's call, not the model's. A transport with a
+	// follow-up-turn channel (TUI, web session, IM) backgrounds every child so
+	// the parent turn ends at once and the user can keep talking while the
+	// child works; one without such a channel — the CLI one-shot — has nowhere
+	// for a completion notification to land, so it blocks and hands the reply
+	// back inline. See SetSynchronous.
+	//
+	// This used to be a run_in_background parameter. Asking the model to
+	// predict how long a child would run made it guess "short" almost every
+	// time, which pinned the parent turn — and the user — behind minutes of
+	// child work.
+	runInBackground := !mgr.Synchronous()
 
 	if runInBackground {
 		id, err := mgr.Start(req)
@@ -369,18 +367,8 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 	if err != nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("sub_agent: %w", err)
 	}
-	// User promoted the running synchronous sub-agent to background.
-	if res.StopReason == "promoted" {
-		return agent.ToolResult{
-			Text: fmt.Sprintf("Sub-agent %s was promoted to background. You will be notified when it completes.", res.AgentID),
-			UI:   subAgentResultUI(res.AgentID),
-		}, nil
-	}
 	text := withAgentTag(res.AgentID, res.Reply)
 	text += incompleteNote(res.StopReason, res.AgentID)
-	if forcedSync {
-		text += "\n\n[note: ran synchronously and returned its full result here — this transport doesn't support background sub-agents, so run_in_background was ignored.]"
-	}
 	return agent.ToolResult{Text: text, UI: subAgentResultUI(res.AgentID)}, nil
 }
 

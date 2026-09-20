@@ -31,7 +31,7 @@ Also identify:
 
 Call the `sub_agent` tool with `subagent_type: "code-review"` — a read-only reviewer that starts with zero context. Pass it the diff range, file list, and tech design reference in the prompt — but NOT your implementation reasoning or conversation history.
 
-If you need to review multiple independent changes (e.g., several PRs), dispatch each sub-agent with `run_in_background: true` so they run in parallel. Wait for the completion notifications and use the results from those notifications. Do not poll `sub_agent_status` while waiting; use `sub_agent_status` only if you suspect an agent is stuck or need to list running agents. For a single short review, a synchronous `sub_agent` call is fine.
+If you need to review multiple independent changes (e.g., several PRs), dispatch one sub-agent per change in the same round — they run in parallel. When a dispatch comes back as a handle rather than a result, end your turn and use the completion notification when it arrives. Do not poll `sub_agent_status` while waiting; use it only if you suspect an agent is stuck or need to list running agents.
 
 The sub-agent prompt should follow the template in [code-reviewer.md](code-reviewer.md).
 

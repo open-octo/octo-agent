@@ -10,9 +10,11 @@ import (
 )
 
 // TestVerify_AgentToolAsyncLaunchAndResume drives the exact production tool surface
-// the LLM triggers — AgentTool.Execute with run_in_background=true, wired through
-// the default SubAgentManager + real Spawner exactly as the REPL wires them —
-// and confirms the async sub_agent completes and delivers its result via notification.
+// the LLM triggers — AgentTool.Execute wired through the default SubAgentManager
+// + real Spawner exactly as the REPL wires them — and confirms a background
+// sub_agent completes and delivers its result via notification. The manager is
+// left unmarked, which is what every transport with a follow-up-turn channel
+// does and is what selects background dispatch.
 func TestVerify_AgentToolAsyncLaunchAndResume(t *testing.T) {
 	send := &subAgentSender{reply: "first-task done", inputTokens: 100, outputTokens: 40}
 	parent := agent.New(send, "parent-model")
@@ -46,12 +48,12 @@ func TestVerify_AgentToolAsyncLaunchAndResume(t *testing.T) {
 
 	ctx := context.Background()
 
-	// 1. The model calls sub_agent with run_in_background=true.
+	// 1. The model calls sub_agent. Dispatch is the manager's call, not the
+	// model's: this one is not synchronous, so the child goes to the background.
 	out, err := (tools.AgentTool{}).Execute(ctx, "sub_agent", map[string]any{
-		"description":       "research the cache module",
-		"prompt":            "Summarise the cache module.",
-		"subagent_type":     "explore",
-		"run_in_background": true,
+		"description":   "research the cache module",
+		"prompt":        "Summarise the cache module.",
+		"subagent_type": "explore",
 	})
 	if err != nil {
 		t.Fatalf("sub_agent.Execute: %v", err)

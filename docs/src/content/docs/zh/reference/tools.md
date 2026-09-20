@@ -56,8 +56,8 @@ description: octo 给模型的每一个内置工具。
 
 | 工具 | 作用 |
 |---|---|
-| `sub_agent` | 启动一个子代理（同步或异步） |
-| `sub_agent_send` / `sub_agent_status` / `sub_agent_kill` | 跟进、轮询或停止一个异步子代理 |
+| `sub_agent` | 启动一个子代理（原地跑还是后台跑由 octo 决定，模型不选） |
+| `sub_agent_send` / `sub_agent_status` / `sub_agent_kill` | 跟进、轮询或停止一个子代理 |
 | `workflow` | 运行一段确定性的多 agent 编排脚本 |
 | `workflow_status` / `workflow_kill` | 轮询或停止一个后台工作流 |
 | `workflow_save` | 把一段脚本保存成一个有名字、可复用的工作流 |

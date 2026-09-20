@@ -66,6 +66,7 @@ func TestSubAgentManager_ConcurrencyCap(t *testing.T) {
 // turn limit is flagged INCOMPLETE rather than passed off as a finished result.
 func TestAgentTool_SyncMaxTurnsSurfaced(t *testing.T) {
 	mgr := NewSubAgentManager(&resultSpawner{reply: "partial work", stopReason: "max_turns"})
+	mgr.SetSynchronous(true) // inline dispatch: the annotation rides the tool_result
 	ctx := WithSubAgentManager(context.Background(), mgr)
 
 	res, err := (AgentTool{}).Execute(ctx, "sub_agent", map[string]any{
@@ -83,10 +84,36 @@ func TestAgentTool_SyncMaxTurnsSurfaced(t *testing.T) {
 
 	// A normal completion must NOT be flagged.
 	mgr2 := NewSubAgentManager(&resultSpawner{reply: "done", stopReason: ""})
+	mgr2.SetSynchronous(true)
 	ctx2 := WithSubAgentManager(context.Background(), mgr2)
 	res2, _ := (AgentTool{}).Execute(ctx2, "sub_agent", map[string]any{"description": "d", "prompt": "p", "subagent_type": "general"})
 	if strings.Contains(res2.Text, "INCOMPLETE") {
 		t.Errorf("a complete result should not be flagged, got: %q", res2.Text)
+	}
+}
+
+// TestAgentTool_FanOutPastCapIsRefused locks the overflow semantics of the
+// background path, which every interactive transport now takes: past the cap a
+// dispatch is refused outright rather than queued. That is the right trade
+// there — the parent turn is not blocked, so the model can do other work and
+// launch the rest once a completion notification frees a slot.
+func TestAgentTool_FanOutPastCapIsRefused(t *testing.T) {
+	sp := &blockingSpawner{release: make(chan struct{})}
+	defer close(sp.release)
+	mgr := NewSubAgentManager(sp) // background dispatch
+	ctx := WithSubAgentManager(context.Background(), mgr)
+	args := map[string]any{"description": "d", "prompt": "p", "subagent_type": "general"}
+
+	for i := 0; i < maxConcurrentSubAgents; i++ {
+		if _, err := (AgentTool{}).Execute(ctx, "sub_agent", args); err != nil {
+			t.Fatalf("dispatch %d is within the cap and should succeed: %v", i, err)
+		}
+	}
+
+	if _, err := (AgentTool{}).Execute(ctx, "sub_agent", args); err == nil {
+		t.Fatal("a dispatch past the cap should be refused, not queued")
+	} else if !strings.Contains(err.Error(), "too many") {
+		t.Errorf("the refusal should tell the model to wait, got: %v", err)
 	}
 }
 
@@ -111,21 +138,58 @@ func TestAgentTool_RequiresSubagentType(t *testing.T) {
 	}
 }
 
-// TestAgentTool_ForcedSyncNote verifies that asking for background on a
-// synchronous transport tells the model it ran synchronously instead of
-// silently ignoring the choice.
-func TestAgentTool_ForcedSyncNote(t *testing.T) {
-	mgr := NewSubAgentManager(&resultSpawner{reply: "done"})
-	mgr.SetSynchronous(true)
-	ctx := WithSubAgentManager(context.Background(), mgr)
+// TestAgentTool_NoBackgroundParameter locks the parameter out of the schema.
+// The model used to pick sync vs async itself and reliably guessed "short",
+// so a minutes-long child pinned the parent turn and the user could not get a
+// word in until it finished.
+func TestAgentTool_NoBackgroundParameter(t *testing.T) {
+	def := (AgentTool{}).Definition()
+	props, ok := def.Parameters["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("schema has no properties map: %#v", def.Parameters)
+	}
+	if _, exposed := props["run_in_background"]; exposed {
+		t.Error("sub_agent must not expose run_in_background — dispatch belongs to the transport")
+	}
+	if strings.Contains(def.Description, "run_in_background") {
+		t.Errorf("the description must not name the removed parameter: %q", def.Description)
+	}
+}
 
-	res, err := (AgentTool{}).Execute(ctx, "sub_agent", map[string]any{
-		"description": "d", "prompt": "p", "subagent_type": "general", "run_in_background": true,
+// TestAgentTool_DispatchFollowsTransport is the rule that replaced the
+// parameter: a transport that can deliver a completion notification
+// backgrounds every child so the parent turn ends immediately; one that
+// cannot runs it inline and hands back the reply, because a background
+// result would have nowhere to land.
+func TestAgentTool_DispatchFollowsTransport(t *testing.T) {
+	args := map[string]any{"description": "d", "prompt": "p", "subagent_type": "general"}
+
+	t.Run("no follow-up channel runs inline", func(t *testing.T) {
+		mgr := NewSubAgentManager(&resultSpawner{reply: "child result"})
+		mgr.SetSynchronous(true)
+		res, err := (AgentTool{}).Execute(WithSubAgentManager(context.Background(), mgr), "sub_agent", args)
+		if err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		if !strings.Contains(res.Text, "child result") {
+			t.Errorf("inline dispatch should return the child's reply, got: %q", res.Text)
+		}
+		if strings.Contains(res.Text, "Started sub-agent") {
+			t.Errorf("inline dispatch must not hand back an async stub, got: %q", res.Text)
+		}
 	})
-	if err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if !strings.Contains(res.Text, "ran synchronously") {
-		t.Errorf("forced-sync downgrade should be surfaced, got: %q", res.Text)
-	}
+
+	t.Run("follow-up channel runs in the background", func(t *testing.T) {
+		mgr := NewSubAgentManager(&resultSpawner{reply: "child result"})
+		res, err := (AgentTool{}).Execute(WithSubAgentManager(context.Background(), mgr), "sub_agent", args)
+		if err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		if !strings.Contains(res.Text, "Started sub-agent") {
+			t.Errorf("background dispatch should return the handle, got: %q", res.Text)
+		}
+		if strings.Contains(res.Text, "child result") {
+			t.Errorf("background dispatch must not block for the reply, got: %q", res.Text)
+		}
+	})
 }

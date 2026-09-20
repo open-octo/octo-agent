@@ -35,7 +35,6 @@ spawn 入口(`internal/tools/agent.go`),经 spawner 注册门控——未配置 
 | `description` | UI/日志用的短标签,不影响行为 |
 | `prompt` | 任务,**自包含**:子 agent 看不到本对话,所有上下文都得写在这里 |
 | `subagent_type` | preset(见下),**必填**;省略直接报错并列出可用 preset |
-| `run_in_background` | true=异步(完成后通知);false/省略=同步阻塞返回结果 |
 | `model` | 可选,覆盖父模型(如指定更便宜的) |
 | `tools` | 可选工具名白名单,与父 toolbelt 取交集 |
 
@@ -55,16 +54,26 @@ spawn 入口(`internal/tools/agent.go`),经 spawner 注册门控——未配置 
 
 现在每个 child 一律零对话上下文 + preset persona,`prompt` 必须自包含。
 
-### Sync vs Async
+### Sync vs Async:由 transport 决定,模型不参与
 
-- 默认 **async**(CLI TUI / Web 会话 / IM):`run_in_background:true` 起后台、立即返回句柄,完成经
-  通知注入对话——TUI 走 agent Inbox,Web/IM 走 `deliverModelNote` / `runChannelIdleTurn`,回合
-  空闲时自动开一个 follow-up turn。
-- **唯一强制同步的 transport 是 CLI one-shot**:单回合进程没有后续回合通道,`SetSynchronous(true)`
-  让 `sub_agent` 走 `RunSync` 阻塞、把结果直接作为 tool_result 返回。此时即使模型传了
-  `run_in_background:true` 也被强制为同步,且**结果里明说**降级了(不静默吞掉模型的选择)。
-  server 侧没有等价路径——`prepareToolTurn` 要求 ctx 带 session id(所有生产调用方都钉了),
-  缺失即报错;历史上曾有"无会话 one-shot"兜底分支,生产上不可达,已删除。
+派发方式不是工具参数。`SubAgentManager.Synchronous()` 是唯一判据,`sub_agent` 直接取
+`runInBackground := !mgr.Synchronous()`。
+
+- 默认 **async**(CLI TUI / Web 会话 / IM):`Start` 起后台、立即返回句柄,父回合当场收尾,用户可以
+  马上继续说话;完成经通知注入对话——TUI 走 agent Inbox,Web/IM 走 `deliverModelNote` /
+  `runChannelIdleTurn`,回合空闲时自动开一个 follow-up turn。
+- **同步的是 CLI one-shot**:单回合进程没有后续回合通道,`SetSynchronous(true)` 让 `sub_agent`
+  走 `RunSync` 阻塞、把结果直接作为 tool_result 返回。server 的进程级兜底 manager 也设了同步,
+  但每条生产路径都会把会话级 manager 钉进 ctx(`resolveSubAgentManager` 优先取它),所以那是兜底
+  不是活路径。
+
+模型只看到结果的形态,不看到派发方式:直接拿到回复(被 loop budget 切断时带 `incompleteNote` 的
+INCOMPLETE 后缀),或者拿到 `Started sub-agent agent_N` 加一句"完成时会通知你"。工具 description
+明说这两种都正常、不需要它选。
+
+**为什么不把这个选择交给模型**:那要求它预判任务耗时,而它几乎总是猜"短"。结果是一个跑几分钟的
+child 把父回合钉住,用户在它结束前插不上话——恰恰是异步本该解决的问题。耗时预判不可靠,由
+transport 判定后这个决策就不存在了。
 
 ### 防递归
 
@@ -187,8 +196,9 @@ child.MaxTurns = childMaxTurns              // child 专属 loop 预算
 - **`Send(agentID, msg)`**:起 goroutine 跑 `Continue`,立即返回。
 - **busy / pending 队列**:一个子 agent 同时只处理一个请求。`Send` 时它 busy 则存进 `pending`(深度
   1);已有 pending 则报 `already has a pending message`;当前请求结束后自动发 pending。
-- **并发上限**:`maxConcurrentSubAgents`(16)限制同时在跑的 async spawn——模型一次发一大批
-  `run_in_background:true` 也不会起无界个并发 agent loop。超限的新 spawn 被明确拒绝(让模型等),
+- **并发上限**:`maxConcurrentSubAgents`(16)限制同时在跑的 async spawn——模型一次 fan-out 一大批
+  也不会起无界个并发 agent loop。超限的新 spawn 被明确**拒绝**(让模型等):异步下父回合没有被占住,
+  模型收到这条错误可以先做别的、等通知回来再补派。对照同步路径的 `syncSem` 是阻塞排队,
   续话(`Send`/`Continue`)轮不计入此上限(受 live-child 上限约束)。`activeAsync` 在 manager 锁下
   计数,每个 spawn goroutine 结束时递减。
 - **`Kill(id)` / `KillAll()`**:取消子 agent 的 ctx;`KillAll` 在会话关闭时清掉所有在途子 agent。
@@ -245,7 +255,7 @@ sequenceDiagram
     participant C as child Agent
     participant IB as Inbox
 
-    M->>T: tool_use sub_agent(prompt, run_in_background:true)
+    M->>T: tool_use sub_agent(prompt)
     T->>MGR: Start(req)
     MGR-->>T: agent_1（立即）
     T-->>M: "Started sub-agent agent_1. You will be notified..."

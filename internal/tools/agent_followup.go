@@ -15,10 +15,12 @@ import (
 // these tools nothing exposed them to the model, so an async child could
 // only be awaited, never steered or queried.
 //
-// Two ID namespaces converge here, matching what the model actually sees:
-//   - async spawns return "agent_N" (manager-tracked) — Send delivers
+// Two ID namespaces converge here, matching what the model actually sees.
+// Which one a given child lands in follows the transport's dispatch choice
+// (see AgentTool), not anything the model asked for:
+//   - backgrounded spawns return "agent_N" (manager-tracked) — Send delivers
 //     asynchronously and the reply arrives as a notification;
-//   - sync spawns tag their reply "[agent <id>]" (spawner-side) — those
+//   - inline spawns tag their reply "[agent <id>]" (spawner-side) — those
 //     continue synchronously and return the reply inline.
 // sub_agent_send tries the manager first and falls back to a synchronous
 // continue, so the model can use whichever ID it has.
@@ -30,17 +32,16 @@ func (AgentSendTool) Definition() agent.ToolDefinition {
 	return agent.ToolDefinition{
 		Name: "sub_agent_send",
 		Description: "Send a follow-up message to an existing sub-agent — steer it, ask for more " +
-			"detail, or continue its task with its context intact. Accepts either ID form: " +
-			"an async sub-agent's id (agent_N, from sub_agent with run_in_background) gets " +
-			"the message asynchronously and replies via a notification; a sync sub-agent's " +
-			"id (the [agent …] tag on its reply) is continued synchronously and the reply " +
-			"returns here directly.",
+			"detail, or continue its task with its context intact. Use whichever id that " +
+			"sub-agent gave you — an agent_N handle, or the [agent …] tag on its reply. " +
+			"The response reaches you the same way that sub-agent's first result did: " +
+			"back in this call, or later as a completion notification.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"agent_id": map[string]any{
 					"type":        "string",
-					"description": "The sub-agent to message: agent_N for async sub-agents, or the [agent …] tag id from a synchronous sub-agent's reply.",
+					"description": "The sub-agent to message — its agent_N handle or the [agent …] tag id, whichever the sub_agent result gave you.",
 				},
 				"message": map[string]any{
 					"type":        "string",
@@ -107,14 +108,14 @@ func (AgentStatusTool) Definition() agent.ToolDefinition {
 			"background sub-agent to finish — wait for the completion notification instead. With agent_id, report " +
 			"that sub-agent's state (working/idle/exited) and its latest result; without agent_id, list all tracked " +
 			"sub-agents (working ones plus idle-but-resumable ones). Use this tool only when you suspect a sub-agent is stuck or when you need to know " +
-			"which agents are still running. A synchronous sub-agent's id (the [agent …] tag on its reply) works here too: it reports " +
+			"which agents are still running. An [agent …] tag id from an inline reply works here too: it reports " +
 			"that child's last round and whether it can still be resumed with sub_agent_send.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"agent_id": map[string]any{
 					"type":        "string",
-					"description": "Optional sub-agent id: agent_N for an async sub-agent, or the [agent …] tag id from a synchronous one. Omit to list everything reachable (working, or idle-but-resumable).",
+					"description": "Optional sub-agent id — an agent_N handle or an [agent …] tag id. Omit to list everything reachable (working, or idle-but-resumable).",
 				},
 			},
 		},

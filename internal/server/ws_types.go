@@ -408,12 +408,6 @@ type wsInPromoteSyncTerminal struct {
 	SessionID string `json:"session_id"`
 }
 
-// wsInPromoteSyncSubAgent is sent by the browser when the user clicks the
-// "Background" button on a running synchronous sub_agent tool card.
-type wsInPromoteSyncSubAgent struct {
-	SessionID string `json:"session_id"`
-}
-
 // wsInKillBackground is sent by the browser when the user kills a process from
 // the background-process popover. HandleID is the BackgroundManager id shown
 // in background_tasks_update (e.g. "bg_1").

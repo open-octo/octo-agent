@@ -59,17 +59,23 @@ The frontmatter `name` field, if present, is ignored — the filename (minus `.m
 uses to request this type. Directories are rescanned on every lookup, so an edit takes effect
 immediately, no restart needed.
 
-## Following up on an async sub-agent
+## Following up on a sub-agent
 
-Spawns can run synchronously or asynchronously. When the model issues several `sub_agent` calls in
-one round, they fan out **concurrently** (capped at 16 in flight) instead of running one after
-another. In the TUI, `Ctrl+B` promotes the sub-agent you're currently watching to the background
-so the main conversation continues without it. An async one that finishes without being killed
-stays addressable:
+Where octo is running decides whether a sub-agent works in the background or inline — the model
+doesn't pick. An interactive session (the TUI, the web UI, an IM chat) backgrounds every sub-agent:
+the parent turn ends as soon as the child is dispatched, so you can keep talking while it works,
+and its result arrives later as a completion notification. The headless one-shot (a positional
+message, `--prompt-file`, or piped stdin) has no later turn for a notification to land in, so it
+runs the child inline and hands the reply straight back.
+
+When the model issues several `sub_agent` calls in one round, they fan out **concurrently** (capped
+at 16 in flight) instead of running one after another; past that cap a spawn is refused and the
+model waits for a slot to free up. A sub-agent that finishes without being killed stays
+addressable:
 
 | Tool | Purpose |
 |---|---|
-| `sub_agent_send` | send a follow-up message to a running or finished async sub-agent |
+| `sub_agent_send` | send a follow-up message to a running or finished sub-agent |
 | `sub_agent_status` | check progress without blocking |
 | `sub_agent_kill` | stop one early |
 

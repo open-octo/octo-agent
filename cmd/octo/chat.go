@@ -1022,14 +1022,13 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	subAgentMgr = toolEnv.SubAgentMgr
 
 	// The headless one-shot exits when its single turn ends, so a background
-	// sub-agent's completion notification has no follow-up turn to land in —
-	// children spawned with run_in_background=true would be orphaned and their
-	// results silently lost. Run sub-agents inline instead; this is the only
-	// transport that still forces sync. (Web session and IM turns keep async:
-	// they kick an idle follow-up turn on completion.) Parallel fan-out is
-	// unaffected: sync sub_agent calls issued in one assistant message still
-	// dispatch concurrently. The TUI keeps async too — it re-injects
-	// completions as follow-up turns.
+	// sub-agent's completion notification has no follow-up turn to land in:
+	// the child would be orphaned and its result silently lost. Marking the
+	// manager synchronous is what makes sub_agent run children inline here,
+	// and this is the only transport that does. (Web sessions, IM turns and
+	// the TUI all kick an idle follow-up turn on completion, so they keep the
+	// background default.) Parallel fan-out is unaffected: inline sub_agent
+	// calls issued in one assistant message still dispatch concurrently.
 	if !useTUI {
 		subAgentMgr.SetSynchronous(true)
 	}

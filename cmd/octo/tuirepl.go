@@ -2251,7 +2251,7 @@ func (m *tuiModel) handleTurnFinished(err error) (tea.Model, tea.Cmd) {
 	m.cancelTurn = nil
 	m.running = nil // clear any live tool indicator (e.g. on interrupt)
 	// NB: intentionally do NOT clear m.modal / m.modalQueue here. A background
-	// sub-agent (run_in_background) runs on a context detached from the turn, so
+	// sub-agent runs on a context detached from the turn, so
 	// its permission prompt outlives the turn and must stay answerable — nil-ing
 	// it would strand that sub-agent's Ask goroutine forever (its resp channel
 	// would never receive, and its context isn't cancelled at turn end). A
