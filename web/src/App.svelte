@@ -10,6 +10,7 @@
   import * as api from './lib/api'
   import { installExternalLinkInterceptor } from './lib/externalLinks'
   import { installLaDeliveryBridge } from './lib/laDelivery'
+  import { installLaStorageBridge } from './lib/laStorage'
   import { startNativeHeartbeat } from './lib/nativeHeartbeat'
   import { normalizeHash, hashPicksChatTarget } from './lib/hashRouting'
   import { pruneSessions } from './lib/genui/panel-state'
@@ -64,10 +65,15 @@
   // session seen as the page goes away.
   onMount(() => markActiveSessionSeenOnLeave(() => get(view) === 'chat' ? get(activeSessionId) : null))
 
-  // A Light App can be open in either host (the panel or a mounted full page),
-  // and a delivery is addressed to the app rather than to a session — so the
-  // subscription lives here, once, rather than in either host.
-  onMount(() => installLaDeliveryBridge(ws))
+  // Both halves of the Light App bridge are global, and both used to be
+  // installed by whichever host happened to render. The artifacts panel is
+  // hidden by default, so a Light App opened as a mounted page had no message
+  // listener at all — its pushes, its storage migration and its downloads all
+  // went nowhere. They belong here: one listener, for as long as the app runs.
+  onMount(() => {
+    installLaStorageBridge()
+    return installLaDeliveryBridge(ws)
+  })
 
   // Switching chats must never leave the previous session's diff on screen: the
   // panel is per-session, and a stale patch list reads as this session's work.

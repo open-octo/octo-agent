@@ -28,6 +28,14 @@ import (
 // reasoning confidently about a sketch from an hour ago.
 const lightAppStaleAfter = 5 * time.Minute
 
+// lightAppEvictAfter is when a snapshot stops being reported at all. The
+// explicit DELETE the host sends on unmount is the normal path out; this is
+// for the ones that never arrive — a closed laptop, a killed browser, a tab
+// discarded under memory pressure. Without it a 12 MiB screenshot and a
+// phantom app would both live until serve restarts, and insert_into_lightapp
+// would happily report a delivery into a frame nobody has open.
+const lightAppEvictAfter = 30 * time.Minute
+
 const (
 	maxLightAppDigest  = 4 << 10  // 4 KiB of prose is already more than a digest
 	maxLightAppSummary = 32 << 10 // structured extras, passed through verbatim
@@ -48,13 +56,6 @@ type LightAppSnapshot struct {
 	Image     []byte
 	ImageType string
 	UpdatedAt time.Time
-}
-
-// Signature identifies the *content* of a snapshot, not just its shape. Two
-// different selections that happen to have the same size must not share one,
-// or a stale screenshot survives a selection swap.
-func (s *LightAppSnapshot) Signature() string {
-	return fmt.Sprintf("%s|%d|%d", s.Digest, len(s.Summary), len(s.Image))
 }
 
 // Stale reports whether the snapshot is old enough that the model should be
@@ -82,7 +83,10 @@ func PutLightApp(snap LightAppSnapshot) {
 		return
 	}
 	if len(snap.Digest) > maxLightAppDigest {
-		snap.Digest = snap.Digest[:maxLightAppDigest] + "…"
+		// Cut on a rune boundary: a digest is prose, often not ASCII, and
+		// slicing bytes would leave a half character for json.Marshal to
+		// replace with U+FFFD.
+		snap.Digest = strings.ToValidUTF8(snap.Digest[:maxLightAppDigest], "") + "…"
 	}
 	if len(snap.Summary) > maxLightAppSummary {
 		snap.Summary = nil
@@ -100,7 +104,19 @@ func PutLightApp(snap LightAppSnapshot) {
 	if lightAppMirror.apps == nil {
 		lightAppMirror.apps = map[string]*LightAppSnapshot{}
 	}
+	evictLightAppsLocked(time.Now())
 	lightAppMirror.apps[snap.Slug] = &snap
+}
+
+// evictLightAppsLocked drops snapshots nobody has refreshed in a long time.
+// Lazy rather than a timer: the mirror is only interesting when something
+// touches it, and every path that reads or writes it already holds the lock.
+func evictLightAppsLocked(now time.Time) {
+	for slug, s := range lightAppMirror.apps {
+		if now.Sub(s.UpdatedAt) > lightAppEvictAfter {
+			delete(lightAppMirror.apps, slug)
+		}
+	}
 }
 
 // DropLightApp forgets an app — sent when its frame goes away, so the tools
@@ -139,6 +155,7 @@ func lightAppDelivererFn() LightAppDeliverer {
 func lightAppSnapshot(slug string) *LightAppSnapshot {
 	lightAppMirror.mu.Lock()
 	defer lightAppMirror.mu.Unlock()
+	evictLightAppsLocked(time.Now())
 	s := lightAppMirror.apps[slug]
 	if s == nil {
 		return nil
@@ -151,6 +168,7 @@ func lightAppSnapshot(slug string) *LightAppSnapshot {
 func lightAppSnapshots() []*LightAppSnapshot {
 	lightAppMirror.mu.Lock()
 	defer lightAppMirror.mu.Unlock()
+	evictLightAppsLocked(time.Now())
 	out := make([]*LightAppSnapshot, 0, len(lightAppMirror.apps))
 	for _, s := range lightAppMirror.apps {
 		cp := *s
@@ -174,7 +192,19 @@ func describeAge(d time.Duration) string {
 	}
 }
 
+// renderedSummaryMax is what one app may contribute to a lightapp_state
+// answer. The ingest cap (maxLightAppSummary) is about what the mirror will
+// hold; this is about what a tool the model is told to call freely may spend
+// of its context.
+const renderedSummaryMax = 512
+
 // renderLightAppLine is one app's line in the lightapp_state answer.
+//
+// The digest and summary are written by the app, which is third-party code —
+// before this existed, a Light App had no way to put a single byte in front of
+// the model. So they are attributed and quoted rather than stated in octo's
+// own voice: everything indented under the app's name is the app describing
+// itself, not octo reporting a fact.
 func renderLightAppLine(s *LightAppSnapshot, now time.Time) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "- %s — updated %s", s.Slug, describeAge(now.Sub(s.UpdatedAt)))
@@ -186,10 +216,14 @@ func renderLightAppLine(s *LightAppSnapshot, now time.Time) string {
 	}
 	b.WriteString("\n")
 	if s.Digest != "" {
-		fmt.Fprintf(&b, "  %s\n", s.Digest)
+		fmt.Fprintf(&b, "  the app says: %q\n", s.Digest)
 	}
 	if len(s.Summary) > 0 {
-		fmt.Fprintf(&b, "  details: %s\n", string(s.Summary))
+		sum := string(s.Summary)
+		if len(sum) > renderedSummaryMax {
+			sum = strings.ToValidUTF8(sum[:renderedSummaryMax], "") + "… (truncated)"
+		}
+		fmt.Fprintf(&b, "  and reports: %s\n", sum)
 	}
 	return b.String()
 }

@@ -33,6 +33,9 @@ func (s *Server) handlePutLightAppState(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxLightAppStateBody)
+	// Anything past this budget spills to a temp file, which the deferred
+	// RemoveAll below deletes — the mirror's "screenshots stay in memory" rule
+	// is about octo's own durable store, not about net/http's scratch space.
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_lightapp_state")
 		return

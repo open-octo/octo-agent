@@ -9,10 +9,12 @@
 //
 // The app gains no capability from this. It only gets to be seen.
 
-// A canvas can fire on every stroke, so snapshots are coalesced per app: one
-// request in flight, at most one queued, and never more than one per window.
-// The queued snapshot is always the newest — an intermediate state nobody
-// asked about is worth nothing.
+// A canvas can fire on every stroke, so snapshots are coalesced per app: at
+// most one queued, and never more than one request per window. The queued
+// snapshot is always the newest — an intermediate state nobody asked about is
+// worth nothing. Requests are not serialised beyond that; the server keeps
+// whichever arrives last, and one window apart they do not overlap in
+// practice.
 const MIN_INTERVAL_MS = 1000
 
 // Anything larger is dropped rather than sent: the server caps the body too,
@@ -30,6 +32,11 @@ type Pending = { digest: string; summary: string; image: Blob | null }
 const queued = new Map<string, Pending>()
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
 const lastSent = new Map<string, number>()
+// Bumped whenever an app goes away. A request already awaiting fetch cannot be
+// cancelled, and if it lands after the DELETE the server is left describing an
+// app nobody has open — so a flush whose generation moved on drops its result
+// instead of racing it.
+const generation = new Map<string, number>()
 
 // Exported for tests: the shape the server receives.
 export function buildStateForm(p: Pending): FormData {
@@ -45,6 +52,7 @@ async function flush(slug: string): Promise<void> {
   queued.delete(slug)
   timers.delete(slug)
   if (!p) return
+  const gen = generation.get(slug) ?? 0
   lastSent.set(slug, Date.now())
   try {
     await fetch(`/api/light-apps/${encodeURIComponent(slug)}/state`, {
@@ -55,6 +63,13 @@ async function flush(slug: string): Promise<void> {
     // A dropped snapshot is not worth surfacing: the app will push again on
     // its next change, and the mirror's staleness marker already tells the
     // model that what it has may have moved on.
+  }
+  // The app went away while this was in flight. Its DELETE and this PUT then
+  // raced, and a PUT that lands second leaves the mirror describing an app
+  // nobody has open — for the full eviction window. Aborting cannot help
+  // (the request was already sent), so undo it instead.
+  if ((generation.get(slug) ?? 0) !== gen) {
+    void fetch(`/api/light-apps/${encodeURIComponent(slug)}/state`, { method: 'DELETE' }).catch(() => {})
   }
 }
 
@@ -90,5 +105,6 @@ export function dropLaState(slug: string): void {
   timers.delete(slug)
   queued.delete(slug)
   lastSent.delete(slug)
+  generation.set(slug, (generation.get(slug) ?? 0) + 1)
   void fetch(`/api/light-apps/${encodeURIComponent(slug)}/state`, { method: 'DELETE' }).catch(() => {})
 }

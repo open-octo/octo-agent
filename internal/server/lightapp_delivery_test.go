@@ -148,3 +148,51 @@ func TestDelivery_UnknownTicket(t *testing.T) {
 		t.Error("an unknown ticket returned content")
 	}
 }
+
+// TestDeliverToLightApp_RejectsSVG: the extension table calls SVG an image, but
+// it is a document that carries script, and the model side cannot sniff it
+// either — the two directions have to agree on what an image is.
+func TestDeliverToLightApp_RejectsSVG(t *testing.T) {
+	resetDeliveries(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	dir := t.TempDir()
+	svg := filepath.Join(dir, "x.svg")
+	body := `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`
+	if err := os.WriteFile(svg, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := srv.deliverToLightApp("sketch", svg, ""); err == nil {
+		t.Fatal("SVG was accepted for delivery")
+	}
+	// And nothing was registered, so there is no ticket to redeem either.
+	lightAppDeliveries.mu.Lock()
+	n := len(lightAppDeliveries.by)
+	lightAppDeliveries.mu.Unlock()
+	if n != 0 {
+		t.Errorf("a refused delivery still minted %d ticket(s)", n)
+	}
+}
+
+// TestDelivery_ServedWithSandbox: the bytes are meant to be fetched and handed
+// to a frame, but the URL can be opened directly — same defence the artifact
+// endpoint applies.
+func TestDelivery_ServedWithSandbox(t *testing.T) {
+	resetDeliveries(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	png := pngFixture(t, t.TempDir())
+
+	if err := srv.deliverToLightApp("sketch", png, ""); err != nil {
+		t.Fatal(err)
+	}
+	w := doJSON(t, srv, "GET", "/api/light-apps/sketch/delivery/"+lastDeliveryID(t), "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if got := w.Header().Get("Content-Security-Policy"); got != "sandbox" {
+		t.Errorf("Content-Security-Policy is %q, want \"sandbox\"", got)
+	}
+	if w.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Error("missing nosniff")
+	}
+}

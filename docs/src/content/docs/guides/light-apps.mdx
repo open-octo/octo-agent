@@ -278,6 +278,11 @@ window.octo.onDelivery(({ blob, name, note }) => {
 })
 ```
 
+Your app has to be **publishing** to receive anything: octo finds the delivery's
+target through the same snapshots `pushState` sends, so an app that only
+registers a handler and never publishes looks closed to the agent. Publish once
+on load and you are reachable.
+
 This is the only inbound direction, and it carries a file and a note, nothing
 else: no conversation, no instructions to execute. An app that registers no
 handler simply never receives anything, and the agent finds out the same way it

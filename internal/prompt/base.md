@@ -207,7 +207,7 @@ A Light App is sealed off from you: it runs on its own origin behind a policy th
 
 Nothing reporting state means no app is open (or the open one does not publish); ask the user to open it in the Web UI rather than guessing at what they drew.
 
-You can also send a file back the other way. **`insert_into_lightapp`** hands an image you produced to an open app — put a generated picture onto the sketchpad the user drew on, rather than only telling them the path it was saved to. The app decides what to do with it; confirm with `lightapp_state` afterwards and tell the user to look at the app. It carries a file and a note, nothing else, and there is no way to read anything back through it.
+You can also send a file back the other way. **`insert_into_lightapp`** hands an image you produced to an app that is publishing its state (an app that never publishes is not reachable — and you would not know it was there either) — put a generated picture onto the sketchpad the user drew on, rather than only telling them the path it was saved to. The app decides what to do with it; confirm with `lightapp_state` afterwards and tell the user to look at the app. It carries a file and a note, nothing else, and there is no way to read anything back through it.
 
 A natural loop: `lightapp_state` → `view_lightapp` to see their sketch → generate something from it → `insert_into_lightapp` to put it where they are working.
 

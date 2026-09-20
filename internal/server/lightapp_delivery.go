@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +40,15 @@ const (
 	lightAppDeliveryTTL = 2 * time.Minute
 	maxLightAppDelivery = 32 << 20
 )
+
+// deliverableImageTypes mirrors what agent.NewImageBlock accepts on the way in,
+// so a file the model could look at is exactly a file it can hand back.
+var deliverableImageTypes = map[string]bool{
+	"image/png":  true,
+	"image/jpeg": true,
+	"image/gif":  true,
+	"image/webp": true,
+}
 
 type lightAppDelivery struct {
 	slug    string
@@ -80,8 +88,13 @@ func (s *Server) deliverToLightApp(slug, path, note string) error {
 	// Images only, for now: an app receiving an arbitrary file has no way to
 	// know what to do with it, and widening this later is easier than
 	// narrowing it.
+	//
+	// The set is the raster formats agent.NewImageBlock can sniff, not every
+	// "image/*" the extension table knows — so the two directions agree on what
+	// an image is. It also keeps SVG out, which is a document that carries
+	// script, not a picture.
 	ctype, known := tools.ArtifactContentType(abs)
-	if !known || !strings.HasPrefix(ctype, "image/") {
+	if !known || !deliverableImageTypes[ctype] {
 		return fmt.Errorf("%s is not an image octo can deliver", filepath.Base(abs))
 	}
 
@@ -149,6 +162,10 @@ func (s *Server) handleGetLightAppDelivery(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", d.ctype)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")
+	// Defense in depth for a URL opened directly in a tab, the same reasoning
+	// (and header) as the artifact endpoint: the bytes are only ever meant to
+	// be read by fetch and handed to a frame.
+	w.Header().Set("Content-Security-Policy", "sandbox")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
 }

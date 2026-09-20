@@ -49,7 +49,7 @@ func (LightAppStateTool) Execute(_ context.Context, _ string, _ map[string]any) 
 		}, nil
 	}
 	var b strings.Builder
-	b.WriteString("Light Apps reporting state:\n")
+	b.WriteString("Light Apps the user has open, each describing itself:\n")
 	for _, s := range apps {
 		b.WriteString(renderLightAppLine(s, now))
 	}
@@ -156,8 +156,8 @@ func (LightAppInsertTool) Definition() agent.ToolDefinition {
 			"example, put a generated picture onto their sketchpad canvas so they can keep " +
 			"working on it. Use after making a file the user will want to use where they are " +
 			"already working, rather than only telling them where it was saved. Call " +
-			"lightapp_state first: the app has to be open, and it decides what to do with what " +
-			"it receives.",
+			"lightapp_state first: the app has to be publishing its state to be reachable " +
+			"here, and it decides what to do with what it receives.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -167,7 +167,7 @@ func (LightAppInsertTool) Definition() agent.ToolDefinition {
 				},
 				"path": map[string]any{
 					"type":        "string",
-					"description": "Absolute path of the image file to send (PNG, JPEG, WebP, GIF or AVIF).",
+					"description": "Absolute path of the image file to send (PNG, JPEG, GIF or WebP).",
 				},
 				"note": map[string]any{
 					"type":        "string",

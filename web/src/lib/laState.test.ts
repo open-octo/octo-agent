@@ -110,6 +110,42 @@ describe('acceptLaState', () => {
 })
 
 describe('dropLaState', () => {
+  // A request already awaiting fetch cannot be recalled. If it lands after the
+  // DELETE, the mirror is left describing an app nobody has open — so the
+  // flush checks afterwards and undoes itself.
+  it('undoes an in-flight push that raced the drop', async () => {
+    let release: (v: Response) => void = () => {}
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET', body: init?.body as FormData | undefined })
+      if (init?.method === 'DELETE') return Promise.resolve(new Response('{}', { status: 200 }))
+      return new Promise<Response>((r) => { release = r })
+    })
+
+    acceptLaState('sketch', { digest: 'in flight' })
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(calls.filter((c) => c.method === 'PUT').length).toBe(1)
+
+    // The frame goes away while the PUT is still out.
+    dropLaState('sketch')
+    release(new Response('{}', { status: 200 }))
+    await vi.advanceTimersByTimeAsync(50)
+
+    // Two DELETEs: the one the drop sent, and the one the flush sent when it
+    // came back and found the app gone.
+    expect(calls.filter((c) => c.method === 'DELETE').length).toBe(2)
+  })
+
+  it('does not undo a push that belongs to a reopened app', async () => {
+    dropLaState('sketch')
+    calls = []
+
+    acceptLaState('sketch', { digest: 'reopened' })
+    await vi.advanceTimersByTimeAsync(1100)
+
+    expect(calls.filter((c) => c.method === 'PUT').length).toBe(1)
+    expect(calls.filter((c) => c.method === 'DELETE').length).toBe(0)
+  })
+
   it('tells the server the app is gone', () => {
     dropLaState('sketch')
 

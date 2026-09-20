@@ -9,7 +9,7 @@
   import DiffView from './diff/DiffView.svelte'
   import ArtifactFrame from './ArtifactFrame.svelte'
   import * as api from '../lib/api'
-  import { installLaStorageBridge, registerLaIframe, unregisterLaIframe } from '../lib/laStorage'
+  import { registerLaIframe, unregisterLaIframe } from '../lib/laStorage'
 
   // This column never holds the traffic lights, but its top row has to sit on
   // the same axis as the chat title beside it, which Header lifts on mac.
@@ -260,7 +260,6 @@
   // switches apps, so the namespace has to be re-pinned every time.
   let laFrameEl = $state<HTMLIFrameElement | null>(null)
   $effect(() => {
-    installLaStorageBridge()
     const el = laFrameEl
     if (!el) return
     registerLaIframe(el.contentWindow, laCurSlug)
