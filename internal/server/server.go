@@ -2656,6 +2656,28 @@ func (s *Server) validateAgentID(agentID string) error {
 	return fmt.Errorf("agent %q not found", agentID)
 }
 
+// validateSessionAgentID is validateAgentID plus the rule that a conversation
+// session may not be backed by one of the built-in delegation profiles
+// (explore / general / code-review). Those shape a sub-agent's prompt and
+// toolbelt for a delegated task; binding one to a top-level session is a
+// caller mistake — typically an API client passing its subagent_type through
+// as the session's agent_profile — and it then shows up in the sidebar as if
+// the user had picked an expert. "default" is built-in too but is the normal
+// session profile, and a user file shadowing one of the three names loads as
+// SourceUser, so both stay allowed.
+func (s *Server) validateSessionAgentID(agentID string) error {
+	if agentID == "" || agentID == agentprofile.DefaultID {
+		return nil
+	}
+	if err := s.validateAgentID(agentID); err != nil {
+		return err
+	}
+	if p := s.profileForAgent(agentID); p.Source == agentprofile.SourceBuiltin {
+		return fmt.Errorf("agent %q is a built-in sub-agent profile and cannot back a session; pick an expert or omit agent_profile", agentID)
+	}
+	return nil
+}
+
 // agentUserDir is the user-level profile directory (~/.octo/agents).
 func agentUserDir() string {
 	dir, err := datahome.Path("agents")

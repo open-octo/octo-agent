@@ -538,6 +538,10 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	if agentProfile == "" {
 		agentProfile = agentprofile.DefaultID
 	}
+	if err := s.validateSessionAgentID(agentProfile); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	source := req.Source
 	if source == "" {
 		source = "manual"
@@ -1745,7 +1749,7 @@ func (s *Server) handleUpdateSessionAgentProfile(w http.ResponseWriter, r *http.
 	if agentProfile == "" {
 		agentProfile = agentprofile.DefaultID
 	}
-	if err := s.validateAgentID(agentProfile); err != nil {
+	if err := s.validateSessionAgentID(agentProfile); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
