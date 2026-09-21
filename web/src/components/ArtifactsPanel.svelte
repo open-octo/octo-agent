@@ -10,6 +10,7 @@
   import ArtifactFrame from './ArtifactFrame.svelte'
   import * as api from '../lib/api'
   import { registerLaIframe, unregisterLaIframe } from '../lib/laStorage'
+  import { reportingFrames, artifactKey } from '../lib/laState'
 
   // This column never holds the traffic lights, but its top row has to sit on
   // the same axis as the chat title beside it, which Header lifts on mac.
@@ -21,6 +22,13 @@
   const cur = $derived($artifacts[$artifactSel] ?? $artifacts[0])
   // Images render outside the sandboxed iframe and have no source view.
   const curIsImage = $derived(!!cur?.src)
+
+  // A page that publishes its state is one the model can read, which is not
+  // otherwise visible from the outside — the marker is the only thing that
+  // answers "can the agent see this?".
+  const curReporting = $derived(
+    !!cur && !!$activeSessionId && $reportingFrames.has(artifactKey($activeSessionId, cur.path)),
+  )
 
   // Entries observe metadata-only; the body is fetched and the preview built
   // on first selection. Re-runs when a live re-write swaps the entry object,
@@ -589,6 +597,11 @@
           <span class="file-name mono">{cur.name}</span>
           <span class="file-meta">{cur.type}</span>
         </span>
+        {#if curReporting}
+          <span class="reporting" title={$t('artifacts.reporting')} aria-label={$t('artifacts.reporting')}>
+            <iconify-icon icon="ant-design:eye-outlined" width="13"></iconify-icon>
+          </span>
+        {/if}
         <span style="flex:1"></span>
         {#if !curIsImage}
           <div class="seg">
@@ -699,6 +712,9 @@
    to the mode switcher reads as a label for the switcher rather than the
    remains of a filename. */
 .file-id { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
+/* Survives the narrow-panel rule that drops .file-id: of everything in the
+   topbar this is the part a user cannot deduce from the page itself. */
+.reporting { display: flex; align-items: center; flex: 0 0 auto; color: var(--text-tertiary); }
 /* Driven by the panel's own width, not the window's: the panel is dragged
    narrow inside a wide window, which is precisely when the topbar runs out of
    room and the trailing controls get pushed under the panel's edge. Below 400px

@@ -1,11 +1,17 @@
 <script lang="ts">
-  import { artifacts, panelContent, artifactSel, artifactModalOpen, showToast } from '../lib/stores'
+  import { artifacts, panelContent, artifactSel, artifactModalOpen, showToast, activeSessionId } from '../lib/stores'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
   import { hydrateArtifact } from '../lib/artifacts'
   import ArtifactFrame from './ArtifactFrame.svelte'
+  import { reportingFrames, artifactKey } from '../lib/laState'
 
   const cur = $derived($artifacts[$artifactSel] ?? $artifacts[0])
+  // Same marker as the panel's — maximizing must not lose the answer to "can
+  // the agent see this?". See ArtifactsPanel.
+  const curReporting = $derived(
+    !!cur && !!$activeSessionId && $reportingFrames.has(artifactKey($activeSessionId, cur.path)),
+  )
   let modalEl = $state<HTMLDivElement | null>(null)
 
   // Entries observe metadata-only; the body is fetched and the preview built
@@ -75,6 +81,11 @@
         <span class="file-name">{cur.name}</span>
         <span class="file-meta">{cur.type}</span>
       </div>
+      {#if curReporting}
+        <span class="reporting" title={$t('artifacts.reporting')} aria-label={$t('artifacts.reporting')}>
+          <iconify-icon icon="ant-design:eye-outlined" width="13"></iconify-icon>
+        </span>
+      {/if}
       <button class="icon-btn" title={$t('artifacts.copy')} disabled={!cur.loaded || cur.loadFailed} onclick={onCopy}><iconify-icon icon="ant-design:copy-outlined" width="14"></iconify-icon></button>
       <button class="icon-btn" title={$t('artifacts.download')} disabled={!cur.loaded || cur.loadFailed} onclick={onDownload}><iconify-icon icon="ant-design:download-outlined" width="14"></iconify-icon></button>
       <button class="icon-btn" title={$t('artifacts.restore')} onclick={restoreSidebar}>
@@ -146,6 +157,7 @@
 .file-info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .file-name { font-size: 13px; font-weight: 600; color: var(--text-heading); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-meta { font-size: 11px; color: var(--text-tertiary); }
+.reporting { display: flex; align-items: center; flex: 0 0 auto; color: var(--text-tertiary); }
 .icon-btn {
   width: 28px; height: 28px; flex: 0 0 28px; border: none; background: transparent;
   border-radius: 6px; display: flex; align-items: center; justify-content: center;

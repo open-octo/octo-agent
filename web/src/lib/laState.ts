@@ -1,3 +1,5 @@
+import { writable } from 'svelte/store'
+
 // laState.ts — relays a sandboxed page's state snapshot to the server.
 //
 // The page cannot reach the API itself: it runs on its own origin behind a
@@ -99,6 +101,7 @@ function accept(key: string, endpoint: string, msg: LaStatePush): void {
   if (!digest && !summary && !image) return
 
   queued.set(key, { digest, summary, image })
+  reportingFrames.update((s) => (s.has(key) ? s : new Set(s).add(key)))
   schedule(key, endpoint)
 }
 
@@ -109,12 +112,26 @@ function drop(key: string, endpoint: string): void {
   queued.delete(key)
   lastSent.delete(key)
   generation.set(key, (generation.get(key) ?? 0) + 1)
+  reportingFrames.update((s) => {
+    if (!s.has(key)) return s
+    const n = new Set(s)
+    n.delete(key)
+    return n
+  })
   void fetch(endpoint, { method: 'DELETE' }).catch(() => {})
 }
 
 const artifactEndpoint = (session: string, path: string) =>
   `/api/sessions/${encodeURIComponent(session)}/artifacts/state?path=${encodeURIComponent(path)}`
-const artifactKey = (session: string, path: string) => session + '\n' + path
+// The identity a frame reports under — also the key of the server-side mirror
+// entry, so the panel's marker can ask `reportingFrames` about an artifact it
+// only knows by (session, path).
+export const artifactKey = (session: string, path: string) => session + '\n' + path
+
+// The identities currently feeding the mirror — what the panel's "visible to
+// the agent" marker reads. A page enters on its first accepted push and
+// leaves on drop.
+export const reportingFrames = writable<ReadonlySet<string>>(new Set())
 
 /** Accept one `state` message from a session artifact's frame. */
 export function acceptArtifactState(session: string, path: string, msg: LaStatePush): void {

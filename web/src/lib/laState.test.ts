@@ -27,6 +27,7 @@ beforeEach(() => {
   drop()
   dropArtifactState('sess-1', '/tmp/other.html')
   dropArtifactState('sess-9', '/tmp/shared.html')
+  dropArtifactState('sess-2', P)
   calls = []
 })
 
@@ -172,5 +173,19 @@ describe('buildStateForm', () => {
     expect(form.get('digest')).toBe('only this')
     expect(form.get('summary')).toBeNull()
     expect(form.get('image')).toBeNull()
+  })
+})
+
+describe('reportingFrames', () => {
+  it('marks a page on its first accepted push and unmarks on drop', async () => {
+    const { get } = await import('svelte/store')
+    const { reportingFrames } = await import('./laState')
+
+    expect(get(reportingFrames).size).toBe(0)
+    push({ digest: 'hello' })
+    expect([...get(reportingFrames)]).toEqual(['sess-1\n/tmp/work/page.html'])
+
+    drop()
+    expect(get(reportingFrames).size).toBe(0)
   })
 })
