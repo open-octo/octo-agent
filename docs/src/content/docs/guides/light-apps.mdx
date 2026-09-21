@@ -83,7 +83,10 @@ one you reach for constantly — a sketchpad, a calculator, a board — add a `m
 | --- | --- |
 | *omitted* | The Light Apps page only — the default, and what every existing app does. |
 | `"view"` | Its own entry in the left navigation, rendered full-page. |
-| `"panel"` | A slot in the right-hand panel, alongside session artifacts and the diff review. |
+
+`"view"` is the only value. The right-hand panel belongs to the session — its artifacts and its
+diff — and an app is not part of a session; an app that still asks for a slot there lands on the
+Light Apps page like any other.
 
 This is a field you write by hand: the agent does not add it on its own, because whether an app
 deserves a permanent spot in your UI is your call, not its.
@@ -235,8 +238,7 @@ A sketchpad that claims a page of its own. Two files, no build step:
 ```
 
 Reload the Web UI and **Sketchpad** is in the left navigation, with its emoji for
-an icon. Change `mount` to `"panel"` and it moves into the right-hand panel's
-switcher instead, beside session artifacts and the diff review.
+an icon.
 
 The `window.octo.pushState` call is what lets the agent see the drawing: ask it
 "what did I just draw?" and it reads the digest, then looks at the image. See

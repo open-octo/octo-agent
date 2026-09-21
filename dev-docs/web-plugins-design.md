@@ -127,16 +127,15 @@ seed 只投放一次：`~/.octo/themes/.seeded` 记录已投放的 id，所以�
 |---|---|
 | 缺省 | 今天的行为——只在 Light Apps 页的卡片列表里出现 |
 | `"view"` | 侧边栏导航多一项，点击后整页渲染这个 app |
-| `"panel"` | 右侧面板多一个槽位，与 session artifacts / diff 并列 |
 
 缺省即现状，老 Light App 一行不用改。
 
 落点是四处，都很浅：
 
-1. `lightAppManifest` 加 `Mount string \`json:"mount,omitempty"\`` ，服务端校验只接受这两个值，其余当缺省。
+1. `lightAppManifest` 加 `Mount string \`json:"mount,omitempty"\`` ，服务端校验只接受 `"view"`，其余当缺省。
 2. `Sidebar.svelte` 的 `topNav` 数组（形状 `{icon, label, v}`）追加声明了 `mount: "view"` 的项。`view` store 是 `writable('chat')`，纯字符串无联合类型约束，插件 slug 直接作为 view 值即可。
-3. `PanelContent` 类型（`web/src/lib/stores.ts`，现为 `'session' | 'lightapps' | 'diff'`）放宽到可以取一个插件 slug。
-4. `panelForView(v, openApps, sessionId)` 是"某个 view 配哪个面板"的唯一裁决点，插件的面板归属在这里加一条。
+3. 右侧面板不参与：它属于会话（artifacts / diff），app 不是会话的一部分，`PanelContent` 保持
+   `'session' | 'lightapps' | 'diff'`。
 
 **mount 带出的新问题：远程用户会看到一个点不开的入口。** 内置 lightapps 至少还是个列表页，而 mount 到侧边栏的入口在手机上点进去只会拿到 403，看起来像坏功能。解法是复用现成判定——`laAvailable`（`$localAccess && !laHostIsIPv6`）为 false 时，mount 入口整个不渲染。不新建机制，不加提示文案：一个远程用户看不见的入口，好过一个看得见但坏掉的。
 
@@ -154,10 +153,10 @@ seed 只投放一次：`~/.octo/themes/.seeded` 记录已投放的 id，所以�
 
 **mount**
 
-4. 一个声明 `"mount": "view"` 的 Light App 出现在侧边栏，点击整页渲染；声明 `"mount": "panel"` 的出现在右侧面板槽位。
+4. 一个声明 `"mount": "view"` 的 Light App 出现在侧边栏，点击整页渲染。
 5. 不声明 mount 的老 Light App 行为完全不变（仍只在列表页出现）。
 6. 非法 mount 值不会让列表接口失败，按缺省处理。
-7. 远程浏览器（非 `isLocalPeer`）下，mount 入口不出现在侧边栏，也不出现在面板槽位里；Light Apps 列表页本身的行为不变。
+7. 远程浏览器（非 `isLocalPeer`）下，mount 入口不出现在侧边栏；Light Apps 列表页本身的行为不变。
 
 **示例**
 

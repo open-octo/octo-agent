@@ -926,10 +926,11 @@ export interface LightApp {
   // index.html's mtime, stamped by the server on every read. Opaque to the
   // client — it's only ever compared for equality against the copy on screen.
   updated_at?: string
-  // Where the app claims a permanent place in the UI. Absent for every app
-  // that does not ask for one, which is the default. The server drops values
-  // outside this set, so the UI never has to defend against a third.
-  mount?: 'view' | 'panel'
+  // Where the app claims a permanent place in the UI: its own page in the
+  // left navigation. Absent for every app that does not ask for one, which is
+  // the default. The server drops anything else — including the retired
+  // "panel" — so the UI never has to defend against a second value.
+  mount?: 'view'
 }
 
 export interface LightAppDetail {

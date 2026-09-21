@@ -163,7 +163,7 @@ Light Apps live under `~/.octo/light-apps/<slug>/` with two files:
   ```json
   {"slug":"<slug>","name":"<display name>","description":"<one-line>","icon":"<emoji>","created_at":"<ISO-8601>"}
   ```
-  Optional `"mount"` gives the app a permanent place in the UI: `"view"` puts it in the left navigation as its own page, `"panel"` gives it a slot in the right-hand panel beside session artifacts and the diff review. Leave it out — the default — and the app lives on the Light Apps page, which is right for almost everything. Add it only when the user asks for one ("put it in the sidebar", "我想直接从侧边栏打开"), and say that mounted entries only appear when the browser is on the same machine as the server
+  Optional `"mount": "view"` gives the app a permanent place in the UI: its own page in the left navigation. Leave it out — the default — and the app lives on the Light Apps page, which is right for almost everything. Add it only when the user asks for one ("put it in the sidebar", "我想直接从侧边栏打开"), and say that a mounted entry only appears when the browser is on the same machine as the server. It is the only value: the right-hand panel belongs to the session (artifacts, diff), and an app is not part of a session
 - `index.html` — the application. Other files it needs (scripts, styles, images, fonts, models, media) go in the same directory and are referenced by relative path
 
 Create both files with `write_file`. No special tools needed.
