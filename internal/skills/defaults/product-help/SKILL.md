@@ -22,12 +22,13 @@ You have access to octo's product documentation. Use it to answer user questions
    - `IM.md` — the IM/chat bridge (`channels.yml`, supported platforms, `send_message`/`send_file`)
    - `TUI.md` — terminal UI reference (slash commands, keyboard shortcuts, status bar)
    - `WEB.md` — Web UI reference (`octo serve` dashboard: composer shortcuts, mid-turn steer vs. queue)
+   - `THEMES.md` — Web UI themes (`~/.octo/themes/<id>/`: manifest, the light/dark two-block rule, silent-failure traps)
    - `TROUBLESHOOTING.md` — common issues and fixes
 
    Read the relevant file(s) with `read_file` before answering.
 
 2. **Online docs** (fallback, and the source of truth for anything the bundled summaries don't cover) — the public docs site at `https://octo-agent.dev/docs/`, fetched with `web_fetch`:
-   - `guides/<topic>/` for narrative how-tos — e.g. `guides/goals/`, `guides/workflows/`, `guides/loop/`, `guides/cron-tasks/`, `guides/browser-automation/`, `guides/sub-agents/`, `guides/expert-agents/`, `guides/light-apps/`, `guides/sandbox-the-agent/`, `guides/self-host/`, `guides/channels/`, `guides/hooks/`, `guides/use-skills/`, `guides/connect-mcp-servers/`, `guides/memory/`, `guides/memory-backends/`, `guides/profiles/`, `guides/start-screen/` (customizing the new-session page: cards, hero, app shortcuts — including the built-in cards' text, which lives in the frontend's i18n and nowhere a user can open)
+   - `guides/<topic>/` for narrative how-tos — e.g. `guides/goals/`, `guides/workflows/`, `guides/loop/`, `guides/cron-tasks/`, `guides/browser-automation/`, `guides/sub-agents/`, `guides/expert-agents/`, `guides/light-apps/` (reusable HTML mini-apps the agent can author; mounted into the left nav or side panel they are octo's closest thing to plugins), `guides/sandbox-the-agent/`, `guides/self-host/`, `guides/air-gapped/`, `guides/channels/`, `guides/hooks/`, `guides/use-skills/`, `guides/connect-mcp-servers/`, `guides/memory/`, `guides/memory-backends/`, `guides/profiles/`, `guides/genui/`, `guides/customize/` (Web UI customization overview: themes + start screen + mounted Light Apps), `guides/themes/`, `guides/start-screen/` (customizing the new-session page: cards, hero, app shortcuts — including the built-in cards' text, which lives in the frontend's i18n and nowhere a user can open)
    - `reference/<topic>/` for exhaustive lookups — `reference/cli/`, `reference/config-file/`, `reference/permissions/`, `reference/slash-commands/`, `reference/tools/`, `reference/http-api/`, `reference/security/`, `reference/compatibility/`
    - Some topics (`sub-agents`, `expert-agents`, `light-apps`, `sandbox-the-agent`, `self-host`) have a full guide online but no bundled summary file at all — go straight to `web_fetch` for those.
    - For anything neither the bundled docs nor the docs site cover (e.g. an internal design doc under `dev-docs/`), fall back to `https://github.com/open-octo/octo-agent/blob/main/<path>` via `web_fetch`.
