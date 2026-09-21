@@ -10,7 +10,7 @@
 //   - the migration: before the app had an origin, its localStorage lived in
 //     this page's IndexedDB (`octo-la-storage`, keys `{slug}:{key}`) behind a
 //     shim. The server appends a small script to every Light App
-//     (internal/server/lightapp_bridge.js) that asks once per load; the host
+//     (internal/server/frame_bridge.js) that asks once per load; the host
 //     answers with the namespace's entries the first time, the app writes them
 //     into its real storage, and the namespace is marked migrated. The old rows
 //     stay put for now.

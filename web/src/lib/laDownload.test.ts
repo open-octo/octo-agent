@@ -8,7 +8,7 @@ import { sanitizeDownloadName, MAX_DOWNLOAD_BYTES } from './laDownload'
 // The frame-side script is the server's: it is appended to every Light App
 // the origin serves (internal/server/lightapp_origin.go), so the tests run
 // the very bytes that ship. vitest's cwd is web/ (vitest.config.ts).
-const BRIDGE_JS = readFileSync(join(process.cwd(), '..', 'internal', 'server', 'lightapp_bridge.js'), 'utf8')
+const BRIDGE_JS = readFileSync(join(process.cwd(), '..', 'internal', 'server', 'frame_bridge.js'), 'utf8')
 import { nativeShell, toasts } from './stores'
 import { tr } from './i18n'
 import { get } from 'svelte/store'
@@ -157,7 +157,7 @@ function bootBridge(ns: string, download = true): Sent[] {
   const all: Sent[] = []
   const fakeWin = {
     parent: { postMessage: (d: Sent) => all.push(d) },
-    __octoLightApp: { ns, download },
+    __octoBridge: { kind: 'lightapp', ns, download },
     addEventListener() {},
   }
   new Function('window', 'document', BRIDGE_JS)(fakeWin, docProxy)
@@ -301,7 +301,7 @@ describe('injected download script', () => {
   })
 
   it('does nothing when not framed', () => {
-    const top = { parent: null as unknown, __octoLightApp: { ns: 'app-e', download: true }, addEventListener() {} }
+    const top = { parent: null as unknown, __octoBridge: { ns: 'app-e', download: true }, addEventListener() {} }
     top.parent = top
     const before = HTMLAnchorElement.prototype.click
     new Function('window', 'document', BRIDGE_JS)(top, docProxy)
@@ -325,7 +325,7 @@ describe('injected download script', () => {
 
   it('announces itself to the host for the one-time storage migration', () => {
     const all: Sent[] = []
-    const fakeWin = { parent: { postMessage: (d: Sent) => all.push(d) }, __octoLightApp: { ns: 'app-k', download: false }, addEventListener() {} }
+    const fakeWin = { parent: { postMessage: (d: Sent) => all.push(d) }, __octoBridge: { ns: 'app-k', download: false }, addEventListener() {} }
     new Function('window', 'document', BRIDGE_JS)(fakeWin, docProxy)
     expect(all).toEqual([{ __laBridge: 1, id: 0, ns: 'app-k', op: 'migrate-ready' }])
   })
@@ -336,7 +336,7 @@ describe('injected download script', () => {
     let reloaded = 0
     const fakeWin = {
       parent: { postMessage: (d: Sent) => all.push(d) },
-      __octoLightApp: { ns: 'app-m', download: false },
+      __octoBridge: { ns: 'app-m', download: false },
       addEventListener: (_t: string, fn: (ev: unknown) => void) => listeners.push(fn),
       location: { reload: () => { reloaded++ } },
     }

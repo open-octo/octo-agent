@@ -59,13 +59,13 @@ func TestLightAppOrigin_ServesEntryWithBridgeAndAssets(t *testing.T) {
 		}
 		// The bridge rides just before </body>, configured for this slug, with
 		// the download half off under plain serve (a browser downloads itself).
-		if !strings.Contains(body, `window.__octoLightApp={"download":false,"ns":"demo"};`) {
+		if !strings.Contains(body, `window.__octoBridge={"download":false,"kind":"lightapp","ns":"demo"};`) {
 			t.Errorf("GET %s: bridge config missing or wrong: %s", target, body)
 		}
 		if !strings.Contains(body, "op: 'migrate-ready'") {
 			t.Errorf("GET %s: bridge script not injected", target)
 		}
-		if idx := strings.Index(body, "__octoLightApp"); idx < 0 || idx > strings.Index(body, "</body>") {
+		if idx := strings.Index(body, "__octoBridge"); idx < 0 || idx > strings.Index(body, "</body>") {
 			t.Errorf("GET %s: bridge must sit before </body>", target)
 		}
 		if strings.Contains(w.Header().Get("Content-Security-Policy"), "sandbox") {
@@ -93,7 +93,7 @@ func TestLightAppOrigin_DesktopInjectsTheDownloadBridge(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), `window.__octoLightApp={"download":true,"ns":"demo"};`) {
+	if !strings.Contains(w.Body.String(), `window.__octoBridge={"download":true,"kind":"lightapp","ns":"demo"};`) {
 		t.Errorf("desktop must turn the download bridge on: %s", w.Body.String())
 	}
 	// No <body> tag at all: the bridge still lands, at the end.
@@ -111,7 +111,7 @@ func TestLightAppOrigin_LargeEntryIsServed(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("12 MB entry: status = %d, body=%s", w.Code, w.Body.String()[:min(200, w.Body.Len())])
 	}
-	if !strings.Contains(w.Body.String(), "<h1>big</h1>") || !strings.Contains(w.Body.String(), "__octoLightApp") {
+	if !strings.Contains(w.Body.String(), "<h1>big</h1>") || !strings.Contains(w.Body.String(), "__octoBridge") {
 		t.Errorf("large entry lost content or bridge")
 	}
 	over := strings.Repeat(" ", artifactEntryMaxBytes+1)

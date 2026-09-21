@@ -321,7 +321,7 @@ func artifactBridge(g *artifactGrant) []byte {
 		"kind": "artifact",
 		"ns":   g.sessionID + "\n" + g.entry,
 	})
-	return []byte("<script>window.__octoBridge=" + string(cfg) + ";</script>\n<script>" + lightAppBridgeJS + "</script>")
+	return []byte("<script>window.__octoBridge=" + string(cfg) + ";</script>\n<script>" + frameBridgeJS + "</script>")
 }
 
 // serveArtifactAsset serves one file from under root by its cleaned relative

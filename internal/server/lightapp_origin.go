@@ -32,8 +32,8 @@ const (
 	lightAppHostBare   = "apps.localhost"
 )
 
-//go:embed lightapp_bridge.js
-var lightAppBridgeJS string
+//go:embed frame_bridge.js
+var frameBridgeJS string
 
 var bodyCloseRe = regexp.MustCompile(`(?i)</body\s*>`)
 
@@ -88,14 +88,17 @@ func (s *Server) serveLightAppOrigin(w http.ResponseWriter, r *http.Request) {
 }
 
 // lightAppBridge is the script tag pair appended to a Light App entry: the
-// configuration literal, then the embedded bridge. json.Marshal escapes `<`,
-// `>` and `&`, so a slug can never close the script element early.
+// configuration literal, then the embedded bridge — the same frame bridge a
+// session artifact gets (artifactBridge), with the lightapp kind's storage
+// and download halves. json.Marshal escapes `<`, `>` and `&`, so a slug can
+// never close the script element early.
 func (s *Server) lightAppBridge(slug string) []byte {
 	cfg, _ := json.Marshal(map[string]any{
+		"kind":     "lightapp",
 		"ns":       slug,
 		"download": s.cfg.Native != nil,
 	})
-	return []byte("<script>window.__octoLightApp=" + string(cfg) + ";</script>\n<script>" + lightAppBridgeJS + "</script>")
+	return []byte("<script>window.__octoBridge=" + string(cfg) + ";</script>\n<script>" + frameBridgeJS + "</script>")
 }
 
 // injectBeforeBody places script just before the closing body tag, or at the
