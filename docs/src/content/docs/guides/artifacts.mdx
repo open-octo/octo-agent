@@ -1,0 +1,96 @@
+---
+title: Artifacts
+description: Files the agent writes open in a panel beside the conversation — and an HTML artifact can publish what it shows, so you can point at the page instead of describing it.
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+Anything the agent writes that can be rendered — an HTML page, a Markdown document, an image —
+opens in the **Artifacts** panel on the right of the Web UI, beside the conversation that produced
+it. Files written with `write_file` / `edit_file` appear there on their own; anything else the
+agent wants to show it passes to [`show_artifact`](/docs/reference/tools/).
+
+The panel gives an HTML or Markdown artifact a **Preview** / **Code** toggle, and the expand button
+takes the preview full-screen. Images render directly. The switcher at the top left of the panel
+moves between the artifacts of this session and the working tree's diff.
+
+## How an HTML artifact runs
+
+Each one is served from its own origin, `<token>.artifacts.localhost`, so it behaves like an
+ordinary web page: scripts run, `fetch` to a whitelisted CDN works, fullscreen works. octo's own
+API does not exist on that origin, and the page is served behind a policy that closes its network
+exits — so a page the agent wrote cannot read your conversation, your files, or anything else octo
+can reach.
+
+That seal is also why the agent cannot simply read the page back. It has written the HTML, but it
+has no idea what that HTML *renders as* — whether the layout holds, whether the chart drew, whether
+the contrast is legible.
+
+## Letting the agent see it
+
+A page closes that gap by publishing a snapshot of itself. One call, no setup:
+
+```js
+window.octo?.pushState({
+  digest: 'A bar chart of Q3 sales, 8 bars, revenue peaks in September.',
+  summary: { bars: 8, peak: 'September' },   // optional, any JSON
+  image: canvasOrBlob,                        // optional screenshot
+})
+```
+
+- **`digest`** is the contract: one line, written for a reader who cannot see the screen. It is
+  what the agent reads when you gesture at the page — "this chart", "what I selected".
+- **`summary`** rides along as JSON and is handed over uninterpreted.
+- **`image`** takes a `<canvas>` element directly, or a `Blob` — `canvas.toBlob(...)` for anything
+  you drew yourself, a screenshot library for anything you didn't.
+
+Call it on load and again on every meaningful change; octo coalesces a burst into one relay, so a
+canvas firing per stroke is fine. Guard with `window.octo?.` so the page still works when it is
+opened bare in a browser tab.
+
+The agent then has two tools. `artifact_state` lists the pages of this session that are publishing,
+each with its own digest and whether a screenshot is available — cheap enough to check whenever you
+mention the page. `view_artifact` pulls the screenshot into the conversation as a real image, which
+is also how the agent checks its own work: write the page, look at what it actually rendered, fix
+what looks wrong.
+
+An **eye icon in the panel's title bar** means the artifact open there is publishing — that is what
+"can the agent see this?" looks like from the outside. No icon, nothing published.
+
+**Publishing gives the page nothing.** No conversation, no API, no credentials. It is one
+direction: the page describes itself, and that description is all that leaves it.
+
+## Taking what the agent sends
+
+The other direction carries a file the agent produced — a generated image to drop onto a canvas the
+user has been drawing on. Register a handler to accept one:
+
+```js
+window.octo?.onDelivery(({ blob, name, note }) => {
+  // draw it in, display it, or ignore it — it is your page
+})
+```
+
+The agent sends it with `insert_into_artifact`. Images only for now (PNG, JPEG, GIF, WebP), one
+file and a short note, nothing else — no conversation, no instructions to run. A page that
+registers no handler simply never receives anything, and the agent learns how it went the same way
+it learns everything else about the page: by reading what it publishes next.
+
+## What stays out of reach
+
+- **The agent never reads the DOM.** It sees the digest, the summary and the screenshot the page
+  chose to publish, and nothing more.
+- **Scoped to one conversation.** A page can only publish under the identity the Web UI gave its
+  frame, the relay rejects any path the session did not write, and the tools only ever read the
+  current session's mirror. One conversation's artifacts are invisible to another's.
+- **Nothing is written to disk.** Snapshots live in memory: a screenshot is replaced by the next
+  push, goes stale after 5 minutes, is dropped after 30, and disappears the moment the frame
+  closes. Only a screenshot actually handed to the model by `view_artifact` becomes part of the
+  conversation.
+
+## Related
+
+- [Interactive panels (GenUI)](/docs/guides/genui/) — when structure belongs inside the reply
+  instead of in a file
+- [Light Apps](/docs/guides/light-apps/) — pages you keep and reopen; they have their own storage
+  and download contract, and do not publish state

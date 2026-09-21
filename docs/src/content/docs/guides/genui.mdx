@@ -152,7 +152,7 @@ wrong one produces a result that looks wrong without erroring.
 | Use | When |
 |---|---|
 | **Panel** (GenUI) | Disposable structure inside one reply that you might act on right now — a comparison, a status summary, a small form. No reason to exist as a file. |
-| **Artifact** | A deliverable that should outlive the reply — a document, a standalone page, a chart that *is* the output, anything needing a real charting library or a heatmap/sankey/map. Written with `write_file` and shown with [`show_artifact`](/docs/reference/tools/). |
+| **[Artifact](/docs/guides/artifacts/)** | A deliverable that should outlive the reply — a document, a standalone page, a chart that *is* the output, anything needing a real charting library or a heatmap/sankey/map. Written with `write_file` and shown with [`show_artifact`](/docs/reference/tools/). |
 | **[Light App](/docs/guides/light-apps/)** | A tool you'll reopen later, saved and launchable from the Web UI at zero token cost. |
 
 The same line separates a `mermaid` node from a charting artifact: a diagram that explains what

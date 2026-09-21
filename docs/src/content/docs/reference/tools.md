@@ -112,6 +112,9 @@ Search is off (or hasn't activated).
 | `send_message` | proactively push text to an IM chat that is **not** the current conversation (a normal reply already covers the current one) |
 | `send_file` | send a local file over IM — defaults to the current chat; pass `platform`+`chat_id` to target a different one |
 | `show_artifact` | display a built HTML/Markdown/image file in the Web UI's artifact panel |
+| `artifact_state` | what this session's open artifacts say they contain — one digest per publishing page, and whether it published a screenshot. See [Artifacts](/docs/guides/artifacts/) |
+| `view_artifact` | pull an open artifact's published screenshot into the conversation as an image |
+| `insert_into_artifact` | hand an image file to an open artifact, for the page to do what it likes with |
 | `restart_server` | request a server [restart](/docs/guides/self-host/#restarting) (e.g. after a config change); always `ask`-class, never allow-listable. Not available in the desktop build, where the server runs in-process with no supervisor — channel config is applied via hot-reload instead. |
 
 Next: see how tool calls are gated in [The agent loop](/docs/concepts/agent-loop/).

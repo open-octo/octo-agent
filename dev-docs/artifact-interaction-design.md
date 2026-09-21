@@ -51,23 +51,24 @@ app 经 postMessage 桥推出快照，Web UI 转发到 server 的进程内镜像
 
 ## 协议：桥泛化，不新造
 
-现有桥（`lightapp_bridge.js`）的 op 分两类：
+现有桥（`frame_bridge.js`）的 op 分两类：
 
 - **通用交互**：`state`（推快照）、`delivery`（收投递）——制品要用
 - **轻应用专属**：storage migrate、download 代理——制品不需要
   （制品没有 localStorage 契约；下载在制品里走常规浏览器路径）
 
 泛化方式：注入配置从 `window.__octoLightApp = {slug}` 变为带种类的
-`window.__octoBridge = {kind: "artifact", session, path}` 与 `{kind: "lightapp", slug}`，
+`window.__octoBridge = {kind: "artifact", ns: "<session>\n<path>"}` 与
+`{kind: "lightapp", ns: "<slug>", download}`，
 桥 JS 按 kind 装配能力。对页面暴露的 API 不变：`window.octo.pushState(...)` /
 `window.octo.onDelivery(...)`——artifact-design 文档里的示例代码和轻应用示例可以共用。
 
-**server 注入点**：`handleGetArtifact` serve `text/html` 时注入
+**server 注入点**：`serveArtifactOrigin` 交给 `serveArtifactEntry` 时把桥注入入口 HTML
 （复用 `lightapp_origin.go` 的 `injectBeforeBody`）。注入前必须过现有的
 sessionWrotePath 白名单——天然成立：能走到 serve 的 HTML 本来就是会话写出的。
 
 **relay 端点**：新增 `PUT/DELETE /api/sessions/{id}/artifacts/state?path=…`，
-处理逻辑与 `handlePutLightAppState` 相同，但**校验 path 在该会话的制品白名单内**——
+**校验 path 在该会话的制品白名单内**——
 镜像键里的 path 不是浏览器说了算，否则任意页面都能往别的会话的镜像里写。
 
 **投递**：票绑定 `(session_id, path)` 而非 slug，WS 广播不变，Web UI 取字节后

@@ -84,6 +84,7 @@ export default defineConfig({
 						{ label: 'Repeat a task with /loop', slug: 'guides/loop', translations: { 'zh-CN': '用 /loop 重复任务' } },
 						{ label: 'Schedule cron tasks', slug: 'guides/cron-tasks', translations: { 'zh-CN': '定时任务' } },
 						{ label: 'Interactive panels (GenUI)', slug: 'guides/genui', translations: { 'zh-CN': '交互面板（GenUI）' } },
+						{ label: 'Artifacts', slug: 'guides/artifacts', translations: { 'zh-CN': '制品' } },
 						{ label: 'Light Apps', slug: 'guides/light-apps', translations: { 'zh-CN': '轻应用' } },
 						{ label: 'Run more than one octo', slug: 'guides/profiles', translations: { 'zh-CN': '同时跑多个 octo' } },
 						{ label: 'Self-host octo serve', slug: 'guides/self-host', translations: { 'zh-CN': '自托管 octo serve' } },
