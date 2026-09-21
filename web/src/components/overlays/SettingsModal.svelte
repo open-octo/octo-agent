@@ -929,6 +929,26 @@ select.sinput { cursor: pointer; }
 .mobile-disabled { padding: 28px 16px; text-align: center; font-size: 13px; color: var(--text-tertiary); }
 .mono { font-family: var(--font-mono); }
 
+@media (max-width: 640px) {
+  .backdrop { padding: 0; }
+  .modal {
+    max-width: none; height: 100%; border: none; border-radius: 0;
+  }
+  .modal-header { padding: 14px 16px; }
+  .modal-body { flex-direction: column; }
+  .rail {
+    width: 100%; flex: 0 0 auto; flex-direction: row; gap: 2px;
+    border-right: none; border-bottom: 1px solid var(--border); padding: 6px;
+    overflow-x: auto; overflow-y: hidden;
+  }
+  .scat { flex: 0 0 auto; gap: 6px; padding: 8px 9px; white-space: nowrap; }
+  .scat span { font-size: 12px; }
+  .pane { padding: 16px 14px; }
+  .setrow { gap: 12px; }
+  .sinput { width: 150px; }
+  .archive-project-select { width: 120px; }
+}
+
 /* ── data management ─────────────────────────────────────────────────────── */
 .data-row {
   display: flex; align-items: center; justify-content: space-between;
