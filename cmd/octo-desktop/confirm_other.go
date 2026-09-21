@@ -1,12 +1,13 @@
-//go:build !darwin
+//go:build !darwin && !windows
 
 package main
 
 import "github.com/wailsapp/wails/v3/pkg/application"
 
 // platformConfirm asks a yes/no question through Wails' own dialog, blocking
-// until it is answered. Only macOS needs its own alert (see confirm_darwin.go);
-// elsewhere the framework's dialog is what it has always been.
+// until it is answered. macOS and Windows each need their own alert (see
+// confirm_darwin.go and confirm_windows.go); on Linux the framework's dialog is
+// what it has always been.
 func platformConfirm(app *application.App, title, message, okLabel, cancelLabel string) bool {
 	var ok bool
 	dlg := app.Dialog.Question().SetTitle(title).SetMessage(message)
