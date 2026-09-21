@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import 'fake-indexeddb/auto'
 import { registerLaIframe, unregisterLaIframe, registerArtifactFrame, installLaStorageBridge, LA_DB_NAME, LA_STORE } from './laStorage'
-import { acceptLaState, acceptArtifactState, dropArtifactState } from './laState'
+import { acceptLaState, dropLaState, acceptArtifactState, dropArtifactState } from './laState'
 import { vi } from 'vitest'
 
 // The relay itself is covered in laState.test.ts; here the question is only
@@ -179,10 +179,10 @@ describe('artifact frame routing', () => {
 
   it('forgets the artifact server-side when the frame unregisters', async () => {
     const w = makeWin()
-    registerArtifactFrame(w, 'sess-9', '/tmp/page.html')
+    registerArtifactFrame(w, 'sess-9', '/tmp/gone.html')
     unregisterLaIframe(w)
 
-    expect(dropArtifactState).toHaveBeenCalledWith('sess-9', '/tmp/page.html')
+    expect(dropArtifactState).toHaveBeenCalledWith('sess-9', '/tmp/gone.html')
   })
 
   it('an artifact frame never triggers the light-app storage migration', async () => {
@@ -192,5 +192,36 @@ describe('artifact frame routing', () => {
 
     // No reply at all: migration is a light-app contract.
     expect(w.__sent.length).toBe(0)
+  })
+})
+
+describe('double-host frames', () => {
+  // The panel and the maximized modal can both host the same artifact at
+  // once (ArtifactModal mounts a second ArtifactFrame for the same
+  // (session, path)). Closing one must not drop the mirror entry the other
+  // is still feeding.
+  it('drops the mirror entry only when the LAST frame for an identity unregisters', async () => {
+    const panel = makeWin()
+    const modal = makeWin()
+    registerArtifactFrame(panel, 'sess-9', '/tmp/shared.html')
+    registerArtifactFrame(modal, 'sess-9', '/tmp/shared.html')
+
+    unregisterLaIframe(modal)
+    expect(dropArtifactState).not.toHaveBeenCalled()
+
+    unregisterLaIframe(panel)
+    expect(dropArtifactState).toHaveBeenCalledWith('sess-9', '/tmp/shared.html')
+  })
+
+  it('same for a light app open in both the panel and a mounted page', () => {
+    const a = makeWin()
+    const b = makeWin()
+    registerLaIframe(a, 'sketch')
+    registerLaIframe(b, 'sketch')
+
+    unregisterLaIframe(a)
+    expect(dropLaState).not.toHaveBeenCalled()
+    unregisterLaIframe(b)
+    expect(dropLaState).toHaveBeenCalledWith('sketch')
   })
 })

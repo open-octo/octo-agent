@@ -137,7 +137,6 @@ func TestArtifactOrigin_InjectsInteractionBridge(t *testing.T) {
 	}
 }
 
-
 func TestArtifactGrant_RefusedForNonLocalClients(t *testing.T) {
 	f := newOriginFixture(t, "<h1>hi</h1>")
 	body, _ := json.Marshal(map[string]string{"path": f.entry})

@@ -197,33 +197,3 @@ func describeAge(d time.Duration) string {
 // hold; this is about what a tool the model is told to call freely may spend
 // of its context.
 const renderedSummaryMax = 512
-
-// renderLightAppLine is one app's line in the lightapp_state answer.
-//
-// The digest and summary are written by the app, which is third-party code —
-// before this existed, a Light App had no way to put a single byte in front of
-// the model. So they are attributed and quoted rather than stated in octo's
-// own voice: everything indented under the app's name is the app describing
-// itself, not octo reporting a fact.
-func renderLightAppLine(s *LightAppSnapshot, now time.Time) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "- %s — updated %s", s.Slug, describeAge(now.Sub(s.UpdatedAt)))
-	if s.Stale(now) {
-		b.WriteString(" (stale: the user may have moved on)")
-	}
-	if len(s.Image) > 0 {
-		b.WriteString(", has a screenshot you can view")
-	}
-	b.WriteString("\n")
-	if s.Digest != "" {
-		fmt.Fprintf(&b, "  the app says: %q\n", s.Digest)
-	}
-	if len(s.Summary) > 0 {
-		sum := string(s.Summary)
-		if len(sum) > renderedSummaryMax {
-			sum = strings.ToValidUTF8(sum[:renderedSummaryMax], "") + "… (truncated)"
-		}
-		fmt.Fprintf(&b, "  and reports: %s\n", sum)
-	}
-	return b.String()
-}

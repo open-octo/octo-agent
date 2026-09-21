@@ -79,8 +79,14 @@ export function unregisterLaIframe(win: Window | null | undefined): void {
   const reg = laFrames.get(win)
   laFrames.delete(win)
   // The page is gone from the screen, so it must go from the mirror too: the
-  // model should not describe a canvas nobody has open.
+  // model should not describe a canvas nobody has open. But "gone" means no
+  // frame still shows it — the same page can be hosted twice at once (the
+  // panel and the maximized modal), and closing one must not silence the
+  // other.
   if (!reg) return
+  for (const r of laFrames.values()) {
+    if (r.ns === reg.ns) return
+  }
   if (reg.kind === 'artifact' && reg.session !== undefined && reg.path !== undefined) {
     dropArtifactState(reg.session, reg.path)
   } else {
