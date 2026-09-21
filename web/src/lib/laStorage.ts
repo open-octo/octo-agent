@@ -40,33 +40,52 @@ export const LA_STORE = 'kv'
 // namespace dump (which scans `{ns}:`) and can never collide with an app key.
 const MIGRATED_PREFIX = '__octo_migrated__:'
 
-import { acceptLaState, dropLaState } from './laState'
+import { acceptLaState, dropLaState, acceptArtifactState, dropArtifactState } from './laState'
 
-const laFrames = new Map<Window, string>() // iframe window -> namespace
+// One registered frame: a Light App by slug, or a session artifact by
+// (session, path). The ns is the identity the bridge stamps into every
+// message — for an artifact it is `session\npath`, the same key the mirror
+// uses server-side.
+type FrameReg = { ns: string; kind: 'lightapp' | 'artifact'; session?: string; path?: string }
+
+const laFrames = new Map<Window, FrameReg>() // iframe window -> registration
 let bridgeInstalled = false
 
 export function registerLaIframe(win: Window | null | undefined, ns: string): void {
   if (!win) return
-  laFrames.set(win, ns)
+  laFrames.set(win, { ns, kind: 'lightapp' })
+}
+
+// The artifact twin: the panel's preview frame for one HTML artifact of a
+// session. Registering it is what lets the page's bridge reach the mirror —
+// and lets deliveries find it.
+export function registerArtifactFrame(win: Window | null | undefined, session: string, path: string): void {
+  if (!win) return
+  laFrames.set(win, { ns: session + '\n' + path, kind: 'artifact', session, path })
 }
 
 // Reverse lookup for the delivery path: which frame, if any, is currently
-// showing this app. Both hosts (the panel and the mounted full page) register
+// showing this page. Both hosts (the panel and the mounted full page) register
 // here, so either one can receive.
 export function laFrameFor(ns: string): Window | null {
-  for (const [win, n] of laFrames) {
-    if (n === ns) return win
+  for (const [win, r] of laFrames) {
+    if (r.ns === ns) return win
   }
   return null
 }
 
 export function unregisterLaIframe(win: Window | null | undefined): void {
   if (!win) return
-  const ns = laFrames.get(win)
+  const reg = laFrames.get(win)
   laFrames.delete(win)
-  // The app is gone from the screen, so it must go from the mirror too: the
+  // The page is gone from the screen, so it must go from the mirror too: the
   // model should not describe a canvas nobody has open.
-  if (ns) dropLaState(ns)
+  if (!reg) return
+  if (reg.kind === 'artifact' && reg.session !== undefined && reg.path !== undefined) {
+    dropArtifactState(reg.session, reg.path)
+  } else {
+    dropLaState(reg.ns)
+  }
 }
 
 // ── IndexedDB ───────────────────────────────────────────────────────────────
@@ -137,37 +156,48 @@ function laMarkMigrated(ns: string): Promise<unknown> {
 // ── Message router ──────────────────────────────────────────────────────────
 
 function onLaMessage(ev: MessageEvent): void {
-  const ns = laFrames.get(ev.source as Window)
-  if (!ns) return
+  const reg = laFrames.get(ev.source as Window)
+  if (!reg) return
   const d = ev.data as Record<string, unknown> | null
   if (!d || d.__laBridge !== 1) return
-  if (d.ns !== ns) return // stale document from before an app switch
+  if (d.ns !== reg.ns) return // stale document from before an app switch
   const source = ev.source as Window
 
   switch (d.op) {
     case 'migrate-ready':
+      // Storage migration is a Light App contract; an artifact frame asking
+      // for it hears nothing, like any op it has no business sending.
+      if (reg.kind !== 'lightapp') break
       // Nothing to say when the app was born on the origin or already took
       // its data: the frame simply hears no reply and carries on.
-      laIsMigrated(ns)
+      laIsMigrated(reg.ns)
         .then(async (done) => {
           if (done) return
-          const entries = await laDump(ns)
+          const entries = await laDump(reg.ns)
           if (Object.keys(entries).length === 0) return
           source.postMessage({ __laBridge: 1, id: 0, res: true, ok: true, op: 'migrate', value: entries }, '*')
         })
         .catch(() => {})
       break
     case 'migrated':
-      laMarkMigrated(ns).catch(() => {})
+      if (reg.kind !== 'lightapp') break
+      laMarkMigrated(reg.ns).catch(() => {})
       break
     case 'state':
-      // One-way: the app describes itself, the host relays it. Nothing is
-      // sent back, and the app gains no read access by pushing.
-      acceptLaState(ns, d as { digest?: unknown; summary?: unknown; image?: unknown })
+      // One-way: the page describes itself, the host relays it. Nothing is
+      // sent back, and the page gains no read access by pushing.
+      if (reg.kind === 'artifact' && reg.session !== undefined && reg.path !== undefined) {
+        acceptArtifactState(reg.session, reg.path, d as { digest?: unknown; summary?: unknown; image?: unknown })
+      } else {
+        acceptLaState(reg.ns, d as { digest?: unknown; summary?: unknown; image?: unknown })
+      }
       break
     case 'download':
-      // A payload that isn't a Blob or is over the cap is dropped outright
-      // rather than reported back — the bridge never waits for a reply.
+      // Light Apps only — an artifact's downloads are its own origin's
+      // business. A payload that isn't a Blob or is over the cap is dropped
+      // outright rather than reported back — the bridge never waits for a
+      // reply.
+      if (reg.kind !== 'lightapp') return
       if (!(d.blob instanceof Blob) || d.blob.size > MAX_DOWNLOAD_BYTES) return
       void deliverLaDownload(sanitizeDownloadName(d.name), d.blob)
       break

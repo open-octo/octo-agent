@@ -9,8 +9,23 @@
   import type { Artifact } from '../lib/types'
   import { t } from '../lib/i18n'
   import { ARTIFACT_SANDBOX, ARTIFACT_ORIGIN_SANDBOX, probeArtifactOrigin, themeRev } from '../lib/artifacts'
+  import { registerArtifactFrame, unregisterLaIframe } from '../lib/laStorage'
+  import { activeSessionId } from '../lib/stores'
 
   let { artifact }: { artifact: Artifact } = $props()
+
+  // The origin frame's bridge lets the page push state and receive deliveries
+  // — but only if the host registers it: the router serves registered windows
+  // only, and the (session, path) identity comes from here, never from the
+  // page. Unregistering also drops the page from the mirror the model reads.
+  let frameEl = $state<HTMLIFrameElement | null>(null)
+  $effect(() => {
+    const el = frameEl
+    const sid = $activeSessionId
+    if (!el || !sid) return
+    registerArtifactFrame(el.contentWindow, sid, artifact.path)
+    return () => unregisterLaIframe(el.contentWindow)
+  })
 
   // The banner the origin bakes into a gated page carries theme colours, and
   // the origin has no other way to learn the app's theme than its URL. A
@@ -33,7 +48,7 @@
 </script>
 
 {#if artifact.originURL}
-  <iframe {src} sandbox={ARTIFACT_ORIGIN_SANDBOX} allow="fullscreen; clipboard-write" title={artifact.name}></iframe>
+  <iframe bind:this={frameEl} {src} sandbox={ARTIFACT_ORIGIN_SANDBOX} allow="fullscreen; clipboard-write" title={artifact.name}></iframe>
 {:else if artifact.originUnavailable}
   <div class="local-only">
     <iconify-icon icon="ant-design:desktop-outlined" width="28"></iconify-icon>

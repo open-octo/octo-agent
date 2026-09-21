@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { acceptLaState, dropLaState, buildStateForm } from './laState'
+import { acceptLaState, dropLaState, buildStateForm, acceptArtifactState, dropArtifactState } from './laState'
 
 type Call = { url: string; method: string; body: FormData | undefined }
 
@@ -169,5 +169,38 @@ describe('buildStateForm', () => {
     expect(form.get('digest')).toBe('only this')
     expect(form.get('summary')).toBeNull()
     expect(form.get('image')).toBeNull()
+  })
+})
+
+describe('acceptArtifactState', () => {
+  it('relays to the session-scoped artifact endpoint, path as a query', async () => {
+    acceptArtifactState('sess-1', '/tmp/work/dir/a page.html', { digest: 'a chart' })
+    await vi.advanceTimersByTimeAsync(1100)
+
+    expect(calls.length).toBe(1)
+    expect(calls[0].url).toBe('/api/sessions/sess-1/artifacts/state?path=' + encodeURIComponent('/tmp/work/dir/a page.html'))
+    expect(calls[0].method).toBe('PUT')
+    expect(calls[0].body?.get('digest')).toBe('a chart')
+  })
+
+  it('shares the throttle with light apps but not the bucket', async () => {
+    acceptLaState('sketch', { digest: 'app' })
+    acceptArtifactState('sess-1', '/tmp/a.html', { digest: 'page' })
+    await vi.advanceTimersByTimeAsync(1100)
+
+    // Different identities, different queues: both go out.
+    expect(calls.length).toBe(2)
+    const urls = calls.map((c) => c.url).sort()
+    expect(urls[0]).toBe('/api/light-apps/sketch/state')
+    expect(urls[1]).toContain('/api/sessions/sess-1/artifacts/state')
+  })
+
+  it('drop sends the session-scoped DELETE', async () => {
+    acceptArtifactState('sess-1', '/tmp/a.html', { digest: 'x' })
+    await vi.advanceTimersByTimeAsync(1100)
+    dropArtifactState('sess-1', '/tmp/a.html')
+
+    const del = calls.find((c) => c.method === 'DELETE')
+    expect(del?.url).toBe('/api/sessions/sess-1/artifacts/state?path=' + encodeURIComponent('/tmp/a.html'))
   })
 })

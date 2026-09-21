@@ -1,14 +1,18 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import 'fake-indexeddb/auto'
-import { registerLaIframe, unregisterLaIframe, installLaStorageBridge, LA_DB_NAME, LA_STORE } from './laStorage'
-import { acceptLaState } from './laState'
+import { registerLaIframe, unregisterLaIframe, registerArtifactFrame, installLaStorageBridge, LA_DB_NAME, LA_STORE } from './laStorage'
+import { acceptLaState, acceptArtifactState, dropArtifactState } from './laState'
 import { vi } from 'vitest'
 
 // The relay itself is covered in laState.test.ts; here the question is only
 // whether the router hands it the right messages.
-vi.mock('./laState', () => ({ acceptLaState: vi.fn(), dropLaState: vi.fn() }))
+vi.mock('./laState', () => ({ acceptLaState: vi.fn(), dropLaState: vi.fn(), acceptArtifactState: vi.fn(), dropArtifactState: vi.fn() }))
 
 installLaStorageBridge()
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
 
 type Sent = Record<string, unknown> | null
 
@@ -151,5 +155,42 @@ describe('Light App state routing', () => {
     await fromFrame(w, 'state', { digest: 'stray' })
 
     expect(vi.mocked(acceptLaState)).not.toHaveBeenCalled()
+  })
+})
+
+describe('artifact frame routing', () => {
+  it('routes a state push to the artifact relay with its (session, path) identity', async () => {
+    const w = makeWin()
+    registerArtifactFrame(w, 'sess-9', '/tmp/page.html')
+    await fromFrame(w, 'state', { digest: 'a chart' }, 'sess-9\n/tmp/page.html')
+
+    expect(acceptArtifactState).toHaveBeenCalledWith('sess-9', '/tmp/page.html', expect.objectContaining({ digest: 'a chart' }))
+    expect(acceptLaState).not.toHaveBeenCalled()
+  })
+
+  it('drops a push that claims another identity than the registration', async () => {
+    const w = makeWin()
+    registerArtifactFrame(w, 'sess-9', '/tmp/page.html')
+    // A stale document from before the iframe was reused claims a different ns.
+    await fromFrame(w, 'state', { digest: 'stale' }, 'sess-9\n/tmp/other.html')
+
+    expect(acceptArtifactState).not.toHaveBeenCalled()
+  })
+
+  it('forgets the artifact server-side when the frame unregisters', async () => {
+    const w = makeWin()
+    registerArtifactFrame(w, 'sess-9', '/tmp/page.html')
+    unregisterLaIframe(w)
+
+    expect(dropArtifactState).toHaveBeenCalledWith('sess-9', '/tmp/page.html')
+  })
+
+  it('an artifact frame never triggers the light-app storage migration', async () => {
+    const w = makeWin()
+    registerArtifactFrame(w, 'sess-9', '/tmp/page.html')
+    await fromFrame(w, 'migrate-ready', {}, 'sess-9\n/tmp/page.html')
+
+    // No reply at all: migration is a light-app contract.
+    expect(w.__sent.length).toBe(0)
   })
 })
