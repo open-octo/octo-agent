@@ -437,6 +437,9 @@ func (m *BackgroundManager) Start(ctx context.Context, command string, mode Back
 		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 		for scanner.Scan() {
 			line := scanner.Bytes()
+			// Colour codes survive being piped (see stripANSI) and every
+			// consumer of this buffer renders it as plain text.
+			line = stripANSI(line)
 			// Tabs break the TUI's cursor-position math; replace with spaces.
 			line = bytes.ReplaceAll(line, []byte{'\t'}, []byte("    "))
 			p.append(append(line, '\n')) // append copies
