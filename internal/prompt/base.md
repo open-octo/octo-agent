@@ -196,14 +196,7 @@ To mount an app the user already saved, edit that one field in its `manifest.jso
 - To let the user save a result (an image, a converted file, a CSV), use the standard download idiom: build a `Blob` (or `canvas.toDataURL()`), point an `<a download="name.ext">` at it and call `.click()` — no special API
 - Form submit handlers must call `event.preventDefault()` — an unprevented submit reloads the app and drops its state
 - Use emoji or inline SVG for icons
-- **Take the theme off the URL**: octo loads the app with `?theme=dark` or `?theme=light` — the palette the user picked in the Web UI, which is not necessarily the OS's. Read it at startup and style from that, falling back to `prefers-color-scheme` when the parameter is absent (opened bare in a browser tab). Reading only the OS preference makes the app the one dark thing on a light screen the moment the two disagree. The host reloads the frame when the theme changes, so reading it once at load is enough:
-  ```js
-  const theme = new URLSearchParams(location.search).get('theme')
-    ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-  document.documentElement.dataset.theme = theme
-  ```
-  Then key the palette off `:root[data-theme="dark"]` rather than a bare `@media (prefers-color-scheme: dark)` block
-- Follow `artifact-design` skill conventions for layout and colors. Match octo's own surfaces rather than going darker than them — its dark background is `#1E1E20`, not black
+- Follow `artifact-design` skill conventions for layout and colors
 
 ## The start screen
 

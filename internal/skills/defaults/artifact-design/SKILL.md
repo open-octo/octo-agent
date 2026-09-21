@@ -61,13 +61,28 @@ legibility at the panel's docked width.
   side-by-side diagram lanes need an explicit `@media (max-width: 720px)` (or
   tighter) fallback to a single column, or they'll clip or force horizontal
   scroll in the default view.
-- **Theme support is one-directional.** Only `@media (prefers-color-scheme:
-  dark)` is a live signal in octo today — the panel does not push its own
-  light/dark toggle state into the iframe (unlike some other artifact
-  hosts). Still write `:root[data-theme="dark"]` / `:root[data-theme="light"]`
-  overrides alongside the media query — they're free, harmless if unused, and
-  correct if that wiring ever lands — but don't rely on them being live; the
-  media query is what actually renders today for most users.
+- **The theme arrives on the URL — read it.** octo loads the page with
+  `?theme=dark` or `?theme=light`: the palette the user picked in the Web UI,
+  which is not necessarily the OS's. Nothing applies it for you, so a page that
+  only watches `prefers-color-scheme` follows the OS and becomes the one dark
+  rectangle on a light screen the moment the two disagree. Apply it at startup
+  and key the palette off `data-theme`, keeping the media query as the fallback
+  for a page opened bare in a browser tab:
+
+  ```html
+  <script>
+    document.documentElement.dataset.theme =
+      new URLSearchParams(location.search).get('theme')
+      ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+  </script>
+  ```
+
+  Put it in `<head>`, before the body paints, or the page flashes the wrong
+  palette first. octo reloads the frame when the theme changes, so reading it
+  once at load is enough — no listener.
+- **Don't out-dark the UI.** octo's own dark surfaces are `#1E1E20` (layout)
+  and `#2C2C2E` (containers). A page that goes to near-black reads as a hole
+  punched in the window rather than part of it.
 - **Update in place, not by versioning.** Re-running `write_file`/`edit_file`
   against the *same absolute path* updates that same panel entry rather than
   creating a new one. If you're iterating on a diagram, keep writing the same
@@ -108,7 +123,7 @@ Before calling `write_file`/`show_artifact`, confirm:
       font and use the stack alone
 - [ ] Any image is a file beside the page or a `data:` URI, never a network
       URL at the network's mercy
-- [ ] `@media (prefers-color-scheme: dark)` covers every color used, and every
+- [ ] The theme is read off the URL in `<head>`, and `:root[data-theme="dark"]` covers every color used, and every
       color has a light-mode default that isn't just "assume light"
 - [ ] The narrowest layout (~380px) has no fixed-pixel widths wider than the
       viewport and no unintended horizontal scroll on the page body — wrap
@@ -140,13 +155,20 @@ well-made "layered boxes with a few connectors" diagrams:
 Skeleton:
 
 ```html
+<script>
+  // The theme octo resolved, applied before anything paints. See above.
+  document.documentElement.dataset.theme =
+    new URLSearchParams(location.search).get('theme')
+    ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+</script>
 <style>
   :root { --bg:#fafaf9; --ink:#1c1917; --line:#d6d3d1; --accent:#2563eb; --accent-soft:#eff6ff; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#0c0a09; --ink:#f5f5f4; --line:#292524; --accent:#60a5fa; --accent-soft:#172033; }
-  }
-  :root[data-theme="dark"] { --bg:#0c0a09; --ink:#f5f5f4; --line:#292524; --accent:#60a5fa; --accent-soft:#172033; }
+  :root[data-theme="dark"] { --bg:#1e1e20; --ink:#f5f5f4; --line:#3a3a3d; --accent:#60a5fa; --accent-soft:#172033; }
   :root[data-theme="light"] { --bg:#fafaf9; --ink:#1c1917; --line:#d6d3d1; --accent:#2563eb; --accent-soft:#eff6ff; }
+  /* The fallback for a page opened outside octo, where no theme rides the URL. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) { --bg:#1e1e20; --ink:#f5f5f4; --line:#3a3a3d; --accent:#60a5fa; --accent-soft:#172033; }
+  }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 -apple-system,BlinkMacSystemFont,sans-serif; }
   .wrap { padding: 20px 16px; }
