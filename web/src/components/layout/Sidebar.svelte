@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import { get } from 'svelte/store'
-  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen, cmdkOpen, nativeShell, isDesktopShell, dirLeaf, lightapps, mountedViews, loadLightApps } from '../../lib/stores'
+  import { view, sidebar, sessions, sessionGroups, pinnedSessions, collapsedSessions, editGroupId, editGroupDraft, activeSessionId, selMode, sel, menuFor, editId, editDraft, showToast, mcpServers, createNewSession, createSessionInGroup, clearPendingSessionOpts, settingsModalOpen, cmdkOpen, nativeShell, isDesktopShell, dirLeaf, mountedViews, loadLightApps } from '../../lib/stores'
   import * as api from '../../lib/api'
   import { titlebarDblClick } from '../../lib/nativeWindow'
   import { t, tr } from '../../lib/i18n'
@@ -122,19 +122,6 @@
     { icon: 'ant-design:mobile-outlined', label: 'nav.channels', v: 'channels' },
   ]
 
-  // An app reached WITHOUT a mount (a start-screen shortcut, a bookmarked
-  // hash) owns no row in the nav group, so the sidebar would show nothing
-  // active and the desktop shell — no browser back button — would leave no
-  // named way out. Give it a transient row while it is the view; it vanishes
-  // on navigating away, which is what keeps it honest next to mounted apps.
-  const transientAppNav = $derived.by(() => {
-    if (!$view.startsWith('app:')) return []
-    const slug = $view.slice(4)
-    if ($mountedViews.some(a => a.slug === slug)) return []
-    const app = $lightapps.find(a => a.slug === slug)
-    if (!app) return []
-    return [{ icon: '', emoji: app.icon || '\u{1F9E9}', label: app.name || app.slug, raw: true, v: $view }]
-  })
   // The nav group, in both widths: the destinations worth a row of their own,
   // followed by the Light Apps that asked for one (manifest `mount: "view"`).
   // A mounted app names itself — its label is the manifest's name, not an i18n
@@ -149,7 +136,6 @@
       raw: true,
       v: `app:${a.slug}`,
     })),
-    ...transientAppNav,
   ])
   // The viewport widths the sidebar changes shape at: below RAIL_BELOW there is
   // no room for session titles beside the content, below HIDDEN_BELOW none for
