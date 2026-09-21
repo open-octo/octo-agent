@@ -137,8 +137,17 @@
       v: `app:${a.slug}`,
     })),
   ])
-  function goToMore(v: string) {
+  function closeOnMobile() {
+    if (window.innerWidth < 640) sidebar.set('hidden')
+  }
+
+  function navigateTo(v: string) {
     view.set(v as any)
+    closeOnMobile()
+  }
+
+  function goToMore(v: string) {
+    navigateTo(v)
     morePopoverOpen = false
   }
 
@@ -675,12 +684,12 @@
            to the same landing page they go to, and its active state is being ON
            that landing page — chat view with no session picked. -->
       <div class="nav-group">
-        <div class="nav-row" class:solid={onLanding} onclick={() => createNewSession()}>
+        <div class="nav-row" class:solid={onLanding} onclick={() => { createNewSession(); closeOnMobile() }}>
           <iconify-icon icon="ant-design:plus-circle-outlined" width="14" style="color:{onLanding ? 'var(--blue-6)' : 'var(--text-tertiary)'}"></iconify-icon>
           <span style="font-size:13px;color:{onLanding ? 'var(--blue-6)' : 'var(--text-secondary)'};font-weight:{onLanding ? '600' : '400'};">{$t('nav.new_session')}</span>
         </div>
         {#each topNav as item (item.v)}
-        <div class="nav-row" class:solid={navActive(item.v)} onclick={() => view.set(item.v as any)}>
+        <div class="nav-row" class:solid={navActive(item.v)} onclick={() => navigateTo(item.v)}>
           {#if item.emoji}
             <span class="nav-emoji">{item.emoji}</span>
           {:else}
@@ -935,7 +944,7 @@
           class:menu-open={menuOpen}
           onclick={() => {
           if ($selMode) { if (!isPinned(s.id)) toggleSel(s.id) }
-          else { view.set('chat'); activeSessionId.set(s.id); menuFor.set(null) }
+          else { navigateTo('chat'); activeSessionId.set(s.id); menuFor.set(null) }
         }}
         >
           {#if $selMode && !isPinned(s.id)}
@@ -1100,7 +1109,7 @@
     </div>
     {:else}
     <div class="footer">
-      <div class="footer-settings" style="color:{$settingsModalOpen ? 'var(--blue-6)' : 'var(--text-secondary)'}" onclick={() => settingsModalOpen.set(true)}>
+      <div class="footer-settings" style="color:{$settingsModalOpen ? 'var(--blue-6)' : 'var(--text-secondary)'}" onclick={() => { settingsModalOpen.set(true); closeOnMobile() }}>
         <iconify-icon icon="ant-design:setting-outlined" width="14"></iconify-icon>
         <span>{$t('nav.settings')}</span>
       </div>
@@ -1113,7 +1122,7 @@
   {#if $sidebar === 'rail'}
   <div class="rail">
     <div class="rail-new" class:native-inset={isDesktopShell && isMac}>
-      <button class="rail-btn primary" title={$t('nav.new_session')} onclick={() => createNewSession()}>
+      <button class="rail-btn primary" title={$t('nav.new_session')} onclick={() => { createNewSession(); closeOnMobile() }}>
         <iconify-icon icon="ant-design:plus-outlined" width="16"></iconify-icon>
       </button>
     </div>
@@ -1123,7 +1132,7 @@
         class="rail-btn"
         class:active={navActive(item.v)}
         title={item.raw ? item.title : $t(item.title)}
-        onclick={() => view.set(item.v as any)}
+        onclick={() => navigateTo(item.v)}
       >
         {#if item.emoji}
           <span class="nav-emoji rail">{item.emoji}</span>
@@ -1152,7 +1161,7 @@
         class="rail-btn"
         class:active={navActive(item.v)}
         title={item.raw ? item.title : $t(item.title)}
-        onclick={() => view.set(item.v as any)}
+        onclick={() => navigateTo(item.v)}
       >
         {#if item.emoji}
           <span class="nav-emoji rail">{item.emoji}</span>
@@ -1163,7 +1172,7 @@
       {/each}
     </div>
     <div class="rail-footer">
-      <button class="rail-btn" class:active={$settingsModalOpen} title={$t('nav.settings')} onclick={() => settingsModalOpen.set(true)}>
+      <button class="rail-btn" class:active={$settingsModalOpen} title={$t('nav.settings')} onclick={() => { settingsModalOpen.set(true); closeOnMobile() }}>
         <iconify-icon icon="ant-design:setting-outlined" width="16"></iconify-icon>
       </button>
     </div>
