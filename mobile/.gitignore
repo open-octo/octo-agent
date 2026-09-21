@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 dist/
 # Build artifact: the bundled web frontend (npm run bundle-web).
 www/
