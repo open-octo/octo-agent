@@ -111,6 +111,33 @@ func TestArtifactGrant_IssuesAndReusesToken(t *testing.T) {
 	}
 }
 
+// TestArtifactOrigin_InjectsInteractionBridge: the entry carries the bridge
+// that lets the page push state and receive deliveries, configured with the
+// (session, path) identity the mirror is keyed by — and nothing else: the
+// bridge must not learn a byte beyond what the grant already knows.
+func TestArtifactOrigin_InjectsInteractionBridge(t *testing.T) {
+	f := newOriginFixture(t, "<html><body><h1>hi</h1></body></html>")
+	tok := f.token(t)
+
+	w := f.originGet(t, tok, "/")
+	if w.Code != http.StatusOK {
+		t.Fatalf("entry status = %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `window.__octoBridge={"kind":"artifact"`) {
+		t.Errorf("entry lacks the artifact bridge config:\n%s", body)
+	}
+	if !strings.Contains(body, f.sessionID) || !strings.Contains(body, f.entry) {
+		t.Errorf("bridge config should carry the (session, path) identity:\n%s", body)
+	}
+	// Injected before the closing body tag, where the bridge's own comment
+	// promises it lands.
+	if strings.Index(body, "__octoBridge") > strings.Index(body, "</body>") {
+		t.Error("bridge landed after </body>")
+	}
+}
+
+
 func TestArtifactGrant_RefusedForNonLocalClients(t *testing.T) {
 	f := newOriginFixture(t, "<h1>hi</h1>")
 	body, _ := json.Marshal(map[string]string{"path": f.entry})

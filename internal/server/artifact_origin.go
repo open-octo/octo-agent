@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"net"
 	"net/http"
 	"os"
@@ -302,10 +303,25 @@ func (s *Server) serveArtifactOrigin(w http.ResponseWriter, r *http.Request) {
 
 	p := path.Clean("/" + r.URL.Path)
 	if p == "/" || p == "/index.html" || p == "/"+filepath.Base(g.entry) {
-		serveArtifactEntry(w, r, g.entry, nil)
+		serveArtifactEntry(w, r, g.entry, artifactBridge(g))
 		return
 	}
 	serveArtifactAsset(w, r, g.root, strings.TrimPrefix(p, "/"))
+}
+
+// artifactBridge is the script tag pair appended to a session artifact's
+// entry: the configuration literal, then the embedded bridge — the same
+// bridge a Light App gets (lightAppBridge), assembled here for the
+// interaction half (state push, delivery) rather than storage. The ns is the
+// mirror key, session + path, so the host can tell a stale document's late
+// message from the live one's. json.Marshal escapes `<`, `>` and `&`, so the
+// paths can never close the script element early.
+func artifactBridge(g *artifactGrant) []byte {
+	cfg, _ := json.Marshal(map[string]any{
+		"kind": "artifact",
+		"ns":   g.sessionID + "\n" + g.entry,
+	})
+	return []byte("<script>window.__octoBridge=" + string(cfg) + ";</script>\n<script>" + lightAppBridgeJS + "</script>")
 }
 
 // serveArtifactAsset serves one file from under root by its cleaned relative
@@ -342,10 +358,10 @@ func serveArtifactAsset(w http.ResponseWriter, r *http.Request, root, rel string
 }
 
 // serveArtifactEntry sends an entry document through the external-reference
-// gate, with an optional script appended before </body> (the Light App
-// bridge; nil for session artifacts). Theme comes from the frame's own URL
-// (?theme=dark) because the banner bakes its colours in and the origin has no
-// other way to learn the app's theme.
+// gate, with an optional script appended before </body> (the bridge: storage
+// for a Light App, state/delivery for a session artifact). Theme comes from
+// the frame's own URL (?theme=dark) because the banner bakes its colours in
+// and the origin has no other way to learn the app's theme.
 func serveArtifactEntry(w http.ResponseWriter, r *http.Request, entry string, inject []byte) {
 	fi, err := os.Stat(entry)
 	if err != nil || fi.IsDir() {
