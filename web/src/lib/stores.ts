@@ -206,9 +206,15 @@ export const lightappSel = writable<string>('')
 // loaded and empty for almost everyone — see loadLanding.
 export const landing = writable<import('./api').LandingConfig>({})
 
-// Read once per page load, and nothing waits on it: the built-in cards paint
-// first and an override replaces them when the answer lands. One small request,
-// and the answer cannot change without a file edit.
+// Nothing waits on this: the built-in cards paint first and an override
+// replaces them when the answer lands.
+//
+// Re-read rather than cached for the page's lifetime. The config is a file the
+// user edits in an editor — and one the agent itself writes, mid-session, when
+// asked to make the start screen theirs. The browser could pick that up with a
+// refresh; the desktop shell has no refresh, so a cached read meant quitting
+// the app to see your own edit. Callers re-ask whenever the start screen comes
+// into view (App.svelte); only concurrent asks share a request.
 let landingRequest: Promise<void> | null = null
 export function loadLanding(): Promise<void> {
   if (landingRequest) return landingRequest
@@ -219,6 +225,9 @@ export function loadLanding(): Promise<void> {
     })
     .catch(() => {
       // The built-in cards are the fallback, and they are already on screen.
+    })
+    .finally(() => {
+      landingRequest = null
     })
   return landingRequest
 }

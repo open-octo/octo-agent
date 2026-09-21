@@ -72,7 +72,24 @@
   // listener, for as long as the app runs.
   onMount(() => {
     installLaStorageBridge()
-    void loadLanding()
+  })
+
+  // The start screen is read from a file (~/.octo/landing/config.json) that
+  // the user edits by hand — and that the agent writes itself when asked to
+  // make that screen theirs. Re-read whenever the screen comes into view, and
+  // again when the window regains focus while it is showing: the edit usually
+  // happens in another window, and the desktop shell has no refresh to fall
+  // back on. This also covers the first read, since the effect runs at mount.
+  const onStartScreen = $derived($view === 'chat' && !$activeSessionId)
+  $effect(() => {
+    if (onStartScreen) void loadLanding()
+  })
+  onMount(() => {
+    const onFocus = () => {
+      if (get(view) === 'chat' && !get(activeSessionId)) void loadLanding()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
   })
 
   // Switching chats must never leave the previous session's diff on screen: the

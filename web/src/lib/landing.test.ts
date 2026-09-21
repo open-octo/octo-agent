@@ -14,7 +14,7 @@ vi.stubGlobal('localStorage', {
 const getLanding = vi.fn()
 vi.mock('./api', () => ({ getLanding: () => getLanding() }))
 
-// The read is once per page load, so each case needs its own module instance
+// The module holds the config in a store, so each case needs its own instance
 // rather than a reset hook that only tests would use.
 async function freshStores() {
   vi.resetModules()
@@ -26,7 +26,7 @@ beforeEach(() => {
 })
 
 describe('loadLanding', () => {
-  it('reads once however many callers ask', async () => {
+  it('shares one request between callers asking at the same time', async () => {
     getLanding.mockResolvedValue({ title: 'mine' })
     const { landing, loadLanding } = await freshStores()
 
@@ -34,6 +34,35 @@ describe('loadLanding', () => {
 
     expect(getLanding).toHaveBeenCalledTimes(1)
     expect(get(landing).title).toBe('mine')
+  })
+
+  // The config is a file the user edits in another window, and the agent
+  // rewrites it mid-session. The desktop shell has no refresh, so a read
+  // cached for the page's lifetime meant quitting the app to see the edit.
+  it('reads again once the previous read has settled', async () => {
+    getLanding.mockResolvedValueOnce({ title: 'first' }).mockResolvedValueOnce({ title: 'second' })
+    const { landing, loadLanding } = await freshStores()
+
+    await loadLanding()
+    expect(get(landing).title).toBe('first')
+
+    await loadLanding()
+
+    expect(getLanding).toHaveBeenCalledTimes(2)
+    expect(get(landing).title).toBe('second')
+  })
+
+  // A failed read must not wedge the sharing slot shut, or the next visit to
+  // the start screen would never ask again.
+  it('asks again after a failed read', async () => {
+    getLanding.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ title: 'back' })
+    const { landing, loadLanding } = await freshStores()
+
+    await loadLanding()
+    await loadLanding()
+
+    expect(getLanding).toHaveBeenCalledTimes(2)
+    expect(get(landing).title).toBe('back')
   })
 
   it('leaves the built-in cards in place when the request fails', async () => {
