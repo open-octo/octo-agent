@@ -112,12 +112,14 @@ octo-agent 已经有一套完整的生成 + 展示循环：Agent 生成 HTML →
 ### 服务端注入的桥脚本
 
 服务端在入口 `</body>` 前追加两段 `<script>`：一行配置
-`window.__octoLightApp={"download":<bool>,"ns":"<slug>"}`（`json.Marshal` 会转义 `<>&`，slug 无法提前
-闭合脚本），以及嵌入二进制的 `internal/server/lightapp_bridge.js`。它和宿主之间沿用 `__laBridge`
-信封，宿主侧的路由在 `web/src/lib/laStorage.ts`：只听面板用 `registerLaIframe` 登记过的窗口，
-且消息里的 `ns` 必须等于登记的 slug（iframe 元素在切换应用时复用，旧文档的迟到消息不能落进新应用）。
+`window.__octoBridge={"kind":"lightapp","ns":"<slug>","download":<bool>}`（`json.Marshal` 会转义
+`<>&`，slug 无法提前闭合脚本），以及嵌入二进制的 `internal/server/frame_bridge.js`。这个桥由
+轻应用和会话制品共用，`kind` 决定装配哪半边——轻应用装存储迁移和下载桥，制品装状态推送和投递
+（见 `artifact-interaction-design.md`）。它和宿主之间沿用 `__laBridge` 信封，宿主侧的路由在
+`web/src/lib/laStorage.ts`：只听面板用 `registerLaIframe` 登记过的窗口，且消息里的 `ns` 必须等于
+登记的 slug（iframe 元素在切换应用时复用，旧文档的迟到消息不能落进新应用）。
 
-桥脚本做两件事：
+轻应用这一半做两件事：
 
 - **存储迁移（一次性）。** 独立源之前，应用的 `localStorage` 由宿主页面的 IndexedDB
   （库 `octo-la-storage`、store `kv`、键 `{slug}:{key}`）经 shim 代管。现在真 `localStorage` 是唯一存储，
