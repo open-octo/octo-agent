@@ -55,6 +55,15 @@ not switch profiles: that restarts the backend, so it lives in the desktop tray 
 `octo serve --profile <name>` launch. CLI twin: `octo profiles` (`CLI.md`); guide:
 **https://octo-agent.dev/docs/guides/profiles/**.
 
+## The start screen
+
+The new-session page (four starter cards, optional hero, Light App shortcut chips) is customizable
+via `~/.octo/landing/config.json` — `cards` replaces the built-in four wholesale (omit `cards` to
+keep them), `hero` takes an image file beside the config or one embedded Light App, `apps` lists
+Light App slugs. The built-in cards' text lives in the web UI's i18n, not in any user-readable file;
+the guide lists it. Full schema and the built-in four:
+**https://octo-agent.dev/docs/guides/start-screen/** (`web_fetch`).
+
 ## Related docs
 
 - Serving it, remote access, and auth: **https://octo-agent.dev/docs/guides/self-host/**
