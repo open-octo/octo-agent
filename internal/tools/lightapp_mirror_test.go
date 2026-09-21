@@ -23,12 +23,9 @@ func TestLightAppMirror_EvictsAbandoned(t *testing.T) {
 	})
 	PutLightApp(LightAppSnapshot{Slug: "live", Digest: "still open"})
 
-	out := runTool(t, LightAppStateTool{}, nil)
-	if strings.Contains(out, "ghost") {
-		t.Errorf("an abandoned app is still being reported:\n%s", out)
-	}
-	if !strings.Contains(out, "live") {
-		t.Errorf("eviction took a live app with it:\n%s", out)
+	out := lightAppSnapshots()
+	if len(out) != 1 || out[0].Slug != "live" {
+		t.Errorf("eviction took a live app with it or kept the ghost: %+v", out)
 	}
 	if lightAppSnapshot("ghost") != nil {
 		t.Error("the abandoned snapshot is still held in memory")
@@ -46,12 +43,12 @@ func TestLightAppMirror_StaleIsNotEvicted(t *testing.T) {
 		UpdatedAt: time.Now().Add(-2 * lightAppStaleAfter),
 	})
 
-	out := runTool(t, LightAppStateTool{}, nil)
-	if !strings.Contains(out, "sketch") {
-		t.Fatalf("a stale app should still be reported:\n%s", out)
+	out := lightAppSnapshots()
+	if len(out) != 1 || out[0].Slug != "sketch" {
+		t.Fatalf("a stale app should still be listed: %+v", out)
 	}
-	if !strings.Contains(out, "stale") {
-		t.Errorf("and it should be labelled stale:\n%s", out)
+	if !out[0].Stale(time.Now()) {
+		t.Error("and it should report itself stale")
 	}
 }
 

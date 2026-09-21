@@ -62,8 +62,6 @@ var allTools = []tool{
 	MemoryRecallTool{},
 	ArtifactStateTool{},
 	ArtifactViewTool{},
-	LightAppStateTool{},
-	LightAppViewTool{},
 	LightAppInsertTool{},
 }
 
