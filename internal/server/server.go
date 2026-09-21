@@ -559,11 +559,11 @@ func New(cfg Config) (*Server, error) {
 		goalLastStatus:      make(map[string]agent.GoalStatus),
 	}
 
-	// Lets insert_into_lightapp reach the browser: the tool runs in this
-	// process, the app runs in a frame that cannot call this API at all. A CLI
-	// session never installs one, and the tool then says Light Apps are out of
-	// reach instead of silently dropping the file.
-	s.installLightAppDeliverer()
+	// Lets insert_into_artifact reach the browser: the tool runs in this
+	// process, the frame runs in a page that cannot call this API at all. A
+	// CLI session never installs one, and the tool then says the panel is out
+	// of reach instead of silently dropping the file.
+	s.installArtifactDeliverer()
 
 	// Register the WebSocket-backed asker so ask_user_question appears in the
 	// tool catalog and can be dispatched through the browser.
@@ -882,6 +882,7 @@ func (s *Server) registerRoutes() {
 	s.api("POST /api/sessions/{id}/artifacts/grant", s.handleGrantArtifactOrigin)
 	s.api("PUT /api/sessions/{id}/artifacts/state", s.handlePutArtifactState)
 	s.api("DELETE /api/sessions/{id}/artifacts/state", s.handleDeleteArtifactState)
+	s.api("GET /api/sessions/{id}/artifacts/delivery/{ticket}", s.handleGetArtifactDelivery)
 	s.api("GET /api/sessions/{id}/diff", s.handleGetSessionDiff)
 	s.api("GET /api/sessions/{id}/diff/file", s.handleGetSessionFileDiff)
 	s.api("DELETE /api/sessions/{id}", s.handleDeleteSession)
@@ -965,9 +966,6 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/light-apps", s.handleListLightApps)
 	s.api("GET /api/light-apps/{slug}", s.handleGetLightApp)
 	s.api("DELETE /api/light-apps/{slug}", s.handleDeleteLightApp)
-	s.api("PUT /api/light-apps/{slug}/state", s.handlePutLightAppState)
-	s.api("DELETE /api/light-apps/{slug}/state", s.handleDeleteLightAppState)
-	s.api("GET /api/light-apps/{slug}/delivery/{id}", s.handleGetLightAppDelivery)
 	s.api("GET /api/trash", s.handleGetTrash)
 	s.api("POST /api/trash/empty", s.handleEmptyTrash)
 	s.api("POST /api/trash/{id}/restore", s.handleRestoreTrash)

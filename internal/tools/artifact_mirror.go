@@ -169,8 +169,25 @@ func artifactSnapshots(session string) []*ArtifactSnapshot {
 	return out
 }
 
-// describeAge and renderedSummaryMax live in lightapp_mirror.go while the
-// light-app mirror still exists; they move here when slice 2 deletes it.
+// describeAge renders the "updated N ago" line the digest carries.
+func describeAge(d time.Duration) string {
+	switch {
+	case d < 2*time.Second:
+		return "just now"
+	case d < time.Minute:
+		return fmt.Sprintf("%ds ago", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	default:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	}
+}
+
+// renderedSummaryMax is what one page may contribute to an artifact_state
+// answer. The ingest cap (maxArtifactSummary) is about what the mirror will
+// hold; this is about what a tool the model is told to call freely may spend
+// of its context.
+const renderedSummaryMax = 512
 
 // renderArtifactLine is one page's line in the artifact_state answer.
 //

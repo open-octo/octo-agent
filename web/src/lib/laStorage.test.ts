@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import 'fake-indexeddb/auto'
 import { registerLaIframe, unregisterLaIframe, registerArtifactFrame, installLaStorageBridge, LA_DB_NAME, LA_STORE } from './laStorage'
-import { acceptLaState, dropLaState, acceptArtifactState, dropArtifactState } from './laState'
+import { acceptArtifactState, dropArtifactState } from './laState'
 import { vi } from 'vitest'
 
 // The relay itself is covered in laState.test.ts; here the question is only
 // whether the router hands it the right messages.
-vi.mock('./laState', () => ({ acceptLaState: vi.fn(), dropLaState: vi.fn(), acceptArtifactState: vi.fn(), dropArtifactState: vi.fn() }))
+vi.mock('./laState', () => ({ acceptArtifactState: vi.fn(), dropArtifactState: vi.fn() }))
 
 installLaStorageBridge()
 
@@ -121,43 +121,6 @@ describe('Light App storage migration', () => {
     expect(w.__sent).toEqual([])
   })
 })
-describe('Light App state routing', () => {
-  it('relays a state push under the namespace the frame is registered as', async () => {
-    const w = makeWin()
-    registerLaIframe(w, w.__ns)
-    vi.mocked(acceptLaState).mockClear()
-
-    await fromFrame(w, 'state', { digest: '2 strokes', summary: { strokes: 2 } })
-
-    expect(vi.mocked(acceptLaState)).toHaveBeenCalledTimes(1)
-    const [ns, msg] = vi.mocked(acceptLaState).mock.calls[0]
-    expect(ns).toBe(w.__ns)
-    expect((msg as { digest?: unknown }).digest).toBe('2 strokes')
-  })
-
-  // An app is arbitrary third-party code. It can post whatever it likes, so
-  // the namespace has to come from which frame sent the message, never from
-  // the message itself.
-  it('drops a push that claims another app\'s namespace', async () => {
-    const w = makeWin()
-    registerLaIframe(w, w.__ns)
-    vi.mocked(acceptLaState).mockClear()
-
-    await fromFrame(w, 'state', { digest: 'not mine' }, 'someone-elses-app')
-
-    expect(vi.mocked(acceptLaState)).not.toHaveBeenCalled()
-  })
-
-  it('ignores a push from a frame that was never registered', async () => {
-    const w = makeWin()
-    vi.mocked(acceptLaState).mockClear()
-
-    await fromFrame(w, 'state', { digest: 'stray' })
-
-    expect(vi.mocked(acceptLaState)).not.toHaveBeenCalled()
-  })
-})
-
 describe('artifact frame routing', () => {
   it('routes a state push to the artifact relay with its (session, path) identity', async () => {
     const w = makeWin()
@@ -165,7 +128,6 @@ describe('artifact frame routing', () => {
     await fromFrame(w, 'state', { digest: 'a chart' }, 'sess-9\n/tmp/page.html')
 
     expect(acceptArtifactState).toHaveBeenCalledWith('sess-9', '/tmp/page.html', expect.objectContaining({ digest: 'a chart' }))
-    expect(acceptLaState).not.toHaveBeenCalled()
   })
 
   it('drops a push that claims another identity than the registration', async () => {
@@ -213,15 +175,5 @@ describe('double-host frames', () => {
     expect(dropArtifactState).toHaveBeenCalledWith('sess-9', '/tmp/shared.html')
   })
 
-  it('same for a light app open in both the panel and a mounted page', () => {
-    const a = makeWin()
-    const b = makeWin()
-    registerLaIframe(a, 'sketch')
-    registerLaIframe(b, 'sketch')
-
-    unregisterLaIframe(a)
-    expect(dropLaState).not.toHaveBeenCalled()
-    unregisterLaIframe(b)
-    expect(dropLaState).toHaveBeenCalledWith('sketch')
-  })
 })
+

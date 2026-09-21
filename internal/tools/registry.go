@@ -63,7 +63,6 @@ var allTools = []tool{
 	ArtifactStateTool{},
 	ArtifactViewTool{},
 	ArtifactInsertTool{},
-	LightAppInsertTool{},
 }
 
 // DefaultRegistry is the agent.ToolExecutor used when `octo --tools` is

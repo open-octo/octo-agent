@@ -40,7 +40,7 @@ export const LA_STORE = 'kv'
 // namespace dump (which scans `{ns}:`) and can never collide with an app key.
 const MIGRATED_PREFIX = '__octo_migrated__:'
 
-import { acceptLaState, dropLaState, acceptArtifactState, dropArtifactState } from './laState'
+import { acceptArtifactState, dropArtifactState } from './laState'
 
 // One registered frame: a Light App by slug, or a session artifact by
 // (session, path). The ns is the identity the bridge stamps into every
@@ -78,20 +78,17 @@ export function unregisterLaIframe(win: Window | null | undefined): void {
   if (!win) return
   const reg = laFrames.get(win)
   laFrames.delete(win)
-  // The page is gone from the screen, so it must go from the mirror too: the
-  // model should not describe a canvas nobody has open. But "gone" means no
-  // frame still shows it — the same page can be hosted twice at once (the
-  // panel and the maximized modal), and closing one must not silence the
-  // other.
-  if (!reg) return
+  // A page gone from the screen must go from the mirror too: the model should
+  // not describe a page nobody has open. But "gone" means no frame still
+  // shows it — the same page can be hosted twice at once (the panel and the
+  // maximized modal), and closing one must not silence the other. Light Apps
+  // have no mirror entry to drop; their registration only routes storage and
+  // downloads.
+  if (!reg || reg.kind !== 'artifact' || reg.session === undefined || reg.path === undefined) return
   for (const r of laFrames.values()) {
     if (r.ns === reg.ns) return
   }
-  if (reg.kind === 'artifact' && reg.session !== undefined && reg.path !== undefined) {
-    dropArtifactState(reg.session, reg.path)
-  } else {
-    dropLaState(reg.ns)
-  }
+  dropArtifactState(reg.session, reg.path)
 }
 
 // ── IndexedDB ───────────────────────────────────────────────────────────────
@@ -191,12 +188,11 @@ function onLaMessage(ev: MessageEvent): void {
       break
     case 'state':
       // One-way: the page describes itself, the host relays it. Nothing is
-      // sent back, and the page gains no read access by pushing.
-      if (reg.kind === 'artifact' && reg.session !== undefined && reg.path !== undefined) {
-        acceptArtifactState(reg.session, reg.path, d as { digest?: unknown; summary?: unknown; image?: unknown })
-      } else {
-        acceptLaState(reg.ns, d as { digest?: unknown; summary?: unknown; image?: unknown })
-      }
+      // sent back, and the page gains no read access by pushing. Only
+      // artifacts have a mirror to relay into — a Light App's state op is
+      // from a stale bridge and lands nowhere.
+      if (reg.kind !== 'artifact' || reg.session === undefined || reg.path === undefined) break
+      acceptArtifactState(reg.session, reg.path, d as { digest?: unknown; summary?: unknown; image?: unknown })
       break
     case 'download':
       // Light Apps only — an artifact's downloads are its own origin's

@@ -5,9 +5,8 @@
 // from the inline script just before it, and the kind selects which halves
 // boot:
 //
-//   lightapp  one-time storage migration, interaction (until the light-app
-//             mirror's retirement completes), and — in the desktop shell
-//             only, whose webview cannot download — the download bridge.
+//   lightapp  one-time storage migration, and — in the desktop shell only,
+//             whose webview cannot download — the download bridge.
 //   artifact  interaction only: the page describes itself to the model and
 //             can be handed a file back (the artifact_state / view_artifact /
 //             insert_into_artifact tools). An artifact has no storage
@@ -151,6 +150,7 @@
   if (KIND === 'lightapp') {
     bootStorageMigration();
     bootDownloadBridge();
+  } else {
+    bootInteraction();
   }
-  bootInteraction();
 })();

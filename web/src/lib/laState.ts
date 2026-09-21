@@ -112,20 +112,9 @@ function drop(key: string, endpoint: string): void {
   void fetch(endpoint, { method: 'DELETE' }).catch(() => {})
 }
 
-const lightAppEndpoint = (slug: string) => `/api/light-apps/${encodeURIComponent(slug)}/state`
 const artifactEndpoint = (session: string, path: string) =>
   `/api/sessions/${encodeURIComponent(session)}/artifacts/state?path=${encodeURIComponent(path)}`
 const artifactKey = (session: string, path: string) => session + '\n' + path
-
-/** Accept one `state` message from a Light App frame. */
-export function acceptLaState(slug: string, msg: LaStatePush): void {
-  accept(slug, lightAppEndpoint(slug), msg)
-}
-
-/** Forget an app server-side — its frame went away. */
-export function dropLaState(slug: string): void {
-  drop(slug, lightAppEndpoint(slug))
-}
 
 /** Accept one `state` message from a session artifact's frame. */
 export function acceptArtifactState(session: string, path: string, msg: LaStatePush): void {

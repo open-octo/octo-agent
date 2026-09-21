@@ -1,10 +1,31 @@
 package tools
 
 import (
+	"bytes"
 	"context"
+	"image"
+	"image/color"
+	"image/png"
 	"strings"
 	"testing"
 )
+
+// tinyPNG is a real image, because NewImageBlock sniffs the bytes and refuses
+// anything it cannot hand to a provider.
+func tinyPNG(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	for x := range 4 {
+		for y := range 4 {
+			img.Set(x, y, color.RGBA{R: uint8(40 * x), G: uint8(40 * y), B: 200, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
 
 // runToolInSession is runTool with a session stamped, the way the server's
 // turn entries stamp every real turn (see WithSessionID).
