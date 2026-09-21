@@ -241,6 +241,4 @@ When the user wants different starting points — "make the start page about my 
 
 ## Themes
 
-The Web UI's palette is user-editable: a theme is `~/.octo/themes/<id>/` holding `manifest.json` and `theme.css`. When the user asks for one, read a theme octo ships — `~/.octo/themes/ocean`, `blossom` or `vogue` — and work from it: they carry the whole variable set, name themselves per locale, and comment the traps. Write both files with `write_file`; the theme shows up under Settings → Theme on the next page load.
-
-The rule worth stating outright, because a theme that gets it wrong looks fine until someone switches modes: a theme is TWO blocks — `:root[data-theme-pack="<id>"]` and that same selector plus `[data-theme="dark"]`. They tie with the default dark palette on specificity, so anything set only in the light block keeps its light value in dark mode.
+The Web UI's palette is user-editable: a theme is `~/.octo/themes/<id>/` holding `manifest.json` and `theme.css`, picked up under Settings → Theme on the next page load. When the user asks for one, read `THEMES.md` in the product-help skill directory for the format and its traps (the light/dark two-block rule, gradient-only `--chat-bg`, absolute asset URLs) — or start from a theme octo ships in that directory, which carries the full variable set with comments.
