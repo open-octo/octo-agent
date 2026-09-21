@@ -31,35 +31,37 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('deliverToFrame', () => {
-  it('redeems the ticket and hands the bytes to the app', async () => {
+  it('redeems the ticket and hands the bytes to the frame showing the artifact', async () => {
     vi.mocked(laFrameFor).mockReturnValue(fakeFrame())
 
-    const out = await deliverToFrame({ slug: 'sketch', id: 'abc123', name: 'gen.png', note: 'from your sketch' })
+    const out = await deliverToFrame({ session: 's1', path: '/tmp/page.html', id: 'abc123', name: 'gen.png', note: 'from the brief' })
 
     expect(out).toBe('delivered')
-    expect(fetched).toEqual(['/api/light-apps/sketch/delivery/abc123'])
+    expect(fetched).toEqual(['/api/sessions/s1/artifacts/delivery/abc123'])
+    // The frame lookup is by the same composite identity the bridge stamps.
+    expect(laFrameFor).toHaveBeenCalledWith('s1\n/tmp/page.html')
     expect(posted.length).toBe(1)
     expect(posted[0].data.op).toBe('delivery')
-    expect(posted[0].data.ns).toBe('sketch')
+    expect(posted[0].data.ns).toBe('s1\n/tmp/page.html')
     expect(posted[0].data.name).toBe('gen.png')
-    expect(posted[0].data.note).toBe('from your sketch')
+    expect(posted[0].data.note).toBe('from the brief')
     expect(posted[0].data.blob).toBeInstanceOf(Blob)
   })
 
-  it('escapes both path segments', async () => {
+  it('escapes the session, the path and the ticket', async () => {
     vi.mocked(laFrameFor).mockReturnValue(fakeFrame())
 
-    await deliverToFrame({ slug: 'a/b', id: 'x y' })
+    await deliverToFrame({ session: 'a/b', path: '/tmp/x y.html', id: 'x y' })
 
-    expect(fetched[0]).toBe('/api/light-apps/a%2Fb/delivery/x%20y')
+    expect(fetched[0]).toBe('/api/sessions/a%2Fb/artifacts/delivery/x%20y')
   })
 
-  // The user may have closed the app between the tool call and the event. That
-  // is not an error worth surfacing — the ticket simply expires.
-  it('does nothing when the app is not open', async () => {
+  // The user may have closed the panel between the tool call and the event.
+  // That is not an error worth surfacing — the ticket simply expires.
+  it('does nothing when the artifact is not open', async () => {
     vi.mocked(laFrameFor).mockReturnValue(null)
 
-    expect(await deliverToFrame({ slug: 'sketch', id: 'abc' })).toBe('no-frame')
+    expect(await deliverToFrame({ session: 's1', path: '/tmp/p.html', id: 'abc' })).toBe('no-frame')
     expect(fetched.length).toBe(0)
     expect(posted.length).toBe(0)
   })
@@ -68,7 +70,7 @@ describe('deliverToFrame', () => {
     vi.mocked(laFrameFor).mockReturnValue(fakeFrame())
     vi.stubGlobal('fetch', () => Promise.resolve(errorResponse(404)))
 
-    expect(await deliverToFrame({ slug: 'sketch', id: 'gone' })).toBe('failed')
+    expect(await deliverToFrame({ session: 's1', path: '/tmp/p.html', id: 'gone' })).toBe('failed')
     expect(posted.length).toBe(0)
   })
 
@@ -76,16 +78,16 @@ describe('deliverToFrame', () => {
     vi.mocked(laFrameFor).mockReturnValue(fakeFrame())
     vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')))
 
-    expect(await deliverToFrame({ slug: 'sketch', id: 'abc' })).toBe('failed')
+    expect(await deliverToFrame({ session: 's1', path: '/tmp/p.html', id: 'abc' })).toBe('failed')
     expect(posted.length).toBe(0)
   })
 
   it('ignores a malformed announcement', async () => {
     vi.mocked(laFrameFor).mockReturnValue(fakeFrame())
 
-    expect(await deliverToFrame({ slug: 'sketch' })).toBe('failed')
+    expect(await deliverToFrame({ session: 's1', path: '/tmp/p.html' })).toBe('failed')
     expect(await deliverToFrame({ id: 'abc' })).toBe('failed')
-    expect(await deliverToFrame({ slug: 42, id: 'abc' })).toBe('failed')
+    expect(await deliverToFrame({ session: 42, path: '/tmp/p.html', id: 'abc' })).toBe('failed')
     expect(fetched.length).toBe(0)
   })
 })
