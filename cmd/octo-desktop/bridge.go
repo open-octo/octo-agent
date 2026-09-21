@@ -944,6 +944,12 @@ func (b *nativeBridge) Heartbeat(frameAgeMS int64, hidden bool) {
 // confirm shows a modal question dialog and reports whether the user chose the
 // affirmative button. The cancel button is the safe default.
 //
+// The message must end in a yes/no question. Windows draws the system's own
+// Yes/No buttons and takes no custom labels (see confirm_windows.go), so
+// okLabel/cancelLabel are what macOS and Linux show, not a promise — a
+// question those two words cannot answer ("Save" / "Discard") would read
+// wrong there with nothing to catch it.
+//
 // Both askers reach it while the app may well not be the active one — the
 // tray's "Quit Octo", clicked from whatever the user was in, and the
 // launch-time takeover prompt — and a dialog that comes up behind the active

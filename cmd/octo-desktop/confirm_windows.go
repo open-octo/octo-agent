@@ -19,8 +19,14 @@ const idYes = 6
 // program, and without it the box can open behind whatever they are looking at
 // — the tray click then appears to do nothing, which is the same failure the
 // macOS path fixes with a floating window level.
+//
+// MB_DEFBUTTON2 makes No the default, which is what the other two platforms
+// do and what every caller wants: Return on these prompts must not stop the
+// hub every editor and IM channel is connected to, and must not shut down the
+// backend another process is already running. Without it MessageBox defaults
+// to the first button (MB_DEFBUTTON1 is zero), which for MB_YESNO is Yes.
 const confirmFlags = windows.MB_YESNO | windows.MB_ICONQUESTION |
-	windows.MB_SYSTEMMODAL | windows.MB_SETFOREGROUND
+	windows.MB_SYSTEMMODAL | windows.MB_SETFOREGROUND | windows.MB_DEFBUTTON2
 
 // confirmAnswer reports whether a MessageBox return code is a yes. Anything
 // else — "No", or the 0 an error returns — is a no, because every caller acts

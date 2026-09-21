@@ -14,10 +14,13 @@ import "github.com/wailsapp/wails/v3/pkg/application"
 // runs it on a goroutine of its own and returns immediately, so reading a
 // variable the button callbacks set gave an answer before the dialog was even
 // on screen — always the zero value, "cancel". Waiting for a callback is what
-// makes this synchronous, and the wait always ends: in the GTK4 backend octo
-// builds (the gtk3 build tag is used nowhere here), Escape and the window's
-// close button both report the cancel button set below, so dismissing the
-// dialog runs a callback exactly like clicking one does.
+// makes this synchronous, and the wait ends on both of the paths that report
+// an answer: a button press, and the dialog's close-request, which reports the
+// cancel button set below (in the GTK4 backend octo builds — the gtk3 build
+// tag is used nowhere here — Escape activates that button too). Those two are
+// the whole contract: a dialog torn down by some other route would report
+// nothing and leave this call waiting, so nothing here may take one down by
+// hand.
 //
 // Every caller is on a menu callback's or an application event listener's
 // goroutine — Wails dispatches both with `go` — so the wait is never holding

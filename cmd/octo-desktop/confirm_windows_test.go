@@ -38,3 +38,12 @@ func TestConfirmFlagsAskAYesNoQuestion(t *testing.T) {
 		t.Error("confirmFlags must include MB_SETFOREGROUND: the prompt is raised from the tray, with the app in the background")
 	}
 }
+
+// Return must not be an answer of yes. These prompts stop a backend other
+// clients are connected to, and MessageBox defaults to its first button —
+// which for MB_YESNO is Yes — unless told otherwise.
+func TestConfirmFlagsDefaultToNo(t *testing.T) {
+	if confirmFlags&windows.MB_DEFBUTTON2 == 0 {
+		t.Error("confirmFlags must include MB_DEFBUTTON2 so the cancel button is the default")
+	}
+}
