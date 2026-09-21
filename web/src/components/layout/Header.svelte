@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { sidebar, nativeShell, isDesktopShell, panelContent, view, chatHeaderSnippet, activeSessionId, lightappOpen, panelForView } from '../../lib/stores'
+  import { sidebar, nativeShell, isDesktopShell, panelContent, view, chatHeaderSnippet, activeSessionId, lightappOpen, lightapps, panelForView } from '../../lib/stores'
   import { diffBadge } from '../../lib/diff'
   import { t } from '../../lib/i18n'
   import { ws, wsState } from '../../lib/ws'
@@ -57,6 +57,11 @@
   // otherwise observe). The toggle itself lives in lib/nativeWindow because the
   // sidebar's titlebar flips it too.
 
+  // The Light App this view is showing, once the installed list has arrived.
+  const mountedApp = $derived(
+    $view.startsWith('app:') ? ($lightapps.find(a => a.slug === $view.slice(4)) ?? null) : null,
+  )
+
   onMount(() => {
     if (!$nativeShell) return // web mode has no native bridge — skip entirely
     refreshMaximised()
@@ -79,6 +84,21 @@
        page header stays exactly where it already was. -->
   {#if $view === 'chat' && $chatHeaderSnippet}
     <div class="chat-header-slot">{@render $chatHeaderSnippet()}</div>
+  {:else if mountedApp}
+    <!-- A Light App fills its page edge to edge and has no page header of its
+         own to name it, so this row does the naming — and carries the way out
+         the desktop shell cannot provide, having no browser back button. Drawn
+         here rather than inside the app's own frame, which would leave this row
+         blank above a second bar saying the same thing. -->
+    <button type="button" class="app-back" onclick={() => view.set('chat')}>
+      <iconify-icon icon="ant-design:arrow-left-outlined" width="13"></iconify-icon>
+      <span>{$t('lightapps.back')}</span>
+    </button>
+    <span class="app-name">
+      {#if mountedApp.icon}<span class="app-emoji">{mountedApp.icon}</span>{/if}
+      {mountedApp.name || mountedApp.slug}
+    </span>
+    <span class="spacer"></span>
   {:else}
     <span class="spacer"></span>
   {/if}
@@ -151,6 +171,22 @@ header .icon-btn,
 header .window-controls { --wails-draggable: no-drag; }
 
 .spacer { flex: 1; }
+/* Sized like the row's other controls rather than like a page title: this is
+   chrome, and the app's own page supplies the heading. */
+.app-back {
+  display: flex; align-items: center; gap: 4px; flex: 0 0 auto;
+  padding: 4px 8px; border: 0; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-secondary);
+  font-family: inherit; font-size: 12px; cursor: pointer;
+  --wails-draggable: no-drag;
+}
+.app-back:hover { background: var(--hover-neutral); color: var(--text); }
+.app-name {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  font-size: 12px; font-weight: 500; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.app-emoji { font-size: 13px; line-height: 1; }
 /* ChatView's own .chat-header is already display:flex with its own
    justify-content:space-between, so as a block child it fills this slot the
    ordinary way — none of its own CSS has to change to live in this row. */
