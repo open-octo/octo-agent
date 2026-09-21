@@ -151,27 +151,71 @@ func TestRecorderCapturesEffects(t *testing.T) {
 	if err := pg.WaitFor(ctx, "#none", testWaitTimeout); err != nil {
 		t.Fatalf("wait: %v", err)
 	}
+	// A gesture and the request it causes are stamped by two different
+	// consumers, and a loaded runner can leave more than the default window
+	// between them — which drops the request instead of attributing it. The
+	// window is a var for exactly this; widen it while this test runs so the
+	// assertions below are about attribution, not about runner speed.
+	origWindow := effectsAttributionWindow
+	effectsAttributionWindow = 30 * time.Second
+	t.Cleanup(func() { effectsAttributionWindow = origWindow })
+
 	rec := NewRecorder(pg)
 	if err := rec.Start(ctx); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	defer rec.Stop()
 
-	click := func(sel string) {
+	recordedClicks := func() []RecordedEvent {
+		var out []RecordedEvent
+		for _, e := range rec.Events() {
+			if e.Type == "click" {
+				out = append(out, e)
+			}
+		}
+		return out
+	}
+	// click waits until the recorder has both the gesture and whatever it was
+	// supposed to cause, instead of sleeping a fixed amount and hoping. A
+	// request is attributed to the last gesture stamped at or before it, so a
+	// request still on the wire when the NEXT click is stamped is credited to
+	// that one — which is what a fixed sleep let a slow runner do (the #get
+	// fetch landing after #none, leaving #get with no effects at all).
+	// Waiting for the effect to be recorded makes the ordering the test's
+	// choice rather than the runner's.
+	n := 0
+	click := func(sel string, recorded func(RecordedEvent) bool) {
+		t.Helper()
 		if err := pg.Click(ctx, sel); err != nil {
 			t.Fatalf("click %s: %v", sel, err)
 		}
-		// Let the click's request start and the recorder's wait probe fire
-		// before the next gesture, so attribution has nothing to disambiguate.
-		time.Sleep(600 * time.Millisecond)
+		n++
+		deadline := time.Now().Add(20 * time.Second)
+		for {
+			got := recordedClicks()
+			if len(got) >= n && recorded(got[n-1]) {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("click %s: the recorder never saw its effect; clicks so far = %+v", sel, got)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
 	}
-	click("#post")
-	click("#nav")
+	recordedAtAll := func(RecordedEvent) bool { return true }
+
+	click("#post", func(e RecordedEvent) bool { return e.Effects != nil && e.Effects.Requests["POST"] >= 1 })
+	click("#nav", func(e RecordedEvent) bool {
+		return e.Effects != nil && strings.HasSuffix(e.Effects.URLAfter, "/next")
+	})
 	if err := pg.WaitFor(ctx, "#none", testWaitTimeout); err != nil {
 		t.Fatalf("wait after nav: %v", err)
 	}
-	click("#get")
-	click("#none")
+	click("#get", func(e RecordedEvent) bool { return e.Effects != nil && e.Effects.Requests["GET"] >= 1 })
+	// Nothing to wait for on the last one — its whole point is that it causes
+	// nothing — so it gets the one fixed settle left in the test, long enough
+	// for a request it did not make to show up and fail the assertion below.
+	click("#none", recordedAtAll)
 	time.Sleep(500 * time.Millisecond)
 
 	var clicks []RecordedEvent
