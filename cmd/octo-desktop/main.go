@@ -317,6 +317,14 @@ func main() {
 		bridge.updateRestart.Store(true)
 	})
 
+	// Double-clicking the pet shows the window or puts it away. Registered
+	// once for the app, not per pet window: the listener outlives any
+	// individual pet, and re-registering on every showPet would stack a
+	// handler per appearance.
+	app.Event.On(petToggleWindowEvent, func(*application.CustomEvent) {
+		bridge.petToggleMainWindow()
+	})
+
 	// Interacting with the "update available" toast starts the update flow;
 	// session notifications focus and route to the relevant session; every other
 	// notification just raises the window. Match the category (which all three

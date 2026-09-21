@@ -19,6 +19,13 @@ const (
 	petStateBusy  = server.ActivityBusy
 )
 
+// petToggleWindowEvent is what a double-click on the pet emits (see pet.html).
+// The page reaches the Go side through wails:event:emit, the one channel open
+// to a window whose Wails runtime never loads; the window opts into it with
+// AllowSimpleEventEmit, which is safe here because the page is this file's own
+// inline HTML with nothing remote in it.
+const petToggleWindowEvent = "octo:pet:toggle-window"
+
 // petHTML is self-contained (inline CSS/SVG/JS) and is handed to the webview
 // as a literal page rather than served: the pet must not depend on the hub
 // being up, and it has nothing to do with the web UI's vite bundle.
@@ -166,6 +173,28 @@ func (b *nativeBridge) petClosed(w *application.WebviewWindow) {
 	b.refreshTray()
 }
 
+// petToggleMainWindow is what a double-click on the pet does: bring the main
+// window up, or put it away when it is already up. The pet is the one piece of
+// Octo always in sight, which makes it a handle for the window that costs no
+// screen furniture.
+//
+// Visibility decides, not focus. Clicking the pet activates the pet's own
+// window on Windows, so the main window is never the focused one by the time
+// this runs — a focus test would make the double-click a show-only gesture on
+// the platform that asked for the toggle. A minimised window counts as put
+// away and is brought back: Win32 still calls it visible, and restoring it is
+// plainly what the gesture means there.
+func (b *nativeBridge) petToggleMainWindow() {
+	if w := b.currentWindow(); w != nil && w.IsVisible() && !w.IsMinimised() {
+		// Same flag the close-to-hide path sets: the liveness probe must not
+		// treat a window the user just put away as one that needs reviving.
+		b.hidden.Store(true)
+		w.Hide()
+		return
+	}
+	b.showWindow()
+}
+
 // togglePet shows the pet, or dismisses it if it is already up. Either way the
 // tray menu is rebuilt, so its label follows the pet instead of going stale
 // until refreshTrayLoop's next tick.
@@ -203,6 +232,9 @@ func (b *nativeBridge) showPet() {
 		BackgroundType:   application.BackgroundTypeTransparent,
 		BackgroundColour: application.RGBA{},
 		HTML:             petHTML,
+		// Lets the page emit petToggleWindowEvent; see the const's comment for
+		// why that is safe for this window in particular.
+		AllowSimpleEventEmit: true,
 		Mac: application.MacWindow{
 			// Backdrop is what actually makes the window transparent on macOS:
 			// the cross-platform BackgroundType above is never read by the
