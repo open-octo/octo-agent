@@ -7,6 +7,7 @@ import (
 
 	"github.com/open-octo/octo-agent/internal/server"
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 // petStateSleep is the one pet state with no matching server activity — the pet
@@ -148,6 +149,23 @@ func (b *nativeBridge) watchPetPointer(w *application.WebviewWindow) {
 // and names what the next click will do.
 func (b *nativeBridge) petShown() bool { return b.pet.Load() != nil }
 
+// petClosed retires the pet when its window goes away without the tray item
+// being used — Alt-F4, or "Close window" from its taskbar entry. Nothing else
+// cleared b.pet, so the tray kept offering "Hide pet" for a pet that was
+// already gone, and that item then spent a click closing a dead window before
+// the next one could bring it back (#2503).
+//
+// The compare-and-swap is what makes this safe to run on every close: a
+// toggle-off has already taken the pointer, and a fast off/on has replaced it
+// with the new pet, so neither is undone here.
+func (b *nativeBridge) petClosed(w *application.WebviewWindow) {
+	if !b.pet.CompareAndSwap(w, nil) {
+		return
+	}
+	petForgetFirstMouseWindow()
+	b.refreshTray()
+}
+
 // togglePet shows the pet, or dismisses it if it is already up. Either way the
 // tray menu is rebuilt, so its label follows the pet instead of going stale
 // until refreshTrayLoop's next tick.
@@ -213,6 +231,11 @@ func (b *nativeBridge) showPet() {
 			// around the square window — an outline around a transparent page,
 			// the same thing DisableShadow prevents on macOS.
 			DisableFramelessWindowDecorations: true,
+			// The pet is an ornament, not a place the user switches to: a
+			// second "Octo" button in the taskbar is noise next to the real
+			// window's, and its "Close window" entry was the easiest way to
+			// dismiss a pet the tray then went on claiming was up.
+			HiddenOnTaskbar: true,
 		},
 	}
 	// Bottom-right of the work area (so it clears the dock/taskbar). X/Y alone
@@ -231,6 +254,16 @@ func (b *nativeBridge) showPet() {
 	}
 	w := b.app.Window.NewWithOptions(opts)
 	b.pet.Store(w)
+	// A hook, not a listener: hooks run synchronously before Wails' own
+	// WindowClosing listener (the one that destroys the window), while
+	// listeners run concurrently with it. petForgetFirstMouseWindow has to
+	// land before the destroy for the same reason togglePet calls it before
+	// Close — the panel is released the moment it closes, and the hook must
+	// stop recognising that address while it still belongs to the pet. The
+	// event is never cancelled here: this is bookkeeping, not a veto.
+	w.RegisterHook(events.Common.WindowClosing, func(*application.WindowEvent) {
+		b.petClosed(w)
+	})
 	w.Show()
 	// The options above are not enough on their own: the NSPanel path ignores
 	// InitialPosition and opens centred anyway, so place it again once it is

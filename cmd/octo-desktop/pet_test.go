@@ -149,3 +149,33 @@ func TestRememberPetPositionPersists(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+// A pet window closed by anything other than the tray item — Alt-F4, or the
+// taskbar's "Close window" — has to retire the pet, or the tray goes on
+// offering "Hide pet" for a window that is already gone.
+func TestPetClosedRetiresThePet(t *testing.T) {
+	b := &nativeBridge{}
+	w := &application.WebviewWindow{}
+	b.pet.Store(w)
+
+	b.petClosed(w)
+
+	if b.petShown() {
+		t.Fatal("petShown() = true after the pet's window closed, want false")
+	}
+}
+
+// togglePet takes the pointer before it closes the window, and a fast off/on
+// can have a second pet up by the time the first one's close is handled.
+// Neither may be undone by the closing window's own cleanup.
+func TestPetClosedLeavesANewerPetAlone(t *testing.T) {
+	b := &nativeBridge{}
+	closing, current := &application.WebviewWindow{}, &application.WebviewWindow{}
+	b.pet.Store(current)
+
+	b.petClosed(closing)
+
+	if got := b.pet.Load(); got != current {
+		t.Fatalf("pet = %p after an older window closed, want the current one (%p)", got, current)
+	}
+}

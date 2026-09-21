@@ -808,18 +808,26 @@ func buildTrayMenu(app *application.App, bridge *nativeBridge) *application.Menu
 // Web UI's data-management panel or `octo profiles` can add/remove at any
 // time, so without this a deleted profile lingers in the menu until restart.
 // The status lines are language-dependent, so a language switch (re-applied
-// here) changes the signature and triggers a rebuild that re-reads L().
+// here) changes the signature and triggers a rebuild that re-reads L(). The
+// pet is in for the same reason as the update state: its row names what the
+// next click does, and the refreshTray that follows a pet appearing or going
+// away could race a rebuild that read the state just before it changed.
 func trayMenuSignature(bridge *nativeBridge) string {
 	applyLang() // follow a language switch made in onboarding / Settings
 	upd := ""
 	if v := bridge.updateAvailable.Load(); v != nil {
 		upd = *v
 	}
+	pet := ""
+	if bridge.petShown() {
+		pet = "pet"
+	}
 	profiles, err := datahome.List()
 	if err != nil {
 		profiles = nil // an unreadable home must not wedge the refresh loop
 	}
-	return strings.Join(trayStatusLines(bridge), "|") + "\x00" + upd + "\x00" + strings.Join(profiles, "|")
+	return strings.Join(trayStatusLines(bridge), "|") + "\x00" + upd + "\x00" + pet +
+		"\x00" + strings.Join(profiles, "|")
 }
 
 // refreshTrayLoop re-publishes the tray menu whenever its status text changes,
