@@ -207,6 +207,22 @@ func (s *Server) startVersionRefresh() {
 		return // one already in flight
 	}
 	current := strings.TrimPrefix(version.Version, "v")
+	// Read the cache again now that the token is held. The caller judged it
+	// stale BEFORE taking the token, and in between the refresh it lost the
+	// CAS to can have published its result and released the token — so the
+	// answer this lookup would fetch is already in hand. Holding the token
+	// makes the re-read conclusive: a finishing refresh publishes under the
+	// cache lock and only then releases the token (deferred in that order),
+	// so nothing can be in flight and unpublished while we are here.
+	//
+	// Without this, every reader polling while a refresh is in flight had a
+	// window in which it started a redundant second lookup — one extra
+	// request to GitHub for an answer already cached, on the one path that
+	// promises to leave the machine four times a day.
+	if _, _, stale := s.versionSnapshot(current); !stale {
+		s.versionChecking.Store(false)
+		return
+	}
 	s.versionRefreshWG.Add(1)
 	go func() {
 		defer s.versionRefreshWG.Done()
