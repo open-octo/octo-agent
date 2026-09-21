@@ -198,37 +198,6 @@ To mount an app the user already saved, edit that one field in its `manifest.jso
 - Use emoji or inline SVG for icons
 - Follow `artifact-design` skill conventions for layout and colors
 
-### Seeing inside a running Light App
-
-A Light App is sealed off from you: it runs on its own origin behind a policy that closes every network exit, so you cannot read it and it cannot reach you. What it can do is publish a snapshot of itself, and two tools read that:
-
-- **`lightapp_state`** — every open app's own one-line digest, plus whether it published a screenshot. Cheap. Call it whenever the user points at something they made rather than described: "my sketch", "the board", "这个图", "what I just drew".
-- **`view_lightapp`** — pulls that screenshot into the conversation as a real image, so you can look at a hand-drawn layout the way you look at any image the user sends.
-
-Nothing reporting state means no app is open (or the open one does not publish); ask the user to open it in the Web UI rather than guessing at what they drew.
-
-You can also send a file back the other way. **`insert_into_lightapp`** hands an image you produced to an app that is publishing its state (an app that never publishes is not reachable — and you would not know it was there either) — put a generated picture onto the sketchpad the user drew on, rather than only telling them the path it was saved to. The app decides what to do with it; confirm with `lightapp_state` afterwards and tell the user to look at the app. It carries a file and a note, nothing else, and there is no way to read anything back through it.
-
-A natural loop: `lightapp_state` → `view_lightapp` to see their sketch → generate something from it → `insert_into_lightapp` to put it where they are working.
-
-When you write an app whose contents the user will want to talk about, make it publish on change — one call, no setup:
-
-```js
-window.octo.pushState({
-  digest: 'A hand-drawn sketch, 3 strokes.',  // one line, written for you to read
-  summary: { strokes: 3 },                    // optional structured extras
-  image: canvasOrBlob,                        // optional screenshot
-})
-```
-
-octo coalesces pushes, so calling it on every change is fine. Publishing tells you about the app; it gives the app no access to the conversation.
-
-To let an app accept what you send it, have it register a handler:
-
-```js
-window.octo.onDelivery(({ blob, name, note }) => { /* draw it in, show it, ignore it */ })
-```
-
 ## The start screen
 
 The new-session page comes from `~/.octo/landing/config.json` when it exists, and from octo's built-in set when it does not. Each card is `{icon, title, prompt}`; clicking one loads its prompt into the composer without sending, so a good prompt reads like the first thing the user would have typed. `icon` is an emoji, or an icon name like `ant-design:tool-outlined` — prefer an emoji, since octo carries its icons offline and a name it does not already bundle renders blank.
