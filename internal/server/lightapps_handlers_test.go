@@ -233,9 +233,10 @@ func seedLightAppRaw(t *testing.T, home, slug, manifest string) {
 	}
 }
 
-// TestLightAppMount_ListNormalises: the two mount values the UI has slots for
-// survive the listing; anything else degrades to the default placement instead
-// of failing the app or the whole scan.
+// TestLightAppMount_ListNormalises: the one mount value the UI has a slot for
+// survives the listing; anything else — a typo, or the retired "panel" —
+// degrades to the default placement instead of failing the app or the whole
+// scan.
 func TestLightAppMount_ListNormalises(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -260,7 +261,7 @@ func TestLightAppMount_ListNormalises(t *testing.T) {
 	for _, a := range out.Apps {
 		got[a.Slug] = a.Mount
 	}
-	want := map[string]string{"as-view": "view", "as-panel": "panel", "typo": "", "legacy": ""}
+	want := map[string]string{"as-view": "view", "as-panel": "", "typo": "", "legacy": ""}
 	for slug, mount := range want {
 		if got[slug] != mount {
 			t.Errorf("%s: expected mount %q, got %q", slug, mount, got[slug])
@@ -306,12 +307,12 @@ func TestLightAppMount_OmittedFromJSON(t *testing.T) {
 }
 
 func TestNormalizeMount(t *testing.T) {
-	for _, in := range []string{"view", "panel"} {
-		if got := normalizeMount(in); got != in {
-			t.Errorf("normalizeMount(%q) = %q, want %q", in, got, in)
-		}
+	if got := normalizeMount("view"); got != "view" {
+		t.Errorf(`normalizeMount("view") = %q, want "view"`, got)
 	}
-	for _, in := range []string{"", "sidebar", "View", "PANEL", "nav", "view "} {
+	// "panel" among the rejects, not the accepts: the right-hand panel slot is
+	// retired, and an app still asking for it falls back to the default.
+	for _, in := range []string{"", "panel", "sidebar", "View", "PANEL", "nav", "view "} {
 		if got := normalizeMount(in); got != "" {
 			t.Errorf("normalizeMount(%q) = %q, want empty", in, got)
 		}

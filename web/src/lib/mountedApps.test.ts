@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { get } from 'svelte/store'
-import { lightapps, localAccess, mountedViews, mountedPanels, lightappURL } from './stores'
+import { lightapps, localAccess, mountedViews, lightappURL } from './stores'
 import type { LightApp } from './api'
 
 // jsdom exposes no localStorage under Node 26 (see unread.test.ts), and stores
@@ -13,8 +13,10 @@ vi.stubGlobal('localStorage', {
   clear: () => backing.clear(),
 })
 
-function app(slug: string, mount?: 'view' | 'panel'): LightApp {
-  return { slug, name: slug, description: '', icon: '🎨', created_at: '', mount }
+// `mount` is widened past the client type on purpose: a stale app on disk can
+// still carry the retired "panel", and the store has to hold the line.
+function app(slug: string, mount?: string): LightApp {
+  return { slug, name: slug, description: '', icon: '🎨', created_at: '', mount: mount as LightApp['mount'] }
 }
 
 beforeEach(() => {
@@ -24,29 +26,35 @@ beforeEach(() => {
 })
 
 describe('mounted Light Apps', () => {
-  it('splits the installed list by what each app claims', () => {
-    lightapps.set([app('plain'), app('as-view', 'view'), app('as-panel', 'panel')])
+  it('picks out the apps claiming their own page', () => {
+    lightapps.set([app('plain'), app('as-view', 'view')])
 
     expect(get(mountedViews).map((a) => a.slug)).toEqual(['as-view'])
-    expect(get(mountedPanels).map((a) => a.slug)).toEqual(['as-panel'])
+  })
+
+  // "panel" was the other placement once. The server normalises it away, but
+  // an app carrying it must never reappear in the navigation on the strength
+  // of the word alone.
+  it('gives the retired panel placement nothing', () => {
+    lightapps.set([app('as-panel', 'panel')])
+
+    expect(get(mountedViews)).toEqual([])
   })
 
   it('offers nothing to a remote browser', () => {
     // A mounted entry there would open a frame on <slug>.apps.localhost, which
     // resolves to the viewer's own machine rather than the server's — better no
     // entry at all than one that cannot load.
-    lightapps.set([app('as-view', 'view'), app('as-panel', 'panel')])
+    lightapps.set([app('as-view', 'view')])
     localAccess.set(false)
 
     expect(get(mountedViews)).toEqual([])
-    expect(get(mountedPanels)).toEqual([])
   })
 
   it('treats an app claiming no mount as belonging to the Light Apps page only', () => {
     lightapps.set([app('plain')])
 
     expect(get(mountedViews)).toEqual([])
-    expect(get(mountedPanels)).toEqual([])
   })
 })
 

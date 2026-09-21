@@ -136,9 +136,8 @@ export const artifactView = writable<ArtifactView>('preview')
 export const artifactModalOpen = writable(false)
 
 // Artifacts panel sidebar mode. null = closed, 'session' = session artifacts,
-// 'lightapps' = Light Apps list + rendering, 'diff' = git diff review,
-// `app:<slug>` = a Light App that claimed a panel slot in its manifest.
-export type PanelContent = 'session' | 'lightapps' | 'diff' | `app:${string}`
+// 'lightapps' = Light Apps list + rendering, 'diff' = git diff review.
+export type PanelContent = 'session' | 'lightapps' | 'diff'
 export const panelContent = writable<PanelContent | null>(null)
 
 // The two modes the panel's own switcher offers, and the one it comes back to.
@@ -254,14 +253,12 @@ const hostIsIPv6 = typeof location !== 'undefined' && location.hostname.includes
 export const lightappsAvailable = derived(localAccess, ($local) => $local && !hostIsIPv6)
 
 // Apps claiming a permanent place in the UI, empty wherever they could not
-// render. `mount` is already normalised server-side, so these two cover it.
+// render. `mount` is already normalised server-side, so this one value covers
+// it — the right-hand panel is the session's own, and an app is not part of a
+// session.
 export const mountedViews = derived(
   [lightapps, lightappsAvailable],
   ([$apps, $ok]) => ($ok ? $apps.filter((a) => a.mount === 'view') : []),
-)
-export const mountedPanels = derived(
-  [lightapps, lightappsAvailable],
-  ([$apps, $ok]) => ($ok ? $apps.filter((a) => a.mount === 'panel') : []),
 )
 
 // The URL a Light App frame loads, mounted or not: its own origin, on the port

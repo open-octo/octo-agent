@@ -27,10 +27,12 @@ type lightAppManifest struct {
 	Description string `json:"description"`
 	Icon        string `json:"icon,omitempty"`
 	CreatedAt   string `json:"created_at"`
-	// Mount is where the app claims a permanent place in the UI: "view" (its
-	// own entry in the left navigation) or "panel" (a slot in the right-hand
-	// panel). Empty — the default, and what every app written before this
-	// field does — means the Light Apps page only.
+	// Mount is where the app claims a permanent place in the UI: "view" gives
+	// it its own entry in the left navigation. Empty — the default, and what
+	// every app written before this field does — means the Light Apps page
+	// only. A panel slot was the other option once; the right-hand panel is
+	// the session's own (artifacts, diff), and an app is not part of a
+	// session.
 	Mount string `json:"mount,omitempty"`
 	// UpdatedAt is index.html's mtime, stamped at read time so the web UI can
 	// tell that an app it has open was rewritten on disk. Derived, never
@@ -41,14 +43,13 @@ type lightAppManifest struct {
 
 // normalizeMount drops a mount value the UI has no slot for, so a typo (or a
 // field written by a future version) degrades to the default placement rather
-// than failing the whole listing.
+// than failing the whole listing. The retired "panel" goes the same way as a
+// typo: an app that still asks for it lands on the Light Apps page.
 func normalizeMount(mount string) string {
-	switch mount {
-	case "view", "panel":
+	if mount == "view" {
 		return mount
-	default:
-		return ""
 	}
+	return ""
 }
 
 // stampLightApp fills m.UpdatedAt from the app's index.html. A missing file
