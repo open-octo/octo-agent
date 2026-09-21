@@ -359,6 +359,14 @@ func main() {
 	}
 	tray.SetTooltip(L().takeoverTitle)
 	tray.SetMenu(buildTrayMenu(app, bridge))
+	// Show, not toggle. Wails' own default for a tray with a window attached
+	// hides a window that is already visible, which reads as "the tray click
+	// did nothing" whenever the window is open but buried behind the app the
+	// user is actually in — the state this click exists to get out of. Putting
+	// the window back in the tray already has its own gesture: closing it.
+	if trayClickOpensWindow(runtime.GOOS) {
+		tray.OnClick(func() { bridge.showWindow() })
+	}
 	// Keep the tray's status lines (backend, channels, connected clients) fresh
 	// while the app runs — macOS doesn't refresh a status menu on open.
 	go refreshTrayLoop(app, tray, bridge)

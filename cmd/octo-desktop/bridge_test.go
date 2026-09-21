@@ -454,6 +454,19 @@ func TestCloseShouldQuit(t *testing.T) {
 	}
 }
 
+// The tray's left click may only be claimed where it is free. macOS opens its
+// status menu with it, and Linux runs the click handler when the menu opens
+// too — either would cost the user the menu, or raise the window every time
+// they went looking for it.
+func TestTrayClickOpensWindow(t *testing.T) {
+	cases := map[string]bool{"windows": true, "darwin": false, "linux": false}
+	for goos, want := range cases {
+		if got := trayClickOpensWindow(goos); got != want {
+			t.Errorf("trayClickOpensWindow(%q) = %v, want %v", goos, got, want)
+		}
+	}
+}
+
 // Closing the window while the hub keeps running in the tray hides it instead
 // of destroying it, so the next show skips the webview cold start. Every reason
 // the window must really go must win over that: a detached corpse a revive is

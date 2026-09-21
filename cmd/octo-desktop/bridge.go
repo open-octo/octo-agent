@@ -767,6 +767,22 @@ func closeShouldQuit(goos string, allowQuit bool) bool {
 	return goos == "windows" && allowQuit
 }
 
+// trayClickOpensWindow reports whether a left click on the tray icon should
+// bring the window up.
+//
+// Windows only, and the platform's own convention rather than a preference:
+// the menu is on right-click there, so left-click is free and is what every
+// tray-resident app opens its window with. Without it a window closed to the
+// tray can only be reached through the menu's "Show Octo".
+//
+// Not macOS: the status item's left click IS how its menu opens, so taking it
+// would leave the menu unreachable. Not Linux either, though for a subtler
+// reason — its tray runs the click handler when the MENU opens as well, so
+// right-clicking to reach the menu would raise the window as a side effect.
+func trayClickOpensWindow(goos string) bool {
+	return goos == "windows"
+}
+
 // closeShouldHide reports whether a WindowClosing should be turned into a hide.
 // Only the live window (current) qualifies — a detached corpse a revive is
 // discarding must really close — and only while the app is staying alive:
