@@ -115,6 +115,39 @@ Before calling `write_file`/`show_artifact`, confirm:
       any table/code block that must be wide in its own
       `overflow-x: auto` container instead
 
+## Make it visible to the agent (when the content matters)
+
+An artifact runs sealed on its own origin — the agent cannot read it back. A
+page whose content the user will discuss ("this chart", "what I selected")
+should publish its state, one call, no setup:
+
+```js
+window.octo?.pushState({
+  digest: 'A bar chart of Q3 sales, 8 bars.',  // one line, written for the model
+  summary: { bars: 8 },                         // optional structured extras
+  image: canvasOrBlob,                          // optional screenshot
+})
+```
+
+- **When to push**: on load once, then on every meaningful change (the host
+  coalesces pushes — a canvas may push per stroke). Skip it for static
+  reports; nobody asks "what does that say" about a page that says it.
+- **`digest` is the contract.** It is the one line the model reads when the
+  user gestures at the page — write it for a reader who cannot see the
+  screen. `summary` rides along as JSON, uninterpreted.
+- **`image`**: a canvas element or Blob. Push a screenshot when the page is
+  visual — it is what lets the agent look at the rendered result (its own
+  work, your layout bug) instead of asking the user to describe it.
+- To receive what the agent sends back (a generated image onto a canvas):
+
+```js
+window.octo?.onDelivery(({ blob, name, note }) => { /* draw it in, then pushState again */ })
+```
+
+Publishing tells the agent about the page; it gives the page no access to
+the conversation. Both calls are absent outside octo's panel — guard with
+`window.octo?.` so the page also works opened bare.
+
 ## The box-and-arrow diagram pattern
 
 For architecture/system/flow diagrams, hand-written CSS beats reaching for a

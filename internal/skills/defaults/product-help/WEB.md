@@ -38,6 +38,24 @@ The pencil button on a ghost line retracts that message back into the composer f
 counterpart of the TUI's ↑ recall). It fails once the turn has already consumed the message, which the UI
 reports rather than silently dropping the text.
 
+## The artifacts panel
+
+The right-hand panel alternates between **Artifacts** — every previewable file this session wrote
+(HTML, Markdown, images), with a preview/code toggle — and **Diff**, the review of the working
+tree.
+
+An HTML artifact previews inside a sandboxed frame on its own origin, so nothing on the page can
+reach the API or the conversation. What it *can* do is publish a snapshot of itself — a one-line
+digest, optional structured extras, an optional screenshot — with `window.octo.pushState(...)`.
+That snapshot is what the agent reads through its `artifact_state` and `view_artifact` tools, and
+`insert_into_artifact` hands a file back the other way to a page that registered
+`window.octo.onDelivery(...)`. An eye icon in the panel's title bar means the page open there is
+publishing — that is what "can the agent see this?" looks like. Snapshots live in memory only,
+scoped to the session that wrote the file, and disappear when the frame closes.
+
+Not publishing is the default: a page that never calls `pushState` is invisible to the agent. The
+`artifact-design` skill is what tells the agent to make the pages it writes publish.
+
 ## Slash commands
 
 The Web UI recognizes a different command set than the TUI — `/goal edit <text>` edits inline in one step
