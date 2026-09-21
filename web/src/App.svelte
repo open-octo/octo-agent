@@ -10,7 +10,7 @@
   import * as api from './lib/api'
   import { installExternalLinkInterceptor } from './lib/externalLinks'
   import { installLaStorageBridge } from './lib/laStorage'
-  import { loadLanding } from './lib/stores'
+  import { loadLanding, loadLightApps, onStartScreen } from './lib/stores'
   import { startNativeHeartbeat } from './lib/nativeHeartbeat'
   import { normalizeHash, hashPicksChatTarget } from './lib/hashRouting'
   import { pruneSessions } from './lib/genui/panel-state'
@@ -72,7 +72,32 @@
   // listener, for as long as the app runs.
   onMount(() => {
     installLaStorageBridge()
+  })
+
+  // The start screen is read from a file (~/.octo/landing/config.json) that
+  // the user edits by hand — and that the agent writes itself when asked to
+  // make that screen theirs. Its hero app and pinned shortcuts resolve against
+  // the installed Light Apps, which the agent can add to in the same breath,
+  // so both are re-read together.
+  //
+  // Whenever that screen comes into view, and again when the window regains
+  // focus while it is showing: the edit usually happens in another window, and
+  // the desktop shell has no refresh to fall back on. This also covers the
+  // first read, since the effect runs at mount.
+  function readStartScreen() {
     void loadLanding()
+    void loadLightApps()
+  }
+  const startScreenShowing = $derived(onStartScreen($view, $activeSessionId, mobileShell))
+  $effect(() => {
+    if (startScreenShowing) readStartScreen()
+  })
+  onMount(() => {
+    const onFocus = () => {
+      if (onStartScreen(get(view), get(activeSessionId), mobileShell)) readStartScreen()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
   })
 
   // Switching chats must never leave the previous session's diff on screen: the
