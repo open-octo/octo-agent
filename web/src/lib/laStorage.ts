@@ -41,35 +41,51 @@ export const LA_STORE = 'kv'
 const MIGRATED_PREFIX = '__octo_migrated__:'
 
 import { acceptArtifactState, dropArtifactState } from './laState'
+import { lightappOrigin } from './stores'
 
 // One registered frame: a Light App by slug, or a session artifact by
 // (session, path). The ns is the identity the bridge stamps into every
 // message — for an artifact it is `session\npath`, the same key the mirror
 // uses server-side.
-type FrameReg = { ns: string; kind: 'lightapp' | 'artifact'; session?: string; path?: string }
+//
+// `origin` is the origin the frame is expected to speak from, and the only
+// one a delivery is posted to. A page can navigate itself away — the sandbox
+// does not stop it and the page's own CSP cannot govern where it goes — and
+// the WindowProxy stays the same across that navigation. Without pinning the
+// origin, the document that lands next would inherit this registration: it
+// could push state as this artifact, and would receive the next image the
+// agent sends.
+type FrameReg = { ns: string; kind: 'lightapp' | 'artifact'; origin: string; session?: string; path?: string }
 
 const laFrames = new Map<Window, FrameReg>() // iframe window -> registration
 let bridgeInstalled = false
 
 export function registerLaIframe(win: Window | null | undefined, ns: string): void {
   if (!win) return
-  laFrames.set(win, { ns, kind: 'lightapp' })
+  laFrames.set(win, { ns, kind: 'lightapp', origin: lightappOrigin(ns) })
 }
 
 // The artifact twin: the panel's preview frame for one HTML artifact of a
 // session. Registering it is what lets the page's bridge reach the mirror —
-// and lets deliveries find it.
-export function registerArtifactFrame(win: Window | null | undefined, session: string, path: string): void {
+// and lets deliveries find it. The origin comes from the grant URL the host
+// loaded, never from the page.
+export function registerArtifactFrame(
+  win: Window | null | undefined,
+  session: string,
+  path: string,
+  origin: string,
+): void {
   if (!win) return
-  laFrames.set(win, { ns: session + '\n' + path, kind: 'artifact', session, path })
+  laFrames.set(win, { ns: session + '\n' + path, kind: 'artifact', origin, session, path })
 }
 
 // Reverse lookup for the delivery path: which frame, if any, is currently
-// showing this page. Both hosts (the panel and the mounted full page) register
-// here, so either one can receive.
-export function laFrameFor(ns: string): Window | null {
+// showing this page, and the origin its bytes may be posted to. Both hosts
+// (the panel and the mounted full page) register here, so either one can
+// receive.
+export function laFrameFor(ns: string): { win: Window; origin: string } | null {
   for (const [win, r] of laFrames) {
-    if (r.ns === ns) return win
+    if (r.ns === ns) return { win, origin: r.origin }
   }
   return null
 }
@@ -161,6 +177,9 @@ function laMarkMigrated(ns: string): Promise<unknown> {
 function onLaMessage(ev: MessageEvent): void {
   const reg = laFrames.get(ev.source as Window)
   if (!reg) return
+  // The window is registered, but the document inside it may not be the one
+  // that was registered — see FrameReg.origin.
+  if (ev.origin !== reg.origin) return
   const d = ev.data as Record<string, unknown> | null
   if (!d || d.__laBridge !== 1) return
   if (d.ns !== reg.ns) return // stale document from before an app switch

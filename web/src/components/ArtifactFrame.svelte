@@ -22,9 +22,14 @@
   $effect(() => {
     const el = frameEl
     const sid = $activeSessionId
-    if (!el || !sid) return
-    registerArtifactFrame(el.contentWindow, sid, artifact.path)
-    return () => unregisterLaIframe(el.contentWindow)
+    const url = artifact.originURL
+    if (!el || !sid || !url) return
+    // Capture the window: once the element is out of the document its
+    // contentWindow reads null, and the cleanup would leave the registration
+    // — and the mirror entry behind it — alive until the 30-minute evict.
+    const win = el.contentWindow
+    registerArtifactFrame(win, sid, artifact.path, new URL(url, location.href).origin)
+    return () => unregisterLaIframe(win)
   })
 
   // The banner the origin bakes into a gated page carries theme colours, and

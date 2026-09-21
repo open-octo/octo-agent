@@ -90,7 +90,7 @@ func TestArtifactView_UnknownPath(t *testing.T) {
 	resetArtifactMirror(t)
 	PutArtifact(ArtifactSnapshot{Session: "s1", Path: "/tmp/a.html", Digest: "a chart", Image: tinyPNG(t), ImageType: "image/png"})
 
-	out := runToolInSession(t, ArtifactViewTool{}, "s1", map[string]any{"path": "/tmp/nope.html"})
+	out := runToolInSession(t, ArtifactViewTool{}, "s1", map[string]any{"artifact": "/tmp/nope.html"})
 	if !strings.Contains(out, "/tmp/nope.html") || !strings.Contains(out, "artifact_state") {
 		t.Errorf("expected a named refusal pointing at artifact_state:\n%s", out)
 	}

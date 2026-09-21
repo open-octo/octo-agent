@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import 'fake-indexeddb/auto'
 import { registerLaIframe, unregisterLaIframe, registerArtifactFrame, installLaStorageBridge, LA_DB_NAME, LA_STORE } from './laStorage'
 import { acceptArtifactState, dropArtifactState } from './laState'
+import { lightappOrigin } from './stores'
 import { vi } from 'vitest'
 
 // The relay itself is covered in laState.test.ts; here the question is only
@@ -51,14 +52,24 @@ function seedLegacy(ns: string, entries: Record<string, string>): Promise<void> 
 
 // Dispatch a message as if from the app's frame and wait for the async IDB
 // roundtrip.
-async function fromFrame(w: Window & { __sent: Sent[]; __ns: string }, op: string, extra: Record<string, unknown> = {}, ns = w.__ns): Promise<void> {
+async function fromFrame(
+  w: Window & { __sent: Sent[]; __ns: string },
+  op: string,
+  extra: Record<string, unknown> = {},
+  ns = w.__ns,
+  origin = lightappOrigin(w.__ns),
+): Promise<void> {
   window.dispatchEvent(new MessageEvent('message', {
     data: { __laBridge: 1, id: 0, ns, op, ...extra },
     source: w,
-    origin: 'http://' + ns + '.apps.localhost:8088',
+    origin,
   }))
   await new Promise((r) => setTimeout(r, 20))
 }
+
+// The origin an artifact frame is served from — minted per grant, so the host
+// takes it from the URL it loaded and the page never gets to assert it.
+const ART_ORIGIN = 'http://tok-abc.artifacts.localhost:8088'
 
 // No fresh IDBFactory per test: the module caches its connection, so a new
 // factory would leave the seeds and the reads in different databases. The
@@ -124,24 +135,24 @@ describe('Light App storage migration', () => {
 describe('artifact frame routing', () => {
   it('routes a state push to the artifact relay with its (session, path) identity', async () => {
     const w = makeWin()
-    registerArtifactFrame(w, 'sess-9', '/tmp/page.html')
-    await fromFrame(w, 'state', { digest: 'a chart' }, 'sess-9\n/tmp/page.html')
+    registerArtifactFrame(w, 'sess-9', '/tmp/page.html', ART_ORIGIN)
+    await fromFrame(w, 'state', { digest: 'a chart' }, 'sess-9\n/tmp/page.html', ART_ORIGIN)
 
     expect(acceptArtifactState).toHaveBeenCalledWith('sess-9', '/tmp/page.html', expect.objectContaining({ digest: 'a chart' }))
   })
 
   it('drops a push that claims another identity than the registration', async () => {
     const w = makeWin()
-    registerArtifactFrame(w, 'sess-9', '/tmp/page.html')
+    registerArtifactFrame(w, 'sess-9', '/tmp/page.html', ART_ORIGIN)
     // A stale document from before the iframe was reused claims a different ns.
-    await fromFrame(w, 'state', { digest: 'stale' }, 'sess-9\n/tmp/other.html')
+    await fromFrame(w, 'state', { digest: 'stale' }, 'sess-9\n/tmp/other.html', ART_ORIGIN)
 
     expect(acceptArtifactState).not.toHaveBeenCalled()
   })
 
   it('forgets the artifact server-side when the frame unregisters', async () => {
     const w = makeWin()
-    registerArtifactFrame(w, 'sess-9', '/tmp/gone.html')
+    registerArtifactFrame(w, 'sess-9', '/tmp/gone.html', ART_ORIGIN)
     unregisterLaIframe(w)
 
     expect(dropArtifactState).toHaveBeenCalledWith('sess-9', '/tmp/gone.html')
@@ -149,11 +160,32 @@ describe('artifact frame routing', () => {
 
   it('an artifact frame never triggers the light-app storage migration', async () => {
     const w = makeWin()
-    registerArtifactFrame(w, 'sess-9', '/tmp/page.html')
-    await fromFrame(w, 'migrate-ready', {}, 'sess-9\n/tmp/page.html')
+    registerArtifactFrame(w, 'sess-9', '/tmp/page.html', ART_ORIGIN)
+    await fromFrame(w, 'migrate-ready', {}, 'sess-9\n/tmp/page.html', ART_ORIGIN)
 
     // No reply at all: migration is a light-app contract.
     expect(w.__sent.length).toBe(0)
+  })
+})
+
+describe('frame origin pinning', () => {
+  // A registered frame can navigate itself elsewhere — the sandbox does not
+  // stop it and the WindowProxy survives the trip. The document that lands
+  // next must not inherit the registration.
+  it('ignores a message from an origin other than the one registered', async () => {
+    const w = makeWin()
+    registerArtifactFrame(w, 'sess-9', '/tmp/page.html', ART_ORIGIN)
+    await fromFrame(w, 'state', { digest: 'from elsewhere' }, 'sess-9\n/tmp/page.html', 'https://evil.example')
+
+    expect(acceptArtifactState).not.toHaveBeenCalled()
+  })
+
+  it('ignores a light-app message from an origin other than the app\'s own', async () => {
+    const w = makeWin()
+    registerLaIframe(w, w.__ns)
+    await fromFrame(w, 'migrate-ready', {}, w.__ns, 'https://evil.example')
+
+    expect(w.__sent).toEqual([])
   })
 })
 
@@ -165,8 +197,8 @@ describe('double-host frames', () => {
   it('drops the mirror entry only when the LAST frame for an identity unregisters', async () => {
     const panel = makeWin()
     const modal = makeWin()
-    registerArtifactFrame(panel, 'sess-9', '/tmp/shared.html')
-    registerArtifactFrame(modal, 'sess-9', '/tmp/shared.html')
+    registerArtifactFrame(panel, 'sess-9', '/tmp/shared.html', ART_ORIGIN)
+    registerArtifactFrame(modal, 'sess-9', '/tmp/shared.html', ART_ORIGIN)
 
     unregisterLaIframe(modal)
     expect(dropArtifactState).not.toHaveBeenCalled()

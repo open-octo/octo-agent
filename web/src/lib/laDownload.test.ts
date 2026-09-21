@@ -9,7 +9,7 @@ import { sanitizeDownloadName, MAX_DOWNLOAD_BYTES } from './laDownload'
 // the origin serves (internal/server/lightapp_origin.go), so the tests run
 // the very bytes that ship. vitest's cwd is web/ (vitest.config.ts).
 const BRIDGE_JS = readFileSync(join(process.cwd(), '..', 'internal', 'server', 'frame_bridge.js'), 'utf8')
-import { nativeShell, toasts } from './stores'
+import { nativeShell, toasts, lightappOrigin } from './stores'
 import { tr } from './i18n'
 import { get } from 'svelte/store'
 import * as api from './api'
@@ -23,7 +23,7 @@ function fromApp(data: Record<string, unknown>): void {
   const ns = 'dl-' + nsCounter++
   const w = { postMessage: () => {} } as unknown as Window
   registerLaIframe(w, ns)
-  window.dispatchEvent(new MessageEvent('message', { data: { __laBridge: 1, id: 0, ns, ...data }, source: w, origin: 'null' }))
+  window.dispatchEvent(new MessageEvent('message', { data: { __laBridge: 1, id: 0, ns, ...data }, source: w, origin: lightappOrigin(ns) }))
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 15))

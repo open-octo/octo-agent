@@ -71,7 +71,7 @@ func (ArtifactViewTool) Definition() agent.ToolDefinition {
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path": map[string]any{
+				"artifact": map[string]any{
 					"type": "string",
 					"description": "Which artifact to view, as artifact_state names it. " +
 						"Optional when exactly one page is reporting state.",
@@ -83,7 +83,7 @@ func (ArtifactViewTool) Definition() agent.ToolDefinition {
 
 func (ArtifactViewTool) Execute(ctx context.Context, _ string, input map[string]any) (agent.ToolResult, error) {
 	sid := SessionIDFrom(ctx)
-	path := strings.TrimSpace(stringArg(input, "path"))
+	path := strings.TrimSpace(stringArg(input, "artifact"))
 	pages := artifactSnapshots(sid)
 
 	var snap *ArtifactSnapshot
@@ -108,7 +108,7 @@ func (ArtifactViewTool) Execute(ctx context.Context, _ string, input map[string]
 			names = append(names, s.Path)
 		}
 		return agent.ToolResult{
-			Text: fmt.Sprintf("Several artifacts are reporting state (%s). Pass `path` to say which one to view.", strings.Join(names, ", ")),
+			Text: fmt.Sprintf("Several artifacts are reporting state (%s). Pass `artifact` to say which one to view.", strings.Join(names, ", ")),
 		}, nil
 	}
 

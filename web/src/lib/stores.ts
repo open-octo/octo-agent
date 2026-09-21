@@ -264,13 +264,20 @@ export const mountedPanels = derived(
   ([$apps, $ok]) => ($ok ? $apps.filter((a) => a.mount === 'panel') : []),
 )
 
-// The URL a Light App frame loads, mounted or not: its own origin, on the port
-// this page is already talking to, with the resolved theme so the app can match
-// the UI. `gen` busts the frame's cache when the panel asks for a reload.
+// The origin a Light App frame runs on: its own host, on the port this page is
+// already talking to. Also what the message router expects `ev.origin` to be
+// and what a delivery targets, so the formula lives in one place.
+export function lightappOrigin(slug: string): string {
+  const port = location.port ? `:${location.port}` : ''
+  return `http://${slug}.apps.localhost${port}`
+}
+
+// The URL a Light App frame loads, mounted or not: its own origin, with the
+// resolved theme so the app can match the UI. `gen` busts the frame's cache
+// when the panel asks for a reload.
 export function lightappURL(slug: string, gen: number = 0): string {
   const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
-  const port = location.port ? `:${location.port}` : ''
-  return `http://${slug}.apps.localhost${port}/?theme=${theme}&v=${gen}`
+  return `${lightappOrigin(slug)}/?theme=${theme}&v=${gen}`
 }
 export const lightappHTML = writable<Record<string, string>>({})
 // updated_at of the copy in lightappHTML, per slug. The panel's change poll

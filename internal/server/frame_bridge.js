@@ -147,7 +147,19 @@
     };
   }
 
+  // A Light App gets `window.octo` with both calls present and inert. The
+  // apps written while the mirror existed were taught the unguarded form —
+  // `window.octo.pushState({...})` — and those calls sit in pointerup and
+  // change handlers, where a TypeError takes the rest of the handler with it.
+  // Retiring the mirror must not break the app around it.
+  function bootInertInteraction() {
+    window.octo = window.octo || {};
+    window.octo.pushState = function () {};
+    window.octo.onDelivery = function () {};
+  }
+
   if (KIND === 'lightapp') {
+    bootInertInteraction();
     bootStorageMigration();
     bootDownloadBridge();
   } else {

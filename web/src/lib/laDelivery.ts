@@ -33,8 +33,8 @@ export async function deliverToFrame(ev: ArtifactDeliveryEvent): Promise<'delive
   // its own, and the agent finds out through artifact_state like everything
   // else about the page.
   const ns = session + '\n' + path
-  const win = laFrameFor(ns)
-  if (!win) return 'no-frame'
+  const target = laFrameFor(ns)
+  if (!target || !target.origin) return 'no-frame'
 
   try {
     const res = await fetch(
@@ -42,7 +42,7 @@ export async function deliverToFrame(ev: ArtifactDeliveryEvent): Promise<'delive
     )
     if (!res.ok) return 'failed'
     const blob = await res.blob()
-    win.postMessage(
+    target.win.postMessage(
       {
         __laBridge: 1,
         id: 0,
@@ -52,7 +52,9 @@ export async function deliverToFrame(ev: ArtifactDeliveryEvent): Promise<'delive
         note: typeof ev.note === 'string' ? ev.note : '',
         blob,
       },
-      '*',
+      // Never '*': the bytes are the agent's, and the frame may have taken
+      // itself somewhere else since it registered.
+      target.origin,
     )
     return 'delivered'
   } catch {

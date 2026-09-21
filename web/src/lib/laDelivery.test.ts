@@ -10,12 +10,19 @@ type Posted = { data: Record<string, unknown>; origin: string }
 let posted: Posted[]
 let fetched: string[]
 
-function fakeFrame(): Window {
+// The registry hands back the window and the origin it was registered with;
+// the bytes may only be posted to that origin.
+const ART_ORIGIN = 'http://tok-abc.artifacts.localhost:8088'
+
+function fakeFrame(origin = ART_ORIGIN): { win: Window; origin: string } {
   return {
-    postMessage: (data: Record<string, unknown>, origin: string) => {
-      posted.push({ data, origin })
-    },
-  } as unknown as Window
+    win: {
+      postMessage: (data: Record<string, unknown>, target: string) => {
+        posted.push({ data, origin: target })
+      },
+    } as unknown as Window,
+    origin,
+  }
 }
 
 beforeEach(() => {
@@ -46,6 +53,19 @@ describe('deliverToFrame', () => {
     expect(posted[0].data.name).toBe('gen.png')
     expect(posted[0].data.note).toBe('from the brief')
     expect(posted[0].data.blob).toBeInstanceOf(Blob)
+    // Never '*': the frame may have navigated itself away since it registered.
+    expect(posted[0].origin).toBe(ART_ORIGIN)
+  })
+
+  // A registration with no origin to post to is not a target. Nothing is
+  // fetched either — the ticket is better left to expire than spent on a
+  // frame the bytes cannot safely reach.
+  it('does not deliver to a frame with no pinned origin', async () => {
+    vi.mocked(laFrameFor).mockReturnValue(fakeFrame(''))
+
+    expect(await deliverToFrame({ session: 's1', path: '/tmp/p.html', id: 'abc' })).toBe('no-frame')
+    expect(fetched.length).toBe(0)
+    expect(posted.length).toBe(0)
   })
 
   it('escapes the session, the path and the ticket', async () => {

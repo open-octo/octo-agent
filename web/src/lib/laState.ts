@@ -1,18 +1,19 @@
-import { writable } from 'svelte/store'
-
 // laState.ts — relays a sandboxed page's state snapshot to the server.
 //
 // The page cannot reach the API itself: it runs on its own origin behind a
 // CSP that closes every network exit. It posts a snapshot over the
 // `__laBridge` channel instead (laStorage.ts routes it here), and this module
 // — running in the host page, which has the origin and the cookie — puts it
-// on the matching endpoint:
+// on the session artifact's endpoint:
 //
-//   Light App          PUT /api/light-apps/{slug}/state
-//   session artifact   PUT /api/sessions/{id}/artifacts/state?path=…
+//   PUT /api/sessions/{id}/artifacts/state?path=…
 //
-// The mirror there is what the model's state/view tools read. The page gains
-// no capability from this. It only gets to be seen.
+// Session artifacts are the only pages with a mirror; a Light App's bridge
+// does not assemble this half at all. The mirror is what the model's
+// state/view tools read. The page gains no capability from this. It only gets
+// to be seen.
+
+import { writable } from 'svelte/store'
 
 // A canvas can fire on every stroke, so snapshots are coalesced per identity:
 // at most one queued, and never more than one request per window. The queued

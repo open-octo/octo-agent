@@ -80,7 +80,11 @@ func (s *Server) deliverToArtifact(session, artifactPath, filePath, note string)
 	if err != nil {
 		return fmt.Errorf("session not found")
 	}
-	if _, ok := sessionWrotePath(sess, artifactPath); !ok {
+	// Use the transcript's own spelling of the path from here on, the way the
+	// preview and the state relay do: the ticket and the broadcast then carry
+	// the same string the mirror is keyed by, whoever asked.
+	served, ok := sessionWrotePath(sess, artifactPath)
+	if !ok {
 		return fmt.Errorf("%s is not an artifact of this session", filepath.Base(artifactPath))
 	}
 
@@ -125,13 +129,13 @@ func (s *Server) deliverToArtifact(session, artifactPath, filePath, note string)
 			delete(artifactDeliveries.by, k)
 		}
 	}
-	artifactDeliveries.by[id] = &artifactDelivery{session: session, artifactPath: artifactPath, filePath: abs, ctype: ctype, created: now}
+	artifactDeliveries.by[id] = &artifactDelivery{session: session, artifactPath: served, filePath: abs, ctype: ctype, created: now}
 	artifactDeliveries.mu.Unlock()
 
 	s.broadcastGlobal(map[string]any{
 		"type":    "artifact_delivery",
 		"session": session,
-		"path":    artifactPath,
+		"path":    served,
 		"id":      id,
 		"name":    filepath.Base(abs),
 		"note":    note,

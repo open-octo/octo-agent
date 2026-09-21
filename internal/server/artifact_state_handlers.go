@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -82,8 +83,16 @@ func (s *Server) handlePutArtifactState(w http.ResponseWriter, r *http.Request) 
 	// Summary is relayed verbatim but must at least be JSON: the tools hand it
 	// to the model as-is, and a malformed blob there reads as corrupt output
 	// rather than as the page's own mistake.
+	//
+	// Compacted, not just validated: JSON allows raw newlines between tokens,
+	// and artifact_state renders the summary into a line-per-page answer. A
+	// page could otherwise pad its own JSON into what reads as another
+	// artifact's line.
 	if raw := strings.TrimSpace(r.FormValue("summary")); raw != "" && json.Valid([]byte(raw)) {
-		snap.Summary = json.RawMessage(raw)
+		var buf bytes.Buffer
+		if json.Compact(&buf, []byte(raw)) == nil {
+			snap.Summary = json.RawMessage(buf.Bytes())
+		}
 	}
 
 	if file, hdr, err := r.FormFile("image"); err == nil {
