@@ -172,17 +172,29 @@ func TestEnableSubAgentTools_RefreshesMemoryBackendBeforeBakingGuidance(t *testi
 	}
 }
 
-// scriptedSender returns a fixed sequence of replies across all sender methods,
-// sharing one counter between the parent turn and any sub-agent it spawns (both
-// run against the same sender). It lets a test drive a sub_agent tool_use
-// and observe the sub-agent run inline.
+// scriptedSender hands one conversation — the parent turn, named by the user
+// message it opens with — a fixed sequence of replies, and answers every other
+// conversation with a constant.
+//
+// Routing on the conversation rather than on a shared counter is what makes it
+// deterministic. A sub-agent the turn spawns runs against this same sender on
+// its own goroutine, so with one counter the child's first call could land
+// between the parent's two and take the reply the parent was about to get,
+// leaving the parent with the fallback. Which one got there first was the
+// runner's decision, not the test's.
 type scriptedSender struct {
-	mu      sync.Mutex
+	mu sync.Mutex
+	// opening is the parent turn's first user message; a conversation that
+	// starts with anything else is somebody else's.
+	opening string
 	replies []agent.Reply
 	calls   int
 }
 
-func (s *scriptedSender) next() agent.Reply {
+func (s *scriptedSender) next(msgs []agent.Message) agent.Reply {
+	if !s.isParent(msgs) {
+		return agent.Reply{Content: "child reply"}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var r agent.Reply
@@ -195,24 +207,36 @@ func (s *scriptedSender) next() agent.Reply {
 	return r
 }
 
-func (s *scriptedSender) SendMessages(_ context.Context, _, _ string, _ []agent.Message, _ int) (agent.Reply, error) {
-	return s.next(), nil
+// isParent reports whether these messages are the parent turn's conversation,
+// by the user message it opens with — the one thing that stays put as the turn
+// grows tool_use and tool_result messages on the end.
+func (s *scriptedSender) isParent(msgs []agent.Message) bool {
+	for _, m := range msgs {
+		if m.Role == agent.RoleUser {
+			return m.Content == s.opening
+		}
+	}
+	return false
 }
 
-func (s *scriptedSender) StreamMessages(_ context.Context, _, _ string, _ []agent.Message, _ int, onChunk func(string), _ func(string)) (agent.Reply, error) {
-	r := s.next()
+func (s *scriptedSender) SendMessages(_ context.Context, _, _ string, msgs []agent.Message, _ int) (agent.Reply, error) {
+	return s.next(msgs), nil
+}
+
+func (s *scriptedSender) StreamMessages(_ context.Context, _, _ string, msgs []agent.Message, _ int, onChunk func(string), _ func(string)) (agent.Reply, error) {
+	r := s.next(msgs)
 	if onChunk != nil && r.Content != "" {
 		onChunk(r.Content)
 	}
 	return r, nil
 }
 
-func (s *scriptedSender) SendMessagesWithTools(_ context.Context, _, _ string, _ []agent.Message, _ int, _ []agent.ToolDefinition) (agent.Reply, error) {
-	return s.next(), nil
+func (s *scriptedSender) SendMessagesWithTools(_ context.Context, _, _ string, msgs []agent.Message, _ int, _ []agent.ToolDefinition) (agent.Reply, error) {
+	return s.next(msgs), nil
 }
 
-func (s *scriptedSender) StreamMessagesWithTools(_ context.Context, _, _ string, _ []agent.Message, _ int, _ []agent.ToolDefinition, onChunk func(string), _ agent.ToolInputDeltaFunc, _ agent.ThinkingDeltaFunc) (agent.Reply, error) {
-	r := s.next()
+func (s *scriptedSender) StreamMessagesWithTools(_ context.Context, _, _ string, msgs []agent.Message, _ int, _ []agent.ToolDefinition, onChunk func(string), _ agent.ToolInputDeltaFunc, _ agent.ThinkingDeltaFunc) (agent.Reply, error) {
+	r := s.next(msgs)
 	if onChunk != nil && r.Content != "" {
 		onChunk(r.Content)
 	}
@@ -229,7 +253,8 @@ func TestServerBackgroundsSubAgent(t *testing.T) {
 	// allow sub_agent), not a developer's ~/.octo/permissions.yml.
 	t.Setenv("HOME", t.TempDir())
 
-	sender := &scriptedSender{replies: []agent.Reply{
+	const ask = "please use a sub-agent"
+	sender := &scriptedSender{opening: ask, replies: []agent.Reply{
 		// 1. Parent asks to spawn a sub-agent.
 		{
 			Blocks: []agent.ContentBlock{
@@ -261,7 +286,7 @@ func TestServerBackgroundsSubAgent(t *testing.T) {
 	})
 
 	sess := agent.NewSession("stub-model", "")
-	reply, err := srv.runTurn(context.Background(), sess, "please use a sub-agent")
+	reply, err := srv.runTurn(context.Background(), sess, ask)
 	if err != nil {
 		t.Fatalf("runTurn: %v", err)
 	}
