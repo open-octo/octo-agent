@@ -330,9 +330,20 @@ func TestRefreshLatestVersion_BypassesCacheAndSeedsIt(t *testing.T) {
 	if latest, _ := awaitVersion(t, srv, "9.9.9"); latest != "9.9.9" {
 		t.Fatalf("priming read = %q, want 9.9.9", latest)
 	}
+	// Measured from a settled baseline rather than from zero, for the reason
+	// spelled out in TestLatestVersion_ChecksAndCaches: this test owns the
+	// process-wide upgrade.BaseURL and pins a release-like version, so a stray
+	// lookup anywhere in the binary lands on this fake. What belongs to this
+	// test is each delta below, not the total.
+	settleVersionRefresh(t, srv)
+	baseline := atomic.LoadInt32(&hits)
+
 	tag = "10.0.0"
 	if latest, _ := srv.LatestVersion(); latest != "9.9.9" {
 		t.Fatalf("cached read = %q, want the cached 9.9.9", latest)
+	}
+	if got := atomic.LoadInt32(&hits); got != baseline {
+		t.Errorf("cached read cost %d upstream request(s), want 0", got-baseline)
 	}
 
 	// The manual check ignores the refresh interval...
@@ -348,8 +359,52 @@ func TestRefreshLatestVersion_BypassesCacheAndSeedsIt(t *testing.T) {
 		t.Errorf("badge read after refresh = (%q, %v), want (10.0.0, true)", latest, needs)
 	}
 	settleVersionRefresh(t, srv)
-	if got := atomic.LoadInt32(&hits); got != 2 {
-		t.Errorf("upstream hits = %d, want 2 (one background refresh + one forced; the rest cached)", got)
+	if got := atomic.LoadInt32(&hits); got != baseline+1 {
+		t.Errorf("the forced refresh plus a cached read cost %d upstream request(s), want exactly 1", got-baseline)
+	}
+}
+
+// TestStartVersionRefresh_SkipsALookupThatAlreadyLanded: a reader judges the
+// cache stale, then reaches startVersionRefresh late — after the refresh it
+// would have lost the CAS to has published its answer and released the token.
+// Taking the token must not commit it to a second lookup for something already
+// in the cache. Calling startVersionRefresh directly IS that reader: the
+// staleness judgement upstream of it is exactly what has gone out of date.
+//
+// This is the flake behind "upstream hits = 3, want 2" above: awaitVersion
+// polls every 5ms, so some poll eventually reads the empty cache a moment
+// before the background refresh publishes and calls in a moment after.
+func TestStartVersionRefresh_SkipsALookupThatAlreadyLanded(t *testing.T) {
+	var hits int32
+	mux := http.NewServeMux()
+	var fake *httptest.Server
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		http.Redirect(w, r, fake.URL+"/releases/tag/v9.9.9", http.StatusFound)
+	})
+	fake = httptest.NewServer(mux)
+	t.Cleanup(fake.Close)
+
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
+
+	origV, origC := version.Version, version.Commit
+	version.Version, version.Commit = "0.18.0", "abc1234"
+	t.Cleanup(func() { version.Version, version.Commit = origV, origC })
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
+	srv.LatestVersion()
+	if latest, _ := awaitVersion(t, srv, "9.9.9"); latest != "9.9.9" {
+		t.Fatalf("priming read = %q, want 9.9.9", latest)
+	}
+	settleVersionRefresh(t, srv)
+	baseline := atomic.LoadInt32(&hits)
+
+	srv.startVersionRefresh()
+	settleVersionRefresh(t, srv)
+	if got := atomic.LoadInt32(&hits); got != baseline {
+		t.Errorf("a late refresh cost %d upstream request(s), want 0 — the answer was already cached", got-baseline)
 	}
 }
 
