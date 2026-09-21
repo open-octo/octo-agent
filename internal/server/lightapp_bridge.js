@@ -41,23 +41,6 @@
     post({ __laBridge: 1, id: 0, ns: NS, op: 'migrate-ready' });
   }
 
-  // ── The retired state/delivery pair ──────────────────────────────────────
-  //
-  // `octo.pushState` mirrored a snapshot of the app host side for the model to
-  // read, and `octo.onDelivery` took a file back from it. Both are gone: the
-  // loop asked an app to be written for it, opened in the right place and kept
-  // open, and what came back was a line its author wrote in advance rather
-  // than an answer to what was asked.
-  //
-  // They stay here as no-ops rather than disappearing. The apps written while
-  // the mirror existed call `window.octo.pushState(...)` unguarded — the docs
-  // of the day taught that spelling — from pointerup and change handlers,
-  // where a TypeError would take the rest of the handler with it. An app that
-  // publishes into nothing keeps working; an app that throws does not.
-  window.octo = window.octo || {};
-  window.octo.pushState = function () {};
-  window.octo.onDelivery = function () {};
-
   // ── Download bridge (desktop shell only) ──────────────────────────────────
   //
   // The desktop webview has no download delegate, so an `<a download>` click
