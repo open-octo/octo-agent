@@ -1,12 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import 'fake-indexeddb/auto'
 import { registerLaIframe, unregisterLaIframe, installLaStorageBridge, LA_DB_NAME, LA_STORE } from './laStorage'
-import { acceptLaState } from './laState'
 import { vi } from 'vitest'
-
-// The relay itself is covered in laState.test.ts; here the question is only
-// whether the router hands it the right messages.
-vi.mock('./laState', () => ({ acceptLaState: vi.fn(), dropLaState: vi.fn() }))
 
 installLaStorageBridge()
 
@@ -117,39 +112,16 @@ describe('Light App storage migration', () => {
     expect(w.__sent).toEqual([])
   })
 })
-describe('Light App state routing', () => {
-  it('relays a state push under the namespace the frame is registered as', async () => {
+// `state` was a bridge op once: an app pushed a snapshot of itself and the
+// host relayed it to a mirror the model read. The mirror is gone, and an app
+// written while it existed may still send the op.
+describe('retired state op', () => {
+  it('is answered with nothing, like any op the host does not know', async () => {
     const w = makeWin()
     registerLaIframe(w, w.__ns)
-    vi.mocked(acceptLaState).mockClear()
 
     await fromFrame(w, 'state', { digest: '2 strokes', summary: { strokes: 2 } })
 
-    expect(vi.mocked(acceptLaState)).toHaveBeenCalledTimes(1)
-    const [ns, msg] = vi.mocked(acceptLaState).mock.calls[0]
-    expect(ns).toBe(w.__ns)
-    expect((msg as { digest?: unknown }).digest).toBe('2 strokes')
-  })
-
-  // An app is arbitrary third-party code. It can post whatever it likes, so
-  // the namespace has to come from which frame sent the message, never from
-  // the message itself.
-  it('drops a push that claims another app\'s namespace', async () => {
-    const w = makeWin()
-    registerLaIframe(w, w.__ns)
-    vi.mocked(acceptLaState).mockClear()
-
-    await fromFrame(w, 'state', { digest: 'not mine' }, 'someone-elses-app')
-
-    expect(vi.mocked(acceptLaState)).not.toHaveBeenCalled()
-  })
-
-  it('ignores a push from a frame that was never registered', async () => {
-    const w = makeWin()
-    vi.mocked(acceptLaState).mockClear()
-
-    await fromFrame(w, 'state', { digest: 'stray' })
-
-    expect(vi.mocked(acceptLaState)).not.toHaveBeenCalled()
+    expect(w.__sent).toEqual([])
   })
 })

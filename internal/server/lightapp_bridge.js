@@ -41,60 +41,22 @@
     post({ __laBridge: 1, id: 0, ns: NS, op: 'migrate-ready' });
   }
 
-  // ── State push (app → host, one way) ──────────────────────────────────────
+  // ── The retired state/delivery pair ──────────────────────────────────────
   //
-  // Lets an app describe itself to the model: octo mirrors the snapshot host
-  // side, where the lightapp_state / view_lightapp tools read it. There is no
-  // reply and no read path — the app never learns anything about the
-  // conversation from this.
+  // `octo.pushState` mirrored a snapshot of the app host side for the model to
+  // read, and `octo.onDelivery` took a file back from it. Both are gone: the
+  // loop asked an app to be written for it, opened in the right place and kept
+  // open, and what came back was a line its author wrote in advance rather
+  // than an answer to what was asked.
   //
-  //   octo.pushState({ digest: 'one line for the model',
-  //                    summary: { any: 'json' },
-  //                    image: blobOrCanvas })
-  //
-  // A canvas is accepted directly and converted; the host coalesces pushes, so
-  // calling this on every change is fine.
+  // They stay here as no-ops rather than disappearing. The apps written while
+  // the mirror existed call `window.octo.pushState(...)` unguarded — the docs
+  // of the day taught that spelling — from pointerup and change handlers,
+  // where a TypeError would take the rest of the handler with it. An app that
+  // publishes into nothing keeps working; an app that throws does not.
   window.octo = window.octo || {};
-
-  // ── Delivery (host → app) ─────────────────────────────────────────────────
-  //
-  // The agent can hand this app a file — a generated image to drop onto a
-  // canvas. Register a callback to receive it; ignore it and nothing happens.
-  // This is the only inbound direction, it carries a file and a note, and it
-  // never carries anything about the conversation.
-  //
-  //   octo.onDelivery(function (d) { d.blob; d.name; d.note })
-  var deliveryHandlers = [];
-  window.octo.onDelivery = function (fn) {
-    if (typeof fn === 'function') deliveryHandlers.push(fn);
-  };
-  if (window.addEventListener) {
-    window.addEventListener('message', function (ev) {
-      var d = ev.data;
-      if (!d || d.__laBridge !== 1 || d.op !== 'delivery' || ev.source !== window.parent) return;
-      for (var i = 0; i < deliveryHandlers.length; i++) {
-        try { deliveryHandlers[i]({ blob: d.blob, name: d.name, note: d.note }); }
-        catch (e) { console.warn('[octo] delivery handler failed', e); }
-      }
-    });
-  }
-
-  window.octo.pushState = function (state) {
-    var s = state || {};
-    function send(blob) {
-      post({
-        __laBridge: 1, id: 0, ns: NS, op: 'state',
-        digest: typeof s.digest === 'string' ? s.digest : '',
-        summary: s.summary,
-        image: blob || null,
-      });
-    }
-    var img = s.image;
-    if (img && typeof img.toBlob === 'function') {
-      try { img.toBlob(function (b) { send(b); }, 'image/png'); return; } catch (e) {}
-    }
-    send(img && typeof Blob !== 'undefined' && img instanceof Blob ? img : null);
-  };
+  window.octo.pushState = function () {};
+  window.octo.onDelivery = function () {};
 
   // ── Download bridge (desktop shell only) ──────────────────────────────────
   //
