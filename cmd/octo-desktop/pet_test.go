@@ -1,11 +1,24 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+// The const and the page are the two halves of one message, and nothing else
+// ties them together: rename the const and pet.html goes on emitting the old
+// name, which lands on no listener and silently costs the pet its
+// double-click. Neither half can be type-checked against the other, so check
+// the text.
+func TestPetHTMLEmitsTheToggleEvent(t *testing.T) {
+	want := "wails:event:emit:" + petToggleWindowEvent
+	if !strings.Contains(petHTML, want) {
+		t.Fatalf("pet.html must invoke %q", want)
+	}
+}
 
 // The corners are the whole reason shape-aware pass-through exists: a 200pt
 // square dropped on the desktop overlaps things the user meant to click, and

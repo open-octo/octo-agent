@@ -393,6 +393,19 @@
     stage.classList.add('poke');
   }, true);
 
+  // Double-click shows the main window, or puts it away when it is already up
+  // — the pet is the one bit of Octo always in sight, so it doubles as the
+  // handle for the window. The Go side decides which; this only reports the
+  // gesture, through the same stub the drag uses (the page can't reach the
+  // real runtime, and wails:event:emit is the one channel that doesn't need
+  // it). A double-click is two clicks, so the poke above plays first — the
+  // pet reacting to being prodded, which is what it should look like.
+  addEventListener('dblclick', (e) => {
+    if (dragging) return;
+    e.preventDefault();
+    window._wails?.invoke?.('wails:event:emit:octo:pet:toggle-window');
+  }, true);
+
   // The Go side drives the pet through this; ?state= is for eyeballing it in a browser.
   window.octoPet = { setState };
 
