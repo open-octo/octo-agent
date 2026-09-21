@@ -60,6 +60,8 @@ var allTools = []tool{
 	BrowserTool{},
 	ComputerTool{},
 	MemoryRecallTool{},
+	ArtifactStateTool{},
+	ArtifactViewTool{},
 	LightAppStateTool{},
 	LightAppViewTool{},
 	LightAppInsertTool{},
