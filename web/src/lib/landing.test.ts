@@ -12,7 +12,11 @@ vi.stubGlobal('localStorage', {
 })
 
 const getLanding = vi.fn()
-vi.mock('./api', () => ({ getLanding: () => getLanding() }))
+const listLightApps = vi.fn()
+vi.mock('./api', () => ({
+  getLanding: () => getLanding(),
+  listLightApps: () => listLightApps(),
+}))
 
 // The module holds the config in a store, so each case needs its own instance
 // rather than a reset hook that only tests would use.
@@ -23,6 +27,8 @@ async function freshStores() {
 
 beforeEach(() => {
   getLanding.mockReset()
+  listLightApps.mockReset()
+  listLightApps.mockResolvedValue([])
 })
 
 describe('loadLanding', () => {
@@ -71,5 +77,54 @@ describe('loadLanding', () => {
 
     await expect(loadLanding()).resolves.toBeUndefined()
     expect(get(landing)).toEqual({})
+  })
+})
+
+// The start screen resolves its hero app and its pinned shortcuts against the
+// installed Light Apps, so that list has to be re-readable for the same reason
+// the config is: the agent can create an app and pin it in the same breath.
+describe('loadLightApps', () => {
+  it('reads again once the previous read has settled', async () => {
+    listLightApps
+      .mockResolvedValueOnce([{ slug: 'first', name: 'First' }])
+      .mockResolvedValueOnce([{ slug: 'first', name: 'First' }, { slug: 'second', name: 'Second' }])
+    const { lightapps, loadLightApps } = await freshStores()
+
+    await loadLightApps()
+    expect(get(lightapps).map((a) => a.slug)).toEqual(['first'])
+
+    await loadLightApps()
+
+    expect(listLightApps).toHaveBeenCalledTimes(2)
+    expect(get(lightapps).map((a) => a.slug)).toEqual(['first', 'second'])
+  })
+
+  it('shares one request between callers asking at the same time', async () => {
+    const { loadLightApps } = await freshStores()
+
+    await Promise.all([loadLightApps(), loadLightApps(), loadLightApps()])
+
+    expect(listLightApps).toHaveBeenCalledTimes(1)
+  })
+})
+
+// The gate both callers share — an effect on the stores, and a focus listener
+// reading them with get(). One answer, so they cannot drift apart.
+describe('onStartScreen', () => {
+  it('is the blank chat, on a desktop-shaped UI', async () => {
+    const { onStartScreen } = await freshStores()
+
+    expect(onStartScreen('chat', null, false)).toBe(true)
+    expect(onStartScreen('chat', '', false)).toBe(true)
+  })
+
+  it('is not a session, another view, or the mobile UI', async () => {
+    const { onStartScreen } = await freshStores()
+
+    expect(onStartScreen('chat', 'sess-1', false)).toBe(false)
+    expect(onStartScreen('skills', null, false)).toBe(false)
+    // Mobile renders none of the start screen, so it must not pay for it —
+    // a phone browser fires focus on every tab switch.
+    expect(onStartScreen('chat', null, true)).toBe(false)
   })
 })

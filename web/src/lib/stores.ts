@@ -173,6 +173,17 @@ export function panelForView(v: string, openApps: string[], sessionId: string | 
   return null
 }
 
+/**
+ * Whether the start screen — the blank chat that renders from
+ * ~/.octo/landing — is what the user is looking at. It is the only consumer of
+ * the landing config, so it is also the only moment worth re-reading it (and
+ * the Light App list its hero and shortcuts resolve against). The mobile UI
+ * renders none of it.
+ */
+export function onStartScreen(v: string, sessionId: string | null, mobile: boolean): boolean {
+  return !mobile && v === 'chat' && !sessionId
+}
+
 /** Open the panel in whatever the current view offers, or close it if open. */
 export function togglePanel(): void {
   panelContent.update(v => v ? null : panelForView(get(view), get(lightappOpen), get(activeSessionId)))
@@ -234,9 +245,14 @@ export function loadLanding(): Promise<void> {
 
 export const lightapps = writable<import('./api').LightApp[]>([])
 
-// The installed list is read in two places before the Light Apps panel is ever
-// opened: the sidebar needs it at boot to know which apps claim a mount. The
-// in-flight promise is shared so the callers cost one request between them.
+// The installed list is read in several places before the Light Apps panel is
+// ever opened: the sidebar needs it at boot to know which apps claim a mount.
+// Concurrent callers share one request.
+//
+// Re-readable for the same reason loadLanding is: the start screen resolves
+// its hero app and its pinned shortcuts against this list, so an app created
+// during the visit would otherwise stay invisible there until a restart —
+// which is exactly the half of the bug the config re-read does not cover.
 let lightappsRequest: Promise<void> | null = null
 export function loadLightApps(): Promise<void> {
   if (lightappsRequest) return lightappsRequest
@@ -246,8 +262,11 @@ export function loadLightApps(): Promise<void> {
       lightapps.set(list)
     })
     .catch(() => {
-      // Both callers degrade to showing nothing, which is also the answer when
-      // the user simply has no Light Apps.
+      // Callers degrade to showing nothing, which is also the answer when the
+      // user simply has no Light Apps.
+    })
+    .finally(() => {
+      lightappsRequest = null
     })
   return lightappsRequest
 }
