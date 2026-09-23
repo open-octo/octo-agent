@@ -213,7 +213,8 @@ func (s *scriptedSender) next(msgs []agent.Message) agent.Reply {
 func (s *scriptedSender) isParent(msgs []agent.Message) bool {
 	for _, m := range msgs {
 		if m.Role == agent.RoleUser {
-			return m.Content == s.opening
+			// The interface note may ride ahead of the parent's opening line.
+			return strings.TrimSpace(agent.StripSystemReminders(m.Content)) == s.opening
 		}
 	}
 	return false

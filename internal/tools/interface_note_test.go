@@ -19,7 +19,8 @@ func TestInterfaceReminder_PerEntry(t *testing.T) {
 		{agent.EntryTUI, "Interface: the terminal UI."},
 		{agent.EntryCLI, "Interface: a one-shot run"},
 		{agent.EntryCron, "Interface: a scheduled run"},
-		{agent.EntryAPI, ""},
+		{agent.EntryAPI, "Interface: an API client"},
+		{agent.EntrySetup, ""},
 		{"", ""},
 	}
 	for _, c := range cases {
@@ -100,5 +101,24 @@ func TestInterfaceNote_OnlyWhenChanged(t *testing.T) {
 				t.Errorf("want no note, got %q", got)
 			}
 		})
+	}
+}
+
+// A scheduled task with notify targets pushes its reply to IM, so the cron
+// note must not promise Web-only rendering there.
+func TestInterfaceNote_CronReplySentToIM(t *testing.T) {
+	e := hooks.NewEngine(nil)
+	NewInterfaceNote(nil).RegisterHooks(e)
+	p := hooks.Payload{Event: hooks.EventUserPromptSubmit, Transport: agent.EntryCron, UserInput: "run"}
+
+	if got := e.Inject(context.Background(), p); !strings.Contains(got, "read later in the Web UI") {
+		t.Errorf("plain cron run: got %q", got)
+	}
+	got := e.Inject(WithReplyToIM(context.Background()), p)
+	if !strings.Contains(got, "also sent to an IM chat") || strings.Contains(got, "GenUI panels render") {
+		t.Errorf("cron run with IM notify: got %q", got)
+	}
+	if !strings.HasPrefix(got, interfaceNotePrefix) {
+		t.Errorf("cron-to-IM note must be recognisable as a note: %q", got)
 	}
 }

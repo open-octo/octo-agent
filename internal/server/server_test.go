@@ -2502,7 +2502,7 @@ func TestRunTurn_InterruptPersistsKeptInput(t *testing.T) {
 	if len(reloaded.Messages) != 2 {
 		t.Fatalf("persisted messages = %d, want 2 (input + interrupt note): %+v", len(reloaded.Messages), reloaded.Messages)
 	}
-	if m := reloaded.Messages[0]; m.Role != agent.RoleUser || m.Content != "fix the bug" {
+	if m := reloaded.Messages[0]; m.Role != agent.RoleUser || strings.TrimSpace(agent.StripSystemReminders(m.Content)) != "fix the bug" {
 		t.Errorf("messages[0] = %+v, want the interrupted user input", m)
 	}
 	if m := reloaded.Messages[1]; m.Role != agent.RoleAssistant {

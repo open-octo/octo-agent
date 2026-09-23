@@ -40,8 +40,11 @@ func (n *InterfaceNote) RegisterHooks(e *hooks.Engine) {
 	if n == nil || e == nil {
 		return
 	}
-	e.RegisterInProc(hooks.EventUserPromptSubmit, func(_ context.Context, p hooks.Payload) string {
+	e.RegisterInProc(hooks.EventUserPromptSubmit, func(ctx context.Context, p hooks.Payload) string {
 		r := InterfaceReminder(p.Transport)
+		if p.Transport == agent.EntryCron && replyToIM(ctx) {
+			r = cronToIMReminder
+		}
 		if r == "" || n.lastNote() == r {
 			return ""
 		}
@@ -50,6 +53,25 @@ func (n *InterfaceNote) RegisterHooks(e *hooks.Engine) {
 }
 
 const interfaceNotePrefix = "<system-reminder>\nInterface: "
+
+// cronToIMReminder replaces the cron note when the run's reply is also pushed
+// to IM chats (a scheduled task with notify targets): the Web UI would render
+// a diagram, the chat would get its source.
+const cronToIMReminder = "<system-reminder>\nInterface: a scheduled run with no one watching live. The reply is also sent to an IM chat, where only markdown renders; ```mermaid fences and GenUI would arrive as source, so write a flow as a numbered list.\n</system-reminder>"
+
+type ctxKeyReplyToIM struct{}
+
+// WithReplyToIM marks a turn whose reply is also delivered to an IM chat. The
+// turn's transport stays what started it (cron); only the interface note reads
+// this.
+func WithReplyToIM(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ctxKeyReplyToIM{}, true)
+}
+
+func replyToIM(ctx context.Context) bool {
+	v, _ := ctx.Value(ctxKeyReplyToIM{}).(bool)
+	return v
+}
 
 // lastNote returns the most recent interface note in the agent's history, or
 // "" when there is none. It reads the history at call time: the agent's
@@ -109,6 +131,8 @@ func InterfaceReminder(transport string) string {
 		line = "Interface: a one-shot run in a terminal or script. Reply in plain text or simple markdown; ```mermaid fences and GenUI show as source."
 	case agent.EntryCron:
 		line = "Interface: a scheduled run with no one watching live. The reply is read later in the Web UI, where markdown, ```mermaid fences and GenUI panels render."
+	case agent.EntryAPI:
+		line = "Interface: an API client or script. Reply in plain text or simple markdown; ```mermaid fences and GenUI show as source."
 	default:
 		return ""
 	}
