@@ -134,7 +134,7 @@ UI 在轻应用卡片上提供"公开访问"开关，打开时确认一次，说
 
 前端：
 
-- `probeArtifactOrigin`、`originUnavailable`、`ArtifactFrame` 的"仅本机可用"分支及 i18n 文案 `artifacts.local_only`、`lightapps.local_only`。
+- `probeArtifactOrigin` 与 i18n 文案 `artifacts.local_only`、`lightapps.local_only`。`ArtifactFrame` 的"仅本机可用"分支改为 grant 请求失败时的"预览加载失败"（`originUnavailable`，文案 `artifacts.preview_unavailable`），代码视图不受影响。
 - `lightappsAvailable` 与 `hostIsIPv6`；`mountedViews` 不再按可用性过滤。
 - `laStorage.ts` 的迁移接收端，改为宿主直接迁移。
 

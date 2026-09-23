@@ -28,8 +28,6 @@ boundary sits, what protects it, and what is deliberately out of scope.
 | DNS rebinding (attacker domain resolving to 127.0.0.1) | The loopback exemption requires a local `Host` header |
 | Spoofed client IPs | `X-Forwarded-For` is never consulted for the loopback exemption |
 | XSSI reads of uploaded files | `X-Content-Type-Options: nosniff` on served uploads |
-| Agent-written HTML (which a prompt injection can author) reaching the app from the Artifacts panel | It renders from a separate origin, `<token>.artifacts.localhost`, that serves artifact files only — no API, no UI — and whose `Origin` the CSRF gate rejects; the auth cookie is host-only and never sent there |
-| Agent-written HTML exfiltrating the files it can read beside itself | A `Content-Security-Policy` on the artifact origin limits every load and connection to the page's own origin and an allowlist of CDN hosts (the remaining channel — the frame navigating itself away with data in the URL — is documented, not closed) |
 
 IM channels (Feishu, DingTalk, Discord, …) authenticate separately via each
 platform's bot credentials plus octo's chat/user binding; the adapters hold
@@ -45,6 +43,15 @@ outbound connections only and expose no inbound HTTP routes.
   serve`) or tunnel.
 - **Brute force.** No lockout or rate limiting: the key is 256 bits of
   `crypto/rand`; online guessing is not viable.
+- **Agent-written HTML.** Session artifacts and Light Apps render in a frame
+  from a path on octo's own origin (`/_artifacts/…`, `/_apps/…`), so they work
+  however octo is reached. Same origin means the page is not isolated from
+  the app: its script can read the access key and call the API as the user.
+  A prompt injection that gets the agent to write a page gets that page this
+  power once the user opens it. The frame keeps a page's styles and scripts
+  out of the UI, and its `localStorage` keys apart from the UI's, but that is
+  protection against accidents, not against a hostile page. A Light App the
+  user marks public is served without the key to anyone who has the link.
 
 ## The access key
 

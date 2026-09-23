@@ -5,10 +5,10 @@ import { join } from 'node:path'
 import { registerLaIframe, installLaStorageBridge } from './laStorage'
 import { sanitizeDownloadName, MAX_DOWNLOAD_BYTES } from './laDownload'
 
-// The frame-side script is the server's: it is appended to every Light App
-// the origin serves (internal/server/lightapp_origin.go), so the tests run
-// the very bytes that ship. vitest's cwd is web/ (vitest.config.ts).
-const BRIDGE_JS = readFileSync(join(process.cwd(), '..', 'internal', 'server', 'lightapp_bridge.js'), 'utf8')
+// The frame-side script is the server's: it is spliced into every page the
+// server serves (internal/server/artifact_pages.go), so the tests run the very
+// bytes that ship. vitest's cwd is web/ (vitest.config.ts).
+const BRIDGE_JS = readFileSync(join(process.cwd(), '..', 'internal', 'server', 'page_shim.js'), 'utf8')
 import { nativeShell, toasts } from './stores'
 import { tr } from './i18n'
 import { get } from 'svelte/store'
@@ -151,13 +151,12 @@ const docProxy = {
 
 // Boot the bridge the way the served page does: framed, configured for the
 // slug, with the download half on (the desktop shell's configuration). The
-// migration half posts its `migrate-ready` at boot; the download assertions
-// below filter on op so that message never counts as a download.
+// download assertions filter on op, so only download messages count.
 function bootBridge(ns: string, download = true): Sent[] {
   const all: Sent[] = []
   const fakeWin = {
     parent: { postMessage: (d: Sent) => all.push(d) },
-    __octoLightApp: { ns, download },
+    __octoPage: { ns, download },
     addEventListener() {},
   }
   new Function('window', 'document', BRIDGE_JS)(fakeWin, docProxy)
@@ -301,7 +300,7 @@ describe('injected download script', () => {
   })
 
   it('does nothing when not framed', () => {
-    const top = { parent: null as unknown, __octoLightApp: { ns: 'app-e', download: true }, addEventListener() {} }
+    const top = { parent: null as unknown, __octoPage: { ns: 'app-e', download: true }, addEventListener() {} }
     top.parent = top
     const before = HTMLAnchorElement.prototype.click
     new Function('window', 'document', BRIDGE_JS)(top, docProxy)
@@ -321,41 +320,5 @@ describe('injected download script', () => {
     expect(ev.defaultPrevented).toBe(false)
     await tick()
     expect(sent).toHaveLength(0)
-  })
-
-  it('announces itself to the host for the one-time storage migration', () => {
-    const all: Sent[] = []
-    const fakeWin = { parent: { postMessage: (d: Sent) => all.push(d) }, __octoLightApp: { ns: 'app-k', download: false }, addEventListener() {} }
-    new Function('window', 'document', BRIDGE_JS)(fakeWin, docProxy)
-    expect(all).toEqual([{ __laBridge: 1, id: 0, ns: 'app-k', op: 'migrate-ready' }])
-  })
-
-  it('writes the migrated entries into localStorage without clobbering newer ones, then reports', () => {
-    const all: Sent[] = []
-    const listeners: Array<(ev: unknown) => void> = []
-    let reloaded = 0
-    const fakeWin = {
-      parent: { postMessage: (d: Sent) => all.push(d) },
-      __octoLightApp: { ns: 'app-m', download: false },
-      addEventListener: (_t: string, fn: (ev: unknown) => void) => listeners.push(fn),
-      location: { reload: () => { reloaded++ } },
-    }
-    // The environment has no localStorage of its own; the script reaches it as
-    // a global, so a Map-backed stand-in is what it sees.
-    const store = new Map<string, string>()
-    vi.stubGlobal('localStorage', {
-      getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
-      setItem: (k: string, v: string) => { store.set(k, String(v)) },
-    })
-    store.set('kept', 'new')
-    new Function('window', 'document', BRIDGE_JS)(fakeWin, docProxy)
-    listeners[0]({ data: { __laBridge: 1, id: 0, res: true, ok: true, op: 'migrate', value: { kept: 'old', score: '10' } }, source: fakeWin.parent })
-    expect(store.get('kept')).toBe('new')
-    expect(store.get('score')).toBe('10')
-    expect(all.at(-1)).toEqual({ __laBridge: 1, id: 0, ns: 'app-m', op: 'migrated', count: 1 })
-    expect(reloaded).toBe(1)
-    // A reply from anything but the parent is ignored.
-    listeners[0]({ data: { __laBridge: 1, id: 0, res: true, ok: true, op: 'migrate', value: { evil: '1' } }, source: {} })
-    expect(store.has('evil')).toBe(false)
   })
 })

@@ -154,12 +154,11 @@ export interface Artifact {
   // placeholder note rather than the document, and code is empty. Actions
   // that persist the body (copy, download) are disabled.
   loadFailed?: boolean
-  // HTML artifacts render from their own origin (the artifact origin, see
-  // internal/server/artifact_origin.go): originURL is the page URL the frame
+  // HTML artifacts render as a page of their own (/_artifacts/<token>/, see
+  // internal/server/artifact_pages.go): originURL is the page URL the frame
   // loads by src, and preview stays empty. originUnavailable is set instead
-  // when this browser cannot reach that origin — a client the server did not
-  // consider local, or a host that fails to resolve *.localhost — and the
-  // panel shows a local-only notice in place of the preview.
+  // when the grant request failed, and the panel says the preview could not
+  // load in its place.
   originURL?: string
   originUnavailable?: boolean
   // Observation count for this path in the session; bumps on every re-write

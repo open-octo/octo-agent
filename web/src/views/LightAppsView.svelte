@@ -63,6 +63,33 @@
     await openAgentSession($t('lightapps.new_prompt'), tr('lightapps.session_new'))
   }
 
+  // A public app's page is served without auth, so the link works for anyone
+  // who can reach this server. Only turning it on asks first; turning it off
+  // takes nothing away from anyone.
+  async function handlePublic(app: LightApp, on: boolean) {
+    if (on && !(await confirmDialog(tr('lightapps.public_on')))) return
+    busyId = app.slug
+    try {
+      const next = await api.setLightAppPublic(app.slug, on)
+      apps = apps.map(a => (a.slug === app.slug ? { ...a, public: next.public } : a))
+    } catch (e: any) {
+      showToast(`Failed to update: ${e.message}`, 'error')
+    } finally {
+      busyId = null
+    }
+  }
+
+  const publicURL = (slug: string) => `${location.origin}/_apps/${encodeURIComponent(slug)}/`
+  // On localhost the link names this machine; it only means something to
+  // others once octo is reached through a tunnel or a domain.
+  const onLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+
+  function copyPublicURL(slug: string) {
+    navigator.clipboard.writeText(publicURL(slug))
+      .then(() => showToast(tr('lightapps.public_copied')))
+      .catch(() => showToast(tr('artifacts.copy_failed'), 'error'))
+  }
+
   async function handleDelete(slug: string, name: string) {
     if (!(await confirmDialog(tr('lightapps.confirm_delete').replace('{name}', name)))) return
     busyId = slug
@@ -108,6 +135,34 @@
             <div class="card-body">
               <div class="card-name">{app.name}</div>
               <div class="card-desc">{app.description}</div>
+            </div>
+            <div class="card-public">
+              <label class="public-toggle">
+                <input
+                  type="checkbox"
+                  checked={!!app.public}
+                  disabled={busyId === app.slug}
+                  onchange={(e) => {
+                    const box = e.currentTarget
+                    const want = box.checked
+                    box.checked = !!app.public // the list, not the click, decides
+                    void handlePublic(app, want)
+                  }}
+                />
+                {$t('lightapps.public')}
+              </label>
+              {#if app.public}
+                <div class="public-link">
+                  <code title={publicURL(app.slug)}>{publicURL(app.slug)}</code>
+                  <button class="btn-action" onclick={() => copyPublicURL(app.slug)}>
+                    <iconify-icon icon="ant-design:copy-outlined" width="13"></iconify-icon>
+                    {$t('lightapps.public_copy')}
+                  </button>
+                </div>
+                {#if onLocalhost}
+                  <div class="public-hint">{$t('lightapps.public_local_hint')}</div>
+                {/if}
+              {/if}
             </div>
             <div class="card-actions">
               <button class="btn-action" onclick={() => handleOpen(app.slug)}>
@@ -177,6 +232,14 @@ p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 6
 .card-actions {
   display: flex; gap: 6px; flex-wrap: wrap;
 }
+.card-public { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.public-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; width: fit-content; }
+.public-link { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.public-link code {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; color: var(--text-tertiary);
+}
+.public-hint { font-size: 11px; color: var(--text-tertiary); }
 .btn-action {
   height: 28px; padding: 0 10px; border: 1px solid var(--border);
   background: var(--bg-container); border-radius: 8px;

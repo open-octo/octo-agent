@@ -10,12 +10,11 @@
 // (hydrateArtifact), so history replay costs no network and a session's
 // unopened artifacts hold no data: URIs.
 //
-// HTML artifacts do not get a preview document at all: they render from the
-// artifact origin — `http://<token>.artifacts.localhost:<port>/`, granted by
-// the server per artifact (internal/server/artifact_origin.go) — where the
-// page is its own site, with its own storage and its own relative references,
-// and the same-origin policy keeps it out of the app. Only Markdown still
-// renders through a srcdoc frame, and everything below about inlining is
+// HTML artifacts do not get a preview document at all: they render as a real
+// page — `/_artifacts/<token>/` on this origin, granted by the server per
+// artifact (internal/server/artifact_pages.go) — so the page's relative
+// references load the files beside it and its storage persists. Only Markdown
+// still renders through a srcdoc frame, and everything below about inlining is
 // about Markdown.
 //
 // Constraint on every preview document built here: it must not reference
@@ -54,18 +53,15 @@ import type { Artifact } from './types'
 // user asked their own agent to write.
 export const ARTIFACT_SANDBOX = 'allow-scripts allow-forms allow-modals allow-pointer-lock'
 
-// The sandbox for a frame whose src is the artifact origin. allow-same-origin
-// here means "let the page be itself": it is a cross-origin document, so the
-// same-origin policy — not this attribute — is what separates it from the app,
-// and with a real origin it gets storage, downloads, fullscreen and pointer
-// lock natively. The sandbox stays for the two flags it still withholds:
-// allow-popups and allow-top-navigation protect the host tab from the page.
-//
-// What this does leave open: the frame may navigate *itself* anywhere,
-// including to the app origin. That is harmless only as long as the app
-// origin has no endpoint that reflects attacker-controlled HTML — the day one
-// appears, a page navigating its frame there would run in the app origin
-// with these same flags. Keep the app's HTML responses static.
+// The sandbox for a frame whose src is an artifact or Light App page
+// (/_artifacts/…, /_apps/…) on this origin. allow-same-origin lets the page
+// have storage, downloads, fullscreen and pointer lock natively — and, being
+// same-origin, it is not isolated from the app: that is the accepted trade
+// (dev-docs/same-origin-artifacts-design.md). Keeping the UI's settings out of
+// its reach is the job of the server-injected localStorage namespace
+// (internal/server/page_shim.js). The sandbox stays for the two flags it
+// withholds: allow-popups and allow-top-navigation keep a misbehaving page
+// from opening windows or navigating the host tab away.
 export const ARTIFACT_ORIGIN_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-modals allow-downloads allow-pointer-lock'
 
 // Tracks which session the current artifacts belong to, so an async fetch that
@@ -92,13 +88,8 @@ let autoOpened = false
 
 // How many times each path has been observed this session: the cache-busting
 // revision in an image's src, and the `v` the artifact frame appends to an
-// HTML entry's origin URL. Cleared with the artifacts themselves.
+// HTML entry's page URL. Cleared with the artifacts themselves.
 const revisions = new Map<string, number>()
-
-// Origin URLs a frame has already reached once. The probe (probeArtifactOrigin)
-// runs per URL, not per render, so a theme switch or a re-write of the same
-// page does not fetch the entry again.
-const probedOrigins = new Set<string>()
 
 function kindOf(path: string): Kind | null {
   const dot = path.lastIndexOf('.')
@@ -517,37 +508,11 @@ type HydratedBody = {
   originUnavailable?: boolean
 }
 
-// The frame found the artifact origin unreachable: swap the entry to the
-// local-only notice. Identity-matched like every other write-back, so a
-// re-write that already replaced the entry is left alone. Only this entry is
-// touched — the next artifact asks for its own grant and probes again, so a
-// transient failure never locks the whole page into the notice.
-export function markArtifactOriginUnavailable(a: Artifact): void {
-  artifacts.update(list => list.map(e => (e === a ? { ...e, originURL: undefined, originUnavailable: true } : e)))
-}
-
-// The server grants an origin to any client it considers local, but only the
-// browser knows whether `<token>.artifacts.localhost` resolves here: an
-// `ssh -L` forward is byte-for-byte a local request and still fails. A no-cors
-// fetch of the page settles that — an opaque response means a server answered
-// on that hostname (any status counts, including a 404 from some other octo on
-// the same port, which is the one shape this cannot tell apart), a rejection
-// means the host does not exist from this machine. Once per URL.
-export function probeArtifactOrigin(a: Artifact): void {
-  const url = a.originURL
-  if (!url || probedOrigins.has(url)) return
-  probedOrigins.add(url)
-  fetch(url, { mode: 'no-cors', cache: 'no-store' }).catch(() => {
-    probedOrigins.delete(url)
-    markArtifactOriginUnavailable(a)
-  })
-}
-
 // An HTML artifact: the source text for the code view comes from the
-// artifacts endpoint as before; the preview is the origin URL the server
-// grants for it. A refused grant (409: this client is not local) or a failed
-// request is not a load failure — the code view still works — so the entry
-// records originUnavailable and the frame shows the local-only notice.
+// artifacts endpoint as before; the preview is the page URL the server grants
+// for it. A failed grant is not a load failure — the code view still works —
+// so the entry records originUnavailable and the frame says the preview could
+// not load.
 async function buildHTMLEntry(sessionId: string, path: string): Promise<HydratedBody | null> {
   const [res, grant] = await Promise.all([
     fetch(artifactURL(sessionId, path)),

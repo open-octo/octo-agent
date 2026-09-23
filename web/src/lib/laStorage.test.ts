@@ -1,27 +1,28 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import 'fake-indexeddb/auto'
-import { registerLaIframe, unregisterLaIframe, installLaStorageBridge, LA_DB_NAME, LA_STORE } from './laStorage'
-import { vi } from 'vitest'
+import { get } from 'svelte/store'
+import { ensureLightAppStorage, lightappStorageReady, migratedKey, pageKeyPrefix, LA_DB_NAME, LA_STORE, EXPORT_TIMEOUT_MS } from './laStorage'
 
-installLaStorageBridge()
+// jsdom exposes no localStorage under Node 26 (see unread.test.ts). One Map
+// stands in for the storage the UI and its app frames share.
+const backing = new Map<string, string>()
+vi.stubGlobal('localStorage', {
+  get length() { return backing.size },
+  key: (i: number) => [...backing.keys()][i] ?? null,
+  getItem: (k: string) => (backing.has(k) ? backing.get(k)! : null),
+  setItem: (k: string, v: string) => { backing.set(k, String(v)) },
+  removeItem: (k: string) => { backing.delete(k) },
+  clear: () => backing.clear(),
+})
 
-type Sent = Record<string, unknown> | null
-
-let nsCounter = 0
-function makeWin() {
-  // unique namespace per test — the module caches its IndexedDB connection,
-  // so a fresh IDBFactory alone doesn't reset data between tests
-  const ns = 'app-' + nsCounter++
-  const w = { __sent: [] as Sent[], __ns: ns } as unknown as Window & { __sent: Sent[]; __ns: string }
-  ;(w as { postMessage: (m: unknown) => void }).postMessage = (m: unknown) => {
-    w.__sent.push(m as Sent)
-  }
-  return w
-}
+// Unique slug per test: the module caches its IndexedDB connection and its
+// per-slug migration promise, so the slug is the isolation.
+let n = 0
+const slug = () => 'app-' + n++
 
 // What the old srcdoc shim left behind: rows keyed `{ns}:{key}` in the host's
-// IndexedDB. Written straight into the store, as the shim's host half did.
-function seedLegacy(ns: string, entries: Record<string, string>): Promise<void> {
+// IndexedDB, plus the marker the retired origin's migration set.
+function seedIdb(rows: Record<string, unknown>): Promise<void> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(LA_DB_NAME, 1)
     req.onupgradeneeded = () => {
@@ -33,95 +34,94 @@ function seedLegacy(ns: string, entries: Record<string, string>): Promise<void> 
       const db = req.result
       const t = db.transaction(LA_STORE, 'readwrite')
       const s = t.objectStore(LA_STORE)
-      for (const [k, v] of Object.entries(entries)) s.put(v, `${ns}:${k}`)
+      for (const [k, v] of Object.entries(rows)) s.put(v, k)
       t.oncomplete = () => { db.close(); resolve() }
       t.onerror = () => reject(t.error)
     }
   })
 }
 
-// Dispatch a message as if from the app's frame and wait for the async IDB
-// roundtrip.
-async function fromFrame(w: Window & { __sent: Sent[]; __ns: string }, op: string, extra: Record<string, unknown> = {}, ns = w.__ns): Promise<void> {
+// jsdom's URL is http://localhost:3000, so the host frames the retired
+// origin's export page; answer from it the way the page does.
+async function answerExport(s: string, value: Record<string, string>, origin = `http://${s}.apps.localhost:3000`) {
+  await vi.waitFor(() => {
+    if (!exportFrame(s)) throw new Error('no export frame yet')
+  })
+  const frame = exportFrame(s)!
   window.dispatchEvent(new MessageEvent('message', {
-    data: { __laBridge: 1, id: 0, ns, op, ...extra },
-    source: w,
-    origin: 'http://' + ns + '.apps.localhost:8088',
+    data: { __laBridge: 1, op: 'export', ns: s, value },
+    source: frame.contentWindow,
+    origin,
   }))
-  await new Promise((r) => setTimeout(r, 20))
 }
 
-// No fresh IDBFactory per test: the module caches its connection, so a new
-// factory would leave the seeds and the reads in different databases. The
-// unique namespace per test is the isolation.
+function exportFrame(s: string): HTMLIFrameElement | undefined {
+  return [...document.querySelectorAll('iframe')].find((f) => f.src === `http://${s}.apps.localhost:3000/__octo_export`)
+}
+
+const keysOf = (s: string) =>
+  Object.fromEntries([...backing].filter(([k]) => k.startsWith(pageKeyPrefix(s))).map(([k, v]) => [k.slice(pageKeyPrefix(s).length), v]))
+
 describe('Light App storage migration', () => {
-  it('answers the first migrate-ready with the legacy entries, once', async () => {
-    const w = makeWin()
-    await seedLegacy(w.__ns, { score: '10', name: 'x' })
-    registerLaIframe(w, w.__ns)
+  it('moves the retired origin and the legacy rows into the namespace, newer origin first', async () => {
+    const s = slug()
+    await seedIdb({ [`${s}:score`]: '1', [`${s}:legacy`]: 'idb' })
+    const done = ensureLightAppStorage(s)
+    await answerExport(s, { score: '10', name: 'x' })
+    await done
 
-    await fromFrame(w, 'migrate-ready')
-    expect(w.__sent).toEqual([{ __laBridge: 1, id: 0, res: true, ok: true, op: 'migrate', value: { score: '10', name: 'x' } }])
-
-    // The frame took the data and said so; the next load must get nothing.
-    await fromFrame(w, 'migrated', { count: 2 })
-    w.__sent = []
-    await fromFrame(w, 'migrate-ready')
-    expect(w.__sent).toEqual([])
+    expect(keysOf(s)).toEqual({ score: '10', name: 'x', legacy: 'idb' })
+    expect(backing.get(migratedKey(s))).toBe('1')
+    expect(get(lightappStorageReady).has(s)).toBe(true)
+    expect(exportFrame(s)).toBeUndefined() // the helper frame is gone
   })
 
-  it('says nothing for an app that never had legacy data', async () => {
-    const w = makeWin()
-    registerLaIframe(w, w.__ns)
-    await fromFrame(w, 'migrate-ready')
-    expect(w.__sent).toEqual([])
+  it('never overwrites what the namespace already holds', async () => {
+    const s = slug()
+    backing.set(pageKeyPrefix(s) + 'score', 'newer')
+    const done = ensureLightAppStorage(s)
+    await answerExport(s, { score: 'old', extra: 'y' })
+    await done
+    expect(keysOf(s)).toEqual({ score: 'newer', extra: 'y' })
   })
 
-  it('only hands out the registered namespace, whatever the message claims', async () => {
-    const a = makeWin()
-    const b = makeWin()
-    await seedLegacy(a.__ns, { secret: 'a' })
-    await seedLegacy(b.__ns, { secret: 'b' })
-    registerLaIframe(b, b.__ns)
-
-    // b's frame claiming to be a is a stale-document (or hostile) message: ignored.
-    await fromFrame(b, 'migrate-ready', {}, a.__ns)
-    expect(b.__sent).toEqual([])
-    await fromFrame(b, 'migrate-ready')
-    expect(b.__sent).toEqual([{ __laBridge: 1, id: 0, res: true, ok: true, op: 'migrate', value: { secret: 'b' } }])
+  it('skips legacy rows the retired origin already took', async () => {
+    const s = slug()
+    await seedIdb({ [`${s}:gone`]: 'deleted-since', [`__octo_migrated__:${s}`]: 1 })
+    const done = ensureLightAppStorage(s)
+    await answerExport(s, {})
+    await done
+    expect(keysOf(s)).toEqual({})
   })
 
-  it('ignores windows the panel never registered, and ones it unregistered', async () => {
-    const w = makeWin()
-    await seedLegacy(w.__ns, { k: 'v' })
-    await fromFrame(w, 'migrate-ready')
-    expect(w.__sent).toEqual([])
-
-    registerLaIframe(w, w.__ns)
-    unregisterLaIframe(w)
-    await fromFrame(w, 'migrate-ready')
-    expect(w.__sent).toEqual([])
+  it('runs once: a migrated app opens without the export frame', async () => {
+    const s = slug()
+    backing.set(migratedKey(s), '1')
+    await ensureLightAppStorage(s)
+    expect(exportFrame(s)).toBeUndefined()
+    expect(get(lightappStorageReady).has(s)).toBe(true)
   })
 
-  it('no longer answers the storage ops the old shim sent', async () => {
-    const w = makeWin()
-    registerLaIframe(w, w.__ns)
-    for (const op of ['dump', 'set', 'remove', 'clear']) {
-      await fromFrame(w, op, { key: 'k', value: 'v' })
+  it('ignores an export from anywhere but its own frame and origin', async () => {
+    const s = slug()
+    const done = ensureLightAppStorage(s)
+    await answerExport(s, { evil: '1' }, 'http://evil.example')
+    await answerExport(s, { good: '1' })
+    await done
+    expect(keysOf(s)).toEqual({ good: '1' })
+  })
+
+  it('opens the app without the export when the page never answers', async () => {
+    vi.useFakeTimers()
+    try {
+      const s = slug()
+      const done = ensureLightAppStorage(s)
+      await vi.advanceTimersByTimeAsync(EXPORT_TIMEOUT_MS + 10)
+      await done
+      expect(get(lightappStorageReady).has(s)).toBe(true)
+      expect(backing.get(migratedKey(s))).toBe('1')
+    } finally {
+      vi.useRealTimers()
     }
-    expect(w.__sent).toEqual([])
-  })
-})
-// `state` was a bridge op once: an app pushed a snapshot of itself and the
-// host relayed it to a mirror the model read. The mirror is gone, and an app
-// written while it existed may still send the op.
-describe('retired state op', () => {
-  it('is answered with nothing, like any op the host does not know', async () => {
-    const w = makeWin()
-    registerLaIframe(w, w.__ns)
-
-    await fromFrame(w, 'state', { digest: '2 strokes', summary: { strokes: 2 } })
-
-    expect(w.__sent).toEqual([])
   })
 })
