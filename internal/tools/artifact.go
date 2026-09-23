@@ -37,62 +37,6 @@ var artifactContentTypes = map[string]string{
 	".webp":     "image/webp",
 }
 
-// artifactAssetContentTypes is the second table: files an HTML artifact may
-// reference from its own directory when it renders on the artifact origin
-// (internal/server/artifact_origin.go). Kept apart from artifactContentTypes
-// so a page's .bin or .wasm never shows up as an entry in the Artifacts panel.
-// Deliberately absent: .html/.htm (one entry document per grant), and anything
-// that is not a page asset — .env, .pem, .key, source files — so a grant for
-// a report in a directory never turns into a read of its neighbours.
-var artifactAssetContentTypes = map[string]string{
-	// styles, scripts, data
-	".css":  "text/css; charset=utf-8",
-	".js":   "text/javascript; charset=utf-8",
-	".mjs":  "text/javascript; charset=utf-8",
-	".json": "application/json",
-	".wasm": "application/wasm",
-	".csv":  "text/csv; charset=utf-8",
-	".txt":  "text/plain; charset=utf-8",
-	".xml":  "application/xml",
-	// 3D
-	".glb":  "model/gltf-binary",
-	".gltf": "model/gltf+json",
-	".bin":  "application/octet-stream",
-	".obj":  "text/plain; charset=utf-8",
-	".mtl":  "text/plain; charset=utf-8",
-	".hdr":  "image/vnd.radiance",
-	// fonts
-	".woff":  "font/woff",
-	".woff2": "font/woff2",
-	".ttf":   "font/ttf",
-	".otf":   "font/otf",
-	// media
-	".mp3":  "audio/mpeg",
-	".wav":  "audio/wav",
-	".ogg":  "audio/ogg",
-	".mp4":  "video/mp4",
-	".webm": "video/webm",
-}
-
-// ArtifactAssetContentType returns the Content-Type for a file an HTML
-// artifact may load from its own directory — the images of the previewable
-// table plus the asset table above — or ok=false when the extension is
-// neither. HTML is not an asset: a grant serves exactly one entry document.
-func ArtifactAssetContentType(path string) (ctype string, ok bool) {
-	ext := strings.ToLower(filepath.Ext(path))
-	if ctype, ok = artifactAssetContentTypes[ext]; ok {
-		return ctype, true
-	}
-	ctype, ok = artifactContentTypes[ext]
-	if ok && strings.HasPrefix(ctype, "text/html") {
-		return "", false
-	}
-	if ok && strings.HasPrefix(ctype, "text/markdown") {
-		return "", false
-	}
-	return ctype, ok
-}
-
 // ArtifactContentType returns the Content-Type for a previewable artifact
 // path, or ok=false when the extension isn't previewable.
 func ArtifactContentType(path string) (ctype string, ok bool) {
@@ -127,11 +71,11 @@ func (ShowArtifactTool) Definition() agent.ToolDefinition {
 			"it was created by some means other than write_file (a terminal " +
 			"heredoc/redirect like `cat > x.html`, a script, a build step, or a download). Files you " +
 			"create with write_file/edit_file are surfaced automatically and do NOT need this. In the " +
-			"web UI the file opens in the Artifacts panel (HTML renders in a sandboxed preview); in " +
+			"web UI the file opens in the Artifacts panel (HTML renders in an iframe); in " +
 			"the TUI the path renders as a click-to-open link; elsewhere the path is simply " +
 			"reported. The file must already exist. Before authoring an HTML artifact's content, " +
 			"check the artifact-design skill for the panel's " +
-			"constraints — self-contained only, sandboxed iframe, narrow default width.",
+			"constraints — narrow default width, files beside the page by relative path.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

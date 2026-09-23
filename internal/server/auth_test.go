@@ -262,7 +262,7 @@ func TestRequireAuth_RouteCoverage(t *testing.T) {
 // for direct mux registrations: the apiRoutes loop above can't catch a route
 // that bypasses api() entirely, because bypassing api() is exactly what
 // keeps a route out of apiRoutes. Only health, version, the MCP OAuth
-// callback, and the static handler may register directly.
+// callback, Light App pages, and the static handler may register directly.
 func TestRegisterRoutes_OnlyKnownUnauthenticated(t *testing.T) {
 	src, err := os.ReadFile("server.go")
 	if err != nil {
@@ -273,7 +273,11 @@ func TestRegisterRoutes_OnlyKnownUnauthenticated(t *testing.T) {
 		"GET /api/health":  true,
 		"GET /api/version": true,
 		"GET /api/mcp/servers/{name}/oauth/callback": true,
-		"/": true,
+		// Applies requireAuth itself unless the app is public (lightapp_pages.go);
+		// the slashless form only redirects to it.
+		"GET /_apps/{slug}":           true,
+		"GET /_apps/{slug}/{path...}": true,
+		"/":                           true,
 	}
 	if len(direct) != len(allowed) {
 		t.Errorf("expected exactly %d direct mux registrations, got %d", len(allowed), len(direct))

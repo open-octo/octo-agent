@@ -271,31 +271,18 @@ export function loadLightApps(): Promise<void> {
   return lightappsRequest
 }
 
-// A Light App renders from <slug>.apps.localhost, which only resolves on the
-// machine running octo serve — and which the origin's frame-ancestors policy
-// cannot name when the UI itself is on an IPv6 literal such as
-// http://[::1]:8088 (CSP's host-source grammar has no bracket form). The Light
-// Apps panel already gated itself on both halves; mounted entries share the
-// judgement, so a remote browser is shown no entry it could not open.
-const hostIsIPv6 = typeof location !== 'undefined' && location.hostname.includes(':')
-export const lightappsAvailable = derived(localAccess, ($local) => $local && !hostIsIPv6)
+// Apps claiming a permanent place in the UI. `mount` is already normalised
+// server-side, so this one value covers it — the right-hand panel is the
+// session's own, and an app is not part of a session.
+export const mountedViews = derived(lightapps, ($apps) => $apps.filter((a) => a.mount === 'view'))
 
-// Apps claiming a permanent place in the UI, empty wherever they could not
-// render. `mount` is already normalised server-side, so this one value covers
-// it — the right-hand panel is the session's own, and an app is not part of a
-// session.
-export const mountedViews = derived(
-  [lightapps, lightappsAvailable],
-  ([$apps, $ok]) => ($ok ? $apps.filter((a) => a.mount === 'view') : []),
-)
-
-// The URL a Light App frame loads, mounted or not: its own origin, on the port
-// this page is already talking to, with the resolved theme so the app can match
-// the UI. `gen` busts the frame's cache when the panel asks for a reload.
+// The URL a Light App frame loads, mounted or not: /_apps/<slug>/ on this
+// page's own origin (internal/server/lightapp_pages.go), with the resolved
+// theme so the app can match the UI. `gen` busts the frame's cache when the
+// panel asks for a reload.
 export function lightappURL(slug: string, gen: number = 0): string {
   const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
-  const port = location.port ? `:${location.port}` : ''
-  return `http://${slug}.apps.localhost${port}/?theme=${theme}&v=${gen}`
+  return `/_apps/${encodeURIComponent(slug)}/?theme=${theme}&v=${gen}`
 }
 export const lightappHTML = writable<Record<string, string>>({})
 // updated_at of the copy in lightappHTML, per slug. The panel's change poll

@@ -41,14 +41,13 @@ describe('mounted Light Apps', () => {
     expect(get(mountedViews)).toEqual([])
   })
 
-  it('offers nothing to a remote browser', () => {
-    // A mounted entry there would open a frame on <slug>.apps.localhost, which
-    // resolves to the viewer's own machine rather than the server's — better no
-    // entry at all than one that cannot load.
+  it('offers the same entries to a remote browser', () => {
+    // The app renders from a path on the server's own origin, so a browser
+    // behind a tunnel or on another machine loads it just the same.
     lightapps.set([app('as-view', 'view')])
     localAccess.set(false)
 
-    expect(get(mountedViews)).toEqual([])
+    expect(get(mountedViews).map((a) => a.slug)).toEqual(['as-view'])
   })
 
   it('treats an app claiming no mount as belonging to the Light Apps page only', () => {
@@ -59,21 +58,23 @@ describe('mounted Light Apps', () => {
 })
 
 describe('lightappURL', () => {
-  // Parsed rather than matched as a string: a prefix check would also accept
-  // sketch.apps.localhost.example.com, and the host is the whole point of the
-  // app having an origin of its own.
-  it('addresses the app on its own origin, carrying the resolved theme', () => {
+  // A path on this page's own origin, whatever host the UI was reached on.
+  it('addresses the app under /_apps/ on this origin, carrying the resolved theme', () => {
     document.documentElement.setAttribute('data-theme', 'dark')
-    const url = new URL(lightappURL('sketch', 3))
+    const url = new URL(lightappURL('sketch', 3), 'https://octo.example.com')
 
-    expect(url.protocol).toBe('http:')
-    expect(url.hostname).toBe('sketch.apps.localhost')
+    expect(url.origin).toBe('https://octo.example.com')
+    expect(url.pathname).toBe('/_apps/sketch/')
     expect(url.searchParams.get('theme')).toBe('dark')
     expect(url.searchParams.get('v')).toBe('3')
   })
 
+  it('escapes the slug into one path segment', () => {
+    expect(lightappURL('a b').startsWith('/_apps/a%20b/?')).toBe(true)
+  })
+
   it('reports light for any theme that is not dark', () => {
     document.documentElement.setAttribute('data-theme', 'light')
-    expect(new URL(lightappURL('sketch')).searchParams.get('theme')).toBe('light')
+    expect(new URL(lightappURL('sketch'), 'http://localhost').searchParams.get('theme')).toBe('light')
   })
 })

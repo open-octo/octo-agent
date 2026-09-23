@@ -24,11 +24,12 @@
 	<true/>
 	<!-- Loopback-only HTTP to the in-process server; no arbitrary loads.
 	     NSAllowsLocalNetworking covers "localhost" and IP literals but not
-	     its subdomains, and artifacts / Light Apps render from
-	     <token>.artifacts.localhost and <slug>.apps.localhost
-	     (internal/server/artifact_origin.go) — without the explicit
-	     exception the webview refuses those frames with "App Transport
-	     Security policy requires the use of a secure connection". -->
+	     its subdomains, and the one-time export of a Light App's storage
+	     frames <slug>.apps.localhost (internal/server/lightapp_pages.go),
+	     where apps used to render — without the explicit exception the
+	     webview refuses that frame with "App Transport Security policy
+	     requires the use of a secure connection". Goes away with the
+	     export. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

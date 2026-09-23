@@ -123,8 +123,8 @@ type Server struct {
 	mux  *http.ServeMux
 	http *http.Server
 
-	// artifactGrants maps a `<token>.artifacts.localhost` label to the HTML
-	// artifact it serves (artifact_origin.go). In-memory only: a restart
+	// artifactGrants maps a /_artifacts/<token>/ token to the HTML artifact
+	// it serves (artifact_pages.go). In-memory only: a restart
 	// invalidates every grant and the panel simply asks for a new one.
 	artifactGrantsMu sync.Mutex
 	artifactGrants   map[string]*artifactGrant
@@ -842,9 +842,10 @@ func (s *Server) doShutdown(ctx context.Context) error {
 
 // api registers an authenticated route. The requireAuth wrapper is applied
 // here, in one place, so a new route cannot forget it. /api/health,
-// /api/version, the MCP OAuth callback, and static files are the only
-// handlers registered directly on the mux — the OAuth callback bypasses
-// auth deliberately (see handleMCPOAuthCallback's doc comment).
+// /api/version, the MCP OAuth callback, Light App pages, and static files are
+// the only handlers registered directly on the mux — the OAuth callback
+// bypasses auth deliberately (see handleMCPOAuthCallback's doc comment), and
+// a Light App page applies requireAuth itself unless the app is public.
 //
 // Every API response is also stamped no-store here, for the same reason the
 // auth wrapper lives here: the desktop webview (WKWebView) heuristically
@@ -874,6 +875,8 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/sessions/{id}/confirmation", s.handleGetSessionConfirmation)
 	s.api("GET /api/sessions/{id}/artifacts", s.handleGetArtifact)
 	s.api("POST /api/sessions/{id}/artifacts/grant", s.handleGrantArtifactOrigin)
+	s.api("GET /_artifacts/{token}", redirectToSlash)
+	s.api("GET /_artifacts/{token}/{path...}", s.handleArtifactPage)
 	s.api("GET /api/sessions/{id}/diff", s.handleGetSessionDiff)
 	s.api("GET /api/sessions/{id}/diff/file", s.handleGetSessionFileDiff)
 	s.api("DELETE /api/sessions/{id}", s.handleDeleteSession)
@@ -957,6 +960,13 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/light-apps", s.handleListLightApps)
 	s.api("GET /api/light-apps/{slug}", s.handleGetLightApp)
 	s.api("DELETE /api/light-apps/{slug}", s.handleDeleteLightApp)
+	s.api("PUT /api/light-apps/{slug}/public", s.handleSetLightAppPublic)
+	// Direct, not s.api: a public app is served without auth; every other
+	// one goes through requireAuth inside the handler (lightapp_pages.go).
+	// The slashless redirect reveals nothing, and a public link typed without
+	// its trailing slash must still reach the app.
+	s.mux.HandleFunc("GET /_apps/{slug}", redirectToSlash)
+	s.mux.HandleFunc("GET /_apps/{slug}/{path...}", s.handleLightAppPage)
 	s.api("GET /api/trash", s.handleGetTrash)
 	s.api("POST /api/trash/empty", s.handleEmptyTrash)
 	s.api("POST /api/trash/{id}/restore", s.handleRestoreTrash)

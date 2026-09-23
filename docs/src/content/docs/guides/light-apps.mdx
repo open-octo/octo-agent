@@ -24,10 +24,25 @@ A Light App is an HTML page written by the agent using pure frontend technologie
 └── …               # optional files it references by relative path: scripts, styles, images, fonts, models, media
 ```
 
-Each Light App runs on its own origin (`<slug>.apps.localhost`), so it behaves like an ordinary
-web page: `localStorage` persists between visits, downloads and fullscreen work, and files beside
-`index.html` load by relative path. It cannot reach octo's own API, and it needs no backend.
-Light Apps open only in a browser on the machine running octo — not on a phone over the tunnel.
+Each Light App is an ordinary web page served by octo at `/_apps/<slug>/`: `localStorage`
+persists between visits (each app's data is kept apart from the others and from octo's own
+settings), downloads and fullscreen work, and files beside `index.html` load by relative path.
+It needs no backend.
+
+Light Apps work however you reach octo — on the same machine, in the desktop app, or from another
+device through a tunnel (ngrok, cloudflared) or your own domain. From another device you sign in
+with the access key as usual, and apps open with it. The phone UI does not show Light Apps.
+
+### Sharing an app publicly
+
+On the Light Apps page, each card has a **Public link** switch. Turn it on and the app's page is
+served to anyone who has the link, without the access key — including every file in the app's
+folder, so only do this for apps meant to be seen. The card then shows the link to copy. On
+`localhost` that link points at your own machine; it becomes shareable once octo is reachable
+through a tunnel or a domain. Turn the switch off and the link stops working immediately.
+
+A Light App runs with the same access as the octo UI it is shown in. Only keep apps you asked
+your agent to make.
 
 ## When to use
 
@@ -90,11 +105,6 @@ Light Apps page like any other.
 
 This is a field you write by hand: the agent does not add it on its own, because whether an app
 deserves a permanent spot in your UI is your call, not its.
-
-Mounted apps are subject to the same locality rule as every Light App — they render from
-`<slug>.apps.localhost`, which only resolves on the machine running `octo serve`. When you open
-the Web UI from another device, mounted entries are hidden rather than shown broken. The Light
-Apps page itself behaves the same as always.
 
 ### A complete example
 
@@ -200,8 +210,9 @@ an icon.
 
 The agent follows these rules when generating a Light App:
 
-- Files the page needs live in the app's directory and are referenced by relative path; external scripts and stylesheets are allowed only from well-known CDNs (cdnjs, jsdelivr, unpkg, Google Fonts and their mainland-China mirrors) and are otherwise stripped
-- The page's network is limited to its own files and those CDNs — no calls to other APIs, no images from other hosts, no access to octo's API
+- Files the page needs live in the app's directory and are referenced by relative path, never starting with `/`
+- External libraries come from a CDN with a pinned version, only when a real library is needed — the app shows nothing if that host is unreachable
+- No calls to octo's own API from inside the page
 - File processing via `FileReader` + `<input type="file">`
 - Saving results (a generated image, a converted file) via the standard `<a download>` idiom — the host writes the file: a regular download in the browser, the OS save dialog in the desktop app
 - Icons via emoji or inline SVG

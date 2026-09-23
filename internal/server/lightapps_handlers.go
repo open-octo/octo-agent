@@ -34,6 +34,9 @@ type lightAppManifest struct {
 	// the session's own (artifacts, diff), and an app is not part of a
 	// session.
 	Mount string `json:"mount,omitempty"`
+	// Public serves the app's page (/_apps/<slug>/) without auth. Set only
+	// from the UI through handleSetLightAppPublic.
+	Public bool `json:"public,omitempty"`
 	// UpdatedAt is index.html's mtime, stamped at read time so the web UI can
 	// tell that an app it has open was rewritten on disk. Derived, never
 	// persisted: the writers leave it empty and omitempty keeps it out of
@@ -145,6 +148,61 @@ func (s *Server) handleGetLightApp(w http.ResponseWriter, r *http.Request) {
 		"manifest": manifest,
 		"html":     string(htmlData),
 	})
+}
+
+// handleSetLightAppPublic switches whether the app's page is served without
+// auth. Only the `public` key of manifest.json is rewritten; every other key,
+// including ones this version does not know, is kept as it was.
+func (s *Server) handleSetLightAppPublic(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	if !safeLightAppSlug(slug) {
+		writeError(w, http.StatusBadRequest, "invalid_lightapp_slug")
+		return
+	}
+	var req struct {
+		Public *bool `json:"public"`
+	}
+	if err := readBodyJSON(r, &req); err != nil {
+		writeInvalidJSONBody(w, err)
+		return
+	}
+	if req.Public == nil {
+		writeError(w, http.StatusBadRequest, "missing public")
+		return
+	}
+	manifestPath := filepath.Join(lightAppsDir(), slug, "manifest.json")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "lightapp_not_found")
+		return
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		writeError(w, http.StatusInternalServerError, "invalid_lightapp_manifest")
+		return
+	}
+	if *req.Public {
+		raw["public"] = json.RawMessage("true")
+	} else {
+		delete(raw, "public")
+	}
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "invalid_lightapp_manifest")
+		return
+	}
+	if err := os.WriteFile(manifestPath, append(out, '\n'), 0o644); err != nil {
+		writeError(w, http.StatusInternalServerError, "write_lightapp_manifest_failed")
+		return
+	}
+	var m lightAppManifest
+	_ = json.Unmarshal(out, &m)
+	if m.Slug == "" {
+		m.Slug = slug
+	}
+	m.Mount = normalizeMount(m.Mount)
+	stampLightApp(&m, filepath.Join(lightAppsDir(), slug, "index.html"))
+	writeJSON(w, http.StatusOK, m)
 }
 
 // handleDeleteLightApp removes a Light App dir (recursively) by its slug.

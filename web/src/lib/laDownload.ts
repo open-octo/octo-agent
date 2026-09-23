@@ -1,11 +1,11 @@
 // Light App download bridge — the host half.
 //
-// A Light App renders from its own origin, so in a browser `<a download>` is a
-// plain download and needs no help. The desktop webview is the exception: the
-// octo-served page has no download delegate at all, so a download there is a
-// silent no-op (see internal/server/native_handlers.go, SaveFile). For that
-// case the server appends a script to the app (internal/server/lightapp_bridge.js,
-// desktop only) that intercepts the standard idiom — an anchor with a `download`
+// A Light App renders as a real page (/_apps/<slug>/), so in a browser
+// `<a download>` is a plain download and needs no help. The desktop webview is
+// the exception: the octo-served page has no download delegate at all, so a
+// download there is a silent no-op (see internal/server/native_handlers.go,
+// SaveFile). For that case the script the server splices into the app
+// (internal/server/page_shim.js) turns on a half that intercepts the standard idiom — an anchor with a `download`
 // attribute pointing at a blob:/data: URL — reads the bytes into a Blob and
 // posts it here, where it is saved the way the artifact panel's Download button
 // saves: the OS save dialog through /api/native/save-file.

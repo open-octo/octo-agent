@@ -1,6 +1,6 @@
 ---
 name: artifact-design
-description: Design guidance for any HTML/Markdown file shown in octo's Artifacts panel — reports, dashboards, architecture/system diagrams, generated UIs, slide-style pages, 3D scenes. Read this BEFORE writing the file, not after — it calibrates how much design effort the request warrants and covers the panel's real constraints (the page runs on its own origin and can reference files beside it, external resources gated to an allowlist of CDN hosts, narrow default width, no live theme push). Use when the user asks to "画架构图" / "generate a diagram" / "make a dashboard" / "produce a report page" / "visualize this as a page" / build any artifact meant to be looked at rather than edited. If the page contains a chart, graph, plot, heatmap, or stat tile, also read references/charts.md — chart-type selection, color systems, legend/axis/tooltip conventions.
+description: Design guidance for any HTML/Markdown file shown in octo's Artifacts panel — reports, dashboards, architecture/system diagrams, generated UIs, slide-style pages, 3D scenes. Read this BEFORE writing the file, not after — it calibrates how much design effort the request warrants and covers the panel's real constraints (the page is a real web page that can reference files beside it by relative path, narrow default width, no live theme push). Use when the user asks to "画架构图" / "generate a diagram" / "make a dashboard" / "produce a report page" / "visualize this as a page" / build any artifact meant to be looked at rather than edited. If the page contains a chart, graph, plot, heatmap, or stat tile, also read references/charts.md — chart-type selection, color systems, legend/axis/tooltip conventions.
 ---
 
 # Artifact design
@@ -20,38 +20,27 @@ legibility at the panel's docked width.
 
 ## How the panel actually works — design within these constraints
 
-- **The page runs on its own origin — a real one, not the app's.** HTML
-  renders from `http://<token>.artifacts.localhost:<port>/` inside a frame, so
-  everything a normal web page can do locally works: `localStorage` and
-  IndexedDB persist, `<a download>` saves a file, `requestFullscreen()` and
-  pointer lock work, WebGL and Web Audio work. Its network is fenced by a
-  Content-Security-Policy: the page may load from and talk to its own origin
-  and the allowlisted CDN hosts below, and nothing else — no `fetch` to other
-  APIs, no images or media from other hosts, no reaching octo's `/api`. Data
-  the page needs must be in the page or in a file beside it; do not write code
-  that calls external services or octo's API from inside the page.
+- **The page is a real web page.** HTML renders inside a frame from a path on
+  octo's own address, so everything a normal web page can do works:
+  `localStorage` persists (the page's keys are kept apart from octo's own and
+  from other pages'), `<a download>` saves a file, `requestFullscreen()` and
+  pointer lock work, WebGL and Web Audio work, and `fetch` can reach public
+  APIs. Do not write code that calls octo's own API from inside the page.
 - **Files beside the page load by relative path.** `<script src="./app.js">`,
   `<link href="./style.css">`, `<img src="./chart.png">`,
-  `loader.load('./model.glb')`, fonts, audio and video in the same directory
-  (or a subdirectory) are served with the page. Only page-asset types are:
-  images, `.css`/`.js`/`.mjs`/`.json`/`.wasm`/`.csv`/`.txt`/`.xml`, `.glb`/
-  `.gltf`/`.bin`/`.obj`/`.mtl`/`.hdr`, `.woff`/`.woff2`/`.ttf`/`.otf`,
-  `.mp3`/`.wav`/`.ogg`/`.mp4`/`.webm`. A second `.html` is not — one entry
-  page per artifact. A single file is still the simplest artifact; split into
-  sibling files when the page has a real script or a binary asset (a model, a
-  font, a recording) that would be absurd to inline.
-- **External references are allowlist-gated, and the allowlist is enforced.**
-  A `<script src=…>` / `<link rel="stylesheet" href=…>` pointing at another
-  host may only use these CDN hosts; anything else is stripped before
-  rendering, under a banner saying how many were removed:
-  `cdnjs.cloudflare.com`, `cdn.jsdelivr.net`, `unpkg.com`,
-  `fonts.googleapis.com`, `fonts.gstatic.com`, and the mainland-China mirrors
-  `cdn.bootcdn.net`, `cdn.staticfile.org`, `cdn.staticfile.net`,
-  `registry.npmmirror.com`. Pin exact versions; if the user is in mainland
-  China, prefer the CN mirrors. Reach for a CDN only when the page needs a
-  real library (React, ECharts, Chart.js, three.js, …) — a page that depends
-  on one shows nothing when that host is unreachable. Relative references are
-  not external and are never stripped.
+  `loader.load('./model.glb')`, `fetch('./data.json')`, fonts, audio, video
+  and other `.html` pages in the same directory (or a subdirectory) are served
+  with the page. Never start such a path with `/`: the page lives under a path
+  prefix, and an absolute path lands outside it. A single file is still the
+  simplest artifact; split into sibling files when the page has a real script
+  or a binary asset (a model, a font, a recording) that would be absurd to
+  inline.
+- **External resources load from anywhere — which is why to be sparing.** Pin
+  exact versions; if the user is in mainland China, prefer a mirror reachable
+  there (`cdn.bootcdn.net`, `cdn.staticfile.net`, `registry.npmmirror.com`).
+  Reach for a CDN only when the page needs a real library (React, ECharts,
+  Chart.js, three.js, …) — a page that depends on one shows nothing when that
+  host is unreachable, and a saved Light App has to keep working for years.
 - **The default viewport is narrow.** The panel is a **420px-wide docked
   sidebar** by default; the user can maximize it to `min(900px, 75vw)`, but
   don't design for that as the common case. Build the layout to read cleanly
@@ -113,10 +102,10 @@ and share. Match investment to what's being requested:
 Before calling `write_file`/`show_artifact`, confirm:
 
 - [ ] Every `<script src>` / `<link rel="stylesheet" href>` is either a
-      relative path to a file you also wrote beside the page, or an
-      allowlisted CDN host (see above) with a pinned version
+      relative path to a file you also wrote beside the page, or a CDN URL
+      with a pinned version
 - [ ] Every relative reference names a file that really exists in the page's
-      directory, with an asset extension from the list above
+      directory, and none starts with `/`
 - [ ] Web fonts only from `fonts.googleapis.com` or a `.woff2` beside the
       page, always with a system-stack fallback: `-apple-system,
       BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif` — or skip the web

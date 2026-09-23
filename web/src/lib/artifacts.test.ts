@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { get } from 'svelte/store'
 import { artifacts, artifactSel, panelContent, panelExpanded } from './stores'
-import { observeArtifact, hydrateArtifact, resetArtifacts, markArtifactOriginUnavailable, probeArtifactOrigin } from './artifacts'
-import type { Artifact } from './types'
+import { observeArtifact, hydrateArtifact, resetArtifacts } from './artifacts'
 import { blobResponse as imageResponse } from '../test/fetchStub'
 
 // Nothing a preview document references can authenticate: the srcdoc iframe has
@@ -316,20 +315,19 @@ describe('observeArtifact — markdown image references', () => {
 
 // An HTML artifact previews as its own document, so the same references need the
 // same treatment.
-// HTML artifacts render from the artifact origin: hydration asks the server
-// for a grant instead of building a preview document, and nothing beside the
-// page is ever fetched by the host — the origin serves those files to the
-// frame directly.
-describe('hydrateArtifact — html artifacts on the artifact origin', () => {
+// HTML artifacts render as pages: hydration asks the server for a grant
+// instead of building a preview document, and nothing beside the page is ever
+// fetched by the host — the server serves those files to the frame directly.
+describe('hydrateArtifact — html artifacts as pages', () => {
   const html = '<h1>hi</h1><img src="chart.png">'
 
   function stubFetch(grantStatus = 200) {
     const fetchMock = vi.fn(async (u: string) => {
       if (u.endsWith('/artifacts/grant')) {
         if (grantStatus !== 200) {
-          return new Response(JSON.stringify({ error: 'artifact origin unavailable' }), { status: grantStatus })
+          return new Response(JSON.stringify({ error: 'session not found' }), { status: grantStatus })
         }
-        return new Response(JSON.stringify({ url: 'http://tok.artifacts.localhost:8088/', expires_at: '2026-01-01T00:00:00Z' }))
+        return new Response(JSON.stringify({ url: '/_artifacts/tok/', expires_at: '2026-01-01T00:00:00Z' }))
       }
       return new Response(html)
     })
@@ -341,14 +339,14 @@ describe('hydrateArtifact — html artifacts on the artifact origin', () => {
     return fetchMock.mock.calls.filter(c => String(c[0]).endsWith('/artifacts/grant'))
   }
 
-  it('records the granted origin URL and builds no preview document', async () => {
+  it('records the granted page URL and builds no preview document', async () => {
     const fetchMock = stubFetch()
 
     await observeHydrated('/tmp/page.html')
 
     const [entry] = get(artifacts)
     expect(entry.loaded).toBe(true)
-    expect(entry.originURL).toBe('http://tok.artifacts.localhost:8088/')
+    expect(entry.originURL).toBe('/_artifacts/tok/')
     expect(entry.originUnavailable).toBeFalsy()
     expect(entry.preview).toBe('')
     expect(entry.code).toBe(html)
@@ -360,8 +358,8 @@ describe('hydrateArtifact — html artifacts on the artifact origin', () => {
     expect(fetchMock.mock.calls.some(c => String(c[0]).includes('chart.png'))).toBe(false)
   })
 
-  it('marks the origin unavailable when the server refuses the grant, keeping the code view', async () => {
-    stubFetch(409)
+  it('marks the preview unavailable when the grant fails, keeping the code view', async () => {
+    stubFetch(404)
 
     await observeHydrated('/tmp/page.html')
 
@@ -373,48 +371,12 @@ describe('hydrateArtifact — html artifacts on the artifact origin', () => {
     expect(entry.code).toBe(html)
   })
 
-  it('bumps rev on a re-write so the frame reloads the unchanged origin', () => {
+  it('bumps rev on a re-write so the frame reloads the unchanged page URL', () => {
     stubFetch()
     observeArtifact(SID, payload('/tmp/page.html'), false)
     observeArtifact(SID, payload('/tmp/page.html'), false)
     expect(get(artifacts)).toHaveLength(1)
     expect(get(artifacts)[0].rev).toBe(2)
-  })
-
-  it('a frame that finds the origin unreachable flips only that entry; later artifacts still ask', async () => {
-    const fetchMock = stubFetch()
-    await observeHydrated('/tmp/page.html')
-
-    markArtifactOriginUnavailable(get(artifacts)[0])
-
-    expect(get(artifacts)[0].originUnavailable).toBe(true)
-    expect(get(artifacts)[0].originURL).toBeUndefined()
-    const before = grantCalls(fetchMock).length
-    await observeHydrated('/tmp/other.html')
-    // A transient failure must not lock the whole page into the notice.
-    expect(grantCalls(fetchMock).length).toBe(before + 1)
-    expect(get(artifacts).at(-1)!.originURL).toBe('http://tok.artifacts.localhost:8088/')
-  })
-
-  it('probes an origin URL once, and marks the entry when the host does not resolve', async () => {
-    const probe = vi.fn(async (url: string) => {
-      if (url.startsWith('http://dead.')) throw new TypeError('Failed to fetch')
-      return new Response(null, { status: 200 })
-    })
-    vi.stubGlobal('fetch', probe)
-    const live = { path: '/tmp/a.html', originURL: 'http://live.artifacts.localhost:8088/' } as Artifact
-    const dead = { path: '/tmp/b.html', originURL: 'http://dead.artifacts.localhost:8088/' } as Artifact
-    artifacts.set([live, dead])
-
-    probeArtifactOrigin(live)
-    probeArtifactOrigin(live) // a theme switch or re-render: no second fetch
-    probeArtifactOrigin(dead)
-    await new Promise(r => setTimeout(r, 0))
-
-    expect(probe.mock.calls.filter(c => String(c[0]).startsWith('http://live.')).length).toBe(1)
-    expect(get(artifacts)[0].originUnavailable).toBeFalsy()
-    expect(get(artifacts)[1].originUnavailable).toBe(true)
-    expect(get(artifacts)[1].originURL).toBeUndefined()
   })
 })
 
@@ -477,7 +439,7 @@ describe('installArtifactThemeRefresh — theme switch busts baked previews', ()
       { id: 'a2', name: 'shot.png', path: '/tmp/shot.png', type: 'Image', icon: '',
         loaded: true, src: '/api/x.png', preview: '' } as any,
       { id: 'a3', name: 'page.html', path: '/tmp/page.html', type: 'HTML', icon: '',
-        loaded: true, code: '<h1>hi</h1>', preview: '', originURL: 'http://t.artifacts.localhost:8088/' } as any,
+        loaded: true, code: '<h1>hi</h1>', preview: '', originURL: '/_artifacts/t/' } as any,
     ])
 
     document.documentElement.setAttribute('data-theme', 'dark')
@@ -490,9 +452,9 @@ describe('installArtifactThemeRefresh — theme switch busts baked previews', ()
     // to rebuild it, so resetting it would strand a permanent spinner.
     expect(get(artifacts)[1].loaded).toBe(true)
     expect(get(artifacts)[1].src).toBe('/api/x.png')
-    // An HTML entry on the artifact origin has no baked theme: the frame
+    // An HTML entry rendered as a page has no baked theme: the frame
     // passes the theme in the URL, so nothing here needs rebuilding.
     expect(get(artifacts)[2].loaded).toBe(true)
-    expect(get(artifacts)[2].originURL).toBe('http://t.artifacts.localhost:8088/')
+    expect(get(artifacts)[2].originURL).toBe('/_artifacts/t/')
   })
 })

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightappOpen, lightapps, lightappHTML, lightappStamp, cacheLightApp, dropLightApp, showToast, isDesktopShell, activeSessionId, savePanelMode, lightappsAvailable, lightappURL, type PanelMode } from '../lib/stores'
+  import { artifacts, panelContent, panelExpanded, artifactSel, artifactView, lightappSel, lightappOpen, lightapps, lightappHTML, lightappStamp, cacheLightApp, dropLightApp, showToast, isDesktopShell, activeSessionId, savePanelMode, lightappURL, type PanelMode } from '../lib/stores'
   import { titlebarDblClick } from '../lib/nativeWindow'
   import { t } from '../lib/i18n'
   import { copyArtifact, downloadArtifact, imagePreviewError } from '../lib/artifact-actions'
@@ -9,7 +9,7 @@
   import DiffView from './diff/DiffView.svelte'
   import ArtifactFrame from './ArtifactFrame.svelte'
   import * as api from '../lib/api'
-  import { registerLaIframe, unregisterLaIframe } from '../lib/laStorage'
+  import { registerLaIframe, unregisterLaIframe, ensureLightAppStorage, lightappStorageReady } from '../lib/laStorage'
 
   // This column never holds the traffic lights, but its top row has to sit on
   // the same axis as the chat title beside it, which Header lifts on mac.
@@ -203,31 +203,29 @@
     }),
   )
   const laCurSlug = $derived($lightappOpen.includes($lightappSel) ? $lightappSel : ($lightappOpen[0] ?? ''))
-  // A Light App renders from its own origin, `<slug>.apps.localhost` on the
-  // port this page came from (internal/server/lightapp_origin.go) — a real
-  // origin, so its localStorage persists and its relative references load.
-  // The theme rides in the URL for the gate's banner; laReloadGen makes the
-  // reload button produce a fresh URL even when nothing else changed. Only a
-  // browser on this machine resolves that hostname, so a remote client (the
-  // server reports `local: false`) sees a notice instead of a frame — and so
-  // does a UI opened at an IPv6 literal such as http://[::1]:8088, which the
-  // origin's frame-ancestors policy cannot name (CSP has no bracket form).
-  const laAvailable = $derived($lightappsAvailable)
+  // A Light App renders from /_apps/<slug>/ on this origin
+  // (internal/server/lightapp_pages.go), so its relative references load and
+  // its (namespaced) localStorage persists, however octo is reached. The
+  // theme rides in the URL for the app to read; laReloadGen makes the reload
+  // button produce a fresh URL even when nothing else changed. The frame waits
+  // for the app's old storage to be moved into its namespace (laStorage.ts),
+  // so the app never boots against data about to change under it.
+  $effect(() => {
+    if (laCurSlug) void ensureLightAppStorage(laCurSlug)
+  })
   const laCurURL = $derived.by(() => {
     void $themeRev
-    if (!laCurSlug || !laAvailable) return ''
+    if (!laCurSlug || !$lightappStorageReady.has(laCurSlug)) return ''
     return lightappURL(laCurSlug, laReloadGen)
   })
   const laCurName = $derived($lightapps.find(a => a.slug === laCurSlug)?.name ?? laCurSlug)
 
   // ── Light App bridge ─────────────────────────────────────────────────────
-  // The server appends a small script to every Light App it serves; it asks
-  // this page once for the storage the old srcdoc shim kept for the app
-  // (one-time migration into the app's own localStorage) and, in the desktop
-  // shell, hands downloads over because the webview cannot save files. Both
-  // arrive as messages; register the iframe so the handler only serves OUR
-  // frame, under the slug it shows — the element is reused when the user
-  // switches apps, so the namespace has to be re-pinned every time.
+  // In the desktop shell the script the server splices into every Light App
+  // hands downloads over, because the webview cannot save files. They arrive
+  // as messages; register the iframe so the handler only serves OUR frame,
+  // under the slug it shows — the element is reused when the user switches
+  // apps, so the namespace has to be re-pinned every time.
   let laFrameEl = $state<HTMLIFrameElement | null>(null)
   $effect(() => {
     const el = laFrameEl
@@ -476,9 +474,7 @@
           <button onclick={() => reloadLightApp(laCurSlug)} disabled={laLoading}>{$t('lightapps.reload')}</button>
         </div>
       {/if}
-      {#if laCurSlug && !laAvailable}
-        <div class="empty"><iconify-icon icon="ant-design:desktop-outlined" width="28"></iconify-icon><span>{$t('lightapps.local_only')}</span></div>
-      {:else if laCurURL}
+      {#if laCurURL}
         {#key laReloadGen}
         <iframe bind:this={laFrameEl} src={laCurURL} sandbox={ARTIFACT_ORIGIN_SANDBOX} allow="fullscreen; clipboard-write" title={laCurName}></iframe>
         {/key}

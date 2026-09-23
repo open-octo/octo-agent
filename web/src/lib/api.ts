@@ -931,6 +931,8 @@ export interface LightApp {
   // the default. The server drops anything else — including the retired
   // "panel" — so the UI never has to defend against a second value.
   mount?: 'view'
+  // Served without auth at /_apps/<slug>/ (internal/server/lightapp_pages.go).
+  public?: boolean
 }
 
 export interface LightAppDetail {
@@ -972,6 +974,11 @@ export async function getLightApp(slug: string): Promise<LightAppDetail> {
 
 export async function deleteLightApp(slug: string): Promise<void> {
   await request<unknown>(`/api/light-apps/${encodeURIComponent(slug)}`, { method: 'DELETE' })
+}
+
+// Serve the app's page to anyone with the link, or back to signed-in only.
+export async function setLightAppPublic(slug: string, isPublic: boolean): Promise<LightApp> {
+  return request<LightApp>(`/api/light-apps/${encodeURIComponent(slug)}/public`, { method: 'PUT', ...json({ public: isPublic }) })
 }
 
 // Trash

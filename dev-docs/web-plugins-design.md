@@ -46,26 +46,15 @@ octo 自带的其余主题（ocean / blossom / vogue）是 `internal/server/them
 └── index.html
 ```
 
-服务端 `internal/server/lightapp_origin.go` 把它挂在独立 origin `<slug>.apps.localhost` 上（常量 `lightAppHostSuffix`），入口经 `serveArtifactEntry` 过 CDN 闸，同级资源按扩展名放行。`internal/server/lightapps_handlers.go` 的 `lightAppManifest` 结构提供列表/读取/删除，存储根是 `datahome.Path("light-apps")`。宿主在 `web/src/components/ArtifactsPanel.svelte` 的 `$panelContent === 'lightapps'` 分支里渲染。
+服务端 `internal/server/lightapp_pages.go` 把它挂在 octo 自己 origin 下的 `/_apps/<slug>/`，同目录文件按相对路径服务（`dev-docs/same-origin-artifacts-design.md`）。`internal/server/lightapps_handlers.go` 的 `lightAppManifest` 结构提供列表/读取/删除，存储根是 `datahome.Path("light-apps")`。宿主在 `web/src/components/ArtifactsPanel.svelte` 的 `$panelContent === 'lightapps'` 分支里渲染。
 
-`internal/server/lightapp_bridge.js` 是服务端注入进 Light App 的 postMessage 桥，用 `__laBridge` 信封，**当前只承载两件事**：一次性 localStorage 迁移，和桌面 webview 下的下载转交。
+`internal/server/page_shim.js` 是服务端注入进每个页面的脚本，**只做两件事**：把 `localStorage` 包进按页面划分的命名空间，和桌面 webview 下经 `__laBridge` 信封的下载转交。
 
 **缺口有两个：桥不通向 octo 的会话数据；Light App 只能在 lightapps 列表里被打开，不能声明自己挂在哪。**
 
-### Artifact origin：授权模型的先例
+### 制品 grant：授权模型的先例
 
-`internal/server/artifact_origin.go` 给每个 HTML 制品发一个 24h TTL 的 grant（`artifactGrantTTL`），token 是 16 随机字节的 hex，挂在 `<token>.artifacts.localhost`。`handleGrantArtifactOrigin` 的三道闸——可预览类型、绝对路径、transcript 证明本会话写过——是"授权访问一份本地文件"的现成写法。Light App 不发 token：它是用户主动保留的东西，而且**稳定的 hostname 本身就是目的**，localStorage 要跨会话和重启存活。
-
-### 硬约束：`*.localhost` 只在同机可用
-
-浏览器把 `*.localhost` 解析到本机，所以跑在这些 origin 上的东西只在浏览器与 `octo serve` 同机时可用。两侧都已显式处理：
-
-- `serveLightAppOrigin` 对非本地 peer 直接 403（`isLocalPeer`，文案 "light apps are available only from the local machine"）。
-- `handleGrantArtifactOrigin` 对非本地请求返 409——不是 403，语义是"没有被禁止，这个 origin 对你不存在"——前端落到 local-only 提示并保留代码视图。IPv6 字面量 host 同样 409，因为 CSP 的 host-source 语法没有方括号形式，`frame-ancestors` 写不出 `[::1]`。
-
-前端已有现成判定：`ArtifactsPanel.svelte` 的 `laAvailable = $localAccess && !laHostIsIPv6`，两个坑都盖住了。
-
-**推论：面板插件在手机端、tunnel 远程访问下不可用。** 这是设计约束不是缺陷，但 mount 会把它变成一个可见问题——见下。主题包不受影响，它是纯 CSS，走主 API。
+`internal/server/artifact_pages.go` 给每个 HTML 制品发一个 24h TTL 的 grant（`artifactGrantTTL`），token 是 16 随机字节的 hex，页面在 `/_artifacts/<token>/`。`handleGrantArtifactOrigin` 的三道闸——可预览类型、绝对路径、transcript 证明本会话写过——是"授权访问一份本地文件"的现成写法。Light App 不发 token：它是用户主动保留的东西，slug 就是它稳定的 URL 和 localStorage 命名空间，数据跨会话和重启存活。
 
 ## 设计
 
@@ -80,7 +69,7 @@ graph LR
     subgraph S["octo serve"]
         API["GET /api/themes"]
         LA["GET /api/lightapps<br/>(manifest 增 mount)"]
-        ORG["&lt;slug&gt;.apps.localhost<br/>(既有 origin, isLocalPeer)"]
+        ORG["/_apps/&lt;slug&gt;/<br/>(既有页面路由)"]
     end
     subgraph W["Web UI"]
         CSS["注入 &lt;style&gt; + 注册 pack id"]
@@ -137,7 +126,7 @@ seed 只投放一次：`~/.octo/themes/.seeded` 记录已投放的 id，所以�
 3. 右侧面板不参与：它属于会话（artifacts / diff），app 不是会话的一部分，`PanelContent` 保持
    `'session' | 'lightapps' | 'diff'`。
 
-**mount 带出的新问题：远程用户会看到一个点不开的入口。** 内置 lightapps 至少还是个列表页，而 mount 到侧边栏的入口在手机上点进去只会拿到 403，看起来像坏功能。解法是复用现成判定——`laAvailable`（`$localAccess && !laHostIsIPv6`）为 false 时，mount 入口整个不渲染。不新建机制，不加提示文案：一个远程用户看不见的入口，好过一个看得见但坏掉的。
+mount 入口在任何访问方式下都能打开：页面走 octo 自己的 origin，远程浏览器凭同一个登录 cookie 加载它。
 
 ### 桥暂不扩展
 
@@ -156,7 +145,7 @@ seed 只投放一次：`~/.octo/themes/.seeded` 记录已投放的 id，所以�
 4. 一个声明 `"mount": "view"` 的 Light App 出现在侧边栏，点击整页渲染。
 5. 不声明 mount 的老 Light App 行为完全不变（仍只在列表页出现）。
 6. 非法 mount 值不会让列表接口失败，按缺省处理。
-7. 远程浏览器（非 `isLocalPeer`）下，mount 入口不出现在侧边栏；Light Apps 列表页本身的行为不变。
+7. 远程浏览器（隧道、域名）下 mount 入口照常出现并能打开。
 
 **示例**
 

@@ -68,13 +68,12 @@
   landing,
   view,
   lightapps,
-  lightappsAvailable,
   lightappURL,
   } from '../lib/stores'
   import { ws, wsState, wsReconnect } from '../lib/ws'
   import * as api from '../lib/api'
   import { observeArtifact, resetArtifacts, ARTIFACT_ORIGIN_SANDBOX, themeRev } from '../lib/artifacts'
-  import { registerLaIframe, unregisterLaIframe } from '../lib/laStorage'
+  import { registerLaIframe, unregisterLaIframe, ensureLightAppStorage, lightappStorageReady } from '../lib/laStorage'
   import { renderMarkdown, escapeHtml, setupCopyButtons } from '../lib/markdown'
   import { applyToolToggle, buildExportConversation, exportConversationStyles, hasRenderableTurn, TOOL_RESULT_CHARS } from '../lib/exportTranscript'
   import { t, tr, pickLocalized } from '../lib/i18n'
@@ -1854,15 +1853,14 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       prompt: $t(`chat.starter_${s.key}_prompt`),
     }))
   })
-  // The hero fills the space above the mark. An app is only offered where a
-  // Light App can actually load, and only when it is actually installed —
-  // otherwise a stale slug would leave a 404 frame on the first screen of
-  // every new session.
+  // The hero fills the space above the mark. An app is only offered when it is
+  // actually installed — otherwise a stale slug would leave a 404 frame on the
+  // first screen of every new session.
   const landingHero = $derived.by(() => {
     const hero = $landing.hero
     if (!hero) return null
     if (hero.image) return { kind: 'image' as const, src: `/api/landing/assets/${encodeURIComponent(hero.image)}`, height: hero.height ?? 180 }
-    if (!hero.app || !$lightappsAvailable) return null
+    if (!hero.app) return null
     const app = $lightapps.find(a => a.slug === hero.app)
     return app ? { kind: 'app' as const, slug: app.slug, height: hero.height ?? 180 } : null
   })
@@ -1873,16 +1871,22 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     void (landingHero?.kind === 'image' ? landingHero.src : '')
     heroImageBroken = false
   })
+  // The frame waits for the app's old storage to be moved into its namespace
+  // (laStorage.ts), like every other Light App host.
+  $effect(() => {
+    if (landingHero?.kind === 'app') void ensureLightAppStorage(landingHero.slug)
+  })
   const heroSrc = $derived.by(() => {
     void $themeRev
-    return landingHero?.kind === 'app' ? lightappURL(landingHero.slug) : ''
+    if (landingHero?.kind !== 'app' || !$lightappStorageReady.has(landingHero.slug)) return ''
+    return lightappURL(landingHero.slug)
   })
   // Pinned apps are shortcuts: they resolve against what is actually installed,
   // so a slug for an app the user deleted simply does not appear.
   const landingApps = $derived(
     ($landing.apps ?? [])
       .map(slug => $lightapps.find(a => a.slug === slug))
-      .filter((a): a is NonNullable<typeof a> => !!a && $lightappsAvailable),
+      .filter((a): a is NonNullable<typeof a> => !!a),
   )
 
   const landingTitle = $derived($landing.title || $t('chat.landing_title'))
@@ -1893,8 +1897,8 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   const isIconName = (icon: string) => icon.includes(':')
 
   // A hero app is a Light App host like the panel and the mounted page, so it
-  // registers the same way — otherwise it would lose storage, downloads and
-  // the state push the model reads.
+  // registers the same way — otherwise it would lose the desktop download
+  // path.
   let heroFrameEl = $state<HTMLIFrameElement | null>(null)
   $effect(() => {
     const el = heroFrameEl

@@ -165,7 +165,7 @@ Light Apps live under `~/.octo/light-apps/<slug>/` with two files:
   ```json
   {"slug":"<slug>","name":"<display name>","description":"<one-line>","icon":"<emoji>","created_at":"<ISO-8601>"}
   ```
-  Optional `"mount": "view"` gives the app a permanent place in the UI: its own page in the left navigation. Leave it out — the default — and the app lives on the Light Apps page, which is right for almost everything. Add it only when the user asks for one ("put it in the sidebar", "我想直接从侧边栏打开"), and say that a mounted entry only appears when the browser is on the same machine as the server. It is the only value: the right-hand panel belongs to the session (artifacts, diff), and an app is not part of a session
+  Optional `"mount": "view"` gives the app a permanent place in the UI: its own page in the left navigation. Leave it out — the default — and the app lives on the Light Apps page, which is right for almost everything. Add it only when the user asks for one ("put it in the sidebar", "我想直接从侧边栏打开"). It is the only value: the right-hand panel belongs to the session (artifacts, diff), and an app is not part of a session
 - `index.html` — the application. Other files it needs (scripts, styles, images, fonts, models, media) go in the same directory and are referenced by relative path
 
 Create both files with `write_file`. No special tools needed.
@@ -187,13 +187,13 @@ Create both files with `write_file`. No special tools needed.
 4. Choose a slug: lowercase letters, digits, hyphens. Derive from the app name.
 5. Report: "已保存！以后在「轻应用」面板随时打开。"
 
-To mount an app the user already saved, edit that one field in its `manifest.json` — nothing else changes, and the entry appears on the next page load.
+To mount an app the user already saved, edit that one field in its `manifest.json` — nothing else changes, and the entry appears on the next page load. Whenever you change an existing `manifest.json`, keep every field you did not mean to change; the user may have set some from the UI.
 
 ### Constraints on index.html
 
-- The page runs on its own origin (`<slug>.apps.localhost`), so ordinary browser features work: `localStorage` persists, `<a download>` saves, fullscreen and WebGL work. Its network is fenced by a Content-Security-Policy to its own files and the CDN hosts below: no `fetch` to other APIs, no images or media from other hosts, no access to octo's API. Data the app needs goes in the page or in a file beside it
-- Files in the app's directory load by relative path: `<script src="./app.js">`, `<link href="./style.css">`, `<img src="./chart.png">`, `./model.glb`, fonts, audio, video. Only page-asset types are served (images, css/js/json/wasm/csv/txt/xml, glb/gltf/bin/obj/mtl/hdr, woff/woff2/ttf/otf, mp3/wav/ogg/mp4/webm); a second `.html` is not — one page per app
-- External `<script src>` / `<link rel="stylesheet" href>` pointing at another host may ONLY use these CDN hosts — anything else is stripped at render time: `cdnjs.cloudflare.com`, `cdn.jsdelivr.net`, `unpkg.com`, `fonts.googleapis.com`, `fonts.gstatic.com`, and the mainland-China mirrors `cdn.bootcdn.net`, `cdn.staticfile.org`, `cdn.staticfile.net`, `registry.npmmirror.com`. Pin exact versions. If the user is in mainland China, prefer the CN mirrors. Reach for a CDN only when a real library (React, ECharts, Chart.js, three.js, …) is needed — a page that depends on one shows nothing when that host is unreachable
+- The page is an ordinary web page shown in a frame, so browser features work: `localStorage` persists (each app's keys are kept apart from other apps and from octo's own), `<a download>` saves, fullscreen and WebGL work, and `fetch` can reach any API. Do not call octo's own API from the page
+- Files in the app's directory load by relative path: `<script src="./app.js">`, `<link href="./style.css">`, `<img src="./chart.png">`, `./model.glb`, `./data.json`, fonts, audio, video, and other `.html` pages. Never start such a path with `/` — the app is served under a path prefix, and an absolute path lands outside it
+- External scripts and stylesheets may come from any host. Pin exact versions. If the user is in mainland China, prefer a mirror that is reachable there (`cdn.bootcdn.net`, `cdn.staticfile.net`, `registry.npmmirror.com`). Reach for a CDN only when a real library (React, ECharts, Chart.js, three.js, …) is needed — a page that depends on one shows nothing when that host is unreachable
 - Use `FileReader` + `<input type="file">` for file processing
 - To let the user save a result (an image, a converted file, a CSV), use the standard download idiom: build a `Blob` (or `canvas.toDataURL()`), point an `<a download="name.ext">` at it and call `.click()` — no special API
 - Form submit handlers must call `event.preventDefault()` — an unprevented submit reloads the app and drops its state
