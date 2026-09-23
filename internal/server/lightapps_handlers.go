@@ -151,14 +151,8 @@ func (s *Server) handleGetLightApp(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSetLightAppPublic switches whether the app's page is served without
-// auth. Only the `public` key of manifest.json is rewritten; every other key,
-// including ones this version does not know, is kept as it was.
+// auth.
 func (s *Server) handleSetLightAppPublic(w http.ResponseWriter, r *http.Request) {
-	slug := r.PathValue("slug")
-	if !safeLightAppSlug(slug) {
-		writeError(w, http.StatusBadRequest, "invalid_lightapp_slug")
-		return
-	}
 	var req struct {
 		Public *bool `json:"public"`
 	}
@@ -168,6 +162,48 @@ func (s *Server) handleSetLightAppPublic(w http.ResponseWriter, r *http.Request)
 	}
 	if req.Public == nil {
 		writeError(w, http.StatusBadRequest, "missing public")
+		return
+	}
+	s.rewriteLightAppManifest(w, r.PathValue("slug"), func(raw map[string]json.RawMessage) {
+		if *req.Public {
+			raw["public"] = json.RawMessage("true")
+		} else {
+			delete(raw, "public")
+		}
+	})
+}
+
+// handleSetLightAppMount gives the app its own entry in the left navigation
+// ("view") or takes it away (""). The same field the agent writes when the
+// user asks it to; this is the switch for doing it by hand.
+func (s *Server) handleSetLightAppMount(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Mount *string `json:"mount"`
+	}
+	if err := readBodyJSON(r, &req); err != nil {
+		writeInvalidJSONBody(w, err)
+		return
+	}
+	if req.Mount == nil || (*req.Mount != "" && normalizeMount(*req.Mount) == "") {
+		writeError(w, http.StatusBadRequest, "mount must be \"view\" or \"\"")
+		return
+	}
+	s.rewriteLightAppManifest(w, r.PathValue("slug"), func(raw map[string]json.RawMessage) {
+		if *req.Mount == "" {
+			delete(raw, "mount")
+		} else {
+			raw["mount"], _ = json.Marshal(*req.Mount)
+		}
+	})
+}
+
+// rewriteLightAppManifest applies change to the keys of the app's
+// manifest.json and writes it back, keeping every other key — ones this
+// version does not know included — as it was, then answers with the updated
+// manifest the way the list reports it.
+func (s *Server) rewriteLightAppManifest(w http.ResponseWriter, slug string, change func(raw map[string]json.RawMessage)) {
+	if !safeLightAppSlug(slug) {
+		writeError(w, http.StatusBadRequest, "invalid_lightapp_slug")
 		return
 	}
 	manifestPath := filepath.Join(lightAppsDir(), slug, "manifest.json")
@@ -181,11 +217,7 @@ func (s *Server) handleSetLightAppPublic(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "invalid_lightapp_manifest")
 		return
 	}
-	if *req.Public {
-		raw["public"] = json.RawMessage("true")
-	} else {
-		delete(raw, "public")
-	}
+	change(raw)
 	out, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "invalid_lightapp_manifest")

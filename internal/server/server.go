@@ -961,6 +961,7 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/light-apps/{slug}", s.handleGetLightApp)
 	s.api("DELETE /api/light-apps/{slug}", s.handleDeleteLightApp)
 	s.api("PUT /api/light-apps/{slug}/public", s.handleSetLightAppPublic)
+	s.api("PUT /api/light-apps/{slug}/mount", s.handleSetLightAppMount)
 	// Direct, not s.api: a public app is served without auth; every other
 	// one goes through requireAuth inside the handler (lightapp_pages.go).
 	// The slashless redirect reveals nothing, and a public link typed without
