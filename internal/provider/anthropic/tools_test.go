@@ -696,6 +696,9 @@ func TestSend_ToolUse_EmptyInputAfterReload(t *testing.T) {
 	if err := json.Unmarshal(capturedBody, &wireReq); err != nil {
 		t.Fatalf("decode wire body: %v", err)
 	}
+	if len(wireReq.Messages) < 2 {
+		t.Fatalf("messages len = %d, want at least 2", len(wireReq.Messages))
+	}
 	var blocks []struct {
 		Type  string          `json:"type"`
 		Input json.RawMessage `json:"input"`
