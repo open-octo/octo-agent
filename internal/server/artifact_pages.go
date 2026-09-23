@@ -188,7 +188,9 @@ func (s *Server) handleArtifactPage(w http.ResponseWriter, r *http.Request) {
 	}
 	rel := r.PathValue("path")
 	shim := s.pageShim(artifactNamespace(g.sessionID, g.entry), false)
-	if rel == "" || rel == "index.html" || rel == filepath.Base(g.entry) {
+	// Only the entry's own name maps to it: a real index.html beside a
+	// report.html entry is a page of its own, reachable by its name.
+	if rel == "" || rel == filepath.Base(g.entry) {
 		servePageEntry(w, r, g.entry, shim)
 		return
 	}

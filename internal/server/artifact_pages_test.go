@@ -268,6 +268,31 @@ func TestArtifactPage_ServesEntryWithShimAndFiles(t *testing.T) {
 	}
 }
 
+// An entry not named index.html leaves a real index.html beside it reachable:
+// "./index.html" from the entry is a link to that page, not back to itself.
+func TestArtifactPage_SiblingIndexIsItsOwnPage(t *testing.T) {
+	f := newPageFixture(t, "<h1>index</h1>")
+	report := filepath.Join(f.root, "report.html")
+	if err := os.WriteFile(report, []byte("<h1>report</h1>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.sessionID = newArtifactSession(t, report)
+	w := f.grant(t, report)
+	if w.Code != http.StatusOK {
+		t.Fatalf("grant: status = %d, body=%s", w.Code, w.Body.String())
+	}
+	base := jsonField(t, w, "url")
+	for target, want := range map[string]string{
+		base:                 "<h1>report</h1>",
+		base + "report.html": "<h1>report</h1>",
+		base + "index.html":  "<h1>index</h1>",
+	} {
+		if w := f.get(t, target); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), want) {
+			t.Errorf("GET %s: status = %d, want body containing %q, got %q", target, w.Code, want, w.Body.String())
+		}
+	}
+}
+
 func TestArtifactPage_NamespaceOutlivesTheToken(t *testing.T) {
 	f := newPageFixture(t, "<h1>hi</h1>")
 	ns := artifactNamespace(f.sessionID, f.entry)
