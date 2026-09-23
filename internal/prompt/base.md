@@ -185,7 +185,7 @@ Create both files with `write_file`. No special tools needed.
 4. Choose a slug: lowercase letters, digits, hyphens. Derive from the app name.
 5. Report: "已保存！以后在「轻应用」面板随时打开。"
 
-To mount an app the user already saved, edit that one field in its `manifest.json` — nothing else changes, and the entry appears on the next page load.
+To mount an app the user already saved, edit that one field in its `manifest.json` — nothing else changes, and the entry appears on the next page load. Whenever you change an existing `manifest.json`, keep every field you did not mean to change; the user may have set some from the UI.
 
 ### Constraints on index.html
 

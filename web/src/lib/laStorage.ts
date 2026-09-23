@@ -36,9 +36,9 @@ export const LA_STORE = 'kv'
 // the app has deleted since.
 const IDB_MIGRATED_PREFIX = '__octo_migrated__:'
 
-// The namespace page_shim.js keeps an app's keys under, and the marker that
-// the app's data has been moved into it.
-export const pageKeyPrefix = (ns: string) => `octo.page.${ns}:`
+// The namespace page_shim.js keeps an app's keys under (encoded the same way
+// there), and the marker that the app's data has been moved into it.
+export const pageKeyPrefix = (ns: string) => `octo.page.${encodeURIComponent(ns)}:`
 export const migratedKey = (slug: string) => `octo.page.migrated.${slug}`
 
 // How long the retired origin's export page gets to answer before the app

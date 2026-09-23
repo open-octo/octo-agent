@@ -66,6 +66,38 @@ describe('page shim localStorage namespace', () => {
     expect(b.getItem('k')).toBe('from-b')
   })
 
+  it('keeps what a real Storage inherits ahead of stored keys', () => {
+    const real = makeStorage()
+    const ls = boot('demo', real)
+    ls.setItem('x', '1')
+    ls.setItem('toString', 'shadow') // a stored key never hides an inherited method
+    expect(ls.hasOwnProperty('x')).toBe(true)
+    expect(ls.hasOwnProperty('missing')).toBe(false)
+    expect(typeof ls.toString).toBe('function')
+    expect(() => String(ls)).not.toThrow()
+    expect(ls.getItem('toString')).toBe('shadow')
+    expect('hasOwnProperty' in ls).toBe(true)
+  })
+
+  it('keeps the prototype of the storage it wraps', () => {
+    class FakeStorage {}
+    const real = Object.assign(Object.create(FakeStorage.prototype), makeStorage())
+    const win: Record<string, unknown> = { localStorage: real, __octoPage: { ns: 'p' } }
+    win.parent = win
+    new Function('window', 'document', SHIM_JS)(win, {})
+    expect(win.localStorage instanceof FakeStorage).toBe(true)
+  })
+
+  it('never lets one namespace reach into another that extends it', () => {
+    const real = makeStorage()
+    const a = boot('a', real)
+    const ab = boot('a:b', real)
+    ab.setItem('k', 'v')
+    expect(Object.keys(a)).toEqual([])
+    a.clear()
+    expect(ab.getItem('k')).toBe('v')
+  })
+
   it('reads what an earlier load of the same page wrote', () => {
     const real = makeStorage({ 'octo.page.demo:saved': 'yes' })
     expect(boot('demo', real).getItem('saved')).toBe('yes')

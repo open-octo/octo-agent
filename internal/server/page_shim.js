@@ -19,8 +19,15 @@
   var real;
   try { real = window.localStorage; } catch (e) { real = null; }
   if (real) {
-    var P = 'octo.page.' + NS + ':';
+    // Encoded so one namespace can never be a prefix of another (`a` vs `a:b`).
+    var P = 'octo.page.' + encodeURIComponent(NS) + ':';
     var hasOwn = Object.prototype.hasOwnProperty;
+    // What a real Storage inherits — hasOwnProperty, toString, valueOf,
+    // constructor — resolves before a stored key of the same name, as it does
+    // on the real thing. The target carries the same prototype so instanceof
+    // Storage still holds.
+    var proto = Object.getPrototypeOf(real) || Object.prototype;
+    var inherited = function (k) { return k !== 'length' && !hasOwn.call(api, k) && k in proto; };
     var own = function () {
       var out = [];
       for (var i = 0; i < real.length; i++) {
@@ -38,17 +45,18 @@
     };
     // Property access (`localStorage.foo = 'x'`, `Object.keys(localStorage)`,
     // `'foo' in localStorage`) behaves as on a real Storage, under the prefix.
-    var wrapped = new Proxy({}, {
+    var wrapped = new Proxy(Object.create(proto), {
       get: function (t, k) {
         if (k === 'length') return own().length;
-        if (typeof k !== 'string') return undefined;
+        if (typeof k !== 'string') return proto[k];
         if (hasOwn.call(api, k)) return api[k];
+        if (inherited(k)) return proto[k];
         var v = real.getItem(P + k);
         return v === null ? undefined : v;
       },
       set: function (t, k, v) { if (typeof k === 'string') real.setItem(P + k, String(v)); return true; },
       deleteProperty: function (t, k) { if (typeof k === 'string') real.removeItem(P + k); return true; },
-      has: function (t, k) { return typeof k === 'string' && (k === 'length' || hasOwn.call(api, k) || real.getItem(P + k) !== null); },
+      has: function (t, k) { return typeof k === 'string' ? (k === 'length' || hasOwn.call(api, k) || inherited(k) || real.getItem(P + k) !== null) : k in proto; },
       ownKeys: function () { return own(); },
       getOwnPropertyDescriptor: function (t, k) {
         if (typeof k !== 'string') return undefined;

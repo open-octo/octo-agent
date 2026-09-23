@@ -24,7 +24,7 @@
 
 两个前缀都在 mux 上注册，与 `/api`、`/ws`、UI 静态文件并列。UI 用 hash 路由（`#/chat/...`），不占用这两个路径。
 
-- `/_apps/<slug>` 与 `/_artifacts/<token>` 不带尾斜杠时 301 到带尾斜杠的形式，保证页面里的相对路径在前缀之下解析。
+- `/_apps/<slug>` 与 `/_artifacts/<token>` 不带尾斜杠时 301 到带尾斜杠的形式，保证页面里的相对路径在前缀之下解析。轻应用的这个跳转不鉴权（它不泄露任何内容），手敲的公开链接漏了斜杠也能到达。
 - `/` 和 `/index.html` 返回入口；其余路径返回根目录下的同名文件。轻应用的根目录是 `~/.octo/light-apps/<slug>/`，制品的根目录是入口 HTML 所在目录。
 - 根目录下的任意普通文件都服务，`Content-Type` 按扩展名（`mime.TypeByExtension`），未知扩展名为 `application/octet-stream`。多个 `.html` 可以互相链接。
 - 路径逐段解析，`..` 和指向根目录之外的符号链接返回 404。这是 URL 到目录的映射正确性，不是安全边界。
@@ -64,7 +64,8 @@
 
 脚本用 `Object.defineProperty(window, 'localStorage', ...)` 把 `window.localStorage` 换成一个 Proxy，底层仍是真实的 `localStorage`：
 
-- 键一律加前缀 `octo.page.<ns>:`。`getItem` / `setItem` / `removeItem` 和属性读写（`localStorage.foo = 'x'`）都经前缀。
+- 键一律加前缀 `octo.page.<ns>:`，`ns` 经 `encodeURIComponent`，一个命名空间不会是另一个的前缀。`getItem` / `setItem` / `removeItem` 和属性读写（`localStorage.foo = 'x'`）都经前缀。
+- 原型上的成员（`hasOwnProperty`、`toString` 等）优先于同名的存储键，和真实 Storage 一致；Proxy 的 target 继承被包装对象的原型，`instanceof Storage` 仍为真。
 - `clear()` 只删自己前缀下的键；`length` 和 `key(i)` 只数自己前缀下的键。
 - 同步语义、持久性、配额都是浏览器原生的，刷新、重开、服务重启后数据仍在。
 
@@ -115,7 +116,7 @@ UI 在轻应用卡片上提供"公开访问"开关，打开时确认一次，说
 
 轻应用的数据目前可能在两处，都在第一次以新路径打开该应用时迁进命名空间，只写新位置里还不存在的键，迁完记一个标记 `octo.page.migrated.<slug>`（界面自己的 `localStorage` 键，不经前缀）。
 
-1. **`<slug>.apps.localhost` 的 `localStorage`**（v1.16.15 起的独立源）。只有本机客户端（`localAccess`）可能有这份数据。宿主插入一个隐藏 iframe 加载 `http://<slug>.apps.localhost:<port>/__octo_export`，这个页面把自己 origin 的 `localStorage` 整份 `postMessage` 给父窗口，宿主写入后移除 iframe。5 秒没有回音按无数据处理并照样打标记。
+1. **`<slug>.apps.localhost` 的 `localStorage`**（v1.16.15 起的独立源）。只有 UI 在 `localhost` / `127.0.0.1` 上时才可能有这份数据，也只有这时才去读。宿主插入一个隐藏 iframe 加载 `http://<slug>.apps.localhost:<port>/__octo_export`，这个页面把自己 origin 的 `localStorage` 整份 `postMessage` 给父窗口，宿主写入后移除 iframe。5 秒没有回音按无数据处理并照样打标记。
 2. **宿主 IndexedDB `octo-la-storage`**（独立源之前的 srcdoc shim 时代）。同源之后宿主直接读 `{slug}:{key}` 行写进命名空间，不再经过 iframe。
 
 为此 `*.apps.localhost` 保留一个极小的 handler：只服务 `/__octo_export`，要求 `isLocalPeer`，响应头带 `frame-ancestors http://localhost:* http://127.0.0.1:*`，其余路径 404。桌面端 `Info.plist` 的 `localhost` 子域 ATS 例外随之保留。两者在迁移窗口结束后一起删除。
@@ -166,8 +167,8 @@ UI 在轻应用卡片上提供"公开访问"开关，打开时确认一次，说
 服务端：
 
 - `internal/server/server.go`：`/_apps/`、`/_artifacts/` 路由，公开开关路由，`hostRouter` 收缩为导出页
-- `internal/server/artifact_origin.go`：grant 去掉本机判断、返回相对 URL；制品页面 handler
-- `internal/server/lightapp_origin.go`：轻应用页面 handler、公开判定、导出页
+- `internal/server/artifact_pages.go`（原 `artifact_origin.go`）：grant 去掉本机判断、返回相对 URL；制品页面 handler
+- `internal/server/lightapp_pages.go`（原 `lightapp_origin.go`）：轻应用页面 handler、公开判定、导出页
 - `internal/server/page_shim.js`：新增，命名空间包装与桌面下载桥 <!--lint:new-->
 - `internal/server/lightapp_bridge.js`、`internal/server/artifact_gate.go`：删除
 - `internal/server/lightapps_handlers.go`：manifest `public`、`PUT .../public`

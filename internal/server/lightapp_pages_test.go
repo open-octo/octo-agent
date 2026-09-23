@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -72,7 +73,7 @@ func TestLightAppPage_ServesEntryWithShimAndFiles(t *testing.T) {
 		if i := strings.Index(body, cfg); i < 0 || i > strings.Index(body, `<script src="./app.js">`) {
 			t.Errorf("GET %s: shim missing or after the page scripts: %s", target, body)
 		}
-		if !strings.Contains(body, "'octo.page.' + NS + ':'") {
+		if !strings.Contains(body, "'octo.page.' + encodeURIComponent(NS) + ':'") {
 			t.Errorf("GET %s: shim script not injected", target)
 		}
 	}
@@ -185,6 +186,61 @@ func TestLightAppPage_PublicSkipsAuth(t *testing.T) {
 	data, _ = os.ReadFile(filepath.Join(lightAppsDir(), "demo", "manifest.json"))
 	if strings.Contains(string(data), `"public"`) {
 		t.Errorf("public:false should drop the key: %s", data)
+	}
+}
+
+// Making one app public opens that app's directory and nothing else: not a
+// sibling app, not a path that climbs out, not a link that points out.
+func TestLightAppPage_PublicStaysInsideItsApp(t *testing.T) {
+	srv := newLightAppFixture(t, Config{Addr: "127.0.0.1:0", Tools: false}, "<h1>demo</h1>")
+	other := filepath.Join(lightAppsDir(), "other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"manifest.json": `{"slug":"other","name":"Other"}`, "index.html": "<h1>other</h1>"} {
+		if err := os.WriteFile(filepath.Join(other, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Symlink(filepath.Join(other, "index.html"), filepath.Join(lightAppsDir(), "demo", "peek.html")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if w := setPublic(t, srv, true); w.Code != http.StatusOK {
+		t.Fatalf("PUT public: status = %d", w.Code)
+	}
+
+	for _, target := range []string{
+		"/_apps/other/",
+		"/_apps/demo%2F..%2Fother/",
+		"/_apps/demo/..%2Fother%2Findex.html",
+		"/_apps/demo/peek.html",
+	} {
+		w := remoteGet(srv, target, false)
+		if w.Code == http.StatusOK {
+			t.Errorf("public demo, keyless %s: status 200, body %q", target, w.Body.String())
+		}
+	}
+	// The mux cleans a literal `..` into a redirect; following it lands on the
+	// private app, which still wants the key.
+	if w := remoteGet(srv, "/_apps/demo/../other/", false); w.Code == http.StatusOK {
+		t.Errorf("literal .. escaped the public app: %q", w.Body.String())
+	}
+
+	// Typed without its trailing slash, a public link still reaches the app.
+	w := remoteGet(srv, "/_apps/demo", false)
+	if w.Code != http.StatusMovedPermanently || w.Header().Get("Location") != "/_apps/demo/" {
+		t.Errorf("slashless public link: status = %d, Location = %q", w.Code, w.Header().Get("Location"))
+	}
+}
+
+func TestRedirectToSlash_KeepsTheSegmentEscaped(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/_apps/a%23b?v=1", nil)
+	w := httptest.NewRecorder()
+	redirectToSlash(w, req)
+	if got := w.Header().Get("Location"); got != "/_apps/a%23b/?v=1" {
+		t.Errorf("Location = %q", got)
 	}
 }
 

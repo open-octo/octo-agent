@@ -198,7 +198,8 @@ func (s *Server) handleArtifactPage(w http.ResponseWriter, r *http.Request) {
 // redirectToSlash sends /_artifacts/<token> and /_apps/<slug> to the same path
 // with a trailing slash, so the page's relative references resolve under it.
 func redirectToSlash(w http.ResponseWriter, r *http.Request) {
-	target := r.URL.Path + "/"
+	// Escaped, so a `#` or `?` in the segment stays part of the path.
+	target := r.URL.EscapedPath() + "/"
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}
@@ -307,7 +308,9 @@ var (
 // before any script the page declares; without one, right after the doctype,
 // and only for a bare fragment at the very top — anything ahead of the doctype
 // would drop the page into quirks mode. A byte scan rather than a parse on
-// purpose: the page goes out as its own bytes.
+// purpose: the page goes out as its own bytes. The one shape it gets wrong: a
+// `<head>` inside a comment or a script string ahead of the real tag; accepted
+// as a corner the parse-free approach pays for.
 func injectAtHead(doc, script []byte) []byte {
 	if len(script) == 0 {
 		return doc

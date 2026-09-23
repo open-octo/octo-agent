@@ -273,7 +273,9 @@ func TestRegisterRoutes_OnlyKnownUnauthenticated(t *testing.T) {
 		"GET /api/health":  true,
 		"GET /api/version": true,
 		"GET /api/mcp/servers/{name}/oauth/callback": true,
-		// Applies requireAuth itself unless the app is public (lightapp_pages.go).
+		// Applies requireAuth itself unless the app is public (lightapp_pages.go);
+		// the slashless form only redirects to it.
+		"GET /_apps/{slug}":           true,
 		"GET /_apps/{slug}/{path...}": true,
 		"/":                           true,
 	}

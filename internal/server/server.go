@@ -961,9 +961,11 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/light-apps/{slug}", s.handleGetLightApp)
 	s.api("DELETE /api/light-apps/{slug}", s.handleDeleteLightApp)
 	s.api("PUT /api/light-apps/{slug}/public", s.handleSetLightAppPublic)
-	s.api("GET /_apps/{slug}", redirectToSlash)
 	// Direct, not s.api: a public app is served without auth; every other
 	// one goes through requireAuth inside the handler (lightapp_pages.go).
+	// The slashless redirect reveals nothing, and a public link typed without
+	// its trailing slash must still reach the app.
+	s.mux.HandleFunc("GET /_apps/{slug}", redirectToSlash)
 	s.mux.HandleFunc("GET /_apps/{slug}/{path...}", s.handleLightAppPage)
 	s.api("GET /api/trash", s.handleGetTrash)
 	s.api("POST /api/trash/empty", s.handleEmptyTrash)
