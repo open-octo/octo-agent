@@ -40,6 +40,11 @@ func TestBuildEnvContext_ProfileDataDirectory(t *testing.T) {
 	if !strings.Contains(out, want) {
 		t.Errorf("env context missing %q:\n%s", want, out)
 	}
+	// ~/.octo/bin does not follow the profile; the line must not send the
+	// model looking for it under ~/.octo-work.
+	if !strings.Contains(out, "`~/.octo/bin` is shared by every profile") {
+		t.Errorf("env context lost the ~/.octo/bin exception:\n%s", out)
+	}
 }
 
 func TestBuildEnvContext_GitLineOnlyWhenOK(t *testing.T) {
