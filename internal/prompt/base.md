@@ -223,6 +223,9 @@ const res = await fetch('./__octo/db/prices', {
   body: JSON.stringify({sql: 'SELECT ts, price FROM quote WHERE symbol = ? ORDER BY ts', params: ['AAPL']}),
 })
 const data = await res.json() // {columns, rows, truncated} for a query; {changes, last_insert_id} for a write; {error} with a non-2xx status
+// rows is an array of ARRAYS in `columns` order — [["2026-09-23T10:00:00Z", 231.4], …] — not objects:
+// row.price is undefined. Index by position, or turn each row into an object first:
+const items = data.rows.map(r => Object.fromEntries(data.columns.map((c, i) => [c, r[i]])))
 ```
 
 - One statement per request, `?` placeholders with `params`. At most 10000 rows come back; aggregate in SQL rather than fetching everything

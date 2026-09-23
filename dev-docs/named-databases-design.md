@@ -142,7 +142,7 @@ const { columns, rows } = await res.json()
 { "changes": 1, "last_insert_id": 42 }
 ```
 
-行数和字节上限见上文，超出时 `truncated` 为 `true`。响应头与页面文件一致（`setPageHeaders`：`no-store`、`nosniff`）。
+`rows` 的每一行是按 `columns` 顺序排列的数组，不是对象：`SELECT a.id, b.id` 这种重名列在对象里会互相覆盖。提示词和工具描述都写明这一点，并给出转成对象的一行写法，因为模型默认会按 `row.price` 取值。行数和字节上限见上文，超出时 `truncated` 为 `true`。响应头与页面文件一致（`setPageHeaders`：`no-store`、`nosniff`）。
 
 错误：
 

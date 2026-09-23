@@ -32,7 +32,8 @@ func (SQLiteTool) Definition() agent.ToolDefinition {
 			"use them for data collected over time (a scheduled task appending results, a log, a " +
 			"dataset a page shows). The name is all a reader needs: an HTML artifact or Light App " +
 			"page reads the same database with `fetch('./__octo/db/<db>', {method:'POST', body: " +
-			"JSON.stringify({sql, params})})`, so a writer never needs to know where a page lives.\n\n" +
+			"JSON.stringify({sql, params})})` — it answers `{columns, rows}` with each row an array in " +
+			"`columns` order, not an object — so a writer never needs to know where a page lives.\n\n" +
 			"One statement per call (a second one is refused); use a multi-row VALUES list or " +
 			"INSERT … SELECT to write many rows at once. Bind values with `?` placeholders and " +
 			"`params` rather than splicing them into the SQL. ATTACH and VACUUM INTO are refused. " +
