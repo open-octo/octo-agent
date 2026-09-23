@@ -234,6 +234,35 @@ func (s *Session) GoalStore() *agent.Session {
 	return s.Store
 }
 
+// ReloadStore rereads the backing store from disk and rebuilds the agent's
+// history from it. The session object outlives its turns, so without this a
+// turn starts from a history that misses whatever the Web UI added while it
+// held the session — and Persist then writes that history back over the file.
+// The history is replaced in place (its own lock), not swapped for a new
+// value another goroutine may be holding. A store replaced or tombstoned
+// (/unbind) while the file was read is left as it now is.
+func (s *Session) ReloadStore() error {
+	s.storeMu.Lock()
+	cur := s.Store
+	s.storeMu.Unlock()
+	if cur == nil {
+		return nil
+	}
+	fresh, err := agent.LoadSession(cur.ID)
+	if err != nil {
+		return err
+	}
+	s.storeMu.Lock()
+	if s.Store != cur {
+		s.storeMu.Unlock()
+		return nil
+	}
+	s.Store = fresh
+	s.storeMu.Unlock()
+	s.Agent.History.ReplaceWithPersisted(fresh.Messages)
+	return nil
+}
+
 // deleteStore removes the persisted history and tombstones the store so an
 // in-flight turn can't write it back; used by /unbind and /bind, whose
 // contracts are "history cleared" / "start fresh". Returns the delete error

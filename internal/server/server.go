@@ -3346,9 +3346,8 @@ func (s *Server) handleChannelCompact(ad channel.Adapter, ev channel.InboundEven
 		return
 	}
 
-	if fresh, err := agent.LoadSession(storeID); err == nil {
-		sess.Store = fresh
-	}
+	// Summarize what is on disk, not a history the Web UI may have moved past.
+	s.reloadChannelHistory(sess)
 
 	go func() {
 		defer s.recoverBg("channel compaction")
@@ -3619,12 +3618,28 @@ func (s *Server) runChannelIdleTurn(ctx context.Context, sess *channel.Session, 
 	s.runChannelTurns(ctx, sess, ad, ev, strings.Join(agent.Texts(items), "\n\n"), nil)
 }
 
+// reloadChannelHistory starts an IM turn from what is on disk
+// (channel.Session.ReloadStore). A load failure keeps what is in memory, the
+// same best-effort stance restoreOrInitStore takes.
+func (s *Server) reloadChannelHistory(sess *channel.Session) {
+	if err := sess.ReloadStore(); err != nil {
+		slog.Warn("reload channel session", "err", err)
+	}
+}
+
 // runChannelTurns executes one content-bearing turn plus any chained turns
 // drained from the agent's Inbox. It is shared between user-initiated and
 // idle-triggered channel turns. stopTyping, if non-nil, cancels the caller's
 // typing-keepalive ticker the first time this chain's reply text reaches the
 // user (see channel.NewUIController).
 func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad channel.Adapter, ev channel.InboundEvent, content string, stopTyping func()) {
+	// Start from what is on disk, as a web turn does (buildAgent). The IM
+	// session object outlives its turns, so its in-memory history misses
+	// anything the Web UI added while it held the session — and Persist
+	// writes that history back over the file. Runs after BeginRun, so no
+	// earlier turn in this session is still about to save.
+	s.reloadChannelHistory(sess)
+
 	// Refresh the external memory backend from config — IM turns never go
 	// through prepareToolTurn (only WS/REST/cron do), so this is the only
 	// place that keeps it live for IM at all, not just on-time. Must run

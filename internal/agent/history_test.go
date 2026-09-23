@@ -63,3 +63,26 @@ func TestHistory_ConcurrentAppend(t *testing.T) {
 		t.Errorf("Len after concurrent appends = %d, want %d", h.Len(), writers*perWriter)
 	}
 }
+
+// Loading what is already on disk is not a rewrite: the next save should
+// append, not rewrite the whole file. ReplaceAll (compaction) is one.
+func TestHistory_ReplaceWithPersistedIsNotARewrite(t *testing.T) {
+	msgs := []Message{NewUserMessage("a"), NewAssistantMessage("b")}
+
+	h := NewHistory()
+	h.ReplaceAll(msgs)
+	if !h.RewriteDirty() {
+		t.Fatal("ReplaceAll should flag a rewrite")
+	}
+	h.ReplaceWithPersisted(msgs)
+	if h.RewriteDirty() {
+		t.Error("ReplaceWithPersisted should clear the rewrite flag")
+	}
+	if h.Len() != 2 {
+		t.Errorf("Len = %d, want 2", h.Len())
+	}
+	msgs[0].Content = "changed"
+	if h.Snapshot()[0].Content != "a" {
+		t.Error("history must hold its own copy of the messages")
+	}
+}
