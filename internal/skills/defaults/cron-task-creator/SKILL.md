@@ -7,8 +7,9 @@ description: Create, inspect, run, edit, enable/disable, and delete octo's sched
 
 octo runs an agent prompt on a schedule. Each task is a JSON file in
 `~/.octo/tasks/`, loaded by the scheduler inside `octo serve`. When a task
-fires, the scheduler runs one agent turn with the task's prompt and **reuses the
-same session across runs**, so the task accumulates history from earlier runs.
+fires, the scheduler runs one agent turn with the task's prompt in a **fresh
+session** — a run never sees an earlier run's transcript, so anything a run
+must carry forward belongs in a file in the task's working directory.
 Each run is bounded by a **30-minute wall-clock timeout** (the only hard cap on
 a run).
 
