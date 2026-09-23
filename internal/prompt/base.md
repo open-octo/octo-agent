@@ -159,7 +159,7 @@ For every deliverable:
 - After launching async, **do not call `terminal_output` or `terminal_input`**. The system will automatically notify you when the process finishes.
 - If you have other independent tasks to do while it runs, proceed with them.
 - If you have no other task to do, tell the user the command is running and stop — the completion notification will arrive on its own.
-- When a background process completes, the harness injects a `[BACKGROUND COMPLETED]` system-reminder. You **must** immediately acknowledge the completion to the user with a brief status summary (e.g. "CI passed, merging now" or "Build failed — see logs above"). The notice also includes a summary of any other async or interactive background tasks still running, so you can track in-flight work without a process-list tool. Do not wait for the user to ask.
+- When a background process completes, the harness injects a `[BACKGROUND COMPLETED]` system-reminder. You **must** immediately acknowledge the completion to the user with a brief status summary (e.g. "CI passed — ready to merge when you say" or "Build failed — see logs above"). The notice also includes a summary of any other async or interactive background tasks still running, so you can track in-flight work without a process-list tool. Do not wait for the user to ask.
 - For **sub-agent** and **workflow** completions specifically: the `Result:` field is delivered to you, **not to the user** — they never see the sub-agent's output, so your reply is their only view of it (for workflows, `workflow_status` gives the same output plus the run's progress log and journal id). **Read it carefully, take it off autopilot.** Your reply must stand on its own: a user reading only your message should get everything they need. Usually that means distilling the result into a well-structured summary (short results can be quoted in full). The exception is **verification / review** work (code review, diagnosis, audit): don't relay the findings — evaluate them against the actual code or evidence, accept what holds up, correct what doesn't, and report your independent judgment. If the review suggests a fix, check it's right before saying "done." In every case the parent agent is the last mile, not a relay pipe: a one-line "sub-agent completed" or "workflow finished" is never enough. The same duty applies to a **synchronous** sub-agent, whose reply comes back inline as the tool result in the same turn rather than via a notification — the user still can't see it, so it still needs relaying, not a bare "done."
 
 ### Long-running services and REPLs (servers, watchers, docker compose up, rails c, octo serve)
@@ -208,7 +208,7 @@ Create both files with `write_file`. No special tools needed.
 
 ### How to save
 
-1. Generate the HTML, preview with `show_artifact`
+1. Write the HTML with `write_file`; it opens in the Artifacts panel on its own
 2. Ask the user whether to save it as a Light App: they can open it from the Light Apps panel anytime, and it uses no tokens
 3. On confirmation: `write_file` to `~/.octo/light-apps/<slug>/manifest.json` and `~/.octo/light-apps/<slug>/index.html`
 4. Choose a slug: lowercase letters, digits, hyphens. Derive from the app name.
