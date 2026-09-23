@@ -27,7 +27,7 @@ the server was down is not replayed on restart.
 | `cron` | yes | Schedule expression — see below |
 | `prompt` | yes | The prompt sent to the agent on each run |
 | `model` | no | Model override; defaults to the server's model |
-| `agent` | no | `"general"` or `"coding"` |
+| `agent_id` | no | Id of the expert the run executes as; empty = the Default Agent |
 | `directory` | no | Working directory the run executes in |
 | `notify` | no | IM chats to push each run's final reply (or failure) to |
 | `enabled` | yes | Whether the schedule is currently active |
@@ -75,6 +75,21 @@ seconds minutes hours day-of-month month day-of-week
 Descriptors also work: `@hourly`, `@daily`, `@weekly`, `@every 90m`. Times are in the server's
 local timezone.
 
+## Editing a task in the Web UI
+
+Click the edit button on a task in the scheduler panel. The new session opens
+with an edit form prefilled with the task's name, cron expression (restated in
+plain words), prompt, model, directory, and enabled state.
+
+- Change the fields you want and save — the change takes effect right away. A
+  bad or sub-hourly cron expression is rejected, not saved.
+- Or describe the change in the box at the bottom of the form ("move it to
+  8am on weekdays") and the agent makes it. Notifications and the expert a
+  task runs as are changed this way too.
+
+A field too long to fit the form without being cut off (a very long prompt,
+say) is left out of it — describe that change in the bottom box instead.
+
 ## Managing tasks via the API
 
 Every change through the API reschedules the running process immediately — the recommended path
@@ -99,7 +114,7 @@ curl -s -X PATCH http://127.0.0.1:8088/api/tasks/{id} \
   -d '{"prompt":"new prompt ...","enabled":false}'
 ```
 
-`PATCH /api/tasks/{id}` accepts `name`, `enabled`, `cron`, `prompt`, `model`, `agent`, `directory`,
+`PATCH /api/tasks/{id}` accepts `name`, `enabled`, `cron`, `prompt`, `model`, `agent_id`, `directory`,
 `notify` — send only what you're changing; renaming via `name` also renames the task's project (its
 directory stays put). The Web UI's scheduler panel is a client of this
 same API, so a task created by `curl` shows up there and vice versa; the panel is also the

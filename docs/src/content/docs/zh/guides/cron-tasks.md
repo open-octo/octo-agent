@@ -26,7 +26,7 @@ octo serve
 | `cron` | 是 | 调度表达式——见下文 |
 | `prompt` | 是 | 每次运行发给 agent 的 prompt |
 | `model` | 否 | 模型覆盖；不填就用 server 的默认模型 |
-| `agent` | 否 | `"general"` 或 `"coding"` |
+| `agent_id` | 否 | 运行时使用的专家 id；留空 = Default Agent |
 | `directory` | 否 | 运行时所在的工作目录 |
 | `notify` | 否 | 每次运行的最终回复（或失败信息）要推送到哪些 IM 会话 |
 | `enabled` | 是 | 这个计划当前是否处于启用状态 |
@@ -70,6 +70,19 @@ seconds minutes hours day-of-month month day-of-week
 也支持描述符写法：`@hourly`、`@daily`、`@weekly`、`@every 90m`。时间用的是 server 所在的
 本地时区。
 
+## 在 Web UI 中编辑任务
+
+在调度器面板里点任务的编辑按钮。新会话会直接给出一张预填了当前值的编辑表单：名称、
+cron 表达式（附一句大白话说明是什么时间）、prompt、模型、工作目录、是否启用。
+
+- 直接改想改的字段，点保存，改动立即生效。cron 写错或者间隔不到 1 小时会被拒绝，
+  不会保存。
+- 或者在表单最下面的输入框里用一句话描述想怎么改（例如"改到工作日早上 8 点"），
+  由 agent 替你调整。通知目标、任务使用的专家也通过这里修改。
+
+内容过长的字段（例如很长的 prompt）不会放进表单，以免被截断，这类改动通过最下面的
+输入框描述即可。
+
 ## 通过 API 管理任务
 
 只要 `octo serve` 在跑，所有走 API 的改动都会立刻让正在运行的进程重新调度——这是推荐路径。
@@ -93,7 +106,7 @@ curl -s -X PATCH http://127.0.0.1:8088/api/tasks/{id} \
   -d '{"prompt":"new prompt ...","enabled":false}'
 ```
 
-`PATCH /api/tasks/{id}` 接受 `name`、`enabled`、`cron`、`prompt`、`model`、`agent`、
+`PATCH /api/tasks/{id}` 接受 `name`、`enabled`、`cron`、`prompt`、`model`、`agent_id`、
 `directory`、`notify`——只发你要改的那部分就行；用 `name` 改名也会同步重命名任务的项目（目录不动）。Web UI 里的调度器面板就是这套 API 的一个
 客户端，所以用 `curl` 创建的任务会出现在面板里，反过来也一样；面板也是**试跑一个新任务的
 `Run` 按钮**推荐用的地方，而不是从聊天会话里直接触发 `/api/tasks/{id}/run`——一次运行是在这

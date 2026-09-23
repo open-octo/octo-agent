@@ -23,7 +23,7 @@ a run).
 | `cron` | yes | Schedule expression — see format below |
 | `prompt` | yes | The prompt sent to the agent on each run |
 | `model` | no | Model override; defaults to the server's model |
-| `agent` | no | `"general"` or `"coding"` |
+| `agent_id` | no | Id of the expert (`/api/agents`) the run executes as; empty = the Default Agent |
 | `directory` | no | Working directory the run executes in |
 | `notify` | no | IM chats to push each run's final reply (or failure) to — see the notify table |
 | `enabled` | yes | Whether the schedule is active |
@@ -88,6 +88,55 @@ day, not for sub-hourly polling. If the user wants faster iteration, use
    this conversation and the output lands in a session the user isn't watching.
    The panel runs it where they can see it.
 
+## Editing a task
+
+The Web UI's edit button opens a session with the skill arguments
+`edit <id> "<name>"`. There is no single-task GET — find the task in
+`GET /api/tasks` by `id`.
+
+In that session (or whenever the user is clearly in the Web UI), open with an
+edit form instead of asking what to change. Elsewhere (TUI, IM), list the
+current fields as text and ask.
+
+### The edit form
+
+Read the `genui` skill before emitting it. Reply with a short line and one
+inline `octo-ui` fence — **no panel `id`** — holding, in this order:
+
+| Field | Node | Prefill |
+|---|---|---|
+| `name` | `input` | current `name` |
+| `cron` | `input`, label saying 6 fields, seconds first | current `cron` |
+| — | `text`, `tone: "muted"` | the current schedule in plain words ("every weekday at 18:30") |
+| `prompt` | `textarea`, `rows: 12` | current `prompt` |
+| `model` | `input`, placeholder saying empty = the server's model | current `model` or empty |
+| `directory` | `input` | current `directory` or empty |
+| `enabled` | `switch` | current `enabled` |
+| `note` | `textarea`, `rows: 3` | empty; label along the lines of "Or describe the change and I'll make it" |
+
+followed by a primary `button` with `action: "save_task"` and
+`payload: {"id": "<id>"}`. Label fields in the user's language. `notify` and
+`agent_id` stay out of the form — changes to them go through `note`.
+
+The renderer silently truncates a prefilled value past its cap — **500**
+characters for an `input`, **5000** for a `textarea` — and whatever it shows
+is what comes back on submit. **Leave a field out of the form when its
+current value is near its cap** (over ~480 / ~4800 characters), and say in a
+`text` node that it can be changed through `note`.
+
+When the `[octo-ui-action]` with `action: "save_task"` comes back:
+
+- Compare each submitted field with the task you fetched and `PATCH` only
+  the ones that changed.
+- **Fields only, no `note`** — the user already made the edit; don't ask
+  again. `PATCH`, then report the changes in one or two lines; a changed
+  `cron` is restated in plain words. A 400 (bad cron, sub-hourly schedule,
+  unknown expert) goes back to the user as-is. Nothing changed → say so and
+  stop.
+- **A `note`** — handle it as in the workflow above, on top of any field
+  changes: a new schedule is translated and echoed back, a rewritten prompt
+  is shown and confirmed before `PATCH`.
+
 ## API — one surface, all under `/api/tasks`
 
 Prefer the API whenever `octo serve` is up (default `:8088`): every change
@@ -95,7 +144,7 @@ reschedules the running process immediately.
 
 ```bash
 # Create — returns {"id":"task_..."}. Include any optional field (directory,
-# model, agent, notify) right here.
+# model, agent_id, notify) right here.
 curl -s -X POST http://127.0.0.1:8088/api/tasks \
   -H 'Content-Type: application/json' \
   -d '{"name":"daily-report","cron":"0 0 9 * * *","prompt":"Summarize ...","directory":"/srv/repo"}'
@@ -114,7 +163,9 @@ curl -s -X PATCH http://127.0.0.1:8088/api/tasks/{id} \
 ```
 
 `PATCH /api/tasks/{id}` accepts `name`, `enabled`, `cron`, `prompt`, `model`,
-`agent`, `directory`, `notify` — send only the fields you want to change.
+`agent_id`, `directory`, `notify` — send only the fields you want to change.
+A changed `cron` is re-validated (syntax and the 1-hour floor) and rejected
+with a 400.
 Renaming via `name` also renames the task's session group. Look up `{id}` from
 the create response or the list. (Earlier builds had a separate
 `/api/cron-tasks/...` route and a `/toggle` endpoint; both are gone — everything
