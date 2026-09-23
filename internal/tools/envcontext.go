@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 // BuildEnvContext renders the machine-level "# Environment" block shared by the
@@ -31,6 +33,17 @@ func BuildEnvContext(cwd, branch string, dirty, ok bool) string {
 	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		fmt.Fprintf(&b, "- Home directory: %s\n", home)
+	}
+	// The prompt, the tool descriptions and the skills spell octo's data
+	// paths as ~/.octo/…; under a named profile they live elsewhere, and a
+	// model left to guess writes Light Apps and databases where nothing reads
+	// them. ~/.octo/bin is the exception (datahome.BinDir: machine-wide), and
+	// product-help contrasts ~/.octo with ~/.octo-<name> on purpose. The
+	// default profile gets no line, so its prompt is unchanged.
+	if profile := datahome.Current(); profile != "" {
+		if dir, err := datahome.Dir(); err == nil {
+			fmt.Fprintf(&b, "- Octo data directory: %s (profile %q). octo's own data paths written `~/.octo/…` in these instructions, tool descriptions and skills — config, sessions, skills, tasks, Light Apps, databases — are under this directory instead. Two exceptions: `~/.octo/bin` is shared by every profile, and text that contrasts the default `~/.octo` with a named `~/.octo-<name>` means what it says\n", dir, profile)
+		}
 	}
 	// The git line is meaningful only with a name; because this helper is
 	// exported, a future caller passing ok=true with an empty branch should not
