@@ -7,8 +7,11 @@ description: Create, inspect, run, edit, enable/disable, and delete octo's sched
 
 octo runs an agent prompt on a schedule. Each task is a JSON file in
 `~/.octo/tasks/`, loaded by the scheduler inside `octo serve`. When a task
-fires, the scheduler runs one agent turn with the task's prompt and **reuses the
-same session across runs**, so the task accumulates history from earlier runs.
+fires, the scheduler runs one agent turn with the task's prompt in a **fresh
+session** — a run never sees an earlier run's transcript. What's worth keeping
+across runs goes in long-term memory: each task has its own project, and with
+it its own working directory and memory directory, so a note one run saves is
+in the next run's memory block.
 Each run is bounded by a **30-minute wall-clock timeout** (the only hard cap on
 a run).
 
@@ -68,7 +71,9 @@ day, not for sub-hourly polling. If the user wants faster iteration, use
    ("every weekday at 18:30") before creating anything.
 3. **Write a self-contained prompt.** The task session has no access to this
    conversation — the prompt must carry all context: what to do, where, and what
-   the output should look like.
+   the output should look like. When a run depends on what earlier runs found
+   ("only report issues I haven't seen"), have the prompt say what to save to
+   memory at the end of each run and to check it at the start.
 4. **Give the prompt an explicit stop condition.** An open-ended prompt makes the
    model keep re-verifying until the 30-minute timeout instead of finishing.
    Spell out when the task is done, especially the empty case:
