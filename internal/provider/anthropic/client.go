@@ -604,11 +604,19 @@ func marshalBlocks(blocks []agent.ContentBlock) ([]map[string]any, error) {
 				"signature": b.Signature,
 			})
 		case "tool_use":
+			// A no-argument call's empty map is dropped by the omitempty tag
+			// when the session is saved, so a reloaded block carries nil here.
+			// That would go out as "input": null, which DashScope rejects with
+			// HTTP 400 on every later request in the session.
+			input := b.Input
+			if input == nil {
+				input = map[string]any{}
+			}
 			m := map[string]any{
 				"type":  "tool_use",
 				"id":    b.ID,
 				"name":  b.Name,
-				"input": b.Input,
+				"input": input,
 			}
 			out = append(out, m)
 		case "tool_result":
