@@ -4,6 +4,7 @@ import DOMPurify from "dompurify"
 // GenuiCode.svelte gets the same registrations without depending on this
 // module having been imported first.
 import hljs from "./highlight"
+import { MERMAID_BLOCK_CLASS } from "./mermaid"
 
 export function escapeHtml(s: string): string {
   return s
@@ -34,7 +35,31 @@ export function isSafeHref(href: string): boolean {
 // semantically identical.
 const renderer = new Renderer()
 
-renderer.code = function ({ text: codeText, lang }: { text: string; lang?: string }) {
+// A fence is closed when its last line repeats the opening fence character at
+// least as many times. marked hands an unclosed trailing fence to the code
+// renderer too, running to the end of the text.
+function isClosedFence(raw: string): boolean {
+  const open = /^ {0,3}(`{3,}|~{3,})/.exec(raw)
+  const body = raw.trimEnd()
+  const nl = body.lastIndexOf("\n")
+  if (!open || nl === -1) return false
+  const last = body.slice(nl + 1).trim()
+  return last.length >= open[1].length && last === open[1][0].repeat(last.length)
+}
+
+renderer.code = function ({ text: codeText, lang, raw }: Tokens.Code) {
+  // Only a closed fence is tagged: while a reply streams, an open fence holds a
+  // half-written diagram. mermaid.ts draws the diagram once the block is in
+  // the DOM; until then, and whenever mermaid rejects it, the source shows.
+  if (lang === "mermaid" && isClosedFence(raw)) {
+    return `<div class="code-block ${MERMAID_BLOCK_CLASS}">
+  <div class="code-header">
+    <span class="code-lang">mermaid</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="hljs language-plaintext">${escapeHtml(codeText)}</code></pre>
+</div>`
+  }
   const language = lang && hljs.getLanguage(lang) ? lang : "plaintext"
   let highlighted: string
   if (language !== "plaintext") {

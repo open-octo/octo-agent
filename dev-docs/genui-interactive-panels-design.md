@@ -12,14 +12,14 @@
 
 That shape is wrong for the thing a panel actually is. Clicking a tab, filtering a table, or filling in a form is not a conversational act — it is manipulation of an object the model already handed over. Routing it through the conversation produces a transcript full of near-identical panels, leaves every earlier copy clickable and stale, costs a full model turn per click, and still loses every field value on page reload because the values live only in `GenuiBlock.svelte`'s in-memory `$state`.
 
-This document makes a GenUI panel a self-contained, addressable, locally-interactive object: it has an identity that survives across turns, it responds to most interaction instantly with no model involvement, it can be updated in place when the model *is* needed, and its interaction state survives a reload. It also adds the node types that only become worth having once interaction is local: `slider`, `number`, and `textarea` as inputs, `collapsible`, `code`, `link` and `divider` for structure, and `plot`, `quiz`, and `mermaid` as content.
+This document makes a GenUI panel a self-contained, addressable, locally-interactive object: it has an identity that survives across turns, it responds to most interaction instantly with no model involvement, it can be updated in place when the model *is* needed, and its interaction state survives a reload. It also adds the node types that only become worth having once interaction is local: `slider`, `number`, and `textarea` as inputs, `collapsible`, `code`, `link` and `divider` for structure, and `plot` and `quiz` as content.
 
 ## Goals
 
 - Interaction that the panel can answer by itself is answered by itself: no message, no model turn, no latency.
 - Interaction that genuinely needs the model updates the existing panel in place, without adding a user bubble or an assistant bubble to the transcript.
 - A panel's interaction state (selected tab, filter text, form values, quiz answers) survives a page reload.
-- Add the nodes that local interaction makes worth having: `slider`, `number`, `textarea` as inputs, `collapsible`, `code`, `link`, `divider` for structure, and `plot`, `quiz`, `mermaid` as content.
+- Add the nodes that local interaction makes worth having: `slider`, `number`, `textarea` as inputs, `collapsible`, `code`, `link`, `divider` for structure, and `plot`, `quiz` as content.
 - Every existing GenUI behaviour keeps working byte-identically when a spec omits the new fields.
 
 ## Non-goals
@@ -28,7 +28,7 @@ Deliberately excluded, each for a stated reason rather than by omission:
 
 - **A persistent session-level dock. Not planned** — this replaces the "deferred pending a later design" status `genui-design.md` gave it. A dock existed on that list to solve panel accumulation: many near-identical panels piling up, needing de-duplication and re-ordering. Addressable panels solve that directly, at the cost of one optional field, and they keep a panel where the conversation put it. What a dock would still add is a panel surface *outside* the message flow — a product direction, not a fix for anything currently broken, and the single most reworked part of upstream dsh-genui's implementation. If it is ever revisited it should be argued from "users want a panel area detached from the conversation", not from panel accumulation, which no longer happens.
 - **Cross-device state sync.** Interaction state is a property of a reader at a screen, not of the session on disk — the same judgement the client already applies to every other view-level preference it keeps in localStorage. A phone and a desktop viewing the same session keep independent panel state.
-- **3D / WebGL nodes.** The dependency and the WebGL-context lifecycle cost are both large, and unlike `mermaid` there is no everyday use for them in this product.
+- **3D / WebGL nodes.** The dependency and the WebGL-context lifecycle cost are both large, and there is no everyday use for them in this product.
 - **The model automatically observing local interaction.** Local interaction is transparent to the model by construction (see "Model visibility" below). When the model needs to know, the user takes an explicit action that carries the field values — the mechanism `context.ts:26-27` already implements.
 - **Expression evaluation of any kind.** No `eval`, no `new Function`, and no hand-written expression parser either — see "Local interaction" for how conditions are expressed instead.
 
@@ -55,7 +55,6 @@ Verified by reading the code, not assumed.
 - **The whole frontend is embedded in the binary.** `internal/server/static.go:11` is `//go:embed all:webdist` — every emitted chunk ships in the binary whether or not it is ever loaded.
 - **Svelte components cannot currently be mount-tested.** `web/vitest.config.ts` sets `environment: 'jsdom'` and the svelte plugin but no `resolve.conditions`, so Vitest resolves Svelte's server build and `mount()` throws `lifecycle_function_unavailable` from `svelte/src/index-server.js:25`. Measured, not inherited from the prior document: adding `resolve.conditions: ['browser']` makes a leaf component mount and assert correctly, and the full existing suite still passes (25 files, 368 tests).
 - **IM and TUI degrade at the fence boundary only.** `genui.StripOctoUIFences` (`internal/tools/genui/fence.go`) finds ` ```octo-ui ` / ` ``` ` line boundaries and substitutes `PlaceholderText` (`fence.go:11`) without parsing the JSON. New node types inside the fence are therefore invisible to it.
-- **Artifacts can already render mermaid, at a cost.** Artifact previews are `sandbox="allow-scripts"` srcdoc iframes (`ArtifactsPanel.svelte:341`) with no CSP restricting external script sources (the `Content-Security-Policy: sandbox` header at `artifact_handler.go:87` applies to the standalone artifact endpoint). A model can write an HTML artifact that pulls mermaid from a CDN today — which works only online, renders in a separate panel rather than in the reply, and cannot participate in GenUI interaction.
 
 ## Overall architecture
 
@@ -80,7 +79,7 @@ flowchart TB
         TV["table-view.ts<br/>local filter + sort"]
         PL["plot-layout.ts<br/>chart geometry"]
         ST["panel-state.ts<br/>localStorage persistence"]
-        NODES["GenuiSlider / GenuiQuiz /<br/>GenuiPlot / GenuiMermaid / …"]
+        NODES["GenuiSlider / GenuiQuiz /<br/>GenuiPlot / …"]
     end
 
     subgraph Backend["internal/ (unchanged)"]
@@ -313,7 +312,7 @@ Its existence also removes a workaround: sending the user to a URL previously re
 
 `divider` has no fields and no state.
 
-### New nodes: plot and mermaid
+### New node: plot
 
 **`plot`** renders as hand-written SVG with no dependency at all:
 
@@ -341,26 +340,7 @@ Multi-series introduces alignment questions that are settled here rather than le
 
 Anything past this belongs in an artifact. That boundary is the same one the "Relationship to the Artifacts panel" section of `genui-design.md` draws, and it is why no charting library is introduced: a heatmap, a sankey, a map, or brush-and-zoom interaction is a deliverable that outlives the reply, and an artifact iframe already lets the model write a full charting page with arbitrary script.
 
-**`mermaid`** renders a diagram from source:
-
-```ts
-{
-  type: 'mermaid'
-  code: string        // capped at 5000 characters
-}
-```
-
-`GenuiMermaid.svelte` imports mermaid dynamically at first render — `const { default: mermaid } = await import('mermaid')` — mirroring the html2canvas precedent at `ChatView.svelte:1962` and its stated reason. It renders to an SVG string and shows a compact error line if mermaid rejects the source — a model writing invalid diagram syntax must never blank the panel. Three initialization settings carry weight:
-
-- **`securityLevel: 'strict'`** — mermaid's own sanitizing of the labels it renders.
-- **`htmlLabels: false`** — without it, flowchart labels render inside a `foreignObject`, which is in DOMPurify's SVG-disallowed list *and* its forbidden-contents list, so the sanitize step below removes the element together with its text. The diagram survives as boxes and arrows with no words in them: no error, no failure branch, just silently wordless. Off, mermaid emits native SVG text, which passes the sanitizer untouched and needs no exemption carved into the whitelist. `securityLevel` does not imply this — mermaid's `getEffectiveHtmlLabels()` defaults it to true independently.
-- **An extended `secure` list** — `themeCSS` and `themeVariables` can be set from inside the diagram source through a `%%{init: …}%%` directive and are absent from mermaid's default `secure` list, so strict mode leaves them writable. They land in a style element that survives sanitizing, which would let a diagram pull an external `url()` — the only path in GenUI by which model output could make the page issue a network request. Adding them to `secure` closes it.
-
-**This node breaks the `{@html}` invariant, and that has to be paid for.** `GenuiNode.svelte:1-9` states that GenUI content never uses `{@html}`; an SVG string cannot be inserted any other way. The exemption is contained as narrowly as possible:
-
-- `GenuiMermaid.svelte` is the only component in the tree permitted to use `{@html}`, with a comment at the insertion point stating why and pointing here.
-- The SVG passes through the project's existing DOMPurify with `USE_PROFILES: { svg: true, svgFilters: true }` before insertion, so the output is sanitized by our own policy rather than only by mermaid's internal one. Two independent sanitizers on this path is the same belt-and-braces posture the guard already takes by running in both Go and TypeScript.
-- The `code` field itself is guard-capped like any other string field, and mermaid is configured with `startOnLoad: false` so nothing auto-executes against the surrounding document.
+Diagrams are not a GenUI node: a ` ```mermaid ` fence in the reply's markdown is drawn in place by the chat renderer (see `chat-mermaid-design.md`).
 
 ### Guard caps
 
@@ -374,7 +354,6 @@ Local interaction changes what a panel must carry: the model now ships the data 
 | `MAX_TABLE_COLUMNS` | 50 | 50 | Unchanged. |
 | `MAX_OPTIONS` | 50 | 50 | Also bounds `quiz` options. |
 | `MAX_PANEL_ID_LEN` | — | 64 | New. |
-| `MAX_MERMAID_LEN` | — | 5000 | New. Roughly a 150-line diagram; beyond that an artifact is the right vehicle. |
 | `MAX_PLOT_POINTS` | — | 100 | New. Per series. Past this a plot is unreadable at chat width. |
 | `MAX_PLOT_SERIES` | — | 8 | New. Matches the fixed colour sequence; a ninth series would have no distinct colour to take. |
 | `MAX_TEXTAREA_LEN` | — | 5000 | New. Bounds a `textarea`'s model-supplied default, and is mirrored as the rendered element's `maxlength` so what the user types back is bounded by the same number. |
@@ -384,7 +363,7 @@ Local interaction changes what a panel must carry: the model now ships the data 
 
 `MAX_TABLE_ROWS` at 500 with `MAX_TABLE_CELL_LEN` at 2000 leaves a worst-case table well inside what the existing tool-result cards already render, and the guard trims rather than rejects, so an over-cap table still shows its first 500 rows.
 
-**Which nodes each surface accepts.** `collapsible`, `code`, `divider`, `plot` and `mermaid` join the read-only whitelist, so a `render_ui` tool card can hold them: none carries a field or fires an action, and folding is presentation rather than input. `slider`, `number`, `textarea` and `quiz` join the interactive whitelist and stay off the tool-card path, which has no way to set a field.
+**Which nodes each surface accepts.** `collapsible`, `code`, `divider` and `plot` join the read-only whitelist, so a `render_ui` tool card can hold them: none carries a field or fires an action, and folding is presentation rather than input. `slider`, `number`, `textarea` and `quiz` join the interactive whitelist and stay off the tool-card path, which has no way to set a field.
 
 Three spec fields are deliberately dropped by the Go guard while the TS guard keeps them, for one shared reason — they name a field, and the tool-card path accepts no field-bearing node: `visibleWhen`, `table.filterBy`, and a spec's `id` (identity exists so a later turn can re-address a panel; a tool card is a one-shot nothing addresses again). `table.sortable` survives on both, because sorting reads no field.
 
@@ -400,14 +379,13 @@ Numeric fields on `slider` and `number` (`min`, `max`, `step`, `value`) are clam
 - The silent-turn contract, stated as a hard requirement because degradation is silent from the model's side: on receiving an action whose JSON carries `panel`, reply with **exactly one** ` ```octo-ui ` fence carrying that same `id` and no other text. Prose in that reply turns it into an ordinary visible message.
 - The local-first principle: ship the data the user will switch between, and use `visibleWhen` / `filterBy` / `tabs` rather than a button, because a button costs a model turn and a condition costs nothing. Reserve actions for work the panel genuinely cannot do — fetching data it does not have, or taking a real-world action.
 - Field-value visibility: local interaction is invisible until an action fires, so a panel whose values matter needs a submit button.
-- The new node table entries for `slider`, `number`, `textarea`, `collapsible`, `code`, `divider`, `plot`, `quiz`, and `mermaid`, with their caps.
+- The new node table entries for `slider`, `number`, `textarea`, `collapsible`, `code`, `divider`, `plot`, and `quiz`, with their caps.
 - How the input nodes pair with conditions: a `slider` or `number` is only useful next to a `visibleWhen` range predicate or a `filterBy`, and a `textarea` is only useful next to a submit button. A model that emits an input with nothing reading it has built a control that does nothing.
-- The `mermaid` versus artifact boundary: a diagram that is part of this reply's structure is a `mermaid` node; a diagram that is a deliverable belongs in an artifact, per the existing artifact boundary section.
 
 ## Security design
 
 - **No new code-execution surface.** Conditions are structured comparisons over a string/number/boolean map; there is no parser, no evaluator, and no place a model-supplied string is interpreted as anything but data. `plot` is arithmetic over numbers.
-- **The `{@html}` exemption is confined to `GenuiMermaid.svelte`** and double-sanitized (mermaid `securityLevel: 'strict'` plus the project's DOMPurify under an SVG profile). No other component gains the capability, and the existing "never `{@html}`" comment in `GenuiNode.svelte` is amended to name the single exception rather than deleted.
+- **The `{@html}` exemption is confined to `GenuiCode.svelte`**, whose markup is produced by highlight.js from escaped source. The "never `{@html}`" comment in `GenuiNode.svelte` names that single exception.
 - **Panel ids are constrained to `[A-Za-z0-9_-]{1,64}`** before being used in a localStorage key or compared against a model-supplied id, removing escaping questions by construction.
 - **Reserved field names.** Model-supplied `field` values may not begin with `__`, keeping internal state (tab index, fold state) unaddressable from a spec. This is enforced on every path that names a field — input nodes, `table.filterBy`, and `visibleWhen`. The condition path matters even though a condition only ever reads: without it a spec could observe which tab is open or which section is unfolded.
 - **Silent turns hide rendering, never history.** The messages are ordinary messages in the session file and in exports, so a panel can never change without a trace in the record; only the live transcript view elides them, with the panel's status chip as the in-conversation feedback.
@@ -416,26 +394,7 @@ Numeric fields on `slider` and `number` (`min`, `max`, `step`, `value`) are clam
 
 ## External dependencies
 
-| Dependency | Version | How it is loaded | Size impact |
-|---|---|---|---|
-| `mermaid` | ^11.17.0 | Dynamic `import()` at first render of a `mermaid` node | Emitted entirely as lazy chunks; see the measurements below |
-
-This is the only new dependency, and per `.octorules` it needs justification.
-
-Measured from a real production build of this project rather than an isolated experiment:
-
-| | Before | After |
-|---|---|---|
-| Main bundle (`index-*.js`) | 705.7 KB | 731.3 KB |
-| Total `webdist` | ~1.1 MB | 4.5 MB |
-
-**The main bundle grows by about 26 KB** — the new GenUI components, not mermaid. Every byte of mermaid lands in lazy chunks that a session touching no diagram never loads or parses, exactly as `html2canvas` already behaves (`ChatView.svelte:1962`).
-
-What the growth costs in distribution: `go:embed all:webdist` ships every chunk in the binary, so the artefact grows by the full ~3.4 MB uncompressed. Against the release archives — `octo_1.16.0_darwin_arm64.tar.gz` is 14 MB — the compressed delta is roughly **+7%** of what a user downloads. The Go runtime, not the web bundle, dominates the artefact.
-
-The largest chunks (`cytoscape` at 435 KB, `katex` at 259 KB) belong to architecture/mindmap diagrams and maths, which most diagrams never touch.
-
-Trimming to a hand-registered subset via `mermaid.core` was evaluated and rejected: dropping cytoscape and katex saves roughly 215 KB gzipped — around 1.5% of the release archive — in exchange for pinning ourselves to mermaid's internal diagram-registration API, which would make every future mermaid upgrade an adaptation exercise. The full package with dynamic loading is the better trade.
+None. `plot` is hand-written SVG.
 
 ## Configuration design
 
@@ -472,7 +431,6 @@ No schema change. `Session` (`internal/agent/session.go:30-106`) is untouched: p
 | 11h3 | Link degenerate input | href over `MAX_HREF_LEN`; missing `text` | Node dropped; `text` falls back to the href |
 | 11h4 | Streaming predicate, every prefix | Feed each prefix of a real silent reply, and of a reply that starts with prose | Never false for the silent one; once false for the other, false for every longer prefix |
 | 11h5 | Silent turn across a tool call | Action, tool group, progress row, then a matching fence | Classified silent; a real assistant message in between is not skipped |
-| 11h6 | Mermaid label survival | Sanitize a foreignObject label and a native text label under the SVG profile | foreignObject label is removed entirely; text label survives — the assumption `htmlLabels: false` rests on |
 | 11h7 | Persistence seeding | Mount a panel, read storage before any interaction, then change a value | Nothing stored until the change; the change is stored |
 | 11h8 | Storage of the wrong shape | Entries that are numbers, missing `panels`, null `panels`, arrays, bare strings | No throw; a malformed entry is dropped while well-formed siblings survive |
 | 11h | Code highlighting | Registered lang, unregistered lang, no lang | Highlighted / plain monospace / plain monospace — never an error |
@@ -483,22 +441,20 @@ No schema change. `Session` (`internal/agent/session.go:30-106`) is untouched: p
 | 14 | State GC | Store holding a session absent from the session list; store exceeding 50 sessions | Absent session dropped on list load; least-recently-written evicted past 50 |
 | 15 | Guard: panel id | Ids that are too long, wrongly charactered, non-string | Field dropped, spec still renders anonymously |
 | 16 | Guard: reserved fields | Spec with `field: "__tab:0"` | Field dropped |
-| 17 | Guard: new caps | Table over 500 rows, mermaid over 5000 chars, plot over 100 points | Trimmed, never rejected |
-| 18 | Mermaid sanitization | Diagram source attempting script injection through a label | Rendered SVG contains no script; DOMPurify strips it |
-| 19 | Mermaid failure | Invalid diagram syntax | Inline error line; the rest of the panel still renders |
-| 20 | IM / TUI degrade | A reply with an id-bearing fence containing new node types | `StripOctoUIFences` substitutes the placeholder as before — new node types change nothing |
-| 21 | Old sessions | Resume a pre-v1.16.0 session and a v1.16.0 session | No ids anywhere; projection returns an empty map; rendering identical to today |
+| 17 | Guard: new caps | Table over 500 rows, plot over 100 points | Trimmed, never rejected |
+| 18 | IM / TUI degrade | A reply with an id-bearing fence containing new node types | `StripOctoUIFences` substitutes the placeholder as before — new node types change nothing |
+| 19 | Old sessions | Resume a pre-v1.16.0 session and a v1.16.0 session | No ids anywhere; projection returns an empty map; rendering identical to today |
 
 Go-side coverage extends the existing `internal/tools/genui` table tests for the new fields and caps. Manual verification: a browser click-through against an isolated test server confirming the silent-turn loop end to end with a real model turn, including the degradation path — the logic tests cover classification, but "the panel visibly swaps and no bubble appears" is a rendering property worth seeing once.
 
 ## Compatibility design
 
-- **Data compatibility.** No persisted schema changes. Old sessions contain no ids, so `projectPanels` returns an empty map and every fence renders through the existing anonymous path (test #21).
+- **Data compatibility.** No persisted schema changes. Old sessions contain no ids, so `projectPanels` returns an empty map and every fence renders through the existing anonymous path (test #19).
 - **Logic compatibility.** Every new spec field is optional, and every new node type is additive to a whitelist that drops unknown types rather than failing. A v1.16.0 spec is a valid spec here with identical behaviour.
 - **Old clients, new sessions.** A stale browser tab running v1.16.0 code against a session containing id-bearing fences renders every version as its own panel — that is, current behaviour — and the `panel` key in an action JSON is ignored by `parseGenuiActionBubble`, which only requires `action` to be a string (`ChatView.svelte:1593`). Degraded, not broken, and self-resolving on reload.
 - **New clients, old model behaviour.** A model that never emits an `id` gets exactly today's feature set. Nothing forces adoption.
 - **Protocol compatibility.** No new WS message types and no new fields on existing frames: the action envelope is JSON inside a message body that the backend treats as opaque text.
-- **IM and TUI.** Unchanged. `StripOctoUIFences` works on fence boundaries and never parses the body, so ids and new node types are invisible to it (test #20). Silent turns cannot arise there because those transports have no panel to click.
+- **IM and TUI.** Unchanged. `StripOctoUIFences` works on fence boundaries and never parses the body, so ids and new node types are invisible to it (test #18). Silent turns cannot arise there because those transports have no panel to click.
 - **Cross-region considerations.** Not applicable — single-deployment OSS project, no region split.
 
 ## High availability design
@@ -510,14 +466,12 @@ Every failure mode in this design has a defined degradation, and none of them is
 - A malformed or unknown spec field is dropped by the guard; the panel renders without it.
 - A silent turn that does not match its contract becomes an ordinary visible message — the model's output is never discarded.
 - A turn that errors or is interrupted leaves the panel on its current spec with an inline error line, not blank and not stuck pending.
-- A mermaid render failure produces an inline error line inside the panel; the surrounding nodes render.
 - localStorage being unavailable (private mode, quota) degrades to in-memory state through the same try/catch pattern `notifications.ts:21` already uses.
 
 ### Load protection
 
 - Projection is a single pass with the same cache and 80ms throttle as segment splitting, so it cannot reintroduce the O(n²) streaming hazard of #1114.
 - `MAX_TABLE_ROWS` rising to 500 is the only cap increase; filtering and sorting operate on arrays bounded by it, and the DOM renders the filtered subset.
-- Mermaid loads once per page and only when a diagram is actually rendered; the rendered SVG is cached per `code` string so re-renders from unrelated state changes do not re-invoke it.
 
 ## Monitoring and alerting
 

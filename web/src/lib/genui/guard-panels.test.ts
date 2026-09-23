@@ -7,7 +7,6 @@ import {
   READ_ONLY_NODE_TYPES,
   INTERACTIVE_NODE_TYPES,
   MAX_TABLE_ROWS,
-  MAX_MERMAID_LEN,
   MAX_CODE_LEN,
   MAX_TEXTAREA_LEN,
   MAX_PLOT_POINTS,
@@ -135,9 +134,12 @@ describe('textarea', () => {
 })
 
 describe('content nodes', () => {
-  it('trims code and mermaid rather than rejecting them', () => {
+  it('trims code rather than rejecting it', () => {
     expect(one({ type: 'code', code: 'x'.repeat(MAX_CODE_LEN + 50) }).code.length).toBe(MAX_CODE_LEN)
-    expect(one({ type: 'mermaid', code: 'x'.repeat(MAX_MERMAID_LEN + 50) }).code.length).toBe(MAX_MERMAID_LEN)
+  })
+
+  it('drops a mermaid node — diagrams are a markdown fence now', () => {
+    expect(sanitizeSpec({ items: [{ type: 'mermaid', code: 'graph TD; A-->B;' }, { type: 'divider' }] }, READ_ONLY_NODE_TYPES).spec?.items).toEqual([{ type: 'divider' }])
   })
 
   it('accepts a divider with no fields', () => {

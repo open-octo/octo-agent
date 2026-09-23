@@ -26,7 +26,6 @@ func TestSanitize_NewContentNodesAccepted(t *testing.T) {
 	for _, node := range []map[string]any{
 		{"type": "divider"},
 		{"type": "code", "code": "ls -la", "lang": "bash"},
-		{"type": "mermaid", "code": "graph TD; A-->B;"},
 		{"type": "collapsible", "title": "more", "children": []any{map[string]any{"type": "text", "text": "x"}}},
 		{"type": "plot", "plot": "bar", "series": []any{map[string]any{"points": []any{map[string]any{"label": "a", "value": 1.0}}}}},
 	} {
@@ -183,16 +182,18 @@ func TestSanitize_PlotTrimsToCaps(t *testing.T) {
 	}
 }
 
-func TestSanitize_CodeAndMermaidTrimmedNotRejected(t *testing.T) {
+func TestSanitize_CodeTrimmedNotRejected(t *testing.T) {
 	long := strings.Repeat("x", MaxCodeLen+100)
 	got := sanitizeOne(t, map[string]any{"type": "code", "code": long})
 	if len(got["code"].(string)) != MaxCodeLen {
 		t.Fatalf("code len = %d, want %d", len(got["code"].(string)), MaxCodeLen)
 	}
-	long = strings.Repeat("y", MaxMermaidLen+100)
-	got = sanitizeOne(t, map[string]any{"type": "mermaid", "code": long})
-	if len(got["code"].(string)) != MaxMermaidLen {
-		t.Fatalf("mermaid len = %d, want %d", len(got["code"].(string)), MaxMermaidLen)
+}
+
+// Diagrams are a ```mermaid fence in the reply's markdown, not a GenUI node.
+func TestSanitize_MermaidNodeDropped(t *testing.T) {
+	if got := sanitizeOne(t, map[string]any{"type": "mermaid", "code": "graph TD; A-->B;"}); got != nil {
+		t.Fatalf("mermaid node kept: %v", got)
 	}
 }
 

@@ -75,6 +75,7 @@
   import { observeArtifact, resetArtifacts, ARTIFACT_ORIGIN_SANDBOX, themeRev } from '../lib/artifacts'
   import { registerLaIframe, unregisterLaIframe, ensureLightAppStorage, lightappStorageReady } from '../lib/laStorage'
   import { renderMarkdown, escapeHtml, setupCopyButtons } from '../lib/markdown'
+  import { setupMermaid } from '../lib/mermaid'
   import { applyToolToggle, buildExportConversation, exportConversationStyles, hasRenderableTurn, TOOL_RESULT_CHARS } from '../lib/exportTranscript'
   import { t, tr, pickLocalized } from '../lib/i18n'
   import { insertPendingSend, takeConfirmedSend } from '../lib/pendingSendOrder'
@@ -1656,9 +1657,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     sc.scrollTo({ top: target, behavior: reduce ? 'auto' : 'smooth' })
   }
 
-  // ── markdown copy buttons setup ────────────────────────────────────────────
+  // ── markdown copy buttons + mermaid diagrams setup ─────────────────────────
   function setupAssistantEl(el: HTMLElement) {
-    return setupCopyButtons(el)
+    const copy = setupCopyButtons(el)
+    const mermaid = setupMermaid(el)
+    return { destroy: () => { copy.destroy(); mermaid.destroy() } }
   }
 
   // ── throttled markdown rendering while streaming ────────────────────────────
@@ -3781,6 +3784,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   margin: 0; padding: 12px 14px; overflow-x: auto; font-size: 12.5px; line-height: 1.75;
   font-family: var(--font-mono); color: var(--text); font-style: normal;
 }
+:global(.rich-answer .mermaid-block[data-mermaid-rendered] pre), :global(.think-body .mermaid-block[data-mermaid-rendered] pre) { display: none; }
+:global(.rich-answer .mermaid-diagram), :global(.think-body .mermaid-diagram) { padding: 12px 14px; overflow-x: auto; }
+:global(.rich-answer .mermaid-diagram svg), :global(.think-body .mermaid-diagram svg) { max-width: 100%; height: auto; }
 :global(.rich-answer .md-bq), :global(.think-body .md-bq) {
   margin: 0; padding: 8px 14px; border-left: 3px solid var(--blue-2);
   background: var(--surface-info); border-radius: 0 6px 6px 0;

@@ -40,7 +40,6 @@ const (
 	MaxTableColumns = 50
 
 	// Interactive-panel caps — see dev-docs/genui-interactive-panels-design.md.
-	MaxMermaidLen = 5000
 	MaxCodeLen    = 5000
 	MaxPlotPoints = 100
 	// MaxHrefLen is well past any real URL; a longer one is dropped rather
@@ -78,7 +77,6 @@ var ReadOnlyNodeTypes = map[string]bool{
 	"link":        true,
 	"divider":     true,
 	"plot":        true,
-	"mermaid":     true,
 }
 
 // safeHrefSchemes mirrors the frontend's isSafeHref whitelist
@@ -279,9 +277,6 @@ func sanitizeNode(node map[string]any, allowed map[string]bool, depth int, count
 		if h, ok := numberField(node, "height"); ok {
 			out["height"] = clampNumber(math.Round(h), 80, 400)
 		}
-
-	case "mermaid":
-		out["code"] = clampString(stringField(node, "code"), MaxMermaidLen)
 	}
 
 	// visibleWhen is deliberately NOT carried through here. It is a condition

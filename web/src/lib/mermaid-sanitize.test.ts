@@ -1,11 +1,11 @@
-// Pins the assumption GenuiMermaid.svelte is built on.
+// Pins the assumption mermaid.ts is built on.
 //
 // mermaid cannot be rendered under jsdom (it needs getBBox /
 // getComputedTextLength, which jsdom does not implement), so the diagram
 // pipeline itself is not testable here. What IS testable — and what actually
 // broke — is which label shape survives the sanitizer. If DOMPurify ever
-// changes its SVG profile, this fails and points at the reason the mermaid
-// component sets htmlLabels: false.
+// changes its SVG profile, this fails and points at the reason mermaid.ts
+// sets htmlLabels: false.
 import { describe, it, expect } from 'vitest'
 import DOMPurify from 'dompurify'
 
@@ -21,7 +21,7 @@ describe('mermaid label survival through the SVG sanitizer', () => {
   it('drops a foreignObject label entirely — element and contents', () => {
     // foreignObject is in DOMPurify's svgDisallowed AND its FORBID_CONTENTS,
     // so a flowchart rendered with html labels comes out as empty boxes and
-    // arrows: no error, just silently wordless. This is why the component
+    // arrows: no error, just silently wordless. This is why mermaid.ts
     // turns html labels off rather than allowing the element back in.
     const out = DOMPurify.sanitize(FOREIGN_OBJECT_LABEL, SVG_PROFILE)
     expect(out).not.toContain('NodeText')
