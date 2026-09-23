@@ -5,14 +5,14 @@
 // replace directive below.
 module github.com/open-octo/octo-agent/cmd/octo-desktop
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/mattn/go-isatty v0.0.24
 	github.com/open-octo/octo-agent v0.0.0
 	github.com/tc-hib/winres v0.3.1
 	github.com/wailsapp/wails/v3 v3.0.0-beta.16
-	golang.org/x/sys v0.47.0
+	golang.org/x/sys v0.48.0
 )
 
 require (
@@ -27,11 +27,11 @@ require (
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/tetratelabs/wazero v1.12.0 // indirect
-	github.com/yuin/goldmark v1.8.5 // indirect
-	golang.org/x/image v0.45.0 // indirect
-	golang.org/x/mod v0.38.0 // indirect
-	golang.org/x/net v0.58.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	github.com/yuin/goldmark v1.8.6 // indirect
+	golang.org/x/image v0.46.0 // indirect
+	golang.org/x/mod v0.41.0 // indirect
+	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
