@@ -253,9 +253,15 @@ export const lightapps = writable<import('./api').LightApp[]>([])
 // its hero app and its pinned shortcuts against this list, so an app created
 // during the visit would otherwise stay invisible there until a restart —
 // which is exactly the half of the bug the config re-read does not cover.
+//
+// `fresh` is for a caller that has just written: a request already in flight
+// may have left before the write and would hand back the old list, so it is
+// waited out and a new one sent after it.
 let lightappsRequest: Promise<void> | null = null
-export function loadLightApps(): Promise<void> {
-  if (lightappsRequest) return lightappsRequest
+export function loadLightApps(opts: { fresh?: boolean } = {}): Promise<void> {
+  if (lightappsRequest) {
+    return opts.fresh ? lightappsRequest.then(() => loadLightApps()) : lightappsRequest
+  }
   lightappsRequest = api
     .listLightApps()
     .then((list) => {

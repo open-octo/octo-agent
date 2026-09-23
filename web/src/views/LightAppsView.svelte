@@ -86,7 +86,7 @@
     try {
       const next = await api.setLightAppMount(app.slug, on)
       apps = apps.map(a => (a.slug === app.slug ? { ...a, mount: next.mount } : a))
-      await loadLightApps()
+      await loadLightApps({ fresh: true })
     } catch (e: any) {
       showToast(`Failed to update: ${e.message}`, 'error')
     } finally {

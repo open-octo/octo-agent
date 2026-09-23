@@ -93,9 +93,9 @@
     if (startScreenShowing) readStartScreen()
   })
   // The installed list is re-read on every focus, not only on the start
-  // screen: the sidebar's mounted entries come from it too, and an app the
-  // agent mounts mid-chat would otherwise stay hidden until a restart in the
-  // desktop shell.
+  // screen: the sidebar's mounted entries come from it too. An app the agent
+  // mounts mid-chat appears the next time the window comes back into focus;
+  // while the window keeps focus throughout, it waits for that.
   onMount(() => {
     const onFocus = () => {
       if (onStartScreen(get(view), get(activeSessionId), mobileShell)) readStartScreen()

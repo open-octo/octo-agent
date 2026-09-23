@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { get } from 'svelte/store'
-import { lightapps, localAccess, mountedViews, lightappURL } from './stores'
+import { lightapps, localAccess, mountedViews, lightappURL, loadLightApps } from './stores'
+import * as api from './api'
 import type { LightApp } from './api'
 
 // jsdom exposes no localStorage under Node 26 (see unread.test.ts), and stores
@@ -54,6 +55,38 @@ describe('mounted Light Apps', () => {
     lightapps.set([app('plain')])
 
     expect(get(mountedViews)).toEqual([])
+  })
+})
+
+describe('loadLightApps', () => {
+  // A switch writes, then re-reads. A read already in flight may have left
+  // before the write; handing that one back would put the old list on screen.
+  it('fresh waits out a read in flight and reads again after it', async () => {
+    let releaseStale!: (v: LightApp[]) => void
+    const calls: string[] = []
+    const spy = vi.spyOn(api, 'listLightApps')
+      .mockImplementationOnce(() => { calls.push('stale'); return new Promise((r) => { releaseStale = r }) })
+      .mockImplementationOnce(async () => { calls.push('fresh'); return [app('as-view', 'view')] })
+
+    const focusRead = loadLightApps()
+    const afterWrite = loadLightApps({ fresh: true })
+    releaseStale([app('as-view')])
+    await Promise.all([focusRead, afterWrite])
+
+    expect(calls).toEqual(['stale', 'fresh'])
+    expect(get(mountedViews).map((a) => a.slug)).toEqual(['as-view'])
+    spy.mockRestore()
+  })
+
+  it('shares a read in flight when freshness does not matter', async () => {
+    let release!: (v: LightApp[]) => void
+    const spy = vi.spyOn(api, 'listLightApps').mockImplementation(() => new Promise((r) => { release = r }))
+    const a = loadLightApps()
+    const b = loadLightApps()
+    release([])
+    await Promise.all([a, b])
+    expect(spy).toHaveBeenCalledTimes(1)
+    spy.mockRestore()
   })
 })
 
