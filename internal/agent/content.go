@@ -35,17 +35,18 @@ type ContentBlock struct {
 
 	// Input is the parsed argument map the model passes to the tool
 	// (type=="tool_use"). Keys and value types are defined by the tool's
-	// JSON Schema Parameters.
+	// JSON Schema Parameters. omitempty drops an empty map, so a no-argument
+	// call reloaded from a saved session has Input nil; provider adapters
+	// must send nil as `{}`, since some endpoints reject `"input": null`.
 	Input map[string]any `json:"input,omitempty"`
 
 	// InputError is set on a tool_use block whose arguments arrived as
 	// malformed JSON — an unescaped newline or quote inside a string, or an
 	// endpoint that reported the turn complete but delivered half the
-	// arguments. Input is then an empty map (never nil, so
-	// the block still round-trips to the provider as `"input": {}`), and the
-	// agent loop answers the call with this message instead of running the
-	// tool: the model must learn its JSON was broken, not go hunting for a
-	// "missing" parameter.
+	// arguments. Input is then empty (the provider adapters send it as
+	// `"input": {}`), and the agent loop answers the call with this message
+	// instead of running the tool: the model must learn its JSON was broken,
+	// not go hunting for a "missing" parameter.
 	InputError string `json:"input_error,omitempty"`
 
 	// ToolUseID links this result back to its originating tool_use block
