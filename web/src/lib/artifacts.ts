@@ -34,6 +34,7 @@
 import { get, writable } from 'svelte/store'
 import { artifacts, panelContent, panelExpanded, artifactSel } from './stores'
 import { renderMarkdown } from './markdown'
+import { renderMermaidBlocks } from './mermaid'
 import { grantArtifactOrigin } from './api'
 import type { Artifact } from './types'
 
@@ -615,7 +616,10 @@ async function buildTextBody(
   // iframe is sandboxed and styled by MD_STYLES alone, and inlineLocalRefs
   // below has to see an <img src="chart.png"> to rewrite it to a data: URI.
   // The chat's own bubbles get the escaping default instead (markdown.ts).
-  const body = await inlineLocalRefs(renderMarkdown(code, true, { rawHtml: true }), sessionId, path)
+  // Mermaid blocks are drawn here, in the app, because the frame runs no
+  // mermaid of its own.
+  const rendered = await renderMermaidBlocks(renderMarkdown(code, true, { rawHtml: true }))
+  const body = await inlineLocalRefs(rendered, sessionId, path)
   const preview = `<style>${MD_STYLES}</style><body style="${bodyStyle}">${body}${COPY_SCRIPT}</body>`
   return { code, preview }
 }
@@ -631,6 +635,9 @@ function darkMDStyles(): string {
     `.copy-btn:hover{background:#3d3d3d;color:#58a6ff}`,
     // Markdown tables — mirrors the app's .rich-answer/.md-content table skin
     // (see ChatView/ProfileView) with the preview iframe's own palette.
+    `.mermaid-block[data-mermaid-rendered] pre{display:none}`,
+    `.mermaid-diagram{padding:12px 14px;overflow-x:auto}`,
+    `.mermaid-diagram svg{max-width:100%;height:auto}`,
     `.table-scroll{overflow-x:auto;margin:10px 0}`,
     `table{width:max-content;min-width:100%;max-width:none;border-collapse:collapse;border-spacing:0;font-size:13.5px;line-height:1.55}`,
     `th,td{padding:7px 14px;text-align:left;vertical-align:top;border:1px solid #30363d}`,
@@ -667,6 +674,9 @@ function lightMDStyles(): string {
     `.copy-btn:hover{background:#d0d7de;color:#0969da}`,
     // Markdown tables — mirrors the app's .rich-answer/.md-content table skin
     // (see ChatView/ProfileView) with the preview iframe's own palette.
+    `.mermaid-block[data-mermaid-rendered] pre{display:none}`,
+    `.mermaid-diagram{padding:12px 14px;overflow-x:auto}`,
+    `.mermaid-diagram svg{max-width:100%;height:auto}`,
     `.table-scroll{overflow-x:auto;margin:10px 0}`,
     `table{width:max-content;min-width:100%;max-width:none;border-collapse:collapse;border-spacing:0;font-size:13.5px;line-height:1.55}`,
     `th,td{padding:7px 14px;text-align:left;vertical-align:top;border:1px solid #d0d7de}`,

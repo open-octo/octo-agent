@@ -7,7 +7,7 @@ const render = vi.fn()
 vi.mock('mermaid', () => ({ default: { initialize: vi.fn(), render } }))
 
 import { renderMarkdown } from './markdown'
-import { setupMermaid, resetMermaidCache } from './mermaid'
+import { setupMermaid, renderMermaidBlocks, resetMermaidCache } from './mermaid'
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
 
@@ -113,5 +113,29 @@ describe('setupMermaid: theme and failures', () => {
     await flush()
     expect(el.querySelectorAll('.mermaid-diagram')).toHaveLength(2)
     expect(render).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('renderMermaidBlocks', () => {
+  it('returns the markdown with each diagram drawn in place', async () => {
+    render.mockResolvedValue({ svg: '<svg><text>A</text><script>alert(1)</script></svg>' })
+    const out = await renderMermaidBlocks(renderMarkdown('# t\n\n```mermaid\ngraph TD\nA-->B\n```'))
+    const doc = new DOMParser().parseFromString(out, 'text/html')
+    expect(doc.querySelector('h1')?.textContent).toBe('t')
+    expect(doc.querySelector('.mermaid-block[data-mermaid-rendered] .mermaid-diagram svg text')?.textContent).toBe('A')
+    expect(out).not.toContain('<script')
+  })
+
+  it('keeps the source of a block mermaid rejects', async () => {
+    render.mockRejectedValue(new Error('parse error'))
+    const out = await renderMermaidBlocks(renderMarkdown('```mermaid\nnot a diagram\n```'))
+    expect(out).not.toContain('data-mermaid-rendered')
+    expect(out).toContain('not a diagram')
+  })
+
+  it('leaves markdown without a diagram untouched and never loads mermaid', async () => {
+    const html = renderMarkdown('plain **text**')
+    expect(await renderMermaidBlocks(html)).toBe(html)
+    expect(render).not.toHaveBeenCalled()
   })
 })
