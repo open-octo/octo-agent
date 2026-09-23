@@ -55,7 +55,7 @@ func TestExec_CreateWriteRead(t *testing.T) {
 
 	path, _ := Path("prices")
 	var mode string
-	res = mustExec(t, "prices", ReadWrite, "PRAGMA journal_mode")
+	res = mustExec(t, "prices", Create, "PRAGMA journal_mode")
 	if mode, _ = res.Rows[0][0].(string); mode != "wal" {
 		t.Errorf("journal_mode = %q, want wal (file %s)", mode, path)
 	}
@@ -255,6 +255,26 @@ func TestExec_ReadOnlyTakesQueriesOnly(t *testing.T) {
 		if _, err := Exec(context.Background(), "p", ReadOnly, q, nil, testLimits); err != nil {
 			t.Errorf("%s: %v", q, err)
 		}
+	}
+}
+
+// A non-public page changes rows; the layout and the file's settings stay the
+// sqlite tool's.
+func TestExec_ReadWriteTakesRowStatementsOnly(t *testing.T) {
+	scratchHome(t)
+	mustExec(t, "p", Create, "CREATE TABLE t(a)")
+	for _, q := range []string{"DROP TABLE t", "CREATE TABLE u(a)", "ALTER TABLE t ADD COLUMN b", "PRAGMA journal_mode=DELETE", "CREATE INDEX i ON t(a)", "BEGIN"} {
+		if _, err := Exec(context.Background(), "p", ReadWrite, q, nil, testLimits); !errors.Is(err, ErrNotAllowed) {
+			t.Errorf("%s: err = %v, want ErrNotAllowed", q, err)
+		}
+	}
+	for _, q := range []string{"INSERT INTO t VALUES (1)", "REPLACE INTO t VALUES (2)", "UPDATE t SET a = 3", "WITH x AS (SELECT 3) DELETE FROM t WHERE a IN x", "SELECT * FROM t"} {
+		if _, err := Exec(context.Background(), "p", ReadWrite, q, nil, testLimits); err != nil {
+			t.Errorf("%s: %v", q, err)
+		}
+	}
+	if res := mustExec(t, "p", Create, "PRAGMA journal_mode"); res.Rows[0][0] != "wal" {
+		t.Errorf("journal_mode = %v, want wal", res.Rows[0][0])
 	}
 }
 

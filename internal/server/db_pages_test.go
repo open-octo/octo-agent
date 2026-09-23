@@ -101,7 +101,8 @@ func TestArtifactDB_ReadsAndWrites(t *testing.T) {
 		"bad name":       {base + "Bad.Name", dbBody("SELECT 1"), http.StatusBadRequest},
 		"two statements": {base + "prices", dbBody("SELECT 1; DELETE FROM quote"), http.StatusBadRequest},
 		"sql error":      {base + "prices", dbBody("SELECT FROM"), http.StatusBadRequest},
-		"attach":         {base + "prices", dbBody("ATTACH DATABASE 'x.db' AS x"), http.StatusBadRequest},
+		"attach":         {base + "prices", dbBody("ATTACH DATABASE 'x.db' AS x"), http.StatusForbidden},
+		"ddl":            {base + "prices", dbBody("DROP TABLE quote"), http.StatusForbidden},
 		"bad json":       {base + "prices", "{", http.StatusBadRequest},
 		"unknown token":  {"/_artifacts/" + strings.Repeat("0", 32) + "/__octo/db/prices", dbBody("SELECT 1"), http.StatusNotFound},
 	} {

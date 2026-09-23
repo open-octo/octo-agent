@@ -55,6 +55,8 @@
 
 只读连接拒绝写入，但不拒绝设置进程级状态的 PRAGMA（`soft_heap_limit`、`hard_heap_limit` 对之后的所有连接生效）。只读模式下语句的第一个关键字必须是 `SELECT`、`WITH` 或 `VALUES`，其余返回 `ErrReadOnly`。读表结构用 `SELECT … FROM pragma_table_info('<表>')`。
 
+非公开页面（读写模式）在此之外只多 `INSERT`、`UPDATE`、`DELETE`、`REPLACE`，其余（`CREATE`、`ALTER`、`DROP`、`PRAGMA`、事务语句）返回 `ErrNotAllowed`。表结构和文件设置归 `sqlite` 工具：页面删了表或者用 `PRAGMA journal_mode` 把库切出 WAL，都会让往里写的定时任务出错。
+
 ### 上限
 
 公开应用的查询来自任何拿到链接的人，HTTP 服务又没有写超时（为了 WebSocket，`WriteTimeout: 0`），不加上限的话一个匿名请求就能让一个核一直空转（无终止的递归 CTE），或者要出 GB 级的结果（循环里的 `zeroblob`）。每次调用都带 `sqlitedb.Limits`：
@@ -151,6 +153,7 @@ const { columns, rows } = await res.json()
 | 超时 | 400 | `query_timeout` |
 | 公开应用读取未声明的库 | 403 | `database_not_declared` |
 | 公开应用写入或执行非查询语句 | 403 | `database is read-only here` |
+| 非公开页面执行行级读写以外的语句 | 403 | `ErrNotAllowed` 的信息 |
 | 库不存在 | 404 | `database_not_found` |
 | busy_timeout 后仍被锁；公开查询并发已满 | 503 | `database_busy` |
 
@@ -171,7 +174,7 @@ const { columns, rows } = await res.json()
 - `internal/prompt/base.md` 轻应用一节：
   - 新增"Where a page keeps its data"小节，先讲 `localStorage` 和具名库怎么选：只服务于这个页面在这台浏览器里的数据（视图状态、草稿、公开应用里访客自己的状态）用 `localStorage`；会被别人读到的数据（定时任务或 agent 写的、agent 以后要读的、要跨设备的、量大要查询的、用户自己录入丢了会心疼的记录）用具名库，即使页面是唯一的写入方。`localStorage` 的代价写明：按 origin 分开存（桌面端、`localhost` 浏览器、隧道各一份），agent 读不到，容量小，清站点数据就没了。
   - 同一小节讲具名库的用法：页面用 `fetch('./__octo/db/<name>', …)` 查，制品和轻应用写法相同；库和表由 agent 建页面时用 `sqlite` 工具建好；页面用到的库写进 manifest `databases`。
-  - 页面写入只做行级操作（`INSERT` / `UPDATE` / `DELETE`），不做 `CREATE` / `ALTER` / `DROP`；表结构由写入方（定时任务）负责。这是软约束，没有代码拦截。
+  - 页面写入只做行级操作（`INSERT` / `UPDATE` / `DELETE` / `REPLACE`），`CREATE` / `ALTER` / `DROP` / `PRAGMA` 会被拒绝；表结构由 `sqlite` 工具负责。
   - "Do not call octo's own API from the page" 保留，并注明 `./__octo/db/` 是页面自己的数据接口，不在此列。
   - "When to suggest" 的 ❌ "Backend-dependent workflows" 保留：这里的"后端"指需要 LLM 或服务端逻辑，定时采集加页面展示是 ✅ 场景，补一条。
 - `dev-docs/light-apps-design.md`：manifest 字段表加 `databases`，链接本文档。
@@ -191,7 +194,7 @@ const { columns, rows } = await res.json()
 - 工具：写一个不存在的库时创建文件并进入 WAL；非法库名被拒；`ATTACH`、`VACUUM INTO` 被拒且目标文件不存在；两条语句的输入被拒且第一条没有执行；`SELECT` 超过 200 行时截断并注明总行数；`INSERT` 返回 `changes` 和 `last_insert_id`。
 - 并发：两个 `*sql.DB`（模拟两个进程）同时写同一个库，不出现 `database is locked`。
 - 接口，制品：有效 grant 下 `POST ./__octo/db/<name>` 可读可写；无效 token 404；库不存在 404 且没有建出文件。
-- 接口，非公开轻应用：远程无 cookie 401；带 cookie 可读可写。
+- 接口，非公开轻应用：远程无 cookie 401；带 cookie 可读可写；DDL 和 `PRAGMA` 403，库仍在 WAL。
 - 接口，公开轻应用：无 cookie 读已声明的库 200；读未声明的库 403；任何写入 403；`ATTACH`、`PRAGMA` 403；无终止的递归 CTE 在行数上限处返回；100 MB 的 `zeroblob` 被拒。
 - 跨站：本机请求带外站 `Origin` 不能改非公开应用的库。
 - 上限：超时在限定时间内返回 `ErrTimeout`；字节上限按累计字节截断。

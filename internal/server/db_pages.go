@@ -110,7 +110,7 @@ func serveDBQuery(w http.ResponseWriter, r *http.Request, mode sqlitedb.Mode) {
 	case errors.Is(err, sqlitedb.ErrNotFound):
 		writeError(w, http.StatusNotFound, "database_not_found")
 		return
-	case errors.Is(err, sqlitedb.ErrReadOnly):
+	case errors.Is(err, sqlitedb.ErrReadOnly), errors.Is(err, sqlitedb.ErrNotAllowed):
 		writeError(w, http.StatusForbidden, err.Error())
 		return
 	case errors.Is(err, sqlitedb.ErrBusy):

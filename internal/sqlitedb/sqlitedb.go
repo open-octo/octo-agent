@@ -32,7 +32,9 @@ const (
 	// Create opens read-write and creates the file when missing: the sqlite
 	// tool, the only thing that brings a database into being.
 	Create Mode = iota
-	// ReadWrite opens an existing database read-write: a non-public page.
+	// ReadWrite opens an existing database for a non-public page: it reads
+	// and changes rows, but the table layout and the file's settings belong
+	// to the sqlite tool.
 	ReadWrite
 	// ReadOnly opens an existing database read-only: a public Light App.
 	ReadOnly
@@ -46,9 +48,15 @@ var (
 	ErrBusy               = errors.New("database is busy")
 	ErrReadOnly           = errors.New("database is read-only here")
 	ErrTimeout            = errors.New("query ran past its time limit")
+	ErrNotAllowed         = errors.New("a page may only run SELECT, WITH, VALUES, INSERT, UPDATE, DELETE and REPLACE")
 )
 
 var nameRe = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
+
+var (
+	readVerbs     = map[string]bool{"SELECT": true, "WITH": true, "VALUES": true}
+	rowWriteVerbs = map[string]bool{"INSERT": true, "UPDATE": true, "DELETE": true, "REPLACE": true}
+)
 
 // ValidName reports whether name can be a database name. The name becomes the
 // file name as is, so the character set rules out path traversal and two
@@ -105,8 +113,13 @@ func Exec(ctx context.Context, name string, mode Mode, query string, params []an
 	// A read-only connection refuses writes, but not a PRAGMA that sets
 	// process-wide state (soft_heap_limit, hard_heap_limit). A reader needs
 	// none: table info is SELECT … FROM pragma_table_info(…).
-	if mode == ReadOnly && verb != "SELECT" && verb != "WITH" && verb != "VALUES" {
+	if mode == ReadOnly && !readVerbs[verb] {
 		return nil, ErrReadOnly
+	}
+	// A page that drops a table or switches the file out of WAL
+	// (PRAGMA journal_mode) breaks the scheduled task writing into it.
+	if mode == ReadWrite && !readVerbs[verb] && !rowWriteVerbs[verb] {
+		return nil, ErrNotAllowed
 	}
 	args, err := normalizeParams(params)
 	if err != nil {

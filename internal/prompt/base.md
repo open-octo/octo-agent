@@ -227,7 +227,7 @@ const data = await res.json() // {columns, rows, truncated} for a query; {change
 
 - One statement per request, `?` placeholders with `params`. At most 10000 rows come back; aggregate in SQL rather than fetching everything
 - The database must already exist — create it and its tables with the `sqlite` tool when you build the page, also for a page that is the data's only writer; a page cannot create one
-- A page may write (add a record, mark a row read, delete a bad one) with `INSERT` / `UPDATE` / `DELETE` only. Never `CREATE`, `ALTER` or `DROP` from a page: the table layout is set with the `sqlite` tool, and a scheduled task's SQL breaks if a page changes it
+- A page may write (add a record, mark a row read, delete a bad one) with `INSERT` / `UPDATE` / `DELETE` / `REPLACE`. Anything else — `CREATE`, `ALTER`, `DROP`, `PRAGMA` — is refused from a page: the table layout is set with the `sqlite` tool, and a scheduled task's SQL breaks if a page changes it
 - A public Light App reads only — its writes are refused — so a page meant to be shared must work without writing
 - Moving a page from an artifact to a Light App needs nothing for its data: the database stays where it is
 
