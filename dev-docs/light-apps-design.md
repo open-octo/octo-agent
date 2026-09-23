@@ -61,6 +61,7 @@ octo-agent 已经有一套完整的生成 + 展示循环：Agent 生成 HTML →
 | `created_at` | ✅ | ISO-8601 时间，Agent 生成时填入 |
 | `mount` | | `"view"` 时在左侧导航有自己的入口；UI 卡片上的开关（`PUT /api/light-apps/{slug}/mount`）或手写 |
 | `public` | | 为真时 `/_apps/<slug>/` 不需要登录即可访问；只由 UI 开关写入 |
+| `databases` | | 页面查询的具名数据库列表；只在应用公开时起作用，公开应用只能读列出的库（`dev-docs/named-databases-design.md`） |
 
 ### index.html
 

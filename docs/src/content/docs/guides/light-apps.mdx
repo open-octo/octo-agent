@@ -44,6 +44,27 @@ through a tunnel or a domain. Turn the switch off and the link stops working imm
 A Light App runs with the same access as the octo UI it is shown in. Only keep apps you asked
 your agent to make.
 
+### Showing data a cron task collects
+
+For data that piles up over time — prices checked every hour, new posts, daily metrics — the agent
+keeps it in a **named database**: a SQLite file at `~/.octo/databases/<name>.db`, written with the
+`sqlite` tool. A [cron task](/docs/guides/cron-tasks/) appends to it on its schedule; a Light App
+reads it and draws the table or chart. The two only share the database name, so the task doesn't
+care which app shows its data, and renaming or rebuilding the app never touches the data.
+
+Ask for it in one go — "every hour, record the price of X into a database, and make me a Light App
+that charts it" — and the agent creates the database, the task and the app. The page you preview
+in the conversation already shows the real data, and keeps showing it after you save it.
+
+The app can also change rows (mark one read, delete a bad one). A public app can only read, and
+only the databases its `manifest.json` lists in `databases`.
+
+The same goes for records you enter in an app yourself — expenses, to-dos, notes. The agent keeps
+them in a named database rather than the browser's `localStorage`, because `localStorage` is kept
+per address: the desktop app, a browser on `localhost` and your phone through a tunnel would each
+see a different copy, and the agent could not read any of them. `localStorage` stays for what only
+matters to one screen, like the tab you had open or a half-filled form.
+
 ## When to use
 
 ✅ **Good candidates for Light Apps**:
@@ -51,11 +72,12 @@ your agent to make.
 - Template generators: daily report templates, checklist generators
 - Tasks with fixed input → output rules: validators, calculators, formatters
 - Tools you want available offline
+- Views over data a cron task collects into a named database (see above)
 
 ❌ **Not suitable for Light Apps**:
 - One-off analysis or research
 - Tasks that genuinely need LLM reasoning each time
-- Workflows requiring backend APIs / databases (use [Skills](/docs/guides/use-skills/) or [Workflows](/docs/guides/workflows/))
+- Workflows that need server-side logic on every use (use [Skills](/docs/guides/use-skills/) or [Workflows](/docs/guides/workflows/))
 
 ## How to create one
 

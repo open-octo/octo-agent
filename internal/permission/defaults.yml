@@ -171,6 +171,12 @@ grep:
 web_search:
   - allow: { pattern: "" }
 
+# sqlite reaches only the named databases under ~/.octo/databases/ (ATTACH
+# and VACUUM INTO are refused on every connection). A scheduled task is its
+# main writer, and there the implicit ask resolves to deny.
+sqlite:
+  - allow: { pattern: "" }
+
 # Control-plane / meta tools — allowed without prompting. They have no direct
 # side effect: a sub-agent inherits its parent's gate, so sub_agent can't let
 # it do anything the gate wouldn't already permit, and the task_* tools are

@@ -37,6 +37,10 @@ type lightAppManifest struct {
 	// Public serves the app's page (/_apps/<slug>/) without auth. Set only
 	// from the UI through handleSetLightAppPublic.
 	Public bool `json:"public,omitempty"`
+	// Databases names the databases under ~/.octo/databases/ the page
+	// queries. Only a public app is held to it: it may read those and no
+	// others (db_pages.go).
+	Databases []string `json:"databases,omitempty"`
 	// UpdatedAt is index.html's mtime, stamped at read time so the web UI can
 	// tell that an app it has open was rewritten on disk. Derived, never
 	// persisted: the writers leave it empty and omitempty keeps it out of
