@@ -526,6 +526,18 @@ func TestDefaultRules_ControlToolsAllowedEvenInStrict(t *testing.T) {
 	}
 }
 
+// A scheduled task is the sqlite tool's main writer, and a scheduled task
+// runs on a non-interactive transport where the implicit ask means deny.
+func TestDefaultRules_SQLiteAllowed(t *testing.T) {
+	e, err := New("", "/work", ModeStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.Check("sqlite", map[string]any{"db": "prices", "sql": "DELETE FROM quote"}); got != Allow {
+		t.Errorf("sqlite: got %s, want Allow", got)
+	}
+}
+
 // ─── Tiered priority ───────────────────────────────────────────────────────
 
 // TestCheck_DenyBeatsAllowRegardlessOfOrder guards the deny > ask > allow

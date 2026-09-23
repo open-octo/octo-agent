@@ -37,6 +37,7 @@ var allTools = []tool{
 	SendMessageTool{},
 	GlobTool{},
 	GrepTool{},
+	SQLiteTool{},
 	WebFetchTool{},
 	WebSearchTool{},
 	SkillTool{},

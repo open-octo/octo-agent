@@ -277,7 +277,10 @@ func TestRegisterRoutes_OnlyKnownUnauthenticated(t *testing.T) {
 		// the slashless form only redirects to it.
 		"GET /_apps/{slug}":           true,
 		"GET /_apps/{slug}/{path...}": true,
-		"/":                           true,
+		// Same split: a public app reads its declared databases without auth,
+		// read-only; every other app goes through requireAuth (db_pages.go).
+		"POST /_apps/{slug}/__octo/db/{name}": true,
+		"/":                                   true,
 	}
 	if len(direct) != len(allowed) {
 		t.Errorf("expected exactly %d direct mux registrations, got %d", len(allowed), len(direct))

@@ -166,6 +166,8 @@ Light Apps live under `~/.octo/light-apps/<slug>/` with two files:
   {"slug":"<slug>","name":"<display name>","description":"<one-line>","icon":"<emoji>","created_at":"<ISO-8601>"}
   ```
   Optional `"mount": "view"` gives the app a permanent place in the UI: its own page in the left navigation. Leave it out — the default — and the app lives on the Light Apps page, which is right for almost everything. Add it only when the user asks for one ("put it in the sidebar", "我想直接从侧边栏打开"). It is the only value: the right-hand panel belongs to the session (artifacts, diff), and an app is not part of a session
+
+  Optional `"databases": ["<name>", …]` lists the named databases the page queries (see "Where a page keeps its data"). Always list them when the page uses any: if the user later makes the app public from the UI, a public app may read only the databases listed here
 - `index.html` — the application. Other files it needs (scripts, styles, images, fonts, models, media) go in the same directory and are referenced by relative path
 
 Create both files with `write_file`. No special tools needed.
@@ -175,6 +177,7 @@ Create both files with `write_file`. No special tools needed.
 - ✅ Repeated tasks: data reconciliation, format conversion, template tools, generators, worksheet/checklist tools, daily/weekly reports
 - ✅ Tasks with well-defined input → output rules
 - ✅ Tasks achievable with pure client-side HTML/CSS/JS (FileReader, `<input type="file">`, localStorage)
+- ✅ Views over data collected over time — a scheduled task writes it into a named database, the app shows it (see "Where a page keeps its data")
 - ❌ One-off research or analysis
 - ❌ Tasks that genuinely need LLM reasoning each time
 - ❌ Backend-dependent workflows (use a skill or workflow instead)
@@ -191,7 +194,7 @@ To mount an app the user already saved, edit that one field in its `manifest.jso
 
 ### Constraints on index.html
 
-- The page is an ordinary web page shown in a frame, so browser features work: `localStorage` persists (each app's keys are kept apart from other apps and from octo's own), `<a download>` saves, fullscreen and WebGL work, and `fetch` can reach any API. Do not call octo's own API from the page
+- The page is an ordinary web page shown in a frame, so browser features work: `localStorage` persists (each app's keys are kept apart from other apps and from octo's own; see "Where a page keeps its data" for what belongs there), `<a download>` saves, fullscreen and WebGL work, and `fetch` can reach any API. Do not call octo's own API from the page (`./__octo/db/` below is the page's own data path, not that API)
 - Files in the app's directory load by relative path: `<script src="./app.js">`, `<link href="./style.css">`, `<img src="./chart.png">`, `./model.glb`, `./data.json`, fonts, audio, video, and other `.html` pages. Never start such a path with `/` — the app is served under a path prefix, and an absolute path lands outside it
 - External scripts and stylesheets may come from any host. Pin exact versions. If the user is in mainland China, prefer a mirror that is reachable there (`cdn.bootcdn.net`, `cdn.staticfile.net`, `registry.npmmirror.com`). Reach for a CDN only when a real library (React, ECharts, Chart.js, three.js, …) is needed — a page that depends on one shows nothing when that host is unreachable
 - Use `FileReader` + `<input type="file">` for file processing
@@ -199,6 +202,46 @@ To mount an app the user already saved, edit that one field in its `manifest.jso
 - Form submit handlers must call `event.preventDefault()` — an unprevented submit reloads the app and drops its state
 - Use emoji or inline SVG for icons
 - Follow `artifact-design` skill conventions for layout and colors
+
+### Where a page keeps its data
+
+Decide by who the data belongs to:
+
+- **`localStorage`** — what serves only this page in this browser: view state (selected tab, filters, sort order), drafts, remembered inputs, and in a public app each visitor's own state. Know its costs: it is stored per origin, so the desktop app, a browser on `localhost` and a phone through a tunnel each see their own separate copy; the agent cannot read it; it holds a few MB of strings with no querying; clearing site data wipes it
+- **A named database** (the `sqlite` tool) — anything read by someone other than this page in this browser: data a scheduled task or the agent writes; data the user may later ask the agent about ("这个月记了多少账"); data that must show up on another device; data large enough to need `WHERE` / `GROUP BY`; and the user's own records that would hurt to lose — expenses, to-dos, notes, a reading log — even when the page is their only writer
+
+When unsure: if the data may one day be read by anyone besides this page in this browser — the agent, a scheduled task, another device — use a named database.
+
+A named database is not a file beside the page. The writer and the page meet at the database name only: a scheduled task never needs to know which page shows its data or where that page lives.
+
+The page — an HTML artifact in the panel and the same page saved as a Light App alike — queries it by a relative path:
+
+```js
+const res = await fetch('./__octo/db/prices', {
+  method: 'POST',
+  headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({sql: 'SELECT ts, price FROM quote WHERE symbol = ? ORDER BY ts', params: ['AAPL']}),
+})
+const data = await res.json() // {columns, rows, truncated} for a query; {changes, last_insert_id} for a write; {error} with a non-2xx status
+// rows is an array of ARRAYS in `columns` order — [["2026-09-23T10:00:00Z", 231.4], …] — not objects:
+// row.price is undefined. Index by position, or turn each row into an object first:
+const items = data.rows.map(r => Object.fromEntries(data.columns.map((c, i) => [c, r[i]])))
+```
+
+- One statement per request, `?` placeholders with `params`. At most 10000 rows come back; aggregate in SQL rather than fetching everything
+- The database must already exist — create it and its tables with the `sqlite` tool when you build the page, also for a page that is the data's only writer; a page cannot create one
+- A page may write (add a record, mark a row read, delete a bad one) with `INSERT` / `UPDATE` / `DELETE` / `REPLACE`. Anything else — `CREATE`, `ALTER`, `DROP`, `PRAGMA` — is refused from a page: the table layout is set with the `sqlite` tool, and a scheduled task's SQL breaks if a page changes it
+- A public Light App reads only — its writes are refused — so a page meant to be shared must work without writing
+- Moving a page from an artifact to a Light App needs nothing for its data: the database stays where it is
+- In the conversation, read and write databases with the `sqlite` tool, never `sqlite3` or a script through `terminal`: Windows has no `sqlite3`, and the tool waits for locks and refuses a second statement
+
+A collecting job that needs no judgment on each run — fetch a URL, parse it, insert the rows — is better written as a script the OS scheduler runs (cron, launchd, Windows Task Scheduler) than as a scheduled task, which is an LLM turn every time and fires only while octo is running. Offer that when the user's job is deterministic. Such a script writes the database with its language's SQLite library:
+
+- Create the database and its tables with the `sqlite` tool first, so the file starts in WAL mode; if the script creates it, it runs `PRAGMA journal_mode=WAL` once
+- Open it at the path under `~/.octo/databases/` (the profile's data directory when octo runs with `--profile`) with a lock wait — `sqlite3.connect(path, timeout=5)` in Python — so it queues behind a page or octo instead of failing
+- Use absolute paths for the interpreter, the script and its files: the OS scheduler's `PATH` and working directory are not the user's shell's. Keep third-party packages in a virtual environment
+- Record every run (time, status, error) in a `runs` table and have the page show the latest one. A failed OS job is otherwise silent — octo neither sees it nor notifies anyone
+- Registering the job (`crontab`, `launchctl`, `schtasks`) asks the user first; say what it will run and how often before you do
 
 ## The start screen
 

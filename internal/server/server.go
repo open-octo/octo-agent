@@ -877,6 +877,7 @@ func (s *Server) registerRoutes() {
 	s.api("POST /api/sessions/{id}/artifacts/grant", s.handleGrantArtifactOrigin)
 	s.api("GET /_artifacts/{token}", redirectToSlash)
 	s.api("GET /_artifacts/{token}/{path...}", s.handleArtifactPage)
+	s.api("POST /_artifacts/{token}/__octo/db/{name}", s.handleArtifactDB)
 	s.api("GET /api/sessions/{id}/diff", s.handleGetSessionDiff)
 	s.api("GET /api/sessions/{id}/diff/file", s.handleGetSessionFileDiff)
 	s.api("DELETE /api/sessions/{id}", s.handleDeleteSession)
@@ -968,6 +969,7 @@ func (s *Server) registerRoutes() {
 	// its trailing slash must still reach the app.
 	s.mux.HandleFunc("GET /_apps/{slug}", redirectToSlash)
 	s.mux.HandleFunc("GET /_apps/{slug}/{path...}", s.handleLightAppPage)
+	s.mux.HandleFunc("POST /_apps/{slug}/__octo/db/{name}", s.handleLightAppDB)
 	s.api("GET /api/trash", s.handleGetTrash)
 	s.api("POST /api/trash/empty", s.handleEmptyTrash)
 	s.api("POST /api/trash/{id}/restore", s.handleRestoreTrash)

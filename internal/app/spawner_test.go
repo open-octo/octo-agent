@@ -485,10 +485,11 @@ func TestFilterChildTools_ReadOnlyDropsMutators(t *testing.T) {
 		{Name: "terminal"},
 		{Name: "write_file"},
 		{Name: "edit_file"},
+		{Name: "sqlite"},
 	}
 	got := filterChildTools(parentTools, nil, nil, true)
 	for _, td := range got {
-		if td.Name == "write_file" || td.Name == "edit_file" {
+		if td.Name == "write_file" || td.Name == "edit_file" || td.Name == "sqlite" {
 			t.Errorf("read-only child must not contain %q", td.Name)
 		}
 	}

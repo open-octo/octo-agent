@@ -604,7 +604,7 @@ func (lc *liveChild) syncSession() {
 // that stays top-level-only) and, when allowed is non-empty, intersects with
 // that allowlist so the parent can hand the child a restricted toolbelt (e.g.
 // read-only research). When readOnly is set, the mutating tools (write_file,
-// edit_file) are dropped too — used by read-only presets so the child keeps
+// edit_file, sqlite) are dropped too — used by read-only presets so the child keeps
 // terminal/MCP/codegraph but can't change files. The two filters compose: a
 // readOnly preset still honours allowed.
 func filterChildTools(parent []agent.ToolDefinition, allowed, disallowed []string, readOnly bool) []agent.ToolDefinition {
@@ -631,7 +631,7 @@ func filterChildTools(parent []agent.ToolDefinition, allowed, disallowed []strin
 		if td.Name == "sub_agent" {
 			continue
 		}
-		if readOnly && (td.Name == "write_file" || td.Name == "edit_file") {
+		if readOnly && (td.Name == "write_file" || td.Name == "edit_file" || td.Name == "sqlite") {
 			continue
 		}
 		if allowSet != nil && !allowSet[td.Name] {

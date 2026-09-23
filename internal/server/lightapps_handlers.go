@@ -37,11 +37,36 @@ type lightAppManifest struct {
 	// Public serves the app's page (/_apps/<slug>/) without auth. Set only
 	// from the UI through handleSetLightAppPublic.
 	Public bool `json:"public,omitempty"`
+	// Databases names the databases under ~/.octo/databases/ the page
+	// queries. Only a public app is held to it: it may read those and no
+	// others (db_pages.go).
+	Databases looseStrings `json:"databases,omitempty"`
 	// UpdatedAt is index.html's mtime, stamped at read time so the web UI can
 	// tell that an app it has open was rewritten on disk. Derived, never
 	// persisted: the writers leave it empty and omitempty keeps it out of
 	// manifest.json.
 	UpdatedAt string `json:"updated_at,omitempty"`
+}
+
+// looseStrings decodes a JSON string list, or a lone string as a list of
+// one. Any other shape decodes to nothing rather than failing: the field is
+// agent-written, and a strict decode would drop the whole app from the
+// listing over it. For a public app nothing means no database is readable.
+type looseStrings []string
+
+func (l *looseStrings) UnmarshalJSON(b []byte) error {
+	var one string
+	if json.Unmarshal(b, &one) == nil {
+		*l = looseStrings{one}
+		return nil
+	}
+	var list []string
+	if json.Unmarshal(b, &list) == nil {
+		*l = list
+		return nil
+	}
+	*l = nil
+	return nil
 }
 
 // normalizeMount drops a mount value the UI has no slot for, so a typo (or a
