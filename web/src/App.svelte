@@ -92,9 +92,14 @@
   $effect(() => {
     if (startScreenShowing) readStartScreen()
   })
+  // The installed list is re-read on every focus, not only on the start
+  // screen: the sidebar's mounted entries come from it too, and an app the
+  // agent mounts mid-chat would otherwise stay hidden until a restart in the
+  // desktop shell.
   onMount(() => {
     const onFocus = () => {
       if (onStartScreen(get(view), get(activeSessionId), mobileShell)) readStartScreen()
+      else void loadLightApps()
     }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
