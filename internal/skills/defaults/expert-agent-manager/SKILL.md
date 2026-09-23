@@ -29,8 +29,9 @@ allowlist).
 `GET`/`POST`/`PUT`/`DELETE` on `/api/agents` see two kinds of profile,
 distinguished by a `source` field on every response:
 
-- **`"source": "user"`** — created via this skill or the Web UI form, stored
-  in `~/.octo/agents/`. Freely editable and deletable.
+- **`"source": "user"`** — created via this skill (the Web UI's create and
+  edit buttons open a session running it) or by hand, stored in
+  `~/.octo/agents/`. Freely editable and deletable.
 - **`"source": "default"`** — an **officially curated expert** shipped in the
   binary (the ones shown in the Web UI's expert gallery, e.g. copywriter,
   resume-coach, trip-planner). These are **read-only**: `PUT` and `DELETE` on
@@ -336,13 +337,57 @@ can drive a real test; you cannot simulate it.
      404s on a hidden id — it's the one endpoint that can still find it), then
      retry step 1. Only report "no such agent" if it's absent from the list
      entirely.
-2. **Show the user the current state** and ask what to change.
+   - If the profile's `source` is `"default"`, it can't be edited — follow
+     "When the user asks to change a curated expert" above instead.
+2. **Show the current state and ask what to change.** When the session was
+   opened by the Web UI's edit button (the skill arguments are
+   `edit <id>`), or the user is otherwise clearly in the Web UI, open with an
+   edit form (below) rather than a question — the user edits the fields they
+   care about directly, or describes the change in words. Elsewhere (TUI,
+   IM), list the current fields as text and ask.
 3. **Apply the smallest edit** that satisfies the request.
 4. **Call `PUT /api/agents/:id`** with the full updated profile (the API
-   replaces the whole object — send all fields, not just changed ones). If
-   the profile's `source` is `"default"`, mention to the user that this edit
-   forks it into a personal copy that will no longer receive octo's future
-   updates to that curated persona's content.
+   replaces the whole object — send all fields, not just changed ones).
+
+#### The edit form
+
+Read the `genui` skill before emitting it. Reply with a short line and one
+inline `octo-ui` fence — **no panel `id`** — holding, in this order:
+
+| Field | Node | Prefill |
+|---|---|---|
+| `name` | `input` | current `name` |
+| `description` | `input` | current `description` |
+| `system_prompt` | `textarea`, `rows: 12` | current `system_prompt` |
+| `model` | `input`, placeholder saying empty = the default model | current `model` or empty |
+| `tools` | `input`, label saying comma-separated, empty = no tools | current `tools` joined with `, ` |
+| `tool_skills` | `input`, label saying comma-separated | current `tool_skills` joined with `, ` |
+| `note` | `textarea`, `rows: 3` | empty; label along the lines of "Or describe the change and I'll make it" |
+
+followed by a primary `button` with `action: "save_expert"` and
+`payload: {"id": "<id>"}`. Label fields in the user's language.
+
+The renderer silently truncates a prefilled value past its cap — **500**
+characters for an `input`, **5000** for a `textarea` — and whatever it shows
+is what comes back on submit, so a truncated field would overwrite the
+real value. **Leave a field out of the form when its current value is near
+its cap** (over ~480 / ~4800 characters), and say in a `text` node that it
+can be changed through `note`. Do the same for `tools` when the profile has
+no `tools` key (it inherits every tool): an input can't express "inherit",
+and submitting it would turn the agent into a no-tools or allowlisted one.
+
+When the `[octo-ui-action]` with `action: "save_expert"` comes back:
+
+- Compare each submitted field with the profile you fetched. A field left
+  out of the form keeps its current value. `tools` and `tool_skills` are
+  split on commas and trimmed; an empty `tools` means `[]`.
+- **Fields only, no `note`** — the user already made the edit; don't ask
+  again. `PUT` and report the changes in one or two lines; a 400 (unknown
+  tool or skill name, unknown model) goes back to the user as-is with the
+  valid names. Nothing changed → say so and stop.
+- **A `note`** — treat it as the request in step 3, applied on top of any
+  field changes. When it touches the system prompt, show the revised prompt
+  and confirm before `PUT`, same as when creating.
 
 Note: `id` is immutable. `channel_bindings` from the
 existing profile are preserved unless the user explicitly changes them.
