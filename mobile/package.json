@@ -12,16 +12,16 @@
   },
   "dependencies": {
     "@capacitor/app": "^8.1.1",
-    "@capacitor/core": "^8.5.1",
+    "@capacitor/core": "^8.5.2",
     "jsqr": "^1.4.0"
   },
   "devDependencies": {
     "@capacitor/android": "^8.4.2",
-    "@capacitor/cli": "^8.5.1",
+    "@capacitor/cli": "^8.5.2",
     "@capacitor/ios": "^8.4.2",
     "esbuild": "^0.28.2",
     "typescript": "^6.0.3",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.1"
   },
   "overrides": {
     "uuid": "^11.1.1"
