@@ -151,6 +151,12 @@ A task that collects something each run — a price, a count, new items — can 
 on first use). A [Light App](/docs/guides/light-apps/) can then read the same database by name and
 chart it; the task never needs to know which app shows the data.
 
+If the job needs no judgment on each run — fetch a page, parse it, insert the rows — ask the agent
+to write it as a script for your OS scheduler (cron, launchd, Windows Task Scheduler) instead. It
+costs no tokens per run and runs even while octo is closed. The script writes the same database,
+and the agent has it record each run in a `runs` table so the app can show when it last ran and
+whether it failed — an OS job that fails is otherwise silent.
+
 ## Notifications
 
 `notify` is a list of IM targets (a single bare object is also accepted); every entry gets pushed

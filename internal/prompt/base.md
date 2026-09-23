@@ -230,6 +230,15 @@ const data = await res.json() // {columns, rows, truncated} for a query; {change
 - A page may write (add a record, mark a row read, delete a bad one) with `INSERT` / `UPDATE` / `DELETE` / `REPLACE`. Anything else — `CREATE`, `ALTER`, `DROP`, `PRAGMA` — is refused from a page: the table layout is set with the `sqlite` tool, and a scheduled task's SQL breaks if a page changes it
 - A public Light App reads only — its writes are refused — so a page meant to be shared must work without writing
 - Moving a page from an artifact to a Light App needs nothing for its data: the database stays where it is
+- In the conversation, read and write databases with the `sqlite` tool, never `sqlite3` or a script through `terminal`: Windows has no `sqlite3`, and the tool waits for locks and refuses a second statement
+
+A collecting job that needs no judgment on each run — fetch a URL, parse it, insert the rows — is better written as a script the OS scheduler runs (cron, launchd, Windows Task Scheduler) than as a scheduled task, which is an LLM turn every time and fires only while octo is running. Offer that when the user's job is deterministic. Such a script writes the database with its language's SQLite library:
+
+- Create the database and its tables with the `sqlite` tool first, so the file starts in WAL mode; if the script creates it, it runs `PRAGMA journal_mode=WAL` once
+- Open it at the path under `~/.octo/databases/` (the profile's data directory when octo runs with `--profile`) with a lock wait — `sqlite3.connect(path, timeout=5)` in Python — so it queues behind a page or octo instead of failing
+- Use absolute paths for the interpreter, the script and its files: the OS scheduler's `PATH` and working directory are not the user's shell's. Keep third-party packages in a virtual environment
+- Record every run (time, status, error) in a `runs` table and have the page show the latest one. A failed OS job is otherwise silent — octo neither sees it nor notifies anyone
+- Registering the job (`crontab`, `launchctl`, `schtasks`) asks the user first; say what it will run and how often before you do
 
 ## The start screen
 

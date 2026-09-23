@@ -39,7 +39,12 @@ func (SQLiteTool) Definition() agent.ToolDefinition {
 			"A statement that returns rows prints them tab-separated under a header line (up to " +
 			"200 rows, long values cut short; use count(*) or LIMIT/OFFSET for more); any other " +
 			"prints the changed-row count and last insert id. List existing databases with glob " +
-			"on `~/.octo/databases/*.db`; see a database's tables with `SELECT sql FROM sqlite_master`.",
+			"on `~/.octo/databases/*.db`; see a database's tables with `SELECT sql FROM sqlite_master`.\n\n" +
+			"In the conversation, read and write these databases with this tool, not `sqlite3` or a " +
+			"script through terminal: Windows has no `sqlite3`, and this tool waits for locks and " +
+			"refuses a second statement. A script meant to run outside octo (from the OS scheduler, " +
+			"say) may write them with its language's SQLite library, opening the file with a lock " +
+			"wait (Python: `sqlite3.connect(path, timeout=5)`).",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

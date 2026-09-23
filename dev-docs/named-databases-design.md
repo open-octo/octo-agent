@@ -177,6 +177,9 @@ const { columns, rows } = await res.json()
   - 页面写入只做行级操作（`INSERT` / `UPDATE` / `DELETE` / `REPLACE`），`CREATE` / `ALTER` / `DROP` / `PRAGMA` 会被拒绝；表结构由 `sqlite` 工具负责。
   - "Do not call octo's own API from the page" 保留，并注明 `./__octo/db/` 是页面自己的数据接口，不在此列。
   - "When to suggest" 的 ❌ "Backend-dependent workflows" 保留：这里的"后端"指需要 LLM 或服务端逻辑，定时采集加页面展示是 ✅ 场景，补一条。
+  - 对话里读写库一律用 `sqlite` 工具，不经 terminal 调 `sqlite3` 或脚本（Windows 没有 `sqlite3`；工具带锁等待和单语句防护）。
+  - 每次运行不需要判断的确定性采集任务，建议写成操作系统定时任务（cron / launchd / 任务计划程序）执行的脚本，而不是 octo 定时任务：后者每次都是一轮 LLM，且只在 octo 运行时触发。脚本用语言自带的 SQLite 库写库，约定是：库先用 `sqlite` 工具建好（WAL）；打开时带锁等待；解释器和文件用绝对路径；每次运行写进 `runs` 表供页面显示；注册定时任务前先说明要跑什么、多久一次。
+- `sqlite` 工具描述：同样写明对话里用工具、octo 之外运行的脚本用语言自带的 SQLite 库并带锁等待。
 - `dev-docs/light-apps-design.md`：manifest 字段表加 `databases`，链接本文档。
 - `docs/src/content/docs/guides/light-apps.mdx`、`docs/src/content/docs/zh/guides/light-apps.mdx`：加"展示定时任务采集的数据"一节；"不适合"里的"需要后端 API / 数据库"改为"每次使用都要跑服务端逻辑"。
 - `docs/src/content/docs/guides/cron-tasks.md` 及中文版：提一句采集结果可以写进具名库给轻应用展示。
