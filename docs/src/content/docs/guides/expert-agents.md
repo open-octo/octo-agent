@@ -36,10 +36,10 @@ tool allowlist, isolated session pool) with a few differences:
   its card's hide action, or by asking the Default Agent conversationally) —
   it disappears from the gallery and can no longer be picked for a new
   session, but nothing is lost; hiding it again shows it back.
-- **Editing forks it.** If you edit a curated expert's prompt or settings, it
-  becomes your own personal copy from that point on — it stops receiving
-  octo's future content updates for that persona (the same trade-off as
-  editing any other built-in default content, e.g. a bundled skill).
+- **Read-only.** A curated expert's prompt and settings can't be edited: it's
+  identical on every machine and keeps receiving octo's content updates for
+  that persona. For a variant, ask the Default Agent to create your own expert
+  modeled on it, and hide the original if you'd rather not see both.
 - **Can't be deleted.** Only your own custom experts can be permanently
   removed; a curated one can only be hidden.
 
@@ -48,18 +48,11 @@ tool allowlist, isolated session pool) with a few differences:
 ### From the Web UI
 
 1. Open the **Agents** panel (sidebar → Agents, or press `Cmd+K` → "Agents").
-2. Click **New Agent**.
-3. Fill in:
-   - **Name** — how it appears in the sidebar and agent picker.
-   - **Description** — shown in the agent list. Required.
-   - **System Prompt** — the persona. Write what the agent is, what it does, and
-     how it should behave. This replaces the Default Agent's identity layers
-     (soul.md, user.md).
-   - **Model** — leave empty to use the default model, or pick a specific one.
-   - **Tools** — check the tools the agent may use. Leave all unchecked to
-     grant no tools.
-   - **Skills** — check the skills the agent may load on demand.
-4. Click **Save**.
+2. Click **Create Agent**. This opens a new session where the Default Agent
+   designs the agent with you through the `expert-agent-manager` skill: it
+   asks what the agent's one job is and what would ruin it, drafts the system
+   prompt for your review, then fills in model, tools, and skills and creates
+   it once you confirm.
 
 ### From conversation
 
@@ -70,6 +63,21 @@ Ask the Default Agent:
 
 The Default Agent uses the `expert-agent-manager` skill to create and configure
 the agent through the same underlying API.
+
+## Editing an agent
+
+Click **Edit with Agent** on an agent's card. The new session opens with an
+edit form prefilled with the current name, description, system prompt, model,
+tools, and skills.
+
+- Change the fields you want and save — the change takes effect right away.
+- Or describe the change in the box at the bottom of the form ("make the tone
+  more formal") and the Default Agent makes it; changes to the system prompt
+  are shown to you for confirmation first.
+
+A field too long to fit the form without being cut off (a very long system
+prompt, say) is left out of it — describe that change in the bottom box
+instead. The same goes for tools when the agent inherits every tool.
 
 ## How expert agents differ from the Default Agent
 
