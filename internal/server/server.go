@@ -3346,14 +3346,16 @@ func (s *Server) handleChannelCompact(ad channel.Adapter, ev channel.InboundEven
 		return
 	}
 
-	// Summarize what is on disk, not a history the Web UI may have moved past.
-	s.reloadChannelHistory(sess)
-
 	go func() {
 		defer s.recoverBg("channel compaction")
 		defer s.releaseSessionBinding(storeID, agent.EntryChannel)
 		ctx, done := sess.BeginRun(context.Background())
 		defer done()
+		// Summarize what is on disk, not a history the Web UI may have moved
+		// past. Inside the run: a turn that started after the IsRunning check
+		// has finished and saved by now, instead of having its messages
+		// replaced mid-turn.
+		s.reloadChannelHistory(sess)
 		stats, err := sess.Agent.ForceCompact(ctx, nil)
 		switch {
 		case err != nil:

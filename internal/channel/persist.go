@@ -252,13 +252,15 @@ func (s *Session) ReloadStore() error {
 	if err != nil {
 		return err
 	}
+	// The history is replaced while storeMu is held: once fresh is s.Store, a
+	// concurrent Persist writes its Messages. Same lock order as Persist
+	// (storeMu, then the history's own lock).
 	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
 	if s.Store != cur {
-		s.storeMu.Unlock()
 		return nil
 	}
 	s.Store = fresh
-	s.storeMu.Unlock()
 	s.Agent.History.ReplaceWithPersisted(fresh.Messages)
 	return nil
 }
