@@ -1,8 +1,11 @@
 package tools
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/open-octo/octo-agent/internal/datahome"
 )
 
 func TestBuildEnvContext_RendersSharedLines(t *testing.T) {
@@ -18,6 +21,24 @@ func TestBuildEnvContext_RendersSharedLines(t *testing.T) {
 	}
 	if strings.Contains(out, "Git branch:") {
 		t.Errorf("no git line expected when ok=false:\n%s", out)
+	}
+}
+
+func TestBuildEnvContext_ProfileDataDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	t.Setenv(datahome.ProfileEnv, "")
+	if out := BuildEnvContext("/w", "", false, false); strings.Contains(out, "Octo data directory") {
+		t.Errorf("default profile should add no data-directory line:\n%s", out)
+	}
+
+	t.Setenv(datahome.ProfileEnv, "work")
+	out := BuildEnvContext("/w", "", false, false)
+	want := "- Octo data directory: " + filepath.Join(home, ".octo-work") + ` (profile "work")`
+	if !strings.Contains(out, want) {
+		t.Errorf("env context missing %q:\n%s", want, out)
 	}
 }
 
