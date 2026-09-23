@@ -244,6 +244,64 @@ func TestRedirectToSlash_KeepsTheSegmentEscaped(t *testing.T) {
 	}
 }
 
+func putLightApp(t *testing.T, srv *Server, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.http.Handler, w, req)
+	return w
+}
+
+// The mount switch writes the same field the agent does, and only that field.
+func TestSetLightAppMount(t *testing.T) {
+	srv := newLightAppFixture(t, Config{Addr: "127.0.0.1:0", Tools: false}, "<h1>demo</h1>")
+	manifest := func() map[string]any {
+		data, err := os.ReadFile(filepath.Join(lightAppsDir(), "demo", "manifest.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+
+	// The fixture starts mounted; unmounting drops the key.
+	w := putLightApp(t, srv, "/api/light-apps/demo/mount", `{"mount":""}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("unmount: status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var m lightAppManifest
+	if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil || m.Mount != "" || m.Name != "Demo" {
+		t.Errorf("unmount response = %+v (err %v)", m, err)
+	}
+	if raw := manifest(); raw["mount"] != nil || raw["future_field"] == nil || raw["name"] != "Demo" {
+		t.Errorf("manifest after unmount = %v", raw)
+	}
+
+	if w := putLightApp(t, srv, "/api/light-apps/demo/mount", `{"mount":"view"}`); w.Code != http.StatusOK {
+		t.Fatalf("mount: status = %d", w.Code)
+	}
+	if raw := manifest(); raw["mount"] != "view" || raw["future_field"] == nil {
+		t.Errorf("manifest after mount = %v", raw)
+	}
+
+	for _, c := range []struct {
+		path, body string
+		want       int
+	}{
+		{"/api/light-apps/demo/mount", `{}`, http.StatusBadRequest},
+		{"/api/light-apps/demo/mount", `{"mount":"panel"}`, http.StatusBadRequest},
+		{"/api/light-apps/nope/mount", `{"mount":"view"}`, http.StatusNotFound},
+	} {
+		if w := putLightApp(t, srv, c.path, c.body); w.Code != c.want {
+			t.Errorf("PUT %s %s: status = %d, want %d", c.path, c.body, w.Code, c.want)
+		}
+	}
+}
+
 func TestSetLightAppPublic_Validation(t *testing.T) {
 	srv := newLightAppFixture(t, Config{Addr: "127.0.0.1:0", Tools: false}, "<h1>demo</h1>")
 	for _, c := range []struct {

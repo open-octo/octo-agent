@@ -981,6 +981,11 @@ export async function setLightAppPublic(slug: string, isPublic: boolean): Promis
   return request<LightApp>(`/api/light-apps/${encodeURIComponent(slug)}/public`, { method: 'PUT', ...json({ public: isPublic }) })
 }
 
+// Give the app its own entry in the left navigation, or take it away.
+export async function setLightAppMount(slug: string, mounted: boolean): Promise<LightApp> {
+  return request<LightApp>(`/api/light-apps/${encodeURIComponent(slug)}/mount`, { method: 'PUT', ...json({ mount: mounted ? 'view' : '' }) })
+}
+
 // Trash
 
 export async function listTrash(): Promise<RecallFile[]> {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { showToast, openAgentSession, panelContent, lightapps, lightappSel, lightappOpen, lightappHTML, cacheLightApp } from '../lib/stores'
+  import { showToast, openAgentSession, panelContent, lightapps, lightappSel, lightappOpen, lightappHTML, cacheLightApp, loadLightApps } from '../lib/stores'
   import * as api from '../lib/api'
   import type { LightApp } from '../lib/api'
   import { t, tr } from '../lib/i18n'
@@ -79,6 +79,21 @@
     }
   }
 
+  // The sidebar reads the shared list, so it is re-read after the switch and
+  // the entry appears or goes away without a reload.
+  async function handleMount(app: LightApp, on: boolean) {
+    busyId = app.slug
+    try {
+      const next = await api.setLightAppMount(app.slug, on)
+      apps = apps.map(a => (a.slug === app.slug ? { ...a, mount: next.mount } : a))
+      await loadLightApps()
+    } catch (e: any) {
+      showToast(`Failed to update: ${e.message}`, 'error')
+    } finally {
+      busyId = null
+    }
+  }
+
   const publicURL = (slug: string) => `${location.origin}/_apps/${encodeURIComponent(slug)}/`
   // On localhost the link names this machine; it only means something to
   // others once octo is reached through a tunnel or a domain.
@@ -136,8 +151,22 @@
               <div class="card-name">{app.name}</div>
               <div class="card-desc">{app.description}</div>
             </div>
-            <div class="card-public">
-              <label class="public-toggle">
+            <div class="card-settings">
+              <label class="toggle">
+                <input
+                  type="checkbox"
+                  checked={app.mount === 'view'}
+                  disabled={busyId === app.slug}
+                  onchange={(e) => {
+                    const box = e.currentTarget
+                    const want = box.checked
+                    box.checked = app.mount === 'view' // the list, not the click, decides
+                    void handleMount(app, want)
+                  }}
+                />
+                {$t('lightapps.mount')}
+              </label>
+              <label class="toggle">
                 <input
                   type="checkbox"
                   checked={!!app.public}
@@ -232,8 +261,8 @@ p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 6
 .card-actions {
   display: flex; gap: 6px; flex-wrap: wrap;
 }
-.card-public { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-secondary); }
-.public-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; width: fit-content; }
+.card-settings { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; width: fit-content; }
 .public-link { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .public-link code {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
