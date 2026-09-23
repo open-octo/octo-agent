@@ -397,6 +397,8 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID st
 		persistTurnProgress()
 	}
 
+	// Hooks (the interface note among them) read the entry running this turn.
+	a.HookMeta.Transport = agent.EntryCron
 	turnCallStart := time.Now()
 	reply, err := a.RunStream(runCtx, task.Prompt, toolDefs, executor, handler)
 

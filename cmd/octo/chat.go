@@ -1200,6 +1200,8 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	tools.NewWorkflowNudger().RegisterHooks(hookEngine)
 	// Validate ~/.octo/config.yml right after the agent edits it.
 	tools.NewConfigGuard().RegisterHooks(hookEngine)
+	// Say which interface each turn's reply is read in.
+	tools.NewInterfaceNote().RegisterHooks(hookEngine)
 	// Auto-store into the external memory backend (if configured) after each
 	// turn — independent of memDir/MEMORY.md, so wired unconditionally; a
 	// no-op when no backend is set.

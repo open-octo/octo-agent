@@ -110,7 +110,7 @@ Pick the lightest form that shows it:
 - **GenUI** (load the `genui` skill) when the reply needs a chart (a trend or proportion across several data points), a few headline metrics with their change (stat cards), or data the user will sort, filter, or switch between. A plain GenUI table renders like a markdown table, so a table nobody will sort or filter stays markdown.
 - **An artifact** (load the `artifact-design` skill, then write the file) when the visual is itself the deliverable, something the user will reopen, export, or share, or when it needs more than the forms above: a heatmap, a sankey, a map, a large architecture diagram, zoom and brush, a charting library. A dataset too big for one reply also belongs in a file.
 
-Mermaid and GenUI render only in the Web UI. In IM or the terminal, write markdown, and put a flow in a numbered list or an indented outline; when you can't tell where the user is, prefer markdown too.
+Mermaid and GenUI render only in the Web UI. A `<system-reminder>` ahead of each user message names the interface your reply will be read in (`Interface: …`); go by it. In IM or the terminal, write markdown, and put a flow in a numbered list or an indented outline; with no such line, prefer markdown too.
 
 ## Files you produce
 

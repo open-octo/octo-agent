@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -158,8 +159,10 @@ func TestMidTurnQueue_RunsAsSeparateTurns(t *testing.T) {
 		if m.Role != agent.RoleUser {
 			continue
 		}
-		if m.Content != "" {
-			userTexts = append(userTexts, m.Content)
+		// The per-turn interface note rides ahead of each user message; the
+		// test is about the user's own text.
+		if c := strings.TrimSpace(agent.StripSystemReminders(m.Content)); c != "" {
+			userTexts = append(userTexts, c)
 		}
 		for _, b := range m.Blocks {
 			if b.Type == "text" && b.Text != "" {
@@ -247,8 +250,10 @@ func TestTurnTeardown_UndrainedSteerRunsBeforeQueued(t *testing.T) {
 		if m.Role != agent.RoleUser {
 			continue
 		}
-		if m.Content != "" {
-			userTexts = append(userTexts, m.Content)
+		// The per-turn interface note rides ahead of each user message; the
+		// test is about the user's own text.
+		if c := strings.TrimSpace(agent.StripSystemReminders(m.Content)); c != "" {
+			userTexts = append(userTexts, c)
 		}
 		for _, b := range m.Blocks {
 			if b.Type == "text" && b.Text != "" {
@@ -342,7 +347,7 @@ func TestKickIdleSteerTurn_RunsQueuedAsSeparateTurns(t *testing.T) {
 	var userTexts []string
 	for _, m := range loaded.Messages {
 		if m.Role == agent.RoleUser && m.Content != "" {
-			userTexts = append(userTexts, m.Content)
+			userTexts = append(userTexts, strings.TrimSpace(agent.StripSystemReminders(m.Content)))
 		}
 	}
 	for _, want := range []string{"late-steer", "late-queued"} {

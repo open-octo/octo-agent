@@ -1668,6 +1668,9 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		persistTurnProgress()
 	}
 
+	// The agent was assembled with whatever entry held the session then; this
+	// turn is the Web UI's, and hooks (the interface note among them) read it.
+	a.HookMeta.Transport = agent.EntryWeb
 	turnCallStart := time.Now()
 	reply, err := a.RunStream(runCtx, content, toolDefs, executor, handler)
 	// Whether this turn was goal-continuation-kicked, read before the error
