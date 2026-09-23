@@ -93,9 +93,10 @@
     if (startScreenShowing) readStartScreen()
   })
   // The installed list is re-read on every focus, not only on the start
-  // screen: the sidebar's mounted entries come from it too, and an app the
-  // agent mounts mid-chat would otherwise stay hidden until a restart in the
-  // desktop shell.
+  // screen: the sidebar's mounted entries come from it too, and a manifest
+  // edited outside this window (by hand, or by a turn another client ran)
+  // shows up when the user comes back. Turns this UI hears end with a re-read
+  // of their own (session_activity below).
   onMount(() => {
     const onFocus = () => {
       if (onStartScreen(get(view), get(activeSessionId), mobileShell)) readStartScreen()
@@ -427,8 +428,14 @@
       }
       // The agent just finished changing files. Re-render the Git Diff panel if
       // it's open on this session, or move its badge if it isn't — that pair is
-      // the whole refresh story, no polling anywhere.
-      if (ev.kind === 'turn_ended') onDiffTurnEnded(sid)
+      // the whole refresh story, no polling anywhere. The agent may also have
+      // written a Light App's manifest (mounted it, say), so the installed list
+      // the sidebar reads is re-read too — the window usually kept focus the
+      // whole turn, and the desktop shell has no refresh.
+      if (ev.kind === 'turn_ended') {
+        onDiffTurnEnded(sid)
+        void loadLightApps()
+      }
       if (ev.kind === 'question_pending' || ev.kind === 'confirm_pending' || ev.kind === 'turn_complete') {
         notifyForSessionActivity(sid, ev.kind)
       }
