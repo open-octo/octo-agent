@@ -35,6 +35,17 @@ func newLightAppFixture(t *testing.T, cfg Config, indexHTML string) *Server {
 	return mustServer(t, cfg)
 }
 
+// cleanedRedirect reports whether the mux answered a path holding `..` by
+// redirecting to its cleaned form — 301 on Go 1.25, 307 on later releases —
+// which then 404s on its own. The target must no longer contain `..`.
+func cleanedRedirect(w *httptest.ResponseRecorder) bool {
+	if w.Code != http.StatusMovedPermanently && w.Code != http.StatusTemporaryRedirect {
+		return false
+	}
+	loc := w.Header().Get("Location")
+	return loc != "" && !strings.Contains(loc, "..")
+}
+
 func localGet(srv *Server, target string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	w := httptest.NewRecorder()
@@ -85,7 +96,7 @@ func TestLightAppPage_ServesEntryWithShimAndFiles(t *testing.T) {
 	}
 	for _, target := range []string{"/_apps/nope/", "/_apps/demo/missing.js", "/_apps/demo/../other/index.html"} {
 		// The mux cleans `..` with a redirect to the cleaned path, which then 404s.
-		if w := localGet(srv, target); w.Code != http.StatusNotFound && w.Code != http.StatusTemporaryRedirect {
+		if w := localGet(srv, target); w.Code != http.StatusNotFound && !cleanedRedirect(w) {
 			t.Errorf("GET %s: status = %d, want 404", target, w.Code)
 		}
 	}
