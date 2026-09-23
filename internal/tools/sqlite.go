@@ -4,15 +4,19 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/sqlitedb"
 )
 
 const (
-	sqliteMaxRows  = 200
-	sqliteMaxBytes = 16 << 10
+	sqliteMaxBytes = 16 << 10 // of printed output
+	sqliteMaxCell  = 1000     // bytes of one printed value
 )
+
+var sqliteLimits = sqlitedb.Limits{MaxRows: 200, MaxBytes: 1 << 20, Timeout: time.Minute}
 
 // SQLiteTool runs one SQL statement against a named database under
 // ~/.octo/databases/. It is the only writer that can create a database; pages
@@ -33,9 +37,9 @@ func (SQLiteTool) Definition() agent.ToolDefinition {
 			"INSERT … SELECT to write many rows at once. Bind values with `?` placeholders and " +
 			"`params` rather than splicing them into the SQL. ATTACH and VACUUM INTO are refused. " +
 			"A statement that returns rows prints them tab-separated under a header line (up to " +
-			"200 rows); any other prints the changed-row count and last insert id. List existing " +
-			"databases with glob on `~/.octo/databases/*.db`; see a database's tables with " +
-			"`SELECT sql FROM sqlite_master`.",
+			"200 rows, long values cut short; use count(*) or LIMIT/OFFSET for more); any other " +
+			"prints the changed-row count and last insert id. List existing databases with glob " +
+			"on `~/.octo/databases/*.db`; see a database's tables with `SELECT sql FROM sqlite_master`.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -72,7 +76,7 @@ func (SQLiteTool) Execute(ctx context.Context, _ string, input map[string]any) (
 		}
 		params = list
 	}
-	res, err := sqlitedb.Exec(ctx, db, sqlitedb.Create, query, params, sqliteMaxRows)
+	res, err := sqlitedb.Exec(ctx, db, sqlitedb.Create, query, params, sqliteLimits)
 	if err != nil {
 		return agent.ToolResult{}, fmt.Errorf("sqlite: %w", err)
 	}
@@ -100,20 +104,28 @@ func formatSQLiteResult(res *sqlitedb.Result) string {
 		shown++
 	}
 	switch {
-	case res.Total == 0:
+	case len(res.Rows) == 0 && !res.Truncated:
 		b.WriteString("\n(0 rows)")
-	case shown < res.Total:
-		fmt.Fprintf(&b, "\n(showing %d of %d rows)", shown, res.Total)
+	case shown < len(res.Rows) || res.Truncated:
+		fmt.Fprintf(&b, "\n(showing the first %d rows; more not shown)", shown)
 	}
 	return b.String()
 }
 
 // sqliteCell renders one value on a single line so the tab-separated layout
-// holds: NULL spelled out, tabs and line breaks escaped.
+// holds: NULL spelled out, tabs and line breaks escaped, a long value cut
+// short so one cell cannot push its whole row out of the output.
 func sqliteCell(v any) string {
 	if v == nil {
 		return "NULL"
 	}
 	s := fmt.Sprint(v)
+	if len(s) > sqliteMaxCell {
+		cut := sqliteMaxCell
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = fmt.Sprintf("%s…(%d bytes)", s[:cut], len(s))
+	}
 	return strings.NewReplacer(`\`, `\\`, "\t", `\t`, "\n", `\n`, "\r", `\r`).Replace(s)
 }

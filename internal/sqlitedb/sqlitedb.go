@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	sqlite "modernc.org/sqlite"
@@ -44,6 +45,7 @@ var (
 	ErrMultipleStatements = errors.New("only one SQL statement per call")
 	ErrBusy               = errors.New("database is busy")
 	ErrReadOnly           = errors.New("database is read-only here")
+	ErrTimeout            = errors.New("query ran past its time limit")
 )
 
 var nameRe = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
@@ -68,25 +70,43 @@ func Path(name string) (string, error) {
 	return filepath.Join(dir, name+".db"), nil
 }
 
+// Limits bound one call. A public page's query comes from anyone who has the
+// link, so every bound is on by default for the caller to size: without them
+// one request can spin a core forever (an unbounded recursive CTE) or ask for
+// gigabytes (zeroblob in a loop).
+type Limits struct {
+	MaxRows  int
+	MaxBytes int // value bytes kept across all rows
+	// MaxValueLen caps any one string or blob (SQLITE_LIMIT_LENGTH); 0
+	// keeps SQLite's default.
+	MaxValueLen int
+	Timeout     time.Duration
+}
+
 // Result is one statement's outcome. A statement that yields columns fills
-// Columns/Rows/Total; one that yields none fills Changes/LastInsertID.
+// Columns/Rows/Truncated; one that yields none fills Changes/LastInsertID.
 type Result struct {
-	HasRows      bool
-	Columns      []string
-	Rows         [][]any
-	Total        int // rows the statement produced; > len(Rows) when capped
+	HasRows bool
+	Columns []string
+	Rows    [][]any
+	// Truncated means the statement had more rows than Rows holds. Reading
+	// stops at the cap rather than counting on, so the query stops too.
+	Truncated    bool
 	Changes      int64
 	LastInsertID int64
 }
 
-// Truncated reports whether Rows stops short of what the statement produced.
-func (r *Result) Truncated() bool { return r.Total > len(r.Rows) }
-
-// Exec runs one SQL statement against the named database. At most maxRows
-// rows are kept; the rest are counted into Total.
-func Exec(ctx context.Context, name string, mode Mode, query string, params []any, maxRows int) (*Result, error) {
-	if err := checkSingleStatement(query); err != nil {
+// Exec runs one SQL statement against the named database within lim.
+func Exec(ctx context.Context, name string, mode Mode, query string, params []any, lim Limits) (*Result, error) {
+	verb, err := checkSingleStatement(query)
+	if err != nil {
 		return nil, err
+	}
+	// A read-only connection refuses writes, but not a PRAGMA that sets
+	// process-wide state (soft_heap_limit, hard_heap_limit). A reader needs
+	// none: table info is SELECT … FROM pragma_table_info(…).
+	if mode == ReadOnly && verb != "SELECT" && verb != "WITH" && verb != "VALUES" {
+		return nil, ErrReadOnly
 	}
 	args, err := normalizeParams(params)
 	if err != nil {
@@ -104,6 +124,12 @@ func Exec(ctx context.Context, name string, mode Mode, query string, params []an
 		return nil, ErrNotFound
 	}
 
+	if lim.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, lim.Timeout)
+		defer cancel()
+	}
+
 	// Opened per call rather than pooled: calls are rare next to the cost of
 	// an open, and nothing is left holding the file — Windows cannot delete
 	// or replace a file that is still open.
@@ -114,7 +140,7 @@ func Exec(ctx context.Context, name string, mode Mode, query string, params []an
 	defer db.Close()
 	conn, err := db.Conn(ctx)
 	if err != nil {
-		return nil, mapErr(err)
+		return nil, mapErr(ctx, err)
 	}
 	defer conn.Close()
 	// A read-only connection still lets ATTACH create and write another file,
@@ -124,18 +150,23 @@ func Exec(ctx context.Context, name string, mode Mode, query string, params []an
 	if _, err := sqlite.Limit(conn, lib.SQLITE_LIMIT_ATTACHED, 0); err != nil {
 		return nil, err
 	}
+	if lim.MaxValueLen > 0 {
+		if _, err := sqlite.Limit(conn, lib.SQLITE_LIMIT_LENGTH, lim.MaxValueLen); err != nil {
+			return nil, err
+		}
+	}
 
 	rows, err := conn.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, mapErr(err)
+		return nil, mapErr(ctx, err)
 	}
-	res, err := collect(rows, maxRows)
+	res, err := collect(rows, lim)
 	if err != nil {
-		return nil, mapErr(err)
+		return nil, mapErr(ctx, err)
 	}
 	if !res.HasRows {
 		if err := conn.QueryRowContext(ctx, "SELECT changes(), last_insert_rowid()").Scan(&res.Changes, &res.LastInsertID); err != nil {
-			return nil, mapErr(err)
+			return nil, mapErr(ctx, err)
 		}
 	}
 	return res, nil
@@ -164,17 +195,18 @@ func dsn(path string, mode Mode) string {
 	return u.String()
 }
 
-func collect(rows *sql.Rows, maxRows int) (*Result, error) {
+func collect(rows *sql.Rows, lim Limits) (*Result, error) {
 	defer rows.Close()
 	cols, err := rows.Columns()
 	if err != nil {
 		return nil, err
 	}
 	res := &Result{HasRows: len(cols) > 0, Columns: cols, Rows: [][]any{}}
+	size := 0
 	for rows.Next() {
-		res.Total++
-		if res.Total > maxRows {
-			continue
+		if len(res.Rows) == lim.MaxRows {
+			res.Truncated = true
+			break
 		}
 		vals := make([]any, len(cols))
 		ptrs := make([]any, len(cols))
@@ -184,12 +216,26 @@ func collect(rows *sql.Rows, maxRows int) (*Result, error) {
 		if err := rows.Scan(ptrs...); err != nil {
 			return nil, err
 		}
+		rowSize := 0
 		for i, v := range vals {
 			vals[i] = jsonValue(v)
+			rowSize += valueSize(vals[i])
 		}
+		if size+rowSize > lim.MaxBytes {
+			res.Truncated = true
+			break
+		}
+		size += rowSize
 		res.Rows = append(res.Rows, vals)
 	}
 	return res, rows.Err()
+}
+
+func valueSize(v any) int {
+	if s, ok := v.(string); ok {
+		return len(s)
+	}
+	return 8
 }
 
 // jsonValue maps a scanned value onto what JSON carries: a BLOB becomes
@@ -234,7 +280,10 @@ func normalizeParams(params []any) ([]any, error) {
 	return out, nil
 }
 
-func mapErr(err error) error {
+func mapErr(ctx context.Context, err error) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return ErrTimeout
+	}
 	var se *sqlite.Error
 	if errors.As(err, &se) {
 		switch se.Code() & 0xff {
@@ -251,8 +300,11 @@ func mapErr(err error) error {
 // driver runs every statement it is given and reports only the last, so
 // "SELECT …; DELETE …" would return nothing and empty the table. A trigger
 // body (BEGIN … ; … END) reads as several statements and is refused too.
-func checkSingleStatement(s string) error {
+//
+// It also returns the statement's first keyword, upper-cased.
+func checkSingleStatement(s string) (string, error) {
 	seen, ended := false, false
+	verb := ""
 	for i := 0; i < len(s); {
 		c := s[i]
 		switch {
@@ -279,7 +331,14 @@ func checkSingleStatement(s string) error {
 			continue
 		}
 		if ended {
-			return ErrMultipleStatements
+			return "", ErrMultipleStatements
+		}
+		if !seen {
+			j := i
+			for j < len(s) && (s[j] >= 'a' && s[j] <= 'z' || s[j] >= 'A' && s[j] <= 'Z') {
+				j++
+			}
+			verb = strings.ToUpper(s[i:j])
 		}
 		seen = true
 		switch c {
@@ -294,9 +353,9 @@ func checkSingleStatement(s string) error {
 		}
 	}
 	if !seen {
-		return ErrEmptyStatement
+		return "", ErrEmptyStatement
 	}
-	return nil
+	return verb, nil
 }
 
 // skipQuoted returns the index after the quoted run opening at s[i]; a doubled

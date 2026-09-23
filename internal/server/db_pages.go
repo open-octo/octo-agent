@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"github.com/open-octo/octo-agent/internal/sqlitedb"
 )
@@ -20,10 +21,21 @@ import (
 // the databases its manifest lists. A page never creates a database: that is
 // the sqlite tool's job. See dev-docs/named-databases-design.md.
 
-const (
-	dbRequestMaxBytes = 1 << 20
-	dbPageMaxRows     = 10000
-)
+const dbRequestMaxBytes = 1 << 20
+
+// dbPageLimits bounds one page query. A public app's queries come from anyone
+// with the link, and the HTTP server has no write timeout (WebSockets), so
+// these are what stop one request from spinning a core or filling memory.
+var dbPageLimits = sqlitedb.Limits{
+	MaxRows:     10000,
+	MaxBytes:    16 << 20,
+	MaxValueLen: 4 << 20,
+	Timeout:     10 * time.Second,
+}
+
+// publicDBSlots caps public queries in flight across every app, so a burst of
+// anonymous requests cannot take every core.
+var publicDBSlots = make(chan struct{}, 4)
 
 func (s *Server) handleArtifactDB(w http.ResponseWriter, r *http.Request) {
 	if s.lookupGrant(r.PathValue("token")) == nil {
@@ -44,6 +56,13 @@ func (s *Server) handleLightAppDB(w http.ResponseWriter, r *http.Request) {
 		// not depend on who is looking at it.
 		if !slices.Contains(m.Databases, r.PathValue("name")) {
 			writeError(w, http.StatusForbidden, "database_not_declared")
+			return
+		}
+		select {
+		case publicDBSlots <- struct{}{}:
+			defer func() { <-publicDBSlots }()
+		default:
+			writeError(w, http.StatusServiceUnavailable, "database_busy")
 			return
 		}
 		serveDBQuery(w, r, sqlitedb.ReadOnly)
@@ -84,7 +103,7 @@ func serveDBQuery(w http.ResponseWriter, r *http.Request, mode sqlitedb.Mode) {
 		writeInvalidJSONBody(w, err)
 		return
 	}
-	res, err := sqlitedb.Exec(r.Context(), name, mode, req.SQL, req.Params, dbPageMaxRows)
+	res, err := sqlitedb.Exec(r.Context(), name, mode, req.SQL, req.Params, dbPageLimits)
 	setPageHeaders(w.Header())
 	switch {
 	case err == nil:
@@ -97,12 +116,15 @@ func serveDBQuery(w http.ResponseWriter, r *http.Request, mode sqlitedb.Mode) {
 	case errors.Is(err, sqlitedb.ErrBusy):
 		writeError(w, http.StatusServiceUnavailable, "database_busy")
 		return
+	case errors.Is(err, sqlitedb.ErrTimeout):
+		writeError(w, http.StatusBadRequest, "query_timeout")
+		return
 	default:
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if res.HasRows {
-		writeJSON(w, http.StatusOK, map[string]any{"columns": res.Columns, "rows": res.Rows, "truncated": res.Truncated()})
+		writeJSON(w, http.StatusOK, map[string]any{"columns": res.Columns, "rows": res.Rows, "truncated": res.Truncated})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"changes": res.Changes, "last_insert_id": res.LastInsertID})

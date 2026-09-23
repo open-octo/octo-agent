@@ -65,9 +65,18 @@
 
   // A public app's page is served without auth, so the link works for anyone
   // who can reach this server. Only turning it on asks first; turning it off
-  // takes nothing away from anyone.
+  // takes nothing away from anyone. The databases it declares become readable
+  // too, and the agent — not the user — wrote that list, so the question
+  // names them.
+  function publicPrompt(app: LightApp): string {
+    const dbs = app.databases ?? []
+    return dbs.length
+      ? tr('lightapps.public_on_db').replace('{names}', dbs.join(', '))
+      : tr('lightapps.public_on')
+  }
+
   async function handlePublic(app: LightApp, on: boolean) {
-    if (on && !(await confirmDialog(tr('lightapps.public_on')))) return
+    if (on && !(await confirmDialog(publicPrompt(app)))) return
     busyId = app.slug
     try {
       const next = await api.setLightAppPublic(app.slug, on)

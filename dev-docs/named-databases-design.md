@@ -51,6 +51,25 @@
 
 `internal/sqlitedb` 里用一个小扫描器判断：跳过单引号字符串、双引号 / 反引号 / 方括号标识符、`--` 行注释和 `/* */` 块注释，找到语句外的第一个 `;` 之后，只允许剩下空白、注释和更多的 `;`。触发器的 `BEGIN … ; … END` 在这个扫描器看来是多条语句，同样被拒绝。
 
+### 只读连接只接受查询
+
+只读连接拒绝写入，但不拒绝设置进程级状态的 PRAGMA（`soft_heap_limit`、`hard_heap_limit` 对之后的所有连接生效）。只读模式下语句的第一个关键字必须是 `SELECT`、`WITH` 或 `VALUES`，其余返回 `ErrReadOnly`。读表结构用 `SELECT … FROM pragma_table_info('<表>')`。
+
+### 上限
+
+公开应用的查询来自任何拿到链接的人，HTTP 服务又没有写超时（为了 WebSocket，`WriteTimeout: 0`），不加上限的话一个匿名请求就能让一个核一直空转（无终止的递归 CTE），或者要出 GB 级的结果（循环里的 `zeroblob`）。每次调用都带 `sqlitedb.Limits`：
+
+| 上限 | 页面接口 | `sqlite` 工具 |
+|---|---|---|
+| 行数 | 10000 | 200 |
+| 结果累计字节 | 16 MB | 1 MB |
+| 单个值（`SQLITE_LIMIT_LENGTH`） | 4 MB | SQLite 默认 |
+| 超时 | 10 s | 60 s |
+
+- 读到行数或字节上限就停止读取，`truncated` 为真。不再往下数总行数，查询也就随之停止；需要总数用 `count(*)`。
+- 超时通过 context 取消，驱动会中断正在执行的语句，返回 `ErrTimeout`。
+- 公开应用的查询全局最多 4 个同时进行，超出时返回 503 `database_busy`。
+
 ### 执行
 
 语句统一走 `QueryContext`：
@@ -78,7 +97,7 @@
 | `sql` | ✅ | 一条 SQL 语句 |
 | `params` | | 位置参数数组 |
 
-返回：有列时是一行列名加若干行数据，以制表符分隔，最多 200 行、16 KB，超出时截断并注明总行数；无列时是 `changes=<n> last_insert_id=<n>`。SQL 错误原样返回给模型。
+返回：有列时是一行列名加若干行数据，以制表符分隔，最多 200 行、16 KB 输出，单个值超过 1000 字节时截短并注明原长度（整行照常输出），有更多行没显示时注明"more not shown"；无列时是 `changes=<n> last_insert_id=<n>`。SQL 错误原样返回给模型。
 
 工具的描述里讲清楚：库在哪、库名规则、一次一条语句、页面怎么查（见下文），让定时任务的 agent 只看工具描述就能写对。查看已有的库用 `glob` 扫 `~/.octo/databases/`，查看表结构用 `SELECT sql FROM sqlite_master`。
 
@@ -121,7 +140,7 @@ const { columns, rows } = await res.json()
 { "changes": 1, "last_insert_id": 42 }
 ```
 
-最多返回 10000 行，超出时 `truncated` 为 `true`。响应头与页面文件一致（`setPageHeaders`：`no-store`、`nosniff`）。
+行数和字节上限见上文，超出时 `truncated` 为 `true`。响应头与页面文件一致（`setPageHeaders`：`no-store`、`nosniff`）。
 
 错误：
 
@@ -129,16 +148,21 @@ const { columns, rows } = await res.json()
 |---|---|---|
 | 库名不合法 | 400 | `invalid_database_name` |
 | 多条语句、SQL 语法或执行错误 | 400 | SQL 错误信息 |
+| 超时 | 400 | `query_timeout` |
 | 公开应用读取未声明的库 | 403 | `database_not_declared` |
-| 公开应用写入 | 403 | `database is read-only here` |
+| 公开应用写入或执行非查询语句 | 403 | `database is read-only here` |
 | 库不存在 | 404 | `database_not_found` |
-| busy_timeout 后仍被锁 | 503 | `database_busy` |
+| busy_timeout 后仍被锁；公开查询并发已满 | 503 | `database_busy` |
 
 ### manifest `databases`
 
 轻应用 `manifest.json` 新增可选字段 `databases`（字符串数组），列出页面会查的库。它只在应用公开时起作用：公开应用只能读列出的库。非公开时不检查。
 
 这个字段由 agent 写，和 `public` 由 UI 写不同。提示词要求页面用到哪些库就写哪些，这样用户以后在 UI 上打开公开开关时不需要回头补。
+
+因为列表是 agent 写的，用户打开公开开关时的确认框会列出这些库名（`lightapps.public_on_db`），用户知道点下去会把哪些库开放出去。
+
+解码是宽松的：数组照常；单个字符串当作只有一项的列表；其他形状解码为空，不报错。严格解码失败会让整个应用从列表里消失；解码为空对公开应用意味着一个库都读不了。
 
 会话制品没有 manifest，也不会公开，不涉及这个字段。
 
@@ -168,7 +192,9 @@ const { columns, rows } = await res.json()
 - 并发：两个 `*sql.DB`（模拟两个进程）同时写同一个库，不出现 `database is locked`。
 - 接口，制品：有效 grant 下 `POST ./__octo/db/<name>` 可读可写；无效 token 404；库不存在 404 且没有建出文件。
 - 接口，非公开轻应用：远程无 cookie 401；带 cookie 可读可写。
-- 接口，公开轻应用：无 cookie 读已声明的库 200；读未声明的库 403；任何写入 403；`ATTACH` 被拒。
+- 接口，公开轻应用：无 cookie 读已声明的库 200；读未声明的库 403；任何写入 403；`ATTACH`、`PRAGMA` 403；无终止的递归 CTE 在行数上限处返回；100 MB 的 `zeroblob` 被拒。
+- 跨站：本机请求带外站 `Origin` 不能改非公开应用的库。
+- 上限：超时在限定时间内返回 `ErrTimeout`；字节上限按累计字节截断。
 - 页面实测：会话里做一个读具名库的制品，在制品栏里显示数据；保存成轻应用后不改任何代码照常显示；定时任务往库里追加数据后刷新页面能看到新数据。
 - Windows CI 通过（WAL 文件锁、路径拼接）。
 
@@ -181,6 +207,7 @@ const { columns, rows } = await res.json()
 - `internal/app/spawner.go`：只读子代理过滤
 - `internal/server/db_pages.go`：两个页面前缀下的查询接口 <!--lint:new-->
 - `internal/server/server.go`：路由注册
-- `internal/server/lightapps_handlers.go`：`lightAppManifest` 加 `Databases`
+- `internal/server/lightapps_handlers.go`：`lightAppManifest` 加 `Databases`（宽松解码）
+- `web/src/views/LightAppsView.svelte`、`web/src/lib/api.ts`、`web/src/lib/i18n.ts`：公开确认框列出库名
 - `internal/prompt/base.md`、`dev-docs/light-apps-design.md`、上文列出的用户文档
 - `go.mod`、`go.sum`、`cmd/octo-desktop/go.mod`、`cmd/octo-desktop/go.sum`

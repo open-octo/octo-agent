@@ -933,6 +933,9 @@ export interface LightApp {
   mount?: 'view'
   // Served without auth at /_apps/<slug>/ (internal/server/lightapp_pages.go).
   public?: boolean
+  // Named databases the page queries; a public app may read these and no
+  // others (internal/server/db_pages.go).
+  databases?: string[]
 }
 
 export interface LightAppDetail {

@@ -20,7 +20,7 @@ func seedDB(t *testing.T, name string) {
 		"CREATE TABLE quote(id INTEGER PRIMARY KEY, symbol TEXT, price REAL)",
 		"INSERT INTO quote(symbol, price) VALUES ('AAPL', 231.4), ('MSFT', 402)",
 	} {
-		if _, err := sqlitedb.Exec(context.Background(), name, sqlitedb.Create, q, nil, 10); err != nil {
+		if _, err := sqlitedb.Exec(context.Background(), name, sqlitedb.Create, q, nil, dbPageLimits); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -178,7 +178,7 @@ func TestLightAppDB_PublicReadsDeclaredOnly(t *testing.T) {
 		"undeclared db":     {"/_apps/demo/__octo/db/secret", dbBody("SELECT * FROM quote"), false, http.StatusForbidden},
 		"write":             {"/_apps/demo/__octo/db/prices", dbBody("DELETE FROM quote"), false, http.StatusForbidden},
 		"write as owner":    {"/_apps/demo/__octo/db/prices", dbBody("DROP TABLE quote"), true, http.StatusForbidden},
-		"attach":            {"/_apps/demo/__octo/db/prices", dbBody("ATTACH DATABASE 'x.db' AS x"), false, http.StatusBadRequest},
+		"attach":            {"/_apps/demo/__octo/db/prices", dbBody("ATTACH DATABASE 'x.db' AS x"), false, http.StatusForbidden},
 		"write via the cte": {"/_apps/demo/__octo/db/prices", dbBody("WITH x AS (SELECT 1) DELETE FROM quote"), false, http.StatusForbidden},
 	} {
 		if w := remotePost(srv, tc.target, tc.body, tc.cookie); w.Code != tc.want {
@@ -188,6 +188,71 @@ func TestLightAppDB_PublicReadsDeclaredOnly(t *testing.T) {
 	res := decodeDB(t, remotePost(srv, "/_apps/demo/__octo/db/prices", dbBody("SELECT count(*) FROM quote"), false))
 	if len(res.Rows) != 1 || res.Rows[0][0] != float64(2) {
 		t.Errorf("rows after refused writes = %+v, want 2", res)
+	}
+}
+
+// A cross-site page cannot drive a private app's database through the
+// user's browser: a foreign Origin loses the loopback exemption.
+func TestLightAppDB_CrossSiteRefused(t *testing.T) {
+	srv := newLightAppFixture(t, Config{Addr: "127.0.0.1:0", Tools: false}, "<h1>demo</h1>")
+	seedDB(t, "prices")
+	req := httptest.NewRequest(http.MethodPost, "/_apps/demo/__octo/db/prices", strings.NewReader(dbBody("DELETE FROM quote")))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://evil.example")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.http.Handler, w, req)
+	if w.Code == http.StatusOK {
+		t.Fatalf("cross-site POST: status 200 (%s)", w.Body.String())
+	}
+	if res := decodeDB(t, localPost(srv, "/_apps/demo/__octo/db/prices", dbBody("SELECT count(*) FROM quote"))); res.Rows[0][0] != float64(2) {
+		t.Errorf("rows after cross-site POST = %v, want 2", res.Rows[0][0])
+	}
+}
+
+// What an anonymous caller can make a public app's endpoint do is bounded:
+// an endless query stops at the row cap, a huge value is refused, and a
+// PRAGMA — some set process-wide state — is not a query.
+func TestLightAppDB_PublicIsBounded(t *testing.T) {
+	srv := newLightAppFixture(t, Config{Addr: "127.0.0.1:0", Tools: false}, "<h1>demo</h1>")
+	seedDB(t, "prices")
+	manifest := filepath.Join(lightAppsDir(), "demo", "manifest.json")
+	if err := os.WriteFile(manifest, []byte(`{"slug":"demo","name":"Demo","databases":["prices"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if w := setPublic(t, srv, true); w.Code != http.StatusOK {
+		t.Fatalf("PUT public: %d", w.Code)
+	}
+	post := func(sql string) *httptest.ResponseRecorder {
+		return remotePost(srv, "/_apps/demo/__octo/db/prices", dbBody(sql), false)
+	}
+	w := post("WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT x FROM c")
+	if res := decodeDB(t, w); w.Code != http.StatusOK || len(res.Rows) != dbPageLimits.MaxRows || !res.Truncated {
+		t.Errorf("endless query: %d rows=%d truncated=%v", w.Code, len(res.Rows), res.Truncated)
+	}
+	if w := post("SELECT zeroblob(100000000)"); w.Code != http.StatusBadRequest {
+		t.Errorf("100 MB value: status = %d, want 400", w.Code)
+	}
+	if w := post("PRAGMA soft_heap_limit = 1"); w.Code != http.StatusForbidden {
+		t.Errorf("PRAGMA: status = %d, want 403 (%s)", w.Code, w.Body.String())
+	}
+}
+
+// databases is agent-written; a wrong shape must not hide the app.
+func TestLightAppManifest_LooseDatabases(t *testing.T) {
+	for raw, want := range map[string]string{
+		`{"databases":["a","b"]}`: "a,b",
+		`{"databases":"a"}`:       "a",
+		`{"databases":{"x":1}}`:   "",
+		`{"databases":[1,2]}`:     "",
+	} {
+		var m lightAppManifest
+		if err := json.Unmarshal([]byte(raw), &m); err != nil {
+			t.Errorf("%s: %v", raw, err)
+			continue
+		}
+		if got := strings.Join(m.Databases, ","); got != want {
+			t.Errorf("%s: databases = %q, want %q", raw, got, want)
+		}
 	}
 }
 

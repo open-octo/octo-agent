@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/open-octo/octo-agent/internal/sqlitedb"
 )
@@ -58,15 +59,24 @@ func TestSQLiteTool_TruncatesRowsAndBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(out, "(showing 200 of 500 rows)") {
+	if !strings.HasSuffix(out, "(showing the first 200 rows; more not shown)") {
 		t.Errorf("row cap tail = %q", out[len(out)-40:])
 	}
-	out, err = runSQLite(t, map[string]any{"db": "n", "sql": "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 50) SELECT i, printf('%.1000c', 'x') FROM n"})
+	out, err = runSQLite(t, map[string]any{"db": "n", "sql": "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 50) SELECT i, printf('%.900c', 'x') FROM n"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out) > sqliteMaxBytes+64 || !strings.Contains(out, "of 50 rows)") {
+	if len(out) > sqliteMaxBytes+64 || !strings.HasSuffix(out, "more not shown)") {
 		t.Errorf("byte cap: len=%d tail=%q", len(out), out[len(out)-40:])
+	}
+	// One value longer than a cell is cut short; its row still shows.
+	out, err = runSQLite(t, map[string]any{"db": "n", "sql": "SELECT 1, printf('%.50000c', '价')"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(out, "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[1], "1\t价") || !strings.HasSuffix(lines[1], "…(150000 bytes)") || !utf8.ValidString(out) {
+		t.Errorf("long cell: %d lines, tail %q", len(lines), out[len(out)-30:])
 	}
 }
 
