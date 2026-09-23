@@ -653,3 +653,60 @@ func TestSendStream_ToolInputDeltaCallbackFires(t *testing.T) {
 		t.Errorf("tool_use block not found in resp.Blocks: %+v", resp.Blocks)
 	}
 }
+
+// TestSend_ToolUse_EmptyInputAfterReload verifies that a no-argument tool call
+// still goes out with "input": {} after the history has been saved and reloaded.
+// The block's Input tag is omitempty, so an empty map is dropped on save and
+// comes back nil; sending that as "input": null makes DashScope's Anthropic
+// endpoint reject every later request in the session with HTTP 400.
+func TestSend_ToolUse_EmptyInputAfterReload(t *testing.T) {
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedBody, _ = io.ReadAll(r.Body)
+		_, _ = w.Write([]byte(`{"id":"m","type":"message","role":"assistant","model":"x","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+
+	history := []agent.Message{
+		agent.NewUserMessage("list my todos"),
+		agent.NewToolUseMessage([]agent.ContentBlock{agent.NewToolUseBlockFromJSON("toolu_1", "todo_list", "{}")}),
+		agent.NewToolResultMessage([]agent.ContentBlock{agent.NewToolResultBlock("toolu_1", "none", false)}),
+		agent.NewUserMessage("thanks"),
+	}
+	saved, err := json.Marshal(history)
+	if err != nil {
+		t.Fatalf("marshal history: %v", err)
+	}
+	var reloaded []agent.Message
+	if err := json.Unmarshal(saved, &reloaded); err != nil {
+		t.Fatalf("unmarshal history: %v", err)
+	}
+
+	c, _ := New("k")
+	c.BaseURL = srv.URL
+	if _, err := c.Send(context.Background(), provider.Request{Model: "x", Messages: reloaded}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	var wireReq struct {
+		Messages []struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(capturedBody, &wireReq); err != nil {
+		t.Fatalf("decode wire body: %v", err)
+	}
+	var blocks []struct {
+		Type  string          `json:"type"`
+		Input json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(wireReq.Messages[1].Content, &blocks); err != nil {
+		t.Fatalf("decode assistant content: %v", err)
+	}
+	if len(blocks) != 1 || blocks[0].Type != "tool_use" {
+		t.Fatalf("assistant content = %s, want one tool_use block", wireReq.Messages[1].Content)
+	}
+	if got := string(blocks[0].Input); got != "{}" {
+		t.Errorf("tool_use input = %s, want {}", got)
+	}
+}
