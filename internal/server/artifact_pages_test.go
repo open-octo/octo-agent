@@ -246,8 +246,10 @@ func TestArtifactPage_ServesEntryWithShimAndFiles(t *testing.T) {
 			t.Errorf("GET %s: status = %d, body = %q", target, w.Code, w.Body.String())
 		}
 	}
-	if w := f.get(t, base+"app.js"); !strings.HasPrefix(w.Header().Get("Content-Type"), "text/javascript") {
-		t.Errorf("app.js Content-Type = %q", w.Header().Get("Content-Type"))
+	// The type comes from mime.TypeByExtension, which on Windows reads the
+	// registry and answers application/javascript; browsers take either.
+	if ct := f.get(t, base+"app.js").Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/javascript") && !strings.HasPrefix(ct, "application/javascript") {
+		t.Errorf("app.js Content-Type = %q", ct)
 	}
 	if w := f.get(t, base+"other.html"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "window.__octoPage=") {
 		t.Errorf("second page: status = %d, body = %s", w.Code, w.Body.String())
@@ -319,7 +321,7 @@ func TestArtifactPage_NotFound(t *testing.T) {
 		base + "%2e%2e/outside.js",
 		"/_artifacts/0123456789abcdef0123456789abcdef/",
 	} {
-		if w := f.get(t, target); w.Code != http.StatusNotFound && w.Code != http.StatusTemporaryRedirect {
+		if w := f.get(t, target); w.Code != http.StatusNotFound && !cleanedRedirect(w) {
 			t.Errorf("GET %s: status = %d, want 404 (body=%s)", target, w.Code, w.Body.String())
 		}
 	}
