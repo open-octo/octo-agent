@@ -8,10 +8,9 @@
   // leaf components below, never {@html} — GenUI content never touches the
   // markdown/DOMPurify path at all.
   //
-  // Two components are deliberate exceptions, each documented at its own
-  // insertion point: GenuiMermaid (an SVG string cannot be inserted any other
-  // way; double-sanitized) and GenuiCode (highlight.js escapes the source it
-  // wraps, so the model's text never reaches the DOM as markup).
+  // GenuiCode is the one deliberate exception, documented at its own
+  // insertion point: highlight.js escapes the source it wraps, so the
+  // model's text never reaches the DOM as markup.
   //
   // This component also decides whether a node renders at all: a node may
   // carry `visibleWhen`, evaluated here against the panel's live field map so
@@ -47,7 +46,6 @@
   import GenuiLink from './GenuiLink.svelte'
   import GenuiDivider from './GenuiDivider.svelte'
   import GenuiPlot from './GenuiPlot.svelte'
-  import GenuiMermaid from './GenuiMermaid.svelte'
   import { useGenuiFieldContext } from '../../lib/genui/context'
   import { evaluateCondition } from '../../lib/genui/condition'
 
@@ -103,8 +101,6 @@
     <GenuiLink {node} />
   {:else if node.type === 'plot'}
     <GenuiPlot {node} />
-  {:else if node.type === 'mermaid'}
-    <GenuiMermaid {node} />
   {:else if node.type === 'button'}
     <GenuiButton {node} />
   {:else if node.type === 'input'}

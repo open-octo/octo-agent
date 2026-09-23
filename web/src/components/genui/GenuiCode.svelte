@@ -6,8 +6,8 @@
   // already gets in markdown.
   //
   // The highlighted markup is inserted with {@html}, which GenUI otherwise
-  // never does (see GenuiNode.svelte). It is safe here for a narrower reason
-  // than mermaid's: the string handed to {@html} is produced by highlight.js
+  // never does (see GenuiNode.svelte). It is safe here because the string
+  // handed to {@html} is produced by highlight.js
   // from `node.code`, and highlight.js escapes the source text it wraps —
   // the input never reaches the DOM as markup. On the unregistered-language
   // path nothing is generated at all and the text renders through ordinary

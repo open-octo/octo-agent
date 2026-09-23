@@ -1,12 +1,12 @@
 ---
 name: genui
-description: Render structured, glanceable, interactive UI in the chat instead of plain text — dashboards, stat cards, filterable tables, charts, mermaid diagrams, choice panels, forms, quizzes. Panels can carry an id so later turns update them in place, and most interaction resolves in the browser with no round-trip. Read this before calling render_ui or emitting a ```octo-ui fence, so the spec you produce matches the node whitelist and caps the renderer actually enforces.
+description: Render structured, glanceable, interactive UI in the chat instead of plain text — dashboards, stat cards, filterable tables, charts, choice panels, forms, quizzes. Panels can carry an id so later turns update them in place, and most interaction resolves in the browser with no round-trip. Read this before calling render_ui or emitting a ```octo-ui fence, so the spec you produce matches the node whitelist and caps the renderer actually enforces.
 ---
 
 # GenUI
 
 GenUI lets you describe a small UI tree as JSON — cards, stats, tables, lists,
-badges, progress bars, callouts, charts, diagrams, code blocks, and form
+badges, progress bars, callouts, charts, code blocks, and form
 controls — and have it render as real components in the chat instead of you
 writing the same information out as prose or a markdown table. There are two ways to emit a spec; which one to use depends
 on what you're building and where the reply is going. Read "The two output
@@ -67,7 +67,6 @@ fence.
 | `link` | `text: string`, `href: string` | Opens in a new tab. Only `http://`, `https://`, `mailto:` and `tel:` are accepted — anything else drops the whole node, since a link that cannot be followed still looks like one. Omit `text` and the href is shown instead |
 | `collapsible` | `title: string`, `children: GenuiNode[]`, `open?: boolean` | Foldable section. `open` seeds the first render only — after that the user's toggle wins, and it survives a reload |
 | `plot` | `plot: "bar"\|"line"\|"area"\|"pie"`, `series: {name?: string, points: {label: string, value: number}[]}[]`, `stacked?: boolean`, `legend?: boolean`, `xLabel?: string`, `yLabel?: string`, `height?: number` | See the plot notes below |
-| `mermaid` | `code: string` | A mermaid diagram, rendered inline |
 
 Notes on `plot`: the x axis is the union of every series' labels in
 first-appearance order, so series need not agree on their labels or their
@@ -80,7 +79,9 @@ anywhere in this table.
 
 `link` is the only node carrying a URL, and it is the way to send the user
 somewhere — don't put a `button` on it, which would cost a whole turn just to
-hand back a link. There is no 3D node. Don't invent fields outside this table
+hand back a link. There is no 3D node, and no diagram node: a flowchart or
+sequence diagram is a ` ```mermaid ` fence in the reply's own markdown, which
+the Web UI draws in place. Don't invent fields outside this table
 — anything not listed here is stripped before it reaches the renderer (see
 "Caps and what happens past them").
 
@@ -232,7 +233,7 @@ oversized spec — going over a cap doesn't fail your call, it silently trims:
 - Max `list`/`keyvalue` items: **200**
 - Max `select`/`radio`/`quiz` options: **50**
 - Max `tabs` entries: **8**
-- Max `code` / `mermaid` / `textarea` default text: **5000** characters
+- Max `code` / `textarea` default text: **5000** characters
 - Max `plot` series: **8**; max points per series: **100**
 - Max `link` href: **2000** characters — an over-long one drops the node
   rather than being truncated into a link pointing elsewhere
@@ -262,10 +263,9 @@ that won't error, it'll just look wrong:
   reply that the user might act on right now — a quick comparison, a status
   summary, a small form — that has no reason to exist as a file.
 
-The same line separates a `mermaid` or `plot` node from a charting artifact.
-A diagram that explains what you just said, or a chart the user is about to
-filter, belongs in the panel. A visualization that is itself the deliverable
-— something needing a heatmap, a sankey, a map, brush-and-zoom, or a
+The same line separates a `plot` node from a charting artifact. A chart the
+user is about to filter belongs in the panel. A visualization that is itself
+the deliverable — something needing a heatmap, a sankey, a map, brush-and-zoom, or a
 charting library's full expressiveness — belongs in an artifact, where you
 can write a real page with real code.
 

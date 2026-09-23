@@ -34,7 +34,6 @@ export const MAX_TABS = 8
 
 // Interactive-panel caps — see dev-docs/genui-interactive-panels-design.md.
 export const MAX_PANEL_ID_LEN = 64
-export const MAX_MERMAID_LEN = 5000
 export const MAX_CODE_LEN = 5000
 export const MAX_TEXTAREA_LEN = 5000
 export const MAX_TEXTAREA_ROWS = 12
@@ -83,7 +82,6 @@ export const READ_ONLY_NODE_TYPES: ReadonlySet<string> = new Set([
   'link',
   'divider',
   'plot',
-  'mermaid',
 ])
 
 /** Interactive node "type" values, added by Slice B. Inline-octo-ui-fence
@@ -155,6 +153,9 @@ function sanitizeNode(
   count: { value: number }
 ): GenuiNode | null {
   if (depth > MAX_DEPTH || count.value >= MAX_NODES) return null
+  // Diagrams are a markdown fence now. A panel saved while `mermaid` was a
+  // node type keeps its diagram source as a code excerpt instead of losing it.
+  if (node.type === 'mermaid') node = { type: 'code', lang: 'mermaid', code: node.code }
   const type = node.type
   if (typeof type !== 'string' || !allowed.has(type)) return null
   // Reserve this node's own slot before recursing into any children — see
@@ -428,9 +429,6 @@ function sanitizeByType(
       if (height !== undefined) out.height = clampNumber(Math.round(height), 80, 400)
       return out
     }
-
-    case 'mermaid':
-      return { type: 'mermaid', code: clampString(stringField(node, 'code'), MAX_MERMAID_LEN) } as GenuiNode
 
     default:
       return null

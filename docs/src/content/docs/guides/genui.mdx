@@ -9,7 +9,7 @@ import { Badge } from '@astrojs/starlight/components';
 
 Ask for a comparison and you usually get a markdown table. Ask for a status summary and you get
 three paragraphs. GenUI lets the agent answer with a **panel** instead: a small tree of real
-components — stat cards, a filterable table, a chart, a mermaid diagram, a form — rendered inline
+components — stat cards, a filterable table, a chart, a form — rendered inline
 in the chat.
 
 The part worth understanding is what happens *after* it renders. Switching a tab, filtering a
@@ -41,7 +41,7 @@ Read-only, available on both paths:
 - **Data** — tables, bulleted lists, key/value definition lists
 - **Metrics** — stat cards with an up/down delta, badges, progress bars
 - **Emphasis** — callouts in info / success / warning / danger tones
-- **Code and diagrams** — syntax-highlighted excerpts, and mermaid diagrams rendered inline
+- **Code** — syntax-highlighted excerpts
 - **Charts** — bar, line, area and pie plots, optionally stacked, with axis labels and a legend
 
 Interactive, inline-fence only:
@@ -155,9 +155,9 @@ wrong one produces a result that looks wrong without erroring.
 | **Artifact** | A deliverable that should outlive the reply — a document, a standalone page, a chart that *is* the output, anything needing a real charting library or a heatmap/sankey/map. Written with `write_file` and shown with [`show_artifact`](/docs/reference/tools/). |
 | **[Light App](/docs/guides/light-apps/)** | A tool you'll reopen later, saved and launchable from the Web UI at zero token cost. |
 
-The same line separates a `mermaid` node from a charting artifact: a diagram that explains what
-the agent just said belongs in the panel; a visualization that is itself the deliverable belongs in
-an artifact.
+Diagrams aren't a panel component. A ` ```mermaid ` block in an ordinary reply is drawn in place in
+the Web UI chat, and in the preview of a Markdown artifact. Mermaid is loaded lazily, at the first
+diagram a session actually shows, so a session that never shows one never downloads or parses it.
 
 ## If you'd rather have prose
 
@@ -173,6 +173,3 @@ tools:
 This is a "stop teaching it" switch, not a hard off switch. The `render_ui` tool stays in the tool
 list and the renderer still parses an ` ```octo-ui ` fence, so a model that produces one anyway
 will still get a panel — and a panel already sitting in a transcript keeps rendering either way.
-
-Mermaid is loaded lazily, at the first diagram a session actually renders, so a session that never
-shows one never downloads or parses it.

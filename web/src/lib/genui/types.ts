@@ -270,11 +270,6 @@ export interface GenuiPlotNode {
   height?: number
 }
 
-export interface GenuiMermaidNode {
-  type: 'mermaid'
-  code: string
-}
-
 type GenuiNodeVariant =
   | GenuiTextNode
   | GenuiRowNode
@@ -301,7 +296,6 @@ type GenuiNodeVariant =
   | GenuiLinkNode
   | GenuiDividerNode
   | GenuiPlotNode
-  | GenuiMermaidNode
 
 // Intersecting the union with GenuiVisibility distributes over the members,
 // so `node.type === 'text'` still narrows while every variant gains the
