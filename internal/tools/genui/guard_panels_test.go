@@ -191,9 +191,10 @@ func TestSanitize_CodeTrimmedNotRejected(t *testing.T) {
 }
 
 // Diagrams are a ```mermaid fence in the reply's markdown, not a GenUI node.
-func TestSanitize_MermaidNodeDropped(t *testing.T) {
-	if got := sanitizeOne(t, map[string]any{"type": "mermaid", "code": "graph TD; A-->B;"}); got != nil {
-		t.Fatalf("mermaid node kept: %v", got)
+func TestSanitize_MermaidNodeBecomesCode(t *testing.T) {
+	got := sanitizeOne(t, map[string]any{"type": "mermaid", "code": "graph TD; A-->B;"})
+	if got["type"] != "code" || got["lang"] != "mermaid" || got["code"] != "graph TD; A-->B;" {
+		t.Fatalf("mermaid node = %v, want a mermaid code excerpt", got)
 	}
 }
 

@@ -146,6 +146,12 @@ func sanitizeNode(node map[string]any, allowed map[string]bool, depth int, count
 		return nil
 	}
 	typ, _ := node["type"].(string)
+	// Diagrams are a markdown fence now. A mermaid node keeps its diagram
+	// source as a code excerpt instead of being dropped.
+	if typ == "mermaid" {
+		node = map[string]any{"type": "code", "lang": "mermaid", "code": node["code"]}
+		typ = "code"
+	}
 	if !allowed[typ] {
 		return nil
 	}

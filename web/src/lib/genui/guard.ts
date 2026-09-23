@@ -153,6 +153,9 @@ function sanitizeNode(
   count: { value: number }
 ): GenuiNode | null {
   if (depth > MAX_DEPTH || count.value >= MAX_NODES) return null
+  // Diagrams are a markdown fence now. A panel saved while `mermaid` was a
+  // node type keeps its diagram source as a code excerpt instead of losing it.
+  if (node.type === 'mermaid') node = { type: 'code', lang: 'mermaid', code: node.code }
   const type = node.type
   if (typeof type !== 'string' || !allowed.has(type)) return null
   // Reserve this node's own slot before recursing into any children — see

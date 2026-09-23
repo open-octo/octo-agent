@@ -92,7 +92,7 @@ octo 开箱自带 21 个 skill。每一个都会在模型判断任务匹配时�
 |---|---|
 | `web-access` | 应对难搞网页目标的方法论 + 跨 session 的经验库：需要登录/反爬的站点、结构未知的页面、多来源交叉核实 |
 | `artifact-design` | Artifacts 面板里任何自包含 HTML/Markdown 页面的设计指引——报告、仪表盘、架构图、生成式 UI，含页面内图表的图型选择与配色系统规则 |
-| `genui` | 让回复以真实组件呈现在对话里——仪表盘、可筛选表格、图表、mermaid 图、表单——而不是大段文字，且大部分交互在浏览器里就地完成。见[交互面板](/docs/zh/guides/genui/) |
+| `genui` | 让回复以真实组件呈现在对话里——仪表盘、可筛选表格、图表、表单——而不是大段文字，且大部分交互在浏览器里就地完成。见[交互面板](/docs/zh/guides/genui/) |
 | `office-xlsx` | 创建/读取/编辑 `.xlsx` 表格——公式、样式、合并单元格、多个 sheet、图表、数据校验 |
 | `ppt-master` | 把文档（PDF/DOCX/URL/Markdown）转成可编辑的 PowerPoint——SVG 生成的幻灯片、原生图表/表格、演讲者备注，导出 `.pptx` |
 | `image-gen` | 用 AI 模型（14 个后端）生成图片，或搜索开放版权素材，产出到文件——支持单张或批量；`ppt-master` 等 skill 会委托它生图 |

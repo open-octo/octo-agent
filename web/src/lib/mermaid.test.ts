@@ -39,6 +39,16 @@ describe('renderMarkdown: mermaid fences', () => {
     expect(renderMarkdown('````mermaid\ngraph TD\n```')).not.toContain('mermaid-block')
   })
 
+  it('tags a tilde fence, an info string after the name, and any case', () => {
+    expect(renderMarkdown('~~~mermaid\ngraph TD\n~~~')).toContain('mermaid-block')
+    expect(renderMarkdown('```mermaid title\ngraph TD\n```')).toContain('mermaid-block')
+    expect(renderMarkdown('```Mermaid\ngraph TD\n```')).toContain('mermaid-block')
+  })
+
+  it('treats a closing run indented four spaces as content', () => {
+    expect(renderMarkdown('```mermaid\ngraph TD\n    ```')).not.toContain('mermaid-block')
+  })
+
   it('does not tag other languages', () => {
     expect(renderMarkdown('```js\nx\n```')).not.toContain('mermaid-block')
   })
@@ -77,6 +87,31 @@ describe('setupMermaid', () => {
     el.innerHTML = renderMarkdown(md + '\n\nmore text')
     await flush()
     expect(el.querySelector('.mermaid-diagram svg')).not.toBeNull()
+    expect(render).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('setupMermaid: theme and failures', () => {
+  it('redraws a finished diagram when the theme changes', async () => {
+    render.mockImplementation(async () => ({ svg: `<svg><text>${document.documentElement.getAttribute('data-theme') ?? 'light'}</text></svg>` }))
+    const el = mount('```mermaid\ngraph TD\nA-->B\n```')
+    setupMermaid(el)
+    await flush()
+    expect(el.querySelector('.mermaid-diagram text')?.textContent).toBe('light')
+    document.documentElement.setAttribute('data-theme', 'dark')
+    await flush()
+    await flush()
+    expect(el.querySelectorAll('.mermaid-diagram')).toHaveLength(1)
+    expect(el.querySelector('.mermaid-diagram text')?.textContent).toBe('dark')
+    document.documentElement.removeAttribute('data-theme')
+  })
+
+  it('renders one source once when two blocks show it', async () => {
+    render.mockResolvedValue({ svg: '<svg><text>A</text></svg>' })
+    const el = mount('```mermaid\ngraph TD\nA-->B\n```\n\n```mermaid\ngraph TD\nA-->B\n```')
+    setupMermaid(el)
+    await flush()
+    expect(el.querySelectorAll('.mermaid-diagram')).toHaveLength(2)
     expect(render).toHaveBeenCalledTimes(1)
   })
 })

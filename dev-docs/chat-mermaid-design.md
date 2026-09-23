@@ -12,7 +12,11 @@ The rendered SVG is cached by theme + source. A streamed reply re-renders its ma
 
 ## Failure behaviour
 
-A block mermaid cannot render stays the code block it already is — no error line, nothing blanked. `suppressErrorRendering: true` is required for this: without it mermaid draws its own "Syntax error" diagram and leaves it attached to `document.body`, below the whole app.
+A block mermaid cannot render stays the code block it already is — no error line, nothing blanked — and logs a `console.warn`. `suppressErrorRendering: true` is required for this: without it mermaid draws its own "Syntax error" diagram and leaves it attached to `document.body`, below the whole app.
+
+A source mermaid rejects is cached as a failure. A failure to load mermaid itself (a lazy chunk that 404s after an upgrade) is not: it says nothing about the source, and a later attempt may load.
+
+`mermaid.initialize()` sets global config that `render()` reads while it runs, so renders go through one queue; two renders with different themes never overlap, and a diagram is never cached under the wrong theme.
 
 ## Security
 
@@ -28,7 +32,11 @@ Two settings carry weight beyond that:
 
 ## Theme
 
-The diagram uses mermaid's `dark` theme when `<html data-theme="dark">`, `default` otherwise, read at render time. A diagram already on screen keeps its theme until its message re-renders.
+The diagram uses mermaid's `dark` theme when `<html data-theme="dark">`, `default` otherwise, read at render time. mermaid's light-theme lines are unreadable on a dark background and the reverse, and a finished message never re-renders, so `setupMermaid` also watches `data-theme` and redraws every diagram in its container when it changes.
+
+## Compatibility
+
+`mermaid` is no longer a GenUI node type. Both spec guards (`guard.ts`, `internal/tools/genui/guard.go`) turn a `mermaid` node into a `code` node with `lang: "mermaid"`, so a panel saved while the node existed shows the diagram source instead of losing it, and a model that still emits one gets the same.
 
 ## Dependency
 

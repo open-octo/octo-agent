@@ -138,8 +138,8 @@ describe('content nodes', () => {
     expect(one({ type: 'code', code: 'x'.repeat(MAX_CODE_LEN + 50) }).code.length).toBe(MAX_CODE_LEN)
   })
 
-  it('drops a mermaid node — diagrams are a markdown fence now', () => {
-    expect(sanitizeSpec({ items: [{ type: 'mermaid', code: 'graph TD; A-->B;' }, { type: 'divider' }] }, READ_ONLY_NODE_TYPES).spec?.items).toEqual([{ type: 'divider' }])
+  it('shows a saved mermaid node as its source — diagrams are a markdown fence now', () => {
+    expect(one({ type: 'mermaid', code: 'graph TD; A-->B;' })).toEqual({ type: 'code', lang: 'mermaid', code: 'graph TD; A-->B;' })
   })
 
   it('accepts a divider with no fields', () => {

@@ -97,7 +97,7 @@ matches its description — you rarely need to invoke them by name.
 |---|---|
 | `web-access` | Methodology + a cross-session experience library for hard web targets: login-gated or anti-bot sites, unknown page structure, cross-source verification |
 | `artifact-design` | Design guidance for any self-contained HTML/Markdown page shown in the Artifacts panel — reports, dashboards, diagrams, generated UIs — including chart-type selection and color-system rules for any charts on the page |
-| `genui` | Renders a reply as real components in the chat — dashboards, filterable tables, charts, mermaid diagrams, forms — instead of prose, with most interaction resolving in the browser. See [Interactive panels](/docs/guides/genui/) |
+| `genui` | Renders a reply as real components in the chat — dashboards, filterable tables, charts, forms — instead of prose, with most interaction resolving in the browser. See [Interactive panels](/docs/guides/genui/) |
 | `office-xlsx` | Creates/reads/edits `.xlsx` spreadsheets — formulas, styling, merged cells, multiple sheets, charts, validation |
 | `ppt-master` | Turns a document (PDF/DOCX/URL/Markdown) into an editable PowerPoint deck — SVG-authored slides with native charts/tables and speaker notes, exported to `.pptx` |
 | `image-gen` | Generates images with an AI model (14 provider backends) or sources openly-licensed stock, saved to files — one-off or batch; other skills like `ppt-master` delegate to it |

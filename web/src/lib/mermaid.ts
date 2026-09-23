@@ -39,9 +39,16 @@ function currentTheme(): 'dark' | 'default' {
   return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default'
 }
 
+// mermaid.initialize() sets global config, and render() reads it while it
+// works, so a render with one theme must not overlap one with another — a
+// theme switch mid-render would otherwise cache a diagram under the wrong key.
+let queue: Promise<unknown> = Promise.resolve()
+
+// Resolves to null when mermaid rejects the source; rejects when mermaid
+// itself can't be loaded, which says nothing about the source.
 async function renderSvg(code: string, theme: 'dark' | 'default'): Promise<string | null> {
-  try {
-    const { default: mermaid } = await import('mermaid')
+  const { default: mermaid } = await import('mermaid')
+  const run = queue.then(async () => {
     mermaid.initialize({
       startOnLoad: false,
       securityLevel: 'strict',
@@ -66,22 +73,37 @@ async function renderSvg(code: string, theme: 'dark' | 'default'): Promise<strin
       // one matching the app.
       secure: ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'suppressErrorRendering', 'maxEdges', 'htmlLabels', 'theme', 'themeCSS', 'themeVariables'],
     })
-    const { svg } = await mermaid.render(`md-mermaid-${seq++}`, code)
-    return DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } })
-  } catch {
-    return null
-  }
+    try {
+      const { svg } = await mermaid.render(`md-mermaid-${seq++}`, code)
+      return DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } })
+    } catch (err) {
+      console.warn('mermaid: diagram not rendered:', err)
+      return null
+    }
+  })
+  // A rejected link would skip every later render queued behind it.
+  queue = run.catch(() => {})
+  return run
 }
 
 function svgFor(code: string, theme: 'dark' | 'default'): Promise<string | null> {
   const key = `${theme}\x00${code}`
   let p = inflight.get(key)
   if (!p) {
-    p = renderSvg(code, theme).then((svg) => {
-      cache.set(key, svg)
-      inflight.delete(key)
-      return svg
-    })
+    p = renderSvg(code, theme).then(
+      (svg) => {
+        cache.set(key, svg)
+        inflight.delete(key)
+        return svg
+      },
+      (err) => {
+        // Not cached: a chunk that failed to load (say, after an upgrade
+        // replaced it) may load on a later attempt.
+        console.warn('mermaid: failed to load:', err)
+        inflight.delete(key)
+        return null
+      },
+    )
     inflight.set(key, p)
   }
   return p
@@ -122,12 +144,29 @@ export function setupMermaid(el: HTMLElement): { destroy: () => void } {
   hydrate(el)
   const obs = new MutationObserver(() => hydrate(el))
   obs.observe(el, { childList: true, subtree: true })
-  return { destroy: () => obs.disconnect() }
+  // A finished message never re-renders, so a theme switch has to redraw its
+  // diagrams itself: mermaid's light lines vanish on a dark background and
+  // the reverse.
+  const themeObs = new MutationObserver(() => {
+    for (const block of el.querySelectorAll<HTMLElement>(`[${RENDERED_ATTR}]`)) {
+      block.querySelector('.mermaid-diagram')?.remove()
+      block.removeAttribute(RENDERED_ATTR)
+    }
+    hydrate(el)
+  })
+  themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+  return {
+    destroy: () => {
+      obs.disconnect()
+      themeObs.disconnect()
+    },
+  }
 }
 
 /** Test seam. */
 export function resetMermaidCache(): void {
   cache.clear()
   inflight.clear()
+  queue = Promise.resolve()
   seq = 0
 }
