@@ -126,7 +126,9 @@ function onLocalUI(): boolean {
 function exportFromRetiredOrigin(slug: string): Promise<Record<string, string>> {
   if (!onLocalUI()) return Promise.resolve({})
   const port = location.port ? `:${location.port}` : ''
-  const origin = `http://${slug.toLowerCase()}.apps.localhost${port}`
+  // The same scheme as this page: an https UI could not frame an http page
+  // anyway (mixed content), and a local serve is plain http either way.
+  const origin = `${location.protocol}//${slug.toLowerCase()}.apps.localhost${port}`
   return new Promise((resolve) => {
     const frame = document.createElement('iframe')
     frame.style.display = 'none'
