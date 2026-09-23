@@ -1,6 +1,6 @@
-# Mermaid diagrams in chat
+# Mermaid diagrams in chat and Markdown artifacts
 
-A ` ```mermaid ` fence in an assistant reply renders as a diagram in the Web UI's chat. It is ordinary markdown: the model writes the fence it would write anywhere else, and every other surface (IM, the TUI, Markdown artifact previews, exported transcripts) shows the fence as a code block.
+A ` ```mermaid ` fence renders as a diagram in two places in the Web UI: an assistant reply in the chat, and the preview of a Markdown artifact. It is ordinary markdown: the model writes the fence it would write anywhere else, and every other surface (IM, the TUI, the mobile UI, exported transcripts, the `.md` file itself) shows the fence as its source.
 
 ## Rendering path
 
@@ -8,7 +8,13 @@ A ` ```mermaid ` fence in an assistant reply renders as a diagram in the Web UI'
 2. `setupMermaid` (`web/src/lib/mermaid.ts`) is a Svelte action on the chat's markdown containers (`.rich-answer`, `.think-body`, via `setupAssistantEl` in `ChatView.svelte`). It hydrates every untagged `mermaid-block` on mount and on each DOM mutation, since `{@html}` replaces the nodes whenever the rendered string changes.
 3. Hydration appends a `.mermaid-diagram` holding the SVG and marks the block `data-mermaid-rendered`; CSS then hides the block's `<pre>`. The source stays in the DOM, so the header's Copy button still copies the diagram source.
 
-The rendered SVG is cached by theme + source. A streamed reply re-renders its markdown every 80 ms; each pass rebuilds the block, and the cached SVG is re-attached synchronously instead of re-running mermaid, so the diagram doesn't flicker. A source mermaid rejects is cached as a failure and not retried.
+### Markdown artifact previews
+
+A Markdown artifact previews in a sandboxed `srcdoc` frame (`buildTextBody` in `web/src/lib/artifacts.ts`) that runs no mermaid and that no action can reach. `renderMermaidBlocks` draws the blocks in the app before the preview document is built, parsing the rendered markdown into a detached `<template>`, attaching each diagram the same way hydration does, and serializing it back. The frame receives finished SVG and needs no script. The preview style sheets carry the same hide-the-`<pre>` rule. A theme switch already rebuilds every text preview (`installArtifactThemeRefresh`), which redraws its diagrams in the new theme.
+
+### Caching
+
+The rendered SVG is cached by theme + source, shared by both paths. A streamed reply re-renders its markdown every 80 ms; each pass rebuilds the block, and the cached SVG is re-attached synchronously instead of re-running mermaid, so the diagram doesn't flicker. A source mermaid rejects is cached as a failure and not retried.
 
 ## Failure behaviour
 

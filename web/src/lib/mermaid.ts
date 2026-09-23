@@ -88,6 +88,7 @@ async function renderSvg(code: string, theme: 'dark' | 'default'): Promise<strin
 
 function svgFor(code: string, theme: 'dark' | 'default'): Promise<string | null> {
   const key = `${theme}\x00${code}`
+  if (cache.has(key)) return Promise.resolve(cache.get(key) ?? null)
   let p = inflight.get(key)
   if (!p) {
     p = renderSvg(code, theme).then(
@@ -110,7 +111,12 @@ function svgFor(code: string, theme: 'dark' | 'default'): Promise<string | null>
 }
 
 function apply(block: HTMLElement, svg: string) {
-  if (!block.isConnected || block.hasAttribute(RENDERED_ATTR)) return
+  if (!block.isConnected) return
+  attach(block, svg)
+}
+
+function attach(block: HTMLElement, svg: string) {
+  if (block.hasAttribute(RENDERED_ATTR)) return
   const diagram = document.createElement('div')
   diagram.className = 'mermaid-diagram'
   diagram.innerHTML = svg
@@ -161,6 +167,25 @@ export function setupMermaid(el: HTMLElement): { destroy: () => void } {
       themeObs.disconnect()
     },
   }
+}
+
+/** Draws the mermaid blocks in a rendered-markdown string and returns the
+ * string with each diagram in place — for a document that renders somewhere
+ * no action can reach, such as a Markdown artifact's sandboxed srcdoc frame.
+ * The SVG is produced here, in the app, so the frame needs no script. */
+export async function renderMermaidBlocks(html: string): Promise<string> {
+  if (!html.includes(MERMAID_BLOCK_CLASS)) return html
+  const tpl = document.createElement('template')
+  tpl.innerHTML = html
+  const blocks = tpl.content.querySelectorAll<HTMLElement>(`.${MERMAID_BLOCK_CLASS}`)
+  const theme = currentTheme()
+  await Promise.all(Array.from(blocks, async (block) => {
+    const code = block.querySelector('pre code')?.textContent ?? ''
+    if (!code.trim()) return
+    const svg = await svgFor(code, theme)
+    if (svg) attach(block, svg)
+  }))
+  return tpl.innerHTML
 }
 
 /** Test seam. */
