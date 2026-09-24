@@ -93,31 +93,29 @@ func (h *History) ReplaceWithPersisted(msgs []Message) {
 	h.rewritten = false
 }
 
-// UserTexts returns the text of each user message that carries any, oldest
-// first: its Content, or its text blocks joined. Tool results, which ride
-// user messages as blocks, contribute nothing.
-func (h *History) UserTexts() []string {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	var out []string
-	for _, m := range h.messages {
+// TokensSince returns the estimated tokens of the messages after the newest
+// user message whose text satisfies match, and whether there was one; with
+// none, it returns the estimate for the whole history. A user message's text
+// is its Content followed by its text blocks; tool results, which ride user
+// messages as blocks, never match.
+func (h *History) TokensSince(match func(text string) bool) (int, bool) {
+	msgs := h.Snapshot()
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
 		if m.Role != RoleUser {
 			continue
 		}
 		t := m.Content
 		for _, b := range m.Blocks {
 			if b.Type == "text" && b.Text != "" {
-				if t != "" {
-					t += "\n\n"
-				}
-				t += b.Text
+				t += "\n\n" + b.Text
 			}
 		}
-		if t != "" {
-			out = append(out, t)
+		if match(t) {
+			return EstimateTokens(msgs[i+1:]), true
 		}
 	}
-	return out
+	return EstimateTokens(msgs), false
 }
 
 // Tail returns the last n messages (or all if fewer).

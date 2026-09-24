@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"sync"
 	"testing"
 )
@@ -87,15 +88,30 @@ func TestHistory_ReplaceWithPersistedIsNotARewrite(t *testing.T) {
 	}
 }
 
-func TestHistory_UserTexts(t *testing.T) {
+func TestHistory_TokensSince(t *testing.T) {
 	h := NewHistory()
-	h.Append(NewUserMessage("a"))
-	h.Append(NewAssistantMessage("b"))
-	h.Append(Message{Role: RoleUser, Blocks: []ContentBlock{NewTextBlock("c1"), NewTextBlock("c2")}})
-	h.Append(NewToolResultMessage([]ContentBlock{NewToolResultBlock("t", "out", false)}))
-	got := h.UserTexts()
-	want := []string{"a", "c1\n\nc2"}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("UserTexts = %q, want %q", got, want)
+	h.Append(NewUserMessage("old"))
+	h.Append(NewUserMessage("MARK in content"))
+	h.Append(NewAssistantMessage("after the mark"))
+	h.Append(NewToolResultMessage([]ContentBlock{NewToolResultBlock("t", "MARK in a tool result", false)}))
+	all := h.Snapshot()
+	isMark := func(s string) bool { return strings.Contains(s, "MARK") }
+
+	got, found := h.TokensSince(isMark)
+	if !found {
+		t.Fatal("the user message carrying the mark was not found")
+	}
+	if want := EstimateTokens(all[2:]); got != want {
+		t.Errorf("tokens since = %d, want %d (the two messages after it; a tool result never matches)", got, want)
+	}
+
+	h.Append(Message{Role: RoleUser, Blocks: []ContentBlock{NewTextBlock("MARK in a text block")}})
+	if got, found := h.TokensSince(isMark); !found || got != 0 {
+		t.Errorf("mark in a text block of the newest message: got %d, %v; want 0, true", got, found)
+	}
+
+	none := func(string) bool { return false }
+	if got, found := h.TokensSince(none); found || got != EstimateTokens(h.Snapshot()) {
+		t.Errorf("no match: got %d, %v; want the whole history, false", got, found)
 	}
 }

@@ -105,19 +105,26 @@ optional sections whose rules are written **in full** (not as pointer links) and
 re-surfaced on the message stream when they're relevant:
 
 ```
-## 必须遵守        always-apply rules — restated every 10 user turns
+## 必须遵守        always-apply rules — restated as the conversation grows (~100k tokens)
 ## 触发提醒        each bullet "(触发: kw1, kw2) rule text" — recalled on a keyword hit
 ```
 
 `memory.ParseRules` extracts these tiers (section headings are matched by
 keyword — `必须遵守`/`always`, `触发`/`trigger` — tolerant of emoji and heading
 level). `memory.Injector.Reminder` renders the per-turn `<system-reminder>`:
-always-apply rules once the conversation has run `restateEvery` (10) user turns
-past the system prompt — which already carries them in the memory block — or
-past the last restatement, plus any triggered rules whose keywords occur in the
-user input, each surfaced at most once per session. Each restatement stays in
-the history, so restating every turn cost one copy per turn for good; the
-history itself — read when the hook fires, via `History.UserTexts` — is the
+always-apply rules once the conversation has grown `restateAfterTokens`
+(100k, estimated with `agent.EstimateTokens`) past the system prompt — which
+already carries them in the memory block — or past the last restatement, plus
+any triggered rules whose keywords occur in the user input, each surfaced at
+most once per session. Distance is measured in tokens, not turns: one
+tool-heavy turn can add tens of thousands of tokens, a long chat very few, and
+compaction shrinks the conversation and so resets the count. A rule the system
+prompt lacks is restated at once: serve freezes a session's prompt on its first
+turn, while the injector parses `MEMORY.md` when the process first serves the
+session, so a rule added in between reaches the reminder but not the prompt.
+Each restatement stays in the history, so restating every turn cost one copy
+per turn for good. The history and system prompt, read when the hook fires
+through `memory.HistoryView` (`History.TokensSince`, `Agent.System`), are the
 judge, since the Web UI and an IM chat drive one session through separate
 agents and injectors. A restatement alone carries a one-line header; newly
 triggered rules come with the full one. Trigger matching is

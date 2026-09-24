@@ -1193,7 +1193,10 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if homeMemDir != "" && homeMemDir != memDir {
 			rules.Merge(memory.ParseRules(homeMemDir))
 		}
-		memory.NewInjector(rules).RegisterHooks(hookEngine, func() []string { return a.History.UserTexts() })
+		memory.NewInjector(rules).RegisterHooks(hookEngine, memory.HistoryView{
+			TokensSince: func(match func(string) bool) (int, bool) { return a.History.TokensSince(match) },
+			System:      func() string { return a.System },
+		})
 	}
 	// Suggest saving a workflow once the model chains >=2 skills by hand in a
 	// turn — independent of memory, so wired unconditionally.

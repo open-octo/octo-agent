@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/hooks"
 )
 
@@ -18,10 +19,10 @@ func newTestInjector() *Injector {
 	})
 }
 
-func TestReminder_AlwaysEveryTurn(t *testing.T) {
+func TestReminder_AlwaysEveryTurnWhenHistoryUnknown(t *testing.T) {
 	in := newTestInjector()
 	for _, input := range []string{"hello", "what's up", "fix this bug"} {
-		got := in.Reminder(input, nil)
+		got := in.Reminder(input, HistoryView{})
 		if !strings.Contains(got, "never commit on main") {
 			t.Errorf("input %q: always rule missing from reminder:\n%s", input, got)
 		}
@@ -34,12 +35,12 @@ func TestReminder_AlwaysEveryTurn(t *testing.T) {
 func TestReminder_TriggeredOnlyOnMatch(t *testing.T) {
 	in := newTestInjector()
 
-	off := in.Reminder("just say hi", nil)
+	off := in.Reminder("just say hi", HistoryView{})
 	if strings.Contains(off, "deploy via Lark bot") {
 		t.Errorf("untriggered rule leaked:\n%s", off)
 	}
 
-	on := in.Reminder("帮我部署到 311", nil)
+	on := in.Reminder("帮我部署到 311", HistoryView{})
 	if !strings.Contains(on, "deploy via Lark bot") {
 		t.Errorf("triggered rule missing:\n%s", on)
 	}
@@ -48,11 +49,11 @@ func TestReminder_TriggeredOnlyOnMatch(t *testing.T) {
 func TestReminder_TriggeredDedupPerSession(t *testing.T) {
 	in := newTestInjector()
 
-	first := in.Reminder("deploy now", nil)
+	first := in.Reminder("deploy now", HistoryView{})
 	if !strings.Contains(first, "deploy via Lark bot") {
 		t.Fatalf("first deploy turn should surface the rule:\n%s", first)
 	}
-	second := in.Reminder("deploy again", nil)
+	second := in.Reminder("deploy again", HistoryView{})
 	if strings.Contains(second, "deploy via Lark bot") {
 		t.Errorf("rule should not repeat in same session:\n%s", second)
 	}
@@ -66,14 +67,14 @@ func TestReminder_EmptyWhenNothing(t *testing.T) {
 	in := NewInjector(&Rules{
 		Triggered: []Rule{{Text: "x", Triggers: []string{"deploy"}}},
 	})
-	if got := in.Reminder("unrelated input", nil); got != "" {
+	if got := in.Reminder("unrelated input", HistoryView{}); got != "" {
 		t.Errorf("expected empty reminder, got:\n%s", got)
 	}
 }
 
 func TestReminder_NilSafe(t *testing.T) {
 	var in *Injector
-	if got := in.Reminder("anything", nil); got != "" {
+	if got := in.Reminder("anything", HistoryView{}); got != "" {
 		t.Errorf("nil injector should return empty, got %q", got)
 	}
 }
@@ -124,7 +125,7 @@ func TestSaveNudge_OncePerTurn_RearmedByReminder(t *testing.T) {
 	if got := in.SaveNudge("terminal", term("gh pr merge 1")); got != "" {
 		t.Errorf("second milestone in same turn should be silent, got %q", got)
 	}
-	in.Reminder("next user turn", nil) // new turn re-arms the latch
+	in.Reminder("next user turn", HistoryView{}) // new turn re-arms the latch
 	if in.SaveNudge("terminal", term("gh pr merge 2")) == "" {
 		t.Error("milestone on a later turn should nudge again")
 	}
@@ -139,72 +140,93 @@ func TestSaveNudge_NilSafe(t *testing.T) {
 
 // ─── Restating the always-apply rules ───────────────────────────────────────
 
-func plain(n int) []string {
-	h := make([]string, n)
-	for i := range h {
-		h[i] = "plain message"
+// view fakes what the model sees: tokens since the last restatement (or the
+// start), whether there was one, and the system prompt.
+func view(since int, restated bool, system string) HistoryView {
+	return HistoryView{
+		TokensSince: func(func(string) bool) (int, bool) { return since, restated },
+		System:      func() string { return system },
 	}
-	return h
 }
 
-// withRestatement returns user texts where the always rules were restated
-// `ago` user messages before the end.
-func withRestatement(in *Injector, ago int) []string {
-	return append([]string{in.Reminder("start", nil) + "\n\nstart"}, plain(ago)...)
-}
+const promptWithRules = "…memory block… never commit on main …"
 
-func TestReminder_AlwaysRestatedOnlyEveryN(t *testing.T) {
-	in0 := newTestInjector()
+func TestReminder_AlwaysRestatedByDistance(t *testing.T) {
 	cases := []struct {
-		name    string
-		history []string
-		want    bool
+		name string
+		v    HistoryView
+		want bool
 	}{
-		// The system prompt carries MEMORY.md, so the start needs no copy.
-		{"fresh session", []string{}, false},
-		{"fewer than restateEvery turns in", plain(restateEvery - 1), false},
-		{"restateEvery turns in", plain(restateEvery), true},
-		{"restated just now", withRestatement(in0, 0), false},
-		{"restated a few turns ago", withRestatement(in0, restateEvery-1), false},
-		{"restated restateEvery turns ago", withRestatement(in0, restateEvery), true},
-		{"history unknown", nil, true},
+		{"fresh session, rules in the prompt", view(0, false, promptWithRules), false},
+		{"conversation still short", view(restateAfterTokens-1, false, promptWithRules), false},
+		{"conversation grown past the threshold", view(restateAfterTokens, false, promptWithRules), true},
+		{"restated recently", view(10, true, promptWithRules), false},
+		{"grown past the threshold since the restatement", view(restateAfterTokens, true, promptWithRules), true},
+		{"rule missing from a frozen prompt", view(0, false, "a prompt frozen before the rule was added"), true},
+		{"missing rule already restated", view(10, true, "a prompt frozen before the rule was added"), false},
+		{"history unknown", HistoryView{}, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := newTestInjector().Reminder("next", c.history)
+			got := newTestInjector().Reminder("next", c.v)
 			if has := strings.Contains(got, "never commit on main"); has != c.want {
 				t.Fatalf("always rule present = %v, want %v:\n%s", has, c.want, got)
 			}
 			if !c.want && got != "" {
 				t.Errorf("nothing to surface, got:\n%s", got)
 			}
-			if c.want && strings.Contains(got, fullHeader) {
-				t.Errorf("a restatement alone should carry the short header:\n%s", got)
+			if c.want && (strings.Contains(got, fullHeader) || !isRestatement(got)) {
+				t.Errorf("a restatement alone should carry the short header and be recognisable:\n%s", got)
 			}
 		})
 	}
 }
 
 // A newly triggered rule always comes with the full header, and doesn't drag
-// the always rules along when they aren't due.
-func TestReminder_TriggeredCarriesFullHeaderWithoutAlways(t *testing.T) {
-	in := newTestInjector()
-	got := in.Reminder("帮我部署", plain(2))
-	if !strings.Contains(got, "deploy via Lark bot") || !strings.Contains(got, fullHeader) {
-		t.Fatalf("triggered rule with full header expected:\n%s", got)
+// the always rules along when they aren't due; when they are, both go out and
+// the result still counts as a restatement.
+func TestReminder_TriggeredWithFullHeader(t *testing.T) {
+	notDue := newTestInjector().Reminder("帮我部署", view(10, true, promptWithRules))
+	if !strings.Contains(notDue, "deploy via Lark bot") || !strings.Contains(notDue, fullHeader) {
+		t.Fatalf("triggered rule with full header expected:\n%s", notDue)
 	}
-	if strings.Contains(got, "never commit on main") {
-		t.Errorf("always rule restated although not due:\n%s", got)
+	if strings.Contains(notDue, "never commit on main") || isRestatement(notDue) {
+		t.Errorf("always rule restated although not due:\n%s", notDue)
+	}
+
+	due := newTestInjector().Reminder("帮我部署", view(restateAfterTokens, true, promptWithRules))
+	if !strings.Contains(due, "deploy via Lark bot") || !strings.Contains(due, "never commit on main") || !isRestatement(due) {
+		t.Errorf("both tiers expected, recognisable as a restatement:\n%s", due)
 	}
 }
 
-// The hook reads the history when it fires; an empty history is known (a
-// fresh session), not unknown.
-func TestInjector_HookReadsHistoryAtFireTime(t *testing.T) {
+func TestIsRestatement(t *testing.T) {
+	cases := map[string]bool{
+		"<system-reminder>\n" + shortAlways + "- r\n</system-reminder>\n\nhi": true,
+		// The format before this change, still found in older sessions.
+		"<system-reminder>\nReminders from your project memory. …\n\nAlways apply:\n- r\n</system-reminder>": true,
+		// A triggered rule that merely mentions the words.
+		"<system-reminder>\n" + fullHeader + "\nRelevant to what you're about to do:\n- Always apply gofmt\n</system-reminder>": false,
+		"Always apply (from your project memory): pasted by the user":                                                           false,
+	}
+	for text, want := range cases {
+		if got := isRestatement(text); got != want {
+			t.Errorf("isRestatement(%q) = %v, want %v", text, got, want)
+		}
+	}
+}
+
+// Through the hook, against a real agent history: nothing at the start (the
+// prompt carries the rules), a restatement once the conversation has grown,
+// then nothing again right after it.
+func TestInjector_HookAgainstRealHistory(t *testing.T) {
 	in := newTestInjector()
 	e := hooks.NewEngine(nil)
-	var history []string
-	in.RegisterHooks(e, func() []string { return history })
+	h := agent.NewHistory()
+	in.RegisterHooks(e, HistoryView{
+		TokensSince: func(m func(string) bool) (int, bool) { return h.TokensSince(m) },
+		System:      func() string { return promptWithRules },
+	})
 	submit := func() string {
 		return e.Inject(context.Background(), hooks.Payload{Event: hooks.EventUserPromptSubmit, UserInput: "hi"})
 	}
@@ -212,12 +234,13 @@ func TestInjector_HookReadsHistoryAtFireTime(t *testing.T) {
 	if got := submit(); got != "" {
 		t.Fatalf("first turn: the system prompt already carries the rules, got %q", got)
 	}
-	history = plain(restateEvery)
+	h.Append(agent.NewUserMessage("hi"))
+	h.Append(agent.NewAssistantMessage(strings.Repeat("a long tool-heavy stretch of work ", restateAfterTokens/4)))
 	got := submit()
 	if !strings.Contains(got, "never commit on main") {
-		t.Fatalf("restateEvery turns in, the rules are due:\n%s", got)
+		t.Fatalf("the conversation has grown past the threshold:\n%s", got)
 	}
-	history = append(history, got+"\n\nhi")
+	h.Append(agent.NewUserMessage(got + "\n\nhi"))
 	if got := submit(); got != "" {
 		t.Errorf("just restated: got %q", got)
 	}

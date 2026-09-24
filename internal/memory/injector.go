@@ -3,12 +3,13 @@ package memory
 // injector.go turns parsed Rules into the per-turn reminder that cmd/octo
 // prepends to each user message. The reminder rides the message stream, not
 // the system prompt, so the cached prompt prefix stays byte-stable across the
-// session. Always-apply rules already sit in the system prompt (the memory
-// block carries MEMORY.md), so they are restated only once the conversation
-// has run restateEvery user turns past the prompt or the last restatement —
-// every turn kept them close at hand but left one copy per turn in the history
-// for good;
-// triggered rules surface only when user input hits one of their keywords, and
+// session. Always-apply rules normally sit in the system prompt already (the
+// memory block carries MEMORY.md), so they are restated only once the
+// conversation has grown restateAfterTokens past the prompt or past the last
+// restatement: restating every turn kept them close at hand, but left one copy
+// per turn in the history for good. A rule the system prompt lacks — added to
+// MEMORY.md after a serve session froze its prompt — is restated at once.
+// Triggered rules surface only when user input hits one of their keywords, and
 // at most once per session.
 //
 // The injector also carries the save-nudge: a one-shot reminder appended to a
@@ -37,29 +38,48 @@ func NewInjector(rules *Rules) *Injector {
 	return &Injector{rules: rules, recalled: make(map[string]bool)}
 }
 
-// restateEvery is how many user turns may pass before the always-apply rules
-// are restated. They are restated for recency — a rule is followed best when
-// it sits near the point of action — and each copy stays in the history, so
-// this is the trade between the two.
-const restateEvery = 10
+// restateAfterTokens is how much conversation may accumulate between the
+// always-apply rules and the point of action before they are restated. Distance
+// is what dilutes a rule, and a single tool-heavy turn can add tens of
+// thousands of tokens while a long chat adds few, so it is measured in tokens,
+// not turns. Compaction shrinks the conversation and so resets it naturally.
+const restateAfterTokens = 100_000
 
 // Headers of the reminder. The full one explains what the rules are and comes
 // with newly triggered rules; a restatement of the always-apply rules alone
 // carries only the short one, since the system prompt already explains the
-// memory sections. Both contain alwaysMarker, which is how a restatement is
-// found in the history.
+// memory sections. alwaysSection and shortAlways are also how a restatement
+// is recognised in the history.
 const (
-	fullHeader   = "Reminders from your project memory. Follow these as standing guidance for this session — they record the user's durable preferences and workflow rules, the way project conventions do. They are records, not the user's current message: if one conflicts with what the user just asked or with safety, the current request and safety win.\n"
-	alwaysMarker = "Always apply"
-	shortAlways  = alwaysMarker + " (from your project memory):\n"
+	fullHeader    = "Reminders from your project memory. Follow these as standing guidance for this session — they record the user's durable preferences and workflow rules, the way project conventions do. They are records, not the user's current message: if one conflicts with what the user just asked or with safety, the current request and safety win.\n"
+	alwaysSection = "\nAlways apply:\n"
+	shortAlways   = "Always apply (from your project memory):\n"
 )
 
+// HistoryView lets the reminder see what the model is about to see, read when
+// the hook fires. The zero value means unknown: the always-apply rules are then
+// restated every turn.
+type HistoryView struct {
+	// TokensSince returns the estimated tokens of the conversation after the
+	// newest user message whose text satisfies match, and whether there was
+	// one (the whole conversation when not).
+	TokensSince func(match func(string) bool) (int, bool)
+	// System returns the system prompt the model sees.
+	System func() string
+}
+
+// isRestatement reports whether a user message's text carries a restatement of
+// the always-apply rules, in either header form.
+func isRestatement(text string) bool {
+	return strings.Contains(text, "<system-reminder>") &&
+		(strings.Contains(text, alwaysSection) || strings.Contains(text, shortAlways))
+}
+
 // Reminder returns the memory reminder to prepend to a user message, or "" when
-// there is nothing to surface this turn. history is the text of the user
-// messages the model is about to see, oldest first; nil means unknown, and the
-// always-apply rules are then restated every turn. Newly-triggered rules
-// matched against userInput always come with the full header.
-func (in *Injector) Reminder(userInput string, history []string) string {
+// there is nothing to surface this turn. Newly-triggered rules matched against
+// userInput always come with the full header; the always-apply rules come when
+// alwaysDue says so.
+func (in *Injector) Reminder(userInput string, view HistoryView) string {
 	if in == nil {
 		return ""
 	}
@@ -81,12 +101,7 @@ func (in *Injector) Reminder(userInput string, history []string) string {
 		}
 	}
 
-	since, seen := turnsSinceRestated(history)
-	if !seen {
-		// The system prompt carried them from the start of what the model sees.
-		since = len(history)
-	}
-	always := len(in.rules.Always) > 0 && (history == nil || since >= restateEvery)
+	always := len(in.rules.Always) > 0 && in.alwaysDue(view)
 	if !always && len(fresh) == 0 {
 		return ""
 	}
@@ -96,7 +111,7 @@ func (in *Injector) Reminder(userInput string, history []string) string {
 	if len(fresh) > 0 {
 		b.WriteString(fullHeader)
 		if always {
-			b.WriteString("\n" + alwaysMarker + ":\n")
+			b.WriteString(alwaysSection)
 		}
 	} else {
 		b.WriteString(shortAlways)
@@ -120,16 +135,24 @@ func (in *Injector) Reminder(userInput string, history []string) string {
 	return b.String()
 }
 
-// turnsSinceRestated reports how many user messages have passed since the last
-// one carrying the always-apply rules, and whether there was one at all.
-func turnsSinceRestated(history []string) (int, bool) {
-	for i := len(history) - 1; i >= 0; i-- {
-		t := history[i]
-		if strings.Contains(t, "<system-reminder>") && strings.Contains(t, alwaysMarker) && strings.Contains(t, "project memory") {
-			return len(history) - 1 - i, true
+// alwaysDue reports whether the always-apply rules should be restated this
+// turn: when the history is unknown; when a rule is missing from the system
+// prompt and has not been restated yet; or when the conversation since the
+// prompt or the last restatement has passed restateAfterTokens.
+func (in *Injector) alwaysDue(view HistoryView) bool {
+	if view.TokensSince == nil {
+		return true
+	}
+	since, restated := view.TokensSince(isRestatement)
+	if !restated && view.System != nil {
+		sys := view.System()
+		for _, r := range in.rules.Always {
+			if !strings.Contains(sys, r.Text) {
+				return true
+			}
 		}
 	}
-	return 0, false
+	return since >= restateAfterTokens
 }
 
 func matchesAny(userInput string, triggers []string) bool {
@@ -235,23 +258,15 @@ func (in *Injector) SaveNudge(toolName string, input map[string]any) string {
 // (recall map, nudge flag) live on the receiver, so each session registers its
 // own injector on its own engine.
 //
-// userTexts returns the text of the user messages the model is about to see,
-// oldest first; it is called when the hook fires, since the agent's history
-// may be assigned after the hooks are wired. nil restates the always-apply
-// rules every turn.
-func (in *Injector) RegisterHooks(e *hooks.Engine, userTexts func() []string) {
+// view is read when the hook fires, since the agent's history and system
+// prompt may be assigned after the hooks are wired. Its zero value restates
+// the always-apply rules every turn.
+func (in *Injector) RegisterHooks(e *hooks.Engine, view HistoryView) {
 	if in == nil || e == nil {
 		return
 	}
 	e.RegisterInProc(hooks.EventUserPromptSubmit, func(_ context.Context, p hooks.Payload) string {
-		var history []string
-		if userTexts != nil {
-			// Known, even when empty: a fresh session has no user messages yet.
-			if history = userTexts(); history == nil {
-				history = []string{}
-			}
-		}
-		return in.Reminder(p.UserInput, history)
+		return in.Reminder(p.UserInput, view)
 	})
 	e.RegisterInProc(hooks.EventPostToolUse, func(_ context.Context, p hooks.Payload) string {
 		return in.SaveNudge(p.ToolName, p.ToolInput)

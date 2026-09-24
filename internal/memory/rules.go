@@ -3,7 +3,7 @@ package memory
 // rules.go adds an actionable, attention-aware layer on top of the plain
 // MEMORY.md injection. MEMORY.md may carry two optional structured sections:
 //
-//	## 必须遵守        (always-apply rules; restated near every user turn)
+//	## 必须遵守        (always-apply rules; restated as the conversation grows)
 //	## 触发提醒        (rules recalled only when user input hits a keyword)
 //
 // Rules in these sections are written in full (not as pointer links), so the
@@ -75,7 +75,7 @@ type Rule struct {
 
 // Rules holds the two actionable tiers parsed from MEMORY.md.
 type Rules struct {
-	Always    []Rule // restated every turn
+	Always    []Rule // restated as the conversation grows (see restateAfterTokens)
 	Triggered []Rule // recalled when user input matches a trigger
 }
 

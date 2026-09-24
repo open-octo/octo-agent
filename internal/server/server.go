@@ -1477,8 +1477,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd), sourceHookDirs(cwd, proj)...)
 	hookEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
 	if memDir := s.sessionMemDir(proj); memDir != "" {
-		// Read at call time: a.History is assigned after the hooks are wired.
-		s.injectorFor(sess.ID, memDir).RegisterHooks(hookEngine, func() []string { return a.History.UserTexts() })
+		s.injectorFor(sess.ID, memDir).RegisterHooks(hookEngine, memoryView(a))
 	}
 	// Workflow save-nudge — memory-independent, wired for every session.
 	tools.NewWorkflowNudger().RegisterHooks(hookEngine)
@@ -1512,6 +1511,15 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 // is bound on first use: a session retargeted into another project keeps
 // its old rules until the injector is dropped, matching how the recall
 // latch already survives across turns.
+// memoryView lets the memory reminder see a's history and system prompt,
+// read when the hook fires: buildAgent assigns both after wiring the hooks.
+func memoryView(a *agent.Agent) memory.HistoryView {
+	return memory.HistoryView{
+		TokensSince: func(match func(string) bool) (int, bool) { return a.History.TokensSince(match) },
+		System:      func() string { return a.System },
+	}
+}
+
 func (s *Server) injectorFor(key, memDir string) *memory.Injector {
 	s.injectorMu.Lock()
 	defer s.injectorMu.Unlock()
@@ -3718,7 +3726,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	imEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd), sourceHookDirs(cwd, proj)...)
 	imEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
 	if memDir := s.sessionMemDir(proj); memDir != "" {
-		s.injectorFor("im:"+string(sess.Key), memDir).RegisterHooks(imEngine, func() []string { return sess.Agent.History.UserTexts() })
+		s.injectorFor("im:"+string(sess.Key), memDir).RegisterHooks(imEngine, memoryView(sess.Agent))
 	}
 	// Workflow save-nudge — memory-independent, wired for every IM session.
 	tools.NewWorkflowNudger().RegisterHooks(imEngine)
