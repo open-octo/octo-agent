@@ -559,6 +559,9 @@ func startHub(app *application.App, bridge *nativeBridge, settings desktopSettin
 	server.StartUploadsHousekeeping()
 
 	srv, err := server.New(server.Config{
+		// Served via ServeOn(ln) below, so this is not a bind address — it
+		// tells sessions which port the REST API is on.
+		Addr:  ln.Addr().String(),
 		Tools: true,
 		// On: the version badge needs the latest-release lookup to know an update
 		// exists. It reports upgrade_mode "installer" (Native is set), so the web

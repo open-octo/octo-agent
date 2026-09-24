@@ -87,8 +87,10 @@ happens to be running `octo serve`, every endpoint above is unreachable —
 ```
 curl -s --max-time 1 http://localhost:8088/api/version
 ```
-(8088 is the default `octo serve` port; if the user has a custom `--addr`,
-try that instead.) No response within ~1s → no server is running. Don't keep
+(8088 is the default `octo serve` port. If the Environment section has an
+`Octo server:` line, this session runs inside that server: skip the check and
+use that address for every API call below. Otherwise, if the user has a custom
+`--addr`, try that instead.) No response within ~1s → no server is running. Don't keep
 retrying or guessing other ports — fall back to the file-based approach below
 for anything it covers, and tell the user plainly when something (see "Hiding
 a curated expert" below) genuinely requires a running server.

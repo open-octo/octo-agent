@@ -88,7 +88,9 @@ channels:
 
 ## Hot-reload after config change
 
-After writing `channels.yml`, apply the change without a full restart:
+After writing `channels.yml`, apply the change without a full restart. (Every
+`127.0.0.1:8088` in this skill is the default address; if the Environment
+section has an `Octo server:` line, use that address instead.)
 
 ```bash
 curl -s -X POST "http://127.0.0.1:8088/api/channels/<platform>/reload"
