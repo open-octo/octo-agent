@@ -105,22 +105,22 @@ optional sections whose rules are written **in full** (not as pointer links) and
 re-surfaced on the message stream when they're relevant:
 
 ```
-## 必须遵守        always-apply rules — restated at least every 10 user turns
+## 必须遵守        always-apply rules — restated every 10 user turns
 ## 触发提醒        each bullet "(触发: kw1, kw2) rule text" — recalled on a keyword hit
 ```
 
 `memory.ParseRules` extracts these tiers (section headings are matched by
 keyword — `必须遵守`/`always`, `触发`/`trigger` — tolerant of emoji and heading
 level). `memory.Injector.Reminder` renders the per-turn `<system-reminder>`:
-always-apply rules whenever the user messages the model is about to see no
-longer carry them within the last `restateEvery` (10) turns, plus any triggered
-rules whose keywords occur in the user input, each surfaced at most once per
-session. Each restatement stays in the history, so restating every turn cost
-one copy per turn for good; the history itself — read when the hook fires, via
-`History.UserTexts` — is the judge, since the Web UI and an IM chat drive one
-session through separate agents and injectors. The first restatement carries
-the full header explaining what the rules are; later ones, when the history
-already holds it, carry a one-line header. Trigger matching is
+always-apply rules once the conversation has run `restateEvery` (10) user turns
+past the system prompt — which already carries them in the memory block — or
+past the last restatement, plus any triggered rules whose keywords occur in the
+user input, each surfaced at most once per session. Each restatement stays in
+the history, so restating every turn cost one copy per turn for good; the
+history itself — read when the hook fires, via `History.UserTexts` — is the
+judge, since the Web UI and an IM chat drive one session through separate
+agents and injectors. A restatement alone carries a one-line header; newly
+triggered rules come with the full one. Trigger matching is
 deliberately conservative and one-directional — *input contains trigger* —
 with ASCII keywords matched on word boundaries (`deploy` does not fire on
 `deployment`) and CJK keywords matched as substrings (`部署` fires inside

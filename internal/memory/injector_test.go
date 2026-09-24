@@ -139,51 +139,47 @@ func TestSaveNudge_NilSafe(t *testing.T) {
 
 // ─── Restating the always-apply rules ───────────────────────────────────────
 
-// history builds user texts where the always rules were restated `ago` user
-// messages before the end (ago < 0: never).
-func historyWithRestatement(in *Injector, ago int) []string {
-	var h []string
-	first := in.Reminder("start", nil) // full restatement, as a first turn gets
-	if ago >= 0 {
-		h = append(h, first+"\n\nstart")
-	}
-	for i := 0; i < ago; i++ {
-		h = append(h, "plain message")
-	}
-	if ago < 0 {
-		h = append(h, "plain message", "another")
+func plain(n int) []string {
+	h := make([]string, n)
+	for i := range h {
+		h[i] = "plain message"
 	}
 	return h
 }
 
+// withRestatement returns user texts where the always rules were restated
+// `ago` user messages before the end.
+func withRestatement(in *Injector, ago int) []string {
+	return append([]string{in.Reminder("start", nil) + "\n\nstart"}, plain(ago)...)
+}
+
 func TestReminder_AlwaysRestatedOnlyEveryN(t *testing.T) {
+	in0 := newTestInjector()
 	cases := []struct {
-		name      string
-		ago       int
-		wantRules bool
-		wantFull  bool
+		name    string
+		history []string
+		want    bool
 	}{
-		{"never restated (or compacted away)", -1, true, true},
-		{"restated just now", 0, false, false},
-		{"restated a few turns ago", restateEvery - 1, false, false},
-		{"restated restateEvery turns ago", restateEvery, true, false},
+		// The system prompt carries MEMORY.md, so the start needs no copy.
+		{"fresh session", []string{}, false},
+		{"fewer than restateEvery turns in", plain(restateEvery - 1), false},
+		{"restateEvery turns in", plain(restateEvery), true},
+		{"restated just now", withRestatement(in0, 0), false},
+		{"restated a few turns ago", withRestatement(in0, restateEvery-1), false},
+		{"restated restateEvery turns ago", withRestatement(in0, restateEvery), true},
+		{"history unknown", nil, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			in := newTestInjector()
-			h := historyWithRestatement(in, c.ago)
-			got := in.Reminder("next", h)
-			if hasRule := strings.Contains(got, "never commit on main"); hasRule != c.wantRules {
-				t.Fatalf("always rule present = %v, want %v:\n%s", hasRule, c.wantRules, got)
+			got := newTestInjector().Reminder("next", c.history)
+			if has := strings.Contains(got, "never commit on main"); has != c.want {
+				t.Fatalf("always rule present = %v, want %v:\n%s", has, c.want, got)
 			}
-			if !c.wantRules {
-				if got != "" {
-					t.Errorf("nothing to surface, got:\n%s", got)
-				}
-				return
+			if !c.want && got != "" {
+				t.Errorf("nothing to surface, got:\n%s", got)
 			}
-			if full := strings.Contains(got, fullHeader); full != c.wantFull {
-				t.Errorf("full header = %v, want %v:\n%s", full, c.wantFull, got)
+			if c.want && strings.Contains(got, fullHeader) {
+				t.Errorf("a restatement alone should carry the short header:\n%s", got)
 			}
 		})
 	}
@@ -193,8 +189,7 @@ func TestReminder_AlwaysRestatedOnlyEveryN(t *testing.T) {
 // the always rules along when they aren't due.
 func TestReminder_TriggeredCarriesFullHeaderWithoutAlways(t *testing.T) {
 	in := newTestInjector()
-	h := historyWithRestatement(in, 1)
-	got := in.Reminder("帮我部署", h)
+	got := in.Reminder("帮我部署", plain(2))
 	if !strings.Contains(got, "deploy via Lark bot") || !strings.Contains(got, fullHeader) {
 		t.Fatalf("triggered rule with full header expected:\n%s", got)
 	}
@@ -203,7 +198,8 @@ func TestReminder_TriggeredCarriesFullHeaderWithoutAlways(t *testing.T) {
 	}
 }
 
-// The hook reads the history when it fires.
+// The hook reads the history when it fires; an empty history is known (a
+// fresh session), not unknown.
 func TestInjector_HookReadsHistoryAtFireTime(t *testing.T) {
 	in := newTestInjector()
 	e := hooks.NewEngine(nil)
@@ -213,12 +209,16 @@ func TestInjector_HookReadsHistoryAtFireTime(t *testing.T) {
 		return e.Inject(context.Background(), hooks.Payload{Event: hooks.EventUserPromptSubmit, UserInput: "hi"})
 	}
 
-	first := submit()
-	if !strings.Contains(first, "never commit on main") {
-		t.Fatalf("first turn must restate:\n%s", first)
-	}
-	history = append(history, first+"\n\nhi")
 	if got := submit(); got != "" {
-		t.Errorf("second turn with the restatement in history: got %q", got)
+		t.Fatalf("first turn: the system prompt already carries the rules, got %q", got)
+	}
+	history = plain(restateEvery)
+	got := submit()
+	if !strings.Contains(got, "never commit on main") {
+		t.Fatalf("restateEvery turns in, the rules are due:\n%s", got)
+	}
+	history = append(history, got+"\n\nhi")
+	if got := submit(); got != "" {
+		t.Errorf("just restated: got %q", got)
 	}
 }
