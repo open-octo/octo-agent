@@ -239,6 +239,8 @@ The agent follows these rules when generating a Light App:
 - No calls to octo's own API from inside the page
 - File processing via `FileReader` + `<input type="file">`
 - Saving results (a generated image, a converted file) via the standard `<a download>` idiom — the host writes the file: a regular download in the browser, the OS save dialog in the desktop app
+- The page sizes itself to the frame, not to a pixel height: the same app appears in a ~420px-wide sidebar, as a full-height mounted page, and — as a landing `hero` — in a frame as short as ~300px. Let a flex column fill the height with the main region growing (keep a `min-height` on it), and drop the least important blocks under `@media (max-height: …)`. A main element pinned to a pixel height is clipped in every frame shorter than you assumed
+- octo loads the page with `?theme=dark` or `?theme=light` — the Web UI theme, which may differ from the OS's. Read it and key the palette off it, before the body paints; the frame reloads on a theme change, so reading it once at load is enough
 - Icons via emoji or inline SVG
 - Layout and color conventions from the `artifact-design` skill
 

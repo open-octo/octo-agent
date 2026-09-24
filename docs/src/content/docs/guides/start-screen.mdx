@@ -87,7 +87,9 @@ can draw on before you have even started a session. The whole of that machinery 
 unchanged.
 
 `height` is in pixels, clamped to 80–420: the hero shares the screen with the cards and the
-composer.
+composer. Prefer the middle of that range (300–360) over the cap — a tall hero pushes the whole
+page past a short window, and since the page scrolls itself down to the composer, what gets cut
+off is the top of the hero.
 
 **Exactly one app.** A landing page with several embedded apps is a dashboard, and every frame is
 something your first screen has to wait for. If both `image` and `app` are given, the image wins
