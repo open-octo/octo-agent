@@ -81,6 +81,18 @@ func (h *History) ReplaceAll(msgs []Message) {
 	h.rewritten = true
 }
 
+// ReplaceWithPersisted replaces the message list with messages just loaded
+// from the session file. Unlike ReplaceAll it clears the rewrite flag rather
+// than setting it: memory now matches the file, so the next save has nothing
+// to rewrite and can append as usual.
+func (h *History) ReplaceWithPersisted(msgs []Message) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.messages = make([]Message, len(msgs))
+	copy(h.messages, msgs)
+	h.rewritten = false
+}
+
 // Tail returns the last n messages (or all if fewer).
 func (h *History) Tail(n int) []Message {
 	h.mu.RLock()

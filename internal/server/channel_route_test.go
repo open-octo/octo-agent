@@ -1044,3 +1044,45 @@ func TestChannelCommand_UnbindThenStopCancelsWakeup(t *testing.T) {
 		t.Fatal("/stop after /unbind must cancel the armed loop wakeup")
 	}
 }
+
+// An IM session object outlives its turns. When the Web UI takes a turn on the
+// same session in between, the next IM turn must start from the file, or its
+// save writes the stale in-memory history back over the web turn.
+func TestHandleChannelMessage_KeepsWebTurnsTakenBetweenIMTurns(t *testing.T) {
+	setTestHome(t) // the chat's session file is shared by every IM test otherwise
+	srv := chanServer(t)
+	ad := &fullFakeAdapter{}
+	ctx := context.Background()
+
+	srv.handleChannelMessage(ctx, ad, evFor("first from im"), nil)
+	sess := srv.channelMgr.GetSession(evFor("x"), "")
+	if sess == nil || sess.Store == nil {
+		t.Fatal("no IM session after the first turn")
+	}
+
+	onDisk, err := agent.LoadSession(sess.Store.ID)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	onDisk.Messages = append(onDisk.Messages, agent.NewUserMessage("from web"), agent.NewAssistantMessage("web reply"))
+	if err := onDisk.Save(); err != nil {
+		t.Fatalf("save web turn: %v", err)
+	}
+
+	srv.handleChannelMessage(ctx, ad, evFor("second from im"), nil)
+
+	final, err := agent.LoadSession(sess.Store.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	var users []string
+	for _, m := range final.Messages {
+		if m.Role == agent.RoleUser {
+			users = append(users, strings.TrimSpace(agent.StripSystemReminders(m.Content)))
+		}
+	}
+	want := []string{"first from im", "from web", "second from im"}
+	if strings.Join(users, "|") != strings.Join(want, "|") {
+		t.Errorf("user messages on disk = %q, want %q", users, want)
+	}
+}
