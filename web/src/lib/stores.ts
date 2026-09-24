@@ -126,6 +126,12 @@ export const macosMajor = writable(shellMacosMajor)
 // in-app fs picker) instead of being uploaded. False for a remote browser.
 export const localAccess = writable(false)
 
+// Latest update verdict read from /api/version by someone other than
+// VersionBadge (the Settings modal's About page). The badge only re-reads on
+// a 60s timer, so without this the modal could say "update available" while
+// the badge beside it still showed none.
+export const versionUpdate = writable<{ latest: string; needsUpdate: boolean } | null>(null)
+
 // Artifacts panel
 export const artifacts = writable<Artifact[]>([])
 export const artifactSel = writable(0)

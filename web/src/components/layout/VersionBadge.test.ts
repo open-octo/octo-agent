@@ -12,6 +12,7 @@ import VersionBadge from './VersionBadge.svelte'
 import * as api from '../../lib/api'
 import { ws } from '../../lib/ws'
 import { setLocale } from '../../lib/i18n'
+import { versionUpdate } from '../../lib/stores'
 
 let target: HTMLElement
 let app: Record<string, unknown> | null = null
@@ -44,6 +45,7 @@ const pop = () => target.querySelector('.vb-pop')
 
 beforeEach(() => {
   setLocale('en')
+  versionUpdate.set(null)
   wsHandlers = {}
   vi.spyOn(ws, 'on').mockImplementation(((type: string, fn: (ev: unknown) => void) => {
     wsHandlers[type] = fn
@@ -128,6 +130,37 @@ describe('VersionBadge re-check', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('VersionBadge picks up fresher reads', () => {
+  // The Settings modal reads /api/version the moment it opens; the badge only
+  // on its timer, so the two could disagree for up to a minute.
+  it('takes the Settings modal\'s answer without waiting for its tick', async () => {
+    await render()
+    expect(target.querySelector('.vb-dot.update')).toBe(null)
+
+    versionUpdate.set({ latest: '1.17.0', needsUpdate: true })
+    flushSync()
+
+    expect(target.querySelector('.vb-dot.update')).toBeTruthy()
+  })
+
+  it('re-reads when the page becomes visible again', async () => {
+    const getVersion = vi.spyOn(api, 'getVersion')
+      .mockResolvedValue(versionPayload() as never)
+    app = mount(VersionBadge, { target }) as Record<string, unknown>
+    await new Promise((r) => setTimeout(r, 0))
+    flushSync()
+
+    getVersion.mockResolvedValue(
+      versionPayload({ latest: '1.17.0', needs_update: true }) as never,
+    )
+    document.dispatchEvent(new Event('visibilitychange'))
+    await new Promise((r) => setTimeout(r, 0))
+    flushSync()
+
+    expect(target.querySelector('.vb-dot.update')).toBeTruthy()
   })
 })
 
