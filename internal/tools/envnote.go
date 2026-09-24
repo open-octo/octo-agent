@@ -31,10 +31,18 @@ func Locale() string {
 // It also steers file writes away from the PowerShell cmdlets entirely: their
 // default encodings (ANSI from Set-Content, UTF-16LE from `>`) re-encode files
 // that were UTF-8, which users see as their source files getting corrupted.
+//
+// Quoting gets its own line because models carry bash's `\"` escape into
+// PowerShell, where it closes the string instead: inline `python -c "..."`
+// code then reaches the interpreter with its quotes stripped (#2563).
 const shellEnvNoteWindows = "- Shell: PowerShell. Use PowerShell syntax and cmdlets " +
 	"(Get-ChildItem, Get-Content, Select-String, Remove-Item, $env:VAR), not POSIX sh. " +
 	"Chain commands with `;` rather than `&&` (Windows PowerShell 5.1 lacks `&&`). " +
 	"Prefer the built-in read_file / glob / grep tools over shelling out — they're identical across platforms.\n" +
+	"- Quoting: PowerShell's escape character is the backtick, not backslash — inside \"...\" a `\\\"` ENDS the string " +
+	"(a bash habit), and `$` expands. Don't inline multi-line code with `python -c` / `node -e`: write it to a file " +
+	"with write_file and run that, or pipe a single-quoted here-string, which applies no escaping at all " +
+	"(`@'` on its own line, the code, then `'@ | python -` at the start of a line).\n" +
 	"- Writing files: never create or rewrite a file with `Set-Content`, `Add-Content`, `Out-File`, `>` or `>>`. " +
 	"Windows PowerShell 5.1 writes ANSI (the host code page — GBK on a Chinese Windows) from Set-Content/Add-Content " +
 	"and UTF-16LE from `>`/Out-File, while Get-Content decodes as ANSI, so a read-modify-write pipeline such as " +
