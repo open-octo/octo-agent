@@ -95,11 +95,11 @@ func (r *Registry) scanRoot(root, source string) {
 		return // missing/unreadable root: nothing to add
 	}
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
 		name := e.Name()
 		dir := filepath.Join(root, name)
+		if !isDirFollowingLinks(e, dir) {
+			continue
+		}
 		b, err := os.ReadFile(filepath.Join(dir, SkillFile))
 		if err != nil {
 			continue
@@ -121,6 +121,21 @@ func (r *Registry) scanRoot(root, source string) {
 			Source:      source,
 		}
 	}
+}
+
+// isDirFollowingLinks reports whether e is a directory, or a symlink to one.
+// Users who share one skills folder across several agents link individual
+// skills into ~/.octo/skills; ReadDir reports those entries as symlinks, so
+// IsDir alone would drop them.
+func isDirFollowingLinks(e os.DirEntry, path string) bool {
+	if e.IsDir() {
+		return true
+	}
+	if e.Type()&os.ModeSymlink == 0 {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // frontmatter is the subset of SKILL.md frontmatter we consume. yaml.v3 ignores

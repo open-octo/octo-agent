@@ -332,3 +332,71 @@ func TestSetDisabled_ReloadPreserves(t *testing.T) {
 		t.Error("keep should still be disabled after reload")
 	}
 }
+
+// linkSkill writes a skill into a shared folder outside root and symlinks it
+// in as <root>/<name> — the layout of a user sharing ~/.agents/skills across
+// agents. It skips the test where symlinks need privileges (Windows).
+func linkSkill(t *testing.T, root, name, content string) (target string) {
+	t.Helper()
+	shared := t.TempDir()
+	writeSkill(t, shared, name, content)
+	target = filepath.Join(shared, name)
+	if err := os.Symlink(target, filepath.Join(root, name)); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	return target
+}
+
+func TestDiscover_FollowsSymlinkedSkillDir(t *testing.T) {
+	useDefaultRoot(t, t.TempDir())
+	userRoot := t.TempDir()
+	useUserRoot(t, userRoot)
+	linkSkill(t, userRoot, "shared", "---\ndescription: lives in ~/.agents\n---\nbody")
+	// A link to a plain file is still not a skill.
+	file := filepath.Join(t.TempDir(), "note.md")
+	if err := os.WriteFile(file, []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(file, filepath.Join(userRoot, "note")); err != nil {
+		t.Fatal(err)
+	}
+	// Nor is a dangling link.
+	if err := os.Symlink(filepath.Join(t.TempDir(), "gone"), filepath.Join(userRoot, "gone")); err != nil {
+		t.Fatal(err)
+	}
+
+	r := Discover()
+	s, ok := r.Get("shared")
+	if !ok {
+		t.Fatal("symlinked skill not discovered")
+	}
+	if s.Description != "lives in ~/.agents" {
+		t.Errorf("Description = %q", s.Description)
+	}
+	if want := filepath.Join(userRoot, "shared"); s.Dir != want {
+		t.Errorf("Dir = %q, want the link path %q", s.Dir, want)
+	}
+	if r.Len() != 1 {
+		t.Errorf("Len = %d, want 1 (file link and dangling link are not skills)", r.Len())
+	}
+}
+
+// Deleting a linked skill removes the link, never the shared original that
+// other agents still read.
+func TestDelete_SymlinkedSkillKeepsTarget(t *testing.T) {
+	useDefaultRoot(t, t.TempDir())
+	userRoot := t.TempDir()
+	useUserRoot(t, userRoot)
+	target := linkSkill(t, userRoot, "shared", "---\ndescription: d\n---\nbody")
+
+	r := Discover()
+	if err := r.Delete("shared"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(userRoot, "shared")); !os.IsNotExist(err) {
+		t.Errorf("link still present after delete: err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(target, SkillFile)); err != nil {
+		t.Errorf("shared original was removed: %v", err)
+	}
+}
