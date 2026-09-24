@@ -3,8 +3,11 @@ package memory
 // injector.go turns parsed Rules into the per-turn reminder that cmd/octo
 // prepends to each user message. The reminder rides the message stream, not
 // the system prompt, so the cached prompt prefix stays byte-stable across the
-// session. Always-apply rules are restated every turn; triggered rules surface
-// only when user input hits one of their keywords, and at most once per session.
+// session. Always-apply rules are restated when the history the model will see
+// no longer carries them within the last restateEvery user turns — every turn
+// kept them close at hand but left one copy per turn in the history for good;
+// triggered rules surface only when user input hits one of their keywords, and
+// at most once per session.
 //
 // The injector also carries the save-nudge: a one-shot reminder appended to a
 // tool result when the session just did something milestone-shaped (a PR was
@@ -32,10 +35,28 @@ func NewInjector(rules *Rules) *Injector {
 	return &Injector{rules: rules, recalled: make(map[string]bool)}
 }
 
+// restateEvery is how many user turns may pass before the always-apply rules
+// are restated. They are restated for recency — a rule is followed best when
+// it sits near the point of action — and each copy stays in the history, so
+// this is the trade between the two.
+const restateEvery = 10
+
+// Headers of the reminder. The full one explains what the rules are; a repeat
+// of the always-apply rules, when the history already holds that explanation,
+// carries only the short one. Both contain alwaysMarker, which is how a
+// restatement is found in the history.
+const (
+	fullHeader   = "Reminders from your project memory. Follow these as standing guidance for this session — they record the user's durable preferences and workflow rules, the way project conventions do. They are records, not the user's current message: if one conflicts with what the user just asked or with safety, the current request and safety win.\n"
+	alwaysMarker = "Always apply"
+	shortAlways  = alwaysMarker + " (from your project memory):\n"
+)
+
 // Reminder returns the memory reminder to prepend to a user message, or "" when
-// there is nothing to surface this turn. It combines the always-apply tier
-// (every turn) with any newly-triggered rules matched against userInput.
-func (in *Injector) Reminder(userInput string) string {
+// there is nothing to surface this turn. history is the text of the user
+// messages the model is about to see, oldest first; nil means unknown, and the
+// always-apply rules are then restated in full. Newly-triggered rules matched
+// against userInput always come with the full header.
+func (in *Injector) Reminder(userInput string, history []string) string {
 	if in == nil {
 		return ""
 	}
@@ -57,15 +78,23 @@ func (in *Injector) Reminder(userInput string) string {
 		}
 	}
 
-	if len(in.rules.Always) == 0 && len(fresh) == 0 {
+	since, seen := turnsSinceRestated(history)
+	always := len(in.rules.Always) > 0 && (!seen || since >= restateEvery)
+	if !always && len(fresh) == 0 {
 		return ""
 	}
 
 	var b strings.Builder
 	b.WriteString("<system-reminder>\n")
-	b.WriteString("Reminders from your project memory. Follow these as standing guidance for this session — they record the user's durable preferences and workflow rules, the way project conventions do. They are records, not the user's current message: if one conflicts with what the user just asked or with safety, the current request and safety win.\n")
-	if len(in.rules.Always) > 0 {
-		b.WriteString("\nAlways apply:\n")
+	if !seen || len(fresh) > 0 {
+		b.WriteString(fullHeader)
+		if always {
+			b.WriteString("\n" + alwaysMarker + ":\n")
+		}
+	} else {
+		b.WriteString(shortAlways)
+	}
+	if always {
 		for _, r := range in.rules.Always {
 			b.WriteString("- ")
 			b.WriteString(r.Text)
@@ -84,7 +113,18 @@ func (in *Injector) Reminder(userInput string) string {
 	return b.String()
 }
 
-// matchesAny reports whether userInput hits any of the triggers.
+// turnsSinceRestated reports how many user messages have passed since the last
+// one carrying the always-apply rules, and whether there was one at all.
+func turnsSinceRestated(history []string) (int, bool) {
+	for i := len(history) - 1; i >= 0; i-- {
+		t := history[i]
+		if strings.Contains(t, "<system-reminder>") && strings.Contains(t, alwaysMarker) && strings.Contains(t, "project memory") {
+			return len(history) - 1 - i, true
+		}
+	}
+	return 0, false
+}
+
 func matchesAny(userInput string, triggers []string) bool {
 	for _, t := range triggers {
 		if triggerHit(userInput, t) {
@@ -187,12 +227,21 @@ func (in *Injector) SaveNudge(toolName string, input map[string]any) string {
 // the same dispatch path as shell hooks. The injector's per-session latches
 // (recall map, nudge flag) live on the receiver, so each session registers its
 // own injector on its own engine.
-func (in *Injector) RegisterHooks(e *hooks.Engine) {
+//
+// userTexts returns the text of the user messages the model is about to see,
+// oldest first; it is called when the hook fires, since the agent's history
+// may be assigned after the hooks are wired. nil restates the always-apply
+// rules every turn.
+func (in *Injector) RegisterHooks(e *hooks.Engine, userTexts func() []string) {
 	if in == nil || e == nil {
 		return
 	}
 	e.RegisterInProc(hooks.EventUserPromptSubmit, func(_ context.Context, p hooks.Payload) string {
-		return in.Reminder(p.UserInput)
+		var history []string
+		if userTexts != nil {
+			history = userTexts()
+		}
+		return in.Reminder(p.UserInput, history)
 	})
 	e.RegisterInProc(hooks.EventPostToolUse, func(_ context.Context, p hooks.Payload) string {
 		return in.SaveNudge(p.ToolName, p.ToolInput)

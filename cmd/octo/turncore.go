@@ -100,10 +100,6 @@ func runTurn(ctx context.Context, a *agent.Agent, cfg replConfig, sink ViewSink,
 	if cfg.session != nil {
 		ctx = tools.WithSessionID(ctx, cfg.session.ID)
 	}
-	// Memory-hygiene nudge: appended when both cross-session memory and tools
-	// are active, reminding the model to scan for durable signals at the
-	// decision point. Gated on tools because the nudge asks the model to call
-	// a tool.
 	turnInput := line
 
 	// Drain anything that accumulated before this turn started — in practice a

@@ -93,6 +93,33 @@ func (h *History) ReplaceWithPersisted(msgs []Message) {
 	h.rewritten = false
 }
 
+// UserTexts returns the text of each user message that carries any, oldest
+// first: its Content, or its text blocks joined. Tool results, which ride
+// user messages as blocks, contribute nothing.
+func (h *History) UserTexts() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var out []string
+	for _, m := range h.messages {
+		if m.Role != RoleUser {
+			continue
+		}
+		t := m.Content
+		for _, b := range m.Blocks {
+			if b.Type == "text" && b.Text != "" {
+				if t != "" {
+					t += "\n\n"
+				}
+				t += b.Text
+			}
+		}
+		if t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // Tail returns the last n messages (or all if fewer).
 func (h *History) Tail(n int) []Message {
 	h.mu.RLock()

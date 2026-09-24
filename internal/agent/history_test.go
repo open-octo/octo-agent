@@ -86,3 +86,16 @@ func TestHistory_ReplaceWithPersistedIsNotARewrite(t *testing.T) {
 		t.Error("history must hold its own copy of the messages")
 	}
 }
+
+func TestHistory_UserTexts(t *testing.T) {
+	h := NewHistory()
+	h.Append(NewUserMessage("a"))
+	h.Append(NewAssistantMessage("b"))
+	h.Append(Message{Role: RoleUser, Blocks: []ContentBlock{NewTextBlock("c1"), NewTextBlock("c2")}})
+	h.Append(NewToolResultMessage([]ContentBlock{NewToolResultBlock("t", "out", false)}))
+	got := h.UserTexts()
+	want := []string{"a", "c1\n\nc2"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("UserTexts = %q, want %q", got, want)
+	}
+}

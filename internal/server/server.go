@@ -1477,7 +1477,8 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd), sourceHookDirs(cwd, proj)...)
 	hookEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
 	if memDir := s.sessionMemDir(proj); memDir != "" {
-		s.injectorFor(sess.ID, memDir).RegisterHooks(hookEngine)
+		// Read at call time: a.History is assigned after the hooks are wired.
+		s.injectorFor(sess.ID, memDir).RegisterHooks(hookEngine, func() []string { return a.History.UserTexts() })
 	}
 	// Workflow save-nudge — memory-independent, wired for every session.
 	tools.NewWorkflowNudger().RegisterHooks(hookEngine)
@@ -3717,7 +3718,7 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	imEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, s.projectHooksTrusted(cwd), sourceHookDirs(cwd, proj)...)
 	imEngine.Notify = func(m string) { slog.Warn("hook", "err", m) }
 	if memDir := s.sessionMemDir(proj); memDir != "" {
-		s.injectorFor("im:"+string(sess.Key), memDir).RegisterHooks(imEngine)
+		s.injectorFor("im:"+string(sess.Key), memDir).RegisterHooks(imEngine, func() []string { return sess.Agent.History.UserTexts() })
 	}
 	// Workflow save-nudge — memory-independent, wired for every IM session.
 	tools.NewWorkflowNudger().RegisterHooks(imEngine)

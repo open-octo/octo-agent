@@ -62,7 +62,7 @@ Running from your home directory needs no special case: home's own directory *is
 
 `MEMORY.md` supports two optional sections that behave differently from a plain pointer index:
 
-- **Always-apply rules** — restated on every single turn, for something that must never be missed.
+- **Always-apply rules** — restated at the start and again at least every 10 turns, so they stay close to what you're doing, for something that must never be missed.
 - **Triggered rules** — each written as a rule plus a set of trigger keywords; recalled once per
   session the first time one of its keywords appears in what you type (English keywords match on
   word boundaries, so `deploy` doesn't fire on `deployment`; Chinese keywords match as a substring).
