@@ -126,12 +126,13 @@ func (r *Registry) scanRoot(root, source string) {
 // isDirFollowingLinks reports whether e is a directory, or a symlink to one.
 // Users who share one skills folder across several agents link individual
 // skills into ~/.octo/skills; ReadDir reports those entries as symlinks, so
-// IsDir alone would drop them.
+// IsDir alone would drop them. A Windows junction (mklink /J, which needs no
+// privileges) reports ModeIrregular rather than ModeSymlink since Go 1.23.
 func isDirFollowingLinks(e os.DirEntry, path string) bool {
 	if e.IsDir() {
 		return true
 	}
-	if e.Type()&os.ModeSymlink == 0 {
+	if e.Type()&(os.ModeSymlink|os.ModeIrregular) == 0 {
 		return false
 	}
 	info, err := os.Stat(path)
