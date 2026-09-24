@@ -14,7 +14,7 @@
   import * as api from '../../lib/api'
   import { ws } from '../../lib/ws'
   import { t } from '../../lib/i18n'
-  import { nativeShell, localAccess, isDesktopShell, macosMajor } from '../../lib/stores'
+  import { nativeShell, localAccess, isDesktopShell, macosMajor, versionUpdate } from '../../lib/stores'
   import { applyTitlebarLift } from '../../lib/nativeWindow'
 
   type Phase = 'idle' | 'upgrading' | 'needs_restart' | 'reconnecting' | 'restart_failed' | 'done'
@@ -107,6 +107,15 @@
     // Only while idle: a tick landing mid-upgrade would overwrite needsUpdate
     // under the phase machine's feet.
     const recheck = setInterval(() => { if (phase === 'idle') checkVersion(true) }, RECHECK_MS)
+    // A hidden page's timers get throttled (the desktop window sits hidden in
+    // the tray for hours), so re-read as soon as it is shown again rather than
+    // showing a stale answer until the next tick fires.
+    const onVisible = () => { if (document.visibilityState === 'visible' && phase === 'idle') checkVersion(true) }
+    document.addEventListener('visibilitychange', onVisible)
+    // Take a fresher read made elsewhere (the Settings modal) straight away.
+    const offShared = versionUpdate.subscribe((v) => {
+      if (v && phase === 'idle') { latest = v.latest; needsUpdate = v.needsUpdate }
+    })
     // upgrade_log / upgrade_complete are global broadcasts (no session_id); the
     // WS dispatch is by type, so these fire regardless of the active session.
     const offLog = ws.on('upgrade_log', (ev: any) => {
@@ -125,7 +134,7 @@
       if (ev.success) { needsUpdate = false; phase = 'needs_restart' }
       else { phase = 'idle' } // failure: badge stays update-available
     })
-    return () => { clearInterval(recheck); offLog(); offDone() }
+    return () => { clearInterval(recheck); document.removeEventListener('visibilitychange', onVisible); offShared(); offLog(); offDone() }
   })
 
   async function startUpgrade() {

@@ -8,7 +8,7 @@
   import FileRecallView from '../../views/FileRecallView.svelte'
   import ProfileView from '../../views/ProfileView.svelte'
   import { get } from 'svelte/store'
-  import { showToast, nativeShell, settingsModalOpen, settingsTarget, onboardPhase, sessions, sessionGroups, collapsedSessions, activeSessionId, view, clearPendingSessionOpts } from '../../lib/stores'
+  import { showToast, nativeShell, settingsModalOpen, versionUpdate, settingsTarget, onboardPhase, sessions, sessionGroups, collapsedSessions, activeSessionId, view, clearPendingSessionOpts } from '../../lib/stores'
   import type { Session, SessionGroup } from '../../lib/types'
   import { setLocale, t, tr } from '../../lib/i18n'
   import { getMode, setMode, type ThemeMode } from '../../lib/theme'
@@ -316,6 +316,7 @@
       serverOs = v.os ?? ''
       latestStr = v.latest ?? ''
       updateAvail = !!v.needs_update
+      versionUpdate.set({ latest: latestStr, needsUpdate: updateAvail })
       downloadUrl = v.download_url ?? ''
       upgradeMode = v.upgrade_mode === 'installer' ? 'installer' : 'cli'
     } catch { /* non-critical */ }
