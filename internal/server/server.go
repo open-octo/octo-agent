@@ -2137,7 +2137,14 @@ func serverAddrNote(addr string) string {
 	case "", "0.0.0.0", "::":
 		host = "127.0.0.1"
 	}
-	return fmt.Sprintf("- Octo server: http://%s (this session runs inside it). For octo's REST API (`curl` via the terminal tool) use this address wherever a skill or doc writes `127.0.0.1:8088` or `localhost:8088`; 8088 is only the default port\n", net.JoinHostPort(host, port))
+	// Bound to one LAN address, the server isn't on loopback at all, and a
+	// request to that address arrives from it rather than from loopback — so
+	// the key exemption the skills rely on doesn't apply.
+	auth := ""
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		auth = ". This address is not loopback, so every request needs the `access_key` from `~/.octo/config.yml` in an `X-Access-Key` header"
+	}
+	return fmt.Sprintf("- Octo server: http://%s (this session runs inside it). For octo's REST API (`curl` via the terminal tool) use this address wherever a skill or doc writes `127.0.0.1:8088` or `localhost:8088`; 8088 is only the default port%s\n", net.JoinHostPort(host, port), auth)
 }
 
 // ensureSender lazily initialises the sender when the server started in

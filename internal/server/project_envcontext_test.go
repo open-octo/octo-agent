@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/open-octo/octo-agent/internal/agent"
 )
 
 func TestSourceDirsHash_Stability(t *testing.T) {
@@ -100,6 +102,19 @@ func TestBuildEnvContext_NamesServerAddr(t *testing.T) {
 			t.Errorf("addr %q: env context missing %q:\n%s", tc.addr, tc.want, out)
 		}
 	}
+	for addr, wantKey := range map[string]bool{
+		"127.0.0.1:8088":   false,
+		":8088":            false,
+		"[::1]:8088":       false,
+		"localhost:8088":   false,
+		"192.168.1.5:8088": true,
+		"octo.lan:8088":    true,
+	} {
+		out := buildEnvContext("/some/dir", addr)
+		if got := strings.Contains(out, "X-Access-Key"); got != wantKey {
+			t.Errorf("addr %q: access-key note present = %v, want %v:\n%s", addr, got, wantKey, out)
+		}
+	}
 	for _, addr := range []string{"", "127.0.0.1:0", "garbage"} {
 		if out := buildEnvContext("/some/dir", addr); strings.Contains(out, "Octo server:") {
 			t.Errorf("addr %q names no concrete port, but got a server line:\n%s", addr, out)
@@ -121,5 +136,19 @@ func TestNew_EnvContextNamesConfiguredAddr(t *testing.T) {
 	}
 	if _, env := srv.curCwdEnv(); !strings.Contains(env, "- Octo server: http://127.0.0.1:18090 (") {
 		t.Errorf("env context missing the server address:\n%s", env)
+	}
+}
+
+// A session with its own working directory rebuilds the env context rather
+// than reusing the launch one; the rebuilt block must still name the server.
+func TestSessionCwdEnv_OwnDirNamesServerAddr(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:18090"})
+	dir := t.TempDir()
+	gotDir, env := srv.sessionCwdEnv(&agent.Session{ID: "own-dir", WorkingDir: dir})
+	if gotDir != dir {
+		t.Fatalf("session dir = %q, want %q (test no longer reaches the rebuild path)", gotDir, dir)
+	}
+	if !strings.Contains(env, "- Octo server: http://127.0.0.1:18090 (") {
+		t.Errorf("rebuilt env context missing the server address:\n%s", env)
 	}
 }
