@@ -62,7 +62,7 @@ Running from your home directory needs no special case: home's own directory *is
 
 `MEMORY.md` supports two optional sections that behave differently from a plain pointer index:
 
-- **Always-apply rules** — restated on every single turn, for something that must never be missed.
+- **Always-apply rules** — part of the system prompt like the rest of `MEMORY.md`; restated once the conversation has grown far past it (about 100k tokens) so they stay close to what you're doing, and right away if the session's prompt was frozen before the rule was added. For something that must never be missed.
 - **Triggered rules** — each written as a rule plus a set of trigger keywords; recalled once per
   session the first time one of its keywords appears in what you type (English keywords match on
   word boundaries, so `deploy` doesn't fire on `deployment`; Chinese keywords match as a substring).
@@ -82,16 +82,18 @@ commands doesn't nag repeatedly; see it listed alongside every other configured 
 
 ## When memory changes take effect
 
-Every transport — CLI, web, and IM — composes the system prompt once, the first time a session
-takes a turn, and reuses that exact text for the rest of the session's life: resuming it later, or
-an IM chat being rebound to it, picks up the same frozen prompt rather than recomposing it. This is
-deliberate, not an oversight: recomposing on every turn would vary the text on anything that can
-change mid-session — the memory file included — and invalidate the provider's prompt-cache prefix on
-that turn and every one after.
+The system prompt is composed once and then reused as is. The web UI and IM compose it the first
+time a session takes a turn and store it with the session, so resuming the session later, or an IM
+chat being rebound to it, picks up that same frozen prompt. The CLI composes it each time `octo`
+starts, resuming included, and keeps it for the life of that process. `/reload` recomposes it on
+the spot, over any transport. This is deliberate, not an oversight: recomposing on every turn would
+vary the text on anything that can change mid-session — the memory file included — and invalidate
+the provider's prompt-cache prefix on that turn and every one after.
 
 So what you tell the agent mid-session is already live in that conversation's own history — it
 doesn't need a fresh read of `MEMORY.md` to know it. What the agent *writes* to memory during a
-session surfaces starting the *next* session (over any transport), which is exactly when a plain
+session surfaces in the next prompt composed — normally the *next* session, or after `/reload` —
+which is exactly when a plain
 index file is supposed to matter — for a conversation that hasn't lived through the one where it was
 learned.
 
