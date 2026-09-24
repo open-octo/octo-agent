@@ -17,6 +17,8 @@ func TestShellEnvNoteContent(t *testing.T) {
 		"Set-Content", // ANSI/UTF-16 default encodings corrupt UTF-8 files
 		"write_file",  // the encoding-safe alternative it must point at
 		"npm.cmd",     // execution-policy workaround
+		"backtick",    // bash's \" escape closes a PowerShell string (#2563)
+		"python -c",   // steer multi-line code into a file or here-string
 	} {
 		if !strings.Contains(shellEnvNoteWindows, want) {
 			t.Errorf("windows note missing %q", want)
