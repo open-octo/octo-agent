@@ -3459,13 +3459,6 @@ func (s *Server) handleChannelMessage(ctx context.Context, ad channel.Adapter, e
 	}
 	defer s.releaseSessionBinding(storeID, agent.EntryChannel)
 
-	// Reload the authoritative session after acquiring the binding. Another
-	// process may have saved since the manager restored it, and we must not
-	// persist through a stale Store pointer.
-	if fresh, err := agent.LoadSession(storeID); err == nil {
-		sess.Store = fresh
-	}
-
 	// Waits for any in-flight turn in this session, then makes this turn
 	// cancellable by /stop (Session.Interrupt).
 	ctx, done := sess.BeginRun(ctx)
