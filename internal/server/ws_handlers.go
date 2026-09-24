@@ -724,6 +724,13 @@ func (s *Server) wsReloadSession(sid string) {
 		s.wsToast(sid, "Reload failed: "+err.Error(), "error")
 		return
 	}
+	// The memory rules are re-read with the prompt: an injector left holding
+	// the old ones would take a rule just deleted from MEMORY.md for one the
+	// new prompt lacks, and restate it. (It also forgets which triggered rules
+	// it already surfaced, as /clear does.)
+	s.injectorMu.Lock()
+	delete(s.sessionInjectors, sid)
+	s.injectorMu.Unlock()
 	s.wsToast(sid, "System prompt will be recomposed on your next message — new skills, MCP tools, and memory will be visible.", "success")
 }
 

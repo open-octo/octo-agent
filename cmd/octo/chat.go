@@ -1185,7 +1185,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	hookEngine := hooks.EngineFromEnvAndFiles(hooks.SharedSeen(), cwd, projectHooksTrusted)
 	hookEngine.Notify = func(m string) { fmt.Fprintln(stderr, "↳ hook: "+m) }
 	hooks.SetSpillNotify(func(m string) { fmt.Fprintln(stderr, "↳ hook: "+m) })
-	if memDir != "" {
+	memoryRules := func() *memory.Rules {
 		rules := memory.ParseRules(memDir)
 		// Skip the merge when both resolve to the same directory (a non-repo
 		// cwd shares the home tier) — parsing it twice only to dedupe by rule
@@ -1193,7 +1193,12 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if homeMemDir != "" && homeMemDir != memDir {
 			rules.Merge(memory.ParseRules(homeMemDir))
 		}
-		memory.NewInjector(rules).RegisterHooks(hookEngine, memory.HistoryView{
+		return rules
+	}
+	var memInjector *memory.Injector
+	if memDir != "" {
+		memInjector = memory.NewInjector(memoryRules())
+		memInjector.RegisterHooks(hookEngine, memory.HistoryView{
 			TokensSince: func(match func(string) bool) (int, bool) { return a.History.TokensSince(match) },
 			System:      func() string { return a.System },
 		})
@@ -1417,6 +1422,9 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			skillsManifest = tools.SkillsManifest(skillReg)
 			if memDir != "" {
 				memInjection = memory.RenderInjection(memDir, homeMemDir)
+				// Re-read the rules with the prompt, so a rule just deleted
+				// from MEMORY.md isn't taken for one the new prompt lacks.
+				memInjector.SetRules(memoryRules())
 			}
 			if g := tools.MemoryBackendGuidance(); g != "" {
 				memInjection = strings.TrimSpace(memInjection + "\n\n" + g)

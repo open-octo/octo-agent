@@ -118,7 +118,14 @@ already carries them in the memory block — or past the last restatement, plus
 any triggered rules whose keywords occur in the user input, each surfaced at
 most once per session. Distance is measured in tokens, not turns: one
 tool-heavy turn can add tens of thousands of tokens, a long chat very few, and
-compaction shrinks the conversation and so resets the count. A rule the system
+compaction shrinks the conversation and so resets the count. With a context
+window under roughly 130k, compaction (at 75% of the window, system prompt
+included) comes first and the rules are never restated; they are still in the
+system prompt, and compaction keeps the conversation short, so that is
+accepted. Images count as zero in the estimate. `/reload` re-reads the rules
+along with the prompt (web and IM drop the cached injector, the CLI calls
+`Injector.SetRules`), so a rule deleted from `MEMORY.md` isn't taken for one
+the new prompt lacks. A rule the system
 prompt lacks is restated at once: serve freezes a session's prompt on its first
 turn, while the injector parses `MEMORY.md` when the process first serves the
 session, so a rule added in between reaches the reminder but not the prompt.

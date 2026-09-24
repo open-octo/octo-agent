@@ -1511,15 +1511,6 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 // is bound on first use: a session retargeted into another project keeps
 // its old rules until the injector is dropped, matching how the recall
 // latch already survives across turns.
-// memoryView lets the memory reminder see a's history and system prompt,
-// read when the hook fires: buildAgent assigns both after wiring the hooks.
-func memoryView(a *agent.Agent) memory.HistoryView {
-	return memory.HistoryView{
-		TokensSince: func(match func(string) bool) (int, bool) { return a.History.TokensSince(match) },
-		System:      func() string { return a.System },
-	}
-}
-
 func (s *Server) injectorFor(key, memDir string) *memory.Injector {
 	s.injectorMu.Lock()
 	defer s.injectorMu.Unlock()
@@ -1536,6 +1527,15 @@ func (s *Server) injectorFor(key, memDir string) *memory.Injector {
 		s.sessionInjectors[key] = inj
 	}
 	return inj
+}
+
+// memoryView lets the memory reminder see a's history and system prompt,
+// read when the hook fires: buildAgent assigns both after wiring the hooks.
+func memoryView(a *agent.Agent) memory.HistoryView {
+	return memory.HistoryView{
+		TokensSince: func(match func(string) bool) (int, bool) { return a.History.TokensSince(match) },
+		System:      func() string { return a.System },
+	}
 }
 
 // writeJSON is a convenience helper for JSON responses.
@@ -3292,6 +3292,14 @@ func (s *Server) handleChannelCommand(ad channel.Adapter, ev channel.InboundEven
 		s.rememberedMu.Unlock()
 		s.injectorMu.Lock()
 		delete(s.sessionInjectors, imKey)
+		s.injectorMu.Unlock()
+	case "/reload":
+		// /reload recomposes the prompt against the current MEMORY.md; re-read
+		// the memory rules with it, so a rule just deleted there isn't taken
+		// for one the new prompt lacks and restated. The conversation carries
+		// on, so permissions and loops stay.
+		s.injectorMu.Lock()
+		delete(s.sessionInjectors, "im:"+string(s.channelMgr.KeyFor(ev, profile.ID)))
 		s.injectorMu.Unlock()
 	case "/stop":
 		// /stop is the IM interrupt — also the hard stop for an armed loop.

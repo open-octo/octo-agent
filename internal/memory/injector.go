@@ -75,6 +75,16 @@ func isRestatement(text string) bool {
 		(strings.Contains(text, alwaysSection) || strings.Contains(text, shortAlways))
 }
 
+// SetRules replaces the rule set, for a caller that re-reads MEMORY.md along
+// with the system prompt (/reload). The recall latch is kept. Call it between
+// turns: like the rest of the injector, it is not locked.
+func (in *Injector) SetRules(rules *Rules) {
+	if in == nil {
+		return
+	}
+	in.rules = rules
+}
+
 // Reminder returns the memory reminder to prepend to a user message, or "" when
 // there is nothing to surface this turn. Newly-triggered rules matched against
 // userInput always come with the full header; the always-apply rules come when

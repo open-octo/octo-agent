@@ -2,6 +2,8 @@ package memory
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -243,5 +245,34 @@ func TestInjector_HookAgainstRealHistory(t *testing.T) {
 	h.Append(agent.NewUserMessage(got + "\n\nhi"))
 	if got := submit(); got != "" {
 		t.Errorf("just restated: got %q", got)
+	}
+}
+
+// The premise behind skipping the first restatement: every always-apply rule
+// the injector parses appears verbatim in the memory block the system prompt
+// carries. Pinned against the real parse and render, so a parser that starts
+// normalising rule text breaks this test rather than silently restating
+// every rule on every session's first turn.
+func TestReminder_RulesFromTheRealMemoryBlock(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) {
+		if err := os.WriteFile(filepath.Join(dir, IndexFile), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("# Memory\n\n## 必须遵守\n- **Never** commit on `main`\n-   reply in Chinese  \n\n## 触发提醒\n- (触发: deploy) deploy via the bot\n")
+	system := RenderInjection(dir)
+
+	in := NewInjector(ParseRules(dir))
+	if got := in.Reminder("hi", view(0, false, system)); got != "" {
+		t.Fatalf("rules are in the system prompt, yet the first turn restated them:\n%s", got)
+	}
+
+	// A rule added after the prompt froze reaches the injector but not the
+	// prompt: it is restated at once.
+	write("# Memory\n\n## 必须遵守\n- **Never** commit on `main`\n- a rule added later\n")
+	later := NewInjector(ParseRules(dir))
+	if got := later.Reminder("hi", view(0, false, system)); !strings.Contains(got, "a rule added later") {
+		t.Errorf("a rule missing from the frozen prompt should be restated at once:\n%s", got)
 	}
 }
