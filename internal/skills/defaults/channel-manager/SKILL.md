@@ -28,6 +28,9 @@ Configure IM platform channels for octo. Supported platforms: `feishu`, `weixin`
 
 - Config lives in `~/.octo/channels.yml` (YAML, mode 600). Edit it directly with
   `read_file` / `write_file`.
+- The server API is written `127.0.0.1:8088` throughout this skill, the default
+  address. If the Environment section has an `Octo server:` line, use that
+  address in every command instead.
 - Each platform can have **multiple bot instances** — e.g. 3 Feishu bots in one group,
   each bound to a different expert agent. Instances are named; the name becomes the
   `adapter_id` used in profile `channel_bindings`.

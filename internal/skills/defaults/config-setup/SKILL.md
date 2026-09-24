@@ -36,6 +36,10 @@ on the running octo server at `http://localhost:<port>` (use `curl` via the `ter
 The server listens on `127.0.0.1:8088` by default (the desktop app's built-in
 server uses the same port). Loopback requests need no access key.
 
+A session running inside the server (Web UI, desktop, IM) has an `Octo server:`
+line in its Environment section. When it's there, use that address in place of
+`127.0.0.1:8088` in every command in this skill and skip the steps below.
+
 1. **Try the default first**: `curl -s http://127.0.0.1:8088/api/config`.
    JSON back = you're connected; skip the rest of this section.
 2. **Connection refused?** The server may be on a custom port:

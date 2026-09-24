@@ -56,7 +56,9 @@ func getDefaultToolsFor(model string, contextWindow int) []agent.ToolDefinition 
 
 // Config holds server-level settings.
 type Config struct {
-	// Bind address (e.g. ":8088", "127.0.0.1:8088").
+	// Bind address (e.g. ":8088", "127.0.0.1:8088"). Also the address the
+	// env context gives the model for the REST API, so a caller serving on its
+	// own listener (ServeOn) sets it to that listener's address.
 	Addr string
 
 	// Provider and model override; zero values fall back to env/config.
@@ -472,7 +474,7 @@ func New(cfg Config) (*Server, error) {
 	_ = workflow.PruneJournals()
 
 	cwd, _ := os.Getwd()
-	envCtx := buildEnvContext(cwd)
+	envCtx := buildEnvContext(cwd, cfg.Addr)
 
 	skillReg := skills.Discover()
 	fileCfg, _ := config.Load()
@@ -2013,7 +2015,7 @@ func (s *Server) sessionCwdEnv(sess *agent.Session) (string, string) {
 			slog.Warn("could not create the workspace directory a session fell back to", "dir", dir, "err", err)
 		}
 	}
-	return dir, buildEnvContext(dir)
+	return dir, buildEnvContext(dir, s.cfg.Addr)
 }
 
 // sessionMemDir returns the memory directory for a turn belonging to proj —
@@ -2114,9 +2116,35 @@ func (s *Server) sessionCwdByID(sessionID string) string {
 // buildEnvContext mirrors cmd/octo's env context builder (delegating the shared
 // machine lines to tools.BuildEnvContext). The server's cwd is a workspace, not
 // a repository, so it passes ok=false and repo branches are shown per mounted
-// source folder by appendProjectEnvContext instead.
-func buildEnvContext(cwd string) string {
-	return tools.BuildEnvContext(cwd, "", false, false)
+// source folder by appendProjectEnvContext instead. It also names the address
+// this server answers on, which the CLI has no equivalent for.
+func buildEnvContext(cwd, addr string) string {
+	return tools.BuildEnvContext(cwd, "", false, false) + serverAddrNote(addr)
+}
+
+// serverAddrNote tells the model where this server's REST API is. The bundled
+// skills spell it 127.0.0.1:8088, the default; a server started on another
+// port (--addr, a named profile) left the model to find that out by failing
+// against 8088 first. Empty when addr names no concrete port.
+func serverAddrNote(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || port == "" || port == "0" {
+		return ""
+	}
+	// A wildcard bind also listens on loopback, and loopback is what passes
+	// the auth exemption without an access key.
+	switch host {
+	case "", "0.0.0.0", "::":
+		host = "127.0.0.1"
+	}
+	// Bound to one LAN address, the server isn't on loopback at all, and a
+	// request to that address arrives from it rather than from loopback — so
+	// the key exemption the skills rely on doesn't apply.
+	auth := ""
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		auth = ". This address is not loopback, so every request needs the `access_key` from `~/.octo/config.yml` in an `X-Access-Key` header"
+	}
+	return fmt.Sprintf("- Octo server: http://%s (this session runs inside it). For octo's REST API (`curl` via the terminal tool) use this address wherever a skill or doc writes `127.0.0.1:8088` or `localhost:8088`; 8088 is only the default port%s\n", net.JoinHostPort(host, port), auth)
 }
 
 // ensureSender lazily initialises the sender when the server started in

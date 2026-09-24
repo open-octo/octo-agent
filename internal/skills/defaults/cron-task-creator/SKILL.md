@@ -140,7 +140,8 @@ When the `[octo-ui-action]` with `action: "save_task"` comes back:
 ## API — one surface, all under `/api/tasks`
 
 Prefer the API whenever `octo serve` is up (default `:8088`): every change
-reschedules the running process immediately.
+reschedules the running process immediately. If the Environment section has an
+`Octo server:` line, use that address in place of `127.0.0.1:8088` below.
 
 ```bash
 # Create — returns {"id":"task_..."}. Include any optional field (directory,
