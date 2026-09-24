@@ -35,6 +35,12 @@ func (s *Server) handleExportSkill(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "skill directory not found")
 		return
 	}
+	// A skill linked in from a shared folder: walk its real directory, or
+	// Walk stops at the link and the containment check below rejects
+	// every file as outside it.
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+	}
 
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name+".zip"))
