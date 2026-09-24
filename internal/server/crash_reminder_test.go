@@ -157,7 +157,9 @@ func TestDoAgentTurn_NoReminderAfterCleanTurn(t *testing.T) {
 	srv.doAgentTurn(sess, "next question", nil, nil)
 
 	got := sender.lastUserContent(t)
-	if strings.Contains(got, "system-reminder") {
+	// Other reminders (the interface note) ride every turn; only the crash one
+	// must stay away.
+	if strings.Contains(got, "ended abnormally") {
 		t.Errorf("reminder fired after a cleanly finished turn; user content = %q", got)
 	}
 }

@@ -1179,6 +1179,9 @@ func (s *Server) runTurn(ctx context.Context, sess *agent.Session, userInput str
 	ctx = context.WithValue(ctx, ctxKeySessionID{}, sess.ID)
 	ctx = tools.WithSessionID(ctx, sess.ID) // tools-layer per-session state (replay secrets)
 	a := s.buildAgent(sess)
+	// A REST/script client, whatever entry the session is bound to: the
+	// interface note has nothing to promise it about rendering.
+	a.HookMeta.Transport = agent.EntryAPI
 
 	if !s.cfg.Tools {
 		// Run (not Turn) so this path shares the loop's interrupt contract

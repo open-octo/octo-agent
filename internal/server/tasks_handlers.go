@@ -397,6 +397,13 @@ func (s *Server) RunTask(ctx context.Context, task scheduler.Task) (sessionID st
 		persistTurnProgress()
 	}
 
+	// Hooks (the interface note among them) read the entry running this turn.
+	a.HookMeta.Transport = agent.EntryCron
+	if len(task.Notify) > 0 {
+		// The reply is pushed to IM too (notifyTaskResult), where diagrams and
+		// panels arrive as source.
+		runCtx = tools.WithReplyToIM(runCtx)
+	}
 	turnCallStart := time.Now()
 	reply, err := a.RunStream(runCtx, task.Prompt, toolDefs, executor, handler)
 

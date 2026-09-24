@@ -424,7 +424,9 @@ func TestRunChat_PromptFile_SingleTurn(t *testing.T) {
 	if requests != 1 {
 		t.Errorf("endpoint saw %d requests, want exactly 1 (the multi-line prompt must be ONE turn)", requests)
 	}
-	if lastUserContent != prompt {
+	// The interface note rides ahead of the user's text; the prompt itself must
+	// arrive whole.
+	if strings.TrimSpace(agent.StripSystemReminders(lastUserContent)) != prompt {
 		t.Errorf("user message = %q, want the full multi-line prompt %q", lastUserContent, prompt)
 	}
 }

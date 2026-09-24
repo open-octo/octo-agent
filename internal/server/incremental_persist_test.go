@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -163,7 +164,7 @@ func TestDoAgentTurn_PersistsProgressIncrementally(t *testing.T) {
 		t.Fatalf("mid-turn persisted %d messages, want 4 (user, tool_use, tool_result, steer): %+v",
 			len(onDisk.Messages), onDisk.Messages)
 	}
-	if onDisk.Messages[0].Content != "hello" {
+	if strings.TrimSpace(agent.StripSystemReminders(onDisk.Messages[0].Content)) != "hello" {
 		t.Errorf("persisted[0] = %q, want the user message", onDisk.Messages[0].Content)
 	}
 	if !hasBlock(onDisk.Messages[1], "tool_use") {

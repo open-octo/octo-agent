@@ -1483,6 +1483,8 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	tools.NewWorkflowNudger().RegisterHooks(hookEngine)
 	// Validate ~/.octo/config.yml right after the agent edits it.
 	tools.NewConfigGuard().RegisterHooks(hookEngine)
+	// Say which interface each turn's reply is read in.
+	tools.NewInterfaceNote(a).RegisterHooks(hookEngine)
 	// Auto-store into the external memory backend (if configured) — a no-op
 	// when none is set.
 	tools.RegisterMemoryBackendHooks(hookEngine)
@@ -3711,6 +3713,8 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	tools.NewWorkflowNudger().RegisterHooks(imEngine)
 	// Validate ~/.octo/config.yml right after the agent edits it.
 	tools.NewConfigGuard().RegisterHooks(imEngine)
+	// Say which interface each turn's reply is read in.
+	tools.NewInterfaceNote(sess.Agent).RegisterHooks(imEngine)
 	// Auto-store into the external memory backend (if configured) — a no-op
 	// when none is set.
 	tools.RegisterMemoryBackendHooks(imEngine)
