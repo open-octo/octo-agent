@@ -146,6 +146,21 @@ describe('VersionBadge picks up fresher reads', () => {
     expect(target.querySelector('.vb-dot.update')).toBeTruthy()
   })
 
+  it('ignores the Settings modal\'s answer while an upgrade is in flight', async () => {
+    await render({ latest: '1.17.0', needs_update: true })
+    wsHandlers['upgrade_log']?.({ line: 'downloading...' })
+    flushSync()
+
+    versionUpdate.set({ latest: '1.16.7', needsUpdate: false })
+    flushSync()
+    wsHandlers['upgrade_complete']?.({ success: false })
+    flushSync()
+
+    // The failed upgrade leaves the badge update-available; a mid-upgrade
+    // store write must not have cleared it.
+    expect(target.querySelector('.vb-dot.update')).toBeTruthy()
+  })
+
   it('re-reads when the page becomes visible again', async () => {
     const getVersion = vi.spyOn(api, 'getVersion')
       .mockResolvedValue(versionPayload() as never)
