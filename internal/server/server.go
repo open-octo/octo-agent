@@ -7,6 +7,8 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1492,6 +1494,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	tools.RegisterMemoryBackendHooks(hookEngine)
 	a.Hooks = hookEngine
 	a.HookMeta = hooks.Meta{SessionID: sess.ID, Transport: sess.BoundEntry, Cwd: cwd}
+	a.UpstreamSessionID = sess.ID
 	if p, err := sess.SavePath(); err == nil {
 		a.HookMeta.TranscriptPath = p
 	}
@@ -3398,7 +3401,6 @@ func (s *Server) handleChannelCompact(ad channel.Adapter, ev channel.InboundEven
 		defer s.releaseSessionBinding(storeID, agent.EntryChannel)
 		ctx, done := sess.BeginRun(context.Background())
 		defer done()
-		ctx = agent.WithUpstreamSessionID(ctx, storeID)
 		// Summarize what is on disk, not a history the Web UI may have moved
 		// past. Inside the run: a turn that started after the IsRunning check
 		// has finished and saved by now, instead of having its messages
@@ -3776,11 +3778,16 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	tools.RegisterMemoryBackendHooks(imEngine)
 	sess.Agent.Hooks = imEngine
 	sess.Agent.HookMeta = hooks.Meta{SessionID: string(sess.Key), Transport: agent.EntryChannel, Cwd: cwd}
+	// The raw chat key embeds platform chat identifiers, so it goes upstream
+	// only hashed; a backing Store's ID replaces it below.
+	keySum := sha256.Sum256([]byte(sess.Key))
+	sess.Agent.UpstreamSessionID = "im-" + hex.EncodeToString(keySum[:8])
 	// The persisted backing session (Store) carries the durable SessionStart
 	// flag + transcript path; IM persists it after each turn, so MarkHookStarted
 	// rides that Save. Store can be tombstoned by a concurrent /unbind — nil-skip.
 	if st := sess.Store; st != nil {
 		sess.Agent.HookMeta.SessionID = st.ID
+		sess.Agent.UpstreamSessionID = st.ID
 		if p, err := st.SavePath(); err == nil {
 			sess.Agent.HookMeta.TranscriptPath = p
 		}
@@ -3927,14 +3934,6 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		}
 		ctx = tools.WithSessionID(ctx, sid)
 	}
-	// Set outside the tools block so a tool-less serve still sends it, and only
-	// from the backing store: the "im:"+Key fallback above embeds platform chat
-	// identifiers, which must not leave for the provider.
-	upstreamSID := ""
-	if sess.Store != nil {
-		upstreamSID = sess.Store.ID
-	}
-	ctx = agent.WithUpstreamSessionID(ctx, upstreamSID)
 
 	// Session title, web doAgentTurn parity: an IM session starts life with
 	// agent.NewSession's "*Octo Agent" placeholder and — unlike a web turn —

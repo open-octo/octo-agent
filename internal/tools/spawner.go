@@ -83,13 +83,6 @@ type SpawnRequest struct {
 	// full conversation transcript to <SessionDir>/<agent-id>.jsonl so it can
 	// be inspected after a failure.
 	SessionDir string
-
-	// ParentSessionID is the parent conversation's upstream session ID
-	// (agent.UpstreamSessionIDFrom), captured by callers whose dispatch runs
-	// the child on a detached ctx that no longer carries it. The spawner
-	// prefixes the child's own upstream ID with it; empty falls back to the
-	// Spawn ctx.
-	ParentSessionID string
 }
 
 // SpawnResult is the sub-agent's final output, plus its token usage so the

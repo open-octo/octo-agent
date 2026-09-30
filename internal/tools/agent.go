@@ -324,8 +324,6 @@ func (AgentTool) Execute(ctx context.Context, _ string, input map[string]any) (a
 		Prompt:      prompt,
 		Tools:       callTools,
 		Model:       callModel,
-		// SubAgentManager runs the child on a detached ctx, so carry it here.
-		ParentSessionID: agent.UpstreamSessionIDFrom(ctx),
 	}
 	req.SystemSuffix = profile.SystemPrompt
 	req.ReadOnly = profile.ReadOnly

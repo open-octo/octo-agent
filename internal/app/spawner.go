@@ -150,17 +150,14 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 
 	lc := &liveChild{agent: child, tools: childTools, executor: executor, sessionDir: req.SessionDir}
 	id := s.reg.put(lc)
-	// Prefixed with the parent session, when known, so ids minted by separate
-	// registries (one per serve session) can't collide upstream. Written under
-	// lc.mu: the child is already visible to Continue, whose runChild reads it.
-	parent := req.ParentSessionID
-	if parent == "" {
-		parent = agent.UpstreamSessionIDFrom(ctx)
-	}
+	// The child is its own conversation upstream (its prompt prefix differs
+	// from the parent's), prefixed with the parent's so ids minted by separate
+	// registries can't collide. Under lc.mu: the child is already visible to
+	// Continue, whose runChild holds it while the child runs.
 	lc.mu.Lock()
-	lc.upstreamSessionID = id
-	if parent != "" {
-		lc.upstreamSessionID = parent + "/agent-" + id
+	child.UpstreamSessionID = id
+	if p := s.parent.UpstreamSessionID; p != "" {
+		child.UpstreamSessionID = p + "/agent-" + id
 	}
 	lc.mu.Unlock()
 
@@ -369,10 +366,6 @@ func (s *Spawner) runChild(ctx context.Context, lc *liveChild, prompt string) (r
 	defer lc.setBusy(false)
 
 	childCtx := tools.WithSubAgentMarker(ctx)
-	// The child is its own conversation upstream: its prompt prefix differs
-	// from the parent's. Only the upstream key is overridden; the tools-layer
-	// session ID is left as the Spawn ctx has it.
-	childCtx = agent.WithUpstreamSessionID(childCtx, lc.upstreamSessionID)
 
 	// When the manager stamped an event sink into ctx (live panels), stream
 	// the child's activity to it: tool dispatches with their (capped) outputs,
@@ -682,10 +675,6 @@ type liveChild struct {
 	agent    *agent.Agent
 	tools    []agent.ToolDefinition
 	executor agent.ToolExecutor
-
-	// upstreamSessionID is the conversation ID the child's provider requests
-	// carry (agent.WithUpstreamSessionID); stable across Continue rounds.
-	upstreamSessionID string
 
 	mu sync.Mutex // serializes runChild on this child
 

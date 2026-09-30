@@ -294,10 +294,6 @@ func runOnce(cfg replConfig, prompt string, stream bool) int {
 	// reply text. Bypasses the live view (and its spinner / tool lines) so
 	// captured stdout carries only the answer.
 	if !stream {
-		// This path skips runTurn, which is where streamed turns get the ID.
-		if cfg.session != nil {
-			ctx = agent.WithUpstreamSessionID(ctx, cfg.session.ID)
-		}
 		reply, err := a.Run(ctx, prompt, cfg.tools, cfg.executor)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {

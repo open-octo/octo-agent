@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/browser"
 )
 
@@ -52,11 +51,8 @@ type SecretAsker interface {
 // process-level — correct for the CLI, whose process IS the session boundary.
 type ctxKeySessionID struct{}
 
-// WithSessionID stamps the turn's session ID. Every turn entry already calls
-// it, so it also stamps the ID providers forward upstream
-// (agent.WithUpstreamSessionID) rather than each entry doing so separately.
+// WithSessionID stamps the turn's session ID.
 func WithSessionID(ctx context.Context, sid string) context.Context {
-	ctx = agent.WithUpstreamSessionID(ctx, sid)
 	return context.WithValue(ctx, ctxKeySessionID{}, sid)
 }
 

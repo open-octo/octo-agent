@@ -123,6 +123,7 @@ func offerOnboarding(reader lineReader, out io.Writer) bool {
 // existing post-turn Save — MarkHookStarted only marks the meta dirty.
 func wireSessionHooks(a *agent.Agent, sess *agent.Session, transport string) {
 	a.HookMeta.SessionID = sess.ID
+	a.UpstreamSessionID = sess.ID
 	a.HookMeta.Transport = transport
 	if p, err := sess.SavePath(); err == nil {
 		a.HookMeta.TranscriptPath = p
