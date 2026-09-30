@@ -44,7 +44,7 @@ If you already have reliable access to a Codex or Claude subscription, keep usin
 ## Highlights
 
 - **A single ~40 MB Go binary**: one command to download, copy to any server, and run. No Node / Python / Ruby dependency tree; no npm mirror, node-gyp build failure, or version conflict headaches.
-- **No cache degradation**: prompt caching is tuned per provider; measured hit rates for Kimi, DeepSeek, and Qwen are all **95%+**, keeping your token bill predictable.
+- **No cache degradation**: prompt caching is tuned per provider; measured hit rates for Kimi, DeepSeek, and Qwen are all **99%+**, keeping your token bill predictable.
 - **Eight interfaces**: TUI, CLI, Web UI, desktop app, IM bridge, VS Code, Obsidian, and mobile — few other agent projects cover this many entry points at once.
 - **Zero telemetry**: no IP, device model, model choice, or usage behavior is collected — no telemetry hooks at all. The Web UI ships every asset it needs — icons are bundled, text uses system fonts — so opening it touches no CDN. The only thing octo asks the network about itself is whether a newer release exists, and that is one config switch away from silent.
 - **Desktop installer around 100 MB**: compare that to Codex desktop and WorkBuddy, which often weigh in around **1 GB**. A thin agent harness shouldn't need that much space.
@@ -76,7 +76,7 @@ Built-in tools (shell, file read/write/edit, search), MCP servers, skills, and s
 
 ### Native model support, without cache degradation
 
-DeepSeek, Kimi, Qwen, Anthropic, OpenAI, or any OpenAI / Anthropic-compatible endpoint — octo supports them natively. Prompt caching is tuned per provider, with hit rates of 95%+. Unlike setups that front Claude Code with a third-party model and see cache hit rates collapse from misconfiguration, octo keeps your token bill predictable.
+DeepSeek, Kimi, Qwen, Anthropic, OpenAI, or any OpenAI / Anthropic-compatible endpoint — octo supports them natively. Prompt caching is tuned per provider, with hit rates of 99%+. Unlike setups that front Claude Code with a third-party model and see cache hit rates collapse from misconfiguration, octo keeps your token bill predictable.
 
 ### Stable and safe — won't edit itself dead, won't go rogue
 
