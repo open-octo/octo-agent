@@ -40,6 +40,8 @@ func (s *Server) handleBenchmark(w http.ResponseWriter, r *http.Request) {
 	// Cap the benchmark so a stalled provider doesn't hang the UI.
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
+	// Calls the sender directly rather than through an Agent entry point.
+	ctx = agent.WithUpstreamSessionID(ctx, sessionID)
 
 	// Resolve the model to benchmark: the session's current model if we can
 	// load it, otherwise the server's default.

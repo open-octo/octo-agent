@@ -10,6 +10,8 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -450,6 +452,10 @@ func TestConnection(ctx context.Context, providerName, apiKey, baseURL, model, p
 	if err != nil {
 		return err
 	}
+	// Bypasses the Agent entry points, so it needs its own conversation ID.
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	ctx = agent.WithUpstreamSessionID(ctx, "conntest-"+hex.EncodeToString(b[:]))
 	_, err = p.Send(ctx, provider.Request{
 		Model:     model,
 		Messages:  []agent.Message{{Role: agent.RoleUser, Content: "hi"}},

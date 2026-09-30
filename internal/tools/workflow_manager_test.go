@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/workflow"
 )
 
@@ -83,6 +84,33 @@ func TestWorkflowManager_Start_PropagatesWorkingDirIntoAgentCalls(t *testing.T) 
 	}
 	if seenCWD != "/some/project/dir" {
 		t.Errorf("agent() call saw WorkingDir(ctx) = %q, want %q", seenCWD, "/some/project/dir")
+	}
+}
+
+// The upstream session ID crosses the same detach, so provider calls a run
+// makes outside an Agent entry point (the browser healer) still carry it.
+func TestWorkflowManager_Start_PropagatesUpstreamSessionID(t *testing.T) {
+	m := NewWorkflowManager()
+	var seen string
+	captureAgent := func(ctx context.Context, prompt string, _ workflow.AgentOptions) workflow.AgentResult {
+		seen = agent.UpstreamSessionIDFrom(ctx)
+		return workflow.AgentResult{Reply: "ok"}
+	}
+
+	id, err := m.Start(WorkflowRunRequest{
+		Description:       "sid-check",
+		Script:            `agent("hi")`,
+		Agent:             captureAgent,
+		UpstreamSessionID: "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if snap := waitForDone(t, m, id); snap.Status != "done" {
+		t.Fatalf("status = %q, want done (err=%q)", snap.Status, snap.ErrMsg)
+	}
+	if seen != "sess-1" {
+		t.Errorf("agent() call saw upstream session ID %q, want sess-1", seen)
 	}
 }
 
