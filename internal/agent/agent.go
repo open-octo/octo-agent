@@ -296,6 +296,13 @@ type Agent struct {
 	// unset.
 	HookMeta hooks.Meta
 
+	// UpstreamSessionID is the conversation ID providers may forward to their
+	// endpoint (see WithUpstreamSessionID). Every exported entry point stamps
+	// it into ctx, so turns, compaction, titles and the tools a turn runs all
+	// carry it. Set by the session-owning layer before a run, like HookMeta.
+	// Providers hash it before sending, so it may embed identifiers.
+	UpstreamSessionID string
+
 	// turnTools accumulates the tool names dispatched during the current turn,
 	// surfaced to the Stop hook as tools_used. Reset at each turn's first user
 	// input; read and cleared when Stop fires.
@@ -769,7 +776,7 @@ func (a *Agent) getImageDescriber() ImageDescriber {
 // appends the reply to history, and returns it. Errors leave History
 // unchanged from before the call.
 func (a *Agent) Turn(ctx context.Context, userInput string) (Reply, error) {
-	return a.turn(ctx, userInput, false)
+	return a.turn(a.withUpstreamSession(ctx), userInput, false)
 }
 
 // turn is Turn plus the finishInterrupt contract selector — see turnStream
@@ -829,7 +836,7 @@ func (a *Agent) TurnStream(
 	onChunk func(textDelta string),
 	onThinking func(thinkingDelta string),
 ) (Reply, error) {
-	return a.turnStream(ctx, userInput, onChunk, onThinking, nil, false)
+	return a.turnStream(a.withUpstreamSession(ctx), userInput, onChunk, onThinking, nil, false)
 }
 
 // turnStream is TurnStream plus an optional event handler, so the RunStream
@@ -923,6 +930,7 @@ const truncationResumePrompt = "You were cut off mid-thought. Continue exactly w
 // If tools is nil or executor is nil, Run is equivalent to Turn (single-turn,
 // no tool dispatch).
 func (a *Agent) Run(ctx context.Context, userInput string, tools []ToolDefinition, executor ToolExecutor) (reply Reply, err error) {
+	ctx = a.withUpstreamSession(ctx)
 	sender := a.GetSender()
 	if sender == nil {
 		return Reply{}, fmt.Errorf("agent: no Sender configured")
@@ -974,6 +982,7 @@ func (a *Agent) RunStream(
 	executor ToolExecutor,
 	handler EventHandler,
 ) (reply Reply, err error) {
+	ctx = a.withUpstreamSession(ctx)
 	sender := a.GetSender()
 	if sender == nil {
 		return Reply{}, fmt.Errorf("agent: no Sender configured")
@@ -1721,6 +1730,7 @@ const suggestInstruction = "Suggest ONE concise, specific next message I (the us
 // is told not to call tools; if it returns a tool_use anyway, Content is empty
 // and we simply produce no suggestion that turn.
 func (a *Agent) Suggest(ctx context.Context, tools []ToolDefinition) (string, error) {
+	ctx = a.withUpstreamSession(ctx)
 	sender := a.GetSender()
 	if sender == nil || a.Model == "" {
 		return "", fmt.Errorf("agent: suggest: not configured")
@@ -1816,6 +1826,7 @@ func (a *Agent) GenerateTitle(ctx context.Context) (string, error) {
 // GenerateTitleOrSnippet snippet fallback already guarantees a title, and a
 // retry would double the latency of a call bounded by TitleGenerationTimeout.
 func (a *Agent) GenerateTitleFrom(ctx context.Context, snap []Message) (string, error) {
+	ctx = a.withUpstreamSession(ctx)
 	sender, model := a.GetSender(), a.Model
 	isLite := a.LiteSender != nil && a.LiteModel != ""
 	if isLite {

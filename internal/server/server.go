@@ -1492,6 +1492,7 @@ func (s *Server) buildAgent(sess *agent.Session) *agent.Agent {
 	tools.RegisterMemoryBackendHooks(hookEngine)
 	a.Hooks = hookEngine
 	a.HookMeta = hooks.Meta{SessionID: sess.ID, Transport: sess.BoundEntry, Cwd: cwd}
+	a.UpstreamSessionID = sess.ID
 	if p, err := sess.SavePath(); err == nil {
 		a.HookMeta.TranscriptPath = p
 	}
@@ -3403,6 +3404,11 @@ func (s *Server) handleChannelCompact(ad channel.Adapter, ev channel.InboundEven
 		// has finished and saved by now, instead of having its messages
 		// replaced mid-turn.
 		s.reloadChannelHistory(sess)
+		// A /compact before this chat's first turn, or right after a rebind,
+		// would otherwise run on an unset or stale upstream ID.
+		if sess.Agent.UpstreamSessionID != storeID {
+			sess.Agent.UpstreamSessionID = storeID
+		}
 		stats, err := sess.Agent.ForceCompact(ctx, nil)
 		switch {
 		case err != nil:
@@ -3778,7 +3784,17 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 	// The persisted backing session (Store) carries the durable SessionStart
 	// flag + transcript path; IM persists it after each turn, so MarkHookStarted
 	// rides that Save. Store can be tombstoned by a concurrent /unbind — nil-skip.
-	if st := sess.Store; st != nil {
+	st := sess.Store
+	upstream := string(sess.Key)
+	if st != nil {
+		upstream = st.ID
+	}
+	// Written only on change: this runs every turn, and a title goroutine or
+	// async sub-agent from the previous turn may still be reading it.
+	if sess.Agent.UpstreamSessionID != upstream {
+		sess.Agent.UpstreamSessionID = upstream
+	}
+	if st != nil {
 		sess.Agent.HookMeta.SessionID = st.ID
 		if p, err := st.SavePath(); err == nil {
 			sess.Agent.HookMeta.TranscriptPath = p

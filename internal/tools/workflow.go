@@ -360,7 +360,8 @@ func (WorkflowTool) Execute(ctx context.Context, _ string, input map[string]any)
 		// workflow_save) still resolve against this turn's directory instead
 		// of falling back to the server's own launch directory once the run
 		// is no longer tied to this request's ctx.
-		WorkingDir: WorkingDirOrCWD(ctx),
+		WorkingDir:        WorkingDirOrCWD(ctx),
+		UpstreamSessionID: agent.UpstreamSessionIDFrom(ctx),
 	}
 
 	runID, err := mgr.Start(req)

@@ -184,6 +184,7 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 			apiVer = DefaultAPIVersion
 		}
 		httpReq.Header.Set("anthropic-version", apiVer)
+		provider.SetSessionHeader(ctx, httpReq.Header, c.endpointURL())
 		for k, v := range c.Headers {
 			httpReq.Header.Set(k, v)
 		}

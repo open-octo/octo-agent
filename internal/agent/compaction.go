@@ -514,6 +514,7 @@ func (a *Agent) maybeCompact(ctx context.Context, handler EventHandler) error {
 // report what changed (BeforeTokens == AfterTokens and FoldedMsgs == 0 means
 // nothing was compacted).
 func (a *Agent) ForceCompact(ctx context.Context, handler EventHandler) (CompactStats, error) {
+	ctx = a.withUpstreamSession(ctx)
 	msgs := a.History.Snapshot()
 	origBefore := a.historyTokens(msgs)
 	before := origBefore

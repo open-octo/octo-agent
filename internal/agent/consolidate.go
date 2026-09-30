@@ -26,6 +26,7 @@ project context, useful references). Output only the updated summary text.`
 // may be empty — empty priorSummary means "first pass"; empty newNotes means
 // "no new material" and the call short-circuits.
 func (a *Agent) ConsolidateMemory(ctx context.Context, priorSummary, newNotes string) (string, error) {
+	ctx = a.withUpstreamSession(ctx)
 	sender := a.GetSender()
 	if sender == nil {
 		return "", fmt.Errorf("agent: no Sender configured")

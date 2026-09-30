@@ -79,7 +79,7 @@
   import { applyToolToggle, buildExportConversation, exportConversationStyles, hasRenderableTurn, TOOL_RESULT_CHARS } from '../lib/exportTranscript'
   import { t, tr, pickLocalized } from '../lib/i18n'
   import { insertPendingSend, takeConfirmedSend } from '../lib/pendingSendOrder'
-  import { isReplayedUserEcho } from '../lib/userEchoDedup'
+  import { appendLiveAfterHistory, isReplayedUserEcho } from '../lib/userEchoDedup'
   import { inlineSlashCommand } from '../lib/inlineSlash'
   import { exportModeStore, selectedMessagesStore } from '../lib/exportStore'
   import { filenameStem } from '../lib/filename'
@@ -428,8 +428,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   }
 
   // loadHistory fetches and renders a session's persisted transcript. Used on
-  // session switch and on a server `history_reload` (after /clear or /compact
-  // rewrote history out of band). Returns a promise that resolves once the
+  // session switch, on a server `history_reload` (after /clear or /compact
+  // rewrote history out of band) and on `history_rollback` (edit / retry
+  // stripped the tail). Returns a promise that resolves once the
   // fetch settles (success or failure) — the mount effect below awaits it
   // before subscribing over WS; see the comment there for why.
   //
@@ -438,7 +439,15 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // the stores at all — even keyed by its own sid, a late append would
   // duplicate the transcript when the user switches straight back and the
   // fresh effect's own loadHistory appends the same events again (#2090).
-  function loadHistory(sid: string, isStale: () => boolean): Promise<void> {
+  // A load is also stale once a newer one for the same session has started:
+  // two rollbacks/reloads in quick succession each clear and refetch, and an
+  // older response landing after the second clear would render a transcript
+  // the newer response then appends again (#2570).
+  const historyLoadGen = new Map<string, number>()
+  function loadHistory(sid: string, isCancelled: () => boolean): Promise<void> {
+    const gen = (historyLoadGen.get(sid) ?? 0) + 1
+    historyLoadGen.set(sid, gen)
+    const isStale = () => isCancelled() || historyLoadGen.get(sid) !== gen
     // Seed the goal chip for this session; failures (older server, goals
     // disabled) just leave the chip hidden.
     api.getSessionGoal(sid)
@@ -456,6 +465,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // Server-resolved, so it's correct even before $sessions has loaded —
       // see the comment on the 'thinking' branch in handleHistoryEvent.
       const historyShowReasoning = resp?.show_reasoning ?? true
+      // Live events can land while the fetch is in flight — after a rollback
+      // the rerun is already streaming. Set them aside so history renders
+      // first (and its tool calls group onto history bubbles), then put them
+      // back behind it, minus the echo the fetch already returned.
+      const live = get(chatMessages)[sid] ?? []
+      clearMsgs(sid)
       // Collect the tool_ids that came from history so we only close those,
       // leaving any concurrently-replayed live-turn tools untouched.
       const historyToolIds = new Set<string>()
@@ -465,6 +480,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       }
       // Finish only the history tools (not live-turn tools from WS replay).
       finishToolsById(sid, historyToolIds)
+      if (live.length) {
+        chatMessages.update(m => ({ ...m, [sid]: appendLiveAfterHistory(m[sid] ?? [], live) }))
+      }
       // Pin to bottom after the DOM update so the user lands at the latest message.
       queueMicrotask(() => {
         if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight

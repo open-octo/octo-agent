@@ -597,6 +597,17 @@ func (m *Manager) cmdCompact(ev InboundEvent, agentID string) string {
 	ctx, done := sess.BeginRun(context.Background())
 	defer done()
 
+	// Same upstream ID the turn path sets: a /compact before this chat's first
+	// turn would otherwise run on an unset one.
+	upstream := string(sess.Key)
+	sess.storeMu.Lock()
+	if sess.Store != nil {
+		upstream = sess.Store.ID
+	}
+	sess.storeMu.Unlock()
+	if sess.Agent.UpstreamSessionID != upstream {
+		sess.Agent.UpstreamSessionID = upstream
+	}
 	stats, err := sess.Agent.ForceCompact(ctx, nil)
 	if err != nil {
 		return fmt.Sprintf("Compact failed: %v", err)

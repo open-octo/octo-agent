@@ -81,6 +81,8 @@ func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 
 	a := agent.New(llmSender, resolvedModel)
+	// init keeps no session; the process is the conversation.
+	a.UpstreamSessionID = newCacheKey()
 	a.System = prompt.Compose("", cwd, env, "", "", "", true, false) // init is a one-shot task; no skills/mcp/memory
 
 	// init's whole job is writing/updating .octorules at cwd's root, and it

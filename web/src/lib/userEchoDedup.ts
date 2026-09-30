@@ -28,3 +28,16 @@ export function isReplayedUserEcho(msgs: readonly UserMsgLike[], content: string
     m.type === 'user' && !m.pending && m.content === content && m.createdAt === createdAt,
   )
 }
+
+// Joins a history fetch with the live messages that arrived while it was in
+// flight. A rollback (edit / retry) clears the transcript and refetches while
+// the rerun is already streaming: its user echo lands first, and the server
+// has also persisted that message below the turn's history watermark, so the
+// fetch returns it too. History goes first (it is older), and a live user
+// bubble the fetch already holds is dropped rather than rendered twice.
+export function appendLiveAfterHistory<T extends UserMsgLike>(history: readonly T[], live: readonly T[]): T[] {
+  const fresh = live.filter(m =>
+    !(m.type === 'user' && m.createdAt !== undefined && isReplayedUserEcho(history, m.content, m.createdAt)),
+  )
+  return [...history, ...fresh]
+}

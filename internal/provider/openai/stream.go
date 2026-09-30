@@ -98,6 +98,7 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 		if c.APIKey != "" {
 			httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
 		}
+		provider.SetSessionHeader(ctx, httpReq.Header, c.endpointURL())
 		for k, v := range c.Headers {
 			httpReq.Header.Set(k, v)
 		}
