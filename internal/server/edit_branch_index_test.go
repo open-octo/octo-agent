@@ -447,6 +447,88 @@ func TestHandleEditMessage_MidStream_InterruptsAndReruns(t *testing.T) {
 	}
 }
 
+// TestHandleEditMessage_MidStream_RefusesOlderMessage: while a reply runs,
+// only the turn in flight is editable. Editing an earlier prompt would cut
+// every finished turn after it, so it is refused without interrupting the
+// running turn or touching history.
+func TestHandleEditMessage_MidStream_RefusesOlderMessage(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	sender := &blockUntilCanceledSender{entered: make(chan struct{})}
+	srv.sender = sender
+	srv.initWS()
+	srv.turnRunning = make(map[string]bool)
+	srv.steerQueues = make(map[string][]queuedTurn)
+	srv.sessionAgents = make(map[string]*agent.Agent)
+
+	sess := agent.NewSession("stub-model", "")
+	sess.Title = "fixed title"
+	sess.Messages = []agent.Message{
+		agent.NewUserMessage("one"),
+		{Role: agent.RoleAssistant, Content: "two"},
+	}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	mu := srv.sessionTurnLock(sess.ID)
+	mu.Lock()
+	srv.turnRunning[sess.ID] = true
+	mu.Unlock()
+	turnDone := make(chan struct{})
+	go func() {
+		defer func() {
+			mu.Lock()
+			srv.turnRunning[sess.ID] = false
+			mu.Unlock()
+			close(turnDone)
+		}()
+		srv.doAgentTurn(sess, "in flight", nil, nil)
+	}()
+	<-sender.entered
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/edit_message",
+		strings.NewReader(`{"message_index":0,"new_content":"EDITED"}`))
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("editing an older message mid-stream: status = %d, want 409", w.Code)
+	}
+	select {
+	case <-turnDone:
+		t.Fatal("the refused edit interrupted the running turn")
+	default:
+	}
+
+	// The in-flight prompt is editable, but not with a stale copy of its text:
+	// that is refused before the interrupt too.
+	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/edit_message",
+		strings.NewReader(`{"message_index":2,"new_content":"EDITED","original_content":"something else"}`))
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("stale content mid-stream: status = %d, want 409", w.Code)
+	}
+	select {
+	case <-turnDone:
+		t.Fatal("the stale edit interrupted the running turn")
+	default:
+	}
+
+	srv.interruptSession(sess.ID)
+	<-turnDone
+	got, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got.Messages[0].Content != "one" {
+		t.Fatalf("first prompt = %q, want it untouched", got.Messages[0].Content)
+	}
+}
+
 // TestHandleEvent_SteerInjected_CarriesMessageIndex: a steer message injected
 // mid-turn must reach the browser with its persisted message_index so edit and
 // branch can target it. Reminder-only items are skipped for display but still

@@ -2579,6 +2579,19 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // index and text would pass the server's check and cut at the wrong message.
   let editingTarget: { messageIndex: number; content: string } | null = null
 
+  // A bubble needs a persisted position to be edited: a pending one has none,
+  // and an edit without one would truncate at the wrong place. Mid-stream
+  // only the turn in flight qualifies (the server interrupts it and reruns);
+  // an older message would cut every finished turn after it, so it waits
+  // until the reply is stopped. A finished turn shows as an assistant bubble
+  // carrying messageIndex — the same test the server applies.
+  let lastClosedReply = $derived(msgs.findLastIndex((x: any) => x.type === 'assistant' && typeof x.messageIndex === 'number'))
+
+  function canEdit(index: number, running: boolean): boolean {
+    if (typeof msgs[index]?.messageIndex !== 'number') return false
+    return !running || index > lastClosedReply
+  }
+
   function startEdit(index: number) {
     if (editingBusy) return
     const m = msgs[index]
@@ -2961,12 +2974,9 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                     </div>
                   {:else}
                     <div class="msg-actions">
-                      <!-- Editable even mid-stream: confirming the edit has the
-                           server interrupt the in-flight turn before rerunning,
-                           so the button needs no streaming gate. It does need a
-                           persisted position: a pending bubble has none, and an
-                           edit without one would truncate at the wrong place. -->
-                      {#if typeof msg.messageIndex === 'number'}
+                      <!-- See canEdit: needs a persisted position, and mid-stream
+                           only the turn in flight is editable. -->
+                      {#if canEdit(i, streaming)}
                         <button class="action-btn" title={$t('chat.edit')} onclick={() => startEdit(i)}>
                           <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
                         </button>
