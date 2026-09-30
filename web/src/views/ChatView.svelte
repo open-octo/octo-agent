@@ -439,7 +439,15 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // the stores at all — even keyed by its own sid, a late append would
   // duplicate the transcript when the user switches straight back and the
   // fresh effect's own loadHistory appends the same events again (#2090).
-  function loadHistory(sid: string, isStale: () => boolean): Promise<void> {
+  // A load is also stale once a newer one for the same session has started:
+  // two rollbacks/reloads in quick succession each clear and refetch, and an
+  // older response landing after the second clear would render a transcript
+  // the newer response then appends again (#2570).
+  const historyLoadGen = new Map<string, number>()
+  function loadHistory(sid: string, isCancelled: () => boolean): Promise<void> {
+    const gen = (historyLoadGen.get(sid) ?? 0) + 1
+    historyLoadGen.set(sid, gen)
+    const isStale = () => isCancelled() || historyLoadGen.get(sid) !== gen
     // Seed the goal chip for this session; failures (older server, goals
     // disabled) just leave the chip hidden.
     api.getSessionGoal(sid)
