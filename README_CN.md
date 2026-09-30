@@ -44,7 +44,7 @@ octo 围绕这个定位构建：
 ## Highlights
 
 - **单个 ~40 MB 的 Go 二进制**：一条命令下载，拷到任何服务器都能立即运行。没有 Node / Python / Ruby 依赖树，没有 npm 镜像、node-gyp 编译失败、依赖版本冲突的烦恼。
-- **缓存不劣化**：针对国产模型逐家做了提示词缓存优化，Kimi、DeepSeek、Qwen 的缓存命中率都能到 **95% 以上**，token 账单可预期。
+- **缓存不劣化**：针对国产模型逐家做了提示词缓存优化，Kimi、DeepSeek、Qwen 的缓存命中率都能到 **99% 以上**，token 账单可预期。
 - **八种界面**：TUI、CLI、Web UI、桌面应用、IM 桥接、VS Code、Obsidian、移动端——很少有其他 agent 项目能同时覆盖这么多入口。
 - **零遥测**：不收集 IP、机型、模型选择、使用行为，没有任何遥测埋点。Web UI 需要的静态资源全部随二进制发布——图标已打包，正文用系统字体——打开界面不碰任何 CDN。octo 唯一会向网络打听自己的事情是「有没有新版本」，改一个配置就能彻底静默。
 - **桌面安装包约 100 MB**：相比之下 Codex 桌面版和 WorkBuddy 动辄 **1 GB 上下**。一个薄薄的 agent harness，没必要占用那么大的空间。
@@ -76,7 +76,7 @@ octo（单二进制）
 
 ### 原生多模型，缓存不劣化
 
-DeepSeek、Kimi、Qwen、Anthropic、OpenAI，或任何兼容 OpenAI / Anthropic 协议的端点，octo 都是原生支持。针对国产模型逐家做了提示词缓存优化，缓存命中率 95% 以上；不会像某些方案把 Claude Code 接在国产模型前面时，因缓存配置不当导致命中率崩塌、token 账单暴涨。
+DeepSeek、Kimi、Qwen、Anthropic、OpenAI，或任何兼容 OpenAI / Anthropic 协议的端点，octo 都是原生支持。针对国产模型逐家做了提示词缓存优化，缓存命中率 99% 以上；不会像某些方案把 Claude Code 接在国产模型前面时，因缓存配置不当导致命中率崩塌、token 账单暴涨。
 
 ### 稳定且安全：不会把自己改挂，也不会发疯删数据
 
