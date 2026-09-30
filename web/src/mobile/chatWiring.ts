@@ -18,7 +18,7 @@ import { ws } from '../lib/ws'
 import { tr } from '../lib/i18n'
 import * as api from '../lib/api'
 import { inlineSlashCommand } from '../lib/inlineSlash'
-import { isReplayedUserEcho } from '../lib/userEchoDedup'
+import { appendLiveAfterHistory, isReplayedUserEcho } from '../lib/userEchoDedup'
 import {
   chatMessages,
   chatStreaming,
@@ -81,12 +81,20 @@ export function loadMobileHistory(sid: string): Promise<void> {
   return api.getSessionMessages(sid).then((resp: any) => {
     const events: any[] = resp?.events ?? []
     const showReasoning = resp?.show_reasoning ?? true
+    // After a rollback the rerun is already streaming while this fetch is in
+    // flight; render history first, then put the live messages back behind
+    // it (same as the desktop's loadHistory).
+    const live = get(chatMessages)[sid] ?? []
+    clearMsgs(sid)
     const historyToolIds = new Set<string>()
     for (const ev of events) {
       if (ev.type === 'tool_call' && ev.tool_id) historyToolIds.add(ev.tool_id)
       applyHistoryEvent(sid, ev, showReasoning)
     }
     finishToolsById(sid, historyToolIds)
+    if (live.length) {
+      chatMessages.update(m => ({ ...m, [sid]: appendLiveAfterHistory(m[sid] ?? [], live) }))
+    }
   }).catch(() => {})
 }
 
@@ -287,6 +295,15 @@ export function wireMobileSession(sid: string): () => void {
   }))
 
   cleanups.push(ws.on('history_reload', (ev: any) => {
+    if (!forSid(ev)) return
+    clearMsgs(sid)
+    loadMobileHistory(sid)
+  }))
+
+  // An edit or retry (from any client) stripped the transcript tail
+  // server-side; without this the phone keeps the stale tail and the rerun
+  // lands after it.
+  cleanups.push(ws.on('history_rollback', (ev: any) => {
     if (!forSid(ev)) return
     clearMsgs(sid)
     loadMobileHistory(sid)
