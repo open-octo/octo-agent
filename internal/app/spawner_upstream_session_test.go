@@ -53,3 +53,33 @@ func TestSpawner_ChildUsesOwnUpstreamSessionID(t *testing.T) {
 		t.Errorf("parent ctx was mutated: %q", agent.UpstreamSessionIDFrom(ctx))
 	}
 }
+
+// SubAgentManager hands Spawn a detached ctx, so the parent arrives on the
+// request instead.
+func TestSpawner_ParentSessionIDFromRequest(t *testing.T) {
+	send := &sessionCtxSender{}
+	parent := agent.New(send, "m")
+	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
+
+	res, err := sp.Spawn(context.Background(), tools.SpawnRequest{Description: "d", Prompt: "p", ParentSessionID: "parent-sess"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "parent-sess/agent-" + res.AgentID; len(send.upstream) != 1 || send.upstream[0] != want {
+		t.Errorf("child upstream session IDs = %q, want [%q]", send.upstream, want)
+	}
+}
+
+func TestSpawner_NoParentSessionUsesBareID(t *testing.T) {
+	send := &sessionCtxSender{}
+	parent := agent.New(send, "m")
+	sp := NewSpawner(parent, nilExecutor{}, func(context.Context) []agent.ToolDefinition { return nil })
+
+	res, err := sp.Spawn(context.Background(), tools.SpawnRequest{Description: "d", Prompt: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(send.upstream) != 1 || send.upstream[0] != res.AgentID {
+		t.Errorf("child upstream session IDs = %q, want [%q]", send.upstream, res.AgentID)
+	}
+}

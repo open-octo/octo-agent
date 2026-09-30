@@ -55,4 +55,14 @@ func TestOpenCodeSessionHeader_SendAndStream(t *testing.T) {
 	if len(got) != 2 || got[0] != "sess-1" || got[1] != "sess-1" {
 		t.Errorf("%s per request = %q, want both \"sess-1\"", provider.OpenCodeSessionHeader, got)
 	}
+
+	// A configured header of the same name (any casing) overrides it.
+	got = nil
+	c.Headers = map[string]string{"X-OpenCode-Session": "mine"}
+	if _, err := c.Send(ctx, req); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if len(got) != 1 || got[0] != "mine" {
+		t.Errorf("%s with configured override = %q, want [\"mine\"]", provider.OpenCodeSessionHeader, got)
+	}
 }

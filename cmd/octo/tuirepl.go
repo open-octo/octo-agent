@@ -1018,6 +1018,9 @@ func (m *tuiModel) startCompact() tea.Cmd {
 	m.spinnerFrame = 0
 	m.running = nil
 	ctx, cancel := context.WithCancel(context.Background())
+	if m.cfg.session != nil {
+		ctx = agent.WithUpstreamSessionID(ctx, m.cfg.session.ID)
+	}
 	m.cancelTurn = cancel
 	a := m.a
 	sink := m.sink

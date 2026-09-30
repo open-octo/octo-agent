@@ -3398,6 +3398,7 @@ func (s *Server) handleChannelCompact(ad channel.Adapter, ev channel.InboundEven
 		defer s.releaseSessionBinding(storeID, agent.EntryChannel)
 		ctx, done := sess.BeginRun(context.Background())
 		defer done()
+		ctx = agent.WithUpstreamSessionID(ctx, storeID)
 		// Summarize what is on disk, not a history the Web UI may have moved
 		// past. Inside the run: a turn that started after the IsRunning check
 		// has finished and saved by now, instead of having its messages
@@ -3926,6 +3927,14 @@ func (s *Server) runChannelTurns(ctx context.Context, sess *channel.Session, ad 
 		}
 		ctx = tools.WithSessionID(ctx, sid)
 	}
+	// Set outside the tools block so a tool-less serve still sends it, and only
+	// from the backing store: the "im:"+Key fallback above embeds platform chat
+	// identifiers, which must not leave for the provider.
+	upstreamSID := ""
+	if sess.Store != nil {
+		upstreamSID = sess.Store.ID
+	}
+	ctx = agent.WithUpstreamSessionID(ctx, upstreamSID)
 
 	// Session title, web doAgentTurn parity: an IM session starts life with
 	// agent.NewSession's "*Octo Agent" placeholder and — unlike a web turn —

@@ -22,6 +22,7 @@ func TestSetSessionHeader(t *testing.T) {
 		{"host case-insensitive", stamped, "https://OpenCode.AI/zen/go/v1/messages", "sess-1"},
 		{"other vendor gets nothing", stamped, "https://api.deepseek.com/v1/chat/completions", ""},
 		{"lookalike host gets nothing", stamped, "https://notopencode.ai/v1/messages", ""},
+		{"userinfo trick gets nothing", stamped, "https://opencode.ai@evil.com/v1/messages", ""},
 		{"unstamped ctx gets nothing", context.Background(), "https://opencode.ai/zen/go/v1/messages", ""},
 	}
 	for _, tc := range cases {

@@ -19,6 +19,36 @@ func (s *blockingSpawner) Continue(_ context.Context, _, _ string) (SpawnResult,
 	return SpawnResult{}, nil
 }
 
+// reqSpawner records the request it was handed.
+type reqSpawner struct{ got SpawnRequest }
+
+func (s *reqSpawner) Spawn(_ context.Context, req SpawnRequest) (SpawnResult, error) {
+	s.got = req
+	return SpawnResult{AgentID: "c1", Reply: "ok"}, nil
+}
+func (s *reqSpawner) Continue(_ context.Context, _, _ string) (SpawnResult, error) {
+	return SpawnResult{}, nil
+}
+
+// TestAgentTool_CarriesParentSessionID verifies the parent's upstream session
+// ID reaches the spawner even though SubAgentManager runs the child on a
+// detached ctx.
+func TestAgentTool_CarriesParentSessionID(t *testing.T) {
+	sp := &reqSpawner{}
+	mgr := NewSubAgentManager(sp)
+	mgr.SetSynchronous(true)
+	ctx := WithSubAgentManager(WithSessionID(context.Background(), "parent-sess"), mgr)
+
+	if _, err := (AgentTool{}).Execute(ctx, "sub_agent", map[string]any{
+		"description": "d", "prompt": "p", "subagent_type": "general",
+	}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if sp.got.ParentSessionID != "parent-sess" {
+		t.Errorf("ParentSessionID = %q, want parent-sess", sp.got.ParentSessionID)
+	}
+}
+
 // resultSpawner returns a fixed reply + stop reason synchronously.
 type resultSpawner struct {
 	reply      string
