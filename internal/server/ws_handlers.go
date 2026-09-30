@@ -942,6 +942,36 @@ func (s *Server) handleWSRetry(conn *wsConn, sessionID string) {
 		return
 	}
 
+	// The rerun must own the binding while it writes the transcript — see
+	// handleEditMessage. Reload after binding: the session loaded above
+	// predates the bind, and saving it would write the old binding back.
+	if ok, _, berr := s.acquireSessionBinding(sess.ID, agent.EntryWeb, false); !ok {
+		mu.Unlock()
+		s.wsHub.broadcast(sessionID, map[string]string{
+			"type":    "error",
+			"message": berr.Error(),
+		})
+		return
+	}
+	if sess, err = agent.LoadSession(sessionID); err != nil {
+		mu.Unlock()
+		s.releaseSessionBinding(sessionID, agent.EntryWeb)
+		s.wsHub.broadcast(sessionID, map[string]string{
+			"type":    "error",
+			"message": "session not found",
+		})
+		return
+	}
+	if lastUserIdx = lastVisibleUserIdx(sess.Messages); lastUserIdx < 0 {
+		mu.Unlock()
+		s.releaseSessionBinding(sessionID, agent.EntryWeb)
+		s.wsHub.broadcast(sessionID, map[string]string{
+			"type":    "error",
+			"message": "no user message to retry",
+		})
+		return
+	}
+
 	userMsg := sess.Messages[lastUserIdx]
 	sess.Messages = sess.Messages[:lastUserIdx]
 	_ = sess.Save()
@@ -968,7 +998,11 @@ func (s *Server) handleWSRetry(conn *wsConn, sessionID string) {
 	mu.Unlock()
 
 	go func() {
+		if s.drain.begin() == nil {
+			defer s.drain.end()
+		}
 		defer func() {
+			s.releaseSessionBinding(sessionID, agent.EntryWeb)
 			mu.Lock()
 			s.turnRunning[sess.ID] = false
 			mu.Unlock()

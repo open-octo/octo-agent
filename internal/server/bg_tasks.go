@@ -168,8 +168,10 @@ func (s *Server) kickIdleTurn(sessionID string, next func(*agent.Session) (strin
 	mu := s.sessionTurnLock(sessionID)
 	mu.Lock()
 	if s.turnRunning[sessionID] {
+		// The running turn owns the binding and releases it when it winds
+		// down. Releasing here would unbind it mid-turn, and the release's
+		// full rewrite would race that turn's own appends.
 		mu.Unlock()
-		s.releaseSessionBinding(sessionID, agent.EntryWeb)
 		return false
 	}
 	sess, err := agent.LoadSession(sessionID)
