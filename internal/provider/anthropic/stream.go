@@ -142,7 +142,8 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 		// ordered list of block indices to preserve emission order
 		blockOrder  []int
 		sawEvent    bool // at least one event line was parsed (stream reached the server)
-		sawTerminal bool // message_delta carried a stop_reason, or message_stop arrived
+		sawTerminal bool // message_delta carried a stop_reason
+		sawStop     bool // message_stop arrived
 	)
 
 	// Guard the body read against a mid-stream stall: if the server stops
@@ -241,7 +242,7 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 			}
 
 		case "message_stop":
-			sawTerminal = true
+			sawStop = true
 
 		case "message_delta":
 			if ev.Delta != nil && ev.Delta.StopReason != "" {
@@ -280,6 +281,15 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 		// instead of failing the turn. A caller cancellation passes through
 		// untouched (see retry.AsTransientStream).
 		return result, retry.AsTransientStream(fmt.Errorf("anthropic: stream read: %w", err))
+	}
+	// A message_stop with no stop_reason before it is a server that closed the
+	// message early: Kimi has been seen sending message_start, a few thinking
+	// deltas, then message_stop — no message_delta, no usage. Real Anthropic
+	// (and Kimi on a healthy turn) always sends message_delta with stop_reason
+	// first. Accepting it would end the turn on a half-written thinking block
+	// with no text, no error and no retry.
+	if !sawTerminal && sawStop {
+		return result, retry.AsTransientStream(errors.New("anthropic: message_stop arrived without a stop_reason (truncated mid-generation)"))
 	}
 	// The scanner hit a clean EOF (no read error) without ever seeing
 	// message_stop or a message_delta carrying stop_reason. Each individual

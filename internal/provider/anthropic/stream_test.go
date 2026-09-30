@@ -447,6 +447,35 @@ func TestSendStream_MidStreamResetIsTransient(t *testing.T) {
 	}
 }
 
+// TestSendStream_MessageStopWithoutStopReason_IsTransient covers a server that
+// closes the message early: message_stop arrives but no message_delta ever
+// carried a stop_reason. Seen from Kimi mid-thinking; accepting it ended the
+// turn on a half-written thinking block with no text and no retry.
+func TestSendStream_MessageStopWithoutStopReason_IsTransient(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `data:{"type":"message_start","message":{"model":"k3","usage":{"input_tokens":83062}}}`+"\n\n")
+		_, _ = io.WriteString(w, `data:{"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}`+"\n\n")
+		_, _ = io.WriteString(w, `data:{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Maybe it"}}`+"\n\n")
+		_, _ = io.WriteString(w, `data:{"type":"message_stop"}`+"\n\n")
+	}))
+	defer srv.Close()
+
+	c, _ := New("k")
+	c.BaseURL = srv.URL
+	_, err := c.SendStream(context.Background(), provider.Request{
+		Model: "x", Messages: []agent.Message{agent.NewUserMessage("hi")},
+	}, provider.StreamCallbacks{})
+	if err == nil {
+		t.Fatal("expected an error from a message_stop with no stop_reason")
+	}
+	var ts interface{ TransientStream() bool }
+	if !errors.As(err, &ts) || !ts.TransientStream() {
+		t.Errorf("message_stop without stop_reason should be transient, got %v", err)
+	}
+}
+
 // TestSendStream_CleanCloseWithoutTerminalEvent_IsTransient covers a
 // connection that drops exactly on an SSE event boundary mid-tool-call:
 // content_block_start and an input_json_delta both arrive as complete, valid
