@@ -476,6 +476,33 @@ func TestSendStream_MessageStopWithoutStopReason_IsTransient(t *testing.T) {
 	}
 }
 
+// TestSendStream_StopReasonAfterMessageStop_Succeeds pins that the aggregator
+// reads past message_stop: a stop_reason arriving after it still ends the
+// message cleanly rather than tripping the early-close check above.
+func TestSendStream_StopReasonAfterMessageStop_Succeeds(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `data:{"type":"content_block_start","index":0,"content_block":{"type":"text"}}`+"\n\n")
+		_, _ = io.WriteString(w, `data:{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}`+"\n\n")
+		_, _ = io.WriteString(w, `data:{"type":"message_stop"}`+"\n\n")
+		_, _ = io.WriteString(w, `data:{"type":"message_delta","delta":{"stop_reason":"end_turn"}}`+"\n\n")
+	}))
+	defer srv.Close()
+
+	c, _ := New("k")
+	c.BaseURL = srv.URL
+	resp, err := c.SendStream(context.Background(), provider.Request{
+		Model: "x", Messages: []agent.Message{agent.NewUserMessage("hi")},
+	}, provider.StreamCallbacks{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StopReason != "end_turn" || resp.Content != "hi" {
+		t.Errorf("got stop_reason=%q content=%q, want end_turn/hi", resp.StopReason, resp.Content)
+	}
+}
+
 // TestSendStream_CleanCloseWithoutTerminalEvent_IsTransient covers a
 // connection that drops exactly on an SSE event boundary mid-tool-call:
 // content_block_start and an input_json_delta both arrive as complete, valid

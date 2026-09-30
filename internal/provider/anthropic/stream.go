@@ -287,12 +287,14 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 	// deltas, then message_stop — no message_delta, no usage. Real Anthropic
 	// (and Kimi on a healthy turn) always sends message_delta with stop_reason
 	// first. Accepting it would end the turn on a half-written thinking block
-	// with no text, no error and no retry.
+	// with no text, no error and no retry. The check below would catch it too;
+	// this one exists so the log tells a server-side early close apart from a
+	// dropped connection.
 	if !sawTerminal && sawStop {
 		return result, retry.AsTransientStream(errors.New("anthropic: message_stop arrived without a stop_reason (truncated mid-generation)"))
 	}
-	// The scanner hit a clean EOF (no read error) without ever seeing
-	// message_stop or a message_delta carrying stop_reason. Each individual
+	// The scanner hit a clean EOF (no read error) without ever seeing a
+	// message_delta carrying stop_reason. Each individual
 	// `data:` line was valid, self-contained JSON, so this isn't caught by
 	// the parse-error or scanner.Err() checks above — it's a connection that
 	// dropped exactly on an SSE line boundary mid-generation (idle LB/proxy
