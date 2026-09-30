@@ -495,3 +495,57 @@ func TestHandleEvent_SteerInjected_CarriesMessageIndex(t *testing.T) {
 		t.Errorf("second steer message_index = %v, want 7 (skipped item still occupies slot 6)", msgs[1]["message_index"])
 	}
 }
+
+// TestDoAgentTurn_Compaction_BroadcastsHistoryReload: a compaction folds the
+// oldest messages into one summary, shifting every later persisted index. The
+// browser's bubbles still carry the old indices, so an edit or branch from one
+// would target the wrong message; the turn end must have it re-fetch.
+func TestDoAgentTurn_Compaction_BroadcastsHistoryReload(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	// Tools on: only the tool loop compacts before a turn.
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: true})
+	srv.initWS()
+	srv.turnRunning = make(map[string]bool)
+	srv.steerQueues = make(map[string][]queuedTurn)
+	srv.sessionAgents = make(map[string]*agent.Agent)
+
+	// Enough prior turns, each large, to cross the fallback window's trigger.
+	sess := agent.NewSession("stub-model", "")
+	sess.Title = "fixed title"
+	big := strings.Repeat("lorem ipsum dolor sit amet ", 4000)
+	for i := 0; i < 8; i++ {
+		sess.Messages = append(sess.Messages,
+			agent.NewUserMessage(big),
+			agent.Message{Role: agent.RoleAssistant, Content: "ok"})
+	}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	before := len(sess.Messages)
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 1024), subscribed: map[string]struct{}{}}
+	srv.wsHub.subscribe(conn, sess.ID)
+
+	srv.doAgentTurn(sess, "next question", nil, nil)
+
+	reloaded, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(reloaded.Messages) >= before {
+		t.Fatalf("persisted %d messages, want fewer than %d: the turn should have compacted", len(reloaded.Messages), before)
+	}
+	var seen []map[string]any
+	waitFor(t, func() bool {
+		seen = append(seen, drainConn(t, conn)...)
+		for _, ev := range seen {
+			if ev["type"] == "history_reload" {
+				return true
+			}
+		}
+		return false
+	})
+}

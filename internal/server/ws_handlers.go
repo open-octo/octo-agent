@@ -1670,7 +1670,17 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			}
 		}
 	}
+	// A compaction that folded messages shifts every later persisted index,
+	// while the browser's bubbles keep the ones they were given — the turn end
+	// has it re-fetch the transcript so edit and branch target the right
+	// message. Same no-op test as the EventCompactDone watermark adjustment.
+	compacted := false
 	handler := func(ev agent.AgentEvent) {
+		if ev.Kind == agent.EventCompactDone {
+			if c := ev.Compact; c != nil && c.FoldedMsgs > 0 && c.BeforeTokens != c.AfterTokens {
+				compacted = true
+			}
+		}
 		sw.handleEvent(ev)
 		persistTurnProgress()
 	}
@@ -1770,7 +1780,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		// message doesn't trigger a needless reload. Deliberately NOT the
 		// rollback fact above: a compacted turn keeps its user message but
 		// still shifts every index below the fold.
-		if len(sess.Messages) < historyWatermark {
+		if len(sess.Messages) < historyWatermark || compacted {
 			s.broadcastHistoryReload(sess.ID)
 		}
 	} else {
@@ -1784,6 +1794,9 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			"reply":      map[string]any{"content": rCopy.Content},
 		})
 		sw.sendRaw(b)
+		if compacted {
+			s.broadcastHistoryReload(sess.ID)
+		}
 	}
 
 	// The turn's remaining file writes ALL land before the `complete` broadcast
