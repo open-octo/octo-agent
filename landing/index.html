@@ -123,7 +123,7 @@
     .shot-bar{display:flex; align-items:center; gap:6px; padding:12px 16px; border-bottom:1px solid var(--line);}
     .dot{width:10px; height:10px; border-radius:50%; background:var(--line-2);}
     .shot-title{margin-left:10px; font-size:11px; letter-spacing:.14em; color:var(--ink-4); font-family:var(--mono);}
-    .shot-media{aspect-ratio:2/1; background:var(--paper-3); display:flex; align-items:center; justify-content:center; position:relative;}
+    .shot-media{aspect-ratio:16/9; background:var(--paper-3); display:flex; align-items:center; justify-content:center; position:relative;}
     .shot-media img,.shot-media video{width:100%; height:100%; object-fit:cover; display:block;}
     .shot-ph{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; color:var(--ink-4); font-size:14px;}
     .carousel{position:absolute; inset:0;}
@@ -133,14 +133,12 @@
     .carousel-playpause{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%) scale(.85); width:64px; height:64px; border-radius:50%; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:3; opacity:0; transition:opacity .2s,transform .2s; pointer-events:none;}
     .carousel.is-paused .carousel-playpause{opacity:1; transform:translate(-50%,-50%) scale(1);}
     .carousel-playpause::before{content:""; border-style:solid; border-width:11px 0 11px 19px; border-color:transparent transparent transparent #fff; margin-left:4px;}
-    .carousel-arrow{position:absolute; top:50%; transform:translateY(-50%); z-index:3; width:52px; height:52px; border-radius:50%; border:none; background:rgba(28,26,23,.35); color:#fff; font-size:32px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity .2s,background .2s; font-family:inherit;}
-    .carousel-arrow:hover{background:rgba(28,26,23,.6);}
-    .shot-media:hover .carousel-arrow{opacity:1;}
-    .carousel-arrow.prev{left:16px;}
-    .carousel-arrow.next{right:16px;}
-    .carousel-dots{position:absolute; bottom:22px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:4;}
-    .carousel-dots button{width:8px; height:8px; padding:0; border:none; border-radius:50%; background:rgba(255,255,255,.5); cursor:pointer; transition:background .2s,width .2s;}
-    .carousel-dots button.active{background:#fff; width:20px; border-radius:4px;}
+    .carousel-mute{position:absolute; left:14px; bottom:8px; z-index:5; width:30px; height:30px; padding:0; border:none; border-radius:50%; background:rgba(0,0,0,.45); color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center;}
+    .carousel-mute:hover{background:rgba(0,0,0,.7);}
+    .carousel-mute svg{width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round;}
+    .carousel-mute .on{display:none;}
+    .carousel-mute[aria-pressed="true"] .on{display:block;}
+    .carousel-mute[aria-pressed="true"] .off{display:none;}
     .carousel-time{position:absolute; right:14px; bottom:11px; z-index:4; font-family:var(--mono); font-size:11px; color:rgba(255,255,255,.92); text-shadow:0 1px 2px rgba(0,0,0,.55); letter-spacing:.02em; pointer-events:none;}
     .carousel-progress{position:absolute; left:0; right:0; bottom:0; height:34px; display:flex; align-items:flex-end; z-index:4; cursor:pointer; touch-action:none; background:linear-gradient(to top,rgba(0,0,0,.45),transparent);}
     .carousel-track{position:relative; width:100%; height:4px; background:rgba(255,255,255,.35); transition:height .15s;}
@@ -331,7 +329,7 @@
         </div>
       </aside>
     </div>
-    <div class="wrap shot-wrap">
+    <div class="wrap shot-wrap" id="intro-video">
       <div class="shot">
         <div class="shot-bar">
           <span class="dot"></span><span class="dot"></span><span class="dot"></span>
@@ -339,20 +337,17 @@
         </div>
         <div class="shot-media">
           <div class="carousel" id="demo-carousel">
-            <div class="slide active"><video src="octo-demo-5.mp4" muted playsinline preload="auto" aria-label="Octo Desktop demo 1"></video></div>
-            <div class="slide"><video src="octo-demo.mp4" muted playsinline preload="auto" aria-label="Octo Desktop demo 2"></video></div>
-            <div class="slide"><video src="octo-demo-2.mp4" muted playsinline preload="auto" aria-label="Octo Desktop demo 3"></video></div>
-            <div class="slide"><video src="octo-demo-3.mp4" muted playsinline preload="auto" aria-label="Octo Desktop demo 4"></video></div>
-            <div class="slide"><video src="octo-demo-4.mp4" muted playsinline preload="auto" aria-label="Octo Desktop demo 5"></video></div>
+            <div class="slide active"><video src="octo-intro.mp4" poster="octo-intro-poster.jpg" muted playsinline preload="auto" aria-label="Octo intro video"></video></div>
             <div class="carousel-playpause" aria-hidden="true"></div>
-            <button class="carousel-arrow prev" type="button" aria-label="Previous">‹</button>
-            <button class="carousel-arrow next" type="button" aria-label="Next">›</button>
-            <div class="carousel-dots"></div>
+            <button class="carousel-mute" type="button" aria-label="Unmute" aria-pressed="false">
+              <svg class="off" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m23 9-6 6M17 9l6 6"/></svg>
+              <svg class="on" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>
+            </button>
             <div class="carousel-time"><span class="cur">0:00</span> / <span class="dur">0:00</span></div>
             <div class="carousel-progress" role="slider" aria-label="Seek" tabindex="0" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="carousel-track"><div class="carousel-fill"></div></div></div>
           </div>
           <div class="shot-ph" style="display:none">
-            <span data-en="Desktop demo — drop octo-demo.mp4 here" data-zh="桌面版演示 —— 放入 octo-demo.mp4"></span>
+            <span data-en="Desktop demo — drop octo-intro.mp4 here" data-zh="桌面版演示 —— 放入 octo-intro.mp4"></span>
           </div>
         </div>
       </div>
@@ -635,33 +630,24 @@
     // ----- Scroll reveal -----
     const io=new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting) e.target.classList.add('visible'); }),{threshold:.1});
     document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
-    // ----- Demo carousel (auto-advance when a clip ends; dots + arrows) -----
+    // ----- Demo video (loops when it ends; starts muted so autoplay is allowed) -----
     (function(){
       const root=document.getElementById('demo-carousel');
       if(!root) return;
       const slides=[...root.querySelectorAll('.slide')];
       const videos=slides.map(s=>s.querySelector('video'));
-      const dotsWrap=root.querySelector('.carousel-dots');
+      const mute=root.querySelector('.carousel-mute');
       const prog=root.querySelector('.carousel-progress');
       const fill=root.querySelector('.carousel-fill');
       const curEl=root.querySelector('.carousel-time .cur');
       const durEl=root.querySelector('.carousel-time .dur');
       let idx=0, scrubbing=false;
       const fmt=s=>{ s=Math.max(0,Math.floor(s||0)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
-      const dots=slides.map((_,i)=>{
-        const b=document.createElement('button');
-        b.type='button'; b.setAttribute('aria-label','Slide '+(i+1));
-        if(i===0) b.classList.add('active');
-        b.addEventListener('click',()=>go(i));
-        dotsWrap.appendChild(b);
-        return b;
-      });
       function setFill(r){ fill.style.width=(r*100)+'%'; prog.setAttribute('aria-valuenow',Math.round(r*100)); }
       function setTime(){ const v=videos[idx]; curEl.textContent=fmt(v&&v.currentTime); durEl.textContent=fmt(v&&v.duration); }
       function go(n){
         idx=(n+slides.length)%slides.length;
         slides.forEach((s,i)=>s.classList.toggle('active',i===idx));
-        dots.forEach((d,i)=>d.classList.toggle('active',i===idx));
         setFill(0); setTime();
         videos.forEach((v,i)=>{
           if(i===idx){ try{v.currentTime=0;}catch(e){} v.play().catch(()=>{}); }
@@ -693,8 +679,13 @@
         if(e.key==='ArrowRight'){ v.currentTime=Math.min(v.duration,v.currentTime+5); e.preventDefault(); }
         else if(e.key==='ArrowLeft'){ v.currentTime=Math.max(0,v.currentTime-5); e.preventDefault(); }
       });
-      root.querySelector('.prev').addEventListener('click',()=>go(idx-1));
-      root.querySelector('.next').addEventListener('click',()=>go(idx+1));
+      mute.addEventListener('click',()=>{
+        const on=videos[idx].muted;
+        videos.forEach(v=>{ v.muted=!on; });
+        mute.setAttribute('aria-pressed',String(on));
+        mute.setAttribute('aria-label',on?'Mute':'Unmute');
+        if(on && videos[idx].paused) videos[idx].play().catch(()=>{});
+      });
       go(0);
     })();
   </script>
