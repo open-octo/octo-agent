@@ -1094,9 +1094,17 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 	running := s.turnRunning[id]
 	mu.Unlock()
 	if running {
-		if cur, err := agent.LoadSession(id); err == nil && idx < len(cur.Messages) && turnClosedAfter(cur.Messages, idx) {
-			writeError(w, http.StatusConflict, "only the message being answered can be edited while a reply is running; stop it first")
-			return
+		if cur, err := agent.LoadSession(id); err == nil && idx < len(cur.Messages) {
+			if turnClosedAfter(cur.Messages, idx) {
+				writeError(w, http.StatusConflict, "only the message being answered can be edited while a reply is running; stop it first")
+				return
+			}
+			// Same content check as below, done before the interrupt so a
+			// stale edit doesn't cost the running turn.
+			if req.OriginalContent != nil && normalizeDisplayedText(*req.OriginalContent) != displayedUserText(cur.Messages[idx]) {
+				writeError(w, http.StatusConflict, "the conversation changed since this message was shown; reload and edit again")
+				return
+			}
 		}
 	}
 

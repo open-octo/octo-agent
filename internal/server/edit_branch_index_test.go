@@ -503,6 +503,21 @@ func TestHandleEditMessage_MidStream_RefusesOlderMessage(t *testing.T) {
 	default:
 	}
 
+	// The in-flight prompt is editable, but not with a stale copy of its text:
+	// that is refused before the interrupt too.
+	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/edit_message",
+		strings.NewReader(`{"message_index":2,"new_content":"EDITED","original_content":"something else"}`))
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("stale content mid-stream: status = %d, want 409", w.Code)
+	}
+	select {
+	case <-turnDone:
+		t.Fatal("the stale edit interrupted the running turn")
+	default:
+	}
+
 	srv.interruptSession(sess.ID)
 	<-turnDone
 	got, err := agent.LoadSession(sess.ID)
