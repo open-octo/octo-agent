@@ -299,9 +299,8 @@ type Agent struct {
 	// UpstreamSessionID is the conversation ID providers may forward to their
 	// endpoint (see WithUpstreamSessionID). Every exported entry point stamps
 	// it into ctx, so turns, compaction, titles and the tools a turn runs all
-	// carry it. Set by the session-owning layer before a run, like HookMeta;
-	// deliberately separate from HookMeta.SessionID, which can be a raw IM chat
-	// key that must not leave for the provider.
+	// carry it. Set by the session-owning layer before a run, like HookMeta.
+	// Providers hash it before sending, so it may embed identifiers.
 	UpstreamSessionID string
 
 	// turnTools accumulates the tool names dispatched during the current turn,

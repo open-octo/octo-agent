@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/panics"
 	"github.com/open-octo/octo-agent/internal/workflow"
 )
@@ -90,6 +91,10 @@ type WorkflowRunRequest struct {
 	// caller's cwd, but a script's own internal calls were still losing it
 	// here).
 	WorkingDir string
+	// UpstreamSessionID carries the caller's agent.UpstreamSessionIDFrom value
+	// across the same detach, for provider calls the run makes outside an
+	// Agent entry point (the browser healer during a recording replay).
+	UpstreamSessionID string
 	// JournalDir overrides the workflow runtime's journal directory
 	// (~/.octo/workflow-journals by default). Empty leaves the runtime
 	// default in place — real entry points never set this; tests point it at
@@ -307,6 +312,9 @@ func (m *WorkflowManager) Start(req WorkflowRunRequest) (string, error) {
 	// workflow()/workflow_save()) would silently fall back to the server's
 	// launch directory instead of req.WorkingDir.
 	ctx, cancel := context.WithCancel(WithWorkingDir(context.Background(), req.WorkingDir))
+	if req.UpstreamSessionID != "" {
+		ctx = agent.WithUpstreamSessionID(ctx, req.UpstreamSessionID)
+	}
 
 	m.mu.Lock()
 	if m.active >= maxConcurrentWorkflows {
