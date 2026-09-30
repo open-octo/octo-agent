@@ -1050,6 +1050,23 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 	}
 
+	// The rerun is a Web turn like any other and must own the binding while it
+	// writes the transcript: unbound, the next message sent mid-turn binds the
+	// session by rewriting the file from its own snapshot, dropping the rounds
+	// this turn appended since. Taken only now, after the interrupted turn's
+	// wind-down released its own.
+	if ok, _, berr := s.acquireSessionBinding(id, agent.EntryWeb, false); !ok {
+		mu.Unlock()
+		writeError(w, http.StatusConflict, berr.Error())
+		return
+	}
+	started := false
+	defer func() {
+		if !started {
+			s.releaseSessionBinding(id, agent.EntryWeb)
+		}
+	}()
+
 	// Load AFTER the wind-down so the interrupted turn's final save (or its
 	// first-round rollback) is what we see.
 	sess, err := agent.LoadSession(id)
@@ -1095,10 +1112,19 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 	s.broadcastRollback(id)
 
 	s.turnRunning[id] = true
+	started = true
 	mu.Unlock()
 
 	go func() {
+		// Hold the drain gate past the binding release's session write, as
+		// handleWSUserMessage does.
+		if s.drain.begin() == nil {
+			defer s.drain.end()
+		}
 		defer func() {
+			// Release before clearing turnRunning, so the flag only flips once
+			// the release's session write is done.
+			s.releaseSessionBinding(id, agent.EntryWeb)
 			mu.Lock()
 			s.turnRunning[id] = false
 			mu.Unlock()

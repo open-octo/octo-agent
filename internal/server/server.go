@@ -1236,10 +1236,17 @@ func (s *Server) acquireSessionBinding(id, entry string, steal bool) (bool, stri
 
 	bound := sess.BoundEntry
 	if bound == "" || bound == entry {
-		// Own it. Write back immediately so other processes see it.
-		sess.Bind(entry, false)
-		if err := sess.Save(); err != nil {
-			return false, "", fmt.Errorf("persist binding: %w", err)
+		// Own it. Write back immediately so other processes see it — but only
+		// when the binding actually changes. Bind forces a full rewrite from
+		// the snapshot just loaded, and when we already own the session a turn
+		// of ours may be appending to the file right now (a mid-turn message
+		// after the cache lease lapsed): the rewrite would drop every round
+		// that turn appended after the load. Renewing the lease is an append.
+		if bound == "" {
+			sess.Bind(entry, false)
+			if err := sess.Save(); err != nil {
+				return false, "", fmt.Errorf("persist binding: %w", err)
+			}
 		}
 		if err := sess.WriteLease(entry, now.Add(entryBindingLease)); err != nil {
 			return false, "", fmt.Errorf("write lease: %w", err)
