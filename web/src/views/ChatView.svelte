@@ -2545,6 +2545,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   let editingIndex = $state<number | null>(null)
   let editingDraft = $state('')
   let editingBusy = $state(false)
+  // The target as it was when editing started. editingIndex is a render
+  // position, and a transcript re-render (history_reload / rollback) can put a
+  // different bubble there while the draft is open; sending that bubble's own
+  // index and text would pass the server's check and cut at the wrong message.
+  let editingTarget: { messageIndex: number; content: string } | null = null
 
   function startEdit(index: number) {
     if (editingBusy) return
@@ -2552,17 +2557,19 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     if (!m) return
     editingIndex = index
     editingDraft = m.content
+    editingTarget = { messageIndex: m.messageIndex, content: m.content }
   }
 
   function cancelEdit() {
     editingIndex = null
     editingDraft = ''
+    editingTarget = null
   }
 
   async function saveEdit() {
     const sid = get(activeSessionId)
-    if (editingIndex == null || !sid || editingBusy) return
-    const idx = editingIndex
+    if (editingIndex == null || !editingTarget || !sid || editingBusy) return
+    const target = editingTarget
     const content = editingDraft.trim()
     if (!content) return
     editingBusy = true
@@ -2570,12 +2577,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // The server interrupts any in-flight turn, truncates history to just
       // before the message, and reruns with the edited prompt itself — no
       // resend from here (a resend would append the prompt a second time).
-      await api.editMessage(sid, msgs[idx].messageIndex, content, msgs[idx].content)
+      await api.editMessage(sid, target.messageIndex, content, target.content)
       // Server truncated history and reran — re-pin so the new reply streams
       // into view even if the user had scrolled up before editing.
       pinToBottom()
-      editingIndex = null
-      editingDraft = ''
+      cancelEdit()
     } catch (e: any) {
       showToast(e.message, 'error')
     } finally {

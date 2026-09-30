@@ -472,6 +472,11 @@ func TestHandleEditMessage_RefusesUntrustedIndex(t *testing.T) {
 	}
 	assertUntouched("missing index")
 
+	if code := post(`{"message_index":-2,"new_content":"x"}`); code != http.StatusBadRequest {
+		t.Fatalf("negative index: status = %d, want 400", code)
+	}
+	assertUntouched("negative index")
+
 	if code := post(`{"message_index":0,"new_content":"x","original_content":"three"}`); code != http.StatusConflict {
 		t.Fatalf("mismatched content: status = %d, want 409", code)
 	}

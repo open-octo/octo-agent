@@ -1064,6 +1064,10 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	idx := *req.MessageIndex
+	if idx < 0 {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index out of range: %d", idx))
+		return
+	}
 	if strings.TrimSpace(req.NewContent) == "" {
 		writeError(w, http.StatusBadRequest, "new_content must be non-empty")
 		return
@@ -1095,7 +1099,7 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	if idx < 0 || idx > len(sess.Messages) {
+	if idx > len(sess.Messages) {
 		mu.Unlock()
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index out of range: %d (have %d messages)", idx, len(sess.Messages)))
 		return
