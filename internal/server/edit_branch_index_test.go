@@ -496,11 +496,13 @@ func TestHandleEvent_SteerInjected_CarriesMessageIndex(t *testing.T) {
 	}
 }
 
-// TestDoAgentTurn_Compaction_BroadcastsHistoryReload: a compaction folds the
-// oldest messages into one summary, shifting every later persisted index. The
+// TestDoAgentTurn_Compaction_BroadcastsReindex: a compaction folds the oldest
+// messages into one summary, shifting every later persisted index. The
 // browser's bubbles still carry the old indices, so an edit or branch from one
-// would target the wrong message; the turn end must have it re-fetch.
-func TestDoAgentTurn_Compaction_BroadcastsHistoryReload(t *testing.T) {
+// would target the wrong message. The server must say how far to shift them,
+// and the shift must land the turn's own prompt on its persisted position,
+// without a history_reload, which would redraw the transcript as the summary.
+func TestDoAgentTurn_Compaction_BroadcastsReindex(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
@@ -542,10 +544,44 @@ func TestDoAgentTurn_Compaction_BroadcastsHistoryReload(t *testing.T) {
 	waitFor(t, func() bool {
 		seen = append(seen, drainConn(t, conn)...)
 		for _, ev := range seen {
-			if ev["type"] == "history_reload" {
+			if ev["type"] == "complete" {
 				return true
 			}
 		}
 		return false
 	})
+	liveIndex, folded := -1, 0
+	for _, ev := range seen {
+		switch ev["type"] {
+		case "history_reload":
+			t.Fatal("compaction broadcast history_reload; want history_reindex so the transcript stays on screen")
+		case "history_user_message":
+			if ev["content"] == "next question" {
+				liveIndex = int(ev["message_index"].(float64))
+			}
+		case "history_reindex":
+			folded = int(ev["folded_msgs"].(float64))
+		}
+	}
+	if liveIndex != before {
+		t.Fatalf("live prompt message_index = %d, want %d", liveIndex, before)
+	}
+	if folded == 0 {
+		t.Fatal("no history_reindex broadcast for a compaction that folded messages")
+	}
+	persisted := -1
+	for i, m := range reloaded.Messages {
+		text := m.Content
+		for _, b := range m.Blocks {
+			if text == "" && b.Type == "text" {
+				text = b.Text
+			}
+		}
+		if strings.TrimSpace(agent.StripSystemReminders(text)) == "next question" {
+			persisted = i
+		}
+	}
+	if got := liveIndex - folded + 1; got != persisted {
+		t.Fatalf("shifted prompt index = %d, want its persisted index %d", got, persisted)
+	}
 }

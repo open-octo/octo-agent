@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -1670,17 +1671,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			}
 		}
 	}
-	// A compaction that folded messages shifts every later persisted index,
-	// while the browser's bubbles keep the ones they were given — the turn end
-	// has it re-fetch the transcript so edit and branch target the right
-	// message. Same no-op test as the EventCompactDone watermark adjustment.
-	compacted := false
 	handler := func(ev agent.AgentEvent) {
-		if ev.Kind == agent.EventCompactDone {
-			if c := ev.Compact; c != nil && c.FoldedMsgs > 0 && c.BeforeTokens != c.AfterTokens {
-				compacted = true
-			}
-		}
 		sw.handleEvent(ev)
 		persistTurnProgress()
 	}
@@ -1780,7 +1771,7 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 		// message doesn't trigger a needless reload. Deliberately NOT the
 		// rollback fact above: a compacted turn keeps its user message but
 		// still shifts every index below the fold.
-		if len(sess.Messages) < historyWatermark || compacted {
+		if len(sess.Messages) < historyWatermark {
 			s.broadcastHistoryReload(sess.ID)
 		}
 	} else {
@@ -1794,9 +1785,6 @@ func (s *Server) doAgentTurn(sess *agent.Session, content string, blocks []agent
 			"reply":      map[string]any{"content": rCopy.Content},
 		})
 		sw.sendRaw(b)
-		if compacted {
-			s.broadcastHistoryReload(sess.ID)
-		}
 	}
 
 	// The turn's remaining file writes ALL land before the `complete` broadcast
@@ -2355,7 +2343,32 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 					ls.historyWatermark = 1
 				}
 			}
+			// The turn's own buffered bubbles carry pre-compaction indices
+			// too; a tab replaying them would edit or branch at the wrong
+			// message. Replace rather than mutate: the hub may still be
+			// marshalling the original maps.
+			if ls, ok := w.server.liveStates[w.sessionID]; ok {
+				for i, e := range ls.events {
+					if idx, ok := e["message_index"].(int); ok {
+						shifted := maps.Clone(e)
+						if idx < c.FoldedMsgs {
+							delete(shifted, "message_index")
+						} else {
+							shifted["message_index"] = idx - c.FoldedMsgs + 1
+						}
+						ls.events[i] = shifted
+					}
+				}
+			}
 			w.server.liveStateMu.Unlock()
+			// Tell open tabs to shift the indices they hold the same way,
+			// keeping what they show: a history_reload would redraw the
+			// transcript as the one summary message.
+			w.hub.broadcast(w.sessionID, map[string]any{
+				"type":        "history_reindex",
+				"session_id":  w.sessionID,
+				"folded_msgs": c.FoldedMsgs,
+			})
 		}
 
 	case agent.EventImageDescribing:
