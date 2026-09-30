@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://octo-agent.dev/#intro-video"><img src="docs/assets/octo-intro-cover.jpg" alt="观看 50 秒介绍：octo 让三个子代理并行干活、写出网页并在右侧预览、随时切换模型" width="100%"></a>
+  <a href="https://octo-agent.dev/?lang=zh#intro-video"><img src="docs/assets/octo-intro-cover.jpg" alt="观看 50 秒介绍：octo 让三个子代理并行干活、写出网页并在右侧预览、随时切换模型" width="100%"></a>
 </p>
 
 <div align="center">

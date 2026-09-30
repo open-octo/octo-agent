@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://octo-agent.dev/#intro-video"><img src="docs/assets/octo-intro-cover.jpg" alt="Watch the 50-second intro: octo runs three sub-agents in parallel, writes a web page and previews it, then switches models" width="100%"></a>
+  <a href="https://octo-agent.dev/?lang=en#intro-video"><img src="docs/assets/octo-intro-cover-en.jpg" alt="Watch the 50-second intro: octo runs three sub-agents in parallel, writes a web page and previews it, then switches models" width="100%"></a>
 </p>
 
 <div align="center">
