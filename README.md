@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/octo-demo-2.gif" alt="Octo dispatching three sub-agents to explore TUI, IM, and Mobile modules in parallel" width="100%">
+  <a href="https://octo-agent.dev/#intro-video"><img src="docs/assets/octo-intro-cover.jpg" alt="Watch the 50-second intro: octo runs three sub-agents in parallel, writes a web page and previews it, then switches models" width="100%"></a>
 </p>
 
 <div align="center">
