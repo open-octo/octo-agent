@@ -183,11 +183,14 @@ export async function branchSession(sessionId: string, messageIndex: number): Pr
 // Edit a user message and regenerate from it. The server interrupts any
 // in-flight turn, truncates history to just before the message, and reruns
 // with the new content (keeping the original image attachments) — the caller
-// must NOT resend; the rerun re-appends the prompt itself.
-export async function editMessage(sessionId: string, messageIndex: number, newContent: string): Promise<void> {
+// must NOT resend; the rerun re-appends the prompt itself. originalContent is
+// the bubble's text as shown: the server refuses the edit (409) when the
+// message at messageIndex no longer matches it, rather than truncating at a
+// stale index.
+export async function editMessage(sessionId: string, messageIndex: number, newContent: string, originalContent: string): Promise<void> {
   await request<unknown>(`/api/sessions/${sessionId}/edit_message`, {
     method: 'POST',
-    ...json({ message_index: messageIndex, new_content: newContent }),
+    ...json({ message_index: messageIndex, new_content: newContent, original_content: originalContent }),
   })
 }
 

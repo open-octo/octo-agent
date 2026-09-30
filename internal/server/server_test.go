@@ -424,6 +424,71 @@ func TestHandleEditMessage(t *testing.T) {
 	}
 }
 
+// TestHandleEditMessage_RefusesUntrustedIndex: an edit truncates history on
+// disk, so an index the server can't trust must be refused before anything is
+// cut. A missing index used to decode as 0 and wipe the whole transcript; a
+// stale one (the browser's indices drift after a mid-turn compaction) cut at
+// whatever plain user message happened to sit there.
+func TestHandleEditMessage_RefusesUntrustedIndex(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := agent.NewSession("stub-model", "sys")
+	sess.Title = "fixed title"
+	sess.Messages = []agent.Message{
+		{Role: agent.RoleUser, Content: "one"},
+		{Role: agent.RoleAssistant, Content: "two"},
+		{Role: agent.RoleUser, Content: "<system-reminder>model-only</system-reminder>\n\nthree\n\n[Attached file: /tmp/notes.pdf]"},
+		{Role: agent.RoleAssistant, Content: "four"},
+	}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.initWS()
+	srv.turnRunning = make(map[string]bool)
+
+	post := func(body string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sess.ID+"/edit_message", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		serveLoopback(srv.mux, w, req)
+		return w.Code
+	}
+	assertUntouched := func(what string) {
+		t.Helper()
+		got, err := agent.LoadSession(sess.ID)
+		if err != nil {
+			t.Fatalf("%s: load: %v", what, err)
+		}
+		if len(got.Messages) != 4 {
+			t.Fatalf("%s: history has %d messages, want the original 4", what, len(got.Messages))
+		}
+	}
+
+	if code := post(`{"new_content":"x"}`); code != http.StatusBadRequest {
+		t.Fatalf("missing index: status = %d, want 400", code)
+	}
+	assertUntouched("missing index")
+
+	if code := post(`{"message_index":0,"new_content":"x","original_content":"three"}`); code != http.StatusConflict {
+		t.Fatalf("mismatched content: status = %d, want 409", code)
+	}
+	assertUntouched("mismatched content")
+
+	// The browser shows the text without the reminder or the attachment note;
+	// that is what it sends back, and it must match.
+	if code := post(`{"message_index":2,"new_content":"REWRITTEN","original_content":"three"}`); code != http.StatusOK {
+		t.Fatalf("matching content: status = %d, want 200", code)
+	}
+	waitFor(t, func() bool {
+		got, err := agent.LoadSession(sess.ID)
+		return err == nil && len(got.Messages) == 4 && got.Messages[2].Content == "REWRITTEN" &&
+			got.Messages[3].Role == agent.RoleAssistant
+	})
+}
+
 // TestHandleDeleteSession_InterruptsActiveTurn is the regression guard for
 // the zombie-modal-resurrects-the-deleted-file bug: deleting a session must
 // cancel its registered turn (e.g. one blocked in ask_user_question) before

@@ -1003,8 +1003,40 @@ func (s *Server) handleBranchSession(w http.ResponseWriter, r *http.Request) {
 // ─── POST /api/sessions/{id}/edit_message ──────────────────────────────────
 
 type editMessageRequest struct {
-	MessageIndex int    `json:"message_index"`
+	// A pointer so a missing index is a 400, not a silent 0: truncating at 0
+	// wipes the whole transcript.
+	MessageIndex *int   `json:"message_index"`
 	NewContent   string `json:"new_content"`
+	// OriginalContent is the text the browser showed in the bubble being
+	// edited. When set, the edit is refused unless it matches the message at
+	// MessageIndex: the browser's indices can drift from disk (a mid-turn
+	// compaction shifts every later message), and a stale index would
+	// otherwise truncate history at the wrong place.
+	OriginalContent *string `json:"original_content,omitempty"`
+}
+
+// displayedUserText is the text a plain user message renders as in the web
+// transcript (the same derivation the history endpoint uses), so it can be
+// compared against what the browser showed.
+func displayedUserText(m agent.Message) string {
+	text := m.Content
+	if text == "" {
+		for _, b := range m.Blocks {
+			if b.Type == "text" {
+				text = b.Text
+				break
+			}
+		}
+	}
+	return normalizeDisplayedText(text)
+}
+
+// normalizeDisplayedText strips model-facing reminder spans and attachment
+// notes. Idempotent, so it is applied to the browser's copy too: a live steer
+// bubble keeps its attachment notes in the text, while a replayed one doesn't.
+func normalizeDisplayedText(text string) string {
+	text, _ = docChipRefs(strings.TrimSpace(agent.StripSystemReminders(text)))
+	return strings.TrimSpace(text)
 }
 
 // handleEditMessage replaces the user message at message_index and regenerates
@@ -1027,6 +1059,11 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		writeInvalidJSONBody(w, err)
 		return
 	}
+	if req.MessageIndex == nil {
+		writeError(w, http.StatusBadRequest, "message_index is required")
+		return
+	}
+	idx := *req.MessageIndex
 	if strings.TrimSpace(req.NewContent) == "" {
 		writeError(w, http.StatusBadRequest, "new_content must be non-empty")
 		return
@@ -1058,23 +1095,28 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	if req.MessageIndex < 0 || req.MessageIndex > len(sess.Messages) {
+	if idx < 0 || idx > len(sess.Messages) {
 		mu.Unlock()
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index out of range: %d (have %d messages)", req.MessageIndex, len(sess.Messages)))
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_index out of range: %d (have %d messages)", idx, len(sess.Messages)))
 		return
 	}
 	// message_index == len(Messages) is legal: a first-round send failure
 	// rolls the still-unanswered prompt back out of history, so there is
 	// nothing left to strip — the rerun below simply recreates it.
 	var blocks []agent.ContentBlock
-	if req.MessageIndex < len(sess.Messages) {
-		target := sess.Messages[req.MessageIndex]
+	if idx < len(sess.Messages) {
+		target := sess.Messages[idx]
 		// Same invariant as branching: tool results ride on user-role messages,
 		// so a bare Role check would still let an edit truncate between an
 		// assistant tool_use and its tool_result (issue #1899).
 		if !agent.IsPlainUserMessage(target) {
 			mu.Unlock()
 			writeError(w, http.StatusBadRequest, "message_index does not name a plain user message")
+			return
+		}
+		if req.OriginalContent != nil && normalizeDisplayedText(*req.OriginalContent) != displayedUserText(target) {
+			mu.Unlock()
+			writeError(w, http.StatusConflict, "the conversation changed since this message was shown; reload and edit again")
 			return
 		}
 		// Keep the original image attachments (rehydrated by LoadSession) so
@@ -1085,7 +1127,7 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 				blocks = append(blocks, b)
 			}
 		}
-		sess.TruncateTo(req.MessageIndex)
+		sess.TruncateTo(idx)
 		if err := sess.Save(); err != nil {
 			mu.Unlock()
 			writeError(w, http.StatusInternalServerError, err.Error())
