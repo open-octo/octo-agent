@@ -1031,6 +1031,18 @@ func displayedUserText(m agent.Message) string {
 	return normalizeDisplayedText(text)
 }
 
+// turnClosedAfter reports whether a finished turn follows msgs[idx]: some
+// later message is a settled assistant reply. False means msgs[idx] belongs to
+// the turn still in flight (its prompt, or a steer injected into it).
+func turnClosedAfter(msgs []agent.Message, idx int) bool {
+	for _, m := range msgs[idx+1:] {
+		if agent.IsSettledAssistantMessage(m) {
+			return true
+		}
+	}
+	return false
+}
+
 // normalizeDisplayedText strips model-facing reminder spans and attachment
 // notes. Idempotent, so it is applied to the browser's copy too: a live steer
 // bubble keeps its attachment notes in the text, while a replayed one doesn't.
@@ -1073,12 +1085,25 @@ func (s *Server) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Editing mid-stream is the supported "change my mind while it's replying"
+	// flow, but only for the turn in flight: an older message would cut every
+	// finished turn after it, tool side effects and all, with one click while
+	// the user was likely just fixing a typo. Stop first for that.
+	mu := s.sessionTurnLock(id)
+	mu.Lock()
+	running := s.turnRunning[id]
+	mu.Unlock()
+	if running {
+		if cur, err := agent.LoadSession(id); err == nil && idx < len(cur.Messages) && turnClosedAfter(cur.Messages, idx) {
+			writeError(w, http.StatusConflict, "only the message being answered can be edited while a reply is running; stop it first")
+			return
+		}
+	}
+
 	// Interrupt any in-flight turn, then wait for it to fully wind down —
 	// turnRunning clears only after the turn's final save — so the truncate
-	// below cannot race the dying turn's own persistence. Editing mid-stream
-	// is the supported "change my mind while it's replying" flow.
+	// below cannot race the dying turn's own persistence.
 	s.interruptSession(id)
-	mu := s.sessionTurnLock(id)
 	deadline := time.Now().Add(10 * time.Second)
 	mu.Lock()
 	for s.turnRunning[id] {
