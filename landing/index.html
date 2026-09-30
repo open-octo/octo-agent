@@ -337,7 +337,7 @@
         </div>
         <div class="shot-media">
           <div class="carousel" id="demo-carousel">
-            <div class="slide active"><video src="octo-intro.mp4" poster="octo-intro-poster.jpg" muted playsinline preload="auto" aria-label="Octo intro video"></video></div>
+            <div class="slide active"><video data-src-en="octo-intro-en.mp4" data-src-zh="octo-intro.mp4" poster="octo-intro-en-poster.jpg" data-poster-en="octo-intro-en-poster.jpg" data-poster-zh="octo-intro-poster.jpg" muted playsinline preload="auto" aria-label="Octo intro video"></video></div>
             <div class="carousel-playpause" aria-hidden="true"></div>
             <button class="carousel-mute" type="button" aria-label="Unmute" aria-pressed="false">
               <svg class="off" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m23 9-6 6M17 9l6 6"/></svg>
@@ -347,7 +347,7 @@
             <div class="carousel-progress" role="slider" aria-label="Seek" tabindex="0" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="carousel-track"><div class="carousel-fill"></div></div></div>
           </div>
           <div class="shot-ph" style="display:none">
-            <span data-en="Desktop demo — drop octo-intro.mp4 here" data-zh="桌面版演示 —— 放入 octo-intro.mp4"></span>
+            <span data-en="Desktop demo — drop octo-intro-en.mp4 here" data-zh="桌面版演示 —— 放入 octo-intro.mp4"></span>
           </div>
         </div>
       </div>
@@ -573,10 +573,18 @@
       document.querySelectorAll('[data-href-en]').forEach(el=>{
         const h = el.dataset['href'+(lang==='zh'?'Zh':'En')]; if(h) el.setAttribute('href',h);
       });
+      // Language-specific media (the intro film has an English and a Chinese cut)
+      document.querySelectorAll('[data-src-en]').forEach(el=>{
+        const src = el.dataset['src'+(lang==='zh'?'Zh':'En')], poster = el.dataset['poster'+(lang==='zh'?'Zh':'En')];
+        if(poster) el.setAttribute('poster', poster);
+        if(src && el.getAttribute('src')!==src){ el.setAttribute('src', src); el.load(); el.play().catch(()=>{}); }
+      });
       document.querySelectorAll('.lang button').forEach(b=>b.classList.toggle('active', b.dataset.lang===lang));
       try{ localStorage.setItem('octo-lang', lang); }catch(e){}
     }
-    let initial; try{ initial = localStorage.getItem('octo-lang'); }catch(e){}
+    // ?lang=en|zh (e.g. from a README link) wins over the stored choice and the browser language
+    let initial = new URLSearchParams(location.search).get('lang');
+    if(initial!=='en' && initial!=='zh'){ try{ initial = localStorage.getItem('octo-lang'); }catch(e){} }
     if(initial!=='en' && initial!=='zh'){
       initial = (navigator.language||'').toLowerCase().startsWith('zh') ? 'zh' : 'en';
     }
