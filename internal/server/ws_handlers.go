@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -2376,7 +2377,32 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 					ls.historyWatermark = 1
 				}
 			}
+			// The turn's own buffered bubbles carry pre-compaction indices
+			// too; a tab replaying them would edit or branch at the wrong
+			// message. Replace rather than mutate: the hub may still be
+			// marshalling the original maps.
+			if ls, ok := w.server.liveStates[w.sessionID]; ok {
+				for i, e := range ls.events {
+					if idx, ok := e["message_index"].(int); ok {
+						shifted := maps.Clone(e)
+						if idx < c.FoldedMsgs {
+							delete(shifted, "message_index")
+						} else {
+							shifted["message_index"] = idx - c.FoldedMsgs + 1
+						}
+						ls.events[i] = shifted
+					}
+				}
+			}
 			w.server.liveStateMu.Unlock()
+			// Tell open tabs to shift the indices they hold the same way,
+			// keeping what they show: a history_reload would redraw the
+			// transcript as the one summary message.
+			w.hub.broadcast(w.sessionID, map[string]any{
+				"type":        "history_reindex",
+				"session_id":  w.sessionID,
+				"folded_msgs": c.FoldedMsgs,
+			})
 		}
 
 	case agent.EventImageDescribing:

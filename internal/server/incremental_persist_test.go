@@ -237,6 +237,43 @@ func TestDoAgentTurn_PersistsProgressIncrementally(t *testing.T) {
 	}
 }
 
+// TestHandleEvent_CompactDoneShiftsBufferedIndices: a tab that subscribes
+// mid-turn replays the turn's buffered bubbles, so their message_index must
+// follow a compaction the same way the watermark does. A bubble whose message
+// was folded loses its index; the original maps are left untouched because
+// the hub may still be marshalling them.
+func TestHandleEvent_CompactDoneShiftsBufferedIndices(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+	const sid = "compact-buffer-session"
+	folded := map[string]any{"type": "history_user_message", "content": "old", "message_index": 3}
+	kept := map[string]any{"type": "history_user_message", "content": "prompt", "message_index": 10}
+	tool := map[string]any{"type": "tool_call", "tool_id": "t1"}
+	srv.liveStateMu.Lock()
+	srv.liveStates[sid] = &sessionLiveState{
+		progress:         &wsEventProgress{Type: "progress", Phase: "active"},
+		historyWatermark: 11,
+		events:           []map[string]any{folded, kept, tool},
+	}
+	srv.liveStateMu.Unlock()
+
+	sw := srv.newWSStreamWriter(sid)
+	sw.handleEvent(agent.AgentEvent{Kind: agent.EventCompactDone, Compact: &agent.CompactStats{BeforeTokens: 100, AfterTokens: 40, FoldedMsgs: 6}})
+
+	srv.liveStateMu.RLock()
+	events := srv.liveStates[sid].events
+	srv.liveStateMu.RUnlock()
+	if _, ok := events[0]["message_index"]; ok {
+		t.Errorf("folded bubble keeps message_index %v, want none", events[0]["message_index"])
+	}
+	if got := events[1]["message_index"]; got != 5 {
+		t.Errorf("kept bubble message_index = %v, want 5", got)
+	}
+	if kept["message_index"] != 10 || folded["message_index"] != 3 {
+		t.Error("the original buffered maps were mutated")
+	}
+}
+
 // TestHandleEvent_CompactDoneShiftsWatermark checks the watermark arithmetic
 // for mid-turn compaction: folding K leading messages into one summary moves
 // the pre-turn boundary to W-K+1, and folding past the boundary clamps to 1

@@ -495,3 +495,93 @@ func TestHandleEvent_SteerInjected_CarriesMessageIndex(t *testing.T) {
 		t.Errorf("second steer message_index = %v, want 7 (skipped item still occupies slot 6)", msgs[1]["message_index"])
 	}
 }
+
+// TestDoAgentTurn_Compaction_BroadcastsReindex: a compaction folds the oldest
+// messages into one summary, shifting every later persisted index. The
+// browser's bubbles still carry the old indices, so an edit or branch from one
+// would target the wrong message. The server must say how far to shift them,
+// and the shift must land the turn's own prompt on its persisted position,
+// without a history_reload, which would redraw the transcript as the summary.
+func TestDoAgentTurn_Compaction_BroadcastsReindex(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	// Tools on: only the tool loop compacts before a turn.
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: true})
+	srv.initWS()
+	srv.turnRunning = make(map[string]bool)
+	srv.steerQueues = make(map[string][]queuedTurn)
+	srv.sessionAgents = make(map[string]*agent.Agent)
+
+	// Enough prior turns, each large, to cross the fallback window's trigger.
+	sess := agent.NewSession("stub-model", "")
+	sess.Title = "fixed title"
+	big := strings.Repeat("lorem ipsum dolor sit amet ", 4000)
+	for i := 0; i < 8; i++ {
+		sess.Messages = append(sess.Messages,
+			agent.NewUserMessage(big),
+			agent.Message{Role: agent.RoleAssistant, Content: "ok"})
+	}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	before := len(sess.Messages)
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 1024), subscribed: map[string]struct{}{}}
+	srv.wsHub.subscribe(conn, sess.ID)
+
+	srv.doAgentTurn(sess, "next question", nil, nil)
+
+	reloaded, err := agent.LoadSession(sess.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(reloaded.Messages) >= before {
+		t.Fatalf("persisted %d messages, want fewer than %d: the turn should have compacted", len(reloaded.Messages), before)
+	}
+	var seen []map[string]any
+	waitFor(t, func() bool {
+		seen = append(seen, drainConn(t, conn)...)
+		for _, ev := range seen {
+			if ev["type"] == "complete" {
+				return true
+			}
+		}
+		return false
+	})
+	liveIndex, folded := -1, 0
+	for _, ev := range seen {
+		switch ev["type"] {
+		case "history_reload":
+			t.Fatal("compaction broadcast history_reload; want history_reindex so the transcript stays on screen")
+		case "history_user_message":
+			if ev["content"] == "next question" {
+				liveIndex = int(ev["message_index"].(float64))
+			}
+		case "history_reindex":
+			folded = int(ev["folded_msgs"].(float64))
+		}
+	}
+	if liveIndex != before {
+		t.Fatalf("live prompt message_index = %d, want %d", liveIndex, before)
+	}
+	if folded == 0 {
+		t.Fatal("no history_reindex broadcast for a compaction that folded messages")
+	}
+	persisted := -1
+	for i, m := range reloaded.Messages {
+		text := m.Content
+		for _, b := range m.Blocks {
+			if text == "" && b.Type == "text" {
+				text = b.Text
+			}
+		}
+		if strings.TrimSpace(agent.StripSystemReminders(text)) == "next question" {
+			persisted = i
+		}
+	}
+	if got := liveIndex - folded + 1; got != persisted {
+		t.Fatalf("shifted prompt index = %d, want its persisted index %d", got, persisted)
+	}
+}

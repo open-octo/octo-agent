@@ -80,6 +80,7 @@
   import { t, tr, pickLocalized } from '../lib/i18n'
   import { insertPendingSend, takeConfirmedSend } from '../lib/pendingSendOrder'
   import { appendLiveAfterHistory, isReplayedUserEcho } from '../lib/userEchoDedup'
+  import { shiftMessageIndices } from '../lib/reindex'
   import { inlineSlashCommand } from '../lib/inlineSlash'
   import { exportModeStore, selectedMessagesStore } from '../lib/exportStore'
   import { filenameStem } from '../lib/filename'
@@ -626,6 +627,15 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       clearMsgs(sid)
       resetArtifacts(sid)
       loadHistory(sid, () => cancelled)
+    }))
+
+    // A mid-turn compaction moved every persisted index on disk. Shift the
+    // ones the bubbles carry so edit and branch keep targeting the right
+    // message, without redrawing the transcript.
+    cleanups.push(ws.on('history_reindex', (ev) => {
+      if ((ev as any).session_id !== sid) return
+      const folded = Number((ev as any).folded_msgs) || 0
+      chatMessages.update(m => m[sid] ? { ...m, [sid]: shiftMessageIndices(m[sid], folded) } : m)
     }))
 
     // The transcript tail was stripped server-side (retry / rollback): re-render
