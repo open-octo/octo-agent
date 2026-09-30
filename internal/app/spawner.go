@@ -150,6 +150,15 @@ func (s *Spawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.Spaw
 
 	lc := &liveChild{agent: child, tools: childTools, executor: executor, sessionDir: req.SessionDir}
 	id := s.reg.put(lc)
+	// Prefixed with the parent session so ids minted by separate registries
+	// (one per serve session) can't collide upstream. Written under lc.mu:
+	// the child is already visible to Continue, whose runChild reads it.
+	lc.mu.Lock()
+	lc.upstreamSessionID = id
+	if parent := tools.SessionIDFrom(ctx); parent != "" {
+		lc.upstreamSessionID = parent + "/agent-" + id
+	}
+	lc.mu.Unlock()
 
 	if req.SessionDir != "" {
 		sess := agent.NewSession(child.Model, child.System)
@@ -356,6 +365,10 @@ func (s *Spawner) runChild(ctx context.Context, lc *liveChild, prompt string) (r
 	defer lc.setBusy(false)
 
 	childCtx := tools.WithSubAgentMarker(ctx)
+	// The child is its own conversation upstream (its prompt prefix differs
+	// from the parent's), but keeps the parent's tools-layer session ID so
+	// per-session tool state such as the replay-secret cache stays shared.
+	childCtx = agent.WithUpstreamSessionID(childCtx, lc.upstreamSessionID)
 
 	// When the manager stamped an event sink into ctx (live panels), stream
 	// the child's activity to it: tool dispatches with their (capped) outputs,
@@ -665,6 +678,10 @@ type liveChild struct {
 	agent    *agent.Agent
 	tools    []agent.ToolDefinition
 	executor agent.ToolExecutor
+
+	// upstreamSessionID is the conversation ID the child's provider requests
+	// carry (agent.WithUpstreamSessionID); stable across Continue rounds.
+	upstreamSessionID string
 
 	mu sync.Mutex // serializes runChild on this child
 

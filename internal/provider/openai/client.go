@@ -299,6 +299,7 @@ func (c *Client) Send(ctx context.Context, req provider.Request) (provider.Respo
 		if c.APIKey != "" {
 			httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
 		}
+		provider.SetSessionHeader(ctx, httpReq.Header, c.endpointURL())
 		for k, v := range c.Headers {
 			httpReq.Header.Set(k, v)
 		}
