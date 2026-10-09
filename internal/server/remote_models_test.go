@@ -73,4 +73,11 @@ func TestListRemoteModels_UsesStoredConnection(t *testing.T) {
 	if code, _ = getRemoteModels(t, srv, "missing"); code != http.StatusNotFound {
 		t.Fatalf("missing endpoint: code=%d, want 404", code)
 	}
+
+	// The vendor env var wins over the stored key, as it does for chat.
+	t.Setenv("CUSTOM_API_KEY", "sk-stored")
+	code, got = getRemoteModels(t, srv, "wrong-key")
+	if code != http.StatusOK || !got.OK {
+		t.Fatalf("wrong-key with env key: code=%d resp=%+v, want ok", code, got)
+	}
 }

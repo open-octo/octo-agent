@@ -234,12 +234,16 @@
   let fetchPicked   = $state<Set<string>>(new Set())
   let fetchFilter   = $state('')
   let fetchVision   = $state(true)
+  // Bumped per fetch so a response from a cancelled-then-reopened panel can't
+  // overwrite the newer request's result (same endpoint id, different call).
+  let fetchSeq = 0
 
   function canFetchModels(ep: EndpointConfig): boolean {
     return ep.provider === 'custom' && ep.protocol === 'openai'
   }
 
   async function openFetchModels(ep: EndpointConfig) {
+    const seq = ++fetchSeq
     fetchFor = ep.id
     fetchLoading = true
     fetchError = ''
@@ -249,14 +253,19 @@
     fetchVision = true
     try {
       const r = await api.listRemoteModels(ep.id)
-      if (fetchFor !== ep.id) return
+      if (seq !== fetchSeq) return
       if (r.ok) fetchModels = r.models ?? []
       else fetchError = r.message ?? ''
     } catch (e: any) {
-      if (fetchFor === ep.id) fetchError = e.message ?? ''
+      if (seq === fetchSeq) fetchError = e.message ?? ''
     } finally {
-      if (fetchFor === ep.id) fetchLoading = false
+      if (seq === fetchSeq) fetchLoading = false
     }
+  }
+
+  function closeFetchModels() {
+    fetchSeq++
+    fetchFor = null
   }
 
   function toggleFetchPick(model: string) {
@@ -271,12 +280,26 @@
     return q ? fetchModels.filter((m) => m.toLowerCase().includes(q)) : fetchModels
   }
 
+  // Picked ids not on the endpoint yet. A model added elsewhere after the
+  // panel opened stays in fetchPicked; re-adding it would overwrite its vision
+  // flag with the panel's shared toggle.
+  function fetchedToAdd(ep: EndpointConfig): string[] {
+    return fetchModels.filter((m) => fetchPicked.has(m) && !ep.models.some((x) => x.model === m))
+  }
+
   function submitFetchedModels(ep: EndpointConfig) {
-    const picked = fetchModels.filter((m) => fetchPicked.has(m))
+    const picked = fetchedToAdd(ep)
     if (picked.length === 0) return
     run(async () => {
-      for (const m of picked) await api.addEndpointModel(ep.id, m, fetchVision)
-      fetchFor = null
+      try {
+        for (const m of picked) await api.addEndpointModel(ep.id, m, fetchVision)
+      } catch (e) {
+        // run() only reloads on success; the ids added before the failure are
+        // saved, so refresh before surfacing the error or they look lost.
+        await reload()
+        throw e
+      }
+      closeFetchModels()
     })
   }
 
@@ -669,7 +692,7 @@
               {#if fetchLoading}
                 <div class="fetch-note">{$t('settings.endpoints.fetch_models.loading')}</div>
               {:else if fetchError}
-                <div class="fetch-note fetch-error">{$t('settings.endpoints.fetch_models.failed').replace('{message}', fetchError)}</div>
+                <div class="fetch-note fetch-error">{$t('settings.endpoints.fetch_models.failed').replace('{message}', () => fetchError)}</div>
               {:else if fetchModels.length === 0}
                 <div class="fetch-note">{$t('settings.endpoints.fetch_models.empty')}</div>
               {:else}
@@ -678,7 +701,7 @@
                   type="text"
                   placeholder={$t('settings.endpoints.fetch_models.filter')}
                   bind:value={fetchFilter}
-                  onkeydown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); fetchFor = null } }}
+                  onkeydown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); closeFetchModels() } }}
                 />
                 <div class="fetch-list">
                   {#each filteredFetchModels() as m (m)}
@@ -702,11 +725,12 @@
                     <input type="checkbox" bind:checked={fetchVision} disabled={busy} />
                     <span>{$t('settings.endpoints.models.vision')}</span>
                   </label>
-                  <button class="btnp" onclick={() => submitFetchedModels(ep)} disabled={busy || fetchPicked.size === 0}>
-                    {$t('settings.endpoints.fetch_models.add').replace('{n}', String(fetchPicked.size))}
+                  {@const toAdd = fetchedToAdd(ep).length}
+                  <button class="btnp" onclick={() => submitFetchedModels(ep)} disabled={busy || toAdd === 0}>
+                    {$t('settings.endpoints.fetch_models.add').replace('{n}', String(toAdd))}
                   </button>
                 {/if}
-                <button class="btns" onclick={() => (fetchFor = null)} disabled={busy}>{$t('common.cancel')}</button>
+                <button class="btns" onclick={closeFetchModels} disabled={busy}>{$t('common.cancel')}</button>
               </div>
             </div>
           {/if}
