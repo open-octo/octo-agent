@@ -308,18 +308,32 @@ type endpointsResponse struct {
 // endpointConfigJSON is one channel in the two-level response.
 //
 // APIKey is deliberately absent from the JSON shape: the read API never echoes
-// the secret. HasAPIKey is the only key-related field the frontend gets, so it
-// can badge "已配置 / 未设置" without learning the key itself (design §10.1,
-// §19.1).
+// the secret. HasAPIKey and APIKeyEnv are the only key-related fields the
+// frontend gets, so it can badge "已配置 / 未设置" without learning the key
+// itself (design §10.1, §19.1).
 type endpointConfigJSON struct {
-	ID        string              `json:"id"`
-	Name      string              `json:"name,omitempty"`
-	Provider  string              `json:"provider"`
-	BaseURL   string              `json:"base_url,omitempty"`
-	Protocol  string              `json:"protocol,omitempty"`
-	HasAPIKey bool                `json:"has_api_key"`
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	Provider  string `json:"provider"`
+	BaseURL   string `json:"base_url,omitempty"`
+	Protocol  string `json:"protocol,omitempty"`
+	HasAPIKey bool   `json:"has_api_key"`
+	// APIKeyEnv names the vendor env var when it is set. Requests read it
+	// before the stored key, so it is the key in effect even when HasAPIKey
+	// is also true. Only the name is sent, never the value.
+	APIKeyEnv string              `json:"api_key_env,omitempty"`
 	Models    []endpointModelJSON `json:"models"`
 	Headers   map[string]string   `json:"headers,omitempty"`
+}
+
+// apiKeyEnvInEffect returns the provider's API-key env var name when that var
+// is set, mirroring the env-first order of senderForEntry; "" otherwise.
+func apiKeyEnvInEffect(provider string) string {
+	name := app.VendorAPIKeyEnvVar(provider)
+	if name == "" || os.Getenv(name) == "" {
+		return ""
+	}
+	return name
 }
 
 // endpointModelJSON is one model under an endpoint.
@@ -352,6 +366,7 @@ func (s *Server) handleGetEndpoints(w http.ResponseWriter, r *http.Request) {
 			BaseURL:   ep.BaseURL,
 			Protocol:  ep.Protocol,
 			HasAPIKey: ep.APIKey != "",
+			APIKeyEnv: apiKeyEnvInEffect(ep.Provider),
 			Models:    make([]endpointModelJSON, 0, len(ep.Models)),
 			Headers:   ep.Headers,
 		}
@@ -897,6 +912,7 @@ type endpointJSONOut struct {
 	BaseURL   string              `json:"base_url,omitempty"`
 	Protocol  string              `json:"protocol,omitempty"`
 	HasAPIKey bool                `json:"has_api_key"`
+	APIKeyEnv string              `json:"api_key_env,omitempty"`
 	Models    []endpointModelJSON `json:"models"`
 	Headers   map[string]string   `json:"headers,omitempty"`
 }
@@ -909,6 +925,7 @@ func endpointToJSON(ep config.Endpoint) endpointJSONOut {
 		BaseURL:   ep.BaseURL,
 		Protocol:  ep.Protocol,
 		HasAPIKey: ep.APIKey != "",
+		APIKeyEnv: apiKeyEnvInEffect(ep.Provider),
 		Models:    make([]endpointModelJSON, 0, len(ep.Models)),
 		Headers:   ep.Headers,
 	}

@@ -1094,9 +1094,9 @@ export async function getConfig(): Promise<ConfigResponse> {
 }
 
 // PR4b (design §10.1): two-level endpoint view. Mirrors server endpointsResponse
-// (onboard_config_handlers.go). has_api_key is the only key-related field — the
-// server never echoes the key itself. models is the per-endpoint model list.
-// Read-only in PR4b; CRUD lands in PR5.
+// (onboard_config_handlers.go). has_api_key and api_key_env are the only
+// key-related fields — the server never echoes the key itself. models is the
+// per-endpoint model list. Read-only in PR4b; CRUD lands in PR5.
 export interface EndpointModel {
   model: string
   context_window?: number
@@ -1109,6 +1109,9 @@ export interface EndpointConfig {
   base_url?: string
   protocol?: string
   has_api_key: boolean
+  // Name of the vendor env var supplying the key, when set. Requests read it
+  // before the stored key, so it is the key in effect.
+  api_key_env?: string
   headers?: Record<string, string>
   models: EndpointModel[]
 }
@@ -1157,6 +1160,7 @@ export interface EndpointMutationResult {
   base_url?: string
   protocol?: string
   has_api_key: boolean
+  api_key_env?: string
   headers?: Record<string, string>
   models: EndpointModel[]
 }

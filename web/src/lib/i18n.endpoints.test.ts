@@ -13,6 +13,7 @@ const ENDPOINT_KEYS = [
   'settings.endpoints.empty',
   'settings.endpoints.api_key',
   'settings.endpoints.api_key.set',
+  'settings.endpoints.api_key.env',
   'settings.endpoints.api_key.missing',
   'settings.endpoints.models',
   'settings.endpoints.models.vision',
