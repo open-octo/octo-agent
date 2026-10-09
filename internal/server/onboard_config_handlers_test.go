@@ -1775,3 +1775,48 @@ func TestDetectOnboardPhase_EndpointKeyFromEnvIsConfigured(t *testing.T) {
 		t.Fatalf("detectOnboardPhase = %q; an endpoint keyed from the environment is configured", got)
 	}
 }
+
+// TestEndpointsReportKeyEnvInEffect: a key coming from the vendor env var is
+// the one requests use (env before stored key), so the endpoint view names
+// that var — and only the name, never the value — on both the read and the
+// mutation responses.
+func TestEndpointsReportKeyEnvInEffect(t *testing.T) {
+	setTestHome(t)
+	t.Setenv("CUSTOM_API_KEY", "sk-env-secret")
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "relay", Provider: "custom", BaseURL: "https://relay.example", Protocol: "openai", APIKey: "sk-stored", Models: []config.EndpointModel{{Model: "m1"}}},
+			{ID: "ds", Provider: "deepseek", APIKey: "sk-ds", Models: []config.EndpointModel{{Model: "deepseek-v4-flash"}}},
+		},
+		Default: "relay::m1",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	w := doJSON(t, srv, http.MethodGet, "/api/config/endpoints", "")
+	if strings.Contains(w.Body.String(), "sk-env-secret") {
+		t.Fatalf("response leaked the env key value: %s", w.Body.String())
+	}
+	got := map[string]endpointConfigJSON{}
+	for _, ep := range getEndpointsResponse(t, srv).Endpoints {
+		got[ep.ID] = ep
+	}
+	if ep := got["relay"]; ep.APIKeyEnv != "CUSTOM_API_KEY" || !ep.HasAPIKey {
+		t.Errorf("relay: api_key_env=%q has_api_key=%v, want CUSTOM_API_KEY/true", ep.APIKeyEnv, ep.HasAPIKey)
+	}
+	if ep := got["ds"]; ep.APIKeyEnv != "" {
+		t.Errorf("ds: api_key_env=%q, want empty (DEEPSEEK_API_KEY unset)", ep.APIKeyEnv)
+	}
+
+	w = doJSON(t, srv, http.MethodPatch, "/api/config/endpoints/relay", `{"name":"Relay"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH = %d: %s", w.Code, w.Body.String())
+	}
+	var out endpointJSONOut
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.APIKeyEnv != "CUSTOM_API_KEY" {
+		t.Errorf("PATCH response api_key_env=%q, want CUSTOM_API_KEY", out.APIKeyEnv)
+	}
+}

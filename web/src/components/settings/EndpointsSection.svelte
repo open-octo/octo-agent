@@ -496,7 +496,10 @@
             {/if}
             {#if ep.protocol}<span> · {ep.protocol}</span>{/if}
             <span> · {$t('settings.endpoints.api_key')}:
-              {#if ep.has_api_key}<span class="key-set">{$t('settings.endpoints.api_key.set')}</span>
+              <!-- The env var is read before the stored key, so it wins even
+                   when has_api_key is also true. -->
+              {#if ep.api_key_env}<span class="key-set">{$t('settings.endpoints.api_key.env').replace('{name}', ep.api_key_env)}</span>
+              {:else if ep.has_api_key}<span class="key-set">{$t('settings.endpoints.api_key.set')}</span>
               {:else if presetFor(ep.provider)?.custom_endpoint}<span class="key-optional">{$t('settings.endpoints.api_key.optional')}</span>
               {:else}<span class="key-missing">{$t('settings.endpoints.api_key.missing')}</span>{/if}
             </span>
