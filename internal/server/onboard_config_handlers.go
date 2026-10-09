@@ -827,17 +827,17 @@ func (s *Server) handleTestConfig(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve the key. An empty or still-masked field means "unchanged" — the
 	// panel never prefills the key input, so editing a model and hitting Test
-	// sends no key. Reuse the stored key of the matching entry instead of
-	// demanding a re-type; fall back to the vendor's env var last.
+	// sends no key. Then test the key real requests would use: the vendor's
+	// env var first, as senderForEntry does, so a stored key the env shadows
+	// isn't reported as working; the matching entry's stored key last.
 	key := req.APIKey
 	if key == "" || strings.Contains(key, "****") {
-		key = ""
+		key = os.Getenv(app.VendorAPIKeyEnvVar(providerName))
+	}
+	if key == "" {
 		if cfg, err := config.Load(); err == nil {
 			key = storedAPIKey(cfg, providerName, req.BaseURL)
 		}
-	}
-	if key == "" {
-		key = os.Getenv(app.VendorAPIKeyEnvVar(providerName))
 	}
 	if key == "" && !app.VendorKeyOptional(providerName) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "no API key provided"})

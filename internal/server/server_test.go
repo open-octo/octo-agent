@@ -1249,6 +1249,7 @@ func TestHandleTestConfig(t *testing.T) {
 // instead of failing with "no API key provided".
 func TestHandleTestConfig_ReusesStoredKey(t *testing.T) {
 	setTestHome(t)
+	t.Setenv("OPENAI_API_KEY", "")
 
 	var gotAuth string
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1279,6 +1280,50 @@ func TestHandleTestConfig_ReusesStoredKey(t *testing.T) {
 	}
 	if gotAuth != "Bearer stored-key" {
 		t.Errorf("Authorization = %q, want Bearer stored-key (stored key reused)", gotAuth)
+	}
+}
+
+// Real requests read the vendor env var before the stored key, so with the
+// key field left empty the test must try the env key: a stored key the env
+// shadows would otherwise test green while chat uses a different key.
+func TestHandleTestConfig_EnvKeyBeforeStoredKey(t *testing.T) {
+	setTestHome(t)
+	t.Setenv("OPENAI_API_KEY", "env-key")
+
+	var gotAuth []string
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = append(gotAuth, r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"!"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer mock.Close()
+
+	seedModels(t, config.Config{
+		Endpoints: []config.Endpoint{
+			{ID: "ep-a", Provider: "openai", BaseURL: mock.URL, APIKey: "stored-key", Models: []config.EndpointModel{{Model: "gpt-4o-mini"}}},
+		},
+		Default: "ep-a::gpt-4o-mini",
+	})
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	// Empty and masked key fields both mean "unchanged".
+	for _, field := range []string{``, `,"api_key":"sk-a****wxyz"`} {
+		gotAuth = nil
+		w := doJSON(t, srv, http.MethodPost, "/api/config/test",
+			`{"model":"gpt-4o-mini","base_url":"`+mock.URL+`","provider":"openai"`+field+`}`)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+		}
+		if len(gotAuth) != 1 || gotAuth[0] != "Bearer env-key" {
+			t.Errorf("key field %q: Authorization = %v, want [Bearer env-key]", field, gotAuth)
+		}
+	}
+
+	// A key typed into the form is what the user asked to test.
+	gotAuth = nil
+	doJSON(t, srv, http.MethodPost, "/api/config/test",
+		`{"model":"gpt-4o-mini","base_url":"`+mock.URL+`","provider":"openai","api_key":"typed-key"}`)
+	if len(gotAuth) != 1 || gotAuth[0] != "Bearer typed-key" {
+		t.Errorf("typed key: Authorization = %v, want [Bearer typed-key]", gotAuth)
 	}
 }
 
