@@ -1787,6 +1787,7 @@ func TestEndpointsReportKeyEnvInEffect(t *testing.T) {
 	seedModels(t, config.Config{
 		Endpoints: []config.Endpoint{
 			{ID: "relay", Provider: "custom", BaseURL: "https://relay.example", Protocol: "openai", APIKey: "sk-stored", Models: []config.EndpointModel{{Model: "m1"}}},
+			{ID: "env-only", Provider: "custom", BaseURL: "https://other.example", Protocol: "openai", Models: []config.EndpointModel{{Model: "m2"}}},
 			{ID: "ds", Provider: "deepseek", APIKey: "sk-ds", Models: []config.EndpointModel{{Model: "deepseek-v4-flash"}}},
 		},
 		Default: "relay::m1",
@@ -1803,6 +1804,10 @@ func TestEndpointsReportKeyEnvInEffect(t *testing.T) {
 	}
 	if ep := got["relay"]; ep.APIKeyEnv != "CUSTOM_API_KEY" || !ep.HasAPIKey {
 		t.Errorf("relay: api_key_env=%q has_api_key=%v, want CUSTOM_API_KEY/true", ep.APIKeyEnv, ep.HasAPIKey)
+	}
+	// The case the badge exists for: nothing stored, key supplied by the env.
+	if ep := got["env-only"]; ep.APIKeyEnv != "CUSTOM_API_KEY" || ep.HasAPIKey {
+		t.Errorf("env-only: api_key_env=%q has_api_key=%v, want CUSTOM_API_KEY/false", ep.APIKeyEnv, ep.HasAPIKey)
 	}
 	if ep := got["ds"]; ep.APIKeyEnv != "" {
 		t.Errorf("ds: api_key_env=%q, want empty (DEEPSEEK_API_KEY unset)", ep.APIKeyEnv)
