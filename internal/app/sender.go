@@ -464,6 +464,27 @@ func TestConnection(ctx context.Context, providerName, apiKey, baseURL, model, p
 	return err
 }
 
+// ErrModelListingUnsupported is returned by ListModels for an endpoint whose
+// wire protocol has no model-listing call octo knows how to make.
+var ErrModelListingUnsupported = errors.New("this endpoint does not support listing models")
+
+// ListModels asks the endpoint which model ids it serves (GET /v1/models on
+// the OpenAI protocol). The result carries ids only — no context window or
+// vision flag — so callers must not treat it as a ready model configuration.
+func ListModels(ctx context.Context, providerName, apiKey, baseURL, protocol string, headers map[string]string) ([]string, error) {
+	p, err := buildClient(providerName, apiKey, baseURL, protocol, headers, nil)
+	if err != nil {
+		return nil, err
+	}
+	lister, ok := p.(interface {
+		ListModels(context.Context) ([]string, error)
+	})
+	if !ok {
+		return nil, ErrModelListingUnsupported
+	}
+	return lister.ListModels(ctx)
+}
+
 // Compile-time assertions: sender satisfies all agent sender interfaces.
 var (
 	_ agent.Sender              = sender{}

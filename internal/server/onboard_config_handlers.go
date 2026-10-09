@@ -1198,6 +1198,52 @@ func (s *Server) handleAddEndpointModel(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, endpointToJSON(updated))
 }
 
+// handleListRemoteModels backs the settings panel's "Fetch models" button: it
+// asks a saved Custom endpoint which model ids it serves, using the stored
+// connection (env key first, like senderForEntry). It only reads — the panel
+// adds the ids the user picks through POST .../models. A failed upstream call
+// is a normal result ({ok:false}), not an HTTP error, so the panel can show it
+// next to the button the same way handleTestConfig's result is shown.
+func (s *Server) handleListRemoteModels(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var ep config.Endpoint
+	found := false
+	for _, e := range cfg.Endpoints {
+		if e.ID == id {
+			ep, found = e, true
+			break
+		}
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("endpoint %q not found", id))
+		return
+	}
+	// Named vendors keep their curated lists; Anthropic-protocol endpoints have
+	// no common listing call.
+	if ep.Provider != app.ProviderCustom || ep.Protocol != "openai" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "fetching models is only supported for custom OpenAI-compatible endpoints"})
+		return
+	}
+
+	key := os.Getenv(app.VendorAPIKeyEnvVar(ep.Provider))
+	if key == "" {
+		key = ep.APIKey
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	models, err := app.ListModels(ctx, ep.Provider, key, ep.BaseURL, ep.Protocol, ep.Headers)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "models": models})
+}
+
 // handleDeleteEndpointModel: DELETE /api/config/endpoints/{id}/models/{model}
 func (s *Server) handleDeleteEndpointModel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
