@@ -222,6 +222,64 @@
     })
   }
 
+  // ── fetch models: a checklist of the ids GET /v1/models reports, for
+  // Custom OpenAI-compatible endpoints only (named vendors keep their
+  // catalogue). Picked ids go through the same add-model call as a typed one;
+  // the listing carries no vision/context-window info, so the vision default
+  // matches the manual row. ──
+  let fetchFor      = $state<string | null>(null)
+  let fetchLoading  = $state(false)
+  let fetchError    = $state('')
+  let fetchModels   = $state<string[]>([])
+  let fetchPicked   = $state<Set<string>>(new Set())
+  let fetchFilter   = $state('')
+  let fetchVision   = $state(true)
+
+  function canFetchModels(ep: EndpointConfig): boolean {
+    return ep.provider === 'custom' && ep.protocol === 'openai'
+  }
+
+  async function openFetchModels(ep: EndpointConfig) {
+    fetchFor = ep.id
+    fetchLoading = true
+    fetchError = ''
+    fetchModels = []
+    fetchPicked = new Set()
+    fetchFilter = ''
+    fetchVision = true
+    try {
+      const r = await api.listRemoteModels(ep.id)
+      if (fetchFor !== ep.id) return
+      if (r.ok) fetchModels = r.models ?? []
+      else fetchError = r.message ?? ''
+    } catch (e: any) {
+      if (fetchFor === ep.id) fetchError = e.message ?? ''
+    } finally {
+      if (fetchFor === ep.id) fetchLoading = false
+    }
+  }
+
+  function toggleFetchPick(model: string) {
+    const next = new Set(fetchPicked)
+    if (next.has(model)) next.delete(model)
+    else next.add(model)
+    fetchPicked = next
+  }
+
+  function filteredFetchModels(): string[] {
+    const q = fetchFilter.trim().toLowerCase()
+    return q ? fetchModels.filter((m) => m.toLowerCase().includes(q)) : fetchModels
+  }
+
+  function submitFetchedModels(ep: EndpointConfig) {
+    const picked = fetchModels.filter((m) => fetchPicked.has(m))
+    if (picked.length === 0) return
+    run(async () => {
+      for (const m of picked) await api.addEndpointModel(ep.id, m, fetchVision)
+      fetchFor = null
+    })
+  }
+
   // ── create / edit form ──
 
   function openCreate() {
@@ -606,12 +664,62 @@
             {/if}
           </div>
 
+          {#if fetchFor === ep.id}
+            <div class="fetch-panel">
+              {#if fetchLoading}
+                <div class="fetch-note">{$t('settings.endpoints.fetch_models.loading')}</div>
+              {:else if fetchError}
+                <div class="fetch-note fetch-error">{$t('settings.endpoints.fetch_models.failed').replace('{message}', fetchError)}</div>
+              {:else if fetchModels.length === 0}
+                <div class="fetch-note">{$t('settings.endpoints.fetch_models.empty')}</div>
+              {:else}
+                <input
+                  class="add-input fetch-filter"
+                  type="text"
+                  placeholder={$t('settings.endpoints.fetch_models.filter')}
+                  bind:value={fetchFilter}
+                  onkeydown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); fetchFor = null } }}
+                />
+                <div class="fetch-list">
+                  {#each filteredFetchModels() as m (m)}
+                    {@const added = ep.models.some((x) => x.model === m)}
+                    <label class="fetch-item" class:fetch-added={added}>
+                      <input
+                        type="checkbox"
+                        checked={added || fetchPicked.has(m)}
+                        disabled={busy || added}
+                        onchange={() => toggleFetchPick(m)}
+                      />
+                      <span class="mono">{m}</span>
+                      {#if added}<span class="fetch-tag">{$t('settings.endpoints.fetch_models.added')}</span>{/if}
+                    </label>
+                  {/each}
+                </div>
+              {/if}
+              <div class="fetch-actions">
+                {#if !fetchLoading && !fetchError && fetchModels.length > 0}
+                  <label class="vision-check">
+                    <input type="checkbox" bind:checked={fetchVision} disabled={busy} />
+                    <span>{$t('settings.endpoints.models.vision')}</span>
+                  </label>
+                  <button class="btnp" onclick={() => submitFetchedModels(ep)} disabled={busy || fetchPicked.size === 0}>
+                    {$t('settings.endpoints.fetch_models.add').replace('{n}', String(fetchPicked.size))}
+                  </button>
+                {/if}
+                <button class="btns" onclick={() => (fetchFor = null)} disabled={busy}>{$t('common.cancel')}</button>
+              </div>
+            </div>
+          {/if}
+
           <!-- Endpoint-level actions only. Model-level ones (default / Lite /
                vision helper) live on each chip as inline icon toggles — the
                footer duplicates existed because those used to hide behind a
                chip-click dropdown. -->
           <div class="ep-actions">
             <button class="act" onclick={() => openEdit(ep)} disabled={busy}>{$t('common.edit')}</button>
+            {#if canFetchModels(ep)}
+              <button class="act" onclick={() => openFetchModels(ep)} disabled={busy || (fetchFor === ep.id && fetchLoading)}>{$t('settings.endpoints.fetch_models')}</button>
+            {/if}
             <button class="act danger" onclick={() => removeEndpoint(ep)} disabled={busy}>{$t('common.delete')}</button>
           </div>
         </div>
@@ -707,6 +815,26 @@
 .add-ok:hover:not(:disabled) { color: var(--success-text); border-color: var(--success-text); }
 .add-cancel:hover:not(:disabled) { color: var(--error); border-color: var(--error); }
 .add-ok:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── fetch-models checklist ── */
+.fetch-panel {
+  display: flex; flex-direction: column; gap: 8px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg-layout);
+}
+.fetch-note { font-size: 12.5px; color: var(--text-secondary); }
+.fetch-error { color: var(--error); }
+.fetch-filter { width: 100%; max-width: 320px; box-sizing: border-box; }
+/* Relay gateways can list hundreds of models; scroll inside the panel. */
+.fetch-list { display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow-y: auto; }
+.fetch-item {
+  display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 6px;
+  font-size: 12.5px; color: var(--text); cursor: pointer;
+}
+.fetch-item:hover { background: var(--hover-neutral); }
+.fetch-item input { accent-color: var(--blue-6); }
+.fetch-added { color: var(--text-tertiary); cursor: default; }
+.fetch-tag { font-size: 11.5px; color: var(--text-quaternary); }
+.fetch-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 
 /* ── footer actions ── */
 .ep-actions { display: flex; align-items: center; gap: 16px; padding-top: 2px; }

@@ -1195,6 +1195,13 @@ export async function addEndpointModel(id: string, model: string, vision: boolea
   return request<EndpointMutationResult>(`/api/config/endpoints/${encodeURIComponent(id)}/models`, { method: 'POST', ...json({ model, vision, context_window: contextWindow }) })
 }
 
+// Asks a saved Custom OpenAI-compatible endpoint which model ids it serves
+// (GET <base_url>/v1/models, server-side with the stored key). An upstream
+// failure comes back as ok:false with a message, not as a thrown error.
+export async function listRemoteModels(id: string): Promise<{ ok: boolean; models?: string[]; message?: string }> {
+  return request<{ ok: boolean; models?: string[]; message?: string }>(`/api/config/endpoints/${encodeURIComponent(id)}/remote-models`)
+}
+
 export async function deleteEndpointModel(id: string, model: string): Promise<void> {
   await request<unknown>(`/api/config/endpoints/${encodeURIComponent(id)}/models/${encodeURIComponent(model)}`, { method: 'DELETE' })
 }

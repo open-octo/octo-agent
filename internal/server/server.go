@@ -1002,6 +1002,7 @@ func (s *Server) registerRoutes() {
 	s.api("PATCH /api/config/endpoints/{id}", s.handleUpdateEndpoint)
 	s.api("DELETE /api/config/endpoints/{id}", s.handleDeleteEndpoint)
 	s.api("POST /api/config/endpoints/{id}/models", s.handleAddEndpointModel)
+	s.api("GET /api/config/endpoints/{id}/remote-models", s.handleListRemoteModels)
 	s.api("DELETE /api/config/endpoints/{id}/models/{model}", s.handleDeleteEndpointModel)
 	s.api("POST /api/config/endpoints/{id}/default", s.handleSetEndpointDefault)
 	s.api("POST /api/config/endpoints/{id}/lite", s.handleSetEndpointLite)
