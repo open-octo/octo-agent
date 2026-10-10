@@ -205,6 +205,57 @@ func TestReplayLiveState_ToolEventsKeepServerTimestamps(t *testing.T) {
 	}
 }
 
+// TestReplayLiveState_StampsBufferedEventsAsReplay guards #2607: a replayed
+// write's tool_result looked identical to a live one, so the web client
+// re-opened the artifact panel on every refresh of a long-running turn. The
+// replay copy carries replay:true; the buffer itself (and so the live
+// broadcast) stays unstamped.
+func TestReplayLiveState_StampsBufferedEventsAsReplay(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+	srv.pendingQuestions = map[string]wsEventRequestUserQuestion{}
+	srv.pendingConfirms = map[string]wsEventRequestConfirmation{}
+
+	const sid = "replay-stamp-session"
+	defer tools.CloseSessionBackgroundManager(sid)
+
+	seedLiveTurn(srv, sid)
+	sw := srv.newWSStreamWriter(sid)
+	sw.handleEvent(agent.AgentEvent{
+		Kind: agent.EventToolStarted, ToolName: "write_file", ToolID: "call_1",
+		Input: map[string]any{"path": "memory.md"},
+	})
+	sw.handleEvent(agent.AgentEvent{
+		Kind: agent.EventToolDone, ToolID: "call_1", Output: "ok",
+		UI: map[string]any{"type": "write", "path": "memory.md"},
+	})
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.replayLiveState(sid, conn)
+
+	seen := 0
+	for _, ev := range drainConn(t, conn) {
+		switch ev["type"] {
+		case "tool_call", "tool_result":
+			if ev["replay"] != true {
+				t.Errorf("replayed %s not stamped replay:true: %v", ev["type"], ev)
+			}
+			seen++
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("replayed tool events = %d, want 2", seen)
+	}
+
+	srv.liveStateMu.RLock()
+	defer srv.liveStateMu.RUnlock()
+	for _, ev := range srv.liveStates[sid].events {
+		if _, ok := ev["replay"]; ok {
+			t.Errorf("replay stamp leaked into the shared buffer: %v", ev)
+		}
+	}
+}
+
 // TestReplayLiveState_NothingAfterTurnPersists checks that once the live
 // state is dropped (doAgentTurn after Save), a subscribing tab gets no
 // buffered transcript events — history is the source from then on, and

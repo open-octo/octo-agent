@@ -363,8 +363,17 @@ func (s *Server) replayLiveState(sessionID string, conn *wsConn) {
 		// Transcript events broadcast before this tab subscribed. Without
 		// this a page refresh mid-turn loses every tool card (and any
 		// streamed text) until the turn persists at its end.
+		// Each is stamped replay:true (on a copy — the buffer is shared by
+		// every later subscriber) so the tab can tell a catch-up from a live
+		// event: a replayed write must not auto-open the artifact panel again
+		// on every refresh of a long-running turn (#2607).
 		for _, ev := range state.events {
-			if b, err := json.Marshal(ev); err == nil {
+			stamped := make(map[string]any, len(ev)+1)
+			for k, v := range ev {
+				stamped[k] = v
+			}
+			stamped["replay"] = true
+			if b, err := json.Marshal(stamped); err == nil {
 				replay = append(replay, b)
 			}
 		}
