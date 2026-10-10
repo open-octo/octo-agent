@@ -2,9 +2,11 @@ package server
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -3267,5 +3269,68 @@ func TestHandleGetSessionMessages_AssistantMessageCarriesCreatedAt(t *testing.T)
 	}
 	if v, ok := got[2]["created_at"]; ok {
 		t.Errorf("pre-CreatedAt reply carried created_at = %v, want none", v)
+	}
+}
+
+// The transcript endpoint is the one response that grows with the session —
+// several MB for a long one — so it is gzipped for a client that accepts it,
+// and the decompressed body must be exactly what an identity request gets.
+func TestHandleGetSessionMessages_Gzip(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := agent.NewSession("deepseek-v4-pro", "")
+	sess.Title = "fixed"
+	sess.Messages = []agent.Message{
+		{Role: agent.RoleUser, Content: strings.Repeat("hello ", 200)},
+		{Role: agent.RoleAssistant, Content: strings.Repeat("world ", 200)},
+	}
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	get := func(acceptEncoding string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
+		req.SetPathValue("id", sess.ID)
+		if acceptEncoding != "" {
+			req.Header.Set("Accept-Encoding", acceptEncoding)
+		}
+		rec := httptest.NewRecorder()
+		srv.handleGetSessionMessages(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("messages endpoint = %d: %s", rec.Code, rec.Body.String())
+		}
+		return rec
+	}
+
+	plain := get("")
+	if enc := plain.Header().Get("Content-Encoding"); enc != "" {
+		t.Fatalf("identity request got Content-Encoding %q", enc)
+	}
+
+	zipped := get("gzip, deflate, br")
+	if enc := zipped.Header().Get("Content-Encoding"); enc != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", enc)
+	}
+	if v := zipped.Header().Get("Vary"); v != "Accept-Encoding" {
+		t.Errorf("Vary = %q, want Accept-Encoding", v)
+	}
+	if ct := zipped.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	if zipped.Body.Len() >= plain.Body.Len() {
+		t.Errorf("gzipped body %d bytes, not smaller than plain %d", zipped.Body.Len(), plain.Body.Len())
+	}
+	zr, err := gzip.NewReader(zipped.Body)
+	if err != nil {
+		t.Fatalf("gzip reader: %v", err)
+	}
+	got, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatalf("decompress: %v", err)
+	}
+	if !bytes.Equal(got, plain.Body.Bytes()) {
+		t.Errorf("decompressed body differs from identity body:\n%s\nvs\n%s", got, plain.Body.Bytes())
 	}
 }
