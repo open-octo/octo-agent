@@ -1037,7 +1037,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     cleanups.push(ws.on('tool_result', (ev) => {
       if ((ev as any).session_id && (ev as any).session_id !== sid) return
       updateToolResult(sid, (ev as any).tool_id, (ev as any).result, (ev as any).ui_payload, (ev as any).ts)
-      observeArtifact(sid, (ev as any).ui_payload, true)   // live turn — may auto-open
+      // A mid-turn resubscribe (page reload) redelivers this turn's earlier
+      // results stamped `replay`; those were already seen and must not pop
+      // the panel open again on every refresh (#2607).
+      observeArtifact(sid, (ev as any).ui_payload, !(ev as any).replay)
     }))
 
     cleanups.push(ws.on('tool_error', (ev) => {
