@@ -6,6 +6,7 @@
 package server
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1554,6 +1555,26 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// writeJSONGzip is writeJSON for large payloads: gzipped when the client
+// accepts it. A long session's transcript runs to several MB of JSON that
+// gzips ~3–4× smaller, and a phone on a mobile network pays for every byte on
+// each reload. The tunnel bridge drops the phone's Accept-Encoding, so its
+// loopback client negotiates (and transparently undoes) gzip on its own.
+func writeJSONGzip(w http.ResponseWriter, r *http.Request, status int, v any) {
+	if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		writeJSON(w, status, v)
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "application/json")
+	h.Set("Content-Encoding", "gzip")
+	h.Add("Vary", "Accept-Encoding")
+	w.WriteHeader(status)
+	gz := gzip.NewWriter(w)
+	_ = json.NewEncoder(gz).Encode(v)
+	_ = gz.Close()
 }
 
 // writeError writes a structured error response.

@@ -800,7 +800,7 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSONGzip(w, r, http.StatusOK, map[string]any{
 		"has_more":       false,
 		"events":         events,
 		"show_reasoning": effShowReasoning,
