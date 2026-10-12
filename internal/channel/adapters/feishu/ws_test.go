@@ -156,7 +156,13 @@ func TestStart_LongConnection(t *testing.T) {
 				conn.WriteMessage(websocket.BinaryMessage, f.marshal())
 			}
 			ackCh <- readFrame()
-			<-r.Context().Done()
+			// Hold the connection until the client closes it.
+			conn.SetReadDeadline(time.Time{})
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					return
+				}
+			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -170,7 +176,11 @@ func TestStart_LongConnection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	got := make(chan channel.InboundEvent, 1)
-	go a.Start(ctx, func(ev channel.InboundEvent) { got <- ev })
+	done := make(chan struct{})
+	go func() {
+		a.Start(ctx, func(ev channel.InboundEvent) { got <- ev })
+		close(done)
+	}()
 
 	select {
 	case ping := <-pingCh:
@@ -203,5 +213,14 @@ func TestStart_LongConnection(t *testing.T) {
 	case msg := <-errCh:
 		t.Fatal(msg)
 	default:
+	}
+
+	// Cancellation must close the socket rather than wait out the read
+	// deadline (2×60s+5s here) with a zombie connection still acking.
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start did not return promptly after cancel")
 	}
 }

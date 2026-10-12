@@ -191,13 +191,20 @@ func (a *Adapter) connectOnce(ctx context.Context, onMessage func(channel.Inboun
 	if u, err := url.Parse(ep.URL); err == nil {
 		if id, err := strconv.ParseInt(u.Query().Get("service_id"), 10, 32); err == nil {
 			ws.serviceID = int32(id)
+		} else {
+			// Pings may then go unanswered and the connection time out;
+			// leave a trace of why.
+			log.Printf("[feishu] endpoint URL has no usable service_id; pinging with 0")
 		}
 	}
 
 	log.Printf("[feishu] connected to WebSocket")
 
 	// FEISHU-005: proactive ping goroutine. The server answers each ping
-	// with a pong that may carry an updated ClientConfig.
+	// with a pong that may carry an updated ClientConfig. It also closes the
+	// socket on cancellation: otherwise readEvents stays blocked until the
+	// read deadline, and a stopped adapter keeps acking events the server
+	// will then never redeliver.
 	pingCtx, cancelPing := context.WithCancel(ctx)
 	defer cancelPing()
 	go func() {
@@ -209,6 +216,7 @@ func (a *Adapter) connectOnce(ctx context.Context, onMessage func(channel.Inboun
 			}
 			select {
 			case <-pingCtx.Done():
+				conn.Close()
 				return
 			case <-time.After(ws.pingInterval()):
 			}
@@ -517,7 +525,12 @@ func (a *Adapter) getWSEndpoint(ctx context.Context) (wsEndpoint, error) {
 		if json.Unmarshal(body, &r) == nil && r.Msg != "" {
 			return wsEndpoint{}, fmt.Errorf("HTTP %d: code %d: %s", resp.StatusCode, r.Code, r.Msg)
 		}
-		return wsEndpoint{}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		// Truncated: this lands in a log line repeated every reconnect.
+		snippet := strings.TrimSpace(string(body))
+		if len(snippet) > 200 {
+			snippet = snippet[:200] + "…"
+		}
+		return wsEndpoint{}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, snippet)
 	}
 	if err := json.Unmarshal(body, &r); err != nil {
 		return wsEndpoint{}, err
@@ -578,8 +591,13 @@ func (a *Adapter) readEvents(ctx context.Context, ws *wsConn, onMessage func(cha
 			if payload == nil {
 				continue
 			}
-			// Ack before dispatching: handling a message can run a whole
-			// agent turn, and a late ack invites a redelivery.
+			// A stopped adapter must not ack: the event would be lost
+			// instead of redelivered to the live connection.
+			if ctx.Err() != nil {
+				return nil
+			}
+			// Ack before dispatching: handleEvent can block on attachment
+			// downloads, and a late ack invites a redelivery.
 			if err := ws.writeFrame(ackFrame(f)); err != nil {
 				return fmt.Errorf("ack: %w", err)
 			}
