@@ -266,6 +266,30 @@
   function count(n: number, one: string, many: string): string {
     return `${n} ${n === 1 ? one : many}`
   }
+  // What a grep output line means depends on the mode: a matching line
+  // (content), a file (files_with_matches) or a "path:N" tally (count). With
+  // context on, match and context lines can't be told apart reliably — a path
+  // or the line itself may contain ":12:" — so that case reports lines. Past
+  // the cap the server appends a marker naming the real total.
+  function grepMeta(tool: any, res: string): string {
+    if (res === '(no matches)') return '0 matches'
+    let a = tool.args
+    if (typeof a === 'string') { try { a = JSON.parse(a) } catch { a = null } }
+    if (!a || typeof a !== 'object') a = {}
+    const trunc = res.match(/\n\[truncated to first \d+ of (\d+) lines/)
+    const shown = (trunc ? res.slice(0, trunc.index) : res)
+      .split('\n').filter(l => l.trim() !== '' && l !== '--')
+    const total = trunc ? Number(trunc[1]) : shown.length
+    switch (a.mode) {
+      case 'files_with_matches': return count(total, 'file', 'files')
+      case 'count': {
+        const sum = shown.reduce((n, l) => n + (Number(l.match(/(\d+)$/)?.[1]) || 0), 0)
+        return trunc ? `${sum}+ matches` : count(sum, 'match', 'matches')
+      }
+    }
+    const hasContext = ['context_lines', 'before', 'after'].some(k => Number(a[k]) > 0)
+    return hasContext ? count(total, 'line', 'lines') : count(total, 'match', 'matches')
+  }
   function toolMeta(tool: any): string {
     if (!tool.done || tool.error) return ''
     const res = typeof tool.result === 'string' ? tool.result : ''
@@ -276,9 +300,7 @@
         const provider = searchProvider(tool)
         return provider ? `${count(r.length, 'result', 'results')} · ${provider}` : count(r.length, 'result', 'results')
       }
-      // A zero-hit grep returns the "(no matches)" sentinel, which would
-      // otherwise count as one line.
-      case 'grep':       return res === '(no matches)' ? '0 matches' : res ? count(nonEmptyLines(res), 'match', 'matches') : ''
+      case 'grep':       return res ? grepMeta(tool, res) : ''
       case 'read_file':  return res ? count(nonEmptyLines(res), 'line', 'lines') : ''
       case 'bash': case 'terminal': {
         const out = (tool.stdout && tool.stdout.length) ? tool.stdout.join('\n') : res
