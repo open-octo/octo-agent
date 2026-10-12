@@ -182,7 +182,16 @@
           <div class="table-row">
             <!-- Name + agent/model target -->
             <div class="task-name-cell">
-              <span class="task-name">{task.name}</span>
+              <div class="task-name-row">
+                <span class="task-name">{task.name}</span>
+                {#if task.permission_mode}
+                  <span class="task-perm" title={$t(`tasks.perm_${task.permission_mode}_hint`)}>
+                    <StatusTag status={task.permission_mode === 'strict' ? 'warning' : 'default'}>
+                      {$t(`tasks.perm_${task.permission_mode}`)}
+                    </StatusTag>
+                  </span>
+                {/if}
+              </div>
               {#if task.agent_id || task.agent || task.model}
                 <span class="task-target">{task.agent_id || task.agent || task.model}</span>
               {/if}
@@ -281,7 +290,9 @@ p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 6
 
 /* ── table cells ─────────────────────────────────────────────────────────────── */
 .task-name-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-right: 16px; }
+.task-name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .task-name { font-size: 14px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-perm { flex-shrink: 0; display: inline-flex; }
 .task-target { font-size: 12px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mono { font-family: var(--font-mono); }
 .cron { font-size: 13px; color: var(--text-secondary); }
