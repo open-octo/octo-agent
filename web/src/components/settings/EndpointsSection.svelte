@@ -5,6 +5,7 @@
   import type { EndpointConfig, ProviderPreset } from '../../lib/api'
   import { showToast, openAgentSession, settingsModalOpen } from '../../lib/stores'
   import { confirmDialog } from '../../lib/confirm'
+  import { parseContextWindow, formatContextWindow } from '../../lib/contextWindow'
   import StatusTag from '../ui/StatusTag.svelte'
   import ApiKeyInput from './ApiKeyInput.svelte'
   import VariantChips from './VariantChips.svelte'
@@ -46,6 +47,10 @@
   let addingFor      = $state<string | null>(null)
   let newModel       = $state('')
   let newModelVision = $state(true)
+  let newModelWin    = $state('')
+  // The model chip whose context window is being edited, keyed by cid().
+  let editingWin     = $state<string | null>(null)
+  let winText        = $state('')
 
   // ── popover menu: the catalogue picker behind "+ Add model". Model-level
   // actions (default/Lite/vision helper) are inline icon toggles on each
@@ -197,6 +202,7 @@
     addingFor = ep.id
     newModel = ''
     newModelVision = true
+    newModelWin = ''
     menu = null
   }
 
@@ -216,9 +222,36 @@
   function submitAddModel(ep: EndpointConfig) {
     const model = newModel.trim()
     if (!model) return
+    const win = parseContextWindow(newModelWin)
+    if (win === null) {
+      showToast(tr('settings.endpoints.context_window.invalid'), 'error')
+      return
+    }
     run(async () => {
-      await api.addEndpointModel(ep.id, model, newModelVision)
+      // An empty field is omitted rather than sent as 0, so re-adding a model
+      // keeps a window already set in config.yml.
+      await api.addEndpointModel(ep.id, model, newModelVision, win || undefined)
       addingFor = null
+    })
+  }
+
+  // Context window of an existing model: the add-model call upserts, so
+  // re-sending the model with its vision flag changes only the window. An
+  // empty field sends 0, which clears the override.
+  function openEditWindow(ep: EndpointConfig, m: api.EndpointModel) {
+    editingWin = cid(ep.id, m.model)
+    winText = formatContextWindow(m.context_window ?? 0)
+  }
+
+  function submitEditWindow(ep: EndpointConfig, m: api.EndpointModel) {
+    const win = parseContextWindow(winText)
+    if (win === null) {
+      showToast(tr('settings.endpoints.context_window.invalid'), 'error')
+      return
+    }
+    run(async () => {
+      await api.addEndpointModel(ep.id, m.model, m.vision, win)
+      editingWin = null
     })
   }
 
@@ -597,6 +630,9 @@
                    chip reads its roles at a glance and one click toggles. -->
               <div class="chip" class:chip-default={isDef} class:chip-lite={isLit} class:chip-vision={isVis}>
                 <span class="chip-label mono">{m.model}</span>
+                {#if m.context_window}
+                  <span class="chip-win mono" title={$t('settings.endpoints.context_window')}>{formatContextWindow(m.context_window)}</span>
+                {/if}
                 <button
                   class="chip-act"
                   class:on-default={isDef}
@@ -614,6 +650,14 @@
                   disabled={busy}
                 >
                   <iconify-icon icon={isLit ? 'ant-design:thunderbolt-filled' : 'ant-design:thunderbolt-outlined'} width="13"></iconify-icon>
+                </button>
+                <button
+                  class="chip-act"
+                  title={$t('settings.endpoints.context_window.edit')}
+                  onclick={() => openEditWindow(ep, m)}
+                  disabled={busy}
+                >
+                  <iconify-icon icon="ant-design:edit-outlined" width="13"></iconify-icon>
                 </button>
                 {#if m.vision || isVis}
                   <button
@@ -635,6 +679,30 @@
                   <iconify-icon icon="ant-design:close-outlined" width="11"></iconify-icon>
                 </button>
               </div>
+              {#if editingWin === cid(ep.id, m.model)}
+                <div class="add-row win-row">
+                  <label class="win-field">
+                    <span>{$t('settings.endpoints.context_window')}</span>
+                    <input
+                      class="add-input win-input mono"
+                      type="text"
+                      placeholder={$t('settings.endpoints.context_window.placeholder')}
+                      bind:value={winText}
+                      onkeydown={(e) => {
+                        if (e.key === 'Enter') submitEditWindow(ep, m)
+                        if (e.key === 'Escape') { e.stopPropagation(); editingWin = null }
+                      }}
+                      disabled={busy}
+                    />
+                  </label>
+                  <button class="add-ok" onclick={() => submitEditWindow(ep, m)} disabled={busy}>
+                    <iconify-icon icon="ant-design:check-outlined" width="13"></iconify-icon>
+                  </button>
+                  <button class="add-cancel" onclick={() => (editingWin = null)} disabled={busy}>
+                    <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
+                  </button>
+                </div>
+              {/if}
             {/each}
 
             {#if addingFor === ep.id}
@@ -659,6 +727,18 @@
                     <option value={pm}></option>
                   {/each}
                 </datalist>
+                <input
+                  class="add-input win-input mono"
+                  type="text"
+                  title={$t('settings.endpoints.context_window')}
+                  placeholder={$t('settings.endpoints.context_window.placeholder')}
+                  bind:value={newModelWin}
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter') submitAddModel(ep)
+                    if (e.key === 'Escape') { e.stopPropagation(); addingFor = null }
+                  }}
+                  disabled={busy}
+                />
                 <label class="vision-check">
                   <input type="checkbox" bind:checked={newModelVision} disabled={busy} />
                   <span>{$t('settings.endpoints.models.vision')}</span>
@@ -800,6 +880,13 @@
   font-size: 12.5px; color: var(--text);
   display: inline-flex; align-items: center;
 }
+/* A set context-window override, shown so the chip reads it without opening
+   the editor. */
+.chip-win {
+  height: 18px; padding: 0 5px; margin-right: 2px; border-radius: 5px;
+  background: var(--bg-container); color: var(--text-secondary); font-size: 11px;
+  display: inline-flex; align-items: center;
+}
 /* Inline action toggles: grey when inactive, role-colored when active (the
    colored icon IS the state badge). */
 .chip-act {
@@ -825,10 +912,17 @@
 .chip-add:hover:not(:disabled) { border-color: var(--blue-5); color: var(--blue-5); }
 
 /* ── inline add-model row ── */
-.add-row { display: inline-flex; align-items: center; gap: 6px; }
+/* Wraps so the extra context-window field still fits a phone-width panel. */
+.add-row { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: 100%; }
 .add-input {
   height: 28px; width: 200px; padding: 0 10px; border: 1px solid var(--blue-5);
   border-radius: 8px; font-size: 12.5px; color: var(--text); background: var(--bg-container); outline: none;
+}
+.add-input.win-input { width: 120px; }
+/* The editor opens on its own line right under the chip it edits. */
+.win-row { flex-basis: 100%; }
+.win-field {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);
 }
 .vision-check {
   display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
