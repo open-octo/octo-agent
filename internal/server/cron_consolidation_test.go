@@ -211,6 +211,33 @@ func TestPatchTask_RejectsEmptyName(t *testing.T) {
 	}
 }
 
+// TestPatchTask_RejectsUnknownField: a field the task doesn't have must be a
+// 400 naming it, not a 200 that silently drops it (#2613).
+func TestPatchTask_RejectsUnknownField(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	id := createTaskForTest(t, srv, `{"name":"keep","cron":"0 0 9 * * *","prompt":"go"}`)
+
+	body := `{"prompt":"changed","permission_mode":"auto"}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/tasks/"+id, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("patch status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "permission_mode") {
+		t.Errorf("error should name the unknown field, got %s", w.Body.String())
+	}
+	// The known field in the same body is not half-applied.
+	if got := listTasksForTest(t, srv)[0].Prompt; got != "go" {
+		t.Errorf("task prompt = %q, want unchanged %q", got, "go")
+	}
+}
+
 // TestDeleteTask_DeletesGroupKeepsSessions: deleting a task deletes its group,
 // but the group's member sessions stay on disk (they fall back to ungrouped).
 func TestDeleteTask_DeletesGroupKeepsSessions(t *testing.T) {
