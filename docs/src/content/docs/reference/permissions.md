@@ -84,10 +84,12 @@ memory directory uses), independent of `permissions.yml` and unaffected by mode.
 :::
 
 :::note
-Cron task sessions are the other place a write needs to happen with nobody present to answer an
-`ask`. A newly created task session defaults to `auto` rather than the global `interactive`
-default — an explicit `permission_mode` in `config.yml` (`interactive`, `strict`, or `auto`) is
-still honored as-is; only the unconfigured case differs from a web/CLI/IM session's default.
+Cron task runs are the other place a tool call happens with nobody present to answer an `ask`, so
+they never use `interactive`. Each task carries its own required `permission_mode` — `auto` (an
+`ask` is allowed) or `strict` (an `ask` is denied) — and every run starts a fresh session in that
+mode; the global default in `config.yml` doesn't apply. Deny rules hold in both. Tasks created
+before the field existed were given `strict` if the global mode was `strict`, otherwise `auto`. See
+[Schedule cron tasks](/docs/guides/cron-tasks/).
 :::
 
 ## Remembering a choice

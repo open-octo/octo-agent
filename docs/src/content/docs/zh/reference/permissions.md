@@ -78,10 +78,11 @@ mode 覆盖。
 :::
 
 :::note
-cron 定时任务的会话是另一个"需要在无人应答的情况下写文件"的场景。新建的任务会话默认走 `auto`，
-而不是普通 web/CLI/IM 会话的全局 `interactive` 默认值——如果 `config.yml` 显式配置了
-`permission_mode`（`interactive`/`strict`/`auto` 任意一个），仍然照常尊重；只有"什么都没配置"
-这一种情况的兜底值不一样。
+cron 定时任务的运行是另一个"调用工具时没人能应答 `ask`"的场景，所以它永远不会用 `interactive`。
+每个任务都带一个必填的 `permission_mode`：`auto`（`ask` 直接放行）或 `strict`（`ask` 直接拒绝），
+每次运行都按它新建会话，不看 `config.yml` 里的全局默认值。两种模式下 deny 规则都照样生效。这个字段
+出现之前建的任务，全局是 `strict` 的补成了 `strict`，否则补成 `auto`。详见
+[定时任务](/docs/zh/guides/cron-tasks/)。
 :::
 
 ## 记住一次选择
