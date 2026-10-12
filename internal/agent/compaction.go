@@ -111,7 +111,11 @@ func lookupContextWindow(model string) int {
 	m := strings.ToLower(model)
 	switch {
 	// ── Anthropic Claude ──
+	// The 5.x line is 1M by default per Anthropic's models overview
+	// (platform.claude.com/docs/en/about-claude/models/overview, 2026-10-12).
 	case strings.Contains(m, "claude-fable-5") || strings.Contains(m, "claude-mythos-5"):
+		return 1_000_000
+	case strings.Contains(m, "claude-opus-5") || strings.Contains(m, "claude-haiku-5"):
 		return 1_000_000
 	case strings.Contains(m, "claude-opus-4.8") || strings.Contains(m, "claude-opus-4"):
 		return 1_000_000
@@ -214,6 +218,12 @@ func lookupContextWindow(model string) int {
 	case strings.Contains(m, "qwen"):
 		return 32_000
 
+	// ── Meta Muse Spark ──
+	// 1,048,576 per Meta's model docs (ai.developer.meta.com/docs/models) and
+	// models.dev; rounded down to stay conservative.
+	case strings.Contains(m, "muse-spark"):
+		return 1_000_000
+
 	// ── Meta Llama ──
 	case strings.Contains(m, "llama-3.3") || strings.Contains(m, "llama3.3"):
 		return 128_000
@@ -258,8 +268,13 @@ func lookupContextWindow(model string) int {
 		return 64_000
 
 	// ── XAI Grok ──
-	// Context windows per xAI's model catalogue (docs.x.ai, 2026-07-09):
-	// grok-4.5 = 500k, grok-4.20 / grok-4.3 = 1M, grok-build-0.1 = 256k.
+	// Context windows per xAI's model catalogue (docs.x.ai, 2026-07-09, and
+	// 2026-10-12 for 4.6/4.7): grok-4.5 / 4.6 / 4.7 = 500k, grok-4.20 /
+	// grok-4.3 = 1M, grok-build-0.1 = 256k.
+	case strings.Contains(m, "grok-4.7") || strings.Contains(m, "grok4.7"):
+		return 500_000
+	case strings.Contains(m, "grok-4.6") || strings.Contains(m, "grok4.6"):
+		return 500_000
 	case strings.Contains(m, "grok-4.5") || strings.Contains(m, "grok4.5"):
 		return 500_000
 	case strings.Contains(m, "grok-4.20") || strings.Contains(m, "grok4.20"):

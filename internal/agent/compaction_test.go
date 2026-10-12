@@ -130,6 +130,16 @@ func TestContextWindow(t *testing.T) {
 	if got := contextWindow("glm-5.3-flash"); got != 1_000_000 {
 		t.Errorf("glm-5.3-flash window = %d, want 1000000", got)
 	}
+	for _, m := range []string{"claude-opus-5-5", "claude-opus-5", "claude-haiku-5-5", "muse-spark-1.3-contributor"} {
+		if got := contextWindow(m); got != 1_000_000 {
+			t.Errorf("%s window = %d, want 1000000", m, got)
+		}
+	}
+	for _, m := range []string{"grok-4.7", "grok-4.6"} {
+		if got := contextWindow(m); got != 500_000 {
+			t.Errorf("%s window = %d, want 500000", m, got)
+		}
+	}
 	if got := contextWindow("x-ai/grok-4.5"); got != 500_000 {
 		t.Errorf("grok-4.5 window = %d, want 500000", got)
 	}
